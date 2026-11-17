@@ -6667,3 +6667,67 @@ test('indexed array pointers retain the source location through index effects', 
     uncaughtException: undefined,
   });
 });
+
+test('scalar replacement copies packed records and preserves destination field addresses', () => {
+  const source = `const std=@import("std");const P=packed struct{x:u8};pub fn main()void{var a=[_]P{.{.x=1},.{.x=1}};const p=&a[0].x;std.mem.replaceScalar(P,&a,.{.x=1},.{.x=9});std.debug.print("{}|",.{p.*});a[0].x=4;std.debug.print("{} {} {}",.{p.*,a[0].x,a[1].x});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: '9|4 4 9',
+    uncaughtException: undefined,
+  });
+});
+
+test('scalar replacement copies packed union bits into each destination', () => {
+  const source = `const std=@import("std");const U=packed union{x:u8,y:u8};pub fn main()void{var a=[_]U{.{.x=1},.{.y=1}};const p=&a[0].y;std.mem.replaceScalar(U,&a,.{.y=1},.{.x=9});a[0].x=4;std.debug.print("{} {} {}",.{p.*,a[0].y,a[1].x});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: '4 4 9',
+    uncaughtException: undefined,
+  });
+});
+
+test.each(['u3,b:u4', 'u8,b:u16', '*u8,b:usize'])(
+  'constant packed unions validate all fields before materialization: %s',
+  (fields) => {
+    const initializer = fields.startsWith('*') ? '&n' : '2';
+    const source = `const U=packed union{a:${fields}};pub fn main()void{var n:u8=1;_=&n;const u=U{.a=${initializer}};_=u.a;}`;
+    expect(executeProgram('zig', source)).toMatchObject({ kind: 'compileError' });
+  }
+);
+
+test.each([false, true])(
+  'reinterpreted byte pointers meter accessed elements rather than array suffixes: %s',
+  (write) => {
+    const body = write ? 'u.b.*=7;sum+=a[0];' : 'sum+=u.b.*;';
+    const source = `const std=@import("std");const U=extern union{a:*u8,b:*i8};pub fn main()void{var a:[1000]u8=@splat(7);const u=U{.a=&a[0]};var sum:i32=0;for(0..1000)|_|{${body}}std.debug.print("{}",.{sum});}`;
+    expect(executeProgram('zig', source)).toMatchObject({
+      kind: 'executed',
+      stderr: '7000',
+      uncaughtException: undefined,
+    });
+  }
+);
+
+test('reinterpreted aggregate views synchronize only intersecting fields', () => {
+  const source = `const std=@import("std");const P=extern struct{a:u8,b:u8};const U=extern union{a:*P,b:*[2]i8};pub fn main()void{var a:[1000]P=@splat(.{.a=7,.b=8});const p=&a[0].a;const u=U{.a=&a[0]};var sum:i32=0;for(0..1000)|_|{u.b.*[1]=8;sum+=u.b.*[0];}std.debug.print("{} {} {}",.{sum,p.*,a[0].b});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: '7000 7 8',
+    uncaughtException: undefined,
+  });
+});
+
+test.each([
+  ['u32', '4', 'u16', '2', '0x01020304', '1', '3', '1'],
+  ['u64', '8', 'u32', '4', '0x0102030405060708', '1', '5', '3'],
+])(
+  'chained %s pointer projections retain byte identity',
+  (wide, bytes, middle, chunk, value, inner, outer, expected) => {
+    const source = `const std=@import("std");const A=extern union{p:*${wide},q:*[${bytes}]u8};const B=extern union{p:*${wide},q:*[2]${middle}};const C=extern union{p:*${middle},q:*[${chunk}]u8};pub fn main(init:std.process.Init)!void{var n:${wide}=${value};const a=A{.p=&n};const b=B{.p=&n};const c=C{.p=&b.q[1]};var m=std.AutoHashMap(*u8,u8).init(init.gpa);defer m.deinit();try m.put(&a.q[${outer}],9);std.debug.print("{} {} {} {any}",.{c.q[${inner}],a.q[${outer}],&c.q[${inner}]==&a.q[${outer}],m.get(&c.q[${inner}])});}`;
+    expect(executeProgram('zig', source)).toMatchObject({
+      kind: 'executed',
+      stderr: `${expected} ${expected} true 9`,
+      uncaughtException: undefined,
+    });
+  }
+);

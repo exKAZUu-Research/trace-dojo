@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 493 -- Keeps typed byte views and their overlapping storage operations together.
+// code-gauge-allow-file fileNcss 503 -- Keeps typed byte views and their overlapping storage operations together.
 import { panic } from './arith';
 import { enumLookup } from './enumLookup';
 import { asBigFloat, BigFloat, type FloatBits, floatOf, FORMATS } from './floats';
@@ -43,6 +43,8 @@ interface FieldLocation {
 
 export class BufferMemorySpace {
   readonly memories = new WeakMap<Value[], BufferMemory>();
+  readonly typedViews = new WeakMap<Value[], { memory: BufferMemory; offset: (index: number) => number }>();
+  readonly logicalMemories = new WeakMap<object, Map<string, BufferMemory>>();
   readonly referenceIds = new WeakMap<object, bigint>();
   readonly references = new WeakValueMap<string, object>();
   nextReferenceId = 1n;
@@ -159,27 +161,26 @@ export class BufferMemory {
     private readonly spend: () => void,
     private readonly space: BufferMemorySpace,
     private readonly addressOf?: (value: object) => bigint,
-    private readonly synchronization?: { pull: () => void; push: () => void },
+    private readonly synchronization?: {
+      pull: (offset: number, bits: number) => void;
+      push: (offset: number, bits: number) => void;
+    },
     private readonly pointerLocation?: (offset: number) => { storage: object; index: number }
   ) {
     space.memories.set(bytes, this);
   }
 
-  read(type: Type, offset: number, packed?: number): Value {
-    return this.access(false, () => this.readValue(type, offset, packed));
+  get byteLength(): number {
+    return this.bytes.length;
   }
 
-  write(type: Type, offset: number, value: Value, packed?: number): void {
-    this.access(true, () => this.writeValue(type, offset, value, packed));
-  }
-
-  private access<T>(write: boolean, run: () => T): T {
+  private access<T>(write: boolean, offset: number, bits: number, run: () => T): T {
     if (!this.synchronization || this.accessDepth !== 0) return run();
     this.accessDepth++;
     try {
-      this.synchronization.pull();
+      this.synchronization.pull(offset, bits);
       const result = run();
-      if (write) this.synchronization.push();
+      if (write) this.synchronization.push(offset, bits);
       return result;
     } finally {
       this.accessDepth--;
@@ -203,6 +204,7 @@ export class BufferMemory {
         return true;
       },
     });
+    this.space.typedViews.set(slots, { memory: this, offset: (index) => fields[index]?.offset ?? 0 });
     registerStorageLocation(slots, (index) => ({ storage: this.bytes, index: (fields[index]?.offset ?? 0) / 8 }));
     if (this.pointerLocation)
       registerPointerLocation(slots, (index) => this.pointerLocation!(fields[index]?.offset ?? 0));
@@ -211,7 +213,7 @@ export class BufferMemory {
 
   // code-gauge-allow functionNcss 40 -- Decodes each scalar representation and transparent wrapper from shared bytes.
   // code-gauge-allow functionCognitiveComplexity 22 -- Decodes each scalar representation and transparent wrapper from shared bytes.
-  private readValue(type: Type, offset: number, packed?: number): Value {
+  read(type: Type, offset: number, packed?: number): Value {
     if (type.kind === 'array' || type.kind === 'struct' || type.kind === 'union')
       return this.readAggregate(type, offset);
     switch (type.kind) {
@@ -355,7 +357,9 @@ export class BufferMemory {
   private attachUnionBacking(union: ZUnion, type: Extract<Type, { kind: 'union' }>, offset: number): void {
     union.backingKey = () => {
       spendMemory(sizeOf(type));
-      return this.bytes.slice(offset / 8, offset / 8 + sizeOf(type)).join(',');
+      return this.access(false, offset, sizeOf(type) * 8, () =>
+        this.bytes.slice(offset / 8, offset / 8 + sizeOf(type)).join(',')
+      );
     };
     union.backingReferences = () => {
       spendMemory(sizeOf(type) * 8);
@@ -386,6 +390,7 @@ export class BufferMemory {
     const singleton = singleValueOf(child, this.spend);
     if (singleton) {
       const array = zeroArray(length, hasSentinel, copyForStorage(singleton.value));
+      this.space.typedViews.set(array.slots, { memory: this, offset: () => offset });
       registerStorageLocation(array.slots, () => ({ storage: this.bytes, index: offset / 8 }), true);
       return array;
     }
@@ -411,6 +416,7 @@ export class BufferMemory {
         return true;
       },
     });
+    this.space.typedViews.set(slots, { memory: this, offset: (index) => offset + index * stride * 8 });
     registerStorageLocation(slots, (index) => ({ storage: this.bytes, index: offset / 8 + index * stride }), true);
     if (this.pointerLocation)
       registerPointerLocation(slots, (index) => this.pointerLocation!(offset + index * stride * 8));
@@ -419,7 +425,7 @@ export class BufferMemory {
 
   // code-gauge-allow functionNcss 45 -- Encodes each scalar representation and transparent wrapper into shared bytes.
   // code-gauge-allow functionCognitiveComplexity 23 -- Encodes each scalar representation and transparent wrapper into shared bytes.
-  private writeValue(type: Type, offset: number, value: Value, packed?: number): void {
+  write(type: Type, offset: number, value: Value, packed?: number): void {
     if (type.kind === 'array' || type.kind === 'struct' || type.kind === 'union') {
       this.writeAggregate(type, offset, value);
       return;
@@ -529,6 +535,12 @@ export class BufferMemory {
   }
 
   private copyRegion(destination: BufferMemory, offset: number, start: number, length: number): void {
+    this.access(false, offset, length * 8, () =>
+      destination.access(true, start, length * 8, () => this.copyRegionRaw(destination, offset, start, length))
+    );
+  }
+
+  private copyRegionRaw(destination: BufferMemory, offset: number, start: number, length: number): void {
     spendMemory(length * 20);
     const bytes = this.bytes.slice(offset / 8, offset / 8 + length);
     const references: (StoredReference & { offset: number })[] = [];
@@ -547,6 +559,10 @@ export class BufferMemory {
 
   private readBits(offset: number, bits: number): bigint {
     if (offset < 0 || offset + bits > this.bytes.length * 8) panic('index out of bounds');
+    return this.access(false, offset, bits, () => this.readRawBits(offset, bits));
+  }
+
+  private readRawBits(offset: number, bits: number): bigint {
     let result = 0n;
     for (let index = 0; index < bits; index += 8) {
       this.spend();
@@ -563,6 +579,10 @@ export class BufferMemory {
 
   private writeBits(offset: number, bits: number, value: bigint): void {
     if (offset < 0 || offset + bits > this.bytes.length * 8) panic('index out of bounds');
+    this.access(true, offset, bits, () => this.writeRawBits(offset, bits, value));
+  }
+
+  private writeRawBits(offset: number, bits: number, value: bigint): void {
     for (let index = 0; index < bits;) {
       this.spend();
       const position = offset + index;
@@ -579,8 +599,10 @@ export class BufferMemory {
   }
 
   private currentReference(offset: number): StoredReference | undefined {
-    const reference = this.referenceOffsets.get(offset);
-    return reference && this.readBits(offset, reference.bits) === reference.id ? reference : undefined;
+    return this.access(false, offset, 1, () => {
+      const reference = this.referenceOffsets.get(offset);
+      return reference && this.readBits(offset, reference.bits) === reference.id ? reference : undefined;
+    });
   }
 
   private reference(offset: number, type: Type, bits = 64): Value {

@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 670 -- Groups the related standard library operations that share this module.
+// code-gauge-allow-file fileNcss 672 -- Groups the related standard library operations that share this module.
 import { transferCost } from '../allocation';
 import { indexOutOfBounds, PANIC, panic } from '../arith';
 import type { Expression, Span } from '../ast';
@@ -655,10 +655,17 @@ const MEMBERS: Record<string, () => Member> = {
     const slice = mutableSlice(sema, sliceArg, type);
     const [match, replacement] = compileArgs(sema, [matchArg, replacementArg], [type, type]);
     const equality = comparisonOf(sema, type, call.span);
+    const cost = nativeTransferCost(sema, type, call.span);
     return computed(VOID, [slice, match, replacement], call.span, ([value, from, to], frame) => {
       const target = value as Slice;
       const equal = equality(frame);
-      for (let index = 0; index < target.length; index++) if (equal(target.get(index), from)) target.set(index, to);
+      const spend = nativeBudget(sema, frame);
+      for (let index = 0; index < target.length; index++) {
+        spend();
+        if (!equal(target.get(index), from)) continue;
+        spend(cost);
+        storeSliceValue(target, index, to);
+      }
       return;
     });
   }),

@@ -1149,7 +1149,7 @@ export abstract class SemaBase implements SemaApi {
     build: (values: Value[]) => Value,
     retainFacts = false
   ): TExpr {
-    this.storage.reserve(type);
+    this.reserveStorage(type, span);
     if (elements.every((element) => element.known)) {
       return known(type, build(elements.map((element) => copyForStorage(element.value))), span);
     }
