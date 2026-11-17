@@ -2,7 +2,17 @@ import { ExecutionLimitError, LIMITS } from '../interpreter/limits';
 import { inspect, rEquals } from './conversions';
 import { def, sdef } from './define';
 import { argumentError, frozenError, runtimeError, typeError } from './errors';
-import { eachEntry, hashDelete, hashDeleteEntry, hashGet, hashGetOrInsert, hashKeyOf, hashSet, rehash } from './hashes';
+import {
+  eachEntry,
+  hashDelete,
+  hashDeleteEntry,
+  hashGet,
+  hashGetOrInsert,
+  hashKeyOf,
+  hashSet,
+  rehash,
+  withHashTraversal,
+} from './hashes';
 import { callBlock, callMethod, type Gen, respondsTo } from './interp';
 import { iterate, STOP } from './libEnumerable';
 import { makeEnumerator } from './libEnumerator';
@@ -12,8 +22,6 @@ import { arr, newHash, str, truthy } from './values';
 
 /** A Set keeps its members as the keys of a Hash, which gives it the Hash's insertion order and equality. */
 class SetData {
-  hashing = false;
-  inspecting = false;
   constructor(readonly members: RHash) {
     members.iterationError = "can't add a new item into set during iteration";
   }
@@ -51,12 +59,12 @@ function* modify(self: RObject): Gen<void> {
 }
 
 function* inspectSet(self: RObject): Gen<string> {
-  const data = self.data as SetData;
-  if (data.inspecting) return 'Set[...]';
   const runtime = rt();
-  if (runtime.setInspectDepth >= LIMITS.maxCallDepth) throw new ExecutionLimitError('output');
-  data.inspecting = true;
-  runtime.setInspectDepth++;
+  const context = runtime.recursionContext;
+  if (context.inspecting.has(self)) return 'Set[...]';
+  if (context.setInspectDepth >= LIMITS.maxCallDepth) throw new ExecutionLimitError('output');
+  context.inspecting.add(self);
+  context.setInspectDepth++;
   const parts: string[] = [];
   let length = 5;
   const members = membersOf(self);
@@ -72,8 +80,8 @@ function* inspectSet(self: RObject): Gen<string> {
     return `Set[${parts.join(', ')}]`;
   } finally {
     members.iterating--;
-    runtime.setInspectDepth--;
-    data.inspecting = false;
+    context.setInspectDepth--;
+    context.inspecting.delete(self);
   }
 }
 
@@ -315,18 +323,13 @@ def('Set', ['==', 'eql?'], 1, function* (self: RObject, [value]) {
   return membersOf(self).map.size === membersOf(value).map.size && (yield* subset(self, value));
 });
 def('Set', 'hash', 0, function* (self: RObject) {
-  const data = self.data as SetData;
-  if (data.hashing) return 0n;
-  data.hashing = true;
-  try {
+  return yield* withHashTraversal(function* () {
     let hash = 0n;
-    yield* eachEntry(data.members, function* (entry) {
+    yield* eachEntry(membersOf(self), function* (entry) {
       hash += BigInt(`0x${yield* hashKeyOf(entry.key)}`);
     });
     return hash;
-  } finally {
-    data.hashing = false;
-  }
+  });
 });
 def('Set', 'clear', 0, function* (self: RObject) {
   yield* modify(self);

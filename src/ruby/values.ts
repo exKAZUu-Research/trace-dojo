@@ -12,14 +12,15 @@ import {
   RSymbol,
   type Value,
 } from './objects';
-import { rt } from './runtime';
+import { rt, UnsupportedFeatureError } from './runtime';
+import { codePointCharacters } from './unicodeText';
 
 export function str(s: string): RString {
   rt().checkStringLength(s.length);
   const value = new RString(rt().c.String, s);
   if (
     /[\uDC80-\uDCFF]/.test(s) &&
-    [...s].some((char) => {
+    codePointCharacters(s).some((char) => {
       const point = char.codePointAt(0) as number;
       return point >= 0xdc_80 && point <= 0xdc_ff;
     })
@@ -31,6 +32,15 @@ export function str(s: string): RString {
 export function asciiString(s: string): RString {
   const value = str(s);
   value.usAscii = true;
+  return value;
+}
+
+export function internFrozenString(value: RString): RString {
+  const key = `${value.binary}:${value.usAscii}:${value.s}`;
+  const previous = rt().frozenStrings.get(key);
+  if (previous) return previous;
+  value.frozen = true;
+  rt().frozenStrings.set(key, value);
   return value;
 }
 
@@ -48,7 +58,7 @@ export function frozenCoreString(text: string): RString {
 export function stringBytes(value: RString): Uint8Array {
   if (value.rawBytes) return value.rawBytes;
   return value.binary
-    ? Uint8Array.from([...value.s].map((char) => char.codePointAt(0) as number))
+    ? Uint8Array.from(codePointCharacters(value.s).map((char) => char.codePointAt(0) as number))
     : new TextEncoder().encode(value.s);
 }
 
@@ -77,6 +87,7 @@ export function stringFromBytes(bytes: Uint8Array, binary = false, usAscii = fal
   return value;
 }
 
+// code-gauge-allow functionCognitiveComplexity 22 -- UTF-8 lead-byte widths and failed decodes preserve invalid bytes individually instead of replacing them.
 function decodeInvalidBytes(bytes: Uint8Array): string {
   const decoder = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true });
   let text = '';
@@ -120,9 +131,10 @@ function encodeInvalidText(text: string): Uint8Array {
   return Uint8Array.from(bytes);
 }
 
+// code-gauge-allow functionCognitiveComplexity 28 -- Character slices share byte offsets and encoding flags across UTF-8, US-ASCII, binary and invalid-byte representations.
 export function stringCharacters(value: RString): RString[] {
-  if (!value.rawBytes && !value.binary)
-    return [...value.s].map((char) => {
+  if (!value.rawBytes && !value.binary && !value.usAscii)
+    return codePointCharacters(value.s).map((char) => {
       const result = str(char);
       result.usAscii = value.usAscii;
       return result;
@@ -132,10 +144,10 @@ export function stringCharacters(value: RString): RString[] {
   for (let index = 0; index < bytes.length;) {
     rt().spend();
     const first = bytes[index];
-    const width = value.binary ? 1 : first < 0x80 ? 1 : first < 0xe0 ? 2 : first < 0xf0 ? 3 : 4;
+    const width = value.binary || value.usAscii ? 1 : first < 0x80 ? 1 : first < 0xe0 ? 2 : first < 0xf0 ? 3 : 4;
     const segment = bytes.slice(index, Math.min(bytes.length, index + width));
     let valid = value.binary || first < 0x80;
-    if (!valid && segment.length === width) {
+    if (!valid && !value.usAscii && segment.length === width) {
       try {
         new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(segment);
         valid = true;
@@ -155,7 +167,7 @@ export function stringCharacters(value: RString): RString[] {
 }
 
 export function stringCharacterCount(value: RString): number {
-  if (value.binary) return stringBytes(value).length;
+  if (value.binary || value.usAscii) return stringBytes(value).length;
   let count = 0;
   for (let index = 0; index < value.s.length; index++) {
     if ((value.s.codePointAt(index) as number) > 0xff_ff) index++;
@@ -190,7 +202,7 @@ export function newHash(): RHash {
 }
 
 export function sym(name: string): RSymbol {
-  return RSymbol.of(name);
+  return RSymbol.fromKey(name);
 }
 
 export function range(begin: Value, end: Value, exclusive: boolean): RRange {
@@ -199,6 +211,11 @@ export function range(begin: Value, end: Value, exclusive: boolean): RRange {
 
 export function truthy(value: Value): boolean {
   return value !== false && value !== NIL;
+}
+
+export function requireObjectIdentity(value: Value): void {
+  if (typeof value === 'bigint' && (value < -(1n << 62n) || value >= 1n << 62n))
+    throw new UnsupportedFeatureError('大きな Integer のオブジェクト同一性');
 }
 
 export function sameIdentity(left: Value, right: Value): boolean {
@@ -225,7 +242,7 @@ export function classOf(value: Value): RClass {
   }
   if (value === NIL) return c.NilClass;
   if (value instanceof RSymbol) return c.Symbol;
-  if (value instanceof RClass) return singletonClassOf(value);
+  if (value instanceof RClass) return singletonClassOf(value, false);
   return (value as RBasic).singleton ?? (value as RBasic).cls;
 }
 
@@ -237,17 +254,24 @@ export function realClassOf(value: Value): RClass {
   return cls;
 }
 
+export function singletonDefinitionClass(value: Value): RClass | undefined {
+  if (value === NIL || typeof value === 'boolean') return realClassOf(value);
+  if (!(value instanceof RBasic) || value instanceof RFloat) return undefined;
+  return singletonClassOf(value);
+}
+
 /** The singleton class of an object, created on first use; a class's chains to its superclass's. */
-export function singletonClassOf(value: Value): RClass {
+export function singletonClassOf(value: Value, exposed = true): RClass {
   const { c } = rt();
   if (!(value instanceof RBasic) || value instanceof RFloat) {
     throw new TypeError('A singleton class of an immediate value');
   }
+  if (exposed) value.singletonExposed = true;
   if (value.singleton) return value.singleton;
   let superclass: RClass;
   if (value instanceof RClass) {
     if (value.isModule) superclass = c.Module;
-    else superclass = value.superclass ? singletonClassOf(value.superclass) : c.Class;
+    else superclass = value.superclass ? singletonClassOf(value.superclass, false) : c.Class;
   } else {
     superclass = value.cls;
   }

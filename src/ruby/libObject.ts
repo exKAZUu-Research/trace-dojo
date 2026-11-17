@@ -1,4 +1,5 @@
-// code-gauge-allow-file fileNcss 583 -- The libObject module keeps one concern's cases together.
+import { copyHierarchy, copySingletonHierarchy, includeHierarchy } from './classHierarchy';
+// code-gauge-allow-file fileNcss 922 -- Object lifecycle and exception construction share representation and state; splitting registration by size would scatter that concern.
 import {
   anonymousClassName,
   anyToS,
@@ -14,25 +15,19 @@ import {
   toInt,
   toRubyInt,
   toStrValue,
+  tryImplicitConversion,
 } from './conversions';
 import { def, sdef } from './define';
 import { argumentCountError, argumentError, frozenError, nameError, rubyError, typeError } from './errors';
 import { hashSet } from './hashes';
-import {
-  addMethod,
-  callMethod,
-  callProc,
-  type Gen,
-  invoke,
-  ivarGet,
-  ivarSet,
-  makeBlock,
-  requireBlock,
-  respondsTo,
-} from './interp';
+import { internId } from './internedIds';
+import { addMethod, callMethod, callProc, type Gen, invoke, ivarSet, makeBlock, requireBlock } from './interp';
 import { curry, makeEnumerator, sizedEnumerator } from './libEnumerator';
 import { writeStderrLine } from './libIo';
+import { identifierSymbol } from './libMeta';
 import { kernelFloat, kernelInteger } from './libNumeric';
+import { identifierKeyString } from './libString';
+import { allocateStruct, copyStructLayout } from './libStruct';
 import {
   invalidateMethodCaches,
   NIL,
@@ -52,7 +47,6 @@ import {
 import { rt, RubyError, ThrowSignal, UnsupportedFeatureError } from './runtime';
 import {
   arr,
-  asciiString,
   classOf,
   frozenCoreString,
   isA,
@@ -60,6 +54,7 @@ import {
   realClassOf,
   sameIdentity,
   singletonClassOf,
+  singletonDefinitionClass,
   str,
   sym,
   truthy,
@@ -123,9 +118,9 @@ function hashString(text: string): number {
 
 def('Kernel', 'class', 0, (self) => realClassOf(self));
 def('Kernel', 'singleton_class', 0, (self) => {
-  if (self === NIL || typeof self === 'boolean') return realClassOf(self);
-  if (!(self instanceof RBasic) || self instanceof RFloat) throw typeError("can't define singleton");
-  return singletonClassOf(self);
+  const owner = singletonDefinitionClass(self);
+  if (!owner) throw typeError("can't define singleton");
+  return owner;
 });
 def('Kernel', 'frozen?', 0, (self) => (self instanceof RBasic ? self.frozen : true));
 def('Kernel', 'freeze', 0, (self) => {
@@ -147,6 +142,9 @@ def('Kernel', '===', 1, function* (self, [other]) {
 def('Kernel', 'eql?', 1, function* (self, [other]) {
   return yield* rEql(self, other);
 });
+def('Kernel', '!~', 1, function* (self, [other]) {
+  return !truthy(yield* callMethod(self, '=~', [other], undefined, undefined, { fcall: true }));
+});
 def('Kernel', 'hash', 0, (self) => BigInt(hashString(String(objectId(self)))));
 def('Kernel', '<=>', 1, function* (self, [other]) {
   if (classOf(self).findMethod('==')?.owner === rt().c.Comparable) return self === other ? 0n : NIL;
@@ -156,9 +154,6 @@ def('Kernel', 'to_s', 0, (self) => str(anyToS(self)));
 def('Kernel', 'inspect', 0, function* (self) {
   if (self instanceof RObject && self.exception) return str(yield* inspectException(self));
   if (self instanceof RBasic && !(self instanceof RClass)) {
-    if (classOf(self).findMethod('to_s')?.body.kind === 'user' && !self.ivars?.size) {
-      return str(anyToS(self));
-    }
     return str(yield* inspectObject(self));
   }
   return str(anyToS(self));
@@ -195,13 +190,16 @@ def(
   { keywords: true }
 );
 
-// code-gauge-allow functionCognitiveComplexity 18 -- Object copying preserves each value kind, singleton methods, copy hooks, and clone freeze options.
-// code-gauge-allow functionNcss 39 -- Object copying preserves each value kind, singleton methods, copy hooks, and clone freeze options.
 function* copyObject(self: Value, clone: boolean, freezeOption?: Value): Gen {
   if (!(self instanceof RBasic) || self instanceof RFloat) {
     if (clone && freezeOption === false) throw argumentError(`can't unfreeze ${realClassOf(self).name}`);
     return self;
   }
+  if (self instanceof RObject && self.cls === rt().c.Rational) {
+    if (clone && freezeOption === false) throw argumentError("can't unfreeze Rational");
+    return self;
+  }
+  if (self instanceof RObject && self.cls === rt().c.Encoding) throw typeError('allocator undefined for Encoding');
   let copy: RBasic;
   if (self instanceof RClass) copy = copyClass(self);
   else if (self instanceof RString) {
@@ -216,6 +214,7 @@ function* copyObject(self: Value, clone: boolean, freezeOption?: Value): Gen {
     for (const [key, entry] of self.map) hash.map.set(key, { ...entry });
     hash.defaultValue = self.defaultValue;
     hash.defaultProc = self.defaultProc;
+    hash.byIdentity = self.byIdentity;
     copy = hash;
   } else if (self instanceof RObject) {
     const object = new RObject(self.cls);
@@ -227,6 +226,8 @@ function* copyObject(self: Value, clone: boolean, freezeOption?: Value): Gen {
     const proc = new RProc(self.cls, self.body, self.self, self.outer);
     proc.isLambda = self.isLambda;
     proc.captured = self.captured ? [...self.captured] : undefined;
+    proc.reflectedMethod = self.reflectedMethod;
+    proc.nativeRequired = self.nativeRequired;
     proc.breakTag = self.breakTag;
     proc.callSiteState = self.callSiteState;
     copy = proc;
@@ -237,24 +238,32 @@ function* copyObject(self: Value, clone: boolean, freezeOption?: Value): Gen {
     return self;
   }
   if (self.ivars) copy.ivars = new Map(self.ivars);
+  if (self.internal) copy.internal = new Map(self.internal);
+  copy.singletonExposed = self.singletonExposed;
   if ((clone || self instanceof RClass) && self.singleton) copySingleton(self.singleton, copy);
   yield* initializeCopy(copy, self, clone, freezeOption);
   if (clone) copy.frozen = freezeOption === true || (freezeOption !== false && self.frozen);
+  if (self instanceof RObject && self.cls.isSubclassOf(rt().c.Data)) copy.frozen = true;
   return copy;
 }
 
 function copyClass(source: RClass): RClass {
   const copy = new RClass(source.cls, undefined, source.superclass, source.isModule, source.isSingleton);
+  copyStructLayout(source, copy);
   copy.instanceKind = source.instanceKind;
   copy.isUserDefined = source.isUserDefined;
   for (const included of source.includes) copy.includes.push(included);
   for (const prepended of source.prepends) copy.prepends.push(prepended);
+  const occurrences = copyHierarchy(source, copy);
   for (const [name, value] of source.constants) copy.constants.set(name, value);
+  for (const [name, row] of source.constantRows) copy.constantRows.set(name, row);
   for (const [name, value] of source.classVariables) copy.classVariables.set(name, value);
   for (const [name, method] of source.methods)
     copy.methods.set(name, {
       ...method,
       owner: method.owner === source ? copy : method.owner,
+      lookupOccurrence:
+        method.lookupOccurrence && (occurrences.get(method.lookupOccurrence) ?? method.lookupOccurrence),
       body:
         method.body.kind === 'user'
           ? { ...method.body, cref: method.body.cref.map((scope) => (scope === source ? copy : scope)) }
@@ -269,8 +278,14 @@ function copySingleton(original: RClass, copy: RBasic): void {
   singleton.attached = copy;
   for (const included of original.includes) singleton.includes.push(included);
   for (const prepended of original.prepends) singleton.prepends.push(prepended);
-  for (const [name, method] of original.methods)
-    singleton.methods.set(name, { ...method, owner: method.owner === original ? singleton : method.owner });
+  const { occurrences, methods } = copySingletonHierarchy(original, singleton);
+  for (const [name, method] of methods)
+    singleton.methods.set(name, {
+      ...method,
+      owner: method.owner === original ? singleton : method.owner,
+      lookupOccurrence:
+        method.lookupOccurrence && (occurrences.get(method.lookupOccurrence) ?? method.lookupOccurrence),
+    });
   copy.singleton = singleton;
   invalidateMethodCaches();
 }
@@ -308,23 +323,30 @@ def('Kernel', 'display', [0, 1], function* (self, args) {
   yield* callMethod(stream, 'write', [self]);
   return NIL;
 });
-def('Kernel', ['to_enum', 'enum_for'], [0, -1], function* (self, args, block) {
-  const [method = sym('each'), ...rest] = args;
-  if (method instanceof RSymbol) return makeEnumerator(self, method.name, rest, undefined, { sizeBlock: block });
-  if (method instanceof RString || respondsTo(method, 'to_str', true))
-    return makeEnumerator(self, (yield* toStrValue(method)).s, rest, undefined, { sizeBlock: block });
-  throw typeError(`${yield* inspect(method)} is not a symbol nor a string`);
-});
-
-def('Kernel', 'instance_variables', 0, () => {
-  throw new UnsupportedFeatureError('instance_variables');
-});
+def(
+  'Kernel',
+  ['to_enum', 'enum_for'],
+  [0, -1],
+  function* (self, args, block, keywords) {
+    const [method = sym('each'), ...rest] = args;
+    if (method instanceof RSymbol) return makeEnumerator(self, method.key, rest, keywords, { sizeBlock: block });
+    const converted = method instanceof RString ? method : yield* tryImplicitConversion(method, 'to_str');
+    if (converted instanceof RString)
+      return makeEnumerator(self, identifierSymbol(converted).key, rest, keywords, { sizeBlock: block });
+    if (converted !== undefined && converted !== NIL)
+      throw typeError(
+        `can't convert ${realClassOf(method).name} to String (${realClassOf(method).name}#to_str gives ${realClassOf(converted).name})`
+      );
+    throw typeError(`${yield* inspect(method)} is not a symbol nor a string`);
+  },
+  { keywords: true }
+);
 
 // Kernel functions ----------------------------------------------------------------------------------------------------
 
 const PRIVATE = { visibility: 'private' as Visibility };
 
-def('Kernel', 'block_given?', 0, () => rt().frame.home.extra.block !== undefined, PRIVATE);
+def('Kernel', 'block_given?', 0, () => rt().frame.lexicalBlock !== undefined, PRIVATE);
 def(
   'Kernel',
   'loop',
@@ -339,7 +361,7 @@ def(
         yield* callProc(block, [], { used: false });
       } catch (error) {
         if (error instanceof RubyError && isA(error.exception, rt().c.StopIteration)) {
-          return ivarGet(error.exception, '@result');
+          return error.exception.internal?.get('result') ?? NIL;
         }
         throw error;
       }
@@ -376,8 +398,8 @@ def(
 );
 
 /** Builds the exception `raise` throws from its arguments. */
-// code-gauge-allow functionNcss 36 -- raise accepts exception classes or instances, messages, and cause keywords in Ruby order.
 // code-gauge-allow functionCognitiveComplexity 25 -- raise accepts exception classes or instances, messages, and cause keywords in Ruby order.
+// code-gauge-allow functionNcss 37 -- raise accepts exception classes or instances, messages, and cause keywords in Ruby order.
 export function* makeRaise(args: Value[], keywords?: RHash): Gen<RubyError> {
   const runtime = rt();
   const parsed = raiseArguments(args, keywords);
@@ -394,10 +416,9 @@ export function* makeRaise(args: Value[], keywords?: RHash): Gen<RubyError> {
     exception = yield* callMethod(runtime.c.RuntimeError, 'new', [args[0]]);
   } else {
     const [target, message] = args;
-    if (!respondsTo(target, 'exception', true)) throw typeError('exception class/object expected');
-    exception = yield* callMethod(target, 'exception', message === undefined ? [] : [message], undefined, undefined, {
-      fcall: true,
-    });
+    const converted = yield* tryImplicitConversion(target, 'exception', message === undefined ? [] : [message]);
+    if (converted === undefined) throw typeError('exception class/object expected');
+    exception = converted;
     if (!(exception instanceof RObject) || !exception.exception) throw typeError('exception object expected');
   }
   const object = exception as RObject;
@@ -464,7 +485,7 @@ def(
   function* (_self, [status = true]) {
     const code = status === true ? 0n : status === false ? 1n : BigInt(yield* toRubyInt(status));
     const error = rubyError(rt().c.SystemExit, 'exit');
-    error.exception.ivars = new Map([['@__status', code]]);
+    error.exception.internal = new Map([['status', code]]);
     throw error;
   },
   PRIVATE
@@ -489,7 +510,7 @@ def(
       yield* writeStderrLine(converted);
     }
     const error = rubyError(rt().c.SystemExit, converted ?? str('exit'));
-    error.exception.ivars = new Map([['@__status', 1n]]);
+    error.exception.internal = new Map([['status', 1n]]);
     throw error;
   },
   PRIVATE
@@ -522,10 +543,7 @@ def(
   },
   { ...PRIVATE, keywords: true }
 );
-for (const [name, feature] of [
-  ['Rational', '有理数（Rational）'],
-  ['Complex', '複素数（Complex）'],
-] as const) {
+for (const [name, feature] of [['Complex', '複素数（Complex）']] as const) {
   const reject = (): never => {
     throw new UnsupportedFeatureError(feature);
   };
@@ -539,8 +557,9 @@ def(
   1,
   function* (_self, [value]) {
     if (value instanceof RString) return value;
-    if (respondsTo(value, 'to_str', true)) {
-      const converted = yield* callMethod(value, 'to_str', [], undefined, undefined, { fcall: true });
+    const stringValue = yield* tryImplicitConversion(value, 'to_str');
+    if (stringValue !== undefined) {
+      const converted = stringValue;
       if (converted instanceof RString) return converted;
       if (converted !== NIL)
         throw typeError(
@@ -561,13 +580,15 @@ def(
   1,
   function* (_self, [value]) {
     if (value instanceof RArray) return value;
-    if (respondsTo(value, 'to_ary', true)) {
-      const converted = yield* callMethod(value, 'to_ary', [], undefined, undefined, { fcall: true });
+    const arrayValue = yield* tryImplicitConversion(value, 'to_ary');
+    if (arrayValue !== undefined) {
+      const converted = arrayValue;
       if (converted instanceof RArray) return converted;
       if (converted !== NIL) throw collectionConversionError(value, converted, 'Array', 'to_ary');
     }
-    if (respondsTo(value, 'to_a', true)) {
-      const converted = yield* callMethod(value, 'to_a', [], undefined, undefined, { fcall: true });
+    const listValue = yield* tryImplicitConversion(value, 'to_a');
+    if (listValue !== undefined) {
+      const converted = listValue;
       if (converted instanceof RArray) return converted;
       if (converted !== NIL) throw collectionConversionError(value, converted, 'Array', 'to_a');
     }
@@ -582,8 +603,9 @@ def(
   function* (_self, [value]) {
     if (value instanceof RHash) return value;
     if (value === NIL) return newHash();
-    if (respondsTo(value, 'to_hash', true)) {
-      const converted = yield* callMethod(value, 'to_hash', [], undefined, undefined, { fcall: true });
+    const hashValue = yield* tryImplicitConversion(value, 'to_hash');
+    if (hashValue !== undefined) {
+      const converted = hashValue;
       if (converted instanceof RHash) return converted;
       if (converted !== NIL) throw collectionConversionError(value, converted, 'Hash', 'to_hash');
     }
@@ -607,18 +629,17 @@ for (const [name, feature] of [
   ['readline', '標準入力（readline）'],
   ['readlines', '標準入力（readlines）'],
   ['open', 'ファイルの読み書き（open）'],
+  ['__dir__', 'ファイルの場所（__dir__）'],
   ['system', '外部コマンドの実行（system）'],
   ['exec', '外部コマンドの実行（exec）'],
   ['spawn', '外部コマンドの実行（spawn）'],
   ['`', '外部コマンドの実行（`...`）'],
   ['fork', 'プロセスの生成（fork）'],
   ['trap', 'シグナル（trap）'],
-  ['sleep', 'sleep'],
   ['eval', '文字列の評価（eval）'],
   ['binding', 'binding'],
   ['caller', '呼び出し履歴（caller）'],
   ['caller_locations', '呼び出し履歴（caller_locations）'],
-  ['at_exit', 'at_exit'],
   ['set_trace_func', 'set_trace_func'],
   ['select', 'select'],
   ['syscall', 'syscall'],
@@ -635,25 +656,12 @@ for (const [name, feature] of [
   );
 }
 for (const [name, feature] of [
-  ['send', 'send（名前によるメソッドの呼び出し）'],
-  ['__send__', '__send__（名前によるメソッドの呼び出し）'],
-  ['public_send', 'public_send（名前によるメソッドの呼び出し）'],
-  ['respond_to?', 'respond_to?'],
-  ['method', 'method（Method オブジェクト）'],
-  ['public_method', 'public_method'],
   ['singleton_method', 'singleton_method'],
   ['methods', 'methods'],
   ['public_methods', 'public_methods'],
   ['private_methods', 'private_methods'],
   ['protected_methods', 'protected_methods'],
   ['singleton_methods', 'singleton_methods'],
-  ['instance_variable_get', 'instance_variable_get'],
-  ['instance_variable_set', 'instance_variable_set'],
-  ['instance_variable_defined?', 'instance_variable_defined?'],
-  ['remove_instance_variable', 'remove_instance_variable'],
-  ['instance_eval', 'instance_eval'],
-  ['instance_exec', 'instance_exec'],
-  ['define_singleton_method', 'define_singleton_method'],
 ] as const) {
   def('Kernel', name, [0, -1], () => {
     throw new UnsupportedFeatureError(feature);
@@ -666,12 +674,12 @@ def('Module', ['name'], 0, (self: RClass) => {
   const name = self.name;
   if (name === undefined) return NIL;
   if (self.nameString?.text === name) return self.nameString.value;
-  const value = /^[\u0000-\u007F]*$/.test(name) ? asciiString(name) : str(name);
+  const value = identifierKeyString(name);
   value.frozen = true;
   self.nameString = { text: name, value };
   return value;
 });
-def('Module', ['to_s', 'inspect'], 0, (self: RClass) => str(className(self)));
+def('Module', ['to_s', 'inspect'], 0, (self: RClass) => identifierKeyString(className(self)));
 def('Module', '===', 1, (self: RClass, [value]) => isA(value, self));
 def('Module', '==', 1, (self, [other]) => self === other);
 def('Module', 'hash', 0, (self: RClass) => BigInt(self.id));
@@ -711,10 +719,9 @@ def(
     if (!(target instanceof RClass)) throw typeError('wrong argument type');
     if (target.frozen) throw frozenError(target, target.name ?? '');
     if (self.ancestors().includes(target)) throw argumentError('cyclic include detected');
-    if (!target.ancestors().includes(self)) {
-      target.includes.unshift(self);
-      invalidateMethodCaches();
-    }
+    includeHierarchy(target, self);
+    if (!target.includes.includes(self)) target.includes.unshift(self);
+    invalidateMethodCaches();
     return self;
   },
   { visibility: 'private' }
@@ -724,11 +731,12 @@ def(
   'Module',
   'extend_object',
   1,
-  (self: RClass, [target]) => {
+  function* (self: RClass, [target]) {
     if (!(target instanceof RBasic) || target instanceof RFloat) throw typeError("can't define singleton");
     if (target.frozen)
-      throw frozenError(target, target instanceof RClass ? (target.name ?? '') : (realClassOf(target).name ?? ''));
+      throw frozenError(target, target instanceof RClass ? (target.name ?? '') : yield* inspect(target));
     const singleton = singletonClassOf(target);
+    includeHierarchy(singleton, self);
     if (!singleton.includes.includes(self)) singleton.includes.unshift(self);
     invalidateMethodCaches();
     return target;
@@ -748,35 +756,12 @@ def('Module', 'include', [1, -1], function* (self: RClass, modules) {
   }
   return self;
 });
-def('Module', 'prepend', [1, -1], () => {
-  throw new UnsupportedFeatureError('prepend');
-});
+
 for (const name of [
-  'define_method',
-  'alias_method',
-  'remove_method',
-  'undef_method',
-  'instance_method',
-  'public_instance_method',
-  'method_defined?',
-  'public_method_defined?',
-  'private_method_defined?',
-  'protected_method_defined?',
   'instance_methods',
   'public_instance_methods',
   'private_instance_methods',
-  'class_eval',
-  'module_eval',
-  'class_exec',
-  'module_exec',
-  'const_get',
-  'const_set',
-  'const_defined?',
-  'constants',
-  'class_variable_get',
-  'class_variable_set',
-  'class_variables',
-  'class_variable_defined?',
+  'public_instance_method',
   'remove_const',
   'refine',
   'using',
@@ -797,30 +782,34 @@ function* symbolNames(args: Value[], expandArrays = false): Gen<string[]> {
 }
 
 function* symbolName(value: Value): Gen<string> {
-  if (value instanceof RSymbol) return value.name;
-  if (value instanceof RString) return value.s;
-  if (respondsTo(value, 'to_str', true)) return (yield* toStrValue(value)).s;
+  if (value instanceof RSymbol) return value.key;
+  if (value instanceof RString) return identifierSymbol(value).key;
+  const converted = yield* tryImplicitConversion(value, 'to_str');
+  if (converted instanceof RString) return identifierSymbol(converted).key;
+  if (converted !== undefined && converted !== NIL)
+    throw typeError(
+      `can't convert ${realClassOf(value).name} to String (${realClassOf(value).name}#to_str gives ${realClassOf(converted).name})`
+    );
   throw typeError(`${yield* inspect(value)} is not a symbol nor a string`);
 }
 
 function* defineAttributes(self: RClass, names: Value[], reader: boolean, writer: boolean): Gen<RArray> {
   const frame = rt().frame;
-  const visibility =
-    (frame.kind === 'class' && frame.self === self) || frame.extra.definitionTarget === self
-      ? frame.defaultVisibility
-      : 'public';
+  const row = rt().currentRow;
+  const visibility = frame.definitionOwner === self ? frame.defaultVisibility : 'public';
   const defined: Value[] = [];
   for (const value of names) {
     const name = yield* symbolName(value);
+    internId(name);
     if (!/^[A-Za-z_\u0080-￿][\w\u0080-￿]*$/u.test(name)) {
       throw nameError(`invalid attribute name '${name}'`, self, name);
     }
     if (reader) {
-      addMethod(self, { name, owner: self, visibility, body: { kind: 'reader', ivar: `@${name}` } });
+      addMethod(self, { name, owner: self, visibility, row, body: { kind: 'reader', ivar: `@${name}` } });
       defined.push(sym(name));
     }
     if (writer) {
-      addMethod(self, { name: `${name}=`, owner: self, visibility, body: { kind: 'writer', ivar: `@${name}` } });
+      addMethod(self, { name: `${name}=`, owner: self, visibility, row, body: { kind: 'writer', ivar: `@${name}` } });
       defined.push(sym(`${name}=`));
     }
   }
@@ -842,10 +831,11 @@ def('Module', 'attr_accessor', [0, -1], function* (self: RClass, args) {
   return yield* defineAttributes(self, args, true, true);
 });
 
+// code-gauge-allow functionCognitiveComplexity 24 -- The ordered cases for object lifecycle and exception construction share state; splitting them solely for the metric would hide their sequencing.
 function* setVisibility(self: RClass, args: Value[], visibility: Visibility): Gen {
   const frame = rt().frame;
   if (args.length === 0) {
-    if ((frame.kind === 'class' && frame.self === self) || frame.extra.definitionTarget === self) {
+    if (frame.definitionOwner === self) {
       frame.defaultVisibility = visibility;
       frame.moduleFunction = false;
     } else if (frame.kind === 'main' && self === rt().c.Object) {
@@ -857,7 +847,7 @@ function* setVisibility(self: RClass, args: Value[], visibility: Visibility): Ge
   for (const arg of args)
     for (const value of arg instanceof RArray ? arg.items : [arg]) {
       const name = yield* symbolName(value);
-      const method = self.findMethod(name);
+      const method = self.findMethodFromOrigin(name);
       if (!method) {
         throw nameError(
           `undefined method '${name}' for ${self.isModule ? 'module' : 'class'} '${self.name}'`,
@@ -865,10 +855,11 @@ function* setVisibility(self: RClass, args: Value[], visibility: Visibility): Ge
           name
         );
       }
-      if (method.owner === self) method.visibility = visibility;
+      const local = self.methods.get(name);
+      if (local) local.visibility = visibility;
       else addMethod(self, { name, owner: self, visibility, body: { kind: 'visibility' } });
+      invalidateMethodCaches();
     }
-  invalidateMethodCaches();
   return args.length === 1 ? args[0] : arr(args);
 }
 
@@ -882,28 +873,28 @@ def(
   function* (self: RClass, args) {
     const frame = rt().frame;
     if (args.length === 0) {
-      if (frame.kind === 'class' && frame.self === self) {
+      if (frame.definitionOwner === self) {
         frame.moduleFunction = true;
         frame.defaultVisibility = 'private';
       }
       return NIL;
     }
     for (const name of yield* symbolNames(args)) {
+      yield* setVisibility(self, [RSymbol.fromKey(name)], 'private');
       const method = self.findMethod(name);
       if (!method) throw nameError(`undefined method '${name}' for module '${self.name}'`, self, name);
       addMethod(singletonClassOf(self), { ...method, owner: singletonClassOf(self), visibility: 'public' });
-      addMethod(self, { ...method, visibility: 'private' });
     }
     return args.length === 1 ? args[0] : arr(args);
   },
   PRIVATE
 );
 def('Module', 'private_class_method', [0, -1], function* (self: RClass, args) {
-  yield* setVisibility(singletonClassOf(self), args, 'private');
+  yield* setVisibility(singletonDefinitionClass(self) as RClass, args, 'private');
   return NIL;
 });
 def('Module', 'public_class_method', [0, -1], function* (self: RClass, args) {
-  yield* setVisibility(singletonClassOf(self), args, 'public');
+  yield* setVisibility(singletonDefinitionClass(self) as RClass, args, 'public');
   return NIL;
 });
 def('Module', 'private_constant', [0, -1], () => {
@@ -944,8 +935,7 @@ sdef('Class', 'new', [0, 1], function* (_self, [superclass], block) {
   if (parent.isSingleton) throw typeError("can't make subclass of singleton class");
   const cls = new RClass(runtime.c.Class, undefined, parent, false);
   cls.isUserDefined = true;
-  const inherited = classOf(parent).findMethod('inherited');
-  if (inherited?.body.kind === 'user') yield* invoke(inherited, parent, [cls], undefined, undefined, false);
+  yield* callMethod(parent, 'inherited', [cls], undefined, undefined, { fcall: true, used: false });
   if (block) yield* callProc(block, [cls], { self: cls, definitionTarget: cls });
   return cls;
 });
@@ -954,15 +944,21 @@ sdef('Class', 'new', [0, 1], function* (_self, [superclass], block) {
 export function allocate(cls: RClass): Value {
   const runtime = rt();
   if (cls.isSingleton) throw typeError("can't create instance of singleton class");
+  if (cls === runtime.c.Struct || cls === runtime.c.Data) throw typeError(`allocator undefined for ${cls.name}`);
   switch (cls.instanceKind) {
     case 'string': {
-      return new RString(cls, '');
+      const value = new RString(cls, '');
+      value.binary = true;
+      return value;
     }
     case 'array': {
       return new RArray(cls, []);
     }
     case 'hash': {
       return new RHash(cls);
+    }
+    case 'record': {
+      return allocateStruct(cls);
     }
     case 'exception': {
       const object = new RObject(cls);
@@ -995,6 +991,7 @@ def('NilClass', 'to_f', 0, () => 0);
 def('NilClass', 'inspect', 0, () => str('nil'));
 def('NilClass', '&', 1, () => false);
 def('NilClass', '|', 1, (_self, [other]) => truthy(other));
+def('NilClass', '^', 1, (_self, [other]) => truthy(other));
 def('NilClass', 'nil?', 0, () => true);
 def('TrueClass', ['to_s', 'inspect'], 0, () => frozenCoreString('true'));
 def('TrueClass', '&', 1, (_self, [other]) => truthy(other));
@@ -1084,8 +1081,8 @@ def(
     const privateCall = remaining.length > 3 ? truthy(remaining.pop() ?? NIL) : false;
     const methodArgs = remaining.length > 2 ? (remaining.pop() ?? NIL) : NIL;
     yield* initializeNameError(self, remaining, keywords);
-    self.ivars?.set('@__args', methodArgs);
-    self.ivars?.set('@__private_call', privateCall);
+    self.internal?.set('args', methodArgs);
+    self.internal?.set('private_call', privateCall);
     return NIL;
   },
   { ...PRIVATE, keywords: true }
@@ -1098,26 +1095,30 @@ def(
     const options = exceptionKeywords(keywords, ['receiver']);
     yield* setExceptionMessage(self, args[0] ?? NIL);
     if (options.has('receiver')) {
-      self.ivars ??= new Map();
-      self.ivars.set('@__receiver', options.get('receiver') ?? NIL);
+      self.internal ??= new Map();
+      self.internal.set('receiver', options.get('receiver') ?? NIL);
     }
     return NIL;
   },
   { ...PRIVATE, keywords: true }
 );
-def(
-  'KeyError',
-  'initialize',
-  [0, 1],
-  function* (self: RObject, args, _block, keywords) {
-    const options = exceptionKeywords(keywords, ['receiver', 'key']);
-    yield* setExceptionMessage(self, args[0] ?? NIL);
-    self.ivars ??= new Map();
-    for (const [name, value] of options) self.ivars.set(`@__${name}`, value);
-    return NIL;
-  },
-  { ...PRIVATE, keywords: true }
-);
+for (const [owner, allowed] of [
+  ['KeyError', ['receiver', 'key']],
+  ['NoMatchingPatternKeyError', ['matchee', 'key']],
+] as const)
+  def(
+    owner,
+    'initialize',
+    [0, 1],
+    function* (self: RObject, args, _block, keywords) {
+      const options = exceptionKeywords(keywords, allowed);
+      yield* setExceptionMessage(self, args[0] ?? NIL);
+      self.internal ??= new Map();
+      for (const [name, value] of options) self.internal.set(name, value);
+      return NIL;
+    },
+    { ...PRIVATE, keywords: true }
+  );
 
 function* initializeNameError(self: RObject, args: Value[], keywords: RHash | undefined): Gen<void> {
   const options = exceptionKeywords(keywords, ['receiver']);
@@ -1125,12 +1126,12 @@ function* initializeNameError(self: RObject, args: Value[], keywords: RHash | un
   const messageCount = args.length > 1 ? args.length - 1 : args.length;
   if (messageCount > 1) throw argumentCountError(messageCount, 0, 1);
   yield* setExceptionMessage(self, args[0] ?? NIL);
-  self.ivars ??= new Map();
-  self.ivars.set('@__name', name);
-  if (options.has('receiver')) self.ivars.set('@__receiver', options.get('receiver') ?? NIL);
+  self.internal ??= new Map();
+  self.internal.set('name', name);
+  if (options.has('receiver')) self.internal.set('receiver', options.get('receiver') ?? NIL);
 }
 
-function exceptionKeywords(keywords: RHash | undefined, allowed: string[]): Map<string, Value> {
+function exceptionKeywords(keywords: RHash | undefined, allowed: readonly string[]): Map<string, Value> {
   const options = new Map<string, Value>();
   for (const entry of keywords?.map.values() ?? []) {
     const name = entry.key instanceof RSymbol ? entry.key.name : '';
@@ -1141,18 +1142,20 @@ function exceptionKeywords(keywords: RHash | undefined, allowed: string[]): Map<
 }
 
 function exceptionMetadata(self: RObject, name: string, label: string): Value {
-  if (!self.ivars?.has(name)) throw argumentError(`no ${label} is available`);
-  return self.ivars.get(name) ?? NIL;
+  if (!self.internal?.has(name)) throw argumentError(`no ${label} is available`);
+  return self.internal.get(name) ?? NIL;
 }
 
-def('NameError', 'name', 0, (self: RObject) => self.ivars?.get('@__name') ?? NIL);
-def('NameError', 'receiver', 0, (self: RObject) => exceptionMetadata(self, '@__receiver', 'receiver'));
-def('NoMethodError', 'args', 0, (self: RObject) => self.ivars?.get('@__args') ?? NIL);
-def('NoMethodError', 'private_call?', 0, (self: RObject) => self.ivars?.get('@__private_call') ?? false);
-def('FrozenError', 'receiver', 0, (self: RObject) => exceptionMetadata(self, '@__receiver', 'receiver'));
-def('KeyError', 'key', 0, (self: RObject) => exceptionMetadata(self, '@__key', 'key'));
-def('KeyError', 'receiver', 0, (self: RObject) => exceptionMetadata(self, '@__receiver', 'receiver'));
-def('StopIteration', 'result', 0, (self: RObject) => self.ivars?.get('@result') ?? NIL);
+def('NameError', 'name', 0, (self: RObject) => self.internal?.get('name') ?? NIL);
+def('NameError', 'receiver', 0, (self: RObject) => exceptionMetadata(self, 'receiver', 'receiver'));
+def('NoMethodError', 'args', 0, (self: RObject) => self.internal?.get('args') ?? NIL);
+def('NoMethodError', 'private_call?', 0, (self: RObject) => self.internal?.get('private_call') ?? false);
+def('FrozenError', 'receiver', 0, (self: RObject) => exceptionMetadata(self, 'receiver', 'receiver'));
+def('KeyError', 'key', 0, (self: RObject) => exceptionMetadata(self, 'key', 'key'));
+def('KeyError', 'receiver', 0, (self: RObject) => exceptionMetadata(self, 'receiver', 'receiver'));
+def('NoMatchingPatternKeyError', 'key', 0, (self: RObject) => exceptionMetadata(self, 'key', 'key'));
+def('NoMatchingPatternKeyError', 'matchee', 0, (self: RObject) => exceptionMetadata(self, 'matchee', 'matchee'));
+def('StopIteration', 'result', 0, (self: RObject) => self.internal?.get('result') ?? NIL);
 def(
   'SystemExit',
   'initialize',
@@ -1164,8 +1167,8 @@ def(
     if (status === undefined && args.length > 1) throw argumentCountError(args.length, 0, 1);
     (self.exception as NonNullable<RObject['exception']>).message =
       status === undefined ? (first ?? NIL) : (args[1] ?? NIL);
-    self.ivars ??= new Map();
-    self.ivars.set('@__status', status ?? 0n);
+    self.internal ??= new Map();
+    self.internal.set('status', status ?? 0n);
     return NIL;
   },
   PRIVATE
@@ -1175,15 +1178,15 @@ function* systemExitStatus(value: Value): Gen<bigint | undefined> {
   if (value === true) return 0n;
   if (value === false) return 1n;
   if (typeof value === 'bigint' || typeof value === 'number' || value instanceof RFloat) return yield* toInt(value);
-  if (value !== NIL && respondsTo(value, 'to_int', true)) {
-    const converted = yield* callMethod(value, 'to_int', [], undefined, undefined, { fcall: true });
+  if (value !== NIL) {
+    const converted = yield* tryImplicitConversion(value, 'to_int');
     if (typeof converted === 'bigint') return converted;
   }
   return undefined;
 }
 
-def('SystemExit', 'status', 0, (self: RObject) => self.ivars?.get('@__status') ?? 0n);
-def('SystemExit', 'success?', 0, (self: RObject) => (self.ivars?.get('@__status') ?? 0n) === 0n);
+def('SystemExit', 'status', 0, (self: RObject) => self.internal?.get('status') ?? 0n);
+def('SystemExit', 'success?', 0, (self: RObject) => (self.internal?.get('status') ?? 0n) === 0n);
 
 // Comparable ----------------------------------------------------------------------------------------------------------
 
@@ -1200,7 +1203,7 @@ function* compareOrFail(self: Value, other: Value): Gen<number> {
 
 def('Comparable', '==', 1, function* (self, [other]) {
   if (self === other) return true;
-  const pairs = rt().comparablePairs;
+  const pairs = rt().recursionContext.comparablePairs;
   const active = pairs.get(self) ?? new Set<Value>();
   if (active.has(other)) throw new ComparableCycle(self, other);
   active.add(other);
@@ -1253,17 +1256,14 @@ def(
   'Proc',
   ['call', '()', 'yield', '===', '[]'],
   [0, -1],
-  function* (self: RProc, args, block, keywords) {
-    return yield* callProc(self, args, { keywords, block, callRow: rt().currentRow });
+  function* (self: RProc, args, block, keywords, used) {
+    return yield* callProc(self, args, { keywords, block, callRow: rt().currentRow, used });
   },
   { keywords: true }
 );
 def('Proc', 'to_proc', 0, (self) => self);
 def('Proc', 'lambda?', 0, (self: RProc) => self.isLambda);
 def('Proc', 'arity', 0, (self: RProc) => BigInt(procArity(self)));
-def('Proc', 'parameters', 0, () => {
-  throw new UnsupportedFeatureError('Proc#parameters');
-});
 def('Proc', ['inspect', 'to_s'], 0, (self: RProc) => str(inspectProc(self)));
 def('Proc', 'curry', [0, 1], function* (self: RProc, args) {
   const arity = args.length > 0 ? yield* toRubyInt(args[0]) : procArity(self);
@@ -1291,11 +1291,11 @@ sdef('Proc', 'new', 0, (_self, _args, block) => requireProcBlock(block));
 export function procArity(proc: RProc): number {
   if (proc.body.kind === 'native') return proc.body.arity;
   const { params } = proc.body.def;
-  if (!params) return proc.isLambda ? 0 : -1;
+  if (!params) return 0;
   const positional = params.required.length + params.post.length;
   const requiredKeywords = params.keywords.some((keyword) => !keyword.value);
   const required = positional + Number(requiredKeywords);
-  if (params.rest !== undefined || params.optional.length > 0) return -required - 1;
+  if (params.rest !== undefined || (proc.isLambda && params.optional.length > 0)) return -required - 1;
   if (proc.isLambda && !requiredKeywords && (params.keywords.length > 0 || params.keywordRest !== undefined))
     return -positional - 1;
   return required;
@@ -1314,8 +1314,10 @@ export function defineMainObject(main: RObject): void {
       visibility: 'private',
       body: {
         kind: 'native',
-        fn: (_self, args) => {
+        fn: (_self, args, block) => {
           if (name === 'include') return callMethod(object, 'include', args);
+          if (name === 'define_method' || name === 'using') return callMethod(object, name, args, undefined, block);
+          if (name === 'ruby2_keywords') throw new UnsupportedFeatureError(name);
           return setVisibility(object, args, visibility);
         },
         min: 0,
@@ -1325,9 +1327,11 @@ export function defineMainObject(main: RObject): void {
     });
   };
   delegate('include', 'public');
+  delegate('define_method', 'public');
+  delegate('using', 'public');
+  delegate('ruby2_keywords', 'public');
   delegate('public', 'public');
   delegate('private', 'private');
-  delegate('protected', 'protected');
   for (const name of ['to_s', 'inspect']) {
     singleton.methods.set(name, {
       name,

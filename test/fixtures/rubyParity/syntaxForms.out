@@ -1,0 +1,71 @@
+begin block
+Counter
+0
+"hi from o"
+"..."
+"..."
+"undefined method 'talk' for an instance of Animal"
+[2, 4, 6]
+[3, 7]
+[6, 7]
+[[1, 2]]
+[[1, 2], {a: 3}, :blk]
+"no keywords accepted"
+nil
+"method"
+"constant"
+nil
+nil
+"method"
+"local-variable"
+"assignment"
+31
+10
+15
+15
+1000
+1000.0
+0.0025
+6.02e+23
+"a"
+"concat"
+["a", "b", "c"]
+[:x, :y]
+:"hello world"
+{key: 1}
+"it's"
+"v1"
+(3/1)
+(3/2)
+(1/3)
+(1/4)
+(1/2)
+(3/4)
+(1/3)
+(3/2)
+(33/100)
+(3/1)
+Dear 1,
+  indented
+bye
+"    keep\n"
+"no \#{interp} \\n here\n"
+["app", 1, "dev"]
+[1, 2, [3]]
+:big
+"ok"
+true
+false
+"x"
+[7]
+:pinned
+NoMatchingPatternError
+"99: 1 === 99 does not return true"
+[1, 2]
+3
+[1, 2]
+[2, 3]
+92
+"line a\nline b\n"
+at exit
+end block

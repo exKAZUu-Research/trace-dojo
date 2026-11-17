@@ -622,19 +622,15 @@ test.each([
   await screen.findByRole('option', { name: /前に進む/ });
   await user.keyboard('{Escape}');
   await replaceJavaSource(editor, source);
-  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
-  try {
-    await act(async () => {
-      fireEvent.keyDown(editor, { key: ' ', code: 'Space', ctrlKey: true });
-      fireEvent.keyUp(editor, { key: ' ', code: 'Space', ctrlKey: true });
-      await vi.runAllTimersAsync();
-    });
-    expect(vi.getTimerCount()).toBe(0);
-    expect(screen.queryByRole('option', { name: /前に進む/ })).not.toBeInTheDocument();
-    expect(infrastructure.grade).not.toHaveBeenCalled();
-  } finally {
-    vi.useRealTimers();
-  }
+  const view = EditorView.findFromDOM(editor);
+  expect(view, 'The rendered textbox must belong to a mounted CodeMirror view').toBeDefined();
+  if (!view) throw new Error('Mounted CodeMirror view is unavailable');
+  fireEvent.keyDown(editor, { key: ' ', code: 'Space', ctrlKey: true });
+  fireEvent.keyUp(editor, { key: ' ', code: 'Space', ctrlKey: true });
+  expect(completionStatus(view.state)).toBe('pending');
+  await waitFor(() => expect(completionStatus(view.state)).not.toBe('pending'));
+  expect(screen.queryByRole('option', { name: /前に進む/ })).not.toBeInTheDocument();
+  expect(infrastructure.grade).not.toHaveBeenCalled();
 });
 
 test('Java snippet completion accepts with Enter and Tab navigates source placeholders without grading', async () => {
@@ -1121,18 +1117,14 @@ test('variable completion respects local field shadowing before offering Turtle 
   const shadowed = 'class Main { void draw() { int 亀 = 1; 亀.前';
   await replaceJavaSource(editor, shadowed + after);
   await user.keyboard(`{ArrowLeft>${after.length}}`);
-  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
-  try {
-    await act(async () => {
-      fireEvent.keyDown(editor, { key: ' ', code: 'Space', ctrlKey: true });
-      fireEvent.keyUp(editor, { key: ' ', code: 'Space', ctrlKey: true });
-      await vi.runAllTimersAsync();
-    });
-    expect(vi.getTimerCount()).toBe(0);
-    expect(screen.queryByRole('option')).not.toBeInTheDocument();
-  } finally {
-    vi.useRealTimers();
-  }
+  const view = EditorView.findFromDOM(editor);
+  expect(view, 'The rendered textbox must belong to a mounted CodeMirror view').toBeDefined();
+  if (!view) throw new Error('Mounted CodeMirror view is unavailable');
+  fireEvent.keyDown(editor, { key: ' ', code: 'Space', ctrlKey: true });
+  fireEvent.keyUp(editor, { key: ' ', code: 'Space', ctrlKey: true });
+  expect(completionStatus(view.state)).toBe('pending');
+  await waitFor(() => expect(completionStatus(view.state)).not.toBe('pending'));
+  expect(screen.queryByRole('option')).not.toBeInTheDocument();
 });
 
 function expectStoredDraft(code: string): { key: string; raw: string } {

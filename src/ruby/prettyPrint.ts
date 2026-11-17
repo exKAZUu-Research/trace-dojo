@@ -1,6 +1,8 @@
 import { ExecutionLimitError, LIMITS } from '../interpreter/limits';
-import { addressOf, anonymousClassName, inspect, strInspect, symInspect } from './conversions';
+import { addressOf, anonymousClassName, inspect, quotedSymbolName, symInspect } from './conversions';
+import { isCoreMethod } from './define';
 import type { Gen } from './interp';
+import { structEntriesOf } from './libStruct';
 import { type HashEntry, RArray, RBasic, RClass, RHash, RObject, RString, RSymbol, type Value } from './objects';
 import { rt } from './runtime';
 import { classOf, realClassOf, stringBytes, stringFromBytes } from './values';
@@ -33,6 +35,8 @@ export function* prettyInspect(value: Value): Gen<string> {
   return `${layout(doc)}\n`;
 }
 
+// code-gauge-allow functionCognitiveComplexity 16 -- The ordered cases for width-sensitive recursive object rendering share state; splitting them solely for the metric would hide their sequencing.
+// code-gauge-allow functionNcss 44 -- The ordered cases for width-sensitive recursive object rendering share state; splitting them solely for the metric would hide their sequencing.
 export function* writePretty(value: Value, write: (part: string) => Gen<void>): Gen<void> {
   const callbacks = inspectionCallbackCount(value, new Set(), { nodes: 0, textLength: 0 });
   if (callbacks === 0) {
@@ -242,18 +246,18 @@ function group(
   };
 }
 
-/** Whether the program redefined how a value is shown, which then decides its text as a whole. */
-function showsItself(value: Value): boolean {
+function usesInspectCallback(value: Value): boolean {
+  if (value instanceof RObject && structEntriesOf(value) !== undefined) return false;
   const method = classOf(value).findMethod('inspect');
-  return method !== undefined && method.body.kind !== 'native';
+  return method !== undefined && !isCoreMethod(method, method.owner, 'inspect');
 }
 
 function* build(value: Value, seen: Set<object>, budget: BuildBudget, defer = false): Gen<Doc> {
   rt().spend();
   if (seen.size >= LIMITS.maxCallDepth) throw new ExecutionLimitError('output');
   if (++budget.nodes > LIMITS.maxOutputLength) throw new ExecutionLimitError('output');
-  if (defer && showsItself(value)) return { kind: 'text', text: '', deferred: value };
-  if (value instanceof RArray && !showsItself(value)) {
+  if (defer && usesInspectCallback(value)) return { kind: 'text', text: '', deferred: value };
+  if (value instanceof RArray && !usesInspectCallback(value)) {
     if (seen.has(value)) return text('[...]', budget);
     seen.add(value);
     try {
@@ -267,7 +271,7 @@ function* build(value: Value, seen: Set<object>, budget: BuildBudget, defer = fa
       seen.delete(value);
     }
   }
-  if (value instanceof RHash && !showsItself(value)) {
+  if (value instanceof RHash && !usesInspectCallback(value)) {
     if (seen.has(value)) return text('{...}', budget);
     seen.add(value);
     value.iterating++;
@@ -285,7 +289,7 @@ function* build(value: Value, seen: Set<object>, budget: BuildBudget, defer = fa
       seen.delete(value);
     }
   }
-  if (value instanceof RString && !showsItself(value)) {
+  if (value instanceof RString && !usesInspectCallback(value)) {
     const lines = stringLines(value);
     if (lines.length <= 1) return text(yield* inspect(value), budget);
     const parts: Doc[] = [];
@@ -295,12 +299,36 @@ function* build(value: Value, seen: Set<object>, budget: BuildBudget, defer = fa
     }
     return { kind: 'group', indent: 0, parts };
   }
+  if (value instanceof RObject) {
+    const members = structEntriesOf(value);
+    if (members) {
+      const cls = realClassOf(value);
+      const kind = cls.isSubclassOf(rt().c.Data) ? 'data' : 'struct';
+      const head = `#<${kind}${kind === 'struct' || cls.name !== undefined ? ` ${cls.name ?? ''}` : ''}`;
+      if (seen.has(value)) return text(`${head}:...>`, budget);
+      seen.add(value);
+      try {
+        const parts: Doc[] = [];
+        for (const [index, [name, member]] of members.entries()) {
+          if (index > 0) parts.push(text(',', budget));
+          parts.push(breakable(), text(`${name}=`, budget), {
+            kind: 'group',
+            indent: 1,
+            parts: [breakable(''), yield* build(member, seen, budget, defer)],
+          });
+        }
+        return group(1, head, parts, '>', budget);
+      } finally {
+        seen.delete(value);
+      }
+    }
+  }
   if (
     value instanceof RObject &&
     !value.exception &&
     value.data === undefined &&
-    !showsItself(value) &&
-    classOf(value).findMethod('to_s')?.body.kind === 'native' &&
+    !usesInspectCallback(value) &&
+    isCoreMethod(classOf(value).findMethod('to_s'), rt().c.Kernel, 'to_s') &&
     value.ivars &&
     value.ivars.size > 0
   ) {
@@ -310,7 +338,6 @@ function* build(value: Value, seen: Set<object>, budget: BuildBudget, defer = fa
     const parts: Doc[] = [];
     let first = true;
     for (const [name, item] of value.ivars) {
-      if (name.startsWith('@__')) continue;
       if (!first) parts.push(text(',', budget));
       first = false;
       parts.push(breakable(), text(`${name}=`, budget), {
@@ -325,11 +352,13 @@ function* build(value: Value, seen: Set<object>, budget: BuildBudget, defer = fa
   return text(yield* inspect(value), budget);
 }
 
+// code-gauge-allow functionCognitiveComplexity 25 -- Callback counting follows each supported container's observable inspection order and stops after two callbacks.
+// code-gauge-allow functionNcss 31 -- Each container representation contributes its children through a distinct protocol.
 function inspectionCallbackCount(value: Value, seen: Set<object>, budget: BuildBudget, depth = 0): number {
   rt().spend();
   if (depth >= LIMITS.maxCallDepth) throw new ExecutionLimitError('output');
   if (++budget.nodes > LIMITS.maxOutputLength) throw new ExecutionLimitError('output');
-  if (showsItself(value)) return 1;
+  if (usesInspectCallback(value)) return 1;
   if (!(value instanceof RBasic) || seen.has(value)) return 0;
   seen.add(value);
   let count = 0;
@@ -345,7 +374,8 @@ function inspectionCallbackCount(value: Value, seen: Set<object>, budget: BuildB
       if (count >= 2) return 2;
     }
   } else {
-    for (const item of value.ivars?.values() ?? []) {
+    const members = value instanceof RObject ? structEntriesOf(value) : undefined;
+    for (const item of members?.map(([, item]) => item) ?? value.ivars?.values() ?? []) {
       count += inspectionCallbackCount(item, seen, budget, depth + 1);
       if (count >= 2) return 2;
     }
@@ -354,7 +384,7 @@ function inspectionCallbackCount(value: Value, seen: Set<object>, budget: BuildB
 }
 
 function isSimplePrettySymbol(key: RSymbol): boolean {
-  return !/^:["$@]|[%&*+\-/<=>@\]^`|~]$/.test(symInspect(key.name));
+  return !/^:["$@]|[%&*+\-/<=>@\]^`|~]$/.test(symInspect(key));
 }
 
 function stringLines(value: RString): RString[] {
@@ -373,7 +403,7 @@ function stringLines(value: RString): RString[] {
 function* pair(key: Value, value: Value, seen: Set<object>, budget: BuildBudget, defer = false): Gen<Doc[]> {
   const parts: Doc[] = [];
   if (key instanceof RSymbol) {
-    parts.push(text(`${isSimplePrettySymbol(key) ? key.name : strInspect(key.name)}:`, budget));
+    parts.push(text(`${isSimplePrettySymbol(key) ? key.name : quotedSymbolName(key)}:`, budget));
   } else {
     parts.push(yield* build(key, seen, budget, defer), text(' ', budget), text('=>', budget));
   }
