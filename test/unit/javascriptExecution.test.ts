@@ -1556,6 +1556,16 @@ function main() {
 main();`,
   ],
   [
+    'console.table of Set and Map iterators',
+    `const s = new Set([1, 2, 3]);
+console.table(s.entries());
+console.table(new Set([{ a: 1 }, { b: 2 }]).entries());
+console.table(s.values());
+console.table(s);
+const m = new Map([["a", 1]]);
+console.table(m.entries()); console.table(m.keys()); console.table(m.values());`,
+  ],
+  [
     'apply checking its receiver first, and receivers named as V8 names them',
     `const apply = Function.prototype.apply;
 for (const recv of [{}, 1, "s", null, undefined, [1], Symbol("q")]) {

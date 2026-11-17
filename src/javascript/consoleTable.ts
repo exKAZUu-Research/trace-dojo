@@ -100,12 +100,19 @@ function formatCollectionTable(runtime: Runtime, data: JsObject, budget: OutputB
       ]
     );
   }
-  const shown = (entry: CollectionEntry): Value =>
-    isMap && iterator?.kind === 'values' ? (entry.value as Value) : entry.key;
+  const shown = (entry: CollectionEntry): Value[] => {
+    if (isMap) return [iterator?.kind === 'values' ? (entry.value as Value) : entry.key];
+    // A Set's entries are pairs of its value, which Node.js lists as rows of their own.
+    return iterator?.kind === 'entries' ? [entry.key, entry.key] : [entry.key];
+  };
+  const values = entries.flatMap(shown);
   return renderTable(
     runtime,
     ['(iteration index)', 'Values'],
-    [indices, entries.map((entry) => inspectCell(runtime, shown(entry), budget))]
+    [
+      values.map((_, index) => inspectCell(runtime, index, budget)),
+      values.map((value) => inspectCell(runtime, value, budget)),
+    ]
   );
 }
 
