@@ -407,11 +407,12 @@ export function errorHeadline(runtime: Runtime, error: JsObject): string {
  * Node.js then improves with the `name` it reads again.
  */
 function errorText(runtime: Runtime, error: JsObject, constructor: string | undefined): string {
-  error.stackHeadline ??= v8Headline(runtime, error);
-  const text = error.stackHeadline;
-  const improvedName = runtime.get(error, 'name');
+  const text = headlineOf(runtime, error);
+  const improvedName = readIgnoringThrows(runtime, error, 'name');
   // Node.js also reads the message on each print, which a getter observes.
-  runtime.get(error, 'message');
+  readIgnoringThrows(runtime, error, 'message');
+  // Node.js prints an error whose first line V8 could not format as `Object.prototype.toString` names it.
+  if (text === undefined) return '[object Error]';
   if (improvedName === undefined || improvedName === null) return improveErrorName(text, 'Error', constructor);
   if (typeof improvedName === 'string') return improveErrorName(text, improvedName, constructor);
   // Node.js marks a name that is not a string with the error's class, as `42 [Error]: bad`.
@@ -425,11 +426,33 @@ function errorText(runtime: Runtime, error: JsObject, constructor: string | unde
  * reach; an accessor stays listed without being called.
  */
 function isInHeadline(runtime: Runtime, error: JsObject, key: Key): boolean {
-  error.stackHeadline ??= v8Headline(runtime, error);
   const property = error.properties.get(key);
   if (!property?.enumerable) return true;
   if (isAccessor(property)) return false;
-  return typeof property.value !== 'string' || error.stackHeadline.includes(property.value);
+  const headline = headlineOf(runtime, error) ?? '[object Error]';
+  return typeof property.value !== 'string' || headline.includes(property.value);
+}
+
+/**
+ * An error's first stack line, formatted when first needed and kept, or undefined while its `name` or `message`
+ * throws, which V8 tries again on the next print.
+ */
+function headlineOf(runtime: Runtime, error: JsObject): string | undefined {
+  try {
+    error.stackHeadline ??= v8Headline(runtime, error);
+  } catch (formatError) {
+    if (!(formatError instanceof JsThrow)) throw formatError;
+  }
+  return error.stackHeadline;
+}
+
+function readIgnoringThrows(runtime: Runtime, object: JsObject, key: Key): Value {
+  try {
+    return runtime.get(object, key);
+  } catch (error) {
+    if (!(error instanceof JsThrow)) throw error;
+    return undefined;
+  }
 }
 
 function v8Headline(runtime: Runtime, error: JsObject): string {

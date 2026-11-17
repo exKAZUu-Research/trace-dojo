@@ -2167,6 +2167,39 @@ N1: z
     });
   });
 
+  test('an error whose name or message throws prints as [object Error] until they stop throwing', () => {
+    // Node.js prints each error's stack trace after its first line, which the interpreter leaves out.
+    const source = `function main() {
+  const e = new Error("bad"); Object.defineProperty(e, "message", { get() { throw "oops"; } });
+  try { console.log(e); } catch (x) { console.log("caught", x); }
+  let n = 0; const f = new Error("bad"); Object.defineProperty(f, "name", { get() { n++; throw new Error("nm"); } });
+  try { console.log(f); console.log(n); } catch (x) { console.log("caught", String(x)); }
+  try { console.log([f]); console.log(n); } catch (x) { console.log("caught", String(x)); }
+  let m = 0; const g = new Error("ok"); Object.defineProperty(g, "message", { get() { if (++m > 1) throw "late"; return "fine"; } });
+  try { console.log(g); console.log(m); console.log(g); console.log(m); } catch (x) { console.log("caught", x); }
+  const h = new Error("x"); Object.defineProperty(h, "message", { get() { return { toString() { throw "ts"; } }; } });
+  try { console.log(h); } catch (x) { console.log("caught", x); }
+  const k = new TypeError("t"); Object.defineProperty(k, "message", { get() { throw 1; } }); k.code = 5;
+  try { console.log(k); } catch (x) { console.log("caught", x); }
+}
+main();`;
+    expect(executeProgram('javascript', source)).toMatchObject({
+      kind: 'executed',
+      stdout: `[object Error]
+[object Error]
+2
+[ [object Error] ]
+4
+Error: fine
+2
+Error: fine
+3
+[object Error]
+[object Error] { code: 5 }
+`,
+    });
+  });
+
   test('a timer pending through a busy wait fires after its delay, not the wait plus its delay', () => {
     // Node.js prints about 101 here, but late under load, so the check is on the interpreter's clock alone.
     const source = `let sum = 0; const v = Date.now(); setTimeout(() => console.log(Date.now() - v), 100);
