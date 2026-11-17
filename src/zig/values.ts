@@ -240,7 +240,7 @@ export class Pointer {
   }
 
   project(kind: 'length' | 'optional'): Pointer {
-    const location = this.storageLocation();
+    const location = kind === 'optional' ? storageLocation(this.target.slots, this.index) : this.storageLocation();
     let projections = Pointer.projections.get(location.storage);
     if (!projections) {
       projections = new Map();
@@ -249,16 +249,16 @@ export class Pointer {
     const key = `${location.index} ${kind}`;
     let storage = projections.get(key);
     if (!storage) {
-      storage = kind === 'length' ? new SliceLength(this) : new SomeSlots(this);
+      storage = kind === 'length' ? new SliceLength(this) : new OptionalSlots(this);
       projections.set(key, storage);
     }
     return new Pointer(storage, 0);
   }
 
-  static optionalProjection(target: Slots, index: number): SomeSlots | undefined {
-    const location = new Pointer(target, index).storageLocation();
+  static optionalProjection(target: Slots, index: number): OptionalSlots | undefined {
+    const location = storageLocation(target.slots, index);
     const projection = Pointer.projections.get(location.storage)?.get(`${location.index} optional`);
-    return projection instanceof SomeSlots ? projection : undefined;
+    return projection instanceof OptionalSlots ? projection : undefined;
   }
 
   storageLocation(): { storage: object; index: number } {
@@ -270,7 +270,7 @@ export class Pointer {
     const value = (storageAliases.get(slots) ?? slots)[this.index];
     if (value instanceof ZArray) return storageLocation(value.slots, value.offset);
     return storageLocation(
-      this.target instanceof SomeSlots || this.target instanceof SliceLength ? this.target : this.target.slots,
+      this.target instanceof OptionalSlots || this.target instanceof SliceLength ? this.target : this.target.slots,
       this.index
     );
   }
@@ -421,9 +421,9 @@ export function storeInto(target: Slots, index: number, value: Value): void {
 // code-gauge-allow functionNcss 33 -- Keeps the storage identity rules together for each value representation.
 function storeSnapshotInto(target: Slots, index: number, value: Value): void {
   const payload = Pointer.optionalProjection(target, index);
-  if (payload && value instanceof Some) {
-    payload.assign(value.value);
-    value = new Some(payload.slots[0]);
+  if (payload && value !== NULL) {
+    payload.assign(optionalPayload(value));
+    value = payload.presentValue();
   }
   if (storageLocations.has(target.slots)) {
     target.slots[index] = value;
@@ -432,7 +432,7 @@ function storeSnapshotInto(target: Slots, index: number, value: Value): void {
   const current = target.slots[index];
   if (value instanceof ZArray && current instanceof ZArray && current.length === value.length) {
     if (zeroArrayValues.has(value.slots) && zeroArrayValues.has(current.slots)) return;
-    const source = value.values();
+    const source = value.values(value.hasSentinel);
     for (const [at, slot] of source.entries()) storeSnapshotInto(current, current.offset + at, slot);
     return;
   }
@@ -479,27 +479,33 @@ class SliceLength implements Slots {
   }
 }
 
-/** The payload of an optional whose payload is itself optional, as storage that `.?` points into. */
-class SomeSlots implements Slots {
+/** The payload storage of an optional whose tag occupies separate bytes. */
+class OptionalSlots implements Slots {
   private readonly cell: Cell;
   readonly slots: Value[];
+  private readonly wrapped: boolean;
 
   constructor(private readonly pointer: Pointer) {
-    this.cell = new Cell((pointer.load() as Some).value);
+    this.wrapped = pointer.load() instanceof Some;
+    this.cell = new Cell(optionalPayload(pointer.load()));
     this.slots = new Proxy(this.cell.slots, {
       set: (_, key, value) => {
         if (key === '0') {
           this.cell.slots[0] = value as Value;
-          if (this.pointer.load() instanceof Some)
-            this.pointer.target.slots[this.pointer.index] = new Some(value as Value);
+          if (this.pointer.load() !== NULL) this.pointer.target.slots[this.pointer.index] = this.presentValue();
         }
         return true;
       },
     });
+    aliasStorage(this.slots, this.cell.slots);
   }
 
   assign(value: Value): void {
     storeSnapshotInto(this.cell, 0, value);
+  }
+
+  presentValue(): Value {
+    return this.wrapped ? new Some(this.cell.slots[0]) : this.cell.slots[0];
   }
 }
 

@@ -7268,3 +7268,87 @@ test.each([
     uncaughtException: undefined,
   });
 });
+
+test.each(['if', 'while'])(
+  'ordinary %s optional payload pointers retain separate scalar and aggregate storage',
+  (capture) => {
+    const source = `const std=@import("std");pub fn main()void{
+    var o:?u8=7;
+    ${capture}(o)|*p|{o=null;p.*=9;std.debug.print("{} {}|",.{p.*,o==null});o=3;o=null;std.debug.print("{} {}|",.{p.*,o==null});${capture === 'while' ? 'break;' : ''}}
+    var a:?[2]u8=.{1,2};
+    ${capture}(a)|*p|{a=null;p.*[0]=9;std.debug.print("{} {}|",.{p.*[0],a==null});a=.{3,4};a=null;std.debug.print("{} {}",.{p.*[0],a==null});${capture === 'while' ? 'break;' : ''}}
+  }`;
+    expect(executeProgram('zig', source)).toMatchObject({
+      kind: 'executed',
+      stderr: '9 true|3 true|9 true|3 true',
+      uncaughtException: undefined,
+    });
+  }
+);
+
+test('ordinary optional unwrap pointers preserve tags while pointer niches share their null representation', () => {
+  const source = `const std=@import("std");pub fn main()void{var o:?u8=7;const p=&o.?;o=null;p.*=9;var x:u8=1;var q:?*u8=&x;const qp=&q.?;q=null;qp.*=&x;std.debug.print("{} {} {}",.{p.*,o==null,q==null});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: '9 true false',
+    uncaughtException: undefined,
+  });
+});
+
+test.each(['[1:0]u8', '[0:0]u8', '[1:7]u8'])('assignments copy mutable %s sentinel elements', (type) => {
+  const length = type.startsWith('[0:') ? 0 : 1;
+  const source = `const std=@import("std");pub fn main()void{var a:${type}=undefined;var b:${type}=undefined;var n:usize=${length};_=&n;a[n]=9;b=a;std.debug.print("{}",.{b[n]});}`;
+  expect(executeProgram('zig', source)).toMatchObject({ kind: 'executed', stderr: '9', uncaughtException: undefined });
+});
+
+test.each(['a', 'b'])('replacement searches repetitive %s input within linear work', (character) => {
+  const last = character === 'a' ? 'b' : 'a';
+  const source = `const std=@import("std");pub fn main()void{var out:[10000]u8=undefined;const n=std.mem.replace(u8,"${character.repeat(10_000)}","${character.repeat(99)}${last}","z",&out);std.debug.print("{} {c}",.{n,out[9999]});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: `0 ${character}`,
+    uncaughtException: undefined,
+  });
+});
+
+test('replacement scans preserve live input and pattern aliases across sequential writes', () => {
+  const source = `const std=@import("std");pub fn main()void{
+    var a=[_]u8{'a','b','a','d','e',0};
+    const n=std.mem.replace(u8,a[0..5],"aa","Z",a[1..6]);
+    var pattern=[_]u8{'a','b',0,0};
+    const m=std.mem.replace(u8,"axab",pattern[0..2],"Z",&pattern);
+    std.debug.print("{} {s}|{} {s}",.{n,a[1..5],m,pattern});
+  }`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: '1 aZde|0 axab',
+    uncaughtException: undefined,
+  });
+});
+
+test('nested sentinel array assignments preserve sentinel element pointers', () => {
+  const source = `const std=@import("std");pub fn main()void{var a:[1][1:0]u8=.{.{1}};var b:[1][1:0]u8=.{.{2}};var n:usize=1;_=&n;const p=&b[0][n];a[0][n]=9;b=a;std.debug.print("{} {}",.{b[0][n],p.*});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: '9 9',
+    uncaughtException: undefined,
+  });
+});
+
+test('nested optional projections observe replacement through every enclosing payload cell', () => {
+  const source = `const std=@import("std");pub fn main()void{var o:???u8=@as(??u8,@as(?u8,1));const p=&o.?.?;o=@as(??u8,@as(?u8,7));o=null;std.debug.print("{?} {}",.{p.*,o==null});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: '7 true',
+    uncaughtException: undefined,
+  });
+});
+
+test('native iterator updates preserve retained optional index payloads', () => {
+  const source = `const std=@import("std");pub fn main()void{var it=std.mem.splitScalar(u8,"a,b",',');const p=&it.index.?;_=it.next();std.debug.print("{}|",.{p.*});_=it.next();p.*=9;std.debug.print("{} {}",.{p.*,it.index==null});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: '2|9 true',
+    uncaughtException: undefined,
+  });
+});

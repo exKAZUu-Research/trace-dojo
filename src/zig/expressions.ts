@@ -30,7 +30,7 @@ import {
   parseFloatLiteral,
 } from './floats';
 import { spendIntegerOperation } from './integerWork';
-import { sizeOf } from './layout';
+import { optionalNicheBits, sizeOf } from './layout';
 import { callableNative } from './nativeAdapter';
 import { asFloat, comparisonTest, isArithmeticType, isIntegerType, isZero, sign } from './operands';
 import { type Frame, Jump, withHeldValues } from './runtime';
@@ -636,7 +636,7 @@ export abstract class ExpressionCompiler extends SemaBase {
     this.checkMemoryHeader(operand, expression);
     // A known null still panics only when the program runs, as in Zig.
     if (operand.known && operand.value !== NULL)
-      return knownAt(child, this.optionalPayloadPointer(this.addressOf(operand).value as Pointer), expression);
+      return knownAt(child, this.optionalPayloadPointer(this.addressOf(operand).value as Pointer, child), expression);
     const evaluate = operand.eval;
     const place = operand.place;
     const unwrapPlace: Place | undefined = place && {
@@ -645,7 +645,7 @@ export abstract class ExpressionCompiler extends SemaBase {
         const pointer = place.locate(frame);
         const value = pointer.load();
         if (value === NULL) nullUnwrapPanic();
-        return value instanceof Some ? pointer.project('optional') : pointer;
+        return this.optionalPayloadPointer(pointer, child);
       },
     };
     return {
@@ -659,8 +659,8 @@ export abstract class ExpressionCompiler extends SemaBase {
     };
   }
 
-  protected optionalPayloadPointer(pointer: Pointer): Pointer {
-    return pointer.load() instanceof Some ? pointer.project('optional') : pointer;
+  protected optionalPayloadPointer(pointer: Pointer, child: Type): Pointer {
+    return optionalNicheBits(child) ? pointer : pointer.project('optional');
   }
 
   // Indexing and slicing ----------------------------------------------------------------------------------------------

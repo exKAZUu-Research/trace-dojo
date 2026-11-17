@@ -746,7 +746,7 @@ export abstract class StatementCompiler extends CallCompiler {
         frame.runtime.spend(slots);
         holder.slots[index] = optionalSome(nested ? NULL : undefinedValue(type.child), type.child);
       }
-      const payload = this.optionalPayloadPointer(new Pointer(holder, index));
+      const payload = this.optionalPayloadPointer(new Pointer(holder, index), type.child);
       inner(frame, payload.target, payload.index);
     };
   }
@@ -1183,7 +1183,7 @@ export abstract class StatementCompiler extends CallCompiler {
           known: true,
           value: address
             ? condition.type.kind === 'optional'
-              ? this.optionalPayloadPointer(address.value as Pointer)
+              ? this.optionalPayloadPointer(address.value as Pointer, condition.type.child)
               : address.value
             : payload(conditionResult.value),
         };
@@ -1338,7 +1338,8 @@ export abstract class StatementCompiler extends CallCompiler {
             return;
           }
           const target = pointer;
-          frame.slots[binding.slot] = operand?.type.kind === 'optional' ? this.optionalPayloadPointer(target) : target;
+          frame.slots[binding.slot] =
+            operand?.type.kind === 'optional' ? this.optionalPayloadPointer(target, operand.type.child) : target;
         },
       };
     }

@@ -332,7 +332,7 @@ function iteratorType(kind: 'split' | 'token', delimiter: DelimiterKind, child: 
     let index = state.slots[indexSlot] as bigint;
     while (index < buffer.lengthValue && isDelimiter(buffer, index, state.slots[delimiterSlot], equal, spend))
       index += delimiterLength(state.slots[delimiterSlot]);
-    state.slots[indexSlot] = BigInt(index);
+    storeInto(state, indexSlot, index);
     if (index === buffer.lengthValue) return undefined;
     const end = findDelimiter(buffer, index, state.slots[delimiterSlot], equal, spend) ?? buffer.lengthValue;
     return { start: index, end };
@@ -348,9 +348,9 @@ function iteratorType(kind: 'split' | 'token', delimiter: DelimiterKind, child: 
             let end = buffer.lengthValue;
             const found = findDelimiter(buffer, start, state.slots[delimiterSlot], equal, spend) ?? -1n;
             if (found === -1n) {
-              state.slots[indexSlot] = NULL;
+              storeInto(state, indexSlot, NULL);
             } else {
-              state.slots[indexSlot] = BigInt(found + delimiterLength(state.slots[delimiterSlot]));
+              storeInto(state, indexSlot, found + delimiterLength(state.slots[delimiterSlot]));
               end = found;
             }
             return subSlice(state.slots[0] as Slice, start, end - start);
@@ -360,8 +360,11 @@ function iteratorType(kind: 'split' | 'token', delimiter: DelimiterKind, child: 
             if (state.slots[indexSlot] !== 0n) panic(PANIC.unreachable);
             const buffer = state.slots[0] as Slice;
             const end = findDelimiter(buffer, 0n, state.slots[delimiterSlot], equal, spend) ?? buffer.lengthValue;
-            state.slots[indexSlot] =
-              end === buffer.lengthValue ? NULL : BigInt(end + delimiterLength(state.slots[delimiterSlot]));
+            storeInto(
+              state,
+              indexSlot,
+              end === buffer.lengthValue ? NULL : end + delimiterLength(state.slots[delimiterSlot])
+            );
             return subSlice(state.slots[0] as Slice, 0n, end);
           }),
           peek: method('peek', optionalOf(resultSlice), (state, equal, spend) => {
@@ -379,7 +382,7 @@ function iteratorType(kind: 'split' | 'token', delimiter: DelimiterKind, child: 
             return subSlice(buffer, start, buffer.lengthValue - start);
           }),
           reset: method('reset', VOID, (state) => {
-            state.slots[indexSlot] = 0n;
+            storeInto(state, indexSlot, 0n);
             return;
           }),
         }
@@ -387,7 +390,7 @@ function iteratorType(kind: 'split' | 'token', delimiter: DelimiterKind, child: 
           next: method('next', optionalOf(resultSlice), (state, equal, spend) => {
             const token = tokenPeek(state, equal, spend);
             if (!token) return NULL;
-            state.slots[indexSlot] = BigInt(token.end);
+            storeInto(state, indexSlot, token.end);
             return subSlice(state.slots[0] as Slice, token.start, token.end - token.start);
           }),
           peek: method('peek', optionalOf(resultSlice), (state, equal, spend) => {
@@ -403,7 +406,7 @@ function iteratorType(kind: 'split' | 'token', delimiter: DelimiterKind, child: 
             return subSlice(state.slots[0] as Slice, index, buffer.lengthValue - index);
           }),
           reset: method('reset', VOID, (state) => {
-            state.slots[indexSlot] = 0n;
+            storeInto(state, indexSlot, 0n);
             return;
           }),
         };
@@ -668,7 +671,7 @@ const MEMBERS: Record<string, () => Member> = {
       return source.length + count * ((r as Slice).lengthValue - pattern.length);
     });
   }),
-  // code-gauge-allow functionNcss 42 -- Implements sequential replacement, overlap and capacity checks together.
+  // code-gauge-allow functionNcss 50 -- Implements sequential replacement, overlap and capacity checks together.
   replace: generic('std.mem.replace', 5, (sema, call, type, [inputArg, needleArg, replacementArg, outputArg]) => {
     const [input, needle, replacement] = [inputArg, needleArg, replacementArg].map((arg) =>
       constSlice(sema, arg, type)
@@ -687,15 +690,31 @@ const MEMBERS: Record<string, () => Member> = {
         else sema.spendCompilation(cost);
       };
       const equal = equality(frame);
+      const changesSearch = [source, pattern].some((input) =>
+        storageOverlaps(
+          input.target,
+          input.start,
+          target.target,
+          target.start,
+          Math.max(input.length, target.length),
+          sizeOf(type)
+        )
+      );
+      const text = sequence(source, spend);
+      const needle = sequence(pattern, spend);
+      let next = changesSearch ? undefined : findSequence(text, needle, 0n, equal);
       let index = 0,
         written = 0,
         count = 0;
       while (index < source.length) {
         spend();
-        let matches = index + pattern.length <= source.length;
-        for (let offset = 0; matches && offset < pattern.length; offset++) {
-          spend();
-          matches = equal(source.get(index + offset), pattern.get(offset));
+        let matches = next === BigInt(index);
+        if (changesSearch) {
+          matches = index + pattern.length <= source.length;
+          for (let offset = 0; matches && offset < pattern.length; offset++) {
+            spend();
+            matches = equal(source.get(index + offset), pattern.get(offset));
+          }
         }
         if (matches) {
           if (written + replace.length > target.length) indexOutOfBounds(replace.length, target.length - written);
@@ -717,6 +736,7 @@ const MEMBERS: Record<string, () => Member> = {
           written += replace.length;
           index += pattern.length;
           count++;
+          if (!changesSearch) next = findSequence(text, needle, BigInt(index), equal);
         } else {
           if (written >= target.length) indexOutOfBounds(written, target.length);
           if (cost !== 0) {
