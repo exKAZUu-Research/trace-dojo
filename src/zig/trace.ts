@@ -1,5 +1,5 @@
 // code-gauge-allow-file duplicateLines 17 -- Library types repeat the same shape of method on purpose, each over its own state.
-import { LIMITS } from '../interpreter/limits';
+import { ExecutionLimitError, LIMITS } from '../interpreter/limits';
 import type { ProgramRecording } from '../interpreter/program';
 import type { ProgramInput } from '../interpreter/programIo';
 import type { TraceOptions } from '../interpreter/traceAnnotations';
@@ -72,23 +72,15 @@ class Snapshotter {
    * The variables a frame shows: its locals in scope, then, when `withGlobals`, the container-level variables. A
    * method's receiver also shows its fields as `self.x`, as Java's `this.x`.
    */
-  // code-gauge-allow functionCognitiveComplexity 16 -- Preserves visible variable order while enforcing the shared preview allowance.
   variablesOf(frame: Frame, withGlobals: boolean): TraceVariables {
     const variables: TraceVariables = {
       vars: Object.create(null) as TraceVariables['vars'],
       referenceVars: Object.create(null) as TraceVariables['referenceVars'],
     };
     if (frame.fn.internal) return variables;
-    if (previewRemaining(this.previews) === 0) {
-      variables.referenceVars['…'] = TRUNCATED;
-      return variables;
-    }
+    previewRemaining(this.previews);
     const shown = new Set<string>();
     for (const local of frame.fn.locals) {
-      if (previewRemaining(this.previews) === 0) {
-        variables.referenceVars['…'] = TRUNCATED;
-        break;
-      }
       const value = frame.slots[local.slot];
       if (value === UNASSIGNED || local.name.startsWith('\0')) continue;
       shown.add(local.name);
@@ -97,10 +89,6 @@ class Snapshotter {
     }
     if (!withGlobals) return variables;
     for (const global of this.program.globals) {
-      if (previewRemaining(this.previews) === 0) {
-        variables.referenceVars['…'] = TRUNCATED;
-        break;
-      }
       if (shown.has(global.name)) continue;
       addVariable(variables, global.name, global.cell.slots[0], global.type, this.previews);
     }
@@ -123,13 +111,15 @@ class PreviewBudget {
   }
 
   spendMetadata(cost: number): boolean {
-    return this.pool ? spendPreview(this.pool, cost) : this.spend(cost);
+    if (!this.pool) return this.spend(cost);
+    spendPreview(this.pool, cost);
+    return true;
   }
 
   spend(cost = 1): boolean {
     const accepted = cost <= this.remaining;
     this.available = Math.max(0, this.available - cost);
-    if (this.pool) this.pool.remaining = Math.max(0, this.pool.remaining - cost);
+    if (this.pool) spendPreview(this.pool, cost);
     return accepted;
   }
 }
@@ -137,7 +127,7 @@ const TRUNCATED: DisplayNode = { kind: 'value', value: '…', verbatim: true };
 
 function addVariable(variables: TraceVariables, name: string, value: Value, type: Type, pool: PreviewPool): void {
   if (isHiddenType(type)) return;
-  if (!spendPreview(pool, name.length)) return;
+  spendPreview(pool, name.length);
   const scalar = scalarOf(value, type, previewBudget(MAX_SCALAR_EXPANSION, pool));
   if (scalar !== NOT_SCALAR) variables.vars[name] = scalar;
   // Arrays and slices also appear as references so that learners can expand their elements.
@@ -172,7 +162,7 @@ function addReceiverFields(variables: TraceVariables, name: string, value: Value
   }
   if (structType.kind !== 'struct' || !(struct instanceof ZStruct)) return;
   for (const [index, field] of (structType.fields ?? []).entries()) {
-    if (!spendPreview(pool, name.length + field.name.length + 1)) break;
+    spendPreview(pool, name.length + field.name.length + 1);
     const scalar = scalarOf(struct.slots[index], field.type, previewBudget(MAX_SCALAR_EXPANSION, pool));
     if (scalar !== NOT_SCALAR) variables.vars[`${name}.${field.name}`] = scalar;
   }
@@ -504,17 +494,14 @@ function previewBudget(remaining: number, pool?: PreviewPool): PreviewBudget {
 }
 
 function previewRemaining(pool: PreviewPool): number {
-  if (performance.now() >= pool.deadline) pool.remaining = 0;
+  if (performance.now() >= pool.deadline) throw new ExecutionLimitError('time');
+  if (pool.remaining === 0) throw new ExecutionLimitError('trace');
   return pool.remaining;
 }
 
-function spendPreview(pool: PreviewPool, cost: number): boolean {
-  if (cost > previewRemaining(pool)) {
-    pool.remaining = 0;
-    return false;
-  }
+function spendPreview(pool: PreviewPool, cost: number): void {
+  if (cost > previewRemaining(pool)) throw new ExecutionLimitError('trace');
   pool.remaining -= cost;
-  return true;
 }
 
 function unreadableSnapshot(value: Value, type: Type): boolean {

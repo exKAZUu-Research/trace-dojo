@@ -1,5 +1,6 @@
 import { expect, test } from 'vitest';
 
+import { ExecutionLimitError } from '../../src/interpreter/limits';
 import { executeProgram, traceProgram } from '../../src/interpreter/program';
 import { gradeRegularAnswers, type RegularGradingResult } from '../../src/problems/regular/grade';
 import type { TraceItem } from '../../src/problems/trace';
@@ -476,25 +477,16 @@ test('large byte strings and nested numeric arrays use bounded reference preview
   expect(previews?.a).toMatchObject({ kind: 'array', entries: { '…': { kind: 'value', value: '… (20000 items)' } } });
 });
 
-test.each(['u8', 'u16'])('repeated %s array views share a bounded trace preview allowance', (type) => {
+test.each(['u8', 'u16'])('repeated %s array views report an exhausted trace allowance', (type) => {
   const views = Array.from({ length: 100 }, (_, i) => `const a${i}:[]const ${type}=&a;`).join('');
   const uses = Array.from({ length: 100 }, (_, i) => `_=a${i};`).join('');
   const source = `const std=@import("std");pub fn main()void{var a:[9999]${type}=@splat(97);_=&a;${views}${uses}std.debug.print("done",.{});}`;
-  const result = traceProgram('zig', source, source);
-  expect(result.stderr).toBe('done');
-  expect(result.uncaughtException).toBeUndefined();
-  expect(result.traceItems.length).toBeGreaterThan(100);
-  expect(result.traceItems.at(-1)?.referenceVars['…']).toMatchObject({ kind: 'value', value: '…', verbatim: true });
-  expect(JSON.stringify(result.traceItems).length).toBeLessThan(10_000_000);
+  expect(() => traceProgram('zig', source, source)).toThrow(new ExecutionLimitError('trace'));
 });
 
-test('oversized numeric preview attempts consume the shared trace allowance', () => {
+test('oversized numeric preview work reports a trace limit', () => {
   const source = `pub fn main()void{const x:u65535=1<<65534;for(0..100)|_|{_=x;}}`;
-  const result = traceProgram('zig', source, source);
-  expect(result.uncaughtException).toBeUndefined();
-  expect(result.traceItems.length).toBeGreaterThan(100);
-  expect(result.traceItems.at(-1)?.referenceVars['…']).toMatchObject({ kind: 'value', value: '…', verbatim: true });
-  expect(result.finalVars).not.toHaveProperty('x');
+  expect(() => traceProgram('zig', source, source)).toThrow(new ExecutionLimitError('trace'));
 });
 
 test.each([
@@ -576,4 +568,22 @@ test('repeated error-union scalar captures retain binding steps', () => {
   const source = `pub fn main()void{\nfor([_]error{Bad}!u8{1,1})|x|{\n_=x catch unreachable;\n}\n}`;
   const result = traceProgram('zig', source, source);
   expect(result.traceItems.map((item) => item.line)).toEqual([0, 2, 3, 2, 3]);
+});
+
+test.each([
+  [100, 1000],
+  [200, 500],
+])('repeated %s-element array snapshots retain final answers after %s updates', (length, count) => {
+  const source = `pub fn main()void{
+var a:[${length}]u32=@splat(0);
+var i:usize=0;
+while(i<${count}):(i+=1){a[i%${length}]+=1;}
+}`;
+  const result = traceProgram('zig', source, source);
+  expect(result.finalVars).toMatchObject({
+    a: Array.from({ length }, (_, i) => Math.floor(count / length) + (i < count % length ? 1 : 0)),
+    i: count,
+  });
+  expect(result.traceItems).toHaveLength(count * 2 + 3);
+  expect(result.traceItems.every((item) => item.referenceVars['…'] === undefined)).toBe(true);
 });

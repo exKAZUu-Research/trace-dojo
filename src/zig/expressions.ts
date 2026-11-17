@@ -686,12 +686,15 @@ export abstract class ExpressionCompiler extends SemaBase {
       const pointer = new Pointer({ slots: elements.slots }, elements.start + Number(index.value));
       return knownAt(child, pointer, expression);
     }
-    const evaluateObject =
-      type.kind === 'array' && object.place ? (frame: Frame) => object.place!.locate(frame).load() : object.eval;
+    const base = this.deferredLoad(object);
+    const evaluateObject = base.operand.eval;
     const access = this.elementAccess(type);
     const locate = (frame: Frame): { slots: Slots; position: number } => {
       const value = evaluateObject(frame);
-      return withHeldValues(frame, [value], () => access(value, index.eval(frame) as bigint));
+      return withHeldValues(frame, [value], () => {
+        const position = index.eval(frame) as bigint;
+        return access(base.read(value), position);
+      });
     };
     const staticSource = object.known
       ? object.value
@@ -832,15 +835,15 @@ export abstract class ExpressionCompiler extends SemaBase {
       this.checkMemoryOperand(operand, expression);
     const arrayType =
       type.kind === 'pointer' && type.size === 'one' && type.child.kind === 'array' ? type.child : undefined;
-    const headerAddress = !arrayType && base.place ? this.addressOf(base) : undefined;
+    const loaded = this.deferredLoad(base);
     const operands = [
-      headerAddress ?? base,
+      loaded.operand,
       start,
       ...(end ? [end] : []),
       ...(sentinelExpression ? [sentinelExpression] : []),
     ];
     const render = ([baseValue, first, last]: Value[]): Value => {
-      const value = headerAddress ? (baseValue as Pointer).load() : baseValue;
+      const value = loaded.read(baseValue);
       let target: Slots;
       let offset: number;
       let length: bigint;
@@ -879,6 +882,12 @@ export abstract class ExpressionCompiler extends SemaBase {
           : undefined,
       knownLength: base.known || base.knownLength !== undefined ? resultLength : undefined,
     };
+  }
+
+  private deferredLoad(value: TExpr): { operand: TExpr; read: (value: Value) => Value } {
+    return value.place
+      ? { operand: this.addressOf(value), read: (value) => (value as Pointer).load() }
+      : { operand: value, read: (value) => value };
   }
 
   private sentinelValue(expression: Expression, child: Type): Value {

@@ -6649,3 +6649,21 @@ test('concrete Unicode and assertion functions retain qualified function types',
     uncaughtException: undefined,
   });
 });
+
+test('indexed slice places load headers after index effects', () => {
+  const source = `const std=@import("std");fn reset(s:*[]u8,b:[]u8)usize{s.*=b;return 0;}pub fn main()void{var a=[_]u8{7};var b=[_]u8{8};var s:[]u8=&a;const n=s[reset(&s,&b)];s=&a;s[reset(&s,&b)]=9;std.debug.print("{} {} {}",.{n,a[0],b[0]});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: '8 7 9',
+    uncaughtException: undefined,
+  });
+});
+
+test('indexed array pointers retain the source location through index effects', () => {
+  const source = `const std=@import("std");fn reset(p:**[1]u8,b:*[1]u8)usize{p.*=b;return 0;}pub fn main()void{var a=[_]u8{7};var b=[_]u8{8};var p:*[1]u8=&a;p[reset(&p,&b)]=9;std.debug.print("{} {}",.{a[0],b[0]});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: '7 9',
+    uncaughtException: undefined,
+  });
+});

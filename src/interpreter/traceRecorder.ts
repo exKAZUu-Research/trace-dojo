@@ -47,14 +47,17 @@ export class TraceRecorder<F extends TracedFrame> implements StepRecorder {
     if (frames.some((frame) => this.frames.isAtomic(frame))) return false;
     if (this.traceItems.length >= MAX_TRACE_ITEMS) throw new ExecutionLimitError('trace');
     this.runtime.collectGarbage();
+    const current = frames.at(-1) as F;
+    const variables = this.frames.variablesOf(current);
     this.traceItems.push({
       line: row + 1,
       callLines: frames.slice(1).flatMap(({ callRow }) => (callRow === undefined ? [] : [callRow + 1])),
-      ...this.frames.variablesOf(frames.at(-1) as F),
+      ...variables,
       turtles: world.turtleTraces(),
       board: world.boardText(),
     });
-    for (const frame of frames) this.varsAtLastStep.set(frame, this.frames.variablesOf(frame).vars);
+    for (const frame of frames)
+      this.varsAtLastStep.set(frame, frame === current ? variables.vars : this.frames.variablesOf(frame).vars);
     return true;
   }
 
