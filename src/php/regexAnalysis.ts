@@ -6,6 +6,7 @@ import { UnsupportedFeatureError } from './unsupported';
 type Length = readonly [number, number];
 
 // code-gauge-allow functionNcss 46 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+// code-gauge-allow functionCognitiveComplexity 30 -- Keeps shared traversal state for captures, lookbehind and case folding in one AST pass.
 export function analyzeRegex(source: string, unicode: boolean, utf8: boolean, ignoreCase: boolean): Set<string> {
   let tree: AST.Pattern;
   try {
@@ -15,7 +16,8 @@ export function analyzeRegex(source: string, unicode: boolean, utf8: boolean, ig
       throw new UnsupportedFeatureError('解析器の制限を超える正規表現');
     throw error;
   }
-  const variableLookbehinds = new Set<AST.Assertion>();
+  const capturesAtEntry = new Map<AST.Assertion, number>();
+  let captureCount = 0;
   const references = new Set<string>();
   const contexts: boolean[] = [];
   const lengths = new Map<AST.Element, Length>();
@@ -44,31 +46,31 @@ export function analyzeRegex(source: string, unicode: boolean, utf8: boolean, ig
       }
     },
     onAssertionEnter(node) {
-      validateLookbehind(node, lengths);
-      if (node.kind === 'lookbehind') {
-        const bounds = node.alternatives.map((alternative) => alternativeLength(alternative, lengths, new Set()));
-        if (bounds.some(([min, max]) => min !== max || min !== bounds[0][0])) variableLookbehinds.add(node);
-      }
+      capturesAtEntry.set(node, captureCount);
     },
-    onCapturingGroupEnter(node) {
-      let parent: AST.Node | undefined = node.parent;
-      while (parent) {
-        if (parent.type === 'Assertion' && variableLookbehinds.has(parent))
-          throw new UnsupportedFeatureError('可変長後読みのキャプチャ');
-        parent = parent.parent ?? undefined;
-      }
+    onAssertionLeave(node) {
+      if (validateLookbehind(node, lengths) && captureCount !== capturesAtEntry.get(node))
+        throw new UnsupportedFeatureError('可変長後読みのキャプチャ');
+    },
+    onCapturingGroupEnter() {
+      captureCount++;
     },
   });
   return references;
 }
 
-function validateLookbehind(node: AST.Assertion, lengths: Map<AST.Element, Length>): void {
-  if (node.kind !== 'lookbehind') return;
+function validateLookbehind(node: AST.Assertion, lengths: Map<AST.Element, Length>): boolean {
+  if (node.kind !== 'lookbehind') return false;
+  let firstLength: number | undefined;
+  let variable = false;
   for (const alternative of node.alternatives) {
     const [min, max] = alternativeLength(alternative, lengths, new Set());
     if (!Number.isFinite(max) || max > 65_535 || (min !== max && max > 255))
       throw new UnsupportedFeatureError('長さの制限を超える後読み正規表現');
+    if (min !== max || (firstLength !== undefined && min !== firstLength)) variable = true;
+    firstLength ??= min;
   }
+  return variable;
 }
 
 function alternativeLength(node: AST.Alternative, cache: Map<AST.Element, Length>, active: Set<AST.Element>): Length {
