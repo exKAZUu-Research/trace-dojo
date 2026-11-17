@@ -1,0 +1,68 @@
+class A {
+  static t = 3;
+  static s = A.t + this.t;
+  static q: number;
+  static p = this.q;
+  static p2 = A.q;
+  static self: number = A.self;
+  static g = function (x = A.later) { return x; };
+  static later = 1;
+  static obj = { m() { return A.later2; }, get z() { return A.later2; } };
+  static later2 = 2;
+  static k = class { y = A.later3; static w = A.later3; };
+  static later3 = 3;
+  x: number = this.y;
+  y: number = this.x;
+  m = this.meth();
+  meth() { return this.y; }
+  gg = this.acc;
+  get acc() { return 1; }
+  static sacc = A.acc2;
+  static get acc2() { return 1; }
+  static setX = (A.t = 4);
+  static post = (A.z1 = 4);
+  static z1 = 0;
+}
+class P {
+  a = this.p;
+  constructor(public p: number) {}
+  b = this.p;
+  c = this.d.length;
+  d = "x";
+  e?: number;
+  f = this.e;
+  g!: number;
+  h = this.g;
+}
+class Q {
+  static {
+    Q.v = 1;
+  }
+  static v: number;
+  static w = this.v;
+}
+console.log(A.s, new P(1).b);
+class S3 {
+  static {
+    console.log(S3.t, this.t);
+  }
+  static t = 3;
+  static f = () => S3.t;
+  static g = function () { return S3.t; };
+  static h = S3.m();
+  static m() { return S3.t; }
+  static k = [S3.t].length;
+}
+class S5 {
+  static s = S5["t"];
+  static u = (S5).t;
+  static v = S5?.t;
+  static t = 3;
+  static w = typeof S5.zz;
+  static zz = 1;
+}
+class E5 {
+  static e = E5.t2;
+  static get t2() { return 1; }
+}
+console.log(S5.s, E5.e);

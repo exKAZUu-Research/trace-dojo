@@ -1,0 +1,44 @@
+class Animal {
+  name = "animal";
+  static kind = "k";
+  age!: number;
+  opt?: string;
+  constructor(public legs: number) {}
+  speak() { return "..."; }
+  get label() { return this.name; }
+  set label(v: string) { this.name = v; }
+  arrow = () => 1;
+  #secret = 1;
+  static sm() { return 1; }
+}
+class Dog extends Animal {
+  y = super.name;
+  describe() { return super.name + super.speak() + super.label; }
+  a() { return super.legs; }
+  b() { return super.age + (super.opt ?? ""); }
+  c() { return super.arrow(); }
+  static d() { return super.kind + super.sm(); }
+  static e = super.kind;
+  f() { super.name = "x"; }
+  g() { const { name } = super.constructor as any; return name; }
+  h() { return super["name"]; }
+}
+class Puppy extends Dog {
+  i() { return super.name + super.describe(); }
+}
+console.log(new Dog(4).describe(), new Puppy(4).i());
+abstract class Base {
+  private p = 1;
+  protected q = 2;
+  declare r: number;
+  abstract s: number;
+  abstract m(): number;
+}
+class D extends Base {
+  s = 1;
+  m() { return 1; }
+  a() { return super.p + super.q + super.r + super.s; }
+  b = () => super.q;
+  c() { return super.m(); }
+}
+console.log(new D().a());

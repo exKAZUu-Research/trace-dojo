@@ -311,7 +311,10 @@ export class AssignmentChecker {
       this.c.error(expression, 'オプショナルチェーン ?. を含む式には代入できません。');
       return errorType;
     }
-    const objectType = this.c.members.checkNonNullable(objectNode, this.c.expressions.check(objectNode));
+    const objectType =
+      objectNode.type === 'super'
+        ? this.c.classes.superType(expression)
+        : this.c.members.checkNonNullable(objectNode, this.c.expressions.check(objectNode));
     const properties = (objectType.kind === 'union' ? objectType.types : [objectType])
       .map((member) => this.c.propertyOf(member, propertyNode.text))
       .filter((property): property is Property => property !== undefined);

@@ -117,7 +117,9 @@ export function targetElementType(c: Checker, targets: ObjectType[], index: numb
   return unionOf(
     targets.map((member) => {
       const elements = member.tuple?.elements;
-      return elements?.[index] && !elements[index].rest ? elements[index].type : c.elementTypeOf(member);
+      return elements?.[index] && !elements[index].rest
+        ? c.relations.tupleElementTargetType(elements[index])
+        : c.elementTypeOf(member);
     })
   );
 }

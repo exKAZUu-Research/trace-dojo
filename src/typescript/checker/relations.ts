@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 442 -- Decides assignability and comparability for every kind of type, as TypeScript's checker does in one place.
+// code-gauge-allow-file fileNcss 446 -- Decides assignability and comparability for every kind of type, as TypeScript's checker does in one place.
 import type { Checker } from './checker';
 import { isUnit } from './flow';
 import { isNumericName } from './syntax';
@@ -42,17 +42,18 @@ export class Relations {
     return this.isRelated(a, b, 'comparable') || this.isRelated(b, a, 'comparable');
   }
 
-  isRelated(source: Type, target: Type, relation: Relation): boolean {
+  /** With `checkWeak` false, as for a member of an intersection target, skips the check of a weak target type. */
+  isRelated(source: Type, target: Type, relation: Relation, checkWeak = true): boolean {
     if (source === target) return true;
     this.c.budget.spend();
-    const key = `${relation}:${source.id}:${target.id}`;
+    const key = `${relation}${checkWeak ? '' : '-member'}:${source.id}:${target.id}`;
     const cached = this.cache.get(key);
     if (cached !== undefined) return cached;
     if (this.assumed.has(key) || this.assumed.size > 40) return true;
     this.assumed.add(key);
     let result: boolean;
     try {
-      result = this.structuredRelated(source, target, relation);
+      result = this.structuredRelated(source, target, relation, checkWeak);
     } finally {
       this.assumed.delete(key);
     }
@@ -61,19 +62,17 @@ export class Relations {
   }
 
   // code-gauge-allow functionCognitiveComplexity 29 -- Follows TypeScript's order of checks for each kind of type.
-  // code-gauge-allow functionNcss 33 -- Follows TypeScript's order of checks for each kind of type.
-  private structuredRelated(source: Type, target: Type, relation: Relation): boolean {
+  // code-gauge-allow functionNcss 35 -- Follows TypeScript's order of checks for each kind of type.
+  private structuredRelated(source: Type, target: Type, relation: Relation, checkWeak: boolean): boolean {
     const s = regularOf(source);
     const t = regularOf(target);
     const trivial = this.trivialRelation(s, t);
     if (trivial !== undefined) return trivial;
-    if (s.kind === 'union') {
-      return relation === 'comparable'
-        ? s.types.some((member) => this.isRelated(member, t, relation))
-        : s.types.every((member) => this.isRelated(member, t, relation));
-    }
+    if (s.kind === 'union') return this.unionSourceRelated(s, t, relation, checkWeak);
+    if (checkWeak && this.lacksWeakTypeProperty(s, t, relation)) return false;
     if (t.kind === 'union') return this.relatedToUnion(s, t, relation);
-    if (t.kind === 'intersection') return t.types.every((member) => this.isRelated(s, member, relation));
+    // TypeScript checks a weak intersection as a whole, so a member whose properties are all optional need not share one.
+    if (t.kind === 'intersection') return t.types.every((member) => this.isRelated(s, member, relation, false));
     if (s.kind === 'intersection') {
       if (s.types.some((member) => this.isRelated(member, t, relation))) return true;
       return t.kind === 'object' && this.objectRelated(s, t, relation);
@@ -99,6 +98,12 @@ export class Relations {
     }
     if (t.kind === 'indexedAccess' || t.kind === 'keyof' || t.kind === 'conditional') return false;
     return this.relatedToConcrete(s, t, relation);
+  }
+
+  private unionSourceRelated(s: UnionType, t: Type, relation: Relation, checkWeak: boolean): boolean {
+    return relation === 'comparable'
+      ? s.types.some((member) => this.isRelated(member, t, relation, checkWeak))
+      : s.types.every((member) => this.isRelated(member, t, relation, checkWeak));
   }
 
   /** The relation that holds whatever the types' structures are, if any. */
@@ -325,8 +330,7 @@ export class Relations {
       this.signaturesRelated(sourceStructure.callSignatures, targetStructure.callSignatures, relation) &&
       this.signaturesRelated(sourceStructure.constructSignatures, targetStructure.constructSignatures, relation) &&
       (!stringIndex || this.indexRelated(sourceStructure, source, stringIndex.type, false, relation)) &&
-      (!numberIndex || this.indexRelated(sourceStructure, source, numberIndex.type, true, relation)) &&
-      !this.lacksWeakTypeProperty(sourceStructure, targetStructure, relation)
+      (!numberIndex || this.indexRelated(sourceStructure, source, numberIndex.type, true, relation))
     );
   }
 
@@ -397,17 +401,23 @@ export class Relations {
     return true;
   }
 
-  /** Whether the target is a weak type, whose properties are all optional, and the source shares none of them. */
-  private lacksWeakTypeProperty(sourceStructure: Structure, targetStructure: Structure, relation: Relation): boolean {
-    return (
-      relation === 'assignable' &&
-      targetStructure.properties.size > 0 &&
-      [...targetStructure.properties.values()].every((property) => property.optional) &&
-      targetStructure.callSignatures.length === 0 &&
-      !targetStructure.stringIndex &&
-      !targetStructure.numberIndex &&
-      (sourceStructure.properties.size > 0 || sourceStructure.callSignatures.length > 0) &&
-      ![...targetStructure.properties.keys()].some((name) => sourceStructure.properties.has(name))
+  /**
+   * Whether the target is a weak type, whose properties are all optional (an intersection when every member is), and
+   * the source has properties but shares none of them.
+   */
+  private lacksWeakTypeProperty(source: Type, target: Type, relation: Relation): boolean {
+    if (relation !== 'assignable' || !isWeakCheckedSource(source)) return false;
+    // An intersection drops its empty object members, as `Config & {}` is `Config`.
+    const members =
+      target.kind === 'intersection' ? target.types.filter((member) => !this.isEmptyObjectType(member)) : [target];
+    if (members.length === 0 || !members.every((member) => member.kind === 'object' && member.objectKind !== 'mapped'))
+      return false;
+    const targetStructures = members.map((member) => this.c.structureOf(member));
+    if (!targetStructures.every((structure) => isWeakStructure(structure))) return false;
+    const sourceStructure = this.c.structureOf(source);
+    if (sourceStructure.properties.size === 0 && sourceStructure.callSignatures.length === 0) return false;
+    return !targetStructures.some((structure) =>
+      [...structure.properties.keys()].some((name) => sourceStructure.properties.has(name))
     );
   }
 
@@ -486,6 +496,12 @@ export class Relations {
     });
   }
 
+  /** The type a tuple element accepts: a rest element's elements, or `undefined` too when the element is optional. */
+  tupleElementTargetType(element: TupleElement): Type {
+    if (element.rest) return this.c.restElementType(element.type);
+    return element.optional ? unionOf([element.type, undefinedType]) : element.type;
+  }
+
   private tupleElementRelated(element: TupleElement, expected: TupleElement, relation: Relation): boolean {
     if ((element.rest && !expected.rest) || (isRequired(expected) && !isRequired(element))) return false;
     // A missing optional element reads as `undefined` unless the target's element may be missing too.
@@ -494,8 +510,7 @@ export class Relations {
       : element.optional && !expected.optional
         ? unionOf([element.type, undefinedType])
         : element.type;
-    const targetType = expected.rest ? this.c.restElementType(expected.type) : expected.type;
-    return this.isRelated(sourceType, targetType, relation);
+    return this.isRelated(sourceType, this.tupleElementTargetType(expected), relation);
   }
 
   private signaturesRelated(sources: Signature[], targets: Signature[], relation: Relation): boolean {
@@ -660,4 +675,20 @@ function templatePlaceholderTexts(value: string, texts: readonly string[]): stri
 
 function isRequired(element: TupleElement): boolean {
   return !element.optional && !element.rest;
+}
+
+/** Whether a source is checked against a weak target: an object, an intersection, or a primitive, as in TypeScript. */
+function isWeakCheckedSource(source: Type): boolean {
+  if (source.kind === 'intrinsic') return !['object', 'null', 'undefined', 'void', 'unknown'].includes(source.name);
+  return ['object', 'intersection', 'literal', 'templateLiteral', 'stringMapping'].includes(source.kind);
+}
+
+function isWeakStructure(structure: Structure): boolean {
+  return (
+    structure.properties.size > 0 &&
+    [...structure.properties.values()].every((property) => property.optional) &&
+    structure.callSignatures.length === 0 &&
+    !structure.stringIndex &&
+    !structure.numberIndex
+  );
 }

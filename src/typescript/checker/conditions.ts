@@ -385,7 +385,11 @@ export class ConditionChecker {
     if (name === undefined || (!object && !source?.type)) return;
     const objectType = source?.type ?? this.c.expressions.checkReferenceSilently(object!);
     const nonNull = this.c.relations.removeNullish(objectType);
-    if (!this.c.flow.isDiscriminant(nonNull, name) && !this.c.relations.isNullable(objectType)) return;
+    // As in TypeScript, the declared type decides whether the property is a discriminant, so testing the last
+    // remaining member of a union still narrows it.
+    const declared = source ? nonNull : this.c.relations.removeNullish(this.unnarrowedType(object!));
+    const discriminantSource = declared.kind === 'union' || nonNull.kind === 'union' ? declared : nonNull;
+    if (!this.c.flow.isDiscriminant(discriminantSource, name) && !this.c.relations.isNullable(objectType)) return;
     const apply = (state: State, assumeTrue: boolean): void => {
       if (!state) return;
       const outer = this.c.flow.current;
@@ -405,6 +409,19 @@ export class ConditionChecker {
     };
     apply(whenTrue, true);
     apply(whenFalse, false);
+  }
+
+  /** The type of a reference without its own narrowing in the current flow. */
+  private unnarrowedType(reference: TreeNode): Type {
+    const key = this.c.flow.referenceKey(reference);
+    const state = this.c.flow.current?.clone();
+    if (!key || !state) return this.c.expressions.checkReferenceSilently(reference);
+    state.entries.delete(key);
+    let type: Type = anyType;
+    this.c.flow.from(state, () => {
+      type = this.c.expressions.checkReferenceSilently(reference);
+    });
+    return type;
   }
 
   private narrowDestructuredSiblings(reference: TreeNode, objectType: Type): void {

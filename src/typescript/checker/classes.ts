@@ -3,6 +3,7 @@ import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import type { Checker } from './checker';
 import { FlowState, type State } from './flow';
+import { isUsedBeforeInitialization } from './initializationOrder';
 import type { Sym } from './scopes';
 import { hasToken, named } from './syntax';
 import {
@@ -625,6 +626,20 @@ export class ClassChecker {
   }
 
   superProperty(node: TreeNode, propertyNode: TreeNode): Type {
+    const target = this.superType(node);
+    return target === errorType
+      ? errorType
+      : this.c.members.propertyAccess(
+          node,
+          node.childForFieldName('object') as TreeNode,
+          propertyNode,
+          target,
+          propertyNode.text
+        );
+  }
+
+  /** The type `super.<name>` at `node` reads a member of: the base instance type, or the base class in static code. */
+  superType(node: TreeNode): Type {
     const classNode = this.enclosingClass(node);
     const base = classNode ? this.baseInstanceType(classNode) : undefined;
     if (!classNode || !base) {
@@ -632,39 +647,12 @@ export class ClassChecker {
       return errorType;
     }
     const owner = this.thisOwner(node);
-    const isStatic = owner !== undefined && hasToken(owner, 'static');
-    const target = isStatic ? (this.baseStaticType(classNode) ?? anyType) : base;
-    const property = this.c.propertyOf(target, propertyNode.text);
-    if (property?.isAbstract && property.isMethod) {
-      this.c.error(propertyNode, `抽象メソッド '${propertyNode.text}' は、'super' からは使えません。`);
-    }
-    return this.c.members.propertyAccess(
-      node,
-      node.childForFieldName('object') as TreeNode,
-      propertyNode,
-      target,
-      propertyNode.text
-    );
+    return owner !== undefined && hasToken(owner, 'static') ? (this.baseStaticType(classNode) ?? anyType) : base;
   }
 
-  /** Reports, in a field initializer, a field of the same class that is initialized after it. */
+  /** Reports, in a field initializer or a static block, a class member read before it is initialized. */
   checkInitializedBefore(node: TreeNode, objectNode: TreeNode, property: Property): void {
-    if (objectNode.type !== 'this' || !property.declaringClass || !property.declaration) return;
-    const owner = this.thisOwner(node);
-    if (owner?.type !== 'field_definition' || hasToken(owner, 'static')) return;
-    if (owner.parent?.parent?.id !== property.declaringClass.declaration.id) return;
-    // A function in the initializer runs later, when it is called.
-    for (let current = node.parent; current && current.id !== owner.id; current = current.parent) {
-      if (current.type === 'arrow_function') return;
-    }
-    const declaration = property.declaration;
-    // A field initializes in declaration order, a field without an initializer only in the constructor, after them.
-    const later =
-      declaration.type === 'field_definition'
-        ? declaration.startIndex > owner.startIndex ||
-          (!declaration.childForFieldName('value') && !hasToken(declaration, '!') && !hasToken(declaration, '?'))
-        : declaration.type === 'required_parameter' || declaration.type === 'optional_parameter';
-    if (later)
+    if (isUsedBeforeInitialization(node, objectNode, property))
       this.c.error(
         node.childForFieldName('property') ?? node,
         `プロパティ '${property.name}' は、初期化される前に使われています。`
@@ -718,7 +706,9 @@ export class ClassChecker {
     property: Property
   ): void {
     void objectType;
-    if (property.visibility === 'public' || !property.declaringClass) return;
+    if (!property.declaringClass || (objectNode.type === 'super' && this.reportSuperAccess(propertyNode, property)))
+      return;
+    if (property.visibility === 'public') return;
     const enclosing = this.enclosingClass(node);
     const enclosingInfo = enclosing ? this.classInfoOfNode(enclosing) : undefined;
     const declaring = property.declaringClass;
@@ -752,6 +742,18 @@ export class ClassChecker {
         `プロパティ '${property.name}' は protected なので、クラス '${enclosingInfo.name}' のインスタンスからしか使えません。`
       );
     }
+  }
+
+  /** Reports, through `super`, an abstract member or an instance field, which lives on the instance instead of the prototype. */
+  private reportSuperAccess(propertyNode: TreeNode, property: Property): boolean {
+    if (property.isAbstract) {
+      this.c.error(propertyNode, `抽象メソッド '${property.name}' は、'super' からは使えません。`);
+      return true;
+    }
+    const declaration = property.declaration;
+    if (declaration?.type !== 'field_definition' || hasToken(declaration, 'static')) return false;
+    this.c.error(propertyNode, `親クラスのフィールド '${property.name}' は、子クラスから 'super' では使えません。`);
+    return true;
   }
 
   private classInfoOfType(type: Type): ClassInfo | undefined {
