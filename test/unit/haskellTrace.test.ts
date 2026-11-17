@@ -859,3 +859,20 @@ main = repeatEach print [1,1 :: Int]`;
     [3, 1],
   ]);
 });
+
+test.each(['', 'i+200'])('fresh lazy lists have bounded cumulative previews: %s', (end) => {
+  const source = `import Control.Monad
+main=forM_ [1..1000::Int] $ \\i -> do
+ let a=[i..${end}]; b=[i*2..${end ? 'i*2+200' : ''}]; c=[i*3..${end ? 'i*3+200' : ''}] :: [Int]
+ print (head a + head b + head c)`;
+  const recording = traceProgram('haskell', source, source);
+  expect(recording.uncaughtException).toBeUndefined();
+  expect(recording.stdout).toBe(Array.from({ length: 1000 }, (_, index) => `${(index + 1) * 6}\n`).join(''));
+  expect(recording.traceItems).toHaveLength(3001);
+  expect(recording.traceItems.at(-1)?.vars.i).toBe(1000);
+  expect(recording.traceItems.at(-1)?.referenceVars).toMatchObject({
+    a: { kind: 'value', value: '…' },
+    b: { kind: 'value', value: '…' },
+    c: { kind: 'value', value: '…' },
+  });
+});

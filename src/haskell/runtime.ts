@@ -64,6 +64,10 @@ export class Runtime implements TracedRuntime<TraceFrame> {
   private readonly dictCache = new Map<InstanceInfo, Dict>();
   private allocated = 0;
   private gcMilliseconds = 0;
+  private displayOperations = LIMITS.maxOperations;
+  private displayMilliseconds = 0;
+  private displayDeadline = 0;
+  private previewing = false;
 
   constructor(input?: ProgramInput) {
     this.io = new ProgramIO(this.budget, input);
@@ -74,6 +78,10 @@ export class Runtime implements TracedRuntime<TraceFrame> {
     if (this.displayRemaining !== undefined) {
       this.displayRemaining -= cost;
       if (this.displayRemaining < 0) throw new DisplayAbort();
+      if (this.previewing) {
+        this.displayOperations -= cost;
+        if (this.displayOperations < 0 || performance.now() > this.displayDeadline) throw new DisplayAbort();
+      }
     } else this.budget.spend(cost);
   }
 
@@ -87,6 +95,20 @@ export class Runtime implements TracedRuntime<TraceFrame> {
       return this.budget.excludingTime(() => withTypeWorkBudget(() => this.spend(), run));
     } finally {
       this.displayRemaining = undefined;
+    }
+  }
+
+  withPreviewBudget<T>(run: () => T): T {
+    if (this.previewing) return run();
+    if (this.displayOperations <= 0 || this.displayMilliseconds >= LIMITS.maxMilliseconds) throw new DisplayAbort();
+    const started = performance.now();
+    this.displayDeadline = started + LIMITS.maxMilliseconds - this.displayMilliseconds;
+    this.previewing = true;
+    try {
+      return run();
+    } finally {
+      this.displayMilliseconds += performance.now() - started;
+      this.previewing = false;
     }
   }
 

@@ -99,7 +99,7 @@ function addSelfFields(
       const forced = forceForDisplay(runtime, field);
       return forced === undefined
         ? NOT_SCALAR
-        : scalarOf(runtime, forced, slotDisplayType(field, constructorFieldType(self.con, entry.type, index)), 0);
+        : scalarForDisplay(runtime, forced, slotDisplayType(field, constructorFieldType(self.con, entry.type, index)));
     });
     if (scalar !== undefined && scalar !== NOT_SCALAR) variables.vars[`this.${self.con.fieldNames[index]}`] = scalar;
   }
@@ -120,10 +120,12 @@ function displayAttempt<T>(runtime: Runtime, work: () => T): T | undefined {
 /** Evaluates a value for display, leaving it unevaluated when that fails or takes too long. */
 function forceForDisplay(runtime: Runtime, slot: Slot): Value | undefined {
   slot = untypedSlot(slot);
+  const ready = peek(slot);
+  if (ready !== undefined) return ready;
   if (slot instanceof Thunk && slot.state !== 'done' && runtime.displayAborted.has(slot)) return;
   return runtime.withDisplayBudget(DISPLAY_OPERATIONS, () => {
     try {
-      return runtime.machine.force(slot);
+      return runtime.withPreviewBudget(() => runtime.machine.force(slot));
     } catch (error) {
       if (error instanceof DisplayAbort && slot instanceof Thunk) runtime.displayAborted.add(slot);
       if (error instanceof HaskellException || error instanceof DisplayAbort) return;
@@ -137,17 +139,27 @@ const NOT_SCALAR = Symbol('notScalar');
 
 function addVariable(runtime: Runtime, variables: VariableDisplay, name: string, value: Value, type: Type): void {
   if (isHidden(value, type)) return;
-  const scalar = scalarOf(runtime, value, type, 0);
+  const scalar = scalarForDisplay(runtime, value, type);
   if (scalar !== NOT_SCALAR) variables.vars[name] = scalar;
   if (!variables.referenceVars) return;
   // Lists also appear as references so that learners can expand their elements.
   if (scalar !== NOT_SCALAR && !isListValue(value, type)) return;
   try {
-    const node = new DisplayNodes(runtime).build(value, type, 0);
+    const node = runtime.withPreviewBudget(() => new DisplayNodes(runtime).build(value, type, 0));
     if (node) variables.referenceVars[name] = node;
   } catch (error) {
     if (!(error instanceof DisplayAbort)) throw error;
     variables.referenceVars[name] = { kind: 'value', value: '…' };
+  }
+}
+
+function scalarForDisplay(runtime: Runtime, value: Value, type: Type): ReturnType<typeof scalarOf> {
+  if (!(value instanceof ConValue) || value.fields.length === 0) return scalarOf(runtime, value, type, 0);
+  try {
+    return runtime.withPreviewBudget(() => scalarOf(runtime, value, type, 0));
+  } catch (error) {
+    if (error instanceof DisplayAbort) return NOT_SCALAR;
+    throw error;
   }
 }
 
