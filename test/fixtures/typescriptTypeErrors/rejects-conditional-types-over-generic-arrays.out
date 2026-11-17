@@ -1,0 +1,10 @@
+(3,44): error TS2322: Type 'number' is not assignable to type 'T'.
+  'T' could be instantiated with an arbitrary type which could be unrelated to 'number'.
+(6,38): error TS2322: Type '"no"' is not assignable to type '"yes"'.
+(8,53): error TS2322: Type '1' is not assignable to type 'IsStr<T[]>'.
+(9,38): error TS2322: Type '2' is not assignable to type 'IsStr<T[]>'.
+(12,39): error TS2322: Type '1' is not assignable to type '2'.
+(14,36): error TS2322: Type 'T[][]' is not assignable to type 'T[]'.
+  Type 'T[]' is not assignable to type 'T'.
+    'T' could be instantiated with an arbitrary type which could be unrelated to 'T[]'.
+(18,55): error TS2322: Type '1' is not assignable to type '[T] extends [string] ? 1 : 2'.
