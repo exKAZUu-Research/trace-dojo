@@ -117,7 +117,8 @@ export class Expandos {
     const key = this.c.flow.referenceKey(node);
     if (!key || key !== this.c.flow.referenceKey(assignments[0].childForFieldName('left') as TreeNode)) return;
     if (controlFlowContainer(node).id !== controlFlowContainer(assignments[0]).id) return;
-    if (assignments.some((assignment) => hasRunBefore(assignment.parent as TreeNode, node))) return;
+    const statements = new Set(assignments.map((assignment) => (assignment.parent as TreeNode).id));
+    if (assignedBefore(node, statements, controlFlowContainer(node))) return;
     this.c.error(propertyNode, `プロパティ '${property.name}' は、代入される前に使われています。`);
   }
 }
@@ -137,16 +138,49 @@ function controlFlowContainer(node: TreeNode): TreeNode {
   return current;
 }
 
-/** Whether a statement has run whenever a later node runs: it precedes the node, nested only in plain blocks. */
-function hasRunBefore(statement: TreeNode, node: TreeNode): boolean {
-  if (statement.endIndex > node.startIndex) return false;
-  let container = statement.parent as TreeNode;
-  while (container.endIndex < node.endIndex) {
-    if (container.type !== 'statement_block' || !['program', 'statement_block'].includes(container.parent?.type ?? ''))
-      return false;
-    container = container.parent as TreeNode;
+/**
+ * Whether one of the assignment statements has run on every path to a node: a statement before it in a block that
+ * holds it, within its control flow container, definitely runs one.
+ */
+function assignedBefore(node: TreeNode, statements: Set<number>, container: TreeNode): boolean {
+  for (let current = node; current.parent && current.id !== container.id; current = current.parent) {
+    const { parent } = current;
+    if (parent.type !== 'statement_block' && parent.type !== 'program') continue;
+    for (const sibling of named(parent)) {
+      if (sibling.startIndex >= current.startIndex) break;
+      if (definitelyRuns(sibling, statements)) return true;
+    }
   }
-  return true;
+  return false;
+}
+
+/** Whether running a statement runs one of the assignment statements on every path that completes it. */
+function definitelyRuns(statement: TreeNode, statements: Set<number>): boolean {
+  if (statements.has(statement.id)) return true;
+  const runs = (child: TreeNode | null): boolean => child !== null && definitelyRuns(child, statements);
+  switch (statement.type) {
+    case 'statement_block': {
+      return named(statement).some((child) => definitelyRuns(child, statements));
+    }
+    case 'else_clause': {
+      return named(statement).some((child) => definitelyRuns(child, statements));
+    }
+    case 'if_statement': {
+      return runs(statement.childForFieldName('consequence')) && runs(statement.childForFieldName('alternative'));
+    }
+    case 'try_statement': {
+      const handler = statement.childForFieldName('handler');
+      const finalizer = statement.childForFieldName('finalizer');
+      const body = runs(statement.childForFieldName('body'));
+      return (
+        (body && (handler === null || runs(handler.childForFieldName('body')))) ||
+        (finalizer !== null && runs(finalizer.childForFieldName('body')))
+      );
+    }
+    default: {
+      return false;
+    }
+  }
 }
 
 export function isImmediatelyInvoked(node: TreeNode): boolean {
