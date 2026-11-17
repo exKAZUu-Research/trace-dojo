@@ -1,8 +1,8 @@
-// code-gauge-allow-file fileNcss 454 -- Resolves calls as TypeScript does: callees, overloads, inference, and the effects of calls on the flow.
+// code-gauge-allow-file fileNcss 459 -- Resolves calls as TypeScript does: callees, overloads, inference, and the effects of calls on the flow.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import { unsupportedMessage } from '../unsupported';
-import { CallArity } from './callArity';
+import { CallArity, tupleTypeAt } from './callArity';
 import type { Checker, Mapper } from './checker';
 import { InferencePriority, type InferenceRun, newInferenceRun } from './inference';
 import { named, skipParentheses, stringValue } from './syntax';
@@ -16,7 +16,6 @@ import {
   numberType,
   type Parameter,
   type Signature,
-  type TupleElement,
   type Type,
   type TypeParameter,
   undefinedType,
@@ -780,14 +779,4 @@ function receiverObject(callee: TreeNode): TreeNode | undefined {
   const expression = skipParentheses(callee);
   if (expression.type !== 'member_expression' && expression.type !== 'subscript_expression') return undefined;
   return expression.childForFieldName('object') ?? undefined;
-}
-
-/** The type the argument at an offset into a rest parameter of a tuple type takes, counting its trailing elements from the end. */
-function tupleTypeAt(c: Checker, elements: TupleElement[], offset: number): Type | undefined {
-  const restIndex = elements.findIndex((element) => element.rest);
-  if (restIndex === -1 || offset < restIndex) {
-    const element = elements[offset];
-    return element && (element.optional ? unionOf([element.type, undefinedType]) : element.type);
-  }
-  return c.restElementType(elements[restIndex].type);
 }

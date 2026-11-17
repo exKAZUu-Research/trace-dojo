@@ -2,7 +2,7 @@ import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import type { Checker } from './checker';
 import { named } from './syntax';
-import { isIntrinsic, type Signature, type Type } from './types';
+import { isIntrinsic, type Signature, type TupleElement, type Type, undefinedType, unionOf } from './types';
 
 /** Counts the arguments of a call against the parameters of a signature, and reports when they do not fit. */
 export class CallArity {
@@ -82,4 +82,17 @@ export class CallArity {
     const at = excess ?? (callee.type === 'member_expression' ? (callee.childForFieldName('property') ?? node) : node);
     this.c.error(at, message);
   }
+}
+
+/**
+ * The type an argument passed at an offset into a rest parameter of a tuple type takes: the element at that position,
+ * or the rest element's element type at or after a rest element.
+ */
+export function tupleTypeAt(c: Checker, elements: TupleElement[], offset: number): Type | undefined {
+  const restIndex = elements.findIndex((element) => element.rest);
+  if (restIndex === -1 || offset < restIndex) {
+    const element = elements[offset];
+    return element && (element.optional ? unionOf([element.type, undefinedType]) : element.type);
+  }
+  return c.restElementType(elements[restIndex].type);
 }
