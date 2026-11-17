@@ -249,7 +249,20 @@ class LibraryCompiler {
       assertPublicExports(name, exports);
       modules.set(name, { name, exports, instances: [] });
     }
+    this.markConstructorVisibility(modules);
     return modules;
+  }
+
+  private markConstructorVisibility(modules: Map<string, CompiledModuleInfo>): void {
+    const exported = new Set([...modules.values()].flatMap((module) => [...module.exports.values.values()]));
+    for (const module of this.internal.values()) {
+      for (const entry of module.exports.types.values()) {
+        if (entry.entity.kind !== 'type') continue;
+        for (const con of entry.entity.entity.cons) {
+          if (!exported.has(con.entity)) con.isLibraryPrivate = true;
+        }
+      }
+    }
   }
 
   private exportValues(exports: ExportTable, from: string, names: string[], moduleName: string): void {

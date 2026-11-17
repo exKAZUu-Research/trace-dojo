@@ -217,7 +217,7 @@ function traceFloat(value: number, type: Type): number {
   return Math.sign(value) * Number(`${digits.join('')}e${exponent - digits.length}`);
 }
 
-// code-gauge-allow functionCognitiveComplexity 28 -- One branch per kind of value shown as a scalar.
+// code-gauge-allow functionCognitiveComplexity 29 -- One branch per kind of value shown as a scalar.
 // code-gauge-allow functionNcss 38 -- Scalar formatting handles primitive values and library abstract values together.
 function scalarOf(runtime: Runtime, value: Value, type: Type, depth: number): Scalar | typeof NOT_SCALAR {
   runtime.spend();
@@ -249,7 +249,7 @@ function scalarOf(runtime: Runtime, value: Value, type: Type, depth: number): Sc
   }
   if (value.con === UNIT_CON || (value.con.type.module === 'Base' && value.con.type.name === 'Maybe'))
     return NOT_SCALAR;
-  if (value.fields.length === 0) return value.con.name;
+  if (value.fields.length === 0 && !value.con.isLibraryPrivate) return value.con.name;
   return NOT_SCALAR;
 }
 
@@ -278,7 +278,7 @@ class DisplayNodes {
     }
   }
 
-  // code-gauge-allow functionCognitiveComplexity 25 -- One branch per kind of value shown as a node.
+  // code-gauge-allow functionCognitiveComplexity 27 -- One branch per kind of value shown as a node.
   // code-gauge-allow functionNcss 34 -- Node formatting dispatches on each supported value representation.
   private nodeOf(value: Value, type: Type, depth: number): DisplayNode | undefined {
     if (depth > 20) return { kind: 'value', value: '…' };
@@ -308,7 +308,8 @@ class DisplayNodes {
       const inner = forceForDisplay(this.runtime, value.fields[0]);
       return inner === undefined ? undefined : this.build(inner, elementType(type, 0), depth + 1);
     }
-    if (value.fields.length === 0) return { kind: 'value', value: con.name };
+    if (value.fields.length === 0)
+      return con.isLibraryPrivate ? { kind: 'object', entries: {} } : { kind: 'value', value: con.name };
     return this.dataNodeOf(value, type, depth);
   }
 

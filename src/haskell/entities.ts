@@ -41,6 +41,7 @@ export interface ConInfo {
   /** The positions of the fields that constructing a value evaluates first, in order. */
   strictFields?: number[];
   isNewtype?: boolean;
+  isLibraryPrivate?: true;
   span?: Span;
 }
 

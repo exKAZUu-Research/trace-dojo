@@ -484,3 +484,49 @@ test('Maybe and unit preserve their abstract views inside and outside lists', ()
   expect(result.traceItems.at(-1)?.referenceVars.m).toEqual({ kind: 'value', value: null });
   expect(result.traceItems.at(-1)?.referenceVars).not.toHaveProperty('u');
 });
+
+test('opaque handles preserve public output without exposing private constructor answers', () => {
+  const source = `import System.IO
+main=do
+ let out=stdout
+ let err=stderr
+ hPutStrLn out "visible"
+ hPutStrLn err "hidden"
+ print out
+ print err`;
+  const result = traceProgram('haskell', source, source);
+  expect(result.stdout).toBe('visible\n{handle: <stdout>}\n{handle: <stderr>}\n');
+  expect(result.finalVars).toEqual({});
+  expect(result.traceItems.at(-1)?.vars).toEqual({});
+  expect(result.traceItems.at(-1)?.referenceVars).toEqual({
+    out: { kind: 'object', entries: {} },
+    err: { kind: 'object', entries: {} },
+  });
+});
+
+test('opaque handle loops preserve reference-only binding steps', () => {
+  const source = `import System.IO
+import Control.Monad
+main=forM_ [stdout,stdout,stderr] $ \\out->do
+ print(1::Int)`;
+  const result = traceProgram('haskell', source, source);
+  expect(result.stdout).toBe('1\n1\n1\n');
+  expect(result.traceItems.map(({ line }) => line)).toEqual([0, 4, 4, 4]);
+  expect(result.traceItems.at(-1)?.vars).toEqual({});
+});
+
+test('opaque handles remain references inside lists and this fields', () => {
+  const source = `import System.IO
+data C=C {sink::Handle}
+main=do
+ let this=C stdout
+ let handles=[stderr]
+ print(1::Int)`;
+  const result = traceProgram('haskell', source, source);
+  expect(result.stdout).toBe('1\n');
+  expect(result.finalVars).toEqual({});
+  expect(result.traceItems.at(-1)?.referenceVars).toMatchObject({
+    this: { kind: 'object', entries: { sink: { kind: 'object', entries: {} } } },
+    handles: { kind: 'array', entries: { 0: { kind: 'object', entries: {} } } },
+  });
+});
