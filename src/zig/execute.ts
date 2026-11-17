@@ -32,8 +32,13 @@ export function executeZigProgram(source: string, input?: ProgramInput): Program
  * @param onEnd Receives `main`'s frame when it returns, while the frame still holds its variables.
  */
 export function runProgram(runtime: Runtime, program: CompiledProgram, onEnd?: (frame: Frame) => void): ProgramRun {
+  runtime.bufferMemory = program.bufferMemory;
   return withMemoryAccounting(
-    { spend: (cost) => runtime.spend(cost), reserve: (count) => runtime.reserveStorage(count) },
+    {
+      space: program.bufferMemory,
+      spend: (cost) => runtime.spend(cost),
+      reserve: (count) => runtime.reserveStorage(count),
+    },
     () => executeMain(runtime, program, onEnd)
   );
 }

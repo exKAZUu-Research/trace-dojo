@@ -31,16 +31,12 @@ import {
   Pointer,
   type Slice,
   type Slots,
-  Some,
   storeInto,
   type Value,
   ZArray,
-  zeroArrayElement,
   ZStruct,
-  ZUnion,
 } from '../values';
 import { WeakValueMap } from '../weakValueMap';
-import { equalValues } from './common';
 import { autoHashBytes, hasPhysicalHashLayout, wyhash } from './hashing';
 import {
   ALLOCATOR,
@@ -60,6 +56,7 @@ import {
   nativeStateCall,
   nativeStruct,
 } from './native';
+import { validateEquality, valuesEqual } from './valueEquality';
 
 type KeyKind = 'auto' | 'string';
 
@@ -98,21 +95,12 @@ function hashOf(frame: Frame, key: Value, keyType: Type, kind: KeyKind): bigint 
   return wyhash(0n, bytes);
 }
 
-// code-gauge-allow functionCognitiveComplexity 17 -- Compares each supported representation with the same runtime budget.
-function keysEqual(frame: Frame, a: Value, b: Value, kind: KeyKind): boolean {
-  frame.runtime.spend();
-  if (kind === 'string') return stringKeysEqual(frame, a as Slice, b as Slice);
-  if (a instanceof ZStruct && b instanceof ZStruct) {
-    if (a.slots.length !== b.slots.length) return false;
-    for (let index = 0; index < a.slots.length; index++)
-      if (!keysEqual(frame, a.slots[index], b.slots[index], 'auto')) return false;
-    return true;
+function keysEqual(frame: Frame, a: Value, b: Value, type: Type, kind: KeyKind): boolean {
+  if (kind === 'string') {
+    frame.runtime.spend();
+    return stringKeysEqual(frame, a as Slice, b as Slice);
   }
-  if (a instanceof ZArray && b instanceof ZArray) return arrayKeysEqual(frame, a, b);
-  if (a instanceof ZUnion && b instanceof ZUnion)
-    return a.tag === b.tag && keysEqual(frame, a.slots[0], b.slots[0], 'auto');
-  if (a instanceof Some && b instanceof Some) return keysEqual(frame, a.value, b.value, 'auto');
-  return equalValues(a, b);
+  return valuesEqual(type, a, b, () => frame.runtime.spend());
 }
 
 function stringKeysEqual(frame: Frame, x: Slice, y: Slice): boolean {
@@ -121,16 +109,6 @@ function stringKeysEqual(frame: Frame, x: Slice, y: Slice): boolean {
     frame.runtime.spend();
     if (x.get(index) !== y.get(index)) return false;
   }
-  return true;
-}
-
-function arrayKeysEqual(frame: Frame, a: ZArray, b: ZArray): boolean {
-  if (a.lengthValue !== b.lengthValue) return false;
-  const x = zeroArrayElement(a),
-    y = zeroArrayElement(b);
-  if (x && y) return keysEqual(frame, x.value, y.value, 'auto');
-  for (let index = 0; index < a.length; index++)
-    if (!keysEqual(frame, a.get(index), b.get(index), 'auto')) return false;
   return true;
 }
 
@@ -178,7 +156,8 @@ function getIndex(frame: Frame, state: MapState, key: Value, keyType: Type, kind
   let index = Number(hash & BigInt(mask));
   while (state.metadata[index] !== 0 && limit !== 0) {
     frame.runtime.spend();
-    if (state.metadata[index] === (0x80 | print) && keysEqual(frame, key, state.keys.slots[index], kind)) return index;
+    if (state.metadata[index] === (0x80 | print) && keysEqual(frame, key, state.keys.slots[index], keyType, kind))
+      return index;
     limit--;
     index = (index + 1) & mask;
   }
@@ -328,7 +307,7 @@ function getOrPut(
   while (state.metadata[index] !== 0 && limit !== 0) {
     frame.runtime.spend();
     if (state.metadata[index] === (0x80 | print)) {
-      if (keysEqual(frame, key, state.keys.slots[index], kind)) return { index, found: true };
+      if (keysEqual(frame, key, state.keys.slots[index], keyType, kind)) return { index, found: true };
     } else if (firstTombstone === state.capacity && state.metadata[index] === 1) {
       firstTombstone = index;
     }
@@ -461,7 +440,10 @@ function defineMembers(types: MapTypes, keyType: Type, valueType: Type, kind: Ke
     fnMember(`${map.namespace.name}.${name}`, (sema, call) => {
       sema.resolveStorage(keyType, call.span);
       sema.resolveStorage(valueType, call.span);
-      if (kind === 'auto' && options.args.includes(keyType)) validateAutoKey(sema, keyType, call.span);
+      if (kind === 'auto' && options.args.includes(keyType)) {
+        validateAutoKey(sema, keyType, call.span);
+        validateEquality(sema, keyType, call.span);
+      }
       const takesAllocator = options.allocates === true && !managed;
       const expected = takesAllocator ? [ALLOCATOR, ...options.args] : options.args;
       const args = compileArgs(sema, expectArgs(sema, call, expected.length, name), expected);

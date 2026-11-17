@@ -6178,3 +6178,86 @@ test.each(['A', '?A', '[1]A'])('shared by-value cycle queries stay within the de
   expect(result.status, result.stderr).toBe(0);
   expect(JSON.parse(result.stdout)).toMatchObject({ kind: 'limitExceeded' });
 });
+
+test.each(['void', 'struct{}', '[2]void'])('meta equality keeps large %s arrays virtual', (type) => {
+  const source = `const std=@import("std");pub fn main(init:std.process.Init)!void{const s=try init.gpa.alloc(${type},1000001);const a=s[0..1000001].*;std.debug.print("{}",.{std.meta.eql(a,a)});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: 'true',
+    uncaughtException: undefined,
+  });
+});
+
+test.each(['U', 'struct{u:U}', '[1]U', '?U'])('meta equality rejects recursively untagged %s values', (type) => {
+  const initializer =
+    type === 'U' ? '.{.a=7}' : type === 'struct{u:U}' ? '.{.u=.{.a=7}}' : type === '[1]U' ? '.{.{.a=7}}' : '.{.a=7}';
+  const source = `const std=@import("std");const U=union{a:u8,b:u8};pub fn main()void{const x:${type}=${initializer};std.debug.print("{}",.{std.meta.eql(x,x)});}`;
+  expect(executeProgram('zig', source)).toMatchObject({ kind: 'compileError' });
+});
+
+test('packed unions compare physical bits across active-field choices', () => {
+  const source = `const std=@import("std");const U=packed union{a:u8,b:u8};pub fn main()void{var x=U{.a=7};_=&x;const y=U{.b=7};const z=U{.a=8};std.debug.print("{} {} {} {}",.{x==y,x!=z,std.meta.eql(x,y),std.meta.eql(x,z)});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: 'true true true false',
+    uncaughtException: undefined,
+  });
+});
+
+test('packed equality preserves pointer identities across constants and allocator views', () => {
+  const source = `const std=@import("std");const U=packed union{p:*u8,q:*u8};pub fn main()!void{var a:u8=1;var b:u8=2;const x=U{.p=&a};const y=U{.q=&a};const z=U{.q=&b};var bytes:[64]u8=undefined;var f=std.heap.FixedBufferAllocator.init(&bytes);const p=try f.allocator().create(U);p.*=x;std.debug.print("{} {} {}",.{x==y,x==z,p.*==y});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: 'true false true',
+    uncaughtException: undefined,
+  });
+});
+
+test.each([3, 24])('packed equality ignores storage padding beyond %s bits', (bits) => {
+  const bytes = bits === 3 ? 'buffer[0]=250;' : 'buffer[0]=2;buffer[1]=0;buffer[2]=0;buffer[3]=255;';
+  const source = `const std=@import("std");const U=packed union{a:u${bits},b:u${bits}};pub fn main()!void{var buffer:[16]u8=undefined;var f=std.heap.FixedBufferAllocator.init(&buffer);const p=try f.allocator().create(U);${bytes}const x=U{.b=2};std.debug.print("{} {}",.{p.*==x,std.meta.eql(p.*,x)});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: 'true true',
+    uncaughtException: undefined,
+  });
+});
+
+test.each([false, true])('packed union map keys compare bits recursively: %s', (nested) => {
+  const type = nested ? 'struct{u:U}' : 'U';
+  const first = nested ? '.{.u=.{.a=7}}' : '.{.a=7}';
+  const second = nested ? '.{.u=.{.b=7}}' : '.{.b=7}';
+  const source = `const std=@import("std");const U=packed union{a:u8,b:u8};const K=${type};pub fn main(init:std.process.Init)!void{var m=std.AutoHashMap(K,u8).init(init.gpa);defer m.deinit();try m.put(${first},42);const k:K=${second};const found=m.get(k);try m.put(k,43);std.debug.print("{any} {} {}",.{found,m.get(k).?,m.count()});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: '42 43 1',
+    uncaughtException: undefined,
+  });
+});
+
+test('meta equality permits pointers and empty arrays of untagged unions', () => {
+  const source = `const std=@import("std");const U=union{a:u8,b:u8};pub fn main()void{const x=U{.a=7};const empty:[0]U=.{};std.debug.print("{} {}",.{std.meta.eql(&x,&x),std.meta.eql(empty,empty)});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: 'true true',
+    uncaughtException: undefined,
+  });
+});
+
+test('packed struct equality and map keys compare NaN bits', () => {
+  const source = `const std=@import("std");const S=packed struct{x:f32};pub fn main(init:std.process.Init)!void{const x=S{.x=std.math.nan(f32)};var m=std.AutoHashMap(S,u8).init(init.gpa);defer m.deinit();try m.put(x,1);std.debug.print("{} {} {any}",.{x==x,std.meta.eql(x,x),m.get(x)});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: 'true true 1',
+    uncaughtException: undefined,
+  });
+});
+
+test('packed pointer keys hash the same bits across logical, physical and integer views', () => {
+  const source = `const std=@import("std");const U=packed union{p:*u8,x:usize};pub fn main(init:std.process.Init)!void{var n:u8=1;const a=U{.p=&n};const bits=a.x;const b=U{.x=bits};var m=std.AutoHashMap(U,u8).init(init.gpa);defer m.deinit();try m.put(a,42);const found=m.get(b);try m.put(b,43);const c=U{.p=&n};std.debug.print("{any} {any} {}",.{found,m.get(c),m.count()});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: '42 43 1',
+    uncaughtException: undefined,
+  });
+});

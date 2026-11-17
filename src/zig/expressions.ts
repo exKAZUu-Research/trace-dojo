@@ -16,7 +16,7 @@ import {
   shiftRight,
 } from './arith';
 import type { BinaryOperator, Expression, ExpressionOf, Span } from './ast';
-import { physicalUnion } from './bufferMemory';
+import { packedValuesEqual, physicalUnion } from './bufferMemory';
 import { enumLookup } from './enumLookup';
 import {
   type AnyFloat,
@@ -102,6 +102,7 @@ import {
   FnValue,
   markConstantStorage,
   NULL,
+  optionalPayload,
   Pointer,
   registerStorageLocation,
   scalarValuesEqual,
@@ -1142,6 +1143,13 @@ export abstract class ExpressionCompiler extends SemaBase {
           ? (a, b) => ((a as FnValue).fn === (b as FnValue).fn ? 0 : 1)
           : (a, b) => ((a as Pointer).equals(b as Pointer) ? 0 : 1);
       }
+      case 'struct':
+      case 'union': {
+        if (ordered || type.layout !== 'packed')
+          return this.error(span, `${typeName(type)} 型の値は、${ordered ? '大小を' : '== で'}比べられません。`);
+        this.resolveStorage(type, span);
+        return (a, b) => (packedValuesEqual(type, a, b) ? 0 : 1);
+      }
       case 'optional': {
         if (ordered) this.error(span, `${typeName(type)} 型の値は、大小を比べられません。`);
         const compareChild = this.valueComparator(type.child, false, span);
@@ -1830,10 +1838,6 @@ function objectId(value: object): number {
 function unwrapOptionalValue(value: Value): Value {
   if (value === NULL) nullUnwrapPanic();
   return optionalPayload(value);
-}
-
-function optionalPayload(value: Value): Value {
-  return value instanceof Some ? value.value : value;
 }
 
 /** The shift amount's type for an integer type: `u5` for 32 bits, as `std.math.Log2Int` gives. */

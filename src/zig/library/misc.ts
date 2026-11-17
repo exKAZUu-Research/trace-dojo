@@ -42,19 +42,16 @@ import {
   optionalSome,
   type Pointer,
   Slice,
-  Some,
-  storageLocation,
   type Value,
   ZArray,
   ZStruct,
-  ZUnion,
+  type ZUnion,
 } from '../values';
 import { WeakValueMap } from '../weakValueMap';
 import { zeroAllocation } from '../zeroSizedMemory';
 import {
   computed,
   constSlice,
-  equalValues,
   mutableSlice,
   nativeBudget,
   newSlice,
@@ -84,6 +81,7 @@ import {
   nativeStruct,
   structReceiver,
 } from './native';
+import { validateEquality, valuesEqual } from './valueEquality';
 
 // std.unicode -----------------------------------------------------------------------------------------------------------
 
@@ -332,28 +330,14 @@ const UNICODE: Record<string, () => Member> = {
 
 // std.meta and std.enums ------------------------------------------------------------------------------------------------
 
-/** `std.meta.eql`: equality by value, through arrays, structs, unions, and optionals but not pointers. */
-function deepEqual(a: Value, b: Value): boolean {
-  if (a instanceof ZArray && b instanceof ZArray)
-    return a.values().every((value, index) => deepEqual(value, b.get(index)));
-  if (a instanceof ZStruct && b instanceof ZStruct)
-    return a.slots.every((value, index) => deepEqual(value, b.slots[index]));
-  if (a instanceof ZUnion && b instanceof ZUnion) return a.tag === b.tag && deepEqual(a.slots[0], b.slots[0]);
-  if (a instanceof Some && b instanceof Some) return deepEqual(a.value, b.value);
-  if (a instanceof Slice && b instanceof Slice) {
-    const left = storageLocation(a.target.slots, a.start);
-    const right = storageLocation(b.target.slots, b.start);
-    return left.storage === right.storage && left.index === right.index && a.lengthValue === b.lengthValue;
-  }
-  return equalValues(a, b);
-}
-
 const META: Record<string, () => Member> = {
   eql: fnMember('std.meta.eql', (sema, call) => {
     const [aArg, bArg] = expectArgs(sema, call, 2, 'std.meta.eql');
     const a = sema.compile(aArg);
     const b = sema.coerce(sema.compile(bArg, a.type), a.type, bArg);
-    return computed(BOOL, [a, b], call.span, ([x, y]) => deepEqual(x, y));
+    sema.resolveStorage(a.type, call.span);
+    validateEquality(sema, a.type, call.span);
+    return computed(BOOL, [a, b], call.span, ([x, y], frame) => valuesEqual(a.type, x, y, nativeBudget(sema, frame)));
   }),
   stringToEnum: fnMember('std.meta.stringToEnum', (sema, call) => {
     const [typeArg, textArg] = expectArgs(sema, call, 2, 'std.meta.stringToEnum');

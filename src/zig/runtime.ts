@@ -61,7 +61,7 @@ export interface Deferred {
 }
 
 export class Runtime {
-  readonly bufferMemory = new BufferMemorySpace();
+  bufferMemory = new BufferMemorySpace();
   readonly budget: ExecutionBudget;
   readonly io: ProgramIO;
   readonly world = new TurtleWorld();
@@ -72,8 +72,6 @@ export class Runtime {
   readonly globals: { cell: Slots; type: Type }[] = [];
   private readonly turtleReachability = new TurtleReachability((cost) => this.spend(cost));
   private allocated = 0;
-  private readonly identities = new WeakMap<object, bigint>();
-  private nextIdentity = 1n;
 
   constructor(input?: ProgramInput, budget = new ExecutionBudget()) {
     this.budget = budget;
@@ -81,12 +79,7 @@ export class Runtime {
   }
 
   identityOf(value: object): bigint {
-    let identity = this.identities.get(value);
-    if (identity === undefined) {
-      identity = this.nextIdentity++;
-      this.identities.set(value, identity);
-    }
-    return identity;
+    return this.bufferMemory.identityOf(value);
   }
 
   spend(cost = 1): void {

@@ -4,6 +4,7 @@ import { misplacedAtomicMessage } from '../interpreter/traceAnnotations';
 import { panic } from './arith';
 import type { FunctionDeclaration, SourceFile, Span } from './ast';
 import { checkSource } from './astCheck';
+import { BufferMemorySpace } from './bufferMemory';
 import { duringComptime } from './comptimeMemory';
 import type { FunctionInstance } from './functions';
 import { withMemoryAccounting } from './memoryAccounting';
@@ -26,6 +27,7 @@ export interface GlobalVariable {
 }
 
 export interface CompiledProgram {
+  bufferMemory: BufferMemorySpace;
   main: FunctionInstance;
   mainTakesInit: boolean;
   globals: GlobalVariable[];
@@ -51,7 +53,11 @@ export function compileProgram(file: SourceFile, options: CompileOptions = {}): 
   try {
     const compiler = new Compiler(file, { ...options, budget });
     compiled = withMemoryAccounting(
-      { spend: (cost) => budget.spend(cost), reserve: (count) => compiler.reservePhysicalSlots(count) },
+      {
+        space: compiler.bufferMemory,
+        spend: (cost) => budget.spend(cost),
+        reserve: (count) => compiler.reservePhysicalSlots(count),
+      },
       () => compiler.compileMain()
     );
   } catch (error) {
@@ -69,6 +75,7 @@ function firstErrors(errors: readonly SourceDiagnostic[]): SourceDiagnostic[] {
 }
 
 class Compiler extends StatementCompiler {
+  readonly bufferMemory = new BufferMemorySpace();
   protected readonly tracing: boolean;
   private readonly atomicRows: ReadonlySet<number>;
   private readonly atomicFunctions = new WeakSet<FunctionDeclaration>();
@@ -112,7 +119,12 @@ class Compiler extends StatementCompiler {
     const main = this.instantiate(new FnRef(decl), argTypes, syntax);
     this.compilePendingBodies();
     this.checkMainReturn(main, syntax);
-    return { main, mainTakesInit: argTypes.length === 1, globals: this.globalVariables };
+    return {
+      main,
+      mainTakesInit: argTypes.length === 1,
+      globals: this.globalVariables,
+      bufferMemory: this.bufferMemory,
+    };
   }
 
   private checkMainReturn(main: FunctionInstance, syntax: FunctionDeclaration): void {
@@ -175,6 +187,7 @@ class Compiler extends StatementCompiler {
   protected evaluateAtCompileTime(expression: TExpr): Value {
     this.compilePendingBodies();
     const runtime = new Runtime(undefined, this.compilationBudget);
+    runtime.bufferMemory = this.bufferMemory;
     const frame = new Frame(
       runtime,
       { name: 'comptime', locals: [], isAtomic: false } as unknown as FunctionInstance,

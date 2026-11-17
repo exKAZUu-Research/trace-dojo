@@ -1,14 +1,15 @@
-// code-gauge-allow-file fileNcss 440 -- Keeps typed byte views and their overlapping storage operations together.
+// code-gauge-allow-file fileNcss 445 -- Keeps typed byte views and their overlapping storage operations together.
 import { panic } from './arith';
 import { enumLookup } from './enumLookup';
 import { asBigFloat, BigFloat, type FloatBits, floatOf, FORMATS } from './floats';
 import { bitSizeOf, errorUnionOffsets, fieldOffsets, optionalNicheBits, sizeOf, unionOffsets } from './layout';
-import { reserveMemory, spendMemory } from './memoryAccounting';
+import { memorySpace, reserveMemory, spendMemory } from './memoryAccounting';
 import { copyForStorage, undefinedValue } from './semaBase';
 import { singleValueOf } from './singleValue';
 import { type Type, typeId } from './types';
 import {
   ErrorValue,
+  FnValue,
   NULL,
   Pointer,
   registerStorageLocation,
@@ -45,6 +46,15 @@ export class BufferMemorySpace {
   nextReferenceId = 1n;
   readonly errorReferenceIds = new WeakMap<object, bigint>();
   nextErrorReferenceId = 1n;
+
+  identityOf(value: object): bigint {
+    let identity = this.referenceIds.get(value);
+    if (identity === undefined) {
+      identity = this.nextReferenceId++;
+      this.referenceIds.set(value, identity);
+    }
+    return identity;
+  }
 }
 
 export function physicalBytes(
@@ -61,11 +71,27 @@ export function physicalBytes(
   return bytes.map(Number);
 }
 
+export function packedValuesEqual(type: Extract<Type, { kind: 'struct' | 'union' }>, a: Value, b: Value): boolean {
+  const length = sizeOf(type);
+  spendMemory(length * 2);
+  const left = Array.from<Value>({ length }).fill(0n);
+  const right = Array.from<Value>({ length }).fill(0n);
+  new BufferMemory(left, spendMemory, memorySpace()).write(type, 0, a);
+  new BufferMemory(right, spendMemory, memorySpace()).write(type, 0, b);
+  const bits = bitSizeOf(type);
+  for (let at = 0; at < bits; at += 8) {
+    spendMemory();
+    const mask = (1n << BigInt(Math.min(8, bits - at))) - 1n;
+    if (((left[at / 8] as bigint) & mask) !== ((right[at / 8] as bigint) & mask)) return false;
+  }
+  return true;
+}
+
 export function zeroPhysicalValue(type: Extract<Type, { kind: 'struct' | 'union' }>): Value {
   const length = sizeOf(type);
   reserveMemory(length);
   spendMemory(length);
-  const memory = new BufferMemory(Array.from<Value>({ length }).fill(0n), spendMemory, new BufferMemorySpace());
+  const memory = new BufferMemory(Array.from<Value>({ length }).fill(0n), spendMemory, memorySpace());
   return memory.read(type, 0);
 }
 
@@ -75,7 +101,7 @@ export function physicalUnion(type: Extract<Type, { kind: 'union' }>, value: ZUn
   reserveMemory(length);
   spendMemory(length);
   const bytes = Array.from<Value>({ length }).fill(0xaan);
-  const memory = new BufferMemory(bytes, spendMemory, new BufferMemorySpace());
+  const memory = new BufferMemory(bytes, spendMemory, memorySpace());
   memory.write(type, 0, value);
   const backing = memory.read(type, 0) as ZUnion;
   value.slots = backing.slots;
@@ -518,13 +544,11 @@ class BufferMemory {
       id = existing ?? 1n + (this.space.nextErrorReferenceId++ % 65_535n);
       this.space.errorReferenceIds.set(value, id);
     } else {
-      const location = value instanceof Pointer ? value.storageLocation() : { storage: value, index: 0 };
-      let base = this.space.referenceIds.get(location.storage);
-      if (base === undefined) {
-        base = this.space.nextReferenceId++;
-        this.space.referenceIds.set(location.storage, base);
-      }
-      id = (base << 40n) + BigInt(location.index * 8);
+      const location =
+        value instanceof Pointer
+          ? value.storageLocation()
+          : { storage: value instanceof FnValue ? value.fn : value, index: 0 };
+      id = (this.space.identityOf(location.storage) << 32n) + BigInt(location.index * 8);
     }
     const key = referenceKey(id, type, bits);
     this.space.references.set(key, value);

@@ -132,11 +132,12 @@ class LayoutQuery {
     const cached = this.bitSizes.get(type) ?? resolvedBits.get(type);
     if (cached !== undefined) return cached;
     let result: number;
-    if (type.kind === 'struct' && type.layout === 'packed') {
+    if ((type.kind === 'struct' || type.kind === 'union') && type.layout === 'packed') {
       this.enter(type);
       try {
         result = 0;
-        for (const field of type.fields ?? []) {
+        const fields = type.kind === 'union' ? type.fields?.slice(0, 1) : type.fields;
+        for (const field of fields ?? []) {
           this.spend();
           result += this.bits(field.type);
         }

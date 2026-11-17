@@ -480,6 +480,10 @@ function scalarIdentity(value: object): number {
   return identity;
 }
 
+export function optionalPayload(value: Value): Value {
+  return value instanceof Some ? value.value : value;
+}
+
 export function scalarValuesEqual(a: Value, b: Value): boolean {
   if (a instanceof BigFloat && b instanceof BigFloat) return compareFloats(a, b) === 0;
   if (a instanceof Pointer && b instanceof Pointer) return a.equals(b);
