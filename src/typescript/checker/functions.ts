@@ -395,6 +395,9 @@ export class FunctionChecker {
       context.returnTypes.flatMap((type) => (type.kind === 'union' ? type.types : [type]))
     );
     const types = returned.map((type) => (context.keepsLiterals ? type : this.c.widenLiteral(type)));
+    // A function expression or an object literal method that never returns returns `never`; a declaration `void`.
+    if (types.length === 0 && !context.hasReturn && !context.endReachable && mayReturnNever(context.node))
+      return neverType;
     if (types.length === 0) return voidType;
     if (context.endReachable && context.hasReturnWithValue) types.push(undefinedType);
     if (!context.hasReturnWithValue) return voidType;
@@ -601,4 +604,9 @@ function mayBeUndefined(type: Type): boolean {
   return (type.kind === 'union' ? type.types : [type]).some(
     (member) => isIntrinsic(member, 'undefined') || isIntrinsic(member, 'void')
   );
+}
+
+function mayReturnNever(node: TreeNode): boolean {
+  if (node.type === 'arrow_function' || node.type === 'function_expression') return true;
+  return node.type === 'method_definition' && node.parent?.type === 'object';
 }
