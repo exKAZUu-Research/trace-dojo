@@ -789,7 +789,7 @@ instance Enum Bool where
   fromEnum False = 0
   fromEnum True = 1
   enumFrom = boundedEnumFrom
-  enumFromThen = boundedEnumFromThen
+  enumFromThen x y = x ${BT}seq${BT} boundedEnumFromThen x y
 
 instance Bounded Bool where
   minBound = False

@@ -662,3 +662,28 @@ main=do
     uncaughtException: undefined,
   });
 });
+
+test.each([
+  ['[]', 'fromList []'],
+  ['[1]', 'fromList [1]'],
+  ['[1,2]', 'fromList [1,2]'],
+  ['[1,2,3]', 'fromList [1,3]'],
+  ['[1,2,3,4]', 'fromList [1,4]'],
+])('powerSet preserves tree-shaped callback demand for %s', (values, uncaughtException) => {
+  const source = `import qualified Data.Set as S
+import qualified Data.Map.Strict as M
+main=print(M.size(M.fromSet (\\k->error(show k)::Int)(S.powerSet(S.fromList(${values}::[Int])))))`;
+  expect(executeProgram('haskell', source)).toMatchObject({ kind: 'executed', stdout: '', uncaughtException });
+});
+
+test('powerSet retains all ordered subsets without requiring an Ord instance', () => {
+  const source = `import qualified Data.Set as S
+main=do
+ print(S.map S.toList(S.powerSet(S.fromList[2,1::Int])))
+ print(S.size(S.powerSet(S.singleton(id::Int->Int))))`;
+  expect(executeProgram('haskell', source)).toMatchObject({
+    kind: 'executed',
+    stdout: 'fromList [[],[1],[1,2],[2]]\n2\n',
+    uncaughtException: undefined,
+  });
+});

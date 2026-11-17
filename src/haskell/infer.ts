@@ -21,6 +21,7 @@ import type {
 } from './rast';
 import { RecursionBudget } from './recursionBudget';
 import type { Span } from './syntax';
+import { walkGraph } from './typeGraph';
 import {
   defaultKind,
   freshKindVar,
@@ -43,6 +44,7 @@ import {
   tcon,
   type TVar,
   type Type,
+  typeChildren,
   typeVarsOf,
   unifyKinds,
   unifyTypes,
@@ -1080,14 +1082,18 @@ export function typeVarNames(types: readonly RType[]): string[] {
 }
 
 export function checkSchemeAmbiguity(scheme: Scheme, span: Span): void {
-  const indices = (type: Type): number[] => {
-    const current = prune(type);
-    if (current.tag === 'tgen') return [current.index];
-    if (current.tag === 'tap') return [...indices(current.fn), ...indices(current.arg)];
-    return [];
-  };
-  const visible = new Set(indices(scheme.type));
-  if (scheme.preds.some((pred) => indices(pred.type).some((index) => !visible.has(index)))) {
-    throw compileError(span, '型シグネチャの制約に、結果の型から決まらない型変数があります。');
+  const visible = genericIndices(scheme.type);
+  for (const pred of scheme.preds) {
+    for (const index of genericIndices(pred.type)) {
+      if (!visible.has(index)) {
+        throw compileError(span, '型シグネチャの制約に、結果の型から決まらない型変数があります。');
+      }
+    }
   }
+}
+
+function genericIndices(type: Type): Set<number> {
+  const result = new Set<number>();
+  for (const node of walkGraph(type, prune, typeChildren)) if (node.tag === 'tgen') result.add(node.index);
+  return result;
 }

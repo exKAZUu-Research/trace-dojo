@@ -48,10 +48,31 @@ const flatSequences = [
   'main=print(length [1::Int | ' + Array.from({ length: 3000 }, () => 'True').join(',') + '])',
   'main=print(do {' + Array.from({ length: 3000 }, () => 'Just ()').join(';') + '; Just(1::Int)})',
 ];
-const ioLetResults = [6000, 10_000].map((size) => {
+const ioLetResults = [6000, 10_000, 15_000, 20_000].map((size) => {
   const source = 'main=do {' + Array.from({ length: size }, () => 'let {x=()}').join(';') + ';print(1::Int)}';
   return executeProgram('haskell', source);
 });
+const sharedSignatures = (depth: number, polymorphic: boolean, constraint = ''): string => {
+  const argument = polymorphic ? ' a' : '';
+  const declarations = [
+    `type A0${argument}=${polymorphic ? 'a' : 'Int'}`,
+    ...Array.from(
+      { length: depth },
+      (_, index) => `type A${index + 1}${argument}=(A${index}${argument},A${index}${argument})`
+    ),
+  ].join('\n');
+  return `${declarations}\nf::${constraint}A${depth}${argument}->Bool\nf _=True\nmain=print(1::Int)`;
+};
+const signatureGraphs = {
+  valid: [
+    sharedSignatures(30, false),
+    sharedSignatures(31, false),
+    'class C a\n' + sharedSignatures(31, false, 'C A31=>'),
+    sharedSignatures(8, true, 'Eq a=>'),
+    sharedSignatures(8, true, 'Eq(A8 a)=>'),
+  ].map((source) => executeProgram('haskell', source)),
+  ambiguous: executeProgram('haskell', sharedSignatures(8, true, 'Eq b=>')),
+};
 const atomicLets =
   'main=do -- atomic\n' + Array.from({ length: 10_000 }, () => ' let {x=()}').join('\n') + '\n print(1::Int)';
 const atomicLetRecording = traceProgram('haskell', atomicLets, atomicLets);
@@ -79,6 +100,7 @@ process.stdout.write(
     flatSequences: flatSequences.map((source) => executeProgram('haskell', source)),
     patterns: patterns.map((source) => executeProgram('haskell', source)),
     ioLets: ioLetResults,
+    signatureGraphs,
     ioLetTrace: {
       stdout: atomicLetRecording.stdout,
       uncaughtException: atomicLetRecording.uncaughtException,

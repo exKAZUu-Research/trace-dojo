@@ -11,6 +11,7 @@ import {
 } from './entities';
 import { compileError, unsupportedError } from './errors';
 import { DEFAULT_FIXITY, resolveExprChain, resolvePatChain, sectionOperand } from './fixity';
+import { LocalScope } from './localScope';
 import { type CompiledModuleInfo, emptyExports, type ExportTable, type TypeLike } from './modules';
 import type {
   Binder,
@@ -165,16 +166,6 @@ class GlobalScope {
       this.qualifiedTypes.set(qualifier, candidates);
     }
     candidates.add(name, entity);
-  }
-}
-
-class LocalScope {
-  readonly vars = new Map<string, LocalVar>();
-
-  constructor(readonly parent?: LocalScope) {}
-
-  lookup(name: string): LocalVar | undefined {
-    return this.vars.get(name) ?? this.parent?.lookup(name);
   }
 }
 
@@ -751,7 +742,7 @@ class Renamer {
       const clauseScope = new LocalScope(scope);
       const binders = new Map<string, LocalVar>();
       const pats = clause.args.map((pat) => this.renamePat(pat, binders));
-      for (const [name, local] of binders) clauseScope.vars.set(name, local);
+      for (const [name, local] of binders) clauseScope.define(name, local);
       return { pats, rhs: this.renameRhs(clause.rhs, clauseScope), span: clause.span };
     });
     return { k: 'fun', binder, clauses, span: raw.span };
@@ -790,7 +781,7 @@ class Renamer {
     for (const binding of raw) {
       for (const name of binding.names) {
         if (scope.vars.has(name.name)) throw compileError(name.span, `${name.name} が重複して定義されています。`);
-        scope.vars.set(name.name, newLocal(name.name, name.span));
+        scope.define(name.name, newLocal(name.name, name.span));
       }
     }
     for (const decl of decls) {
@@ -879,7 +870,7 @@ class Renamer {
         const binders = new Map<string, LocalVar>();
         const pats = expr.pats.map((pat) => this.renamePat(pat, binders));
         const inner = new LocalScope(scope);
-        for (const [name, local] of binders) inner.vars.set(name, local);
+        for (const [name, local] of binders) inner.define(name, local);
         return { k: 'lambda', pats, body: this.renameExpr(expr.body, inner), span };
       }
       case 'let': {
@@ -1004,7 +995,7 @@ class Renamer {
     const binders = new Map<string, LocalVar>();
     const pat = this.renamePat(alt.pat, binders);
     const inner = new LocalScope(scope);
-    for (const [name, local] of binders) inner.vars.set(name, local);
+    for (const [name, local] of binders) inner.define(name, local);
     return { pat, rhs: this.renameRhs(alt.rhs, inner), span: alt.span };
   }
 
@@ -1024,7 +1015,7 @@ class Renamer {
           const binders = new Map<string, LocalVar>();
           const pat = this.renamePat(stmt.pat, binders);
           scope = new LocalScope(scope);
-          for (const [name, local] of binders) scope.vars.set(name, local);
+          for (const [name, local] of binders) scope.define(name, local);
           result.push({ k: 'bind', pat, expr, span: stmt.span });
           break;
         }

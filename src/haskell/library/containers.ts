@@ -440,9 +440,8 @@ nearest compareKey lower = go Nothing
           GT -> go (if lower then best else Just x) r
 
 powerSet :: Set a -> Set (Set a)
-powerSet s = fromDistinctAscList (B.map fromDistinctAscList (subsets (toAscList s)))
-  where subsets [] = [[]]
-        subsets (x:xs) = let rest = subsets xs in [] : (B.map (x:) rest ++ B.tail rest)
+powerSet s = insertMin STip (foldr' step STip s)
+  where step x rest = glue (insertMin (singleton x) (mapMonotonic (insertMin x) rest)) rest
 
 cartesianProduct :: Set a -> Set b -> Set (a,b)
 cartesianProduct a b = a ${BT}seq${BT} case b of

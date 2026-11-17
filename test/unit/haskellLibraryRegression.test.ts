@@ -871,3 +871,21 @@ main=do
     uncaughtException: undefined,
   });
 });
+
+test.each([
+  ['Bool', 'first'],
+  ['Ordering', 'second'],
+  ['E', 'first'],
+])('%s stepped enumeration retains its instance-specific endpoint demand', (type, uncaughtException) => {
+  const source = `data E=A|B|C deriving(Enum,Bounded)\nmain=print(null([error "first",error "second"..]::[${type}]))`;
+  expect(executeProgram('haskell', source)).toMatchObject({ kind: 'executed', stdout: '', uncaughtException });
+});
+
+test('Bool stepped enumeration preserves ascending, descending and repeated values', () => {
+  const source = 'main=print([False,True ..],[True,False ..],take 3 [False,False ..],take 3 [True,True ..])';
+  expect(executeProgram('haskell', source)).toMatchObject({
+    kind: 'executed',
+    stdout: '([False,True],[True,False],[False,False,False],[True,True,True])\n',
+    uncaughtException: undefined,
+  });
+});

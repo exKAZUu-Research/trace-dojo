@@ -836,6 +836,7 @@ test('compiler and native evaluation recursion remain bounded under Node', { tim
     patterns,
     flatSequences,
     ioLets,
+    signatureGraphs,
     ioLetTrace,
     display,
     recovery,
@@ -847,6 +848,7 @@ test('compiler and native evaluation recursion remain bounded under Node', { tim
       patterns: z.array(resultSchema),
       flatSequences: z.array(resultSchema),
       ioLets: z.array(resultSchema),
+      signatureGraphs: z.object({ valid: z.array(resultSchema), ambiguous: resultSchema }),
       ioLetTrace: z.object({ stdout: z.string(), uncaughtException: z.string().optional(), steps: z.number() }),
       display: z.array(z.object({ stdout: z.string() }).passthrough()),
       recovery: resultSchema,
@@ -866,11 +868,20 @@ test('compiler and native evaluation recursion remain bounded under Node', { tim
       expect(result.uncaughtException).toBeUndefined();
     } else expect(result).toMatchObject({ kind: 'limitExceeded', limit: 'operations' });
   }
-  expect(ioLets).toHaveLength(2);
+  expect(ioLets).toHaveLength(4);
   for (const result of ioLets) {
     expect(result).toMatchObject({ kind: 'executed', stdout: '1\n' });
     expect(result.uncaughtException).toBeUndefined();
   }
+  expect(signatureGraphs.valid).toHaveLength(5);
+  for (const result of signatureGraphs.valid) {
+    expect(result).toMatchObject({ kind: 'executed', stdout: '1\n' });
+    expect(result.uncaughtException).toBeUndefined();
+  }
+  expect(signatureGraphs.ambiguous).toMatchObject({
+    kind: 'compileError',
+    diagnostics: [expect.objectContaining({ message: expect.stringContaining('制約に') })],
+  });
   expect(ioLetTrace).toEqual({ stdout: '1\n', steps: 1 });
   expect(patterns).toHaveLength(12);
   for (const [index, result] of patterns.entries()) {
