@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 562 -- Follows the flow of control through each kind of statement.
+// code-gauge-allow-file fileNcss 567 -- Follows the flow of control through each kind of statement.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import type { Checker } from './checker';
@@ -26,8 +26,11 @@ interface JumpTarget {
   continues: State[];
 }
 
-/** How many times a loop body is checked silently, at most, to find the types its back edges bring. */
-const MAX_LOOP_PASSES = 3;
+/**
+ * How many times a loop body is checked silently, at most, to find the types its back edges bring; a loop still
+ * unsettled then reads the references it assigns or narrows with their declared types.
+ */
+const MAX_LOOP_PASSES = 10;
 
 /**
  * The type syntaxes that check themselves where they are written, as in a branch of a conditional type no use
@@ -465,41 +468,34 @@ export class StatementChecker {
       return;
     }
     let state = entry?.clone();
-    let last: { exit: State; breaks: State[] } | undefined;
-    for (let pass = 0; pass < MAX_LOOP_PASSES; pass++) {
-      const target: JumpTarget = { isLoop: true, breaks: [], continues: [] };
-      let backEdge: State;
-      let exit: State;
-      this.c.silently(() => {
-        this.c.flow.current = state?.clone();
-        this.jumpTargets.push(target);
-        try {
-          exit = iterate(target);
-          backEdge = this.c.flow.current;
-        } finally {
-          this.jumpTargets.pop();
-        }
-      });
-      const next = this.c.flow.merge([entry, backEdge!]);
+    let settled: State[] | undefined;
+    for (let pass = 1; ; pass++) {
+      const { exits, backEdge } = this.c.silently(() => this.loopPass(state, iterate));
+      const next = this.c.flow.merge([entry, backEdge]);
       if (this.sameState(next, state)) {
-        last = { exit: exit!, breaks: target.breaks };
+        settled = exits;
+        break;
+      }
+      if (pass === MAX_LOOP_PASSES) {
+        state = widenTouched(next, state, backEdge);
         break;
       }
       state = next;
     }
     // Checking silently already, the pass that settled the loop is the one that would report errors.
-    const exits = last && this.c.silent > 0 ? [last.exit, ...last.breaks] : this.finalPass(state, iterate);
+    const exits = settled && this.c.silent > 0 ? settled : this.loopPass(state, iterate).exits;
     if (key !== undefined) this.silentLoopExits.set(key, exits);
     this.c.flow.current = this.c.flow.merge(exits);
   }
 
-  /** Runs a loop's iteration once more from its settled state, reporting errors, and returns where it exits. */
-  private finalPass(state: State, iterate: (target: JumpTarget) => State): State[] {
+  /** Runs a loop's iteration once from `state`, and returns where it exits and the state its back edge brings. */
+  private loopPass(state: State, iterate: (target: JumpTarget) => State): { exits: State[]; backEdge: State } {
     const target: JumpTarget = { isLoop: true, breaks: [], continues: [] };
-    this.c.flow.current = state;
+    this.c.flow.current = state?.clone();
     this.jumpTargets.push(target);
     try {
-      return [iterate(target), ...target.breaks];
+      const exit = iterate(target);
+      return { exits: [exit, ...target.breaks], backEdge: this.c.flow.current };
     } finally {
       this.jumpTargets.pop();
     }
@@ -845,4 +841,17 @@ function indexSignatureNode(body: TreeNode, kind: 'string' | 'number'): TreeNode
   return named(body).find(
     (member) => member.type === 'index_signature' && new RegExp(`^\\[\\s*\\w+\\s*:\\s*${kind}\\b`).test(member.text)
   );
+}
+
+/**
+ * `state` without the references that a loop pass from `start` assigned or narrowed by its back edge `backEdge`, which
+ * then read with their declared types.
+ */
+function widenTouched(state: State, start: State, backEdge: State): State {
+  if (!state) return state;
+  const widened = state.clone();
+  for (const key of state.entries.keys()) {
+    if (backEdge?.entries.get(key) !== start?.entries.get(key)) widened.entries.delete(key);
+  }
+  return widened;
 }

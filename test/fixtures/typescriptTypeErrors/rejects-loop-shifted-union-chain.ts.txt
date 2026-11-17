@@ -1,0 +1,7 @@
+let a: number | string = 0, b: number | string = 0, c: number | string = 0, d: number | string = 0;
+let i = 0;
+while (i++ < 5) { console.log(a.toFixed()); a = b; b = c; c = d; d = 'x'; }
+let v0: number | string = 0, v1: number | string = 0, v2: number | string = 0, v3: number | string = 0, v4: number | string = 0, v5: number | string = 0, v6: number | string = 0, v7: number | string = 0, v8: number | string = 0, v9: number | string = 0, v10: number | string = 0, v11: number | string = 0;
+for (const k of [1, 2]) { console.log(k, v0.toFixed()); v0 = v1; v1 = v2; v2 = v3; v3 = v4; v4 = v5; v5 = v6; v6 = v7; v7 = v8; v8 = v9; v9 = v10; v10 = v11; v11 = 'x'; }
+let e: number | string = 0, g: number | string = 0, h: number | string = 0, j: number | string = 0;
+do { console.log(e.toFixed()); e = g; g = h; h = j; j = 'x'; } while (i++ < 9);
