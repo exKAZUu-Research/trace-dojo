@@ -19,6 +19,8 @@ import {
 /** Checks class declarations: their members, constructors, and the types they implement and extend. */
 export class ClassDeclarationChecker {
   private readonly checked = new Set<number>();
+  /** The fields without initializers that their class's constructor assigns on every path. */
+  private readonly constructorAssignedFields = new Set<number>();
 
   constructor(private readonly c: Checker) {}
 
@@ -270,47 +272,95 @@ export class ClassDeclarationChecker {
     }
   }
 
-  // code-gauge-allow functionCognitiveComplexity 19 -- Follows TypeScript's checks of each inherited member: visibility, kind, then type.
+  /** Checks each member overriding a base member: its visibility, then its kind, then its type. */
   private checkBaseCompatibility(node: TreeNode, info: ClassInfo): void {
     const base = this.c.classes.baseInstanceType(node);
     if (!base || isAnyLike(base)) return;
     const own = this.c.classes.membersOf(node, info, false);
     for (const [name, property] of own.properties) {
       const baseProperty = this.c.propertyOf(base, name);
-      if (!baseProperty) continue;
-      if (baseProperty.visibility === 'private' || property.visibility === 'private') {
-        if (baseProperty.visibility === 'private' || property.visibility !== baseProperty.visibility) {
-          this.c.error(
-            property.declaration?.childForFieldName('name') ?? node,
-            `クラス '${info.name}' は、基底クラスを正しく継承していません。プロパティ '${name}' の可視性が異なります。`
-          );
-        }
-        continue;
-      }
-      if (visibilityRank[property.visibility] > visibilityRank[baseProperty.visibility]) {
-        this.c.error(
-          node.childForFieldName('name') ?? node,
-          `クラス '${info.name}' は、基底クラスを正しく継承していません。プロパティ '${name}' の可視性を狭めています。`
-        );
-        continue;
-      }
-      // A method may become a property, but a property may not become a method.
-      if (property.isMethod && !baseProperty.isMethod && !baseProperty.isAbstract) {
-        this.c.error(
-          property.declaration?.childForFieldName('name') ?? node,
-          `基底クラスはメンバー '${name}' をプロパティとして定義していますが、クラス '${info.name}' はメソッドとして定義しています。`
-        );
+      if (!baseProperty || this.reportVisibilityMismatch(node, info, property, baseProperty)) continue;
+      const nameNode = memberNameNode(property) ?? node;
+      const kindMismatch = this.kindMismatch(info, base, property, baseProperty);
+      if (kindMismatch) {
+        this.c.error(nameNode, kindMismatch);
         continue;
       }
       const ownType = property.type();
       const baseType = baseProperty.type();
       if (!this.c.relations.isAssignable(ownType, baseType)) {
         this.c.error(
-          property.declaration?.childForFieldName('name') ?? node,
+          nameNode,
           `型 '${info.name}' のプロパティ '${name}' は、基底の型の同じプロパティに代入できません。型 '${this.c.print(ownType)}' を型 '${this.c.print(baseType)}' に代入することはできません。`
         );
       }
     }
+  }
+
+  /** Reports a member whose visibility differs from its base member's as TypeScript forbids; whether it did. */
+  private reportVisibilityMismatch(
+    node: TreeNode,
+    info: ClassInfo,
+    property: Property,
+    baseProperty: Property
+  ): boolean {
+    if (baseProperty.visibility === 'private' || property.visibility === 'private') {
+      if (baseProperty.visibility === 'private' || property.visibility !== baseProperty.visibility) {
+        this.c.error(
+          memberNameNode(property) ?? node,
+          `クラス '${info.name}' は、基底クラスを正しく継承していません。プロパティ '${property.name}' の可視性が異なります。`
+        );
+      }
+      return true;
+    }
+    if (visibilityRank[property.visibility] <= visibilityRank[baseProperty.visibility]) return false;
+    this.c.error(
+      node.childForFieldName('name') ?? node,
+      `クラス '${info.name}' は、基底クラスを正しく継承していません。プロパティ '${property.name}' の可視性を狭めています。`
+    );
+    return true;
+  }
+
+  /**
+   * The error for a member that overrides a base member of another kind, as TypeScript's
+   * `checkKindsOfPropertyMemberOverrides` reports: a method may become a field but not an accessor, and a field or an
+   * accessor may become neither a method nor the other kind unless the base member is abstract or an interface's.
+   */
+  private kindMismatch(info: ClassInfo, base: Type, property: Property, baseProperty: Property): string | undefined {
+    const { name } = property;
+    const kind = memberKind(property);
+    const baseKind = memberKind(baseProperty);
+    const baseName = this.c.print(base);
+    if (baseKind === 'method') {
+      return kind === 'accessor'
+        ? `クラス '${baseName}' で定義されたインスタンス メンバー関数 '${name}' が、拡張されたクラス '${info.name}' ではインスタンス メンバー アクセサーとして定義されています。`
+        : undefined;
+    }
+    if (kind === 'method') {
+      return baseKind === 'accessor'
+        ? `クラス '${baseName}' で定義されたインスタンス メンバー アクセサー '${name}' が、拡張されたクラス '${info.name}' ではインスタンス メンバー関数として定義されています。`
+        : `基底クラスはメンバー '${name}' をプロパティとして定義していますが、クラス '${info.name}' はメソッドとして定義しています。`;
+    }
+    if (baseProperty.isAbstract || baseProperty.nameType || isInterfaceMember(baseProperty)) return undefined;
+    if (kind !== baseKind) {
+      return kind === 'field'
+        ? `'${name}' はクラス '${baseName}' でアクセサーとして定義されていますが、ここではインスタンス プロパティとして '${info.name}' でオーバーライドされています。`
+        : `'${name}' はクラス '${baseName}' でプロパティとして定義されていますが、ここでは '${info.name}' でアクセサーとしてオーバーライドされています。`;
+    }
+    return this.overwritesBaseField(property)
+      ? `プロパティ '${name}' は、'${baseName}' の基底プロパティを上書きします。これが意図的である場合は初期化子を追加してください。そうでなければ、冗長な宣言を削除してください。`
+      : undefined;
+  }
+
+  /**
+   * Whether a field redeclaring a base field sets it to `undefined`, as a class field defined on each instance does
+   * unless an initializer or the constructor assigns it.
+   */
+  private overwritesBaseField(property: Property): boolean {
+    const { declaration } = property;
+    if (declaration?.type !== 'field_definition' || declaration.childForFieldName('value') || property.isAbstract)
+      return false;
+    return hasToken(declaration, '!') || !this.constructorAssignedFields.has(declaration.id);
   }
 
   /** Reports static members that do not fit the base class's static members of the same names. */
@@ -340,13 +390,17 @@ export class ClassDeclarationChecker {
     if (!body) return;
     const ownerId = ctor?.id ?? 0;
     const states = [endState, ...returnStates].filter((state): state is FlowState => state !== undefined);
-    for (const member of named(body)) {
-      const nameNode = this.uninitializedFieldName(member);
-      if (!nameNode) continue;
+    const isAssigned = (nameNode: TreeNode): boolean => {
       const names = this.c.silently(() => this.c.patterns.propertyNames(nameNode));
       const key = propertyReferenceKey(`this${ownerId}`, names?.length === 1 ? names[0] : nameNode.text);
-      const assigned = ctor !== undefined && states.every((state) => state.assignedFields.has(key));
-      if (!assigned) {
+      return ctor !== undefined && states.every((state) => state.assignedFields.has(key));
+    };
+    for (const member of named(body)) {
+      const fieldName = member.type === 'field_definition' ? member.childForFieldName('name') : undefined;
+      if (fieldName && !member.childForFieldName('value') && isAssigned(fieldName))
+        this.constructorAssignedFields.add(member.id);
+      const nameNode = this.uninitializedFieldName(member);
+      if (nameNode && !isAssigned(nameNode)) {
         this.c.error(
           nameNode,
           `プロパティ ${nameNode.text} には初期値がなく、コンストラクタの中で必ず代入されてもいません。`
@@ -374,6 +428,25 @@ export class ClassDeclarationChecker {
       return undefined;
     return nameNode;
   }
+}
+
+/** Whether a member is a method, an accessor, or a field, which a member overriding it must agree with. */
+function memberKind(property: Property): 'method' | 'accessor' | 'field' {
+  if (property.isMethod) return 'method';
+  const declarationType = property.declaration?.type ?? '';
+  return ['method_definition', 'method_signature', 'abstract_method_signature'].includes(declarationType)
+    ? 'accessor'
+    : 'field';
+}
+
+function isInterfaceMember(property: Property): boolean {
+  return property.declaration?.parent?.parent?.type === 'interface_declaration';
+}
+
+/** The name a member is declared with, or the parameter that declares a parameter property. */
+function memberNameNode(property: Property): TreeNode | undefined {
+  const { declaration } = property;
+  return declaration?.childForFieldName('name') ?? declaration?.childForFieldName('pattern') ?? undefined;
 }
 
 function readType(property: Property): Type {
