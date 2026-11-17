@@ -212,9 +212,11 @@ function checkMergedProperty(c: Checker, member: TreeNode, seen: Map<string, Tre
   const before = declaredPropertyType(c, previous, name);
   const after = declaredPropertyType(c, member, name);
   if (before && after && !c.relations.identical(before, after)) {
+    // TypeScript words the error for a parameter property as it does for a variable.
+    const kind = member.type === 'field_definition' || member.type === 'property_signature' ? 'プロパティ' : '変数';
     c.error(
       memberNameNode(member),
-      `後のプロパティの宣言は、同じ型でなければいけません。プロパティ ${name} の型は '${c.print(before)}' ですが、ここでは '${c.print(after)}' です。`
+      `後の${kind}の宣言は、同じ型でなければいけません。${kind} ${name} の型は '${c.print(before)}' ですが、ここでは '${c.print(after)}' です。`
     );
   }
 }
@@ -319,10 +321,15 @@ function memberNameNode(member: TreeNode): TreeNode {
 /** The type a property declaration gives, with `undefined` if it is optional; a class field may infer it. */
 function declaredPropertyType(c: Checker, declaration: TreeNode, name: string): Type | undefined {
   const annotated = c.typeNodes.annotationType(declaration.childForFieldName('type'));
+  const classNode = declaringClassNode(declaration);
   const type =
     annotated ??
-    (declaration.type === 'field_definition'
-      ? c.propertyOf(c.classes.classInfoOfNode(declaration.parent?.parent as TreeNode).instanceType, name)?.type()
-      : undefined);
+    (classNode ? c.propertyOf(c.classes.classInfoOfNode(classNode).instanceType, name)?.type() : undefined);
   return type && hasToken(declaration, '?') ? unionOf([type, undefinedType]) : type;
+}
+
+/** The class declaring a field or a parameter property, or undefined for an interface's property. */
+function declaringClassNode(declaration: TreeNode): TreeNode | undefined {
+  const body = declaration.type === 'field_definition' ? declaration.parent : declaration.parent?.parent?.parent;
+  return body?.type === 'class_body' ? (body.parent ?? undefined) : undefined;
 }
