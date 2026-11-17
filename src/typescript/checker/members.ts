@@ -293,8 +293,8 @@ export class MemberChecker {
   }
 
   /**
-   * Whether a value can never be called: it is only compared, or a `const` holds it whose every reference is only
-   * compared. A value passed elsewhere may be called there.
+   * Whether a value can never be called: it is only compared or discarded, or a variable holds it whose every reference
+   * is, which an assignment to it is not. A value passed, stored, or destructured elsewhere may be called there.
    */
   private isNeverCalled(read: TreeNode | null): boolean {
     if (isOnlyCompared(read)) return true;
@@ -302,7 +302,7 @@ export class MemberChecker {
     const name = declarator?.childForFieldName('name');
     if (
       declarator?.type !== 'variable_declarator' ||
-      declarator.parent?.childForFieldName('kind')?.text !== 'const' ||
+      !['const', 'let'].includes(declarator.parent?.childForFieldName('kind')?.text ?? '') ||
       name?.type !== 'identifier'
     )
       return false;
@@ -495,12 +495,13 @@ export class MemberChecker {
 }
 
 /**
- * Whether a member read's value is only examined, as the operand of `typeof` or of an equality, so that it can never be
- * called afterwards.
+ * Whether a member read's value is only examined or discarded, as the operand of `typeof`, `void`, or an equality, so
+ * that it can never be called afterwards.
  */
 function isOnlyCompared(read: TreeNode | null): boolean {
   const parent = read && outermostParentheses(read).parent;
-  if (parent?.type === 'unary_expression') return parent.childForFieldName('operator')?.text === 'typeof';
+  if (parent?.type === 'unary_expression')
+    return ['typeof', 'void'].includes(parent.childForFieldName('operator')?.text ?? '');
   return (
     parent?.type === 'binary_expression' &&
     ['===', '!==', '==', '!='].includes(parent.childForFieldName('operator')?.text ?? '')
