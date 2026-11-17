@@ -14,7 +14,7 @@ import {
   toStr,
   tryImplicitConversion,
 } from './conversions';
-import { def, isCoreMethod, sdef } from './define';
+import { def, sdef } from './define';
 import { argumentError, floatDomainError, rangeError, rubyError, typeError, zeroDivisionError } from './errors';
 import { exceptionOption } from './exceptionOption';
 import { roundFloatDigits, roundHalfAway } from './floatFormat';
@@ -49,7 +49,7 @@ import {
 import { platformGamma, platformLog2, platformLog10, platformLogGamma } from './platformMath';
 import { rt, RubyError, UnsupportedFeatureError } from './runtime';
 import { codePointCharacters } from './unicodeText';
-import { arr, asciiString, classOf, realClassOf, str, truthy } from './values';
+import { arr, asciiString, realClassOf, str, truthy } from './values';
 
 type Num = bigint | number;
 
@@ -210,12 +210,7 @@ for (const owner of ['Integer', 'Float']) {
   def(owner, '+@', 0, (self: Num) => self);
   def(owner, ['==', '==='], 1, function* (self: Num, [other]) {
     if (isNum(other)) return numericEquals(self, other);
-    const equality = classOf(other).findMethod('==');
-    if (equality && !isCoreMethod(equality, equality.owner, '=='))
-      return truthy(yield* callMethod(other, '==', [callbackReceiver(self)]));
-    if (other === NIL || typeof other === 'boolean' || other instanceof RString || other instanceof RSymbol)
-      return false;
-    return truthy(yield* callMethod(other, '==', [callbackReceiver(self)]));
+    return truthy(yield* callMethod(other, '==', [callbackReceiver(self)], undefined, undefined, { fcall: true }));
   });
   def(owner, 'eql?', 1, (self: Num, [other]) => typeof self === typeof other && numericEquals(self, other as Num));
   def(owner, '<=>', 1, function* (self: Num, [other]) {

@@ -39022,3 +39022,253 @@ test.each(nativeEncodedSuccessorCarryCases)(
     expect(run(source)).toMatchObject({ kind: 'executed', stdout, uncaughtException: undefined });
   }
 );
+
+const nativeNumericCaseCallbackCases = [
+  [
+    'class X;public;def ==(other);puts :called;true;end;end;x=X.new;n=1;[:==,:===].each{|m|begin;p n.send(m,x);rescue=>e;p e.class,e.message;end};begin;p(case x;when n;:yes;else;:no;end);p [x].grep(n).size;p((x in ^n));rescue=>e;p e.class,e.message;end',
+    'called\ntrue\ncalled\ntrue\ncalled\n:yes\ncalled\n1\ncalled\ntrue\n',
+  ],
+  [
+    'class X;public;def ==(other);puts :called;false;end;end;x=X.new;n=1;[:==,:===].each{|m|begin;p n.send(m,x);rescue=>e;p e.class,e.message;end};begin;p(case x;when n;:yes;else;:no;end);p [x].grep(n).size;p((x in ^n));rescue=>e;p e.class,e.message;end',
+    'called\nfalse\ncalled\nfalse\ncalled\n:no\ncalled\n0\ncalled\nfalse\n',
+  ],
+  [
+    'class X;public;def ==(other);puts :called;nil;end;end;x=X.new;n=1;[:==,:===].each{|m|begin;p n.send(m,x);rescue=>e;p e.class,e.message;end};begin;p(case x;when n;:yes;else;:no;end);p [x].grep(n).size;p((x in ^n));rescue=>e;p e.class,e.message;end',
+    'called\nfalse\ncalled\nfalse\ncalled\n:no\ncalled\n0\ncalled\nfalse\n',
+  ],
+  [
+    'class X;public;def ==(other);puts :called;:yes;end;end;x=X.new;n=1;[:==,:===].each{|m|begin;p n.send(m,x);rescue=>e;p e.class,e.message;end};begin;p(case x;when n;:yes;else;:no;end);p [x].grep(n).size;p((x in ^n));rescue=>e;p e.class,e.message;end',
+    'called\ntrue\ncalled\ntrue\ncalled\n:yes\ncalled\n1\ncalled\ntrue\n',
+  ],
+  [
+    'class X;public;def ==(other);puts :called;raise "bad";end;end;x=X.new;n=1;[:==,:===].each{|m|begin;p n.send(m,x);rescue=>e;p e.class,e.message;end};begin;p(case x;when n;:yes;else;:no;end);p [x].grep(n).size;p((x in ^n));rescue=>e;p e.class,e.message;end',
+    'called\nRuntimeError\n"bad"\ncalled\nRuntimeError\n"bad"\ncalled\nRuntimeError\n"bad"\n',
+  ],
+  [
+    'class X;private;def ==(other);puts :called;true;end;end;x=X.new;n=1;[:==,:===].each{|m|begin;p n.send(m,x);rescue=>e;p e.class,e.message;end};begin;p(case x;when n;:yes;else;:no;end);p [x].grep(n).size;p((x in ^n));rescue=>e;p e.class,e.message;end',
+    'called\ntrue\ncalled\ntrue\ncalled\n:yes\ncalled\n1\ncalled\ntrue\n',
+  ],
+  [
+    'class X;private;def ==(other);puts :called;false;end;end;x=X.new;n=1;[:==,:===].each{|m|begin;p n.send(m,x);rescue=>e;p e.class,e.message;end};begin;p(case x;when n;:yes;else;:no;end);p [x].grep(n).size;p((x in ^n));rescue=>e;p e.class,e.message;end',
+    'called\nfalse\ncalled\nfalse\ncalled\n:no\ncalled\n0\ncalled\nfalse\n',
+  ],
+  [
+    'class X;private;def ==(other);puts :called;nil;end;end;x=X.new;n=1;[:==,:===].each{|m|begin;p n.send(m,x);rescue=>e;p e.class,e.message;end};begin;p(case x;when n;:yes;else;:no;end);p [x].grep(n).size;p((x in ^n));rescue=>e;p e.class,e.message;end',
+    'called\nfalse\ncalled\nfalse\ncalled\n:no\ncalled\n0\ncalled\nfalse\n',
+  ],
+  [
+    'class X;private;def ==(other);puts :called;:yes;end;end;x=X.new;n=1;[:==,:===].each{|m|begin;p n.send(m,x);rescue=>e;p e.class,e.message;end};begin;p(case x;when n;:yes;else;:no;end);p [x].grep(n).size;p((x in ^n));rescue=>e;p e.class,e.message;end',
+    'called\ntrue\ncalled\ntrue\ncalled\n:yes\ncalled\n1\ncalled\ntrue\n',
+  ],
+  [
+    'class X;private;def ==(other);puts :called;raise "bad";end;end;x=X.new;n=1;[:==,:===].each{|m|begin;p n.send(m,x);rescue=>e;p e.class,e.message;end};begin;p(case x;when n;:yes;else;:no;end);p [x].grep(n).size;p((x in ^n));rescue=>e;p e.class,e.message;end',
+    'called\nRuntimeError\n"bad"\ncalled\nRuntimeError\n"bad"\ncalled\nRuntimeError\n"bad"\n',
+  ],
+  [
+    'class X;protected;def ==(other);puts :called;true;end;end;x=X.new;n=1;[:==,:===].each{|m|begin;p n.send(m,x);rescue=>e;p e.class,e.message;end};begin;p(case x;when n;:yes;else;:no;end);p [x].grep(n).size;p((x in ^n));rescue=>e;p e.class,e.message;end',
+    'called\ntrue\ncalled\ntrue\ncalled\n:yes\ncalled\n1\ncalled\ntrue\n',
+  ],
+  [
+    'class X;protected;def ==(other);puts :called;false;end;end;x=X.new;n=1;[:==,:===].each{|m|begin;p n.send(m,x);rescue=>e;p e.class,e.message;end};begin;p(case x;when n;:yes;else;:no;end);p [x].grep(n).size;p((x in ^n));rescue=>e;p e.class,e.message;end',
+    'called\nfalse\ncalled\nfalse\ncalled\n:no\ncalled\n0\ncalled\nfalse\n',
+  ],
+  [
+    'class X;protected;def ==(other);puts :called;nil;end;end;x=X.new;n=1;[:==,:===].each{|m|begin;p n.send(m,x);rescue=>e;p e.class,e.message;end};begin;p(case x;when n;:yes;else;:no;end);p [x].grep(n).size;p((x in ^n));rescue=>e;p e.class,e.message;end',
+    'called\nfalse\ncalled\nfalse\ncalled\n:no\ncalled\n0\ncalled\nfalse\n',
+  ],
+  [
+    'class X;protected;def ==(other);puts :called;:yes;end;end;x=X.new;n=1;[:==,:===].each{|m|begin;p n.send(m,x);rescue=>e;p e.class,e.message;end};begin;p(case x;when n;:yes;else;:no;end);p [x].grep(n).size;p((x in ^n));rescue=>e;p e.class,e.message;end',
+    'called\ntrue\ncalled\ntrue\ncalled\n:yes\ncalled\n1\ncalled\ntrue\n',
+  ],
+  [
+    'class X;protected;def ==(other);puts :called;raise "bad";end;end;x=X.new;n=1;[:==,:===].each{|m|begin;p n.send(m,x);rescue=>e;p e.class,e.message;end};begin;p(case x;when n;:yes;else;:no;end);p [x].grep(n).size;p((x in ^n));rescue=>e;p e.class,e.message;end',
+    'called\nRuntimeError\n"bad"\ncalled\nRuntimeError\n"bad"\ncalled\nRuntimeError\n"bad"\n',
+  ],
+  [
+    'class X;public;def ==(other);puts :called;true;end;end;x=X.new;n=1.0;[:==,:===].each{|m|begin;p n.send(m,x);rescue=>e;p e.class,e.message;end};begin;p(case x;when n;:yes;else;:no;end);p [x].grep(n).size;p((x in ^n));rescue=>e;p e.class,e.message;end',
+    'called\ntrue\ncalled\ntrue\ncalled\n:yes\ncalled\n1\ncalled\ntrue\n',
+  ],
+  [
+    'class X;public;def ==(other);puts :called;false;end;end;x=X.new;n=1.0;[:==,:===].each{|m|begin;p n.send(m,x);rescue=>e;p e.class,e.message;end};begin;p(case x;when n;:yes;else;:no;end);p [x].grep(n).size;p((x in ^n));rescue=>e;p e.class,e.message;end',
+    'called\nfalse\ncalled\nfalse\ncalled\n:no\ncalled\n0\ncalled\nfalse\n',
+  ],
+  [
+    'class X;public;def ==(other);puts :called;nil;end;end;x=X.new;n=1.0;[:==,:===].each{|m|begin;p n.send(m,x);rescue=>e;p e.class,e.message;end};begin;p(case x;when n;:yes;else;:no;end);p [x].grep(n).size;p((x in ^n));rescue=>e;p e.class,e.message;end',
+    'called\nfalse\ncalled\nfalse\ncalled\n:no\ncalled\n0\ncalled\nfalse\n',
+  ],
+  [
+    'class X;public;def ==(other);puts :called;:yes;end;end;x=X.new;n=1.0;[:==,:===].each{|m|begin;p n.send(m,x);rescue=>e;p e.class,e.message;end};begin;p(case x;when n;:yes;else;:no;end);p [x].grep(n).size;p((x in ^n));rescue=>e;p e.class,e.message;end',
+    'called\ntrue\ncalled\ntrue\ncalled\n:yes\ncalled\n1\ncalled\ntrue\n',
+  ],
+  [
+    'class X;public;def ==(other);puts :called;raise "bad";end;end;x=X.new;n=1.0;[:==,:===].each{|m|begin;p n.send(m,x);rescue=>e;p e.class,e.message;end};begin;p(case x;when n;:yes;else;:no;end);p [x].grep(n).size;p((x in ^n));rescue=>e;p e.class,e.message;end',
+    'called\nRuntimeError\n"bad"\ncalled\nRuntimeError\n"bad"\ncalled\nRuntimeError\n"bad"\n',
+  ],
+  [
+    'class X;private;def ==(other);puts :called;true;end;end;x=X.new;n=1.0;[:==,:===].each{|m|begin;p n.send(m,x);rescue=>e;p e.class,e.message;end};begin;p(case x;when n;:yes;else;:no;end);p [x].grep(n).size;p((x in ^n));rescue=>e;p e.class,e.message;end',
+    'called\ntrue\ncalled\ntrue\ncalled\n:yes\ncalled\n1\ncalled\ntrue\n',
+  ],
+  [
+    'class X;private;def ==(other);puts :called;false;end;end;x=X.new;n=1.0;[:==,:===].each{|m|begin;p n.send(m,x);rescue=>e;p e.class,e.message;end};begin;p(case x;when n;:yes;else;:no;end);p [x].grep(n).size;p((x in ^n));rescue=>e;p e.class,e.message;end',
+    'called\nfalse\ncalled\nfalse\ncalled\n:no\ncalled\n0\ncalled\nfalse\n',
+  ],
+  [
+    'class X;private;def ==(other);puts :called;nil;end;end;x=X.new;n=1.0;[:==,:===].each{|m|begin;p n.send(m,x);rescue=>e;p e.class,e.message;end};begin;p(case x;when n;:yes;else;:no;end);p [x].grep(n).size;p((x in ^n));rescue=>e;p e.class,e.message;end',
+    'called\nfalse\ncalled\nfalse\ncalled\n:no\ncalled\n0\ncalled\nfalse\n',
+  ],
+  [
+    'class X;private;def ==(other);puts :called;:yes;end;end;x=X.new;n=1.0;[:==,:===].each{|m|begin;p n.send(m,x);rescue=>e;p e.class,e.message;end};begin;p(case x;when n;:yes;else;:no;end);p [x].grep(n).size;p((x in ^n));rescue=>e;p e.class,e.message;end',
+    'called\ntrue\ncalled\ntrue\ncalled\n:yes\ncalled\n1\ncalled\ntrue\n',
+  ],
+  [
+    'class X;private;def ==(other);puts :called;raise "bad";end;end;x=X.new;n=1.0;[:==,:===].each{|m|begin;p n.send(m,x);rescue=>e;p e.class,e.message;end};begin;p(case x;when n;:yes;else;:no;end);p [x].grep(n).size;p((x in ^n));rescue=>e;p e.class,e.message;end',
+    'called\nRuntimeError\n"bad"\ncalled\nRuntimeError\n"bad"\ncalled\nRuntimeError\n"bad"\n',
+  ],
+  [
+    'class X;protected;def ==(other);puts :called;true;end;end;x=X.new;n=1.0;[:==,:===].each{|m|begin;p n.send(m,x);rescue=>e;p e.class,e.message;end};begin;p(case x;when n;:yes;else;:no;end);p [x].grep(n).size;p((x in ^n));rescue=>e;p e.class,e.message;end',
+    'called\ntrue\ncalled\ntrue\ncalled\n:yes\ncalled\n1\ncalled\ntrue\n',
+  ],
+  [
+    'class X;protected;def ==(other);puts :called;false;end;end;x=X.new;n=1.0;[:==,:===].each{|m|begin;p n.send(m,x);rescue=>e;p e.class,e.message;end};begin;p(case x;when n;:yes;else;:no;end);p [x].grep(n).size;p((x in ^n));rescue=>e;p e.class,e.message;end',
+    'called\nfalse\ncalled\nfalse\ncalled\n:no\ncalled\n0\ncalled\nfalse\n',
+  ],
+  [
+    'class X;protected;def ==(other);puts :called;nil;end;end;x=X.new;n=1.0;[:==,:===].each{|m|begin;p n.send(m,x);rescue=>e;p e.class,e.message;end};begin;p(case x;when n;:yes;else;:no;end);p [x].grep(n).size;p((x in ^n));rescue=>e;p e.class,e.message;end',
+    'called\nfalse\ncalled\nfalse\ncalled\n:no\ncalled\n0\ncalled\nfalse\n',
+  ],
+  [
+    'class X;protected;def ==(other);puts :called;:yes;end;end;x=X.new;n=1.0;[:==,:===].each{|m|begin;p n.send(m,x);rescue=>e;p e.class,e.message;end};begin;p(case x;when n;:yes;else;:no;end);p [x].grep(n).size;p((x in ^n));rescue=>e;p e.class,e.message;end',
+    'called\ntrue\ncalled\ntrue\ncalled\n:yes\ncalled\n1\ncalled\ntrue\n',
+  ],
+  [
+    'class X;protected;def ==(other);puts :called;raise "bad";end;end;x=X.new;n=1.0;[:==,:===].each{|m|begin;p n.send(m,x);rescue=>e;p e.class,e.message;end};begin;p(case x;when n;:yes;else;:no;end);p [x].grep(n).size;p((x in ^n));rescue=>e;p e.class,e.message;end',
+    'called\nRuntimeError\n"bad"\ncalled\nRuntimeError\n"bad"\ncalled\nRuntimeError\n"bad"\n',
+  ],
+  [
+    'class X;public;def ==(other);puts :called;true;end;end;x=X.new;n=Float::NAN;[:==,:===].each{|m|begin;p n.send(m,x);rescue=>e;p e.class,e.message;end};begin;p(case x;when n;:yes;else;:no;end);p [x].grep(n).size;p((x in ^n));rescue=>e;p e.class,e.message;end',
+    'called\ntrue\ncalled\ntrue\ncalled\n:yes\ncalled\n1\ncalled\ntrue\n',
+  ],
+  [
+    'class X;public;def ==(other);puts :called;false;end;end;x=X.new;n=Float::NAN;[:==,:===].each{|m|begin;p n.send(m,x);rescue=>e;p e.class,e.message;end};begin;p(case x;when n;:yes;else;:no;end);p [x].grep(n).size;p((x in ^n));rescue=>e;p e.class,e.message;end',
+    'called\nfalse\ncalled\nfalse\ncalled\n:no\ncalled\n0\ncalled\nfalse\n',
+  ],
+  [
+    'class X;public;def ==(other);puts :called;nil;end;end;x=X.new;n=Float::NAN;[:==,:===].each{|m|begin;p n.send(m,x);rescue=>e;p e.class,e.message;end};begin;p(case x;when n;:yes;else;:no;end);p [x].grep(n).size;p((x in ^n));rescue=>e;p e.class,e.message;end',
+    'called\nfalse\ncalled\nfalse\ncalled\n:no\ncalled\n0\ncalled\nfalse\n',
+  ],
+  [
+    'class X;public;def ==(other);puts :called;:yes;end;end;x=X.new;n=Float::NAN;[:==,:===].each{|m|begin;p n.send(m,x);rescue=>e;p e.class,e.message;end};begin;p(case x;when n;:yes;else;:no;end);p [x].grep(n).size;p((x in ^n));rescue=>e;p e.class,e.message;end',
+    'called\ntrue\ncalled\ntrue\ncalled\n:yes\ncalled\n1\ncalled\ntrue\n',
+  ],
+  [
+    'class X;public;def ==(other);puts :called;raise "bad";end;end;x=X.new;n=Float::NAN;[:==,:===].each{|m|begin;p n.send(m,x);rescue=>e;p e.class,e.message;end};begin;p(case x;when n;:yes;else;:no;end);p [x].grep(n).size;p((x in ^n));rescue=>e;p e.class,e.message;end',
+    'called\nRuntimeError\n"bad"\ncalled\nRuntimeError\n"bad"\ncalled\nRuntimeError\n"bad"\n',
+  ],
+  [
+    'class X;private;def ==(other);puts :called;true;end;end;x=X.new;n=Float::NAN;[:==,:===].each{|m|begin;p n.send(m,x);rescue=>e;p e.class,e.message;end};begin;p(case x;when n;:yes;else;:no;end);p [x].grep(n).size;p((x in ^n));rescue=>e;p e.class,e.message;end',
+    'called\ntrue\ncalled\ntrue\ncalled\n:yes\ncalled\n1\ncalled\ntrue\n',
+  ],
+  [
+    'class X;private;def ==(other);puts :called;false;end;end;x=X.new;n=Float::NAN;[:==,:===].each{|m|begin;p n.send(m,x);rescue=>e;p e.class,e.message;end};begin;p(case x;when n;:yes;else;:no;end);p [x].grep(n).size;p((x in ^n));rescue=>e;p e.class,e.message;end',
+    'called\nfalse\ncalled\nfalse\ncalled\n:no\ncalled\n0\ncalled\nfalse\n',
+  ],
+  [
+    'class X;private;def ==(other);puts :called;nil;end;end;x=X.new;n=Float::NAN;[:==,:===].each{|m|begin;p n.send(m,x);rescue=>e;p e.class,e.message;end};begin;p(case x;when n;:yes;else;:no;end);p [x].grep(n).size;p((x in ^n));rescue=>e;p e.class,e.message;end',
+    'called\nfalse\ncalled\nfalse\ncalled\n:no\ncalled\n0\ncalled\nfalse\n',
+  ],
+  [
+    'class X;private;def ==(other);puts :called;:yes;end;end;x=X.new;n=Float::NAN;[:==,:===].each{|m|begin;p n.send(m,x);rescue=>e;p e.class,e.message;end};begin;p(case x;when n;:yes;else;:no;end);p [x].grep(n).size;p((x in ^n));rescue=>e;p e.class,e.message;end',
+    'called\ntrue\ncalled\ntrue\ncalled\n:yes\ncalled\n1\ncalled\ntrue\n',
+  ],
+  [
+    'class X;private;def ==(other);puts :called;raise "bad";end;end;x=X.new;n=Float::NAN;[:==,:===].each{|m|begin;p n.send(m,x);rescue=>e;p e.class,e.message;end};begin;p(case x;when n;:yes;else;:no;end);p [x].grep(n).size;p((x in ^n));rescue=>e;p e.class,e.message;end',
+    'called\nRuntimeError\n"bad"\ncalled\nRuntimeError\n"bad"\ncalled\nRuntimeError\n"bad"\n',
+  ],
+  [
+    'class X;protected;def ==(other);puts :called;true;end;end;x=X.new;n=Float::NAN;[:==,:===].each{|m|begin;p n.send(m,x);rescue=>e;p e.class,e.message;end};begin;p(case x;when n;:yes;else;:no;end);p [x].grep(n).size;p((x in ^n));rescue=>e;p e.class,e.message;end',
+    'called\ntrue\ncalled\ntrue\ncalled\n:yes\ncalled\n1\ncalled\ntrue\n',
+  ],
+  [
+    'class X;protected;def ==(other);puts :called;false;end;end;x=X.new;n=Float::NAN;[:==,:===].each{|m|begin;p n.send(m,x);rescue=>e;p e.class,e.message;end};begin;p(case x;when n;:yes;else;:no;end);p [x].grep(n).size;p((x in ^n));rescue=>e;p e.class,e.message;end',
+    'called\nfalse\ncalled\nfalse\ncalled\n:no\ncalled\n0\ncalled\nfalse\n',
+  ],
+  [
+    'class X;protected;def ==(other);puts :called;nil;end;end;x=X.new;n=Float::NAN;[:==,:===].each{|m|begin;p n.send(m,x);rescue=>e;p e.class,e.message;end};begin;p(case x;when n;:yes;else;:no;end);p [x].grep(n).size;p((x in ^n));rescue=>e;p e.class,e.message;end',
+    'called\nfalse\ncalled\nfalse\ncalled\n:no\ncalled\n0\ncalled\nfalse\n',
+  ],
+  [
+    'class X;protected;def ==(other);puts :called;:yes;end;end;x=X.new;n=Float::NAN;[:==,:===].each{|m|begin;p n.send(m,x);rescue=>e;p e.class,e.message;end};begin;p(case x;when n;:yes;else;:no;end);p [x].grep(n).size;p((x in ^n));rescue=>e;p e.class,e.message;end',
+    'called\ntrue\ncalled\ntrue\ncalled\n:yes\ncalled\n1\ncalled\ntrue\n',
+  ],
+  [
+    'class X;protected;def ==(other);puts :called;raise "bad";end;end;x=X.new;n=Float::NAN;[:==,:===].each{|m|begin;p n.send(m,x);rescue=>e;p e.class,e.message;end};begin;p(case x;when n;:yes;else;:no;end);p [x].grep(n).size;p((x in ^n));rescue=>e;p e.class,e.message;end',
+    'called\nRuntimeError\n"bad"\ncalled\nRuntimeError\n"bad"\ncalled\nRuntimeError\n"bad"\n',
+  ],
+  [
+    'class X;public;def ==(other);puts :called;true;end;end;x=X.new;n=Float::INFINITY;[:==,:===].each{|m|begin;p n.send(m,x);rescue=>e;p e.class,e.message;end};begin;p(case x;when n;:yes;else;:no;end);p [x].grep(n).size;p((x in ^n));rescue=>e;p e.class,e.message;end',
+    'called\ntrue\ncalled\ntrue\ncalled\n:yes\ncalled\n1\ncalled\ntrue\n',
+  ],
+  [
+    'class X;public;def ==(other);puts :called;false;end;end;x=X.new;n=Float::INFINITY;[:==,:===].each{|m|begin;p n.send(m,x);rescue=>e;p e.class,e.message;end};begin;p(case x;when n;:yes;else;:no;end);p [x].grep(n).size;p((x in ^n));rescue=>e;p e.class,e.message;end',
+    'called\nfalse\ncalled\nfalse\ncalled\n:no\ncalled\n0\ncalled\nfalse\n',
+  ],
+  [
+    'class X;public;def ==(other);puts :called;nil;end;end;x=X.new;n=Float::INFINITY;[:==,:===].each{|m|begin;p n.send(m,x);rescue=>e;p e.class,e.message;end};begin;p(case x;when n;:yes;else;:no;end);p [x].grep(n).size;p((x in ^n));rescue=>e;p e.class,e.message;end',
+    'called\nfalse\ncalled\nfalse\ncalled\n:no\ncalled\n0\ncalled\nfalse\n',
+  ],
+  [
+    'class X;public;def ==(other);puts :called;:yes;end;end;x=X.new;n=Float::INFINITY;[:==,:===].each{|m|begin;p n.send(m,x);rescue=>e;p e.class,e.message;end};begin;p(case x;when n;:yes;else;:no;end);p [x].grep(n).size;p((x in ^n));rescue=>e;p e.class,e.message;end',
+    'called\ntrue\ncalled\ntrue\ncalled\n:yes\ncalled\n1\ncalled\ntrue\n',
+  ],
+  [
+    'class X;public;def ==(other);puts :called;raise "bad";end;end;x=X.new;n=Float::INFINITY;[:==,:===].each{|m|begin;p n.send(m,x);rescue=>e;p e.class,e.message;end};begin;p(case x;when n;:yes;else;:no;end);p [x].grep(n).size;p((x in ^n));rescue=>e;p e.class,e.message;end',
+    'called\nRuntimeError\n"bad"\ncalled\nRuntimeError\n"bad"\ncalled\nRuntimeError\n"bad"\n',
+  ],
+  [
+    'class X;private;def ==(other);puts :called;true;end;end;x=X.new;n=Float::INFINITY;[:==,:===].each{|m|begin;p n.send(m,x);rescue=>e;p e.class,e.message;end};begin;p(case x;when n;:yes;else;:no;end);p [x].grep(n).size;p((x in ^n));rescue=>e;p e.class,e.message;end',
+    'called\ntrue\ncalled\ntrue\ncalled\n:yes\ncalled\n1\ncalled\ntrue\n',
+  ],
+  [
+    'class X;private;def ==(other);puts :called;false;end;end;x=X.new;n=Float::INFINITY;[:==,:===].each{|m|begin;p n.send(m,x);rescue=>e;p e.class,e.message;end};begin;p(case x;when n;:yes;else;:no;end);p [x].grep(n).size;p((x in ^n));rescue=>e;p e.class,e.message;end',
+    'called\nfalse\ncalled\nfalse\ncalled\n:no\ncalled\n0\ncalled\nfalse\n',
+  ],
+  [
+    'class X;private;def ==(other);puts :called;nil;end;end;x=X.new;n=Float::INFINITY;[:==,:===].each{|m|begin;p n.send(m,x);rescue=>e;p e.class,e.message;end};begin;p(case x;when n;:yes;else;:no;end);p [x].grep(n).size;p((x in ^n));rescue=>e;p e.class,e.message;end',
+    'called\nfalse\ncalled\nfalse\ncalled\n:no\ncalled\n0\ncalled\nfalse\n',
+  ],
+  [
+    'class X;private;def ==(other);puts :called;:yes;end;end;x=X.new;n=Float::INFINITY;[:==,:===].each{|m|begin;p n.send(m,x);rescue=>e;p e.class,e.message;end};begin;p(case x;when n;:yes;else;:no;end);p [x].grep(n).size;p((x in ^n));rescue=>e;p e.class,e.message;end',
+    'called\ntrue\ncalled\ntrue\ncalled\n:yes\ncalled\n1\ncalled\ntrue\n',
+  ],
+  [
+    'class X;private;def ==(other);puts :called;raise "bad";end;end;x=X.new;n=Float::INFINITY;[:==,:===].each{|m|begin;p n.send(m,x);rescue=>e;p e.class,e.message;end};begin;p(case x;when n;:yes;else;:no;end);p [x].grep(n).size;p((x in ^n));rescue=>e;p e.class,e.message;end',
+    'called\nRuntimeError\n"bad"\ncalled\nRuntimeError\n"bad"\ncalled\nRuntimeError\n"bad"\n',
+  ],
+  [
+    'class X;protected;def ==(other);puts :called;true;end;end;x=X.new;n=Float::INFINITY;[:==,:===].each{|m|begin;p n.send(m,x);rescue=>e;p e.class,e.message;end};begin;p(case x;when n;:yes;else;:no;end);p [x].grep(n).size;p((x in ^n));rescue=>e;p e.class,e.message;end',
+    'called\ntrue\ncalled\ntrue\ncalled\n:yes\ncalled\n1\ncalled\ntrue\n',
+  ],
+  [
+    'class X;protected;def ==(other);puts :called;false;end;end;x=X.new;n=Float::INFINITY;[:==,:===].each{|m|begin;p n.send(m,x);rescue=>e;p e.class,e.message;end};begin;p(case x;when n;:yes;else;:no;end);p [x].grep(n).size;p((x in ^n));rescue=>e;p e.class,e.message;end',
+    'called\nfalse\ncalled\nfalse\ncalled\n:no\ncalled\n0\ncalled\nfalse\n',
+  ],
+  [
+    'class X;protected;def ==(other);puts :called;nil;end;end;x=X.new;n=Float::INFINITY;[:==,:===].each{|m|begin;p n.send(m,x);rescue=>e;p e.class,e.message;end};begin;p(case x;when n;:yes;else;:no;end);p [x].grep(n).size;p((x in ^n));rescue=>e;p e.class,e.message;end',
+    'called\nfalse\ncalled\nfalse\ncalled\n:no\ncalled\n0\ncalled\nfalse\n',
+  ],
+  [
+    'class X;protected;def ==(other);puts :called;:yes;end;end;x=X.new;n=Float::INFINITY;[:==,:===].each{|m|begin;p n.send(m,x);rescue=>e;p e.class,e.message;end};begin;p(case x;when n;:yes;else;:no;end);p [x].grep(n).size;p((x in ^n));rescue=>e;p e.class,e.message;end',
+    'called\ntrue\ncalled\ntrue\ncalled\n:yes\ncalled\n1\ncalled\ntrue\n',
+  ],
+  [
+    'class X;protected;def ==(other);puts :called;raise "bad";end;end;x=X.new;n=Float::INFINITY;[:==,:===].each{|m|begin;p n.send(m,x);rescue=>e;p e.class,e.message;end};begin;p(case x;when n;:yes;else;:no;end);p [x].grep(n).size;p((x in ^n));rescue=>e;p e.class,e.message;end',
+    'called\nRuntimeError\n"bad"\ncalled\nRuntimeError\n"bad"\ncalled\nRuntimeError\n"bad"\n',
+  ],
+] as const;
+
+test.each(nativeNumericCaseCallbackCases)(
+  'Numeric comparisons dispatch internal equality callbacks regardless of visibility: %s',
+  (source, stdout) => {
+    expect(run(source)).toMatchObject({ kind: 'executed', stdout, uncaughtException: undefined });
+  }
+);
