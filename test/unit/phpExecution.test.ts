@@ -120,3 +120,8 @@ test('turtle methods take their Japanese and English names', () => {
   );
   expect(execution.kind === 'executed' && execution.finalTurtles).toEqual([{ x: 0, y: 2, color: '#', dir: 'S' }]);
 });
+
+test('string offset padding stops at the string limit before allocating', () => {
+  const execution = run('<?php $s = "abc"; try { $s[1000000000] = "x"; } catch (Throwable $e) { echo "caught"; }');
+  expect(execution.kind === 'executed' && execution.stdout).toMatch(/^\nFatal error: Allowed memory size/);
+});

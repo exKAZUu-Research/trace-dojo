@@ -700,8 +700,6 @@ export function writeProp(object: PhpObject, name: string, value: Value, scope: 
         guarded(object, `set:${name}`, () => callMagic(object, magic, [name, value]));
         return;
       }
-      if (decl.isReadonly)
-        throwError('Error', `Cannot modify protected readonly property ${object.cls.name}::$${name}`);
       throwError('Error', `Cannot access ${decl.visibility} property ${object.cls.name}::$${name}`);
     }
     if (decl.hooks?.set && !object.guards?.has(`hook:${name}`)) {
@@ -721,18 +719,18 @@ export function writeProp(object: PhpObject, name: string, value: Value, scope: 
       const current = object.props.get(decl.key);
       const initialized = current !== UNINIT && current !== undefined;
       if (initialized && !object.cloning)
-        throwError('Error', `Cannot modify readonly property ${object.cls.name}::$${name}`);
+        throwError('Error', `Cannot modify readonly property ${decl.cls.name}::$${name}`);
       const outsideScope = !canWriteProp(decl, scope) || (scope !== decl.cls && !object.cloning);
       if (outsideScope && (scope === undefined || !scope.isSubclassOf(decl.cls))) {
         throwError(
           'Error',
-          `Cannot modify ${readonlySetVisibility(decl)}(set) readonly property ${object.cls.name}::$${name} from ${scopeText(scope)}`
+          `Cannot modify ${readonlySetVisibility(decl)}(set) readonly property ${decl.cls.name}::$${name} from ${scopeText(scope)}`
         );
       }
       if (object.cloning) {
         object.readonlyInit ??= new Set();
         if (object.readonlyInit.has(decl.key))
-          throwError('Error', `Cannot modify readonly property ${object.cls.name}::$${name}`);
+          throwError('Error', `Cannot modify readonly property ${decl.cls.name}::$${name}`);
         object.readonlyInit.add(decl.key);
       }
     } else if (!canWriteProp(decl, scope)) {
@@ -806,7 +804,7 @@ export function checkIndirectModification(object: PhpObject, name: string, scope
   if (decl.isReadonly) {
     const slot = object.props.get(decl.key);
     if (slot !== UNINIT && slot !== undefined)
-      throwError('Error', `Cannot indirectly modify readonly property ${object.cls.name}::$${name}`);
+      throwError('Error', `Cannot indirectly modify readonly property ${decl.cls.name}::$${name}`);
   } else if (!canWriteProp(decl, scope)) {
     throwError(
       'Error',
@@ -823,12 +821,14 @@ function readonlySetVisibility(decl: PropDecl): Visibility {
 /** The reference a property holds, creating it, for `=&`, by-reference arguments, and nested writes. */
 // code-gauge-allow functionCognitiveComplexity 20 -- Follows PHP's class linking and property access rules in their order of checks.
 // code-gauge-allow functionNcss 31 -- Follows PHP's class linking and property access rules in their order of checks.
-export function propRef(object: PhpObject, name: string, scope: PhpClass | undefined): Ref {
+export function propRef(object: PhpObject, name: string, scope: PhpClass | undefined, acquire = false): Ref {
   const decl = lookupProp(object.cls, name, scope);
   const key = decl && !decl.isStatic ? decl.key : name;
   if (decl && !decl.isStatic && !canAccessProp(decl, scope)) {
     throwError('Error', `Cannot access ${decl.visibility} property ${object.cls.name}::$${name}`);
   }
+  if (acquire && decl?.isReadonly)
+    throwError('Error', `Cannot acquire reference to readonly property ${decl.cls.name}::$${name}`);
   checkIndirectModification(object, name, scope);
   let slot = object.props.get(key);
   if (slot instanceof Ref) return slot;
@@ -874,7 +874,7 @@ export function unsetProp(object: PhpObject, name: string, scope: PhpClass | und
       }
       throwError('Error', `Cannot access ${decl.visibility} property ${object.cls.name}::$${name}`);
     }
-    if (decl.isReadonly) throwError('Error', `Cannot unset readonly property ${object.cls.name}::$${name}`);
+    if (decl.isReadonly) throwError('Error', `Cannot unset readonly property ${decl.cls.name}::$${name}`);
     const slot = object.props.get(decl.key);
     if (slot instanceof Ref) slot.rc--;
     if (decl.type) object.props.set(decl.key, UNINIT);

@@ -579,7 +579,7 @@ function foreachObject(statement: Extract<Stmt, { k: 'foreach' }>, object: PhpOb
     visited.add(name);
     runtime.spend();
     if (statement.byRef) {
-      const ref = propRef(object, name, scope);
+      const ref = propRef(object, name, scope, true);
       bindForeachRef(statement.value, ref);
       if (statement.key) assignTo(statement.key, name);
       runtime.steps.stepBinding(statement.row, true);

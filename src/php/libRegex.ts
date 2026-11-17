@@ -299,7 +299,7 @@ function replaceCompiled(
   limit: number,
   count: { value: number },
   replace: (match: Match) => string
-): string {
+): string | undefined {
   let result = '';
   let last = 0;
   let done = 0;
@@ -310,6 +310,7 @@ function replaceCompiled(
     done++;
     rt().ensureStringFits(result.length);
   }
+  if (rt().lastPregError !== 0) return undefined;
   count.value += done;
   return result + subject.slice(last);
 }
@@ -464,6 +465,7 @@ defineFunction(
       }
       last = match.ends[0];
     }
+    if (rt().lastPregError !== 0) return false;
     if (!noEmpty || last < subject.length) add(subject.slice(last), last);
     return result;
   }

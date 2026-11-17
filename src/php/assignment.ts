@@ -211,6 +211,8 @@ function stringOffsetPlace(parent: Place, text: string, key: Value | undefined):
         warn('Only the first byte will be assigned to the string offset');
         character = character[0];
       }
+      rt().ensureStringFits(Math.max(text.length, offset + 1));
+      rt().spend(Math.ceil(Math.max(text.length, offset + 1) / 64));
       const padded = offset >= text.length ? text + ' '.repeat(offset - text.length) + character : text;
       const updated = offset >= text.length ? padded : text.slice(0, offset) + character + text.slice(offset + 1);
       parent.set(updated);
@@ -498,6 +500,10 @@ export function unsetTarget(target: Expr): void {
     }
     case 'idx': {
       if (target.index === undefined) throwError('Error', 'Cannot use [] for unsetting');
+      if (target.base.k === 'var' && target.base.name === 'GLOBALS') {
+        new VarPlace(runtime.globalFrame, toStr(ev(target.index))).unset();
+        return;
+      }
       const base = unsetContainer(target.base);
       const index = ev(target.index);
       if (base === undefined) return;
@@ -525,24 +531,34 @@ export function unsetTarget(target: Expr): void {
 
 /** The container an unset of an element writes into, or undefined when it does not exist. */
 function unsetContainer(e: Expr): PhpArray | PhpObject | string | undefined {
-  if (e.k === 'var' || e.k === 'varvar' || e.k === 'idx' || e.k === 'prop' || e.k === 'sprop') {
-    if (e.k === 'idx' && e.base.k === 'var' && e.base.name === 'GLOBALS' && e.index) {
-      const name = toStr(ev(e.index));
-      new VarPlace(rt().globalFrame, name).unset();
-      return undefined;
+  const place = unsetPlace(e);
+  const value = place?.get();
+  if (value === undefined) warnUndefinedBase(e);
+  if (value instanceof PhpArray) return writableContainer(place as Place) as PhpArray;
+  if (value instanceof PhpObject || typeof value === 'string') return value;
+  return undefined;
+}
+
+function unsetPlace(e: Expr): Place | undefined {
+  if (e.k === 'idx') {
+    if (e.index === undefined) throwError('Error', 'Cannot use [] for unsetting');
+    if (e.base.k === 'var' && e.base.name === 'GLOBALS') {
+      return new VarPlace(rt().globalFrame, toStr(ev(e.index)));
     }
-    if (!isset(e) && !(e.k === 'prop')) {
-      warnUndefinedBase(e);
-      return undefined;
+    const container = unsetContainer(e.base);
+    const key = ev(e.index);
+    if (container instanceof PhpArray) return new ElementPlace(container, toKey(key, 'unset'));
+    if (container instanceof PhpObject) {
+      const place = arrayAccessPlace(container, key);
+      return place.nested?.() ?? place;
     }
-    const place = placeOf(e);
-    const value = place.get();
-    if (value instanceof PhpArray) return writableContainer(place) as PhpArray;
-    if (value instanceof PhpObject || typeof value === 'string') return value;
+    if (typeof container === 'string') throwError('Error', 'Cannot unset string offsets');
     return undefined;
   }
-  const value = ev(e);
-  return value instanceof PhpArray || value instanceof PhpObject ? value : undefined;
+  if (e.k === 'var' || e.k === 'varvar' || e.k === 'prop' || e.k === 'sprop') {
+    return placeOf(e);
+  }
+  return new ValuePlace(ev(e));
 }
 
 /** Warns about the undefined variable an unset of an element starts from, as PHP's fetch for unset does. */
