@@ -639,9 +639,12 @@ function forOfIterationSource(node: Node): IterationSource | undefined {
   const isLogical = operator === '&&' || operator === '||';
   const isNegation = operand.type === 'unary_expression' && field(operand, 'operator').text === '!';
   if (operator === '??') return coalescingIterationSource(operand);
+  if (operand.type === 'object') return objectIterationSource(operand);
+  if (operand.type === 'ternary_expression') {
+    // A conditional on a literal is printed by its parts; one on anything else is named by its value.
+    return isLiteral(unwrapParentheses(field(operand, 'condition'))) ? iterationSource(node) : undefined;
+  }
   if (
-    operand.type === 'ternary_expression' ||
-    operand.type === 'object' ||
     (isLogical && !LITERAL_TYPES.has(unwrapParentheses(field(operand, 'left')).type)) ||
     (isNegation && NEGATED_BY_VALUE.has(unwrapParentheses(field(operand, 'argument')).type)) ||
     (operator !== undefined && !isLogical && chain(operand, operator).length > 2) ||
@@ -672,6 +675,21 @@ function coalescingIterationSource(operand: Node): IterationSource | undefined {
       isLiteral(left) &&
       left.type !== 'null');
   return named ? { text } : undefined;
+}
+
+/**
+ * How V8 names a `for...of` iterable written as an object literal: by a part for each member when all of them are
+ * `key: value` pairs with written keys or spreads, and otherwise, with a computed key, a shorthand, or a method, by its
+ * value.
+ */
+function objectIterationSource(operand: Node): IterationSource | undefined {
+  const members = namedChildren(operand).filter((member) => member.type !== 'comment');
+  const printable = members.every(
+    (member) =>
+      member.type === 'spread_element' ||
+      (member.type === 'pair' && member.childForFieldName('key')?.type !== 'computed_property_name')
+  );
+  return printable ? { text: `{${'(intermediate value)'.repeat(members.length)}}` } : undefined;
 }
 
 /** How V8 prints an operand of `??` in a loop's error, a call as its callee and an optional chain as a value. */

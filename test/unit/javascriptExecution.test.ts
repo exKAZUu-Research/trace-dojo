@@ -1553,6 +1553,19 @@ function main() {
 main();`,
   ],
   [
+    'object literals and conditionals named in iteration and call errors',
+    `const x = 5, o1 = { p: 1 }, k = "z";
+function main() {
+  for (const run of [() => { for (const v of { p: 1 }); }, () => { for (const v of { p: 1, q: 2, r: 3 }); }, () => { for (const v of {}); }, () => { for (const v of { [1]: 2 }); },
+    () => { for (const v of { p: 1, [k]: 2 }); }, () => { for (const v of { x }); }, () => { for (const v of { ...o1 }); }, () => { for (const v of { m() {} }); },
+    () => { for (const v of (true ? x : x)); }, () => { for (const v of (o1.p ? x : x)); }, () => { for (const v of (0 ? x : x)); }, () => { for (const v of ("s" ? x : x)); },
+    () => ({ p: 1, q: 2 })(), () => [...{ p: 1, q: 2 }], () => { const [a] = { p: 1, q: 2 }; }, () => (true ? x : x)()]) {
+    try { run(); } catch (e) { console.log(e.message); }
+  }
+}
+main();`,
+  ],
+  [
     'for-of over every operand kind of nullish coalescing',
     `const o = { a: 1, b: null }; let x = 5; let n = null; const g = () => 1; const h = () => null;
 function main() {

@@ -103,7 +103,9 @@ function printedCallee(node: Node): string | undefined {
       return printedCallee(namedChildren(node)[0]);
     }
     case 'object': {
-      return namedChildren(node).some((child) => child.type !== 'comment') ? '{(intermediate value)}' : '{}';
+      // V8 prints a part for each member.
+      const members = namedChildren(node).filter((child) => child.type !== 'comment');
+      return `{${'(intermediate value)'.repeat(members.length)}}`;
     }
     case 'array': {
       return `[${namedChildren(node)
