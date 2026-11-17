@@ -1,7 +1,9 @@
+// code-gauge-allow-file fileNcss 440 -- Keeps typed byte views and their overlapping storage operations together.
 import { panic } from './arith';
 import { enumLookup } from './enumLookup';
 import { asBigFloat, BigFloat, type FloatBits, floatOf, FORMATS } from './floats';
 import { bitSizeOf, errorUnionOffsets, fieldOffsets, optionalNicheBits, sizeOf, unionOffsets } from './layout';
+import { reserveMemory, spendMemory } from './memoryAccounting';
 import { copyForStorage, undefinedValue } from './semaBase';
 import { singleValueOf } from './singleValue';
 import { type Type, typeId } from './types';
@@ -52,6 +54,33 @@ export function physicalBytes(
   return bytes.map(Number);
 }
 
+export function zeroPhysicalValue(type: Extract<Type, { kind: 'struct' | 'union' }>): Value {
+  const length = sizeOf(type);
+  reserveMemory(length);
+  spendMemory(length);
+  const memory = new BufferMemory(Array.from<Value>({ length }).fill(0n), spendMemory, new BufferMemorySpace());
+  return memory.read(type, 0);
+}
+
+export function physicalUnion(type: Extract<Type, { kind: 'union' }>, value: ZUnion): ZUnion {
+  if (value.fieldView) return value;
+  const length = sizeOf(type);
+  reserveMemory(length);
+  spendMemory(length);
+  const bytes = Array.from<Value>({ length }).fill(0xaan);
+  const memory = new BufferMemory(bytes, spendMemory, new BufferMemorySpace());
+  memory.write(type, 0, value);
+  const backing = memory.read(type, 0) as ZUnion;
+  value.slots = backing.slots;
+  value.fieldView = backing.fieldView;
+  value.copyBacking = backing.copyBacking;
+  value.writeBacking = backing.writeBacking;
+  value.backingKey = backing.backingKey;
+  value.backingReferences = backing.backingReferences;
+  value.copyBackingTo = backing.copyBackingTo;
+  return value;
+}
+
 // code-gauge-allow functionParameterCount 7 -- Binds typed storage, its byte region, work budget, and initialized prefix together.
 export function bindBufferMemory(
   memory: object,
@@ -87,6 +116,7 @@ export function bindBufferMemory(
 class BufferMemory {
   private readonly views = new Map<string, Value>();
   private readonly referenceHolds = new Map<string, object>();
+  private readonly referenceOffsets = new Map<number, { key: string; value: object }>();
 
   constructor(
     private readonly bytes: Value[],
@@ -118,7 +148,7 @@ class BufferMemory {
 
   // code-gauge-allow functionNcss 40 -- Decodes each scalar representation and transparent wrapper from shared bytes.
   // code-gauge-allow functionCognitiveComplexity 22 -- Decodes each scalar representation and transparent wrapper from shared bytes.
-  private read(type: Type, offset: number, packed?: number): Value {
+  read(type: Type, offset: number, packed?: number): Value {
     if (type.kind === 'array' || type.kind === 'struct' || type.kind === 'union')
       return this.readAggregate(type, offset);
     switch (type.kind) {
@@ -222,7 +252,38 @@ class BufferMemory {
       },
     });
     registerStorageLocation(union.slots, () => ({ storage: this.bytes, index: offset / 8 + layout.payload }));
+    if (type.layout !== 'auto') this.attachUnionBacking(union, type, offset);
     return union;
+  }
+
+  private attachUnionBacking(union: ZUnion, type: Extract<Type, { kind: 'union' }>, offset: number): void {
+    union.backingKey = () => {
+      spendMemory(sizeOf(type));
+      return this.bytes.slice(offset / 8, offset / 8 + sizeOf(type)).join(',');
+    };
+    union.backingReferences = () => {
+      spendMemory(sizeOf(type) * 8);
+      const values: Value[] = [];
+      for (let bit = 0; bit < sizeOf(type) * 8; bit++) {
+        const reference = this.referenceOffsets.get(offset + bit);
+        if (reference) values.push(reference.value as Value);
+      }
+      return values;
+    };
+    union.fieldView = (index) => ({ slots: this.slots([{ type: type.fields![index].type, offset }]) });
+    union.copyBacking = () => {
+      const length = sizeOf(type);
+      reserveMemory(length);
+      spendMemory(length);
+      const memory = new BufferMemory(Array.from<Value>({ length }).fill(0n), spendMemory, this.space);
+      this.copyRegion(memory, offset, 0, length);
+      const copy = memory.read(type, 0) as ZUnion;
+      copy.tag = union.tag;
+      return copy;
+    };
+    union.writeBacking = (value) => this.write(type, offset, physicalUnion(type, value));
+    union.copyBackingTo = (destination, start) =>
+      this.copyRegion(destination as BufferMemory, offset, start, sizeOf(type));
   }
 
   arrayView(child: Type, length: bigint, offset: number, hasSentinel = false): ZArray {
@@ -317,6 +378,7 @@ class BufferMemory {
   }
 
   // code-gauge-allow functionCognitiveComplexity 21 -- Writes aggregate contents using their physical layout without replacing interior views.
+  // code-gauge-allow functionNcss 33 -- Encodes aggregate layouts without invalidating interior aliases.
   private writeAggregate(
     type: Extract<Type, { kind: 'array' | 'struct' | 'union' }>,
     offset: number,
@@ -351,11 +413,33 @@ class BufferMemory {
       }
       case 'union': {
         const union = value as ZUnion;
+        if (type.layout !== 'auto' && union.copyBackingTo) {
+          union.copyBackingTo(this, offset);
+          (this.readAggregate(type, offset) as ZUnion).tag = union.tag;
+          return;
+        }
         const layout = unionOffsets(type);
         (this.readAggregate(type, offset) as ZUnion).tag = union.tag;
         this.write(type.fields![union.tag].type, offset + layout.payload * 8, union.slots[0]);
         return;
       }
+    }
+  }
+
+  private copyRegion(destination: BufferMemory, offset: number, start: number, length: number): void {
+    spendMemory(length * 20);
+    const bytes = this.bytes.slice(offset / 8, offset / 8 + length);
+    const references: { offset: number; key: string; value: object }[] = [];
+    for (let bit = 0; bit < length * 8; bit++) {
+      const reference = this.referenceOffsets.get(offset + bit);
+      if (reference) references.push({ ...reference, offset: start + bit });
+    }
+    for (let bit = 0; bit < length * 8; bit++) destination.referenceOffsets.delete(start + bit);
+    for (let index = 0; index < bytes.length; index++) destination.bytes[start / 8 + index] = bytes[index];
+    for (const reference of references) {
+      destination.referenceOffsets.set(reference.offset, reference);
+      destination.referenceHolds.set(reference.key, reference.value);
+      destination.space.references.set(reference.key, reference.value);
     }
   }
 
@@ -395,8 +479,15 @@ class BufferMemory {
   private reference(offset: number, type: Type, bits = 64): Value {
     const id = this.readBits(offset, bits);
     const key = referenceKey(id, type, bits);
-    const value = this.referenceHolds.get(key) ?? this.space.references.get(key);
-    if (value) this.referenceHolds.set(key, value);
+    const stored = this.referenceOffsets.get(offset);
+    const value =
+      (stored?.key === key ? stored.value : undefined) ??
+      this.referenceHolds.get(key) ??
+      this.space.references.get(key);
+    if (value) {
+      this.referenceHolds.set(key, value);
+      this.referenceOffsets.set(offset, { key, value });
+    }
     return (value as Value) ?? undefinedValue(type);
   }
 
@@ -426,6 +517,7 @@ class BufferMemory {
     const key = referenceKey(id, type, bits);
     this.space.references.set(key, value);
     this.referenceHolds.set(key, value);
+    this.referenceOffsets.set(offset, { key, value });
     this.writeBits(offset, bits, id);
   }
 

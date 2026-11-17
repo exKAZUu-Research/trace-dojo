@@ -140,7 +140,6 @@ function storeMapSlot(frame: Frame, storage: Slots, index: number, value: Value,
 }
 
 function snapshotEntry(frame: Frame, state: MapState, index: number, keyType: Type, valueType: Type): ZStruct {
-  frame.runtime.spend(transferCost(keyType) + transferCost(valueType));
   return new ZStruct([
     copyForFrame(frame, state.keys.slots[index], keyType),
     copyForFrame(frame, state.values.slots[index], valueType),
@@ -467,19 +466,7 @@ function defineMembers(types: MapTypes, keyType: Type, valueType: Type, kind: Ke
       const expected = takesAllocator ? [ALLOCATOR, ...options.args] : options.args;
       const args = compileArgs(sema, expectArgs(sema, call, expected.length, name), expected);
       const state = stateOf(sema, call.receiver, map, call.span, options.mutable);
-      const transfers = args.map((arg) => {
-        const evaluate = arg.eval;
-        const cost = transferCost(arg.type);
-        return {
-          ...arg,
-          eval: (frame: Frame) => {
-            const value = evaluate(frame);
-            frame.runtime.spend(cost);
-            return value;
-          },
-        };
-      });
-      return nativeStateCall(options.result, transfers, call.span, state, (received, values, frame) => {
+      return nativeStateCall(options.result, args, call.span, state, (received, values, frame) => {
         if (takesAllocator) received.allocator = allocatorState(values[0]);
         return run(received, values.slice(takesAllocator ? 1 : 0), frame);
       });

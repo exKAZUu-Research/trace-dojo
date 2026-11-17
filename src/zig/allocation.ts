@@ -7,7 +7,11 @@ export class CompilationStorage {
   private allocated = 0;
 
   reserve(type: Type): void {
-    this.allocated += valueSlots(type);
+    this.reserveSlots(valueSlots(type));
+  }
+
+  reserveSlots(count: number): void {
+    this.allocated += count;
     if (this.allocated > LIMITS.maxSlots) throw new ExecutionLimitError('storage');
   }
 }

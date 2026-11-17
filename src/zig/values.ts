@@ -154,9 +154,14 @@ export class ZStruct implements Slots {
   constructor(public slots: Value[]) {}
 }
 
-/** A union value: the index of its active field and that field's value. */
 export class ZUnion implements Slots {
   slots: Value[];
+  writeBacking?: (value: ZUnion) => void;
+  backingKey?: () => string;
+  backingReferences?: () => Value[];
+  fieldView?: (index: number) => Slots;
+  copyBacking?: () => ZUnion;
+  copyBackingTo?: (destination: unknown, offset: number) => void;
 
   constructor(
     public tag: number,
@@ -366,7 +371,7 @@ export function copyValue(value: Value): Value {
     return new ZArray(copied, 0, value.lengthValue, value.hasSentinel);
   }
   if (value instanceof ZStruct) return new ZStruct(value.slots.map((slot) => copyValue(slot)));
-  if (value instanceof ZUnion) return new ZUnion(value.tag, copyValue(value.slots[0]));
+  if (value instanceof ZUnion) return value.copyBacking?.() ?? new ZUnion(value.tag, copyValue(value.slots[0]));
   if (value instanceof Some) return new Some(copyValue(value.value));
   return value;
 }
@@ -379,7 +384,7 @@ export function storeInto(target: Slots, index: number, value: Value): void {
   storeSnapshotInto(target, index, copyValue(value));
 }
 
-// code-gauge-allow functionCognitiveComplexity 16 -- Preserves existing aggregate locations when storing copied values.
+// code-gauge-allow functionCognitiveComplexity 18 -- Preserves existing aggregate locations when storing copied values.
 function storeSnapshotInto(target: Slots, index: number, value: Value): void {
   if (storageLocations.has(target.slots)) {
     target.slots[index] = value;
@@ -397,7 +402,17 @@ function storeSnapshotInto(target: Slots, index: number, value: Value): void {
     for (const [at, slot] of source.entries()) storeSnapshotInto(current, at, slot);
     return;
   }
-  if (value instanceof ZUnion && current instanceof ZUnion && current.tag === value.tag) {
+  if (value instanceof ZUnion && current instanceof ZUnion && current.writeBacking) {
+    current.writeBacking(value);
+    return;
+  }
+  if (
+    value instanceof ZUnion &&
+    current instanceof ZUnion &&
+    !value.fieldView &&
+    !current.fieldView &&
+    current.tag === value.tag
+  ) {
     storeSnapshotInto(current, 0, value.slots[0]);
     return;
   }

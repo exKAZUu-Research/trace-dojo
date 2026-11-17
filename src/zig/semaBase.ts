@@ -1,6 +1,6 @@
 import { CompileError } from '../interpreter/diagnostics';
 import { ExecutionBudget } from '../interpreter/limits';
-import { CompilationStorage, resolveTypeSlots, valueSlots } from './allocation';
+import { CompilationStorage, resolveTypeSlots, transferCost, valueSlots } from './allocation';
 import { PANIC, panic } from './arith';
 import { isDiscardName } from './ast';
 import type {
@@ -266,6 +266,10 @@ export abstract class SemaBase implements SemaApi {
   reserveStorage(type: Type, span: Span): void {
     this.resolveStorage(type, span);
     this.storage.reserve(type);
+  }
+
+  reservePhysicalSlots(count: number): void {
+    this.storage.reserveSlots(count);
   }
 
   error(span: Span, message: string): never {
@@ -1448,6 +1452,7 @@ export function valueEvaluators(args: readonly TExpr[]): TExpr['eval'][] {
 
 export function copyForFrame(frame: Frame, value: Value, type: Type): Value {
   if (!(type.kind === 'struct' && type.namespace.internal)) frame.runtime.reserveStorage(valueSlots(type));
+  frame.runtime.spend(transferCost(type));
   const singleton = type.kind === 'array' ? singleValueOf(type, () => frame.runtime.spend()) : undefined;
   return copyForStorage(singleton ? singleton.value : value);
 }
@@ -1465,7 +1470,7 @@ export function copyForStorage(value: Value): Value {
       )
     );
   if (value instanceof ZStruct) return new ZStruct(value.slots.map((slot) => copyForStorage(slot)));
-  if (value instanceof ZUnion) return new ZUnion(value.tag, copyForStorage(value.slots[0]));
+  if (value instanceof ZUnion) return value.copyBacking?.() ?? new ZUnion(value.tag, copyForStorage(value.slots[0]));
   if (value instanceof Some) return new Some(copyForStorage(value.value));
   if (value instanceof NativeHandle && typeof value.state.fresh === 'function')
     return (value.state.fresh as () => Value)();

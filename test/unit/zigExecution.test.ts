@@ -5828,3 +5828,158 @@ test('map key comparisons preserve independently backed strings and nested aggre
     uncaughtException: undefined,
   });
 });
+
+test.each(['fixed', 'file'])('custom formatting shares %s writer aliases and pointer identity', (kind) => {
+  const initialize =
+    kind === 'fixed'
+      ? 'var w=std.Io.Writer.fixed(&b);gp=&w;try w.print("{f}",.{P{}});std.debug.print("{s}|{} {}",.{w.buffered(),seen,same});'
+      : 'var w=std.Io.File.stdout().writer(init.io,&b);gp=&w.interface;try w.interface.print("{f}",.{P{}});try w.interface.flush();std.debug.print("{} {}",.{seen,same});';
+  const source = `const std=@import("std");var gp:?*std.Io.Writer=null;var seen:usize=0;var same=false;const P=struct{pub fn format(_:P,w:*std.Io.Writer)std.Io.Writer.Error!void{same=w==gp.?;try w.writeAll("a");seen=gp.?.buffered().len;try gp.?.writeAll("b");}};pub fn main(init:std.process.Init)!void{${kind === 'fixed' ? '_=init;' : ''}var b:[20]u8=undefined;${initialize}}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stdout: kind === 'file' ? 'ab' : '',
+    stderr: kind === 'fixed' ? 'ab|1 true' : '1 true',
+    uncaughtException: undefined,
+  });
+});
+
+test('writer buffer and end fields remain live through aliases and buffer replacement', () => {
+  const source = `const std=@import("std");pub fn main()!void{var b:[8]u8=undefined;var other:[4]u8=undefined;var w=std.Io.Writer.fixed(&b);try w.writeAll("abc");std.debug.print("{} {}|",.{w.end,w.buffer.len});const end=&w.end;end.*=1;w.buffer[1]=122;w.end=2;std.debug.print("{s}|",.{w.buffered()});w.buffer=&other;w.end=0;try w.writeAll("xy");std.debug.print("{s} {}",.{w.buffered(),w.buffer.len});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: '3 8|az|xy 4',
+    uncaughtException: undefined,
+  });
+});
+
+test('writer writes respect a shortened public buffer', () => {
+  const source = `const std=@import("std");pub fn main()!void{var b:[8]u8=undefined;var w=std.Io.Writer.fixed(&b);w.buffer=w.buffer[0..2];w.writeAll("abc") catch|e|{std.debug.print("{s} {s}",.{@errorName(e),w.buffered()});return;};}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: 'WriteFailed ab',
+    uncaughtException: undefined,
+  });
+});
+
+test('const writer headers reject public field mutation', () => {
+  expect(
+    executeProgram(
+      'zig',
+      `const std=@import("std");pub fn main()void{var b:[8]u8=undefined;const w=std.Io.Writer.fixed(&b);w.end=1;}`
+    )
+  ).toMatchObject({ kind: 'compileError' });
+});
+
+test.each([
+  ['u8', '2'],
+  ['i8', '-1'],
+])('tag formatting panics for unnamed %s enum values', (backing, tag) => {
+  for (const declaration of ['const x:E=@enumFromInt(TAG);', 'var x:E=@enumFromInt(TAG);_=&x;']) {
+    const source = `const std=@import("std");const E=enum(${backing}){a=1,_};pub fn main()void{${declaration.replace('TAG', tag)}std.debug.print("pre{t}",.{x});}`;
+    expect(executeProgram('zig', source)).toMatchObject({
+      kind: 'executed',
+      stderr: 'pre',
+      uncaughtException: 'panic: invalid enum value',
+    });
+  }
+});
+
+test('empty positional patterns return the supplied position without a bounds check', () => {
+  const source = `const std=@import("std");pub fn main()void{var pos:usize=4;_=&pos;std.debug.print("{any} {any} {any}",.{std.mem.findPos(u8,"abc",pos,""),std.mem.indexOfPos(u8,"",9,""),std.mem.findPos(u8,"abc",1,"")});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: '4 9 1',
+    uncaughtException: undefined,
+  });
+});
+
+test.each(['q.clearRetainingCapacity();', '_=q.pop();'])(
+  'priority queues meter repeated aggregate transfers: %s',
+  (remove) => {
+    const source = `const std=@import("std");const P=struct{x:u8,a:[1000]u8};fn cmp(_:void,a:P,b:P)std.math.Order{return std.math.order(a.x,b.x);}pub fn main(init:std.process.Init)!void{var q:std.PriorityQueue(P,void,cmp)=.empty;defer q.deinit(init.gpa);const p=P{.x=1,.a=@splat(0)};for(0..600)|_|{try q.push(init.gpa,p);${remove}}}`;
+    expect(executeProgram('zig', source)).toMatchObject({ kind: 'limitExceeded', limit: 'operations' });
+  }
+);
+
+test.each(['comptime_int', 'comptime_float'])('checked division supports %s and inferred error sets', (type) => {
+  const source = `const std=@import("std");pub fn main()void{const narrowed:error{}!${type}=std.math.divTrunc(${type},7,2);_=narrowed catch unreachable;const a=std.math.divTrunc(${type},-7,2) catch unreachable;const b=std.math.divFloor(${type},-7,2) catch unreachable;const c=std.math.divCeil(${type},7,2) catch unreachable;const d=std.math.divExact(${type},8,2) catch unreachable;const e=std.math.mod(${type},-7,2) catch unreachable;const f=std.math.rem(${type},-7,2) catch unreachable;std.debug.print("{d} {d} {d} {d} {d} {d}",.{a,b,c,d,e,f});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: '-3 -4 4 4 1 -1',
+    uncaughtException: undefined,
+  });
+});
+
+test.each(['concat', 'join', 'replaceOwned'])(
+  'allocating memory %s meters source reads and stored copies',
+  (operation) => {
+    const expression =
+      operation === 'concat'
+        ? 'std.mem.concat(init.gpa,u8,&.{&a})'
+        : operation === 'join'
+          ? 'std.mem.join(init.gpa,"",&.{&a})'
+          : 'std.mem.replaceOwned(u8,init.gpa,&a,"z","x")';
+    const source = `const std=@import("std");pub fn main(init:std.process.Init)!void{const a:[150000]u8=@splat(97);for(0..4)|_|{const result=try ${expression};init.gpa.free(result);}}`;
+    expect(executeProgram('zig', source)).toMatchObject({ kind: 'limitExceeded', limit: 'operations' });
+  }
+);
+
+test.each(['extern', 'packed'])('explicit %s union fields share bytes and preserve copies', (layout) => {
+  const source = `const std=@import("std");const U=${layout} union{x:u32,y:u32};pub fn main()void{const c=U{.x=42};std.debug.print("{}|",.{c.y});var a=U{.x=1};const p=&a.y;p.*=7;var b=a;b.x=9;std.debug.print("{} {} {} {}",.{a.x,a.y,b.x,b.y});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: '42|7 7 9 9',
+    uncaughtException: undefined,
+  });
+});
+
+test('extern union views preserve inactive bytes through nested copies and allocator storage', () => {
+  const source = `const std=@import("std");const U=extern union{bytes:[4]u8,first:u8};const S=struct{u:U};pub fn main(init:std.process.Init)!void{var s=S{.u=.{.bytes=.{1,2,3,4}}};s.u.first=9;var t=s;t.u.first=8;const p=try init.gpa.create(U);defer init.gpa.destroy(p);p.*=s.u;p.first=7;std.debug.print("{} {} {} {} {}",.{s.u.bytes[0],t.u.bytes[0],t.u.bytes[3],p.bytes[0],p.bytes[3]});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: '9 8 4 7 4',
+    uncaughtException: undefined,
+  });
+});
+
+test('zeroes initializes slices and comptime numbers recursively', () => {
+  const source = `const std=@import("std");const S=struct{bytes:[]u8,z:[:0]const u8};pub fn main()void{const s=std.mem.zeroes(S);const i=std.mem.zeroes(comptime_int);const f=std.mem.zeroes(comptime_float);std.debug.print("{} {} {} {d} {}",.{s.bytes.len,s.z.len,i+1,f+2,s.z[0..0:0].len});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: '0 0 1 2 0',
+    uncaughtException: undefined,
+  });
+});
+
+test.each([
+  'enum(u8){a=1}',
+  'struct{e:enum(u8){a=1}}',
+  'union{a:u8,b:u8}',
+  'packed union{a:u8,b:u8}',
+  '[:1]const u8',
+  '[:0]const u16',
+  '*u8',
+  'error{Bad}!u8',
+])('zeroes rejects nonzeroable types: %s', (type) => {
+  expect(
+    executeProgram('zig', `const std=@import("std");const T=${type};pub fn main()void{_=std.mem.zeroes(T);}`)
+  ).toMatchObject({ kind: 'compileError' });
+});
+
+test('zeroes fills every extern union field and nested union with zero bytes', () => {
+  const source = `const std=@import("std");const U=extern union{first:u8,wide:u64};const S=struct{u:U};const E=enum(u8){a=1,_};pub fn main()void{const u=std.mem.zeroes(U);const s=std.mem.zeroes(S);const e=std.mem.zeroes(E);std.debug.print("{} {} {} {}",.{u.first,u.wide,s.u.wide,@intFromEnum(e)});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: '0 0 0 0',
+    uncaughtException: undefined,
+  });
+});
+
+test('union assignment preserves existing field aliases and pointer payload copies', () => {
+  const source = `const std=@import("std");const U=extern union{x:u32,y:u32};const P=extern union{p:*u8,q:*u8};pub fn main()void{var u=U{.x=1};const field=&u.y;u=.{.y=8};var n:u8=2;var p=P{.p=&n};p.q.*=3;const copy=p;p=.{.q=&n};copy.p.*=4;std.debug.print("{} {} {}",.{field.*,u.x,n});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: '8 8 4',
+    uncaughtException: undefined,
+  });
+});

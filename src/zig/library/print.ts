@@ -47,9 +47,8 @@ import {
   isDiscardingWriter,
   writeCounted,
   WRITER,
+  writerPointer,
   type WriterState,
-  writerState,
-  writerValue,
   writeTo,
 } from './writer';
 
@@ -213,14 +212,9 @@ function formatMethod(sema: SemaApi, type: Type, span: Span): FormatMethod {
   );
   const byPointer = selfType.kind === 'pointer';
   return (frame, value, state) => {
-    const header = writerValue(state);
-    const writer = new Pointer({ slots: [header] }, 0);
-    try {
-      const result = fn.call(frame, [byPointer ? new Pointer({ slots: [value] }, 0) : value, writer]);
-      if (result instanceof ErrorValue) throw new PrintWriteError(result);
-    } finally {
-      Object.assign(state, writerState(header));
-    }
+    const writer = writerPointer(state);
+    const result = fn.call(frame, [byPointer ? new Pointer({ slots: [value] }, 0) : value, writer]);
+    if (result instanceof ErrorValue) throw new PrintWriteError(result);
   };
 }
 

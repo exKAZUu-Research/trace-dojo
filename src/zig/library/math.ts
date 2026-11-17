@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 561 -- Groups the related standard library operations that share this module.
+// code-gauge-allow-file fileNcss 570 -- Groups the related standard library operations that share this module.
 import {
   checked,
   divCeil,
@@ -29,7 +29,6 @@ import {
   FORMATS,
   integerSqrt,
   isInfinite,
-  isIntegral,
   isNaNFloat,
   minMaxFloat,
   negate,
@@ -321,30 +320,36 @@ class UnexpectedRemainder extends Error {}
 const DIVISION_ERRORS = errorSetOf(['DivisionByZero', 'Overflow']);
 const MOD_ERRORS = errorSetOf(['DivisionByZero', 'NegativeDenominator']);
 
-// code-gauge-allow functionCognitiveComplexity 21 -- Transcribes the corresponding function of Zig's standard library or compiler step by step.
+// code-gauge-allow functionCognitiveComplexity 24 -- Transcribes the corresponding function of Zig's standard library or compiler step by step.
 function intDivision(
   name: string,
   errors: typeof DIVISION_ERRORS,
-  compute: (a: bigint, b: bigint, type: IntType) => bigint
+  compute: (a: bigint, b: bigint) => bigint
 ): () => Member {
   return generic(name, 3, (sema, call, type, [aArg, bArg]) => {
-    if (type.kind === 'float') return floatDivisionMember(sema, call, name, errors, type, [aArg, bArg]);
-    if (type.kind !== 'int') return sema.error(call.span, `${name} は数の型にだけ使えます（${typeName(type)} です）。`);
+    if (type.kind === 'float' || type.kind === 'comptime_float')
+      return floatDivisionMember(sema, call, name, errors, type, [aArg, bArg]);
+    if (type.kind !== 'int' && type.kind !== 'comptime_int')
+      return sema.error(call.span, `${name} は数の型にだけ使えます（${typeName(type)} です）。`);
     const a = sema.coerce(sema.compile(aArg, type), type, aArg);
     const b = sema.coerce(sema.compile(bArg, type), type, bArg);
-    return computed(errorUnionOf(errors, type), [a, b], call.span, ([x, y]) => {
-      if ((y as bigint) === 0n) return ErrorValue.of('DivisionByZero');
-      if (errors === MOD_ERRORS && (y as bigint) < 0n) return ErrorValue.of('NegativeDenominator');
-      let result: bigint;
-      try {
-        result = compute(x as bigint, y as bigint, type);
-      } catch (error) {
-        if (error instanceof UnexpectedRemainder) return ErrorValue.of('UnexpectedRemainder');
-        throw error;
-      }
-      if (!fitsInt(result, type)) return ErrorValue.of('Overflow');
-      return result;
-    });
+    return checkedDivisionResult(
+      computed(errorUnionOf(divisionErrors(type, errors), type), [a, b], call.span, ([x, y], frame) => {
+        if ((y as bigint) === 0n) return ErrorValue.of('DivisionByZero');
+        if (errors === MOD_ERRORS && (y as bigint) < 0n) return ErrorValue.of('NegativeDenominator');
+        let result: bigint;
+        try {
+          spendIntegerOperation(x as bigint, y as bigint, false, nativeBudget(sema, frame));
+          result = compute(x as bigint, y as bigint);
+        } catch (error) {
+          if (error instanceof UnexpectedRemainder) return ErrorValue.of('UnexpectedRemainder');
+          throw error;
+        }
+        if (type.kind === 'int' && !fitsInt(result, type)) return ErrorValue.of('Overflow');
+        return result;
+      }),
+      type
+    );
   });
 }
 
@@ -354,27 +359,52 @@ function floatDivisionMember(
   call: NativeCall,
   name: string,
   errors: typeof DIVISION_ERRORS,
-  type: FloatType,
+  type: Type,
   [aArg, bArg]: readonly Expression[]
 ): TExpr {
   const [a, b] = [aArg, bArg].map((arg) => sema.coerce(sema.compile(arg, type), type, arg));
   const operation = name.slice('std.math.'.length);
-  return computed(errorUnionOf(errors, type), [a, b], call.span, ([x, y]) => {
-    const numerator = x as AnyFloat;
-    const denominator = y as AnyFloat;
-    const order = compareFloats(denominator, 0);
-    if (order === 0) return ErrorValue.of('DivisionByZero');
-    if (errors === MOD_ERRORS && order !== undefined && order < 0) return ErrorValue.of('NegativeDenominator');
-    if (operation === 'mod') return floatMod(numerator, denominator, type.bits);
-    if (operation === 'rem') return floatRem(numerator, denominator, type.bits);
-    const quotient = floatArithmetic(numerator, denominator, '/', type.bits);
-    if (operation === 'divExact') return isIntegral(quotient) ? quotient : ErrorValue.of('UnexpectedRemainder');
-    return roundFloat(
-      { divTrunc: '@trunc', divFloor: '@floor', divCeil: '@ceil' }[operation] as string,
-      quotient,
-      type.bits
+  const bits = bitsOf(type);
+  return checkedDivisionResult(
+    computed(errorUnionOf(divisionErrors(type, errors), type), [a, b], call.span, ([x, y]) => {
+      const numerator = x as AnyFloat;
+      const denominator = y as AnyFloat;
+      const order = compareFloats(denominator, 0);
+      if (order === 0) return ErrorValue.of('DivisionByZero');
+      if (errors === MOD_ERRORS && order !== undefined && order < 0) return ErrorValue.of('NegativeDenominator');
+      if (operation === 'mod') return floatMod(numerator, denominator, bits);
+      if (operation === 'rem') return floatRem(numerator, denominator, bits);
+      const quotient = floatArithmetic(numerator, denominator, '/', bits);
+      if (operation === 'divExact') {
+        const result = roundFloat('@trunc', quotient, bits);
+        return compareFloats(floatArithmetic(result, denominator, '*', bits), numerator) === 0
+          ? result
+          : ErrorValue.of('UnexpectedRemainder');
+      }
+      return roundFloat(
+        { divTrunc: '@trunc', divFloor: '@floor', divCeil: '@ceil' }[operation] as string,
+        quotient,
+        bits
+      );
+    }),
+    type
+  );
+}
+
+function divisionErrors(type: Type, errors: typeof DIVISION_ERRORS): typeof DIVISION_ERRORS {
+  return type.kind === 'int' && type.signed
+    ? errors
+    : errorSetOf([...(errors.names ?? [])].filter((name) => name !== 'Overflow'));
+}
+
+function checkedDivisionResult(result: TExpr, type: Type): TExpr {
+  if ((type.kind === 'comptime_int' || type.kind === 'comptime_float') && result.known)
+    return known(
+      errorUnionOf(errorSetOf(result.value instanceof ErrorValue ? [result.value.name] : []), type),
+      result.value,
+      result.span
     );
-  });
+  return result;
 }
 
 function gcdMember(lcm: boolean): Member {

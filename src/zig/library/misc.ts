@@ -1,9 +1,20 @@
+import { transferCost } from '../allocation';
 import { indexOutOfBounds, PANIC, panic } from '../arith';
 import type { Span } from '../ast';
 import { enumLookup } from '../enumLookup';
+import { sizeOf } from '../layout';
 import { isIntegerType } from '../operands';
 import { type Frame, withHeldValues } from '../runtime';
-import { copyForStorage, FnRef, known, runtime, type SemaApi, type TExpr, undefinedValue } from '../semaBase';
+import {
+  copyForFrame,
+  copyForStorage,
+  FnRef,
+  known,
+  runtime,
+  type SemaApi,
+  type TExpr,
+  undefinedValue,
+} from '../semaBase';
 import {
   BOOL,
   CONST_U8_SLICE,
@@ -39,10 +50,10 @@ import {
   ZUnion,
 } from '../values';
 import { WeakValueMap } from '../weakValueMap';
+import { zeroAllocation } from '../zeroSizedMemory';
 import {
   computed,
   constSlice,
-  elements,
   equalValues,
   mutableSlice,
   nativeBudget,
@@ -418,35 +429,39 @@ function priorityQueueType(
     { name: 'context', type: context, hasDefault: false },
   ]);
   queueTypes.set(key, type);
+  const store = (frame: Frame, items: Slice, index: number, value: Value): void => {
+    frame.runtime.spend(2 * transferCost(element));
+    storeSliceValue(items, index, value);
+  };
   const order = (frame: Frame, queue: ZStruct, a: Value, b: Value): bigint =>
     compare.call(frame, [queue.slots[2], a, b]) as bigint;
   const siftUp = (frame: Frame, queue: ZStruct, start: number): void => {
     const items = queue.slots[0] as Slice;
-    const child = copyForStorage(items.get(start));
+    const child = copyForFrame(frame, items.get(start), element);
     let index = start;
     while (index > 0) {
       const parentIndex = (index - 1) >> 1;
       const parent = items.get(parentIndex);
       if (order(frame, queue, child, parent) !== ORDER_LT) break;
-      storeSliceValue(items, index, parent);
+      store(frame, items, index, parent);
       index = parentIndex;
     }
-    storeSliceValue(items, index, child);
+    store(frame, items, index, child);
   };
   const siftDown = (frame: Frame, queue: ZStruct, target: number): void => {
     const items = queue.slots[0] as Slice;
-    const element = copyForStorage(items.get(target));
+    const saved = copyForFrame(frame, items.get(target), element);
     let index = target;
     for (;;) {
       let lesser = index * 2 + 1;
       if (lesser >= items.length) break;
       const next = lesser + 1;
       if (next < items.length && order(frame, queue, items.get(next), items.get(lesser)) === ORDER_LT) lesser = next;
-      if (order(frame, queue, element, items.get(lesser)) === ORDER_LT) break;
-      storeSliceValue(items, index, items.get(lesser));
+      if (order(frame, queue, saved, items.get(lesser)) === ORDER_LT) break;
+      store(frame, items, index, items.get(lesser));
       index = lesser;
     }
-    storeSliceValue(items, index, element);
+    store(frame, items, index, saved);
   };
   const reserve = (frame: Frame, queue: ZStruct, wanted: number, allocator: AllocatorState | undefined): boolean => {
     let capacity = Number(queue.slots[1] as bigint);
@@ -461,6 +476,14 @@ function priorityQueueType(
       Number(queue.slots[1] as bigint) > 0 ? items.target : undefined
     );
     if (!complete) return false;
+    if (sizeOf(element) === 0) {
+      const storage = zeroAllocation(frame.runtime, BigInt(capacity), element);
+      complete(storage.target, items.length);
+      queue.slots[0] = new Slice(storage.target, storage.start, items.lengthValue);
+      queue.slots[1] = BigInt(capacity);
+      return true;
+    }
+    frame.runtime.spend((capacity + items.length) * transferCost(element));
     const values = items.values().map(copyForStorage);
     while (values.length < capacity) values.push(undefinedValue(element));
     const storage = new ZArray(values, 0, capacity);
@@ -490,13 +513,19 @@ function priorityQueueType(
           run(frame, state.receiver, values.slice(allocator ? 1 : 0), allocator ? allocatorState(values[0]) : undefined)
       );
     });
-  const push = (frame: Frame, queue: ZStruct, values: Value[], allocator: AllocatorState | undefined): Value => {
+  const push = (
+    frame: Frame,
+    queue: ZStruct,
+    values: Value[] | Slice,
+    allocator: AllocatorState | undefined
+  ): Value => {
     const items = queue.slots[0] as Slice;
     if (!reserve(frame, queue, items.length + values.length, allocator)) return ERROR_OUT_OF_MEMORY;
-    for (const value of values) {
+    for (let index = 0; index < values.length; index++) {
+      const value = values instanceof Slice ? values.get(index) : values[index];
       const current = queue.slots[0] as Slice;
       const grown = new Slice(current.target, current.start, current.length + 1);
-      grown.set(current.length, copyForStorage(value));
+      store(frame, grown, current.length, value);
       queue.slots[0] = grown;
       siftUp(frame, queue, grown.length - 1);
     }
@@ -505,11 +534,12 @@ function priorityQueueType(
   const popIndex = (frame: Frame, queue: ZStruct, index: number): Value => {
     const items = queue.slots[0] as Slice;
     if (index >= items.length) indexOutOfBounds(index, items.length);
-    const last = copyForStorage(items.get(items.length - 1));
-    const item = copyForStorage(items.get(index));
-    storeSliceValue(items, index, last);
+    const last = copyForFrame(frame, items.get(items.length - 1), element);
+    const item = copyForFrame(frame, items.get(index), element);
+    store(frame, items, index, last);
     const shrunk = new Slice(items.target, items.start, items.length - 1);
     queue.slots[0] = shrunk;
+    frame.runtime.spend(2 * transferCost(element));
     items.target.slots[items.start + shrunk.length] = undefinedValue(element);
     return withHeldValues(frame, [item, last], () => {
       if (index === shrunk.length) return item;
@@ -543,11 +573,11 @@ function priorityQueueType(
       [sliceOf(element, true)],
       errorUnionOf(ALLOCATOR_ERROR, VOID),
       true,
-      (frame, queue, [values], allocator) => push(frame, queue, elements(values), allocator)
+      (frame, queue, [values], allocator) => push(frame, queue, values as Slice, allocator)
     ),
-    peek: method('peek', [], optionalOf(element), false, (_, queue) => {
+    peek: method('peek', [], optionalOf(element), false, (frame, queue) => {
       const items = queue.slots[0] as Slice;
-      return items.length > 0 ? optionalSome(items.get(0), element) : NULL;
+      return items.length > 0 ? optionalSome(copyForFrame(frame, items.get(0), element), element) : NULL;
     }),
     pop: method('pop', [], optionalOf(element), false, (frame, queue) =>
       (queue.slots[0] as Slice).length > 0 ? optionalSome(popIndex(frame, queue, 0), element) : NULL
@@ -557,10 +587,13 @@ function priorityQueueType(
     ),
     count: method('count', [], USIZE, false, (_, queue) => BigInt((queue.slots[0] as Slice).length)),
     capacity: method('capacity', [], USIZE, false, (_, queue) => queue.slots[1]),
-    clearRetainingCapacity: method('clearRetainingCapacity', [], VOID, false, (_, queue) => {
+    clearRetainingCapacity: method('clearRetainingCapacity', [], VOID, false, (frame, queue) => {
       const items = queue.slots[0] as Slice;
-      for (let index = 0; index < items.length; index++)
-        items.target.slots[items.start + index] = undefinedValue(element);
+      if (sizeOf(element) !== 0) {
+        frame.runtime.spend(items.length * 2 * transferCost(element));
+        for (let index = 0; index < items.length; index++)
+          items.target.slots[items.start + index] = undefinedValue(element);
+      }
       queue.slots[0] = new Slice(items.target, items.start, 0);
       return;
     }),

@@ -416,7 +416,10 @@ function writerOf(
   if (mutable && pointer.type.isConst)
     return sema.error(call.span, '定数の std.Io.Writer には書き込めません（var で宣言してください）。');
   const evaluate = pointer.eval;
-  return (frame) => writerState((evaluate(frame) as Pointer).load());
+  return (frame) => {
+    const pointer = evaluate(frame) as Pointer;
+    return writerState(pointer.load(), pointer);
+  };
 }
 
 function writeRepeated(frame: Parameters<TExpr['eval']>[0], state: WriterState, data: number[], count: number): Value {

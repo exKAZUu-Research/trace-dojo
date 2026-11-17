@@ -130,9 +130,13 @@ export class TurtleReachability {
     }
   }
 
-  // code-gauge-allow functionCognitiveComplexity 28 -- Dispatches typed edges while preserving native opaque state.
-  // code-gauge-allow functionNcss 36 -- Covers each representation that can retain a turtle.
+  // code-gauge-allow functionCognitiveComplexity 20 -- Dispatches typed edges while preserving opaque reference roots.
+  // code-gauge-allow functionNcss 35 -- Covers each representation that can retain a turtle.
   private typedChildren(value: Value, type: Type, push: Push, turtles: Set<unknown>): void {
+    if (value instanceof ZUnion && value.backingReferences) {
+      for (const reference of value.backingReferences()) push(reference);
+      return;
+    }
     switch (type.kind) {
       case 'array': {
         if (value instanceof ZArray) this.sequence(value, type.child, push);
@@ -152,10 +156,7 @@ export class TurtleReachability {
         return;
       }
       case 'struct': {
-        if (value instanceof ZStruct && type.fields && !type.native && !type.namespace.internal) {
-          for (const [index, field] of type.fields.entries())
-            push(field.comptimeValue ? field.comptimeValue.value : value.slots[index], field.type);
-        } else if (value && typeof value === 'object') this.children(value, push, turtles);
+        this.structChildren(value, type, push, turtles);
         return;
       }
       case 'union': {
@@ -171,6 +172,20 @@ export class TurtleReachability {
     }
   }
 
+  private structChildren(
+    value: Value,
+    type: Extract<Type, { kind: 'struct' }>,
+    push: Push,
+    turtles: Set<unknown>
+  ): void {
+    if (!(value instanceof ZStruct && type.fields && !type.native && !type.namespace.internal)) {
+      if (value && typeof value === 'object') this.children(value, push, turtles);
+      return;
+    }
+    for (const [index, field] of type.fields.entries())
+      push(field.comptimeValue ? field.comptimeValue.value : value.slots[index], field.type);
+  }
+
   private sequence(value: ZArray | Slice, child: Type, push: Push): void {
     if (!this.mayContainTurtles(child)) return;
     for (let index = 0; BigInt(index) < value.lengthValue; index++) {
@@ -179,9 +194,11 @@ export class TurtleReachability {
     }
   }
 
-  // code-gauge-allow functionCognitiveComplexity 19 -- Traverses untyped temporaries and native storage without recursive host calls.
+  // code-gauge-allow functionCognitiveComplexity 23 -- Traverses untyped temporaries and native storage without recursive host calls.
   private children(item: object, push: Push, turtles: Set<unknown>): void {
-    if (item instanceof ZArray || item instanceof ZStruct || item instanceof ZUnion) {
+    if (item instanceof ZUnion && item.backingReferences) {
+      for (const reference of item.backingReferences()) push(reference);
+    } else if (item instanceof ZArray || item instanceof ZStruct || item instanceof ZUnion) {
       for (const value of item.slots) push(value);
     } else if (item instanceof Pointer || item instanceof Slice) push(item.target);
     else if (item instanceof Some) push(item.value);

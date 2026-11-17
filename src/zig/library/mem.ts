@@ -1,7 +1,10 @@
-// code-gauge-allow-file fileNcss 629 -- Groups the related standard library operations that share this module.
+// code-gauge-allow-file fileNcss 670 -- Groups the related standard library operations that share this module.
+import { transferCost } from '../allocation';
 import { indexOutOfBounds, PANIC, panic } from '../arith';
 import type { Expression, Span } from '../ast';
-import { type AnyFloat, compareFloats, floatFromBigInt, minMaxFloat } from '../floats';
+import { zeroPhysicalValue } from '../bufferMemory';
+import { enumLookup } from '../enumLookup';
+import { type AnyFloat, BigFloat, compareFloats, floatFromBigInt, minMaxFloat } from '../floats';
 import { sizeOf } from '../layout';
 import { isArithmeticType } from '../operands';
 import type { Frame } from '../runtime';
@@ -13,7 +16,6 @@ import {
   optionalOf,
   pointerTo,
   sliceOf,
-  type StructField,
   type StructType,
   TYPE,
   type Type,
@@ -32,7 +34,6 @@ import {
   compareScalars,
   computed,
   constSlice,
-  elements,
   equalValues,
   generic,
   mutableSlice,
@@ -131,7 +132,7 @@ function findSequence(
   from: bigint,
   equal: typeof equalValues
 ): bigint | undefined {
-  if (needle.length === 0n) return from <= haystack.length ? from : undefined;
+  if (needle.length === 0n) return from;
   outer: for (let index = from; index + needle.length <= haystack.length; index++) {
     for (let offset = 0n; offset < needle.length; offset++) {
       if (!equal(haystack.get(index + offset), needle.get(offset))) continue outer;
@@ -758,7 +759,7 @@ const MEMBERS: Record<string, () => Member> = {
       slicesArg
     );
     return allocatingCall(sliceOf(type, false), [allocator, slices], call.span, ([value], frame) =>
-      joiningPlan(elements(value), [], () => frame.runtime.spend(), sizeOf(type) === 0)
+      joiningPlan(value as Slice, undefined, () => frame.runtime.spend(), sizeOf(type) === 0)
     );
   }),
   join: fnMember('std.mem.join', (sema, call) => {
@@ -771,7 +772,7 @@ const MEMBERS: Record<string, () => Member> = {
       slicesArg
     );
     return allocatingCall(sliceOf(U8, false), [allocator, separator, slices], call.span, ([sep, value], frame) =>
-      joiningPlan(elements(value), elements(sep), () => frame.runtime.spend())
+      joiningPlan(value as Slice, sep as Slice, () => frame.runtime.spend())
     );
   }),
   sort: sorter('std.mem.sort', 'block'),
@@ -780,11 +781,8 @@ const MEMBERS: Record<string, () => Member> = {
     const [typeArg] = expectArgs(sema, call, 1, 'std.mem.zeroes');
     const type = sema.compileType(typeArg);
     sema.reserveStorage(type, call.span);
-    return known(
-      type,
-      zeroValue(type, (struct) => sema.structFields(struct, call.span)),
-      call.span
-    );
+    sema.spendCompilation(transferCost(type));
+    return known(type, zeroValue(type, sema, call.span), call.span);
   }),
   cutPrefix: cutMember('std.mem.cutPrefix', false),
   cutSuffix: cutMember('std.mem.cutSuffix', true),
@@ -959,17 +957,14 @@ function replacementPlan(
   };
 }
 
-// code-gauge-allow functionCognitiveComplexity 17 -- Plans exact lengths before traversing only stored data.
-function joiningPlan(
-  parts: readonly Value[],
-  separator: readonly Value[],
-  spend: () => void,
-  zero = false
-): AllocationPlan {
-  const slices = parts as readonly Slice[];
-  let length = BigInt(separator.length) * BigInt(Math.max(0, slices.length - 1));
-  for (const slice of slices) {
+// code-gauge-allow functionCognitiveComplexity 18 -- Plans exact lengths before traversing only stored data.
+function joiningPlan(parts: Slice, separator: Slice | undefined, spend: () => void, zero = false): AllocationPlan {
+  const slices: Slice[] = [];
+  let length = BigInt(separator?.length ?? 0) * BigInt(Math.max(0, parts.length - 1));
+  for (let index = 0; index < parts.length; index++) {
     spend();
+    const slice = parts.get(index) as Slice;
+    slices.push(slice);
     length += slice.lengthValue;
     if (length > (1n << 64n) - 1n) panic(PANIC.overflow);
   }
@@ -979,7 +974,7 @@ function joiningPlan(
       if (zero) return [];
       const values: Value[] = [];
       for (const [index, slice] of slices.entries()) {
-        if (index > 0) for (const value of separator) values.push(value);
+        if (index > 0 && separator) for (let at = 0; at < separator.length; at++) values.push(separator.get(at));
         for (let at = 0; at < slice.length; at++) values.push(slice.get(at));
       }
       return values;
@@ -998,6 +993,7 @@ function allocatingCall(
     const child = type.kind === 'pointer' ? type.child : type;
     const complete = reserveNativeAllocation(frame, allocatorState(values[0]), allocation.length, child);
     if (!complete) return ERROR_OUT_OF_MEMORY;
+    if (sizeOf(child) !== 0) frame.runtime.spend(Number(allocation.length) * (transferCost(child) + 1));
     const result =
       sizeOf(child) === 0
         ? zeroAllocation(frame.runtime, BigInt(allocation.length), child)
@@ -1007,37 +1003,71 @@ function allocatingCall(
   });
 }
 
-/** `std.mem.zeroes`: a value whose bits are all zero. */
-export function zeroValue(type: Type, fieldsOf: (type: StructType) => readonly StructField[]): Value {
+// code-gauge-allow functionCognitiveComplexity 24 -- Follows the reference zero-initialization rules for each supported type.
+// code-gauge-allow functionNcss 48 -- Keeps type validation with the corresponding zero representation.
+function zeroValue(type: Type, sema: SemaApi, span: Span): Value {
+  sema.spendCompilation();
+  const zero = (child: Type): Value => zeroValue(child, sema, span);
   switch (type.kind) {
     case 'int':
-    case 'enum': {
+    case 'comptime_int': {
       return 0n;
+    }
+    case 'comptime_float': {
+      return BigFloat.zero();
     }
     case 'float': {
       return floatFromBigInt(0n, type.bits);
     }
+    case 'enum': {
+      const fields = enumLookup(sema.enumFields(type), () => sema.spendCompilation());
+      if (type.exhaustive && !fields.byValue.has(0n)) return sema.error(span, 'enum に値 0 がありません。');
+      return 0n;
+    }
+    case 'void': {
+      return undefined;
+    }
     case 'bool': {
       return false;
     }
+    case 'null':
     case 'optional': {
       return NULL;
     }
     case 'array': {
-      const singleton = singleValueOf(type, () => {});
+      const child = zero(type.child);
+      const singleton = singleValueOf(type, () => sema.spendCompilation());
       if (singleton) return copyForStorage(singleton.value);
       return newArray(
-        Array.from({ length: Number(type.length) }, () => zeroValue(type.child, fieldsOf)),
+        Array.from({ length: Number(type.length) }, () => copyForStorage(child)),
         type.sentinel
       );
     }
     case 'struct': {
-      return new ZStruct(fieldsOf(type).map((field) => zeroValue(field.type, fieldsOf)));
+      if (sizeOf(type) === 0) return undefinedValue(type);
+      if (type.layout === 'extern') return zeroPhysicalValue(type);
+      return new ZStruct(
+        sema
+          .structFields(type, span)
+          .map((field) => (field.comptimeValue ? field.comptimeValue.value : zero(field.type)))
+      );
     }
-    default: {
-      return undefinedValue(type);
+    case 'pointer': {
+      if (type.size === 'slice') {
+        if (type.sentinel === undefined) return new Slice(newArray([], undefined), 0, 0);
+        if (type.child === U8 && type.sentinel === 0n) return new Slice(newArray([], 0n), 0, 0);
+      }
+      break;
+    }
+    case 'union': {
+      if (type.layout === 'extern') {
+        sema.unionFields(type);
+        return zeroPhysicalValue(type);
+      }
+      break;
     }
   }
+  return sema.error(span, `std.mem.zeroes は ${typeName(type)} 型をゼロにできません。`);
 }
 
 /** `findMinMax(T, slice)`: the indexes of the first minimum and the first maximum. */

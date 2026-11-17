@@ -16,6 +16,7 @@ import {
   shiftRight,
 } from './arith';
 import type { BinaryOperator, Expression, ExpressionOf, Span } from './ast';
+import { physicalUnion } from './bufferMemory';
 import { enumLookup } from './enumLookup';
 import {
   type AnyFloat,
@@ -486,6 +487,21 @@ export abstract class ExpressionCompiler extends SemaBase {
     const index = this.fieldIndexes(fields).get(name) ?? -1;
     if (index === -1) return this.error(span, `${typeName(type)} 型には、フィールド「${name}」がありません。`);
     const field = fields[index];
+    if (type.layout !== 'auto') {
+      const view = (value: Value): Slots => physicalUnion(type, value as ZUnion).fieldView!(index);
+      if (base.known) {
+        const parent = this.addressOf(base).value as Pointer;
+        return knownAt(field.type, new Pointer(view(parent.load()), 0), span);
+      }
+      return {
+        ...this.derived(base, field.type, (value) => view(value).slots[0]),
+        span,
+        place: base.place && {
+          isConst: base.place.isConst,
+          locate: (frame) => new Pointer(view(base.place!.locate(frame).load()), 0),
+        },
+      };
+    }
     const check = (value: Value): ZUnion => {
       const union = value as ZUnion;
       if (union.tag !== index) {
@@ -1782,7 +1798,8 @@ export function constantKey(value: Value, spend: () => void): string {
   if (value instanceof ZArray)
     return `array ${JSON.stringify(value.values(value.hasSentinel).map((item) => constantKey(item, spend)))}`;
   if (value instanceof ZStruct) return `struct ${JSON.stringify(value.slots.map((item) => constantKey(item, spend)))}`;
-  if (value instanceof ZUnion) return `union ${value.tag} ${constantKey(value.slots[0], spend)}`;
+  if (value instanceof ZUnion)
+    return value.backingKey?.() ?? `union ${value.tag} ${constantKey(value.slots[0], spend)}`;
   if (value instanceof Some) return `some ${constantKey(value.value, spend)}`;
   if (value instanceof Pointer) {
     const location = value.storageLocation();

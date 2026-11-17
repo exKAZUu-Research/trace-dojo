@@ -6,6 +6,7 @@ import type { FunctionDeclaration, SourceFile, Span } from './ast';
 import { checkSource } from './astCheck';
 import { duringComptime } from './comptimeMemory';
 import type { FunctionInstance } from './functions';
+import { withMemoryAccounting } from './memoryAccounting';
 import { MemoryFault } from './memoryFault';
 import { parseZig } from './parse';
 import './library/registry';
@@ -48,7 +49,11 @@ export function compileProgram(file: SourceFile, options: CompileOptions = {}): 
   if (astErrors.fatal) throw new CompileError(firstErrors(astErrors.errors));
   let compiled: CompiledProgram;
   try {
-    compiled = new Compiler(file, { ...options, budget }).compileMain();
+    const compiler = new Compiler(file, { ...options, budget });
+    compiled = withMemoryAccounting(
+      { spend: (cost) => budget.spend(cost), reserve: (count) => compiler.reservePhysicalSlots(count) },
+      () => compiler.compileMain()
+    );
   } catch (error) {
     // Zig reports type errors together with unused locals and similar errors, which do not stop its analysis.
     if (!(error instanceof CompileError) || astErrors.errors.length === 0) throw error;

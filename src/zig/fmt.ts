@@ -1,5 +1,5 @@
 import { checkOutputSize } from './allocation';
-// code-gauge-allow-file fileNcss 754 -- The file holds one layer of the compiler, whose parts share its private state.
+// code-gauge-allow-file fileNcss 757 -- The file holds one layer of the compiler, whose parts share its private state.
 /**
  * Zig's formatted printing (`std.Io.Writer.print` and `printValue`), transcribed so that output matches byte for byte.
  * Formatting works on bytes, as Zig's strings are bytes.
@@ -477,7 +477,9 @@ export function printValue(
         if (kind === 'enum_literal') return alignBuffer(out, utf8((value as EnumLiteral).name), options);
         if (kind === 'union')
           return alignBuffer(out, utf8(info.unionFields(type)[(value as ZUnion).tag].name), options);
-        return alignBuffer(out, utf8(enumName(value as bigint, type as EnumType, info) ?? ''), options);
+        const name = enumName(value as bigint, type as EnumType, info);
+        if (name === undefined) panic(PANIC.invalidEnum);
+        return alignBuffer(out, utf8(name), options);
       }
       default: {
         break;

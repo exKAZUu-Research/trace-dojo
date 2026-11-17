@@ -184,7 +184,6 @@ function defineMembers(type: StructType, child: Type): void {
   ): (() => Member) =>
     fnMember(`ArrayList.${name}`, (sema, call) => {
       sema.resolveStorage(child, call.span);
-      const argumentCost = options.args.reduce((total, type) => total + transferCost(type), 0);
       const expected = options.allocator ? [ALLOCATOR, ...options.args] : options.args;
       const args = compileArgs(sema, expectArgs(sema, call, expected.length, name), expected);
       const list = receiverOf(sema, call.receiver, type, call.span, options.byValue !== true);
@@ -196,7 +195,6 @@ function defineMembers(type: StructType, child: Type): void {
         (state, values, frame) => {
           const received = listOf(state.receiver, child, frame);
           if (options.allocator) received.allocator = allocatorState(values[0]);
-          frame.runtime.spend(argumentCost);
           return run(received, options.allocator ? values.slice(1) : values, frame);
         }
       );

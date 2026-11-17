@@ -4,6 +4,7 @@ import type { ProgramExecution, ProgramRun } from '../interpreter/program';
 import type { ProgramInput } from '../interpreter/programIo';
 import { type CompiledProgram, compileSource } from './compiler';
 import { ExitSignal, processInit } from './library/std';
+import { withMemoryAccounting } from './memoryAccounting';
 import { MemoryFault } from './memoryFault';
 import { Frame, OutOfMemory, Runtime, StackOverflow, ZigPanic } from './runtime';
 import { ErrorValue } from './values';
@@ -31,6 +32,13 @@ export function executeZigProgram(source: string, input?: ProgramInput): Program
  * @param onEnd Receives `main`'s frame when it returns, while the frame still holds its variables.
  */
 export function runProgram(runtime: Runtime, program: CompiledProgram, onEnd?: (frame: Frame) => void): ProgramRun {
+  return withMemoryAccounting(
+    { spend: (cost) => runtime.spend(cost), reserve: (count) => runtime.reserveStorage(count) },
+    () => executeMain(runtime, program, onEnd)
+  );
+}
+
+function executeMain(runtime: Runtime, program: CompiledProgram, onEnd?: (frame: Frame) => void): ProgramRun {
   for (const global of program.globals) runtime.globals.push(global);
   const { main } = program;
   let uncaughtException: string | undefined;

@@ -53,10 +53,7 @@ export function sorter(name: string, algorithm: SortAlgorithm): () => Member {
       algorithm === 'block' ? blockSorter(sema, type, [items, context], lessThan, cost, call.span) : undefined;
     return nativeCall(VOID, [items, context], call.span, ([value, contextValue], frame) => {
       const slice = value as Slice;
-      const compare = (args: Value[]): Value => {
-        frame.runtime.spend(cost * 2);
-        return lessThan.call(frame, args);
-      };
+      const compare = (args: Value[]): Value => lessThan.call(frame, args);
       if (block) block(frame, slice, contextValue);
       else
         sortValues(

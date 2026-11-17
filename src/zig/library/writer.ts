@@ -3,16 +3,24 @@ import { checkOutputSize } from '../allocation';
 import { byteValues } from '../builtins';
 import type { FormatOutput } from '../fmt';
 import type { Frame } from '../runtime';
-import type { StructType } from '../types';
-import { ErrorValue, NativeHandle, Slice, type Value, ZArray, ZStruct } from '../values';
+import { sliceOf, type StructType, U8, USIZE } from '../types';
+import { ErrorValue, NativeHandle, Pointer, Slice, type Value, ZArray, ZStruct } from '../values';
 import { nativeStruct } from './native';
 
-export const WRITER: StructType = nativeStruct('Io.Writer', {}, [], {
-  kind: 'writer',
-  args: [],
-  storageSlots: 5,
-  byteSize: 32,
-});
+export const WRITER: StructType = nativeStruct(
+  'Io.Writer',
+  {},
+  [
+    { name: 'buffer', type: sliceOf(U8, false), hasDefault: false },
+    { name: 'end', type: USIZE, hasDefault: false },
+  ],
+  {
+    kind: 'writer',
+    args: [],
+    storageSlots: 3,
+    byteSize: 32,
+  }
+);
 
 export interface WriterState extends Record<string, unknown> {
   fd: number | undefined;
@@ -89,23 +97,56 @@ function discardWritten(state: WriterState, length: number, prefix: readonly num
   state.end += length;
 }
 
-export function writerValue(state: WriterState): ZStruct {
-  return new ZStruct([state.fd, state.buffer, state.end, state.capacity, state.growth]);
+const headers = new WeakMap<WriterState, ZStruct>();
+const states = new WeakMap<ZStruct, WriterState>();
+const pointers = new WeakMap<WriterState, Pointer>();
+
+export function writerPointer(state: WriterState): Pointer {
+  let pointer = pointers.get(state);
+  if (!pointer) {
+    pointer = new Pointer({ slots: [writerValue(state)] }, 0);
+    pointers.set(state, pointer);
+  }
+  return pointer;
 }
 
-export function writerState(value: Value): WriterState {
+export function writerValue(state: WriterState): ZStruct {
+  const cached = headers.get(state);
+  if (cached) return cached;
+  const header = new ZStruct([state.buffer, BigInt(state.end), state.fd, state.capacity, state.growth]);
+  bindWriterState(state, header);
+  return header;
+}
+
+export function writerState(value: Value, pointer?: Pointer): WriterState {
   const header = value as ZStruct;
-  const state = {} as WriterState;
-  for (const [index, name] of ['fd', 'buffer', 'end', 'capacity', 'growth'].entries()) {
+  let state = states.get(header);
+  if (!state) {
+    state = {} as WriterState;
+    bindWriterState(state, header);
+  }
+  if (pointer) pointers.set(state, pointer);
+  return state;
+}
+
+function bindWriterState(state: WriterState, header: ZStruct): void {
+  headers.set(state, header);
+  states.set(header, state);
+  for (const [index, name] of ['buffer', 'end', 'fd', 'capacity', 'growth'].entries()) {
     Object.defineProperty(state, name, {
       enumerable: true,
-      get: () => header.slots[index],
+      configurable: true,
+      get: () =>
+        name === 'end'
+          ? Number(header.slots[index] as bigint)
+          : name === 'capacity' && header.slots[index] !== Infinity
+            ? (header.slots[0] as Slice).length
+            : header.slots[index],
       set: (value: Value) => {
-        header.slots[index] = value;
+        header.slots[index] = name === 'end' ? BigInt(value as number) : value;
       },
     });
   }
-  return state;
 }
 
 export function bufferedBytes(frame: Frame, state: WriterState): number[] {
