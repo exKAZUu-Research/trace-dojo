@@ -58,6 +58,7 @@ const stringMappings = new Set(['Uppercase', 'Lowercase', 'Capitalize', 'Uncapit
 /** Resolves the types the program writes: annotations, type references, and type declarations. */
 export class TypeNodes {
   private readonly typeNodeCache = new Map<number, Type>();
+  private readonly restConstraintsInValidation = new Set<number>();
   /** The type each kind of type syntax denotes; the others are `any`. */
   private readonly typeSyntaxes = new Map<string, (node: TreeNode) => Type>([
     ['predefined_type', (node) => predefinedTypes[node.text] ?? anyType],
@@ -253,10 +254,21 @@ export class TypeNodes {
       }
       if (type.kind === 'union') return type.types.every((member) => this.validTupleRestType(member, seen));
       if (type.kind === 'intersection') return type.types.some((member) => this.validTupleRestType(member, seen));
+      // A deferred generic type, such as a conditional one, is an array when its constraint is; one whose constraint
+      // holds this rest again, as a recursive tuple type's does, is taken as valid.
+      if (type.kind !== 'object') {
+        if (this.restConstraintsInValidation.has(type.id)) return true;
+        this.restConstraintsInValidation.add(type.id);
+        try {
+          const constraint = this.c.baseConstraint(type);
+          return constraint !== type && this.validTupleRestType(constraint, seen);
+        } finally {
+          this.restConstraintsInValidation.delete(type.id);
+        }
+      }
       return (
-        type.kind === 'object' &&
-        (this.c.isArrayOrTuple(type) ||
-          this.c.relations.isAssignable(type, this.c.globalType('ReadonlyArray', [anyType])))
+        this.c.isArrayOrTuple(type) ||
+        this.c.relations.isAssignable(type, this.c.globalType('ReadonlyArray', [anyType]))
       );
     } finally {
       seen.delete(type.id);

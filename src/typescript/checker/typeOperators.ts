@@ -117,7 +117,10 @@ export class TypeOperators {
         ? () => this.c.typeNodes.typeFromNode(constraintNode)
         : node.parent?.type === 'template_type'
           ? () => stringType
-          : undefined,
+          : // An `infer` that takes a tuple's rest is an array, as TypeScript implies.
+            node.parent?.type === 'rest_type'
+            ? () => this.c.arrayType(unknownType)
+            : undefined,
     });
   }
 

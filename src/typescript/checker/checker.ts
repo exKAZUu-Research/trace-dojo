@@ -615,7 +615,12 @@ export class Checker {
         return unionOf([stringType, numberType, symbolType]);
       }
       case 'conditional': {
-        return unionOf([this.baseConstraint(type.trueType), this.baseConstraint(type.falseType)]);
+        // The true branch sees its check type narrowed to the extends type, as TypeScript's substitution types do.
+        const trueConstraint =
+          type.trueType === type.checkType
+            ? intersectionOf([this.baseConstraint(type.checkType), type.extendsType], this.budget)
+            : this.baseConstraint(type.trueType);
+        return unionOf([trueConstraint, this.baseConstraint(type.falseType)]);
       }
       default: {
         return type;
