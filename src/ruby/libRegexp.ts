@@ -1265,6 +1265,7 @@ function regexpInspect(regexp: RObject): string {
 }
 
 function escapedRegexpSource(source: string): string {
+  // oxlint-disable-next-line no-control-regex -- Ruby descriptions escape nonprinting controls while preserving whitespace.
   return source.replaceAll(/\\[\s\S]|\/|[\u0000-\u0008\u000E-\u001F\u007F]/g, (part) => {
     if (part.startsWith('\\')) return part;
     if (part === '/') return String.raw`\/`;
