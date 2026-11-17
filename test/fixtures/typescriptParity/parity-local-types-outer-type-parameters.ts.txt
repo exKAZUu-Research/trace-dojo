@@ -1,0 +1,40 @@
+function wrap<T>(v: T) {
+  interface Box { value: T }
+  const b: Box = { value: v };
+  return b;
+}
+const n: number = wrap(1).value;
+function make<T>(v: T) { class Holder { value: T = v; } return new Holder(); }
+const s: string = make("x").value;
+function pair<T>(v: T) {
+  interface Pair<U> { first: T; second: U }
+  const p: Pair<number> = { first: v, second: 2 };
+  return p;
+}
+const p1: string = pair("a").first;
+const p2: number = pair("a").second;
+function makeG<T>(v: T) {
+  class Cell<U> { constructor(public a: T, public b: U) {} }
+  return new Cell(v, true);
+}
+const g1: string = makeG("q").a;
+const g2: boolean = makeG("q").b;
+function expr<T>(v: T) { const C = class { value = v; }; return new C(); }
+const e1: number = expr(3).value;
+function outer<T>(t: T) {
+  function inner<U>(u: U) { interface Both { t: T; u: U } const b: Both = { t, u }; return b; }
+  return inner(1);
+}
+const o1: string = outer("s").t;
+const o2: number = outer("s").u;
+class Gen<T> {
+  make(v: T) { interface Item { v: T } const i: Item = { v }; return i; }
+}
+const gi: number = new Gen<number>().make(1).v;
+function rec<T>(v: T) {
+  interface Node { value: T; next?: Node }
+  const node: Node = { value: v, next: { value: v } };
+  return node;
+}
+const r1: number | undefined = rec(1).next?.value;
+console.log(n, s, p1, p2, g1, g2, e1, o1, o2, gi, r1);

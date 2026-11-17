@@ -170,12 +170,20 @@ export interface ObjectType {
   isFunction?: boolean;
   /** Whether it is the instance type of a class or interface with a `this` type. */
   thisType?: TypeParameter;
-  /** For an instantiated anonymous type, the declared one, which every instantiation shares as its recursion identity. */
+  /**
+   * For an instantiated anonymous type, or an interface or class instantiated for its outer type parameters, the declared
+   * one, which every instantiation shares as its recursion identity.
+   */
   origin?: ObjectType;
-  /** For an instantiated anonymous type, the type arguments of `origin`'s type parameters and of outer ones. */
+  /** For an instantiated type with an `origin`, the type arguments of `origin`'s type parameters and of outer ones. */
   mapper?: Map<number, Type>;
   /** Whether it was written outside every declaration of type parameters, so that no type parameter occurs in it. */
   nonGeneric?: boolean;
+  /**
+   * For an interface or class declared inside generic declarations, their type parameters it sees, which TypeScript's
+   * `getOuterTypeParameters` gives and instantiating it maps.
+   */
+  outerTypeParameters?: TypeParameter[];
 }
 
 export interface TupleElement {

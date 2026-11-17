@@ -108,6 +108,7 @@ export class ClassChecker {
       name: info.name,
       typeParameters: typeParameters.length > 0 ? typeParameters : undefined,
       classInfo: info,
+      outerTypeParameters: this.c.signatures.outerTypeParametersOf(node),
       resolve: () => {
         if (structure) return structure;
         structure = emptyStructure();

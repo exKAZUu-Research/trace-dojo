@@ -51,8 +51,14 @@ function ownTypeVariables(type: Type, search: Search): boolean | undefined {
       return true;
     }
     case 'object': {
-      if (type.objectKind === 'interface') return (type.typeParameters?.length ?? 0) > 0;
+      if (type.objectKind === 'interface') {
+        if ((type.typeParameters?.length ?? 0) > 0) return true;
+        if (!type.outerTypeParameters) return false;
+        return !type.mapper || [...type.mapper.values()].some((argument) => visit(argument, search));
+      }
       if (type.objectKind === 'anonymous') return !type.nonGeneric;
+      if (type.objectKind === 'reference' && type.target?.outerTypeParameters && visit(type.target, search))
+        return true;
       return type.objectKind === 'mapped' || undefined;
     }
     default: {

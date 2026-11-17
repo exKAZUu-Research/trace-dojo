@@ -644,6 +644,7 @@ export class TypeNodes {
       id: newTypeId(),
       objectKind: 'interface',
       name: symbol.name,
+      outerTypeParameters: this.c.signatures.outerTypeParametersOf(symbol.typeDeclarations[0]),
       typeParameters: typeParameters.length > 0 ? typeParameters : undefined,
       resolve: () => {
         if (structure) return structure;

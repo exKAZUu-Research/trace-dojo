@@ -297,6 +297,15 @@ export class Signatures {
     if (!declaration) return [];
     return this.typeParametersOf(declaration);
   }
+
+  /** The type parameters of the declarations enclosing a class or interface, outermost first, if it has any. */
+  outerTypeParametersOf(node: TreeNode): TypeParameter[] | undefined {
+    const outer: TypeParameter[] = [];
+    for (let current = node.parent; current; current = current.parent) {
+      if (current.childForFieldName('type_parameters')) outer.unshift(...this.typeParametersOf(current));
+    }
+    return outer.length > 0 ? outer : undefined;
+  }
 }
 
 /**

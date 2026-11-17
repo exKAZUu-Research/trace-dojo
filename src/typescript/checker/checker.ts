@@ -399,7 +399,7 @@ export class Checker {
     switch (type.objectKind) {
       case 'reference': {
         return this.reference(
-          type.target as ObjectType,
+          this.instantiateOuterTypeParameters(type.target as ObjectType, mapper),
           (type.typeArguments ?? []).map((argument) => this.instantiate(argument, mapper))
         );
       }
@@ -427,10 +427,11 @@ export class Checker {
       }
       case 'interface': {
         // A generic interface or class stands for itself applied to its own type parameters.
+        const target = this.instantiateOuterTypeParameters(type, mapper);
         const parameters = type.typeParameters ?? [];
-        if (!parameters.some((parameter) => mapper.has(parameter.id))) return type;
+        if (!parameters.some((parameter) => mapper.has(parameter.id))) return target;
         return this.reference(
-          type,
+          target,
           parameters.map((parameter) => mapper.get(parameter.id) ?? parameter)
         );
       }
@@ -452,6 +453,35 @@ export class Checker {
       origin: type.origin ?? type,
       mapper: type.mapper ? this.composeMappers(type.mapper, mapper) : mapper,
     });
+    this.instantiationCache.set(key, instantiated);
+    return instantiated;
+  }
+
+  /**
+   * An interface or class declared inside generic declarations with their type parameters mapped, as TypeScript gives a
+   * reference to it its outer type arguments. Instantiations with the same outer type arguments are one type.
+   */
+  private instantiateOuterTypeParameters(type: ObjectType, mapper: Mapper): ObjectType {
+    const outer = type.outerTypeParameters;
+    if (!outer) return type;
+    const origin = type.origin ?? type;
+    const argumentOf = (parameter: TypeParameter): Type => type.mapper?.get(parameter.id) ?? parameter;
+    const outerMapper: Mapper = new Map(
+      outer.map((parameter) => [parameter.id, this.instantiate(argumentOf(parameter), mapper)])
+    );
+    if (outer.every((parameter) => outerMapper.get(parameter.id) === argumentOf(parameter))) return type;
+    if (outer.every((parameter) => outerMapper.get(parameter.id) === parameter)) return origin;
+    const key = `${origin.id}[${this.mapperKey(outerMapper)}]`;
+    const cached = this.instantiationCache.get(key);
+    if (cached) return cached as ObjectType;
+    let structure: Structure | undefined;
+    const instantiated: ObjectType = {
+      ...origin,
+      id: newTypeId(),
+      origin,
+      mapper: outerMapper,
+      resolve: () => (structure ??= this.instantiateStructure(origin.resolve(), outerMapper)),
+    };
     this.instantiationCache.set(key, instantiated);
     return instantiated;
   }
