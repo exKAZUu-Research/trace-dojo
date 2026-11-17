@@ -61,6 +61,8 @@ interface Context {
   /** The depth of the object formatted last, which decides whether its parents may share a line. */
   currentDepth: number;
   seen: Set<JsObject>;
+  /** The stack text of each error this inspection prints, which Node.js works out once per print. */
+  errorStacks: Map<JsObject, ErrorStack>;
   /** The reference numbers of the objects printed as `[Circular *n]`. */
   circular: Map<JsObject, number>;
   breakLength: number;
@@ -116,6 +118,7 @@ export function inspectValue(
     indentationLvl: 0,
     currentDepth: 0,
     seen: new Set(),
+    errorStacks: new Map(),
     circular: new Map(),
     breakLength: options.breakLength ?? BREAK_LENGTH,
     compact: options.compact ?? COMPACT,
@@ -226,7 +229,16 @@ interface Frame {
 function formatRaw(ctx: Context, value: JsObject, recurseTimes: number): string {
   const { runtime } = ctx;
   const constructor = constructorName(runtime, value);
-  const keys = enumerableKeys(runtime, value, ctx.showHidden);
+  if (value.isError && constructor !== 'Object') {
+    // Node.js reads the tag of every object it formats, and an error's stack before checking its own keys against it.
+    const tag = runtime.get(value, WELL_KNOWN_SYMBOLS.toStringTag);
+    const own = value.properties.get(WELL_KNOWN_SYMBOLS.toStringTag);
+    ctx.errorStacks.set(value, {
+      ...errorStackOf(runtime, value),
+      tag: typeof tag === 'string' && !(tag !== '' && own?.enumerable) ? tag : '',
+    });
+  }
+  const keys = enumerableKeys(runtime, value, ctx.showHidden, ctx.errorStacks.get(value));
   const showsLength = ctx.showHidden && value instanceof JsArray;
   const frame = frameOf(ctx, value, constructor, keys.length > 0 || value.promise !== undefined || showsLength);
   if (typeof frame === 'string') return frame;
@@ -277,7 +289,8 @@ function frameOf(ctx: Context, value: JsObject, constructor: string | undefined,
   if (value instanceof JsFunction) base = functionBase(runtime, value, constructor);
   else if (value.regexp) base = String(value.regexp);
   else if (dateValueOf(value) !== undefined) base = dateBase(value, constructor);
-  else if (value.isError && constructor !== 'Object') base = errorText(runtime, value, constructor);
+  else if (value.isError && constructor !== 'Object')
+    base = errorText(runtime, value, constructor, ctx.errorStacks.get(value));
   else if (value.primitive !== undefined) base = boxedBase(ctx, value.primitive, constructor, toStringTagOf(value));
   else if (value.isArguments) open = '[Arguments] {';
   else {
@@ -352,7 +365,7 @@ function prefixOf(constructor: string | undefined, fallback: string, size = ''):
 /** The keys an object shows: its enumerable ones, or with `showHidden` all of its own, as `%o` shows them. */
 const ERROR_KEYS = new Set<Key>(['name', 'message', 'stack']);
 
-function enumerableKeys(runtime: Runtime, object: JsObject, showHidden: boolean): Key[] {
+function enumerableKeys(runtime: Runtime, object: JsObject, showHidden: boolean, stack?: ErrorStack): Key[] {
   // An array keeps its elements apart from its other properties.
   const own =
     object instanceof JsArray
@@ -362,7 +375,7 @@ function enumerableKeys(runtime: Runtime, object: JsObject, showHidden: boolean)
   const strings = typeof object.primitive === 'string' ? own.slice(object.primitive.length) : own;
   const keys: Key[] = [...strings, ...runtime.ownSymbols(object)];
   const listed = keys.filter((key) => {
-    if (object.isError && ERROR_KEYS.has(key) && (showHidden || isInHeadline(runtime, object, key))) return false;
+    if (object.isError && ERROR_KEYS.has(key) && (showHidden || !stack || isInStack(object, key, stack))) return false;
     return showHidden || object.properties.get(key)?.enumerable;
   });
   // An error also shows its own hidden reasons, bracketed, as Node.js does.
@@ -407,17 +420,21 @@ export function errorHeadline(runtime: Runtime, error: JsObject): string {
  * The first line of an error's stack, which V8 formats from its `name` and `message` when first read, and which
  * Node.js then improves with the `name` it reads again.
  */
-function errorText(runtime: Runtime, error: JsObject, constructor: string | undefined): string {
-  const text = headlineOf(runtime, error);
-  // Without a stack, Node.js tries `Error.prototype.toString`, bracketed, and then `Object.prototype.toString`.
-  const fallback = text === undefined ? tryOrUndefined(() => v8Headline(runtime, error)) : undefined;
-  if (text === undefined && fallback === undefined) return objectToString(runtime, error);
+function errorText(
+  runtime: Runtime,
+  error: JsObject,
+  constructor: string | undefined,
+  stack = errorStackOf(runtime, error)
+): string {
+  if (stack.kind === 'tag') return stack.text;
   const improvedName = readIgnoringThrows(runtime, error, 'name');
   // Node.js also reads the message on each print, which a getter observes.
   readIgnoringThrows(runtime, error, 'message');
-  if (text === undefined) return `[${fallback}]`;
-  if (improvedName === undefined || improvedName === null) return improveErrorName(text, 'Error', constructor);
-  if (typeof improvedName === 'string') return improveErrorName(text, improvedName, constructor);
+  if (stack.kind === 'string') return stack.text;
+  const text = stack.text;
+  if (improvedName === undefined || improvedName === null)
+    return improveErrorName(text, 'Error', constructor, stack.tag);
+  if (typeof improvedName === 'string') return improveErrorName(text, improvedName, constructor, stack.tag);
   // Node.js marks a name that is not a string with the error's class, as `42 [Error]: bad`.
   const shown = runtime.toString(improvedName);
   return text.replace(shown, `${shown} [${constructor ?? 'Error'}]`);
@@ -428,12 +445,31 @@ function errorText(runtime: Runtime, error: JsObject, constructor: string | unde
  * a string or that the stack's first line already shows, which a change after the error was first printed does not
  * reach; an accessor stays listed without being called.
  */
-function isInHeadline(runtime: Runtime, error: JsObject, key: Key): boolean {
+function isInStack(error: JsObject, key: Key, stack: ErrorStack): boolean {
   const property = error.properties.get(key);
   if (!property?.enumerable) return true;
   if (isAccessor(property)) return false;
-  const headline = headlineOf(runtime, error) ?? '[object Error]';
-  return typeof property.value !== 'string' || headline.includes(property.value);
+  return typeof property.value !== 'string' || stack.text.includes(property.value);
+}
+
+/**
+ * What Node.js prints for an error's stack: the first line V8 formats, or without one `Error.prototype.toString`'s
+ * text bracketed, or failing that `Object.prototype.toString`'s tag.
+ */
+interface ErrorStack {
+  kind: 'stack' | 'string' | 'tag';
+  text: string;
+  /** The `Symbol.toStringTag` Node.js shows beside the class, unless an own enumerable one lists it as a key. */
+  tag?: string;
+}
+
+function errorStackOf(runtime: Runtime, error: JsObject): ErrorStack {
+  const headline = headlineOf(runtime, error);
+  if (headline !== undefined) return { kind: 'stack', text: headline };
+  const text = tryOrUndefined(() => v8Headline(runtime, error));
+  return text === undefined
+    ? { kind: 'tag', text: objectToString(runtime, error) }
+    : { kind: 'string', text: `[${text}]` };
 }
 
 /**
@@ -476,11 +512,12 @@ function v8Headline(runtime: Runtime, error: JsObject): string {
  * shows its class, as `NotFound [Error]: missing`, or only its class when that contains the name, as
  * `MyError: missing`.
  */
-function improveErrorName(text: string, name: string, constructor: string | undefined): string {
+function improveErrorName(text: string, name: string, constructor: string | undefined, tag = ''): string {
   const looksNormal =
     constructor === undefined ||
     (name.endsWith('Error') && text.startsWith(name) && (text.length === name.length || text[name.length] === ':'));
-  const prototype = constructor ?? 'Error';
+  const base = constructor ?? 'Error';
+  const prototype = tag !== '' && tag !== base ? `${base} [${tag}]` : base;
   if (!looksNormal || name === prototype) return text;
   return prototype.includes(name)
     ? `${prototype}${text.slice(name.length)}`

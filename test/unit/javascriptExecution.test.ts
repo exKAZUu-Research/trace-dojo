@@ -2244,6 +2244,27 @@ const e = new Error("bad"); Object.defineProperty(e, "message", { get() { throw 
     });
   });
 
+  test('an error is formatted once per print, with the tag Node.js reads beside its class', () => {
+    // Node.js prints each error's stack trace after its first line, which the interpreter leaves out.
+    const source = `let n = 0; const e = new Error(); e.name = "Custom"; Object.defineProperty(e, "message", { get() { if (n++ === 0) throw 1; return "m" + n; } });
+console.log(e); console.log(e); console.log(n);
+let t = 0; const f = new Error(); Object.defineProperty(f, Symbol.toStringTag, { get() { return ++t === 1 ? "First" : "Second"; } }); Object.defineProperty(f, "message", { get() { throw 1; } });
+console.log(f); console.log(t);
+let u = 0; const g = new Error("ok"); Object.defineProperty(g, Symbol.toStringTag, { get() { u++; return "Tagged"; } });
+console.log(g); console.log(u);`;
+    expect(executeProgram('javascript', source)).toMatchObject({
+      kind: 'executed',
+      stdout: `[Custom: m2]
+Custom: m4
+5
+[object Second]
+2
+Error [Tagged]: ok
+1
+`,
+    });
+  });
+
   test('a timer pending through a busy wait fires after its delay, not the wait plus its delay', () => {
     // Node.js prints about 101 here, but late under load, so the check is on the interpreter's clock alone.
     const source = `let sum = 0; const v = Date.now(); setTimeout(() => console.log(Date.now() - v), 100);
