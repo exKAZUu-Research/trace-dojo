@@ -1,0 +1,12 @@
+(8,38): error TS2322: Type 'T' is not assignable to type 'Required<T>'.
+(9,38): error TS2322: Type 'Partial<T>' is not assignable to type 'T'.
+  'T' could be instantiated with an arbitrary type which could be unrelated to 'Partial<T>'.
+(13,46): error TS2322: Type 'Readonly<Partial<T>>' is not assignable to type 'T'.
+  'T' could be instantiated with an arbitrary type which could be unrelated to 'Readonly<Partial<T>>'.
+(15,46): error TS2322: Type 'Partial<T>' is not assignable to type 'Readonly<T>'.
+(17,72): error TS2322: Type 'T' is not assignable to type '{ [P in K]: T[P & keyof T]; }'.
+(21,49): error TS2322: Type 'Partial<T>' is not assignable to type 'T'.
+  'T' could be instantiated with an arbitrary type which could be unrelated to 'Partial<T>'.
+(26,53): error TS2322: Type '{ [P in keyof T]: string; }' is not assignable to type 'T'.
+  'T' could be instantiated with an arbitrary type which could be unrelated to '{ [P in keyof T]: string; }'.
+(27,53): error TS2322: Type 'T' is not assignable to type '{ [P in keyof T]: string; }'.

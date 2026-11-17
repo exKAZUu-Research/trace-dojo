@@ -148,6 +148,9 @@ export class Relations {
     // TypeScript checks a weak intersection as a whole, so a member whose properties are all optional need not share one.
     if (t.kind === 'intersection')
       return t.types.every((member) => this.isRelated(s, member, relation, state | INTERSECTION_TARGET));
+    // TypeScript relates to a generic mapped type or a type parameter target before it turns to the source's constraint.
+    if (t.kind === 'object' && this.relatedToHomomorphicMapped(s, t, relation)) return true;
+    if (t.kind === 'typeParameter' && s.kind === 'object' && this.mappedRelatedToParameter(s, t, relation)) return true;
     if (s.kind === 'intersection') {
       if (s.types.some((member) => this.isRelated(member, t, relation, state | INTERSECTION_SOURCE))) return true;
       return t.kind === 'object' && this.objectRelated(s, t, relation, state);
@@ -316,6 +319,38 @@ export class Relations {
   }
 
   /**
+   * `{ [P in K]: S[P] }` with its optionality kept holds what `S` does, and `{ [P in keyof S]: S[P] }` what is related to
+   * `S` too, as TypeScript's rules for a generic mapped target relate `T` to `Partial<T>` and `Readonly<Partial<T>>`.
+   */
+  private relatedToHomomorphicMapped(s: Type, t: ObjectType, relation: Relation): boolean {
+    const mapped = t.objectKind === 'mapped' ? t.mapped : undefined;
+    if (!mapped || mapped.optionalModifier === '-' || mapped.nameType) return false;
+    const { template, typeParameter, constraint } = mapped;
+    if (template.kind !== 'indexedAccess' || template.indexType !== typeParameter) return false;
+    if (this.identical(template.objectType, s)) return true;
+    // Only over the keys of `S` does a type related to `S` have every key, as `Pick<S, K>` need not.
+    return (
+      constraint.kind === 'keyof' &&
+      this.identical(constraint.type, template.objectType) &&
+      this.isRelated(s, template.objectType, relation)
+    );
+  }
+
+  /**
+   * TypeScript relates `{ [P in K]: X }` that does not add `?` to a type parameter `T` when `keyof T` is related to
+   * `K` and `X` to `T[P]`, so `Readonly<T>` is assignable to `T`.
+   */
+  private mappedRelatedToParameter(s: ObjectType, t: TypeParameter, relation: Relation): boolean {
+    const mapped = s.objectKind === 'mapped' ? s.mapped : undefined;
+    if (!mapped || mapped.nameType || mapped.optionalModifier === '+') return false;
+    const { typeOperators } = this.c;
+    return (
+      this.isRelated(typeOperators.keyofType(t), mapped.constraint, relation) &&
+      this.isRelated(mapped.template, typeOperators.indexedAccess(t, mapped.typeParameter), relation)
+    );
+  }
+
+  /**
    * Whether a type parameter is related to a type through its constraint; one without a constraint is comparable to
    * any type but another type parameter, as TypeScript lets `x as T` and `v === "x"` stand in generic code.
    */
@@ -473,18 +508,8 @@ export class Relations {
 
   private objectRelated(source: Type, target: ObjectType, relation: Relation, state = 0): boolean {
     if (target.objectKind === 'mapped') {
-      const { mapped } = target;
       // Every property of a mapped type that adds `?` is optional, so an object without members holds what it does.
       if (isOptionalMappedType(target) && source.kind === 'object' && this.hasNoMembers(source)) return true;
-      // `{ [P in keyof S]: S[P] }` with its optionality kept holds what `S` does.
-      if (
-        mapped?.optionalModifier !== '-' &&
-        !mapped?.nameType &&
-        mapped?.template.kind === 'indexedAccess' &&
-        this.identical(mapped.template.objectType, source) &&
-        mapped.template.indexType === mapped.typeParameter
-      )
-        return true;
       return source.kind === 'object' && this.sameMapped(source, target, relation);
     }
     const byElements = this.elementsRelated(source, target, relation);
