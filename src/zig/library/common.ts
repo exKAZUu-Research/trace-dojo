@@ -18,6 +18,10 @@ import { compileTimeReadable, NULL, Pointer, Slice, storeInto, type Value, ZArra
 import { ALLOCATOR, ALLOCATOR_ERROR, nativeEnum } from './heap';
 import { compileArgs, expectArgs, fnMember, type Member } from './native';
 
+export function nativeBudget(sema: SemaApi, frame?: Frame): (cost?: number) => void {
+  return frame ? (cost = 1) => frame.runtime.spend(cost) : (cost = 1) => sema.spendCompilation(cost);
+}
+
 export type Eval = TExpr['eval'];
 
 /** A library function whose first argument is a type, as `std.mem.eql(u8, a, b)`. */

@@ -3621,3 +3621,60 @@ test('formatting a virtual zero-sized list obeys the output budget', () => {
   const source = `const std=@import("std");pub fn main(init:std.process.Init)!void{var l:std.ArrayList(void)=.empty;try l.appendNTimes(init.gpa,{},1000000000);std.debug.print("{any}",.{l.items});}`;
   expect(executeProgram('zig', source)).toMatchObject({ kind: 'limitExceeded', limit: 'output' });
 });
+
+test.each(['parseInt', 'parseUnsigned'])('native %s digit visits share the work budget', (method) => {
+  const source = `const std=@import("std");pub fn main()void{const a:[300000]u8=@splat(48);for(0..4)|_|{_=std.fmt.${method}(u8,&a,10) catch 0;}}`;
+  expect(executeProgram('zig', source)).toMatchObject({ kind: 'limitExceeded', limit: 'operations' });
+});
+
+test('integer parsing rejects early without copying an unvisited suffix', () => {
+  const source = `const std=@import("std");pub fn main()void{var a:[300000]u8=@splat(48);a[0]=33;for(0..4)|_|{_=std.fmt.parseInt(u8,&a,10) catch 0;}std.debug.print("ok",.{});}`;
+  expect(executeProgram('zig', source)).toMatchObject({ kind: 'executed', stderr: 'ok', uncaughtException: undefined });
+});
+
+test.each(['upperString', 'lowerString'])('native ASCII %s visits share the work budget', (method) => {
+  const source = `const std=@import("std");pub fn main()void{var a:[300000]u8=@splat(97);for(0..4)|_|{_=std.ascii.${method}(&a,&a);}}`;
+  expect(executeProgram('zig', source)).toMatchObject({ kind: 'limitExceeded', limit: 'operations' });
+});
+
+test('parseUnsigned supports signed targets while retaining range and sign errors', () => {
+  const source = `const std=@import("std");pub fn main()!void{std.debug.print("{} {}|",.{try std.fmt.parseUnsigned(i32,"42",10),try std.fmt.parseUnsigned(i8,"7_f",16)});for([_] []const u8{"128","+1","-1"})|text|{_=std.fmt.parseUnsigned(i8,text,10) catch |e|{std.debug.print("{s}|",.{@errorName(e)});continue;};}}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: '42 127|Overflow|InvalidCharacter|InvalidCharacter|',
+    uncaughtException: undefined,
+  });
+});
+
+test('digitToChar accepts a runtime case and panics outside the digit range', () => {
+  const source = `const std=@import("std");pub fn main()void{var c:std.fmt.Case=.lower;std.debug.print("{c}",.{std.fmt.digitToChar(10,c)});c=.upper;std.debug.print("{c}",.{std.fmt.digitToChar(35,c)});var n:u8=36;_=&n;_=std.fmt.digitToChar(n,c);}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: 'aZ',
+    uncaughtException: 'panic: reached unreachable code',
+  });
+});
+
+test('Writer.buffered rejects extra arguments', () => {
+  const source = `const std=@import("std");pub fn main()void{var b:[8]u8=undefined;const w=std.Io.Writer.fixed(&b);_=w.buffered(1);}`;
+  expect(executeProgram('zig', source)).toMatchObject({ kind: 'compileError' });
+});
+
+test.each(['splatByteAll(65,200)', 'splatBytesAll("ab",100)'])(
+  'allocating Writer.%s grows and retains prefixes on allocation failure',
+  (operation) => {
+    const declaration = `const std=@import("std");const P=struct{pub fn format(_:P,w:*std.Io.Writer)std.Io.Writer.Error!void{try w.writeByte(120);try w.${operation};}};`;
+    const success = `${declaration}pub fn main(init:std.process.Init)!void{const g=init.gpa;var l:std.ArrayList(u8)=.empty;defer l.deinit(g);try l.print(g,"{f}",.{P{}});std.debug.print("ok {} {}",.{l.items.len,l.capacity});}`;
+    expect(executeProgram('zig', success)).toMatchObject({
+      kind: 'executed',
+      stderr: 'ok 201 431',
+      uncaughtException: undefined,
+    });
+    const failure = `${declaration}pub fn main()!void{var bytes:[200]u8=undefined;var f=std.heap.FixedBufferAllocator.init(&bytes);const g=f.allocator();var l:std.ArrayList(u8)=.empty;defer l.deinit(g);l.print(g,"{f}",.{P{}}) catch |e|{std.debug.print("{s}|{} {} {s}",.{@errorName(e),l.items.len,l.capacity,l.items});return;};}`;
+    expect(executeProgram('zig', failure)).toMatchObject({
+      kind: 'executed',
+      stderr: 'OutOfMemory|1 132 x',
+      uncaughtException: undefined,
+    });
+  }
+);

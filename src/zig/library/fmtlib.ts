@@ -17,12 +17,23 @@ import {
 } from '../types';
 import { decodeUtf8 } from '../utf8';
 import { ErrorValue, Slice, type Value } from '../values';
-import { allocating, allocatorArg, computed, constSlice, elements, generic, mutableSlice, newSlice } from './common';
-import { allocatorState, ERROR_OUT_OF_MEMORY, reserveNativeAllocation } from './heap';
-import { compileArgs, expectArgs, fnMember, type Member, nativeCall, nativeStruct } from './native';
+import {
+  allocating,
+  allocatorArg,
+  computed,
+  constSlice,
+  elements,
+  generic,
+  mutableSlice,
+  nativeBudget,
+  newSlice,
+} from './common';
+import { allocatorState, ERROR_OUT_OF_MEMORY, nativeEnum, reserveNativeAllocation } from './heap';
+import { compileArgs, expectArgs, fnMember, type Member, nativeCall, nativeStruct, typeMember } from './native';
 import { compilePrint, PrintWriteError } from './print';
 import type { WriterState } from './writer';
 
+const CASE = nativeEnum('fmt.Case', ['lower', 'upper']);
 const PARSE_INT_ERRORS = errorSetOf(['Overflow', 'InvalidCharacter']);
 const INVALID_CHARACTER = ErrorValue.of('InvalidCharacter');
 const OVERFLOW = ErrorValue.of('Overflow');
@@ -37,45 +48,48 @@ function charToDigit(c: number, base: number): number | undefined {
 }
 
 /** `std.fmt.parseInt`, transcribed: the sign, a base prefix when the base is 0, digits with `_` between them. */
-function parseInt(bytes: number[], base: number, type: IntType): Value {
+function parseInt(bytes: Slice, base: number, type: IntType, spend: () => void, unsigned = false): Value {
+  const read = (index: number): number => {
+    spend();
+    return Number(bytes.get(index) as bigint);
+  };
   if (bytes.length === 0) return INVALID_CHARACTER;
   let negative = false;
-  let digits = bytes;
-  if (bytes[0] === 0x2b) digits = bytes.slice(1);
-  else if (bytes[0] === 0x2d) {
-    negative = true;
-    digits = bytes.slice(1);
+  let start = 0;
+  const first = read(0);
+  if (first === 0x2b || first === 0x2d) {
+    if (unsigned) return INVALID_CHARACTER;
+    negative = first === 0x2d;
+    start++;
   }
-  if (digits.length === 0) return INVALID_CHARACTER;
+  if (start === bytes.length) return INVALID_CHARACTER;
   let radix = base;
   if (base === 0) {
     radix = 10;
-    if (digits.length > 2 && digits[0] === 0x30) {
-      const prefix = digits[1] | 0x20;
+    if (bytes.length - start > 2 && read(start) === 0x30) {
+      const prefix = read(start + 1) | 0x20;
       if (prefix === 0x62) radix = 2;
       else if (prefix === 0x6f) radix = 8;
       else if (prefix === 0x78) radix = 16;
-      if (radix !== 10) digits = digits.slice(2);
+      if (radix !== 10) start += 2;
     }
   }
-  if (digits.length === 0 || digits[0] === 0x5f || digits.at(-1) === 0x5f) return INVALID_CHARACTER;
+  if (read(start) === 0x5f || read(bytes.length - 1) === 0x5f) return INVALID_CHARACTER;
   const accumulate = intType(type.signed, Math.max(8, type.bits));
   let value = 0n;
-  let first = true;
-  for (const c of digits) {
+  for (let index = start; index < bytes.length; index++) {
+    const c = read(index);
     if (c === 0x5f) continue;
     const digit = charToDigit(c, radix);
     if (digit === undefined) return INVALID_CHARACTER;
     if (value !== 0n) {
       value *= BigInt(radix);
       if (!fitsInt(value, accumulate)) return OVERFLOW;
-    } else if (negative && first) {
+    } else if (negative) {
       value = -BigInt(digit);
       if (!fitsInt(value, accumulate)) return OVERFLOW;
-      first = false;
       continue;
     }
-    first = false;
     value = negative ? value - BigInt(digit) : value + BigInt(digit);
     if (!fitsInt(value, accumulate)) return OVERFLOW;
   }
@@ -137,25 +151,23 @@ function bytesOf(value: Value): number[] {
 }
 
 const MEMBERS: Record<string, () => Member> = {
+  Case: typeMember(() => CASE),
   parseInt: generic('std.fmt.parseInt', 3, (sema, call, type, [bufferArg, baseArg]) => {
     if (type.kind !== 'int')
       return sema.error(call.span, `std.fmt.parseInt には整数の型を渡してください（${typeName(type)} です）。`);
     const buffer = constSlice(sema, bufferArg, U8);
     const [base] = compileArgs(sema, [baseArg], [U8]);
-    return computed(errorUnionOf(PARSE_INT_ERRORS, type), [buffer, base], call.span, ([text, radix]) =>
-      parseInt(bytesOf(text), Number(radix as bigint), type)
+    return computed(errorUnionOf(PARSE_INT_ERRORS, type), [buffer, base], call.span, ([text, radix], frame) =>
+      parseInt(text as Slice, Number(radix as bigint), type, nativeBudget(sema, frame))
     );
   }),
   parseUnsigned: generic('std.fmt.parseUnsigned', 3, (sema, call, type, [bufferArg, baseArg]) => {
-    if (type.kind !== 'int' || type.signed)
-      return sema.error(call.span, 'std.fmt.parseUnsigned には符号なしの整数の型を渡してください。');
+    if (type.kind !== 'int') return sema.error(call.span, 'std.fmt.parseUnsigned には整数の型を渡してください。');
     const buffer = constSlice(sema, bufferArg, U8);
     const [base] = compileArgs(sema, [baseArg], [U8]);
-    return computed(errorUnionOf(PARSE_INT_ERRORS, type), [buffer, base], call.span, ([text, radix]) => {
-      const bytes = bytesOf(text);
-      if (bytes[0] === 0x2b || bytes[0] === 0x2d) return INVALID_CHARACTER;
-      return parseInt(bytes, Number(radix as bigint), type);
-    });
+    return computed(errorUnionOf(PARSE_INT_ERRORS, type), [buffer, base], call.span, ([text, radix], frame) =>
+      parseInt(text as Slice, Number(radix as bigint), type, nativeBudget(sema, frame), true)
+    );
   }),
   parseFloat: generic('std.fmt.parseFloat', 2, (sema, call, type, [bufferArg]) => {
     if (type.kind !== 'float')
@@ -165,9 +177,8 @@ const MEMBERS: Record<string, () => Member> = {
       );
     const buffer = constSlice(sema, bufferArg, U8);
     return computed(errorUnionOf(errorSetOf(['InvalidCharacter']), type), [buffer], call.span, ([text], frame) => {
+      nativeBudget(sema, frame)((text as Slice).length);
       const bytes = bytesOf(text);
-      if (frame) frame.runtime.spend(bytes.length);
-      else sema.spendCompilation(bytes.length);
       return parseFloat(bytes, type);
     });
   }),
@@ -238,13 +249,11 @@ const MEMBERS: Record<string, () => Member> = {
   }),
   digitToChar: fnMember('std.fmt.digitToChar', (sema, call) => {
     const [digitArg, caseArg] = expectArgs(sema, call, 2, 'std.fmt.digitToChar');
-    const [digit] = compileArgs(sema, [digitArg], [U8]);
-    const upper = sema.knownValue(sema.compile(caseArg), '大文字・小文字') as unknown as {
-      name: string;
-    };
-    const offset = upper?.name === 'upper' ? 0x41 : 0x61;
-    return computed(U8, [digit], call.span, ([value]) => {
+    const [digit, letterCase] = compileArgs(sema, [digitArg, caseArg], [U8, CASE]);
+    return computed(U8, [digit, letterCase], call.span, ([value, selectedCase]) => {
+      const offset = selectedCase === 1n ? 0x41 : 0x61;
       const d = Number(value as bigint);
+      if (d >= 36) panic(PANIC.unreachable);
       return BigInt(d < 10 ? d + 0x30 : d + offset - 10);
     });
   }),

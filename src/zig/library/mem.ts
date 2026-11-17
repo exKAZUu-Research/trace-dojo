@@ -34,6 +34,7 @@ import {
   equalValues,
   generic,
   mutableSlice,
+  nativeBudget,
   newSlice,
   OPTIONAL_USIZE,
   optionalIndex,
@@ -69,10 +70,6 @@ function comparisonBudget(sema: SemaApi, frame?: Frame): typeof equalValues {
     spend();
     return equalValues(a, b);
   };
-}
-
-function nativeBudget(sema: SemaApi, frame?: Frame): () => void {
-  return frame ? () => frame.runtime.spend() : () => sema.spendCompilation();
 }
 
 function findSequence(haystack: Value[], needle: Value[], from: number, equal: typeof equalValues): number {

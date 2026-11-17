@@ -344,6 +344,7 @@ function addWriterMembers(): void {
       );
     }),
     buffered: fnMember('Writer.buffered', (sema, call) => {
+      expectArgs(sema, call, 0, 'Writer.buffered');
       const writer = writerOf(sema, call, false);
       return runtime(
         sliceOf(U8, false),
@@ -409,7 +410,7 @@ function writerOf(
 function writeRepeated(frame: Parameters<TExpr['eval']>[0], state: WriterState, data: number[], count: number): Value {
   const length = data.length * count;
   const end = state.end + length;
-  if (state.fd === undefined && end > state.capacity) {
+  if (state.fd === undefined && !state.growth && end > state.capacity) {
     const available = Math.max(0, state.capacity - state.end);
     writeTo(
       frame,

@@ -9,6 +9,7 @@ import {
   constSlice,
   elements,
   mutableSlice,
+  nativeBudget,
   newSlice,
   OPTIONAL_USIZE,
   optionalIndex,
@@ -64,12 +65,15 @@ function stringMapper(name: string, map: (c: number) => number): () => Member {
     const [outArg, inArg] = expectArgs(sema, call, 2, name);
     const output = mutableSlice(sema, outArg, U8);
     const input = constSlice(sema, inArg, U8);
-    return computed(sliceOf(U8, false), [output, input], call.span, ([out, value]) => {
+    return computed(sliceOf(U8, false), [output, input], call.span, ([out, value], frame) => {
       const source = value as Slice;
       const target = out as Slice;
-      // `std.debug.assert(output.len >= ascii_string.len)`.
       if (target.length < source.length) panic(PANIC.unreachable);
-      for (let index = 0; index < source.length; index++) target.set(index, BigInt(map(Number(source.get(index)))));
+      const spend = nativeBudget(sema, frame);
+      for (let index = 0; index < source.length; index++) {
+        spend();
+        target.set(index, BigInt(map(Number(source.get(index)))));
+      }
       return new Slice(target.target, target.start, source.length);
     });
   });
@@ -83,6 +87,7 @@ function allocMapper(name: string, map: (c: number) => number): () => Member {
     return nativeCall(allocating(sliceOf(U8, false)), [allocator, input], call.span, ([allocator, input], frame) => {
       const complete = reserveNativeAllocation(frame, allocatorState(allocator), (input as Slice).length, U8);
       if (!complete) return ERROR_OUT_OF_MEMORY;
+      frame.runtime.spend((input as Slice).length);
       const result = newSlice(bytes(input).map((byte) => BigInt(map(byte))));
       complete(result.target);
       return result;
@@ -100,13 +105,10 @@ function comparer(
     const a = constSlice(sema, aArg, U8);
     const b = constSlice(sema, bArg, U8);
     return computed(resultType, [a, b], call.span, ([x, y], frame) => {
-      const spend = (cost = 1): void => {
-        if (frame) frame.runtime.spend(cost);
-        else sema.spendCompilation(cost);
-      };
+      const spend = nativeBudget(sema, frame);
+      spend((x as Slice).length + (y as Slice).length);
       const left = bytes(x);
       const right = bytes(y);
-      spend(left.length + right.length);
       return compute(left, right, spend);
     });
   });
