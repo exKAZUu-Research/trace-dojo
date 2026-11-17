@@ -1,5 +1,5 @@
 // oxlint-disable unicorn/prefer-code-point -- PHP pattern strings contain bytes; UTF-8 validation reads each byte separately.
-// code-gauge-allow-file fileNcss 740 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 741 -- Holds the cases of one concern of the interpreter, which share their helpers.
 import { dec, enc, utf8Length } from './bytes';
 import { analyzeRegex } from './regexAnalysis';
 import { rt } from './runtime';
@@ -331,6 +331,7 @@ class PatternConverter {
     return this.result;
   }
 
+  // code-gauge-allow functionNcss 31 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
   private item(): void {
     const char = this.source[this.index];
     if (this.options.extended && this.skipExtended(char)) return;
@@ -366,8 +367,9 @@ class PatternConverter {
         return;
       }
     }
-    this.index++;
-    this.emit(this.metaCharacter(char) ?? literal(char), !'^$|'.includes(char));
+    const text = this.options.utf8 ? String.fromCodePoint(this.source.codePointAt(this.index) ?? 0) : char;
+    this.index += text.length;
+    this.emit(this.metaCharacter(text) ?? literal(text), !'^$|'.includes(text));
   }
 
   private skipExtended(char: string): boolean {

@@ -52,7 +52,9 @@ export class FatalError {
     readonly row: number,
     /** Whether PHP ran out of memory, after which its trace shows only the innermost call. */
     readonly exhausted = false
-  ) {}
+  ) {
+    if (exhausted && current) current.exhausted = true;
+  }
 }
 
 /** Ends the program through `exit`, after which PHP still runs shutdown functions and destructors. */
@@ -147,6 +149,7 @@ export class Runtime {
   /** The number of user calls running, bounded by the call depth limit. */
   depth = 0;
   shuttingDown = false;
+  exhausted = false;
   private pendingOutput = '';
   /** The classes a program declared, in declaration order, whose static properties the trace shows. */
   readonly userClasses: PhpClass[] = [];

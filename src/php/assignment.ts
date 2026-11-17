@@ -235,50 +235,47 @@ function arrayAccessPlace(object: PhpObject, key: Value | undefined): Place {
       toBool(callMethod(object, 'offsetExists', [key ?? null]))
         ? callMethod(object, 'offsetGet', [key ?? null])
         : undefined,
-    nested: () => {
-      if (
-        key !== undefined &&
-        object.internal !== undefined &&
-        nativeArrayStorage(object.internal) &&
-        object.cls.findMethod('offsetget')?.fn.kind === 'native'
-      ) {
-        return new ElementPlace(object.internal.writable(), toKey(key ?? null));
-      }
-      if (
-        key === undefined &&
-        object.internal !== undefined &&
-        nativeArrayStorage(object.internal) &&
-        object.cls.findMethod('offsetget')?.fn.kind === 'native'
-      ) {
-        notice(`Indirect modification of overloaded element of ${object.cls.name} has no effect`);
-        return new RefPlace(new Ref(null));
-      }
-      const runtime = rt();
-      runtime.lastReturnRef = undefined;
-      const value = callMethod(object, 'offsetGet', [key ?? null]);
-      const returned = runtime.lastReturnRef as Ref | undefined;
-      runtime.lastReturnRef = undefined;
-      if (returned) return new RefPlace(returned);
-      if (!(value instanceof PhpObject)) {
-        notice(`Indirect modification of overloaded element of ${object.cls.name} has no effect`);
-      }
-      return new RefPlace(new Ref(value));
-    },
+    nested: () => arrayAccessNestedPlace(object, key),
     get: () => callMethod(object, 'offsetGet', [key ?? null]),
     set: (value) => {
       callMethod(object, 'offsetSet', [key ?? null, value]);
       return value;
     },
-    ref: () => {
-      const value = callMethod(object, 'offsetGet', [key ?? null]);
-      if (!(value instanceof PhpObject))
-        notice(`Indirect modification of overloaded element of ${object.cls.name} has no effect`);
-      return new Ref(value);
-    },
+    ref: () => arrayAccessNestedPlace(object, key).ref(),
     unset: () => {
       callMethod(object, 'offsetUnset', [key ?? null]);
     },
   };
+}
+
+function arrayAccessNestedPlace(object: PhpObject, key: Value | undefined): Place {
+  if (
+    key !== undefined &&
+    object.internal !== undefined &&
+    nativeArrayStorage(object.internal) &&
+    object.cls.findMethod('offsetget')?.fn.kind === 'native'
+  ) {
+    return new ElementPlace(object.internal.writable(), toKey(key ?? null));
+  }
+  if (
+    key === undefined &&
+    object.internal !== undefined &&
+    nativeArrayStorage(object.internal) &&
+    object.cls.findMethod('offsetget')?.fn.kind === 'native'
+  ) {
+    notice(`Indirect modification of overloaded element of ${object.cls.name} has no effect`);
+    return new RefPlace(new Ref(null));
+  }
+  const runtime = rt();
+  runtime.lastReturnRef = undefined;
+  const value = callMethod(object, 'offsetGet', [key ?? null]);
+  const returned = runtime.lastReturnRef as Ref | undefined;
+  runtime.lastReturnRef = undefined;
+  if (returned) return new RefPlace(returned);
+  if (!(value instanceof PhpObject)) {
+    notice(`Indirect modification of overloaded element of ${object.cls.name} has no effect`);
+  }
+  return new RefPlace(new Ref(value));
 }
 
 // code-gauge-allow functionCognitiveComplexity 22 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.

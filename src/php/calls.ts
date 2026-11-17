@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 466 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 467 -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import { LIMITS } from '../interpreter/limits';
 import type { FunctionDecl } from './ast';
@@ -415,6 +415,7 @@ function invokeUser(target: CallTarget, fn: UserFunction, args: ArgValue[], row:
       // The host's stack may run out before the call depth limit under a smaller stack. Too little stack remains here
       // to build an error, so a prepared one carries the innermost call out to where reporting it is safe.
       if (error instanceof RangeError) {
+        runtime.exhausted = true;
         hostStackExhaustion.record ??= callStack.at(-1);
         hostStackExhaustion.row ??= runtime.row;
         throw hostStackExhaustion;

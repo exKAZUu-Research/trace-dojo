@@ -638,9 +638,9 @@ function invalidateOwner(owner: object): void {
   }
 }
 
-export function ownershipProof(value: object, roots: Set<unknown>): object | undefined {
+export function ownershipProof(value: object, isRoot: (value: object) => boolean): object | undefined {
   const root = reachProofs.get(value);
-  return root !== undefined && roots.has(root) ? root : undefined;
+  return root !== undefined && isRoot(root) ? root : undefined;
 }
 
 export function rememberOwnership(path: object[], root: object): void {

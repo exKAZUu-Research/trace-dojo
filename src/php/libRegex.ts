@@ -322,13 +322,15 @@ function replaceCompiled(
   let done = 0;
   for (const match of matchesOf(compiled, subject, 0, status)) {
     if (limit >= 0 && done >= limit) break;
-    result += subject.slice(last, match.starts[0]) + replace(match);
+    const replacement = replace(match);
+    rt().ensureStringFits(result.length + match.starts[0] - last + replacement.length);
+    result += subject.slice(last, match.starts[0]) + replacement;
     last = match.ends[0];
     done++;
-    rt().ensureStringFits(result.length);
   }
   if (status.error !== 0) return undefined;
   count.value += done;
+  rt().ensureStringFits(result.length + subject.length - last);
   return result + subject.slice(last);
 }
 
@@ -505,7 +507,9 @@ defineFunction('preg_grep(string $pattern, array $array, int $flags = 0): array|
   const invert = ((args[2] as bigint | undefined) ?? 0n) === 1n;
   const result = new PhpArray();
   for (const [key, value] of (args[1] as PhpArray).entries()) {
-    const matched = !matchesOf(compiled, toStr(value)).next().done;
+    const status = { error: 0 };
+    const matched = !matchesOf(compiled, toStr(value), 0, status).next().done;
+    if (status.error !== 0) break;
     if (matched !== invert) result.set(key, value);
   }
   return result;

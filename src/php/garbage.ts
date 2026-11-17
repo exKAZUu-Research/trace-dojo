@@ -1,4 +1,5 @@
-// code-gauge-allow-file fileNcss 597 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 653 -- Holds the cases of one concern of the interpreter, which share their helpers.
+import { ExecutionLimitError } from '../interpreter/limits';
 import type { TurtleState } from '../interpreter/turtleWorld';
 import type { Frame, Runtime } from './runtime';
 import {
@@ -46,7 +47,7 @@ export function collectGarbage(runtime: Runtime, cycles = false): number {
     retainTurtles(runtime, reached);
     return 0;
   }
-  const { owners, handles } = releaseOrder(freed, previousOrder);
+  const { owners, handles } = releaseOrder(freed, previousOrder, runtime);
   const collected = freed.length + heldArrayCount(freed);
   const destructible = freed.filter((object) => !object.destructed && object.cls.findMethod('__destruct'));
   if (destructible.length === 0 || runtime.shuttingDown) {
@@ -75,35 +76,46 @@ export function collectGarbage(runtime: Runtime, cycles = false): number {
  * destroyed from the dropped values outward: its destructor runs, then what it holds is released in order, then its
  * handle returns to the free list. Objects on a cycle stay, as reference counting cannot free them.
  */
-// code-gauge-allow functionNcss 32 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+// code-gauge-allow functionNcss 38 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+// code-gauge-allow functionCognitiveComplexity 20 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 export function releaseDropped(runtime: Runtime, dropped: unknown[]): void {
-  if (runtime.shuttingDown || runtime.objects.size === 0) return;
-  dropped = dropped.filter((value) => !(value instanceof PhpObject && activeReleaseObjects.has(value)));
+  if (runtime.shuttingDown || runtime.exhausted || runtime.objects.size === 0) return;
+  dropped = dropped.filter(
+    (value) => !(value instanceof PhpObject && activeReleaseObjects.get(value)?.hasVisited(value))
+  );
   if (!dropped.some((value) => mayHoldObject(value))) return;
   const roots = ownershipRoots(runtime);
   const unreachable = new Set<object>();
   dropped = dropped.filter(
     (value) =>
+      (value instanceof PhpObject && activeReleaseObjects.has(value)) ||
       !(value instanceof Ref || value instanceof PhpArray || value instanceof PhpObject) ||
       !ownedReachable(value, roots, runtime, unreachable)
   );
   if (dropped.length === 0) return;
   const within = objectsWithin(dropped);
-  if (within.length === 0 || heldDirectly(runtime, within)) return;
-  runtime.spend();
-  const reached = new Set(within.filter((object) => ownedReachable(object, roots, runtime, unreachable)));
-  const freed = new Set(freeable(within.filter((object) => !reached.has(object))));
-  if (freed.size === 0) return;
+  const freed = new Set<PhpObject>();
+  if (within.length > 0 && !heldDirectly(runtime, within)) {
+    runtime.spend();
+    const reached = new Set(within.filter((object) => ownedReachable(object, roots, runtime, unreachable)));
+    for (const object of freeable(within.filter((object) => !reached.has(object)))) freed.add(object);
+  }
+  if (freed.size === 0 && activeReleaseObjects.size === 0) return;
   const release = new Release(runtime, freed, roots);
   const active = [...freed];
-  for (const object of active) activeReleaseObjects.add(object);
+  for (const object of active) activeReleaseObjects.set(object, release);
   releasing++;
   try {
     for (const value of dropped) release.value(value);
   } finally {
     releasing--;
-    for (const object of active) activeReleaseObjects.delete(object);
+    for (const object of active) {
+      activeReleaseObjects.delete(object);
+      pendingReleaseObjects.delete(object);
+    }
+    if (activeReleaseObjects.size === 0) releaseSequence = 0;
   }
+  if (active.length === 0) return;
   const turtleRoots = ownershipRoots(runtime);
   retainTurtles(
     runtime,
@@ -124,7 +136,8 @@ class ReleaseFinish {
 class Release {
   private readonly visited = new Set<PhpObject>();
   private readonly visitedArrays = new Set<PhpArray>();
-  private readonly unreachable = new Set<object>();
+  private unreachable = new Set<object>();
+  private retainedBefore: number | undefined;
 
   constructor(
     private readonly runtime: Runtime,
@@ -132,7 +145,8 @@ class Release {
     private roots: Set<unknown>
   ) {}
 
-  // code-gauge-allow functionCognitiveComplexity 17 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+  // code-gauge-allow functionCognitiveComplexity 22 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+  // code-gauge-allow functionNcss 34 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
   value(value: unknown): void {
     const pending: unknown[] = [value];
     let work = 0;
@@ -141,13 +155,19 @@ class Release {
       const item = pending.pop();
       if (item instanceof ReleaseFinish) {
         this.runtime.freeObject(item.object);
+        pendingReleaseObjects.delete(item.object);
         if (item.failed) throw item.failure;
       } else if (item instanceof Ref) pending.push(item.v);
       else if (item instanceof PhpArray) {
-        if (this.visitedArrays.has(item)) continue;
+        if (!item.composite || this.visitedArrays.has(item)) continue;
         this.visitedArrays.add(item);
         appendReversed(pending, item.map.values());
       } else if (item instanceof PhpObject) {
+        const owner = activeReleaseObjects.get(item);
+        if (owner && owner !== this) {
+          owner.resume(item);
+          continue;
+        }
         const finish = this.prepare(item);
         if (!finish) continue;
         pending.push(finish);
@@ -158,11 +178,35 @@ class Release {
     }
   }
 
+  hasVisited(object: PhpObject): boolean {
+    return this.visited.has(object);
+  }
+
+  resume(object: PhpObject): void {
+    if (this.visited.has(object)) return;
+    const previousRoots = this.roots;
+    const previousUnreachable = this.unreachable;
+    const previousRetained = this.retainedBefore;
+    this.retainedBefore = releaseSequence;
+    this.roots = ownershipRoots(this.runtime);
+    this.unreachable = new Set();
+    try {
+      this.value(object);
+    } finally {
+      this.roots = previousRoots;
+      this.unreachable = previousUnreachable;
+      this.retainedBefore = previousRetained;
+    }
+  }
+
+  // code-gauge-allow functionNcss 33 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+  // code-gauge-allow functionCognitiveComplexity 19 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
   private prepare(object: PhpObject): ReleaseFinish | undefined {
     if (!this.freed.has(object) || this.visited.has(object) || this.runtime.objects.get(object.id) !== object)
       return undefined;
-    if (ownedReachable(object, this.roots, this.runtime, this.unreachable)) return undefined;
+    if (ownedReachable(object, this.roots, this.runtime, this.unreachable, this.retainedBefore)) return undefined;
     this.visited.add(object);
+    pendingReleaseObjects.set(object, ++releaseSequence);
     let failure: unknown;
     let failed = false;
     if (!object.destructed && object.cls.findMethod('__destruct')) {
@@ -173,6 +217,7 @@ class Release {
       try {
         destruct(object);
       } catch (error) {
+        if (this.runtime.exhausted || error instanceof ExecutionLimitError) throw error;
         failure = error;
         failed = true;
       } finally {
@@ -182,8 +227,9 @@ class Release {
       if ([...roots].some((root) => this.unreachable.has(root as object)) || this.revived(changes, roots))
         this.unreachable.clear();
       this.roots = roots;
-      if (ownedReachable(object, this.roots, this.runtime, this.unreachable)) {
+      if (ownedReachable(object, this.roots, this.runtime, this.unreachable, this.retainedBefore)) {
         this.freed.delete(object);
+        pendingReleaseObjects.delete(object);
         if (failed) throw failure;
         return undefined;
       }
@@ -200,7 +246,7 @@ class Release {
         pushObject(change.owner, held);
         if (!held.some((value) => this.unreachable.has(value as object))) continue;
       }
-      if (ownedReachable(change.owner, roots, this.runtime, this.unreachable)) return true;
+      if (ownedReachable(change.owner, roots, this.runtime, this.unreachable, this.retainedBefore)) return true;
     }
     return false;
   }
@@ -208,7 +254,9 @@ class Release {
 
 /** How many releases are running, during which a collection would free their objects out of order. */
 let releasing = 0;
-const activeReleaseObjects = new Set<PhpObject>();
+const activeReleaseObjects = new Map<PhpObject, Release>();
+const pendingReleaseObjects = new Map<PhpObject, number>();
+let releaseSequence = 0;
 
 /**
  * Whether each object is held directly by a variable or a temporary of a running function, which keeps it alive
@@ -296,7 +344,7 @@ export function mark(runtime: Runtime): Set<PhpObject> {
   const reached = new Set<PhpObject>();
   const visitedArrays = new Set<PhpArray>();
   const roots: unknown[] = [];
-  for (const object of activeReleaseObjects) if (runtime.objects.get(object.id) === object) roots.push(object);
+  for (const object of activeReleaseObjects.keys()) if (runtime.objects.get(object.id) === object) roots.push(object);
   appendValues(roots, ownershipRoots(runtime));
   // A stack visits the first of the items pushed together first when they are pushed in reverse.
   const pending = roots.toReversed();
@@ -431,9 +479,12 @@ function freeable(garbage: PhpObject[]): PhpObject[] {
  * last reachability pass saw it. Destructors run owners first; handles return to the free list owners last, after
  * releasing an object has released what it held.
  */
+// code-gauge-allow functionNcss 37 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+// code-gauge-allow functionCognitiveComplexity 20 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 function releaseOrder(
   freed: PhpObject[],
-  previousOrder: Map<PhpObject, number>
+  previousOrder: Map<PhpObject, number>,
+  runtime: Runtime
 ): { owners: PhpObject[]; handles: PhpObject[] } {
   const set = new Set(freed);
   const referenced = new Set<PhpObject>();
@@ -447,11 +498,23 @@ function releaseOrder(
   const handles: PhpObject[] = [];
   const visited = new Set<PhpObject>();
   const visit = (object: PhpObject): void => {
-    if (visited.has(object)) return;
-    visited.add(object);
-    owners.push(object);
-    for (const target of edges.get(object) as PhpObject[]) visit(target);
-    handles.push(object);
+    const pending: { object: PhpObject; finish: boolean }[] = [{ object, finish: false }];
+    let work = 0;
+    while (pending.length > 0) {
+      if ((++work & 255) === 0) runtime.budget.checkClock();
+      const item = pending.pop() as { object: PhpObject; finish: boolean };
+      if (item.finish) {
+        handles.push(item.object);
+        continue;
+      }
+      if (visited.has(item.object)) continue;
+      visited.add(item.object);
+      owners.push(item.object);
+      pending.push({ object: item.object, finish: true });
+      const children = edges.get(item.object) as PhpObject[];
+      for (let index = children.length - 1; index >= 0; index--)
+        pending.push({ object: children[index], finish: false });
+    }
   };
   const position = (object: PhpObject): number => previousOrder.get(object) ?? Number.MAX_SAFE_INTEGER;
   const roots = freed
@@ -609,14 +672,20 @@ function ownershipRoots(runtime: Runtime): Set<unknown> {
   );
 }
 
-// code-gauge-allow functionNcss 31 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
-// code-gauge-allow functionCognitiveComplexity 24 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+// code-gauge-allow functionNcss 36 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+// code-gauge-allow functionCognitiveComplexity 28 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 function ownedReachable(
   value: Ref | PhpArray | PhpObject,
   roots: Set<unknown>,
   runtime: Runtime,
-  unreachable?: Set<object>
+  unreachable?: Set<object>,
+  retainedBefore?: number
 ): boolean {
+  const isRoot = (value: object): boolean => {
+    if (roots.has(value)) return true;
+    const sequence = value instanceof PhpObject ? pendingReleaseObjects.get(value) : undefined;
+    return retainedBefore !== undefined && sequence !== undefined && sequence <= retainedBefore;
+  };
   const pending: object[] = [value];
   const visited = new Set<object>();
   const predecessor = new Map<object, object>();
@@ -625,7 +694,7 @@ function ownedReachable(
     if ((++work & 255) === 0) runtime.budget.checkClock();
     const item = pending.pop() as object;
     if (unreachable?.has(item)) continue;
-    const root = roots.has(item) ? item : ownershipProof(item, roots);
+    const root = isRoot(item) ? item : ownershipProof(item, isRoot);
     if (root) {
       const path = [item];
       let child = predecessor.get(item);

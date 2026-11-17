@@ -618,3 +618,55 @@ test('strict native null coercion throws without emitting a deprecation', () => 
     'strlen(): Argument #1 ($string) must be of type string, null given:done'
   );
 });
+
+test.each([
+  "preg_replace('/^/',$p,[$s],1)[0]",
+  "preg_filter('/^/',$p,[$s],1)[0]",
+  "preg_replace_callback('/^/',fn()=>$p,[$s],1)[0]",
+  'substr_replace([$s],$p,0,0)[0]',
+])('bounds complete array replacement strings: %s', (expression) => {
+  const result = run(`<?php $s='a';$p=str_repeat('x',900000);for($i=0;$i<5;$i++)$s=${expression};echo 'never';`);
+  expect(result.kind === 'executed' && result.stdout).toMatch(/^\nFatal error: Allowed memory size/);
+});
+
+test.each(['/(?<=(a{1,3})(a{1,3}))b/', '/(?<=a{1,3}(a{1,3}))b/'])(
+  'rejects variable lookbehind capture order the host cannot preserve: %s',
+  (pattern) => {
+    expect(run(`<?php preg_match('${pattern}','aaaab',$m);`)).toMatchObject({
+      kind: 'executed',
+      uncaughtException: expect.stringContaining('この採点環境では使えません。'),
+    });
+  }
+);
+
+test('retains fixed lookbehind captures', () => {
+  expect(run("<?php preg_match('/(?<=(aa))b/','aab',$m);echo $m[1];")).toMatchObject({
+    kind: 'executed',
+    stdout: 'aa',
+  });
+});
+
+test('collects a long object cycle without host recursion', () => {
+  expect(
+    run(
+      '<?php class N{public $next;}$head=new N;$p=$head;for($i=0;$i<30000;$i++){$p->next=new N;$p=$p->next;}$p->next=$head;unset($p,$head);echo gc_collect_cycles();'
+    )
+  ).toMatchObject({ kind: 'executed', stdout: '30001' });
+});
+
+test.each(['$this->next=null;', 'unset($this->next);'])(
+  'nested destructor cleanup obeys the call-depth limit without rescanning: %s',
+  (body) => {
+    vi.restoreAllMocks();
+    const result = run(
+      `<?php class N{public $next;function __destruct(){${body}}}$head=null;for($i=0;$i<5000;$i++){$n=new N;$n->next=$head;$head=$n;}unset($n);$head=null;echo 'never';`
+    );
+    expect(result.kind === 'executed' && result.stdout).toMatch(/^\nFatal error: Allowed memory size/);
+  }
+);
+
+test('memory exhaustion stops destructor callbacks', () => {
+  const result = run('<?php class N{function __destruct(){echo "never";}}$n=new N;str_repeat("x",1000001);');
+  expect(result.kind === 'executed' && result.stdout).toMatch(/^\nFatal error: Allowed memory size/);
+  expect(result.kind === 'executed' && result.stdout).not.toContain('never');
+});

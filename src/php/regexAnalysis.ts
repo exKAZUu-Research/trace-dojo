@@ -5,8 +5,7 @@ import { UnsupportedFeatureError } from './unsupported';
 
 type Length = readonly [number, number];
 
-// code-gauge-allow functionNcss 35 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
-// code-gauge-allow functionCognitiveComplexity 27 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+// code-gauge-allow functionNcss 46 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 export function analyzeRegex(source: string, unicode: boolean, utf8: boolean, ignoreCase: boolean): Set<string> {
   let tree: AST.Pattern;
   try {
@@ -16,6 +15,7 @@ export function analyzeRegex(source: string, unicode: boolean, utf8: boolean, ig
       throw new UnsupportedFeatureError('解析器の制限を超える正規表現');
     throw error;
   }
+  const variableLookbehinds = new Set<AST.Assertion>();
   const references = new Set<string>();
   const contexts: boolean[] = [];
   const lengths = new Map<AST.Element, Length>();
@@ -45,6 +45,18 @@ export function analyzeRegex(source: string, unicode: boolean, utf8: boolean, ig
     },
     onAssertionEnter(node) {
       validateLookbehind(node, lengths);
+      if (node.kind === 'lookbehind') {
+        const bounds = node.alternatives.map((alternative) => alternativeLength(alternative, lengths, new Set()));
+        if (bounds.some(([min, max]) => min !== max || min !== bounds[0][0])) variableLookbehinds.add(node);
+      }
+    },
+    onCapturingGroupEnter(node) {
+      let parent: AST.Node | undefined = node.parent;
+      while (parent) {
+        if (parent.type === 'Assertion' && variableLookbehinds.has(parent))
+          throw new UnsupportedFeatureError('可変長後読みのキャプチャ');
+        parent = parent.parent ?? undefined;
+      }
     },
   });
   return references;

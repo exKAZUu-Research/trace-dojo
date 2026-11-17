@@ -134,6 +134,7 @@ function printUncaught(runtime: Runtime, object: PhpObject): string {
 
 /** Destroys the objects that remain, as PHP's shutdown does: global variables first, newest first, then the rest. */
 function shutdown(runtime: Runtime): string | undefined {
+  if (runtime.exhausted) return undefined;
   return guard(runtime, () => {
     runtime.frames.length = 1;
     destroyGlobals(runtime);

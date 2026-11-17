@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 954 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 963 -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 // oxlint-disable typescript/no-misused-spread -- PHP splits strings into bytes or code points, never into grapheme clusters.
 // oxlint-disable unicorn/prefer-code-point -- PHP strings hold bytes as code units 0–255, which charCodeAt and fromCharCode read and write as they are.
@@ -270,6 +270,7 @@ function replaceAll(
   if (!insensitive) {
     const parts = subject.split(search);
     count.value += parts.length - 1;
+    rt().ensureStringFits(subject.length + (parts.length - 1) * (replace.length - search.length));
     return checkLength(parts.join(replace));
   }
   const lowered = lower(subject);
@@ -279,10 +280,12 @@ function replaceAll(
   for (;;) {
     const found = lowered.indexOf(target, position);
     if (found === -1) break;
+    rt().ensureStringFits(result.length + found - position + replace.length);
     result += subject.slice(position, found) + replace;
     position = found + search.length;
     count.value++;
   }
+  rt().ensureStringFits(result.length + subject.length - position);
   return checkLength(result + subject.slice(position));
 }
 
@@ -366,6 +369,7 @@ defineFunction(
       let end = lengthValue === null || lengthValue === undefined ? subject.length : Number(lengthValue);
       if (lengthValue !== null && lengthValue !== undefined)
         end = end < 0 ? Math.max(subject.length + end, start) : Math.min(start + end, subject.length);
+      rt().ensureStringFits(start + replacement.length + subject.length - Math.max(end, start));
       return subject.slice(0, start) + replacement + subject.slice(Math.max(end, start));
     };
     if (text instanceof PhpArray) {
@@ -1272,13 +1276,20 @@ defineFunction('basename(string $path, string $suffix = ""): string', ({ args })
   if (suffix !== '' && path.endsWith(suffix) && path !== suffix) path = path.slice(0, -suffix.length);
   return path;
 });
+// code-gauge-allow functionCognitiveComplexity 16 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 defineFunction('dirname(string $path, int $levels = 1): string', ({ args }) => {
-  let path = s(args[0]);
-  for (let level = 0; level < Number(args[1] ?? 1n); level++) {
-    const trimmed = path.replace(/\/+$/, '');
-    const slash = trimmed.lastIndexOf('/');
-    if (slash === -1) return '.';
-    path = trimmed.slice(0, slash).replace(/\/+$/, '') || '/';
+  const path = s(args[0]);
+  const levels = (args[1] as bigint | undefined) ?? 1n;
+  if (levels < 1n) throwError('ValueError', 'dirname(): Argument #2 ($levels) must be greater than or equal to 1');
+  if (path === '') return '';
+  let end = path.length;
+  for (let level = 0n; level < levels; level++) {
+    rt().spend();
+    while (end > 0 && path[end - 1] === '/') end--;
+    if (end === 0) return path.startsWith('/') ? '/' : '.';
+    end = path.lastIndexOf('/', end - 1);
+    if (end === -1) return '.';
   }
-  return path;
+  while (end > 0 && path[end - 1] === '/') end--;
+  return end === 0 ? '/' : path.slice(0, end);
 });
