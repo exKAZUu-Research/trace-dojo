@@ -56,6 +56,8 @@ export class JsObject {
   turtle?: TurtleState;
   /** Set by the builtin Error constructors, which `Error.prototype.toString` and stack traces rely on. */
   isError = false;
+  /** An error's first stack line, which V8 formats when the error is first printed and keeps through later changes. */
+  stackHeadline?: string;
   /** Set by the RegExp constructor and regular expression literals; never run itself, since it keeps no lastIndex. */
   regexp?: RegExp;
   /** Set on a builtin iterator, such as a generator, which loops and spreads step through and close early. */

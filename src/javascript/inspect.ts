@@ -349,6 +349,8 @@ function prefixOf(constructor: string | undefined, fallback: string, size = ''):
 }
 
 /** The keys an object shows: its enumerable ones, or with `showHidden` all of its own, as `%o` shows them. */
+const ERROR_KEYS = new Set<Key>(['name', 'message', 'stack']);
+
 function enumerableKeys(runtime: Runtime, object: JsObject, showHidden: boolean): Key[] {
   // An array keeps its elements apart from its other properties.
   const own =
@@ -359,7 +361,7 @@ function enumerableKeys(runtime: Runtime, object: JsObject, showHidden: boolean)
   const strings = typeof object.primitive === 'string' ? own.slice(object.primitive.length) : own;
   const keys: Key[] = [...strings, ...runtime.ownSymbols(object)];
   const listed = keys.filter((key) => {
-    if (object.isError && (key === 'message' || key === 'name' || key === 'stack')) return false;
+    if (object.isError && ERROR_KEYS.has(key) && (showHidden || isInHeadline(runtime, object, key))) return false;
     return showHidden || object.properties.get(key)?.enumerable;
   });
   // An error also shows its own hidden reasons, bracketed, as Node.js does.
@@ -403,17 +405,37 @@ export function errorHeadline(runtime: Runtime, error: JsObject): string {
  * Node.js then improves with the `name` it reads again.
  */
 function errorText(runtime: Runtime, error: JsObject, constructor: string | undefined): string {
-  const name = runtime.get(error, 'name');
-  const message = runtime.get(error, 'message');
-  const nameText = name === undefined ? 'Error' : runtime.toString(name);
-  const messageText = message === undefined ? '' : runtime.toString(message);
-  const text = nameText === '' ? messageText : messageText === '' ? nameText : `${nameText}: ${messageText}`;
+  error.stackHeadline ??= v8Headline(runtime, error);
+  const text = error.stackHeadline;
   const improvedName = runtime.get(error, 'name');
+  // Node.js also reads the message on each print, which a getter observes.
+  runtime.get(error, 'message');
   if (improvedName === undefined || improvedName === null) return improveErrorName(text, 'Error', constructor);
   if (typeof improvedName === 'string') return improveErrorName(text, improvedName, constructor);
   // Node.js marks a name that is not a string with the error's class, as `42 [Error]: bad`.
   const shown = runtime.toString(improvedName);
   return text.replace(shown, `${shown} [${constructor ?? 'Error'}]`);
+}
+
+/**
+ * Whether Node.js leaves out an error's own `name`, `message`, or `stack`: a hidden one, or a data property that is not
+ * a string or that the stack's first line already shows, which a change after the error was first printed does not
+ * reach; an accessor stays listed without being called.
+ */
+function isInHeadline(runtime: Runtime, error: JsObject, key: Key): boolean {
+  error.stackHeadline ??= v8Headline(runtime, error);
+  const property = error.properties.get(key);
+  if (!property?.enumerable) return true;
+  if (isAccessor(property)) return false;
+  return typeof property.value !== 'string' || error.stackHeadline.includes(property.value);
+}
+
+function v8Headline(runtime: Runtime, error: JsObject): string {
+  const name = runtime.get(error, 'name');
+  const message = runtime.get(error, 'message');
+  const nameText = name === undefined ? 'Error' : runtime.toString(name);
+  const messageText = message === undefined ? '' : runtime.toString(message);
+  return nameText === '' ? messageText : messageText === '' ? nameText : `${nameText}: ${messageText}`;
 }
 
 /**

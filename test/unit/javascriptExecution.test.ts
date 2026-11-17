@@ -2126,6 +2126,36 @@ Q 50
     });
   });
 
+  test('an error keeps the first line it was first printed with, as V8 caches its stack', () => {
+    // Node.js prints each error's stack trace after its first line, which the interpreter leaves out.
+    const source = `const e = new Error("a"); e.message = "b"; console.log(String(e).length, e);
+const f = new Error("a"); console.log(f); f.message = "b"; console.log(f);
+const g = new Error("a"); console.log([g].length); g.name = "X"; console.log(g);
+const p = new Error("p"); try { throw p; } catch {} p.message = "q"; console.log(p);
+let n = 0; const k = new Error("z"); Object.defineProperty(k, "message", { get: () => "m" + ++n, configurable: true });
+console.log(k); console.log(n); console.log(k); console.log(n);
+let c = 0; const j = new Error("z"); Object.defineProperty(j, "name", { get: () => "N" + ++c, configurable: true });
+console.log(j); console.log(c); console.log(j); console.log(c);`;
+    expect(executeProgram('javascript', source)).toMatchObject({
+      kind: 'executed',
+      stdout: `8 Error: b
+Error: a
+Error: a
+1
+X: a
+Error: q
+Error: m1
+2
+Error: m1
+3
+N1: z
+2
+N1: z
+3
+`,
+    });
+  });
+
   test('a timer pending through a busy wait fires after its delay, not the wait plus its delay', () => {
     // Node.js prints about 101 here, but late under load, so the check is on the interpreter's clock alone.
     const source = `let sum = 0; const v = Date.now(); setTimeout(() => console.log(Date.now() - v), 100);
