@@ -1,0 +1,13 @@
+(1,38): error TS18046: 'value' is of type 'unknown'.
+(2,38): error TS18046: 'value' is of type 'unknown'.
+(3,38): error TS18046: 'value' is of type 'unknown'.
+(7,40): error TS2571: Object is of type 'unknown'.
+(8,45): error TS18046: 'value.x' is of type 'unknown'.
+(9,49): error TS18048: 'value' is possibly 'undefined'.
+(10,24): error TS18050: The value 'null' cannot be used here.
+(11,44): error TS18047: 'value' is possibly 'null'.
+(12,38): error TS2571: Object is of type 'unknown'.
+(14,62): error TS18048: 'value' is possibly 'undefined'.
+(15,62): error TS18048: 'value' is possibly 'undefined'.
+(16,24): error TS18050: The value 'undefined' cannot be used here.
+(17,40): error TS18047: 'value' is possibly 'null'.

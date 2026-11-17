@@ -78,6 +78,7 @@ export class OperatorChecker {
       const value = numberValue(argument.text);
       return freshLiteralType(typeof value === 'bigint' ? -value : -value);
     }
+    if (!this.checkNonNullOperand(argument, type)) return numberType;
     // TypeScript rejects a numeric unary operator on a value that may be a symbol, even through a constraint.
     if (this.maySymbol(type)) {
       this.c.error(argument, `演算子 '${operator}' は型 'symbol' には使えません。`);
@@ -87,12 +88,26 @@ export class OperatorChecker {
       if (this.isBigintLike(type)) this.c.error(argument, "演算子 '+' は型 'bigint' には使えません。");
       return numberType;
     }
+    return this.isBigintLike(type) ? bigintType : numberType;
+  }
+
+  /**
+   * Reports an operand that is `unknown` or may be `null` or `undefined`, through its constraint too, returning whether
+   * the operator still gives its usual type.
+   */
+  private checkNonNullOperand(argument: TreeNode, type: Type): boolean {
     if (isIntrinsic(type, 'null') || isIntrinsic(type, 'undefined')) {
       this.c.error(argument, `値 '${this.c.print(type)}' はここでは使えません。`);
-      return numberType;
+      return false;
     }
-    if (!isAnyLike(type) && this.c.relations.isNullable(type)) this.c.members.checkNonNullable(argument, type);
-    return this.isBigintLike(type) ? bigintType : numberType;
+    if (isIntrinsic(type, 'unknown')) {
+      this.c.members.checkNonNullable(argument, type);
+      return false;
+    }
+    const constraint = this.c.baseConstraint(type);
+    if (!isAnyLike(constraint) && this.c.relations.isNullable(constraint))
+      this.c.members.checkNonNullable(argument, constraint);
+    return true;
   }
 
   private maySymbol(type: Type): boolean {
