@@ -88,15 +88,24 @@ export class BindingPatterns {
    * parameter defaults: a generic type may by its constraint, while `any`, `unknown`, and `void` may not, as
    * TypeScript 7 decides.
    */
-  defaultMayBeUndefined(type: Type, path = new Set<Type>()): boolean {
-    // Only a type on the path being followed is a cycle; one that two operands share is answered for each.
+  defaultMayBeUndefined(type: Type, path = new Set<Type>(), answers = new Map<Type, boolean>()): boolean {
+    // Only a type on the path being followed is a cycle; one that operands share keeps the answer found for it.
+    const known = answers.get(type);
+    if (known !== undefined) return known;
     if (path.has(type)) return false;
+    this.c.budget.spend();
     path.add(type);
     try {
-      if (type.kind === 'union') return type.types.some((member) => this.defaultMayBeUndefined(member, path));
-      if (type.kind === 'intersection') return type.types.every((member) => this.defaultMayBeUndefined(member, path));
-      const constraint = this.c.baseConstraint(type);
-      return constraint === type ? isIntrinsic(type, 'undefined') : this.defaultMayBeUndefined(constraint, path);
+      const next = (member: Type): boolean => this.defaultMayBeUndefined(member, path, answers);
+      let answer: boolean;
+      if (type.kind === 'union') answer = type.types.some(next);
+      else if (type.kind === 'intersection') answer = type.types.every(next);
+      else {
+        const constraint = this.c.baseConstraint(type);
+        answer = constraint === type ? isIntrinsic(type, 'undefined') : next(constraint);
+      }
+      answers.set(type, answer);
+      return answer;
     } finally {
       path.delete(type);
     }
@@ -270,9 +279,10 @@ export class BindingPatterns {
         const source = this.c.structureOf(type);
         structure.stringIndex = source.stringIndex;
         structure.numberIndex = source.numberIndex;
+        // A rest copies each value into a plain, writable property, as a spread does.
         for (const [name, property] of source.properties) {
           if (!omitted.includes(name) && !(property.isMethod && property.declaringClass))
-            structure.properties.set(name, property);
+            structure.properties.set(name, { ...property, readonly: false, getterOnly: false, writeType: undefined });
         }
         return structure;
       },
