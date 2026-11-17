@@ -1,0 +1,5 @@
+(1,95): error TS2339: Property 'toUpperCase' does not exist on type 'string | number'.
+  Property 'toUpperCase' does not exist on type 'number'.
+(2,95): error TS2339: Property 'toFixed' does not exist on type 'string | number'.
+  Property 'toFixed' does not exist on type 'string'.
+(5,73): error TS2454: Variable 'y' is used before being assigned.
