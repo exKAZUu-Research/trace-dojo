@@ -32,8 +32,8 @@ import {
 /** Resolves the type operators: `keyof`, indexed access, conditional, mapped, and template literal types. */
 export class TypeOperators {
   private readonly mappedParameters = new Map<number, TypeParameter>();
-  /** The keys of a mapped type that a name type maps to each name, by the structure being built. */
-  private readonly mappedKeys = new WeakMap<Structure, Map<string, Type[]>>();
+  /** The keys and name types of a mapped type that a name type maps to each name, by the structure being built. */
+  private readonly mappedKeys = new WeakMap<Structure, Map<string, { keys: Type[]; nameTypes: Type[] }>>();
   private readonly inferParameters = new Map<number, Map<string, TypeParameter>>();
 
   constructor(private readonly c: Checker) {}
@@ -237,12 +237,14 @@ export class TypeOperators {
     if (nameMember.kind === 'literal' && typeof nameMember.value !== 'boolean') {
       const name = String(nameMember.value);
       const key = mapper.get(info.typeParameter.id) as Type;
-      // Keys that a name type maps to one name share it, as TypeScript maps the union of those keys.
-      const keys = [...(structure.properties.get(name) ? (this.mappedKeys.get(structure)?.get(name) ?? []) : []), key];
       let names = this.mappedKeys.get(structure);
       if (!names) this.mappedKeys.set(structure, (names = new Map()));
-      names.set(name, keys);
-      structure.properties.set(name, this.mappedProperty(info, unionOf(keys), name));
+      // Keys that a name type maps to one name share it, as TypeScript maps the union of those keys.
+      const collided = structure.properties.has(name) ? names.get(name) : undefined;
+      const keys = [...(collided?.keys ?? []), key];
+      const nameTypes = [...(collided?.nameTypes ?? []), nameMember];
+      names.set(name, { keys, nameTypes });
+      structure.properties.set(name, this.mappedProperty(info, keys, name, unionOf(nameTypes)));
       return;
     }
     const indexInfo = (): IndexInfo => ({
@@ -254,9 +256,12 @@ export class TypeOperators {
     else if (isIntrinsic(nameMember, 'number')) structure.numberIndex = indexInfo();
   }
 
-  private mappedProperty(info: MappedInfo, key: Type, name: string): Property {
-    // A renamed property takes the modifiers of the one property its key names in the source.
-    const sourceName = key.kind === 'literal' && typeof key.value !== 'boolean' ? String(key.value) : undefined;
+  /** The property that `keys` map to, which takes the modifiers of the source property the first key names. */
+  private mappedProperty(info: MappedInfo, keys: Type[], name: string, nameType: Type): Property {
+    const [firstKey] = keys;
+    const key = unionOf(keys);
+    const sourceName =
+      firstKey.kind === 'literal' && typeof firstKey.value !== 'boolean' ? String(firstKey.value) : undefined;
     const sourceProperty =
       info.source && sourceName !== undefined ? this.c.propertyOf(info.source, sourceName) : undefined;
     let type: Type | undefined;
@@ -273,6 +278,7 @@ export class TypeOperators {
       readonly: applyModifier(info.readonlyModifier, sourceProperty?.readonly ?? false),
       isMethod: false,
       visibility: 'public',
+      nameType,
     };
   }
 
@@ -298,7 +304,7 @@ export class TypeOperators {
     // keyof lists the public members only.
     for (const [name, property] of structure.properties) {
       if (name.startsWith('__@') || name.startsWith('#') || property.visibility !== 'public') continue;
-      keys.push(this.isNumericKey(property) ? literalType(Number(name)) : literalType(name));
+      keys.push(property.nameType ?? (this.isNumericKey(property) ? literalType(Number(name)) : literalType(name)));
     }
     return unionOf(keys);
   }
@@ -308,6 +314,10 @@ export class TypeOperators {
    * type, which `keyof` gives as a number.
    */
   isNumericKey(property: Property): boolean {
+    if (property.nameType)
+      return (property.nameType.kind === 'union' ? property.nameType.types : [property.nameType]).some(
+        (member) => member.kind === 'literal' && typeof member.value === 'number'
+      );
     const declaration = property.declaration;
     const name = declaration?.childForFieldName('name') ?? declaration?.childForFieldName('key');
     if (name?.type !== 'computed_property_name') return name?.type === 'number';
