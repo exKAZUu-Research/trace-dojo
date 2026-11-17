@@ -35,14 +35,21 @@ function contextualCallSignature(c: Checker, type: Type, node: TreeNode): Signat
   if (signatures.length < 2) return signatures[0];
   let combined: Signature | undefined = signatures[0];
   for (const signature of signatures.slice(1)) {
-    // TypeScript intersects generic signatures only when their type parameters are identical.
-    if (combined.typeParameters.length > 0 || signature.typeParameters.length > 0) return undefined;
-    combined = intersectedSignature(c, combined, signature);
+    const mapper = identicalTypeParametersMapper(c, combined, signature);
+    if (!mapper) return undefined;
+    combined = intersectedSignature(
+      c,
+      combined,
+      mapper.size > 0 ? c.instantiateSignature(signature, mapper) : signature
+    );
   }
   return combined;
 }
 
-/** The signature of an intersection of two functions, whose parameters take what either one takes. */
+/**
+ * The signature of an intersection of two functions with the same type parameters, whose parameters take what either
+ * one takes.
+ */
 function intersectedSignature(c: Checker, left: Signature, right: Signature): Signature {
   const [longest, shorter] = left.parameters.length >= right.parameters.length ? [left, right] : [right, left];
   const minimum = Math.max(minArgumentCount(left), minArgumentCount(right));
@@ -56,31 +63,52 @@ function intersectedSignature(c: Checker, left: Signature, right: Signature): Si
     };
   });
   return {
-    typeParameters: [],
+    typeParameters: left.typeParameters,
     parameters,
     returnType: () => intersectionOf([left.returnType(), right.returnType()], c.budget),
   };
 }
 
-/** Whether two signatures take the same parameters, as TypeScript compares a union's signatures. */
+/** Whether two signatures take the same type parameters and parameters, as TypeScript compares a union's signatures. */
 function haveIdenticalParameters(c: Checker, source: Signature, target: Signature): boolean {
   if (
     source.parameters.length !== target.parameters.length ||
     minArgumentCount(source) !== minArgumentCount(target) ||
-    hasRestParameter(source) !== hasRestParameter(target) ||
-    source.typeParameters.length !== target.typeParameters.length
+    hasRestParameter(source) !== hasRestParameter(target)
   )
     return false;
+  const mapper = identicalTypeParametersMapper(c, source, target);
+  return (
+    mapper !== undefined &&
+    source.parameters.every((parameter, index) =>
+      identicalTypes(c, parameter.type, c.instantiate(target.parameters[index].type, mapper))
+    )
+  );
+}
+
+/**
+ * The mapper from the target's type parameters to the source's when they have the same constraints and defaults, as
+ * TypeScript requires of signatures it combines.
+ */
+function identicalTypeParametersMapper(c: Checker, source: Signature, target: Signature): Mapper | undefined {
+  if (source.typeParameters.length !== target.typeParameters.length) return undefined;
   const mapper: Mapper = new Map(
     target.typeParameters.map((parameter, index) => [parameter.id, source.typeParameters[index]])
   );
-  return source.parameters.every((parameter, index) => {
-    const targetType = c.instantiate(target.parameters[index].type, mapper);
+  const identicalAfterMapping = (sourceType: Type | undefined, targetType: Type | undefined): boolean =>
+    identicalTypes(c, sourceType ?? unknownType, targetType ? c.instantiate(targetType, mapper) : unknownType);
+  const identical = source.typeParameters.every((parameter, index) => {
+    const other = target.typeParameters[index];
     return (
-      parameter.type === targetType ||
-      (isAnyLike(parameter.type) === isAnyLike(targetType) && c.relations.identical(parameter.type, targetType))
+      identicalAfterMapping(parameter.constraint?.(), other.constraint?.()) &&
+      identicalAfterMapping(parameter.default?.(), other.default?.())
     );
   });
+  return identical ? mapper : undefined;
+}
+
+function identicalTypes(c: Checker, source: Type, target: Type): boolean {
+  return source === target || (isAnyLike(source) === isAnyLike(target) && c.relations.identical(source, target));
 }
 
 /** How many parameters a function expression requires, which a contextual signature must have at least. */

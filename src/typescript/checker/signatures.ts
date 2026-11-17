@@ -12,6 +12,7 @@ import {
   type TypeParameter,
   undefinedType,
   unionOf,
+  unknownType,
 } from './types';
 
 /** Resolves the signatures and type parameters that function-like and generic declarations declare. */
@@ -26,7 +27,7 @@ export class Signatures {
       const cached = this.signatureCache.get(node.id);
       if (cached) return cached;
     }
-    const typeParameters = this.typeParametersOf(node);
+    const typeParameters = this.functionTypeParameters(node, contextual);
     const { parameters, thisType } = this.declaredParameters(node, contextual);
     const returnNode =
       node.childForFieldName('return_type') ??
@@ -49,6 +50,11 @@ export class Signatures {
     };
     if (!contextual && this.c.silent === 0) this.signatureCache.set(node.id, signature);
     return signature;
+  }
+
+  /** A function's type parameters, which one its contextual signature types takes from that signature. */
+  private functionTypeParameters(node: TreeNode, contextual: Signature | undefined): TypeParameter[] {
+    return contextual && isContextSensitiveFunction(node) ? contextual.typeParameters : this.typeParametersOf(node);
   }
 
   private declaredParameters(
@@ -274,9 +280,15 @@ export class Signatures {
       kind: 'typeParameter',
       id: newTypeId(),
       name: node.childForFieldName('name')?.text ?? 'T',
-      constraint: constraintNode ? () => this.c.typeNodes.typeFromNode(named(constraintNode)[0]) : undefined,
+      constraint: constraintNode ? () => this.declaredConstraint(constraintNode) : undefined,
       default: defaultNode ? () => this.c.typeNodes.typeFromNode(named(defaultNode)[0]) : undefined,
     };
+  }
+
+  /** A type parameter's constraint, where TypeScript reads `extends any` as `extends unknown`. */
+  private declaredConstraint(constraintNode: TreeNode): Type {
+    const constraint = this.c.typeNodes.typeFromNode(named(constraintNode)[0]);
+    return constraint === anyType ? unknownType : constraint;
   }
 
   typeParametersOfSymbol(symbol: Sym): TypeParameter[] {
@@ -285,6 +297,17 @@ export class Signatures {
     if (!declaration) return [];
     return this.typeParametersOf(declaration);
   }
+}
+
+/**
+ * Whether a function expression or method takes its parameters' types or `this` from its contextual signature, as one
+ * without type parameters does unless it annotates every parameter and, if it is not an arrow function, `this`.
+ */
+export function isContextSensitiveFunction(node: TreeNode): boolean {
+  if (node.childForFieldName('type_parameters')) return false;
+  const nodes = parameterNodes(node);
+  if (nodes.some((parameterNode) => !parameterNode.childForFieldName('type'))) return true;
+  return node.type !== 'arrow_function' && (nodes.length === 0 || patternOf(nodes[0]).type !== 'this');
 }
 
 /** The parameter declarations of a function-like node, a `this` parameter included. */
