@@ -1,5 +1,5 @@
 import { type Frame, withHeldValues } from '../runtime';
-import { copyForFrame, known } from '../semaBase';
+import { copyForFrame, known, type SemaApi } from '../semaBase';
 import { BOOL, fnType, optionalOf, type StructType, type Type, typeName, USIZE, VOID } from '../types';
 import { FnValue, NULL, optionalSome, Slice, type Value, ZStruct } from '../values';
 import { blockSortFunction, runBlockSort } from './blockSort';
@@ -65,7 +65,7 @@ function reader(
   name: string,
   elementCount: 1 | 2,
   callbackReturn: Type,
-  resultType: (type: Type) => Type,
+  resultType: (type: Type, sema: SemaApi) => Type,
   compute: (items: Slice, call: (args: Value[]) => Value, frame: Frame, type: Type) => Value
 ): () => Member {
   return generic(name, 4, (sema, call, type, [itemsArg, contextArg, fnArg]) => {
@@ -80,7 +80,7 @@ function reader(
       callbackReturn,
       fnArg
     );
-    return nativeCall(resultType(type), [items, context], call.span, ([slice, contextValue], frame: Frame) => {
+    return nativeCall(resultType(type, sema), [items, context], call.span, ([slice, contextValue], frame: Frame) => {
       return compute(
         slice as Slice,
         (args) => {
@@ -144,38 +144,29 @@ function extremum(items: Slice, call: (args: Value[]) => Value, frame: Frame, ty
 
 /** `equalRange(T, items, context, compareFn)`: the bounds of the items the function finds equal. */
 function equalRangeMember(): Member {
-  return generic('std.sort.equalRange', 4, (sema, call, type, [itemsArg, contextArg, fnArg]) => {
-    const items = constSlice(sema, itemsArg, type);
-    const context = sema.compile(contextArg);
-    const fn = callbackFunction(sema, sema.compile(fnArg), fnArg);
-    checkCallback(sema, 'std.sort.equalRange', fn, [context.type, type], ORDER, fnArg);
-    return nativeCall(
-      tupleOf(sema, [USIZE, USIZE]),
-      [items, context],
-      call.span,
-      ([slice, contextValue], frame: Frame) => {
-        const values = slice as Slice;
-        const order = (item: Value): bigint => {
-          frame.runtime.spend();
-          return fn.call(frame, [contextValue, item]) as bigint;
-        };
-        let low = 0;
-        let high = values.length;
-        while (low < high) {
-          const middle = low + Math.floor((high - low) / 2);
-          const comparison = order(values.get(middle));
-          if (comparison === ORDER_GT) low = middle + 1;
-          else if (comparison === ORDER_LT) high = middle;
-          else {
-            const lower = low + partitionPoint(subSlice(values, low, middle), (item) => order(item) === ORDER_GT);
-            const upper = middle + partitionPoint(subSlice(values, middle, high), (item) => order(item) !== ORDER_LT);
-            return new ZStruct([BigInt(lower), BigInt(upper)]);
-          }
+  return reader(
+    'std.sort.equalRange',
+    1,
+    ORDER,
+    (_type, sema) => tupleOf(sema, [USIZE, USIZE]),
+    (values, call) => {
+      const order = (item: Value): bigint => call([item]) as bigint;
+      let low = 0;
+      let high = values.length;
+      while (low < high) {
+        const middle = low + Math.floor((high - low) / 2);
+        const comparison = order(values.get(middle));
+        if (comparison === ORDER_GT) low = middle + 1;
+        else if (comparison === ORDER_LT) high = middle;
+        else {
+          const lower = low + partitionPoint(subSlice(values, low, middle), (item) => order(item) === ORDER_GT);
+          const upper = middle + partitionPoint(subSlice(values, middle, high), (item) => order(item) !== ORDER_LT);
+          return new ZStruct([BigInt(lower), BigInt(upper)]);
         }
-        return new ZStruct([BigInt(low), BigInt(low)]);
       }
-    );
-  })();
+      return new ZStruct([BigInt(low), BigInt(low)]);
+    }
+  )();
 }
 
 const MEMBERS: Record<string, () => Member> = {

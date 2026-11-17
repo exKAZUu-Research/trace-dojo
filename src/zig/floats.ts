@@ -378,7 +378,7 @@ export function integerSqrt(value: bigint): bigint {
 // Literals ------------------------------------------------------------------------------------------------------------
 
 /** Parses a Zig float literal (decimal or hexadecimal, with `_` separators) to the nearest float of a format. */
-// code-gauge-allow functionNcss 32 -- Keeps decimal and hexadecimal literal conversion together.
+// code-gauge-allow functionNcss 35 -- Keeps decimal and hexadecimal literal conversion together.
 // code-gauge-allow functionCognitiveComplexity 19 -- Checks both literal radices before allocating their exact values.
 export function parseFloatLiteral(text: string, bits: FloatBits): BigFloat {
   const clean = text.replaceAll('_', '');

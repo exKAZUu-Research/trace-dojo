@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 960 -- The file holds one layer of the compiler, whose parts share its private state.
+// code-gauge-allow-file fileNcss 969 -- The file holds one layer of the compiler, whose parts share its private state.
 // code-gauge-allow-file duplicateLines 18 -- Undefined and zero initializers share aggregate shapes but differ in scalar and optional values.
 import { CompileError } from '../interpreter/diagnostics';
 import { ExecutionBudget } from '../interpreter/limits';
@@ -20,6 +20,7 @@ import {
   asBigFloat,
   BigFloat,
   bigFloatOf,
+  compareFloats,
   floatFromBigInt,
   floatOf,
   FORMATS,
@@ -744,7 +745,7 @@ export abstract class SemaBase implements SemaApi {
     }
   }
 
-  // code-gauge-allow functionCognitiveComplexity 16 -- Checks each rule of Zig's type coercion or container analysis in turn.
+  // code-gauge-allow functionCognitiveComplexity 17 -- Checks each rule of Zig's type coercion or container analysis in turn.
   private coerceToInt(expression: TExpr, to: IntType, span: Span): TExpr | undefined {
     const from = expression.type;
     if (from.kind === 'comptime_int' || (from.kind === 'int' && expression.known)) {
@@ -754,8 +755,8 @@ export abstract class SemaBase implements SemaApi {
       return known(to, value, span);
     }
     if (from.kind === 'int') return intWidens(from, to) ? { ...expression, type: to } : undefined;
-    if (from.kind === 'comptime_float' && expression.known) {
-      const value = expression.value as BigFloat;
+    if ((from.kind === 'comptime_float' || from.kind === 'float') && expression.known) {
+      const value = asBigFloat(expression.value as AnyFloat);
       if (!isIntegral(value)) this.error(span, fractional(value, to));
       const integer = truncateToBigInt(value);
       if (!fitsInt(integer, to)) this.error(span, `${typeName(to)} 型では、整数 ${integer} を表せません。`);
@@ -764,7 +765,7 @@ export abstract class SemaBase implements SemaApi {
     return undefined;
   }
 
-  // code-gauge-allow functionCognitiveComplexity 19 -- Checks each rule of Zig's type coercion or container analysis in turn.
+  // code-gauge-allow functionCognitiveComplexity 20 -- Checks each rule of Zig's type coercion or container analysis in turn.
   private coerceToFloat(expression: TExpr, to: Extract<Type, { kind: 'float' }>, span: Span): TExpr | undefined {
     const from = expression.type;
     if (from.kind === 'comptime_float' && expression.known) {
@@ -778,8 +779,14 @@ export abstract class SemaBase implements SemaApi {
       }
       return known(to, converted, span);
     }
+    if (from.kind === 'float' && expression.known) {
+      const value = asBigFloat(expression.value as AnyFloat);
+      const converted = floatOf(value, to.bits);
+      if (value.kind !== 'nan' && compareFloats(value, converted) !== 0)
+        this.error(span, `${typeName(to)} 型では、浮動小数点数を正確に表せません。`);
+      return known(to, converted, span);
+    }
     if (from.kind === 'float' && from.bits <= to.bits) {
-      if (expression.known) return known(to, floatOf(asBigFloat(expression.value as AnyFloat), to.bits), span);
       if (to.bits <= 64) return { ...expression, type: to };
       return this.derived(expression, to, (value) => floatOf(asBigFloat(value as AnyFloat), to.bits));
     }
@@ -924,33 +931,12 @@ export abstract class SemaBase implements SemaApi {
 
   private coerceToStruct(expression: TExpr, to: StructType, span: Span): TExpr | undefined {
     const from = expression.type;
-    if (from.kind !== 'struct' || !isAnonymous(from)) return undefined;
+    if (from.kind !== 'struct' || !from.isTuple || !to.isTuple) return undefined;
     const sourceFields = from.fields ?? [];
     const targetFields = this.structFields(to, span);
-    if (sourceFields.length === 0 && targetFields.length === 0 && to.native)
-      return this.nativeDefault(to, span, expression);
-    if (to.isTuple) {
-      if (sourceFields.length !== targetFields.length) return undefined;
-      const elements = targetFields.map((field, index) =>
-        this.coerce(this.tupleElement(expression, index, sourceFields[index], span), field.type, span)
-      );
-      return this.aggregate(to, elements, span, (values) => new ZStruct(values));
-    }
-    const targetIndexes = this.fieldIndexes(targetFields);
-    const sourceIndexes = this.fieldIndexes(sourceFields);
-    for (const field of sourceFields) {
+    if (sourceFields.length !== targetFields.length) return undefined;
+    const elements = targetFields.map((field, index) => {
       this.compilationBudget.spend();
-      if (!targetIndexes.has(field.name)) {
-        this.error(span, `構造体 ${typeName(to)} には、フィールド「${field.name}」がありません。`);
-      }
-    }
-    const elements = targetFields.map((field) => {
-      this.compilationBudget.spend();
-      const index = sourceIndexes.get(field.name);
-      if (index === undefined) {
-        if (!field.hasDefault) this.error(span, `フィールド「${field.name}」の値がありません。`);
-        return known(field.type, field.defaultValue, span);
-      }
       return this.coerce(this.tupleElement(expression, index, sourceFields[index], span), field.type, span);
     });
     return this.aggregate(to, elements, span, (values) => new ZStruct(values));
@@ -998,6 +984,38 @@ export abstract class SemaBase implements SemaApi {
     return runtime(field.type, (frame) => (evaluate(frame) as ZStruct).slots[index], span);
   }
 
+  /** An expression computed from others, known when they all are. */
+  protected combine(operands: readonly TExpr[], type: Type, compute: (values: Value[]) => Value, span: Span): TExpr {
+    const result = this.constantResult(operands, compute, span);
+    if (operands.every((operand) => operand.known)) return known(type, result?.value, span);
+    const evaluators = operands.map((operand) => operand.eval);
+    return { ...runtime(type, (frame) => compute(evaluateHeld(frame, evaluators)), span), staticResult: result };
+  }
+
+  protected constantResult(
+    operands: readonly TExpr[],
+    compute: (values: Value[]) => Value,
+    span: Span
+  ): { value: Value } | undefined {
+    const facts = operands.map(staticResultOf);
+    let result: { value: Value } | undefined;
+    if (facts.every((fact) => fact !== undefined)) {
+      try {
+        result = { value: compute(facts.map((fact) => fact.value)) };
+      } catch (error) {
+        if (error instanceof ZigPanic)
+          return this.error(span, `値が決まっている計算が、実行時のエラー（${error.text}）になります。`);
+        throw error;
+      }
+    }
+    return result;
+  }
+
+  protected singleReturningResult(expressions: readonly TExpr[]): { value: Value } | undefined {
+    const returning = expressions.filter((expression) => expression.type.kind !== 'noreturn');
+    return returning.length === 1 ? staticResultOf(returning[0]) : undefined;
+  }
+
   /** An aggregate built from elements, known when they all are. */
   protected aggregate(type: Type, elements: readonly TExpr[], span: Span, build: (values: Value[]) => Value): TExpr {
     this.storage.reserve(type);
@@ -1005,14 +1023,17 @@ export abstract class SemaBase implements SemaApi {
       return known(type, build(elements.map((element) => copyForStorage(element.value))), span);
     }
     const evaluators = elements.map((element) => element.eval);
-    return runtime(
-      type,
-      (frame) => {
-        frame.runtime.reserveStorage(valueSlots(type));
-        return build(evaluateHeld(frame, evaluators, copyForStorage));
-      },
-      span
-    );
+    return {
+      ...runtime(
+        type,
+        (frame) => {
+          frame.runtime.reserveStorage(valueSlots(type));
+          return build(evaluateHeld(frame, evaluators, copyForStorage));
+        },
+        span
+      ),
+      staticResult: this.constantResult(elements, (values) => build(values.map(copyForStorage)), span),
+    };
   }
 
   protected fixedResult(operand: TExpr, type: Type, value: Value, span: Span = operand.span): TExpr {

@@ -429,20 +429,19 @@ export abstract class ExpressionCompiler extends SemaBase {
       }
       return this.error(span, `${typeName(type)} 型には、フィールド「${name}」がありません。`);
     }
-    if (field.comptimeValue !== undefined) return known(field.type, field.comptimeValue, span);
+    if (field.comptimeValue !== undefined) return this.fixedResult(base, field.type, field.comptimeValue, span);
     if (base.known) {
       const parent = this.addressOf(base).value as Pointer;
       const pointer = new Pointer(parent.load() as ZStruct, index);
       return knownAt(field.type, pointer, span);
     }
-    const evaluate = base.eval;
     const place = base.place;
     const fieldPlace: Place | undefined = place && {
       isConst: place.isConst,
       locate: (frame) => new Pointer(place.locate(frame).load() as ZStruct, index),
       compileTimePointer: place.compileTimePointer && new Pointer(place.compileTimePointer.load() as ZStruct, index),
     };
-    return runtime(field.type, (frame) => (evaluate(frame) as ZStruct).slots[index], span, fieldPlace);
+    return { ...this.derived(base, field.type, (value) => (value as ZStruct).slots[index]), place: fieldPlace, span };
   }
 
   private unionField(base: TExpr, type: Extract<Type, { kind: 'union' }>, name: string, span: Span): TExpr {
@@ -553,7 +552,13 @@ export abstract class ExpressionCompiler extends SemaBase {
         return value instanceof Some ? pointer.project('optional') : pointer;
       },
     };
-    return runtime(child, (frame) => unwrapOptionalValue(evaluate(frame)), expression, unwrapPlace);
+    return {
+      ...runtime(child, (frame) => unwrapOptionalValue(evaluate(frame)), expression, unwrapPlace),
+      staticResult:
+        staticResultOf(operand)?.value !== NULL
+          ? this.constantResult([operand], ([value]) => unwrapOptionalValue(value), expression)
+          : undefined,
+    };
   }
 
   protected optionalPayloadPointer(pointer: Pointer): Pointer {
@@ -562,8 +567,8 @@ export abstract class ExpressionCompiler extends SemaBase {
 
   // Indexing and slicing ----------------------------------------------------------------------------------------------
 
-  // code-gauge-allow functionCognitiveComplexity 20 -- Keeps static bounds and the corresponding storage location together.
-  // code-gauge-allow functionNcss 32 -- Keeps static bounds and the corresponding storage location together.
+  // code-gauge-allow functionCognitiveComplexity 22 -- Keeps static bounds and the corresponding storage location together.
+  // code-gauge-allow functionNcss 34 -- Keeps static bounds and the corresponding storage location together.
   protected index(expression: ExpressionOf<'index'>): TExpr {
     const object = this.compile(expression.object);
     const index = this.coerce(this.compile(expression.index, USIZE), USIZE, expression.index);
@@ -611,15 +616,28 @@ export abstract class ExpressionCompiler extends SemaBase {
       },
       compileTimePointer: staticElement ? new Pointer(staticElement.slots, staticElement.position) : undefined,
     };
-    return runtime(
-      child,
-      (frame) => {
-        const { slots, position } = locate(frame);
-        return slots.slots[position];
-      },
-      expression,
-      place
-    );
+    return {
+      ...runtime(
+        child,
+        (frame) => {
+          const { slots, position } = locate(frame);
+          return slots.slots[position];
+        },
+        expression,
+        place
+      ),
+      staticResult:
+        type.kind === 'array' || isConstantData(staticResultOf(object)?.value)
+          ? this.constantResult(
+              [object, index],
+              ([value, position]) => {
+                const element = access(value, position as bigint);
+                return element.slots.slots[element.position];
+              },
+              expression
+            )
+          : undefined,
+    };
   }
 
   /** Locates the element at an index of an array, a pointer to one, or a slice, checking the bounds. */
@@ -890,18 +908,22 @@ export abstract class ExpressionCompiler extends SemaBase {
   private logical(expression: ExpressionOf<'binary'>): TExpr {
     const left = this.coerce(this.compile(expression.left, BOOL), BOOL, expression.left);
     const isAnd = expression.operator === 'and';
-    if (left.known && (left.value as boolean) !== isAnd) return known(BOOL, !isAnd, expression);
+    const leftResult = staticResultOf(left);
+    if (leftResult && leftResult.value !== isAnd) return this.fixedResult(left, BOOL, !isAnd, expression);
     const right = this.coerce(this.compile(expression.right, BOOL), BOOL, expression.right);
     if (left.known) return right;
     const evaluateLeft = left.eval;
     const evaluateRight = right.eval;
-    return runtime(
-      BOOL,
-      isAnd
-        ? (frame) => (evaluateLeft(frame) as boolean) && (evaluateRight(frame) as boolean)
-        : (frame) => (evaluateLeft(frame) as boolean) || (evaluateRight(frame) as boolean),
-      expression
-    );
+    return {
+      ...runtime(
+        BOOL,
+        isAnd
+          ? (frame) => (evaluateLeft(frame) as boolean) && (evaluateRight(frame) as boolean)
+          : (frame) => (evaluateLeft(frame) as boolean) || (evaluateRight(frame) as boolean),
+        expression
+      ),
+      staticResult: leftResult ? staticResultOf(right) : undefined,
+    };
   }
 
   private orelse(expression: ExpressionOf<'binary'>, resultType: Type | undefined): TExpr {
@@ -917,6 +939,9 @@ export abstract class ExpressionCompiler extends SemaBase {
     if (left.known && left.value !== NULL)
       return this.coerce(known(child, optionalPayload(left.value), expression), type, expression);
     if (left.known) return otherwise;
+    const leftResult = staticResultOf(left);
+    if (leftResult && leftResult.value !== NULL)
+      return this.coerce(this.derived(left, child, optionalPayload), type, expression);
     const evaluateLeft = left.eval;
     const evaluateRight = otherwise.eval;
     // The payload converts to the result type as a value of the child type would.
@@ -926,16 +951,19 @@ export abstract class ExpressionCompiler extends SemaBase {
       type,
       expression
     ).eval;
-    return runtime(
-      type,
-      (frame) => {
-        const value = evaluateLeft(frame);
-        if (value === NULL) return evaluateRight(frame);
-        current = optionalPayload(value);
-        return convert(frame);
-      },
-      expression
-    );
+    return {
+      ...runtime(
+        type,
+        (frame) => {
+          const value = evaluateLeft(frame);
+          if (value === NULL) return evaluateRight(frame);
+          current = optionalPayload(value);
+          return convert(frame);
+        },
+        expression
+      ),
+      staticResult: leftResult ? staticResultOf(otherwise) : undefined,
+    };
   }
 
   // code-gauge-allow functionCognitiveComplexity 30 -- Keeps one operation of the interpreter in one place.
@@ -967,14 +995,7 @@ export abstract class ExpressionCompiler extends SemaBase {
     if (errorUnion && error && !ordered) {
       // An error union equals an error when it holds that error.
       const isEqual = operator === '==';
-      return runtime(
-        BOOL,
-        (frame) => {
-          const values = evaluateHeld(frame, [left.eval, right.eval]);
-          return (values[0] === values[1]) === isEqual;
-        },
-        expression
-      );
+      return this.combine([left, right], BOOL, ([a, b]) => (a === b) === isEqual, expression);
     }
     // Integers of any types compare by their values, without a common type.
     const type =
@@ -985,23 +1006,7 @@ export abstract class ExpressionCompiler extends SemaBase {
     }
     const compare = this.comparator(type, ordered, expression);
     const test = comparisonTest(operator);
-    const a = staticResultOf(left),
-      b = staticResultOf(right);
-    const result = a && b ? { value: test(compare(a.value, b.value)) } : undefined;
-    if (left.known && right.known) return known(BOOL, result?.value, expression);
-    const evaluateLeft = left.eval;
-    const evaluateRight = right.eval;
-    return {
-      ...runtime(
-        BOOL,
-        (frame) => {
-          const [left, right] = evaluateHeld(frame, [evaluateLeft, evaluateRight]);
-          return test(compare(left, right));
-        },
-        expression
-      ),
-      staticResult: result,
-    };
+    return this.combine([left, right], BOOL, ([a, b]) => test(compare(a, b)), expression);
   }
 
   /** A function comparing two values of a type: negative, zero, or positive, or NaN when unordered. */
@@ -1232,7 +1237,6 @@ export abstract class ExpressionCompiler extends SemaBase {
     }
   }
 
-  // code-gauge-allow functionCognitiveComplexity 17 -- Checks compile-time and fixed-width shift contracts together.
   private shift(expression: ExpressionOf<'binary'>, resultType: Type | undefined): TExpr {
     const left = this.compile(expression.left, resultType);
     const type = left.type;
@@ -1266,10 +1270,7 @@ export abstract class ExpressionCompiler extends SemaBase {
         : expression.operator === '>>'
           ? (a: Value, b: Value): Value => shiftRight(a as bigint, b as bigint, int)
           : (a: Value, b: Value): Value => shiftLeftSaturating(a as bigint, b as bigint, int);
-    if (left.known && right.known) return known(type, operation(left.value, right.value), expression);
-    const evaluateLeft = left.eval;
-    const evaluateRight = right.eval;
-    return runtime(type, (frame) => operation(evaluateLeft(frame), evaluateRight(frame)), expression);
+    return this.combine([left, right], type, ([a, b]) => operation(a, b), expression);
   }
 
   protected checkKnownShift(amount: TExpr, type: IntType, span: Span): void {

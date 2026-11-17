@@ -3343,8 +3343,8 @@ test('constant results select control-flow branches without erasing condition ef
   });
 });
 
-test('indexed struct initialization and coercion preserve source order and defaults', () => {
-  const source = `const std=@import("std");const S=struct{a:u8=9,b:u8,c:u8=7};pub fn main()void{var s:S=.{.b=2};s=.{.b=s.a,.a=4};const v=.{.b=@as(u8,3),.a=@as(u8,8),.c=@as(u8,6)};const w:S=v;std.debug.print("{} {} {}|{} {} {}",.{s.a,s.b,s.c,w.a,w.b,w.c});}`;
+test('indexed struct initialization preserves source order and defaults', () => {
+  const source = `const std=@import("std");const S=struct{a:u8=9,b:u8,c:u8=7};pub fn main()void{var s:S=.{.b=2};s=.{.b=s.a,.a=4};const w:S=.{.b=3,.a=8,.c=6};std.debug.print("{} {} {}|{} {} {}",.{s.a,s.b,s.c,w.a,w.b,w.c});}`;
   expect(executeProgram('zig', source)).toMatchObject({
     kind: 'executed',
     stderr: '4 9 7|8 3 6',
@@ -3352,16 +3352,11 @@ test('indexed struct initialization and coercion preserve source order and defau
   });
 });
 
-test.each(['typed', 'coerce', 'store'])('large %s struct matching uses indexed field positions', (mode) => {
+test.each(['typed', 'store'])('large %s struct matching uses indexed field positions', (mode) => {
   const n = 3000;
   const fields = Array.from({ length: n }, (_, index) => `f${index}:u8`).join(',');
   const values = Array.from({ length: n }, (_, index) => `.f${n - 1 - index}=@as(u8,${index % 251})`).join(',');
-  const statement =
-    mode === 'typed'
-      ? `const x=S{${values}};`
-      : mode === 'coerce'
-        ? `const v=.{${values}};const x:S=v;`
-        : `var x:S=undefined;x=.{${values}};`;
+  const statement = mode === 'typed' ? `const x=S{${values}};` : `var x:S=undefined;x=.{${values}};`;
   const source = `const std=@import("std");const S=struct{${fields}};pub fn main()void{${statement}std.debug.print("{} {}",.{x.f0,x.f${n - 1}});}`;
   expect(executeProgram('zig', source)).toMatchObject({
     kind: 'executed',
@@ -3431,3 +3426,87 @@ test('hexadecimal signs retain ordinary spaced and decimal-exponent expressions'
     )
   ).toMatchObject({ kind: 'executed', stderr: '253 486 0.001', uncaughtException: undefined });
 });
+
+test.each([
+  ['shift', '(if(get()) |_| @as(u8,3) else |_| unreachable) << 1', 6],
+  ['logical', 'if((if(get()) |_| true else |_| unreachable) and true) @as(u8,3) else @as(u8,4)', 3],
+  ['switch', 'switch(if(get()) |_| @as(u8,3) else |_| unreachable){3=>@as(u8,3),else=>@as(u8,4)}', 3],
+  ['unwrap', '(if(get()) |_| @as(?u8,3) else |_| unreachable).?', 3],
+  ['orelse', '(if(get()) |_| @as(?u8,3) else |_| unreachable) orelse 4', 3],
+  ['field', '(if(get()) |_| S{.x=3} else |_| unreachable).x', 3],
+  ['index', '(if(get()) |_| [_]u8{3} else |_| unreachable)[0]', 3],
+])('effectful constant results survive %s composition', (_name, expression, length) => {
+  const source = `const std=@import("std");const S=struct{x:u8};fn get()error{}!u8{std.debug.print("call|",.{});return 1;}pub fn main()void{const n=${expression};const a:[n]u8=@splat(7);std.debug.print("{}",.{a.len});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: `call|${length}`,
+    uncaughtException: undefined,
+  });
+});
+
+test.each(['error{}', 'error{E}'])(
+  'a single returning branch retains its constant result through %s conditions',
+  (errors) => {
+    const source = `const std=@import("std");fn get()${errors}!u8{std.debug.print("c",.{});return 1;}pub fn main()void{const n=if(get()) |_| @as(u8,3) else |_| unreachable;const a:[n]u8=@splat(7);const d:comptime_int=@truncate(n);std.debug.print("{} {}",.{a.len,d});}`;
+    expect(executeProgram('zig', source)).toMatchObject({
+      kind: 'executed',
+      stderr: 'c3 3',
+      uncaughtException: undefined,
+    });
+  }
+);
+
+test('constant branch facts preserve short-circuit effects', () => {
+  const source = `const std=@import("std");fn get()error{E}!u8{std.debug.print("c",.{});return 1;}fn yes()bool{std.debug.print("y",.{});return true;}pub fn main()void{const n=if(get()) |_| @as(u8,3) else |_| unreachable;const a:[n]u8=@splat(7);const b=(if(get()) |_| false else |_| unreachable) and yes();const c=(if(get()) |_| true else |_| unreachable) or yes();std.debug.print("{} {} {}",.{a.len,b,c});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: 'ccc3 false true',
+    uncaughtException: undefined,
+  });
+});
+
+test.each(['const u:T=t;_=u;', 'f(t);', 'const u=g();_=u;'])(
+  'stored anonymous structs do not coerce to named structs: %s',
+  (statement) => {
+    const source = `const T=struct{a:i32,b:f32};fn f(t:T)void{_=t;}fn g()T{const t=.{.a=1,.b=2};return t;}pub fn main()void{const t=.{.a=@as(i32,1),.b=@as(f32,2)};_=t;${statement}}`;
+    expect(executeProgram('zig', source)).toMatchObject({ kind: 'compileError' });
+  }
+);
+
+test('struct literals retain result locations while stored tuples coerce to arrays', () => {
+  const source = `const std=@import("std");const T=struct{a:i32,b:f32};fn f(t:T)void{std.debug.print("{} {d}|",.{t.a,t.b});}pub fn main()void{f(.{.a=1,.b=2});const tuple=.{@as(u8,3),@as(u8,4)};const array:[2]u8=tuple;std.debug.print("{any}",.{array});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: '1 2|{ 3, 4 }',
+    uncaughtException: undefined,
+  });
+});
+
+test('known floats coerce exactly to narrower floats and integral destinations', () => {
+  const source = `const std=@import("std");const k:f64=0.25;fn f(x:f32)f32{return x;}pub fn main()void{const a:f64=0.5;const b:f32=a;const c:f64=3;const d:i32=c;var x:f16=k;x+=1;std.debug.print("{d} {d} {} {d} {d}",.{b,f(a),d,x,@as(f32,@as(f128,0.125))});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: '0.5 0.5 3 1.25 0.125',
+    uncaughtException: undefined,
+  });
+});
+
+test.each([
+  ['f64', '0.1', 'f32'],
+  ['f64', '2.5', 'i32'],
+  ['f64', '3e10', 'i32'],
+  ['f64', '65520', 'f16'],
+  ['f64', '1e300', 'f32'],
+])('known %s value %s cannot coerce inexactly to %s', (from, value, to) => {
+  expect(executeProgram('zig', `pub fn main()void{const a:${from}=${value};const b:${to}=a;_=b;}`)).toMatchObject({
+    kind: 'compileError',
+  });
+});
+
+test.each(['if(get()) @as(u8,3) else @as(u8,3)', 'switch(get()){true=>@as(u8,3),false=>@as(u8,3)}'])(
+  'equal runtime branches do not acquire a compile-time result: %s',
+  (expression) => {
+    const source = `fn get()bool{return true;}pub fn main()void{const n=${expression};const a:[n]u8=@splat(7);_=a;}`;
+    expect(executeProgram('zig', source)).toMatchObject({ kind: 'compileError' });
+  }
+);

@@ -6,6 +6,7 @@ export function createUtf8Decoder(): TextDecoder {
   return new TextDecoder('utf-8', { ignoreBOM: true });
 }
 
+// code-gauge-allow functionCognitiveComplexity 18 -- Keeps strict decoding and the lossless malformed-byte fallback together.
 export function decodeIdentifierBytes(bytes: readonly number[]): string {
   const input = new Uint8Array(bytes);
   const decoder = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true });

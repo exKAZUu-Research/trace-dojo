@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 772 -- The file holds one layer of the compiler, whose parts share its private state.
+// code-gauge-allow-file fileNcss 778 -- The file holds one layer of the compiler, whose parts share its private state.
 import type { Node } from '@willbooster/web-tree-sitter';
 
 import { CompileError } from '../interpreter/diagnostics';

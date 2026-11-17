@@ -1187,7 +1187,7 @@ export abstract class StatementCompiler extends CallCompiler {
   }
 
   // code-gauge-allow functionParameterCount 7 -- Keeps the analysis and the generated code of one construct together, as Zig's Sema does.
-  // code-gauge-allow functionCognitiveComplexity 18 -- Keeps the analysis and the generated code of one construct together, as Zig's Sema does.
+  // code-gauge-allow functionCognitiveComplexity 20 -- Keeps the analysis and the generated code of one construct together, as Zig's Sema does.
   private combineBranches(
     span: Span,
     then: { stmt?: Stmt; value?: TExpr },
@@ -1232,19 +1232,25 @@ export abstract class StatementCompiler extends CallCompiler {
     const evaluateB = b.eval;
     const noreturn = thenValue.type.kind === 'noreturn' && otherwiseValue.type.kind === 'noreturn';
     const choose = (frame: Frame): Value => (select(frame) === 0 ? evaluateA(frame) : evaluateB(frame));
-    const value = runtime(
-      noreturn ? NORETURN : type,
-      slots.length === 0
-        ? choose
-        : (frame) => {
-            try {
-              return choose(frame);
-            } finally {
-              clear(frame);
-            }
-          },
-      span
-    );
+    const value: TExpr = {
+      ...runtime(
+        noreturn ? NORETURN : type,
+        slots.length === 0
+          ? choose
+          : (frame) => {
+              try {
+                return choose(frame);
+              } finally {
+                clear(frame);
+              }
+            },
+        span
+      ),
+      staticResult: this.singleReturningResult([
+        ...(thenValue.type.kind === 'noreturn' ? [] : [a]),
+        ...(otherwiseValue.type.kind === 'noreturn' ? [] : [b]),
+      ]),
+    };
     return {
       stmt: { exec: (frame) => void value.eval(frame), noreturn },
       value,
@@ -1997,15 +2003,23 @@ export abstract class StatementCompiler extends CallCompiler {
         },
         noreturn: allNoreturn,
       },
-      value: runtime(
-        allNoreturn ? NORETURN : type,
-        (frame) => {
-          const result = run(frame);
-          if (result instanceof Jump) throw result;
-          return result?.value;
-        },
-        expression
-      ),
+      value: {
+        ...runtime(
+          allNoreturn ? NORETURN : type,
+          (frame) => {
+            const result = run(frame);
+            if (result instanceof Jump) throw result;
+            return result?.value;
+          },
+          expression
+        ),
+        staticResult: this.singleReturningResult([
+          ...[...coerced.entries()].filter(([source]) => source.type.kind !== 'noreturn').map(([, value]) => value),
+          ...target.breaks
+            .filter((site) => site.value.type.kind !== 'noreturn')
+            .map((site) => site.final ?? site.value),
+        ]),
+      },
     };
   }
 

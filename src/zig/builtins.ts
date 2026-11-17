@@ -37,7 +37,6 @@ import {
 import { sizeOf } from './layout';
 import { importStd } from './library/std';
 import { isIntegerType } from './operands';
-import { ZigPanic } from './runtime';
 import {
   copyForStorage,
   evaluateHeld,
@@ -950,24 +949,6 @@ export abstract class BuiltinCompiler extends ExpressionCompiler {
       },
       expression
     );
-  }
-
-  /** An expression computed from others, known when they all are. */
-  protected combine(operands: readonly TExpr[], type: Type, compute: (values: Value[]) => Value, span: Span): TExpr {
-    const facts = operands.map(staticResultOf);
-    let result: { value: Value } | undefined;
-    if (facts.every((fact) => fact !== undefined)) {
-      try {
-        result = { value: compute(facts.map((fact) => fact.value)) };
-      } catch (error) {
-        if (error instanceof ZigPanic)
-          return this.error(span, `値が決まっている計算が、実行時のエラー（${error.text}）になります。`);
-        throw error;
-      }
-    }
-    if (operands.every((operand) => operand.known)) return known(type, result?.value, span);
-    const evaluators = operands.map((operand) => operand.eval);
-    return { ...runtime(type, (frame) => compute(evaluateHeld(frame, evaluators)), span), staticResult: result };
   }
 }
 
