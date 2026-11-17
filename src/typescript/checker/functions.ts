@@ -5,7 +5,14 @@ import { contextualSignatureOf } from './contextualSignatures';
 import { FlowState, type State } from './flow';
 import type { Sym } from './scopes';
 import { isContextSensitiveFunction } from './signatures';
-import { hasToken, isClassConstructor, named, patternIdentifiers, propertyNameText } from './syntax';
+import {
+  hasToken,
+  isClassConstructor,
+  isImmediatelyInvoked,
+  named,
+  patternIdentifiers,
+  propertyNameText,
+} from './syntax';
 import {
   anyType,
   filterType,
@@ -40,6 +47,8 @@ export interface FunctionContext {
   contextualReturn?: Type;
   /** Whether an expression the function returns is being checked, where its own return type cannot be used. */
   inReturn?: boolean;
+  /** Whether its body continues the enclosing flow, as that of a function called where it is written does. */
+  inlined?: boolean;
 }
 
 /** Checks function expressions and bodies, inferring the types they return. */
@@ -56,6 +65,11 @@ export class FunctionChecker {
   private readonly inferredReturns = new Map<number, Type>();
 
   constructor(private readonly c: Checker) {}
+
+  /** The innermost function whose flow the checked code follows, which an inlined function body shares. */
+  flowOwner(): TreeNode | undefined {
+    return this.contexts.findLast((context) => !context.inlined)?.node;
+  }
 
   functionExpression(node: TreeNode, contextual?: Type): Type {
     const contextualSignature = isAnyLike(contextual ?? unknownType)
@@ -240,12 +254,12 @@ export class FunctionChecker {
   }
 
   /**
-   * Checks a function's body from a fresh flow, returning the type it returns.
+   * Checks a function's body, returning the type it returns. The body starts from a fresh flow, but that of a function
+   * called where it is written continues the enclosing flow, which goes on from where the body ends, as in tsc.
    *
    * @param isolated Whether to check without the enclosing flow, as when inferring the return type ahead.
    */
   checkFunctionBody(node: TreeNode, signature: Signature, contextualReturn: Type | undefined, isolated: boolean): Type {
-    void isolated;
     if (this.reentersBody(node)) return anyType;
     const body = node.childForFieldName('body');
     const context = this.newContext(node, contextualReturn);
@@ -254,7 +268,9 @@ export class FunctionChecker {
     this.contexts.push(context);
     this.capturedTypes.push(this.capture());
     const outer = this.c.flow.current;
-    this.c.flow.current = this.c.classes.initialFlow(node);
+    const inlined = !isolated && isInlinedInvocation(node);
+    context.inlined = inlined;
+    this.c.flow.current = inlined ? outer?.clone() : this.c.classes.initialFlow(node);
     this.c.statements.declareHoistedVariables(this.c.ownScope(node));
     this.narrowDefaultedParameters(node);
     try {
@@ -278,7 +294,7 @@ export class FunctionChecker {
       }
       return this.returnTypeOf(context);
     } finally {
-      this.c.flow.current = outer;
+      this.c.flow.current = inlined ? this.c.flow.merge([this.c.flow.current, ...context.returnStates]) : outer;
       this.contexts.pop();
       this.capturedTypes.pop();
     }
@@ -567,4 +583,13 @@ function mayBeUndefined(type: Type): boolean {
 function mayReturnNever(node: TreeNode): boolean {
   if (node.type === 'arrow_function' || node.type === 'function_expression') return true;
   return node.type === 'method_definition' && node.parent?.type === 'object';
+}
+
+/** Whether a function runs where it is written, synchronously, as tsc's binder inlines the flow of such a function. */
+function isInlinedInvocation(node: TreeNode): boolean {
+  return (
+    (node.type === 'arrow_function' || node.type === 'function_expression') &&
+    !hasToken(node, 'async') &&
+    isImmediatelyInvoked(node)
+  );
 }

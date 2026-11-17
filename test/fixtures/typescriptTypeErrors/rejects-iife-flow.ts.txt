@@ -1,0 +1,36 @@
+function f1(): number { let y: number; (() => { y = 1; })(); return y; }
+function f2(x: string | undefined): number { if (x) { return (() => x.length)(); } return 0; }
+function f3(): number { let y: number; (() => { (() => { y = 2; })(); })(); return y; }
+function f4(): number { let y: number; for (let i = 0; i < 2; i++) { (() => { y = i; })(); } return y; }
+function f5(): number { let y: number; (() => { const g = () => y; y = 1; console.log(g()); })(); return y; }
+class K {
+  a: number;
+  b: string;
+  constructor(flag: boolean) {
+    (() => {
+      if (flag) { this.a = 1; return; }
+      this.a = 2;
+    })();
+    (function (this: void) { })();
+  }
+}
+let s6: string | number = ["a", 1][0];
+s6 = "x";
+const n6 = (() => s6.length)();
+let u7: string | undefined;
+const r7 = (() => { u7 = "q"; return u7.length; })();
+console.log(f1(), f2("ab"), f3(), f4(), f5(), new K(true).a, n6, r7, u7.length);
+const c = [true, false][0];
+let a1: number; (() => { if (c) { a1 = 1; return; } a1 = 2; })(); console.log(a1);
+let a2: number; (() => { if (c) return; a2 = 1; })(); console.log(a2);
+let a3: number; (() => console.log(a3))(); a3 = 1;
+let x5: string | number = ["a", 1][0]; if (typeof x5 === "string") { (() => { x5 = 1; })(); console.log(x5.length); }
+let a6: number; ((n: number) => { a6 = n; })(1); console.log(a6);
+let a7: number; const v7 = (() => { a7 = 2; return 3; })() + a7; console.log(v7);
+let a8: number; (function () { a8 = 1; }).call(undefined); console.log(a8);
+let a9: number; (() => { const f = () => { a9 = 1; }; f(); })(); console.log(a9);
+let a10: number; !function () { a10 = 1; }(); console.log(a10);
+let a11: string | undefined = undefined as string | undefined; (() => { a11 = "a"; })(); console.log(a11.length);
+let a12: number; ((() => { a12 = 1; }))(); console.log(a12);
+(() => { throw new Error("x"); })();
+const s14: string = 1;

@@ -371,7 +371,7 @@ export class ExpressionChecker {
   /** Whether a reference reads a variable of an enclosing function, which flow analysis does not follow into it. */
   private isOuterVariable(node: TreeNode, symbol: Sym): boolean {
     if (symbol.scope.kind === 'global') return false;
-    const owner = this.c.functions.contexts.at(-1)?.node;
+    const owner = this.c.functions.flowOwner();
     if (!owner) return false;
     for (let current: TreeNode | null | undefined = symbol.valueDeclaration; current; current = current.parent) {
       if (current.id === owner.id) return false;
