@@ -88,7 +88,7 @@ export function charLength(text: string): number {
 }
 
 function modify(self: RString): void {
-  if (self.frozen) throw frozenError(self, strInspect(self.s));
+  if (self.frozen) throw frozenError(self, inspectStringEncoding(self));
 }
 
 export function setText(self: RString, text: string): void {
@@ -1590,6 +1590,7 @@ for (const [name, transform] of TRANSFORMS) {
   });
   // code-gauge-allow functionCognitiveComplexity 22 -- The ordered cases for String encoding and mutation share state; splitting them solely for the metric would hide their sequencing.
   def('String', `${name}!`, 0, function (self: RString) {
+    modify(self);
     if (self.binary && (name === 'succ' || name === 'next')) {
       setBytes(self, successorBytes(stringBytes(self), true), true);
       return self;
@@ -1604,7 +1605,6 @@ for (const [name, transform] of TRANSFORMS) {
         before.length === after.length &&
         before.every((byte, index) => byte === after[index])
       ) {
-        modify(self);
         return NIL;
       }
       setBytes(self, after);
@@ -1613,7 +1613,6 @@ for (const [name, transform] of TRANSFORMS) {
     if (self.binary) {
       const result = binaryTransform(self.s, name, transform);
       if (result.s === self.s && name !== 'succ' && name !== 'next') {
-        modify(self);
         return NIL;
       }
       setBytes(self, stringBytes(result), true);
@@ -1625,7 +1624,6 @@ for (const [name, transform] of TRANSFORMS) {
       return self;
     }
     if (result === self.s) {
-      modify(self);
       return NIL;
     }
     setText(self, result);
