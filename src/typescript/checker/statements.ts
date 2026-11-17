@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 571 -- Follows the flow of control through each kind of statement.
+// code-gauge-allow-file fileNcss 573 -- Follows the flow of control through each kind of statement.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import type { Checker } from './checker';
@@ -22,7 +22,6 @@ import {
   stringType,
   type Structure,
   type Type,
-  type TypeParameter,
   undefinedType,
 } from './types';
 
@@ -232,10 +231,9 @@ export class StatementChecker {
     if (!body || !clause) return;
     for (const baseNode of named(clause)) {
       const base = this.c.typeNodes.typeFromNode(baseNode);
-      const mismatch =
-        base.kind === 'typeParameter'
-          ? this.typeParameterBaseMismatch(symbol, base)
-          : this.propertyBaseMismatch(body, structure, base);
+      const mismatch = holdsTypeParameter(base)
+        ? this.typeParameterBaseMismatch(symbol, base)
+        : this.propertyBaseMismatch(body, structure, base);
       if (mismatch === undefined) continue;
       const name = node.childForFieldName('name');
       this.c.error(
@@ -247,10 +245,10 @@ export class StatementChecker {
   }
 
   /**
-   * Why an interface does not fit a type parameter it extends, or `undefined` when it does: fitting the parameter's
-   * constraint is not enough, since the parameter may stand for a subtype.
+   * Why an interface does not fit a base that is or intersects a type parameter, or `undefined` when it does: fitting
+   * the parameter's constraint is not enough, since the parameter may stand for a subtype.
    */
-  private typeParameterBaseMismatch(symbol: Sym, base: TypeParameter): string | undefined {
+  private typeParameterBaseMismatch(symbol: Sym, base: Type): string | undefined {
     if (!this.c.typeNodes.interfaceBases.baseTypesOf(symbol).includes(base)) return undefined;
     return this.c.relations.isAssignable(this.c.typeNodes.declaredTypeOf(symbol), base) ? undefined : '';
   }
@@ -842,7 +840,6 @@ export class StatementChecker {
   }
 }
 
-/** The index signature for `string` or `number` keys that a type's body declares. */
 /**
  * `state` without the references that a loop pass from `start` assigned or narrowed by its back edge `backEdge`, which
  * then read with their declared types.
@@ -854,4 +851,12 @@ function widenTouched(state: State, start: State, backEdge: State): State {
     if (backEdge?.entries.get(key) !== start?.entries.get(key)) widened.entries.delete(key);
   }
   return widened;
+}
+
+/** Whether a base is a type parameter or intersects one, which an interface cannot fit by its members alone. */
+function holdsTypeParameter(base: Type): boolean {
+  return (
+    base.kind === 'typeParameter' ||
+    (base.kind === 'intersection' && base.types.some((member) => member.kind === 'typeParameter'))
+  );
 }
