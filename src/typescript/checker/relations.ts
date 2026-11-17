@@ -241,7 +241,6 @@ export class Relations {
   }
 
   /** Whether a string matches a template literal type such as `` `id-${number}` ``. */
-  // code-gauge-allow functionCognitiveComplexity 24 -- Matches a string against a template literal type by backtracking over its placeholders.
   private matchesTemplate(value: string, target: Type): boolean {
     if (target.kind === 'stringMapping') {
       const inner = target.type;
@@ -254,26 +253,13 @@ export class Relations {
       return isIntrinsic(inner, 'string') || this.isAssignable({ kind: 'literal', value } as Type, inner);
     }
     if (target.kind !== 'templateLiteral') return false;
-    const { texts, types } = target;
-    const match = (position: number, index: number): boolean => {
-      const prefix = texts[index];
-      if (!value.startsWith(prefix, position)) return false;
-      const start = position + prefix.length;
-      if (index === types.length) return start === value.length;
-      const nextText = texts[index + 1];
-      for (let end = start; end <= value.length; end++) {
-        if (nextText !== '' && !value.startsWith(nextText, end)) continue;
-        if (index + 1 === types.length && nextText === '' && end !== value.length) continue;
-        if (this.matchesPlaceholder(value.slice(start, end), types[index]) && match(end, index + 1)) return true;
-      }
-      return false;
-    };
-    return match(0, 0);
+    const parts = templatePlaceholderTexts(value, target.texts);
+    return parts?.every((text, index) => this.matchesPlaceholder(text, target.types[index])) ?? false;
   }
 
   private matchesPlaceholder(text: string, type: Type): boolean {
     if (isIntrinsic(type, 'string') || isAnyLike(type)) return true;
-    if (isIntrinsic(type, 'number')) return text.trim() !== '' && Number.isFinite(Number(text));
+    if (isIntrinsic(type, 'number')) return text !== '' && Number.isFinite(Number(text));
     if (isIntrinsic(type, 'bigint')) return /^-?\d+$/.test(text);
     if (type.kind === 'literal') return String(type.value) === text;
     if (type.kind === 'union') return type.types.some((member) => this.matchesPlaceholder(text, member));
@@ -663,3 +649,26 @@ const covariantLibraryTypes = new Set([
   'ReadonlyMap',
   'ReadonlySet',
 ]);
+
+/**
+ * The text each placeholder of a template literal type takes from a string, as TypeScript splits it without
+ * backtracking: a placeholder ends at the first occurrence of the text after it, or after one character when another
+ * placeholder follows directly, and the last one takes the rest before the template's final text.
+ */
+function templatePlaceholderTexts(value: string, texts: readonly string[]): string[] | undefined {
+  const startText = texts[0];
+  const endText = texts.at(-1) ?? '';
+  if (value.length < startText.length + endText.length || !value.startsWith(startText) || !value.endsWith(endText))
+    return undefined;
+  const body = value.slice(0, value.length - endText.length);
+  const parts: string[] = [];
+  let position = startText.length;
+  for (const delimiter of texts.slice(1, -1)) {
+    const end = delimiter === '' ? position + 1 : body.indexOf(delimiter, position);
+    if (end < 0 || end > body.length) return undefined;
+    parts.push(body.slice(position, end));
+    position = end + delimiter.length;
+  }
+  parts.push(body.slice(position));
+  return parts;
+}
