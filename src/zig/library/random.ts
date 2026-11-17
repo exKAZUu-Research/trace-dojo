@@ -350,7 +350,7 @@ addMembers(RANDOM, {
       (frame) => {
         const generator = state(frame);
         const slice = evaluate(frame) as Slice;
-        frame.runtime.spend(1 + Math.floor(slice.length / 8));
+        frame.runtime.spend(1 + Math.floor(slice.length / 8) + slice.length * 2);
         for (const [index, byte] of fill(generator, slice.length).entries()) slice.set(index, BigInt(byte));
         return;
       },

@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 578 -- Groups the related standard library operations that share this module.
+// code-gauge-allow-file fileNcss 580 -- Groups the related standard library operations that share this module.
 import { indexOutOfBounds, PANIC, panic } from '../arith';
 import type { Expression, Span } from '../ast';
 import { type AnyFloat, compareFloats, floatFromBigInt, minMaxFloat } from '../floats';
@@ -940,14 +940,17 @@ export function zeroValue(type: Type, fieldsOf: (type: StructType) => readonly S
 function minMaxIndexes(name: string): Member {
   return generic(name, 2, (sema, call, type, [sliceArg]) => {
     const slice = constSlice(sema, sliceArg, type);
-    return computed(tupleOf(sema, [USIZE, USIZE]), [slice], call.span, ([value]) => {
-      const items = elements(value);
+    return computed(tupleOf(sema, [USIZE, USIZE]), [slice], call.span, ([value], frame) => {
+      const items = value as Slice;
+      const spend = nativeBudget(sema, frame);
       if (items.length === 0) panic(PANIC.unreachable);
       let low = 0;
       let high = 0;
-      for (const [index, item] of items.entries()) {
-        if (compareScalars(item, items[low]) < 0) low = index;
-        if (compareScalars(item, items[high]) > 0) high = index;
+      for (let index = 0; index < items.length; index++) {
+        spend(2);
+        const item = items.get(index);
+        if (compareScalars(item, items.get(low)) < 0) low = index;
+        if (compareScalars(item, items.get(high)) > 0) high = index;
       }
       return new ZStruct([BigInt(low), BigInt(high)]);
     });
@@ -983,12 +986,14 @@ function diffMember(name: string): Member {
   return generic(name, 3, (sema, call, type, [aArg, bArg]) => {
     const a = constSlice(sema, aArg, type);
     const b = constSlice(sema, bArg, type);
-    return computed(OPTIONAL_USIZE, [a, b], call.span, ([x, y]) => {
-      const xs = elements(x);
-      const ys = elements(y);
-      const shorter = Math.min(xs.length, ys.length);
-      for (let index = 0; index < shorter; index++) if (!equalValues(xs[index], ys[index])) return BigInt(index);
-      return xs.length === ys.length ? NULL : BigInt(shorter);
+    return computed(OPTIONAL_USIZE, [a, b], call.span, ([x, y], frame) => {
+      const xs = x as Slice;
+      const ys = y as Slice;
+      const shorter = xs.lengthValue < ys.lengthValue ? xs.lengthValue : ys.lengthValue;
+      const equal = comparisonBudget(sema, frame);
+      for (let index = 0n; index < shorter; index++)
+        if (!equal(xs.get(Number(index)), ys.get(Number(index)))) return index;
+      return xs.lengthValue === ys.lengthValue ? NULL : shorter;
     });
   })();
 }

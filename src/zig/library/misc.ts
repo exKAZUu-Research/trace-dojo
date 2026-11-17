@@ -44,6 +44,7 @@ import {
   elements,
   equalValues,
   mutableSlice,
+  nativeBudget,
   newSlice,
   ORDER,
   ORDER_GT,
@@ -125,23 +126,33 @@ function decode(bytes: number[]): number | string {
   }
 }
 
-function byteNumbers(value: Value): number[] {
-  return elements(value).map((byte) => Number(byte as bigint));
+function byteNumbers(value: Value, spend: (cost?: number) => void): number[] {
+  const slice = value as Slice;
+  spend(slice.length);
+  return slice.values().map((byte) => Number(byte as bigint));
 }
 
-function codepoints(bytes: number[]): number[] | string {
-  const result: number[] = [];
+function codepoints(value: Value, spend: (cost?: number) => void): number | string {
+  const bytes = value as Slice;
+  let count = 0;
   let index = 0;
   while (index < bytes.length) {
-    const length = sequenceLength(bytes[index]);
+    spend();
+    const first = Number(bytes.get(index));
+    const length = sequenceLength(first);
     if (length === undefined) return 'Utf8InvalidStartByte';
     if (index + length > bytes.length) return 'TruncatedInput';
-    const value = decode(bytes.slice(index, index + length));
-    if (typeof value === 'string') return value;
-    result.push(value);
+    const sequence = [first];
+    for (let offset = 1; offset < length; offset++) {
+      spend();
+      sequence.push(Number(bytes.get(index + offset)));
+    }
+    const point = decode(sequence);
+    if (typeof point === 'string') return point;
+    count++;
     index += length;
   }
-  return result;
+  return count;
 }
 
 const UTF8_ITERATOR: StructType = nativeStruct('unicode.Utf8Iterator', {}, [
@@ -188,7 +199,7 @@ addMembers(UTF8_ITERATOR, {
       (frame) => {
         const slice = nextSlice(state(frame));
         if (!slice) return NULL;
-        const value = decode(byteNumbers(slice));
+        const value = decode(byteNumbers(slice, nativeBudget(sema, frame)));
         if (typeof value === 'string') panic(PANIC.unreachable);
         return BigInt(value);
       },
@@ -200,8 +211,10 @@ addMembers(UTF8_ITERATOR, {
 addMembers(UTF8_VIEW, {
   init: fnMember('Utf8View.init', (sema, call) => {
     const [text] = compileArgs(sema, expectArgs(sema, call, 1, 'Utf8View.init'), [CONST_U8_SLICE]);
-    return computed(errorUnionOf(errorSetOf(['InvalidUtf8']), UTF8_VIEW), [text], call.span, ([value]) =>
-      typeof codepoints(byteNumbers(value)) === 'string' ? ErrorValue.of('InvalidUtf8') : new ZStruct([value])
+    return computed(errorUnionOf(errorSetOf(['InvalidUtf8']), UTF8_VIEW), [text], call.span, ([value], frame) =>
+      typeof codepoints(value, nativeBudget(sema, frame)) === 'string'
+        ? ErrorValue.of('InvalidUtf8')
+        : new ZStruct([value])
     );
   }),
   initUnchecked: fnMember('Utf8View.initUnchecked', (sema, call) => {
@@ -268,8 +281,8 @@ const UNICODE: Record<string, () => Member> = {
     const [bytesArg] = expectArgs(sema, call, 1, 'utf8Decode');
     const bytes = constSlice(sema, bytesArg, U8);
     const errors = errorSetOf(UTF8_DECODE_ERRORS);
-    return computed(errorUnionOf(errors, U21), [bytes], call.span, ([value]) => {
-      const result = decode(byteNumbers(value));
+    return computed(errorUnionOf(errors, U21), [bytes], call.span, ([value], frame) => {
+      const result = decode(byteNumbers(value, nativeBudget(sema, frame)));
       return typeof result === 'string' ? ErrorValue.of(result) : BigInt(result);
     });
   }),
@@ -287,16 +300,21 @@ const UNICODE: Record<string, () => Member> = {
       errorUnionOf(errorSetOf(['Utf8InvalidStartByte', 'TruncatedInput', ...UTF8_DECODE_ERRORS]), USIZE),
       [text],
       call.span,
-      ([value]) => {
-        const points = codepoints(byteNumbers(value));
-        return typeof points === 'string' ? ErrorValue.of(points) : BigInt(points.length);
+      ([value], frame) => {
+        const points = codepoints(value, nativeBudget(sema, frame));
+        return typeof points === 'string' ? ErrorValue.of(points) : BigInt(points);
       }
     );
   }),
   utf8ValidateSlice: fnMember('std.unicode.utf8ValidateSlice', (sema, call) => {
     const [textArg] = expectArgs(sema, call, 1, 'utf8ValidateSlice');
     const text = constSlice(sema, textArg, U8);
-    return computed(BOOL, [text], call.span, ([value]) => typeof codepoints(byteNumbers(value)) !== 'string');
+    return computed(
+      BOOL,
+      [text],
+      call.span,
+      ([value], frame) => typeof codepoints(value, nativeBudget(sema, frame)) !== 'string'
+    );
   }),
 };
 
@@ -332,8 +350,8 @@ const META: Record<string, () => Member> = {
       return sema.error(typeArg, `stringToEnum には enum の型を渡してください（${typeName(type)} です）。`);
     const fields = sema.enumFields(type);
     const text = constSlice(sema, textArg, U8);
-    return computed(optionalOf(type), [text], call.span, ([value]) => {
-      const name = decodeIdentifierBytes(byteNumbers(value));
+    return computed(optionalOf(type), [text], call.span, ([value], frame) => {
+      const name = decodeIdentifierBytes(byteNumbers(value, nativeBudget(sema, frame)));
       return fields.find((field) => field.name === name)?.value ?? NULL;
     });
   }),

@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 541 -- Groups the related standard library operations that share this module.
+// code-gauge-allow-file fileNcss 546 -- Groups the related standard library operations that share this module.
 import { checked, divCeil, divExact, divFloor, divTrunc, floatMod, floatRem, mod, PANIC, panic, rem } from '../arith';
 import type { Expression } from '../ast';
 import { fusedMultiplyAdd, intFittingRange, roundFloat } from '../builtins';
@@ -48,7 +48,17 @@ import {
   typeName,
 } from '../types';
 import { ErrorValue, NULL, type Value } from '../values';
-import { compareScalars, computed, generic, ORDER, ORDER_EQ, ORDER_GT, ORDER_LT, orderValue } from './common';
+import {
+  compareScalars,
+  computed,
+  generic,
+  nativeBudget,
+  ORDER,
+  ORDER_EQ,
+  ORDER_GT,
+  ORDER_LT,
+  orderValue,
+} from './common';
 import { nativeEnum } from './heap';
 import { addMembers, expectArgs, fnMember, type Member, nativeStruct, typeMember } from './native';
 
@@ -102,15 +112,12 @@ function logarithm(name: string, base: bigint, compute: (x: number) => number): 
     if (base === 10n && type.kind === 'int' && type.signed) {
       return sema.error(call.span, `${name} は符号付き整数には使えません（${typeName(type)} 型です）。`);
     }
-    return computed(type, [value], call.span, ([x]) => {
-      let n = x as bigint;
+    return computed(type, [value], call.span, ([x], frame) => {
+      const n = x as bigint;
       if (n <= 0n) panic(PANIC.unreachable);
-      let result = 0n;
-      while (n >= base) {
-        n /= base;
-        result++;
-      }
-      return result;
+      const binaryLength = n.toString(2).length;
+      nativeBudget(sema, frame)(binaryLength);
+      return BigInt((base === 2n ? binaryLength : n.toString(10).length) - 1);
     });
   });
 }
@@ -650,8 +657,7 @@ const MEMBERS: Record<string, () => Member> = {
   }),
   order: fnMember('std.math.order', (sema, call) => {
     const [aArg, bArg] = expectArgs(sema, call, 2, 'std.math.order');
-    const a = sema.compile(aArg);
-    const b = sema.compile(bArg, a.type);
+    const [a, b] = comparisonOperands(sema, aArg, bArg);
     return computed(ORDER, [a, b], call.span, ([x, y]) => {
       // Zig's `order` reaches `unreachable` when neither `<`, `==`, nor `>` holds, as for NaN.
       if ([x, y].some((value) => typeof value !== 'bigint' && isNaNFloat(value as AnyFloat))) panic(PANIC.unreachable);
@@ -676,9 +682,8 @@ const MEMBERS: Record<string, () => Member> = {
   CompareOperator: typeMember(() => COMPARE_OPERATOR),
   compare: fnMember('std.math.compare', (sema, call) => {
     const [aArg, opArg, bArg] = expectArgs(sema, call, 3, 'std.math.compare');
-    const a = sema.compile(aArg);
+    const [a, b] = comparisonOperands(sema, aArg, bArg);
     const operator = sema.coerce(sema.compile(opArg, COMPARE_OPERATOR), COMPARE_OPERATOR, opArg);
-    const b = sema.compile(bArg, a.type.kind.startsWith('comptime') ? undefined : a.type);
     return computed(BOOL, [a, operator, b], call.span, ([x, op, y]) => {
       const unordered = [x, y].some((value) => typeof value !== 'bigint' && isNaNFloat(value as AnyFloat));
       return compareHolds(unordered ? undefined : compareScalarsAny(x, y), op as bigint);
@@ -895,6 +900,15 @@ const MEMBERS: Record<string, () => Member> = {
   }),
   approxEqAbs: approximateEquality(false),
 };
+
+function comparisonOperands(sema: SemaApi, a: Expression, b: Expression): [TExpr, TExpr] {
+  const operands = [sema.compile(a), sema.compile(b)] as const;
+  for (const operand of operands)
+    if (!isArithmeticType(operand.type)) sema.error(operand.span, '大小を比べる引数は数にしてください。');
+  if (operands.every((operand) => isIntegerType(operand.type))) return [...operands];
+  const type = sema.peerType(operands, a);
+  return [sema.coerce(operands[0], type, a), sema.coerce(operands[1], type, b)];
+}
 
 function compareScalarsAny(a: Value, b: Value): number {
   if (typeof a === 'bigint' || typeof b === 'bigint') {

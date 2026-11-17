@@ -3858,3 +3858,44 @@ std.debug.print("{} {} {}",.{view.len,s.len,empty[0..].len});}`;
     uncaughtException: undefined,
   });
 });
+
+test.each(['log2', 'log10'])('large comptime integer %s is bounded without repeated division', (name) => {
+  const source = `const std=@import("std");pub fn main()void{const n=std.math.${name}(0x${'f'.repeat(250_000)});_=n;}`;
+  expect(executeProgram('zig', source)).toMatchObject({ kind: 'limitExceeded', limit: 'operations' });
+});
+
+test.each([
+  'std.mem.findDiff(u8,&a,&a)',
+  'std.mem.indexOfDiff(u8,&a,&a)',
+  'std.mem.findMinMax(u8,&a)',
+  'std.mem.indexOfMinMax(u8,&a)',
+  'try std.unicode.utf8CountCodepoints(&a)',
+  'std.unicode.utf8ValidateSlice(&a)',
+  'try std.unicode.Utf8View.init(&a)',
+])('native scans share the operation budget: %s', (call) => {
+  const source = `const std=@import("std");pub fn main()!void{const a:[300000]u8=@splat('a');for(0..4)|_|{_=${call};}}`;
+  expect(executeProgram('zig', source)).toMatchObject({ kind: 'limitExceeded', limit: 'operations' });
+});
+
+test('random byte generation and stores share the operation budget', () => {
+  const source = `const std=@import("std");pub fn main()void{var a:[300000]u8=undefined;var p=std.Random.DefaultPrng.init(1);for(0..4)|_|{p.random().bytes(&a);}}`;
+  expect(executeProgram('zig', source)).toMatchObject({ kind: 'limitExceeded', limit: 'operations' });
+});
+
+test.each(['order(true,false)', 'compare(true,.eq,false)', 'order(.a,.b)', 'compare("a",.lt,"b")'])(
+  'native mathematical comparisons reject nonnumeric operands: %s',
+  (call) => {
+    expect(executeProgram('zig', `const std=@import("std");pub fn main()void{_=std.math.${call};}`)).toMatchObject({
+      kind: 'compileError',
+    });
+  }
+);
+
+test('mathematical comparisons preserve mixed integer values and floating peer coercions', () => {
+  const source = `const std=@import("std");pub fn main()void{std.debug.print("{} {} {} {}",.{std.math.order(@as(i8,-1),@as(u8,255)),std.math.compare(@as(u8,255),.gt,@as(i8,-1)),std.math.order(1,@as(f32,1.5)),std.math.compare(@as(f64,2),.eq,2)});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: '.lt true .lt true',
+    uncaughtException: undefined,
+  });
+});
