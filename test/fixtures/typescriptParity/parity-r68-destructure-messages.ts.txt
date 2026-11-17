@@ -1,0 +1,10 @@
+const obj: any = { x: undefined, n: null };
+const tries: (() => unknown)[] = [
+  () => { const { a } = obj.x; return a; },
+  () => { const { a } = obj.n; return a; },
+  () => { const {} = obj.x; },
+  () => { const { a: { b } } = obj; return b; },
+  () => { function f({ a }: any) { return a; } return (f as any)(); },
+  () => { const [p] = obj.n; return p; },
+];
+for (const t of tries) { try { console.log(t()); } catch (e: any) { console.log(e.constructor.name, e.message); } }

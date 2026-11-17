@@ -1,0 +1,9 @@
+type A = { a: number } | { b: string };
+function f(x: A): number {
+  const key = "a";
+  if (key in x) {
+    return x.a;
+  }
+  return 0;
+}
+console.log(f({ a: 1 }));

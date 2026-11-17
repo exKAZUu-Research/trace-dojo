@@ -1,0 +1,6 @@
+type Pt = { x: number; y: number } | { x: number; y: number; z: number };
+function f(p: Pt): number {
+  const { x, y } = p;
+  return x + y;
+}
+console.log(f({ x: 1, y: 2 }));

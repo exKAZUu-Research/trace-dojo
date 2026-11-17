@@ -1,0 +1,5 @@
+class A { get v() { return 1; } }
+class B extends A { get v() { return 2; } }
+abstract class C { abstract f(): number; }
+class D extends C { f = () => 1; }
+console.log(new B().v, new D().f());

@@ -1,0 +1,5 @@
+type N = `${number}`;
+const a: N = "1e3";
+const b: N = " 1";
+const c: N = "0x10";
+console.log(a, b, c);

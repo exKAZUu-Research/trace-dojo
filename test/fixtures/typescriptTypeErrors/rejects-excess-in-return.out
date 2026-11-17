@@ -1,0 +1,2 @@
+(2,35): error TS2353: Object literal may only specify known properties, and 'y' does not exist in type 'P'.
+(3,39): error TS2353: Object literal may only specify known properties, and 'y' does not exist in type 'P'.

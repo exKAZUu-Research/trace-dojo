@@ -1,0 +1,4 @@
+const r = ((a, b) => a + b)(1, 2);
+const s = (function (x) { return x.toUpperCase(); })("a");
+const t = ((x) => x)();
+console.log(r, s, t);

@@ -1,0 +1,6 @@
+TypeError Cannot use 'in' operator to search for 'a' in str
+TypeError Cannot use 'in' operator to search for 'a' in 5
+TypeError Cannot use 'in' operator to search for 'a' in undefined
+TypeError Cannot use 'in' operator to search for '1' in null
+TypeError Cannot use 'in' operator to search for 'Symbol(s)' in true
+TypeError Cannot use 'in' operator to search for 'x' in a very long string value that goes on and on

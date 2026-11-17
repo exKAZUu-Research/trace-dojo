@@ -1,0 +1,7 @@
+const DEFAULT_NAME = "guest";
+let name = DEFAULT_NAME;
+name = "alice";
+const LIMIT = 10;
+let n = LIMIT;
+n = 20;
+console.log(name, n);

@@ -1,0 +1,4 @@
+console.log(Array.isArray(Array.prototype), Object.prototype.toString.call(Array.prototype), Array.prototype.length);
+console.log(Array.prototype.includes.call('abc' as any, 'b'), Array.prototype.indexOf.call({ length: 2, 0: 'x', 1: 'y' } as any, 'y'));
+console.log(Array.prototype.every.call('aaa' as any, (c: any) => c === 'a'), Array.prototype.reduce.call('abc' as any, (a: any, c: any) => c + a, ''));
+console.log([].concat.apply([], [[1], [2, 3]] as any));

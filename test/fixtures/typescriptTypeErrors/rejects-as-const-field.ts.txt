@@ -1,0 +1,5 @@
+class A { kind = "a" as const; }
+const k: "a" = new A().kind;
+let x = "b" as const;
+x = "c";
+console.log(k, x);
