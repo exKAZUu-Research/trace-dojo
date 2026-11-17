@@ -7634,6 +7634,18 @@ test.each([false, true])('cleared map roots preserve independent pointers: %s', 
   });
 });
 
+test.each([
+  ['', 'null'],
+  ['try m.put(7,9);', '9'],
+])('numeric map and iterator roots skip a large reserved table: %s', (setup, value) => {
+  const source = `const std=@import("std");pub fn main(init:std.process.Init)!void{var m=std.AutoHashMap(u8,u8).init(init.gpa);defer m.deinit();try m.ensureTotalCapacity(100000);${setup}var it=m.iterator();const t=Turtle.init();var count:usize=0;for(0..20)|_|{if(t.canMoveForward())count+=1;}const found:?u8=if(it.next())|e|e.value_ptr.* else null;std.debug.print("{} {any}",.{count,found});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: `20 ${value}`,
+    uncaughtException: undefined,
+  });
+});
+
 test.each(['[0]f32', '[0][]u8', '[2][0]f32'])('empty %s map keys do not hash an unused element type', (type) => {
   const key = type === '[2][0]f32' ? '.{.{},.{}}' : '.{}';
   const source = `const std=@import("std");pub fn main(init:std.process.Init)!void{var m=std.AutoHashMap(${type},u8).init(init.gpa);defer m.deinit();try m.put(${key},7);std.debug.print("{any}",.{m.get(${key})});}`;
@@ -8367,6 +8379,19 @@ test('writer header references skip byte-only backing during turtle queries', ()
     uncaughtException: undefined,
   });
 });
+
+test.each(['append(init.gpa,probe())', 'appendBounded(probe())'])(
+  'list receivers stay typed while evaluating %s',
+  (call) => {
+    const mainArgs = call.includes('init.') ? 'init:std.process.Init' : '';
+    const source = `const std=@import("std");fn probe()u8{const t=Turtle.init();var count:u8=0;for(0..20)|_|{if(t.canMoveForward())count+=1;}return count;}pub fn main(${mainArgs})!void{var a:[100000]u8=@splat(1);var l=std.ArrayList(u8).fromOwnedSlice(&a);l.shrinkRetainingCapacity(99999);try l.${call};std.debug.print("{} {}",.{l.items.len,l.items[99999]});}`;
+    expect(executeProgram('zig', source)).toMatchObject({
+      kind: 'executed',
+      stderr: '100000 20',
+      uncaughtException: undefined,
+    });
+  }
+);
 
 test.each([
   'std.math.shl(u65535,x,1)',

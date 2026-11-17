@@ -24,7 +24,15 @@ import {
   typeName,
   VOID as VOID_TYPE,
 } from '../types';
-import { FnValue, NativeHandle, type NativeState, type Pointer, type Value, type ZStruct } from '../values';
+import {
+  FnValue,
+  NativeHandle,
+  type NativeState,
+  type Pointer,
+  registerNativeReferences,
+  type Value,
+  type ZStruct,
+} from '../values';
 import { PUBLIC_STD_MEMBERS } from './publicMembers';
 
 /** A declaration's type and value, which a native namespace resolves on first use. */
@@ -211,6 +219,26 @@ export function nativeCall(
 
 export function handle(kind: string, state: Record<string, unknown>): NativeHandle {
   return new NativeHandle(kind, state);
+}
+
+export function nativeStructCall(
+  type: Type,
+  args: readonly TExpr[],
+  span: Span,
+  receiver: { type: StructType; evaluate: (frame: Frame) => ZStruct },
+  compute: (receiver: ZStruct, values: Value[], frame: Frame) => Value
+): TExpr {
+  return nativeStateCall(
+    type,
+    args,
+    span,
+    (frame) => {
+      const state = { value: receiver.evaluate(frame) };
+      registerNativeReferences(state, () => [{ value: state.value, type: receiver.type }]);
+      return state;
+    },
+    (state, values, frame) => compute(state.value, values, frame)
+  );
 }
 
 export function nativeStateCall<S extends NativeState>(

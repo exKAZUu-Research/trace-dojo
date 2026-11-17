@@ -348,12 +348,11 @@ export interface NativeReference {
   type?: Type;
 }
 
-const nativeReferences = new WeakMap<object, (spend: () => void) => Iterable<NativeReference>>();
+type NativeReferences = (spend: () => void, mayContainTurtles: (type: Type) => boolean) => Iterable<NativeReference>;
 
-export function registerNativeReferences(
-  state: object,
-  references: (spend: () => void) => Iterable<NativeReference>
-): void {
+const nativeReferences = new WeakMap<object, NativeReferences>();
+
+export function registerNativeReferences(state: object, references: NativeReferences): void {
   nativeReferences.set(state, references);
 }
 
@@ -364,9 +363,9 @@ export class NativeHandle {
     private readonly logicalReferences?: (spend: () => void) => Iterable<unknown>
   ) {}
 
-  *references(spend: () => void): Iterable<NativeReference> {
+  *references(spend: () => void, mayContainTurtles: (type: Type) => boolean): Iterable<NativeReference> {
     const typed = nativeReferences.get(this.state);
-    if (typed) yield* typed(spend);
+    if (typed) yield* typed(spend, mayContainTurtles);
     else
       for (const value of this.logicalReferences ? this.logicalReferences(spend) : Object.values(this.state))
         yield { value };

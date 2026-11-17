@@ -30,6 +30,7 @@ import {
   NULL,
   optionalSome,
   Pointer,
+  registerNativeReferences,
   type Slice,
   type Slots,
   storeInto,
@@ -371,7 +372,7 @@ function hashMapType(name: string, keyType: Type, valueType: Type, kind: KeyKind
   ]);
   const map = nativeStruct(`${name}(${typeName(keyType)},${typeName(valueType)})`, {}, [], {
     kind: 'hashMap',
-    defaultValue: managed ? undefined : () => emptyMapValue(),
+    defaultValue: managed ? undefined : () => emptyMapValue(map),
     storageSlots: managed ? 5 : 4,
     byteSize: managed ? 40 : 24,
     args: [keyType, valueType],
@@ -416,7 +417,7 @@ function stateOf(
       sema.error(span, '定数のハッシュマップは変更できません（var で宣言してください）。');
     return (frame) => {
       const value = (evaluate(frame) as Pointer).load();
-      return readMapState(mutable ? value : copyForFrame(frame, value, type));
+      return readMapState(mutable ? value : copyForFrame(frame, value, type), type);
     };
   }
   if (receiver.type !== type) return sema.error(span, `${type.namespace.name} の値に対して呼び出してください。`);
@@ -427,7 +428,7 @@ function stateOf(
   }
   return (frame) => {
     const value = evaluate(frame);
-    return readMapState(mutable ? value : copyForFrame(frame, value, type));
+    return readMapState(mutable ? value : copyForFrame(frame, value, type), type);
   };
 }
 
@@ -621,33 +622,21 @@ function defineMembers(types: MapTypes, keyType: Type, valueType: Type, kind: Ke
         return;
       }
     ),
-    iterator: method(
-      'iterator',
-      { args: [], result: iterator, mutable: false },
-      (state) => new ZStruct([new NativeHandle('mapIterator', state), 0n])
-    ),
-    keyIterator: method(
-      'keyIterator',
-      { args: [], result: keyIterator, mutable: false },
-      (state) => new ZStruct([new NativeHandle('mapIterator', state), 0n])
-    ),
-    valueIterator: method(
-      'valueIterator',
-      { args: [], result: valueIterator, mutable: false },
-      (state) => new ZStruct([new NativeHandle('mapIterator', state), 0n])
-    ),
+    iterator: method('iterator', { args: [], result: iterator, mutable: false }, mapIteratorValue),
+    keyIterator: method('keyIterator', { args: [], result: keyIterator, mutable: false }, mapIteratorValue),
+    valueIterator: method('valueIterator', { args: [], result: valueIterator, mutable: false }, mapIteratorValue),
   };
   if (managed) {
     members.init = fnMember(
       `${map.namespace.name}.init`,
       (sema, call) => {
         const [allocator] = compileArgs(sema, expectArgs(sema, call, 1, 'init'), [ALLOCATOR]);
-        return nativeCall(map, [allocator], call.span, ([value]) => emptyMapValue(value));
+        return nativeCall(map, [allocator], call.span, ([value]) => emptyMapValue(map, value));
       },
       () => ({ type: fnType([ALLOCATOR], map) })
     );
   } else {
-    members.empty = () => ({ type: map, value: emptyMapValue() });
+    members.empty = () => ({ type: map, value: emptyMapValue(map) });
   }
   addMembers(map, members);
   addMembers(
@@ -721,19 +710,25 @@ function nextMember(
   };
 }
 
-function emptyMapValue(allocator?: Value): ZStruct {
+function mapIteratorValue(state: MapState): ZStruct {
+  return new ZStruct([new NativeHandle('mapIterator', state), 0n]);
+}
+
+function emptyMapValue(type: StructType, allocator?: Value): ZStruct {
   const state = emptyState();
-  const slots: Value[] = [0, 0, 0, mapAllocation({ metadata: state.metadata, keys: state.keys, values: state.values })];
+  const allocation = mapAllocation({ metadata: state.metadata, keys: state.keys, values: state.values }, type);
+  const slots: Value[] = [0, 0, 0, allocation];
   if (allocator !== undefined) slots.push(allocator);
   return new ZStruct(slots);
 }
 
-function readMapState(value: Value): MapState {
+function readMapState(value: Value, type: StructType): MapState {
   const header = value as ZStruct;
   const state = {
     header,
     allocator: header.slots[4] instanceof NativeHandle ? allocatorState(header.slots[4]) : undefined,
   } as MapState;
+  registerNativeReferences(state, () => [{ value: header, type }]);
   for (const [index, name] of ['capacity', 'size', 'available'].entries()) {
     Object.defineProperty(state, name, {
       enumerable: true,
@@ -748,26 +743,28 @@ function readMapState(value: Value): MapState {
       enumerable: true,
       get: () => (header.slots[3] as NativeHandle).state[name],
       set: (value: unknown) => {
-        header.slots[3] = mapAllocation({
-          ...(header.slots[3] as NativeHandle).state,
-          [name]: value,
-        });
+        header.slots[3] = mapAllocation({ ...(header.slots[3] as NativeHandle).state, [name]: value }, type);
       },
     });
   }
   return state;
 }
 
-function mapAllocation(state: Record<string, unknown>): NativeHandle {
-  return new NativeHandle('hashMapAllocation', state, function* (spend) {
+function mapAllocation(state: Record<string, unknown>, type: StructType): NativeHandle {
+  const [keyType, valueType] = type.native!.args;
+  registerNativeReferences(state, function* (spend, mayContainTurtles) {
+    const visitKeys = mayContainTurtles(keyType);
+    const visitValues = mayContainTurtles(valueType);
+    if (!visitKeys && !visitValues) return;
     const metadata = state.metadata as number[];
     for (let index = 0; index < metadata.length; index++) {
       spend();
       if ((metadata[index] & 0x80) === 0) continue;
-      yield (state.keys as ZArray).get(index);
-      yield (state.values as ZArray).get(index);
+      if (visitKeys) yield { value: (state.keys as ZArray).get(index), type: keyType };
+      if (visitValues) yield { value: (state.values as ZArray).get(index), type: valueType };
     }
   });
+  return new NativeHandle('hashMapAllocation', state);
 }
 
 function allocating(type: Type): Type {

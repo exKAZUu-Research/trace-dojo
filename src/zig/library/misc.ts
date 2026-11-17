@@ -59,8 +59,8 @@ import {
   expectArgs,
   fnMember,
   type Member,
-  nativeStateCall,
   nativeStruct,
+  nativeStructCall,
   structReceiver,
 } from './native';
 import { type QueueAlgorithms, queueAlgorithms } from './queueAlgorithms';
@@ -417,19 +417,14 @@ function priorityQueueType(element: Type, context: Type, compareExpression: TExp
         const expected = allocator ? [ALLOCATOR, ...args] : args;
         const compiled = compileArgs(sema, expectArgs(sema, call, expected.length, name), expected);
         const queue = structReceiver(sema, call, type, !['peek', 'count', 'capacity'].includes(name));
-        return nativeStateCall(
-          result,
-          compiled,
-          call.span,
-          (frame) => ({ receiver: queue(frame) }),
-          (state, values, frame) =>
-            run(
-              frame,
-              state.receiver,
-              values.slice(allocator ? 1 : 0),
-              allocator ? allocatorState(values[0]) : undefined,
-              prepared
-            )
+        return nativeStructCall(result, compiled, call.span, { type, evaluate: queue }, (receiver, values, frame) =>
+          run(
+            frame,
+            receiver,
+            values.slice(allocator ? 1 : 0),
+            allocator ? allocatorState(values[0]) : undefined,
+            prepared
+          )
         );
       },
       () => ({

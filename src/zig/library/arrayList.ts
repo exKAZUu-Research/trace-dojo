@@ -49,8 +49,8 @@ import {
   expectArgs,
   fnMember,
   type Member,
-  nativeStateCall,
   nativeStruct,
+  nativeStructCall,
   structReceiver,
 } from './native';
 import { compilePrint } from './print';
@@ -207,15 +207,16 @@ function defineMembers(type: StructType, child: Type): void {
         const expected = options.allocator ? [ALLOCATOR, ...options.args] : options.args;
         const args = compileArgs(sema, expectArgs(sema, call, expected.length, name), expected);
         const list = receiverOf(sema, call.receiver, type, call.span, options.byValue !== true);
-        return nativeStateCall(
+        return nativeStructCall(
           options.result,
           args,
           call.span,
-          (frame) => ({
-            receiver: options.byValue ? (copyForFrame(frame, list(frame), type) as ZStruct) : list(frame),
-          }),
-          (state, values, frame) => {
-            const received = listOf(state.receiver, child, frame);
+          {
+            type,
+            evaluate: (frame) => (options.byValue ? (copyForFrame(frame, list(frame), type) as ZStruct) : list(frame)),
+          },
+          (receiver, values, frame) => {
+            const received = listOf(receiver, child, frame);
             if (options.allocator) received.allocator = allocatorState(values[0]);
             return run(received, options.allocator ? values.slice(1) : values, frame);
           }
@@ -243,19 +244,19 @@ function defineMembers(type: StructType, child: Type): void {
         const args = compileArgs(sema, expectArgs(sema, call, params.length, name), params);
         const list = receiverOf(sema, call.receiver, type, call.span, true);
         const fn = sliceMutator(sema, child, type, name, call.span);
-        return nativeStateCall(
+        return nativeStructCall(
           allocating(VOID),
           args,
           call.span,
-          (frame) => ({ receiver: list(frame) }),
-          (state, values, frame) => {
-            const received = listOf(state.receiver, child, frame);
+          { type, evaluate: list },
+          (receiver, values, frame) => {
+            const received = listOf(receiver, child, frame);
             received.allocator = allocatorState(values[0]);
             const removed = name === 'replaceRange' ? (values[2] as bigint) : 0n;
             if (removed > received.items.lengthValue) panic(PANIC.overflow);
             const nextLength = received.items.lengthValue - removed + (values.at(-1) as Slice).lengthValue;
             if (!ensureTotalCapacity(frame, received, nextLength, child)) return ERROR_OUT_OF_MEMORY;
-            return sema.callFunction(fn, [new Pointer({ slots: [state.receiver] }, 0), ...values.slice(1)], frame);
+            return sema.callFunction(fn, [new Pointer({ slots: [receiver] }, 0), ...values.slice(1)], frame);
           }
         );
       },
@@ -441,13 +442,8 @@ function defineMembers(type: StructType, child: Type): void {
         const args = compileArgs(sema, expectArgs(sema, call, 1, 'orderedRemoveMany'), [sliceOf(USIZE, true)]);
         const list = receiverOf(sema, call.receiver, type, call.span, true);
         const fn = orderedRemover(sema, child, type, call.span);
-        return nativeStateCall(
-          VOID,
-          args,
-          call.span,
-          (frame) => ({ receiver: list(frame) }),
-          (state, values, frame) =>
-            sema.callFunction(fn, [new Pointer({ slots: [state.receiver] }, 0), values[0]], frame)
+        return nativeStructCall(VOID, args, call.span, { type, evaluate: list }, (receiver, values, frame) =>
+          sema.callFunction(fn, [new Pointer({ slots: [receiver] }, 0), values[0]], frame)
         );
       },
       () => ({ type: fnType([pointerTo(type, false), sliceOf(USIZE, true)], VOID), receiver: true })
@@ -560,18 +556,18 @@ function defineMembers(type: StructType, child: Type): void {
       const [allocator] = compileArgs(sema, [allocatorArg], [ALLOCATOR]);
       const list = receiverOf(sema, call.receiver, type, call.span, true);
       const print = compilePrint(sema, format, args, call.span);
-      return nativeStateCall(
+      return nativeStructCall(
         allocating(VOID),
         [allocator],
         call.span,
-        (frame) => ({ receiver: list(frame) }),
-        (state, [allocator], frame) => {
+        { type, evaluate: list },
+        (receiver, [allocator], frame) => {
           const prepared = print.prepare(frame);
           return withHeldValues(
             frame,
             [prepared.args],
             () => {
-              const received = listOf(state.receiver, child, frame);
+              const received = listOf(receiver, child, frame);
               received.allocator = allocatorState(allocator);
               if (!ensureTotalCapacity(frame, received, received.items.length + print.formatLength, child))
                 return ERROR_OUT_OF_MEMORY;
