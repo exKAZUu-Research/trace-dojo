@@ -2,7 +2,7 @@ import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import type { Checker } from './checker';
 import type { Scope, Sym } from './scopes';
-import { hasToken, named, patternIdentifiers } from './syntax';
+import { hasToken, isClassConstructor, isParameterProperty, named, patternIdentifiers } from './syntax';
 import {
   anyType,
   newTypeId,
@@ -59,13 +59,15 @@ export class Signatures {
   }
 
   /**
-   * Reports a required parameter after one marked `?`, which callers could not omit, and a default value where no
-   * implementation could evaluate it. Both are grammar errors that hold however the signature is resolved.
+   * Reports a required parameter after one marked `?`, which callers could not omit, a default value where no
+   * implementation could evaluate it, and a misplaced parameter property. All are grammar errors that hold however the
+   * signature is resolved.
    */
   private checkParameterGrammar(node: TreeNode): void {
     const hasBody = node.childForFieldName('body') !== null;
     let optional = false;
     for (const parameterNode of parameterNodes(node)) {
+      if (isParameterProperty(parameterNode)) this.checkParameterPropertyGrammar(node, parameterNode);
       const hasDefault = parameterNode.childForFieldName('value') !== null;
       if (hasDefault && !hasBody)
         this.c.errorWhileResolving(parameterNode, '引数の既定値は、関数やコンストラクタの実装にしか書けません。');
@@ -73,6 +75,14 @@ export class Signatures {
       else if (optional && patternOf(parameterNode).type !== 'rest_pattern' && !hasDefault)
         this.c.errorWhileResolving(parameterNode, '省略できる引数の後に、省略できない引数は書けません。');
     }
+  }
+
+  /** Reports a parameter property declared by a binding pattern, or outside a constructor's implementation. */
+  private checkParameterPropertyGrammar(node: TreeNode, parameterNode: TreeNode): void {
+    if (patternOf(parameterNode).type !== 'identifier')
+      this.c.errorWhileResolving(parameterNode, '分割代入のパターンでは、引数プロパティを宣言できません。');
+    if (!isClassConstructor(node) || node.childForFieldName('body') === null)
+      this.c.errorWhileResolving(parameterNode, '引数プロパティは、コンストラクタの実装でしか宣言できません。');
   }
 
   /** A function's type parameters, which one its contextual signature types takes from that signature. */

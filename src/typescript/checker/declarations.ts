@@ -4,7 +4,7 @@ import type { Checker } from './checker';
 import { withDomMembers } from './library';
 import { nativeGlobalRedeclaration } from './nativeGlobalIdentity';
 import type { Scope, Sym } from './scopes';
-import { hasToken, isConstructorName, named } from './syntax';
+import { hasToken, isConstructorName, isParameterProperty, named } from './syntax';
 import { isAnyLike, isIntrinsic, type Property, type Type, undefinedType, unionOf } from './types';
 
 /** Reports the declarations TypeScript rejects for declaring a name twice, at every declaration it involves. */
@@ -195,10 +195,6 @@ function propertyDeclarationsOf(c: Checker, declaration: TreeNode): TreeNode[] {
     ...members.filter((member) => member.type === 'field_definition' && !hasToken(member, 'static')),
     ...(parameters ? named(parameters).filter(isParameterProperty) : []),
   ];
-}
-
-function isParameterProperty(parameter: TreeNode): boolean {
-  return hasToken(parameter, 'readonly') || named(parameter).some((part) => part.type === 'accessibility_modifier');
 }
 
 function isComputed(member: TreeNode): boolean {

@@ -2,6 +2,7 @@ import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import type { Node } from '../javascript/convertNodes';
 import { isConstructorDefinition } from '../javascript/programConverter';
+import { isParameterProperty } from './checker/syntax';
 
 /**
  * The type of a synthesized statement that copies a constructor's parameter properties to `this`, which the
@@ -232,16 +233,15 @@ function isTypeOnlyField(node: TreeNode): boolean {
   );
 }
 
-/** The parameters of a constructor that declare properties, such as `private x: number`. */
-export function parameterPropertiesOf(constructorNode: TreeNode): TreeNode[] {
+/**
+ * The parameters of a constructor that declare properties, such as `private x: number`. A binding pattern declares
+ * none, as the checker rejects it.
+ */
+function parameterPropertiesOf(constructorNode: TreeNode): TreeNode[] {
   const parameters = constructorNode.childForFieldName('parameters');
   return (parameters?.namedChildren ?? []).filter(
     (parameterNode): parameterNode is TreeNode =>
-      parameterNode !== null &&
-      (parameterNode.type === 'required_parameter' || parameterNode.type === 'optional_parameter') &&
-      parameterNode.children.some(
-        (child) => child?.type === 'accessibility_modifier' || child?.type === 'readonly' || child?.type === 'override'
-      )
+      parameterNode?.childForFieldName('pattern')?.type === 'identifier' && isParameterProperty(parameterNode)
   );
 }
 

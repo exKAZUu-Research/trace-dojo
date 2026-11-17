@@ -139,6 +139,14 @@ export function isClassConstructor(node: TreeNode): boolean {
   );
 }
 
+/** Whether a parameter carries a modifier that makes it a parameter property, as `private x: number`. */
+export function isParameterProperty(parameter: TreeNode): boolean {
+  return parameter.children.some(
+    (child) =>
+      child?.type === 'accessibility_modifier' || child?.type === 'readonly' || child?.type === 'override_modifier'
+  );
+}
+
 /** Whether a class member's name makes it the constructor: `constructor` as a name or a string, but not computed. */
 export function isConstructorName(name: TreeNode | null | undefined): boolean {
   if (name?.type === 'property_identifier') return name.text === 'constructor';
