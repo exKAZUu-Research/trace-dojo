@@ -130,11 +130,12 @@ export function deinitArena(frame: Frame, arena: ZStruct): void {
   header.slots.fill(NULL);
 }
 
-export function arenaCapacity(arena: ZStruct): number {
+export function arenaCapacity(frame: Frame, arena: ZStruct): number {
   let capacity = 0;
   for (const first of arenaHeader(arena).slots) {
     let current = first;
     while (current instanceof NativeHandle) {
+      frame.runtime.spend();
       const node = current.state as ArenaNode;
       capacity += node.size - NODE_SIZE;
       current = node.next;

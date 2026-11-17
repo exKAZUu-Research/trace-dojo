@@ -5716,3 +5716,62 @@ test('array pointers with different lengths retain common sentinels through slic
     uncaughtException: undefined,
   });
 });
+
+test.each(['a', 'b'])('inline switch checks fallthrough in every specialization after %s', (tag) => {
+  const other = tag === 'a' ? 'b' : 'a';
+  const source = `const std=@import("std");const U=union(enum){a:u8,b:u8};fn f(u:U)u8{switch(u){inline .${tag},.${other}=>|v,t|{_=v;if(t==.${tag})return 1;}}}pub fn main()void{std.debug.print("{}",.{f(.{.${other}=1})});}`;
+  expect(executeProgram('zig', source)).toMatchObject({ kind: 'compileError' });
+  expect(
+    executeProgram('zig', source.replace(`if(t==.${tag})return 1;`, `if(t==.${tag}){return 1;}else{return 2;}`))
+  ).toMatchObject({ kind: 'executed', stderr: '2', uncaughtException: undefined });
+});
+
+test.each(['u8', 'void', 'u0'])('effectful labeled-block %s slice bounds retain their known break result', (type) => {
+  const prefix = `const std=@import("std");fn get()void{std.debug.print("g",.{});}pub fn main()void{`;
+  const view = `const s:[]${type}=p;const q=s[0..(blk:{get();break :blk @as(usize,1);})];std.debug.print("{}",.{q.len});}`;
+  expect(executeProgram('zig', `${prefix}const p:*[2]${type}=undefined;${view}`)).toMatchObject({
+    kind: 'compileError',
+  });
+  expect(executeProgram('zig', `${prefix}var a:[2]${type}=undefined;const p=&a;${view}`)).toMatchObject({
+    kind: 'executed',
+    stderr: 'g1',
+    uncaughtException: undefined,
+  });
+});
+
+test('labeled blocks with differing break results retain runtime bounds and effects', () => {
+  const source = `const std=@import("std");fn get()void{std.debug.print("g",.{});}pub fn main()void{const p:*[2]u8=undefined;const s:[]u8=p;var flag=false;_=&flag;const n:usize=blk:{get();if(flag)break :blk @as(usize,1);break :blk @as(usize,0);};const q=s[0..n];std.debug.print("{}",.{q.len});}`;
+  expect(executeProgram('zig', source)).toMatchObject({ kind: 'executed', stderr: 'g0', uncaughtException: undefined });
+});
+
+test.each(['pub fn main()noreturn{}', 'fn f()noreturn{}pub fn main()void{f();}'])(
+  'noreturn fallthrough is a compile error: %s',
+  (source) => {
+    expect(executeProgram('zig', source)).toMatchObject({ kind: 'compileError' });
+  }
+);
+
+test('noreturn functions may terminate and unused invalid bodies stay lazy', () => {
+  const source = `const std=@import("std");fn unused()noreturn{}fn done()noreturn{std.process.exit(0);}pub fn main()void{done();}`;
+  expect(executeProgram('zig', source)).toMatchObject({ kind: 'executed', uncaughtException: undefined });
+});
+
+test.each(['@as(u8,true)', 'takes(true)'])(
+  'known-false while skips unreachable continuation semantics: %s',
+  (continuation) => {
+    const source = `const std=@import("std");fn takes(x:u8)void{_=x;}pub fn main()void{while(false):(${continuation}){}std.debug.print("ok",.{});}`;
+    expect(executeProgram('zig', source)).toMatchObject({
+      kind: 'executed',
+      stderr: 'ok',
+      uncaughtException: undefined,
+    });
+    expect(executeProgram('zig', source.replace('while(false)', 'var flag=false;_=&flag;while(flag)'))).toMatchObject({
+      kind: 'compileError',
+    });
+  }
+);
+
+test('arena capacity queries charge each retained allocation node', () => {
+  const source = `const std=@import("std");pub fn main(init:std.process.Init)!void{var a=std.heap.ArenaAllocator.init(init.gpa);defer a.deinit();const g=a.allocator();for(0..10000)|_|{_=try g.alloc(u8,1);}for(0..120000)|_|{_=a.queryCapacity();}}`;
+  expect(executeProgram('zig', source)).toMatchObject({ kind: 'limitExceeded', limit: 'operations' });
+});

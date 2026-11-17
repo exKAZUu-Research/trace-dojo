@@ -160,7 +160,7 @@ export abstract class StatementCompiler extends CallCompiler {
         const body = this.blockStatements(syntax.body.statements, syntax.body, true);
         const payload =
           compilation.returnType.kind === 'error_union' ? compilation.returnType.payload : compilation.returnType;
-        if (!body.noreturn && payload.kind !== 'void' && payload.kind !== 'noreturn') {
+        if (!body.noreturn && payload.kind !== 'void') {
           this.error(
             syntax.body,
             `関数「${syntax.name}」の最後に return がありません（${typeName(compilation.returnType)} 型の値を返してください）。`
@@ -908,7 +908,7 @@ export abstract class StatementCompiler extends CallCompiler {
 
   /** A block as a statement or an expression; a labeled block's value is what `break :label value` gives. */
   // code-gauge-allow functionNcss 42 -- Keeps the analysis and the generated code of one construct together, as Zig's Sema does.
-  // code-gauge-allow functionCognitiveComplexity 27 -- Keeps the analysis and the generated code of one construct together, as Zig's Sema does.
+  // code-gauge-allow functionCognitiveComplexity 28 -- Keeps the analysis and the generated code of one construct together, as Zig's Sema does.
   private blockStatement(
     expression: ExpressionOf<'block'>,
     resultType: Type | undefined,
@@ -979,7 +979,16 @@ export abstract class StatementCompiler extends CallCompiler {
     if (asStatement && type.kind !== 'void' && type.kind !== 'noreturn') {
       this.error(expression, `${typeName(type)} 型の値を使っていません。`);
     }
-    return { stmt, value: runtime(stmt.noreturn ? NORETURN : type, run, expression) };
+    return {
+      stmt,
+      value: {
+        ...runtime(stmt.noreturn ? NORETURN : type, run, expression),
+        staticResult: this.singleReturningResult([
+          ...target.breaks.map((site) => site.final ?? site.value),
+          ...(!body.noreturn ? [known(VOID, undefined, expression)] : []),
+        ]),
+      },
+    };
   }
 
   /** The type of what the `break`s of a target give, coercing each to it. */
@@ -1419,12 +1428,12 @@ export abstract class StatementCompiler extends CallCompiler {
     let continueExec: Exec | undefined;
     try {
       ({ body, continueExec } = this.withCapture(binding, () => {
-        const continuation = expression.continueExpression
-          ? this.withoutSteps(() => this.statementExpression(expression.continueExpression as Expression, expression))
-              .exec
-          : undefined;
-        // Zig does not analyze the body of a loop whose condition is known to be false.
         const neverRuns = kind === 'bool' && staticResultOf(condition)?.value === false;
+        const continuation =
+          !neverRuns && expression.continueExpression
+            ? this.withoutSteps(() => this.statementExpression(expression.continueExpression as Expression, expression))
+                .exec
+            : undefined;
         const body: Stmt = neverRuns ? { exec: () => {}, noreturn: false } : this.loopBody(expression.body);
         return { body, continueExec: continuation };
       }));
@@ -2067,9 +2076,9 @@ export abstract class StatementCompiler extends CallCompiler {
       }
     };
     const allNoreturn =
-      [...prongs, ...(elseProng ? [elseProng] : [])].every((prong) =>
-        prong.body ? prong.body.noreturn : prong.value?.type.kind === 'noreturn'
-      ) && !target.broken;
+      [...prongs, ...(elseProng ? [elseProng] : [])]
+        .flatMap((prong) => (prong.inline ? [...prong.inline.values()] : [prong]))
+        .every((prong) => (prong.body ? prong.body.noreturn : prong.value?.type.kind === 'noreturn')) && !target.broken;
     return {
       stmt: {
         exec: (frame) => {

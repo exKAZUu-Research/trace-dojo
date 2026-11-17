@@ -406,7 +406,7 @@ const ARENA_ALLOCATOR: StructType = allocatorInstanceType(
     queryCapacity: fnMember('ArenaAllocator.queryCapacity', (sema, call) => {
       expectArgs(sema, call, 0, 'queryCapacity');
       const value = instanceValue(sema, call, ARENA_ALLOCATOR);
-      return nativeCall(USIZE, [value], call.span, ([arena]) => BigInt(arenaCapacity(arena as ZStruct)));
+      return nativeCall(USIZE, [value], call.span, ([arena], frame) => BigInt(arenaCapacity(frame, arena as ZStruct)));
     }),
     reset: fnMember('ArenaAllocator.reset', (sema, call) => {
       const owner = instancePointer(sema, call, ARENA_ALLOCATOR);
