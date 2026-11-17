@@ -1,9 +1,8 @@
 import type { FunctionInfo, IODoCore } from './core';
-import { isScalarType, scalarConstructorKind, slotDisplayType } from './displayTypes';
+import { isScalarType, slotDisplayType } from './displayTypes';
 import type { Machine, RunState } from './machine';
 import { DisplayAbort, type Runtime, type TraceFrame } from './runtime';
-import { prune, splitApp, type Type } from './types';
-import { ConValue, Env, HaskellException, type IODo, type Slot } from './values';
+import { Env, type IODo, type Slot } from './values';
 import type { VisibleScope } from './visibleScope';
 
 export interface DoFrame {
@@ -188,24 +187,13 @@ function storesAnswer(runtime: Runtime, env: Env, visible: VisibleScope, names: 
         const binding = visible.bindings.get(name);
         if (!binding) return false;
         const slot = env.at(visible.level - binding.level).slots[binding.index];
-        return slot !== undefined && storesScalar(runtime, slot, slotDisplayType(slot, binding.type));
+        if (slot === undefined) return false;
+        const type = slotDisplayType(slot, binding.type);
+        return isScalarType(type) || runtime.displaysAnswer?.(slot, type) === true;
       })
     );
   } catch (error) {
     if (error instanceof DisplayAbort) return false;
-    throw error;
-  }
-}
-
-function storesScalar(runtime: Runtime, slot: Slot, type: Type): boolean {
-  if (isScalarType(type)) return true;
-  const { head } = splitApp(prune(type));
-  if (head.tag !== 'tcon' || !head.entity.cons.some((con) => scalarConstructorKind(con) === 'enum')) return false;
-  try {
-    const value = runtime.machine.force(slot);
-    return value instanceof ConValue && scalarConstructorKind(value.con) === 'enum';
-  } catch (error) {
-    if (error instanceof HaskellException) return false;
     throw error;
   }
 }

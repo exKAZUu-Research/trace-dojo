@@ -299,18 +299,10 @@ export function isScalarType(type: Type): boolean {
   if (head.tag !== 'tcon') return false;
   const entity = head.entity;
   if ([INT_TYPE, INTEGER_TYPE, WORD_TYPE, DOUBLE_TYPE, FLOAT_TYPE, CHAR_TYPE].includes(entity)) return true;
-  if ((entity.name === 'Bool' || entity.name === 'Ratio') && entity.module === 'Base') return true;
-  if (entity.cons.length > 0 && entity.cons.every((con) => scalarConstructorKind(con) === 'enum')) return true;
+  if (entity.name === 'Bool' && entity.module === 'Base') return true;
   if (entity.special === 'list' && args.length === 1) {
     const elem = splitApp(args[0]).head;
     return elem.tag === 'tcon' && elem.entity === CHAR_TYPE;
   }
   return false;
-}
-
-export function scalarConstructorKind(con: ConInfo): 'ratio' | 'enum' | undefined {
-  chargeTypeWork();
-  if (con.type.module === 'Base' && con.type.name === 'Ratio') return 'ratio';
-  if (con.type.module === 'Data.Map.Internal' || con.type.module === 'Data.Set.Internal') return;
-  if (con.arity === 0 && con.type.module !== 'Base') return 'enum';
 }

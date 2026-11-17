@@ -5,7 +5,7 @@ import { TraceRecorder, type TraceVariables } from '../interpreter/traceRecorder
 import type { DisplayNode, TraceItemVariable } from '../problems/trace';
 import { CHAR_TYPE, CONS_CON, FLOAT_TYPE, NIL_CON, UNIT_CON } from './builtinTypes';
 import { compileProgram } from './compile';
-import { constructorFieldType, scalarConstructorKind, slotDisplayType, UNKNOWN_TYPE } from './displayTypes';
+import { constructorFieldType, slotDisplayType, UNKNOWN_TYPE } from './displayTypes';
 import { floatToDigits } from './primitives';
 import { runProgram } from './run';
 import { DisplayAbort, Runtime, type TraceFrame } from './runtime';
@@ -27,6 +27,7 @@ import { visibleVariables } from './visibleScope';
 export function traceHaskellProgram(program: string, trace: TraceOptions, input?: ProgramInput): ProgramRecording {
   const compiled = compileProgram(program, new Set(trace.atomicAnnotations.keys()), true);
   const runtime = new Runtime(input);
+  runtime.displaysAnswer = (slot, type) => slotDisplaysAnswer(runtime, slot, type);
   const recorder = new TraceRecorder(runtime, {
     isAtomic: (frame) => frame.isAtomic,
     variablesOf: (frame) => variablesOf(runtime, frame),
@@ -42,6 +43,19 @@ export function traceHaskellProgram(program: string, trace: TraceOptions, input?
     if (frame) finalVars = variablesOf(runtime, frame).vars;
   });
   return { traceItems: recorder.traceItems, finalVars, ...run };
+}
+
+function slotDisplaysAnswer(runtime: Runtime, slot: Slot, type: Type): boolean {
+  return (
+    displayAttempt(runtime, () => {
+      const value = forceForDisplay(runtime, slot);
+      return (
+        value !== undefined &&
+        !isHidden(value, type) &&
+        scalarOf(runtime, value, slotDisplayType(slot, type), 0) !== NOT_SCALAR
+      );
+    }) === true
+  );
 }
 
 /** The variables a frame's running statement sees: its parameters and the variables bound before it, in order. */
@@ -210,7 +224,7 @@ function scalarOf(runtime: Runtime, value: Value, type: Type, depth: number): Sc
   if (typeof value === 'string') return value;
   if (!(value instanceof ConValue)) return NOT_SCALAR;
   if (containerKind(value)) return NOT_SCALAR;
-  if (scalarConstructorKind(value.con) === 'ratio') {
+  if (value.con.type.module === 'Base' && value.con.type.name === 'Ratio') {
     const numerator = forceForDisplay(runtime, value.fields[0]);
     const denominator = forceForDisplay(runtime, value.fields[1]);
     return typeof numerator === 'bigint' && typeof denominator === 'bigint'
@@ -230,7 +244,7 @@ function scalarOf(runtime: Runtime, value: Value, type: Type, depth: number): Sc
     }
     return scalars as Scalar;
   }
-  if (scalarConstructorKind(value.con) === 'enum') return value.con.name;
+  if (value.fields.length === 0 && value.con.type.module !== 'Base') return value.con.name;
   return NOT_SCALAR;
 }
 
@@ -276,7 +290,7 @@ class DisplayNodes {
     if (!(value instanceof ConValue) || isHidden(value, type)) return undefined;
     const container = containerKind(value);
     if (container) return this.containerNodeOf(value, type, depth, container);
-    if (scalarConstructorKind(value.con) === 'ratio') {
+    if (value.con.type.module === 'Base' && value.con.type.name === 'Ratio') {
       const scalar = scalarOf(this.runtime, value, type, depth);
       return typeof scalar === 'string' ? { kind: 'value', value: scalar } : undefined;
     }

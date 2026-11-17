@@ -369,3 +369,37 @@ main=forM_ [slow(5000::Int)] $ \\x->do
   expect(result.uncaughtException).toBeUndefined();
   expect(result.traceItems.at(-1)?.referenceVars.x).toMatchObject({ kind: 'object' });
 });
+
+test.each([
+  { declaration: '', values: '[[1::Int],[1]]', answer: [1] },
+  { declaration: '', values: '[[True],[True]]', answer: [true] },
+  { declaration: 'data C=Red|Blue', values: '[[Red],[Red]]', answer: ['Red'] },
+  { declaration: 'data C=Red|Box Int', values: '[[Red],[Red]]', answer: ['Red'] },
+  { declaration: 'import Data.Ratio', values: '[[1%2],[1%2]]', answer: ['1 % 2'] },
+  { declaration: '', values: '[[[1::Int]],[[1]]]', answer: [[1]] },
+  { declaration: '', values: '[[],[]]::[[Int]]', answer: [] },
+])('list answer bindings retain each iteration: $values', ({ declaration, values, answer }) => {
+  const source = `import Control.Monad
+${declaration}
+main=forM_ (${values}) $ \\x->do
+ print(1::Int)`;
+  const result = traceProgram('haskell', source, source);
+  expect(result.stdout).toBe('1\n1\n');
+  expect(result.traceItems.map(({ line }) => line)).toEqual([0, 3, 4, 3, 4]);
+  expect(result.traceItems.slice(1).map(({ vars }) => vars.x)).toEqual([answer, answer, answer, answer]);
+  expect(result.traceItems.at(-1)?.referenceVars.x).toBeDefined();
+});
+
+test.each(['[[Box 1],[Box 1]]', '[[error "unused"::C],[error "unused"]]', '[repeat Red,repeat Red]'])(
+  'lists without a displayable answer preserve reference-only binding steps: %s',
+  (values) => {
+    const source = `import Control.Monad
+data C=Red|Box Int
+main=forM_ (${values}) $ \\x->do
+ print(1::Int)`;
+    const result = traceProgram('haskell', source, source);
+    expect(result.stdout).toBe('1\n1\n');
+    expect(result.traceItems.map(({ line }) => line)).toEqual([0, 4, 4]);
+    expect(result.traceItems.at(-1)?.vars).not.toHaveProperty('x');
+  }
+);
