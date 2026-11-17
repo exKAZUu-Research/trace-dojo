@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 445 -- Machine states and frames share one evaluator stack.
+// code-gauge-allow-file fileNcss 449 -- Machine states and frames share one evaluator stack.
 import { CONS_CON, NIL_CON } from './builtinTypes';
 import type { CaseCore, Core, IODoCore } from './core';
 import type { TypeHint } from './displayTypeHints';
@@ -328,6 +328,7 @@ export class Machine {
     return false;
   }
 
+  // code-gauge-allow functionNcss 31 -- Keep thunk entry, its rollback frame and preview accounting in one transition.
   private stepEnter(state: RunState): void {
     const entered = state.value;
     const slot = untypedSlot(entered);
@@ -343,7 +344,6 @@ export class Machine {
       state.returnValue(slot.value as Value);
       return;
     }
-    this.runtime.spend();
     this.squeezeUpdateFrame(slot);
     slot.state = 'evaluating';
     this.stack.push({
@@ -354,6 +354,8 @@ export class Machine {
       native: slot.native,
       target: slot.target,
     });
+    this.runtime.beginPreview(slot);
+    this.runtime.spend();
     if (slot.target) {
       state.enter(slot.target);
       return;
@@ -379,6 +381,7 @@ export class Machine {
     if (entered.target) return;
     top.thunk.redirect(entered);
     this.stack.pop();
+    this.runtime.endPreview(top.thunk);
   }
 
   private stepApply(state: RunState): void {
@@ -441,7 +444,7 @@ export class Machine {
     else state.enter(result);
   }
 
-  // code-gauge-allow functionNcss 43 -- One short case per kind of frame a value returns to.
+  // code-gauge-allow functionNcss 44 -- One short case per kind of frame a value returns to.
   private stepReturn(state: RunState): boolean {
     const frame = this.stack.pop() as Frame;
     switch (frame.k) {
@@ -450,6 +453,7 @@ export class Machine {
       }
       case 'update': {
         frame.thunk.update(state.value as Value);
+        this.runtime.endPreview(frame.thunk);
         return false;
       }
       case 'apply': {
@@ -611,6 +615,7 @@ export class Machine {
         frame.thunk.env = frame.env;
         frame.thunk.native = frame.native;
         frame.thunk.target = frame.target;
+        this.runtime.endPreview(frame.thunk, true);
       } else if (frame.k === 'do') {
         unwindBlock(this, frame);
       }

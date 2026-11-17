@@ -90,7 +90,7 @@ export class Runtime implements TracedRuntime<TraceFrame> {
   }
 
   forcePreview(slot: Thunk): Value {
-    return this.previews.force(slot, () => this.machine.force(slot));
+    return this.previews.force(() => this.machine.force(slot));
   }
 
   consumePreview(slot: Thunk): void {
@@ -99,6 +99,14 @@ export class Runtime implements TracedRuntime<TraceFrame> {
       this.budget.spend(cost.operations);
       this.recordAllocation(cost.allocations);
     }
+  }
+
+  beginPreview(slot: Thunk): void {
+    this.previews.enter(slot);
+  }
+
+  endPreview(slot: Thunk, aborted = false): void {
+    this.previews.leave(slot, aborted);
   }
 
   evaluationLimitError(): Error {

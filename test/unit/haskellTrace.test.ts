@@ -982,6 +982,41 @@ test('demanding previewed computations still enforces the execution budget', () 
   expect(() => traceProgram('haskell', source, source)).toThrowError(ExecutionLimitError);
 });
 
+test.each([
+  ['(x+1,x+2)', 'snd p'],
+  ['(x+1,x+2,x+3)', 'case p of (_,_,z)->z'],
+])('shared inner previews preserve execution limits: %s', (tuple, result) => {
+  const source = `import Control.Monad
+main=forM_ [1..800::Int] $ \\i -> do
+ let p=let x=sum [1..100::Int]+i in ${tuple}
+ print (${result})`;
+  expect(executeProgram('haskell', source)).toMatchObject({ kind: 'limitExceeded', limit: 'operations' });
+  expect(() => traceProgram('haskell', source, source)).toThrowError(ExecutionLimitError);
+});
+
+test('shared inner previews charge a demanded computation once', () => {
+  const source = `import Control.Monad
+main=forM_ [1..400::Int] $ \\i -> do
+ let p=let x=sum [1..100::Int]+i in (x+1,x+2,x+3)
+ case p of (a,b,c)->print(a+b+c)`;
+  const execution = executeProgram('haskell', source);
+  expect(execution).toMatchObject({ kind: 'executed' });
+  const recording = traceProgram('haskell', source, source);
+  expect(recording.uncaughtException).toBeUndefined();
+  expect(recording.stdout).toBe(Array.from({ length: 400 }, (_, i) => `${15_159 + 3 * i}\n`).join(''));
+});
+
+test('unused shared inner previews do not consume the execution budget', () => {
+  const source = `import Control.Monad
+main=forM_ [1..800::Int] $ \\i -> do
+ let p=let x=sum [1..100::Int]+i in (x+1,i)
+ print(snd p)`;
+  expect(executeProgram('haskell', source)).toMatchObject({ kind: 'executed' });
+  const recording = traceProgram('haskell', source, source);
+  expect(recording.uncaughtException).toBeUndefined();
+  expect(recording.stdout).toBe(Array.from({ length: 800 }, (_, i) => `${i + 1}\n`).join(''));
+});
+
 test('an evaluated list stays visible through repeated unchanged renders', () => {
   const source = `main=do
  let xs=[1..10::Int]

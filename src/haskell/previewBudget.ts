@@ -1,5 +1,4 @@
 import { LIMITS } from '../interpreter/limits';
-import { chargeTypeWork } from './typeWorkBudget';
 import { type Thunk, type Value } from './values';
 
 type PreviewKind = 'scalar' | 'composite';
@@ -12,20 +11,27 @@ interface PreviewUsage {
 interface PreviewTransaction {
   kind: PreviewKind;
   deadline: number;
-  operations: number;
-  executionOperations: number;
-  allocations: number;
-  dependencies: Set<PreviewDebt>;
   forcing: boolean;
+  frames: PreviewFrame[];
 }
 
 interface PreviewDebt {
-  kind: PreviewKind;
-  operations: number;
+  scalarOperations: number;
+  compositeOperations: number;
   executionOperations: number;
   allocations: number;
   consumed: boolean;
   dependencies: PreviewDebt[];
+}
+
+interface PreviewFrame {
+  thunk: Thunk;
+  debt: PreviewDebt;
+  scalarOperations: number;
+  compositeOperations: number;
+  executionOperations: number;
+  allocations: number;
+  dependenciesLength: number;
 }
 
 export class DisplayAbort extends Error {
@@ -47,49 +53,31 @@ export class PreviewBudget {
     const active = this.active;
     if (!active) return;
     if (active.forcing) {
-      active.operations += operations;
-      active.executionOperations += executionOperations;
-      active.allocations += allocations;
       this.usage[active.kind].operations += operations;
+      const debt = active.frames.at(-1)?.debt;
+      if (debt) {
+        if (active.kind === 'scalar') debt.scalarOperations += operations;
+        else debt.compositeOperations += operations;
+        debt.executionOperations += executionOperations;
+        debt.allocations += allocations;
+      }
       if (this.remainingOperations(active.kind) < 0) throw new DisplayAbort();
     }
     if (performance.now() > active.deadline) throw new DisplayAbort();
   }
 
-  force(slot: Thunk, work: () => Value): Value {
-    return this.run(() => this.forceInTransaction(slot, work), 'scalar');
+  force(work: () => Value): Value {
+    return this.run(() => this.forceInTransaction(work), 'scalar');
   }
 
-  private forceInTransaction(slot: Thunk, work: () => Value): Value {
+  private forceInTransaction(work: () => Value): Value {
     const active = this.active as PreviewTransaction;
     if (this.remainingOperations(active.kind) <= 0) throw new DisplayAbort();
     const savedForcing = active.forcing;
     active.forcing = true;
-    const before = {
-      operations: active.operations,
-      executionOperations: active.executionOperations,
-      allocations: active.allocations,
-    };
-    const savedDependencies = active.dependencies;
-    active.dependencies = new Set();
     try {
-      const value = work();
-      const debt: PreviewDebt = {
-        kind: active.kind,
-        operations: 0,
-        executionOperations: active.executionOperations - before.executionOperations,
-        allocations: active.allocations - before.allocations,
-        consumed: false,
-        dependencies: [...active.dependencies],
-      };
-      for (let current: Thunk | undefined = slot; current; current = current.target) {
-        chargeTypeWork();
-        this.debts.set(current, debt);
-      }
-      debt.operations = active.operations - before.operations;
-      return value;
+      return work();
     } finally {
-      active.dependencies = savedDependencies;
       active.forcing = savedForcing;
     }
   }
@@ -102,11 +90,8 @@ export class PreviewBudget {
     this.active = {
       kind,
       deadline: started + remainingTime,
-      operations: 0,
-      executionOperations: 0,
-      allocations: 0,
-      dependencies: new Set(),
       forcing: false,
+      frames: [],
     };
     try {
       return work();
@@ -116,13 +101,46 @@ export class PreviewBudget {
     }
   }
 
+  enter(thunk: Thunk): void {
+    const active = this.active;
+    if (!active?.forcing) return;
+    const debt = this.debtFor(thunk);
+    active.frames.push({
+      thunk,
+      debt,
+      scalarOperations: debt.scalarOperations,
+      compositeOperations: debt.compositeOperations,
+      executionOperations: debt.executionOperations,
+      allocations: debt.allocations,
+      dependenciesLength: debt.dependencies.length,
+    });
+  }
+
+  leave(thunk: Thunk, aborted: boolean): void {
+    const active = this.active;
+    if (!active?.forcing) return;
+    const frame = active.frames.pop();
+    if (frame?.thunk !== thunk) throw new Error('Unbalanced preview thunk frames');
+    if (!aborted) return;
+    const { debt } = frame;
+    debt.scalarOperations = frame.scalarOperations;
+    debt.compositeOperations = frame.compositeOperations;
+    debt.executionOperations = frame.executionOperations;
+    debt.allocations = frame.allocations;
+    debt.dependencies.length = frame.dependenciesLength;
+  }
+
   consume(slot: Thunk, demanded: boolean): { operations: number; allocations: number } | undefined {
-    const debt = this.debts.get(slot);
-    if (!debt || debt.consumed) return;
+    const active = this.active;
     if (!demanded) {
-      this.active?.dependencies.add(debt);
+      if (!active?.forcing) return;
+      const debt = slot.state === 'pending' ? this.debtFor(slot) : this.debts.get(slot);
+      const parent = active.frames.at(-1)?.debt;
+      if (debt && !debt.consumed && parent && parent !== debt) parent.dependencies.push(debt);
       return;
     }
+    const debt = this.debts.get(slot);
+    if (!debt || debt.consumed) return;
     const pending = [debt];
     let executionOperations = 0;
     let allocations = 0;
@@ -130,13 +148,30 @@ export class PreviewBudget {
       const current = pending.pop() as PreviewDebt;
       if (current.consumed) continue;
       current.consumed = true;
-      this.usage[current.kind].operations -= current.operations;
+      this.usage.scalar.operations -= current.scalarOperations;
+      this.usage.composite.operations -= current.compositeOperations;
       executionOperations += current.executionOperations;
       allocations += current.allocations;
       for (const dependency of current.dependencies) pending.push(dependency);
       current.dependencies = [];
     }
     return { operations: executionOperations, allocations };
+  }
+
+  private debtFor(slot: Thunk): PreviewDebt {
+    let debt = this.debts.get(slot);
+    if (!debt || debt.consumed) {
+      debt = {
+        scalarOperations: 0,
+        compositeOperations: 0,
+        executionOperations: 0,
+        allocations: 0,
+        consumed: false,
+        dependencies: [],
+      };
+      this.debts.set(slot, debt);
+    }
+    return debt;
   }
 
   private remainingOperations(kind: PreviewKind): number {
