@@ -1,0 +1,19 @@
+const \u0061=1; console.log(a);
+const b=1; console.log(\u0062);
+const o = { \u0061bc: 1 };
+console.log(o.abc, o.\u0061bc);
+type \u0054 = number;
+const t: T = 2;
+interface P { n\u0061me: string }
+const p: P = { name: "x" };
+console.log(t, p.name);
+function \u{66}n(x: number) { return x; }
+console.log(fn(1));
+let c\u0061t = 1;
+cat = 2;
+console.log(c\u0061t);
+class Q { m\u0065thod() { return 3; } }
+console.log(new Q().method());
+const r = { m: 1 };
+const { \u006d: mm } = r;
+console.log(mm, r["m"]);

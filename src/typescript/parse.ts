@@ -4,6 +4,7 @@ import { CompileError, type SourceDiagnostic } from '../interpreter/diagnostics'
 import { type TraceAnnotation, traceAnnotationsIn, type TraceOptions } from '../interpreter/traceAnnotations';
 import { commentTokens, loadParser, parseSource } from '../interpreter/treeSitter';
 import type { Program } from '../javascript/ast';
+import { nameOf } from '../javascript/convertNodes';
 import { checkTypeScript } from './checker/checker';
 import { javaScriptViewOf } from './jsView';
 import { TypeScriptProgramConverter } from './programConverter';
@@ -33,7 +34,7 @@ export function parseTypeScript(source: string, trace?: TraceOptions): Program {
         converterErrors = error.diagnostics;
       }
       // tsc reports its grammar errors and type errors together; the type checker words a row's error first.
-      const diagnostics = checkTypeScript(root);
+      const diagnostics = checkWithDecodedNames(root, source);
       const rows = new Set(diagnostics.map((diagnostic) => diagnostic.row));
       const all = [...diagnostics, ...converterErrors.filter((diagnostic) => !rows.has(diagnostic.row))].toSorted(
         (a, b) => a.row - b.row
@@ -43,6 +44,44 @@ export function parseTypeScript(source: string, trace?: TraceOptions): Program {
     },
     { locateErrors: (root, errors) => typeScriptSyntaxErrors(root, source, errors) }
   );
+}
+
+/** Type-checks a program with the `\u` escapes of its names decoded, as tsc reads them, which keeps every row. */
+function checkWithDecodedNames(root: Node, source: string): SourceDiagnostic[] {
+  const decoded = decodeNameEscapes(root, source);
+  if (decoded === source) return checkTypeScript(root);
+  const tree = parser.parse(decoded);
+  try {
+    // A decoded name that reads as a keyword changes the tree, whose original names are then checked instead.
+    return checkTypeScript(tree && tree.rootNode.toString() === root.toString() ? tree.rootNode : root);
+  } finally {
+    tree?.delete();
+  }
+}
+
+function decodeNameEscapes(root: Node, source: string): string {
+  let decoded = '';
+  let end = 0;
+  const visit = (node: Node): void => {
+    if (node.childCount > 0) {
+      for (const child of node.children) if (child) visit(child);
+    } else if (node.type.endsWith('identifier') && node.text.includes('\\')) {
+      decoded += source.slice(end, node.startIndex) + decodedName(node);
+      end = node.endIndex;
+    }
+  };
+  visit(root);
+  return decoded + source.slice(end);
+}
+
+/** The name a node spells, or its source text when an escape is invalid there, which the converter reports. */
+function decodedName(node: Node): string {
+  try {
+    return nameOf(node);
+  } catch (error) {
+    if (error instanceof CompileError) return node.text;
+    throw error;
+  }
 }
 
 function typeScriptSyntaxErrors(root: Node, source: string, errors: SourceDiagnostic[]): SourceDiagnostic[] {
