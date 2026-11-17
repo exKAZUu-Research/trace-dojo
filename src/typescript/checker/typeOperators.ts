@@ -276,6 +276,7 @@ export class TypeOperators {
     };
   }
 
+  // code-gauge-allow functionCognitiveComplexity 17 -- Follows TypeScript's keys of each kind of type.
   keyofType(type: Type): Type {
     if (this.c.relations.isGeneric(type)) return { kind: 'keyof', id: newTypeId(), type };
     if (isAnyLike(type) || isIntrinsic(type, 'never')) return unionOf([stringType, numberType, symbolType]);
@@ -297,9 +298,25 @@ export class TypeOperators {
     // keyof lists the public members only.
     for (const [name, property] of structure.properties) {
       if (name.startsWith('__@') || name.startsWith('#') || property.visibility !== 'public') continue;
-      keys.push(isNumericKey(property) ? literalType(Number(name)) : literalType(name));
+      keys.push(this.isNumericKey(property) ? literalType(Number(name)) : literalType(name));
     }
     return unionOf(keys);
+  }
+
+  /**
+   * Whether a property is named by a number, as `0: T`, `[1]: T`, or `[n]: T` for a constant `n` of a number literal
+   * type, which `keyof` gives as a number.
+   */
+  isNumericKey(property: Property): boolean {
+    const declaration = property.declaration;
+    const name = declaration?.childForFieldName('name') ?? declaration?.childForFieldName('key');
+    if (name?.type !== 'computed_property_name') return name?.type === 'number';
+    let numeric = false;
+    this.c.flow.from(this.c.flow.current, () => {
+      const type = this.c.silently(() => this.c.expressions.check(named(name)[0]));
+      numeric = type.kind === 'literal' && typeof type.value === 'number';
+    });
+    return numeric;
   }
 
   /** `object[index]`, reporting a missing property at `node` when given. */
@@ -549,12 +566,4 @@ function appendEach(prefixes: string[], members: Type[], suffix: string): string
         prefix + (member.kind === 'literal' ? String(member.value) : (member as { name: string }).name) + suffix
     )
   );
-}
-
-/** Whether a property is declared with a number as its name, as `0: T` or `[1]: T`, which `keyof` gives as a number. */
-function isNumericKey(property: Property): boolean {
-  const declaration = property.declaration;
-  let name = declaration?.childForFieldName('name') ?? declaration?.childForFieldName('key');
-  if (name?.type === 'computed_property_name') name = named(name)[0];
-  return name?.type === 'number';
 }

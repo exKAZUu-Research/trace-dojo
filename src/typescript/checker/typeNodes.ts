@@ -3,7 +3,7 @@ import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 import { unsupportedMessage } from '../unsupported';
 import type { Checker, Mapper } from './checker';
 import type { Sym } from './scopes';
-import { hasToken, named, numberValue, propertyNameText, stringValue } from './syntax';
+import { hasToken, isNumericName, named, numberValue, propertyNameText, stringValue } from './syntax';
 import {
   anonymousObject,
   anyType,
@@ -164,12 +164,17 @@ export class TypeNodes {
     const objectType = this.typeFromNode(object);
     const indexType = this.typeFromNode(index);
     if (objectType.kind === 'typeParameter' && indexType.kind === 'literal') {
-      // A type parameter can be indexed only by the keys its constraint has.
+      // A type parameter can be indexed only by the keys of its constraint, which conditional types narrow; `T extends any`
+      // is as unconstrained as `T`.
       const constraint = this.c.constraintOf(objectType);
-      const name = String(indexType.value);
+      const constraints = [
+        constraint && !isIntrinsic(constraint, 'any') ? constraint : unknownType,
+        ...this.conditionalExtendsTypes(node, objectType),
+      ];
+      const key = indexType.value;
       if (
-        !this.narrowedByConditional(node, object.text) &&
-        (!constraint || (!this.c.propertyOf(constraint, name) && !this.c.structureOf(constraint).stringIndex))
+        (typeof key !== 'string' && typeof key !== 'number') ||
+        !constraints.some((constraint) => this.hasKey(constraint, key))
       ) {
         this.c.error(index, `型 '${this.c.print(indexType)}' は型 '${objectType.name}' のインデックスに使えません。`);
         return errorType;
@@ -178,42 +183,58 @@ export class TypeNodes {
     return this.c.typeOperators.indexedAccess(objectType, indexType, index);
   }
 
+  /** Whether `keyof type` contains `key`, or `key` is numeric and `type` has a number index signature. */
+  // code-gauge-allow functionCognitiveComplexity 17 -- Follows TypeScript's keys of each kind of type a constraint can be.
+  private hasKey(type: Type, key: string | number, seen = new Set<number>()): boolean {
+    if (isAnyLike(type) || isIntrinsic(type, 'never')) return true;
+    if (seen.has(type.id)) return false;
+    seen.add(type.id);
+    if (type.kind === 'union') return type.types.every((member) => this.hasKey(member, key, seen));
+    if (type.kind === 'intersection') return type.types.some((member) => this.hasKey(member, key, seen));
+    if (type.kind !== 'object') {
+      if (type.kind === 'intrinsic' && ['unknown', 'null', 'undefined', 'void', 'object'].includes(type.name))
+        return false;
+      const constraint = this.c.relations.isGeneric(type) ? this.c.baseConstraint(type) : this.c.apparentType(type);
+      return constraint !== type && this.hasKey(constraint, key, seen);
+    }
+    const structure = this.c.structureOf(type);
+    if (structure.stringIndex) return true;
+    if (structure.numberIndex && (typeof key === 'number' || isNumericName(key))) return true;
+    const property = structure.properties.get(String(key));
+    return property !== undefined && (typeof key === 'number') === this.c.typeOperators.isNumericKey(property);
+  }
+
   /**
    * Whether a rest's type parameter is an array where the rest is written: in the true branch of a conditional type that
    * checks it against an array type, as TypeScript's substitution types narrow it.
    */
   private narrowedToArray(node: TreeNode, type: Type): boolean {
-    if (type.kind !== 'typeParameter') return false;
-    let child = node;
-    for (let current = node.parent; current; current = current.parent) {
-      const extendsNode = current.childForFieldName('right');
-      if (
-        current.type === 'conditional_type' &&
-        current.childForFieldName('left')?.text === type.name &&
-        current.childForFieldName('consequence')?.id === child.id &&
-        extendsNode &&
-        this.validTupleRestType(this.typeFromNode(extendsNode))
-      )
-        return true;
-      child = current;
-    }
-    return false;
+    return (
+      type.kind === 'typeParameter' &&
+      this.conditionalExtendsTypes(node, type).some((extendsType) => this.validTupleRestType(extendsType))
+    );
   }
 
-  /** Whether a type node is in the true branch of a conditional type that checks `name`, which constrains it more. */
-  private narrowedByConditional(node: TreeNode, name: string): boolean {
+  /**
+   * The types that the conditional types whose true branch holds `node` check `parameter` against, as `X extends C` and
+   * `[X] extends [C]` do; `any` and `unknown` do not narrow it.
+   */
+  private conditionalExtendsTypes(node: TreeNode, parameter: TypeParameter): Type[] {
+    const types: Type[] = [];
     let child = node;
     for (let current = node.parent; current; current = current.parent) {
-      if (
-        current.type === 'conditional_type' &&
-        current.childForFieldName('left')?.text === name &&
-        current.childForFieldName('consequence')?.id === child.id
-      ) {
-        return true;
+      if (current.type === 'conditional_type' && current.childForFieldName('consequence')?.id === child.id) {
+        const [check, extendsNode] = unwrapUnaryTuples(
+          current.childForFieldName('left') as TreeNode,
+          current.childForFieldName('right') as TreeNode
+        );
+        const extendsType = check.text === parameter.name ? this.typeFromNode(extendsNode) : undefined;
+        if (extendsType && !isIntrinsic(extendsType, 'any') && !isIntrinsic(extendsType, 'unknown'))
+          types.push(extendsType);
       }
       child = current;
     }
-    return false;
+    return types;
   }
 
   private literalTypeOf(node: TreeNode): Type {
@@ -446,7 +467,7 @@ export class TypeNodes {
       switch (member.type) {
         case 'property_signature': {
           const nameNode = member.childForFieldName('name') as TreeNode;
-          const name = propertyNameText(nameNode);
+          const name = this.memberName(nameNode);
           if (name === undefined) break;
           const typeNode = member.childForFieldName('type');
           structure.properties.set(name, {
@@ -462,7 +483,7 @@ export class TypeNodes {
         }
         case 'method_signature': {
           const nameNode = member.childForFieldName('name') as TreeNode;
-          const name = propertyNameText(nameNode);
+          const name = this.memberName(nameNode);
           if (name === undefined) break;
           if (hasToken(member, 'get') || hasToken(member, 'set')) {
             this.addAccessorSignature(structure, member, name);
@@ -509,6 +530,14 @@ export class TypeNodes {
       }
     }
     return structure;
+  }
+
+  /** The name of a member, which a computed key gives by its literal type, as a constant's. */
+  private memberName(nameNode: TreeNode): string | undefined {
+    const written = propertyNameText(nameNode);
+    if (written !== undefined || nameNode.type !== 'computed_property_name') return written;
+    const names = this.c.silently(() => this.c.patterns.capturePropertyNames(nameNode));
+    return names?.length === 1 ? names[0] : undefined;
   }
 
   private implicitAnyMember(member: TreeNode, nameNode: TreeNode): Type {
@@ -614,3 +643,15 @@ export class TypeNodes {
 
 /** The type nodes whose element types TypeScript resolves later, which lets an alias refer to itself inside them. */
 const deferringTypeNodes = new Set(['array_type', 'tuple_type', 'type_arguments', 'readonly_type']);
+
+/** The check and extends types of a conditional type inside the one-element tuples both are wrapped in, as `[X] extends [C]`. */
+function unwrapUnaryTuples(check: TreeNode, extendsNode: TreeNode): [TreeNode, TreeNode] {
+  if (
+    check.type !== 'tuple_type' ||
+    extendsNode.type !== 'tuple_type' ||
+    named(check).length !== 1 ||
+    named(extendsNode).length !== 1
+  )
+    return [check, extendsNode];
+  return unwrapUnaryTuples(named(check)[0], named(extendsNode)[0]);
+}

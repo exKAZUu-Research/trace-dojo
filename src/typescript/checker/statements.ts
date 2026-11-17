@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 529 -- Follows the flow of control through each kind of statement.
+// code-gauge-allow-file fileNcss 532 -- Follows the flow of control through each kind of statement.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import type { Checker } from './checker';
@@ -27,6 +27,12 @@ interface JumpTarget {
 
 /** How many times a loop body is checked silently, at most, to find the types its back edges bring. */
 const MAX_LOOP_PASSES = 3;
+
+/**
+ * The type syntaxes that check themselves where they are written, as in a branch of a conditional type no use
+ * instantiates: a tuple its elements, and an indexed access its key.
+ */
+const eagerTypeSyntaxes = new Set(['tuple_type', 'lookup_type']);
 
 /** Checks statements, following the flow of control through them. */
 export class StatementChecker {
@@ -131,7 +137,7 @@ export class StatementChecker {
   }
 
   /** Resolves every type written in a node, so that unknown names report errors. */
-  // code-gauge-allow functionCognitiveComplexity 17 -- Walks type references and object types while keeping qualified namespace references intact for availability checks.
+  // code-gauge-allow functionCognitiveComplexity 19 -- Walks type references and object types while keeping qualified namespace references intact for availability checks.
   private resolveTypesIn(node: TreeNode | null): void {
     if (!node) return;
     const visit = (current: TreeNode): void => {
@@ -154,8 +160,7 @@ export class StatementChecker {
         const type = this.c.typeNodes.typeFromNode(current);
         if (type.kind === 'object') this.checkIndexConformance(type.resolve(), current);
       }
-      // A tuple checks its elements where it is written, as in a branch of a conditional type no use instantiates.
-      if (current.type === 'tuple_type') this.c.typeNodes.typeFromNode(current);
+      if (eagerTypeSyntaxes.has(current.type)) this.c.typeNodes.typeFromNode(current);
       for (const child of named(current)) visit(child);
     };
     visit(node);
