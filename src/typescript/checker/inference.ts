@@ -2,6 +2,7 @@ import type { Checker, Mapper } from './checker';
 import {
   anyType,
   errorType,
+  intersectionOf,
   isAnyLike,
   isIntrinsic,
   literalType,
@@ -108,7 +109,7 @@ export class TypeInference {
 
   private inferredType(parameter: TypeParameter, inference: Inference, widen: boolean): Type {
     if (inference.candidates.length === 0) {
-      return inference.contravariant[0];
+      return this.commonSubtype(inference.contravariant);
     }
     const shouldWiden = widen && inference.topLevel && !this.c.literals.hasPrimitiveConstraint(parameter);
     const candidates = inference.candidates.map((candidate) =>
@@ -120,8 +121,16 @@ export class TypeInference {
       inference.contravariant.length > 0 &&
       !inference.contravariant.some((candidate) => this.c.relations.isAssignable(covariantType, candidate))
     )
-      return inference.contravariant[0];
+      return this.commonSubtype(inference.contravariant);
     return covariantType;
+  }
+
+  /** Each candidate in turn replaces the one kept so far if it is assignable to it, as TypeScript's `getCommonSubtype`. */
+  private commonSubtype(candidates: Type[]): Type {
+    let subtype = candidates[0];
+    for (const candidate of candidates.slice(1))
+      if (this.c.relations.isAssignable(candidate, subtype)) subtype = candidate;
+    return subtype;
   }
 
   private commonSupertype(candidates: Type[]): Type {
@@ -483,7 +492,8 @@ export class TypeInference {
       const inference = run.inferences.get(parameter.id) as Inference;
       if (inference.candidates.length > 0)
         result.set(parameter.id, unionOf(inference.candidates.map((candidate) => regularOf(candidate))));
-      else if (inference.contravariant.length > 0) result.set(parameter.id, inference.contravariant[0]);
+      else if (inference.contravariant.length > 0)
+        result.set(parameter.id, intersectionOf(inference.contravariant, this.c.budget));
     }
     return result;
   }

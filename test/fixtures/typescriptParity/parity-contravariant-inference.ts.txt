@@ -1,0 +1,25 @@
+interface Animal {
+  name: string;
+}
+interface Dog extends Animal {
+  bark(): void;
+}
+function combine<T>(a: (x: T) => void, b: (x: T) => void) {
+  return (x: T) => {
+    a(x);
+    b(x);
+  };
+}
+const f = combine(
+  (x: Animal) => console.log(x.name),
+  (x: Dog) => x.bark()
+);
+f({ name: "dog", bark() { console.log("woof"); } });
+const g = combine(
+  (x: { id: number }) => console.log(x.id),
+  (x: { id: number; tag: string }) => console.log(x.tag)
+);
+g({ id: 1, tag: "a" });
+type Arg<T> = T extends { a: (x: infer U) => void; b: (x: infer U) => void } ? U : never;
+const arg: Arg<{ a: (x: { id: number }) => void; b: (x: { tag: string }) => void }> = { id: 2, tag: "b" };
+console.log(arg.id, arg.tag);
