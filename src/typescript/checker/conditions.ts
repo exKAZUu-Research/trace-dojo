@@ -16,17 +16,14 @@ import {
   anyType,
   booleanType,
   filterType,
-  intersectionOf,
   isAnyLike,
   isIntrinsic,
-  mapType,
   neverType,
   nullType,
   regularOf,
   type Type,
   undefinedType,
   unionOf,
-  unknownType,
 } from './types';
 
 /** The flow states where a condition is true and where it is false, with the condition's type. */
@@ -239,7 +236,7 @@ export class ConditionChecker {
     const { target, type: predicateType } = predicate;
     const { whenTrue, whenFalse } = this.narrowed(target, (current, assumeTrue) =>
       assumeTrue
-        ? this.narrowToPredicate(current, predicateType)
+        ? this.c.flow.narrowByPredicate(current, predicateType)
         : filterType(current, (member) => !this.c.relations.isAssignable(member, predicateType))
     );
     const excludesUndefined = !this.c.relations.isAssignable(undefinedType, predicateType);
@@ -352,31 +349,6 @@ export class ConditionChecker {
       expression.childForFieldName('property')?.text ?? ''
     );
     return property !== undefined && !property.optional;
-  }
-
-  /**
-   * The type a predicate narrows `current` to, as TypeScript's `getNarrowedType` gives with assignability for its subtype
-   * checks: for each member of the predicate type, the more specific of it and each member of `current` it relates to,
-   * or with none, the more specific of the whole types, or else their intersection.
-   */
-  private narrowToPredicate(current: Type, predicateType: Type): Type {
-    if (isAnyLike(current) || isIntrinsic(current, 'unknown') || current === predicateType) return predicateType;
-    const assignable = (source: Type, target: Type): boolean => this.c.relations.isAssignable(source, target);
-    const narrowed = mapType(predicateType, (candidate) => {
-      const related = mapType(current, (member) =>
-        assignable(member, candidate) ? member : assignable(candidate, member) ? candidate : neverType
-      );
-      if (!isIntrinsic(related, 'never')) return related;
-      return mapType(current, (member) =>
-        member.kind === 'typeParameter' && assignable(candidate, member.constraint?.() ?? unknownType)
-          ? intersectionOf([member, candidate], this.c.budget)
-          : neverType
-      );
-    });
-    if (!isIntrinsic(narrowed, 'never')) return narrowed;
-    if (assignable(predicateType, current)) return predicateType;
-    if (assignable(current, predicateType)) return current;
-    return intersectionOf([current, predicateType], this.c.budget);
   }
 
   /** The instance type a constructor creates, for `instanceof`. */
@@ -548,8 +520,6 @@ export class ConditionChecker {
     return undefined;
   }
 
-  // code-gauge-allow functionNcss 37 -- Follows TypeScript's narrowing by each form of equality: typeof, references, discriminants, and optional chains.
-  // code-gauge-allow functionCognitiveComplexity 25 -- Follows TypeScript's narrowing by each form of equality: typeof, references, discriminants, and optional chains.
   private narrowEquality(left: TreeNode, right: TreeNode, operator: string): { whenTrue: State; whenFalse: State } {
     const equal = operator === '===' || operator === '==';
     const loose = operator === '==' || operator === '!=';

@@ -252,6 +252,37 @@ export class Flow {
 
   // Narrowing operations ----------------------------------------------------------------------------------------
 
+  /**
+   * The type a type predicate narrows `type` to, as TypeScript's `getNarrowedType` gives with assignability for its
+   * subtype checks: the members each member of the predicate type relates to, or else the more specific of the two
+   * types, or else their intersection.
+   */
+  narrowByPredicate(type: Type, predicateType: Type): Type {
+    if (isAnyLike(type) || isIntrinsic(type, 'unknown') || type === predicateType) return predicateType;
+    const narrowed = mapType(predicateType, (candidate) => this.narrowByPredicateMember(type, candidate));
+    if (!isIntrinsic(narrowed, 'never')) return narrowed;
+    if (this.c.relations.isAssignable(predicateType, type)) return predicateType;
+    if (this.c.relations.isAssignable(type, predicateType)) return type;
+    return intersectionOf([type, predicateType], this.c.budget);
+  }
+
+  /**
+   * For each member of `type` related to `candidate`, the more specific of the two; with none, each type parameter whose
+   * constraint `candidate` fits, intersected with it.
+   */
+  private narrowByPredicateMember(type: Type, candidate: Type): Type {
+    const assignable = (source: Type, target: Type): boolean => this.c.relations.isAssignable(source, target);
+    const related = mapType(type, (member) =>
+      assignable(member, candidate) ? member : assignable(candidate, member) ? candidate : neverType
+    );
+    if (!isIntrinsic(related, 'never')) return related;
+    return mapType(type, (member) =>
+      member.kind === 'typeParameter' && assignable(candidate, member.constraint?.() ?? unknownType)
+        ? intersectionOf([member, candidate], this.c.budget)
+        : neverType
+    );
+  }
+
   /** The part of a type that `typeof value === name` keeps (or, with `assumeTrue` false, that the opposite keeps). */
   // code-gauge-allow functionCognitiveComplexity 22 -- Follows TypeScript's narrowing of each kind of type by a `typeof` result.
   narrowByTypeof(type: Type, name: string, assumeTrue: boolean): Type {
