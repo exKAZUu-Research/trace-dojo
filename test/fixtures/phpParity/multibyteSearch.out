@@ -1,0 +1,67 @@
+int(6)
+int(3)
+bool(false)
+int(3)
+int(1)
+mb_strripos(): Argument #3 ($offset) must be contained in argument #1 ($haystack)
+string(30) "テキストです。日本語"
+string(12) "日本語の"
+string(9) "日本語"
+string(33) "日本語のテキストです。"
+string(5) "WORLD"
+string(2) "He"
+string(4) "äBC"
+string(4) "Äbc"
+bool(false)
+string(3) "abc"
+string(0) ""
+string(3) "abc"
+string(0) ""
+string(0) ""
+bool(false)
+string(8) "3f623f63"
+string(6) "613f62"
+mb_strstr(): Argument #4 ($encoding) must be a valid encoding, "nope" given
+"48656c6c6f20572e2e2e"
+"e697a5e69cace8aa9ee381aee280a6"
+"e697a5e69cace8aa9ee381aee38386"
+"e8aa9ee381aee383862e2e"
+"2e2e2e"
+"2e2e2e"
+"646566"
+"616263646566"
+""
+"e697a5"
+
+Deprecated: mb_strimwidth(): passing a negative integer to argument #3 ($width) is deprecated in /main.php on line 10
+"61626364"
+
+Deprecated: mb_strimwidth(): passing a negative integer to argument #3 ($width) is deprecated in /main.php on line 10
+"63642e"
+""
+"613f7e"
+"613f6263"
+mb_strimwidth(): Argument #2 ($start) is out of range
+mb_strimwidth(): Argument #2 ($start) is out of range
+
+Deprecated: mb_strimwidth(): passing a negative integer to argument #3 ($width) is deprecated in /main.php on line 12
+mb_strimwidth(): Argument #3 ($width) is out of range
+string(5) "abc  "
+string(5) "  abc"
+string(6) "全角"
+string(5) "abcxx"
+string(5) "xxabc"
+string(1) "c"
+string(0) ""
+string(0) ""
+string(3) "abc"
+string(7) "﻿x﻿"
+string(1) "x"
+string(6) "本日"
+string(4) "613f"
+string(2) "61"
+string(16) "30c630ad30b930c8"
+string(2) "BC"
+string(4) "0061"
+string(4) "ab.."
+string(2) "ab"

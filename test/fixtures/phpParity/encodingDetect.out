@@ -1,0 +1,24 @@
+ ["ASCII","ASCII","UTF-8","UTF-8","ASCII","ASCII","UTF-8","ISO-8859-1","UTF-8","ASCII","UTF-16LE","ASCII","ASCII","UTF-32"]
+616263 ["ASCII","ASCII","UTF-8","UTF-8","ASCII","ASCII","UTF-8","ISO-8859-1","UTF-8","ASCII","UTF-8","ASCII","ASCII","UTF-8"]
+e697a5e69cace8aa ["UTF-8","UTF-8","UTF-8","UTF-8","ASCII",false,"UTF-8","UTF-8","UTF-8","UTF-8","UTF-8","UTF-8","UTF-8","UTF-8"]
+e974e9 ["ASCII",false,"UTF-8",false,"ASCII",false,"ISO-8859-1","ISO-8859-1","ISO-8859-1","ISO-8859-1","UTF-16LE","ASCII","ISO-8859-1","UTF-32"]
+ff ["ASCII",false,"UTF-8",false,"ASCII",false,"ISO-8859-1","ISO-8859-1","ISO-8859-1","ISO-8859-1","UTF-16LE","ASCII","ISO-8859-1","UTF-32"]
+c3a9ff ["UTF-8",false,"UTF-8",false,"ASCII",false,"ISO-8859-1","ISO-8859-1","ISO-8859-1","ISO-8859-1","UTF-16LE","UTF-8","ISO-8859-1","UTF-32"]
+6161616161616161 ["ASCII","UTF-8","UTF-8","UTF-8","ASCII",false,"UTF-8","ISO-8859-1","UTF-8","ASCII","UTF-8","ASCII","UTF-8","UTF-8"]
+6161616161616161 ["UTF-8","UTF-8","UTF-8","UTF-8","ASCII",false,"UTF-8","ISO-8859-1","UTF-8","UTF-8","UTF-8","UTF-8","UTF-8","UTF-8"]
+efbbbf616263 ["UTF-8","UTF-8","UTF-8","UTF-8","ASCII",false,"UTF-8","UTF-8","UTF-8","UTF-8","UTF-8","UTF-8","UTF-8","UTF-8"]
+6121622f63 ["ASCII","ASCII","UTF-8","UTF-8","ASCII","ASCII","UTF-8","ISO-8859-1","UTF-8","ASCII","UTF-8","ASCII","ASCII","UTF-8"]
+00410042 ["ASCII","ASCII","UTF-8","UTF-8","ASCII","ASCII","UTF-8","ISO-8859-1","UTF-8","ASCII","UTF-16BE","ASCII","ASCII","UTF-8"]
+c480 ["UTF-8","UTF-8","UTF-8","UTF-8","ASCII",false,"UTF-8","ISO-8859-1","UTF-8","UTF-8","UTF-16BE","UTF-8","UTF-8","UTF-8"]
+f09f9880 ["UTF-8","UTF-8","UTF-8","UTF-8","ASCII",false,"UTF-8","UTF-8","UTF-8","UTF-8","UTF-16LE","UTF-8","UTF-8","UTF-8"]
+6180 ["ASCII",false,"UTF-8",false,"ASCII",false,"ISO-8859-1","ISO-8859-1","ISO-8859-1","ISO-8859-1","UTF-16LE","ASCII","ISO-8859-1","UTF-32"]
+2121212121212121 ["UTF-8","UTF-8","UTF-8","UTF-8","ASCII",false,"UTF-8","ISO-8859-1","UTF-8","UTF-8","UTF-8","UTF-8","UTF-8","UTF-8"]
+6162616261626162 ["ASCII",false,"UTF-8",false,"ASCII",false,"ISO-8859-1","ISO-8859-1","ISO-8859-1","ISO-8859-1","UTF-16BE","ASCII","ISO-8859-1","UTF-8"]
+bool(false)
+string(5) "UTF-8"
+string(5) "ASCII"
+string(5) "ASCII"
+mb_detect_encoding(): Argument #2 ($encodings) must specify at least one encoding
+mb_detect_encoding(): Argument #2 ($encodings) must specify at least one encoding
+mb_detect_encoding(): Argument #2 ($encodings) contains invalid encoding "nope"
+mb_detect_encoding(): Argument #2 ($encodings) contains invalid encoding "x"

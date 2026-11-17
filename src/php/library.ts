@@ -1,10 +1,17 @@
 import './bootstrap';
 import './exceptions';
 import './libCore';
+import './libIntrospection';
 import './libMath';
 import './libString';
+import './libLocale';
+import './libScan';
+import './libUrl';
+import './libMultibyte';
 import './libArray';
+import './libArrayUser';
 import './libJson';
 import './libSpl';
 import './libUnsupported';
 import './libRegex';
+import './libRandomizer';

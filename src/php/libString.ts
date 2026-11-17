@@ -2,18 +2,20 @@
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 // oxlint-disable typescript/no-misused-spread -- PHP splits strings into bytes or code points, never into grapheme clusters.
 // oxlint-disable unicorn/prefer-code-point -- PHP strings hold bytes as code units 0–255, which charCodeAt and fromCharCode read and write as they are.
-import { createHash } from 'node:crypto';
+import { createHash, createHmac } from 'node:crypto';
 
-import { eastAsianWidth } from 'get-east-asian-width';
-
-import { codePointBytes, dec, enc, lower, upper, utf8Chars } from './bytes';
+import { byteAt, charAt, enc, lower, untilNul, upper } from './bytes';
 import { compareBytes, valueName } from './conversions';
 import { deprecated, throwError, warn } from './errors';
-import { decodeHtml, escapeHtml } from './htmlEntities';
+import { decodeHtml, escapeHtml, nextChar, translationTable } from './htmlEntities';
+import { isStream } from './libCore';
+import { ctypeUpper, isCtypeAlpha, isUtf8Ctype } from './libLocale';
 import { defineAlias, defineConstant, defineFunction, markInlined } from './native';
 import { toStr } from './operators';
 import { rt } from './runtime';
+import { formatPrintf } from './sprintf';
 import { incrementString } from './strings';
+import { UnsupportedFeatureError } from './unsupported';
 import { PhpArray, type Ref, type Value } from './values';
 
 defineConstant('STR_PAD_RIGHT', 1n);
@@ -31,14 +33,6 @@ defineConstant('ENT_XHTML', 32n);
 defineConstant('ENT_DISALLOWED', 128n);
 defineConstant('HTML_SPECIALCHARS', 0n);
 defineConstant('HTML_ENTITIES', 1n);
-defineConstant('MB_CASE_UPPER', 0n);
-defineConstant('MB_CASE_LOWER', 1n);
-defineConstant('MB_CASE_TITLE', 2n);
-defineConstant('MB_CASE_FOLD', 3n);
-defineConstant('MB_CASE_UPPER_SIMPLE', 4n);
-defineConstant('MB_CASE_LOWER_SIMPLE', 5n);
-defineConstant('MB_CASE_TITLE_SIMPLE', 6n);
-defineConstant('MB_CASE_FOLD_SIMPLE', 7n);
 
 const s = (value: Value): string => value as string;
 const n = (value: Value): number => Number(value as bigint);
@@ -120,6 +114,21 @@ defineFunction(
   'str_pad(string $string, int $length, string $pad_string = " ", int $pad_type = STR_PAD_RIGHT): string',
   ({ args }) => padUnits('str_pad', [...s(args[0])], args, [...(args[2] === undefined ? ' ' : s(args[2]))])
 );
+/** Pads a sequence of bytes or characters to the length that `args` holds, as `str_pad` does with its arguments. */
+export function padUnits(name: string, text: string[], args: Value[], pad: string[]): string {
+  const length = n(args[1]);
+  const type = args[3] === undefined ? 1 : n(args[3]);
+  if (length <= text.length) return text.join('');
+  if (pad.length === 0) throwError('ValueError', `${name}(): Argument #3 ($pad_string) must not be empty`);
+  if (type < 0 || type > 2) {
+    throwError('ValueError', `${name}(): Argument #4 ($pad_type) must be STR_PAD_LEFT, STR_PAD_RIGHT, or STR_PAD_BOTH`);
+  }
+  const total = length - text.length;
+  const fill = (count: number): string => Array.from({ length: count }, (_, index) => pad[index % pad.length]).join('');
+  const left = type === 0 ? total : type === 1 ? 0 : Math.floor(total / 2);
+  return fill(left) + text.join('') + fill(total - left);
+}
+
 defineFunction('str_split(string $string, int $length = 1): array', ({ args }) => {
   const text = s(args[0]);
   const length = args[1] === undefined ? 1 : n(args[1]);
@@ -388,11 +397,6 @@ defineFunction('strnatcasecmp(string $string1, string $string2): int', ({ args }
   BigInt(naturalCompare(s(args[0]), s(args[1]), true))
 );
 
-/** The byte at `index`, or 0 past the end, as C reads a string's terminator. */
-function at(text: string, index: number): number {
-  return index < text.length ? text.charCodeAt(index) : 0;
-}
-
 function isDigit(code: number): boolean {
   return code >= 48 && code <= 57;
 }
@@ -404,12 +408,12 @@ function isSpace(code: number): boolean {
 /** Compares two runs of digits that start with a zero as fractions: the first different digit decides. */
 function compareLeft(a: string, ap: number, b: string, bp: number): { result: number; ap: number; bp: number } {
   for (; ; ap++, bp++) {
-    const da = ap < a.length && isDigit(at(a, ap));
-    const db = bp < b.length && isDigit(at(b, bp));
+    const da = ap < a.length && isDigit(byteAt(a, ap));
+    const db = bp < b.length && isDigit(byteAt(b, bp));
     if (!da && !db) return { result: 0, ap, bp };
     if (!da) return { result: -1, ap, bp };
     if (!db) return { result: 1, ap, bp };
-    if (at(a, ap) !== at(b, bp)) return { result: at(a, ap) < at(b, bp) ? -1 : 1, ap, bp };
+    if (byteAt(a, ap) !== byteAt(b, bp)) return { result: byteAt(a, ap) < byteAt(b, bp) ? -1 : 1, ap, bp };
   }
 }
 
@@ -418,12 +422,12 @@ function compareLeft(a: string, ap: number, b: string, bp: number): { result: nu
 function compareRight(a: string, ap: number, b: string, bp: number): { result: number; ap: number; bp: number } {
   let bias = 0;
   for (; ; ap++, bp++) {
-    const da = ap < a.length && isDigit(at(a, ap));
-    const db = bp < b.length && isDigit(at(b, bp));
+    const da = ap < a.length && isDigit(byteAt(a, ap));
+    const db = bp < b.length && isDigit(byteAt(b, bp));
     if (!da && !db) return { result: bias, ap, bp };
     if (!da) return { result: -1, ap, bp };
     if (!db) return { result: 1, ap, bp };
-    if (bias === 0 && at(a, ap) !== at(b, bp)) bias = at(a, ap) < at(b, bp) ? -1 : 1;
+    if (bias === 0 && byteAt(a, ap) !== byteAt(b, bp)) bias = byteAt(a, ap) < byteAt(b, bp) ? -1 : 1;
   }
 }
 
@@ -435,13 +439,13 @@ export function naturalCompare(a: string, b: string, insensitive: boolean): numb
   let bp = 0;
   let leading = true;
   for (;;) {
-    let ca = at(a, ap);
-    let cb = at(b, bp);
-    while (leading && ca === 48 && ap + 1 < a.length && isDigit(at(a, ap + 1))) ca = at(a, ++ap);
-    while (leading && cb === 48 && bp + 1 < b.length && isDigit(at(b, bp + 1))) cb = at(b, ++bp);
+    let ca = byteAt(a, ap);
+    let cb = byteAt(b, bp);
+    while (leading && ca === 48 && ap + 1 < a.length && isDigit(byteAt(a, ap + 1))) ca = byteAt(a, ++ap);
+    while (leading && cb === 48 && bp + 1 < b.length && isDigit(byteAt(b, bp + 1))) cb = byteAt(b, ++bp);
     leading = false;
-    while (isSpace(ca)) ca = at(a, ++ap);
-    while (isSpace(cb)) cb = at(b, ++bp);
+    while (isSpace(ca)) ca = byteAt(a, ++ap);
+    while (isSpace(cb)) cb = byteAt(b, ++bp);
     if (isDigit(ca) && isDigit(cb)) {
       const run = ca === 48 || cb === 48 ? compareLeft(a, ap, b, bp) : compareRight(a, ap, b, bp);
       ({ ap, bp } = run);
@@ -449,8 +453,8 @@ export function naturalCompare(a: string, b: string, insensitive: boolean): numb
       if (ap >= a.length && bp >= b.length) return 0;
       if (ap >= a.length) return -1;
       if (bp >= b.length) return 1;
-      ca = at(a, ap);
-      cb = at(b, bp);
+      ca = byteAt(a, ap);
+      cb = byteAt(b, bp);
     }
     if (insensitive) {
       ca = upper(String.fromCharCode(ca)).charCodeAt(0);
@@ -620,13 +624,7 @@ function findWords(text: string, extra: Set<string>): [number, string][] {
 }
 
 function isWordChar(char: string, extra: Set<string>): boolean {
-  return isAlpha(char.charCodeAt(0)) || extra.has(char) || char === "'" || char === '-';
-}
-
-/** Whether a byte is a letter as the reference PHP's C library reads it, which includes the letters of Latin-1. */
-function isAlpha(code: number): boolean {
-  if (code < 0x80) return (code >= 65 && code <= 90) || (code >= 97 && code <= 122);
-  return code === 0xaa || code === 0xb5 || code === 0xba || (code >= 0xc0 && code !== 0xd7 && code !== 0xf7);
+  return isCtypeAlpha(char.charCodeAt(0)) || extra.has(char) || char === "'" || char === '-';
 }
 
 defineFunction('nl2br(string $string, bool $use_xhtml = true): string', ({ args }) => {
@@ -652,6 +650,41 @@ defineFunction(
 
 function entityFlags(value: Value): bigint {
   return value === undefined ? 11n : (value as bigint);
+}
+
+defineFunction(
+  'get_html_translation_table(int $table = HTML_SPECIALCHARS, int $flags = ENT_QUOTES | ENT_SUBSTITUTE | ENT_HTML401, string $encoding = "UTF-8"): array',
+  ({ args }) => {
+    const flags = entityFlags(args[1]);
+    const charset = htmlCharset(args[2] === undefined ? '' : s(args[2]));
+    const all = args[0] !== undefined && args[0] !== 0n && charset !== 'multibyte';
+    if (all && (flags & 48n) === 48n)
+      throw new UnsupportedFeatureError('HTML5 の文字実体参照の一覧（get_html_translation_table）');
+    if (all && charset === 'other')
+      throw new UnsupportedFeatureError('この文字コードの文字実体参照の一覧（get_html_translation_table）');
+    const array = new PhpArray();
+    for (const [key, entity] of translationTable(all, flags, charset === 'latin1')) array.set(key, entity);
+    return array;
+  }
+);
+
+const HTML_CHARSETS =
+  'ISO-8859-1 ISO8859-1 ISO-8859-15 ISO8859-15 utf-8 cp1252 Windows-1252 1252 BIG5 950 GB2312 936 BIG5-HKSCS Shift_JIS SJIS 932 SJIS-win CP932 EUCJP EUC-JP eucJP-win KOI8-R koi8-ru koi8r cp1251 Windows-1251 win-1251 iso8859-5 iso-8859-5 cp866 866 ibm866 MacRoman'.split(
+    ' '
+  );
+
+/** How htmlspecialchars' determine_charset classifies an encoding name for the tables this grader provides. */
+function htmlCharset(name: string): 'utf8' | 'latin1' | 'multibyte' | 'other' {
+  if (name === '') return 'utf8';
+  const known = HTML_CHARSETS.find((candidate) => lower(candidate) === lower(name));
+  if (known === undefined) {
+    warn(`get_html_translation_table(): Charset "${name}" is not supported, assuming UTF-8`);
+    return 'utf8';
+  }
+  // oxlint-disable-next-line unicorn/text-encoding-identifier-case -- PHP names the charset `utf-8`.
+  if (known === 'utf-8') return 'utf8';
+  if (/^ISO-?8859-1$/.test(known)) return 'latin1';
+  return /^(BIG5|950|GB2312|936|Shift_JIS|SJIS|932|CP932|EUC-?JP|eucJP-win)/.test(known) ? 'multibyte' : 'other';
 }
 
 defineFunction('strip_tags(string $string, array|string|null $allowed_tags = null): string', ({ args }) =>
@@ -711,6 +744,109 @@ defineFunction('addslashes(string $string): string', ({ args }) =>
 defineFunction('stripslashes(string $string): string', ({ args }) =>
   s(args[0]).replaceAll(/\\(.?)/gs, (_match, char: string) => (char === '0' ? '\0' : char))
 );
+const C_ESCAPES = new Map([
+  ['\n', 'n'],
+  ['\t', 't'],
+  ['\r', 'r'],
+  ['\u0007', 'a'],
+  ['\v', 'v'],
+  ['\b', 'b'],
+  ['\f', 'f'],
+]);
+
+defineFunction('addcslashes(string $string, string $characters): string', ({ args }) => {
+  const text = s(args[0]);
+  if (text === '' || s(args[1]) === '') return text;
+  const set = charMask(s(args[1]), 'addcslashes');
+  let result = '';
+  for (const char of text) {
+    if (!set.has(char)) result += char;
+    else {
+      const code = char.charCodeAt(0);
+      result +=
+        code >= 32 && code <= 126 ? `\\${char}` : `\\${C_ESCAPES.get(char) ?? code.toString(8).padStart(3, '0')}`;
+    }
+  }
+  return result;
+});
+
+const C_UNESCAPES = new Map([...C_ESCAPES].map(([char, letter]) => [letter, char]));
+
+defineFunction('stripcslashes(string $string): string', ({ args }) =>
+  s(args[0]).replaceAll(/\\(x[\dA-Fa-f]{1,2}|[0-7]{1,3}|[^])/g, (_match, escape: string) => {
+    if (escape.length > 1 && escape[0] === 'x') return String.fromCharCode(Number.parseInt(escape.slice(1), 16));
+    if (/^[0-7]/.test(escape)) return String.fromCharCode(Number.parseInt(escape, 8) & 0xff);
+    return C_UNESCAPES.get(escape) ?? escape;
+  })
+);
+defineFunction('quotemeta(string $string): string', ({ args }) =>
+  s(args[0]).replaceAll(/[.\\+*?[^\]$()]/g, String.raw`\$&`)
+);
+defineFunction('str_rot13(string $string): string', ({ args }) =>
+  s(args[0]).replaceAll(/[A-Za-z]/g, (char) => {
+    const base = char <= 'Z' ? 65 : 97;
+    return String.fromCharCode(((char.charCodeAt(0) - base + 13) % 26) + base);
+  })
+);
+defineFunction('strpbrk(string $string, string $characters): string|false', ({ args }) => {
+  const text = s(args[0]);
+  const characters = s(args[1]);
+  if (characters === '') throwError('ValueError', 'strpbrk(): Argument #2 ($characters) must be a non-empty string');
+  for (let index = 0; index < text.length; index++) if (characters.includes(text[index])) return text.slice(index);
+  return false;
+});
+defineFunction(
+  'substr_compare(string $haystack, string $needle, int $offset, ?int $length = null, bool $case_insensitive = false): int',
+  ({ args }) => {
+    const haystack = s(args[0]);
+    const length = args[3] === undefined || args[3] === null ? undefined : n(args[3]);
+    if (length !== undefined && length <= 0) {
+      if (length === 0) return 0n;
+      throwError('ValueError', 'substr_compare(): Argument #4 ($length) must be greater than or equal to 0');
+    }
+    let offset = n(args[2]);
+    if (offset < 0) offset = Math.max(haystack.length + offset, 0);
+    if (offset > haystack.length) offsetError('substr_compare');
+    const rest = haystack.slice(offset);
+    const needle = s(args[1]);
+    return BigInt(compareLimited(rest, needle, length ?? Math.max(needle.length, rest.length), args[4] === true));
+  }
+);
+
+/** Compares at most `length` bytes as zend_binary_strncmp does: the first different bytes decide by their difference. */
+function compareLimited(a: string, b: string, length: number, insensitive: boolean): number {
+  const limit = Math.min(length, a.length, b.length);
+  for (let index = 0; index < limit; index++) {
+    let x = a.charCodeAt(index);
+    let y = b.charCodeAt(index);
+    if (insensitive) {
+      if (x >= 65 && x <= 90) x += 32;
+      if (y >= 65 && y <= 90) y += 32;
+    }
+    if (x !== y) return x - y;
+  }
+  return Math.sign(Math.min(length, a.length) - Math.min(length, b.length));
+}
+
+defineFunction('utf8_encode(string $string): string', ({ args }) => {
+  deprecated(
+    'Function utf8_encode() is deprecated since 8.2, visit the php.net documentation for various alternatives'
+  );
+  return enc(s(args[0]));
+});
+defineFunction('utf8_decode(string $string): string', ({ args }) => {
+  deprecated(
+    'Function utf8_decode() is deprecated since 8.2, visit the php.net documentation for various alternatives'
+  );
+  const text = s(args[0]);
+  let result = '';
+  for (let index = 0; index < text.length;) {
+    const [length, code] = nextChar(text, index);
+    result += code === undefined || code > 0xff ? '?' : String.fromCharCode(code);
+    index += length;
+  }
+  return result;
+});
 defineFunction(
   String.raw`chunk_split(string $string, int $length = 76, string $separator = "\r\n"): string`,
   ({ args }) => {
@@ -777,6 +913,100 @@ defineFunction(
     return BigInt(previous[b.length]);
   }
 );
+defineFunction('vfprintf($stream, string $format, array $values): int', ({ args }) => {
+  const stream = args[0];
+  if (!isStream(stream)) {
+    throwError('TypeError', `vfprintf(): Argument #1 ($stream) must be of type resource, ${valueName(stream)} given`);
+  }
+  const text = formatPrintf(s(args[1]), (args[2] as PhpArray).values(), true);
+  if (stream.internal === 'STDIN') throw new UnsupportedFeatureError('標準入力への書き込み');
+  if (stream.internal === 'STDOUT') rt().echo(text);
+  else rt().echoError(text);
+  return BigInt(text.length);
+});
+defineFunction('metaphone(string $string, int $max_phonemes = 0): string', ({ args }) => {
+  const max = args[1] === undefined ? 0 : n(args[1]);
+  if (max < 0) throwError('ValueError', 'metaphone(): Argument #2 ($max_phonemes) must be greater than or equal to 0');
+  return metaphone(untilNul(s(args[0])), max);
+});
+
+/** The phonemes of a letter and how many letters after it they cover; `at` reads the letter at a relative offset. */
+type MetaphoneRule = (at: (offset: number) => string) => [string, number];
+
+const METAPHONE_RULES: Record<string, MetaphoneRule> = {
+  B: (at) => [at(-1) === 'M' ? '' : 'B', 0],
+  C: (at) => {
+    if (makesSoft(at(1))) return at(1) === 'I' && at(2) === 'A' ? ['X', 0] : [at(-1) === 'S' ? '' : 'S', 0];
+    return at(1) === 'H' ? ['X', 1] : ['K', 0];
+  },
+  D: (at) => (at(1) === 'G' && makesSoft(at(2)) ? ['J', 1] : ['T', 0]),
+  G: (at) => {
+    if (at(1) === 'H') return noGhToF(at(-3)) || at(-4) === 'H' ? ['', 0] : ['F', 1];
+    if (at(1) === 'N')
+      return !isCtypeAlpha(at(2).charCodeAt(0)) || (at(2) === 'E' && at(3) === 'D') ? ['', 0] : ['K', 0];
+    return [makesSoft(at(1)) && at(-1) !== 'G' ? 'J' : 'K', 0];
+  },
+  H: (at) => [isVowel(at(1)) && !'CGPST'.includes(at(-1)) ? 'H' : '', 0],
+  K: (at) => [at(-1) === 'C' ? '' : 'K', 0],
+  P: (at) => [at(1) === 'H' ? 'F' : 'P', 0],
+  Q: () => ['K', 0],
+  S: (at) => {
+    if (at(1) === 'I' && (at(2) === 'O' || at(2) === 'A')) return ['X', 0];
+    return at(1) === 'H' ? ['X', 1] : ['S', 0];
+  },
+  T: (at) => {
+    if (at(1) === 'I' && (at(2) === 'O' || at(2) === 'A')) return ['X', 0];
+    if (at(1) === 'H') return ['0', 1];
+    return [at(1) === 'C' && at(2) === 'H' ? '' : 'T', 0];
+  },
+  V: () => ['F', 0],
+  W: (at) => [isVowel(at(1)) ? 'W' : '', 0],
+  X: () => ['KS', 0],
+  Y: (at) => [isVowel(at(1)) ? 'Y' : '', 0],
+  Z: () => ['S', 0],
+  ...Object.fromEntries([...'FJLMNR'].map((letter): [string, MetaphoneRule] => [letter, () => [letter, 0]])),
+};
+
+/** Encodes a word as the metaphone() of PHP's metaphone.c does, which reads letters through the C library's locale. */
+function metaphone(word: string, max: number): string {
+  const letter = (index: number): string => (index < 0 ? '\0' : ctypeUpper(charAt(word, index)));
+  let index = 0;
+  while (index < word.length && !isCtypeAlpha(word.charCodeAt(index))) index++;
+  if (index >= word.length) return '';
+  let [result, skip] = metaphoneStart(letter(index), letter(index + 1));
+  for (index += skip; index < word.length && (max === 0 || result.length < max); index++) {
+    const current = letter(index);
+    if (!isCtypeAlpha(word.charCodeAt(index)) || (current === letter(index - 1) && current !== 'C')) continue;
+    const rule = METAPHONE_RULES[current] as MetaphoneRule | undefined;
+    let phonemes = '';
+    [phonemes, skip] = rule ? rule((offset) => letter(index + offset)) : ['', 0];
+    result += phonemes;
+    index += skip;
+  }
+  return result;
+}
+
+/** The phonemes of the first letter, which keeps a vowel, and how many letters they cover. */
+function metaphoneStart(first: string, next: string): [string, number] {
+  if (first === 'A') return next === 'E' ? ['E', 2] : ['A', 1];
+  if ('GKP'.includes(first) && next === 'N') return ['N', 2];
+  if (first === 'W' && (next === 'R' || next === 'H' || isVowel(next))) return [next === 'R' ? 'R' : 'W', 2];
+  if (first === 'X') return ['S', 1];
+  return 'EIOU'.includes(first) ? [first, 1] : ['', 0];
+}
+
+function isVowel(letter: string): boolean {
+  return letter.length === 1 && 'AEIOU'.includes(letter);
+}
+
+function makesSoft(letter: string): boolean {
+  return letter.length === 1 && 'EIY'.includes(letter);
+}
+
+function noGhToF(letter: string): boolean {
+  return letter.length === 1 && 'BDH'.includes(letter);
+}
+
 defineFunction('soundex(string $string): string', ({ args }) => {
   const codes = '01230120022455012623010202';
   let result = '';
@@ -832,14 +1062,58 @@ defineFunction('sha1(string $string, bool $binary = false): string', ({ args }) 
   hash('sha1', s(args[0]), args[1] === true)
 );
 defineFunction('crc32(string $string): int', ({ args }) => BigInt(crc32(s(args[0]))));
+/** The algorithms of PHP's `hash_algos()`, whose cryptographic ones come before `adler32`. */
+const PHP_HASHES =
+  'md2 md4 md5 sha1 sha224 sha256 sha384 sha512/224 sha512/256 sha512 sha3-224 sha3-256 sha3-384 sha3-512 ripemd128 ripemd160 ripemd256 ripemd320 whirlpool tiger128,3 tiger160,3 tiger192,3 tiger128,4 tiger160,4 tiger192,4 snefru snefru256 gost gost-crypto haval128,3 haval160,3 haval192,3 haval224,3 haval256,3 haval128,4 haval160,4 haval192,4 haval224,4 haval256,4 haval128,5 haval160,5 haval192,5 haval224,5 haval256,5 adler32 crc32 crc32b crc32c fnv132 fnv1a32 fnv164 fnv1a64 joaat murmur3a murmur3c murmur3f xxh32 xxh64 xxh3 xxh128'.split(
+    ' '
+  );
+
 defineFunction('hash(string $algo, string $data, bool $binary = false, array $options = []): string', ({ args }) => {
   const algorithm = lower(s(args[0]));
-  if (!['md5', 'sha1', 'sha256', 'sha512', 'sha384', 'sha224'].includes(algorithm)) {
-    if (algorithm === 'crc32b') return crc32(s(args[1])).toString(16).padStart(8, '0');
-    throwError('ValueError', 'hash(): Argument #1 ($algo) must be a valid hashing algorithm');
+  if (algorithm === 'crc32b') {
+    const digest = crc32(s(args[1])).toString(16).padStart(8, '0');
+    return args[2] === true
+      ? digest.replaceAll(/../g, (byte) => String.fromCharCode(Number.parseInt(byte, 16)))
+      : digest;
   }
-  return hash(algorithm, s(args[1]), args[2] === true);
+  if (!PHP_HASHES.includes(algorithm))
+    throwError('ValueError', 'hash(): Argument #1 ($algo) must be a valid hashing algorithm');
+  return hash(nodeHashName(algorithm, 'hash'), s(args[1]), args[2] === true);
 });
+defineFunction('hash_hmac(string $algo, string $data, string $key, bool $binary = false): string', ({ args }) => {
+  const algorithm = lower(s(args[0]));
+  if (!PHP_HASHES.slice(0, PHP_HASHES.indexOf('adler32')).includes(algorithm)) {
+    throwError('ValueError', 'hash_hmac(): Argument #1 ($algo) must be a valid cryptographic hashing algorithm');
+  }
+  const hmac = createHmac(nodeHashName(algorithm, 'hash_hmac'), Buffer.from(s(args[2]), 'latin1'));
+  hmac.update(Buffer.from(s(args[1]), 'latin1'));
+  return args[3] === true ? hmac.digest('latin1') : hmac.digest('hex');
+});
+
+const NODE_HASHES = new Map([
+  ...[
+    'md5',
+    'sha1',
+    'sha224',
+    'sha256',
+    'sha384',
+    'sha512',
+    'sha3-224',
+    'sha3-256',
+    'sha3-384',
+    'sha3-512',
+    'ripemd160',
+  ].map((name): [string, string] => [name, name]),
+  ['sha512/224', 'sha512-224'],
+  ['sha512/256', 'sha512-256'],
+]);
+
+/** The name Node's crypto module gives an algorithm of PHP's, which stops the program when this grader lacks it. */
+function nodeHashName(algorithm: string, functionName: string): string {
+  const name = NODE_HASHES.get(algorithm);
+  if (!name) throw new UnsupportedFeatureError(`ハッシュアルゴリズム ${algorithm}（${functionName}）`);
+  return name;
+}
 
 function hash(algorithm: string, data: string, binary: boolean): string {
   const digest = createHash(algorithm).update(Buffer.from(data, 'latin1'));
@@ -936,7 +1210,7 @@ function span(args: Value[], inSet: boolean): bigint {
 
 // Character classes --------------------------------------------------------------------------------------------------
 
-// The reference PHP's C library classifies the bytes 0x80–0xFF as the characters of Latin-1.
+// The reference PHP's C library classifies the bytes 0x80–0xFF as the characters of Latin-1 in its C.UTF-8 locale.
 for (const [name, pattern] of [
   ['ctype_digit', /^\d+$/],
   ['ctype_alpha', /^[A-Za-z\u00AA\u00B5\u00BA\u00C0-\u00D6\u00D8-\u00F6\u00F8-\u00FF]+$/],
@@ -951,7 +1225,7 @@ for (const [name, pattern] of [
   ['ctype_print', /^[ -~\u00A0-\u00AC\u00AE-\u00FF]+$/],
   ['ctype_graph', /^[!-~\u00A1-\u00AC\u00AE-\u00FF]+$/],
 ] as const) {
-  // code-gauge-allow functionCognitiveComplexity 17 -- Transcribes PHP's algorithm for this function step by step, whose branches mirror PHP's.
+  // code-gauge-allow functionCognitiveComplexity 19 -- Transcribes PHP's algorithm for this function step by step, whose branches mirror PHP's.
   defineFunction(`${name}(mixed $text): bool`, ({ args }) => {
     let [value] = args;
     if (typeof value === 'bigint') {
@@ -966,295 +1240,10 @@ for (const [name, pattern] of [
       );
       return false;
     }
-    return pattern.test(value);
+    // oxlint-disable-next-line no-control-regex -- In the C locale, the C library classifies only ASCII bytes.
+    return pattern.test(value) && (isUtf8Ctype() || /^[\0-\u007F]*$/.test(value));
   });
 }
-
-// Multibyte strings --------------------------------------------------------------------------------------------------
-
-const chars = (value: Value): string[] => utf8Chars(s(value));
-
-// Every name and alias of `mb_list_encodings()`, lowercased; the functions handle every string as UTF-8.
-const ENCODINGS = new Set(
-  lower(
-    'BASE64 UUENCODE HTML-ENTITIES HTML Quoted-Printable qprint 7bit 8bit binary UCS-4 ISO-10646-UCS-4 UCS4 UCS-4BE byte4be UCS-4LE byte4le UCS-2 ISO-10646-UCS-2 UCS2 UNICODE UCS-2BE byte2be UCS-2LE byte2le UTF-32 utf32 UTF-32BE UTF-32LE UTF-16 utf16 UTF-16BE UTF-16LE UTF-8 utf8 UTF-7 utf7 UTF7-IMAP mUTF-7 ASCII ANSI_X3.4-1968 iso-ir-6 ANSI_X3.4-1986 ISO_646.irv:1991 US-ASCII ISO646-US us IBM367 IBM-367 cp367 csASCII EUC-JP EUC EUC_JP eucJP x-euc-jp SJIS x-sjis SHIFT-JIS eucJP-win eucJP-open eucJP-ms EUC-JP-2004 EUC_JP-2004 SJIS-Mobile#DOCOMO SJIS-DOCOMO shift_jis-imode x-sjis-emoji-docomo SJIS-Mobile#KDDI SJIS-KDDI shift_jis-kddi x-sjis-emoji-kddi SJIS-Mobile#SOFTBANK SJIS-SOFTBANK shift_jis-softbank x-sjis-emoji-softbank SJIS-mac MacJapanese x-Mac-Japanese SJIS-2004 SJIS2004 Shift_JIS-2004 UTF-8-Mobile#DOCOMO UTF-8-DOCOMO UTF8-DOCOMO UTF-8-Mobile#KDDI-A UTF-8-Mobile#KDDI-B UTF-8-Mobile#KDDI UTF-8-KDDI UTF8-KDDI UTF-8-Mobile#SOFTBANK UTF-8-SOFTBANK UTF8-SOFTBANK CP932 MS932 Windows-31J MS_Kanji SJIS-win SJIS-ms SJIS-open CP51932 JIS ISO-2022-JP ISO-2022-JP-MS ISO2022JPMS GB18030 gb-18030 gb-18030-2000 GB18030-2022 Windows-1252 cp1252 Windows-1254 CP1254 CP-1254 ISO-8859-1 ISO8859-1 latin1 ISO-8859-2 ISO8859-2 latin2 ISO-8859-3 ISO8859-3 latin3 ISO-8859-4 ISO8859-4 latin4 ISO-8859-5 ISO8859-5 cyrillic ISO-8859-6 ISO8859-6 arabic ISO-8859-7 ISO8859-7 greek ISO-8859-8 ISO8859-8 hebrew ISO-8859-9 ISO8859-9 latin5 ISO-8859-10 ISO8859-10 latin6 ISO-8859-13 ISO8859-13 ISO-8859-14 ISO8859-14 latin8 ISO-8859-15 ISO8859-15 ISO-8859-16 ISO8859-16 EUC-CN CN-GB EUC_CN eucCN x-euc-cn gb2312 CP936 CP-936 GBK HZ EUC-TW EUC_TW eucTW x-euc-tw BIG-5 CN-BIG5 BIG-FIVE BIGFIVE CP950 EUC-KR EUC_KR eucKR x-euc-kr UHC CP949 ISO-2022-KR Windows-1251 CP1251 CP-1251 CP866 CP-866 IBM866 IBM-866 KOI8-R KOI8R KOI8-U KOI8U ArmSCII-8 ArmSCII8 CP850 CP-850 IBM850 IBM-850 ISO-2022-JP-2004 ISO-2022-JP-MOBILE#KDDI ISO-2022-JP-KDDI CP50220 cp50220raw cp50220-raw JIS-ms CP50221 CP50222'
-  ).split(' ')
-);
-
-function checkEncoding(name: string, args: Value[], position: number): void {
-  const encoding = args[position - 1];
-  if (typeof encoding === 'string' && !ENCODINGS.has(lower(encoding))) {
-    throwError(
-      'ValueError',
-      `${name}(): Argument #${position} ($encoding) must be a valid encoding, "${encoding}" given`
-    );
-  }
-}
-
-defineFunction('mb_strlen(string $string, ?string $encoding = null): int', ({ args }) => {
-  checkEncoding('mb_strlen', args, 2);
-  return BigInt(chars(args[0]).length);
-});
-defineFunction(
-  'mb_substr(string $string, int $start, ?int $length = null, ?string $encoding = null): string',
-  ({ args }) => {
-    checkEncoding('mb_substr', args, 4);
-    const list = chars(args[0]);
-    let start = n(args[1]);
-    if (start < 0) start = Math.max(list.length + start, 0);
-    if (start > list.length) return '';
-    let end = list.length;
-    if (args[2] !== undefined && args[2] !== null) {
-      const length = n(args[2]);
-      end = length < 0 ? Math.max(list.length + length, start) : Math.min(start + length, list.length);
-    }
-    return list.slice(start, end).join('');
-  }
-);
-defineFunction('mb_strtoupper(string $string, ?string $encoding = null): string', ({ args }) => {
-  checkEncoding('mb_strtoupper', args, 2);
-  return enc(dec(s(args[0])).toUpperCase());
-});
-defineFunction('mb_strtolower(string $string, ?string $encoding = null): string', ({ args }) => {
-  checkEncoding('mb_strtolower', args, 2);
-  return enc(dec(s(args[0])).toLowerCase());
-});
-defineFunction('mb_str_split(string $string, int $length = 1, ?string $encoding = null): array', ({ args }) => {
-  const list = chars(args[0]);
-  const length = args[1] === undefined ? 1 : n(args[1]);
-  if (length < 1) throwError('ValueError', 'mb_str_split(): Argument #2 ($length) must be greater than 0');
-  checkEncoding('mb_str_split', args, 3);
-  const parts: string[] = [];
-  for (let index = 0; index < list.length; index += length) parts.push(list.slice(index, index + length).join(''));
-  return PhpArray.list(parts);
-});
-
-/** Pads a sequence of bytes or characters to the length that `args` holds, as `str_pad` does with its arguments. */
-function padUnits(name: string, text: string[], args: Value[], pad: string[]): string {
-  const length = n(args[1]);
-  const type = args[3] === undefined ? 1 : n(args[3]);
-  if (length <= text.length) return text.join('');
-  if (pad.length === 0) throwError('ValueError', `${name}(): Argument #3 ($pad_string) must not be empty`);
-  if (type < 0 || type > 2) {
-    throwError('ValueError', `${name}(): Argument #4 ($pad_type) must be STR_PAD_LEFT, STR_PAD_RIGHT, or STR_PAD_BOTH`);
-  }
-  const total = length - text.length;
-  const fill = (count: number): string => Array.from({ length: count }, (_, index) => pad[index % pad.length]).join('');
-  const left = type === 0 ? total : type === 1 ? 0 : Math.floor(total / 2);
-  return fill(left) + text.join('') + fill(total - left);
-}
-
-// code-gauge-allow functionCognitiveComplexity 17 -- Transcribes PHP's algorithm for this function step by step, whose branches mirror PHP's.
-function mbSearch(args: Value[], reverse: boolean, insensitive: boolean, name: string): Value {
-  checkEncoding(name, args, 4);
-  const haystack = chars(insensitive ? enc(dec(s(args[0])).toLowerCase()) : args[0]);
-  const needle = chars(insensitive ? enc(dec(s(args[1])).toLowerCase()) : args[1]);
-  let offset = args[2] === undefined ? 0 : n(args[2]);
-  if (offset > haystack.length || offset < -haystack.length) {
-    throwError('ValueError', `${name}(): Argument #3 ($offset) must be contained in argument #1 ($haystack)`);
-  }
-  const matchesAt = (index: number): boolean => needle.every((char, at) => haystack[index + at] === char);
-  if (!reverse) {
-    if (offset < 0) offset += haystack.length;
-    for (let index = offset; index + needle.length <= haystack.length; index++)
-      if (matchesAt(index)) return BigInt(index);
-    return false;
-  }
-  const start = Math.max(offset, 0);
-  const limit = offset < 0 ? haystack.length + offset : haystack.length - needle.length;
-  for (let index = Math.min(limit, haystack.length - needle.length); index >= start; index--)
-    if (matchesAt(index)) return BigInt(index);
-  return false;
-}
-
-defineFunction(
-  'mb_strpos(string $haystack, string $needle, int $offset = 0, ?string $encoding = null): int|false',
-  ({ args }) => mbSearch(args, false, false, 'mb_strpos')
-);
-defineFunction(
-  'mb_strrpos(string $haystack, string $needle, int $offset = 0, ?string $encoding = null): int|false',
-  ({ args }) => mbSearch(args, true, false, 'mb_strrpos')
-);
-defineFunction(
-  'mb_stripos(string $haystack, string $needle, int $offset = 0, ?string $encoding = null): int|false',
-  ({ args }) => mbSearch(args, false, true, 'mb_stripos')
-);
-defineFunction('mb_substr_count(string $haystack, string $needle, ?string $encoding = null): int', ({ args }) => {
-  if (s(args[1]) === '') throwError('ValueError', 'mb_substr_count(): Argument #2 ($needle) must not be empty');
-  checkEncoding('mb_substr_count', args, 3);
-  return BigInt(s(args[0]).split(s(args[1])).length - 1);
-});
-defineFunction(
-  'mb_str_pad(string $string, int $length, string $pad_string = " ", int $pad_type = STR_PAD_RIGHT, ?string $encoding = null): string',
-  ({ args }) => {
-    checkEncoding('mb_str_pad', args, 5);
-    return padUnits('mb_str_pad', chars(args[0]), args, args[2] === undefined ? [' '] : chars(args[2]));
-  }
-);
-defineFunction('mb_strwidth(string $string, ?string $encoding = null): int', ({ args }) => {
-  checkEncoding('mb_strwidth', args, 2);
-  let width = 0;
-  for (const char of dec(s(args[0]))) width += eastAsianWidth(char.codePointAt(0) as number) === 2 ? 2 : 1;
-  return BigInt(width);
-});
-defineFunction('mb_convert_case(string $string, int $mode, ?string $encoding = null): string', ({ args }) => {
-  checkEncoding('mb_convert_case', args, 3);
-  const convert = CASE_MODES[n(args[1])] as ((text: string) => string) | undefined;
-  if (!convert)
-    throwError('ValueError', 'mb_convert_case(): Argument #2 ($mode) must be one of the MB_CASE_* constants');
-  return enc(convert(dec(s(args[0]))));
-});
-defineFunction('mb_internal_encoding(?string $encoding = null): string|bool', ({ args }) => {
-  checkEncoding('mb_internal_encoding', args, 1);
-  // oxlint-disable-next-line unicorn/text-encoding-identifier-case -- PHP returns the encoding's name as `UTF-8`.
-  return args[0] ? true : 'UTF-8';
-});
-defineFunction('mb_ucfirst(string $string, ?string $encoding = null): string', ({ args }) => {
-  checkEncoding('mb_ucfirst', args, 2);
-  const list = chars(args[0]);
-  if (list.length === 0) return '';
-  return enc(titleFull(dec(list[0]))) + list.slice(1).join('');
-});
-defineFunction('mb_lcfirst(string $string, ?string $encoding = null): string', ({ args }) => {
-  checkEncoding('mb_lcfirst', args, 2);
-  const list = chars(args[0]);
-  if (list.length === 0) return '';
-  return enc(dec(list[0]).toLowerCase()) + list.slice(1).join('');
-});
-
-/** The conversions of `mb_convert_case` by the value of their MB_CASE_* constant. */
-const CASE_MODES: readonly ((text: string) => string)[] = [
-  (text) => text.toUpperCase(),
-  (text) => text.toLowerCase(),
-  (text) => titleCase(text, false),
-  (text) => mapChars(text, foldFull),
-  (text) => mapChars(text, upperSimple),
-  (text) => mapChars(text, lowerSimple),
-  (text) => titleCase(text, true),
-  (text) => mapChars(text, foldSimple),
-];
-const CASED = /\p{Cased}/u;
-const CASE_IGNORABLE = /\p{Case_Ignorable}/u;
-const FINAL_SIGMA_BEFORE = /\p{Cased}\p{Case_Ignorable}*$/u;
-const FINAL_SIGMA_AFTER = /^\p{Case_Ignorable}*\p{Cased}/u;
-const GEORGIAN = /^[\u10D0-\u10FA\u10FD-\u10FF]$/;
-// The characters whose titlecase in Unicode's UnicodeData.txt and SpecialCasing.txt differs from their uppercase.
-const TITLE_EXCEPTIONS = new Map<string, string>([
-  ...[...'ßﬀﬁﬂﬃﬄﬅﬆﬓﬔﬕﬖﬗև'].map((char): [string, string] => {
-    const [first, ...rest] = [...char.toUpperCase()];
-    return [char, first + rest.join('').toLowerCase()];
-  }),
-  ...[...'ǄǅǆǇǈǉǊǋǌǱǲǳ'].map((char, index): [string, string] => [char, 'ǅǅǅǈǈǈǋǋǋǲǲǲ'[index]]),
-  ...Array.from({ length: 0x30 }, (_, index): [string, string] => [
-    String.fromCodePoint(0x1f_80 + index),
-    String.fromCodePoint((0x1f_80 + index) | 8),
-  ]),
-  ...[...'ᾳᾼῃῌῳῼ'].map((char, index): [string, string] => [char, 'ᾼᾼῌῌῼῼ'[index]]),
-  ['ᾲ', 'Ὰ\u0345'],
-  ['ᾴ', 'Ά\u0345'],
-  ['ῂ', 'Ὴ\u0345'],
-  ['ῄ', 'Ή\u0345'],
-  ['ῲ', 'Ὼ\u0345'],
-  ['ῴ', 'Ώ\u0345'],
-  ['ᾷ', 'Α\u0342\u0345'],
-  ['ῇ', 'Η\u0342\u0345'],
-  ['ῷ', 'Ω\u0342\u0345'],
-]);
-
-/** Title-cases each word as mbstring does: a cased character after another, skipping case-ignorable ones, is lowercased. */
-function titleCase(text: string, simple: boolean): string {
-  const list = [...text];
-  let afterCased = false;
-  let result = '';
-  for (const [index, char] of list.entries()) {
-    if (simple) result += afterCased ? lowerSimple(char) : titleSimple(char);
-    else result += afterCased ? lowerInContext(list, index) : titleFull(char);
-    if (!CASE_IGNORABLE.test(char)) afterCased = CASED.test(char);
-  }
-  return result;
-}
-
-function lowerInContext(list: string[], index: number): string {
-  const char = list[index];
-  if (char !== 'Σ') return char.toLowerCase();
-  const final =
-    FINAL_SIGMA_BEFORE.test(list.slice(0, index).join('')) && !FINAL_SIGMA_AFTER.test(list.slice(index + 1).join(''));
-  return final ? 'ς' : 'σ';
-}
-
-function titleFull(char: string): string {
-  return TITLE_EXCEPTIONS.get(char) ?? (GEORGIAN.test(char) ? char : char.toUpperCase());
-}
-
-function titleSimple(char: string): string {
-  const title = titleFull(char);
-  return isOneChar(title) ? title : char;
-}
-
-function upperSimple(char: string): string {
-  const upper = char.toUpperCase();
-  if (isOneChar(upper)) return upper;
-  const title = TITLE_EXCEPTIONS.get(char) ?? char;
-  return isOneChar(title) ? title : char;
-}
-
-function lowerSimple(char: string): string {
-  return [...char.toLowerCase()][0];
-}
-
-/** The full case folding of a character, which lowercases all but Cherokee and the dotless i. */
-function foldFull(char: string): string {
-  const code = char.codePointAt(0) as number;
-  if (code >= 0xab_70 && code <= 0xab_bf) return String.fromCodePoint(code - 0xab_70 + 0x13_a0);
-  if (code >= 0x13_f8 && code <= 0x13_fd) return String.fromCodePoint(code - 8);
-  if ((code >= 0x13_a0 && code <= 0x13_f5) || char === 'ı') return char;
-  return char.toLowerCase().toUpperCase().toLowerCase();
-}
-
-function foldSimple(char: string): string {
-  const folded = foldFull(char);
-  if (isOneChar(folded)) return folded;
-  const lowered = char.toLowerCase();
-  return isOneChar(lowered) ? lowered : char;
-}
-
-function mapChars(text: string, convert: (char: string) => string): string {
-  let result = '';
-  for (const char of text) result += convert(char);
-  return result;
-}
-
-function isOneChar(text: string): boolean {
-  return text.length === 1 || (text.length === 2 && (text.codePointAt(0) as number) > 0xff_ff);
-}
-
-const MB_WHITESPACE = String.raw`[\s\0\u0085\u00A0\u1680\u2000-\u200A\u2028\u2029\u202F\u205F\u3000\u180E]`;
-const MB_TRIM = new RegExp(`^${MB_WHITESPACE}+|${MB_WHITESPACE}+$`, 'gu');
-
-defineFunction('mb_trim(string $string, ?string $characters = null, ?string $encoding = null): string', ({ args }) => {
-  checkEncoding('mb_trim', args, 3);
-  const text = dec(s(args[0]));
-  if (args[1] === undefined || args[1] === null) return enc(text.replaceAll(MB_TRIM, ''));
-  const set = new Set(dec(s(args[1])));
-  const list = [...text];
-  let start = 0;
-  let end = list.length;
-  while (start < end && set.has(list[start])) start++;
-  while (end > start && set.has(list[end - 1])) end--;
-  return enc(list.slice(start, end).join(''));
-});
-defineFunction('mb_chr(int $codepoint, ?string $encoding = null): string|false', ({ args }) => {
-  checkEncoding('mb_chr', args, 2);
-  const code = n(args[0]);
-  if (code < 0 || code > 0x10_ff_ff || (code >= 0xd8_00 && code <= 0xdf_ff)) return false;
-  return codePointBytes(code);
-});
-defineFunction('mb_ord(string $string, ?string $encoding = null): int|false', ({ args }) => {
-  const text = dec(s(args[0]));
-  if (text === '') throwError('ValueError', 'mb_ord(): Argument #1 ($string) must not be empty');
-  checkEncoding('mb_ord', args, 2);
-  return BigInt(text.codePointAt(0) as number);
-});
 
 // Paths, which these functions handle as strings without touching any file ------------------------------------------
 

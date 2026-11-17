@@ -5,7 +5,6 @@ import { callCallback, callTargetOf, callValue } from './callables';
 import { callStack, setCallableExplainer } from './calls';
 import * as classesModule from './classes';
 import { findClass, lookupMethod, visibleProps } from './classes';
-import * as conversionsModule from './conversions';
 import { debugType, getType, isNumericString, normalizeKeyString, valueName } from './conversions';
 import {
   E_ALL,
@@ -33,7 +32,7 @@ import { cast, deprecatedConstant, iterate } from './interp';
 import { defineAlias, defineConstant, defineFunction, markInlined } from './native';
 import { toFloat, toInt, toStr } from './operators';
 import { printR, varDump, varExport } from './output';
-import { PhpThrow, rt } from './runtime';
+import { rt } from './runtime';
 import { formatPrintf } from './sprintf';
 import { constantKey, defineConstant as defineUserConstant } from './statements';
 import { setCallableCheck } from './types';
@@ -477,18 +476,42 @@ defineFunction('is_subclass_of(mixed $object_or_class, string $class, bool $allo
   else if (typeof value === 'string' && allowString === true) cls = findClass(value);
   return cls !== undefined && cls !== target && cls.isSubclassOf(target);
 });
-defineFunction('class_implements(object|string $object_or_class, bool $autoload = true): array|false', ({ args }) => {
-  const cls = classOf(args[0]);
-  if (!cls) return false;
+for (const [name, related] of [
+  ['class_implements', (cls: PhpClass) => cls.interfaces],
+  ['class_parents', (cls: PhpClass) => ancestorsOf(cls)],
+  ['class_uses', (cls: PhpClass) => cls.traits],
+] as const) {
+  defineFunction(`${name}(mixed $object_or_class, bool $autoload = true): array|false`, ({ args }) => {
+    if (!(args[0] instanceof PhpObject) && typeof args[0] !== 'string') {
+      throwError(
+        'TypeError',
+        `${name}(): Argument #1 ($object_or_class) must be of type object|string, ${valueName(args[0])} given`
+      );
+    }
+    const cls = classOf(args[0]);
+    if (!cls) {
+      const loaded = args[1] === false ? '' : ' and could not be loaded';
+      warn(`${name}(): Class ${args[0] as string} does not exist${loaded}`);
+      return false;
+    }
+    const array = new PhpArray();
+    for (const { name: className } of related(cls)) array.set(className, className);
+    return array;
+  });
+}
+
+function ancestorsOf(cls: PhpClass): PhpClass[] {
+  const ancestors: PhpClass[] = [];
+  for (let parent = cls.parent; parent; parent = parent.parent) ancestors.push(parent);
+  return ancestors;
+}
+
+/** The SPL classes and interfaces as PHP 8.5 lists them, some of which the interpreter does not provide. */
+const SPL_CLASSES =
+  'AppendIterator ArrayIterator ArrayObject BadFunctionCallException BadMethodCallException CachingIterator CallbackFilterIterator DirectoryIterator DomainException EmptyIterator FilesystemIterator FilterIterator GlobIterator InfiniteIterator InvalidArgumentException IteratorIterator LengthException LimitIterator LogicException MultipleIterator NoRewindIterator OuterIterator OutOfBoundsException OutOfRangeException OverflowException ParentIterator RangeException RecursiveArrayIterator RecursiveCachingIterator RecursiveCallbackFilterIterator RecursiveDirectoryIterator RecursiveFilterIterator RecursiveIterator RecursiveIteratorIterator RecursiveRegexIterator RecursiveTreeIterator RegexIterator RuntimeException SeekableIterator SplDoublyLinkedList SplFileInfo SplFileObject SplFixedArray SplHeap SplMinHeap SplMaxHeap SplObjectStorage SplObserver SplPriorityQueue SplQueue SplStack SplSubject SplTempFileObject UnderflowException UnexpectedValueException';
+defineFunction('spl_classes(): array', () => {
   const array = new PhpArray();
-  for (const iface of cls.interfaces) array.set(iface.name, iface.name);
-  return array;
-});
-defineFunction('class_parents(object|string $object_or_class, bool $autoload = true): array|false', ({ args }) => {
-  const cls = classOf(args[0]);
-  if (!cls) return false;
-  const array = new PhpArray();
-  for (let parent = cls.parent; parent; parent = parent.parent) array.set(parent.name, parent.name);
+  for (const name of SPL_CLASSES.split(' ')) array.set(name, name);
   return array;
 });
 defineFunction('spl_object_id(object $object): int', ({ args }) => BigInt((args[0] as PhpObject).id));
@@ -658,10 +681,3 @@ defineFunction(
   },
   true
 );
-
-defineFunction('assert(mixed $assertion, Throwable|string|null $description = null): bool', ({ args }) => {
-  const [assertion, description] = args;
-  if (conversionsModule.toBool(assertion)) return true;
-  if (description instanceof PhpObject) throw new PhpThrow(description);
-  throwError('AssertionError', typeof description === 'string' ? description : 'assert(false)');
-});

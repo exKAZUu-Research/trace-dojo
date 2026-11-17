@@ -1,7 +1,7 @@
 // code-gauge-allow-file fileNcss 883 -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 // oxlint-disable unicorn/prefer-code-point -- PHP strings hold bytes as code units 0–255, which charCodeAt and fromCharCode read and write as they are.
-import { lower } from './bytes';
+import { lower, upper } from './bytes';
 import { callCallback, callCallbackRefs, callMethod } from './callables';
 import { canAccessProp, issetProp, lookupProp, objectToArray, readProp } from './classes';
 import * as conversionsModule from './conversions';
@@ -26,6 +26,8 @@ defineConstant('SORT_ASC', 4n);
 defineConstant('SORT_DESC', 3n);
 defineConstant('COUNT_NORMAL', 0n);
 defineConstant('COUNT_RECURSIVE', 1n);
+defineConstant('CASE_LOWER', 0n);
+defineConstant('CASE_UPPER', 1n);
 defineConstant('ARRAY_FILTER_USE_KEY', 2n);
 defineConstant('ARRAY_FILTER_USE_BOTH', 1n);
 defineConstant('EXTR_OVERWRITE', 0n);
@@ -288,6 +290,13 @@ function toStrKey(value: Value): Value {
   return toStr(value);
 }
 
+defineFunction('array_change_key_case(array $array, int $case = CASE_LOWER): array', ({ args }) => {
+  const changeCase = (args[1] ?? 0n) === 0n ? lower : upper;
+  return rebuild(
+    [...arr(args[0]).map].map(([key, slot]) => [typeof key === 'string' ? changeCase(key) : key, slot]),
+    false
+  );
+});
 defineFunction('array_flip(array $array): array', ({ args }) => {
   const result = new PhpArray();
   for (const [key, value] of arr(args[0]).entries()) {
@@ -821,10 +830,9 @@ defineFunction('array_count_values(array $array): array', ({ args }) => {
 
 type SetCompare = (a: [Key, Value], b: [Key, Value]) => boolean;
 
-function setOperation(name: string, args: Value[], keep: boolean, same: SetCompare, callbacks = 0): PhpArray {
-  const arrays = args.slice(0, args.length - callbacks);
-  checkSetArguments(name, arrays);
-  const [first, ...others] = arrays as PhpArray[];
+function setOperation(name: string, args: Value[], keep: boolean, same: SetCompare): PhpArray {
+  checkSetArguments(name, args);
+  const [first, ...others] = args as PhpArray[];
   const result = new PhpArray();
   for (const entry of first.entries()) {
     rt().spend();
@@ -835,7 +843,7 @@ function setOperation(name: string, args: Value[], keep: boolean, same: SetCompa
   return result;
 }
 
-function checkSetArguments(name: string, arrays: Value[]): void {
+export function checkSetArguments(name: string, arrays: Value[]): void {
   for (const [index, value] of arrays.entries()) {
     if (!(value instanceof PhpArray)) {
       throwError(
@@ -897,37 +905,6 @@ defineFunction('array_intersect_key(array $array, array ...$arrays): array', ({ 
 defineFunction('array_intersect_assoc(array $array, array ...$arrays): array', ({ args }) =>
   setOperation('array_intersect_assoc', args, true, sameAssoc)
 );
-defineFunction('array_udiff(array $array, ...$rest): array', ({ args }) => {
-  const callback = args.at(-1);
-  return setOperation(
-    'array_udiff',
-    args,
-    false,
-    (a, b) => Number(callCallback(callback as Value, [a[1], b[1]])) === 0,
-    1
-  );
-});
-defineFunction('array_uintersect(array $array, ...$rest): array', ({ args }) => {
-  const callback = args.at(-1);
-  return setOperation(
-    'array_uintersect',
-    args,
-    true,
-    (a, b) => Number(callCallback(callback as Value, [a[1], b[1]])) === 0,
-    1
-  );
-});
-defineFunction('array_diff_ukey(array $array, ...$rest): array', ({ args }) => {
-  const callback = args.at(-1);
-  return setOperation(
-    'array_diff_ukey',
-    args,
-    false,
-    (a, b) => Number(callCallback(callback as Value, [a[0], b[0]])) === 0,
-    1
-  );
-});
-
 defineFunction('array_find(array $array, callable $callback): mixed', ({ args }) => {
   for (const [key, value] of arr(args[0]).entries())
     if (conversionsModule.toBool(callCallback(args[1], [value, key]))) return value;
@@ -1015,8 +992,14 @@ function sortComparator(flags: bigint): (a: Value, b: Value) => number {
 
 /** Calls a user comparison as PHP's sorts do, accepting a bool result with a deprecation. */
 function userComparator(name: string, callback: Value): (a: Value, b: Value) => number {
+  const call = userComparisonCaller(name);
+  return (a, b) => call(callback, a, b);
+}
+
+/** Calls user comparisons, accepting a bool result with one deprecation for all the calls through the caller. */
+export function userComparisonCaller(name: string): (callback: Value, a: Value, b: Value) => number {
   let warned = false;
-  return (a, b) => {
+  return (callback, a, b) => {
     const result = callCallback(callback, [a, b]);
     if (typeof result === 'boolean') {
       if (!warned) {
@@ -1032,7 +1015,7 @@ function userComparator(name: string, callback: Value): (a: Value, b: Value) => 
 }
 
 /** The sign of a comparison callback's result, which PHP reads as an int: 0.5 counts as equal. */
-function comparisonSign(result: Value): number {
+export function comparisonSign(result: Value): number {
   const value = typeof result === 'number' ? Math.trunc(result) : Number(cast('int', result));
   return value < 0 ? -1 : value > 0 ? 1 : 0;
 }

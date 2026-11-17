@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 518 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 521 -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import { ExecutionLimitError } from '../interpreter/limits';
 import { assignTo, bindRef, destructure, placeOf, unsetTarget } from './assignment';
@@ -24,7 +24,7 @@ import { ev, evReturn } from './interp';
 import { looseEquals, setObjectConversions, toStr } from './operators';
 import { ElementPlace, share, VarPlace, writableContainer } from './places';
 import { ExitSignal, FatalError, Frame, PhpThrow, rt, type Runtime } from './runtime';
-import { type Callable, type Key, PhpArray, type PhpClass, PhpObject, Ref, UNINIT, type Value } from './values';
+import { type Callable, type Key, PhpArray, PhpClass, PhpObject, Ref, UNINIT, type Value } from './values';
 
 type Completion =
   | undefined
@@ -250,7 +250,6 @@ function execStmt(statement: Stmt, seek?: string): Completion {
     if (runtime.destructibles > 0 && !runtime.shuttingDown) collectGarbage(runtime);
   }
 }
-
 /** Enters the statement that holds a label without running what comes before the label inside it. */
 function seekInto(statement: Stmt, label: string): Completion {
   switch (statement.k) {
@@ -539,8 +538,11 @@ function bindForeachRef(target: Expr, ref: Ref): void {
   else bindRef(target, ref);
 }
 
+/** The class of the iterator objects PHP's engine makes for foreach, which programs never see. */
+const FOREACH_ITERATOR = new PhpClass('InternalIterator');
+
 // code-gauge-allow functionCognitiveComplexity 27 -- One case per statement kind, as PHP runs each kind differently.
-// code-gauge-allow functionNcss 42 -- One case per statement kind, as PHP runs each kind differently.
+// code-gauge-allow functionNcss 44 -- One case per statement kind, as PHP runs each kind differently.
 function foreachObject(statement: Extract<Stmt, { k: 'foreach' }>, object: PhpObject): Completion {
   const runtime = rt();
   const iterator = iteratorOf(object);
@@ -550,7 +552,11 @@ function foreachObject(statement: Extract<Stmt, { k: 'foreach' }>, object: PhpOb
     return foreachArrayByRef(statement, storage.writable());
   }
   if (iterator) {
-    runtime.frame.temporaries.push(iterator);
+    // PHP's engine wraps the iterator in an iterator object of its own, which takes an object handle while the loop
+    // runs and releases the iterator before itself.
+    const handle = runtime.newObject(FOREACH_ITERATOR);
+    handle.internal = { held: () => [iterator] };
+    runtime.frame.temporaries.push(handle);
     callMethod(iterator, 'rewind', []);
     while (toBool(callMethod(iterator, 'valid', []))) {
       runtime.spend();

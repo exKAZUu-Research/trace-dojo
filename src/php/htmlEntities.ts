@@ -337,13 +337,29 @@ export function decodeHtml(text: string, flags: bigint, all: boolean): string {
   return result;
 }
 
+/**
+ * The characters `get_html_translation_table` lists and their entities, in code point order. `latin1` gives single-byte
+ * keys for ISO-8859-1 and leaves out the characters it cannot hold.
+ */
+export function translationTable(all: boolean, flags: bigint, latin1: boolean): [string, string][] {
+  const codes =
+    all && doctypeOf(flags) !== Doctype.Xml1 ? [...ENTITY_BY_CODE.keys(), 0x27] : [...BASIC_ENTITIES.keys(), 0x27];
+  const entries: [string, string][] = [];
+  for (const code of codes.toSorted((a, b) => a - b)) {
+    const name = entityFor(code, flags, all);
+    if (!name || (latin1 && code > 0xff)) continue;
+    entries.push([latin1 ? String.fromCharCode(code) : codePointBytes(code), `&${name};`]);
+  }
+  return entries;
+}
+
 function doctypeOf(flags: bigint): Doctype {
   return Number(flags & 48n) as Doctype;
 }
 
 /** The length and code point of the UTF-8 character at `index`, without a code point when invalid, as PHP's get_next_char reads them. */
 // code-gauge-allow functionCognitiveComplexity 17 -- Transcribes PHP's algorithm for this function step by step, whose branches mirror PHP's.
-function nextChar(text: string, index: number): [number, number | undefined] {
+export function nextChar(text: string, index: number): [number, number | undefined] {
   const lead = text.charCodeAt(index);
   if (lead < 0x80) return [1, lead];
   if (lead < 0xc2 || lead > 0xf4) return [1, undefined];

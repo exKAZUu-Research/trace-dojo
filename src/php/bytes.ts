@@ -86,3 +86,19 @@ export function codePointBytes(codePoint: number): string {
     0x80 | (codePoint & 0x3f)
   );
 }
+
+/** The text before the first NUL byte, where PHP's C code stops reading a string. */
+export function untilNul(text: string): string {
+  const nul = text.indexOf('\0');
+  return nul === -1 ? text : text.slice(0, nul);
+}
+
+/** The character at `index`, or a NUL past the end, as C reads a string's terminator. */
+export function charAt(text: string, index: number): string {
+  return text[index] ?? '\0';
+}
+
+/** The byte at `index`, or 0 past the end, as C reads a string's terminator. */
+export function byteAt(text: string, index: number): number {
+  return index < text.length ? text.charCodeAt(index) : 0;
+}

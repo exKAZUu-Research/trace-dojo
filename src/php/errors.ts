@@ -52,6 +52,24 @@ const LEVEL_NAMES = new Map<bigint, string>([
   [E_RECOVERABLE_ERROR, 'Recoverable fatal error'],
 ]);
 
+/** An error that `error_get_last` reports. */
+export interface ReportedError {
+  level: bigint;
+  message: string;
+  row: number;
+}
+
+/** The last error of each run that no user handler took, even one that `@` or `error_reporting` hid. */
+const lastErrors = new WeakMap<object, ReportedError>();
+
+export function lastError(): ReportedError | undefined {
+  return lastErrors.get(rt());
+}
+
+export function clearLastError(): void {
+  lastErrors.delete(rt());
+}
+
 /** Reports a non-fatal error as PHP's CLI does: through a user handler, or printed to standard output. */
 export function emitError(level: bigint, message: string, row = rt().row): void {
   const runtime = rt();
@@ -62,6 +80,7 @@ export function emitError(level: bigint, message: string, row = rt().row): void 
     if (callUserHandler(handler, level, message, row)) return;
     break;
   }
+  lastErrors.set(runtime, { level, message, row });
   if (runtime.silence > 0 && level !== E_USER_ERROR) return;
   const reported = (runtime.errorReporting & level) !== 0n;
   // A fatal error ends the program even when it is not reported, and PHP 8.5 prints its stack trace.

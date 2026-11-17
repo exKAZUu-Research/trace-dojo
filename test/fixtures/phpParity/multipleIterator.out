@@ -1,0 +1,126 @@
+Array
+(
+    [0] => 0
+    [1] => 0
+)
+Array
+(
+    [0] => 1
+    [1] => a
+)
+Array
+(
+    [0] => 1
+    [1] => 1
+)
+Array
+(
+    [0] => 2
+    [1] => b
+)
+array(2) {
+  ["num"]=>
+  int(0)
+  ["let"]=>
+  int(0)
+}
+array(2) {
+  ["num"]=>
+  int(1)
+  ["let"]=>
+  string(1) "a"
+}
+array(2) {
+  ["num"]=>
+  int(1)
+  ["let"]=>
+  int(1)
+}
+array(2) {
+  ["num"]=>
+  int(2)
+  ["let"]=>
+  string(1) "b"
+}
+array(2) {
+  ["num"]=>
+  int(2)
+  ["let"]=>
+  NULL
+}
+array(2) {
+  ["num"]=>
+  int(3)
+  ["let"]=>
+  NULL
+}
+int(2)
+int(2)
+InvalidArgumentException: Key duplication error
+bool(true)
+bool(false)
+int(2)
+InvalidArgumentException: Sub-Iterator is associated with NULL
+bool(false)
+RuntimeException: Called current() on an invalid iterator
+RuntimeException: Called key() on an invalid iterator
+RuntimeException: Called current() with non valid sub iterator
+int(0)
+int(1)
+int(0)
+int(2)
+MultipleIterator Object
+(
+    [storage:SplObjectStorage:private] => Array
+        (
+            [0] => Array
+                (
+                    [obj] => ArrayIterator Object
+                        (
+                            [storage:ArrayIterator:private] => Array
+                                (
+                                    [0] => 1
+                                )
+
+                        )
+
+                    [inf] => 
+                )
+
+            [1] => Array
+                (
+                    [obj] => ArrayIterator Object
+                        (
+                            [storage:ArrayIterator:private] => Array
+                                (
+                                )
+
+                        )
+
+                    [inf] => 
+                )
+
+        )
+
+)
+
+Array
+(
+    [0] => __construct
+    [1] => getFlags
+    [2] => setFlags
+    [3] => attachIterator
+    [4] => detachIterator
+    [5] => containsIterator
+    [6] => countIterators
+    [7] => rewind
+    [8] => valid
+    [9] => key
+    [10] => current
+    [11] => next
+)
+Array
+(
+    [Iterator] => Iterator
+    [Traversable] => Traversable
+)

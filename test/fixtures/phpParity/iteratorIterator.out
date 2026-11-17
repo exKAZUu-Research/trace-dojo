@@ -1,0 +1,95 @@
+rewind
+valid
+current
+key
+0=>10
+next
+valid
+current
+key
+1=>20
+next
+valid
+--
+rewind
+valid
+current
+key
+bool(true)
+int(10)
+int(0)
+next
+valid
+current
+key
+next
+valid
+bool(false)
+NULL
+NULL
+a=1
+b=2
+string(13) "ArrayIterator"
+object(IteratorIterator)#5 (0) {
+}
+IteratorIterator Object
+(
+)
+
+Array
+(
+    [OuterIterator] => OuterIterator
+    [Traversable] => Traversable
+    [Iterator] => Iterator
+)
+Array
+(
+    [0] => __construct
+    [1] => getInnerIterator
+    [2] => rewind
+    [3] => valid
+    [4] => key
+    [5] => current
+    [6] => next
+)
+Array
+(
+    [Iterator] => Iterator
+    [Traversable] => Traversable
+)
+Array
+(
+    [Iterator] => Iterator
+    [Traversable] => Traversable
+)
+Array
+(
+    [0] => getInnerIterator
+    [1] => current
+    [2] => next
+    [3] => key
+    [4] => valid
+    [5] => rewind
+)
+Array
+(
+    [0] => hasChildren
+    [1] => getChildren
+    [2] => current
+    [3] => next
+    [4] => key
+    [5] => valid
+    [6] => rewind
+)
+array(3) {
+  [0]=>
+  int(3)
+  [1]=>
+  int(4)
+  [2]=>
+  int(5)
+}
+LogicException: Class to downcast to not found or not base class or does not implement Traversable
+Error: The object is in an invalid state as the parent constructor was not called
+0:2
+1:4

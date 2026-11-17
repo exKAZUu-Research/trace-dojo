@@ -32,6 +32,20 @@ export class MersenneTwister {
     this.seeded = true;
   }
 
+  /** The state words and the position in them, as Mt19937's __debugInfo lists them. */
+  snapshot(): { words: number[]; count: number } {
+    return { words: [...this.state], count: this.count };
+  }
+
+  copy(): MersenneTwister {
+    const copy = new MersenneTwister();
+    copy.state.set(this.state);
+    copy.count = this.count;
+    copy.seeded = this.seeded;
+    copy.phpMode = this.phpMode;
+    return copy;
+  }
+
   private reload(): void {
     const s = this.state;
     const twist = this.phpMode ? twistPhp : twistStandard;

@@ -11,7 +11,7 @@ import {
   isset,
   placeOf,
 } from './assignment';
-import type { ClassDecl, ClassRef, Expr } from './ast';
+import type { Arg, ClassDecl, ClassRef, Expr } from './ast';
 import { hasReferenceItem } from './astAnalysis';
 import { lower } from './bytes';
 import {
@@ -24,7 +24,7 @@ import {
   methodCallExpression,
   staticCallExpression,
 } from './callables';
-import { callStack, invoke } from './calls';
+import { type ArgValue, callStack, invoke } from './calls';
 import {
   canCall,
   checkInstantiable,
@@ -171,27 +171,14 @@ export function evChain(e: Expr): Chain {
         runtime.row = e.row;
         const cls = resolveClassRef(e.cls);
         checkInstantiable(cls);
-        const constructor = cls.findMethod('__construct');
-        const args = evalArgs(
-          e.args,
-          constructor?.fn,
-          constructor ? `${constructor.scope.name}::__construct` : undefined
-        );
-        runtime.row = e.row;
-        return instantiate(cls, args, e.row, runtime.frame.scope);
+        return instantiate(cls, () => constructorArgs(cls, e.args, e.row), e.row, runtime.frame.scope);
       });
     }
     case 'newAnon': {
       return keepingResult(() => {
         runtime.row = e.row;
         const cls = anonymousClass(e.decl, e.row);
-        const constructor = cls.findMethod('__construct');
-        const args = evalArgs(
-          e.args,
-          constructor?.fn,
-          constructor ? `${constructor.scope.name}::__construct` : undefined
-        );
-        return instantiate(cls, args, e.row, runtime.frame.scope);
+        return instantiate(cls, () => constructorArgs(cls, e.args, e.row), e.row, runtime.frame.scope);
       });
     }
     case 'assign': {
@@ -671,6 +658,14 @@ function classConstantOf(e: Extract<Expr, { k: 'cconst' }>): Value {
   const cls = resolveClassRef(e.cls);
   runtime.row = e.row;
   return classConstant(cls, e.name, runtime.frame.scope);
+}
+
+/** Evaluates the arguments of `new`, which PHP does after it has created the object. */
+function constructorArgs(cls: PhpClass, args: Arg[], row: number): ArgValue[] {
+  const constructor = cls.findMethod('__construct');
+  const values = evalArgs(args, constructor?.fn, constructor ? `${constructor.scope.name}::__construct` : undefined);
+  rt().row = row;
+  return values;
 }
 
 const anonymousClasses = new WeakMap<object, PhpClass>();

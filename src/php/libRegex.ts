@@ -2,9 +2,10 @@
 import { dec, enc } from './bytes';
 import { callCallback } from './callables';
 import { throwError, warn } from './errors';
+import { isCallable } from './libCore';
 import { defineConstant, defineFunction } from './native';
 import { toStr } from './operators';
-import { type Compiled, PatternError, translate } from './pcrePattern';
+import { type Compiled, groupName, PatternError, translate } from './pcrePattern';
 import { rt } from './runtime';
 import { UnsupportedFeatureError } from './unsupported';
 import { PhpArray, type Ref, type Value } from './values';
@@ -27,6 +28,10 @@ const PREG_CONSTANTS: [string, bigint][] = [
   ['PREG_JIT_STACKLIMIT_ERROR', 6n],
 ];
 for (const [name, value] of PREG_CONSTANTS) defineConstant(name, value);
+defineConstant('PCRE_VERSION', '10.47 2025-10-21');
+defineConstant('PCRE_VERSION_MAJOR', 10n);
+defineConstant('PCRE_VERSION_MINOR', 47n);
+defineConstant('PCRE_JIT_SUPPORT', false);
 
 const cache = new Map<string, Compiled | string>();
 
@@ -61,31 +66,51 @@ interface Match {
 
 /**
  * The matches of a compiled pattern in a subject, from byte `offset` on (counted from the end if negative), as PCRE
- * finds them. Sets the PCRE error and yields nothing for a bad subject or offset.
+ * finds them: after an empty match, PCRE looks for a non-empty one at the same place before moving on. Sets the PCRE
+ * error and yields nothing for a bad subject or offset.
  */
 function* matchesOf(compiled: Compiled, subject: string, offset = 0): Generator<Match> {
-  const start = offset < 0 ? Math.max(subject.length + offset, 0) : offset;
-  const text = compiled.utf8 ? dec(subject) : subject;
-  rt().lastPregError = subjectError(compiled, subject, text, start);
-  if (rt().lastPregError !== 0) return;
-  const byteOffset = compiled.utf8 ? byteIndexer(text) : (index: number): number => index;
-  let position = compiled.utf8 ? charIndexOf(text, start) : start;
-  const { regex } = compiled;
+  const prepared = prepareSubject(compiled, subject, offset);
+  if (!prepared) return;
+  const { text, byteOffset } = prepared;
+  let { position } = prepared;
+  let retry = false;
   while (position <= text.length) {
     rt().spend();
+    const regex = retry ? compiled.retry : compiled.regex;
     regex.lastIndex = position;
-    const result = regex.exec(text);
-    if (!result) return;
-    yield toMatch(result, byteOffset, compiled.utf8);
-    const matchEnd = result.index + result[0].length;
-    position =
-      result[0].length === 0
-        ? matchEnd + (compiled.utf8 && (text.codePointAt(matchEnd) ?? 0) > 0xff_ff ? 2 : 1)
-        : matchEnd;
+    const result = regex.exec(text) as (RegExpExecArray & { indices: RegExpIndicesArray }) | null;
+    if (!result) {
+      if (!retry || position >= text.length) return;
+      retry = false;
+      position += compiled.utf8 && (text.codePointAt(position) ?? 0) > 0xff_ff ? 2 : 1;
+      continue;
+    }
+    const [matchStart, matchEnd] = matchBounds(compiled, result);
+    yield toMatch(compiled, result, [matchStart, matchEnd], byteOffset);
+    position = matchEnd;
+    retry = matchStart === matchEnd;
   }
 }
 
-/** The PCRE error that matching from byte `start` gives before matching anything, 0 for none. */
+/**
+ * The text to match a subject as and where to start, from byte `offset` (counted from the end if negative), or
+ * undefined after setting the PCRE error for a bad subject or offset.
+ */
+function prepareSubject(
+  compiled: Compiled,
+  subject: string,
+  offset: number
+): { text: string; position: number; byteOffset: (index: number) => number } | undefined {
+  const start = offset < 0 ? Math.max(subject.length + offset, 0) : offset;
+  const text = compiled.utf8 ? dec(subject) : subject;
+  rt().lastPregError = subjectError(compiled, subject, text, start);
+  if (rt().lastPregError !== 0) return undefined;
+  if (!compiled.utf8) return { text, position: start, byteOffset: (index) => index };
+  return { text, position: charIndexOf(text, start), byteOffset: byteIndexer(text) };
+}
+
+/** The subject error that matching from byte `start` gives before matching anything, 0 for none. */
 function subjectError(compiled: Compiled, subject: string, text: string, start: number): number {
   if (start > subject.length) return 1;
   if (!compiled.utf8) return 0;
@@ -93,34 +118,36 @@ function subjectError(compiled: Compiled, subject: string, text: string, start: 
   return ((subject.codePointAt(start) ?? 0) & 0xc0) === 0x80 ? 5 : 0;
 }
 
-function toMatch(result: RegExpExecArray, byteOffset: (index: number) => number, utf8: boolean): Match {
-  const starts: number[] = [];
-  const ends: number[] = [];
-  for (const [start, end] of groupIndices(result)) {
-    starts.push(start === -1 ? -1 : byteOffset(start));
-    ends.push(end === -1 ? -1 : byteOffset(end));
+/** Where the reported match starts and ends: after the last `\K` passed, if any. */
+function matchBounds(compiled: Compiled, result: RegExpExecArray & { indices: RegExpIndicesArray }): [number, number] {
+  let [start, end] = result.indices[0] as [number, number];
+  for (const name of compiled.keeps) {
+    const keep = result.indices.groups?.[name];
+    if (keep) start = Math.max(start, keep[0]);
   }
-  const texts = [...result].map((value) => (value === undefined || !utf8 ? value : enc(value)));
-  return { starts, ends, texts };
+  return [start, end];
 }
 
-/** The start and end of the whole match and each group, found by matching each group's text where it can be. */
-function groupIndices(result: RegExpExecArray): [number, number][] {
-  const withIndices = result as RegExpExecArray & { indices?: [number, number][] };
-  if (withIndices.indices) return withIndices.indices.map((pair) => pair ?? [-1, -1]);
-  const start = result.index;
-  const pairs: [number, number][] = [[start, start + result[0].length]];
-  let cursor = start;
-  for (const group of result.slice(1)) {
-    if (group === undefined) {
-      pairs.push([-1, -1]);
-      continue;
-    }
-    const at = result.input.indexOf(group, cursor);
-    const position = at === -1 ? start : at;
-    pairs.push([position, position + group.length]);
+function toMatch(
+  compiled: Compiled,
+  result: RegExpExecArray & { indices: RegExpIndicesArray },
+  bounds: [number, number],
+  byteOffset: (index: number) => number
+): Match {
+  const pairs = [bounds];
+  for (let group = 1; group <= compiled.groupCount; group++) {
+    pairs.push(result.indices.groups?.[groupName(group)] ?? [-1, -1]);
   }
-  return pairs;
+  const text = (start: number, end: number): string | undefined => {
+    if (start === -1) return undefined;
+    const value = result.input.slice(start, end);
+    return compiled.utf8 ? enc(value) : value;
+  };
+  return {
+    starts: pairs.map(([start]) => (start === -1 ? -1 : byteOffset(start))),
+    ends: pairs.map(([, end]) => (end === -1 ? -1 : byteOffset(end))),
+    texts: pairs.map(([start, end]) => text(start, end)),
+  };
 }
 
 function byteIndexer(text: string): (index: number) => number {
@@ -145,11 +172,6 @@ function charIndexOf(text: string, byteOffset: number): number {
     index += char.length;
   }
   return index;
-}
-
-function withIndices(compiled: Compiled): Compiled {
-  if (compiled.regex.flags.includes('d')) return compiled;
-  return { ...compiled, regex: new RegExp(compiled.regex.source, `${compiled.regex.flags}d`) };
 }
 
 /** Builds the array a match fills: by group number, with named groups before their numbers. */
@@ -184,7 +206,7 @@ defineFunction(
       throwError('ValueError', 'preg_match(): Argument #4 ($flags) must be a PREG_* constant');
     rt().lastPregError = 0;
     const offset = Number((args[4] as bigint | undefined) ?? 0n);
-    const first = matchesOf(withIndices(compiled), args[1] as string, offset).next();
+    const first = matchesOf(compiled, args[1] as string, offset).next();
     if (refs[2]) {
       refs[2].v = first.done
         ? new PhpArray()
@@ -207,9 +229,7 @@ defineFunction(
     if ((flags & 3n) === 0n) flags |= 1n;
     const offsetCapture = (flags & 256n) !== 0n;
     const unmatchedAsNull = (flags & 512n) !== 0n;
-    const matches = [
-      ...matchesOf(withIndices(compiled), args[1] as string, Number((args[4] as bigint | undefined) ?? 0n)),
-    ];
+    const matches = [...matchesOf(compiled, args[1] as string, Number((args[4] as bigint | undefined) ?? 0n))];
     if (refs[2]) {
       let result = new PhpArray();
       if ((flags & 2n) !== 0n) {
@@ -262,11 +282,20 @@ function replaceOne(
   replace: (match: Match) => string
 ): string | undefined {
   const compiled = compile(name, pattern);
-  if (!compiled) return undefined;
+  return compiled && replaceCompiled(compiled, subject, limit, count, replace);
+}
+
+function replaceCompiled(
+  compiled: Compiled,
+  subject: string,
+  limit: number,
+  count: { value: number },
+  replace: (match: Match) => string
+): string {
   let result = '';
   let last = 0;
   let done = 0;
-  for (const match of matchesOf(withIndices(compiled), subject)) {
+  for (const match of matchesOf(compiled, subject)) {
     if (limit >= 0 && done >= limit) break;
     result += subject.slice(last, match.starts[0]) + replace(match);
     last = match.ends[0];
@@ -281,7 +310,8 @@ function pregReplace(
   name: string,
   args: Value[],
   refs: (Ref | undefined)[],
-  replacer: (pattern: number) => (match: Match) => string
+  replacer: (pattern: number) => (match: Match) => string,
+  filter = false
 ): Value {
   rt().lastPregError = 0;
   const [patternValue, , subjectValue, limitValue] = args;
@@ -289,46 +319,58 @@ function pregReplace(
   const patterns =
     patternValue instanceof PhpArray ? patternValue.values().map((item) => toStr(item)) : [toStr(patternValue)];
   const count = { value: 0 };
+  // preg_filter drops a subject that no pattern matched.
   const replaceSubject = (subject: string): string | undefined => {
+    const before = count.value;
     let current: string | undefined = subject;
     for (const [index, pattern] of patterns.entries()) {
       current = replaceOne(name, pattern, current, limit, count, replacer(index));
       if (current === undefined) return undefined;
     }
-    return current;
+    return filter && count.value === before ? undefined : current;
   };
-  let result: Value;
-  if (subjectValue instanceof PhpArray) {
-    const array = new PhpArray();
-    for (const [key, item] of subjectValue.entries()) {
-      const replaced = replaceSubject(toStr(item));
-      if (replaced !== undefined) array.set(key, replaced);
-    }
-    result = array;
-  } else result = replaceSubject(toStr(subjectValue)) ?? null;
+  const result = mapSubjects(subjectValue, replaceSubject);
   if (refs[4]) refs[4].v = BigInt(count.value);
   return result;
 }
 
-defineFunction(
-  'preg_replace(string|array $pattern, string|array $replacement, string|array $subject, int $limit = -1, &$count = null): string|array|null',
-  ({ args, refs }) => {
-    const replacement = args[1];
-    if (replacement instanceof PhpArray && !(args[0] instanceof PhpArray)) {
-      throwError(
-        'TypeError',
-        'preg_replace(): Argument #1 ($pattern) must be of type array when argument #2 ($replacement) is an array, string given'
+/** Replaces in a subject, or in each subject of an array, leaving out those whose replacement fails. */
+function mapSubjects(subject: Value, replace: (subject: string) => string | undefined): Value {
+  if (!(subject instanceof PhpArray)) return replace(toStr(subject)) ?? null;
+  const array = new PhpArray();
+  for (const [key, item] of subject.entries()) {
+    const replaced = replace(toStr(item));
+    if (replaced !== undefined) array.set(key, replaced);
+  }
+  return array;
+}
+
+for (const [name, filter] of [
+  ['preg_replace', false],
+  ['preg_filter', true],
+] as const) {
+  defineFunction(
+    `${name}(string|array $pattern, string|array $replacement, string|array $subject, int $limit = -1, &$count = null): string|array|null`,
+    ({ args, refs }) => {
+      const replacement = args[1];
+      if (replacement instanceof PhpArray && !(args[0] instanceof PhpArray)) {
+        throwError(
+          'TypeError',
+          `${name}(): Argument #1 ($pattern) must be of type array when argument #2 ($replacement) is an array, string given`
+        );
+      }
+      const replacements =
+        replacement instanceof PhpArray ? replacement.values().map((item) => toStr(item)) : undefined;
+      return pregReplace(
+        name,
+        args,
+        refs,
+        (index) => (match) => expandReplacement(replacements ? (replacements[index] ?? '') : toStr(replacement), match),
+        filter
       );
     }
-    const replacements = replacement instanceof PhpArray ? replacement.values().map((item) => toStr(item)) : undefined;
-    return pregReplace(
-      'preg_replace',
-      args,
-      refs,
-      (index) => (match) => expandReplacement(replacements ? (replacements[index] ?? '') : toStr(replacement), match)
-    );
-  }
-);
+  );
+}
 defineFunction(
   'preg_replace_callback(string|array $pattern, callable $callback, string|array $subject, int $limit = -1, &$count = null, int $flags = 0): string|array|null',
   ({ args, refs }) => {
@@ -342,6 +384,42 @@ defineFunction(
         callCallback(args[1], [matchArray(compiled, match, (flags & 256n) !== 0n, (flags & 512n) !== 0n, true)])
       );
     });
+  }
+);
+defineFunction(
+  'preg_replace_callback_array(array $pattern, string|array $subject, int $limit = -1, &$count = null, int $flags = 0): string|array|null',
+  ({ args, refs }) => {
+    rt().lastPregError = 0;
+    const limit = Number((args[2] as bigint | undefined) ?? -1n);
+    const flags = (args[4] as bigint | undefined) ?? 0n;
+    const count = { value: 0 };
+    let subject: Value = args[1];
+    // Each pattern replaces in every subject before the next pattern does.
+    for (const [pattern, callback] of (args[0] as PhpArray).entries()) {
+      if (typeof pattern !== 'string') {
+        throwError(
+          'TypeError',
+          'preg_replace_callback_array(): Argument #1 ($pattern) must contain only string patterns as keys'
+        );
+      }
+      if (!isCallable(callback)) {
+        throwError(
+          'TypeError',
+          'preg_replace_callback_array(): Argument #1 ($pattern) must contain only valid callbacks'
+        );
+      }
+      subject = mapSubjects(subject, (text) =>
+        replaceOne('preg_replace_callback_array', pattern, text, limit, count, (match) => {
+          const compiled = compile('preg_replace_callback_array', pattern) as Compiled;
+          return toStr(
+            callCallback(callback, [matchArray(compiled, match, (flags & 256n) !== 0n, (flags & 512n) !== 0n, true)])
+          );
+        })
+      );
+      if (subject === null) return null;
+    }
+    if (refs[3]) refs[3].v = BigInt(count.value);
+    return subject;
   }
 );
 defineFunction(
@@ -364,7 +442,7 @@ defineFunction(
       result.append(offsetCapture ? PhpArray.list([text, BigInt(offset)]) : text);
     };
     let last = 0;
-    for (const match of matchesOf(withIndices(compiled), subject)) {
+    for (const match of matchesOf(compiled, subject)) {
       if (limit !== -1 && limit <= 1) break;
       if (!noEmpty || match.starts[0] !== last) {
         add(subject.slice(last, match.starts[0]), last);

@@ -1,0 +1,168 @@
+// oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
+import { callCallback } from './callables';
+import { type CallRecord, callStack } from './calls';
+import * as conversionsModule from './conversions';
+import { clearLastError, deprecated, lastError, throwError, warn } from './errors';
+import { defineConstant, defineFunction } from './native';
+import { toStr } from './operators';
+import { type Frame, PhpThrow, rt, SCRIPT_PATH } from './runtime';
+import { UnsupportedFeatureError } from './unsupported';
+import { PhpArray, PhpObject, type Value } from './values';
+
+// Errors -------------------------------------------------------------------------------------------------------------
+
+defineFunction('error_get_last(): ?array', () => {
+  const error = lastError();
+  if (!error) return null;
+  const array = new PhpArray();
+  array.set('type', error.level);
+  array.set('message', error.message);
+  array.set('file', SCRIPT_PATH);
+  array.set('line', BigInt(error.row + 1));
+  return array;
+});
+defineFunction('error_clear_last(): void', () => {
+  clearLastError();
+  return null;
+});
+
+// Backtraces ---------------------------------------------------------------------------------------------------------
+
+defineConstant('DEBUG_BACKTRACE_PROVIDE_OBJECT', 1n);
+defineConstant('DEBUG_BACKTRACE_IGNORE_ARGS', 2n);
+
+defineFunction('debug_backtrace(int $options = DEBUG_BACKTRACE_PROVIDE_OBJECT, int $limit = 0): array', ({ args }) => {
+  const options = (args[0] as bigint | undefined) ?? 1n;
+  const limit = Number((args[1] as bigint | undefined) ?? 0n);
+  // The last record is debug_backtrace's own call.
+  const records = callStack.slice(0, -1);
+  const frames = framesOf(records);
+  const trace = new PhpArray();
+  for (let index = records.length - 1; index >= 0; index--) {
+    if (limit > 0 && trace.size >= limit) break;
+    trace.append(backtraceFrame(records[index], frames[index], options));
+  }
+  return trace;
+});
+
+/**
+ * The frames of user code that the records called, matched up in order: native functions run without one. A record
+ * without a frame shows no object and the arguments it was called with.
+ */
+function framesOf(records: CallRecord[]): (Frame | undefined)[] {
+  const frames = rt().frames.slice(1);
+  let next = 0;
+  return records.map((record) => {
+    const frame = frames.at(next);
+    const matches = frame !== undefined && frameName(frame) === record.name;
+    if (matches) next++;
+    return matches ? frame : undefined;
+  });
+}
+
+function frameName(frame: Frame): string | undefined {
+  if (frame.method) return frame.method.name;
+  return frame.fn?.kind === 'user' ? frame.fn.decl.name : frame.fn?.name;
+}
+
+function backtraceFrame(record: CallRecord, frame: Frame | undefined, options: bigint): PhpArray {
+  const entry = new PhpArray();
+  if (record.row !== undefined) {
+    entry.set('file', SCRIPT_PATH);
+    entry.set('line', BigInt(record.row + 1));
+  }
+  entry.set('function', record.name);
+  if (record.className !== undefined) {
+    entry.set('class', record.className);
+    if ((options & 1n) !== 0n && record.type === '->' && frame?.thisObj) entry.set('object', frame.thisObj);
+    entry.set('type', record.type ?? '::');
+  }
+  if ((options & 2n) === 0n) {
+    const args = PhpArray.list(frame ? currentArgs(frame, record.args) : record.args);
+    for (const [name, value] of record.named ?? []) args.set(name, value);
+    entry.set('args', args);
+  }
+  return entry;
+}
+
+/** The arguments of a call as PHP reports them: the parameters' current values, then the extra arguments. */
+function currentArgs(frame: Frame, passed: Value[]): Value[] {
+  const values = [...passed];
+  if (frame.fn?.kind !== 'user') return values;
+  for (const [index, param] of frame.fn.params.entries()) {
+    if (index >= values.length || param.variadic) break;
+    const ref = frame.vars.get(param.name);
+    if (ref) values[index] = ref.v;
+  }
+  return values;
+}
+
+// Assertions ---------------------------------------------------------------------------------------------------------
+
+/** The settings that `assert_options` reads and changes, as PHP's `assert.*` INI settings hold them. */
+interface AssertOptions {
+  active: boolean;
+  bail: boolean;
+  warning: boolean;
+  exception: boolean;
+  callback: Value | undefined;
+}
+
+const assertOptions = new WeakMap<object, AssertOptions>();
+
+function currentAssertOptions(): AssertOptions {
+  let options = assertOptions.get(rt());
+  if (!options) {
+    options = { active: true, bail: false, warning: true, exception: true, callback: undefined };
+    assertOptions.set(rt(), options);
+  }
+  return options;
+}
+
+const ASSERT_OPTIONS = ['active', 'callback', 'bail', 'warning', 'exception'] as const;
+for (const [index, name] of ASSERT_OPTIONS.entries()) {
+  const constant = `ASSERT_${name.toUpperCase()}`;
+  defineConstant(
+    constant,
+    BigInt(index + 1),
+    `Constant ${constant} is deprecated since 8.3, as assert_options() is deprecated`
+  );
+}
+
+defineFunction('assert_options(int $option, mixed $value = UNKNOWN): mixed', ({ args }) => {
+  deprecated('Function assert_options() is deprecated since 8.3');
+  const name = ASSERT_OPTIONS[Number(args[0]) - 1] as (typeof ASSERT_OPTIONS)[number] | undefined;
+  if (name === undefined)
+    throwError('ValueError', 'assert_options(): Argument #1 ($option) must be an ASSERT_* constant');
+  const options = currentAssertOptions();
+  if (name === 'callback') {
+    const previous = options.callback ?? null;
+    if (args.length > 1) options.callback = args[1] ?? undefined;
+    return previous;
+  }
+  const previous = BigInt(options[name]);
+  if (args.length > 1) options[name] = parseIniBool(toStr(args[1]));
+  return previous;
+});
+
+/** Reads a boolean INI value as zend_ini_parse_bool does. */
+function parseIniBool(text: string): boolean {
+  if (['true', 'yes', 'on'].includes(text.toLowerCase())) return true;
+  return Number.parseInt(/^\s*[+-]?\d+/.exec(text)?.[0] ?? '0', 10) !== 0;
+}
+
+defineFunction('assert(mixed $assertion, Throwable|string|null $description = null): bool', ({ args, row }) => {
+  const [assertion, description] = args;
+  const options = currentAssertOptions();
+  if (!options.active || conversionsModule.toBool(assertion)) return true;
+  if (description instanceof PhpObject) throw new PhpThrow(description);
+  if (options.bail) throw new UnsupportedFeatureError('assert_options() の ASSERT_BAIL');
+  const text = typeof description === 'string' ? description : undefined;
+  if (options.callback !== undefined) {
+    const line = BigInt((row ?? rt().row) + 1);
+    callCallback(options.callback, text === undefined ? [SCRIPT_PATH, line, null] : [SCRIPT_PATH, line, null, text]);
+  }
+  if (options.exception) throwError('AssertionError', text ?? '');
+  if (options.warning) warn(`assert(): ${text ?? 'Assertion'} failed`);
+  return false;
+});

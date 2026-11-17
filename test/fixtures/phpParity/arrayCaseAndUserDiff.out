@@ -1,0 +1,15 @@
+0 ArgumentCountError: array_udiff() expects at least 2 arguments, 0 given
+1 ArgumentCountError: array_udiff() expects at least 2 arguments, 1 given
+2 TypeError: array_udiff(): Argument #2 must be a valid callback, function "nope" not found or invalid function name
+3 TypeError: array_udiff(): Argument #2 must be of type array, int given
+4 TypeError: array_udiff_uassoc(): Argument #2 must be a valid callback, array callback must have exactly two members
+5 ArgumentCountError: array_udiff_uassoc() expects at least 3 arguments, 2 given
+6 TypeError: array_udiff_uassoc(): Argument #3 must be a valid callback, function "nope" not found or invalid function name
+7 TypeError: array_uintersect_assoc(): Argument #2 must be of type array, int given
+8 TypeError: array_uintersect_assoc(): Argument #1 ($array) must be of type array, int given
+9 TypeError: array_intersect_ukey(): Argument #3 must be a valid callback, function "nope" not found or invalid function name
+10 TypeError: array_change_key_case(): Argument #1 ($array) must be of type array, int given
+array(1) {
+  [0]=>
+  int(1)
+}

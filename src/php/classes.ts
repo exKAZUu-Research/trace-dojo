@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 709 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 710 -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import type { ClassDecl, Expr, FunctionDecl, MethodDeclAst, PropertyDeclAst } from './ast';
 import { lower } from './bytes';
@@ -523,21 +523,31 @@ export function checkInstantiable(cls: PhpClass): void {
 }
 
 /** Creates an object and runs its constructor, as `new` does. */
-export function instantiate(cls: PhpClass, args: ArgValue[], callRow: number, scope: PhpClass | undefined): PhpObject {
+/**
+ * Creates an object and runs its constructor. PHP creates the object before it evaluates the arguments (`args`), and
+ * evaluates them even for a class without a constructor.
+ */
+export function instantiate(
+  cls: PhpClass,
+  args: () => ArgValue[],
+  callRow: number,
+  scope: PhpClass | undefined
+): PhpObject {
   checkInstantiable(cls);
   const object = createObject(cls);
   rt().frame.temporaries.push(object);
   const constructor = cls.findMethod('__construct');
+  if (constructor && !canCall(constructor, scope)) {
+    throwError(
+      'Error',
+      `Call to ${constructor.visibility} ${constructor.scope.name}::__construct() from ${scope ? `scope ${scope.name}` : 'global scope'}`
+    );
+  }
+  const values = args();
   if (constructor) {
-    if (!canCall(constructor, scope)) {
-      throwError(
-        'Error',
-        `Call to ${constructor.visibility} ${constructor.scope.name}::__construct() from ${scope ? `scope ${scope.name}` : 'global scope'}`
-      );
-    }
     invoke(
       { fn: constructor.fn, thisObj: object, scope: constructor.scope, staticClass: cls, method: constructor },
-      args,
+      values,
       callRow
     );
   }
@@ -762,7 +772,7 @@ export function createDynamicProp(object: PhpObject, name: string): void {
 
 function allowsDynamicProps(cls: PhpClass): boolean {
   for (let current: PhpClass | undefined = cls; current; current = current.parent) {
-    if (current.name === 'stdClass' || current.name === 'ArrayObject' || current.name === 'Closure') return true;
+    if (current.name === 'stdClass' || current.name === 'Closure') return true;
   }
   return false;
 }

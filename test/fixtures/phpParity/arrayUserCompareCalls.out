@@ -1,0 +1,175 @@
+array_udiff: cmp(green,brown) cmp(green,blue) cmp(brown,blue) cmp(green,red) cmp(red,Yellow) cmp(green,Yellow) cmp(brown,Yellow) cmp(blue,Yellow) cmp(red,blue) cmp(green,blue) cmp(brown,blue) cmp(blue,blue) cmp(red,green) cmp(brown,green) cmp(green,green) cmp(GREEN,brown) cmp(brown,yellow) cmp(yellow,red) cmp(brown,red) cmp(yellow,blue) cmp(red,blue) cmp(brown,blue) cmp(GREEN,blue) cmp(yellow,pink) cmp(red,pink) cmp(brown,pink) cmp(Yellow,GREEN) cmp(Yellow,blue) cmp(Yellow,blue) cmp(blue,blue) cmp(blue,blue) cmp(blue,brown) cmp(brown,brown) cmp(brown,green) cmp(green,pink) cmp(green,green) cmp(green,red) cmp(red,pink) cmp(red,red) Array
+(
+    [a] => green
+    [x] => Yellow
+    [q] => green
+)
+cmp(green,brown) cmp(green,blue) cmp(brown,blue) cmp(green,red) cmp(red,Yellow) cmp(green,Yellow) cmp(brown,Yellow) cmp(blue,Yellow) cmp(red,blue) cmp(green,blue) cmp(brown,blue) cmp(blue,blue) cmp(red,green) cmp(brown,green) cmp(green,green) cmp(GREEN,brown) cmp(brown,yellow) cmp(yellow,red) cmp(brown,red) cmp(yellow,blue) cmp(red,blue) cmp(brown,blue) cmp(GREEN,blue) cmp(yellow,pink) cmp(red,pink) cmp(brown,pink) cmp(green,blue) cmp(brown,blue) cmp(green,brown) cmp(green,red) cmp(Yellow,GREEN) cmp(Yellow,blue) cmp(Yellow,blue) cmp(Yellow,blue) cmp(blue,blue) cmp(blue,blue) cmp(blue,brown) cmp(brown,brown) cmp(brown,green) cmp(green,pink) cmp(green,blue) cmp(green,brown) cmp(green,green) cmp(green,green) cmp(green,red) cmp(red,pink) cmp(red,red) Array
+(
+    [x] => Yellow
+)
+array_uintersect: cmp(green,brown) cmp(green,blue) cmp(brown,blue) cmp(green,red) cmp(red,Yellow) cmp(green,Yellow) cmp(brown,Yellow) cmp(blue,Yellow) cmp(red,blue) cmp(green,blue) cmp(brown,blue) cmp(blue,blue) cmp(red,green) cmp(brown,green) cmp(green,green) cmp(GREEN,brown) cmp(brown,yellow) cmp(yellow,red) cmp(brown,red) cmp(yellow,blue) cmp(red,blue) cmp(brown,blue) cmp(GREEN,blue) cmp(yellow,pink) cmp(red,pink) cmp(brown,pink) cmp(Yellow,GREEN) cmp(Yellow,blue) cmp(blue,blue) cmp(blue,blue) cmp(blue,blue) cmp(blue,brown) cmp(brown,brown) cmp(brown,green) cmp(green,pink) cmp(green,pink) cmp(red,pink) cmp(red,pink) cmp(red,red) Array
+(
+    [b] => brown
+    [c] => blue
+    [0] => red
+    [5] => blue
+)
+cmp(green,brown) cmp(green,blue) cmp(brown,blue) cmp(green,red) cmp(red,Yellow) cmp(green,Yellow) cmp(brown,Yellow) cmp(blue,Yellow) cmp(red,blue) cmp(green,blue) cmp(brown,blue) cmp(blue,blue) cmp(red,green) cmp(brown,green) cmp(green,green) cmp(GREEN,brown) cmp(brown,yellow) cmp(yellow,red) cmp(brown,red) cmp(yellow,blue) cmp(red,blue) cmp(brown,blue) cmp(GREEN,blue) cmp(yellow,pink) cmp(red,pink) cmp(brown,pink) cmp(green,blue) cmp(brown,blue) cmp(green,brown) cmp(green,red) cmp(Yellow,GREEN) cmp(Yellow,blue) cmp(blue,blue) cmp(blue,blue) cmp(blue,blue) cmp(blue,blue) cmp(blue,brown) cmp(brown,brown) cmp(brown,brown) cmp(brown,green) cmp(green,pink) cmp(green,pink) cmp(red,pink) cmp(red,pink) cmp(red,red) cmp(red,green) cmp(red,red) Array
+(
+    [b] => brown
+    [c] => blue
+    [0] => red
+    [5] => blue
+)
+array_diff_ukey: k(a,b) k(b,c) k(c,0) k(b,0) k(a,0) k(c,x) k(x,5) k(c,5) k(b,5) k(a,5) k(0,5) k(x,q) k(b,q) k(c,q) k(a,B) k(a,0) k(B,0) k(a,1) k(B,1) k(0,1) k(a,c) k(c,9) k(a,9) k(B,9) k(1,9) k(0,0) k(5,0) k(5,1) k(5,9) k(5,B) k(5,a) k(5,c) k(a,0) k(a,1) k(a,9) k(a,B) k(a,a) k(b,0) k(b,1) k(b,9) k(b,B) k(b,a) k(b,c) k(c,0) k(c,1) k(c,9) k(c,B) k(c,a) k(c,c) k(q,0) k(q,1) k(q,9) k(q,B) k(q,a) k(q,c) k(x,0) k(x,1) k(x,9) k(x,B) k(x,a) k(x,c) Array
+(
+    [b] => brown
+    [x] => Yellow
+    [5] => blue
+    [q] => green
+)
+k(a,b) k(b,c) k(c,0) k(b,0) k(a,0) k(c,x) k(x,5) k(c,5) k(b,5) k(a,5) k(0,5) k(x,q) k(b,q) k(c,q) k(a,B) k(a,0) k(B,0) k(a,1) k(B,1) k(0,1) k(a,c) k(c,9) k(a,9) k(B,9) k(1,9) k(0,c) k(c,b) k(0,b) k(c,zz) k(0,0) k(5,0) k(5,1) k(5,9) k(5,B) k(5,a) k(5,c) k(5,0) k(5,b) k(5,c) k(5,zz) k(a,0) k(a,1) k(a,9) k(a,B) k(a,a) k(b,0) k(b,1) k(b,9) k(b,B) k(b,a) k(b,c) k(b,0) k(b,b) k(c,0) k(c,1) k(c,9) k(c,B) k(c,a) k(c,c) k(q,0) k(q,1) k(q,9) k(q,B) k(q,a) k(q,c) k(q,0) k(q,b) k(q,c) k(q,zz) k(x,0) k(x,1) k(x,9) k(x,B) k(x,a) k(x,c) k(x,0) k(x,b) k(x,c) k(x,zz) Array
+(
+    [x] => Yellow
+    [5] => blue
+    [q] => green
+)
+array_intersect_ukey: k(a,b) k(b,c) k(c,0) k(b,0) k(a,0) k(c,x) k(x,5) k(c,5) k(b,5) k(a,5) k(0,5) k(x,q) k(b,q) k(c,q) k(a,B) k(a,0) k(B,0) k(a,1) k(B,1) k(0,1) k(a,c) k(c,9) k(a,9) k(B,9) k(1,9) k(0,0) k(5,1) k(5,9) k(a,9) k(a,B) k(a,a) k(b,c) k(c,c) Array
+(
+    [a] => green
+    [c] => blue
+    [0] => red
+)
+k(a,b) k(b,c) k(c,0) k(b,0) k(a,0) k(c,x) k(x,5) k(c,5) k(b,5) k(a,5) k(0,5) k(x,q) k(b,q) k(c,q) k(a,B) k(a,0) k(B,0) k(a,1) k(B,1) k(0,1) k(a,c) k(c,9) k(a,9) k(B,9) k(1,9) k(0,c) k(c,b) k(0,b) k(c,zz) k(0,0) k(0,0) k(5,1) k(5,9) k(a,9) k(a,B) k(a,a) k(a,b) k(b,c) k(c,c) k(c,b) k(c,c) Array
+(
+    [c] => blue
+    [0] => red
+)
+array_diff_uassoc: k(a,b) k(b,c) k(c,0) k(b,0) k(a,0) k(c,x) k(x,5) k(c,5) k(b,5) k(a,5) k(0,5) k(x,q) k(b,q) k(c,q) k(a,B) k(a,0) k(B,0) k(a,1) k(B,1) k(0,1) k(a,c) k(c,9) k(a,9) k(B,9) k(1,9) k(0,0) k(5,0) k(5,1) k(5,9) k(5,B) k(5,a) k(5,c) k(a,0) k(a,1) k(a,9) k(a,B) k(a,a) k(b,0) k(b,1) k(b,9) k(b,B) k(b,a) k(b,c) k(c,0) k(c,1) k(c,9) k(c,B) k(c,a) k(c,c) k(q,0) k(q,1) k(q,9) k(q,B) k(q,a) k(q,c) k(x,0) k(x,1) k(x,9) k(x,B) k(x,a) k(x,c) Array
+(
+    [a] => green
+    [b] => brown
+    [0] => red
+    [x] => Yellow
+    [5] => blue
+    [q] => green
+)
+k(a,b) k(b,c) k(c,0) k(b,0) k(a,0) k(c,x) k(x,5) k(c,5) k(b,5) k(a,5) k(0,5) k(x,q) k(b,q) k(c,q) k(a,B) k(a,0) k(B,0) k(a,1) k(B,1) k(0,1) k(a,c) k(c,9) k(a,9) k(B,9) k(1,9) k(0,c) k(c,b) k(0,b) k(c,zz) k(0,0) k(0,0) k(5,0) k(5,1) k(5,9) k(5,B) k(5,a) k(5,c) k(5,0) k(5,b) k(5,c) k(5,zz) k(a,0) k(a,1) k(a,9) k(a,B) k(a,a) k(a,0) k(a,b) k(a,c) k(a,zz) k(b,0) k(b,1) k(b,9) k(b,B) k(b,a) k(b,c) k(b,0) k(b,b) k(c,0) k(c,1) k(c,9) k(c,B) k(c,a) k(c,c) k(q,0) k(q,1) k(q,9) k(q,B) k(q,a) k(q,c) k(q,0) k(q,b) k(q,c) k(q,zz) k(x,0) k(x,1) k(x,9) k(x,B) k(x,a) k(x,c) k(x,0) k(x,b) k(x,c) k(x,zz) Array
+(
+    [a] => green
+    [0] => red
+    [x] => Yellow
+    [5] => blue
+    [q] => green
+)
+array_intersect_uassoc: k(a,b) k(b,c) k(c,0) k(b,0) k(a,0) k(c,x) k(x,5) k(c,5) k(b,5) k(a,5) k(0,5) k(x,q) k(b,q) k(c,q) k(a,B) k(a,0) k(B,0) k(a,1) k(B,1) k(0,1) k(a,c) k(c,9) k(a,9) k(B,9) k(1,9) k(0,0) k(5,0) k(5,1) k(5,9) k(a,9) k(a,B) k(a,a) k(b,a) k(b,c) k(c,c) Array
+(
+    [c] => blue
+)
+k(a,b) k(b,c) k(c,0) k(b,0) k(a,0) k(c,x) k(x,5) k(c,5) k(b,5) k(a,5) k(0,5) k(x,q) k(b,q) k(c,q) k(a,B) k(a,0) k(B,0) k(a,1) k(B,1) k(0,1) k(a,c) k(c,9) k(a,9) k(B,9) k(1,9) k(0,c) k(c,b) k(0,b) k(c,zz) k(0,0) k(5,0) k(5,1) k(5,9) k(a,9) k(a,B) k(a,a) k(b,a) k(b,c) k(c,c) k(c,0) k(c,b) k(c,c) Array
+(
+    [c] => blue
+)
+array_udiff_uassoc: k(a,b) k(b,c) k(c,0) k(b,0) k(a,0) k(c,x) k(x,5) k(c,5) k(b,5) k(a,5) k(0,5) k(x,q) k(b,q) k(c,q) k(a,B) k(a,0) k(B,0) k(a,1) k(B,1) k(0,1) k(a,c) k(c,9) k(a,9) k(B,9) k(1,9) k(0,0) cmp(red,yellow) k(5,0) k(5,1) k(5,9) k(5,B) k(5,a) k(5,c) k(a,0) k(a,1) k(a,9) k(a,B) k(a,a) cmp(green,GREEN) k(b,0) k(b,1) k(b,9) k(b,B) k(b,a) k(b,c) k(c,0) k(c,1) k(c,9) k(c,B) k(c,a) k(c,c) cmp(blue,blue) k(q,0) k(q,1) k(q,9) k(q,B) k(q,a) k(q,c) k(x,0) k(x,1) k(x,9) k(x,B) k(x,a) k(x,c) Array
+(
+    [a] => green
+    [b] => brown
+    [0] => red
+    [x] => Yellow
+    [5] => blue
+    [q] => green
+)
+k(a,b) k(b,c) k(c,0) k(b,0) k(a,0) k(c,x) k(x,5) k(c,5) k(b,5) k(a,5) k(0,5) k(x,q) k(b,q) k(c,q) k(a,B) k(a,0) k(B,0) k(a,1) k(B,1) k(0,1) k(a,c) k(c,9) k(a,9) k(B,9) k(1,9) k(0,c) k(c,b) k(0,b) k(c,zz) k(0,0) cmp(red,yellow) k(0,0) cmp(red,green) k(5,0) k(5,1) k(5,9) k(5,B) k(5,a) k(5,c) k(5,0) k(5,b) k(5,c) k(5,zz) k(a,0) k(a,1) k(a,9) k(a,B) k(a,a) cmp(green,GREEN) k(a,0) k(a,b) k(a,c) k(a,zz) k(b,0) k(b,1) k(b,9) k(b,B) k(b,a) k(b,c) k(b,0) k(b,b) cmp(brown,brown) k(c,0) k(c,1) k(c,9) k(c,B) k(c,a) k(c,c) cmp(blue,blue) k(q,0) k(q,1) k(q,9) k(q,B) k(q,a) k(q,c) k(q,0) k(q,b) k(q,c) k(q,zz) k(x,0) k(x,1) k(x,9) k(x,B) k(x,a) k(x,c) k(x,0) k(x,b) k(x,c) k(x,zz) Array
+(
+    [a] => green
+    [0] => red
+    [x] => Yellow
+    [5] => blue
+    [q] => green
+)
+array_uintersect_uassoc: k(a,b) k(b,c) k(c,0) k(b,0) k(a,0) k(c,x) k(x,5) k(c,5) k(b,5) k(a,5) k(0,5) k(x,q) k(b,q) k(c,q) k(a,B) k(a,0) k(B,0) k(a,1) k(B,1) k(0,1) k(a,c) k(c,9) k(a,9) k(B,9) k(1,9) k(0,0) cmp(red,yellow) k(5,0) k(5,1) k(5,9) k(a,9) k(a,B) k(a,a) cmp(green,GREEN) k(b,a) k(b,c) k(c,c) cmp(blue,blue) Array
+(
+    [c] => blue
+)
+k(a,b) k(b,c) k(c,0) k(b,0) k(a,0) k(c,x) k(x,5) k(c,5) k(b,5) k(a,5) k(0,5) k(x,q) k(b,q) k(c,q) k(a,B) k(a,0) k(B,0) k(a,1) k(B,1) k(0,1) k(a,c) k(c,9) k(a,9) k(B,9) k(1,9) k(0,c) k(c,b) k(0,b) k(c,zz) k(0,0) cmp(red,yellow) k(5,0) k(5,1) k(5,9) k(a,9) k(a,B) k(a,a) cmp(green,GREEN) k(b,a) k(b,c) k(c,c) cmp(blue,blue) cmp(c,0) cmp(c,b) cmp(c,c) cmp(blue,blue) Array
+(
+    [c] => blue
+)
+array_udiff_assoc: cmp(green,GREEN) cmp(blue,blue) cmp(red,yellow) Array
+(
+    [a] => green
+    [b] => brown
+    [0] => red
+    [x] => Yellow
+    [5] => blue
+    [q] => green
+)
+cmp(green,GREEN) cmp(brown,brown) cmp(blue,blue) cmp(red,yellow) cmp(red,green) Array
+(
+    [a] => green
+    [0] => red
+    [x] => Yellow
+    [5] => blue
+    [q] => green
+)
+array_uintersect_assoc: cmp(green,GREEN) cmp(blue,blue) cmp(red,yellow) Array
+(
+    [c] => blue
+)
+cmp(green,GREEN) cmp(blue,blue) cmp(blue,blue) cmp(red,yellow) Array
+(
+    [c] => blue
+)
+array_udiff 23 317 {"0":17,"3":28,"4":11,"5":1,"6":1,"7":6,"9":20,"10":5,"12":6,"13":30,"14":7,"15":20,"17":25,"19":15,"20":7,"21":30,"23":17,"26":18,"27":25,"28":5,"30":1,"32":5,"37":11}
+array_uintersect 17 311 {"1":9,"2":8,"8":2,"11":22,"16":16,"18":21,"22":22,"24":13,"25":9,"29":21,"31":2,"33":14,"34":10,"35":3,"36":24,"38":3,"39":22}
+array_udiff_assoc 40 0 [17,9,8,28,11,1,1,6,2,20,5,22,6,30,7,20,16,25,21,15,7,30,22,17,13,9,18,25,5,21,1,2,5,14,10,3,24,11,3,22]
+array_uintersect_assoc 0 0 []
+array_diff_ukey 16 868 {"k14":26,"k27":16,"k5":24,"k17":3,"k28":22,"k24":2,"k20":12,"k15":26,"k22":14,"k1":13,"k25":8,"k9":9,"k19":24,"k30":8,"k18":21,"k10":10}
+array_intersect_ukey 0 194 []
+array_diff_uassoc 17 868 {"k14":26,"k27":16,"k5":24,"k17":3,"k28":22,"k24":2,"k20":12,"k15":26,"k22":14,"k1":13,"k25":8,"k9":9,"k19":24,"k30":8,"k18":21,"k10":10,"k3":26}
+array_intersect_uassoc 0 194 []
+
+Deprecated: array_udiff(): Returning bool from comparison function is deprecated, return an integer less than, equal to, or greater than zero in /main.php on line 16
+array(2) {
+  [0]=>
+  int(1)
+  [1]=>
+  int(5)
+}
+
+Deprecated: array_diff_uassoc(): Returning bool from comparison function is deprecated, return an integer less than, equal to, or greater than zero in /main.php on line 17
+array(1) {
+  ["b"]=>
+  int(2)
+}
+array(0) {
+}
+cmp(1,2) cmp(1,2) cmp(1,2) cmp(2,2) array(2) {
+  [5]=>
+  int(1)
+  [7]=>
+  int(9)
+}
+cmp(2,2) array(2) {
+  [5]=>
+  int(1)
+  [6]=>
+  int(9)
+}
+array(4) {
+  ["A"]=>
+  int(1)
+  ["B"]=>
+  int(5)
+  [3]=>
+  string(1) "x"
+  ["ÄBC"]=>
+  int(1)
+}
+array(1) {
+  ["a"]=>
+  int(2)
+}
+int(0)
+int(1)

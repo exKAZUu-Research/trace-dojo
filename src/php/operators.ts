@@ -16,6 +16,7 @@ import {
   valueName,
 } from './conversions';
 import { deprecated, notice, throwError, warn } from './errors';
+import { cPow } from './floatPow';
 import { INT_MAX, INT_MIN, type Key, PhpArray, PhpObject, type Value } from './values';
 
 /** Converts an object to a string through `__toString`, which the interpreter provides. */
@@ -188,19 +189,13 @@ function power(a: bigint | number, b: bigint | number): bigint | number {
     if (a === 0n || a === 1n || b === 0n) return b === 0n ? 1n : a;
     if (a === -1n) return b % 2n === 0n ? 1n : -1n;
     // The result overflows once the exponent passes 63 for any base other than 0 and ±1.
-    if (b > 64n) return Math.pow(Number(a), Number(b));
+    if (b > 64n) return cPow(Number(a), Number(b));
     return intOrFloat(a ** b);
   }
   if (Number(a) === 0 && Number(b) < 0) {
     deprecated('Power of base 0 and negative exponent is deprecated');
   }
   return cPow(Number(a), Number(b));
-}
-
-/** `x ** y` as C's pow, which PHP calls: unlike JavaScript, 1 to any power and -1 to an infinite one are 1. */
-function cPow(x: number, y: number): number {
-  if (x === 1 || (x === -1 && (y === Infinity || y === -Infinity))) return 1;
-  return Math.pow(x, y);
 }
 
 /**

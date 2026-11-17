@@ -1,0 +1,7 @@
+string(6) "3f0041"
+string(6) "3f0041"
+string(10) "ISO-8859-1"
+string(10) "ISO-8859-1"
+string(5) "ASCII"
+string(5) "ASCII"
+mb_detect_encoding(): Argument #2 ($encodings) contains invalid encoding ""

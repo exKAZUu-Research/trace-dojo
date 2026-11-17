@@ -3,6 +3,7 @@ import { randomInt } from 'node:crypto';
 
 import { floatFitsInt, valueName } from './conversions';
 import { deprecated, throwError } from './errors';
+import { cPow } from './floatPow';
 import { defineAlias, defineConstant, defineFunction } from './native';
 import { arithmetic, compare } from './operators';
 import { rt } from './runtime';
@@ -77,6 +78,7 @@ defineFunction('sqrt(float $num): float', ({ args }) => Math.sqrt(args[0] as num
 defineFunction('pow(mixed $num, mixed $exponent): mixed', ({ args }) => {
   return arithmetic('**', args[0], args[1]);
 });
+defineFunction('fpow(float $num, float $exponent): float', ({ args }) => cPow(args[0] as number, args[1] as number));
 defineFunction('intdiv(int $num1, int $num2): int', ({ args }) => {
   const [a, b] = args as [bigint, bigint];
   if (b === 0n) throwError('DivisionByZeroError', 'Division by zero');

@@ -205,7 +205,7 @@ function quoteExport(text: string): string {
   return `'${text.replaceAll(/['\\]/g, String.raw`\$&`).replaceAll('\0', `' . "\\0" . '`)}'`;
 }
 
-// code-gauge-allow functionCognitiveComplexity 22 -- Transcribes PHP's algorithm for this function step by step, whose branches mirror PHP's.
+// code-gauge-allow functionCognitiveComplexity 24 -- Transcribes PHP's algorithm for this function step by step, whose branches mirror PHP's.
 // code-gauge-allow functionNcss 39 -- Transcribes PHP's algorithm for this function step by step, whose branches mirror PHP's.
 function exportValue(value: Value, level: number, active: Set<object>): string {
   if (value === null) return 'NULL';
@@ -245,15 +245,21 @@ function exportValue(value: Value, level: number, active: Set<object>): string {
   try {
     const isStd = object.cls.name === 'stdClass';
     let text = isStd ? `${lead}(object) array(\n` : `${lead}\\${object.cls.name}::__set_state(array(\n`;
-    for (const [key, slot] of object.props) {
+    for (const [key, slot] of exportedProps(object)) {
       if (slot === UNINIT) continue;
-      const name = propNameOf(key);
-      text += `${' '.repeat(level + 2)}${quoteExport(name)} => ${exportValue(slotValue(slot), level + 2, active)},\n`;
+      const keyText = typeof key === 'bigint' ? String(key) : quoteExport(propNameOf(key));
+      text += `${' '.repeat(level + 2)}${keyText} => ${exportValue(slotValue(slot), level + 2, active)},\n`;
     }
     return `${text}${close}${isStd ? ')' : '))'}`;
   } finally {
     active.delete(object);
   }
+}
+
+/** The properties `var_export` writes: an ArrayObject's or ArrayIterator's are the array it holds. */
+function exportedProps(object: PhpObject): Iterable<[string | bigint, Slot]> {
+  const storage = (object.internal as { properties?: () => PhpArray } | undefined)?.properties;
+  return typeof storage === 'function' ? storage.call(object.internal).map : object.props;
 }
 
 function circularExport(): string {
