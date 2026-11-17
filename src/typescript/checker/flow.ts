@@ -1,7 +1,7 @@
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import type { Checker } from './checker';
-import { named, propertyNameText, skipParentheses } from './syntax';
+import { isNumericName, named, propertyNameText, skipParentheses } from './syntax';
 import {
   anonymousObject,
   bigintType,
@@ -63,6 +63,8 @@ export type State = FlowState | undefined;
 /** The flow of a program's control, which narrows its references and tracks its assignments. */
 export class Flow {
   current: State = new FlowState();
+  /** While set, only the references it accepts narrow, and their keys are collected, as for an aliased condition. */
+  narrowingScope?: { accepts: (node: TreeNode) => boolean; keys: Set<string> };
   /** `{}`, what `unknown` narrows to where it is neither `null` nor `undefined`. */
   private readonly emptyObject = anonymousObject(() => emptyStructure());
 
@@ -156,7 +158,7 @@ export class Flow {
   }
 
   /** The property an element access always reads: a literal key, or a constant holding a literal. */
-  private constantIndexName(index: TreeNode): string | undefined {
+  constantIndexName(index: TreeNode): string | undefined {
     if (index.type === 'string' || index.type === 'number') return propertyNameText(index);
     if (index.type !== 'identifier') return undefined;
     const symbol = this.c.scopeOf(index).lookupValue(index.text);
@@ -206,6 +208,10 @@ export class Flow {
   narrowReference(node: TreeNode, narrow: (type: Type) => Type): void {
     const key = this.referenceKey(node);
     if (!key || !this.current) return;
+    if (this.narrowingScope) {
+      if (!this.narrowingScope.accepts(node)) return;
+      this.narrowingScope.keys.add(key);
+    }
     const current = this.c.expressions.checkReferenceSilently(node);
     const entry = this.current.entries.get(key);
     // A value of a type parameter constrained to a union also narrows the constraint, which reading its members uses.
@@ -410,37 +416,32 @@ export class Flow {
     return false;
   }
 
-  /** The part of a type that `"name" in value` keeps. */
+  /** The part of a type that `name in value` keeps, as TypeScript's `narrowTypeByInKeyword` decides. */
   narrowByIn(type: Type, name: string, assumeTrue: boolean): Type {
     if (isAnyLike(type)) return type;
-    // A type that does not declare the property gains it as `unknown`, as `object` becomes `object & Record<"a", unknown>`.
-    if (
-      assumeTrue &&
-      type.kind !== 'union' &&
-      !this.c.propertyOf(type, name) &&
-      !this.c.structureOf(type).stringIndex
-    ) {
-      return intersectionOf(
-        [
-          type,
-          anonymousObject(() => ({
-            ...emptyStructure(),
-            properties: new Map([[name, simpleProperty(name, unknownType)]]),
-          })),
-        ],
-        this.c.budget
-      );
-    }
-    return filterType(type, (member) => {
-      if (member.kind !== 'object' && member.kind !== 'intersection') return assumeTrue;
-      const property = this.c.propertyOf(member, name);
-      if (!property) {
-        const structure = this.c.structureOf(member);
-        if (structure.stringIndex) return true;
-        return !assumeTrue;
-      }
-      return assumeTrue || property.optional;
-    });
+    const members = type.kind === 'union' ? type.types : [type];
+    if (members.some((member) => this.isPresencePossible(member, name, true)))
+      return filterType(type, (member) => this.isPresencePossible(member, name, assumeTrue));
+    if (!assumeTrue) return type;
+    // A type that no member declares the property in gains it as `unknown`, as `object` becomes `object & Record<"a", unknown>`.
+    return intersectionOf(
+      [
+        type,
+        anonymousObject(() => ({
+          ...emptyStructure(),
+          properties: new Map([[name, simpleProperty(name, unknownType)]]),
+        })),
+      ],
+      this.c.budget
+    );
+  }
+
+  /** Whether a value of a type may have (or, with `assumeTrue` false, lack) a property, as its members and index signatures say. */
+  private isPresencePossible(type: Type, name: string, assumeTrue: boolean): boolean {
+    const property = this.c.propertyOf(type, name);
+    if (property) return property.optional || assumeTrue;
+    const { stringIndex, numberIndex } = this.c.structureOf(type);
+    return stringIndex !== undefined || (numberIndex !== undefined && isNumericName(name)) || !assumeTrue;
   }
 
   /** The members of a union whose property `name` may be `value`, as `x.kind === "a"` narrows `x`. */

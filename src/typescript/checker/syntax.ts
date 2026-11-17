@@ -139,3 +139,28 @@ export function numberValue(text: string): number | bigint {
 export function isFunctionWithOwnThis(node: TreeNode): boolean {
   return ['function_declaration', 'function_expression', 'method_definition', 'class_static_block'].includes(node.type);
 }
+
+/** Whether a node is a link of an optional chain: `a?.b`, or a link continuing one without parentheses, as `a?.b.c`. */
+export function isOptionalChain(node: TreeNode): boolean {
+  const object = chainObject(node);
+  return object !== undefined && (node.childForFieldName('optional_chain') !== null || isOptionalChain(object));
+}
+
+/** The expression a link of a chain continues, as `a?.b` for `a?.b.c`, `a?.b()`, and `a?.b!`. */
+export function chainObject(node: TreeNode): TreeNode | undefined {
+  switch (node.type) {
+    case 'member_expression':
+    case 'subscript_expression': {
+      return node.childForFieldName('object') ?? undefined;
+    }
+    case 'call_expression': {
+      return node.childForFieldName('function') ?? undefined;
+    }
+    case 'non_null_expression': {
+      return named(node)[0];
+    }
+    default: {
+      return undefined;
+    }
+  }
+}

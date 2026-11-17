@@ -1,0 +1,79 @@
+type S = { k: "a"; n: number } | { k: "b"; t: string };
+class Box {
+  v = 1;
+}
+class C {
+  readonly r: string | number = "r";
+  get g(): string | number {
+    return "g";
+  }
+  test(): void {
+    const rIsText = typeof this.r === "string";
+    if (rIsText) console.log(this.r.toUpperCase());
+    const gIsText = typeof this.g === "string";
+    if (gIsText) console.log(this.g.toUpperCase());
+  }
+}
+function readonlyChain(o: { readonly a: { readonly v: string | number } }): void {
+  const isText = typeof o.a.v === "string";
+  if (isText) console.log(o.a.v.toUpperCase(), o["a"]["v"].length);
+  else console.log(o.a.v.toFixed(1));
+}
+function partlyConstant(x: string | number, y: string | number): void {
+  const bothText = typeof x === "string" && typeof y === "string";
+  y = 1;
+  if (bothText) console.log(x.toUpperCase(), y);
+}
+function locals(x: string | number): void {
+  let l = x;
+  const lIsText = typeof l === "string";
+  if (lIsText) console.log(l.toUpperCase());
+  for (let i = 0, y = x; i < 1; i++) {
+    const yIsText = typeof y === "string";
+    if (yIsText) console.log(y.toUpperCase());
+  }
+  try {
+    throw x;
+  } catch (e) {
+    const eIsText = typeof e === "string";
+    if (eIsText) console.log(e.toUpperCase());
+  }
+}
+function kinds(s: S, m: { k: "a"; n: number } | { k: "b"; t: string }, d: Box | string, h: { a: number } | { b: string }): void {
+  const isA = s.k === "a";
+  const both = isA && m.k === "a";
+  if (both) console.log(s.n, m.n);
+  const isBox = d instanceof Box;
+  if (isBox) console.log(d.v);
+  else console.log(d.toUpperCase());
+  const hasA = "a" in h;
+  if (hasA) console.log(h.a);
+}
+function constants({ v }: { v: string | number }, o: { readonly v: string | undefined }, t: readonly [string | number]): void {
+  const vIsText = typeof v === "string";
+  if (vIsText) console.log(v.toUpperCase());
+  const defined = o.v !== undefined;
+  if (defined) console.log(o.v.length);
+  const firstIsText = typeof t[0] === "string";
+  if (firstIsText) console.log(t[0].toUpperCase());
+  const ro = { w: v } as const;
+  const wIsText = typeof ro.w === "string";
+  if (wIsText) console.log(ro.w.toUpperCase());
+}
+function depth(x: string | number): void {
+  const c1 = typeof x === "string";
+  const c2 = c1;
+  const c3 = c2;
+  const c4 = c3;
+  const c5 = c4;
+  if (c5) console.log(x.toUpperCase());
+}
+new C().test();
+readonlyChain({ a: { v: "chain" } });
+readonlyChain({ a: { v: 2 } });
+partlyConstant("x", "y");
+locals("local");
+kinds({ k: "a", n: 1 }, { k: "a", n: 2 }, new Box(), { a: 3 });
+kinds({ k: "b", t: "t" }, { k: "a", n: 2 }, "box", { b: "b" });
+constants({ v: "v" }, { v: "ov" }, ["first"]);
+depth("deep");

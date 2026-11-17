@@ -1,0 +1,93 @@
+type S = { k: "a"; n: number } | { k: "b"; t: string };
+let globalLet: string | number = pick() ? 1 : "a";
+const globalLetIsText = typeof globalLet === "string";
+if (globalLetIsText) console.log(globalLet.toUpperCase());
+var globalVar: string | number = pick() ? 1 : "a";
+const globalVarIsText = typeof globalVar === "string";
+if (globalVarIsText) console.log(globalVar.toUpperCase());
+function mutableProperty(o: { v: string | number }) {
+  const isText = typeof o.v === "string";
+  if (isText) console.log(o.v.toUpperCase());
+}
+function writtenProperty(o: { v: string | number }) {
+  const isText = typeof o.v === "string";
+  o.v = 2;
+  if (isText) console.log(o.v.toUpperCase());
+}
+function reassignedBase(o: { readonly v: string | number }) {
+  const isText = typeof o.v === "string";
+  o = { v: 1 };
+  if (isText) console.log(o.v.toUpperCase());
+}
+function partlyConstant(x: string | number, y: string | number) {
+  const bothText = typeof x === "string" && typeof y === "string";
+  y = 1;
+  if (bothText) console.log(x.toUpperCase(), y.toUpperCase());
+}
+function locals() {
+  let l: string | number = pick() ? 1 : "a";
+  const lIsText = typeof l === "string";
+  if (lIsText) console.log(l.toUpperCase());
+  var w: string | number = pick() ? 1 : "a";
+  const wIsText = typeof w === "string";
+  if (wIsText) console.log(w.toUpperCase());
+}
+function nested(o: { readonly a: { readonly v: string | number } }, p: { a: { readonly v: string | number } }) {
+  const b1 = typeof o.a.v === "string";
+  if (b1) console.log(o.a.v.toUpperCase());
+  const b2 = typeof p.a.v === "string";
+  if (b2) console.log(p.a.v.toUpperCase());
+  const b3 = typeof o["a"]["v"] === "string";
+  if (b3) console.log(o["a"]["v"].toUpperCase());
+}
+class C {
+  readonly r: string | number = "a";
+  m: string | number = "a";
+  get g(): string | number {
+    return "a";
+  }
+  test() {
+    const b1 = typeof this.r === "string";
+    if (b1) console.log(this.r.toUpperCase());
+    const b2 = typeof this.m === "string";
+    if (b2) console.log(this.m.toUpperCase());
+    const b3 = typeof this.g === "string";
+    if (b3) console.log(this.g.toUpperCase());
+  }
+}
+function constObject() {
+  const o = { v: pick() ? 1 : "a" };
+  const b = typeof o.v === "string";
+  if (b) console.log(o.v.toUpperCase());
+  const ro = { v: pick() ? 1 : "a" } as const;
+  const rb = typeof ro.v === "string";
+  if (rb) console.log(ro.v.toUpperCase());
+}
+function depth(x: string | number) {
+  const c1 = typeof x === "string";
+  const c2 = c1;
+  const c3 = c2;
+  const c4 = c3;
+  const c5 = c4;
+  const c6 = c5;
+  if (c5) console.log(x.toUpperCase());
+  if (c6) console.log(x.toUpperCase());
+}
+function discriminants(s: S, m: S, r: S) {
+  const b1 = s.k === "a";
+  if (b1) console.log(s.n);
+  const b2 = m.k === "a";
+  m = { k: "b", t: "" };
+  if (b2) console.log(m.n);
+  const b3 = r.k === "a";
+  if (b3) console.log(r.n);
+}
+function elements(xs: readonly (string | number)[], t: readonly [string | number]) {
+  const b = typeof xs[0] === "string";
+  if (b) console.log(xs[0].toUpperCase());
+  const c = typeof t[0] === "string";
+  if (c) console.log(t[0].toUpperCase());
+}
+function pick(): boolean {
+  return false;
+}

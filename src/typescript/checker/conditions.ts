@@ -1,8 +1,17 @@
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import type { Checker } from './checker';
+import { isConstantReference } from './constantReferences';
 import type { State } from './flow';
-import { named, numberValue, patternIdentifiers, skipParentheses, stringValue } from './syntax';
+import {
+  chainObject,
+  isOptionalChain,
+  named,
+  numberValue,
+  patternIdentifiers,
+  skipParentheses,
+  stringValue,
+} from './syntax';
 import {
   anyType,
   booleanType,
@@ -26,8 +35,21 @@ interface Condition {
 /** The kinds of expressions that are objects, which are always truthy. */
 const alwaysTruthyTypes = new Set(['array', 'arrow_function', 'class', 'function_expression', 'object', 'regex']);
 
+/** The kinds of expressions that declare or assign when checked. */
+const sideEffectTypes = new Set([
+  'arrow_function',
+  'assignment_expression',
+  'augmented_assignment_expression',
+  'class',
+  'function_expression',
+  'update_expression',
+]);
+
 /** Checks conditions, computing the flow states where they are true and false. */
 export class ConditionChecker {
+  /** How many aliased conditions are being inlined into each other. */
+  private aliasDepth = 0;
+
   constructor(private readonly c: Checker) {}
 
   /** Checks a condition, returning the flow states where it is true and where it is false. */
@@ -92,10 +114,10 @@ export class ConditionChecker {
     if (operator === 'instanceof') {
       const type = this.c.expressions.check(expression);
       const instance = this.c.silently(() => this.instanceTypeOfConstructor(this.c.expressions.check(right)));
-      return {
-        ...this.narrowed(left, (current, assumeTrue) => this.c.flow.narrowByInstanceof(current, instance, assumeTrue)),
-        type,
-      };
+      const { whenTrue, whenFalse } = this.narrowed(left, (current, assumeTrue) =>
+        this.c.flow.narrowByInstanceof(current, instance, assumeTrue)
+      );
+      return { whenTrue: this.chainEvaluated(whenTrue, left), whenFalse, type };
     }
     const key = operator === 'in' ? this.c.silently(() => this.c.expressions.check(left)) : undefined;
     if (key?.kind === 'literal' && (typeof key.value === 'string' || typeof key.value === 'number')) {
@@ -139,7 +161,7 @@ export class ConditionChecker {
 
   /**
    * The condition a constant stands for, as `const isText = typeof x === "string"` narrows `x` where `isText` is
-   * tested, when nothing the condition narrows can change after it.
+   * tested. As in TypeScript, it narrows only references that cannot change after it, through up to five constants.
    */
   private aliasedCondition(identifier: TreeNode): Condition | undefined {
     const symbol = this.c.scopeOf(identifier).lookupValue(identifier.text);
@@ -149,20 +171,48 @@ export class ConditionChecker {
     if (declarator.childForFieldName('name')?.type !== 'identifier' || declarator.childForFieldName('type')) {
       return undefined;
     }
-    if (!value || !this.narrowsOnlyConstantReferences(value)) return undefined;
+    const outerScope = this.c.flow.narrowingScope;
+    if (!value || this.aliasDepth >= 5 || hasSideEffects(value)) return undefined;
     const type = this.c.expressions.check(identifier);
     const base = this.c.flow.current;
+    const keys = new Set<string>();
+    this.c.flow.narrowingScope = { accepts: (node) => isConstantReference(this.c, node), keys };
+    this.aliasDepth++;
+    let aliased: Condition;
     try {
-      const aliased = this.c.silently(() => this.condition(value, false));
-      // The constant itself narrows by its truthiness as well.
-      const narrowOwn = (state: State, assumeTrue: boolean): State =>
-        this.c.flow.from(state, () =>
-          this.c.flow.narrowReference(identifier, (current) => this.c.flow.narrowByTruthiness(current, assumeTrue))
-        );
-      return { whenTrue: narrowOwn(aliased.whenTrue, true), whenFalse: narrowOwn(aliased.whenFalse, false), type };
+      aliased = this.c.silently(() => this.condition(value, false));
     } finally {
+      this.aliasDepth--;
+      this.c.flow.narrowingScope = outerScope;
       this.c.flow.current = base;
     }
+    for (const key of keys) outerScope?.keys.add(key);
+    return {
+      whenTrue: this.aliasNarrowed(base, aliased.whenTrue, keys, identifier, true),
+      whenFalse: this.aliasNarrowed(base, aliased.whenFalse, keys, identifier, false),
+      type,
+    };
+  }
+
+  /**
+   * `base` with the narrowing of `keys` in `aliased` and of the constant `identifier` by its truthiness, apart from
+   * what else checking the aliased condition again changed.
+   */
+  private aliasNarrowed(
+    base: State,
+    aliased: State,
+    keys: Set<string>,
+    identifier: TreeNode,
+    assumeTrue: boolean
+  ): State {
+    const result = aliased && base?.clone();
+    for (const key of keys) {
+      const entry = aliased?.entries.get(key);
+      if (entry) result?.entries.set(key, entry);
+    }
+    return this.c.flow.from(result, () =>
+      this.c.flow.narrowReference(identifier, (current) => this.c.flow.narrowByTruthiness(current, assumeTrue))
+    );
   }
 
   /** Whether every variable an expression refers to is a constant, or a parameter or variable never reassigned. */
@@ -181,14 +231,13 @@ export class ConditionChecker {
     const predicate = this.c.expressions.calls.predicateOf(expression);
     if (!predicate) return { ...this.truthiness(expression), type };
     const { target, type: predicateType } = predicate;
-    return {
-      ...this.narrowed(target, (current, assumeTrue) =>
-        assumeTrue
-          ? this.narrowToPredicate(current, predicateType)
-          : filterType(current, (member) => !this.c.relations.isAssignable(member, predicateType))
-      ),
-      type,
-    };
+    const { whenTrue, whenFalse } = this.narrowed(target, (current, assumeTrue) =>
+      assumeTrue
+        ? this.narrowToPredicate(current, predicateType)
+        : filterType(current, (member) => !this.c.relations.isAssignable(member, predicateType))
+    );
+    const excludesUndefined = !this.c.relations.isAssignable(undefinedType, predicateType);
+    return { whenTrue: excludesUndefined ? this.chainEvaluated(whenTrue, target) : whenTrue, whenFalse, type };
   }
 
   /** Reports a tested expression that is `void`, or that is always truthy or always falsy by its syntax. */
@@ -336,18 +385,24 @@ export class ConditionChecker {
   }
 
   private truthiness(expression: TreeNode): { whenTrue: State; whenFalse: State } {
-    const narrowedChain = this.narrowed(expression, (current, assumeTrue) =>
+    const { whenTrue, whenFalse } = this.narrowed(expression, (current, assumeTrue) =>
       this.c.flow.narrowByTruthiness(current, assumeTrue)
     );
-    // `a?.b` being truthy means `a` is not nullish.
-    if (expression.type === 'member_expression' && expression.childForFieldName('optional_chain')) {
-      const object = expression.childForFieldName('object') as TreeNode;
-      const whenTrue = this.c.flow.from(narrowedChain.whenTrue, () =>
-        this.c.flow.narrowReference(object, (type) => this.c.relations.removeNullish(type))
-      );
-      return { whenTrue, whenFalse: narrowedChain.whenFalse };
+    return { whenTrue: this.chainEvaluated(whenTrue, expression), whenFalse };
+  }
+
+  /** A state where an optional chain was evaluated to its end, so `a` and `a.b` are not nullish for `a?.b?.c`. */
+  private chainEvaluated(state: State, chain: TreeNode): State {
+    const bases: TreeNode[] = [];
+    for (let current = skipParentheses(chain); isOptionalChain(current);) {
+      current = skipParentheses(chainObject(current) as TreeNode);
+      bases.push(current);
     }
-    return narrowedChain;
+    if (bases.length === 0) return state;
+    return this.c.flow.from(state, () => {
+      for (const base of bases.toReversed())
+        this.c.flow.narrowReference(base, (type) => this.c.relations.removeNullish(type));
+    });
   }
 
   /** The states where a reference is narrowed for a true and a false condition. */
@@ -482,10 +537,13 @@ export class ConditionChecker {
       ) {
         const target = typeofSide.childForFieldName('argument') as TreeNode;
         const name = stringValue(other);
-        const result = this.narrowed(target, (current, assumeTrue) =>
+        const { whenTrue, whenFalse } = this.narrowed(target, (current, assumeTrue) =>
           this.c.flow.narrowByTypeof(current, name, assumeTrue === equal)
         );
-        return result;
+        // A chain that `typeof` finds other than `"undefined"` was evaluated.
+        return equal === (name !== 'undefined')
+          ? { whenTrue: this.chainEvaluated(whenTrue, target), whenFalse }
+          : { whenTrue, whenFalse: this.chainEvaluated(whenFalse, target) };
       }
     }
     const leftType = this.c.expressions.checkReferenceSilently(left);
@@ -510,34 +568,30 @@ export class ConditionChecker {
       );
       this.narrowDiscriminantParent(reference, narrow, whenTrue, whenFalse);
     }
-    // `a?.b !== undefined` and `a?.b === 1` mean `a` is not nullish.
-    for (const [side, otherType] of [
-      [leftExpression, rightType],
-      [rightExpression, leftType],
-    ] as const) {
-      const base = this.optionalChainBase(side);
-      if (!base) continue;
-      const otherIsUndefined = isIntrinsic(otherType, 'undefined') || (loose && isIntrinsic(otherType, 'null'));
-      const otherMayBeUndefined = this.c.relations.isAssignable(undefinedType, otherType);
-      const defined = (state: State): State =>
-        this.c.flow.from(state, () =>
-          this.c.flow.narrowReference(base, (type) => this.c.relations.removeNullish(type))
-        );
-      if (equal ? !otherMayBeUndefined : otherIsUndefined) whenTrue = defined(whenTrue);
-      else if (equal ? otherIsUndefined : !otherMayBeUndefined) whenFalse = defined(whenFalse);
-    }
-    return { whenTrue, whenFalse };
+    const states = this.chainCompared({ whenTrue, whenFalse }, leftExpression, rightType, equal, loose);
+    return this.chainCompared(states, rightExpression, leftType, equal, loose);
   }
 
-  /** The object an optional chain such as `a?.b.c` tests for `null` and `undefined`, which is `a`. */
-  private optionalChainBase(expression: TreeNode): TreeNode | undefined {
-    let current = expression;
-    while (current.type === 'member_expression' || current.type === 'subscript_expression') {
-      const object = current.childForFieldName('object') as TreeNode;
-      if (current.childForFieldName('optional_chain')) return this.c.flow.referenceKey(object) ? object : undefined;
-      current = object;
-    }
-    return undefined;
+  /**
+   * The states after comparing an optional chain with a value of `otherType`, where the chain was evaluated as
+   * TypeScript's `narrowTypeByOptionalChainContainment` decides: `a?.b !== undefined` and `a?.b === 1` mean it was,
+   * but `a?.b === x` does not where `x` may be `undefined` (or `null`, for `==`).
+   */
+  private chainCompared(
+    states: { whenTrue: State; whenFalse: State },
+    chain: TreeNode,
+    otherType: Type,
+    equal: boolean,
+    loose: boolean
+  ): { whenTrue: State; whenFalse: State } {
+    const isNullable = (type: Type): boolean => isIntrinsic(type, 'undefined') || (loose && isIntrinsic(type, 'null'));
+    const others = otherType.kind === 'union' ? otherType.types : [otherType];
+    const allNullable = others.every((type) => isNullable(type));
+    const noneNullable = others.every((type) => !isNullable(type) && !isAnyLike(type) && !isIntrinsic(type, 'unknown'));
+    return {
+      whenTrue: (equal ? noneNullable : allNullable) ? this.chainEvaluated(states.whenTrue, chain) : states.whenTrue,
+      whenFalse: (equal ? allNullable : noneNullable) ? this.chainEvaluated(states.whenFalse, chain) : states.whenFalse,
+    };
   }
 
   /** The state entering a `case` of a `switch` on `discriminant` (or the `default`, excluding the cases). */
@@ -584,4 +638,9 @@ function withoutAssertions(node: TreeNode): TreeNode {
     else if (expression.type === 'type_assertion') expression = named(expression).at(-1) as TreeNode;
     else return expression;
   }
+}
+
+/** Whether checking an expression again would declare or assign something, which an aliased condition must not. */
+function hasSideEffects(expression: TreeNode): boolean {
+  return sideEffectTypes.has(expression.type) || named(expression).some((child) => hasSideEffects(child));
 }
