@@ -1,0 +1,3 @@
+before
+
+Deprecated: exit(): Passing null to parameter #1 ($status) of type string|int is deprecated in /main.php on line 1

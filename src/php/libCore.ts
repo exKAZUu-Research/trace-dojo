@@ -411,9 +411,9 @@ setCallableCheck(isCallable);
 
 defineFunction('get_class(object $object = UNKNOWN): string', ({ args }) => {
   if (args.length === 0) {
-    deprecated('Calling get_class() without arguments is deprecated');
     const scope = rt().frame.scope;
     if (!scope) throwError('Error', 'get_class() without arguments must be called from within a class');
+    deprecated('Calling get_class() without arguments is deprecated');
     return scope.name;
   }
   const object = args[0] as PhpObject;

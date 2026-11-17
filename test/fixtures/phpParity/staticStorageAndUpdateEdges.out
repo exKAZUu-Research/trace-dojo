@@ -1,0 +1,31 @@
+bool(false)
+bool(false)
+bool(false)
+42 43 44 45
+42 43
+bool(true)
+bool(true)
+array(1) {
+  [0]=>
+  int(5)
+}
+fallback Cannot access private property State::$private
+fallback Cannot access protected property State::$protected
+fallback Access to undeclared static property State::$missing
+42 42 42
+Cannot access private property State::$private
+Cannot access protected property State::$protected
+int(1)
+int(2)
+int(6)
+int(2)
+2
+4
+Cannot re-assign $this
+get_class() without arguments must be called from within a class
+fallback Cannot use assign-op operators with string offsets
+Cannot increment/decrement string offsets
+Cannot increment/decrement string offsets
+Cannot use string offset as an array
+a
+3 4

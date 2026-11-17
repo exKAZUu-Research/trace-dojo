@@ -432,7 +432,7 @@ test.each([
   });
 });
 
-test.each(['true', '2.0'])('exit validates strict scalar arguments before terminating: %s', (value) => {
+test.each(['true', '2.0', 'null'])('exit validates strict scalar arguments before terminating: %s', (value) => {
   const result = run(
     `<?php declare(strict_types=1);try {exit(${value});}catch(Throwable $e){echo $e->getMessage();}echo ':continued';`
   );
@@ -581,4 +581,40 @@ test.each([
       `<?php $d=0;class N{public $next;public $scratch;function __destruct(){${body}}}$head=null;for($i=0;$i<10000;$i++){$n=new N;$n->next=$head;$head=$n;}unset($n);$head=null;echo 'done:',$d;`
     )
   ).toMatchObject({ kind: 'executed', stdout: `done:${count}` });
+});
+
+test.each([
+  ['class ParentReference {function &g($x){return $x;}}', 'class'],
+  ['interface ParentReference {function &g($x);}', 'interface'],
+  ['abstract class ParentReference {abstract function &g($x);}', 'abstract'],
+])('retains parent return-reference contracts through %s', (parent, kind) => {
+  const relation = kind === 'interface' ? 'implements' : 'extends';
+  const result = run(
+    `<?php ${parent}class ChildValue ${relation} ParentReference{function g($x){return $x;}}echo 'never';`
+  );
+  expect(result.kind === 'executed' && result.stdout).toContain(
+    'Declaration of ChildValue::g($x) must be compatible with & ParentReference::g($x)'
+  );
+});
+
+test.each(['int', '?int'])(
+  'static update reads reject uninitialized %s storage without exposing host values',
+  (type) => {
+    const result = run(
+      `<?php class A{public static ${type} $x;}try{A::$x++;}catch(Throwable $e){echo $e->getMessage();}echo ':done';`
+    );
+    expect(result).toMatchObject({
+      kind: 'executed',
+      stdout: 'Typed static property A::$x must not be accessed before initialization:done',
+    });
+  }
+);
+
+test('strict native null coercion throws without emitting a deprecation', () => {
+  const result = run(
+    '<?php declare(strict_types=1);try{strlen(null);}catch(Throwable $e){echo $e->getMessage();}echo ":done";'
+  );
+  expect(result.kind === 'executed' && result.stdout).toBe(
+    'strlen(): Argument #1 ($string) must be of type string, null given:done'
+  );
 });

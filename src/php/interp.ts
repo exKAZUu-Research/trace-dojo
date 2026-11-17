@@ -372,7 +372,6 @@ function isThrowableObject(object: PhpObject): boolean {
 }
 
 /** Evaluates an expression without the warnings an undefined variable or key would raise, as `??` and `empty` do. */
-// code-gauge-allow functionCognitiveComplexity 17 -- One case per expression kind, as PHP evaluates each kind differently.
 // code-gauge-allow functionNcss 37 -- One case per expression kind, as PHP evaluates each kind differently.
 export function evQuiet(e: Expr): Value {
   const runtime = rt();
@@ -403,9 +402,7 @@ export function evQuiet(e: Expr): Value {
     case 'sprop': {
       const cls = resolveClassRef(e.cls);
       const name = typeof e.name === 'string' ? e.name : toStr(ev(e.name));
-      const found = cls.findStatic(name);
-      if (!found) return null;
-      return readStaticProp(cls, name, runtime.frame.scope);
+      return readStaticProp(cls, name, runtime.frame.scope, true);
     }
     default: {
       return ev(e);

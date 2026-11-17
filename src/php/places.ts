@@ -6,7 +6,7 @@ import { dropped, type Key, PhpArray, PhpObject, type PropDecl, Ref, type Value 
 /** A location a program writes to: a variable, an element, a property, or a static property. */
 export interface Place {
   /** The value, or undefined when the location does not exist. */
-  get(): Value | undefined;
+  get(update?: 'assignOp' | 'incdec' | 'nested'): Value | undefined;
   set(value: Value): Value;
   /** The location as a reference, which `=&`, by-reference arguments, and `global` share. */
   ref(): Ref;
@@ -66,6 +66,7 @@ export class VarPlace implements Place {
   }
 
   bind(ref: Ref): void {
+    if (this.name === 'this') throwError('Error', 'Cannot re-assign $this');
     const old = this.frame.vars.get(this.name);
     if (old === ref) return;
     if (old) old.rc--;
@@ -169,7 +170,7 @@ export class ValuePlace implements Place {
  * The array a nested write goes into, after separating it from other holders or creating it, or the ArrayAccess
  * object that receives the write.
  */
-export function writableContainer(place: Place, value = place.get()): PhpArray | PhpObject | string {
+export function writableContainer(place: Place, value = place.get('nested')): PhpArray | PhpObject | string {
   if (value instanceof PhpArray) {
     if (arrayIsShared(value)) {
       const copy = value.copy();

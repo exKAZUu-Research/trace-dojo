@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 810 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 830 -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import type { ClassDecl, Expr, FunctionDecl, MethodDeclAst, PropertyDeclAst } from './ast';
 import builtinNames from './builtinNames.json';
@@ -493,6 +493,12 @@ function checkOverride(cls: PhpClass, method: Method, parent: Method, reportTent
  * (parameters as many, as optional, and as wide in type) and returns only what the parent may return.
  */
 function signatureCompatible(child: Method, parent: Method, skipReturn = false): boolean {
+  if (
+    parent.fn.kind === 'user' &&
+    parent.fn.decl.byRefReturn &&
+    (child.fn.kind !== 'user' || !child.fn.decl.byRefReturn)
+  )
+    return false;
   const childParams = child.fn.params;
   const parentParams = parent.fn.params;
   const childRequired = childParams.filter((param) => !param.optional && !param.variadic).length;
@@ -1109,10 +1115,27 @@ export function staticPropRef(cls: PhpClass, name: string, scope: PhpClass | und
   return ref;
 }
 
-export function readStaticProp(cls: PhpClass, name: string, scope: PhpClass | undefined): Value {
+export function bindStaticPropertyReference(cls: PhpClass, name: string, scope: PhpClass | undefined, ref: Ref): void {
+  const old = staticPropRef(cls, name, scope);
+  const found = cls.findStatic(name);
+  if (!found || old === ref) return;
+  if (found.decl.type) attachPropertyReference(ref, found.decl);
+  ref.isRef = true;
+  ref.rc++;
+  old.rc--;
+  found.decl.cls.staticProps.set(name, { ...found, ref });
+  dropped(old.v);
+}
+
+export function readStaticProp(cls: PhpClass, name: string, scope: PhpClass | undefined, quiet = false): Value {
+  if (quiet) {
+    const found = cls.findStatic(name);
+    if (!found || !canAccessProp(found.decl, scope)) return null;
+  }
   const ref = staticPropRef(cls, name, scope);
   const value = ref.v;
   if ((value as unknown) === UNINIT) {
+    if (quiet) return null;
     throwError('Error', `Typed static property ${cls.name}::$${name} must not be accessed before initialization`);
   }
   return value;

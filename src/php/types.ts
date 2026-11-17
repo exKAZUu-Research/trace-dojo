@@ -89,7 +89,7 @@ const NO_MATCH = Symbol('noMatch');
 export function coerce(value: Value, type: TypeDecl, context: CoercionContext): Value | typeof NO_MATCH {
   if (matches(value, type, context)) return value;
   if (value === null) {
-    if (context.internal && context.nullDeprecation && scalarTarget(type)) {
+    if (!context.strict && context.internal && context.nullDeprecation && scalarTarget(type)) {
       deprecated(context.nullDeprecation());
       return coerceScalar(value, type);
     }

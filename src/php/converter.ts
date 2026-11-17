@@ -715,7 +715,10 @@ export class Converter extends DeclarationConverter {
       case 'scoped_property_access_expression': {
         const cls = this.classRef(node.childForFieldName('scope') as Node);
         const nameNode = node.childForFieldName('name') as Node;
-        const name = nameNode.type === 'variable_name' ? this.variableName(nameNode) : this.expr(nameNode);
+        const name =
+          nameNode.type === 'variable_name'
+            ? this.variableName(nameNode)
+            : this.expr(nameNode.type === 'dynamic_variable_name' ? nameNode.namedChildren[0] : nameNode);
         return { k: 'sprop', cls, name, row };
       }
       case 'scoped_call_expression': {

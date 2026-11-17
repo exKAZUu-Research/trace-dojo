@@ -2,7 +2,7 @@
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import type { Expr, ListItem } from './ast';
 import { callMethod } from './callables';
-import { findClass, issetProp, propRef, readProp, staticPropRef, unsetProp, writeProp } from './classes';
+import { issetProp, propRef, readProp, staticPropRef, unsetProp, writeProp } from './classes';
 import * as classesModule from './classes';
 import * as conversionsModule from './conversions';
 import { debugType, toBool, valueName } from './conversions';
@@ -57,8 +57,7 @@ export function placeOf(e: Expr): Place {
     }
     case 'idx': {
       if (e.base.k === 'var' && e.base.name === 'GLOBALS') {
-        if (e.index === undefined) throwError('Error', 'Cannot append to $GLOBALS');
-        return new VarPlace(runtime.globalFrame, toStr(ev(e.index)));
+        return globalPlace(e.index);
       }
       const parent = placeOf(e.base);
       const key = e.index === undefined ? undefined : ev(e.index);
@@ -81,8 +80,7 @@ export function placeOf(e: Expr): Place {
     case 'sprop': {
       const cls = resolveClassRef(e.cls);
       const name = typeof e.name === 'string' ? e.name : toStr(ev(e.name));
-      const ref = staticPropRef(cls, name, frame.scope);
-      return new StaticPlace(ref, cls.findStatic(name)?.decl);
+      return new StaticPlace(cls, name, frame.scope);
     }
     case 'call':
     case 'mcall':
@@ -96,38 +94,69 @@ export function placeOf(e: Expr): Place {
   }
 }
 
-class StaticPlace extends RefPlace {
+function globalPlace(index?: Expr): VarPlace {
+  if (index === undefined) throwError('Error', 'Cannot append to $GLOBALS');
+  return new VarPlace(rt().globalFrame, toStr(ev(index)));
+}
+
+class StaticPlace implements Place {
   constructor(
-    target: Ref,
-    private readonly decl: PropDecl | undefined
-  ) {
-    super(target);
+    private readonly cls: PhpClass,
+    private readonly name: string,
+    private readonly scope: PhpClass | undefined
+  ) {}
+
+  private get decl(): PropDecl | undefined {
+    return this.cls.findStatic(this.name)?.decl;
+  }
+
+  private get target(): Ref {
+    return staticPropRef(this.cls, this.name, this.scope);
   }
 
   declaration(): PropDecl | undefined {
     return this.decl;
   }
 
-  override ref(): Ref {
-    if ((this.target.v as unknown) === UNINIT && this.decl?.type) {
-      if (coerce(null, this.decl.type, { strict: true, internal: false, scope: this.decl.cls }) === NO_MATCH)
-        throwError(
-          'Error',
-          `Cannot access uninitialized non-nullable property ${this.decl.cls.name}::$${this.decl.name} by reference`
-        );
-      this.target.v = null;
+  get(update?: 'assignOp' | 'incdec' | 'nested'): Value {
+    const value = this.target.v;
+    if ((value as unknown) === UNINIT) {
+      if (update === 'nested') return null;
+      throwError(
+        'Error',
+        `Typed static property ${this.cls.name}::$${this.name} must not be accessed before initialization`
+      );
     }
-    return this.target;
+    return value;
   }
 
-  override set(value: Value): Value {
-    if (this.decl?.type) {
-      const { coerceProperty } = classesModule;
-      this.target.v = coerceProperty(this.decl, value);
-      return this.target.v;
+  getForIsset(): Value {
+    return classesModule.readStaticProp(this.cls, this.name, this.scope, true);
+  }
+
+  ref(): Ref {
+    const target = this.target;
+    const decl = this.decl;
+    if ((target.v as unknown) === UNINIT && decl?.type) {
+      if (coerce(null, decl.type, { strict: true, internal: false, scope: decl.cls }) === NO_MATCH)
+        throwError(
+          'Error',
+          `Cannot access uninitialized non-nullable property ${decl.cls.name}::$${decl.name} by reference`
+        );
+      target.v = null;
     }
-    this.target.v = value;
-    return this.target.v;
+    return target;
+  }
+
+  set(value: Value): Value {
+    const target = this.target;
+    const decl = this.decl;
+    target.v = decl?.type ? classesModule.coerceProperty(decl, value) : value;
+    return target.v;
+  }
+
+  unset(): void {
+    throwError('Error', 'Attempt to unset static property');
   }
 }
 
@@ -252,11 +281,19 @@ function arrayAccessPlace(object: PhpObject, key: Value | undefined): Place {
   };
 }
 
+// code-gauge-allow functionCognitiveComplexity 22 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 function stringOffsetPlace(parent: Place, text: string, key: Value | undefined): Place {
   return {
-    get: () => {
-      throwError('Error', 'Cannot use string offset as an array');
+    get: (operation) => {
+      const message =
+        operation === 'assignOp'
+          ? 'Cannot use assign-op operators with string offsets'
+          : operation === 'incdec'
+            ? 'Cannot increment/decrement string offsets'
+            : 'Cannot use string offset as an array';
+      throwError('Error', message);
     },
+    getForIsset: () => (key === undefined ? undefined : readIndex(text, key, true)),
     set: (value) => {
       if (key === undefined) throwError('Error', '[] operator not supported for strings');
       const position = stringOffset(text, key, false) as number;
@@ -321,16 +358,16 @@ export function assignTo(target: Expr, value: Value): void {
 
 // code-gauge-allow functionNcss 52 -- Handles each kind of writable expression, whose write rules PHP defines separately.
 export function bindRef(target: Expr, ref: Ref): void {
-  if (target.k === 'var') {
-    if (target.name === 'this') throwError('Error', 'Cannot re-assign $this');
-    new VarPlace(rt().frame, target.name).bind(ref);
-    return;
-  }
-  if (target.k === 'varvar') {
-    new VarPlace(rt().frame, toStr(ev(target.name))).bind(ref);
+  if (target.k === 'var' || target.k === 'varvar') {
+    const name = target.k === 'var' ? target.name : toStr(ev(target.name));
+    new VarPlace(rt().frame, name).bind(ref);
     return;
   }
   if (target.k === 'idx') {
+    if (target.base.k === 'var' && target.base.name === 'GLOBALS') {
+      globalPlace(target.index).bind(ref);
+      return;
+    }
     const parent = placeOf(target.base);
     const key = target.index === undefined ? undefined : toKey(ev(target.index));
     let container = writableContainer(parent);
@@ -367,19 +404,7 @@ export function bindRef(target: Expr, ref: Ref): void {
   if (target.k === 'sprop') {
     const cls = resolveClassRef(target.cls);
     const name = typeof target.name === 'string' ? target.name : toStr(ev(target.name));
-    const found = cls.findStatic(name);
-    if (!found) throwError('Error', `Access to undeclared static property ${cls.name}::$${name}`);
-    ref.isRef = true;
-    if (found.decl.type) {
-      classesModule.attachPropertyReference(ref, found.decl);
-    }
-    for (let current: PhpClass | undefined = cls; current; current = current.parent) {
-      const own = current.staticProps.get(name);
-      if (own) {
-        current.staticProps.set(name, { ...own, ref });
-        break;
-      }
-    }
+    classesModule.bindStaticPropertyReference(cls, name, rt().frame.scope, ref);
     return;
   }
   throwError('Error', 'Cannot assign reference to this expression');
@@ -449,7 +474,7 @@ export function compoundAssign(e: Extract<Expr, { k: 'assignOp' }>): Value {
   const place = placeOf(e.target);
   const value = ev(e.value);
   runtime.row = e.row;
-  let current = place.get();
+  let current = place.get('assignOp');
   if (current === undefined) {
     warnUndefinedTarget(e.target, place);
     current = null;
@@ -488,7 +513,7 @@ export function incDec(e: Extract<Expr, { k: 'incdec' }>): Value {
   const runtime = rt();
   const place = placeOf(e.target);
   runtime.row = e.row;
-  let old = place.get();
+  let old = place.get('incdec');
   if (old === undefined) {
     warnUndefinedTarget(e.target, place);
     old = null;
@@ -655,6 +680,7 @@ function warnUndefinedBase(e: Expr): void {
 }
 
 // code-gauge-allow functionNcss 48 -- Handles each kind of writable expression, whose write rules PHP defines separately.
+// code-gauge-allow functionCognitiveComplexity 27 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 export function isset(e: Expr): boolean {
   const runtime = rt();
   switch (e.k) {
@@ -691,12 +717,9 @@ export function isset(e: Expr): boolean {
       return issetProp(object, memberName(e.name), runtime.frame.scope);
     }
     case 'sprop': {
-      const cls = e.cls.k === 'named' ? findClass(e.cls.name) : resolveClassRef(e.cls);
-      if (!cls) return false;
+      const cls = resolveClassRef(e.cls);
       const name = typeof e.name === 'string' ? e.name : toStr(ev(e.name));
-      const found = cls.findStatic(name);
-      if (!found || !classesModule.canAccessProp(found.decl, runtime.frame.scope)) return false;
-      return classesModule.resolveStatic(found.ref).v !== null;
+      return classesModule.readStaticProp(cls, name, runtime.frame.scope, true) !== null;
     }
     case 'cconst': {
       return ev(e) !== null;
