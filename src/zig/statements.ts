@@ -1866,6 +1866,7 @@ export abstract class StatementCompiler extends CallCompiler {
       evaluate: TExpr['eval'];
       binding: LocalBinding | undefined;
     }[] = [];
+    let noreturn = false;
     for (const element of elements) {
       target.continued = false;
       this.compilationBudget.spend();
@@ -1885,7 +1886,10 @@ export abstract class StatementCompiler extends CallCompiler {
           evaluate: element.eval,
           binding,
         });
-        if (body.noreturn && !target.continued) break;
+        if (body.noreturn && !target.continued) {
+          noreturn = !target.broken;
+          break;
+        }
       } finally {
         fn.targets.pop();
       }
@@ -1907,7 +1911,7 @@ export abstract class StatementCompiler extends CallCompiler {
           }
           return;
         }),
-        noreturn: false,
+        noreturn,
       },
       value: known(VOID, undefined, expression),
     };

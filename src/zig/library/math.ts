@@ -672,7 +672,7 @@ const MEMBERS: Record<string, () => Member> = {
           ? Math.log2(value)
           : baseValue === 10
             ? Math.log10(value)
-            : Math.log(value) / (baseValue === Math.E ? 1 : Math.log(baseValue));
+            : Math.log(value) / (baseValue === toDouble(fromDouble(Math.E, bitsOf(type))) ? 1 : Math.log(baseValue));
       return fromDouble(result, bitsOf(type));
     });
   }),

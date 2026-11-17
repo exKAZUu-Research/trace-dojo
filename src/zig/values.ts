@@ -62,19 +62,22 @@ export function registerStorageLocation(
   if (virtual) virtualStorage.add(storage);
 }
 
+// code-gauge-allow functionParameterCount 7 -- Compares typed storage ranges with independent starts and extents.
 export function storageOverlaps(
   left: Slots,
   leftStart: number,
   right: Slots,
   rightStart: number,
   length: number,
-  stride: number
+  stride: number,
+  rightLength = length
 ): boolean {
+  if (length === 0 || rightLength === 0) return false;
   const a = storageLocation(left.slots, leftStart);
   const b = storageLocation(right.slots, rightStart);
   const first = storageLocations.has(left.slots) ? a.index : a.index * stride;
   const second = storageLocations.has(right.slots) ? b.index : b.index * stride;
-  return a.storage === b.storage && Math.abs(first - second) < length * stride;
+  return a.storage === b.storage && first < second + rightLength * stride && second < first + length * stride;
 }
 
 export function storageLocation(storage: object, index: number): { storage: object; index: number } {
@@ -417,7 +420,7 @@ export function storeInto(target: Slots, index: number, value: Value): void {
   storeSnapshotInto(target, index, copyValue(value));
 }
 
-// code-gauge-allow functionCognitiveComplexity 20 -- Preserves aggregate and optional payload locations when storing copied values.
+// code-gauge-allow functionCognitiveComplexity 21 -- Preserves aggregate and optional payload locations when storing copied values.
 // code-gauge-allow functionNcss 33 -- Keeps the storage identity rules together for each value representation.
 function storeSnapshotInto(target: Slots, index: number, value: Value): void {
   const payload = Pointer.optionalProjection(target, index);
@@ -432,7 +435,7 @@ function storeSnapshotInto(target: Slots, index: number, value: Value): void {
   const current = target.slots[index];
   if (value instanceof ZArray && current instanceof ZArray && current.length === value.length) {
     if (zeroArrayValues.has(value.slots) && zeroArrayValues.has(current.slots)) return;
-    const source = value.values(value.hasSentinel);
+    const source = value.values(current.hasSentinel && value.hasSentinel);
     for (const [at, slot] of source.entries()) storeSnapshotInto(current, current.offset + at, slot);
     return;
   }

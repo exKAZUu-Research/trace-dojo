@@ -544,7 +544,8 @@ export abstract class ExpressionCompiler extends SemaBase {
       return this.error(span, `${typeName(type)} 型はポインタではないので、.* で参照できません。`);
     }
     if (type.child.kind === 'fn') return { ...pointer, type: type.child, place: undefined, local: undefined };
-    this.resolveStorage(type.child, span);
+    if (this.requiresComptime(type.child, span) && !pointer.known)
+      this.error(span, 'コンパイルのときだけの型は、実行時のポインタから読み出せません。');
     if (sizeOf(type.child) !== 0) this.checkMemoryOperand(pointer, span);
     const evaluate = pointer.eval;
     const zero = sizeOf(type.child) === 0;

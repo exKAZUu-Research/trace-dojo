@@ -696,8 +696,9 @@ const MEMBERS: Record<string, () => Member> = {
           input.start,
           target.target,
           target.start,
-          Math.max(input.length, target.length),
-          sizeOf(type)
+          input.length,
+          sizeOf(type),
+          target.length
         )
       );
       const text = sequence(source, spend);

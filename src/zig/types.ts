@@ -457,6 +457,7 @@ export function isScalarType(type: Type): boolean {
 }
 
 /** Whether values of a type exist only at compile time. */
+// code-gauge-allow duplicateLines 23 -- Comptime classification and by-value cycle detection traverse similar graphs with different leaf and field predicates.
 export function isComptimeOnly(type: Type, seen = new Set<Type>()): boolean {
   if (seen.has(type)) return false;
   spendMemory();
@@ -474,9 +475,6 @@ export function isComptimeOnly(type: Type, seen = new Set<Type>()): boolean {
     case 'array':
     case 'optional': {
       return isComptimeOnly(type.child, seen);
-    }
-    case 'pointer': {
-      return type.child.kind !== 'fn' && isComptimeOnly(type.child, seen);
     }
     case 'error_union': {
       return isComptimeOnly(type.payload, seen);

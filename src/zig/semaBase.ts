@@ -629,6 +629,7 @@ export abstract class SemaBase implements SemaApi {
   }
 
   /** Whether a value of `type` contains a `target` in place, not behind a pointer, which would have no size. */
+  // code-gauge-allow duplicateLines 23 -- By-value cycle detection and comptime classification traverse similar graphs with different leaf and field predicates.
   private holdsByValue(type: Type, target: Type, seen: Set<Type>): boolean {
     this.spendCompilation();
     if (type === target) return true;

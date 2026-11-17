@@ -7399,3 +7399,62 @@ test.each(['0..', '0..1'])('ordinary sentinel slice %s inherits its type without
     uncaughtException: expect.stringContaining('sentinel mismatch'),
   });
 });
+
+test.each(['.{1}', '0..1'])('nonempty inline for %s propagates guaranteed return', (operand) => {
+  const source = `const std=@import("std");fn f()u8{inline for(${operand})|_|{return 3;}}pub fn main()void{std.debug.print("{}",.{f()});}`;
+  expect(executeProgram('zig', source)).toMatchObject({ kind: 'executed', stderr: '3', uncaughtException: undefined });
+});
+
+test.each(['inline for(.{})|_|{return 3;}', 'inline for(0..1)|_|{break;}', 'inline for(0..1)|_|{continue;}'])(
+  'inline loop fallthrough still requires a return: %s',
+  (body) => {
+    expect(executeProgram('zig', `fn f()u8{${body}}pub fn main()void{_=f();}`)).toMatchObject({ kind: 'compileError' });
+  }
+);
+
+test.each(['0.007', '0.014'])('f32 natural-base logarithms preserve declared-base rounding for %s', (value) => {
+  const source = `const std=@import("std");pub fn main()void{var e:f32=std.math.e;var x:f32=${value};_=&e;_=&x;std.debug.print("{}",.{std.math.log(f32,e,x)==@log(x)});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: 'true',
+    uncaughtException: undefined,
+  });
+});
+
+test.each([10_000, 12_000])('replacement uses linear search for disjoint shared-buffer output at %s', (offset) => {
+  const source = `const std=@import("std");pub fn main()void{var a:[30000]u8=@splat(97);var n:[100]u8=@splat(97);n[99]=98;const c=std.mem.replace(u8,a[0..10000],&n,"z",a[${offset}..]);std.debug.print("{} {}",.{c,a[${offset}]});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: '0 97',
+    uncaughtException: undefined,
+  });
+});
+
+test.each([0, 7])('sentinel %s source assignment respects an ordinary destination extent', (sentinel) => {
+  const source = `const std=@import("std");pub fn main()void{var a=[_]u8{1,2,3};const b=[1:${sentinel}]u8{9};a[0..1].*=b;std.debug.print("{any}",.{a});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: '{ 9, 2, 3 }',
+    uncaughtException: undefined,
+  });
+});
+
+test.each(['[1:0]u8', '[0:0]u8', '[1:7]u8'])('byte-backed %s copies retain stored sentinel bytes', (type) => {
+  const length = type.startsWith('[0:') ? 0 : 1;
+  const source = `const std=@import("std");pub fn main()!void{var buf:[8]u8=undefined;var f=std.heap.FixedBufferAllocator.init(&buf);const p=try f.allocator().create(${type});var a:${type}=undefined;var n:usize=${length};_=&n;a[n]=9;p.*=a;std.debug.print("{} {}",.{p[n],buf[n]});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: '9 9',
+    uncaughtException: undefined,
+  });
+});
+
+test.each(['struct{t:type}', 'union(enum){t:type}'])(
+  'generic pointer to optional %s descriptor stays runtime-known',
+  (type) => {
+    const source = `const D=${type};fn f(o:anytype)(if(o.*==null) u8 else o.*.?.t){return 0;}pub fn main()void{const o:?D=null;_=f(&o);}`;
+    expect(executeProgram('zig', source)).toMatchObject({ kind: 'compileError' });
+    const local = `const D=${type};pub fn main()void{const o:?D=null;const p=&o;const T=if(p.*==null) u8 else p.*.?.t;const n:T=0;_=n;}`;
+    expect(executeProgram('zig', local)).toMatchObject({ kind: 'executed', uncaughtException: undefined });
+  }
+);
