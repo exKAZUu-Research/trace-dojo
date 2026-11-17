@@ -107,6 +107,13 @@ function checkListIndex(list: ListStorage, index: Value, method: string, inclusi
   return position;
 }
 
+function removeListNode(list: ListStorage, first: boolean): Value {
+  const node = (first ? list.nodes.shift() : list.nodes.pop()) as ListNode;
+  const value = node.v;
+  node.v = null;
+  return value;
+}
+
 const listMethods: NativeMethod[] = [
   {
     signature: 'add(int $index, mixed $value): void',
@@ -121,11 +128,11 @@ const listMethods: NativeMethod[] = [
   },
   {
     signature: 'pop(): mixed',
-    impl: ({ thisObj }) => (nonEmptyList(thisObj, 'pop from').nodes.pop() as ListNode).v,
+    impl: ({ thisObj }) => removeListNode(nonEmptyList(thisObj, 'pop from'), false),
   },
   {
     signature: 'shift(): mixed',
-    impl: ({ thisObj }) => (nonEmptyList(thisObj, 'shift from').nodes.shift() as ListNode).v,
+    impl: ({ thisObj }) => removeListNode(nonEmptyList(thisObj, 'shift from'), true),
   },
   {
     signature: 'push(mixed $value): void',
@@ -223,7 +230,7 @@ defineClass({
     },
     {
       signature: 'dequeue(): mixed',
-      impl: ({ thisObj }) => (nonEmptyList(thisObj, 'shift from').nodes.shift() as ListNode).v,
+      impl: ({ thisObj }) => removeListNode(nonEmptyList(thisObj, 'shift from'), true),
     },
   ],
   createInternal: () => new ListStorage(IT_FIX),
@@ -273,7 +280,10 @@ class HeapStorage {
   clone(object: PhpObject): HeapStorage {
     const fresh = object.cls.createInternal?.(object) as HeapStorage;
     const copy = new HeapStorage(this.owner, fresh.compareMethod, this.flags);
-    copy.elements = [...this.elements];
+    rt().allocate(this.elements.length);
+    copy.elements = this.elements.map((element) =>
+      isEntry(element) ? { data: share(element.data), priority: share(element.priority) } : share(element)
+    );
     copy.corrupted = this.corrupted;
     return copy;
   }
@@ -296,6 +306,7 @@ class HeapStorage {
   }
 
   insert(element: HeapElement): void {
+    rt().allocate(1, this.elements.length + 1);
     this.writeLocked = true;
     let position = this.elements.length;
     while (position > 0 && this.compare(this.elements[(position - 1) >> 1], element) < 0) {
@@ -546,13 +557,18 @@ const fixedOf = (object: PhpObject): FixedStorage => object.internal as FixedSto
 
 /** Transcribes spl_offset_convert_to_ulong, whose negative results fall out of range. */
 function fixedIndex(object: PhpObject, index: Value): number {
+  const position = fixedOffset(index);
+  if (position < 0 || position >= fixedOf(object).items.length)
+    throwError('OutOfBoundsException', 'Index invalid or out of range');
+  return position;
+}
+
+function fixedOffset(index: Value): number {
   let position: number;
   if (typeof index === 'bigint' || typeof index === 'boolean') position = Number(index);
   else if (typeof index === 'number') position = Number(toKey(index));
   else if (typeof index === 'string' && /^(?:0|-?[1-9]\d*)$/.test(index)) position = Number(index);
   else throwError('TypeError', `Cannot access offset of type ${debugType(index)} on SplFixedArray`);
-  if (position < 0 || position >= fixedOf(object).items.length)
-    throwError('OutOfBoundsException', 'Index invalid or out of range');
   return position;
 }
 
@@ -584,7 +600,10 @@ defineClass({
       },
       {
         signature: 'offsetExists($index): bool',
-        impl: ({ thisObj, args }) => Number(args[0]) >= 0 && Number(args[0]) < fixedOf(thisObj).items.length,
+        impl: ({ thisObj, args }) => {
+          const index = fixedOffset(args[0]);
+          return index >= 0 && index < fixedOf(thisObj).items.length && fixedOf(thisObj).items[index] !== null;
+        },
       },
       {
         signature: 'offsetGet($index): mixed',

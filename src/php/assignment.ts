@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 536 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 539 -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import type { Expr, ListItem } from './ast';
 import { callMethod } from './callables';
@@ -222,9 +222,9 @@ function issetPropExists(object: PhpObject, name: string, scope: PhpClass | unde
   return object.props.has(name);
 }
 
-let nativeArrayStorage: (value: unknown) => value is { writable(): PhpArray } = (
+let nativeArrayStorage: (value: unknown) => value is { writable(): PhpArray; readonly array: PhpArray } = (
   _value
-): _value is { writable(): PhpArray } => false;
+): _value is { writable(): PhpArray; readonly array: PhpArray } => false;
 
 export function setNativeArrayStorage(check: typeof nativeArrayStorage): void {
   nativeArrayStorage = check;
@@ -440,9 +440,18 @@ export function destructure(target: Extract<Expr, { k: 'list' }>, value: Value):
   }
 }
 
+// code-gauge-allow functionCognitiveComplexity 16 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 function destructureItem(item: ListItem, value: Value, key: Key): void {
   if (item.byRef) {
-    if (!(value instanceof PhpArray)) throwError('Error', 'Cannot assign reference to non referenceable value');
+    if (!(value instanceof PhpArray)) {
+      if (value === null) throwError('Error', 'Cannot assign reference to non referenceable value');
+      throwError(
+        'Error',
+        typeof value === 'string'
+          ? 'Cannot create references to/from string offsets'
+          : 'Cannot use a scalar value as an array'
+      );
+    }
     const ref = new ElementPlace(value, key).ref();
     bindRef(item.target, ref);
     return;
@@ -705,8 +714,7 @@ export function isset(e: Expr): boolean {
         return position !== undefined && position >= 0;
       }
       if (base instanceof PhpObject) {
-        if (!isArrayAccess(base)) throwError('Error', `Cannot use object of type ${base.cls.name} as array`);
-        return toBool(callMethod(base, 'offsetExists', [index]));
+        return issetArrayAccess(base, index);
       }
       return false;
     }
@@ -727,4 +735,11 @@ export function isset(e: Expr): boolean {
       return ev(e) !== null;
     }
   }
+}
+
+function issetArrayAccess(object: PhpObject, index: Value): boolean {
+  if (!isArrayAccess(object)) throwError('Error', `Cannot use object of type ${object.cls.name} as array`);
+  if (nativeArrayStorage(object.internal) && object.cls.findMethod('offsetexists')?.fn.kind === 'native')
+    return (object.internal.array.get(toKey(index, 'isset')) ?? null) !== null;
+  return toBool(callMethod(object, 'offsetExists', [index]));
 }

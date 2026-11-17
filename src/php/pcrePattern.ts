@@ -373,7 +373,7 @@ class PatternConverter {
   }
 
   private skipExtended(char: string): boolean {
-    if (/\s/.test(char)) {
+    if (/[ \t\n\r\v\f\u0085]/.test(char) || (this.options.utf8 && /[\u2028\u2029]/.test(char))) {
       this.index++;
       return true;
     }
@@ -652,7 +652,7 @@ class PatternConverter {
       }
       case 'R': {
         const vertical = (this.options.utf8 ? UCP_SETS : BYTE_SETS).get('v') as string;
-        this.emit(String.raw`(?:\r\n|[${vertical}])`, true);
+        this.emit(String.raw`(?:\r\n|\r(?!\n)|(?:(?!\r)[${vertical}]))`, true);
         return;
       }
       case 'g': {

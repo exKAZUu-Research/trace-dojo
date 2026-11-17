@@ -1,5 +1,8 @@
 import { CompileError } from '../interpreter/diagnostics';
-import type { Expr, FunctionDecl, Stmt } from './ast';
+import type { Arg, Expr, FunctionDecl, Stmt } from './ast';
+import { lower } from './bytes';
+import { nativeParameters } from './native';
+import type { Param } from './values';
 
 /** Whether an expression statement only calls functions or creates objects, whose own steps show what it did. */
 export function onlyCalls(e: Expr): boolean {
@@ -122,10 +125,22 @@ export function collectMainVars(body: Stmt[]): Set<string> {
  * assignments, references, foreach targets, and arguments a function may take by reference.
  */
 export function validateReads(body: Stmt[]): void {
-  const visit = (value: unknown, writing: boolean): void => {
+  new ReadValidator(body).visit(body, false);
+}
+
+class ReadValidator {
+  private readonly functions: Map<string, Param[]>;
+  constructor(private readonly body: Stmt[]) {
+    this.functions = new Map(
+      body.flatMap((statement) =>
+        statement.k === 'func' ? [[lower(statement.decl.name), statement.decl.params] as const] : []
+      )
+    );
+  }
+  visit(value: unknown, writing: boolean): void {
     if (!value || typeof value !== 'object') return;
     if (Array.isArray(value)) {
-      for (const item of value) visit(item, writing);
+      for (const item of value) this.visit(item, writing);
       return;
     }
     const node = value as Record<string, unknown> & { k?: string; row?: number };
@@ -136,37 +151,37 @@ export function validateReads(body: Stmt[]): void {
             { row: node.row ?? 0, message: '[] で読み出すことはできません（Cannot use [] for reading）。' },
           ]);
         }
-        visit(node.base, writing);
-        visit(node.index, false);
+        this.visit(node.base, writing);
+        this.visit(node.index, false);
         return;
       }
       case 'assign':
       case 'assignOp': {
-        visit(node.target, true);
-        visit(node.value, false);
+        this.visit(node.target, true);
+        this.visit(node.value, false);
         return;
       }
       case 'assignRef': {
-        visit(node.target, true);
-        visit(node.source, true);
+        this.visit(node.target, true);
+        this.visit(node.source, true);
         return;
       }
       case 'incdec': {
-        visit(node.target, true);
+        this.visit(node.target, true);
         return;
       }
       case 'foreach': {
-        visit(node.subject, Boolean(node.byRef));
-        visit(node.key, true);
-        visit(node.value, true);
-        visit(node.body, false);
+        this.visit(node.subject, Boolean(node.byRef));
+        this.visit(node.key, true);
+        this.visit(node.value, true);
+        this.visit(node.body, false);
         return;
       }
       case 'list': {
         for (const item of (node.items as ({ key?: unknown; target: unknown } | undefined)[]) ?? []) {
           if (!item) continue;
-          visit(item.key, false);
-          visit(item.target, true);
+          this.visit(item.key, false);
+          this.visit(item.target, true);
         }
         return;
       }
@@ -175,15 +190,16 @@ export function validateReads(body: Stmt[]): void {
       case 'scall':
       case 'new': {
         for (const [key, child] of Object.entries(node)) {
-          if (key === 'args') for (const arg of child as { e: unknown }[]) visit(arg.e, true);
-          else if (key !== 'row') visit(child, false);
+          if (key === 'args') {
+            this.arguments(node as unknown as Expr, child as Arg[]);
+          } else if (key !== 'row') this.visit(child, false);
         }
         return;
       }
       case 'array': {
         for (const item of node.items as { key?: unknown; value: unknown; byRef: boolean }[]) {
-          visit(item.key, false);
-          visit(item.value, item.byRef);
+          this.visit(item.key, false);
+          this.visit(item.value, item.byRef);
         }
         return;
       }
@@ -194,18 +210,59 @@ export function validateReads(body: Stmt[]): void {
               { row: target.row, message: '[] で unset することはできません（Cannot use [] for unsetting）。' },
             ]);
           }
-          visit(target, true);
+          this.visit(target, true);
         }
         return;
       }
       default: {
         for (const [key, child] of Object.entries(node)) {
-          if (key !== 'row') visit(child, false);
+          if (key !== 'row') this.visit(child, false);
         }
       }
     }
-  };
-  visit(body, false);
+  }
+  private arguments(expression: Expr, args: Arg[]): void {
+    const params = this.parametersOf(expression);
+    let positional = 0;
+    let unpacked = false;
+    for (const arg of args) {
+      const param = arg.name
+        ? params?.find((param) => param.name === arg.name)
+        : (params?.[positional] ?? (params?.at(-1)?.variadic ? params.at(-1) : undefined));
+      const writing = !arg.spread && (params === undefined || unpacked || param?.byRef === true);
+      this.visit(arg.e, writing);
+      if (arg.spread) unpacked = true;
+      else if (!arg.name) positional++;
+    }
+  }
+  // code-gauge-allow functionCognitiveComplexity 19 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+  private parametersOf(expression: Expr): Param[] | undefined {
+    if (expression.k === 'scall' && expression.cls.k === 'named' && typeof expression.name === 'string') {
+      const methodName = lower(expression.name);
+      let cls = this.body.find(
+        (statement) =>
+          statement.k === 'class' &&
+          lower(statement.decl.name) === lower(expression.cls.k === 'named' ? expression.cls.name : '')
+      );
+      const seen = new Set<Stmt>();
+      while (cls?.k === 'class' && !seen.has(cls)) {
+        seen.add(cls);
+        const method = cls.decl.methods.find((method) => lower(method.fn.name) === methodName);
+        if (method) return method.fn.params;
+        const parent = cls.decl.parent;
+        cls = parent
+          ? this.body.find((statement) => statement.k === 'class' && lower(statement.decl.name) === lower(parent))
+          : undefined;
+      }
+      return;
+    }
+    if (expression.k !== 'call' || 'k' in expression.fn) return;
+    return (
+      this.functions.get(lower(expression.fn.name)) ??
+      nativeParameters(expression.fn.name) ??
+      (expression.fn.fallback ? nativeParameters(expression.fn.fallback) : undefined)
+    );
+  }
 }
 
 /** Whether a destructuring assigns any element by reference, at any depth. */

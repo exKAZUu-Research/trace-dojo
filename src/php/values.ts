@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 479 -- Keeps one PHP runtime concern and its shared helpers in one module.
+// code-gauge-allow-file fileNcss 564 -- Keeps one PHP runtime concern and its shared helpers in one module.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import type { TurtleState } from '../interpreter/turtleWorld';
 import type { ClassDecl, FunctionDecl } from './ast';
@@ -87,6 +87,7 @@ export const INT_MIN = -9_223_372_036_854_775_808n;
 /** An ordered map, which arrays share until one of their holders writes to it (copy on write). */
 export class PhpArray {
   mutationVersion = 0;
+  private order: ArrayOrder | undefined;
   private readonly parents = new Set<WeakRef<PhpArray>>();
   private readonly knownParents = new WeakSet<PhpArray>();
   map: Map<Key, Value | Ref>;
@@ -115,6 +116,11 @@ export class PhpArray {
     const array = new PhpArray();
     for (const value of values) array.append(copyValueSlot(value));
     return array;
+  }
+
+  cursor(): ArrayCursor {
+    this.order ??= new ArrayOrder(this.map.keys());
+    return this.order.cursor();
   }
 
   get size(): number {
@@ -179,11 +185,13 @@ export class PhpArray {
     if (slot instanceof PhpObject) slot.arrayHolders.push({ array: new WeakRef(this), key });
     this.trackSlot(key, slot);
     this.map.set(key, slot);
+    this.order?.insert(key);
   }
 
   replaceTable(map: Map<Key, Value | Ref>, nextFree: bigint): void {
     allocationHandler(Math.max(0, map.size - this.map.size), map.size);
     this.map = map;
+    this.order?.replace(map.keys());
     for (const [key, slot] of map) this.trackSlot(key, slot);
     this.nextFree = nextFree;
     this.composite = [...map.values()].some((value) => value !== null && typeof value === 'object');
@@ -220,6 +228,7 @@ export class PhpArray {
     if (this.pointer === key) this.pointer = this.keyAfter(key);
     this.invalidate();
     this.map.delete(key);
+    this.order?.delete(key);
     dropped(old);
   }
 
@@ -482,6 +491,94 @@ export class PhpClass {
     if (this === other) return true;
     for (let cls: PhpClass | undefined = this.parent; cls; cls = cls.parent) if (cls === other) return true;
     return this.interfaces.includes(other);
+  }
+}
+
+interface ArrayEntry {
+  key: Key;
+  index: number;
+  previous?: ArrayEntry;
+  next?: ArrayEntry;
+}
+
+class ArrayOrder {
+  readonly entries = new Map<Key, ArrayEntry>();
+  first: ArrayEntry | undefined;
+  private last: ArrayEntry | undefined;
+  private nextIndex = 0;
+  private readonly cursors = new Set<WeakRef<ArrayCursor>>();
+
+  constructor(keys: Iterable<Key>) {
+    for (const key of keys) this.insert(key);
+  }
+
+  cursor(): ArrayCursor {
+    const cursor = new ArrayCursor(this);
+    this.cursors.add(new WeakRef(cursor));
+    return cursor;
+  }
+
+  insert(key: Key): void {
+    if (this.entries.has(key)) return;
+    const entry: ArrayEntry = { key, index: this.nextIndex++, previous: this.last };
+    if (this.last) this.last.next = entry;
+    else this.first = entry;
+    this.last = entry;
+    this.entries.set(key, entry);
+    for (const cursor of this.liveCursors()) cursor.entry ??= entry;
+  }
+
+  delete(key: Key): void {
+    const entry = this.entries.get(key);
+    if (!entry) return;
+    for (const cursor of this.liveCursors()) if (cursor.entry === entry) cursor.entry = entry.next;
+    if (entry.previous) entry.previous.next = entry.next;
+    else this.first = entry.next;
+    if (entry.next) entry.next.previous = entry.previous;
+    else this.last = entry.previous;
+    this.entries.delete(key);
+  }
+
+  replace(keys: Iterable<Key>): void {
+    const cursors = [...this.liveCursors()].map((cursor) => ({ cursor, index: cursor.entry?.index }));
+    this.entries.clear();
+    this.first = undefined;
+    this.last = undefined;
+    this.nextIndex = 0;
+    this.cursors.clear();
+    for (const key of keys) this.insert(key);
+    const entries = [...this.entries.values()];
+    for (const { cursor, index } of cursors) {
+      cursor.entry = index === undefined ? undefined : entries[index];
+      this.cursors.add(new WeakRef(cursor));
+    }
+  }
+
+  private *liveCursors(): Generator<ArrayCursor> {
+    for (const reference of this.cursors) {
+      const cursor = reference.deref();
+      if (cursor) yield cursor;
+      else this.cursors.delete(reference);
+    }
+  }
+}
+
+export class ArrayCursor {
+  entry: ArrayEntry | undefined;
+  constructor(private readonly order: ArrayOrder) {
+    this.rewind();
+  }
+  get key(): Key | undefined {
+    return this.entry?.key;
+  }
+  get index(): number | undefined {
+    return this.entry?.index;
+  }
+  rewind(): void {
+    this.entry = this.order.first;
+  }
+  next(): void {
+    this.entry = this.entry?.next;
   }
 }
 

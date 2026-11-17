@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 756 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 775 -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 // oxlint-disable unicorn/text-encoding-identifier-case -- mbstring names its encodings in this case.
 // oxlint-disable typescript/no-misused-spread -- PHP splits strings into bytes or code points, never into grapheme clusters.
@@ -7,7 +7,7 @@ import { inflateRawSync } from 'node:zlib';
 
 import { eastAsianWidth } from 'get-east-asian-width';
 
-import { codePointBytes, dec, enc, lower, utf8Chars } from './bytes';
+import { codePointBytes, dec, enc, lower } from './bytes';
 import { deprecated, throwError, warn } from './errors';
 import { padUnits } from './libString';
 import { defineConstant, defineFunction } from './native';
@@ -27,7 +27,16 @@ defineConstant('MB_CASE_FOLD_SIMPLE', 7n);
 
 const s = (value: Value): string => value as string;
 const n = (value: Value): number => Number(value as bigint);
-const chars = (value: Value): string[] => utf8Chars(s(value));
+const chars = (value: Value): string[] => {
+  const text = s(value);
+  const parts: string[] = [];
+  for (let index = 0; index < text.length;) {
+    const [, length] = decodeUtf8At(text, index);
+    parts.push(text.slice(index, index + length));
+    index += length;
+  }
+  return parts;
+};
 
 // Names accepted by mbstring, including encodings rejected by codecFor.
 const ENCODINGS = new Set(
@@ -63,7 +72,7 @@ defineUtf8Function(
       const length = n(args[2]);
       end = length < 0 ? Math.max(list.length + length, start) : Math.min(start + length, list.length);
     }
-    return list.slice(start, end).join('');
+    return encodeCodes(UTF8.decode(list.slice(start, end).join('')), UTF8);
   }
 );
 defineUtf8Function('mb_strtoupper(string $string, ?string $encoding = null): string', ({ args }) => {
@@ -75,7 +84,14 @@ defineUtf8Function('mb_strtolower(string $string, ?string $encoding = null): str
   return enc(dec(s(args[0])).toLowerCase());
 });
 defineUtf8Function('mb_str_split(string $string, int $length = 1, ?string $encoding = null): array', ({ args }) => {
-  const list = chars(args[0]);
+  const list: string[] = [];
+  const text = s(args[0]);
+  for (let index = 0; index < text.length;) {
+    const lead = text.charCodeAt(index);
+    const size = lead < 0xc2 || lead > 0xf4 ? 1 : lead < 0xe0 ? 2 : lead < 0xf0 ? 3 : 4;
+    list.push(text.slice(index, index + size));
+    index += size;
+  }
   const length = args[1] === undefined ? 1 : n(args[1]);
   if (length < 1) throwError('ValueError', 'mb_str_split(): Argument #2 ($length) must be greater than 0');
   checkEncoding('mb_str_split', args, 3);
@@ -634,8 +650,11 @@ function substitution(): Substitution {
 /** Encodes code points, writing each one the encoding cannot hold as mb_illegal_output does; `tally` counts those. */
 function encodeCodes(codes: number[], codec: Codec, tally?: { errors: number }): string {
   let result = '';
-  for (const code of codes)
-    result += (code === BAD ? undefined : codec.encode(code)) ?? illegalOutput(code, codec, tally);
+  for (const code of codes) {
+    const encoded = (code === BAD ? undefined : codec.encode(code)) ?? illegalOutput(code, codec, tally);
+    rt().ensureStringFits(result.length + encoded.length);
+    result += encoded;
+  }
   return result;
 }
 
@@ -1120,7 +1139,7 @@ function halfToFull(code: number, next: number, mode: number): [number, boolean]
   return [0x30_00 + table[index], false];
 }
 
-// code-gauge-allow functionCognitiveComplexity 22 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+// code-gauge-allow functionCognitiveComplexity 25 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 function defineUtf8Function(signature: string, impl: NativeFunction['impl']): void {
   const name = signature.slice(0, signature.indexOf('('));
   const parameters = signature.slice(signature.indexOf('(') + 1, signature.indexOf(')')).split(',');
@@ -1133,7 +1152,12 @@ function defineUtf8Function(signature: string, impl: NativeFunction['impl']): vo
     )
       return impl(context);
     const codec = encodingArgument(context.args, position, name);
-    if (codec === UTF8) return impl(context);
+    if (codec === UTF8) {
+      if (!['mb_strtoupper', 'mb_strtolower', 'mb_convert_case'].includes(name)) return impl(context);
+      const args = [...context.args];
+      args[0] = encodeCodes(UTF8.decode(s(args[0])), UTF8);
+      return impl({ ...context, args });
+    }
     const args = context.args.map((value, index) =>
       typeof value === 'string' && index !== position - 1 ? encodeCodes(codec.decode(value), UTF8) : value
     );

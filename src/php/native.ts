@@ -38,6 +38,10 @@ export function defineAlias(alias: string, target: string): void {
   functions.push({ ...fn, name: alias });
 }
 
+export function nativeParameters(name: string): NativeFunction['params'] | undefined {
+  return functions.find((fn) => lower(fn.name) === lower(name))?.params;
+}
+
 /** Defines a builtin constant; reading one with a `deprecation` should report that message as E_DEPRECATED. */
 export function defineConstant(name: string, value: Value, deprecation?: string): void {
   constants.push([name, value]);

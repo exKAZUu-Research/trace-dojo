@@ -95,6 +95,8 @@ class JsonEncoder {
     private readonly maxDepth: number
   ) {}
 
+  // code-gauge-allow functionNcss 32 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+  // code-gauge-allow functionCognitiveComplexity 16 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
   encode(value: Value, level: number): string {
     rt().spend();
     if (value === null) return 'null';
@@ -123,7 +125,10 @@ class JsonEncoder {
     if (this.active.has(value)) return this.fail(6);
     this.active.add(value);
     try {
-      return this.encode(callMethod(value, 'jsonSerialize', []), level);
+      const result = callMethod(value, 'jsonSerialize', []);
+      if (result !== value) return this.encode(result, level);
+      this.active.delete(value);
+      return this.encodeContainer(value, level);
     } finally {
       this.active.delete(value);
     }
@@ -156,47 +161,43 @@ class JsonEncoder {
   }
 
   private encodeArray(value: PhpArray, level: number): string {
-    const entries = [...value.entries()];
-    if (value.isList() && !has(this.flags, 16n))
-      return wrap(
-        entries.map(([, item]) => this.encode(item, level + 1)),
-        '[',
-        ']',
-        this.flags,
-        level
-      );
-    return wrap(
-      entries.map(([key, item]) => this.member(String(key), item, level)),
-      '{',
-      '}',
-      this.flags,
-      level
-    );
+    const list = value.isList() && !has(this.flags, 16n);
+    return wrap(this.arrayMembers(value, level, list), list ? '[' : '{', list ? ']' : '}', this.flags, level);
+  }
+
+  private *arrayMembers(value: PhpArray, level: number, list: boolean): Generator<string> {
+    const snapshot = [...value.entries()];
+    for (const [key, item] of snapshot)
+      yield list ? this.encode(item, level + 1) : this.member(String(key), item, level);
   }
 
   private encodeObject(object: PhpObject, level: number): string {
-    const parts: string[] = [];
+    return wrap(this.objectMembers(object, level), '{', '}', this.flags, level);
+  }
+
+  private *objectMembers(object: PhpObject, level: number): Generator<string> {
     const table = (object.internal as { properties?: () => PhpArray } | undefined)?.properties?.();
     if (table) {
       for (const [key, item] of table.entries()) {
         if (typeof key === 'string' && key.startsWith('\0')) continue;
-        parts.push(this.member(String(key), item, level));
+        yield this.member(String(key), item, level);
       }
-      return wrap(parts, '{', '}', this.flags, level);
+      return;
     }
     for (const [key, slot] of object.props) {
       if (slot === UNINIT) continue;
       const decl = declForKey(object.cls, key);
       if (decl && !canAccessProp(decl, undefined)) continue;
-      parts.push(this.member(propNameOf(key), slot instanceof Ref ? slot.v : slot, level));
+      yield this.member(propNameOf(key), slot instanceof Ref ? slot.v : slot, level);
     }
-    return wrap(parts, '{', '}', this.flags, level);
   }
 
   private member(key: string, item: Value, level: number): string {
     let name = this.encodeString(key, this.flags & ~32n);
     if (name === 'null') name = '""';
-    return `${name}:${has(this.flags, 128n) ? ' ' : ''}${this.encode(item, level + 1)}`;
+    const value = this.encode(item, level + 1);
+    rt().ensureStringFits(name.length + value.length + (has(this.flags, 128n) ? 2 : 1));
+    return `${name}:${has(this.flags, 128n) ? ' ' : ''}${value}`;
   }
 
   private fail(code: number): string {
@@ -210,12 +211,15 @@ class JsonEncoder {
     let index = 0;
     while (index < text.length) {
       if (text.charCodeAt(index) < 0x80) {
-        result += escapeAscii(text[index++], flags);
+        const escaped = escapeAscii(text[index++], flags);
+        rt().ensureStringFits(result.length + escaped.length + 1);
+        result += escaped;
         continue;
       }
       const length = utf8Length(text, index);
       const encoded = length === 1 ? invalidByte(flags) : encodeCharacter(text.slice(index, index + length), flags);
       if (encoded === undefined) return this.fail(5);
+      rt().ensureStringFits(result.length + encoded.length + 1);
       result += encoded;
       index += length;
     }
@@ -266,11 +270,19 @@ function encodeCharacter(bytes: string, flags: bigint): string {
   return `\\u${(0xd8_00 + (offset >> 10)).toString(16)}\\u${(0xdc_00 + (offset & 0x3_ff)).toString(16)}`;
 }
 
-function wrap(parts: string[], open: string, close: string, flags: bigint, level: number): string {
-  if (parts.length === 0) return open + close;
-  if (!has(flags, 128n)) return `${open}${parts.join(',')}${close}`;
-  const inner = '    '.repeat(level + 1);
-  return `${open}\n${parts.map((part) => inner + part).join(',\n')}\n${'    '.repeat(level)}${close}`;
+function wrap(parts: Iterable<string>, open: string, close: string, flags: bigint, level: number): string {
+  const pretty = has(flags, 128n);
+  rt().ensureStringFits(pretty ? 4 * (level + 1) + 4 : 2);
+  const inner = pretty ? '    '.repeat(level + 1) : '';
+  const ending = pretty ? `\n${'    '.repeat(level)}${close}` : close;
+  let text = open;
+  let count = 0;
+  for (const part of parts) {
+    const separator = count++ === 0 ? (pretty ? '\n' : '') : pretty ? ',\n' : ',';
+    rt().ensureStringFits(text.length + separator.length + inner.length + part.length + ending.length);
+    text += separator + inner + part;
+  }
+  return text + (count === 0 ? close : ending);
 }
 
 function decodePoint(bytes: string): number {

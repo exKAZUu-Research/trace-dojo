@@ -4,7 +4,7 @@ import type { Arg, Expr } from './ast';
 import builtinNames from './builtinNames.json';
 import { lower } from './bytes';
 import { type ArgValue, type CallTarget, closureFunction, functionDisplayName, invoke, paramIsByRef } from './calls';
-import { canCall, lookupMethod, requireClass } from './classes';
+import { canCall, lookupMethod, requireClass, requireClassScope } from './classes';
 import { debugType, valueName } from './conversions';
 import { notice, throwError, warn } from './errors';
 import { type Chain, ev, evChain, iterate, resolveClassRef, SHORT } from './interp';
@@ -399,18 +399,18 @@ function magicTarget(object: PhpObject, magic: Method, name: string): CallTarget
   return { fn: magicForwarder(magic, name, object, object.cls), thisObj: object };
 }
 
-// code-gauge-allow functionCognitiveComplexity 22 -- Resolves each form of call and callable by PHP's lookup rules, in PHP's order of checks.
+// code-gauge-allow functionCognitiveComplexity 25 -- Resolves each form of call and callable by PHP's lookup rules, in PHP's order of checks.
 function staticCallable(className: string, methodName: string, scope: PhpClass | undefined): CallTarget {
   const frame = rt().frame;
   let cls: PhpClass;
   const word = lower(className);
   if (word === 'self' || word === 'static' || word === 'parent') {
-    if (!frame.scope) throwError('Error', `Cannot use "${word}" when no class scope is active`);
+    const scope = requireClassScope(frame.scope, word);
     cls =
       word === 'self'
-        ? frame.scope
+        ? scope
         : word === 'parent'
-          ? (frame.scope.parent ?? requireClass(className))
+          ? (scope.parent ?? requireClass(className))
           : (frame.staticClass ?? requireClass(className));
   } else cls = requireClass(className);
   const method = lookupMethod(cls, lower(methodName), scope);

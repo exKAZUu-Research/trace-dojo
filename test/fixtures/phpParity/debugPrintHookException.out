@@ -1,0 +1,9 @@
+
+Warning: Uncaught Exception: bad in /main.php:2
+Stack trace:
+#0 [internal function]: FailingDebug->__debugInfo()
+#1 /main.php(3): print_r(Object(FailingDebug))
+#2 {main}
+  thrown in /main.php on line 2
+
+Fatal error: __debuginfo() must return an array in /main.php on line 3

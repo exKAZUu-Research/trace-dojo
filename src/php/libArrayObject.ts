@@ -10,7 +10,7 @@ import { arrayIsShared, share } from './places';
 import './splInterfaces';
 import { rt } from './runtime';
 import { UnsupportedFeatureError } from './unsupported';
-import { type Key, PhpArray, type PhpClass, PhpObject, Ref, type Value } from './values';
+import { type ArrayCursor, type Key, PhpArray, type PhpClass, PhpObject, Ref, type Value } from './values';
 
 const STD_PROP_LIST = 1;
 const ARRAY_AS_PROPS = 2;
@@ -20,7 +20,8 @@ const INTERNAL_FLAGS = 0xff_ff_00_00;
 
 /** The storage of an ArrayObject or ArrayIterator: its own array, or the ArrayObject whose storage it uses. */
 export class ArrayStorage {
-  position = 0;
+  private cursorArray: PhpArray | undefined;
+  private iteratorCursor: ArrayCursor | undefined;
   flags = 0;
   /** The class ArrayObject::getIterator instantiates. */
   iteratorClass = 'ArrayIterator';
@@ -36,6 +37,19 @@ export class ArrayStorage {
     private own: PhpArray,
     private readonly backing?: PhpObject
   ) {}
+
+  cursor(): ArrayCursor {
+    const array = this.array;
+    if (this.cursorArray !== array) {
+      const index = this.iteratorCursor?.index;
+      const initialized = this.iteratorCursor !== undefined;
+      this.cursorArray = array;
+      this.iteratorCursor = array.cursor();
+      if (initialized)
+        while (this.iteratorCursor.index !== index && this.iteratorCursor.key !== undefined) this.iteratorCursor.next();
+    }
+    return this.iteratorCursor as ArrayCursor;
+  }
 
   get array(): PhpArray {
     return this.backing ? storageOf(this.backing).array : this.own;
@@ -258,7 +272,7 @@ function sortStorage(object: PhpObject, name: string, args: Value[]): Value {
 }
 
 function keyAt(storage: ArrayStorage): Key | undefined {
-  return storage.array.keys()[storage.position];
+  return storage.cursor().key;
 }
 
 function currentEntry(storage: ArrayStorage): Value | undefined {
@@ -269,7 +283,7 @@ function currentEntry(storage: ArrayStorage): Value | undefined {
 const iteratorMethods: NativeMethod[] = [
   {
     signature: 'rewind(): void',
-    impl: ({ thisObj }) => ((storageOf(thisObj).position = 0), null),
+    impl: ({ thisObj }) => (storageOf(thisObj).cursor().rewind(), null),
   },
   {
     signature: 'current(): mixed',
@@ -281,21 +295,25 @@ const iteratorMethods: NativeMethod[] = [
   },
   {
     signature: 'next(): void',
-    impl: ({ thisObj }) => ((storageOf(thisObj).position += 1), null),
+    impl: ({ thisObj }) => (storageOf(thisObj).cursor().next(), null),
   },
   {
     signature: 'valid(): bool',
-    impl: ({ thisObj }) => storageOf(thisObj).position < storageOf(thisObj).array.size,
+    impl: ({ thisObj }) => storageOf(thisObj).cursor().key !== undefined,
   },
   {
     signature: 'seek(int $offset): void',
     impl: ({ thisObj, args }) => {
       const storage = storageOf(thisObj);
       const offset = Number(args[0]);
-      if (offset >= 0) storage.position = offset;
-      if (offset < 0 || offset >= storage.array.size)
-        throwError('OutOfBoundsException', `Seek position ${offset} is out of range`);
-      storage.position = offset;
+      if (offset < 0) throwError('OutOfBoundsException', `Seek position ${offset} is out of range`);
+      const cursor = storage.cursor();
+      cursor.rewind();
+      for (let index = 0; index < offset && cursor.key !== undefined; index++) {
+        rt().spend();
+        cursor.next();
+      }
+      if (cursor.key === undefined) throwError('OutOfBoundsException', `Seek position ${offset} is out of range`);
       return null;
     },
   },

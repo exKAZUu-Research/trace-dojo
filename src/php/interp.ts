@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 697 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 699 -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import {
   applyOperator,
@@ -37,6 +37,7 @@ import {
   readProp,
   readStaticProp,
   requireClass,
+  requireClassScope,
   visibleProps,
   writeProp,
 } from './classes';
@@ -564,7 +565,8 @@ function spreadInto(array: PhpArray, value: Value): void {
 }
 
 /** Iterates over an array or a Traversable object, as `foreach` would. */
-export function* iterate(value: Value): Generator<[Value, Value]> {
+// code-gauge-allow functionCognitiveComplexity 17 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+export function* iterate(value: Value, fetch: 'both' | 'value' | 'none' = 'both'): Generator<[Value, Value]> {
   if (value instanceof PhpArray) {
     for (const entry of value.entries()) yield entry;
     return;
@@ -578,8 +580,8 @@ export function* iterate(value: Value): Generator<[Value, Value]> {
     callMethod(iterator, 'rewind', []);
     while (toBool(callMethod(iterator, 'valid', []))) {
       rt().spend();
-      const current = callMethod(iterator, 'current', []);
-      const key = callMethod(iterator, 'key', []);
+      const current = fetch === 'none' ? null : callMethod(iterator, 'current', []);
+      const key = fetch === 'both' ? callMethod(iterator, 'key', []) : null;
       yield [key, current];
       callMethod(iterator, 'next', []);
     }
@@ -673,17 +675,15 @@ export function resolveClassRef(ref: ClassRef): PhpClass {
       return requireClass(ref.name);
     }
     case 'self': {
-      if (!frame.scope) throwError('Error', 'Cannot use "self" when no class scope is active');
-      return frame.scope;
+      return requireClassScope(frame.scope, 'self');
     }
     case 'parent': {
-      if (!frame.scope) throwError('Error', 'Cannot use "parent" when no class scope is active');
-      if (!frame.scope.parent) throwError('Error', 'Cannot use "parent" when current class scope has no parent');
+      requireClassScope(frame.scope, 'parent');
+      if (!frame.scope?.parent) throwError('Error', 'Cannot use "parent" when current class scope has no parent');
       return frame.scope.parent;
     }
     case 'static': {
-      if (!frame.staticClass) throwError('Error', 'Cannot use "static" when no class scope is active');
-      return frame.staticClass;
+      return requireClassScope(frame.staticClass, 'static');
     }
     case 'expr': {
       const value = ev(ref.e);
@@ -703,6 +703,8 @@ function classConstantOf(e: Extract<Expr, { k: 'cconst' }>): Value {
       if (!(value instanceof PhpObject)) throwError('TypeError', `Cannot use "::class" on ${debugType(value)}`);
       return value.cls.fullName;
     }
+    if (e.cls.k === 'self' || e.cls.k === 'static' || e.cls.k === 'parent')
+      requireClassScope(runtime.frame.scope, e.cls.k, 'className');
     return resolveClassRef(e.cls).fullName;
   }
   const cls = resolveClassRef(e.cls);

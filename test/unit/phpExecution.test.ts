@@ -697,3 +697,66 @@ test('counts deep nested arrays without host recursion', () => {
     stdout: '30000',
   });
 });
+
+test.each([
+  'function f(int $x=[]){}',
+  'function f(false $x=true){}',
+  'function f(true $x=false){}',
+  'class A{public int $x="bad";}',
+  'class A{public int $x=[];}',
+  'class A{public int $x=null;}',
+  'class A{public false $x=true;}',
+])('rejects incompatible declaration defaults before output: %s', (declaration) => {
+  expect(run(`<?php echo 'before'; ${declaration}`).kind).toBe('compileError');
+});
+
+test.each([
+  '<?php echo "before"; $s=<<<TXT\n \thello\n  TXT;',
+  '<?php echo "before"; $s=<<<\'TXT\'\n\thello\n  TXT;',
+  '<?php echo "before"; $s=<<<TXT\n  hello\n\tTXT;',
+  '<?php echo "before"; $s=<<<TXT\n  hello\n \tTXT;',
+])('rejects mixed heredoc indentation before output: %s', (source) => {
+  expect(run(source).kind).toBe('compileError');
+});
+
+test.each(['SplMaxHeap', 'SplMinHeap', 'SplPriorityQueue'])(
+  'charges cloned heap storage to the allocation budget: %s',
+  (name) => {
+    const insert = name === 'SplPriorityQueue' ? '$h->insert($i,$i);' : '$h->insert($i);';
+    const result = run(
+      `<?php $h=new ${name};for($i=0;$i<1000;$i++){${insert}}$held=array_fill(0,970000,0);$copies=[];for($i=0;$i<40;$i++)$copies[]=clone $h;echo 'never';`
+    );
+    expect(result.kind === 'executed' && result.stdout).toMatch(/^\nFatal error: Allowed memory size/);
+    expect(result.kind === 'executed' && result.stdout).not.toContain('never');
+  }
+);
+
+test.each([
+  "json_encode(array_fill(0,100000,str_repeat('x',10000)));",
+  "json_encode(array_fill(0,100,str_repeat('x',10000)),JSON_PRETTY_PRINT);",
+  'json_encode(str_repeat(chr(1),200000));',
+  "mb_convert_encoding([str_repeat('x',300000)],'UTF-32BE','UTF-8');",
+  "mb_convert_encoding([str_repeat('x',300000)=>1],'UTF-32BE','UTF-8');",
+])('bounds native encoded strings before constructing oversized results: %s', (call) => {
+  const result = run(`<?php ${call}echo 'never';`);
+  expect(result.kind === 'executed' && result.stdout).toMatch(/^\nFatal error: Allowed memory size/);
+  expect(result.kind === 'executed' && result.stdout).not.toContain('never');
+});
+
+test.each([
+  'strlen($a[]);',
+  'abs($a[]);',
+  'function f($x){} f($a[]);',
+  'strlen(string: $a[]);',
+  'function f(&$x,...$values){} f($a[], $b[]);',
+])('rejects append reads in known value arguments before output: %s', (source) => {
+  expect(run(`<?php echo 'before'; ${source}`).kind).toBe('compileError');
+});
+
+test.each(['ArrayIterator', 'ArrayObject'])('iterates native array storage in linear time: %s', (name) => {
+  vi.restoreAllMocks();
+  expect(run(`<?php $a=new ${name}(range(1,20000));$sum=0;foreach($a as $v)$sum+=$v;echo $sum;`)).toMatchObject({
+    kind: 'executed',
+    stdout: '200010000',
+  });
+});

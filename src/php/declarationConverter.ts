@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 565 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 574 -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import type { Node } from '@willbooster/web-tree-sitter';
 
@@ -387,18 +387,24 @@ export abstract class DeclarationConverter extends ConverterBase {
   }
 
   /** Rejects a literal default value the parameter's type can never hold, as PHP does at compile time. */
-  private checkDefaultType(node: Node, name: string, type: TypeDecl, value: Expr): void {
-    if (value.k !== 'lit' || value.v === null) return;
+  // code-gauge-allow functionCognitiveComplexity 27 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+  private checkDefaultType(node: Node, name: string, type: TypeDecl, value: Expr, property = false): void {
+    if (value.k !== 'lit' && value.k !== 'array') return;
+    if (value.k === 'lit' && value.v === null && !property) return;
     const literalType =
-      typeof value.v === 'bigint'
-        ? 'int'
-        : typeof value.v === 'number'
-          ? 'float'
-          : typeof value.v === 'boolean'
-            ? 'bool'
-            : typeof value.v === 'string'
-              ? 'string'
-              : undefined;
+      value.k === 'array'
+        ? 'array'
+        : value.v === null
+          ? 'null'
+          : typeof value.v === 'bigint'
+            ? 'int'
+            : typeof value.v === 'number'
+              ? 'float'
+              : typeof value.v === 'boolean'
+                ? String(value.v)
+                : typeof value.v === 'string'
+                  ? 'string'
+                  : undefined;
     if (literalType === undefined || defaultFits(type, literalType)) return;
     this.error(
       node,
@@ -652,7 +658,7 @@ export abstract class DeclarationConverter extends ConverterBase {
     }
   }
 
-  // code-gauge-allow functionNcss 36 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+  // code-gauge-allow functionNcss 39 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
   protected properties(member: Node, decl: ClassDecl, kind: ClassDecl['kind']): void {
     const attributes = member.childForFieldName('attributes');
     if (attributes) this.unsupported(attributes, '属性（#[...]）');
@@ -698,6 +704,8 @@ export abstract class DeclarationConverter extends ConverterBase {
           `readonly のプロパティには初期値を書けません（Readonly property ${decl.name}::$${name} cannot have default value）。`
         );
       }
+      const defaultExpr = defaultNode ? this.constantExpr(defaultNode, false) : undefined;
+      if (type && defaultExpr) this.checkDefaultType(element, name, type, defaultExpr, true);
       const prop: PropertyDeclAst = {
         name,
         visibility: modifiers.visibility ?? 'public',
@@ -705,7 +713,7 @@ export abstract class DeclarationConverter extends ConverterBase {
         isStatic: modifiers.isStatic,
         isReadonly,
         type,
-        defaultExpr: defaultNode ? this.constantExpr(defaultNode, false) : undefined,
+        defaultExpr,
         row: element.startPosition.row,
         isAbstract: modifiers.isAbstract,
         isFinal: modifiers.isFinal,
@@ -1015,12 +1023,14 @@ function referencesProperty(node: Node, name: string): boolean {
 
 /** Whether a literal of a scalar type may be the default value of a parameter of `type`; an int may stand for a float. */
 function defaultFits(type: TypeDecl, literalType: string): boolean {
+  if (literalType === 'null' && typeAllowsNull(type)) return true;
   if (type.k === 'inter') return false;
   if (type.k === 'union') return type.types.some((part) => defaultFits(part, literalType));
   const name = type.name;
   if (name === 'mixed' || name === literalType) return true;
   if (literalType === 'int' && name === 'float') return true;
-  if (literalType === 'bool') return name === 'true' || name === 'false';
+  if (literalType === 'true' || literalType === 'false') return name === 'bool';
+  if (literalType === 'array') return name === 'iterable';
   return false;
 }
 

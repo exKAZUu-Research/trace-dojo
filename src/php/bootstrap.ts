@@ -4,7 +4,7 @@ import { callTargetOf, closureFromCallable, closureTarget } from './callables';
 import { copyClosureData, invoke } from './calls';
 import { requireClass } from './classes';
 import { debugType } from './conversions';
-import { throwError } from './errors';
+import { throwError, warn } from './errors';
 import { collectGarbage } from './garbage';
 import { defineClass, installNatives, type NativeMethod } from './native';
 import { rt } from './runtime';
@@ -74,6 +74,7 @@ defineClass({
   methods: [{ signature: 'jsonSerialize(): mixed', impl: () => null, isAbstract: true }],
 });
 
+// code-gauge-allow functionCognitiveComplexity 16 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 function bindClosure(closure: PhpObject, newThis: Value, newScope: Value | undefined): Value {
   const data = closure.internal as ClosureData;
   let scope = data.scope;
@@ -84,7 +85,18 @@ function bindClosure(closure: PhpObject, newThis: Value, newScope: Value | undef
   }
   if (newThis !== null && !(newThis instanceof PhpObject)) return null;
   if (newThis instanceof PhpObject && data.isStatic && data.fn.kind === 'user' && data.fn.decl.isClosure) {
-    throwError('Error', 'Cannot bind an instance to a static closure');
+    warn('Cannot bind an instance to a static closure, this will be an error in PHP 9');
+    return null;
+  }
+  if (data.method && !data.method.isStatic && newThis === null) {
+    warn('Cannot unbind $this of method, this will be an error in PHP 9');
+    return null;
+  }
+  if (data.method && newThis instanceof PhpObject && !newThis.cls.isSubclassOf(data.method.scope)) {
+    warn(
+      `Cannot bind method ${data.method.scope.name}::${data.method.name}() to object of class ${newThis.cls.name}, this will be an error in PHP 9`
+    );
+    return null;
   }
   const runtime = rt();
   const bound = runtime.newObject(closure.cls);
@@ -149,7 +161,6 @@ function turtleOf(object: PhpObject): TurtleState {
   if (!state) throwError('Error', 'Turtle method called on an object that is not a turtle');
   return state;
 }
-
 // code-gauge-allow functionNcss 33 -- Transcribes PHP's algorithm for this function step by step, whose branches mirror PHP's.
 function defineTurtleMethods(): NativeMethod[] {
   const methods: NativeMethod[] = [

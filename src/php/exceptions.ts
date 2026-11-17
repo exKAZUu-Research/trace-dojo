@@ -89,7 +89,7 @@ function traceArrayText(trace: Value): string {
   return lines.join('\n');
 }
 
-function traceArg(value: Value): string {
+export function traceArg(value: Value): string {
   if (value === null) return 'NULL';
   switch (typeof value) {
     case 'boolean': {

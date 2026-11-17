@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 910 -- One converter of the statements and expressions, which share the converter state.
+// code-gauge-allow-file fileNcss 925 -- One converter of the statements and expressions, which share the converter state.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import type { Node } from '@willbooster/web-tree-sitter';
 
@@ -329,7 +329,9 @@ export class Converter extends DeclarationConverter {
       byRef = true;
       valueNode = valueNode.namedChildren[0];
     }
-    const value = valueNode.type === 'list_literal' ? this.listLiteral(valueNode) : this.writable(valueNode);
+    const value = ['list_literal', 'array_creation_expression'].includes(valueNode.type)
+      ? this.listLiteral(valueNode)
+      : this.writable(valueNode);
     const body = this.loopBody(() => this.blockOf(node.childrenForFieldName('body')));
     return { k: 'foreach', subject, key, value, byRef, body, row };
   }
@@ -922,7 +924,7 @@ export class Converter extends DeclarationConverter {
     return { k: 'const', name: this.resolveConstName(raw), row };
   }
 
-  // code-gauge-allow functionNcss 34 -- One case per grammar node kind, each converted where PHP gives it its own meaning.
+  // code-gauge-allow functionNcss 35 -- One case per grammar node kind, each converted where PHP gives it its own meaning.
   private functionCall(node: Node): Expr {
     const row = node.startPosition.row;
     const fnNode = node.childForFieldName('function') as Node;
@@ -950,8 +952,8 @@ export class Converter extends DeclarationConverter {
       }
       if (word === 'eval') this.unsupported(node, 'eval');
       if (word === 'die' || word === 'exit') {
-        const { args } = this.args(argumentsNode);
-        return { k: 'exit', e: args[0]?.e, row };
+        const { args, fcc } = this.args(argumentsNode);
+        if (!fcc) return { k: 'exit', e: args[0]?.e, row };
       }
       if (word === '__halt_compiler') this.unsupported(node, '__halt_compiler');
     }
@@ -1147,7 +1149,7 @@ export class Converter extends DeclarationConverter {
     return items;
   }
 
-  // code-gauge-allow functionCognitiveComplexity 21 -- One case per grammar node kind, each converted where PHP gives it its own meaning.
+  // code-gauge-allow functionCognitiveComplexity 24 -- One case per grammar node kind, each converted where PHP gives it its own meaning.
   // code-gauge-allow functionNcss 35 -- One case per grammar node kind, each converted where PHP gives it its own meaning.
   private listLiteral(node: Node): Expr {
     const row = node.startPosition.row;
@@ -1155,7 +1157,9 @@ export class Converter extends DeclarationConverter {
     let expectingItem = true;
     let keyed = false;
     let pendingKey: Expr | undefined;
-    for (const child of node.children) {
+    for (const child of node.children.flatMap((child) =>
+      child.type === 'array_element_initializer' ? child.children : [child]
+    )) {
       if (child.type === ',') {
         if (expectingItem) items.push(undefined);
         expectingItem = true;
@@ -1176,7 +1180,9 @@ export class Converter extends DeclarationConverter {
         byRef = true;
         target = child.namedChildren[0];
       }
-      const converted = target.type === 'list_literal' ? this.listLiteral(target) : this.writable(target);
+      const converted = ['list_literal', 'array_creation_expression'].includes(target.type)
+        ? this.listLiteral(target)
+        : this.writable(target);
       items.push({ key: pendingKey, target: converted, byRef });
       pendingKey = undefined;
       expectingItem = false;
@@ -1214,7 +1220,22 @@ export class Converter extends DeclarationConverter {
     return enc(this.removeIndent(raw, indent, end));
   }
 
+  private checkIndentKinds(raw: string, end: Node): void {
+    const lineStart = this.source.lastIndexOf('\n', end.startIndex - 1) + 1;
+    const closing = this.source.slice(lineStart, end.startIndex);
+    if (/ /.test(closing) && /\t/.test(closing))
+      this.error(end, 'Invalid indentation - tabs and spaces cannot be mixed');
+    const kind = closing[0];
+    if (!kind) return;
+    for (const line of raw.split('\n')) {
+      const leading = /^[ \t]*/.exec(line)?.[0] ?? '';
+      if (leading.slice(0, closing.length).includes(kind === ' ' ? '\t' : ' '))
+        this.error(end, 'Invalid indentation - tabs and spaces cannot be mixed');
+    }
+  }
+
   private removeIndent(raw: string, indent: number, end: Node): string {
+    this.checkIndentKinds(raw, end);
     if (indent === 0) return raw;
     const lines = raw.split('\n');
     return lines
@@ -1235,7 +1256,7 @@ export class Converter extends DeclarationConverter {
    * Converts a double-quoted string or heredoc, reading its literal text from the source between the interpolated
    * expressions, since the grammar leaves line breaks out of its content nodes.
    */
-  // code-gauge-allow functionNcss 58 -- One case per grammar node kind, each converted where PHP gives it its own meaning.
+  // code-gauge-allow functionNcss 59 -- One case per grammar node kind, each converted where PHP gives it its own meaning.
   private interpolated(node: Node): Expr {
     const row = node.startPosition.row;
     const isHeredoc = node.type === 'heredoc';
@@ -1248,6 +1269,7 @@ export class Converter extends DeclarationConverter {
     let cursor = isHeredoc ? container.startIndex : (children[0]?.endIndex ?? container.startIndex);
     let limit = isHeredoc ? container.endIndex : (children.at(-1)?.startIndex ?? container.endIndex);
     if (isHeredoc) {
+      this.checkIndentKinds(this.source.slice(cursor, limit), end as Node);
       // The body runs from the line after the opening marker to the line break before the closing one.
       if (this.source.startsWith('\r\n', cursor)) cursor += 2;
       else if (this.source[cursor] === '\n') cursor++;

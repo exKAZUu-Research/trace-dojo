@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 544 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 553 -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import { lower } from './bytes';
 import { callCallback, callTargetOf, callValue } from './callables';
@@ -29,12 +29,13 @@ import {
   throwError,
   warn,
 } from './errors';
+import { traceArg } from './exceptions';
 import { collectGarbage } from './garbage';
 import { cast, deprecatedConstant, iterate } from './interp';
 import { defineAlias, defineConstant, defineFunction, markInlined } from './native';
-import { toFloat, toInt, toStr } from './operators';
+import { toFloat, toInt, toKey, toStr } from './operators';
 import { printR, varDump, varExport } from './output';
-import { rt } from './runtime';
+import { ExitSignal, rt } from './runtime';
 import { formatPrintf } from './sprintf';
 import { constantKey, defineConstant as defineUserConstant } from './statements';
 import { setCallableCheck } from './types';
@@ -265,7 +266,8 @@ defineFunction('defined(string $constant_name): bool', ({ args }) => {
   const name = (args[0] as string).replace(/^\\/, '');
   if (name.includes('::')) {
     const [className, constName] = name.split('::');
-    return findClass(className)?.findConst(constName) !== undefined;
+    const constant = findClass(className)?.findConst(constName);
+    return constant !== undefined && classesModule.canAccessConstant(constant, rt().frame.scope);
   }
   return rt().constants.has(constantKey(name));
 });
@@ -307,6 +309,7 @@ defineFunction(
 defineFunction(
   'func_get_arg(int $position): mixed',
   ({ args }) => {
+    if (!rt().frame.fn) throwError('Error', 'func_get_arg() cannot be called from the global scope');
     const values = currentArgs();
     const position = Number(args[0]);
     if (position < 0 || position >= values.length) {
@@ -561,25 +564,23 @@ defineFunction(
 defineFunction('iterator_to_array(Traversable|array $iterator, bool $preserve_keys = true): array', ({ args }) => {
   const [iterable, preserveKeys = true] = args;
   const array = new PhpArray();
-  for (const [key, value] of iterate(iterable)) {
-    if (preserveKeys === true) {
-      if (typeof key !== 'bigint' && typeof key !== 'string')
-        throwError('TypeError', 'Cannot access offset of type ' + debugType(key) + ' on array');
-      array.set(normalizeKeyString(String(key)), value);
-    } else array.append(value);
+  for (const [key, value] of iterate(iterable, preserveKeys === true ? 'both' : 'value')) {
+    if (preserveKeys === true) array.set(toKey(key), value);
+    else array.append(value);
   }
   return array;
 });
 defineFunction('iterator_count(Traversable|array $iterator): int', ({ args }) => {
   let count = 0n;
-  for (const entry of iterate(args[0])) if (entry) count++;
+  const iterator = iterate(args[0], 'none');
+  while (!iterator.next().done) count++;
   return count;
 });
 defineFunction('iterator_apply(Traversable $iterator, callable $callback, ?array $args = null): int', ({ args }) => {
   let count = 0n;
   const extra = args[2] instanceof PhpArray ? args[2].values() : [];
-  for (const entry of iterate(args[0])) {
-    if (!entry) continue;
+  const iterator = iterate(args[0], 'none');
+  while (!iterator.next().done) {
     count++;
     if (callCallback(args[1], extra) !== true) break;
   }
@@ -653,6 +654,12 @@ defineFunction(
 
 // Miscellaneous ------------------------------------------------------------------------------------------------------
 
+defineFunction('exit(string|int $status = 0): never', ({ args }) => {
+  const status = args[0] ?? 0n;
+  if (typeof status === 'string') rt().echo(status);
+  throw new ExitSignal(typeof status === 'string' ? 0 : Number(status));
+});
+defineAlias('die', 'exit');
 defineFunction('phpversion(?string $extension = null): string|false', ({ args }) => (args[0] ? false : '8.5.12'));
 defineFunction('php_sapi_name(): string|false', () => 'cli');
 defineFunction('sleep(int $seconds): int', () => 0n);
@@ -660,13 +667,15 @@ defineFunction('usleep(int $microseconds): void', () => null);
 defineFunction('gc_collect_cycles(): int', () => BigInt(collectGarbage(rt(), true)));
 defineFunction('gc_enable(): void', () => null);
 defineFunction('gc_disable(): void', () => null);
-defineFunction('debug_print_backtrace(int $options = 0, int $limit = 0): void', () => {
-  const records = callStack.toReversed().slice(1);
+defineFunction('debug_print_backtrace(int $options = 0, int $limit = 0): void', ({ args }) => {
+  const options = Number(args[0] ?? 0n);
+  const limit = Number(args[1] ?? 0n);
+  const records = callStack.toReversed().slice(1, limit > 0 ? limit + 1 : undefined);
   rt().echo(
     records
       .map(
         (record, index) =>
-          `#${index} ${record.row === undefined ? '[internal function]' : `/main.php(${record.row + 1})`}: ${record.className ? `${record.className}${record.type}` : ''}${record.name}()\n`
+          `#${index} ${record.row === undefined ? '[internal function]' : `/main.php(${record.row + 1})`}: ${record.className ? `${record.className}${record.type}` : ''}${record.name}(${options & 2 ? '' : [...record.args.map(traceArg), ...(record.named ?? []).map(([name, value]) => `${name}: ${traceArg(value)}`)].join(', ')})\n`
       )
       .join('')
   );

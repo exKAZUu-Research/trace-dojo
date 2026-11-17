@@ -51,7 +51,8 @@ export class FatalError {
     readonly message: string,
     readonly row: number,
     /** Whether PHP ran out of memory, after which its trace shows only the innermost call. */
-    readonly exhausted = false
+    readonly exhausted = false,
+    readonly withTrace = true
   ) {
     if (exhausted && current) current.exhausted = true;
   }

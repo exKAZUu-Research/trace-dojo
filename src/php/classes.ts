@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 850 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 854 -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import type { ClassDecl, Expr, FunctionDecl, MethodDeclAst, PropertyDeclAst } from './ast';
 import builtinNames from './builtinNames.json';
@@ -1165,18 +1165,11 @@ export function readStaticProp(cls: PhpClass, name: string, scope: PhpClass | un
   return value;
 }
 
-// code-gauge-allow functionCognitiveComplexity 16 -- Follows PHP's class linking and property access rules in their order of checks.
 export function classConstant(cls: PhpClass, name: string, scope: PhpClass | undefined): Value {
   const constant = cls.findConst(name);
   if (!constant) throwError('Error', `Undefined constant ${cls.name}::${name}`);
-  if (constant.visibility !== 'public') {
-    const allowed =
-      scope !== undefined &&
-      (constant.visibility === 'private'
-        ? scope === constant.cls
-        : scope.isSubclassOf(constant.cls) || constant.cls.isSubclassOf(scope));
-    if (!allowed) throwError('Error', `Cannot access ${constant.visibility} constant ${cls.name}::${name}`);
-  }
+  if (!canAccessConstant(constant, scope))
+    throwError('Error', `Cannot access ${constant.visibility} constant ${cls.name}::${name}`);
   if (constant.value === undefined) {
     if (constant.evaluating)
       throwError('Error', `Cannot declare self-referencing constant ${constant.cls.name}::${name}`);
@@ -1201,6 +1194,16 @@ export function classConstant(cls: PhpClass, name: string, scope: PhpClass | und
   return share(constant.value as Value);
 }
 
+export function canAccessConstant(constant: ClassConst, scope: PhpClass | undefined): boolean {
+  return (
+    constant.visibility === 'public' ||
+    (scope !== undefined &&
+      (constant.visibility === 'private'
+        ? scope === constant.cls
+        : scope.isSubclassOf(constant.cls) || constant.cls.isSubclassOf(scope)))
+  );
+}
+
 export function objectToArray(object: PhpObject): PhpArray {
   const array = new PhpArray();
   for (const [key, slot] of object.props) {
@@ -1211,4 +1214,18 @@ export function objectToArray(object: PhpObject): PhpArray {
     array.setSlot(normalizeKeyString(arrayKey), copyValueSlot(slot));
   }
   return array;
+}
+
+export function requireClassScope(
+  scope: PhpClass | undefined,
+  word: 'self' | 'static' | 'parent',
+  context: 'access' | 'className' = 'access'
+): PhpClass {
+  if (scope) return scope;
+  throwError(
+    'Error',
+    context === 'className'
+      ? `Cannot use "${word}" in the global scope`
+      : `Cannot access "${word}" when no class scope is active`
+  );
 }

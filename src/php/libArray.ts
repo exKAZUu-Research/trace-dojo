@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 989 -- Keeps one PHP runtime concern and its shared helpers in one module.
+// code-gauge-allow-file fileNcss 996 -- Keeps one PHP runtime concern and its shared helpers in one module.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 // oxlint-disable unicorn/prefer-code-point -- PHP strings hold bytes as code units 0–255, which charCodeAt and fromCharCode read and write as they are.
 import { type Comparisons, type Entry, SortedWalk } from './arraySetWalk';
@@ -1258,18 +1258,14 @@ defineFunction('natsort(array &$array): true', (ctx) =>
 defineFunction('natcasesort(array &$array): true', (ctx) =>
   sortArray(ctx, 'natcasesort', (a, b) => naturalCompare(toStr(valueOf(a[1])), toStr(valueOf(b[1])), true), false)
 );
-// code-gauge-allow functionCognitiveComplexity 18 -- Transcribes PHP's algorithm for this function step by step, whose branches mirror PHP's.
-// code-gauge-allow functionNcss 32 -- Transcribes PHP's algorithm for this function step by step, whose branches mirror PHP's.
 defineFunction('array_multisort(&~$array, &~...$rest): bool', (ctx) => {
-  const columns: { ref: Ref; order: number; flags: bigint }[] = [];
+  const columns: { ref: Ref; order: number; flags: bigint; orderSet: boolean; modeSet: boolean }[] = [];
   for (const [index, value] of ctx.args.entries()) {
     if (value instanceof PhpArray) {
-      columns.push({ ref: ctx.refs[index] ?? new Ref(value), order: 1, flags: 0n });
+      columns.push({ ref: ctx.refs[index] ?? new Ref(value), order: 1, flags: 0n, orderSet: false, modeSet: false });
     } else if (typeof value === 'bigint' && columns.length > 0) {
       const column = columns.at(-1) as (typeof columns)[number];
-      if (value === 3n) column.order = -1;
-      else if (value === 4n) column.order = 1;
-      else column.flags = value;
+      setColumnFlag(column, value, index + 1);
     } else throwError('TypeError', `array_multisort(): Argument #${index + 1} must be an array or a sort flag`);
   }
   const size = (columns[0].ref.v as PhpArray).size;
@@ -1295,6 +1291,32 @@ defineFunction('array_multisort(&~$array, &~...$rest): bool', (ctx) => {
   }
   return true;
 });
+
+function setColumnFlag(
+  column: { order: number; flags: bigint; orderSet: boolean; modeSet: boolean },
+  value: bigint,
+  position: number
+): void {
+  if (value === 3n || value === 4n) {
+    if (column.orderSet)
+      throwError(
+        'TypeError',
+        `array_multisort(): Argument #${position} must be an array or a sort flag that has not already been specified`
+      );
+    column.orderSet = true;
+    column.order = value === 3n ? -1 : 1;
+  } else {
+    if (![0n, 1n, 2n, 5n, 6n, 10n, 14n].includes(value))
+      throwError('ValueError', `array_multisort(): Argument #${position} must be a valid sort flag`);
+    if (column.modeSet)
+      throwError(
+        'TypeError',
+        `array_multisort(): Argument #${position} must be an array or a sort flag that has not already been specified`
+      );
+    column.modeSet = true;
+    column.flags = value;
+  }
+}
 
 // The internal pointer -----------------------------------------------------------------------------------------------
 

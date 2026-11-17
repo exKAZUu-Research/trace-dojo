@@ -397,7 +397,7 @@ function tryStatement(statement: Extract<Stmt, { k: 'try' }>, seek?: string): Co
           : statement.catches.find((item) => item.body.some((inner) => containsLabel(inner, seek)));
       completion = inCatch ? execList(inCatch.body, seek) : execList(statement.body, seek);
     } catch (error) {
-      if (runtime.exhausted) throw error;
+      if (runtime.exhausted || error instanceof FatalError) throw error;
       if (!(error instanceof PhpThrow)) {
         if (statement.fin && !(error instanceof ExitSignal) && !(error instanceof ExecutionLimitError)) {
           pending = error;

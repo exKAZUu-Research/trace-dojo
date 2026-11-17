@@ -2,24 +2,36 @@
 import { callMethod } from './callables';
 import { declForKey, propNameOf } from './classes';
 import { formatFloat, formatFloatRepr } from './conversions';
-import { deprecated, warn } from './errors';
+import { deprecated, E_ERROR, E_WARNING, warn } from './errors';
+import { throwableText } from './exceptions';
 import { toStr } from './operators';
-import { FatalError, rt } from './runtime';
+import { FatalError, PhpThrow, rt } from './runtime';
 import { describeType } from './types';
 import { type ClosureData, isClosure, PhpArray, PhpObject, Ref, type Slot, UNINIT, type Value } from './values';
 
 /** The properties an object shows to `var_dump` and `print_r`: `__debugInfo`'s array, or its property table. */
-// code-gauge-allow functionCognitiveComplexity 20 -- Transcribes PHP's algorithm for this function step by step, whose branches mirror PHP's.
+// code-gauge-allow functionCognitiveComplexity 30 -- Transcribes PHP's algorithm for this function step by step, whose branches mirror PHP's.
+// code-gauge-allow functionNcss 34 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 function debugEntries(object: PhpObject): [string | bigint, Slot, string][] {
   if (object.cls.findMethod('__debuginfo')) {
-    const info = callMethod(object, '__debugInfo', []);
+    let info: Value;
+    try {
+      info = callMethod(object, '__debugInfo', []);
+    } catch (error) {
+      if (!(error instanceof PhpThrow)) throw error;
+      const line = error.object.props.get('line');
+      if (rt().silence === 0 && (rt().errorReporting & E_WARNING) !== 0n)
+        rt().echo(
+          `\nWarning: Uncaught ${throwableText(error.object)}\n  thrown in /main.php on line ${typeof line === 'bigint' ? line : 0}\n`
+        );
+      failDebugInfo();
+    }
     if (info === null) {
       deprecated(`Returning null from ${object.cls.name}::__debugInfo() is deprecated, return an empty array instead`);
       return [];
     }
-    if (!(info instanceof PhpArray)) throw new FatalError('__debuginfo() must return an array', rt().row);
-    if (info instanceof PhpArray)
-      return [...info.entries()].map(([key, value]) => [key, value, typeof key === 'string' ? `"${key}"` : `${key}`]);
+    if (!(info instanceof PhpArray)) failDebugInfo();
+    return [...info.entries()].map(([key, value]) => [key, value, typeof key === 'string' ? `"${key}"` : `${key}`]);
   }
   if (isClosure(object)) return closureDebug(object);
   const internal = object.internal as { debugEntries?: () => [string | bigint, Value][] } | undefined;
@@ -38,6 +50,15 @@ function debugEntries(object: PhpObject): [string | bigint, Slot, string][] {
     entries.push([name, slot, label]);
   }
   return entries;
+}
+
+function failDebugInfo(): never {
+  throw new FatalError(
+    (rt().errorReporting & E_ERROR) !== 0n ? '__debuginfo() must return an array' : '',
+    rt().row,
+    false,
+    false
+  );
 }
 
 /** The label `var_dump` shows for a key of a debug table, unmangling a private or protected property name. */
