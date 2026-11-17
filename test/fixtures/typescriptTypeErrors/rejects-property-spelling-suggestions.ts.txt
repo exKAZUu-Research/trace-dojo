@@ -1,0 +1,10 @@
+const s = "abc";
+console.log(s.lenght);
+const xs = [1];
+xs.lenght = 0;
+console.log(xs.psuh);
+class P { name = "a"; description = "d"; }
+console.log(new P().nmae, new P().descrption, new P().Name);
+const o = { count: 1, value: 2 };
+console.log(o.cuont, o.vlaue, o.valeu, o.COUNT);
+console.log(Math.florr(1), "x".toUppercase());

@@ -4,6 +4,7 @@ import { unsupportedMessage } from '../unsupported';
 import type { Checker } from './checker';
 import type { State } from './flow';
 import { printedPropertyName } from './print';
+import { spellingSuggestion } from './spelling';
 import { chainObject, isNumericName, isOptionalChain, skipParentheses } from './syntax';
 import {
   anyType,
@@ -350,21 +351,13 @@ export class MemberChecker {
     );
   }
 
+  /** A property of the type, or of a primitive's wrapper, as `length` of a string, that `name` may misspell. */
   private suggestProperty(type: Type, name: string): string | undefined {
-    const candidates = (type.kind === 'union' ? [] : [...this.c.structureOf(type).properties.keys()]).filter(
+    if (type.kind === 'union') return undefined;
+    const candidates = [...this.c.structureOf(this.c.apparentType(type)).properties.keys()].filter(
       (candidate) => !candidate.startsWith('__')
     );
-    let best: string | undefined;
-    let bestDistance = Math.max(2, Math.floor(name.length * 0.34));
-    for (const candidate of candidates) {
-      if (Math.abs(candidate.length - name.length) > bestDistance) continue;
-      const distance = editDistance(candidate.toLowerCase(), name.toLowerCase());
-      if (candidate.toLowerCase() === name.toLowerCase() || distance < bestDistance) {
-        best = candidate;
-        bestDistance = distance;
-      }
-    }
-    return best;
+    return spellingSuggestion(name, candidates);
   }
 
   elementAccess(node: TreeNode): Type {
@@ -485,20 +478,6 @@ export class MemberChecker {
   private indexedTypeOfMembers(access: IndexAccess, objectType: UnionType, indexType: Type): Type {
     return unionOf(objectType.types.map((member) => this.indexedTypeAt(access, member, indexType)));
   }
-}
-
-function editDistance(a: string, b: string): number {
-  const previous = Array.from({ length: b.length + 1 }, (_, index) => index);
-  for (let i = 1; i <= a.length; i++) {
-    let diagonal = previous[0];
-    previous[0] = i;
-    for (let j = 1; j <= b.length; j++) {
-      const above = previous[j];
-      previous[j] = Math.min(previous[j] + 1, previous[j - 1] + 1, diagonal + (a[i - 1] === b[j - 1] ? 0 : 1));
-      diagonal = above;
-    }
-  }
-  return previous[b.length];
 }
 
 /**
