@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 524 -- Holds the types of classes with `this`, `super`, and accessibility, which all read the class information.
+// code-gauge-allow-file fileNcss 528 -- Holds the types of classes with `this`, `super`, and accessibility, which all read the class information.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import { typesAtConstructorExit } from './assignmentFlow';
@@ -501,10 +501,19 @@ export class ClassChecker {
       );
       return this.c.literals.widenDeclared(valueType, hasToken(member, 'readonly'));
     }
+    const types = this.constructorExitTypes(member, nameNode);
+    // A field the constructor leaves `undefined` or `null` on every path has no type to infer.
+    if (!isIntrinsic(this.c.relations.removeNullish(unionOf(types)), 'never')) return unionOf(types);
+    if (!this.c.isLibrary(member)) this.c.error(nameNode, `メンバー ${nameNode.text} の型が暗黙に any になります。`);
+    return anyType;
+  }
+
+  /** The types an instance field holds where its class's constructor finishes. */
+  private constructorExitTypes(member: TreeNode, nameNode: TreeNode): Type[] {
     const classNode = member.parent?.parent;
     const body =
       classNode && !hasToken(member, 'static') ? this.constructorNode(classNode)?.childForFieldName('body') : undefined;
-    const types = body
+    return body
       ? typesAtConstructorExit(
           body,
           nameNode.text,
@@ -516,10 +525,6 @@ export class ClassChecker {
           () => this.c.budget.spend()
         )
       : [];
-    // A field the constructor leaves `undefined` or `null` on every path has no type to infer.
-    if (!isIntrinsic(this.c.relations.removeNullish(unionOf(types)), 'never')) return unionOf(types);
-    if (!this.c.isLibrary(member)) this.c.error(nameNode, `メンバー ${nameNode.text} の型が暗黙に any になります。`);
-    return anyType;
   }
 
   private accessorType(getter: TreeNode | undefined, setter: TreeNode | undefined): Type {

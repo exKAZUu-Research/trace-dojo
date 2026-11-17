@@ -11,6 +11,7 @@ import {
   isIntrinsic,
   isPropertyKeyLiteral,
   literalType,
+  type ObjectType,
   regularOf,
   simpleProperty,
   stringType,
@@ -334,28 +335,27 @@ export class BindingPatterns {
 
   elementAt(node: TreeNode, type: Type, index: number): Type {
     if (isAnyLike(type)) return anyType;
-    if (type.kind === 'object' && type.objectKind === 'tuple') {
-      const elements = type.tuple?.elements ?? [];
-      const restIndex = elements.findIndex((member) => member.rest);
-      // At or past a rest element, any of the rest's values or the elements after it may take the position.
-      if (restIndex !== -1 && index >= restIndex && restIndex < elements.length - 1)
-        return this.valuesFrom(elements, restIndex);
-      const element = elements[index];
-      if (!element) {
-        const rest = elements.find((member) => member.rest);
-        if (rest) return unionOf([this.c.restElementType(rest.type), undefinedType]);
-        // An element with a default, as in `const [a = 1] = []`, takes the default where the tuple ends.
-        if (node.type === 'assignment_pattern') return undefinedType;
-        this.c.error(
-          node,
-          `長さ ${elements.length} のタプル型 '${this.c.print(type)}' には、インデックス ${index} の要素がありません。`
-        );
-        return errorType;
-      }
-      if (element.rest) return this.c.restElementType(element.type);
-      return element.optional ? unionOf([element.type, undefinedType]) : element.type;
-    }
+    if (type.kind === 'object' && type.objectKind === 'tuple') return this.tupleElementAt(node, type, index);
     return this.iteratedType(node, type);
+  }
+
+  private tupleElementAt(node: TreeNode, type: ObjectType, index: number): Type {
+    const elements = type.tuple?.elements ?? [];
+    const restIndex = elements.findIndex((member) => member.rest);
+    // At or past a rest element, any of the rest's values or the elements after it may take the position.
+    if (restIndex !== -1 && index >= restIndex && restIndex < elements.length - 1)
+      return this.valuesFrom(elements, restIndex);
+    const element = elements[index];
+    if (element?.rest) return this.c.restElementType(element.type);
+    if (element) return element.optional ? unionOf([element.type, undefinedType]) : element.type;
+    if (restIndex !== -1) return unionOf([this.c.restElementType(elements[restIndex].type), undefinedType]);
+    // An element with a default, as in `const [a = 1] = []`, takes the default where the tuple ends.
+    if (node.type === 'assignment_pattern') return undefinedType;
+    this.c.error(
+      node,
+      `長さ ${elements.length} のタプル型 '${this.c.print(type)}' には、インデックス ${index} の要素がありません。`
+    );
+    return errorType;
   }
 
   restOfIterable(pattern: TreeNode, type: Type, from: number): Type {

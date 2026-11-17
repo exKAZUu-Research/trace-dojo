@@ -176,13 +176,7 @@ function defineFunction(builder: RealmBuilder): void {
   );
   builder.method(functionPrototype, 'apply', 2, ({ runtime, thisValue, args, callRow }) => {
     // The receiver is checked before the argument list, whose getters may have effects.
-    if (!isCallable(thisValue)) {
-      const kind = thisValue === null ? 'null' : typeof thisValue === 'object' ? 'an object' : `a ${typeof thisValue}`;
-      runtime.throwError(
-        'TypeError',
-        `Function.prototype.apply was called on ${runtime.describePlain(thisValue)}, which is ${thisValue === undefined ? 'undefined' : kind} and not a function`
-      );
-    }
+    if (!isCallable(thisValue)) throwNotApplicable(runtime, thisValue);
     return runtime.call(thisValue, args[0], listFromArrayLike(runtime, args[1]), callRow);
   });
   builder.method(functionPrototype, 'bind', 1, ({ runtime, thisValue, args }) => {
@@ -224,6 +218,19 @@ function defineFunction(builder: RealmBuilder): void {
       return runtime.throwError('TypeError', 'Function.prototype.toString requires a function');
     return runtime.functionSource(thisValue);
   });
+}
+
+function throwNotApplicable(runtime: Runtime, receiver: Value): never {
+  const kind =
+    receiver === undefined || receiver === null
+      ? String(receiver)
+      : typeof receiver === 'object'
+        ? 'an object'
+        : `a ${typeof receiver}`;
+  return runtime.throwError(
+    'TypeError',
+    `Function.prototype.apply was called on ${runtime.describePlain(receiver)}, which is ${kind} and not a function`
+  );
 }
 
 const errorNames: ErrorName[] = [
