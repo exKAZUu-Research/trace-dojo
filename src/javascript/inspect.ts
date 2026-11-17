@@ -158,11 +158,16 @@ export function formatNumber(value: number): string {
   return Object.is(value, -0) ? '-0' : String(value);
 }
 
-/** Node.js's numericSeparator: `_` between each three digits of an integer part, as `1_234_567.891`. */
+/**
+ * Node.js's numericSeparator: `_` between each three digits of an integer part from its end and of a fractional part
+ * from its start, as `1_234_567.891_2`.
+ */
 function separateDigits(text: string): string {
-  const match = /^(-?)(\d+)(.*)$/.exec(text);
-  if (!match || match[3].includes('e')) return text;
-  return `${match[1]}${match[2].replaceAll(/\B(?=(\d{3})+$)/g, '_')}${match[3]}`;
+  const match = /^(-?)(\d+)(?:\.(\d+))?$/.exec(text);
+  if (!match) return text;
+  const [, sign, integer, fraction] = match;
+  const separatedFraction = fraction === undefined ? '' : `.${fraction.replaceAll(/(\d{3})(?=\d)/g, '$1_')}`;
+  return `${sign}${integer.replaceAll(/\B(?=(\d{3})+$)/g, '_')}${separatedFraction}`;
 }
 
 function formatString(ctx: Context, text: string): string {
