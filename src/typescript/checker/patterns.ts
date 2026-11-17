@@ -88,13 +88,18 @@ export class BindingPatterns {
    * parameter defaults: a generic type may by its constraint, while `any`, `unknown`, and `void` may not, as
    * TypeScript 7 decides.
    */
-  defaultMayBeUndefined(type: Type, seen = new Set<Type>()): boolean {
-    if (seen.has(type)) return false;
-    seen.add(type);
-    if (type.kind === 'union') return type.types.some((member) => this.defaultMayBeUndefined(member, seen));
-    if (type.kind === 'intersection') return type.types.every((member) => this.defaultMayBeUndefined(member, seen));
-    const constraint = this.c.baseConstraint(type);
-    return constraint === type ? isIntrinsic(type, 'undefined') : this.defaultMayBeUndefined(constraint, seen);
+  defaultMayBeUndefined(type: Type, path = new Set<Type>()): boolean {
+    // Only a type on the path being followed is a cycle; one that two operands share is answered for each.
+    if (path.has(type)) return false;
+    path.add(type);
+    try {
+      if (type.kind === 'union') return type.types.some((member) => this.defaultMayBeUndefined(member, path));
+      if (type.kind === 'intersection') return type.types.every((member) => this.defaultMayBeUndefined(member, path));
+      const constraint = this.c.baseConstraint(type);
+      return constraint === type ? isIntrinsic(type, 'undefined') : this.defaultMayBeUndefined(constraint, path);
+    } finally {
+      path.delete(type);
+    }
   }
 
   /**
