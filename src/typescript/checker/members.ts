@@ -6,6 +6,7 @@ import type { State } from './flow';
 import { printedPropertyName } from './print';
 import { spellingSuggestion } from './spelling';
 import { chainObject, isNumericName, isOptionalChain, skipParentheses } from './syntax';
+import { tupleElementBeyond } from './tupleIndexes';
 import {
   anyType,
   errorType,
@@ -464,8 +465,7 @@ export class MemberChecker {
     if (!property)
       return typeof value === 'symbol'
         ? this.c.structureOf(objectType).symbolIndex?.type
-        : (this.c.typeOperators.tupleElementBeyond(objectType, name, access.indexNode) ??
-            this.indexSignatureType(objectType, name));
+        : (tupleElementBeyond(this.c, objectType, name, access.indexNode) ?? this.indexSignatureType(objectType, name));
     this.checkPropertyAvailability(access.indexNode, objectType, name, property);
     this.c.expressions.expandos.checkAssignedBefore(access.node, access.indexNode, property);
     // `o["secret"]` reads a private or protected member, which TypeScript leaves as a way around its access checks.
