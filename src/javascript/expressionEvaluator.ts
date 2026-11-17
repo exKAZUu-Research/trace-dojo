@@ -315,6 +315,7 @@ export abstract class ExpressionEvaluator extends EvaluatorBase {
     if (resolved === SHORT_CIRCUIT) return SHORT_CIRCUIT;
     const { fn, thisValue } = resolved;
     if (expression.optional && (fn === undefined || fn === null)) return SHORT_CIRCUIT;
+    if (expression.isTaggedTemplate) runtime.checkTag(fn);
     const { temporaries } = runtime.frame;
     const held = temporaries.length;
     temporaries.push(fn, thisValue);
@@ -322,7 +323,6 @@ export abstract class ExpressionEvaluator extends EvaluatorBase {
       // The arguments are evaluated before the callee is checked, as in JavaScript.
       const args = this.evaluateArguments(expression.args);
       if (!isCallable(fn)) return runtime.throwError('TypeError', `${expression.calleeText} is not a function`);
-      if (expression.isTaggedTemplate) runtime.checkTag(fn);
       appendAll(temporaries, args);
       return runtime.call(fn, thisValue, args, expression.row);
     } finally {
