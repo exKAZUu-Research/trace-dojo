@@ -18,6 +18,7 @@ import {
   type Property,
   regularOf,
   stringType,
+  symbolType,
   type Type,
   undefinedType,
   unionOf,
@@ -68,6 +69,11 @@ export class OperatorChecker {
           const value = numberValue(argument.text);
           return freshLiteralType(typeof value === 'bigint' ? -value : -value);
         }
+        // TypeScript rejects a numeric unary operator on a value that may be a symbol, even through a constraint.
+        if (this.maySymbol(type)) {
+          this.c.error(argument, `演算子 '${operator}' は型 'symbol' には使えません。`);
+          return numberType;
+        }
         if (operator === '+') {
           if (this.isBigintLike(type)) this.c.error(argument, "演算子 '+' は型 'bigint' には使えません。");
           return numberType;
@@ -84,6 +90,13 @@ export class OperatorChecker {
         return anyType;
       }
     }
+  }
+
+  private maySymbol(type: Type): boolean {
+    if (isAnyLike(type)) return false;
+    const constraint = this.c.baseConstraint(type);
+    const members = constraint.kind === 'union' ? constraint.types : [constraint];
+    return members.some((member) => !isAnyLike(member) && this.c.relations.isAssignable(member, symbolType));
   }
 
   private checkDelete(argument: TreeNode): void {
