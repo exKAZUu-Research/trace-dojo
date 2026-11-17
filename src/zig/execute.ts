@@ -6,7 +6,7 @@ import { type CompiledProgram, compileSource } from './compiler';
 import { ExitSignal, processInit } from './library/std';
 import { withMemoryAccounting } from './memoryAccounting';
 import { MemoryFault } from './memoryFault';
-import { Frame, OutOfMemory, Runtime, StackOverflow, ZigPanic } from './runtime';
+import { type Frame, OutOfMemory, Runtime, StackOverflow, ZigPanic } from './runtime';
 import { ErrorValue } from './values';
 
 export function executeZigProgram(source: string, input?: ProgramInput): ProgramExecution {
@@ -50,20 +50,15 @@ function executeMain(runtime: Runtime, program: CompiledProgram, onEnd?: (frame:
   try {
     const body = main.body;
     if (!body) throw new Error('main is not compiled');
-    const frame = new Frame(runtime, main, undefined, main.slotCount);
-    if (program.mainTakesInit) frame.slots[main.paramSlots[0]] = processInit();
-    runtime.pushFrame(frame);
-    let result;
-    try {
-      result = body(frame);
-    } finally {
+    const result = runtime.withFrame(main, undefined, undefined, (frame) => {
+      if (program.mainTakesInit) frame.slots[main.paramSlots[0]] = processInit();
       try {
+        return body(frame);
+      } finally {
         onEnd?.(frame);
         runtime.collectGarbage();
-      } finally {
-        runtime.popFrame();
       }
-    }
+    });
     if (result instanceof ErrorValue) uncaughtException = `error: ${result.name}`;
   } catch (error) {
     uncaughtException = describeUncaught(error);

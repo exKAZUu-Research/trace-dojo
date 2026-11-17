@@ -5,7 +5,7 @@ import { BuiltinCompiler } from './builtins';
 import { constantKey } from './expressions';
 import { FunctionInstance } from './functions';
 import { callableNative } from './nativeAdapter';
-import { Frame, Jump } from './runtime';
+import { type Frame, Jump } from './runtime';
 import {
   addDecls,
   copyForFrame,
@@ -550,24 +550,19 @@ export abstract class CallCompiler extends BuiltinCompiler {
     const { runtime: rt } = caller;
     rt.spend();
     if (fn.native) return copyForFrame(caller, fn.native(args, caller), fn.returnType);
-    if (!fn.body) return panic('関数がまだ準備できていません。');
+    const body = fn.body;
+    if (!body) return panic('関数がまだ準備できていません。');
     const origin = caller.fn.internal ? caller.nativeCallRow : callRow;
-    const frame = new Frame(
-      rt,
+    const result = rt.withFrame(
       fn,
       fn.internal ? undefined : (origin ?? callRow),
-      fn.slotCount,
-      fn.internal ? origin : undefined
+      fn.internal ? origin : undefined,
+      (frame) => {
+        for (const [index, slot] of fn.paramSlots.entries())
+          frame.slots[slot] = argumentsHaveStorage ? args[index] : copyForFrame(frame, args[index], fn.params[index]);
+        return body(frame);
+      }
     );
-    for (const [index, slot] of fn.paramSlots.entries())
-      frame.slots[slot] = argumentsHaveStorage ? args[index] : copyForFrame(frame, args[index], fn.params[index]);
-    rt.pushFrame(frame);
-    let result: Value;
-    try {
-      result = fn.body(frame);
-    } finally {
-      rt.popFrame();
-    }
     if (fn.isAtomic) rt.steps.completeAtomicCall();
     if (fn.returnType.kind === 'noreturn') panic(PANIC.noreturnReturned);
     return result;

@@ -53,8 +53,6 @@ export class Frame implements Slots, TracedFrame {
     slotCount: number,
     readonly nativeCallRow?: number
   ) {
-    runtime.reserveStorage(slotCount);
-    runtime.spend(Math.ceil(slotCount / 16));
     this.slots = Array.from({ length: slotCount }, () => UNASSIGNED);
   }
 }
@@ -76,6 +74,7 @@ export class Runtime {
   readonly globals: { cell: Slots; type: Type }[] = [];
   private readonly turtleReachability = new TurtleReachability((cost) => this.spend(cost));
   private allocated = 0;
+  private activeFrameSlots = 0;
 
   constructor(input?: ProgramInput, budget = new ExecutionBudget()) {
     this.budget = budget;
@@ -109,22 +108,34 @@ export class Runtime {
   }
 
   allocate(count: number): void {
+    if (!this.canAllocate(count)) throw new OutOfMemory();
     this.allocated += count;
-    if (this.allocated > LIMITS.maxSlots || count > LIMITS.maxSlots) throw new OutOfMemory();
   }
 
   /** Whether allocating `count` more slots stays within the limit, for allocators that return `error.OutOfMemory`. */
   canAllocate(count: number): boolean {
-    return this.allocated + count <= LIMITS.maxSlots && count <= LIMITS.maxSlots;
+    return this.allocated + this.activeFrameSlots + count <= LIMITS.maxSlots && count <= LIMITS.maxSlots;
   }
 
-  pushFrame(frame: Frame): void {
+  withFrame<T>(
+    fn: FunctionInstance,
+    callRow: number | undefined,
+    nativeCallRow: number | undefined,
+    run: (frame: Frame) => T
+  ): T {
     if (this.frames.length >= LIMITS.maxCallDepth) throw new StackOverflow();
+    const slots = fn.slotCount;
+    if (!this.canAllocate(slots)) throw new ExecutionLimitError('storage');
+    this.spend(Math.ceil(slots / 16));
+    const frame = new Frame(this, fn, callRow, slots, nativeCallRow);
+    this.activeFrameSlots += slots;
     this.frames.push(frame);
-  }
-
-  popFrame(): void {
-    this.frames.pop();
+    try {
+      return run(frame);
+    } finally {
+      this.frames.pop();
+      this.activeFrameSlots -= slots;
+    }
   }
 
   /** Removes the turtles that no variable reaches any longer, as Java's garbage collector does. */

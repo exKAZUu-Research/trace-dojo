@@ -8438,6 +8438,19 @@ test('recursive frames reserve slots for locals in untaken branches', () => {
 });
 
 test.each([
+  [10, 100_001],
+  [500, 2001],
+])('sequential calls release each frame with %i locals', (count, calls) => {
+  const locals = Array.from({ length: count }, (_, index) => `const a${index}:u8=0;_=a${index};`).join('');
+  const source = `const std=@import("std");fn f(n:u16)u8{if(n==65535){${locals}}return 1;}pub fn main()void{var sum:usize=0;for(0..${calls})|_|sum+=f(0);std.debug.print("{}",.{sum});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: String(calls),
+    uncaughtException: undefined,
+  });
+});
+
+test.each([
   ['std.mem.count(u8,&a,"aa")', '100000'],
   ['std.mem.containsAtLeast(u8,&a,100000,"aa")', 'true'],
   ['std.mem.replacementSize(u8,&a,"aa","b")', '100000'],
