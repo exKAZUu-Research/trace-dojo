@@ -359,10 +359,15 @@ export class OperatorChecker {
     const r = regularOf(rightType);
     if (isAnyLike(l) || isAnyLike(r)) return;
     if (isNullishIntrinsic(l) || isNullishIntrinsic(r)) return;
-    if (this.c.relations.isComparable(this.comparableForm(l), this.comparableForm(r))) return;
+    const overlaps = (a: Type, b: Type): boolean =>
+      this.c.relations.isComparable(this.comparableForm(a), this.comparableForm(b));
+    if (overlaps(l, r)) return;
+    // As TypeScript does, the message names the operands' base types when those do not overlap either.
+    const [leftBase, rightBase] = [baseTypeOfLiteral(l), baseTypeOfLiteral(r)];
+    const [shownLeft, shownRight] = overlaps(leftBase, rightBase) ? [l, r] : [leftBase, rightBase];
     this.c.error(
       node,
-      `この比較は意図したものではないようです。型 '${this.c.print(l)}' と型 '${this.c.print(r)}' には重なりがありません。`
+      `この比較は意図したものではないようです。型 '${this.c.print(shownLeft)}' と型 '${this.c.print(shownRight)}' には重なりがありません。`
     );
   }
 
@@ -625,4 +630,12 @@ function syntacticNullishness(node: TreeNode): 'always' | 'never' | 'sometimes' 
       return 'never';
     }
   }
+}
+
+/** TypeScript's base type of a literal type: its primitive, or `string` for a template literal or string mapping. */
+function baseTypeOfLiteral(type: Type): Type {
+  return mapType(type, (member) => {
+    if (member.kind === 'literal' && typeof member.value !== 'symbol') return primitiveOfLiteral(member);
+    return member.kind === 'templateLiteral' || member.kind === 'stringMapping' ? stringType : member;
+  });
 }
