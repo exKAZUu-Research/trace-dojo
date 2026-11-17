@@ -599,11 +599,7 @@ export class Checker {
             simpleProperty(String(index), member.type, { optional: member.optional, readonly })
           );
         }
-        const fixedLength = flat.every((member) => !member.rest && !member.optional);
-        properties.set(
-          'length',
-          simpleProperty('length', fixedLength ? literalType(flat.length) : numberType, { readonly: true })
-        );
+        properties.set('length', simpleProperty('length', tupleLengthType(flat), { readonly }));
         structure = { ...base, properties };
         return structure;
       },
@@ -907,4 +903,11 @@ function flattenTupleElements(elements: TupleElement[]): TupleElement[] {
       ? (element.type.tuple?.elements ?? [])
       : [element]
   );
+}
+
+/** The lengths a tuple may have: any with a rest element, else each from its required elements' count to all. */
+function tupleLengthType(elements: TupleElement[]): Type {
+  if (elements.some((element) => element.rest)) return numberType;
+  const required = elements.filter((element) => !element.optional).length;
+  return unionOf(Array.from({ length: elements.length - required + 1 }, (_, offset) => literalType(required + offset)));
 }
