@@ -103,6 +103,10 @@ function view(node: TreeNode): ViewNode {
     case 'field_definition': {
       return generic(node, 'field_definition');
     }
+    case 'undefined': {
+      // tsx's esbuild emits `undefined` as `(void 0)`, which V8 then names in errors.
+      return leaf(node, 'undefined', '(void 0)');
+    }
     default: {
       return typeDeclarations.has(node.type) ? leaf(node, 'empty_statement') : generic(node, node.type);
     }

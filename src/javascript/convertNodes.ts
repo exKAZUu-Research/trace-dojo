@@ -113,10 +113,13 @@ function printedCallee(node: Node): string | undefined {
         .join(',')}]`;
     }
     case 'null':
-    case 'undefined':
     case 'true':
     case 'false': {
       return node.type;
+    }
+    case 'undefined': {
+      // As written, or as a compiler emitted it.
+      return node.text;
     }
     case 'call_expression': {
       return `${calleeText(field(node, 'function'))}(...)`;

@@ -42,7 +42,7 @@ export abstract class ExpressionConverter extends ConverterBase {
     false: (node) => ({ kind: 'literal', value: false, row: rowOf(node) }),
     // oxlint-disable-next-line unicorn/no-null -- JavaScript null is a value of the interpreted language.
     null: (node) => ({ kind: 'literal', value: null, row: rowOf(node) }),
-    undefined: (node) => ({ kind: 'identifier', name: nameOf(node), row: rowOf(node) }),
+    undefined: (node) => ({ kind: 'identifier', name: 'undefined', row: rowOf(node) }),
     identifier: (node) => this.identifierRead(node),
     this: (node) => ({ kind: 'this', row: rowOf(node) }),
     super: (node) => fail(node, 'super は super(...) か super.メソッド名 の形でしか書けません。'),
