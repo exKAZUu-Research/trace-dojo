@@ -1,0 +1,9 @@
+function update<T extends object>(obj: T, key: keyof T, value: T[keyof T]): Partial<T> {
+  const changes: Partial<T> = {};
+  changes[key] = value;
+  return changes;
+}
+console.log(update({ a: 1 }, "a", 2));
+class C<E> { ls: Partial<E> = {}; }
+class Emitter<E extends Record<string, any>> { private ls: { [K in keyof E]?: ((e: E[K]) => void)[] } = {}; }
+function h<K extends string>() { const x: { [P in K]?: number } = {}; return x; }

@@ -9,6 +9,8 @@ import {
   type Structure,
   trueType,
   type Type,
+  undefinedType,
+  unionOf,
   uniqueSymbolName,
 } from './types';
 
@@ -133,7 +135,11 @@ export class Printer {
       case 'mapped': {
         const info = type.mapped;
         if (!info) return '{}';
-        return `{ [${info.typeParameter.name} in ${this.print(info.constraint)}]: ${this.print(info.template)}; }`;
+        const readonly = info.readonlyModifier ? `${info.readonlyModifier === '-' ? '-' : ''}readonly ` : '';
+        const optional = info.optionalModifier ? `${info.optionalModifier === '-' ? '-' : ''}?` : '';
+        const as = info.nameType ? ` as ${this.print(info.nameType)}` : '';
+        const template = info.optionalModifier === '+' ? unionOf([info.template, undefinedType]) : info.template;
+        return `{ ${readonly}[${info.typeParameter.name} in ${this.print(info.constraint)}${as}]${optional}: ${this.print(template)}; }`;
       }
       default: {
         return this.printAnonymous(type);

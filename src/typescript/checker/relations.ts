@@ -261,7 +261,11 @@ export class Relations {
       if (['null', 'undefined', 'void', 'unknown'].includes(s.name)) return false;
       // `object` has the members of `Object`.
       if (s.name === 'object')
-        return this.isEmptyObjectType(t) || this.objectRelated(this.c.globalType('Object'), t, relation);
+        return (
+          this.isEmptyObjectType(t) ||
+          isOptionalMappedType(t) ||
+          this.objectRelated(this.c.globalType('Object'), t, relation)
+        );
     }
     if (s.kind === 'literal' || s.kind === 'intrinsic' || s.kind === 'templateLiteral' || s.kind === 'stringMapping') {
       // A primitive has the members of its boxing interface.
@@ -377,7 +381,11 @@ export class Relations {
   /** Whether an object type has no members, as `{}` does, which every non-nullish value is assignable to. */
   isEmptyObjectType(type: Type): boolean {
     if (type.kind !== 'object') return false;
-    if (type.objectKind === 'interface' && type.name === 'Object') return true;
+    return (type.objectKind === 'interface' && type.name === 'Object') || this.hasNoMembers(type);
+  }
+
+  private hasNoMembers(type: ObjectType): boolean {
+    if (type.objectKind === 'mapped') return false;
     const structure = type.resolve();
     return (
       structure.properties.size === 0 &&
@@ -425,6 +433,8 @@ export class Relations {
   private objectRelated(source: Type, target: ObjectType, relation: Relation): boolean {
     if (target.objectKind === 'mapped') {
       const { mapped } = target;
+      // Every property of a mapped type that adds `?` is optional, so an object without members holds what it does.
+      if (isOptionalMappedType(target) && source.kind === 'object' && this.hasNoMembers(source)) return true;
       // `{ [P in keyof S]: S[P] }` with its optionality kept holds what `S` does.
       if (
         mapped?.optionalModifier !== '-' &&
@@ -858,6 +868,10 @@ function hasInferableIndex(source: Type, structure: Structure): boolean {
   if (source.kind === 'intersection') return true;
   if (source.kind !== 'object') return false;
   return (source.objectKind !== 'interface' && source.objectKind !== 'reference') || !!source.isLiteral;
+}
+
+function isOptionalMappedType(type: Type): boolean {
+  return type.kind === 'object' && type.objectKind === 'mapped' && type.mapped?.optionalModifier === '+';
 }
 
 /** What instantiations of the same declared type share, as TypeScript's `getRecursionIdentity` returns. */
