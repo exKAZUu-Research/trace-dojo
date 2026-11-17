@@ -60,6 +60,8 @@ interface ObjectLiteral {
    * which TypeScript keeps only where every spread part has them.
    */
   spreadIndexes?: Indexes[];
+  /** How many alternatives TypeScript counts its union spreads to make, which may be more than `alternatives`. */
+  complexity?: number;
   /** Whether its spreads made more alternatives than TypeScript represents, which makes the literal an error. */
   isTooComplex?: boolean;
   /**
@@ -554,21 +556,23 @@ export class LiteralChecker {
       this.spreadSingle(literal, objectPart, mayBeNullish);
       return;
     }
-    this.spreadUnion(literal, member, [...objectMembers, ...(mayBeNullish ? [undefined] : [])]);
-  }
-
-  /** Spreads each of `parts`, a union's objects and `undefined` when it may be nullish, into its own alternative. */
-  private spreadUnion(literal: ObjectLiteral, member: TreeNode, parts: (Type | undefined)[]): void {
-    // Each alternative of a union spreads its own properties, as TypeScript gives the literal a union type.
-    const bases = literal.alternatives ?? [new Map<string, Property>()];
-    const count = bases.length * parts.length;
-    // TypeScript refuses a cross product of union spreads of 100,000 alternatives or more.
-    if (count >= 100_000) {
+    // TypeScript refuses a cross product of union spreads of 100,000 alternatives or more, counting every member of
+    // each union, though the members `null`, `undefined`, and `void` all leave the same alternative.
+    const complexity = (literal.complexity ?? 1) * (spread.kind === 'union' ? spread.types.length : 1);
+    if (complexity >= 100_000) {
       this.c.error(member, 'この式の型は、表せないほど複雑な共用体型になります。');
       literal.isTooComplex = true;
       return;
     }
-    this.c.budget.spend(count);
+    literal.complexity = complexity;
+    this.spreadUnion(literal, [...objectMembers, ...(mayBeNullish ? [undefined] : [])]);
+  }
+
+  /** Spreads each of `parts`, a union's objects and `undefined` when it may be nullish, into its own alternative. */
+  private spreadUnion(literal: ObjectLiteral, parts: (Type | undefined)[]): void {
+    // Each alternative of a union spreads its own properties, as TypeScript gives the literal a union type.
+    const bases = literal.alternatives ?? [new Map<string, Property>()];
+    this.c.budget.spend(bases.length * parts.length);
     const baseIndexes = literal.spreadIndexes;
     literal.spreadIndexes = bases.flatMap((_, index) =>
       parts.map((type) => this.spreadIndexesOnto(baseIndexes?.[index], this.indexesOf(type, literal.isConstContext)))
