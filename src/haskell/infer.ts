@@ -513,7 +513,7 @@ export class Checker {
       }
       case 'typed': {
         const scheme = this.sigToScheme(expr.sig);
-        expr.dictParams = this.checkAgainstScheme(scheme, expr.span, (type) => this.checkExpr(expr.expr, type));
+        expr.dictParams = this.checkAgainstScheme(scheme, (type) => this.checkExpr(expr.expr, type));
         const instantiated = this.instantiate(scheme, expr.span, '型の注釈');
         expr.evidence = instantiated.evidence;
         return instantiated.type;
@@ -814,9 +814,7 @@ export class Checker {
     }
     for (const scc of dependencyOrder(implicit)) this.inferImplicit(scc);
     for (const { binding, scheme } of explicit) {
-      binding.dictParams = this.checkAgainstScheme(scheme, binding.span, (type) =>
-        this.inferBindingBody(binding, type)
-      );
+      binding.dictParams = this.checkAgainstScheme(scheme, (type) => this.inferBindingBody(binding, type));
     }
   }
 
@@ -915,7 +913,7 @@ export class Checker {
       if (sig) {
         const inferred = local.scheme;
         const declared = this.sigToScheme(sig);
-        this.checkAgainstScheme(declared, sig.span, (type) =>
+        this.checkAgainstScheme(declared, (type) =>
           this.unify(this.instantiate(inferred, sig.span, local.name).type, type, sig.span)
         );
         local.scheme = declared;
@@ -961,7 +959,6 @@ export class Checker {
    */
   checkAgainstScheme(
     scheme: Scheme,
-    span: Span,
     check: (type: Type) => void,
     extraGivens: { pred: Pred; evidence: Evidence }[] = []
   ): DictParam[] {

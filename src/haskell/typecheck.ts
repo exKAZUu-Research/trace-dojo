@@ -382,7 +382,6 @@ function checkInstanceSupers(checker: Checker, info: InstanceInfo, span: Span): 
     let evidence: Evidence | undefined;
     checker.checkAgainstScheme(
       { kinds: [], preds: [], type: head },
-      span,
       () => {
         evidence = checker.want(
           { cls: sup, type: head },
@@ -429,12 +428,7 @@ function checkInstanceMethods(checker: Checker, declared: DeclaredInstance): Omi
       type: shiftGens(methodScheme.type, head),
     };
     const givens = contextParams.map((param) => ({ pred: param.pred, evidence: { kind: 'param', param } as Evidence }));
-    const ownParams = checker.checkAgainstScheme(
-      rest,
-      binding.span,
-      (type) => checkClauses(checker, binding, type),
-      givens
-    );
+    const ownParams = checker.checkAgainstScheme(rest, (type) => checkClauses(checker, binding, type), givens);
     const implementationBinding: RBinding = {
       ...binding,
       binder: { kind: 'global', entity: implementation },
@@ -481,9 +475,7 @@ function checkDefaults(checker: Checker, decl: RClassDecl): RBinding[] {
       span: binding.span,
     };
     decl.entity.defaults[index] = implementation;
-    const params = checker.checkAgainstScheme(method.scheme as Scheme, binding.span, (type) =>
-      checkClauses(checker, binding, type)
-    );
+    const params = checker.checkAgainstScheme(method.scheme as Scheme, (type) => checkClauses(checker, binding, type));
     const implementationBinding: RBinding = {
       ...binding,
       binder: { kind: 'global', entity: implementation },
