@@ -28,7 +28,7 @@ function tupleSource(size: number): string {
     `instance ${tupleContext('Ord', vars)} => Ord ${type} where`,
     `  compare ${tuple(vars)} ${tuple(others)} = ${compare}`,
     `  ${tuple(vars)} < ${tuple(others)} = ${less}`,
-    '  x <= y = not (y < x)',
+    size === 2 ? '  x <= y = x `seq` not (y < x)' : '  x <= y = not (y < x)',
     '  x > y = y < x',
     '  x >= y = not (x < y)',
     `instance ${tupleContext('Show', vars)} => Show ${type} where`,

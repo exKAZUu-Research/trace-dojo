@@ -320,7 +320,7 @@ test.each(['Data.Set', 'Data.Map', 'Data.Map.Strict'])(
       expect(executeProgram('haskell', source)).toMatchObject({
         kind: 'executed',
         stdout: '',
-        uncaughtException: 'key',
+        uncaughtException: search === 'lookupGT' ? 'stored' : 'key',
       });
     }
   }

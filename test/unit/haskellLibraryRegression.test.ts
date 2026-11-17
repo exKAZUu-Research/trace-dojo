@@ -777,3 +777,48 @@ test('large non-enumeration sums keep default relational argument order', () => 
   const source = 'data Box=Box Int|B|C|D deriving(Eq,Ord)\nmain=print((error "left"::Box)<=(error "right"))';
   expect(executeProgram('haskell', source)).toMatchObject({ kind: 'executed', stdout: '', uncaughtException: 'left' });
 });
+
+test.each([
+  ['Rational', '', ['left', 'left', 'left', 'right']],
+  ['Ratio Int', '', ['left', 'left', 'left', 'right']],
+  ['[Int]', '', ['right', 'left', 'left', 'right']],
+  ['Bool', '', ['left', 'right', 'right', 'left']],
+  ['Ordering', '', ['left', 'right', 'right', 'left']],
+  ['Maybe Int', '', ['left', 'right', 'right', 'left']],
+  ['(Int,Int)', '', ['left', 'left', 'right', 'left']],
+  ['(Int,Int,Int)', '', ['left', 'right', 'right', 'left']],
+  [
+    'K',
+    'data K=K Int deriving Eq\ninstance Ord K where compare(K x)(K y)=compare x y',
+    ['right', 'left', 'left', 'right'],
+  ],
+  ['K', 'data K=K Int deriving Eq\ninstance Ord K where K x <= K y = x<=y', ['right', 'left', 'left', 'right']],
+  ['K', 'data K=A Int|B|C|D deriving(Eq,Ord)', ['right', 'left', 'left', 'right']],
+])('Ord defaults and specialized %s methods preserve operand demand: %s', (type, declarations, exceptions) => {
+  for (const [index, operator] of ['<', '<=', '>', '>='].entries()) {
+    const source = `import Data.Ratio\n${declarations}\nmain=print((error "left"::${type})${operator}(error "right"))`;
+    expect(executeProgram('haskell', source)).toMatchObject({
+      kind: 'executed',
+      stdout: '',
+      uncaughtException: exceptions[index],
+    });
+  }
+});
+
+test('Ord relational defaults delegate to an explicit less-than-or-equal method', () => {
+  const declarations = `data K=K Int Int
+instance Eq K where K a _==K b _=a==b
+instance Ord K where
+  compare(K a x)(K b y)=x \`seq\` y \`seq\` compare a b
+  K a _ <= K b _=a<=b`;
+  expect(
+    executeProgram('haskell', `${declarations}\nmain=let x=K 1 undefined; y=K 2 undefined in print(x<y,x<=y,x>y,x>=y)`)
+  ).toMatchObject({ kind: 'executed', stdout: '(True,True,False,False)\n', uncaughtException: undefined });
+  expect(executeProgram('haskell', `${declarations}\nmain=print(compare(K 1 undefined)(K 2 undefined))`)).toMatchObject(
+    {
+      kind: 'executed',
+      stdout: '',
+      uncaughtException: 'Prelude.undefined',
+    }
+  );
+});

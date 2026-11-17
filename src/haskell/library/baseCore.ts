@@ -160,18 +160,12 @@ class Eq a => Ord a where
   (<), (<=), (>), (>=) :: a -> a -> Bool
   max, min :: a -> a -> a
   compare x y = if x == y then EQ else if x <= y then LT else GT
-  x < y = case compare x y of
-    LT -> True
-    _ -> False
   x <= y = case compare x y of
     GT -> False
     _ -> True
-  x > y = case compare x y of
-    GT -> True
-    _ -> False
-  x >= y = case compare x y of
-    LT -> False
-    _ -> True
+  x >= y = y <= x
+  x > y = not (x <= y)
+  x < y = not (y <= x)
   max x y = if x <= y then y else x
   min x y = if x <= y then x else y
 
@@ -197,6 +191,7 @@ instance Eq Bool where
 
 instance Ord Bool where
   compare a b = compare (primConTag a) (primConTag b)
+  x < y = primConTag x < primConTag y
   x <= y = not (y < x)
   x > y = y < x
   x >= y = not (x < y)
@@ -206,6 +201,7 @@ instance Eq Ordering where
 
 instance Ord Ordering where
   compare a b = compare (primConTag a) (primConTag b)
+  x < y = primConTag x < primConTag y
   x <= y = not (y < x)
   x > y = y < x
   x >= y = not (x < y)
@@ -268,12 +264,6 @@ instance Ord a => Ord [a] where
   compare (x:xs) (y:ys) = case compare x y of
     EQ -> compare xs ys
     other -> other
-  x <= y = case compare x y of
-    GT -> False
-    _ -> True
-  x < y = not (y <= x)
-  x > y = not (x <= y)
-  x >= y = y <= x
 
 instance Eq Char where
   (==) = primitive "charEq"
@@ -716,7 +706,8 @@ instance Eq a => Eq (Ratio a) where
   (x :% y) == (x' :% y') = x == x' && y == y'
 
 instance Integral a => Ord (Ratio a) where
-  compare (x :% y) (x' :% y') = compare (x * y') (x' * y)
+  (x :% y) <= (x' :% y') = x * y' <= x' * y
+  (x :% y) < (x' :% y') = x * y' < x' * y
 
 instance Integral a => Num (Ratio a) where
   (x :% y) + (x' :% y') = reduce (x * y' + x' * y) (y * y')
