@@ -2,6 +2,96 @@ import { expect, test } from 'vitest';
 
 import { executeProgram, traceProgram } from '../../src/interpreter/program';
 
+test.each([
+  ['main=do\n do\n  print(1::Int)\n  print(2::Int)\n print(3::Int)', '1\n2\n3\n', [0, 3, 4, 5]],
+  ['main=do\n do\n  pure()\n print(1::Int)', '1\n', [0, 4]],
+  ['main=do\n do\n  do\n   print(1::Int)\n print(2::Int)', '1\n2\n', [0, 4, 5]],
+  ['main=do\n (do\n   print(1::Int)\n   print(2::Int))::IO()\n print(3::Int)', '1\n2\n3\n', [0, 3, 4, 5]],
+])('nested IO blocks record only their statements: %s', (source, stdout, lines) => {
+  const result = traceProgram('haskell', source, source);
+  expect(result.stdout).toBe(stdout);
+  expect(result.uncaughtException).toBeUndefined();
+  expect(result.traceItems.map((item) => item.line)).toEqual(lines);
+});
+
+test('a bare nested IO block restores its enclosing visible scope', () => {
+  const source = `main=do
+ let outer=9::Int
+ do
+  let inner=1::Int
+  print inner
+ print outer`;
+  const result = traceProgram('haskell', source, source);
+  expect(result.stdout).toBe('1\n9\n');
+  expect(result.uncaughtException).toBeUndefined();
+  expect(result.traceItems.map((item) => item.line)).toEqual([0, 2, 4, 5, 6]);
+  expect(result.traceItems.find((item) => item.line === 5)?.vars).toEqual({ outer: 9, inner: 1 });
+  expect(result.traceItems.at(-1)?.vars).toEqual({ outer: 9 });
+});
+
+test('binding the result of a nested IO block keeps its assignment step', () => {
+  const source = `main=do
+ x<-do
+  print(0::Int)
+  pure(2::Int)
+ print x`;
+  const result = traceProgram('haskell', source, source);
+  expect(result.stdout).toBe('0\n2\n');
+  expect(result.uncaughtException).toBeUndefined();
+  expect(result.traceItems.find((item) => item.line === 2)?.vars.x).toBe(2);
+});
+
+test.each([
+  'let (f,g)=(id,not)',
+  'let Just f=Just id',
+  'let [f,g]=[id,id]',
+  'let (f,g)=(pure(1::Int)::IO Int,pure(2::Int)::IO Int)',
+  'let Just f=Nothing::Maybe(Int->Int)',
+])('pattern declarations containing only functions and actions add no step: %s', (declaration) => {
+  const source = `main=do\n ${declaration}\n print(0::Int)`;
+  const result = traceProgram('haskell', source, source);
+  expect(result.stdout).toBe('0\n');
+  expect(result.uncaughtException).toBeUndefined();
+  expect(result.traceItems.map((item) => item.line)).toEqual([0, 3]);
+});
+
+test('destructured actions keep their execution steps without an empty declaration step', () => {
+  const source = `main=do
+ let (hello,bye)=(putStrLn "hello",putStrLn "bye")
+ hello
+ bye`;
+  const control = source.replace(
+    '(hello,bye)=(putStrLn "hello",putStrLn "bye")',
+    '{hello=putStrLn "hello";bye=putStrLn "bye"}'
+  );
+  const result = traceProgram('haskell', source, source);
+  const ordinary = traceProgram('haskell', control, control);
+  expect(result.stdout).toBe('hello\nbye\n');
+  expect(ordinary.stdout).toBe(result.stdout);
+  expect(result.uncaughtException).toBeUndefined();
+  expect(result.traceItems.map((item) => item.line)).toEqual([0, 3, 4]);
+  expect(ordinary.traceItems.map((item) => item.line)).toEqual([0, 2, 2]);
+});
+
+test('mixed function and scalar pattern declarations retain their assignment step', () => {
+  const source = 'main=do\n let (f,n)=(id,2::Int)\n print(f n)';
+  const result = traceProgram('haskell', source, source);
+  expect(result.stdout).toBe('2\n');
+  expect(result.uncaughtException).toBeUndefined();
+  expect(result.traceItems.map((item) => item.line)).toEqual([0, 2, 3]);
+  expect(result.traceItems[1].vars).toEqual({ n: 2 });
+});
+
+test('using a failed function pattern preserves its normal pattern-match exception', () => {
+  const source = 'main=do\n let Just f=Nothing::Maybe(Int->Int)\n print(f 1)';
+  const executed = executeProgram('haskell', source);
+  expect(executed).toMatchObject({ kind: 'executed', stdout: '', uncaughtException: expect.any(String) });
+  const result = traceProgram('haskell', source, source);
+  expect(result.stdout).toBe('');
+  if (executed.kind === 'executed') expect(result.uncaughtException).toBe(executed.uncaughtException);
+  expect(result.traceItems.some((item) => item.line === 2)).toBe(false);
+});
+
 const declarations = [
   { declaration: String.raw`f= \n->do`, suffix: '', call: 'f', main: 'f 2' },
   { declaration: String.raw`f=(\n->do`, suffix: ')', call: 'f', main: 'f 2' },

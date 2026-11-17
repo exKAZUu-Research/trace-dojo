@@ -1155,10 +1155,6 @@ export class Codegen {
     return { k: 'iodo', stmts, bindingRow: binding?.row, bindingNames: binding?.names, entryVisible };
   }
 
-  /**
-   * Generates a statement's expression. A conditional (`if`, `case`, `when`, `unless`) records no step itself; its
-   * branches run as blocks whose statements do, as Java's `if` statement does.
-   */
   // code-gauge-allow functionCognitiveComplexity 17 -- IO statement lowering preserves dictionary scopes and dispatches each control form.
   private compileStatementExpr(expr: RExpr): { code: Core; noStep: boolean } {
     if (expr.k === 'typed' && expr.dictParams?.length) return this.compileTypedStatement(expr);
@@ -1188,10 +1184,11 @@ export class Codegen {
         }
       }
     }
-    // A loop over a lambda (`forM_ xs $ \x -> do ...`) records no step itself, as Java's for-each does: the binding
-    // steps and the body's steps show it. `return x` records none, as Java's `return` statement does.
     const support = this.options.support;
-    return { code: this.compileExpr(expr), noStep: isLoopStatement(inner, support) || isReturn(inner, support) };
+    return {
+      code: this.compileExpr(expr),
+      noStep: inner.k === 'do' || isLoopStatement(inner, support) || isReturn(inner, support),
+    };
   }
 
   private compileTypedStatement(expr: Extract<RExpr, { k: 'typed' }>): { code: Core; noStep: boolean } {
@@ -1499,17 +1496,18 @@ function isLoopStatement(expr: RExpr, support: CodegenSupport): boolean {
   return args.some((arg) => arg.k === 'lambda');
 }
 
-/** Whether a `let` defines only functions and actions, which are not variables to learners, as a Java method is not. */
 function definesOnlyFunctions(group: RBindGroup): boolean {
   return group.bindings.every((binding) => {
-    if (binding.k !== 'fun' || binding.binder.kind !== 'local') return false;
-    if (binding.clauses[0].pats.length > 0) return true;
-    const local = binding.binder.local;
-    const type = local.scheme?.type ?? local.type;
-    if (!type) return false;
-    const { head } = splitApp(prune(type));
-    return head.tag === 'tcon' && (head.entity.special === 'function' || head.entity === IO_TYPE);
+    if (binding.k === 'pat') return binding.binders.every(isFunctionOrAction);
+    return binding.binder.kind === 'local' && isFunctionOrAction(binding.binder.local);
   });
+}
+
+function isFunctionOrAction(local: LocalVar): boolean {
+  const type = local.scheme?.type ?? local.type;
+  if (!type) return false;
+  const { head } = splitApp(prune(type));
+  return head.tag === 'tcon' && (head.entity.special === 'function' || head.entity === IO_TYPE);
 }
 
 /** Whether an expression is `return x` or `pure x`. */
