@@ -409,7 +409,6 @@ export function isContextSensitiveFunction(node: TreeNode): boolean {
   return node.type !== 'arrow_function' && (nodes.length === 0 || patternOf(nodes[0]).type !== 'this');
 }
 
-/** The parameter declarations of a function-like node, a `this` parameter included. */
 /**
  * Parameters where one with a default value, or marked `?`, before a required one is required too, as callers must pass
  * it to reach the later one; its type takes `undefined` instead, which makes the default apply.
@@ -430,6 +429,7 @@ function withRequiredPrefix(parameters: Parameter[], nodes: TreeNode[]): Paramet
   );
 }
 
+/** The parameter declarations of a function-like node, a `this` parameter included. */
 function parameterNodes(node: TreeNode): TreeNode[] {
   const parametersNode = node.childForFieldName('parameters');
   const nodes = parametersNode ? named(parametersNode) : [];

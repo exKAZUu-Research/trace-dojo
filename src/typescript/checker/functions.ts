@@ -225,9 +225,9 @@ export class FunctionChecker {
       );
     }
     if (!parameter) return undefined;
-    return parameter.optional && !node.childForFieldName('value')
-      ? unionOf([parameter.type, undefinedType])
-      : parameter.type;
+    // A default replaces `undefined`, which a parameter before a required one admits for callers.
+    if (node.childForFieldName('value')) return this.c.relations.removeUndefined(parameter.type);
+    return parameter.optional ? unionOf([parameter.type, undefinedType]) : parameter.type;
   }
 
   /** The return type of a function without an annotation, from checking its body silently. */
