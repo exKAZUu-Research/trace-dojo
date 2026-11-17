@@ -185,25 +185,33 @@ export class TypeNodes {
 
   /**
    * Whether `key`, a literal or the `string` or `number` type, is assignable to `keyof type`. Visited types are tracked
-   * per path, so a member shared by sibling alternatives keeps its answer.
+   * per path, so a member shared by sibling alternatives keeps its answer, which one lookup remembers for every path.
    */
-  private hasKey(type: Type, key: Type, path = new Set<number>()): boolean {
+  private hasKey(type: Type, key: Type, path = new Set<number>(), answers = new Map<number, boolean>()): boolean {
     if (isAnyLike(type) || isIntrinsic(type, 'never')) return true;
+    const known = answers.get(type.id);
+    if (known !== undefined) return known;
     if (path.has(type.id)) return false;
+    this.c.budget.spend();
     path.add(type.id);
-    const result = this.hasKeyOnPath(type, key, path);
-    path.delete(type.id);
-    return result;
+    try {
+      const result = this.hasKeyOnPath(type, key, path, answers);
+      answers.set(type.id, result);
+      return result;
+    } finally {
+      path.delete(type.id);
+    }
   }
 
-  private hasKeyOnPath(type: Type, key: Type, path: Set<number>): boolean {
-    if (type.kind === 'union') return type.types.every((member) => this.hasKey(member, key, path));
-    if (type.kind === 'intersection') return type.types.some((member) => this.hasKey(member, key, path));
+  private hasKeyOnPath(type: Type, key: Type, path: Set<number>, answers: Map<number, boolean>): boolean {
+    const next = (member: Type): boolean => this.hasKey(member, key, path, answers);
+    if (type.kind === 'union') return type.types.every(next);
+    if (type.kind === 'intersection') return type.types.some(next);
     if (type.kind !== 'object') {
       if (type.kind === 'intrinsic' && ['unknown', 'null', 'undefined', 'void', 'object'].includes(type.name))
         return false;
       const constraint = this.c.relations.isGeneric(type) ? this.c.baseConstraint(type) : this.c.apparentType(type);
-      return constraint !== type && this.hasKey(constraint, key, path);
+      return constraint !== type && next(constraint);
     }
     return this.structureHasKey(type, key);
   }
