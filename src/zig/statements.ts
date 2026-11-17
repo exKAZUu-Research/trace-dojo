@@ -311,6 +311,7 @@ export abstract class StatementCompiler extends CallCompiler {
     let value = this.compileDeclValue(valueSyntax, declared, statement.name, this.fn?.instance.name);
     if (declared) value = this.coerce(value, declared, valueSyntax);
     const type = value.type;
+    this.resolveStorage(type, statement);
     if (!statement.isConst && isComptimeOnly(type)) {
       this.error(
         statement,

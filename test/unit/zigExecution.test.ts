@@ -7052,3 +7052,102 @@ test('comparator body-type coercions keep queue construction lazy', () => {
   const source = `const std=@import("std");const C=struct{};const F=fn(*C,u8,u8)std.math.Order;const Q=std.PriorityQueue(u8,*C,@as(F,compare));var qp:?*Q=null;fn compare(_: *const C,a:u8,b:u8)std.math.Order{_=qp.?.count();return std.math.order(a,b);}pub fn main(init:std.process.Init)!void{var c:C=.{};var q=Q.initContext(&c);defer q.deinit(init.gpa);qp=&q;try q.pushSlice(init.gpa,&.{2,1});std.debug.print("{}",.{q.pop().?});}`;
   expect(executeProgram('zig', source)).toMatchObject({ kind: 'executed', stderr: '1', uncaughtException: undefined });
 });
+
+test.each(['const', 'var'])('global %s aggregate copies share the compilation storage budget', (kind) => {
+  const declarations = Array.from({ length: 12 }, (_, index) => `${kind} b${index}:[100000]u8=a;`).join('');
+  const uses = Array.from({ length: 12 }, (_, index) => `_=&b${index};`).join('');
+  expect(executeProgram('zig', `const a:[100000]u8=@splat(1);${declarations}pub fn main()void{${uses}}`)).toMatchObject(
+    { kind: 'limitExceeded', limit: 'storage' }
+  );
+});
+
+test.each(['local', 'global'])('null optional %s bindings validate their payload layout', (scope) => {
+  const declaration = 'const o:?U=null;';
+  const source = `const U=packed union{a:u3,b:u4};${scope === 'global' ? declaration : ''}pub fn main()void{${scope === 'local' ? declaration : ''}_=o;}`;
+  expect(executeProgram('zig', source)).toMatchObject({ kind: 'compileError' });
+});
+
+test.each(['+', '-', '*', '/'])('ordinary extended float %s charges wide rational arithmetic', (operator) => {
+  const source = `pub fn main()void{var x:f128=0x1p16000;var y:f128=0x1p-16000;_=&x;_=&y;for(0..10000)|_|{_=x${operator}y;}}`;
+  expect(executeProgram('zig', source)).toMatchObject({ kind: 'limitExceeded', limit: 'operations' });
+});
+
+test.each([2, 3])('turtle containment visits shared types once with %s pointer fields', (count) => {
+  const definitions = Array.from(
+    { length: 20 },
+    (_, index) =>
+      `const S${index + 1}=struct{${Array.from({ length: count }, (_, field) => `p${field}:?*S${index}=null`).join(',')}};`
+  ).join('');
+  const locals = Array.from({ length: 20 }, (_, index) => `var s${index}:S${index + 1}=.{};_=&s${index};`).join('');
+  const result = executeProgram(
+    'zig',
+    `const S0=struct{x:u8};${definitions}pub fn main()void{${locals}const t=Turtle.init();_=t.canMoveForward();}`
+  );
+  expect(result).toMatchObject({ kind: 'executed', uncaughtException: undefined });
+});
+
+test.each(['void', '[1001]void'])('virtual %s array keys hash without traversing empty element data', (child) => {
+  const length = child === 'void' ? 1_000_001 : 1000;
+  const source = `const std=@import("std");pub fn main(init:std.process.Init)!void{const s=try init.gpa.alloc(${child},${length});defer init.gpa.free(s);const a=s[0..${length}].*;var m=std.AutoHashMap([${length}]${child},u8).init(init.gpa);defer m.deinit();try m.put(a,1);std.debug.print("{}",.{m.count()});}`;
+  expect(executeProgram('zig', source)).toMatchObject({ kind: 'executed', stderr: '1', uncaughtException: undefined });
+});
+
+test.each(['gcd', 'lcm'])('wide %s remainders share the integer work budget', (operation) => {
+  let a = 1n;
+  let b = 1n;
+  for (let index = 0; index < 20_000; index++) [a, b] = [b, a + b];
+  const source = `const std=@import("std");pub fn main()void{_=std.math.${operation}(0x${a.toString(16)},0x${b.toString(16)});}`;
+  expect(executeProgram('zig', source)).toMatchObject({ kind: 'limitExceeded', limit: 'operations' });
+});
+
+test.each(['if', 'while'])(
+  'retained %s optional payload pointers survive clearing and replacing the outer value',
+  (capture) => {
+    const source = `const std=@import("std");pub fn main()void{
+    var o:??u8=@as(?u8,null);
+    ${capture}(o)|*p|{
+      o=null;std.debug.print("{?} {}|",.{p.*,o==null});
+      p.*=1;std.debug.print("{?} {}|",.{p.*,o==null});
+      o=@as(?u8,7);o=null;std.debug.print("{?} {}|",.{p.*,o==null});
+      o=@as(?u8,9);p.*=3;std.debug.print("{?} {?}",.{p.*,o.?});
+      ${capture === 'while' ? 'break;' : ''}
+    }
+  }`;
+    expect(executeProgram('zig', source)).toMatchObject({
+      kind: 'executed',
+      stderr: 'null true|1 true|7 true|3 3',
+      uncaughtException: undefined,
+    });
+  }
+);
+
+test.each(['a:u8,b:u16', 'a:enum{a,b},b:u1', 'a:*u8,b:usize'])(
+  'absent packed payloads reject invalid fields %s while pointer bindings stay lazy',
+  (fields) => {
+    const definition = `const U=packed union{${fields}};`;
+    expect(executeProgram('zig', `${definition}pub fn main()void{const o:?U=null;_=o;}`)).toMatchObject({
+      kind: 'compileError',
+    });
+    expect(executeProgram('zig', `${definition}pub fn main()void{const p:?*U=null;_=p;}`)).toMatchObject({
+      kind: 'executed',
+      uncaughtException: undefined,
+    });
+  }
+);
+
+test('captured nested optional aggregate locations survive present and absent assignments', () => {
+  const source = `const std=@import("std");pub fn main()void{
+    var o:??[2]u8=@as(?[2]u8,.{1,2});
+    if(o)|*p|{
+      const e=&p.*.?[0];
+      o=@as(?[2]u8,.{7,8});o=null;
+      std.debug.print("{} {}|",.{e.*,o==null});
+      e.*=9;std.debug.print("{} {}",.{p.*.?[0],o==null});
+    }
+  }`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: '7 true|9 true',
+    uncaughtException: undefined,
+  });
+});

@@ -255,6 +255,12 @@ export class Pointer {
     return new Pointer(storage, 0);
   }
 
+  static optionalProjection(target: Slots, index: number): SomeSlots | undefined {
+    const location = new Pointer(target, index).storageLocation();
+    const projection = Pointer.projections.get(location.storage)?.get(`${location.index} optional`);
+    return projection instanceof SomeSlots ? projection : undefined;
+  }
+
   storageLocation(): { storage: object; index: number } {
     const slots = this.target.slots;
     const projected = pointerLocations.get(slots)?.(this.index);
@@ -411,8 +417,14 @@ export function storeInto(target: Slots, index: number, value: Value): void {
   storeSnapshotInto(target, index, copyValue(value));
 }
 
-// code-gauge-allow functionCognitiveComplexity 18 -- Preserves existing aggregate locations when storing copied values.
+// code-gauge-allow functionCognitiveComplexity 20 -- Preserves aggregate and optional payload locations when storing copied values.
+// code-gauge-allow functionNcss 33 -- Keeps the storage identity rules together for each value representation.
 function storeSnapshotInto(target: Slots, index: number, value: Value): void {
+  const payload = Pointer.optionalProjection(target, index);
+  if (payload && value instanceof Some) {
+    payload.assign(value.value);
+    value = new Some(payload.slots[0]);
+  }
   if (storageLocations.has(target.slots)) {
     target.slots[index] = value;
     return;
@@ -469,17 +481,25 @@ class SliceLength implements Slots {
 
 /** The payload of an optional whose payload is itself optional, as storage that `.?` points into. */
 class SomeSlots implements Slots {
-  constructor(private readonly pointer: Pointer) {}
+  private readonly cell: Cell;
+  readonly slots: Value[];
 
-  get slots(): Value[] {
-    const some = this.pointer.load() as Some;
-    const holder = this.pointer;
-    return new Proxy([some.value], {
+  constructor(private readonly pointer: Pointer) {
+    this.cell = new Cell((pointer.load() as Some).value);
+    this.slots = new Proxy(this.cell.slots, {
       set: (_, key, value) => {
-        if (key === '0') holder.target.slots[holder.index] = new Some(value as Value);
+        if (key === '0') {
+          this.cell.slots[0] = value as Value;
+          if (this.pointer.load() instanceof Some)
+            this.pointer.target.slots[this.pointer.index] = new Some(value as Value);
+        }
         return true;
       },
     });
+  }
+
+  assign(value: Value): void {
+    storeSnapshotInto(this.cell, 0, value);
   }
 }
 

@@ -1,3 +1,5 @@
+import { spendMemory } from './memoryAccounting';
+
 /**
  * Floating-point numbers of every Zig float type. `f16`, `f32`, and `f64` values are JavaScript numbers rounded to
  * their type; `f80`, `f128`, and `comptime_float` (which Zig computes as `f128`) are {@link BigFloat}s, computed
@@ -231,12 +233,14 @@ function arithmeticNumber(a: number, b: number, operator: '+' | '-' | '*' | '/')
 }
 
 /** `a op b` rounded to a format, for BigFloats. */
-// code-gauge-allow functionNcss 39 -- Transcribes the corresponding function of Zig's standard library or compiler step by step.
+// code-gauge-allow functionNcss 41 -- Transcribes the corresponding function of Zig's standard library or compiler step by step.
 // code-gauge-allow functionCognitiveComplexity 24 -- Transcribes the corresponding function of Zig's standard library or compiler step by step.
 export function bigArithmetic(a: BigFloat, b: BigFloat, operator: '+' | '-' | '*' | '/', bits: FloatBits): BigFloat {
   const special = specialResult(a, b, operator);
   if (special) return special.kind === 'finite' ? roundTo(special, bits) : special;
   const format = FORMATS[bits];
+  const width = Math.abs(a.exponent) + Math.abs(b.exponent) + bitLength(a.mantissa) + bitLength(b.mantissa);
+  spendMemory(Math.ceil(width / 64));
   const x = toRational(a);
   const y = toRational(b);
   const xn = x.sign ? -x.num : x.num;

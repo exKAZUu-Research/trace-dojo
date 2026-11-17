@@ -95,39 +95,35 @@ export class TurtleReachability {
     this.spend();
     if (seen.has(type)) return false;
     seen.add(type);
-    try {
-      switch (type.kind) {
-        case 'array': {
-          return (type.length !== 0n || type.sentinel !== undefined) && this.contains(type.child, seen);
-        }
-        case 'pointer':
-        case 'optional': {
-          return this.contains(type.child, seen);
-        }
-        case 'error_union': {
-          return this.contains(type.payload, seen);
-        }
-        case 'struct': {
-          return Boolean(
-            type.native !== undefined ||
-            type.namespace.internal ||
-            !type.fields ||
-            type.fields.some((field) => this.contains(field.type, seen))
-          );
-        }
-        case 'union': {
-          return !type.fields || type.fields.some((field) => this.contains(field.type, seen));
-        }
-        case 'anyopaque':
-        case 'anytype': {
-          return true;
-        }
-        default: {
-          return false;
-        }
+    switch (type.kind) {
+      case 'array': {
+        return (type.length !== 0n || type.sentinel !== undefined) && this.contains(type.child, seen);
       }
-    } finally {
-      seen.delete(type);
+      case 'pointer':
+      case 'optional': {
+        return this.contains(type.child, seen);
+      }
+      case 'error_union': {
+        return this.contains(type.payload, seen);
+      }
+      case 'struct': {
+        return Boolean(
+          type.native !== undefined ||
+          type.namespace.internal ||
+          !type.fields ||
+          type.fields.some((field) => this.contains(field.type, seen))
+        );
+      }
+      case 'union': {
+        return !type.fields || type.fields.some((field) => this.contains(field.type, seen));
+      }
+      case 'anyopaque':
+      case 'anytype': {
+        return true;
+      }
+      default: {
+        return false;
+      }
     }
   }
 

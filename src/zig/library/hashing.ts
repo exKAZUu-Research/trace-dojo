@@ -100,8 +100,8 @@ export function autoHashBytes(
   return bytes;
 }
 
-// code-gauge-allow functionNcss 53 -- Serializes each key representation while charging work before materialization.
-// code-gauge-allow functionCognitiveComplexity 24 -- Serializes each key representation while charging work before materialization.
+// code-gauge-allow functionNcss 55 -- Serializes each key representation while charging work before materialization.
+// code-gauge-allow functionCognitiveComplexity 26 -- Serializes each key representation while charging work before materialization.
 function appendHashBytes(
   bytes: number[],
   value: Value,
@@ -139,6 +139,7 @@ function appendHashBytes(
       return;
     }
     case 'array': {
+      if (emptyHash(type.child, spend)) return;
       const array = value as ZArray;
       for (let index = 0; index < array.length; index++)
         appendHashBytes(bytes, array.get(index), type.child, identityOf, spend);
@@ -177,6 +178,30 @@ function appendHashBytes(
       if (value !== NULL)
         appendHashBytes(bytes, value instanceof Some ? value.value : value, type.child, identityOf, spend);
       return;
+    }
+  }
+}
+
+function emptyHash(type: Type, spend: (cost?: number) => void): boolean {
+  spend();
+  switch (type.kind) {
+    case 'void': {
+      return true;
+    }
+    case 'int': {
+      return type.bits === 0;
+    }
+    case 'enum': {
+      return (type.tagType?.bits ?? 0) === 0;
+    }
+    case 'array': {
+      return type.length === 0n || emptyHash(type.child, spend);
+    }
+    case 'struct': {
+      return (type.fields ?? []).every((field) => emptyHash(field.type, spend));
+    }
+    default: {
+      return false;
     }
   }
 }

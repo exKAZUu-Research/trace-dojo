@@ -443,16 +443,19 @@ function gcdMember(lcm: boolean): Member {
     )
       return sema.error(call.span, 'std.math.gcd の引数は符号なし整数にしてください。');
     return computed(type, [sema.coerce(a, type), sema.coerce(b, type)], call.span, ([x, y], frame) =>
-      gcdResult(x as bigint, y as bigint, type, lcm, () => (frame ? frame.runtime.spend() : sema.spendCompilation()))
+      gcdResult(x as bigint, y as bigint, type, lcm, (cost) =>
+        frame ? frame.runtime.spend(cost) : sema.spendCompilation(cost)
+      )
     );
   })();
 }
 
-function gcdResult(left: bigint, right: bigint, type: Type, lcm: boolean, spend: () => void): bigint {
+function gcdResult(left: bigint, right: bigint, type: Type, lcm: boolean, spend: (cost: number) => void): bigint {
   if (!lcm && left === 0n && right === 0n) panic(PANIC.unreachable);
   const divisor = gcd(left, right, spend);
   if (!lcm) return divisor;
   if (divisor === 0n) return 0n;
+  spendIntegerOperation(left, divisor, false, spend);
   const quotient = left / divisor;
   spendIntegerOperation(quotient, right, true, spend);
   const product = quotient * right;
@@ -460,11 +463,11 @@ function gcdResult(left: bigint, right: bigint, type: Type, lcm: boolean, spend:
   return type.kind === 'int' ? checked(result, type) : result;
 }
 
-function gcd(a: bigint, b: bigint, spend: () => void): bigint {
+function gcd(a: bigint, b: bigint, spend: (cost: number) => void): bigint {
   let x = a < 0n ? -a : a;
   let y = b < 0n ? -b : b;
   while (y !== 0n) {
-    spend();
+    spendIntegerOperation(x, y, false, spend);
     [x, y] = [y, x % y];
   }
   return x;

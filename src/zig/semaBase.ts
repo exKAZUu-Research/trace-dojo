@@ -442,7 +442,8 @@ export abstract class SemaBase implements SemaApi {
     }
   }
 
-  // code-gauge-allow functionCognitiveComplexity 18 -- Checks each rule of Zig's type coercion or container analysis in turn.
+  // code-gauge-allow functionCognitiveComplexity 20 -- Keeps declaration state and its compilation-time storage transaction together.
+  // code-gauge-allow functionNcss 33 -- Keeps declaration state and its compilation-time storage transaction together.
   private resolveVariable(decl: Extract<Decl, { kind: 'const' | 'var' }>): void {
     if (decl.state === 'resolved') return;
     if (decl.state === 'resolving') {
@@ -470,13 +471,16 @@ export abstract class SemaBase implements SemaApi {
             `変数「${syntax.name}」の型 ${typeName(compiled.type)} は、コンパイルのときだけの型です。`
           );
         }
+        this.resolveStorage(compiled.type, syntax);
+        const slots = copiedValueSlots(compiled.type, compiled.value, () => this.spendCompilation());
+        this.storage.reserveSlots(slots);
+        this.spendCompilation(sizeOf(compiled.type) === 0 ? 0 : 1 + slots);
+        decl.cell = { slots: [copyForStorage(compiled.value)] };
         decl.type = compiled.type;
         if (decl.kind === 'const') {
           decl.value = compiled.value;
-          decl.cell = { slots: [copyForStorage(compiled.value)] };
           markConstantStorage(decl.cell);
         } else {
-          decl.cell = { slots: [copyForStorage(compiled.value)] };
           markRuntimeStorage(decl.cell, compiled.type);
           const owner = decl.namespace.name.replace(/^main\.?/, '');
           this.globalVariables.push({
