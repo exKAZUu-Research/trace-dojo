@@ -30,10 +30,9 @@ export function blockSorter(
       })
     )
   );
-  const fn = sema.libraryFunction(file, element, 'block', [args[0].type, args[1].type, predicate], span, [
-    ...args,
-    known(predicate, comparison, span),
-  ]);
+  const fn = sema.libraryFunction(file, element, 'block', [args[0].type, args[1].type, predicate], span, {
+    args: [...args, known(predicate, comparison, span)],
+  });
   return (frame, items, context) => {
     sema.callFunction(fn, [items, context, comparison], frame);
   };

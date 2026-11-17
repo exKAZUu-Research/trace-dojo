@@ -19,6 +19,7 @@ import {
 } from '../types';
 import { NativeHandle, NULL, optionalSome, Pointer, Slice, storeInto, type Value, ZArray, ZStruct } from '../values';
 import { zeroSlice } from '../zeroSizedMemory';
+import { orderedRemover } from './arrayListAlgorithms';
 import { constSlice } from './common';
 import {
   ALLOCATOR,
@@ -359,30 +360,19 @@ function defineMembers(type: StructType, child: Type): void {
       setLength(list, length as bigint);
       return;
     }),
-    orderedRemoveMany: method(
-      'orderedRemoveMany',
-      { args: [sliceOf(USIZE, true)], result: VOID },
-      (list, [indexes], frame) => {
-        const keys = (indexes as Slice).values((length) => frame.runtime.spend(length)) as bigint[];
-        for (const [position, index] of keys.entries()) {
-          if (position > 0 && index < keys[position - 1]) panic(PANIC.overflow);
-          if (index >= list.items.lengthValue) indexOutOfBounds(index, list.items.lengthValue);
-        }
-        if (sizeOf(child) === 0) {
-          setLength(list, list.items.lengthValue - BigInt(new Set(keys).size));
-          return;
-        }
-        const sorted = keys.map(Number);
-        spendTransfers(list, list.items.lengthValue, 3);
-        const values = list.items.values().map(copyForStorage);
-        const removed = new Set(sorted);
-        const kept = values.filter((_, index) => !removed.has(index));
-        for (const [position, value] of kept.entries())
-          storeInto(list.items.target, list.items.start + position, value);
-        setLength(list, kept.length);
-        return;
-      }
-    ),
+    orderedRemoveMany: fnMember('ArrayList.orderedRemoveMany', (sema, call) => {
+      sema.resolveStorage(child, call.span);
+      const args = compileArgs(sema, expectArgs(sema, call, 1, 'orderedRemoveMany'), [sliceOf(USIZE, true)]);
+      const list = receiverOf(sema, call.receiver, type, call.span, true);
+      const fn = orderedRemover(sema, child, type, call.span);
+      return nativeStateCall(
+        VOID,
+        args,
+        call.span,
+        (frame) => ({ receiver: list(frame) }),
+        (state, values, frame) => sema.callFunction(fn, [new Pointer({ slots: [state.receiver] }, 0), values[0]], frame)
+      );
+    }),
     shrinkAndFree: method(
       'shrinkAndFree',
       { args: [USIZE], result: VOID, allocator: true },

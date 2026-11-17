@@ -171,6 +171,11 @@ export interface NativeCall {
 }
 
 /** The compiler's services that native functions use. */
+export interface LibraryFunctionOptions {
+  args?: readonly TExpr[];
+  namespaceName?: string;
+}
+
 export interface SemaApi {
   compile(expression: Expression, resultType?: Type): TExpr;
   compileType(expression: Expression): Type;
@@ -185,7 +190,7 @@ export interface SemaApi {
     name: string,
     params: readonly Type[],
     span: Span,
-    args?: readonly TExpr[]
+    options?: LibraryFunctionOptions
   ): FunctionInstance;
   coerce(expression: TExpr, type: Type, span?: Span): TExpr;
   error(span: Span, message: string): never;
@@ -252,7 +257,8 @@ export abstract class SemaBase implements SemaApi {
     element: Type,
     name: string,
     params: readonly Type[],
-    span: Span
+    span: Span,
+    options?: LibraryFunctionOptions
   ): FunctionInstance;
 
   spendCompilation(cost = 1): void {

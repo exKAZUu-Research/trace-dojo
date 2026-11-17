@@ -12,6 +12,7 @@ import {
   FnRef,
   isType,
   known,
+  type LibraryFunctionOptions,
   type LocalBinding,
   NATIVE_FN_TYPE,
   NativeFn,
@@ -458,7 +459,7 @@ export abstract class CallCompiler extends BuiltinCompiler {
     name: string,
     params: readonly Type[],
     span: Span,
-    args: readonly TExpr[] = []
+    options: LibraryFunctionOptions = {}
   ): FunctionInstance {
     let types = this.libraryNamespaces.get(file);
     if (!types) {
@@ -467,14 +468,14 @@ export abstract class CallCompiler extends BuiltinCompiler {
     }
     let namespace = types.get(element);
     if (!namespace) {
-      namespace = { name: 'std.sort.block', internal: true, decls: new Map() };
+      namespace = { name: options.namespaceName ?? 'std.sort.block', internal: true, decls: new Map() };
       addDecls(namespace, file.members);
       namespace.decls.set('T', { kind: 'native', name: 'T', resolve: () => ({ type: TYPE, value: element }) });
       types.set(element, namespace);
     }
     const decl = namespace.decls.get(name);
     if (decl?.kind !== 'fn') throw new Error(`Missing library function ${name}`);
-    return this.instantiate(new FnRef(decl), params, span, args);
+    return this.instantiate(new FnRef(decl), params, span, options.args ?? []);
   }
 
   /** Runs a function in a new frame, as the call at `callRow` of the caller's frame. */

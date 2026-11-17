@@ -6079,3 +6079,16 @@ test('empty writeAll and byte splats skip invalid buffer metadata without touchi
   const source = `const std=@import("std");pub fn main()!void{var b:[8]u8=undefined;var w=std.Io.Writer.fixed(&b);w.end=9;try w.writeAll("");try w.splatByteAll(97,0);try w.flush();std.debug.print("ok",.{});}`;
   expect(executeProgram('zig', source)).toMatchObject({ kind: 'executed', stderr: 'ok', uncaughtException: undefined });
 });
+
+test.each([
+  ['1,3,4,5,6', 0, 2, '{ 1, 4, 4 }|{ 1, 4, 4, 5, 6 }|{ 1, 4 }'],
+  ['0,2,3,4,5,6', 1, 3, '{ 0, 2, 5, 6 }|{ 0, 2, 5, 6, 5, 6 }|{ 2, 5 }'],
+  ['0,1,2,4,5,6', 2, 4, '{ 0, 1, 4, 6 }|{ 0, 1, 4, 6, 5, 6 }|{ 4, 6 }'],
+])('orderedRemoveMany reads live aliased indices from %s', (values, start, end, expected) => {
+  const source = `const std=@import("std");pub fn main()void{var a=[_]usize{${values}};var l=std.ArrayList(usize).fromOwnedSlice(&a);const indexes=l.items[${start}..${end}];l.orderedRemoveMany(indexes);std.debug.print("{any}|{any}|{any}",.{l.items,a,indexes});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: expected,
+    uncaughtException: undefined,
+  });
+});
