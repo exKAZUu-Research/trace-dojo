@@ -5,7 +5,7 @@ import type { Checker } from './checker';
 import { checkTypeMemberDuplicates } from './declarations';
 import { FlowState, type State } from './flow';
 import type { Scope, Sym } from './scopes';
-import { hasToken, isNumericName, isWithin, named, skipParentheses } from './syntax';
+import { arrayLiteralLength, hasToken, isNumericName, isWithin, named, skipParentheses } from './syntax';
 import {
   anyType,
   errorType,
@@ -343,7 +343,7 @@ export class StatementChecker {
 
   private isEmptyArrayLiteral(node: TreeNode): boolean {
     const expression = skipParentheses(node);
-    return expression.type === 'array' && named(expression).length === 0;
+    return expression.type === 'array' && arrayLiteralLength(expression) === 0;
   }
 
   /** The type of a variable from its declaration, computed ahead of its statement when used earlier. */

@@ -2,7 +2,7 @@
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import type { Checker } from './checker';
-import { arrayPatternElements, hasToken, isNumericName, named, propertyNameText } from './syntax';
+import { arrayLiteralLength, arrayPatternElements, hasToken, isNumericName, named, propertyNameText } from './syntax';
 import {
   anonymousObject,
   anyType,
@@ -804,9 +804,8 @@ function isSpreadIntoCall(node: TreeNode): boolean {
 
 /** The elements of an array literal in their positions, with `undefined` for a hole a comma leaves. */
 function arrayElements(node: TreeNode): (TreeNode | undefined)[] {
+  const elements: (TreeNode | undefined)[] = Array.from({ length: arrayLiteralLength(node) });
   const positioned = arrayPatternElements(node);
-  const length = positioned.length === 0 ? 0 : (positioned.at(-1)?.index ?? 0) + 1;
-  const elements: (TreeNode | undefined)[] = Array.from({ length });
   for (const { element, index } of positioned) elements[index] = element;
   return elements;
 }

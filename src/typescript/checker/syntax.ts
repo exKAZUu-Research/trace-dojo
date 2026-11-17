@@ -52,6 +52,16 @@ export function patternIdentifiers(pattern: TreeNode): TreeNode[] {
   }
 }
 
+/**
+ * The number of positions of an array literal, holes included: every comma ends a position, and only the last comma,
+ * when nothing follows it, ends none of its own.
+ */
+export function arrayLiteralLength(array: TreeNode): number {
+  const parts = array.children.filter((child) => child && !['[', ']', 'comment'].includes(child.type));
+  const commas = parts.filter((child) => child?.type === ',').length;
+  return parts.length === 0 || parts.at(-1)?.type === ',' ? commas : commas + 1;
+}
+
 /** The elements of an array pattern with their positions, which holes such as `[, x]` skip. */
 export function arrayPatternElements(pattern: TreeNode): { element: TreeNode; index: number }[] {
   const elements: { element: TreeNode; index: number }[] = [];

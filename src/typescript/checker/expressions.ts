@@ -10,6 +10,7 @@ import { ExpressionTypeCache } from './expressionTypeCache';
 import type { FlowEntry } from './flow';
 import type { Sym } from './scopes';
 import {
+  arrayLiteralLength,
   hasToken,
   isImmediatelyInvoked,
   isNumericName,
@@ -366,7 +367,7 @@ export class ExpressionChecker {
       declaration?.type === 'variable_declarator' &&
       !declaration.childForFieldName('type') &&
       value?.type === 'array' &&
-      named(value).length === 0
+      arrayLiteralLength(value) === 0
     );
   }
 

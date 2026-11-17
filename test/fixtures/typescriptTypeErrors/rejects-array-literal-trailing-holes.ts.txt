@@ -1,0 +1,14 @@
+const a = [, ,] as const;
+const n: undefined = a[1];
+const b = [1, ,];
+const m: number = b[1];
+const c = [, ,];
+const k: number = c[0];
+const d = [1, ,] as const;
+const e: readonly [1, undefined] = d;
+const l: 2 = d.length;
+const t: [number, undefined, undefined] = [1, , ,];
+const u: [number, undefined] = [1, , ,];
+const q = [,];
+q.push(1);
+console.log(n, m, k, e, l, t, u);
