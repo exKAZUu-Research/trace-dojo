@@ -225,7 +225,7 @@ export function matches(
       return value instanceof PhpArray;
     }
     case 'object': {
-      return value instanceof PhpObject && value.cls.name !== '(stream)';
+      return value instanceof PhpObject && !value.isResource;
     }
     case 'iterable': {
       return value instanceof PhpArray || (value instanceof PhpObject && isTraversable(value));

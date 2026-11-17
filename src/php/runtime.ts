@@ -75,7 +75,7 @@ export interface TraceEntry {
 export class Frame {
   vars = new Map<string, Ref>();
   /** Values that an expression being evaluated holds, which garbage collection must keep. */
-  temporaries: Value[] = [];
+  temporaries: (Value | Ref)[] = [];
   args: Value[] = [];
   /** The row being run in this frame, which a stack trace reports for the call this frame made. */
   row = 0;
@@ -124,6 +124,10 @@ export class Runtime {
   /** Constants by name, whose namespace prefix is lowercased. */
   readonly constants = new Map<string, Value>();
   readonly objects = new Map<number, PhpObject>();
+  readonly turtleObjects = new Set<PhpObject>();
+  readonly arrayCycles = new Set<PhpArray>();
+  readonly collectingArrays = new Set<PhpArray>();
+  collectingCycles = false;
   readonly internalObjects = new Set<PhpObject>();
   private readonly pendingReleases: unknown[] = [];
   private readonly freeHandles: number[] = [];
@@ -240,16 +244,23 @@ export class Runtime {
     releaseDropped(this, released);
   }
 
+  holdTemporaryReference(ref: Ref): void {
+    ref.rc++;
+    this.frame.temporaries.push(ref);
+  }
+
   /** Lets go of a frame's temporaries from `mark` on, as PHP frees temporary values once they are used. */
   dropTemporaries(frame: Frame, mark: number): void {
     if (frame.temporaries.length <= mark) return;
     const values = frame.temporaries.splice(mark);
+    for (const value of values) if (value instanceof Ref) value.rc--;
     this.release(values);
   }
 
   freeObject(object: PhpObject): void {
     if (this.objects.get(object.id) !== object) return;
     this.objects.delete(object.id);
+    this.turtleObjects.delete(object);
     this.internalObjects.delete(object);
     for (const slot of object.props.values())
       if (slot instanceof Ref) {

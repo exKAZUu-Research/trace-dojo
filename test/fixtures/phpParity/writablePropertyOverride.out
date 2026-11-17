@@ -1,0 +1,4 @@
+
+Fatal error: Cannot redeclare non-readonly property A::$x as readonly B::$x in /main.php on line 1
+Stack trace:
+#0 {main}

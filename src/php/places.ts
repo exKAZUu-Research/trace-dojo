@@ -1,6 +1,7 @@
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import { deprecated, throwError, warn } from './errors';
-import type { Frame } from './runtime';
+import { type Frame, rt } from './runtime';
+import { coerce, NO_MATCH, typeToString } from './types';
 import { dropped, type Key, PhpArray, PhpObject, type PropDecl, Ref, type Value } from './values';
 
 /** A location a program writes to: a variable, an element, a property, or a static property. */
@@ -78,7 +79,9 @@ export class VarPlace implements Place {
 }
 
 export class RefPlace implements Place {
-  constructor(readonly target: Ref) {}
+  constructor(readonly target: Ref) {
+    if (target.rc === 0) rt().holdTemporaryReference(target);
+  }
 
   get(): Value {
     return this.target.v;
@@ -180,19 +183,27 @@ export function writableContainer(place: Place, value = place.get('nested')): Ph
     return value;
   }
   if (value === undefined || value === null) {
-    const array = new PhpArray();
-    place.set(array);
-    return array;
+    return initializeArray(place);
   }
   if (value === false) {
     deprecated('Automatic conversion of false to array is deprecated');
-    const array = new PhpArray();
-    place.set(array);
-    return array;
+    return initializeArray(place);
   }
   if (value instanceof PhpObject) return value;
   if (typeof value === 'string') return value;
   throwError('Error', 'Cannot use a scalar value as an array');
+}
+
+function initializeArray(place: Place): PhpArray {
+  const array = new PhpArray();
+  const decl = place.declaration?.();
+  if (decl?.type && coerce(array, decl.type, { strict: true, internal: false, scope: decl.cls }) === NO_MATCH)
+    throwError(
+      'TypeError',
+      `Cannot auto-initialize an array inside property ${decl.cls.name}::$${decl.name} of type ${typeToString(decl.type)}`
+    );
+  place.set(array);
+  return array;
 }
 
 /** Reads an element of an array, warning as PHP does when the key does not exist. */

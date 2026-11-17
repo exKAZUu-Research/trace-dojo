@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 564 -- Keeps one PHP runtime concern and its shared helpers in one module.
+// code-gauge-allow-file fileNcss 575 -- Keeps one PHP runtime concern and its shared helpers in one module.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import type { TurtleState } from '../interpreter/turtleWorld';
 import type { ClassDecl, FunctionDecl } from './ast';
@@ -36,6 +36,18 @@ export class Ref {
     this.value = value;
     trackOwner(value, this);
   }
+  static temporary(value: Value): Ref {
+    const ref = new Ref(value);
+    ref.rc = 0;
+    return ref;
+  }
+
+  addTypeOwner(decl: PropDecl, object?: PhpObject): void {
+    this.typedBy ??= [];
+    if (!this.typedBy.some((owner) => owner.decl === decl && owner.object === object))
+      this.typedBy.push({ decl, object });
+  }
+
   get v(): Value {
     return this.value;
   }
@@ -390,6 +402,7 @@ export interface PropDecl {
   setVisibility?: Visibility;
   isStatic: boolean;
   isReadonly: boolean;
+  isFinal: boolean;
   type?: TypeDecl;
   /** The initial value's expression, or undefined for none (null if untyped, uninitialized if typed). */
   hasDefault: boolean;
@@ -588,6 +601,10 @@ function* lineage(start: PhpClass): Generator<PhpClass> {
 }
 
 export class PhpObject {
+  get isResource(): boolean {
+    return this.cls.name === '(stream)';
+  }
+
   readonly arrayHolders: { array: WeakRef<PhpArray>; key: Key }[] = [];
   props = new PropertyMap(this);
   private internalValue?: unknown;

@@ -1,6 +1,5 @@
 // code-gauge-allow-file fileNcss 532 -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
-import { ExecutionLimitError } from '../interpreter/limits';
 import { assignTo, bindRef, destructure, placeOf, unsetTarget } from './assignment';
 import type { Expr, FunctionDecl, Program, Stmt } from './ast';
 import { nestedBodies } from './astAnalysis';
@@ -23,7 +22,7 @@ import { collectBeforeAllocation, setDestructor } from './garbage';
 import { ev, evQuiet, evReturn } from './interp';
 import { looseEquals, setObjectConversions, toStr } from './operators';
 import { ElementPlace, RefPlace, share, ValuePlace, VarPlace, writableContainer } from './places';
-import { ExitSignal, FatalError, Frame, PhpThrow, rt, type Runtime } from './runtime';
+import { FatalError, Frame, PhpThrow, rt, type Runtime } from './runtime';
 import {
   type Callable,
   type Key,
@@ -382,7 +381,7 @@ function staticDeclaration(statement: Extract<Stmt, { k: 'static' }>, frame: Fra
   }
 }
 
-// code-gauge-allow functionNcss 56 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+// code-gauge-allow functionCognitiveComplexity 25 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 function tryStatement(statement: Extract<Stmt, { k: 'try' }>, seek?: string): Completion {
   const runtime = rt();
   let completion: Completion;
@@ -391,39 +390,11 @@ function tryStatement(statement: Extract<Stmt, { k: 'try' }>, seek?: string): Co
   const inFinally = seek !== undefined && statement.fin?.some((inner) => containsLabel(inner, seek));
   if (!inFinally) {
     try {
-      const inCatch =
-        seek === undefined
-          ? undefined
-          : statement.catches.find((item) => item.body.some((inner) => containsLabel(inner, seek)));
-      completion = inCatch ? execList(inCatch.body, seek) : execList(statement.body, seek);
+      completion = tryCatchStatement(statement, seek);
     } catch (error) {
-      if (runtime.exhausted || error instanceof FatalError) throw error;
-      if (!(error instanceof PhpThrow)) {
-        if (statement.fin && !(error instanceof ExitSignal) && !(error instanceof ExecutionLimitError)) {
-          pending = error;
-          failed = true;
-        } else throw error;
-      } else {
-        const handler = statement.catches.find((item) => item.types.some((name) => catches(error.object, name)));
-        if (handler) {
-          try {
-            runtime.row = handler.row;
-            // Unwinding released the values the throwing code held, which PHP frees before it binds the exception.
-            runtime.frame.temporaries.push(error.object);
-            runtime.thrown = undefined;
-            collectBeforeAllocation(runtime);
-            if (handler.varName !== undefined) new VarPlace(runtime.frame, handler.varName).set(error.object);
-            completion = execList(handler.body);
-          } catch (error_) {
-            if (!statement.fin) throw error_;
-            pending = error_;
-            failed = true;
-          }
-        } else if (statement.fin) {
-          pending = error;
-          failed = true;
-        } else throw error;
-      }
+      if (!(error instanceof PhpThrow) || runtime.exhausted || !statement.fin) throw error;
+      pending = error;
+      failed = true;
     }
   }
   if (statement.fin) {
@@ -442,6 +413,28 @@ function tryStatement(statement: Extract<Stmt, { k: 'try' }>, seek?: string): Co
     if (failed) throw pending;
   }
   return completion;
+}
+
+function tryCatchStatement(statement: Extract<Stmt, { k: 'try' }>, seek?: string): Completion {
+  const inCatch =
+    seek === undefined
+      ? undefined
+      : statement.catches.find((item) => item.body.some((inner) => containsLabel(inner, seek)));
+  if (inCatch) return execList(inCatch.body, seek);
+  try {
+    return execList(statement.body, seek);
+  } catch (error) {
+    if (!(error instanceof PhpThrow)) throw error;
+    const handler = statement.catches.find((item) => item.types.some((name) => catches(error.object, name)));
+    if (!handler) throw error;
+    const runtime = rt();
+    runtime.row = handler.row;
+    runtime.frame.temporaries.push(error.object);
+    runtime.thrown = undefined;
+    collectBeforeAllocation(runtime);
+    if (handler.varName !== undefined) new VarPlace(runtime.frame, handler.varName).set(error.object);
+    return execList(handler.body);
+  }
 }
 
 /** Appends `previous` to the end of the chain of previous exceptions of `exception`, as zend_exception_set_previous does. */
@@ -598,7 +591,7 @@ function foreachObject(statement: Extract<Stmt, { k: 'foreach' }>, object: PhpOb
     visited.add(name);
     runtime.spend();
     if (statement.byRef) {
-      const ref = propRef(object, name, scope, true);
+      const ref = propRef(object, name, scope, 'foreach');
       bindForeachRef(statement.value, ref);
       if (statement.key) assignTo(statement.key, name);
       runtime.steps.stepBinding(statement.row, true);

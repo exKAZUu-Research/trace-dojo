@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 854 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 887 -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import type { ClassDecl, Expr, FunctionDecl, MethodDeclAst, PropertyDeclAst } from './ast';
 import builtinNames from './builtinNames.json';
@@ -194,9 +194,13 @@ function propertyKey(cls: PhpClass, name: string, visibility: Visibility): strin
   return visibility === 'private' ? `\0${cls.name}\0${name}` : name;
 }
 
-// code-gauge-allow functionNcss 42 -- Follows PHP's class linking and property access rules in their order of checks.
+// code-gauge-allow functionNcss 52 -- Follows PHP's class linking and property access rules in their order of checks.
 function addProperty(cls: PhpClass, ast: PropertyDeclAst): void {
   const inherited = cls.propByName.get(ast.name);
+  if (inherited && inherited.cls !== cls && inherited.isFinal)
+    throw new FatalError(`Cannot override final property ${inherited.cls.name}::$${ast.name}`, ast.row);
+  if (ast.isFinal && ast.visibility === 'private')
+    throw new FatalError('Property cannot be both final and private', ast.row);
   if (inherited && inherited.cls !== cls && inherited.visibility !== 'private') {
     if (inherited.isStatic !== ast.isStatic) {
       throw new FatalError(
@@ -212,9 +216,14 @@ function addProperty(cls: PhpClass, ast: PropertyDeclAst): void {
         ast.row
       );
     }
-    if (inherited.type && (!ast.type || typeToString(inherited.type) !== typeToString(ast.type))) {
+    if (inherited.isReadonly !== ast.isReadonly)
       throw new FatalError(
-        `Type of ${cls.name}::$${ast.name} must be ${typeToString(inherited.type)} (as in class ${inherited.cls.name})`,
+        `Cannot redeclare ${inherited.isReadonly ? 'readonly' : 'non-readonly'} property ${inherited.cls.name}::$${ast.name} as ${ast.isReadonly ? 'readonly' : 'non-readonly'} ${cls.name}::$${ast.name}`,
+        ast.row
+      );
+    if (inherited.type && (!ast.type || !propertyTypeCompatible(inherited, ast, cls))) {
+      throw new FatalError(
+        `Type of ${cls.name}::$${ast.name} must be ${describeType(inherited.type, inherited.cls)} (as in class ${inherited.cls.name})`,
         ast.row
       );
     }
@@ -233,6 +242,7 @@ function addProperty(cls: PhpClass, ast: PropertyDeclAst): void {
     setVisibility: ast.setVisibility ?? (ast.isReadonly && ast.visibility === 'public' ? 'protected' : undefined),
     isStatic: ast.isStatic,
     isReadonly: ast.isReadonly,
+    isFinal: ast.isFinal || ast.setVisibility === 'private',
     type: ast.type,
     hasDefault: ast.defaultExpr !== undefined,
     isVirtual: ast.isVirtual,
@@ -261,9 +271,10 @@ function addProperty(cls: PhpClass, ast: PropertyDeclAst): void {
   }
   if (ast.isStatic) {
     const ref: LazyRef = new Ref(null);
-    // Static properties take their initial values when the class is first used, as constant expressions may refer to
-    // classes declared later.
-    ref.lazy = () => (decl.defaultValue ? decl.defaultValue() : decl.type ? (UNINIT as unknown as Value) : null);
+    const initialize = (): Value =>
+      decl.defaultValue ? decl.defaultValue() : decl.type ? (UNINIT as unknown as Value) : null;
+    if (!ast.defaultExpr || ast.defaultExpr.k === 'lit') ref.v = initialize();
+    else ref.lazy = initialize;
     cls.staticProps.set(ast.name, { ref, decl });
     cls.propByName.set(ast.name, decl);
     return;
@@ -274,6 +285,18 @@ function addProperty(cls: PhpClass, ast: PropertyDeclAst): void {
   else cls.props.push(decl);
   cls.propByName.set(ast.name, decl);
   if (decl.visibility === 'private') cls.privateProps.set(ast.name, decl);
+}
+
+function propertyTypeCompatible(parent: PropDecl, child: PropertyDeclAst, cls: PhpClass): boolean {
+  const parentType = parent.type as TypeDecl;
+  const childType = child.type as TypeDecl;
+  const acceptsChild = isSubtype(childType, cls, parentType, parent.cls);
+  const acceptsParent = isSubtype(parentType, parent.cls, childType, cls);
+  if (parent.isVirtual && parent.hooks) {
+    if (!parent.hooks.set) return acceptsChild;
+    if (!parent.hooks.get) return acceptsParent;
+  }
+  return acceptsChild && acceptsParent;
 }
 
 function checkPropertyDefault(decl: PropDecl, value: Value): Value {
@@ -492,6 +515,7 @@ function checkOverride(cls: PhpClass, method: Method, parent: Method, reportTent
  * Whether a method may override another as PHP's inheritance check allows: it accepts every call the parent accepts
  * (parameters as many, as optional, and as wide in type) and returns only what the parent may return.
  */
+// code-gauge-allow functionCognitiveComplexity 18 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 function signatureCompatible(child: Method, parent: Method, skipReturn = false): boolean {
   if (
     parent.fn.kind === 'user' &&
@@ -506,6 +530,12 @@ function signatureCompatible(child: Method, parent: Method, skipReturn = false):
   for (const [index, param] of parentParams.entries()) {
     const own = childParams[index] ?? (childParams.at(-1)?.variadic ? childParams.at(-1) : undefined);
     if (!own || !paramCompatible(own, child.cls, param, parent.cls)) return false;
+    if (
+      param.variadic &&
+      (!childParams.at(-1)?.variadic ||
+        childParams.slice(index).some((own) => !paramCompatible(own, child.cls, param, parent.cls)))
+    )
+      return false;
   }
   if (skipReturn) return true;
   const parentReturn = returnTypeOf(parent.fn);
@@ -701,9 +731,13 @@ function guarded(object: PhpObject, key: string, run: () => Value): Value {
   }
 }
 
-// code-gauge-allow functionNcss 38 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+// code-gauge-allow functionNcss 42 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 export function readProp(object: PhpObject, name: string, scope: PhpClass | undefined, quiet = false): Value {
   rt().spend();
+  if (object.isResource) {
+    if (!quiet) warn(`Attempt to read property "${name}" on resource`);
+    return null;
+  }
   const decl = lookupProp(object.cls, name, scope);
   if (decl && !decl.isStatic) {
     if (!canAccessProp(decl, scope)) {
@@ -750,8 +784,9 @@ export function readProp(object: PhpObject, name: string, scope: PhpClass | unde
   return null;
 }
 
-// code-gauge-allow functionNcss 55 -- Follows PHP's class linking and property access rules in their order of checks.
+// code-gauge-allow functionNcss 57 -- Follows PHP's class linking and property access rules in their order of checks.
 export function writeProp(object: PhpObject, name: string, value: Value, scope: PhpClass | undefined): Value {
+  if (object.isResource) throwError('Error', `Attempt to assign property "${name}" on resource`);
   rt().spend();
   const decl = lookupProp(object.cls, name, scope);
   if (decl && !decl.isStatic) {
@@ -867,6 +902,7 @@ export function coerceProperty(decl: PropDecl, value: Value, object?: PhpObject,
  * and asymmetric visibility forbid where a plain write would be forbidden.
  */
 export function checkIndirectModification(object: PhpObject, name: string, scope: PhpClass | undefined): void {
+  if (object.isResource) throwError('Error', `Attempt to modify property "${name}" on resource`);
   const decl = lookupProp(object.cls, name, scope);
   if (!decl || decl.isStatic) return;
   if (decl.isReadonly) {
@@ -891,7 +927,13 @@ function readonlySetVisibility(decl: PropDecl): Visibility {
 /** The reference a property holds, creating it, for `=&`, by-reference arguments, and nested writes. */
 // code-gauge-allow functionCognitiveComplexity 25 -- Follows PHP's class linking and property access rules in their order of checks.
 // code-gauge-allow functionNcss 35 -- Follows PHP's class linking and property access rules in their order of checks.
-export function propRef(object: PhpObject, name: string, scope: PhpClass | undefined, acquire = false): Ref {
+export function propRef(
+  object: PhpObject,
+  name: string,
+  scope: PhpClass | undefined,
+  mode: 'alias' | 'foreach' = 'alias'
+): Ref {
+  if (object.isResource) throwError('Error', `Attempt to modify property "${name}" on resource`);
   const decl = lookupProp(object.cls, name, scope);
   const key = decl && !decl.isStatic ? decl.key : name;
   if (decl && !decl.isStatic && !canAccessProp(decl, scope)) {
@@ -901,13 +943,9 @@ export function propRef(object: PhpObject, name: string, scope: PhpClass | undef
   }
   let slot = object.props.get(key);
   const value = slot instanceof Ref ? slot.v : slot;
-  if (decl?.isReadonly && value instanceof PhpObject) {
-    const temporary = new Ref(value);
-    temporary.rc = 0;
-    return temporary;
-  }
-  if (acquire && decl?.isReadonly)
+  if (mode === 'foreach' && decl?.isReadonly)
     throwError('Error', `Cannot acquire reference to readonly property ${decl.cls.name}::$${name}`);
+  if (decl?.isReadonly && value instanceof PhpObject) return Ref.temporary(value);
   checkIndirectModification(object, name, scope);
   if (slot instanceof Ref) return slot;
   if (slot === undefined && !decl) {
@@ -941,14 +979,13 @@ function overloadedPropertyReference(object: PhpObject, name: string): Ref | und
   if (returned) return returned;
   if (!(value instanceof PhpObject))
     notice(`Indirect modification of overloaded property ${object.cls.name}::$${name} has no effect`);
-  const temporary = new Ref(value);
-  temporary.rc = 0;
-  return temporary;
+  return Ref.temporary(value);
 }
 
-// code-gauge-allow functionCognitiveComplexity 25 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
-// code-gauge-allow functionNcss 32 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+// code-gauge-allow functionCognitiveComplexity 26 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+// code-gauge-allow functionNcss 34 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 export function bindPropertyReference(object: PhpObject, name: string, ref: Ref, scope: PhpClass | undefined): void {
+  if (object.isResource) throwError('Error', `Attempt to modify property "${name}" on resource`);
   const decl = lookupProp(object.cls, name, scope);
   if ((!decl || !canAccessProp(decl, scope)) && object.cls.findMethod('__get')) {
     rt().lastReturnRef = undefined;
@@ -996,8 +1033,7 @@ export function attachPropertyReference(ref: Ref, decl: PropDecl, object?: PhpOb
       );
   }
   ref.assign(value);
-  ref.typedBy ??= [];
-  ref.typedBy.push({ decl, object });
+  ref.addTypeOwner(decl, object);
 }
 
 setReferenceTypeCheck(checkReferenceValue);
@@ -1021,9 +1057,10 @@ function checkReferenceValue(ref: Ref, value: Value): Value {
   return coerced;
 }
 
-// code-gauge-allow functionCognitiveComplexity 20 -- Follows PHP's class linking and property access rules in their order of checks.
-// code-gauge-allow functionNcss 32 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+// code-gauge-allow functionCognitiveComplexity 21 -- Follows PHP's class linking and property access rules in their order of checks.
+// code-gauge-allow functionNcss 34 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 export function unsetProp(object: PhpObject, name: string, scope: PhpClass | undefined): void {
+  if (object.isResource) return;
   const decl = lookupProp(object.cls, name, scope);
   if (decl && !decl.isStatic) {
     if (!canAccessProp(decl, scope)) {
@@ -1058,8 +1095,9 @@ export function unsetProp(object: PhpObject, name: string, scope: PhpClass | und
   if (magic) callMagic(object, magic, [name]);
 }
 
-// code-gauge-allow functionCognitiveComplexity 20 -- Follows PHP's class linking and property access rules in their order of checks.
+// code-gauge-allow functionCognitiveComplexity 21 -- Follows PHP's class linking and property access rules in their order of checks.
 export function issetProp(object: PhpObject, name: string, scope: PhpClass | undefined): boolean {
+  if (object.isResource) return false;
   const decl = lookupProp(object.cls, name, scope);
   if (decl && !decl.isStatic && canAccessProp(decl, scope)) {
     if (decl.hooks?.get) return readProp(object, name, scope, true) !== null;
@@ -1132,10 +1170,7 @@ export function staticPropRef(cls: PhpClass, name: string, scope: PhpClass | und
     throwError('Error', `Cannot access ${found.decl.visibility} property ${cls.name}::$${name}`);
   }
   const ref = resolveStatic(found.ref);
-  if (found.decl.type && !ref.typedBy?.some((constraint) => constraint.decl === found.decl)) {
-    ref.typedBy ??= [];
-    ref.typedBy.push({ decl: found.decl });
-  }
+  if (found.decl.type) ref.addTypeOwner(found.decl);
   return ref;
 }
 

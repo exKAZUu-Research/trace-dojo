@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 473 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 476 -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import { LIMITS } from '../interpreter/limits';
 import type { FunctionDecl } from './ast';
@@ -366,7 +366,7 @@ function callerIsStrict(): boolean {
 
 // User functions -----------------------------------------------------------------------------------------------------
 
-// code-gauge-allow functionCognitiveComplexity 17 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+// code-gauge-allow functionCognitiveComplexity 20 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 function invokeUser(target: CallTarget, fn: UserFunction, args: ArgValue[], row: number | undefined): Value {
   const runtime = rt();
   const { decl } = fn;
@@ -437,6 +437,7 @@ function invokeUser(target: CallTarget, fn: UserFunction, args: ArgValue[], row:
     callStack.pop();
     runtime.frames.pop();
     for (const ref of frame.vars.values()) ref.rc--;
+    for (const value of frame.temporaries) if (value instanceof Ref) value.rc--;
     runtime.row = savedRow;
     if (decl.isAtomic) runtime.steps.completeAtomicCall();
   }

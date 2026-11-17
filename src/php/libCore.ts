@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 553 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 554 -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import { lower } from './bytes';
 import { callCallback, callTargetOf, callValue } from './callables';
@@ -32,7 +32,7 @@ import {
 import { traceArg } from './exceptions';
 import { collectGarbage } from './garbage';
 import { cast, deprecatedConstant, iterate } from './interp';
-import { defineAlias, defineConstant, defineFunction, markInlined } from './native';
+import { defineAlias, defineConstant, defineFunction, defineRuntimeConstant, markInlined } from './native';
 import { toFloat, toInt, toKey, toStr } from './operators';
 import { printR, varDump, varExport } from './output';
 import { ExitSignal, rt } from './runtime';
@@ -697,9 +697,11 @@ const streams: [string, number][] = [
   ['STDERR', 3],
 ];
 for (const [name, id] of streams) {
-  const stream = new PhpObject(streamClass, id);
-  stream.internal = name;
-  defineConstant(name, stream);
+  defineRuntimeConstant(name, () => {
+    const stream = new PhpObject(streamClass, id);
+    stream.internal = name;
+    return stream;
+  });
 }
 
 function writeStream(stream: Value, text: string, name: string): Value {

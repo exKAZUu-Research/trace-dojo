@@ -170,3 +170,28 @@ $p->show();`;
   // oxlint-disable-next-line unicorn/no-null -- The trace format shows null as null.
   expect(inShow?.referenceVars.$y).toEqual({ kind: 'value', value: null });
 });
+
+test('private fields keep their declaring scope in context and object expansion', () => {
+  const source = `<?php
+class A{private $x=1;function f(){
+$n=$this->x;
+echo $n;
+}}
+class B extends A{private $x=2;}
+$b=new B;
+$b->f();`;
+  const items = phpTrace(source);
+  expect(items.find((item) => item.vars.$n === 1)).toMatchObject({ vars: { $n: 1, '$this->x': 1 } });
+  expect(items.find((item) => item.referenceVars.$b)?.referenceVars.$b).toMatchObject({
+    kind: 'object',
+    entries: { 'A::$x': { kind: 'value', value: 1 }, 'B::$x': { kind: 'value', value: 2 } },
+  });
+});
+
+test.each([
+  ["class C{public static $x=VALUE;}\necho 'hello';\ndefine('VALUE',3);\necho C::$x;", 'hello3'],
+  ["class C{public static $x=1/0;}\necho 'unused';", 'unused'],
+])('trace snapshots leave deferred static initializers untouched: %s', (body, stdout) => {
+  const source = `<?php\n${body}`;
+  expect(traceProgram('php', source, source)).toMatchObject({ stdout, uncaughtException: undefined });
+});

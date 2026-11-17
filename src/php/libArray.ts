@@ -791,7 +791,7 @@ function walkValues(ref: Ref, ctx: NativeContext, recursive: boolean, active: Se
         if (slot === undefined || slot === UNINIT) continue;
         elementRef = slot instanceof Ref ? slot : new Ref(slot);
         const decl = declForKey(container.cls, name);
-        if (decl?.type) elementRef.typedBy = [...(elementRef.typedBy ?? []), { decl, object: container }];
+        if (decl?.type) elementRef.addTypeOwner(decl, container);
         container.props.set(name, elementRef);
       }
       if (recursive && elementRef.v instanceof PhpArray) {

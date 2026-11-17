@@ -5,7 +5,7 @@ import type { TraceOptions } from '../interpreter/traceAnnotations';
 import { TraceRecorder, type TraceVariables } from '../interpreter/traceRecorder';
 import type { DisplayNode, TraceItemVariable } from '../problems/trace';
 import { dec } from './bytes';
-import { propNameOf, resolveStatic } from './classes';
+import { canAccessProp, declForKey, type LazyRef, lookupProp, propNameOf } from './classes';
 import { parsePhp } from './parse';
 import { runProgram } from './run';
 import { type Frame, rt, Runtime } from './runtime';
@@ -32,7 +32,6 @@ export function tracePhpProgram(program: string, trace: TraceOptions, input?: Pr
  * (`$this->x`, as Java's `this.x`) and the static properties of the program's classes (`Foo::$x`, as Java's static
  * fields).
  */
-// code-gauge-allow functionCognitiveComplexity 25 -- Transcribes PHP's algorithm for this function step by step, whose branches mirror PHP's.
 function variablesOf(runtime: Runtime, frame: Frame, withContext: boolean): TraceVariables {
   const variables: TraceVariables = { vars: {}, referenceVars: {} };
   for (const [name, ref] of frame.vars) {
@@ -40,23 +39,35 @@ function variablesOf(runtime: Runtime, frame: Frame, withContext: boolean): Trac
     addVariable(variables, `$${dec(name)}`, ref.v);
   }
   if (!withContext) return variables;
+  contextProperties(variables, frame);
+  staticVariables(variables, runtime);
+  return variables;
+}
+
+function contextProperties(variables: TraceVariables, frame: Frame): void {
   const self = frame.thisObj;
   if (self && !self.turtle) {
     for (const [key, slot] of self.props) {
       if (slot === UNINIT) continue;
-      addVariable(variables, `$this->${dec(propNameOf(key))}`, slot instanceof Ref ? slot.v : slot);
+      const name = propNameOf(key);
+      const decl = lookupProp(self.cls, name, frame.scope);
+      if (decl && (decl.key !== key || !canAccessProp(decl, frame.scope))) continue;
+      addVariable(variables, `$this->${dec(name)}`, slot instanceof Ref ? slot.v : slot);
     }
   }
+}
+
+function staticVariables(variables: TraceVariables, runtime: Runtime): void {
   for (const cls of runtime.userClasses) {
     if (cls.isAnonymous) continue;
     for (const [name, { ref, decl }] of cls.staticProps) {
       if (decl.cls !== cls) continue;
-      const value = resolveStatic(ref).v;
+      if ((ref as LazyRef).lazy) continue;
+      const value = ref.v;
       if ((value as unknown) === UNINIT) continue;
       addVariable(variables, `${dec(cls.name)}::$${dec(name)}`, value);
     }
   }
-  return variables;
 }
 
 /** Closures are definitions, not variables, to learners. */
@@ -152,16 +163,34 @@ function displayNodeOf(value: Value, seen: Set<object>, budget: { remaining: num
       }
       return { kind: isList ? 'array' : 'object', entries };
     }
-    for (const [key, slot] of value.props) {
-      if (slot === UNINIT) continue;
-      const node = displayNodeOf(slot instanceof Ref ? slot.v : slot, seen, budget);
-      if (node) define(entries, dec(propNameOf(key)), node);
-      if (budget.remaining <= 0) break;
-    }
-    return { kind: 'object', entries };
+    return { kind: 'object', entries: objectEntries(value, seen, budget) };
   } finally {
     seen.delete(value);
   }
+}
+
+function objectEntries(
+  value: PhpObject,
+  seen: Set<object>,
+  budget: { remaining: number }
+): Record<string, DisplayNode> {
+  const entries: Record<string, DisplayNode> = {};
+  const counts = new Map<string, number>();
+  for (const [key, slot] of value.props)
+    if (slot !== UNINIT) {
+      const name = propNameOf(key);
+      counts.set(name, (counts.get(name) ?? 0) + 1);
+    }
+  for (const [key, slot] of value.props) {
+    if (slot === UNINIT) continue;
+    const node = displayNodeOf(slot instanceof Ref ? slot.v : slot, seen, budget);
+    const name = propNameOf(key);
+    const decl = declForKey(value.cls, key);
+    const label = (counts.get(name) ?? 0) > 1 && decl ? `${decl.cls.name}::$${name}` : name;
+    if (node) define(entries, dec(label), node);
+    if (budget.remaining <= 0) break;
+  }
+  return entries;
 }
 
 function keyLabel(key: Key, isList: boolean): string {

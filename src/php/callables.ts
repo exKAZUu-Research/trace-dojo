@@ -151,7 +151,7 @@ export function methodCallExpression(e: Extract<Expr, { k: 'mcall' }>): Chain {
     methodName = toStr(value);
   }
   runtime.row = e.row;
-  if (!(object instanceof PhpObject)) {
+  if (!(object instanceof PhpObject) || object.isResource) {
     throwError('Error', `Call to a member function ${methodName}() on ${valueName(object)}`);
   }
   runtime.frame.temporaries.push(object);

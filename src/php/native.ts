@@ -15,7 +15,7 @@ import {
 } from './values';
 
 const functions: NativeFunction[] = [];
-const constants: [string, Value][] = [];
+const constants: [string, Value | (() => Value)][] = [];
 const constantDeprecations = new Map<string, string>();
 const classDefinitions: ClassDefinition[] = [];
 
@@ -46,6 +46,10 @@ export function nativeParameters(name: string): NativeFunction['params'] | undef
 export function defineConstant(name: string, value: Value, deprecation?: string): void {
   constants.push([name, value]);
   if (deprecation) constantDeprecations.set(name, deprecation);
+}
+
+export function defineRuntimeConstant(name: string, create: () => Value): void {
+  constants.push([name, create]);
 }
 
 /** The E_DEPRECATED message PHP reports when a script reads the builtin constant `name`, if PHP deprecates it. */
@@ -83,7 +87,8 @@ export function defineClass(definition: ClassDefinition): void {
 export function installNatives(): void {
   const runtime = rt();
   for (const fn of functions) runtime.functions.set(lower(fn.name), fn);
-  for (const [name, value] of constants) {
+  for (const [name, definition] of constants) {
+    const value = typeof definition === 'function' ? definition() : definition;
     runtime.constants.set(name, value);
     if (value instanceof PhpArray || value instanceof PhpObject) runtime.rootConstants.add(value);
   }
@@ -122,6 +127,7 @@ function buildClass(definition: ClassDefinition): PhpClass {
       visibility: prop.visibility,
       isStatic: false,
       isReadonly: prop.isReadonly ?? false,
+      isFinal: false,
       hasDefault: true,
       defaultValue: prop.defaultValue,
       type: prop.typed ? { k: 'named', name: 'mixed' } : undefined,

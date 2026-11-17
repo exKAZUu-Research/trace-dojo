@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 539 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 545 -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import type { Expr, ListItem } from './ast';
 import { callMethod } from './callables';
@@ -85,8 +85,11 @@ export function placeOf(e: Expr): Place {
     case 'call':
     case 'mcall':
     case 'scall': {
+      runtime.lastReturnRef = undefined;
       const value = ev(e);
-      return new ValuePlace(value);
+      const returned = runtime.lastReturnRef;
+      runtime.lastReturnRef = undefined;
+      return returned ? new RefPlace(returned) : new ValuePlace(value);
     }
     default: {
       return new ValuePlace(ev(e));
@@ -124,7 +127,7 @@ class StaticPlace implements Place {
       if (update === 'nested') return null;
       throwError(
         'Error',
-        `Typed static property ${this.cls.name}::$${this.name} must not be accessed before initialization`
+        `Typed static property ${this.decl?.cls.name ?? this.cls.name}::$${this.name} must not be accessed before initialization`
       );
     }
     return value;
@@ -165,18 +168,11 @@ function writtenObject(e: Expr): Value {
   return e.k === 'var' ? evQuiet(e) : ev(e);
 }
 
-// code-gauge-allow functionNcss 32 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 // code-gauge-allow functionCognitiveComplexity 25 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 function propPlace(object: PhpObject, name: string): Place {
   const scope = rt().frame.scope;
   return {
-    get: () => {
-      if (!issetPropExists(object, name, scope)) {
-        const magic = object.cls.findMethod('__get');
-        if (!magic) return;
-      }
-      return readProp(object, name, scope, true);
-    },
+    get: (operation) => readPropertyPlace(object, name, scope, operation),
     set: (value) => writeProp(object, name, value, scope),
     ref: () => propRef(object, name, scope),
     unset: () => unsetProp(object, name, scope),
@@ -208,12 +204,30 @@ function propPlace(object: PhpObject, name: string): Place {
         if (returned) return new RefPlace(returned);
         if (!(value instanceof PhpObject))
           throwError('Error', `Indirect modification of ${decl.cls.name}::$${name} is not allowed`);
-        return new RefPlace(new Ref(value));
+        return new RefPlace(Ref.temporary(value));
       }
       classesModule.checkIndirectModification(object, name, scope);
       return this;
     },
   };
+}
+
+function readPropertyPlace(
+  object: PhpObject,
+  name: string,
+  scope: PhpClass | undefined,
+  operation?: 'assignOp' | 'incdec' | 'nested'
+): Value | undefined {
+  if (object.isResource && operation)
+    throwError(
+      'Error',
+      `Attempt to ${operation === 'assignOp' ? 'assign' : operation === 'incdec' ? 'increment/decrement' : 'modify'} property "${name}" on resource`
+    );
+  if (!issetPropExists(object, name, scope)) {
+    const magic = object.cls.findMethod('__get');
+    if (!magic) return;
+  }
+  return readProp(object, name, scope, true);
 }
 
 function issetPropExists(object: PhpObject, name: string, scope: PhpClass | undefined): boolean {
@@ -266,7 +280,7 @@ function arrayAccessNestedPlace(object: PhpObject, key: Value | undefined): Plac
     object.cls.findMethod('offsetget')?.fn.kind === 'native'
   ) {
     notice(`Indirect modification of overloaded element of ${object.cls.name} has no effect`);
-    return new RefPlace(new Ref(null));
+    return new RefPlace(Ref.temporary(null));
   }
   const runtime = rt();
   runtime.lastReturnRef = undefined;
@@ -277,7 +291,7 @@ function arrayAccessNestedPlace(object: PhpObject, key: Value | undefined): Plac
   if (!(value instanceof PhpObject)) {
     notice(`Indirect modification of overloaded element of ${object.cls.name} has no effect`);
   }
-  return new RefPlace(new Ref(value));
+  return new RefPlace(Ref.temporary(value));
 }
 
 // code-gauge-allow functionCognitiveComplexity 22 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
@@ -420,7 +434,7 @@ export function assignReference(target: Expr, source: Expr): Value {
     if (returned) ref = returned;
     else {
       notice('Only variables should be assigned by reference');
-      ref = new Ref(value);
+      ref = Ref.temporary(value);
     }
   } else ref = placeOf(source).ref();
   runtime.row = target.row;

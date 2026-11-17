@@ -1,0 +1,1 @@
+<?php echo 'never';class A{final private int $x=1;}

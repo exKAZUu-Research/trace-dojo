@@ -1,0 +1,4 @@
+
+Fatal error: Cannot override final property A::$x in /main.php on line 1
+Stack trace:
+#0 {main}

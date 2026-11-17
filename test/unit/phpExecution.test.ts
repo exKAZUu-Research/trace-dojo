@@ -760,3 +760,47 @@ test.each(['ArrayIterator', 'ArrayObject'])('iterates native array storage in li
     stdout: '200010000',
   });
 });
+
+test.each(['return 1;', 'echo "finally";throw new Exception("replacement");'])(
+  'catch-body memory failure bypasses finally replacement: %s',
+  (body) => {
+    const result = run(
+      `<?php function f(){try{throw new Exception;}catch(Throwable $e){str_repeat('x',1000000000);}finally{${body}}}echo f(),'never';`
+    );
+    expect(result.kind === 'executed' && result.stdout).toMatch(/^\nFatal error: Allowed memory size/);
+    expect(result.kind === 'executed' && result.stdout).not.toMatch(/finally|replacement|never/);
+  }
+);
+
+test('stream resources cannot retain learner state between executions', () => {
+  expect(run('<?php $s=STDOUT;try{$s->marker="local";}catch(Throwable $e){echo $e->getMessage();}')).toMatchObject({
+    kind: 'executed',
+    stdout: 'Attempt to assign property "marker" on resource',
+  });
+  expect(run('<?php $s=STDOUT;echo $s->marker ?? "absent";')).toMatchObject({ kind: 'executed', stdout: 'absent' });
+});
+
+test('typed property constraints stay bounded under repeated reference binding', () => {
+  vi.restoreAllMocks();
+  expect(
+    run('<?php class A{public int $x=1;}$a=new A;$r=&$a->x;for($i=0;$i<12000;$i++){$a->x=&$r;$r++;}echo $a->x;')
+  ).toMatchObject({ kind: 'executed', stdout: '12001' });
+});
+
+test('temporary releases stay bounded with a large live object collection', () => {
+  vi.restoreAllMocks();
+  expect(
+    run(
+      '<?php class P{function __construct(public int $x){}}$live=[];for($i=0;$i<10000;$i++)$live[]=new P($i);for($i=0;$i<20000;$i++)$q=new P($i);echo count($live);'
+    )
+  ).toMatchObject({ kind: 'executed', stdout: '10000' });
+});
+
+test('destructor-created temporaries do not rescan the remaining object chain', () => {
+  vi.restoreAllMocks();
+  expect(
+    run(
+      '<?php class Node{public $next;function __construct($next){$this->next=$next;}function __destruct(){$t=new stdClass;}}$n=null;for($i=0;$i<10000;$i++)$n=new Node($n);unset($n);echo "done";'
+    )
+  ).toMatchObject({ kind: 'executed', stdout: 'done' });
+});

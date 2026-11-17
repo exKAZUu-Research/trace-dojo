@@ -148,7 +148,7 @@ export function getType(value: Value): string {
   if (value === null) return 'NULL';
   if (typeof value !== 'object') return SCALAR_TYPE_NAMES[typeof value as keyof typeof SCALAR_TYPE_NAMES].gettype;
   if (value instanceof PhpArray) return 'array';
-  return value.cls.name === '(stream)' ? 'resource' : 'object';
+  return value.isResource ? 'resource' : 'object';
 }
 
 /** The type name in error messages and `get_debug_type`. */
@@ -157,7 +157,7 @@ export function debugType(value: Value): string {
   if (typeof value !== 'object') return SCALAR_TYPE_NAMES[typeof value as keyof typeof SCALAR_TYPE_NAMES].debug;
   if (value instanceof PhpArray) return 'array';
   const object = value as PhpObject;
-  if (object.cls.name === '(stream)') return 'resource (stream)';
+  if (object.isResource) return 'resource (stream)';
   return object.cls.name;
 }
 
