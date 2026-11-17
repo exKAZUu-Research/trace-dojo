@@ -1,5 +1,5 @@
-import { loadParser } from '../../interpreter/treeSitter';
 import { TURTLE_METHOD_NAMES } from '../../interpreter/turtleWorld';
+import { loadTypeScriptParser } from '../treeSitter';
 import { BROWSER_ONLY_GLOBALS, BROWSER_TYPES, SHARED_HOST_GLOBALS } from './domGlobals';
 import { ECMASCRIPT_LIBRARY } from './ecmascriptLibrary';
 import { Scope, type Sym } from './scopes';
@@ -67,7 +67,7 @@ const BROWSER_LIBRARY = [
   }),
 ].join('\n');
 
-const parser = await loadParser('@willbooster/tree-sitter-typescript/tree-sitter-typescript.wasm');
+const parser = await loadTypeScriptParser();
 
 /** The library's declarations, parsed once; its tree lives as long as the process. */
 export const libraryTree = (() => {

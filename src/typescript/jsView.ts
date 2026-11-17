@@ -67,7 +67,7 @@ const typeMembers = new Set(['method_signature', 'abstract_method_signature', 'i
 /** Modifier tokens of members, parameters, and declarators that running a program ignores. */
 const memberModifiers = new Set(['readonly', 'abstract', 'declare', '?', '!', 'override']);
 const modifiedTypes = new Set([
-  'field_definition',
+  'public_field_definition',
   'method_definition',
   'variable_declarator',
   'required_parameter',
@@ -100,7 +100,7 @@ function view(node: TreeNode): ViewNode {
     case 'abstract_class_declaration': {
       return generic(node, 'class_declaration');
     }
-    case 'field_definition': {
+    case 'public_field_definition': {
       return generic(node, 'field_definition');
     }
     default: {
@@ -203,7 +203,7 @@ function classBody(node: TreeNode): ViewNode {
 /** Whether a field only declares a type: an abstract field, or one marked `declare`. */
 function isTypeOnlyField(node: TreeNode): boolean {
   return (
-    node.type === 'field_definition' &&
+    node.type === 'public_field_definition' &&
     node.children.some((child) => child?.type === 'abstract' || child?.type === 'declare')
   );
 }

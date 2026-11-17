@@ -156,7 +156,7 @@ export function checkDuplicateMembers(c: Checker, body: TreeNode): void {
 
 /** The key under which a class member conflicts with others, or `undefined` if it cannot conflict. */
 function duplicateKeyOf(member: TreeNode): string | undefined {
-  if (!['field_definition', 'method_definition'].includes(member.type)) return undefined;
+  if (!['public_field_definition', 'method_definition'].includes(member.type)) return undefined;
   const nameNode = member.childForFieldName('name');
   const name = nameNode ? propertyNameText(nameNode) : undefined;
   if (!nameNode || name === undefined) return undefined;

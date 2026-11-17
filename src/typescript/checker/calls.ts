@@ -307,7 +307,7 @@ export class Calls {
       callee.type === 'identifier' ? this.c.scopeOf(callee).lookupValue(callee.text)?.valueDeclaration : undefined;
     if (declaration?.type === 'variable_declarator' && !declaration.childForFieldName('type')) return false;
     const field = signature.declaration.parent;
-    if (field?.type === 'field_definition' && !field.childForFieldName('type')) return false;
+    if (field?.type === 'public_field_definition' && !field.childForFieldName('type')) return false;
     return isIntrinsic(signature.returnType(), 'never');
   }
 

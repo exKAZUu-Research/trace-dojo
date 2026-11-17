@@ -267,7 +267,7 @@ export class ClassChecker {
     const nameNode = member.childForFieldName('name');
     const name = nameNode ? propertyNameText(nameNode) : undefined;
     switch (member.type) {
-      case 'field_definition': {
+      case 'public_field_definition': {
         if (name !== undefined && nameNode)
           members.structure.properties.set(name, this.fieldProperty(name, nameNode, member, members.info));
         break;
@@ -510,7 +510,7 @@ export class ClassChecker {
         case 'class_static_block': {
           return current;
         }
-        case 'field_definition': {
+        case 'public_field_definition': {
           return current;
         }
         case 'class_heritage': {
@@ -541,7 +541,7 @@ export class ClassChecker {
     }
     if (
       (owner.type === 'method_definition' ||
-        owner.type === 'field_definition' ||
+        owner.type === 'public_field_definition' ||
         owner.type === 'class_static_block') &&
       parent?.type === 'class_body'
     ) {
@@ -645,7 +645,7 @@ export class ClassChecker {
   checkInitializedBefore(node: TreeNode, objectNode: TreeNode, property: Property): void {
     if (objectNode.type !== 'this' || !property.declaringClass || !property.declaration) return;
     const owner = this.thisOwner(node);
-    if (owner?.type !== 'field_definition' || hasToken(owner, 'static')) return;
+    if (owner?.type !== 'public_field_definition' || hasToken(owner, 'static')) return;
     if (owner.parent?.parent?.id !== property.declaringClass.declaration.id) return;
     // A function in the initializer runs later, when it is called.
     for (let current = node.parent; current && current.id !== owner.id; current = current.parent) {
@@ -654,7 +654,7 @@ export class ClassChecker {
     const declaration = property.declaration;
     // A field initializes in declaration order, a field without an initializer only in the constructor, after them.
     const later =
-      declaration.type === 'field_definition'
+      declaration.type === 'public_field_definition'
         ? declaration.startIndex > owner.startIndex ||
           (!declaration.childForFieldName('value') && !hasToken(declaration, '!') && !hasToken(declaration, '?'))
         : declaration.type === 'required_parameter' || declaration.type === 'optional_parameter';
@@ -776,7 +776,7 @@ export class ClassChecker {
       if (current.type === 'arrow_function') return true;
     }
     const isConstructor = owner.type === 'method_definition' && owner.childForFieldName('name')?.text === 'constructor';
-    const isInitializer = owner.type === 'field_definition';
+    const isInitializer = owner.type === 'public_field_definition';
     if (!isConstructor && !isInitializer) return true;
     const classNode = owner.parent?.parent;
     return classNode?.id !== property.declaringClass.declaration.id;
