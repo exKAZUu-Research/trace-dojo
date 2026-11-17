@@ -59,7 +59,9 @@ export class BindingPatterns {
         const defaultType = this.c.expressions.check(right, this.impliedType(left) ?? type);
         const withoutUndefined = this.c.relations.removeUndefined(type);
         if (annotated && !isIntrinsic(withoutUndefined, 'never')) {
-          const declared = this.c.relations.isAssignable(undefinedType, defaultType) ? type : withoutUndefined;
+          // A default that can be `undefined` keeps it; one typed `any` does not, as TypeScript's type facts have it.
+          const keepsUndefined = !isAnyLike(defaultType) && this.c.relations.isAssignable(undefinedType, defaultType);
+          const declared = keepsUndefined ? type : withoutUndefined;
           this.c.expressions.checkAssignable(right, defaultType, declared);
           this.bindPattern(left, declared, bind, annotated);
           return;
