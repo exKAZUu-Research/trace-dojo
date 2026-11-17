@@ -39,6 +39,6 @@ test('repeated ready lists stay bounded on both sides of the display element lim
     expect(summary.exception).toBeUndefined();
     expect(summary.answers).toBe(6000);
     expect(summary.steps).toBe(isPairs ? 6004 : 6006);
-    if (!isPairs) expect(summary.last).toBe(length <= 1000 ? 'array' : 'value');
+    expect(summary.last).toBe(length <= 1000 ? 'array' : 'value');
   }
 });

@@ -78,6 +78,7 @@ export class Runtime implements TracedRuntime<TraceFrame> {
   private renderDeadline: number | undefined;
   private readonly renderMilliseconds = { answer: 0, reference: 0 };
   private displayAllocated = 0;
+  private displayRetained = 0;
   private renderExcludedMilliseconds = 0;
 
   withRenderBudget<T>(kind: 'answer' | 'reference', run: () => T): T {
@@ -86,11 +87,12 @@ export class Runtime implements TracedRuntime<TraceFrame> {
     const excluded = this.renderExcludedMilliseconds;
     this.renderDeadline = started + LIMITS.maxMilliseconds - this.renderMilliseconds[kind];
     const allocated = this.displayAllocated;
+    const retained = this.displayRetained;
     try {
       if (started >= this.renderDeadline) throw new DisplayAbort();
       return run();
     } catch (error) {
-      this.displayAllocated = allocated;
+      this.displayAllocated = allocated + this.displayRetained - retained;
       throw error;
     } finally {
       this.renderMilliseconds[kind] += performance.now() - started - (this.renderExcludedMilliseconds - excluded);
@@ -200,6 +202,10 @@ export class Runtime implements TracedRuntime<TraceFrame> {
   allocateDisplay(): void {
     if (this.displayAllocated + ALLOCATION_OVERHEAD > LIMITS.maxSlots) throw new DisplayAbort();
     this.displayAllocated += ALLOCATION_OVERHEAD;
+  }
+
+  retainDisplay(): void {
+    this.displayRetained += ALLOCATION_OVERHEAD;
   }
 
   private spendDisplay(cost: number, executionCost: number, allocations = 0): void {

@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 433 -- Scalar answers and reference nodes share bounded display traversal and caches.
+// code-gauge-allow-file fileNcss 500 -- Scalar answers and reference nodes share bounded display traversal and caches.
 import type { ProgramRecording } from '../interpreter/program';
 import type { ProgramInput } from '../interpreter/programIo';
 import type { TraceOptions } from '../interpreter/traceAnnotations';
@@ -6,6 +6,7 @@ import { TraceRecorder, type TraceVariables } from '../interpreter/traceRecorder
 import type { DisplayNode, TraceItemVariable } from '../problems/trace';
 import { CHAR_TYPE, CONS_CON, FLOAT_TYPE, NIL_CON, UNIT_CON } from './builtinTypes';
 import { compileProgram } from './compile';
+import { type CachedDisplay, displayCacheFor } from './displayCache';
 import { constructorFieldType, isConcreteType, slotDisplayType, UNKNOWN_TYPE } from './displayTypes';
 import { DISPLAY_OPERATIONS } from './previewBudget';
 import { floatToDigits } from './primitives';
@@ -262,7 +263,6 @@ interface ListView {
   items: ListItem[];
   primitive: boolean;
   scalar: Scalar | undefined;
-  node: DisplayNode | undefined;
 }
 
 const listViews = new WeakMap<ConValue, WeakMap<Type, ListView>>();
@@ -305,7 +305,6 @@ function listItems(runtime: Runtime, value: ConValue, type: Type): ListItem[] | 
       items,
       primitive: items.every((item) => typeof item.value !== 'object'),
       scalar: undefined,
-      node: undefined,
     });
   }
   return items;
@@ -392,7 +391,6 @@ function uncachedListScalarOf(
   const items = listItems(runtime, value, type);
   if (!items) return NOT_SCALAR;
   const view = listViews.get(value)?.get(type);
-  if (view?.scalar !== undefined && depth < MAX_DISPLAY_DEPTH) return view.scalar;
   if (isStringType(type, value)) {
     const scalar = charsOf(items);
     if (view?.primitive) view.scalar = scalar;
@@ -417,44 +415,43 @@ function containerKind(value: ConValue): 'map' | 'set' | undefined {
   return undefined;
 }
 
+interface NodeCapture {
+  slots: Slot[];
+  dependencies: CachedDisplay[];
+  cacheable: boolean;
+}
+
 class DisplayNodes {
   private readonly ancestors = new Set<ConValue>();
-  constructor(private readonly runtime: Runtime) {}
+  private capture: NodeCapture | undefined;
+  private readonly cache: ReturnType<typeof displayCacheFor>;
+  constructor(private readonly runtime: Runtime) {
+    this.cache = displayCacheFor(runtime);
+  }
 
   build(value: Value, type: Type, depth: number): DisplayNode | undefined {
     this.runtime.spend();
+    if (depth > MAX_DISPLAY_DEPTH) return this.truncated();
     if (!(value instanceof ConValue)) {
+      if (typeof value !== 'object') return this.primitiveNode(value, type, depth);
+      if (this.capture) this.capture.cacheable = false;
       this.runtime.allocateDisplay();
       return this.nodeOf(value, type, depth);
     }
-    if (oversizedLists.has(value)) return this.truncated();
-    const cached = listViews.get(value)?.get(type);
-    if (cached?.node && depth < MAX_DISPLAY_DEPTH) {
-      reuseListItems(this.runtime, cached);
-      return cached.node;
-    }
-    if (value.fields.length === 0) {
-      this.runtime.allocateDisplay();
-      return this.nodeOf(value, type, depth);
-    }
-    return this.runtime.withRenderBudget('reference', () => this.buildStructured(value, type, depth));
-  }
-
-  private buildStructured(value: ConValue, type: Type, depth: number): DisplayNode | undefined {
-    this.runtime.allocateDisplay();
-    if (this.ancestors.has(value)) return this.truncated();
-    this.ancestors.add(value);
-    try {
-      return this.nodeOf(value, type, depth);
-    } finally {
-      this.ancestors.delete(value);
-    }
+    if (oversizedLists.has(value) || this.ancestors.has(value)) return this.truncated();
+    return this.memo(value, type, `node:${depth}`, () => {
+      this.ancestors.add(value);
+      try {
+        return this.nodeOf(value, type, depth);
+      } finally {
+        this.ancestors.delete(value);
+      }
+    });
   }
 
   // code-gauge-allow functionCognitiveComplexity 27 -- One branch per kind of value shown as a node.
   // code-gauge-allow functionNcss 34 -- Node formatting dispatches on each supported value representation.
   private nodeOf(value: Value, type: Type, depth: number): DisplayNode | undefined {
-    if (depth > MAX_DISPLAY_DEPTH) return this.truncated();
     if (typeof value === 'bigint') return { kind: 'value', value: traceInt(value) };
     if (typeof value === 'number') return { kind: 'value', value: traceFloat(value, type) };
     if (typeof value === 'string') return { kind: 'value', value };
@@ -478,7 +475,7 @@ class DisplayNodes {
     if (con.type.traceKind === 'maybe') {
       // A Maybe shows as what it holds, or as null, as a Java reference does.
       if (con.name === 'Nothing') return NULL_NODE;
-      const inner = forceForDisplay(this.runtime, value.fields[0]);
+      const inner = this.force(value.fields[0]);
       return inner === undefined ? undefined : this.build(inner, elementType(type, 0), depth + 1);
     }
     if (value.fields.length === 0)
@@ -492,24 +489,26 @@ class DisplayNodes {
     let count = 0;
     const visit = (slot: Slot): boolean => {
       this.runtime.spend();
-      const node = forceForDisplay(this.runtime, slot);
+      const node = this.force(slot);
       if (!(node instanceof ConValue)) return false;
       if (node.fields.length === 0) return true;
       const left = kind === 'map' ? 3 : 2;
       if (!visit(node.fields[left]) || count >= MAX_ELEMENTS) return false;
-      const key = forceForDisplay(this.runtime, node.fields[1]);
+      const key = this.force(node.fields[1]);
       if (key === undefined) return false;
-      const keyNode = this.build(key, elementType(type, 0), depth + 1) ?? NULL_NODE;
-      if (kind === 'map') {
-        const item = forceForDisplay(this.runtime, node.fields[2]);
-        entries[count++] = {
-          kind: 'array',
-          entries: {
-            0: keyNode,
-            1: item === undefined ? NULL_NODE : (this.build(item, elementType(type, 1), depth + 1) ?? NULL_NODE),
-          },
-        };
-      } else entries[count++] = keyNode;
+      entries[count++] =
+        this.memo(node, type, `entry:${depth}`, () => {
+          const keyNode = this.build(key, elementType(type, 0), depth + 1) ?? NULL_NODE;
+          if (kind === 'set') return keyNode;
+          const item = this.force(node.fields[2]);
+          return {
+            kind: 'array',
+            entries: {
+              0: keyNode,
+              1: item === undefined ? NULL_NODE : (this.build(item, elementType(type, 1), depth + 1) ?? NULL_NODE),
+            },
+          };
+        }) ?? NULL_NODE;
       return visit(node.fields[left + 1]);
     };
     return visit(value) ? { kind: 'array', entries } : this.truncated();
@@ -519,18 +518,20 @@ class DisplayNodes {
     const items = listItems(this.runtime, value, type);
     if (!items) return this.truncated();
     const view = listViews.get(value)?.get(type);
-    if (view?.node && depth < MAX_DISPLAY_DEPTH) return view.node;
+    if (view && this.capture) {
+      for (const slot of view.spine) this.capture.slots.push(slot);
+      for (const item of items) this.capture.slots.push(item.slot);
+    }
     if (isStringType(type, value)) return { kind: 'value', value: charsOf(items) };
     const entries: Record<string, DisplayNode> = Object.create(null);
     for (const [index, item] of items.entries()) {
       entries[index] = this.build(item.value, item.type, depth + 1) ?? NULL_NODE;
     }
-    const node: DisplayNode = { kind: 'array', entries };
-    if (view?.primitive && depth < MAX_DISPLAY_DEPTH) view.node = node;
-    return node;
+    return { kind: 'array', entries };
   }
 
   private truncated(): DisplayNode {
+    if (this.capture) this.capture.cacheable = false;
     this.runtime.incompletePreview();
     return { kind: 'value', value: '…' };
   }
@@ -542,12 +543,94 @@ class DisplayNodes {
     const isTuple = con.type.special === 'tuple';
     if (!isTuple && con.type.cons.length > 1) entries['<constructor>'] = { kind: 'value', value: con.name };
     for (const [index, field] of value.fields.entries()) {
-      const forced = forceForDisplay(this.runtime, field);
+      const forced = this.force(field);
       if (forced === undefined) continue;
       const fieldType = isTuple ? elementType(type, index) : constructorFieldType(con, type, index);
       const node = this.build(forced, slotDisplayType(field, fieldType), depth + 1);
       if (node) entries[con.fieldNames?.[index] ?? String(index)] = node;
     }
     return { kind: isTuple ? 'array' : 'object', entries };
+  }
+
+  private primitiveNode(value: Value, type: Type, depth: number): DisplayNode | undefined {
+    const cache = this.cache;
+    const cached = cache.get(value, type, 'primitive');
+    if (cached) return cached.node;
+    this.runtime.allocateDisplay();
+    const node = this.nodeOf(value, type, depth);
+    if (node && isConcreteType(type)) {
+      cache.set(value, type, 'primitive', { node, slots: [], dependencies: [], pending: false });
+      this.runtime.retainDisplay();
+    }
+    return node;
+  }
+
+  private memo(value: ConValue, type: Type, key: string, work: () => DisplayNode | undefined): DisplayNode | undefined {
+    const cached = this.cache.get(value, type, key);
+    if (cached) {
+      this.reuse(cached);
+      return cached.node;
+    }
+    return this.runtime.withRenderBudget('reference', () => this.captureNode(value, type, key, work));
+  }
+
+  private captureNode(
+    value: ConValue,
+    type: Type,
+    key: string,
+    work: () => DisplayNode | undefined
+  ): DisplayNode | undefined {
+    this.runtime.allocateDisplay();
+    const parent = this.capture;
+    const capture: NodeCapture = { slots: [...value.fields], dependencies: [], cacheable: true };
+    this.capture = capture;
+    let completed: CachedDisplay | undefined;
+    try {
+      const node = work();
+      if (node && capture.cacheable && isConcreteType(type)) {
+        completed = { node, slots: capture.slots, dependencies: capture.dependencies, pending: true };
+        this.cache.set(value, type, key, completed);
+        this.runtime.retainDisplay();
+      }
+      return node;
+    } finally {
+      this.capture = parent;
+      if (parent) {
+        parent.cacheable &&= completed !== undefined;
+        if (completed) parent.dependencies.push(completed);
+      }
+    }
+  }
+
+  // code-gauge-allow functionCognitiveComplexity 22 -- One postorder walk settles a shared cache-dependency graph once.
+  private reuse(cached: CachedDisplay): void {
+    if (cached.pending) {
+      const pending = [{ view: cached, visited: false }];
+      const seen = new Set<CachedDisplay>();
+      while (pending.length > 0) {
+        const { view, visited } = pending.pop()!;
+        if (!view.pending) continue;
+        if (!visited) {
+          if (seen.has(view)) continue;
+          seen.add(view);
+          pending.push({ view, visited: true });
+          for (const dependency of view.dependencies) pending.push({ view: dependency, visited: false });
+          continue;
+        }
+        let unreleased = view.dependencies.some((dependency) => dependency.pending);
+        for (const slot of view.slots) unreleased = this.runtime.trackPreview(slot) || unreleased;
+        view.pending = unreleased;
+      }
+    }
+    if (this.capture) this.capture.dependencies.push(cached);
+  }
+
+  private force(slot: Slot): Value | undefined {
+    const value = forceForDisplay(this.runtime, slot);
+    if (this.capture) {
+      this.capture.slots.push(slot);
+      if (value === undefined) this.capture.cacheable = false;
+    }
+    return value;
   }
 }
