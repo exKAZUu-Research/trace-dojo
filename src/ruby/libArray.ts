@@ -301,11 +301,12 @@ def('Array', '<=>', 1, function* (self: RArray, [other]) {
   const compared = other instanceof RArray ? other : yield* tryAry(other);
   if (!compared) return NIL;
   if (self === compared) return 0n;
-  const pairs = rt().arrayComparisonPairs;
+  const context = rt().recursionContext;
+  const pairs = context.arrayComparisonPairs;
   const active = pairs.get(self) ?? new Set<RArray>();
   if (active.has(compared)) return 0n;
-  if (rt().arrayComparisonDepth >= LIMITS.maxCallDepth) throw new ExecutionLimitError('output');
-  rt().arrayComparisonDepth++;
+  if (context.arrayComparisonDepth >= LIMITS.maxCallDepth) throw new ExecutionLimitError('output');
+  context.arrayComparisonDepth++;
   active.add(compared);
   pairs.set(self, active);
   try {
@@ -316,7 +317,7 @@ def('Array', '<=>', 1, function* (self: RArray, [other]) {
     }
     return BigInt(Math.sign(self.items.length - compared.items.length));
   } finally {
-    rt().arrayComparisonDepth--;
+    context.arrayComparisonDepth--;
     active.delete(compared);
     if (active.size === 0) pairs.delete(self);
   }

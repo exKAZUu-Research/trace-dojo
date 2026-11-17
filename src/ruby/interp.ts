@@ -24,6 +24,7 @@ import {
 } from './conversions';
 import { coreConstants } from './coreConstants';
 import { isCoreMethod } from './define';
+import { requireCompatibleStringEncoding } from './encodedStringJoin';
 import {
   argumentCountError,
   argumentError,
@@ -887,6 +888,8 @@ export function constSet(module: RClass, name: string, value: Value, row = rt().
   module.constants.set(name, value);
   module.constantRows.set(name, row);
   if (value instanceof RClass && value.baseName === undefined) {
+    if (module !== rt().c.Object && module.name !== undefined)
+      requireCompatibleStringEncoding(identifierKeyString(module.name), identifierKeyString(name));
     value.baseName = name;
     if (module !== rt().c.Object) value.lexicalParent = module;
   }

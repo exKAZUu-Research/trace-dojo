@@ -200,6 +200,14 @@ export class UnsupportedFeatureError extends Error {
   }
 }
 
+interface RecursionContext {
+  inspecting: Set<object>;
+  comparablePairs: Map<Value, Set<Value>>;
+  arrayComparisonPairs: Map<RArray, Set<RArray>>;
+  arrayComparisonDepth: number;
+  setInspectDepth: number;
+}
+
 export class Runtime implements TracedRuntime<Frame> {
   readonly world = new TurtleWorld();
   readonly steps = new StepTracker();
@@ -227,14 +235,27 @@ export class Runtime implements TracedRuntime<Frame> {
   readonly atExit: RProc[] = [];
   readonly registeredEndBlocks = new WeakSet<object>();
   readonly completedExitHandlers: RProc[] = [];
-  readonly comparablePairs = new Map<Value, Set<Value>>();
-  readonly arrayComparisonPairs = new Map<RArray, Set<RArray>>();
-  arrayComparisonDepth = 0;
+  private readonly recursionContexts = new WeakMap<object, RecursionContext>();
+
+  get recursionContext(): RecursionContext {
+    const key = this.activeCursor ?? this;
+    let context = this.recursionContexts.get(key);
+    if (!context) {
+      context = {
+        inspecting: new Set(),
+        comparablePairs: new Map(),
+        arrayComparisonPairs: new Map(),
+        arrayComparisonDepth: 0,
+        setInspectDepth: 0,
+      };
+      this.recursionContexts.set(key, context);
+    }
+    return context;
+  }
   /** The row of the statement running now, which a call records as its frame's call row. */
   currentRow = 0;
   containerVersion = 0;
   userCallVersion = 0;
-  setInspectDepth = 0;
   /** The fake addresses `inspect` shows for objects, assigned in the order the program shows them. */
   readonly addresses = new Map<object, number>();
   readonly methodHashIds = new WeakMap<object, number>();

@@ -49302,3 +49302,1009 @@ test.each(unavailableMethodReceiverIdentityCases)(
     });
   }
 );
+
+const nativeCursorAndByteEditCases = [
+  [
+    's="aé";i=Object.new;i.define_singleton_method(:to_int){s.replace("abc");1};r=Object.new;r.define_singleton_method(:to_str){s.replace("abc");"Q"};begin;v=(s[/(é)/]=r);p (v.is_a?(String) ? [v.bytes,v.encoding] : :object),s.bytes,s.encoding;rescue=>e;p e.class,e.message;end',
+    ':object\n[97, 81]\n#<Encoding:UTF-8>\n',
+  ],
+  [
+    's="aé";i=Object.new;i.define_singleton_method(:to_int){s.replace("abc");1};r=Object.new;r.define_singleton_method(:to_str){s.replace("abc");"Q"};begin;v=(s[/(é)/,i]="Q");p (v.is_a?(String) ? [v.bytes,v.encoding] : :object),s.bytes,s.encoding;rescue=>e;p e.class,e.message;end',
+    '[[81], #<Encoding:UTF-8>]\n[97, 81]\n#<Encoding:UTF-8>\n',
+  ],
+  [
+    's="aé";i=Object.new;i.define_singleton_method(:to_int){s.replace("abc");1};r=Object.new;r.define_singleton_method(:to_str){s.replace("abc");"Q"};begin;v=s.slice!(/(é)/,i);p (v.is_a?(String) ? [v.bytes,v.encoding] : :object),s.bytes,s.encoding;rescue=>e;p e.class,e.message;end',
+    '[[98, 99], #<Encoding:UTF-8>]\n[97]\n#<Encoding:UTF-8>\n',
+  ],
+  [
+    's="aé";i=Object.new;i.define_singleton_method(:to_int){s.replace("aé");1};r=Object.new;r.define_singleton_method(:to_str){s.replace("aé");"Q"};begin;v=(s[/(é)/]=r);p (v.is_a?(String) ? [v.bytes,v.encoding] : :object),s.bytes,s.encoding;rescue=>e;p e.class,e.message;end',
+    ':object\n[97, 81]\n#<Encoding:UTF-8>\n',
+  ],
+  [
+    's="aé";i=Object.new;i.define_singleton_method(:to_int){s.replace("aé");1};r=Object.new;r.define_singleton_method(:to_str){s.replace("aé");"Q"};begin;v=(s[/(é)/,i]="Q");p (v.is_a?(String) ? [v.bytes,v.encoding] : :object),s.bytes,s.encoding;rescue=>e;p e.class,e.message;end',
+    '[[81], #<Encoding:UTF-8>]\n[97, 81]\n#<Encoding:UTF-8>\n',
+  ],
+  [
+    's="aé";i=Object.new;i.define_singleton_method(:to_int){s.replace("aé");1};r=Object.new;r.define_singleton_method(:to_str){s.replace("aé");"Q"};begin;v=s.slice!(/(é)/,i);p (v.is_a?(String) ? [v.bytes,v.encoding] : :object),s.bytes,s.encoding;rescue=>e;p e.class,e.message;end',
+    '[[195, 169], #<Encoding:UTF-8>]\n[97]\n#<Encoding:UTF-8>\n',
+  ],
+  [
+    's="aé";i=Object.new;i.define_singleton_method(:to_int){s.replace("éa");1};r=Object.new;r.define_singleton_method(:to_str){s.replace("éa");"Q"};begin;v=(s[/(é)/]=r);p (v.is_a?(String) ? [v.bytes,v.encoding] : :object),s.bytes,s.encoding;rescue=>e;p e.class,e.message;end',
+    ':object\n[195, 81]\n#<Encoding:UTF-8>\n',
+  ],
+  [
+    's="aé";i=Object.new;i.define_singleton_method(:to_int){s.replace("éa");1};r=Object.new;r.define_singleton_method(:to_str){s.replace("éa");"Q"};begin;v=(s[/(é)/,i]="Q");p (v.is_a?(String) ? [v.bytes,v.encoding] : :object),s.bytes,s.encoding;rescue=>e;p e.class,e.message;end',
+    '[[81], #<Encoding:UTF-8>]\n[195, 81]\n#<Encoding:UTF-8>\n',
+  ],
+  [
+    's="aé";i=Object.new;i.define_singleton_method(:to_int){s.replace("éa");1};r=Object.new;r.define_singleton_method(:to_str){s.replace("éa");"Q"};begin;v=s.slice!(/(é)/,i);p (v.is_a?(String) ? [v.bytes,v.encoding] : :object),s.bytes,s.encoding;rescue=>e;p e.class,e.message;end',
+    '[[169, 97], #<Encoding:UTF-8>]\n[195]\n#<Encoding:UTF-8>\n',
+  ],
+  [
+    's="aé";i=Object.new;i.define_singleton_method(:to_int){s.replace("a😀z");1};r=Object.new;r.define_singleton_method(:to_str){s.replace("a😀z");"Q"};begin;v=(s[/(é)/]=r);p (v.is_a?(String) ? [v.bytes,v.encoding] : :object),s.bytes,s.encoding;rescue=>e;p e.class,e.message;end',
+    ':object\n[97, 81, 152, 128, 122]\n#<Encoding:UTF-8>\n',
+  ],
+  [
+    's="aé";i=Object.new;i.define_singleton_method(:to_int){s.replace("a😀z");1};r=Object.new;r.define_singleton_method(:to_str){s.replace("a😀z");"Q"};begin;v=(s[/(é)/,i]="Q");p (v.is_a?(String) ? [v.bytes,v.encoding] : :object),s.bytes,s.encoding;rescue=>e;p e.class,e.message;end',
+    '[[81], #<Encoding:UTF-8>]\n[97, 81, 152, 128, 122]\n#<Encoding:UTF-8>\n',
+  ],
+  [
+    's="aé";i=Object.new;i.define_singleton_method(:to_int){s.replace("a😀z");1};r=Object.new;r.define_singleton_method(:to_str){s.replace("a😀z");"Q"};begin;v=s.slice!(/(é)/,i);p (v.is_a?(String) ? [v.bytes,v.encoding] : :object),s.bytes,s.encoding;rescue=>e;p e.class,e.message;end',
+    '[[240, 159], #<Encoding:UTF-8>]\n[97, 152, 128, 122]\n#<Encoding:UTF-8>\n',
+  ],
+  [
+    's="aé";i=Object.new;i.define_singleton_method(:to_int){s.replace("abcdef");1};r=Object.new;r.define_singleton_method(:to_str){s.replace("abcdef");"Q"};begin;v=(s[/(é)/]=r);p (v.is_a?(String) ? [v.bytes,v.encoding] : :object),s.bytes,s.encoding;rescue=>e;p e.class,e.message;end',
+    ':object\n[97, 81, 100, 101, 102]\n#<Encoding:UTF-8>\n',
+  ],
+  [
+    's="aé";i=Object.new;i.define_singleton_method(:to_int){s.replace("abcdef");1};r=Object.new;r.define_singleton_method(:to_str){s.replace("abcdef");"Q"};begin;v=(s[/(é)/,i]="Q");p (v.is_a?(String) ? [v.bytes,v.encoding] : :object),s.bytes,s.encoding;rescue=>e;p e.class,e.message;end',
+    '[[81], #<Encoding:UTF-8>]\n[97, 81, 100, 101, 102]\n#<Encoding:UTF-8>\n',
+  ],
+  [
+    's="aé";i=Object.new;i.define_singleton_method(:to_int){s.replace("abcdef");1};r=Object.new;r.define_singleton_method(:to_str){s.replace("abcdef");"Q"};begin;v=s.slice!(/(é)/,i);p (v.is_a?(String) ? [v.bytes,v.encoding] : :object),s.bytes,s.encoding;rescue=>e;p e.class,e.message;end',
+    '[[98, 99], #<Encoding:UTF-8>]\n[97, 100, 101, 102]\n#<Encoding:UTF-8>\n',
+  ],
+  [
+    's="éa";i=Object.new;i.define_singleton_method(:to_int){s.replace("abc");1};r=Object.new;r.define_singleton_method(:to_str){s.replace("abc");"Q"};begin;v=(s[/(é)/]=r);p (v.is_a?(String) ? [v.bytes,v.encoding] : :object),s.bytes,s.encoding;rescue=>e;p e.class,e.message;end',
+    ':object\n[81, 99]\n#<Encoding:UTF-8>\n',
+  ],
+  [
+    's="éa";i=Object.new;i.define_singleton_method(:to_int){s.replace("abc");1};r=Object.new;r.define_singleton_method(:to_str){s.replace("abc");"Q"};begin;v=(s[/(é)/,i]="Q");p (v.is_a?(String) ? [v.bytes,v.encoding] : :object),s.bytes,s.encoding;rescue=>e;p e.class,e.message;end',
+    '[[81], #<Encoding:UTF-8>]\n[81, 99]\n#<Encoding:UTF-8>\n',
+  ],
+  [
+    's="éa";i=Object.new;i.define_singleton_method(:to_int){s.replace("abc");1};r=Object.new;r.define_singleton_method(:to_str){s.replace("abc");"Q"};begin;v=s.slice!(/(é)/,i);p (v.is_a?(String) ? [v.bytes,v.encoding] : :object),s.bytes,s.encoding;rescue=>e;p e.class,e.message;end',
+    '[[97, 98], #<Encoding:UTF-8>]\n[99]\n#<Encoding:UTF-8>\n',
+  ],
+  [
+    's="éa";i=Object.new;i.define_singleton_method(:to_int){s.replace("aé");1};r=Object.new;r.define_singleton_method(:to_str){s.replace("aé");"Q"};begin;v=(s[/(é)/]=r);p (v.is_a?(String) ? [v.bytes,v.encoding] : :object),s.bytes,s.encoding;rescue=>e;p e.class,e.message;end',
+    ':object\n[81, 169]\n#<Encoding:UTF-8>\n',
+  ],
+  [
+    's="éa";i=Object.new;i.define_singleton_method(:to_int){s.replace("aé");1};r=Object.new;r.define_singleton_method(:to_str){s.replace("aé");"Q"};begin;v=(s[/(é)/,i]="Q");p (v.is_a?(String) ? [v.bytes,v.encoding] : :object),s.bytes,s.encoding;rescue=>e;p e.class,e.message;end',
+    '[[81], #<Encoding:UTF-8>]\n[81, 169]\n#<Encoding:UTF-8>\n',
+  ],
+  [
+    's="éa";i=Object.new;i.define_singleton_method(:to_int){s.replace("aé");1};r=Object.new;r.define_singleton_method(:to_str){s.replace("aé");"Q"};begin;v=s.slice!(/(é)/,i);p (v.is_a?(String) ? [v.bytes,v.encoding] : :object),s.bytes,s.encoding;rescue=>e;p e.class,e.message;end',
+    '[[97, 195], #<Encoding:UTF-8>]\n[169]\n#<Encoding:UTF-8>\n',
+  ],
+  [
+    's="éa";i=Object.new;i.define_singleton_method(:to_int){s.replace("éa");1};r=Object.new;r.define_singleton_method(:to_str){s.replace("éa");"Q"};begin;v=(s[/(é)/]=r);p (v.is_a?(String) ? [v.bytes,v.encoding] : :object),s.bytes,s.encoding;rescue=>e;p e.class,e.message;end',
+    ':object\n[81, 97]\n#<Encoding:UTF-8>\n',
+  ],
+  [
+    's="éa";i=Object.new;i.define_singleton_method(:to_int){s.replace("éa");1};r=Object.new;r.define_singleton_method(:to_str){s.replace("éa");"Q"};begin;v=(s[/(é)/,i]="Q");p (v.is_a?(String) ? [v.bytes,v.encoding] : :object),s.bytes,s.encoding;rescue=>e;p e.class,e.message;end',
+    '[[81], #<Encoding:UTF-8>]\n[81, 97]\n#<Encoding:UTF-8>\n',
+  ],
+  [
+    's="éa";i=Object.new;i.define_singleton_method(:to_int){s.replace("éa");1};r=Object.new;r.define_singleton_method(:to_str){s.replace("éa");"Q"};begin;v=s.slice!(/(é)/,i);p (v.is_a?(String) ? [v.bytes,v.encoding] : :object),s.bytes,s.encoding;rescue=>e;p e.class,e.message;end',
+    '[[195, 169], #<Encoding:UTF-8>]\n[97]\n#<Encoding:UTF-8>\n',
+  ],
+  [
+    's="éa";i=Object.new;i.define_singleton_method(:to_int){s.replace("a😀z");1};r=Object.new;r.define_singleton_method(:to_str){s.replace("a😀z");"Q"};begin;v=(s[/(é)/]=r);p (v.is_a?(String) ? [v.bytes,v.encoding] : :object),s.bytes,s.encoding;rescue=>e;p e.class,e.message;end',
+    ':object\n[81, 159, 152, 128, 122]\n#<Encoding:UTF-8>\n',
+  ],
+  [
+    's="éa";i=Object.new;i.define_singleton_method(:to_int){s.replace("a😀z");1};r=Object.new;r.define_singleton_method(:to_str){s.replace("a😀z");"Q"};begin;v=(s[/(é)/,i]="Q");p (v.is_a?(String) ? [v.bytes,v.encoding] : :object),s.bytes,s.encoding;rescue=>e;p e.class,e.message;end',
+    '[[81], #<Encoding:UTF-8>]\n[81, 159, 152, 128, 122]\n#<Encoding:UTF-8>\n',
+  ],
+  [
+    's="éa";i=Object.new;i.define_singleton_method(:to_int){s.replace("a😀z");1};r=Object.new;r.define_singleton_method(:to_str){s.replace("a😀z");"Q"};begin;v=s.slice!(/(é)/,i);p (v.is_a?(String) ? [v.bytes,v.encoding] : :object),s.bytes,s.encoding;rescue=>e;p e.class,e.message;end',
+    '[[97, 240], #<Encoding:UTF-8>]\n[159, 152, 128, 122]\n#<Encoding:UTF-8>\n',
+  ],
+  [
+    's="éa";i=Object.new;i.define_singleton_method(:to_int){s.replace("abcdef");1};r=Object.new;r.define_singleton_method(:to_str){s.replace("abcdef");"Q"};begin;v=(s[/(é)/]=r);p (v.is_a?(String) ? [v.bytes,v.encoding] : :object),s.bytes,s.encoding;rescue=>e;p e.class,e.message;end',
+    ':object\n[81, 99, 100, 101, 102]\n#<Encoding:UTF-8>\n',
+  ],
+  [
+    's="éa";i=Object.new;i.define_singleton_method(:to_int){s.replace("abcdef");1};r=Object.new;r.define_singleton_method(:to_str){s.replace("abcdef");"Q"};begin;v=(s[/(é)/,i]="Q");p (v.is_a?(String) ? [v.bytes,v.encoding] : :object),s.bytes,s.encoding;rescue=>e;p e.class,e.message;end',
+    '[[81], #<Encoding:UTF-8>]\n[81, 99, 100, 101, 102]\n#<Encoding:UTF-8>\n',
+  ],
+  [
+    's="éa";i=Object.new;i.define_singleton_method(:to_int){s.replace("abcdef");1};r=Object.new;r.define_singleton_method(:to_str){s.replace("abcdef");"Q"};begin;v=s.slice!(/(é)/,i);p (v.is_a?(String) ? [v.bytes,v.encoding] : :object),s.bytes,s.encoding;rescue=>e;p e.class,e.message;end',
+    '[[97, 98], #<Encoding:UTF-8>]\n[99, 100, 101, 102]\n#<Encoding:UTF-8>\n',
+  ],
+  [
+    's="a😀z";i=Object.new;i.define_singleton_method(:to_int){s.replace("a😀z");1};r=Object.new;r.define_singleton_method(:to_str){s.replace("a😀z");"Q"};begin;v=(s[/(😀)/]=r);p (v.is_a?(String) ? [v.bytes,v.encoding] : :object),s.bytes,s.encoding;rescue=>e;p e.class,e.message;end',
+    ':object\n[97, 81, 122]\n#<Encoding:UTF-8>\n',
+  ],
+  [
+    's="a😀z";i=Object.new;i.define_singleton_method(:to_int){s.replace("a😀z");1};r=Object.new;r.define_singleton_method(:to_str){s.replace("a😀z");"Q"};begin;v=(s[/(😀)/,i]="Q");p (v.is_a?(String) ? [v.bytes,v.encoding] : :object),s.bytes,s.encoding;rescue=>e;p e.class,e.message;end',
+    '[[81], #<Encoding:UTF-8>]\n[97, 81, 122]\n#<Encoding:UTF-8>\n',
+  ],
+  [
+    's="a😀z";i=Object.new;i.define_singleton_method(:to_int){s.replace("a😀z");1};r=Object.new;r.define_singleton_method(:to_str){s.replace("a😀z");"Q"};begin;v=s.slice!(/(😀)/,i);p (v.is_a?(String) ? [v.bytes,v.encoding] : :object),s.bytes,s.encoding;rescue=>e;p e.class,e.message;end',
+    '[[240, 159, 152, 128], #<Encoding:UTF-8>]\n[97, 122]\n#<Encoding:UTF-8>\n',
+  ],
+  [
+    's="a😀z";i=Object.new;i.define_singleton_method(:to_int){s.replace("abcdef");1};r=Object.new;r.define_singleton_method(:to_str){s.replace("abcdef");"Q"};begin;v=(s[/(😀)/]=r);p (v.is_a?(String) ? [v.bytes,v.encoding] : :object),s.bytes,s.encoding;rescue=>e;p e.class,e.message;end',
+    ':object\n[97, 81, 102]\n#<Encoding:UTF-8>\n',
+  ],
+  [
+    's="a😀z";i=Object.new;i.define_singleton_method(:to_int){s.replace("abcdef");1};r=Object.new;r.define_singleton_method(:to_str){s.replace("abcdef");"Q"};begin;v=(s[/(😀)/,i]="Q");p (v.is_a?(String) ? [v.bytes,v.encoding] : :object),s.bytes,s.encoding;rescue=>e;p e.class,e.message;end',
+    '[[81], #<Encoding:UTF-8>]\n[97, 81, 102]\n#<Encoding:UTF-8>\n',
+  ],
+  [
+    's="a😀z";i=Object.new;i.define_singleton_method(:to_int){s.replace("abcdef");1};r=Object.new;r.define_singleton_method(:to_str){s.replace("abcdef");"Q"};begin;v=s.slice!(/(😀)/,i);p (v.is_a?(String) ? [v.bytes,v.encoding] : :object),s.bytes,s.encoding;rescue=>e;p e.class,e.message;end',
+    '[[98, 99, 100, 101], #<Encoding:UTF-8>]\n[97, 102]\n#<Encoding:UTF-8>\n',
+  ],
+  [
+    's="abc";i=Object.new;i.define_singleton_method(:to_int){s.replace("abc");1};r=Object.new;r.define_singleton_method(:to_str){s.replace("abc");"Q"};begin;v=(s[/(b)/]=r);p (v.is_a?(String) ? [v.bytes,v.encoding] : :object),s.bytes,s.encoding;rescue=>e;p e.class,e.message;end',
+    ':object\n[97, 81, 99]\n#<Encoding:UTF-8>\n',
+  ],
+  [
+    's="abc";i=Object.new;i.define_singleton_method(:to_int){s.replace("abc");1};r=Object.new;r.define_singleton_method(:to_str){s.replace("abc");"Q"};begin;v=(s[/(b)/,i]="Q");p (v.is_a?(String) ? [v.bytes,v.encoding] : :object),s.bytes,s.encoding;rescue=>e;p e.class,e.message;end',
+    '[[81], #<Encoding:UTF-8>]\n[97, 81, 99]\n#<Encoding:UTF-8>\n',
+  ],
+  [
+    's="abc";i=Object.new;i.define_singleton_method(:to_int){s.replace("abc");1};r=Object.new;r.define_singleton_method(:to_str){s.replace("abc");"Q"};begin;v=s.slice!(/(b)/,i);p (v.is_a?(String) ? [v.bytes,v.encoding] : :object),s.bytes,s.encoding;rescue=>e;p e.class,e.message;end',
+    '[[98], #<Encoding:UTF-8>]\n[97, 99]\n#<Encoding:UTF-8>\n',
+  ],
+  [
+    's="abc";i=Object.new;i.define_singleton_method(:to_int){s.replace("aé");1};r=Object.new;r.define_singleton_method(:to_str){s.replace("aé");"Q"};begin;v=(s[/(b)/]=r);p (v.is_a?(String) ? [v.bytes,v.encoding] : :object),s.bytes,s.encoding;rescue=>e;p e.class,e.message;end',
+    ':object\n[97, 81, 169]\n#<Encoding:UTF-8>\n',
+  ],
+  [
+    's="abc";i=Object.new;i.define_singleton_method(:to_int){s.replace("aé");1};r=Object.new;r.define_singleton_method(:to_str){s.replace("aé");"Q"};begin;v=(s[/(b)/,i]="Q");p (v.is_a?(String) ? [v.bytes,v.encoding] : :object),s.bytes,s.encoding;rescue=>e;p e.class,e.message;end',
+    '[[81], #<Encoding:UTF-8>]\n[97, 81, 169]\n#<Encoding:UTF-8>\n',
+  ],
+  [
+    's="abc";i=Object.new;i.define_singleton_method(:to_int){s.replace("aé");1};r=Object.new;r.define_singleton_method(:to_str){s.replace("aé");"Q"};begin;v=s.slice!(/(b)/,i);p (v.is_a?(String) ? [v.bytes,v.encoding] : :object),s.bytes,s.encoding;rescue=>e;p e.class,e.message;end',
+    '[[195], #<Encoding:UTF-8>]\n[97, 169]\n#<Encoding:UTF-8>\n',
+  ],
+  [
+    's="abc";i=Object.new;i.define_singleton_method(:to_int){s.replace("éa");1};r=Object.new;r.define_singleton_method(:to_str){s.replace("éa");"Q"};begin;v=(s[/(b)/]=r);p (v.is_a?(String) ? [v.bytes,v.encoding] : :object),s.bytes,s.encoding;rescue=>e;p e.class,e.message;end',
+    ':object\n[195, 81, 97]\n#<Encoding:UTF-8>\n',
+  ],
+  [
+    's="abc";i=Object.new;i.define_singleton_method(:to_int){s.replace("éa");1};r=Object.new;r.define_singleton_method(:to_str){s.replace("éa");"Q"};begin;v=(s[/(b)/,i]="Q");p (v.is_a?(String) ? [v.bytes,v.encoding] : :object),s.bytes,s.encoding;rescue=>e;p e.class,e.message;end',
+    '[[81], #<Encoding:UTF-8>]\n[195, 81, 97]\n#<Encoding:UTF-8>\n',
+  ],
+  [
+    's="abc";i=Object.new;i.define_singleton_method(:to_int){s.replace("éa");1};r=Object.new;r.define_singleton_method(:to_str){s.replace("éa");"Q"};begin;v=s.slice!(/(b)/,i);p (v.is_a?(String) ? [v.bytes,v.encoding] : :object),s.bytes,s.encoding;rescue=>e;p e.class,e.message;end',
+    '[[169], #<Encoding:UTF-8>]\n[195, 97]\n#<Encoding:UTF-8>\n',
+  ],
+  [
+    's="abc";i=Object.new;i.define_singleton_method(:to_int){s.replace("a😀z");1};r=Object.new;r.define_singleton_method(:to_str){s.replace("a😀z");"Q"};begin;v=(s[/(b)/]=r);p (v.is_a?(String) ? [v.bytes,v.encoding] : :object),s.bytes,s.encoding;rescue=>e;p e.class,e.message;end',
+    ':object\n[97, 81, 159, 152, 128, 122]\n#<Encoding:UTF-8>\n',
+  ],
+  [
+    's="abc";i=Object.new;i.define_singleton_method(:to_int){s.replace("a😀z");1};r=Object.new;r.define_singleton_method(:to_str){s.replace("a😀z");"Q"};begin;v=(s[/(b)/,i]="Q");p (v.is_a?(String) ? [v.bytes,v.encoding] : :object),s.bytes,s.encoding;rescue=>e;p e.class,e.message;end',
+    '[[81], #<Encoding:UTF-8>]\n[97, 81, 159, 152, 128, 122]\n#<Encoding:UTF-8>\n',
+  ],
+  [
+    's="abc";i=Object.new;i.define_singleton_method(:to_int){s.replace("a😀z");1};r=Object.new;r.define_singleton_method(:to_str){s.replace("a😀z");"Q"};begin;v=s.slice!(/(b)/,i);p (v.is_a?(String) ? [v.bytes,v.encoding] : :object),s.bytes,s.encoding;rescue=>e;p e.class,e.message;end',
+    '[[240], #<Encoding:UTF-8>]\n[97, 159, 152, 128, 122]\n#<Encoding:UTF-8>\n',
+  ],
+  [
+    's="abc";i=Object.new;i.define_singleton_method(:to_int){s.replace("abcdef");1};r=Object.new;r.define_singleton_method(:to_str){s.replace("abcdef");"Q"};begin;v=(s[/(b)/]=r);p (v.is_a?(String) ? [v.bytes,v.encoding] : :object),s.bytes,s.encoding;rescue=>e;p e.class,e.message;end',
+    ':object\n[97, 81, 99, 100, 101, 102]\n#<Encoding:UTF-8>\n',
+  ],
+  [
+    's="abc";i=Object.new;i.define_singleton_method(:to_int){s.replace("abcdef");1};r=Object.new;r.define_singleton_method(:to_str){s.replace("abcdef");"Q"};begin;v=(s[/(b)/,i]="Q");p (v.is_a?(String) ? [v.bytes,v.encoding] : :object),s.bytes,s.encoding;rescue=>e;p e.class,e.message;end',
+    '[[81], #<Encoding:UTF-8>]\n[97, 81, 99, 100, 101, 102]\n#<Encoding:UTF-8>\n',
+  ],
+  [
+    's="abc";i=Object.new;i.define_singleton_method(:to_int){s.replace("abcdef");1};r=Object.new;r.define_singleton_method(:to_str){s.replace("abcdef");"Q"};begin;v=s.slice!(/(b)/,i);p (v.is_a?(String) ? [v.bytes,v.encoding] : :object),s.bytes,s.encoding;rescue=>e;p e.class,e.message;end',
+    '[[98], #<Encoding:UTF-8>]\n[97, 99, 100, 101, 102]\n#<Encoding:UTF-8>\n',
+  ],
+  [
+    's="éé";i=Object.new;i.define_singleton_method(:to_int){s.replace("abc");1};r=Object.new;r.define_singleton_method(:to_str){s.replace("abc");"Q"};begin;v=(s[/(é)/]=r);p (v.is_a?(String) ? [v.bytes,v.encoding] : :object),s.bytes,s.encoding;rescue=>e;p e.class,e.message;end',
+    ':object\n[81, 99]\n#<Encoding:UTF-8>\n',
+  ],
+  [
+    's="éé";i=Object.new;i.define_singleton_method(:to_int){s.replace("abc");1};r=Object.new;r.define_singleton_method(:to_str){s.replace("abc");"Q"};begin;v=(s[/(é)/,i]="Q");p (v.is_a?(String) ? [v.bytes,v.encoding] : :object),s.bytes,s.encoding;rescue=>e;p e.class,e.message;end',
+    '[[81], #<Encoding:UTF-8>]\n[81, 99]\n#<Encoding:UTF-8>\n',
+  ],
+  [
+    's="éé";i=Object.new;i.define_singleton_method(:to_int){s.replace("abc");1};r=Object.new;r.define_singleton_method(:to_str){s.replace("abc");"Q"};begin;v=s.slice!(/(é)/,i);p (v.is_a?(String) ? [v.bytes,v.encoding] : :object),s.bytes,s.encoding;rescue=>e;p e.class,e.message;end',
+    '[[97, 98], #<Encoding:UTF-8>]\n[99]\n#<Encoding:UTF-8>\n',
+  ],
+  [
+    's="éé";i=Object.new;i.define_singleton_method(:to_int){s.replace("aé");1};r=Object.new;r.define_singleton_method(:to_str){s.replace("aé");"Q"};begin;v=(s[/(é)/]=r);p (v.is_a?(String) ? [v.bytes,v.encoding] : :object),s.bytes,s.encoding;rescue=>e;p e.class,e.message;end',
+    ':object\n[81, 169]\n#<Encoding:UTF-8>\n',
+  ],
+  [
+    's="éé";i=Object.new;i.define_singleton_method(:to_int){s.replace("aé");1};r=Object.new;r.define_singleton_method(:to_str){s.replace("aé");"Q"};begin;v=(s[/(é)/,i]="Q");p (v.is_a?(String) ? [v.bytes,v.encoding] : :object),s.bytes,s.encoding;rescue=>e;p e.class,e.message;end',
+    '[[81], #<Encoding:UTF-8>]\n[81, 169]\n#<Encoding:UTF-8>\n',
+  ],
+  [
+    's="éé";i=Object.new;i.define_singleton_method(:to_int){s.replace("aé");1};r=Object.new;r.define_singleton_method(:to_str){s.replace("aé");"Q"};begin;v=s.slice!(/(é)/,i);p (v.is_a?(String) ? [v.bytes,v.encoding] : :object),s.bytes,s.encoding;rescue=>e;p e.class,e.message;end',
+    '[[97, 195], #<Encoding:UTF-8>]\n[169]\n#<Encoding:UTF-8>\n',
+  ],
+  [
+    's="éé";i=Object.new;i.define_singleton_method(:to_int){s.replace("éa");1};r=Object.new;r.define_singleton_method(:to_str){s.replace("éa");"Q"};begin;v=(s[/(é)/]=r);p (v.is_a?(String) ? [v.bytes,v.encoding] : :object),s.bytes,s.encoding;rescue=>e;p e.class,e.message;end',
+    ':object\n[81, 97]\n#<Encoding:UTF-8>\n',
+  ],
+  [
+    's="éé";i=Object.new;i.define_singleton_method(:to_int){s.replace("éa");1};r=Object.new;r.define_singleton_method(:to_str){s.replace("éa");"Q"};begin;v=(s[/(é)/,i]="Q");p (v.is_a?(String) ? [v.bytes,v.encoding] : :object),s.bytes,s.encoding;rescue=>e;p e.class,e.message;end',
+    '[[81], #<Encoding:UTF-8>]\n[81, 97]\n#<Encoding:UTF-8>\n',
+  ],
+  [
+    's="éé";i=Object.new;i.define_singleton_method(:to_int){s.replace("éa");1};r=Object.new;r.define_singleton_method(:to_str){s.replace("éa");"Q"};begin;v=s.slice!(/(é)/,i);p (v.is_a?(String) ? [v.bytes,v.encoding] : :object),s.bytes,s.encoding;rescue=>e;p e.class,e.message;end',
+    '[[195, 169], #<Encoding:UTF-8>]\n[97]\n#<Encoding:UTF-8>\n',
+  ],
+  [
+    's="éé";i=Object.new;i.define_singleton_method(:to_int){s.replace("a😀z");1};r=Object.new;r.define_singleton_method(:to_str){s.replace("a😀z");"Q"};begin;v=(s[/(é)/]=r);p (v.is_a?(String) ? [v.bytes,v.encoding] : :object),s.bytes,s.encoding;rescue=>e;p e.class,e.message;end',
+    ':object\n[81, 159, 152, 128, 122]\n#<Encoding:UTF-8>\n',
+  ],
+  [
+    's="éé";i=Object.new;i.define_singleton_method(:to_int){s.replace("a😀z");1};r=Object.new;r.define_singleton_method(:to_str){s.replace("a😀z");"Q"};begin;v=(s[/(é)/,i]="Q");p (v.is_a?(String) ? [v.bytes,v.encoding] : :object),s.bytes,s.encoding;rescue=>e;p e.class,e.message;end',
+    '[[81], #<Encoding:UTF-8>]\n[81, 159, 152, 128, 122]\n#<Encoding:UTF-8>\n',
+  ],
+  [
+    's="éé";i=Object.new;i.define_singleton_method(:to_int){s.replace("a😀z");1};r=Object.new;r.define_singleton_method(:to_str){s.replace("a😀z");"Q"};begin;v=s.slice!(/(é)/,i);p (v.is_a?(String) ? [v.bytes,v.encoding] : :object),s.bytes,s.encoding;rescue=>e;p e.class,e.message;end',
+    '[[97, 240], #<Encoding:UTF-8>]\n[159, 152, 128, 122]\n#<Encoding:UTF-8>\n',
+  ],
+  [
+    's="éé";i=Object.new;i.define_singleton_method(:to_int){s.replace("abcdef");1};r=Object.new;r.define_singleton_method(:to_str){s.replace("abcdef");"Q"};begin;v=(s[/(é)/]=r);p (v.is_a?(String) ? [v.bytes,v.encoding] : :object),s.bytes,s.encoding;rescue=>e;p e.class,e.message;end',
+    ':object\n[81, 99, 100, 101, 102]\n#<Encoding:UTF-8>\n',
+  ],
+  [
+    's="éé";i=Object.new;i.define_singleton_method(:to_int){s.replace("abcdef");1};r=Object.new;r.define_singleton_method(:to_str){s.replace("abcdef");"Q"};begin;v=(s[/(é)/,i]="Q");p (v.is_a?(String) ? [v.bytes,v.encoding] : :object),s.bytes,s.encoding;rescue=>e;p e.class,e.message;end',
+    '[[81], #<Encoding:UTF-8>]\n[81, 99, 100, 101, 102]\n#<Encoding:UTF-8>\n',
+  ],
+  [
+    's="éé";i=Object.new;i.define_singleton_method(:to_int){s.replace("abcdef");1};r=Object.new;r.define_singleton_method(:to_str){s.replace("abcdef");"Q"};begin;v=s.slice!(/(é)/,i);p (v.is_a?(String) ? [v.bytes,v.encoding] : :object),s.bytes,s.encoding;rescue=>e;p e.class,e.message;end',
+    '[[97, 98], #<Encoding:UTF-8>]\n[99, 100, 101, 102]\n#<Encoding:UTF-8>\n',
+  ],
+  [
+    'c=Object.const_set("A",Class.new);c.define_method(:x){1};m=c.instance_method(:x);s=m.to_s;p s.bytes,s.valid_encoding?,s.encoding',
+    '[35, 60, 85, 110, 98, 111, 117, 110, 100, 77, 101, 116, 104, 111, 100, 58, 32, 65, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\ntrue\n#<Encoding:BINARY (ASCII-8BIT)>\n',
+  ],
+  [
+    'c=Object.const_set("A",Class.new);c.define_method(:x){1};m=c.new.method(:x);s=m.to_s;p s.bytes,s.valid_encoding?,s.encoding',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 65, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\ntrue\n#<Encoding:BINARY (ASCII-8BIT)>\n',
+  ],
+  [
+    'c=Object.const_set("A",Class.new);def c.x;1;end;m=c.singleton_class.instance_method(:x);s=m.to_s;p s.bytes,s.valid_encoding?,s.encoding',
+    '[35, 60, 85, 110, 98, 111, 117, 110, 100, 77, 101, 116, 104, 111, 100, 58, 32, 35, 60, 67, 108, 97, 115, 115, 58, 65, 62, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\ntrue\n#<Encoding:BINARY (ASCII-8BIT)>\n',
+  ],
+  [
+    'c=Object.const_set("A",Class.new);def c.x;1;end;m=c.method(:x);s=m.to_s;p s.bytes,s.valid_encoding?,s.encoding',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 65, 46, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\ntrue\n#<Encoding:BINARY (ASCII-8BIT)>\n',
+  ],
+  [
+    'c=Object.const_set("Aé",Class.new);c.define_method(:x){1};m=c.instance_method(:x);s=m.to_s;p s.bytes,s.valid_encoding?,s.encoding',
+    '[35, 60, 85, 110, 98, 111, 117, 110, 100, 77, 101, 116, 104, 111, 100, 58, 32, 65, 195, 169, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\ntrue\n#<Encoding:UTF-8>\n',
+  ],
+  [
+    'c=Object.const_set("Aé",Class.new);c.define_method(:x){1};m=c.new.method(:x);s=m.to_s;p s.bytes,s.valid_encoding?,s.encoding',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 65, 195, 169, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\ntrue\n#<Encoding:UTF-8>\n',
+  ],
+  [
+    'c=Object.const_set("Aé",Class.new);def c.x;1;end;m=c.singleton_class.instance_method(:x);s=m.to_s;p s.bytes,s.valid_encoding?,s.encoding',
+    '[35, 60, 85, 110, 98, 111, 117, 110, 100, 77, 101, 116, 104, 111, 100, 58, 32, 35, 60, 67, 108, 97, 115, 115, 58, 65, 195, 169, 62, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\ntrue\n#<Encoding:UTF-8>\n',
+  ],
+  [
+    'c=Object.const_set("Aé",Class.new);def c.x;1;end;m=c.method(:x);s=m.to_s;p s.bytes,s.valid_encoding?,s.encoding',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 65, 195, 169, 46, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\ntrue\n#<Encoding:UTF-8>\n',
+  ],
+  [
+    'c=Object.const_set("A"+233.chr,Class.new);c.define_method(:x){1};m=c.instance_method(:x);s=m.to_s;p s.bytes,s.valid_encoding?,s.encoding',
+    '[35, 60, 85, 110, 98, 111, 117, 110, 100, 77, 101, 116, 104, 111, 100, 58, 32, 65, 92, 120, 69, 57, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\ntrue\n#<Encoding:BINARY (ASCII-8BIT)>\n',
+  ],
+  [
+    'c=Object.const_set("A"+233.chr,Class.new);c.define_method(:x){1};m=c.new.method(:x);s=m.to_s;p s.bytes,s.valid_encoding?,s.encoding',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 65, 92, 120, 69, 57, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\ntrue\n#<Encoding:BINARY (ASCII-8BIT)>\n',
+  ],
+  [
+    'c=Object.const_set("A"+233.chr,Class.new);def c.x;1;end;m=c.singleton_class.instance_method(:x);s=m.to_s;p s.bytes,s.valid_encoding?,s.encoding',
+    '[35, 60, 85, 110, 98, 111, 117, 110, 100, 77, 101, 116, 104, 111, 100, 58, 32, 35, 60, 67, 108, 97, 115, 115, 58, 65, 92, 120, 69, 57, 62, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\ntrue\n#<Encoding:BINARY (ASCII-8BIT)>\n',
+  ],
+  [
+    'c=Object.const_set("A"+233.chr,Class.new);def c.x;1;end;m=c.method(:x);s=m.to_s;p s.bytes,s.valid_encoding?,s.encoding',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 65, 92, 120, 69, 57, 46, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\ntrue\n#<Encoding:BINARY (ASCII-8BIT)>\n',
+  ],
+  [
+    'c=Object.const_set("A"+255.chr,Class.new);c.define_method(:x){1};m=c.instance_method(:x);s=m.to_s;p s.bytes,s.valid_encoding?,s.encoding',
+    '[35, 60, 85, 110, 98, 111, 117, 110, 100, 77, 101, 116, 104, 111, 100, 58, 32, 65, 92, 120, 70, 70, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\ntrue\n#<Encoding:BINARY (ASCII-8BIT)>\n',
+  ],
+  [
+    'c=Object.const_set("A"+255.chr,Class.new);c.define_method(:x){1};m=c.new.method(:x);s=m.to_s;p s.bytes,s.valid_encoding?,s.encoding',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 65, 92, 120, 70, 70, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\ntrue\n#<Encoding:BINARY (ASCII-8BIT)>\n',
+  ],
+  [
+    'c=Object.const_set("A"+255.chr,Class.new);def c.x;1;end;m=c.singleton_class.instance_method(:x);s=m.to_s;p s.bytes,s.valid_encoding?,s.encoding',
+    '[35, 60, 85, 110, 98, 111, 117, 110, 100, 77, 101, 116, 104, 111, 100, 58, 32, 35, 60, 67, 108, 97, 115, 115, 58, 65, 92, 120, 70, 70, 62, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\ntrue\n#<Encoding:BINARY (ASCII-8BIT)>\n',
+  ],
+  [
+    'c=Object.const_set("A"+255.chr,Class.new);def c.x;1;end;m=c.method(:x);s=m.to_s;p s.bytes,s.valid_encoding?,s.encoding',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 65, 92, 120, 70, 70, 46, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\ntrue\n#<Encoding:BINARY (ASCII-8BIT)>\n',
+  ],
+  [
+    'o=Object.new;def o.inspect;if $yielding;$yielding=false;$y<<:pause;end;"x";end;a=[o];e=Enumerator.new{|y|$y=y;$yielding=true;y<<a.inspect};p e.next;p a;p e.next',
+    ':pause\n[x]\n"[x]"\n',
+  ],
+  [
+    'o=Object.new;def o.inspect;if $yielding;$yielding=false;$y<<:pause;end;"x";end;a=[o];e=Enumerator.new{|y|$y=y;$yielding=true;y<<a.inspect};p e.next;e.rewind;p a;p a',
+    ':pause\n[x]\n[x]\n',
+  ],
+  [
+    'o=Object.new;def o.inspect;if $yielding;$yielding=false;$y<<:pause;end;"x";end;a={a:o};e=Enumerator.new{|y|$y=y;$yielding=true;y<<a.inspect};p e.next;p a;p e.next',
+    ':pause\n{a: x}\n"{a: x}"\n',
+  ],
+  [
+    'o=Object.new;def o.inspect;if $yielding;$yielding=false;$y<<:pause;end;"x";end;a={a:o};e=Enumerator.new{|y|$y=y;$yielding=true;y<<a.inspect};p e.next;e.rewind;p a;p a',
+    ':pause\n{a: x}\n{a: x}\n',
+  ],
+  [
+    'o=Object.new;def o.inspect;if $yielding;$yielding=false;$y<<:pause;end;"x";end;a=Set[o];e=Enumerator.new{|y|$y=y;$yielding=true;y<<a.inspect};p e.next;p a;p e.next',
+    ':pause\nSet[x]\n"Set[x]"\n',
+  ],
+  [
+    'o=Object.new;def o.inspect;if $yielding;$yielding=false;$y<<:pause;end;"x";end;a=Set[o];e=Enumerator.new{|y|$y=y;$yielding=true;y<<a.inspect};p e.next;e.rewind;p a;p a',
+    ':pause\nSet[x]\nSet[x]\n',
+  ],
+  [
+    'class C;include Comparable;def <=>(o);if $pause;$pause=false;$y<<:pause;end;0;end;end;a=C.new;b=C.new;e=Enumerator.new{|y|$y=y;$pause=true;y<<(a==b)};p e.next;p a==b;p e.next',
+    ':pause\ntrue\ntrue\n',
+  ],
+  [
+    'class C;include Comparable;def <=>(o);if $pause;$pause=false;$y<<:pause;end;0;end;end;a=C.new;b=C.new;e=Enumerator.new{|y|$y=y;$pause=true;y<<(a==b)};p e.next;e.rewind;p a==b;',
+    ':pause\ntrue\n',
+  ],
+  [
+    'class C;include Comparable;def <=>(o);if $pause;$pause=false;$y<<:pause;end;1;end;end;a=[C.new];b=[C.new];e=Enumerator.new{|y|$y=y;$pause=true;y<<(a<=>b)};p e.next;p a<=>b;p e.next',
+    ':pause\n1\n1\n',
+  ],
+  [
+    'class C;include Comparable;def <=>(o);if $pause;$pause=false;$y<<:pause;end;1;end;end;a=[C.new];b=[C.new];e=Enumerator.new{|y|$y=y;$pause=true;y<<(a<=>b)};p e.next;e.rewind;p a<=>b;',
+    ':pause\n1\n',
+  ],
+  [
+    's=String.new("éx",encoding:"UTF-8");n=String.new("é",encoding:"UTF-8");begin;p s.partition(n).map{|x|[x.bytes,x.encoding]},s.rpartition(n).map{|x|[x.bytes,x.encoding]};rescue=>e;p e.class,e.message;end',
+    '[[[], #<Encoding:UTF-8>], [[195, 169], #<Encoding:UTF-8>], [[120], #<Encoding:UTF-8>]]\n[[[], #<Encoding:UTF-8>], [[195, 169], #<Encoding:UTF-8>], [[120], #<Encoding:UTF-8>]]\n',
+  ],
+  [
+    's=String.new("éx",encoding:"UTF-8");n=String.new("x",encoding:"UTF-8");begin;p s.partition(n).map{|x|[x.bytes,x.encoding]},s.rpartition(n).map{|x|[x.bytes,x.encoding]};rescue=>e;p e.class,e.message;end',
+    '[[[195, 169], #<Encoding:UTF-8>], [[120], #<Encoding:UTF-8>], [[], #<Encoding:UTF-8>]]\n[[[195, 169], #<Encoding:UTF-8>], [[120], #<Encoding:UTF-8>], [[], #<Encoding:UTF-8>]]\n',
+  ],
+  [
+    's=String.new("éx",encoding:"UTF-8");n=String.new("",encoding:"UTF-8");begin;p s.partition(n).map{|x|[x.bytes,x.encoding]},s.rpartition(n).map{|x|[x.bytes,x.encoding]};rescue=>e;p e.class,e.message;end',
+    '[[[], #<Encoding:UTF-8>], [[], #<Encoding:UTF-8>], [[195, 169, 120], #<Encoding:UTF-8>]]\n[[[195, 169, 120], #<Encoding:UTF-8>], [[], #<Encoding:UTF-8>], [[], #<Encoding:UTF-8>]]\n',
+  ],
+  [
+    's=String.new("xéx",encoding:"UTF-8");n=String.new("é",encoding:"UTF-8");begin;p s.partition(n).map{|x|[x.bytes,x.encoding]},s.rpartition(n).map{|x|[x.bytes,x.encoding]};rescue=>e;p e.class,e.message;end',
+    '[[[120], #<Encoding:UTF-8>], [[195, 169], #<Encoding:UTF-8>], [[120], #<Encoding:UTF-8>]]\n[[[120], #<Encoding:UTF-8>], [[195, 169], #<Encoding:UTF-8>], [[120], #<Encoding:UTF-8>]]\n',
+  ],
+  [
+    's=String.new("xéx",encoding:"UTF-8");n=String.new("x",encoding:"UTF-8");begin;p s.partition(n).map{|x|[x.bytes,x.encoding]},s.rpartition(n).map{|x|[x.bytes,x.encoding]};rescue=>e;p e.class,e.message;end',
+    '[[[], #<Encoding:UTF-8>], [[120], #<Encoding:UTF-8>], [[195, 169, 120], #<Encoding:UTF-8>]]\n[[[120, 195, 169], #<Encoding:UTF-8>], [[120], #<Encoding:UTF-8>], [[], #<Encoding:UTF-8>]]\n',
+  ],
+  [
+    's=String.new("xéx",encoding:"UTF-8");n=String.new("",encoding:"UTF-8");begin;p s.partition(n).map{|x|[x.bytes,x.encoding]},s.rpartition(n).map{|x|[x.bytes,x.encoding]};rescue=>e;p e.class,e.message;end',
+    '[[[], #<Encoding:UTF-8>], [[], #<Encoding:UTF-8>], [[120, 195, 169, 120], #<Encoding:UTF-8>]]\n[[[120, 195, 169, 120], #<Encoding:UTF-8>], [[], #<Encoding:UTF-8>], [[], #<Encoding:UTF-8>]]\n',
+  ],
+  [
+    's=String.new("abc",encoding:"UTF-8");n=String.new("é",encoding:"UTF-8");begin;p s.partition(n).map{|x|[x.bytes,x.encoding]},s.rpartition(n).map{|x|[x.bytes,x.encoding]};rescue=>e;p e.class,e.message;end',
+    '[[[97, 98, 99], #<Encoding:UTF-8>], [[], #<Encoding:UTF-8>], [[], #<Encoding:UTF-8>]]\n[[[], #<Encoding:UTF-8>], [[], #<Encoding:UTF-8>], [[97, 98, 99], #<Encoding:UTF-8>]]\n',
+  ],
+  [
+    's=String.new("abc",encoding:"UTF-8");n=String.new("x",encoding:"UTF-8");begin;p s.partition(n).map{|x|[x.bytes,x.encoding]},s.rpartition(n).map{|x|[x.bytes,x.encoding]};rescue=>e;p e.class,e.message;end',
+    '[[[97, 98, 99], #<Encoding:UTF-8>], [[], #<Encoding:UTF-8>], [[], #<Encoding:UTF-8>]]\n[[[], #<Encoding:UTF-8>], [[], #<Encoding:UTF-8>], [[97, 98, 99], #<Encoding:UTF-8>]]\n',
+  ],
+  [
+    's=String.new("abc",encoding:"UTF-8");n=String.new("",encoding:"UTF-8");begin;p s.partition(n).map{|x|[x.bytes,x.encoding]},s.rpartition(n).map{|x|[x.bytes,x.encoding]};rescue=>e;p e.class,e.message;end',
+    '[[[], #<Encoding:UTF-8>], [[], #<Encoding:UTF-8>], [[97, 98, 99], #<Encoding:UTF-8>]]\n[[[97, 98, 99], #<Encoding:UTF-8>], [[], #<Encoding:UTF-8>], [[], #<Encoding:UTF-8>]]\n',
+  ],
+  [
+    's=String.new("éx",encoding:"UTF-8");n=String.new("é",encoding:"US-ASCII");begin;p s.partition(n).map{|x|[x.bytes,x.encoding]},s.rpartition(n).map{|x|[x.bytes,x.encoding]};rescue=>e;p e.class,e.message;end',
+    'Encoding::CompatibilityError\n"incompatible character encodings: UTF-8 and US-ASCII"\n',
+  ],
+  [
+    's=String.new("éx",encoding:"UTF-8");n=String.new("x",encoding:"US-ASCII");begin;p s.partition(n).map{|x|[x.bytes,x.encoding]},s.rpartition(n).map{|x|[x.bytes,x.encoding]};rescue=>e;p e.class,e.message;end',
+    '[[[195, 169], #<Encoding:UTF-8>], [[120], #<Encoding:US-ASCII>], [[], #<Encoding:UTF-8>]]\n[[[195, 169], #<Encoding:UTF-8>], [[120], #<Encoding:US-ASCII>], [[], #<Encoding:UTF-8>]]\n',
+  ],
+  [
+    's=String.new("éx",encoding:"UTF-8");n=String.new("",encoding:"US-ASCII");begin;p s.partition(n).map{|x|[x.bytes,x.encoding]},s.rpartition(n).map{|x|[x.bytes,x.encoding]};rescue=>e;p e.class,e.message;end',
+    '[[[], #<Encoding:UTF-8>], [[], #<Encoding:US-ASCII>], [[195, 169, 120], #<Encoding:UTF-8>]]\n[[[195, 169, 120], #<Encoding:UTF-8>], [[], #<Encoding:US-ASCII>], [[], #<Encoding:UTF-8>]]\n',
+  ],
+  [
+    's=String.new("xéx",encoding:"UTF-8");n=String.new("é",encoding:"US-ASCII");begin;p s.partition(n).map{|x|[x.bytes,x.encoding]},s.rpartition(n).map{|x|[x.bytes,x.encoding]};rescue=>e;p e.class,e.message;end',
+    'Encoding::CompatibilityError\n"incompatible character encodings: UTF-8 and US-ASCII"\n',
+  ],
+  [
+    's=String.new("xéx",encoding:"UTF-8");n=String.new("x",encoding:"US-ASCII");begin;p s.partition(n).map{|x|[x.bytes,x.encoding]},s.rpartition(n).map{|x|[x.bytes,x.encoding]};rescue=>e;p e.class,e.message;end',
+    '[[[], #<Encoding:UTF-8>], [[120], #<Encoding:US-ASCII>], [[195, 169, 120], #<Encoding:UTF-8>]]\n[[[120, 195, 169], #<Encoding:UTF-8>], [[120], #<Encoding:US-ASCII>], [[], #<Encoding:UTF-8>]]\n',
+  ],
+  [
+    's=String.new("xéx",encoding:"UTF-8");n=String.new("",encoding:"US-ASCII");begin;p s.partition(n).map{|x|[x.bytes,x.encoding]},s.rpartition(n).map{|x|[x.bytes,x.encoding]};rescue=>e;p e.class,e.message;end',
+    '[[[], #<Encoding:UTF-8>], [[], #<Encoding:US-ASCII>], [[120, 195, 169, 120], #<Encoding:UTF-8>]]\n[[[120, 195, 169, 120], #<Encoding:UTF-8>], [[], #<Encoding:US-ASCII>], [[], #<Encoding:UTF-8>]]\n',
+  ],
+  [
+    's=String.new("abc",encoding:"UTF-8");n=String.new("é",encoding:"US-ASCII");begin;p s.partition(n).map{|x|[x.bytes,x.encoding]},s.rpartition(n).map{|x|[x.bytes,x.encoding]};rescue=>e;p e.class,e.message;end',
+    '[[[97, 98, 99], #<Encoding:UTF-8>], [[], #<Encoding:UTF-8>], [[], #<Encoding:UTF-8>]]\n[[[], #<Encoding:UTF-8>], [[], #<Encoding:UTF-8>], [[97, 98, 99], #<Encoding:UTF-8>]]\n',
+  ],
+  [
+    's=String.new("abc",encoding:"UTF-8");n=String.new("x",encoding:"US-ASCII");begin;p s.partition(n).map{|x|[x.bytes,x.encoding]},s.rpartition(n).map{|x|[x.bytes,x.encoding]};rescue=>e;p e.class,e.message;end',
+    '[[[97, 98, 99], #<Encoding:UTF-8>], [[], #<Encoding:UTF-8>], [[], #<Encoding:UTF-8>]]\n[[[], #<Encoding:UTF-8>], [[], #<Encoding:UTF-8>], [[97, 98, 99], #<Encoding:UTF-8>]]\n',
+  ],
+  [
+    's=String.new("abc",encoding:"UTF-8");n=String.new("",encoding:"US-ASCII");begin;p s.partition(n).map{|x|[x.bytes,x.encoding]},s.rpartition(n).map{|x|[x.bytes,x.encoding]};rescue=>e;p e.class,e.message;end',
+    '[[[], #<Encoding:UTF-8>], [[], #<Encoding:US-ASCII>], [[97, 98, 99], #<Encoding:UTF-8>]]\n[[[97, 98, 99], #<Encoding:UTF-8>], [[], #<Encoding:US-ASCII>], [[], #<Encoding:UTF-8>]]\n',
+  ],
+  [
+    's=String.new("éx",encoding:"UTF-8");n=String.new("é",encoding:"ASCII-8BIT");begin;p s.partition(n).map{|x|[x.bytes,x.encoding]},s.rpartition(n).map{|x|[x.bytes,x.encoding]};rescue=>e;p e.class,e.message;end',
+    'Encoding::CompatibilityError\n"incompatible character encodings: UTF-8 and BINARY (ASCII-8BIT)"\n',
+  ],
+  [
+    's=String.new("éx",encoding:"UTF-8");n=String.new("x",encoding:"ASCII-8BIT");begin;p s.partition(n).map{|x|[x.bytes,x.encoding]},s.rpartition(n).map{|x|[x.bytes,x.encoding]};rescue=>e;p e.class,e.message;end',
+    '[[[195, 169], #<Encoding:UTF-8>], [[120], #<Encoding:BINARY (ASCII-8BIT)>], [[], #<Encoding:UTF-8>]]\n[[[195, 169], #<Encoding:UTF-8>], [[120], #<Encoding:BINARY (ASCII-8BIT)>], [[], #<Encoding:UTF-8>]]\n',
+  ],
+  [
+    's=String.new("éx",encoding:"UTF-8");n=String.new("",encoding:"ASCII-8BIT");begin;p s.partition(n).map{|x|[x.bytes,x.encoding]},s.rpartition(n).map{|x|[x.bytes,x.encoding]};rescue=>e;p e.class,e.message;end',
+    '[[[], #<Encoding:UTF-8>], [[], #<Encoding:BINARY (ASCII-8BIT)>], [[195, 169, 120], #<Encoding:UTF-8>]]\n[[[195, 169, 120], #<Encoding:UTF-8>], [[], #<Encoding:BINARY (ASCII-8BIT)>], [[], #<Encoding:UTF-8>]]\n',
+  ],
+  [
+    's=String.new("xéx",encoding:"UTF-8");n=String.new("é",encoding:"ASCII-8BIT");begin;p s.partition(n).map{|x|[x.bytes,x.encoding]},s.rpartition(n).map{|x|[x.bytes,x.encoding]};rescue=>e;p e.class,e.message;end',
+    'Encoding::CompatibilityError\n"incompatible character encodings: UTF-8 and BINARY (ASCII-8BIT)"\n',
+  ],
+  [
+    's=String.new("xéx",encoding:"UTF-8");n=String.new("x",encoding:"ASCII-8BIT");begin;p s.partition(n).map{|x|[x.bytes,x.encoding]},s.rpartition(n).map{|x|[x.bytes,x.encoding]};rescue=>e;p e.class,e.message;end',
+    '[[[], #<Encoding:UTF-8>], [[120], #<Encoding:BINARY (ASCII-8BIT)>], [[195, 169, 120], #<Encoding:UTF-8>]]\n[[[120, 195, 169], #<Encoding:UTF-8>], [[120], #<Encoding:BINARY (ASCII-8BIT)>], [[], #<Encoding:UTF-8>]]\n',
+  ],
+  [
+    's=String.new("xéx",encoding:"UTF-8");n=String.new("",encoding:"ASCII-8BIT");begin;p s.partition(n).map{|x|[x.bytes,x.encoding]},s.rpartition(n).map{|x|[x.bytes,x.encoding]};rescue=>e;p e.class,e.message;end',
+    '[[[], #<Encoding:UTF-8>], [[], #<Encoding:BINARY (ASCII-8BIT)>], [[120, 195, 169, 120], #<Encoding:UTF-8>]]\n[[[120, 195, 169, 120], #<Encoding:UTF-8>], [[], #<Encoding:BINARY (ASCII-8BIT)>], [[], #<Encoding:UTF-8>]]\n',
+  ],
+  [
+    's=String.new("abc",encoding:"UTF-8");n=String.new("é",encoding:"ASCII-8BIT");begin;p s.partition(n).map{|x|[x.bytes,x.encoding]},s.rpartition(n).map{|x|[x.bytes,x.encoding]};rescue=>e;p e.class,e.message;end',
+    '[[[97, 98, 99], #<Encoding:UTF-8>], [[], #<Encoding:UTF-8>], [[], #<Encoding:UTF-8>]]\n[[[], #<Encoding:UTF-8>], [[], #<Encoding:UTF-8>], [[97, 98, 99], #<Encoding:UTF-8>]]\n',
+  ],
+  [
+    's=String.new("abc",encoding:"UTF-8");n=String.new("x",encoding:"ASCII-8BIT");begin;p s.partition(n).map{|x|[x.bytes,x.encoding]},s.rpartition(n).map{|x|[x.bytes,x.encoding]};rescue=>e;p e.class,e.message;end',
+    '[[[97, 98, 99], #<Encoding:UTF-8>], [[], #<Encoding:UTF-8>], [[], #<Encoding:UTF-8>]]\n[[[], #<Encoding:UTF-8>], [[], #<Encoding:UTF-8>], [[97, 98, 99], #<Encoding:UTF-8>]]\n',
+  ],
+  [
+    's=String.new("abc",encoding:"UTF-8");n=String.new("",encoding:"ASCII-8BIT");begin;p s.partition(n).map{|x|[x.bytes,x.encoding]},s.rpartition(n).map{|x|[x.bytes,x.encoding]};rescue=>e;p e.class,e.message;end',
+    '[[[], #<Encoding:UTF-8>], [[], #<Encoding:BINARY (ASCII-8BIT)>], [[97, 98, 99], #<Encoding:UTF-8>]]\n[[[97, 98, 99], #<Encoding:UTF-8>], [[], #<Encoding:BINARY (ASCII-8BIT)>], [[], #<Encoding:UTF-8>]]\n',
+  ],
+  [
+    's=String.new("éx",encoding:"US-ASCII");n=String.new("é",encoding:"UTF-8");begin;p s.partition(n).map{|x|[x.bytes,x.encoding]},s.rpartition(n).map{|x|[x.bytes,x.encoding]};rescue=>e;p e.class,e.message;end',
+    'Encoding::CompatibilityError\n"incompatible character encodings: US-ASCII and UTF-8"\n',
+  ],
+  [
+    's=String.new("éx",encoding:"US-ASCII");n=String.new("x",encoding:"UTF-8");begin;p s.partition(n).map{|x|[x.bytes,x.encoding]},s.rpartition(n).map{|x|[x.bytes,x.encoding]};rescue=>e;p e.class,e.message;end',
+    '[[[195, 169], #<Encoding:US-ASCII>], [[120], #<Encoding:UTF-8>], [[], #<Encoding:US-ASCII>]]\n[[[195, 169], #<Encoding:US-ASCII>], [[120], #<Encoding:UTF-8>], [[], #<Encoding:US-ASCII>]]\n',
+  ],
+  [
+    's=String.new("éx",encoding:"US-ASCII");n=String.new("",encoding:"UTF-8");begin;p s.partition(n).map{|x|[x.bytes,x.encoding]},s.rpartition(n).map{|x|[x.bytes,x.encoding]};rescue=>e;p e.class,e.message;end',
+    '[[[], #<Encoding:US-ASCII>], [[], #<Encoding:UTF-8>], [[195, 169, 120], #<Encoding:US-ASCII>]]\n[[[195, 169, 120], #<Encoding:US-ASCII>], [[], #<Encoding:UTF-8>], [[], #<Encoding:US-ASCII>]]\n',
+  ],
+  [
+    's=String.new("xéx",encoding:"US-ASCII");n=String.new("é",encoding:"UTF-8");begin;p s.partition(n).map{|x|[x.bytes,x.encoding]},s.rpartition(n).map{|x|[x.bytes,x.encoding]};rescue=>e;p e.class,e.message;end',
+    'Encoding::CompatibilityError\n"incompatible character encodings: US-ASCII and UTF-8"\n',
+  ],
+  [
+    's=String.new("xéx",encoding:"US-ASCII");n=String.new("x",encoding:"UTF-8");begin;p s.partition(n).map{|x|[x.bytes,x.encoding]},s.rpartition(n).map{|x|[x.bytes,x.encoding]};rescue=>e;p e.class,e.message;end',
+    '[[[], #<Encoding:US-ASCII>], [[120], #<Encoding:UTF-8>], [[195, 169, 120], #<Encoding:US-ASCII>]]\n[[[120, 195, 169], #<Encoding:US-ASCII>], [[120], #<Encoding:UTF-8>], [[], #<Encoding:US-ASCII>]]\n',
+  ],
+  [
+    's=String.new("xéx",encoding:"US-ASCII");n=String.new("",encoding:"UTF-8");begin;p s.partition(n).map{|x|[x.bytes,x.encoding]},s.rpartition(n).map{|x|[x.bytes,x.encoding]};rescue=>e;p e.class,e.message;end',
+    '[[[], #<Encoding:US-ASCII>], [[], #<Encoding:UTF-8>], [[120, 195, 169, 120], #<Encoding:US-ASCII>]]\n[[[120, 195, 169, 120], #<Encoding:US-ASCII>], [[], #<Encoding:UTF-8>], [[], #<Encoding:US-ASCII>]]\n',
+  ],
+  [
+    's=String.new("abc",encoding:"US-ASCII");n=String.new("é",encoding:"UTF-8");begin;p s.partition(n).map{|x|[x.bytes,x.encoding]},s.rpartition(n).map{|x|[x.bytes,x.encoding]};rescue=>e;p e.class,e.message;end',
+    '[[[97, 98, 99], #<Encoding:US-ASCII>], [[], #<Encoding:US-ASCII>], [[], #<Encoding:US-ASCII>]]\n[[[], #<Encoding:US-ASCII>], [[], #<Encoding:US-ASCII>], [[97, 98, 99], #<Encoding:US-ASCII>]]\n',
+  ],
+  [
+    's=String.new("abc",encoding:"US-ASCII");n=String.new("x",encoding:"UTF-8");begin;p s.partition(n).map{|x|[x.bytes,x.encoding]},s.rpartition(n).map{|x|[x.bytes,x.encoding]};rescue=>e;p e.class,e.message;end',
+    '[[[97, 98, 99], #<Encoding:US-ASCII>], [[], #<Encoding:US-ASCII>], [[], #<Encoding:US-ASCII>]]\n[[[], #<Encoding:US-ASCII>], [[], #<Encoding:US-ASCII>], [[97, 98, 99], #<Encoding:US-ASCII>]]\n',
+  ],
+  [
+    's=String.new("abc",encoding:"US-ASCII");n=String.new("",encoding:"UTF-8");begin;p s.partition(n).map{|x|[x.bytes,x.encoding]},s.rpartition(n).map{|x|[x.bytes,x.encoding]};rescue=>e;p e.class,e.message;end',
+    '[[[], #<Encoding:US-ASCII>], [[], #<Encoding:UTF-8>], [[97, 98, 99], #<Encoding:US-ASCII>]]\n[[[97, 98, 99], #<Encoding:US-ASCII>], [[], #<Encoding:UTF-8>], [[], #<Encoding:US-ASCII>]]\n',
+  ],
+  [
+    's=String.new("éx",encoding:"US-ASCII");n=String.new("é",encoding:"US-ASCII");begin;p s.partition(n).map{|x|[x.bytes,x.encoding]},s.rpartition(n).map{|x|[x.bytes,x.encoding]};rescue=>e;p e.class,e.message;end',
+    '[[[195, 169, 120], #<Encoding:US-ASCII>], [[], #<Encoding:US-ASCII>], [[], #<Encoding:US-ASCII>]]\n[[[], #<Encoding:US-ASCII>], [[], #<Encoding:US-ASCII>], [[195, 169, 120], #<Encoding:US-ASCII>]]\n',
+  ],
+  [
+    's=String.new("éx",encoding:"US-ASCII");n=String.new("x",encoding:"US-ASCII");begin;p s.partition(n).map{|x|[x.bytes,x.encoding]},s.rpartition(n).map{|x|[x.bytes,x.encoding]};rescue=>e;p e.class,e.message;end',
+    '[[[195, 169], #<Encoding:US-ASCII>], [[120], #<Encoding:US-ASCII>], [[], #<Encoding:US-ASCII>]]\n[[[195, 169], #<Encoding:US-ASCII>], [[120], #<Encoding:US-ASCII>], [[], #<Encoding:US-ASCII>]]\n',
+  ],
+  [
+    's=String.new("éx",encoding:"US-ASCII");n=String.new("",encoding:"US-ASCII");begin;p s.partition(n).map{|x|[x.bytes,x.encoding]},s.rpartition(n).map{|x|[x.bytes,x.encoding]};rescue=>e;p e.class,e.message;end',
+    '[[[], #<Encoding:US-ASCII>], [[], #<Encoding:US-ASCII>], [[195, 169, 120], #<Encoding:US-ASCII>]]\n[[[195, 169, 120], #<Encoding:US-ASCII>], [[], #<Encoding:US-ASCII>], [[], #<Encoding:US-ASCII>]]\n',
+  ],
+  [
+    's=String.new("xéx",encoding:"US-ASCII");n=String.new("é",encoding:"US-ASCII");begin;p s.partition(n).map{|x|[x.bytes,x.encoding]},s.rpartition(n).map{|x|[x.bytes,x.encoding]};rescue=>e;p e.class,e.message;end',
+    '[[[120, 195, 169, 120], #<Encoding:US-ASCII>], [[], #<Encoding:US-ASCII>], [[], #<Encoding:US-ASCII>]]\n[[[], #<Encoding:US-ASCII>], [[], #<Encoding:US-ASCII>], [[120, 195, 169, 120], #<Encoding:US-ASCII>]]\n',
+  ],
+  [
+    's=String.new("xéx",encoding:"US-ASCII");n=String.new("x",encoding:"US-ASCII");begin;p s.partition(n).map{|x|[x.bytes,x.encoding]},s.rpartition(n).map{|x|[x.bytes,x.encoding]};rescue=>e;p e.class,e.message;end',
+    '[[[], #<Encoding:US-ASCII>], [[120], #<Encoding:US-ASCII>], [[195, 169, 120], #<Encoding:US-ASCII>]]\n[[[120, 195, 169], #<Encoding:US-ASCII>], [[120], #<Encoding:US-ASCII>], [[], #<Encoding:US-ASCII>]]\n',
+  ],
+  [
+    's=String.new("xéx",encoding:"US-ASCII");n=String.new("",encoding:"US-ASCII");begin;p s.partition(n).map{|x|[x.bytes,x.encoding]},s.rpartition(n).map{|x|[x.bytes,x.encoding]};rescue=>e;p e.class,e.message;end',
+    '[[[], #<Encoding:US-ASCII>], [[], #<Encoding:US-ASCII>], [[120, 195, 169, 120], #<Encoding:US-ASCII>]]\n[[[120, 195, 169, 120], #<Encoding:US-ASCII>], [[], #<Encoding:US-ASCII>], [[], #<Encoding:US-ASCII>]]\n',
+  ],
+  [
+    's=String.new("abc",encoding:"US-ASCII");n=String.new("é",encoding:"US-ASCII");begin;p s.partition(n).map{|x|[x.bytes,x.encoding]},s.rpartition(n).map{|x|[x.bytes,x.encoding]};rescue=>e;p e.class,e.message;end',
+    '[[[97, 98, 99], #<Encoding:US-ASCII>], [[], #<Encoding:US-ASCII>], [[], #<Encoding:US-ASCII>]]\n[[[], #<Encoding:US-ASCII>], [[], #<Encoding:US-ASCII>], [[97, 98, 99], #<Encoding:US-ASCII>]]\n',
+  ],
+  [
+    's=String.new("abc",encoding:"US-ASCII");n=String.new("x",encoding:"US-ASCII");begin;p s.partition(n).map{|x|[x.bytes,x.encoding]},s.rpartition(n).map{|x|[x.bytes,x.encoding]};rescue=>e;p e.class,e.message;end',
+    '[[[97, 98, 99], #<Encoding:US-ASCII>], [[], #<Encoding:US-ASCII>], [[], #<Encoding:US-ASCII>]]\n[[[], #<Encoding:US-ASCII>], [[], #<Encoding:US-ASCII>], [[97, 98, 99], #<Encoding:US-ASCII>]]\n',
+  ],
+  [
+    's=String.new("abc",encoding:"US-ASCII");n=String.new("",encoding:"US-ASCII");begin;p s.partition(n).map{|x|[x.bytes,x.encoding]},s.rpartition(n).map{|x|[x.bytes,x.encoding]};rescue=>e;p e.class,e.message;end',
+    '[[[], #<Encoding:US-ASCII>], [[], #<Encoding:US-ASCII>], [[97, 98, 99], #<Encoding:US-ASCII>]]\n[[[97, 98, 99], #<Encoding:US-ASCII>], [[], #<Encoding:US-ASCII>], [[], #<Encoding:US-ASCII>]]\n',
+  ],
+  [
+    's=String.new("éx",encoding:"US-ASCII");n=String.new("é",encoding:"ASCII-8BIT");begin;p s.partition(n).map{|x|[x.bytes,x.encoding]},s.rpartition(n).map{|x|[x.bytes,x.encoding]};rescue=>e;p e.class,e.message;end',
+    'Encoding::CompatibilityError\n"incompatible character encodings: US-ASCII and BINARY (ASCII-8BIT)"\n',
+  ],
+  [
+    's=String.new("éx",encoding:"US-ASCII");n=String.new("x",encoding:"ASCII-8BIT");begin;p s.partition(n).map{|x|[x.bytes,x.encoding]},s.rpartition(n).map{|x|[x.bytes,x.encoding]};rescue=>e;p e.class,e.message;end',
+    '[[[195, 169], #<Encoding:US-ASCII>], [[120], #<Encoding:BINARY (ASCII-8BIT)>], [[], #<Encoding:US-ASCII>]]\n[[[195, 169], #<Encoding:US-ASCII>], [[120], #<Encoding:BINARY (ASCII-8BIT)>], [[], #<Encoding:US-ASCII>]]\n',
+  ],
+  [
+    's=String.new("éx",encoding:"US-ASCII");n=String.new("",encoding:"ASCII-8BIT");begin;p s.partition(n).map{|x|[x.bytes,x.encoding]},s.rpartition(n).map{|x|[x.bytes,x.encoding]};rescue=>e;p e.class,e.message;end',
+    '[[[], #<Encoding:US-ASCII>], [[], #<Encoding:BINARY (ASCII-8BIT)>], [[195, 169, 120], #<Encoding:US-ASCII>]]\n[[[195, 169, 120], #<Encoding:US-ASCII>], [[], #<Encoding:BINARY (ASCII-8BIT)>], [[], #<Encoding:US-ASCII>]]\n',
+  ],
+  [
+    's=String.new("xéx",encoding:"US-ASCII");n=String.new("é",encoding:"ASCII-8BIT");begin;p s.partition(n).map{|x|[x.bytes,x.encoding]},s.rpartition(n).map{|x|[x.bytes,x.encoding]};rescue=>e;p e.class,e.message;end',
+    'Encoding::CompatibilityError\n"incompatible character encodings: US-ASCII and BINARY (ASCII-8BIT)"\n',
+  ],
+  [
+    's=String.new("xéx",encoding:"US-ASCII");n=String.new("x",encoding:"ASCII-8BIT");begin;p s.partition(n).map{|x|[x.bytes,x.encoding]},s.rpartition(n).map{|x|[x.bytes,x.encoding]};rescue=>e;p e.class,e.message;end',
+    '[[[], #<Encoding:US-ASCII>], [[120], #<Encoding:BINARY (ASCII-8BIT)>], [[195, 169, 120], #<Encoding:US-ASCII>]]\n[[[120, 195, 169], #<Encoding:US-ASCII>], [[120], #<Encoding:BINARY (ASCII-8BIT)>], [[], #<Encoding:US-ASCII>]]\n',
+  ],
+  [
+    's=String.new("xéx",encoding:"US-ASCII");n=String.new("",encoding:"ASCII-8BIT");begin;p s.partition(n).map{|x|[x.bytes,x.encoding]},s.rpartition(n).map{|x|[x.bytes,x.encoding]};rescue=>e;p e.class,e.message;end',
+    '[[[], #<Encoding:US-ASCII>], [[], #<Encoding:BINARY (ASCII-8BIT)>], [[120, 195, 169, 120], #<Encoding:US-ASCII>]]\n[[[120, 195, 169, 120], #<Encoding:US-ASCII>], [[], #<Encoding:BINARY (ASCII-8BIT)>], [[], #<Encoding:US-ASCII>]]\n',
+  ],
+  [
+    's=String.new("abc",encoding:"US-ASCII");n=String.new("é",encoding:"ASCII-8BIT");begin;p s.partition(n).map{|x|[x.bytes,x.encoding]},s.rpartition(n).map{|x|[x.bytes,x.encoding]};rescue=>e;p e.class,e.message;end',
+    '[[[97, 98, 99], #<Encoding:US-ASCII>], [[], #<Encoding:US-ASCII>], [[], #<Encoding:US-ASCII>]]\n[[[], #<Encoding:US-ASCII>], [[], #<Encoding:US-ASCII>], [[97, 98, 99], #<Encoding:US-ASCII>]]\n',
+  ],
+  [
+    's=String.new("abc",encoding:"US-ASCII");n=String.new("x",encoding:"ASCII-8BIT");begin;p s.partition(n).map{|x|[x.bytes,x.encoding]},s.rpartition(n).map{|x|[x.bytes,x.encoding]};rescue=>e;p e.class,e.message;end',
+    '[[[97, 98, 99], #<Encoding:US-ASCII>], [[], #<Encoding:US-ASCII>], [[], #<Encoding:US-ASCII>]]\n[[[], #<Encoding:US-ASCII>], [[], #<Encoding:US-ASCII>], [[97, 98, 99], #<Encoding:US-ASCII>]]\n',
+  ],
+  [
+    's=String.new("abc",encoding:"US-ASCII");n=String.new("",encoding:"ASCII-8BIT");begin;p s.partition(n).map{|x|[x.bytes,x.encoding]},s.rpartition(n).map{|x|[x.bytes,x.encoding]};rescue=>e;p e.class,e.message;end',
+    '[[[], #<Encoding:US-ASCII>], [[], #<Encoding:BINARY (ASCII-8BIT)>], [[97, 98, 99], #<Encoding:US-ASCII>]]\n[[[97, 98, 99], #<Encoding:US-ASCII>], [[], #<Encoding:BINARY (ASCII-8BIT)>], [[], #<Encoding:US-ASCII>]]\n',
+  ],
+  [
+    's=String.new("éx",encoding:"ASCII-8BIT");n=String.new("é",encoding:"UTF-8");begin;p s.partition(n).map{|x|[x.bytes,x.encoding]},s.rpartition(n).map{|x|[x.bytes,x.encoding]};rescue=>e;p e.class,e.message;end',
+    'Encoding::CompatibilityError\n"incompatible character encodings: BINARY (ASCII-8BIT) and UTF-8"\n',
+  ],
+  [
+    's=String.new("éx",encoding:"ASCII-8BIT");n=String.new("x",encoding:"UTF-8");begin;p s.partition(n).map{|x|[x.bytes,x.encoding]},s.rpartition(n).map{|x|[x.bytes,x.encoding]};rescue=>e;p e.class,e.message;end',
+    '[[[195, 169], #<Encoding:BINARY (ASCII-8BIT)>], [[120], #<Encoding:UTF-8>], [[], #<Encoding:BINARY (ASCII-8BIT)>]]\n[[[195, 169], #<Encoding:BINARY (ASCII-8BIT)>], [[120], #<Encoding:UTF-8>], [[], #<Encoding:BINARY (ASCII-8BIT)>]]\n',
+  ],
+  [
+    's=String.new("éx",encoding:"ASCII-8BIT");n=String.new("",encoding:"UTF-8");begin;p s.partition(n).map{|x|[x.bytes,x.encoding]},s.rpartition(n).map{|x|[x.bytes,x.encoding]};rescue=>e;p e.class,e.message;end',
+    '[[[], #<Encoding:BINARY (ASCII-8BIT)>], [[], #<Encoding:UTF-8>], [[195, 169, 120], #<Encoding:BINARY (ASCII-8BIT)>]]\n[[[195, 169, 120], #<Encoding:BINARY (ASCII-8BIT)>], [[], #<Encoding:UTF-8>], [[], #<Encoding:BINARY (ASCII-8BIT)>]]\n',
+  ],
+  [
+    's=String.new("xéx",encoding:"ASCII-8BIT");n=String.new("é",encoding:"UTF-8");begin;p s.partition(n).map{|x|[x.bytes,x.encoding]},s.rpartition(n).map{|x|[x.bytes,x.encoding]};rescue=>e;p e.class,e.message;end',
+    'Encoding::CompatibilityError\n"incompatible character encodings: BINARY (ASCII-8BIT) and UTF-8"\n',
+  ],
+  [
+    's=String.new("xéx",encoding:"ASCII-8BIT");n=String.new("x",encoding:"UTF-8");begin;p s.partition(n).map{|x|[x.bytes,x.encoding]},s.rpartition(n).map{|x|[x.bytes,x.encoding]};rescue=>e;p e.class,e.message;end',
+    '[[[], #<Encoding:BINARY (ASCII-8BIT)>], [[120], #<Encoding:UTF-8>], [[195, 169, 120], #<Encoding:BINARY (ASCII-8BIT)>]]\n[[[120, 195, 169], #<Encoding:BINARY (ASCII-8BIT)>], [[120], #<Encoding:UTF-8>], [[], #<Encoding:BINARY (ASCII-8BIT)>]]\n',
+  ],
+  [
+    's=String.new("xéx",encoding:"ASCII-8BIT");n=String.new("",encoding:"UTF-8");begin;p s.partition(n).map{|x|[x.bytes,x.encoding]},s.rpartition(n).map{|x|[x.bytes,x.encoding]};rescue=>e;p e.class,e.message;end',
+    '[[[], #<Encoding:BINARY (ASCII-8BIT)>], [[], #<Encoding:UTF-8>], [[120, 195, 169, 120], #<Encoding:BINARY (ASCII-8BIT)>]]\n[[[120, 195, 169, 120], #<Encoding:BINARY (ASCII-8BIT)>], [[], #<Encoding:UTF-8>], [[], #<Encoding:BINARY (ASCII-8BIT)>]]\n',
+  ],
+  [
+    's=String.new("abc",encoding:"ASCII-8BIT");n=String.new("é",encoding:"UTF-8");begin;p s.partition(n).map{|x|[x.bytes,x.encoding]},s.rpartition(n).map{|x|[x.bytes,x.encoding]};rescue=>e;p e.class,e.message;end',
+    '[[[97, 98, 99], #<Encoding:BINARY (ASCII-8BIT)>], [[], #<Encoding:BINARY (ASCII-8BIT)>], [[], #<Encoding:BINARY (ASCII-8BIT)>]]\n[[[], #<Encoding:BINARY (ASCII-8BIT)>], [[], #<Encoding:BINARY (ASCII-8BIT)>], [[97, 98, 99], #<Encoding:BINARY (ASCII-8BIT)>]]\n',
+  ],
+  [
+    's=String.new("abc",encoding:"ASCII-8BIT");n=String.new("x",encoding:"UTF-8");begin;p s.partition(n).map{|x|[x.bytes,x.encoding]},s.rpartition(n).map{|x|[x.bytes,x.encoding]};rescue=>e;p e.class,e.message;end',
+    '[[[97, 98, 99], #<Encoding:BINARY (ASCII-8BIT)>], [[], #<Encoding:BINARY (ASCII-8BIT)>], [[], #<Encoding:BINARY (ASCII-8BIT)>]]\n[[[], #<Encoding:BINARY (ASCII-8BIT)>], [[], #<Encoding:BINARY (ASCII-8BIT)>], [[97, 98, 99], #<Encoding:BINARY (ASCII-8BIT)>]]\n',
+  ],
+  [
+    's=String.new("abc",encoding:"ASCII-8BIT");n=String.new("",encoding:"UTF-8");begin;p s.partition(n).map{|x|[x.bytes,x.encoding]},s.rpartition(n).map{|x|[x.bytes,x.encoding]};rescue=>e;p e.class,e.message;end',
+    '[[[], #<Encoding:BINARY (ASCII-8BIT)>], [[], #<Encoding:UTF-8>], [[97, 98, 99], #<Encoding:BINARY (ASCII-8BIT)>]]\n[[[97, 98, 99], #<Encoding:BINARY (ASCII-8BIT)>], [[], #<Encoding:UTF-8>], [[], #<Encoding:BINARY (ASCII-8BIT)>]]\n',
+  ],
+  [
+    's=String.new("éx",encoding:"ASCII-8BIT");n=String.new("é",encoding:"US-ASCII");begin;p s.partition(n).map{|x|[x.bytes,x.encoding]},s.rpartition(n).map{|x|[x.bytes,x.encoding]};rescue=>e;p e.class,e.message;end',
+    'Encoding::CompatibilityError\n"incompatible character encodings: BINARY (ASCII-8BIT) and US-ASCII"\n',
+  ],
+  [
+    's=String.new("éx",encoding:"ASCII-8BIT");n=String.new("x",encoding:"US-ASCII");begin;p s.partition(n).map{|x|[x.bytes,x.encoding]},s.rpartition(n).map{|x|[x.bytes,x.encoding]};rescue=>e;p e.class,e.message;end',
+    '[[[195, 169], #<Encoding:BINARY (ASCII-8BIT)>], [[120], #<Encoding:US-ASCII>], [[], #<Encoding:BINARY (ASCII-8BIT)>]]\n[[[195, 169], #<Encoding:BINARY (ASCII-8BIT)>], [[120], #<Encoding:US-ASCII>], [[], #<Encoding:BINARY (ASCII-8BIT)>]]\n',
+  ],
+  [
+    's=String.new("éx",encoding:"ASCII-8BIT");n=String.new("",encoding:"US-ASCII");begin;p s.partition(n).map{|x|[x.bytes,x.encoding]},s.rpartition(n).map{|x|[x.bytes,x.encoding]};rescue=>e;p e.class,e.message;end',
+    '[[[], #<Encoding:BINARY (ASCII-8BIT)>], [[], #<Encoding:US-ASCII>], [[195, 169, 120], #<Encoding:BINARY (ASCII-8BIT)>]]\n[[[195, 169, 120], #<Encoding:BINARY (ASCII-8BIT)>], [[], #<Encoding:US-ASCII>], [[], #<Encoding:BINARY (ASCII-8BIT)>]]\n',
+  ],
+  [
+    's=String.new("xéx",encoding:"ASCII-8BIT");n=String.new("é",encoding:"US-ASCII");begin;p s.partition(n).map{|x|[x.bytes,x.encoding]},s.rpartition(n).map{|x|[x.bytes,x.encoding]};rescue=>e;p e.class,e.message;end',
+    'Encoding::CompatibilityError\n"incompatible character encodings: BINARY (ASCII-8BIT) and US-ASCII"\n',
+  ],
+  [
+    's=String.new("xéx",encoding:"ASCII-8BIT");n=String.new("x",encoding:"US-ASCII");begin;p s.partition(n).map{|x|[x.bytes,x.encoding]},s.rpartition(n).map{|x|[x.bytes,x.encoding]};rescue=>e;p e.class,e.message;end',
+    '[[[], #<Encoding:BINARY (ASCII-8BIT)>], [[120], #<Encoding:US-ASCII>], [[195, 169, 120], #<Encoding:BINARY (ASCII-8BIT)>]]\n[[[120, 195, 169], #<Encoding:BINARY (ASCII-8BIT)>], [[120], #<Encoding:US-ASCII>], [[], #<Encoding:BINARY (ASCII-8BIT)>]]\n',
+  ],
+  [
+    's=String.new("xéx",encoding:"ASCII-8BIT");n=String.new("",encoding:"US-ASCII");begin;p s.partition(n).map{|x|[x.bytes,x.encoding]},s.rpartition(n).map{|x|[x.bytes,x.encoding]};rescue=>e;p e.class,e.message;end',
+    '[[[], #<Encoding:BINARY (ASCII-8BIT)>], [[], #<Encoding:US-ASCII>], [[120, 195, 169, 120], #<Encoding:BINARY (ASCII-8BIT)>]]\n[[[120, 195, 169, 120], #<Encoding:BINARY (ASCII-8BIT)>], [[], #<Encoding:US-ASCII>], [[], #<Encoding:BINARY (ASCII-8BIT)>]]\n',
+  ],
+  [
+    's=String.new("abc",encoding:"ASCII-8BIT");n=String.new("é",encoding:"US-ASCII");begin;p s.partition(n).map{|x|[x.bytes,x.encoding]},s.rpartition(n).map{|x|[x.bytes,x.encoding]};rescue=>e;p e.class,e.message;end',
+    '[[[97, 98, 99], #<Encoding:BINARY (ASCII-8BIT)>], [[], #<Encoding:BINARY (ASCII-8BIT)>], [[], #<Encoding:BINARY (ASCII-8BIT)>]]\n[[[], #<Encoding:BINARY (ASCII-8BIT)>], [[], #<Encoding:BINARY (ASCII-8BIT)>], [[97, 98, 99], #<Encoding:BINARY (ASCII-8BIT)>]]\n',
+  ],
+  [
+    's=String.new("abc",encoding:"ASCII-8BIT");n=String.new("x",encoding:"US-ASCII");begin;p s.partition(n).map{|x|[x.bytes,x.encoding]},s.rpartition(n).map{|x|[x.bytes,x.encoding]};rescue=>e;p e.class,e.message;end',
+    '[[[97, 98, 99], #<Encoding:BINARY (ASCII-8BIT)>], [[], #<Encoding:BINARY (ASCII-8BIT)>], [[], #<Encoding:BINARY (ASCII-8BIT)>]]\n[[[], #<Encoding:BINARY (ASCII-8BIT)>], [[], #<Encoding:BINARY (ASCII-8BIT)>], [[97, 98, 99], #<Encoding:BINARY (ASCII-8BIT)>]]\n',
+  ],
+  [
+    's=String.new("abc",encoding:"ASCII-8BIT");n=String.new("",encoding:"US-ASCII");begin;p s.partition(n).map{|x|[x.bytes,x.encoding]},s.rpartition(n).map{|x|[x.bytes,x.encoding]};rescue=>e;p e.class,e.message;end',
+    '[[[], #<Encoding:BINARY (ASCII-8BIT)>], [[], #<Encoding:US-ASCII>], [[97, 98, 99], #<Encoding:BINARY (ASCII-8BIT)>]]\n[[[97, 98, 99], #<Encoding:BINARY (ASCII-8BIT)>], [[], #<Encoding:US-ASCII>], [[], #<Encoding:BINARY (ASCII-8BIT)>]]\n',
+  ],
+  [
+    's=String.new("éx",encoding:"ASCII-8BIT");n=String.new("é",encoding:"ASCII-8BIT");begin;p s.partition(n).map{|x|[x.bytes,x.encoding]},s.rpartition(n).map{|x|[x.bytes,x.encoding]};rescue=>e;p e.class,e.message;end',
+    '[[[], #<Encoding:BINARY (ASCII-8BIT)>], [[195, 169], #<Encoding:BINARY (ASCII-8BIT)>], [[120], #<Encoding:BINARY (ASCII-8BIT)>]]\n[[[], #<Encoding:BINARY (ASCII-8BIT)>], [[195, 169], #<Encoding:BINARY (ASCII-8BIT)>], [[120], #<Encoding:BINARY (ASCII-8BIT)>]]\n',
+  ],
+  [
+    's=String.new("éx",encoding:"ASCII-8BIT");n=String.new("x",encoding:"ASCII-8BIT");begin;p s.partition(n).map{|x|[x.bytes,x.encoding]},s.rpartition(n).map{|x|[x.bytes,x.encoding]};rescue=>e;p e.class,e.message;end',
+    '[[[195, 169], #<Encoding:BINARY (ASCII-8BIT)>], [[120], #<Encoding:BINARY (ASCII-8BIT)>], [[], #<Encoding:BINARY (ASCII-8BIT)>]]\n[[[195, 169], #<Encoding:BINARY (ASCII-8BIT)>], [[120], #<Encoding:BINARY (ASCII-8BIT)>], [[], #<Encoding:BINARY (ASCII-8BIT)>]]\n',
+  ],
+  [
+    's=String.new("éx",encoding:"ASCII-8BIT");n=String.new("",encoding:"ASCII-8BIT");begin;p s.partition(n).map{|x|[x.bytes,x.encoding]},s.rpartition(n).map{|x|[x.bytes,x.encoding]};rescue=>e;p e.class,e.message;end',
+    '[[[], #<Encoding:BINARY (ASCII-8BIT)>], [[], #<Encoding:BINARY (ASCII-8BIT)>], [[195, 169, 120], #<Encoding:BINARY (ASCII-8BIT)>]]\n[[[195, 169, 120], #<Encoding:BINARY (ASCII-8BIT)>], [[], #<Encoding:BINARY (ASCII-8BIT)>], [[], #<Encoding:BINARY (ASCII-8BIT)>]]\n',
+  ],
+  [
+    's=String.new("xéx",encoding:"ASCII-8BIT");n=String.new("é",encoding:"ASCII-8BIT");begin;p s.partition(n).map{|x|[x.bytes,x.encoding]},s.rpartition(n).map{|x|[x.bytes,x.encoding]};rescue=>e;p e.class,e.message;end',
+    '[[[120], #<Encoding:BINARY (ASCII-8BIT)>], [[195, 169], #<Encoding:BINARY (ASCII-8BIT)>], [[120], #<Encoding:BINARY (ASCII-8BIT)>]]\n[[[120], #<Encoding:BINARY (ASCII-8BIT)>], [[195, 169], #<Encoding:BINARY (ASCII-8BIT)>], [[120], #<Encoding:BINARY (ASCII-8BIT)>]]\n',
+  ],
+  [
+    's=String.new("xéx",encoding:"ASCII-8BIT");n=String.new("x",encoding:"ASCII-8BIT");begin;p s.partition(n).map{|x|[x.bytes,x.encoding]},s.rpartition(n).map{|x|[x.bytes,x.encoding]};rescue=>e;p e.class,e.message;end',
+    '[[[], #<Encoding:BINARY (ASCII-8BIT)>], [[120], #<Encoding:BINARY (ASCII-8BIT)>], [[195, 169, 120], #<Encoding:BINARY (ASCII-8BIT)>]]\n[[[120, 195, 169], #<Encoding:BINARY (ASCII-8BIT)>], [[120], #<Encoding:BINARY (ASCII-8BIT)>], [[], #<Encoding:BINARY (ASCII-8BIT)>]]\n',
+  ],
+  [
+    's=String.new("xéx",encoding:"ASCII-8BIT");n=String.new("",encoding:"ASCII-8BIT");begin;p s.partition(n).map{|x|[x.bytes,x.encoding]},s.rpartition(n).map{|x|[x.bytes,x.encoding]};rescue=>e;p e.class,e.message;end',
+    '[[[], #<Encoding:BINARY (ASCII-8BIT)>], [[], #<Encoding:BINARY (ASCII-8BIT)>], [[120, 195, 169, 120], #<Encoding:BINARY (ASCII-8BIT)>]]\n[[[120, 195, 169, 120], #<Encoding:BINARY (ASCII-8BIT)>], [[], #<Encoding:BINARY (ASCII-8BIT)>], [[], #<Encoding:BINARY (ASCII-8BIT)>]]\n',
+  ],
+  [
+    's=String.new("abc",encoding:"ASCII-8BIT");n=String.new("é",encoding:"ASCII-8BIT");begin;p s.partition(n).map{|x|[x.bytes,x.encoding]},s.rpartition(n).map{|x|[x.bytes,x.encoding]};rescue=>e;p e.class,e.message;end',
+    '[[[97, 98, 99], #<Encoding:BINARY (ASCII-8BIT)>], [[], #<Encoding:BINARY (ASCII-8BIT)>], [[], #<Encoding:BINARY (ASCII-8BIT)>]]\n[[[], #<Encoding:BINARY (ASCII-8BIT)>], [[], #<Encoding:BINARY (ASCII-8BIT)>], [[97, 98, 99], #<Encoding:BINARY (ASCII-8BIT)>]]\n',
+  ],
+  [
+    's=String.new("abc",encoding:"ASCII-8BIT");n=String.new("x",encoding:"ASCII-8BIT");begin;p s.partition(n).map{|x|[x.bytes,x.encoding]},s.rpartition(n).map{|x|[x.bytes,x.encoding]};rescue=>e;p e.class,e.message;end',
+    '[[[97, 98, 99], #<Encoding:BINARY (ASCII-8BIT)>], [[], #<Encoding:BINARY (ASCII-8BIT)>], [[], #<Encoding:BINARY (ASCII-8BIT)>]]\n[[[], #<Encoding:BINARY (ASCII-8BIT)>], [[], #<Encoding:BINARY (ASCII-8BIT)>], [[97, 98, 99], #<Encoding:BINARY (ASCII-8BIT)>]]\n',
+  ],
+  [
+    's=String.new("abc",encoding:"ASCII-8BIT");n=String.new("",encoding:"ASCII-8BIT");begin;p s.partition(n).map{|x|[x.bytes,x.encoding]},s.rpartition(n).map{|x|[x.bytes,x.encoding]};rescue=>e;p e.class,e.message;end',
+    '[[[], #<Encoding:BINARY (ASCII-8BIT)>], [[], #<Encoding:BINARY (ASCII-8BIT)>], [[97, 98, 99], #<Encoding:BINARY (ASCII-8BIT)>]]\n[[[97, 98, 99], #<Encoding:BINARY (ASCII-8BIT)>], [[], #<Encoding:BINARY (ASCII-8BIT)>], [[], #<Encoding:BINARY (ASCII-8BIT)>]]\n',
+  ],
+  [
+    'o=Object.new;def o.inspect;if $yielding;$yielding=false;$y<<:pause;end;"x";end;a=([o]);e=Enumerator.new{|y|$y=y;$yielding=true;y<<a.inspect};p e.next;p a.inspect;p e.next',
+    ':pause\n"[x]"\n"[x]"\n',
+  ],
+  [
+    'o=Object.new;def o.inspect;if $yielding;$yielding=false;$y<<:pause;end;"x";end;a=([o]);e=Enumerator.new{|y|$y=y;$yielding=true;y<<a.inspect};p e.next;e.rewind;p a.inspect;p a.inspect',
+    ':pause\n"[x]"\n"[x]"\n',
+  ],
+  [
+    'o=Object.new;def o.inspect;if $yielding;$yielding=false;$y<<:pause;end;"x";end;a=([o]);e=Enumerator.new{|y|$y=y;$yielding=true;y<<a.inspect};p e.next;p a.inspect;f=Enumerator.new{|y|y<<a.inspect};p f.next;p e.next',
+    ':pause\n"[x]"\n"[x]"\n"[x]"\n',
+  ],
+  [
+    'o=Object.new;def o.inspect;if $yielding;$yielding=false;$y<<:pause;end;"x";end;a=({a:o});e=Enumerator.new{|y|$y=y;$yielding=true;y<<a.inspect};p e.next;p a.inspect;p e.next',
+    ':pause\n"{a: x}"\n"{a: x}"\n',
+  ],
+  [
+    'o=Object.new;def o.inspect;if $yielding;$yielding=false;$y<<:pause;end;"x";end;a=({a:o});e=Enumerator.new{|y|$y=y;$yielding=true;y<<a.inspect};p e.next;e.rewind;p a.inspect;p a.inspect',
+    ':pause\n"{a: x}"\n"{a: x}"\n',
+  ],
+  [
+    'o=Object.new;def o.inspect;if $yielding;$yielding=false;$y<<:pause;end;"x";end;a=({a:o});e=Enumerator.new{|y|$y=y;$yielding=true;y<<a.inspect};p e.next;p a.inspect;f=Enumerator.new{|y|y<<a.inspect};p f.next;p e.next',
+    ':pause\n"{a: x}"\n"{a: x}"\n"{a: x}"\n',
+  ],
+  [
+    'o=Object.new;def o.inspect;if $yielding;$yielding=false;$y<<:pause;end;"x";end;a=(Set[o]);e=Enumerator.new{|y|$y=y;$yielding=true;y<<a.inspect};p e.next;p a.inspect;p e.next',
+    ':pause\n"Set[x]"\n"Set[x]"\n',
+  ],
+  [
+    'o=Object.new;def o.inspect;if $yielding;$yielding=false;$y<<:pause;end;"x";end;a=(Set[o]);e=Enumerator.new{|y|$y=y;$yielding=true;y<<a.inspect};p e.next;e.rewind;p a.inspect;p a.inspect',
+    ':pause\n"Set[x]"\n"Set[x]"\n',
+  ],
+  [
+    'o=Object.new;def o.inspect;if $yielding;$yielding=false;$y<<:pause;end;"x";end;a=(Set[o]);e=Enumerator.new{|y|$y=y;$yielding=true;y<<a.inspect};p e.next;p a.inspect;f=Enumerator.new{|y|y<<a.inspect};p f.next;p e.next',
+    ':pause\n"Set[x]"\n"Set[x]"\n"Set[x]"\n',
+  ],
+  [
+    'o=Object.new;def o.inspect;if $yielding;$yielding=false;$y<<:pause;end;"x";end;a=(a=Object.new;a.instance_variable_set(:@x,o);a);e=Enumerator.new{|y|$y=y;$yielding=true;y<<a.inspect};v=e.next;p(v.is_a?(String) ? v.end_with?(" @x=x>") : v);p a.inspect.end_with?(" @x=x>");v=e.next;p(v.is_a?(String) ? v.end_with?(" @x=x>") : v)',
+    ':pause\ntrue\ntrue\n',
+  ],
+  [
+    'o=Object.new;def o.inspect;if $yielding;$yielding=false;$y<<:pause;end;"x";end;a=(a=Object.new;a.instance_variable_set(:@x,o);a);e=Enumerator.new{|y|$y=y;$yielding=true;y<<a.inspect};v=e.next;p(v.is_a?(String) ? v.end_with?(" @x=x>") : v);e.rewind;p a.inspect.end_with?(" @x=x>");p a.inspect.end_with?(" @x=x>")',
+    ':pause\ntrue\ntrue\n',
+  ],
+  [
+    'o=Object.new;def o.inspect;if $yielding;$yielding=false;$y<<:pause;end;"x";end;a=(a=Object.new;a.instance_variable_set(:@x,o);a);e=Enumerator.new{|y|$y=y;$yielding=true;y<<a.inspect};v=e.next;p(v.is_a?(String) ? v.end_with?(" @x=x>") : v);p a.inspect.end_with?(" @x=x>");f=Enumerator.new{|y|y<<a.inspect};p f.next.end_with?(" @x=x>");v=e.next;p(v.is_a?(String) ? v.end_with?(" @x=x>") : v)',
+    ':pause\ntrue\ntrue\ntrue\n',
+  ],
+  ['a=[];a<<a;p a;p(a<=>[a]);p a==[a]', '[[...]]\n0\ntrue\n'],
+  ['h={};h[:a]=h;p h', '{a: {...}}\n'],
+  ['s=Set.new;s<<s;p s', 'Set[Set[...]]\n'],
+  ['class C;include Comparable;def <=>(o);self==o ? 0 : nil;end;end;p C.new==C.new', 'false\n'],
+  [
+    's="aé";i=Object.new;i.define_singleton_method(:to_int){s.replace("abc");1};r=Object.new;r.define_singleton_method(:to_str){s.replace("abc");"Q"};begin;v=(s[/(?<x>é)/,0]=r);p(v.is_a?(String) ? v.bytes : :object);p s.bytes;rescue=>e;p e.class,e.message;end',
+    ':object\n[97, 81]\n',
+  ],
+  [
+    's="aé";i=Object.new;i.define_singleton_method(:to_int){s.replace("aé");1};r=Object.new;r.define_singleton_method(:to_str){s.replace("aé");"Q"};begin;v=(s[/(?<x>é)/,0]=r);p(v.is_a?(String) ? v.bytes : :object);p s.bytes;rescue=>e;p e.class,e.message;end',
+    ':object\n[97, 81]\n',
+  ],
+  [
+    's="aé";i=Object.new;i.define_singleton_method(:to_int){s.replace("😀z");1};r=Object.new;r.define_singleton_method(:to_str){s.replace("😀z");"Q"};begin;v=(s[/(?<x>é)/,0]=r);p(v.is_a?(String) ? v.bytes : :object);p s.bytes;rescue=>e;p e.class,e.message;end',
+    ':object\n[240, 81, 128, 122]\n',
+  ],
+  [
+    's="aé";i=Object.new;i.define_singleton_method(:to_int){s.replace("abc");1};r=Object.new;r.define_singleton_method(:to_str){s.replace("abc");"Q"};begin;v=s.slice!(/(?<x>é)/,0);p(v.is_a?(String) ? v.bytes : :object);p s.bytes;rescue=>e;p e.class,e.message;end',
+    '[195, 169]\n[97]\n',
+  ],
+  [
+    's="aé";i=Object.new;i.define_singleton_method(:to_int){s.replace("aé");1};r=Object.new;r.define_singleton_method(:to_str){s.replace("aé");"Q"};begin;v=s.slice!(/(?<x>é)/,0);p(v.is_a?(String) ? v.bytes : :object);p s.bytes;rescue=>e;p e.class,e.message;end',
+    '[195, 169]\n[97]\n',
+  ],
+  [
+    's="aé";i=Object.new;i.define_singleton_method(:to_int){s.replace("😀z");1};r=Object.new;r.define_singleton_method(:to_str){s.replace("😀z");"Q"};begin;v=s.slice!(/(?<x>é)/,0);p(v.is_a?(String) ? v.bytes : :object);p s.bytes;rescue=>e;p e.class,e.message;end',
+    '[195, 169]\n[97]\n',
+  ],
+  [
+    's="aé";i=Object.new;i.define_singleton_method(:to_int){s.replace("abc");1};r=Object.new;r.define_singleton_method(:to_str){s.replace("abc");"Q"};begin;v=(s[/(?<x>é)/,i]=r);p(v.is_a?(String) ? v.bytes : :object);p s.bytes;rescue=>e;p e.class,e.message;end',
+    ':object\n[97, 81]\n',
+  ],
+  [
+    's="aé";i=Object.new;i.define_singleton_method(:to_int){s.replace("aé");1};r=Object.new;r.define_singleton_method(:to_str){s.replace("aé");"Q"};begin;v=(s[/(?<x>é)/,i]=r);p(v.is_a?(String) ? v.bytes : :object);p s.bytes;rescue=>e;p e.class,e.message;end',
+    ':object\n[97, 81]\n',
+  ],
+  [
+    's="aé";i=Object.new;i.define_singleton_method(:to_int){s.replace("😀z");1};r=Object.new;r.define_singleton_method(:to_str){s.replace("😀z");"Q"};begin;v=(s[/(?<x>é)/,i]=r);p(v.is_a?(String) ? v.bytes : :object);p s.bytes;rescue=>e;p e.class,e.message;end',
+    ':object\n[240, 81, 128, 122]\n',
+  ],
+  [
+    's="aé";i=Object.new;i.define_singleton_method(:to_int){s.replace("abc");1};r=Object.new;r.define_singleton_method(:to_str){s.replace("abc");"Q"};begin;v=s.slice!(/(?<x>é)/,i);p(v.is_a?(String) ? v.bytes : :object);p s.bytes;rescue=>e;p e.class,e.message;end',
+    '[98, 99]\n[97]\n',
+  ],
+  [
+    's="aé";i=Object.new;i.define_singleton_method(:to_int){s.replace("aé");1};r=Object.new;r.define_singleton_method(:to_str){s.replace("aé");"Q"};begin;v=s.slice!(/(?<x>é)/,i);p(v.is_a?(String) ? v.bytes : :object);p s.bytes;rescue=>e;p e.class,e.message;end',
+    '[195, 169]\n[97]\n',
+  ],
+  [
+    's="aé";i=Object.new;i.define_singleton_method(:to_int){s.replace("😀z");1};r=Object.new;r.define_singleton_method(:to_str){s.replace("😀z");"Q"};begin;v=s.slice!(/(?<x>é)/,i);p(v.is_a?(String) ? v.bytes : :object);p s.bytes;rescue=>e;p e.class,e.message;end',
+    '[159, 152]\n[240, 128, 122]\n',
+  ],
+  [
+    's="aé";i=Object.new;i.define_singleton_method(:to_int){s.replace("abc");1};r=Object.new;r.define_singleton_method(:to_str){s.replace("abc");"Q"};begin;v=(s[/(?<x>é)/,-1]=r);p(v.is_a?(String) ? v.bytes : :object);p s.bytes;rescue=>e;p e.class,e.message;end',
+    ':object\n[97, 81]\n',
+  ],
+  [
+    's="aé";i=Object.new;i.define_singleton_method(:to_int){s.replace("aé");1};r=Object.new;r.define_singleton_method(:to_str){s.replace("aé");"Q"};begin;v=(s[/(?<x>é)/,-1]=r);p(v.is_a?(String) ? v.bytes : :object);p s.bytes;rescue=>e;p e.class,e.message;end',
+    ':object\n[97, 81]\n',
+  ],
+  [
+    's="aé";i=Object.new;i.define_singleton_method(:to_int){s.replace("😀z");1};r=Object.new;r.define_singleton_method(:to_str){s.replace("😀z");"Q"};begin;v=(s[/(?<x>é)/,-1]=r);p(v.is_a?(String) ? v.bytes : :object);p s.bytes;rescue=>e;p e.class,e.message;end',
+    ':object\n[240, 81, 128, 122]\n',
+  ],
+  [
+    's="aé";i=Object.new;i.define_singleton_method(:to_int){s.replace("abc");1};r=Object.new;r.define_singleton_method(:to_str){s.replace("abc");"Q"};begin;v=s.slice!(/(?<x>é)/,-1);p(v.is_a?(String) ? v.bytes : :object);p s.bytes;rescue=>e;p e.class,e.message;end',
+    '[195, 169]\n[97]\n',
+  ],
+  [
+    's="aé";i=Object.new;i.define_singleton_method(:to_int){s.replace("aé");1};r=Object.new;r.define_singleton_method(:to_str){s.replace("aé");"Q"};begin;v=s.slice!(/(?<x>é)/,-1);p(v.is_a?(String) ? v.bytes : :object);p s.bytes;rescue=>e;p e.class,e.message;end',
+    '[195, 169]\n[97]\n',
+  ],
+  [
+    's="aé";i=Object.new;i.define_singleton_method(:to_int){s.replace("😀z");1};r=Object.new;r.define_singleton_method(:to_str){s.replace("😀z");"Q"};begin;v=s.slice!(/(?<x>é)/,-1);p(v.is_a?(String) ? v.bytes : :object);p s.bytes;rescue=>e;p e.class,e.message;end',
+    '[195, 169]\n[97]\n',
+  ],
+  [
+    's="aé";i=Object.new;i.define_singleton_method(:to_int){s.replace("abc");1};r=Object.new;r.define_singleton_method(:to_str){s.replace("abc");"Q"};begin;v=(s[/(?<x>é)/,:x]=r);p(v.is_a?(String) ? v.bytes : :object);p s.bytes;rescue=>e;p e.class,e.message;end',
+    ':object\n[97, 81]\n',
+  ],
+  [
+    's="aé";i=Object.new;i.define_singleton_method(:to_int){s.replace("aé");1};r=Object.new;r.define_singleton_method(:to_str){s.replace("aé");"Q"};begin;v=(s[/(?<x>é)/,:x]=r);p(v.is_a?(String) ? v.bytes : :object);p s.bytes;rescue=>e;p e.class,e.message;end',
+    ':object\n[97, 81]\n',
+  ],
+  [
+    's="aé";i=Object.new;i.define_singleton_method(:to_int){s.replace("😀z");1};r=Object.new;r.define_singleton_method(:to_str){s.replace("😀z");"Q"};begin;v=(s[/(?<x>é)/,:x]=r);p(v.is_a?(String) ? v.bytes : :object);p s.bytes;rescue=>e;p e.class,e.message;end',
+    ':object\n[240, 81, 128, 122]\n',
+  ],
+  [
+    's="aé";i=Object.new;i.define_singleton_method(:to_int){s.replace("abc");1};r=Object.new;r.define_singleton_method(:to_str){s.replace("abc");"Q"};begin;v=s.slice!(/(?<x>é)/,:x);p(v.is_a?(String) ? v.bytes : :object);p s.bytes;rescue=>e;p e.class,e.message;end',
+    '[195, 169]\n[97]\n',
+  ],
+  [
+    's="aé";i=Object.new;i.define_singleton_method(:to_int){s.replace("aé");1};r=Object.new;r.define_singleton_method(:to_str){s.replace("aé");"Q"};begin;v=s.slice!(/(?<x>é)/,:x);p(v.is_a?(String) ? v.bytes : :object);p s.bytes;rescue=>e;p e.class,e.message;end',
+    '[195, 169]\n[97]\n',
+  ],
+  [
+    's="aé";i=Object.new;i.define_singleton_method(:to_int){s.replace("😀z");1};r=Object.new;r.define_singleton_method(:to_str){s.replace("😀z");"Q"};begin;v=s.slice!(/(?<x>é)/,:x);p(v.is_a?(String) ? v.bytes : :object);p s.bytes;rescue=>e;p e.class,e.message;end',
+    '[195, 169]\n[97]\n',
+  ],
+  [
+    's="aé";i=Object.new;i.define_singleton_method(:to_int){s.replace("abc");1};r=Object.new;r.define_singleton_method(:to_str){s.replace("abc");"Q"};begin;v=(s[/(?<x>é)/,"x"]=r);p(v.is_a?(String) ? v.bytes : :object);p s.bytes;rescue=>e;p e.class,e.message;end',
+    ':object\n[97, 81]\n',
+  ],
+  [
+    's="aé";i=Object.new;i.define_singleton_method(:to_int){s.replace("aé");1};r=Object.new;r.define_singleton_method(:to_str){s.replace("aé");"Q"};begin;v=(s[/(?<x>é)/,"x"]=r);p(v.is_a?(String) ? v.bytes : :object);p s.bytes;rescue=>e;p e.class,e.message;end',
+    ':object\n[97, 81]\n',
+  ],
+  [
+    's="aé";i=Object.new;i.define_singleton_method(:to_int){s.replace("😀z");1};r=Object.new;r.define_singleton_method(:to_str){s.replace("😀z");"Q"};begin;v=(s[/(?<x>é)/,"x"]=r);p(v.is_a?(String) ? v.bytes : :object);p s.bytes;rescue=>e;p e.class,e.message;end',
+    ':object\n[240, 81, 128, 122]\n',
+  ],
+  [
+    's="aé";i=Object.new;i.define_singleton_method(:to_int){s.replace("abc");1};r=Object.new;r.define_singleton_method(:to_str){s.replace("abc");"Q"};begin;v=s.slice!(/(?<x>é)/,"x");p(v.is_a?(String) ? v.bytes : :object);p s.bytes;rescue=>e;p e.class,e.message;end',
+    '[195, 169]\n[97]\n',
+  ],
+  [
+    's="aé";i=Object.new;i.define_singleton_method(:to_int){s.replace("aé");1};r=Object.new;r.define_singleton_method(:to_str){s.replace("aé");"Q"};begin;v=s.slice!(/(?<x>é)/,"x");p(v.is_a?(String) ? v.bytes : :object);p s.bytes;rescue=>e;p e.class,e.message;end',
+    '[195, 169]\n[97]\n',
+  ],
+  [
+    's="aé";i=Object.new;i.define_singleton_method(:to_int){s.replace("😀z");1};r=Object.new;r.define_singleton_method(:to_str){s.replace("😀z");"Q"};begin;v=s.slice!(/(?<x>é)/,"x");p(v.is_a?(String) ? v.bytes : :object);p s.bytes;rescue=>e;p e.class,e.message;end',
+    '[195, 169]\n[97]\n',
+  ],
+  [
+    'a=Object.const_set("A",Class.new);a.define_method(:x){1};b=Object.const_set("B",Class.new(a));m=b.instance_method(:x);s=m.inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 85, 110, 98, 111, 117, 110, 100, 77, 101, 116, 104, 111, 100, 58, 32, 65, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'a=Object.const_set("A",Class.new);a.define_method(:x){1};b=Object.const_set("B",Class.new(a));m=b.new.method(:x);s=m.inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 65, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'a=Object.const_set("A",Class.new);a.define_method(:x){1};b=Object.const_set("Bé",Class.new(a));m=b.instance_method(:x);s=m.inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 85, 110, 98, 111, 117, 110, 100, 77, 101, 116, 104, 111, 100, 58, 32, 65, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'a=Object.const_set("A",Class.new);a.define_method(:x){1};b=Object.const_set("Bé",Class.new(a));m=b.new.method(:x);s=m.inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 195, 169, 40, 65, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:UTF-8>\ntrue\n',
+  ],
+  [
+    'a=Object.const_set("A",Class.new);a.define_method(:x){1};b=Object.const_set("B"+255.chr,Class.new(a));m=b.instance_method(:x);s=m.inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 85, 110, 98, 111, 117, 110, 100, 77, 101, 116, 104, 111, 100, 58, 32, 65, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'a=Object.const_set("A",Class.new);a.define_method(:x){1};b=Object.const_set("B"+255.chr,Class.new(a));m=b.new.method(:x);s=m.inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 92, 120, 70, 70, 40, 65, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'a=Object.const_set("Aé",Class.new);a.define_method(:x){1};b=Object.const_set("B",Class.new(a));m=b.instance_method(:x);s=m.inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 85, 110, 98, 111, 117, 110, 100, 77, 101, 116, 104, 111, 100, 58, 32, 65, 195, 169, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:UTF-8>\ntrue\n',
+  ],
+  [
+    'a=Object.const_set("Aé",Class.new);a.define_method(:x){1};b=Object.const_set("B",Class.new(a));m=b.new.method(:x);s=m.inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 65, 195, 169, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:UTF-8>\ntrue\n',
+  ],
+  [
+    'a=Object.const_set("Aé",Class.new);a.define_method(:x){1};b=Object.const_set("Bé",Class.new(a));m=b.instance_method(:x);s=m.inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 85, 110, 98, 111, 117, 110, 100, 77, 101, 116, 104, 111, 100, 58, 32, 65, 195, 169, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:UTF-8>\ntrue\n',
+  ],
+  [
+    'a=Object.const_set("Aé",Class.new);a.define_method(:x){1};b=Object.const_set("Bé",Class.new(a));m=b.new.method(:x);s=m.inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 195, 169, 40, 65, 195, 169, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:UTF-8>\ntrue\n',
+  ],
+  [
+    'a=Object.const_set("Aé",Class.new);a.define_method(:x){1};b=Object.const_set("B"+255.chr,Class.new(a));m=b.instance_method(:x);s=m.inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 85, 110, 98, 111, 117, 110, 100, 77, 101, 116, 104, 111, 100, 58, 32, 65, 195, 169, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:UTF-8>\ntrue\n',
+  ],
+  [
+    'a=Object.const_set("Aé",Class.new);a.define_method(:x){1};b=Object.const_set("B"+255.chr,Class.new(a));m=b.new.method(:x);s=m.inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 92, 120, 70, 70, 40, 65, 195, 169, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:UTF-8>\ntrue\n',
+  ],
+  [
+    'a=Object.const_set("A"+233.chr,Class.new);a.define_method(:x){1};b=Object.const_set("B",Class.new(a));m=b.instance_method(:x);s=m.inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 85, 110, 98, 111, 117, 110, 100, 77, 101, 116, 104, 111, 100, 58, 32, 65, 92, 120, 69, 57, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'a=Object.const_set("A"+233.chr,Class.new);a.define_method(:x){1};b=Object.const_set("B",Class.new(a));m=b.new.method(:x);s=m.inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 65, 92, 120, 69, 57, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'a=Object.const_set("A"+233.chr,Class.new);a.define_method(:x){1};b=Object.const_set("Bé",Class.new(a));m=b.instance_method(:x);s=m.inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 85, 110, 98, 111, 117, 110, 100, 77, 101, 116, 104, 111, 100, 58, 32, 65, 92, 120, 69, 57, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'a=Object.const_set("A"+233.chr,Class.new);a.define_method(:x){1};b=Object.const_set("Bé",Class.new(a));m=b.new.method(:x);s=m.inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 195, 169, 40, 65, 92, 120, 69, 57, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:UTF-8>\ntrue\n',
+  ],
+  [
+    'a=Object.const_set("A"+233.chr,Class.new);a.define_method(:x){1};b=Object.const_set("B"+255.chr,Class.new(a));m=b.instance_method(:x);s=m.inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 85, 110, 98, 111, 117, 110, 100, 77, 101, 116, 104, 111, 100, 58, 32, 65, 92, 120, 69, 57, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'a=Object.const_set("A"+233.chr,Class.new);a.define_method(:x){1};b=Object.const_set("B"+255.chr,Class.new(a));m=b.new.method(:x);s=m.inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 92, 120, 70, 70, 40, 65, 92, 120, 69, 57, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+] as const;
+
+test.each(nativeCursorAndByteEditCases)(
+  'Cursor-local recursion, encoded method owners and byte edits preserve Ruby output: %s',
+  (source, stdout) => {
+    expect(run(source)).toMatchObject({ kind: 'executed', stdout, uncaughtException: undefined });
+  }
+);
+
+const nativeEncodedNamespaceMethodCases = [
+  [
+    'a=Object.const_set("A",Class.new);begin;b=a.const_set("B",Class.new);rescue=>e;p e.class,e.message;exit;end;b.define_method(:x){1};s=b.instance_method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 85, 110, 98, 111, 117, 110, 100, 77, 101, 116, 104, 111, 100, 58, 32, 65, 58, 58, 66, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'a=Object.const_set("A",Class.new);begin;b=a.const_set("Bé",Class.new);rescue=>e;p e.class,e.message;exit;end;b.define_method(:x){1};s=b.instance_method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 85, 110, 98, 111, 117, 110, 100, 77, 101, 116, 104, 111, 100, 58, 32, 65, 58, 58, 66, 195, 169, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:UTF-8>\ntrue\n',
+  ],
+  [
+    'a=Object.const_set("A",Class.new);begin;b=a.const_set("B"+255.chr,Class.new);rescue=>e;p e.class,e.message;exit;end;b.define_method(:x){1};s=b.instance_method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 85, 110, 98, 111, 117, 110, 100, 77, 101, 116, 104, 111, 100, 58, 32, 65, 58, 58, 66, 92, 120, 70, 70, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'a=Object.const_set("Aé",Class.new);begin;b=a.const_set("B",Class.new);rescue=>e;p e.class,e.message;exit;end;b.define_method(:x){1};s=b.instance_method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 85, 110, 98, 111, 117, 110, 100, 77, 101, 116, 104, 111, 100, 58, 32, 65, 195, 169, 58, 58, 66, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:UTF-8>\ntrue\n',
+  ],
+  [
+    'a=Object.const_set("Aé",Class.new);begin;b=a.const_set("Bé",Class.new);rescue=>e;p e.class,e.message;exit;end;b.define_method(:x){1};s=b.instance_method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 85, 110, 98, 111, 117, 110, 100, 77, 101, 116, 104, 111, 100, 58, 32, 65, 195, 169, 58, 58, 66, 195, 169, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:UTF-8>\ntrue\n',
+  ],
+  [
+    'a=Object.const_set("Aé",Class.new);begin;b=a.const_set("B"+255.chr,Class.new);rescue=>e;p e.class,e.message;exit;end;b.define_method(:x){1};s=b.instance_method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    'Encoding::CompatibilityError\n"incompatible character encodings: UTF-8 and BINARY (ASCII-8BIT)"\n',
+  ],
+  [
+    'a=Object.const_set("A"+233.chr,Class.new);begin;b=a.const_set("B",Class.new);rescue=>e;p e.class,e.message;exit;end;b.define_method(:x){1};s=b.instance_method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 85, 110, 98, 111, 117, 110, 100, 77, 101, 116, 104, 111, 100, 58, 32, 65, 92, 120, 69, 57, 58, 58, 66, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'a=Object.const_set("A"+233.chr,Class.new);begin;b=a.const_set("Bé",Class.new);rescue=>e;p e.class,e.message;exit;end;b.define_method(:x){1};s=b.instance_method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    'Encoding::CompatibilityError\n"incompatible character encodings: BINARY (ASCII-8BIT) and UTF-8"\n',
+  ],
+  [
+    'a=Object.const_set("A"+233.chr,Class.new);begin;b=a.const_set("B"+255.chr,Class.new);rescue=>e;p e.class,e.message;exit;end;b.define_method(:x){1};s=b.instance_method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 85, 110, 98, 111, 117, 110, 100, 77, 101, 116, 104, 111, 100, 58, 32, 65, 92, 120, 69, 57, 58, 58, 66, 92, 120, 70, 70, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+] as const;
+
+test.each(nativeEncodedNamespaceMethodCases)(
+  'Encoded namespace Method owners preserve names and compatibility errors: %s',
+  (source, stdout) => {
+    expect(run(source)).toMatchObject({ kind: 'executed', stdout, uncaughtException: undefined });
+  }
+);
+
+test.each(['assign', 'index', 'slice'])(
+  'Regexp %s rejects edits extending beyond the live receiver bytes',
+  (operation) => {
+    const source = `s="a😀z";i=Object.new;i.define_singleton_method(:to_int){s.replace("abc");1};r=Object.new;r.define_singleton_method(:to_str){s.replace("abc");"Q"};begin;${
+      operation === 'assign' ? 's[/(😀)/]=r' : operation === 'index' ? 's[/(😀)/,i]="Q"' : 's.slice!(/(😀)/,i)'
+    };rescue=>e;p e.class,e.message;end;p s.bytes`;
+    expect(run(source)).toMatchObject({
+      kind: 'executed',
+      stdout: 'RuntimeError\n"string modified"\n[97, 98, 99]\n',
+      uncaughtException: undefined,
+    });
+  }
+);

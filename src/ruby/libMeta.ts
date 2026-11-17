@@ -1,7 +1,7 @@
 // code-gauge-allow-file fileNcss 564 -- Reflection and encoded constant lookup share representation and state; splitting registration by size would scatter that concern.
 import type { Params } from './ast';
 import { prependHierarchy } from './classHierarchy';
-import { addressOf, className, inspect, tryImplicitConversion } from './conversions';
+import { addressOf, className, inspect, inspectValue, tryImplicitConversion } from './conversions';
 import { def, findCoreMethod, isCoreMethod, sdef, sundef } from './define';
 import { joinEncodedStrings } from './encodedStringJoin';
 import { argumentError, frozenError, nameError, rubyError, typeError, undefinedMethodError } from './errors';
@@ -27,7 +27,7 @@ import {
   setClassVariable,
 } from './interp';
 import { procArity } from './libObject';
-import { inspectStringEncoding, symbolFromString, symbolString } from './libString';
+import { identifierKeyString, inspectStringEncoding, symbolFromString, symbolString } from './libString';
 import { nativeOwners } from './nativeOwners';
 import { type NativeSignature, nativeSignatures } from './nativeSignatures';
 import {
@@ -327,7 +327,8 @@ function* methodDescription(self: RObject): Gen<RString> {
   const row = definition?.row ?? method.row;
   const kind = unbound ? 'UnboundMethod' : 'Method';
   return joinEncodedStrings([
-    str(`#<${kind}: ${owner}`),
+    methodDescriptionText(`#<${kind}: `),
+    owner,
     symbolString(sym(name)),
     ...(name === method.name ? [] : [str('('), symbolString(sym(method.name)), str(')')]),
     str(`(${signature})${row === undefined ? '' : ` main.rb:${row + 1}`}>`),
@@ -357,21 +358,41 @@ function methodParameterSignature(params: Params): string {
   return signature.join(', ');
 }
 
-function* methodOwnerPrefix(definingOwner: RClass, recv: Value, unbound: boolean): Gen<string> {
+function* methodOwnerPrefix(definingOwner: RClass, recv: Value, unbound: boolean): Gen<RString> {
   if (!definingOwner.isSingleton) {
-    const owner = className(definingOwner);
+    const owner = methodClassLabel(definingOwner);
     const receiver = unbound
       ? owner
-      : className(
+      : methodClassLabel(
           recv instanceof RClass && (!recv.isModule || recv.singletonExposed) ? classOf(recv) : realClassOf(recv)
         );
-    return `${receiver}${receiver === owner ? '' : `(${owner})`}#`;
+    return joinEncodedStrings([
+      receiver,
+      ...(receiver.s === owner.s ? [] : [methodDescriptionText('('), owner, methodDescriptionText(')')]),
+      methodDescriptionText('#'),
+    ]);
   }
   const attached = definingOwner.attached as Value;
-  const name = attached instanceof RClass ? className(attached) : yield* inspect(attached);
-  if (unbound) return `#<Class:${name}>#`;
-  const receiver = recv instanceof RClass ? className(recv) : yield* inspect(recv);
-  return recv === attached ? `${receiver}.` : `${receiver}(${name}).`;
+  const name = attached instanceof RClass ? methodClassLabel(attached) : yield* inspectValue(attached);
+  if (unbound) return joinEncodedStrings([methodDescriptionText('#<Class:'), name, methodDescriptionText('>#')]);
+  const receiver = recv instanceof RClass ? methodClassLabel(recv) : yield* inspectValue(recv);
+  return joinEncodedStrings([
+    receiver,
+    ...(recv === attached ? [] : [methodDescriptionText('('), name, methodDescriptionText(')')]),
+    methodDescriptionText('.'),
+  ]);
+}
+
+function methodClassLabel(cls: RClass): RString {
+  const name = identifierKeyString(className(cls));
+  if (!name.binary) return name;
+  return methodDescriptionText(inspectStringEncoding(name).slice(1, -1));
+}
+
+function methodDescriptionText(text: string): RString {
+  const value = str(text);
+  value.binary = true;
+  return value;
 }
 
 /** What `parameters` lists for parameters a program wrote: each one's kind and, when it has one, its name. */

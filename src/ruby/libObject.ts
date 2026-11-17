@@ -1201,7 +1201,7 @@ function* compareOrFail(self: Value, other: Value): Gen<number> {
 
 def('Comparable', '==', 1, function* (self, [other]) {
   if (self === other) return true;
-  const pairs = rt().comparablePairs;
+  const pairs = rt().recursionContext.comparablePairs;
   const active = pairs.get(self) ?? new Set<Value>();
   if (active.has(other)) throw new ComparableCycle(self, other);
   active.add(other);

@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 672 -- Ruby conversions, encoded inspection and internal equality share value representations; splitting by size would scatter those protocols.
+// code-gauge-allow-file fileNcss 674 -- Ruby conversions, encoded inspection and internal equality share value representations; splitting by size would scatter those protocols.
 import { ExecutionLimitError, LIMITS } from '../interpreter/limits';
 import { isCoreMethod } from './define';
 import { argumentError, implicitConversionError, rangeError, rubyError, typeError } from './errors';
@@ -353,10 +353,8 @@ function fastInspect(value: Value): string | undefined {
   return fastToS(value);
 }
 
-/** Inspects the objects a container holds, showing `[...]` for one that contains itself. */
-const inspecting = new Set<object>();
-
 export function* inspectArray(array: RArray): Gen<RString> {
+  const inspecting = rt().recursionContext.inspecting;
   if (inspecting.has(array)) return asciiString('[...]');
   inspecting.add(array);
   try {
@@ -375,6 +373,7 @@ export function* inspectArray(array: RArray): Gen<RString> {
 
 // code-gauge-allow functionCognitiveComplexity 16 -- The ordered cases for Ruby value conversion and encoded inspection share state; splitting them solely for the metric would hide their sequencing.
 export function* inspectHash(hash: RHash): Gen<RString> {
+  const inspecting = rt().recursionContext.inspecting;
   if (hash.map.size === 0) return asciiString('{}');
   if (inspecting.has(hash)) return asciiString('{...}');
   inspecting.add(hash);
@@ -470,6 +469,7 @@ export function* inspectRange(value: RRange): Gen<string> {
 }
 
 export function* inspectObject(object: RBasic): Gen<string> {
+  const inspecting = rt().recursionContext.inspecting;
   const name = realClassOf(object).name ?? anonymousClassName(realClassOf(object));
   const ivars = [...(object.ivars ?? [])];
   if (ivars.length === 0) return `#<${name}:${addressOf(object)}>`;

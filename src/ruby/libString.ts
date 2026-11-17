@@ -1831,8 +1831,7 @@ function splitString(text: string, separator: string, limit: number): string[] {
 def('String', 'partition', 1, function* (self: RString, [separator]) {
   regexpUnsupported(separator);
   const needle = yield* searchString(self, separator);
-  if (needle.rawBytes && !needle.binary)
-    return arr([textResult(self, self.s), textResult(self, ''), textResult(self, '')]);
+  if (!validStringEncoding(needle)) return arr([textResult(self, self.s), textResult(self, ''), textResult(self, '')]);
   const text = needle.s;
   const index = self.s.indexOf(text);
   if (index === -1) return arr([textResult(self, self.s), textResult(self, ''), textResult(self, '')]);
@@ -1841,8 +1840,7 @@ def('String', 'partition', 1, function* (self: RString, [separator]) {
 def('String', 'rpartition', 1, function* (self: RString, [separator]) {
   regexpUnsupported(separator);
   const needle = yield* searchString(self, separator);
-  if (needle.rawBytes && !needle.binary)
-    return arr([textResult(self, ''), textResult(self, ''), textResult(self, self.s)]);
+  if (!validStringEncoding(needle)) return arr([textResult(self, ''), textResult(self, ''), textResult(self, self.s)]);
   const text = needle.s;
   const index = self.s.lastIndexOf(text);
   if (index === -1) return arr([textResult(self, ''), textResult(self, ''), textResult(self, self.s)]);

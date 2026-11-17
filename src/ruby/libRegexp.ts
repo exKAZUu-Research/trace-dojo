@@ -17,7 +17,7 @@ import {
 } from './conversions';
 import { coreMethod, def, extend, sdef, sundef } from './define';
 import { checkStringEncodingCompatibility, EncodedStringBuilder, joinEncodedStrings } from './encodedStringJoin';
-import { argumentError, frozenError, indexError, rubyError, typeError } from './errors';
+import { argumentError, frozenError, indexError, rubyError, runtimeError, typeError } from './errors';
 import { validateKeywords } from './exceptionOption';
 import { digest, hashDefault, hashGet, hashSet, stringKeyEquals, stringKeyHash } from './hashes';
 import { callBlock, callMethod, type Gen, invoke } from './interp';
@@ -2027,32 +2027,42 @@ wrapFirst('slice!', function* (self, args) {
   const state = execAt(args[0] as RObject, self.s, 0, self);
   setLastMatch(state);
   if (!state) return NIL;
-  const range = args.length > 1 ? yield* sliceCaptureRange(state, args[1]) : state.groups[0];
+  const ranges = matchByteRanges(state);
+  const range = args.length > 1 ? yield* sliceCaptureRange(state, args[1], ranges) : ranges[0];
   if (range === 'unmatched') return sliceStringEncoding(self, 0, 0);
   if (!range) return NIL;
   const [from, to] = range;
-  const removed = sliceStringEncoding(self, from, to);
+  const bytes = regexpEditBytes(self, to);
+  const removed = stringFromBytes(bytes.subarray(from, to), self.binary, self.usAscii);
   const remainder = joinEncodedStrings(
-    [sliceStringEncoding(self, 0, from), sliceStringEncoding(self, to)],
+    [
+      stringFromBytes(bytes.subarray(0, from), self.binary, self.usAscii),
+      stringFromBytes(bytes.subarray(to), self.binary, self.usAscii),
+    ],
     LIMITS.maxStringLength
   );
   setBytes(self, stringBytes(remainder), remainder.binary);
   self.usAscii = remainder.usAscii;
   return removed;
 });
-function* sliceCaptureRange(state: MatchState, key: Value): Gen<readonly [number, number] | 'unmatched' | undefined> {
+function* sliceCaptureRange(
+  state: MatchState,
+  key: Value,
+  ranges: (readonly [number, number] | undefined)[]
+): Gen<readonly [number, number] | 'unmatched' | undefined> {
   if (key instanceof RString || key instanceof RSymbol) {
-    return state.groups[namedCaptureGroup(state, key)] ?? 'unmatched';
+    return ranges[namedCaptureGroup(state, key)] ?? 'unmatched';
   }
   let group = yield* toIndex(key);
   if (group < 0) group += state.groups.length;
-  return group >= 0 && group < state.groups.length ? (state.groups[group] ?? 'unmatched') : undefined;
+  return group >= 0 && group < state.groups.length ? (ranges[group] ?? 'unmatched') : undefined;
 }
 // code-gauge-allow functionCognitiveComplexity 16 -- Regexp assignment distinguishes numeric and named captures and preserves Ruby's unmatched-group errors.
 wrapFirst('[]=', function* (self, args) {
   const state = execAt(args[0] as RObject, self.s, 0, self);
   setLastMatch(state);
   if (!state) throw indexError('regexp not matched');
+  const ranges = matchByteRanges(state);
   let group = 0;
   if (args.length === 3) {
     const key = args[1];
@@ -2064,7 +2074,7 @@ wrapFirst('[]=', function* (self, args) {
         throw indexError(`index ${index} out of regexp`);
     }
   }
-  const range = state.groups[group];
+  const range = ranges[group];
   if (!range) throw indexError(`regexp group ${group} not matched`);
   const replacement = yield* toStrValue(args.at(-1) as Value);
   checkStringEncodingCompatibility(
@@ -2075,14 +2085,25 @@ wrapFirst('[]=', function* (self, args) {
   );
   if (self.frozen) throw frozenError(self, inspectStringEncoding(self));
   const [from, to] = range;
+  const bytes = regexpEditBytes(self, to);
   const result = joinEncodedStrings(
-    [sliceStringEncoding(self, 0, from), replacement, sliceStringEncoding(self, to)],
+    [
+      stringFromBytes(bytes.subarray(0, from), self.binary, self.usAscii),
+      replacement,
+      stringFromBytes(bytes.subarray(to), self.binary, self.usAscii),
+    ],
     LIMITS.maxStringLength
   );
   setBytes(self, stringBytes(result), result.binary);
   self.usAscii = result.usAscii;
   return args.at(-1) as Value;
 });
+function regexpEditBytes(self: RString, end: number): Uint8Array {
+  const bytes = stringBytes(self);
+  if (end > bytes.length) throw runtimeError('string modified');
+  return bytes;
+}
+
 wrapFirst(
   'start_with?',
   function* (self, args, block, previous, used) {
