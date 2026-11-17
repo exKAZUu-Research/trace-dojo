@@ -658,12 +658,15 @@ function forOfIterationSource(node: Node): IterationSource | undefined {
  */
 function coalescingIterationSource(operand: Node): IterationSource | undefined {
   const left = unwrapParentheses(field(operand, 'left'));
-  const right = unwrapParentheses(field(operand, 'right'));
+  // V8 tells a parenthesized right operand apart from a bare one.
+  const written = field(operand, 'right');
+  const right = unwrapParentheses(written);
   const text = `(${printed(left)} ?? ${printed(right)})`;
   if (right.type === 'call_expression') return { text, callee: text };
-  if (left.type === 'call_expression' && isLiteral(right)) return { text, unreadName: printed(left) };
+  if (left.type === 'call_expression' && isLiteral(right))
+    return { text, unreadName: calleeText(field(left, 'function')) };
   const named =
-    right.type === 'identifier' ||
+    written.type === 'identifier' ||
     (isLiteral(right) && (left.type === 'identifier' || isLiteral(left))) ||
     ((right.type === 'member_expression' || right.type === 'subscript_expression') &&
       isLiteral(left) &&
@@ -671,8 +674,9 @@ function coalescingIterationSource(operand: Node): IterationSource | undefined {
   return named ? { text } : undefined;
 }
 
-/** How V8 prints an operand of `??` in a loop's error, a call as its callee. */
+/** How V8 prints an operand of `??` in a loop's error, a call as its callee and an optional chain as a value. */
 function printed(side: Node): string {
+  if (isOptionalChain(side)) return '(intermediate value)';
   return side.type === 'call_expression' ? calleeText(field(side, 'function')) : calleeText(side);
 }
 

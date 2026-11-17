@@ -1543,6 +1543,16 @@ main();
 for (const n of [1234.123456789, -1234.5678, 0.0001234, 1e21, -0.12345, 1.123, 1234n]) console.dir({ n }, { numericSeparator: true });`,
   ],
   [
+    'for-of over nullish coalescing with parenthesized and optional-chain operands',
+    `const o = { a: 1, b: null, f: null }; let x = 5; let nul = null;
+function main() {
+  for (const run of [() => { for (const v of (x) ?? o.a); }, () => { for (const v of o.a ?? (x)); }, () => { for (const v of o.f?.() ?? x); }, () => { for (const v of o.f?.() ?? 3); }, () => { for (const v of (o.a) ?? x); }, () => { for (const v of o.a ?? o.b.c); }, () => { for (const v of (nul) ?? (x)); }]) {
+    try { run(); } catch (e) { console.log(e.message); }
+  }
+}
+main();`,
+  ],
+  [
     'for-of over every operand kind of nullish coalescing',
     `const o = { a: 1, b: null }; let x = 5; let n = null; const g = () => 1; const h = () => null;
 function main() {
