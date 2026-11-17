@@ -1,0 +1,12 @@
+type Json = string | number | JsonArray | JsonObject;
+interface JsonArray extends Array<Json> {}
+interface JsonObject { [k: string]: Json }
+const j: Json = { a: "x", b: [1] };
+interface Tree extends Array<Tree> {}
+const t: Tree = [[], [[]]];
+const s: string[] = ["a"];
+const j2: JsonArray = s;
+const j3: JsonArray = ["a"];
+interface Plain extends Array<number> {}
+const p: Plain = [1, 2];
+console.log(j, t, j2, j3, p);

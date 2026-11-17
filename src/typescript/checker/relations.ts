@@ -1,15 +1,18 @@
-// code-gauge-allow-file fileNcss 588 -- Decides assignability and comparability for every kind of type, as TypeScript's checker does in one place.
+// code-gauge-allow-file fileNcss 658 -- Decides assignability and comparability for every kind of type, as TypeScript's checker does in one place.
 import type { Checker } from './checker';
 import { isUnit } from './flow';
 import { childTypes, isGenericObjectOrIndexType } from './genericTypes';
 import { isNumericName } from './syntax';
 import {
   anonymousObject,
+  anyType,
   booleanType,
+  type ConditionalType,
   errorType,
   filterType,
   type IndexedAccessType,
   type IndexInfo,
+  type IntersectionType,
   isAnyLike,
   isIntrinsic,
   isSymbolName,
@@ -29,6 +32,7 @@ import {
 } from './types';
 
 type Relation = 'assignable' | 'comparable';
+type SignatureMode = 'signature' | 'strictCallback' | 'bivariantCallback';
 type KeyKind = 'string' | 'number' | 'symbol';
 
 const MAX_RELATION_DEPTH = 100;
@@ -43,6 +47,12 @@ const MAX_RECURSION_IDENTITY_COUNT = 3;
 export class Relations {
   /** Pairs assumed related while comparing their members, which recursive types revisit. */
   private readonly assumed = new Set<string>();
+  /**
+   * Pairs found related while others were assumed, in order, kept until the outermost comparison decides whether its
+   * assumptions held, as TypeScript's `maybeKeys` are.
+   */
+  private readonly provisional: string[] = [];
+  private readonly provisionalKeys = new Set<string>();
   private readonly cache = new Map<string, boolean>();
   /** The structured sources and targets being compared, outermost first. */
   private readonly sourceStack: Type[] = [];
@@ -71,10 +81,13 @@ export class Relations {
     const key = `${relation}-${state}:${source.id}:${target.id}`;
     const cached = this.cache.get(key);
     if (cached !== undefined) return cached;
-    if (this.assumed.has(key)) return true;
+    if (this.assumed.has(key) || this.provisionalKeys.has(key)) return true;
     if (isLeaf(source) && isLeaf(target)) return this.structuredRelated(source, target, relation, state);
     // TypeScript gives up here with "Excessive stack depth comparing types" (TS2321).
     if (this.sourceStack.length >= MAX_RELATION_DEPTH) return false;
+    // An outermost comparison that an exception ended left its provisional pairs undecided.
+    if (this.assumed.size === 0) this.dropProvisional(0);
+    const start = this.provisional.length;
     this.assumed.add(key);
     let result: boolean;
     try {
@@ -82,8 +95,27 @@ export class Relations {
     } finally {
       this.assumed.delete(key);
     }
-    if (this.assumed.size === 0) this.cache.set(key, result);
+    this.record(key, result, start);
     return result;
+  }
+
+  /** A failure holds whatever was assumed, but a success may rest on an assumption that has yet to fail. */
+  private record(key: string, result: boolean, start: number): void {
+    if (!result) {
+      this.cache.set(key, false);
+      this.dropProvisional(start);
+    } else if (this.assumed.size === 0) {
+      for (const provisional of this.provisional) this.cache.set(provisional, true);
+      this.dropProvisional(0);
+      this.cache.set(key, true);
+    } else {
+      this.provisional.push(key);
+      this.provisionalKeys.add(key);
+    }
+  }
+
+  private dropProvisional(start: number): void {
+    for (const key of this.provisional.splice(start)) this.provisionalKeys.delete(key);
   }
 
   /** Compares structured types on the comparison stacks, as TypeScript's `recursiveTypeRelatedTo` does. */
@@ -148,13 +180,8 @@ export class Relations {
     // TypeScript checks a weak intersection as a whole, so a member whose properties are all optional need not share one.
     if (t.kind === 'intersection')
       return t.types.every((member) => this.isRelated(s, member, relation, state | INTERSECTION_TARGET));
-    // TypeScript relates to a generic mapped type or a type parameter target before it turns to the source's constraint.
-    if (t.kind === 'object' && this.relatedToHomomorphicMapped(s, t, relation)) return true;
-    if (t.kind === 'typeParameter' && s.kind === 'object' && this.mappedRelatedToParameter(s, t, relation)) return true;
-    if (s.kind === 'intersection') {
-      if (s.types.some((member) => this.isRelated(member, t, relation, state | INTERSECTION_SOURCE))) return true;
-      return t.kind === 'object' && this.objectRelated(s, t, relation, state);
-    }
+    if (this.relatedToGenericTarget(s, t, relation)) return true;
+    if (s.kind === 'intersection') return this.intersectionSourceRelated(s, t, relation, state);
     if (s.kind === 'typeParameter') return this.typeParameterRelated(s, t, relation);
     if (s.kind === 'indexedAccess' || s.kind === 'keyof' || s.kind === 'conditional') {
       if (this.genericSourceRelated(s, t, relation)) return true;
@@ -164,6 +191,11 @@ export class Relations {
     if (t.kind === 'indexedAccess') return this.relatedToIndexedAccess(s, t, relation);
     if (t.kind === 'keyof' || t.kind === 'conditional') return false;
     return this.relatedToConcrete(s, t, relation, state);
+  }
+
+  private intersectionSourceRelated(s: IntersectionType, t: Type, relation: Relation, state: number): boolean {
+    if (s.types.some((member) => this.isRelated(member, t, relation, state | INTERSECTION_SOURCE))) return true;
+    return t.kind === 'object' && this.objectRelated(s, t, relation, state);
   }
 
   private typeParameterRelated(s: TypeParameter, t: Type, relation: Relation): boolean {
@@ -229,10 +261,25 @@ export class Relations {
 
   private genericSourceRelated(s: Type, t: Type, relation: Relation): boolean {
     if (t.kind === s.kind && this.sameGeneric(s, t)) return true;
+    if (s.kind === 'conditional' && t.kind === 'conditional' && this.conditionalsRelated(s, t, relation)) return true;
     // TypeScript tries a conditional type's branches before their constraints, so `Exclude<keyof T, K>` fits `keyof T`.
     if (s.kind === 'conditional' && this.isRelated(unionOf([s.trueType, s.falseType]), t, relation)) return true;
     const constraint = this.c.baseConstraint(s);
     return constraint !== s && this.isRelated(constraint, t, relation);
+  }
+
+  /**
+   * As TypeScript relates two conditional types: their extends types are identical once the source's `infer` type
+   * parameters are inferred from the target's, either check type is related to the other, and so are their branches.
+   */
+  private conditionalsRelated(s: ConditionalType, t: ConditionalType, relation: Relation): boolean {
+    const mapper = this.c.inference.inferFromTypes(s.inferTypeParameters, t.extendsType, s.extendsType);
+    return (
+      this.identical(this.c.instantiate(s.extendsType, mapper), t.extendsType) &&
+      (this.isRelated(s.checkType, t.checkType, relation) || this.isRelated(t.checkType, s.checkType, relation)) &&
+      this.isRelated(this.c.instantiate(s.trueType, mapper), t.trueType, relation) &&
+      this.isRelated(s.falseType, t.falseType, relation)
+    );
   }
 
   private unionSourceRelated(s: UnionType, t: Type, relation: Relation, state: number): boolean {
@@ -316,6 +363,12 @@ export class Relations {
       return this.isEmptyObjectType(t) || this.objectRelated(s, t, relation, state);
     }
     return s.kind === 'object' && this.objectRelated(s, t, relation, state);
+  }
+
+  /** TypeScript relates to a generic mapped type or a type parameter target before it turns to the source's constraint. */
+  private relatedToGenericTarget(s: Type, t: Type, relation: Relation): boolean {
+    if (t.kind === 'object') return this.relatedToHomomorphicMapped(s, t, relation);
+    return t.kind === 'typeParameter' && s.kind === 'object' && this.mappedRelatedToParameter(s, t, relation);
   }
 
   /**
@@ -722,13 +775,31 @@ export class Relations {
   }
 
   private signaturesRelated(sources: Signature[], targets: Signature[], relation: Relation): boolean {
-    for (const target of targets) {
-      if (!sources.some((source) => this.signatureRelated(source, target, relation))) return false;
+    if (sources.length === 1 && targets.length === 1) return this.signatureRelated(sources[0], targets[0], relation);
+    // TypeScript compares overloads with their type parameters erased to `any`.
+    const erasedSources = sources.map((source) => this.erased(source));
+    for (const target of targets.map((target) => this.erased(target))) {
+      if (!erasedSources.some((source) => this.signatureRelated(source, target, relation))) return false;
     }
     return true;
   }
 
-  signatureRelated(source: Signature, target: Signature, relation: Relation): boolean {
+  private erased(signature: Signature): Signature {
+    if (signature.typeParameters.length === 0) return signature;
+    const mapper = new Map(signature.typeParameters.map((parameter) => [parameter.id, anyType as Type]));
+    return { ...this.c.instantiateSignature(signature, mapper), typeParameters: [] };
+  }
+
+  /**
+   * `mode` tells a signature from a callback parameter's, whose parameters TypeScript compares only contravariantly
+   * and, for a method's callback, whose return types either way.
+   */
+  private signatureRelated(
+    source: Signature,
+    target: Signature,
+    relation: Relation,
+    mode: SignatureMode = 'signature'
+  ): boolean {
     let sourceSignature = source;
     if (source.typeParameters.length > 0) {
       // A generic source is instantiated to fit the target, as the target's parameters infer its type arguments.
@@ -742,46 +813,88 @@ export class Relations {
       ? Number.POSITIVE_INFINITY
       : target.parameters.length;
     if (sourceRequired > targetCount) return false;
-    const bivariant = source.isMethod === true || target.isMethod === true;
+    const bivariant = mode === 'signature' && (source.isMethod === true || target.isMethod === true);
     if (
       !this.thisTypesRelated(sourceSignature, target, relation, bivariant) ||
-      !this.parametersRelated(sourceSignature, target, relation, bivariant)
+      !this.parametersRelated(sourceSignature, target, relation, bivariant, mode !== 'signature')
     )
       return false;
+    return this.returnsRelated(sourceSignature, target, relation, mode);
+  }
+
+  private returnsRelated(source: Signature, target: Signature, relation: Relation, mode: SignatureMode): boolean {
     const targetReturn = target.returnType();
     if (isIntrinsic(targetReturn, 'void')) return true;
-    const sourceReturn = sourceSignature.returnType();
-    if (target.predicate && !sourceSignature.predicate) return false;
-    if (target.predicate && sourceSignature.predicate) {
+    const sourceReturn = source.returnType();
+    if (target.predicate && !source.predicate) return false;
+    if (target.predicate && source.predicate) {
       return (
-        target.predicate.index === sourceSignature.predicate.index &&
-        this.isRelated(sourceSignature.predicate.type, target.predicate.type, relation)
+        target.predicate.index === source.predicate.index &&
+        this.isRelated(source.predicate.type, target.predicate.type, relation)
       );
     }
-    return this.isRelated(sourceReturn, targetReturn, relation);
+    return (
+      (mode === 'bivariantCallback' && this.isRelated(targetReturn, sourceReturn, relation)) ||
+      this.isRelated(sourceReturn, targetReturn, relation)
+    );
   }
 
   /** Whether the target's `this` suits the source's, which only a source that declares a non-`void` one requires. */
   private thisTypesRelated(source: Signature, target: Signature, relation: Relation, bivariant: boolean): boolean {
     if (!source.thisType || isIntrinsic(source.thisType, 'void') || !target.thisType) return true;
-    return this.parameterRelated(source.thisType, target.thisType, relation, bivariant);
+    return this.parameterRelated(source.thisType, target.thisType, relation, bivariant, true);
   }
 
-  private parametersRelated(source: Signature, target: Signature, relation: Relation, bivariant: boolean): boolean {
+  private parametersRelated(
+    source: Signature,
+    target: Signature,
+    relation: Relation,
+    bivariant: boolean,
+    inCallback: boolean
+  ): boolean {
     const count = Math.max(source.parameters.length, target.parameters.length);
     for (let index = 0; index < count; index++) {
       const sourceType = this.parameterTypeAt(source, index);
       const targetType = this.parameterTypeAt(target, index);
-      if (sourceType && targetType && !this.parameterRelated(sourceType, targetType, relation, bivariant)) return false;
+      if (sourceType && targetType && !this.parameterRelated(sourceType, targetType, relation, bivariant, inCallback))
+        return false;
     }
     return true;
   }
 
-  private parameterRelated(sourceType: Type, targetType: Type, relation: Relation, bivariant: boolean): boolean {
+  private parameterRelated(
+    sourceType: Type,
+    targetType: Type,
+    relation: Relation,
+    bivariant: boolean,
+    inCallback: boolean
+  ): boolean {
+    const sourceCallback = inCallback ? undefined : this.callbackSignature(sourceType);
+    const targetCallback = sourceCallback && this.callbackSignature(targetType);
+    // TypeScript compares callback parameters, as `Array#reduce` takes, signature to signature.
+    if (sourceCallback && targetCallback && this.isNullable(sourceType) === this.isNullable(targetType))
+      return this.signatureRelated(
+        targetCallback,
+        sourceCallback,
+        relation,
+        bivariant ? 'bivariantCallback' : 'strictCallback'
+      );
     return (
       this.isRelated(targetType, sourceType, relation) ||
       (bivariant && this.isRelated(sourceType, targetType, relation))
     );
+  }
+
+  /** The only call signature of a function type without other members, as TypeScript's `getSingleCallSignature`. */
+  private callbackSignature(type: Type): Signature | undefined {
+    const object = this.removeNullish(type);
+    if (object.kind !== 'object') return undefined;
+    const { callSignatures, constructSignatures, properties, stringIndex, numberIndex, symbolIndex } =
+      this.c.structureOf(object);
+    if (callSignatures.length !== 1 || callSignatures[0].predicate) return undefined;
+    const hasOtherMembers =
+      constructSignatures.length > 0 || properties.size > 0 || stringIndex || numberIndex || symbolIndex;
+    return hasOtherMembers ? undefined : callSignatures[0];
   }
 
   private parameterTypeAt(signature: Signature, index: number): Type | undefined {
@@ -835,6 +948,11 @@ const covariantLibraryTypes = new Set([
   'Iterable',
   'IterableIterator',
   'Iterator',
+  'ArrayIterator',
+  'MapIterator',
+  'SetIterator',
+  'StringIterator',
+  'RegExpStringIterator',
   'ArrayLike',
   'ReadonlyMap',
   'ReadonlySet',

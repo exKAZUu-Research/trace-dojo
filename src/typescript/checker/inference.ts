@@ -512,6 +512,7 @@ export class TypeInference {
   /** A generic signature instantiated to compare with `target`, inferring from the target's parameters. */
   instantiateToFit(source: Signature, target: Signature): Signature {
     const run = newInferenceRun(source.typeParameters);
+    if (source.thisType && target.thisType) this.inferTypes(run, target.thisType, source.thisType, true);
     const count = Math.min(source.parameters.length, target.parameters.length);
     for (let index = 0; index < count; index++) {
       this.inferTypes(run, target.parameters[index].type, source.parameters[index].type, true);
@@ -523,6 +524,14 @@ export class TypeInference {
         parameter.id,
         inference.candidates.length > 0 ? unionOf(inference.candidates) : (parameter.constraint?.() ?? unknownType)
       );
+    }
+    // An inference that breaks its constraint gives way to it, as in TypeScript's `getInferredType`.
+    for (const parameter of source.typeParameters) {
+      const constraint = parameter.constraint?.();
+      if (!constraint) continue;
+      const instantiated = this.c.instantiate(constraint, mapper);
+      if (!this.c.relations.isAssignable(mapper.get(parameter.id) as Type, instantiated))
+        mapper.set(parameter.id, instantiated);
     }
     return { ...this.c.instantiateSignature(source, mapper), typeParameters: [] };
   }
