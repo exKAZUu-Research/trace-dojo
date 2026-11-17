@@ -16,6 +16,9 @@ export class RegexpCursor {
   readonly length: number;
   snapshot: RString;
   private bytes: Uint8Array;
+  private readonly sourceBinary: boolean;
+  private readonly sourceUsAscii: boolean;
+  private validated = true;
 
   constructor(
     private readonly regexp: RObject,
@@ -25,11 +28,17 @@ export class RegexpCursor {
     this.snapshot = matchSnapshot(subject, this.snapshotPolicy);
     this.bytes = stringBytes(this.snapshot);
     this.length = this.bytes.length;
+    this.sourceBinary = this.snapshot.binary;
+    this.sourceUsAscii = this.snapshot.usAscii;
     validateRegexpSubject(regexp, subject);
   }
 
   match(byte: number): MatchState | undefined {
     if (byte > this.length) return undefined;
+    if (!this.validated) {
+      validateRegexpSubject(this.regexp, this.snapshot);
+      this.validated = true;
+    }
     const unit = regexpByteUnit(this.snapshot, byte);
     if (regexpByteIndex(this.snapshot, unit) === byte)
       return execAt(this.regexp, this.snapshot.s, charIndex(this.snapshot.s, unit), this.subject, this.snapshot, true);
@@ -72,6 +81,21 @@ export class RegexpCursor {
     return this.nextCharacter(to, current ? this.snapshot : (state.snapshot ?? this.snapshot));
   }
 
+  nextSource(state: MatchState): number {
+    const [from, to] = this.range(state)!;
+    if (from !== to) return to;
+    if (to >= this.length || this.sourceBinary || this.sourceUsAscii || this.bytes[to] < 0x80) return to + 1;
+    const first = this.bytes[to];
+    const width = first < 0xe0 ? 2 : first < 0xf0 ? 3 : 4;
+    const segment = this.bytes.subarray(to, to + width);
+    try {
+      new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(segment, { stream: segment.length < width });
+      return to + segment.length;
+    } catch {
+      return to + 1;
+    }
+  }
+
   nextCharacter(to: number, source = this.snapshot): number {
     if (source.binary) return to + 1;
     const unit = regexpByteUnit(source, to);
@@ -92,9 +116,13 @@ export class RegexpCursor {
       return;
     const bytes = stringBytes(subject);
     if (bytes.length !== this.length) throw rubyError(rt().c.RuntimeError, 'string modified');
-    validateRegexpSubject(this.regexp, subject);
+    this.validated = false;
     this.snapshot = matchSnapshot(subject, this.snapshotPolicy);
     this.bytes = bytes;
+  }
+
+  sliceSource(from: number, to = this.length): RString {
+    return stringFromBytes(this.bytes.subarray(from, to), this.sourceBinary, this.sourceUsAscii);
   }
 
   slice(from: number, to = this.length): RString {

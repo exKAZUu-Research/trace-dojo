@@ -1749,21 +1749,22 @@ function* substituteRegexp(
         stringBytes(piece).every((byte) => byte < 0x80)
       );
     }
-    if (position < from) output.append(cursor.slice(position, from));
+    if (position < from) output.append(cursor.sliceSource(position, from));
     output.append(piece);
     position = to;
     lastSearch = search;
     last = state;
-    search = cursor.next(state, true);
+    if (global && from === to && to >= cursor.length) break;
+    search = cursor.nextSource(state);
     if (global && from === to && to < cursor.length) {
-      output.append(cursor.slice(to, search));
+      output.append(cursor.sliceSource(to, search));
       position = search;
     }
     state = global ? cursor.match(search) : undefined;
     if (global) setLastMatch(state);
   }
   if (!global && ((!block && !(replacement instanceof RHash)) || !last)) setLastMatch(last);
-  output.append(cursor.slice(position));
+  output.append(cursor.sliceSource(position));
   if (global) setLastMatch(lastSearch === undefined ? undefined : cursor.match(lastSearch));
   return { value: output.finish(), matched: last !== undefined };
 }
