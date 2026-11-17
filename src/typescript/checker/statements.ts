@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 520 -- Follows the flow of control through each kind of statement.
+// code-gauge-allow-file fileNcss 522 -- Follows the flow of control through each kind of statement.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import type { Checker } from './checker';
@@ -308,10 +308,10 @@ export class StatementChecker {
   private patternDeclarator(declarator: TreeNode, pattern: TreeNode, isConst: boolean): void {
     const value = declarator.childForFieldName('value');
     const annotation = this.c.typeNodes.annotationType(declarator.childForFieldName('type'));
-    const valueType = value
-      ? this.c.expressions.check(value, annotation ?? this.c.patterns.impliedType(pattern))
-      : (annotation ?? anyType);
+    const implied = annotation ? undefined : this.c.patterns.impliedType(pattern);
+    const valueType = value ? this.c.expressions.check(value, annotation ?? implied) : (annotation ?? anyType);
     if (annotation && value) this.c.expressions.checkAssignable(pattern, valueType, annotation);
+    if (value && implied) this.c.patterns.checkInitializer(pattern, value, valueType, implied);
     const sourceType = annotation ?? this.c.literals.widenDeclared(valueType, false);
     if (isConst) this.c.patterns.correlatedSources.set(pattern.id, sourceType);
     this.c.patterns.bindPattern(

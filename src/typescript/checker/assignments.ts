@@ -33,10 +33,9 @@ export class AssignmentChecker {
       leftExpression.type === 'object' ||
       leftExpression.type === 'array'
     ) {
-      const valueType = this.c.expressions.check(
-        right,
-        this.c.silently(() => this.patternContext(leftExpression))
-      );
+      const implied = this.c.silently(() => this.patternContext(leftExpression));
+      const valueType = this.c.expressions.check(right, implied);
+      this.c.patterns.checkInitializer(leftExpression, right, valueType, implied);
       this.destructuringAssignment(leftExpression, valueType);
       return valueType;
     }

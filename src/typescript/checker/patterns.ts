@@ -56,7 +56,9 @@ export class BindingPatterns {
       case 'object_assignment_pattern': {
         const left = pattern.childForFieldName('left') as TreeNode;
         const right = pattern.childForFieldName('right') as TreeNode;
-        const defaultType = this.c.expressions.check(right, this.impliedType(left) ?? type);
+        const implied = this.impliedType(left);
+        const defaultType = this.c.expressions.check(right, implied ?? type);
+        this.checkInitializer(left, right, defaultType, implied);
         const withoutUndefined = this.c.relations.removeUndefined(type);
         if (annotated && !isIntrinsic(withoutUndefined, 'never')) {
           // A default that can be `undefined` keeps it; one typed `any` does not, as TypeScript's type facts have it.
@@ -88,6 +90,14 @@ export class BindingPatterns {
    * takes as its contextual type: an object literal there gains the properties the pattern gives defaults, as
    * `const { a = 1 } = {}` does. `leafType` gives the type of an element that is not a pattern, with or without default.
    */
+  /**
+   * Checks an initializer, which no annotation types, against the type its pattern implies, reporting the properties of
+   * its object literals that the pattern does not take apart, as TypeScript does.
+   */
+  checkInitializer(pattern: TreeNode, value: TreeNode, valueType: Type, implied = this.impliedType(pattern)): void {
+    if (implied) this.c.expressions.checkExcessProperties(value, valueType, implied);
+  }
+
   impliedType(pattern: TreeNode, leafType = (element: TreeNode) => this.bindingLeafType(element)): Type | undefined {
     switch (pattern.type) {
       case 'object':
@@ -112,7 +122,11 @@ export class BindingPatterns {
       const name = isPair
         ? propertyNameText(element.childForFieldName('key') as TreeNode)
         : (defaultedTarget(element) ?? element).text;
-      if (name === undefined || element.type === 'spread_element' || element.type === 'rest_pattern') continue;
+      // A rest element or a computed key takes properties the pattern does not name, which an initializer may have.
+      if (name === undefined || element.type === 'spread_element' || element.type === 'rest_pattern') {
+        structure.stringIndex = { type: anyType, readonly: false };
+        continue;
+      }
       structure.properties.set(
         name,
         simpleProperty(name, this.impliedElementType(value, leafType), { optional: !!defaultedTarget(value) })

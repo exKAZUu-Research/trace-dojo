@@ -541,8 +541,10 @@ export class FunctionChecker {
     const annotation = this.c.typeNodes.annotationType(parameter.childForFieldName('type'));
     if (!value) return;
     const pattern = parameter.childForFieldName('pattern') ?? parameter;
-    const valueType = this.c.expressions.check(value, annotation ?? this.c.patterns.impliedType(pattern));
+    const implied = annotation ? undefined : this.c.patterns.impliedType(pattern);
+    const valueType = this.c.expressions.check(value, annotation ?? implied);
     if (annotation) this.c.expressions.checkAssignable(pattern, valueType, annotation, value);
+    else this.c.patterns.checkInitializer(pattern, value, valueType, implied);
   }
 
   /** Reports a required parameter after one marked `?`, which callers could not omit. */
