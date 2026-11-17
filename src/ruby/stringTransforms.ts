@@ -1,10 +1,12 @@
+import { stringEncodingName } from './conversions';
 import { argumentError, rubyError } from './errors';
-import { NIL, type RNil, RString } from './objects';
+import { validStringEncoding } from './libEncoding';
+import { type RNil, RString } from './objects';
 import { rt } from './runtime';
 import { str, stringBytes, stringCharacters, stringFromBytes } from './values';
 
 // code-gauge-allow functionCognitiveComplexity 20 -- Each transform retains the charset-specific validation and output metadata of the same byte sequence.
-export function transformEncodedBytes(self: RString, name: string, separator: RString | RNil | undefined): RString {
+export function transformEncodedBytes(self: RString, name: string): RString {
   if (['upcase', 'downcase', 'capitalize', 'swapcase'].includes(name)) {
     if (!self.usAscii) throw argumentError('input string invalid');
     return stringFromBytes(asciiCaseBytes(stringBytes(self), name), false, true);
@@ -24,8 +26,7 @@ export function transformEncodedBytes(self: RString, name: string, separator: RS
   const bytes = stringBytes(self);
   if (name === 'succ' || name === 'next')
     return stringFromBytes(successorBytes(bytes, false, self.usAscii), false, self.usAscii);
-  if (name === 'chop') return chopInvalidBytes(self, bytes);
-  return chompInvalidBytes(bytes, separator, self.usAscii);
+  return chopInvalidBytes(self, bytes);
 }
 
 function asciiCaseBytes(bytes: Uint8Array, name: string): Uint8Array {
@@ -47,23 +48,33 @@ function chopInvalidBytes(self: RString, bytes: Uint8Array): RString {
   return stringFromBytes(bytes.slice(0, bytes.length - width), false, self.usAscii);
 }
 
-// code-gauge-allow functionCognitiveComplexity 21 -- Paragraph, newline and literal suffix modes share byte boundaries and preserve the source charset.
-function chompInvalidBytes(bytes: Uint8Array, separator: RString | RNil | undefined, usAscii: boolean): RString {
-  const result = (value: Uint8Array): RString => stringFromBytes(value, false, usAscii);
-  if (separator === NIL) return result(bytes);
-  const suffix = separator instanceof RString ? stringBytes(separator) : Uint8Array.of(10);
+// code-gauge-allow functionCognitiveComplexity 24 -- Native paragraph, newline, length and encoding stages share ordered suffix boundaries.
+export function chompBytes(self: RString, separator: RString | RNil): RString {
+  const bytes = stringBytes(self);
+  const result = (value: Uint8Array): RString => stringFromBytes(value, self.binary, self.usAscii);
+  if (!(separator instanceof RString) || bytes.length === 0) return result(bytes);
+  const suffix = stringBytes(separator);
   if (suffix.length === 0) {
     let end = bytes.length;
     while (end > 0 && bytes[end - 1] === 10) end -= end > 1 && bytes[end - 2] === 13 ? 2 : 1;
     return result(bytes.slice(0, end));
   }
+  if (suffix.length > bytes.length) return result(bytes);
   if (suffix.length === 1 && suffix[0] === 10) {
     if (bytes.at(-1) === 13) return result(bytes.slice(0, -1));
     if (bytes.at(-1) === 10) return result(bytes.slice(0, bytes.at(-2) === 13 ? -2 : -1));
   }
-  const matches =
-    bytes.length >= suffix.length &&
-    suffix.every((byte, index) => byte === bytes[bytes.length - suffix.length + index]);
+  if (
+    stringEncodingName(self) !== stringEncodingName(separator) &&
+    bytes.some((byte) => byte >= 0x80) &&
+    suffix.some((byte) => byte >= 0x80)
+  )
+    throw rubyError(
+      rt().c['Encoding::CompatibilityError'],
+      `incompatible character encodings: ${stringEncodingName(self)} and ${stringEncodingName(separator)}`
+    );
+  if (!validStringEncoding(separator)) return result(bytes);
+  const matches = suffix.every((byte, index) => byte === bytes[bytes.length - suffix.length + index]);
   return result(bytes.slice(0, matches ? bytes.length - suffix.length : bytes.length));
 }
 

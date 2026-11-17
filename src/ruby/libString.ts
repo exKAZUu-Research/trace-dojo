@@ -50,7 +50,7 @@ import {
 import { RegexpCursor } from './regexpCursor';
 import { regexpByteIndex, regexpByteUnit } from './regexpPositions';
 import { rt, UnsupportedFeatureError, whileHeld } from './runtime';
-import { successorBytes, transformEncodedBytes } from './stringTransforms';
+import { chompBytes, successorBytes, transformEncodedBytes } from './stringTransforms';
 import { codePointCharacters, isAsciiText } from './unicodeText';
 import {
   arr,
@@ -1544,61 +1544,58 @@ function rstrip(text: string): string {
   return text.slice(0, end);
 }
 
-function chomp(text: string, separator: string | undefined): string {
-  if (separator === undefined) return text;
-  if (separator === '\n') {
-    if (text.endsWith('\r\n')) return text.slice(0, -2);
-    if (text.endsWith('\n') || text.endsWith('\r')) return text.slice(0, -1);
-    return text;
-  }
-  if (separator === '') return text.replace(/(\r?\n)+$/, '');
-  return text.endsWith(separator) ? text.slice(0, -separator.length) : text;
-}
-
 function chop(text: string): string {
   if (text.endsWith('\r\n')) return text.slice(0, -2);
   const chars = charsOf(text);
   return chars.slice(0, -1).join('');
 }
 
-const TRANSFORMS: [string, (text: string, args: string[]) => string, number][] = [
-  ['upcase', (text) => text.toUpperCase(), 0],
-  ['downcase', (text) => text.toLowerCase(), 0],
-  ['capitalize', capitalize, 0],
-  ['swapcase', swapcase, 0],
-  ['strip', (text) => lstrip(rstrip(text)), 0],
-  ['lstrip', lstrip, 0],
-  ['rstrip', rstrip, 0],
-  ['chomp', (text, args) => chomp(text, args[0]), 1],
-  ['chop', chop, 0],
-  ['succ', succ, 0],
-  ['next', succ, 0],
+function* chompString(self: RString, args: Value[]): Gen<RString> {
+  const separator = args.length > 0 ? args[0] : (rt().globals.get('$/') ?? NIL);
+  return chompBytes(self, separator === NIL ? NIL : yield* stringArgValue(separator));
+}
+
+def('String', 'chomp', [0, 1], chompString);
+def('String', 'chomp!', [0, 1], function* (self: RString, args) {
+  modify(self);
+  const before = stringBytes(self);
+  if (before.length === 0) return NIL;
+  const result = yield* chompString(self, args);
+  const after = stringBytes(result);
+  if (after.length === before.length) return NIL;
+  setBytes(self, after);
+  return self;
+});
+
+const TRANSFORMS: [string, (text: string) => string][] = [
+  ['upcase', (text) => text.toUpperCase()],
+  ['downcase', (text) => text.toLowerCase()],
+  ['capitalize', capitalize],
+  ['swapcase', swapcase],
+  ['strip', (text) => lstrip(rstrip(text))],
+  ['lstrip', lstrip],
+  ['rstrip', rstrip],
+  ['chop', chop],
+  ['succ', succ],
+  ['next', succ],
 ];
 
-for (const [name, transform, maxArgs] of TRANSFORMS) {
-  def('String', name, [0, maxArgs], function* (self: RString, args) {
-    const selected = name === 'chomp' && args.length === 0 ? [rt().globals.get('$/') ?? NIL] : args;
+for (const [name, transform] of TRANSFORMS) {
+  def('String', name, 0, function* (self: RString) {
     if ((self.rawBytes || (self.usAscii && !isAsciiText(self.s))) && !self.binary)
-      return transformEncodedBytes(self, name, yield* invalidSeparator(name, selected));
+      return transformEncodedBytes(self, name);
     if (self.binary && (name === 'succ' || name === 'next'))
       return stringFromBytes(successorBytes(stringBytes(self), true), true);
-    if (name === 'chomp' && selected[0] === NIL) return copyStringEncoding(self);
-    const strings: string[] = [];
-    for (const arg of selected) strings.push(yield* stringArg(arg));
-    return self.binary
-      ? binaryTransform(self.s, name, strings, transform)
-      : textResult(self, transform(self.s, strings));
+    return self.binary ? binaryTransform(self.s, name, transform) : textResult(self, transform(self.s));
   });
   // code-gauge-allow functionCognitiveComplexity 22 -- The ordered cases for String encoding and mutation share state; splitting them solely for the metric would hide their sequencing.
-  // code-gauge-allow functionNcss 36 -- The ordered cases for String encoding and mutation share state; splitting them solely for the metric would hide their sequencing.
-  def('String', `${name}!`, [0, maxArgs], function* (self: RString, args) {
-    const selected = name === 'chomp' && args.length === 0 ? [rt().globals.get('$/') ?? NIL] : args;
+  def('String', `${name}!`, 0, function* (self: RString) {
     if (self.binary && (name === 'succ' || name === 'next')) {
       setBytes(self, successorBytes(stringBytes(self), true), true);
       return self;
     }
     if ((self.rawBytes || (self.usAscii && !isAsciiText(self.s))) && !self.binary) {
-      const result = transformEncodedBytes(self, name, yield* invalidSeparator(name, selected));
+      const result = transformEncodedBytes(self, name);
       const before = stringBytes(self);
       const after = stringBytes(result);
       if (
@@ -1613,14 +1610,8 @@ for (const [name, transform, maxArgs] of TRANSFORMS) {
       setBytes(self, after);
       return self;
     }
-    if (name === 'chomp' && selected[0] === NIL) {
-      modify(self);
-      return NIL;
-    }
-    const strings: string[] = [];
-    for (const arg of selected) strings.push(yield* stringArg(arg));
     if (self.binary) {
-      const result = binaryTransform(self.s, name, strings, transform);
+      const result = binaryTransform(self.s, name, transform);
       if (result.s === self.s && name !== 'succ' && name !== 'next') {
         modify(self);
         return NIL;
@@ -1628,7 +1619,7 @@ for (const [name, transform, maxArgs] of TRANSFORMS) {
       setBytes(self, stringBytes(result), true);
       return self;
     }
-    const result = transform(self.s, strings);
+    const result = transform(self.s);
     if (name === 'succ' || name === 'next') {
       setText(self, result);
       return self;
@@ -1643,12 +1634,7 @@ for (const [name, transform, maxArgs] of TRANSFORMS) {
 }
 
 // code-gauge-allow functionCognitiveComplexity 17 -- The ordered cases for String encoding and mutation share state; splitting them solely for the metric would hide their sequencing.
-function binaryTransform(
-  text: string,
-  name: string,
-  args: string[],
-  transform: (text: string, args: string[]) => string
-): RString {
+function binaryTransform(text: string, name: string, transform: (text: string) => string): RString {
   const result =
     name === 'upcase'
       ? asciiUpcase(text)
@@ -1658,7 +1644,7 @@ function binaryTransform(
           ? asciiUpcase(text.slice(0, 1)) + asciiDowncase(text.slice(1))
           : name === 'swapcase'
             ? text.replaceAll(/[a-zA-Z]/g, (char) => (char <= 'Z' ? char.toLowerCase() : char.toUpperCase()))
-            : transform(text, args);
+            : transform(text);
   const bytes = new Uint8Array(result.length);
   for (let index = 0; index < result.length; index++) bytes[index] = result.codePointAt(index) as number;
   return stringFromBytes(bytes, true);
@@ -1670,12 +1656,6 @@ function asciiUpcase(value: string): string {
 
 function asciiDowncase(value: string): string {
   return value.replaceAll(/[A-Z]/g, (char) => char.toLowerCase());
-}
-
-function* invalidSeparator(name: string, args: Value[]): Gen<RString | typeof NIL | undefined> {
-  if (name !== 'chomp' || args.length === 0) return undefined;
-  if (args[0] === NIL) return NIL;
-  return yield* stringArgValue(args[0]);
 }
 
 def('String', 'reverse', 0, (self: RString) =>
