@@ -5,6 +5,7 @@ import type { State } from './flow';
 import { defaultedTarget } from './patterns';
 import { printedPropertyName } from './print';
 import type { Sym } from './scopes';
+import { nameSuggestionHint } from './spelling';
 import { arrayPatternElements, named, skipParentheses } from './syntax';
 import {
   anyType,
@@ -316,7 +317,10 @@ export class AssignmentChecker {
   private variableTargetType(expression: TreeNode, compound: boolean): Type {
     const symbol = this.c.scopeOf(expression).lookupValue(expression.text);
     if (!symbol) {
-      this.c.error(expression, `名前 ${expression.text} が見つかりません。`);
+      this.c.error(
+        expression,
+        `名前 ${expression.text} が見つかりません。${nameSuggestionHint(this.c.scopeOf(expression), expression.text, 'value')}`
+      );
       return errorType;
     }
     // A library constant is declared with the kind `declared`, its entry recording `const`.

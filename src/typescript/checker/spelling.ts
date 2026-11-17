@@ -1,3 +1,5 @@
+import type { Scope } from './scopes';
+
 /**
  * The candidate TypeScript suggests for a misspelled name, as its `getSpellingSuggestion` picks one: the closest within
  * a distance that grows with the name's length, where changing only a letter's case costs little.
@@ -46,4 +48,19 @@ function fillRow(letter: string, s2: string, i: number, max: number, previous: n
     minimum = Math.min(minimum, current[j]);
   }
   return minimum;
+}
+
+/** The hint TypeScript adds to an unknown name: the visible value or type name it may misspell, if any. */
+export function nameSuggestionHint(scope: Scope, name: string, meaning: 'value' | 'type'): string {
+  const suggestion = spellingSuggestion(name, visibleNames(scope, meaning));
+  return suggestion ? `'${suggestion}' のことですか？` : '';
+}
+
+/** The names of the values or types a scope and the scopes around it declare, the globals included. */
+function visibleNames(scope: Scope, meaning: 'value' | 'type'): Set<string> {
+  // `undefined` is a global the checker types without declaring it.
+  const names = new Set<string>(meaning === 'value' ? ['undefined'] : []);
+  for (let current: Scope | undefined = scope; current; current = current.parent)
+    for (const name of (meaning === 'value' ? current.values : current.types).keys()) names.add(name);
+  return names;
 }

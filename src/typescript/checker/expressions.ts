@@ -9,8 +9,8 @@ import { Expandos, laterRunningTypes } from './expandos';
 import { ExpressionTypeCache } from './expressionTypeCache';
 import type { FlowEntry } from './flow';
 import { printedPropertyName } from './print';
-import type { Scope, Sym } from './scopes';
-import { spellingSuggestion } from './spelling';
+import type { Sym } from './scopes';
+import { nameSuggestionHint } from './spelling';
 import {
   arrayLiteralLength,
   assignmentKind,
@@ -322,9 +322,8 @@ export class ExpressionChecker {
     if (typeSymbol && typeSymbol.typeKind !== 'class') {
       this.c.error(node, `${name} は型であり、値としては使えません。`);
     } else {
-      const hint = nodeGlobalHint(name);
-      const suggestion = hint ? undefined : spellingSuggestion(name, visibleValueNames(this.c.scopeOf(node)));
-      this.c.error(node, `名前 ${name} が見つかりません。${suggestion ? `'${suggestion}' のことですか？` : hint}`);
+      const hint = nodeGlobalHint(name) || nameSuggestionHint(this.c.scopeOf(node), name, 'value');
+      this.c.error(node, `名前 ${name} が見つかりません。${hint}`);
     }
     return errorType;
   }
@@ -787,13 +786,4 @@ function isCallee(node: TreeNode): boolean {
   const { parent } = expression;
   const callee = parent?.childForFieldName(parent.type === 'new_expression' ? 'constructor' : 'function');
   return (parent?.type === 'call_expression' || parent?.type === 'new_expression') && callee?.id === expression.id;
-}
-
-/** The names of the values a scope and the scopes around it declare, the program's and the library's globals included. */
-function visibleValueNames(scope: Scope): Set<string> {
-  // `undefined` is a global the checker types without declaring it.
-  const names = new Set<string>(['undefined']);
-  for (let current: Scope | undefined = scope; current; current = current.parent)
-    for (const name of current.values.keys()) names.add(name);
-  return names;
 }

@@ -4,6 +4,7 @@ import { unsupportedMessage } from '../unsupported';
 import type { Checker, Mapper } from './checker';
 import { IndexedAccessKeys } from './indexedAccessKeys';
 import type { Sym } from './scopes';
+import { nameSuggestionHint } from './spelling';
 import { hasToken, named, numberValue, propertyNameText, stringValue } from './syntax';
 import {
   anonymousObject,
@@ -350,7 +351,7 @@ export class TypeNodes {
         nameNode,
         value
           ? `${name} は値であり、型としては使えません。型を表すには typeof ${name} と書いてください。`
-          : `型 ${name} が見つかりません。`
+          : `型 ${name} が見つかりません。${nameSuggestionHint(this.c.scopeOf(nameNode), name, 'type')}`
       );
       return errorType;
     }
