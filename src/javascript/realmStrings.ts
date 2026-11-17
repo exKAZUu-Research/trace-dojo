@@ -1,5 +1,5 @@
 import type { RealmBuilder } from './realm';
-import { hostLocales } from './realmDate';
+import { hostLocales, hostOptions } from './realmDate';
 import { asRegExp, replaceWithRegExp, splitWithRegExp } from './realmRegExp';
 import type { Runtime } from './runtime';
 import {
@@ -172,7 +172,13 @@ function defineSearches(method: StringMethod): void {
         : text[name](search, integerArgument(runtime, args[1], 0));
     });
   }
-  method('localeCompare', 1, ({ runtime, args }, text) => collator.compare(text, runtime.toString(args[0])));
+  method('localeCompare', 1, ({ runtime, args }, text) => {
+    const that = runtime.toString(args[0]);
+    if (args[1] === undefined && args[2] === undefined) return collator.compare(text, that);
+    const locales = args[1] === undefined ? 'en' : (hostLocales(runtime, args[1]) as Intl.LocalesArgument);
+    const options = hostOptions(runtime, args[2]) as Intl.CollatorOptions;
+    return throwingHostErrors(runtime, () => text.localeCompare(that, locales, options));
+  });
 }
 
 function defineExtractions(method: StringMethod): void {

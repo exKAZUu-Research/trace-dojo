@@ -1553,6 +1553,17 @@ function main() {
 main();`,
   ],
   [
+    'localeCompare with locales and options',
+    `console.log(["file10", "file9", "File2"].sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" })));
+console.log("a".localeCompare("A", undefined, { sensitivity: "base" }), "10".localeCompare("9", undefined, { numeric: true }), "ä".localeCompare("z", "sv"), "ä".localeCompare("z"));
+console.log("a".localeCompare("B"), "a".localeCompare("b", "en", { caseFirst: "upper" }), ["b", "a", "C"].sort((x, y) => x.localeCompare(y, ["de", "en"])));
+try { "a".localeCompare("b", "not a locale!"); } catch (e) { console.log(e.name, e.message); }
+try { "a".localeCompare("b", undefined, { sensitivity: "bogus" }); } catch (e) { console.log(e.name, e.message); }
+try { "a".localeCompare("b", null); } catch (e) { console.log(e.name, e.message); }
+const opts = { get numeric() { console.log("read numeric"); return true; } };
+console.log("2".localeCompare("10", undefined, opts));`,
+  ],
+  [
     'integrity of arrays whose elements have their own descriptors',
     `function main() {
   const a = [0]; Object.defineProperty(a, "0", { get: () => 42, configurable: false }); Object.preventExtensions(a); Object.defineProperty(a, "length", { writable: false });
