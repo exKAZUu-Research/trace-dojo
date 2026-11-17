@@ -1556,6 +1556,21 @@ function main() {
 main();`,
   ],
   [
+    'inherited properties under showHidden and sorted collections',
+    `const proto = {}; Object.defineProperty(proto, "hidden", { value: 3 });
+console.dir(Object.create(proto), { showHidden: true });
+console.log("%o", Object.create({ inherited: 4 }));
+class C { get value() { return 1; } m() {} }
+console.dir(new C(), { showHidden: true });
+class D extends C { x = 1; get extra() { return 2; } }
+console.dir(new D(), { showHidden: true });
+console.dir({ a: 1 }, { showHidden: true });
+console.dir(new Map([["b", 2], ["a", 1]]), { sorted: true });
+console.dir(new Set([3, 1, 2]), { sorted: true });
+console.dir([3, 1, 2], { sorted: true });
+const s = new Set([2, 1]); s.z = 1; s.a = 2; console.dir(s, { sorted: true });`,
+  ],
+  [
     'console.table of Set and Map iterators',
     `const s = new Set([1, 2, 3]);
 console.table(s.entries());

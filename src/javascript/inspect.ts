@@ -18,6 +18,7 @@ import {
   JsObject,
   JsThrow,
   type Key,
+  type Property,
   type Value,
 } from './values';
 
@@ -232,7 +233,13 @@ function formatRaw(ctx: Context, value: JsObject, recurseTimes: number): string 
   if (value.isError && constructor !== 'Object') noteErrorStack(ctx, value);
   const keys = enumerableKeys(runtime, value, ctx.showHidden, ctx.errorStacks.get(value));
   const showsLength = ctx.showHidden && value instanceof JsArray;
-  const frame = frameOf(ctx, value, constructor, keys.length > 0 || value.promise !== undefined || showsLength);
+  const inherited = ctx.showHidden ? inheritedKeys(value) : [];
+  const frame = frameOf(
+    ctx,
+    value,
+    constructor,
+    keys.length > 0 || inherited.length > 0 || value.promise !== undefined || showsLength
+  );
   if (typeof frame === 'string') return frame;
   if (recurseTimes > ctx.depth) {
     const name = prefixOf(constructor, value instanceof JsArray ? 'Array' : 'Object').slice(0, -1);
@@ -246,9 +253,15 @@ function formatRaw(ctx: Context, value: JsObject, recurseTimes: number): string 
   if (value.promise) output.push(promiseEntry(ctx, value.promise, recurseTimes));
   if (showsLength) output.push(`[length]: ${formatNumber((value as JsArray).elements.length)}`);
   const properties = keys.map((key) => formatProperty(ctx, value, recurseTimes, key));
-  // `sorted` orders the properties as text, after an array's elements or a collection's entries.
-  if (ctx.sorted) properties.sort();
-  output.push(...properties);
+  for (const [owner, key] of inherited) properties.push(formatProperty(ctx, owner, recurseTimes, key));
+  // `sorted` orders the properties as text, after an array's elements, and a collection's entries with them.
+  if (ctx.sorted && value.collection) {
+    output.push(...properties);
+    output.sort();
+  } else {
+    if (ctx.sorted) properties.sort();
+    output.push(...properties);
+  }
   runtime.scan(output.length);
   const reference = ctx.circular.get(value);
   let { base } = frame;
@@ -261,6 +274,45 @@ function formatRaw(ctx: Context, value: JsObject, recurseTimes: number): string 
   }
   ctx.seen.delete(value);
   return reduceToSingleString(ctx, output, base, braces, recurseTimes, value);
+}
+
+/**
+ * The data properties and accessors an object inherits from the prototypes its own class adds, with the prototype
+ * holding each, which Node.js's `showHidden` lists after its own: up to three prototypes, stopping at a builtin one,
+ * without methods, `constructor`, or keys a nearer object has.
+ */
+function inheritedKeys(value: JsObject): [JsObject, Key][] {
+  const seen = new Set<Key>(value.properties.keys());
+  const found: [JsObject, Key][] = [];
+  let current: JsObject | undefined = firstOwnPrototype(value);
+  for (let depth = 0; depth < 3 && current && !isBuiltinPrototype(current); depth++) {
+    const keys = [...current.properties.keys()];
+    for (const key of keys) {
+      const property = current.properties.get(key) as Property;
+      if (key === 'constructor' || seen.has(key)) continue;
+      if (!isAccessor(property) && property.value instanceof JsFunction) continue;
+      found.push([current, key]);
+    }
+    for (const key of keys) seen.add(key);
+    current = current.proto ?? undefined;
+  }
+  return found;
+}
+
+/** The prototype Node.js starts listing inherited properties from: the object's own one, unless that is a builtin's. */
+function firstOwnPrototype(value: JsObject): JsObject | undefined {
+  const first = value.proto;
+  return first && !isBuiltinPrototype(first) ? first : undefined;
+}
+
+function isBuiltinPrototype(object: JsObject): boolean {
+  const constructor = object.properties.get('constructor');
+  return (
+    constructor !== undefined &&
+    !isAccessor(constructor) &&
+    constructor.value instanceof JsFunction &&
+    constructor.value.behavior.kind === 'native'
+  );
 }
 
 /** What surrounds the entries of an object, or its whole text when it has no entries to list. */
