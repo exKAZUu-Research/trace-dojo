@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 567 -- Follows the flow of control through each kind of statement.
+// code-gauge-allow-file fileNcss 569 -- Follows the flow of control through each kind of statement.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import type { Checker } from './checker';
@@ -196,18 +196,19 @@ export class StatementChecker {
     }
     this.c.signatures.typeParametersOf(node);
     const type = this.c.typeNodes.declaredTypeOf(symbol);
-    if (type.kind === 'object') {
-      const structure = type.resolve();
-      for (const property of structure.properties.values()) property.type();
-      for (const signature of structure.callSignatures) signature.returnType();
-      const interfaces = symbol.typeDeclarations.filter((declaration) => declaration.type === 'interface_declaration');
-      const isFirst = interfaces[0]?.id === node.id;
-      if (isFirst) this.checkIndexSignatures(symbol, interfaces, structure);
-      if (!isFirst || checkInheritedPropertiesAreIdentical(this.c, symbol, node.childForFieldName('name') ?? node))
-        this.checkInterfaceBases(node, symbol, structure);
-    }
+    if (type.kind === 'object') this.checkInterfaceMembers(node, symbol, type.resolve());
     for (const child of named(node)) if (child.type === 'extends_type_clause') this.resolveTypesIn(child);
     this.resolveTypesIn(node.childForFieldName('body'));
+  }
+
+  private checkInterfaceMembers(node: TreeNode, symbol: Sym, structure: Structure): void {
+    for (const property of structure.properties.values()) property.type();
+    for (const signature of structure.callSignatures) signature.returnType();
+    const interfaces = symbol.typeDeclarations.filter((declaration) => declaration.type === 'interface_declaration');
+    const isFirst = interfaces[0]?.id === node.id;
+    if (isFirst) this.checkIndexSignatures(symbol, interfaces, structure);
+    if (!isFirst || checkInheritedPropertiesAreIdentical(this.c, symbol, node.childForFieldName('name') ?? node))
+      this.checkInterfaceBases(node, symbol, structure);
   }
 
   /** Checks the index signatures of merged interface declarations together, as TypeScript does at the first one. */

@@ -5,6 +5,7 @@ import { conditionalBranch, isGenericObjectOrIndexType } from './genericTypes';
 import { applicableIndex, isPatternKey } from './indexInfos';
 import { printedPropertyName } from './print';
 import { named, templateFragmentText } from './syntax';
+import { appendEach, isSpelledLiteral, placeholderTemplate, splicedSpans } from './templateSpans';
 import { tupleElementBeyond } from './tupleIndexes';
 import {
   anonymousObject,
@@ -552,36 +553,22 @@ export class TypeOperators {
     }
     if (types.some((type) => isIntrinsic(type, 'never'))) return neverType;
     const combinations = this.literalCombinations(texts, types);
-    if (combinations === 'never') return neverType;
     if (combinations) return unionOf(combinations.map((text) => literalType(text)));
     const union = types.find((type) => type.kind === 'union');
     if (union?.kind === 'union')
       return unionOf(
-        union.types.map((member) =>
-          this.templateLiteral(
-            texts,
-            types.map((type) => (type === union ? member : type))
-          )
-        )
+        union.types.map((member) => this.templateLiteral(texts, types.with(types.indexOf(union), member)))
       );
     if (types.some((type) => this.c.relations.isGeneric(type)))
       return { kind: 'templateLiteral', id: newTypeId(), texts, types };
-    if (texts.every((text) => text === '')) {
-      if (types.every((type) => isIntrinsic(type, 'string'))) return stringType;
-      if (types.length === 1 && isPatternKey(types[0])) return types[0];
-    }
-    return { kind: 'templateLiteral', id: newTypeId(), texts, types };
+    return placeholderTemplate(texts, types);
   }
 
-  /**
-   * The strings a template spells when each placeholder is a literal or a union of them, `never` when one is `never`,
-   * or `undefined` when one is not a literal.
-   */
-  private literalCombinations(texts: string[], types: Type[]): string[] | 'never' | undefined {
+  /** The strings a template spells when each placeholder is a literal or a union of them, else `undefined`. */
+  private literalCombinations(texts: string[], types: Type[]): string[] | undefined {
     let combinations: string[] = [texts[0]];
     for (const [index, type] of types.entries()) {
       const members = type.kind === 'union' ? type.types : [type];
-      if (members.some((member) => isIntrinsic(member, 'never'))) return 'never';
       if (!members.every(isSpelledLiteral)) return undefined;
       this.c.budget.spend(combinations.length * members.length);
       combinations = appendEach(combinations, members, texts[index + 1]);
@@ -637,48 +624,6 @@ function mapText(mapping: StringMapping, text: string): string {
 /** A modified property's flag: `+` sets it, `-` clears it, and no modifier keeps the source's. */
 function applyModifier(modifier: '+' | '-' | undefined, inherited: boolean): boolean {
   return modifier === '+' || (modifier !== '-' && inherited);
-}
-
-/** Each prefix followed by the text of each literal, `null`, or `undefined` member and the suffix. */
-function appendEach(prefixes: string[], members: Type[], suffix: string): string[] {
-  return prefixes.flatMap((prefix) =>
-    members.map(
-      (member) =>
-        prefix + (member.kind === 'literal' ? String(member.value) : (member as { name: string }).name) + suffix
-    )
-  );
-}
-
-/**
- * The texts and placeholders of a template literal type with each placeholder that is a template literal type or spells
- * one text spliced into the texts, as TypeScript's `getTemplateLiteralType` adds its spans.
- */
-function splicedSpans(texts: string[], types: Type[]): { texts: string[]; types: Type[] } {
-  const spliced = { texts: [] as string[], types: [] as Type[] };
-  let text = texts[0];
-  const addSpans = (spanTexts: string[], spanTypes: Type[]): void => {
-    for (const [index, type] of spanTypes.entries()) {
-      if (type.kind === 'templateLiteral') {
-        text += type.texts[0];
-        addSpans(type.texts, type.types);
-      } else if (isSpelledLiteral(type)) {
-        text += appendEach([''], [type], '')[0];
-      } else {
-        spliced.texts.push(text);
-        spliced.types.push(type);
-        text = '';
-      }
-      text += spanTexts[index + 1];
-    }
-  };
-  addSpans(texts, types);
-  spliced.texts.push(text);
-  return spliced;
-}
-
-/** Whether a template placeholder spells one text, as a literal, `null`, or `undefined` does. */
-function isSpelledLiteral(member: Type): boolean {
-  return member.kind === 'literal' || isIntrinsic(member, 'null') || isIntrinsic(member, 'undefined');
 }
 
 /** The key types that the index signatures of a structure give its `keyof`, where a string index takes numbers too. */

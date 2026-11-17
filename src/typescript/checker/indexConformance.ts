@@ -92,6 +92,14 @@ function hasIndexFor(structure: Structure, keyType: Type): boolean {
 
 /** Reports each of the index signatures among `members` that declare the same key type, at every one of them. */
 export function checkDuplicateIndexSignatures(c: Checker, members: TreeNode[]): void {
+  for (const { keyType, declarations } of indexSignaturesByKeyType(c, members)) {
+    if (declarations.length < 2) continue;
+    for (const declaration of declarations)
+      c.error(declaration, `型 '${c.print(keyType)}' のインデックス シグネチャが重複しています。`);
+  }
+}
+
+function indexSignaturesByKeyType(c: Checker, members: TreeNode[]): { keyType: Type; declarations: TreeNode[] }[] {
   const groups: { keyType: Type; declarations: TreeNode[] }[] = [];
   for (const member of members) {
     if (member.type !== 'index_signature' || member.namedChildren.some((child) => child?.type === 'mapped_type_clause'))
@@ -103,11 +111,7 @@ export function checkDuplicateIndexSignatures(c: Checker, members: TreeNode[]): 
       else groups.push({ keyType, declarations: [member] });
     }
   }
-  for (const { keyType, declarations } of groups) {
-    if (declarations.length < 2) continue;
-    for (const declaration of declarations)
-      c.error(declaration, `型 '${c.print(keyType)}' のインデックス シグネチャが重複しています。`);
-  }
+  return groups;
 }
 
 function declaredKeyType(c: Checker, member: TreeNode): Type {
