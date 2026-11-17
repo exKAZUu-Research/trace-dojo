@@ -38,6 +38,8 @@ export class Sym {
   pendingUnion?: UnionType;
   /** The feature name when using this library value is not supported yet. */
   unsupported?: string;
+  /** Whether only calling or constructing the value is unavailable, as with `Function`, whose references still work. */
+  unsupportedCallOnly?: boolean;
   /** For a value whose declaration has no annotation, whose type the initializer gives. */
   isLibrary = false;
 

@@ -156,7 +156,10 @@ export function markUnsupported(scope: Scope): void {
     ...Object.keys(SHARED_HOST_GLOBALS).map((name) => [name, name]),
   ]) {
     const symbol: Sym | undefined = scope.values.get(name);
-    if (symbol) symbol.unsupported = feature;
+    if (symbol) {
+      symbol.unsupported = feature;
+      symbol.unsupportedCallOnly = name === 'Function';
+    }
     if (omittedLibraryGlobals.includes(name)) {
       const type = scope.types.get(name);
       if (type) type.unsupported = feature;

@@ -237,7 +237,7 @@ export class ExpressionChecker {
   }
 
   private reportUnavailableValue(node: TreeNode, symbol: Sym): boolean {
-    if (!symbol.unsupported) return false;
+    if (!symbol.unsupported || (symbol.unsupportedCallOnly && !isCallee(node))) return false;
     this.c.error(node, unsupportedMessage(symbol.unsupported));
     return true;
   }
@@ -714,4 +714,13 @@ function nodeGlobalHint(name: string): string {
   return ['process', 'require', 'module', 'exports', '__dirname', '__filename', 'Buffer'].includes(name)
     ? 'Node.js の機能は、この採点環境では使えません。'
     : '';
+}
+
+/** Whether an expression, through parentheses, is what a call or `new` calls. */
+function isCallee(node: TreeNode): boolean {
+  let expression = node;
+  while (expression.parent?.type === 'parenthesized_expression') expression = expression.parent;
+  const { parent } = expression;
+  const callee = parent?.childForFieldName(parent.type === 'new_expression' ? 'constructor' : 'function');
+  return (parent?.type === 'call_expression' || parent?.type === 'new_expression') && callee?.id === expression.id;
 }
