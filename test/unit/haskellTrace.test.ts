@@ -981,3 +981,56 @@ test('demanding previewed computations still enforces the execution budget', () 
   expect(executeProgram('haskell', source)).toMatchObject({ kind: 'limitExceeded', limit: 'operations' });
   expect(() => traceProgram('haskell', source, source)).toThrowError(ExecutionLimitError);
 });
+
+test('an evaluated list stays visible through repeated unchanged renders', () => {
+  const source = `main=do
+ let xs=[1..10::Int]
+ loop 1 xs
+loop::Int->[Int]->IO()
+loop i xs | i>1500=print(length xs) | otherwise=do
+ let k=i*2
+ print k
+ loop(i+1)xs`;
+  const recording = traceProgram('haskell', source, source);
+  expect(recording.uncaughtException).toBeUndefined();
+  expect(recording.stdout).toBe(Array.from({ length: 1500 }, (_, i) => `${(i + 1) * 2}\n`).join('') + '10\n');
+  const shown = recording.traceItems.filter((item) => Object.hasOwn(item.referenceVars, 'xs'));
+  expect(shown.length).toBeGreaterThan(2500);
+  for (const item of shown) expect(item.vars.xs).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
+});
+
+test('demanded list transformations keep displaying later iterations', () => {
+  const source = `main=loop 1 [1..20::Int]
+loop::Int->[Int]->IO()
+loop i xs | i>150=print(length xs) | otherwise=do
+ let ys=map(+1)xs
+ let zs=reverse ys
+ print(sum zs)
+ loop(i+1)ys`;
+  const recording = traceProgram('haskell', source, source);
+  expect(recording.uncaughtException).toBeUndefined();
+  expect(recording.stdout).toBe(Array.from({ length: 150 }, (_, i) => `${230 + i * 20}\n`).join('') + '20\n');
+  const last = recording.traceItems.findLast((item) => Object.hasOwn(item.referenceVars, 'ys'));
+  expect(last?.vars.ys).toEqual(Array.from({ length: 20 }, (_, i) => 151 + i));
+  expect(last?.vars.zs).toEqual(Array.from({ length: 20 }, (_, i) => 170 - i));
+});
+
+test('evaluated maps retain their ordered contents across repeated steps', () => {
+  const source = `import Control.Monad
+import qualified Data.Map as M
+main=do
+ let m=M.fromList[(i,i*2)|i<-[1..100::Int]]
+ print(M.size m)
+ forM_[1..150::Int] $ \\i->print i`;
+  const recording = traceProgram('haskell', source, source);
+  expect(recording.uncaughtException).toBeUndefined();
+  expect(recording.stdout).toBe('100\n' + Array.from({ length: 150 }, (_, i) => `${i + 1}\n`).join(''));
+  const last = recording.traceItems.at(-1)?.referenceVars.m;
+  expect(last?.kind).toBe('array');
+  if (last?.kind !== 'array') return;
+  expect(Object.keys(last.entries)).toHaveLength(100);
+  expect(last.entries[99]).toEqual({
+    kind: 'array',
+    entries: { 0: { kind: 'value', value: 100 }, 1: { kind: 'value', value: 200 } },
+  });
+});

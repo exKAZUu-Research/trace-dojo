@@ -16,6 +16,7 @@ interface PreviewTransaction {
   executionOperations: number;
   allocations: number;
   dependencies: Set<PreviewDebt>;
+  forcing: boolean;
 }
 
 interface PreviewDebt {
@@ -45,11 +46,14 @@ export class PreviewBudget {
   spend(operations: number, executionOperations: number, allocations: number): void {
     const active = this.active;
     if (!active) return;
-    active.operations += operations;
-    active.executionOperations += executionOperations;
-    active.allocations += allocations;
-    this.usage[active.kind].operations += operations;
-    if (this.remainingOperations(active.kind) < 0 || performance.now() > active.deadline) throw new DisplayAbort();
+    if (active.forcing) {
+      active.operations += operations;
+      active.executionOperations += executionOperations;
+      active.allocations += allocations;
+      this.usage[active.kind].operations += operations;
+      if (this.remainingOperations(active.kind) < 0) throw new DisplayAbort();
+    }
+    if (performance.now() > active.deadline) throw new DisplayAbort();
   }
 
   force(slot: Thunk, work: () => Value): Value {
@@ -58,6 +62,9 @@ export class PreviewBudget {
 
   private forceInTransaction(slot: Thunk, work: () => Value): Value {
     const active = this.active as PreviewTransaction;
+    if (this.remainingOperations(active.kind) <= 0) throw new DisplayAbort();
+    const savedForcing = active.forcing;
+    active.forcing = true;
     const before = {
       operations: active.operations,
       executionOperations: active.executionOperations,
@@ -83,13 +90,14 @@ export class PreviewBudget {
       return value;
     } finally {
       active.dependencies = savedDependencies;
+      active.forcing = savedForcing;
     }
   }
 
   run<T>(work: () => T, kind: PreviewKind = 'composite'): T {
     if (this.active) return work();
     const remainingTime = this.remainingMilliseconds(kind);
-    if (this.remainingOperations(kind) <= 0 || remainingTime <= 0) throw new DisplayAbort();
+    if (remainingTime <= 0) throw new DisplayAbort();
     const started = performance.now();
     this.active = {
       kind,
@@ -98,6 +106,7 @@ export class PreviewBudget {
       executionOperations: 0,
       allocations: 0,
       dependencies: new Set(),
+      forcing: false,
     };
     try {
       return work();
