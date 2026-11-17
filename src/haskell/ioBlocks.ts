@@ -24,8 +24,6 @@ export interface TraceContext {
   prefixEnv: Env;
   visible: VisibleScope;
   row: number | undefined;
-  block?: IODoCore;
-  index?: number;
 }
 
 export function runBlock(machine: Machine, state: RunState, action: IODo): void {
@@ -140,8 +138,6 @@ function startStatement(machine: Machine, state: RunState, frame: DoFrame): void
     const context = frame.traceFrame.contexts.at(-1) as TraceContext;
     context.visible = stmt.visible;
     context.row = stmt.row;
-    context.block = frame.code;
-    context.index = frame.index;
     frame.mark = machine.runtime.steps.statementMark();
     if (stmt.kind !== 'let') {
       machine.stack.push({ k: 'runIO' });

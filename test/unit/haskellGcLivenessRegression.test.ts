@@ -61,6 +61,88 @@ test('nested shadows preserve pending turtles at distinct lexical depths', () =>
 });
 
 test.each([
+  'if True then do\n  let t=()\n  print(0::Int)\n  else pure()',
+  'case True of\n  True->do\n   let t=()\n   print(0::Int)\n  False->pure()',
+  'when True $ do\n  let t=()\n  print(0::Int)',
+  'unless False $ do\n  let t=()\n  print(0::Int)',
+])('temporary turtle shadowing preserves the resumed scope: %s', (block) => {
+  const source = `import Control.Monad (unless, when)
+main=do
+ t<-newTurtleAt 0 1
+ ${block}
+ r<-newTurtle
+ clear<-canMoveForward r
+ print clear`;
+  const executed = executeProgram('haskell', source);
+  expect(executed).toMatchObject({ kind: 'executed', stdout: '0\nFalse\n', uncaughtException: undefined });
+  const traced = traceProgram('haskell', source, source);
+  expect(traced.stdout).toBe('0\nFalse\n');
+  expect(traced.uncaughtException).toBeUndefined();
+  expect(traced.finalTurtles).toHaveLength(2);
+});
+
+test('ending a nested shadow restores the final visible turtle', () => {
+  const source = `main=do
+ t<-newTurtleAt 0 1
+ if True then do
+  let t=()
+  print(0::Int)
+  else pure()`;
+  const result = traceProgram('haskell', source, source);
+  expect(result.stdout).toBe('0\n');
+  expect(result.uncaughtException).toBeUndefined();
+  expect(result.finalTurtles).toEqual([{ x: 0, y: 1, color: '#', dir: 'N' }]);
+});
+
+test('nested shadowed turtles survive only while their lexical scopes remain active', () => {
+  const source = `main=do
+ a<-newTurtleAt 0 1
+ if True then do
+  b<-newTurtleAt 1 1
+  if True then do
+   let a=()
+       b=()
+   print(0::Int)
+   else pure()
+  print(1::Int)
+  else pure()
+ r<-newTurtle
+ clear<-canMoveForward r
+ print clear`;
+  const executed = executeProgram('haskell', source);
+  expect(executed).toMatchObject({ kind: 'executed', stdout: '0\n1\nFalse\n', uncaughtException: undefined });
+  const traced = traceProgram('haskell', source, source);
+  expect(traced.stdout).toBe('0\n1\nFalse\n');
+  expect(traced.uncaughtException).toBeUndefined();
+  expect(traced.traceItems.find((item) => item.line === 8)?.turtles).toHaveLength(2);
+  expect(traced.finalTurtles).toEqual([
+    { x: 0, y: 1, color: '#', dir: 'N' },
+    { x: 0, y: 0, color: '#', dir: 'N' },
+  ]);
+});
+
+test('a permanent shadow releases the restored turtle when the shadow executes', () => {
+  const source = `main=do
+ t<-newTurtleAt 0 1
+ if True then do
+  let t=()
+  print(0::Int)
+  else pure()
+ print(1::Int)
+ let t=()
+ r<-newTurtle
+ clear<-canMoveForward r
+ print clear`;
+  const executed = executeProgram('haskell', source);
+  expect(executed).toMatchObject({ kind: 'executed', stdout: '0\n1\nTrue\n', uncaughtException: undefined });
+  const traced = traceProgram('haskell', source, source);
+  expect(traced.stdout).toBe('0\n1\nTrue\n');
+  expect(traced.uncaughtException).toBeUndefined();
+  expect(traced.traceItems.find((item) => item.line === 7)?.turtles).toHaveLength(1);
+  expect(traced.finalTurtles).toEqual([{ x: 0, y: 0, color: '#', dir: 'N' }]);
+});
+
+test.each([
   ['length ts', 'count', 'count'],
   ['sum(map(const(1::Int))ts)', 'count', 'count'],
   ['(length ts, ())', 'fst count', 'fst count'],

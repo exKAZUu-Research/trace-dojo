@@ -1,7 +1,5 @@
-import { Map as PersistentMap } from 'immutable';
-
 import type { TurtleState } from '../interpreter/turtleWorld';
-import type { Core, IODoCore, IOStmt, LocalRef } from './core';
+import type { Core, IOStmt, LocalRef } from './core';
 import type { Frame } from './machine';
 import type { Runtime } from './runtime';
 import { chargeTypeWork } from './typeWorkBudget';
@@ -111,29 +109,6 @@ function outer(codes: Core[]): [Core, boolean][] {
   return codes.map((child) => [child, false]);
 }
 
-const liveCache = new WeakMap<IODoCore, PersistentMap<string, LocalRef>[]>();
-
-function liveAfter(block: IODoCore, index: number): Iterable<LocalRef> {
-  let byIndex = liveCache.get(block);
-  if (!byIndex) {
-    byIndex = [];
-    let live = PersistentMap<string, LocalRef>();
-    for (let position = block.stmts.length - 1; position >= 0; position--) {
-      chargeTypeWork();
-      byIndex[position] = live;
-      for (const code of statementCodes(block.stmts[position])) {
-        for (const ref of freeVarsOf(code)) {
-          chargeTypeWork();
-          const key = `${ref.depth}:${ref.index}`;
-          if (!live.has(key)) live = live.set(key, ref);
-        }
-      }
-    }
-    liveCache.set(block, byIndex);
-  }
-  return byIndex[index]?.values() ?? [];
-}
-
 function statementCodes(stmt: IOStmt): Core[] {
   return stmt.kind === 'let'
     ? stmt.binds.map((bind) => bind.expr)
@@ -180,13 +155,8 @@ function pushRefs(refs: Iterable<LocalRef>, env: Env | undefined, push: Push): v
 
 function pushRoots(runtime: Runtime, push: Push): void {
   for (const frame of runtime.frames) {
-    for (const [index, context] of frame.contexts.entries()) {
-      if (context.env !== frame.contexts[index + 1]?.env.parent || !context.block || context.index === undefined) {
-        for (const visible of visibleVariables(context.visible))
-          push(context.env.at(visible.depth).slots[visible.index]);
-      } else {
-        pushRefs(liveAfter(context.block, context.index), context.env, push);
-      }
+    for (const context of frame.contexts) {
+      for (const visible of visibleVariables(context.visible)) push(context.env.at(visible.depth).slots[visible.index]);
     }
   }
   const scannedEnvs = new Set<Env>();
