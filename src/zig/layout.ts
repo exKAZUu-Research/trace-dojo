@@ -40,11 +40,12 @@ function calculateFieldOffsets(type: StructType, query: LayoutQuery): number[] {
   return offsets;
 }
 
-export function unionOffsets(type: UnionType): { payload: number; tag: number } {
+export function unionOffsets(type: UnionType): { payload: number; tag: number | undefined } {
   return resolvedUnions.get(type) ?? calculateUnionOffsets(type, new LayoutQuery());
 }
 
-function calculateUnionOffsets(type: UnionType, query: LayoutQuery): { payload: number; tag: number } {
+function calculateUnionOffsets(type: UnionType, query: LayoutQuery): { payload: number; tag: number | undefined } {
+  if (type.layout !== 'auto') return { payload: 0, tag: undefined };
   const { size: payloadSize, align: payloadAlign } = unionPayload(type, query);
   const tag = query.layout(type.tagType ?? intType(false, 8));
   return tag.align >= payloadAlign
@@ -79,7 +80,7 @@ const leafLayouts = new WeakMap<Type, Layout>();
 const resolvedLayouts = new WeakMap<Type, Layout>();
 const resolvedBits = new WeakMap<Type, number>();
 const resolvedFields = new WeakMap<StructType, number[]>();
-const resolvedUnions = new WeakMap<UnionType, { payload: number; tag: number }>();
+const resolvedUnions = new WeakMap<UnionType, { payload: number; tag: number | undefined }>();
 
 export function hasResolvedLayout(type: Type): boolean {
   return resolvedLayouts.has(type);
@@ -234,20 +235,24 @@ function computeLayout(type: Type, query: LayoutQuery): Layout {
       return { size: alignTo(size, align), align };
     }
     case 'union': {
-      const payload = unionPayload(type, query);
-      let size = payload.size;
-      let align = payload.align;
-      const tag = type.tagType ? intLayout(type.tagType.tagType?.bits ?? 0) : intLayout(8);
-      if (tag.size > 0) {
-        size = alignTo(size, tag.align) + tag.size;
-        align = Math.max(align, tag.align);
-      }
-      return { size: alignTo(size, align), align };
+      return unionLayout(type, query);
     }
     default: {
       return { size: 0, align: 1 };
     }
   }
+}
+
+function unionLayout(type: UnionType, query: LayoutQuery): Layout {
+  const payload = unionPayload(type, query);
+  if (type.layout !== 'auto') return { size: alignTo(payload.size, payload.align), align: payload.align };
+  let { size, align } = payload;
+  const tag = type.tagType ? intLayout(type.tagType.tagType?.bits ?? 0) : intLayout(8);
+  if (tag.size > 0) {
+    size = alignTo(size, tag.align) + tag.size;
+    align = Math.max(align, tag.align);
+  }
+  return { size: alignTo(size, align), align };
 }
 
 export function optionalNicheBits(child: Type): number | undefined {

@@ -178,6 +178,7 @@ export interface SemaApi {
   reserveStorage(type: Type, span: Span): void;
   resolveStorage(type: Type, span: Span): void;
   spendCompilation(cost?: number): void;
+  nameSlice(text: string, frame?: Frame): Slice;
   libraryFunction(
     file: SourceFile,
     element: Type,
@@ -272,6 +273,7 @@ export abstract class SemaBase implements SemaApi {
   }
 
   abstract compile(expression: Expression, resultType?: Type): TExpr;
+  abstract nameSlice(text: string, frame?: Frame): Slice;
   abstract valueComparator(type: Type, ordered: boolean, span: Span): (a: Value, b: Value) => number;
   abstract callFunction(fn: FunctionInstance, args: Value[], frame: Frame): Value;
   protected abstract declarationType(decl: Extract<Decl, { kind: 'fn' }>, span: Span): FnType;
@@ -917,8 +919,12 @@ export abstract class SemaBase implements SemaApi {
       return known(to, this.knownFunctionValue(expression, span), span);
     }
     if (from.kind !== 'pointer') return undefined;
-    // A pointer to an empty array has nothing to write, so it coerces to a slice of variables.
-    const empty = from.size === 'one' && from.child.kind === 'array' && from.child.length === 0n;
+    const empty =
+      to.size === 'slice' &&
+      to.sentinel === undefined &&
+      from.size === 'one' &&
+      from.child.kind === 'array' &&
+      from.child.length === 0n;
     if (from.isConst && !to.isConst && !empty) return undefined;
     if (from.size === to.size) {
       if (!inMemoryCoercible(from.child, to.child)) return undefined;
@@ -1337,11 +1343,14 @@ export function mergeErrorSets(a: ErrorSetType, b: ErrorSetType): ErrorSetType {
 // code-gauge-allow functionCognitiveComplexity 20 -- Intersects pointer qualifiers, array lengths and sentinel guarantees.
 function peerPointers(a: Extract<Type, { kind: 'pointer' }>, b: Extract<Type, { kind: 'pointer' }>): Type | undefined {
   const isConst = a.isConst || b.isConst;
+  const leftSentinel = pointerSentinel(a),
+    rightSentinel = pointerSentinel(b);
+  const sentinel = sameSentinel(leftSentinel, rightSentinel) ? leftSentinel : undefined;
   if (a.size === 'slice' || b.size === 'slice') {
     const elementA = elementOf(a);
     const elementB = elementOf(b);
     if (!elementA || elementA !== elementB) return undefined;
-    return sliceOf(elementA, isConst);
+    return sliceOf(elementA, isConst, sentinel);
   }
   if (a.child.kind === 'array' && b.child.kind === 'array') {
     const left = a.child,
@@ -1352,13 +1361,17 @@ function peerPointers(a: Extract<Type, { kind: 'pointer' }>, b: Extract<Type, { 
         ? left.child
         : undefined;
     if (!child) return undefined;
-    const sentinel = sameSentinel(left.sentinel, right.sentinel) ? left.sentinel : undefined;
     return left.length === right.length
       ? pointerTo(arrayOf(left.length, child, sentinel), isConst)
-      : sliceOf(child, isConst);
+      : sliceOf(child, isConst, sentinel);
   }
   if (a.child === b.child) return pointerTo(a.child, isConst);
   return undefined;
+}
+
+function pointerSentinel(pointer: Extract<Type, { kind: 'pointer' }>): Value | undefined {
+  if (pointer.size === 'slice') return pointer.sentinel;
+  return pointer.child.kind === 'array' ? pointer.child.sentinel : undefined;
 }
 
 function elementOf(pointer: Extract<Type, { kind: 'pointer' }>): Type | undefined {

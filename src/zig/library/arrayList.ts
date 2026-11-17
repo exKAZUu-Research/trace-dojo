@@ -225,6 +225,7 @@ function defineMembers(type: StructType, child: Type): void {
     Slice: () => ({ type: TYPE, value: items }),
     empty: () => ({ type, value: emptyList() }),
     initCapacity: fnMember('ArrayList.initCapacity', (sema, call) => {
+      sema.resolveStorage(child, call.span);
       const [allocator, count] = compileArgs(sema, expectArgs(sema, call, 2, 'initCapacity'), [ALLOCATOR, USIZE]);
       const evaluate = count.eval;
       const evaluateAllocator = allocator.eval;

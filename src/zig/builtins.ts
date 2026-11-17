@@ -922,7 +922,7 @@ export abstract class BuiltinCompiler extends ExpressionCompiler {
     });
   }
 
-  private nameSlice(text: string, frame?: Frame): Slice {
+  nameSlice(text: string, frame?: Frame): Slice {
     const cached = this.nameSlices.get(text);
     if (cached) return cached;
     const spend = (cost: number): void => (frame ? frame.runtime.spend(cost) : this.spendCompilation(cost));

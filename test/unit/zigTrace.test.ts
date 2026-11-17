@@ -558,3 +558,10 @@ test('wide enum snapshots retain late names in scalars, arrays and optionals', (
   expect(result.finalVars).toMatchObject({ e: '.f29999', a: ['.f29999', '.f29998'], o: '.f29997' });
   expect(result.traceItems.filter((item) => item.vars.e === '.f29999').length).toBeGreaterThan(1000);
 });
+
+test.each(['x:u8,', ''])('receiver previews do not dereference undefined pointers with fields %s', (fields) => {
+  const source = `const std=@import("std");const S=struct{${fields}fn f(self:*S)void{_=self;std.debug.print("ok",.{});}};fn ptr()*S{return undefined;}pub fn main()void{ptr().f();}`;
+  const result = traceProgram('zig', source, source);
+  expect(result).toMatchObject({ stderr: 'ok', uncaughtException: undefined });
+  expect(result.traceItems.length).toBeGreaterThan(0);
+});

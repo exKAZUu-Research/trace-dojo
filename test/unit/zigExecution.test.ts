@@ -5600,3 +5600,119 @@ test('resolved collection layouts are reused across repeated runtime metadata qu
   const source = `const std=@import("std");const S=struct{${fields}};pub fn main()void{const l:std.ArrayList(S)=.empty;var total:usize=0;for(0..200)|_|{total+=l.allocatedSlice().len;}std.debug.print("{}",.{total});}`;
   expect(executeProgram('zig', source)).toMatchObject({ kind: 'executed', stderr: '0', uncaughtException: undefined });
 });
+
+test.each(['extern', 'packed'])('%s union allocations contain only payload bytes', (layout) => {
+  for (const field of ['x', 'y']) {
+    const source = `const std=@import("std");const U=${layout} union{x:u64,y:${layout === 'packed' ? 'u64' : 'u32'}};pub fn main()!void{var buf:[16]u8=undefined;var f=std.heap.FixedBufferAllocator.init(&buf);const p=try f.allocator().create(U);p.*=.{.${field}=7};const q=try f.allocator().create(u64);q.*=9;std.debug.print("{} {} {} {}",.{f.end_index,p.${field},buf[0],buf[8]});}`;
+    expect(executeProgram('zig', source)).toMatchObject({
+      kind: 'executed',
+      stderr: '16 7 7 9',
+      uncaughtException: undefined,
+    });
+    const exact = source
+      .replace('[16]u8', '[8]u8')
+      .replace('const q=try f.allocator().create(u64);q.*=9;', '')
+      .replace('"{} {} {} {}",.{f.end_index,p.' + field + ',buf[0],buf[8]}', '"{} {}",.{f.end_index,p.' + field + '}');
+    expect(executeProgram('zig', exact)).toMatchObject({
+      kind: 'executed',
+      stderr: '8 7',
+      uncaughtException: undefined,
+    });
+  }
+});
+
+test.each([
+  ['struct{x:u8}', 1],
+  ['[2]struct{x:u64}', 16],
+])('ArrayList.initCapacity resolves %s storage before exposing its header', (type, size) => {
+  const source = `const std=@import("std");pub fn main()!void{var buf:[32]u8=undefined;var f=std.heap.FixedBufferAllocator.init(&buf);const l=try std.ArrayList(${type}).initCapacity(f.allocator(),1);std.debug.print("{} {} {}",.{l.items.len,l.capacity,f.end_index});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: `0 1 ${size}`,
+    uncaughtException: undefined,
+  });
+});
+
+test.each(['std.process.exit(0)', 'f()'])('container initialization rejects runtime exit through %s', (initialize) => {
+  const source = `const std=@import("std");fn f()u8{std.process.exit(0);}const x=${initialize};pub fn main()void{_=x;}`;
+  expect(executeProgram('zig', source)).toMatchObject({ kind: 'compileError' });
+});
+
+test('runtime process.exit retains output and normal exit handling', () => {
+  expect(
+    executeProgram('zig', `const std=@import("std");pub fn main()void{std.debug.print("ok",.{});std.process.exit(7);}`)
+  ).toMatchObject({ kind: 'executed', stderr: 'ok', uncaughtException: undefined });
+});
+
+test.each(['apple', '日本語'])(
+  'std.enums.tagName shares %s backing with the builtin and retains operand effects',
+  (name) => {
+    const source = `const std=@import("std");const E=enum{@"${name}"};fn next()E{std.debug.print("g",.{});return .@"${name}";}pub fn main()void{const a=std.enums.tagName(E,next()).?;const b=std.enums.tagName(E,next()).?;const c=@tagName(E.@"${name}");std.debug.print("{} {} {s}",.{&a[0]==&b[0],&a[0]==&c[0],a});}`;
+    expect(executeProgram('zig', source)).toMatchObject({
+      kind: 'executed',
+      stderr: `ggtrue true ${name}`,
+      uncaughtException: undefined,
+    });
+  }
+);
+
+test.each(['const s:[:0]u8="";', 'const s:*[0:7]u8=&[_:7]u8{};', 'const s:*[0]u8=&[_]u8{};'])(
+  'empty constant backing cannot produce a writable pointer or sentinel view: %s',
+  (initialize) => {
+    expect(executeProgram('zig', `pub fn main()void{${initialize}_=s;}`)).toMatchObject({ kind: 'compileError' });
+  }
+);
+
+test('empty ordinary slices retain their const exception and mutable sentinel storage stays writable', () => {
+  const source = `const std=@import("std");pub fn main()void{const empty:[]u8="";var a=[0:7]u8{};const s:[:7]u8=&a;s[0]=7;std.debug.print("{} {}",.{empty.len,s[0]});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: '0 7',
+    uncaughtException: undefined,
+  });
+});
+
+test.each([
+  ['[]const u8', '.{}'],
+  ['[]const u8', '.{1,2}'],
+  ['*const[2]u8', '.{1,2}'],
+])('aggregate initialization of %s requires an explicit address: %s', (type, literal) => {
+  expect(executeProgram('zig', `pub fn main()void{const s:${type}=${literal};_=s;}`)).toMatchObject({
+    kind: 'compileError',
+  });
+  expect(
+    executeProgram(
+      'zig',
+      `const std=@import("std");pub fn main()void{const s:${type}=&${literal};std.debug.print("{}",.{s.len});}`
+    )
+  ).toMatchObject({ kind: 'executed', stderr: literal === '.{}' ? '0' : '2', uncaughtException: undefined });
+});
+
+test.each(['s', '&a'])('slice peers retain common sentinel guarantees with %s', (left) => {
+  for (const reverse of [false, true]) {
+    const source = `const std=@import("std");pub fn main()void{var a=[1:0]u8{1};const s:[:0]u8=&a;${left === '&a' ? '_=s;' : ''}const c:[:0]const u8=&a;var flag=false;_=&flag;const p=if(flag)${reverse ? 'c' : left} else ${reverse ? left : 'c'};const q:[:0]const u8=p;std.debug.print("{} {}",.{q.len,q[1]});}`;
+    expect(executeProgram('zig', source)).toMatchObject({
+      kind: 'executed',
+      stderr: '1 0',
+      uncaughtException: undefined,
+    });
+  }
+});
+
+test('slice peers drop incompatible sentinels', () => {
+  const source = `const std=@import("std");pub fn main()void{var a=[1:0]u8{1};var b=[1:7]u8{2};const s:[:0]u8=&a;const t:[:7]const u8=&b;var flag=false;_=&flag;const p=if(flag)s else t;std.debug.print("{} {}",.{p.len,@TypeOf(p)==[]const u8});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: '1 true',
+    uncaughtException: undefined,
+  });
+});
+
+test('array pointers with different lengths retain common sentinels through slice peers', () => {
+  const source = `const std=@import("std");pub fn main()void{var a=[1:0]u8{1};var b=[2:0]u8{2,3};var flag=false;_=&flag;const p=if(flag)&a else &b;const s:[:0]u8=p;std.debug.print("{} {}",.{s.len,s[s.len]});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: '2 0',
+    uncaughtException: undefined,
+  });
+});

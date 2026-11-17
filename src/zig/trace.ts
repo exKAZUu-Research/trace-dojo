@@ -162,7 +162,12 @@ function addReceiverFields(variables: TraceVariables, name: string, value: Value
   let struct = value;
   let structType = type;
   if (type.kind === 'pointer' && type.size === 'one') {
-    struct = (value as Pointer).load();
+    try {
+      struct = (value as Pointer).load();
+    } catch (error) {
+      if (error instanceof MemoryFault) return;
+      throw error;
+    }
     structType = type.child;
   }
   if (structType.kind !== 'struct' || !(struct instanceof ZStruct)) return;

@@ -1561,9 +1561,6 @@ export abstract class ExpressionCompiler extends SemaBase {
       return this.coerce(known(this.tupleType([]), new ZStruct([]), expression), type, expression);
     }
     if (type.kind === 'union') return this.unionInit(expression, type);
-    if (type.kind === 'pointer' && type.size === 'slice' && expression.fields.length === 0 && !expression.type) {
-      return known(type, new Slice(new ZArray([]), 0, 0), expression);
-    }
     if (type.kind !== 'struct') {
       if (!expression.type && resultType) return this.anonymousStruct(expression);
       return this.error(expression, `${typeName(type)} 型は、{ .x = ... } の形では初期化できません。`);
@@ -1648,7 +1645,6 @@ export abstract class ExpressionCompiler extends SemaBase {
     return type;
   }
 
-  // code-gauge-allow functionNcss 36 -- Keeps the analysis and the generated code of one construct together, as Zig's Sema does.
   // code-gauge-allow functionCognitiveComplexity 24 -- Keeps the analysis and the generated code of one construct together, as Zig's Sema does.
   protected arrayInit(expression: ExpressionOf<'arrayInit'>, resultType: Type | undefined): TExpr {
     let type: Type | undefined;
@@ -1662,15 +1658,6 @@ export abstract class ExpressionCompiler extends SemaBase {
       }
     } else if (resultType) {
       type = unwrapResult(resultType);
-    }
-    if (type?.kind === 'pointer' && type.size === 'slice' && !expression.type) {
-      // `.{ 1, 2 }` for a slice of constants is a pointer to a constant array.
-      const array = arrayOf(expression.elements.length, type.child, type.sentinel);
-      const initialized = this.arrayInit(expression, array);
-      return this.coerce(this.addressOf(initialized), type, expression);
-    }
-    if (type?.kind === 'pointer' && type.size === 'one' && type.child.kind === 'array' && !expression.type) {
-      return this.coerce(this.addressOf(this.arrayInit(expression, type.child)), type, expression);
     }
     if (type?.kind === 'array') {
       const array = type;

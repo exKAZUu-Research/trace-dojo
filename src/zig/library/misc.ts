@@ -23,7 +23,7 @@ import {
   USIZE,
   VOID,
 } from '../types';
-import { decodeIdentifierBytes, encodeIdentifierText } from '../utf8';
+import { decodeIdentifierBytes } from '../utf8';
 import {
   ErrorValue,
   FnValue,
@@ -375,10 +375,10 @@ const ENUMS: Record<string, () => Member> = {
     if (type.kind !== 'enum') return sema.error(typeArg, 'tagName には enum の型を渡してください。');
     const fields = enumLookup(sema.enumFields(type), () => sema.spendCompilation());
     const value = sema.coerce(sema.compile(valueArg, type), type, valueArg);
-    return computed(optionalOf(CONST_U8_SLICE), [value], call.span, ([tag]) => {
+    return computed(optionalOf(CONST_U8_SLICE), [value], call.span, ([tag], frame) => {
       const field = fields.byValue.get(tag as bigint);
       if (!field) return NULL;
-      return newSlice(encodeIdentifierText(field.name).map(BigInt));
+      return sema.nameSlice(field.name, frame);
     });
   }),
   fromInt: fnMember('std.enums.fromInt', (sema, call) => {

@@ -166,7 +166,6 @@ class BufferMemory {
     }
   }
 
-  // code-gauge-allow functionCognitiveComplexity 21 -- Builds stable typed views for arrays, structs, and tagged unions.
   private readAggregate(type: Extract<Type, { kind: 'array' | 'struct' | 'union' }>, offset: number): Value {
     const key = `${typeId(type)} ${offset}`;
     if (type.kind === 'struct' && (type.native?.storageSlots !== undefined || type.native?.kind === 'allocator'))
@@ -189,32 +188,41 @@ class BufferMemory {
         )
       );
     } else {
-      const layout = unionOffsets(type);
-      const tag = (): number => this.unionTag(type, offset + layout.tag * 8);
-      const union = new ZUnion(0, undefined);
-      Object.defineProperty(union, 'tag', {
-        get: tag,
-        set: (index: number) => {
-          const encoded = type.tagType?.fields?.[index]?.value ?? BigInt(index);
-          this.writeBits(offset + layout.tag * 8, (type.tagType ? sizeOf(type.tagType) : 1) * 8, encoded);
-        },
-      });
-      union.slots = new Proxy([undefined] as Value[], {
-        get: (target, property, receiver) =>
-          property === '0'
-            ? this.read(type.fields![tag()].type, offset + layout.payload * 8)
-            : Reflect.get(target, property, receiver),
-        set: (target, property, value: Value, receiver) => {
-          if (property !== '0') return Reflect.set(target, property, value, receiver);
-          this.write(type.fields![tag()].type, offset + layout.payload * 8, value);
-          return true;
-        },
-      });
-      registerStorageLocation(union.slots, () => ({ storage: this.bytes, index: offset / 8 + layout.payload }));
-      value = union;
+      value = this.unionView(type, offset);
     }
     this.views.set(key, value);
     return value;
+  }
+
+  private unionView(type: Extract<Type, { kind: 'union' }>, offset: number): ZUnion {
+    const layout = unionOffsets(type);
+    const tagOffset = layout.tag;
+    let active = 0;
+    const tag = (): number => (tagOffset === undefined ? active : this.unionTag(type, offset + tagOffset * 8));
+    const union = new ZUnion(0, undefined);
+    Object.defineProperty(union, 'tag', {
+      get: tag,
+      set: (index: number) => {
+        active = index;
+        if (tagOffset !== undefined) {
+          const encoded = type.tagType?.fields?.[index]?.value ?? BigInt(index);
+          this.writeBits(offset + tagOffset * 8, (type.tagType ? sizeOf(type.tagType) : 1) * 8, encoded);
+        }
+      },
+    });
+    union.slots = new Proxy([undefined] as Value[], {
+      get: (target, property, receiver) =>
+        property === '0'
+          ? this.read(type.fields![tag()].type, offset + layout.payload * 8)
+          : Reflect.get(target, property, receiver),
+      set: (target, property, value: Value, receiver) => {
+        if (property !== '0') return Reflect.set(target, property, value, receiver);
+        this.write(type.fields![tag()].type, offset + layout.payload * 8, value);
+        return true;
+      },
+    });
+    registerStorageLocation(union.slots, () => ({ storage: this.bytes, index: offset / 8 + layout.payload }));
+    return union;
   }
 
   arrayView(child: Type, length: bigint, offset: number, hasSentinel = false): ZArray {
@@ -344,8 +352,7 @@ class BufferMemory {
       case 'union': {
         const union = value as ZUnion;
         const layout = unionOffsets(type);
-        if (type.tagType) this.write(type.tagType, offset + layout.tag * 8, type.tagType.fields![union.tag].value);
-        else this.writeBits(offset + layout.tag * 8, 8, BigInt(union.tag));
+        (this.readAggregate(type, offset) as ZUnion).tag = union.tag;
         this.write(type.fields![union.tag].type, offset + layout.payload * 8, union.slots[0]);
         return;
       }

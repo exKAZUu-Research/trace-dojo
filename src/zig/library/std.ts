@@ -2,6 +2,7 @@ import { checkOutputSize } from '../allocation';
 import { panic } from '../arith';
 import type { Span } from '../ast';
 import { bytesToText, CONST_U8 } from '../builtins';
+import { rejectRuntimeEffect } from '../comptimeMemory';
 import { known, type NativeCall, runtime, type SemaApi, type TExpr } from '../semaBase';
 import {
   BOOL,
@@ -467,6 +468,7 @@ const PROCESS = nativeStruct('std.process', {
   exit: fnMember('std.process.exit', (sema, call) => {
     const [code] = compileArgs(sema, expectArgs(sema, call, 1, 'std.process.exit'), [U8]);
     return nativeCall({ kind: 'noreturn' }, [code], call.span, ([value]) => {
+      rejectRuntimeEffect();
       throw new ExitSignal(Number(value as bigint));
     });
   }),
