@@ -560,8 +560,11 @@ export class Flow {
     if (declared.kind !== 'union') {
       return declared;
     }
-    const reduced = filterType(declared, (member) => this.c.relations.isAssignable(assigned, member));
-    if (isIntrinsic(reduced, 'never')) return declared;
+    // As TypeScript's getAssignmentReducedType: the members any part of the assigned type may be, when the whole of it
+    // fits them.
+    const parts = assigned.kind === 'union' ? assigned.types : [assigned];
+    const reduced = filterType(declared, (member) => parts.some((part) => this.c.relations.isAssignable(part, member)));
+    if (isIntrinsic(reduced, 'never') || !this.c.relations.isAssignable(assigned, reduced)) return declared;
     // A literal assigned to a union keeps its literal when the union lists literals, as `"a" | "b"` does.
     if (
       assigned.kind === 'literal' &&
@@ -569,11 +572,6 @@ export class Flow {
       reduced.types.some((member) => member.kind === 'literal')
     ) {
       return filterType(reduced, (member) => member.kind !== 'literal' || member.value === assigned.value);
-    }
-    if (assigned.kind === 'union') {
-      return filterType(reduced, (member) =>
-        assigned.types.some((part) => this.c.relations.isAssignable(part, member))
-      );
     }
     return reduced;
   }
