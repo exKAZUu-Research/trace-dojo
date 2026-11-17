@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 531 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 532 -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import { ExecutionLimitError } from '../interpreter/limits';
 import { assignTo, bindRef, destructure, placeOf, unsetTarget } from './assignment';
@@ -382,7 +382,7 @@ function staticDeclaration(statement: Extract<Stmt, { k: 'static' }>, frame: Fra
   }
 }
 
-// code-gauge-allow functionNcss 54 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+// code-gauge-allow functionNcss 56 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 function tryStatement(statement: Extract<Stmt, { k: 'try' }>, seek?: string): Completion {
   const runtime = rt();
   let completion: Completion;
@@ -397,6 +397,7 @@ function tryStatement(statement: Extract<Stmt, { k: 'try' }>, seek?: string): Co
           : statement.catches.find((item) => item.body.some((inner) => containsLabel(inner, seek)));
       completion = inCatch ? execList(inCatch.body, seek) : execList(statement.body, seek);
     } catch (error) {
+      if (runtime.exhausted) throw error;
       if (!(error instanceof PhpThrow)) {
         if (statement.fin && !(error instanceof ExitSignal) && !(error instanceof ExecutionLimitError)) {
           pending = error;
@@ -638,7 +639,7 @@ function runBody(decl: FunctionDecl, frame: Frame): Value {
       if (param.promote) writeProp(frame.thisObj, param.name, frame.vars.get(param.name)?.v ?? null, frame.scope);
     }
   }
-  if (decl.arrowBody) return ev(decl.arrowBody);
+  if (decl.arrowBody) return evReturn(decl.arrowBody);
   const completion = execList(decl.body);
   if (completion?.t === 'return') return completion.v;
   if (completion?.t === 'goto') throw new Error(`Unresolved goto ${completion.label}`);

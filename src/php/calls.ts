@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 467 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 473 -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import { LIMITS } from '../interpreter/limits';
 import type { FunctionDecl } from './ast';
@@ -140,7 +140,8 @@ export function invoke(target: CallTarget, args: ArgValue[], callRow: number | u
   return invokeUser(target, target.fn, args, callRow);
 }
 
-// code-gauge-allow functionNcss 34 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+// code-gauge-allow functionNcss 40 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+// code-gauge-allow functionCognitiveComplexity 16 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 function invokeNative(target: CallTarget, fn: NativeFunction, args: ArgValue[], row: number | undefined): Value {
   const runtime = rt();
   runtime.spend();
@@ -168,6 +169,8 @@ function invokeNative(target: CallTarget, fn: NativeFunction, args: ArgValue[], 
   nativeDepth++;
   runtime.nativeCalls++;
   const held: unknown[] = args.map((arg) => arg.ref ?? arg.v);
+  const retainedRefs = args.flatMap((arg) => (arg.ref ? [arg.ref] : []));
+  for (const ref of retainedRefs) ref.rc++;
   runtime.nativeHeld.push(held);
   const savedRow = runtime.row;
   let result: Value;
@@ -184,12 +187,14 @@ function invokeNative(target: CallTarget, fn: NativeFunction, args: ArgValue[], 
     nativeDepth--;
     runtime.nativeCalls--;
     runtime.nativeHeld.pop();
+    for (const ref of retainedRefs) ref.rc--;
     callStack.pop();
     runtime.row = savedRow;
   }
   // The values the function's callbacks returned are released once it is done with them; its result stays held.
   if (result instanceof PhpObject || result instanceof PhpArray) runtime.frame.temporaries.push(result);
   runtime.release(held);
+  runtime.lastReturnRef = undefined;
   return result;
 }
 
@@ -424,7 +429,6 @@ function invokeUser(target: CallTarget, fn: UserFunction, args: ArgValue[], row:
     }
     if (decl.returnType) result = checkReturn(result, decl.returnType, name, frame);
     else if (decl.byRefReturn === false) result = share(result);
-    runtime.lastReturnRef = decl.byRefReturn ? frame.returnRef : undefined;
     returned = result;
   } finally {
     nativeDepth = outerNative;
@@ -437,6 +441,7 @@ function invokeUser(target: CallTarget, fn: UserFunction, args: ArgValue[], row:
     if (decl.isAtomic) runtime.steps.completeAtomicCall();
   }
   releaseFrame(runtime, caller, frame, returned, outerNative > 0);
+  runtime.lastReturnRef = decl.byRefReturn ? frame.returnRef : undefined;
   return returned;
 }
 

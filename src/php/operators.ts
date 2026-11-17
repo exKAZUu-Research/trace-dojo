@@ -17,7 +17,7 @@ import {
 import { deprecated, notice, throwError, warn } from './errors';
 import { cPow } from './floatPow';
 import { rt } from './runtime';
-import { INT_MAX, INT_MIN, type Key, PhpArray, PhpObject, type Value } from './values';
+import { copyValueSlot, INT_MAX, INT_MIN, type Key, PhpArray, PhpObject, type Value } from './values';
 
 /** Converts an object to a string through `__toString`, which the interpreter provides. */
 let objectToString: (object: PhpObject) => string = () => '';
@@ -229,7 +229,7 @@ export function formatFloatForMessage(value: number): string {
 function arrayUnion(left: PhpArray, right: PhpArray): PhpArray {
   const result = left.copy();
   for (const [key, slot] of right.map) {
-    if (!result.map.has(key)) result.setSlot(key, slot);
+    if (!result.map.has(key)) result.setSlot(key, copyValueSlot(slot));
   }
   return result;
 }

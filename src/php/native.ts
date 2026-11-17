@@ -65,7 +65,7 @@ export interface ClassDefinition {
   interfaces?: string[];
   isAbstract?: boolean;
   isFinal?: boolean;
-  props?: { name: string; visibility: Visibility; defaultValue: () => Value; typed?: boolean }[];
+  props?: { name: string; visibility: Visibility; defaultValue: () => Value; typed?: boolean; isReadonly?: boolean }[];
   consts?: Record<string, Value>;
   methods?: NativeMethod[];
   createInternal?: (object: PhpObject) => unknown;
@@ -117,7 +117,7 @@ function buildClass(definition: ClassDefinition): PhpClass {
       cls,
       visibility: prop.visibility,
       isStatic: false,
-      isReadonly: false,
+      isReadonly: prop.isReadonly ?? false,
       hasDefault: true,
       defaultValue: prop.defaultValue,
       type: prop.typed ? { k: 'named', name: 'mixed' } : undefined,

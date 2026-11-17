@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 688 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 697 -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import {
   applyOperator,
@@ -82,18 +82,26 @@ export type Chain = Value | typeof SHORT;
 
 /** Evaluates an expression whose value a `return` passes to the caller, which keeps it alive meanwhile. */
 export function evReturn(e: Expr): Value {
-  const frame = rt().frame;
+  const runtime = rt();
+  const frame = runtime.frame;
   const fn = frame.fn;
-  if (fn?.kind === 'user' && fn.decl.byRefReturn) {
-    if (['var', 'idx', 'prop', 'sprop'].includes(e.k)) {
-      const ref = placeOf(e).ref();
-      ref.isRef = true;
-      frame.returnRef = ref;
-      return ref.v;
-    }
-    notice('Only variable references should be returned by reference');
+  if (fn?.kind !== 'user' || !fn.decl.byRefReturn) return ev(e);
+  let ref: Ref | undefined;
+  let value: Value;
+  if (['var', 'varvar', 'idx', 'prop', 'sprop'].includes(e.k)) {
+    ref = placeOf(e).ref();
+    value = ref.v;
+  } else {
+    runtime.lastReturnRef = undefined;
+    value = ev(e);
+    if (e.k === 'call' || e.k === 'mcall' || e.k === 'scall') ref = runtime.lastReturnRef;
+    runtime.lastReturnRef = undefined;
   }
-  return ev(e);
+  if (ref) {
+    ref.isRef = true;
+    frame.returnRef = ref;
+  } else notice('Only variable references should be returned by reference');
+  return value;
 }
 
 export function ev(e: Expr): Value {

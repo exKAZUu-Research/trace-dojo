@@ -1,3 +1,4 @@
+import { lower } from './bytes';
 import { floatFitsInt, numericPrefix, toBool } from './conversions';
 import { deprecated } from './errors';
 import { formatFloatForMessage, toStr } from './operators';
@@ -246,7 +247,7 @@ export function matches(
     }
     default: {
       if (!(value instanceof PhpObject)) return false;
-      const cls = rt().classes.get(type.name.toLowerCase());
+      const cls = rt().classes.get(lower(type.name));
       return cls !== undefined && value.cls.isSubclassOf(cls);
     }
   }

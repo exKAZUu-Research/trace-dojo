@@ -39,7 +39,7 @@ export function upper(text: string): string {
   return text.replaceAll(/[a-z]+/g, (match) => match.toUpperCase());
 }
 
-/** The code points of a UTF-8 byte string, with each invalid byte standing alone, as mbstring counts them. */
+/** The code points of a UTF-8 byte string, with each invalid byte standing alone. */
 export function utf8Chars(bytes: string): string[] {
   const chars: string[] = [];
   let index = 0;

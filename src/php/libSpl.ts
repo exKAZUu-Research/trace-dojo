@@ -533,7 +533,7 @@ class FixedStorage {
   clone(): FixedStorage {
     const copy = new FixedStorage();
     rt().allocate(this.items.length);
-    copy.items = [...this.items];
+    copy.items = this.items.map(share);
     return copy;
   }
 
@@ -640,7 +640,7 @@ defineClass({
           const array = args[0] as PhpArray;
           if (args[1] === false) {
             rt().allocate(array.size);
-            fixedOf(object).items = array.values();
+            fixedOf(object).items = array.values().map(share);
           } else {
             const rawKeys = array.keys();
             if (rawKeys.some((key) => typeof key !== 'bigint' || key < 0n))
@@ -650,7 +650,7 @@ defineClass({
             for (const key of keys) size = Math.max(size, key + 1);
             rt().allocate(size);
             const items = Array.from({ length: size }, (): Value => null);
-            for (const [key, value] of array.entries()) items[Number(key)] = value;
+            for (const [key, value] of array.entries()) items[Number(key)] = share(value);
             fixedOf(object).items = items;
           }
           return object;

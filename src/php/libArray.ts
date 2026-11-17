@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 942 -- Keeps one PHP runtime concern and its shared helpers in one module.
+// code-gauge-allow-file fileNcss 989 -- Keeps one PHP runtime concern and its shared helpers in one module.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 // oxlint-disable unicorn/prefer-code-point -- PHP strings hold bytes as code units 0–255, which charCodeAt and fromCharCode read and write as they are.
 import { type Comparisons, type Entry, SortedWalk } from './arraySetWalk';
@@ -16,6 +16,7 @@ import { arrayIsShared, ElementPlace, share, VarPlace } from './places';
 import { rt } from './runtime';
 import {
   copyValueSlot,
+  deref,
   INT_MIN,
   type Key,
   type NativeContext,
@@ -125,18 +126,30 @@ defineAlias('sizeof', 'count');
 markInlined('count');
 markInlined('sizeof');
 
-function countRecursive(array: PhpArray, active = new Set<PhpArray>()): number {
-  if (active.has(array)) {
-    warn('count(): Recursion detected');
-    return 0;
+function countRecursive(array: PhpArray): number {
+  const active = new Set<PhpArray>();
+  const pending = [{ array, leave: false }];
+  let count = 0;
+  while (pending.length > 0) {
+    const item = pending.pop() as { array: PhpArray; leave: boolean };
+    if (item.leave) {
+      active.delete(item.array);
+      continue;
+    }
+    if (active.has(item.array)) {
+      warn('count(): Recursion detected');
+      continue;
+    }
+    active.add(item.array);
+    count += item.array.size;
+    pending.push({ array: item.array, leave: true });
+    const values = item.array.values();
+    for (let index = values.length - 1; index >= 0; index--) {
+      rt().spend();
+      const value = values[index];
+      if (value instanceof PhpArray) pending.push({ array: value, leave: false });
+    }
   }
-  active.add(array);
-  let count = array.size;
-  for (const item of array.values()) {
-    rt().spend();
-    if (item instanceof PhpArray) count += countRecursive(item, active);
-  }
-  active.delete(array);
   return count;
 }
 
@@ -270,46 +283,89 @@ defineFunction('array_merge(array ...$arrays): array', ({ args }) => {
 });
 defineFunction('array_merge_recursive(array ...$arrays): array', ({ args }) => {
   const result = new PhpArray();
-  for (const value of args) mergeRecursive(result, arr(value));
+  const combination = new ArrayCombination('merge');
+  for (const value of args) combination.run(result, arr(value));
   return result;
 });
 
-function mergeRecursive(target: PhpArray, source: PhpArray): void {
-  for (const [key, item] of source.entries()) {
-    if (typeof key === 'bigint') {
-      target.append(share(item));
-      continue;
+interface CombinationFrame {
+  target: PhpArray;
+  source: PhpArray;
+  entries: IterableIterator<[Key, Value | Ref]>;
+  sourceOrigin: object;
+  targetOrigin: object;
+}
+
+class ArrayCombination {
+  private readonly frames: CombinationFrame[] = [];
+  private readonly sources = new Set<object>();
+  private readonly targets = new Set<object>();
+
+  constructor(private readonly mode: 'merge' | 'replace') {}
+
+  run(target: PhpArray, source: PhpArray): void {
+    this.push(target, source, target, source);
+    while (this.frames.length > 0) {
+      rt().spend();
+      const frame = this.frames.at(-1) as CombinationFrame;
+      const next = frame.entries.next();
+      if (next.done) {
+        this.frames.pop();
+        this.sources.delete(frame.sourceOrigin);
+        this.targets.delete(frame.targetOrigin);
+      } else this.combineSlot(frame.target, next.value[0], next.value[1]);
     }
+  }
+
+  // code-gauge-allow functionCognitiveComplexity 20 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+  private combineSlot(target: PhpArray, key: Key, slot: Value | Ref): void {
+    if (this.mode === 'merge' && typeof key === 'bigint') {
+      target.append(copyValueSlot(slot));
+      return;
+    }
+    const item = deref(slot);
     const existing = target.get(key);
-    if (existing === undefined) {
-      target.set(key, share(item));
-      continue;
+    if (
+      existing === undefined ||
+      (this.mode === 'replace' && !(existing instanceof PhpArray && item instanceof PhpArray))
+    ) {
+      target.setSlot(key, copyValueSlot(slot));
+      return;
     }
-    const merged = existing instanceof PhpArray ? existing.copy() : PhpArray.list([existing]);
-    if (item instanceof PhpArray) mergeRecursive(merged, item);
-    else merged.append(item);
-    target.set(key, merged);
+    if (this.mode === 'replace' && slot instanceof Ref && target.map.get(key) === slot)
+      throwError('Error', 'Recursion detected');
+    const composite = existing instanceof PhpArray || existing instanceof PhpObject;
+    if (this.mode === 'merge' && composite && this.targets.has(existing)) throwError('Error', 'Recursion detected');
+    const merged =
+      existing instanceof PhpArray
+        ? existing.copy()
+        : existing instanceof PhpObject
+          ? (cast('array', existing) as PhpArray)
+          : PhpArray.list([existing]);
+    target.setSlot(key, merged);
+    const incoming = this.mode === 'merge' && item instanceof PhpObject ? (cast('array', item) as PhpArray) : item;
+    if (incoming instanceof PhpArray) this.push(merged, incoming, composite ? existing : merged, item as object);
+    else merged.append(incoming);
+  }
+
+  private push(target: PhpArray, source: PhpArray, targetOrigin: object, sourceOrigin: object): void {
+    if (this.sources.has(sourceOrigin)) throwError('Error', 'Recursion detected');
+    this.sources.add(sourceOrigin);
+    this.targets.add(targetOrigin);
+    this.frames.push({ target, source, entries: source.map.entries(), targetOrigin, sourceOrigin });
   }
 }
 
 defineFunction('array_replace(array $array, array ...$replacements): array', ({ args }) => {
   const result = arr(args[0]).copy();
   for (const replacement of args.slice(1))
-    for (const [key, item] of arr(replacement).entries()) result.set(key, share(item));
+    for (const [key, slot] of arr(replacement).map) result.setSlot(key, copyValueSlot(slot));
   return result;
 });
 defineFunction('array_replace_recursive(array $array, array ...$replacements): array', ({ args }) => {
-  const replace = (base: PhpArray, replacement: PhpArray): PhpArray => {
-    const result = base.copy();
-    for (const [key, item] of replacement.entries()) {
-      const existing = result.get(key);
-      if (item instanceof PhpArray && existing instanceof PhpArray) result.set(key, replace(existing, item));
-      else result.set(key, share(item));
-    }
-    return result;
-  };
-  let result = arr(args[0]);
-  for (const replacement of args.slice(1)) result = replace(result, arr(replacement));
+  const result = arr(args[0]).copy();
+  const combination = new ArrayCombination('replace');
+  for (const replacement of args.slice(1)) combination.run(result, arr(replacement));
   return result;
 });
 defineFunction('array_combine(array $keys, array $values): array', ({ args }) => {
@@ -652,7 +708,7 @@ defineFunction('array_map(?callable $callback, array $array, array ...$arrays): 
     const result = new PhpArray();
     rt().held.push(first);
     try {
-      for (const [key, value] of first.entries()) result.set(key, share(callCallback(callback, [value])));
+      for (const [key, value] of first.entries()) result.setSlot(key, callbackSlot(callback, [value]));
     } finally {
       rt().held.pop();
     }
@@ -663,15 +719,25 @@ defineFunction('array_map(?callable $callback, array $array, array ...$arrays): 
       throwError('TypeError', `array_map(): Argument #${index + 3} must be of type array, ${valueName(value)} given`);
     }
   }
-  const lists = [first, ...rest].map((value) => (value as PhpArray).values());
+  const lists = [first, ...rest].map((value) => [...(value as PhpArray).map.values()]);
   const length = Math.max(...lists.map((list) => list.length));
   const result = new PhpArray();
   for (let index = 0; index < length; index++) {
     const items = lists.map((list) => (index < list.length ? list[index] : null));
-    result.append(callback === null ? PhpArray.list(items) : share(callCallback(callback, items)));
+    result.append(callback === null ? PhpArray.copySlots(items) : callbackSlot(callback, items.map(deref)));
   }
   return result;
 });
+function callbackSlot(callback: Value, args: Value[]): Value | Ref {
+  const value = callCallback(callback, args);
+  const ref = rt().lastReturnRef;
+  rt().lastReturnRef = undefined;
+  if (!ref) return value;
+  ref.isRef = true;
+  ref.rc++;
+  return ref;
+}
+
 defineFunction('array_filter(array $array, ?callable $callback = null, int $mode = 0): array', ({ args }) => {
   const [array, callback = null, mode = 0n] = args;
   const result = new PhpArray();
@@ -774,11 +840,11 @@ defineFunction(
       ctx.args[2] === undefined || ctx.args[2] === null ? undefined : Number(ctx.args[2])
     );
     const replacementValue = ctx.args[3];
-    const replacement: [Key, Value][] =
+    const replacement: [Key, Value | Ref][] =
       replacementValue === undefined
         ? []
         : replacementValue instanceof PhpArray
-          ? replacementValue.values().map((value): [Key, Value] => [0n, share(value)])
+          ? [...replacementValue.map.values()].map((value): [Key, Value | Ref] => [0n, value])
           : [[0n, replacementValue]];
     const removed = rebuild(entries.slice(start, end), true);
     rebuild([...entries.slice(0, start), ...replacement, ...entries.slice(end)], true, array);

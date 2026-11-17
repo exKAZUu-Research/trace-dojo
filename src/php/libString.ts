@@ -318,7 +318,7 @@ function strReplace(args: Value[], refs: (Ref | undefined)[], insensitive: boole
   if (subject instanceof PhpArray) {
     const array = new PhpArray();
     for (const [key, item] of subject.entries()) {
-      array.set(key, item instanceof PhpArray ? item : replaceOne(toStr(item)));
+      array.set(key, replaceOne(toStr(item)));
     }
     result = array;
   } else result = replaceOne(toStr(subject));

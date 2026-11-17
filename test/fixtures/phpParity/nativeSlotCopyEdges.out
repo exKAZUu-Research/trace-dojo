@@ -1,0 +1,96 @@
+array(1) {
+  [0]=>
+  &int(3)
+}
+array(1) {
+  [0]=>
+  array(2) {
+    [0]=>
+    &int(3)
+    [1]=>
+    int(2)
+  }
+}
+array(1) {
+  ["x"]=>
+  &int(3)
+}
+array(1) {
+  ["x"]=>
+  &int(3)
+}
+array(1) {
+  [0]=>
+  &int(3)
+}
+array(1) {
+  ["x"]=>
+  &int(3)
+}
+array(1) {
+  [0]=>
+  &string(1) "b"
+}
+array(1) {
+  [0]=>
+  int(2)
+}
+array(1) {
+  [0]=>
+  int(3)
+}
+array(1) {
+  ["value"]=>
+  &int(4)
+}
+int(5)
+int(5)
+array(1) {
+  [0]=>
+  int(2)
+}
+array(1) {
+  [0]=>
+  int(2)
+}
+array(1) {
+  [0]=>
+  int(2)
+}
+int(2)
+int(2)
+int(2)
+int(2)
+int(2)
+
+Notice: Indirect modification of overloaded element of SplFixedArray has no effect in /main.php on line 26
+int(2)
+int(2)
+array(1) {
+  [0]=>
+  array(2) {
+    [0]=>
+    int(1)
+    [1]=>
+    int(2)
+  }
+}
+array(1) {
+  [0]=>
+  array(3) {
+    [0]=>
+    int(1)
+    [1]=>
+    int(2)
+    [2]=>
+    int(3)
+  }
+}
+array(1) {
+  [0]=>
+  &int(2)
+}
+array(1) {
+  [0]=>
+  &int(2)
+}

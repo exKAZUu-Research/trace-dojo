@@ -1,0 +1,26 @@
+Cannot modify readonly property Random\Randomizer::$engine
+Cannot unset readonly property Random\Randomizer::$engine
+Random\Engine\Mt19937
+Élève Пример
+Élève Пример
+
+Warning: Array to string conversion in /main.php on line 18
+
+Warning: Array to string conversion in /main.php on line 18
+array(1) {
+  [0]=>
+  string(5) "Array"
+}
+array(1) {
+  [0]=>
+  string(5) "Array"
+}
+Cannot assign by reference to overloaded object
+bool(true)
+array(1) {
+  [0]=>
+  array(1) {
+    [0]=>
+    int(1)
+  }
+}

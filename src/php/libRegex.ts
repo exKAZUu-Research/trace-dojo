@@ -8,7 +8,7 @@ import { toStr } from './operators';
 import { type Compiled, groupName, PatternError, translate } from './pcrePattern';
 import { rt } from './runtime';
 import { UnsupportedFeatureError } from './unsupported';
-import { PhpArray, type Ref, type Value } from './values';
+import { copyValueSlot, PhpArray, type Ref, type Value } from './values';
 
 const PREG_CONSTANTS: [string, bigint][] = [
   ['PREG_PATTERN_ORDER', 1n],
@@ -510,7 +510,7 @@ defineFunction('preg_grep(string $pattern, array $array, int $flags = 0): array|
     const status = { error: 0 };
     const matched = !matchesOf(compiled, toStr(value), 0, status).next().done;
     if (status.error !== 0) break;
-    if (matched !== invert) result.set(key, value);
+    if (matched !== invert) result.setSlot(key, copyValueSlot((args[1] as PhpArray).map.get(key) as Value | Ref));
   }
   return result;
 });

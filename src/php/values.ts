@@ -1,7 +1,8 @@
-// code-gauge-allow-file fileNcss 472 -- Keeps one PHP runtime concern and its shared helpers in one module.
+// code-gauge-allow-file fileNcss 479 -- Keeps one PHP runtime concern and its shared helpers in one module.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import type { TurtleState } from '../interpreter/turtleWorld';
 import type { ClassDecl, FunctionDecl } from './ast';
+import { lower } from './bytes';
 
 /**
  * A PHP value. Strings are byte strings: each UTF-16 code unit holds one byte (0–255), so that lengths and offsets
@@ -13,7 +14,7 @@ export type Key = bigint | string;
 
 /** A variable or element slot that references share (`$a = &$b`). */
 export class Ref {
-  /** How many variables, elements, and properties hold this slot, once it is a reference. */
+  /** The number of storage and call-argument holders of this slot. */
   private holders = 1;
   get rc(): number {
     return this.holders;
@@ -101,14 +102,18 @@ export class PhpArray {
 
   constructor(map?: Map<Key, Value | Ref>) {
     this.map = map ?? new Map();
-    for (const [key, slot] of this.map) trackOwner(slot, this, key);
+    for (const [key, slot] of this.map) this.trackSlot(key, slot);
     // An array costs a slot of its own besides its elements, as a program of many small arrays holds their tables too.
     allocationHandler(this.map.size + 1, this.map.size);
   }
 
   static list(values: Value[]): PhpArray {
+    return PhpArray.copySlots(values);
+  }
+
+  static copySlots(values: Iterable<Value | Ref>): PhpArray {
     const array = new PhpArray();
-    for (const value of values) array.append(value);
+    for (const value of values) array.append(copyValueSlot(value));
     return array;
   }
 
@@ -172,17 +177,22 @@ export class PhpArray {
     }
     this.invalidate();
     if (slot instanceof PhpObject) slot.arrayHolders.push({ array: new WeakRef(this), key });
-    trackOwner(slot, this, key);
+    this.trackSlot(key, slot);
     this.map.set(key, slot);
   }
 
   replaceTable(map: Map<Key, Value | Ref>, nextFree: bigint): void {
     allocationHandler(Math.max(0, map.size - this.map.size), map.size);
     this.map = map;
-    for (const [key, slot] of map) trackOwner(slot, this, key);
+    for (const [key, slot] of map) this.trackSlot(key, slot);
     this.nextFree = nextFree;
     this.composite = [...map.values()].some((value) => value !== null && typeof value === 'object');
     this.invalidate();
+  }
+
+  private trackSlot(key: Key, slot: Value | Ref): void {
+    if (slot instanceof PhpArray) slot.shared = true;
+    trackOwner(slot, this, key);
   }
 
   trackCachedParent(parent: PhpArray): void {
@@ -432,7 +442,7 @@ export class PhpClass {
   ) {}
 
   get lname(): string {
-    return this.name.toLowerCase();
+    return lower(this.name);
   }
 
   findMethod(lname: string): Method | undefined {

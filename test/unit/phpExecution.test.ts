@@ -168,8 +168,7 @@ test.each([
   '<?php new SplFixedArray(1000001);',
   '<?php $a=new SplFixedArray(); $a->setSize(1000001);',
   '<?php SplFixedArray::fromArray([1000001 => 1]);',
-  '<?php $a=[]; for($i=0;$i<20000;$i++) $a=[$a]; echo count($a,1);',
-])('native allocation or host recursion failure remains a PHP result: %s', (source) => {
+])('native collection allocation failure remains a PHP result: %s', (source) => {
   const execution = run(source);
   expect(execution.kind === 'executed' && execution.stdout).toMatch(/^\nFatal error: Allowed memory size/);
 });
@@ -669,4 +668,32 @@ test('memory exhaustion stops destructor callbacks', () => {
   const result = run('<?php class N{function __destruct(){echo "never";}}$n=new N;str_repeat("x",1000001);');
   expect(result.kind === 'executed' && result.stdout).toMatch(/^\nFatal error: Allowed memory size/);
   expect(result.kind === 'executed' && result.stdout).not.toContain('never');
+});
+
+test.each(['return 1;', 'throw new Exception("replacement");'])(
+  'memory exhaustion bypasses finally replacement: %s',
+  (body) => {
+    const result = run(
+      `<?php function f(){try{str_repeat('x',1000000000);}finally{${body}}}try{echo f(),'never';}catch(Throwable $e){echo 'caught';}`
+    );
+    expect(result.kind === 'executed' && result.stdout).toMatch(/^\nFatal error: Allowed memory size/);
+    expect(result.kind === 'executed' && result.stdout).not.toMatch(/never|caught|replacement/);
+  }
+);
+
+test.each(['array_merge_recursive', 'array_replace_recursive'])(
+  'combines deep acyclic arrays without host recursion: %s',
+  (name) => {
+    const result = run(
+      `<?php $a=['k'=>1];for($i=0;$i<2000;$i++)$a=['k'=>$a];$b=${name}($a,$a);for($i=0;$i<2000;$i++)$b=$b['k'];echo is_array($b['k'])?$b['k'][0]:$b['k'];`
+    );
+    expect(result).toMatchObject({ kind: 'executed', stdout: '1' });
+  }
+);
+
+test('counts deep nested arrays without host recursion', () => {
+  expect(run('<?php $a=[];for($i=0;$i<30000;$i++)$a=[$a];echo count($a,COUNT_RECURSIVE);')).toMatchObject({
+    kind: 'executed',
+    stdout: '30000',
+  });
 });

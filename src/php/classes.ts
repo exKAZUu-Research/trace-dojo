@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 830 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 850 -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import type { ClassDecl, Expr, FunctionDecl, MethodDeclAst, PropertyDeclAst } from './ast';
 import builtinNames from './builtinNames.json';
@@ -871,6 +871,8 @@ export function checkIndirectModification(object: PhpObject, name: string, scope
   if (!decl || decl.isStatic) return;
   if (decl.isReadonly) {
     const slot = object.props.get(decl.key);
+    const value = slot instanceof Ref ? slot.v : slot;
+    if (value instanceof PhpObject) return;
     if (slot !== UNINIT && slot !== undefined)
       throwError('Error', `Cannot indirectly modify readonly property ${decl.cls.name}::$${name}`);
   } else if (!canWriteProp(decl, scope)) {
@@ -893,28 +895,24 @@ export function propRef(object: PhpObject, name: string, scope: PhpClass | undef
   const decl = lookupProp(object.cls, name, scope);
   const key = decl && !decl.isStatic ? decl.key : name;
   if (decl && !decl.isStatic && !canAccessProp(decl, scope)) {
+    const overloaded = overloadedPropertyReference(object, name);
+    if (overloaded) return overloaded;
     throwError('Error', `Cannot access ${decl.visibility} property ${object.cls.name}::$${name}`);
+  }
+  let slot = object.props.get(key);
+  const value = slot instanceof Ref ? slot.v : slot;
+  if (decl?.isReadonly && value instanceof PhpObject) {
+    const temporary = new Ref(value);
+    temporary.rc = 0;
+    return temporary;
   }
   if (acquire && decl?.isReadonly)
     throwError('Error', `Cannot acquire reference to readonly property ${decl.cls.name}::$${name}`);
   checkIndirectModification(object, name, scope);
-  let slot = object.props.get(key);
   if (slot instanceof Ref) return slot;
   if (slot === undefined && !decl) {
-    const magic = object.cls.findMethod('__get');
-    if (magic && !object.guards?.has(`get:${name}`)) {
-      const runtime = rt();
-      runtime.lastReturnRef = undefined;
-      const value = guarded(object, `get:${name}`, () => callMagic(object, magic, [name]));
-      const returned = runtime.lastReturnRef;
-      runtime.lastReturnRef = undefined;
-      // A change goes through only to what `&__get` returns by reference; any other value is a temporary copy.
-      if (returned) return returned;
-      if (!(value instanceof PhpObject)) {
-        notice(`Indirect modification of overloaded property ${object.cls.name}::$${name} has no effect`);
-      }
-      return new Ref(value);
-    }
+    const overloaded = overloadedPropertyReference(object, name);
+    if (overloaded) return overloaded;
     createDynamicProp(object, name);
   }
   if (
@@ -932,7 +930,24 @@ export function propRef(object: PhpObject, name: string, scope: PhpClass | undef
   return ref;
 }
 
-// code-gauge-allow functionCognitiveComplexity 19 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+function overloadedPropertyReference(object: PhpObject, name: string): Ref | undefined {
+  const magic = object.cls.findMethod('__get');
+  if (!magic || object.guards?.has(`get:${name}`)) return;
+  const runtime = rt();
+  runtime.lastReturnRef = undefined;
+  const value = guarded(object, `get:${name}`, () => callMagic(object, magic, [name]));
+  const returned = runtime.lastReturnRef;
+  runtime.lastReturnRef = undefined;
+  if (returned) return returned;
+  if (!(value instanceof PhpObject))
+    notice(`Indirect modification of overloaded property ${object.cls.name}::$${name} has no effect`);
+  const temporary = new Ref(value);
+  temporary.rc = 0;
+  return temporary;
+}
+
+// code-gauge-allow functionCognitiveComplexity 25 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+// code-gauge-allow functionNcss 32 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 export function bindPropertyReference(object: PhpObject, name: string, ref: Ref, scope: PhpClass | undefined): void {
   const decl = lookupProp(object.cls, name, scope);
   if ((!decl || !canAccessProp(decl, scope)) && object.cls.findMethod('__get')) {
@@ -946,7 +961,16 @@ export function bindPropertyReference(object: PhpObject, name: string, ref: Ref,
   if (decl && !decl.isStatic) {
     if (!canAccessProp(decl, scope))
       throwError('Error', `Cannot access ${decl.visibility} property ${object.cls.name}::$${name}`);
-    if (decl.isReadonly) throwError('Error', `Cannot indirectly modify readonly property ${decl.cls.name}::$${name}`);
+    if (decl.isReadonly) {
+      const slot = object.props.get(decl.key);
+      const value = slot instanceof Ref ? slot.v : slot;
+      throwError(
+        'Error',
+        value instanceof PhpObject
+          ? 'Cannot assign by reference to overloaded object'
+          : `Cannot indirectly modify readonly property ${decl.cls.name}::$${name}`
+      );
+    }
     checkIndirectModification(object, name, scope);
     if (decl.type) attachPropertyReference(ref, decl, object);
   } else if (!object.props.has(name)) createDynamicProp(object, name);

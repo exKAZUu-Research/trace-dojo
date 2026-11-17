@@ -39,7 +39,7 @@ import { formatPrintf } from './sprintf';
 import { constantKey, defineConstant as defineUserConstant } from './statements';
 import { setCallableCheck } from './types';
 import { UnsupportedFeatureError } from './unsupported';
-import { isClosure, PhpArray, PhpClass, PhpObject, Ref, UNINIT, type Value } from './values';
+import { copyValueSlot, isClosure, PhpArray, PhpClass, PhpObject, Ref, UNINIT, type Value } from './values';
 
 // Constants ------------------------------------------------------------------------------------------------------------
 
@@ -430,7 +430,6 @@ defineFunction('get_called_class(): string', () => {
   if (!cls) throwError('Error', 'get_called_class() must be called from within a class');
   return cls.name;
 });
-// code-gauge-allow functionCognitiveComplexity 22 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 defineFunction('get_object_vars(object $object): array', ({ args }) => {
   const object = args[0] as PhpObject;
   const scope = rt().frame.scope;
@@ -441,11 +440,11 @@ defineFunction('get_object_vars(object $object): array', ({ args }) => {
     if (decl.hooks?.get) array.set(decl.name, classesModule.readProp(object, decl.name, scope));
     else {
       const slot = object.props.get(decl.key);
-      if (slot !== undefined && slot !== UNINIT) array.set(decl.name, slot instanceof Ref ? slot.v : slot);
+      if (slot !== undefined && slot !== UNINIT) array.setSlot(decl.name, copyValueSlot(slot));
     }
   }
   for (const [key, slot] of object.props) {
-    if (!declaredKeys.has(key) && slot !== UNINIT) array.set(key, slot instanceof Ref ? slot.v : slot);
+    if (!declaredKeys.has(key) && slot !== UNINIT) array.setSlot(key, copyValueSlot(slot));
   }
   return array;
 });
@@ -718,7 +717,7 @@ defineFunction(
   'get_defined_vars(): array',
   () => {
     const array = new PhpArray();
-    for (const [name, ref] of rt().frame.vars) array.set(normalizeKeyString(name), ref.v);
+    for (const [name, ref] of rt().frame.vars) array.setSlot(normalizeKeyString(name), copyValueSlot(ref));
     return array;
   },
   true

@@ -166,7 +166,7 @@ function writtenObject(e: Expr): Value {
 }
 
 // code-gauge-allow functionNcss 32 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
-// code-gauge-allow functionCognitiveComplexity 23 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+// code-gauge-allow functionCognitiveComplexity 25 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 function propPlace(object: PhpObject, name: string): Place {
   const scope = rt().frame.scope;
   return {
@@ -193,6 +193,11 @@ function propPlace(object: PhpObject, name: string): Place {
     },
     nested() {
       const decl = classesModule.lookupProp(object.cls, name, scope);
+      if (
+        ((decl && !classesModule.canAccessProp(decl, scope)) || !issetPropExists(object, name, scope)) &&
+        object.cls.findMethod('__get')
+      )
+        return new RefPlace(propRef(object, name, scope));
       if (decl?.hooks?.get && !object.guards?.has(`hook:${name}`)) {
         classesModule.checkIndirectModification(object, name, scope);
         const runtime = rt();
@@ -204,9 +209,6 @@ function propPlace(object: PhpObject, name: string): Place {
         if (!(value instanceof PhpObject))
           throwError('Error', `Indirect modification of ${decl.cls.name}::$${name} is not allowed`);
         return new RefPlace(new Ref(value));
-      }
-      if (!issetPropExists(object, name, scope) && object.cls.findMethod('__get')) {
-        return new RefPlace(propRef(object, name, scope));
       }
       classesModule.checkIndirectModification(object, name, scope);
       return this;

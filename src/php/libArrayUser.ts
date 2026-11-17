@@ -7,8 +7,7 @@ import { checkSetArguments, comparisonSign, userComparisonCaller } from './libAr
 import { isCallable } from './libCore';
 import { defineFunction } from './native';
 import { toStr } from './operators';
-import { share } from './places';
-import { PhpArray, type Value } from './values';
+import { copyValueSlot, PhpArray, type Ref, type Value } from './values';
 import { zendSort } from './zendSort';
 
 // The array diffs and intersections that take comparison callbacks. Programs see the order of the callbacks' calls, so
@@ -101,15 +100,13 @@ function splitCallbacks(name: string, args: Value[], count: number): [Value[], V
   return [args.slice(0, first), args.slice(first)];
 }
 
-/** Walks the sorted lists of php_array_intersect and php_array_diff together, as their loops do. */
-/** Transcribes php_array_intersect_key and php_array_diff_key, which look up each key of the first array. */
 function lookupOperation(arrays: PhpArray[], intersect: boolean, same: (a: Value, b: Value) => number): PhpArray {
   const [first, ...others] = arrays;
   const result = new PhpArray();
   for (const [key, value] of first.entries()) {
     const matches = (other: PhpArray): boolean => other.has(key) && same(value, other.get(key) as Value) === 0;
     const keep = intersect ? others.every((other) => matches(other)) : !others.some((other) => matches(other));
-    if (keep) result.set(key, share(value));
+    if (keep) result.setSlot(key, copyValueSlot(first.map.get(key) as Value | Ref));
   }
   return result;
 }

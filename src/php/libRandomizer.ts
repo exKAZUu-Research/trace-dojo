@@ -375,7 +375,7 @@ const randomizerMethods: NativeMethod[] = [
   },
   {
     signature: 'shuffleArray(array $array): array',
-    impl: ({ thisObj, args }) => PhpArray.list(shuffle(algoOf(thisObj), (args[0] as PhpArray).values())),
+    impl: ({ thisObj, args }) => PhpArray.copySlots(shuffle(algoOf(thisObj), [...(args[0] as PhpArray).map.values()])),
   },
   {
     signature: 'shuffleBytes(string $bytes): string',
@@ -654,6 +654,6 @@ defineClass({
 defineClass({
   name: String.raw`Random\Randomizer`,
   isFinal: true,
-  props: [{ name: 'engine', visibility: 'public', defaultValue: () => null, typed: true }],
+  props: [{ name: 'engine', visibility: 'public', defaultValue: () => null, typed: true, isReadonly: true }],
   methods: randomizerMethods,
 });
