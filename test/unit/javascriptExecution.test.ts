@@ -1553,6 +1553,18 @@ function main() {
 main();`,
   ],
   [
+    'Function.prototype as a callable function and functions printed with their constructors',
+    `console.log(typeof Function.prototype, JSON.stringify(Function.prototype.name), Function.prototype.length, Function.prototype());
+console.log(Function.prototype, [Function.prototype], Object.getPrototypeOf(() => 1) === Function.prototype);
+console.log(Object.prototype.toString.call(Function.prototype), String(Object.getPrototypeOf(class {})));
+try { new Function.prototype(); } catch (e) { console.log(e.message); }
+console.log(Function.prototype.call(), Function.prototype.bind(null).name);
+function f() {} Object.setPrototypeOf(f, Object.prototype); console.log(f);
+const g = () => 1; Object.setPrototypeOf(g, null); console.log(g);
+const h = function () {}; Object.setPrototypeOf(h, {}); console.log(h, [h]);
+async function af() {} function* gf() {} console.log(af, gf, Math.max, class A {});`,
+  ],
+  [
     'object literals with accessors and spreads named in iteration errors',
     `const o = { a: 1 }, k = "z";
 function main() {

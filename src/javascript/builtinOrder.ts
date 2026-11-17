@@ -26,6 +26,7 @@ const V8_MEMBER_ORDER: Record<string, string> = {
   'Object.prototype':
     'constructor,__defineGetter__,__defineSetter__,hasOwnProperty,__lookupGetter__,__lookupSetter__,isPrototypeOf,propertyIsEnumerable,toString,valueOf,__proto__,toLocaleString',
   'Error.prototype': 'constructor,name,message,toString',
+  'Function.prototype': 'length,name,constructor,apply,bind,call,toString',
   Error: 'length,name,prototype,captureStackTrace,prepareStackTrace,isError,stackTraceLimit',
   Symbol:
     'length,name,prototype,for,keyFor,asyncIterator,hasInstance,isConcatSpreadable,iterator,match,matchAll,replace,search,species,split,toPrimitive,toStringTag,unscopables,dispose,asyncDispose',

@@ -273,7 +273,7 @@ function frameOf(ctx: Context, value: JsObject, constructor: string | undefined,
   if (value.turtle) return `Turtle { x: ${value.turtle.x}, y: ${value.turtle.y} }`;
   let base = '';
   let open = '{';
-  if (value instanceof JsFunction) base = functionBase(runtime, value);
+  if (value instanceof JsFunction) base = functionBase(runtime, value, constructor);
   else if (value.regexp) base = String(value.regexp);
   else if (dateValueOf(value) !== undefined) base = dateBase(value, constructor);
   else if (value.isError && constructor !== 'Object') base = errorText(runtime, value, constructor);
@@ -371,12 +371,20 @@ function enumerableKeys(runtime: Runtime, object: JsObject, showHidden: boolean)
   return listed;
 }
 
-function functionBase(runtime: Runtime, fn: JsFunction): string {
+/**
+ * How Node.js names a function: its kind and name, with `(null prototype)` without a constructor and the constructor's
+ * name after it when that is not a function's, as for `Function.prototype`, whose constructor is `Object`.
+ */
+function functionBase(runtime: Runtime, fn: JsFunction, constructor: string | undefined): string {
   const name = runtime.functionName(fn);
   if (fn.behavior.kind !== 'class') {
     const node = fn.behavior.kind === 'user' ? fn.behavior.node : undefined;
     const kind = `${node?.isAsync ? 'Async' : ''}${node?.isGenerator ? 'Generator' : ''}Function`;
-    return name ? `[${kind}: ${name}]` : `[${kind} (anonymous)]`;
+    const prototype = constructor === undefined ? ' (null prototype)' : '';
+    const base = name ? `[${kind}${prototype}: ${name}]` : `[${kind}${prototype} (anonymous)]`;
+    return constructor === undefined || constructor === kind || constructor === 'Function'
+      ? base
+      : `${base} ${constructor}`;
   }
   const superName = fn.proto instanceof JsFunction ? runtime.functionName(fn.proto) : '';
   return `[class ${name || '(anonymous)'}${superName ? ` extends ${superName}` : ''}]`;

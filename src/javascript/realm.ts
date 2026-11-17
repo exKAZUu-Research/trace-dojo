@@ -80,7 +80,12 @@ export class RealmBuilder {
     const asyncIteratorPrototype = new JsObject(objectPrototype);
     this.realm = {
       objectPrototype,
-      functionPrototype: new JsObject(objectPrototype),
+      // Function.prototype is itself a function that returns `undefined`, as calling it shows.
+      functionPrototype: new JsFunction(objectPrototype, {
+        kind: 'native',
+        run: () => {},
+        isConstructor: false,
+      }),
       // Array.prototype is itself an empty array, as `Array.isArray(Array.prototype)` shows.
       arrayPrototype: new JsArray(objectPrototype, []),
       stringPrototype: new JsObject(objectPrototype),

@@ -3,6 +3,7 @@ import { listFromArrayLike } from './arrayOps';
 import { formatLogArguments } from './consoleFormat';
 import { formatTable } from './consoleTable';
 import { inspect, inspectValue } from './inspect';
+import { defineFunctionProperties } from './memberProperties';
 import type { ErrorName, RealmBuilder } from './realm';
 import { toInteger } from './realmArrays';
 import { dateValueOf, hostLocales, hostOptions } from './realmDate';
@@ -162,6 +163,7 @@ function collectProperties(runtime: Runtime, value: Value, entry: (key: string, 
 
 function defineFunction(builder: RealmBuilder): void {
   const { functionPrototype } = builder.realm;
+  defineFunctionProperties(functionPrototype as JsFunction, '', 0);
   builder.defineClass(
     'Function',
     1,
