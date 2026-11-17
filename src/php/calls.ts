@@ -245,7 +245,7 @@ function bindNative(
   }
   // Only call_user_func passes on named arguments its variadic parameter collects; PHP's other functions refuse them,
   // after checking the arguments they did match.
-  const refusesNamed = named !== undefined && fn.name !== 'call_user_func';
+  const refusesNamed = named !== undefined && fn.name !== 'call_user_func' && !fn.acceptsNamed;
   if (refusesNamed && given < required) {
     throwError(
       'ArgumentCountError',

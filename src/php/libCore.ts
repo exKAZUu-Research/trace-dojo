@@ -2,7 +2,7 @@
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import { lower } from './bytes';
 import { callCallback, callTargetOf, callValue } from './callables';
-import { callStack, setCallableExplainer } from './calls';
+import { type ArgValue, callStack, setCallableExplainer } from './calls';
 import * as classesModule from './classes';
 import { findClass, lookupMethod, visibleProps } from './classes';
 import { debugType, getType, isNumericString, normalizeKeyString, valueName } from './conversions';
@@ -38,7 +38,7 @@ import { formatPrintf } from './sprintf';
 import { constantKey, defineConstant as defineUserConstant } from './statements';
 import { setCallableCheck } from './types';
 import { UnsupportedFeatureError } from './unsupported';
-import { isClosure, PhpArray, PhpClass, PhpObject, type Value } from './values';
+import { isClosure, PhpArray, PhpClass, PhpObject, Ref, type Value } from './values';
 
 // Constants ------------------------------------------------------------------------------------------------------------
 
@@ -321,13 +321,15 @@ defineFunction('call_user_func(callable $callback, mixed ...$args): mixed', ({ a
 });
 defineFunction('call_user_func_array(callable $callback, array $args): mixed', ({ args, row }) => {
   const array = args[1] as PhpArray;
-  const argValues: { v: Value; name?: string }[] = [];
-  for (const [key, v] of array.entries()) {
-    if (typeof key === 'string') argValues.push({ v, name: key });
+  const argValues: ArgValue[] = [];
+  for (const [key, slot] of array.map) {
+    const ref = slot instanceof Ref && slot.isRef ? slot : undefined;
+    const v = slot instanceof Ref ? slot.v : slot;
+    if (typeof key === 'string') argValues.push({ v, ref, name: key });
     else {
       if (argValues.some((arg) => arg.name !== undefined))
         throwError('Error', 'Cannot use positional argument after named argument during unpacking');
-      argValues.push({ v });
+      argValues.push({ v, ref });
     }
   }
   return callValue(args[0], argValues, row);

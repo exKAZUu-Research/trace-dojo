@@ -1,5 +1,6 @@
 // oxlint-disable unicorn/prefer-code-point -- PHP strings hold bytes as code units 0–255, which charCodeAt reads as they are.
-import { codePointBytes } from './bytes';
+import { codePointBytes, dec, enc } from './bytes';
+import html5Entities from './html5Entities.json';
 
 /** The named entities of HTML 4.01, which `htmlentities` writes and `html_entity_decode` reads, by code point. */
 export const HTML401_ENTITIES: readonly (readonly [number, string])[] = [
@@ -283,8 +284,7 @@ const BASIC_ENTITIES = new Map([
 const BASIC_CODES = new Map([...BASIC_ENTITIES].map(([code, name]) => [name, code]));
 
 /**
- * Escapes UTF-8 text as `htmlspecialchars` (`all` false) or `htmlentities` (`all` true) does. HTML5 uses the
- * HTML 4.01 entities plus `&apos;`.
+ * Escapes UTF-8 text as `htmlspecialchars` (`all` false) or `htmlentities` (`all` true) does.
  */
 // code-gauge-allow functionCognitiveComplexity 23 -- Transcribes PHP's algorithm for this function step by step, whose branches mirror PHP's.
 export function escapeHtml(text: string, flags: bigint, all: boolean, doubleEncode: boolean): string {
@@ -303,6 +303,15 @@ export function escapeHtml(text: string, flags: bigint, all: boolean, doubleEnco
       result += entityLength > 0 ? text.slice(index - 1, index + entityLength) : '&amp;';
       index += entityLength;
     } else {
+      if (all && doctype === Doctype.Html5 && index < text.length) {
+        const [nextLength] = nextChar(text, index);
+        const pair = HTML5_CANONICAL.get(char + text.slice(index, index + nextLength));
+        if (pair) {
+          result += pair;
+          index += nextLength;
+          continue;
+        }
+      }
       const name = entityFor(code, flags, all);
       if (name) result += `&${name};`;
       else if (flags & DISALLOWED && !isAllowed(code, doctype)) result += REPLACEMENT;
@@ -331,7 +340,7 @@ export function decodeHtml(text: string, flags: bigint, all: boolean): string {
       result += '&';
       continue;
     }
-    result += codePointBytes(entity.code);
+    result += ('text' in entity ? entity.text : undefined) ?? codePointBytes(entity.code);
     index = entity.end;
   }
   return result;
@@ -341,7 +350,19 @@ export function decodeHtml(text: string, flags: bigint, all: boolean): string {
  * The characters `get_html_translation_table` lists and their entities, in code point order. `latin1` gives single-byte
  * keys for ISO-8859-1 and leaves out the characters it cannot hold.
  */
+const HTML5_CANONICAL = new Map(Object.entries(html5Entities.canonical).map(([text, entity]) => [enc(text), entity]));
+const HTML5_NAMES = new Map(Object.entries(html5Entities.names).map(([name, text]) => [name, enc(text)]));
+
 export function translationTable(all: boolean, flags: bigint, latin1: boolean): [string, string][] {
+  if (all && doctypeOf(flags) === Doctype.Html5) {
+    return [...HTML5_CANONICAL]
+      .filter(
+        ([text]) =>
+          quoteAllowed(dec(text).codePointAt(0) as number, flags) &&
+          (!latin1 || (dec(text).length === 1 && dec(text).charCodeAt(0) <= 255))
+      )
+      .map(([text, entity]) => [latin1 ? dec(text) : text, entity]);
+  }
   const codes =
     all && doctypeOf(flags) !== Doctype.Xml1 ? [...ENTITY_BY_CODE.keys(), 0x27] : [...BASIC_ENTITIES.keys(), 0x27];
   const entries: [string, string][] = [];
@@ -416,10 +437,16 @@ function namedEntity(
   index: number,
   doctype: Doctype,
   all: boolean
-): { code: number; end: number } | undefined {
+): { code: number; end: number; text?: string } | undefined {
   NAME.lastIndex = index;
   const name = NAME.exec(text)?.[1];
   if (!name) return undefined;
+  if (all && doctype === Doctype.Html5) {
+    const text = HTML5_NAMES.get(name);
+    return text === undefined
+      ? undefined
+      : { code: dec(text).codePointAt(0) as number, end: index + name.length, text };
+  }
   let code = (all && doctype !== Doctype.Xml1 ? CODE_BY_ENTITY : BASIC_CODES).get(name);
   if (name === 'apos' && doctype !== Doctype.Html401) code = 0x27;
   return code === undefined ? undefined : { code, end: index + name.length };
@@ -440,6 +467,7 @@ function entityFor(code: number, flags: bigint, all: boolean): string | undefine
   if (!quoteAllowed(code, flags)) return undefined;
   const doctype = doctypeOf(flags);
   if (code === 0x27) return doctype === Doctype.Html401 || (all && doctype === Doctype.Xhtml) ? '#039' : 'apos';
+  if (all && doctype === Doctype.Html5) return HTML5_CANONICAL.get(codePointBytes(code))?.slice(1, -1);
   return (all && doctype !== Doctype.Xml1 ? ENTITY_BY_CODE : BASIC_ENTITIES).get(code);
 }
 

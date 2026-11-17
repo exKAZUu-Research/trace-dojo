@@ -11,7 +11,7 @@ import { cast } from './interp';
 import { naturalCompare } from './libString';
 import { defineAlias, defineConstant, defineFunction, markInlined } from './native';
 import { arithmetic, compare, looseEquals, strictEquals, toFloat, toKey, toStr } from './operators';
-import { ElementPlace, share, VarPlace } from './places';
+import { arrayIsShared, ElementPlace, share, VarPlace } from './places';
 import { rt } from './runtime';
 import { INT_MIN, type Key, type NativeContext, PhpArray, PhpObject, Ref, UNINIT, type Value } from './values';
 import { zendSort } from './zendSort';
@@ -45,7 +45,7 @@ const arr = (value: Value): PhpArray => value as PhpArray;
 function writableArray(ctx: NativeContext, index: number): PhpArray {
   const ref = ctx.refs[index] as Ref;
   let array = ref.v as PhpArray;
-  if (array.shared) {
+  if (arrayIsShared(array)) {
     array = array.copy();
     ref.v = array;
   }
@@ -550,7 +550,7 @@ defineFunction(
     checkExtractArguments(mode, prefix);
     const byReference = (flags & 256n) !== 0n;
     let array = (refs[0]?.v ?? args[0]) as PhpArray;
-    if (byReference && array.shared) {
+    if (byReference && arrayIsShared(array)) {
       array = array.copy();
       if (refs[0]) refs[0].v = array;
     }
@@ -670,7 +670,7 @@ for (const name of ['array_walk', 'array_walk_recursive']) {
 function walkValues(ref: Ref, ctx: NativeContext, recursive: boolean, active: Set<PhpArray | PhpObject>): void {
   let container = ref.v as PhpArray | PhpObject;
   if (active.has(container)) throwError('Error', 'Recursion detected');
-  if (container instanceof PhpArray && container.shared) {
+  if (container instanceof PhpArray && arrayIsShared(container)) {
     container = container.copy();
     ref.v = container;
   }

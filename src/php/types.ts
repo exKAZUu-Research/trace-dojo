@@ -135,7 +135,7 @@ function coerceScalar(value: Value, type: TypeDecl): Value | typeof NO_MATCH {
       }
     }
     if (wantsBool && !wantsInt && !wantsFloat) return value !== '' && value !== '0';
-    if (wantsBool && prefix === undefined) return value !== '' && value !== '0';
+    if (wantsBool && !prefix?.whole) return value !== '' && value !== '0';
     return NO_MATCH;
   }
   if (value === null) {

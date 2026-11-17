@@ -172,9 +172,7 @@ function createThrowable(className: string, message: string, code = 0n): PhpObje
 /** Calls a user error handler set with `set_error_handler`, telling whether it handled the error. */
 function callUserHandler(handler: Value, level: bigint, message: string, row: number): boolean {
   const runtime = rt();
-  const saved = runtime.errorHandlers;
-  // The handler runs without itself, so that an error inside it reaches the default handling.
-  runtime.errorHandlers = [];
+  runtime.activeErrorHandlers.add(handler);
   try {
     const result = callValue(
       handler,
@@ -183,7 +181,7 @@ function callUserHandler(handler: Value, level: bigint, message: string, row: nu
     );
     return result !== false;
   } finally {
-    runtime.errorHandlers = saved;
+    runtime.activeErrorHandlers.delete(handler);
   }
 }
 

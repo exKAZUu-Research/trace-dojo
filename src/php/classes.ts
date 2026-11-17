@@ -11,6 +11,7 @@ import { coerce, describeType, NO_MATCH, typeToString } from './types';
 import {
   type Callable,
   type ClassConst,
+  dropped,
   type Method,
   type Param,
   PhpArray,
@@ -230,6 +231,7 @@ function addProperty(cls: PhpClass, ast: PropertyDeclAst): void {
     let cached: { value: Value } | undefined;
     decl.defaultValue = () => {
       cached ??= { value: checkPropertyDefault(decl, evaluateInClass(expression, cls)) };
+      if (cached.value instanceof PhpArray) cached.value.persistentHolder = true;
       return share(cached.value);
     };
   }
@@ -742,14 +744,20 @@ export function writeProp(object: PhpObject, name: string, value: Value, scope: 
     }
     const coerced = decl.type ? coerceProperty(decl, value, object) : value;
     const slot = object.props.get(decl.key);
-    if (slot instanceof Ref) slot.v = coerced;
-    else object.props.set(decl.key, share(coerced));
+    if (slot instanceof Ref) slot.assign(coerced);
+    else {
+      object.props.set(decl.key, share(coerced));
+      dropped(slot);
+    }
     return;
   }
   const slot = object.props.get(name);
   if (slot !== undefined) {
-    if (slot instanceof Ref) slot.v = value;
-    else object.props.set(name, share(value));
+    if (slot instanceof Ref) slot.assign(value);
+    else {
+      object.props.set(name, share(value));
+      dropped(slot);
+    }
     return;
   }
   const magic = object.cls.findMethod('__set');
@@ -849,6 +857,13 @@ export function propRef(object: PhpObject, name: string, scope: PhpClass | undef
     }
     createDynamicProp(object, name);
   }
+  if (
+    (slot === UNINIT || slot === undefined) &&
+    decl?.type &&
+    coerce(null, decl.type, { strict: true, internal: false, scope: decl.cls }) === NO_MATCH
+  ) {
+    throwError('Error', `Cannot access uninitialized non-nullable property ${decl.cls.name}::$${name} by reference`);
+  }
   if (slot === UNINIT || slot === undefined) slot = null;
   const ref = new Ref(slot);
   ref.isRef = true;
@@ -891,12 +906,14 @@ export function unsetProp(object: PhpObject, name: string, scope: PhpClass | und
     if (slot instanceof Ref) slot.rc--;
     if (decl.type) object.props.set(decl.key, UNINIT);
     else object.props.delete(decl.key);
+    dropped(slot);
     return;
   }
   if (object.props.has(name)) {
     const slot = object.props.get(name);
     if (slot instanceof Ref) slot.rc--;
     object.props.delete(name);
+    dropped(slot);
     return;
   }
   const magic = object.cls.findMethod('__unset');

@@ -95,7 +95,7 @@ export function emitError(level: bigint, message: string, row = rt().row): void 
   const runtime = rt();
   for (let index = runtime.errorHandlers.length - 1; index >= 0; index--) {
     const { handler, mask } = runtime.errorHandlers[index];
-    if (handler === null) break;
+    if (handler === null || runtime.activeErrorHandlers.has(handler)) break;
     if ((mask & level) === 0n) break;
     if (callUserHandler(handler, level, message, row)) return;
     break;

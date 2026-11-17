@@ -458,9 +458,10 @@ defineFunction(
         if (limit !== -1) limit--;
       }
       if (delimCapture) {
-        for (let group = 1; group < match.texts.length; group++) {
-          const text = match.texts[group];
-          if (text !== undefined && !(noEmpty && text === '')) add(text, match.starts[group]);
+        const lastGroup = match.texts.findLastIndex((text) => text !== undefined);
+        for (let group = 1; group <= lastGroup; group++) {
+          const text = match.texts[group] ?? '';
+          if (!(noEmpty && text === '')) add(text, match.starts[group]);
         }
       }
       last = match.ends[0];

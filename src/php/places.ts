@@ -169,7 +169,7 @@ export class ValuePlace implements Place {
 export function writableContainer(place: Place): PhpArray | PhpObject | string {
   const value = place.get();
   if (value instanceof PhpArray) {
-    if (value.shared) {
+    if (arrayIsShared(value)) {
       const copy = value.copy();
       place.set(copy);
       return copy;
@@ -200,4 +200,15 @@ export function readElement(array: PhpArray, key: Key, quiet: boolean): Value {
     return null;
   }
   return value;
+}
+
+let sharingCheck: (array: PhpArray) => boolean = (array) => array.shared;
+
+export function setArraySharingCheck(check: typeof sharingCheck): void {
+  sharingCheck = check;
+}
+
+export function arrayIsShared(array: PhpArray): boolean {
+  if (!array.shared) return false;
+  return sharingCheck(array);
 }

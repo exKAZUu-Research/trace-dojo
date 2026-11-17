@@ -7,7 +7,8 @@ import { TurtleWorld } from '../interpreter/turtleWorld';
 import type { FunctionDecl, Program } from './ast';
 import { dec } from './bytes';
 import type { CompileNotice } from './converter';
-import { collectBeforeAllocation, collectGarbage, releaseDropped } from './garbage';
+import { arrayIsShared, collectBeforeAllocation, collectGarbage, releaseDropped } from './garbage';
+import { setArraySharingCheck } from './places';
 import { MersenneTwister } from './random';
 import {
   type Callable,
@@ -103,7 +104,9 @@ export class Frame {
 
 /** The order in which a program declared its global variables, which PHP's shutdown follows. */
 export class Runtime {
-  mbEncoding = 'utf8';
+  // oxlint-disable-next-line unicorn/text-encoding-identifier-case -- PHP returns this canonical encoding name.
+  mbEncoding = 'UTF-8';
+  readonly activeErrorHandlers = new Set<Value>();
   readonly budget = new ExecutionBudget();
   readonly io: ProgramIO;
   readonly world = new TurtleWorld();
@@ -341,3 +344,5 @@ export function withRuntime<T>(runtime: Runtime, run: () => T): T {
 }
 
 export type { PhpArray, Value };
+
+setArraySharingCheck((array) => (current ? arrayIsShared(current, array) : array.shared));

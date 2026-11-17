@@ -7,7 +7,7 @@ import { deprecated, throwError, warn } from './errors';
 import { iterate } from './interp';
 import { defineClass, type NativeMethod } from './native';
 import { toKey } from './operators';
-import { share } from './places';
+import { arrayIsShared, share } from './places';
 import './splInterfaces';
 import { rt } from './runtime';
 import { UnsupportedFeatureError } from './unsupported';
@@ -65,7 +65,7 @@ export class ArrayStorage {
 
   writable(): PhpArray {
     if (this.backing) return storageOf(this.backing).writable();
-    if (this.own.shared) this.own = this.own.copy();
+    if (arrayIsShared(this.own)) this.own = this.own.copy();
     return this.own;
   }
 

@@ -165,7 +165,7 @@ test.each([
   '<?php new SplFixedArray(1000001);',
   '<?php $a=new SplFixedArray(); $a->setSize(1000001);',
   '<?php SplFixedArray::fromArray([1000001 => 1]);',
-  '<?php $a=[]; $b=&$a; for($i=0;$i<20000;$i++){ $b[0]=[]; $b=&$b[0]; } unset($b); echo count($a,1);',
+  '<?php $a=[]; for($i=0;$i<20000;$i++) $a=[$a]; echo count($a,1);',
 ])('native allocation or host recursion failure remains a PHP result: %s', (source) => {
   const execution = run(source);
   expect(execution.kind === 'executed' && execution.stdout).toMatch(/^\nFatal error: Allowed memory size/);
@@ -180,3 +180,17 @@ test.each(['<?php file_put_contents("a.txt","x",FILE_APPEND|LOCK_EX);', '<?php m
     });
   }
 );
+
+test('unrelated array temporaries do not invalidate scalar-grid garbage caches', () => {
+  const execution = run(
+    '<?php $data=[]; for($i=0;$i<10000;$i++) $data[]=[$i]; for($i=0;$i<10000;$i++){ $temp=[$i]; $x=new stdClass(); } echo "done";'
+  );
+  expect(execution).toMatchObject({ kind: 'executed', stdout: 'done' });
+});
+
+test('array arguments released after calls do not force repeated copies', () => {
+  const execution = run(
+    '<?php function total($arr){return count($arr);} $a=[];for($i=0;$i<3000;$i++){ $a[]=$i; $n=total($a); } echo $n;'
+  );
+  expect(execution).toMatchObject({ kind: 'executed', stdout: '3000' });
+});

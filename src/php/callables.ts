@@ -213,13 +213,17 @@ function magicForwarder(magic: Method, name: string, object: PhpObject | undefin
   return {
     kind: 'native',
     name,
+    acceptsNamed: true,
     params: [{ name: 'args', byRef: false, variadic: true, optional: true }],
-    impl: ({ args }) =>
-      invoke(
+    impl: ({ args, named }) => {
+      const forwarded = PhpArray.list(args);
+      for (const [key, value] of named ?? []) forwarded.set(key, value);
+      return invoke(
         { fn: magic.fn, thisObj: object, scope: magic.scope, staticClass: cls, method: magic },
-        [{ v: name }, { v: PhpArray.list(args) }],
+        [{ v: name }, { v: forwarded }],
         undefined
-      ),
+      );
+    },
   };
 }
 
@@ -257,6 +261,7 @@ export function staticCallExpression(e: Extract<Expr, { k: 'scall' }>): Value {
   if (thisObj) {
     const magic = thisObj.cls.findMethod('__call');
     if (magic) {
+      if (e.fcc) return magicClosure(thisObj, magic, methodName);
       const args = evalArgs(e.args, undefined, undefined);
       return invoke(
         { fn: magic.fn, thisObj, scope: magic.scope, staticClass: thisObj.cls, method: magic },
@@ -267,6 +272,8 @@ export function staticCallExpression(e: Extract<Expr, { k: 'scall' }>): Value {
   }
   const magicStatic = cls.findMethod('__callstatic');
   if (magicStatic) {
+    if (e.fcc)
+      return closureFromCallable({ fn: magicForwarder(magicStatic, methodName, undefined, cls), staticClass: cls });
     const args = evalArgs(e.args, undefined, undefined);
     return invoke(
       { fn: magicStatic.fn, scope: magicStatic.scope, staticClass: cls, method: magicStatic },

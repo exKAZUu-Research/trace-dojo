@@ -62,12 +62,15 @@ export const INT_MIN = -9_223_372_036_854_775_808n;
 
 /** An ordered map, which arrays share until one of their holders writes to it (copy on write). */
 export class PhpArray {
-  static mutationVersion = 0;
+  mutationVersion = 0;
+  private readonly parents = new Set<WeakRef<PhpArray>>();
+  private readonly knownParents = new WeakSet<PhpArray>();
   map: Map<Key, Value | Ref>;
   /** One more than the largest integer key so far, or INT_MIN before any, as PHP's nNextFreeElement. */
   nextFree = INT_MIN;
   /** Whether more than one holder may see this array, so that a write must copy it first. */
   shared = false;
+  persistentHolder = false;
   /** Whether an element may hold an object, an array, or a reference, which garbage collection must visit. */
   composite = false;
   /** The internal pointer of `current()`, `next()`, and `reset()`, as the key it points at. */
@@ -143,8 +146,25 @@ export class PhpArray {
       allocationHandler(1, this.map.size + 1);
       if (this.pointer === undefined) this.pointer = key;
     }
-    PhpArray.mutationVersion++;
+    this.invalidate();
     this.map.set(key, slot);
+  }
+
+  trackCachedParent(parent: PhpArray): void {
+    if (this.knownParents.has(parent)) return;
+    this.knownParents.add(parent);
+    this.parents.add(new WeakRef(parent));
+  }
+
+  private invalidate(visited = new Set<PhpArray>()): void {
+    if (visited.has(this)) return;
+    visited.add(this);
+    this.mutationVersion++;
+    for (const parent of this.parents) {
+      const array = parent.deref();
+      if (array) array.invalidate(visited);
+      else this.parents.delete(parent);
+    }
   }
 
   delete(key: Key): void {
@@ -152,7 +172,7 @@ export class PhpArray {
     if (old instanceof Ref) old.rc--;
     // PHP moves a pointer at the deleted element on to the next one.
     if (this.pointer === key) this.pointer = this.keyAfter(key);
-    PhpArray.mutationVersion++;
+    this.invalidate();
     this.map.delete(key);
     dropped(old);
   }
@@ -280,6 +300,7 @@ export interface NativeFunction {
    * so that stack traces show no frame for it and what it calls shows the caller's line.
    */
   inlined?: boolean;
+  acceptsNamed?: boolean;
 }
 
 export interface UserFunction {

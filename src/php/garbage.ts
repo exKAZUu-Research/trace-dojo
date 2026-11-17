@@ -443,12 +443,12 @@ export function holderCounts(runtime: Runtime): Map<PhpObject, number> {
 const objectFreeArrays = new WeakMap<PhpArray, number>();
 
 function objectFree(array: PhpArray, runtime: Runtime): boolean {
-  if (objectFreeArrays.get(array) === PhpArray.mutationVersion) return true;
+  if (objectFreeArrays.get(array) === array.mutationVersion) return true;
   const pending = [array];
   const visited = new Set<PhpArray>();
   while (pending.length > 0) {
     const current = pending.pop() as PhpArray;
-    if (visited.has(current) || objectFreeArrays.get(current) === PhpArray.mutationVersion) continue;
+    if (visited.has(current) || objectFreeArrays.get(current) === current.mutationVersion) continue;
     visited.add(current);
     runtime.spend(Math.ceil(current.size / 64));
     for (const slot of current.map.values()) {
@@ -456,6 +456,41 @@ function objectFree(array: PhpArray, runtime: Runtime): boolean {
       if (slot instanceof PhpArray && slot.composite) pending.push(slot);
     }
   }
-  for (const item of visited) objectFreeArrays.set(item, PhpArray.mutationVersion);
+  for (const item of visited) {
+    objectFreeArrays.set(item, item.mutationVersion);
+    for (const slot of item.map.values()) if (slot instanceof PhpArray) slot.trackCachedParent(item);
+  }
   return true;
+}
+
+export function arrayIsShared(runtime: Runtime, target: PhpArray): boolean {
+  let count = target.persistentHolder ? 1 : 0;
+  const visited = new Set<unknown>();
+  const pending: unknown[] = [];
+  for (const frame of runtime.frames) {
+    for (const ref of frame.vars.values()) pending.push(ref);
+    pending.push(...frame.temporaries, frame.returning, frame.thisObj, frame.closure);
+  }
+  for (const cls of runtime.classes.values()) for (const { ref } of cls.staticProps.values()) pending.push(ref);
+  for (const fn of runtime.functions.values()) if (fn.kind === 'user') pending.push(...fn.statics.values());
+  for (const value of runtime.constants.values()) pending.push(value);
+  pending.push(...runtime.held);
+  let visits = 0;
+  while (pending.length > 0) {
+    if (++visits % 64 === 0) runtime.spend();
+    const value = pending.pop();
+    if (value === target) {
+      if (++count > 1) return true;
+      continue;
+    }
+    if (visited.has(value)) continue;
+    visited.add(value);
+    if (value instanceof Ref) pending.push(value.v);
+    else if (value instanceof PhpArray && value.composite) {
+      for (const slot of value.map.values()) if (slot !== null && typeof slot === 'object') pending.push(slot);
+    } else if (value instanceof PhpObject) pushObject(value, pending);
+    else if (Array.isArray(value)) pending.push(...value);
+    else if (value instanceof Map) pending.push(...value.values());
+  }
+  return false;
 }
