@@ -212,7 +212,9 @@ export class TypeOperators {
     if (source && source.kind === 'object' && this.c.isArrayOrTuple(source) && !info.nameType) {
       return this.mappedArrayOrTuple(info, source);
     }
-    return anonymousObject(() => this.mappedStructure(info));
+    return anonymousObject(() => this.mappedStructure(info), {
+      mappedKeys: info.nameType ? undefined : info.constraint,
+    });
   }
 
   /** A homomorphic mapped type over an array or a tuple, which maps its elements. */
@@ -311,7 +313,11 @@ export class TypeOperators {
         return neverType;
       return this.keyofType(this.c.apparentType(type));
     }
-    const structure = type.resolve();
+    // TypeScript's `getIndexTypeForMappedType` gives a mapped type's constraint, as `string` for `Record<string, T>`.
+    return type.mappedKeys ?? this.memberKeys(type.resolve());
+  }
+
+  private memberKeys(structure: Structure): Type {
     const keys = indexKeys(structure);
     // keyof lists the public members only.
     for (const [name, property] of structure.properties) {

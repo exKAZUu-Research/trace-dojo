@@ -419,13 +419,36 @@ export class MemberChecker {
       ['typeParameter', 'keyof', 'conditional', 'indexedAccess'].includes(index.kind) ||
       objectType.kind === 'typeParameter'
     ) {
-      return this.c.typeOperators.indexedAccess(objectType, index);
+      return this.checkedGenericIndex(access, objectType, this.c.typeOperators.indexedAccess(objectType, index));
     }
     if (isPropertyKeyLiteral(index)) {
       const type = this.literalIndexedType(access, objectType, index.value, indexType);
       if (type) return type;
     }
     return this.computedIndexedType(access, objectType, index, indexType);
+  }
+
+  /**
+   * A deferred access of an object by a generic key, reporting a key that is not one of the object's keys as TypeScript's
+   * `checkIndexedAccessIndexType` does, as `K extends string | number` is not for a `Record<string, T>`. The check
+   * applies to an object that is not generic, whose `keyof` is known.
+   */
+  private checkedGenericIndex(access: IndexAccess, objectType: Type, type: Type): Type {
+    if (type.kind !== 'indexedAccess' || this.c.relations.isGeneric(objectType)) return type;
+    const keys = this.c.typeOperators.keyofType(objectType);
+    const numberIndexed = this.c.structureOf(objectType).numberIndex !== undefined;
+    const index = type.indexType;
+    const valid = (index.kind === 'union' ? index.types : [index]).every(
+      (member) =>
+        this.c.relations.isAssignable(member, keys) ||
+        (numberIndexed && this.c.relations.isAssignable(member, numberType))
+    );
+    if (valid) return type;
+    this.c.error(
+      access.node,
+      `型 '${this.c.print(index)}' は型 '${this.c.print(objectType)}' のインデックスに使えません。`
+    );
+    return errorType;
   }
 
   /** The type of the element a literal index names, or `undefined` when no property has its name. */

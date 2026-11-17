@@ -229,11 +229,7 @@ export class AssignmentChecker {
       this.c.flow.current = this.c.flow.merge([skipped, evaluated]);
       if (targetType !== errorType)
         this.c.expressions.checkAssignable(skipParentheses(left), valueType, this.declaredTargetType(left));
-      const kept =
-        operator === '??='
-          ? this.c.relations.removeNullish(targetType)
-          : this.c.flow.narrowByTruthiness(targetType, operator === '||=');
-      const result = this.c.literals.subtypeReduced([kept, valueType]);
+      const result = this.logicalAssignmentType(operator, targetType, valueType);
       // The target holds what it kept or what was assigned, as `s ||= "x"` leaves a truthy `s` or `"x"`.
       if (targetType !== errorType) this.assignReference(skipParentheses(left), this.declaredTargetType(left), result);
       return result;
@@ -252,6 +248,12 @@ export class AssignmentChecker {
       this.c.expressions.checkAssignable(skipParentheses(left), resultType, declared);
     this.assignReference(skipParentheses(left), declared, resultType);
     return resultType;
+  }
+
+  private logicalAssignmentType(operator: string, targetType: Type, valueType: Type): Type {
+    if (operator === '??=') return this.c.operators.coalescingType(targetType, valueType);
+    if (operator === '||=') return this.c.operators.disjunctionType(targetType, valueType);
+    return this.c.literals.subtypeReduced([this.c.flow.narrowByTruthiness(targetType, false), valueType]);
   }
 
   /** The flow states where a logical assignment keeps its target and where it evaluates the right operand. */

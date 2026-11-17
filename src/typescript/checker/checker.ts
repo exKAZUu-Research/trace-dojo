@@ -458,6 +458,7 @@ export class Checker {
       isLiteral: type.isLiteral,
       classInfo: type.classInfo,
       isClassStatic: type.isClassStatic,
+      mappedKeys: type.mappedKeys,
       name: type.name,
       aliasName: type.aliasName,
       aliasArguments: type.aliasArguments?.map((argument) => this.instantiate(argument, mapper)),

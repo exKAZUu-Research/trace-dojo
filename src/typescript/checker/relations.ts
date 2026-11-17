@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 679 -- Decides assignability and comparability for every kind of type, as TypeScript's checker does in one place.
+// code-gauge-allow-file fileNcss 683 -- Decides assignability and comparability for every kind of type, as TypeScript's checker does in one place.
 import type { Checker } from './checker';
 import { isUnit } from './flow';
 import { childTypes, isGenericObjectOrIndexType } from './genericTypes';
@@ -532,24 +532,32 @@ export class Relations {
   }
 
   /**
-   * What reading an object with only a string index signature by a generic string or number key gives: tsc reads it
-   * by `string`, as `r[k]` with `K extends string` on a `Record<string, number[]>` is `number[]`.
+   * What reading an object with only a string index signature by a generic key gives: TypeScript's
+   * `getIndexedAccessTypeOrUndefined` reads it by `string` when the key is assignable to `string` or to `number`, as
+   * `r[k]` with `K extends string` on a `Record<string, number[]>` is `number[]`, but leaves `K extends string | number`
+   * deferred.
    */
   stringIndexReadByGenericKey(object: Type, key: Type): Type | undefined {
-    if (!this.isGeneric(key)) return undefined;
-    const type = this.stringIndexOnlyType(object);
-    return type && this.isAssignable(key, unionOf([stringType, numberType])) ? type : undefined;
+    if (!this.isGeneric(key) || !this.stringIndexOnly(object)) return undefined;
+    if (!this.isAssignable(key, stringType) && !this.isAssignable(key, numberType)) return undefined;
+    return this.stringIndexType(object);
   }
 
-  /** The type of the string index signature of an object, or of each union member, that has no other members. */
-  private stringIndexOnlyType(object: Type): Type | undefined {
-    if (object.kind === 'union') {
-      const types = object.types.map((member) => this.stringIndexOnlyType(member));
-      return types.every((type) => type !== undefined) ? unionOf(types) : undefined;
-    }
-    if (object.kind !== 'object' || object.objectKind === 'mapped') return undefined;
-    const { properties, stringIndex, numberIndex, symbolIndex } = this.c.structureOf(object);
-    return properties.size === 0 && !numberIndex && !symbolIndex ? stringIndex?.type : undefined;
+  private stringIndexType(object: Type): Type {
+    if (object.kind === 'union') return unionOf(object.types.map((member) => this.stringIndexType(member)));
+    return this.c.structureOf(object).stringIndex?.type ?? errorType;
+  }
+
+  /**
+   * TypeScript's `isStringIndexSignatureOnlyType`: an object, or a union or intersection of them, with only a string
+   * index signature.
+   */
+  private stringIndexOnly(object: Type): boolean {
+    if (object.kind === 'union' || object.kind === 'intersection')
+      return object.types.every((member) => this.stringIndexOnly(member));
+    if (object.kind !== 'object' || object.objectKind === 'mapped') return false;
+    const { properties, stringIndex, numberIndex, symbolIndex, patternIndexes } = this.c.structureOf(object);
+    return properties.size === 0 && !!stringIndex && !numberIndex && !symbolIndex && !patternIndexes?.length;
   }
 
   private hasNoMembers(type: ObjectType): boolean {

@@ -166,6 +166,8 @@ export interface ObjectType {
   isClassStatic?: boolean;
   tuple?: TupleInfo;
   mapped?: MappedInfo;
+  /** For an object a mapped type without `as` resolved to, its constraint, which `keyof` gives instead of its members. */
+  mappedKeys?: Type;
   /** For a function or object literal whose type was inferred from an expression. */
   isLiteral?: boolean;
   /** For an object literal typed by one alternative of a union it spreads, which TypeScript leaves unnormalized. */

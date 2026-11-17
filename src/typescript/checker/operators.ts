@@ -185,7 +185,7 @@ export class OperatorChecker {
       case '&&':
       case '||':
       case '??': {
-        return this.logical(node, operator, left, right, contextual);
+        return this.logical(operator, left, right, contextual);
       }
       case 'instanceof': {
         return this.instanceofExpression(left, right);
@@ -377,7 +377,7 @@ export class OperatorChecker {
     return isIntrinsic(removed, 'never') ? type : removed;
   }
 
-  private logical(node: TreeNode, operator: string, left: TreeNode, right: TreeNode, contextual?: Type): Type {
+  private logical(operator: string, left: TreeNode, right: TreeNode, contextual?: Type): Type {
     if (operator === '??') {
       const nullishness = syntacticNullishness(left);
       if (nullishness === 'never')
@@ -406,13 +406,19 @@ export class OperatorChecker {
       rightType = this.c.expressions.check(right, contextual ?? leftType);
     });
     this.c.flow.current = this.c.flow.merge([operator === '&&' ? whenFalse : whenTrue, after]);
-    void node;
     if (operator === '&&')
       return unionOf([falsyValuesOf(this.c.flow.narrowByTruthiness(leftType, false)), rightType], true);
-    return this.c.literals.subtypeReduced([this.c.flow.narrowByTruthiness(leftType, true), rightType]);
+    return this.disjunctionType(leftType, rightType);
   }
 
-  private coalescingType(left: Type, right: Type): Type {
+  /** The type of `left || right`, which is `left` when it cannot be falsy, as TypeScript's `getTypeFacts` decides. */
+  disjunctionType(left: Type, right: Type): Type {
+    if (isIntrinsic(this.c.flow.narrowByTruthiness(this.nullishConstraint(left), false), 'never')) return left;
+    return this.c.literals.subtypeReduced([this.c.flow.narrowByTruthiness(left, true), right]);
+  }
+
+  /** The type of `left ?? right`, which is `left` when it cannot be nullish, as TypeScript's `getTypeFacts` decides. */
+  coalescingType(left: Type, right: Type): Type {
     const constraint = this.nullishConstraint(left);
     if (!this.c.relations.isNullable(constraint) && !isAnyLike(constraint) && !isIntrinsic(constraint, 'unknown'))
       return left;
