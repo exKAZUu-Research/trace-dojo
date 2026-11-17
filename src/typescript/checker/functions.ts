@@ -4,6 +4,7 @@ import type { Checker } from './checker';
 import { contextualSignatureOf } from './contextualSignatures';
 import { FlowState, type State } from './flow';
 import type { Sym } from './scopes';
+import { isContextSensitiveFunction } from './signatures';
 import { hasToken, isClassConstructor, named, patternIdentifiers, propertyNameText } from './syntax';
 import {
   anyType,
@@ -61,6 +62,8 @@ export class FunctionChecker {
       ? this.anySignature()
       : contextualSignatureOf(this.c, contextual, node);
     const signature = this.c.signatures.signatureOf(node, contextualSignature);
+    if (node.type !== 'arrow_function' && isContextSensitiveFunction(node))
+      this.c.classes.registerContextualThis(node, contextualSignature?.thisType);
     // Parameters take their types from the signature, which the body sees.
     this.bindParameters(node, signature);
     const contextualReturn = contextualSignature ? contextualSignature.returnType() : undefined;

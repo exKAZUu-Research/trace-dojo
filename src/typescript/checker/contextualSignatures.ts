@@ -48,7 +48,7 @@ function contextualCallSignature(c: Checker, type: Type, node: TreeNode): Signat
 
 /**
  * The signature of an intersection of two functions with the same type parameters, whose parameters take what either
- * one takes.
+ * one takes and whose `this` is what either one's is.
  */
 function intersectedSignature(c: Checker, left: Signature, right: Signature): Signature {
   const [longest, shorter] = left.parameters.length >= right.parameters.length ? [left, right] : [right, left];
@@ -65,6 +65,8 @@ function intersectedSignature(c: Checker, left: Signature, right: Signature): Si
   return {
     typeParameters: left.typeParameters,
     parameters,
+    thisType:
+      left.thisType && right.thisType ? unionOf([left.thisType, right.thisType]) : (left.thisType ?? right.thisType),
     returnType: () => intersectionOf([left.returnType(), right.returnType()], c.budget),
   };
 }

@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 528 -- Holds the types of classes with `this`, `super`, and accessibility, which all read the class information.
+// code-gauge-allow-file fileNcss 534 -- Holds the types of classes with `this`, `super`, and accessibility, which all read the class information.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import { typesAtConstructorExit } from './assignmentFlow';
@@ -587,9 +587,18 @@ export class ClassChecker {
     this.objectThisByMethod.set(method.id, object);
   }
 
+  /** The `this` types functions take from their contextual signatures, by function. */
+  private readonly contextualThisByFunction = new Map<number, Type>();
+
+  registerContextualThis(node: TreeNode, type: Type | undefined): void {
+    if (type) this.contextualThisByFunction.set(node.id, type);
+    else this.contextualThisByFunction.delete(node.id);
+  }
+
   thisContextId(node: TreeNode): number {
     const owner = this.thisOwner(node);
-    return (owner ? this.objectThisByMethod.get(owner.id)?.id : undefined) ?? this.thisStack.at(-1)?.id ?? 0;
+    const ownerThis = owner && (this.contextualThisByFunction.get(owner.id) ?? this.objectThisByMethod.get(owner.id));
+    return ownerThis?.id ?? this.thisStack.at(-1)?.id ?? 0;
   }
 
   /** The node that decides what `this` is at `node`: a class member, a function, or the program. */
@@ -625,7 +634,7 @@ export class ClassChecker {
   thisTypeOfExpression(node: TreeNode): Type {
     const owner = this.thisOwner(node);
     if (!owner) return this.globalThisType(node);
-    const thisParameter = this.thisParameterType(owner);
+    const thisParameter = this.thisParameterType(owner) ?? this.contextualThisByFunction.get(owner.id);
     if (thisParameter) return thisParameter;
     const parent = owner.parent;
     const objectThis = this.objectThisByMethod.get(owner.id);
