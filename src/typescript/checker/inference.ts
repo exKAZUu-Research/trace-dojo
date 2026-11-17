@@ -292,6 +292,10 @@ export class TypeInference {
     return true;
   }
 
+  /**
+   * Infers from the elements of a tuple as TypeScript matches them: those before the target's rest by position, those
+   * after it from the end, and the source elements between to the rest.
+   */
   private inferFromTupleElements(
     run: InferenceRun,
     sourceElements: TupleElement[],
@@ -302,11 +306,28 @@ export class TypeInference {
       if (this.inferFromVariadicPair(run, sourceElements.slice(index), element, targetElements[index + 1], recurse))
         break;
       if (element.rest) {
-        recurse(this.c.tupleType(sourceElements.slice(index)), element.type);
+        this.inferFromRestAndEnd(sourceElements, targetElements, index, recurse);
         break;
       }
       if (sourceElements[index]) recurse(sourceElements[index].type, element.type);
     }
+  }
+
+  private inferFromRestAndEnd(
+    sourceElements: TupleElement[],
+    targetElements: TupleElement[],
+    restIndex: number,
+    recurse: Recurse
+  ): void {
+    const end = targetElements.slice(restIndex + 1);
+    const middleEnd = sourceElements.length - end.length;
+    const fixedSource = sourceElements.every((element) => !element.rest && !element.optional);
+    if (end.some((element) => element.rest) || !fixedSource || middleEnd < restIndex) {
+      recurse(this.c.tupleType(sourceElements.slice(restIndex)), targetElements[restIndex].type);
+      return;
+    }
+    for (const [offset, element] of end.entries()) recurse(sourceElements[middleEnd + offset].type, element.type);
+    recurse(this.c.tupleType(sourceElements.slice(restIndex, middleEnd)), targetElements[restIndex].type);
   }
 
   /** Infers `[...A, ...B]` by splitting the source where the arguments passed to `...args: A` end; whether it applied. */
