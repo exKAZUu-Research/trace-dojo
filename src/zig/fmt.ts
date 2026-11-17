@@ -1,5 +1,5 @@
 import { checkOutputSize } from './allocation';
-// code-gauge-allow-file fileNcss 794 -- The file holds one layer of the compiler, whose parts share its private state.
+// code-gauge-allow-file fileNcss 798 -- The file holds one layer of the compiler, whose parts share its private state.
 /**
  * Zig's formatted printing (`std.Io.Writer.print` and `printValue`), transcribed so that output matches byte for byte.
  * Formatting works on bytes, as Zig's strings are bytes.
@@ -70,6 +70,7 @@ export interface FormatOutput {
   push: (...bytes: number[]) => number;
   checkSize?: (length: number) => void;
   writeView?: (length: number, get: (index: number) => number) => void;
+  repeat?: (byte: number, count: number) => void;
 }
 
 export interface FormatTemplate {
@@ -846,7 +847,8 @@ export function alignBuffer(out: FormatOutput, buffer: readonly number[] | ByteV
     return;
   }
   const fill = (count: number): void => {
-    for (let index = 0; index < count; index++) out.push(options.fill);
+    if (out.repeat) out.repeat(options.fill, count);
+    else for (let index = 0; index < count; index++) out.push(options.fill);
   };
   switch (options.alignment) {
     case 'left': {

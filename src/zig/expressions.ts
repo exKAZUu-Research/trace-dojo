@@ -1288,20 +1288,7 @@ export abstract class ExpressionCompiler extends SemaBase {
     const a = staticResultOf(left),
       b = staticResultOf(right);
     const result = a && b ? { value: this.foldArithmetic(operation, a.value, b.value, type, expression) } : undefined;
-    if (left.known && right.known) return known(type, result?.value, expression);
-    const evaluateLeft = left.eval;
-    const evaluateRight = right.eval;
-    return {
-      ...runtime(
-        type,
-        (frame) => {
-          const [a, b] = evaluateHeld(frame, [evaluateLeft, evaluateRight]);
-          return operation(a, b, frame);
-        },
-        expression
-      ),
-      staticResult: result,
-    };
+    return this.combine([left, right], type, ([a, b], frame) => operation(a, b, frame), expression, result);
   }
 
   private foldArithmetic(operation: (a: Value, b: Value) => Value, a: Value, b: Value, type: Type, span: Span): Value {

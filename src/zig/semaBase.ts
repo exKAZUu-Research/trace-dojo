@@ -1148,12 +1148,22 @@ export abstract class SemaBase implements SemaApi {
     operands: readonly TExpr[],
     type: Type,
     compute: (values: Value[], frame?: Frame) => Value,
-    span: Span
+    span: Span,
+    result = this.constantResult(operands, compute, span)
   ): TExpr {
-    const result = this.constantResult(operands, compute, span);
     if (operands.every((operand) => operand.known)) return known(type, result?.value, span);
     const evaluators = operands.map((operand) => operand.eval);
-    return { ...runtime(type, (frame) => compute(evaluateHeld(frame, evaluators), frame), span), staticResult: result };
+    return {
+      ...runtime(
+        type,
+        (frame) => {
+          const values = evaluateHeld(frame, evaluators);
+          return result ? copyForStorage(result.value) : compute(values, frame);
+        },
+        span
+      ),
+      staticResult: result,
+    };
   }
 
   protected constantResult(

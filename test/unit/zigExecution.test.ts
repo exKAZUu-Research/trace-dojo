@@ -8029,3 +8029,41 @@ test.each([0, 1, 2, 3, 47, 48, 49, 63, 64, 65, 255, 256])(
     });
   }
 );
+
+test.each(['x*(if(get()) |_| x else |_| unreachable)', '@mulWithOverflow(x,if(get()) |_| x else |_| unreachable)'])(
+  'proven arithmetic reuses its result while retaining argument effects: %s',
+  (operation) => {
+    const source = `const std=@import("std");fn get()error{}!void{std.debug.print("g",.{});}pub fn main()void{const x:u65535=std.math.maxInt(u32767);for(0..1200)|_|{_=${operation};}std.debug.print("ok",.{});}`;
+    expect(executeProgram('zig', source)).toMatchObject({
+      kind: 'executed',
+      stderr: 'g'.repeat(1200) + 'ok',
+      uncaughtException: undefined,
+    });
+  }
+);
+
+test.each([
+  ['s: >70', '"x"', '1|71'],
+  ['d: >70', '@as(u8,7)', '1|71'],
+  ['s: <70', '"x"', '0|71'],
+  ['s: ^70', '"x"', '0|71'],
+  ['s: ^131', '"x"', '0|132'],
+  ['s: >65', '"x"', '0|66'],
+  ['s: >66', '"x"', '1|67'],
+])('counting padded formats preserve writer operation boundaries: %s', (format, value, expected) => {
+  const source = `const std=@import("std");const P=struct{pub fn format(_:P,w:*std.Io.Writer)std.Io.Writer.Error!void{std.debug.print("{}|",.{w.buffered().len});try w.writeAll("!");}};pub fn main()void{std.debug.print("{}",.{std.fmt.count("{${format}}{f}",.{${value},P{}})});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: expected,
+    uncaughtException: undefined,
+  });
+});
+
+test('reusing a proven overflow result keeps aggregate evaluations independent', () => {
+  const source = `const std=@import("std");fn get()error{}!void{std.debug.print("g",.{});}pub fn main()void{for(0..3)|_|{var pair=@addWithOverflow(@as(u8,250),if(get()) |_| @as(u8,10) else |_| unreachable);std.debug.print("{}|",.{pair[0]});pair[0]=99;}}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: 'g4|g4|g4|',
+    uncaughtException: undefined,
+  });
+});

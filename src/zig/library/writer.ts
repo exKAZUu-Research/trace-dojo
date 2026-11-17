@@ -33,22 +33,27 @@ export interface WriterState extends Record<string, unknown> {
 
 export class CountingFormatOutput implements FormatOutput {
   length = 0;
-  readonly prefix: number[] = [];
 
-  constructor(private readonly frame: Frame) {}
+  constructor(
+    private readonly frame: Frame,
+    private readonly destination: WriterState
+  ) {}
 
   push(...bytes: number[]): number {
-    this.frame.runtime.spend(bytes.length);
-    for (const byte of bytes) if (this.prefix.length < 64) this.prefix.push(byte);
-    this.length += bytes.length;
+    this.writeView(bytes.length, (index) => bytes[index]);
     return this.length;
   }
 
   writeView(length: number, get: (index: number) => number): void {
     this.frame.runtime.spend(length);
-    const prefix = Math.min(length, 64 - this.prefix.length);
-    for (let index = 0; index < prefix; index++) this.prefix.push(get(index));
+    const state = this.destination;
+    const prefix = state.end + length <= state.capacity ? Array.from({ length }, (_, index) => get(index)) : [];
+    discardWritten(state, length, prefix);
     this.length += length;
+  }
+
+  repeat(byte: number, count: number): void {
+    this.writeView(count, () => byte);
   }
 
   checkSize(length: number): void {
@@ -79,11 +84,6 @@ export function isDiscardingWriter(state: WriterState): boolean {
 
 export function discardedBytes(state: WriterState): number {
   return ((state.growth as NativeHandle).state.count as number) + state.end;
-}
-
-export function writeCounted(frame: Frame, state: WriterState, output: CountingFormatOutput): void {
-  if (state.end + output.length > state.capacity) frame.runtime.spend(state.end);
-  discardWritten(state, output.length, output.prefix);
 }
 
 export function discardRepeated(frame: Frame, state: WriterState, bytes: readonly number[], count: number): void {

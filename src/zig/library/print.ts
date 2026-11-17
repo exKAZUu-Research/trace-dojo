@@ -45,7 +45,6 @@ import {
   bufferingWriter,
   CountingFormatOutput,
   isDiscardingWriter,
-  writeCounted,
   WRITER,
   writerPointer,
   type WriterState,
@@ -260,7 +259,7 @@ function appendSegments(
       formatWithMethod(segment.arg, argValue(segment.arg));
     } else {
       const bytes: number[] | CountingFormatOutput = isDiscardingWriter(destination)
-        ? new CountingFormatOutput(frame)
+        ? new CountingFormatOutput(frame, destination)
         : [];
       try {
         printValue(bytes, segment.spec, options, argValue(segment.arg), fields[segment.arg].type as Type, info);
@@ -274,10 +273,7 @@ function appendSegments(
 }
 
 function writeFormatted(frame: Frame, destination: WriterState, bytes: readonly number[] | CountingFormatOutput): void {
-  if (bytes instanceof CountingFormatOutput) {
-    writeCounted(frame, destination, bytes);
-    return;
-  }
+  if (bytes instanceof CountingFormatOutput) return;
   const result = writeTo(frame, destination, bytes);
   if (result instanceof ErrorValue) throw new PrintWriteError(result);
 }
