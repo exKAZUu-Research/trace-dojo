@@ -7648,3 +7648,50 @@ test.each(['powi(u65535,x,40000) catch 0', 'pow(u65535,x,40000)'])(
     expect(executeProgram('zig', source)).toMatchObject({ kind: 'limitExceeded', limit: 'operations' });
   }
 );
+
+test.each(['struct{t:type}', 'union(enum){t:type}'])(
+  'address-only %s descriptor projections preserve locations and known pointer effects',
+  (type) => {
+    for (const mode of ['slice', 'field']) {
+      const helper =
+        mode === 'slice'
+          ? 'fn f(o:[]const ?D)*const ?D{return &o[0];}'
+          : 'const S=struct{d:?D};fn f(o:*const S)*const ?D{return &o.d;}';
+      const body =
+        mode === 'slice'
+          ? 'const o=[1]?D{null};std.debug.print("{}",.{f(&o)==&o[0]});'
+          : 'const o:S=.{.d=null};std.debug.print("{}",.{f(&o)==&o.d});';
+      expect(
+        executeProgram('zig', `const std=@import("std");const D=${type};${helper}pub fn main()void{${body}}`)
+      ).toMatchObject({ kind: 'executed', stderr: 'true', uncaughtException: undefined });
+    }
+    const field = `const std=@import("std");const D=${type};const S=struct{d:?D};pub fn main()void{const o:S=.{.d=null};const p=&(blk:{std.debug.print("g",.{});break :blk &o;}).*.d;std.debug.print("{}",.{p.*==null});}`;
+    expect(executeProgram('zig', field)).toMatchObject({
+      kind: 'executed',
+      stderr: 'gtrue',
+      uncaughtException: undefined,
+    });
+    const indexed = `const std=@import("std");const D=${type};pub fn main()void{const a=[1]?D{null};const p=&(blk:{std.debug.print("g",.{});break :blk @as([]const ?D,&a);})[0];std.debug.print("{}",.{p.*==null});}`;
+    expect(executeProgram('zig', indexed)).toMatchObject({
+      kind: 'executed',
+      stderr: 'gtrue',
+      uncaughtException: undefined,
+    });
+    const restricted = `const D=${type};fn f(o:*const [1]?D)*const ?D{return &o[0];}pub fn main()void{const a=[1]?D{null};_=f(&a);}`;
+    expect(executeProgram('zig', restricted)).toMatchObject({ kind: 'compileError' });
+  }
+);
+
+test.each(['a:void,b:u8', 'a:void,b:void'])(
+  'enum-to-union coercion resolves lazy %s tags before matching',
+  (fields) => {
+    const source = `const std=@import("std");const Tag=enum{a,b};const U=union(Tag){${fields}};pub fn main()void{const t:Tag=.a;const u:U=t;std.debug.print("{}",.{u==.a});}`;
+    expect(executeProgram('zig', source)).toMatchObject({
+      kind: 'executed',
+      stderr: 'true',
+      uncaughtException: undefined,
+    });
+    const runtime = `const Tag=enum{a,b};const U=union(Tag){${fields}};fn f(t:Tag)U{return t;}pub fn main()void{_=f(.a);}`;
+    expect(executeProgram('zig', runtime)).toMatchObject({ kind: 'compileError' });
+  }
+);

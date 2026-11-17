@@ -98,7 +98,7 @@ export interface Place {
   readonly isConst: boolean;
   readonly locate: (frame: Frame) => Pointer;
   readonly compileTimePointer?: Pointer;
-  readonly address?: TExpr;
+  readonly address?: () => TExpr;
 }
 
 /** An analyzed expression: its type, its value when the compiler knows it, and the code that computes it. */
@@ -854,9 +854,9 @@ export abstract class SemaBase implements SemaApi {
         return undefined;
       }
       case 'union': {
+        const fields = this.unionFields(to);
         if (from.kind === 'enum_literal' && expression.known) {
           const { name } = expression.value as EnumLiteral;
-          const fields = this.unionFields(to);
           const index = this.fieldIndexes(fields).get(name);
           if (index === undefined) this.error(span, `union ${typeName(to)} には、フィールド「${name}」がありません。`);
           if (fields[index].type.kind !== 'void') {
@@ -865,7 +865,6 @@ export abstract class SemaBase implements SemaApi {
           return this.materializeUnion(to, index, known(VOID, undefined, span), span);
         }
         if (from.kind === 'enum' && to.tagType === from && expression.known) {
-          const fields = this.unionFields(to);
           const tag = enumLookup(this.enumFields(from), () => this.spendCompilation()).byValue.get(
             expression.value as bigint
           );

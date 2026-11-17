@@ -361,7 +361,7 @@ export abstract class ExpressionCompiler extends SemaBase {
 
   // code-gauge-allow functionNcss 42 -- Keeps the analysis and the generated code of one construct together, as Zig's Sema does.
   // code-gauge-allow functionCognitiveComplexity 30 -- Keeps the analysis and the generated code of one construct together, as Zig's Sema does.
-  protected fieldAccess(expression: ExpressionOf<'field'>): TExpr {
+  protected fieldAccess(expression: ExpressionOf<'field'>, load = true): TExpr {
     const object = this.compileLocation(expression.object);
     const { name } = expression;
     if (object.type.kind === 'type') {
@@ -387,10 +387,10 @@ export abstract class ExpressionCompiler extends SemaBase {
             expression
           );
         }
-        return this.validateComptimeLoad(this.structField(base, type, name, expression));
+        return this.validateComptimeLoad(this.structField(base, type, name, expression), load);
       }
       case 'union': {
-        return this.validateComptimeLoad(this.unionField(base, type, name, expression));
+        return this.validateComptimeLoad(this.unionField(base, type, name, expression), load);
       }
       case 'array': {
         if (name === 'len') return this.fixedResult(this.typeOnlyOperand(base), USIZE, type.length, expression);
@@ -471,12 +471,7 @@ export abstract class ExpressionCompiler extends SemaBase {
       const pointer = new Pointer(parent.load() as ZStruct, index);
       return knownAt(field.type, pointer, span);
     }
-    const place = base.place;
-    const fieldPlace: Place | undefined = place && {
-      isConst: place.isConst,
-      locate: (frame) => new Pointer(place.locate(frame).load() as ZStruct, index),
-      compileTimePointer: place.compileTimePointer && new Pointer(place.compileTimePointer.load() as ZStruct, index),
-    };
+    const fieldPlace = this.projectedPlace(base, field.type, (parent) => new Pointer(parent.load() as ZStruct, index));
     const facts = fieldFacts(valueFactsOf(base), index);
     const result = facts?.exact
       ? this.fixedResult(base, field.type, facts.exact.value, span)
@@ -498,10 +493,7 @@ export abstract class ExpressionCompiler extends SemaBase {
       return {
         ...this.derived(base, field.type, (value) => view(value).slots[0]),
         span,
-        place: base.place && {
-          isConst: base.place.isConst,
-          locate: (frame) => new Pointer(view(base.place!.locate(frame).load()), 0),
-        },
+        place: this.projectedPlace(base, field.type, (parent) => new Pointer(view(parent.load()), 0)),
       };
     }
     const check = (value: Value): ZUnion => {
@@ -522,16 +514,24 @@ export abstract class ExpressionCompiler extends SemaBase {
       const parent = this.addressOf(base).value as Pointer;
       return knownAt(field.type, new Pointer(parent.load() as ZUnion, 0), span);
     }
-    const place = base.place;
-    const fieldPlace: Place | undefined = place && {
-      isConst: place.isConst,
-      locate: (frame) => new Pointer(check(place.locate(frame).load()), 0),
-    };
+    const fieldPlace = this.projectedPlace(base, field.type, (parent) => new Pointer(check(parent.load()), 0));
     return {
       ...this.derived(base, field.type, (value) => check(value).slots[0]),
       valueFacts: fieldFacts(valueFactsOf(base), index),
       span,
       place: fieldPlace,
+    };
+  }
+
+  private projectedPlace(base: TExpr, child: Type, project: (parent: Pointer) => Pointer): Place | undefined {
+    const place = base.place;
+    if (!place) return undefined;
+    return {
+      isConst: place.isConst,
+      locate: (frame) => project(place.locate(frame)),
+      compileTimePointer: place.compileTimePointer && project(place.compileTimePointer),
+      address: () =>
+        this.derived(this.addressOf(base), pointerTo(child, place.isConst), (value) => project(value as Pointer)),
     };
   }
 
@@ -550,7 +550,7 @@ export abstract class ExpressionCompiler extends SemaBase {
     const zero = sizeOf(type.child) === 0 && !comptime;
     const place: Place = {
       isConst: type.isConst,
-      address: pointer,
+      address: () => pointer,
       locate: (frame) =>
         zero ? this.zeroPointer(evaluate(frame) as Pointer, type.child) : (evaluate(frame) as Pointer),
       compileTimePointer: pointer.known && pointer.value instanceof Pointer ? pointer.value : undefined,
@@ -561,17 +561,21 @@ export abstract class ExpressionCompiler extends SemaBase {
       type.isConst && isConstantData(fact?.value)
         ? { ...this.derived(pointer, type.child, (value) => (value as Pointer).load()), span, place }
         : runtime(type.child, (frame) => (evaluate(frame) as Pointer).load(), span, place);
-    return load ? this.validateComptimeLoad(result) : result;
+    return this.validateComptimeLoad(result, load);
   }
 
-  private validateComptimeLoad(expression: TExpr): TExpr {
-    if (this.requiresComptime(expression.type, expression.span) && !staticResultOf(expression))
+  private validateComptimeLoad(expression: TExpr, load = true): TExpr {
+    if (load && this.requiresComptime(expression.type, expression.span) && !staticResultOf(expression))
       this.error(expression.span, 'コンパイルのときだけの型は、実行時のポインタから読み出せません。');
     return expression;
   }
 
   private compileLocation(expression: Expression, resultType?: Type): TExpr {
     if (expression.kind === 'paren') return this.compileLocation(expression.operand, resultType);
+    if (expression.kind === 'field' || expression.kind === 'index') {
+      this.compilationBudget.spend();
+      return expression.kind === 'field' ? this.fieldAccess(expression, false) : this.index(expression, false);
+    }
     if (expression.kind === 'deref') {
       this.compilationBudget.spend();
       return this.dereferenced(this.compile(expression.operand), expression, false);
@@ -612,7 +616,7 @@ export abstract class ExpressionCompiler extends SemaBase {
         span
       );
     }
-    if (place?.address) return place.address;
+    if (place?.address) return place.address();
     if (place?.compileTimePointer)
       return known(pointerTo(expression.type, place.isConst), place.compileTimePointer, span);
     if (place && !expression.local)
@@ -683,7 +687,7 @@ export abstract class ExpressionCompiler extends SemaBase {
 
   // Indexing and slicing ----------------------------------------------------------------------------------------------
 
-  protected index(expression: ExpressionOf<'index'>): TExpr {
+  protected index(expression: ExpressionOf<'index'>, load = true): TExpr {
     const object = this.compile(expression.object);
     const index = this.coerce(this.compile(expression.index, USIZE), USIZE, expression.index);
     const type = object.type;
@@ -725,14 +729,25 @@ export abstract class ExpressionCompiler extends SemaBase {
         : undefined;
     const staticElement =
       index.known && staticSource !== undefined ? access(staticSource, index.value as bigint) : undefined;
+    const elementPointer = (element: { slots: Slots; position: number }): Pointer => {
+      const pointer = new Pointer(element.slots, element.position);
+      return zero ? this.zeroPointer(pointer, child) : pointer;
+    };
+    const locatePointer = (frame: Frame): Pointer => elementPointer(locate(frame));
+    const addressType = pointerTo(child, isConst);
     const place: Place = {
       isConst,
-      locate: (frame) => {
-        const { slots, position } = locate(frame);
-        const pointer = new Pointer(slots, position);
-        return zero ? this.zeroPointer(pointer, child) : pointer;
-      },
-      compileTimePointer: staticElement ? new Pointer(staticElement.slots, staticElement.position) : undefined,
+      address: () => ({
+        ...runtime(addressType, locatePointer, expression),
+        staticResult: this.constantResult(
+          [type.kind === 'array' ? base.operand : object, index],
+          ([value, position]) =>
+            elementPointer(access(type.kind === 'array' ? base.read(value) : value, position as bigint)),
+          expression
+        ),
+      }),
+      locate: locatePointer,
+      compileTimePointer: staticElement ? elementPointer(staticElement) : undefined,
     };
     const facts =
       !zero && index.known && type.kind === 'array' ? fieldFacts(valueFactsOf(object), Number(index.value)) : undefined;
@@ -745,7 +760,7 @@ export abstract class ExpressionCompiler extends SemaBase {
       expression,
       place
     );
-    return this.validateComptimeLoad({
+    const result = {
       ...(facts?.exact ? this.fixedResult(object, child, facts.exact.value, expression) : projected),
       place,
       valueFacts: facts,
@@ -762,7 +777,8 @@ export abstract class ExpressionCompiler extends SemaBase {
               expression
             )
           : undefined),
-    });
+    };
+    return this.validateComptimeLoad(result, load || (type.kind === 'pointer' && type.size === 'one'));
   }
 
   /** Locates the element at an index of an array, a pointer to one, or a slice, checking the bounds. */
