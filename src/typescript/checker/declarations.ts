@@ -269,3 +269,32 @@ function reportDuplicateMembers(c: Checker, key: string, members: TreeNode[]): v
     else c.error(nameNode, `${name} はすでに宣言されています。`);
   }
 }
+
+/**
+ * Reports the members of one interface or object type body that declare a name twice, at each of them, except the
+ * overloads of a method and a getter with a setter, which TypeScript allows.
+ */
+export function checkTypeMemberDuplicates(c: Checker, body: TreeNode): void {
+  const byName = new Map<string, TreeNode[]>();
+  for (const member of named(body)) {
+    const nameNode = member.childForFieldName('name');
+    const name = nameNode ? propertyNameText(nameNode) : undefined;
+    if (!nameNode || name === undefined) continue;
+    byName.set(name, [...(byName.get(name) ?? []), member]);
+  }
+  for (const [name, members] of byName) {
+    if (members.length < 2 || isAllowedRedeclaration(members)) continue;
+    for (const member of members) {
+      c.error(member.childForFieldName('name') ?? member, `${name} はすでに宣言されています。`);
+    }
+  }
+}
+
+function isAllowedRedeclaration(members: TreeNode[]): boolean {
+  const getters = members.filter((member) => hasToken(member, 'get')).length;
+  const setters = members.filter((member) => hasToken(member, 'set')).length;
+  if (getters + setters === members.length) return getters <= 1 && setters <= 1;
+  return members.every(
+    (member) => member.type === 'method_signature' && !hasToken(member, 'get') && !hasToken(member, 'set')
+  );
+}

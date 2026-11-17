@@ -1,7 +1,8 @@
-// code-gauge-allow-file fileNcss 532 -- Follows the flow of control through each kind of statement.
+// code-gauge-allow-file fileNcss 537 -- Follows the flow of control through each kind of statement.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import type { Checker } from './checker';
+import { checkTypeMemberDuplicates } from './declarations';
 import { FlowState, type State } from './flow';
 import type { Scope, Sym } from './scopes';
 import { hasToken, isNumericName, named, skipParentheses } from './syntax';
@@ -157,6 +158,7 @@ export class StatementChecker {
         }
       }
       if (current.type === 'object_type') {
+        checkTypeMemberDuplicates(this.c, current);
         const type = this.c.typeNodes.typeFromNode(current);
         if (type.kind === 'object') this.checkIndexConformance(type.resolve(), current);
       }
@@ -170,6 +172,8 @@ export class StatementChecker {
     const name = node.childForFieldName('name')?.text;
     const symbol = name ? this.c.scopeOf(node).lookupType(name) : undefined;
     if (!symbol) return;
+    const body = node.childForFieldName('body');
+    if (body) checkTypeMemberDuplicates(this.c, body);
     this.c.signatures.typeParametersOf(node);
     const type = this.c.typeNodes.declaredTypeOf(symbol);
     if (type.kind === 'object') {
