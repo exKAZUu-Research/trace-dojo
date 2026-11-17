@@ -55,6 +55,7 @@ import {
   unionOf,
   type UnionType,
   unknownType,
+  withAlias,
 } from './types';
 import { couldContainTypeVariables } from './typeVariables';
 
@@ -413,7 +414,7 @@ export class Checker {
       case 'mapped': {
         const mapped = type.mapped as MappedInfo;
         const getTemplate = (): Type => this.instantiate(mapped.template, mapper);
-        return this.typeOperators.mappedType({
+        const instantiated = this.typeOperators.mappedType({
           typeParameter: mapped.typeParameter,
           readonlyModifier: mapped.readonlyModifier,
           optionalModifier: mapped.optionalModifier,
@@ -424,6 +425,13 @@ export class Checker {
             return getTemplate();
           },
         });
+        return type.aliasName
+          ? withAlias(
+              instantiated,
+              type.aliasName,
+              (type.aliasArguments ?? []).map((argument) => this.instantiate(argument, mapper))
+            )
+          : instantiated;
       }
       case 'interface': {
         // A generic interface or class stands for itself applied to its own type parameters.

@@ -491,7 +491,7 @@ export class TypeOperators {
       kind: 'conditional',
       distributive: type.distributive,
       aliasName: type.aliasName,
-      aliasArguments: type.aliasArguments,
+      aliasArguments: type.aliasArguments?.map((argument) => checker.instantiate(argument, outer)),
       id: newTypeId(),
       checkType,
       extendsType,

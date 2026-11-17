@@ -8,6 +8,7 @@ import type { Sym } from './scopes';
 import { nameSuggestionHint } from './spelling';
 import { hasToken, named, numberValue, propertyNameText, stringValue } from './syntax';
 import {
+  aliasedDeclaredType,
   anonymousObject,
   anyType,
   bigintType,
@@ -626,14 +627,11 @@ export class TypeNodes {
       value?.type === 'union_type' ? { kind: 'union', id: newTypeId(), types: [] } : undefined;
     if (pending) this.c.registerAliasUnion(pending, unionAlias(symbol));
     symbol.pendingUnion = pending;
-    let type = value ? this.typeFromNode(value) : anyType;
+    const type = value ? this.typeFromNode(value) : anyType;
     symbol.resolving = false;
     symbol.pendingUnion = undefined;
     if (pending) pending.types = type.kind === 'union' ? type.types : [type];
-    if (type.kind === 'object' && type.objectKind === 'anonymous' && !type.aliasName) {
-      type = { ...type, aliasName: symbol.name, aliasArguments: this.c.signatures.typeParametersOfSymbol(symbol) };
-    }
-    return type;
+    return aliasedDeclaredType(type, symbol.name, this.c.signatures.typeParametersOfSymbol(symbol));
   }
 
   private interfaceType(symbol: Sym): ObjectType {

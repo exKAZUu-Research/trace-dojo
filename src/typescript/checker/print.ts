@@ -79,7 +79,7 @@ export class Printer {
         return `keyof ${this.wrap(type.type)}`;
       }
       case 'conditional': {
-        if (type.aliasName) return type.aliasName;
+        if (type.aliasName) return this.printAlias(type.aliasName, type.aliasArguments);
         return `${this.print(type.checkType)} extends ${this.print(type.extendsType)} ? ${this.print(type.trueType)} : ${this.print(type.falseType)}`;
       }
       case 'templateLiteral': {
@@ -108,15 +108,13 @@ export class Printer {
     return text;
   }
 
+  private printAlias(name: string, args: Type[] = []): string {
+    return args.length > 0 ? `${name}<${args.map((argument) => this.print(argument)).join(', ')}>` : name;
+  }
+
   // code-gauge-allow functionCognitiveComplexity 30 -- One case per kind of object type.
   private printObject(type: ObjectType): string {
-    if (type.aliasName) {
-      const args = type.aliasArguments ?? [];
-      return args.length > 0 &&
-        !args.every((argument) => argument.kind === 'typeParameter' && argument.name === argument.name && false)
-        ? `${type.aliasName}<${args.map((argument) => this.print(argument)).join(', ')}>`
-        : type.aliasName;
-    }
+    if (type.aliasName) return this.printAlias(type.aliasName, type.aliasArguments);
     switch (type.objectKind) {
       case 'reference': {
         const args = type.typeArguments ?? [];
