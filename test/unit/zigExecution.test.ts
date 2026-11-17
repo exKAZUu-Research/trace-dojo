@@ -6433,3 +6433,114 @@ test.each(['u32767', 'i32767'])('weighted random supports the auxiliary integer 
   const source = `const std=@import("std");pub fn main()void{var p=std.Random.DefaultPrng.init(0);const r=p.random();const n=r.weightedIndex(${type},&.{1});std.debug.print("{}",.{n});}`;
   expect(executeProgram('zig', source)).toMatchObject({ kind: 'executed', stderr: '0', uncaughtException: undefined });
 });
+
+test.each([
+  ['insertSlice(init.gpa,0,l.items[2..4])', '{ 1, 2, 1, 2, 3, 4 }'],
+  ['replaceRange(init.gpa,0,1,l.items[2..4])', '{ 2, 3, 2, 3, 4 }'],
+  ['replaceRange(init.gpa,0,3,l.items[3..4])', '{ 4, 4 }'],
+])('list mutations preserve native live-source movement: %s', (operation, output) => {
+  const source = `const std=@import("std");pub fn main(init:std.process.Init)!void{var b:[8]u8=undefined;var l=std.ArrayList(u8).initBuffer(&b);try l.appendSlice(init.gpa,&.{1,2,3,4});try l.${operation};std.debug.print("{any}",.{l.items});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: output,
+    uncaughtException: undefined,
+  });
+});
+
+test.each(['union(enum(u8)){a:u8=5,b:u8=10}', 'union(enum(u8)){a:u8=9,b:u8}'])(
+  'tagged union values use shared enum validation: %s',
+  (type) => {
+    const source = `const std=@import("std");const U=${type};pub fn main()void{const u=U{.b=7};std.debug.print("{} {t}",.{@intFromEnum(u),u});}`;
+    expect(executeProgram('zig', source)).toMatchObject({
+      kind: 'executed',
+      stderr: '10 b',
+      uncaughtException: undefined,
+    });
+  }
+);
+
+test.each(['union(enum(u8)){a:u8=5,b:u8=5}', 'union(enum(u8)){a:u8=255,b:u8}', 'union(enum){a:u8=5,b:u8}'])(
+  'union tag values reject invalid enum domains: %s',
+  (type) => {
+    expect(executeProgram('zig', `const U=${type};pub fn main()void{_=U{.b=1};}`)).toMatchObject({
+      kind: 'compileError',
+    });
+  }
+);
+
+test.each([
+  'var a=[_]u8{7,0};var b=[_]u8{8,0};var s:[]u8=&a;const q=s[0..1:z:{s=&b;break:z @as(u8,0);}];',
+  'var a=[_]u8{7,8,0};var s:[]u8=&a;const q=s[0..1:z:{s=s[1..];break:z @as(u8,0);}];',
+])('slice headers load after bound and sentinel effects: %s', (body) => {
+  expect(
+    executeProgram('zig', `const std=@import("std");pub fn main()void{${body}std.debug.print("{} {}",.{q[0],s[0]});}`)
+  ).toMatchObject({ kind: 'executed', stderr: '8 8', uncaughtException: undefined });
+});
+
+test.each([0, 1])('ordinary slices require sentinel extent beyond length %s', (length) => {
+  const source = `pub fn main()void{var a=[_]u8{7,0};var n:usize=${length};_=&n;const s:[]u8=a[${length === 0 ? 1 : 0}..][0..n];_=s[0..${length}:0];}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    uncaughtException: `panic: index out of bounds: index ${length + 1}, len ${length}`,
+  });
+});
+
+test.each([false, true])('readonly nested pointer peers preserve qualifiers in both orders: %s', (reverse) => {
+  const a = '@as([]const *u8,&a)',
+    b = '@as([]const *const u8,&b)';
+  const source = `const std=@import("std");pub fn main()void{var x:u8=7;const a=[_]*u8{&x};const b=[_]*const u8{&x};var flag=true;_=&flag;const p=if(flag)${reverse ? b : a} else ${reverse ? a : b};std.debug.print("{} {}",.{p[0].*,@TypeOf(p)==[]const *const u8});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: '7 true',
+    uncaughtException: undefined,
+  });
+});
+
+test.each(['const p:[]*const u8=&a;', 'const p:**const u8=&a[0];'])(
+  'mutable outer pointers reject covariant children: %s',
+  (declaration) => {
+    const source = `pub fn main()void{var x:u8=7;var a=[_]*u8{&x};${declaration}_=p;}`;
+    expect(executeProgram('zig', source)).toMatchObject({ kind: 'compileError' });
+  }
+);
+
+test.each(['.{@as(u8,2),a}', '(.{@as(u8,2),a})'])(
+  'mixed destructuring stores before later initializers: %s',
+  (literal) => {
+    const source = `const std=@import("std");pub fn main()void{var a:u8=1;a,const b=${literal};std.debug.print("{} {}",.{a,b});}`;
+    expect(executeProgram('zig', source)).toMatchObject({
+      kind: 'executed',
+      stderr: '2 2',
+      uncaughtException: undefined,
+    });
+  }
+);
+
+test.each([
+  'inline for([_]u8{0,1})|x|{if(x==0)break;const n:u8=true;_=n;}',
+  'inline for(.{@as(u8,1),true})|x|{if(@TypeOf(x)==u8)break;const n:u8=x;_=n;}',
+])('inline loop termination skips later unreachable specializations: %s', (loop) => {
+  expect(
+    executeProgram('zig', `const std=@import("std");pub fn main()void{${loop}std.debug.print("ok",.{});}`)
+  ).toMatchObject({ kind: 'executed', stderr: 'ok', uncaughtException: undefined });
+});
+
+test('inline continue preserves later reachable specializations', () => {
+  const source = `const std=@import("std");pub fn main()void{inline for(.{@as(u8,1),true})|x|{if(@TypeOf(x)==u8)continue;std.debug.print("{}",.{x});}}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: 'true',
+    uncaughtException: undefined,
+  });
+});
+
+test.each([false, true])('readonly pointer peers combine optional children: %s', (optional) => {
+  const child = optional ? '?*' : '*';
+  const unwrap = optional ? 'p.*.?.*' : 'p.*.*';
+  const source = `const std=@import("std");pub fn main()void{var x:u8=7;const a:${child}u8=&x;const b:${child}const u8=&x;var f=true;_=&f;const p=if(f)&a else &b;const q=if(f)&b else &a;std.debug.print("{} {}",.{${unwrap},${unwrap.replaceAll('p.', 'q.')}});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: '7 7',
+    uncaughtException: undefined,
+  });
+});

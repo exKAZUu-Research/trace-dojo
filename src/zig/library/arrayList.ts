@@ -19,7 +19,7 @@ import {
 } from '../types';
 import { NativeHandle, NULL, optionalSome, Pointer, Slice, storeInto, type Value, ZArray, ZStruct } from '../values';
 import { zeroSlice } from '../zeroSizedMemory';
-import { orderedRemover } from './arrayListAlgorithms';
+import { orderedRemover, sliceMutator } from './arrayListAlgorithms';
 import { constSlice } from './common';
 import {
   ALLOCATOR,
@@ -200,6 +200,29 @@ function defineMembers(type: StructType, child: Type): void {
         }
       );
     });
+  const mutateSlice = (name: 'insertSlice' | 'replaceRange'): (() => Member) =>
+    fnMember(`ArrayList.${name}`, (sema, call) => {
+      sema.resolveStorage(child, call.span);
+      const params = [ALLOCATOR, USIZE, ...(name === 'replaceRange' ? [USIZE] : []), constItems];
+      const args = compileArgs(sema, expectArgs(sema, call, params.length, name), params);
+      const list = receiverOf(sema, call.receiver, type, call.span, true);
+      const fn = sliceMutator(sema, child, type, name, call.span);
+      return nativeStateCall(
+        allocating(VOID),
+        args,
+        call.span,
+        (frame) => ({ receiver: list(frame) }),
+        (state, values, frame) => {
+          const received = listOf(state.receiver, child, frame);
+          received.allocator = allocatorState(values[0]);
+          const removed = name === 'replaceRange' ? (values[2] as bigint) : 0n;
+          if (removed > received.items.lengthValue) panic(PANIC.overflow);
+          const nextLength = received.items.lengthValue - removed + (values.at(-1) as Slice).lengthValue;
+          if (!ensureTotalCapacity(frame, received, nextLength, child)) return ERROR_OUT_OF_MEMORY;
+          return sema.callFunction(fn, [new Pointer({ slots: [state.receiver] }, 0), ...values.slice(1)], frame);
+        }
+      );
+    });
   const insertValues = (frame: Frame, list: List, at: bigint, input: Value[] | Slice): Value => {
     const count = input instanceof Slice ? input.lengthValue : BigInt(input.length);
     const length = list.items.lengthValue + count;
@@ -302,11 +325,7 @@ function defineMembers(type: StructType, child: Type): void {
       { args: [USIZE, child], result: allocating(VOID), allocator: true },
       (list, [index, item], frame) => insertValues(frame, list, index as bigint, [item])
     ),
-    insertSlice: method(
-      'insertSlice',
-      { args: [USIZE, constItems], result: allocating(VOID), allocator: true },
-      (list, [index, slice], frame) => insertValues(frame, list, index as bigint, slice as Slice)
-    ),
+    insertSlice: mutateSlice('insertSlice'),
     orderedRemove: method('orderedRemove', { args: [USIZE], result: child }, (list, [index]) => {
       const position = Number(index as bigint);
       if ((index as bigint) >= list.items.lengthValue) indexOutOfBounds(index as bigint, list.items.lengthValue);
@@ -478,40 +497,7 @@ function defineMembers(type: StructType, child: Type): void {
       setLength(list, list.struct.slots[1] as bigint);
       return;
     }),
-    replaceRange: method(
-      'replaceRange',
-      { args: [USIZE, USIZE, constItems], result: allocating(VOID), allocator: true },
-      (list, [start, length, slice], frame) => {
-        if (sizeOf(child) === 0) {
-          const from = start as bigint,
-            count = length as bigint;
-          if (count > list.items.lengthValue) panic(PANIC.overflow);
-          const next = list.items.lengthValue - count + (slice as Slice).lengthValue;
-          if (!ensureTotalCapacity(frame, list, next, child)) return ERROR_OUT_OF_MEMORY;
-          if (from + count > list.items.lengthValue)
-            panic(`start index ${from + count} is larger than end index ${list.items.lengthValue}`);
-          setLength(list, next);
-          return;
-        }
-        const from = Number(start as bigint);
-        const count = Number(length as bigint);
-        spendTransfers(list, list.items.lengthValue + (slice as Slice).lengthValue, 3);
-        const values = list.items.values().map(copyForStorage);
-        const replacement = (slice as Slice).values().map(copyForStorage);
-        // Zig computes `items.len - len` before slicing `items[start + len ..]`.
-        if (count > values.length) panic(PANIC.overflow);
-        if (!ensureTotalCapacity(frame, list, values.length - count + replacement.length, child)) {
-          return ERROR_OUT_OF_MEMORY;
-        }
-        if (from + count > values.length)
-          panic(`start index ${from + count} is larger than end index ${values.length}`);
-        const combined = [...values.slice(0, from), ...replacement, ...values.slice(from + count)];
-        for (const [position, value] of combined.entries())
-          storeInto(list.items.target, list.items.start + position, value);
-        setLength(list, combined.length);
-        return;
-      }
-    ),
+    replaceRange: mutateSlice('replaceRange'),
   };
   if (child === U8) {
     members.print = fnMember('ArrayList.print', (sema, call) => {

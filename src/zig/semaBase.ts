@@ -593,8 +593,8 @@ export abstract class SemaBase implements SemaApi {
     }
   }
 
-  // code-gauge-allow functionCognitiveComplexity 20 -- Checks each rule of Zig's type coercion or container analysis in turn.
-  // code-gauge-allow functionNcss 33 -- Resolves enum tags, indexed uniqueness, and integer range checks in declaration order.
+  // code-gauge-allow functionCognitiveComplexity 24 -- Checks each rule of Zig's type coercion or container analysis in turn.
+  // code-gauge-allow functionNcss 35 -- Resolves enum tags, indexed uniqueness, and integer range checks in declaration order.
   enumFields(type: EnumType): NonNullable<EnumType['fields']> {
     if (type.fields) return type.fields;
     const syntax = type.namespace.syntax;
@@ -611,6 +611,7 @@ export abstract class SemaBase implements SemaApi {
         this.spendCompilation();
         let value = next;
         if (field.value) {
+          if (!declaredTag) this.error(field, 'enum の値を指定するときは、整数のタグの型を書いてください。');
           const tagType = declaredTag as IntType;
           value = this.knownValue(
             this.coerce(this.compile(field.value, tagType), tagType, field.value),
@@ -647,20 +648,21 @@ export abstract class SemaBase implements SemaApi {
       });
       type.fields = fields;
       if (syntax.taggedByEnum) {
-        const tagType = syntax.argument ? this.compileType(syntax.argument) : undefined;
-        if (tagType && tagType.kind !== 'int') this.error(syntax, 'union(enum(T)) の T は整数の型にしてください。');
         const tagNamespace: Namespace = {
           name: `@typeInfo(${type.namespace.name}).@"union".tag_type.?`,
           decls: new Map(),
+          scope: this.scope,
+          syntax: { ...syntax, containerKind: 'enum' },
         };
         type.tagType = {
           kind: 'enum',
           namespace: tagNamespace,
-          tagType: (tagType as IntType | undefined) ?? smallestUnsigned(Math.max(fields.length - 1, 0)),
-          fields: fields.map((field, index) => ({ name: field.name, value: BigInt(index) })),
+          tagType: undefined,
+          fields: undefined,
           exhaustive: true,
           unionOf: type,
         };
+        this.enumFields(type.tagType);
       } else if (syntax.argument) {
         const tagType = this.compileType(syntax.argument);
         if (tagType.kind !== 'enum') this.error(syntax, 'union(T) の T は enum の型にしてください。');
@@ -940,14 +942,14 @@ export abstract class SemaBase implements SemaApi {
       from.child.length === 0n;
     if (from.isConst && !to.isConst && !empty) return undefined;
     if (from.size === to.size) {
-      if (!inMemoryCoercible(from.child, to.child)) return undefined;
+      if (!pointerChildCoercible(from.child, to.child, to.isConst)) return undefined;
       if (to.sentinel !== undefined && !sameSentinel(from.sentinel, to.sentinel)) return undefined;
       return { ...expression, type: to };
     }
     // `*[N]T` to `[]T`
     if (from.size === 'one' && to.size === 'slice' && from.child.kind === 'array') {
       const array = from.child;
-      if (!inMemoryCoercible(array.child, to.child)) return undefined;
+      if (!pointerChildCoercible(array.child, to.child, to.isConst || empty)) return undefined;
       if (to.sentinel !== undefined && !sameSentinel(array.sentinel, to.sentinel)) return undefined;
       const { length } = array;
       return {
@@ -1322,7 +1324,7 @@ export function inMemoryCoercible(from: Type, to: Type): boolean {
   if (from.kind === 'pointer' && to.kind === 'pointer') {
     if (from.size !== to.size || (from.isConst && !to.isConst)) return false;
     if (to.sentinel !== undefined && !sameSentinel(from.sentinel, to.sentinel)) return false;
-    return inMemoryCoercible(from.child, to.child);
+    return pointerChildCoercible(from.child, to.child, to.isConst);
   }
   if (from.kind === 'optional' && to.kind === 'optional') return inMemoryCoercible(from.child, to.child);
   if (from.kind === 'error_set' && to.kind === 'error_set') return errorSetIncludes(to, from);
@@ -1362,24 +1364,30 @@ function peerPointers(a: Extract<Type, { kind: 'pointer' }>, b: Extract<Type, { 
   if (a.size === 'slice' || b.size === 'slice') {
     const elementA = elementOf(a);
     const elementB = elementOf(b);
-    if (!elementA || elementA !== elementB) return undefined;
-    return sliceOf(elementA, isConst, sentinel);
+    if (!elementA || !elementB) return undefined;
+    const child = peerMemoryType(elementA, elementB, isConst);
+    return child ? sliceOf(child, isConst, sentinel) : undefined;
   }
   if (a.child.kind === 'array' && b.child.kind === 'array') {
     const left = a.child,
       right = b.child;
-    const child = inMemoryCoercible(left.child, right.child)
-      ? right.child
-      : inMemoryCoercible(right.child, left.child)
-        ? left.child
-        : undefined;
+    const child = peerMemoryType(left.child, right.child, isConst);
     if (!child) return undefined;
     return left.length === right.length
       ? pointerTo(arrayOf(left.length, child, sentinel), isConst)
       : sliceOf(child, isConst, sentinel);
   }
-  if (a.child === b.child) return pointerTo(a.child, isConst);
-  return undefined;
+  const child = peerMemoryType(a.child, b.child, isConst);
+  return child ? pointerTo(child, isConst) : undefined;
+}
+
+function peerMemoryType(a: Type, b: Type, isConst: boolean): Type | undefined {
+  if (pointerChildCoercible(a, b, isConst)) return b;
+  return pointerChildCoercible(b, a, isConst) ? a : undefined;
+}
+
+function pointerChildCoercible(from: Type, to: Type, isConst: boolean): boolean {
+  return inMemoryCoercible(from, to) && (isConst || inMemoryCoercible(to, from));
 }
 
 function pointerSentinel(pointer: Extract<Type, { kind: 'pointer' }>): Value | undefined {

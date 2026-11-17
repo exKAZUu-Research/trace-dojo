@@ -1,5 +1,5 @@
 /*
-Adapted from Zig 0.17.1 lib/std/array_list.zig orderedRemoveMany; T is bound by the caller.
+Adapted from Zig 0.17.1 lib/std/array_list.zig mutation bodies; T is bound by the caller.
 The MIT License (Expat)
 
 Copyright (c) Zig contributors
@@ -47,6 +47,32 @@ fn orderedRemoveMany(self: *std.ArrayList(T), sorted_indexes: []const usize) voi
     @memmove(self.items[start - shift ..][0..len], self.items[start..][0..len]);
     self.items.len = end - shift;
 }
+fn addManyAtAssumeCapacity(self: *std.ArrayList(T), index: usize, count: usize) []T {
+    if (self.pointer_stability.state != .unlocked) unreachable;
+    const new_len = self.items.len + count;
+    std.debug.assert(self.capacity >= new_len);
+    const to_move = self.items[index..];
+    self.items.len = new_len;
+    @memmove(self.items[index + count ..][0..to_move.len], to_move);
+    const result = self.items[index..][0..count];
+    @memset(result, undefined);
+    return result;
+}
+fn insertSliceAssumeCapacity(self: *std.ArrayList(T), index: usize, items: []const T) void {
+    const dst = addManyAtAssumeCapacity(self, index, items.len);
+    @memcpy(dst, items);
+}
+fn replaceRangeAssumeCapacity(self: *std.ArrayList(T), start: usize, len: usize, new_items: []const T) void {
+    std.debug.assert(self.capacity - self.items.len >= new_items.len -| len);
+    if (self.pointer_stability.state != .unlocked) unreachable;
+    const tail = self.items[start + len ..];
+    const vacated = self.items[self.items.len - (len -| new_items.len) ..];
+    self.items.len = self.items.len - len + new_items.len;
+    @memmove(self.items[start + new_items.len ..], tail);
+    @memcpy(self.items[start..][0..new_items.len], new_items);
+    @memset(vacated, undefined);
+}
+
 `;
 
 let file: ReturnType<typeof parseZig> | undefined;
@@ -56,4 +82,16 @@ export function orderedRemover(sema: SemaApi, child: Type, list: StructType, spa
   return sema.libraryFunction(file, child, 'orderedRemoveMany', [pointerTo(list, false), sliceOf(USIZE, true)], span, {
     namespaceName: 'std.array_list',
   });
+}
+
+export function sliceMutator(
+  sema: SemaApi,
+  child: Type,
+  list: StructType,
+  name: 'insertSlice' | 'replaceRange',
+  span: Span
+): FunctionInstance {
+  file ??= parseZig(SOURCE);
+  const params = [pointerTo(list, false), USIZE, ...(name === 'replaceRange' ? [USIZE] : []), sliceOf(child, true)];
+  return sema.libraryFunction(file, child, `${name}AssumeCapacity`, params, span, { namespaceName: 'std.array_list' });
 }

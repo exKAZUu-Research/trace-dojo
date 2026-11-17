@@ -93,6 +93,7 @@ interface JumpTarget {
   /** The type a labeled switch's `continue` gives a new operand of. */
   readonly operandType?: Type;
   broken: boolean;
+  continued?: boolean;
 }
 
 interface BreakSite {
@@ -328,8 +329,8 @@ export abstract class StatementCompiler extends CallCompiler {
     return { exec: this.simple(row, isObjectCreation(valueSyntax), run), noreturn: false };
   }
 
-  // code-gauge-allow functionNcss 49 -- Keeps the analysis and the generated code of one construct together, as Zig's Sema does.
-  // code-gauge-allow functionCognitiveComplexity 26 -- Analyzes tuple and array targets before generating their simultaneous assignments.
+  // code-gauge-allow functionNcss 43 -- Keeps aggregate target analysis and generated assignment order together.
+  // code-gauge-allow functionCognitiveComplexity 22 -- Keeps aggregate target analysis and generated assignment order together.
   private destructure(statement: Extract<Statement, { kind: 'destructure' }>): Stmt {
     const sequential = this.sequentialDestructure(statement);
     if (sequential) return sequential;
@@ -353,24 +354,10 @@ export abstract class StatementCompiler extends CallCompiler {
       const elementExpression = this.elementOf(held, index, elementTypes[index], isArray, statement);
       if (target.declaration) {
         const declared = target.declaration.type ? this.compileType(target.declaration.type) : undefined;
-        const coerced = declared ? this.coerce(elementExpression, declared, target) : elementExpression;
-        if (!target.declaration.isConst && isComptimeOnly(coerced.type)) {
-          this.error(
-            target,
-            `変数「${target.declaration.name}」の型 ${typeName(coerced.type)} は、コンパイルのときだけの型です。`
-          );
-        }
-        const binding = this.declareLocal(
-          target.declaration.name,
-          coerced.type,
-          target.declaration.isConst,
-          coerced,
-          target.declaration.quotedName
+        return this.destructureDeclaration(
+          target,
+          declared ? this.coerce(elementExpression, declared, target) : elementExpression
         );
-        const convert = coerced;
-        return (frame: Frame): void => {
-          frame.slots[binding.slot] = copyForFrame(frame, convert.eval(frame), convert.type);
-        };
       }
       const destination = target.target as Expression;
       if (destination.kind === 'identifier' && isDiscardName(destination)) return () => {};
@@ -396,40 +383,58 @@ export abstract class StatementCompiler extends CallCompiler {
     };
   }
 
-  /**
-   * `a, b = .{ b, a };` stores each element as soon as it computes it, as Zig's result locations do, so that a later
-   * element sees an earlier one's new value.
-   */
+  // code-gauge-allow functionCognitiveComplexity 16 -- Prepares all initializer scopes before publishing sequential declarations.
   private sequentialDestructure(statement: Extract<Statement, { kind: 'destructure' }>): Stmt | undefined {
-    const { value } = statement;
-    if (value.kind !== 'arrayInit' || value.type || statement.targets.some((target) => target.declaration))
-      return undefined;
+    const value = unwrapParens(statement.value);
+    if (value.kind !== 'arrayInit' || value.type) return undefined;
     if (value.elements.length !== statement.targets.length) {
       this.error(
         statement,
         `分割代入の数が合いません（${statement.targets.length} 個ですが、値は ${value.elements.length} 個です）。`
       );
     }
-    const stores = statement.targets.map((target, index) => {
-      const destination = target.target as Expression;
+    const prepared = statement.targets.map((target, index) => {
       const element = value.elements[index];
+      if (target.declaration) {
+        const declared = target.declaration.type ? this.compileType(target.declaration.type) : undefined;
+        const compiled = this.compile(element, declared);
+        return { target, element: declared ? this.coerce(compiled, declared, element) : compiled };
+      }
+      const destination = target.target as Expression;
       if (destination.kind === 'identifier' && isDiscardName(destination)) {
         const discarded = this.compile(element).eval;
-        return (frame: Frame): void => void discarded(frame);
+        return { store: (frame: Frame): void => void discarded(frame) };
       }
       const place = this.assignablePlace(destination);
       const evaluate = this.coerce(this.compile(element, place.type), place.type, element).eval;
       const locate = place.place.locate;
-      return (frame: Frame): void => {
-        const pointer = locate(frame);
-        withHeldValues(frame, [pointer], () => storeInto(pointer.target, pointer.index, evaluate(frame)));
+      return {
+        store: (frame: Frame): void => {
+          const pointer = locate(frame);
+          withHeldValues(frame, [pointer], () => storeInto(pointer.target, pointer.index, evaluate(frame)));
+        },
       };
     });
+    const stores = prepared.map((item) => item.store ?? this.destructureDeclaration(item.target!, item.element!));
     return {
       exec: this.simple(this.stepRow(statement), false, (frame) => {
         for (const store of stores) store(frame);
       }),
       noreturn: false,
+    };
+  }
+
+  private destructureDeclaration(
+    target: Extract<Statement, { kind: 'destructure' }>['targets'][number],
+    value: TExpr
+  ): (frame: Frame) => void {
+    const declaration = target.declaration!;
+    if (!declaration.isConst && isComptimeOnly(value.type)) {
+      this.error(target, `変数「${declaration.name}」の型 ${typeName(value.type)} は、コンパイルのときだけの型です。`);
+    }
+    const binding = this.declareLocal(declaration.name, value.type, declaration.isConst, value, declaration.quotedName);
+    return (frame: Frame): void => {
+      frame.slots[binding.slot] = copyForFrame(frame, value.eval(frame), value.type);
     };
   }
 
@@ -822,6 +827,7 @@ export abstract class StatementCompiler extends CallCompiler {
     const target = this.findTarget(expression.label, expression.kind, expression);
     const { id } = target;
     if (expression.kind === 'continue') {
+      target.continued = true;
       if (target.kind === 'switch') {
         const operand = this.coerce(
           this.compile(expression.value as Expression, target.operandType),
@@ -1852,7 +1858,14 @@ export abstract class StatementCompiler extends CallCompiler {
       broken: false,
     };
     const row = this.stepRow(expression);
-    const iterations = elements.map((element) => {
+    const iterations: {
+      body: Exec;
+      slot: number | undefined;
+      evaluate: TExpr['eval'];
+      binding: LocalBinding | undefined;
+    }[] = [];
+    for (const element of elements) {
+      target.continued = false;
       this.compilationBudget.spend();
       const locals = new Map<string, LocalBinding>();
       let binding: LocalBinding | undefined;
@@ -1864,16 +1877,17 @@ export abstract class StatementCompiler extends CallCompiler {
       fn.targets.push(target);
       try {
         const body = this.withScope({ locals, parent: this.scope }, () => this.loopBody(expression.body));
-        return {
+        iterations.push({
           body: clearingLocals(binding ? [binding.slot] : [], body.exec),
           slot: binding?.slot,
           evaluate: element.eval,
           binding,
-        };
+        });
+        if (body.noreturn && !target.continued) break;
       } finally {
         fn.targets.pop();
       }
-    });
+    }
     const { id } = target;
     return {
       stmt: {

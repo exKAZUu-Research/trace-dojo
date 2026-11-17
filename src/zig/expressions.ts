@@ -815,8 +815,9 @@ export abstract class ExpressionCompiler extends SemaBase {
     if (first !== undefined && last !== undefined && first > last) {
       this.error(expression, `スライスの始まり ${first} が、終わり ${last} より大きくなっています。`);
     }
-    if (staticLen !== undefined && last !== undefined && last > limitOf(staticLen)) {
-      this.error(expression, `スライスの終わり ${last} は、長さ ${staticLen} の範囲の外です。`);
+    const extra = sentinelExpression ? 1n : 0n;
+    if (staticLen !== undefined && last !== undefined && last + extra > limitOf(staticLen)) {
+      this.error(expression, `スライスの終わり ${last + extra} は、長さ ${staticLen} の範囲の外です。`);
     }
     if (staticLen !== undefined && first !== undefined && first > (end ? limitOf(staticLen) : staticLen)) {
       this.error(expression, `スライスの始まり ${first} は、長さ ${staticLen} の範囲の外です。`);
@@ -831,8 +832,15 @@ export abstract class ExpressionCompiler extends SemaBase {
       this.checkMemoryOperand(operand, expression);
     const arrayType =
       type.kind === 'pointer' && type.size === 'one' && type.child.kind === 'array' ? type.child : undefined;
-    const operands = [base, start, ...(end ? [end] : []), ...(sentinelExpression ? [sentinelExpression] : [])];
-    const render = ([value, first, last]: Value[]): Value => {
+    const headerAddress = !arrayType && base.place ? this.addressOf(base) : undefined;
+    const operands = [
+      headerAddress ?? base,
+      start,
+      ...(end ? [end] : []),
+      ...(sentinelExpression ? [sentinelExpression] : []),
+    ];
+    const render = ([baseValue, first, last]: Value[]): Value => {
+      const value = headerAddress ? (baseValue as Pointer).load() : baseValue;
       let target: Slots;
       let offset: number;
       let length: bigint;
@@ -849,7 +857,7 @@ export abstract class ExpressionCompiler extends SemaBase {
       }
       const fromValue = first as bigint;
       const toValue = end ? (last as bigint) : length;
-      if (toValue > length + (sourceSentinel === undefined ? 0n : 1n)) indexOutOfBounds(toValue, length);
+      if (toValue + extra > limitOf(length)) indexOutOfBounds(toValue + extra, length);
       if (fromValue > toValue) panic(`start index ${fromValue} is larger than end index ${toValue}`);
       const from = offset + Number(fromValue),
         to = offset + Number(toValue);
