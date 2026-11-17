@@ -23,9 +23,9 @@ export function regexpLexicalSource(source: string, extended: boolean): string {
     .join('');
 }
 
-export function regexpSourceTokens(source: string, extended: boolean): Token[] {
+export function regexpSourceTokens(source: string, extended: boolean, captureGroup?: boolean): Token[] {
   try {
-    return tokenize(source, { flags: extended ? 'x' : '', rules: { rubySyntax: true } }).tokens;
+    return tokenize(source, { flags: extended ? 'x' : '', rules: { rubySyntax: true, captureGroup } }).tokens;
   } catch (error) {
     if (error instanceof SyntaxError || error instanceof UnsupportedFeatureError) throw error;
     if (error instanceof RangeError) throw new ExecutionLimitError('operations');

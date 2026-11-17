@@ -36844,3 +36844,353 @@ test.each(nativeCaseRegexpIteratorTimeEncodingCases)(
     expect(run(source)).toMatchObject({ kind: 'executed', stdout, uncaughtException: undefined });
   }
 );
+
+const nativeSourceCaptureNumberCases = [
+  [
+    String.raw`begin;r=Regexp.new("(?<n>b)\\1");p r.match?("ba");rescue=>e;p e.class,e.message;end`,
+    'RegexpError\n"numbered backref/call is not allowed. (use name): /(?<n>b)\\\\1/"\n',
+  ],
+  [String.raw`begin;r=Regexp.new("(?<n>b)\\10");p r.match?("b\b");rescue=>e;p e.class,e.message;end`, 'true\n'],
+  [String.raw`begin;r=Regexp.new("(?<n>b)\\11");p r.match?("b\t");rescue=>e;p e.class,e.message;end`, 'true\n'],
+  [String.raw`begin;r=Regexp.new("(?<n>b)\\12");p r.match?("b\n");rescue=>e;p e.class,e.message;end`, 'true\n'],
+  [String.raw`begin;r=Regexp.new("(?<n>b)\\18");p r.match?("ba");rescue=>e;p e.class,e.message;end`, 'false\n'],
+  [String.raw`begin;r=Regexp.new("(?<n>b)\\80");p r.match?("ba");rescue=>e;p e.class,e.message;end`, 'false\n'],
+  [
+    String.raw`begin;r=Regexp.new("(?<n>b)\\1");p r.match?("ba");rescue=>e;p e.class,e.message;end`,
+    'RegexpError\n"numbered backref/call is not allowed. (use name): /(?<n>b)\\\\1/"\n',
+  ],
+  [String.raw`begin;r=Regexp.new("(?<n>b)\\10");p r.match?("b\b");rescue=>e;p e.class,e.message;end`, 'true\n'],
+  [String.raw`begin;r=Regexp.new("(?<n>b)\\11");p r.match?("b\t");rescue=>e;p e.class,e.message;end`, 'true\n'],
+  [String.raw`begin;r=Regexp.new("(?<n>b)\\12");p r.match?("b\n");rescue=>e;p e.class,e.message;end`, 'true\n'],
+  [String.raw`begin;r=Regexp.new("(?<n>b)\\18");p r.match?("ba");rescue=>e;p e.class,e.message;end`, 'false\n'],
+  [String.raw`begin;r=Regexp.new("(?<n>b)\\80");p r.match?("ba");rescue=>e;p e.class,e.message;end`, 'false\n'],
+  [
+    String.raw`begin;r=Regexp.new("(?<n>b)(a)\\1");p r.match?("baa");rescue=>e;p e.class,e.message;end`,
+    'RegexpError\n"numbered backref/call is not allowed. (use name): /(?<n>b)(a)\\\\1/"\n',
+  ],
+  [String.raw`begin;r=Regexp.new("(?<n>b)(a)\\10");p r.match?("ba\b");rescue=>e;p e.class,e.message;end`, 'true\n'],
+  [String.raw`begin;r=Regexp.new("(?<n>b)(a)\\11");p r.match?("ba\t");rescue=>e;p e.class,e.message;end`, 'true\n'],
+  [String.raw`begin;r=Regexp.new("(?<n>b)(a)\\12");p r.match?("ba\n");rescue=>e;p e.class,e.message;end`, 'true\n'],
+  [String.raw`begin;r=Regexp.new("(?<n>b)(a)\\18");p r.match?("baa");rescue=>e;p e.class,e.message;end`, 'false\n'],
+  [String.raw`begin;r=Regexp.new("(?<n>b)(a)\\80");p r.match?("baa");rescue=>e;p e.class,e.message;end`, 'false\n'],
+  [
+    String.raw`begin;r=Regexp.new("(a)(?<n>b)\\1");p r.match?("aba");rescue=>e;p e.class,e.message;end`,
+    'RegexpError\n"numbered backref/call is not allowed. (use name): /(a)(?<n>b)\\\\1/"\n',
+  ],
+  [String.raw`begin;r=Regexp.new("(a)(?<n>b)\\10");p r.match?("ab\b");rescue=>e;p e.class,e.message;end`, 'true\n'],
+  [String.raw`begin;r=Regexp.new("(a)(?<n>b)\\11");p r.match?("ab\t");rescue=>e;p e.class,e.message;end`, 'true\n'],
+  [String.raw`begin;r=Regexp.new("(a)(?<n>b)\\12");p r.match?("ab\n");rescue=>e;p e.class,e.message;end`, 'true\n'],
+  [String.raw`begin;r=Regexp.new("(a)(?<n>b)\\18");p r.match?("aba");rescue=>e;p e.class,e.message;end`, 'false\n'],
+  [String.raw`begin;r=Regexp.new("(a)(?<n>b)\\80");p r.match?("aba");rescue=>e;p e.class,e.message;end`, 'false\n'],
+  [
+    String.raw`begin;r=Regexp.new("(?<n>b)(a)(a)(a)(a)(a)(a)(a)\\1");p r.match?("baaaaaaaa");rescue=>e;p e.class,e.message;end`,
+    'RegexpError\n"numbered backref/call is not allowed. (use name): /(?<n>b)(a)(a)(a)(a)(a)(a)(a)\\\\1/"\n',
+  ],
+  [
+    String.raw`begin;r=Regexp.new("(?<n>b)(a)(a)(a)(a)(a)(a)(a)\\10");p r.match?("baaaaaaa\b");rescue=>e;p e.class,e.message;end`,
+    'true\n',
+  ],
+  [
+    String.raw`begin;r=Regexp.new("(?<n>b)(a)(a)(a)(a)(a)(a)(a)\\11");p r.match?("baaaaaaa\t");rescue=>e;p e.class,e.message;end`,
+    'true\n',
+  ],
+  [
+    String.raw`begin;r=Regexp.new("(?<n>b)(a)(a)(a)(a)(a)(a)(a)\\12");p r.match?("baaaaaaa\n");rescue=>e;p e.class,e.message;end`,
+    'true\n',
+  ],
+  [
+    String.raw`begin;r=Regexp.new("(?<n>b)(a)(a)(a)(a)(a)(a)(a)\\18");p r.match?("baaaaaaaa");rescue=>e;p e.class,e.message;end`,
+    'false\n',
+  ],
+  [
+    String.raw`begin;r=Regexp.new("(?<n>b)(a)(a)(a)(a)(a)(a)(a)\\80");p r.match?("baaaaaaaa");rescue=>e;p e.class,e.message;end`,
+    'false\n',
+  ],
+  [
+    String.raw`begin;r=Regexp.new("(a)(a)(a)(a)(a)(a)(a)(?<n>b)\\1");p r.match?("aaaaaaaba");rescue=>e;p e.class,e.message;end`,
+    'RegexpError\n"numbered backref/call is not allowed. (use name): /(a)(a)(a)(a)(a)(a)(a)(?<n>b)\\\\1/"\n',
+  ],
+  [
+    String.raw`begin;r=Regexp.new("(a)(a)(a)(a)(a)(a)(a)(?<n>b)\\10");p r.match?("aaaaaaab\b");rescue=>e;p e.class,e.message;end`,
+    'true\n',
+  ],
+  [
+    String.raw`begin;r=Regexp.new("(a)(a)(a)(a)(a)(a)(a)(?<n>b)\\11");p r.match?("aaaaaaab\t");rescue=>e;p e.class,e.message;end`,
+    'true\n',
+  ],
+  [
+    String.raw`begin;r=Regexp.new("(a)(a)(a)(a)(a)(a)(a)(?<n>b)\\12");p r.match?("aaaaaaab\n");rescue=>e;p e.class,e.message;end`,
+    'true\n',
+  ],
+  [
+    String.raw`begin;r=Regexp.new("(a)(a)(a)(a)(a)(a)(a)(?<n>b)\\18");p r.match?("aaaaaaaba");rescue=>e;p e.class,e.message;end`,
+    'false\n',
+  ],
+  [
+    String.raw`begin;r=Regexp.new("(a)(a)(a)(a)(a)(a)(a)(?<n>b)\\80");p r.match?("aaaaaaaba");rescue=>e;p e.class,e.message;end`,
+    'false\n',
+  ],
+  [
+    String.raw`begin;r=Regexp.new("(?<n>b)(a)(a)(a)(a)(a)(a)(a)(a)\\1");p r.match?("baaaaaaaaa");rescue=>e;p e.class,e.message;end`,
+    'RegexpError\n"numbered backref/call is not allowed. (use name): /(?<n>b)(a)(a)(a)(a)(a)(a)(a)(a)\\\\1/"\n',
+  ],
+  [
+    String.raw`begin;r=Regexp.new("(?<n>b)(a)(a)(a)(a)(a)(a)(a)(a)\\10");p r.match?("baaaaaaaa\b");rescue=>e;p e.class,e.message;end`,
+    'true\n',
+  ],
+  [
+    String.raw`begin;r=Regexp.new("(?<n>b)(a)(a)(a)(a)(a)(a)(a)(a)\\11");p r.match?("baaaaaaaa\t");rescue=>e;p e.class,e.message;end`,
+    'true\n',
+  ],
+  [
+    String.raw`begin;r=Regexp.new("(?<n>b)(a)(a)(a)(a)(a)(a)(a)(a)\\12");p r.match?("baaaaaaaa\n");rescue=>e;p e.class,e.message;end`,
+    'true\n',
+  ],
+  [
+    String.raw`begin;r=Regexp.new("(?<n>b)(a)(a)(a)(a)(a)(a)(a)(a)\\18");p r.match?("baaaaaaaaa");rescue=>e;p e.class,e.message;end`,
+    'false\n',
+  ],
+  [
+    String.raw`begin;r=Regexp.new("(?<n>b)(a)(a)(a)(a)(a)(a)(a)(a)\\80");p r.match?("baaaaaaaaa");rescue=>e;p e.class,e.message;end`,
+    'false\n',
+  ],
+  [
+    String.raw`begin;r=Regexp.new("(a)(a)(a)(a)(a)(a)(a)(a)(?<n>b)\\1");p r.match?("aaaaaaaaba");rescue=>e;p e.class,e.message;end`,
+    'RegexpError\n"numbered backref/call is not allowed. (use name): /(a)(a)(a)(a)(a)(a)(a)(a)(?<n>b)\\\\1/"\n',
+  ],
+  [
+    String.raw`begin;r=Regexp.new("(a)(a)(a)(a)(a)(a)(a)(a)(?<n>b)\\10");p r.match?("aaaaaaaab\b");rescue=>e;p e.class,e.message;end`,
+    'true\n',
+  ],
+  [
+    String.raw`begin;r=Regexp.new("(a)(a)(a)(a)(a)(a)(a)(a)(?<n>b)\\11");p r.match?("aaaaaaaab\t");rescue=>e;p e.class,e.message;end`,
+    'true\n',
+  ],
+  [
+    String.raw`begin;r=Regexp.new("(a)(a)(a)(a)(a)(a)(a)(a)(?<n>b)\\12");p r.match?("aaaaaaaab\n");rescue=>e;p e.class,e.message;end`,
+    'true\n',
+  ],
+  [
+    String.raw`begin;r=Regexp.new("(a)(a)(a)(a)(a)(a)(a)(a)(?<n>b)\\18");p r.match?("aaaaaaaaba");rescue=>e;p e.class,e.message;end`,
+    'false\n',
+  ],
+  [
+    String.raw`begin;r=Regexp.new("(a)(a)(a)(a)(a)(a)(a)(a)(?<n>b)\\80");p r.match?("aaaaaaaaba");rescue=>e;p e.class,e.message;end`,
+    'false\n',
+  ],
+  [
+    String.raw`begin;r=Regexp.new("(?<n>b)(a)(a)(a)(a)(a)(a)(a)(a)(a)\\1");p r.match?("baaaaaaaaaa");rescue=>e;p e.class,e.message;end`,
+    'RegexpError\n"numbered backref/call is not allowed. (use name): /(?<n>b)(a)(a)(a)(a)(a)(a)(a)(a)(a)\\\\1/"\n',
+  ],
+  [
+    String.raw`begin;r=Regexp.new("(?<n>b)(a)(a)(a)(a)(a)(a)(a)(a)(a)\\10");p r.match?("baaaaaaaaa\b");rescue=>e;p e.class,e.message;end`,
+    'RegexpError\n"numbered backref/call is not allowed. (use name): /(?<n>b)(a)(a)(a)(a)(a)(a)(a)(a)(a)\\\\10/"\n',
+  ],
+  [
+    String.raw`begin;r=Regexp.new("(?<n>b)(a)(a)(a)(a)(a)(a)(a)(a)(a)\\11");p r.match?("baaaaaaaaa\t");rescue=>e;p e.class,e.message;end`,
+    'true\n',
+  ],
+  [
+    String.raw`begin;r=Regexp.new("(?<n>b)(a)(a)(a)(a)(a)(a)(a)(a)(a)\\12");p r.match?("baaaaaaaaa\n");rescue=>e;p e.class,e.message;end`,
+    'true\n',
+  ],
+  [
+    String.raw`begin;r=Regexp.new("(?<n>b)(a)(a)(a)(a)(a)(a)(a)(a)(a)\\18");p r.match?("baaaaaaaaaa");rescue=>e;p e.class,e.message;end`,
+    'false\n',
+  ],
+  [
+    String.raw`begin;r=Regexp.new("(?<n>b)(a)(a)(a)(a)(a)(a)(a)(a)(a)\\80");p r.match?("baaaaaaaaaa");rescue=>e;p e.class,e.message;end`,
+    'false\n',
+  ],
+  [
+    String.raw`begin;r=Regexp.new("(a)(a)(a)(a)(a)(a)(a)(a)(a)(?<n>b)\\1");p r.match?("aaaaaaaaaba");rescue=>e;p e.class,e.message;end`,
+    'RegexpError\n"numbered backref/call is not allowed. (use name): /(a)(a)(a)(a)(a)(a)(a)(a)(a)(?<n>b)\\\\1/"\n',
+  ],
+  [
+    String.raw`begin;r=Regexp.new("(a)(a)(a)(a)(a)(a)(a)(a)(a)(?<n>b)\\10");p r.match?("aaaaaaaaab\b");rescue=>e;p e.class,e.message;end`,
+    'RegexpError\n"numbered backref/call is not allowed. (use name): /(a)(a)(a)(a)(a)(a)(a)(a)(a)(?<n>b)\\\\10/"\n',
+  ],
+  [
+    String.raw`begin;r=Regexp.new("(a)(a)(a)(a)(a)(a)(a)(a)(a)(?<n>b)\\11");p r.match?("aaaaaaaaab\t");rescue=>e;p e.class,e.message;end`,
+    'true\n',
+  ],
+  [
+    String.raw`begin;r=Regexp.new("(a)(a)(a)(a)(a)(a)(a)(a)(a)(?<n>b)\\12");p r.match?("aaaaaaaaab\n");rescue=>e;p e.class,e.message;end`,
+    'true\n',
+  ],
+  [
+    String.raw`begin;r=Regexp.new("(a)(a)(a)(a)(a)(a)(a)(a)(a)(?<n>b)\\18");p r.match?("aaaaaaaaaba");rescue=>e;p e.class,e.message;end`,
+    'false\n',
+  ],
+  [
+    String.raw`begin;r=Regexp.new("(a)(a)(a)(a)(a)(a)(a)(a)(a)(?<n>b)\\80");p r.match?("aaaaaaaaaba");rescue=>e;p e.class,e.message;end`,
+    'false\n',
+  ],
+  [
+    String.raw`begin;r=Regexp.new("(?<n>b)(a)(a)(a)(a)(a)(a)(a)(a)(a)(a)\\1");p r.match?("baaaaaaaaaaa");rescue=>e;p e.class,e.message;end`,
+    'RegexpError\n"numbered backref/call is not allowed. (use name): /(?<n>b)(a)(a)(a)(a)(a)(a)(a)(a)(a)(a)\\\\1/"\n',
+  ],
+  [
+    String.raw`begin;r=Regexp.new("(?<n>b)(a)(a)(a)(a)(a)(a)(a)(a)(a)(a)\\10");p r.match?("baaaaaaaaaa\b");rescue=>e;p e.class,e.message;end`,
+    'RegexpError\n"numbered backref/call is not allowed. (use name): /(?<n>b)(a)(a)(a)(a)(a)(a)(a)(a)(a)(a)\\\\10/"\n',
+  ],
+  [
+    String.raw`begin;r=Regexp.new("(?<n>b)(a)(a)(a)(a)(a)(a)(a)(a)(a)(a)\\11");p r.match?("baaaaaaaaaa\t");rescue=>e;p e.class,e.message;end`,
+    'RegexpError\n"numbered backref/call is not allowed. (use name): /(?<n>b)(a)(a)(a)(a)(a)(a)(a)(a)(a)(a)\\\\11/"\n',
+  ],
+  [
+    String.raw`begin;r=Regexp.new("(?<n>b)(a)(a)(a)(a)(a)(a)(a)(a)(a)(a)\\12");p r.match?("baaaaaaaaaa\n");rescue=>e;p e.class,e.message;end`,
+    'true\n',
+  ],
+  [
+    String.raw`begin;r=Regexp.new("(?<n>b)(a)(a)(a)(a)(a)(a)(a)(a)(a)(a)\\18");p r.match?("baaaaaaaaaaa");rescue=>e;p e.class,e.message;end`,
+    'false\n',
+  ],
+  [
+    String.raw`begin;r=Regexp.new("(?<n>b)(a)(a)(a)(a)(a)(a)(a)(a)(a)(a)\\80");p r.match?("baaaaaaaaaaa");rescue=>e;p e.class,e.message;end`,
+    'false\n',
+  ],
+  [
+    String.raw`begin;r=Regexp.new("(a)(a)(a)(a)(a)(a)(a)(a)(a)(a)(?<n>b)\\1");p r.match?("aaaaaaaaaaba");rescue=>e;p e.class,e.message;end`,
+    'RegexpError\n"numbered backref/call is not allowed. (use name): /(a)(a)(a)(a)(a)(a)(a)(a)(a)(a)(?<n>b)\\\\1/"\n',
+  ],
+  [
+    String.raw`begin;r=Regexp.new("(a)(a)(a)(a)(a)(a)(a)(a)(a)(a)(?<n>b)\\10");p r.match?("aaaaaaaaaab\b");rescue=>e;p e.class,e.message;end`,
+    'RegexpError\n"numbered backref/call is not allowed. (use name): /(a)(a)(a)(a)(a)(a)(a)(a)(a)(a)(?<n>b)\\\\10/"\n',
+  ],
+  [
+    String.raw`begin;r=Regexp.new("(a)(a)(a)(a)(a)(a)(a)(a)(a)(a)(?<n>b)\\11");p r.match?("aaaaaaaaaab\t");rescue=>e;p e.class,e.message;end`,
+    'RegexpError\n"numbered backref/call is not allowed. (use name): /(a)(a)(a)(a)(a)(a)(a)(a)(a)(a)(?<n>b)\\\\11/"\n',
+  ],
+  [
+    String.raw`begin;r=Regexp.new("(a)(a)(a)(a)(a)(a)(a)(a)(a)(a)(?<n>b)\\12");p r.match?("aaaaaaaaaab\n");rescue=>e;p e.class,e.message;end`,
+    'true\n',
+  ],
+  [
+    String.raw`begin;r=Regexp.new("(a)(a)(a)(a)(a)(a)(a)(a)(a)(a)(?<n>b)\\18");p r.match?("aaaaaaaaaaba");rescue=>e;p e.class,e.message;end`,
+    'false\n',
+  ],
+  [
+    String.raw`begin;r=Regexp.new("(a)(a)(a)(a)(a)(a)(a)(a)(a)(a)(?<n>b)\\80");p r.match?("aaaaaaaaaaba");rescue=>e;p e.class,e.message;end`,
+    'false\n',
+  ],
+  [
+    String.raw`begin;r=Regexp.new("(?<n>b)(a)(a)(a)(a)(a)(a)(a)(a)(a)(a)(a)\\1");p r.match?("baaaaaaaaaaaa");rescue=>e;p e.class,e.message;end`,
+    'RegexpError\n"numbered backref/call is not allowed. (use name): /(?<n>b)(a)(a)(a)(a)(a)(a)(a)(a)(a)(a)(a)\\\\1/"\n',
+  ],
+  [
+    String.raw`begin;r=Regexp.new("(?<n>b)(a)(a)(a)(a)(a)(a)(a)(a)(a)(a)(a)\\10");p r.match?("baaaaaaaaaaa\b");rescue=>e;p e.class,e.message;end`,
+    'RegexpError\n"numbered backref/call is not allowed. (use name): /(?<n>b)(a)(a)(a)(a)(a)(a)(a)(a)(a)(a)(a)\\\\10/"\n',
+  ],
+  [
+    String.raw`begin;r=Regexp.new("(?<n>b)(a)(a)(a)(a)(a)(a)(a)(a)(a)(a)(a)\\11");p r.match?("baaaaaaaaaaa\t");rescue=>e;p e.class,e.message;end`,
+    'RegexpError\n"numbered backref/call is not allowed. (use name): /(?<n>b)(a)(a)(a)(a)(a)(a)(a)(a)(a)(a)(a)\\\\11/"\n',
+  ],
+  [
+    String.raw`begin;r=Regexp.new("(?<n>b)(a)(a)(a)(a)(a)(a)(a)(a)(a)(a)(a)\\12");p r.match?("baaaaaaaaaaa\n");rescue=>e;p e.class,e.message;end`,
+    'RegexpError\n"numbered backref/call is not allowed. (use name): /(?<n>b)(a)(a)(a)(a)(a)(a)(a)(a)(a)(a)(a)\\\\12/"\n',
+  ],
+  [
+    String.raw`begin;r=Regexp.new("(?<n>b)(a)(a)(a)(a)(a)(a)(a)(a)(a)(a)(a)\\18");p r.match?("baaaaaaaaaaaa");rescue=>e;p e.class,e.message;end`,
+    'false\n',
+  ],
+  [
+    String.raw`begin;r=Regexp.new("(?<n>b)(a)(a)(a)(a)(a)(a)(a)(a)(a)(a)(a)\\80");p r.match?("baaaaaaaaaaaa");rescue=>e;p e.class,e.message;end`,
+    'false\n',
+  ],
+  [
+    String.raw`begin;r=Regexp.new("(a)(a)(a)(a)(a)(a)(a)(a)(a)(a)(a)(?<n>b)\\1");p r.match?("aaaaaaaaaaaba");rescue=>e;p e.class,e.message;end`,
+    'RegexpError\n"numbered backref/call is not allowed. (use name): /(a)(a)(a)(a)(a)(a)(a)(a)(a)(a)(a)(?<n>b)\\\\1/"\n',
+  ],
+  [
+    String.raw`begin;r=Regexp.new("(a)(a)(a)(a)(a)(a)(a)(a)(a)(a)(a)(?<n>b)\\10");p r.match?("aaaaaaaaaaab\b");rescue=>e;p e.class,e.message;end`,
+    'RegexpError\n"numbered backref/call is not allowed. (use name): /(a)(a)(a)(a)(a)(a)(a)(a)(a)(a)(a)(?<n>b)\\\\10/"\n',
+  ],
+  [
+    String.raw`begin;r=Regexp.new("(a)(a)(a)(a)(a)(a)(a)(a)(a)(a)(a)(?<n>b)\\11");p r.match?("aaaaaaaaaaab\t");rescue=>e;p e.class,e.message;end`,
+    'RegexpError\n"numbered backref/call is not allowed. (use name): /(a)(a)(a)(a)(a)(a)(a)(a)(a)(a)(a)(?<n>b)\\\\11/"\n',
+  ],
+  [
+    String.raw`begin;r=Regexp.new("(a)(a)(a)(a)(a)(a)(a)(a)(a)(a)(a)(?<n>b)\\12");p r.match?("aaaaaaaaaaab\n");rescue=>e;p e.class,e.message;end`,
+    'RegexpError\n"numbered backref/call is not allowed. (use name): /(a)(a)(a)(a)(a)(a)(a)(a)(a)(a)(a)(?<n>b)\\\\12/"\n',
+  ],
+  [
+    String.raw`begin;r=Regexp.new("(a)(a)(a)(a)(a)(a)(a)(a)(a)(a)(a)(?<n>b)\\18");p r.match?("aaaaaaaaaaaba");rescue=>e;p e.class,e.message;end`,
+    'false\n',
+  ],
+  [
+    String.raw`begin;r=Regexp.new("(a)(a)(a)(a)(a)(a)(a)(a)(a)(a)(a)(?<n>b)\\80");p r.match?("aaaaaaaaaaaba");rescue=>e;p e.class,e.message;end`,
+    'false\n',
+  ],
+  [
+    String.raw`begin;r=Regexp.new("(?<n>b)(a)(a)(a)(a)(a)(a)(a)(a)(a)(a)(a)(a)\\1");p r.match?("baaaaaaaaaaaaa");rescue=>e;p e.class,e.message;end`,
+    'RegexpError\n"numbered backref/call is not allowed. (use name): /(?<n>b)(a)(a)(a)(a)(a)(a)(a)(a)(a)(a)(a)(a)\\\\1/"\n',
+  ],
+  [
+    String.raw`begin;r=Regexp.new("(?<n>b)(a)(a)(a)(a)(a)(a)(a)(a)(a)(a)(a)(a)\\10");p r.match?("baaaaaaaaaaaa\b");rescue=>e;p e.class,e.message;end`,
+    'RegexpError\n"numbered backref/call is not allowed. (use name): /(?<n>b)(a)(a)(a)(a)(a)(a)(a)(a)(a)(a)(a)(a)\\\\10/"\n',
+  ],
+  [
+    String.raw`begin;r=Regexp.new("(?<n>b)(a)(a)(a)(a)(a)(a)(a)(a)(a)(a)(a)(a)\\11");p r.match?("baaaaaaaaaaaa\t");rescue=>e;p e.class,e.message;end`,
+    'RegexpError\n"numbered backref/call is not allowed. (use name): /(?<n>b)(a)(a)(a)(a)(a)(a)(a)(a)(a)(a)(a)(a)\\\\11/"\n',
+  ],
+  [
+    String.raw`begin;r=Regexp.new("(?<n>b)(a)(a)(a)(a)(a)(a)(a)(a)(a)(a)(a)(a)\\12");p r.match?("baaaaaaaaaaaa\n");rescue=>e;p e.class,e.message;end`,
+    'RegexpError\n"numbered backref/call is not allowed. (use name): /(?<n>b)(a)(a)(a)(a)(a)(a)(a)(a)(a)(a)(a)(a)\\\\12/"\n',
+  ],
+  [
+    String.raw`begin;r=Regexp.new("(?<n>b)(a)(a)(a)(a)(a)(a)(a)(a)(a)(a)(a)(a)\\18");p r.match?("baaaaaaaaaaaaa");rescue=>e;p e.class,e.message;end`,
+    'false\n',
+  ],
+  [
+    String.raw`begin;r=Regexp.new("(?<n>b)(a)(a)(a)(a)(a)(a)(a)(a)(a)(a)(a)(a)\\80");p r.match?("baaaaaaaaaaaaa");rescue=>e;p e.class,e.message;end`,
+    'false\n',
+  ],
+  [
+    String.raw`begin;r=Regexp.new("(a)(a)(a)(a)(a)(a)(a)(a)(a)(a)(a)(a)(?<n>b)\\1");p r.match?("aaaaaaaaaaaaba");rescue=>e;p e.class,e.message;end`,
+    'RegexpError\n"numbered backref/call is not allowed. (use name): /(a)(a)(a)(a)(a)(a)(a)(a)(a)(a)(a)(a)(?<n>b)\\\\1/"\n',
+  ],
+  [
+    String.raw`begin;r=Regexp.new("(a)(a)(a)(a)(a)(a)(a)(a)(a)(a)(a)(a)(?<n>b)\\10");p r.match?("aaaaaaaaaaaab\b");rescue=>e;p e.class,e.message;end`,
+    'RegexpError\n"numbered backref/call is not allowed. (use name): /(a)(a)(a)(a)(a)(a)(a)(a)(a)(a)(a)(a)(?<n>b)\\\\10/"\n',
+  ],
+  [
+    String.raw`begin;r=Regexp.new("(a)(a)(a)(a)(a)(a)(a)(a)(a)(a)(a)(a)(?<n>b)\\11");p r.match?("aaaaaaaaaaaab\t");rescue=>e;p e.class,e.message;end`,
+    'RegexpError\n"numbered backref/call is not allowed. (use name): /(a)(a)(a)(a)(a)(a)(a)(a)(a)(a)(a)(a)(?<n>b)\\\\11/"\n',
+  ],
+  [
+    String.raw`begin;r=Regexp.new("(a)(a)(a)(a)(a)(a)(a)(a)(a)(a)(a)(a)(?<n>b)\\12");p r.match?("aaaaaaaaaaaab\n");rescue=>e;p e.class,e.message;end`,
+    'RegexpError\n"numbered backref/call is not allowed. (use name): /(a)(a)(a)(a)(a)(a)(a)(a)(a)(a)(a)(a)(?<n>b)\\\\12/"\n',
+  ],
+  [
+    String.raw`begin;r=Regexp.new("(a)(a)(a)(a)(a)(a)(a)(a)(a)(a)(a)(a)(?<n>b)\\18");p r.match?("aaaaaaaaaaaaba");rescue=>e;p e.class,e.message;end`,
+    'false\n',
+  ],
+  [
+    String.raw`begin;r=Regexp.new("(a)(a)(a)(a)(a)(a)(a)(a)(a)(a)(a)(a)(?<n>b)\\80");p r.match?("aaaaaaaaaaaaba");rescue=>e;p e.class,e.message;end`,
+    'false\n',
+  ],
+  [
+    String.raw`begin;r=Regexp.new("(?:a)(?<n>b)\\10");p r.source;rescue=>e;p e.class,e.message;end`,
+    '"(?:a)(?<n>b)\\\\10"\n',
+  ],
+  [
+    String.raw`begin;r=Regexp.new("[(](?<n>b)\\10");p r.source;rescue=>e;p e.class,e.message;end`,
+    '"[(](?<n>b)\\\\10"\n',
+  ],
+  [
+    String.raw`begin;r=Regexp.new("\\((?<n>b)\\10");p r.source;rescue=>e;p e.class,e.message;end`,
+    '"\\\\((?<n>b)\\\\10"\n',
+  ],
+  [
+    String.raw`begin;r=Regexp.new("(?x)(a)# (b)(c)(d)(e)(f)(g)(h)(i)(j)\n(?<n>b)\\10");p r.source;rescue=>e;p e.class,e.message;end`,
+    '"(?x)(a)# (b)(c)(d)(e)(f)(g)(h)(i)(j)\\n(?<n>b)\\\\10"\n',
+  ],
+] as const;
+
+test.each(nativeSourceCaptureNumberCases)(
+  'Numeric regexp references use source captures before named-mode suppression: %s',
+  (source, stdout) => {
+    expect(run(source)).toMatchObject({ kind: 'executed', stdout, uncaughtException: undefined });
+  }
+);

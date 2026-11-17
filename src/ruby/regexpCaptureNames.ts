@@ -56,7 +56,7 @@ export function regexpNumericEscapes(
   const references = new Map<number, { kind: 'reference' | 'character'; value: number; length: number }>();
   let captures = 0;
   let depth = 0;
-  for (const token of regexpSourceTokens(source, extended)) {
+  for (const token of regexpSourceTokens(source, extended, true)) {
     if (token.type === 'GroupOpen' && token.kind === 'capturing') captures++;
     else if (token.type === 'CharacterClassOpen') depth++;
     else if (token.type === 'CharacterClassClose') depth--;
