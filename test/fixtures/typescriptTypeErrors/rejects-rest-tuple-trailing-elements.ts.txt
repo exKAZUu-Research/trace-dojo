@@ -1,0 +1,20 @@
+function g(...a: [...string[], number]) { return a.length; }
+console.log(g("a", "b", 1), g(1));
+g("a");
+g("a", "b");
+g(1, 2);
+g(true, 1);
+function p(x: boolean, ...a: [...string[], number, boolean]) { return a.length; }
+console.log(p(true, "a", 1, false), p(false, 1, true));
+p(true, 1);
+p(true, "a", 1);
+const h = (...a: [...number[], string]) => a.length;
+console.log(h("z"), h(1, 2, "z"));
+function v<T extends unknown[]>(...a: [...T, number]) { return a; }
+const arr: [string, number] = ["s", 1];
+const arr2: [boolean, string, number] = [true, "t", 2];
+console.log(v(...arr), v(...arr2));
+const bad: [string, string] = ["s", "t"];
+v(...bad);
+const nums: number[] = [1, 2];
+console.log(g(...nums), v(...nums));

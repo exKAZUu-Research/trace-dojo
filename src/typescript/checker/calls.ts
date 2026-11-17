@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 459 -- Resolves calls as TypeScript does: callees, overloads, inference, and the effects of calls on the flow.
+// code-gauge-allow-file fileNcss 489 -- Resolves calls as TypeScript does: callees, overloads, inference, and the effects of calls on the flow.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import { unsupportedMessage } from '../unsupported';
@@ -16,6 +16,7 @@ import {
   numberType,
   type Parameter,
   type Signature,
+  type TupleElement,
   type Type,
   type TypeParameter,
   undefinedType,
@@ -433,7 +434,7 @@ export class Calls {
         this.c.silently(() => this.argumentsMatch(instantiated, args))
       ) {
         const final = instantiate(candidate);
-        this.checkArguments(final, args, true);
+        this.checkArguments(final, args, true, node);
         if (typeArguments)
           this.c.typeNodes.checkTypeArgumentConstraints(
             node,
@@ -512,7 +513,7 @@ export class Calls {
   ): Resolution {
     const instantiated = this.arity.arityMatches(candidate, args) ? instantiate(candidate) : undefined;
     if (instantiated && this.arity.arityMatches(instantiated, args)) {
-      this.checkArguments(instantiated, args, true);
+      this.checkArguments(instantiated, args, true, node);
       return { signature: instantiated, returnType: instantiated.returnType() };
     }
     this.arity.reportArity(node, callee, instantiated ?? candidate, args);
@@ -549,7 +550,22 @@ export class Calls {
   }
 
   /** Checks each argument against its parameter, reporting mismatches when `report`. */
-  private checkArguments(signature: Signature, args: TreeNode[], report: boolean): boolean {
+  private checkArguments(signature: Signature, args: TreeNode[], report: boolean, call?: TreeNode): boolean {
+    const restIndex = signature.parameters.length - 1;
+    if (isTrailingRestTuple(signature) && !args.slice(0, restIndex).some((arg) => arg.type === 'spread_element'))
+      return (
+        this.checkArguments(
+          { ...signature, parameters: signature.parameters.slice(0, -1) },
+          args.slice(0, restIndex),
+          report
+        ) &&
+        this.checkRestTupleArguments(
+          signature.parameters[restIndex].type,
+          args.slice(restIndex),
+          report,
+          args[restIndex] ?? call
+        )
+      );
     let ok = true;
     let index = 0;
     for (const arg of args) {
@@ -559,18 +575,47 @@ export class Calls {
         index += count;
         continue;
       }
-      const parameterType = this.parameterTypeAt(signature, index);
-      const argType = this.c.expressions.check(arg, parameterType);
-      if (parameterType && !this.c.relations.isAssignable(argType, parameterType)) {
-        // TypeScript reports the first argument that does not fit.
-        if (report && ok) this.reportArgument(arg, argType, parameterType);
-        ok = false;
-      } else if (parameterType && report) {
-        this.c.expressions.checkExcessProperties(arg, argType, parameterType);
-      }
+      // TypeScript reports the first argument that does not fit.
+      ok = this.checkArgument(arg, this.parameterTypeAt(signature, index), report, report && ok) && ok;
       index++;
     }
     return ok;
+  }
+
+  private checkArgument(
+    arg: TreeNode,
+    parameterType: Type | undefined,
+    report: boolean,
+    reportMismatch: boolean
+  ): boolean {
+    const argType = this.c.expressions.check(arg, parameterType);
+    if (!parameterType) return true;
+    if (!this.c.relations.isAssignable(argType, parameterType)) {
+      if (reportMismatch) this.reportArgument(arg, argType, parameterType);
+      return false;
+    }
+    if (report) this.c.expressions.checkExcessProperties(arg, argType, parameterType);
+    return true;
+  }
+
+  /**
+   * Checks the arguments a rest parameter whose tuple has elements after its rest element takes, as
+   * `...a: [...string[], number]`: TypeScript checks them as one tuple, reported where they start.
+   */
+  private checkRestTupleArguments(
+    restType: Type,
+    args: TreeNode[],
+    report: boolean,
+    at: TreeNode | undefined
+  ): boolean {
+    const tuple = this.argumentTuple(args, false);
+    if (this.c.relations.isAssignable(tuple, restType)) return true;
+    if (report && at)
+      this.c.error(
+        at,
+        `型 '${this.c.print(tuple)}' の引数を型 '${this.c.print(restType)}' のパラメーターに渡すことはできません。`
+      );
+    return false;
   }
 
   /** Checks what a spread argument passes, returning how many parameters it takes and whether it fits them. */
@@ -644,7 +689,7 @@ export class Calls {
     if (restIndex !== undefined)
       this.c.inference.inferTypes(
         run,
-        this.argumentTuple(args.slice(restIndex)),
+        this.argumentTuple(args.slice(restIndex), true),
         (signature.parameters.at(-1) as Parameter).type,
         true
       );
@@ -684,20 +729,29 @@ export class Calls {
   /** Records how many arguments `...args: A` takes, which splits what `A` infers from `[...A, ...B]`. */
   private recordImpliedArity(run: InferenceRun, signature: Signature, args: TreeNode[]): void {
     const restIndex = this.genericRestIndex(signature);
-    if (restIndex === undefined || args.slice(restIndex).some((arg) => arg.type === 'spread_element')) return;
+    if (restIndex === undefined) return;
+    const lengths = args.slice(restIndex).map((arg) => this.arity.spreadLength(arg));
+    if (lengths.includes(undefined)) return;
     const restType = (signature.parameters.at(-1) as Parameter).type;
     const inference = run.inferences.get(restType.id);
-    if (inference) inference.impliedArity = args.length - restIndex;
+    if (inference) inference.impliedArity = (lengths as number[]).reduce((sum, length) => sum + length, 0);
   }
 
-  private argumentTuple(args: TreeNode[]): Type {
-    return this.c.tupleType(
-      args.map((arg) => ({
-        type: this.c.widenLiteral(this.c.silently(() => this.c.expressions.check(arg))),
-        optional: false,
-        rest: false,
-      }))
-    );
+  /** The tuple of what arguments pass, a spread one passing its tuple's elements or, for an array, a rest element. */
+  private argumentTuple(args: TreeNode[], widen: boolean): Type {
+    const check = (node: TreeNode): Type => this.c.silently(() => this.c.expressions.check(node));
+    const elements = args.flatMap((arg): TupleElement[] => {
+      if (arg.type !== 'spread_element') {
+        const type = check(arg);
+        return [{ type: widen ? this.c.widenLiteral(type) : type, optional: false, rest: false }];
+      }
+      const spreadType = check(named(arg)[0]);
+      if (spreadType.kind === 'object' && spreadType.objectKind === 'tuple') return spreadType.tuple?.elements ?? [];
+      const element = this.c.silently(() => this.c.patterns.iteratedType(undefined, spreadType));
+      return [{ type: this.c.arrayType(element), optional: false, rest: true }];
+    });
+    // A tuple of only a rest element is the array it spreads, as TypeScript normalizes `[...T[]]`.
+    return elements.length === 1 && elements[0].rest ? elements[0].type : this.c.tupleType(elements);
   }
 
   /** Where a rest parameter typed by one of the signature's own type parameters starts, as in `...args: T`. */
@@ -779,4 +833,11 @@ function receiverObject(callee: TreeNode): TreeNode | undefined {
   const expression = skipParentheses(callee);
   if (expression.type !== 'member_expression' && expression.type !== 'subscript_expression') return undefined;
   return expression.childForFieldName('object') ?? undefined;
+}
+
+/** Whether a signature's rest parameter is a tuple with elements after its rest element, as `[...string[], number]`. */
+function isTrailingRestTuple(signature: Signature): boolean {
+  const last = signature.parameters.at(-1);
+  const elements = last?.rest && last.type.kind === 'object' ? last.type.tuple?.elements : undefined;
+  return elements !== undefined && elements.slice(0, -1).some((element) => element.rest);
 }
