@@ -165,12 +165,14 @@ function scalarForDisplay(runtime: Runtime, value: Value, type: Type): ReturnTyp
 function previewKind(type: Type, self = false): PreviewKind {
   if (isScalarType(type)) return 'scalar';
   const { head } = splitApp(prune(type));
-  if (head.tag !== 'tcon') return 'composite';
+  if (head.tag !== 'tcon') return 'discovery';
   const entity = head.entity;
-  if (self && entity.fields.size > 0) return 'scalar';
+  if (self && entity.fields.size > 0) return 'discovery';
   if (entity.special || (entity.module === 'Base' && entity.name === 'Maybe')) return 'composite';
   if (entity.module === 'Base' && entity.name === 'Ratio') return 'scalar';
-  return entity.cons.some((con) => con.arity === 0 && !con.isLibraryPrivate) ? 'scalar' : 'composite';
+  const scalar = (con: (typeof entity.cons)[number]): boolean => con.arity === 0 && !con.isLibraryPrivate;
+  if (!entity.cons.some(scalar)) return 'composite';
+  return entity.cons.every(scalar) ? 'scalar' : 'discovery';
 }
 
 /** Functions, actions, and `()` are not variables to learners. */

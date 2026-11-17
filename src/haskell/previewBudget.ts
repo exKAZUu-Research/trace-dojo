@@ -1,7 +1,7 @@
 import { LIMITS } from '../interpreter/limits';
 import { type Thunk, type Value } from './values';
 
-export type PreviewKind = 'scalar' | 'composite';
+export type PreviewKind = 'scalar' | 'composite' | 'discovery';
 
 interface PreviewUsage {
   operations: number;
@@ -18,6 +18,7 @@ interface PreviewTransaction {
 interface PreviewDebt {
   scalarOperations: number;
   compositeOperations: number;
+  discoveryOperations: number;
   executionOperations: number;
   allocations: number;
   consumed: boolean;
@@ -29,6 +30,7 @@ interface PreviewFrame {
   debt: PreviewDebt;
   scalarOperations: number;
   compositeOperations: number;
+  discoveryOperations: number;
   executionOperations: number;
   allocations: number;
   dependenciesLength: number;
@@ -45,9 +47,10 @@ export class PreviewBudget {
   private readonly usage: Record<PreviewKind, PreviewUsage> = {
     scalar: { operations: 0, milliseconds: 0 },
     composite: { operations: 0, milliseconds: 0 },
+    discovery: { operations: 0, milliseconds: 0 },
   };
   private readonly debts = new WeakMap<Thunk, PreviewDebt>();
-  private readonly aborted = new WeakMap<Thunk, PreviewKind>();
+  private readonly aborted = new WeakMap<Thunk, Partial<Record<PreviewKind, true>>>();
   private active: PreviewTransaction | undefined;
 
   spend(operations: number, executionOperations: number, allocations: number): void {
@@ -58,7 +61,8 @@ export class PreviewBudget {
       const debt = active.frames.at(-1)?.debt;
       if (debt) {
         if (active.kind === 'scalar') debt.scalarOperations += operations;
-        else debt.compositeOperations += operations;
+        else if (active.kind === 'composite') debt.compositeOperations += operations;
+        else debt.discoveryOperations += operations;
         debt.executionOperations += executionOperations;
         debt.allocations += allocations;
       }
@@ -70,11 +74,15 @@ export class PreviewBudget {
   force(slot: Thunk, work: () => Value, kind: PreviewKind): Value {
     kind = this.active?.kind ?? kind;
     const aborted = this.aborted.get(slot);
-    if (aborted === 'scalar' || aborted === kind) throw new DisplayAbort();
+    if (aborted?.[kind]) throw new DisplayAbort();
     try {
       return this.run(() => this.forceInTransaction(work), kind);
     } catch (error) {
-      if (error instanceof DisplayAbort) this.aborted.set(slot, kind);
+      if (error instanceof DisplayAbort) {
+        const failed = this.aborted.get(slot) ?? {};
+        failed[kind] = true;
+        this.aborted.set(slot, failed);
+      }
       throw error;
     }
   }
@@ -119,6 +127,7 @@ export class PreviewBudget {
       debt,
       scalarOperations: debt.scalarOperations,
       compositeOperations: debt.compositeOperations,
+      discoveryOperations: debt.discoveryOperations,
       executionOperations: debt.executionOperations,
       allocations: debt.allocations,
       dependenciesLength: debt.dependencies.length,
@@ -134,6 +143,7 @@ export class PreviewBudget {
     const { debt } = frame;
     debt.scalarOperations = frame.scalarOperations;
     debt.compositeOperations = frame.compositeOperations;
+    debt.discoveryOperations = frame.discoveryOperations;
     debt.executionOperations = frame.executionOperations;
     debt.allocations = frame.allocations;
     debt.dependencies.length = frame.dependenciesLength;
@@ -159,6 +169,7 @@ export class PreviewBudget {
       current.consumed = true;
       this.usage.scalar.operations -= current.scalarOperations;
       this.usage.composite.operations -= current.compositeOperations;
+      this.usage.discovery.operations -= current.discoveryOperations;
       executionOperations += current.executionOperations;
       allocations += current.allocations;
       for (const dependency of current.dependencies) pending.push(dependency);
@@ -173,6 +184,7 @@ export class PreviewBudget {
       debt = {
         scalarOperations: 0,
         compositeOperations: 0,
+        discoveryOperations: 0,
         executionOperations: 0,
         allocations: 0,
         consumed: false,
@@ -184,14 +196,14 @@ export class PreviewBudget {
   }
 
   private remainingOperations(kind: PreviewKind): number {
-    const { scalar, composite } = this.usage;
-    const total = LIMITS.maxOperations - scalar.operations - composite.operations;
-    return kind === 'scalar' ? total : Math.min(total, LIMITS.maxOperations / 2 - composite.operations);
+    const { scalar, composite, discovery } = this.usage;
+    const total = LIMITS.maxOperations - scalar.operations - composite.operations - discovery.operations;
+    return kind === 'scalar' ? total : Math.min(total, LIMITS.maxOperations / 4 - this.usage[kind].operations);
   }
 
   private remainingMilliseconds(kind: PreviewKind): number {
-    const { scalar, composite } = this.usage;
-    const total = LIMITS.maxMilliseconds - scalar.milliseconds - composite.milliseconds;
-    return kind === 'scalar' ? total : Math.min(total, LIMITS.maxMilliseconds / 2 - composite.milliseconds);
+    const { scalar, composite, discovery } = this.usage;
+    const total = LIMITS.maxMilliseconds - scalar.milliseconds - composite.milliseconds - discovery.milliseconds;
+    return kind === 'scalar' ? total : Math.min(total, LIMITS.maxMilliseconds / 4 - this.usage[kind].milliseconds);
   }
 }

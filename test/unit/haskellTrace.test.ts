@@ -1003,6 +1003,42 @@ main=forM_ [1..1000::Int] $ \\i -> do
   expect(assignments.at(-1)?.vars[shown]).toBe(last);
 });
 
+test.each([
+  ['data T=E|T [Int]', 'a'],
+  ['data T=T {items::[Int]}', 'this'],
+])('uncertain composite roots preserve scalar capacity: %s', (declaration, name) => {
+  const source = `import Control.Monad
+${declaration}
+main=forM_ [1..1000::Int] $ \\i -> do
+ let ${name}=last(map T(replicate 100 [1..10]))
+ let n=i*2
+ print n`;
+  const recording = traceProgram('haskell', source, source);
+  expect(recording.uncaughtException).toBeUndefined();
+  expect(recording.stdout).toBe(Array.from({ length: 1000 }, (_, i) => `${(i + 1) * 2}\n`).join(''));
+  const assignments = recording.traceItems.filter((item) => item.line === 5);
+  expect(assignments).toHaveLength(1000);
+  for (const [index, item] of assignments.entries()) {
+    expect(item.vars.i).toBe(index + 1);
+    expect(item.vars.n).toBe((index + 1) * 2);
+  }
+});
+
+test('mixed constructor types retain cheap enum answers after composite exhaustion', () => {
+  const source = `import Control.Monad
+data T=E|T [Int]
+main=forM_ [1..1000::Int] $ \\i -> do
+ let a=reverse [1..200::Int]
+ let n=if even i then E else E
+ print i`;
+  const recording = traceProgram('haskell', source, source);
+  expect(recording.uncaughtException).toBeUndefined();
+  expect(recording.stdout).toBe(Array.from({ length: 1000 }, (_, i) => `${i + 1}\n`).join(''));
+  const assignments = recording.traceItems.filter((item) => item.line === 5);
+  expect(assignments).toHaveLength(1000);
+  for (const item of assignments) expect(item.vars.n).toBe('E');
+});
+
 test.each([20, 30, 77])('demanded scalar previews preserve every loop assignment: sum 1..%i', (count) => {
   const source = `import Control.Monad
 main=forM_ [1..1000::Int] $ \\i -> do
