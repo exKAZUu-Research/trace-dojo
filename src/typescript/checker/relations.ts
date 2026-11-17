@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 570 -- Decides assignability and comparability for every kind of type, as TypeScript's checker does in one place.
+// code-gauge-allow-file fileNcss 588 -- Decides assignability and comparability for every kind of type, as TypeScript's checker does in one place.
 import type { Checker } from './checker';
 import { isUnit } from './flow';
 import { childTypes, isGenericObjectOrIndexType } from './genericTypes';

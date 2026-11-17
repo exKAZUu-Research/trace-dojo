@@ -1,5 +1,5 @@
 import { childTypes } from './genericTypes';
-import type { Type } from './types';
+import type { ObjectType, Type } from './types';
 
 const results = new WeakMap<Type, boolean>();
 
@@ -51,18 +51,36 @@ function ownTypeVariables(type: Type, search: Search): boolean | undefined {
       return true;
     }
     case 'object': {
-      if (type.objectKind === 'interface') {
-        if ((type.typeParameters?.length ?? 0) > 0) return true;
-        if (!type.outerTypeParameters) return false;
-        return !type.mapper || [...type.mapper.values()].some((argument) => visit(argument, search));
-      }
-      if (type.objectKind === 'anonymous') return !type.nonGeneric;
-      if (type.objectKind === 'reference' && type.target?.outerTypeParameters && visit(type.target, search))
-        return true;
-      return type.objectKind === 'mapped' || undefined;
+      return ownObjectTypeVariables(type, search);
     }
     default: {
       return undefined;
     }
   }
+}
+
+function ownObjectTypeVariables(type: ObjectType, search: Search): boolean | undefined {
+  switch (type.objectKind) {
+    case 'interface': {
+      return (type.typeParameters?.length ?? 0) > 0 || outerTypeVariables(type, search);
+    }
+    case 'anonymous': {
+      return !type.nonGeneric;
+    }
+    case 'reference': {
+      return (type.target !== undefined && outerTypeVariables(type.target, search)) || undefined;
+    }
+    case 'mapped': {
+      return true;
+    }
+    default: {
+      return undefined;
+    }
+  }
+}
+
+/** Whether a class or interface declared inside generic declarations has type parameters of theirs left unmapped. */
+function outerTypeVariables(type: ObjectType, search: Search): boolean {
+  if (!type.outerTypeParameters) return false;
+  return !type.mapper || [...type.mapper.values()].some((argument) => visit(argument, search));
 }
