@@ -81,6 +81,8 @@ function pushObjectReferences(
     for (const value of object.captured) pending.push(value);
   }
   if (!(object instanceof JsArray)) return 0;
+  // An element defined as an accessor keeps its getter and setter apart from the elements.
+  for (const property of object.definedElements?.values() ?? []) pushProperty(pending, property);
   // Pushed one by one: spreading a large array into push() exceeds the engine's argument limit.
   for (const element of object.elements) pending.push(element);
   return object.elements.length;

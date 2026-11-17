@@ -21,6 +21,32 @@ if (t.前に進めるか() && !t.前のマスが塗られているか()) t.後�
   expect(execution).toMatchObject({ kind: 'executed', finalTurtles: [{ x: 1, y: 2, color: 'R', dir: 'N' }] });
 });
 
+test('a turtle an array element accessor keeps stays on the board', () => {
+  const execution = executeProgram(
+    'typescript',
+    `function make() {
+  const t = new Turtle();
+  const array: Turtle[] = [];
+  Object.defineProperty(array, "0", { get: () => t });
+  return array;
+}
+const array = make();
+array[0].forward();`
+  );
+  expect(execution).toMatchObject({ kind: 'executed', finalTurtles: [{ x: 0, y: 1 }] });
+});
+
+test('a turtle saved on the this of a plain call stays on the board for the next plain call', () => {
+  const execution = executeProgram(
+    'typescript',
+    `function save(this: any) { this.t = new Turtle(); }
+function move(this: any) { this.t.forward(); }
+save();
+move();`
+  );
+  expect(execution).toMatchObject({ kind: 'executed', finalTurtles: [{ x: 0, y: 1 }] });
+});
+
 test('a parameter property becomes a field before the fields the class declares', () => {
   const execution = executeProgram(
     'typescript',

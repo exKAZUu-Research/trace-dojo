@@ -54,7 +54,7 @@ type ClassBehavior = Extract<FunctionBehavior, { kind: 'class' }>;
 
 export class Evaluator extends SuspendableStatementEvaluator {
   /** What `this` is for a plain call of a function that is not strict mode code, created when first needed. */
-  private globalObject: JsObject | undefined;
+  implicitReceiver: JsObject | undefined;
 
   /** Runs a program in the frame the caller pushed, whose scope becomes the program's own. */
   runProgram(program: Program): void {
@@ -499,8 +499,8 @@ export class Evaluator extends SuspendableStatementEvaluator {
    */
   private sloppyThis(thisValue: Value): Value {
     if (thisValue !== undefined && thisValue !== null) return this.runtime.toObject(thisValue);
-    this.globalObject ??= this.runtime.newObject();
-    return this.globalObject;
+    this.implicitReceiver ??= this.runtime.newObject();
+    return this.implicitReceiver;
   }
 
   /** Runs an async function's body, whose parameters' errors reject its promise as the body's own errors do. */

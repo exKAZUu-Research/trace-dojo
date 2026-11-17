@@ -1012,6 +1012,8 @@ export class Runtime {
     const roots: unknown[] = [];
     for (const frame of this.frames) appendAll(roots, frame.reachableValues());
     appendAll(roots, this.eventLoop.roots());
+    // Every later non-strict call without a receiver gets this object again.
+    roots.push(this.evaluator.implicitReceiver);
     const { reached, scanned } = findReachableTurtles(roots);
     this.spend(Math.ceil(scanned / 64));
     this.world.retain((turtle) => reached.has(turtle));
