@@ -458,23 +458,14 @@ export class MemberChecker {
     indexType: Type
   ): Type | undefined {
     const name = String(value);
-    if (objectType.kind === 'object' && objectType.objectKind === 'tuple' && typeof value === 'number') {
-      const elements = objectType.tuple?.elements ?? [];
-      if (value >= elements.length && !elements.some((element) => element.rest)) {
-        this.c.error(
-          access.indexNode,
-          `長さ ${elements.length} のタプル型 '${this.c.print(objectType)}' には、インデックス ${name} の要素がありません。`
-        );
-        return errorType;
-      }
-    }
     if (objectType.kind === 'union') return this.indexedTypeOfMembers(access, objectType, indexType);
     const property = this.c.propertyOf(objectType, name);
     // A unique symbol matches the symbol index signature only.
     if (!property)
       return typeof value === 'symbol'
         ? this.c.structureOf(objectType).symbolIndex?.type
-        : this.indexSignatureType(objectType, name);
+        : (this.c.typeOperators.tupleElementBeyond(objectType, name, access.indexNode) ??
+            this.indexSignatureType(objectType, name));
     this.checkPropertyAvailability(access.indexNode, objectType, name, property);
     this.c.expressions.expandos.checkAssignedBefore(access.node, access.indexNode, property);
     // `o["secret"]` reads a private or protected member, which TypeScript leaves as a way around its access checks.

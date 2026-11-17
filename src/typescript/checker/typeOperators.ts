@@ -369,6 +369,8 @@ export class TypeOperators {
     const name = String(key);
     const property = this.c.propertyOf(object, name);
     if (property) return property.optional ? unionOf([property.type(), undefinedType]) : property.type();
+    const element = this.tupleElementBeyond(object, name, node);
+    if (element) return element;
     const structure = this.c.structureOf(object);
     const numeric = typeof key === 'number' || isNumericName(name);
     if (numeric && structure.numberIndex) return structure.numberIndex.type;
@@ -377,6 +379,33 @@ export class TypeOperators {
     if (node)
       this.c.error(node, `プロパティ '${printedPropertyName(name)}' は型 '${this.c.print(object)}' にありません。`);
     return errorType;
+  }
+
+  /**
+   * The type at a numeric name no element of a tuple has: past a rest element, the values from the rest on, and
+   * otherwise `undefined` after reporting the position at `node`. A negative position past a rest element is left to
+   * the number index signature, as is any name for an object other than a tuple.
+   */
+  tupleElementBeyond(object: Type, name: string, node: TreeNode | undefined): Type | undefined {
+    if (object.kind !== 'object' || object.objectKind !== 'tuple' || !isNumericName(name)) return undefined;
+    const elements = object.tuple?.elements ?? [];
+    const restIndex = elements.findIndex((element) => element.rest);
+    if (restIndex !== -1)
+      return Number(name) < 0
+        ? undefined
+        : unionOf(
+            elements
+              .slice(restIndex)
+              .map((element) => (element.rest ? this.c.restElementType(element.type) : element.type))
+          );
+    if (node)
+      this.c.error(
+        node,
+        Number(name) < 0
+          ? 'タプル型は負の値でインデックス指定できません。'
+          : `長さ ${elements.length} のタプル型 '${this.c.print(object)}' には、インデックス ${name} の要素がありません。`
+      );
+    return undefinedType;
   }
 
   conditionalTypeFromNode(node: TreeNode): Type {
