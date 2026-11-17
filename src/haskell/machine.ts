@@ -1,8 +1,15 @@
-// code-gauge-allow-file fileNcss 433 -- Machine states and frames share one evaluator stack.
+// code-gauge-allow-file fileNcss 440 -- Machine states and frames share one evaluator stack.
 import { CONS_CON, NIL_CON } from './builtinTypes';
 import type { CaseCore, Core, IODoCore } from './core';
 import type { TypeHint } from './displayTypeHints';
-import { constructorFieldHint, slotTypeHint, thunkTypeHint, typedSlot } from './displayTypes';
+import {
+  applicationDisplayHint,
+  constructorFieldHint,
+  methodTypeHint,
+  slotTypeHint,
+  thunkTypeHint,
+  typedSlot,
+} from './displayTypes';
 import type { ConInfo } from './entities';
 import { type DoFrame, finishMatch, markTailSelfCall, runBlock, statementDone, unwindBlock } from './ioBlocks';
 import type { Primitive } from './primitives';
@@ -37,7 +44,7 @@ export type Frame =
       native?: () => Slot | TailCall;
       target: Thunk | undefined;
     }
-  | { k: 'apply'; args: Slot[] }
+  | { k: 'apply'; args: Slot[]; displayType?: TypeHint }
   | { k: 'case'; core: CaseCore; env: Env; displayType: TypeHint | undefined }
   | { k: 'charCase'; core: Extract<Core, { k: 'charCase' }>; env: Env }
   | { k: 'method'; index: number }
@@ -86,7 +93,6 @@ function primFn(prim: Primitive): PrimFn {
   return fn;
 }
 
-/** A primitive's request to apply a function in its place, as a tail call. */
 export class TailCall {
   constructor(
     readonly fn: Value,
@@ -94,12 +100,10 @@ export class TailCall {
   ) {}
 }
 
-/** An `IO` primitive's request to run another action in its place. */
 export class RunNext {
   constructor(readonly action: Slot) {}
 }
 
-/** The result of a primitive: a value or slot, or a function to apply in its place. */
 export type PrimResult = Slot | TailCall;
 
 /**
@@ -112,7 +116,6 @@ export class Machine {
 
   constructor(readonly runtime: Runtime) {}
 
-  /** Evaluates a slot to weak head normal form. */
   force(slot: Slot): Value {
     slot = untypedSlot(slot);
     if (!(slot instanceof Thunk)) return slot;
@@ -124,14 +127,12 @@ export class Machine {
     return this.run({ mode: 'apply', fn, args }) as Value;
   }
 
-  /** Runs an `IO` action to its end, returning its result. */
   runIO(action: Slot): Slot {
     return this.run({ mode: 'runSlotIO', slot: action });
   }
 
-  /** Creates the slot for an argument or binding: a value when it needs no evaluation, else a thunk. */
   makeSlot(code: Core, env: Env | undefined): Slot {
-    return typedSlot(this.makeUntypedSlot(code, env), code.displayType);
+    return typedSlot(this.makeUntypedSlot(code, env), applicationDisplayHint(code, env, this.runtime));
   }
 
   private makeUntypedSlot(code: Core, env: Env | undefined): Slot {
@@ -176,7 +177,7 @@ export class Machine {
     if (code.k === 'lit' || code.k === 'lam' || code.k === 'global' || code.k === 'prim' || code.k === 'iodo') {
       return this.makeSlot(code, env);
     }
-    return typedSlot(new Thunk(code, env), code.displayType);
+    return typedSlot(new Thunk(code, env), applicationDisplayHint(code, env, this.runtime));
   }
 
   private run(start: RunStart): Slot {
@@ -229,7 +230,6 @@ export class Machine {
     }
   }
 
-  /** Evaluates one node of code: a value returns, and other nodes push what they continue with. */
   // code-gauge-allow functionNcss 57 -- One short case per kind of code node.
   private stepEval(state: RunState): void {
     const { code, env } = state;
@@ -372,7 +372,6 @@ export class Machine {
     this.stack.pop();
   }
 
-  /** Applies a function to arguments: a call when it has them all, a partial application when it lacks some. */
   private stepApply(state: RunState): void {
     let { fn, args } = state;
     if (fn instanceof Partial) {
@@ -408,7 +407,6 @@ export class Machine {
     state.evaluate(fn.lam.body, frameEnv);
   }
 
-  /** Forces a primitive's strict arguments one by one, then runs it. */
   private stepPrim(state: RunState): void {
     const frame = this.stack.at(-1) as Extract<Frame, { k: 'prim' }>;
     const strict = frame.prim.strict;
@@ -432,8 +430,7 @@ export class Machine {
     else state.enter(result);
   }
 
-  /** Delivers a value to the frame on top of the stack, telling whether it reached the base of this run. */
-  // code-gauge-allow functionNcss 41 -- One short case per kind of frame a value returns to.
+  // code-gauge-allow functionNcss 43 -- One short case per kind of frame a value returns to.
   private stepReturn(state: RunState): boolean {
     const frame = this.stack.pop() as Frame;
     switch (frame.k) {
@@ -445,6 +442,14 @@ export class Machine {
         return false;
       }
       case 'apply': {
+        if (frame.displayType)
+          this.inheritTypeHint(
+            typedSlot(state.value as Value, {
+              tag: 'applicationType',
+              parent: frame.displayType,
+              arguments: frame.args.length,
+            })
+          );
         state.applyTo(state.value as Value, frame.args);
         return false;
       }
@@ -459,7 +464,13 @@ export class Machine {
       case 'method':
       case 'super': {
         const dict = state.value as Dict;
-        state.enter(frame.k === 'method' ? dict.methods[frame.index] : dict.supers[frame.index]);
+        state.enter(
+          frame.k === 'method' && this.runtime.steps.recorder
+            ? typedSlot(dict.methods[frame.index], methodTypeHint(dict, frame.index, this.runtime))
+            : frame.k === 'method'
+              ? dict.methods[frame.index]
+              : dict.supers[frame.index]
+        );
         return false;
       }
       case 'deferredDo': {
@@ -490,7 +501,12 @@ export class Machine {
 
   private inheritTypeHint(slot: Slot): void {
     const top = this.stack.at(-1);
-    if (!this.runtime.steps.recorder || top?.k !== 'update') return;
+    if (!this.runtime.steps.recorder) return;
+    if (top?.k === 'apply') {
+      top.displayType = slotTypeHint(slot, top.displayType);
+      return;
+    }
+    if (top?.k !== 'update') return;
     const hint = thunkTypeHint(top.thunk);
     hint.value = slotTypeHint(slot, hint.value);
   }
@@ -522,7 +538,6 @@ export class Machine {
     state.evaluate(core.default, env);
   }
 
-  /** Runs an `IO` action: its result goes to the frame below, and a composed action runs its parts in turn. */
   private stepIO(state: RunState): void {
     const action = state.value as Value;
     this.runtime.spend();
@@ -549,7 +564,6 @@ export class Machine {
     }
   }
 
-  /** Delivers an action's result to the frame on top of the stack, telling whether it reached the base of this run. */
   private stepIODone(state: RunState): boolean {
     const frame = this.stack.pop() as Frame;
     switch (frame.k) {
@@ -576,7 +590,6 @@ export class Machine {
     }
   }
 
-  /** Pops the frames above `base` after an exception, resetting the thunks they were evaluating. */
   private unwind(base: number): void {
     const { stack } = this;
     while (stack.length > base) {
@@ -602,7 +615,6 @@ type RunStart =
   | { mode: 'apply'; fn: Value; args: Slot[] }
   | { mode: 'runSlotIO'; slot: Slot };
 
-/** What one level of evaluation is doing: evaluating code, entering a slot, applying a function, or running IO. */
 export class RunState {
   mode: Mode;
   code = undefined as unknown as Core;

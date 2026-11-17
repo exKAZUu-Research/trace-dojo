@@ -418,6 +418,11 @@ instance Ord a => Monoid (Set a) where
   mempty = empty
 
 instance Foldable Set where
+  fold = foldMap id
+  foldMap f = go
+    where go STip = mempty
+          go (SBin 1 x _ _) = f x
+          go (SBin _ x l r) = go l ${BT}mappend${BT} (f x ${BT}mappend${BT} go r)
   foldr = foldr
   foldl = foldl
   foldr' = foldr'
@@ -428,8 +433,8 @@ instance Foldable Set where
   elem x s = B.elem x (toAscList s)
   minimum = findMin
   maximum = findMax
-  sum s = B.sum (toAscList s)
-  product s = B.product (toAscList s)
+  sum = foldl' (+) 0
+  product = foldl' (*) 1
 
 nearest :: (a -> Ordering) -> Bool -> Set a -> Maybe a
 nearest compareKey lower = go Nothing
@@ -795,7 +800,10 @@ foldlWithKey' f z m = z ${BT}seq${BT} case m of
   Bin _ k x l r -> let left = foldlWithKey' f z l in left ${BT}seq${BT} foldlWithKey' f (f left k x) r
 
 foldMapWithKey :: Monoid m => (k -> a -> m) -> Map k a -> m
-foldMapWithKey f = foldrWithKey (\k x acc -> f k x <> acc) mempty
+foldMapWithKey f = go
+  where go Tip = mempty
+        go (Bin 1 k x _ _) = f k x
+        go (Bin _ k x l r) = go l ${BT}mappend${BT} (f k x ${BT}mappend${BT} go r)
 
 map :: (a -> b) -> Map k a -> Map k b
 map _ Tip = Tip
@@ -1091,6 +1099,8 @@ instance Functor (Map k) where
   fmap = map
 
 instance Foldable (Map k) where
+  fold = foldMap id
+  foldMap f = foldMapWithKey (\_ x -> f x)
   foldr = foldr
   foldl = foldl
   foldr' = foldr'
@@ -1099,8 +1109,8 @@ instance Foldable (Map k) where
   null = null
   length = size
   elem x m = B.elem x (elems m)
-  sum m = B.sum (elems m)
-  product m = B.product (elems m)
+  sum = foldl' (+) 0
+  product = foldl' (*) 1
 
 instance Traversable (Map k) where
   traverse f = traverseWithKey (\_ -> f)
