@@ -312,10 +312,15 @@ export class StatementChecker {
   /** A variable declared again, which keeps the type its first declaration gives, as TypeScript's merged symbol does. */
   private redeclaredVariable(declarator: TreeNode, symbol: Sym, annotation: Type | undefined): void {
     const value = declarator.childForFieldName('value');
-    const nameNode = declarator.childForFieldName('name') as TreeNode;
-    const valueType = value ? this.c.expressions.check(value, annotation) : undefined;
-    if (value && valueType && annotation) this.c.expressions.checkAssignable(nameNode, valueType, annotation, value);
-    if (!valueType) return;
+    if (!value) return;
+    const valueType = this.c.expressions.check(value, annotation);
+    if (annotation)
+      this.c.expressions.checkAssignable(
+        declarator.childForFieldName('name') as TreeNode,
+        valueType,
+        annotation,
+        value
+      );
     const declared = this.c.expressions.valueTypeOf(symbol);
     this.c.flow.set(`s${symbol.id}`, {
       type: this.c.flow.assignmentReduced(declared, regularOf(valueType)),
@@ -333,7 +338,7 @@ export class StatementChecker {
       return;
     }
     this.c.expressions.setVariableType(symbol, annotation);
-    // A `var` declared again keeps what it holds.
+    // A `var` keeps what its hoisted binding holds, which an assignment before the declaration may have set.
     if (kind === 'var' && this.c.flow.entry(key)) return;
     this.c.flow.set(key, { type: annotation, assigned: hasToken(declarator, '!') });
   }
