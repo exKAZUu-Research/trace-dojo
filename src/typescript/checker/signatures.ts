@@ -101,7 +101,7 @@ export class Signatures {
         thisType = this.c.typeNodes.annotationType(parameterNode.childForFieldName('type'));
       else parameters.push(this.declaredParameter(node, parameterNode, contextual, parameters.length));
     }
-    return { parameters, thisType };
+    return { parameters: withRequiredPrefix(parameters, parameterNodes(node)), thisType };
   }
 
   private declaredParameter(
@@ -410,6 +410,26 @@ export function isContextSensitiveFunction(node: TreeNode): boolean {
 }
 
 /** The parameter declarations of a function-like node, a `this` parameter included. */
+/**
+ * Parameters where one with a default value, or marked `?`, before a required one is required too, as callers must pass
+ * it to reach the later one; its type takes `undefined` instead, which makes the default apply.
+ */
+function withRequiredPrefix(parameters: Parameter[], nodes: TreeNode[]): Parameter[] {
+  const declared = nodes.filter((parameterNode) => patternOf(parameterNode).type !== 'this');
+  const minArgumentCount =
+    declared.findLastIndex(
+      (parameterNode) =>
+        parameterNode.type !== 'optional_parameter' &&
+        parameterNode.childForFieldName('value') === null &&
+        patternOf(parameterNode).type !== 'rest_pattern'
+    ) + 1;
+  return parameters.map((parameter, index) =>
+    index < minArgumentCount && parameter.optional
+      ? { ...parameter, optional: false, type: unionOf([parameter.type, undefinedType]) }
+      : parameter
+  );
+}
+
 function parameterNodes(node: TreeNode): TreeNode[] {
   const parametersNode = node.childForFieldName('parameters');
   const nodes = parametersNode ? named(parametersNode) : [];
