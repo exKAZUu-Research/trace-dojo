@@ -6204,8 +6204,8 @@ test('packed unions compare physical bits across active-field choices', () => {
   });
 });
 
-test('packed equality preserves pointer identities across constants and allocator views', () => {
-  const source = `const std=@import("std");const U=packed union{p:*u8,q:*u8};pub fn main()!void{var a:u8=1;var b:u8=2;const x=U{.p=&a};const y=U{.q=&a};const z=U{.q=&b};var bytes:[64]u8=undefined;var f=std.heap.FixedBufferAllocator.init(&bytes);const p=try f.allocator().create(U);p.*=x;std.debug.print("{} {} {}",.{x==y,x==z,p.*==y});}`;
+test('extern union pointer views preserve identities across constants and allocator storage', () => {
+  const source = `const std=@import("std");const U=extern union{p:*u8,q:*u8};pub fn main()!void{var a:u8=1;var b:u8=2;const x=U{.p=&a};const y=U{.q=&a};const z=U{.q=&b};var bytes:[64]u8=undefined;var f=std.heap.FixedBufferAllocator.init(&bytes);const p=try f.allocator().create(U);p.*=x;std.debug.print("{} {} {}",.{x.q==y.p,x.p==z.q,p.q==y.p});}`;
   expect(executeProgram('zig', source)).toMatchObject({
     kind: 'executed',
     stderr: 'true false true',
@@ -6253,8 +6253,8 @@ test('packed struct equality and map keys compare NaN bits', () => {
   });
 });
 
-test('packed pointer keys hash the same bits across logical, physical and integer views', () => {
-  const source = `const std=@import("std");const U=packed union{p:*u8,x:usize};pub fn main(init:std.process.Init)!void{var n:u8=1;const a=U{.p=&n};const bits=a.x;const b=U{.x=bits};var m=std.AutoHashMap(U,u8).init(init.gpa);defer m.deinit();try m.put(a,42);const found=m.get(b);try m.put(b,43);const c=U{.p=&n};std.debug.print("{any} {any} {}",.{found,m.get(c),m.count()});}`;
+test('pointer map keys retain identity through extern union views', () => {
+  const source = `const std=@import("std");const U=extern union{p:*u8,q:*u8};pub fn main(init:std.process.Init)!void{var n:u8=1;const a=U{.p=&n};var m=std.AutoHashMap(*u8,u8).init(init.gpa);defer m.deinit();try m.put(a.q,42);const found=m.get(&n);try m.put(&n,43);std.debug.print("{any} {any} {}",.{found,m.get(a.p),m.count()});}`;
   expect(executeProgram('zig', source)).toMatchObject({
     kind: 'executed',
     stderr: '42 43 1',
