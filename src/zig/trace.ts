@@ -301,6 +301,8 @@ function guardedDisplayNode(
   }
 }
 
+// code-gauge-allow functionCognitiveComplexity 30 -- Dispatches bounded reference previews over Zig value representations.
+// code-gauge-allow functionNcss 49 -- Keeps scalar, wrapper and aggregate display selection together.
 function displayValue(value: Value, type: Type, seen: Set<unknown>, budget: PreviewBudget): DisplayNode | undefined {
   if (budget.remaining <= 0) return TRUNCATED;
   if (value === UNASSIGNED) return undefined;
