@@ -178,10 +178,9 @@ export class Calls {
 
   /** The object a method is called on, which its `this` parameter infers from. */
   private receiverType(callee: TreeNode): Type | undefined {
-    if (callee.type !== 'member_expression' || callee.childForFieldName('object')?.type === 'super') return undefined;
-    return this.c.silently(() =>
-      this.c.relations.removeNullish(this.c.expressions.check(callee.childForFieldName('object') as TreeNode))
-    );
+    const object = receiverObject(callee);
+    if (!object || object.type === 'super') return undefined;
+    return this.c.silently(() => this.c.relations.removeNullish(this.c.expressions.check(object)));
   }
 
   private isName(node: TreeNode): boolean {
@@ -294,9 +293,12 @@ export class Calls {
   private checkThisContext(callee: TreeNode, signature: Signature): void {
     const { thisType } = signature;
     if (!thisType || isAnyLike(thisType)) return;
-    const expression = skipParentheses(callee);
-    const object = expression.type === 'member_expression' ? expression.childForFieldName('object') : undefined;
-    const context = object ? this.c.silently(() => this.c.expressions.check(object)) : voidType;
+    const object = receiverObject(callee);
+    const checked = object ? this.c.silently(() => this.c.expressions.check(object)) : voidType;
+    // An optional call runs only when its object is not nullish.
+    const context = skipParentheses(callee).childForFieldName('optional_chain')
+      ? this.c.relations.removeNullish(checked)
+      : checked;
     if (this.c.relations.isAssignable(context, thisType)) return;
     this.c.error(
       callee,
@@ -755,4 +757,11 @@ function hasRest(signature: Signature): boolean {
 
 function requiredCount(signature: Signature): number {
   return signature.parameters.filter((parameter) => !parameter.optional && !parameter.rest).length;
+}
+
+/** The object a call through a property or an element, as `o.f()` or `o["f"]()`, passes as `this`. */
+function receiverObject(callee: TreeNode): TreeNode | undefined {
+  const expression = skipParentheses(callee);
+  if (expression.type !== 'member_expression' && expression.type !== 'subscript_expression') return undefined;
+  return expression.childForFieldName('object') ?? undefined;
 }

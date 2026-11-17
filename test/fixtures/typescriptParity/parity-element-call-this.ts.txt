@@ -1,0 +1,7 @@
+function f(this: { x: number }) { return this.x; }
+const o = { x: 1, f };
+console.log(o["f"](), o.f(), (o["f"])());
+const k = "f";
+console.log(o[k]());
+const p: { x: number; f: typeof f } | undefined = o as { x: number; f: typeof f } | undefined;
+console.log(p?.["f"](), p?.f());
