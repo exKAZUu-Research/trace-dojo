@@ -101,6 +101,19 @@ const t = new Turtle(x, 0);`,
   expect(stepsOf('typescript', typescript)).toEqual(stepsOf('java', java));
 });
 
+test('a private static field traces under its private name', () => {
+  const typescript = `class Settings {
+  static #value = 0;
+  static bump() {
+    Settings.#value = 2;
+  }
+}
+Settings.bump();
+const t = new Turtle(1, 0);`;
+  const steps = traceProgram('typescript', typescript, typescript).traceItems;
+  expect(steps.at(-1)?.vars).toEqual({ 'Settings.#value': 2 });
+});
+
 // A parameter property is a field declared before the others, which the constructor assigns on the parameter's row.
 test('a program traces as the JavaScript its types erase to', () => {
   const typescript = `interface Mover {

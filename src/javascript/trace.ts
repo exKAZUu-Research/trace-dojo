@@ -74,16 +74,8 @@ class Snapshotter {
     for (const [className, binding] of top.bindings) {
       const cls = binding.value;
       if (!(cls instanceof JsFunction) || cls.behavior.kind !== 'class') continue;
-      for (const [key, property] of cls.properties) {
-        if (
-          typeof key !== 'string' ||
-          !property.enumerable ||
-          isAccessor(property) ||
-          property.value instanceof JsFunction
-        )
-          continue;
-        addVariable(variables, `${className}.${key}`, property.value);
-      }
+      // Its private static fields show as instance ones do.
+      for (const [key, value] of displayedEntries(cls)) addVariable(variables, `${className}.${key}`, value);
     }
   }
 
