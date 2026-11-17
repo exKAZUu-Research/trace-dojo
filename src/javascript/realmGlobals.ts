@@ -39,7 +39,14 @@ export function defineGlobalBuiltins(builder: RealmBuilder): void {
 }
 
 function defineUriFunctions(builder: RealmBuilder): void {
-  for (const [name, encode] of Object.entries({ encodeURI, encodeURIComponent, decodeURI, decodeURIComponent })) {
+  for (const [name, encode] of Object.entries({
+    encodeURI,
+    encodeURIComponent,
+    decodeURI,
+    decodeURIComponent,
+    escape,
+    unescape,
+  })) {
     builder.global(
       name,
       builder.function(name, 1, ({ runtime, args }) => {

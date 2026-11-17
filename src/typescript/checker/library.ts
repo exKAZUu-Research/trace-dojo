@@ -145,8 +145,6 @@ const unsupportedValues: Record<string, string> = {
   alert: 'alert',
   prompt: 'prompt などの標準入力',
   AggregateError: 'AggregateError',
-  escape: 'escape',
-  unescape: 'unescape',
 };
 
 export function markUnsupported(scope: Scope): void {
