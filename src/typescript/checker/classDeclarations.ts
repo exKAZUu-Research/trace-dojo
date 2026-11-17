@@ -206,6 +206,7 @@ export class ClassDeclarationChecker {
     }
   }
 
+  // code-gauge-allow functionCognitiveComplexity 19 -- Follows TypeScript's checks of each inherited member: visibility, kind, then type.
   private checkBaseCompatibility(node: TreeNode, info: ClassInfo): void {
     const base = this.c.classes.baseInstanceType(node);
     if (!base || isAnyLike(base)) return;

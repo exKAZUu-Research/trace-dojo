@@ -2,7 +2,6 @@
 // comments, typed arrays, and `Intl` removed.
 // Copyright (c) Microsoft Corporation. Licensed under the Apache License, Version 2.0.
 // oxfmt-ignore
-// code-gauge-allow fileSize 1200 -- Holds the library declarations TypeScript type-checks programs against.
 export const ECMASCRIPT_LIBRARY = `
 declare var NaN: number;
 declare var Infinity: number;

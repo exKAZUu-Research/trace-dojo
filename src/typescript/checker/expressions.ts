@@ -534,7 +534,8 @@ export class ExpressionChecker {
   }
 
   /** Reports the properties of a fresh object literal that its target does not declare. */
-  // code-gauge-allow functionCognitiveComplexity 24 -- Follows TypeScript's excess property check, including nested object literals.
+  // code-gauge-allow functionCognitiveComplexity 29 -- Follows TypeScript's excess property check, including nested object literals.
+  // code-gauge-allow functionNcss 33 -- Follows TypeScript's excess property check through unions, arrays, discriminants, and nested literals.
   checkExcessProperties(node: TreeNode, source: Type, target: Type): void {
     // Each object literal a union, an array, or a tuple holds is checked against where it goes.
     if (source.kind === 'union') {

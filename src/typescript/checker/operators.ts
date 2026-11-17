@@ -31,8 +31,8 @@ const typeofResult = unionOf(
 export class OperatorChecker {
   constructor(private readonly c: Checker) {}
 
-  // code-gauge-allow functionNcss 38 -- One case per unary operator.
-  // code-gauge-allow functionCognitiveComplexity 23 -- One case per unary operator.
+  // code-gauge-allow functionNcss 42 -- One case per unary operator.
+  // code-gauge-allow functionCognitiveComplexity 26 -- One case per unary operator.
   unary(node: TreeNode): Type {
     const operator = node.childForFieldName('operator')?.text ?? '';
     const argument = node.childForFieldName('argument') as TreeNode;

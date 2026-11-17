@@ -421,6 +421,8 @@ export class ConditionChecker {
     return undefined;
   }
 
+  // code-gauge-allow functionNcss 37 -- Follows TypeScript's narrowing by each form of equality: typeof, references, discriminants, and optional chains.
+  // code-gauge-allow functionCognitiveComplexity 25 -- Follows TypeScript's narrowing by each form of equality: typeof, references, discriminants, and optional chains.
   private narrowEquality(left: TreeNode, right: TreeNode, operator: string): { whenTrue: State; whenFalse: State } {
     const equal = operator === '===' || operator === '==';
     const loose = operator === '==' || operator === '!=';

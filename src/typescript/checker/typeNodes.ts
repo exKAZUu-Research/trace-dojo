@@ -398,6 +398,8 @@ export class TypeNodes {
   }
 
   /** The type a type name stands for: an interface, a class's instance type, an alias, or a type parameter. */
+  // code-gauge-allow functionNcss 35 -- One case per kind of type declaration, with recursive aliases.
+  // code-gauge-allow functionCognitiveComplexity 20 -- One case per kind of type declaration, with recursive aliases.
   declaredTypeOf(symbol: Sym): Type {
     if (symbol.declaredType) return symbol.declaredType;
     switch (symbol.typeKind) {

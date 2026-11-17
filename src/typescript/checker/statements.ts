@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 438 -- Follows the flow of control through each kind of statement.
+// code-gauge-allow-file fileNcss 501 -- Follows the flow of control through each kind of statement.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import type { Checker } from './checker';
@@ -170,6 +170,7 @@ export class StatementChecker {
   }
 
   /** Reports a property of an interface that does not fit the same property of an interface it extends. */
+  // code-gauge-allow functionCognitiveComplexity 17 -- Follows TypeScript's check of each member an interface redeclares from each base.
   private checkInterfaceBases(node: TreeNode, structure: Structure): void {
     const body = node.childForFieldName('body');
     const clause = named(node).find((child) => child.type === 'extends_type_clause');
@@ -196,6 +197,7 @@ export class StatementChecker {
    * the string index. A property inherited from elsewhere is reported at the index signature of `owner`, the body
    * declaring the type.
    */
+  // code-gauge-allow functionCognitiveComplexity 21 -- Follows TypeScript's checks of properties and number indexes against index signatures.
   checkIndexConformance(structure: Structure, owner?: TreeNode): void {
     for (const property of structure.properties.values()) {
       const nameNode = property.declaration?.childForFieldName('name');
@@ -552,7 +554,8 @@ export class StatementChecker {
       this.c.expressions.reportNotAssignable(left, elementType, declared);
   }
 
-  // code-gauge-allow functionNcss 36 -- Follows the flow through the cases, fall-through, and an exhaustive end in one pass.
+  // code-gauge-allow functionNcss 47 -- Follows the flow through the cases, fall-through, and an exhaustive end in one pass.
+  // code-gauge-allow functionCognitiveComplexity 20 -- Follows the flow through the cases, fall-through, `switch (true)`, and an exhaustive end in one pass.
   private switchStatement(node: TreeNode): void {
     const value = node.childForFieldName('value') as TreeNode;
     const discriminant = skipParentheses(value);

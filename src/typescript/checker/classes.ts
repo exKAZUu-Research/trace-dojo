@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 481 -- Holds the types of classes with `this`, `super`, and accessibility, which all read the class information.
+// code-gauge-allow-file fileNcss 489 -- Holds the types of classes with `this`, `super`, and accessibility, which all read the class information.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import type { Checker } from './checker';
@@ -423,6 +423,7 @@ export class ClassChecker {
   }
 
   /** The widened types the constructor assigns to `this.name`, from which a field without a type takes its type. */
+  // code-gauge-allow functionCognitiveComplexity 16 -- Walks the constructor for assignments to the field outside nested functions.
   private constructorAssignments(member: TreeNode, name: string): Type[] {
     const classNode = member.parent?.parent;
     const ctor = classNode ? this.constructorNode(classNode) : undefined;

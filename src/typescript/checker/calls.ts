@@ -549,6 +549,8 @@ export class Calls {
   // Inference ----------------------------------------------------------------------------------------------------
 
   /** A signature with its type parameters replaced by the given or inferred type arguments. */
+  // code-gauge-allow functionNcss 36 -- Follows TypeScript's inference passes: context-insensitive arguments, the contextual return, then callbacks.
+  // code-gauge-allow functionCognitiveComplexity 19 -- Follows TypeScript's inference passes: context-insensitive arguments, the contextual return, then callbacks.
   private instantiateFor(
     signature: Signature,
     args: TreeNode[],

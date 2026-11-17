@@ -1,3 +1,4 @@
+// code-gauge-allow-file fileNcss 424 -- Decides assignability and comparability for every kind of type, as TypeScript's checker does in one place.
 import type { Checker } from './checker';
 import { isUnit } from './flow';
 import { isNumericName } from './syntax';
@@ -57,7 +58,8 @@ export class Relations {
     return result;
   }
 
-  // code-gauge-allow functionCognitiveComplexity 22 -- Follows TypeScript's order of checks for each kind of type.
+  // code-gauge-allow functionCognitiveComplexity 29 -- Follows TypeScript's order of checks for each kind of type.
+  // code-gauge-allow functionNcss 33 -- Follows TypeScript's order of checks for each kind of type.
   private structuredRelated(source: Type, target: Type, relation: Relation): boolean {
     const s = regularOf(source);
     const t = regularOf(target);
@@ -509,7 +511,7 @@ export class Relations {
     return true;
   }
 
-  // code-gauge-allow functionCognitiveComplexity 18 -- Compares parameters and return types as TypeScript does.
+  // code-gauge-allow functionCognitiveComplexity 21 -- Compares parameters and return types as TypeScript does.
   signatureRelated(source: Signature, target: Signature, relation: Relation): boolean {
     let sourceSignature = source;
     if (source.typeParameters.length > 0) {

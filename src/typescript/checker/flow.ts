@@ -135,7 +135,6 @@ export class Flow {
   }
 
   /** The key of a reference that narrowing applies to: a variable, `this`, or a property path of one. */
-  // code-gauge-allow functionCognitiveComplexity 17 -- One case per kind of reference that flow analysis follows.
   referenceKey(node: TreeNode): string | undefined {
     const expression = skipParentheses(node);
     switch (expression.type) {
@@ -296,6 +295,7 @@ export class Flow {
     return assumeTrue ? this.narrowToEqual(type, other, loose) : this.narrowToUnequal(type, other, loose);
   }
 
+  // code-gauge-allow functionCognitiveComplexity 17 -- Follows TypeScript's narrowing of each kind of type by equality.
   private narrowToEqual(type: Type, other: Type, loose: boolean): Type {
     const nullish = isIntrinsic(other, 'null') || isIntrinsic(other, 'undefined');
     if (loose && nullish) {

@@ -283,6 +283,7 @@ export class LiteralChecker {
    * The members of a contextual union that the literal's discriminant properties select, as `{ type: "say", … }`
    * selects the member whose `type` is `"say"`; the whole union when none or no member is selected.
    */
+  // code-gauge-allow functionCognitiveComplexity 16 -- Follows TypeScript's discrimination of a contextual union by literal properties.
   private discriminatedContext(node: TreeNode, contextual: Type): Type {
     if (contextual.kind !== 'union') return contextual;
     let members = contextual.types;
@@ -412,7 +413,7 @@ export class LiteralChecker {
   }
 
   /** The type a variable declared with this initializer type gets. */
-  // code-gauge-allow functionCognitiveComplexity 28 -- One case per kind of type that a declaration widens.
+  // code-gauge-allow functionCognitiveComplexity 29 -- One case per kind of type that a declaration widens.
   widenDeclared(type: Type, isConst: boolean): Type {
     // A constant keeps a fresh literal type, which widens again where a mutable location takes its value.
     // Only a fresh literal widens, which `as const` and annotations make regular.

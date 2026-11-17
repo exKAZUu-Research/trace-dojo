@@ -122,6 +122,7 @@ export class FunctionChecker {
    * The type predicate TypeScript 5.5 infers for a function that only returns a boolean condition on a parameter, as
    * `(x) => x !== null` is `(x) => x is T` when the condition is false exactly where the parameter is not a `T`.
    */
+  // code-gauge-allow functionCognitiveComplexity 18 -- Follows TypeScript 5.5's conditions for inferring a type predicate.
   inferredPredicate(node: TreeNode, signature: Signature): Signature['predicate'] {
     const returned = this.singleReturnedExpression(node);
     if (!returned || !isBooleanLike(this.c.silently(() => signature.returnType()))) return undefined;
