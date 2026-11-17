@@ -64,10 +64,6 @@ function ordering(order: number): Value {
   return nullary(cons_[order < 0 ? 0 : order === 0 ? 1 : 2]);
 }
 
-export function isTrue(value: Value): boolean {
-  return (value as ConValue).con.tag === 1;
-}
-
 strict('newtypeField', 1, ([value]) => (value as ConValue).fields[0]);
 
 const unit = (): Value => nullary(UNIT_CON);
