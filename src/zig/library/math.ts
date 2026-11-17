@@ -900,10 +900,16 @@ const MEMBERS: Record<string, () => Member> = {
     }
     const bits = bitsOf(type);
     const coerced = args.map((arg) => sema.coerce(arg, type, arg.span));
-    return computed(type, coerced, call.span, ([a, b, t]) => {
+    return computed(type, coerced, call.span, ([a, b, t], frame) => {
       // `@mulAdd(T, b - a, t, a)`, rounding once after the product and the sum.
       const difference = asBigFloat(floatArithmetic(b as AnyFloat, a as AnyFloat, '-', bits));
-      return fusedMultiplyAdd(difference, asBigFloat(t as AnyFloat), asBigFloat(a as AnyFloat), bits);
+      return fusedMultiplyAdd(
+        difference,
+        asBigFloat(t as AnyFloat),
+        asBigFloat(a as AnyFloat),
+        bits,
+        nativeBudget(sema, frame)
+      );
     });
   }),
   isPowerOfTwo: fnMember('std.math.isPowerOfTwo', (sema, call) => {

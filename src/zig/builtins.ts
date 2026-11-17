@@ -15,7 +15,7 @@ import {
   rem,
 } from './arith';
 import type { Expression, ExpressionOf, Span } from './ast';
-// code-gauge-allow-file fileNcss 691 -- The file holds one layer of the compiler, whose parts share its private state.
+// code-gauge-allow-file fileNcss 693 -- The file holds one layer of the compiler, whose parts share its private state.
 import { enumLookup } from './enumLookup';
 import { ExpressionCompiler, log2IntType } from './expressions';
 import {
@@ -390,13 +390,19 @@ export abstract class BuiltinCompiler extends ExpressionCompiler {
         if (type.kind !== 'float') this.error(args[0], '@mulAdd は浮動小数点数の型にだけ使えます。');
         const [a, b, c] = args.slice(1).map((arg) => this.coerce(this.compile(arg, type), type, arg));
         const bits = (type as FloatType).bits;
-        const compute = (x: Value, y: Value, z: Value): Value => {
-          const product = asBigFloat(x as AnyFloat);
-          const exact = new BigFloat(false, 'finite', 0n, 0);
-          void exact;
-          return fusedMultiplyAdd(product, asBigFloat(y as AnyFloat), asBigFloat(z as AnyFloat), bits);
-        };
-        return this.combine([a, b, c], type, (values) => compute(values[0], values[1], values[2]), expression);
+        return this.combine(
+          [a, b, c],
+          type,
+          ([x, y, z], frame) =>
+            fusedMultiplyAdd(
+              asBigFloat(x as AnyFloat),
+              asBigFloat(y as AnyFloat),
+              asBigFloat(z as AnyFloat),
+              bits,
+              (cost) => (frame ? frame.runtime.spend(cost) : this.spendCompilation(cost))
+            ),
+          expression
+        );
       }
       case '@intFromEnum': {
         const operand = this.compile(args[0]);
@@ -722,7 +728,7 @@ export abstract class BuiltinCompiler extends ExpressionCompiler {
         ),
         expression
       );
-    return this.combine(coerced, type, pickAll, expression);
+    return this.combine(coerced, type, (values) => pickAll(values), expression);
   }
 
   private absBuiltin(expression: ExpressionOf<'builtinCall'>, resultType: Type | undefined): TExpr {
@@ -1124,22 +1130,32 @@ function convertFloat(value: AnyFloat, bits: FloatBits): AnyFloat {
   return floatOf(asBigFloat(value), bits);
 }
 
-export function fusedMultiplyAdd(a: BigFloat, b: BigFloat, c: BigFloat, bits: FloatBits): AnyFloat {
+export function fusedMultiplyAdd(
+  a: BigFloat,
+  b: BigFloat,
+  c: BigFloat,
+  bits: FloatBits,
+  spend: (cost: number) => void
+): AnyFloat {
   if (a.kind !== 'finite' || b.kind !== 'finite')
     return floatOf(asBigFloat(floatArithmetic(floatArithmetic(a, b, '*', 128), c, '+', 128)), bits);
   if (c.kind !== 'finite') return floatOf(c, bits);
-  const product = {
-    sign: a.sign !== b.sign,
-    mantissa: a.mantissa * b.mantissa,
-    exponent: a.exponent + b.exponent,
-  };
-  const exactProduct = new BigFloat(product.sign, 'finite', product.mantissa, product.exponent);
-  const sum = addExact(exactProduct, c);
-  return floatOf(sum, bits);
+  spend(Math.ceil((a.mantissa.toString(2).length + b.mantissa.toString(2).length) / 64));
+  const product = new BigFloat(a.sign !== b.sign, 'finite', a.mantissa * b.mantissa, a.exponent + b.exponent);
+  return floatOf(addExact(product, c, spend), bits);
 }
 
-function addExact(a: BigFloat, b: BigFloat): BigFloat {
+function addExact(a: BigFloat, b: BigFloat, spend: (cost: number) => void): BigFloat {
+  if (a.isZero && b.isZero) return BigFloat.zero(a.sign && b.sign);
+  if (a.isZero) return b;
+  if (b.isZero) return a;
   const exponent = Math.min(a.exponent, b.exponent);
+  const width =
+    Math.max(
+      a.mantissa.toString(2).length + a.exponent - exponent,
+      b.mantissa.toString(2).length + b.exponent - exponent
+    ) + 1;
+  spend(Math.ceil(width / 64));
   const x = (a.sign ? -a.mantissa : a.mantissa) << BigInt(a.exponent - exponent);
   const y = (b.sign ? -b.mantissa : b.mantissa) << BigInt(b.exponent - exponent);
   const sum = x + y;

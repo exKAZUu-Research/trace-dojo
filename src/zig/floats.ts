@@ -32,12 +32,9 @@ export class BigFloat {
     if (kind === 'finite') {
       if (mantissa === 0n) this.exponent = 0;
       else {
-        while ((mantissa & 1n) === 0n) {
-          mantissa >>= 1n;
-          exponent++;
-        }
-        this.mantissa = mantissa;
-        this.exponent = exponent;
+        const trailingBits = (mantissa & -mantissa).toString(2).length - 1;
+        this.mantissa = mantissa >> BigInt(trailingBits);
+        this.exponent = exponent + trailingBits;
       }
     }
   }

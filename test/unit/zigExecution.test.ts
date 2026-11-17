@@ -5577,3 +5577,20 @@ test('indexed member lookup retains quoted tags, callable fields and methods', (
     executeProgram('zig', `const U=union(enum){a:u8};pub fn main()void{_=@unionInit(U,"missing",1);}`)
   ).toMatchObject({ kind: 'compileError' });
 });
+
+test.each(['f80', 'f128'])(
+  'fused %s arithmetic handles wide exponent gaps and signed zeros without repeated normalization',
+  (type) => {
+    const source = `const std=@import("std");pub fn main()void{var x:${type}=0x1p16000;_=&x;var ok=true;for(0..100)|_|{ok=ok and @mulAdd(${type},x,1,0)==x and @mulAdd(${type},-0.0,1,x)==x and @mulAdd(${type},x,1,-x)==0;}std.debug.print("{} {d} {d}",.{ok,@mulAdd(${type},-0.0,1,-0.0),@mulAdd(${type},-0.0,1,0.0)});}`;
+    expect(executeProgram('zig', source)).toMatchObject({
+      kind: 'executed',
+      stderr: 'true -0 0',
+      uncaughtException: undefined,
+    });
+  }
+);
+
+test.each(['f80', 'f128'])('fused %s exponent alignment charges arithmetic work', (type) => {
+  const source = `pub fn main()void{var x:${type}=0x1p16000;var y:${type}=0x1p-16000;_=&x;_=&y;for(0..5000)|_|{_=@mulAdd(${type},x,1,y);}}`;
+  expect(executeProgram('zig', source)).toMatchObject({ kind: 'limitExceeded', limit: 'operations' });
+});
