@@ -1,6 +1,6 @@
 import { FUNCTION_TYPE } from './builtinTypes';
 import type { ClassEnv } from './classEnv';
-import { DERIVABLE_CLASSES, deriveInstance } from './deriving';
+import { deriveInstance } from './deriving';
 import {
   type ClassEntity,
   type Evidence,
@@ -494,8 +494,7 @@ function deriveInstances(checker: Checker, module: RModule, options: TypecheckOp
   const pending: { decl: RDataDecl; cls: ClassEntity; info: InstanceInfo; span: Span }[] = [];
   for (const decl of module.dataDecls) {
     for (const { cls, span } of decl.deriving) {
-      const derivable = DERIVABLE_CLASSES.find((name) => name === cls.name && cls.module === 'Base');
-      if (!derivable) {
+      if (!options.builtins.derivableClasses.has(cls)) {
         if (['Functor', 'Foldable', 'Traversable', 'Generic', 'Data', 'Lift'].includes(cls.name)) {
           throw unsupportedError(span, `${cls.name} の deriving`);
         }

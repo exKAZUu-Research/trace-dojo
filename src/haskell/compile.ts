@@ -6,6 +6,7 @@ import { DOUBLE_TYPE, INT_TYPE, INTEGER_TYPE, IO_TYPE, PRIMITIVE_TYPES, TURTLE_T
 import { ClassEnv } from './classEnv';
 import { Codegen, type CodegenSupport } from './codegen';
 import type { GlobalDef } from './core';
+import { DERIVABLE_CLASSES } from './deriving';
 import { type ClassEntity, nextId, type TypeEntity, type ValueEntity } from './entities';
 import type { Builtins } from './infer';
 import { LIBRARY_SOURCES, PUBLIC_MODULES, UNSUPPORTED_MODULES, UNSUPPORTED_VALUES } from './library';
@@ -329,7 +330,7 @@ function exportType(
   for (const child of selected) exports.values.set(child.name, child);
 }
 
-// code-gauge-allow functionNcss 34 -- One lookup per built-in entity the checker needs.
+// code-gauge-allow functionNcss 38 -- One lookup per built-in entity the checker needs.
 function makeBuiltins(type: (name: string) => TypeEntity, cls: (name: string) => ClassEntity): Builtins {
   const standard = [
     'Eq',
@@ -359,6 +360,7 @@ function makeBuiltins(type: (name: string) => TypeEntity, cls: (name: string) =>
   const numeric = ['Num', 'Real', 'Integral', 'Fractional', 'Floating', 'RealFrac', 'RealFloat'];
   let standardClasses: Set<ClassEntity> | undefined;
   let numericClasses: Set<ClassEntity> | undefined;
+  let derivableClasses: Set<ClassEntity> | undefined;
   return {
     get bool() {
       return type('Bool');
@@ -400,6 +402,10 @@ function makeBuiltins(type: (name: string) => TypeEntity, cls: (name: string) =>
     get numericClasses() {
       numericClasses ??= new Set(numeric.map(cls));
       return numericClasses;
+    },
+    get derivableClasses() {
+      derivableClasses ??= new Set(DERIVABLE_CLASSES.map(cls));
+      return derivableClasses;
     },
   };
 }

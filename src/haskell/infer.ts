@@ -66,6 +66,7 @@ export interface Builtins {
   monadFail: ClassEntity;
   /** The classes whose constraints defaulting may solve. */
   standardClasses: ReadonlySet<ClassEntity>;
+  derivableClasses: ReadonlySet<ClassEntity>;
   numericClasses: ReadonlySet<ClassEntity>;
 }
 

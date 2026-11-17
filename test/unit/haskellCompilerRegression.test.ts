@@ -1196,3 +1196,28 @@ main=print(f(1::Int)False)`;
     uncaughtException: undefined,
   });
 });
+
+test.each(
+  ['Base', 'Example'].flatMap((module) =>
+    ['Eq', 'Ord', 'Show', 'Read', 'Enum', 'Bounded'].map((name) => ({ module, name }))
+  )
+)('user class $module.$name is not stock derivable', ({ module, name }) => {
+  const source = `module ${module} where
+import Prelude hiding (${name}(..))
+class ${name} a where
+ describe::a->String
+data T=T deriving ${name}
+main=putStrLn "ok"`;
+  expect(executeProgram('haskell', source).kind).toBe('compileError');
+});
+
+test('source modules retain actual stock deriving class identities', () => {
+  const source = `module Base where
+data T=Red|Blue deriving(Eq,Ord,Show,Read,Enum,Bounded)
+main=print(read "Blue"==Blue,Red<Blue,fromEnum Blue,[minBound..maxBound]::[T])`;
+  expect(executeProgram('haskell', source)).toMatchObject({
+    kind: 'executed',
+    stdout: '(True,True,1,[Red,Blue])\n',
+    uncaughtException: undefined,
+  });
+});
