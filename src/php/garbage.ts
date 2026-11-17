@@ -1,7 +1,7 @@
 // code-gauge-allow-file fileNcss 417 -- Holds the cases of one concern of the interpreter, which share their helpers.
 import type { TurtleState } from '../interpreter/turtleWorld';
 import type { Frame, Runtime } from './runtime';
-import { type ClosureData, isClosure, PhpArray, PhpObject, Ref, type Slot } from './values';
+import { type ClosureData, isClosure, PhpArray, PhpObject, Ref } from './values';
 
 /** The objects at most of which a run checks for garbage on every allocation, to reuse object handles as PHP does. */
 const ALLOCATION_CHECK_LIMIT = 2000;
@@ -403,7 +403,7 @@ export function holderCounts(runtime: Runtime): Map<PhpObject, number> {
   const visitedObjects = new Set<PhpObject>();
   const visitedRefs = new Set<Ref>();
   const pending: unknown[] = [];
-  const count = (value: Slot | unknown): void => {
+  const count = (value: unknown): void => {
     if (value instanceof PhpObject) counts.set(value, (counts.get(value) ?? 0) + 1);
     pending.push(value);
   };
