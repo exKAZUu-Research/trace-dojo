@@ -6,7 +6,15 @@ import type { Checker } from './checker';
 import { FlowState, type State } from './flow';
 import { isUsedBeforeInitialization } from './initializationOrder';
 import type { Sym } from './scopes';
-import { hasToken, isClassConstructor, isConstructorName, isImmediatelyInvoked, isWithin, named } from './syntax';
+import {
+  hasToken,
+  isClassConstructor,
+  isConstructorName,
+  isImmediatelyInvoked,
+  isWithin,
+  named,
+  propertyNameText,
+} from './syntax';
 import {
   anonymousObject,
   anyType,
@@ -513,14 +521,18 @@ export class ClassChecker {
     const classNode = member.parent?.parent;
     const body =
       classNode && !hasToken(member, 'static') ? this.constructorNode(classNode)?.childForFieldName('body') : undefined;
-    return body
+    // Names compare as property keys, as `["x"]` and `x`, or `1` and `this[1]`, name the same field.
+    const name = propertyNameText(nameNode);
+    return body && name !== undefined
       ? typesAtConstructorExit(
           body,
-          nameNode.text,
+          name,
           (right) => this.c.widen(this.c.silently(() => this.c.expressions.check(right))),
           (index) => {
             const key = this.c.silently(() => this.c.expressions.check(index));
-            return key.kind === 'literal' && typeof key.value === 'string' ? key.value : undefined;
+            return key.kind === 'literal' && (typeof key.value === 'string' || typeof key.value === 'number')
+              ? String(key.value)
+              : undefined;
           },
           () => this.c.budget.spend()
         )
