@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 995 -- The file holds one layer of the compiler, whose parts share its private state.
+// code-gauge-allow-file fileNcss 996 -- The file holds one layer of the compiler, whose parts share its private state.
 import { CompileError } from '../interpreter/diagnostics';
 import { ExecutionBudget } from '../interpreter/limits';
 import { CompilationStorage, valueSlots } from './allocation';
@@ -163,6 +163,7 @@ export interface NativeCall {
 export interface SemaApi {
   compile(expression: Expression, resultType?: Type): TExpr;
   compileType(expression: Expression): Type;
+  valueComparator(type: Type, ordered: boolean, span: Span): (a: Value, b: Value) => number;
   reserveStorage(type: Type, span: Span): void;
   resolveStorage(type: Type, span: Span): void;
   spendCompilation(cost?: number): void;
@@ -251,6 +252,7 @@ export abstract class SemaBase implements SemaApi {
   }
 
   abstract compile(expression: Expression, resultType?: Type): TExpr;
+  abstract valueComparator(type: Type, ordered: boolean, span: Span): (a: Value, b: Value) => number;
   abstract callFunction(fn: FunctionInstance, args: Value[], frame: Frame): Value;
   protected abstract declarationType(decl: Extract<Decl, { kind: 'fn' }>, span: Span): FnType;
   abstract instantiate(ref: FnRef, argTypes: readonly Type[], span: Span): FunctionInstance;

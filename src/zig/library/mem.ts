@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 611 -- Groups the related standard library operations that share this module.
+// code-gauge-allow-file fileNcss 620 -- Groups the related standard library operations that share this module.
 import { indexOutOfBounds, PANIC, panic } from '../arith';
 import type { Expression, Span } from '../ast';
 import { type AnyFloat, compareFloats, floatFromBigInt, minMaxFloat } from '../floats';
@@ -65,97 +65,176 @@ interface AllocationPlan {
   build: () => Value[];
 }
 
-function comparisonBudget(sema: SemaApi, frame?: Frame): typeof equalValues {
-  const spend = nativeBudget(sema, frame);
-  return (a, b) => {
-    spend();
-    return equalValues(a, b);
+function comparisonOf(sema: SemaApi, type: Type, span: Span): (frame?: Frame) => typeof equalValues {
+  const compare = sema.valueComparator(type, false, span);
+  return (frame) => {
+    const spend = nativeBudget(sema, frame);
+    return (a, b) => {
+      spend();
+      return compare(a, b) === 0;
+    };
   };
 }
 
-function findSequence(haystack: Value[], needle: Value[], from: number, equal: typeof equalValues): number {
-  if (needle.length === 0) return from <= haystack.length ? from : -1;
+class Sequence {
+  constructor(
+    readonly length: bigint,
+    private readonly read: (index: bigint) => Value
+  ) {}
+
+  get(index: bigint): Value {
+    return this.read(index);
+  }
+
+  some(predicate: (value: Value, index: bigint) => boolean): boolean {
+    return this.findFrom(predicate) !== undefined;
+  }
+
+  every(predicate: (value: Value, index: bigint) => boolean): boolean {
+    return this.findFrom((value, index) => !predicate(value, index)) === undefined;
+  }
+
+  findFrom(predicate: (value: Value, index: bigint) => boolean, from = 0n): bigint | undefined {
+    for (let index = from; index < this.length; index++) if (predicate(this.get(index), index)) return index;
+    return undefined;
+  }
+
+  findLastIndex(predicate: (value: Value, index: bigint) => boolean): bigint | undefined {
+    for (let index = this.length; index > 0n;) {
+      index--;
+      if (predicate(this.get(index), index)) return index;
+    }
+    return undefined;
+  }
+
+  count(predicate: (value: Value) => boolean): bigint {
+    let count = 0n;
+    for (let index = 0n; index < this.length; index++) if (predicate(this.get(index))) count++;
+    return count;
+  }
+}
+
+function sequence(value: Value, spend: () => void, scalar = false): Sequence {
+  if (scalar) return new Sequence(1n, () => value);
+  const slice = value as Slice;
+  return new Sequence(slice.lengthValue, (index) => {
+    spend();
+    return slice.get(Number(index));
+  });
+}
+
+function findSequence(
+  haystack: Sequence,
+  needle: Sequence,
+  from: bigint,
+  equal: typeof equalValues
+): bigint | undefined {
+  if (needle.length === 0n) return from <= haystack.length ? from : undefined;
   outer: for (let index = from; index + needle.length <= haystack.length; index++) {
-    for (let offset = 0; offset < needle.length; offset++) {
-      if (!equal(haystack[index + offset], needle[offset])) continue outer;
+    for (let offset = 0n; offset < needle.length; offset++) {
+      if (!equal(haystack.get(index + offset), needle.get(offset))) continue outer;
     }
     return index;
   }
-  return -1;
+  return undefined;
 }
 
-function findSequenceLast(haystack: Value[], needle: Value[], equal: typeof equalValues): number {
-  for (let index = haystack.length - needle.length; index >= 0; index--) {
-    if (needle.every((value, offset) => equal(haystack[index + offset], value))) return index;
+function findSequenceLast(haystack: Sequence, needle: Sequence, equal: typeof equalValues): bigint | undefined {
+  for (let index = haystack.length - needle.length; index >= 0n; index--) {
+    if (needle.every((value, offset) => equal(haystack.get(index + offset), value))) return index;
   }
-  return -1;
+  return undefined;
 }
 
-function startsWith(haystack: Value[], needle: Value[], equal: typeof equalValues, at = 0): boolean {
-  return at + needle.length <= haystack.length && needle.every((value, offset) => equal(haystack[at + offset], value));
+function startsWith(haystack: Sequence, needle: Sequence, equal: typeof equalValues, at = 0n): boolean {
+  return (
+    at >= 0n &&
+    at + needle.length <= haystack.length &&
+    needle.every((value, offset) => equal(haystack.get(at + offset), value))
+  );
 }
 
-/** `(T, slice, other)` functions that compare two slices or a slice and a scalar, known at compile time when both are. */
+function containsScalar(haystack: Sequence, value: Value, minimum: bigint, equal: typeof equalValues): boolean {
+  let count = 0n;
+  for (let index = 0n; index < haystack.length; index++) {
+    if (equal(haystack.get(index), value)) count++;
+    if (count >= minimum) return true;
+  }
+  return false;
+}
+
+function containsSequence(haystack: Sequence, needle: Sequence, minimum: bigint, equal: typeof equalValues): boolean {
+  if (needle.length === 1n) return containsScalar(haystack, needle.get(0n), minimum, equal);
+  if (needle.length === 0n) panic(PANIC.unreachable);
+  if (minimum === 0n) return true;
+  let count = 0n;
+  for (
+    let index = findSequence(haystack, needle, 0n, equal);
+    index !== undefined;
+    index = findSequence(haystack, needle, index + needle.length, equal)
+  ) {
+    count++;
+    if (count >= minimum) return true;
+  }
+  return false;
+}
+
 function sliceSearch(
   name: string,
   second: 'slice' | 'scalar',
   resultType: Type,
-  compute: (haystack: Value[], operand: Value, equal: typeof equalValues) => Value
+  compute: (haystack: Sequence, operand: Sequence, equal: typeof equalValues) => Value
 ): () => Member {
   return generic(name, 3, (sema, call, type, [haystack, operand]) => {
     const a = constSlice(sema, haystack, type);
     const b =
       second === 'slice' ? constSlice(sema, operand, type) : sema.coerce(sema.compile(operand, type), type, operand);
-    return computed(resultType, [a, b], call.span, ([x, y], frame) =>
-      compute(elements(x), second === 'slice' ? (elements(y) as unknown as Value) : y, comparisonBudget(sema, frame))
-    );
+    const equality = comparisonOf(sema, type, call.span);
+    return computed(resultType, [a, b], call.span, ([x, y], frame) => {
+      const spend = nativeBudget(sema, frame);
+      return compute(sequence(x, spend), sequence(y, spend, second === 'scalar'), equality(frame));
+    });
   });
 }
 
 function positionSearch(
   name: string,
   second: 'slice' | 'scalar',
-  compute: (haystack: Value[], start: number, operand: Value, equal: typeof equalValues) => number
+  compute: (haystack: Sequence, start: bigint, operand: Sequence, equal: typeof equalValues) => bigint | undefined
 ): () => Member {
   return generic(name, 4, (sema, call, type, [haystack, startArg, operand]) => {
     const a = constSlice(sema, haystack, type);
     const [start] = compileArgs(sema, [startArg], [USIZE]);
     const b =
       second === 'slice' ? constSlice(sema, operand, type) : sema.coerce(sema.compile(operand, type), type, operand);
-    return computed(OPTIONAL_USIZE, [a, start, b], call.span, ([x, s, y], frame) =>
-      optionalIndex(
-        compute(
-          elements(x),
-          Number(s as bigint),
-          second === 'slice' ? (elements(y) as unknown as Value) : y,
-          comparisonBudget(sema, frame)
-        )
-      )
-    );
-  });
-}
-
-// code-gauge-allow functionCognitiveComplexity 16 -- Handles each kind of value the operation accepts.
-function trimmer(name: string, start: boolean, end: boolean): () => Member {
-  return generic(name, 3, (sema, call, type, [sliceArg, stripArg]) => {
-    const slice = constSlice(sema, sliceArg, type);
-    const strip = constSlice(sema, stripArg, type);
-    return computed(sliceOf(type, true), [slice, strip], call.span, ([value, values], frame) => {
-      const items = elements(value);
-      const set = elements(values);
-      const equal = comparisonBudget(sema, frame);
-      let from = 0;
-      let to = items.length;
-      if (start) while (from < to && set.some((each) => equal(each, items[from]))) from++;
-      if (end) while (to > from && set.some((each) => equal(each, items[to - 1]))) to--;
-      return slicePart(value, from, to - from);
+    const equality = comparisonOf(sema, type, call.span);
+    return computed(OPTIONAL_USIZE, [a, start, b], call.span, ([x, from, y], frame) => {
+      const spend = nativeBudget(sema, frame);
+      return optionalIndex(
+        compute(sequence(x, spend), from as bigint, sequence(y, spend, second === 'scalar'), equality(frame))
+      );
     });
   });
 }
 
-function slicePart(value: Value, start: number, length: number): Slice {
-  if (value instanceof Slice) return subSlice(value, start, length);
-  return newSlice(elements(value).slice(start, start + length));
+// code-gauge-allow functionCognitiveComplexity 16 -- Keeps the paired live trim bounds together.
+function trimmer(name: string, start: boolean, end: boolean): () => Member {
+  return generic(name, 3, (sema, call, type, [sliceArg, stripArg]) => {
+    const slice = constSlice(sema, sliceArg, type);
+    const strip = constSlice(sema, stripArg, type);
+    const equality = comparisonOf(sema, type, call.span);
+    return computed(sliceOf(type, true), [slice, strip], call.span, ([value, values], frame) => {
+      const spend = nativeBudget(sema, frame);
+      const items = sequence(value, spend),
+        set = sequence(values, spend);
+      const equal = equality(frame);
+      let from = 0n,
+        to = items.length;
+      if (start) while (from < to && set.some((each) => equal(each, items.get(from)))) from++;
+      if (end) while (to > from && set.some((each) => equal(each, items.get(to - 1n)))) to--;
+      return subSlice(value as Slice, from, to - from);
+    });
+  });
 }
 
 // Iterators -----------------------------------------------------------------------------------------------------------
@@ -211,11 +290,15 @@ function iteratorType(kind: 'split' | 'token', delimiter: DelimiterKind, child: 
       expectArgs(sema, call, 0, name);
       const mutable = name !== 'rest' && !(kind === 'split' && name === 'peek');
       const state = structReceiver(sema, call, created, mutable);
+      const equality =
+        name === 'reset' || (kind === 'split' && name === 'rest')
+          ? () => equalValues
+          : comparisonOf(sema, child, call.span);
       return runtime(
         returnType,
         (frame) => {
           frame.runtime.spend();
-          return run(state(frame), comparisonBudget(sema, frame), nativeBudget(sema, frame));
+          return run(state(frame), equality(frame), nativeBudget(sema, frame));
         },
         call.span
       );
@@ -349,6 +432,7 @@ const MEMBERS: Record<string, () => Member> = {
   eql: generic('std.mem.eql', 3, (sema, call, type, [a, b]) => {
     const left = constSlice(sema, a, type);
     const right = constSlice(sema, b, type);
+    const equality = comparisonOf(sema, type, call.span);
     return computed(BOOL, [left, right], call.span, ([x, y], frame) => {
       const a = x as Slice,
         b = y as Slice;
@@ -356,137 +440,101 @@ const MEMBERS: Record<string, () => Member> = {
       const first = storageLocation(a.target.slots, a.start),
         second = storageLocation(b.target.slots, b.start);
       if (type.kind !== 'float' && first.storage === second.storage && first.index === second.index) return true;
-      const equal = comparisonBudget(sema, frame);
+      const equal = equality(frame);
       for (let index = 0; index < a.length; index++) if (!equal(a.get(index), b.get(index))) return false;
       return true;
     });
   }),
   startsWith: sliceSearch('std.mem.startsWith', 'slice', BOOL, (haystack, needle, equal) =>
-    startsWith(haystack, needle as unknown as Value[], equal)
+    startsWith(haystack, needle, equal)
   ),
-  endsWith: sliceSearch('std.mem.endsWith', 'slice', BOOL, (haystack, needle, equal) => {
-    const values = needle as unknown as Value[];
-    return startsWith(haystack, values, equal, haystack.length - values.length) && values.length <= haystack.length;
-  }),
+  endsWith: sliceSearch('std.mem.endsWith', 'slice', BOOL, (haystack, needle, equal) =>
+    startsWith(haystack, needle, equal, haystack.length - needle.length)
+  ),
   indexOf: sliceSearch('std.mem.indexOf', 'slice', OPTIONAL_USIZE, (h, n, equal) =>
-    optionalIndex(findSequence(h, n as unknown as Value[], 0, equal))
+    optionalIndex(findSequence(h, n, 0n, equal))
   ),
   find: sliceSearch('std.mem.find', 'slice', OPTIONAL_USIZE, (h, n, equal) =>
-    optionalIndex(findSequence(h, n as unknown as Value[], 0, equal))
+    optionalIndex(findSequence(h, n, 0n, equal))
   ),
   lastIndexOf: sliceSearch('std.mem.lastIndexOf', 'slice', OPTIONAL_USIZE, (h, n, equal) =>
-    optionalIndex(findSequenceLast(h, n as unknown as Value[], equal))
+    optionalIndex(findSequenceLast(h, n, equal))
   ),
   findLast: sliceSearch('std.mem.findLast', 'slice', OPTIONAL_USIZE, (h, n, equal) =>
-    optionalIndex(findSequenceLast(h, n as unknown as Value[], equal))
+    optionalIndex(findSequenceLast(h, n, equal))
   ),
   indexOfScalar: sliceSearch('std.mem.indexOfScalar', 'scalar', OPTIONAL_USIZE, (h, v, equal) =>
-    optionalIndex(h.findIndex((x) => equal(x, v)))
+    optionalIndex(h.findFrom((x) => equal(x, v.get(0n))))
   ),
   findScalar: sliceSearch('std.mem.findScalar', 'scalar', OPTIONAL_USIZE, (h, v, equal) =>
-    optionalIndex(h.findIndex((x) => equal(x, v)))
+    optionalIndex(h.findFrom((x) => equal(x, v.get(0n))))
   ),
   lastIndexOfScalar: sliceSearch('std.mem.lastIndexOfScalar', 'scalar', OPTIONAL_USIZE, (h, v, equal) =>
-    optionalIndex(h.findLastIndex((x) => equal(x, v)))
+    optionalIndex(h.findLastIndex((x) => equal(x, v.get(0n))))
   ),
   findScalarLast: sliceSearch('std.mem.findScalarLast', 'scalar', OPTIONAL_USIZE, (h, v, equal) =>
-    optionalIndex(h.findLastIndex((x) => equal(x, v)))
+    optionalIndex(h.findLastIndex((x) => equal(x, v.get(0n))))
   ),
   indexOfAny: sliceSearch('std.mem.indexOfAny', 'slice', OPTIONAL_USIZE, (h, set, equal) =>
-    optionalIndex(h.findIndex((x) => (set as unknown as Value[]).some((y) => equal(x, y))))
+    optionalIndex(h.findFrom((x) => set.some((y) => equal(x, y))))
   ),
   findAny: sliceSearch('std.mem.findAny', 'slice', OPTIONAL_USIZE, (h, set, equal) =>
-    optionalIndex(h.findIndex((x) => (set as unknown as Value[]).some((y) => equal(x, y))))
+    optionalIndex(h.findFrom((x) => set.some((y) => equal(x, y))))
   ),
   lastIndexOfAny: sliceSearch('std.mem.lastIndexOfAny', 'slice', OPTIONAL_USIZE, (h, set, equal) =>
-    optionalIndex(h.findLastIndex((x) => (set as unknown as Value[]).some((y) => equal(x, y))))
+    optionalIndex(h.findLastIndex((x) => set.some((y) => equal(x, y))))
   ),
   findLastAny: sliceSearch('std.mem.findLastAny', 'slice', OPTIONAL_USIZE, (h, set, equal) =>
-    optionalIndex(h.findLastIndex((x) => (set as unknown as Value[]).some((y) => equal(x, y))))
+    optionalIndex(h.findLastIndex((x) => set.some((y) => equal(x, y))))
   ),
   indexOfNone: sliceSearch('std.mem.indexOfNone', 'slice', OPTIONAL_USIZE, (h, set, equal) =>
-    optionalIndex(h.findIndex((x) => !(set as unknown as Value[]).some((y) => equal(x, y))))
+    optionalIndex(h.findFrom((x) => !set.some((y) => equal(x, y))))
   ),
   findNone: sliceSearch('std.mem.findNone', 'slice', OPTIONAL_USIZE, (h, set, equal) =>
-    optionalIndex(h.findIndex((x) => !(set as unknown as Value[]).some((y) => equal(x, y))))
+    optionalIndex(h.findFrom((x) => !set.some((y) => equal(x, y))))
   ),
-  indexOfPos: positionSearch('std.mem.indexOfPos', 'slice', (h, start, n, equal) =>
-    findSequence(h, n as unknown as Value[], start, equal)
+  indexOfPos: positionSearch('std.mem.indexOfPos', 'slice', (h, start, n, equal) => findSequence(h, n, start, equal)),
+  findPos: positionSearch('std.mem.findPos', 'slice', (h, start, n, equal) => findSequence(h, n, start, equal)),
+  indexOfAnyPos: positionSearch('std.mem.indexOfAnyPos', 'slice', (h, start, set, equal) =>
+    h.findFrom((value) => set.some((other) => equal(value, other)), start)
   ),
-  findPos: positionSearch('std.mem.findPos', 'slice', (h, start, n, equal) =>
-    findSequence(h, n as unknown as Value[], start, equal)
+  findAnyPos: positionSearch('std.mem.findAnyPos', 'slice', (h, start, set, equal) =>
+    h.findFrom((value) => set.some((other) => equal(value, other)), start)
   ),
-  indexOfAnyPos: positionSearch('std.mem.indexOfAnyPos', 'slice', (h, start, set, equal) => {
-    for (let index = start; index < h.length; index++)
-      if ((set as unknown as Value[]).some((y) => equal(h[index], y))) return index;
-    return -1;
-  }),
-  findAnyPos: positionSearch('std.mem.findAnyPos', 'slice', (h, start, set, equal) => {
-    for (let index = start; index < h.length; index++)
-      if ((set as unknown as Value[]).some((y) => equal(h[index], y))) return index;
-    return -1;
-  }),
-  indexOfScalarPos: positionSearch('std.mem.indexOfScalarPos', 'scalar', (h, start, v, equal) => {
-    for (let index = start; index < h.length; index++) if (equal(h[index], v)) return index;
-    return -1;
-  }),
-  findScalarPos: positionSearch('std.mem.findScalarPos', 'scalar', (h, start, v, equal) => {
-    for (let index = start; index < h.length; index++) if (equal(h[index], v)) return index;
-    return -1;
-  }),
-  count: sliceSearch('std.mem.count', 'slice', USIZE, (h, n, equal) => {
-    const needle = n as unknown as Value[];
-    if (needle.length === 0) panic(PANIC.unreachable);
+  indexOfScalarPos: positionSearch('std.mem.indexOfScalarPos', 'scalar', (h, start, v, equal) =>
+    h.findFrom((value) => equal(value, v.get(0n)), start)
+  ),
+  findScalarPos: positionSearch('std.mem.findScalarPos', 'scalar', (h, start, v, equal) =>
+    h.findFrom((value) => equal(value, v.get(0n)), start)
+  ),
+  count: sliceSearch('std.mem.count', 'slice', USIZE, (h, needle, equal) => {
+    if (needle.length === 0n) panic(PANIC.unreachable);
     let found = 0n;
     for (
-      let index = findSequence(h, needle, 0, equal);
-      index !== -1;
+      let index = findSequence(h, needle, 0n, equal);
+      index !== undefined;
       index = findSequence(h, needle, index + needle.length, equal)
     )
       found++;
     return found;
   }),
   countScalar: sliceSearch('std.mem.countScalar', 'scalar', USIZE, (h, v, equal) =>
-    BigInt(h.filter((x) => equal(x, v)).length)
+    h.count((x) => equal(x, v.get(0n)))
   ),
-  // code-gauge-allow functionNcss 32 -- Keeps bounded substring search with argument analysis.
-  // code-gauge-allow functionCognitiveComplexity 25 -- Keeps bounded substring search with argument analysis.
   containsAtLeast: generic('std.mem.containsAtLeast', 4, (sema, call, type, [h, countArg, n]) => {
     const haystack = constSlice(sema, h, type);
     const [count] = compileArgs(sema, [countArg], [USIZE]);
     const needle = constSlice(sema, n, type);
-    return computed(BOOL, [haystack, count, needle], call.span, ([x, c, y], frame) => {
-      const values = elements(y);
-      if (values.length === 0) panic(PANIC.unreachable);
-      if (c === 0n) return true;
-      const items = elements(x);
-      const spend = (): void => {
-        if (frame) frame.runtime.spend();
-        else sema.spendCompilation();
-      };
-      let found = 0n;
-      for (let position = 0; position + values.length <= items.length;) {
-        let equal = true;
-        for (let offset = 0; offset < values.length; offset++) {
-          spend();
-          if (!equalValues(items[position + offset], values[offset])) {
-            equal = false;
-            break;
-          }
-        }
-        if (equal) {
-          found++;
-          if (found >= (c as bigint)) return true;
-          position += values.length;
-        } else position++;
-      }
-      return false;
+    const equality = comparisonOf(sema, type, call.span);
+    return computed(BOOL, [haystack, count, needle], call.span, ([x, minimum, y], frame) => {
+      const spend = nativeBudget(sema, frame);
+      return containsSequence(sequence(x, spend), sequence(y, spend), minimum as bigint, equality(frame));
     });
   }),
   trim: trimmer('std.mem.trim', true, true),
   trimStart: trimmer('std.mem.trimStart', true, false),
   trimEnd: trimmer('std.mem.trimEnd', false, true),
-  allEqual: sliceSearch('std.mem.allEqual', 'scalar', BOOL, (h, v, equal) => h.every((x) => equal(x, v))),
+  allEqual: sliceSearch('std.mem.allEqual', 'scalar', BOOL, (h, v, equal) => h.every((x) => equal(x, v.get(0n)))),
   lessThan: () => sliceOrder('std.mem.lessThan', true),
   order: () => sliceOrder('std.mem.order', false),
   max: generic('std.mem.max', 2, (sema, call, type, [sliceArg]) => {
@@ -527,10 +575,10 @@ const MEMBERS: Record<string, () => Member> = {
   indexOfDiff: () => diffMember('std.mem.indexOfDiff'),
   findDiff: () => diffMember('std.mem.findDiff'),
   lastIndexOfNone: sliceSearch('std.mem.lastIndexOfNone', 'slice', OPTIONAL_USIZE, (h, set, equal) =>
-    optionalIndex(h.findLastIndex((x) => !(set as unknown as Value[]).some((y) => equal(x, y))))
+    optionalIndex(h.findLastIndex((x) => !set.some((y) => equal(x, y))))
   ),
   findLastNone: sliceSearch('std.mem.findLastNone', 'slice', OPTIONAL_USIZE, (h, set, equal) =>
-    optionalIndex(h.findLastIndex((x) => !(set as unknown as Value[]).some((y) => equal(x, y))))
+    optionalIndex(h.findLastIndex((x) => !set.some((y) => equal(x, y))))
   ),
   containsAtLeastScalar: generic(
     'std.mem.containsAtLeastScalar',
@@ -539,16 +587,10 @@ const MEMBERS: Record<string, () => Member> = {
       const list = constSlice(sema, listArg, type);
       const element = sema.coerce(sema.compile(elementArg, type), type, elementArg);
       const minimum = sema.coerce(sema.compile(minArg, USIZE), USIZE, minArg);
-      return computed(BOOL, [list, element, minimum], call.span, ([value, x, n], frame) => {
-        const list = value as Slice;
-        let count = 0n;
-        const equal = comparisonBudget(sema, frame);
-        for (let index = 0; index < list.length; index++) {
-          if (equal(list.get(index), x)) count++;
-          if (count >= (n as bigint)) return true;
-        }
-        return false;
-      });
+      const equality = comparisonOf(sema, type, call.span);
+      return computed(BOOL, [list, element, minimum], call.span, ([value, x, n], frame) =>
+        containsScalar(sequence(value, nativeBudget(sema, frame)), x, n as bigint, equality(frame))
+      );
     }
   ),
   rotate: generic('std.mem.rotate', 3, (sema, call, type, [itemsArg, amountArg]) => {
@@ -597,9 +639,10 @@ const MEMBERS: Record<string, () => Member> = {
   replaceScalar: generic('std.mem.replaceScalar', 4, (sema, call, type, [sliceArg, matchArg, replacementArg]) => {
     const slice = mutableSlice(sema, sliceArg, type);
     const [match, replacement] = compileArgs(sema, [matchArg, replacementArg], [type, type]);
+    const equality = comparisonOf(sema, type, call.span);
     return computed(VOID, [slice, match, replacement], call.span, ([value, from, to], frame) => {
       const target = value as Slice;
-      const equal = comparisonBudget(sema, frame);
+      const equal = equality(frame);
       for (let index = 0; index < target.length; index++) if (equal(target.get(index), from)) target.set(index, to);
       return;
     });
@@ -608,21 +651,23 @@ const MEMBERS: Record<string, () => Member> = {
     const [input, needle, replacement] = [inputArg, needleArg, replacementArg].map((arg) =>
       constSlice(sema, arg, type)
     );
+    const equality = comparisonOf(sema, type, call.span);
     return computed(USIZE, [input, needle, replacement], call.span, ([x, n, r], frame) => {
-      const source = elements(x),
-        pattern = elements(n),
-        replace = elements(r);
-      const count = replacementCount(source, pattern, () => (frame ? frame.runtime.spend() : sema.spendCompilation()));
-      return BigInt(source.length + count * (replace.length - pattern.length));
+      const spend = nativeBudget(sema, frame);
+      const source = sequence(x, spend),
+        pattern = sequence(n, spend);
+      const count = replacementCount(source, pattern, equality(frame));
+      return source.length + count * ((r as Slice).lengthValue - pattern.length);
     });
   }),
-  // code-gauge-allow functionNcss 40 -- Implements sequential replacement, overlap and capacity checks together.
+  // code-gauge-allow functionNcss 42 -- Implements sequential replacement, overlap and capacity checks together.
   replace: generic('std.mem.replace', 5, (sema, call, type, [inputArg, needleArg, replacementArg, outputArg]) => {
     const [input, needle, replacement] = [inputArg, needleArg, replacementArg].map((arg) =>
       constSlice(sema, arg, type)
     );
     const output = mutableSlice(sema, outputArg, type);
     const cost = nativeTransferCost(sema, type, call.span);
+    const equality = comparisonOf(sema, type, call.span);
     return computed(USIZE, [input, needle, replacement, output], call.span, ([x, n, r, out], frame) => {
       const source = x as Slice,
         pattern = n as Slice,
@@ -633,6 +678,7 @@ const MEMBERS: Record<string, () => Member> = {
         if (frame) frame.runtime.spend(cost);
         else sema.spendCompilation(cost);
       };
+      const equal = equality(frame);
       let index = 0,
         written = 0,
         count = 0;
@@ -641,7 +687,7 @@ const MEMBERS: Record<string, () => Member> = {
         let matches = index + pattern.length <= source.length;
         for (let offset = 0; matches && offset < pattern.length; offset++) {
           spend();
-          matches = equalValues(source.get(index + offset), pattern.get(offset));
+          matches = equal(source.get(index + offset), pattern.get(offset));
         }
         if (matches) {
           if (written + replace.length > target.length) indexOutOfBounds(replace.length, target.length - written);
@@ -684,11 +730,18 @@ const MEMBERS: Record<string, () => Member> = {
       const [input, needle, replacement] = [inputArg, needleArg, replacementArg].map((arg) =>
         constSlice(sema, arg, type)
       );
+      const equality = comparisonOf(sema, type, call.span);
       return allocatingCall(
         sliceOf(type, false),
         [allocator, input, needle, replacement],
         call.span,
-        ([x, n, r], frame) => replacementPlan(elements(x), elements(n), elements(r), () => frame.runtime.spend())
+        ([x, n, r], frame) =>
+          replacementPlan(
+            sequence(x, () => frame.runtime.spend()),
+            sequence(n, () => frame.runtime.spend()),
+            sequence(r, () => frame.runtime.spend()),
+            equality(frame)
+          )
       );
     }
   ),
@@ -745,12 +798,13 @@ function cutMember(name: string, suffix: boolean): () => Member {
   return generic(name, 3, (sema, call, type, [sourceArg, needleArg]) => {
     const source = constSlice(sema, sourceArg, type);
     const needle = constSlice(sema, needleArg, type);
+    const equality = comparisonOf(sema, type, call.span);
     return computed(optionalOf(sliceOf(type, true)), [source, needle], call.span, ([value, pattern], frame) => {
       const input = value as Slice;
       const target = pattern as Slice;
       if (target.lengthValue > input.lengthValue) return NULL;
       const offset = suffix ? input.lengthValue - target.lengthValue : 0n;
-      const equal = comparisonBudget(sema, frame);
+      const equal = equality(frame);
       for (let index = 0n; index < target.lengthValue; index++)
         if (!equal(input.get(Number(offset + index)), target.get(Number(index)))) return NULL;
       return new Slice(
@@ -857,45 +911,45 @@ function copier(name: string): () => Member {
 }
 
 function replacementCount(
-  input: Value[],
-  needle: Value[],
-  spend: () => void,
-  onMatch?: (position: number) => void
-): number {
-  if (needle.length === 0) panic(PANIC.unreachable);
-  let count = 0;
-  for (let index = 0; index < input.length;) {
-    spend();
-    let matches = index + needle.length <= input.length;
-    for (let offset = 0; matches && offset < needle.length; offset++) {
-      spend();
-      matches = equalValues(input[index + offset], needle[offset]);
-    }
-    if (matches) {
-      count++;
-      onMatch?.(index);
-      index += needle.length;
-    } else index++;
+  input: Sequence,
+  needle: Sequence,
+  equal: typeof equalValues,
+  onMatch?: (position: bigint) => void
+): bigint {
+  if (needle.length === 0n) panic(PANIC.unreachable);
+  let count = 0n;
+  for (
+    let index = findSequence(input, needle, 0n, equal);
+    index !== undefined;
+    index = findSequence(input, needle, index + needle.length, equal)
+  ) {
+    count++;
+    onMatch?.(index);
   }
   return count;
 }
 
-function replacementPlan(input: Value[], needle: Value[], replacement: Value[], spend: () => void): AllocationPlan {
-  const positions: number[] = [];
-  const count = replacementCount(input, needle, spend, (position) => positions.push(position));
+function replacementPlan(
+  input: Sequence,
+  needle: Sequence,
+  replacement: Sequence,
+  equal: typeof equalValues
+): AllocationPlan {
+  const positions: bigint[] = [];
+  const count = replacementCount(input, needle, equal, (position) => positions.push(position));
   const length = input.length + count * (replacement.length - needle.length);
   return {
-    length,
+    length: Number(length),
     build: () => {
       const values: Value[] = [];
-      let cursor = 0,
+      let cursor = 0n,
         match = 0;
       while (cursor < input.length) {
         if (cursor === positions[match]) {
-          for (const value of replacement) values.push(value);
+          for (let offset = 0n; offset < replacement.length; offset++) values.push(replacement.get(offset));
           cursor += needle.length;
           match++;
-        } else values.push(input[cursor++]);
+        } else values.push(input.get(cursor++));
       }
       return values;
     },
@@ -1001,12 +1055,14 @@ function cutter(name: string, needleKind: 'slice' | 'scalar', last: boolean): Me
         ? constSlice(sema, needleArg, type)
         : sema.coerce(sema.compile(needleArg, type), type, needleArg);
     const slice = sliceOf(type, true);
+    const equality = comparisonOf(sema, type, call.span);
     return computed(optionalOf(tupleOf(sema, [slice, slice])), [haystack, needle], call.span, ([h, n], frame) => {
-      const items = elements(h);
-      const pattern = needleKind === 'slice' ? elements(n) : [n];
-      const equal = comparisonBudget(sema, frame);
-      const index = last ? findSequenceLast(items, pattern, equal) : findSequence(items, pattern, 0, equal);
-      if (index < 0) return NULL;
+      const spend = nativeBudget(sema, frame);
+      const items = sequence(h, spend);
+      const pattern = sequence(n, spend, needleKind === 'scalar');
+      const equal = equality(frame);
+      const index = last ? findSequenceLast(items, pattern, equal) : findSequence(items, pattern, 0n, equal);
+      if (index === undefined) return NULL;
       const whole = h as Slice;
       return new ZStruct([
         subSlice(whole, 0, index),
@@ -1021,11 +1077,12 @@ function diffMember(name: string): Member {
   return generic(name, 3, (sema, call, type, [aArg, bArg]) => {
     const a = constSlice(sema, aArg, type);
     const b = constSlice(sema, bArg, type);
+    const equality = comparisonOf(sema, type, call.span);
     return computed(OPTIONAL_USIZE, [a, b], call.span, ([x, y], frame) => {
       const xs = x as Slice;
       const ys = y as Slice;
       const shorter = xs.lengthValue < ys.lengthValue ? xs.lengthValue : ys.lengthValue;
-      const equal = comparisonBudget(sema, frame);
+      const equal = equality(frame);
       for (let index = 0n; index < shorter; index++)
         if (!equal(xs.get(Number(index)), ys.get(Number(index)))) return index;
       return xs.lengthValue === ys.lengthValue ? NULL : shorter;

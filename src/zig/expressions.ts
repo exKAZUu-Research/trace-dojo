@@ -1022,13 +1022,13 @@ export abstract class ExpressionCompiler extends SemaBase {
       left = this.coerce(left, type, expression.left);
       right = this.coerce(right, type, expression.right);
     }
-    const compare = this.comparator(type, ordered, expression);
+    const compare = this.valueComparator(type, ordered, expression);
     const test = comparisonTest(operator);
     return this.combine([left, right], BOOL, ([a, b]) => test(compare(a, b)), expression);
   }
 
   /** A function comparing two values of a type: negative, zero, or positive, or NaN when unordered. */
-  private comparator(type: Type, ordered: boolean, span: Span): (a: Value, b: Value) => number {
+  valueComparator(type: Type, ordered: boolean, span: Span): (a: Value, b: Value) => number {
     switch (type.kind) {
       case 'int':
       case 'comptime_int':
@@ -1039,6 +1039,10 @@ export abstract class ExpressionCompiler extends SemaBase {
       case 'float':
       case 'comptime_float': {
         return (a, b) => compareFloats(a as AnyFloat, b as AnyFloat) ?? Number.NaN;
+      }
+      case 'void': {
+        if (ordered) this.error(span, 'void の値は、大小を比べられません。');
+        return () => 0;
       }
       case 'bool': {
         if (ordered) this.error(span, 'bool の値は、大小を比べられません。');
@@ -1063,7 +1067,7 @@ export abstract class ExpressionCompiler extends SemaBase {
       }
       case 'optional': {
         if (ordered) this.error(span, `${typeName(type)} 型の値は、大小を比べられません。`);
-        const compareChild = this.comparator(type.child, false, span);
+        const compareChild = this.valueComparator(type.child, false, span);
         return (a, b) =>
           a === NULL || b === NULL ? (a === b ? 0 : 1) : compareChild(optionalPayload(a), optionalPayload(b));
       }

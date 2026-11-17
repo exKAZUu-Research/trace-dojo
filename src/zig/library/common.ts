@@ -114,8 +114,8 @@ export function orderValue(comparison: number): bigint {
 
 export const OPTIONAL_USIZE = optionalOf(USIZE);
 
-export function optionalIndex(index: number): Value {
-  return index < 0 ? NULL : BigInt(index);
+export function optionalIndex(index: number | bigint | undefined): Value {
+  return index === undefined || index < 0 ? NULL : BigInt(index);
 }
 
 /** Calls a native function, evaluating at compilation only when its return type requires it. */

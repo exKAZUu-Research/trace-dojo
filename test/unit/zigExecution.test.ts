@@ -4492,3 +4492,72 @@ test('known signed nonnegative shift counts coerce by value', () => {
     )
   ).toMatchObject({ kind: 'executed', stderr: '2', uncaughtException: undefined });
 });
+test.each(['find', 'findLast', 'indexOf', 'lastIndexOf', 'startsWith', 'endsWith', 'cut', 'cutLast'])(
+  'empty memory searches inspect only view metadata: %s',
+  (method) => {
+    const expression =
+      method === 'cut' || method === 'cutLast'
+        ? `result.?[1].len==${method === 'cutLast' ? 0 : 18_446_744_073_709_551_615n}`
+        : method === 'startsWith' || method === 'endsWith'
+          ? 'result'
+          : method === 'findLast' || method === 'lastIndexOf'
+            ? 'result.?==18446744073709551615'
+            : 'result.?==0';
+    const source = `const std=@import("std");pub fn main(init:std.process.Init)!void{var list:std.ArrayList(void)=.empty;try list.append(init.gpa,{});const result=std.mem.${method}(void,list.allocatedSlice(),&[_]void{});std.debug.print("{}",.{${expression}});}`;
+    expect(executeProgram('zig', source)).toMatchObject({
+      kind: 'executed',
+      stderr: 'true',
+      uncaughtException: undefined,
+    });
+  }
+);
+
+test.each(['findScalar', 'findScalarLast', 'countScalar', 'allEqual'])(
+  'live scalar searches meter every visited element: %s',
+  (method) => {
+    const source = `const std=@import("std");pub fn main()void{const a:[300000]u8=@splat(0);for(0..4)|_|{_=std.mem.${method}(u8,&a,${method === 'allEqual' ? 0 : 1});}}`;
+    expect(executeProgram('zig', source)).toMatchObject({ kind: 'limitExceeded', limit: 'operations' });
+  }
+);
+
+test('memory search positions retain exact indices near the usize boundary', () => {
+  const source = `const std=@import("std");pub fn main(init:std.process.Init)!void{var list:std.ArrayList(void)=.empty;try list.append(init.gpa,{});std.debug.print("{} {}",.{std.mem.findScalarPos(void,list.allocatedSlice(),18446744073709551614,{}).?,std.mem.findPos(void,list.allocatedSlice(),18446744073709551614,&[_]void{}).?});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: '18446744073709551614 18446744073709551614',
+    uncaughtException: undefined,
+  });
+});
+
+test('containsAtLeast preserves scalar delegation at zero threshold', () => {
+  const source = `const std=@import("std");pub fn main()void{std.debug.print("{} {} {} {}",.{std.mem.containsAtLeast(u8,"",0,"a"),std.mem.containsAtLeast(u8,"",0,"ab"),std.mem.containsAtLeast(u8,"b",0,"a"),std.mem.containsAtLeast(u8,"aba",2,"a")});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: 'false true true true',
+    uncaughtException: undefined,
+  });
+});
+
+test.each([
+  'eql(S,&a,&a)',
+  'find(S,&a,&a)',
+  'countScalar(S,&a,.{})',
+  'startsWith(S,&a,&a)',
+  'cutPrefix(S,&a,&a)',
+  'containsAtLeast(S,&a,0,&a)',
+  'trim(S,&a,&a)',
+  'replaceScalar(S,&a,.{},.{})',
+  'findDiff(S,&a,&a)',
+])('memory equality validates the element domain before shortcuts: %s', (call) => {
+  const source = `const std=@import("std");const S=struct{};pub fn main()void{var a=[_]S{.{}};_=&a;_=std.mem.${call};}`;
+  expect(executeProgram('zig', source)).toMatchObject({ kind: 'compileError' });
+});
+
+test('memory equality uses nested optional payload semantics', () => {
+  const source = `const std=@import("std");pub fn main()void{const a=[_]??u8{@as(?u8,3),null};const b=[_]??u8{@as(?u8,3),null};const c=[_]??u8{@as(?u8,4),null};std.debug.print("{} {} {}",.{std.mem.eql(??u8,&a,&b),std.mem.eql(??u8,&a,&c),std.mem.countScalar(??u8,&a,@as(?u8,3))});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: 'true false 1',
+    uncaughtException: undefined,
+  });
+});
