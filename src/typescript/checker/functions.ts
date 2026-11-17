@@ -507,7 +507,8 @@ export class FunctionChecker {
           (identifier, bound) => {
             const symbol = this.c.scopeOf(identifier).lookupValue(identifier.text);
             if (symbol) this.c.flow.set(`s${symbol.id}`, { type: bound, assigned: true });
-          }
+          },
+          parameter.childForFieldName('type') !== null
         );
       }
     });
@@ -517,9 +518,9 @@ export class FunctionChecker {
     const value = parameter.childForFieldName('value');
     const annotation = this.c.typeNodes.annotationType(parameter.childForFieldName('type'));
     if (!value) return;
-    const valueType = this.c.expressions.check(value, annotation);
-    if (annotation)
-      this.c.expressions.checkAssignable(parameter.childForFieldName('pattern') ?? value, valueType, annotation);
+    const pattern = parameter.childForFieldName('pattern') ?? parameter;
+    const valueType = this.c.expressions.check(value, annotation ?? this.c.patterns.impliedType(pattern));
+    if (annotation) this.c.expressions.checkAssignable(pattern, valueType, annotation);
   }
 
   /** Reports a required parameter after one marked `?`, which callers could not omit. */

@@ -1,6 +1,7 @@
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import type { Checker } from './checker';
+import { defaultedTarget } from './patterns';
 import type { Sym } from './scopes';
 import { arrayPatternElements, named, skipParentheses } from './syntax';
 import {
@@ -32,7 +33,10 @@ export class AssignmentChecker {
       leftExpression.type === 'object' ||
       leftExpression.type === 'array'
     ) {
-      const valueType = this.c.expressions.check(right);
+      const valueType = this.c.expressions.check(
+        right,
+        this.c.silently(() => this.patternContext(leftExpression))
+      );
       this.destructuringAssignment(leftExpression, valueType);
       return valueType;
     }
@@ -47,6 +51,14 @@ export class AssignmentChecker {
     if (targetType !== errorType) this.c.expressions.checkAssignable(leftExpression, valueType, targetType);
     this.assignReference(leftExpression, targetType, valueType);
     return valueType;
+  }
+
+  /** The type the targets of an assignment pattern imply for its right side, so that a literal there takes their types. */
+  private patternContext(pattern: TreeNode): Type | undefined {
+    return this.c.patterns.impliedType(pattern, (element) => {
+      const declared = this.targetType(defaultedTarget(element) ?? element, false);
+      return declared === errorType ? anyType : declared;
+    });
   }
 
   private isEvolvingArrayAssignment(target: TreeNode): boolean {
@@ -117,8 +129,8 @@ export class AssignmentChecker {
 
   destructuringAssignment(pattern: TreeNode, type: Type): void {
     const assign = (target: TreeNode, valueType: Type): void => {
-      if (['assignment_expression', 'assignment_pattern', 'object_assignment_pattern'].includes(target.type)) {
-        const left = target.childForFieldName('left') as TreeNode;
+      const left = defaultedTarget(target);
+      if (left) {
         const right = target.childForFieldName('right') as TreeNode;
         const defaultType = this.c.expressions.check(right);
         assign(left, unionOf([this.c.relations.removeUndefined(valueType), regularOf(defaultType)]));
@@ -136,7 +148,7 @@ export class AssignmentChecker {
     if (pattern.type === 'array' || pattern.type === 'array_pattern') {
       for (const { element, index } of arrayPatternElements(pattern)) {
         if (element.type === 'spread_element' || element.type === 'rest_pattern') {
-          assign(named(element)[0], this.c.patterns.restOfIterable(type, index));
+          assign(named(element)[0], this.c.patterns.restOfIterable(pattern, type, index));
           break;
         }
         const elementType = this.c.patterns.elementAt(element, type, index);
@@ -164,15 +176,14 @@ export class AssignmentChecker {
         case 'object_assignment_pattern': {
           const left = element.childForFieldName('left') as TreeNode;
           used.push(left.text);
-          assign(element, this.c.patterns.destructuredProperty(left, type, left.text, true));
+          assign(element, this.c.patterns.destructuredProperty(left, type, left.text));
           break;
         }
         case 'pair':
         case 'pair_pattern': {
           const key = element.childForFieldName('key') as TreeNode;
           const value = element.childForFieldName('value') as TreeNode;
-          const hasDefault = ['assignment_expression', 'assignment_pattern'].includes(value.type);
-          const selected = this.c.patterns.destructuredKey(key, type, hasDefault);
+          const selected = this.c.patterns.destructuredKey(key, type);
           used.push(...(selected.names ?? []));
           assign(value, selected.type);
           break;

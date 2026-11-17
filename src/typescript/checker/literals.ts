@@ -171,6 +171,7 @@ export class LiteralChecker {
     };
     for (const member of named(node)) this.declareObjectMember(literal, member);
     for (const member of named(node)) this.objectMember(literal, member);
+    if (contextual) this.addPatternDefaults(properties, contextual);
     const { object, genericSpreads, alternatives } = literal;
     if (alternatives) {
       const variants = alternatives.map((alternative) => {
@@ -191,6 +192,16 @@ export class LiteralChecker {
     const fresh: ObjectType = { ...object, id: object.id, fresh: true, regular: object };
     if (genericSpreads.length > 0) return intersectionOf([...genericSpreads, object], this.c.budget);
     return fresh;
+  }
+
+  /** Gives an object literal a binding pattern takes apart the properties the pattern has defaults for. */
+  private addPatternDefaults(properties: Map<string, Property>, contextual: Type): void {
+    for (const member of contextual.kind === 'union' ? contextual.types : [contextual]) {
+      if (!this.c.patterns.impliedTypes.has(member)) continue;
+      for (const [name, property] of this.c.structureOf(member).properties) {
+        if (property.optional && !properties.has(name)) properties.set(name, property);
+      }
+    }
   }
 
   // code-gauge-allow functionCognitiveComplexity 19 -- Builds the complete receiver shape from named members, accessor pairs, and spreads before checking their bodies.

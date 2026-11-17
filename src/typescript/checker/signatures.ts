@@ -85,7 +85,9 @@ export class Signatures {
       contextualParameter ??
       this.setterParameterType(node) ??
       (value
-        ? this.c.expressions.widenedTypeOfInitializer(value)
+        ? this.c.silently(() =>
+            this.c.literals.widenDeclared(this.c.expressions.check(value, this.c.patterns.impliedType(pattern)), false)
+          )
         : this.c.expressions.implicitParameterType(parameterNode, pattern, rest));
     return {
       name: rest ? (named(pattern)[0]?.text ?? 'args') : pattern.type === 'identifier' ? pattern.text : `__${index}`,

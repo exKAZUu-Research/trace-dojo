@@ -4,7 +4,7 @@ import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 import type { Checker } from './checker';
 import { FlowState, type State } from './flow';
 import type { Scope, Sym } from './scopes';
-import { arrayPatternElements, hasToken, isNumericName, named, skipParentheses } from './syntax';
+import { hasToken, isNumericName, named, skipParentheses } from './syntax';
 import {
   anyType,
   errorType,
@@ -303,29 +303,22 @@ export class StatementChecker {
     const value = declarator.childForFieldName('value');
     const annotation = this.c.typeNodes.annotationType(declarator.childForFieldName('type'));
     const valueType = value
-      ? this.c.expressions.check(value, annotation ?? this.arrayPatternContext(pattern))
+      ? this.c.expressions.check(value, annotation ?? this.c.patterns.impliedType(pattern))
       : (annotation ?? anyType);
     if (annotation && value) this.c.expressions.checkAssignable(pattern, valueType, annotation);
     const sourceType = annotation ?? this.c.literals.widenDeclared(valueType, false);
     if (isConst) this.c.patterns.correlatedSources.set(pattern.id, sourceType);
-    this.c.patterns.bindPattern(pattern, sourceType, (identifier, type) => {
-      const symbol = this.c.scopeOf(identifier).lookupValue(identifier.text);
-      if (!symbol) return;
-      const declared = this.c.literals.widenDeclared(type, isConst);
-      this.c.expressions.setVariableType(symbol, declared);
-      this.c.flow.set(`s${symbol.id}`, { type: declared, assigned: true });
-    });
-  }
-
-  /** The tuple an array pattern implies for the array literal it takes apart, so that each element keeps its type. */
-  private arrayPatternContext(pattern: TreeNode): Type | undefined {
-    if (pattern.type !== 'array_pattern') return undefined;
-    return this.c.tupleType(
-      arrayPatternElements(pattern).map(({ element }) =>
-        element.type === 'rest_pattern'
-          ? { type: this.c.arrayType(anyType), optional: false, rest: true }
-          : { type: anyType, optional: false, rest: false }
-      )
+    this.c.patterns.bindPattern(
+      pattern,
+      sourceType,
+      (identifier, type) => {
+        const symbol = this.c.scopeOf(identifier).lookupValue(identifier.text);
+        if (!symbol) return;
+        const declared = this.c.literals.widenDeclared(type, isConst);
+        this.c.expressions.setVariableType(symbol, declared);
+        this.c.flow.set(`s${symbol.id}`, { type: declared, assigned: true });
+      },
+      annotation !== undefined
     );
   }
 
@@ -355,7 +348,10 @@ export class StatementChecker {
       }
     }
     const source =
-      annotation ?? (value ? this.c.literals.widenDeclared(this.c.expressions.check(value), false) : anyType);
+      annotation ??
+      (value
+        ? this.c.literals.widenDeclared(this.c.expressions.check(value, this.c.patterns.impliedType(nameNode)), false)
+        : anyType);
     return this.c.literals.widenDeclared(this.c.patterns.patternType(nameNode, source, symbol.name), isConst);
   }
 
@@ -364,7 +360,7 @@ export class StatementChecker {
     const right = header.childForFieldName('right') as TreeNode;
     const left = header.childForFieldName('left') as TreeNode;
     const isOf = header.childForFieldName('operator')?.text === 'of';
-    const rightType = this.c.expressions.check(right);
+    const rightType = this.c.expressions.check(right, isOf ? this.iterableContext(left) : undefined);
     const elementType = isOf ? this.c.patterns.iteratedType(undefined, rightType) : stringType;
     if (left.type === 'identifier') return elementType;
     return this.c.patterns.patternType(left, elementType, symbol.name);
@@ -544,7 +540,7 @@ export class StatementChecker {
     const right = header.childForFieldName('right') as TreeNode;
     const isOf = header.childForFieldName('operator')?.text === 'of';
     const kind = header.childForFieldName('kind')?.text;
-    const rightType = this.c.expressions.check(right);
+    const rightType = this.c.expressions.check(right, isOf ? this.iterableContext(left) : undefined);
     const elementType = isOf ? this.c.patterns.iteratedType(right, rightType) : this.forInKeyType(right, rightType);
     const body = node.childForFieldName('body') as TreeNode;
     this.loop(node, (target) => {
@@ -555,6 +551,12 @@ export class StatementChecker {
       this.c.flow.current = this.c.flow.merge([this.c.flow.current, ...target.continues]);
       return this.c.flow.merge([head, this.c.flow.current]);
     });
+  }
+
+  /** The array a `for...of` loop's pattern implies for an array literal it iterates. */
+  private iterableContext(left: TreeNode): Type | undefined {
+    const implied = this.c.patterns.impliedType(left);
+    return implied && this.c.arrayType(implied);
   }
 
   /** The type of the keys a `for...in` loop takes, reporting an object that is a primitive. */
