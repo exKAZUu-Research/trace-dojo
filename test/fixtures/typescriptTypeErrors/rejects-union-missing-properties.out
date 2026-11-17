@@ -1,0 +1,6 @@
+(1,43): error TS2339: Property 'toFixed' does not exist on type 'string | number'.
+  Property 'toFixed' does not exist on type 'string'.
+(2,66): error TS2339: Property 'widht' does not exist on type '{ width: number; } | { height: number; }'.
+  Property 'widht' does not exist on type '{ width: number; }'.
+(3,43): error TS2339: Property 'toUppercase' does not exist on type 'string | number'.
+  Property 'toUppercase' does not exist on type 'string'.

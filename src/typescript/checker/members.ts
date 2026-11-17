@@ -236,6 +236,11 @@ export class MemberChecker {
     if (propertyNode.type === 'private_property_identifier')
       return this.c.classes.privateNameAccess(node, propertyNode, objectType);
     if (objectType.kind === 'union') {
+      // TypeScript reports a property some member lacks once, on the whole union, without suggesting another name.
+      if (objectType.types.some((member) => this.lacksProperty(member, name))) {
+        this.c.error(propertyNode, `プロパティ '${name}' は型 '${this.c.print(objectType)}' にありません。`);
+        return errorType;
+      }
       return unionOf(
         objectType.types.map((member) => this.propertyAccess(node, objectNode, propertyNode, member, name)),
         true
@@ -327,6 +332,15 @@ export class MemberChecker {
     if (isNumericName(name) && structure.numberIndex) return structure.numberIndex.type;
     if (structure.stringIndex) return structure.stringIndex.type;
     return undefined;
+  }
+
+  private lacksProperty(member: Type, name: string): boolean {
+    return (
+      !isAnyLike(member) &&
+      member.kind !== 'union' &&
+      !this.c.propertyOf(member, name) &&
+      !this.indexSignatureType(member, name)
+    );
   }
 
   private reportMissingProperty(node: TreeNode, name: string, type: Type): void {
