@@ -1,0 +1,11 @@
+class Base { protected value = 1; }
+class Derived extends Base { public value = 2; }
+const a: Derived = new Base();
+const b: { value: number } = new Derived();
+const c: { value: number } = new Base();
+class Other { protected value = 3; }
+const d: Base = new Other();
+const e: Base = { value: 1 };
+class Sub extends Base { protected value = 5; }
+const f: Base = new Sub();
+const g: Sub = new Base();

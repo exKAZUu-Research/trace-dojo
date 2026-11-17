@@ -1,0 +1,10 @@
+(3,7): error TS2322: Type 'Base' is not assignable to type 'Derived'.
+  Property 'value' is protected in type 'Base' but public in type 'Derived'.
+(5,7): error TS2322: Type 'Base' is not assignable to type '{ value: number; }'.
+  Property 'value' is protected in type 'Base' but public in type '{ value: number; }'.
+(7,7): error TS2322: Type 'Other' is not assignable to type 'Base'.
+  Property 'value' is protected but type 'Other' is not a class derived from 'Base'.
+(8,7): error TS2322: Type '{ value: number; }' is not assignable to type 'Base'.
+  Property 'value' is protected but type '{ value: number; }' is not a class derived from 'Base'.
+(11,7): error TS2322: Type 'Base' is not assignable to type 'Sub'.
+  Property 'value' is protected but type 'Base' is not a class derived from 'Sub'.

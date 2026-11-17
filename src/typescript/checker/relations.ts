@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 671 -- Decides assignability and comparability for every kind of type, as TypeScript's checker does in one place.
+// code-gauge-allow-file fileNcss 674 -- Decides assignability and comparability for every kind of type, as TypeScript's checker does in one place.
 import type { Checker } from './checker';
 import { isUnit } from './flow';
 import { childTypes, isGenericObjectOrIndexType } from './genericTypes';
@@ -718,10 +718,12 @@ export class Relations {
     if (target.visibility === 'private' || source.visibility === 'private') {
       // A private member is compatible only with itself.
       if (source.declaration?.id !== target.declaration?.id) return false;
-    } else if (target.visibility === 'protected' || source.visibility === 'protected') {
-      // A protected member is compatible with one a derived class redeclares.
-      if (source.visibility !== target.visibility || !source.declaringClass || !target.declaringClass) return false;
+    } else if (target.visibility === 'protected') {
+      // A protected member is compatible with one its class or a derived class declares, at either visibility.
+      if (!source.declaringClass || !target.declaringClass) return false;
       if (!this.c.classes.derivesFrom(source.declaringClass, target.declaringClass)) return false;
+    } else if (source.visibility === 'protected') {
+      return false;
     }
     if (source.optional && !target.optional && relation === 'assignable') return false;
     const sourceType = source.type();
