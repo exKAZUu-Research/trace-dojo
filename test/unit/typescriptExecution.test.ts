@@ -104,6 +104,18 @@ console.log(add, add.name, '%d', typeof A);`;
   );
 });
 
+test('a function turned into text through any or an array ends the program as unsupported where it runs', () => {
+  const message = '関数やクラスの文字列への変換は、この採点環境では使えません。';
+  expect(executeProgram('typescript', 'const f: any = () => 1;\nconsole.log(String(f));')).toEqual({
+    kind: 'compileError',
+    diagnostics: [{ row: 1, message }],
+  });
+  expect(executeProgram('typescript', 'function g() {}\nconsole.log([g].join());')).toEqual({
+    kind: 'compileError',
+    diagnostics: [{ row: 1, message }],
+  });
+});
+
 test('Node.js names are unknown, as the reference tsc has no Node.js types', () => {
   expect(diagnosticsOf('process.exit(0);')).toEqual([
     '1: 名前 process が見つかりません。Node.js の機能は、この採点環境では使えません。',

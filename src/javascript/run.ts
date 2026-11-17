@@ -27,6 +27,8 @@ export function executeParsedProgram(parse: () => Program, input?: ProgramInput)
     return { kind: 'executed', ...runProgram(new Runtime(input), program) };
   } catch (error) {
     if (error instanceof ExecutionLimitError) return { kind: 'limitExceeded', limit: error.limit };
+    // A program can reach what is unavailable only as it runs, as turning a function reached through `any` into text.
+    if (error instanceof CompileError) return { kind: 'compileError', diagnostics: error.diagnostics };
     throw error;
   }
 }
@@ -38,6 +40,7 @@ export function executeParsedProgram(parse: () => Program, input?: ProgramInput)
  */
 // code-gauge-allow duplicateLines 20 -- Each language's runner wraps its own runtime and collects the same output contract.
 export function runProgram(runtime: Runtime, program: Program, onEnd?: (scope: Scope) => void): ProgramRun {
+  runtime.rejectsFunctionText = program.rejectsFunctionText ?? false;
   const scope = new Scope(runtime.realm.globals, {
     // A CommonJS script's `this` is its empty `module.exports`.
     thisValue: program.isStrict ? undefined : runtime.newObject(),

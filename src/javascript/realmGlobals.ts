@@ -184,9 +184,7 @@ function defineFunction(builder: RealmBuilder): void {
   builder.method(functionPrototype, 'toString', 0, ({ runtime, thisValue }) => {
     if (!(thisValue instanceof JsFunction))
       return runtime.throwError('TypeError', 'Function.prototype.toString requires a function');
-    const { behavior } = thisValue;
-    if (behavior.kind === 'native') return `function ${runtime.functionName(thisValue)}() { [native code] }`;
-    return behavior.node.source;
+    return runtime.functionSource(thisValue);
   });
 }
 

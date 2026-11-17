@@ -1,4 +1,5 @@
-// code-gauge-allow-file fileNcss 676 -- One runtime of the JavaScript interpreter, whose state its builtins and evaluator share.
+// code-gauge-allow-file fileNcss 684 -- One runtime of the JavaScript interpreter, whose state its builtins and evaluator share.
+import { CompileError } from '../interpreter/diagnostics';
 import { ExecutionBudget, LIMITS } from '../interpreter/limits';
 import { type ProgramInput, ProgramIO } from '../interpreter/programIo';
 import { StepTracker } from '../interpreter/stepTracker';
@@ -75,6 +76,8 @@ export class Runtime {
    * own functions count as called.
    */
   currentRow: number | undefined;
+  /** Set from the program: whether turning a function into text ends it as unavailable. */
+  rejectsFunctionText = false;
   readonly steps = new StepTracker();
   readonly evaluator: Evaluator;
   private allocatedSlots = 0;
@@ -270,17 +273,27 @@ export class Runtime {
   }
 
   /** How V8 names an object in the TypeError of a refused write: by its source, its class, or its tag. */
+  /**
+   * The text of a function as `Function.prototype.toString` gives it; a program that rejects it ends with a compile
+   * error on the row that asked for it.
+   */
+  functionSource(fn: JsFunction): string {
+    const { behavior } = fn;
+    if (behavior.kind === 'native') return `function ${this.functionName(fn)}() { [native code] }`;
+    if (this.rejectsFunctionText) {
+      throw new CompileError([
+        { row: this.currentRow ?? 0, message: '関数やクラスの文字列への変換は、この採点環境では使えません。' },
+      ]);
+    }
+    return behavior.node.source;
+  }
+
   receiverText(target: JsObject): string {
     if (target instanceof JsArray) return '[object Array]';
     if (target.regexp) return '[object RegExp]';
     // A builtin iterator has no constructor of its own, so V8 names it by its tag.
     if (target.hostIterator) return `[object ${this.toString(this.get(target, WELL_KNOWN_SYMBOLS.toStringTag))}]`;
-    if (target instanceof JsFunction) {
-      const { behavior } = target;
-      return behavior.kind === 'native'
-        ? `function ${this.functionName(target)}() { [native code] }`
-        : behavior.node.source;
-    }
+    if (target instanceof JsFunction) return this.functionSource(target);
     const constructor = this.findProperty(target, 'constructor');
     const name =
       constructor && !isAccessor(constructor) && constructor.value instanceof JsFunction

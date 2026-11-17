@@ -1,4 +1,5 @@
 import type { TraceOptions } from '../interpreter/traceAnnotations';
+import type { Program } from '../javascript/ast';
 import type { Node } from '../javascript/convertNodes';
 import { ProgramConverter } from '../javascript/programConverter';
 import { PARAMETER_PROPERTY_ASSIGNMENT } from './jsView';
@@ -33,5 +34,9 @@ export class TypeScriptProgramConverter extends ProgramConverter {
         row,
       };
     };
+  }
+
+  override convert(root: Node): Program {
+    return { ...super.convert(root), rejectsFunctionText: true };
   }
 }
