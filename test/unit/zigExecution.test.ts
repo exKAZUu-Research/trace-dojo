@@ -4748,3 +4748,92 @@ test('comptime integer logarithms use exact integer evaluation', () => {
     uncaughtException: undefined,
   });
 });
+
+test.each(['if(get()) |_| @as(i8,1) else |_| unreachable', '@as(i8,if(get()) |_| 1 else |_| unreachable)'])(
+  'saturating counts preserve static facts and evaluation effects: %s',
+  (count) => {
+    const source = `const std=@import("std");fn get()error{}!u8{std.debug.print("c",.{});return 1;}pub fn main()void{var x:u8=1;_=&x;std.debug.print("{}",.{x<<|(${count})});}`;
+    expect(executeProgram('zig', source)).toMatchObject({
+      kind: 'executed',
+      stderr: 'c2',
+      uncaughtException: undefined,
+    });
+  }
+);
+
+test.each(['u8', 'u16'])('pointer-only array loops do not read undefined storage: %s', (type) => {
+  const source = `const std=@import("std");pub fn main()void{const p:*[2]${type}=undefined;var count:usize=0;for(p)|*item|{_=item;count+=1;}std.debug.print("{}",.{count});}`;
+  expect(executeProgram('zig', source)).toMatchObject({ kind: 'executed', stderr: '2', uncaughtException: undefined });
+  expect(executeProgram('zig', `pub fn main()void{const p:*[2]${type}=undefined;for(p)|item|{_=item;}}`)).toMatchObject(
+    { kind: 'compileError' }
+  );
+});
+
+test.each([
+  ['void', '{}'],
+  ['u0', '0'],
+  ['struct{}', '.{}'],
+  ['[0]u8', '.{}'],
+  ['[2]void', '.{{},{}}'],
+  ['enum{only}', '.only'],
+  ['struct{x:u0,y:void}', '.{.x=0,.y={}}'],
+  ['union(enum){only:void}', '.only'],
+])('namespace captures retain values determined by zero-bit types: %s', (type, value) => {
+  const source = `const std=@import("std");const T=${type};fn outer(n:T)void{const x=n;const S=struct{fn get()T{return x;}};_=S.get();std.debug.print("ok",.{});}pub fn main()void{outer(${value});}`;
+  expect(executeProgram('zig', source)).toMatchObject({ kind: 'executed', stderr: 'ok', uncaughtException: undefined });
+});
+
+test('namespace captures keep runtime enum backing values unavailable', () => {
+  const source = `const T=enum(u8){only=7};fn outer(n:T)void{const x=n;const S=struct{fn get()T{return x;}};_=S.get();}pub fn main()void{outer(.only);}`;
+  expect(executeProgram('zig', source)).toMatchObject({ kind: 'compileError' });
+});
+
+test.each(['-(1<<999998),0', '0,1<<999998', '0,1<<65535', '-(1<<65535),0', '3,2'])(
+  'range-derived integer types reject invalid bounds promptly: %s',
+  (args) => {
+    expect(
+      executeProgram(
+        'zig',
+        `const std=@import("std");pub fn main()void{const T=std.math.IntFittingRange(${args});_=T;}`
+      )
+    ).toMatchObject({ kind: 'compileError' });
+  }
+);
+
+test('range-derived integer types preserve signed boundaries without iterative shifts', () => {
+  const source = `const std=@import("std");pub fn main()void{std.debug.print("{} {} {} {}",.{std.math.IntFittingRange(0,1<<65534),std.math.IntFittingRange(-(1<<65534),0),std.math.IntFittingRange(-128,127),std.math.IntFittingRange(-129,0)});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: 'u65535 i65535 i8 i9',
+    uncaughtException: undefined,
+  });
+});
+
+test('negate shares checked integer result types and bounds', () => {
+  const source = `const std=@import("std");pub fn main()!void{const x=std.math.negate(3);std.debug.print("{} {} {}",.{@TypeOf(x),try x,std.math.negate(@as(i8,-128)) catch 7});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: 'error{Overflow}!comptime_int -3 7',
+    uncaughtException: undefined,
+  });
+});
+
+test('comptime integer logarithms remain usable by integer operators', () => {
+  const source = `const std=@import("std");pub fn main()void{const a=std.math.log(comptime_int,3,100);const b=std.math.log(comptime_int,2,16);std.debug.print("{} {}",.{a<<1,b+1});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: '8 5',
+    uncaughtException: undefined,
+  });
+});
+
+test('pointer-only loops still validate undefined slice headers', () => {
+  expect(executeProgram('zig', 'pub fn main()void{const p:[]u8=undefined;for(p)|*item|{_=item;}}')).toMatchObject({
+    kind: 'compileError',
+  });
+});
+
+test('effectful static negative saturating counts remain compile errors', () => {
+  const source = `const std=@import("std");fn get()error{}!u8{std.debug.print("c",.{});return 1;}pub fn main()void{var x:u8=1;_=&x;_=x<<|(if(get()) |_| @as(i8,-1) else |_| unreachable);}`;
+  expect(executeProgram('zig', source)).toMatchObject({ kind: 'compileError' });
+});

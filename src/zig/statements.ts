@@ -1683,7 +1683,7 @@ export abstract class StatementCompiler extends CallCompiler {
     }
     this.resolveStorage(child, span);
     const zero = sizeOf(child) === 0;
-    if (type.kind === 'pointer' && (type.size === 'slice' || (!zero && staticLength !== 0n)))
+    if (type.kind === 'pointer' && (type.size === 'slice' || (!byPointer && !zero && staticLength !== 0n)))
       this.checkMemoryOperand(compiled, span);
     if (!compiled.known && type.kind === 'array') {
       const read = evaluate;

@@ -1,6 +1,6 @@
 // code-gauge-allow-file fileNcss 558 -- Groups the related standard library operations that share this module.
 import { checked, divCeil, divExact, divFloor, divTrunc, floatMod, floatRem, mod, PANIC, panic, rem } from '../arith';
-import type { Expression } from '../ast';
+import type { Expression, Span } from '../ast';
 import { fusedMultiplyAdd, intFittingRange, roundFloat } from '../builtins';
 import { log2IntType } from '../expressions';
 import {
@@ -61,7 +61,7 @@ import {
   orderValue,
 } from './common';
 import { nativeEnum } from './heap';
-import { addMembers, expectArgs, fnMember, type Member, nativeStruct, typeMember } from './native';
+import { addMembers, compileArgs, expectArgs, fnMember, type Member, nativeStruct, typeMember } from './native';
 
 type FloatDomain = 'float' | 'comptime' | 'numeric' | 'f32-f64' | 'angle';
 
@@ -216,16 +216,27 @@ function orderReceiver(sema: SemaApi, call: NativeCall): TExpr {
 }
 
 /** `add`, `sub`, and `mul` of `(T, a, b)`, returning `error.Overflow` when the result does not fit. */
-function checkedInt(name: string, compute: (a: bigint, b: bigint) => bigint): () => Member {
-  return generic(name, 3, (sema, call, type, [aArg, bArg]) => {
-    if (type.kind !== 'int' && type.kind !== 'comptime_int')
-      return sema.error(call.span, `${name} には整数の型を渡してください（${typeName(type)} です）。`);
-    const operands = [aArg, bArg].map((arg) => sema.coerce(sema.compile(arg, type), type, arg));
-    return computed(errorUnionOf(OVERFLOW_ERROR, type), operands, call.span, ([a, b], frame) => {
-      spendIntegerOperation(a as bigint, b as bigint, name.endsWith('.mul'), nativeBudget(sema, frame));
-      const result = compute(a as bigint, b as bigint);
-      return type.kind === 'int' && !fitsInt(result, type) ? ErrorValue.of('Overflow') : result;
-    });
+function checkedInt(name: string, operator: '+' | '-' | '*'): () => Member {
+  return generic(name, 3, (sema, call, type, args) => {
+    const operands = args.map((arg) => sema.coerce(sema.compile(arg, type), type, arg));
+    return checkedIntegerResult(sema, type, operands, call.span, operator);
+  });
+}
+
+function checkedIntegerResult(
+  sema: SemaApi,
+  type: Type,
+  operands: readonly TExpr[],
+  span: Span,
+  operator: '+' | '-' | '*'
+): TExpr {
+  if (!isIntegerType(type)) return sema.error(span, '計算する値の型は整数にしてください。');
+  return computed(errorUnionOf(OVERFLOW_ERROR, type), operands, span, ([a, b], frame) => {
+    const left = a as bigint,
+      right = b as bigint;
+    spendIntegerOperation(left, right, operator === '*', nativeBudget(sema, frame));
+    const result = operator === '+' ? left + right : operator === '-' ? left - right : left * right;
+    return type.kind === 'int' && !fitsInt(result, type) ? ErrorValue.of('Overflow') : result;
   });
 }
 
@@ -825,26 +836,22 @@ const MEMBERS: Record<string, () => Member> = {
     const type = value.type;
     let result: Type;
     if (type.kind === 'comptime_int' || type.kind === 'comptime_float') result = COMPTIME_INT;
-    else if (type.kind === 'int') result = intFittingRange(type.signed ? -1n : 0n, type.bits === 0 ? 0n : 1n);
-    else if (type.kind === 'float') result = intFittingRange(-1n, 1n);
+    else if (type.kind === 'int')
+      result = intFittingRange(type.signed ? -1n : 0n, type.bits === 0 ? 0n : 1n, sema, call.span);
+    else if (type.kind === 'float') result = intFittingRange(-1n, 1n, sema, call.span);
     else return sema.error(arg, `std.math.sign には数を渡してください（${typeName(type)} 型です）。`);
     return computed(result, [value], call.span, ([x]) => {
       const order = typeof x === 'bigint' ? (x > 0n ? 1 : x < 0n ? -1 : 0) : (compareFloats(x as AnyFloat, 0) ?? 0);
       return BigInt(order);
     });
   }),
-  add: checkedInt('std.math.add', (a, b) => a + b),
-  sub: checkedInt('std.math.sub', (a, b) => a - b),
-  mul: checkedInt('std.math.mul', (a, b) => a * b),
+  add: checkedInt('std.math.add', '+'),
+  sub: checkedInt('std.math.sub', '-'),
+  mul: checkedInt('std.math.mul', '*'),
   negate: fnMember('std.math.negate', (sema, call) => {
     const [arg] = expectArgs(sema, call, 1, 'std.math.negate');
     const value = sema.compile(arg);
-    const type = value.type;
-    if (type.kind !== 'int')
-      return sema.error(arg, `std.math.negate には整数を渡してください（${typeName(type)} 型です）。`);
-    return computed(errorUnionOf(OVERFLOW_ERROR, type), [value], call.span, ([x]) =>
-      fitsInt(-(x as bigint), type) ? -(x as bigint) : ErrorValue.of('Overflow')
-    );
+    return checkedIntegerResult(sema, value.type, [known(value.type, 0n, call.span), value], call.span, '-');
   }),
   shl: shift('std.math.shl', true),
   shr: shift('std.math.shr', false),
@@ -900,9 +907,10 @@ const MEMBERS: Record<string, () => Member> = {
   }),
   IntFittingRange: fnMember('std.math.IntFittingRange', (sema, call) => {
     const [lowArg, highArg] = expectArgs(sema, call, 2, 'std.math.IntFittingRange');
-    const low = sema.knownValue(sema.compile(lowArg), '範囲') as bigint;
-    const high = sema.knownValue(sema.compile(highArg), '範囲') as bigint;
-    return known(TYPE, intFittingRange(low, high), call.span);
+    const [low, high] = compileArgs(sema, [lowArg, highArg], [COMPTIME_INT, COMPTIME_INT]).map(
+      (value) => sema.knownValue(value, '範囲') as bigint
+    );
+    return known(TYPE, intFittingRange(low, high, sema, call.span), call.span);
   }),
   Log2Int: generic('std.math.Log2Int', 1, (sema, call, type) => {
     if (type.kind !== 'int') return sema.error(call.span, 'std.math.Log2Int には整数の型を渡してください。');

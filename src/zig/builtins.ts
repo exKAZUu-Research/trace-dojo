@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 664 -- The file holds one layer of the compiler, whose parts share its private state.
+// code-gauge-allow-file fileNcss 665 -- The file holds one layer of the compiler, whose parts share its private state.
 import {
   checkShiftAmount,
   divCeil,
@@ -46,6 +46,7 @@ import {
   knownLengthOf,
   newArray,
   runtime,
+  type SemaApi,
   type TExpr,
 } from './semaBase';
 import {
@@ -692,7 +693,7 @@ export abstract class BuiltinCompiler extends ExpressionCompiler {
         low = isMax === rangeLow > low ? rangeLow : low;
         high = isMax === rangeHigh > high ? rangeHigh : high;
       }
-      type = intFittingRange(low, high);
+      type = intFittingRange(low, high, this, expression);
     }
     const coerced =
       peer.kind === 'int'
@@ -1115,15 +1116,15 @@ function addExact(a: BigFloat, b: BigFloat): BigFloat {
 }
 
 /** The smallest integer type that holds every value from `low` to `high`, as `std.math.IntFittingRange` gives. */
-export function intFittingRange(low: bigint, high: bigint): IntType {
-  if (low >= 0n) {
-    let bits = 0;
-    while (high >= 1n << BigInt(bits)) bits++;
-    return intType(false, bits);
-  }
-  let bits = 1;
-  while (low < -(1n << BigInt(bits - 1)) || high > (1n << BigInt(bits - 1)) - 1n) bits++;
-  return intType(true, bits);
+export function intFittingRange(low: bigint, high: bigint, sema: SemaApi, span: Span): IntType {
+  if (low > high) return sema.error(span, '整数の範囲の始まりは終わり以下にしてください。');
+  const signed = low < 0n;
+  const magnitude = signed && -low - 1n > high ? -low - 1n : high;
+  const digits = magnitude.toString(2);
+  const bits = (signed ? 1 : 0) + (magnitude === 0n ? 0 : digits.length);
+  if (bits > 65_535) return sema.error(span, '整数の型のビット数は 65535 以下にしてください。');
+  sema.spendCompilation(digits.length);
+  return intType(signed, bits);
 }
 
 export { COMPTIME_INT, USIZE };

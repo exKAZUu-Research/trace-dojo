@@ -54,6 +54,7 @@ import {
   type TExpr,
   undefinedValue,
 } from './semaBase';
+import { singleValueOf } from './singleValue';
 import {
   ANYERROR,
   arrayOf,
@@ -289,8 +290,9 @@ export abstract class ExpressionCompiler extends SemaBase {
     for (let scope: Scope | undefined = this.scope; scope; scope = scope.parent) {
       if (scope.locals?.get(binding.name) === binding) {
         if (crossedNamespace) {
-          if (!binding.known) return this.error(span, `「${binding.name}」は、内側の関数や型から参照できません。`);
-          return known(binding.type, binding.value, span);
+          const fact = binding.known ? { value: binding.value } : singleValueOf(this, binding.type, span);
+          if (!fact) return this.error(span, `「${binding.name}」は、内側の関数や型から参照できません。`);
+          return known(binding.type, fact.value, span);
         }
         break;
       }
@@ -1323,8 +1325,10 @@ export abstract class ExpressionCompiler extends SemaBase {
 
   private unsignedShiftCount(expression: Expression): TExpr {
     const amount = this.compile(expression);
-    if (amount.type.kind === 'comptime_int' || (amount.type.kind === 'int' && amount.known)) {
-      if ((this.knownValue(amount, 'シフト量') as bigint) < 0n) this.error(expression, 'シフトの量が負の数です。');
+    const fact = staticResultOf(amount);
+    if (amount.type.kind === 'comptime_int' || (amount.type.kind === 'int' && fact)) {
+      if (((fact?.value ?? this.knownValue(amount, 'シフト量')) as bigint) < 0n)
+        this.error(expression, 'シフトの量が負の数です。');
     } else if (amount.type.kind !== 'int' || amount.type.signed) {
       this.error(expression, '飽和シフトの量は符号なし整数にしてください。');
     }
