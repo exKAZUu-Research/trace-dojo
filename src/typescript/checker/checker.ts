@@ -395,6 +395,7 @@ export class Checker {
       name: type.name,
       aliasName: type.aliasName,
       aliasArguments: type.aliasArguments?.map((argument) => this.instantiate(argument, mapper)),
+      origin: type.origin ?? type,
     });
     this.instantiationCache.set(key, instantiated);
     return instantiated;

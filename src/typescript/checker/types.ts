@@ -156,6 +156,8 @@ export interface ObjectType {
   isFunction?: boolean;
   /** Whether it is the instance type of a class or interface with a `this` type. */
   thisType?: TypeParameter;
+  /** For an instantiated anonymous type, the declared one, which every instantiation shares as its recursion identity. */
+  origin?: ObjectType;
 }
 
 export interface TupleElement {
@@ -355,8 +357,8 @@ export function unionOf(types: Type[], keepFresh = false): Type {
   return union;
 }
 
-// code-gauge-allow functionNcss 34 -- Flattens and reduces members as TypeScript's intersections do.
-// code-gauge-allow functionCognitiveComplexity 27 -- Flattens and reduces members as TypeScript's intersections do.
+// code-gauge-allow functionNcss 35 -- Flattens and reduces members as TypeScript's intersections do.
+// code-gauge-allow functionCognitiveComplexity 28 -- Flattens and reduces members as TypeScript's intersections do.
 export function intersectionOf(types: Type[], budget: ExecutionBudget): Type {
   budget.spend(types.length);
   const flat: Type[] = [];
@@ -394,8 +396,12 @@ export function intersectionOf(types: Type[], budget: ExecutionBudget): Type {
   }
   const literal = units.find((type) => type.kind === 'literal');
   if (literal && units.length === members.length) return literal;
-  if (members.length === 1) return members[0];
-  return { kind: 'intersection', id: newTypeId(), types: members };
+  // TypeScript drops `void` beside its subtype `undefined`.
+  const reduced = members.filter(
+    (type) => !isIntrinsic(type, 'void') || !units.some((unit) => isIntrinsic(unit, 'undefined'))
+  );
+  if (reduced.length === 1) return reduced[0];
+  return { kind: 'intersection', id: newTypeId(), types: reduced };
 }
 
 function isPrimitive(type: Type): boolean {
@@ -406,10 +412,15 @@ function isPrimitive(type: Type): boolean {
 }
 
 function primitiveOverlaps(a: Type, b: Type): boolean {
-  const baseOf = (type: Type): string =>
-    type.kind === 'literal' ? typeof type.value : type.kind === 'intrinsic' ? type.name : '';
   if (a.kind === 'literal' && b.kind === 'literal') return a.value === b.value;
-  return baseOf(a) === baseOf(b);
+  return primitiveDomain(a) === primitiveDomain(b);
+}
+
+function primitiveDomain(type: Type): string {
+  if (type.kind === 'literal') return typeof type.value;
+  if (type.kind !== 'intrinsic') return '';
+  // `void` holds only `undefined`, so the two overlap as TypeScript's `VoidLike` domain.
+  return type.name === 'void' ? 'undefined' : type.name;
 }
 
 export function typeMembers(type: Type): Type[] {

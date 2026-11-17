@@ -1,0 +1,10 @@
+(2,7): error TS2322: Type '"x1"' is not assignable to type '`X${Uppercase<`${number}`>}`'.
+(3,7): error TS2322: Type '"X1e5"' is not assignable to type '`X${Uppercase<`${number}`>}`'.
+(5,7): error TS2322: Type '"X1"' is not assignable to type '`x${Lowercase<`${number}`>}`'.
+(6,7): error TS2322: Type '"x1E5"' is not assignable to type '`x${Lowercase<`${number}`>}`'.
+(8,7): error TS2322: Type '"item-any"' is not assignable to type '`Item-${string}`'.
+(10,7): error TS2322: Type '"abc-end"' is not assignable to type '`${Capitalize<string>}-end`'.
+(12,7): error TS2322: Type '"Key1"' is not assignable to type '`key${number}`'.
+(14,7): error TS2322: Type '"ID0xff"' is not assignable to type '`ID${Uppercase<`${bigint}`>}`'.
+(16,7): error TS2322: Type '"Ab"' is not assignable to type '`A${Uppercase<Lowercase<string>>}`'.
+(17,7): error TS2322: Type '"10px"' is not assignable to type '`${Uppercase<`${number}`>}PX`'.

@@ -1,0 +1,29 @@
+function toPartial<T>(p: Required<T>): Partial<T> {
+  return p;
+}
+function toReadonly<T>(p: Partial<T>): Readonly<Partial<T>> {
+  return p;
+}
+function fromReadonly<T>(p: Readonly<T>): { [K in keyof T]: T[K] } {
+  return p;
+}
+type Prefixed<T> = { [K in keyof T as `get_${K & string}`]: T[K] };
+type Prefixed2<T> = { [P in keyof T as `get_${P & string}`]: T[P] };
+function same<T>(p: Prefixed<T>): Prefixed2<T> {
+  return p;
+}
+type Plain<T> = { [K in keyof T]: T[K] };
+function toPartialPlain<T>(o: Plain<T>): Partial<T> {
+  return o;
+}
+type Keys<T> = { [K in keyof T]: string };
+type Some<T> = { [K in Exclude<keyof T, 'a'>]: string };
+function narrowKeys<T>(o: Keys<T>): Some<T> {
+  return o;
+}
+type Wide<T> = { [K in keyof T]: string | number };
+function widen<T>(o: Keys<T>): Wide<T> {
+  return o;
+}
+const r = toPartial<{ a: number }>({ a: 1 });
+console.log(r.a, toReadonly, fromReadonly, same, toPartialPlain, narrowKeys, widen);

@@ -491,27 +491,48 @@ export class TypeOperators {
     return { kind: 'templateLiteral', id: newTypeId(), texts, types };
   }
 
-  stringMapping(mapping: 'Uppercase' | 'Lowercase' | 'Capitalize' | 'Uncapitalize', type: Type): Type {
+  /** `Uppercase<T>` and its kin, which TypeScript pushes into a template literal's texts and placeholders. */
+  stringMapping(mapping: StringMapping, type: Type): Type {
     if (type.kind === 'union') return unionOf(type.types.map((member) => this.stringMapping(mapping, member)));
-    if (type.kind === 'literal' && typeof type.value === 'string') {
-      const text = type.value;
-      switch (mapping) {
-        case 'Uppercase': {
-          return literalType(text.toUpperCase());
-        }
-        case 'Lowercase': {
-          return literalType(text.toLowerCase());
-        }
-        case 'Capitalize': {
-          return literalType(text.charAt(0).toUpperCase() + text.slice(1));
-        }
-        default: {
-          return literalType(text.charAt(0).toLowerCase() + text.slice(1));
-        }
+    if (type.kind === 'literal' && typeof type.value === 'string') return literalType(mapText(mapping, type.value));
+    if (type.kind === 'templateLiteral') {
+      const { texts, types } = type;
+      if (mapping === 'Uppercase' || mapping === 'Lowercase') {
+        return this.templateLiteral(
+          texts.map((text) => mapText(mapping, text)),
+          types.map((member) => this.stringMapping(mapping, member))
+        );
       }
+      // Capitalizing changes only the first character, which the first text or else the first placeholder holds.
+      return texts[0] === ''
+        ? this.templateLiteral(texts, [this.stringMapping(mapping, types[0]), ...types.slice(1)])
+        : this.templateLiteral([mapText(mapping, texts[0]), ...texts.slice(1)], types);
     }
+    if (type.kind === 'stringMapping' && type.mapping === mapping) return type;
     if (isAnyLike(type)) return type;
-    return { kind: 'stringMapping', id: newTypeId(), mapping, type };
+    // A `number` or `bigint` placeholder is mapped as the template `${number}` it spells.
+    const inner =
+      isIntrinsic(type, 'number') || isIntrinsic(type, 'bigint') ? this.templateLiteral(['', ''], [type]) : type;
+    return { kind: 'stringMapping', id: newTypeId(), mapping, type: inner };
+  }
+}
+
+type StringMapping = 'Uppercase' | 'Lowercase' | 'Capitalize' | 'Uncapitalize';
+
+function mapText(mapping: StringMapping, text: string): string {
+  switch (mapping) {
+    case 'Uppercase': {
+      return text.toUpperCase();
+    }
+    case 'Lowercase': {
+      return text.toLowerCase();
+    }
+    case 'Capitalize': {
+      return text.charAt(0).toUpperCase() + text.slice(1);
+    }
+    default: {
+      return text.charAt(0).toLowerCase() + text.slice(1);
+    }
   }
 }
 

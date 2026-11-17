@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 446 -- Decides assignability and comparability for every kind of type, as TypeScript's checker does in one place.
+// code-gauge-allow-file fileNcss 538 -- Decides assignability and comparability for every kind of type, as TypeScript's checker does in one place.
 import type { Checker } from './checker';
 import { isUnit } from './flow';
 import { isNumericName } from './syntax';
@@ -15,6 +15,7 @@ import {
   type Signature,
   type Structure,
   type TupleElement,
+  type TupleInfo,
   type Type,
   type TypeParameter,
   undefinedType,
@@ -25,11 +26,22 @@ import {
 
 type Relation = 'assignable' | 'comparable';
 
+const MAX_RELATION_DEPTH = 100;
+const EXPANDING_SOURCE = 1;
+const EXPANDING_TARGET = 2;
+/** How many times a recursive type may recur in a comparison stack before TypeScript stops expanding it. */
+const MAX_RECURSION_IDENTITY_COUNT = 3;
+
 /** Whether one type is assignable to, or comparable with, another, as TypeScript decides it. */
 export class Relations {
   /** Pairs assumed related while comparing their members, which recursive types revisit. */
   private readonly assumed = new Set<string>();
   private readonly cache = new Map<string, boolean>();
+  /** The structured sources and targets being compared, outermost first. */
+  private readonly sourceStack: Type[] = [];
+  private readonly targetStack: Type[] = [];
+  /** Which of the source and target stacks have expanded a recursive type too deeply, as `EXPANDING_*` flags. */
+  private expanding = 0;
 
   constructor(private readonly c: Checker) {}
 
@@ -49,16 +61,39 @@ export class Relations {
     const key = `${relation}${checkWeak ? '' : '-member'}:${source.id}:${target.id}`;
     const cached = this.cache.get(key);
     if (cached !== undefined) return cached;
-    if (this.assumed.has(key) || this.assumed.size > 40) return true;
+    if (this.assumed.has(key)) return true;
+    if (isLeaf(source) && isLeaf(target)) return this.structuredRelated(source, target, relation, checkWeak);
+    // TypeScript gives up here with "Excessive stack depth comparing types" (TS2321).
+    if (this.sourceStack.length >= MAX_RELATION_DEPTH) return false;
     this.assumed.add(key);
     let result: boolean;
     try {
-      result = this.structuredRelated(source, target, relation, checkWeak);
+      result = this.nestedRelated(source, target, relation, checkWeak);
     } finally {
       this.assumed.delete(key);
     }
     if (this.assumed.size === 0) this.cache.set(key, result);
     return result;
+  }
+
+  /** Compares structured types on the comparison stacks, as TypeScript's `recursiveTypeRelatedTo` does. */
+  private nestedRelated(source: Type, target: Type, relation: Relation, checkWeak: boolean): boolean {
+    const saved = this.expanding;
+    this.sourceStack.push(source);
+    this.targetStack.push(target);
+    try {
+      if (!(saved & EXPANDING_SOURCE) && isDeeplyNested(source, this.sourceStack)) this.expanding |= EXPANDING_SOURCE;
+      if (!(saved & EXPANDING_TARGET) && isDeeplyNested(target, this.targetStack)) this.expanding |= EXPANDING_TARGET;
+      // Both sides keep expanding the same recursive types, so TypeScript assumes the relation holds.
+      return (
+        this.expanding === (EXPANDING_SOURCE | EXPANDING_TARGET) ||
+        this.structuredRelated(source, target, relation, checkWeak)
+      );
+    } finally {
+      this.sourceStack.pop();
+      this.targetStack.pop();
+      this.expanding = saved;
+    }
   }
 
   // code-gauge-allow functionCognitiveComplexity 29 -- Follows TypeScript's order of checks for each kind of type.
@@ -81,11 +116,8 @@ export class Relations {
       return (t.kind === 'typeParameter' && s.id === t.id) || this.constraintRelated(s, t, relation);
     }
     if (t.kind === 'typeParameter') return relation === 'comparable' && this.constraintAdmits(s, t);
-    if (s.kind === 'indexedAccess' || s.kind === 'keyof' || s.kind === 'conditional') {
-      if (t.kind === s.kind && this.sameGeneric(s, t)) return true;
-      const constraint = this.c.baseConstraint(s);
-      return constraint !== s && this.isRelated(constraint, t, relation);
-    }
+    if (s.kind === 'indexedAccess' || s.kind === 'keyof' || s.kind === 'conditional')
+      return this.genericSourceRelated(s, t, relation);
     if (t.kind === 'indexedAccess' && !this.isGeneric(t.objectType)) {
       // Writing `o[k]` with a generic key must suit the property of every key the constraint allows.
       const keys = this.c.baseConstraint(t.indexType);
@@ -98,6 +130,14 @@ export class Relations {
     }
     if (t.kind === 'indexedAccess' || t.kind === 'keyof' || t.kind === 'conditional') return false;
     return this.relatedToConcrete(s, t, relation);
+  }
+
+  private genericSourceRelated(s: Type, t: Type, relation: Relation): boolean {
+    if (t.kind === s.kind && this.sameGeneric(s, t)) return true;
+    // TypeScript tries a conditional type's branches before their constraints, so `Exclude<keyof T, K>` fits `keyof T`.
+    if (s.kind === 'conditional' && this.isRelated(unionOf([s.trueType, s.falseType]), t, relation)) return true;
+    const constraint = this.c.baseConstraint(s);
+    return constraint !== s && this.isRelated(constraint, t, relation);
   }
 
   private unionSourceRelated(s: UnionType, t: Type, relation: Relation, checkWeak: boolean): boolean {
@@ -275,9 +315,11 @@ export class Relations {
   private matchesPlaceholder(text: string, type: Type): boolean {
     if (isIntrinsic(type, 'string') || isAnyLike(type)) return true;
     if (isIntrinsic(type, 'number')) return text !== '' && Number.isFinite(Number(text));
-    if (isIntrinsic(type, 'bigint')) return /^-?\d+$/.test(text);
+    // TypeScript accepts what scans as a bigint literal, so radix prefixes but no leading zero, sign, or separator.
+    if (isIntrinsic(type, 'bigint')) return /^-?(?:0|[1-9]\d*|0[xX][\dA-Fa-f]+|0[bB][01]+|0[oO][0-7]+)$/.test(text);
     if (type.kind === 'literal') return String(type.value) === text;
     if (type.kind === 'union') return type.types.some((member) => this.matchesPlaceholder(text, member));
+    if (type.kind === 'templateLiteral' || type.kind === 'stringMapping') return this.matchesTemplate(text, type);
     return false;
   }
 
@@ -329,7 +371,19 @@ export class Relations {
   }
 
   private objectRelated(source: Type, target: ObjectType, relation: Relation): boolean {
-    if (target.objectKind === 'mapped') return source.kind === 'object' && this.sameMapped(source, target, relation);
+    if (target.objectKind === 'mapped') {
+      const { mapped } = target;
+      // `{ [P in keyof S]: S[P] }` with its optionality kept holds what `S` does.
+      if (
+        mapped?.optionalModifier !== '-' &&
+        !mapped?.nameType &&
+        mapped?.template.kind === 'indexedAccess' &&
+        this.identical(mapped.template.objectType, source) &&
+        mapped.template.indexType === mapped.typeParameter
+      )
+        return true;
+      return source.kind === 'object' && this.sameMapped(source, target, relation);
+    }
     const byElements = this.elementsRelated(source, target, relation);
     if (byElements !== undefined) return byElements;
     const sourceStructure = this.c.structureOf(source);
@@ -425,20 +479,29 @@ export class Relations {
     const targetStructures = members.map((member) => this.c.structureOf(member));
     if (!targetStructures.every((structure) => isWeakStructure(structure))) return false;
     const sourceStructure = this.c.structureOf(source);
-    if (sourceStructure.properties.size === 0 && sourceStructure.callSignatures.length === 0) return false;
+    if (sourceStructure.properties.size === 0 && !hasSignatures(sourceStructure)) return false;
     return !targetStructures.some((structure) =>
       [...structure.properties.keys()].some((name) => sourceStructure.properties.has(name))
     );
   }
 
-  /** Whether two generic mapped types map the same keys to related templates. */
+  /**
+   * Whether a generic mapped type is related to another, as TypeScript's `mappedTypeRelatedTo` decides: the target
+   * keeps optional what the source makes optional, maps only keys the source maps, renames keys alike, and maps them
+   * to related templates.
+   */
   private sameMapped(source: ObjectType, target: ObjectType, relation: Relation): boolean {
     const a = source.mapped;
     const b = target.mapped;
     if (!a || !b || source.objectKind !== 'mapped') return false;
-    if (!this.identical(a.constraint, b.constraint) || Boolean(a.nameType) !== Boolean(b.nameType)) return false;
-    const template = this.c.instantiate(a.template, new Map([[a.typeParameter.id, b.typeParameter]]));
-    return this.isRelated(template, b.template, relation);
+    if (relation !== 'comparable' && mappedOptionality(source) > mappedOptionality(target)) return false;
+    if (!this.isRelated(b.constraint, a.constraint, relation)) return false;
+    const mapper = new Map([[a.typeParameter.id, b.typeParameter as Type]]);
+    const sameNames =
+      a.nameType && b.nameType
+        ? this.identical(this.c.instantiate(a.nameType, mapper), b.nameType)
+        : a.nameType === b.nameType;
+    return sameNames && this.isRelated(this.c.instantiate(a.template, mapper), b.template, relation);
   }
 
   private propertyRelated(source: Property, target: Property, relation: Relation): boolean {
@@ -697,8 +760,80 @@ function isWeakStructure(structure: Structure): boolean {
   return (
     structure.properties.size > 0 &&
     [...structure.properties.values()].every((property) => property.optional) &&
-    structure.callSignatures.length === 0 &&
+    !hasSignatures(structure) &&
     !structure.stringIndex &&
     !structure.numberIndex
   );
+}
+
+function hasSignatures(structure: Structure): boolean {
+  return structure.callSignatures.length > 0 || structure.constructSignatures.length > 0;
+}
+
+function isLeaf(type: Type): boolean {
+  return type.kind === 'intrinsic' || type.kind === 'literal';
+}
+
+/** Whether a stack ending in `type` has expanded its recursive type too often, as TypeScript's `isDeeplyNestedType` decides. */
+function isDeeplyNested(type: Type, stack: Type[]): boolean {
+  if (stack.length < MAX_RECURSION_IDENTITY_COUNT) return false;
+  if (type.kind === 'intersection') return type.types.some((member) => isDeeplyNested(member, stack));
+  const identity = recursionIdentity(type);
+  let count = 0;
+  let lastId = 0;
+  for (const member of stack) {
+    if (!hasRecursionIdentity(member, identity)) continue;
+    // Only a type created later than the previous match, as by an expanding instantiation, counts.
+    if (member.id >= lastId && ++count >= MAX_RECURSION_IDENTITY_COUNT) return true;
+    lastId = member.id;
+  }
+  return false;
+}
+
+function hasRecursionIdentity(type: Type, identity: unknown): boolean {
+  return type.kind === 'intersection'
+    ? type.types.some((member) => hasRecursionIdentity(member, identity))
+    : recursionIdentity(type) === identity;
+}
+
+/** What instantiations of the same declared type share, as TypeScript's `getRecursionIdentity` returns. */
+function recursionIdentity(type: Type): unknown {
+  switch (type.kind) {
+    case 'object': {
+      if (type.objectKind === 'reference') return type.target;
+      if (type.objectKind === 'mapped') return type.mapped?.typeParameter;
+      if (type.tuple) return tupleIdentity(type.tuple);
+      return type.origin ?? type;
+    }
+    case 'indexedAccess': {
+      return recursionIdentity(type.objectType);
+    }
+    case 'conditional': {
+      return type.root ?? type;
+    }
+    default: {
+      return type;
+    }
+  }
+}
+
+/** Whether a mapped type adds (1) or removes (-1) optionality, as TypeScript's `getCombinedMappedTypeOptionality` decides. */
+function mappedOptionality(type: Type | undefined): number {
+  if (type?.kind === 'intersection') {
+    const [first, ...rest] = type.types.map((member) => mappedOptionality(member));
+    return rest.every((optionality) => optionality === first) ? (first ?? 0) : 0;
+  }
+  if (type?.kind !== 'object' || !type.mapped) return 0;
+  const { optionalModifier, source } = type.mapped;
+  if (optionalModifier) return optionalModifier === '+' ? 1 : -1;
+  return mappedOptionality(source);
+}
+
+/** A tuple's shape, which TypeScript's tuple target, its recursion identity, stands for. */
+function tupleIdentity(tuple: TupleInfo): string {
+  const shape = tuple.elements.map((element) => {
+    if (element.rest) return '.';
+    return element.optional ? '?' : '!';
+  });
+  return `tuple:${tuple.readonly}:${shape.join('')}`;
 }
