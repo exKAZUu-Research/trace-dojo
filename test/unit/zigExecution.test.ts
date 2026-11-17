@@ -6013,3 +6013,24 @@ test.each([
     )
   ).toMatchObject({ kind: 'compileError' });
 });
+
+test.each(['u.x=0;', 'for(0..8)|i|u.bytes[i]=0;', '@memset(&u.bytes,0);'])(
+  'overlapping union writes discard overwritten turtle roots: %s',
+  (overwrite) => {
+    const source = `const std=@import("std");const U=extern union{p:*Turtle,x:usize,bytes:[8]u8};fn make(a:std.mem.Allocator)!U{const p=try a.create(Turtle);p.*=Turtle.init(0,1);return .{.p=p};}pub fn main(init:std.process.Init)!void{var u=try make(init.gpa);${overwrite}const copy=u;_=copy.x;const t=Turtle.init(0,0);std.debug.print("{}",.{t.canMoveForward()});_=&u;}`;
+    expect(executeProgram('zig', source)).toMatchObject({
+      kind: 'executed',
+      stderr: 'true',
+      uncaughtException: undefined,
+    });
+  }
+);
+
+test('overlapping union copies retain pointer roots whose bytes remain unchanged', () => {
+  const source = `const std=@import("std");const U=extern union{p:*Turtle,x:usize};fn make(a:std.mem.Allocator)!U{const p=try a.create(Turtle);p.*=Turtle.init(0,1);return .{.p=p};}pub fn main(init:std.process.Init)!void{var u=try make(init.gpa);u.x=u.x;const copy=u;const t=Turtle.init(0,0);std.debug.print("{}",.{t.canMoveForward()});_=copy.x;_=&u;}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: 'false',
+    uncaughtException: undefined,
+  });
+});

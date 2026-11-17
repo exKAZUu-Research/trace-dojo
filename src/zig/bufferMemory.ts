@@ -24,6 +24,13 @@ import {
 } from './values';
 import { WeakValueMap } from './weakValueMap';
 
+interface StoredReference {
+  key: string;
+  value: object;
+  id: bigint;
+  bits: number;
+}
+
 interface FieldLocation {
   type: Type;
   offset: number;
@@ -116,7 +123,7 @@ export function bindBufferMemory(
 class BufferMemory {
   private readonly views = new Map<string, Value>();
   private readonly referenceHolds = new Map<string, object>();
-  private readonly referenceOffsets = new Map<number, { key: string; value: object }>();
+  private readonly referenceOffsets = new Map<number, StoredReference>();
 
   constructor(
     private readonly bytes: Value[],
@@ -265,7 +272,7 @@ class BufferMemory {
       spendMemory(sizeOf(type) * 8);
       const values: Value[] = [];
       for (let bit = 0; bit < sizeOf(type) * 8; bit++) {
-        const reference = this.referenceOffsets.get(offset + bit);
+        const reference = this.currentReference(offset + bit);
         if (reference) values.push(reference.value as Value);
       }
       return values;
@@ -429,9 +436,9 @@ class BufferMemory {
   private copyRegion(destination: BufferMemory, offset: number, start: number, length: number): void {
     spendMemory(length * 20);
     const bytes = this.bytes.slice(offset / 8, offset / 8 + length);
-    const references: { offset: number; key: string; value: object }[] = [];
+    const references: (StoredReference & { offset: number })[] = [];
     for (let bit = 0; bit < length * 8; bit++) {
-      const reference = this.referenceOffsets.get(offset + bit);
+      const reference = this.currentReference(offset + bit);
       if (reference) references.push({ ...reference, offset: start + bit });
     }
     for (let bit = 0; bit < length * 8; bit++) destination.referenceOffsets.delete(start + bit);
@@ -476,6 +483,11 @@ class BufferMemory {
     }
   }
 
+  private currentReference(offset: number): StoredReference | undefined {
+    const reference = this.referenceOffsets.get(offset);
+    return reference && this.readBits(offset, reference.bits) === reference.id ? reference : undefined;
+  }
+
   private reference(offset: number, type: Type, bits = 64): Value {
     const id = this.readBits(offset, bits);
     const key = referenceKey(id, type, bits);
@@ -486,7 +498,7 @@ class BufferMemory {
       this.space.references.get(key);
     if (value) {
       this.referenceHolds.set(key, value);
-      this.referenceOffsets.set(offset, { key, value });
+      this.referenceOffsets.set(offset, { key, value, id, bits });
     }
     return (value as Value) ?? undefinedValue(type);
   }
@@ -517,7 +529,7 @@ class BufferMemory {
     const key = referenceKey(id, type, bits);
     this.space.references.set(key, value);
     this.referenceHolds.set(key, value);
-    this.referenceOffsets.set(offset, { key, value });
+    this.referenceOffsets.set(offset, { key, value, id, bits });
     this.writeBits(offset, bits, id);
   }
 
