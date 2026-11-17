@@ -834,6 +834,7 @@ test('compiler and native evaluation recursion remain bounded under Node', { tim
     chains,
     native,
     patterns,
+    flatSequences,
     display,
     recovery,
   } = z
@@ -842,6 +843,7 @@ test('compiler and native evaluation recursion remain bounded under Node', { tim
       chains: z.array(resultSchema),
       native: z.array(resultSchema),
       patterns: z.array(resultSchema),
+      flatSequences: z.array(resultSchema),
       display: z.array(z.object({ stdout: z.string() }).passthrough()),
       recovery: resultSchema,
     })
@@ -853,6 +855,13 @@ test('compiler and native evaluation recursion remain bounded under Node', { tim
   expect(chains.at(-1)).toMatchObject({ kind: 'executed', stdout: '1\n' });
   for (const result of [...chains.slice(1, 5), chains[7], ...native])
     expect(result).toMatchObject({ kind: 'limitExceeded', limit: 'operations' });
+  expect(flatSequences).toHaveLength(6);
+  for (const [index, result] of flatSequences.entries()) {
+    if (index < 4) {
+      expect(result).toMatchObject({ kind: 'executed', stdout: index < 2 ? '1\n' : '2\n' });
+      expect(result.uncaughtException).toBeUndefined();
+    } else expect(result).toMatchObject({ kind: 'limitExceeded', limit: 'operations' });
+  }
   expect(patterns).toHaveLength(12);
   for (const [index, result] of patterns.entries()) {
     expect(result).toMatchObject({ kind: 'executed', stdout: index % 4 === 0 ? '0\n' : '1\n' });
@@ -936,4 +945,23 @@ test('large IO scopes execute and record within a bounded Node heap', { timeout:
   expect(result.execution.stdout).toBe('1\n');
   expect(result.execution.finalTurtles).toHaveLength(1);
   expect(result.recording).toEqual({ stdout: '1\n', first: 1, last: 1, count: 4000, turtles: 1 });
+});
+
+test.each(['\u0085', '\u00A0', '\u1680', '\u2000', '\u2028', '\u2029', '\u202F', '\u205F', '\u3000', '\uFEFF'])(
+  'source string gaps reject non-ASCII whitespace: %j',
+  (char) => {
+    for (const gap of [char, ` \t${char}\n `]) {
+      const source = 'main=putStrLn "a\\' + gap + String.raw`\b"`;
+      expect(executeProgram('haskell', source).kind).toBe('compileError');
+    }
+  }
+);
+
+test.each([' ', '\t', '\n', '\v', '\f', '\r', ' \t\r\n\v\f '])('ASCII source string gaps remain valid: %j', (gap) => {
+  const source = 'main=putStrLn "a\\' + gap + String.raw`\b"`;
+  expect(executeProgram('haskell', source)).toMatchObject({
+    kind: 'executed',
+    stdout: 'ab\n',
+    uncaughtException: undefined,
+  });
 });

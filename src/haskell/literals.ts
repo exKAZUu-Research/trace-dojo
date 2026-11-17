@@ -52,6 +52,7 @@ const SINGLE_ESCAPES: Record<string, number> = {
 };
 
 const MAX_CODE_POINT = 0x10_ff_ff;
+const STRING_GAP_WHITESPACE = /^[\t\n\v\f\r ]+$/;
 
 export function parseIntegerLiteral(text: string, span: Span): bigint {
   if (text.includes('_')) throw unsupportedError(span, '数の区切りの _（NumericUnderscores）');
@@ -102,9 +103,9 @@ function readChars(body: string, span: Span, isString: boolean): string[] {
     index++;
     const next = body[index];
     if (next === undefined) throw syntaxError(span, '文字のエスケープの書き方に誤りがあります。');
-    if (isString && /\s/.test(next)) {
+    if (isString && STRING_GAP_WHITESPACE.test(next)) {
       const close = body.indexOf('\\', index);
-      if (close === -1 || !/^\s*$/.test(body.slice(index, close))) {
+      if (close === -1 || !STRING_GAP_WHITESPACE.test(body.slice(index, close))) {
         throw syntaxError(span, String.raw`文字列の継続（\ と \ の間）の書き方に誤りがあります。`);
       }
       index = close + 1;

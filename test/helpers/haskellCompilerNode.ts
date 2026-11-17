@@ -39,6 +39,15 @@ const patterns = [3000, 9000, 9500].flatMap((size) => {
     `main=do {[${binding}] <- return [1..${size}::Int]; print x}`,
   ];
 });
+const flatSequences = [
+  ...['True', 'otherwise'].map(
+    (guard) => 'f | ' + Array.from({ length: 10_000 }, () => guard).join(',') + ' = 1::Int\nmain=print f'
+  ),
+  'f | let x=1::Int, True, let y=x+1, y==2 = y\nmain=print f',
+  'f | False,error "unused" = 1::Int | otherwise = 2\nmain=print f',
+  'main=print(length [1::Int | ' + Array.from({ length: 3000 }, () => 'True').join(',') + '])',
+  'main=print(do {' + Array.from({ length: 3000 }, () => 'Just ()').join(';') + '; Just(1::Int)})',
+];
 const primitives = ['error(f(n+1))', 'errorWithoutStackTrace(f(n+1))', 'errorWithoutStackTrace("x"++f(n+1))'];
 const nativeResults = primitives.flatMap((rhs) => {
   const source = `f n=${rhs}\nmain=putStrLn(f(0::Int))`;
@@ -60,6 +69,7 @@ process.stdout.write(
   JSON.stringify({
     synonyms: synonyms.map((source) => executeProgram('haskell', source)),
     chains: chains.map((source) => executeProgram('haskell', source)),
+    flatSequences: flatSequences.map((source) => executeProgram('haskell', source)),
     patterns: patterns.map((source) => executeProgram('haskell', source)),
     native: nativeResults,
     display: displayResults,

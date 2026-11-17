@@ -32,6 +32,7 @@ import { patternProjection, patternResult } from './patternBindings';
 import { surfacePatternText } from './patternText';
 import { primitiveNamed, rationalToFloat } from './primitives';
 import type { LocalVar, RAlt, RBindGroup, RBinding, RClause, RExpr, RGuard, RPat, RRhs, RStmt } from './rast';
+import { RecursionBudget } from './recursionBudget';
 import { type DictBuilders, dictBuilders, type Runtime } from './runtime';
 import type { Span } from './syntax';
 import { prune, type Scheme, splitApp, type Type } from './types';
@@ -106,6 +107,7 @@ export class Codegen {
   private readonly rootFrame = new FrameScope(undefined);
   private frame: FrameScope = this.rootFrame;
   private visible = OrderedMap<string, VisibleBinding>();
+  private readonly recursion = new RecursionBudget();
   /** The dictionary parameters of the bindings whose bodies are being generated, for their recursive uses. */
   private readonly ownDictParams = new Map<LocalVar | ValueEntity, DictParam[]>();
   readonly claimedAtomicRows = new Set<number>();
@@ -591,26 +593,31 @@ export class Codegen {
     } else {
       body = fail;
       for (const branch of rhs.body.branches.toReversed())
-        body = this.compileGuarded(branch.guards, 0, branch.expr, body, ioResult);
+        body = this.compileGuarded(branch.guards, branch.expr, body, ioResult);
     }
     this.visible = savedVisible;
     return binds.length > 0 ? { k: 'let', binds, body } : body;
   }
 
-  private compileGuarded(guards: readonly RGuard[], index: number, expr: RExpr, fail: Core, ioResult: boolean): Core {
-    if (index >= guards.length) return this.bodyExpr(expr, ioResult);
-    const guard = guards[index];
-    if (guard.k === 'let') {
-      const savedVisible = this.visible;
-      const binds = this.compileLocalGroup(guard.binds);
-      const rest = this.compileGuarded(guards, index + 1, expr, fail, ioResult);
+  private compileGuarded(guards: readonly RGuard[], expr: RExpr, fail: Core, ioResult: boolean): Core {
+    const savedVisible = this.visible;
+    const wrappers: ({ binds: { index: number; expr: Core }[] } | { condition: Core })[] = [];
+    try {
+      for (const guard of guards) {
+        chargeTypeWork();
+        if (guard.k === 'let') wrappers.push({ binds: this.compileLocalGroup(guard.binds) });
+        else if (!isOtherwise(guard.expr, this.options.support))
+          wrappers.push({ condition: this.compileExpr(guard.expr) });
+      }
+      let body = this.bodyExpr(expr, ioResult);
+      for (const wrapper of wrappers.toReversed()) {
+        body =
+          'binds' in wrapper ? { k: 'let', binds: wrapper.binds, body } : this.ifCore(wrapper.condition, body, fail);
+      }
+      return body;
+    } finally {
       this.visible = savedVisible;
-      return { k: 'let', binds, body: rest };
     }
-    if (isOtherwise(guard.expr, this.options.support))
-      return this.compileGuarded(guards, index + 1, expr, fail, ioResult);
-    const condition = this.compileExpr(guard.expr);
-    return this.ifCore(condition, this.compileGuarded(guards, index + 1, expr, fail, ioResult), fail);
   }
 
   /** A right-hand side's expression: in `IO`, a block of one statement unless it is a `do` block already. */
@@ -622,8 +629,10 @@ export class Codegen {
   // Expressions
 
   compileExpr(expr: RExpr): Core {
-    const code = this.compileExprInner(expr);
-    return this.options.traceTypes && expr.type ? { ...code, displayType: expr.type } : code;
+    return this.recursion.run(() => {
+      const code = this.compileExprInner(expr);
+      return this.options.traceTypes && expr.type ? { ...code, displayType: expr.type } : code;
+    });
   }
 
   // code-gauge-allow functionNcss 58 -- One short case per expression kind, each delegating to a helper.
@@ -879,6 +888,10 @@ export class Codegen {
   }
 
   private compileComprehension(quals: readonly RStmt[], index: number, result: RExpr): Core {
+    return this.recursion.run(() => this.compileComprehensionCore(quals, index, result));
+  }
+
+  private compileComprehensionCore(quals: readonly RStmt[], index: number, result: RExpr): Core {
     if (index >= quals.length) {
       return { k: 'con', con: CONS_CON, args: [this.compileExpr(result), { k: 'con', con: NIL_CON, args: [] }] };
     }
@@ -937,6 +950,10 @@ export class Codegen {
   }
 
   private compileLetChain(stmts: readonly RStmt[], index: number): Core {
+    return this.recursion.run(() => this.compileLetChainCore(stmts, index));
+  }
+
+  private compileLetChainCore(stmts: readonly RStmt[], index: number): Core {
     const stmt = stmts[index];
     if (stmt.k === 'exp') return this.compileExpr(stmt.expr);
     if (stmt.k !== 'let') throw new Error('A bind statement in a block without a monad');
@@ -948,6 +965,10 @@ export class Codegen {
   }
 
   private compileMonadic(stmts: readonly RStmt[], index: number, monad: Evidence): Core {
+    return this.recursion.run(() => this.compileMonadicCore(stmts, index, monad));
+  }
+
+  private compileMonadicCore(stmts: readonly RStmt[], index: number, monad: Evidence): Core {
     const stmt = stmts[index];
     const support = this.options.support;
     if (index === stmts.length - 1) return this.compileExpr((stmt as Extract<RStmt, { k: 'exp' }>).expr);
