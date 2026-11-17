@@ -1,7 +1,7 @@
-import { inspect, inspectRange, toFloat, toInt, toStepFloat } from './conversions';
+import { inspect, inspectRange, supportsImplicitConversion, toFloat, toInt, toStepFloat } from './conversions';
 import { def, sdef } from './define';
 import { argumentError, frozenError, rangeError, rubyError } from './errors';
-import { callMethod, type Gen, invoke, respondsTo } from './interp';
+import { callMethod, type Gen, invoke } from './interp';
 import { isRubyFloat, isRubyNumber, NIL, RFloat, RObject, RRange, type Value } from './objects';
 import { rt, UnsupportedFeatureError } from './runtime';
 import { classOf } from './values';
@@ -215,8 +215,8 @@ function* randomRange(generator: MersenneTwister, range: RRange): Gen<Value | un
 function* randomArithmeticRange(generator: MersenneTwister, begin: Value, end: Value, exclusive: boolean): Gen<Value> {
   let distance = yield* callMethod(end, '-', [begin]);
   if (typeof distance !== 'bigint' && !isRubyFloat(distance)) {
-    if (respondsTo(distance, 'to_int', true)) distance = yield* toInt(distance);
-    else if (respondsTo(distance, 'to_f', true)) distance = yield* toStepFloat(distance);
+    if (yield* supportsImplicitConversion(distance, 'to_int')) distance = yield* toInt(distance);
+    else if (yield* supportsImplicitConversion(distance, 'to_f')) distance = yield* toStepFloat(distance);
     else return NIL;
   }
   if (typeof distance === 'bigint') {
@@ -250,7 +250,8 @@ function* randomFloatArithmeticRange(
 }
 
 function* addRandomFloatOffset(begin: Value, offset: number): Gen<Value> {
-  if (isRubyNumber(begin) || respondsTo(begin, 'to_f', true)) return (yield* randomEndpointFloat(begin)) + offset;
+  if (isRubyNumber(begin) || (yield* supportsImplicitConversion(begin, 'to_f')))
+    return (yield* randomEndpointFloat(begin)) + offset;
   return yield* callMethod(begin, '+', [offset]);
 }
 

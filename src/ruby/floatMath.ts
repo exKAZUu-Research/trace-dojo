@@ -1,3 +1,5 @@
+import { floatDomainError, zeroDivisionError } from './errors';
+import { integerBits, integerGcd } from './integerBudget';
 import { rt } from './runtime';
 
 const bits = new DataView(new ArrayBuffer(8));
@@ -48,23 +50,36 @@ export function ldexpDouble(value: number, exponent: number): number {
 export function bigintRatio(numerator: bigint, denominator: bigint): number {
   if (denominator === 0n) return Number(numerator) / 0;
   if (numerator === 0n) return denominator < 0n ? -0 : 0;
-  const negative = numerator < 0n !== denominator < 0n;
-  const left = numerator < 0n ? -numerator : numerator;
-  const right = denominator < 0n ? -denominator : denominator;
-  let exponent = left.toString(2).length - right.toString(2).length;
-  if (exponent >= 0 ? left < right << BigInt(exponent) : left << BigInt(-exponent) < right) exponent--;
-  if (exponent > 1023) return negative ? Number.NEGATIVE_INFINITY : Number.POSITIVE_INFINITY;
-  if (exponent < -1075) return negative ? -0 : 0;
-  const unitExponent = Math.max(exponent - 52, -1074);
-  const shift = -unitExponent;
-  const scaledNumerator = shift >= 0 ? left << BigInt(shift) : left;
-  const scaledDenominator = shift >= 0 ? right : right << BigInt(-shift);
-  let significand = scaledNumerator / scaledDenominator;
-  const remainder = scaledNumerator % scaledDenominator;
-  const twice = remainder * 2n;
-  if (twice > scaledDenominator || (twice === scaledDenominator && significand % 2n !== 0n)) significand++;
-  if (significand === 0n) return negative ? -0 : 0;
-  return roundedDouble(negative ? -significand : significand, unitExponent);
+  const gcd = integerGcd(numerator, denominator);
+  const left = numerator / gcd;
+  const right = denominator / gcd;
+  const converted = Number(left);
+  const numeratorFixnum = left >= -(1n << 62n) && left < 1n << 62n;
+  const directDivisor = numeratorFixnum ? 1n << 53n : 1n << 62n;
+  if (
+    Number.isFinite(converted) &&
+    (numeratorFixnum ? right > -directDivisor : right >= -directDivisor) &&
+    right < directDivisor
+  )
+    return converted / Number(right);
+  const exponent = integerBits(right) - 64;
+  return scaledIntegerDivision(left, right >> BigInt(exponent), exponent);
+}
+
+export function integerFloatDivision(numerator: bigint, denominator: number): number {
+  const converted = Number(numerator);
+  if (Number.isFinite(converted) || Number.isNaN(denominator)) return converted / denominator;
+  if (denominator === 0) throw zeroDivisionError();
+  if (!Number.isFinite(denominator)) throw floatDomainError(String(denominator));
+  const [fraction, exponent] = frexpDouble(denominator);
+  return scaledIntegerDivision(numerator, BigInt(fraction * 2 ** 53), exponent - 53);
+}
+
+function scaledIntegerDivision(numerator: bigint, denominator: bigint, denominatorExponent: number): number {
+  let exponent = integerBits(numerator) - 128;
+  if (exponent > 32) exponent -= 32;
+  else if (exponent > 0) exponent = 0;
+  return ldexpDouble(Number((numerator >> BigInt(exponent)) / denominator), exponent - denominatorExponent);
 }
 
 export function floatStepCount(begin: number, end: number, step: number, exclusive = false): number {

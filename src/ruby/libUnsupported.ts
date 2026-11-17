@@ -1,8 +1,9 @@
-import { def } from './define';
+import { def, sdef } from './define';
+import { corePrivateMethods, RUBY_CORE_METHODS } from './rubyCoreMethods';
 import { UnsupportedFeatureError } from './runtime';
+import { unavailableMethod } from './unavailableMethod';
 
 for (const [owner, methods] of Object.entries({
-  Hash: ['compare_by_identity?', 'deconstruct_keys'],
   String: [
     'append_as_bytes',
     'byteindex',
@@ -19,9 +20,9 @@ for (const [owner, methods] of Object.entries({
   Integer: ['singleton_method_added'],
   Float: ['singleton_method_added'],
   Set: ['compare_by_identity', 'compare_by_identity?', 'divide'],
-  Symbol: ['encoding', 'match', 'match?'],
-  NilClass: ['rationalize', 'to_c', 'to_r'],
-  Proc: ['binding', 'ruby2_keywords', 'source_location'],
+  NilClass: ['rationalize', 'to_c'],
+  Proc: ['binding', 'ruby2_keywords', 'source_location', '>>', '<<'],
+  Hash: ['<', '<=', '>', '>='],
   Module: [
     'autoload',
     'autoload?',
@@ -42,3 +43,13 @@ for (const [owner, methods] of Object.entries({
     def(owner, name, [0, -1], () => {
       throw new UnsupportedFeatureError(`${owner}#${name}`);
     });
+
+for (const [owner, methods] of Object.entries(RUBY_CORE_METHODS)) {
+  for (const name of methods.instance)
+    def(owner, name, [0, -1], unavailableMethod(`${owner}#${name}`), {
+      ifMissing: true,
+      visibility: corePrivateMethods[owner]?.includes(name) ? 'private' : 'public',
+    });
+  for (const name of methods.singleton)
+    sdef(owner, name, [0, -1], unavailableMethod(`${owner}.${name}`), { ifMissing: true });
+}

@@ -1,3 +1,4 @@
+// code-gauge-allow-file fileNcss 524 -- Range bounds and iteration share representation and state; splitting registration by size would scatter that concern.
 import {
   combinedStringEncoding,
   compareValues,
@@ -9,6 +10,8 @@ import {
   rEquals,
   searchNumericSign,
   spaceship,
+  supportsImplicitConversion,
+  toFloat,
   toIndex,
   toSValue,
 } from './conversions';
@@ -16,14 +19,16 @@ import { def, sdef } from './define';
 import { argumentError, rangeError, typeError } from './errors';
 import { floatStepCount, fusedMultiplyAdd } from './floatMath';
 import { structuralHashValue } from './hashes';
-import { callBlock, callMethod, type Gen, invoke, makeRange, nativeProc, respondsTo, truthyValue } from './interp';
+import { callBlock, callMethod, type Gen, invoke, makeRange, nativeProc, truthyValue } from './interp';
 import { rangeHelpers, STOP, sum, toArray } from './libEnumerable';
 import { makeEnumerator, sizedEnumerator } from './libEnumerator';
+import { respondsToName } from './libMeta';
 import { kernelFloat } from './libNumeric';
-import { isRubyFloat, isRubyNumber, NIL, type RProc, RRange, RString, type Value } from './objects';
+import { fractionOf, isRational } from './libRational';
+import { isRubyFloat, isRubyNumber, NIL, type RObject, type RProc, RRange, RString, type Value } from './objects';
 import { rt, UnsupportedFeatureError } from './runtime';
 import { successorBytes } from './stringTransforms';
-import { arr, asciiString, isA, realClassOf, str, stringBytes, stringFromBytes } from './values';
+import { arr, asciiString, classOf, isA, realClassOf, str, stringBytes, stringFromBytes, sym, truthy } from './values';
 
 type Visit = (value: Value) => Gen<unknown>;
 
@@ -32,7 +37,7 @@ function* iterateRange(range: RRange, visit: Visit): Gen<void> {
   const { begin } = range;
   if (typeof begin === 'bigint') yield* iterateIntegers(range, begin, visit);
   else if (begin instanceof RString) yield* iterateStrings(range, begin, visit);
-  else if (begin === NIL || isRubyFloat(begin) || !respondsToSucc(begin)) {
+  else if (begin === NIL || isRubyFloat(begin) || !(yield* hasDynamicSuccessor(begin))) {
     throw typeError(`can't iterate from ${realClassOf(begin).name}`);
   } else {
     yield* iterateSuccessors(range, visit);
@@ -101,10 +106,6 @@ function* iterateSuccessors(range: RRange, visit: Visit): Gen<void> {
   }
 }
 
-function respondsToSucc(value: Value): boolean {
-  return respondsTo(value, 'succ');
-}
-
 rangeHelpers.iterateRange = iterateRange;
 
 def('Range', 'each', 0, function* (self: RRange, _args, block) {
@@ -130,7 +131,7 @@ def('Range', 'reverse_each', 0, function* (self: RRange, _args, block) {
     rt().heldArrays.pop();
   }
 });
-def('Range', ['to_a', 'to_ary', 'entries'], 0, function* (self: RRange) {
+def('Range', ['to_a', 'entries'], 0, function* (self: RRange) {
   if (self.end === NIL) throw rangeError('cannot convert endless range to an array');
   return arr(yield* toArray(self));
 });
@@ -185,6 +186,7 @@ def('Range', 'min', [0, 1], function* (self: RRange, args, block) {
   if (order === undefined || order > 0 || (order === 0 && self.exclusive)) return NIL;
   return self.begin;
 });
+// code-gauge-allow functionCognitiveComplexity 24 -- The ordered cases for Range bounds and iteration share state; splitting them solely for the metric would hide their sequencing.
 def('Range', 'max', [0, 1], function* (self: RRange, args, block) {
   if (self.begin === NIL && !block && args.length === 0) {
     if (self.end === NIL) throw rangeError('cannot get the maximum of endless range');
@@ -195,15 +197,25 @@ def('Range', 'max', [0, 1], function* (self: RRange, args, block) {
   }
   if (block || args.length > 0) return yield* callEnumerable(self, 'max', args, block);
   if (self.end === NIL) throw rangeError('cannot get the maximum of endless range');
+  if (self.exclusive && !isA(self.end, rt().c.Numeric)) return yield* callEnumerable(self, 'max', [], undefined);
   const order = yield* spaceship(self.begin, self.end);
-  if (order === undefined || order > 0 || (order === 0 && self.exclusive)) return NIL;
+  if (order === undefined || order > 0) return NIL;
   if (self.exclusive) {
-    if (typeof self.end === 'bigint' && typeof self.begin === 'bigint') return self.end - 1n;
-    if (isRubyFloat(self.end)) throw typeError('cannot exclude non Integer end value');
-    throw typeError('cannot exclude end value with non Integer begin value');
+    if (typeof self.end !== 'bigint') throw typeError('cannot exclude non Integer end value');
+    if (order === 0) return NIL;
+    if (typeof self.begin !== 'bigint') throw typeError('cannot exclude end value with non Integer begin value');
+    return self.end - 1n;
   }
   return self.end;
 });
+def('Range', 'minmax', 0, function* (self: RRange, _args, block) {
+  if (block) return yield* callEnumerable(self, 'minmax', [], block);
+  return arr([yield* callMethod(self, 'min', []), yield* callMethod(self, 'max', [])]);
+});
+
+function linearEndpoint(value: Value): boolean {
+  return value !== NIL && (isA(value, rt().c.Numeric) || isA(value, rt().c.Time));
+}
 
 function* callEnumerable(self: RRange, name: string, args: Value[], block: RProc | undefined): Gen {
   const method = rt().c.Enumerable.methods.get(name);
@@ -225,8 +237,8 @@ def('Range', 'sum', [0, 1], function* (self: RRange, args, block) {
   return yield* sum(self, args, block);
 });
 
-// code-gauge-allow functionCognitiveComplexity 21 -- Range size handles Integer, Float, beginless, endless, and exclusive bounds.
-export function rangeSize(range: RRange): Value {
+// code-gauge-allow functionCognitiveComplexity 29 -- Range size handles Integer, Float, beginless, endless, and exclusive bounds.
+export function* rangeSize(range: RRange): Gen<Value> {
   const { begin, end, exclusive } = range;
   if (typeof begin === 'bigint') {
     if (end === NIL) return Number.POSITIVE_INFINITY;
@@ -243,15 +255,36 @@ export function rangeSize(range: RRange): Value {
       if (exclusive && last === limit) size -= 1n;
       return size > 0n ? size : 0n;
     }
+    if (isRational(end)) {
+      return rationalRangeSize(begin, end, exclusive);
+    }
   }
-  if (isRubyFloat(begin)) throw typeError(`can't iterate from Float`);
+  if (!(yield* hasDynamicSuccessor(begin))) throw typeError(`can't iterate from ${realClassOf(begin).name}`);
   return NIL;
 }
 
-def('Range', 'size', 0, (self: RRange) => rangeSize(self));
+function* hasDynamicSuccessor(value: Value): Gen<boolean> {
+  const responder = classOf(value).findMethod('respond_to?');
+  return responder
+    ? truthy(yield* callMethod(value, 'respond_to?', [sym('succ')], undefined, undefined, { fcall: true }))
+    : yield* respondsToName(value, 'succ', false);
+}
+
+function rationalRangeSize(begin: bigint, end: RObject, exclusive: boolean): bigint {
+  const { numerator, denominator } = fractionOf(end);
+  const quotient = numerator / denominator;
+  const last = numerator < 0n && numerator % denominator !== 0n ? quotient - 1n : quotient;
+  const size = last - begin + (exclusive && numerator % denominator === 0n ? 0n : 1n);
+  return size > 0n ? size : 0n;
+}
+
+def('Range', 'size', 0, function* (self: RRange) {
+  return yield* rangeSize(self);
+});
 def('Range', 'count', [0, 1], function* (self: RRange, args, block) {
   if (args.length === 0 && !block) {
-    const size = rangeSize(self);
+    if (self.begin === NIL || self.end === NIL) return Number.POSITIVE_INFINITY;
+    const size = yield* rangeSize(self);
     if (size !== NIL) return size;
   }
   return yield* callEnumerable(self, 'count', args, block);
@@ -259,7 +292,8 @@ def('Range', 'count', [0, 1], function* (self: RRange, args, block) {
 def('Range', 'exclude_end?', 0, (self: RRange) => self.exclusive);
 def('Range', ['include?', 'member?'], 1, function* (self: RRange, [value]) {
   if (value instanceof RRange) return false;
-  if (isRubyNumber(self.begin) || self.begin === NIL) return yield* rangeCovers(self, value);
+  if (linearEndpoint(self.begin) || linearEndpoint(self.end) || self.begin === NIL)
+    return yield* rangeCovers(self, value);
   let found = false;
   yield* iterateRange(self, function* (item) {
     if (yield* rEquals(item, value)) {
@@ -273,6 +307,7 @@ def('Range', '===', 1, function* (self: RRange, [value]) {
   if (value instanceof RRange) return false;
   return yield* rangeCovers(self, value);
 });
+// code-gauge-allow functionCognitiveComplexity 23 -- The ordered cases for Range bounds and iteration share state; splitting them solely for the metric would hide their sequencing.
 def('Range', 'cover?', 1, function* (self: RRange, [value]) {
   if (value instanceof RRange) {
     if (value.begin !== NIL && value.end !== NIL) {
@@ -293,6 +328,7 @@ def('Range', 'cover?', 1, function* (self: RRange, [value]) {
 def('Range', 'inspect', 0, function* (self: RRange) {
   return str(yield* inspectRange(self));
 });
+// code-gauge-allow duplicateLines 26 -- Range rendering combines already-coerced fragments; Array join and warning output have separate incremental bounds and charging.
 def('Range', 'to_s', 0, function* (self: RRange) {
   const parts = [
     self.begin === NIL ? asciiString('') : yield* toSValue(self.begin),
@@ -358,6 +394,7 @@ function* rangeIsEmpty(value: RRange): Gen<boolean> {
   return order > 0 || (order === 0 && value.exclusive);
 }
 
+// code-gauge-allow functionNcss 48 -- The ordered cases for Range bounds and iteration share state; splitting them solely for the metric would hide their sequencing.
 function* bsearchInteger(begin: bigint | typeof NIL, end: bigint | typeof NIL, exclusive: boolean, block: RProc): Gen {
   let low: bigint;
   let high: bigint;
@@ -456,6 +493,7 @@ def('Range', 'hash', 0, function* (self: RRange) {
   return yield* structuralHashValue(self);
 });
 for (const method of ['step', '%'])
+  // code-gauge-allow functionCognitiveComplexity 20 -- The ordered cases for Range bounds and iteration share state; splitting them solely for the metric would hide their sequencing.
   def('Range', method, [0, 1], function* (self: RRange, args, block) {
     const step = args.length > 0 ? args[0] : 1n;
     const customBegin =
@@ -463,20 +501,50 @@ for (const method of ['step', '%'])
       typeof self.begin !== 'bigint' &&
       !isRubyFloat(self.begin) &&
       !(self.begin instanceof RString);
-    if (typeof step !== 'bigint' && !isRubyFloat(step) && !customBegin && !respondsTo(step, 'coerce', true))
+    if (
+      typeof step !== 'bigint' &&
+      !isRubyFloat(step) &&
+      !customBegin &&
+      !(yield* supportsImplicitConversion(step, 'coerce'))
+    )
       throw typeError('no implicit conversion of String into Integer');
-    if (isRubyNumber(step)) {
-      if (Number(step) < 0 && !isRubyNumber(self.begin)) throw argumentError("step can't be negative");
-      if (Number(step) === 0) throw argumentError("step can't be 0");
+    if (isNumericRangeOperand(step)) {
+      const sign = isRational(step)
+        ? fractionOf(step).numerator < 0n
+          ? -1
+          : fractionOf(step).numerator > 0n
+            ? 1
+            : 0
+        : Math.sign(Number(step));
+      if (sign < 0 && !isNumericRangeOperand(self.begin)) throw argumentError("step can't be negative");
+      if (sign === 0) throw argumentError("step can't be 0");
     }
     if (!block) return makeEnumerator(self, method, args);
     return yield* stepRange(self, step, block);
   });
 
+export function isNumericRangeOperand(value: Value): boolean {
+  return isRubyNumber(value) || isRational(value);
+}
+
 function* stepRange(self: RRange, step: Value, block: RProc): Gen {
   const { begin, end } = self;
   if (typeof begin === 'bigint' && typeof step === 'bigint' && (typeof end === 'bigint' || end === NIL)) {
     return yield* stepIntegerRange(self, begin, step, block);
+  }
+  if (
+    isNumericRangeOperand(begin) &&
+    isNumericRangeOperand(step) &&
+    (isNumericRangeOperand(end) || end === NIL) &&
+    [begin, end, step].some(isRubyFloat)
+  ) {
+    return yield* stepNumericRange(
+      self,
+      yield* toFloat(begin),
+      yield* toFloat(step),
+      block,
+      end === NIL ? undefined : yield* toFloat(end)
+    );
   }
   if (isRubyNumber(begin) && isRubyNumber(step) && (isRubyNumber(end) || end === NIL)) {
     return yield* stepNumericRange(self, Number(begin), Number(step), block);
@@ -504,16 +572,16 @@ function* stepIntegerRange(self: RRange, begin: bigint, step: bigint, block: RPr
   return self;
 }
 
-// code-gauge-allow functionCognitiveComplexity 22 -- Numeric Range bounds are directional and distinguish exclusive ends.
-function* stepNumericRange(self: RRange, start: number, by: number, block: RProc): Gen {
+// code-gauge-allow functionCognitiveComplexity 23 -- Numeric Range bounds are directional and distinguish exclusive ends.
+function* stepNumericRange(self: RRange, start: number, by: number, block: RProc, floatEnd?: number): Gen {
   const { end, exclusive } = self;
-  const count = end === NIL ? Number.POSITIVE_INFINITY : floatStepCount(start, Number(end), by, exclusive);
+  const boundary = floatEnd ?? Number(end);
+  const count = end === NIL ? Number.POSITIVE_INFINITY : floatStepCount(start, boundary, by, exclusive);
   if (Number.isNaN(count)) return self;
   for (let index = 0; index < count; index++) {
     rt().spend();
     let value = index === 0 ? start : fusedMultiplyAdd(index, by, start);
     if (end !== NIL) {
-      const boundary = Number(end);
       if (exclusive && !(index === 0 && !Number.isFinite(by)) && (by > 0 ? value >= boundary : value <= boundary))
         break;
       if (by > 0 ? value > boundary : value < boundary) value = boundary;
@@ -523,9 +591,11 @@ function* stepNumericRange(self: RRange, start: number, by: number, block: RProc
   return self;
 }
 
+// code-gauge-allow functionCognitiveComplexity 25 -- The ordered cases for Range bounds and iteration share state; splitting them solely for the metric would hide their sequencing.
 function* stepCustomRange(self: RRange, step: Value, block: RProc): Gen {
   const { end, exclusive } = self;
   let value = self.begin;
+  let descending = false;
   if (end !== NIL) {
     const initialOrder = yield* spaceship(value, end);
     if (initialOrder === 0) {
@@ -534,14 +604,20 @@ function* stepCustomRange(self: RRange, step: Value, block: RProc): Gen {
     }
     const next = yield* callMethod(value, '+', [step]);
     const progressOrder = yield* spaceship(value, next);
-    if (initialOrder === undefined || initialOrder > 0 || progressOrder === undefined || progressOrder >= 0)
+    if (
+      initialOrder === undefined ||
+      progressOrder === undefined ||
+      progressOrder === 0 ||
+      initialOrder < 0 !== progressOrder < 0
+    )
       return self;
+    descending = progressOrder > 0;
   }
   for (;;) {
     rt().spend();
     if (end !== NIL) {
       const order = yield* spaceship(value, end);
-      if (order === undefined || order > 0 || (exclusive && order === 0)) break;
+      if (order === undefined || (descending ? order < 0 : order > 0) || (exclusive && order === 0)) break;
       yield* callBlock(block, [value], false);
       if (order === 0) break;
     } else {
