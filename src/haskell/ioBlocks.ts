@@ -140,6 +140,7 @@ export function statementDone(machine: Machine, state: RunState, frame: DoFrame)
 }
 
 export function finishMatch(machine: Machine, state: RunState, frame: DoFrame): void {
+  if (frame.index + 1 < frame.code.stmts.length) frame.result = undefined;
   completeStatement(machine, frame);
   afterStatement(machine, state, frame);
 }
@@ -163,10 +164,7 @@ function afterStatement(machine: Machine, state: RunState, frame: DoFrame): void
 
 function advanceStatement(machine: Machine, state: RunState, frame: DoFrame): boolean {
   frame.index++;
-  if (frame.index < frame.code.stmts.length) {
-    frame.result = undefined;
-    return true;
-  }
+  if (frame.index < frame.code.stmts.length) return true;
   machine.stack.pop();
   unwindBlock(machine, frame);
   state.ioResult(frame.result as Slot);

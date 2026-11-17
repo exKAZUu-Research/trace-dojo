@@ -34,6 +34,7 @@ import type { LocalVar, RAlt, RBindGroup, RBinding, RClause, RExpr, RGuard, RPat
 import { RecursionBudget } from './recursionBudget';
 import { type DictBuilders, dictBuilders, type Runtime } from './runtime';
 import type { Span } from './syntax';
+import { mapGraph } from './typeGraph';
 import { prune, type Scheme, splitApp, type Type } from './types';
 import { chargeTypeWork } from './typeWorkBudget';
 import { type Dict, Env, HaskellException, type Slot, Thunk } from './values';
@@ -1241,21 +1242,27 @@ export class Codegen {
   }
 
   compileEvidence(evidence: Evidence): Core {
-    const resolved = resolveEvidence(evidence);
-    switch (resolved.kind) {
-      case 'param': {
-        return this.paramRef(resolved.param);
+    return mapGraph<Evidence, Core>(
+      evidence,
+      resolveEvidence,
+      (node) => (node.kind === 'super' ? [node.of] : node.kind === 'instance' ? node.args : []),
+      (node, mapped) => {
+        switch (node.kind) {
+          case 'param': {
+            return this.paramRef(node.param);
+          }
+          case 'instance': {
+            return { k: 'dict', instance: node.instance, args: mapped };
+          }
+          case 'super': {
+            return { k: 'super', dict: mapped[0], index: node.index };
+          }
+          case 'hole': {
+            throw new Error(`Unsolved constraint ${node.hole.pred.cls.name}`);
+          }
+        }
       }
-      case 'instance': {
-        return { k: 'dict', instance: resolved.instance, args: resolved.args.map((arg) => this.compileEvidence(arg)) };
-      }
-      case 'super': {
-        return { k: 'super', dict: this.compileEvidence(resolved.of), index: resolved.index };
-      }
-      case 'hole': {
-        throw new Error(`Unsolved constraint ${resolved.hole.pred.cls.name}`);
-      }
-    }
+    );
   }
 
   private methodOf(evidence: Evidence, cls: ClassEntity, name: string): Core {

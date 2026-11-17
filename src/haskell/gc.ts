@@ -1,5 +1,7 @@
+import { Map as PersistentMap } from 'immutable';
+
 import type { TurtleState } from '../interpreter/turtleWorld';
-import type { Core, IODoCore, LocalRef } from './core';
+import type { Core, IODoCore, IOStmt, LocalRef } from './core';
 import type { Frame } from './machine';
 import type { Runtime } from './runtime';
 import { chargeTypeWork } from './typeWorkBudget';
@@ -23,7 +25,6 @@ import { visibleVariables } from './visibleScope';
 
 const freeCache = new WeakMap<Core, LocalRef[]>();
 
-/** The variables a piece of code reads from its environment, relative to the frame it runs in. */
 export function freeVarsOf(code: Core): LocalRef[] {
   const pending: { code: Core; visited: boolean }[] = [{ code, visited: false }];
   while (pending.length > 0) {
@@ -62,7 +63,6 @@ function cachedNodeReferences(code: Core, children: [Core, boolean][]): LocalRef
   return [...refs.values()];
 }
 
-/** The code nested in a node, each telling whether it runs in a frame of its own. */
 function childCodes(code: Core): [Core, boolean][] {
   switch (code.k) {
     case 'app': {
@@ -97,13 +97,7 @@ function childCodes(code: Core): [Core, boolean][] {
       return outer([code.dict]);
     }
     case 'iodo': {
-      return code.stmts
-        .flatMap((stmt) =>
-          stmt.kind === 'let'
-            ? stmt.binds.map((bind) => bind.expr)
-            : [stmt.expr, ...(stmt.kind === 'bind' && stmt.matcher ? [stmt.matcher] : [])]
-        )
-        .map((child) => [child, true]);
+      return code.stmts.flatMap(statementCodes).map((child) => [child, true]);
     }
     default: {
       return [];
@@ -115,29 +109,35 @@ function outer(codes: Core[]): [Core, boolean][] {
   return codes.map((child) => [child, false]);
 }
 
-const liveCache = new WeakMap<IODoCore, LocalRef[][]>();
+const liveCache = new WeakMap<IODoCore, PersistentMap<string, LocalRef>[]>();
 
-/** The variables that a block's statements after the one at `index` read. */
-function liveAfter(block: IODoCore, index: number): LocalRef[] {
+function liveAfter(block: IODoCore, index: number): Iterable<LocalRef> {
   let byIndex = liveCache.get(block);
   if (!byIndex) {
     byIndex = [];
-    let live: LocalRef[] = [];
+    let live = PersistentMap<string, LocalRef>();
     for (let position = block.stmts.length - 1; position >= 0; position--) {
+      chargeTypeWork();
       byIndex[position] = live;
-      const stmt = block.stmts[position];
-      const own =
-        stmt.kind === 'let'
-          ? stmt.binds.flatMap((bind) => freeVarsOf(bind.expr))
-          : [...freeVarsOf(stmt.expr), ...(stmt.kind === 'bind' && stmt.matcher ? freeVarsOf(stmt.matcher) : [])];
-      live = [...live, ...own];
+      for (const code of statementCodes(block.stmts[position])) {
+        for (const ref of freeVarsOf(code)) {
+          chargeTypeWork();
+          const key = `${ref.depth}:${ref.index}`;
+          if (!live.has(key)) live = live.set(key, ref);
+        }
+      }
     }
     liveCache.set(block, byIndex);
   }
-  return byIndex[index] ?? [];
+  return byIndex[index]?.values() ?? [];
 }
 
-/** The turtles that the program's live variables and pending computations reach. */
+function statementCodes(stmt: IOStmt): Core[] {
+  return stmt.kind === 'let'
+    ? stmt.binds.map((bind) => bind.expr)
+    : [stmt.expr, ...(stmt.kind === 'bind' && stmt.matcher ? [stmt.matcher] : [])];
+}
+
 export function markReachable(runtime: Runtime, checkTime: () => void): Set<TurtleState> {
   const reached = new Set<TurtleState>();
   const seen = new Set<object>();
@@ -160,12 +160,14 @@ export function markReachable(runtime: Runtime, checkTime: () => void): Set<Turt
 
 type Push = (slot: Slot | undefined) => void;
 
-function pushRefs(refs: readonly LocalRef[], env: Env | undefined, push: Push): void {
+function pushRefs(refs: Iterable<LocalRef>, env: Env | undefined, push: Push): void {
   if (!env) return;
-  for (const ref of refs) push(env.at(ref.depth).slots[ref.index]);
+  for (const ref of refs) {
+    chargeTypeWork();
+    push(env.at(ref.depth).slots[ref.index]);
+  }
 }
 
-/** The roots: the variables each trace frame's running statement sees, and what the evaluator's stack holds. */
 function pushRoots(runtime: Runtime, push: Push): void {
   for (const frame of runtime.frames) {
     for (const [index, context] of frame.contexts.entries()) {
@@ -196,7 +198,6 @@ function pushStackFrame(frame: Frame, scannedEnvs: Set<Env>, push: Push): void {
   }
 }
 
-/** Pushes what a value refers to: a closure or a thunk only the variables its code reads. */
 // code-gauge-allow functionCognitiveComplexity 22 -- One branch per kind of runtime value.
 // code-gauge-allow functionNcss 39 -- One branch per kind of runtime value.
 function pushReferences(value: object, push: Push): void {
