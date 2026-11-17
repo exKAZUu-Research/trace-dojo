@@ -226,7 +226,7 @@ export class LiteralChecker {
     }
     const key = member.childForFieldName('name') ?? member.childForFieldName('key');
     const name = key
-      ? propertyNameText(key)
+      ? this.declaredMemberName(key)
       : member.type === 'shorthand_property_identifier'
         ? member.text
         : undefined;
@@ -386,6 +386,15 @@ export class LiteralChecker {
       return;
     }
     literal.properties.set(name, { ...this.literalProperty(name, methodType, false, member), isMethod: true });
+  }
+
+  /** The name of a member, read ahead of the check of the member itself without reporting or narrowing anything. */
+  private declaredMemberName(key: TreeNode): string | undefined {
+    let name: string | undefined;
+    this.c.flow.from(this.c.flow.current, () => {
+      name = this.c.silently(() => this.memberName(key));
+    });
+    return name;
   }
 
   /** The name of a member, which a computed key gives by its literal type. */
