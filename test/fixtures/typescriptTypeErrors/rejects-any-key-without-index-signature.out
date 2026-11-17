@@ -1,0 +1,13 @@
+(14,10): error TS7053: Element implicitly has an 'any' type because expression of type 'any' can't be used to index type 'Point'.
+(15,10): error TS7053: Element implicitly has an 'any' type because expression of type 'any' can't be used to index type 'Shape'.
+(20,10): error TS7053: Element implicitly has an 'any' type because expression of type 'any' can't be used to index type '() => number'.
+(21,10): error TS7053: Element implicitly has an 'any' type because expression of type 'any' can't be used to index type '{ a: number; }'.
+(22,11): error TS7053: Element implicitly has an 'any' type because expression of type 'any' can't be used to index type '{}'.
+(23,11): error TS7053: Element implicitly has an 'any' type because expression of type 'any' can't be used to index type 'Number'.
+(24,11): error TS7053: Element implicitly has an 'any' type because expression of type 'any' can't be used to index type 'typeof globalThis'.
+(25,11): error TS7053: Element implicitly has an 'any' type because expression of type 'any' can't be used to index type 'Math'.
+(26,11): error TS7052: Element implicitly has an 'any' type because type 'Map<string, number>' has no index signature. Did you mean to call 'get'?
+(27,1): error TS7053: Element implicitly has an 'any' type because expression of type 'any' can't be used to index type 'Point'.
+(28,1): error TS7053: Element implicitly has an 'any' type because expression of type 'any' can't be used to index type 'Shape'.
+(29,11): error TS7053: Element implicitly has an 'any' type because expression of type 'any' can't be used to index type 'Symbol'.
+(30,11): error TS7053: Element implicitly has an 'any' type because expression of type 'any' can't be used to index type 'Boolean'.

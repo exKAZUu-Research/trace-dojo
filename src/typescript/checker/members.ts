@@ -435,12 +435,6 @@ export class MemberChecker {
       const type = this.literalIndexedType(access, objectType, index.value, indexType);
       if (type) return type;
     }
-    if (isAnyLike(index)) {
-      const structure = this.c.structureOf(objectType);
-      if (structure.numberIndex) return structure.numberIndex.type;
-      if (structure.stringIndex) return structure.stringIndex.type;
-      return anyType;
-    }
     return this.computedIndexedType(access, objectType, index, indexType);
   }
 
