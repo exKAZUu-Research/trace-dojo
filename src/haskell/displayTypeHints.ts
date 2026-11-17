@@ -20,7 +20,7 @@ export type TypeHint =
     }
   | { tag: 'dictionaryType'; dict: Dict; runtime: Runtime; arguments?: TypeHint[] }
   | { tag: 'deferredMethodType'; dict: Slot; index: number; runtime: Runtime; resolved?: TypeHint }
-  | { tag: 'methodType'; parent: TypeHint; template: Type; parameters: number }
+  | { tag: 'methodType'; parent: TypeHint; template: Type; parameters: number; dictionaries: number }
   | { tag: 'applicationType'; parent: TypeHint; arguments: number };
 
 export interface TypeHintRef {

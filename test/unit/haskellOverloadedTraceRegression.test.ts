@@ -67,3 +67,18 @@ main=loop(0.1::Float)`;
   expect(result.traceItems.map(({ line }) => line)).toEqual([0, 5, 6, 5, 6]);
   expect(result.traceItems.at(-1)?.vars.i).toBe(0.2);
 });
+
+test('method-local constraints do not consume value arrows in display hints', () => {
+  const source = `import Control.Monad
+class C a where combine::Eq b=>a->b->a
+instance C Float where combine n x=if x==x then n+0.1 else n
+loop::C a=>a->IO ()
+loop n=do
+ forM_ [combine n True,combine n True] $ \\i->do
+  print(0::Int)
+main=loop(0.1::Float)`;
+  const result = traceProgram('haskell', source, source);
+  expect(result.stdout).toBe('0\n0\n');
+  expect(result.traceItems.map(({ line }) => line)).toEqual([0, 6, 7, 6, 7]);
+  expect(result.traceItems.at(-1)?.vars.i).toBe(0.2);
+});

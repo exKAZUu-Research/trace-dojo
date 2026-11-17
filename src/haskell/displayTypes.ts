@@ -4,7 +4,7 @@ import { type TypeHint, type TypeHintRef, UNKNOWN_TYPE } from './displayTypeHint
 import type { ConInfo } from './entities';
 import type { Runtime } from './runtime';
 import { mapGraph, mapGraphPairs } from './typeGraph';
-import { instantiateType, matchType, prune, splitApp, type Type, typeChildren } from './types';
+import { instantiateType, matchType, prune, splitApp, tap, tcon, type Type, typeChildren } from './types';
 import { type Dict, Env, type Slot, Thunk, TypedSlot, untypedSlot } from './values';
 
 export { UNKNOWN_TYPE } from './displayTypeHints';
@@ -41,6 +41,7 @@ export function methodTypeHint(dict: Dict, index: number, runtime: Runtime): Typ
     parent: dictionaryTypeHint(dict, runtime),
     template: scheme.type,
     parameters: scheme.kinds.length,
+    dictionaries: scheme.preds.length - 1,
   };
 }
 
@@ -97,10 +98,12 @@ function resolveHint(hint: TypeHint): Type {
           return dictionaryDisplayType(node.dict, mapped);
         }
         case 'methodType': {
-          return instantiateType(
+          let type = instantiateType(
             node.template,
             Array.from({ length: node.parameters }, (_, index) => (index === 0 ? mapped[0] : UNKNOWN_TYPE))
           );
+          for (let index = 0; index < node.dictionaries; index++) type = tap(tcon(FUNCTION_TYPE), UNKNOWN_TYPE, type);
+          return type;
         }
         case 'applicationType': {
           return applicationResultType(mapped[0], node.arguments);
