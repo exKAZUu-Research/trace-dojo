@@ -398,7 +398,6 @@ function tryClass(cls: (name: string) => ClassEntity, name: string): ClassEntity
 
 export interface CompiledProgram {
   main: GlobalDef;
-  previewBindingCount: number;
 }
 
 /** Compiles a program, throwing a `CompileError` for the errors GHC reports before running and for unsupported code. */
@@ -433,8 +432,7 @@ export function compileProgram(source: string, atomicRows?: ReadonlySet<number>,
     const misplaced = codegen.checkAtomicClaims();
     if (misplaced !== undefined) throw new CompileError([{ row: misplaced, message: misplacedHaskellAtomicMessage }]);
     assert.ok(checked.main);
-    const main = codegen.compileEntry(checked.main.entity, checked.main.evidence);
-    return { main, previewBindingCount: codegen.previewBindingCount };
+    return { main: codegen.compileEntry(checked.main.entity, checked.main.evidence) };
   });
 }
 

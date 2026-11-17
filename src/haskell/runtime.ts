@@ -8,7 +8,7 @@ import type { InstanceInfo } from './entities';
 import { markReachable } from './gc';
 import type { TraceContext } from './ioBlocks';
 import { Machine } from './machine';
-import { DisplayAbort, PreviewBudget } from './previewBudget';
+import { DisplayAbort, PreviewBudget, type PreviewView } from './previewBudget';
 import type { Type } from './types';
 import { withTypeWorkBudget } from './typeWorkBudget';
 import { Dict, type Env, type Slot, Thunk, type Value } from './values';
@@ -53,15 +53,14 @@ export class Runtime implements TracedRuntime<TraceFrame> {
   readonly steps = new StepTracker();
   readonly frames: TraceFrame[] = [];
   readonly machine: Machine;
-  displaysAnswer?: (name: string, slot: Slot, type: Type, previewOwner: object) => boolean;
+  displaysAnswer?: (name: string, slot: Slot, type: Type, previewOwner: object, frame: TraceFrame) => boolean;
   private readonly globals = new Map<GlobalDef, Slot>();
   private readonly dictCache = new Map<InstanceInfo, Dict>();
   private allocated = 0;
   private gcMilliseconds = 0;
-  private readonly previews: PreviewBudget;
+  private readonly previews = new PreviewBudget();
 
-  constructor(input?: ProgramInput, previewBindings = 1) {
-    this.previews = new PreviewBudget(previewBindings);
+  constructor(input?: ProgramInput) {
     this.io = new ProgramIO(this.budget, input);
     this.machine = new Machine(this);
   }
@@ -85,8 +84,16 @@ export class Runtime implements TracedRuntime<TraceFrame> {
     }
   }
 
-  withPreviewBudget<T>(owner: object, view: string, share: number, run: () => T): T {
-    return this.previews.run(owner, view, share, run);
+  beginPreviewStatement(owner: object, frame: TraceFrame): void {
+    this.previews.beginStatement(owner, frame);
+  }
+
+  endPreviewStatement(owner: object, frame: TraceFrame): void {
+    this.previews.endStatement(owner, frame);
+  }
+
+  withPreviewBudget<T>(view: PreviewView, run: () => T): T {
+    return this.previews.run(view, run);
   }
 
   forcePreview(slot: Thunk): Value {
@@ -163,7 +170,7 @@ export class Runtime implements TracedRuntime<TraceFrame> {
   /** Pops a trace frame; a call that returns from an atomic function leaves an effect the next step shows. */
   popFrame(frame: TraceFrame, returned = true): void {
     const index = this.frames.lastIndexOf(frame);
-    if (index !== -1) this.frames.splice(index);
+    if (index !== -1) for (const removed of this.frames.splice(index)) this.previews.endFrame(removed);
     if (returned && frame.isAtomic) this.steps.completeAtomicCall();
   }
 

@@ -17,7 +17,7 @@ export function executeHaskellProgram(source: string, input?: ProgramInput): Pro
     throw error;
   }
   try {
-    return { kind: 'executed', ...runProgram(new Runtime(input, compiled.previewBindingCount), compiled) };
+    return { kind: 'executed', ...runProgram(new Runtime(input), compiled) };
   } catch (error) {
     if (error instanceof ExecutionLimitError) return { kind: 'limitExceeded', limit: error.limit };
     throw error;
@@ -43,7 +43,7 @@ export function runProgram(
   }
   onEnd?.(runtime.frames[0]);
   runtime.collectGarbage();
-  runtime.frames.length = 0;
+  while (runtime.frames.length > 0) runtime.popFrame(runtime.frames.at(-1)!, false);
   return {
     finalBoard: runtime.world.boardText(),
     finalTurtles: runtime.world.turtleTraces(),

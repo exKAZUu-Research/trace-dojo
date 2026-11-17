@@ -1063,6 +1063,48 @@ main=forM_ [1..1000::Int] $ \\i -> do
   }
 );
 
+test.each([
+  ['before', 'ready'],
+  ['before', 'computed'],
+  ['after', 'ready'],
+  ['never', 'ready'],
+  ['locals', 'ready'],
+  ['locals', 'blocked'],
+  ['sequence', 'computed'],
+])('inactive declarations do not hide active loop values: %s %s', (order, valueKind) => {
+  const helpers = Array.from(
+    { length: 5 },
+    (_, j) => `f${j}=do\n let x=${valueKind === 'computed' ? `sum [1..10::Int]+${j}` : `${j}::Int`}\n print x`
+  ).join('\n');
+  const calls = Array.from({ length: 5 }, (_, j) => ` f${j}`).join('\n');
+  const locals = Array.from(
+    { length: 5 },
+    (_, j) => ` let x${j}=${valueKind === 'blocked' ? `map (\\n->sum [1..10000::Int]+n+${j}) [1..]` : `${j}::Int`}`
+  ).join('\n');
+  const entry = order === 'sequence' ? 'main=sequence_ [f0,f1,f2,f3,f4,work]\nwork=do' : 'main=do';
+  const source = `import Control.Monad
+${entry}
+${order === 'locals' ? locals : order === 'before' ? calls : ''}
+ forM_ [1..1000::Int] $ \\i -> do
+  let n=sum [1..10::Int]+i
+  print i
+${order === 'after' ? calls : ''}
+${helpers}`;
+  const execution = executeProgram('haskell', source);
+  expect(execution.kind).toBe('executed');
+  if (execution.kind !== 'executed') return;
+  const recording = traceProgram('haskell', source, source);
+  expect(recording.uncaughtException).toBeUndefined();
+  expect(recording.stdout).toBe(execution.stdout);
+  const line = source.split('\n').findIndex((text) => text.includes('let n=')) + 1;
+  const assignments = recording.traceItems.filter((item) => item.line === line);
+  expect(assignments).toHaveLength(1000);
+  for (const [index, item] of assignments.entries()) {
+    expect(item.vars.i).toBe(index + 1);
+    expect(item.vars.n).toBe(index + 56);
+  }
+});
+
 test.each([20, 30, 77])('demanded scalar previews preserve every loop assignment: sum 1..%i', (count) => {
   const source = `import Control.Monad
 main=forM_ [1..1000::Int] $ \\i -> do

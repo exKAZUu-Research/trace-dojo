@@ -2,8 +2,8 @@ import { LIMITS } from '../interpreter/limits';
 import { type Thunk, type Value } from './values';
 
 interface PreviewFamily {
+  activeScopes: number;
   operations: number;
-  operationLimit: number;
   milliseconds: number;
   timeLimit: number;
   views: Map<string, PreviewUsage>;
@@ -12,9 +12,21 @@ interface PreviewFamily {
 interface PreviewUsage {
   family: PreviewFamily;
   operations: number;
-  operationLimit: number;
+  share: number;
   milliseconds: number;
   timeLimit: number;
+}
+
+export interface PreviewView {
+  owner: object;
+  frame: object;
+  key: string;
+  share: number;
+}
+
+interface PreviewScope {
+  statement: object | undefined;
+  families: Set<PreviewFamily>;
 }
 
 interface PreviewCost {
@@ -23,6 +35,7 @@ interface PreviewCost {
 }
 
 interface PreviewTransaction {
+  scope: PreviewScope;
   usage: PreviewUsage;
   deadline: number;
   forcing: boolean;
@@ -59,13 +72,28 @@ export class PreviewBudget {
   private readonly aborted = new WeakMap<Thunk, WeakSet<PreviewUsage>>();
   private milliseconds = 0;
   private active: PreviewTransaction | undefined;
-  private readonly familyLimit: number;
-  private readonly familyTimeLimit: number;
+  private operations = 0;
+  private readonly scopes = new Map<object, PreviewScope>();
+  private activeFamilies = 0;
+  private readonly familyTimeLimit = LIMITS.maxMilliseconds / 2;
 
-  constructor(bindings: number) {
-    const count = Math.max(1, bindings);
-    this.familyLimit = LIMITS.maxOperations / count;
-    this.familyTimeLimit = LIMITS.maxMilliseconds / 2;
+  beginStatement(statement: object, frame: object): void {
+    const scope = this.scopeFor(frame);
+    scope.statement ??= statement;
+  }
+
+  endStatement(statement: object, frame: object): void {
+    if (this.scopes.get(frame)?.statement === statement) this.endFrame(frame);
+  }
+
+  endFrame(frame: object): void {
+    const scope = this.scopes.get(frame);
+    if (!scope) return;
+    this.scopes.delete(frame);
+    for (const family of scope.families) {
+      family.activeScopes--;
+      if (family.activeScopes === 0) this.activeFamilies--;
+    }
   }
 
   spend(operations: number, executionOperations: number, allocations: number): void {
@@ -75,6 +103,7 @@ export class PreviewBudget {
       const { usage } = active;
       usage.operations += operations;
       usage.family.operations += operations;
+      this.operations += operations;
       const debt = active.frames.at(-1)?.debt;
       if (debt) {
         const previous = debt.costs.at(-1);
@@ -92,6 +121,11 @@ export class PreviewBudget {
     const active = this.active;
     if (!active) throw new Error('Preview evaluation requires a display view');
     if (this.aborted.get(slot)?.has(active.usage)) throw new DisplayAbort();
+    const family = active.usage.family;
+    if (!active.scope.families.has(family)) {
+      active.scope.families.add(family);
+      if (family.activeScopes++ === 0) this.activeFamilies++;
+    }
     if (this.remainingOperations(active.usage) <= 0) throw new DisplayAbort();
     const savedForcing = active.forcing;
     active.forcing = true;
@@ -112,9 +146,9 @@ export class PreviewBudget {
     }
   }
 
-  run<T>(owner: object, view: string, share: number, work: () => T): T {
+  run<T>(view: PreviewView, work: () => T): T {
     if (this.active) return work();
-    const usage = this.usageFor(owner, view, share);
+    const usage = this.usageFor(view.owner, view.key, view.share);
     const remainingTime = Math.min(
       LIMITS.maxMilliseconds - this.milliseconds,
       usage.timeLimit - usage.milliseconds,
@@ -123,6 +157,7 @@ export class PreviewBudget {
     if (remainingTime <= 0) throw new DisplayAbort();
     const started = performance.now();
     this.active = {
+      scope: this.scopeFor(view.frame),
       usage,
       deadline: started + remainingTime,
       forcing: false,
@@ -189,10 +224,7 @@ export class PreviewBudget {
       const current = pending.pop() as PreviewDebt;
       if (current.consumed) continue;
       current.consumed = true;
-      for (const { usage, operations } of current.costs) {
-        usage.operations -= operations;
-        usage.family.operations -= operations;
-      }
+      for (const cost of current.costs) this.refund(cost);
       executionOperations += current.executionOperations;
       allocations += current.allocations;
       for (const dependency of current.dependencies) pending.push(dependency);
@@ -202,12 +234,32 @@ export class PreviewBudget {
     return { operations: executionOperations, allocations };
   }
 
+  private refund({ usage, operations }: PreviewCost): void {
+    if (operations > 0) {
+      const milliseconds = (usage.milliseconds * operations) / usage.operations;
+      usage.milliseconds -= milliseconds;
+      usage.family.milliseconds = Math.max(0, usage.family.milliseconds - milliseconds);
+    }
+    usage.operations -= operations;
+    usage.family.operations -= operations;
+    this.operations -= operations;
+  }
+
+  private scopeFor(frame: object): PreviewScope {
+    let scope = this.scopes.get(frame);
+    if (!scope) {
+      scope = { statement: undefined, families: new Set() };
+      this.scopes.set(frame, scope);
+    }
+    return scope;
+  }
+
   private usageFor(owner: object, view: string, share: number): PreviewUsage {
     let family = this.families.get(owner);
     if (!family) {
       family = {
+        activeScopes: 0,
         operations: 0,
-        operationLimit: this.familyLimit,
         milliseconds: 0,
         timeLimit: this.familyTimeLimit,
         views: new Map(),
@@ -215,13 +267,12 @@ export class PreviewBudget {
       this.families.set(owner, family);
     }
     let usage = family.views.get(view);
-    const operationLimit = family.operationLimit * share;
     const timeLimit = family.timeLimit * share;
     if (!usage) {
-      usage = { family, operations: 0, operationLimit, milliseconds: 0, timeLimit };
+      usage = { family, operations: 0, share, milliseconds: 0, timeLimit };
       family.views.set(view, usage);
     } else {
-      usage.operationLimit = Math.min(usage.operationLimit, operationLimit);
+      usage.share = Math.min(usage.share, share);
       usage.timeLimit = Math.min(usage.timeLimit, timeLimit);
     }
     return usage;
@@ -243,6 +294,11 @@ export class PreviewBudget {
   }
 
   private remainingOperations(usage: PreviewUsage): number {
-    return Math.min(usage.operationLimit - usage.operations, usage.family.operationLimit - usage.family.operations);
+    const limit = LIMITS.maxOperations / Math.max(2, this.activeFamilies);
+    return Math.min(
+      LIMITS.maxOperations - this.operations,
+      limit * usage.share - usage.operations,
+      limit - usage.family.operations
+    );
   }
 }

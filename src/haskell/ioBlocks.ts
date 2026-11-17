@@ -61,7 +61,7 @@ export function runBlock(machine: Machine, state: RunState, action: IODo): void 
   if (action.code.bindingRow !== undefined) {
     runtime.steps.stepBinding(
       action.code.bindingRow,
-      storesAnswer(runtime, env, action.code.entryVisible, action.code.bindingNames ?? [])
+      storesAnswer(runtime, env, action.code.entryVisible, action.code.bindingNames ?? [], frame.traceFrame)
     );
   }
   startStatement(machine, state, frame);
@@ -106,6 +106,7 @@ function tailSelfCallers(
 
 function startStatement(machine: Machine, state: RunState, frame: DoFrame): void {
   do {
+    machine.runtime.beginPreviewStatement(frame, frame.traceFrame);
     const stmt = frame.code.stmts[frame.index];
     const context = frame.traceFrame.contexts.at(-1) as TraceContext;
     context.visible = stmt.visible;
@@ -157,6 +158,7 @@ function afterStatement(machine: Machine, state: RunState, frame: DoFrame): void
 }
 
 function advanceStatement(machine: Machine, state: RunState, frame: DoFrame): boolean {
+  machine.runtime.endPreviewStatement(frame, frame.traceFrame);
   frame.index++;
   if (frame.index < frame.code.stmts.length) return true;
   machine.stack.pop();
@@ -167,16 +169,29 @@ function advanceStatement(machine: Machine, state: RunState, frame: DoFrame): bo
 
 export function unwindBlock(machine: Machine, frame: DoFrame): void {
   const runtime = machine.runtime;
+  runtime.endPreviewStatement(frame, frame.traceFrame);
   if (frame.tailCalled) return;
   if (!frame.pushedTraceFrame) frame.traceFrame.contexts.pop();
   else if (runtime.frames[0] !== frame.traceFrame) runtime.popFrame(frame.traceFrame);
 }
 
-function storesAnswer(runtime: Runtime, env: Env, visible: VisibleScope, names: readonly string[]): boolean {
-  return !!runtime.steps.recorder && names.some((name) => bindingDisplaysAnswer(runtime, env, visible, name));
+function storesAnswer(
+  runtime: Runtime,
+  env: Env,
+  visible: VisibleScope,
+  names: readonly string[],
+  frame: TraceFrame
+): boolean {
+  return !!runtime.steps.recorder && names.some((name) => bindingDisplaysAnswer(runtime, env, visible, name, frame));
 }
 
-function bindingDisplaysAnswer(runtime: Runtime, env: Env, visible: VisibleScope, name: string): boolean {
+function bindingDisplaysAnswer(
+  runtime: Runtime,
+  env: Env,
+  visible: VisibleScope,
+  name: string,
+  frame: TraceFrame
+): boolean {
   try {
     const candidate = runtime.withDisplayBudget(20_000, () => {
       runtime.spend();
@@ -190,7 +205,7 @@ function bindingDisplaysAnswer(runtime: Runtime, env: Env, visible: VisibleScope
     return (
       candidate !== undefined &&
       (candidate.scalar ||
-        runtime.displaysAnswer?.(name, candidate.slot, candidate.type, candidate.previewOwner) === true)
+        runtime.displaysAnswer?.(name, candidate.slot, candidate.type, candidate.previewOwner, frame) === true)
     );
   } catch (error) {
     if (error instanceof DisplayAbort) return false;
