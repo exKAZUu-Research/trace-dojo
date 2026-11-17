@@ -1561,6 +1561,12 @@ function main() {
 main();`,
   ],
   [
+    'inherited getters run on the inspected instance',
+    `class C { #s = 7; v = 3; get double() { return this.v * 2; } get secret() { return this.#s; } }
+console.dir(new C(), { showHidden: true, getters: true });
+console.dir(new C(), { getters: true });`,
+  ],
+  [
     'inherited properties under showHidden and sorted collections',
     `const proto = {}; Object.defineProperty(proto, "hidden", { value: 3 });
 console.dir(Object.create(proto), { showHidden: true });

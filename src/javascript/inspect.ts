@@ -284,7 +284,8 @@ function appendProperties(
   keys: [JsObject, Key][],
   recurseTimes: number
 ): void {
-  const properties = keys.map(([owner, key]) => formatProperty(ctx, owner, recurseTimes, key));
+  // An inherited accessor's getter runs on the inspected object, as Node.js calls it.
+  const properties = keys.map(([owner, key]) => formatProperty(ctx, owner, recurseTimes, key, value));
   if (ctx.sorted && value.collection) {
     output.push(...properties);
     output.sort();
@@ -719,7 +720,7 @@ function promiseEntry(ctx: Context, state: PromiseState, recurseTimes: number): 
 }
 
 // code-gauge-allow functionCognitiveComplexity 20 -- Ports Node.js's util.inspect, so the two stay comparable.
-function formatProperty(ctx: Context, object: JsObject, recurseTimes: number, key: Key): string {
+function formatProperty(ctx: Context, object: JsObject, recurseTimes: number, key: Key, receiver = object): string {
   const property = object.properties.get(key);
   let text = 'undefined';
   let separator = ' ';
@@ -729,7 +730,7 @@ function formatProperty(ctx: Context, object: JsObject, recurseTimes: number, ke
     text = formatIndented(ctx, property.value, recurseTimes, diff);
     if (diff === 3 && ctx.breakLength < text.length) separator = `\n${' '.repeat(ctx.indentationLvl + diff)}`;
   } else if (property && isAccessor(property)) {
-    text = formatAccessor(ctx, object, property, recurseTimes);
+    text = formatAccessor(ctx, receiver, property, recurseTimes);
   }
   // A symbol key shows its description with control characters escaped, unlike a symbol value.
   const symbolKey = typeof key === 'symbol' ? escapeControls(key.toString()) : undefined;
