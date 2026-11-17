@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 410 -- Resolves every kind of type syntax a program writes, each needing its own rule.
+// code-gauge-allow-file fileNcss 431 -- Resolves every kind of type syntax a program writes, each needing its own rule.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import { unsupportedMessage } from '../unsupported';
@@ -8,6 +8,7 @@ import { IndexedAccessKeys } from './indexedAccessKeys';
 import { isPatternKey } from './indexInfos';
 import { InterfaceBases } from './interfaceBases';
 import { withDomMembers } from './library';
+import { RecursiveAliases } from './recursiveAliases';
 import type { Sym } from './scopes';
 import { nameSuggestionHint } from './spelling';
 import { hasToken, named, numberValue, propertyNameText, stringValue } from './syntax';
@@ -107,10 +108,12 @@ export class TypeNodes {
 
   private readonly indexedAccessKeys: IndexedAccessKeys;
   readonly interfaceBases: InterfaceBases;
+  private readonly recursiveAliases: RecursiveAliases;
 
   constructor(private readonly c: Checker) {
     this.indexedAccessKeys = new IndexedAccessKeys(c);
     this.interfaceBases = new InterfaceBases(c);
+    this.recursiveAliases = new RecursiveAliases(c);
   }
 
   /** How many array, tuple, and type argument nodes enclose the type node being resolved. */
@@ -122,7 +125,10 @@ export class TypeNodes {
     const defers = deferringTypeNodes.has(node.type);
     if (defers) this.deferredDepth++;
     try {
-      const type = this.computeTypeFromNode(node);
+      let type = this.computeTypeFromNode(node);
+      // `readonly T[]` is one reference, which the outer node makes.
+      if ((defers || node.type === 'generic_type') && node.parent?.type !== 'readonly_type')
+        type = this.recursiveAliases.deferred(type);
       this.typeNodeCache.set(node.id, type);
       return type;
     } finally {
@@ -153,10 +159,25 @@ export class TypeNodes {
   private genericType(node: TreeNode): Type {
     const name = node.childForFieldName('name') as TreeNode;
     const argumentsNode = node.childForFieldName('type_arguments');
-    const typeArguments = argumentsNode ? named(argumentsNode).map((argument) => this.typeFromNode(argument)) : [];
+    const typeArguments = argumentsNode ? this.typeArgumentsOf(name, argumentsNode) : [];
     return name.type === 'nested_type_identifier'
       ? this.qualifiedType(name)
       : this.typeReference(node, name, typeArguments);
+  }
+
+  /**
+   * The type arguments of a type reference. Those of an interface or a class, as `Array<Tree>`, are deferred like an
+   * array's element type, but an alias's are not, as `type R = Record<string, R>` is circular.
+   */
+  private typeArgumentsOf(name: TreeNode, argumentsNode: TreeNode): Type[] {
+    const kind = name.type === 'type_identifier' ? this.c.scopeOf(name).lookupType(name.text)?.typeKind : undefined;
+    const defers = kind === 'interface' || kind === 'class';
+    if (defers) this.deferredDepth++;
+    try {
+      return named(argumentsNode).map((argument) => this.typeFromNode(argument));
+    } finally {
+      if (defers) this.deferredDepth--;
+    }
   }
 
   private readonlyType(node: TreeNode): Type {
@@ -619,12 +640,7 @@ export class TypeNodes {
         break;
       }
       case 'alias': {
-        if (symbol.resolving) {
-          // An array or a type argument may refer to the alias it is part of, as `type Json = … | Json[]` does.
-          if (symbol.pendingUnion && this.deferredDepth > 0) return symbol.pendingUnion;
-          this.c.error(symbol.typeDeclarations[0], `型エイリアス ${symbol.name} が自分自身を参照しています。`);
-          return errorType;
-        }
+        if (symbol.resolving) return this.aliasSelfReference(symbol);
         symbol.declaredType ??= this.aliasType(symbol);
         break;
       }
@@ -633,6 +649,19 @@ export class TypeNodes {
       }
     }
     return symbol.declaredType;
+  }
+
+  /** What a reference to an alias inside its own declaration stands for. */
+  private aliasSelfReference(symbol: Sym): Type {
+    // An array or a type argument may refer to the alias it is part of, as `type Json = … | Json[]` does.
+    if (this.deferredDepth > 0) {
+      if (symbol.pendingUnion) return symbol.pendingUnion;
+      // Instantiating a generic alias that holds itself would never end.
+      const value = symbol.typeDeclarations[0].childForFieldName('value');
+      if (value && isOutsideGenericDeclarations(value)) return this.recursiveAliases.pendingTypeOf(symbol);
+    }
+    this.c.error(symbol.typeDeclarations[0], `型エイリアス ${symbol.name} が自分自身を参照しています。`);
+    return errorType;
   }
 
   /** A DOM interface the program does not merge into, whose members the library leaves out. */
@@ -654,7 +683,8 @@ export class TypeNodes {
     symbol.resolving = false;
     symbol.pendingUnion = undefined;
     if (pending) pending.types = type.kind === 'union' ? type.types : [type];
-    return aliasedDeclaredType(type, symbol.name, this.c.signatures.typeParametersOfSymbol(symbol));
+    const declared = aliasedDeclaredType(type, symbol.name, this.c.signatures.typeParametersOfSymbol(symbol));
+    return this.recursiveAliases.complete(symbol, declared);
   }
 
   interfaceType(symbol: Sym): ObjectType {
@@ -711,7 +741,7 @@ function isMappedMember(member: TreeNode): boolean {
 }
 
 /** The type nodes whose element types TypeScript resolves later, which lets an alias refer to itself inside them. */
-const deferringTypeNodes = new Set(['array_type', 'tuple_type', 'type_arguments', 'readonly_type']);
+const deferringTypeNodes = new Set(['array_type', 'tuple_type', 'readonly_type']);
 
 /** The check and extends types of a conditional type inside the one-element tuples both are wrapped in, as `[X] extends [C]`. */
 function unwrapUnaryTuples(check: TreeNode, extendsNode: TreeNode): [TreeNode, TreeNode] {

@@ -1,0 +1,28 @@
+type Tree = Tree[];
+type Nested = Array<Nested>;
+type Frozen = readonly Frozen[];
+type List = [number, List?];
+type Table = Map<string, Table>;
+type Boxed = { value: number }[] | Boxed[];
+interface Box<T> {
+  value: T;
+}
+type Chain = Box<Chain | undefined>;
+
+const tree: Tree = [[], [[]]];
+const nested: Nested = [[[]]];
+const frozen: Frozen = [[], []];
+const list: List = [1, [2, [3]]];
+const table: Table = new Map([["a", new Map()]]);
+const boxed: Boxed = [[{ value: 1 }]];
+const chain: Chain = { value: { value: undefined } };
+
+function depth(t: Tree): number {
+  return t.length === 0 ? 0 : 1 + Math.max(...t.map(depth));
+}
+function sum(l: List): number {
+  return l[0] + (l[1] ? sum(l[1]) : 0);
+}
+const other: Nested = tree;
+console.log(tree, depth(tree), depth(other), nested.length, frozen.length);
+console.log(sum(list), table.get("a")?.size, boxed.length, chain.value?.value);
