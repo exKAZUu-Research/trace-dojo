@@ -3,6 +3,7 @@ import { DONE } from './iteration';
 import type { RealmBuilder } from './realm';
 import { defineArrayCopies } from './realmArrayCopies';
 import { defineArrayIterations } from './realmArrayIterations';
+import { objectToString } from './realmGlobals';
 import { WELL_KNOWN_SYMBOLS } from './realmIterators';
 import type { Runtime } from './runtime';
 import {
@@ -51,12 +52,29 @@ export type ArrayMethod = (call: NativeCall, ops: ArrayOps) => Value;
 export function arrayMethod(builder: RealmBuilder, name: string, length: number, run: ArrayMethod): void {
   builder.method(builder.realm.arrayPrototype, name, length, (call) => {
     const { runtime, thisValue } = call;
-    if (thisValue === undefined || thisValue === null) {
+    if ((thisValue === undefined || thisValue === null) && NAMED_RECEIVER_ERRORS.has(name)) {
       return runtime.throwError('TypeError', `Array.prototype.${name} called on null or undefined`);
     }
     return run(call, new ArrayOps(runtime, runtime.toObject(thisValue)));
   });
 }
+
+/** The methods whose V8 error for a null or undefined receiver names them; the others report ToObject's error. */
+const NAMED_RECEIVER_ERRORS = new Set([
+  'concat',
+  'every',
+  'filter',
+  'find',
+  'findIndex',
+  'findLast',
+  'findLastIndex',
+  'forEach',
+  'indexOf',
+  'map',
+  'reduce',
+  'reduceRight',
+  'some',
+]);
 
 /** A new array that the builder's steps fill through {@link ArrayOps}, held so that its values stay reachable. */
 export function buildArray(runtime: Runtime, build: (ops: ArrayOps) => void): JsArray {
@@ -367,24 +385,25 @@ export function flattenInto(
 }
 
 function defineSearches(builder: RealmBuilder): void {
-  arrayMethod(builder, 'join', 1, ({ runtime, args }, ops) => joinArray(runtime, ops, args[0], new Set()));
-  arrayMethod(builder, 'toString', 0, ({ runtime }, ops) => joinArray(runtime, ops, undefined, new Set()));
-  // Each element formats with its own toLocaleString, given the locales and options the array was given.
-  arrayMethod(builder, 'toLocaleString', 0, ({ runtime, args }, ops) => {
+  arrayMethod(builder, 'join', 1, ({ runtime, args }, ops) => {
+    // The length is read before the separator's conversion, which may run the program's code and change the array.
     const { length } = ops;
-    runtime.scan(length);
-    let text = '';
-    for (let index = 0; index < length; index++) {
-      const element = ops.get(index);
-      const part =
-        element === undefined || element === null
-          ? ''
-          : runtime.toString(runtime.call(runtime.get(element, 'toLocaleString'), element, args));
-      runtime.extendString(text.length + part.length + 1, part.length + 1);
-      text += (index > 0 ? ',' : '') + part;
-    }
-    return text;
+    const separator = args[0] === undefined ? ',' : runtime.toString(args[0]);
+    return cycleProtectedJoin(runtime, ops, length, separator, (element) => runtime.toString(element));
   });
+  arrayMethod(builder, 'toString', 0, ({ runtime }, ops) => {
+    const join = runtime.get(ops.array, 'join');
+    return isCallable(join) ? runtime.call(join, ops.array, []) : objectToString(runtime, ops.array);
+  });
+  // V8 passes each element's toLocaleString both the locales and the options, even when the array was given neither.
+  arrayMethod(builder, 'toLocaleString', 0, ({ runtime, args, callRow }, ops) =>
+    cycleProtectedJoin(runtime, ops, ops.length, ',', (element) => {
+      const method = runtime.get(element, 'toLocaleString');
+      if (!isCallable(method))
+        return runtime.throwError('TypeError', `${runtime.describeTyped(method)} is not a function`);
+      return runtime.toString(runtime.call(method, element, [args[0], args[1]], callRow));
+    })
+  );
   arrayMethod(builder, 'at', 1, ({ runtime, args }, ops) => {
     const { length } = ops;
     const relative = toInteger(runtime, args[0]);
@@ -427,20 +446,31 @@ function includes(runtime: Runtime, ops: ArrayOps, args: Value[]): boolean {
   return false;
 }
 
-function joinArray(runtime: Runtime, ops: ArrayOps, separatorValue: Value, joining: Set<JsObject>): string {
-  if (joining.has(ops.array)) return '';
-  // The length is read before any conversion, which may run the program's code and change the array.
-  const { length } = ops;
-  const separator = separatorValue === undefined ? ',' : runtime.toString(separatorValue);
+/**
+ * V8's CycleProtectedArrayJoin: joins the formatted elements below `length`, formatting absent and nullish ones as
+ * empty, while an array whose join, toString, or toLocaleString is already running anywhere in the runtime joins as
+ * empty, so that cyclic arrays format as V8 formats them.
+ */
+function cycleProtectedJoin(
+  runtime: Runtime,
+  ops: ArrayOps,
+  length: number,
+  separator: string,
+  format: (element: Value) => string
+): string {
+  let joining = joiningArrays.get(runtime);
+  if (!joining) {
+    joining = new Set();
+    joiningArrays.set(runtime, joining);
+  }
+  if (length === 0 || joining.has(ops.array)) return '';
   joining.add(ops.array);
   runtime.scan(length);
   try {
     let text = '';
     for (let index = 0; index < length; index++) {
       const element = ops.get(index);
-      let part = index > 0 ? separator : '';
-      if (element instanceof JsArray) part += joinArray(runtime, new ArrayOps(runtime, element), undefined, joining);
-      else if (element !== undefined && element !== null) part += runtime.toString(element);
+      const part = (index > 0 ? separator : '') + (element === undefined || element === null ? '' : format(element));
       runtime.extendString(text.length + part.length, part.length);
       text += part;
     }
@@ -449,3 +479,5 @@ function joinArray(runtime: Runtime, ops: ArrayOps, separatorValue: Value, joini
     joining.delete(ops.array);
   }
 }
+
+const joiningArrays = new WeakMap<Runtime, Set<JsObject>>();

@@ -338,26 +338,30 @@ export class Runtime {
     return undefined;
   }
 
-  /** Assigns an element, which a frozen array refuses and a non-extensible one refuses where it has none. */
-  // code-gauge-allow functionCognitiveComplexity 19 -- Transcribes the spec's array element assignment, whose refusals mirror its steps.
+  /**
+   * The spec's OrdinarySet of an element: an own element, or for an absent one the nearest prototype's property, may
+   * be an accessor or read-only; otherwise the element is written, which a non-extensible array refuses where it has
+   * none and a read-only length refuses beyond the length.
+   */
+  // code-gauge-allow functionCognitiveComplexity 16 -- Transcribes the spec's array element assignment, whose refusals mirror its steps.
   setElement(array: JsArray, index: number, value: Value, strict = true): void {
     const { elements } = array;
-    if (index >= elements.length || elements[index] === HOLE) {
-      if (!array.extensible) {
-        this.refuse(strict, `Cannot add property ${index}, object is not extensible`);
-        return;
-      }
-    } else if (array.frozen || array.definedElements?.has(index)) {
-      const defined = array.definedElements?.get(index);
-      if (defined && isAccessor(defined)) {
-        if (defined.set) this.call(defined.set, array, [value], this.currentRow);
-        else this.refuse(strict, `Cannot set property ${index} of [object Array] which has only a getter`);
-        return;
-      }
-      if (array.frozen || defined?.writable === false) {
-        this.refuse(strict, `Cannot assign to read only property '${index}' of object '[object Array]'`);
-        return;
-      }
+    const absent = index >= elements.length || elements[index] === HOLE;
+    const property = absent
+      ? array.proto && this.findProperty(array.proto, String(index))
+      : array.definedElements?.get(index);
+    if (property && isAccessor(property)) {
+      if (property.set) this.call(property.set, array, [value], this.currentRow);
+      else this.refuse(strict, `Cannot set property ${index} of [object Array] which has only a getter`);
+      return;
+    }
+    if ((!absent && array.frozen) || property?.writable === false) {
+      this.refuse(strict, `Cannot assign to read only property '${index}' of object '[object Array]'`);
+      return;
+    }
+    if (absent && !array.extensible) {
+      this.refuse(strict, `Cannot add property ${index}, object is not extensible`);
+      return;
     }
     if (index >= elements.length && !array.isLengthWritable) {
       this.refuse(strict, readOnlyLengthMessage);
@@ -369,13 +373,13 @@ export class Runtime {
 
   /** The spec's ArraySetLength, which stops shrinking at the last non-configurable element. */
   setLength(array: JsArray, value: Value, strict = true, writable = true): void {
-    const length = this.toArrayLength(value);
-    const { elements } = array;
-    // V8 refuses even a write of the same length.
+    // V8 refuses a read-only length before converting the value, and even a write of the same length.
     if (!array.isLengthWritable) {
       this.refuse(strict, readOnlyLengthMessage);
       return;
     }
+    const length = this.toArrayLength(value);
+    const { elements } = array;
     if (length >= elements.length) {
       this.grow(array, length);
       array.isLengthWritable &&= writable;

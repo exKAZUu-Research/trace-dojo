@@ -75,18 +75,18 @@ function defineObject(builder: RealmBuilder): void {
     ({ runtime, thisValue, args }) =>
       runtime.getOwnProperty(runtime.toObject(thisValue), runtime.toPropertyKey(args[0])) !== undefined
   );
-  builder.method(objectPrototype, 'toString', 0, ({ runtime, thisValue }) => {
-    const tag =
-      thisValue === undefined || thisValue === null
-        ? undefined
-        : runtime.get(thisValue, WELL_KNOWN_SYMBOLS.toStringTag);
-    return `[object ${typeof tag === 'string' ? tag : tagOf(thisValue)}]`;
-  });
+  builder.method(objectPrototype, 'toString', 0, ({ runtime, thisValue }) => objectToString(runtime, thisValue));
   builder.method(objectPrototype, 'valueOf', 0, ({ runtime, thisValue }) => runtime.toObject(thisValue));
   // toLocaleString calls the value's own toString, as the specification's Invoke does.
   builder.method(objectPrototype, 'toLocaleString', 0, ({ runtime, thisValue }) =>
     runtime.call(runtime.get(thisValue, 'toString'), thisValue, [])
   );
+}
+
+/** The spec's `Object.prototype.toString`, which other builtins call directly rather than through the property. */
+export function objectToString(runtime: Runtime, value: Value): string {
+  const tag = value === undefined || value === null ? undefined : runtime.get(value, WELL_KNOWN_SYMBOLS.toStringTag);
+  return `[object ${typeof tag === 'string' ? tag : tagOf(value)}]`;
 }
 
 function tagOf(value: Value): string {

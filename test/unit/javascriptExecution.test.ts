@@ -1686,6 +1686,158 @@ async function g() { try { { await using a = null; await using b = { [Symbol.dis
 f(); queueMicrotask(() => console.log('micro'));
 setTimeout(() => { g(); queueMicrotask(() => console.log('micro2')); }, 0);`,
   ],
+  [
+    'array-like lengths read before callbacks are validated',
+    `function run() {
+  for (const name of ['forEach', 'map', 'filter', 'flatMap', 'find', 'findLastIndex', 'some', 'every', 'reduce', 'reduceRight']) {
+    const log = [];
+    const o = { get length() { log.push('length'); return { valueOf() { log.push('valueOf'); return 0; } }; } };
+    try { Array.prototype[name].call(o, null); } catch (e) { log.push(e.name + ': ' + e.message); }
+    console.log(name, log.join(' | '));
+  }
+  try { Array.prototype.map.call({ get length() { throw new RangeError('len'); } }, 3); } catch (e) { console.log(e.name, e.message); }
+  for (const name of ['map', 'join', 'toString', 'concat', 'at']) {
+    try { Array.prototype[name].call(null, () => 1); } catch (e) { console.log(name, e.name, e.message); }
+  }
+}
+run();`,
+  ],
+  [
+    'array toString dispatching to the receiver join and joins stopping on cycles',
+    `function run() {
+  const show = (f) => { try { console.log(JSON.stringify(f())); } catch (e) { console.log(e.name, e.message); } };
+  show(() => Array.prototype.toString.call({ join() { return 'custom:' + arguments.length; } }));
+  show(() => Array.prototype.toString.call({ join: 3 }));
+  show(() => Array.prototype.toString.call({ get join() { console.log('get join'); return () => 'g'; } }));
+  show(() => Array.prototype.toString.call({ [Symbol.toStringTag]: 'Tag', join: null }));
+  show(() => Array.prototype.toString.call(5));
+  const a = [1, 2];
+  a.join = function () { return 'own:' + Array.prototype.join.call(this, '-'); };
+  show(() => [String(a), \`\${[a, [3, 4]]}\`, [a, 5].join(';')]);
+  const b = [1, [2, 3]];
+  b[1].toString = () => 'inner';
+  show(() => [String(b), b.join('+')]);
+  const c = [1];
+  c.join = 'x';
+  show(() => String(c));
+  const d = [];
+  d.push({ toString() { return 'obj[' + d.join('-') + ']'; } }, 2);
+  show(() => [d.join(), String(d)]);
+  const e = [1, 2];
+  e.push(e);
+  show(() => [e.join('-'), String([e, e])]);
+  let separators = 0;
+  show(() => e.join({ toString() { separators++; return '|'; } }));
+  console.log(separators);
+}
+run();`,
+  ],
+  [
+    'array toLocaleString on cyclic arrays and its element calls',
+    `function run() {
+  const show = (f) => { try { console.log(JSON.stringify(f())); } catch (e) { console.log(e.name, e.message); } };
+  const a = [];
+  a.push(a);
+  const b = [1, 2];
+  b.push(b, 3);
+  const x = [1];
+  const y = [2, x];
+  x.push(y);
+  show(() => [a.toLocaleString(), b.toLocaleString(), x.toLocaleString(), y.toLocaleString(), [b, b].toLocaleString()]);
+  const n = [];
+  n.push({ toLocaleString() { return 'L' + n.toLocaleString() + n.join() + String(n); } });
+  show(() => [n.toLocaleString(), n.join()]);
+  const counts = [];
+  const q = [{ toLocaleString() { counts.push(arguments.length); return 'q'; } }];
+  q.toLocaleString();
+  q.toLocaleString('en');
+  q.toLocaleString('en', {});
+  console.log(counts.join());
+  show(() => [{ toLocaleString: 3 }].toLocaleString());
+  show(() => [Object.create(null)].toLocaleString());
+  show(() => [{ toLocaleString: {} }].toLocaleString());
+  show(() => [1234.5, null, undefined, 'x', [6, 7]].toLocaleString());
+  show(() => Array.prototype.toLocaleString.call({ length: 3, 0: 1, 2: [2, 3] }));
+  const r = [1];
+  r.push({ toLocaleString() { throw new Error('boom'); } });
+  show(() => r.toLocaleString());
+  show(() => r.join());
+}
+run();`,
+  ],
+  [
+    'array element assignments meeting inherited setters and read-only elements',
+    `function run() {
+  'use strict';
+  const log = [];
+  const attempt = (label, f) => { try { f(); log.push(label + ' ok'); } catch (e) { log.push(label + ' ' + e.name + ': ' + e.message); } };
+  let n = 0;
+  const p = [];
+  Object.defineProperty(p, '0', { set(v) { n = v; log.push('set this is a: ' + (this === a)); }, configurable: true });
+  Object.defineProperty(p, '1', { get() { return 'g'; }, configurable: true });
+  Object.defineProperty(p, '2', { value: 'ro', writable: false, configurable: true });
+  p[3] = 'w';
+  const a = [];
+  Object.setPrototypeOf(a, p);
+  attempt('setter', () => { a[0] = 4; });
+  log.push(n + ' ' + a.length + ' ' + Object.keys(a));
+  attempt('getter-only', () => { a[1] = 5; });
+  attempt('read-only', () => { a[2] = 6; });
+  attempt('writable', () => { a[3] = 7; });
+  log.push(a.length + ' ' + JSON.stringify(Object.getOwnPropertyDescriptor(a, '3')));
+  const holey = [, , , 9];
+  Object.setPrototypeOf(holey, p);
+  attempt('hole setter', () => { holey[0] = 1; });
+  attempt('hole read-only', () => { holey[2] = 1; });
+  log.push(holey.length + ' ' + Object.keys(holey));
+  Object.defineProperty(Array.prototype, '5', { set(v) { log.push('proto set ' + v); }, configurable: true });
+  const b = [1];
+  attempt('Array.prototype setter', () => { b[5] = 'x'; });
+  attempt('push past', () => { b.push(2, 3, 4, 5, 6); });
+  log.push(b.length + ' ' + JSON.stringify(b));
+  delete Array.prototype[5];
+  Object.defineProperty(Object.prototype, '0', { value: 'op', writable: false, configurable: true });
+  const c = [];
+  attempt('Object.prototype read-only', () => { c[0] = 1; });
+  attempt('unshift', () => { c.unshift(1); });
+  log.push(c.length);
+  delete Object.prototype[0];
+  const ne = Object.preventExtensions(Object.setPrototypeOf([], p));
+  attempt('non-extensible setter', () => { ne[0] = 8; });
+  attempt('non-extensible writable', () => { ne[3] = 8; });
+  const rl = Object.defineProperty(Object.setPrototypeOf([], p), 'length', { writable: false });
+  attempt('read-only length setter', () => { rl[0] = 8; });
+  attempt('read-only length writable', () => { rl[3] = 8; });
+  attempt('object with an array prototype', () => { Object.create(a)[0] = 11; });
+  class Stack extends Array {}
+  Object.defineProperty(Stack.prototype, '0', { set(v) { log.push('class set ' + v); }, configurable: true });
+  const s = new Stack();
+  attempt('subclass', () => { s[0] = 1; });
+  log.push(s.length);
+  console.log(log.join('\\n'));
+}
+run();`,
+  ],
+  [
+    'read-only array lengths refusing assignments before converting them',
+    `function run() {
+  'use strict';
+  const log = [];
+  const a = [1];
+  Object.defineProperty(a, 'length', { writable: false });
+  const v = { valueOf() { log.push('valueOf'); return 1; } };
+  for (const value of [v, 5, -1, 1.5, 'x', { valueOf() { throw new Error('conv'); } }]) {
+    try { a.length = value; } catch (e) { log.push(e.name + ': ' + e.message); }
+  }
+  try { Object.freeze([1, 2]).length = v; } catch (e) { log.push(e.name + ': ' + e.message); }
+  const b = [1, 2, 3];
+  try { b.length = v; log.push('b ' + b.length); } catch (e) { log.push(e.name + ': ' + e.message); }
+  try { b.length = { valueOf() { return -1; } }; } catch (e) { log.push(e.name + ': ' + e.message); }
+  try { Object.defineProperty(a, 'length', { value: v }); log.push('restated'); } catch (e) { log.push(e.name + ': ' + e.message); }
+  console.log(log.join('\\n'));
+}
+run();`,
+  ],
 ])(
   'a program using %s runs as Node.js runs it',
   (_, source) => {
