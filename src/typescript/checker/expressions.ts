@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 480 -- Resolves expressions, lexical references, closure captures, and contextual assignment diagnostics; memoization is separate.
+// code-gauge-allow-file fileNcss 481 -- Resolves expressions, lexical references, closure captures, and contextual assignment diagnostics; memoization is separate.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import { unsupportedMessage } from '../unsupported';
