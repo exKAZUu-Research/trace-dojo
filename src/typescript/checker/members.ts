@@ -276,25 +276,31 @@ export class MemberChecker {
     this.c.classes.checkPropertyAccessibility(node, propertyNode, objectNode, objectType, property);
     this.c.classes.checkInitializedBefore(node, objectNode, property);
     this.c.expressions.expandos.checkAssignedBefore(node, propertyNode, property);
-    this.checkPropertyAvailability(propertyNode, objectType, name, property);
+    this.checkPropertyAvailability(propertyNode, property);
   }
 
-  checkPropertyAvailability(propertyNode: TreeNode, objectType: Type, name: string, property: Property): void {
-    const unsupported =
-      this.unsupportedMember(objectType, name) ?? this.unsupportedLibraryMember(propertyNode, property);
+  private checkPropertyAvailability(propertyNode: TreeNode, property: Property): void {
+    const unsupported = this.unsupportedLibraryMember(propertyNode, property);
     if (unsupported) this.c.error(propertyNode, unsupportedMessage(unsupported));
   }
 
-  /** A library member of every error or regular expression that this interpreter does not provide. */
+  /** A member the library declares that this interpreter does not provide, named by the interface declaring it. */
   private unsupportedLibraryMember(propertyNode: TreeNode, property: Property): string | undefined {
     const declaration = property.declaration;
     if (!declaration || !this.c.isLibrary(declaration)) return undefined;
     const owner = declaration.parent?.parent?.childForFieldName('name')?.text;
+    const { name } = property;
+    // The interpreter leaves out Math.random so that a program always draws the same board.
+    if (owner === 'Math' && name === 'random') return 'Math.random';
+    // The well-known symbols replace the protocols of the language, which this interpreter does not support yet.
+    if (owner === 'SymbolConstructor' && wellKnownSymbols.has(name)) return `Symbol.${name} などの well-known シンボル`;
+    // Timers print how long they took, which differs on every run.
+    if (owner === 'Console' && ['time', 'timeEnd', 'timeLog', 'timeStamp'].includes(name)) return `console.${name}`;
     // A stack trace names the files and lines of the host, which differ from the program's.
-    if (owner === 'Error' && property.name === 'stack') return 'Error の stack';
-    if (owner === 'RegExp' && property.name === 'compile') return 'RegExp の compile';
+    if (owner === 'Error' && name === 'stack') return 'Error の stack';
+    if (owner === 'RegExp' && name === 'compile') return 'RegExp の compile';
     // Node.js shows a function's source as tsx's esbuild printed it, which this interpreter does not reproduce.
-    if (owner === 'Function' && property.name === 'toString' && !this.isNeverCalled(propertyNode.parent))
+    if (owner === 'Function' && name === 'toString' && !this.isNeverCalled(propertyNode.parent))
       return '関数やクラスの文字列への変換';
     return undefined;
   }
@@ -319,19 +325,6 @@ export class MemberChecker {
     return identifiersNamed(root, name.text)
       .filter((reference) => reference.id !== name.id && this.c.scopeOf(reference).lookupValue(name.text) === symbol)
       .every((reference) => isOnlyCompared(reference));
-  }
-
-  private unsupportedMember(objectType: Type, name: string): string | undefined {
-    if (objectType.kind !== 'object') return undefined;
-    // The interpreter leaves out Math.random so that a program always draws the same board.
-    if (objectType.name === 'Math' && name === 'random') return 'Math.random';
-    // The well-known symbols replace the protocols of the language, which this interpreter does not support yet.
-    if (objectType.name === 'SymbolConstructor' && wellKnownSymbols.has(name))
-      return `Symbol.${name} などの well-known シンボル`;
-    // Timers print how long they took, which differs on every run.
-    if (objectType.name === 'Console' && ['time', 'timeEnd', 'timeLog', 'timeStamp'].includes(name))
-      return `console.${name}`;
-    return undefined;
   }
 
   indexSignatureType(type: Type, name: string): Type | undefined {
@@ -466,7 +459,7 @@ export class MemberChecker {
       return typeof value === 'symbol'
         ? this.c.structureOf(objectType).symbolIndex?.type
         : (tupleElementBeyond(this.c, objectType, name, access.indexNode) ?? this.indexSignatureType(objectType, name));
-    this.checkPropertyAvailability(access.indexNode, objectType, name, property);
+    this.checkPropertyAvailability(access.indexNode, property);
     this.c.expressions.expandos.checkAssignedBefore(access.node, access.indexNode, property);
     // `o["secret"]` reads a private or protected member, which TypeScript leaves as a way around its access checks.
     return property.optional ? unionOf([property.type(), undefinedType]) : property.type();

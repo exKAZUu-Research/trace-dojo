@@ -1,0 +1,10 @@
+function demo() {
+ class Math { random() { return 1; } }
+ console.log(new Math().random());
+}
+demo();
+function demo2() {
+ class Console { time() { return 'ready'; } }
+ console.log(new Console().time());
+}
+demo2();
