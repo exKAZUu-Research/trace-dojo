@@ -4957,3 +4957,61 @@ test('unknown array pointer captures keep memory checks at runtime', () => {
     uncaughtException: 'Segmentation fault',
   });
 });
+
+test.each([
+  [1, 'oom:0|'],
+  [3, 'first|oom:0|'],
+  [140, 'first|second|third|abcdef:6|free:0|'],
+])('allocPrint applies allocator failures during writes with capacity %s', (capacity, expected) => {
+  const source = `const std=@import("std");const P=struct{pub fn format(_:P,w:*std.Io.Writer)std.Io.Writer.Error!void{try w.writeAll("ab");std.debug.print("first|",.{});try w.writeAll("cd");std.debug.print("second|",.{});try w.writeAll("ef");std.debug.print("third|",.{});}};pub fn main()void{var b:[${capacity}]u8=undefined;var f=std.heap.FixedBufferAllocator.init(&b);const s=std.fmt.allocPrint(f.allocator(),"{f}",.{P{}}) catch {std.debug.print("oom:{}|",.{f.end_index});return;};std.debug.print("{s}:{}|",.{s,f.end_index});f.allocator().free(s);std.debug.print("free:{}|",.{f.end_index});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: expected,
+    uncaughtException: undefined,
+  });
+});
+
+test('allocPrint evaluates arguments before initial allocation and frees failed formatter buffers', () => {
+  const source = `const std=@import("std");const P=struct{pub fn format(_:P,w:*std.Io.Writer)std.Io.Writer.Error!void{_=w;std.debug.print("format|",.{});return error.WriteFailed;}};fn make()P{std.debug.print("arg|",.{});return .{};}pub fn main()void{var b:[3]u8=undefined;var f=std.heap.FixedBufferAllocator.init(&b);_=std.fmt.allocPrint(f.allocator(),"{f}",.{make()}) catch {};std.debug.print("{}",.{f.end_index});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: 'arg|format|0',
+    uncaughtException: undefined,
+  });
+  expect(executeProgram('zig', source.replace('[3]u8', '[1]u8'))).toMatchObject({
+    kind: 'executed',
+    stderr: 'arg|0',
+    uncaughtException: undefined,
+  });
+});
+
+test.each([
+  ['const a:[410000]u8=@splat(97);', '{s}', '&a', '410000'],
+  ['const a:[205000]u8=@splat(97);', '{s}{s}', '&a,&a', '410000'],
+  ['', '{s: >410000}', '""', '410000'],
+  ['const a:[102500]u8=@splat(0);', '{q}', '&a', '410002'],
+  ['const a:[307500]u8=@splat(97);', '{b64}', '&a', '410000'],
+  ['', '{x:.1000001}', 'std.math.inf(f64)', '3'],
+  ['', '{x:.1000001}', 'std.math.nan(f64)', '3'],
+])('fmt.count discards formatted bytes while retaining the count (%#)', (declaration, format, args, expected) => {
+  const source = `const std=@import("std");pub fn main()void{${declaration}const n=std.fmt.count("${format}",.{${args}});std.debug.print("{}",.{n});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: expected,
+    uncaughtException: undefined,
+  });
+});
+
+test('fmt.count shares its discarding writer through nested format calls and splats', () => {
+  const source = `const std=@import("std");const P=struct{pub fn format(_:P,w:*std.Io.Writer)std.Io.Writer.Error!void{try w.splatByteAll(97,250000);std.debug.print("first|",.{});try w.print("{s: >250000}",.{""});try w.writeAll("xy");std.debug.print("last|",.{});}};pub fn main()void{std.debug.print("{}",.{std.fmt.count("{f}",.{P{}})});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: 'first|last|500002',
+    uncaughtException: undefined,
+  });
+});
+
+test('fmt.count limits formatting work without applying an output limit', () => {
+  const source = `const std=@import("std");pub fn main()void{_=std.fmt.count("{s: >1000001}",.{""});}`;
+  expect(executeProgram('zig', source)).toMatchObject({ kind: 'limitExceeded', limit: 'operations' });
+});

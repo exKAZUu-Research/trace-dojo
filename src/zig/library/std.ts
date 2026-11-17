@@ -38,7 +38,9 @@ import {
 import { compilePrint, printInto, PrintWriteError } from './print';
 import {
   bufferedBytes,
+  discardRepeated,
   flushWriter,
+  isDiscardingWriter,
   WRITER,
   writerBytes,
   type WriterState,
@@ -419,6 +421,10 @@ function writerOf(
 function writeRepeated(frame: Parameters<TExpr['eval']>[0], state: WriterState, data: number[], count: number): Value {
   const length = data.length * count;
   const end = state.end + length;
+  if (isDiscardingWriter(state)) {
+    discardRepeated(frame, state, data, count);
+    return;
+  }
   if (state.fd === undefined && !state.growth && end > state.capacity) {
     const available = Math.max(0, state.capacity - state.end);
     frame.runtime.spend(available);

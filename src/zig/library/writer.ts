@@ -1,8 +1,10 @@
+import { LIMITS } from '../../interpreter/limits';
 import { checkOutputSize } from '../allocation';
 import { byteValues } from '../builtins';
+import type { FormatOutput } from '../fmt';
 import type { Frame } from '../runtime';
 import type { StructType } from '../types';
-import { ErrorValue, type NativeHandle, Slice, type Value, ZArray, ZStruct } from '../values';
+import { ErrorValue, NativeHandle, Slice, type Value, ZArray, ZStruct } from '../values';
 import { nativeStruct } from './native';
 
 export const WRITER: StructType = nativeStruct('Io.Writer', {}, [], {
@@ -18,6 +20,73 @@ export interface WriterState extends Record<string, unknown> {
   end: number;
   capacity: number;
   growth?: NativeHandle;
+}
+
+export class CountingFormatOutput implements FormatOutput {
+  length = 0;
+  readonly prefix: number[] = [];
+
+  constructor(private readonly frame: Frame) {}
+
+  push(...bytes: number[]): number {
+    this.frame.runtime.spend(bytes.length);
+    for (const byte of bytes) if (this.prefix.length < 64) this.prefix.push(byte);
+    this.length += bytes.length;
+    return this.length;
+  }
+
+  checkSize(length: number): void {
+    const extra = Math.max(0, length - this.length);
+    this.frame.runtime.spend(extra > LIMITS.maxOperations - this.frame.runtime.budget.spent ? extra : 0);
+  }
+}
+
+export function discardingWriter(): WriterState {
+  return {
+    fd: undefined,
+    buffer: new Slice(new ZArray(Array.from({ length: 64 }, () => 0xaan)), 0, 64),
+    end: 0,
+    capacity: 64,
+    growth: new NativeHandle('discardingWriter', {
+      count: 0,
+      drain: (frame: Frame, state: WriterState, bytes: readonly number[]) => {
+        frame.runtime.spend(state.end + bytes.length);
+        discardWritten(state, bytes.length, bytes);
+      },
+    }),
+  };
+}
+
+export function isDiscardingWriter(state: WriterState): boolean {
+  return state.growth?.kind === 'discardingWriter';
+}
+
+export function discardedBytes(state: WriterState): number {
+  return ((state.growth as NativeHandle).state.count as number) + state.end;
+}
+
+export function writeCounted(frame: Frame, state: WriterState, output: CountingFormatOutput): void {
+  if (state.end + output.length > state.capacity) frame.runtime.spend(state.end);
+  discardWritten(state, output.length, output.prefix);
+}
+
+export function discardRepeated(frame: Frame, state: WriterState, bytes: readonly number[], count: number): void {
+  const length = bytes.length * count;
+  frame.runtime.spend(length + (length + state.end > state.capacity ? state.end : 0));
+  const prefix =
+    length + state.end <= state.capacity ? Array.from({ length }, (_, index) => bytes[index % bytes.length]) : [];
+  discardWritten(state, length, prefix);
+}
+
+function discardWritten(state: WriterState, length: number, prefix: readonly number[]): void {
+  if (state.end + length > state.capacity) {
+    const data = (state.growth as NativeHandle).state;
+    data.count = (data.count as number) + state.end + length;
+    state.end = 0;
+    return;
+  }
+  for (let index = 0; index < length; index++) state.buffer.set(state.end + index, BigInt(prefix[index]));
+  state.end += length;
 }
 
 export function writerValue(state: WriterState): ZStruct {
@@ -55,6 +124,10 @@ export function writeTo(frame: Frame, state: WriterState, bytes: readonly number
   frame.runtime.spend();
   const end = state.end + bytes.length;
   if (end > state.capacity && state.growth) {
+    const drain = state.growth.state.drain as
+      | ((frame: Frame, writer: WriterState, bytes: readonly number[]) => Value)
+      | undefined;
+    if (drain) return drain(frame, state, bytes);
     const grow = state.growth.state.grow as (frame: Frame, writer: WriterState, end: number) => boolean;
     if (!grow(frame, state, end)) return ErrorValue.of('WriteFailed');
   }

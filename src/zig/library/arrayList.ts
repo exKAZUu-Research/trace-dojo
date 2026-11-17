@@ -107,7 +107,7 @@ function listOf(struct: ZStruct, child: Type, frame: Frame): List {
 }
 
 /** `growCapacity`: the capacity a list grows to when it needs `minimum`. */
-function growCapacity(minimum: number, child: Type): number {
+export function growCapacity(minimum: number, child: Type): number {
   const size = sizeOf(child);
   const initial = Math.max(1, Math.floor(CACHE_LINE / Math.max(size, 1)));
   return minimum + Math.floor(minimum / 2) + initial;

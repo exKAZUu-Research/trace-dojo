@@ -39,7 +39,18 @@ import {
   type Value,
   type ZStruct,
 } from '../values';
-import { bufferedBytes, bufferingWriter, WRITER, type WriterState, writerState, writerValue, writeTo } from './writer';
+import {
+  bufferedBytes,
+  bufferingWriter,
+  CountingFormatOutput,
+  isDiscardingWriter,
+  writeCounted,
+  WRITER,
+  type WriterState,
+  writerState,
+  writerValue,
+  writeTo,
+} from './writer';
 
 export interface PreparedPrint {
   args: ZStruct;
@@ -227,7 +238,7 @@ export class PrintWriteError extends Error {
   }
 }
 
-// code-gauge-allow functionCognitiveComplexity 21 -- Expands parsed segments and writes partial output before a formatting panic.
+// code-gauge-allow functionCognitiveComplexity 24 -- Expands parsed segments and writes partial output before a formatting panic.
 // code-gauge-allow functionParameterCount 7 -- The formatter shares one writer, its frame, and the parsed argument context.
 function appendSegments(
   frame: Frame,
@@ -253,7 +264,9 @@ function appendSegments(
     if (segment.spec === 'f') {
       formatWithMethod(segment.arg, argValue(segment.arg));
     } else {
-      const bytes: number[] = [];
+      const bytes: number[] | CountingFormatOutput = isDiscardingWriter(destination)
+        ? new CountingFormatOutput(frame)
+        : [];
       try {
         printValue(bytes, segment.spec, options, argValue(segment.arg), fields[segment.arg].type as Type, info);
       } catch (error) {
@@ -265,7 +278,11 @@ function appendSegments(
   }
 }
 
-function writeFormatted(frame: Frame, destination: WriterState, bytes: readonly number[]): void {
+function writeFormatted(frame: Frame, destination: WriterState, bytes: readonly number[] | CountingFormatOutput): void {
+  if (bytes instanceof CountingFormatOutput) {
+    writeCounted(frame, destination, bytes);
+    return;
+  }
   const result = writeTo(frame, destination, bytes);
   if (result instanceof ErrorValue) throw new PrintWriteError(result);
 }

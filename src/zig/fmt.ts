@@ -1,5 +1,5 @@
 import { checkOutputSize } from './allocation';
-// code-gauge-allow-file fileNcss 739 -- The file holds one layer of the compiler, whose parts share its private state.
+// code-gauge-allow-file fileNcss 746 -- The file holds one layer of the compiler, whose parts share its private state.
 /**
  * Zig's formatted printing (`std.Io.Writer.print` and `printValue`), transcribed so that output matches byte for byte.
  * Formatting works on bytes, as Zig's strings are bytes.
@@ -62,6 +62,12 @@ export const MAX_DEPTH = 3;
 type TemplateSegment =
   | Extract<Segment, { kind: 'literal' }>
   | ({ kind: 'placeholder' } & ReturnType<typeof parsePlaceholder>);
+
+export interface FormatOutput {
+  readonly length: number;
+  push: (...bytes: number[]) => number;
+  checkSize?: (length: number) => void;
+}
 
 export interface FormatTemplate {
   readonly segments: readonly TemplateSegment[];
@@ -408,7 +414,7 @@ function isByteString(type: Type): boolean {
 
 /** Appends a value printed as `printValue(spec, options, value)` does. */
 export function printValue(
-  out: number[],
+  out: FormatOutput,
   spec: string,
   options: Options,
   value: Value,
@@ -615,7 +621,7 @@ function addressOf(value: Value): bigint {
 /** Specifiers for strings and byte counts, which `printValue` handles before the others. */
 const SPECIAL_SPECIFIERS = new Map<
   string,
-  { accepts: (type: Type) => boolean; print: (out: number[], value: Value, type: Type, options: Options) => void }
+  { accepts: (type: Type) => boolean; print: (out: FormatOutput, value: Value, type: Type, options: Options) => void }
 >([
   [
     'q',
@@ -623,7 +629,7 @@ const SPECIAL_SPECIFIERS = new Map<
       accepts: isByteString,
       print: (out, value, type) => {
         out.push(0x22);
-        appendBytes(out, escapeString(stringBytes(value, type).map(Number)));
+        appendEscapedString(out, stringBytes(value, type).map(Number));
         out.push(0x22);
       },
     },
@@ -649,7 +655,7 @@ const SPECIAL_SPECIFIERS = new Map<
       print: (out, value, type, options) => {
         forbidOptions(options);
         const bytes = stringBytes(value, type);
-        checkOutputSize(Math.ceil(bytes.length / 3) * 4);
+        checkFormatSize(out, out.length + Math.ceil(bytes.length / 3) * 4);
         appendBytes(out, utf8(btoa(bytes.map((byte) => String.fromCodePoint(Number(byte))).join(''))));
       },
     },
@@ -657,8 +663,7 @@ const SPECIAL_SPECIFIERS = new Map<
 ]);
 
 /** `std.zig.stringEscape`: escapes quotes, backslashes, control characters, and invalid or special UTF-8. */
-function escapeString(bytes: readonly number[]): number[] {
-  const out: number[] = [];
+function appendEscapedString(out: FormatOutput, bytes: readonly number[]): void {
   const hex = (byte: number): void => {
     appendBytes(out, utf8(`\\x${byte.toString(16).padStart(2, '0')}`));
   };
@@ -678,10 +683,9 @@ function escapeString(bytes: readonly number[]): number[] {
       index += length;
       continue;
     }
-    checkOutputSize(out.length);
+    checkFormatSize(out, out.length);
     index++;
   }
-  return out;
 }
 
 const ESCAPES: Record<number, string> = {
@@ -706,7 +710,7 @@ function utf8Sequence(bytes: readonly number[], index: number): { length: number
 }
 
 /** `printByteSize`: a byte count in SI (`kB`, `MB`, ...) or IEC (`KiB`, `MiB`, ...) units. */
-function printByteSize(out: number[], value: bigint, binary: boolean, options: Options): void {
+function printByteSize(out: FormatOutput, value: bigint, binary: boolean, options: Options): void {
   if (value === 0n) return alignBuffer(out, utf8('0B'), options);
   const log2 = value.toString(2).length - 1;
   // `std.math.log2(1000)` is 9, the integer part.
@@ -754,9 +758,9 @@ function hexDigits(byte: number, upper: boolean): number[] {
   return utf8(upper ? text.toUpperCase() : text);
 }
 
-export function alignBuffer(out: number[], buffer: readonly number[], options: Options): void {
+export function alignBuffer(out: FormatOutput, buffer: readonly number[], options: Options): void {
   const width = options.width ?? buffer.length;
-  checkOutputSize(out.length + Math.max(width, buffer.length));
+  checkFormatSize(out, out.length + Math.max(width, buffer.length));
   const padding = buffer.length < width ? width - buffer.length : 0;
   if (padding === 0) {
     for (const byte of buffer) out.push(byte);
@@ -784,7 +788,7 @@ export function alignBuffer(out: number[], buffer: readonly number[], options: O
   }
 }
 
-function printUnicodeCodepoint(out: number[], codepoint: number): void {
+function printUnicodeCodepoint(out: FormatOutput, codepoint: number): void {
   if (codepoint >= 0xd8_00 && codepoint <= 0xdf_ff) {
     out.push(0xef, 0xbf, 0xbd);
     return;
@@ -798,7 +802,7 @@ function printUnicodeCodepoint(out: number[], codepoint: number): void {
 
 /** `printInt`: integers print with their type's signedness, a comptime_int as `usize` or `isize` when it fits. */
 export function printInt(
-  out: number[],
+  out: FormatOutput,
   value: bigint,
   type: Type,
   base: number,
@@ -819,7 +823,7 @@ export function printInt(
 
 /** `printFloat`: `std.fmt.float.render` in decimal or scientific mode, then aligned. */
 export function printFloat(
-  out: number[],
+  out: FormatOutput,
   value: AnyFloat,
   bits: FloatBits,
   mode: 'decimal' | 'scientific',
@@ -949,13 +953,13 @@ function formatDecimal(input: Decimal, precision: number | undefined): string {
 }
 
 /** `printFloatHex`: a float as `0x1.8p1`. */
-function printFloatHex(out: number[], value: AnyFloat, bits: FloatBits, upper: boolean, options: Options): void {
+function printFloatHex(out: FormatOutput, value: AnyFloat, bits: FloatBits, upper: boolean, options: Options): void {
   const big = asBigFloat(value);
+  if (big.kind === 'finite') checkFormatSize(out, out.length + (options.precision ?? 0));
   let text = big.sign ? '-' : '';
   if (big.kind === 'nan') text += upper ? 'NAN' : 'nan';
   else if (big.kind === 'inf') text += upper ? 'INF' : 'inf';
   else if (big.isZero) {
-    checkOutputSize(options.precision ?? 0);
     const zeros =
       options.precision === undefined ? '.0' : options.precision > 0 ? `.${'0'.repeat(options.precision)}` : '';
     text += `0x0${zeros}p0`;
@@ -967,7 +971,6 @@ function printFloatHex(out: number[], value: AnyFloat, bits: FloatBits, upper: b
 // code-gauge-allow functionNcss 36 -- Transcribes the corresponding function of Zig's standard library or compiler step by step.
 // code-gauge-allow functionCognitiveComplexity 16 -- Transcribes the corresponding function of Zig's standard library or compiler step by step.
 function hexFloatDigits(big: BigFloat, bits: FloatBits, upper: boolean, precision: number | undefined): string {
-  checkOutputSize(precision ?? 0);
   const format = FORMATS[bits];
   const fractionalBits = format.precision - 1;
   const digits = Math.ceil(fractionalBits / 4);
@@ -1007,7 +1010,12 @@ function hexFloatDigits(big: BigFloat, bits: FloatBits, upper: boolean, precisio
   return `0x${hex[0]}${point}${fraction}p${exponent}`;
 }
 
-function appendBytes(out: number[], bytes: readonly number[]): void {
-  checkOutputSize(out.length + bytes.length);
+function appendBytes(out: FormatOutput, bytes: readonly number[]): void {
+  checkFormatSize(out, out.length + bytes.length);
   for (const byte of bytes) out.push(byte);
+}
+
+function checkFormatSize(out: FormatOutput, length: number): void {
+  if (out.checkSize) out.checkSize(length);
+  else checkOutputSize(length);
 }

@@ -17,6 +17,7 @@ import {
 } from '../types';
 import { decodeUtf8 } from '../utf8';
 import { ErrorValue, Slice, type Value } from '../values';
+import { allocatingWriter, freeWriter, ownWriterSlice } from './allocatingWriter';
 import {
   allocating,
   allocatorArg,
@@ -26,12 +27,11 @@ import {
   generic,
   mutableSlice,
   nativeBudget,
-  newSlice,
 } from './common';
-import { allocatorState, ERROR_OUT_OF_MEMORY, nativeEnum, reserveNativeAllocation } from './heap';
+import { allocatorState, ERROR_OUT_OF_MEMORY, nativeEnum } from './heap';
 import { compileArgs, expectArgs, fnMember, type Member, nativeCall, nativeStruct, typeMember } from './native';
 import { compilePrint, PrintWriteError } from './print';
-import type { WriterState } from './writer';
+import { discardedBytes, discardingWriter, type WriterState } from './writer';
 
 const CASE = nativeEnum('fmt.Case', ['lower', 'upper']);
 const PARSE_INT_ERRORS = errorSetOf(['Overflow', 'InvalidCharacter']);
@@ -216,19 +216,18 @@ const MEMBERS: Record<string, () => Member> = {
     const print = compilePrint(sema, format, args, call.span);
     return nativeCall(allocating(sliceOf(U8, false)), [allocator], call.span, ([value], frame) => {
       const allocator = allocatorState(value);
-      let bytes: number[];
+      const prepared = print.prepare(frame);
+      const writer = allocatingWriter(frame, allocator, print.formatLength);
+      if (!writer) return ERROR_OUT_OF_MEMORY;
       try {
-        bytes = print(frame);
+        prepared.write(writer);
+        return ownWriterSlice(frame, allocator, writer);
       } catch (error) {
         if (error instanceof PrintWriteError) return ERROR_OUT_OF_MEMORY;
         throw error;
+      } finally {
+        freeWriter(allocator, writer);
       }
-      frame.runtime.spend();
-      const complete = reserveNativeAllocation(frame, allocator, bytes.length, U8);
-      if (!complete) return ERROR_OUT_OF_MEMORY;
-      const slice = newSlice(bytes.map(BigInt));
-      complete(slice.target);
-      return slice;
     });
   }),
   count: fnMember('std.fmt.count', (sema, call) => {
@@ -238,7 +237,9 @@ const MEMBERS: Record<string, () => Member> = {
       U64,
       (frame) => {
         try {
-          return BigInt(print(frame).length);
+          const writer = discardingWriter();
+          print(frame, writer);
+          return BigInt(discardedBytes(writer));
         } catch (error) {
           if (error instanceof PrintWriteError) panic(PANIC.unreachable);
           throw error;
