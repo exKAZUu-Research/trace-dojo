@@ -1,6 +1,7 @@
 import { expect, test } from 'vitest';
 
 import { executeProgram, traceProgram } from '../../src/interpreter/program';
+import { gradeRegularAnswers, type RegularGradingResult } from '../../src/problems/regular/grade';
 import type { TraceItem } from '../../src/problems/trace';
 import { traceZigProgram } from '../../src/zig/trace';
 
@@ -404,4 +405,73 @@ test.each([false, true])('many atomic function headers are indexed (multiline: %
     return header;
   }).join('');
   expect(traceZigProgram(`${headers}pub fn main()void{}`, { atomicAnnotations }).uncaughtException).toBeUndefined();
+});
+
+test.each([
+  'var a:std.ArrayList(void)=.empty;try a.append(init.gpa,{});const s=a.allocatedSlice();',
+  'const s=try init.gpa.alloc(void,1000001);',
+  'const s=try init.gpa.alloc(u0,1000001);',
+])('virtual slice snapshots stay bounded and preserve execution: %s', (declaration) => {
+  const source = `const std=@import("std");pub fn main(init:std.process.Init)!void{\n${declaration}\nstd.debug.print("{}",.{s.len});\n}`;
+  const result = traceProgram('zig', source, source);
+  const execution = executeProgram('zig', source);
+  expect(execution).toMatchObject({ kind: 'executed', uncaughtException: undefined });
+  expect(result.stderr).toBe(execution.kind === 'executed' ? execution.stderr : undefined);
+  expect(result.uncaughtException).toBeUndefined();
+  expect(result.traceItems.length).toBeGreaterThan(1);
+  const preview = result.traceItems.at(-1)?.referenceVars.s;
+  expect(preview?.kind).toBe('array');
+  if (preview?.kind === 'array') {
+    expect(Object.keys(preview.entries).length).toBeLessThanOrEqual(2000);
+    expect(preview.entries['…']).toMatchObject({ kind: 'value', verbatim: true });
+  }
+  expect(result.finalVars).not.toHaveProperty('s');
+});
+
+test.each(['f80', 'f128'])('extended %s trace values retain integral changes and array elements', (type) => {
+  const source = `const std=@import("std");pub fn main()void{\nvar x:${type}=9007199254740992;\nx+=1;\nconst a=[_]${type}{x};\n_=a;std.debug.print("{d}",.{x});\n}`;
+  const result = traceProgram('zig', source, source);
+  expect(result.stderr).toBe('9007199254740993');
+  expect(result.finalVars).toMatchObject({ x: 9_007_199_254_740_993n, a: [9_007_199_254_740_993n] });
+  expect(result.traceItems.at(-1)?.referenceVars.a).toMatchObject({
+    kind: 'array',
+    entries: { 0: { kind: 'value', value: 9_007_199_254_740_993n } },
+  });
+});
+
+test.each([
+  ['f80', '0x1.0000000000000002p0', '1.0000000000000000001'],
+  ['f128', '0x1.0000000000000000000000000001p0', '1.0000000000000000000000000000000002'],
+])('extended %s fractional traces keep shortest round-trip decimals', (type, literal, expected) => {
+  const source = `pub fn main()void{\nconst x:${type}=${literal};\nconst a=[_]${type}{x};\n_=a;\n}`;
+  const result = traceProgram('zig', source, source);
+  expect(result.finalVars).toMatchObject({ x: expected, a: [expected] });
+  const grade = (answer: string): RegularGradingResult =>
+    gradeRegularAnswers({
+      expectedBoard: result.finalBoard,
+      expectedTurtles: result.finalTurtles,
+      expectedVariables: result.finalVars,
+      answerBoard: Array.from({ length: 7 }, () => Array.from({ length: 7 }, () => '.' as const)),
+      answerTurtles: [],
+      answerVariables: { x: answer },
+      initialVariables: {},
+    });
+  expect(grade(expected).status).toBe('correct');
+  expect(grade('1').status).toBe('incorrect');
+  expect(result.traceItems.at(-1)?.referenceVars.a).toMatchObject({
+    kind: 'array',
+    entries: { 0: { kind: 'value', value: expected, verbatim: true } },
+  });
+});
+
+test('large byte strings and nested numeric arrays use bounded reference previews', () => {
+  const source = `const std=@import("std");pub fn main(init:std.process.Init)!void{\nconst s=try init.gpa.alloc(u8,20000);\n@memset(s,120);\nconst a:[20000]u0=@splat(0);\n_=.{s,a};\n}`;
+  const result = traceProgram('zig', source, source);
+  expect(result.uncaughtException).toBeUndefined();
+  expect(result.finalVars).not.toHaveProperty('s');
+  expect(result.finalVars).not.toHaveProperty('a');
+  const previews = result.traceItems.at(-1)?.referenceVars;
+  expect(previews?.s).toMatchObject({ kind: 'value' });
+  if (previews?.s.kind === 'value') expect(String(previews.s.value)).toContain('… (20000 bytes)');
+  expect(previews?.a).toMatchObject({ kind: 'array', entries: { '…': { kind: 'value', value: '… (20000 items)' } } });
 });
