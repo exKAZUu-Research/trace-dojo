@@ -264,13 +264,7 @@ class AssignmentFlow {
     if (nestedFunctionTypes.has(node.type)) return isImmediatelyInvoked(node) ? this.invoked(node, values) : values;
     switch (node.type) {
       case 'assignment_expression': {
-        const right = node.childForFieldName('right');
-        const after = right ? this.expression(right, values) : values;
-        const left = node.childForFieldName('left');
-        if (!right || !after || !left || !this.isTarget(left)) return after;
-        const value = this.assignedValue(right);
-        for (const assigned of this.tryAssignments) assigned.push(value);
-        return [value];
+        return this.assignment(node, values);
       }
       case 'ternary_expression': {
         const [whenTrue, whenFalse] = this.branch(node.childForFieldName('condition') as TreeNode, values);
@@ -289,6 +283,16 @@ class AssignmentFlow {
         return this.expressions(named(node), values);
       }
     }
+  }
+
+  private assignment(node: TreeNode, values: Value[]): Values {
+    const right = node.childForFieldName('right');
+    const after = right ? this.expression(right, values) : values;
+    const left = node.childForFieldName('left');
+    if (!right || !after || !left || !this.isTarget(left)) return after;
+    const value = this.assignedValue(right);
+    for (const assigned of this.tryAssignments) assigned.push(value);
+    return [value];
   }
 
   /** The values after a function called where it is written, which runs its body before the call completes. */
