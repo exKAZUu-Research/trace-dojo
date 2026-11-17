@@ -727,3 +727,53 @@ test('lex preserves Unicode operator boundaries and excludes identifier and punc
     uncaughtException: undefined,
   });
 });
+
+const lazyOrderingFields = `data K=K Int Int
+instance Eq K where K a _==K b _=a==b
+instance Ord K where
+  compare(K a x)(K b y)=x \`seq\` y \`seq\` compare a b
+  K a _ < K b _=a<b
+`;
+
+test.each([
+  ['data Box=Box K deriving(Eq,Ord)', 'Box(K 1 undefined)', 'Box(K 2 undefined)'],
+  ['data Box=Box () K deriving(Eq,Ord)', 'Box () (K 1 undefined)', 'Box () (K 2 undefined)'],
+  ['data Box=Box K|Other K deriving(Eq,Ord)', 'Box(K 1 undefined)', 'Box(K 2 undefined)'],
+  ['data Box=Box K|Other K|Last K deriving(Eq,Ord)', 'Box(K 1 undefined)', 'Box(K 2 undefined)'],
+  ['', '((),K 1 undefined)', '((),K 2 undefined)'],
+  [
+    '',
+    '(' + [...Array.from({ length: 14 }, () => '()'), 'K 1 undefined'].join(',') + ')',
+    '(' + [...Array.from({ length: 14 }, () => '()'), 'K 2 undefined'].join(',') + ')',
+  ],
+  ['', 'Just(K 1 undefined)', 'Just(K 2 undefined)'],
+  ['', '(Left(K 1 undefined)::Either K ())', 'Left(K 2 undefined)'],
+  ['', '(Right(K 1 undefined)::Either () K)', 'Right(K 2 undefined)'],
+])('derived-style relational methods use the last field less-than method: %s %s', (declaration, left, right) => {
+  const source = `${lazyOrderingFields}${declaration}\nmain=let x=${left}; y=${right} in print(x<y,x<=y,x>y,x>=y)`;
+  expect(executeProgram('haskell', source)).toMatchObject({
+    kind: 'executed',
+    stdout: '(True,True,False,False)\n',
+    uncaughtException: undefined,
+  });
+  expect(
+    executeProgram('haskell', `${lazyOrderingFields}${declaration}\nmain=print(compare (${left}) (${right}))`)
+  ).toMatchObject({ kind: 'executed', stdout: '', uncaughtException: 'Prelude.undefined' });
+});
+
+test.each([
+  ['data Box=Box K () deriving(Eq,Ord)', 'Box(K 1 undefined) ()', 'Box(K 2 undefined) ()'],
+  ['data Box=Box K|B|C|D deriving(Eq,Ord)', 'Box(K 1 undefined)', 'Box(K 2 undefined)'],
+])(
+  'derived ordering retains comparison demand on nonterminal fields and large sums: %s',
+  (declaration, left, right) => {
+    expect(
+      executeProgram('haskell', `${lazyOrderingFields}${declaration}\nmain=print((${left}) < (${right}))`)
+    ).toMatchObject({ kind: 'executed', stdout: '', uncaughtException: 'Prelude.undefined' });
+  }
+);
+
+test('large non-enumeration sums keep default relational argument order', () => {
+  const source = 'data Box=Box Int|B|C|D deriving(Eq,Ord)\nmain=print((error "left"::Box)<=(error "right"))';
+  expect(executeProgram('haskell', source)).toMatchObject({ kind: 'executed', stdout: '', uncaughtException: 'left' });
+});

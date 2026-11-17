@@ -11,6 +11,8 @@ function tupleSource(size: number): string {
   let compare = `compare ${vars[size - 1]} ${others[size - 1]}`;
   for (let index = size - 2; index >= 0; index--)
     compare = `thenCmp (compare ${vars[index]} ${others[index]}) (${compare})`;
+  let less = `${vars[size - 1]} < ${others[size - 1]}`;
+  for (let index = size - 2; index >= 0; index--) less = `thenLess (compare ${vars[index]} ${others[index]}) (${less})`;
   const shown = vars.map((name) => `shows ${name}`).join(" . showChar ',' . ");
   const read = [
     '("(", s0) <- lex r',
@@ -25,6 +27,7 @@ function tupleSource(size: number): string {
     `  ${tuple(vars)} == ${tuple(others)} = ${eq}`,
     `instance ${tupleContext('Ord', vars)} => Ord ${type} where`,
     `  compare ${tuple(vars)} ${tuple(others)} = ${compare}`,
+    `  ${tuple(vars)} < ${tuple(others)} = ${less}`,
     '  x <= y = not (y < x)',
     '  x > y = y < x',
     '  x >= y = not (x < y)',

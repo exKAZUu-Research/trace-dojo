@@ -179,6 +179,11 @@ thenCmp :: Ordering -> Ordering -> Ordering
 thenCmp EQ y = y
 thenCmp x _ = x
 
+thenLess :: Ordering -> Bool -> Bool
+thenLess LT _ = True
+thenLess EQ rest = rest
+thenLess GT _ = False
+
 comparing :: Ord a => (b -> a) -> b -> b -> Ordering
 comparing p x y = compare (p x) (p y)
 
@@ -225,6 +230,10 @@ instance Ord a => Ord (Maybe a) where
   compare Nothing (Just _) = LT
   compare (Just _) Nothing = GT
   compare (Just x) (Just y) = compare x y
+  Nothing < Nothing = False
+  Nothing < Just _ = True
+  Just _ < Nothing = False
+  Just x < Just y = x < y
   x <= y = not (y < x)
   x > y = y < x
   x >= y = not (x < y)
@@ -239,6 +248,10 @@ instance (Ord a, Ord b) => Ord (Either a b) where
   compare (Left _) (Right _) = LT
   compare (Right _) (Left _) = GT
   compare (Right x) (Right y) = compare x y
+  Left x < Left y = x < y
+  Left _ < Right _ = True
+  Right _ < Left _ = False
+  Right x < Right y = x < y
   x <= y = not (y < x)
   x > y = y < x
   x >= y = not (x < y)

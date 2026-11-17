@@ -10,6 +10,13 @@ const APP_PREC = 10;
 
 type Support = (name: string) => ValueEntity;
 
+interface FieldComparison {
+  method: string;
+  lastMethod?: string;
+  empty: string;
+  combine: string;
+}
+
 /** Builds the method bindings of a derived instance, as GHC's deriving mechanism defines them. */
 export function deriveInstance(decl: RDataDecl, cls: ClassEntity, support: Support): RBinding[] {
   const builder = new Builder(decl.span, support, cls);
@@ -19,7 +26,10 @@ export function deriveInstance(decl: RDataDecl, cls: ClassEntity, support: Suppo
       return [builder.method('==', deriveEq(builder, cons))];
     }
     case 'Ord': {
-      return [builder.method('compare', deriveCompare(builder, cons)), ...deriveComparisons(builder)];
+      const methods = [builder.method('compare', deriveCompare(builder, cons))];
+      if (cons.length > 0 && (cons.length <= 3 || cons.every((con) => con.arity === 0)))
+        methods.push(builder.method('<', deriveLess(builder, cons)), ...deriveComparisons(builder));
+      return methods;
     }
     case 'Show': {
       return [builder.method('showsPrec', deriveShow(builder, cons))];
@@ -138,32 +148,39 @@ function fieldVars(builder: Builder, con: ConInfo, prefix: string): LocalVar[] {
 
 function deriveEq(builder: Builder, cons: ConInfo[]): RClause[] {
   if (cons.length === 0) return [builder.clause([builder.wild(), builder.wild()], builder.conNamed('True'))];
-  const clauses = sameConClauses(builder, cons, '==', 'True', '&&');
+  const clauses = sameConClauses(builder, cons, { method: '==', empty: 'True', combine: '&&' });
   if (cons.length > 1) clauses.push(builder.clause([builder.wild(), builder.wild()], builder.conNamed('False')));
   return clauses;
 }
 
 function deriveCompare(builder: Builder, cons: ConInfo[]): RClause[] {
-  const clauses = sameConClauses(builder, cons, 'compare', 'EQ', 'thenCmp');
-  if (cons.length > 1) {
-    const a = builder.newVar('a');
-    const b = builder.newVar('b');
-    clauses.push(
-      builder.clause(
-        [builder.pvar(a), builder.pvar(b)],
-        builder.call(
-          'compare',
-          builder.call('primConTag', builder.local(a)),
-          builder.call('primConTag', builder.local(b))
-        )
-      )
-    );
-  }
+  const clauses = sameConClauses(builder, cons, { method: 'compare', empty: 'EQ', combine: 'thenCmp' });
+  if (cons.length > 1) clauses.push(constructorTagClause(builder, 'compare'));
   if (cons.length === 0) clauses.push(builder.clause([builder.wild(), builder.wild()], builder.conNamed('EQ')));
   return clauses;
 }
 
-/** GHC derives `<=`, `>`, and `>=` from `<`, so they evaluate their arguments in its order: `x <= y = not (y < x)`. */
+function deriveLess(builder: Builder, cons: ConInfo[]): RClause[] {
+  const clauses = sameConClauses(builder, cons, {
+    method: 'compare',
+    lastMethod: '<',
+    empty: 'False',
+    combine: 'thenLess',
+  });
+  if (cons.length > 1) clauses.push(constructorTagClause(builder, '<'));
+  return clauses;
+}
+
+function constructorTagClause(builder: Builder, method: string): RClause {
+  const a = builder.newVar('a');
+  const b = builder.newVar('b');
+  return builder.clause(
+    [builder.pvar(a), builder.pvar(b)],
+    builder.call(method, builder.call('primConTag', builder.local(a)), builder.call('primConTag', builder.local(b)))
+  );
+}
+
+/** GHC specializes `<=`, `>`, and `>=` through `<`, so they evaluate their arguments in its order: `x <= y = not (y < x)`. */
 function deriveComparisons(builder: Builder): RBinding[] {
   const comparison = (name: string, negate: boolean, swap: boolean): RBinding => {
     const x = builder.newVar('x');
@@ -178,15 +195,14 @@ function deriveComparisons(builder: Builder): RBinding[] {
   return [comparison('<=', true, true), comparison('>', false, true), comparison('>=', true, false)];
 }
 
-/**
- * A clause for each constructor matching two values built by it, combining `method` applied to each pair of fields
- * by `combine` from the right, or `empty` for a constructor without fields.
- */
-function sameConClauses(builder: Builder, cons: ConInfo[], method: string, empty: string, combine: string): RClause[] {
+function sameConClauses(builder: Builder, cons: ConInfo[], comparison: FieldComparison): RClause[] {
+  const { method, empty, combine, lastMethod = method } = comparison;
   return cons.map((con) => {
     const xs = fieldVars(builder, con, 'a');
     const ys = fieldVars(builder, con, 'b');
-    const comparisons = xs.map((x, index) => builder.call(method, builder.local(x), builder.local(ys[index])));
+    const comparisons = xs.map((x, index) =>
+      builder.call(index === xs.length - 1 ? lastMethod : method, builder.local(x), builder.local(ys[index]))
+    );
     const body =
       comparisons.length === 0
         ? builder.conNamed(empty)
