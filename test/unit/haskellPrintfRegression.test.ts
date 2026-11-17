@@ -147,3 +147,31 @@ main=putStrLn(showGFloat Nothing (undefined::N) "")
     uncaughtException: undefined,
   });
 });
+
+test.each([
+  [500, '%6.2f', 'fromIntegral i/7::Double', '  0.14', ' 71.43'],
+  [700, '%5d', 'i', '    1', '  700'],
+  [700, '%-10s', 'show i', '1         ', '700       '],
+  [500, '%08.3f', 'fromIntegral i/7::Float', '0000.143', '0071.429'],
+])('printf table dimensions stay within the execution budget: %i %s', (count, format, value, first, last) => {
+  const source = `import Control.Monad\nimport Text.Printf\nmain=forM_ [1..${count}::Int] $ \\i->printf "${format}\\n" (${value})`;
+  const result = executeProgram('haskell', source);
+  expect(result.kind).toBe('executed');
+  if (result.kind !== 'executed') return;
+  expect(result.uncaughtException).toBeUndefined();
+  const lines = result.stdout.split('\n');
+  expect(lines.pop()).toBe('');
+  expect(lines).toHaveLength(count);
+  expect(lines[0]).toBe(first);
+  expect(lines.at(-1)).toBe(last);
+});
+
+test('printf literal dimensions retain Int overflow behavior', () => {
+  const source =
+    'import Text.Printf\nmain=printf "%18446744073709551616d|%18446744073709551617d|%.18446744073709551616d|%.18446744073709551617d" (0::Int) (0::Int) (0::Int) (0::Int)';
+  expect(executeProgram('haskell', source)).toMatchObject({
+    kind: 'executed',
+    stdout: '0|0||0',
+    uncaughtException: undefined,
+  });
+});

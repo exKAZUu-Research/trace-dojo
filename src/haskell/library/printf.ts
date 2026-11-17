@@ -117,7 +117,8 @@ parseSpec s0 args = flags False False False False False s0
     dimension ('*':r) us = case us of
       [] -> perror "argument list ended prematurely"
       (u:rest) -> (Just (dynamicNumber u), r, rest)
-    dimension s us = let (ds, rest) = span isDigit s in (if null ds then Nothing else Just (read ds), rest, us)
+    dimension s us = let (ds, rest) = span isDigit s
+      in (if null ds then Nothing else Just (foldl' (\n d -> n*10 + ord d - ord '0') 0 ds), rest, us)
     precision ('.':r) us = case dimension r us of
       (p, rest, remaining) -> (Just (maybe 0 id p), rest, remaining)
     precision s us = (Nothing, s, us)
