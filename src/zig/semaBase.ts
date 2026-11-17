@@ -98,6 +98,7 @@ export interface Place {
   readonly isConst: boolean;
   readonly locate: (frame: Frame) => Pointer;
   readonly compileTimePointer?: Pointer;
+  readonly address?: TExpr;
 }
 
 /** An analyzed expression: its type, its value when the compiler knows it, and the code that computes it. */

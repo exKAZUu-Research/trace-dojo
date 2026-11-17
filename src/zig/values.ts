@@ -501,6 +501,7 @@ class OptionalSlots implements Slots {
       },
     });
     aliasStorage(this.slots, this.cell.slots);
+    registerPointerLocation(this.slots, () => this.pointer.storageLocation());
   }
 
   assign(value: Value): void {

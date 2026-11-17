@@ -7485,3 +7485,62 @@ test('f32 math and builtins keep reference rounding instead of rounding a host d
     uncaughtException: undefined,
   });
 });
+
+test.each(['struct{t:type}', 'union(enum){t:type}'])(
+  'indexed optional %s descriptors require proven element values',
+  (type) => {
+    for (const helper of [
+      'fn f(o:anytype)(if(o[0]==null) u8 else o[0].?.t){return 0;}',
+      'fn f(o:[]const ?D)u8{_=o[0];return 0;}',
+    ]) {
+      const source = `const D=${type};${helper}pub fn main()void{const o=[1]?D{null};_=f(&o);}`;
+      expect(executeProgram('zig', source)).toMatchObject({ kind: 'compileError' });
+    }
+    const local = `const D=${type};pub fn main()void{const a=[1]?D{null};const T=if(a[0]==null) u8 else a[0].?.t;const n:T=0;_=n;}`;
+    expect(executeProgram('zig', local)).toMatchObject({ kind: 'executed', uncaughtException: undefined });
+  }
+);
+
+test.each(['struct{t:type}', 'union(enum){t:type}'])(
+  'effectful proven pointers to %s descriptors preserve their output',
+  (type) => {
+    for (const pointer of [
+      '(blk:{std.debug.print("g",.{});break :blk &o;})',
+      '(if(get()) |_| &o else |_| unreachable)',
+    ]) {
+      const source = `const std=@import("std");const D=${type};fn get()error{}!void{std.debug.print("g",.{});}pub fn main()void{const o:?D=null;const x=${pointer}.*;std.debug.print("{}",.{x==null});}`;
+      expect(executeProgram('zig', source)).toMatchObject({
+        kind: 'executed',
+        stderr: 'gtrue',
+        uncaughtException: undefined,
+      });
+    }
+  }
+);
+
+test('descriptor pointers allow runtime data field reads and address-only dereferences', () => {
+  const source = `const std=@import("std");const S=struct{t:type,x:u8};fn read(p:*const S)u8{return p.x;}fn address(p:*const ?S)*const ?S{return &p.*;}pub fn main()void{const s:S=.{.t=u8,.x=7};const o:?S=null;std.debug.print("{} {}",.{read(&s),address(&o)==&o});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: '7 true',
+    uncaughtException: undefined,
+  });
+});
+
+test.each(['u8', 'u16'])('captured optional %s pointers share physical identity and map keys', (type) => {
+  const source = `const std=@import("std");const U=extern union{a:*?${type},b:*${type}};pub fn main(init:std.process.Init)!void{var x:?${type}=7;if(x)|*p|{const u=U{.a=&x};var m=std.AutoHashMap(*${type},u8).init(init.gpa);defer m.deinit();try m.put(p,9);std.debug.print("{} {any}",.{p==u.b,m.get(u.b)});}}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: 'true 9',
+    uncaughtException: undefined,
+  });
+});
+
+test.each(['u8', 'u16'])('optional %s payload aliases share writes independently of the tag', (type) => {
+  const source = `const std=@import("std");const U=extern union{a:*?${type},b:*${type}};pub fn main()void{var x:?${type}=7;if(x)|*p|{const u=U{.a=&x};u.b.*=8;std.debug.print("{} {}|",.{p.*,x.?});x=null;p.*=9;std.debug.print("{} {}|",.{u.b.*,x==null});u.b.*=10;std.debug.print("{} {}",.{p.*,x==null});}}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: '8 8|9 true|10 true',
+    uncaughtException: undefined,
+  });
+});

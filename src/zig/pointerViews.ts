@@ -1,6 +1,6 @@
 import { BufferMemory, type BufferMemorySpace, physicalUnion } from './bufferMemory';
 import { BigFloat } from './floats';
-import { bitSizeOf, fieldOffsets, sizeOf } from './layout';
+import { bitSizeOf, fieldOffsets, optionalNicheBits, sizeOf } from './layout';
 import { reserveMemory, spendMemory } from './memoryAccounting';
 import { arrayOf, type StructType, type Type, typeId } from './types';
 import {
@@ -136,6 +136,7 @@ interface PointerStorage {
   cache: Map<number, { value: Value }>;
 }
 
+// code-gauge-allow functionCognitiveComplexity 18 -- Keeps optional payload and tag synchronization at the same byte-view boundary.
 function synchronizeRegion(
   memory: BufferMemory,
   storage: PointerStorage,
@@ -145,13 +146,20 @@ function synchronizeRegion(
 ): void {
   const { source, type, cache } = storage;
   visitRegion(source, type, { start: offset, end: offset + bits, offset: 0 }, (pointer, child, start, packed) => {
+    const payload =
+      child.kind === 'optional' && !optionalNicheBits(child.child)
+        ? Pointer.optionalProjection(pointer.target, pointer.index)
+        : undefined;
     if (write) {
       storeInto(pointer.target, pointer.index, memory.read(child, start, packed));
+      if (payload && child.kind === 'optional' && pointer.load() === NULL)
+        storeInto(payload, 0, memory.read(child.child, start));
       cache.delete(start);
       return;
     }
     const value = pointer.load();
-    if (cache.has(start) && Object.is(cache.get(start)!.value, value)) return;
+    if (!payload && cache.has(start) && Object.is(cache.get(start)!.value, value)) return;
+    if (payload && child.kind === 'optional' && value === NULL) memory.write(child.child, start, payload.slots[0]);
     memory.write(child, start, value, packed);
     if (
       typeof value !== 'object' ||
