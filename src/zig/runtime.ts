@@ -6,19 +6,10 @@ import { TurtleWorld } from '../interpreter/turtleWorld';
 import { BufferMemorySpace } from './bufferMemory';
 import { rejectRuntimeEffect } from './comptimeMemory';
 import type { FunctionInstance } from './functions';
+import { TurtleReachability } from './turtleReachability';
+import type { Type } from './types';
 import { createUtf8Decoder } from './utf8';
-import {
-  NativeHandle,
-  Pointer,
-  Slice,
-  type Slots,
-  Some,
-  UNASSIGNED,
-  type Value,
-  ZArray,
-  ZStruct,
-  ZUnion,
-} from './values';
+import { type Slots, UNASSIGNED, type Value } from './values';
 
 /** A panic, which ends the program: Zig's safety checks and `@panic` cannot be caught. */
 export class ZigPanic extends Error {
@@ -78,7 +69,8 @@ export class Runtime {
   readonly frames: Frame[] = [];
   private readonly outputDecoders = [createUtf8Decoder(), createUtf8Decoder()];
   /** The storage of container-level variables, which garbage collection starts from. */
-  readonly globals: Slots[] = [];
+  readonly globals: { cell: Slots; type: Type }[] = [];
+  private readonly turtleReachability = new TurtleReachability((cost) => this.spend(cost));
   private allocated = 0;
   private readonly identities = new WeakMap<object, bigint>();
   private nextIdentity = 1n;
@@ -141,41 +133,8 @@ export class Runtime {
   /** Removes the turtles that no variable reaches any longer, as Java's garbage collector does. */
   collectGarbage(): void {
     if (!this.world.hasTurtles) return;
-    const reached = new Set<unknown>();
-    const stack: unknown[] = [];
-    for (const global of this.globals) stack.push(global);
-    for (const frame of this.frames) {
-      for (const value of frame.slots) stack.push(value);
-      for (const value of frame.temporaries) stack.push(value);
-    }
-    const turtles = new Set<unknown>();
-    while (stack.length > 0) {
-      const item = stack.pop();
-      if (item === undefined || item === null || typeof item !== 'object' || reached.has(item)) continue;
-      reached.add(item);
-      pushChildren(item, stack, turtles);
-    }
+    const turtles = this.turtleReachability.collect(this.globals, this.frames);
     this.world.retain((turtle) => turtles.has(turtle));
-  }
-}
-
-// code-gauge-allow functionCognitiveComplexity 19 -- Traverses each supported value representation without recursive host calls.
-function pushChildren(item: object, stack: unknown[], turtles: Set<unknown>): void {
-  if (item instanceof ZArray || item instanceof ZStruct || item instanceof ZUnion) {
-    for (const value of item.slots) stack.push(value);
-  } else if (item instanceof Pointer) {
-    stack.push(item.target);
-  } else if (item instanceof Slice) {
-    stack.push(item.target);
-  } else if (item instanceof Some) {
-    stack.push(item.value);
-  } else if (item instanceof NativeHandle) {
-    if (item.state.turtle) turtles.add(item.state.turtle);
-    for (const value of Object.values(item.state)) stack.push(value);
-  } else if (Array.isArray(item)) {
-    for (const value of item) stack.push(value);
-  } else if ('slots' in item && Array.isArray((item as Slots).slots)) {
-    for (const value of (item as Slots).slots) stack.push(value);
   }
 }
 

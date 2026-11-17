@@ -24,10 +24,7 @@ function valueOf(type: Type, spend: () => void, seen: Set<Type>): Fact | undefin
         return type.bits === 0 ? { value: 0n } : undefined;
       }
       case 'array': {
-        if (type.length === 0n)
-          return {
-            value: new ZArray(type.sentinel === undefined ? [] : [type.sentinel], 0, 0, type.sentinel !== undefined),
-          };
+        if (type.length === 0n && type.sentinel === undefined) return { value: new ZArray([]) };
         const child = valueOf(type.child, spend, seen);
         return child ? { value: constantArray(type, child.value) } : undefined;
       }

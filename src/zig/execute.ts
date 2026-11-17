@@ -31,7 +31,7 @@ export function executeZigProgram(source: string, input?: ProgramInput): Program
  * @param onEnd Receives `main`'s frame when it returns, while the frame still holds its variables.
  */
 export function runProgram(runtime: Runtime, program: CompiledProgram, onEnd?: (frame: Frame) => void): ProgramRun {
-  for (const global of program.globals) runtime.globals.push(global.cell);
+  for (const global of program.globals) runtime.globals.push(global);
   const { main } = program;
   let uncaughtException: string | undefined;
   try {

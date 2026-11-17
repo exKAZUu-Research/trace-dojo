@@ -4891,3 +4891,69 @@ test('distinct large format views reserve compilation storage before copying', (
     )
   ).toMatchObject({ kind: 'limitExceeded', limit: 'storage' });
 });
+
+test.each(['_=a;', 'const s:[]const u8=&a;_=s;'])(
+  'turtle queries skip numeric array and slice storage: %s',
+  (alias) => {
+    const source = `const std=@import("std");pub fn main()void{const a:[300000]u8=@splat(1);${alias}const t=Turtle.init();var n:u16=0;for(0..1000)|_|{if(t.canMoveForward())n+=1;}std.debug.print("{}",.{n});}`;
+    expect(executeProgram('zig', source)).toMatchObject({
+      kind: 'executed',
+      stderr: '1000',
+      uncaughtException: undefined,
+    });
+  }
+);
+
+test('turtle collection meters scans of aggregates that can contain turtle references', () => {
+  const source = `pub fn main()void{var a:[5000]?Turtle=@splat(null);a[4999]=Turtle.init(0,1);const t=Turtle.init(0,0);for(0..200)|_|{_=t.canMoveForward();}}`;
+  expect(executeProgram('zig', source)).toMatchObject({ kind: 'limitExceeded', limit: 'operations' });
+});
+
+test('typed collection follows turtles through nested records, slices and global pointers', () => {
+  const source = `const std=@import("std");const S=struct{data:[20000]u8,t:Turtle};var p:?*S=null;pub fn main()void{var a=[_]S{.{.data=@splat(1),.t=Turtle.init(0,1)}};p=&a[0];const slice:[]S=&a;const t=Turtle.init(0,0);std.debug.print("{}|",.{t.canMoveForward()});slice[0].t.forward();std.debug.print("{}",.{p.?.t.canMoveForward()});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: 'false|true',
+    uncaughtException: undefined,
+    finalTurtles: [
+      { x: 0, y: 2, color: '#', dir: 'N' },
+      { x: 0, y: 0, color: '#', dir: 'N' },
+    ],
+  });
+});
+
+test.each(['[0:7]u8', '[0:0]u8', '[1][0:7]u8', 'struct{a:[0:0]u8}'])(
+  'runtime sentinel storage prevents zero-bit namespace captures: %s',
+  (type) => {
+    const value = type.startsWith('struct') ? '.{.a=.{}}' : type.startsWith('[1]') ? '.{.{}}' : '.{}';
+    const source = `const T=${type};fn outer(n:T)void{const x=n;const S=struct{fn get()T{return x;}};_=S.get();}pub fn main()void{outer(${value});}`;
+    expect(executeProgram('zig', source)).toMatchObject({ kind: 'compileError' });
+  }
+);
+
+test('empty sentinel arrays with zero-bit elements remain namespace-capturable', () => {
+  const source = `const std=@import("std");const T=[0:0]u0;fn outer(n:T)void{const x=n;const S=struct{fn get()T{return x;}};_=S.get();std.debug.print("ok",.{});}pub fn main()void{outer(.{});}`;
+  expect(executeProgram('zig', source)).toMatchObject({ kind: 'executed', stderr: 'ok', uncaughtException: undefined });
+});
+
+test.each(['u8', 'u16'])('discarded undefined array elements require only length metadata: %s', (type) => {
+  const source = `const std=@import("std");pub fn main()void{const p:*[2]${type}=undefined;var n:u8=0;for(p)|_|{n+=1;}std.debug.print("{}",.{n});}`;
+  expect(executeProgram('zig', source)).toMatchObject({ kind: 'executed', stderr: '2', uncaughtException: undefined });
+});
+
+test.each(['n+=item.*;', 'item.*=7;', 'const q:*const u8=item;n+=q.*;', 'const q=item;n+=q.*;'])(
+  'undefined array pointer captures reject actual memory access: %s',
+  (access) => {
+    const source = `pub fn main()void{const p:*[2]u8=undefined;var access=false;_=&access;var n:u8=0;for(p)|*item|{if(access){${access}}n+=1;}_=n;}`;
+    expect(executeProgram('zig', source)).toMatchObject({ kind: 'compileError' });
+  }
+);
+
+test('unknown array pointer captures keep memory checks at runtime', () => {
+  const source = `pub fn main()void{var p:*[2]u8=undefined;_=&p;var access=false;_=&access;for(p)|*item|{if(access){item.*=7;}}}`;
+  expect(executeProgram('zig', source)).toMatchObject({ kind: 'executed', uncaughtException: undefined });
+  expect(executeProgram('zig', source.replace('var access=false', 'var access=true'))).toMatchObject({
+    kind: 'executed',
+    uncaughtException: 'Segmentation fault',
+  });
+});

@@ -309,6 +309,7 @@ export abstract class ExpressionCompiler extends SemaBase {
     return {
       ...runtime(binding.type, (frame) => frame.slots[slot], span, place),
       knownLength: binding.knownLength,
+      undefinedMemory: binding.undefinedMemory,
       local: binding,
     };
   }

@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 996 -- The file holds one layer of the compiler, whose parts share its private state.
+// code-gauge-allow-file fileNcss 1000 -- The file holds one layer of the compiler, whose parts share its private state.
 import { CompileError } from '../interpreter/diagnostics';
 import { ExecutionBudget } from '../interpreter/limits';
 import { CompilationStorage, valueSlots } from './allocation';
@@ -96,6 +96,7 @@ export interface TExpr {
   readonly known: boolean;
   readonly staticResult?: { value: Value };
   readonly knownLength?: bigint;
+  readonly undefinedMemory?: true;
   readonly value: Value;
   readonly eval: Eval;
   readonly place?: Place;
@@ -111,6 +112,7 @@ export interface LocalBinding {
   readonly type: Type;
   readonly isConst: boolean;
   readonly knownLength?: bigint;
+  readonly undefinedMemory?: true;
   /** The value of a constant that the compiler knows. */
   readonly known: boolean;
   readonly value?: Value;
@@ -299,7 +301,7 @@ export abstract class SemaBase implements SemaApi {
   }
 
   protected checkMemoryOperand(value: TExpr, span: Span = value.span): void {
-    if (value.known && isUndefinedMemory(value.value)) this.error(span, 'undefined のポインタは参照できません。');
+    if (hasUndefinedMemory(value)) this.error(span, 'undefined のポインタは参照できません。');
   }
 
   // Values known at compile time ------------------------------------------------------------------------------------
@@ -647,7 +649,8 @@ export abstract class SemaBase implements SemaApi {
   /** Converts an expression to a type as Zig's implicit coercions do, or reports that it cannot. */
   coerce(expression: TExpr, to: Type, span: Span = expression.span): TExpr {
     const converted = this.tryCoerce(expression, to, span);
-    if (converted) return converted;
+    if (converted)
+      return expression.undefinedMemory && to.kind === 'pointer' ? { ...converted, undefinedMemory: true } : converted;
     return this.error(span, mismatch(to, expression.type));
   }
 
@@ -1111,6 +1114,7 @@ export abstract class SemaBase implements SemaApi {
         expression.span
       ),
       staticResult: result,
+      undefinedMemory: type.kind === 'pointer' ? expression.undefinedMemory : undefined,
     };
   }
 
@@ -1325,6 +1329,10 @@ export function withSentinel(values: Value[], sentinel: Value | undefined): Valu
 /** A new array of the elements, followed by the sentinel of a sentinel-terminated array type. */
 export function newArray(values: Value[], sentinel: Value | undefined): ZArray {
   return new ZArray(withSentinel(values, sentinel), 0, values.length, sentinel !== undefined);
+}
+
+export function hasUndefinedMemory(expression: TExpr): boolean {
+  return expression.undefinedMemory === true || isUndefinedMemory(staticResultOf(expression)?.value);
 }
 
 export function staticResultOf(expression: TExpr): { value: Value } | undefined {

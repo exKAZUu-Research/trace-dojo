@@ -10,6 +10,7 @@ import {
   copyForFrame,
   errorSetIncludes,
   evaluateHeld,
+  hasUndefinedMemory,
   known,
   knownLengthOf,
   type LocalBinding,
@@ -266,6 +267,7 @@ export abstract class StatementCompiler extends CallCompiler {
       type,
       isConst,
       knownLength: isConst ? value?.knownLength : undefined,
+      undefinedMemory: isConst ? value?.undefinedMemory : undefined,
       known: Boolean(isConst && (value?.known || value?.staticResult)),
       value: isConst ? (value?.known ? value.value : value?.staticResult?.value) : undefined,
     };
@@ -1512,6 +1514,7 @@ export abstract class StatementCompiler extends CallCompiler {
       evaluate: (frame: Frame) => Value;
       type: Type;
       staticLength?: bigint;
+      undefinedMemory?: true;
     }
     const operands: Operand[] = expression.operands.map((operand, index) => {
       const capture = expression.captures[index];
@@ -1538,7 +1541,7 @@ export abstract class StatementCompiler extends CallCompiler {
         };
       }
       const compiled = this.compile(operand.value);
-      return this.forOperand(compiled, capture?.byPointer ?? false, operand.value);
+      return this.forOperand(compiled, capture, operand.value);
     });
     const lengths = operands.flatMap((operand) => (operand.staticLength === undefined ? [] : [operand.staticLength]));
     if (lengths.some((length) => length !== lengths[0])) this.error(expression, 'for の対象の長さが違います。');
@@ -1546,8 +1549,7 @@ export abstract class StatementCompiler extends CallCompiler {
     const bindings = expression.captures.map((capture, index) => {
       if (isDiscardName(capture)) return;
       const operand = operands[index];
-      const type = capture.byPointer ? operand.type : operand.type;
-      const binding = this.newLocal(capture.name, type, true);
+      const binding = { ...this.newLocal(capture.name, operand.type, true), undefinedMemory: operand.undefinedMemory };
       locals.set(capture.name, binding);
       return binding;
     });
@@ -1630,10 +1632,10 @@ export abstract class StatementCompiler extends CallCompiler {
 
   /** How a `for` reads an array, a pointer to one, or a slice, by value or by pointer. */
   // code-gauge-allow functionNcss 57 -- Keeps the analysis and the generated code of one construct together, as Zig's Sema does.
-  // code-gauge-allow functionCognitiveComplexity 26 -- Keeps all loop operand views and their exact lengths together.
+  // code-gauge-allow functionCognitiveComplexity 29 -- Keeps all loop operand views and their exact lengths together.
   private forOperand(
     compiled: TExpr,
-    byPointer: boolean,
+    capture: Capture | undefined,
     span: Span
   ): {
     lengthOf?: (frame: Frame, value: Value) => bigint;
@@ -1641,7 +1643,10 @@ export abstract class StatementCompiler extends CallCompiler {
     evaluate: (frame: Frame) => Value;
     type: Type;
     staticLength?: bigint;
+    undefinedMemory?: true;
   } {
+    const byPointer = capture?.byPointer ?? false;
+    const readsElement = capture !== undefined && !isDiscardName(capture) && !byPointer;
     const type = compiled.type;
     let child: Type;
     let isConst: boolean;
@@ -1683,7 +1688,7 @@ export abstract class StatementCompiler extends CallCompiler {
     }
     this.resolveStorage(child, span);
     const zero = sizeOf(child) === 0;
-    if (type.kind === 'pointer' && (type.size === 'slice' || (!byPointer && !zero && staticLength !== 0n)))
+    if (type.kind === 'pointer' && (type.size === 'slice' || (readsElement && !zero && staticLength !== 0n)))
       this.checkMemoryOperand(compiled, span);
     if (!compiled.known && type.kind === 'array') {
       const read = evaluate;
@@ -1691,6 +1696,7 @@ export abstract class StatementCompiler extends CallCompiler {
     }
     return {
       type: byPointer ? pointerTo(child, isConst) : child,
+      undefinedMemory: byPointer && hasUndefinedMemory(compiled) ? true : undefined,
       evaluate,
       staticLength,
       lengthOf: (_frame, value) => staticLength ?? viewOf(value).length,
