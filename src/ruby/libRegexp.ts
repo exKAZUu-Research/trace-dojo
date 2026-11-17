@@ -1738,7 +1738,6 @@ function* substituteOnceRegexp(
   const [from, to] = cursor.range(state)!;
   const piece = yield* regexpReplacementPiece(cursor, state, replacement, block, LIMITS.maxStringLength);
   cursor.refresh();
-  cursor.checkLength();
   if (target.frozen) throw frozenError(target, inspectStringEncoding(target));
   const bytes = stringBytes(cursor.snapshot);
   const retainedAscii =
@@ -1778,7 +1777,6 @@ function* substituteAllRegexp(
       LIMITS.maxStringLength - output.length
     );
     cursor.refresh();
-    cursor.checkLength();
     if (position < from) output.append(cursor.sliceSource(position, from));
     output.append(piece);
     position = to;
@@ -1877,7 +1875,6 @@ wrapFirst('scan', function* (self, args, block) {
     setLastMatch(state);
     yield* callBlock(block, [scanValue(state)], false);
     cursor.refresh();
-    cursor.checkLength();
     lastSearch = search;
     search = next;
     state = cursor.match(search);
@@ -1995,7 +1992,6 @@ function splitEmitter(
       if (block) {
         yield* callBlock(block, [part], false);
         cursor.refresh();
-        cursor.checkLength();
       } else parts.push(part);
     }
   };

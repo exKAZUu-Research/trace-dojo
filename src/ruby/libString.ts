@@ -128,16 +128,15 @@ function* stringArgValue(value: Value): Gen<RString> {
   return yield* toStrValue(value);
 }
 
-function* regexpPatternText(value: Value, self: RString): Gen<string> {
+function* regexpPatternString(value: Value): Gen<RString> {
   const pattern = yield* stringArgValue(value);
-  requireCompatibleStringEncoding(self, pattern);
   if (!validStringEncoding(pattern)) {
     throw rubyError(
       rt().c.RegexpError,
       `invalid multibyte character: /${inspectStringEncoding(pattern).slice(1, -1)}/`
     );
   }
-  return pattern.s;
+  return pattern;
 }
 
 function* characterSetPattern(self: RString, value: Value): Gen<RString> {
@@ -1277,7 +1276,9 @@ function* substitute(
   const [pattern, replacement] = args;
   const snapshotPolicy = !global && !mutating ? 'plainCopy' : 'plainString';
   regexpUnsupported(pattern);
-  const target = yield* regexpPatternText(pattern, self);
+  const patternString = yield* regexpPatternString(pattern);
+  requireCompatibleStringEncoding(self, patternString);
+  const target = patternString.s;
   if (replacement === undefined && !block) {
     if (global) throw new UnsupportedFeatureError('ブロックを渡さない gsub（Enumerator）');
     throw argumentError('wrong number of arguments (given 1, expected 2)');
@@ -1419,15 +1420,17 @@ def('String', 'gsub!', [1, 2], function* (self: RString, args, block) {
   return self;
 });
 // code-gauge-allow functionCognitiveComplexity 18 -- The ordered cases for String encoding and mutation share state; splitting them solely for the metric would hide their sequencing.
-// code-gauge-allow functionNcss 38 -- The ordered cases for String encoding and mutation share state; splitting them solely for the metric would hide their sequencing.
+// code-gauge-allow functionNcss 39 -- Pattern conversion, initial validation, byte-position scans, callback checks and last-match restoration retain their native order.
 def('String', 'scan', 1, function* (self: RString, [pattern], block) {
-  if (self.rawBytes && !self.binary) throw argumentError('invalid byte sequence in UTF-8');
+  const sourceLength = stringBytes(self).length;
   regexpUnsupported(pattern);
-  const target = yield* regexpPatternText(pattern, self);
-  if (target.length === 0) return yield* scanEmpty(self, block);
+  const patternString = yield* regexpPatternString(pattern);
+  checkCharacterEncoding(self);
+  requireCompatibleStringEncoding(self, patternString);
+  const target = patternString.s;
+  if (target.length === 0) return yield* scanEmpty(self, block, sourceLength);
   const found: Value[] = [];
   let text = self.s;
-  const sourceLength = stringBytes(self).length;
   let position = 0;
   let lastStart = -1;
   for (;;) {
@@ -1454,8 +1457,14 @@ def('String', 'scan', 1, function* (self: RString, [pattern], block) {
   return self;
 });
 
-function* scanEmpty(self: RString, block: RProc | undefined): Gen<Value> {
-  const cursor = new RegexpCursor(makeRegexp('', { sourceBinary: self.binary }), self, 'plainString');
+function* scanEmpty(self: RString, block: RProc | undefined, expectedExtent: number): Gen<Value> {
+  const cursor = new RegexpCursor(
+    makeRegexp('', { sourceBinary: self.binary }),
+    self,
+    'plainString',
+    'literal',
+    expectedExtent
+  );
   const found: Value[] = [];
   let lastByte = 0;
   for (let offset = 0; offset <= cursor.length;) {

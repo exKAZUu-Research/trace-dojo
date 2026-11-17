@@ -13,9 +13,9 @@ import { rt } from './runtime';
 import { str, stringBytes, stringFromBytes } from './values';
 
 export class RegexpCursor {
-  readonly length: number;
   snapshot: RString;
   private bytes: Uint8Array;
+  private readonly expectedExtent: number;
   private readonly sourceBinary: boolean;
   private readonly sourceUsAscii: boolean;
   private validated = true;
@@ -23,20 +23,26 @@ export class RegexpCursor {
   constructor(
     private readonly regexp: RObject,
     private readonly subject: RString,
-    private readonly snapshotPolicy: MatchSnapshotPolicy = 'preserveClass'
+    private readonly snapshotPolicy: MatchSnapshotPolicy = 'preserveClass',
+    private readonly matchPolicy: 'regexp' | 'literal' = 'regexp',
+    expectedExtent?: number
   ) {
     this.snapshot = matchSnapshot(subject, this.snapshotPolicy);
     this.bytes = stringBytes(this.snapshot);
-    this.length = this.bytes.length;
+    this.expectedExtent = expectedExtent ?? this.bytes.length;
     this.sourceBinary = this.snapshot.binary;
     this.sourceUsAscii = this.snapshot.usAscii;
     validateRegexpSubject(regexp, subject);
   }
 
+  get length(): number {
+    return this.bytes.length;
+  }
+
   match(byte: number): MatchState | undefined {
     if (byte > this.length) return undefined;
     if (!this.validated) {
-      validateRegexpSubject(this.regexp, this.snapshot);
+      if (this.matchPolicy === 'regexp') validateRegexpSubject(this.regexp, this.snapshot);
       this.validated = true;
     }
     const unit = regexpByteUnit(this.snapshot, byte);
@@ -104,7 +110,7 @@ export class RegexpCursor {
   }
 
   nextCharacter(to: number, source = this.snapshot): number {
-    if (source.binary) return to + 1;
+    if (source.binary || source.usAscii) return to + 1;
     const unit = regexpByteUnit(source, to);
     if (regexpByteIndex(source, unit) !== to) return to + 1;
     const point = source.s.codePointAt(unit);
@@ -113,22 +119,18 @@ export class RegexpCursor {
 
   refresh(): void {
     const { subject, snapshot } = this;
-    if (
+    const unchanged =
       subject.s === snapshot.s &&
       subject.rawBytes === snapshot.rawBytes &&
       subject.binary === snapshot.binary &&
       subject.usAscii === snapshot.usAscii &&
-      subject.frozen === snapshot.frozen
-    )
-      return;
-    const bytes = stringBytes(subject);
+      subject.frozen === snapshot.frozen;
+    const bytes = unchanged ? this.bytes : stringBytes(subject);
+    if (bytes.length !== this.expectedExtent) throw rubyError(rt().c.RuntimeError, 'string modified');
+    if (unchanged) return;
     this.validated = false;
     this.snapshot = matchSnapshot(subject, this.snapshotPolicy);
     this.bytes = bytes;
-  }
-
-  checkLength(): void {
-    if (this.bytes.length !== this.length) throw rubyError(rt().c.RuntimeError, 'string modified');
   }
 
   sliceSource(from: number, to = this.length): RString {
