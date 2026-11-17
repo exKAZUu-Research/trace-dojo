@@ -89,8 +89,8 @@ export class Runtime implements TracedRuntime<TraceFrame> {
     return this.previews.run(run);
   }
 
-  forcePreview(slot: Thunk): Value {
-    return this.previews.force(() => this.machine.force(slot));
+  forcePreview(slot: Thunk, scalar: boolean): Value {
+    return this.previews.force(() => this.machine.force(slot), scalar ? 'scalar' : 'composite');
   }
 
   consumePreview(slot: Thunk): void {

@@ -5,7 +5,7 @@ import { TraceRecorder, type TraceVariables } from '../interpreter/traceRecorder
 import type { DisplayNode, TraceItemVariable } from '../problems/trace';
 import { CHAR_TYPE, CONS_CON, FLOAT_TYPE, NIL_CON, UNIT_CON } from './builtinTypes';
 import { compileProgram } from './compile';
-import { constructorFieldType, slotDisplayType, UNKNOWN_TYPE } from './displayTypes';
+import { constructorFieldType, isScalarType, slotDisplayType, UNKNOWN_TYPE } from './displayTypes';
 import { floatToDigits } from './primitives';
 import { runProgram } from './run';
 import { DisplayAbort, Runtime, type TraceFrame } from './runtime';
@@ -79,7 +79,7 @@ function addSlotVariable(
   type: Type
 ): { value: Value; type: Type } | undefined {
   return displayAttempt(runtime, () => {
-    const value = forceForDisplay(runtime, slot);
+    const value = forceForDisplay(runtime, slot, slotDisplayType(slot, type));
     if (value === undefined) return;
     const displayType = slotDisplayType(slot, type);
     addVariable(runtime, variables, name, value, displayType);
@@ -97,7 +97,11 @@ function addSelfFields(
   if (!(self instanceof ConValue) || !self.con.fieldNames) return;
   for (const [index, field] of self.fields.entries()) {
     const scalar = displayAttempt(runtime, () => {
-      const forced = forceForDisplay(runtime, field);
+      const forced = forceForDisplay(
+        runtime,
+        field,
+        slotDisplayType(field, constructorFieldType(self.con, entry.type, index))
+      );
       return forced === undefined
         ? NOT_SCALAR
         : scalarForDisplay(runtime, forced, slotDisplayType(field, constructorFieldType(self.con, entry.type, index)));
@@ -119,14 +123,14 @@ function displayAttempt<T>(runtime: Runtime, work: () => T): T | undefined {
 }
 
 /** Evaluates a value for display, leaving it unevaluated when that fails or takes too long. */
-function forceForDisplay(runtime: Runtime, slot: Slot): Value | undefined {
+function forceForDisplay(runtime: Runtime, slot: Slot, type: Type = UNKNOWN_TYPE): Value | undefined {
   slot = untypedSlot(slot);
   const ready = peek(slot);
   if (ready !== undefined) return ready;
   if (slot instanceof Thunk && slot.state !== 'done' && runtime.displayAborted.has(slot)) return;
   return runtime.withDisplayBudget(DISPLAY_OPERATIONS, () => {
     try {
-      return slot instanceof Thunk ? runtime.forcePreview(slot) : slot;
+      return slot instanceof Thunk ? runtime.forcePreview(slot, isScalarType(type)) : slot;
     } catch (error) {
       if (error instanceof DisplayAbort && slot instanceof Thunk) runtime.displayAborted.add(slot);
       if (error instanceof HaskellException || error instanceof DisplayAbort) return;

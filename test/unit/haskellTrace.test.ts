@@ -958,6 +958,26 @@ main=forM_ [1..1000::Int] $ \\i -> do
   }
 });
 
+test.each(['reverse [1..100::Int]', 'reverse [1..200::Int]', 'last [[1..100::Int],[1..200]]'])(
+  'composite root previews preserve later scalar assignments: %s',
+  (collection) => {
+    const source = `import Control.Monad
+main=forM_ [1..1000::Int] $ \\i -> do
+ let a=${collection}
+ let n=i*2
+ print n`;
+    const recording = traceProgram('haskell', source, source);
+    expect(recording.uncaughtException).toBeUndefined();
+    expect(recording.stdout).toBe(Array.from({ length: 1000 }, (_, i) => `${(i + 1) * 2}\n`).join(''));
+    const assignments = recording.traceItems.filter((item) => item.line === 4);
+    expect(assignments).toHaveLength(1000);
+    for (const [index, item] of assignments.entries()) {
+      expect(item.vars.i).toBe(index + 1);
+      expect(item.vars.n).toBe((index + 1) * 2);
+    }
+  }
+);
+
 test.each([20, 30, 77])('demanded scalar previews preserve every loop assignment: sum 1..%i', (count) => {
   const source = `import Control.Monad
 main=forM_ [1..1000::Int] $ \\i -> do

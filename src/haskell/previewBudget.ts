@@ -66,8 +66,8 @@ export class PreviewBudget {
     if (performance.now() > active.deadline) throw new DisplayAbort();
   }
 
-  force(work: () => Value): Value {
-    return this.run(() => this.forceInTransaction(work), 'scalar');
+  force(work: () => Value, kind: PreviewKind): Value {
+    return this.run(() => this.forceInTransaction(work), kind);
   }
 
   private forceInTransaction(work: () => Value): Value {
