@@ -213,12 +213,13 @@ export class MemberChecker {
   }
 
   checkPropertyAvailability(propertyNode: TreeNode, objectType: Type, name: string, property: Property): void {
-    const unsupported = this.unsupportedMember(objectType, name) ?? this.unsupportedLibraryMember(property);
+    const unsupported =
+      this.unsupportedMember(objectType, name) ?? this.unsupportedLibraryMember(propertyNode, property);
     if (unsupported) this.c.error(propertyNode, unsupportedMessage(unsupported));
   }
 
   /** A library member of every error or regular expression that this interpreter does not provide. */
-  private unsupportedLibraryMember(property: Property): string | undefined {
+  private unsupportedLibraryMember(propertyNode: TreeNode, property: Property): string | undefined {
     const declaration = property.declaration;
     if (!declaration || !this.c.isLibrary(declaration)) return undefined;
     const owner = declaration.parent?.parent?.childForFieldName('name')?.text;
@@ -226,7 +227,8 @@ export class MemberChecker {
     if (owner === 'Error' && property.name === 'stack') return 'Error の stack';
     if (owner === 'RegExp' && property.name === 'compile') return 'RegExp の compile';
     // Node.js shows a function's source as tsx's esbuild printed it, which this interpreter does not reproduce.
-    if (owner === 'Function' && property.name === 'toString') return '関数やクラスの文字列への変換';
+    if (owner === 'Function' && property.name === 'toString' && !isOnlyCompared(propertyNode.parent))
+      return '関数やクラスの文字列への変換';
     return undefined;
   }
 
@@ -416,4 +418,19 @@ function editDistance(a: string, b: string): number {
     }
   }
   return previous[b.length];
+}
+
+/**
+ * Whether a member read's value is only examined, as the operand of `typeof` or of an equality, so that it can never be
+ * called afterwards.
+ */
+function isOnlyCompared(read: TreeNode | null): boolean {
+  let expression = read;
+  while (expression?.parent?.type === 'parenthesized_expression') expression = expression.parent;
+  const parent = expression?.parent;
+  if (parent?.type === 'unary_expression') return parent.childForFieldName('operator')?.text === 'typeof';
+  return (
+    parent?.type === 'binary_expression' &&
+    ['===', '!==', '==', '!='].includes(parent.childForFieldName('operator')?.text ?? '')
+  );
 }
