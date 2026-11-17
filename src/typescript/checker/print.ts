@@ -55,7 +55,7 @@ export class Printer {
           }
           printed.push(this.wrap(member));
         }
-        return printed.join(' | ');
+        return truncatedUnion(printed);
       }
       case 'intersection': {
         return type.types.map((member) => this.wrap(member)).join(' & ');
@@ -204,4 +204,25 @@ export class Printer {
       : undefined;
     return `${typeParameters}(${parameters.join(', ')})${arrow}${predicate ?? this.print(signature.returnType())}`;
   }
+}
+
+/** TypeScript's limit on the length of a printed type, past which it leaves members out. */
+const MAX_PRINTED_LENGTH = 160;
+
+/**
+ * The members of a union joined as TypeScript prints them, which leaves out the members past its length limit but the
+ * last, as `"a" | "b" | ... 98 more ... | "z"`.
+ */
+function truncatedUnion(printed: string[]): string {
+  const joined = printed.join(' | ');
+  if (joined.length <= MAX_PRINTED_LENGTH || printed.length <= 2) return joined;
+  const kept: string[] = [];
+  let length = 0;
+  for (const member of printed.slice(0, -1)) {
+    if (length + member.length > MAX_PRINTED_LENGTH) break;
+    kept.push(member);
+    length += member.length + 3;
+  }
+  const omitted = printed.length - 1 - kept.length;
+  return [...kept, `... ${omitted} more ...`, printed.at(-1) as string].join(' | ');
 }
