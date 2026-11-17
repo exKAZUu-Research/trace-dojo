@@ -476,15 +476,7 @@ export class Checker {
   }
 
   tupleType(elements: TupleElement[], readonly = false): ObjectType {
-    // A rest element of a tuple type spreads into the tuple.
-    const flat: TupleElement[] = [];
-    for (const element of elements) {
-      if (element.rest && element.type.kind === 'object' && element.type.objectKind === 'tuple') {
-        flat.push(...(element.type.tuple?.elements ?? []));
-      } else {
-        flat.push(element);
-      }
-    }
+    const flat = flattenTupleElements(elements);
     // A tuple of only an array's rest is that array, as TypeScript normalizes `[...values: number[]]`.
     const [only] = flat;
     if (flat.length === 1 && only.rest && (this.isArrayType(only.type) || this.isReadonlyArrayType(only.type)))
@@ -757,3 +749,12 @@ export function checkTypeScript(root: TreeNode): SourceDiagnostic[] {
 }
 
 export { regularOf };
+
+/** Tuple elements with each rest element of a tuple type spread into its own elements. */
+function flattenTupleElements(elements: TupleElement[]): TupleElement[] {
+  return elements.flatMap((element) =>
+    element.rest && element.type.kind === 'object' && element.type.objectKind === 'tuple'
+      ? (element.type.tuple?.elements ?? [])
+      : [element]
+  );
+}
