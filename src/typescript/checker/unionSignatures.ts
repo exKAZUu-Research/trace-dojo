@@ -114,7 +114,7 @@ export class UnionSignatures {
   private matches(source: Signature, target: Signature, match: SignatureMatch): boolean {
     if (source === target) return true;
     if (!this.hasMatchingArity(source, target, match.partial)) return false;
-    const mapper = this.typeParameterMapper(source.typeParameters, target.typeParameters, match.partial);
+    const mapper = this.typeParameterMapper(source.typeParameters, target.typeParameters, match);
     if (!mapper) return false;
     const instantiated = mapper.size > 0 ? this.c.instantiateSignature(source, mapper) : source;
     const related = (a: Type, b: Type): boolean => this.related(a, b, match.partial);
@@ -138,17 +138,28 @@ export class UnionSignatures {
 
   /**
    * The mapper from `source`'s type parameters to `target`'s, or `undefined` when they differ in number or in their
-   * constraints and defaults.
+   * constraints, or, when matching signatures by `match`, in their defaults. Combining the members of a union ignores
+   * defaults, as TypeScript's `compareTypeParametersIdentical` does, keeping the first member's.
    */
-  private typeParameterMapper(source: TypeParameter[], target: TypeParameter[], partial = false): Mapper | undefined {
+  private typeParameterMapper(
+    source: TypeParameter[],
+    target: TypeParameter[],
+    match?: SignatureMatch
+  ): Mapper | undefined {
     if (source.length !== target.length) return undefined;
     const mapper: Mapper = new Map(source.map((parameter, index) => [parameter.id, target[index]]));
-    const instantiated = (type: Type | undefined): Type => (type ? this.c.instantiate(type, mapper) : unknownType);
+    const partial = match?.partial ?? false;
+    const relatedAfterMapping = (sourceType: Type | undefined, targetType: Type | undefined): boolean =>
+      this.related(
+        sourceType ? this.c.instantiate(sourceType, mapper) : unknownType,
+        targetType ?? unknownType,
+        partial
+      );
     const same = source.every(
       (parameter, index) =>
         parameter === target[index] ||
-        (this.related(instantiated(parameter.constraint?.()), target[index].constraint?.() ?? unknownType, partial) &&
-          this.related(instantiated(parameter.default?.()), target[index].default?.() ?? unknownType, partial))
+        (relatedAfterMapping(parameter.constraint?.(), target[index].constraint?.()) &&
+          (!match || relatedAfterMapping(parameter.default?.(), target[index].default?.())))
     );
     return same ? mapper : undefined;
   }
