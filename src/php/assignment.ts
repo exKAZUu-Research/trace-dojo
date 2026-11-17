@@ -98,13 +98,14 @@ class StaticPlace extends RefPlace {
     return this.decl;
   }
 
-  override set(value: Value): void {
+  override set(value: Value): Value {
     if (this.decl?.type) {
       const { coerceProperty } = classesModule;
       this.target.v = coerceProperty(this.decl, value);
-      return;
+      return this.target.v;
     }
     this.target.v = value;
+    return this.target.v;
   }
 }
 
@@ -123,7 +124,12 @@ function propPlace(object: PhpObject, name: string): Place {
       }
       return readProp(object, name, scope, true);
     },
-    set: (value) => writeProp(object, name, value, scope),
+    set: (value) => {
+      writeProp(object, name, value, scope);
+      const decl = classesModule.lookupProp(object.cls, name, scope);
+      const slot = object.props.get(decl && !decl.isStatic ? decl.key : name);
+      return slot instanceof Ref ? slot.v : typeof slot === 'symbol' ? value : (slot ?? value);
+    },
     ref: () => propRef(object, name, scope),
     unset: () => unsetProp(object, name, scope),
     declaration: () => classesModule.lookupProp(object.cls, name, scope),
@@ -258,8 +264,8 @@ export function assignExpression(target: Expr, valueExpr: Expr): Value {
   const place = placeOf(target);
   const value = ev(valueExpr);
   runtime.row = target.row;
-  place.set(share(value));
-  return value;
+  const stored = place.set(share(value));
+  return stored === undefined ? value : stored;
 }
 
 /** Assigns a value to a writable expression, as a foreach binding or list() element does. */

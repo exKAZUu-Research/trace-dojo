@@ -19,8 +19,8 @@ import {
 } from './classes';
 import { toBool, valueName } from './conversions';
 import { E_DEPRECATED, E_WARNING, emitError, throwError, warn } from './errors';
-import { collectBeforeAllocation, collectGarbage, setDestructor } from './garbage';
-import { ev, evReturn } from './interp';
+import { collectBeforeAllocation, setDestructor } from './garbage';
+import { ev, evQuiet, evReturn } from './interp';
 import { looseEquals, setObjectConversions, toStr } from './operators';
 import { ElementPlace, RefPlace, share, ValuePlace, VarPlace, writableContainer } from './places';
 import { ExitSignal, FatalError, Frame, PhpThrow, rt, type Runtime } from './runtime';
@@ -145,7 +145,8 @@ function execStmt(statement: Stmt, seek?: string): Completion {
     switch (statement.k) {
       case 'expr': {
         const mark = runtime.steps.statementMark();
-        ev(statement.e);
+        if (statement.e.k === 'var') evQuiet(statement.e);
+        else ev(statement.e);
         runtime.steps.completeStatement(statement.row, statement.onlyCalls, mark);
         return undefined;
       }
@@ -247,7 +248,6 @@ function execStmt(statement: Stmt, seek?: string): Completion {
     }
   } finally {
     runtime.dropTemporaries(frame, held);
-    if (runtime.destructibles > 0 && !runtime.shuttingDown) collectGarbage(runtime);
   }
 }
 /** Enters the statement that holds a label without running what comes before the label inside it. */

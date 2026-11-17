@@ -113,6 +113,8 @@ export abstract class DeclarationConverter extends ConverterBase {
       seen.add(name);
       const typeNode = child.childForFieldName('type');
       const type = typeNode ? this.typeDecl(typeNode) : undefined;
+      if (type?.k === 'named' && ['void', 'never'].includes(type.name))
+        this.error(child, 'void and never cannot be parameter types');
       if (typeNode && type) this.checkTypeScope(typeNode, type);
       const defaultNode = child.childForFieldName('default_value');
       const defaultExpr = defaultNode ? this.expr(defaultNode) : undefined;
@@ -187,6 +189,45 @@ export abstract class DeclarationConverter extends ConverterBase {
   }
 
   protected typeDecl(node: Node): TypeDecl {
+    const type = this.parseTypeDecl(node);
+    if (type.k === 'named' && type.nullable && ['mixed', 'void', 'never', 'null'].includes(type.name))
+      this.error(node, `Type ${type.name} cannot be nullable`);
+    if (type.k !== 'named') {
+      const names = type.types.map((part) => (part.k === 'named' ? lower(part.name) : typeToString(part)));
+      if (new Set(names).size !== names.length) this.error(node, 'Duplicate type is redundant');
+      if (
+        type.k === 'union' &&
+        (names.some((name) => ['mixed', 'void', 'never'].includes(name)) ||
+          (names.includes('iterable') && (names.includes('array') || names.includes('traversable'))))
+      )
+        this.error(node, 'Invalid or redundant union type');
+      if (
+        type.k === 'inter' &&
+        names.some((name) =>
+          [
+            'int',
+            'float',
+            'string',
+            'bool',
+            'array',
+            'object',
+            'callable',
+            'iterable',
+            'mixed',
+            'void',
+            'never',
+            'null',
+            'false',
+            'true',
+          ].includes(name)
+        )
+      )
+        this.error(node, 'Intersection types must be class types');
+    }
+    return type;
+  }
+
+  private parseTypeDecl(node: Node): TypeDecl {
     switch (node.type) {
       case 'primitive_type':
       case 'bottom_type': {
@@ -226,6 +267,20 @@ export abstract class DeclarationConverter extends ConverterBase {
         return { k: 'union', types: node.namedChildren.map((child) => this.typeDecl(child)) };
       }
     }
+  }
+
+  protected constantExpr(node: Node): Expr {
+    const invalid = (child: Node): boolean =>
+      [
+        'variable_name',
+        'dynamic_variable_name',
+        'function_call_expression',
+        'object_creation_expression',
+        'anonymous_function',
+        'arrow_function',
+      ].includes(child.type) || child.namedChildren.some(invalid);
+    if (invalid(node)) this.error(node, 'Constant expression contains invalid operations');
+    return this.expr(node);
   }
 
   /** Rejects a literal default value the parameter's type can never hold, as PHP does at compile time. */
@@ -324,6 +379,7 @@ export abstract class DeclarationConverter extends ConverterBase {
       endRow: node.endPosition.row,
       isAnonymous: anonymous,
     };
+    if (decl.isAbstract && decl.isFinal) this.error(node, 'Cannot use the final modifier on an abstract class');
     const outerClass = this.currentClass;
     const outerKind = this.currentClassKind;
     const outerHasParent = this.currentClassHasParent;
@@ -440,6 +496,8 @@ export abstract class DeclarationConverter extends ConverterBase {
     const attributes = member.childForFieldName('attributes');
     if (attributes) this.unsupported(attributes, '属性（#[...]）');
     const modifiers = this.memberModifiers(member);
+    if (modifiers.isAbstract || modifiers.isStatic || modifiers.isReadonly)
+      this.error(member, 'Invalid modifier on a class constant');
     const typeNode = member.childForFieldName('type');
     for (const element of member.namedChildren.filter((child) => child.type === 'const_element')) {
       const [nameNode, valueNode] = element.namedChildren.filter((part) => part.type !== 'comment');
@@ -458,9 +516,12 @@ export abstract class DeclarationConverter extends ConverterBase {
       if (kind === 'interface' && modifiers.visibility && modifiers.visibility !== 'public') {
         this.error(element, 'インターフェースの定数は public にしてください。');
       }
+      const constantType = typeNode ? this.typeDecl(typeNode) : undefined;
+      const constantValue = this.constantExpr(valueNode);
+      if (constantType && constantValue.k === 'lit') this.checkDefaultType(element, name, constantType, constantValue);
       decl.consts.push({
         name,
-        value: this.expr(valueNode),
+        value: constantValue,
         visibility: modifiers.visibility ?? 'public',
         isFinal: modifiers.isFinal,
         row: element.startPosition.row,
@@ -520,6 +581,9 @@ export abstract class DeclarationConverter extends ConverterBase {
         isAbstract: modifiers.isAbstract,
         isFinal: modifiers.isFinal,
       };
+      if (modifiers.isAbstract && !hookList) this.error(member, 'Only hooked properties may be declared abstract');
+      if (modifiers.isAbstract && hookList && !hookList.namedChildren.some((hook) => !hook.childForFieldName('body')))
+        this.error(member, `Abstract property ${decl.name}::$${name} must specify at least one abstract hook`);
       if (hookList) this.hooks(hookList, prop, decl.name);
       decl.props.push(prop);
     }
@@ -620,6 +684,8 @@ export abstract class DeclarationConverter extends ConverterBase {
     const modifiers = this.memberModifiers(member);
     const fn = this.functionDecl(member, false, decl.name);
     const body = member.childForFieldName('body');
+    if (decl.kind === 'interface' && modifiers.visibility && modifiers.visibility !== 'public')
+      this.error(member, `Access type for interface method ${decl.name}::${fn.name}() must be public`);
     const isAbstract = modifiers.isAbstract || (decl.kind === 'interface' && !body);
     if (decl.kind === 'interface' && body) {
       this.error(

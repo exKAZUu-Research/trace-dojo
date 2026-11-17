@@ -13,6 +13,7 @@ import { decodeLiteral, parseIntegerLiteral } from './literals';
 export type { CompileNotice } from './converterBase';
 
 export class Converter extends DeclarationConverter {
+  private readonly staticNames = new WeakMap<object, Set<string>>();
   convertProgram(root: Node): Program {
     const body: Stmt[] = [];
     let index = 0;
@@ -163,6 +164,15 @@ export class Converter extends DeclarationConverter {
             const value = child.childForFieldName('value');
             return { name: this.variableName(nameNode), init: value ? this.expr(value) : undefined };
           });
+        let names = this.staticNames.get(this.fn);
+        if (!names) {
+          names = new Set();
+          this.staticNames.set(this.fn, names);
+        }
+        for (const variable of vars) {
+          if (names.has(variable.name)) this.error(node, `Duplicate declaration of static variable $${variable.name}`);
+          names.add(variable.name);
+        }
         return [{ k: 'static', vars, row }];
       }
       case 'unset_statement': {
@@ -200,7 +210,7 @@ export class Converter extends DeclarationConverter {
           .filter((child) => child.type === 'const_element')
           .map((child) => {
             const [nameNode, valueNode] = child.namedChildren.filter((part) => part.type !== 'comment');
-            return { name: this.qualify(this.nameText(nameNode)), value: this.expr(valueNode) };
+            return { name: this.qualify(this.nameText(nameNode)), value: this.constantExpr(valueNode) };
           });
         return [{ k: 'const', items, row }];
       }
@@ -557,6 +567,7 @@ export class Converter extends DeclarationConverter {
         return;
       }
       case 'prop': {
+        if (e.nullsafe) this.error(node, "Can't use nullsafe operator in write context");
         this.checkWriteBase(e.obj, node);
         return;
       }
@@ -1056,6 +1067,8 @@ export class Converter extends DeclarationConverter {
         return { name, byRef };
       });
     const fn = this.functionDecl(node, true);
+    if (new Set(uses.map((use) => use.name)).size !== uses.length)
+      this.error(node, 'Cannot use a variable twice in a closure use clause');
     for (const use of uses) {
       if (fn.params.some((param) => param.name === use.name)) {
         this.error(
@@ -1261,7 +1274,10 @@ export class Converter extends DeclarationConverter {
       if (child.type === 'comment') continue;
       raw += this.source.slice(cursor, child.startIndex);
       flush();
-      parts.push(braced ? this.expr(child) : this.simpleInterpolation(child));
+      const part = braced ? this.expr(child) : this.simpleInterpolation(child);
+      if (braced && !['var', 'varvar', 'idx', 'prop', 'sprop', 'mcall', 'scall', 'call'].includes(part.k))
+        this.error(child, 'Invalid expression in string interpolation');
+      parts.push(part);
       braced = false;
       cursor = child.endIndex;
       rawAtLineStart = false;

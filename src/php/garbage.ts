@@ -1,10 +1,16 @@
 // code-gauge-allow-file fileNcss 417 -- Holds the cases of one concern of the interpreter, which share their helpers.
 import type { TurtleState } from '../interpreter/turtleWorld';
 import type { Frame, Runtime } from './runtime';
-import { type ClosureData, isClosure, PhpArray, PhpObject, Ref } from './values';
-
-/** The objects at most of which a run checks for garbage on every allocation, to reuse object handles as PHP does. */
-const ALLOCATION_CHECK_LIMIT = 2000;
+import {
+  type ClosureData,
+  isClosure,
+  ownershipProof,
+  PhpArray,
+  PhpObject,
+  Ref,
+  rememberOwnership,
+  valueOwners,
+} from './values';
 
 /** Runs the destructor of an object, which the interpreter provides. */
 let destruct: (object: PhpObject) => void = () => {};
@@ -69,10 +75,17 @@ export function collectGarbage(runtime: Runtime, cycles = false): number {
 export function releaseDropped(runtime: Runtime, dropped: unknown[]): void {
   if (runtime.shuttingDown || runtime.objects.size === 0) return;
   if (!dropped.some((value) => mayHoldObject(value))) return;
+  const roots = ownershipRoots(runtime);
+  dropped = dropped.filter(
+    (value) =>
+      !(value instanceof Ref || value instanceof PhpArray || value instanceof PhpObject) ||
+      !ownedReachable(value, roots, runtime)
+  );
+  if (dropped.length === 0) return;
   const within = objectsWithin(dropped);
   if (within.length === 0 || heldDirectly(runtime, within)) return;
   runtime.spend();
-  const reached = mark(runtime);
+  const reached = new Set(within.filter((object) => ownedReachable(object, roots, runtime)));
   const freed = new Set(freeable(within.filter((object) => !reached.has(object))));
   if (freed.size === 0) return;
   const release = new Release(runtime, freed, reached);
@@ -82,7 +95,13 @@ export function releaseDropped(runtime: Runtime, dropped: unknown[]): void {
   } finally {
     releasing--;
   }
-  retainTurtles(runtime, release.reached);
+  const turtleRoots = ownershipRoots(runtime);
+  retainTurtles(
+    runtime,
+    new Set(
+      [...runtime.objects.values()].filter((object) => object.turtle && ownedReachable(object, turtleRoots, runtime))
+    )
+  );
 }
 
 /** One run of {@link releaseDropped}, which destroys the freed objects depth-first from the dropped values. */
@@ -108,19 +127,31 @@ class Release {
   private object(object: PhpObject): void {
     if (!this.freed.has(object) || this.visited.has(object) || this.runtime.objects.get(object.id) !== object) return;
     this.visited.add(object);
+    let failure: unknown;
+    let failed = false;
     if (!object.destructed && object.cls.findMethod('__destruct')) {
       object.destructed = true;
       this.runtime.destructibles--;
-      destruct(object);
+      try {
+        destruct(object);
+      } catch (error) {
+        failure = error;
+        failed = true;
+      }
       // A destructor may store its object, or what it holds, somewhere reachable again.
-      this.reached = mark(this.runtime);
+      const roots = ownershipRoots(this.runtime);
+      this.reached = new Set([...this.freed].filter((value) => ownedReachable(value, roots, this.runtime)));
       for (const freed of this.freed) if (this.reached.has(freed)) this.freed.delete(freed);
-      if (!this.freed.has(object)) return;
+      if (!this.freed.has(object)) {
+        if (failed) throw failure;
+        return;
+      }
     }
     const children: unknown[] = [];
     pushObject(object, children);
     for (const child of children) this.value(child);
     this.runtime.freeObject(object);
+    if (failed) throw failure;
   }
 }
 
@@ -189,9 +220,9 @@ function heldArrayCount(freed: PhpObject[]): number {
   return arrays.size;
 }
 
-/** Collects garbage before an allocation when that is cheap, so that a new object reuses a freed handle. */
+/** Releases values whose native call has finished before reusing object handles. */
 export function collectBeforeAllocation(runtime: Runtime): void {
-  if (runtime.objects.size > 0 && runtime.objects.size <= ALLOCATION_CHECK_LIMIT) collectGarbage(runtime);
+  runtime.flushReleases();
 }
 
 function retainTurtles(runtime: Runtime, reached: Set<PhpObject>): void {
@@ -500,6 +531,65 @@ export function arrayIsShared(runtime: Runtime, target: PhpArray): boolean {
     } else if (value instanceof PhpObject) pushObject(value, pending);
     else if (Array.isArray(value)) pending.push(...value);
     else if (value instanceof Map) pending.push(...value.values());
+  }
+  return false;
+}
+
+function ownershipRoots(runtime: Runtime): Set<unknown> {
+  const roots: unknown[] = [];
+  for (const frame of runtime.frames) pushFrame(frame, roots);
+  for (const fn of runtime.functions.values()) if (fn.kind === 'user') roots.push(...fn.statics.values());
+  for (const cls of runtime.classes.values()) {
+    for (const { ref } of cls.staticProps.values()) roots.push(ref);
+    for (const constant of cls.consts.values()) roots.push(constant.value);
+    for (const method of cls.methods.values()) if (method.fn.kind === 'user') roots.push(...method.fn.statics.values());
+  }
+  roots.push(
+    ...runtime.constants.values(),
+    ...runtime.held,
+    runtime.thrown,
+    runtime.exceptionHandler,
+    ...runtime.replacedExceptionHandlers
+  );
+  for (const held of runtime.nativeHeld) roots.push(...held);
+  for (const { handler } of runtime.errorHandlers) roots.push(handler);
+  return new Set(roots);
+}
+
+function ownedReachable(value: Ref | PhpArray | PhpObject, roots: Set<unknown>, runtime: Runtime): boolean {
+  const pending: object[] = [value];
+  const visited = new Set<object>();
+  const predecessor = new Map<object, object>();
+  while (pending.length > 0) {
+    const item = pending.pop() as object;
+    const root = roots.has(item) ? item : ownershipProof(item, roots);
+    if (root) {
+      const path = [item];
+      let child = predecessor.get(item);
+      while (child) {
+        path.push(child);
+        child = predecessor.get(child);
+      }
+      rememberOwnership(path, root);
+      return true;
+    }
+    if (visited.has(item)) continue;
+    visited.add(item);
+    for (const parent of valueOwners(item)) {
+      if (!visited.has(parent) && !predecessor.has(parent)) {
+        predecessor.set(parent, item);
+        pending.push(parent);
+      }
+    }
+    for (const object of runtime.internalObjects) {
+      if (visited.has(object)) continue;
+      const held: unknown[] = [];
+      pushObject(object, held);
+      if (held.includes(item)) {
+        predecessor.set(object, item);
+        pending.push(object);
+      }
+    }
   }
   return false;
 }

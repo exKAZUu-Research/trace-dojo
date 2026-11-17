@@ -8,6 +8,7 @@ import { debugType, normalizeKeyString, toBool, valueName } from './conversions'
 import { deprecated, notice, throwError, warn } from './errors';
 import { share } from './places';
 import { FatalError, rt, SCRIPT_PATH } from './runtime';
+import tentativeReturnMethods from './tentativeReturnMethods.json';
 import { coerce, describeType, NO_MATCH, typeToString } from './types';
 import { UnsupportedFeatureError } from './unsupported';
 import {
@@ -433,11 +434,28 @@ function checkOverride(cls: PhpClass, method: Method, parent: Method): void {
     );
   }
   if (lower(method.name) === '__construct' && !parent.isAbstract && parent.cls.kind !== 'interface') return;
-  if (!signatureCompatible(method, parent)) {
+  const tentative =
+    !parent.cls.isUser && tentativeReturnMethods.includes(lower(parent.scope.name + '::' + parent.name));
+  if (!signatureCompatible(method, parent, tentative)) {
     throw new FatalError(
       `Declaration of ${signatureText(method)} must be compatible with ${signatureText(parent)}`,
       row
     );
+  }
+  if (tentative) {
+    const expected = returnTypeOf(parent.fn);
+    const actual = returnTypeOf(method.fn);
+    if (expected && (!actual || !isSubtype(actual, method.cls, expected, parent.cls))) {
+      const saved = rt().row;
+      rt().row = row;
+      try {
+        deprecated(
+          `Return type of ${signatureText(method)} should either be compatible with ${signatureText(parent)}, or the #[\\ReturnTypeWillChange] attribute should be used to temporarily suppress the notice`
+        );
+      } finally {
+        rt().row = saved;
+      }
+    }
   }
 }
 
@@ -445,7 +463,7 @@ function checkOverride(cls: PhpClass, method: Method, parent: Method): void {
  * Whether a method may override another as PHP's inheritance check allows: it accepts every call the parent accepts
  * (parameters as many, as optional, and as wide in type) and returns only what the parent may return.
  */
-function signatureCompatible(child: Method, parent: Method): boolean {
+function signatureCompatible(child: Method, parent: Method, skipReturn = false): boolean {
   const childParams = child.fn.params;
   const parentParams = parent.fn.params;
   const childRequired = childParams.filter((param) => !param.optional && !param.variadic).length;
@@ -454,6 +472,7 @@ function signatureCompatible(child: Method, parent: Method): boolean {
     const own = childParams[index] ?? (childParams.at(-1)?.variadic ? childParams.at(-1) : undefined);
     if (!own || !paramCompatible(own, child.cls, param, parent.cls)) return false;
   }
+  if (skipReturn) return true;
   const parentReturn = returnTypeOf(parent.fn);
   const childReturn = returnTypeOf(child.fn);
   if (!parentReturn) return true;

@@ -7,7 +7,7 @@ import { TurtleWorld } from '../interpreter/turtleWorld';
 import type { FunctionDecl, Program } from './ast';
 import { dec } from './bytes';
 import type { CompileNotice } from './converter';
-import { arrayIsShared, collectBeforeAllocation, collectGarbage, releaseDropped } from './garbage';
+import { arrayIsShared, collectGarbage, releaseDropped } from './garbage';
 import { setArraySharingCheck } from './places';
 import { MersenneTwister } from './random';
 import {
@@ -19,6 +19,7 @@ import {
   Ref,
   setAllocationHandler,
   setDropHandler,
+  setInternalHandler,
   type Value,
 } from './values';
 
@@ -117,9 +118,10 @@ export class Runtime {
   /** Constants by name, whose namespace prefix is lowercased. */
   readonly constants = new Map<string, Value>();
   readonly objects = new Map<number, PhpObject>();
+  readonly internalObjects = new Set<PhpObject>();
+  private readonly pendingReleases: unknown[] = [];
   private readonly freeHandles: number[] = [];
   private nextHandle = 1;
-  private collecting = false;
   /** Whether an object with a destructor exists, which makes releasing values check for garbage. */
   destructibles = 0;
   strictTypes = false;
@@ -192,15 +194,7 @@ export class Runtime {
 
   /** Allocates the handle of a new object, reusing the most recently freed one as PHP does. */
   newObject(cls: PhpClass): PhpObject {
-    if (!this.collecting && this.mayHoldGarbage) {
-      this.collecting = true;
-      try {
-        collectBeforeAllocation(this);
-        this.mayHoldGarbage = false;
-      } finally {
-        this.collecting = false;
-      }
-    }
+    this.flushReleases();
     const id = this.freeHandles.pop() ?? this.nextHandle++;
     const object = new PhpObject(cls, id);
     this.objects.set(id, object);
@@ -227,16 +221,16 @@ export class Runtime {
   /** The values the callbacks of each running native function returned, which it holds until it returns. */
   nativeHeld: unknown[][] = [];
 
-  /**
-   * Whether garbage may exist that no release freed: a native function may have let go of values silently, or a
-   * release had to wait. The next allocation then collects it, so that the new object reuses a freed handle.
-   */
-  mayHoldGarbage = true;
-
   /** Frees what letting go of some values frees, as {@link releaseDropped} describes, when that is safe now. */
   release(dropped: unknown[]): void {
-    if (this.nativeCalls === 0) releaseDropped(this, dropped);
-    else this.mayHoldGarbage = true;
+    this.pendingReleases.push(...dropped);
+    if (this.nativeCalls === 0) this.flushReleases();
+  }
+
+  flushReleases(): void {
+    if (this.pendingReleases.length === 0) return;
+    const released = this.pendingReleases.splice(0);
+    releaseDropped(this, released);
   }
 
   /** Lets go of a frame's temporaries from `mark` on, as PHP frees temporary values once they are used. */
@@ -249,6 +243,7 @@ export class Runtime {
   freeObject(object: PhpObject): void {
     if (this.objects.get(object.id) !== object) return;
     this.objects.delete(object.id);
+    this.internalObjects.delete(object);
     this.freeHandles.push(object.id);
     if (object.turtle) object.turtle.isAlive = false;
   }
@@ -344,3 +339,5 @@ export function withRuntime<T>(runtime: Runtime, run: () => T): T {
 export type { PhpArray, Value };
 
 setArraySharingCheck((array) => (current ? arrayIsShared(current, array) : array.shared));
+
+setInternalHandler((object) => current?.internalObjects.add(object));

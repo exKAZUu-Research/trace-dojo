@@ -14,6 +14,7 @@ export function setCallableCheck(check: (value: Value) => boolean): void {
 /** Formats a type as PHP's messages do. */
 export function typeToString(type: TypeDecl): string {
   if (type.k === 'named') {
+    if (type.name === 'iterable') return `Traversable|array${type.nullable ? '|null' : ''}`;
     if (type.nullable) return `?${type.name}`;
     return type.name;
   }
@@ -24,7 +25,8 @@ export function typeToString(type: TypeDecl): string {
     others.length === 1 &&
     others.length < type.types.length &&
     others[0].k === 'named' &&
-    others[0].name !== 'mixed'
+    others[0].name !== 'mixed' &&
+    others[0].name !== 'iterable'
   ) {
     return `?${typeToString(others[0])}`;
   }

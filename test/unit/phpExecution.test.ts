@@ -245,3 +245,43 @@ test.each(['<?php bcadd("1","2");', '<?php pack("C",1);', '<?php new NumberForma
     });
   }
 );
+
+test.each([
+  '<?php final abstract class A{}',
+  '<?php abstract final class A{}',
+  '<?php class A{abstract const X=1;}',
+  '<?php abstract class A{abstract protected $p;}',
+  '<?php abstract class A{abstract protected $p{get{return 1;}}}',
+  '<?php $a?->b=1;',
+  '<?php const X=$a;',
+  '<?php const X=foo();',
+  '<?php class A{const X=new B;}',
+  '<?php function f(){static $a;static $a;}',
+  '<?php $f=function()use($a,$a){};',
+  '<?php function f(int|int $a){}',
+  '<?php function f(iterable|array $a){}',
+  '<?php function f(?mixed $a){}',
+  '<?php function f(int&string $a){}',
+  '<?php function f(void $a){}',
+  '<?php function f(?void $a){}',
+  '<?php function f(int|void $a){}',
+  '<?php interface I{private function f();}',
+  '<?php class A{const int X="a";}',
+  '<?php echo "{$a+1}";',
+  '<?php echo "{$a.$b}";',
+  '<?php echo "{$a[0]??1}";',
+])('rejects invalid declarations and expressions before execution: %s', (source) => {
+  expect(run(source).kind).toBe('compileError');
+});
+
+test('ownership tracking keeps append loops and linked lists within the operation budget', () => {
+  expect(run('<?php $a=[];for($i=0;$i<50000;$i++)$a[]=$i;echo count($a);')).toMatchObject({
+    kind: 'executed',
+    stdout: '50000',
+  });
+  expect(
+    run(
+      '<?php class N{public $next=null;function __construct(public $v){}} $head=new N(0);$c=$head;for($i=1;$i<3000;$i++){$c->next=new N($i);$c=$c->next;}$n=0;for($p=$head;$p!==null;$p=$p->next)$n++;echo $n;'
+    )
+  ).toMatchObject({ kind: 'executed', stdout: '3000' });
+});

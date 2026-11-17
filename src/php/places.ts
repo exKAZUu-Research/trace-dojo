@@ -7,7 +7,7 @@ import { dropped, type Key, PhpArray, PhpObject, type PropDecl, Ref, type Value 
 export interface Place {
   /** The value, or undefined when the location does not exist. */
   get(): Value | undefined;
-  set(value: Value): void;
+  set(value: Value): Value | void;
   /** The location as a reference, which `=&`, by-reference arguments, and `global` share. */
   ref(): Ref;
   unset(): void;
@@ -40,10 +40,11 @@ export class VarPlace implements Place {
     return this.frame.vars.get(this.name)?.v;
   }
 
-  set(value: Value): void {
+  set(value: Value): Value {
     const ref = this.frame.vars.get(this.name);
     if (ref) ref.assign(value);
     else this.frame.vars.set(this.name, new Ref(value));
+    return this.get() as Value;
   }
 
   ref(): Ref {
@@ -82,8 +83,9 @@ export class RefPlace implements Place {
     return this.target.v;
   }
 
-  set(value: Value): void {
+  set(value: Value): Value {
     this.target.assign(value);
+    return this.target.v;
   }
 
   ref(): Ref {
@@ -107,16 +109,17 @@ export class ElementPlace implements Place {
     return this.array.get(this.key);
   }
 
-  set(value: Value): void {
+  set(value: Value): Value {
     if (this.key === undefined) {
       const key = this.array.appendKey;
       if (!this.array.append(value)) {
         throwError('Error', 'Cannot add element to the array as the next element is already occupied');
       }
       this.key = key;
-      return;
+      return value;
     }
     this.array.set(this.key, value);
+    return this.array.get(this.key) as Value;
   }
 
   ref(): Ref {
@@ -210,5 +213,7 @@ export function setArraySharingCheck(check: typeof sharingCheck): void {
 
 export function arrayIsShared(array: PhpArray): boolean {
   if (!array.shared) return false;
-  return sharingCheck(array);
+  const shared = sharingCheck(array);
+  if (!shared) array.shared = false;
+  return shared;
 }

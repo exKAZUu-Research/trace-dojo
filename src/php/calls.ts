@@ -166,8 +166,7 @@ function invokeNative(target: CallTarget, fn: NativeFunction, args: ArgValue[], 
   callStack.push(recordFor(target, passed, nativeDepth > 0 && row === undefined ? undefined : row));
   nativeDepth++;
   runtime.nativeCalls++;
-  runtime.mayHoldGarbage = true;
-  const held: unknown[] = [];
+  const held: unknown[] = args.map((arg) => arg.ref ?? arg.v);
   runtime.nativeHeld.push(held);
   const savedRow = runtime.row;
   let result: Value;

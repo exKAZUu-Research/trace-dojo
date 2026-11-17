@@ -21,19 +21,21 @@ export class Ref {
   private value: Value;
   constructor(value: Value = null) {
     this.value = value;
+    trackOwner(value, this);
   }
   get v(): Value {
     return this.value;
   }
   set v(value: Value) {
+    const old = this.value;
     this.value = this.typedBy ? referenceTypeCheck(this, value) : value;
+    trackOwner(this.value, this);
+    if (old !== this.value) dropped(old);
   }
 
   /** Writes a value, converting or rejecting it for the type of the property the reference was taken from. */
   assign(value: Value): void {
-    const old = this.v;
     this.v = value;
-    dropped(old);
   }
 }
 
@@ -87,6 +89,7 @@ export class PhpArray {
 
   constructor(map?: Map<Key, Value | Ref>) {
     this.map = map ?? new Map();
+    for (const [key, slot] of this.map) trackOwner(slot, this, key);
     // An array costs a slot of its own besides its elements, as a program of many small arrays holds their tables too.
     allocationHandler(this.map.size + 1, this.map.size);
   }
@@ -157,12 +160,14 @@ export class PhpArray {
     }
     this.invalidate();
     if (slot instanceof PhpObject) slot.arrayHolders.push({ array: new WeakRef(this), key });
+    trackOwner(slot, this, key);
     this.map.set(key, slot);
   }
 
   replaceTable(map: Map<Key, Value | Ref>, nextFree: bigint): void {
     allocationHandler(Math.max(0, map.size - this.map.size), map.size);
     this.map = map;
+    for (const [key, slot] of map) trackOwner(slot, this, key);
     this.nextFree = nextFree;
     this.composite = [...map.values()].some((value) => value !== null && typeof value === 'object');
     this.invalidate();
@@ -175,6 +180,7 @@ export class PhpArray {
   }
 
   private invalidate(visited = new Set<PhpArray>()): void {
+    invalidateOwner(this);
     if (visited.has(this)) return;
     visited.add(this);
     this.mutationVersion++;
@@ -464,8 +470,15 @@ function* lineage(start: PhpClass): Generator<PhpClass> {
 
 export class PhpObject {
   readonly arrayHolders: { array: WeakRef<PhpArray>; key: Key }[] = [];
-  props = new Map<string, Slot>();
-  internal?: unknown;
+  props = new PropertyMap(this);
+  private internalValue?: unknown;
+  get internal(): unknown {
+    return this.internalValue;
+  }
+  set internal(value: unknown) {
+    this.internalValue = value;
+    internalHandler(this);
+  }
   turtle?: TurtleState;
   /** Whether the destructor ran or must not run. */
   destructed = false;
@@ -501,4 +514,107 @@ export function isClosure(value: Value): boolean {
 
 export function deref(slot: Value | Ref): Value {
   return slot instanceof Ref ? slot.v : slot;
+}
+
+type Owner = Ref | PhpArray | PhpObject;
+const owners = new WeakMap<object, Map<Owner, Set<Key | undefined>>>();
+let internalHandler: (object: PhpObject) => void = () => {};
+
+export function setInternalHandler(handler: typeof internalHandler): void {
+  internalHandler = handler;
+}
+
+function trackOwner(value: unknown, parent: Owner, key?: Key): void {
+  invalidateOwner(parent);
+  if (!(value instanceof Ref || value instanceof PhpArray || value instanceof PhpObject)) return;
+  let parents = owners.get(value);
+  if (!parents) {
+    parents = new Map();
+    owners.set(value, parents);
+  }
+  let keys = parents.get(parent);
+  if (!keys) {
+    keys = new Set();
+    parents.set(parent, keys);
+  }
+  keys.add(key);
+}
+
+export function valueOwners(value: object): Owner[] {
+  const parents = owners.get(value);
+  if (!parents) return [];
+  const result: Owner[] = [];
+  for (const [parent, keys] of parents) {
+    const holds =
+      parent instanceof Ref
+        ? parent.v === value
+        : [...keys].some((key) =>
+            parent instanceof PhpArray
+              ? parent.map.get(key as Key) === value
+              : parent.props.get(key as string) === value
+          );
+    if (holds) result.push(parent);
+    else parents.delete(parent);
+  }
+  return result;
+}
+
+class PropertyMap extends Map<string, Slot> {
+  constructor(private readonly owner: PhpObject) {
+    super();
+  }
+  override set(key: string, value: Slot): this {
+    const old = this.get(key);
+    super.set(key, value);
+    trackOwner(value, this.owner, key);
+    if (old !== value) dropped(old);
+    return this;
+  }
+  override delete(key: string): boolean {
+    const old = this.get(key);
+    invalidateOwner(this.owner);
+    const removed = super.delete(key);
+    if (removed) dropped(old);
+    return removed;
+  }
+}
+
+const reachProofs = new WeakMap<object, object>();
+const proofChildren = new WeakMap<object, Set<object>>();
+
+function invalidateOwner(owner: object): void {
+  const pending = [owner];
+  const visited = new Set<object>();
+  while (pending.length > 0) {
+    const value = pending.pop() as object;
+    if (visited.has(value)) continue;
+    visited.add(value);
+    reachProofs.delete(value);
+    const children = proofChildren.get(value);
+    if (children) {
+      pending.push(...children);
+      proofChildren.delete(value);
+    }
+  }
+}
+
+export function ownershipProof(value: object, roots: Set<unknown>): object | undefined {
+  const root = reachProofs.get(value);
+  return root !== undefined && roots.has(root) ? root : undefined;
+}
+
+export function rememberOwnership(path: object[], root: object): void {
+  for (let index = 0; index < path.length; index++) {
+    const value = path[index];
+    reachProofs.set(value, root);
+    const child = path[index + 1];
+    if (child) {
+      let children = proofChildren.get(value);
+      if (!children) {
+        children = new Set();
+        proofChildren.set(value, children);
+      }
+      children.add(child);
+    }
+  }
 }
