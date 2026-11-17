@@ -264,8 +264,14 @@ export abstract class StatementCompiler extends CallCompiler {
     });
   }
 
-  private declareLocal(name: string, type: Type, isConst: boolean, value?: TExpr, quotedName = false): LocalBinding {
-    const fn = this.currentFn({ row: 0, col: 0, endRow: 0 });
+  private declareLocal(name: string, type: Type, isConst: boolean, value: TExpr, quotedName = false): LocalBinding {
+    this.resolveStorage(type, value.span);
+    if (!isConst && isComptimeOnly(type))
+      this.error(
+        value.span,
+        `変数「${name}」の型 ${typeName(type)} は、コンパイルのときだけの型なので、const で宣言してください。`
+      );
+    const fn = this.currentFn(value.span);
     const slot = this.localSlot();
     const binding: LocalBinding = {
       kind: 'local',
@@ -273,10 +279,10 @@ export abstract class StatementCompiler extends CallCompiler {
       slot,
       type,
       isConst,
-      knownLength: isConst ? value?.knownLength : undefined,
-      valueFacts: isConst && value ? valueFactsOf(value) : undefined,
-      known: Boolean(isConst && (value?.known || value?.staticResult)),
-      value: isConst ? (value?.known ? value.value : value?.staticResult?.value) : undefined,
+      knownLength: isConst ? value.knownLength : undefined,
+      valueFacts: isConst ? valueFactsOf(value) : undefined,
+      known: Boolean(isConst && (value.known || value.staticResult)),
+      value: isConst ? (value.known ? value.value : value.staticResult?.value) : undefined,
     };
     if (!isDiscardName({ name, quotedName })) {
       this.scope.locals?.set(name, binding);
@@ -311,13 +317,6 @@ export abstract class StatementCompiler extends CallCompiler {
     let value = this.compileDeclValue(valueSyntax, declared, statement.name, this.fn?.instance.name);
     if (declared) value = this.coerce(value, declared, valueSyntax);
     const type = value.type;
-    this.resolveStorage(type, statement);
-    if (!statement.isConst && isComptimeOnly(type)) {
-      this.error(
-        statement,
-        `変数「${statement.name}」の型 ${typeName(type)} は、コンパイルのときだけの型なので、const で宣言してください。`
-      );
-    }
     if (type.kind === 'noreturn') return { exec: this.valueExec(value), noreturn: true };
     const binding = this.declareLocal(statement.name, type, statement.isConst, value, statement.quotedName);
     const { slot } = binding;
@@ -429,9 +428,6 @@ export abstract class StatementCompiler extends CallCompiler {
     value: TExpr
   ): (frame: Frame) => void {
     const declaration = target.declaration!;
-    if (!declaration.isConst && isComptimeOnly(value.type)) {
-      this.error(target, `変数「${declaration.name}」の型 ${typeName(value.type)} は、コンパイルのときだけの型です。`);
-    }
     const binding = this.declareLocal(declaration.name, value.type, declaration.isConst, value, declaration.quotedName);
     return (frame: Frame): void => {
       frame.slots[binding.slot] = copyForFrame(frame, value.eval(frame), value.type);

@@ -7217,3 +7217,54 @@ test('large virtual void sentinel arrays retain their extra logical element', ()
     uncaughtException: undefined,
   });
 });
+
+test('format counts keep usize identity through anytype specialization', () => {
+  const source = `const std=@import("std");fn identity(n:anytype)bool{return @TypeOf(n)==usize;}pub fn main()void{const n=std.fmt.count("{}",.{42});std.debug.print("{} {} {}",.{n,@TypeOf(n),identity(n)});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: '2 usize true',
+    uncaughtException: undefined,
+  });
+});
+
+test.each(['a:u3,b:u4', 'a:u8,b:u16', 'a:enum{a,b},b:u1', 'a:*u8,b:usize'])(
+  'destructuring validates absent packed payload fields %s',
+  (fields) => {
+    const definition = `const U=packed union{${fields}};`;
+    expect(
+      executeProgram('zig', `${definition}pub fn main()void{const o:?U,const n:u8=.{null,1};_=o;_=n;}`)
+    ).toMatchObject({ kind: 'compileError' });
+    expect(
+      executeProgram('zig', `${definition}pub fn main()void{const o:?*U,const n:u8=.{null,1};_=o;_=n;}`)
+    ).toMatchObject({ kind: 'executed', uncaughtException: undefined });
+  }
+);
+
+test.each(['struct{buffer:[1000001]u8}', 'struct{buffer:[1000000]u8}', 'union(enum){buffer:[1000001]u8,empty:void}'])(
+  'absent %s payload layouts do not reserve their potential storage',
+  (type) => {
+    const source = `const std=@import("std");const T=${type};const g:?T=null;pub fn main()void{const o:?T=null;const d:?T,const n:u8=.{null,1};std.debug.print("{} {} {} {}",.{g==null,o==null,d==null,n});}`;
+    expect(executeProgram('zig', source)).toMatchObject({
+      kind: 'executed',
+      stderr: 'true true true 1',
+      uncaughtException: undefined,
+    });
+  }
+);
+
+test.each([
+  'splitSequence:next',
+  'splitSequence:first',
+  'splitSequence:peek',
+  'tokenizeSequence:next',
+  'tokenizeSequence:peek',
+])('sequence iterator %s scans repetitive text in linear work', (variant) => {
+  const [factory, method] = variant.split(':');
+  const optional = method === 'first' ? '' : '.?';
+  const source = `const std=@import("std");pub fn main()void{var i=std.mem.${factory}(u8,"${'a'.repeat(10_000)}","${'a'.repeat(99)}b");std.debug.print("{}",.{i.${method}()${optional}.len});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: '10000',
+    uncaughtException: undefined,
+  });
+});

@@ -1,4 +1,4 @@
-import { valueSlots } from './allocation';
+import { potentialValueSlots } from './allocation';
 import { hasResolvedLayout } from './layout';
 import type { Type } from './types';
 import { ErrorValue, NULL, optionalPayload, type Value, type ZArray, type ZStruct, type ZUnion } from './values';
@@ -19,7 +19,7 @@ function planOf(type: Type, spend: () => void): CopyPlan {
   const cached = plans.get(type);
   if (cached) return cached;
   spend();
-  const fixed = valueSlots(type);
+  const fixed = potentialValueSlots(type);
   const plan = buildPlan(type, fixed, spend);
   if (hasResolvedLayout(type)) plans.set(type, plan);
   return plan;

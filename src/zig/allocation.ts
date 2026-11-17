@@ -23,8 +23,13 @@ export function resolveTypeSlots(type: Type, spend: () => void): void {
 }
 
 export function valueSlots(type: Type): number {
-  const cached = resolvedSlots.get(type);
-  return cached ?? new SlotQuery().count(type);
+  const count = potentialValueSlots(type);
+  if (count > LIMITS.maxSlots) throw new ExecutionLimitError('storage');
+  return count;
+}
+
+export function potentialValueSlots(type: Type): number {
+  return resolvedSlots.get(type) ?? new SlotQuery().count(type);
 }
 
 class SlotQuery {
@@ -103,8 +108,7 @@ function countSlots(type: Type, query: SlotQuery): number {
       break;
     }
   }
-  if (!Number.isSafeInteger(count) || count > LIMITS.maxSlots) throw new ExecutionLimitError('storage');
-  return count;
+  return Number.isSafeInteger(count) ? Math.min(count, LIMITS.maxSlots + 1) : LIMITS.maxSlots + 1;
 }
 
 export function transferCost(type: Type): number {

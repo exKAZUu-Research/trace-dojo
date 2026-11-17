@@ -14,7 +14,7 @@ import {
   type Type,
   typeName,
   U8,
-  U64,
+  USIZE,
 } from '../types';
 import { decodeUtf8 } from '../utf8';
 import { ErrorValue, Slice, type Value } from '../values';
@@ -239,7 +239,7 @@ const MEMBERS: Record<string, () => Member> = {
     const [format, args] = expectArgs(sema, call, 2, 'std.fmt.count');
     const print = compilePrint(sema, format, args, call.span);
     return runtime(
-      U64,
+      USIZE,
       (frame) => {
         try {
           const writer = discardingWriter();
