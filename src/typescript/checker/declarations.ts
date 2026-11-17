@@ -3,7 +3,7 @@ import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 import type { Checker } from './checker';
 import { nativeGlobalRedeclaration } from './nativeGlobalIdentity';
 import type { Scope, Sym } from './scopes';
-import { hasToken, named, propertyNameText } from './syntax';
+import { hasToken, named } from './syntax';
 import { isIntrinsic, type Type, undefinedType, unionOf } from './types';
 
 /** Reports the declarations TypeScript rejects for declaring a name twice, at every declaration it involves. */
@@ -167,20 +167,25 @@ function mergedParameterTypesAgree(
 
 /** A property declared again in a merged interface must have the same type. */
 function checkMergedProperties(c: Checker, symbol: Sym): void {
+  const properties = symbol.typeDeclarations
+    .filter((declaration) => declaration.type === 'interface_declaration')
+    .flatMap((declaration) => {
+      const body = declaration.childForFieldName('body');
+      return body ? named(body).filter((member) => member.type === 'property_signature') : [];
+    });
+  // TypeScript binds computed names after the others, so a plain name declares the property first.
   const seen = new Map<string, TreeNode>();
-  for (const declaration of symbol.typeDeclarations) {
-    if (declaration.type !== 'interface_declaration') continue;
-    const body = declaration.childForFieldName('body');
-    for (const member of body ? named(body) : []) {
-      if (member.type === 'property_signature') checkMergedProperty(c, member, seen);
-    }
-  }
+  for (const member of [...properties.filter((member) => !isComputed(member)), ...properties.filter(isComputed)])
+    checkMergedProperty(c, member, seen);
+}
+
+function isComputed(member: TreeNode): boolean {
+  return member.childForFieldName('name')?.type === 'computed_property_name';
 }
 
 function checkMergedProperty(c: Checker, member: TreeNode, seen: Map<string, TreeNode>): void {
-  const nameNode = member.childForFieldName('name');
-  const name = nameNode ? propertyNameText(nameNode) : undefined;
-  if (!nameNode || name === undefined) return;
+  const name = memberName(c, member);
+  if (name === undefined) return;
   const previous = seen.get(name);
   if (!previous) {
     seen.set(name, member);
@@ -204,7 +209,7 @@ function checkMergedProperty(c: Checker, member: TreeNode, seen: Map<string, Tre
   const after = effectiveType(member);
   if (before && after && !c.relations.identical(before, after)) {
     c.error(
-      nameNode,
+      member.childForFieldName('name') ?? member,
       `後のプロパティの宣言は、同じ型でなければいけません。プロパティ ${name} の型は '${c.print(before)}' ですが、ここでは '${c.print(after)}' です。`
     );
   }
@@ -249,10 +254,8 @@ function addParameterPropertyDuplicates(member: TreeNode, groups: Map<string, Tr
 /** The key under which a class member conflicts with others, or `undefined` if it cannot conflict. */
 function duplicateKeyOf(c: Checker, member: TreeNode): string | undefined {
   if (!['field_definition', 'method_definition'].includes(member.type)) return undefined;
-  const nameNode = member.childForFieldName('name');
-  const names = nameNode ? c.patterns.propertyNames(nameNode) : undefined;
-  const name = names?.length === 1 ? names[0] : undefined;
-  if (!nameNode || name === undefined) return undefined;
+  const name = memberName(c, member);
+  if (name === undefined) return undefined;
   // A method without a body is an overload signature, and a getter pairs with a setter.
   if (member.type === 'method_definition' && !member.childForFieldName('body')) return undefined;
   return `${hasToken(member, 'static') ? 'static ' : ''}${name}`;
@@ -277,9 +280,8 @@ function reportDuplicateMembers(c: Checker, key: string, members: TreeNode[]): v
 export function checkTypeMemberDuplicates(c: Checker, body: TreeNode): void {
   const byName = new Map<string, TreeNode[]>();
   for (const member of named(body)) {
-    const nameNode = member.childForFieldName('name');
-    const name = nameNode ? propertyNameText(nameNode) : undefined;
-    if (!nameNode || name === undefined) continue;
+    const name = memberName(c, member);
+    if (name === undefined) continue;
     byName.set(name, [...(byName.get(name) ?? []), member]);
   }
   for (const [name, members] of byName) {
@@ -297,4 +299,11 @@ function isAllowedRedeclaration(members: TreeNode[]): boolean {
   return members.every(
     (member) => member.type === 'method_signature' && !hasToken(member, 'get') && !hasToken(member, 'set')
   );
+}
+
+/** A member's property name, with a computed name resolved as the member's type resolves it. */
+function memberName(c: Checker, member: TreeNode): string | undefined {
+  const nameNode = member.childForFieldName('name');
+  const names = nameNode ? c.patterns.propertyNames(nameNode) : undefined;
+  return names?.length === 1 ? names[0] : undefined;
 }
