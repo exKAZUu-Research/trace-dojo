@@ -439,6 +439,46 @@ main=print(foldr' (\_ _->1::Int) (error "seed") (error "structure"::Maybe Int))`
 });
 
 test.each([
+  ['fmap show (1::Int,True)', '(1,"True")\n'],
+  ['fmap length (1,2,"ab")', '(1,2,2)\n'],
+  ['fmap show ("left",\'x\',True,4::Int)', '("left",\'x\',True,"4")\n'],
+  ['fmap (+1) ((),False,\'x\',"y",5::Int)', '((),False,\'x\',"y",6)\n'],
+  ['fmap not ((),1,2,3,4,True)', '((),1,2,3,4,False)\n'],
+  ['fmap length ((),1,2,3,4,5,"ab")', '((),1,2,3,4,5,2)\n'],
+  ['("a",[1::Int],LT)<>("b",[2],EQ)', '("ab",[1,2],LT)\n'],
+  ['("a","b",[1::Int],EQ)<>("c","d",[2],GT)', '("ac","bd",[1,2],GT)\n'],
+  ['("",[],EQ,"x",[1::Int])<>("a",[True],LT,"y",[2])', '("a",[True],LT,"xy",[1,2])\n'],
+  ['mempty::(String,[Int],Ordering)', '("",[],EQ)\n'],
+  ['mempty::(String,String,[Int],Ordering)', '("","",[],EQ)\n'],
+  ['mempty::(String,String,String,[Int],Ordering)', '("","","",[],EQ)\n'],
+  ['("a",[1::Int],(+1))<*>("b",[2],3::Int)', '("ab",[1,2],4)\n'],
+  ['("a","b",[1::Int],(+1))<*>("c","d",[2],3::Int)', '("ac","bd",[1,2],4)\n'],
+  ['pure(3::Int)::(String,[Int],Int)', '("",[],3)\n'],
+  ['pure(3::Int)::(String,String,[Int],Int)', '("","",[],3)\n'],
+  [String.raw`("a",[1::Int],3::Int)>>= \x->("b",[2],x+1)`, '("ab",[1,2],4)\n'],
+  [String.raw`("a","b",[1::Int],3::Int)>>= \x->("c","d",[2],x+1)`, '("ac","bd",[1,2],4)\n'],
+  ['liftA2 (+) ("a",[1::Int],3::Int) ("b",[2],4)', '("ab",[1,2],7)\n'],
+])('standard tuple instances transform only the result and combine each prefix: %s', (expression, stdout) => {
+  expect(executeProgram('haskell', `import Control.Applicative\nmain=print(${expression})`)).toMatchObject({
+    kind: 'executed',
+    stdout,
+    uncaughtException: undefined,
+  });
+});
+
+test('tuple instance methods retain outer constructor demand and lazy fields', () => {
+  const source = `main=do
+  let (a,_,_)=fmap (error "mapper") (1::Int,2::Int,3::Int)
+  print a
+  print(fmap (error "mapper") (error "tuple"::(Int,Int,Int)) \`seq\` (1::Int))`;
+  expect(executeProgram('haskell', source)).toMatchObject({
+    kind: 'executed',
+    stdout: '1\n',
+    uncaughtException: 'tuple',
+  });
+});
+
+test.each([
   'shift(B a)n=B(shift a n)\n rotate(B a)n=B(rotate a n)',
   'shiftL(B a)n=B(shiftL a n)\n shiftR(B a)n=B(shiftR a n)\n rotateL(B a)n=B(rotateL a n)\n rotateR(B a)n=B(rotateR a n)',
 ])('Bits and FiniteBits inherit supported default methods: %s', (methods) => {

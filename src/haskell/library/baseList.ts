@@ -231,18 +231,6 @@ instance Applicative ((->) r) where
 instance Monad ((->) r) where
   f >>= k = \r -> k (f r) r
 
-instance Functor ((,) a) where
-  fmap f (x, y) = (x, f y)
-
-instance Monoid a => Applicative ((,) a) where
-  pure x = (mempty, x)
-  (u, f) <*> (v, x) = (u <> v, f x)
-  liftA2 f (u, x) (v, y) = (u <> v, f x y)
-
-instance Monoid a => Monad ((,) a) where
-  (u, a) >>= k = case k a of
-    (v, b) -> (u <> v, b)
-
 -- Semigroup and Monoid
 
 class Semigroup a where
@@ -291,12 +279,6 @@ instance Semigroup b => Semigroup (a -> b) where
 
 instance Monoid b => Monoid (a -> b) where
   mempty _ = mempty
-
-instance (Semigroup a, Semigroup b) => Semigroup (a, b) where
-  (a, b) <> (a', b') = (a <> a', b <> b')
-
-instance (Monoid a, Monoid b) => Monoid (a, b) where
-  mempty = (mempty, mempty)
 
 instance Semigroup (Either a b) where
   Left _ <> b = b
