@@ -5,7 +5,7 @@ import { defineArrayCopies } from './realmArrayCopies';
 import { defineArrayIterations } from './realmArrayIterations';
 import { WELL_KNOWN_SYMBOLS } from './realmIterators';
 import type { Runtime } from './runtime';
-import { isCallable, JsArray, JsThrow, type NativeCall, type Value } from './values';
+import { isCallable, JsArray, JsFunction, type JsObject, JsThrow, type NativeCall, type Value } from './values';
 
 /**
  * Defines Array and Array.prototype. Each method follows its algorithm in the ECMAScript specification step by step,
@@ -21,7 +21,12 @@ export function defineArrayBuiltins(builder: RealmBuilder): void {
     return array;
   });
   builder.method(arrayConstructor, 'isArray', 1, ({ args }) => args[0] instanceof JsArray);
-  builder.method(arrayConstructor, 'of', 0, ({ runtime, args }) => runtime.newArray([...args]));
+  builder.method(arrayConstructor, 'of', 0, ({ runtime, thisValue, args }) =>
+    buildWith(runtime, thisValue, args.length, (result) => {
+      for (const [index, value] of args.entries()) result.set(index, value);
+      result.setLength(args.length);
+    })
+  );
   builder.method(arrayConstructor, 'from', 1, arrayFrom);
   defineStackMethods(builder);
   defineReorderings(builder);
@@ -36,10 +41,10 @@ export type ArrayMethod = (call: NativeCall, ops: ArrayOps) => Value;
 export function arrayMethod(builder: RealmBuilder, name: string, length: number, run: ArrayMethod): void {
   builder.method(builder.realm.arrayPrototype, name, length, (call) => {
     const { runtime, thisValue } = call;
-    if (!(thisValue instanceof JsArray)) {
-      return runtime.throwError('TypeError', `Array.prototype.${name} requires an array`);
+    if (thisValue === undefined || thisValue === null) {
+      return runtime.throwError('TypeError', `Array.prototype.${name} called on null or undefined`);
     }
-    return run(call, new ArrayOps(runtime, thisValue));
+    return run(call, new ArrayOps(runtime, runtime.toObject(thisValue)));
   });
 }
 
@@ -50,34 +55,81 @@ export function buildArray(runtime: Runtime, build: (ops: ArrayOps) => void): Js
   return array;
 }
 
-function arrayFrom({ runtime, args, callRow }: NativeCall): JsArray {
+/**
+ * The spec's ArraySpeciesCreate: a new array, or for an instance of a subclass of Array an instance of that subclass
+ * made with `length`, which the builder's steps fill.
+ */
+export function buildSpeciesArray(
+  runtime: Runtime,
+  original: JsObject,
+  length: number,
+  build: (ops: ArrayOps) => void
+): JsObject {
+  const constructor = original instanceof JsArray ? runtime.get(original, 'constructor') : undefined;
+  const arrayConstructor = runtime.get(runtime.realm.arrayPrototype, 'constructor');
+  if (!(constructor instanceof JsFunction) || constructor === arrayConstructor) return buildArray(runtime, build);
+  if (!constructor.isConstructor)
+    runtime.throwError('TypeError', 'object.constructor[Symbol.species] is not a constructor');
+  const result = runtime.construct(constructor, [length]);
+  runtime.hold(result, () => build(new ArrayOps(runtime, result)));
+  return result;
+}
+
+/**
+ * A new array that `Array.from` or `Array.of` called on `constructor` fills: an instance of a subclass of Array called
+ * on it, made with `length` when the source has one, or else an array.
+ */
+function buildWith(
+  runtime: Runtime,
+  constructor: Value,
+  length: number | undefined,
+  build: (ops: ArrayOps) => void
+): JsObject {
+  const arrayConstructor = runtime.get(runtime.realm.arrayPrototype, 'constructor');
+  if (!(constructor instanceof JsFunction) || !constructor.isConstructor || constructor === arrayConstructor) {
+    return buildArray(runtime, build);
+  }
+  const result = runtime.construct(constructor, length === undefined ? [] : [length]);
+  runtime.hold(result, () => build(new ArrayOps(runtime, result)));
+  return result;
+}
+
+// code-gauge-allow functionCognitiveComplexity 25 -- Transcribes the specification's Array.from step by step, whose branches mirror its steps.
+function arrayFrom({ runtime, thisValue, args, callRow }: NativeCall): JsObject {
   const [source, mapper, thisArg] = args;
   if (mapper !== undefined && !isCallable(mapper)) {
-    runtime.throwError('TypeError', `${runtime.describe(mapper)} is not a function`);
+    runtime.throwError('TypeError', `${runtime.describeTyped(mapper)} is not a function`);
   }
-  return buildArray(runtime, (result) => {
-    const add = (value: Value, index: number): void =>
-      result.set(index, mapper ? runtime.call(mapper, thisArg, [value, index], callRow) : value);
-    const method =
-      source === undefined || source === null ? undefined : runtime.get(source, WELL_KNOWN_SYMBOLS.iterator);
-    if (method !== undefined && method !== null) {
-      // Each value is read just before its mapper runs, as JavaScript's iteration does.
-      const iterator = runtime.iterator(source, method);
-      try {
-        for (let index = 0, value = iterator.next(); value !== DONE; index++, value = iterator.next())
-          add(value, index);
-      } catch (error) {
-        // A mapper that throws closes the iterator; a failed `next()` has already ended it.
-        if (error instanceof JsThrow) iterator.close('throw');
-        throw error;
+  const iterable =
+    source !== undefined && source !== null && runtime.get(source, WELL_KNOWN_SYMBOLS.iterator) !== undefined;
+  return buildWith(
+    runtime,
+    thisValue,
+    iterable ? undefined : toLength(runtime, runtime.get(runtime.toObject(source), 'length')),
+    (result) => {
+      const add = (value: Value, index: number): void =>
+        result.set(index, mapper ? runtime.call(mapper, thisArg, [value, index], callRow) : value);
+      const method =
+        source === undefined || source === null ? undefined : runtime.get(source, WELL_KNOWN_SYMBOLS.iterator);
+      if (method !== undefined && method !== null) {
+        // Each value is read just before its mapper runs, as JavaScript's iteration does.
+        const iterator = runtime.iterator(source, method);
+        try {
+          for (let index = 0, value = iterator.next(); value !== DONE; index++, value = iterator.next())
+            add(value, index);
+        } catch (error) {
+          // A mapper that throws closes the iterator; a failed `next()` has already ended it.
+          if (error instanceof JsThrow) iterator.close('throw');
+          throw error;
+        }
+        return;
       }
-      return;
+      // Null and undefined are neither iterable nor array-like, which JavaScript reports as a TypeError.
+      const object = runtime.toObject(source);
+      const length = toLength(runtime, runtime.get(object, 'length'));
+      for (let index = 0; index < length; index++) add(runtime.get(object, String(index)), index);
     }
-    // Null and undefined are neither iterable nor array-like, which JavaScript reports as a TypeError.
-    const object = runtime.toObject(source);
-    const length = toLength(runtime, runtime.get(object, 'length'));
-    for (let index = 0; index < length; index++) add(runtime.get(object, String(index)), index);
-  });
+  );
 }
 
 function toLength(runtime: Runtime, value: Value): number {
@@ -146,7 +198,7 @@ function defineStackMethods(builder: RealmBuilder): void {
 }
 
 // code-gauge-allow functionCognitiveComplexity 22 -- Transcribes the specification's algorithm step by step, whose branches mirror its steps.
-function splice({ runtime, args }: NativeCall, ops: ArrayOps): JsArray {
+function splice({ runtime, args }: NativeCall, ops: ArrayOps): JsObject {
   const { length } = ops;
   const start = relativeIndex(runtime, args[0], length, 0);
   const deleteCount =
@@ -157,7 +209,7 @@ function splice({ runtime, args }: NativeCall, ops: ArrayOps): JsArray {
         : Math.min(Math.max(toInteger(runtime, args[1]), 0), length - start);
   const items = args.slice(2);
   runtime.scan(length + items.length);
-  const removed = buildArray(runtime, (result) => {
+  const removed = buildSpeciesArray(runtime, ops.array, deleteCount, (result) => {
     for (let index = 0; index < deleteCount; index++) {
       if (ops.has(start + index)) result.set(index, ops.get(start + index));
     }
@@ -208,7 +260,7 @@ function defineReorderings(builder: RealmBuilder): void {
   arrayMethod(builder, 'sort', 1, sortArray);
 }
 
-function sortArray(call: NativeCall, ops: ArrayOps): JsArray {
+function sortArray(call: NativeCall, ops: ArrayOps): JsObject {
   const { runtime } = call;
   const compare = sortComparison(call);
   const { length } = ops;
@@ -233,7 +285,10 @@ function sortArray(call: NativeCall, ops: ArrayOps): JsArray {
 export function sortComparison({ runtime, args, callRow }: NativeCall): (left: Value, right: Value) => number {
   const comparator = args[0];
   if (comparator !== undefined && !isCallable(comparator)) {
-    runtime.throwError('TypeError', 'The comparison function must be either a function or undefined');
+    runtime.throwError(
+      'TypeError',
+      `The comparison function must be either a function or undefined: ${runtime.describePlain(comparator)}`
+    );
   }
   return comparator
     ? (left, right) => runtime.toNumber(runtime.call(comparator, undefined, [left, right], callRow)) || 0
@@ -251,13 +306,13 @@ function defineCopies(builder: RealmBuilder): void {
     const start = relativeIndex(runtime, args[0], length, 0);
     const end = relativeIndex(runtime, args[1], length, length);
     runtime.scan(end - start);
-    return buildArray(runtime, (result) => {
+    return buildSpeciesArray(runtime, ops.array, Math.max(end - start, 0), (result) => {
       for (let index = start; index < end; index++) if (ops.has(index)) result.set(index - start, ops.get(index));
       result.setLength(Math.max(end - start, 0));
     });
   });
   arrayMethod(builder, 'concat', 1, ({ runtime, args }, ops) =>
-    buildArray(runtime, (result) => {
+    buildSpeciesArray(runtime, ops.array, 0, (result) => {
       let next = 0;
       for (const item of [ops.array, ...args]) {
         if (!(item instanceof JsArray)) {
@@ -274,7 +329,9 @@ function defineCopies(builder: RealmBuilder): void {
   );
   arrayMethod(builder, 'flat', 0, ({ runtime, args }, ops) => {
     const depth = args[0] === undefined ? 1 : Math.max(toInteger(runtime, args[0]), 0);
-    return buildArray(runtime, (result) => flattenInto(runtime, result, ops, Math.min(depth, 100)));
+    return buildSpeciesArray(runtime, ops.array, 0, (result) =>
+      flattenInto(runtime, result, ops, Math.min(depth, 100))
+    );
   });
 }
 
@@ -352,7 +409,7 @@ function includes(runtime: Runtime, ops: ArrayOps, args: Value[]): boolean {
   return false;
 }
 
-function joinArray(runtime: Runtime, ops: ArrayOps, separatorValue: Value, joining: Set<JsArray>): string {
+function joinArray(runtime: Runtime, ops: ArrayOps, separatorValue: Value, joining: Set<JsObject>): string {
   if (joining.has(ops.array)) return '';
   // The length is read before any conversion, which may run the program's code and change the array.
   const { length } = ops;

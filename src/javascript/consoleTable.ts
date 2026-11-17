@@ -1,35 +1,18 @@
 import { inspectValue, stringWidth } from './inspect';
+import { type CollectionEntry, CollectionIterator } from './realmCollections';
 import type { Runtime } from './runtime';
 import { isObject, JsArray, JsObject, type Value } from './values';
 
 /** The text `console.table` prints for its arguments, or undefined when it prints them as `console.log` does. */
 // code-gauge-allow functionCognitiveComplexity 19 -- Ports Node.js's console.table, so the two stay comparable.
-// code-gauge-allow functionNcss 32 -- Ports Node.js's console.table, so the two stay comparable.
 export function formatTable(runtime: Runtime, data: Value, properties: Value): string | undefined {
   if (!(data instanceof JsObject)) return undefined;
   const selected =
     properties instanceof JsArray
       ? properties.elements.map((element) => runtime.toString(element as Value))
       : undefined;
-  const { collection } = data;
-  if (collection && !collection.isWeak) {
-    const entries = collection.entries.filter((entry) => entry !== undefined);
-    const indices = entries.map((_, index) => inspectCell(runtime, index));
-    if (collection.kind === 'Map') {
-      return renderTable(
-        ['(iteration index)', 'Key', 'Values'],
-        [
-          indices,
-          entries.map((entry) => inspectCell(runtime, entry.key)),
-          entries.map((entry) => inspectCell(runtime, entry.value as Value)),
-        ]
-      );
-    }
-    return renderTable(
-      ['(iteration index)', 'Values'],
-      [indices, entries.map((entry) => inspectCell(runtime, entry.key))]
-    );
-  }
+  const collectionTable = formatCollectionTable(runtime, data);
+  if (collectionTable !== undefined) return collectionTable;
   const columns = new Map<string, string[]>();
   const values: string[] = [];
   let hasPrimitives = false;
@@ -58,6 +41,35 @@ export function formatTable(runtime: Runtime, data: Value, properties: Value): s
     body.push(values);
   }
   return renderTable(head, body);
+}
+
+/**
+ * The table of a Map, a Set, or an iterator over one: its keys and values for a Map or a Map's entries, its values for
+ * the rest, an iterator's from where it has reached on.
+ */
+function formatCollectionTable(runtime: Runtime, data: JsObject): string | undefined {
+  const iterator = data.hostIterator instanceof CollectionIterator ? data.hostIterator : undefined;
+  const state = iterator?.state ?? data.collection;
+  if (!state || state.isWeak) return undefined;
+  const entries = iterator ? iterator.remainingEntries() : state.entries.filter((entry) => entry !== undefined);
+  const indices = entries.map((_, index) => inspectCell(runtime, index));
+  const isMap = state.kind === 'Map';
+  if (isMap && (!iterator || iterator.kind === 'entries')) {
+    return renderTable(
+      ['(iteration index)', 'Key', 'Values'],
+      [
+        indices,
+        entries.map((entry) => inspectCell(runtime, entry.key)),
+        entries.map((entry) => inspectCell(runtime, entry.value as Value)),
+      ]
+    );
+  }
+  const shown = (entry: CollectionEntry): Value =>
+    isMap && iterator?.kind === 'values' ? (entry.value as Value) : entry.key;
+  return renderTable(
+    ['(iteration index)', 'Values'],
+    [indices, entries.map((entry) => inspectCell(runtime, shown(entry)))]
+  );
 }
 
 /** A cell as `console.table` inspects it: an object with more than two keys as `[Object]`, nested ones collapsed. */

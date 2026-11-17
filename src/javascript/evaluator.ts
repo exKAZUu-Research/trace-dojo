@@ -270,7 +270,9 @@ export class Evaluator extends SuspendableStatementEvaluator {
         ? this.withScope(statement.scope, () => this.evaluate(statement.iterable))
         : this.evaluate(statement.iterable);
     const iterator =
-      statement.kind === 'forIn' ? new ValueIterator(this.enumerableKeys(iterable)) : runtime.iterator(iterable);
+      statement.kind === 'forIn'
+        ? new ValueIterator(this.forInKeys(iterable))
+        : runtime.iterator(iterable, undefined, statement.iterableSource);
     return this.forEachIterations(statement, labels, iterable, iterator);
   }
 
@@ -592,12 +594,15 @@ export class Evaluator extends SuspendableStatementEvaluator {
     if (!(superClass instanceof JsFunction) || !superClass.isConstructor) {
       return runtime.throwError(
         'TypeError',
-        `Class extends value ${runtime.describe(superClass)} is not a constructor or null`
+        `Class extends value ${runtime.describePlain(superClass)} is not a constructor or null`
       );
     }
     const parentPrototype = runtime.get(superClass, 'prototype');
     if (parentPrototype !== null && !isObject(parentPrototype)) {
-      return runtime.throwError('TypeError', 'Class extends value does not have valid prototype property');
+      return runtime.throwError(
+        'TypeError',
+        `Class extends value does not have valid prototype property ${runtime.describePlain(parentPrototype)}`
+      );
     }
     return { prototypeParent: parentPrototype, constructorParent: superClass };
   }
@@ -724,9 +729,7 @@ export class Evaluator extends SuspendableStatementEvaluator {
     callRow: number | undefined
   ): JsObject {
     const { runtime } = this;
-    const thisValue = behavior.isDerived
-      ? UNINITIALIZED
-      : runtime.newObject(runtime.prototypeFor(newTarget, runtime.realm.objectPrototype));
+    const thisValue = behavior.isDerived ? UNINITIALIZED : runtime.newInstance(newTarget);
     const functionFrame: FunctionFrame = {
       thisValue,
       homeObject: behavior.homeObject,

@@ -56,10 +56,70 @@ export function unwrapParentheses(node: Node): Node {
   return current;
 }
 
-/** The text of a callee for error messages, shortened as long expressions are. */
+/**
+ * How V8's CallPrinter names a callee in an error message: names, `this`, and property accesses as written without
+ * spaces or type syntax, a string key as `.key`, and anything else as `(intermediate value)`.
+ */
 export function calleeText(node: Node): string {
-  const text = node.text.replaceAll(/\s+/g, ' ');
-  return text.length > 40 ? `${text.slice(0, 40)}...` : text;
+  return printedCallee(node) ?? '(intermediate value)';
+}
+
+// code-gauge-allow functionNcss 40 -- One case per kind of expression V8's CallPrinter names.
+// code-gauge-allow functionCognitiveComplexity 16 -- One case per kind of expression V8's CallPrinter names.
+function printedCallee(node: Node): string | undefined {
+  switch (node.type) {
+    case 'identifier':
+    case 'this':
+    case 'super': {
+      return node.text;
+    }
+    case 'number': {
+      return String(Number(node.text.replaceAll('_', '')));
+    }
+    case 'string': {
+      return `"${node.text.slice(1, -1)}"`;
+    }
+    case 'parenthesized_expression': {
+      return printedCallee(namedChildren(node)[0]);
+    }
+    case 'object': {
+      return '{}';
+    }
+    case 'array': {
+      return `[${namedChildren(node)
+        .map((element) => printedCallee(element) ?? '(intermediate value)')
+        .join(',')}]`;
+    }
+    case 'null':
+    case 'undefined':
+    case 'true':
+    case 'false': {
+      return node.type;
+    }
+    case 'call_expression': {
+      const callee = printedCallee(field(node, 'function'));
+      return callee === undefined ? undefined : `${callee}(...)`;
+    }
+    case 'member_expression': {
+      const object = printedCallee(field(node, 'object'));
+      const dot = node.childForFieldName('optional_chain') ? '?.' : '.';
+      return object === undefined ? undefined : `${object}${dot}${field(node, 'property').text}`;
+    }
+    case 'subscript_expression': {
+      const object = printedCallee(field(node, 'object'));
+      const index = field(node, 'index');
+      if (object === undefined) return undefined;
+      const dot = node.childForFieldName('optional_chain') ? '?.' : '';
+      const plain =
+        index.type === 'template_string' &&
+        namedChildren(index).every((child) => child.type !== 'template_substitution');
+      if (index.type === 'string' || plain) return `${object}${dot || '.'}${index.text.slice(1, -1)}`;
+      return `${object}${dot}[${printedCallee(index) ?? '(intermediate value)'}]`;
+    }
+    default: {
+      return undefined;
+    }
+  }
 }
 
 /** Gives an anonymous function or class the name it is assigned to, as `name` shows. */

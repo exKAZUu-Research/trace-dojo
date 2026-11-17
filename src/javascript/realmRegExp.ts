@@ -2,7 +2,15 @@ import { DONE } from './iteration';
 import type { RealmBuilder } from './realm';
 import { defineHostIteratorPrototype, newHostIterator } from './realmIterators';
 import type { Runtime } from './runtime';
-import { isCallable, type JsArray, JsObject, type NativeCall, throwingHostErrors, type Value } from './values';
+import {
+  isCallable,
+  isObject,
+  type JsArray,
+  JsObject,
+  type NativeCall,
+  throwingHostErrors,
+  type Value,
+} from './values';
 
 const FLAG_GETTERS = [
   ['hasIndices', 'd'],
@@ -64,10 +72,16 @@ function defineRegExpPrototype(builder: RealmBuilder): void {
     return `/${runtime.toString(runtime.get(object, 'source'))}/${runtime.toString(runtime.get(object, 'flags'))}`;
   });
   builder.getter(regExpPrototype, 'source', ({ runtime, thisValue }) =>
-    thisValue === regExpPrototype ? '(?:)' : thisRegExp(runtime, thisValue, 'source').regexp.source
+    thisValue === regExpPrototype ? '(?:)' : thisRegExp(runtime, thisValue, 'source', true).regexp.source
   );
   builder.getter(regExpPrototype, 'flags', ({ runtime, thisValue }) => {
-    const object = runtime.toObject(thisValue);
+    if (!isObject(thisValue)) {
+      runtime.throwError(
+        'TypeError',
+        `RegExp.prototype.flags getter called on non-object ${runtime.describePlain(thisValue)}`
+      );
+    }
+    const object = thisValue;
     return FLAG_GETTERS.filter(([name]) => runtime.get(object, name))
       .map(([, flag]) => flag)
       .join('');
@@ -75,18 +89,20 @@ function defineRegExpPrototype(builder: RealmBuilder): void {
   for (const [name, flag] of FLAG_GETTERS) {
     builder.getter(regExpPrototype, name, ({ runtime, thisValue }) => {
       if (thisValue === regExpPrototype) return;
-      return thisRegExp(runtime, thisValue, name).regexp.flags.includes(flag);
+      return thisRegExp(runtime, thisValue, name, true).regexp.flags.includes(flag);
     });
   }
 }
 
 export type RegExpObject = JsObject & { regexp: RegExp };
 
-function thisRegExp(runtime: Runtime, value: Value, name: string): RegExpObject {
+function thisRegExp(runtime: Runtime, value: Value, name: string, isGetter = false): RegExpObject {
   if (value instanceof JsObject && value.regexp) return value as RegExpObject;
   return runtime.throwError(
     'TypeError',
-    `Method RegExp.prototype.${name} called on incompatible receiver ${runtime.describe(value)}`
+    isGetter
+      ? `RegExp.prototype.${name} getter called on non-RegExp object`
+      : `Method RegExp.prototype.${name} called on incompatible receiver ${runtime.describePlain(value)}`
   );
 }
 

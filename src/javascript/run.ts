@@ -3,9 +3,10 @@ import { ExecutionLimitError } from '../interpreter/limits';
 import type { ProgramExecution, ProgramRun } from '../interpreter/program';
 import type { ProgramInput } from '../interpreter/programIo';
 import type { Program } from './ast';
+import { errorHeadline, inspect } from './inspect';
 import { parseJavaScript } from './parse';
 import { Runtime } from './runtime';
-import { JsThrow, Scope } from './values';
+import { JsObject, JsThrow, Scope } from './values';
 
 export function executeJavaScriptProgram(source: string, input?: ProgramInput): ProgramExecution {
   return executeParsedProgram(() => parseJavaScript(source), input);
@@ -70,9 +71,12 @@ function describeUncaught(runtime: Runtime, error: unknown): string {
   if (isHostStackOverflow(error)) return 'RangeError: Maximum call stack size exceeded';
   if (!(error instanceof JsThrow)) throw error;
   try {
-    return runtime.toString(error.value);
+    // Node.js prints a thrown string as it is, an error by its stack, and any other value as `console.log` shows it.
+    const { value } = error;
+    if (typeof value === 'string') return value;
+    return value instanceof JsObject && value.isError ? errorHeadline(runtime, value) : inspect(runtime, value);
   } catch (formattingError) {
-    // A program's own toString() may itself fail, which leaves only a generic description.
+    // A value too deep to inspect leaves only a generic description.
     if (formattingError instanceof JsThrow || isHostStackOverflow(formattingError)) return 'Error';
     throw formattingError;
   }

@@ -160,15 +160,6 @@ function closingOnThrow<T>(runtime: Runtime, record: IteratorRecord, run: () => 
   }
 }
 
-/** How V8 names a value that is not a function in an iterator helper's TypeError. */
-function notCallableText(runtime: Runtime, value: Value): string {
-  if (typeof value === 'string') return `string "${value}"`;
-  if (typeof value === 'number' || typeof value === 'boolean') return `${typeof value} ${String(value)}`;
-  if (value === null) return 'object null';
-  if (typeof value === 'symbol' || typeof value === 'bigint') return typeof value;
-  return isObject(value) ? 'object' : runtime.describe(value);
-}
-
 /** Checks the receiver and the callback of a helper, closing the receiver when the callback is not a function. */
 function startHelper(call: NativeCall, name: string): { record: IteratorRecord; callback: JsFunction } {
   const { runtime, thisValue, args } = call;
@@ -177,7 +168,7 @@ function startHelper(call: NativeCall, name: string): { record: IteratorRecord; 
   const [callback] = args;
   if (!isCallable(callback)) {
     return closingOnThrow(runtime, record, () =>
-      runtime.throwError('TypeError', `${notCallableText(runtime, callback)} is not a function`)
+      runtime.throwError('TypeError', `${runtime.describeTyped(callback)} is not a function`)
     );
   }
   record.next = runtime.get(thisValue, 'next');

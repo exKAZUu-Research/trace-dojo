@@ -155,7 +155,7 @@ export abstract class StepEvaluator extends ExpressionEvaluator {
         if (element === undefined) {
           values.push(HOLE);
         } else if (element.kind === 'spread') {
-          const spread = runtime.iterate(yield* this.evaluateSteps(element.argument));
+          const spread = runtime.iterate(yield* this.evaluateSteps(element.argument), element.source);
           runtime.allocate(spread.length);
           appendAll(values, spread);
           appendAll(temporaries, spread);

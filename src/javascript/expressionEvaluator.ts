@@ -163,7 +163,7 @@ export abstract class ExpressionEvaluator extends EvaluatorBase {
     if (!isObject(object)) {
       return runtime.throwError(
         'TypeError',
-        `Cannot use 'in' operator to search for '${name}' in ${runtime.describe(object)}`
+        `Cannot use 'in' operator to search for '${name}' in ${runtime.describePlain(object)}`
       );
     }
     return object.privateMembers?.has(this.privateKey(name)) ?? false;
@@ -215,7 +215,7 @@ export abstract class ExpressionEvaluator extends EvaluatorBase {
         if (argument === undefined) {
           values.push(HOLE);
         } else if (argument.kind === 'spread') {
-          const spread = runtime.iterate(this.evaluate(argument.argument));
+          const spread = runtime.iterate(this.evaluate(argument.argument), argument.source);
           runtime.allocate(spread.length);
           appendAll(values, spread);
           appendAll(temporaries, spread);
@@ -519,7 +519,7 @@ export abstract class ExpressionEvaluator extends EvaluatorBase {
         if (!isObject(right)) {
           return runtime.throwError(
             'TypeError',
-            `Cannot use 'in' operator to search for '${String(runtime.toPropertyKey(left))}' in ${runtime.describe(right)}`
+            `Cannot use 'in' operator to search for '${String(runtime.toPropertyKey(left))}' in ${runtime.describePlain(right)}`
           );
         }
         return runtime.hasProperty(right, runtime.toPropertyKey(left));

@@ -68,6 +68,10 @@ export class JsObject {
   promise?: PromiseState;
   /** Set on a Map, Set, WeakMap, or WeakSet. */
   collection?: CollectionState;
+  /** The class `new` made the object with, which names it once its prototype no longer does. */
+  className?: string;
+  /** Set on what `JSON.rawJSON` returns, whose text `JSON.stringify` writes as it is. */
+  isRawJson = false;
   /** Set on a function's `arguments` object, which shows and is tagged as `Arguments`. */
   isArguments = false;
   /** Set on a primitive boxed by `Object(value)`, whose prototype methods read it; a string's are its own indices. */
@@ -96,6 +100,11 @@ export class JsArray extends JsObject {
   frozen = false;
   /** Cleared by Object.freeze or by defining `length` as read-only, after which nothing changes the length. */
   isLengthWritable = true;
+  /**
+   * The elements `Object.defineProperty` gave other attributes than a plain element's, or made accessors; a data
+   * element's value stays in `elements`, and an accessor's place there holds `undefined`.
+   */
+  definedElements?: Map<number, Property>;
 
   constructor(
     proto: JsObject | null,

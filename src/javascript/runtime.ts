@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 612 -- One runtime of the JavaScript interpreter, whose state its builtins and evaluator share.
+// code-gauge-allow-file fileNcss 676 -- One runtime of the JavaScript interpreter, whose state its builtins and evaluator share.
 import { ExecutionBudget, LIMITS } from '../interpreter/limits';
 import { type ProgramInput, ProgramIO } from '../interpreter/programIo';
 import { StepTracker } from '../interpreter/stepTracker';
@@ -149,6 +149,7 @@ export class Runtime {
     return error;
   }
 
+  // code-gauge-allow functionCognitiveComplexity 20 -- One case per kind of exotic object whose own properties are not stored as properties.
   getOwnProperty(object: JsObject, key: Key): Property | undefined {
     if (typeof object.primitive === 'string') {
       const element = ownElement(object.primitive, key);
@@ -167,9 +168,15 @@ export class Runtime {
       const index = arrayIndexOf(key);
       if (index !== undefined) {
         const element = index < object.elements.length ? object.elements[index] : HOLE;
-        return element === HOLE
-          ? undefined
-          : { value: element, writable: !object.frozen, enumerable: true, configurable: !object.sealed };
+        if (element === HOLE) return undefined;
+        const defined = object.definedElements?.get(index);
+        if (defined && isAccessor(defined)) return defined;
+        return {
+          value: element,
+          writable: (defined?.writable ?? true) && !object.frozen,
+          enumerable: defined?.enumerable ?? true,
+          configurable: (defined?.configurable ?? true) && !object.sealed,
+        };
       }
     }
     return object.properties.get(key);
@@ -263,8 +270,11 @@ export class Runtime {
   }
 
   /** How V8 names an object in the TypeError of a refused write: by its source, its class, or its tag. */
-  private receiverText(target: JsObject): string {
+  receiverText(target: JsObject): string {
     if (target instanceof JsArray) return '[object Array]';
+    if (target.regexp) return '[object RegExp]';
+    // A builtin iterator has no constructor of its own, so V8 names it by its tag.
+    if (target.hostIterator) return `[object ${this.toString(this.get(target, WELL_KNOWN_SYMBOLS.toStringTag))}]`;
     if (target instanceof JsFunction) {
       const { behavior } = target;
       return behavior.kind === 'native'
@@ -303,6 +313,7 @@ export class Runtime {
   }
 
   /** Assigns an element, which a frozen array refuses and a non-extensible one refuses where it has none. */
+  // code-gauge-allow functionCognitiveComplexity 19 -- Transcribes the spec's array element assignment, whose refusals mirror its steps.
   setElement(array: JsArray, index: number, value: Value, strict = true): void {
     const { elements } = array;
     if (index >= elements.length || elements[index] === HOLE) {
@@ -310,9 +321,17 @@ export class Runtime {
         this.refuse(strict, `Cannot add property ${index}, object is not extensible`);
         return;
       }
-    } else if (array.frozen) {
-      this.refuse(strict, `Cannot assign to read only property '${index}' of object '[object Array]'`);
-      return;
+    } else if (array.frozen || array.definedElements?.has(index)) {
+      const defined = array.definedElements?.get(index);
+      if (defined && isAccessor(defined)) {
+        if (defined.set) this.call(defined.set, array, [value], this.currentRow);
+        else this.refuse(strict, `Cannot set property ${index} of [object Array] which has only a getter`);
+        return;
+      }
+      if (array.frozen || defined?.writable === false) {
+        this.refuse(strict, `Cannot assign to read only property '${index}' of object '[object Array]'`);
+        return;
+      }
     }
     if (index >= elements.length && !array.isLengthWritable) {
       this.refuse(strict, readOnlyLengthMessage);
@@ -345,6 +364,7 @@ export class Runtime {
         return;
       }
     }
+    for (const index of array.definedElements?.keys() ?? []) if (index >= length) array.definedElements?.delete(index);
     elements.length = length;
   }
 
@@ -370,14 +390,35 @@ export class Runtime {
         return;
       }
     }
-    if (object instanceof JsArray && (arrayIndexOf(key) !== undefined || key === 'length')) {
-      if (isAccessor(property)) this.throwError('TypeError', 'Accessors on array elements are not supported');
+    const index = object instanceof JsArray ? arrayIndexOf(key) : undefined;
+    if (object instanceof JsArray && index !== undefined) {
+      this.defineElement(object, index, property);
+      return;
+    }
+    if (object instanceof JsArray && key === 'length') {
+      if (isAccessor(property)) this.throwError('TypeError', `Cannot redefine property: length`);
       this.set(object, key, property.value);
-      object.isLengthWritable &&= key !== 'length' || property.writable;
+      object.isLengthWritable &&= property.writable;
       return;
     }
     if (!object.properties.has(key)) this.allocate(1);
     object.properties.set(key, property);
+  }
+
+  /** Defines an element, remembering attributes other than a plain element's, or an accessor, in `definedElements`. */
+  private defineElement(array: JsArray, index: number, property: Property): void {
+    const plain = !isAccessor(property) && property.writable && property.enumerable && property.configurable;
+    if (index >= array.elements.length) {
+      if (!array.extensible) this.throwError('TypeError', `Cannot define property ${index}, object is not extensible`);
+      this.grow(array, index + 1);
+    }
+    array.elements[index] = isAccessor(property) ? undefined : property.value;
+    if (plain) {
+      array.definedElements?.delete(index);
+      return;
+    }
+    array.definedElements ??= new Map();
+    array.definedElements.set(index, isAccessor(property) ? property : { ...property, value: undefined });
   }
 
   createDataProperty(object: JsObject, key: Key, value: Value): void {
@@ -398,10 +439,11 @@ export class Runtime {
       const index = arrayIndexOf(key);
       // Deleting a hole changes nothing, which a sealed array allows.
       if (index !== undefined && index < target.elements.length && target.elements[index] !== HOLE) {
-        if (target.sealed) {
+        if (target.sealed || target.definedElements?.get(index)?.configurable === false) {
           this.refuse(strict, `Cannot delete property '${index}' of [object Array]`);
           return false;
         }
+        target.definedElements?.delete(index);
         target.elements[index] = HOLE;
       }
       if (index !== undefined) return true;
@@ -608,7 +650,7 @@ export class Runtime {
     if (behavior.kind === 'class') {
       return this.returnedToBuiltin(frame, this.evaluator.constructClass(fn, behavior, args, target, callRow));
     }
-    const thisValue = this.newObject(this.prototypeFor(target, this.realm.objectPrototype));
+    const thisValue = this.newInstance(target);
     const result = this.evaluator.callFunction(fn, behavior, thisValue, args, callRow, target);
     return this.returnedToBuiltin(frame, isObject(result) ? result : thisValue);
   }
@@ -619,6 +661,13 @@ export class Runtime {
     const box = this.toObject(value);
     box.proto = this.prototypeFor(newTarget, box.proto ?? this.realm.objectPrototype);
     return box;
+  }
+
+  /** The object `new` creates for `newTarget` before its constructor runs. */
+  newInstance(newTarget: JsFunction): JsObject {
+    const instance = this.newObject(this.prototypeFor(newTarget, this.realm.objectPrototype));
+    instance.className = this.functionName(newTarget) || undefined;
+    return instance;
   }
 
   /** The prototype of an object that `new` creates for `newTarget`. */
@@ -761,7 +810,12 @@ export class Runtime {
   ordinaryHasInstance(constructor: Value, value: Value): boolean {
     if (!isCallable(constructor) || !isObject(value)) return false;
     const prototype = this.get(constructor, 'prototype');
-    if (!isObject(prototype)) this.throwError('TypeError', 'Function has non-object prototype in instanceof check');
+    if (!isObject(prototype)) {
+      this.throwError(
+        'TypeError',
+        `Function has non-object prototype '${this.describePlain(prototype)}' in instanceof check`
+      );
+    }
     for (let current = value.proto; current; current = current.proto) {
       this.spend();
       if (current === prototype) return true;
@@ -776,9 +830,10 @@ export class Runtime {
    */
   iterator(
     value: Value,
-    method = value === undefined || value === null ? undefined : this.get(value, WELL_KNOWN_SYMBOLS.iterator)
+    method = value === undefined || value === null ? undefined : this.get(value, WELL_KNOWN_SYMBOLS.iterator),
+    source?: string
   ): ValueIterator {
-    if (!isCallable(method)) return this.throwError('TypeError', `${this.describe(value)} is not iterable`);
+    if (!isCallable(method)) return this.throwError('TypeError', this.notIterableMessage(value, source));
     const iterator = this.call(method, value, [], this.currentRow);
     if (!isObject(iterator))
       return this.throwError('TypeError', 'Result of the Symbol.iterator method is not an object');
@@ -839,13 +894,38 @@ export class Runtime {
     if (!isObject(result)) this.throwError('TypeError', `Iterator result ${this.describe(result)} is not an object`);
   }
 
-  /** All the values an iterable yields, as spread reads them. */
-  iterate(value: Value): Value[] {
+  /** All the values an iterable yields, as spread reads them; `source` names it as V8 does where syntax spreads it. */
+  iterate(value: Value, source?: string): Value[] {
     if (value instanceof JsArray) this.scan(value.elements.length);
-    return this.iterator(value).rest();
+    return this.iterator(value, undefined, source).rest();
   }
 
   /** A short description of a value for error messages. */
+  /** How V8 names a value by its type, as `number 5`, `string "a"`, `object null`, or just `object`. */
+  describeTyped(value: Value): string {
+    if (value === undefined) return 'undefined';
+    if (value === null) return 'object null';
+    if (typeof value === 'string') return `string "${value}"`;
+    if (typeof value === 'symbol' || typeof value === 'bigint' || isObject(value)) return this.typeOf(value);
+    return `${typeof value} ${this.toString(value)}`;
+  }
+
+  /** How V8 shows a value without running its code: a string as it is, an object as `#<Name>`. */
+  describePlain(value: Value): string {
+    if (typeof value === 'symbol') return value.toString();
+    if (value instanceof JsObject) return this.receiverText(value);
+    return String(value);
+  }
+
+  /** The TypeError of iterating a value without an iterator, naming it by its source where syntax iterates it. */
+  private notIterableMessage(value: Value, source: string | undefined): string {
+    if (value === undefined || value === null) {
+      return `${source ?? String(value)} is not iterable (cannot read property ${String(value)})`;
+    }
+    if (source !== undefined) return `${source} is not iterable`;
+    return `${this.describeTyped(value)} is not iterable (cannot read property Symbol(Symbol.iterator))`;
+  }
+
   describe(value: Value): string {
     if (typeof value === 'string') return JSON.stringify(value.length > 30 ? `${value.slice(0, 30)}...` : value);
     if (value instanceof JsFunction) return this.functionName(value) || 'function';
@@ -876,6 +956,7 @@ export class Runtime {
 const MISSING = Symbol('missing');
 
 /** Reads an array element, an array's length, a string's character, or a string's length without a lookup. */
+// code-gauge-allow functionCognitiveComplexity 16 -- Reads a string's or an array's element without its descriptor, unless an accessor defines it.
 function ownElement(value: Value, key: Key): Value | typeof MISSING {
   if (typeof value === 'string') {
     if (key === 'length') return value.length;
@@ -884,8 +965,10 @@ function ownElement(value: Value, key: Key): Value | typeof MISSING {
   } else if (value instanceof JsArray) {
     if (key === 'length') return value.elements.length;
     const index = arrayIndexOf(key);
+    // An accessor element is read through its getter, which `get` calls.
     if (index !== undefined && index < value.elements.length && value.elements[index] !== HOLE) {
-      return value.elements[index] as Value;
+      const defined = value.definedElements?.get(index);
+      return defined && isAccessor(defined) ? MISSING : (value.elements[index] as Value);
     }
   }
   return MISSING;

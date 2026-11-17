@@ -185,7 +185,7 @@ test.each([
   ['a turtle with an invalid color', "new Turtle(0, 0, 'Z');", 'Error: Invalid color: Z'],
   ['a turtle leaving the board', 'const t = new Turtle(0, 6);\nt.forward();', 'Error: Out of bounds: (0, 7)'],
   ['a thrown value', "throw 'stop';", 'stop'],
-  ['a custom error', "class Oops extends Error {}\nthrow new Oops('bad');", 'Error: bad'],
+  ['a custom error', "class Oops extends Error {}\nthrow new Oops('bad');", 'Oops [Error]: bad'],
   ['infinite recursion', 'function f() { return f(); }\nf();', 'RangeError: Maximum call stack size exceeded'],
   ['constructing a generator', 'function* f() {}\nnew f();', 'TypeError: f is not a constructor'],
   [

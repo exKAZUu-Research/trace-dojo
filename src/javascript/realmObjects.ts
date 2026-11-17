@@ -52,6 +52,53 @@ export function defineObjectBuiltins(builder: RealmBuilder): void {
     const key = runtime.toPropertyKey(args[0]);
     return runtime.getOwnProperty(runtime.toObject(thisValue), key)?.enumerable ?? false;
   });
+  defineLegacyAccessorMethods(builder);
+}
+
+/** `__defineGetter__` and its relatives, which define and look up accessors by name. */
+function defineLegacyAccessorMethods(builder: RealmBuilder): void {
+  const { objectPrototype } = builder.realm;
+  for (const kind of ['get', 'set'] as const) {
+    const name = kind === 'get' ? 'Getter' : 'Setter';
+    builder.method(objectPrototype, `__define${name}__`, 2, ({ runtime, thisValue, args }) => {
+      const [key, accessor] = args;
+      if (!(accessor instanceof JsFunction)) {
+        return runtime.throwError('TypeError', `Object.prototype.__define${name}__: Expecting function`);
+      }
+      defineAccessorHalf(runtime, runtime.toObject(thisValue), runtime.toPropertyKey(key), kind, accessor);
+      return;
+    });
+    builder.method(objectPrototype, `__lookup${name}__`, 1, ({ runtime, thisValue, args }) =>
+      lookupAccessor(runtime, runtime.toObject(thisValue), runtime.toPropertyKey(args[0]), kind)
+    );
+  }
+}
+
+/** Defines the getter or the setter of a property, keeping the other half of an accessor already there. */
+function defineAccessorHalf(
+  runtime: Runtime,
+  object: JsObject,
+  key: Key,
+  kind: 'get' | 'set',
+  accessor: JsFunction
+): void {
+  const current = runtime.getOwnProperty(object, key);
+  const kept = current && isAccessor(current) ? current : undefined;
+  runtime.defineProperty(object, key, {
+    get: kind === 'get' ? accessor : kept?.get,
+    set: kind === 'set' ? accessor : kept?.set,
+    enumerable: true,
+    configurable: true,
+  });
+}
+
+/** The getter or the setter of the nearest property of the name, if it is an accessor. */
+function lookupAccessor(runtime: Runtime, object: JsObject, key: Key, kind: 'get' | 'set'): Value {
+  for (let current: JsObject | null = object; current; current = current.proto) {
+    const property = runtime.getOwnProperty(current, key);
+    if (property) return isAccessor(property) ? property[kind] : undefined;
+  }
+  return undefined;
 }
 
 function defineEntries(method: ObjectMethod): void {
@@ -78,7 +125,7 @@ function fromEntries(runtime: Runtime, args: Value[]): Value {
     closingOnThrow(iterator, () => {
       for (let entry = iterator.next(); entry !== DONE; entry = iterator.next()) {
         if (!isObject(entry)) {
-          runtime.throwError('TypeError', `Iterator value ${primitiveText(entry)} is not an entry object`);
+          runtime.throwError('TypeError', `Iterator value ${runtime.describePlain(entry)} is not an entry object`);
         }
         const key = runtime.toPropertyKey(runtime.get(entry, '0'));
         runtime.createDataProperty(object, key, runtime.get(entry, '1'));
@@ -127,7 +174,10 @@ function defineReflection(method: ObjectMethod): void {
   method('create', 2, (runtime, args) => {
     const [proto, properties] = args;
     if (proto !== null && !isObject(proto)) {
-      return runtime.throwError('TypeError', `Object prototype may only be an Object or null: ${primitiveText(proto)}`);
+      return runtime.throwError(
+        'TypeError',
+        `Object prototype may only be an Object or null: ${runtime.describePlain(proto)}`
+      );
     }
     const object = runtime.newObject(proto);
     return properties === undefined
@@ -161,7 +211,10 @@ function setPrototypeOf(runtime: Runtime, args: Value[]): Value {
     return runtime.throwError('TypeError', 'Object.setPrototypeOf called on null or undefined');
   }
   if (proto !== null && !isObject(proto)) {
-    return runtime.throwError('TypeError', `Object prototype may only be an Object or null: ${primitiveText(proto)}`);
+    return runtime.throwError(
+      'TypeError',
+      `Object prototype may only be an Object or null: ${runtime.describePlain(proto)}`
+    );
   }
   if (isObject(object)) changePrototype(runtime, object, proto);
   return object;
@@ -173,7 +226,7 @@ function changePrototype(runtime: Runtime, object: JsObject, proto: JsObject | n
   if (object === runtime.realm.objectPrototype) {
     runtime.throwError('TypeError', "Immutable prototype object 'Object.prototype' cannot have their prototype set");
   }
-  if (!object.extensible) runtime.throwError('TypeError', '#<Object> is not extensible');
+  if (!object.extensible) runtime.throwError('TypeError', `${runtime.describePlain(object)} is not extensible`);
   for (let current = proto; current; current = current.proto) {
     if (current === object) runtime.throwError('TypeError', 'Cyclic __proto__ value');
   }
@@ -203,10 +256,6 @@ function holdingTemporaries(runtime: Runtime, run: () => void): void {
   } finally {
     temporaries.length = held;
   }
-}
-
-function primitiveText(value: Exclude<Value, JsObject>): string {
-  return typeof value === 'symbol' ? value.toString() : String(value);
 }
 
 /** Whether an object is sealed, or frozen when `frozen` is set, as `Object.isSealed` and `Object.isFrozen` test. */

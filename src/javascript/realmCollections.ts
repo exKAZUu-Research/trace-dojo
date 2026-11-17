@@ -239,7 +239,7 @@ function defineCollectionClass(
             continue;
           }
           if (!isObject(item)) {
-            runtime.throwError('TypeError', `Iterator value ${primitiveText(item)} is not an entry object`);
+            runtime.throwError('TypeError', `Iterator value ${runtime.describePlain(item)} is not an entry object`);
           }
           const key = runtime.get(item, '0');
           const value = runtime.hold(key, () => runtime.get(item, '1'));
@@ -251,10 +251,6 @@ function defineCollectionClass(
   });
   builder.constant(prototype, WELL_KNOWN_SYMBOLS.toStringTag, kind);
   return { prototype, constructor };
-}
-
-function primitiveText(value: Exclude<Value, JsObject>): string {
-  return typeof value === 'symbol' ? value.toString() : String(value);
 }
 
 type CollectionMethod = (call: NativeCall, state: CollectionState, collection: JsObject) => Value;
@@ -287,8 +283,7 @@ function requireCollection(runtime: Runtime, value: Value, kind: CollectionKind,
 
 /** How V8 names a value in a message: `#<Constructor>` for an object, its text for a primitive. */
 export function receiverText(runtime: Runtime, value: Value): string {
-  if (!(value instanceof JsObject)) return typeof value === 'string' ? value : primitiveText(value);
-  return `#<${constructorNameOf(runtime, value)}>`;
+  return runtime.describePlain(value);
 }
 
 /** The name of the constructor an object's prototype chain names, without running getters. */
@@ -324,7 +319,7 @@ function defineIterators(
 
 function forEachEntry({ runtime, args, callRow }: NativeCall, state: CollectionState, collection: JsObject): Value {
   const [callback, thisArg] = args;
-  if (!isCallable(callback)) runtime.throwError('TypeError', `${runtime.describe(callback)} is not a function`);
+  if (!isCallable(callback)) runtime.throwError('TypeError', `${runtime.describeTyped(callback)} is not a function`);
   const cursor = state.cursor();
   for (let entry = cursor.next(runtime); entry; entry = cursor.next(runtime)) {
     runtime.spend();
@@ -344,6 +339,7 @@ function defineSizeAndClear(builder: RealmBuilder, prototype: JsObject, kind: 'M
   collectionMethod(builder, prototype, kind, 'forEach', 1, forEachEntry);
 }
 
+// code-gauge-allow functionNcss 35 -- Lists the builtin methods, each a small closure of its own.
 function defineMap(builder: RealmBuilder): void {
   const { prototype, constructor } = defineCollectionClass(builder, 'Map', 'set', builder.realm.mapPrototype);
   collectionMethod(builder, prototype, 'Map', 'get', 1, ({ args }, state) => state.entryOf(args[0])?.value);
@@ -353,6 +349,22 @@ function defineMap(builder: RealmBuilder): void {
   });
   collectionMethod(builder, prototype, 'Map', 'has', 1, ({ args }, state) => state.has(args[0]));
   collectionMethod(builder, prototype, 'Map', 'delete', 1, ({ args }, state) => state.delete(args[0]));
+  collectionMethod(builder, prototype, 'Map', 'getOrInsert', 2, ({ runtime, args }, state) => {
+    const existing = state.entryOf(args[0]);
+    if (existing) return existing.value;
+    state.set(runtime, args[0], args[1]);
+    return args[1];
+  });
+  collectionMethod(builder, prototype, 'Map', 'getOrInsertComputed', 2, ({ runtime, args, callRow }, state) => {
+    const [key, callback] = args;
+    if (!isCallable(callback)) runtime.throwError('TypeError', `${runtime.describeTyped(callback)} is not a function`);
+    const existing = state.entryOf(key);
+    if (existing) return existing.value;
+    // The callback may change the map, so the value goes in after it returns.
+    const value = runtime.call(callback, undefined, [Object.is(key, -0) ? 0 : key], callRow);
+    state.set(runtime, key, value);
+    return value;
+  });
   defineSizeAndClear(builder, prototype, 'Map');
   const iterators = defineIterators(builder, prototype, 'Map', [
     ['keys', 'keys'],

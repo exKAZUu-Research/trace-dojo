@@ -60,7 +60,9 @@ export function defineIteratorBuiltins(builder: RealmBuilder): void {
 export function defineHostIteratorPrototype(builder: RealmBuilder, tag: string): JsObject {
   const prototype = new JsObject(builder.realm.iteratorPrototype);
   const next = builder.method(prototype, 'next', 0, ({ runtime, thisValue }) => {
-    const iterator = thisValue instanceof JsObject ? thisValue.hostIterator : undefined;
+    // Each kind of iterator steps only its own kind, as V8 checks.
+    const iterator =
+      thisValue instanceof JsObject && thisValue.proto === prototype ? thisValue.hostIterator : undefined;
     if (!iterator) {
       return runtime.throwError(
         'TypeError',
@@ -134,7 +136,7 @@ function defineSymbol(builder: RealmBuilder): void {
   builder.method(symbolConstructor, 'keyFor', 1, ({ runtime, args }) => {
     const [symbol] = args;
     if (typeof symbol !== 'symbol')
-      return runtime.throwError('TypeError', `${runtime.describe(symbol)} is not a symbol`);
+      return runtime.throwError('TypeError', `${runtime.describePlain(symbol)} is not a symbol`);
     return registeredKeyOf(runtime, symbol);
   });
   builder.method(symbolPrototype, 'toString', 0, ({ runtime, thisValue }) =>

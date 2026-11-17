@@ -9,7 +9,7 @@ import type {
 } from './ast';
 import { AwaitingIterator, type LoopIterator } from './asyncGenerators';
 import { Awaiting, GeneratorReturn, resumedValue, runToEnd, type Steps } from './generators';
-import { DONE, ValueIterator } from './iteration';
+import { DONE, type HostIterator, ValueIterator } from './iteration';
 import { asyncIteratorOf } from './iteratorProtocol';
 import { WELL_KNOWN_SYMBOLS } from './realmIterators';
 import type { Runtime } from './runtime';
@@ -376,10 +376,10 @@ export abstract class SuspendableStatementEvaluator extends StepEvaluator {
         : yield* this.valueSteps(statement.iterable);
     const iterator: LoopIterator =
       statement.kind === 'forIn'
-        ? syncLoopIterator(new ValueIterator(this.enumerableKeys(iterable)))
+        ? syncLoopIterator(new ValueIterator(this.forInKeys(iterable)))
         : statement.isAwait
           ? new AwaitingIterator(runtime, asyncIteratorOf(runtime, iterable))
-          : syncLoopIterator(runtime.iterator(iterable));
+          : syncLoopIterator(runtime.iterator(iterable, undefined, statement.iterableSource));
     // The iterable and the iterator it gave stay reachable while the loop runs.
     const { temporaries } = runtime.frame;
     const held = temporaries.length;
@@ -447,8 +447,25 @@ export abstract class SuspendableStatementEvaluator extends StepEvaluator {
     }
   }
 
-  /** The keys `for...in` visits: enumerable string keys of the object and its prototypes, each once. */
-  protected enumerableKeys(value: Value): string[] {
+  /** The keys `for...in` visits, skipping one deleted before its turn, as JavaScript does. */
+  protected forInKeys(value: Value): HostIterator {
+    const keys = this.enumerableKeys(value);
+    const object = isObject(value) ? value : undefined;
+    let index = 0;
+    return {
+      next: () => {
+        while (index < keys.length) {
+          const key = keys[index++];
+          if (!object || this.runtime.hasProperty(object, key)) return key;
+        }
+        return DONE;
+      },
+      source: value,
+    };
+  }
+
+  /** The enumerable string keys of an object and its prototypes, each once. */
+  private enumerableKeys(value: Value): string[] {
     const { runtime } = this;
     if (value === undefined || value === null) return [];
     if (typeof value === 'string') return Array.from({ length: value.length }, (_, index) => String(index));

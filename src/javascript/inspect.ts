@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 416 -- One port of Node.js's util.inspect, whose formatters share its context.
+// code-gauge-allow-file fileNcss 461 -- One port of Node.js's util.inspect, whose formatters share its context.
 import { eastAsianWidthType } from 'get-east-asian-width';
 
 import { ExecutionLimitError, LIMITS } from '../interpreter/limits';
@@ -7,7 +7,18 @@ import { type CollectionEntry, CollectionIterator } from './realmCollections';
 import { dateValueOf, inspectDate } from './realmDate';
 import { WELL_KNOWN_SYMBOLS } from './realmIterators';
 import type { Runtime } from './runtime';
-import { HOLE, isAccessor, JsArray, JsFunction, JsObject, type Key, type Value } from './values';
+import {
+  type AccessorProperty,
+  HOLE,
+  isAccessor,
+  isObject,
+  JsArray,
+  JsFunction,
+  JsObject,
+  JsThrow,
+  type Key,
+  type Value,
+} from './values';
 
 // The defaults of Node.js's `util.inspect`, which this module ports from `lib/internal/util/inspect.js`.
 const DEFAULT_DEPTH = 2;
@@ -57,6 +68,11 @@ interface Context {
   maxArrayLength: number;
   /** As `util.inspect`'s option, which `%o` sets: an array also shows its `[length]`. */
   showHidden: boolean;
+  /** As `util.inspect`'s options of the same names. */
+  sorted: boolean;
+  getters: boolean | 'get' | 'set';
+  numericSeparator: boolean;
+  maxStringLength: number;
 }
 
 /** The `util.inspect` options `console.dir` takes. */
@@ -66,6 +82,10 @@ export interface InspectOptions {
   compact?: number | boolean;
   maxArrayLength?: number;
   showHidden?: boolean;
+  sorted?: boolean;
+  getters?: boolean | 'get' | 'set';
+  numericSeparator?: boolean;
+  maxStringLength?: number;
 }
 
 /**
@@ -100,6 +120,10 @@ export function inspectValue(
     compact: options.compact ?? COMPACT,
     maxArrayLength: Math.max(0, options.maxArrayLength ?? MAX_ARRAY_LENGTH),
     showHidden: options.showHidden ?? false,
+    sorted: options.sorted ?? false,
+    getters: options.getters ?? false,
+    numericSeparator: options.numericSeparator ?? false,
+    maxStringLength: Math.max(0, options.maxStringLength ?? MAX_STRING_LENGTH),
   };
   return formatCharged(ctx, value, 0);
 }
@@ -114,8 +138,9 @@ function formatCharged(ctx: Context, value: Value, recurseTimes: number): string
 
 function formatValue(ctx: Context, value: Value, recurseTimes: number): string {
   if (typeof value === 'string') return formatString(ctx, value);
-  if (typeof value === 'number') return formatNumber(value);
-  if (typeof value === 'bigint') return `${value}n`;
+  if (typeof value === 'number')
+    return ctx.numericSeparator ? separateDigits(formatNumber(value)) : formatNumber(value);
+  if (typeof value === 'bigint') return `${ctx.numericSeparator ? separateDigits(String(value)) : value}n`;
   if (!(value instanceof JsObject)) return String(value);
   if (ctx.seen.has(value)) {
     let index = ctx.circular.get(value);
@@ -133,12 +158,19 @@ export function formatNumber(value: number): string {
   return Object.is(value, -0) ? '-0' : String(value);
 }
 
+/** Node.js's numericSeparator: `_` between each three digits of an integer part, as `1_234_567.891`. */
+function separateDigits(text: string): string {
+  const match = /^(-?)(\d+)(.*)$/.exec(text);
+  if (!match || match[3].includes('e')) return text;
+  return `${match[1]}${match[2].replaceAll(/\B(?=(\d{3})+$)/g, '_')}${match[3]}`;
+}
+
 function formatString(ctx: Context, text: string): string {
   let value = text;
   let trailer = '';
-  if (value.length > MAX_STRING_LENGTH) {
-    const remaining = value.length - MAX_STRING_LENGTH;
-    value = value.slice(0, MAX_STRING_LENGTH);
+  if (value.length > ctx.maxStringLength) {
+    const remaining = value.length - ctx.maxStringLength;
+    value = value.slice(0, ctx.maxStringLength);
     trailer = `... ${remaining} more character${remaining > 1 ? 's' : ''}`;
   }
   if (
@@ -163,13 +195,18 @@ function quote(text: string): string {
     if (!text.includes('"')) mark = '"';
     else if (!text.includes('`') && !text.includes('${')) mark = '`';
   }
-  const escaped = text.replaceAll(ESCAPED_CHARACTER, (character) => {
+  const escaped = escapeControls(text);
+  return mark === "'" ? `'${escaped.replaceAll("'", String.raw`\'`)}'` : `${mark}${escaped}${mark}`;
+}
+
+/** Node.js's strEscape replacements: control characters and lone surrogates as escapes. */
+function escapeControls(text: string): string {
+  return text.replaceAll(ESCAPED_CHARACTER, (character) => {
     const named = NAMED_ESCAPES[character];
     if (named) return named;
     const code = character.codePointAt(0) ?? 0;
     return code >= 0xd8_00 ? `\\u${code.toString(16)}` : `\\x${code.toString(16).toUpperCase().padStart(2, '0')}`;
   });
-  return mark === "'" ? `'${escaped.replaceAll("'", String.raw`\'`)}'` : `${mark}${escaped}${mark}`;
 }
 
 interface Frame {
@@ -179,7 +216,7 @@ interface Frame {
 }
 
 // code-gauge-allow functionCognitiveComplexity 19 -- Ports Node.js's util.inspect, so the two stay comparable.
-// code-gauge-allow functionNcss 33 -- Ports Node.js's util.inspect, so the two stay comparable.
+// code-gauge-allow functionNcss 35 -- Ports Node.js's util.inspect, so the two stay comparable.
 function formatRaw(ctx: Context, value: JsObject, recurseTimes: number): string {
   const { runtime } = ctx;
   const constructor = constructorName(runtime, value);
@@ -198,7 +235,10 @@ function formatRaw(ctx: Context, value: JsObject, recurseTimes: number): string 
     value instanceof JsArray ? formatArray(ctx, value, recurseTimes) : formatCollection(ctx, value, recurseTimes);
   if (value.promise) output.push(promiseEntry(ctx, value.promise, recurseTimes));
   if (showsLength) output.push(`[length]: ${formatNumber((value as JsArray).elements.length)}`);
-  for (const key of keys) output.push(formatProperty(ctx, value, recurseTimes, key));
+  const properties = keys.map((key) => formatProperty(ctx, value, recurseTimes, key));
+  // `sorted` orders the properties as text, after an array's elements or a collection's entries.
+  if (ctx.sorted) properties.sort();
+  output.push(...properties);
   runtime.scan(output.length);
   const reference = ctx.circular.get(value);
   let { base } = frame;
@@ -215,7 +255,7 @@ function formatRaw(ctx: Context, value: JsObject, recurseTimes: number): string 
 
 /** What surrounds the entries of an object, or its whole text when it has no entries to list. */
 // code-gauge-allow functionCognitiveComplexity 23 -- Ports Node.js's util.inspect, so the two stay comparable.
-// code-gauge-allow functionNcss 38 -- Ports Node.js's util.inspect, so the two stay comparable.
+// code-gauge-allow functionNcss 39 -- Ports Node.js's util.inspect, so the two stay comparable.
 function frameOf(ctx: Context, value: JsObject, constructor: string | undefined, hasKeys: boolean): Frame | string {
   const { runtime } = ctx;
   if (value instanceof JsArray) {
@@ -231,13 +271,14 @@ function frameOf(ctx: Context, value: JsObject, constructor: string | undefined,
   if (value instanceof JsFunction) base = functionBase(runtime, value);
   else if (value.regexp) base = String(value.regexp);
   else if (dateValueOf(value) !== undefined) base = dateBase(value, constructor);
-  else if (value.isError && constructor !== 'Object') base = errorText(value);
+  else if (value.isError && constructor !== 'Object') base = errorText(value, constructor);
   else if (value.primitive !== undefined) base = boxedBase(ctx, value.primitive, constructor, toStringTagOf(value));
   else if (value.isArguments) open = '[Arguments] {';
   else {
     const tag = toStringTagOf(value);
-    if (tag && tag !== constructor) open = `${prefixOf(constructor, 'Object')}[${tag}] {`;
-    else if (constructor !== 'Object') open = `${prefixOf(constructor, 'Object')}{`;
+    const fallback = value.className ?? 'Object';
+    if (tag && tag !== constructor) open = `${prefixOf(constructor, fallback)}[${tag}] {`;
+    else if (constructor !== 'Object') open = `${prefixOf(constructor, fallback)}{`;
   }
   if (!hasKeys) return base || `${open}}`;
   return { base, braces: [open, '}'] };
@@ -302,7 +343,6 @@ function prefixOf(constructor: string | undefined, fallback: string, size = ''):
   return constructor === undefined ? `[${fallback}${size}: null prototype] ` : `${constructor}${size} `;
 }
 
-/** The keys an object lists, its strings and then its symbols, as `Object.keys` and then its symbols order them. */
 /** The keys an object shows: its enumerable ones, or with `showHidden` all of its own, as `%o` shows them. */
 function enumerableKeys(runtime: Runtime, object: JsObject, showHidden: boolean): Key[] {
   // An array keeps its elements apart from its other properties.
@@ -337,14 +377,39 @@ function functionBase(runtime: Runtime, fn: JsFunction): string {
   return `[class ${name || '(anonymous)'}${superName ? ` extends ${superName}` : ''}]`;
 }
 
-function errorText(error: JsObject): string {
+/**
+ * The first line Node.js prints for an error, such as `MyError: missing`; the stack lines that follow it, with the
+ * error's own properties, name places on the host, which a program here does not have.
+ */
+export function errorHeadline(runtime: Runtime, error: JsObject): string {
+  return errorText(error, constructorName(runtime, error));
+}
+
+function errorText(error: JsObject, constructor: string | undefined): string {
   const message = dataValue(error, 'message');
   let name: Value;
   for (let current: JsObject | null = error; current && name === undefined; current = current.proto) {
     name = dataValue(current, 'name');
   }
   const nameText = typeof name === 'string' ? name : 'Error';
-  return typeof message === 'string' && message ? `${nameText}: ${message}` : nameText;
+  const text = typeof message === 'string' && message ? `${nameText}: ${message}` : nameText;
+  return improveErrorName(text, nameText, constructor);
+}
+
+/**
+ * Node.js's improveStack: an error whose class differs from its `name`, such as `class NotFound extends Error {}`,
+ * shows its class, as `NotFound [Error]: missing`, or only its class when that contains the name, as
+ * `MyError: missing`.
+ */
+function improveErrorName(text: string, name: string, constructor: string | undefined): string {
+  const looksNormal =
+    constructor === undefined ||
+    (name.endsWith('Error') && text.startsWith(name) && (text.length === name.length || text[name.length] === ':'));
+  const prototype = constructor ?? 'Error';
+  if (!looksNormal || name === prototype) return text;
+  return prototype.includes(name)
+    ? `${prototype}${text.slice(name.length)}`
+    : `${prototype} [${name}]${text.slice(name.length)}`;
 }
 
 function dataValue(object: JsObject, key: string): Value {
@@ -352,6 +417,31 @@ function dataValue(object: JsObject, key: string): Value {
   return property && !isAccessor(property) ? property.value : undefined;
 }
 
+function showsGetter(ctx: Context, property: AccessorProperty): boolean {
+  if (!property.get || !ctx.getters) return false;
+  return ctx.getters === true || (ctx.getters === 'set') === (property.set !== undefined);
+}
+
+/** Node.js's `getters` option: the value a getter returns after its label, or the error it threw. */
+function gotText(ctx: Context, object: JsObject, property: AccessorProperty, recurseTimes: number): string {
+  const label = property.set ? 'Getter/Setter' : 'Getter';
+  try {
+    const value = ctx.runtime.call(property.get, object, []);
+    if (isObject(value)) return `[${label}] ${formatIndented(ctx, value, recurseTimes)}`;
+    return `[${label}: ${formatIndented(ctx, value, recurseTimes)}]`;
+  } catch (error) {
+    if (!(error instanceof JsThrow)) throw error;
+    const message = isObject(error.value) ? ctx.runtime.get(error.value, 'message') : error.value;
+    return `[${label}: <Inspection threw (${ctx.runtime.toString(message)})>]`;
+  }
+}
+
+function accessorText(property: AccessorProperty): string {
+  if (property.get) return property.set ? '[Getter/Setter]' : '[Getter]';
+  return property.set ? '[Setter]' : 'undefined';
+}
+
+// code-gauge-allow functionCognitiveComplexity 19 -- Ports Node.js's util.inspect, so the two stay comparable.
 function formatArray(ctx: Context, array: JsArray, recurseTimes: number): string[] {
   const { elements } = array;
   const output: string[] = [];
@@ -363,7 +453,12 @@ function formatArray(ctx: Context, array: JsArray, recurseTimes: number): string
       const count = index - start;
       output.push(`<${count} empty item${count > 1 ? 's' : ''}>`);
     } else {
-      output.push(formatIndented(ctx, elements[index] as Value, recurseTimes));
+      const defined = array.definedElements?.get(index);
+      output.push(
+        defined && isAccessor(defined)
+          ? accessorText(defined)
+          : formatIndented(ctx, elements[index] as Value, recurseTimes)
+      );
       index++;
     }
   }
@@ -442,11 +537,13 @@ function formatProperty(ctx: Context, object: JsObject, recurseTimes: number, ke
     const diff = ctx.compact === true && !(object instanceof JsArray) ? 3 : 2;
     text = formatIndented(ctx, property.value, recurseTimes, diff);
     if (diff === 3 && ctx.breakLength < text.length) separator = `\n${' '.repeat(ctx.indentationLvl + diff)}`;
-  } else if (property?.get) text = property.set ? '[Getter/Setter]' : '[Getter]';
-  else if (property?.set) text = '[Setter]';
-  if (property && !property.enumerable)
-    return `[${typeof key === 'symbol' ? key.toString() : key}]:${separator}${text}`;
-  if (typeof key === 'symbol') return `${key.toString()}:${separator}${text}`;
+  } else if (property && isAccessor(property)) {
+    text = showsGetter(ctx, property) ? gotText(ctx, object, property, recurseTimes) : accessorText(property);
+  }
+  // A symbol key shows its description with control characters escaped, unlike a symbol value.
+  const symbolKey = typeof key === 'symbol' ? escapeControls(key.toString()) : undefined;
+  if (property && !property.enumerable) return `[${symbolKey ?? String(key)}]:${separator}${text}`;
+  if (typeof key === 'symbol') return `${symbolKey}:${separator}${text}`;
   if (KEY_PATTERN.test(key)) return `${key === '__proto__' ? "['__proto__']" : key}:${separator}${text}`;
   return `${quote(key)}:${separator}${text}`;
 }

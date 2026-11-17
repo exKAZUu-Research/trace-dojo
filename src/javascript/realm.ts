@@ -1,4 +1,5 @@
 import { defineAsyncGeneratorBuiltins } from './asyncGenerators';
+import { orderBuiltinMembers } from './builtinOrder';
 import { defineGeneratorBuiltins } from './generators';
 import { defineFunctionProperties } from './memberProperties';
 import { definePromiseBuiltins } from './promises';
@@ -17,7 +18,7 @@ import { defineRegExpBuiltins } from './realmRegExp';
 import { defineStringBuiltins } from './realmStrings';
 import { defineStructuredClone } from './realmStructuredClone';
 import type { Runtime } from './runtime';
-import { JsFunction, JsObject, type Key, type NativeFunction, Scope, type Value } from './values';
+import { JsArray, JsFunction, JsObject, type Key, type NativeFunction, Scope, type Value } from './values';
 
 export type ErrorName =
   | 'Error'
@@ -76,7 +77,8 @@ export class RealmBuilder {
     this.realm = {
       objectPrototype,
       functionPrototype: new JsObject(objectPrototype),
-      arrayPrototype: new JsObject(objectPrototype),
+      // Array.prototype is itself an empty array, as `Array.isArray(Array.prototype)` shows.
+      arrayPrototype: new JsArray(objectPrototype, []),
       stringPrototype: new JsObject(objectPrototype),
       numberPrototype: new JsObject(objectPrototype),
       booleanPrototype: new JsObject(objectPrototype),
@@ -197,5 +199,6 @@ export function createRealm(runtime: Runtime): Realm {
   defineIteratorHelpers(builder);
   defineAsyncBuiltins(builder);
   defineDateBuiltins(builder);
+  orderBuiltinMembers(builder.realm);
   return builder.realm;
 }

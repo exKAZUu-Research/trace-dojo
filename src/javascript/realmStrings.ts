@@ -16,9 +16,11 @@ import {
 const collator = new Intl.Collator('en');
 
 // code-gauge-allow functionCognitiveComplexity 18 -- Lists the String builtins, each a small closure of its own.
-// code-gauge-allow functionNcss 40 -- Lists the String builtins, each a small closure of its own.
+// code-gauge-allow functionNcss 42 -- Lists the String builtins, each a small closure of its own.
 export function defineStringBuiltins(builder: RealmBuilder): void {
   const { stringPrototype } = builder.realm;
+  // String.prototype is a String object for the empty string, which shows only as its own `length`.
+  stringPrototype.properties.set('length', { value: 0, writable: false, enumerable: false, configurable: false });
   const stringConstructor = builder.defineClass('String', 1, stringPrototype, constructString);
   builder.method(stringConstructor, 'fromCharCode', 1, ({ runtime, args }) => {
     runtime.buildString(args.length);
@@ -28,9 +30,10 @@ export function defineStringBuiltins(builder: RealmBuilder): void {
   builder.method(stringConstructor, 'fromCodePoint', 1, ({ runtime, args }) => {
     runtime.buildString(args.length * 2);
     const codePoints = args.map((value) => runtime.toNumber(value));
-    if (codePoints.some((codePoint) => !Number.isInteger(codePoint) || codePoint < 0 || codePoint > 0x10_ff_ff)) {
-      runtime.throwError('RangeError', 'Invalid code point');
-    }
+    const invalid = codePoints.find(
+      (codePoint) => !Number.isInteger(codePoint) || codePoint < 0 || codePoint > 0x10_ff_ff
+    );
+    if (invalid !== undefined) runtime.throwError('RangeError', `Invalid code point ${invalid}`);
     return codePoints.map((codePoint) => String.fromCodePoint(codePoint)).join('');
   });
   builder.method(stringConstructor, 'raw', 1, ({ runtime, args }) => {
@@ -223,7 +226,7 @@ function defineBuilders(method: StringMethod): void {
     ['padStart', true],
     ['padEnd', false],
   ] as const) {
-    method(name, 2, ({ runtime, args }, text) => {
+    method(name, 1, ({ runtime, args }, text) => {
       const length = integerArgument(runtime, args[0], 0);
       const filler = args[1] === undefined ? ' ' : runtime.toString(args[1]);
       runtime.buildString(Math.max(length, text.length));

@@ -16,6 +16,7 @@ import type {
 import { initializerContext, newContext } from './converterBase';
 import {
   accessorOf,
+  calleeText,
   fail,
   field,
   hasChild,
@@ -184,6 +185,9 @@ export class ProgramConverter extends ExpressionConverter {
       );
       if (!valueNode && declarationKind === 'const') fail(declarator, 'const で宣言する変数には初期値が必要です。');
       if (!valueNode && target.kind !== 'identifier') fail(declarator, '分割代入には初期値が必要です。');
+      if (valueNode && (target.kind === 'arrayPattern' || target.kind === 'objectPattern')) {
+        target.source = calleeText(valueNode);
+      }
       return { target, init: valueNode ? this.namedValue(valueNode, target) : undefined };
     });
     const declaration: VariableDeclaration = {
@@ -250,6 +254,7 @@ export class ProgramConverter extends ExpressionConverter {
         declarationKind,
         target,
         iterable: this.expression(field(header, 'right')),
+        iterableSource: calleeText(field(header, 'right')),
         body: this.inBreakable(true, () => this.substatement(field(node, 'body'))),
         scope,
         stepRow: this.stepRowOf(node),

@@ -1,6 +1,6 @@
 import { ArrayOps } from './arrayOps';
 import type { RealmBuilder } from './realm';
-import { arrayMethod, buildArray, flattenInto } from './realmArrays';
+import { arrayMethod, buildSpeciesArray, flattenInto } from './realmArrays';
 import type { Runtime } from './runtime';
 import { isCallable, JsArray, type JsFunction, type NativeCall, toBoolean, type Value } from './values';
 
@@ -17,7 +17,7 @@ export function defineArrayIterations(builder: RealmBuilder): void {
   for (const fromEnd of [false, true]) {
     arrayMethod(builder, fromEnd ? 'reduceRight' : 'reduce', 1, ({ runtime, args, callRow }, ops) => {
       const fn = args[0];
-      if (!isCallable(fn)) return runtime.throwError('TypeError', `${runtime.describe(fn)} is not a function`);
+      if (!isCallable(fn)) return runtime.throwError('TypeError', `${runtime.describeTyped(fn)} is not a function`);
       return reduce(runtime, ops, fn, args, fromEnd, callRow);
     });
   }
@@ -28,7 +28,7 @@ function iterationMethod(builder: RealmBuilder, name: string, run: Iteration): v
   arrayMethod(builder, name, 1, (call, ops) => {
     const { runtime, args, callRow } = call;
     const fn = args[0];
-    if (!isCallable(fn)) return runtime.throwError('TypeError', `${runtime.describe(fn)} is not a function`);
+    if (!isCallable(fn)) return runtime.throwError('TypeError', `${runtime.describeTyped(fn)} is not a function`);
     const thisArg = args[1];
     return run(ops, (value, index) => runtime.call(fn, thisArg, [value, index, ops.array], callRow), call);
   });
@@ -42,20 +42,20 @@ function defineMappings(builder: RealmBuilder): void {
     return;
   });
   iterationMethod(builder, 'map', (ops, callback, { runtime }) =>
-    buildArray(runtime, (result) => {
+    buildSpeciesArray(runtime, ops.array, ops.length, (result) => {
       result.setLength(ops.length);
       forEachPresent(ops, (value, index) => result.set(index, callback(value, index)));
     })
   );
   iterationMethod(builder, 'filter', (ops, callback, { runtime }) =>
-    buildArray(runtime, (result) =>
+    buildSpeciesArray(runtime, ops.array, 0, (result) =>
       forEachPresent(ops, (value, index) => {
         if (toBoolean(callback(value, index))) result.set(result.length, value);
       })
     )
   );
   iterationMethod(builder, 'flatMap', (ops, callback, { runtime }) =>
-    buildArray(runtime, (result) =>
+    buildSpeciesArray(runtime, ops.array, 0, (result) =>
       forEachPresent(ops, (value, index) => {
         const mapped = callback(value, index);
         if (mapped instanceof JsArray) flattenInto(runtime, result, new ArrayOps(runtime, mapped), 0);

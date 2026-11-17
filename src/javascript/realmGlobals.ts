@@ -1,8 +1,10 @@
 import { TURTLE_METHOD_NAMES } from '../interpreter/turtleWorld';
+import { listFromArrayLike } from './arrayOps';
 import { formatLogArguments } from './consoleFormat';
 import { formatTable } from './consoleTable';
 import { inspect, inspectValue } from './inspect';
 import type { ErrorName, RealmBuilder } from './realm';
+import { toInteger } from './realmArrays';
 import { dateValueOf, hostLocales, hostOptions } from './realmDate';
 import { WELL_KNOWN_SYMBOLS } from './realmIterators';
 import { defineHidden, type Runtime } from './runtime';
@@ -86,8 +88,6 @@ function objectTagOf(object: JsObject): string {
   return object.isError ? 'Error' : 'Object';
 }
 
-// code-gauge-allow functionCognitiveComplexity 21 -- Lists the builtin methods, each a small closure of its own.
-// code-gauge-allow functionNcss 36 -- Lists the builtin methods, each a small closure of its own.
 function defineObjectStatics(builder: RealmBuilder, objectConstructor: JsFunction): void {
   builder.method(objectConstructor, 'keys', 1, ({ runtime, args }) =>
     runtime.newArray(runtime.ownEnumerableKeys(runtime.toObject(args[0])))
@@ -132,7 +132,6 @@ function collectProperties(runtime: Runtime, value: Value, entry: (key: string, 
   });
 }
 
-// code-gauge-allow functionCognitiveComplexity 18 -- Lists the builtin methods, each a small closure of its own.
 function defineFunction(builder: RealmBuilder): void {
   const { functionPrototype } = builder.realm;
   builder.defineClass(
@@ -146,11 +145,7 @@ function defineFunction(builder: RealmBuilder): void {
     runtime.call(thisValue, args[0], args.slice(1), callRow)
   );
   builder.method(functionPrototype, 'apply', 2, ({ runtime, thisValue, args, callRow }) => {
-    const list = args[1];
-    if (list !== undefined && list !== null && !(list instanceof JsArray)) {
-      runtime.throwError('TypeError', 'The second argument of apply must be an array');
-    }
-    return runtime.call(thisValue, args[0], list instanceof JsArray ? [...runtime.iterate(list)] : [], callRow);
+    return runtime.call(thisValue, args[0], listFromArrayLike(runtime, args[1]), callRow);
   });
   builder.method(functionPrototype, 'bind', 1, ({ runtime, thisValue, args }) => {
     const target = thisValue;
@@ -158,9 +153,13 @@ function defineFunction(builder: RealmBuilder): void {
     const boundThis = args[0];
     const boundArgs = args.slice(1);
     runtime.allocate(boundArgs.length + 1);
+    // The bound function takes what the target takes beyond the bound arguments.
+    const targetLength = runtime.get(target, 'length');
+    const length =
+      typeof targetLength === 'number' ? Math.max(0, toInteger(runtime, targetLength) - boundArgs.length) : 0;
     const bound = runtime.newNativeFunction(
       `bound ${runtime.functionName(target)}`,
-      0,
+      length,
       (call) =>
         call.newTarget
           ? runtime.construct(
@@ -204,6 +203,22 @@ const errorNames: ErrorName[] = [
 /** The `length` of the error constructors that take more than a message. */
 const errorArgumentCounts: Partial<Record<ErrorName, number>> = { AggregateError: 2, SuppressedError: 3 };
 
+/** Error's own static members, which have nothing to do here past their checks, as programs see no stack. */
+function defineErrorStatics(builder: RealmBuilder, errorConstructor: JsFunction): void {
+  builder.method(errorConstructor, 'captureStackTrace', 2, ({ runtime, args }) => {
+    if (!isObject(args[0])) runtime.throwError('TypeError', 'Invalid argument');
+    return;
+  });
+  builder.method(errorConstructor, 'isError', 1, ({ args }) => args[0] instanceof JsObject && args[0].isError);
+  errorConstructor.properties.set('stackTraceLimit', {
+    value: 10,
+    writable: true,
+    enumerable: true,
+    configurable: true,
+  });
+}
+
+// code-gauge-allow functionCognitiveComplexity 21 -- Defines each error class with its own constructor behavior.
 function defineErrors(builder: RealmBuilder): void {
   const { errorPrototypes } = builder.realm;
   let errorConstructor: JsFunction | undefined;
@@ -221,8 +236,14 @@ function defineErrors(builder: RealmBuilder): void {
     defineHidden(prototype, 'name', name);
     defineHidden(prototype, 'message', '');
   }
+  defineErrorStatics(builder, errorConstructor as JsFunction);
   builder.method(errorPrototypes.Error, 'toString', 0, ({ runtime, thisValue }) => {
-    if (!isObject(thisValue)) return runtime.throwError('TypeError', 'Error.prototype.toString requires an object');
+    if (!isObject(thisValue)) {
+      return runtime.throwError(
+        'TypeError',
+        `Method Error.prototype.toString called on incompatible receiver ${runtime.describePlain(thisValue)}`
+      );
+    }
     const nameValue = runtime.get(thisValue, 'name');
     const messageValue = runtime.get(thisValue, 'message');
     const name = nameValue === undefined ? 'Error' : runtime.toString(nameValue);
@@ -259,7 +280,6 @@ function createAggregateError(call: NativeCall, prototype: JsObject): JsObject {
   return error;
 }
 
-// code-gauge-allow functionCognitiveComplexity 16 -- Lists the builtin methods, each a small closure of its own.
 // code-gauge-allow functionNcss 33 -- Lists the builtin methods, each a small closure of its own.
 function defineNumber(builder: RealmBuilder): void {
   const { numberPrototype } = builder.realm;
@@ -305,28 +325,27 @@ function defineNumber(builder: RealmBuilder): void {
     builder.function('isFinite', 1, ({ runtime, args }) => Number.isFinite(runtime.toNumber(args[0])))
   );
   builder.method(numberPrototype, 'toString', 1, ({ runtime, thisValue, args }) => {
-    const value = thisNumber(runtime, thisValue);
-    const radix = args[0] === undefined ? 10 : runtime.toNumber(args[0]);
-    if (!Number.isInteger(radix) || radix < 2 || radix > 36)
-      runtime.throwError('RangeError', 'toString() radix argument must be between 2 and 36');
+    const value = thisNumber(runtime, thisValue, 'toString');
+    const radix = args[0] === undefined ? 10 : toInteger(runtime, args[0]);
+    if (radix < 2 || radix > 36) runtime.throwError('RangeError', 'toString() radix argument must be between 2 and 36');
     return value.toString(radix);
   });
   builder.method(numberPrototype, 'toFixed', 1, ({ runtime, thisValue, args }) => {
-    const value = thisNumber(runtime, thisValue);
-    const digits = args[0] === undefined ? 0 : Math.trunc(runtime.toNumber(args[0]));
+    const value = thisNumber(runtime, thisValue, 'toFixed');
+    const digits = toInteger(runtime, args[0]);
     if (!(digits >= 0 && digits <= 100))
       runtime.throwError('RangeError', 'toFixed() digits argument must be between 0 and 100');
     return value.toFixed(digits);
   });
   defineNumberFormats(builder);
-  builder.method(numberPrototype, 'valueOf', 0, ({ runtime, thisValue }) => thisNumber(runtime, thisValue));
+  builder.method(numberPrototype, 'valueOf', 0, ({ runtime, thisValue }) => thisNumber(runtime, thisValue, 'valueOf'));
 }
 
 // code-gauge-allow functionCognitiveComplexity 18 -- Transcribes the specification's algorithm step by step, whose branches mirror its steps.
 function defineNumberFormats(builder: RealmBuilder): void {
   const { numberPrototype } = builder.realm;
   builder.method(numberPrototype, 'toPrecision', 1, ({ runtime, thisValue, args }) => {
-    const value = thisNumber(runtime, thisValue);
+    const value = thisNumber(runtime, thisValue, 'toPrecision');
     if (args[0] === undefined) return String(value);
     const precision = Math.trunc(runtime.toNumber(args[0])) || 0;
     if (!Number.isFinite(value)) return String(value);
@@ -336,14 +355,14 @@ function defineNumberFormats(builder: RealmBuilder): void {
   });
   // Node.js formats for its default locale, en-US, when no locale is given.
   builder.method(numberPrototype, 'toLocaleString', 0, ({ runtime, thisValue, args }) => {
-    const value = thisNumber(runtime, thisValue);
+    const value = thisNumber(runtime, thisValue, 'toLocaleString');
     const locales = (args[0] === undefined ? 'en-US' : hostLocales(runtime, args[0])) as Intl.LocalesArgument;
     return throwingHostErrors(runtime, () =>
       value.toLocaleString(locales, hostOptions(runtime, args[1]) as Intl.NumberFormatOptions)
     );
   });
   builder.method(numberPrototype, 'toExponential', 1, ({ runtime, thisValue, args }) => {
-    const value = thisNumber(runtime, thisValue);
+    const value = thisNumber(runtime, thisValue, 'toExponential');
     const digits = Math.trunc(runtime.toNumber(args[0])) || 0;
     if (!Number.isFinite(value)) return String(value);
     if (!(digits >= 0 && digits <= 100))
@@ -358,15 +377,19 @@ function constructNumber({ runtime, args, newTarget }: NativeCall): Value {
   return runtime.primitiveOrBox(typeof numeric === 'bigint' ? Number(numeric) : numeric, newTarget);
 }
 
-function thisNumber(runtime: Runtime, value: Value): number {
+function thisNumber(runtime: Runtime, value: Value, method: string): number {
   const primitive = unboxed(value);
-  if (typeof primitive !== 'number') return runtime.throwError('TypeError', 'This method requires a number');
+  if (typeof primitive !== 'number') {
+    return runtime.throwError('TypeError', `Number.prototype.${method} requires that 'this' be a Number`);
+  }
   return primitive;
 }
 
-function thisBoolean(runtime: Runtime, value: Value): boolean {
+function thisBoolean(runtime: Runtime, value: Value, method: string): boolean {
   const primitive = unboxed(value);
-  if (typeof primitive !== 'boolean') return runtime.throwError('TypeError', 'This method requires a boolean');
+  if (typeof primitive !== 'boolean') {
+    return runtime.throwError('TypeError', `Boolean.prototype.${method} requires that 'this' be a Boolean`);
+  }
   return primitive;
 }
 
@@ -375,8 +398,12 @@ function defineBoolean(builder: RealmBuilder): void {
   builder.defineClass('Boolean', 1, booleanPrototype, ({ runtime, args, newTarget }) =>
     runtime.primitiveOrBox(toBoolean(args[0]), newTarget)
   );
-  builder.method(booleanPrototype, 'toString', 0, ({ runtime, thisValue }) => String(thisBoolean(runtime, thisValue)));
-  builder.method(booleanPrototype, 'valueOf', 0, ({ runtime, thisValue }) => thisBoolean(runtime, thisValue));
+  builder.method(booleanPrototype, 'toString', 0, ({ runtime, thisValue }) =>
+    String(thisBoolean(runtime, thisValue, 'toString'))
+  );
+  builder.method(booleanPrototype, 'valueOf', 0, ({ runtime, thisValue }) =>
+    thisBoolean(runtime, thisValue, 'valueOf')
+  );
 }
 
 function defineMath(builder: RealmBuilder): void {
@@ -384,6 +411,7 @@ function defineMath(builder: RealmBuilder): void {
   for (const name of ['E', 'LN10', 'LN2', 'LOG10E', 'LOG2E', 'PI', 'SQRT1_2', 'SQRT2'] as const) {
     builder.constant(math, name, Math[name]);
   }
+  builder.constant(math, WELL_KNOWN_SYMBOLS.toStringTag, 'Math');
   // Math.random is left out so that a program always draws the same board.
   for (const name of [
     'abs',
@@ -401,6 +429,7 @@ function defineMath(builder: RealmBuilder): void {
     'exp',
     'expm1',
     'floor',
+    'f16round',
     'fround',
     'log',
     'log10',
@@ -425,14 +454,14 @@ function defineMath(builder: RealmBuilder): void {
   for (const name of ['max', 'min', 'hypot'] as const) {
     builder.method(math, name, 2, ({ runtime, args }) => {
       runtime.scan(args.length);
-      let result = name === 'max' ? Number.NEGATIVE_INFINITY : name === 'min' ? Number.POSITIVE_INFINITY : 0;
-      for (const value of args) result = Math[name](result, runtime.toNumber(value));
-      return result;
+      // Every argument converts in order before the host computes, which rounds `hypot` as V8 does.
+      const values: number[] = [];
+      for (const value of args) values.push(runtime.toNumber(value));
+      return Math[name](...values);
     });
   }
 }
 
-// code-gauge-allow functionCognitiveComplexity 29 -- Lists the console methods, each a small closure sharing the group indentation and counts.
 // code-gauge-allow functionNcss 52 -- Lists the console methods, each a small closure sharing the group indentation and counts.
 function defineConsole(builder: RealmBuilder): void {
   const console = builder.namespace('console');
@@ -455,28 +484,7 @@ function defineConsole(builder: RealmBuilder): void {
       return;
     });
   }
-  builder.method(console, 'dir', 0, ({ runtime, args }) => {
-    const [value, options] = args;
-    // null means no limit for depth and maxArrayLength, as util.inspect takes them.
-    const limit = (name: string): number | undefined => {
-      const option = isObject(options) ? runtime.get(options, name) : undefined;
-      if (option === undefined) return undefined;
-      return option === null ? Number.POSITIVE_INFINITY : runtime.toNumber(option);
-    };
-    const compact = isObject(options) ? runtime.get(options, 'compact') : undefined;
-    const showHidden = isObject(options) && toBoolean(runtime.get(options, 'showHidden'));
-    write(
-      runtime,
-      'stdout',
-      inspectValue(runtime, value, undefined, limit('depth'), {
-        breakLength: limit('breakLength'),
-        compact: typeof compact === 'boolean' || typeof compact === 'number' ? compact : undefined,
-        maxArrayLength: limit('maxArrayLength'),
-        showHidden,
-      })
-    );
-    return;
-  });
+  defineConsoleDir(builder, console, write);
   for (const name of ['group', 'groupCollapsed']) {
     builder.method(console, name, 0, ({ runtime, args }) => {
       if (args.length > 0) write(runtime, 'stdout', formatLogArguments(runtime, args));
@@ -511,15 +519,53 @@ function defineConsole(builder: RealmBuilder): void {
     write(runtime, 'stderr', formatLogArguments(runtime, message));
     return;
   });
+  // Node.js's console methods are enumerable properties.
+  for (const property of console.properties.values()) property.enumerable = true;
 }
 
 /** The console methods that print as `console.log` does in a form of their own: tables, traces, and clearing. */
+/** `console.dir`, which prints its value with the `util.inspect` options it is given. */
+// code-gauge-allow functionCognitiveComplexity 18 -- Reads each util.inspect option console.dir takes.
+function defineConsoleDir(
+  builder: RealmBuilder,
+  console: JsObject,
+  write: (runtime: Runtime, stream: 'stdout' | 'stderr', text: string) => void
+): void {
+  builder.method(console, 'dir', 0, ({ runtime, args }) => {
+    const [value, options] = args;
+    // null means no limit for depth and maxArrayLength, as util.inspect takes them.
+    const limit = (name: string): number | undefined => {
+      const option = isObject(options) ? runtime.get(options, name) : undefined;
+      if (option === undefined) return undefined;
+      return option === null ? Number.POSITIVE_INFINITY : runtime.toNumber(option);
+    };
+    const option = (name: string): Value => (isObject(options) ? runtime.get(options, name) : undefined);
+    const compact = option('compact');
+    const getters = option('getters');
+    write(
+      runtime,
+      'stdout',
+      inspectValue(runtime, value, undefined, limit('depth'), {
+        breakLength: limit('breakLength'),
+        compact: typeof compact === 'boolean' || typeof compact === 'number' ? compact : undefined,
+        maxArrayLength: limit('maxArrayLength'),
+        maxStringLength: limit('maxStringLength'),
+        showHidden: toBoolean(option('showHidden')),
+        sorted: toBoolean(option('sorted')),
+        getters: getters === 'get' || getters === 'set' ? getters : toBoolean(getters),
+        numericSeparator: toBoolean(option('numericSeparator')),
+      })
+    );
+    return;
+  });
+}
+
 function defineConsoleOutputs(
   builder: RealmBuilder,
   console: JsObject,
   write: (runtime: Runtime, stream: 'stdout' | 'stderr', text: string) => void
 ): void {
-  builder.method(console, 'table', 1, ({ runtime, args }) => {
+  builder.method(console, 'table', 0, ({ runtime, args }) => {
     write(runtime, 'stdout', formatTable(runtime, args[0], args[1]) ?? formatLogArguments(runtime, args.slice(0, 1)));
     return;
   });

@@ -1,6 +1,6 @@
 import type { RealmBuilder } from './realm';
 import { arrayMethod, buildArray, relativeIndex, sortComparison, toInteger } from './realmArrays';
-import type { Value } from './values';
+import type { JsArray, Value } from './values';
 
 /**
  * Defines the methods that change a copy of the array instead of the array (`toSorted`, `toReversed`, `toSpliced`, and
@@ -29,7 +29,8 @@ function defineReorderedCopies(builder: RealmBuilder): void {
       for (let index = 0; index < length; index++) result.set(index, ops.get(index));
       runtime.scan(length * Math.ceil(Math.log2(length + 1)));
       // The host's sort places undefined last without calling the comparison, as SortCompare does.
-      const sorted = (result.array.elements as Value[]).toSorted(compare);
+      // buildArray's result is an array.
+      const sorted = ((result.array as JsArray).elements as Value[]).toSorted(compare);
       for (const [index, value] of sorted.entries()) result.set(index, value);
     });
   });

@@ -280,9 +280,8 @@ export abstract class EvaluatorBase {
         return;
       }
       case 'objectPattern': {
-        if (value === undefined || value === null) {
-          runtime.throwError('TypeError', `Cannot destructure '${String(value)}' as it is ${String(value)}.`);
-        }
+        if (value === undefined || value === null)
+          runtime.throwError('TypeError', destructuringMessage(pattern, value));
         runtime.hold(value, () => this.bindObjectPattern(pattern, value, mode));
         return;
       }
@@ -292,7 +291,13 @@ export abstract class EvaluatorBase {
   private bindArrayPattern(pattern: Extract<Pattern, { kind: 'arrayPattern' }>, value: Value, mode: BindingMode): void {
     const { runtime } = this;
     // Each binding reads the next value just before it runs, since an earlier default or target may change the array.
-    const iterator = runtime.iterator(value);
+    if (value === undefined || value === null) {
+      runtime.throwError(
+        'TypeError',
+        `${runtime.describeTyped(value)} is not iterable (cannot read property Symbol(Symbol.iterator))`
+      );
+    }
+    const iterator = runtime.iterator(value, undefined, pattern.source);
     try {
       for (const element of pattern.elements) {
         const next = iterator.next();
@@ -373,4 +378,15 @@ export function referenceBase(reference: Reference): Value {
   if (reference.kind === 'property' || reference.kind === 'private') return reference.base;
   if (reference.kind === 'super') return reference.thisValue;
   return undefined;
+}
+
+/** V8's TypeError for taking apart `null` or `undefined`, which names the first property and the source. */
+function destructuringMessage(pattern: Extract<Pattern, { kind: 'objectPattern' }>, value: null | undefined): string {
+  const first = pattern.properties[0]?.key;
+  const name = first?.kind === 'key' ? first.key : undefined;
+  if (pattern.isNested && name !== undefined) return `Cannot read properties of ${String(value)} (reading '${name}')`;
+  const source = pattern.source ?? String(value);
+  return name === undefined
+    ? `Cannot destructure '${source}' as it is ${String(value)}.`
+    : `Cannot destructure property '${name}' of '${source}' as it is ${String(value)}.`;
 }

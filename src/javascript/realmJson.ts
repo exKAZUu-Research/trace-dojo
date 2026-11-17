@@ -11,6 +11,7 @@ import {
   JsObject,
   type Key,
   type NativeCall,
+  throwingHostErrors,
   type Value,
 } from './values';
 
@@ -23,6 +24,18 @@ export function defineJsonBuiltins(builder: RealmBuilder): void {
     )
   );
   builder.method(json, 'parse', 2, (call) => withStackLimit(call.runtime, () => jsonParse(call)));
+  builder.method(json, 'rawJSON', 1, ({ runtime, args }) => {
+    const text = runtime.toString(args[0]);
+    // The host's JSON.rawJSON accepts the same texts and throws V8's SyntaxError for the rest.
+    throwingHostErrors(runtime, () => (JSON as unknown as { rawJSON: (text: string) => unknown }).rawJSON(text));
+    // oxlint-disable-next-line unicorn/no-null -- The object JSON.rawJSON returns has no prototype.
+    const raw = runtime.newObject(null);
+    raw.isRawJson = true;
+    raw.properties.set('rawJSON', { value: text, writable: false, enumerable: true, configurable: false });
+    raw.extensible = false;
+    return raw;
+  });
+  builder.method(json, 'isRawJSON', 1, ({ args }) => args[0] instanceof JsObject && args[0].isRawJson);
 }
 
 /**
@@ -116,6 +129,7 @@ function serializeProperty(
   if (typeof value === 'number') return Number.isFinite(value) ? String(value) : 'null';
   if (typeof value === 'bigint') return runtime.throwError('TypeError', 'Do not know how to serialize a BigInt');
   if (!isObject(value) || isCallable(value)) return undefined;
+  if (value.isRawJson) return runtime.toString(runtime.get(value, 'rawJSON'));
   const object = value;
   return runtime.hold(object, () => {
     enter(serializer, object, key, inArray);

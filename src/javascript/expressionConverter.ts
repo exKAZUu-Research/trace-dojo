@@ -385,7 +385,10 @@ export abstract class ExpressionConverter extends ConverterBase {
   }
 
   private argument(node: Node): Argument {
-    if (node.type === 'spread_element') return { kind: 'spread', argument: this.expression(namedChildren(node)[0]) };
+    if (node.type === 'spread_element') {
+      const operand = namedChildren(node)[0];
+      return { kind: 'spread', argument: this.expression(operand), source: calleeText(operand) };
+    }
     return this.expression(node);
   }
 
@@ -482,7 +485,12 @@ export abstract class ExpressionConverter extends ConverterBase {
       rest = this.pattern(namedChildren(child)[0], leaf);
       return 'rest';
     }).filter((element): element is Pattern | undefined => element !== 'rest');
-    return { kind: 'arrayPattern', elements, rest, row: rowOf(node) };
+    return {
+      kind: 'arrayPattern',
+      elements: elements.map((element) => element && nested(element)),
+      rest,
+      row: rowOf(node),
+    };
   }
 
   private objectPattern(node: Node, leaf: (node: Node) => Pattern): Pattern {
@@ -521,7 +529,12 @@ export abstract class ExpressionConverter extends ConverterBase {
         }
       }
     }
-    return { kind: 'objectPattern', properties, rest, row: rowOf(node) };
+    return {
+      kind: 'objectPattern',
+      properties: properties.map((property) => ({ ...property, value: nested(property.value) })),
+      rest,
+      row: rowOf(node),
+    };
   }
 }
 
@@ -629,4 +642,11 @@ function elementsOf<T>(node: Node, convert: (child: Node) => T): (T | undefined)
     expectsElement = false;
   }
   return elements;
+}
+
+/** Marks a pattern inside another, through its default value. */
+function nested(pattern: Pattern): Pattern {
+  if (pattern.kind === 'default') return { ...pattern, target: nested(pattern.target) };
+  if (pattern.kind === 'arrayPattern' || pattern.kind === 'objectPattern') return { ...pattern, isNested: true };
+  return pattern;
 }
