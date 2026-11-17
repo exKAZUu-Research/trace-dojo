@@ -172,16 +172,62 @@ export class TypeNodes {
         constraint && !isIntrinsic(constraint, 'any') ? constraint : unknownType,
         ...this.conditionalExtendsTypes(node, objectType),
       ];
-      const keys = indexType.kind === 'union' ? indexType.types : [indexType];
-      const isMissing = (key: Type): boolean =>
-        (key.kind === 'literal' || (key.kind === 'intrinsic' && ['string', 'number', 'symbol'].includes(key.name))) &&
-        !constraints.some((constraint) => this.hasKey(constraint, key));
-      if (keys.some(isMissing)) {
+      if (this.isInvalidKey(node, objectType, constraints, indexType, new Set())) {
         this.c.error(index, `型 '${this.c.print(indexType)}' は型 '${objectType.name}' のインデックスに使えません。`);
         return errorType;
       }
     }
     return this.c.typeOperators.indexedAccess(objectType, indexType, index);
+  }
+
+  /**
+   * Whether `key` may name a key that none of `constraints`, the types `object` stands for, has. A type parameter key is
+   * valid when one of its constraints is, and `keyof X` is valid when `object` stands for a subtype of `X`.
+   */
+  private isInvalidKey(
+    node: TreeNode,
+    object: TypeParameter,
+    constraints: Type[],
+    key: Type,
+    visited: Set<number>
+  ): boolean {
+    const next = (member: Type): boolean => this.isInvalidKey(node, object, constraints, member, visited);
+    const isMissing = (): boolean => !constraints.some((constraint) => this.hasKey(constraint, key));
+    switch (key.kind) {
+      case 'union': {
+        return key.types.some(next);
+      }
+      case 'intersection': {
+        return key.types.every(next);
+      }
+      case 'literal': {
+        return isMissing();
+      }
+      case 'intrinsic': {
+        return key.name === 'unknown' || (['string', 'number', 'symbol'].includes(key.name) && isMissing());
+      }
+      case 'object': {
+        return true;
+      }
+      case 'keyof': {
+        return (
+          key.type.id !== object.id &&
+          !constraints.some((constraint) => this.c.relations.isAssignable(constraint, key.type))
+        );
+      }
+      case 'typeParameter': {
+        if (visited.has(key.id)) return false;
+        visited.add(key.id);
+        const constraint = this.c.constraintOf(key);
+        return [
+          constraint && !isIntrinsic(constraint, 'any') ? constraint : unknownType,
+          ...this.conditionalExtendsTypes(node, key),
+        ].every(next);
+      }
+      default: {
+        return false;
+      }
+    }
   }
 
   /**
