@@ -3,10 +3,11 @@ import { isNumericName } from './syntax';
 import {
   type IndexInfo,
   intersectionOf,
-  isAnyLike,
+  isIntrinsic,
+  isSymbolName,
   type KeyedIndexInfo,
-  literalType,
   numberType,
+  type Property,
   stringType,
   type Structure,
   symbolType,
@@ -19,31 +20,23 @@ export function isPatternKey(type: Type): boolean {
 }
 
 /**
- * The index signature of a structure that applies to a key, as TypeScript's `findApplicableIndexInfo` finds it: the
- * symbol index for a symbol key, the number index for a numeric key, and every pattern index whose pattern holds the
- * key, as one of the intersection of their value types, read-only only when all are; else the string index for a string
- * or numeric key.
+ * The index signature of a structure that applies to a key, as TypeScript's `findApplicableIndexInfo` finds it: every
+ * index signature other than the string index whose key type holds the key, as one of the intersection of their value
+ * types, read-only only when all are; else the string index for a string or numeric key. An `any` key fits them all.
  */
 export function applicableIndex(c: Checker, structure: Structure, key: Type): IndexInfo | undefined {
-  const { relations } = c;
-  if (!isAnyLike(key) && relations.isAssignable(key, symbolType)) return structure.symbolIndex;
-  const numeric =
-    isAnyLike(key) ||
-    relations.isAssignable(key, numberType) ||
-    (key.kind === 'literal' && typeof key.value === 'string' && isNumericName(key.value));
   const applicable = [
-    ...(numeric && structure.numberIndex ? [structure.numberIndex] : []),
+    ...(structure.numberIndex && isIndexKeyOf(c, key, numberType) ? [structure.numberIndex] : []),
+    ...(structure.symbolIndex && isIndexKeyOf(c, key, symbolType) ? [structure.symbolIndex] : []),
     ...applicablePatternIndexes(c, structure, key),
   ];
   if (applicable.length > 0) return combinedIndex(c, applicable);
-  return numeric || relations.isAssignable(key, stringType) ? structure.stringIndex : undefined;
+  return isIndexKeyOf(c, key, stringType) ? structure.stringIndex : undefined;
 }
 
-/** The pattern index signatures whose patterns hold a key, which a number literal names by its text. */
+/** The pattern index signatures whose patterns hold a key, which a number key never fits. */
 export function applicablePatternIndexes(c: Checker, structure: Structure, key: Type): KeyedIndexInfo[] {
-  if (!structure.patternIndexes || isAnyLike(key)) return [];
-  const stringKey = key.kind === 'literal' && typeof key.value === 'number' ? literalType(String(key.value)) : key;
-  return structure.patternIndexes.filter((info) => c.relations.isAssignable(stringKey, info.keyType));
+  return (structure.patternIndexes ?? []).filter((info) => c.relations.isAssignable(key, info.keyType));
 }
 
 /** The index signature that several applying to one key act as. */
@@ -110,9 +103,23 @@ export function isIndexKeyOf(c: Checker, source: Type, target: Type): boolean {
   return (
     c.relations.isAssignable(source, target) ||
     (target === stringType && c.relations.isAssignable(source, numberType)) ||
-    (target === numberType &&
-      source.kind === 'literal' &&
-      typeof source.value === 'string' &&
-      isNumericName(source.value))
+    (target === numberType && isNumericStringKey(source))
+  );
+}
+
+/** Whether an index signature for `keyType` applies to a property, by the key type that names it. */
+export function isPropertyKeyOf(c: Checker, property: Property, keyType: Type): boolean {
+  if (isSymbolName(property.name)) return isIntrinsic(keyType, 'symbol');
+  return isIndexKeyOf(c, c.typeOperators.propertyKeyType(property), keyType);
+}
+
+/** Whether a key is a numeric string, as `"1"` and `` `${number}` `` are. */
+export function isNumericStringKey(key: Type): boolean {
+  if (key.kind === 'literal') return typeof key.value === 'string' && isNumericName(key.value);
+  return (
+    key.kind === 'templateLiteral' &&
+    key.texts.length === 2 &&
+    key.texts.every((text) => text === '') &&
+    isIntrinsic(key.types[0], 'number')
   );
 }

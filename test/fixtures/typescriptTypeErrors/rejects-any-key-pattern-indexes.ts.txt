@@ -1,0 +1,31 @@
+function f1(x: { [k: string]: number; [s: symbol]: string }, k: any) {
+  const a: boolean = x[k];
+}
+function f2(x: { [k: `a${string}`]: number; [s: `b${string}`]: string }, k: any) {
+  const a: boolean = x[k];
+}
+function f3(x: { [k: `a${string}`]: number; [s: number]: string }, k: any) {
+  const a: boolean = x[k];
+}
+function f4(x: { [k: symbol]: number }, k: any) {
+  const a: boolean = x[k];
+}
+function f5(x: { [k: `a${string}`]: number }, k: any) {
+  const a: boolean = x[k];
+}
+function f6(x: { [k: string]: number; [s: number]: 1 }, k: any) {
+  const a: boolean = x[k];
+}
+function f7(x: { readonly [k: `a${string}`]: number }, k: any) {
+  x[k] = 1;
+}
+function f8(x: { [k: `a${string}`]: 1 | 2; [s: `b${string}`]: 2 | 3 }, k: any) {
+  const a: boolean = x[k];
+}
+type T1 = { [k: `a${string}`]: number }[any];
+const t1: boolean = 0 as unknown as T1;
+type T2 = { [k: symbol]: number; [k: string]: string }[any];
+const t2: boolean = 0 as unknown as T2;
+function f9(x: { [k: `a${string}`]: number }, k: any) {
+  x[k] = "s";
+}

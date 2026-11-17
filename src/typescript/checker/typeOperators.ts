@@ -322,9 +322,17 @@ export class TypeOperators {
     // keyof lists the public members only.
     for (const [name, property] of structure.properties) {
       if (name.startsWith('__@') || name.startsWith('#') || property.visibility !== 'public') continue;
-      keys.push(property.nameType ?? (this.isNumericKey(property) ? literalType(Number(name)) : literalType(name)));
+      keys.push(this.propertyKeyType(property));
     }
     return unionOf(keys);
+  }
+
+  /** The key type naming a property, as TypeScript's `getLiteralTypeFromProperty` gives it. */
+  propertyKeyType(property: Property): Type {
+    return (
+      property.nameType ??
+      (this.isNumericKey(property) ? literalType(Number(property.name)) : literalType(property.name))
+    );
   }
 
   /**

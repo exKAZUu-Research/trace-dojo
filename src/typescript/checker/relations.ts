@@ -2,7 +2,14 @@
 import type { Checker } from './checker';
 import { isUnit } from './flow';
 import { childTypes, isGenericObjectOrIndexType } from './genericTypes';
-import { applicableIndex, hasIndexSignature, isIndexKeyOf, isPatternKey, keyedIndexes } from './indexInfos';
+import {
+  applicableIndex,
+  hasIndexSignature,
+  isIndexKeyOf,
+  isPatternKey,
+  isPropertyKeyOf,
+  keyedIndexes,
+} from './indexInfos';
 import { templateParts } from './templateParts';
 import {
   anonymousObject,
@@ -15,8 +22,6 @@ import {
   type IntersectionType,
   isAnyLike,
   isIntrinsic,
-  isSymbolName,
-  literalType,
   numberType,
   type ObjectType,
   type Property,
@@ -768,19 +773,13 @@ export class Relations {
     if (state & INTERSECTION_SOURCE || !this.hasInferableIndex(source, structure)) return false;
     const narrowerIndexes = keyedIndexes(structure).filter((index) => isIndexKeyOf(this.c, index.keyType, keyType));
     if (narrowerIndexes.some((index) => !this.isRelated(index.type, target, relation))) return false;
-    for (const [name, property] of structure.properties) {
-      if (!this.isNameOfKey(name, keyType)) continue;
+    for (const property of structure.properties.values()) {
+      if (!isPropertyKeyOf(this.c, property, keyType)) continue;
       if (property.isMethod && source.kind === 'object' && source.objectKind !== 'anonymous') continue;
       const type = property.optional ? unionOf([property.type(), undefinedType]) : property.type();
       if (!this.isRelated(type, target, relation)) return false;
     }
     return true;
-  }
-
-  /** Whether a property name is a key an index signature applies to, as `"0"` is both a string and a numeric key. */
-  private isNameOfKey(name: string, keyType: Type): boolean {
-    if (isSymbolName(name)) return isIntrinsic(keyType, 'symbol');
-    return isIndexKeyOf(this.c, literalType(name), keyType);
   }
 
   /**

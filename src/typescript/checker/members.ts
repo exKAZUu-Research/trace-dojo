@@ -465,7 +465,8 @@ export class MemberChecker {
     if (!property)
       return typeof value === 'symbol'
         ? this.c.structureOf(objectType).symbolIndex?.type
-        : (tupleElementBeyond(this.c, objectType, name, access.indexNode) ?? this.indexSignatureType(objectType, name));
+        : (tupleElementBeyond(this.c, objectType, name, access.indexNode) ??
+            applicableIndex(this.c, this.c.structureOf(objectType), literalType(value))?.type);
     this.checkPropertyAvailability(access.indexNode, property);
     this.c.expressions.expandos.checkAssignedBefore(access.node, access.indexNode, property);
     // `o["secret"]` reads a private or protected member, which TypeScript leaves as a way around its access checks.

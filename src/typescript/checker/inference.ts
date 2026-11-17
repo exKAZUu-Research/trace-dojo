@@ -1,12 +1,11 @@
 import type { Checker, Mapper } from './checker';
-import { applicableIndex, isIndexKeyOf, keyedIndexes } from './indexInfos';
+import { applicableIndex, isIndexKeyOf, isPropertyKeyOf, keyedIndexes } from './indexInfos';
 import {
   anyType,
   errorType,
   intersectionOf,
   isAnyLike,
   isIntrinsic,
-  isSymbolName,
   literalType,
   type ObjectType,
   regularOf,
@@ -414,18 +413,12 @@ export class TypeInference {
   private typesUnderIndex(structure: Structure, keyType: Type): Type[] {
     return [
       ...[...structure.properties.values()]
-        .filter((property) => this.keyFitsIndex(property.name, keyType))
+        .filter((property) => isPropertyKeyOf(this.c, property, keyType))
         .map((property) => (property.optional ? this.c.relations.removeUndefined(property.type()) : property.type())),
       ...keyedIndexes(structure)
         .filter((index) => isIndexKeyOf(this.c, index.keyType, keyType))
         .map((index) => index.type),
     ];
-  }
-
-  /** Whether a property named `name` has a key that an index signature for `keyType` covers. */
-  private keyFitsIndex(name: string, keyType: Type): boolean {
-    if (isSymbolName(name)) return isIntrinsic(keyType, 'symbol');
-    return isIndexKeyOf(this.c, literalType(name), keyType);
   }
 
   private inferFromSignatures(generic: Signature, target: Signature, recurse: Recurse): void {

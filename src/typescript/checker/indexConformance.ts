@@ -1,12 +1,11 @@
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import type { Checker } from './checker';
-import { isIndexKeyOf, isSamePattern, keyedIndexes } from './indexInfos';
+import { isIndexKeyOf, isPropertyKeyOf, isSamePattern, keyedIndexes } from './indexInfos';
 import { isWithin, named } from './syntax';
 import {
   isSymbolName,
   type KeyedIndexInfo,
-  literalType,
   type Property,
   stringType,
   type Structure,
@@ -33,8 +32,7 @@ function checkPropertyConformance(c: Checker, property: Property, indexes: Keyed
   const type = property.optional ? unionOf([property.type(), undefinedType]) : property.type();
   const inherited = owner !== undefined && !isWithin(property.declaration, owner);
   for (const index of indexes) {
-    if (!isIndexKeyOf(c, literalType(property.name), index.keyType) || c.relations.isAssignable(type, index.type))
-      continue;
+    if (!isPropertyKeyOf(c, property, index.keyType) || c.relations.isAssignable(type, index.type)) continue;
     c.error(
       (inherited && owner && indexSignatureNode(c, owner, index.keyType)) || nameNode,
       `型 '${c.print(type)}' のプロパティ '${property.name}' は、'${c.print(index.keyType)}' のインデックスの型 '${c.print(index.type)}' に代入できません。`

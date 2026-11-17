@@ -1,6 +1,5 @@
 import type { Checker } from './checker';
-import { applicablePatternIndexes } from './indexInfos';
-import { isNumericName } from './syntax';
+import { applicablePatternIndexes, isNumericStringKey } from './indexInfos';
 import {
   type ConditionalType,
   intersectionOf,
@@ -237,15 +236,4 @@ export class IndexedAccessKeys {
 function constraintsOf(c: Checker, parameter: TypeParameter, extendsTypes: ExtendsTypes): Type[] {
   const constraint = c.constraintOf(parameter);
   return [constraint && !isIntrinsic(constraint, 'any') ? constraint : unknownType, ...extendsTypes(parameter)];
-}
-
-/** Whether a key is a string that a number index signature applies to: `` `${number}` `` or a numeric literal. */
-function isNumericStringKey(key: Type): boolean {
-  if (key.kind === 'literal') return typeof key.value === 'string' && isNumericName(key.value);
-  return (
-    key.kind === 'templateLiteral' &&
-    key.types.length === 1 &&
-    key.texts.every((text) => text === '') &&
-    isIntrinsic(key.types[0], 'number')
-  );
 }
