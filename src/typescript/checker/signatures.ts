@@ -2,7 +2,7 @@ import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import type { Checker } from './checker';
 import type { Sym } from './scopes';
-import { named } from './syntax';
+import { named, patternIdentifiers } from './syntax';
 import {
   anyType,
   newTypeId,
@@ -36,7 +36,7 @@ export class Signatures {
       typeParameters,
       parameters: this.expandRestTuple(parameters),
       thisType,
-      predicate: returnNode ? this.predicateOf(returnNode, parameters) : undefined,
+      predicate: returnNode ? this.predicateOf(node, returnNode, parameters) : undefined,
       declaration: node,
       isAbstract: node.type === 'constructor_type' && node.children.some((child) => child?.type === 'abstract'),
       returnType: () => {
@@ -57,13 +57,9 @@ export class Signatures {
   ): { parameters: Parameter[]; thisType: Type | undefined } {
     const parameters: Parameter[] = [];
     let thisType: Type | undefined;
-    const parametersNode = node.childForFieldName('parameters');
-    const parameterNodes = parametersNode ? named(parametersNode) : [];
-    const single = node.childForFieldName('parameter');
-    if (single) parameterNodes.push(single);
-    for (const parameterNode of parameterNodes) {
-      const pattern = parameterNode.childForFieldName('pattern') ?? parameterNode;
-      if (pattern.type === 'this') thisType = this.c.typeNodes.annotationType(parameterNode.childForFieldName('type'));
+    for (const parameterNode of parameterNodes(node)) {
+      if (patternOf(parameterNode).type === 'this')
+        thisType = this.c.typeNodes.annotationType(parameterNode.childForFieldName('type'));
       else parameters.push(this.declaredParameter(node, parameterNode, contextual, parameters.length));
     }
     return { parameters, thisType };
@@ -97,20 +93,42 @@ export class Signatures {
     };
   }
 
-  private predicateOf(returnNode: TreeNode, parameters: Parameter[]): Signature['predicate'] {
+  private predicateOf(node: TreeNode, returnNode: TreeNode, parameters: Parameter[]): Signature['predicate'] {
     // A function type spells its predicate without the annotation's colon.
     if (returnNode.type !== 'type_predicate_annotation' && returnNode.type !== 'type_predicate') return undefined;
     const predicateNode = returnNode.type === 'type_predicate' ? returnNode : named(returnNode)[0];
-    const name = predicateNode?.childForFieldName('name')?.text;
+    const nameNode = predicateNode?.childForFieldName('name');
     const typeNode = predicateNode?.childForFieldName('type');
-    if (!name || !typeNode) return undefined;
-    const index = name === 'this' ? -1 : parameters.findIndex((parameter) => parameter.name === name);
+    if (!nameNode || !typeNode) return undefined;
     const type = this.c.typeNodes.typeFromNode(typeNode);
-    const parameter = parameters[index] as Parameter | undefined;
-    if (parameter && !this.c.isLibrary(typeNode) && !this.c.relations.isAssignable(type, parameter.type)) {
-      this.c.error(typeNode, '型述語の型は、その引数の型に代入できる型にしてください。');
+    if (nameNode.text === 'this') return { index: -1, type };
+    const index = parameters.findIndex((parameter) => parameter.name === nameNode.text);
+    const parameter = parameters.at(index);
+    if (!parameter || index === -1) {
+      this.reportMissingPredicateParameter(node, nameNode);
+      return undefined;
     }
+    if (parameter.rest) this.c.error(nameNode, '型述語では、残余引数を参照できません。');
+    else if (!this.c.isLibrary(typeNode) && !this.c.relations.isAssignable(type, parameter.type))
+      this.c.error(typeNode, '型述語の型は、その引数の型に代入できる型にしてください。');
     return { index, type };
+  }
+
+  /** Reports a type predicate naming no parameter: a name in a parameter's binding pattern, or no name at all. */
+  private reportMissingPredicateParameter(node: TreeNode, nameNode: TreeNode): void {
+    const inPattern = parameterNodes(node).some((parameterNode) => {
+      const pattern = patternOf(parameterNode);
+      return (
+        pattern.type !== 'identifier' &&
+        patternIdentifiers(pattern).some((identifier) => identifier.text === nameNode.text)
+      );
+    });
+    this.c.error(
+      nameNode,
+      inPattern
+        ? `型述語では、分割代入のパターンの要素 ${nameNode.text} を参照できません。`
+        : `引数 ${nameNode.text} が見つかりません。`
+    );
   }
 
   /** A setter's parameter without an annotation has the type its getter returns. */
@@ -267,4 +285,17 @@ export class Signatures {
     if (!declaration) return [];
     return this.typeParametersOf(declaration);
   }
+}
+
+/** The parameter declarations of a function-like node, a `this` parameter included. */
+function parameterNodes(node: TreeNode): TreeNode[] {
+  const parametersNode = node.childForFieldName('parameters');
+  const nodes = parametersNode ? named(parametersNode) : [];
+  const single = node.childForFieldName('parameter');
+  if (single) nodes.push(single);
+  return nodes;
+}
+
+function patternOf(parameterNode: TreeNode): TreeNode {
+  return parameterNode.childForFieldName('pattern') ?? parameterNode;
 }
