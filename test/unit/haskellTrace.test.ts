@@ -1,5 +1,6 @@
 import { expect, test } from 'vitest';
 
+import { ExecutionLimitError } from '../../src/interpreter/limits';
 import { executeProgram, traceProgram } from '../../src/interpreter/program';
 import type { TraceItem } from '../../src/problems/trace';
 
@@ -503,4 +504,29 @@ walk t n = do
     { line: 10, callLines: [4] },
     { line: 11, callLines: [4] },
   ]);
+});
+
+test.each(
+  ['error(f(n+1))', 'errorWithoutStackTrace(f(n+1))', 'errorWithoutStackTrace("x"++f(n+1))'].flatMap((rhs) =>
+    ['f(0::Int)', '(f(0::Int),42::Int)'].map((binding) => [rhs, binding])
+  )
+)('native depth exhaustion leaves unused lazy values and later displays independent: %s, %s', (rhs, binding) => {
+  const source = `f n=${rhs}
+main=do
+ let x=${binding}
+ let y=1::Int
+ print y
+ print(y+1)`;
+  expect(executeProgram('haskell', source)).toMatchObject({
+    kind: 'executed',
+    stdout: '1\n2\n',
+    uncaughtException: undefined,
+  });
+  const recording = traceProgram('haskell', source, source);
+  expect(recording.stdout).toBe('1\n2\n');
+  expect(recording.uncaughtException).toBeUndefined();
+  expect(recording.traceItems.some((item) => item.vars.y === 1)).toBe(true);
+  const demanded = source + '\n print x';
+  expect(executeProgram('haskell', demanded)).toMatchObject({ kind: 'limitExceeded', limit: 'operations' });
+  expect(() => traceProgram('haskell', demanded, demanded)).toThrowError(ExecutionLimitError);
 });

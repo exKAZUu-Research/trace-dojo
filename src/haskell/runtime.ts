@@ -14,7 +14,7 @@ import { Dict, type Env, type Slot, Thunk } from './values';
 /** Stops evaluating a value for a trace's display, which leaves the value as it was. */
 export class DisplayAbort extends Error {
   constructor() {
-    super('Display evaluation took too long');
+    super('Display evaluation exceeded its budget');
     this.name = 'DisplayAbort';
   }
 }
@@ -86,11 +86,7 @@ export class Runtime implements TracedRuntime<TraceFrame> {
     }
   }
 
-  /**
-   * The error for a thunk that demands its own value, which never finishes: runghc keeps running instead of reporting
-   * `<<loop>>` as compiled programs do, so the run ends as any endless loop does, and a display leaves the value as it is.
-   */
-  selfDependencyError(): Error {
+  evaluationLimitError(): Error {
     return this.displayRemaining === undefined ? new ExecutionLimitError('operations') : new DisplayAbort();
   }
 

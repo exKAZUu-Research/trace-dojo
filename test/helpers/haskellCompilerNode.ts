@@ -29,11 +29,9 @@ const chains = [
     ')',
   'main=print(1::Int)',
 ];
-const primitives = [
-  'f n=error(f(n+1))\nmain=putStrLn(f(0::Int))',
-  'f n=errorWithoutStackTrace("x"++f(n+1))\nmain=putStrLn(f(0::Int))',
-];
-const nativeResults = primitives.flatMap((source) => {
+const primitives = ['error(f(n+1))', 'errorWithoutStackTrace(f(n+1))', 'errorWithoutStackTrace("x"++f(n+1))'];
+const nativeResults = primitives.flatMap((rhs) => {
+  const source = `f n=${rhs}\nmain=putStrLn(f(0::Int))`;
   let trace;
   try {
     traceProgram('haskell', source, source);
@@ -44,11 +42,16 @@ const nativeResults = primitives.flatMap((source) => {
   }
   return [executeProgram('haskell', source), trace];
 });
+const displayResults = primitives.map((rhs) => {
+  const source = `f n=${rhs}\nmain=do\n let x=f(0::Int)\n let y=1::Int\n print y\n print(y+1)`;
+  return traceProgram('haskell', source, source);
+});
 process.stdout.write(
   JSON.stringify({
     synonyms: synonyms.map((source) => executeProgram('haskell', source)),
     chains: chains.map((source) => executeProgram('haskell', source)),
     native: nativeResults,
+    display: displayResults,
     recovery: executeProgram('haskell', 'f 0="stop"; f n=error(f(n-1)); main=putStrLn(f(32::Int))'),
   })
 );

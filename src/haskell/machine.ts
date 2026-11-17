@@ -105,7 +105,7 @@ export type PrimResult = Slot | TailCall;
  * Evaluation may nest (a primitive forcing a value), each level running until the stack returns to its base.
  */
 export class Machine {
-  private readonly nativeCalls = new RecursionBudget();
+  private readonly nativeCalls = new RecursionBudget(() => this.runtime.evaluationLimitError());
   readonly stack: Frame[] = [];
 
   constructor(readonly runtime: Runtime) {}
@@ -309,7 +309,7 @@ export class Machine {
       state.returnValue(slot.value as Value);
       return;
     }
-    if (slot.state === 'evaluating') throw this.runtime.selfDependencyError();
+    if (slot.state === 'evaluating') throw this.runtime.evaluationLimitError();
     this.runtime.spend();
     this.squeezeUpdateFrame(slot);
     slot.state = 'evaluating';

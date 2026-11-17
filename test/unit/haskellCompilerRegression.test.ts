@@ -833,12 +833,14 @@ test('compiler and native evaluation recursion remain bounded under Node', { tim
     synonyms: results,
     chains,
     native,
+    display,
     recovery,
   } = z
     .object({
       synonyms: z.array(resultSchema),
       chains: z.array(resultSchema),
       native: z.array(resultSchema),
+      display: z.array(z.object({ stdout: z.string() }).passthrough()),
       recovery: resultSchema,
     })
     .parse(JSON.parse(output));
@@ -849,7 +851,12 @@ test('compiler and native evaluation recursion remain bounded under Node', { tim
   expect(chains.at(-1)).toMatchObject({ kind: 'executed', stdout: '1\n' });
   for (const result of [...chains.slice(1, 5), chains[7], ...native])
     expect(result).toMatchObject({ kind: 'limitExceeded', limit: 'operations' });
-  expect(native).toHaveLength(4);
+  expect(native).toHaveLength(6);
+  expect(display).toHaveLength(3);
+  for (const result of display) {
+    expect(result.stdout).toBe('1\n2\n');
+    expect(result.uncaughtException).toBeUndefined();
+  }
   expect(recovery).toMatchObject({ kind: 'executed', stdout: '', uncaughtException: 'stop' });
   expect(results).toHaveLength(4);
   for (const index of [0, 2]) {
