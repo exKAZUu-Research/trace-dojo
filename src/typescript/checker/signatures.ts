@@ -2,7 +2,7 @@ import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import type { Checker } from './checker';
 import type { Sym } from './scopes';
-import { named, patternIdentifiers } from './syntax';
+import { hasToken, named, patternIdentifiers } from './syntax';
 import {
   anyType,
   newTypeId,
@@ -14,6 +14,9 @@ import {
   unionOf,
   unknownType,
 } from './types';
+
+/** The declarations that may be a get or set accessor: in a class, an interface, or an object type. */
+const accessorDeclarationTypes = new Set(['method_definition', 'method_signature', 'abstract_method_signature']);
 
 /** Resolves the signatures and type parameters that function-like and generic declarations declare. */
 export class Signatures {
@@ -27,6 +30,7 @@ export class Signatures {
       const cached = this.signatureCache.get(node.id);
       if (cached) return cached;
     }
+    this.checkParameterGrammar(node);
     const typeParameters = this.functionTypeParameters(node, contextual);
     const { parameters, thisType } = this.declaredParameters(node, contextual);
     const returnNode =
@@ -50,6 +54,23 @@ export class Signatures {
     };
     if (!contextual && this.c.silent === 0) this.signatureCache.set(node.id, signature);
     return signature;
+  }
+
+  /**
+   * Reports a required parameter after one marked `?`, which callers could not omit, and a default value where no
+   * implementation could evaluate it. Both are grammar errors that hold however the signature is resolved.
+   */
+  private checkParameterGrammar(node: TreeNode): void {
+    const hasBody = node.childForFieldName('body') !== null;
+    let optional = false;
+    for (const parameterNode of parameterNodes(node)) {
+      const hasDefault = parameterNode.childForFieldName('value') !== null;
+      if (hasDefault && !hasBody)
+        this.c.errorWhileResolving(parameterNode, '引数の既定値は、関数やコンストラクタの実装にしか書けません。');
+      if (parameterNode.type === 'optional_parameter') optional = true;
+      else if (optional && patternOf(parameterNode).type !== 'rest_pattern' && !hasDefault)
+        this.c.errorWhileResolving(parameterNode, '省略できる引数の後に、省略できない引数は書けません。');
+    }
   }
 
   /** A function's type parameters, which one its contextual signature types takes from that signature. */
@@ -139,14 +160,15 @@ export class Signatures {
 
   /** A setter's parameter without an annotation has the type its getter returns. */
   private setterParameterType(node: TreeNode): Type | undefined {
-    if (node.type !== 'method_definition' || !node.children.some((child) => child?.type === 'set')) return undefined;
+    if (!accessorDeclarationTypes.has(node.type) || !hasToken(node, 'set')) return undefined;
     const name = node.childForFieldName('name')?.text;
     const getter = node.parent
       ? named(node.parent).find(
           (member) =>
-            member.type === 'method_definition' &&
+            accessorDeclarationTypes.has(member.type) &&
             member.childForFieldName('name')?.text === name &&
-            member.children.some((child) => child?.type === 'get')
+            hasToken(member, 'get') &&
+            hasToken(member, 'static') === hasToken(node, 'static')
         )
       : undefined;
     return getter ? this.signatureOf(getter).returnType() : undefined;

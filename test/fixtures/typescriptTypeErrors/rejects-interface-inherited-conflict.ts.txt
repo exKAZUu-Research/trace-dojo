@@ -1,0 +1,32 @@
+interface Left { value: number }
+interface Right { value: string }
+interface Both extends Left, Right {}
+interface L2 { value?: number }
+interface R2 { value: number }
+interface Both2 extends L2, R2 {}
+interface L3 { readonly v: number }
+interface R3 { v: number }
+interface Both3 extends L3, R3 {}
+interface Both4 extends Left, Right { value: never }
+interface Root { r: number }
+interface A1 extends Root {}
+interface A2 extends Root {}
+interface Diamond extends A1, A2 {}
+interface L5 { u: number | string }
+interface R5 { u: string | number }
+interface Both5 extends L5, R5 {}
+interface L6 { m(): void }
+interface R6 { m(): void }
+interface Both6 extends L6, R6 {}
+interface L7 { a: any }
+interface R7 { a: unknown }
+interface Both7 extends L7, R7 {}
+interface G<T> { g: T }
+interface Both8 extends G<number>, G<string> {}
+interface Both9 extends G<number>, G<number> {}
+interface L10 { x: { a: number } }
+interface R10 { x: { a: number } }
+interface Both10 extends L10, R10 {}
+interface Both11 {}
+interface Both11 extends Left, Right {}
+console.log('runs');

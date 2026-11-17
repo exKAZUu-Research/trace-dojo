@@ -483,7 +483,6 @@ export class FunctionChecker {
   checkFunctionLike(node: TreeNode, signature: Signature, contextualReturn: Type | undefined): void {
     if (this.c.silent > 0) return;
     const parameters = node.childForFieldName('parameters');
-    this.checkParameterOrder(parameters ? named(parameters) : []);
     this.checkParameterInitializers(parameters ? named(parameters) : [], signature);
     if (!node.childForFieldName('body')) return;
     this.checkFunctionBody(node, signature, contextualReturn, false);
@@ -520,18 +519,6 @@ export class FunctionChecker {
     const valueType = this.c.expressions.check(value, annotation ?? implied);
     if (annotation) this.c.expressions.checkAssignable(pattern, valueType, annotation, value);
     else this.c.patterns.checkInitializer(pattern, value, valueType, implied);
-  }
-
-  /** Reports a required parameter after one marked `?`, which callers could not omit. */
-  private checkParameterOrder(parameters: TreeNode[]): void {
-    let optional = false;
-    for (const parameter of parameters) {
-      const isRest = parameter.childForFieldName('pattern')?.type === 'rest_pattern';
-      if (parameter.type === 'optional_parameter') optional = true;
-      else if (optional && !isRest && !parameter.childForFieldName('value')) {
-        this.c.error(parameter, '省略できる引数の後に、省略できない引数は書けません。');
-      }
-    }
   }
 
   /** Reports a function that may end without returning a value its declared return type requires. */

@@ -1,8 +1,8 @@
-// code-gauge-allow-file fileNcss 556 -- Follows the flow of control through each kind of statement.
+// code-gauge-allow-file fileNcss 562 -- Follows the flow of control through each kind of statement.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import type { Checker } from './checker';
-import { checkTypeMemberDuplicates } from './declarations';
+import { checkInheritedPropertiesAreIdentical, checkTypeMemberDuplicates } from './declarations';
 import { FlowState, type State } from './flow';
 import type { Scope, Sym } from './scopes';
 import { arrayLiteralLength, hasToken, isNumericName, isWithin, named, skipParentheses } from './syntax';
@@ -34,6 +34,9 @@ const MAX_LOOP_PASSES = 3;
  * instantiates: a tuple its elements, and an indexed access its key.
  */
 const eagerTypeSyntaxes = new Set(['tuple_type', 'lookup_type']);
+
+/** The syntaxes whose type identifiers name a type rather than refer to one, or are resolved with their parent. */
+const nameOnlyTypeParents = new Set(['generic_type', 'type_parameter', 'mapped_type_clause', 'infer_type']);
 
 /** Checks statements, following the flow of control through them. */
 export class StatementChecker {
@@ -140,34 +143,34 @@ export class StatementChecker {
   }
 
   /** Resolves every type written in a node, so that unknown names report errors. */
-  // code-gauge-allow functionCognitiveComplexity 19 -- Walks type references and object types while keeping qualified namespace references intact for availability checks.
   private resolveTypesIn(node: TreeNode | null): void {
     if (!node) return;
     const visit = (current: TreeNode): void => {
+      // A qualified name resolves as a whole, so that its namespace is checked for availability.
       if (current.type === 'nested_type_identifier') {
         this.c.typeNodes.typeFromNode(current);
         return;
       }
-      if (current.type === 'type_identifier' || current.type === 'generic_type') {
-        const parent = current.parent;
-        if (
-          parent?.type !== 'generic_type' &&
-          parent?.type !== 'type_parameter' &&
-          parent?.type !== 'mapped_type_clause' &&
-          parent?.type !== 'infer_type'
-        ) {
-          this.c.typeNodes.typeFromNode(current);
-        }
-      }
-      if (current.type === 'object_type') {
-        checkTypeMemberDuplicates(this.c, current);
-        const type = this.c.typeNodes.typeFromNode(current);
-        if (type.kind === 'object') this.checkIndexConformance(type.resolve(), current);
-      }
-      if (eagerTypeSyntaxes.has(current.type)) this.c.typeNodes.typeFromNode(current);
+      this.resolveTypeNode(current);
       for (const child of named(current)) visit(child);
     };
     visit(node);
+  }
+
+  private resolveTypeNode(node: TreeNode): void {
+    if (
+      (node.type === 'type_identifier' || node.type === 'generic_type') &&
+      !nameOnlyTypeParents.has(node.parent?.type ?? '')
+    ) {
+      this.c.typeNodes.typeFromNode(node);
+    }
+    if (node.type === 'object_type') {
+      checkTypeMemberDuplicates(this.c, node);
+      const type = this.c.typeNodes.typeFromNode(node);
+      if (type.kind === 'object') this.checkIndexConformance(type.resolve(), node);
+    }
+    if (eagerTypeSyntaxes.has(node.type)) this.c.typeNodes.typeFromNode(node);
+    if (node.type === 'infer_type') this.c.typeNodes.checkInferPlacement(node);
   }
 
   private interfaceDeclaration(node: TreeNode): void {
@@ -183,7 +186,10 @@ export class StatementChecker {
       for (const property of structure.properties.values()) property.type();
       for (const signature of structure.callSignatures) signature.returnType();
       this.checkIndexConformance(structure, node.childForFieldName('body') ?? node);
-      this.checkInterfaceBases(node, structure);
+      const isFirst =
+        symbol.typeDeclarations.find((declaration) => declaration.type === 'interface_declaration')?.id === node.id;
+      if (!isFirst || checkInheritedPropertiesAreIdentical(this.c, symbol, node.childForFieldName('name') ?? node))
+        this.checkInterfaceBases(node, structure);
     }
     for (const child of named(node)) if (child.type === 'extends_type_clause') this.resolveTypesIn(child);
     this.resolveTypesIn(node.childForFieldName('body'));
@@ -262,6 +268,7 @@ export class StatementChecker {
     const kind = node.type === 'variable_declaration' ? 'var' : (node.childForFieldName('kind')?.text ?? 'let');
     for (const declarator of named(node)) {
       if (declarator.type !== 'variable_declarator') continue;
+      this.resolveTypesIn(declarator.childForFieldName('type'));
       const nameNode = declarator.childForFieldName('name') as TreeNode;
       if (nameNode.type === 'identifier') this.variableDeclarator(declarator, nameNode, kind);
       else this.patternDeclarator(declarator, nameNode, kind === 'const');

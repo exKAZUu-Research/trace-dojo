@@ -1,11 +1,11 @@
-// code-gauge-allow-file fileNcss 563 -- Holds the types of classes with `this`, `super`, and accessibility, which all read the class information.
+// code-gauge-allow-file fileNcss 573 -- Holds the types of classes with `this`, `super`, and accessibility, which all read the class information.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import { typesAtConstructorExit } from './assignmentFlow';
 import type { Checker } from './checker';
 import { FlowState, type State } from './flow';
 import { isUsedBeforeInitialization } from './initializationOrder';
-import type { Sym } from './scopes';
+import type { Sym, ValueKind } from './scopes';
 import {
   hasToken,
   isClassConstructor,
@@ -35,6 +35,9 @@ import {
   unionOf,
   voidType,
 } from './types';
+
+/** The kinds of global declarations that become properties of `globalThis`, unlike `let`, `const`, and classes. */
+const globalThisValueKinds = new Set<ValueKind>(['var', 'function', 'declared']);
 
 interface MethodEntry {
   signatures: Signature[];
@@ -69,6 +72,7 @@ export class ClassChecker {
   private readonly objectThis: ObjectType[] = [];
   private readonly fieldTypes = new Map<number, Type>();
   private readonly resolvingFields: { member: TreeNode; nameNode: TreeNode }[] = [];
+  private globalThis?: ObjectType;
 
   constructor(private readonly c: Checker) {}
 
@@ -685,14 +689,32 @@ export class ClassChecker {
     return anyType;
   }
 
-  /** The type of `this` outside any function or class, which an arrow function must not capture. */
+  /**
+   * The type of `this` outside any function or class, which an arrow function must not capture: `typeof globalThis`, as
+   * the reference compiler checks the program as a script, although it runs as a module.
+   */
   private globalThisType(node: TreeNode): Type {
     for (let current = node.parent; current; current = current.parent) {
       if (current.type !== 'arrow_function') continue;
       this.c.error(node, "アロー関数が、グローバルの 'this' の値を取り込んでいます。");
       break;
     }
-    return undefinedType;
+    this.globalThis ??= anonymousObject(() => this.globalThisStructure(), { aliasName: 'typeof globalThis' });
+    return this.globalThis;
+  }
+
+  /** The members of `globalThis`: the global `var` declarations and functions, of the library and of the script. */
+  private globalThisStructure(): Structure {
+    const structure = emptyStructure();
+    for (const symbol of this.c.libraryBinder.moduleScope.values.values()) {
+      if (symbol.unsupported || !globalThisValueKinds.has(symbol.valueKind ?? 'let')) continue;
+      structure.properties.set(symbol.name, {
+        ...simpleProperty(symbol.name, anyType),
+        type: () => this.c.expressions.valueTypeOf(symbol),
+        declaration: symbol.valueDeclaration,
+      });
+    }
+    return structure;
   }
 
   private thisParameterType(owner: TreeNode): Type | undefined {

@@ -1,0 +1,11 @@
+(2,28): error TS2312: An interface can only extend an object type or intersection of object types with statically known members.
+(3,24): error TS2312: An interface can only extend an object type or intersection of object types with statically known members.
+(5,21): error TS2312: An interface can only extend an object type or intersection of object types with statically known members.
+(16,42): error TS2312: An interface can only extend an object type or intersection of object types with statically known members.
+(18,24): error TS2312: An interface can only extend an object type or intersection of object types with statically known members.
+(21,24): error TS2312: An interface can only extend an object type or intersection of object types with statically known members.
+(26,21): error TS2304: Cannot find name 'Unknown'.
+(30,24): error TS2312: An interface can only extend an object type or intersection of object types with statically known members.
+(32,21): error TS2312: An interface can only extend an object type or intersection of object types with statically known members.
+(36,21): error TS2312: An interface can only extend an object type or intersection of object types with statically known members.
+(42,24): error TS2312: An interface can only extend an object type or intersection of object types with statically known members.

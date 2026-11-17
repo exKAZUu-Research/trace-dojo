@@ -1,0 +1,17 @@
+(1,43): error TS7061: A mapped type may not declare properties or methods.
+(2,33): error TS7061: A mapped type may not declare properties or methods.
+(3,13): error TS7061: A mapped type may not declare properties or methods.
+(4,33): error TS7061: A mapped type may not declare properties or methods.
+(5,33): error TS7061: A mapped type may not declare properties or methods.
+(6,33): error TS7061: A mapped type may not declare properties or methods.
+(7,33): error TS7061: A mapped type may not declare properties or methods.
+(8,37): error TS7061: A mapped type may not declare properties or methods.
+(9,38): error TS7061: A mapped type may not declare properties or methods.
+(10,15): error TS7061: A mapped type may not declare properties or methods.
+(11,16): error TS7061: A mapped type may not declare properties or methods.
+(12,13): error TS7061: A mapped type may not declare properties or methods.
+(13,33): error TS7061: A mapped type may not declare properties or methods.
+(14,13): error TS7061: A mapped type may not declare properties or methods.
+(15,11): error TS2564: Property '[K in "a"]' has no initializer and is not definitely assigned in the constructor.
+(15,11): error TS7061: A mapped type may not declare properties or methods.
+(16,12): error TS7061: A mapped type may not declare properties or methods.

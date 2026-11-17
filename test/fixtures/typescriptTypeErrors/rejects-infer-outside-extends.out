@@ -1,0 +1,8 @@
+(1,18): error TS1338: 'infer' declarations are only permitted in the 'extends' clause of a conditional type.
+(2,36): error TS1338: 'infer' declarations are only permitted in the 'extends' clause of a conditional type.
+(3,44): error TS1338: 'infer' declarations are only permitted in the 'extends' clause of a conditional type.
+(6,19): error TS1338: 'infer' declarations are only permitted in the 'extends' clause of a conditional type.
+(9,5): error TS2322: Type 'number' is not assignable to type 'Z'.
+  'Z' could be instantiated with an arbitrary type which could be unrelated to 'number'.
+(9,8): error TS1338: 'infer' declarations are only permitted in the 'extends' clause of a conditional type.
+(10,15): error TS1338: 'infer' declarations are only permitted in the 'extends' clause of a conditional type.

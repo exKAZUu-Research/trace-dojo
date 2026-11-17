@@ -4,6 +4,7 @@ import { unsupportedMessage } from '../unsupported';
 import type { Checker, Mapper, UnionAlias } from './checker';
 import { BROWSER_INTERFACES } from './domGlobals';
 import { IndexedAccessKeys } from './indexedAccessKeys';
+import { InterfaceBases } from './interfaceBases';
 import type { Sym } from './scopes';
 import { nameSuggestionHint } from './spelling';
 import { hasToken, named, numberValue, propertyNameText, stringValue } from './syntax';
@@ -94,7 +95,7 @@ export class TypeNodes {
     ['index_type_query', (node) => this.c.typeOperators.keyofType(this.typeFromNode(named(node)[0]))],
     ['lookup_type', (node) => this.lookupType(node)],
     ['conditional_type', (node) => this.c.typeOperators.conditionalTypeFromNode(node)],
-    ['infer_type', (node) => this.c.typeOperators.inferParameterFor(node, named(node)[0].text) ?? anyType],
+    ['infer_type', (node) => this.inferType(node)],
     ['template_literal_type', (node) => this.c.typeOperators.templateLiteralFromNode(node)],
     ['this_type', (node) => this.c.classes.thisTypeAt(node)],
     ['type_predicate', () => booleanType],
@@ -102,9 +103,11 @@ export class TypeNodes {
   ]);
 
   private readonly indexedAccessKeys: IndexedAccessKeys;
+  readonly interfaceBases: InterfaceBases;
 
   constructor(private readonly c: Checker) {
     this.indexedAccessKeys = new IndexedAccessKeys(c);
+    this.interfaceBases = new InterfaceBases(c);
   }
 
   /** How many array, tuple, and type argument nodes enclose the type node being resolved. */
@@ -172,6 +175,19 @@ export class TypeNodes {
       isFunction: true,
       nonGeneric,
     });
+  }
+
+  private inferType(node: TreeNode): Type {
+    this.checkInferPlacement(node);
+    return this.c.typeOperators.inferParameterFor(node, named(node)[0].text) ?? anyType;
+  }
+
+  /** Reports an `infer` declaration outside the extends type of a conditional type, the only place it declares a type. */
+  checkInferPlacement(node: TreeNode): void {
+    for (let child = node; child.parent; child = child.parent) {
+      if (child.parent.type === 'conditional_type' && child.parent.childForFieldName('right')?.id === child.id) return;
+    }
+    this.c.errorWhileResolving(node, 'infer による宣言は、条件型の extends 節の中にしか書けません。');
   }
 
   private lookupType(node: TreeNode): Type {
@@ -384,7 +400,7 @@ export class TypeNodes {
       return errorType;
     }
     const filled = this.c.fillTypeArguments(parameters, typeArguments);
-    this.checkTypeArgumentConstraints(node, parameters, filled);
+    this.interfaceBases.afterResolving(() => this.checkTypeArgumentConstraints(node, parameters, filled));
     return this.appliedType(symbol, declared, parameters, filled);
   }
 
@@ -451,11 +467,10 @@ export class TypeNodes {
 
   private objectTypeLiteral(node: TreeNode): Type {
     const members = named(node);
-    const mappedSignature = members.find(
-      (member) =>
-        member.type === 'index_signature' && member.namedChildren.some((child) => child?.type === 'mapped_type_clause')
-    );
-    if (mappedSignature) return this.c.typeOperators.mappedTypeFromNode(mappedSignature);
+    if (members[0] && isMappedMember(members[0])) {
+      if (members[1]) this.c.errorWhileResolving(members[1], mappedTypeMembersMessage);
+      return this.c.typeOperators.mappedTypeFromNode(members[0]);
+    }
     return anonymousObject(() => this.membersStructure(members), {
       isLiteral: false,
       nonGeneric: isOutsideGenericDeclarations(node),
@@ -532,6 +547,12 @@ export class TypeNodes {
 
   /** Sets the index signature of each key type an index signature declares, as `[k: string | symbol]` declares two. */
   addIndexSignature(structure: Structure, member: TreeNode): void {
+    if (isMappedMember(member)) {
+      // TypeScript reads `[K in T]` after other members as a property with a computed name it rejects.
+      const firstMember = member.parent ? named(member.parent)[0] : member;
+      this.c.errorWhileResolving(firstMember ?? member, mappedTypeMembersMessage);
+      return;
+    }
     const indexType = member.childForFieldName('index_type');
     const info: IndexInfo = {
       type: this.annotationType(member.childForFieldName('type')) ?? anyType,
@@ -643,30 +664,44 @@ export class TypeNodes {
       typeParameters: typeParameters.length > 0 ? typeParameters : undefined,
       resolve: () => {
         if (structure) return structure;
+        const bases = this.interfaceBases.baseTypesOf(symbol);
+        // Resolving its bases may resolve the interface itself, as a base's type arguments or keys may need its members.
+        if (structure) return structure;
         structure = emptyStructure();
-        const { own, bases } = this.interfaceMembers(symbol.typeDeclarations);
-        structure = this.c.mergeBases(own, bases);
+        structure = this.c.mergeBases(this.interfaceOwnMembers(symbol.typeDeclarations), bases);
         return structure;
       },
     };
+    this.interfaceBases.register(type, symbol);
     return type;
   }
 
   /** The members merged interface declarations declare, and the types they extend. */
   interfaceMembers(declarations: TreeNode[]): { own: Structure; bases: Type[] } {
+    return {
+      own: this.interfaceOwnMembers(declarations),
+      bases: this.interfaceBases.basesOf(declarations),
+    };
+  }
+
+  interfaceOwnMembers(declarations: TreeNode[]): Structure {
     // TypeScript merges the overloads of later declarations before those of earlier ones.
-    const own = this.membersStructure(
+    return this.membersStructure(
       declarations.toReversed().flatMap((declaration) => {
         const body = declaration.childForFieldName('body');
         return body ? named(body) : [];
       })
     );
-    const bases = declarations.flatMap((declaration) => {
-      const clause = declaration.namedChildren.find((child) => child?.type === 'extends_type_clause');
-      return clause ? named(clause).map((base) => this.typeFromNode(base)) : [];
-    });
-    return { own, bases };
   }
+}
+
+const mappedTypeMembersMessage = 'マップ型には、プロパティやメソッドを宣言できません。';
+
+/** Whether a member of an object type is written as a mapped type's `[K in T]: …`. */
+function isMappedMember(member: TreeNode): boolean {
+  return (
+    member.type === 'index_signature' && member.namedChildren.some((child) => child?.type === 'mapped_type_clause')
+  );
 }
 
 /** The type nodes whose element types TypeScript resolves later, which lets an alias refer to itself inside them. */

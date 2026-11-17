@@ -1,0 +1,4 @@
+interface Only { set w(input); }
+abstract class A { abstract get v(): number; abstract set v(x); }
+class B { get v(): number { return 1; } set v(x) {} static get s() { return 'a'; } set s(y) {} }
+console.log(new B().v);

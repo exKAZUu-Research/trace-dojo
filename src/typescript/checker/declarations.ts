@@ -4,7 +4,7 @@ import type { Checker } from './checker';
 import { nativeGlobalRedeclaration } from './nativeGlobalIdentity';
 import type { Scope, Sym } from './scopes';
 import { hasToken, isConstructorName, named } from './syntax';
-import { isIntrinsic, type Type, undefinedType, unionOf } from './types';
+import { isAnyLike, isIntrinsic, type Property, type Type, undefinedType, unionOf } from './types';
 
 /** Reports the declarations TypeScript rejects for declaring a name twice, at every declaration it involves. */
 export function checkDuplicateDeclarations(c: Checker, scopes: Scope[]): void {
@@ -316,6 +316,8 @@ function isAllowedRedeclaration(members: TreeNode[]): boolean {
 
 /** A member's property name, with a computed name resolved as the member's type resolves it. */
 function memberName(c: Checker, member: TreeNode): string | undefined {
+  // An index signature's `name` is its parameter's, which names no member.
+  if (member.type === 'index_signature') return undefined;
   const nameNode = member.childForFieldName('name') ?? member.childForFieldName('pattern');
   const names = nameNode ? c.patterns.propertyNames(nameNode) : undefined;
   return names?.length === 1 ? names[0] : undefined;
@@ -340,4 +342,38 @@ function declaredPropertyType(c: Checker, declaration: TreeNode, name: string): 
 function declaringClassNode(declaration: TreeNode): TreeNode | undefined {
   const body = declaration.type === 'field_definition' ? declaration.parent : declaration.parent?.parent?.parent;
   return body?.type === 'class_body' ? (body.parent ?? undefined) : undefined;
+}
+
+/**
+ * Reports an interface whose bases declare a property it does not declare itself in ways that are not identical, as
+ * TypeScript's `checkInheritedPropertiesAreIdentical` does, returning whether none do.
+ */
+export function checkInheritedPropertiesAreIdentical(c: Checker, symbol: Sym, nameNode: TreeNode): boolean {
+  const bases = c.typeNodes.interfaceBases.baseTypesOf(symbol);
+  if (bases.length < 2) return true;
+  const own = c.typeNodes.interfaceOwnMembers(symbol.typeDeclarations).properties;
+  const inherited = new Map<string, { property: Property; base: Type }>();
+  for (const base of bases) {
+    for (const property of c.structureOf(base).properties.values()) {
+      if (own.has(property.name)) continue;
+      const existing = inherited.get(property.name);
+      if (!existing) inherited.set(property.name, { property, base });
+      else if (!arePropertiesIdentical(c, existing.property, property)) {
+        c.error(
+          nameNode,
+          `インターフェース '${c.print(c.typeNodes.declaredTypeOf(symbol))}' は、型 '${c.print(existing.base)}' と '${c.print(base)}' を同時には継承できません。プロパティ '${property.name}' が同一ではありません。`
+        );
+        return false;
+      }
+    }
+  }
+  return true;
+}
+
+function arePropertiesIdentical(c: Checker, a: Property, b: Property): boolean {
+  if (a === b) return true;
+  if (a.visibility !== b.visibility || a.optional !== b.optional || a.readonly !== b.readonly) return false;
+  if (a.visibility !== 'public' && a.declaration?.id !== b.declaration?.id) return false;
+  const [typeA, typeB] = [a.type(), b.type()];
+  return isAnyLike(typeA) === isAnyLike(typeB) && c.relations.identical(typeA, typeB);
 }
