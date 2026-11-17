@@ -1,9 +1,10 @@
-// code-gauge-allow-file fileNcss 564 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 582 -- Holds the cases of one concern of the interpreter, which share their helpers.
 import type { TurtleState } from '../interpreter/turtleWorld';
 import type { Frame, Runtime } from './runtime';
 import {
   type ClosureData,
   isClosure,
+  ownershipGeneration,
   ownershipProof,
   PhpArray,
   PhpObject,
@@ -72,28 +73,34 @@ export function collectGarbage(runtime: Runtime, cycles = false): number {
  * destroyed from the dropped values outward: its destructor runs, then what it holds is released in order, then its
  * handle returns to the free list. Objects on a cycle stay, as reference counting cannot free them.
  */
+// code-gauge-allow functionNcss 32 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 export function releaseDropped(runtime: Runtime, dropped: unknown[]): void {
   if (runtime.shuttingDown || runtime.objects.size === 0) return;
+  dropped = dropped.filter((value) => !(value instanceof PhpObject && activeReleaseObjects.has(value)));
   if (!dropped.some((value) => mayHoldObject(value))) return;
   const roots = ownershipRoots(runtime);
+  const unreachable = new Set<object>();
   dropped = dropped.filter(
     (value) =>
       !(value instanceof Ref || value instanceof PhpArray || value instanceof PhpObject) ||
-      !ownedReachable(value, roots, runtime)
+      !ownedReachable(value, roots, runtime, unreachable)
   );
   if (dropped.length === 0) return;
   const within = objectsWithin(dropped);
   if (within.length === 0 || heldDirectly(runtime, within)) return;
   runtime.spend();
-  const reached = new Set(within.filter((object) => ownedReachable(object, roots, runtime)));
+  const reached = new Set(within.filter((object) => ownedReachable(object, roots, runtime, unreachable)));
   const freed = new Set(freeable(within.filter((object) => !reached.has(object))));
   if (freed.size === 0) return;
-  const release = new Release(runtime, freed, reached);
+  const release = new Release(runtime, freed, roots);
+  const active = [...freed];
+  for (const object of active) activeReleaseObjects.add(object);
   releasing++;
   try {
     for (const value of dropped) release.value(value);
   } finally {
     releasing--;
+    for (const object of active) activeReleaseObjects.delete(object);
   }
   const turtleRoots = ownershipRoots(runtime);
   retainTurtles(
@@ -104,60 +111,91 @@ export function releaseDropped(runtime: Runtime, dropped: unknown[]): void {
   );
 }
 
-/** One run of {@link releaseDropped}, which destroys the freed objects depth-first from the dropped values. */
+class ReleaseFinish {
+  constructor(
+    readonly object: PhpObject,
+    readonly failed: boolean,
+    readonly failure: unknown
+  ) {}
+}
+
 class Release {
   private readonly visited = new Set<PhpObject>();
   private readonly visitedArrays = new Set<PhpArray>();
+  private readonly unreachable = new Set<object>();
 
   constructor(
     private readonly runtime: Runtime,
     private readonly freed: Set<PhpObject>,
-    public reached: Set<PhpObject>
+    private roots: Set<unknown>
   ) {}
 
+  // code-gauge-allow functionCognitiveComplexity 17 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
   value(value: unknown): void {
-    if (value instanceof Ref) this.value(value.v);
-    else if (value instanceof PhpArray) {
-      if (this.visitedArrays.has(value)) return;
-      this.visitedArrays.add(value);
-      for (const slot of value.map.values()) this.value(slot);
-    } else if (value instanceof PhpObject) this.object(value);
+    const pending: unknown[] = [value];
+    let work = 0;
+    while (pending.length > 0) {
+      if ((++work & 255) === 0) this.runtime.budget.checkClock();
+      const item = pending.pop();
+      if (item instanceof ReleaseFinish) {
+        this.runtime.freeObject(item.object);
+        if (item.failed) throw item.failure;
+      } else if (item instanceof Ref) pending.push(item.v);
+      else if (item instanceof PhpArray) {
+        if (this.visitedArrays.has(item)) continue;
+        this.visitedArrays.add(item);
+        appendReversed(pending, item.map.values());
+      } else if (item instanceof PhpObject) {
+        const finish = this.prepare(item);
+        if (!finish) continue;
+        pending.push(finish);
+        const children: unknown[] = [];
+        pushObject(item, children);
+        appendReversed(pending, children);
+      }
+    }
   }
 
-  // code-gauge-allow functionCognitiveComplexity 18 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
-  private object(object: PhpObject): void {
-    if (!this.freed.has(object) || this.visited.has(object) || this.runtime.objects.get(object.id) !== object) return;
+  private prepare(object: PhpObject): ReleaseFinish | undefined {
+    if (!this.freed.has(object) || this.visited.has(object) || this.runtime.objects.get(object.id) !== object)
+      return undefined;
+    if (ownedReachable(object, this.roots, this.runtime, this.unreachable)) return undefined;
     this.visited.add(object);
     let failure: unknown;
     let failed = false;
     if (!object.destructed && object.cls.findMethod('__destruct')) {
       object.destructed = true;
       this.runtime.destructibles--;
+      const generation = ownershipGeneration();
+      const nativeGeneration = this.runtime.nativeOwnershipVersion;
       try {
         destruct(object);
       } catch (error) {
         failure = error;
         failed = true;
       }
-      // A destructor may store its object, or what it holds, somewhere reachable again.
       const roots = ownershipRoots(this.runtime);
-      this.reached = new Set([...this.freed].filter((value) => ownedReachable(value, roots, this.runtime)));
-      for (const freed of this.freed) if (this.reached.has(freed)) this.freed.delete(freed);
-      if (!this.freed.has(object)) {
+      if (
+        generation !== ownershipGeneration() ||
+        nativeGeneration !== this.runtime.nativeOwnershipVersion ||
+        roots.size !== this.roots.size ||
+        [...roots].some((root) => !this.roots.has(root))
+      )
+        this.unreachable.clear();
+      this.roots = roots;
+      if (ownedReachable(object, this.roots, this.runtime, this.unreachable)) {
+        this.freed.delete(object);
         if (failed) throw failure;
-        return;
+        return undefined;
       }
     }
-    const children: unknown[] = [];
-    pushObject(object, children);
-    for (const child of children) this.value(child);
-    this.runtime.freeObject(object);
-    if (failed) throw failure;
+    return new ReleaseFinish(object, failed, failure);
   }
 }
 
 /** How many releases are running, during which a collection would free their objects out of order. */
 let releasing = 0;
+const activeReleaseObjects = new Set<PhpObject>();
 
 /**
  * Whether each object is held directly by a variable or a temporary of a running function, which keeps it alive
@@ -185,6 +223,7 @@ function mayHoldObject(value: unknown): boolean {
 }
 
 /** The objects reachable from some values, through arrays, references, and what objects hold. */
+// code-gauge-allow functionCognitiveComplexity 17 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 function objectsWithin(values: unknown[]): PhpObject[] {
   const found = new Set<PhpObject>();
   const seenArrays = new Set<PhpArray>();
@@ -197,6 +236,7 @@ function objectsWithin(values: unknown[]): PhpObject[] {
       seenArrays.add(item);
       appendValues(pending, [...item.map.values()]);
     } else if (item instanceof PhpObject) {
+      if (activeReleaseObjects.has(item)) continue;
       if (found.has(item)) continue;
       found.add(item);
       pushObject(item, pending);
@@ -238,27 +278,13 @@ function retainTurtles(runtime: Runtime, reached: Set<PhpObject>): void {
  * it reaches them, holders' contents in order, in `runtime.reachOrder`.
  */
 // code-gauge-allow functionNcss 59 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+// code-gauge-allow functionCognitiveComplexity 22 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 export function mark(runtime: Runtime): Set<PhpObject> {
   const reached = new Set<PhpObject>();
   const visitedArrays = new Set<PhpArray>();
   const roots: unknown[] = [];
-  for (const frame of runtime.frames) pushFrame(frame, roots);
-  for (const fn of runtime.userFunctions) appendValues(roots, fn.statics.values());
-  for (const cls of runtime.userClasses) {
-    for (const { ref } of cls.staticProps.values()) roots.push(ref);
-    for (const constant of cls.consts.values()) if (constant.value !== undefined) roots.push(constant.value);
-    for (const method of cls.methods.values())
-      if (method.fn.kind === 'user') appendValues(roots, [...method.fn.statics.values()]);
-  }
-  for (const value of runtime.constants.values()) roots.push(value);
-  appendValues(roots, [
-    ...runtime.held,
-    runtime.exceptionHandler,
-    ...runtime.replacedExceptionHandlers,
-    runtime.thrown,
-  ]);
-  for (const held of runtime.nativeHeld) appendValues(roots, [...held]);
-  for (const { handler } of runtime.errorHandlers) roots.push(handler);
+  for (const object of activeReleaseObjects) if (runtime.objects.get(object.id) === object) roots.push(object);
+  appendValues(roots, ownershipRoots(runtime));
   // A stack visits the first of the items pushed together first when they are pushed in reverse.
   const pending = roots.toReversed();
   const pushInOrder = (items: Iterable<unknown>): void => {
@@ -559,9 +585,9 @@ function ownershipRoots(runtime: Runtime): Set<unknown> {
   roots.push(
     ...runtime.rootConstants,
     ...runtime.held,
-    runtime.thrown,
     runtime.exceptionHandler,
-    ...runtime.replacedExceptionHandlers
+    ...runtime.replacedExceptionHandlers,
+    runtime.thrown
   );
   for (const held of runtime.nativeHeld) appendValues(roots, [...held]);
   for (const { handler } of runtime.errorHandlers) roots.push(handler);
@@ -572,12 +598,20 @@ function ownershipRoots(runtime: Runtime): Set<unknown> {
 
 // code-gauge-allow functionNcss 31 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 // code-gauge-allow functionCognitiveComplexity 24 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
-function ownedReachable(value: Ref | PhpArray | PhpObject, roots: Set<unknown>, runtime: Runtime): boolean {
+function ownedReachable(
+  value: Ref | PhpArray | PhpObject,
+  roots: Set<unknown>,
+  runtime: Runtime,
+  unreachable?: Set<object>
+): boolean {
   const pending: object[] = [value];
   const visited = new Set<object>();
   const predecessor = new Map<object, object>();
+  let work = 0;
   while (pending.length > 0) {
+    if ((++work & 255) === 0) runtime.budget.checkClock();
     const item = pending.pop() as object;
+    if (unreachable?.has(item)) continue;
     const root = roots.has(item) ? item : ownershipProof(item, roots);
     if (root) {
       const path = [item];
@@ -591,23 +625,25 @@ function ownedReachable(value: Ref | PhpArray | PhpObject, roots: Set<unknown>, 
     }
     if (visited.has(item)) continue;
     visited.add(item);
-    for (const parent of valueOwners(item)) {
+    for (const parent of reverseOwners(item, runtime, visited)) {
       if (!visited.has(parent) && !predecessor.has(parent)) {
         predecessor.set(parent, item);
         pending.push(parent);
       }
     }
-    for (const object of runtime.internalObjects) {
-      if (visited.has(object)) continue;
-      const held: unknown[] = [];
-      pushObject(object, held);
-      if (held.includes(item)) {
-        predecessor.set(object, item);
-        pending.push(object);
-      }
-    }
   }
+  if (unreachable) for (const item of visited) unreachable.add(item);
   return false;
+}
+
+function* reverseOwners(value: object, runtime: Runtime, visited: Set<object>): Generator<object> {
+  yield* valueOwners(value);
+  for (const object of runtime.internalObjects) {
+    if (visited.has(object)) continue;
+    const held: unknown[] = [];
+    pushObject(object, held);
+    if (held.includes(value)) yield object;
+  }
 }
 
 function appendValues(target: unknown[], values: Iterable<unknown>): void {

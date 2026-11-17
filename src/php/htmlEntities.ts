@@ -286,7 +286,7 @@ const BASIC_CODES = new Map([...BASIC_ENTITIES].map(([code, name]) => [name, cod
 /**
  * Escapes text in the selected encoding as `htmlspecialchars` (`all` false) or `htmlentities` (`all` true) does.
  */
-// code-gauge-allow functionNcss 35 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+// code-gauge-allow functionNcss 36 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 export function escapeHtml(text: string, flags: bigint, all: boolean, doubleEncode: boolean, latin1 = false): string {
   const doctype = doctypeOf(flags);
   let result = '';
@@ -304,8 +304,9 @@ export function escapeHtml(text: string, flags: bigint, all: boolean, doubleEnco
       index += entityLength;
     } else {
       if (all && doctype === Doctype.Html5 && index < text.length) {
-        const [nextLength] = nextChar(text, index);
-        const pair = HTML5_CANONICAL.get(char + text.slice(index, index + nextLength));
+        const [nextLength] = latin1 ? [1] : nextChar(text, index);
+        const characters = char + text.slice(index, index + nextLength);
+        const pair = HTML5_CANONICAL.get(latin1 ? enc(characters) : characters);
         if (pair) {
           result += pair;
           index += nextLength;

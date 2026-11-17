@@ -1,5 +1,5 @@
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
-import { randomInt } from 'node:crypto';
+import { randomBytes } from 'node:crypto';
 
 import { floatFitsInt, valueName } from './conversions';
 import { deprecated, throwError } from './errors';
@@ -263,7 +263,7 @@ function formatFloatNumber(value: number, { decimals, point, separator }: Number
 }
 
 function groupThousands(digits: string, separator: string): string {
-  return digits.replaceAll(/\B(?=(\d{3})+(?!\d))/g, separator);
+  return digits.replaceAll(/\B(?=(\d{3})+(?!\d))/g, () => separator);
 }
 
 // Random numbers -----------------------------------------------------------------------------------------------------
@@ -309,8 +309,13 @@ defineFunction('random_int(int $min, int $max): int', ({ args }) => {
   if (min > max)
     throwError('ValueError', 'random_int(): Argument #1 ($min) must be less than or equal to argument #2 ($max)');
   const span = max - min;
-  if (span < 2n ** 48n - 1n) return min + BigInt(randomInt(0, Number(span) + 1));
-  return min + (BigInt(randomInt(0, 2 ** 47)) * span) / 2n ** 47n;
+  if (span === 0n) return min;
+  const mask = (1n << BigInt(span.toString(2).length)) - 1n;
+  for (;;) {
+    rt().spend();
+    const value = randomBytes(8).readBigUInt64LE() & mask;
+    if (value <= span) return min + value;
+  }
 });
 defineFunction('lcg_value(): float', () => {
   deprecated(String.raw`Function lcg_value() is deprecated since 8.4, use \Random\Randomizer::getFloat() instead`);

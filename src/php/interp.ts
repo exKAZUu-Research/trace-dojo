@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 686 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 688 -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import {
   applyOperator,
@@ -65,6 +65,8 @@ import { UnsupportedFeatureError } from './unsupported';
 import {
   type ClosureData,
   copyValueSlot,
+  INT_MAX,
+  INT_MIN,
   isClosure,
   PhpArray,
   type PhpClass,
@@ -453,13 +455,18 @@ export function isArrayAccess(object: PhpObject): boolean {
 }
 
 /** The position an index selects in a string: -1 when it is out of range, undefined when `quiet` and the index is not an integer. */
-// code-gauge-allow functionNcss 36 -- One case per expression kind, as PHP evaluates each kind differently.
+// code-gauge-allow functionNcss 40 -- One case per expression kind, as PHP evaluates each kind differently.
 export function stringOffset(text: string, index: Value, quiet: boolean): number | undefined {
   let offset: bigint;
   if (typeof index === 'bigint') offset = index;
   else if (typeof index === 'string') {
-    if (/^[ \t\n\r\v\f]*[+-]?\d+[ \t\n\r\v\f]*$/.test(index)) offset = BigInt(index);
-    else {
+    if (/^[ \t\n\r\v\f]*[+-]?\d+[ \t\n\r\v\f]*$/.test(index)) {
+      offset = BigInt(index);
+      if (offset < INT_MIN || offset > INT_MAX) {
+        if (quiet) return undefined;
+        throwError('TypeError', 'Cannot access offset of type string on string');
+      }
+    } else {
       if (numericPrefix(index)?.whole) {
         if (quiet) return undefined;
         throwError('TypeError', 'Cannot access offset of type string on string');
@@ -740,8 +747,8 @@ function cloneExpression(e: Extract<Expr, { k: 'clone' }>): Value {
   }
 }
 
-// code-gauge-allow functionCognitiveComplexity 24 -- One case per expression kind, as PHP evaluates each kind differently.
-// code-gauge-allow functionNcss 32 -- One case per expression kind, as PHP evaluates each kind differently.
+// code-gauge-allow functionCognitiveComplexity 28 -- One case per expression kind, as PHP evaluates each kind differently.
+// code-gauge-allow functionNcss 35 -- One case per expression kind, as PHP evaluates each kind differently.
 export function cloneObject(original: PhpObject, withValue?: Value): PhpObject {
   const runtime = rt();
   const scope = runtime.frame.scope;
@@ -759,6 +766,8 @@ export function cloneObject(original: PhpObject, withValue?: Value): PhpObject {
       if (slot.rc > 1) {
         slot.rc++;
         copy.props.set(key, slot);
+        const decl = classesModule.declForKey(copy.cls, key);
+        if (decl?.type) classesModule.attachPropertyReference(slot, decl, copy);
       } else copy.props.set(key, share(slot.v));
     } else copy.props.set(key, typeof slot === 'symbol' ? slot : share(slot));
   }

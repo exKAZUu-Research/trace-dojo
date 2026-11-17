@@ -75,8 +75,8 @@ interface Match {
  * finds them: after an empty match, PCRE looks for a non-empty one at the same place before moving on. Sets the PCRE
  * error and yields nothing for a bad subject or offset.
  */
-// code-gauge-allow functionCognitiveComplexity 24 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
-// code-gauge-allow functionNcss 32 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+// code-gauge-allow functionCognitiveComplexity 26 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+// code-gauge-allow functionNcss 34 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 function* matchesOf(compiled: Compiled, subject: string, offset = 0, status?: { error: number }): Generator<Match> {
   const prepared = prepareSubject(compiled, subject, offset);
   if (!prepared) {
@@ -107,6 +107,8 @@ function* matchesOf(compiled: Compiled, subject: string, offset = 0, status?: { 
     }
     if (text === '' && [...compiled.referenced].some((group) => result.groups?.[groupName(group)] === undefined))
       throw new UnsupportedFeatureError('空文字列に対する未参加キャプチャへの後方参照');
+    if ([...compiled.byteCaselessReferences].some((name) => /[\u0080-\u00FF]/.test(result.groups?.[name] ?? '')))
+      throw new UnsupportedFeatureError('非 ASCII バイトを大文字・小文字を区別せずに後方参照する正規表現');
     const [matchStart, matchEnd] = matchBounds(compiled, result);
     yield toMatch(compiled, result, [matchStart, matchEnd], byteOffset);
     position = matchEnd;

@@ -1,6 +1,6 @@
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import { callCallback, callMethod } from './callables';
-import { findClass } from './classes';
+import { createObject, findClass } from './classes';
 import { toBool } from './conversions';
 import { throwError, warn } from './errors';
 import { arrayIteratorOver } from './libArrayObject';
@@ -55,6 +55,65 @@ export class InnerIterator {
 export function innerIteratorOf(object: PhpObject): InnerIterator {
   return new InnerIterator(iteratorOf(object) ?? object);
 }
+
+class LiveIteratorState {
+  position = 0;
+  constructor(
+    readonly owner: PhpObject,
+    readonly values: () => Value[]
+  ) {}
+  held(): Value[] {
+    return [this.owner];
+  }
+  clone(): never {
+    throwError('Error', 'Trying to clone an uncloneable object of class InternalIterator');
+  }
+}
+
+export function liveArrayIterator(owner: PhpObject, values: () => Value[]): PhpObject {
+  const object = createObject(rt().classes.get('internaliterator') as PhpClass);
+  object.internal = new LiveIteratorState(owner, values);
+  return object;
+}
+
+const liveState = (object: PhpObject): LiveIteratorState => object.internal as LiveIteratorState;
+
+defineClass({
+  name: 'InternalIterator',
+  isFinal: true,
+  interfaces: ['Iterator', 'Traversable'],
+  methods: [
+    {
+      signature: 'current(): mixed',
+      impl: ({ thisObj }) => {
+        const state = liveState(thisObj);
+        const value = state.values()[state.position];
+        if (value === undefined) throwError('OutOfBoundsException', 'Index invalid or out of range');
+        return value;
+      },
+    },
+    { signature: 'key(): int', impl: ({ thisObj }) => BigInt(liveState(thisObj).position) },
+    {
+      signature: 'next(): void',
+      impl: ({ thisObj }) => {
+        liveState(thisObj).position++;
+        return null;
+      },
+    },
+    {
+      signature: 'valid(): bool',
+      impl: ({ thisObj }) => liveState(thisObj).position < liveState(thisObj).values().length,
+    },
+    {
+      signature: 'rewind(): void',
+      impl: ({ thisObj }) => {
+        liveState(thisObj).position = 0;
+        return null;
+      },
+    },
+    { signature: '__construct()', visibility: 'private', impl: () => null },
+  ],
+});
 
 const CIT_CALL_TOSTRING = 1;
 const CIT_TOSTRING_USE_KEY = 2;

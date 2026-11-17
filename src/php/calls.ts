@@ -207,6 +207,8 @@ function runNative(runtime: Runtime, fn: NativeFunction, context: NativeContext)
       throw runtime.memoryExhausted(2 ** 31);
     }
     throw error;
+  } finally {
+    if (context.thisObj) runtime.nativeOwnershipVersion++;
   }
 }
 

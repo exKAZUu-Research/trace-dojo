@@ -438,3 +438,55 @@ test.each(['true', '2.0'])('exit validates strict scalar arguments before termin
 test('weak exit accepts an integral float without precision-loss diagnostics', () => {
   expect(run('<?php echo "before";exit(2.0);echo "after";')).toMatchObject({ kind: 'executed', stdout: 'before' });
 });
+
+test.each([
+  String.raw`<?php preg_match('/\xe9/i',"\xc9");`,
+  String.raw`<?php preg_match('/[\xe0-\xef]/i',"\xc9");`,
+  '<?php preg_match("/(?<=a+)b/","ab");',
+  '<?php preg_match("/(?<=a{1,256})b/","ab");',
+])('rejects regex semantics the host cannot preserve: %s', (source) => {
+  expect(run(source)).toMatchObject({
+    kind: 'executed',
+    uncaughtException: expect.stringContaining('この採点環境では使えません。'),
+  });
+});
+
+test('retains bounded lookbehind and Unicode or ASCII case folding', () => {
+  expect(
+    run('<?php var_dump(preg_match("/(?<=a{1,255})b/","ab"),preg_match("/é/iu","É"),preg_match("/a/i","日A"));')
+  ).toMatchObject({ kind: 'executed', stdout: 'int(1)\nint(1)\nint(1)\n' });
+});
+
+test.each([false, true])(
+  'dropping a long linked object chain uses bounded release work with destructor=%s',
+  (destructor) => {
+    vi.restoreAllMocks();
+    expect(
+      run(
+        `<?php class N{public $next;${destructor ? 'function __destruct(){}' : ''}}$x=null;for($i=0;$i<10000;$i++){$n=new N;$n->next=$x;$x=$n;}unset($n);$x=null;echo 'done';`
+      )
+    ).toMatchObject({
+      kind: 'executed',
+      stdout: 'done',
+    });
+  }
+);
+
+test.each(['mb_strpos', 'mb_strrpos', 'mb_stripos', 'mb_strripos'])(
+  'multibyte substring search bounds repeated-prefix work: %s',
+  (name) => {
+    vi.restoreAllMocks();
+    expect(run(`<?php var_dump(${name}(str_repeat('a',200000),str_repeat('a',100000).'b'));`)).toMatchObject({
+      kind: 'executed',
+      stdout: 'bool(false)\n',
+    });
+  }
+);
+
+test('title casing computes final sigma context without rescanning prefixes', () => {
+  vi.restoreAllMocks();
+  expect(run('<?php echo strlen(mb_convert_case(str_repeat("Σ",50000),MB_CASE_TITLE));')).toMatchObject({
+    kind: 'executed',
+    stdout: '100000',
+  });
+});

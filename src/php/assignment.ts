@@ -136,7 +136,6 @@ function writtenObject(e: Expr): Value {
   return e.k === 'var' ? evQuiet(e) : ev(e);
 }
 
-// code-gauge-allow functionCognitiveComplexity 22 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 function propPlace(object: PhpObject, name: string): Place {
   const scope = rt().frame.scope;
   return {
@@ -147,12 +146,7 @@ function propPlace(object: PhpObject, name: string): Place {
       }
       return readProp(object, name, scope, true);
     },
-    set: (value) => {
-      writeProp(object, name, value, scope);
-      const decl = classesModule.lookupProp(object.cls, name, scope);
-      const slot = object.props.get(decl && !decl.isStatic ? decl.key : name);
-      return slot instanceof Ref ? slot.v : typeof slot === 'symbol' ? value : (slot ?? value);
-    },
+    set: (value) => writeProp(object, name, value, scope),
     ref: () => propRef(object, name, scope),
     unset: () => unsetProp(object, name, scope),
     declaration: () => classesModule.lookupProp(object.cls, name, scope),

@@ -7,15 +7,16 @@ import { magicSerializationMethods, serializationMethods } from './libArrayObjec
 import { defineClass, type NativeMethod } from './native';
 import { strictEquals, toKey } from './operators';
 import { rt } from './runtime';
-import { type Key, type NativeFunction, PhpArray, PhpObject, type Value } from './values';
+import { dropped, type Key, type NativeFunction, PhpArray, PhpObject, type Value } from './values';
 
-/**
- * The storage of an SplObjectStorage or MultipleIterator. Like PHP's hash table, it keeps the slot of a removed object
- * empty, so the iteration position stays on the element it was on.
- */
+interface StorageEntry {
+  object: PhpObject;
+  info: Value;
+}
+
 class ObjectStorage {
-  slots: (PhpObject | undefined)[] = [];
-  entries = new Map<PhpObject, Value>();
+  slots: (StorageEntry | undefined)[] = [];
+  entries = new Map<string | PhpObject, StorageEntry>();
   /** The slot the iteration is at, which may be an empty one before the next element. */
   position = 0;
   /** The number key() reports, which counts the steps since the rewind. */
@@ -23,41 +24,81 @@ class ObjectStorage {
   /** The MultipleIterator flags. */
   flags = 0;
 
-  /** The object whose own properties var_dump shows; a clone's storage has none, as cloning copies it first. */
-  constructor(private readonly holder?: PhpObject) {}
+  constructor(
+    private readonly holder: PhpObject,
+    private readonly hashKeys = false
+  ) {}
 
   held(): Value[] {
-    return [...this.entries.keys(), ...this.entries.values()];
+    return [...this.entries.values()].flatMap(({ object, info }) => [object, info]);
   }
 
-  clone(): ObjectStorage {
-    const copy = new ObjectStorage();
-    for (const [object, info] of this.entries) copy.attach(object, info);
+  clone(holder: PhpObject): ObjectStorage {
+    const copy = new ObjectStorage(holder, this.hashKeys);
+    holder.internal = copy;
+    for (const { object, info } of this.entries.values()) copy.attach(object, info);
     copy.flags = this.flags;
     return copy;
   }
 
   debugEntries(): [Key, Value][] {
     const storage = new PhpArray();
-    for (const [object, data] of this.entries) {
+    for (const { object, info: data } of this.entries.values()) {
       const entry = new PhpArray();
       entry.set('obj', object);
       entry.set('inf', data);
       storage.append(entry);
     }
-    const properties = this.holder ? [...objectToArray(this.holder).entries()] : [];
+    const properties = [...objectToArray(this.holder).entries()];
     return [...properties, ['\0SplObjectStorage\0storage', storage]];
   }
 
   attach(object: PhpObject, info: Value): void {
-    if (!this.entries.has(object)) this.slots.push(object);
-    this.entries.set(object, info);
+    const hash = this.hash(object);
+    const entry = this.entries.get(hash);
+    if (entry) {
+      const old = entry.info;
+      entry.info = info;
+      if (old !== info) dropped(old);
+    } else {
+      rt().allocate(1);
+      const entry = { object, info };
+      this.entries.set(hash, entry);
+      this.slots.push(entry);
+    }
   }
 
   detach(object: PhpObject): boolean {
-    if (!this.entries.delete(object)) return false;
-    this.slots[this.slots.indexOf(object)] = undefined;
+    const hash = this.hash(object);
+    const entry = this.entries.get(hash);
+    if (!entry) return false;
+    this.entries.delete(hash);
+    this.slots[this.slots.indexOf(entry)] = undefined;
+    rt().release([entry.object, entry.info]);
     return true;
+  }
+
+  has(object: PhpObject): boolean {
+    return this.entries.has(this.hash(object));
+  }
+  get(object: PhpObject): Value | undefined {
+    return this.entries.get(this.hash(object))?.info;
+  }
+  currentInfo(): Value {
+    return this.slots[this.validPosition()]?.info ?? null;
+  }
+  setCurrentInfo(value: Value): void {
+    const entry = this.slots[this.validPosition()];
+    if (entry) {
+      const old = entry.info;
+      entry.info = value;
+      if (old !== value) dropped(old);
+    }
+  }
+
+  private hash(object: PhpObject): string | PhpObject {
+    if (!this.hashKeys) return object;
+    return callMethod(this.holder, 'getHash', [object]) as string;
   }
 
   rewind(): void {
@@ -67,7 +108,7 @@ class ObjectStorage {
 
   /** The object at the iteration position, or undefined past the end. */
   current(): PhpObject | undefined {
-    return this.slots[this.validPosition()];
+    return this.slots[this.validPosition()]?.object;
   }
 
   next(): void {
@@ -99,7 +140,7 @@ class ObjectStorage {
   }
 
   objects(): PhpObject[] {
-    return [...this.entries.keys()];
+    return [...this.entries.values()].map(({ object }) => object);
   }
 }
 
@@ -152,14 +193,14 @@ defineClass({
       signature: 'contains(object $object): bool',
       impl: ({ thisObj, args }) => {
         deprecatedMethod('contains', 'offsetExists');
-        return storageOf(thisObj).entries.has(args[0] as PhpObject);
+        return storageOf(thisObj).has(args[0] as PhpObject);
       },
     },
     {
       signature: 'addAll(SplObjectStorage $storage): int',
       impl: ({ thisObj, args }) => {
         const storage = storageOf(thisObj);
-        for (const [object, info] of storageOf(args[0] as PhpObject).entries) storage.attach(object, info);
+        for (const { object, info } of storageOf(args[0] as PhpObject).entries.values()) storage.attach(object, info);
         storage.index = 0;
         return BigInt(storage.entries.size);
       },
@@ -178,7 +219,7 @@ defineClass({
       impl: ({ thisObj, args }) => {
         const storage = storageOf(thisObj);
         const other = storageOf(args[0] as PhpObject);
-        for (const object of storage.objects()) if (!other.entries.has(object)) storage.detach(object);
+        for (const object of storage.objects()) if (!other.has(object)) storage.detach(object);
         storage.rewind();
         return BigInt(storage.entries.size);
       },
@@ -187,16 +228,14 @@ defineClass({
       signature: 'getInfo(): mixed',
       impl: ({ thisObj }) => {
         const storage = storageOf(thisObj);
-        const object = storage.current();
-        return object ? (storage.entries.get(object) as Value) : null;
+        return storage.currentInfo();
       },
     },
     {
       signature: 'setInfo(mixed $info): void',
       impl: ({ thisObj, args }) => {
         const storage = storageOf(thisObj);
-        const object = storage.current();
-        if (object) storage.entries.set(object, args[0]);
+        storage.setCurrentInfo(args[0]);
         return null;
       },
     },
@@ -227,15 +266,16 @@ defineClass({
     ...serializationMethods,
     {
       signature: 'offsetExists($object): bool',
-      impl: ({ thisObj, args }) => storageOf(thisObj).entries.has(storageKey(args[0])),
+      impl: ({ thisObj, args }) => storageOf(thisObj).has(storageKey(args[0])),
     },
     {
       signature: 'offsetGet($object): mixed',
       impl: ({ thisObj, args }) => {
         const storage = storageOf(thisObj);
         const key = storageKey(args[0]);
-        if (!storage.entries.has(key)) throwError('UnexpectedValueException', 'Object not found');
-        return storage.entries.get(key) as Value;
+        const info = storage.get(key);
+        if (info === undefined) throwError('UnexpectedValueException', 'Object not found');
+        return info;
       },
     },
     {
@@ -252,7 +292,7 @@ defineClass({
     },
     ...magicSerializationMethods,
   ],
-  createInternal: (object) => new ObjectStorage(object),
+  createInternal: (object) => new ObjectStorage(object, true),
 });
 
 // MultipleIterator ---------------------------------------------------------------------------------------------------
@@ -275,7 +315,7 @@ const multipleMethods: NativeMethod[] = [
     impl: ({ thisObj, args }) => {
       const storage = storageOf(thisObj);
       const info = args[1] ?? null;
-      if (info !== null && [...storage.entries.values()].some((other) => strictEquals(other, info)))
+      if (info !== null && [...storage.entries.values()].some((other) => strictEquals(other.info, info)))
         throwError('InvalidArgumentException', 'Key duplication error');
       storage.attach(args[0] as PhpObject, info);
       return null;
@@ -287,7 +327,7 @@ const multipleMethods: NativeMethod[] = [
   },
   {
     signature: 'containsIterator(Iterator $iterator): bool',
-    impl: ({ thisObj, args }) => storageOf(thisObj).entries.has(args[0] as PhpObject),
+    impl: ({ thisObj, args }) => storageOf(thisObj).has(args[0] as PhpObject),
   },
   { signature: 'countIterators(): int', impl: ({ thisObj }) => BigInt(storageOf(thisObj).entries.size) },
   { signature: 'rewind(): void', impl: ({ thisObj }) => (callEach(thisObj, 'rewind'), null) },
@@ -317,7 +357,7 @@ function getAll(object: PhpObject, method: 'current' | 'key'): PhpArray {
   const storage = storageOf(object);
   if (storage.entries.size === 0) throwError('RuntimeException', `Called ${method}() on an invalid iterator`);
   const result = new PhpArray();
-  for (const [iterator, info] of storage.entries) {
+  for (const { object: iterator, info } of storage.entries.values()) {
     let value: Value = null;
     if (callMethod(iterator, 'valid', []) === true) value = callMethod(iterator, method, []);
     else if (storage.flags & MIT_NEED_ALL)

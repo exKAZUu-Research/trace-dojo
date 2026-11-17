@@ -74,7 +74,6 @@ try { var_dump(~true); } catch (TypeError $e) { echo $e->getMessage(), "\n"; }
 try { $s = "abc"; var_dump($s[[]]); } catch (TypeError $e) { echo $e->getMessage(), "\n"; }
 class S { function __toString(): string { return "x"; } }
 try { $c = true; new $c; } catch (Error $e) { echo $e->getMessage(), "\n"; }
-try { exit(true); } catch (TypeError $e) { echo $e->getMessage(), "\n"; }
 $c = true;
 try { echo $c::X; } catch (Error $e) { echo $e->getMessage(), "\n"; }
 try { $c::m(); } catch (Error $e) { echo $e->getMessage(), "\n"; }
@@ -88,3 +87,4 @@ var_dump(NAN == 1, 1 < NAN, NAN <=> 1);
 $a = [3, 2.5, 9007199254740993, 9007199254740992.0, 1]; sort($a); var_dump($a);
 $o = new stdClass; $o->me = $o; $r = &$o->me; var_dump($o);
 $a = [1]; $a[] = &$a; var_dump($a);
+try { exit(true); } catch (TypeError $e) { echo $e->getMessage(), "\n"; }

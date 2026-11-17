@@ -3,9 +3,9 @@ import { callMethod } from './callables';
 import { createObject } from './classes';
 import { debugType } from './conversions';
 import { throwError } from './errors';
-import { arrayIteratorOver, magicSerializationMethods, serializationMethods } from './libArrayObject';
+import { magicSerializationMethods, serializationMethods } from './libArrayObject';
 import './libObjectStorage';
-import './libIterators';
+import { liveArrayIterator } from './libIterators';
 import './libRegexIterator';
 import './libRecursiveIterators';
 import { defineClass, type NativeMethod } from './native';
@@ -630,7 +630,7 @@ defineClass({
       },
       {
         signature: 'getIterator(): Iterator',
-        impl: ({ thisObj }) => arrayIteratorOver(PhpArray.list(fixedOf(thisObj).items)),
+        impl: ({ thisObj }) => liveArrayIterator(thisObj, () => fixedOf(thisObj).items),
       },
       {
         signature: 'fromArray(array $array, bool $preserveKeys = true): SplFixedArray',

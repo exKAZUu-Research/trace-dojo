@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 439 -- Keeps one PHP runtime concern and its shared helpers in one module.
+// code-gauge-allow-file fileNcss 445 -- Keeps one PHP runtime concern and its shared helpers in one module.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import type { TurtleState } from '../interpreter/turtleWorld';
 import type { ClassDecl, FunctionDecl } from './ast';
@@ -571,6 +571,10 @@ class PropertyMap extends Map<string, Slot> {
     if (old !== value) dropped(old);
     return this;
   }
+  override clear(): void {
+    invalidateOwner(this.owner);
+    super.clear();
+  }
   override delete(key: string): boolean {
     const old = this.get(key);
     invalidateOwner(this.owner);
@@ -580,10 +584,14 @@ class PropertyMap extends Map<string, Slot> {
   }
 }
 
+let ownershipVersion = 0;
+export const ownershipGeneration = (): number => ownershipVersion;
+
 const reachProofs = new WeakMap<object, object>();
 const proofChildren = new WeakMap<object, Set<object>>();
 
 function invalidateOwner(owner: object): void {
+  ownershipVersion++;
   const pending = [owner];
   const visited = new Set<object>();
   while (pending.length > 0) {

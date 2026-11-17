@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 794 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 795 -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import type { ClassDecl, Expr, FunctionDecl, MethodDeclAst, PropertyDeclAst } from './ast';
 import builtinNames from './builtinNames.json';
@@ -729,8 +729,8 @@ export function readProp(object: PhpObject, name: string, scope: PhpClass | unde
   return null;
 }
 
-// code-gauge-allow functionNcss 54 -- Follows PHP's class linking and property access rules in their order of checks.
-export function writeProp(object: PhpObject, name: string, value: Value, scope: PhpClass | undefined): void {
+// code-gauge-allow functionNcss 55 -- Follows PHP's class linking and property access rules in their order of checks.
+export function writeProp(object: PhpObject, name: string, value: Value, scope: PhpClass | undefined): Value {
   rt().spend();
   const decl = lookupProp(object.cls, name, scope);
   if (decl && !decl.isStatic) {
@@ -738,22 +738,9 @@ export function writeProp(object: PhpObject, name: string, value: Value, scope: 
       const magic = object.cls.findMethod('__set');
       if (magic && !object.guards?.has(`set:${name}`)) {
         guarded(object, `set:${name}`, () => callMagic(object, magic, [name, value]));
-        return;
+        return value;
       }
       throwError('Error', `Cannot access ${decl.visibility} property ${object.cls.name}::$${name}`);
-    }
-    if (decl.hooks?.set && !object.guards?.has(`hook:${name}`)) {
-      guarded(object, `hook:${name}`, () =>
-        invoke(
-          { fn: decl.hooks?.set as Callable, thisObj: object, scope: decl.cls, staticClass: object.cls },
-          [{ v: value }],
-          rt().row
-        )
-      );
-      return;
-    }
-    if (decl.isVirtual && decl.hooks && !decl.hooks.set) {
-      throwError('Error', `Property ${object.cls.name}::$${name} is read-only`);
     }
     if (decl.isReadonly) {
       const current = object.props.get(decl.key);
@@ -780,6 +767,19 @@ export function writeProp(object: PhpObject, name: string, value: Value, scope: 
         `Cannot modify ${visibility}(set) property ${decl.cls.name}::$${name} from ${scopeText(scope)}`
       );
     }
+    if (decl.hooks?.set && !object.guards?.has(`hook:${name}`)) {
+      guarded(object, `hook:${name}`, () =>
+        invoke(
+          { fn: decl.hooks?.set as Callable, thisObj: object, scope: decl.cls, staticClass: object.cls },
+          [{ v: value }],
+          rt().row
+        )
+      );
+      return value;
+    }
+    if (decl.isVirtual && decl.hooks && !decl.hooks.set) {
+      throwError('Error', `Property ${object.cls.name}::$${name} is read-only`);
+    }
     const coerced = decl.type ? coerceProperty(decl, value, object) : value;
     const slot = object.props.get(decl.key);
     if (slot instanceof Ref) slot.assign(coerced);
@@ -787,7 +787,7 @@ export function writeProp(object: PhpObject, name: string, value: Value, scope: 
       object.props.set(decl.key, share(coerced));
       dropped(slot);
     }
-    return;
+    return slot instanceof Ref ? slot.v : coerced;
   }
   const slot = object.props.get(name);
   if (slot !== undefined) {
@@ -796,15 +796,16 @@ export function writeProp(object: PhpObject, name: string, value: Value, scope: 
       object.props.set(name, share(value));
       dropped(slot);
     }
-    return;
+    return slot instanceof Ref ? slot.v : value;
   }
   const magic = object.cls.findMethod('__set');
   if (magic && !object.guards?.has(`set:${name}`)) {
     guarded(object, `set:${name}`, () => callMagic(object, magic, [name, value]));
-    return;
+    return value;
   }
   createDynamicProp(object, name);
   object.props.set(name, share(value));
+  return value;
 }
 
 export function createDynamicProp(object: PhpObject, name: string): void {

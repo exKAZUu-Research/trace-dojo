@@ -122,6 +122,7 @@ export class Runtime {
   readonly constants = new Map<string, Value>();
   readonly objects = new Map<number, PhpObject>();
   readonly internalObjects = new Set<PhpObject>();
+  nativeOwnershipVersion = 0;
   private readonly pendingReleases: unknown[] = [];
   private readonly freeHandles: number[] = [];
   private nextHandle = 1;
@@ -247,6 +248,15 @@ export class Runtime {
     if (this.objects.get(object.id) !== object) return;
     this.objects.delete(object.id);
     this.internalObjects.delete(object);
+    for (const slot of object.props.values())
+      if (slot instanceof Ref) {
+        slot.rc--;
+        if (slot.typedBy) {
+          const constraints = slot.typedBy.filter(({ object: owner }) => owner !== object);
+          slot.typedBy = constraints.length > 0 ? constraints : undefined;
+        }
+      }
+    object.props.clear();
     this.freeHandles.push(object.id);
     if (object.turtle) object.turtle.isAlive = false;
   }

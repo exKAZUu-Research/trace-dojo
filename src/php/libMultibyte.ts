@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 733 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 756 -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 // oxlint-disable unicorn/text-encoding-identifier-case -- mbstring names its encodings in this case.
 // oxlint-disable typescript/no-misused-spread -- PHP splits strings into bytes or code points, never into grapheme clusters.
@@ -84,7 +84,6 @@ defineUtf8Function('mb_str_split(string $string, int $length = 1, ?string $encod
   return PhpArray.list(parts);
 });
 
-// code-gauge-allow functionCognitiveComplexity 17 -- Transcribes PHP's algorithm for this function step by step, whose branches mirror PHP's.
 function mbSearch(args: Value[], reverse: boolean, insensitive: boolean, name: string): Value {
   checkEncoding(name, args, 4);
   const haystack = chars(insensitive ? enc(mapChars(dec(s(args[0])), foldSimple)) : args[0]);
@@ -93,18 +92,41 @@ function mbSearch(args: Value[], reverse: boolean, insensitive: boolean, name: s
   if (offset > haystack.length || offset < -haystack.length) {
     throwError('ValueError', `${name}(): Argument #3 ($offset) must be contained in argument #1 ($haystack)`);
   }
-  const matchesAt = (index: number): boolean => needle.every((char, at) => haystack[index + at] === char);
-  if (!reverse) {
-    if (offset < 0) offset += haystack.length;
-    for (let index = offset; index + needle.length <= haystack.length; index++)
-      if (matchesAt(index)) return BigInt(index);
-    return false;
+  if (!reverse && offset < 0) offset += haystack.length;
+  const start = reverse ? Math.max(offset, 0) : offset;
+  const limit = reverse && offset < 0 ? haystack.length + offset : haystack.length - needle.length;
+  return searchCharacters(haystack, needle, start, Math.min(limit, haystack.length - needle.length), reverse);
+}
+
+// code-gauge-allow functionCognitiveComplexity 21 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+function searchCharacters(text: string[], needle: string[], start: number, limit: number, last: boolean): Value {
+  if (needle.length === 0) return BigInt(last ? limit : start);
+  if (limit < start) return false;
+  const prefix = new Uint32Array(needle.length);
+  for (let index = 1, matched = 0; index < needle.length; index++) {
+    rt().spend();
+    while (matched > 0 && needle[index] !== needle[matched]) {
+      rt().spend();
+      matched = prefix[matched - 1];
+    }
+    if (needle[index] === needle[matched]) matched++;
+    prefix[index] = matched;
   }
-  const start = Math.max(offset, 0);
-  const limit = offset < 0 ? haystack.length + offset : haystack.length - needle.length;
-  for (let index = Math.min(limit, haystack.length - needle.length); index >= start; index--)
-    if (matchesAt(index)) return BigInt(index);
-  return false;
+  let found: Value = false;
+  for (let index = start, matched = 0; index < limit + needle.length; index++) {
+    rt().spend();
+    while (matched > 0 && text[index] !== needle[matched]) {
+      rt().spend();
+      matched = prefix[matched - 1];
+    }
+    if (text[index] === needle[matched]) matched++;
+    if (matched === needle.length) {
+      found = BigInt(index - needle.length + 1);
+      if (!last) return found;
+      matched = prefix[matched - 1];
+    }
+  }
+  return found;
 }
 
 defineUtf8Function(
@@ -176,8 +198,6 @@ const CASE_MODES: readonly ((text: string) => string)[] = [
 ];
 const CASED = /\p{Cased}/u;
 const CASE_IGNORABLE = /\p{Case_Ignorable}/u;
-const FINAL_SIGMA_BEFORE = /\p{Cased}\p{Case_Ignorable}*$/u;
-const FINAL_SIGMA_AFTER = /^\p{Case_Ignorable}*\p{Cased}/u;
 const GEORGIAN = /^[\u10D0-\u10FA\u10FD-\u10FF]$/;
 // The characters whose titlecase in Unicode's UnicodeData.txt and SpecialCasing.txt differs from their uppercase.
 const TITLE_EXCEPTIONS = new Map<string, string>([
@@ -203,24 +223,27 @@ const TITLE_EXCEPTIONS = new Map<string, string>([
 ]);
 
 /** Title-cases each word as mbstring does: a cased character after another, skipping case-ignorable ones, is lowercased. */
+// code-gauge-allow functionCognitiveComplexity 20 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 function titleCase(text: string, simple: boolean): string {
   const list = [...text];
+  const following = new Uint8Array(list.length);
+  let after = false;
+  if (!simple)
+    for (let index = list.length - 1; index >= 0; index--) {
+      rt().spend();
+      following[index] = Number(after);
+      if (!CASE_IGNORABLE.test(list[index])) after = CASED.test(list[index]);
+    }
   let afterCased = false;
   let result = '';
   for (const [index, char] of list.entries()) {
+    rt().spend();
     if (simple) result += afterCased ? lowerSimple(char) : titleSimple(char);
-    else result += afterCased ? lowerInContext(list, index) : titleFull(char);
+    else if (!afterCased) result += titleFull(char);
+    else result += char === 'Σ' && !following[index] ? 'ς' : char.toLowerCase();
     if (!CASE_IGNORABLE.test(char)) afterCased = CASED.test(char);
   }
   return result;
-}
-
-function lowerInContext(list: string[], index: number): string {
-  const char = list[index];
-  if (char !== 'Σ') return char.toLowerCase();
-  const final =
-    FINAL_SIGMA_BEFORE.test(list.slice(0, index).join('')) && !FINAL_SIGMA_AFTER.test(list.slice(index + 1).join(''));
-  return final ? 'ς' : 'σ';
 }
 
 function titleFull(char: string): string {
