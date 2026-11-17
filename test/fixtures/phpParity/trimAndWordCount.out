@@ -25,8 +25,7 @@ string(3) "abc"
 
 Warning: trim(): Invalid '..'-range, no character to the right of '..' in /main.php on line 12
 string(3) "abc"
-string(2) "
-"
+string(4) "0d0a"
 string(1) "|"
 string(5) "ab|c|"
 array(6) {

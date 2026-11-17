@@ -10,7 +10,7 @@ var_dump(rtrim('abcx', '..x'));
 var_dump(trim('abc', 'a..c'));
 var_dump(trim('.abc.', '.'));
 var_dump(trim('abc', 'b..'));
-var_dump(chunk_split("", 2));
+var_dump(bin2hex(chunk_split("", 2)));
 var_dump(chunk_split("", 2, "|"));
 var_dump(chunk_split("abc", 2, "|"));
 var_dump(str_word_count("Hello fri3nd, you're looking good today!", 1, '0..9'));
