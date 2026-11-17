@@ -561,9 +561,12 @@ export class Calls {
     report: boolean,
     at: TreeNode | undefined
   ): boolean {
+    const contexts = restTupleContexts(this.c, restType, args);
     // The tuple is built silently, so the arguments' own errors are reported here.
-    if (report) for (const arg of args) this.c.expressions.check(arg.type === 'spread_element' ? named(arg)[0] : arg);
-    const tuple = this.argumentTuple(args, false);
+    if (report)
+      for (const [index, arg] of args.entries())
+        this.c.expressions.check(arg.type === 'spread_element' ? named(arg)[0] : arg, contexts[index]);
+    const tuple = this.argumentTuple(args, false, contexts);
     if (this.c.relations.isAssignable(tuple, restType)) return true;
     if (report && at)
       this.c.error(
@@ -695,11 +698,12 @@ export class Calls {
   }
 
   /** The tuple of what arguments pass, a spread one passing its tuple's elements or, for an array, a rest element. */
-  private argumentTuple(args: TreeNode[], widen: boolean): Type {
-    const check = (node: TreeNode): Type => this.c.silently(() => this.c.expressions.check(node));
-    const elements = args.flatMap((arg): TupleElement[] => {
+  private argumentTuple(args: TreeNode[], widen: boolean, contexts: (Type | undefined)[] = []): Type {
+    const check = (node: TreeNode, context?: Type): Type =>
+      this.c.silently(() => this.c.expressions.check(node, context));
+    const elements = args.flatMap((arg, index): TupleElement[] => {
       if (arg.type !== 'spread_element') {
-        const type = check(arg);
+        const type = check(arg, contexts[index]);
         return [{ type: widen ? this.c.widenLiteral(type) : type, optional: false, rest: false }];
       }
       const spreadType = check(named(arg)[0]);
@@ -788,4 +792,23 @@ function isTrailingRestTuple(signature: Signature): boolean {
   const last = signature.parameters.at(-1);
   const elements = last?.rest && last.type.kind === 'object' ? last.type.tuple?.elements : undefined;
   return elements !== undefined && elements.slice(0, -1).some((element) => element.rest);
+}
+
+/**
+ * The contextual type of each argument a rest of a tuple type takes, as `...a: [...F[], G]`: its leading elements by
+ * position, its trailing ones from the last argument back, and the rest's elements between; none past a spread.
+ */
+function restTupleContexts(c: Checker, restType: Type, args: TreeNode[]): (Type | undefined)[] {
+  const elements = restType.kind === 'object' ? (restType.tuple?.elements ?? []) : [];
+  const restIndex = elements.findIndex((element) => element.rest);
+  const spread = args.findIndex((arg) => arg.type === 'spread_element');
+  const known = spread === -1 ? args.length : spread;
+  return args.map((_, index) => {
+    if (index >= known) return;
+    if (restIndex === -1 || index < restIndex) return elements[index]?.type;
+    const fromEnd = args.length - 1 - index;
+    const trailing = elements.length - 1 - restIndex;
+    if (spread === -1 && fromEnd < trailing) return elements[elements.length - 1 - fromEnd].type;
+    return c.restElementType(elements[restIndex].type);
+  });
 }
