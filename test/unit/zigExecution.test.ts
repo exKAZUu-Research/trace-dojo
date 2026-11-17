@@ -6918,3 +6918,20 @@ test('fixed native function adapters retain identity and static receiver calls',
     uncaughtException: undefined,
   });
 });
+
+test.each([
+  'const R=union(enum){none,large:P};var l:std.ArrayList(R)=.empty;defer l.deinit(init.gpa);try l.append(init.gpa,.none);for(0..500)|_|{if(l.getLast()!=.none)unreachable;}',
+  'var m=std.AutoHashMap(u8,P).init(init.gpa);defer m.deinit();for(0..500)|_|{if(m.get(1)!=null)unreachable;}',
+  'const l:std.ArrayList(P)=.empty;for(0..500)|_|{if(l.getLastOrNull()!=null)unreachable;}',
+  'const R=struct{value:?P};var l:std.ArrayList(R)=.empty;defer l.deinit(init.gpa);try l.append(init.gpa,.{.value=null});for(0..500)|_|{if(l.getLast().value!=null)unreachable;}',
+  'const R=[2]?P;var l:std.ArrayList(R)=.empty;defer l.deinit(init.gpa);try l.append(init.gpa,.{null,null});for(0..500)|_|{if(l.getLast()[0]!=null)unreachable;}',
+  'const R=error{Bad}!P;var l:std.ArrayList(R)=.empty;defer l.deinit(init.gpa);try l.append(init.gpa,error.Bad);for(0..500)|_|{_=l.getLast() catch {};}',
+])('native result copying charges only active aggregate storage: %s', (body) => {
+  const source = `const std=@import("std");const P=struct{a:[3000]u8};pub fn main(init:std.process.Init)!void{_=&init;${body}std.debug.print("ok",.{});}`;
+  expect(executeProgram('zig', source)).toMatchObject({ kind: 'executed', stderr: 'ok', uncaughtException: undefined });
+});
+
+test('native result copying retains full charges and independent storage for present aggregates', () => {
+  const source = `const std=@import("std");const P=struct{a:[3000]u8};pub fn main(init:std.process.Init)!void{var l:std.ArrayList(P)=.empty;defer l.deinit(init.gpa);try l.append(init.gpa,.{.a=@splat(1)});for(0..500)|_|{const p=&l.getLast();if(p.a[0]!=1)unreachable;}}`;
+  expect(executeProgram('zig', source)).toMatchObject({ kind: 'limitExceeded', limit: 'operations' });
+});

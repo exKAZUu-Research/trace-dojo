@@ -1,6 +1,6 @@
 import { CompileError } from '../interpreter/diagnostics';
 import { ExecutionBudget } from '../interpreter/limits';
-import { CompilationStorage, resolveTypeSlots, transferCost, valueSlots } from './allocation';
+import { CompilationStorage, resolveTypeSlots, valueSlots } from './allocation';
 import { PANIC, panic } from './arith';
 import { isDiscardName } from './ast';
 import type {
@@ -13,6 +13,7 @@ import type {
   Span,
 } from './ast';
 import { markRuntimeStorage } from './comptimeMemory';
+import { copiedValueSlots } from './copyAccounting';
 import { enumLookup } from './enumLookup';
 import {
   type AnyFloat,
@@ -29,7 +30,7 @@ import {
   truncateToBigInt,
 } from './floats';
 import { FunctionInstance } from './functions';
-import { bitSizeOf, hasResolvedLayout, resolveTypeLayout } from './layout';
+import { bitSizeOf, hasResolvedLayout, resolveTypeLayout, sizeOf } from './layout';
 import { MemoryFault, UNDEFINED_MEMORY } from './memoryFault';
 import { type Frame, ZigPanic } from './runtime';
 import { singleValueOf } from './singleValue';
@@ -1498,8 +1499,9 @@ export function valueEvaluators(args: readonly TExpr[]): TExpr['eval'][] {
 }
 
 export function copyForFrame(frame: Frame, value: Value, type: Type): Value {
-  if (!(type.kind === 'struct' && type.namespace.internal)) frame.runtime.reserveStorage(valueSlots(type));
-  frame.runtime.spend(transferCost(type));
+  const slots = copiedValueSlots(type, value, () => frame.runtime.spend());
+  frame.runtime.reserveStorage(slots);
+  frame.runtime.spend(sizeOf(type) === 0 ? 0 : 1 + slots);
   const singleton = type.kind === 'array' ? singleValueOf(type, () => frame.runtime.spend()) : undefined;
   return copyForStorage(singleton ? singleton.value : value);
 }
