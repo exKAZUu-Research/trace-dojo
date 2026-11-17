@@ -1124,3 +1124,48 @@ f x = c (if True then Left x else Right x)`;
   });
   expect(executeProgram('haskell', `${declarations}\nmain = print (f (1 :: Int))`).kind).toBe('compileError');
 });
+
+test.each([
+  ['single do', 'main=(do (undefined::IO())) `seq` putStrLn "ok"', 'Prelude.undefined'],
+  ['let do', 'bad::IO()\nbad=do\n let x=1::Int\n undefined\nmain=bad `seq` putStrLn "ok"', 'Prelude.undefined'],
+  ['binding', 'bad::IO()\nbad=error "construction"\nmain=bad `seq` putStrLn "ok"', 'construction'],
+  ['function', 'bad::Int->IO()\nbad n=error "construction"\nmain=bad 1 `seq` putStrLn "ok"', 'construction'],
+  ['lambda', 'main=((\\n->error "construction"::IO()) (1::Int)) `seq` putStrLn "ok"', 'construction'],
+  ['local binding', 'main=do\n let bad::IO();bad=error "construction"\n bad `seq` putStrLn "ok"', 'construction'],
+  [
+    'guarded',
+    'bad::Int->IO()\nbad n | n>0=error "construction" | otherwise=pure()\nmain=bad 1 `seq` putStrLn "ok"',
+    'construction',
+  ],
+  [
+    'case',
+    'bad::Int->IO()\nbad n=case n of {1->error "construction";_->pure()}\nmain=bad 1 `seq` putStrLn "ok"',
+    'construction',
+  ],
+  ['strict application', 'bad::IO()\nbad=undefined\nmain=return $! bad', 'Prelude.undefined'],
+])('%s preserves IO construction demand', (_name, source, uncaughtException) => {
+  expect(executeProgram('haskell', source)).toMatchObject({ kind: 'executed', stdout: '', uncaughtException });
+});
+
+test.each([
+  'main=(do (undefined::IO()); pure()) `seq` putStrLn "ok"',
+  'main=(do x<-(undefined::IO Int); pure x) `seq` putStrLn "ok"',
+  'bad::IO Int\nbad=pure(error "payload")\nmain=bad `seq` putStrLn "ok"',
+  'bad::IO()\nbad=do\n let unused=error "unused"::Int\n pure()\nmain=bad `seq` bad >> putStrLn "ok"',
+])('IO construction keeps sequencing and return payloads lazy: %s', (source) => {
+  expect(executeProgram('haskell', source)).toMatchObject({
+    kind: 'executed',
+    stdout: 'ok\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('long IO let prefixes preserve shadowing without recursive compilation', () => {
+  const lets = Array.from({ length: 3000 }, (_, i) => ` let x=${i}::Int`).join('\n');
+  const source = `action::IO Int\naction=do\n${lets}\n pure x\nmain=action \`seq\` (action >>= print)`;
+  expect(executeProgram('haskell', source)).toMatchObject({
+    kind: 'executed',
+    stdout: '2999\n',
+    uncaughtException: undefined,
+  });
+});

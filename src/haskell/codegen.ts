@@ -1,6 +1,6 @@
 import { OrderedMap } from 'immutable';
 
-// code-gauge-allow-file fileNcss 933 -- The Core generator covers every construct of the language in one pass over shared state.
+// code-gauge-allow-file fileNcss 953 -- The Core generator covers every construct of the language in one pass over shared state.
 import { ExecutionLimitError, LIMITS } from '../interpreter/limits';
 import {
   CONS_CON,
@@ -109,6 +109,7 @@ export class Codegen {
   private visible = OrderedMap<string, VisibleBinding>();
   private readonly recursion = new RecursionBudget();
   private readonly untracedDoTypes = new Set<object>();
+  private ordinaryIO = false;
   /** The dictionary parameters of the bindings whose bodies are being generated, for their recursive uses. */
   private readonly ownDictParams = new Map<LocalVar | ValueEntity, DictParam[]>();
   readonly claimedAtomicRows = new Set<number>();
@@ -625,9 +626,8 @@ export class Codegen {
     }
   }
 
-  /** A right-hand side's expression: in `IO`, a block of one statement unless it is a `do` block already. */
   private bodyExpr(expr: RExpr, ioResult: boolean): Core {
-    return ioResult ? this.ioBlock(expr) : this.compileExpr(expr);
+    return ioResult && !this.ordinaryIO ? this.ioBlock(expr) : this.compileExpr(expr);
   }
 
   // -------------------------------------------------------------------------------------------------------------
@@ -828,7 +828,7 @@ export class Codegen {
       let body: Core;
       const inner = stripParens(expr.body);
       const binding = { row: expr.span.row, names: expr.pats.flatMap(patternLocals).map((local) => local.name) };
-      if (ioResult) {
+      if (ioResult && !this.ordinaryIO) {
         body = this.ioBlock(expr.body, binding);
       } else if (this.options.isProgram && inner.k === 'do') {
         body = this.compileDo(inner, binding);
@@ -973,7 +973,10 @@ export class Codegen {
   }
 
   private compileDo(expr: Extract<RExpr, { k: 'do' }>, binding?: { row: number; names: string[] }): Core {
-    if (this.options.isProgram && expr.type && isIOType(expr.type)) return this.compileIODo(expr, binding);
+    if (this.options.isProgram && expr.type && isIOType(expr.type)) {
+      if (!this.ordinaryIO) return this.ioBlock(expr, binding);
+      return this.hasSequencing(expr.stmts) ? this.compileIODo(expr, binding) : this.compileLetChain(expr.stmts, 0);
+    }
     const head = expr.type ? splitApp(expr.type).head : undefined;
     const key = head?.tag === 'tcon' ? head.entity : (head ?? expr);
     if (!this.options.isProgram || head?.tag === 'tcon' || this.untracedDoTypes.has(key)) {
@@ -995,18 +998,23 @@ export class Codegen {
   }
 
   private compileLetChain(stmts: readonly RStmt[], index: number): Core {
-    return this.recursion.run(() => this.compileLetChainCore(stmts, index));
-  }
-
-  private compileLetChainCore(stmts: readonly RStmt[], index: number): Core {
-    const stmt = stmts[index];
-    if (stmt.k === 'exp') return this.compileExpr(stmt.expr);
-    if (stmt.k !== 'let') throw new Error('A bind statement in a block without a monad');
     const savedVisible = this.visible;
-    const binds = this.compileLocalGroup(stmt.binds);
-    const body = this.compileLetChain(stmts, index + 1);
-    this.visible = savedVisible;
-    return { k: 'let', binds, body };
+    const binds: { index: number; expr: Core }[] = [];
+    try {
+      for (let position = index; position < stmts.length; position++) {
+        chargeTypeWork();
+        const stmt = stmts[position];
+        if (stmt.k === 'exp') {
+          const body = this.compileExpr(stmt.expr);
+          return binds.length > 0 ? { k: 'let', binds, body } : body;
+        }
+        if (stmt.k !== 'let') throw new Error('A bind statement in a block without a monad');
+        for (const bind of this.compileLocalGroup(stmt.binds)) binds.push(bind);
+      }
+      throw new Error('A do block without a final expression');
+    } finally {
+      this.visible = savedVisible;
+    }
   }
 
   private compileMonadic(stmts: readonly RStmt[], index: number, monad: Evidence): Core {
@@ -1191,32 +1199,54 @@ export class Codegen {
     };
   }
 
-  /** An `IO` expression as a block: a `do` block as it is, `return ()` as it is, and others as one statement. */
   private ioBlock(expr: RExpr, binding?: { row: number; names: string[] }): Core {
     if (expr.k === 'typed' && expr.dictParams?.length)
       return this.compileTyped(expr, () => this.ioBlock(expr.expr, binding));
     const inner = stripParens(expr);
-    if (inner.k === 'do') return this.compileIODo(inner, binding);
+    if (inner.k === 'do' && this.hasSequencing(inner.stmts)) return this.compileIODo(inner, binding);
     if (!binding && isReturnUnit(inner, this.options.support)) return this.compileExpr(inner);
-    return this.withIOFrame(() => {
-      const { code, noStep } = this.compileStatementExpr(inner);
-      return {
-        k: 'iodo',
-        stmts: [
-          {
-            kind: 'exp',
-            row: inner.span.row,
-            expr: code,
-            onlyCalls: isCall(inner),
-            noStep,
-            visible: this.snapshotVisible(),
-          },
-        ],
-        bindingRow: binding?.row,
-        bindingNames: binding?.names,
-        entryVisible: this.snapshotVisible(),
-      };
-    });
+    const ordinary = this.compileOrdinaryIO(inner);
+    const io =
+      inner.k === 'do'
+        ? this.compileIODo(inner, binding)
+        : this.withIOFrame(() => {
+            const { code, noStep } = this.compileStatementExpr(inner);
+            return {
+              k: 'iodo',
+              stmts: [
+                {
+                  kind: 'exp',
+                  row: inner.span.row,
+                  expr: code,
+                  onlyCalls: isCall(inner),
+                  noStep,
+                  visible: this.snapshotVisible(),
+                },
+              ],
+              bindingRow: binding?.row,
+              bindingNames: binding?.names,
+              entryVisible: this.snapshotVisible(),
+            };
+          });
+    return { k: 'deferredDo', ordinary, io };
+  }
+
+  private compileOrdinaryIO(expr: RExpr): Core {
+    const saved = this.ordinaryIO;
+    this.ordinaryIO = true;
+    try {
+      return this.compileExpr(expr);
+    } finally {
+      this.ordinaryIO = saved;
+    }
+  }
+
+  private hasSequencing(stmts: readonly RStmt[]): boolean {
+    for (let index = 0; index < stmts.length - 1; index++) {
+      chargeTypeWork();
+      if (stmts[index].k !== 'let') return true;
+    }
+    return false;
   }
 
   private withIOFrame(build: () => Omit<IODoCore, 'size'>): IODoCore {
