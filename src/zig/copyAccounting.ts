@@ -1,4 +1,5 @@
 import { valueSlots } from './allocation';
+import { hasResolvedLayout } from './layout';
 import type { Type } from './types';
 import { ErrorValue, NULL, optionalPayload, type Value, type ZArray, type ZStruct, type ZUnion } from './values';
 
@@ -20,7 +21,7 @@ function planOf(type: Type, spend: () => void): CopyPlan {
   spend();
   const fixed = valueSlots(type);
   const plan = buildPlan(type, fixed, spend);
-  plans.set(type, plan);
+  if (hasResolvedLayout(type)) plans.set(type, plan);
   return plan;
 }
 
@@ -38,7 +39,7 @@ function buildPlan(type: Type, fixed: number, spend: () => void): CopyPlan {
     }
     case 'array': {
       const child = planOf(type.child, spend);
-      if (!child.active || type.length === 0n) return { fixed };
+      if (!child.active || fixed === 0) return { fixed };
       const length = Number(type.length + (type.sentinel === undefined ? 0n : 1n));
       return {
         fixed: length * (1 + child.fixed),

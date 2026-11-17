@@ -6935,3 +6935,15 @@ test('native result copying retains full charges and independent storage for pre
   const source = `const std=@import("std");const P=struct{a:[3000]u8};pub fn main(init:std.process.Init)!void{var l:std.ArrayList(P)=.empty;defer l.deinit(init.gpa);try l.append(init.gpa,.{.a=@splat(1)});for(0..500)|_|{const p=&l.getLast();if(p.a[0]!=1)unreachable;}}`;
   expect(executeProgram('zig', source)).toMatchObject({ kind: 'limitExceeded', limit: 'operations' });
 });
+
+test.each(['union(enum){one:void}', 'struct{u:union(enum){one:void}}'])(
+  'copy plans keep singleton aggregate arrays virtual: %s',
+  (type) => {
+    const source = `const std=@import("std");const U=${type};fn len(a:[2000000]U)usize{return a.len;}pub fn main()void{const a:[2000000]U=undefined;std.debug.print("{}",.{len(a)});}`;
+    expect(executeProgram('zig', source)).toMatchObject({
+      kind: 'executed',
+      stderr: '2000000',
+      uncaughtException: undefined,
+    });
+  }
+);
