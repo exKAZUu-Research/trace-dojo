@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 424 -- Decides assignability and comparability for every kind of type, as TypeScript's checker does in one place.
+// code-gauge-allow-file fileNcss 426 -- Decides assignability and comparability for every kind of type, as TypeScript's checker does in one place.
 import type { Checker } from './checker';
 import { isUnit } from './flow';
 import { isNumericName } from './syntax';
@@ -43,6 +43,7 @@ export class Relations {
 
   isRelated(source: Type, target: Type, relation: Relation): boolean {
     if (source === target) return true;
+    this.c.budget.spend();
     const key = `${relation}:${source.id}:${target.id}`;
     const cached = this.cache.get(key);
     if (cached !== undefined) return cached;
@@ -395,6 +396,7 @@ export class Relations {
     relation: Relation
   ): boolean {
     for (const [name, targetProperty] of targetStructure.properties) {
+      this.c.budget.spend();
       const sourceProperty =
         source.kind === 'object' || source.kind === 'intersection'
           ? (sourceStructure.properties.get(name) ?? this.c.propertyOf(source, name))

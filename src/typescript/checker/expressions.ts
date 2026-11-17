@@ -76,6 +76,7 @@ export class ExpressionChecker {
   // Entry points -------------------------------------------------------------------------------------------------
 
   check(node: TreeNode, contextual?: Type): Type {
+    this.c.budget.spend();
     const checkKind = this.checkers.get(node.type);
     if (checkKind) return checkKind(node, contextual);
     for (const child of named(node)) this.check(child);

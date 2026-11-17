@@ -211,6 +211,7 @@ export class TypeOperators {
     const structure = emptyStructure();
     const { constraint } = info;
     for (const key of constraint.kind === 'union' ? constraint.types : [constraint]) {
+      this.c.budget.spend();
       const mapper: Mapper = new Map([[info.typeParameter.id, key]]);
       const nameType = info.nameType ? this.c.instantiate(info.nameType, mapper) : key;
       for (const nameMember of nameType.kind === 'union' ? nameType.types : [nameType]) {
@@ -432,6 +433,7 @@ export class TypeOperators {
         break;
       }
       combinations = appendEach(combinations, members, texts[index + 1]);
+      this.c.budget.spend(combinations.length);
       if (combinations.length > 10_000) return stringType;
     }
     if (isLiteral) return unionOf(combinations.map((text) => literalType(text)));

@@ -250,7 +250,7 @@ export const nonPrimitiveType = intrinsic('object');
 /** The type of an expression that already caused an error, which compares with anything to avoid more errors. */
 export const errorType: IntrinsicType = { kind: 'intrinsic', id: newTypeId(), name: 'any' };
 
-const literalTypes = new Map<string, LiteralType>();
+let literalTypes = new Map<string, LiteralType>();
 
 /** The regular (non-widening) literal type of a value. */
 export function literalType(value: string | number | bigint | boolean): LiteralType {
@@ -289,7 +289,20 @@ export function regularOf(type: Type): Type {
   return type;
 }
 
-const unionCache = new Map<string, UnionType>();
+let unionCache = new Map<string, UnionType>();
+
+/** The cached types made as the modules loaded, such as `boolean`, which every check starts from. */
+let loadedTypes: { literals: Map<string, LiteralType>; unions: Map<string, UnionType> } | undefined;
+
+/**
+ * Starts the caches of literal and union types afresh for a check. A cached type can hold the types of the check that
+ * made it, and through them the whole check, which a server running program after program must not keep.
+ */
+export function startTypeCaches(): void {
+  loadedTypes ??= { literals: new Map(literalTypes), unions: new Map(unionCache) };
+  literalTypes = new Map(loadedTypes.literals);
+  unionCache = new Map(loadedTypes.unions);
+}
 
 function unionSortKey(type: Type): number {
   return type.id;

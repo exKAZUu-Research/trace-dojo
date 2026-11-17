@@ -128,3 +128,20 @@ test.each([
 ])('%s stops at the execution limits', (_, source, expected) => {
   expect(executeProgram('typescript', source)).toEqual(expected);
 });
+
+test('type checking stops at the execution limits, as the server checks programs in its own process', () => {
+  const heavyTypes = Array.from(
+    { length: 8 },
+    (_, index) => `type D${index} = "0" | "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9";
+type M${index} = { [K in \`\${D${index}}\${D${index}}\${D${index}}\${D${index}}\`]: K };
+const m${index}: Partial<M${index}> = {};`
+  ).join('\n');
+  expect(executeProgram('typescript', heavyTypes)).toMatchObject({ kind: 'limitExceeded' });
+});
+
+test('nested loops are checked once per loop, not once per pass of every enclosing loop', () => {
+  const depth = 40;
+  const loops = Array.from({ length: depth }, (_, index) => `for (let i${index} = 0; i${index} < 1; i${index}++) {`);
+  const source = `let x: number | string = 1;\n${loops.join('\n')}\nx = x === 1 ? "a" : 1;\n${'}'.repeat(depth)}\nconsole.log(x);`;
+  expect(executeProgram('typescript', source)).toMatchObject({ kind: 'executed', stdout: 'a\n' });
+});

@@ -1,6 +1,7 @@
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import type { SourceDiagnostic } from '../../interpreter/diagnostics';
+import { ExecutionBudget } from '../../interpreter/limits';
 import { AssignmentChecker } from './assignments';
 import { Binder } from './binder';
 import { ClassDeclarationChecker } from './classDeclarations';
@@ -40,6 +41,7 @@ import {
   regularOf,
   type Signature,
   simpleProperty,
+  startTypeCaches,
   stringType,
   type Structure,
   symbolType,
@@ -86,7 +88,14 @@ export class Checker {
   /** The members of class instance types with `this` standing for the instance type, by type. */
   private readonly thisStructures = new Map<number, Structure>();
 
+  /**
+   * The operations and the time checking may take, as running a program may: a program can make checking slow, and
+   * the server checks it in its own process.
+   */
+  readonly budget = new ExecutionBudget();
+
   constructor(readonly root: TreeNode) {
+    startTypeCaches();
     this.libraryBinder = new Binder(libraryTree.rootNode, libraryScope());
     markUnsupported(this.libraryBinder.moduleScope);
     this.binder = new Binder(root, this.libraryBinder.moduleScope);
@@ -224,6 +233,7 @@ export class Checker {
 
   instantiate(type: Type, mapper: Mapper): Type {
     if (mapper.size === 0) return type;
+    this.budget.spend();
     switch (type.kind) {
       case 'typeParameter': {
         return mapper.get(type.id) ?? type;

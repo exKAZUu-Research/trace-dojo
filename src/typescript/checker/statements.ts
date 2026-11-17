@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 501 -- Follows the flow of control through each kind of statement.
+// code-gauge-allow-file fileNcss 518 -- Follows the flow of control through each kind of statement.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import type { Checker } from './checker';
@@ -30,6 +30,8 @@ const MAX_LOOP_PASSES = 3;
 
 /** Checks statements, following the flow of control through them. */
 export class StatementChecker {
+  /** Where each loop checked silently exits, by the loop and its entry state. */
+  private readonly silentLoopExits = new Map<string, State[]>();
   private readonly jumpTargets: JumpTarget[] = [];
   /** How each kind of statement is checked; the others need no checks. */
   private readonly checkers = new Map<string, (node: TreeNode) => void>([
@@ -393,36 +395,63 @@ export class StatementChecker {
    *
    * @param iterate Runs one iteration from the current state and returns the state where the loop exits from it.
    */
-  private loop(iterate: (target: JumpTarget) => State): void {
+  private loop(node: TreeNode, iterate: (target: JumpTarget) => State): void {
     const entry = this.c.flow.current;
+    // An enclosing loop's silent passes check this loop once each; the same entry state leaves it the same way.
+    const key = this.c.silent > 0 ? `${node.id}:${this.stateKey(entry)}` : undefined;
+    const known = key === undefined ? undefined : this.silentLoopExits.get(key);
+    if (known) {
+      this.c.flow.current = this.c.flow.merge(known);
+      return;
+    }
     let state = entry?.clone();
+    let last: { exit: State; breaks: State[] } | undefined;
     for (let pass = 0; pass < MAX_LOOP_PASSES; pass++) {
       const target: JumpTarget = { isLoop: true, breaks: [], continues: [] };
       let backEdge: State;
+      let exit: State;
       this.c.silently(() => {
         this.c.flow.current = state?.clone();
         this.jumpTargets.push(target);
         try {
-          iterate(target);
+          exit = iterate(target);
           backEdge = this.c.flow.current;
         } finally {
           this.jumpTargets.pop();
         }
       });
       const next = this.c.flow.merge([entry, backEdge!]);
-      if (this.sameState(next, state)) break;
+      if (this.sameState(next, state)) {
+        last = { exit: exit!, breaks: target.breaks };
+        break;
+      }
       state = next;
     }
+    // Checking silently already, the pass that settled the loop is the one that would report errors.
+    const exits = last && this.c.silent > 0 ? [last.exit, ...last.breaks] : this.finalPass(state, iterate);
+    if (key !== undefined) this.silentLoopExits.set(key, exits);
+    this.c.flow.current = this.c.flow.merge(exits);
+  }
+
+  /** Runs a loop's iteration once more from its settled state, reporting errors, and returns where it exits. */
+  private finalPass(state: State, iterate: (target: JumpTarget) => State): State[] {
     const target: JumpTarget = { isLoop: true, breaks: [], continues: [] };
     this.c.flow.current = state;
     this.jumpTargets.push(target);
-    let exit: State;
     try {
-      exit = iterate(target);
+      return [iterate(target), ...target.breaks];
     } finally {
       this.jumpTargets.pop();
     }
-    this.c.flow.current = this.c.flow.merge([exit, ...target.breaks]);
+  }
+
+  /** A key that two states share when they hold the same types for the same references. */
+  private stateKey(state: State): string {
+    if (!state) return '-';
+    const entries = [...state.entries].map(
+      ([reference, entry]) => `${reference}=${entry.type.id}${entry.assigned ? '' : '?'}${entry.constraint?.id ?? ''}`
+    );
+    return `${entries.toSorted().join(',')}|${[...state.assignedFields].toSorted().join(',')}`;
   }
 
   private sameState(a: State, b: State): boolean {
@@ -438,7 +467,7 @@ export class StatementChecker {
   private whileStatement(node: TreeNode): void {
     const condition = node.childForFieldName('condition') as TreeNode;
     const body = node.childForFieldName('body') as TreeNode;
-    this.loop((target) => {
+    this.loop(node, (target) => {
       const { whenTrue, whenFalse } = this.c.conditions.checkCondition(condition);
       this.c.flow.current = whenTrue;
       this.checkSubstatement(body);
@@ -451,7 +480,7 @@ export class StatementChecker {
   private doStatement(node: TreeNode): void {
     const condition = node.childForFieldName('condition') as TreeNode;
     const body = node.childForFieldName('body') as TreeNode;
-    this.loop((target) => {
+    this.loop(node, (target) => {
       this.checkSubstatement(body);
       this.c.flow.current = this.c.flow.merge([this.c.flow.current, ...target.continues]);
       if (!this.c.flow.isReachable) return;
@@ -471,7 +500,7 @@ export class StatementChecker {
     const body = node.childForFieldName('body') as TreeNode;
     if (initializer && initializer.type !== 'empty_statement') this.forInitializer(initializer);
     const conditionNode = condition && condition.type === 'expression_statement' ? named(condition)[0] : condition;
-    this.loop((target) => {
+    this.loop(node, (target) => {
       let whenFalse: State;
       if (conditionNode) {
         const result = this.c.conditions.checkCondition(conditionNode);
@@ -505,7 +534,7 @@ export class StatementChecker {
     const rightType = this.c.expressions.check(right);
     const elementType = isOf ? this.c.patterns.iteratedType(right, rightType) : this.forInKeyType(right, rightType);
     const body = node.childForFieldName('body') as TreeNode;
-    this.loop((target) => {
+    this.loop(node, (target) => {
       const head = this.c.flow.current?.clone();
       if (kind) this.bindLoopVariables(left, kind, elementType);
       else this.assignLoopVariables(left, elementType);

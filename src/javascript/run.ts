@@ -13,13 +13,14 @@ export function executeJavaScriptProgram(source: string, input?: ProgramInput): 
 }
 
 /** Parses a program with `parse`, which throws a `CompileError` to reject it, and runs it. */
-// code-gauge-allow duplicateLines 15 -- Each language's runner wraps its own parser and runtime.
 export function executeParsedProgram(parse: () => Program, input?: ProgramInput): ProgramExecution {
   let program: Program;
   try {
     program = parse();
   } catch (error) {
     if (error instanceof CompileError) return { kind: 'compileError', diagnostics: error.diagnostics };
+    // Checking a program before it runs is bounded as running it is.
+    if (error instanceof ExecutionLimitError) return { kind: 'limitExceeded', limit: error.limit };
     throw error;
   }
   try {
