@@ -1,0 +1,12 @@
+(1,5): error TS2451: Cannot redeclare block-scoped variable 'a'.
+(2,5): error TS2451: Cannot redeclare block-scoped variable 'a'.
+(3,7): error TS1155: 'const' declarations must be initialized.
+(3,7): error TS7005: Variable 'z' implicitly has an 'any' type.
+(4,16): error TS1107: Jump target cannot cross function boundary.
+(5,16): error TS1107: Jump target cannot cross function boundary.
+(7,9): error TS1182: A destructuring declaration must have an initializer.
+(7,10): error TS7031: Binding element 'p' implicitly has an 'any' type.
+(10,8): error TS1156: 'let' declarations can only be declared inside a block.
+(12,18): error TS1107: Jump target cannot cross function boundary.
+(13,9): error TS1182: A destructuring declaration must have an initializer.
+(13,11): error TS7031: Binding element 'r' implicitly has an 'any' type.
