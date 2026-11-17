@@ -1,7 +1,7 @@
 import { LIMITS } from '../interpreter/limits';
 import { type Thunk, type Value } from './values';
 
-type PreviewKind = 'scalar' | 'composite';
+export type PreviewKind = 'scalar' | 'composite';
 
 interface PreviewUsage {
   operations: number;
@@ -47,6 +47,7 @@ export class PreviewBudget {
     composite: { operations: 0, milliseconds: 0 },
   };
   private readonly debts = new WeakMap<Thunk, PreviewDebt>();
+  private readonly aborted = new WeakMap<Thunk, PreviewKind>();
   private active: PreviewTransaction | undefined;
 
   spend(operations: number, executionOperations: number, allocations: number): void {
@@ -66,8 +67,16 @@ export class PreviewBudget {
     if (performance.now() > active.deadline) throw new DisplayAbort();
   }
 
-  force(work: () => Value, kind: PreviewKind): Value {
-    return this.run(() => this.forceInTransaction(work), kind);
+  force(slot: Thunk, work: () => Value, kind: PreviewKind): Value {
+    kind = this.active?.kind ?? kind;
+    const aborted = this.aborted.get(slot);
+    if (aborted === 'scalar' || aborted === kind) throw new DisplayAbort();
+    try {
+      return this.run(() => this.forceInTransaction(work), kind);
+    } catch (error) {
+      if (error instanceof DisplayAbort) this.aborted.set(slot, kind);
+      throw error;
+    }
   }
 
   private forceInTransaction(work: () => Value): Value {

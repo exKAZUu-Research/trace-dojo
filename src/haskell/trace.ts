@@ -6,6 +6,7 @@ import type { DisplayNode, TraceItemVariable } from '../problems/trace';
 import { CHAR_TYPE, CONS_CON, FLOAT_TYPE, NIL_CON, UNIT_CON } from './builtinTypes';
 import { compileProgram } from './compile';
 import { constructorFieldType, isScalarType, slotDisplayType, UNKNOWN_TYPE } from './displayTypes';
+import type { PreviewKind } from './previewBudget';
 import { floatToDigits } from './primitives';
 import { runProgram } from './run';
 import { DisplayAbort, Runtime, type TraceFrame } from './runtime';
@@ -79,7 +80,7 @@ function addSlotVariable(
   type: Type
 ): { value: Value; type: Type } | undefined {
   return displayAttempt(runtime, () => {
-    const value = forceForDisplay(runtime, slot, slotDisplayType(slot, type));
+    const value = forceForDisplay(runtime, slot, previewKind(slotDisplayType(slot, type), name === 'this'));
     if (value === undefined) return;
     const displayType = slotDisplayType(slot, type);
     addVariable(runtime, variables, name, value, displayType);
@@ -97,14 +98,9 @@ function addSelfFields(
   if (!(self instanceof ConValue) || !self.con.fieldNames) return;
   for (const [index, field] of self.fields.entries()) {
     const scalar = displayAttempt(runtime, () => {
-      const forced = forceForDisplay(
-        runtime,
-        field,
-        slotDisplayType(field, constructorFieldType(self.con, entry.type, index))
-      );
-      return forced === undefined
-        ? NOT_SCALAR
-        : scalarForDisplay(runtime, forced, slotDisplayType(field, constructorFieldType(self.con, entry.type, index)));
+      const fieldType = slotDisplayType(field, constructorFieldType(self.con, entry.type, index));
+      const forced = forceForDisplay(runtime, field, previewKind(fieldType));
+      return forced === undefined ? NOT_SCALAR : scalarForDisplay(runtime, forced, slotDisplayType(field, fieldType));
     });
     if (scalar !== undefined && scalar !== NOT_SCALAR) variables.vars[`this.${self.con.fieldNames[index]}`] = scalar;
   }
@@ -123,16 +119,14 @@ function displayAttempt<T>(runtime: Runtime, work: () => T): T | undefined {
 }
 
 /** Evaluates a value for display, leaving it unevaluated when that fails or takes too long. */
-function forceForDisplay(runtime: Runtime, slot: Slot, type: Type = UNKNOWN_TYPE): Value | undefined {
+function forceForDisplay(runtime: Runtime, slot: Slot, kind: PreviewKind = 'composite'): Value | undefined {
   slot = untypedSlot(slot);
   const ready = peek(slot);
   if (ready !== undefined) return ready;
-  if (slot instanceof Thunk && slot.state !== 'done' && runtime.displayAborted.has(slot)) return;
   return runtime.withDisplayBudget(DISPLAY_OPERATIONS, () => {
     try {
-      return slot instanceof Thunk ? runtime.forcePreview(slot, isScalarType(type)) : slot;
+      return slot instanceof Thunk ? runtime.forcePreview(slot, kind) : slot;
     } catch (error) {
-      if (error instanceof DisplayAbort && slot instanceof Thunk) runtime.displayAborted.add(slot);
       if (error instanceof HaskellException || error instanceof DisplayAbort) return;
       throw error;
     }
@@ -161,11 +155,22 @@ function addVariable(runtime: Runtime, variables: VariableDisplay, name: string,
 function scalarForDisplay(runtime: Runtime, value: Value, type: Type): ReturnType<typeof scalarOf> {
   if (!(value instanceof ConValue) || value.fields.length === 0) return scalarOf(runtime, value, type, 0);
   try {
-    return runtime.withPreviewBudget(() => scalarOf(runtime, value, type, 0));
+    return runtime.withPreviewBudget(() => scalarOf(runtime, value, type, 0), previewKind(type));
   } catch (error) {
     if (error instanceof DisplayAbort) return NOT_SCALAR;
     throw error;
   }
+}
+
+function previewKind(type: Type, self = false): PreviewKind {
+  if (isScalarType(type)) return 'scalar';
+  const { head } = splitApp(prune(type));
+  if (head.tag !== 'tcon') return 'composite';
+  const entity = head.entity;
+  if (self && entity.fields.size > 0) return 'scalar';
+  if (entity.special || (entity.module === 'Base' && entity.name === 'Maybe')) return 'composite';
+  if (entity.module === 'Base' && entity.name === 'Ratio') return 'scalar';
+  return entity.cons.some((con) => con.arity === 0 && !con.isLibraryPrivate) ? 'scalar' : 'composite';
 }
 
 /** Functions, actions, and `()` are not variables to learners. */

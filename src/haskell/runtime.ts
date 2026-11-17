@@ -8,7 +8,7 @@ import type { InstanceInfo } from './entities';
 import { markReachable } from './gc';
 import type { TraceContext } from './ioBlocks';
 import { Machine } from './machine';
-import { DisplayAbort, PreviewBudget } from './previewBudget';
+import { DisplayAbort, PreviewBudget, type PreviewKind } from './previewBudget';
 import type { Type } from './types';
 import { withTypeWorkBudget } from './typeWorkBudget';
 import { Dict, type Env, type Slot, Thunk, type Value } from './values';
@@ -53,7 +53,6 @@ export class Runtime implements TracedRuntime<TraceFrame> {
   readonly steps = new StepTracker();
   readonly frames: TraceFrame[] = [];
   readonly machine: Machine;
-  readonly displayAborted = new WeakSet<Thunk>();
   displaysAnswer?: (name: string, slot: Slot, type: Type) => boolean;
   private readonly globals = new Map<GlobalDef, Slot>();
   private readonly dictCache = new Map<InstanceInfo, Dict>();
@@ -85,12 +84,12 @@ export class Runtime implements TracedRuntime<TraceFrame> {
     }
   }
 
-  withPreviewBudget<T>(run: () => T): T {
-    return this.previews.run(run);
+  withPreviewBudget<T>(run: () => T, kind: PreviewKind = 'composite'): T {
+    return this.previews.run(run, kind);
   }
 
-  forcePreview(slot: Thunk, scalar: boolean): Value {
-    return this.previews.force(() => this.machine.force(slot), scalar ? 'scalar' : 'composite');
+  forcePreview(slot: Thunk, kind: PreviewKind): Value {
+    return this.previews.force(slot, () => this.machine.force(slot), kind);
   }
 
   consumePreview(slot: Thunk): void {
