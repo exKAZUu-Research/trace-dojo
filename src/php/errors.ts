@@ -1,5 +1,20 @@
 import { FatalError, PhpThrow, rt, SCRIPT_PATH } from './runtime';
-import { PhpObject, type Value } from './values';
+import { PhpObject, Ref, type Value } from './values';
+
+let formatThrowable: (object: PhpObject) => string;
+
+export function setThrowableFormatter(format: typeof formatThrowable): void {
+  formatThrowable = format;
+}
+
+export function reportUncaughtWarning(object: PhpObject): void {
+  const runtime = rt();
+  const line = object.props.get('line');
+  if (runtime.silence === 0 && (runtime.errorReporting & E_WARNING) !== 0n)
+    runtime.echo(
+      `\nWarning: Uncaught ${formatThrowable(object)}\n  thrown in ${SCRIPT_PATH} on line ${typeof line === 'bigint' ? line : 0}\n`
+    );
+}
 
 /** Creates a throwable of a builtin class with a message, which the interpreter provides. */
 let createThrowable: (className: string, message: string, code?: bigint) => PhpObject = () => {
@@ -129,4 +144,34 @@ export function fatal(message: string): never {
 
 export function isThrowable(value: Value): value is PhpObject {
   return value instanceof PhpObject && value.cls.isSubclassOf(rt().classes.get('throwable') as never);
+}
+
+/** Appends `previous` to the end of the chain of previous exceptions of `exception`, as zend_exception_set_previous does. */
+export function setPrevious(exception: PhpObject, previous: PhpObject): void {
+  if (exception === previous) return;
+  for (let current = exception; ;) {
+    if (current === previous) return;
+    for (let ancestor = previousOf(previous); ancestor instanceof PhpObject; ancestor = previousOf(ancestor)) {
+      if (ancestor === current) return;
+    }
+    const next = previousOf(current);
+    if (!(next instanceof PhpObject)) {
+      current.props.set(previousKey(current), previous);
+      return;
+    }
+    current = next;
+  }
+}
+
+function previousOf(exception: PhpObject): PhpObject | undefined {
+  const slot = exception.props.get(previousKey(exception));
+  const value = slot instanceof Ref ? slot.v : slot;
+  return value instanceof PhpObject ? value : undefined;
+}
+
+/** The key of the private `previous` property, which Exception or Error declares. */
+function previousKey(exception: PhpObject): string {
+  let base = exception.cls;
+  while (base.parent) base = base.parent;
+  return `\0${base.name}\0previous`;
 }

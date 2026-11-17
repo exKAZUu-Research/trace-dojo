@@ -17,7 +17,7 @@ import {
   writeProp,
 } from './classes';
 import { toBool, valueName } from './conversions';
-import { E_DEPRECATED, E_WARNING, emitError, throwError, warn } from './errors';
+import { E_DEPRECATED, E_WARNING, emitError, setPrevious, throwError, warn } from './errors';
 import { collectBeforeAllocation, setDestructor } from './garbage';
 import { ev, evQuiet, evReturn } from './interp';
 import { looseEquals, setObjectConversions, toStr } from './operators';
@@ -437,34 +437,6 @@ function tryCatchStatement(statement: Extract<Stmt, { k: 'try' }>, seek?: string
   }
 }
 
-/** Appends `previous` to the end of the chain of previous exceptions of `exception`, as zend_exception_set_previous does. */
-function setPrevious(exception: PhpObject, previous: PhpObject): void {
-  if (exception === previous) return;
-  for (let current = exception; ;) {
-    for (let ancestor = previousOf(previous); ancestor instanceof PhpObject; ancestor = previousOf(ancestor)) {
-      if (ancestor === current) return;
-    }
-    const next = previousOf(current);
-    if (!(next instanceof PhpObject)) {
-      current.props.set(previousKey(current), previous);
-      return;
-    }
-    current = next;
-  }
-}
-
-function previousOf(exception: PhpObject): Value {
-  const slot = exception.props.get(previousKey(exception));
-  return slot instanceof Ref ? slot.v : ((slot as Value | undefined) ?? null);
-}
-
-/** The key of the private `previous` property, which Exception or Error declares. */
-function previousKey(exception: PhpObject): string {
-  let base = exception.cls;
-  while (base.parent) base = base.parent;
-  return `\0${base.name}\0previous`;
-}
-
 function catches(object: PhpObject, name: string): boolean {
   const cls = findClass(name);
   return cls !== undefined && object.cls.isSubclassOf(cls);
@@ -680,6 +652,7 @@ setDefaultEvaluator((decl, index) => {
 setClassEvaluator((e, cls) => {
   const runtime = rt();
   const frame = new Frame(undefined, undefined, false, undefined, cls, cls);
+  frame.constantExpression = true;
   runtime.frames.push(frame);
   try {
     return ev(e);

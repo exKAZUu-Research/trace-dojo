@@ -2,8 +2,7 @@
 import { callMethod } from './callables';
 import { declForKey, propNameOf } from './classes';
 import { formatFloat, formatFloatRepr } from './conversions';
-import { deprecated, E_ERROR, E_WARNING, warn } from './errors';
-import { throwableText } from './exceptions';
+import { deprecated, E_ERROR, reportUncaughtWarning, warn } from './errors';
 import { toStr } from './operators';
 import { FatalError, PhpThrow, rt } from './runtime';
 import { describeType } from './types';
@@ -19,11 +18,7 @@ function debugEntries(object: PhpObject): [string | bigint, Slot, string][] {
       info = callMethod(object, '__debugInfo', []);
     } catch (error) {
       if (!(error instanceof PhpThrow)) throw error;
-      const line = error.object.props.get('line');
-      if (rt().silence === 0 && (rt().errorReporting & E_WARNING) !== 0n)
-        rt().echo(
-          `\nWarning: Uncaught ${throwableText(error.object)}\n  thrown in /main.php on line ${typeof line === 'bigint' ? line : 0}\n`
-        );
+      reportUncaughtWarning(error.object);
       failDebugInfo();
     }
     if (info === null) {

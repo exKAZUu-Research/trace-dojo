@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 550 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 560 -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import type { Expr, ListItem } from './ast';
 import { callMethod } from './callables';
@@ -245,12 +245,23 @@ function issetPropExists(object: PhpObject, name: string, scope: PhpClass | unde
   return object.props.has(name);
 }
 
-let nativeArrayStorage: (value: unknown) => value is { writable(): PhpArray; readonly array: PhpArray } = (
-  _value
-): _value is { writable(): PhpArray; readonly array: PhpArray } => false;
+interface NativeArrayStorage {
+  writable(): PhpArray;
+  readonly array: PhpArray;
+  cursor(): { readonly key: Key | undefined };
+}
+let nativeArrayStorage: (value: unknown) => value is NativeArrayStorage = (_value): _value is NativeArrayStorage =>
+  false;
 
 export function setNativeArrayStorage(check: typeof nativeArrayStorage): void {
   nativeArrayStorage = check;
+}
+
+export function nativeIteratorSlot(object: PhpObject): Value | Ref | undefined {
+  const storage = object.internal;
+  if (!nativeArrayStorage(storage) || object.cls.findMethod('current')?.fn.kind !== 'native') return;
+  const key = storage.cursor().key;
+  return key === undefined ? undefined : storage.array.map.get(key);
 }
 
 function arrayAccessPlace(object: PhpObject, key: Value | undefined): Place {

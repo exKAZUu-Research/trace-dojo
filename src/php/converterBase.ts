@@ -169,32 +169,50 @@ export abstract class ConverterBase {
     this.error(node, '書き方に誤りがあります。');
   }
 
-  // code-gauge-allow functionCognitiveComplexity 28 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+  // code-gauge-allow functionNcss 35 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
   protected checkGotos(context: FunctionContext, body: Stmt[]): void {
+    interface Location {
+      loops: Stmt[];
+      finalizers: Stmt[][];
+    }
+    const locations = new Map<Stmt, Location>();
+    const labels = new Map<string, Stmt>();
+    const gotos = new Map<number, Stmt>();
+    const visit = (statements: Stmt[], location: Location): void => {
+      for (const statement of statements) {
+        locations.set(statement, location);
+        if (statement.k === 'label') labels.set(statement.name, statement);
+        if (statement.k === 'goto') gotos.set(statement.offset, statement);
+        if (statement.k === 'break' || statement.k === 'continue') {
+          const target = location.loops.at(-statement.depth);
+          const destination = target && locations.get(target);
+          if (destination && location.finalizers.some((fin) => !destination.finalizers.includes(fin))) {
+            this.error(statement.row, 'jump out of a finally block is disallowed');
+          }
+        }
+        for (const [nested, isLoop] of nestedBodies(statement)) {
+          visit(nested, {
+            loops: isLoop ? [...location.loops, statement] : location.loops,
+            finalizers:
+              statement.k === 'try' && nested === statement.fin
+                ? [...location.finalizers, nested]
+                : location.finalizers,
+          });
+        }
+      }
+    };
+    visit(body, { loops: [], finalizers: [] });
     for (const { label, row, offset } of context.gotos) {
       if (!context.labels.has(label))
         this.error(row, `goto の行き先のラベル「${label}」がありません（'goto' to undefined label '${label}'）。`);
-      const scopes = (
-        statements: Stmt[],
-        target: (statement: Stmt) => boolean,
-        parents: Stmt[] = []
-      ): Stmt[] | undefined => {
-        for (const statement of statements) {
-          if (target(statement)) return parents;
-          for (const [nested, isLoop] of nestedBodies(statement)) {
-            const found = scopes(nested, target, isLoop ? [...parents, statement] : parents);
-            if (found) return found;
-          }
-        }
-        return undefined;
-      };
-      const source =
-        scopes(
-          body,
-          (statement) => statement.k === 'goto' && statement.label === label && statement.offset === offset
-        ) ?? [];
-      const destination = scopes(body, (statement) => statement.k === 'label' && statement.name === label) ?? [];
-      if (destination.some((scope) => !source.includes(scope))) {
+      const source = locations.get(gotos.get(offset) as Stmt);
+      const destination = locations.get(labels.get(label) as Stmt);
+      if (!source || !destination) continue;
+      if (source.finalizers.some((fin) => !destination.finalizers.includes(fin)))
+        this.error(row, 'jump out of a finally block is disallowed');
+      if (destination.finalizers.some((fin) => !source.finalizers.includes(fin)))
+        this.error(row, 'jump into a finally block is disallowed');
+      if (destination.loops.some((scope) => !source.loops.includes(scope))) {
         this.error(
           row,
           `goto でループや switch の中には入れません（'goto' into loop or switch statement is disallowed）。`

@@ -1,7 +1,9 @@
-// code-gauge-allow-file fileNcss 953 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 998 -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import type { ClassDecl, Expr, FunctionDecl, MethodDeclAst, PropertyDeclAst } from './ast';
 import builtinNames from './builtinNames.json';
+import { addConst, applyTraitConstants, evaluateInClass, linkInterfaceConstants } from './classConstants';
+export { canAccessConstant, classConstant, setClassEvaluator } from './classConstants';
 import { lower } from './bytes';
 import { type ArgValue, invoke } from './calls';
 import { debugType, normalizeKeyString, toBool, valueName } from './conversions';
@@ -15,7 +17,6 @@ import { UnsupportedFeatureError } from './unsupported';
 import { unsupportedClasses } from './unsupportedCatalog';
 import {
   type Callable,
-  type ClassConst,
   copyValueSlot,
   dropped,
   type Method,
@@ -32,15 +33,9 @@ import {
   type UserFunction,
   type Value,
   type Visibility,
+  visibilityRank,
 } from './values';
 import { isSubtype } from './variance';
-
-/** Evaluates a constant expression of a class in that class's scope, which the interpreter provides. */
-let evaluateInClass: (e: Expr, cls: PhpClass) => Value = () => null;
-
-export function setClassEvaluator(run: (e: Expr, cls: PhpClass) => Value): void {
-  evaluateInClass = run;
-}
 
 export function findClass(name: string): PhpClass | undefined {
   return rt().classes.get(lower(name.startsWith('\\') ? name.slice(1) : name));
@@ -131,9 +126,7 @@ export function declareClass(decl: ClassDecl, row: number): PhpClass {
     }
   }
   for (const constant of decl.consts) addConst(cls, constant);
-  for (const iface of cls.interfaces) {
-    for (const [name, constant] of iface.consts) if (!cls.consts.has(name)) cls.consts.set(name, constant);
-  }
+  linkInterfaceConstants(cls, row);
   for (const prop of decl.props) addProperty(cls, prop);
   for (const method of decl.methods) addMethod(cls, method);
   applyTraits(cls, decl);
@@ -165,37 +158,11 @@ function inherit(cls: PhpClass, parent: PhpClass): void {
   cls.createInternal = parent.createInternal;
 }
 
-function addConst(cls: PhpClass, ast: ClassDecl['consts'][number]): void {
-  const inherited = cls.consts.get(ast.name);
-  if (inherited?.isFinal && inherited.cls !== cls) {
-    throw new FatalError(
-      `${cls.name}::${ast.name} cannot override final constant ${inherited.cls.name}::${ast.name}`,
-      ast.row
-    );
-  }
-  if (inherited && inherited.cls !== cls && visibilityRank(ast.visibility) < visibilityRank(inherited.visibility)) {
-    const weaker = inherited.visibility === 'protected' ? ' or weaker' : '';
-    throw new FatalError(
-      `Access level to ${cls.name}::${ast.name} must be ${inherited.visibility} (as in class ${inherited.cls.name})${weaker}`,
-      ast.row
-    );
-  }
-  const constant: ClassConst = {
-    name: ast.name,
-    cls,
-    visibility: ast.visibility,
-    isFinal: ast.isFinal,
-    type: ast.type,
-    evaluate: () => evaluateInClass(ast.value, cls),
-  };
-  cls.consts.set(ast.name, constant);
-}
-
 function propertyKey(cls: PhpClass, name: string, visibility: Visibility): string {
   return visibility === 'private' ? `\0${cls.name}\0${name}` : name;
 }
 
-// code-gauge-allow functionNcss 52 -- Follows PHP's class linking and property access rules in their order of checks.
+// code-gauge-allow functionNcss 56 -- Follows PHP's class linking and property access rules in their order of checks.
 function addProperty(cls: PhpClass, ast: PropertyDeclAst): void {
   const inherited = cls.propByName.get(ast.name);
   if (inherited && inherited.cls !== cls && inherited.isFinal)
@@ -222,6 +189,14 @@ function addProperty(cls: PhpClass, ast: PropertyDeclAst): void {
         `Cannot redeclare ${inherited.isReadonly ? 'readonly' : 'non-readonly'} property ${inherited.cls.name}::$${ast.name} as ${ast.isReadonly ? 'readonly' : 'non-readonly'} ${cls.name}::$${ast.name}`,
         ast.row
       );
+    const setter = ast.setVisibility ?? (ast.isReadonly && ast.visibility === 'public' ? 'protected' : ast.visibility);
+    const parentSetter = inherited.setVisibility ?? inherited.visibility;
+    if (visibilityRank(setter) < visibilityRank(parentSetter)) {
+      throw new FatalError(
+        `Set access level of ${cls.name}::$${ast.name} must be ${parentSetter === 'public' ? 'omitted' : `${parentSetter}(set)`} (as in class ${inherited.cls.name})${parentSetter === 'protected' ? ' or weaker' : ''}`,
+        ast.row
+      );
+    }
     if (inherited.type && !propertyTypeCompatible(inherited, ast, cls)) {
       propertyTypeError(inherited, cls, ast.name, ast.row);
     }
@@ -336,10 +311,6 @@ function hookFunction(decl: FunctionDecl): UserFunction {
   return { kind: 'user', name: decl.name, decl, params: decl.params, statics: new Map() };
 }
 
-function visibilityRank(visibility: Visibility): number {
-  return visibility === 'public' ? 2 : visibility === 'protected' ? 1 : 0;
-}
-
 function addMethod(cls: PhpClass, ast: MethodDeclAst, scope = cls): void {
   const fn: UserFunction = { kind: 'user', name: ast.fn.name, decl: ast.fn, params: ast.fn.params, statics: new Map() };
   const method: Method = {
@@ -356,7 +327,7 @@ function addMethod(cls: PhpClass, ast: MethodDeclAst, scope = cls): void {
   cls.methods.set(method.lname, method);
 }
 
-// code-gauge-allow functionNcss 54 -- Follows PHP's class linking and property access rules in their order of checks.
+// code-gauge-allow functionNcss 56 -- Follows PHP's class linking and property access rules in their order of checks.
 function applyTraits(cls: PhpClass, decl: ClassDecl): void {
   if (cls.traits.length === 0) return;
   const rules = decl.traits.flatMap((use) => use.rules);
@@ -369,6 +340,7 @@ function applyTraits(cls: PhpClass, decl: ClassDecl): void {
   const added = new Map<string, PhpClass>();
   const contracts: Method[] = [];
   const propertyOrigins = new Map<string, string>();
+  const constantOrigins = new Map<string, string>();
   for (const trait of cls.traits) {
     for (const [lname, method] of allTraitMethods(trait)) {
       if (excluded.has(`${lower(trait.name)}::${lname}`)) continue;
@@ -389,9 +361,7 @@ function applyTraits(cls: PhpClass, decl: ClassDecl): void {
       cls.methods.set(lname, { ...method, cls, scope: cls, fn: copyFunction(method.fn) });
     }
     applyTraitProperties(cls, trait, propertyOrigins, decl.row);
-    for (const [name, constant] of trait.consts) {
-      if (!cls.consts.has(name)) cls.consts.set(name, { ...constant, cls, evaluate: constant.evaluate });
-    }
+    applyTraitConstants(cls, trait, constantOrigins, decl.row);
   }
   for (const rule of rules) {
     if (rule.k !== 'as') continue;
@@ -1017,8 +987,7 @@ export function checkIndirectModification(object: PhpObject, name: string, scope
     const slot = object.props.get(decl.key);
     const value = slot instanceof Ref ? slot.v : slot;
     if (value instanceof PhpObject) return;
-    if (slot !== UNINIT && slot !== undefined)
-      throwError('Error', `Cannot indirectly modify readonly property ${decl.cls.name}::$${name}`);
+    throwError('Error', `Cannot indirectly modify readonly property ${decl.cls.name}::$${name}`);
   } else if (!canWriteProp(decl, scope)) {
     throwError(
       'Error',
@@ -1309,45 +1278,6 @@ export function readStaticProp(cls: PhpClass, name: string, scope: PhpClass | un
     throwError('Error', `Typed static property ${cls.name}::$${name} must not be accessed before initialization`);
   }
   return value;
-}
-
-export function classConstant(cls: PhpClass, name: string, scope: PhpClass | undefined): Value {
-  const constant = cls.findConst(name);
-  if (!constant) throwError('Error', `Undefined constant ${cls.name}::${name}`);
-  if (!canAccessConstant(constant, scope))
-    throwError('Error', `Cannot access ${constant.visibility} constant ${cls.name}::${name}`);
-  if (constant.value === undefined) {
-    if (constant.evaluating)
-      throwError('Error', `Cannot declare self-referencing constant ${constant.cls.name}::${name}`);
-    constant.evaluating = true;
-    try {
-      let value = (constant.evaluate as () => Value)();
-      if (constant.type) {
-        const coerced = coerce(value, constant.type, { strict: true, internal: false, scope: constant.cls });
-        if (coerced === NO_MATCH) {
-          throwError(
-            'TypeError',
-            `Cannot use ${debugType(value)} as value for class constant ${constant.cls.name}::${name} of type ${typeToString(constant.type)}`
-          );
-        }
-        value = coerced;
-      }
-      constant.value = value;
-    } finally {
-      constant.evaluating = false;
-    }
-  }
-  return share(constant.value as Value);
-}
-
-export function canAccessConstant(constant: ClassConst, scope: PhpClass | undefined): boolean {
-  return (
-    constant.visibility === 'public' ||
-    (scope !== undefined &&
-      (constant.visibility === 'private'
-        ? scope === constant.cls
-        : scope.isSubclassOf(constant.cls) || constant.cls.isSubclassOf(scope)))
-  );
 }
 
 export function objectToArray(object: PhpObject): PhpArray {

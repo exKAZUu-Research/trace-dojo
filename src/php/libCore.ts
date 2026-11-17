@@ -1,11 +1,11 @@
 // code-gauge-allow-file fileNcss 554 -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import { lower } from './bytes';
-import { callCallback, callValue, checkCallable, explainCallable } from './callables';
+import { callValue, checkCallable, explainCallable } from './callables';
 import { type ArgValue, backtraceLimit, callStack, setCallableExplainer } from './calls';
 import * as classesModule from './classes';
 import { findClass } from './classes';
-import { debugType, getType, isNumericString, normalizeKeyString, valueName } from './conversions';
+import { debugType, getType, isNumericString, normalizeKeyString, toBool, valueName } from './conversions';
 import {
   deprecated,
   E_ALL,
@@ -30,10 +30,11 @@ import {
 } from './errors';
 import { traceArg } from './exceptions';
 import { collectGarbage } from './garbage';
-import { cast, deprecatedConstant, iterate } from './interp';
+import { cast, cloneObject, deprecatedConstant, iterate } from './interp';
 import { defineAlias, defineConstant, defineFunction, defineRuntimeConstant, markInlined } from './native';
 import { toFloat, toInt, toKey, toStr } from './operators';
 import { printR, varDump, varExport } from './output';
+import { share } from './places';
 import { ExitSignal, rt } from './runtime';
 import { formatPrintf } from './sprintf';
 import { constantKey, defineConstant as defineUserConstant } from './statements';
@@ -337,6 +338,11 @@ function currentArgs(): Value[] {
   return values;
 }
 
+defineFunction('clone(object $object, array $withProperties = []): object', ({ args }) => {
+  return cloneObject(args[0] as PhpObject, args[1]);
+});
+markInlined('clone');
+
 defineFunction('call_user_func(callable $callback, mixed ...$args): mixed', ({ args, named, row }) => {
   const [callback, ...rest] = args;
   const argValues = rest.map((v) => ({ v }));
@@ -344,19 +350,7 @@ defineFunction('call_user_func(callable $callback, mixed ...$args): mixed', ({ a
   return callValue(callback, argValues, row);
 });
 defineFunction('call_user_func_array(callable $callback, array $args): mixed', ({ args, row }) => {
-  const array = args[1] as PhpArray;
-  const argValues: ArgValue[] = [];
-  for (const [key, slot] of array.map) {
-    const ref = slot instanceof Ref && slot.isRef ? slot : undefined;
-    const v = slot instanceof Ref ? slot.v : slot;
-    if (typeof key === 'string') argValues.push({ v, ref, name: key });
-    else {
-      if (argValues.some((arg) => arg.name !== undefined))
-        throwError('Error', 'Cannot use positional argument after named argument');
-      argValues.push({ v, ref });
-    }
-  }
-  return callValue(args[0], argValues, row);
+  return callValue(args[0], callbackArrayArguments(args[1] as PhpArray), row);
 });
 markInlined('call_user_func');
 markInlined('call_user_func_array');
@@ -522,10 +516,13 @@ defineFunction(
 );
 defineFunction('iterator_to_array(Traversable|array $iterator, bool $preserve_keys = true): array', ({ args }) => {
   const [iterable, preserveKeys = true] = args;
+  if (iterable instanceof PhpArray && preserveKeys === true) return share(iterable);
   const array = new PhpArray();
-  for (const [key, value] of iterate(iterable, preserveKeys === true ? 'both' : 'value')) {
-    if (preserveKeys === true) array.set(toKey(key), value);
-    else array.append(value);
+  rt().frame.temporaries.push(array);
+  for (const [key, value] of iterate(iterable, preserveKeys === true ? 'both' : 'value', true)) {
+    const slot = value instanceof Ref ? (value.rc++, value) : share(value);
+    if (preserveKeys === true) array.setSlot(toKey(key), slot);
+    else array.append(slot);
   }
   return array;
 });
@@ -537,11 +534,11 @@ defineFunction('iterator_count(Traversable|array $iterator): int', ({ args }) =>
 });
 defineFunction('iterator_apply(Traversable $iterator, callable $callback, ?array $args = null): int', ({ args }) => {
   let count = 0n;
-  const extra = args[2] instanceof PhpArray ? args[2].values() : [];
+  const extra = args[2] instanceof PhpArray ? callbackArrayArguments(args[2]) : [];
   const iterator = iterate(args[0], 'none');
   while (!iterator.next().done) {
     count++;
-    if (callCallback(args[1], extra) !== true) break;
+    if (!toBool(callValue(args[1], extra, undefined))) break;
   }
   return count;
 });
@@ -621,8 +618,14 @@ defineFunction('exit(string|int $status = 0): never', ({ args }) => {
 defineAlias('die', 'exit');
 defineFunction('phpversion(?string $extension = null): string|false', ({ args }) => (args[0] ? false : '8.5.12'));
 defineFunction('php_sapi_name(): string|false', () => 'cli');
-defineFunction('sleep(int $seconds): int', () => 0n);
-defineFunction('usleep(int $microseconds): void', () => null);
+defineFunction('sleep(int $seconds): int', ({ args }) => {
+  checkDelay(args[0] as bigint, 'sleep', 'seconds');
+  return 0n;
+});
+defineFunction('usleep(int $microseconds): void', ({ args }) => {
+  checkDelay(args[0] as bigint, 'usleep', 'microseconds');
+  return null;
+});
 defineFunction('gc_collect_cycles(): int', () => BigInt(collectGarbage(rt(), true)));
 defineFunction('gc_enable(): void', () => null);
 defineFunction('gc_disable(): void', () => null);
@@ -692,3 +695,22 @@ defineFunction(
   },
   true
 );
+
+function checkDelay(value: bigint, name: string, parameter: string): void {
+  if (value < 0n) throwError('ValueError', `${name}(): Argument #1 ($${parameter}) must be greater than or equal to 0`);
+}
+
+function callbackArrayArguments(array: PhpArray): ArgValue[] {
+  const argValues: ArgValue[] = [];
+  for (const [key, slot] of array.map) {
+    const ref = slot instanceof Ref && slot.isRef ? slot : undefined;
+    const v = slot instanceof Ref ? slot.v : slot;
+    if (typeof key === 'string') argValues.push({ v, ref, name: key });
+    else {
+      if (argValues.some((arg) => arg.name !== undefined))
+        throwError('Error', 'Cannot use positional argument after named argument');
+      argValues.push({ v, ref });
+    }
+  }
+  return argValues;
+}

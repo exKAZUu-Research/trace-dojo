@@ -3,7 +3,7 @@ import { callMethod, callValue } from './callables';
 import { type CallRecord, callStack } from './calls';
 import { createObject, findClass } from './classes';
 import { formatFloat } from './conversions';
-import { setErrorFactories } from './errors';
+import { setErrorFactories, setThrowableFormatter } from './errors';
 import { type ClassDefinition, defineClass, type NativeMethod } from './native';
 import { toStr } from './operators';
 import { rt, SCRIPT_PATH } from './runtime';
@@ -309,3 +309,5 @@ const subclasses: [string, string][] = [
   ['JsonException', 'Exception'],
 ];
 for (const [name, parent] of subclasses) defineClass({ name, parent });
+
+setThrowableFormatter(throwableText);

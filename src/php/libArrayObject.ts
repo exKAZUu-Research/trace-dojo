@@ -206,7 +206,8 @@ function setStorage(object: PhpObject, value: Value, method: string, flags: numb
   let storage: ArrayStorage;
   let newFlags = flags;
   if (value instanceof PhpArray) {
-    storage = new ArrayStorage(name, value);
+    value.shared = true;
+    storage = new ArrayStorage(name, arrayIsShared(value) ? value.copy() : value);
   } else {
     const other = value as PhpObject;
     deprecated(
@@ -318,9 +319,7 @@ function arrayMethods(name: string): NativeMethod[] {
 }
 
 function arrayCopy(object: PhpObject): PhpArray {
-  const array = storageOf(object).array;
-  array.shared = true;
-  return array;
+  return storageOf(object).array.copy();
 }
 
 /** The class an ArrayObject's getIterator should instantiate, which must extend ArrayIterator. */
@@ -338,7 +337,7 @@ function iteratorClassName(value: Value, method: string, position: number): stri
 /** Sorts the storage with PHP's sort function of the same name, as spl_array_method does. */
 function sortStorage(object: PhpObject, name: string, args: Value[]): Value {
   const storage = storageOf(object);
-  const ref = new Ref(storage.writable());
+  const ref = new Ref(storage.array);
   const fn = rt().functions.get(name);
   if (!fn) throw new Error(`Unknown sort function ${name}`);
   const result = invoke({ fn }, [{ v: ref.v, ref }, ...args.map((v) => ({ v }))], undefined);

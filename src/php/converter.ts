@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 973 -- One converter of the statements and expressions, which share the converter state.
+// code-gauge-allow-file fileNcss 988 -- One converter of the statements and expressions, which share the converter state.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import type { Node } from '@willbooster/web-tree-sitter';
 
@@ -13,6 +13,7 @@ import { decodeLiteral, parseIntegerLiteral } from './literals';
 export type { CompileNotice } from './converterBase';
 
 export class Converter extends DeclarationConverter {
+  private declaredSymbols = new Map<string, Map<string, string>>();
   private readonly staticNames = new WeakMap<object, Set<string>>();
   convertProgram(root: Node): Program {
     this.checkNamespaces(root);
@@ -186,6 +187,7 @@ export class Converter extends DeclarationConverter {
         return [{ k: 'unset', targets, row }];
       }
       case 'function_definition': {
+        this.declareSymbol(node, 'function', this.nameText(node.childForFieldName('name') as Node));
         const decl = this.functionDecl(node, false);
         const key = lower(decl.name);
         if (topLevel) {
@@ -202,6 +204,7 @@ export class Converter extends DeclarationConverter {
       case 'class_declaration':
       case 'interface_declaration':
       case 'trait_declaration': {
+        this.declareSymbol(node, 'class', this.nameText(node.childForFieldName('name') as Node));
         return [{ k: 'class', decl: this.classDecl(node, false, topLevel), row }];
       }
       case 'enum_declaration': {
@@ -213,6 +216,7 @@ export class Converter extends DeclarationConverter {
           .filter((child) => child.type === 'const_element')
           .map((child) => {
             const [nameNode, valueNode] = child.namedChildren.filter((part) => part.type !== 'comment');
+            this.declareSymbol(nameNode, 'const', this.nameText(nameNode));
             return { name: this.qualify(this.nameText(nameNode)), value: this.constantExpr(valueNode, true) };
           });
         return [{ k: 'const', items, row }];
@@ -557,16 +561,18 @@ export class Converter extends DeclarationConverter {
     this.classImports = new Map();
     this.functionImports = new Map();
     this.constImports = new Map();
+    this.declaredSymbols = new Map();
     if (!body) return [];
     const statements = this.blockOf([body]).map((statement) => statement);
     this.namespace = '';
     this.classImports = new Map();
     this.functionImports = new Map();
     this.constImports = new Map();
+    this.declaredSymbols = new Map();
     return statements;
   }
 
-  // code-gauge-allow functionCognitiveComplexity 17 -- One case per grammar node kind, each converted where PHP gives it its own meaning.
+  // code-gauge-allow functionCognitiveComplexity 22 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
   private useDeclaration(node: Node): void {
     const kindNode = node.childForFieldName('type');
     const kind = kindNode ? lower(kindNode.text) : 'class';
@@ -585,18 +591,40 @@ export class Converter extends DeclarationConverter {
       const full = prefix ? `${prefix}\\${raw}` : raw;
       const aliasNode = clause.childForFieldName('alias');
       const alias = aliasNode ? this.nameText(aliasNode) : (full.split('\\').at(-1) as string);
-      if (effective === 'function') this.functionImports.set(lower(alias), full);
-      else if (effective === 'const') this.constImports.set(alias, full);
-      else {
-        if (this.classImports.has(lower(alias))) {
-          this.error(
-            node,
-            `名前「${alias}」は、すでに use で使われています（Cannot use ${full} as ${alias} because the name is already in use）。`
-          );
-        }
-        this.classImports.set(lower(alias), full);
+      const imports = this.importsFor(effective);
+      const key = effective === 'const' ? alias : lower(alias);
+      const declared = this.declaredSymbols.get(effective)?.get(key);
+      const same = declared && (effective === 'const' ? declared === full : lower(declared) === lower(full));
+      if (imports.has(key) || (declared && !same)) {
+        this.error(
+          node,
+          `Cannot use ${effective === 'class' ? '' : `${effective} `}${full} as ${alias} because the name is already in use`
+        );
       }
+      imports.set(key, full);
     }
+  }
+
+  private importsFor(kind: string): Map<string, string> {
+    return kind === 'function' ? this.functionImports : kind === 'const' ? this.constImports : this.classImports;
+  }
+
+  private declareSymbol(node: Node, kind: string, name: string): void {
+    const key = kind === 'const' ? name : lower(name);
+    const full = this.qualify(name);
+    const imported = this.importsFor(kind).get(key);
+    if (imported && (kind === 'const' ? imported !== full : lower(imported) !== lower(full))) {
+      this.error(
+        node,
+        `Cannot redeclare ${kind} ${full}${kind === 'function' ? '()' : ''} (previously declared as local import)`
+      );
+    }
+    let symbols = this.declaredSymbols.get(kind);
+    if (!symbols) {
+      symbols = new Map();
+      this.declaredSymbols.set(kind, symbols);
+    }
+    symbols.set(key, full);
   }
 
   private sequence(node: Node): Expr[] {
@@ -897,11 +925,8 @@ export class Converter extends DeclarationConverter {
       case 'clone_expression': {
         const argumentsNode = node.childForFieldName('arguments');
         if (argumentsNode) {
-          const { args } = this.args(argumentsNode);
-          if (args.length === 0 || args.length > 2 || args.some((arg) => arg.spread || arg.name)) {
-            return { k: 'call', fn: { name: 'clone' }, args, fcc: false, row };
-          }
-          return { k: 'clone', e: args[0].e, with: args[1]?.e, row };
+          const { args, fcc } = this.args(argumentsNode);
+          return { k: 'call', fn: { name: 'clone' }, args, fcc, row };
         }
         return { k: 'clone', e: this.expr(node.namedChildren.find((child) => child.type !== 'comment') as Node), row };
       }

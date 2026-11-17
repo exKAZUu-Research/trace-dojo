@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 699 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 704 -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import {
   applyOperator,
@@ -8,6 +8,7 @@ import {
   destructure,
   incDec,
   isset,
+  nativeIteratorSlot,
   placeOf,
 } from './assignment';
 import type { Arg, ClassDecl, ClassRef, Expr } from './ast';
@@ -24,7 +25,7 @@ import {
   methodCallExpression,
   staticCallExpression,
 } from './callables';
-import { type ArgValue, callStack, copyClosureData, invoke } from './calls';
+import { type ArgValue, copyClosureData, invoke } from './calls';
 import {
   canCall,
   checkInstantiable,
@@ -515,7 +516,7 @@ export function memberName(name: string | Expr): string {
 // code-gauge-allow functionCognitiveComplexity 21 -- One case per expression kind, as PHP evaluates each kind differently.
 function arrayLiteral(e: Extract<Expr, { k: 'array' }>): PhpArray {
   const runtime = rt();
-  const array = new PhpArray();
+  const array = new PhpArray(undefined, e.items.length);
   for (const item of e.items) {
     if (item.spread) {
       const value = ev(item.value);
@@ -565,26 +566,43 @@ function spreadInto(array: PhpArray, value: Value): void {
 }
 
 /** Iterates over an array or a Traversable object, as `foreach` would. */
-// code-gauge-allow functionCognitiveComplexity 17 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
-export function* iterate(value: Value, fetch: 'both' | 'value' | 'none' = 'both'): Generator<[Value, Value]> {
+export function iterate(value: Value, fetch?: 'both' | 'value' | 'none', slots?: false): Generator<[Value, Value]>;
+export function iterate(value: Value, fetch: 'both' | 'value' | 'none', slots: true): Generator<[Value, Value | Ref]>;
+// code-gauge-allow functionNcss 33 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+export function* iterate(
+  value: Value,
+  fetch: 'both' | 'value' | 'none' = 'both',
+  slots = false
+): Generator<[Value, Value | Ref]> {
   if (value instanceof PhpArray) {
-    for (const entry of value.entries()) yield entry;
+    for (const [key, slot] of value.map) yield [key, slots ? slot : slot instanceof Ref ? slot.v : slot];
     return;
   }
-  if (value instanceof PhpObject) {
-    const iterator = iteratorOf(value);
-    if (!iterator) {
-      for (const entry of visibleProps(value, rt().frame.scope)) yield entry;
-      return;
-    }
-    callMethod(iterator, 'rewind', []);
-    while (toBool(callMethod(iterator, 'valid', []))) {
-      rt().spend();
+  if (!(value instanceof PhpObject)) return;
+  const iterator = iteratorOf(value);
+  if (!iterator) {
+    for (const entry of visibleProps(value, rt().frame.scope)) yield entry;
+    return;
+  }
+  callMethod(iterator, 'rewind', []);
+  while (toBool(callMethod(iterator, 'valid', []))) {
+    const runtime = rt();
+    runtime.spend();
+    const frame = runtime.frame;
+    const mark = frame.temporaries.length;
+    try {
+      if (slots) runtime.lastReturnRef = undefined;
       const current = fetch === 'none' ? null : callMethod(iterator, 'current', []);
+      const reference = slots && fetch !== 'none' ? runtime.lastReturnRef : undefined;
+      if (slots) runtime.lastReturnRef = undefined;
+      const slot = slots ? (reference ?? nativeIteratorSlot(iterator) ?? current) : current;
+      if (slots && slot instanceof Ref) runtime.holdTemporaryReference(slot);
       const key = fetch === 'both' ? callMethod(iterator, 'key', []) : null;
-      yield [key, current];
-      callMethod(iterator, 'next', []);
+      yield [key, slot];
+    } finally {
+      if (slots) runtime.dropTemporaries(frame, mark);
     }
+    callMethod(iterator, 'next', []);
   }
 }
 
@@ -709,7 +727,9 @@ function classConstantOf(e: Extract<Expr, { k: 'cconst' }>): Value {
   }
   const cls = resolveClassRef(e.cls);
   runtime.row = e.row;
-  return classConstant(cls, e.name, runtime.frame.scope);
+  const displayName =
+    runtime.frame.constantExpression && (e.cls.k === 'self' || e.cls.k === 'parent') ? e.cls.k : cls.name;
+  return classConstant(cls, e.name, runtime.frame.scope, displayName);
 }
 
 /** Evaluates the arguments of `new`, which PHP does after it has created the object. */
@@ -734,24 +754,11 @@ function anonymousClass(decl: ClassDecl, row: number): PhpClass {
 function cloneExpression(e: Extract<Expr, { k: 'clone' }>): Value {
   const runtime = rt();
   const value = ev(e.e);
-  const withValue = e.with ? ev(e.with) : undefined;
   runtime.row = e.row;
-  if (withValue === undefined) {
-    if (!(value instanceof PhpObject)) {
-      throwError('TypeError', `clone(): Argument #1 ($object) must be of type object, ${valueName(value)} given`);
-    }
-    return cloneObject(value);
+  if (!(value instanceof PhpObject)) {
+    throwError('TypeError', `clone(): Argument #1 ($object) must be of type object, ${valueName(value)} given`);
   }
-  // `clone($object, $with)` is a call of PHP 8.5's clone function, which stack traces show.
-  callStack.push({ name: 'clone', args: [value, withValue], row: e.row });
-  try {
-    if (!(value instanceof PhpObject)) {
-      throwError('TypeError', `clone(): Argument #1 ($object) must be of type object, ${valueName(value)} given`);
-    }
-    return cloneObject(value, withValue);
-  } finally {
-    callStack.pop();
-  }
+  return cloneObject(value);
 }
 
 // code-gauge-allow functionCognitiveComplexity 28 -- One case per expression kind, as PHP evaluates each kind differently.

@@ -68,7 +68,7 @@ export type Expr = { row: number } & (
   | { k: 'cond'; test: Expr; consequent?: Expr; alternate: Expr }
   | { k: 'cast'; type: string; e: Expr }
   | { k: 'silence'; e: Expr }
-  | { k: 'clone'; e: Expr; with?: Expr }
+  | { k: 'clone'; e: Expr }
   | { k: 'throw'; e: Expr }
   | { k: 'isset'; items: Expr[] }
   | { k: 'empty'; e: Expr }

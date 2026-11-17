@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 415 -- Keeps one PHP runtime concern and its shared helpers in one module.
+// code-gauge-allow-file fileNcss 416 -- Keeps one PHP runtime concern and its shared helpers in one module.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import { placeOf } from './assignment';
 import type { Arg, Expr } from './ast';
@@ -464,7 +464,7 @@ function magicTarget(object: PhpObject, magic: Method, name: string): CallTarget
   return { fn: magicForwarder(magic, name, object, object.cls), thisObj: object };
 }
 
-// code-gauge-allow functionCognitiveComplexity 28 -- Resolves each form of call and callable by PHP's lookup rules, in PHP's order of checks.
+// code-gauge-allow functionCognitiveComplexity 30 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 function staticCallable(
   className: string,
   methodName: string,
@@ -491,19 +491,19 @@ function staticCallable(
     ) as PhpClass;
   } else cls = callableClass(className);
   const method = lookupMethod(cls, lower(methodName), scope);
-  if (!method) {
+  if (!method || !canCall(method, scope)) {
     const magic = cls.findMethod('__callstatic');
     if (magic) return { fn: magicForwarder(magic, methodName, undefined, cls), staticClass: cls };
-    throw new CallableFailure(
-      `Call to undefined method ${cls.name}::${methodName}()`,
-      `class ${cls.name} does not have a method "${methodName}"`
-    );
-  }
-  if (!canCall(method, scope))
+    if (!method)
+      throw new CallableFailure(
+        `Call to undefined method ${cls.name}::${methodName}()`,
+        `class ${cls.name} does not have a method "${methodName}"`
+      );
     throw new CallableFailure(
       `Call to ${method.visibility} method ${cls.name}::${method.name}() from ${scope ? `scope ${scope.name}` : 'global scope'}`,
       `cannot access ${method.visibility} method ${cls.name}::${method.name}()`
     );
+  }
   if (!method.isStatic) {
     const thisObj = frame.thisObj && frame.thisObj.cls.isSubclassOf(cls) ? frame.thisObj : undefined;
     if (!thisObj)

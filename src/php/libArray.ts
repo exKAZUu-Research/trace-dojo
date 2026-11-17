@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 997 -- Keeps one PHP runtime concern and its shared helpers in one module.
+// code-gauge-allow-file fileNcss 998 -- Keeps one PHP runtime concern and its shared helpers in one module.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 // oxlint-disable unicorn/prefer-code-point -- PHP strings hold bytes as code units 0–255, which charCodeAt and fromCharCode read and write as they are.
 import { type Comparisons, type Entry, SortedWalk } from './arraySetWalk';
@@ -95,7 +95,7 @@ function rebuild(entries: [Key, Value | Ref][], renumber: boolean, target?: PhpA
       if (typeof newKey === 'bigint' && newKey >= nextFree) nextFree = newKey + 1n;
       if (++work % 64 === 0) rt().spend();
     }
-    array.replaceTable(map, nextFree);
+    array.replaceTable(map, nextFree, renumber);
     return array;
   }
   for (const [key, source] of entries) {
@@ -1192,6 +1192,7 @@ function sortArray(
 ): true {
   checkArrayRef(ctx, 0, name, 'array');
   const array = writableArray(ctx, 0);
+  array.prepareSort();
   if (array.size <= 1 && !(renumber && array.size > 0)) return true;
   const entries = [...array.map].map((entry, position) => ({ entry, position }));
   rt().held.push(array);

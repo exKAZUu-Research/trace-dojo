@@ -1,7 +1,7 @@
-// code-gauge-allow-file fileNcss 644 -- Keeps one PHP runtime concern and its shared helpers in one module.
+// code-gauge-allow-file fileNcss 708 -- Keeps one PHP runtime concern and its shared helpers in one module.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import type { TurtleState } from '../interpreter/turtleWorld';
-import type { ClassDecl, FunctionDecl } from './ast';
+import type { ClassDecl, Expr, FunctionDecl } from './ast';
 import { lower } from './bytes';
 
 /**
@@ -120,7 +120,10 @@ export class PhpArray {
   /** The internal pointer of `current()`, `next()`, and `reset()`, as the key it points at. */
   pointer: Key | undefined | null = null;
 
-  constructor(map?: Map<Key, Value | Ref>) {
+  constructor(
+    map?: Map<Key, Value | Ref>,
+    private readonly capacityHint = map?.size ?? 8
+  ) {
     this.map = map ?? new Map();
     for (const [key, slot] of this.map) this.trackSlot(key, slot);
     // An array costs a slot of its own besides its elements, as a program of many small arrays holds their tables too.
@@ -132,13 +135,17 @@ export class PhpArray {
   }
 
   static copySlots(values: Iterable<Value | Ref>): PhpArray {
-    const array = new PhpArray();
+    const array = new PhpArray(undefined, Array.isArray(values) ? values.length : 8);
     for (const value of values) array.append(copyValueSlot(value));
     return array;
   }
 
   cursor(): ArrayCursor {
     return this.ordered().cursor();
+  }
+
+  prepareSort(): void {
+    this.ordered().unpack();
   }
 
   get size(): number {
@@ -206,10 +213,10 @@ export class PhpArray {
     this.order?.insert(key);
   }
 
-  replaceTable(map: Map<Key, Value | Ref>, nextFree: bigint): void {
+  replaceTable(map: Map<Key, Value | Ref>, nextFree: bigint, packed = false): void {
     allocationHandler(Math.max(0, map.size - this.map.size), map.size);
     this.map = map;
-    this.order?.replace(map.keys());
+    this.ordered().replace(map.keys(), packed);
     for (const [key, slot] of map) this.trackSlot(key, slot);
     this.nextFree = nextFree;
     this.composite = [...map.values()].some((value) => value !== null && typeof value === 'object');
@@ -250,13 +257,15 @@ export class PhpArray {
   }
 
   delete(key: Key): void {
+    if (!this.map.has(key)) return;
+    const order = this.ordered();
     const old = this.map.get(key);
     if (old instanceof Ref) old.rc--;
     // PHP moves a pointer at the deleted element on to the next one.
     if (this.pointer === key) this.pointer = this.keyAfter(key);
     this.invalidate();
     this.map.delete(key);
-    this.order?.delete(key);
+    order.delete(key);
     dropped(old);
   }
 
@@ -297,7 +306,7 @@ export class PhpArray {
   }
 
   private ordered(): ArrayOrder {
-    this.order ??= new ArrayOrder(this.map.keys());
+    this.order ??= new ArrayOrder(this.map.keys(), this.capacityHint);
     return this.order;
   }
 
@@ -328,7 +337,8 @@ export class PhpArray {
         map.set(key, slot);
       }
     }
-    const copy = new PhpArray(map);
+    const copy = new PhpArray(map, this.capacityHint);
+    copy.order = this.ordered().copy();
     copy.nextFree = this.nextFree;
     copy.composite = this.composite;
     copy.pointer = this.pointer;
@@ -437,6 +447,7 @@ export interface PropDecl {
 }
 
 export interface ClassConst {
+  initializer?: Expr;
   name: string;
   cls: PhpClass;
   visibility: Visibility;
@@ -543,9 +554,12 @@ class ArrayOrder {
   first: ArrayEntry | undefined;
   last: ArrayEntry | undefined;
   private nextIndex = 0;
+  private capacity = 8;
+  private packed: boolean | undefined;
   private readonly cursors = new Set<WeakRef<ArrayCursor>>();
 
-  constructor(keys: Iterable<Key>) {
+  constructor(keys: Iterable<Key>, capacityHint = 8) {
+    while (this.capacity < capacityHint) this.capacity *= 2;
     for (const key of keys) this.insert(key);
   }
 
@@ -555,14 +569,64 @@ class ArrayOrder {
     return cursor;
   }
 
+  copy(): ArrayOrder {
+    const copy = new ArrayOrder([], this.capacity);
+    for (const entry of this.entries.values()) copy.appendEntry(entry.key, entry.index);
+    copy.nextIndex = this.nextIndex;
+    copy.packed = this.packed;
+    if (copy.entries.size === 0) {
+      copy.capacity = 8;
+      copy.packed = undefined;
+    } else if (!copy.packed) copy.compact();
+    return copy;
+  }
+
+  // code-gauge-allow functionCognitiveComplexity 21 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
   insert(key: Key): void {
     if (this.entries.has(key)) return;
-    const entry: ArrayEntry = { key, index: this.nextIndex++, previous: this.last };
+    const numeric = typeof key === 'bigint' && key >= 0n && key < BigInt(Number.MAX_SAFE_INTEGER);
+    const position = numeric ? Number(key) : -1;
+    this.packed ??= numeric && position < this.capacity;
+    if (this.packed) {
+      if (!numeric || position < this.nextIndex) this.toMixed();
+      else if (position >= this.capacity) {
+        if (position < this.capacity * 2 && this.entries.size > this.capacity / 2) this.capacity *= 2;
+        else this.toMixed();
+      }
+    }
+    if (!this.packed && this.nextIndex >= this.capacity) {
+      if (this.nextIndex > this.entries.size + (this.entries.size >> 5)) this.compact();
+      else this.capacity *= 2;
+    }
+    const index = this.packed ? position : this.nextIndex;
+    this.nextIndex = index + 1;
+    const entry = this.appendEntry(key, index);
+    for (const cursor of this.liveCursors()) cursor.entry ??= entry;
+  }
+
+  unpack(): void {
+    if (this.packed) this.replace(this.entries.keys(), false);
+  }
+
+  private toMixed(): void {
+    if (this.nextIndex >= this.capacity) this.capacity *= 2;
+    this.packed = false;
+    this.compact();
+  }
+
+  private compact(): void {
+    let index = 0;
+    for (const entry of this.entries.values()) entry.index = index++;
+    this.nextIndex = index;
+  }
+
+  private appendEntry(key: Key, index: number): ArrayEntry {
+    const entry: ArrayEntry = { key, index, previous: this.last };
     if (this.last) this.last.next = entry;
     else this.first = entry;
     this.last = entry;
     this.entries.set(key, entry);
-    for (const cursor of this.liveCursors()) cursor.entry ??= entry;
+    return entry;
   }
 
   delete(key: Key): void {
@@ -572,23 +636,25 @@ class ArrayOrder {
     if (entry.previous) entry.previous.next = entry.next;
     else this.first = entry.next;
     if (entry.next) entry.next.previous = entry.previous;
-    else this.last = entry.previous;
+    else {
+      this.last = entry.previous;
+      this.nextIndex = (this.last?.index ?? -1) + 1;
+    }
     this.entries.delete(key);
   }
 
-  replace(keys: Iterable<Key>): void {
+  replace(keys: Iterable<Key>, packed: boolean): void {
+    const orderedKeys = [...keys];
     const cursors = [...this.liveCursors()].map((cursor) => ({ cursor, index: cursor.entry?.index }));
     this.entries.clear();
     this.first = undefined;
     this.last = undefined;
-    this.nextIndex = 0;
-    this.cursors.clear();
-    for (const key of keys) this.insert(key);
+    for (const key of orderedKeys) this.appendEntry(key, this.entries.size);
+    this.nextIndex = this.entries.size;
+    while (this.capacity < this.nextIndex) this.capacity *= 2;
+    this.packed = packed && [...this.entries.keys()].every((key, index) => key === BigInt(index));
     const entries = [...this.entries.values()];
-    for (const { cursor, index } of cursors) {
-      cursor.entry = index === undefined ? undefined : entries[index];
-      this.cursors.add(new WeakRef(cursor));
-    }
+    for (const { cursor, index } of cursors) cursor.entry = index === undefined ? undefined : entries[index];
   }
 
   private *liveCursors(): Generator<ArrayCursor> {
@@ -877,4 +943,8 @@ export function copyValueSlot(slot: Value | Ref): Value | Ref {
   const value = slot instanceof Ref ? slot.v : slot;
   if (value instanceof PhpArray) value.shared = true;
   return value;
+}
+
+export function visibilityRank(visibility: Visibility): number {
+  return visibility === 'public' ? 2 : visibility === 'protected' ? 1 : 0;
 }

@@ -897,3 +897,72 @@ test.each([
     stdout: 'ok',
   });
 });
+
+test.each([
+  'goto L;try{}finally{L:echo "never";}',
+  'try{}finally{goto L;}L:echo "never";',
+  'while(true){try{}finally{break;}}',
+  'while(true){try{}finally{continue;}}',
+  'while(true){try{}finally{while(true){break 2;}}}',
+  'function f(true|false $x){}',
+  'class A{public true|false|null $x;}',
+  'function f():true|false{}',
+  'use function strlen as x;use function count as X;',
+  'use const PHP_VERSION as X;use const PHP_EOL as X;',
+  'class X{}use Foo as X;',
+  'use Foo as X;class X{}',
+  'function x(){}use function strlen as x;',
+  'use function strlen as x;if(false){function x(){}}',
+  'const X=1;use const PHP_EOL as X;',
+  'use const PHP_EOL as X;const X=1;',
+])('rejects invalid symbol declarations and finally transfers before output: %s', (source) => {
+  expect(run(`<?php echo 'never';${source}`).kind).toBe('compileError');
+});
+
+test.each([
+  'class A{public int $x=null;}',
+  'class A{public static int $x=null;}',
+  'class A{public int|string $x=null;}',
+  'class A{public iterable $x=null;}',
+])('reports a non-nullable property default before output: %s', (source) => {
+  expect(run(`<?php echo 'never';${source}`)).toMatchObject({
+    kind: 'compileError',
+    diagnostics: [{ message: expect.stringContaining('may not be null. Use the nullable type') }],
+  });
+});
+
+test.each([
+  [
+    'interface A{const X=1;}interface B{const X=2;}class C implements A,B{}',
+    'inherits both A::X and B::X, which is ambiguous',
+  ],
+  ['interface A{final const X=1;}class B implements A{const X=2;}', 'cannot override final constant A::X'],
+  [
+    'class A{const int X=1;}class B extends A{const string X="x";}',
+    'Type of B::X must be compatible with A::X of type int',
+  ],
+  ['class A{const int X=1;}class B extends A{const X=1;}', 'Type of B::X must be compatible with A::X of type int'],
+  [
+    'interface A{const int X=1;}class B implements A{const X=2;}',
+    'Type of B::X must be compatible with A::X of type int',
+  ],
+  ['trait T{const X=1;}class A{use T;const X=2;}', 'definition differs and is considered incompatible'],
+  ['trait T{const X=1;}trait U{const X=2;}class A{use T,U;}', 'definition differs and is considered incompatible'],
+  [
+    'trait T{public const X=1;}class A{use T;protected const X=1;}',
+    'definition differs and is considered incompatible',
+  ],
+  ['trait T{const int X=1;}class A{use T;const X=1;}', 'definition differs and is considered incompatible'],
+  [
+    'class A{public int $x=1;}class B extends A{public protected(set) int $x=2;}',
+    'Set access level of B::$x must be omitted',
+  ],
+  [
+    'class A{public protected(set) int $x=1;}class B extends A{public private(set) int $x=2;}',
+    'Set access level of B::$x must be protected(set)',
+  ],
+])('rejects incompatible member contracts: %s', (source, message) => {
+  const result = run(`<?php ${source}echo 'never';`);
+  expect(result.kind === 'executed' && result.stdout).toContain(message);
+  expect(result.kind === 'executed' && result.stdout).not.toContain('never');
+});

@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 626 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 631 -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import type { Node } from '@willbooster/web-tree-sitter';
 
@@ -202,7 +202,7 @@ export abstract class DeclarationConverter extends ConverterBase {
     return lower(node.text.split('(')[0].trim()) as Visibility;
   }
 
-  // code-gauge-allow functionCognitiveComplexity 21 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+  // code-gauge-allow functionCognitiveComplexity 24 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
   protected typeDecl(node: Node): TypeDecl {
     const type = this.parseTypeDecl(node);
     if (type.k === 'named' && type.nullable && ['mixed', 'void', 'never', 'null'].includes(type.name))
@@ -210,6 +210,8 @@ export abstract class DeclarationConverter extends ConverterBase {
     if (type.k !== 'named') {
       const names = type.types.map((part) => (part.k === 'named' ? lower(part.name) : typeToString(part)));
       if (new Set(names).size !== names.length) this.error(node, 'Duplicate type is redundant');
+      if (type.k === 'union' && names.includes('true') && names.includes('false'))
+        this.error(node, 'Type contains both true and false, bool must be used instead');
       if (
         type.k === 'union' &&
         (names.some((name) => ['mixed', 'void', 'never'].includes(name)) ||
@@ -389,7 +391,6 @@ export abstract class DeclarationConverter extends ConverterBase {
     }
   }
 
-  // code-gauge-allow functionCognitiveComplexity 28 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
   private checkDefaultType(node: Node, name: string, type: TypeDecl, value: Expr, property?: string): void {
     value = knownScalarDefault(value) ?? value;
     if (value.k !== 'lit' && value.k !== 'array') return;
@@ -409,6 +410,13 @@ export abstract class DeclarationConverter extends ConverterBase {
                   ? 'string'
                   : undefined;
     if (literalType === undefined || defaultFits(type, literalType)) return;
+    if (property && literalType === 'null' && type.k !== 'inter') {
+      const text = typeToString(type);
+      this.error(
+        node,
+        `Default value for property of type ${text} may not be null. Use the nullable type ${type.k === 'named' && type.name !== 'iterable' ? '?' + text : text + '|null'} to allow null default value`
+      );
+    }
     this.error(
       node,
       `型に合わない既定値です（Cannot use ${literalType} as default value for ${property ? `property ${property}::$${name}` : `parameter $${name}`} of type ${typeToString(type)}）。`

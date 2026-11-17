@@ -29,6 +29,10 @@ export function isSubtype(
   sup: TypeDecl,
   supScope: PhpClass | undefined
 ): boolean {
+  if (sub.k === 'named' && lower(sub.name) === 'iterable')
+    return isSubtype(expandIterable(sub.nullable), subScope, sup, supScope);
+  if (sup.k === 'named' && lower(sup.name) === 'iterable')
+    return isSubtype(sub, subScope, expandIterable(sup.nullable), supScope);
   if (sub.k === 'union') return sub.types.every((part) => isSubtype(part, subScope, sup, supScope));
   if (sub.k === 'named' && sub.nullable) {
     return (
@@ -48,6 +52,15 @@ export function isSubtype(
   return namedSubtype(lower(sub.name), subScope, lower(sup.name), supScope);
 }
 
+function expandIterable(nullable: boolean | undefined): TypeDecl {
+  const types: TypeDecl[] = [
+    { k: 'named', name: 'array' },
+    { k: 'named', name: 'Traversable' },
+  ];
+  if (nullable) types.push({ k: 'named', name: 'null' });
+  return { k: 'union', types };
+}
+
 // code-gauge-allow functionCognitiveComplexity 21 -- One case per builtin type, as PHP relates each to the others.
 function namedSubtype(
   sub: string,
@@ -60,10 +73,6 @@ function namedSubtype(
   if (sub === 'static') return sup === 'static' || namedSubtype('self', subScope, sup, supScope);
   if (sup === 'static') return false;
   if ((sub === 'true' || sub === 'false') && (sup === 'bool' || sup === sub)) return true;
-  if (sub === 'iterable') return sup === 'iterable';
-  if (sup === 'iterable') {
-    return sub === 'array' || sub === 'iterable' || isClassSubtype(sub, subScope, 'traversable', supScope);
-  }
   if (BUILTIN.has(sub) || BUILTIN.has(sup)) {
     if (sub === sup) return true;
     if (sup === 'object') return !BUILTIN.has(sub);
