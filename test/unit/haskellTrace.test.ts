@@ -1135,20 +1135,13 @@ ${helpers}`;
     const execution = executeProgram('haskell', source);
     expect(execution.kind).toBe('executed');
     if (execution.kind !== 'executed') return;
-    const clock = Object.getOwnPropertyDescriptor(performance, 'now');
     let ticks = 0;
-    Object.defineProperty(performance, 'now', { configurable: true, value: () => ticks++ / 1000 });
-    try {
-      const recording = traceProgram('haskell', source, source);
-      expect(recording.uncaughtException).toBeUndefined();
-      expect(recording.stdout).toBe(execution.stdout);
-      const assignments = recording.traceItems.filter((item) => item.line === 6);
-      expect(assignments).toHaveLength(300);
-      for (const [index, item] of assignments.entries()) expect(item.vars.n).toBe(index + 56);
-    } finally {
-      if (clock) Object.defineProperty(performance, 'now', clock);
-      else Reflect.deleteProperty(performance, 'now');
-    }
+    const recording = traceWithClock(source, () => ticks++ / 1000);
+    expect(recording.uncaughtException).toBeUndefined();
+    expect(recording.stdout).toBe(execution.stdout);
+    const assignments = recording.traceItems.filter((item) => item.line === 6);
+    expect(assignments).toHaveLength(300);
+    for (const [index, item] of assignments.entries()) expect(item.vars.n).toBe(index + 56);
   }
 );
 
@@ -1343,7 +1336,7 @@ test.each([20, 30, 77])('demanded scalar previews preserve every loop assignment
 main=forM_ [1..1000::Int] $ \\i -> do
  let n=sum [1..${count}::Int]+i
  print n`;
-  const recording = traceProgram('haskell', source, source);
+  const recording = traceWithClock(source, () => 0);
   expect(recording.uncaughtException).toBeUndefined();
   expect(recording.stdout).toBe(
     Array.from({ length: 1000 }, (_, i) => `${(count * (count + 1)) / 2 + i + 1}\n`).join('')
@@ -1517,7 +1510,7 @@ main=do
  forM_ [1..1000::Int] $ \\i -> do
   let xs=take (if i \`mod\` 20==0 then 3000 else 3) [i..]
   print i`;
-  const recording = traceProgram('haskell', source, source);
+  const recording = traceWithClock(source, () => 0);
   expect(recording.uncaughtException).toBeUndefined();
   expect(recording.stdout).toBe(`start\n${Array.from({ length: 1000 }, (_, i) => `${i + 1}\n`).join('')}`);
   const assignments = recording.traceItems.filter((item) => item.line === 5);
@@ -1545,3 +1538,14 @@ main=do
     if (index % 2 === 0) expect(item.vars.x).toBe(index + 1);
   }
 });
+
+function traceWithClock(source: string, now: () => number): ReturnType<typeof traceProgram> {
+  const clock = Object.getOwnPropertyDescriptor(performance, 'now');
+  Object.defineProperty(performance, 'now', { configurable: true, value: now });
+  try {
+    return traceProgram('haskell', source, source);
+  } finally {
+    if (clock) Object.defineProperty(performance, 'now', clock);
+    else Reflect.deleteProperty(performance, 'now');
+  }
+}
