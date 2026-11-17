@@ -889,3 +889,23 @@ test('Bool stepped enumeration preserves ascending, descending and repeated valu
     uncaughtException: undefined,
   });
 });
+
+test.each([
+  ['take 1 (unwords ("a":undefined))', '"a"\n', undefined],
+  ['take 5 (unwords ("hello":map show(filter even [1,3..])))', '"hello"\n', undefined],
+  ['take 2 (unwords ["a",undefined])', '"a "\n', undefined],
+  ['take 0 (unwords undefined)', '""\n', undefined],
+  ['unwords []', '""\n', undefined],
+  ['unwords ["","a",""]', '" a "\n', undefined],
+  ['take 1 (unwords ["",undefined])', '" "\n', undefined],
+  ['take 5 (unwords(repeat "hi"))', '"hi hi"\n', undefined],
+  ['take 2 (unwords ("a":undefined))', '"a', 'Prelude.undefined'],
+  ['take 1 (unwords [undefined])', '"', 'Prelude.undefined'],
+  ['take 2 (unwords ["",undefined])', '" ', 'Prelude.undefined'],
+])('unwords preserves word and separator demand: %s', (expression, stdout, uncaughtException) => {
+  expect(executeProgram('haskell', `main=print(${expression})`)).toMatchObject({
+    kind: 'executed',
+    stdout,
+    uncaughtException,
+  });
+});

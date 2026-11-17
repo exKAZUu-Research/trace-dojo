@@ -518,8 +518,7 @@ words s = case dropWhile isSpace s of
 
 unwords :: [String] -> String
 unwords [] = ""
-unwords [w] = w
-unwords (w:ws) = w ++ ' ' : unwords ws
+unwords (w:ws) = w ++ concatMapList (' ' :) ws
 
 
 ${FOLDABLE}
