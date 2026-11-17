@@ -355,11 +355,11 @@ export class Machine {
       target: slot.target,
     });
     this.runtime.beginPreview(slot);
-    this.runtime.spend();
     if (slot.target) {
       state.enter(slot.target);
       return;
     }
+    this.runtime.spend();
     if (!slot.native) {
       state.evaluate(slot.code as Core, slot.env);
       return;

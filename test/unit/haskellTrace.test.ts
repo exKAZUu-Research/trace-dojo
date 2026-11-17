@@ -1003,6 +1003,23 @@ test('demanding previewed computations still enforces the execution budget', () 
 });
 
 test.each([
+  ['map (+i) [1..160::Int]', 'sum xs'],
+  ['map (+i) [1..162::Int]', 'let ys=xs in sum ys'],
+  ['scanl (+) i [1..100::Int]', 'sum xs'],
+])('demanded list previews preserve the execution budget: %s', (list, result) => {
+  const source = `import Control.Monad
+main=forM_ [1..300::Int] $ \\i -> do
+ let xs=${list}
+ print(${result})`;
+  const execution = executeProgram('haskell', source);
+  expect(execution.kind).toBe('executed');
+  if (execution.kind !== 'executed') return;
+  const recording = traceProgram('haskell', source, source);
+  expect(recording.uncaughtException).toBeUndefined();
+  expect(recording.stdout).toBe(execution.stdout);
+});
+
+test.each([
   ['(x+1,x+2)', 'snd p'],
   ['(x+1,x+2,x+3)', 'case p of (_,_,z)->z'],
 ])('shared inner previews preserve execution limits: %s', (tuple, result) => {
