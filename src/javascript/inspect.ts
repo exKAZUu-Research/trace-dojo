@@ -276,7 +276,7 @@ function frameOf(ctx: Context, value: JsObject, constructor: string | undefined,
   if (value instanceof JsFunction) base = functionBase(runtime, value);
   else if (value.regexp) base = String(value.regexp);
   else if (dateValueOf(value) !== undefined) base = dateBase(value, constructor);
-  else if (value.isError && constructor !== 'Object') base = errorText(value, constructor);
+  else if (value.isError && constructor !== 'Object') base = errorText(runtime, value, constructor);
   else if (value.primitive !== undefined) base = boxedBase(ctx, value.primitive, constructor, toStringTagOf(value));
   else if (value.isArguments) open = '[Arguments] {';
   else {
@@ -387,18 +387,25 @@ function functionBase(runtime: Runtime, fn: JsFunction): string {
  * error's own properties, name places on the host, which a program here does not have.
  */
 export function errorHeadline(runtime: Runtime, error: JsObject): string {
-  return errorText(error, constructorName(runtime, error));
+  return errorText(runtime, error, constructorName(runtime, error));
 }
 
-function errorText(error: JsObject, constructor: string | undefined): string {
-  const message = dataValue(error, 'message');
-  let name: Value;
-  for (let current: JsObject | null = error; current && name === undefined; current = current.proto) {
-    name = dataValue(current, 'name');
-  }
-  const nameText = typeof name === 'string' ? name : 'Error';
-  const text = typeof message === 'string' && message ? `${nameText}: ${message}` : nameText;
-  return improveErrorName(text, nameText, constructor);
+/**
+ * The first line of an error's stack, which V8 formats from its `name` and `message` when first read, and which
+ * Node.js then improves with the `name` it reads again.
+ */
+function errorText(runtime: Runtime, error: JsObject, constructor: string | undefined): string {
+  const name = runtime.get(error, 'name');
+  const message = runtime.get(error, 'message');
+  const nameText = name === undefined ? 'Error' : runtime.toString(name);
+  const messageText = message === undefined ? '' : runtime.toString(message);
+  const text = nameText === '' ? messageText : messageText === '' ? nameText : `${nameText}: ${messageText}`;
+  const improvedName = runtime.get(error, 'name');
+  if (improvedName === undefined || improvedName === null) return improveErrorName(text, 'Error', constructor);
+  if (typeof improvedName === 'string') return improveErrorName(text, improvedName, constructor);
+  // Node.js marks a name that is not a string with the error's class, as `42 [Error]: bad`.
+  const shown = runtime.toString(improvedName);
+  return text.replace(shown, `${shown} [${constructor ?? 'Error'}]`);
 }
 
 /**
@@ -415,11 +422,6 @@ function improveErrorName(text: string, name: string, constructor: string | unde
   return prototype.includes(name)
     ? `${prototype}${text.slice(name.length)}`
     : `${prototype} [${name}]${text.slice(name.length)}`;
-}
-
-function dataValue(object: JsObject, key: string): Value {
-  const property = object.properties.get(key);
-  return property && !isAccessor(property) ? property.value : undefined;
 }
 
 function showsGetter(ctx: Context, property: AccessorProperty): boolean {
