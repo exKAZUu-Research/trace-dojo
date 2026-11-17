@@ -139,10 +139,6 @@ export class Checker {
     return undefined;
   }
 
-  tryUnify(a: Type, b: Type): boolean {
-    return unifyTypes(a, b, (variable, type) => this.bindVar(variable, type)) === undefined;
-  }
-
   freshVar(kind: Kind = STAR, name?: string): TVar {
     return freshTypeVar(kind, this.level, name);
   }
