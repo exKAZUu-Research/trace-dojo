@@ -1,0 +1,7 @@
+const octalEscape = "\101";
+const repeatedEscape = "\1\2";
+const longEscape = "\501";
+const decimalEscape = "\8\9";
+const followedNull = "\08";
+const templateEscape = `\1`;
+type EscapedType = "\101";

@@ -29,7 +29,7 @@ export abstract class ExpressionEvaluator extends EvaluatorBase {
 
   abstract evaluateClass(cls: ClassNode, inferredName?: Key): JsFunction;
 
-  abstract superCall(args: Value[], callRow: number): JsObject;
+  abstract superCall(args: Value[], callRow: number, skipsAfterSuper?: boolean): JsObject;
 
   evaluate(expression: Expression): Value {
     const value = this.evaluateChain(expression);
@@ -307,7 +307,7 @@ export abstract class ExpressionEvaluator extends EvaluatorBase {
     const { runtime } = this;
     const { callee } = expression;
     if (callee.kind === 'super') {
-      return this.superCall(this.evaluateArguments(expression.args), expression.row);
+      return this.superCall(this.evaluateArguments(expression.args), expression.row, expression.skipsAfterSuper);
     }
     const resolved = this.callee(callee);
     if (resolved === SHORT_CIRCUIT) return SHORT_CIRCUIT;

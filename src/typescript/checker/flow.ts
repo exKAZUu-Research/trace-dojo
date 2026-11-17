@@ -43,11 +43,12 @@ export class FlowState {
   constructor(
     readonly entries = new Map<string, FlowEntry>(),
     /** The fields of `this` (by reference key) that every path to here assigned, which a constructor must. */
-    readonly assignedFields = new Set<string>()
+    readonly assignedFields = new Set<string>(),
+    public superCalled = false
   ) {}
 
   clone(): FlowState {
-    return new FlowState(new Map(this.entries), new Set(this.assignedFields));
+    return new FlowState(new Map(this.entries), new Set(this.assignedFields), this.superCalled);
   }
 }
 
@@ -65,7 +66,11 @@ export class Flow {
     const reachable = states.filter((state): state is FlowState => state !== undefined);
     if (reachable.length === 0) return undefined;
     if (reachable.length === 1) return reachable[0].clone();
-    const merged = new FlowState();
+    const merged = new FlowState(
+      undefined,
+      undefined,
+      reachable.every((state) => state.superCalled)
+    );
     const [first, ...others] = reachable;
     for (const field of first.assignedFields) {
       if (others.every((state) => state.assignedFields.has(field))) merged.assignedFields.add(field);
@@ -76,15 +81,31 @@ export class Flow {
       if (entries.some((entry) => entry === undefined)) continue;
       const defined = entries as FlowEntry[];
       merged.entries.set(key, {
-        type: unionOf(defined.map((entry) => entry.type)),
+        type: this.joinTypes(defined.map((entry) => entry.type)),
         assigned: defined.every((entry) => entry.assigned),
         evolving: defined.some((entry) => entry.evolving),
         constraint: defined.every((entry) => entry.constraint)
-          ? unionOf(defined.map((entry) => entry.constraint as Type))
+          ? this.joinTypes(defined.map((entry) => entry.constraint as Type))
           : undefined,
       });
     }
     return merged;
+  }
+
+  private joinTypes(types: Type[]): Type {
+    const union = unionOf(types);
+    if (union.kind !== 'union') return union;
+    return unionOf(
+      union.types.filter(
+        (member, index) =>
+          !union.types.some(
+            (other, otherIndex) =>
+              index !== otherIndex &&
+              this.c.relations.isAssignable(member, other) &&
+              (!this.c.relations.isAssignable(other, member) || otherIndex < index)
+          )
+      )
+    );
   }
 
   readonly declaredTypes = new Map<string, Type>();
@@ -210,10 +231,15 @@ export class Flow {
   }
 
   private narrowMaybe(member: Type, name: string): Type {
-    const narrowed = typeofTypes[name];
-    if (narrowed) return narrowed();
-    if (name === 'function') return member;
-    return member;
+    const narrowed =
+      typeofTypes[name]?.() ??
+      (name === 'function'
+        ? this.c.globalType('Function')
+        : name === 'object'
+          ? unionOf([nonPrimitiveType, nullType])
+          : undefined);
+    if (!narrowed) return member;
+    return member.kind === 'typeParameter' ? intersectionOf([member, narrowed], this.c.budget) : narrowed;
   }
 
   /** Whether `typeof` a value of the type gives `name`: always, never, or maybe. */

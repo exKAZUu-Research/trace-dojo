@@ -74,7 +74,9 @@ export class ClassDeclarationChecker {
         return;
       }
       if (
-        ['function_declaration', 'function_expression', 'class', 'method_definition'].includes(current.type) &&
+        ['function_declaration', 'function_expression', 'arrow_function', 'class', 'method_definition'].includes(
+          current.type
+        ) &&
         current.id !== ctor.id
       )
         return;

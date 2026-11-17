@@ -584,27 +584,10 @@ export class ClassChecker {
   private checkThisBeforeSuper(node: TreeNode, owner: TreeNode, classNode: TreeNode): void {
     if (owner.type !== 'method_definition' || owner.childForFieldName('name')?.text !== 'constructor') return;
     if (!this.extendsClause(classNode)) return;
-    const body = owner.childForFieldName('body');
-    if (!body) return;
-    const superCall = this.firstSuperCall(body);
-    if (!superCall || node.startIndex < superCall.endIndex) {
-      if (superCall && this.isInside(node, superCall)) return;
+    for (let current = node.parent; current && current.id !== owner.id; current = current.parent)
+      if (current.type === 'arrow_function') return;
+    if (this.c.flow.current && !this.c.flow.current.superCalled)
       this.c.error(node, "派生クラスのコンストラクタでは、'this' を使う前に 'super' を呼び出してください。");
-    }
-  }
-
-  private isInside(node: TreeNode, container: TreeNode): boolean {
-    return container.startIndex <= node.startIndex && node.endIndex <= container.endIndex;
-  }
-
-  private firstSuperCall(body: TreeNode): TreeNode | undefined {
-    for (const statement of named(body)) {
-      if (statement.type !== 'expression_statement') continue;
-      const expression = named(statement)[0];
-      if (expression?.type === 'call_expression' && expression.childForFieldName('function')?.type === 'super')
-        return expression;
-    }
-    return undefined;
   }
 
   /** The type `this` stands for in a type annotation. */
@@ -680,13 +663,17 @@ export class ClassChecker {
   superCall(node: TreeNode, args: TreeNode[]): Type {
     const classNode = this.enclosingClass(node);
     const baseStatic = classNode ? this.baseStaticType(classNode) : undefined;
-    if (!baseStatic) {
+    const owner = this.c.functions.contexts.at(-1)?.node;
+    const inConstructor =
+      owner?.type === 'method_definition' && owner.childForFieldName('name')?.text === 'constructor';
+    if (!baseStatic || !inConstructor) {
       for (const arg of args) this.c.expressions.check(arg);
       this.c.error(node, "'super' の呼び出しは、派生クラスのコンストラクタの中でしか書けません。");
       return voidType;
     }
     if (isAnyLike(baseStatic)) {
       for (const arg of args) this.c.expressions.check(arg);
+      if (this.c.flow.current) this.c.flow.current.superCalled = true;
       return voidType;
     }
     const signatures = this.c
@@ -706,6 +693,7 @@ export class ClassChecker {
         )
       : signatures;
     this.c.expressions.calls.resolveWith(node, node.childForFieldName('function') as TreeNode, instantiated, args);
+    if (this.c.flow.current) this.c.flow.current.superCalled = true;
     return voidType;
   }
 
@@ -740,7 +728,12 @@ export class ClassChecker {
       );
       return;
     }
-    if (objectNode.type === 'super' || objectNode.type === 'this') return;
+    if (
+      objectNode.type === 'super' ||
+      objectNode.type === 'this' ||
+      (property.declaration && hasToken(property.declaration, 'static'))
+    )
+      return;
     const objectInfo = this.classInfoOfType(this.c.silently(() => this.c.expressions.check(objectNode)));
     if (objectInfo && !this.derivesFrom(objectInfo, enclosingInfo)) {
       this.c.error(

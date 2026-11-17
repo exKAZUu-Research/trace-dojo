@@ -242,15 +242,6 @@ function constructorWithProperties(node: TreeNode, fields: ViewNode[]): ViewNode
     assignments.push(leaf(name, PARAMETER_PROPERTY_ASSIGNMENT));
   }
   const body = viewed.childForFieldName('body') as ViewNode;
-  const statements = body.children;
-  // A derived class's constructor assigns them once `super(...)` returns, before the statements after it.
-  const superCall = statements.findIndex(isSuperCallStatement);
-  statements.splice(superCall === -1 ? 1 : superCall + 1, 0, ...assignments);
+  body.children.splice(1, 0, ...assignments);
   return viewed;
-}
-
-function isSuperCallStatement(statement: ViewNode): boolean {
-  if (statement.type !== 'expression_statement') return false;
-  const expression = statement.namedChildren[0];
-  return expression?.type === 'call_expression' && expression.childForFieldName('function')?.type === 'super';
 }

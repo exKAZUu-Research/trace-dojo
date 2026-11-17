@@ -82,10 +82,7 @@ export class StatementChecker {
   checkBlockStatements(statements: TreeNode[], afterEach?: (state: State) => void): void {
     for (const statement of statements) {
       if (!this.c.flow.isReachable) {
-        // Unreachable code is still checked, with what its declarations say.
-        this.c.flow.current = new FlowState();
-        this.check(statement);
-        this.c.flow.current = undefined;
+        this.checkUnreachable(statement);
         continue;
       }
       this.check(statement);
@@ -393,12 +390,16 @@ export class StatementChecker {
 
   private checkSubstatement(node: TreeNode): void {
     if (!this.c.flow.isReachable) {
-      this.c.flow.current = new FlowState();
-      this.check(node);
-      this.c.flow.current = undefined;
+      this.checkUnreachable(node);
       return;
     }
     this.check(node);
+  }
+
+  private checkUnreachable(node: TreeNode): void {
+    this.c.flow.current = new FlowState(undefined, undefined, true);
+    this.check(node);
+    this.c.flow.current = undefined;
   }
 
   /**
@@ -462,12 +463,12 @@ export class StatementChecker {
     const entries = [...state.entries].map(
       ([reference, entry]) => `${reference}=${entry.type.id}${entry.assigned ? '' : '?'}${entry.constraint?.id ?? ''}`
     );
-    return `${entries.toSorted().join(',')}|${[...state.assignedFields].toSorted().join(',')}`;
+    return `${entries.toSorted().join(',')}|${[...state.assignedFields].toSorted().join(',')}|${state.superCalled}`;
   }
 
   private sameState(a: State, b: State): boolean {
     if (!a || !b) return a === b;
-    if (a.entries.size !== b.entries.size) return false;
+    if (a.superCalled !== b.superCalled || a.entries.size !== b.entries.size) return false;
     for (const [key, entry] of a.entries) {
       const other = b.entries.get(key);
       if (!other || other.type.id !== entry.type.id || other.assigned !== entry.assigned) return false;

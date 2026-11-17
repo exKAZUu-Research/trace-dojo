@@ -227,7 +227,7 @@ const errorArgumentCounts: Partial<Record<ErrorName, number>> = { AggregateError
 /** Error's own static members, which have nothing to do here past their checks, as programs see no stack. */
 function defineErrorStatics(builder: RealmBuilder, errorConstructor: JsFunction): void {
   builder.method(errorConstructor, 'captureStackTrace', 2, ({ runtime, args }) => {
-    if (!isObject(args[0])) runtime.throwError('TypeError', 'Invalid argument');
+    if (!isObject(args[0])) runtime.throwError('TypeError', 'invalid_argument');
     return;
   });
   builder.method(errorConstructor, 'isError', 1, ({ args }) => args[0] instanceof JsObject && args[0].isError);

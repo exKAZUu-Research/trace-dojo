@@ -136,6 +136,7 @@ export interface ClassNode extends Span {
   name: string;
   superClass?: Expression;
   ctor?: FunctionNode;
+  afterSuper?: Statement[];
   members: ClassMember[];
   source: string;
 }
@@ -197,6 +198,7 @@ export type Expression = Span & {
     | MemberExpression
     | {
         kind: 'call';
+        skipsAfterSuper?: boolean;
         callee: Expression | SuperReference;
         args: Argument[];
         optional: boolean;

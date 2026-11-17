@@ -166,7 +166,7 @@ export class ExpressionChecker {
 
   /** The type of a parameter that has neither an annotation nor a contextual type: an implicit `any`. */
   implicitParameterType(parameter: TreeNode, pattern: TreeNode, rest: boolean): Type {
-    if (!this.c.isLibrary(parameter) && this.reportsImplicitAny(parameter)) {
+    if (!this.c.isLibrary(parameter)) {
       if (pattern.type === 'identifier') {
         this.c.error(parameter, `引数 ${pattern.text} の型が暗黙に any になります。型を書いてください。`);
       } else if (rest) {
@@ -181,13 +181,6 @@ export class ExpressionChecker {
       }
     }
     return rest ? this.c.arrayType(anyType) : anyType;
-  }
-
-  /** Whether a parameter's implicit `any` is an error: not in a type-only declaration, which reports it elsewhere. */
-  private reportsImplicitAny(parameter: TreeNode): boolean {
-    const owner = parameter.parent?.parent;
-    if (!owner) return true;
-    return true;
   }
 
   /** The type of a `typeof x` type query. */

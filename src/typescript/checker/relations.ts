@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 440 -- Decides assignability and comparability for every kind of type, as TypeScript's checker does in one place.
+// code-gauge-allow-file fileNcss 442 -- Decides assignability and comparability for every kind of type, as TypeScript's checker does in one place.
 import type { Checker } from './checker';
 import { isUnit } from './flow';
 import { isNumericName } from './syntax';
@@ -577,7 +577,8 @@ export class Relations {
     const { parameters } = signature;
     if (index < parameters.length) {
       const parameter = parameters[index];
-      return parameter.rest ? this.c.restElementType(parameter.type) : parameter.type;
+      if (parameter.rest) return this.c.restElementType(parameter.type);
+      return parameter.optional ? unionOf([parameter.type, undefinedType]) : parameter.type;
     }
     const last = parameters.at(-1);
     return last?.rest ? this.c.restElementType(last.type) : undefined;

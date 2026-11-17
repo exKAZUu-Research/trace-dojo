@@ -1,5 +1,5 @@
 import { createArgumentsObject, mapArguments } from './argumentsObject';
-// code-gauge-allow-file fileNcss 488 -- One executor of every statement kind and of functions and classes, which share its scopes.
+// code-gauge-allow-file fileNcss 501 -- Executes statements, functions, fields, and constructor initialization with their shared lexical scopes.
 import type {
   Block,
   ClassMember,
@@ -791,7 +791,7 @@ export class Evaluator extends SuspendableStatementEvaluator {
     }
   }
 
-  superCall(args: Value[], callRow: number | undefined): JsObject {
+  superCall(args: Value[], callRow: number | undefined, skipsAfterSuper = false): JsObject {
     const { runtime } = this;
     const frame = this.functionFrame();
     const constructing = frame?.constructing;
@@ -820,8 +820,22 @@ export class Evaluator extends SuspendableStatementEvaluator {
     const { behavior } = constructing;
     if (behavior.kind === 'class') {
       for (const field of behavior.fields) this.initializeField(constructed, field);
+      if (!skipsAfterSuper) this.initializeAfterSuper(behavior.node.afterSuper, frame);
     }
     return constructed;
+  }
+
+  private initializeAfterSuper(statements: Statement[] | undefined, frame: FunctionFrame): void {
+    if (!statements) return;
+    const outer = this.runtime.frame.scope;
+    let scope = outer;
+    while (scope.functionFrame !== frame && scope.parent) scope = scope.parent;
+    this.runtime.frame.scope = scope;
+    try {
+      this.statements(statements);
+    } finally {
+      this.runtime.frame.scope = outer;
+    }
   }
 }
 

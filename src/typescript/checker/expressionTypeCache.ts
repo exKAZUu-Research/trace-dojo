@@ -35,6 +35,8 @@ export class ExpressionTypeCache {
     const captured = this.c.functions.capturedTypes.map((entries) => [...entries].map(([key, type]) => [key, type.id]));
     const environment = JSON.stringify([
       this.c.flow.current !== undefined,
+      this.c.flow.current?.superCalled,
+      [...(this.c.flow.current?.assignedFields ?? [])].toSorted(),
       flow,
       parameters,
       contexts,
