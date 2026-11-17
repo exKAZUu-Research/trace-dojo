@@ -1,0 +1,60 @@
+array(1) {
+  [0]=>
+  &int(2)
+}
+array(1) {
+  [0]=>
+  &int(2)
+}
+array(1) {
+  [0]=>
+  int(2)
+}
+array(1) {
+  [0]=>
+  &int(3)
+}
+array(1) {
+  [0]=>
+  int(3)
+}
+array(1) {
+  [0]=>
+  &int(5)
+}
+array(1) {
+  [0]=>
+  int(5)
+}
+array(1) {
+  [0]=>
+  &int(5)
+}
+array(1) {
+  [0]=>
+  int(5)
+}
+
+Deprecated: Creation of dynamic property Keeper::$self is deprecated in /main.php on line 9
+array(1) {
+  [0]=>
+  &int(5)
+}
+array(1) {
+  [0]=>
+  int(5)
+}
+array(1) {
+  [0]=>
+  array(1) {
+    [0]=>
+    int(2)
+  }
+}
+array(1) {
+  [0]=>
+  array(1) {
+    [0]=>
+    int(2)
+  }
+}

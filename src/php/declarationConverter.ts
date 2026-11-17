@@ -387,8 +387,8 @@ export abstract class DeclarationConverter extends ConverterBase {
   }
 
   /** Rejects a literal default value the parameter's type can never hold, as PHP does at compile time. */
-  // code-gauge-allow functionCognitiveComplexity 27 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
-  private checkDefaultType(node: Node, name: string, type: TypeDecl, value: Expr, property = false): void {
+  // code-gauge-allow functionCognitiveComplexity 28 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+  private checkDefaultType(node: Node, name: string, type: TypeDecl, value: Expr, property?: string): void {
     if (value.k !== 'lit' && value.k !== 'array') return;
     if (value.k === 'lit' && value.v === null && !property) return;
     const literalType =
@@ -408,7 +408,7 @@ export abstract class DeclarationConverter extends ConverterBase {
     if (literalType === undefined || defaultFits(type, literalType)) return;
     this.error(
       node,
-      `引数 $${name} の型に合わない既定値です（Cannot use ${literalType} as default value for parameter $${name} of type ${typeToString(type)}）。`
+      `型に合わない既定値です（Cannot use ${literalType} as default value for ${property ? `property ${property}::$${name}` : `parameter $${name}`} of type ${typeToString(type)}）。`
     );
   }
 
@@ -705,7 +705,7 @@ export abstract class DeclarationConverter extends ConverterBase {
         );
       }
       const defaultExpr = defaultNode ? this.constantExpr(defaultNode, false) : undefined;
-      if (type && defaultExpr) this.checkDefaultType(element, name, type, defaultExpr, true);
+      if (type && defaultExpr) this.checkDefaultType(element, name, type, defaultExpr, decl.name);
       const prop: PropertyDeclAst = {
         name,
         visibility: modifiers.visibility ?? 'public',

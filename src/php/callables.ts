@@ -1,12 +1,13 @@
+// code-gauge-allow-file fileNcss 415 -- Keeps one PHP runtime concern and its shared helpers in one module.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import { placeOf } from './assignment';
 import type { Arg, Expr } from './ast';
 import builtinNames from './builtinNames.json';
 import { lower } from './bytes';
 import { type ArgValue, type CallTarget, closureFunction, functionDisplayName, invoke, paramIsByRef } from './calls';
-import { canCall, lookupMethod, requireClass, requireClassScope } from './classes';
+import { canCall, classScopeMessage, lookupMethod, requireClass } from './classes';
 import { debugType, valueName } from './conversions';
-import { notice, throwError, warn } from './errors';
+import { deprecated, notice, probe, ProbeFailure, throwError, warn } from './errors';
 import { type Chain, ev, evChain, iterate, resolveClassRef, SHORT } from './interp';
 import { toStr } from './operators';
 import { ElementPlace, share, VarPlace, writableContainer } from './places';
@@ -120,7 +121,7 @@ export function callExpression(e: Extract<Expr, { k: 'call' }>): Value {
   }
   const callee = ev(e.fn);
   runtime.row = e.row;
-  const target = callTargetOf(callee, true);
+  const target = callTargetOf(callee, 'direct');
   if (e.fcc) return closureFromCallable(target);
   const args = evalArgs(e.args, target.fn, functionNameFor(target));
   runtime.row = e.row;
@@ -334,12 +335,48 @@ export function closureTarget(closure: PhpObject): CallTarget {
   };
 }
 
+class CallableFailure {
+  constructor(
+    readonly message: string,
+    readonly problem: string
+  ) {}
+}
+
 /**
  * The function a callable value names: a closure, an invokable object, a function name, `"Class::method"`, or
  * `[$objectOrClass, "method"]`.
  */
-// code-gauge-allow functionNcss 42 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
-export function callTargetOf(value: Value, forCall: boolean): CallTarget {
+export function callTargetOf(value: Value, mode: 'direct' | 'callback'): CallTarget {
+  try {
+    return resolveCallable(value, mode);
+  } catch (error) {
+    if (error instanceof CallableFailure) throwError('Error', error.message);
+    throw error;
+  }
+}
+
+export function checkCallable(value: Value): boolean {
+  try {
+    resolveCallable(value, 'callback', true);
+    return true;
+  } catch (error) {
+    if (error instanceof CallableFailure) return false;
+    throw error;
+  }
+}
+
+export function explainCallable(value: Value): string {
+  try {
+    resolveCallable(value, 'callback');
+    return '';
+  } catch (error) {
+    if (error instanceof CallableFailure) return error.problem;
+    throw error;
+  }
+}
+
+// code-gauge-allow functionCognitiveComplexity 16 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+function resolveCallable(value: Value, mode: 'direct' | 'callback', emitScopeWarning = false): CallTarget {
   const runtime = rt();
   const scope = runtime.frame.scope;
   if (value instanceof PhpObject) {
@@ -353,21 +390,35 @@ export function callTargetOf(value: Value, forCall: boolean): CallTarget {
         staticClass: value.cls,
         method: invokeMethod,
       };
-    if (forCall) throwError('Error', 'Object of type ' + value.cls.name + ' is not callable');
-    throwError('Error', 'Object of type ' + value.cls.name + ' is not callable');
+    throw new CallableFailure('Object of type ' + value.cls.name + ' is not callable', 'no array or string given');
   }
   if (typeof value === 'string') {
     const separator = value.indexOf('::');
-    if (separator !== -1) return staticCallable(value.slice(0, separator), value.slice(separator + 2), scope);
+    if (separator !== -1)
+      return staticCallable(value.slice(0, separator), value.slice(separator + 2), scope, mode, emitScopeWarning);
     const fn = runtime.functions.get(lower(value.startsWith('\\') ? value.slice(1) : value));
     if (!fn) {
       if (builtinNames.functions.includes(lower(value.replace(/^\\/, ''))))
         throw new UnsupportedFeatureError(`PHP の組み込み関数（${value}）`);
-      throwError('Error', `Call to undefined function ${value}()`);
+      throw new CallableFailure(
+        `Call to undefined function ${value}()`,
+        `function "${value}" not found or invalid function name`
+      );
     }
     return { fn };
   }
-  if (value instanceof PhpArray && value.size === 2) {
+  if (value instanceof PhpArray) return arrayCallable(value, scope, mode, emitScopeWarning);
+  throw new CallableFailure(`Value of type ${debugType(value)} is not callable`, 'no array or string given');
+}
+
+// code-gauge-allow functionCognitiveComplexity 27 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+function arrayCallable(
+  value: PhpArray,
+  scope: PhpClass | undefined,
+  mode: 'direct' | 'callback',
+  emitScopeWarning: boolean
+): CallTarget {
+  if (value.size === 2) {
     const target = value.get(0n);
     const method = value.get(1n);
     if (typeof method === 'string' && target instanceof PhpObject) {
@@ -380,90 +431,133 @@ export function callTargetOf(value: Value, forCall: boolean): CallTarget {
       const magic = target.cls.findMethod('__call');
       if (magic) return magicTarget(target, magic, method);
       if (found)
-        throwError(
-          'Error',
-          `Call to ${found.visibility} method ${target.cls.name}::${found.name}() from ${scope ? `scope ${scope.name}` : 'global scope'}`
+        throw new CallableFailure(
+          `Call to ${found.visibility} method ${target.cls.name}::${found.name}() from ${scope ? `scope ${scope.name}` : 'global scope'}`,
+          `cannot access ${found.visibility} method ${target.cls.name}::${found.name}()`
         );
-      throwError('Error', `Call to undefined method ${target.cls.name}::${method}()`);
+      throw new CallableFailure(
+        `Call to undefined method ${target.cls.name}::${method}()`,
+        `class ${target.cls.name} does not have a method "${method}"`
+      );
     }
-    if (typeof method === 'string' && typeof target === 'string') return staticCallable(target, method, scope);
+    if (typeof method === 'string' && typeof target === 'string')
+      return staticCallable(target, method, scope, mode, emitScopeWarning);
   }
-  if (value instanceof PhpArray) {
-    if (value.size !== 2) throwError('Error', 'Array callback must have exactly two elements');
-    throwError('Error', 'First array member is not a valid class name or object');
-  }
-  throwError('Error', `Value of type ${debugType(value)} is not callable`);
+  if (value.size !== 2)
+    throw new CallableFailure(
+      'Array callback must have exactly two elements',
+      'array callback must have exactly two members'
+    );
+  throw new CallableFailure(
+    'First array member is not a valid class name or object',
+    typeof value.get(1n) === 'string'
+      ? 'first array member is not a valid class name or object'
+      : 'second array member is not a valid method'
+  );
 }
 
 function magicTarget(object: PhpObject, magic: Method, name: string): CallTarget {
   return { fn: magicForwarder(magic, name, object, object.cls), thisObj: object };
 }
 
-// code-gauge-allow functionCognitiveComplexity 25 -- Resolves each form of call and callable by PHP's lookup rules, in PHP's order of checks.
-function staticCallable(className: string, methodName: string, scope: PhpClass | undefined): CallTarget {
+// code-gauge-allow functionCognitiveComplexity 28 -- Resolves each form of call and callable by PHP's lookup rules, in PHP's order of checks.
+function staticCallable(
+  className: string,
+  methodName: string,
+  scope: PhpClass | undefined,
+  mode: 'direct' | 'callback',
+  emitScopeWarning: boolean
+): CallTarget {
   const frame = rt().frame;
-  let cls: PhpClass;
   const word = lower(className);
-  if (word === 'self' || word === 'static' || word === 'parent') {
-    const scope = requireClassScope(frame.scope, word);
-    cls =
-      word === 'self'
-        ? scope
-        : word === 'parent'
-          ? (scope.parent ?? requireClass(className))
-          : (frame.staticClass ?? requireClass(className));
-  } else cls = requireClass(className);
+  let cls: PhpClass;
+  if (mode === 'callback' && (word === 'self' || word === 'static' || word === 'parent')) {
+    if (!frame.scope) {
+      const message = classScopeMessage(word);
+      throw new CallableFailure(message, message[0].toLowerCase() + message.slice(1));
+    }
+    if (emitScopeWarning) deprecated(`Use of "${word}" in callables is deprecated`);
+    if (word === 'parent' && !frame.scope.parent)
+      throw new CallableFailure(
+        'Cannot access "parent" when current class scope has no parent',
+        'cannot access "parent" when current class scope has no parent'
+      );
+    cls = (
+      word === 'self' ? frame.scope : word === 'parent' ? frame.scope.parent : (frame.staticClass ?? frame.scope)
+    ) as PhpClass;
+  } else cls = callableClass(className);
   const method = lookupMethod(cls, lower(methodName), scope);
   if (!method) {
     const magic = cls.findMethod('__callstatic');
     if (magic) return { fn: magicForwarder(magic, methodName, undefined, cls), staticClass: cls };
-    throwError('Error', `Call to undefined method ${cls.name}::${methodName}()`);
+    throw new CallableFailure(
+      `Call to undefined method ${cls.name}::${methodName}()`,
+      `class ${cls.name} does not have a method "${methodName}"`
+    );
   }
   if (!canCall(method, scope))
-    throwError(
-      'Error',
-      `Call to ${method.visibility} method ${cls.name}::${method.name}() from ${scope ? `scope ${scope.name}` : 'global scope'}`
+    throw new CallableFailure(
+      `Call to ${method.visibility} method ${cls.name}::${method.name}() from ${scope ? `scope ${scope.name}` : 'global scope'}`,
+      `cannot access ${method.visibility} method ${cls.name}::${method.name}()`
     );
   if (!method.isStatic) {
     const thisObj = frame.thisObj && frame.thisObj.cls.isSubclassOf(cls) ? frame.thisObj : undefined;
     if (!thisObj)
-      throwError('Error', `Non-static method ${method.scope.name}::${method.name}() cannot be called statically`);
+      throw new CallableFailure(
+        `Non-static method ${method.scope.name}::${method.name}() cannot be called statically`,
+        `non-static method ${method.scope.name}::${method.name}() cannot be called statically`
+      );
     return { fn: method.fn, thisObj, scope: method.scope, staticClass: thisObj.cls, method };
   }
   return { fn: method.fn, scope: method.scope, staticClass: cls, method };
 }
 
-/** Calls a callable value with arguments already evaluated, as `call_user_func` and `$f(...)` do. */
-export function callValue(callable: Value, args: ArgValue[], row: number | undefined): Value {
-  const target = callTargetOf(callable, true);
-  const bound = args.map((arg, index) => {
-    if (arg.ref) return arg;
-    if (paramIsByRef(target.fn, index, arg.name) && target.fn.kind === 'user') {
-      const param = arg.name ?? target.fn.params[Math.min(index, target.fn.params.length - 1)].name;
-      warn(
-        `${functionDisplayName(target)}(): Argument #${index + 1} ($${param}) must be passed by reference, value given`
-      );
-      return { ...arg, ref: new Ref(arg.v) };
-    }
-    return arg;
-  });
-  return invoke(target, bound, row);
+function callableClass(name: string): PhpClass {
+  try {
+    return probe(() => requireClass(name));
+  } catch (error) {
+    if (error instanceof ProbeFailure)
+      throw new CallableFailure(`Class "${name}" not found`, `class "${name}" not found`);
+    throw error;
+  }
 }
 
-/** Calls a callback from native code, such as `array_map`'s, whose frames show as `[internal function]`. */
+/** Calls a callable value with arguments already evaluated, as `call_user_func` and `$f(...)` do. */
+export function callValue(
+  callable: Value,
+  args: ArgValue[],
+  row: number | undefined,
+  mode: 'direct' | 'callback' = 'callback'
+): Value {
+  const target = callTargetOf(callable, mode);
+  return invoke(target, bindCallbackArguments(target, args), row);
+}
+
 export function callCallback(callable: Value, args: Value[]): Value {
-  const target = callTargetOf(callable, true);
-  return invoke(
-    target,
+  return callValue(
+    callable,
     args.map((v) => ({ v })),
     undefined
   );
 }
 
-/** Calls a callback with references for its by-reference parameters, as `array_walk` does. */
 export function callCallbackRefs(callable: Value, args: ArgValue[]): Value {
-  const target = callTargetOf(callable, true);
-  return invoke(target, args, undefined);
+  return callValue(callable, args, undefined);
+}
+
+function bindCallbackArguments(target: CallTarget, args: ArgValue[]): ArgValue[] {
+  return args.map((arg, index) => {
+    if (arg.ref || !paramIsByRef(target.fn, index, arg.name)) return arg;
+    const namedIndex = arg.name === undefined ? -1 : target.fn.params.findIndex((param) => param.name === arg.name);
+    const position = namedIndex >= 0 ? namedIndex : index;
+    const param = target.fn.params[Math.min(position, target.fn.params.length - 1)];
+    if (param?.preferRef) return arg;
+    const label = param?.variadic ? '' : ` ($${param?.name ?? arg.name ?? ''})`;
+    warn(
+      `${functionDisplayName(target)}(): Argument #${position + 1}${label} must be passed by reference, value given`
+    );
+    return { ...arg, ref: Ref.temporary(arg.v) };
+  });
 }
 
 export function closureFromCallable(target: CallTarget): PhpObject {

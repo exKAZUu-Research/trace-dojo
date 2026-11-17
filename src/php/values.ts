@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 575 -- Keeps one PHP runtime concern and its shared helpers in one module.
+// code-gauge-allow-file fileNcss 585 -- Keeps one PHP runtime concern and its shared helpers in one module.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import type { TurtleState } from '../interpreter/turtleWorld';
 import type { ClassDecl, FunctionDecl } from './ast';
@@ -213,6 +213,16 @@ export class PhpArray {
   private trackSlot(key: Key, slot: Value | Ref): void {
     if (slot instanceof PhpArray) slot.shared = true;
     trackOwner(slot, this, key);
+  }
+
+  retire(): (Value | Ref)[] {
+    const slots = [...this.map.values()];
+    this.map.clear();
+    this.composite = false;
+    this.mutationVersion++;
+    invalidateOwner(this);
+    for (const slot of slots) if (slot instanceof Ref) slot.rc--;
+    return slots;
   }
 
   trackCachedParent(parent: PhpArray): void {

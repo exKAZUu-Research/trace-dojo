@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 996 -- Keeps one PHP runtime concern and its shared helpers in one module.
+// code-gauge-allow-file fileNcss 997 -- Keeps one PHP runtime concern and its shared helpers in one module.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 // oxlint-disable unicorn/prefer-code-point -- PHP strings hold bytes as code units 0–255, which charCodeAt and fromCharCode read and write as they are.
 import { type Comparisons, type Entry, SortedWalk } from './arraySetWalk';
@@ -1297,7 +1297,10 @@ function setColumnFlag(
   value: bigint,
   position: number
 ): void {
-  if (value === 3n || value === 4n) {
+  const mode = value & ~8n;
+  if (mode < 0n || mode > 6n)
+    throwError('ValueError', `array_multisort(): Argument #${position} must be a valid sort flag`);
+  if (mode === 3n || mode === 4n) {
     if (column.orderSet)
       throwError(
         'TypeError',
@@ -1306,8 +1309,6 @@ function setColumnFlag(
     column.orderSet = true;
     column.order = value === 3n ? -1 : 1;
   } else {
-    if (![0n, 1n, 2n, 5n, 6n, 10n, 14n].includes(value))
-      throwError('ValueError', `array_multisort(): Argument #${position} must be a valid sort flag`);
     if (column.modeSet)
       throwError(
         'TypeError',

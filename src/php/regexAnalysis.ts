@@ -5,8 +5,8 @@ import { UnsupportedFeatureError } from './unsupported';
 
 type Length = readonly [number, number];
 
-// code-gauge-allow functionNcss 46 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
-// code-gauge-allow functionCognitiveComplexity 30 -- Keeps shared traversal state for captures, lookbehind and case folding in one AST pass.
+// code-gauge-allow functionNcss 49 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+// code-gauge-allow functionCognitiveComplexity 30 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 export function analyzeRegex(source: string, unicode: boolean, utf8: boolean, ignoreCase: boolean): Set<string> {
   let tree: AST.Pattern;
   try {
@@ -52,11 +52,21 @@ export function analyzeRegex(source: string, unicode: boolean, utf8: boolean, ig
       if (validateLookbehind(node, lengths) && captureCount !== capturesAtEntry.get(node))
         throw new UnsupportedFeatureError('可変長後読みのキャプチャ');
     },
+    onQuantifierLeave(node) {
+      validateCaptureRepeat(node, lengths);
+    },
     onCapturingGroupEnter() {
       captureCount++;
     },
   });
   return references;
+}
+
+function validateCaptureRepeat(node: AST.Quantifier, lengths: Map<AST.Element, Length>): void {
+  const group = node.element;
+  if (group.type !== 'CapturingGroup' || !/^\$\d+$/.test(group.name ?? '') || node.max === node.min) return;
+  const [min, max] = elementLength(group, lengths, new Set());
+  if (min === 0 && (node.min === 0 || max > 0)) throw new UnsupportedFeatureError('空に一致できるキャプチャの繰り返し');
 }
 
 function validateLookbehind(node: AST.Assertion, lengths: Map<AST.Element, Length>): boolean {

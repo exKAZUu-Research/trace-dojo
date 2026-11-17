@@ -447,6 +447,9 @@ test.each([
   String.raw`<?php preg_match('/[\xe0-\xef]/i',"\xc9");`,
   '<?php preg_match("/(?<=a+)b/","ab");',
   '<?php preg_match("/(?<=a{1,256})b/","ab");',
+  '<?php preg_match("/(a*)+/","aaa");',
+  '<?php preg_match("/(a?){0,3}/","a");',
+  '<?php preg_match("/()*/","");',
 ])('rejects regex semantics the host cannot preserve: %s', (source) => {
   expect(run(source)).toMatchObject({
     kind: 'executed',
@@ -458,6 +461,14 @@ test('retains bounded lookbehind and Unicode or ASCII case folding', () => {
   expect(
     run('<?php var_dump(preg_match("/(?<=a{1,255})b/","ab"),preg_match("/é/iu","É"),preg_match("/a/i","日A"));')
   ).toMatchObject({ kind: 'executed', stdout: 'int(1)\nint(1)\nint(1)\n' });
+});
+
+test('retains fixed empty captures and nonempty repeated captures', () => {
+  expect(run('<?php var_dump(preg_match("/()+/","",$m),$m,preg_match("/(a)+/","aa",$m),$m);')).toMatchObject({
+    kind: 'executed',
+    stdout:
+      'int(1)\narray(2) {\n  [0]=>\n  string(0) ""\n  [1]=>\n  string(0) ""\n}\nint(1)\narray(2) {\n  [0]=>\n  string(2) "aa"\n  [1]=>\n  string(1) "a"\n}\n',
+  });
 });
 
 test.each([false, true])(
@@ -710,6 +721,13 @@ test.each([
   expect(run(`<?php echo 'before'; ${declaration}`).kind).toBe('compileError');
 });
 
+test('identifies the property when rejecting its incompatible default', () => {
+  expect(run('<?php echo "never"; class Account { public int $balance=[]; }')).toMatchObject({
+    kind: 'compileError',
+    diagnostics: [{ message: expect.stringContaining('property Account::$balance of type int') }],
+  });
+});
+
 test.each([
   '<?php echo "before"; $s=<<<TXT\n \thello\n  TXT;',
   '<?php echo "before"; $s=<<<\'TXT\'\n\thello\n  TXT;',
@@ -749,6 +767,8 @@ test.each([
   'function f($x){} f($a[]);',
   'strlen(string: $a[]);',
   'function f(&$x,...$values){} f($a[], $b[]);',
+  'SplFixedArray::fromArray($a[]);',
+  'class A extends SplFixedArray{} A::fromArray(array: $a[]);',
 ])('rejects append reads in known value arguments before output: %s', (source) => {
   expect(run(`<?php echo 'before'; ${source}`).kind).toBe('compileError');
 });

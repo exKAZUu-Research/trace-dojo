@@ -1,10 +1,10 @@
 // code-gauge-allow-file fileNcss 554 -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import { lower } from './bytes';
-import { callCallback, callTargetOf, callValue } from './callables';
-import { type ArgValue, callStack, setCallableExplainer } from './calls';
+import { callCallback, callValue, checkCallable, explainCallable } from './callables';
+import { type ArgValue, backtraceLimit, callStack, setCallableExplainer } from './calls';
 import * as classesModule from './classes';
-import { findClass, lookupMethod } from './classes';
+import { findClass } from './classes';
 import { debugType, getType, isNumericString, normalizeKeyString, valueName } from './conversions';
 import {
   deprecated,
@@ -25,7 +25,6 @@ import {
   E_USER_WARNING,
   E_WARNING,
   emitError,
-  probe,
   throwError,
   warn,
 } from './errors';
@@ -40,7 +39,7 @@ import { formatPrintf } from './sprintf';
 import { constantKey, defineConstant as defineUserConstant } from './statements';
 import { setCallableCheck } from './types';
 import { UnsupportedFeatureError } from './unsupported';
-import { copyValueSlot, isClosure, PhpArray, PhpClass, PhpObject, Ref, UNINIT, type Value } from './values';
+import { copyValueSlot, PhpArray, PhpClass, PhpObject, Ref, UNINIT, type Value } from './values';
 
 // Constants ------------------------------------------------------------------------------------------------------------
 
@@ -363,50 +362,10 @@ markInlined('call_user_func');
 markInlined('call_user_func_array');
 
 export function isCallable(value: Value): boolean {
-  try {
-    if (value instanceof PhpObject) return isClosure(value) || value.cls.findMethod('__invoke') !== undefined;
-    if (typeof value !== 'string' && !(value instanceof PhpArray)) return false;
-    probe(() => callTargetOf(value, false));
-    return true;
-  } catch (error) {
-    if (error instanceof UnsupportedFeatureError) throw error;
-    return false;
-  }
+  return checkCallable(value);
 }
 
-/** Explains why a value is no valid callback, as PHP's messages for callable parameters do. */
-// code-gauge-allow functionCognitiveComplexity 21 -- Transcribes PHP's algorithm for this function step by step, whose branches mirror PHP's.
-function callableProblem(value: Value): string {
-  if (typeof value === 'string') {
-    if (value.includes('::')) {
-      const [className, method] = value.split('::');
-      const cls = findClass(className);
-      if (!cls) return `class "${className}" not found`;
-      return `class ${cls.name} does not have a method "${method}"`;
-    }
-    return `function "${value}" not found or invalid function name`;
-  }
-  if (value instanceof PhpArray) {
-    if (value.size !== 2) return 'array callback must have exactly two members';
-    const target = value.get(0n);
-    const method = value.get(1n);
-    if (typeof method !== 'string') return 'second array member is not a valid method';
-    if (target instanceof PhpObject) {
-      const found = lookupMethod(target.cls, lower(method), rt().frame.scope);
-      if (!found) return `class ${target.cls.name} does not have a method "${method}"`;
-      return `cannot access ${found.visibility} method ${target.cls.name}::${found.name}()`;
-    }
-    if (typeof target === 'string') {
-      const cls = findClass(target);
-      if (!cls) return `class "${target}" not found`;
-      return `class ${cls.name} does not have a method "${method}"`;
-    }
-    return 'first array member is not a valid class name or object';
-  }
-  return 'no array or string given';
-}
-
-setCallableExplainer(callableProblem);
+setCallableExplainer(explainCallable);
 
 setCallableCheck(isCallable);
 
@@ -669,8 +628,8 @@ defineFunction('gc_enable(): void', () => null);
 defineFunction('gc_disable(): void', () => null);
 defineFunction('debug_print_backtrace(int $options = 0, int $limit = 0): void', ({ args }) => {
   const options = Number(args[0] ?? 0n);
-  const limit = Number(args[1] ?? 0n);
-  const records = callStack.toReversed().slice(1, limit > 0 ? limit + 1 : undefined);
+  const limit = backtraceLimit(args[1] as bigint | undefined);
+  const records = callStack.toReversed().slice(1, limit + 1);
   rt().echo(
     records
       .map(

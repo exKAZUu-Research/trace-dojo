@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 750 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 787 -- Holds the cases of one concern of the interpreter, which share their helpers.
 import { ExecutionLimitError } from '../interpreter/limits';
 import type { TurtleState } from '../interpreter/turtleWorld';
 import type { Frame, Runtime } from './runtime';
@@ -39,7 +39,7 @@ export function collectGarbage(runtime: Runtime, cycles = false): number {
   }
 }
 
-// code-gauge-allow functionNcss 50 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+// code-gauge-allow functionNcss 55 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 // code-gauge-allow functionCognitiveComplexity 27 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 function collectGarbageNow(runtime: Runtime, cycles: boolean): number {
   // While a release runs destructors, it frees the rest of what it released itself, in PHP's order.
@@ -57,19 +57,23 @@ function collectGarbageNow(runtime: Runtime, cycles: boolean): number {
   const garbage: PhpObject[] = [];
   for (const object of runtime.objects.values()) if (!reached.has(object)) garbage.push(object);
   if (garbage.length === 0) {
+    finishArrayCollection(runtime, arrayCandidates);
     retainTurtles(runtime, reached);
     return arrayCount;
   }
   const freed = cycles ? garbage : freeable(garbage);
   if (freed.length === 0) {
+    finishArrayCollection(runtime, arrayCandidates);
     retainTurtles(runtime, reached);
     return arrayCount;
   }
   const { owners, handles } = releaseOrder(freed, previousOrder, runtime);
-  const collected = freed.length + heldArrayCount([...freed, ...arrayCandidates], reachedArrays);
+  const arrayStorage = collectibleGraph([...freed, ...arrayCandidates], reachedArrays).arrays;
+  const collected = freed.length + arrayStorage.size;
   const destructible = freed.filter((object) => !object.destructed && object.cls.findMethod('__destruct'));
   if (destructible.length === 0 || runtime.shuttingDown) {
     for (const object of handles) runtime.freeObject(object);
+    finishArrayCollection(runtime, arrayStorage);
     retainTurtles(runtime, mark(runtime));
     return collected;
   }
@@ -89,6 +93,7 @@ function collectGarbageNow(runtime: Runtime, cycles: boolean): number {
   const excluded = new Set(destructible.filter((object) => !cyclic.has(object)));
   const graph = collectibleGraph([...cyclic, ...arrayCandidates], afterArrays, excluded, new Set(remaining));
   for (const object of handles) if (!after.has(object)) runtime.freeObject(object);
+  finishArrayCollection(runtime, arrayStorage);
   retainTurtles(runtime, after);
   return graph.objects.size + graph.arrays.size;
 }
@@ -99,7 +104,7 @@ function collectGarbageNow(runtime: Runtime, cycles: boolean): number {
  * destroyed from the dropped values outward: its destructor runs, then what it holds is released in order, then its
  * handle returns to the free list. Objects on a cycle stay, as reference counting cannot free them.
  */
-// code-gauge-allow functionNcss 42 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+// code-gauge-allow functionNcss 44 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 // code-gauge-allow functionCognitiveComplexity 21 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 export function releaseDropped(runtime: Runtime, dropped: unknown[]): void {
   if (runtime.shuttingDown || runtime.exhausted) return;
@@ -117,7 +122,7 @@ export function releaseDropped(runtime: Runtime, dropped: unknown[]): void {
   );
   if (dropped.length === 0) return;
   const cycleCount = runtime.arrayCycles.size;
-  bufferArrayCycles(runtime, dropped, roots);
+  const arrayStorage = bufferArrayCycles(runtime, dropped, roots);
   if (runtime.arrayCycles.size !== cycleCount) unreachable.clear();
   const within = objectsWithin(dropped);
   const freed = new Set<PhpObject>();
@@ -126,7 +131,10 @@ export function releaseDropped(runtime: Runtime, dropped: unknown[]): void {
     const reached = new Set(within.filter((object) => ownedReachable(object, roots, runtime, unreachable)));
     for (const object of freeable(within.filter((object) => !reached.has(object)))) freed.add(object);
   }
-  if (freed.size === 0 && activeReleaseObjects.size === 0) return;
+  if (freed.size === 0 && activeReleaseObjects.size === 0) {
+    retireArrays(runtime, arrayStorage);
+    return;
+  }
   const release = new Release(runtime, freed, roots);
   const active = [...freed];
   for (const object of active) activeReleaseObjects.set(object, release);
@@ -141,6 +149,7 @@ export function releaseDropped(runtime: Runtime, dropped: unknown[]): void {
     }
     if (activeReleaseObjects.size === 0) releaseSequence = 0;
   }
+  retireArrays(runtime, arrayStorage);
   if (active.length === 0 || runtime.turtleObjects.size === 0) return;
   const turtleRoots = ownershipRoots(runtime);
   retainTurtles(
@@ -389,11 +398,39 @@ function collectibleGraph(
   return { arrays: eligible, objects };
 }
 
-function bufferArrayCycles(runtime: Runtime, values: unknown[], roots: Set<unknown>): void {
-  new DetachedArrays(runtime, roots).run(values);
+function finishArrayCollection(runtime: Runtime, arrays: Iterable<PhpArray>): void {
+  runtime.collectingArrays.clear();
+  retireArrays(runtime, arrays);
+}
+
+// code-gauge-allow functionCognitiveComplexity 19 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+function retireArrays(runtime: Runtime, arrays: Iterable<PhpArray>): void {
+  const roots = ownershipRoots(runtime);
+  const seen = new Set<PhpArray>();
+  const pending = [...arrays];
+  const released: unknown[] = [];
+  while (pending.length > 0) {
+    const array = pending.pop() as PhpArray;
+    if (seen.has(array) || !array.composite) continue;
+    seen.add(array);
+    if (ownedReachable(array, roots, runtime, undefined, undefined, true)) continue;
+    for (const slot of array.retire()) {
+      const value = slot instanceof Ref ? slot.v : slot;
+      if (value instanceof PhpArray) pending.push(value);
+      if (slot instanceof Ref || value instanceof PhpObject) released.push(slot);
+    }
+  }
+  if (released.length > 0) runtime.release(released);
+}
+
+function bufferArrayCycles(runtime: Runtime, values: unknown[], roots: Set<unknown>): Set<PhpArray> {
+  const graph = new DetachedArrays(runtime, roots);
+  graph.run(values);
+  return graph.arrays;
 }
 
 class DetachedArrays {
+  readonly arrays = new Set<PhpArray>();
   private readonly visited = new Set<object>();
   private readonly active = new Map<object, number>();
   private readonly frames: { node: object; children: Iterator<unknown> }[] = [];
@@ -415,8 +452,8 @@ class DetachedArrays {
       }
     }
   }
-  // code-gauge-allow functionNcss 31 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
-  // code-gauge-allow functionCognitiveComplexity 20 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+  // code-gauge-allow functionNcss 33 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+  // code-gauge-allow functionCognitiveComplexity 21 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
   private enter(node: unknown): void {
     if (!(node instanceof Ref || node instanceof PhpArray || node instanceof PhpObject)) return;
     if (node instanceof PhpObject && activeReleaseObjects.has(node)) return;
@@ -431,6 +468,7 @@ class DetachedArrays {
       return;
     }
     if (this.visited.has(node)) return;
+    if (node instanceof PhpArray) this.arrays.add(node);
     this.visited.add(node);
     this.active.set(node, this.frames.length);
     let children: Iterator<unknown>;
@@ -801,18 +839,25 @@ function ownershipRoots(runtime: Runtime): Set<unknown> {
   );
 }
 
-// code-gauge-allow functionNcss 36 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+// code-gauge-allow functionNcss 38 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 function ownedReachable(
   value: Ref | PhpArray | PhpObject,
   roots: Set<unknown>,
   runtime: Runtime,
   unreachable?: Set<object>,
-  retainedBefore?: number
+  retainedBefore?: number,
+  retainOwners = false
 ): boolean {
   const isRoot = (value: object): boolean => {
     if (
       roots.has(value) ||
       (value instanceof PhpArray && (runtime.arrayCycles.has(value) || runtime.collectingArrays.has(value)))
+    )
+      return true;
+    if (
+      retainOwners &&
+      ((value instanceof PhpObject && runtime.objects.get(value.id) === value) ||
+        (value instanceof PhpArray && value.persistentHolder))
     )
       return true;
     const sequence = value instanceof PhpObject ? pendingReleaseObjects.get(value) : undefined;

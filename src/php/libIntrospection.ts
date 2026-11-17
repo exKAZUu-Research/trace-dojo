@@ -1,6 +1,6 @@
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import { callCallback } from './callables';
-import { type CallRecord, callStack } from './calls';
+import { backtraceLimit, type CallRecord, callStack } from './calls';
 import * as conversionsModule from './conversions';
 import { clearLastError, deprecated, lastError, throwError, warn } from './errors';
 import { defineConstant, defineFunction } from './native';
@@ -33,13 +33,13 @@ defineConstant('DEBUG_BACKTRACE_IGNORE_ARGS', 2n);
 
 defineFunction('debug_backtrace(int $options = DEBUG_BACKTRACE_PROVIDE_OBJECT, int $limit = 0): array', ({ args }) => {
   const options = (args[0] as bigint | undefined) ?? 1n;
-  const limit = Number((args[1] as bigint | undefined) ?? 0n);
+  const limit = backtraceLimit(args[1] as bigint | undefined);
   // The last record is debug_backtrace's own call.
   const records = callStack.slice(0, -1);
   const frames = framesOf(records);
   const trace = new PhpArray();
   for (let index = records.length - 1; index >= 0; index--) {
-    if (limit > 0 && trace.size >= limit) break;
+    if (trace.size >= limit) break;
     trace.append(backtraceFrame(records[index], frames[index], options));
   }
   return trace;

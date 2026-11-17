@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 887 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 889 -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import type { ClassDecl, Expr, FunctionDecl, MethodDeclAst, PropertyDeclAst } from './ast';
 import builtinNames from './builtinNames.json';
@@ -1257,10 +1257,14 @@ export function requireClassScope(
   context: 'access' | 'className' = 'access'
 ): PhpClass {
   if (scope) return scope;
-  throwError(
-    'Error',
-    context === 'className'
-      ? `Cannot use "${word}" in the global scope`
-      : `Cannot access "${word}" when no class scope is active`
-  );
+  throwError('Error', classScopeMessage(word, context));
+}
+
+export function classScopeMessage(
+  word: 'self' | 'static' | 'parent',
+  context: 'access' | 'className' = 'access'
+): string {
+  return context === 'className'
+    ? `Cannot use "${word}" in the global scope`
+    : `Cannot access "${word}" when no class scope is active`;
 }

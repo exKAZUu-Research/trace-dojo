@@ -42,6 +42,21 @@ export function nativeParameters(name: string): NativeFunction['params'] | undef
   return functions.find((fn) => lower(fn.name) === lower(name))?.params;
 }
 
+export function nativeMethodParameters(className: string, methodName: string): NativeFunction['params'] | undefined {
+  const seen = new Set<string>();
+  let name: string | undefined = className;
+  while (name && !seen.has(lower(name))) {
+    seen.add(lower(name));
+    const definition = classDefinitions.find((definition) => lower(definition.name) === lower(name as string));
+    if (!definition) return;
+    const method = definition.methods?.find(
+      (method) => lower(method.signature.slice(0, method.signature.indexOf('('))) === lower(methodName)
+    );
+    if (method) return parseSignature(method.signature).params;
+    name = definition.parent;
+  }
+}
+
 /** Defines a builtin constant; reading one with a `deprecation` should report that message as E_DEPRECATED. */
 export function defineConstant(name: string, value: Value, deprecation?: string): void {
   constants.push([name, value]);

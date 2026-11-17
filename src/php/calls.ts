@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 476 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 478 -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import { LIMITS } from '../interpreter/limits';
 import type { FunctionDecl } from './ast';
@@ -340,6 +340,10 @@ function nativeTypeText(type: TypeDecl): string {
   const text = type.types.map((part) => typeToString(part)).join('|');
   // Argument parsing that accepts an array or an object (Z_PARAM_ARRAY_OR_OBJECT) asks for an array in its message.
   return text === 'array|object' ? 'array' : text;
+}
+
+export function backtraceLimit(value: bigint | undefined): number {
+  return value === undefined || value === 0n ? Infinity : Math.max(0, Number(value));
 }
 
 /** Explains why a value is not a valid callback, which the library provides. */

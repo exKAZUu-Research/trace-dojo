@@ -345,7 +345,7 @@ export function evChain(e: Expr): Chain {
       runtime.frame.temporaries.push(value);
       const callable = ev(e.r);
       runtime.row = e.row;
-      return callValue(callable, [{ v: value }], e.row);
+      return callValue(callable, [{ v: value }], e.row, 'direct');
     }
     case 'list': {
       throwError('Error', 'Cannot use list() outside an assignment');

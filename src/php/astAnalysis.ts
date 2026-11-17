@@ -1,7 +1,7 @@
 import { CompileError } from '../interpreter/diagnostics';
 import type { Arg, Expr, FunctionDecl, Stmt } from './ast';
 import { lower } from './bytes';
-import { nativeParameters } from './native';
+import { nativeMethodParameters, nativeParameters } from './native';
 import type { Param } from './values';
 
 /** Whether an expression statement only calls functions or creates objects, whose own steps show what it did. */
@@ -221,38 +221,40 @@ class ReadValidator {
       }
     }
   }
+  // code-gauge-allow functionCognitiveComplexity 16 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
   private arguments(expression: Expr, args: Arg[]): void {
     const params = this.parametersOf(expression);
     let positional = 0;
     let unpacked = false;
     for (const arg of args) {
       const param = arg.name
-        ? params?.find((param) => param.name === arg.name)
+        ? (params?.find((param) => param.name === arg.name) ?? (params?.at(-1)?.variadic ? params.at(-1) : undefined))
         : (params?.[positional] ?? (params?.at(-1)?.variadic ? params.at(-1) : undefined));
-      const writing = !arg.spread && (params === undefined || unpacked || param?.byRef === true);
+      const writing =
+        !arg.spread &&
+        (params === undefined ||
+          unpacked ||
+          param?.byRef === true ||
+          (arg.name !== undefined && (!param || param.variadic)));
       this.visit(arg.e, writing);
       if (arg.spread) unpacked = true;
       else if (!arg.name) positional++;
     }
   }
-  // code-gauge-allow functionCognitiveComplexity 19 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
   private parametersOf(expression: Expr): Param[] | undefined {
     if (expression.k === 'scall' && expression.cls.k === 'named' && typeof expression.name === 'string') {
       const methodName = lower(expression.name);
-      let cls = this.body.find(
-        (statement) =>
-          statement.k === 'class' &&
-          lower(statement.decl.name) === lower(expression.cls.k === 'named' ? expression.cls.name : '')
-      );
-      const seen = new Set<Stmt>();
-      while (cls?.k === 'class' && !seen.has(cls)) {
-        seen.add(cls);
+      let className: string | undefined = expression.cls.name;
+      const seen = new Set<string>();
+      while (className && !seen.has(lower(className))) {
+        seen.add(lower(className));
+        const cls = this.body.find(
+          (statement) => statement.k === 'class' && lower(statement.decl.name) === lower(className as string)
+        );
+        if (cls?.k !== 'class') return nativeMethodParameters(className, methodName);
         const method = cls.decl.methods.find((method) => lower(method.fn.name) === methodName);
         if (method) return method.fn.params;
-        const parent = cls.decl.parent;
-        cls = parent
-          ? this.body.find((statement) => statement.k === 'class' && lower(statement.decl.name) === lower(parent))
-          : undefined;
+        className = cls.decl.parent;
       }
       return;
     }

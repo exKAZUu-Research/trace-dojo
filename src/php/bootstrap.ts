@@ -141,7 +141,7 @@ defineClass({
       impl: ({ args }) => {
         const callable = args[0];
         if (callable instanceof PhpObject && callable.cls.name === 'Closure') return callable;
-        return closureFromCallable(callTargetOf(callable, false));
+        return closureFromCallable(callTargetOf(callable, 'callback'));
       },
     },
     {

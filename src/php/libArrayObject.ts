@@ -22,6 +22,8 @@ const INTERNAL_FLAGS = 0xff_ff_00_00;
 export class ArrayStorage {
   private cursorArray: PhpArray | undefined;
   private iteratorCursor: ArrayCursor | undefined;
+  private readonly watchers = new Set<WeakRef<ArrayStorage>>();
+  private readonly knownWatchers = new WeakSet<ArrayStorage>();
   flags = 0;
   /** The class ArrayObject::getIterator instantiates. */
   iteratorClass = 'ArrayIterator';
@@ -35,29 +37,32 @@ export class ArrayStorage {
     /** The class whose private `storage` property var_dump shows. */
     readonly owner: string,
     private own: PhpArray,
-    private readonly backing?: PhpObject
+    private backing?: PhpObject
   ) {}
 
   cursor(): ArrayCursor {
     const array = this.array;
-    if (this.cursorArray !== array) {
-      const index = this.iteratorCursor?.index;
-      const initialized = this.iteratorCursor !== undefined;
-      this.cursorArray = array;
-      this.iteratorCursor = array.cursor();
-      if (initialized)
-        while (this.iteratorCursor.index !== index && this.iteratorCursor.key !== undefined) this.iteratorCursor.next();
-    }
+    if (this.cursorArray !== array) this.moveCursor(array, 'replace');
+    this.watchChain(this);
     return this.iteratorCursor as ArrayCursor;
   }
 
   get array(): PhpArray {
-    return this.backing ? storageOf(this.backing).array : this.own;
+    return (this.chain().at(-1) as ArrayStorage).own;
   }
 
   set array(array: PhpArray) {
-    if (this.backing) storageOf(this.backing).array = array;
-    else this.own = array;
+    const root = this.chain().at(-1) as ArrayStorage;
+    root.own = array;
+    root.syncCursors('replace');
+  }
+
+  replaceWith(storage: ArrayStorage): void {
+    this.own = storage.own;
+    this.backing = storage.backing;
+    this.flags = storage.flags;
+    this.iteratorClass = storage.iteratorClass;
+    this.syncCursors('replace');
   }
 
   held(): Value[] {
@@ -78,9 +83,62 @@ export class ArrayStorage {
   }
 
   writable(): PhpArray {
-    if (this.backing) return storageOf(this.backing).writable();
-    if (arrayIsShared(this.own)) this.own = this.own.copy();
-    return this.own;
+    const root = this.chain().at(-1) as ArrayStorage;
+    if (arrayIsShared(root.own)) {
+      root.own = root.own.copy();
+      root.syncCursors('copy');
+    }
+    return root.own;
+  }
+
+  private syncCursors(mode: 'copy' | 'replace'): void {
+    for (const reference of this.watchers) {
+      const watcher = reference.deref();
+      if (!watcher) {
+        this.watchers.delete(reference);
+        continue;
+      }
+      if (!watcher.chain().includes(this)) continue;
+      watcher.watchChain(watcher);
+      watcher.moveCursor(watcher.array, mode);
+    }
+  }
+
+  private watchChain(watcher: ArrayStorage): void {
+    for (const storage of this.chain())
+      if (!storage.knownWatchers.has(watcher)) {
+        storage.knownWatchers.add(watcher);
+        storage.watchers.add(new WeakRef(watcher));
+      }
+  }
+
+  private moveCursor(array: PhpArray, mode: 'copy' | 'replace'): void {
+    if (this.cursorArray === array) return;
+    const key = this.iteratorCursor?.key;
+    const index = this.iteratorCursor?.index;
+    const initialized = this.iteratorCursor !== undefined;
+    this.cursorArray = array;
+    this.iteratorCursor = array.cursor();
+    if (initialized)
+      while (
+        this.iteratorCursor.key !== undefined &&
+        (mode === 'copy' ? this.iteratorCursor.key !== key : this.iteratorCursor.index !== index)
+      )
+        this.iteratorCursor.next();
+  }
+
+  private chain(): ArrayStorage[] {
+    const chain: ArrayStorage[] = [this];
+    const seen = new Set(chain);
+    let backing = this.backing;
+    while (backing) {
+      const storage = storageOf(backing);
+      if (seen.has(storage)) throw new UnsupportedFeatureError('循環する SPL 配列ストレージ');
+      chain.push(storage);
+      seen.add(storage);
+      backing = storage.backing;
+    }
+    return chain;
   }
 
   /** What var_dump shows: the object's own properties, then the storage as a private property. */
@@ -150,7 +208,7 @@ function setStorage(object: PhpObject, value: Value, method: string, flags: numb
   }
   storage.flags = checkFlags(old.flags | newFlags);
   storage.iteratorClass = old.iteratorClass;
-  holdStorage(object, storage);
+  old.replaceWith(storage);
 }
 
 function holdStorage(object: PhpObject, storage: ArrayStorage): ArrayStorage {
