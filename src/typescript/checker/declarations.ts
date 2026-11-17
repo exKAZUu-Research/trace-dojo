@@ -27,15 +27,10 @@ function checkValueDuplicates(c: Checker, symbol: Sym): void {
   if (entries.length < 2) return;
   const name = symbol.name;
   if (entries.some((entry) => blockScopedKinds.has(entry.kind))) {
-    const kinds = new Set(entries.map((entry) => entry.kind));
-    for (const entry of entries) {
-      c.error(
-        entry.name,
-        kinds.size === 1 && entry.kind === 'class'
-          ? `${name} はすでに宣言されています。`
-          : `ブロックスコープの変数 ${name} はすでに宣言されています。`
-      );
-    }
+    const message = namesBlockScopedConflict(c, entries)
+      ? `ブロックスコープの変数 ${name} はすでに宣言されています。`
+      : `${name} はすでに宣言されています。`;
+    for (const entry of entries) c.error(entry.name, message);
     return;
   }
   if (entries.some((entry) => entry.kind === 'function') && entries.some((entry) => entry.kind === 'var')) {
@@ -54,6 +49,19 @@ function checkValueDuplicates(c: Checker, symbol: Sym): void {
     return;
   }
   if (entries.every((entry) => entry.kind === 'var')) checkVarRedeclarations(c, symbol);
+}
+
+/**
+ * Whether TypeScript reports a conflict as a block-scoped redeclaration: against the library, when either side is `let`
+ * or `const`, and within the program, when the declaration it binds first is, function declarations being bound first.
+ */
+function namesBlockScopedConflict(c: Checker, entries: Sym['valueEntries']): boolean {
+  if (entries.some((entry) => c.isLibrary(entry.name))) return entries.some(isLexical);
+  return isLexical(entries.find((entry) => entry.kind === 'function') ?? entries[0]);
+}
+
+function isLexical(entry: Sym['valueEntries'][number]): boolean {
+  return entry.kind === 'let' || entry.kind === 'const';
 }
 
 /** A `var` declared again must have the same type each time. */
