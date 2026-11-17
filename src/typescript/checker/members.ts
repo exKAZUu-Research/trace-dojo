@@ -237,9 +237,13 @@ export class MemberChecker {
     if (propertyNode.type === 'private_property_identifier')
       return this.c.classes.privateNameAccess(node, propertyNode, objectType);
     if (objectType.kind === 'union') {
-      // TypeScript reports a property some member lacks once, on the whole union, without suggesting another name.
+      // TypeScript reports a property some member lacks once, on the whole union, suggesting one all members have.
       if (objectType.types.some((member) => this.lacksProperty(member, name))) {
-        this.c.error(propertyNode, `プロパティ '${name}' は型 '${this.c.print(objectType)}' にありません。`);
+        const suggestion = this.suggestProperty(objectType, name);
+        this.c.error(
+          propertyNode,
+          `プロパティ '${name}' は型 '${this.c.print(objectType)}' にありません。${suggestion ? `'${suggestion}' のことですか？` : ''}`
+        );
         return errorType;
       }
       return unionOf(
@@ -368,9 +372,13 @@ export class MemberChecker {
 
   /** A property of the type, or of a primitive's wrapper, as `length` of a string, that `name` may misspell. */
   private suggestProperty(type: Type, name: string): string | undefined {
-    if (type.kind === 'union') return undefined;
-    const candidates = [...this.c.structureOf(this.c.apparentType(type)).properties.keys()].filter(
-      (candidate) => !candidate.startsWith('__')
+    const members = type.kind === 'union' ? type.types : [type];
+    const [first, ...rest] = members.map(
+      (member) => new Set(this.c.structureOf(this.c.apparentType(member)).properties.keys())
+    );
+    // A union's properties are those every member has.
+    const candidates = [...first].filter(
+      (candidate) => !candidate.startsWith('__') && rest.every((names) => names.has(candidate))
     );
     return spellingSuggestion(name, candidates);
   }
