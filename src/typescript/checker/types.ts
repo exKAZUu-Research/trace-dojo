@@ -102,6 +102,8 @@ export interface Signature {
   isMethod?: boolean;
   /** Whether it constructs an abstract class. */
   isAbstract?: boolean;
+  /** How many arguments a call needs when its parameters do not tell, as a union's signature whose rest covers some. */
+  minimumArguments?: number;
 }
 
 export interface IndexInfo {

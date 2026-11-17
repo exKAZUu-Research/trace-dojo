@@ -7,6 +7,7 @@ import {
   type Signature,
   type Type,
   type TypeParameter,
+  undefinedType,
   unionOf,
   unknownType,
 } from './types';
@@ -243,15 +244,20 @@ export class UnionSignatures {
       parameters,
       thisType: thisTypes.length > 0 ? intersectionOf(thisTypes, this.c.budget) : undefined,
       returnType: () => this.c.literals.subtypeReduced([left.returnType(), right.returnType()]),
+      minimumArguments: minimum,
     };
   }
 
-  /** The type a signature takes an argument at `index` as, or `undefined` past its parameters. */
+  /**
+   * The type a signature takes an argument at `index` as, `undefined` included for an optional parameter, or `undefined`
+   * past its parameters.
+   */
   private typeAt(signature: Signature, index: number): Type | undefined {
     const { parameters } = signature;
     if (hasRest(signature) && index >= parameters.length - 1)
       return this.c.restElementType((parameters.at(-1) as Parameter).type);
-    return parameters[index]?.type;
+    const parameter = parameters.at(index);
+    return parameter?.optional ? unionOf([parameter.type, undefinedType]) : parameter?.type;
   }
 
   private intersectParameters(types: Type[]): Type {

@@ -9,6 +9,7 @@ export class CallArity {
   constructor(private readonly c: Checker) {}
 
   minimumArguments(signature: Signature): number {
+    if (signature.minimumArguments !== undefined) return signature.minimumArguments;
     let minimum = 0;
     for (const [index, parameter] of signature.parameters.entries()) {
       if (!parameter.optional && !parameter.rest && !this.acceptsUndefinedOnly(parameter.type)) minimum = index + 1;
