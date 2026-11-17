@@ -444,12 +444,40 @@ export class Calls {
       );
       return { signature: candidates[0], returnType: candidates[0].returnType() };
     }
-    this.c.error(
-      callee.type === 'member_expression' ? (callee.childForFieldName('property') ?? node) : node,
-      'この呼び出しに合うオーバーロードがありません。'
-    );
+    const at = this.overloadErrorLocation(node, callee, byArity, args, instantiate);
+    const message = 'この呼び出しに合うオーバーロードがありません。';
+    if (at) this.c.diagnostics.push({ ...at, message });
+    else
+      this.c.error(
+        callee.type === 'member_expression' ? (callee.childForFieldName('property') ?? node) : node,
+        message
+      );
     const last = byArity.at(-1) as Signature;
     return { signature: last, returnType: this.c.silently(() => instantiate(last)).returnType() };
+  }
+
+  /**
+   * Where TypeScript reports that no overload fits: where the overloads fail alike, judged by the one of up to three
+   * that fails with the most errors or else by the last, and at the call when they fail at different places.
+   */
+  private overloadErrorLocation(
+    node: TreeNode,
+    callee: TreeNode,
+    candidates: Signature[],
+    args: TreeNode[],
+    instantiate: (candidate: Signature) => Signature
+  ): { row: number; index: number } | undefined {
+    if (this.c.silent > 0) return undefined;
+    const failures = (candidates.length > 3 ? candidates.slice(-1) : candidates).map((candidate) => {
+      const start = this.c.diagnostics.length;
+      this.reportSignature(node, callee, candidate, args, instantiate);
+      return this.c.diagnostics.splice(start);
+    });
+    let errors = failures[0];
+    for (const failure of failures) if (failure.length > errors.length) errors = failure;
+    const [first] = errors;
+    if (!first || errors.some((error) => error.index !== first.index)) return undefined;
+    return { row: first.row, index: first.index };
   }
 
   /** Reports why the only signature that could fit does not accept the arguments. */
@@ -598,7 +626,7 @@ export class Calls {
         { ...run, priority: InferencePriority.ReturnType },
         contextual,
         signature.returnType(),
-        false
+        true
       );
     for (const [index, arg] of args.entries()) {
       if (!sensitive[index]) continue;
