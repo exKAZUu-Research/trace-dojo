@@ -1114,7 +1114,7 @@ test.each([
   [1000, 200, true],
   [100, 1000, false],
 ])(
-  'completed expensive cohorts release preview allowance: %i iterations, %i elements, distinct=%s',
+  'completed expensive cohorts release operation quota: %i iterations, %i elements, distinct=%s',
   (iterations, size, distinct) => {
     const names = distinct ? ['burn0', 'burn1'] : ['burn', 'burn'];
     const helpers = [...new Set(names)]
@@ -1135,12 +1135,20 @@ ${helpers}`;
     const execution = executeProgram('haskell', source);
     expect(execution.kind).toBe('executed');
     if (execution.kind !== 'executed') return;
-    const recording = traceProgram('haskell', source, source);
-    expect(recording.uncaughtException).toBeUndefined();
-    expect(recording.stdout).toBe(execution.stdout);
-    const assignments = recording.traceItems.filter((item) => item.line === 6);
-    expect(assignments).toHaveLength(300);
-    for (const [index, item] of assignments.entries()) expect(item.vars.n).toBe(index + 56);
+    const clock = Object.getOwnPropertyDescriptor(performance, 'now');
+    let ticks = 0;
+    Object.defineProperty(performance, 'now', { configurable: true, value: () => ticks++ / 1000 });
+    try {
+      const recording = traceProgram('haskell', source, source);
+      expect(recording.uncaughtException).toBeUndefined();
+      expect(recording.stdout).toBe(execution.stdout);
+      const assignments = recording.traceItems.filter((item) => item.line === 6);
+      expect(assignments).toHaveLength(300);
+      for (const [index, item] of assignments.entries()) expect(item.vars.n).toBe(index + 56);
+    } finally {
+      if (clock) Object.defineProperty(performance, 'now', clock);
+      else Reflect.deleteProperty(performance, 'now');
+    }
   }
 );
 
