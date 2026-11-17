@@ -227,6 +227,7 @@ defineFunction(
       (string | null)?,
     ];
     const format = { decimals, point: point ?? '.', separator: separator ?? ',' };
+    if (decimals > 0n) rt().ensureStringFits(Number(decimals) + format.point.length + 1);
     // Floats from 2^52 on have no fraction, so PHP formats them as ints.
     if (typeof value === 'bigint' || (Math.abs(value) >= 2 ** 52 && floatFitsInt(value)))
       return formatIntNumber(BigInt(value), format);

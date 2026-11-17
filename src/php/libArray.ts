@@ -1171,7 +1171,7 @@ defineFunction('key(array|object $array): int|string|null', ({ args }) =>
   })
 );
 defineFunction('next(array|object &$array): mixed', (ctx) =>
-  withPointer(ctx.refs[0]?.v ?? ctx.args[0], 'next', (array) => {
+  withPointer(pointerValue(ctx), 'next', (array) => {
     const key = array.currentKey();
     if (key === undefined) return false;
     array.pointer = array.keyAfter(key);
@@ -1179,7 +1179,7 @@ defineFunction('next(array|object &$array): mixed', (ctx) =>
   })
 );
 defineFunction('prev(array|object &$array): mixed', (ctx) =>
-  withPointer(ctx.refs[0]?.v ?? ctx.args[0], 'prev', (array) => {
+  withPointer(pointerValue(ctx), 'prev', (array) => {
     const key = array.currentKey();
     if (key === undefined) return false;
     array.pointer = array.keyBefore(key);
@@ -1187,19 +1187,23 @@ defineFunction('prev(array|object &$array): mixed', (ctx) =>
   })
 );
 defineFunction('reset(array|object &$array): mixed', (ctx) =>
-  withPointer(ctx.refs[0]?.v ?? ctx.args[0], 'reset', (array) => {
+  withPointer(pointerValue(ctx), 'reset', (array) => {
     array.pointer = null;
     const key = array.currentKey();
     return key === undefined ? false : (array.get(key) as Value);
   })
 );
 defineFunction('end(array|object &$array): mixed', (ctx) =>
-  withPointer(ctx.refs[0]?.v ?? ctx.args[0], 'end', (array) => {
+  withPointer(pointerValue(ctx), 'end', (array) => {
     const last = [...array.map.keys()].at(-1);
     array.pointer = last;
     return last === undefined ? false : (array.get(last) as Value);
   })
 );
+
+function pointerValue(ctx: NativeContext): Value {
+  return ctx.refs[0]?.v instanceof PhpArray ? writableArray(ctx, 0) : (ctx.refs[0]?.v ?? ctx.args[0]);
+}
 
 /** The internal pointers of objects, which PHP keeps in the property table that the pointer functions walk. */
 const objectPointers = new WeakMap<PhpObject, { pointer: Key | undefined | null }>();

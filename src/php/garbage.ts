@@ -224,7 +224,7 @@ export function mark(runtime: Runtime): Set<PhpObject> {
     if (item instanceof Ref) {
       pending.push(item.v);
     } else if (item instanceof PhpArray) {
-      if (!item.composite || visitedArrays.has(item)) continue;
+      if (!item.composite || visitedArrays.has(item) || objectFree(item, runtime)) continue;
       visitedArrays.add(item);
       pushInOrder([...item.map.values()].filter((slot) => slot !== null && typeof slot === 'object'));
     } else if (item instanceof PhpObject) {
@@ -438,4 +438,24 @@ export function holderCounts(runtime: Runtime): Map<PhpObject, number> {
     }
   }
   return counts;
+}
+
+const objectFreeArrays = new WeakMap<PhpArray, number>();
+
+function objectFree(array: PhpArray, runtime: Runtime): boolean {
+  if (objectFreeArrays.get(array) === PhpArray.mutationVersion) return true;
+  const pending = [array];
+  const visited = new Set<PhpArray>();
+  while (pending.length > 0) {
+    const current = pending.pop() as PhpArray;
+    if (visited.has(current) || objectFreeArrays.get(current) === PhpArray.mutationVersion) continue;
+    visited.add(current);
+    runtime.spend(Math.ceil(current.size / 64));
+    for (const slot of current.map.values()) {
+      if (slot instanceof Ref || slot instanceof PhpObject) return false;
+      if (slot instanceof PhpArray && slot.composite) pending.push(slot);
+    }
+  }
+  for (const item of visited) objectFreeArrays.set(item, PhpArray.mutationVersion);
+  return true;
 }

@@ -153,6 +153,14 @@ function issetPropExists(object: PhpObject, name: string, scope: PhpClass | unde
   return object.props.has(name);
 }
 
+let nativeArrayStorage: (value: unknown) => value is { writable(): PhpArray } = (
+  _value
+): _value is { writable(): PhpArray } => false;
+
+export function setNativeArrayStorage(check: typeof nativeArrayStorage): void {
+  nativeArrayStorage = check;
+}
+
 function arrayAccessPlace(object: PhpObject, key: Value | undefined): Place {
   if (!isArrayAccess(object)) throwError('Error', `Cannot use object of type ${object.cls.name} as array`);
   return {
@@ -161,6 +169,13 @@ function arrayAccessPlace(object: PhpObject, key: Value | undefined): Place {
         ? callMethod(object, 'offsetGet', [key ?? null])
         : undefined,
     nested: () => {
+      if (
+        object.internal !== undefined &&
+        nativeArrayStorage(object.internal) &&
+        object.cls.findMethod('offsetget')?.fn.kind === 'native'
+      ) {
+        return new ElementPlace(object.internal.writable(), toKey(key ?? null));
+      }
       const runtime = rt();
       runtime.lastReturnRef = undefined;
       const value = callMethod(object, 'offsetGet', [key ?? null]);

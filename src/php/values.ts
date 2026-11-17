@@ -62,6 +62,7 @@ export const INT_MIN = -9_223_372_036_854_775_808n;
 
 /** An ordered map, which arrays share until one of their holders writes to it (copy on write). */
 export class PhpArray {
+  static mutationVersion = 0;
   map: Map<Key, Value | Ref>;
   /** One more than the largest integer key so far, or INT_MIN before any, as PHP's nNextFreeElement. */
   nextFree = INT_MIN;
@@ -142,6 +143,7 @@ export class PhpArray {
       allocationHandler(1, this.map.size + 1);
       if (this.pointer === undefined) this.pointer = key;
     }
+    PhpArray.mutationVersion++;
     this.map.set(key, slot);
   }
 
@@ -150,6 +152,7 @@ export class PhpArray {
     if (old instanceof Ref) old.rc--;
     // PHP moves a pointer at the deleted element on to the next one.
     if (this.pointer === key) this.pointer = this.keyAfter(key);
+    PhpArray.mutationVersion++;
     this.map.delete(key);
     dropped(old);
   }

@@ -1,6 +1,6 @@
 // oxlint-disable unicorn/prefer-code-point -- PHP strings hold bytes as code units 0–255, which charCodeAt and fromCharCode read and write as they are.
 const encoder = new TextEncoder();
-const decoder = new TextDecoder('utf-8');
+const decoder = new TextDecoder('utf-8', { ignoreBOM: true });
 
 /** Encodes a JavaScript string as the byte string of its UTF-8 encoding. */
 export function enc(text: string): string {

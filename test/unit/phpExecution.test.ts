@@ -125,3 +125,31 @@ test('string offset padding stops at the string limit before allocating', () => 
   const execution = run('<?php $s = "abc"; try { $s[1000000000] = "x"; } catch (Throwable $e) { echo "caught"; }');
   expect(execution.kind === 'executed' && execution.stdout).toMatch(/^\nFatal error: Allowed memory size/);
 });
+
+test('rejects repeated nested captures rather than returning JavaScript capture semantics', () => {
+  const execution = run('<?php preg_match("/(a|(b))+/", "aba", $m);');
+  expect(execution).toMatchObject({
+    kind: 'executed',
+    uncaughtException: expect.stringContaining('この採点環境では使えません。'),
+  });
+});
+
+test.each(['<?php echo "hello"; declare(strict_types=1);', '<?php function f() {} declare(strict_types=1);'])(
+  'rejects a late strict_types declaration before execution: %s',
+  (source) => {
+    expect(run(source).kind).toBe('compileError');
+  }
+);
+
+test.each(['1', '1.5'])('bounds number_format precision for %s before padding', (value) => {
+  const execution = run(`<?php number_format(${value}, 100000000000000000);`);
+  expect(execution.kind === 'executed' && execution.stdout).toMatch(/^\nFatal error: Allowed memory size/);
+});
+
+test('object replacement remains within the execution budget beside a large scalar grid', () => {
+  vi.restoreAllMocks();
+  const execution = run(
+    '<?php class P { public $x; function __construct($x) { $this->x=$x; } } $grid=[]; for($i=0;$i<10000;$i++) $grid[]=[$i,$i]; $sum=0; for($i=0;$i<10000;$i++) { $p=new P($i); $sum+=$p->x; } echo $sum;'
+  );
+  expect(execution).toMatchObject({ kind: 'executed', stdout: '49995000' });
+});

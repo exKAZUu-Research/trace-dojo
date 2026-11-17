@@ -3,7 +3,7 @@ import type { Node } from '@willbooster/web-tree-sitter';
 
 import { CompileError } from '../interpreter/diagnostics';
 import type { ClassRef, Expr, ResolvedName, Stmt } from './ast';
-import { labelInsideLoop } from './astAnalysis';
+import { nestedBodies } from './astAnalysis';
 import { enc, lower } from './bytes';
 import { unsupportedMessage } from './unsupported';
 import type { TypeDecl } from './values';
@@ -173,7 +173,24 @@ export abstract class ConverterBase {
     for (const { label, row } of context.gotos) {
       if (!context.labels.has(label))
         this.error(row, `goto の行き先のラベル「${label}」がありません（'goto' to undefined label '${label}'）。`);
-      if (labelInsideLoop(body, label, false)) {
+      const scopes = (
+        statements: Stmt[],
+        target: (statement: Stmt) => boolean,
+        parents: Stmt[] = []
+      ): Stmt[] | undefined => {
+        for (const statement of statements) {
+          if (target(statement)) return parents;
+          for (const [nested, isLoop] of nestedBodies(statement)) {
+            const found = scopes(nested, target, isLoop ? [...parents, statement] : parents);
+            if (found) return found;
+          }
+        }
+        return undefined;
+      };
+      const source =
+        scopes(body, (statement) => statement.k === 'goto' && statement.label === label && statement.row === row) ?? [];
+      const destination = scopes(body, (statement) => statement.k === 'label' && statement.name === label) ?? [];
+      if (destination.some((scope) => !source.includes(scope))) {
         this.error(
           row,
           `goto でループや switch の中には入れません（'goto' into loop or switch statement is disallowed）。`

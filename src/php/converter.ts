@@ -453,6 +453,10 @@ export class Converter extends DeclarationConverter {
       if (key === 'strict_types') {
         if (
           !topLevel ||
+          node.parent?.namedChildren.some(
+            (child) =>
+              child.endIndex <= node.startIndex && !['php_tag', 'comment', 'declare_statement'].includes(child.type)
+          ) ||
           node.namedChildren.some((child) => child.type !== 'declare_directive' && child.type !== 'comment')
         ) {
           this.error(

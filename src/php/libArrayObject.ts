@@ -1,4 +1,5 @@
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
+import { setNativeArrayStorage } from './assignment';
 import { callMethod } from './callables';
 import { invoke } from './calls';
 import { createObject, findClass, objectToArray } from './classes';
@@ -79,6 +80,8 @@ export class ArrayStorage {
     return this.flags & STD_PROP_LIST && this.holder ? objectToArray(this.holder) : this.array;
   }
 }
+
+setNativeArrayStorage((value): value is ArrayStorage => value instanceof ArrayStorage);
 
 const storageOf = (object: PhpObject): ArrayStorage => object.internal as ArrayStorage;
 
