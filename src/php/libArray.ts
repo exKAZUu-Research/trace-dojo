@@ -3,7 +3,7 @@
 // oxlint-disable unicorn/prefer-code-point -- PHP strings hold bytes as code units 0–255, which charCodeAt and fromCharCode read and write as they are.
 import { lower, upper } from './bytes';
 import { callCallback, callCallbackRefs, callMethod } from './callables';
-import { canAccessProp, issetProp, lookupProp, objectToArray, readProp } from './classes';
+import { canAccessProp, declForKey, issetProp, lookupProp, objectToArray, readProp } from './classes';
 import * as conversionsModule from './conversions';
 import { compareBytes, compareNumbers, debugType, floatFitsInt, normalizeKeyString, valueName } from './conversions';
 import { deprecated, throwError, warn } from './errors';
@@ -93,12 +93,18 @@ defineAlias('sizeof', 'count');
 markInlined('count');
 markInlined('sizeof');
 
-function countRecursive(array: PhpArray): number {
+function countRecursive(array: PhpArray, active = new Set<PhpArray>()): number {
+  if (active.has(array)) {
+    warn('count(): Recursion detected');
+    return 0;
+  }
+  active.add(array);
   let count = array.size;
   for (const item of array.values()) {
     rt().spend();
-    if (item instanceof PhpArray) count += countRecursive(item);
+    if (item instanceof PhpArray) count += countRecursive(item, active);
   }
+  active.delete(array);
   return count;
 }
 
@@ -652,41 +658,49 @@ defineFunction('array_reduce(array $array, callable $callback, mixed $initial = 
   for (const value of arr(args[0]).values()) carry = callCallback(args[1], [carry, value]);
   return carry;
 });
-defineFunction('array_walk(array|object &$array, callable $callback, mixed $arg = UNKNOWN): true', (ctx) => {
-  const ref = ctx.refs[0] as Ref;
-  if (ref.v instanceof PhpArray) {
-    const array = writableArray(ctx, 0);
-    for (const key of array.keys()) {
-      if (!array.map.has(key)) continue;
-      const elementRef = new ElementPlace(array, key).ref();
-      const callArgs = [{ v: elementRef.v, ref: elementRef }, { v: keyValue(key) }];
-      if (ctx.args.length > 2) callArgs.push({ v: ctx.args[2] });
-      callCallbackRefs(ctx.args[1], callArgs);
-    }
+for (const name of ['array_walk', 'array_walk_recursive']) {
+  defineFunction(`${name}(array|object &$array, callable $callback, mixed $arg = UNKNOWN): true`, (ctx) => {
+    walkValues(ctx.refs[0] as Ref, ctx, name === 'array_walk_recursive', new Set());
+    return true;
+  });
+}
+
+function walkValues(ref: Ref, ctx: NativeContext, recursive: boolean, active: Set<PhpArray | PhpObject>): void {
+  let container = ref.v as PhpArray | PhpObject;
+  if (active.has(container)) throwError('Error', 'Recursion detected');
+  if (container instanceof PhpArray && container.shared) {
+    container = container.copy();
+    ref.v = container;
   }
-  return true;
-});
-defineFunction('array_walk_recursive(array|object &$array, callable $callback, mixed $arg = UNKNOWN): true', (ctx) => {
-  const walk = (ref: Ref): void => {
-    let array = ref.v as PhpArray;
-    if (array.shared) {
-      array = array.copy();
-      ref.v = array;
-    }
-    for (const key of array.keys()) {
-      const elementRef = new ElementPlace(array, key).ref();
-      if (elementRef.v instanceof PhpArray) {
-        walk(elementRef);
+  active.add(container);
+  try {
+    const keys = container instanceof PhpArray ? container.keys() : [...container.props.keys()];
+    for (const key of keys) {
+      let elementRef: Ref;
+      if (container instanceof PhpArray) {
+        if (!container.has(key)) continue;
+        elementRef = new ElementPlace(container, key).ref();
+      } else {
+        const name = key as string;
+        const slot = container.props.get(name);
+        if (slot === undefined || slot === UNINIT) continue;
+        elementRef = slot instanceof Ref ? slot : new Ref(slot);
+        const decl = declForKey(container.cls, name);
+        if (decl?.type) elementRef.typedBy = { decl, object: container };
+        container.props.set(name, elementRef);
+      }
+      if (recursive && elementRef.v instanceof PhpArray) {
+        walkValues(elementRef, ctx, true, active);
         continue;
       }
-      const callArgs = [{ v: elementRef.v, ref: elementRef }, { v: keyValue(key) }];
-      if (ctx.args.length > 2) callArgs.push({ v: ctx.args[2] });
-      callCallbackRefs(ctx.args[1], callArgs);
+      const args = [{ v: elementRef.v, ref: elementRef }, { v: keyValue(key) }];
+      if (ctx.args.length > 2) args.push({ v: ctx.args[2] });
+      callCallbackRefs(ctx.args[1], args);
     }
-  };
-  walk(ctx.refs[0] as Ref);
-  return true;
-});
+  } finally {
+    active.delete(container);
+  }
+}
 defineFunction(
   'array_slice(array $array, int $offset, ?int $length = null, bool $preserve_keys = false): array',
   ({ args }) => {

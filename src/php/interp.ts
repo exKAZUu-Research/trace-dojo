@@ -439,9 +439,9 @@ export function stringOffset(text: string, index: Value, quiet: boolean): number
   let offset: bigint;
   if (typeof index === 'bigint') offset = index;
   else if (typeof index === 'string') {
-    if (/^-?\d+$/.test(index)) offset = BigInt(index);
+    if (/^[ \t\n\r\v\f]*[+-]?\d+[ \t\n\r\v\f]*$/.test(index)) offset = BigInt(index);
     else {
-      const leading = /^[ \t\n\r\v\f]*-?\d+/.exec(index);
+      const leading = /^[ \t\n\r\v\f]*[+-]?\d+/.exec(index);
       if (!leading || quiet) {
         if (quiet) return undefined;
         throwError('TypeError', `Cannot access offset of type ${debugType(index)} on string`);

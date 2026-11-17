@@ -397,16 +397,18 @@ function compareArrays(a: PhpArray, b: PhpArray): number {
   // PHP's zend_hash_compare returns at once for one table, which arrays sharing it until a write are.
   if (a === b) return 0;
   if (a.size !== b.size) return a.size < b.size ? -1 : 1;
-  for (const [key, value] of a.entries()) {
-    rt().spend();
-    if (!b.has(key)) return 1;
-    const result = compare(value, b.get(key) as Value);
-    if (result !== 0) return result;
-  }
-  return 0;
+  return guardComparison(a, () => {
+    for (const [key, value] of a.entries()) {
+      rt().spend();
+      if (!b.has(key)) return 1;
+      const result = compare(value, b.get(key) as Value);
+      if (result !== 0) return result;
+    }
+    return 0;
+  });
 }
 
-const comparing = new Set<PhpObject>();
+const comparing = new Set<PhpObject | PhpArray>();
 
 function compareObjects(a: PhpObject, b: PhpObject): number {
   if (a === b) return 0;
@@ -439,12 +441,14 @@ export function looseEquals(a: Value, b: Value): boolean {
   if (a instanceof PhpArray && b instanceof PhpArray) {
     if (a === b) return true;
     if (a.size !== b.size) return false;
-    for (const [key, value] of a.entries()) {
-      rt().spend();
-      if (!b.has(key)) return false;
-      if (!looseEquals(value, b.get(key) as Value)) return false;
-    }
-    return true;
+    return guardComparison(a, () => {
+      for (const [key, value] of a.entries()) {
+        rt().spend();
+        if (!b.has(key)) return false;
+        if (!looseEquals(value, b.get(key) as Value)) return false;
+      }
+      return true;
+    });
   }
   if (a instanceof PhpObject && b instanceof PhpObject) {
     if (a === b) return true;
@@ -477,14 +481,16 @@ export function strictEquals(a: Value, b: Value): boolean {
   if (typeof a === 'number' && typeof b === 'number') return a === b;
   if (a instanceof PhpArray && b instanceof PhpArray) {
     if (a.size !== b.size) return false;
-    const right = [...b.entries()];
-    let index = 0;
-    for (const [key, value] of a.entries()) {
-      rt().spend();
-      const [otherKey, otherValue] = right[index++];
-      if (key !== otherKey || !strictEquals(value, otherValue)) return false;
-    }
-    return true;
+    return guardComparison(a, () => {
+      const right = [...b.entries()];
+      let index = 0;
+      for (const [key, value] of a.entries()) {
+        rt().spend();
+        const [otherKey, otherValue] = right[index++];
+        if (key !== otherKey || !strictEquals(value, otherValue)) return false;
+      }
+      return true;
+    });
   }
   return false;
 }
@@ -507,4 +513,14 @@ export function toKey(value: Value, use: KeyUse = 'access'): Key {
   const type = debugType(value);
   if (use === 'isset') throwError('TypeError', `Cannot access offset of type ${type} in isset or empty`);
   throwError('TypeError', `Cannot ${use === 'unset' ? 'unset' : 'access'} offset of type ${type} on array`);
+}
+
+function guardComparison<T>(value: PhpArray, compare: () => T): T {
+  if (comparing.has(value)) throwError('Error', 'Nesting level too deep - recursive dependency?');
+  comparing.add(value);
+  try {
+    return compare();
+  } finally {
+    comparing.delete(value);
+  }
 }

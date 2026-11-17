@@ -619,21 +619,27 @@ export class Converter extends DeclarationConverter {
       }
       case 'dynamic_variable_name': {
         const inner = node.namedChildren.find((child) => child.type !== 'comment') as Node;
-        if (node.text.startsWith('${') && node.parent?.type === 'encapsed_string' && inner.type === 'name') {
+        const interpolating =
+          node.text.startsWith('${') &&
+          (node.parent?.type === 'encapsed_string' || node.parent?.type === 'heredoc_body');
+        const parts = inner.namedChildren.filter((child) => child.type !== 'comment');
+        const indexedName =
+          inner.type === 'subscript_expression' &&
+          parts[0]?.type === 'name' &&
+          node.text.startsWith('${' + parts[0].text + '[');
+        if (interpolating) {
           this.notices.push({
             level: 'Deprecated',
-            message: 'Using ${var} in strings is deprecated, use {$var} instead',
+            message:
+              inner.type === 'name' || indexedName
+                ? 'Using ${var} in strings is deprecated, use {$var} instead'
+                : 'Using ${expr} (variable variables) in strings is deprecated, use {${expr}} instead',
             row,
           });
-          return { k: 'var', name: enc(inner.text), row };
         }
         if (inner.type === 'name') return { k: 'var', name: enc(inner.text), row };
-        if (node.text.startsWith('${') && node.parent?.type === 'encapsed_string') {
-          this.notices.push({
-            level: 'Deprecated',
-            message: 'Using ${expr} (variable variables) in strings is deprecated, use {${expr}} instead',
-            row,
-          });
+        if (interpolating && indexedName) {
+          return { k: 'idx', base: { k: 'var', name: enc(parts[0].text), row }, index: this.expr(parts[1]), row };
         }
         return { k: 'varvar', name: this.expr(inner), row };
       }

@@ -8,7 +8,7 @@ import { debugType, valueName } from './conversions';
 import { notice, throwError, warn } from './errors';
 import { type Chain, ev, evChain, iterate, resolveClassRef, SHORT } from './interp';
 import { toStr } from './operators';
-import { ElementPlace, share, VarPlace } from './places';
+import { ElementPlace, share, VarPlace, writableContainer } from './places';
 import { type Frame, rt } from './runtime';
 import {
   type Callable,
@@ -33,18 +33,23 @@ export function evalArgs(args: Arg[], fn: Callable | undefined, name: string | u
   const frame = runtime.frame;
   for (const [index, arg] of args.entries()) {
     if (arg.spread) {
-      const value = ev(arg.e);
+      const source =
+        fn?.params.some((param) => param.byRef) && ['var', 'varvar', 'idx', 'prop', 'sprop'].includes(arg.e.k)
+          ? placeOf(arg.e)
+          : undefined;
+      let value = source ? source.get() : ev(arg.e);
+      if (value instanceof PhpArray && source) value = writableContainer(source);
       if (value instanceof PhpArray) {
         for (const [key, item] of value.entries()) {
-          if (typeof key === 'string') values.push({ v: share(item), name: key });
-          else {
-            if (values.some((other) => other.name !== undefined)) {
-              throwError('Error', 'Cannot use positional argument after named argument during unpacking');
-            }
-            const position = values.length;
-            if (fn && paramIsByRef(fn, position)) values.push({ v: item, ref: new ElementPlace(value, key).ref() });
-            else values.push({ v: share(item) });
+          const argumentName = typeof key === 'string' ? key : undefined;
+          if (argumentName === undefined && values.some((other) => other.name !== undefined)) {
+            throwError('Error', 'Cannot use positional argument after named argument during unpacking');
           }
+          const position = argumentName === undefined ? values.length : -1;
+          if (fn && paramIsByRef(fn, position, argumentName)) {
+            const ref = new ElementPlace(value, key).ref();
+            values.push({ v: ref.v, ref, name: argumentName });
+          } else values.push({ v: share(item), name: argumentName });
         }
       } else if (value instanceof PhpObject) {
         for (const [key, item] of iterate(value)) {
@@ -63,7 +68,14 @@ export function evalArgs(args: Arg[], fn: Callable | undefined, name: string | u
         values.push({ v: ref.v, ref, name: arg.name });
         continue;
       }
+      runtime.lastReturnRef = undefined;
       const value = ev(e);
+      const returned = runtime.lastReturnRef as Ref | undefined;
+      runtime.lastReturnRef = undefined;
+      if (returned && (e.k === 'call' || e.k === 'mcall' || e.k === 'scall')) {
+        values.push({ v: returned.v, ref: returned, name: arg.name });
+        continue;
+      }
       const param = fn?.params[Math.min(position === -1 ? 0 : position, (fn?.params.length ?? 1) - 1)];
       if (param?.preferRef) {
         values.push({ v: value, name: arg.name });

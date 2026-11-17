@@ -67,7 +67,7 @@ export function collectGarbage(runtime: Runtime, cycles = false): number {
  * handle returns to the free list. Objects on a cycle stay, as reference counting cannot free them.
  */
 export function releaseDropped(runtime: Runtime, dropped: unknown[]): void {
-  if (runtime.shuttingDown || runtime.objects.size === 0 || runtime.objects.size > ALLOCATION_CHECK_LIMIT) return;
+  if (runtime.shuttingDown || runtime.objects.size === 0) return;
   if (!dropped.some((value) => mayHoldObject(value))) return;
   const within = objectsWithin(dropped);
   if (within.length === 0 || heldDirectly(runtime, within)) return;

@@ -533,7 +533,7 @@ export function unsetTarget(target: Expr): void {
 function unsetContainer(e: Expr): PhpArray | PhpObject | string | undefined {
   const place = unsetPlace(e);
   const value = place?.get();
-  if (value === undefined) warnUndefinedBase(e);
+  if (value === undefined && e.k !== 'idx') warnUndefinedBase(e);
   if (value instanceof PhpArray) return writableContainer(place as Place) as PhpArray;
   if (value instanceof PhpObject || typeof value === 'string') return value;
   return undefined;
@@ -555,7 +555,12 @@ function unsetPlace(e: Expr): Place | undefined {
     if (typeof container === 'string') throwError('Error', 'Cannot unset string offsets');
     return undefined;
   }
-  if (e.k === 'var' || e.k === 'varvar' || e.k === 'prop' || e.k === 'sprop') {
+  if (e.k === 'prop') {
+    const object = ev(e.obj);
+    const name = memberName(e.name);
+    return object instanceof PhpObject ? propPlace(object, name) : undefined;
+  }
+  if (e.k === 'var' || e.k === 'varvar' || e.k === 'sprop') {
     return placeOf(e);
   }
   return new ValuePlace(ev(e));
@@ -590,7 +595,7 @@ export function isset(e: Expr): boolean {
       const index = ev(e.index);
       if (base instanceof PhpArray) return (base.get(toKey(index, 'isset')) ?? null) !== null;
       if (typeof base === 'string') {
-        if (typeof index === 'string' && !/^\s*-?\d+\s*$/.test(index)) return false;
+        if (typeof index === 'string' && !/^[ \t\n\r\v\f]*[+-]?\d+[ \t\n\r\v\f]*$/.test(index)) return false;
         const position = stringOffset(base, index, true);
         return position !== undefined && position >= 0;
       }
