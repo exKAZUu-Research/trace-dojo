@@ -3,7 +3,7 @@ import { type DisplayTypeScope, type TypeHint, type TypeHintRef, UNKNOWN_TYPE } 
 import type { ConInfo } from './entities';
 import type { Runtime } from './runtime';
 import { mapGraph, mapGraphPairs, walkGraph, walkGraphPairs } from './typeGraph';
-import { instantiateType, matchType, prune, splitApp, tap, tcon, type Type, typeChildren } from './types';
+import { instantiateType, prune, splitApp, tap, tcon, type Type, typeChildren } from './types';
 import { chargeTypeWork } from './typeWorkBudget';
 import { type Dict, type Env, type Slot, Thunk, TypedSlot, untypedSlot } from './values';
 
@@ -137,8 +137,11 @@ function mappedScopedType(template: Type, mapped: Type[]): Type {
 }
 
 function matchedParameterType(pattern: Type, actual: Type, variable: Type): Type {
-  for (const [left, right] of walkGraphPairs(pattern, actual, prune, typeChildren)) if (left === variable) return right;
-  return UNKNOWN_TYPE;
+  let result: Type | undefined;
+  for (const [left, right] of walkGraphPairs(pattern, actual, prune, typeChildren)) {
+    if (left === variable) result = result ? refineType(result, right) : right;
+  }
+  return result ?? UNKNOWN_TYPE;
 }
 
 function instantiatedMethodType(node: Extract<TypeHint, { tag: 'methodType' }>, instance: Type): Type {
@@ -153,7 +156,13 @@ function instantiatedMethodType(node: Extract<TypeHint, { tag: 'methodType' }>, 
 function dictionaryDisplayType(dict: Dict, argumentsTypes: Type[]): Type {
   const { instance } = dict;
   const bindings: (Type | undefined)[] = Array.from({ length: instance.kinds.length });
-  for (const [index, type] of argumentsTypes.entries()) matchType(instance.context[index].type, type, bindings);
+  for (const [index, type] of argumentsTypes.entries()) {
+    for (const [pattern, actual] of walkGraphPairs(instance.context[index].type, type, prune, typeChildren)) {
+      if (pattern.tag !== 'tgen') continue;
+      const previous = bindings[pattern.index];
+      bindings[pattern.index] = previous ? refineType(previous, actual) : actual;
+    }
+  }
   return instantiateType(
     instance.head,
     bindings.map((type) => type ?? UNKNOWN_TYPE)

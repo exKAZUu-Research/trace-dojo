@@ -198,3 +198,42 @@ main=do
     }
   }
 );
+
+test.each([
+  ['(a,Float)', '(a,a)'],
+  ['(Float,a)', '(a,a)'],
+  ['(a,Float,a)', '(a,a,a)'],
+])('repeated constraint variables refine every matching position: %s', (instance, pattern) => {
+  const source = `import Control.Monad
+class PairType a
+instance PairType${instance}
+loop::PairType${pattern}=>a->IO ()
+loop n=do
+ forM_ [id n,id n] $ \\i->do
+  print(0::Int)
+main=loop(0.1::Float)`;
+  const control = source.replace(`PairType${pattern}=>a`, 'Float');
+  const result = traceProgram('haskell', source, source);
+  expect(result.stdout).toBe('0\n0\n');
+  expect(result.traceItems).toEqual(traceProgram('haskell', control, control).traceItems);
+});
+
+test.each(['(Eq(Box a),Fractional a)', '(Fractional a,Eq(Box a))'])(
+  'instance-context evidence refines its head independent of order: %s',
+  (context) => {
+    const source = `import Control.Monad
+data Box a=Box a
+instance Eq(Box a) where _==_=True
+class Raise a where raise::a->a
+instance ${context}=>Raise(Maybe(Maybe a)) where raise(Just(Just x))=Just(Just(x+0.1))
+loop::Raise(Maybe(Maybe a))=>a->IO ()
+loop n=do
+ forM_ [maybe n (maybe n id)(raise(Just(Just n))),maybe n (maybe n id)(raise(Just(Just n)))] $ \\i->do
+  print(0::Int)
+main=loop(0.1::Float)`;
+    const control = source.replace('Raise(Maybe(Maybe a))=>a', 'Float');
+    const result = traceProgram('haskell', source, source);
+    expect(result.stdout).toBe('0\n0\n');
+    expect(result.traceItems).toEqual(traceProgram('haskell', control, control).traceItems);
+  }
+);
