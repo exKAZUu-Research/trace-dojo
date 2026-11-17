@@ -40,10 +40,7 @@ export function formatTable(runtime: Runtime, data: Value, properties: Value): s
           : '';
     }
   }
-  // Node.js collects the columns as an object's keys, which put integer-like keys first, in ascending order.
-  const ordered = [...columns.keys()].toSorted(byObjectKeyOrder);
-  const head = ['(index)', ...ordered];
-  const body = [rowKeys, ...ordered.map((key) => columns.get(key) as string[])];
+  const { head, body } = tableColumns(columns, rowKeys);
   if (hasPrimitives) {
     head.push('Values');
     body.push(values);
@@ -156,6 +153,15 @@ function renderTable(runtime: Runtime, head: string[], columns: string[][]): str
     ...rows.map((row) => renderRow(row)),
     `└${divider.join('┴')}┘`,
   ].join('\n');
+}
+
+/** The headers and cells of a table's columns, which Node.js collects as an object's keys and so orders as one. */
+function tableColumns(columns: Map<string, string[]>, rowKeys: string[]): { head: string[]; body: string[][] } {
+  const ordered = [...columns.keys()].toSorted(byObjectKeyOrder);
+  return {
+    head: ['(index)', ...ordered],
+    body: [rowKeys, ...ordered.map((key) => columns.get(key) as string[])],
+  };
 }
 
 /** Orders keys as an object lists them: integer-like ones first, in ascending order, then the rest as they came. */
