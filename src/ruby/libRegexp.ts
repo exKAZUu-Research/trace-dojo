@@ -2150,7 +2150,7 @@ function* asGen(value: Gen | Value): Gen {
 def('String', '=~', 1, function* (self: RString, [pattern]) {
   if (pattern instanceof RString) throw typeError('type mismatch: String given');
   if (!isRegexp(pattern)) {
-    return yield* callMethod(pattern, '=~', [self]);
+    return yield* callMethod(pattern, '=~', [self], undefined, undefined, { fcall: true });
   }
   const state = execAt(pattern, self.s, 0, self);
   setLastMatch(state);
