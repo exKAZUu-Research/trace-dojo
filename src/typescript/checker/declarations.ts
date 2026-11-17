@@ -165,18 +165,29 @@ function mergedParameterTypesAgree(
   return matches;
 }
 
-/** A property declared again in a merged interface must have the same type. */
+/** A property declared again in a merged interface, or in the class it merges with, must have the same type. */
 function checkMergedProperties(c: Checker, symbol: Sym): void {
-  const properties = symbol.typeDeclarations
-    .filter((declaration) => declaration.type === 'interface_declaration')
-    .flatMap((declaration) => {
-      const body = declaration.childForFieldName('body');
-      return body ? named(body).filter((member) => member.type === 'property_signature') : [];
-    });
+  const properties = symbol.typeDeclarations.flatMap((declaration) => propertyDeclarationsOf(c, declaration));
   // TypeScript binds computed names after the others, so a plain name declares the property first.
   const seen = new Map<string, TreeNode>();
   for (const member of [...properties.filter((member) => !isComputed(member)), ...properties.filter(isComputed)])
     checkMergedProperty(c, member, seen);
+}
+
+/** The instance property declarations of an interface or a class, including a class's parameter properties. */
+function propertyDeclarationsOf(c: Checker, declaration: TreeNode): TreeNode[] {
+  const members = named(declaration.childForFieldName('body') ?? declaration);
+  if (declaration.type === 'interface_declaration')
+    return members.filter((member) => member.type === 'property_signature');
+  const parameters = c.classes.constructorNode(declaration)?.childForFieldName('parameters');
+  return [
+    ...members.filter((member) => member.type === 'field_definition' && !hasToken(member, 'static')),
+    ...(parameters ? named(parameters).filter(isParameterProperty) : []),
+  ];
+}
+
+function isParameterProperty(parameter: TreeNode): boolean {
+  return hasToken(parameter, 'readonly') || named(parameter).some((part) => part.type === 'accessibility_modifier');
 }
 
 function isComputed(member: TreeNode): boolean {
@@ -196,20 +207,13 @@ function checkMergedProperty(c: Checker, member: TreeNode, seen: Map<string, Tre
   );
   if (modifiersDiffer) {
     for (const declaration of [previous, member])
-      c.error(
-        declaration.childForFieldName('name') ?? declaration,
-        `プロパティ ${name} の宣言の修飾子は同じでなければいけません。`
-      );
+      c.error(memberNameNode(declaration), `プロパティ ${name} の宣言の修飾子は同じでなければいけません。`);
   }
-  const effectiveType = (declaration: TreeNode): Type | undefined => {
-    const type = c.typeNodes.annotationType(declaration.childForFieldName('type'));
-    return type && hasToken(declaration, '?') ? unionOf([type, undefinedType]) : type;
-  };
-  const before = effectiveType(previous);
-  const after = effectiveType(member);
+  const before = declaredPropertyType(c, previous, name);
+  const after = declaredPropertyType(c, member, name);
   if (before && after && !c.relations.identical(before, after)) {
     c.error(
-      member.childForFieldName('name') ?? member,
+      memberNameNode(member),
       `後のプロパティの宣言は、同じ型でなければいけません。プロパティ ${name} の型は '${c.print(before)}' ですが、ここでは '${c.print(after)}' です。`
     );
   }
@@ -241,8 +245,7 @@ function addParameterPropertyDuplicates(member: TreeNode, groups: Map<string, Tr
   if (member.childForFieldName('name')?.text !== 'constructor') return;
   const parameters = member.childForFieldName('parameters');
   for (const parameter of parameters ? named(parameters) : []) {
-    if (!hasToken(parameter, 'readonly') && !named(parameter).some((part) => part.type === 'accessibility_modifier'))
-      continue;
+    if (!isParameterProperty(parameter)) continue;
     const pattern = parameter.childForFieldName('pattern');
     if (!pattern || pattern.type !== 'identifier') continue;
     const group = groups.get(pattern.text) ?? [];
@@ -303,7 +306,23 @@ function isAllowedRedeclaration(members: TreeNode[]): boolean {
 
 /** A member's property name, with a computed name resolved as the member's type resolves it. */
 function memberName(c: Checker, member: TreeNode): string | undefined {
-  const nameNode = member.childForFieldName('name');
+  const nameNode = member.childForFieldName('name') ?? member.childForFieldName('pattern');
   const names = nameNode ? c.patterns.propertyNames(nameNode) : undefined;
   return names?.length === 1 ? names[0] : undefined;
+}
+
+/** The name of a member, or of a parameter property. */
+function memberNameNode(member: TreeNode): TreeNode {
+  return member.childForFieldName('name') ?? member.childForFieldName('pattern') ?? member;
+}
+
+/** The type a property declaration gives, with `undefined` if it is optional; a class field may infer it. */
+function declaredPropertyType(c: Checker, declaration: TreeNode, name: string): Type | undefined {
+  const annotated = c.typeNodes.annotationType(declaration.childForFieldName('type'));
+  const type =
+    annotated ??
+    (declaration.type === 'field_definition'
+      ? c.propertyOf(c.classes.classInfoOfNode(declaration.parent?.parent as TreeNode).instanceType, name)?.type()
+      : undefined);
+  return type && hasToken(declaration, '?') ? unionOf([type, undefinedType]) : type;
 }

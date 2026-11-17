@@ -210,12 +210,13 @@ export class Signatures {
     return symbol.typeParameter;
   }
 
-  /** The first declaration of the interface a declaration merges into, if it is one. */
+  /** The declaration whose type parameters an interface declaration shares: its class's, or else the first interface's. */
   private firstDeclarationOf(node: TreeNode): TreeNode | undefined {
     if (node.type !== 'interface_declaration') return undefined;
     const name = node.childForFieldName('name')?.text;
     if (!name) return undefined;
-    return this.c.scopeOf(node).lookupType(name)?.typeDeclarations[0];
+    const declarations = this.c.scopeOf(node).lookupType(name)?.typeDeclarations;
+    return declarations?.find((declaration) => declaration.type !== 'interface_declaration') ?? declarations?.[0];
   }
 
   private mergedDeclarations(node: TreeNode): TreeNode[] {

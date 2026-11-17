@@ -633,22 +633,28 @@ export class TypeNodes {
       resolve: () => {
         if (structure) return structure;
         structure = emptyStructure();
-        // TypeScript merges the overloads of later declarations before those of earlier ones.
-        const own = this.membersStructure(
-          symbol.typeDeclarations.toReversed().flatMap((declaration) => {
-            const body = declaration.childForFieldName('body');
-            return body ? named(body) : [];
-          })
-        );
-        const bases = symbol.typeDeclarations.flatMap((declaration) => {
-          const clause = declaration.namedChildren.find((child) => child?.type === 'extends_type_clause');
-          return clause ? named(clause).map((base) => this.typeFromNode(base)) : [];
-        });
+        const { own, bases } = this.interfaceMembers(symbol.typeDeclarations);
         structure = this.c.mergeBases(own, bases);
         return structure;
       },
     };
     return type;
+  }
+
+  /** The members merged interface declarations declare, and the types they extend. */
+  interfaceMembers(declarations: TreeNode[]): { own: Structure; bases: Type[] } {
+    // TypeScript merges the overloads of later declarations before those of earlier ones.
+    const own = this.membersStructure(
+      declarations.toReversed().flatMap((declaration) => {
+        const body = declaration.childForFieldName('body');
+        return body ? named(body) : [];
+      })
+    );
+    const bases = declarations.flatMap((declaration) => {
+      const clause = declaration.namedChildren.find((child) => child?.type === 'extends_type_clause');
+      return clause ? named(clause).map((base) => this.typeFromNode(base)) : [];
+    });
+    return { own, bases };
   }
 }
 

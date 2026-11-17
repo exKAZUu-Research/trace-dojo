@@ -100,7 +100,9 @@ export class Scope {
       symbol = kind === 'class' ? (this.values.get(name) ?? new Sym(name, this)) : new Sym(name, this);
       this.types.set(name, symbol);
     }
-    symbol.typeKind ??= kind;
+    // An interface declared before the class of its name merges into the class.
+    if (kind === 'class' && symbol.typeKind === 'interface') symbol.typeKind = 'class';
+    else symbol.typeKind ??= kind;
     symbol.typeDeclarations.push(declaration);
     symbol.typeEntries.push({ kind, name: nameNode });
     return symbol;

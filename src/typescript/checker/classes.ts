@@ -60,7 +60,7 @@ export class ClassChecker {
   constructor(private readonly c: Checker) {}
 
   classInfoOf(symbol: Sym): ClassInfo {
-    const declaration = symbol.typeDeclarations[0] ?? symbol.valueDeclaration;
+    const declaration = symbol.typeDeclarations.find((node) => classTypes.has(node.type)) ?? symbol.valueDeclaration;
     return this.classInfoOfNode(declaration as TreeNode);
   }
 
@@ -98,13 +98,48 @@ export class ClassChecker {
       resolve: () => {
         if (structure) return structure;
         structure = emptyStructure();
-        const own = this.membersOf(node, info, false);
+        const interfaces = this.c.typeNodes.interfaceMembers(this.mergedInterfaces(node));
+        const own = this.withInterfaceMembers(this.membersOf(node, info, false), interfaces.own);
         const base = this.baseInstanceType(node);
-        structure = base ? this.mergeBase(own, base, instanceType) : own;
+        structure = this.c.mergeBases(base ? this.mergeBase(own, base, instanceType) : own, interfaces.bases);
         return structure;
       },
     };
     return instanceType;
+  }
+
+  /** The interfaces of the class's name, which merge their members into its instances. */
+  private mergedInterfaces(node: TreeNode): TreeNode[] {
+    const name = node.type === 'class' ? undefined : node.childForFieldName('name')?.text;
+    const declarations = name ? this.c.scopeOf(node).lookupType(name)?.typeDeclarations : undefined;
+    return declarations?.filter((declaration) => declaration.type === 'interface_declaration') ?? [];
+  }
+
+  /**
+   * The class's members with its interfaces': a method both declare takes the signatures of each as overloads, and the
+   * declaration checks report any other member both declare differently.
+   */
+  private withInterfaceMembers(own: Structure, declared: Structure): Structure {
+    const properties = new Map(own.properties);
+    for (const [name, property] of declared.properties) {
+      const existing = properties.get(name);
+      if (!existing) properties.set(name, property);
+      else if (existing.isMethod && property.isMethod) {
+        const signatures = (method: Property): Signature[] => this.c.signaturesOf(method.type(), 'call');
+        let type: Type | undefined;
+        properties.set(name, {
+          ...existing,
+          type: () => (type ??= this.c.overloadedFunction([...signatures(existing), ...signatures(property)])),
+        });
+      }
+    }
+    return {
+      properties,
+      callSignatures: [...own.callSignatures, ...declared.callSignatures],
+      constructSignatures: [...own.constructSignatures, ...declared.constructSignatures],
+      stringIndex: own.stringIndex ?? declared.stringIndex,
+      numberIndex: own.numberIndex ?? declared.numberIndex,
+    };
   }
 
   private staticTypeOf(node: TreeNode, info: ClassInfo): ObjectType {
