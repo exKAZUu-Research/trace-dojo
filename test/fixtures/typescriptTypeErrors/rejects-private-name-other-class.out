@@ -1,0 +1,6 @@
+(5,10): error TS2540: Cannot assign to '#fixed' because it is a read-only property.
+(11,18): error TS18013: Property '#value' is not accessible outside class 'A' because it has a private identifier.
+(20,7): error TS2322: Type 'C' is not assignable to type 'A'.
+  Property '#value' in type 'C' refers to a different member that cannot be accessed from within type 'A'.
+(21,7): error TS2322: Type 'A' is not assignable to type 'B'.
+  Property '#value' in type 'A' refers to a different member that cannot be accessed from within type 'B'.

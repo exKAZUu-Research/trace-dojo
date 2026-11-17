@@ -255,5 +255,5 @@ export function printedPropertyName(name: string): string {
   if (name.startsWith('__@')) return `[Symbol.${name.slice(3)}]`;
   const symbolName = uniqueSymbolName(name);
   if (symbolName !== undefined) return `[${symbolName}]`;
-  return /^[$A-Z_a-z\u0080-￿][\w$\u0080-￿]*$/.test(name) ? name : JSON.stringify(name);
+  return /^#?[$A-Z_a-z\u0080-￿][\w$\u0080-￿]*$/.test(name) ? name : JSON.stringify(name);
 }

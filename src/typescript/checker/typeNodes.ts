@@ -362,10 +362,7 @@ export class TypeNodes {
       );
       return errorType;
     }
-    if (symbol.unsupported) {
-      this.c.error(node, unsupportedMessage(symbol.unsupported));
-      return errorType;
-    }
+    if (this.reportUnusableSymbol(node, nameNode, symbol)) return errorType;
     const declared = this.declaredTypeOf(symbol);
     const parameters = this.c.signatures.typeParametersOfSymbol(symbol);
     if (parameters.length === 0) {
@@ -388,6 +385,17 @@ export class TypeNodes {
     const filled = this.c.fillTypeArguments(parameters, typeArguments);
     this.checkTypeArgumentConstraints(node, parameters, filled);
     return this.appliedType(symbol, declared, parameters, filled);
+  }
+
+  /** Reports a type the name cannot refer to here: an unsupported library type, or a class type parameter in a static member. */
+  private reportUnusableSymbol(node: TreeNode, nameNode: TreeNode, symbol: Sym): boolean {
+    if (symbol.unsupported) {
+      this.c.error(node, unsupportedMessage(symbol.unsupported));
+      return true;
+    }
+    if (!this.c.classes.isClassTypeParameterInStaticMember(symbol, nameNode)) return false;
+    this.c.error(nameNode, '静的メンバーはクラスの型パラメーターを参照できません。');
+    return true;
   }
 
   private appliedType(symbol: Sym, declared: Type, parameters: TypeParameter[], typeArguments: Type[]): Type {
@@ -522,7 +530,7 @@ export class TypeNodes {
   }
 
   /** Sets the index signature of each key type an index signature declares, as `[k: string | symbol]` declares two. */
-  private addIndexSignature(structure: Structure, member: TreeNode): void {
+  addIndexSignature(structure: Structure, member: TreeNode): void {
     const indexType = member.childForFieldName('index_type');
     const info: IndexInfo = {
       type: this.annotationType(member.childForFieldName('type')) ?? anyType,

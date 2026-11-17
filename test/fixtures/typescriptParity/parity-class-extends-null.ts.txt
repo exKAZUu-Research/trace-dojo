@@ -1,0 +1,22 @@
+class Dictionary extends null {
+  static make(): Dictionary {
+    return Object.create(Dictionary.prototype);
+  }
+  label = "dict";
+}
+const dictionary = Dictionary.make();
+console.log(Object.getPrototypeOf(Dictionary.prototype));
+console.log(dictionary instanceof Dictionary, dictionary.label);
+
+class Created extends null {
+  constructor() {
+    return Object.create(Created.prototype);
+  }
+}
+console.log(new Created() instanceof Created);
+
+try {
+  new Dictionary();
+} catch (error) {
+  console.log(error instanceof TypeError);
+}

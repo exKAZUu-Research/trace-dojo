@@ -616,12 +616,16 @@ export class ExpressionChecker {
   private elaborate(source: Type, target: Type): string {
     if (source.kind !== 'object' || target.kind !== 'object' || this.c.isArrayOrTuple(target)) return '';
     const sourceStructure = this.c.structureOf(source);
-    const missing = [...target.resolve().properties.values()].filter(
-      (property) =>
-        !property.optional &&
-        !sourceStructure.properties.has(property.name) &&
-        !this.c.propertyOf(source, property.name)
-    );
+    const missing = [...target.resolve().properties]
+      .filter(
+        ([key, property]) =>
+          !property.optional && !sourceStructure.properties.has(key) && !this.c.propertyOf(source, key)
+      )
+      .map(([, property]) => property);
+    const sourceNames = new Set([...sourceStructure.properties.values()].map((property) => property.name));
+    const otherPrivateName = missing.find((property) => property.isPrivateName && sourceNames.has(property.name));
+    if (otherPrivateName)
+      return `型 '${this.c.print(source)}' のプロパティ '${otherPrivateName.name}' は、型 '${this.c.print(target)}' の中からは使えない別のメンバーです。`;
     if (missing.length === 1) return `プロパティ '${printedPropertyName(missing[0].name)}' がありません。`;
     if (missing.length > 1)
       return `プロパティ ${missing

@@ -1,0 +1,23 @@
+class A {
+  #value = 1;
+  readonly #fixed = 0;
+  reset() {
+    this.#fixed = 2;
+  }
+}
+class B extends A {
+  #value = "child";
+  peek(other: A) {
+    return other.#value;
+  }
+  own(other: B) {
+    return other.#value.length;
+  }
+}
+class C {
+  #value = 1;
+}
+const fromOther: A = new C();
+const fromBase: B = new A();
+const fromDerived: A = new B();
+console.log(fromOther, fromBase, fromDerived);

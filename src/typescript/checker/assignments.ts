@@ -352,8 +352,9 @@ export class AssignmentChecker {
       objectNode.type === 'super'
         ? this.c.classes.superType(expression)
         : this.c.members.checkNonNullable(objectNode, this.c.expressions.check(objectNode));
+    const key = this.c.classes.propertyKey(expression, propertyNode);
     const properties = (objectType.kind === 'union' ? objectType.types : [objectType])
-      .map((member) => this.c.propertyOf(member, propertyNode.text))
+      .map((member) => this.c.propertyOf(member, key))
       .filter((property): property is Property => property !== undefined);
     for (const member of properties) {
       if (this.c.classes.isReadonlyFor(member, expression, objectNode) || member.getterOnly) {
@@ -372,7 +373,7 @@ export class AssignmentChecker {
     if (!compound)
       return unionOf(
         (objectType.kind === 'union' ? objectType.types : [objectType]).map((member) =>
-          this.namedWriteType(member, propertyNode.text)
+          this.namedWriteType(member, key)
         )
       );
 

@@ -38,12 +38,7 @@ export class ClassDeclarationChecker {
     const ctor = this.c.classes.constructorNode(node);
     for (const member of members) this.checkMember(node, member, info, ctor);
     if (!ctor) this.checkPropertyInitialization(node, undefined, new FlowState(), []);
-    else if (clause && !this.firstSuperCallAnywhere(ctor)) {
-      this.c.error(
-        ctor.childForFieldName('name') ?? ctor,
-        "派生クラスのコンストラクタには 'super' の呼び出しが必要です。"
-      );
-    }
+    else if (clause) this.checkSuperCallPresence(node, ctor);
     this.checkImplements(node, info);
     this.c.statements.checkIndexConformance(this.c.classes.membersOf(node, info, false));
     this.checkAbstractMembers(node, info);
@@ -63,7 +58,7 @@ export class ClassDeclarationChecker {
 
   private checkBaseValue(node: TreeNode, baseValue: TreeNode): void {
     const baseType = this.c.expressions.check(baseValue);
-    if (isAnyLike(baseType) || baseType === errorType) return;
+    if (isAnyLike(baseType) || baseType === errorType || isIntrinsic(baseType, 'null')) return;
     if (this.c.signaturesOf(baseType, 'construct').length === 0) {
       this.c.error(baseValue, `型 '${this.c.print(baseType)}' はコンストラクタの型ではありません。`);
       return;
@@ -107,12 +102,29 @@ export class ClassDeclarationChecker {
     }
   }
 
-  private firstSuperCallAnywhere(ctor: TreeNode): boolean {
-    let found = false;
+  /** Reports a derived class's constructor that lacks a `super` call, or that has one although the class extends `null`. */
+  private checkSuperCallPresence(node: TreeNode, ctor: TreeNode): void {
+    const superCall = this.firstSuperCallAnywhere(ctor);
+    if (this.c.classes.extendsNull(node)) {
+      if (superCall)
+        this.c.error(
+          superCall,
+          "クラスが 'null' を継承しているとき、コンストラクタには 'super' の呼び出しを書けません。"
+        );
+    } else if (!superCall) {
+      this.c.error(
+        ctor.childForFieldName('name') ?? ctor,
+        "派生クラスのコンストラクタには 'super' の呼び出しが必要です。"
+      );
+    }
+  }
+
+  private firstSuperCallAnywhere(ctor: TreeNode): TreeNode | undefined {
+    let found: TreeNode | undefined;
     const visit = (current: TreeNode): void => {
       if (found) return;
       if (current.type === 'call_expression' && current.childForFieldName('function')?.type === 'super') {
-        found = true;
+        found = current;
         return;
       }
       if (
@@ -304,20 +316,18 @@ export class ClassDeclarationChecker {
     property: Property,
     baseProperty: Property
   ): boolean {
+    if (!conflictsInVisibility(property, baseProperty)) return false;
     if (baseProperty.visibility === 'private' || property.visibility === 'private') {
-      if (baseProperty.visibility === 'private' || property.visibility !== baseProperty.visibility) {
-        this.c.error(
-          memberNameNode(property) ?? node,
-          `クラス '${info.name}' は、基底クラスを正しく継承していません。プロパティ '${property.name}' の可視性が異なります。`
-        );
-      }
-      return true;
+      this.c.error(
+        memberNameNode(property) ?? node,
+        `クラス '${info.name}' は、基底クラスを正しく継承していません。プロパティ '${property.name}' の可視性が異なります。`
+      );
+    } else {
+      this.c.error(
+        node.childForFieldName('name') ?? node,
+        `クラス '${info.name}' は、基底クラスを正しく継承していません。プロパティ '${property.name}' の可視性を狭めています。`
+      );
     }
-    if (visibilityRank[property.visibility] <= visibilityRank[baseProperty.visibility]) return false;
-    this.c.error(
-      node.childForFieldName('name') ?? node,
-      `クラス '${info.name}' は、基底クラスを正しく継承していません。プロパティ '${property.name}' の可視性を狭めています。`
-    );
     return true;
   }
 
@@ -354,11 +364,16 @@ export class ClassDeclarationChecker {
 
   /**
    * Whether a field redeclaring a base field sets it to `undefined`, as a class field defined on each instance does
-   * unless an initializer or the constructor assigns it.
+   * unless an initializer or the constructor assigns it; a `declare` field defines nothing at run time.
    */
   private overwritesBaseField(property: Property): boolean {
     const { declaration } = property;
-    if (declaration?.type !== 'field_definition' || declaration.childForFieldName('value') || property.isAbstract)
+    if (
+      declaration?.type !== 'field_definition' ||
+      declaration.childForFieldName('value') ||
+      property.isAbstract ||
+      hasToken(declaration, 'declare')
+    )
       return false;
     return hasToken(declaration, '!') || !this.constructorAssignedFields.has(declaration.id);
   }
@@ -370,10 +385,16 @@ export class ClassDeclarationChecker {
     const own = this.c.classes.membersOf(node, info, true);
     for (const [name, property] of own.properties) {
       const baseProperty = name === 'prototype' ? undefined : this.c.propertyOf(baseStatic, name);
-      if (!baseProperty || this.c.relations.isAssignable(property.type(), baseProperty.type())) continue;
+      if (!baseProperty) continue;
+      const mismatch = conflictsInVisibility(property, baseProperty)
+        ? 'の可視性が異なります'
+        : this.c.relations.isAssignable(property.type(), baseProperty.type())
+          ? undefined
+          : 'の型が合いません';
+      if (!mismatch) continue;
       this.c.error(
         node.childForFieldName('name') ?? node,
-        `クラス '${info.name}' の静的な側は、基底クラスの静的な側を正しく継承していません。プロパティ '${name}' の型が合いません。`
+        `クラス '${info.name}' の静的な側は、基底クラスの静的な側を正しく継承していません。プロパティ '${property.name}' ${mismatch}。`
       );
       return;
     }
@@ -437,6 +458,18 @@ function memberKind(property: Property): 'method' | 'accessor' | 'field' {
   return ['method_definition', 'method_signature', 'abstract_method_signature'].includes(declarationType)
     ? 'accessor'
     : 'field';
+}
+
+/**
+ * Whether a member redeclaring a base member conflicts with it in visibility: a private member is compatible only with
+ * itself, and a derived member may not narrow a base member's visibility.
+ */
+function conflictsInVisibility(property: Property, baseProperty: Property): boolean {
+  return (
+    property.visibility === 'private' ||
+    baseProperty.visibility === 'private' ||
+    visibilityRank[property.visibility] > visibilityRank[baseProperty.visibility]
+  );
 }
 
 function isInterfaceMember(property: Property): boolean {

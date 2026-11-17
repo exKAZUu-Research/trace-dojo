@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 534 -- Holds the types of classes with `this`, `super`, and accessibility, which all read the class information.
+// code-gauge-allow-file fileNcss 563 -- Holds the types of classes with `this`, `super`, and accessibility, which all read the class information.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import { typesAtConstructorExit } from './assignmentFlow';
@@ -57,6 +57,11 @@ interface ClassMembers {
 }
 
 const classTypes = new Set(['class_declaration', 'abstract_class_declaration', 'class']);
+
+/** The key a class structure stores a member under: a `#name` is a distinct member in each class declaring it. */
+function memberKey(name: string, info: ClassInfo): string {
+  return name.startsWith('#') ? `${name}@${info.declaration.id}` : name;
+}
 
 /** Classes: their instance and constructor types, `this` and `super`, and the checks of their declarations. */
 export class ClassChecker {
@@ -147,6 +152,7 @@ export class ClassChecker {
       constructSignatures: [...own.constructSignatures, ...declared.constructSignatures],
       stringIndex: own.stringIndex ?? declared.stringIndex,
       numberIndex: own.numberIndex ?? declared.numberIndex,
+      symbolIndex: own.symbolIndex ?? declared.symbolIndex,
     };
   }
 
@@ -203,6 +209,7 @@ export class ClassChecker {
       properties,
       stringIndex: own.stringIndex ?? inherited.stringIndex,
       numberIndex: own.numberIndex ?? inherited.numberIndex,
+      symbolIndex: own.symbolIndex ?? inherited.symbolIndex,
     };
   }
 
@@ -216,6 +223,26 @@ export class ClassChecker {
     const value = clause?.childForFieldName('value');
     if (!value) return undefined;
     return this.c.silently(() => this.c.expressions.check(value));
+  }
+
+  /**
+   * Whether a type parameter of a class is referenced inside one of its static members, which all instantiations of the
+   * class share.
+   */
+  isClassTypeParameterInStaticMember(symbol: Sym, reference: TreeNode): boolean {
+    const classNode = symbol.typeKind === 'typeParameter' ? symbol.typeDeclarations[0]?.parent?.parent : undefined;
+    if (!classNode || !classTypes.has(classNode.type)) return false;
+    let member: TreeNode | null = reference;
+    while (member && member.parent?.parent?.id !== classNode.id) member = member.parent;
+    return (
+      member?.parent?.type === 'class_body' && (hasToken(member, 'static') || member.type === 'class_static_block')
+    );
+  }
+
+  /** Whether the class extends `null`, whose instances have no base class and whose constructor may not call `super`. */
+  extendsNull(node: TreeNode): boolean {
+    const baseStatic = this.baseStaticType(node);
+    return baseStatic !== undefined && isIntrinsic(baseStatic, 'null');
   }
 
   baseInstanceType(node: TreeNode): Type | undefined {
@@ -292,7 +319,7 @@ export class ClassChecker {
    */
   baseConstructSignatures(node: TreeNode): Signature[] | undefined {
     const baseStatic = this.baseStaticType(node);
-    if (!baseStatic || isAnyLike(baseStatic)) return undefined;
+    if (!baseStatic || isAnyLike(baseStatic) || isIntrinsic(baseStatic, 'null')) return undefined;
     const typeArguments = this.baseTypeArguments(node);
     return this.c.signaturesOf(baseStatic, 'construct').flatMap((signature) => {
       const parameters = signature.typeParameters;
@@ -317,9 +344,10 @@ export class ClassChecker {
     for (const member of named(body)) {
       if (hasToken(member, 'static') === isStatic) this.addMember(members, member);
     }
-    for (const [name, entry] of members.methods) structure.properties.set(name, this.methodProperty(name, entry, info));
+    for (const [name, entry] of members.methods)
+      structure.properties.set(memberKey(name, info), this.methodProperty(name, entry, info));
     for (const [name, accessor] of members.accessors) {
-      structure.properties.set(name, this.accessorProperty(name, accessor, info));
+      structure.properties.set(memberKey(name, info), this.accessorProperty(name, accessor, info));
     }
     if (!isStatic) {
       const ctor = this.constructorNode(node);
@@ -335,7 +363,10 @@ export class ClassChecker {
     switch (member.type) {
       case 'field_definition': {
         if (name !== undefined && nameNode)
-          members.structure.properties.set(name, this.fieldProperty(name, nameNode, member, members.info));
+          members.structure.properties.set(
+            memberKey(name, members.info),
+            this.fieldProperty(name, nameNode, member, members.info)
+          );
         break;
       }
       case 'method_definition':
@@ -345,7 +376,7 @@ export class ClassChecker {
         break;
       }
       case 'index_signature': {
-        this.addIndexSignature(members.structure, member);
+        this.c.typeNodes.addIndexSignature(members.structure, member);
         break;
       }
       default: {
@@ -383,17 +414,6 @@ export class ClassChecker {
     else entry.signatures.push({ ...this.c.signatures.signatureOf(member), isMethod: true });
     if (member.type === 'abstract_method_signature' || hasToken(member, 'abstract')) entry.abstract = true;
     members.methods.set(name, entry);
-  }
-
-  private addIndexSignature(structure: Structure, member: TreeNode): void {
-    const indexType = member.childForFieldName('index_type');
-    const keyType = indexType ? this.c.typeNodes.typeFromNode(indexType) : undefined;
-    const index = {
-      type: this.c.typeNodes.annotationType(member.childForFieldName('type')) ?? anyType,
-      readonly: hasToken(member, 'readonly'),
-    };
-    if (keyType && isIntrinsic(keyType, 'number')) structure.numberIndex = index;
-    else structure.stringIndex = index;
   }
 
   private methodProperty(name: string, entry: MethodEntry, info: ClassInfo): Property {
@@ -808,12 +828,35 @@ export class ClassChecker {
       (property.declaration && hasToken(property.declaration, 'static'))
     )
       return;
-    const objectInfo = this.classInfoOfType(this.c.silently(() => this.c.expressions.check(objectNode)));
-    if (objectInfo && !this.derivesFrom(objectInfo, enclosingInfo)) {
+    const receiver = this.c.silently(() => this.c.relations.removeNullish(this.c.expressions.check(objectNode)));
+    if (!this.isReceiverDerivedFrom(receiver, enclosingInfo)) {
       this.c.error(
         propertyNode,
         `プロパティ '${property.name}' は protected なので、クラス '${enclosingInfo.name}' のインスタンスからしか使えません。`
       );
+    }
+  }
+
+  /**
+   * Whether a receiver of a protected instance member is an instance of the enclosing class, as TypeScript's
+   * `hasBaseType` decides: a type parameter by its constraint, an intersection by any member, and never a union.
+   */
+  private isReceiverDerivedFrom(type: Type, enclosing: ClassInfo): boolean {
+    switch (type.kind) {
+      case 'typeParameter': {
+        const constraint = this.c.constraintOf(type);
+        return constraint !== undefined && this.isReceiverDerivedFrom(constraint, enclosing);
+      }
+      case 'intersection': {
+        return type.types.some((member) => this.isReceiverDerivedFrom(member, enclosing));
+      }
+      case 'union': {
+        return false;
+      }
+      default: {
+        const info = this.classInfoOfType(type);
+        return !info || this.derivesFrom(info, enclosing);
+      }
     }
   }
 
@@ -885,16 +928,37 @@ export class ClassChecker {
 
   privateNameAccess(node: TreeNode, propertyNode: TreeNode, objectType: Type): Type {
     const name = propertyNode.text;
-    const property = this.c.propertyOf(objectType, name);
-    if (!property) {
-      this.c.error(propertyNode, `プロパティ '${name}' は型 '${this.c.print(objectType)}' にありません。`);
-      return errorType;
+    const declaring = this.privateNameDeclarer(node, name);
+    const property = declaring && this.c.propertyOf(objectType, memberKey(name, declaring));
+    if (property) return property.type();
+    const declaredElsewhere = [...this.c.structureOf(objectType).properties.values()].some(
+      (member) => member.name === name
+    );
+    this.c.error(
+      propertyNode,
+      declaredElsewhere || !declaring
+        ? `プロパティ '${name}' は、それを宣言したクラスの外では使えません。`
+        : `プロパティ '${name}' は型 '${this.c.print(objectType)}' にありません。`
+    );
+    return errorType;
+  }
+
+  /** The key a property access's name has in class structures, where a `#name` is the one its enclosing classes declare. */
+  propertyKey(node: TreeNode, propertyNode: TreeNode): string {
+    const name = propertyNode.text;
+    if (propertyNode.type !== 'private_property_identifier') return name;
+    const declaring = this.privateNameDeclarer(node, name);
+    return declaring ? memberKey(name, declaring) : name;
+  }
+
+  /** The innermost class enclosing a node that declares a `#name`, which every use of the name in it refers to. */
+  private privateNameDeclarer(node: TreeNode, name: string): ClassInfo | undefined {
+    for (let classNode = this.enclosingClass(node); classNode; classNode = this.enclosingClass(classNode)) {
+      const body = classNode.childForFieldName('body');
+      const declares = body && named(body).some((member) => member.childForFieldName('name')?.text === name);
+      if (declares) return this.classInfoOfNode(classNode);
     }
-    const enclosing = this.enclosingClass(node);
-    if (!enclosing || property.declaringClass?.declaration.id !== enclosing.id) {
-      this.c.error(propertyNode, `プロパティ '${name}' は、それを宣言したクラスの外では使えません。`);
-    }
-    return property.type();
+    return undefined;
   }
 
   // Flow ---------------------------------------------------------------------------------------------------------
