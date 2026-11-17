@@ -202,32 +202,49 @@ export class Calls {
     if (perMember.some((signatures) => signatures.length === 0)) return [];
     if (perMember.every((signatures) => signatures.length === 1)) {
       const all = perMember.map((signatures) => signatures[0]);
-      if (
-        all.every(
-          (signature) =>
-            signature.typeParameters.length === 0 && !signature.parameters.some((parameter) => parameter.rest)
-        )
-      ) {
-        // A union of functions takes the longest parameter list, each parameter the type every member accepts.
-        let longest = all[0];
-        for (const signature of all) if (signature.parameters.length > longest.parameters.length) longest = signature;
-        return [
-          {
-            typeParameters: [],
-            parameters: longest.parameters.map((parameter, index) => {
-              const members = all.filter((signature) => index < signature.parameters.length);
-              return {
-                ...parameter,
-                optional: members.every((signature) => signature.parameters[index].optional),
-                type: this.intersectParameters(members.map((signature) => signature.parameters[index].type)),
-              };
-            }),
-            returnType: () => unionOf(all.map((signature) => signature.returnType())),
-          },
-        ];
+      if (all.every((signature) => signature.typeParameters.length === 0)) {
+        let combined = all[0];
+        for (const signature of all.slice(1)) combined = this.combineUnionSignatures(combined, signature);
+        return [combined];
       }
     }
     return perMember[0];
+  }
+
+  /**
+   * The signature a union of two function types is called by, as TypeScript combines them: the longer parameter list,
+   * each parameter the type both accept at its position, a rest when either has one, and either return type.
+   */
+  private combineUnionSignatures(left: Signature, right: Signature): Signature {
+    const typeAt = (signature: Signature, index: number): Type => {
+      const { parameters } = signature;
+      const restIndex = hasRest(signature) ? parameters.length - 1 : -1;
+      if (restIndex !== -1 && index >= restIndex) return this.c.restElementType(parameters[restIndex].type);
+      return index < parameters.length ? parameters[index].type : unknownType;
+    };
+    const both = (index: number): Type => this.intersectParameters([typeAt(left, index), typeAt(right, index)]);
+    const longest = left.parameters.length >= right.parameters.length ? left : right;
+    const eitherRest = hasRest(left) || hasRest(right);
+    const extraRest = eitherRest && !hasRest(longest);
+    const minimum = Math.max(requiredCount(left), requiredCount(right));
+    const parameters: Parameter[] = longest.parameters.map((parameter, index) => {
+      const isRest = eitherRest && !extraRest && index === longest.parameters.length - 1;
+      return {
+        ...parameter,
+        rest: isRest,
+        optional: !isRest && index >= minimum,
+        type: isRest ? this.c.arrayType(both(index)) : both(index),
+      };
+    });
+    if (extraRest) {
+      const index = longest.parameters.length;
+      parameters.push({ name: 'args', rest: true, optional: false, type: this.c.arrayType(both(index)) });
+    }
+    return {
+      typeParameters: [],
+      parameters,
+      returnType: () => unionOf([left.returnType(), right.returnType()]),
+    };
   }
 
   private intersectParameters(types: Type[]): Type {
@@ -730,4 +747,12 @@ function isDottedName(node: TreeNode): boolean {
   if (node.type === 'identifier' || node.type === 'this') return true;
   if (node.type !== 'member_expression' || node.childForFieldName('optional_chain')) return false;
   return isDottedName(node.childForFieldName('object') as TreeNode);
+}
+
+function hasRest(signature: Signature): boolean {
+  return signature.parameters.at(-1)?.rest === true;
+}
+
+function requiredCount(signature: Signature): number {
+  return signature.parameters.filter((parameter) => !parameter.optional && !parameter.rest).length;
 }
