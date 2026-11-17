@@ -76,7 +76,7 @@ export function compilePrint(sema: SemaApi, formatArg: Expression, argsArg: Expr
           appendSegments(frame, destination, segments, fields, args, info, (arg, value) =>
             (formatMethods.get(arg) as FormatMethod)(frame, value, destination)
           );
-          return suppliedDestination ? [] : bufferedBytes(destination);
+          return suppliedDestination ? [] : bufferedBytes(frame, destination);
         });
       },
     };

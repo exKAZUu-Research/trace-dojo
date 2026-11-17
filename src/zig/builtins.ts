@@ -987,10 +987,10 @@ export function bytesToText(value: Value): string {
   return decodeUtf8(byteValues(value).map(Number));
 }
 
-export function byteValues(value: Value): bigint[] {
-  if (value instanceof Slice) return value.values() as bigint[];
-  if (value instanceof Pointer) return (value.load() as ZArray).values() as bigint[];
-  if (value instanceof ZArray) return value.values() as bigint[];
+export function byteValues(value: Value, spend?: (cost: number) => void): bigint[] {
+  if (value instanceof Slice) return value.values(spend) as bigint[];
+  if (value instanceof Pointer) return (value.load() as ZArray).values(false, spend) as bigint[];
+  if (value instanceof ZArray) return value.values(false, spend) as bigint[];
   return [];
 }
 

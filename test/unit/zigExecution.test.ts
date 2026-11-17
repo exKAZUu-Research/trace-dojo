@@ -4138,3 +4138,56 @@ test('a concatenated pointer does not implicitly become an array value', () => {
     kind: 'compileError',
   });
 });
+
+test.each(['writeAll(&a)', 'write(&a)', 'splatByteAll(97,300000)', 'splatBytesAll("ab",150000)'])(
+  'writer reads, expansion and stores share the operation budget: %s',
+  (call) => {
+    const source = `const std=@import("std");pub fn main()!void{var a:[300000]u8=@splat(97);var b:[300000]u8=undefined;for(0..4)|_|{var w=std.Io.Writer.fixed(&b);_ = try w.${call};}_=&a;}`;
+    expect(executeProgram('zig', source)).toMatchObject({ kind: 'limitExceeded', limit: 'operations' });
+  }
+);
+
+test('writer source memory faults before reserving its impossible copy length', () => {
+  const source = `const std=@import("std");pub fn main()!void{var s:[]u8=undefined;_=&s;var bytes:[2]u8=undefined;var w=std.Io.Writer.fixed(&bytes);try w.writeAll(s);}`;
+  expect(executeProgram('zig', source)).toMatchObject({ kind: 'executed', uncaughtException: 'Segmentation fault' });
+});
+
+test.each([
+  'const a=id(.{.value=7});const b=id(.{.value=8});std.debug.print("{} {} {}",.{@TypeOf(a)==@TypeOf(b),a.value,b.value});',
+  'const a=id(.{.value=7});const b=id(a);std.debug.print("{}",.{b.value});',
+  'const a=id(id(.{.value=7}));std.debug.print("{}",.{a.value});',
+])('repeated signature analysis preserves anonymous parameter identity: %s', (body) => {
+  const source = `const std=@import("std");fn id(x:struct{value:u8})@TypeOf(x){return x;}pub fn main()void{${body}}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: body.includes('@TypeOf') ? 'true 7 8' : '7',
+    uncaughtException: undefined,
+  });
+});
+
+test('signature containers share stable captured type arguments and separate specializations', () => {
+  const source = `const std=@import("std");fn id(T:anytype,x:struct{value:T})@TypeOf(x){return x;}pub fn main()void{const a=id(u8,.{.value=7});const b=id(u8,a);const c=id(u16,.{.value=300});std.debug.print("{} {} {} {}",.{@TypeOf(a)==@TypeOf(b),@TypeOf(a)==@TypeOf(c),b.value,c.value});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: 'true false 7 300',
+    uncaughtException: undefined,
+  });
+});
+
+test('signature containers independent of generic arguments retain declared identity', () => {
+  const source = `const std=@import("std");fn id(x:anytype,y:struct{value:u8})@TypeOf(y){_=x;return y;}pub fn main()void{const a=id(@as(u8,1),.{.value=7});const b=id(@as(u16,1),a);std.debug.print("{} {}",.{@TypeOf(a)==@TypeOf(b),b.value});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: 'true 7',
+    uncaughtException: undefined,
+  });
+});
+
+test('generic container contexts canonicalize function declaration arguments', () => {
+  const source = `const std=@import("std");fn value()u8{return 7;}fn Factory(f:anytype)type{return struct{pub fn run()u8{return f();}};}pub fn main()void{const A=Factory(value);const B=Factory(value);std.debug.print("{} {}",.{A==B,B.run()});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: 'true 7',
+    uncaughtException: undefined,
+  });
+});

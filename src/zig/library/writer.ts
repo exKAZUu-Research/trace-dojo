@@ -1,4 +1,5 @@
 import { checkOutputSize } from '../allocation';
+import { byteValues } from '../builtins';
 import type { Frame } from '../runtime';
 import type { StructType } from '../types';
 import { ErrorValue, type NativeHandle, Slice, type Value, ZArray, ZStruct } from '../values';
@@ -38,8 +39,12 @@ export function writerState(value: Value): WriterState {
   return state;
 }
 
-export function bufferedBytes(state: WriterState): number[] {
-  return state.buffer.target.slots.slice(state.buffer.start, state.buffer.start + state.end).map(Number);
+export function bufferedBytes(frame: Frame, state: WriterState): number[] {
+  return writerBytes(frame, new Slice(state.buffer.target, state.buffer.start, state.end));
+}
+
+export function writerBytes(frame: Frame, value: Value): number[] {
+  return byteValues(value, (cost) => frame.runtime.spend(cost * 2)).map(Number);
 }
 
 export function bufferingWriter(): WriterState {
@@ -56,15 +61,18 @@ export function writeTo(frame: Frame, state: WriterState, bytes: readonly number
   if (end > state.capacity) {
     if (state.fd === undefined) {
       const available = Math.max(0, state.capacity - state.end);
+      frame.runtime.spend(available);
       for (let index = 0; index < available; index++) state.buffer.set(state.end + index, BigInt(bytes[index]));
       state.end += available;
       return ErrorValue.of('WriteFailed');
     }
-    frame.runtime.writeOutput(state.fd, [...bufferedBytes(state), ...bytes]);
+    frame.runtime.spend(state.end + bytes.length);
+    frame.runtime.writeOutput(state.fd, [...bufferedBytes(frame, state), ...bytes]);
     state.end = 0;
     return undefined;
   }
   if (!Number.isFinite(state.capacity)) checkOutputSize(end);
+  frame.runtime.spend(bytes.length);
   for (const [index, byte] of bytes.entries()) state.buffer.set(state.end + index, BigInt(byte));
   state.end = end;
   return undefined;
@@ -72,6 +80,6 @@ export function writeTo(frame: Frame, state: WriterState, bytes: readonly number
 
 export function flushWriter(frame: Frame, state: WriterState): void {
   if (state.fd === undefined) return;
-  frame.runtime.writeOutput(state.fd, bufferedBytes(state));
+  frame.runtime.writeOutput(state.fd, bufferedBytes(frame, state));
   state.end = 0;
 }

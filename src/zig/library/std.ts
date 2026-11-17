@@ -1,7 +1,7 @@
 import { checkOutputSize } from '../allocation';
 import { panic } from '../arith';
 import type { Span } from '../ast';
-import { bytesToText, byteValues, CONST_U8 } from '../builtins';
+import { bytesToText, CONST_U8 } from '../builtins';
 import { known, type NativeCall, runtime, type SemaApi, type TExpr } from '../semaBase';
 import {
   BOOL,
@@ -36,7 +36,16 @@ import {
   unavailableMember,
 } from './native';
 import { compilePrint, printInto, PrintWriteError } from './print';
-import { bufferedBytes, flushWriter, WRITER, type WriterState, writerState, writerValue, writeTo } from './writer';
+import {
+  bufferedBytes,
+  flushWriter,
+  WRITER,
+  writerBytes,
+  type WriterState,
+  writerState,
+  writerValue,
+  writeTo,
+} from './writer';
 
 let std: StructType | undefined;
 
@@ -172,10 +181,10 @@ const DEBUG = nativeStruct('std.debug', {
           print(frame, state);
         } catch (error) {
           if (error instanceof PrintWriteError)
-            return panic(decodeUtf8(buffer.values().map(Number)) + '(msg truncated)');
+            return panic(decodeUtf8(writerBytes(frame, buffer)) + '(msg truncated)');
           throw error;
         }
-        return panic(decodeUtf8(bufferedBytes(state)));
+        return panic(decodeUtf8(bufferedBytes(frame, state)));
       },
       call.span
     );
@@ -241,7 +250,7 @@ function addIoMembers(): void {
           const file = evaluate(frame) as NativeHandle;
           io.eval(frame);
           const value = bytes.eval(frame);
-          frame.runtime.writeOutput(file.state.fd as number, byteValues(value).map(Number));
+          frame.runtime.writeOutput(file.state.fd as number, writerBytes(frame, value));
           return;
         },
         call.span
@@ -268,7 +277,7 @@ function addWriterMembers(): void {
       const writer = writerOf(sema, call);
       const [bytes] = compileArgs(sema, expectArgs(sema, call, 1, 'writeAll'), [CONST_U8_SLICE]);
       return nativeStateCall(errorUnionOf(WRITE_ERROR, VOID), [bytes], call.span, writer, (state, [value], frame) =>
-        writeTo(frame, state, byteValues(value).map(Number))
+        writeTo(frame, state, writerBytes(frame, value))
       );
     }),
     writeByte: fnMember('Writer.writeByte', (sema, call) => {
@@ -293,7 +302,7 @@ function addWriterMembers(): void {
       const writer = writerOf(sema, call);
       const args = compileArgs(sema, expectArgs(sema, call, 1, 'write'), [CONST_U8_SLICE]);
       return nativeStateCall(errorUnionOf(WRITE_ERROR, USIZE), args, call.span, writer, (state, [value], frame) => {
-        const data = byteValues(value).map(Number);
+        const data = writerBytes(frame, value);
         return writeTo(frame, state, data) ?? BigInt(data.length);
       });
     }),
@@ -301,7 +310,7 @@ function addWriterMembers(): void {
       const writer = writerOf(sema, call);
       const args = compileArgs(sema, expectArgs(sema, call, 2, 'splatBytesAll'), [CONST_U8_SLICE, USIZE]);
       return nativeStateCall(errorUnionOf(WRITE_ERROR, VOID), args, call.span, writer, (state, [bytes, count], frame) =>
-        writeRepeated(frame, state, byteValues(bytes).map(Number), Number(count as bigint))
+        writeRepeated(frame, state, writerBytes(frame, bytes), Number(count as bigint))
       );
     }),
     printUnicodeCodepoint: fnMember('Writer.printUnicodeCodepoint', (sema, call) => {
@@ -412,6 +421,7 @@ function writeRepeated(frame: Parameters<TExpr['eval']>[0], state: WriterState, 
   const end = state.end + length;
   if (state.fd === undefined && !state.growth && end > state.capacity) {
     const available = Math.max(0, state.capacity - state.end);
+    frame.runtime.spend(available);
     writeTo(
       frame,
       state,
@@ -420,6 +430,7 @@ function writeRepeated(frame: Parameters<TExpr['eval']>[0], state: WriterState, 
     return WRITE_FAILED;
   }
   if (end > state.capacity || !Number.isFinite(state.capacity)) checkOutputSize(end);
+  frame.runtime.spend(length);
   return writeTo(
     frame,
     state,

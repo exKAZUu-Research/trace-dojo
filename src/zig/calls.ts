@@ -1,6 +1,7 @@
 import { PANIC, panic } from './arith';
 import type { Expression, ExpressionOf, FunctionDeclaration, SourceFile, Span } from './ast';
 import { BuiltinCompiler } from './builtins';
+import { constantKey } from './expressions';
 import { FunctionInstance } from './functions';
 import { Frame, Jump } from './runtime';
 import {
@@ -32,7 +33,7 @@ import {
   typeName,
   VOID,
 } from './types';
-import { type FnValue, Pointer, scalarValueKey, type Value } from './values';
+import { type FnValue, Pointer, type Value } from './values';
 
 /** What a function body's compilation needs to know about the function. */
 export interface FunctionCompilation {
@@ -48,6 +49,7 @@ export interface FunctionCompilation {
 
 export abstract class CallCompiler extends BuiltinCompiler {
   private readonly instances = new Map<string, FunctionInstance>();
+  private readonly parameterScopes = new Map<string, Scope>();
   private readonly instanceIds = new WeakMap<object, number>();
   private nextInstanceId = 1;
 
@@ -276,6 +278,8 @@ export abstract class CallCompiler extends BuiltinCompiler {
   ): Type | undefined {
     const param = decl.syntax.params[index];
     if (!param?.type) return undefined;
+    const fixed = this.declarationTypes.get(decl)?.params[index];
+    if (fixed && fixed !== ANYTYPE) return fixed;
     const typeExpression = param.type;
     return this.inParameterScope(decl, previous, () => this.compileType(typeExpression), values);
   }
@@ -287,6 +291,9 @@ export abstract class CallCompiler extends BuiltinCompiler {
     run: () => T,
     values: readonly (TExpr | undefined)[] = []
   ): T {
+    const key = this.specializationKey(decl, types, values);
+    const cached = this.parameterScopes.get(key);
+    if (cached) return this.withScope(cached, run);
     const locals = new Map<string, LocalBinding>();
     for (const [index, type] of types.entries()) {
       const param = decl.syntax.params[index];
@@ -305,12 +312,13 @@ export abstract class CallCompiler extends BuiltinCompiler {
     }
     const namespace = decl.namespace;
     const scope: Scope = { locals, parent: { namespace, parent: namespace.scope as Scope | undefined } };
+    this.parameterScopes.set(key, scope);
     return this.withScope(scope, run);
   }
 
   /** The instance of a function for argument types, compiling its body the first time. */
-  // code-gauge-allow functionCognitiveComplexity 19 -- Resolves parameter and return types in the same specialization scope.
-  // code-gauge-allow functionNcss 33 -- Keeps specialization identity and its compilation inputs together.
+  // code-gauge-allow functionCognitiveComplexity 24 -- Resolves parameter and return types in the same specialization scope.
+  // code-gauge-allow functionNcss 34 -- Keeps specialization identity and its compilation inputs together.
   instantiate(ref: FnRef, argTypes: readonly Type[], span: Span, args: readonly TExpr[] = []): FunctionInstance {
     const { decl } = ref;
     const syntax = decl.syntax;
@@ -322,13 +330,7 @@ export abstract class CallCompiler extends BuiltinCompiler {
         this.error(span, `関数「${syntax.name}」は anytype の引数を持つので、呼び出さずに値としては使えません。`);
       paramTypes.push(type);
     }
-    const key = JSON.stringify([
-      this.idOf(decl),
-      paramTypes.map((type, index) => [
-        this.idOf(type as object),
-        comptimeArgs[index] ? scalarValueKey(comptimeArgs[index].value) : undefined,
-      ]),
-    ]);
+    const key = this.specializationKey(decl, paramTypes, comptimeArgs);
     const existing = this.instances.get(key);
     if (existing) {
       if (existing.state === 'pending' && this.resolvingFields === 0) this.compilePendingBodies();
@@ -338,7 +340,13 @@ export abstract class CallCompiler extends BuiltinCompiler {
       decl,
       paramTypes,
       () => {
-        const payload = this.compileType(syntax.returnType);
+        const declared = this.declarationTypes.get(decl)?.returnType;
+        const payload =
+          declared && declared !== ANYTYPE
+            ? syntax.inferredErrorSet && declared.kind === 'error_union'
+              ? declared.payload
+              : declared
+            : this.compileType(syntax.returnType);
         if (!syntax.inferredErrorSet) return { returnType: payload, inferredErrors: undefined };
         const errors: ErrorSetType = {
           kind: 'error_set',
@@ -377,6 +385,20 @@ export abstract class CallCompiler extends BuiltinCompiler {
   /** Compiles the bodies that waited for structs' fields. */
   protected compilePendingBodies(): void {
     while (this.pendingBodies.length > 0) (this.pendingBodies.shift() as () => void)();
+  }
+
+  private specializationKey(
+    decl: Extract<Decl, { kind: 'fn' }>,
+    types: readonly Type[],
+    values: readonly (TExpr | undefined)[]
+  ): string {
+    return JSON.stringify([
+      this.idOf(decl),
+      types.map((type, index) => [
+        this.idOf(type as object),
+        values[index]?.known ? constantKey(values[index].value, () => this.spendCompilation()) : undefined,
+      ]),
+    ]);
   }
 
   private idOf(object: object): number {

@@ -1690,7 +1690,7 @@ function knownAt(type: Type, pointer: Pointer, span: Span): TExpr {
   };
 }
 
-function constantKey(value: Value, spend: () => void): string {
+export function constantKey(value: Value, spend: () => void): string {
   spend();
   if (value instanceof ZArray)
     return `array ${JSON.stringify(value.values(true).map((item) => constantKey(item, spend)))}`;

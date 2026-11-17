@@ -138,8 +138,9 @@ export class ZArray implements Slots {
   }
 
   /** The elements, followed by the sentinel when `withSentinel`. */
-  values(withSentinel = false): Value[] {
+  values(withSentinel = false, spend?: (cost: number) => void): Value[] {
     const length = this.length + (withSentinel ? 1 : 0);
+    spend?.(length);
     if (virtualStorage.has(this.slots)) {
       if (length > LIMITS.maxSlots) throw new ExecutionLimitError('storage');
       return Array.from({ length }, (_, index) => this.get(index));
@@ -263,8 +264,9 @@ export class Slice {
     this.target.slots[this.start + index] = value;
   }
 
-  values(): Value[] {
+  values(spend?: (cost: number) => void): Value[] {
     if (this.lengthValue !== 0n && isUndefinedMemory(this)) throw new MemoryFault();
+    spend?.(this.length);
     if (this.lengthValue > BigInt(LIMITS.maxSlots)) throw new ExecutionLimitError('storage');
     return virtualStorage.has(this.target.slots)
       ? Array.from({ length: this.length }, (_, index) => this.get(index))
