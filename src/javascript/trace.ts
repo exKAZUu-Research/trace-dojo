@@ -2,6 +2,7 @@ import type { ProgramRecording } from '../interpreter/program';
 import type { ProgramInput } from '../interpreter/programIo';
 import type { TraceOptions } from '../interpreter/traceAnnotations';
 import { TraceRecorder, type TraceVariables } from '../interpreter/traceRecorder';
+import { NOT_SCALAR, type Scalar, scalarItems } from '../interpreter/traceScalars';
 import type { DisplayNode, TraceItemVariable } from '../problems/trace';
 import type { Program } from './ast';
 import { parseJavaScript } from './parse';
@@ -136,28 +137,15 @@ function addThis(variables: Variables, self: JsObject): void {
   if (node) variables.referenceVars.this = node;
 }
 
-const NOT_SCALAR = Symbol('notScalar');
-type Scalar = TraceItemVariable[string];
-
 function scalarOf(value: Value, seen: Set<JsArray>): Scalar | typeof NOT_SCALAR {
   if (typeof value === 'number' || typeof value === 'string' || typeof value === 'boolean') return value;
   if (typeof value === 'bigint' || typeof value === 'symbol') return displayedPrimitive(value);
   if (value instanceof JsObject && value.primitive !== undefined) return scalarOf(value.primitive, seen);
-  if (!(value instanceof JsArray) || seen.has(value)) return NOT_SCALAR;
-  seen.add(value);
-  const items: Scalar[] = [];
-  for (const element of value.elements.map(valueOfElement)) {
-    if (element === undefined || element === null) {
-      // oxlint-disable-next-line unicorn/no-null -- The trace format shows null and undefined as null.
-      items.push(null);
-      continue;
-    }
-    const scalar = scalarOf(element, seen);
-    if (scalar === NOT_SCALAR) return NOT_SCALAR;
-    items.push(scalar);
-  }
-  seen.delete(value);
-  return items as Scalar;
+  if (!(value instanceof JsArray)) return NOT_SCALAR;
+  return scalarItems(value, value.elements.map(valueOfElement), seen, (element) =>
+    // oxlint-disable-next-line unicorn/no-null -- The trace format shows null and undefined as null.
+    element === undefined || element === null ? null : scalarOf(element, seen)
+  );
 }
 
 // oxlint-disable-next-line unicorn/no-null -- The trace format shows null and undefined as null.
