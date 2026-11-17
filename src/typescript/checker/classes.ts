@@ -428,6 +428,8 @@ export class ClassChecker {
     const ctor = classNode ? this.constructorNode(classNode) : undefined;
     if (!ctor || hasToken(member, 'static')) return [];
     const types: Type[] = [];
+    const body = ctor.childForFieldName('body');
+    let definite = false;
     const visit = (node: TreeNode): void => {
       if (
         ['function_declaration', 'function_expression', 'class', 'method_definition'].includes(node.type) &&
@@ -443,10 +445,13 @@ export class ClassChecker {
         right
       ) {
         types.push(this.c.widen(this.c.silently(() => this.c.expressions.check(right))));
+        // An assignment statement directly in the constructor's body always runs.
+        definite ||= node.parent?.type === 'expression_statement' && node.parent.parent?.id === body?.id;
       }
       for (const child of named(node)) visit(child);
     };
     visit(ctor);
+    if (types.length > 0 && !definite) types.push(undefinedType);
     return types;
   }
 
@@ -724,11 +729,7 @@ export class ClassChecker {
     }
     if (objectNode.type === 'super' || objectNode.type === 'this') return;
     const objectInfo = this.classInfoOfType(this.c.silently(() => this.c.expressions.check(objectNode)));
-    if (
-      objectInfo &&
-      !this.derivesFrom(objectInfo, enclosingInfo) &&
-      objectInfo.declaration.id !== declaring.declaration.id
-    ) {
+    if (objectInfo && !this.derivesFrom(objectInfo, enclosingInfo)) {
       this.c.error(
         propertyNode,
         `プロパティ '${property.name}' は protected なので、クラス '${enclosingInfo.name}' のインスタンスからしか使えません。`
@@ -769,6 +770,10 @@ export class ClassChecker {
     if (objectNode.type !== 'this' || !property.declaringClass) return true;
     const owner = this.thisOwner(expression);
     if (!owner) return true;
+    // An arrow function may run after construction, so it cannot assign a read-only property.
+    for (let current = expression.parent; current && current.id !== owner.id; current = current.parent) {
+      if (current.type === 'arrow_function') return true;
+    }
     const isConstructor = owner.type === 'method_definition' && owner.childForFieldName('name')?.text === 'constructor';
     const isInitializer = owner.type === 'public_field_definition';
     if (!isConstructor && !isInitializer) return true;

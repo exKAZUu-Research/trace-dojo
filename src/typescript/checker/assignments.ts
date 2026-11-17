@@ -158,10 +158,11 @@ export class AssignmentChecker {
       const kept =
         operator === '??='
           ? this.c.relations.removeNullish(targetType)
-          : operator === '||='
-            ? this.c.flow.narrowByTruthiness(targetType, true)
-            : targetType;
-      return this.c.literals.subtypeReduced([kept, valueType]);
+          : this.c.flow.narrowByTruthiness(targetType, operator === '||=');
+      const result = this.c.literals.subtypeReduced([kept, valueType]);
+      // The target holds what it kept or what was assigned, as `s ||= "x"` leaves a truthy `s` or `"x"`.
+      if (targetType !== errorType) this.assignReference(skipParentheses(left), this.declaredTargetType(left), result);
+      return result;
     }
     const valueType = this.c.expressions.check(right);
     const resultType = this.c.operators.binaryOperatorType(
@@ -206,7 +207,9 @@ export class AssignmentChecker {
   private targetType(target: TreeNode, compound: boolean): Type {
     const expression = skipParentheses(target);
     switch (expression.type) {
-      case 'identifier': {
+      case 'identifier':
+      case 'shorthand_property_identifier':
+      case 'shorthand_property_identifier_pattern': {
         return this.variableTargetType(expression, compound);
       }
       case 'member_expression': {
@@ -266,6 +269,10 @@ export class AssignmentChecker {
     if (property?.getterOnly) {
       this.c.error(propertyNode, `${propertyNode.text} はゲッターだけのプロパティなので、代入できません。`);
       return errorType;
+    }
+    // `r.a = 2` writes through a string index signature when `a` is not declared.
+    if (!property && !isAnyLike(objectType) && this.c.structureOf(objectType).stringIndex?.readonly) {
+      return this.reportReadonlyIndex(expression, objectType);
     }
     const type = this.c.members.propertyAccess(expression, objectNode, propertyNode, objectType, propertyNode.text);
     if (compound) {

@@ -1,18 +1,23 @@
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import type { Checker } from './checker';
-import { hasToken, named, propertyNameText } from './syntax';
+import { hasToken, isNumericName, named, propertyNameText } from './syntax';
 import {
   anonymousObject,
   anyType,
   emptyStructure,
+  errorType,
   intersectionOf,
+  isAnyLike,
+  isIntrinsic,
+  mapType,
   neverType,
   type ObjectType,
   type Property,
   regularOf,
   type Type,
   type TypeParameter,
+  undefinedType,
   unionOf,
   unknownType,
 } from './types';
@@ -97,11 +102,13 @@ export class LiteralChecker {
     const members = (contextual.kind === 'union' ? contextual.types : [contextual]).filter(
       (member) => member.kind === 'object' && this.c.isArrayOrTuple(member)
     );
-    if (members.length === 0) {
-      if (contextual.kind === 'typeParameter') return undefined;
-      return undefined;
-    }
-    return unionOf(members.map((member) => this.c.elementTypeOf(member as ObjectType)));
+    if (members.length > 0) return unionOf(members.map((member) => this.c.elementTypeOf(member as ObjectType)));
+    // Any other iterable, such as `Iterable<[string, T]>`, gives its elements the type it iterates.
+    const iterated = (contextual.kind === 'union' ? contextual.types : [contextual])
+      .filter((member) => member.kind === 'object' && this.c.propertyOf(member, '__@iterator'))
+      .map((member) => this.c.silently(() => this.c.patterns.iteratedType(undefined, member)))
+      .filter((type) => type !== errorType && !isAnyLike(type));
+    return iterated.length > 0 ? unionOf(iterated) : undefined;
   }
 
   /** Whether an expression is in a `const` context, inside `as const`. */
@@ -127,7 +134,7 @@ export class LiteralChecker {
   objectLiteral(node: TreeNode, contextual?: Type): Type {
     const properties = new Map<string, Property>();
     const literal: ObjectLiteral = {
-      contextual,
+      contextual: contextual && this.discriminatedContext(node, contextual),
       isConstContext: this.isConstContext(node),
       properties,
       genericSpreads: [],
@@ -256,7 +263,43 @@ export class LiteralChecker {
       literal.genericSpreads.push(spread);
       return;
     }
-    for (const [name, property] of this.spreadProperties(spread)) literal.properties.set(name, property);
+    for (const [name, property] of this.spreadProperties(spread)) {
+      const existing = literal.properties.get(name);
+      // An optional property spread over one already there may be missing, which leaves the earlier value.
+      literal.properties.set(
+        name,
+        existing && property.optional
+          ? {
+              ...property,
+              optional: existing.optional,
+              type: () => unionOf([existing.type(), this.c.relations.removeUndefined(property.type())]),
+            }
+          : property
+      );
+    }
+  }
+
+  /**
+   * The members of a contextual union that the literal's discriminant properties select, as `{ type: "say", … }`
+   * selects the member whose `type` is `"say"`; the whole union when none or no member is selected.
+   */
+  private discriminatedContext(node: TreeNode, contextual: Type): Type {
+    if (contextual.kind !== 'union') return contextual;
+    let members = contextual.types;
+    for (const member of named(node)) {
+      if (member.type !== 'pair') continue;
+      const name = propertyNameText(member.childForFieldName('key') as TreeNode);
+      const value = member.childForFieldName('value') as TreeNode;
+      if (name === undefined || !['string', 'number', 'true', 'false'].includes(value.type)) continue;
+      if (!this.c.flow.isDiscriminant(contextual, name)) continue;
+      const valueType = regularOf(this.c.silently(() => this.c.expressions.check(value)));
+      const selected = members.filter((candidate) => {
+        const property = candidate.kind === 'object' ? this.c.propertyOf(candidate, name) : undefined;
+        return !property || this.c.relations.isAssignable(valueType, property.type());
+      });
+      if (selected.length > 0) members = selected;
+    }
+    return members.length === contextual.types.length ? contextual : unionOf(members);
   }
 
   /** A literal's type in an array element or a property, widened unless the contextual type expects literals. */
@@ -282,14 +325,16 @@ export class LiteralChecker {
   }
 
   /** Whether a type parameter is constrained to primitives, which keeps the literals inferred for it. */
-  private hasPrimitiveConstraint(parameter: TypeParameter): boolean {
+  hasPrimitiveConstraint(parameter: TypeParameter): boolean {
     const constraint = parameter.constraint?.();
     if (!constraint) return false;
     return (constraint.kind === 'union' ? constraint.types : [constraint]).some(
       (member) =>
         member.kind === 'literal' ||
         member.kind === 'keyof' ||
-        (member.kind === 'intrinsic' && ['string', 'number', 'bigint', 'symbol'].includes(member.name)) ||
+        member.kind === 'templateLiteral' ||
+        member.kind === 'stringMapping' ||
+        (member.kind === 'intrinsic' && ['string', 'number', 'bigint', 'boolean', 'symbol'].includes(member.name)) ||
         (member.kind === 'union' && member.types.every((part) => part.kind === 'literal'))
     );
   }
@@ -306,10 +351,20 @@ export class LiteralChecker {
             other.kind === 'object' &&
             member.kind === 'object' &&
             this.c.relations.isAssignable(member, other) &&
+            !this.hasPropertiesBeyondLiteral(member, other) &&
             !(this.c.relations.isAssignable(other, member) && otherIndex > index)
         )
     );
     return unionOf(kept, true);
+  }
+
+  /** Whether a type has a property an object literal type lacks, which keeps it from being the literal's subtype. */
+  private hasPropertiesBeyondLiteral(type: Type, literal: Type): boolean {
+    if (literal.kind !== 'object' || !literal.isLiteral) return false;
+    const literalProperties = this.c.structureOf(literal).properties;
+    return [...this.c.structureOf(type).properties.values()].some(
+      (property) => !literalProperties.has(property.name) && !isIntrinsic(property.type(), 'undefined')
+    );
   }
 
   literalProperty(name: string, type: Type, readonly: boolean, declaration: TreeNode): Property {
@@ -351,7 +406,7 @@ export class LiteralChecker {
       }
       const structure = this.c.structureOf(apparent);
       if (structure.stringIndex) types.push(structure.stringIndex.type);
-      else if (/^\d+$/.test(name) && structure.numberIndex) types.push(structure.numberIndex.type);
+      else if (isNumericName(name) && structure.numberIndex) types.push(structure.numberIndex.type);
     }
     return types.length > 0 ? unionOf(types, true) : undefined;
   }
@@ -359,11 +414,13 @@ export class LiteralChecker {
   /** The type a variable declared with this initializer type gets. */
   // code-gauge-allow functionCognitiveComplexity 28 -- One case per kind of type that a declaration widens.
   widenDeclared(type: Type, isConst: boolean): Type {
-    if (type.kind === 'literal') return isConst ? regularOf(type) : this.c.widenLiteral(type);
+    // A constant keeps a fresh literal type, which widens again where a mutable location takes its value.
+    // Only a fresh literal widens, which `as const` and annotations make regular.
+    if (type.kind === 'literal') return isConst || !type.fresh ? type : this.c.widenLiteral(type);
     if (type.kind === 'union') {
-      const widened = isConst ? regularOf(type) : this.c.widenLiteral(type);
+      const widened = isConst ? type : mapType(type, (member) => this.widenDeclared(member, false));
       return widened.kind === 'union'
-        ? unionOf(widened.types.map((member) => this.widenDeclared(member, isConst)))
+        ? unionOf(this.normalizeObjectLiterals(widened.types.map((member) => this.widenDeclared(member, isConst))))
         : widened;
     }
     if (type.kind === 'object') {
@@ -395,4 +452,41 @@ export class LiteralChecker {
     }
     return regularOf(type);
   }
+
+  /**
+   * Gives each object literal type of a union the properties only its siblings have, as optional `undefined`, so that
+   * `[{ a: 1 }, { a: 2, b: 3 }]` has elements whose `b` can be read.
+   */
+  normalizeObjectLiterals(types: Type[]): Type[] {
+    const literals = types.filter(isObjectLiteral);
+    if (literals.length < 2) return types;
+    const names = new Set(literals.flatMap((literal) => [...this.c.structureOf(literal).properties.keys()]));
+    return types.map((type) => {
+      if (!isObjectLiteral(type)) return type;
+      const missing = [...names].filter((name) => !this.c.structureOf(type).properties.has(name));
+      if (missing.length === 0) return type;
+      return anonymousObject(
+        () => {
+          const structure = type.resolve();
+          const properties = new Map(structure.properties);
+          for (const name of missing) {
+            properties.set(name, {
+              name,
+              type: () => undefinedType,
+              optional: true,
+              readonly: false,
+              isMethod: false,
+              visibility: 'public',
+            });
+          }
+          return { ...structure, properties };
+        },
+        { isLiteral: true }
+      );
+    });
+  }
+}
+
+function isObjectLiteral(type: Type): type is ObjectType {
+  return type.kind === 'object' && type.objectKind === 'anonymous' && !!type.isLiteral && !type.isFunction;
 }

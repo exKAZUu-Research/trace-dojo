@@ -3,7 +3,16 @@ import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 import type { Checker } from './checker';
 import type { Sym } from './scopes';
 import { named } from './syntax';
-import { anyType, newTypeId, type Parameter, type Signature, type Type, type TypeParameter } from './types';
+import {
+  anyType,
+  newTypeId,
+  type Parameter,
+  type Signature,
+  type Type,
+  type TypeParameter,
+  undefinedType,
+  unionOf,
+} from './types';
 
 /** Resolves the signatures and type parameters that function-like and generic declarations declare. */
 export class Signatures {
@@ -93,10 +102,13 @@ export class Signatures {
     const name = predicateNode?.childForFieldName('name')?.text;
     const typeNode = predicateNode?.childForFieldName('type');
     if (!name || !typeNode) return undefined;
-    return {
-      index: name === 'this' ? -1 : parameters.findIndex((parameter) => parameter.name === name),
-      type: this.c.typeNodes.typeFromNode(typeNode),
-    };
+    const index = name === 'this' ? -1 : parameters.findIndex((parameter) => parameter.name === name);
+    const type = this.c.typeNodes.typeFromNode(typeNode);
+    const parameter = parameters[index] as Parameter | undefined;
+    if (parameter && !this.c.isLibrary(typeNode) && !this.c.relations.isAssignable(type, parameter.type)) {
+      this.c.error(typeNode, '型述語の型は、その引数の型に代入できる型にしてください。');
+    }
+    return { index, type };
   }
 
   /** A setter's parameter without an annotation has the type its getter returns. */
@@ -150,7 +162,8 @@ export class Signatures {
     if (index < parameters.length) {
       const parameter = parameters[index];
       if (parameter.rest) return this.c.restElementType(parameter.type);
-      return parameter.type;
+      // An optional parameter of the context may be left out, which the function then sees as `undefined`.
+      return parameter.optional ? unionOf([parameter.type, undefinedType]) : parameter.type;
     }
     const last = parameters.at(-1);
     if (last?.rest) return this.c.restElementType(last.type);

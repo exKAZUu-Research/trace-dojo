@@ -5,7 +5,7 @@ import { Calls } from './calls';
 import type { Checker } from './checker';
 import type { FlowEntry } from './flow';
 import type { Sym } from './scopes';
-import { hasToken, named, numberValue, patternIdentifiers, stringValue } from './syntax';
+import { hasToken, isNumericName, named, numberValue, patternIdentifiers, stringValue } from './syntax';
 import {
   anonymousObject,
   anyType,
@@ -15,10 +15,13 @@ import {
   isAnyLike,
   isIntrinsic,
   nullType,
+  type ObjectType,
+  regularOf,
   stringType,
   symbolType,
   type Type,
   undefinedType,
+  unionOf,
   unknownType,
 } from './types';
 
@@ -85,8 +88,13 @@ export class ExpressionChecker {
   }
 
   private templateString(node: TreeNode, contextual: Type | undefined): Type {
+    const texts = [''];
+    const types: Type[] = [];
     for (const child of named(node)) {
-      if (child.type !== 'template_substitution') continue;
+      if (child.type !== 'template_substitution') {
+        if (child.type === 'string_fragment') texts[texts.length - 1] += child.text;
+        continue;
+      }
       const expression = named(child)[0];
       const type = this.check(expression);
       if (this.isSymbolLike(type)) {
@@ -95,17 +103,24 @@ export class ExpressionChecker {
           "symbol を文字列に暗黙に変換すると、実行時にエラーになります。'String(...)' で囲んでください。"
         );
       }
+      types.push(type);
+      texts.push('');
     }
-    return contextual &&
-      this.c.literals.hasLiteralConstituent(contextual, 'string') &&
-      named(node).every((child) => child.type !== 'template_substitution')
-      ? freshLiteralType(
-          named(node)
-            .filter((child) => child.type === 'string_fragment')
-            .map((child) => child.text)
-            .join('')
-        )
-      : stringType;
+    // A template a literal or template literal type expects has the type its parts spell.
+    if (!contextual || !this.c.literals.hasLiteralConstituent(contextual, 'string')) return stringType;
+    const spellable = types.every((type) =>
+      (type.kind === 'union' ? type.types : [type]).every(
+        (member) =>
+          member.kind === 'literal' ||
+          member.kind === 'templateLiteral' ||
+          ['string', 'number', 'bigint', 'boolean', 'null', 'undefined'].some((name) =>
+            isIntrinsic(member, name as 'string')
+          )
+      )
+    );
+    if (!spellable) return stringType;
+    const spelled = this.c.typeOperators.templateLiteral(texts, types.map(regularOf));
+    return spelled.kind === 'literal' ? freshLiteralType(spelled.value as string) : spelled;
   }
 
   /** The type of an expression as a mutable location holds it, with its literals widened. */
@@ -206,6 +221,7 @@ export class ExpressionChecker {
       this.c.error(node, `変数 ${symbol.name} は値を代入する前に使われています。`);
       if (unassignedAuto) return errorType;
     }
+    if (entry.constraint && this.isConstraintPosition(node)) return entry.constraint;
     if (!entry.evolving || this.isEvolvingUse(node)) return entry.type;
     // An array a nested function pushes to has no type here when nothing pushed to it in this flow.
     if (symbol.usedInClosure && this.isNeverEvolved(entry.type)) return this.reportUndeterminedType(node, symbol);
@@ -220,6 +236,14 @@ export class ExpressionChecker {
       this.c.error(node, `名前 ${name} が見つかりません。${nodeGlobalHint(name)}`);
     }
     return errorType;
+  }
+
+  /** Whether a reference is the object of a member access or the callee of a call, where a type parameter's narrowed constraint stands for it. */
+  private isConstraintPosition(node: TreeNode): boolean {
+    const parent = node.parent;
+    if (parent?.type === 'member_expression' || parent?.type === 'subscript_expression')
+      return parent.childForFieldName('object')?.id === node.id;
+    return parent?.type === 'call_expression' && parent.childForFieldName('function')?.id === node.id;
   }
 
   private isEvolvingUse(node: TreeNode): boolean {
@@ -278,7 +302,9 @@ export class ExpressionChecker {
     if (evolving && this.isEvolvingUse(node)) return declared;
     const assignedLater =
       closure !== undefined && symbol.assignmentOffsets.some((offset) => offset > closure.startIndex);
-    if (!evolving && (symbol.valueKind === 'const' || !assignedLater)) {
+    // A function declaration can be called before anything narrows, as it is hoisted.
+    const hoisted = closure?.type === 'function_declaration' || closure?.type === 'generator_function_declaration';
+    if (!evolving && !hoisted && (symbol.valueKind === 'const' || !assignedLater)) {
       const captured = this.c.functions.capturedTypes.at(-1)?.get(`s${symbol.id}`);
       if (captured) return captured;
     }
@@ -510,9 +536,21 @@ export class ExpressionChecker {
   /** Reports the properties of a fresh object literal that its target does not declare. */
   // code-gauge-allow functionCognitiveComplexity 24 -- Follows TypeScript's excess property check, including nested object literals.
   checkExcessProperties(node: TreeNode, source: Type, target: Type): void {
+    // Each object literal a union, an array, or a tuple holds is checked against where it goes.
+    if (source.kind === 'union') {
+      for (const member of source.types) this.checkExcessProperties(node, member, target);
+      return;
+    }
+    if (source.kind === 'object' && this.c.isArrayOrTuple(source)) {
+      this.checkExcessElements(node, source, target);
+      return;
+    }
     if (source.kind !== 'object' || !source.fresh) return;
-    const targets = (target.kind === 'union' ? target.types : [target]).filter(
-      (member) => member.kind === 'object' || member.kind === 'intersection'
+    const targets = this.discriminatedTargets(
+      source,
+      (target.kind === 'union' ? target.types : [target]).filter(
+        (member) => member.kind === 'object' || member.kind === 'intersection'
+      )
     );
     if (targets.length === 0) return;
     if (
@@ -540,13 +578,49 @@ export class ExpressionChecker {
         }
         continue;
       }
-      if (/^\d+$/.test(name) && targets.some((member) => this.c.structureOf(member).numberIndex)) continue;
+      if (isNumericName(name) && targets.some((member) => this.c.structureOf(member).numberIndex)) continue;
       this.c.error(
         property.declaration?.childForFieldName('key') ?? property.declaration ?? node,
         `オブジェクトリテラルには既知のプロパティしか書けません。'${name}' は型 '${this.c.print(target)}' にありません。`
       );
       return;
     }
+  }
+
+  /** Checks the object literals among an array's or a tuple's elements against the target's elements. */
+  private checkExcessElements(node: TreeNode, source: ObjectType, target: Type): void {
+    const targets = (target.kind === 'union' ? target.types : [target]).filter(
+      (member): member is ObjectType => member.kind === 'object' && this.c.isArrayOrTuple(member)
+    );
+    if (targets.length === 0) return;
+    const sourceElements = source.tuple?.elements;
+    const elementCount = sourceElements?.length ?? 1;
+    for (let index = 0; index < elementCount; index++) {
+      const element = sourceElements ? sourceElements[index].type : this.c.elementTypeOf(source);
+      const targetElements = targets.map((member) => {
+        const elements = member.tuple?.elements;
+        if (!elements) return this.c.elementTypeOf(member);
+        return elements[index] && !elements[index].rest ? elements[index].type : this.c.elementTypeOf(member);
+      });
+      this.checkExcessProperties(node, element, unionOf(targetElements));
+    }
+  }
+
+  /** The members of a target union that an object literal's discriminant properties select, or all of them. */
+  private discriminatedTargets(source: ObjectType, targets: Type[]): Type[] {
+    if (targets.length < 2) return targets;
+    const union = unionOf(targets);
+    let selected = targets;
+    for (const [name, property] of source.resolve().properties) {
+      const value = regularOf(property.type());
+      if (value.kind !== 'literal' || !this.c.flow.isDiscriminant(union, name)) continue;
+      const matching = selected.filter((member) => {
+        const memberProperty = this.c.propertyOf(member, name);
+        return !memberProperty || this.c.relations.isAssignable(value, memberProperty.type());
+      });
+      if (matching.length > 0) selected = matching;
+    }
+    return selected;
   }
 
   private isObjectPrototypeProperty(member: Type, name: string): boolean {

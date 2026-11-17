@@ -6,9 +6,11 @@ import type { Sym } from './scopes';
 import { hasToken, named } from './syntax';
 import {
   anyType,
+  filterType,
   functionType,
   isAnyLike,
   isIntrinsic,
+  neverType,
   type Signature,
   type Type,
   undefinedType,
@@ -63,8 +65,26 @@ export class FunctionChecker {
         ? this.c.signaturesOf(member, 'call')
         : []
     );
-    if (signatures.length !== 1) return undefined;
-    return signatures[0];
+    if (signatures.length === 1) return signatures[0];
+    // An intersection of function types, as a union of callbacks' types becomes, gives one signature whose parameters
+    // take what any of them takes.
+    if (members.length !== 1 || members[0].kind !== 'intersection') return undefined;
+    const [first] = signatures;
+    const alike = signatures.every(
+      (signature) =>
+        signature.typeParameters.length === 0 &&
+        signature.parameters.length === first.parameters.length &&
+        signature.parameters.every((parameter, index) => parameter.rest === first.parameters[index].rest)
+    );
+    if (!alike) return undefined;
+    return {
+      typeParameters: [],
+      parameters: first.parameters.map((parameter, index) => ({
+        ...parameter,
+        type: unionOf(signatures.map((signature) => signature.parameters[index].type)),
+      })),
+      returnType: () => unionOf(signatures.map((signature) => signature.returnType())),
+    };
   }
 
   functionExpression(node: TreeNode, contextual?: Type): Type {
@@ -77,6 +97,7 @@ export class FunctionChecker {
     const contextualReturn = contextualSignature ? contextualSignature.returnType() : undefined;
     const declaredReturn = this.declaredReturnType(node);
     let returnType: Type | undefined;
+    let predicate: { inferred: Signature['predicate'] } | undefined;
     const typed: Signature = {
       ...signature,
       returnType: () => {
@@ -84,8 +105,63 @@ export class FunctionChecker {
         return returnType;
       },
     };
+    if (!declaredReturn && !signature.predicate) {
+      Object.defineProperty(typed, 'predicate', {
+        get: (): Signature['predicate'] => {
+          predicate ??= { inferred: this.inferredPredicate(node, typed) };
+          return predicate.inferred;
+        },
+        enumerable: true,
+      });
+    }
     if (!this.c.silent) this.c.functions.deferFunctionBody(node, signature, contextualReturn);
     return functionType(typed);
+  }
+
+  /**
+   * The type predicate TypeScript 5.5 infers for a function that only returns a boolean condition on a parameter, as
+   * `(x) => x !== null` is `(x) => x is T` when the condition is false exactly where the parameter is not a `T`.
+   */
+  inferredPredicate(node: TreeNode, signature: Signature): Signature['predicate'] {
+    const returned = this.singleReturnedExpression(node);
+    if (!returned || !isBooleanLike(this.c.silently(() => signature.returnType()))) return undefined;
+    const parametersNode = node.childForFieldName('parameters');
+    const names = parametersNode
+      ? named(parametersNode).map((parameter) => parameter.childForFieldName('pattern') ?? parameter)
+      : [node.childForFieldName('parameter')];
+    for (const [index, name] of names.entries()) {
+      const parameter = signature.parameters[index];
+      if (name?.type !== 'identifier' || !parameter || parameter.rest) continue;
+      const symbol = this.c.scopeOf(name).lookupValue(name.text);
+      if (!symbol || symbol.isReassigned) continue;
+      const declared = parameter.type;
+      const key = `s${symbol.id}`;
+      const outer = this.c.flow.current;
+      this.c.flow.current = new FlowState();
+      let whenTrue: State;
+      let whenFalse: State;
+      try {
+        ({ whenTrue, whenFalse } = this.c.silently(() => this.c.conditions.condition(returned, false)));
+      } finally {
+        this.c.flow.current = outer;
+      }
+      const trueType = whenTrue ? (whenTrue.entries.get(key)?.type ?? declared) : neverType;
+      const falseType = whenFalse ? (whenFalse.entries.get(key)?.type ?? declared) : neverType;
+      if (this.c.relations.identical(trueType, declared)) continue;
+      const rest = filterType(declared, (member) => !this.c.relations.isAssignable(member, trueType));
+      if (this.c.relations.identical(rest, falseType)) return { index, type: trueType };
+    }
+    return undefined;
+  }
+
+  /** The expression a function returns when that is all it does: an arrow's expression body or a lone `return`. */
+  private singleReturnedExpression(node: TreeNode): TreeNode | undefined {
+    const body = node.childForFieldName('body');
+    if (!body) return undefined;
+    if (body.type !== 'statement_block') return body;
+    const statements = named(body);
+    if (statements.length !== 1 || statements[0].type !== 'return_statement') return undefined;
+    return named(statements[0])[0];
   }
 
   private anySignature(): Signature {
@@ -255,7 +331,10 @@ export class FunctionChecker {
 
   private returnTypeOf(context: FunctionContext): Type {
     if (context.declaredReturn) return context.declaredReturn;
-    const types = context.returnTypes.map((type) => (context.keepsLiterals ? type : this.c.widenLiteral(type)));
+    const returned = this.c.literals.normalizeObjectLiterals(
+      context.returnTypes.flatMap((type) => (type.kind === 'union' ? type.types : [type]))
+    );
+    const types = returned.map((type) => (context.keepsLiterals ? type : this.c.widenLiteral(type)));
     if (types.length === 0) return voidType;
     if (context.endReachable && context.hasReturnWithValue) types.push(undefinedType);
     if (!context.hasReturnWithValue) return voidType;
@@ -288,15 +367,28 @@ export class FunctionChecker {
             this.c.relations.isAssignable(parameter.type, implementationType) ||
             this.c.relations.isAssignable(implementationType, parameter.type)
           );
-        });
+        }) &&
+        this.returnsCompatibly(overloadSignature.returnType(), signature.returnType());
       if (!compatible) {
         this.c.error(
           overload.childForFieldName('name') ?? overload,
           'このオーバーロードのシグネチャは、実装のシグネチャと合いません。'
         );
+        // TypeScript reports only the first overload that does not fit.
+        return;
       }
     }
     void implementation;
+  }
+
+  /** Whether an overload's return type and its implementation's are related either way, or the overload returns `void`. */
+  private returnsCompatibly(overloadReturn: Type, implementationReturn: Type): boolean {
+    return (
+      isIntrinsic(overloadReturn, 'void') ||
+      isAnyLike(implementationReturn) ||
+      this.c.relations.isAssignable(implementationReturn, overloadReturn) ||
+      this.c.relations.isAssignable(overloadReturn, implementationReturn)
+    );
   }
 
   /** Checks a function's body loudly, when its expression or declaration is checked. */
@@ -365,4 +457,10 @@ export class FunctionChecker {
     }
     this.c.error(returnNode, "関数の最後に return 文がなく、戻り値の型に 'undefined' が含まれていません。");
   }
+}
+
+function isBooleanLike(type: Type): boolean {
+  return (type.kind === 'union' ? type.types : [type]).every(
+    (member) => member.kind === 'literal' && typeof member.value === 'boolean'
+  );
 }

@@ -85,12 +85,21 @@ export class TypeNodes {
 
   constructor(private readonly c: Checker) {}
 
+  /** How many array, tuple, and type argument nodes enclose the type node being resolved. */
+  private deferredDepth = 0;
+
   typeFromNode(node: TreeNode): Type {
     const cached = this.typeNodeCache.get(node.id);
     if (cached) return cached;
-    const type = this.computeTypeFromNode(node);
-    this.typeNodeCache.set(node.id, type);
-    return type;
+    const defers = deferringTypeNodes.has(node.type);
+    if (defers) this.deferredDepth++;
+    try {
+      const type = this.computeTypeFromNode(node);
+      this.typeNodeCache.set(node.id, type);
+      return type;
+    } finally {
+      if (defers) this.deferredDepth--;
+    }
   }
 
   /** The type of a `type_annotation` or of the type node a field holds. */
@@ -406,13 +415,20 @@ export class TypeNodes {
       }
       case 'alias': {
         if (symbol.resolving) {
+          // An array or a type argument may refer to the alias it is part of, as `type Json = … | Json[]` does.
+          if (symbol.pendingUnion && this.deferredDepth > 0) return symbol.pendingUnion;
           this.c.error(symbol.typeDeclarations[0], `型エイリアス ${symbol.name} が自分自身を参照しています。`);
           return errorType;
         }
         symbol.resolving = true;
         const value = symbol.typeDeclarations[0].childForFieldName('value');
+        if (value?.type === 'union_type') symbol.pendingUnion = { kind: 'union', id: newTypeId(), types: [] };
         let type = value ? this.typeFromNode(value) : anyType;
         symbol.resolving = false;
+        if (symbol.pendingUnion) {
+          symbol.pendingUnion.types = type.kind === 'union' ? type.types : [type];
+          symbol.pendingUnion = undefined;
+        }
         if (type.kind === 'object' && type.objectKind === 'anonymous' && !type.aliasName) {
           type = { ...type, aliasName: symbol.name, aliasArguments: this.c.signatures.typeParametersOfSymbol(symbol) };
         }
@@ -455,3 +471,6 @@ export class TypeNodes {
     return type;
   }
 }
+
+/** The type nodes whose element types TypeScript resolves later, which lets an alias refer to itself inside them. */
+const deferringTypeNodes = new Set(['array_type', 'tuple_type', 'type_arguments', 'readonly_type']);

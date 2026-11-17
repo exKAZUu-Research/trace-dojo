@@ -1,5 +1,8 @@
 import type { Checker } from './checker';
+import { isUnit } from './flow';
+import { isNumericName } from './syntax';
 import {
+  anonymousObject,
   booleanType,
   errorType,
   filterType,
@@ -80,6 +83,16 @@ export class Relations {
       const constraint = this.c.baseConstraint(s);
       return constraint !== s && this.isRelated(constraint, t, relation);
     }
+    if (t.kind === 'indexedAccess' && !this.isGeneric(t.objectType)) {
+      // Writing `o[k]` with a generic key must suit the property of every key the constraint allows.
+      const keys = this.c.baseConstraint(t.indexType);
+      const members = keys.kind === 'union' ? keys.types : [keys];
+      if (keys !== t.indexType && members.every((member) => member.kind === 'literal')) {
+        return members.every((key) =>
+          this.isRelated(s, this.c.typeOperators.indexedAccess(t.objectType, key), relation)
+        );
+      }
+    }
     if (t.kind === 'indexedAccess' || t.kind === 'keyof' || t.kind === 'conditional') return false;
     return this.relatedToConcrete(s, t, relation);
   }
@@ -119,7 +132,19 @@ export class Relations {
       case 'templateLiteral':
       case 'stringMapping': {
         if (s.kind === 'literal' && typeof s.value === 'string') return this.matchesTemplate(s.value, t);
-        if (s.kind === 'templateLiteral' && t.kind === 'templateLiteral') return this.sameGeneric(s, t);
+        if (s.kind === 'templateLiteral' && t.kind === 'templateLiteral') {
+          // `id-${number}` fits `id-${string}`: the same texts around types that each fit.
+          const sameTexts =
+            s.texts.length === t.texts.length && s.texts.every((text, index) => text === t.texts[index]);
+          return (
+            this.sameGeneric(s, t) ||
+            (sameTexts &&
+              s.types.every(
+                // A `${string}` placeholder takes any value spelled into a template.
+                (type, index) => isIntrinsic(t.types[index], 'string') || this.isRelated(type, t.types[index], relation)
+              ))
+          );
+        }
         return relation === 'comparable' && isIntrinsic(s, 'string');
       }
       case 'object': {
@@ -134,7 +159,9 @@ export class Relations {
   private relatedToObject(s: Type, t: ObjectType, relation: Relation): boolean {
     if (s.kind === 'intrinsic') {
       if (['null', 'undefined', 'void', 'unknown'].includes(s.name)) return false;
-      if (s.name === 'object') return this.isEmptyObjectType(t);
+      // `object` has the members of `Object`.
+      if (s.name === 'object')
+        return this.isEmptyObjectType(t) || this.objectRelated(this.c.globalType('Object'), t, relation);
     }
     if (s.kind === 'literal' || s.kind === 'intrinsic' || s.kind === 'templateLiteral' || s.kind === 'stringMapping') {
       // A primitive has the members of its boxing interface.
@@ -242,7 +269,7 @@ export class Relations {
 
   private matchesPlaceholder(text: string, type: Type): boolean {
     if (isIntrinsic(type, 'string') || isAnyLike(type)) return true;
-    if (isIntrinsic(type, 'number')) return text !== '' && text.trim() === text && Number.isFinite(Number(text));
+    if (isIntrinsic(type, 'number')) return text.trim() !== '' && Number.isFinite(Number(text));
     if (isIntrinsic(type, 'bigint')) return /^-?\d+$/.test(text);
     if (type.kind === 'literal') return String(type.value) === text;
     if (type.kind === 'union') return type.types.some((member) => this.matchesPlaceholder(text, member));
@@ -263,11 +290,37 @@ export class Relations {
     );
   }
 
+  /**
+   * Whether an object is related to a union of objects by its discriminant properties, as `{ ok: boolean }` is to
+   * `{ ok: true } | { ok: false }`: each combination of the discriminants' unit values must be related to a member.
+   */
   private isRelatedToDiscriminatedUnion(source: ObjectType, targets: Type[], relation: Relation): boolean {
-    void source;
-    void targets;
-    void relation;
-    return false;
+    const union = unionOf(targets);
+    const discriminants = [...this.c.structureOf(source).properties.values()]
+      .filter((property) => this.c.flow.isDiscriminant(union, property.name))
+      .map((property) => {
+        const type = property.type();
+        return { property, values: type.kind === 'union' ? type.types : [type] };
+      })
+      .filter(({ values }) => values.length > 1 && values.every((value) => isUnit(value)));
+    if (discriminants.length === 0) return false;
+    let combinations: Type[][] = [[]];
+    for (const { values } of discriminants) {
+      combinations = combinations.flatMap((combination) => values.map((value) => [...combination, value]));
+      // TypeScript gives up past 25 combinations.
+      if (combinations.length > 25) return false;
+    }
+    return combinations.every((combination) => {
+      const variant = anonymousObject(() => {
+        const structure = this.c.structureOf(source);
+        const properties = new Map(structure.properties);
+        for (const [index, { property }] of discriminants.entries()) {
+          properties.set(property.name, { ...property, type: () => combination[index] });
+        }
+        return { ...structure, properties };
+      });
+      return targets.some((target) => this.isRelated(variant, target, relation));
+    });
   }
 
   private objectRelated(source: Type, target: ObjectType, relation: Relation): boolean {
@@ -310,9 +363,13 @@ export class Relations {
     if (source.objectKind === 'reference' && target.objectKind === 'reference' && source.target === target.target) {
       const sourceArguments = source.typeArguments ?? [];
       const targetArguments = target.typeArguments ?? [];
-      if (sourceArguments.every((argument, index) => this.isRelated(argument, targetArguments[index], relation)))
-        return true;
-      if (source.target?.name === 'Array' || source.target?.name === 'ReadonlyArray') return false;
+      const covariant = sourceArguments.every((argument, index) =>
+        this.isRelated(argument, targetArguments[index], relation)
+      );
+      // The library's collections are covariant; another generic type may use a type argument where it is
+      // contravariant, as a function-typed property does, so its structures decide.
+      if (covariantLibraryTypes.has(source.target?.name ?? '')) return covariant;
+      if (!covariant) return undefined;
     }
     if (source.objectKind === 'tuple' && target.objectKind === 'tuple')
       return this.tupleRelated(source, target, relation);
@@ -408,7 +465,7 @@ export class Relations {
       return false;
     }
     for (const [name, property] of structure.properties) {
-      if (numeric && !/^\d+$/.test(name)) continue;
+      if (numeric && !isNumericName(name)) continue;
       if (property.isMethod && source.kind === 'object' && source.objectKind !== 'anonymous') continue;
       const type = property.optional ? unionOf([property.type(), undefinedType]) : property.type();
       if (!this.isRelated(type, target, relation)) return false;
@@ -482,6 +539,12 @@ export class Relations {
     if (isIntrinsic(targetReturn, 'void')) return true;
     const sourceReturn = sourceSignature.returnType();
     if (target.predicate && !sourceSignature.predicate) return false;
+    if (target.predicate && sourceSignature.predicate) {
+      return (
+        target.predicate.index === sourceSignature.predicate.index &&
+        this.isRelated(sourceSignature.predicate.type, target.predicate.type, relation)
+      );
+    }
     return this.isRelated(sourceReturn, targetReturn, relation);
   }
 
@@ -562,3 +625,15 @@ export class Relations {
     );
   }
 }
+
+/** The generic types of the library whose type arguments compare covariantly, as TypeScript measures them. */
+const covariantLibraryTypes = new Set([
+  'Array',
+  'ReadonlyArray',
+  'Iterable',
+  'IterableIterator',
+  'Iterator',
+  'ArrayLike',
+  'ReadonlyMap',
+  'ReadonlySet',
+]);

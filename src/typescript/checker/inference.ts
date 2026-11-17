@@ -21,6 +21,8 @@ interface Inference {
   contravariant: Type[];
   /** Whether a candidate came from a position where the parameter is the whole type, not part of one. */
   topLevel: boolean;
+  /** Whether the candidates so far came only from the contextual return type, which any argument's candidate replaces. */
+  fromContext?: boolean;
 }
 
 /** The inferences for the type parameters of one call or comparison, which each inference step adds to. */
@@ -38,13 +40,21 @@ export class TypeInference {
   constructor(private readonly c: Checker) {}
 
   /** The inferences so far as a mapper; with `fixing`, a parameter without one becomes its constraint or `unknown`. */
-  partialMapper(parameters: TypeParameter[], inferences: Map<number, Inference>, fixing = false): Mapper | undefined {
+  /**
+   * The type arguments inferred so far, with each parameter `fixes` selects fixed to its constraint or `unknown` when
+   * nothing was inferred for it; the others stay type parameters.
+   */
+  partialMapper(
+    parameters: TypeParameter[],
+    inferences: Map<number, Inference>,
+    fixes: (parameter: TypeParameter) => boolean = () => false
+  ): Mapper | undefined {
     const mapper: Mapper = new Map();
     for (const parameter of parameters) {
       const inference = inferences.get(parameter.id);
       if (inference && (inference.candidates.length > 0 || inference.contravariant.length > 0)) {
         mapper.set(parameter.id, this.inferredType(parameter, inference, false));
-      } else if (fixing) {
+      } else if (fixes(parameter)) {
         mapper.set(parameter.id, parameter.constraint?.() ?? unknownType);
       }
     }
@@ -84,15 +94,7 @@ export class TypeInference {
     if (inference.candidates.length === 0) {
       return inference.contravariant[0];
     }
-    const constraint = parameter.constraint?.();
-    const primitiveConstraint =
-      constraint !== undefined &&
-      (constraint.kind === 'union' ? constraint.types : [constraint]).some(
-        (member) =>
-          (member.kind === 'intrinsic' && ['string', 'number', 'bigint', 'boolean'].includes(member.name)) ||
-          member.kind === 'literal'
-      );
-    const shouldWiden = widen && inference.topLevel && !primitiveConstraint;
+    const shouldWiden = widen && inference.topLevel && !this.c.literals.hasPrimitiveConstraint(parameter);
     const candidates = inference.candidates.map((candidate) =>
       shouldWiden ? this.c.widenLiteral(candidate) : regularOf(candidate)
     );
@@ -165,6 +167,11 @@ export class TypeInference {
     if (!covariant) {
       inference.contravariant.push(source);
       return;
+    }
+    if (run.lowPriority) inference.fromContext = true;
+    else if (inference.fromContext) {
+      inference.candidates.length = 0;
+      inference.fromContext = false;
     }
     if (!inference.candidates.some((candidate) => candidate.id === source.id)) inference.candidates.push(source);
     if (topLevel) inference.topLevel = true;
@@ -289,9 +296,21 @@ export class TypeInference {
             new Map(generic.typeParameters.map((parameter) => [parameter.id, parameter.constraint?.() ?? unknownType]))
           )
         : generic;
-    const count = Math.min(source.parameters.length, target.parameters.length);
+    const restIndex = target.parameters.findIndex((parameter) => parameter.rest);
+    const count = Math.min(source.parameters.length, restIndex === -1 ? target.parameters.length : restIndex);
     for (let index = 0; index < count; index++) {
       recurse(source.parameters[index].type, target.parameters[index].type, false);
+    }
+    // A rest parameter such as `(...args: infer P)` takes the source's remaining parameters as a tuple.
+    if (restIndex !== -1) {
+      const rest = source.parameters
+        .slice(restIndex)
+        .map((parameter) =>
+          parameter.rest
+            ? { type: parameter.type, optional: false, rest: true, name: parameter.name }
+            : { type: parameter.type, optional: parameter.optional, rest: false, name: parameter.name }
+        );
+      recurse(this.c.tupleType(rest), target.parameters[restIndex].type, false);
     }
     const targetReturn = target.returnType();
     if (!isIntrinsic(targetReturn, 'void')) recurse(source.returnType(), targetReturn, true);
@@ -306,7 +325,7 @@ export class TypeInference {
   }
 
   /** Whether a type mentions a type parameter, looking into the members of object types a few levels deep. */
-  private mentions(type: Type, parameter: TypeParameter, depth = 0): boolean {
+  mentions(type: Type, parameter: TypeParameter, depth = 0): boolean {
     if (depth > 3) return false;
     const next = (member: Type): boolean => this.mentions(member, parameter, depth + 1);
     switch (type.kind) {

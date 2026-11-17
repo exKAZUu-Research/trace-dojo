@@ -2,7 +2,7 @@ import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import { unsupportedMessage } from '../unsupported';
 import type { Checker } from './checker';
-import { skipParentheses } from './syntax';
+import { isNumericName, skipParentheses } from './syntax';
 import {
   anyType,
   errorType,
@@ -43,7 +43,25 @@ interface IndexAccess {
 
 /** Checks property and element accesses. */
 export class MemberChecker {
+  /**
+   * The types of the accesses and calls of optional chains without the `undefined` that stopping early adds, which
+   * the rest of the chain continues from.
+   */
+  private readonly continuedTypes = new Map<number, Type>();
+
   constructor(private readonly c: Checker) {}
+
+  /** Records what an optional chain continues from after `node`, returning `node`'s own type with `undefined`. */
+  chainResult(node: TreeNode, continued: Type): Type {
+    this.continuedTypes.set(node.id, continued);
+    return unionOf([continued, undefinedType]);
+  }
+
+  /** The type of an object that continues an optional chain, which is never what stopping the chain gave. */
+  private continuedObjectType(objectNode: TreeNode, checked: Type): Type | undefined {
+    if (objectNode.type === 'parenthesized_expression' || !this.isInOptionalChain(objectNode)) return undefined;
+    return this.continuedTypes.get(objectNode.id) ?? checked;
+  }
 
   memberAccess(node: TreeNode): Type {
     const objectNode = node.childForFieldName('object') as TreeNode;
@@ -53,13 +71,22 @@ export class MemberChecker {
     if (objectNode.type === 'super') return this.c.classes.superProperty(node, propertyNode);
     let objectType = this.c.expressions.check(objectNode);
     const key = this.c.flow.referenceKey(node);
+    const continued = this.continuedObjectType(objectNode, objectType);
     if (optional) {
       if (isAnyLike(objectType)) return anyType;
-      const nonNull = this.c.relations.removeNullish(objectType);
+      const nonNull = this.c.relations.removeNullish(continued ?? objectType);
       const propertyType = this.propertyAccess(node, objectNode, propertyNode, nonNull, name);
-      return this.c.relations.isNullable(objectType) || this.isInOptionalChain(objectNode)
-        ? unionOf([propertyType, undefinedType])
-        : propertyType;
+      return this.c.relations.isNullable(objectType) || continued ? this.chainResult(node, propertyType) : propertyType;
+    }
+    if (continued) {
+      const propertyType = this.propertyAccess(
+        node,
+        objectNode,
+        propertyNode,
+        this.checkNonNullable(objectNode, continued),
+        name
+      );
+      return this.chainResult(node, propertyType);
     }
     objectType = this.checkNonNullable(objectNode, objectType);
     const propertyType = this.propertyAccess(node, objectNode, propertyNode, objectType, name);
@@ -75,12 +102,12 @@ export class MemberChecker {
     if (callee.type !== 'member_expression' || !this.isInOptionalChain(callee)) return undefined;
     const objectNode = callee.childForFieldName('object') as TreeNode;
     const propertyNode = callee.childForFieldName('property') as TreeNode;
-    const objectType = this.c.expressions.check(objectNode);
-    if (isAnyLike(objectType)) return anyType;
-    const nonNull =
-      callee.childForFieldName('optional_chain') || this.isInOptionalChain(objectNode)
-        ? this.c.relations.removeNullish(objectType)
-        : this.checkNonNullable(objectNode, objectType);
+    const checked = this.c.expressions.check(objectNode);
+    if (isAnyLike(checked)) return anyType;
+    const objectType = this.continuedObjectType(objectNode, checked) ?? checked;
+    const nonNull = callee.childForFieldName('optional_chain')
+      ? this.c.relations.removeNullish(objectType)
+      : this.checkNonNullable(objectNode, objectType);
     return this.propertyAccess(callee, objectNode, propertyNode, nonNull, propertyNode.text);
   }
 
@@ -205,7 +232,7 @@ export class MemberChecker {
   private indexSignatureFor(type: Type, name: string): Type | undefined {
     const structure = this.c.structureOf(type);
     if (structure.stringIndex) return structure.stringIndex.type;
-    if (/^\d+$/.test(name) && structure.numberIndex) return structure.numberIndex.type;
+    if (isNumericName(name) && structure.numberIndex) return structure.numberIndex.type;
     return undefined;
   }
 
@@ -252,14 +279,17 @@ export class MemberChecker {
     const objectNode = node.childForFieldName('object') as TreeNode;
     const indexNode = node.childForFieldName('index') as TreeNode;
     const optional = node.childForFieldName('optional_chain') !== null;
-    let objectType = this.c.expressions.check(objectNode);
+    const checked = this.c.expressions.check(objectNode);
     const indexType = this.c.expressions.check(indexNode);
-    objectType = optional ? this.c.relations.removeNullish(objectType) : this.checkNonNullable(objectNode, objectType);
+    const continued = this.continuedObjectType(objectNode, checked);
+    const objectType = optional
+      ? this.c.relations.removeNullish(continued ?? checked)
+      : this.checkNonNullable(objectNode, continued ?? checked);
     const key = this.c.flow.referenceKey(node);
     const entry = key ? this.c.flow.entry(key) : undefined;
     if (entry && !this.c.expressions.isAssignmentTarget(node)) return entry.type;
     const result = this.indexedType(node, objectNode, indexNode, objectType, indexType);
-    return optional ? unionOf([result, undefinedType]) : result;
+    return optional || continued ? this.chainResult(node, result) : result;
   }
 
   indexedType(node: TreeNode, objectNode: TreeNode, indexNode: TreeNode, objectType: Type, indexType: Type): Type {
@@ -306,7 +336,7 @@ export class MemberChecker {
     if (objectType.kind === 'union') return this.indexedTypeOfMembers(access, objectType, indexType);
     const property = this.c.propertyOf(objectType, name);
     if (!property) return undefined;
-    this.c.classes.checkPropertyAccessibility(access.node, access.indexNode, access.objectNode, objectType, property);
+    // `o["secret"]` reads a private or protected member, which TypeScript leaves as a way around its access checks.
     return property.optional ? unionOf([property.type(), undefinedType]) : property.type();
   }
 

@@ -6,10 +6,14 @@ import { named, skipParentheses } from './syntax';
 import {
   anyType,
   errorType,
+  functionType,
+  intersectionOf,
   isAnyLike,
   isIntrinsic,
+  type Parameter,
   type Signature,
   type Type,
+  type TypeParameter,
   undefinedType,
   unionOf,
   unknownType,
@@ -46,7 +50,7 @@ export class Calls {
       return this.c.globalType('Number').resolve() && anyType;
     }
     const chained = this.c.members.chainedCalleeType(callee);
-    const checkedCallee = chained ?? this.c.expressions.check(callee);
+    const checkedCallee = chained ?? this.c.expressions.check(callee, this.immediateCallContext(callee, args));
     if (checkedCallee === errorType) return this.checkArgumentsOnly(args, errorType);
     const calleeType = this.nonNullableCallee(callee, checkedCallee, optional);
     if (isAnyLike(calleeType)) return this.checkArgumentsOnly(args, anyType);
@@ -57,7 +61,7 @@ export class Calls {
       );
       return this.checkArgumentsOnly(args, errorType);
     }
-    const signatures = this.callSignatures(calleeType);
+    const signatures = this.withImmediateCallOptionals(callee, args, this.callSignatures(calleeType));
     if (signatures.length === 0) {
       for (const arg of args) this.c.expressions.check(arg);
       return this.uncallableType(callee, calleeType);
@@ -76,8 +80,44 @@ export class Calls {
     this.checkThisContext(callee, resolution.signature);
     const result = resolution.returnType;
     return chained || (optional && this.c.relations.isNullable(this.c.silently(() => this.c.expressions.check(callee))))
-      ? unionOf([result, undefinedType])
+      ? this.c.members.chainResult(node, result)
       : result;
+  }
+
+  /** For a function called where it is written, as `((x) => x * 2)(3)`, a context giving its parameters the arguments' types. */
+  private immediateCallContext(callee: TreeNode, args: TreeNode[]): Type | undefined {
+    const expression = skipParentheses(callee);
+    if (expression.type !== 'arrow_function' && expression.type !== 'function_expression') return undefined;
+    if (args.some((arg) => arg.type === 'spread_element')) return undefined;
+    const parametersNode = expression.childForFieldName('parameters');
+    const count = Math.max(args.length, parametersNode ? named(parametersNode).length : 1);
+    // A parameter without an argument is optional, holding `undefined`.
+    const parameters = Array.from({ length: count }, (_, index) => ({
+      name: `arg${index}`,
+      type:
+        index < args.length
+          ? this.c.widenLiteral(this.c.silently(() => this.c.expressions.check(args[index])))
+          : undefinedType,
+      optional: index >= args.length,
+      rest: false,
+    }));
+    return functionType({ typeParameters: [], parameters, returnType: () => unknownType });
+  }
+
+  /** For a function called where it is written, its parameters without arguments or annotations are optional. */
+  private withImmediateCallOptionals(callee: TreeNode, args: TreeNode[], signatures: Signature[]): Signature[] {
+    const expression = skipParentheses(callee);
+    if (expression.type !== 'arrow_function' && expression.type !== 'function_expression') return signatures;
+    const parametersNode = expression.childForFieldName('parameters');
+    const parameterNodes = parametersNode ? named(parametersNode) : [];
+    return signatures.map((signature) => ({
+      ...signature,
+      parameters: signature.parameters.map((parameter, index) =>
+        index >= args.length && !parameterNodes[index]?.childForFieldName('type') && !parameter.rest
+          ? { ...parameter, optional: true }
+          : parameter
+      ),
+    }));
   }
 
   private checkArgumentsOnly(args: TreeNode[], result: Type): Type {
@@ -173,6 +213,7 @@ export class Calls {
     let result = types[0];
     for (const type of types.slice(1)) {
       if (this.c.relations.isAssignable(type, result)) result = type;
+      else if (!this.c.relations.isAssignable(result, type)) result = intersectionOf([result, type]);
     }
     return result;
   }
@@ -237,6 +278,20 @@ export class Calls {
   /** Resolves a call to one of `signatures`, as `super(...)` does with its base class's constructors. */
   resolveWith(node: TreeNode, callee: TreeNode, signatures: Signature[], args: TreeNode[]): Type {
     return this.resolve(node, callee, signatures, args, undefined, undefined)?.returnType ?? errorType;
+  }
+
+  /** Whether a call ends the flow, calling through a name a function declared to return `never`. */
+  endsFlow(node: TreeNode): boolean {
+    const signature = this.resolved.get(node.id);
+    const callee = node.childForFieldName('function');
+    if (!signature?.declaration?.childForFieldName('return_type') || !callee || !isDottedName(callee)) return false;
+    // A function held by a variable or a field counts only when that declaration has a type annotation.
+    const declaration =
+      callee.type === 'identifier' ? this.c.scopeOf(callee).lookupValue(callee.text)?.valueDeclaration : undefined;
+    if (declaration?.type === 'variable_declarator' && !declaration.childForFieldName('type')) return false;
+    const field = signature.declaration.parent;
+    if (field?.type === 'public_field_definition' && !field.childForFieldName('type')) return false;
+    return isIntrinsic(signature.returnType(), 'never');
   }
 
   /** The type predicate a call's resolved signature has, with the expression it narrows. */
@@ -513,7 +568,19 @@ export class Calls {
     if (receiver && signature.thisType) this.c.inference.inferTypes(run, receiver, signature.thisType, true);
     // Context-insensitive arguments infer first; functions without parameter annotations then see what they inferred.
     const sensitive = args.map((arg) => this.isContextSensitive(arg));
+    // `...args: T` infers `T` as the tuple of the arguments it takes.
+    const restIndex = this.genericRestIndex(signature);
+    if (restIndex !== undefined) {
+      const elements = args.slice(restIndex).map((arg) => ({
+        type: this.c.widenLiteral(this.c.silently(() => this.c.expressions.check(arg))),
+        optional: false,
+        rest: false,
+      }));
+      const restType = (signature.parameters.at(-1) as Parameter).type;
+      this.c.inference.inferTypes(run, this.c.tupleType(elements), restType, true);
+    }
     for (const [index, arg] of args.entries()) {
+      if (restIndex !== undefined && index >= restIndex) continue;
       if (arg.type === 'spread_element') this.inferFromSpread(run, signature, arg, index);
       else if (!sensitive[index])
         this.inferFromArgument(run, signature, arg, index, this.c.inference.partialMapper(parameters, run.inferences));
@@ -521,17 +588,33 @@ export class Calls {
     if (contextual)
       this.c.inference.inferTypes({ ...run, lowPriority: true }, contextual, signature.returnType(), false);
     for (const [index, arg] of args.entries()) {
-      if (sensitive[index])
-        this.inferFromArgument(
-          run,
-          signature,
-          arg,
-          index,
-          this.c.inference.partialMapper(parameters, run.inferences, true)
-        );
+      if (!sensitive[index]) continue;
+      // A callback's parameters fix what they mention, while its return type keeps the rest to infer from it.
+      const parameterType = this.parameterTypeAt(signature, index);
+      const callbacks = parameterType ? this.c.signaturesOf(parameterType, 'call') : [];
+      const fixes = (parameter: TypeParameter): boolean =>
+        callbacks.length === 0 ||
+        callbacks.some((callback) => callback.parameters.some((p) => this.c.inference.mentions(p.type, parameter)));
+      this.inferFromArgument(
+        run,
+        signature,
+        arg,
+        index,
+        this.c.inference.partialMapper(parameters, run.inferences, fixes)
+      );
     }
     const mapper = this.c.inference.finalMapper(signature, parameters, run.inferences);
     return { ...this.c.instantiateSignature(signature, mapper), typeParameters: [] };
+  }
+
+  /** Where a rest parameter typed by one of the signature's own type parameters starts, as in `...args: T`. */
+  private genericRestIndex(signature: Signature): number | undefined {
+    const last = signature.parameters.at(-1);
+    if (!last?.rest || last.type.kind !== 'typeParameter') return undefined;
+    const { id } = last.type;
+    return signature.typeParameters.some((parameter) => parameter.id === id)
+      ? signature.parameters.length - 1
+      : undefined;
   }
 
   private inferFromSpread(run: InferenceRun, signature: Signature, arg: TreeNode, index: number): void {
@@ -571,4 +654,11 @@ export class Calls {
     if (expression.type === 'array') return named(expression).some((element) => this.isContextSensitive(element));
     return false;
   }
+}
+
+/** Whether an expression names something by identifiers and properties only, as `a`, `this.b`, or `a.b.c`. */
+function isDottedName(node: TreeNode): boolean {
+  if (node.type === 'identifier' || node.type === 'this') return true;
+  if (node.type !== 'member_expression' || node.childForFieldName('optional_chain')) return false;
+  return isDottedName(node.childForFieldName('object') as TreeNode);
 }

@@ -1,6 +1,6 @@
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
-import type { ClassInfo, Type, TypeParameter } from './types';
+import type { ClassInfo, Type, TypeParameter, UnionType } from './types';
 
 export type ValueKind = 'let' | 'const' | 'var' | 'parameter' | 'function' | 'class' | 'catch' | 'declared';
 export type TypeKind = 'interface' | 'alias' | 'class' | 'typeParameter';
@@ -31,6 +31,11 @@ export class Sym {
   usedInClosure = false;
   /** Whether resolving its type is in progress, to detect a type that depends on itself. */
   resolving = false;
+  /**
+   * While a union alias resolves, the union that references to it inside array, tuple, and type argument positions
+   * stand for, which receives the alias's members once they are known.
+   */
+  pendingUnion?: UnionType;
   /** The feature name when using this library value is not supported yet. */
   unsupported?: string;
   /** For a value whose declaration has no annotation, whose type the initializer gives. */

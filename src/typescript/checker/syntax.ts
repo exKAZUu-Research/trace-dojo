@@ -98,6 +98,11 @@ export function propertyNameText(node: TreeNode): string | undefined {
   }
 }
 
+/** Whether a property name is numeric, which a number index signature covers: `1`, `1.5`, and `-1` but not `01`. */
+export function isNumericName(name: string): boolean {
+  return String(Number(name)) === name;
+}
+
 /** The value of a string literal node. */
 export function stringValue(node: TreeNode): string {
   let value = '';

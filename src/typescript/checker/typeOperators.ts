@@ -1,7 +1,7 @@
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import type { Checker, Mapper } from './checker';
-import { named } from './syntax';
+import { isNumericName, named } from './syntax';
 import {
   anonymousObject,
   anyType,
@@ -309,7 +309,7 @@ export class TypeOperators {
     const property = this.c.propertyOf(object, name);
     if (property) return property.optional ? unionOf([property.type(), undefinedType]) : property.type();
     const structure = this.c.structureOf(object);
-    const numeric = typeof key === 'number' || /^\d+$/.test(name);
+    const numeric = typeof key === 'number' || isNumericName(name);
     if (numeric && structure.numberIndex) return structure.numberIndex.type;
     if (structure.stringIndex) return structure.stringIndex.type;
     if (node) this.c.error(node, `プロパティ '${name}' は型 '${this.c.print(object)}' にありません。`);

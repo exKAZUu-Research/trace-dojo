@@ -127,6 +127,13 @@ export class BindingPatterns {
 
   destructuredProperty(node: TreeNode, type: Type, name: string, hasDefault = false): Type {
     if (isAnyLike(type)) return anyType;
+    if (type.kind === 'union') {
+      // Each member must have the property, whose types then unite.
+      const types = type.types.map((member) =>
+        this.c.silently(() => this.destructuredProperty(node, member, name, hasDefault))
+      );
+      if (!types.includes(errorType)) return unionOf(types);
+    }
     const property = this.c.propertyOf(type, name);
     if (!property) {
       const structure = this.c.structureOf(type);
@@ -157,6 +164,8 @@ export class BindingPatterns {
       if (!element) {
         const rest = elements.find((member) => member.rest);
         if (rest) return unionOf([this.c.restElementType(rest.type), undefinedType]);
+        // An element with a default, as in `const [a = 1] = []`, takes the default where the tuple ends.
+        if (node.type === 'assignment_pattern') return undefinedType;
         this.c.error(
           node,
           `長さ ${elements.length} のタプル型 '${this.c.print(type)}' には、インデックス ${index} の要素がありません。`

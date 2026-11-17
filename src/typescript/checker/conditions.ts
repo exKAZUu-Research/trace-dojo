@@ -12,6 +12,7 @@ import {
   neverType,
   regularOf,
   type Type,
+  undefinedType,
   unionOf,
 } from './types';
 
@@ -57,6 +58,11 @@ export class ConditionChecker {
       case 'call_expression': {
         return this.callCondition(expression);
       }
+      case 'identifier': {
+        const aliased = this.aliasedCondition(expression);
+        if (aliased) return aliased;
+        break;
+      }
       case 'assignment_expression': {
         const type = this.c.expressions.check(expression);
         const left = skipParentheses(expression.childForFieldName('left') as TreeNode);
@@ -91,9 +97,10 @@ export class ConditionChecker {
         type,
       };
     }
-    if (operator === 'in' && left.type === 'string') {
+    const key = operator === 'in' ? this.c.silently(() => this.c.expressions.check(left)) : undefined;
+    if (key?.kind === 'literal' && (typeof key.value === 'string' || typeof key.value === 'number')) {
       const type = this.c.expressions.check(expression);
-      const name = stringValue(left);
+      const name = String(key.value);
       return {
         ...this.narrowed(right, (current, assumeTrue) => this.c.flow.narrowByIn(current, name, assumeTrue)),
         type,
@@ -128,6 +135,44 @@ export class ConditionChecker {
         rightResult.type,
       ]),
     };
+  }
+
+  /**
+   * The condition a constant stands for, as `const isText = typeof x === "string"` narrows `x` where `isText` is
+   * tested, when nothing the condition narrows can change after it.
+   */
+  private aliasedCondition(identifier: TreeNode): Condition | undefined {
+    const symbol = this.c.scopeOf(identifier).lookupValue(identifier.text);
+    const declarator = symbol?.valueDeclaration;
+    if (symbol?.valueKind !== 'const' || declarator?.type !== 'variable_declarator') return undefined;
+    const value = declarator.childForFieldName('value');
+    if (declarator.childForFieldName('name')?.type !== 'identifier' || declarator.childForFieldName('type')) {
+      return undefined;
+    }
+    if (!value || !this.narrowsOnlyConstantReferences(value)) return undefined;
+    const type = this.c.expressions.check(identifier);
+    const base = this.c.flow.current;
+    try {
+      const aliased = this.c.silently(() => this.condition(value, false));
+      // The constant itself narrows by its truthiness as well.
+      const narrowOwn = (state: State, assumeTrue: boolean): State =>
+        this.c.flow.from(state, () =>
+          this.c.flow.narrowReference(identifier, (current) => this.c.flow.narrowByTruthiness(current, assumeTrue))
+        );
+      return { whenTrue: narrowOwn(aliased.whenTrue, true), whenFalse: narrowOwn(aliased.whenFalse, false), type };
+    } finally {
+      this.c.flow.current = base;
+    }
+  }
+
+  /** Whether every variable an expression refers to is a constant, or a parameter or variable never reassigned. */
+  private narrowsOnlyConstantReferences(expression: TreeNode): boolean {
+    if (['arrow_function', 'function_expression', 'class'].includes(expression.type)) return false;
+    if (expression.type === 'identifier') {
+      const symbol = this.c.scopeOf(expression).lookupValue(expression.text);
+      return !symbol?.valueKind || symbol.valueKind === 'const' || !symbol.isReassigned;
+    }
+    return named(expression).every((child) => this.narrowsOnlyConstantReferences(child));
   }
 
   /** The condition a call is, narrowing what its signature's type predicate tests. */
@@ -205,17 +250,37 @@ export class ConditionChecker {
     for (const candidate of candidates) {
       const expression = skipParentheses(candidate);
       if (!this.isAlwaysDefinedFunction(expression)) continue;
-      const text = expression.text;
-      const usedInBody =
-        body?.text.includes(`${text}(`) ||
-        condition.text.includes(`${text}(`) ||
-        (body?.text.includes(text) && expression.type === 'identifier');
-      if (usedInBody) continue;
+      // A function the body or the rest of the condition uses was tested on purpose, as `if (p.run) queue.push(p.run)`.
+      const usedElsewhere = [body, tested].some((scope) => scope && this.refersTo(scope, expression));
+      if (usedElsewhere) continue;
       this.c.error(
         expression,
         'この関数は常に定義されているので、この条件は常に真になります。呼び出すつもりでしたか？'
       );
     }
+  }
+
+  /** Whether a node contains a reference, other than `reference` itself, to what `reference` refers to. */
+  private refersTo(scope: TreeNode, reference: TreeNode): boolean {
+    if (scope.id !== reference.id && this.isSameReference(scope, reference)) return true;
+    return named(scope).some((child) => this.refersTo(child, reference));
+  }
+
+  private isSameReference(a: TreeNode, b: TreeNode): boolean {
+    if (a.type !== b.type) return false;
+    if (a.type === 'this') return true;
+    if (a.type === 'identifier') {
+      const symbol = this.c.scopeOf(a).lookupValue(a.text);
+      return symbol !== undefined && symbol === this.c.scopeOf(b).lookupValue(b.text);
+    }
+    if (a.type !== 'member_expression') return false;
+    return (
+      a.childForFieldName('property')?.text === b.childForFieldName('property')?.text &&
+      this.isSameReference(
+        skipParentheses(a.childForFieldName('object') as TreeNode),
+        skipParentheses(b.childForFieldName('object') as TreeNode)
+      )
+    );
   }
 
   /** Whether a reference is a function that is always defined: neither nullable nor an optional property. */
@@ -246,7 +311,17 @@ export class ConditionChecker {
     if (isAnyLike(type)) return anyType;
     const signatures = this.c.signaturesOf(type, 'construct');
     if (signatures.length > 0) {
-      const returned = signatures[0].returnType();
+      // A generic class's instance type takes `any` for its type arguments, which the narrowed members then supply.
+      const [signature] = signatures;
+      const returned =
+        signature.typeParameters.length > 0
+          ? this.c
+              .instantiateSignature(
+                { ...signature, typeParameters: [] },
+                new Map(signature.typeParameters.map((parameter) => [parameter.id, anyType]))
+              )
+              .returnType()
+          : signature.returnType();
       if (returned.kind === 'object' && returned.objectKind === 'reference' && returned.target?.typeParameters) {
         return this.c.reference(
           returned.target,
@@ -298,9 +373,14 @@ export class ConditionChecker {
     whenFalse: State
   ): void {
     const expression = skipParentheses(reference);
-    if (expression.type !== 'member_expression') return;
-    const object = expression.childForFieldName('object') as TreeNode;
-    const name = expression.childForFieldName('property')?.text ?? '';
+    const { object, name } =
+      expression.type === 'member_expression'
+        ? {
+            object: expression.childForFieldName('object') as TreeNode,
+            name: expression.childForFieldName('property')?.text ?? '',
+          }
+        : (this.destructuredFrom(expression) ?? {});
+    if (!object || name === undefined) return;
     const objectType = this.c.expressions.checkReferenceSilently(object);
     const nonNull = this.c.relations.removeNullish(objectType);
     if (!this.c.flow.isDiscriminant(nonNull, name) && !this.c.relations.isNullable(objectType)) return;
@@ -320,6 +400,25 @@ export class ConditionChecker {
     apply(whenFalse, false);
     // The states were narrowed in place, so the reference's own entry stays as narrowed.
     void (whenTrue as FlowState | undefined);
+  }
+
+  /**
+   * For a constant destructured as `const { kind } = shape` from a constant or a parameter never reassigned, the object
+   * and the property it was taken from, which narrowing the constant narrows too.
+   */
+  private destructuredFrom(identifier: TreeNode): { object: TreeNode; name: string } | undefined {
+    if (identifier.type !== 'identifier') return undefined;
+    const symbol = this.c.scopeOf(identifier).lookupValue(identifier.text);
+    const declarator = symbol?.valueDeclaration;
+    const pattern = symbol?.valueEntries[0]?.name;
+    if (symbol?.valueKind !== 'const' || declarator?.type !== 'variable_declarator' || !pattern) return undefined;
+    if (pattern.parent?.id !== declarator.childForFieldName('name')?.id || pattern.parent?.type !== 'object_pattern') {
+      return undefined;
+    }
+    const object = declarator.childForFieldName('value');
+    if (object?.type !== 'identifier' || !this.narrowsOnlyConstantReferences(object)) return undefined;
+    if (pattern.type === 'shorthand_property_identifier_pattern') return { object, name: pattern.text };
+    return undefined;
   }
 
   private narrowEquality(left: TreeNode, right: TreeNode, operator: string): { whenTrue: State; whenFalse: State } {
@@ -351,10 +450,13 @@ export class ConditionChecker {
     let whenTrue = base?.clone();
     let whenFalse = base?.clone();
     // Each side that is a reference narrows by the other's type.
-    for (const [reference, otherType] of [
+    for (const [side, otherType] of [
       [leftExpression, rightType],
       [rightExpression, leftType],
     ] as const) {
+      // `(m = re.exec(s)) !== null` narrows what it assigned.
+      const reference =
+        side.type === 'assignment_expression' ? skipParentheses(side.childForFieldName('left') as TreeNode) : side;
       if (!this.c.flow.referenceKey(reference)) continue;
       const narrow = (current: Type, assumeTrue: boolean): Type =>
         this.c.flow.narrowByEquality(current, regularOf(otherType), assumeTrue === equal, loose);
@@ -364,7 +466,34 @@ export class ConditionChecker {
       );
       this.narrowDiscriminantParent(reference, narrow, whenTrue, whenFalse);
     }
+    // `a?.b !== undefined` and `a?.b === 1` mean `a` is not nullish.
+    for (const [side, otherType] of [
+      [leftExpression, rightType],
+      [rightExpression, leftType],
+    ] as const) {
+      const base = this.optionalChainBase(side);
+      if (!base) continue;
+      const otherIsUndefined = isIntrinsic(otherType, 'undefined') || (loose && isIntrinsic(otherType, 'null'));
+      const otherMayBeUndefined = this.c.relations.isAssignable(undefinedType, otherType);
+      const defined = (state: State): State =>
+        this.c.flow.from(state, () =>
+          this.c.flow.narrowReference(base, (type) => this.c.relations.removeNullish(type))
+        );
+      if (equal ? !otherMayBeUndefined : otherIsUndefined) whenTrue = defined(whenTrue);
+      else if (equal ? otherIsUndefined : !otherMayBeUndefined) whenFalse = defined(whenFalse);
+    }
     return { whenTrue, whenFalse };
+  }
+
+  /** The object an optional chain such as `a?.b.c` tests for `null` and `undefined`, which is `a`. */
+  private optionalChainBase(expression: TreeNode): TreeNode | undefined {
+    let current = expression;
+    while (current.type === 'member_expression' || current.type === 'subscript_expression') {
+      const object = current.childForFieldName('object') as TreeNode;
+      if (current.childForFieldName('optional_chain')) return this.c.flow.referenceKey(object) ? object : undefined;
+      current = object;
+    }
+    return undefined;
   }
 
   /** The state entering a `case` of a `switch` on `discriminant` (or the `default`, excluding the cases). */

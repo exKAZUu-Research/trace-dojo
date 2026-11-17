@@ -12,7 +12,6 @@ import {
   intersectionOf,
   isAnyLike,
   isIntrinsic,
-  literalType,
   mapType,
   neverType,
   nonPrimitiveType,
@@ -35,6 +34,8 @@ export interface FlowEntry {
   assigned: boolean;
   /** For `const a = []`, the array type it has evolved to by the pushes so far. */
   evolving?: boolean;
+  /** For a value of a type parameter constrained to a union, that constraint as narrowed so far. */
+  constraint?: Type;
 }
 
 /** What the paths to a point in a program tell about its variables and references; undefined where none reach it. */
@@ -55,6 +56,8 @@ export type State = FlowState | undefined;
 /** The flow of a program's control, which narrows its references and tracks its assignments. */
 export class Flow {
   current: State = new FlowState();
+  /** `{}`, what `unknown` narrows to where it is neither `null` nor `undefined`. */
+  private readonly emptyObject = anonymousObject(() => emptyStructure());
 
   constructor(private readonly c: Checker) {}
 
@@ -76,6 +79,9 @@ export class Flow {
         type: unionOf(defined.map((entry) => entry.type)),
         assigned: defined.every((entry) => entry.assigned),
         evolving: defined.some((entry) => entry.evolving),
+        constraint: defined.every((entry) => entry.constraint)
+          ? unionOf(defined.map((entry) => entry.constraint as Type))
+          : undefined,
       });
     }
     return merged;
@@ -117,12 +123,25 @@ export class Flow {
     }
   }
 
+  /** The property an element access always reads: a literal key, or a constant holding a literal. */
+  private constantIndexName(index: TreeNode): string | undefined {
+    if (index.type === 'string') return named(index)[0]?.text ?? '';
+    if (index.type === 'number') return index.text;
+    if (index.type !== 'identifier') return undefined;
+    const symbol = this.c.scopeOf(index).lookupValue(index.text);
+    if (symbol?.valueKind !== 'const') return undefined;
+    const type = this.c.silently(() => this.c.expressions.check(index));
+    return type.kind === 'literal' && typeof type.value !== 'boolean' ? String(type.value) : undefined;
+  }
+
   /** The key of a reference that narrowing applies to: a variable, `this`, or a property path of one. */
   // code-gauge-allow functionCognitiveComplexity 17 -- One case per kind of reference that flow analysis follows.
   referenceKey(node: TreeNode): string | undefined {
     const expression = skipParentheses(node);
     switch (expression.type) {
-      case 'identifier': {
+      case 'identifier':
+      case 'shorthand_property_identifier':
+      case 'shorthand_property_identifier_pattern': {
         const symbol = this.c.scopeOf(expression).lookupValue(expression.text);
         return symbol ? `s${symbol.id}` : undefined;
       }
@@ -142,9 +161,9 @@ export class Flow {
       case 'subscript_expression': {
         const object = expression.childForFieldName('object');
         const index = expression.childForFieldName('index');
-        if (!object || !index || (index.type !== 'string' && index.type !== 'number')) return undefined;
-        const base = this.referenceKey(object);
-        return base ? `${base}.${index.type === 'string' ? (named(index)[0]?.text ?? '') : index.text}` : undefined;
+        const name = index ? this.constantIndexName(index) : undefined;
+        const base = object && name !== undefined ? this.referenceKey(object) : undefined;
+        return base ? `${base}.${name}` : undefined;
       }
       default: {
         return undefined;
@@ -158,10 +177,14 @@ export class Flow {
     if (!key || !this.current) return;
     const current = this.c.expressions.checkReferenceSilently(node);
     const entry = this.current.entries.get(key);
+    // A value of a type parameter constrained to a union also narrows the constraint, which reading its members uses.
+    const declaredConstraint = current.kind === 'typeParameter' ? this.c.constraintOf(current) : undefined;
+    const constraint = entry?.constraint ?? (declaredConstraint?.kind === 'union' ? declaredConstraint : undefined);
     this.current.entries.set(key, {
       type: narrow(current),
       assigned: entry?.assigned ?? true,
       evolving: entry?.evolving,
+      constraint: constraint && narrow(constraint),
     });
   }
 
@@ -251,7 +274,7 @@ export class Flow {
   // code-gauge-allow functionCognitiveComplexity 28 -- Follows TypeScript's narrowing of each kind of type by truthiness.
   narrowByTruthiness(type: Type, assumeTrue: boolean): Type {
     if (assumeTrue) {
-      if (isIntrinsic(type, 'unknown')) return type;
+      if (isIntrinsic(type, 'unknown')) return this.emptyObject;
       return filterType(type, (member) => {
         if (isIntrinsic(member, 'null') || isIntrinsic(member, 'undefined') || isIntrinsic(member, 'void'))
           return false;
@@ -264,45 +287,52 @@ export class Flow {
       if (member.kind === 'literal') return member.value ? neverType : member;
       if (member.kind === 'object' || isIntrinsic(member, 'object') || isIntrinsic(member, 'symbol')) return neverType;
       if (member === booleanType) return falseType;
-      if (isIntrinsic(member, 'string')) return literalType('');
-      if (isIntrinsic(member, 'number')) return literalType(0);
-      if (isIntrinsic(member, 'bigint')) return literalType(0n);
       return member;
     });
   }
 
   /** The part of a type that `value === other` (or `!==`) keeps, given the other operand's type. */
-  // code-gauge-allow functionCognitiveComplexity 30 -- Follows TypeScript's narrowing of each kind of type by equality.
   narrowByEquality(type: Type, other: Type, assumeTrue: boolean, loose: boolean): Type {
+    return assumeTrue ? this.narrowToEqual(type, other, loose) : this.narrowToUnequal(type, other, loose);
+  }
+
+  private narrowToEqual(type: Type, other: Type, loose: boolean): Type {
     const nullish = isIntrinsic(other, 'null') || isIntrinsic(other, 'undefined');
-    if (assumeTrue) {
-      if (loose && nullish) {
-        return filterType(
-          type,
-          (member) =>
-            isIntrinsic(member, 'null') ||
-            isIntrinsic(member, 'undefined') ||
-            isIntrinsic(member, 'void') ||
-            isIntrinsic(member, 'unknown') ||
-            isAnyLike(member)
-        );
-      }
-      if (isAnyLike(type)) return type;
-      if (isIntrinsic(type, 'unknown')) return isUnit(other) ? other : type;
-      const filtered = filterType(type, (member) => this.c.relations.isComparable(member, other));
-      if (isUnit(other)) {
-        // A union's members that equal the unit become it, as `string` does for `"a"`.
-        return mapType(filtered, (member) =>
-          member.kind === 'literal' || isUnitIntrinsic(member)
-            ? member
-            : this.c.relations.isAssignable(other, member)
-              ? other
-              : member
-        );
-      }
-      return filtered;
+    if (loose && nullish) {
+      return filterType(
+        type,
+        (member) =>
+          isIntrinsic(member, 'null') ||
+          isIntrinsic(member, 'undefined') ||
+          isIntrinsic(member, 'void') ||
+          isIntrinsic(member, 'unknown') ||
+          isAnyLike(member)
+      );
     }
+    if (isAnyLike(type)) return type;
+    if (isIntrinsic(type, 'unknown')) return isUnit(other) ? other : type;
+    const filtered = filterType(type, (member) => this.c.relations.isComparable(member, other));
+    if (isUnit(other)) {
+      // A union's members that equal the unit become it, as `string` does for `"a"`.
+      return mapType(filtered, (member) =>
+        member.kind === 'literal' || isUnitIntrinsic(member)
+          ? member
+          : this.c.relations.isAssignable(other, member)
+            ? other
+            : member
+      );
+    }
+    return filtered;
+  }
+
+  private narrowToUnequal(type: Type, other: Type, loose: boolean): Type {
+    const nullish = isIntrinsic(other, 'null') || isIntrinsic(other, 'undefined');
     if (!isUnit(other)) return type;
+    // `unknown` that is not `null` is `{} | undefined`, and not either is `{}`.
+    if (isIntrinsic(type, 'unknown') && nullish) {
+      if (loose) return this.emptyObject;
+      return unionOf([this.emptyObject, isIntrinsic(other, 'null') ? undefinedType : nullType]);
+    }
     if (loose && nullish) {
       return filterType(
         type,

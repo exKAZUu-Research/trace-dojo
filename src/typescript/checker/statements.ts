@@ -4,7 +4,7 @@ import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 import type { Checker } from './checker';
 import { FlowState, type State } from './flow';
 import type { Scope, Sym } from './scopes';
-import { hasToken, named, patternIdentifiers, skipParentheses } from './syntax';
+import { arrayPatternElements, hasToken, isNumericName, named, patternIdentifiers, skipParentheses } from './syntax';
 import {
   anyType,
   errorType,
@@ -75,7 +75,8 @@ export class StatementChecker {
     }
   }
 
-  checkBlockStatements(statements: TreeNode[]): void {
+  /** Checks statements in order, calling `afterEach` with the state after each one that is reached. */
+  checkBlockStatements(statements: TreeNode[], afterEach?: (state: State) => void): void {
     for (const statement of statements) {
       if (!this.c.flow.isReachable) {
         // Unreachable code is still checked, with what its declarations say.
@@ -85,6 +86,7 @@ export class StatementChecker {
         continue;
       }
       this.check(statement);
+      afterEach?.(this.c.flow.current?.clone());
     }
   }
 
@@ -94,7 +96,10 @@ export class StatementChecker {
 
   private expressionStatement(node: TreeNode): void {
     const expression = named(node)[0];
-    if (expression) this.c.expressions.check(expression);
+    if (!expression) return;
+    this.c.expressions.check(expression);
+    const call = skipParentheses(expression);
+    if (call.type === 'call_expression' && this.c.expressions.calls.endsFlow(call)) this.c.flow.current = undefined;
   }
 
   private throwStatement(node: TreeNode): void {
@@ -138,6 +143,10 @@ export class StatementChecker {
           this.c.typeNodes.typeFromNode(current);
         }
       }
+      if (current.type === 'object_type') {
+        const type = this.c.typeNodes.typeFromNode(current);
+        if (type.kind === 'object') this.checkIndexConformance(type.resolve(), current);
+      }
       for (const child of named(current)) visit(child);
     };
     visit(node);
@@ -153,29 +162,70 @@ export class StatementChecker {
       const structure = type.resolve();
       for (const property of structure.properties.values()) property.type();
       for (const signature of structure.callSignatures) signature.returnType();
-      this.checkIndexConformance(structure);
+      this.checkIndexConformance(structure, node.childForFieldName('body') ?? node);
+      this.checkInterfaceBases(node, structure);
     }
     for (const child of named(node)) if (child.type === 'extends_type_clause') this.resolveTypesIn(child);
     this.resolveTypesIn(node.childForFieldName('body'));
   }
 
-  /** Reports properties that an index signature of the same type does not allow. */
-  checkIndexConformance(structure: Structure): void {
+  /** Reports a property of an interface that does not fit the same property of an interface it extends. */
+  private checkInterfaceBases(node: TreeNode, structure: Structure): void {
+    const body = node.childForFieldName('body');
+    const clause = named(node).find((child) => child.type === 'extends_type_clause');
+    if (!body || !clause) return;
+    for (const baseNode of named(clause)) {
+      const base = this.c.typeNodes.typeFromNode(baseNode);
+      if (isAnyLike(base) || (base.kind !== 'object' && base.kind !== 'intersection')) continue;
+      for (const property of structure.properties.values()) {
+        const declaration = property.declaration;
+        if (!declaration || declaration.parent?.id !== body.id) continue;
+        const baseProperty = this.c.propertyOf(base, property.name);
+        if (!baseProperty || this.c.relations.isAssignable(property.type(), baseProperty.type())) continue;
+        this.c.error(
+          node.childForFieldName('name') ?? node,
+          `インターフェース '${node.childForFieldName('name')?.text}' は、'${this.c.print(base)}' を正しく継承していません。プロパティ '${property.name}' の型が合いません。`
+        );
+        return;
+      }
+    }
+  }
+
+  /**
+   * Reports properties that an index signature of the same type does not allow, and a number index that does not fit
+   * the string index. A property inherited from elsewhere is reported at the index signature of `owner`, the body
+   * declaring the type.
+   */
+  checkIndexConformance(structure: Structure, owner?: TreeNode): void {
     for (const property of structure.properties.values()) {
       const nameNode = property.declaration?.childForFieldName('name');
       if (!nameNode || !property.declaration || this.c.isLibrary(property.declaration)) continue;
       const type = property.optional ? unionOf([property.type(), undefinedType]) : property.type();
+      const inherited = owner !== undefined && !isWithin(property.declaration, owner);
       for (const [index, kind] of [
         [structure.stringIndex, 'string'],
-        [/^\d+$/.test(property.name) ? structure.numberIndex : undefined, 'number'],
+        [isNumericName(property.name) ? structure.numberIndex : undefined, 'number'],
       ] as const) {
         if (index && !this.c.relations.isAssignable(type, index.type)) {
           this.c.error(
-            nameNode,
+            (inherited && owner && indexSignatureNode(owner, kind)) || nameNode,
             `型 '${this.c.print(type)}' のプロパティ '${property.name}' は、'${kind}' のインデックスの型 '${this.c.print(index.type)}' に代入できません。`
           );
         }
       }
+    }
+    const { stringIndex, numberIndex } = structure;
+    const numberNode = owner && indexSignatureNode(owner, 'number');
+    if (
+      stringIndex &&
+      numberIndex &&
+      numberNode &&
+      !this.c.relations.isAssignable(numberIndex.type, stringIndex.type)
+    ) {
+      this.c.error(
+        numberNode,
+        `'number' のインデックスの型 '${this.c.print(numberIndex.type)}' は、'string' のインデックスの型 '${this.c.print(stringIndex.type)}' に代入できません。`
+      );
     }
   }
 
@@ -240,7 +290,9 @@ export class StatementChecker {
   private patternDeclarator(declarator: TreeNode, pattern: TreeNode, isConst: boolean): void {
     const value = declarator.childForFieldName('value');
     const annotation = this.c.typeNodes.annotationType(declarator.childForFieldName('type'));
-    const valueType = value ? this.c.expressions.check(value, annotation) : (annotation ?? anyType);
+    const valueType = value
+      ? this.c.expressions.check(value, annotation ?? this.arrayPatternContext(pattern))
+      : (annotation ?? anyType);
     if (annotation && value) this.c.expressions.checkAssignable(pattern, valueType, annotation);
     const sourceType = annotation ?? this.c.literals.widenDeclared(valueType, false);
     this.c.patterns.bindPattern(pattern, sourceType, (identifier, type) => {
@@ -250,6 +302,18 @@ export class StatementChecker {
       this.c.expressions.setVariableType(symbol, declared);
       this.c.flow.set(`s${symbol.id}`, { type: declared, assigned: true });
     });
+  }
+
+  /** The tuple an array pattern implies for the array literal it takes apart, so that each element keeps its type. */
+  private arrayPatternContext(pattern: TreeNode): Type | undefined {
+    if (pattern.type !== 'array_pattern') return undefined;
+    return this.c.tupleType(
+      arrayPatternElements(pattern).map(({ element }) =>
+        element.type === 'rest_pattern'
+          ? { type: this.c.arrayType(anyType), optional: false, rest: true }
+          : { type: anyType, optional: false, rest: false }
+      )
+    );
   }
 
   private isEmptyArrayLiteral(node: TreeNode): boolean {
@@ -297,7 +361,11 @@ export class StatementChecker {
 
   private ifStatement(node: TreeNode): void {
     const condition = node.childForFieldName('condition') as TreeNode;
-    const { whenTrue, whenFalse } = this.c.conditions.checkCondition(condition);
+    const checked = this.c.conditions.checkCondition(condition);
+    // `if (true)` never takes its else branch, and `if (false)` never takes its then branch.
+    const literal = skipParentheses(condition).type;
+    const whenTrue = literal === 'false' ? undefined : checked.whenTrue;
+    const whenFalse = literal === 'true' ? undefined : checked.whenFalse;
     const consequence = node.childForFieldName('consequence') as TreeNode;
     this.c.conditions.checkUncalledFunction(condition, consequence);
     const alternative = node.childForFieldName('alternative');
@@ -497,17 +565,32 @@ export class StatementChecker {
     let fallthrough: State;
     const caseTypes: Type[] = [];
     let hasDefault = false;
+    // `switch (true)` enters a case where its test is true, and the default where every test is false.
+    const testsConditions = discriminant.type === 'true';
+    let allFalse = entry;
     try {
       for (const caseNode of cases) {
         let caseEntry: State;
         if (caseNode.type === 'switch_case') {
           this.c.flow.current = entry?.clone();
-          const testType = this.checkCaseTest(caseNode.childForFieldName('value') as TreeNode, discriminantType);
+          const test = caseNode.childForFieldName('value') as TreeNode;
+          const testType = this.checkCaseTest(test, discriminantType);
           caseTypes.push(testType);
-          caseEntry = this.c.conditions.narrowSwitchCase(discriminant, entry, [testType], true);
+          if (testsConditions) {
+            const outer = this.c.flow.current;
+            this.c.flow.current = allFalse?.clone();
+            const { whenTrue, whenFalse } = this.c.silently(() => this.c.conditions.checkCondition(test));
+            this.c.flow.current = outer;
+            caseEntry = whenTrue;
+            allFalse = whenFalse;
+          } else {
+            caseEntry = this.c.conditions.narrowSwitchCase(discriminant, entry, [testType], true);
+          }
         } else {
           hasDefault = true;
-          caseEntry = this.c.conditions.narrowSwitchCase(discriminant, entry, caseTypes, false);
+          caseEntry = testsConditions
+            ? allFalse
+            : this.c.conditions.narrowSwitchCase(discriminant, entry, caseTypes, false);
         }
         this.c.flow.current = this.c.flow.merge([caseEntry, fallthrough]);
         const statements = caseNode
@@ -519,7 +602,11 @@ export class StatementChecker {
     } finally {
       this.jumpTargets.pop();
     }
-    let noMatch = hasDefault ? undefined : this.c.conditions.narrowSwitchCase(discriminant, entry, caseTypes, false);
+    let noMatch = hasDefault
+      ? undefined
+      : testsConditions
+        ? allFalse
+        : this.c.conditions.narrowSwitchCase(discriminant, entry, caseTypes, false);
     // Cases that cover every value of the discriminant leave no path past the switch, as `default` would.
     if (noMatch && this.c.flow.referenceKey(discriminant)) {
       let remaining: Type = neverType;
@@ -551,13 +638,15 @@ export class StatementChecker {
     const body = node.childForFieldName('body') as TreeNode;
     const handler = node.childForFieldName('handler');
     const finalizer = node.childForFieldName('finalizer');
-    // The try block changes the current state in place, while the catch block starts from what held before it.
+    // The try block changes the current state in place, while the catch block starts from any state the try block
+    // passed through, as an exception may leave it after any statement.
     const entry = this.c.flow.current?.clone();
-    this.checkBlockStatements(named(body));
+    const passed: State[] = [entry];
+    this.checkBlockStatements(named(body), (state) => passed.push(state));
     const tryEnd = this.c.flow.current;
     let catchEnd: State;
     if (handler) {
-      this.c.flow.current = this.c.flow.merge([entry, tryEnd]);
+      this.c.flow.current = this.c.flow.merge([...passed, tryEnd]);
       this.bindCatchParameter(handler);
       const handlerBody = handler.childForFieldName('body') as TreeNode;
       this.checkBlockStatements(named(handlerBody));
@@ -569,6 +658,10 @@ export class StatementChecker {
       const finalBody = finalizer.childForFieldName('body') ?? named(finalizer)[0];
       if (finalBody) this.checkBlockStatements(named(finalBody));
       if (!this.c.flow.isReachable) return;
+      // Past the statement, the finally block ran after the try or catch block completed normally.
+      this.c.flow.current = after;
+      if (finalBody && after) this.c.silently(() => this.checkBlockStatements(named(finalBody)));
+      return;
     }
     this.c.flow.current = after;
   }
@@ -620,4 +713,17 @@ export class StatementChecker {
     context.returnStates.push(this.c.flow.current?.clone());
     this.c.flow.current = undefined;
   }
+}
+
+function isWithin(node: TreeNode, ancestor: TreeNode): boolean {
+  for (let current: TreeNode | null = node; current; current = current.parent)
+    if (current.id === ancestor.id) return true;
+  return false;
+}
+
+/** The index signature for `string` or `number` keys that a type's body declares. */
+function indexSignatureNode(body: TreeNode, kind: 'string' | 'number'): TreeNode | undefined {
+  return named(body).find(
+    (member) => member.type === 'index_signature' && new RegExp(`^\\[\\s*\\w+\\s*:\\s*${kind}\\b`).test(member.text)
+  );
 }

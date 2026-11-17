@@ -38,7 +38,11 @@ export class OperatorChecker {
     const argument = node.childForFieldName('argument') as TreeNode;
     switch (operator) {
       case '!': {
-        this.c.conditions.checkCondition(argument);
+        // An operand that is always truthy gives `false`, and one always falsy gives `true`.
+        const { type } = this.c.conditions.condition(argument);
+        if (isAnyLike(type)) return booleanType;
+        if (isIntrinsic(this.c.flow.narrowByTruthiness(type, false), 'never')) return freshLiteralType(false);
+        if (isIntrinsic(this.c.flow.narrowByTruthiness(type, true), 'never')) return freshLiteralType(true);
         return booleanType;
       }
       case 'typeof': {
@@ -170,11 +174,14 @@ export class OperatorChecker {
         if (!this.checkNullishOperands(left, right, leftType, rightType)) return booleanType;
         const l = this.baseOfLiterals(this.c.relations.removeNullish(leftType));
         const r = this.baseOfLiterals(this.c.relations.removeNullish(rightType));
+        // Both operands are numbers, or neither is and they are comparable, as `string | number >= 1` is not.
+        const leftNumeric = this.isNumberLike(l) || this.isBigintLike(l);
+        const rightNumeric = this.isNumberLike(r) || this.isBigintLike(r);
         const ok =
           isAnyLike(l) ||
           isAnyLike(r) ||
-          ((this.isNumberLike(l) || this.isBigintLike(l)) && (this.isNumberLike(r) || this.isBigintLike(r))) ||
-          (this.c.relations.isComparable(l, r) && !(l.kind === 'object' && false));
+          (leftNumeric && rightNumeric) ||
+          (!leftNumeric && !rightNumeric && this.c.relations.isComparable(l, r));
         if (!ok) this.reportOperator(node, operator, leftType, rightType);
         return booleanType;
       }
@@ -393,6 +400,7 @@ export class OperatorChecker {
     const consequence = node.childForFieldName('consequence') as TreeNode;
     const alternative = node.childForFieldName('alternative') as TreeNode;
     const { whenTrue, whenFalse } = this.c.conditions.condition(condition);
+    this.c.conditions.checkUncalledFunction(condition, consequence);
     let trueType: Type = neverType;
     let falseType: Type = neverType;
     const afterTrue = this.c.flow.from(whenTrue, () => {
@@ -409,7 +417,8 @@ export class OperatorChecker {
     const expression = node.type === 'type_assertion' ? (named(node).at(-1) as TreeNode) : named(node)[0];
     const typeNode = node.type === 'type_assertion' ? named(named(node)[0])[0] : named(node)[1];
     if (!typeNode || node.children.some((child) => child?.type === 'const') || typeNode.text === 'const') {
-      return this.c.expressions.check(expression);
+      // `as const` gives literals that never widen.
+      return regularOf(this.c.expressions.check(expression));
     }
     const target = this.c.typeNodes.typeFromNode(typeNode);
     const source = this.c.expressions.check(expression, target);

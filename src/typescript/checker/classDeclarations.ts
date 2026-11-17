@@ -45,6 +45,7 @@ export class ClassDeclarationChecker {
     this.c.statements.checkIndexConformance(this.c.classes.membersOf(node, info, false));
     this.checkAbstractMembers(node, info);
     this.checkBaseCompatibility(node, info);
+    this.checkStaticCompatibility(node, info);
   }
 
   /** Resolves the types written in the class, so that they report the names they cannot find. */
@@ -221,6 +222,21 @@ export class ClassDeclarationChecker {
         }
         continue;
       }
+      if (visibilityRank[property.visibility] > visibilityRank[baseProperty.visibility]) {
+        this.c.error(
+          node.childForFieldName('name') ?? node,
+          `クラス '${info.name}' は、基底クラスを正しく継承していません。プロパティ '${name}' の可視性を狭めています。`
+        );
+        continue;
+      }
+      // A method may become a property, but a property may not become a method.
+      if (property.isMethod && !baseProperty.isMethod && !baseProperty.isAbstract) {
+        this.c.error(
+          property.declaration?.childForFieldName('name') ?? node,
+          `基底クラスはメンバー '${name}' をプロパティとして定義していますが、クラス '${info.name}' はメソッドとして定義しています。`
+        );
+        continue;
+      }
       const ownType = property.type();
       const baseType = baseProperty.type();
       if (!this.c.relations.isAssignable(ownType, baseType)) {
@@ -229,6 +245,22 @@ export class ClassDeclarationChecker {
           `型 '${info.name}' のプロパティ '${name}' は、基底の型の同じプロパティに代入できません。型 '${this.c.print(ownType)}' を型 '${this.c.print(baseType)}' に代入することはできません。`
         );
       }
+    }
+  }
+
+  /** Reports static members that do not fit the base class's static members of the same names. */
+  private checkStaticCompatibility(node: TreeNode, info: ClassInfo): void {
+    const baseStatic = this.c.classes.baseStaticType(node);
+    if (!baseStatic || isAnyLike(baseStatic)) return;
+    const own = this.c.classes.membersOf(node, info, true);
+    for (const [name, property] of own.properties) {
+      const baseProperty = name === 'prototype' ? undefined : this.c.propertyOf(baseStatic, name);
+      if (!baseProperty || this.c.relations.isAssignable(property.type(), baseProperty.type())) continue;
+      this.c.error(
+        node.childForFieldName('name') ?? node,
+        `クラス '${info.name}' の静的な側は、基底クラスの静的な側を正しく継承していません。プロパティ '${name}' の型が合いません。`
+      );
+      return;
     }
   }
 
@@ -278,3 +310,6 @@ export class ClassDeclarationChecker {
     return nameNode;
   }
 }
+
+/** How narrowly each visibility exposes a member, which a derived class may not narrow further. */
+const visibilityRank = { public: 0, protected: 1, private: 2 } as const;
