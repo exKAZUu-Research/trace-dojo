@@ -263,6 +263,7 @@ export class TypeOperators {
     // A key of `any` maps every string key, as TypeScript gives `{ [K in any]: T }` a string index signature.
     if (isIntrinsic(nameMember, 'string') || isAnyLike(nameMember)) structure.stringIndex = indexInfo();
     else if (isIntrinsic(nameMember, 'number')) structure.numberIndex = indexInfo();
+    else if (isIntrinsic(nameMember, 'symbol')) structure.symbolIndex = indexInfo();
   }
 
   /** The property that `keys` map to, which takes the modifiers of the source property the first key names. */
@@ -291,7 +292,6 @@ export class TypeOperators {
     };
   }
 
-  // code-gauge-allow functionCognitiveComplexity 17 -- Follows TypeScript's keys of each kind of type.
   keyofType(type: Type): Type {
     if (this.c.relations.isGeneric(type)) return { kind: 'keyof', id: newTypeId(), type };
     if (isAnyLike(type) || isIntrinsic(type, 'never')) return unionOf([stringType, numberType, symbolType]);
@@ -307,9 +307,7 @@ export class TypeOperators {
       return this.keyofType(this.c.apparentType(type));
     }
     const structure = type.resolve();
-    const keys: Type[] = [];
-    if (structure.stringIndex) keys.push(stringType, numberType);
-    else if (structure.numberIndex) keys.push(numberType);
+    const keys = indexKeys(structure);
     // keyof lists the public members only.
     for (const [name, property] of structure.properties) {
       if (name.startsWith('__@') || name.startsWith('#') || property.visibility !== 'public') continue;
@@ -360,6 +358,7 @@ export class TypeOperators {
       if (structure.stringIndex) return structure.stringIndex.type;
     }
     if (isIntrinsic(index, 'string') && structure.stringIndex) return structure.stringIndex.type;
+    if (isIntrinsic(index, 'symbol') && structure.symbolIndex) return structure.symbolIndex.type;
     if (node)
       this.c.error(node, `型 '${this.c.print(index)}' は型 '${this.c.print(object)}' のインデックスに使えません。`);
     return errorType;
@@ -373,6 +372,7 @@ export class TypeOperators {
     const numeric = typeof key === 'number' || isNumericName(name);
     if (numeric && structure.numberIndex) return structure.numberIndex.type;
     if (typeof key !== 'symbol' && structure.stringIndex) return structure.stringIndex.type;
+    if (typeof key === 'symbol' && structure.symbolIndex) return structure.symbolIndex.type;
     if (node)
       this.c.error(node, `プロパティ '${printedPropertyName(name)}' は型 '${this.c.print(object)}' にありません。`);
     return errorType;
@@ -595,4 +595,13 @@ function appendEach(prefixes: string[], members: Type[], suffix: string): string
 /** Whether a template placeholder spells one text, as a literal, `null`, or `undefined` does. */
 function isSpelledLiteral(member: Type): boolean {
   return member.kind === 'literal' || isIntrinsic(member, 'null') || isIntrinsic(member, 'undefined');
+}
+
+/** The key types that the index signatures of a structure give its `keyof`, where a string index takes numbers too. */
+function indexKeys(structure: Structure): Type[] {
+  const keys: Type[] = [];
+  if (structure.stringIndex) keys.push(stringType, numberType);
+  else if (structure.numberIndex) keys.push(numberType);
+  if (structure.symbolIndex) keys.push(symbolType);
+  return keys;
 }

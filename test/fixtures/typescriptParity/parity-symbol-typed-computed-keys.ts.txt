@@ -1,0 +1,28 @@
+function make(key: symbol) {
+  const o = { [key]: 1 };
+  return o[key];
+}
+const plain: symbol = Symbol("p");
+const pp = { [plain]: 1, name: "pp" };
+console.log(pp[plain], pp.name);
+let mut = Symbol("m");
+const m = { [mut]: "m" };
+console.log(m[mut]);
+console.log(make(Symbol()));
+
+interface Bag {
+  [k: symbol]: number;
+}
+const u = Symbol("u");
+const bag: Bag = { [plain]: 2, [u]: 3 };
+console.log(bag[plain], bag[u]);
+const read = (b: Bag, k: symbol): number => b[k] ?? 0;
+console.log(read(bag, mut));
+const getters = {
+  get [plain]() {
+    return 5;
+  },
+};
+console.log(getters[plain]);
+const keys: (keyof Bag)[] = [u, plain];
+console.log(keys.length);

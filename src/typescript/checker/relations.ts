@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 553 -- Decides assignability and comparability for every kind of type, as TypeScript's checker does in one place.
+// code-gauge-allow-file fileNcss 562 -- Decides assignability and comparability for every kind of type, as TypeScript's checker does in one place.
 import type { Checker } from './checker';
 import { isUnit } from './flow';
 import { isNumericName } from './syntax';
@@ -8,8 +8,10 @@ import {
   errorType,
   filterType,
   type IndexedAccessType,
+  type IndexInfo,
   isAnyLike,
   isIntrinsic,
+  isSymbolName,
   type ObjectType,
   type Property,
   regularOf,
@@ -26,6 +28,7 @@ import {
 } from './types';
 
 type Relation = 'assignable' | 'comparable';
+type KeyKind = 'string' | 'number' | 'symbol';
 
 const MAX_RELATION_DEPTH = 100;
 const EXPANDING_SOURCE = 1;
@@ -336,7 +339,8 @@ export class Relations {
       structure.callSignatures.length === 0 &&
       structure.constructSignatures.length === 0 &&
       !structure.stringIndex &&
-      !structure.numberIndex
+      !structure.numberIndex &&
+      !structure.symbolIndex
     );
   }
 
@@ -391,13 +395,14 @@ export class Relations {
     if (byElements !== undefined) return byElements;
     const sourceStructure = this.c.structureOf(source);
     const targetStructure = target.resolve();
-    const { stringIndex, numberIndex } = targetStructure;
+    const { stringIndex, numberIndex, symbolIndex } = targetStructure;
     return (
       this.propertiesRelated(source, sourceStructure, targetStructure, relation) &&
       this.signaturesRelated(sourceStructure.callSignatures, targetStructure.callSignatures, relation) &&
       this.signaturesRelated(sourceStructure.constructSignatures, targetStructure.constructSignatures, relation) &&
-      (!stringIndex || this.indexRelated(sourceStructure, source, stringIndex.type, false, relation)) &&
-      (!numberIndex || this.indexRelated(sourceStructure, source, numberIndex.type, true, relation))
+      (!stringIndex || this.indexRelated(sourceStructure, source, stringIndex.type, 'string', relation)) &&
+      (!numberIndex || this.indexRelated(sourceStructure, source, numberIndex.type, 'number', relation)) &&
+      (!symbolIndex || this.indexRelated(sourceStructure, source, symbolIndex.type, 'symbol', relation))
     );
   }
 
@@ -527,10 +532,10 @@ export class Relations {
     structure: Structure,
     source: Type,
     target: Type,
-    numeric: boolean,
+    keyKind: KeyKind,
     relation: Relation
   ): boolean {
-    const sourceIndex = numeric ? (structure.numberIndex ?? structure.stringIndex) : structure.stringIndex;
+    const sourceIndex = applicableIndex(structure, keyKind);
     if (sourceIndex) return this.isRelated(sourceIndex.type, target, relation);
     // An object literal's or a type literal's properties satisfy an index signature; a class's or interface's do not.
     if (
@@ -542,7 +547,7 @@ export class Relations {
       return false;
     }
     for (const [name, property] of structure.properties) {
-      if (numeric && !isNumericName(name)) continue;
+      if (!isNameOfKind(name, keyKind)) continue;
       if (property.isMethod && source.kind === 'object' && source.objectKind !== 'anonymous') continue;
       const type = property.optional ? unionOf([property.type(), undefinedType]) : property.type();
       if (!this.isRelated(type, target, relation)) return false;
@@ -776,13 +781,26 @@ function isWeakCheckedSource(source: Type): boolean {
   return ['object', 'intersection', 'literal', 'templateLiteral', 'stringMapping'].includes(source.kind);
 }
 
+/** The index signature of a structure that applies to keys of a kind, as a string index does to numeric keys. */
+function applicableIndex(structure: Structure, keyKind: KeyKind): IndexInfo | undefined {
+  if (keyKind === 'symbol') return structure.symbolIndex;
+  return keyKind === 'number' ? (structure.numberIndex ?? structure.stringIndex) : structure.stringIndex;
+}
+
+/** Whether a property name is a key of a kind, as `"0"` is both a string and a numeric key. */
+function isNameOfKind(name: string, keyKind: KeyKind): boolean {
+  if (isSymbolName(name)) return keyKind === 'symbol';
+  return keyKind === 'string' || (keyKind === 'number' && isNumericName(name));
+}
+
 function isWeakStructure(structure: Structure): boolean {
   return (
     structure.properties.size > 0 &&
     [...structure.properties.values()].every((property) => property.optional) &&
     !hasSignatures(structure) &&
     !structure.stringIndex &&
-    !structure.numberIndex
+    !structure.numberIndex &&
+    !structure.symbolIndex
   );
 }
 

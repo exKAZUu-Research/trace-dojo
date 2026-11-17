@@ -147,8 +147,13 @@ export class Printer {
     const signatureOnly = this.printSignatureOnly(structure);
     if (signatureOnly) return signatureOnly;
     const members: string[] = [];
-    if (structure.stringIndex) members.push(`[x: string]: ${this.print(structure.stringIndex.type)};`);
-    if (structure.numberIndex) members.push(`[x: number]: ${this.print(structure.numberIndex.type)};`);
+    for (const [key, index] of [
+      ['string', structure.stringIndex],
+      ['number', structure.numberIndex],
+      ['symbol', structure.symbolIndex],
+    ] as const) {
+      if (index) members.push(`${index.readonly ? 'readonly ' : ''}[x: ${key}]: ${this.print(index.type)};`);
+    }
     for (const signature of structure.callSignatures) members.push(`${this.printSignature(signature, ': ')};`);
     for (const signature of structure.constructSignatures) members.push(`new ${this.printSignature(signature, ': ')};`);
     for (const property of structure.properties.values()) members.push(...this.printProperty(property));
@@ -158,7 +163,8 @@ export class Printer {
 
   /** A function or constructor type with a single signature and no other members, as an arrow. */
   private printSignatureOnly(structure: Structure): string | undefined {
-    if (structure.properties.size > 0 || structure.stringIndex || structure.numberIndex) return undefined;
+    if (structure.properties.size > 0 || structure.stringIndex || structure.numberIndex || structure.symbolIndex)
+      return undefined;
     const { callSignatures, constructSignatures } = structure;
     if (callSignatures.length === 1 && constructSignatures.length === 0) {
       return this.printSignature(callSignatures[0], ' => ');

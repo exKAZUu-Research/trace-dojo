@@ -437,6 +437,7 @@ export class Checker {
       ),
       stringIndex: index(structure.stringIndex),
       numberIndex: index(structure.numberIndex),
+      symbolIndex: index(structure.symbolIndex),
     };
   }
 
@@ -651,6 +652,7 @@ export class Checker {
       constructSignatures: structures.flatMap((structure) => structure.constructSignatures),
       stringIndex: this.intersectedIndex(structures.map((structure) => structure.stringIndex)),
       numberIndex: this.intersectedIndex(structures.map((structure) => structure.numberIndex)),
+      symbolIndex: this.intersectedIndex(structures.map((structure) => structure.symbolIndex)),
     };
   }
 
@@ -720,7 +722,7 @@ export class Checker {
   /** The members of a type with those of its bases that it does not redeclare. */
   mergeBases(own: Structure, bases: Type[]): Structure {
     const properties = new Map(own.properties);
-    let { stringIndex, numberIndex } = own;
+    let { stringIndex, numberIndex, symbolIndex } = own;
     const callSignatures = [...own.callSignatures];
     const constructSignatures = [...own.constructSignatures];
     for (const base of bases) {
@@ -730,11 +732,12 @@ export class Checker {
         if (!properties.has(name)) properties.set(name, property);
       stringIndex ??= baseStructure.stringIndex;
       numberIndex ??= baseStructure.numberIndex;
+      symbolIndex ??= baseStructure.symbolIndex;
       // An interface has the signatures of every base after its own, as TypeScript appends them.
       callSignatures.push(...baseStructure.callSignatures);
       constructSignatures.push(...baseStructure.constructSignatures);
     }
-    return { properties, callSignatures, constructSignatures, stringIndex, numberIndex };
+    return { properties, callSignatures, constructSignatures, stringIndex, numberIndex, symbolIndex };
   }
 
   // Helpers ------------------------------------------------------------------------------------------------------

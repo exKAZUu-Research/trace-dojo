@@ -28,6 +28,7 @@ import {
   freshLiteralType,
   isAnyLike,
   isIntrinsic,
+  isSymbolName,
   nullType,
   type ObjectType,
   type Property,
@@ -665,7 +666,8 @@ export class ExpressionChecker {
       (member) =>
         (this.c.propertyOf(member, name) !== undefined && !this.isObjectPrototypeProperty(member, name)) ||
         this.c.structureOf(member).stringIndex !== undefined ||
-        (isNumericName(name) && this.c.structureOf(member).numberIndex !== undefined)
+        (isNumericName(name) && this.c.structureOf(member).numberIndex !== undefined) ||
+        (isSymbolName(name) && this.c.structureOf(member).symbolIndex !== undefined)
     );
   }
 

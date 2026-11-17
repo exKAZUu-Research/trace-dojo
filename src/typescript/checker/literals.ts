@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 468 -- Types array and object literals with their spreads, members, and widening, which share one literal state.
+// code-gauge-allow-file fileNcss 508 -- Types array and object literals with their spreads, members, and widening, which share one literal state.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import type { Checker } from './checker';
@@ -13,6 +13,7 @@ import {
   isAnyLike,
   isIntrinsic,
   isPropertyKeyLiteral,
+  isSymbolName,
   mapType,
   neverType,
   newTypeId,
@@ -22,6 +23,7 @@ import {
   regularOf,
   stringType,
   type Structure,
+  symbolType,
   type Type,
   type TypeParameter,
   undefinedType,
@@ -30,15 +32,20 @@ import {
 } from './types';
 
 type MemberKind = 'property' | 'get' | 'set';
-type Indexes = Pick<Structure, 'stringIndex' | 'numberIndex'>;
+type IndexKey = 'stringIndex' | 'numberIndex' | 'symbolIndex';
+type Indexes = Pick<Structure, IndexKey>;
 
 /** An object literal being checked, with the members checked so far. */
 interface ObjectLiteral {
   contextual: Type | undefined;
   isConstContext: boolean;
   properties: Map<string, Property>;
-  /** The index signature that the members written since the last spread give the literal with computed keys. */
-  stringIndex?: Type;
+  /**
+   * The members written since the last spread, which give the literal an index signature for each key kind that a
+   * computed key of no literal type has: the names of those with a name, and the key kinds and types of the others.
+   */
+  writtenNames: Set<string>;
+  computedMembers: { key: IndexKey; type: Type }[];
   /** Whether members are written since the last spread, which TypeScript spreads as one object literal. */
   hasPendingMembers?: boolean;
   /** Spreads of type parameters, which the literal's type intersects. */
@@ -201,6 +208,8 @@ export class LiteralChecker {
       declarations,
       receiver: anonymousObject(() => ({ ...emptyStructure(), properties: declarations })),
       genericSpreads: [],
+      writtenNames: new Set(),
+      computedMembers: [],
       seenKeys: new Map(),
       object: anonymousObject(
         () => ({
@@ -349,12 +358,31 @@ export class LiteralChecker {
       return;
     }
     const valueType = this.memberValue(literal, value, this.indexContext(literal, keyType));
-    literal.stringIndex = unionOf([literal.stringIndex ?? neverType, valueType], true);
+    this.addComputedMember(literal, keyType, valueType);
+  }
+
+  /** Records a member whose key is not one literal, which TypeScript leaves out of the literal's named properties. */
+  private addComputedMember(literal: ObjectLiteral, keyType: Type, type: Type): void {
+    const key = this.indexKeyOf(keyType);
+    if (key) literal.computedMembers.push({ key, type });
+  }
+
+  /** The index signature a computed key of a type gives the literal: none for a type that cannot be a key. */
+  private indexKeyOf(keyType: Type): IndexKey | undefined {
+    const { relations } = this.c;
+    if (relations.isAssignable(keyType, numberType)) return 'numberIndex';
+    if (relations.isAssignable(keyType, symbolType)) return 'symbolIndex';
+    return relations.isAssignable(keyType, unionOf([stringType, numberType, symbolType])) ? 'stringIndex' : undefined;
   }
 
   private namedMember(literal: ObjectLiteral, member: TreeNode, name: string, value: TreeNode): void {
     const valueType = this.memberValue(literal, value, this.memberContext(literal, name));
-    literal.properties.set(name, this.literalProperty(name, valueType, literal.isConstContext, member));
+    this.setWritten(literal, name, this.literalProperty(name, valueType, literal.isConstContext, member));
+  }
+
+  private setWritten(literal: ObjectLiteral, name: string, property: Property): void {
+    literal.properties.set(name, property);
+    literal.writtenNames.add(name);
   }
 
   private memberValue(literal: ObjectLiteral, value: TreeNode, context: Type | undefined): Type {
@@ -364,17 +392,21 @@ export class LiteralChecker {
 
   /**
    * The type the contextual type's index signatures give a member whose computed key is not one literal: its number
-   * index for a numeric key, else its string index.
+   * index for a numeric key, its symbol index for a symbol key, else its string index.
    */
   private indexContext(literal: ObjectLiteral, keyType: Type): Type | undefined {
     if (!literal.contextual) return undefined;
     const isNumeric = this.c.relations.isAssignable(keyType, numberType);
     const isString = isNumeric || this.c.relations.isAssignable(keyType, stringType);
+    const isSymbol = this.c.relations.isAssignable(keyType, symbolType);
     const contextMembers = literal.contextual.kind === 'union' ? literal.contextual.types : [literal.contextual];
     const types = contextMembers.flatMap((member) => {
       if (member.kind !== 'object' && member.kind !== 'intersection') return [];
-      const { stringIndex, numberIndex } = this.c.structureOf(member);
-      const index = (isNumeric ? numberIndex : undefined) ?? (isString ? stringIndex : undefined);
+      const { stringIndex, numberIndex, symbolIndex } = this.c.structureOf(member);
+      const index =
+        (isNumeric ? numberIndex : undefined) ??
+        (isString ? stringIndex : undefined) ??
+        (isSymbol ? symbolIndex : undefined);
       return index ? [index.type] : [];
     });
     return types.length > 0 ? unionOf(types, true) : undefined;
@@ -421,7 +453,7 @@ export class LiteralChecker {
     const valueType = literal.isConstContext
       ? type
       : this.widenForMutableLocation(type, this.memberContext(literal, name));
-    literal.properties.set(name, this.literalProperty(name, valueType, literal.isConstContext, member));
+    this.setWritten(literal, name, this.literalProperty(name, valueType, literal.isConstContext, member));
   }
 
   private methodMember(literal: ObjectLiteral, member: TreeNode): void {
@@ -429,21 +461,19 @@ export class LiteralChecker {
     const name = this.memberName(nameNode);
     const isGetter = hasToken(member, 'get');
     const isSetter = hasToken(member, 'set');
-    const context =
-      name === undefined
-        ? this.indexContext(literal, this.c.expressions.check(named(nameNode)[0] ?? nameNode))
-        : this.memberContext(literal, name);
+    const keyType = name === undefined ? this.c.expressions.check(named(nameNode)[0] ?? nameNode) : undefined;
+    const context = keyType ? this.indexContext(literal, keyType) : this.memberContext(literal, name as string);
     const methodType = this.c.classes.withObjectThis(
       literal.receiver,
       () => this.c.functions.functionExpression(member, context),
       member
     );
     // A key that is not a literal gives the object an index signature, as a computed property does.
-    if (name === undefined) {
-      const valueType = isGetter ? (this.c.signaturesOf(methodType, 'call')[0]?.returnType() ?? anyType) : methodType;
-      if (!isSetter) literal.stringIndex = unionOf([literal.stringIndex ?? neverType, valueType], true);
+    if (keyType) {
+      this.addComputedMember(literal, keyType, this.computedMethodValue(member, methodType));
       return;
     }
+    if (name === undefined) return;
     // TypeScript's grammar check compares only names written as literals.
     if (propertyNameText(nameNode) !== undefined)
       this.checkDuplicateKey(literal, nameNode, name, isGetter ? 'get' : isSetter ? 'set' : 'property');
@@ -451,7 +481,15 @@ export class LiteralChecker {
       this.accessorMember(literal, member, name, methodType);
       return;
     }
-    literal.properties.set(name, { ...this.literalProperty(name, methodType, false, member), isMethod: true });
+    this.setWritten(literal, name, { ...this.literalProperty(name, methodType, false, member), isMethod: true });
+  }
+
+  /** The type a method or accessor of a computed key gives the index signature: an accessor's value type. */
+  private computedMethodValue(member: TreeNode, methodType: Type): Type {
+    const signature = this.c.signaturesOf(methodType, 'call')[0];
+    if (hasToken(member, 'get')) return signature?.returnType() ?? anyType;
+    if (hasToken(member, 'set')) return signature?.parameters[0]?.type ?? anyType;
+    return methodType;
   }
 
   /** The name of a member, read ahead of the check of the member itself without reporting or narrowing anything. */
@@ -474,6 +512,7 @@ export class LiteralChecker {
 
   private accessorMember(literal: ObjectLiteral, member: TreeNode, name: string, methodType: Type): void {
     const { properties } = literal;
+    literal.writtenNames.add(name);
     const isGetter = hasToken(member, 'get');
     const signature = this.c.signaturesOf(methodType, 'call')[0];
     const existing = properties.get(name);
@@ -547,12 +586,31 @@ export class LiteralChecker {
   /** Spreads the members written since the last spread as the one object literal TypeScript makes of them. */
   private spreadWrittenIndexes(literal: ObjectLiteral): void {
     this.addSpreadIndexes(literal, this.writtenIndexes(literal));
-    literal.stringIndex = undefined;
+    literal.writtenNames.clear();
+    literal.computedMembers = [];
     literal.hasPendingMembers = false;
   }
 
+  /**
+   * The index signatures of the members written since the last spread: one for each key kind a computed member has,
+   * typed by every member whose key it applies to, as a string index applies to every key but a symbol.
+   */
   private writtenIndexes(literal: ObjectLiteral): Indexes {
-    return { stringIndex: literal.stringIndex && { type: literal.stringIndex, readonly: literal.isConstContext } };
+    const members = [
+      ...literal.computedMembers,
+      ...[...literal.writtenNames].flatMap((name) => {
+        const property = literal.properties.get(name);
+        return property ? [{ key: indexKeyOfName(name), type: property.type() }] : [];
+      }),
+    ];
+    const indexes: Indexes = {};
+    for (const { key } of literal.computedMembers) {
+      const types = members
+        .filter((member) => (key === 'stringIndex' ? member.key !== 'symbolIndex' : member.key === key))
+        .map((member) => member.type);
+      indexes[key] = { type: unionOf(types, true), readonly: literal.isConstContext };
+    }
+    return indexes;
   }
 
   private addSpreadIndexes(literal: ObjectLiteral, indexes: Indexes): void {
@@ -571,16 +629,21 @@ export class LiteralChecker {
         ? { type: unionOf([leftIndex.type, rightIndex.type]), readonly: false }
         : undefined;
     };
-    return { stringIndex: combine('stringIndex'), numberIndex: combine('numberIndex') };
+    return {
+      stringIndex: combine('stringIndex'),
+      numberIndex: combine('numberIndex'),
+      symbolIndex: combine('symbolIndex'),
+    };
   }
 
   /** The index signatures a spread copies, which are writable in the copy unless it is in a `const` context. */
   private indexesOf(type: Type | undefined, readonly: boolean): Indexes {
     if (type?.kind !== 'object' && type?.kind !== 'intersection') return {};
-    const { stringIndex, numberIndex } = this.c.structureOf(type);
+    const { stringIndex, numberIndex, symbolIndex } = this.c.structureOf(type);
     return {
       stringIndex: stringIndex && { ...stringIndex, readonly },
       numberIndex: numberIndex && { ...numberIndex, readonly },
+      symbolIndex: symbolIndex && { ...symbolIndex, readonly },
     };
   }
 
@@ -745,8 +808,10 @@ export class LiteralChecker {
         continue;
       }
       const structure = this.c.structureOf(apparent);
-      if (structure.stringIndex) types.push(structure.stringIndex.type);
-      else if (isNumericName(name) && structure.numberIndex) types.push(structure.numberIndex.type);
+      const index = isSymbolName(name)
+        ? structure.symbolIndex
+        : (structure.stringIndex ?? (isNumericName(name) ? structure.numberIndex : undefined));
+      if (index) types.push(index.type);
     }
     return types.length > 0 ? unionOf(types, true) : undefined;
   }
@@ -825,6 +890,11 @@ export class LiteralChecker {
       );
     });
   }
+}
+
+function indexKeyOfName(name: string): IndexKey {
+  if (isSymbolName(name)) return 'symbolIndex';
+  return isNumericName(name) ? 'numberIndex' : 'stringIndex';
 }
 
 function isObjectLiteral(type: Type): type is ObjectType {

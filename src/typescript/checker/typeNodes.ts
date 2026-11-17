@@ -537,14 +537,7 @@ export class TypeNodes {
           break;
         }
         case 'index_signature': {
-          const indexType = member.childForFieldName('index_type');
-          const info: IndexInfo = {
-            type: this.annotationType(member.childForFieldName('type')) ?? anyType,
-            readonly: member.children.some((child) => child?.type === 'readonly'),
-          };
-          const keyType = indexType ? this.typeFromNode(indexType) : stringType;
-          if (isIntrinsic(keyType, 'number')) structure.numberIndex = info;
-          else structure.stringIndex = info;
+          this.addIndexSignature(structure, member);
           break;
         }
         default: {
@@ -553,6 +546,24 @@ export class TypeNodes {
       }
     }
     return structure;
+  }
+
+  /** Sets the index signature of each key type an index signature declares, as `[k: string | symbol]` declares two. */
+  private addIndexSignature(structure: Structure, member: TreeNode): void {
+    const indexType = member.childForFieldName('index_type');
+    const info: IndexInfo = {
+      type: this.annotationType(member.childForFieldName('type')) ?? anyType,
+      readonly: member.children.some((child) => child?.type === 'readonly'),
+    };
+    const keyType = indexType ? this.typeFromNode(indexType) : stringType;
+    for (const key of keyType.kind === 'union' ? keyType.types : [keyType]) {
+      const indexKey = isIntrinsic(key, 'number')
+        ? 'numberIndex'
+        : isIntrinsic(key, 'symbol')
+          ? 'symbolIndex'
+          : 'stringIndex';
+      structure[indexKey] = info;
+    }
   }
 
   /** The name of a member, which a computed key gives by its literal type, as a constant's. */

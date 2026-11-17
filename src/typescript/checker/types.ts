@@ -121,6 +121,7 @@ export interface Structure {
   constructSignatures: Signature[];
   stringIndex?: IndexInfo;
   numberIndex?: IndexInfo;
+  symbolIndex?: IndexInfo;
 }
 
 /** The information about a class that its instances' private and protected members and its checks need. */
@@ -301,6 +302,11 @@ export function uniqueSymbolType(name: string): LiteralType {
 /** The name of the declaration of the unique symbol a property name stands for, if it stands for one. */
 export function uniqueSymbolName(propertyName: string): string | undefined {
   return /^Symbol\((.*)@\d+\)$/.exec(propertyName)?.[1];
+}
+
+/** Whether a property name stands for a symbol: a unique symbol or a well-known one, as `__@iterator`. */
+export function isSymbolName(propertyName: string): boolean {
+  return propertyName.startsWith('__@') || uniqueSymbolName(propertyName) !== undefined;
 }
 
 /** Whether a type is a literal that names a property: a string, a number, or a unique symbol. */

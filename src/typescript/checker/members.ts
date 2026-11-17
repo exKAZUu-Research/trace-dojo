@@ -403,7 +403,11 @@ export class MemberChecker {
     const numeric =
       this.c.relations.isAssignable(indexType, numberType) ||
       (indexType.kind === 'literal' && typeof indexType.value === 'string' && isNumericName(indexType.value));
-    const signature = numeric ? (structure.numberIndex ?? structure.stringIndex) : structure.stringIndex;
+    const signature = this.c.relations.isAssignable(indexType, symbolType)
+      ? structure.symbolIndex
+      : numeric
+        ? (structure.numberIndex ?? structure.stringIndex)
+        : structure.stringIndex;
     return signature?.readonly === true;
   }
 
@@ -453,8 +457,11 @@ export class MemberChecker {
     }
     if (objectType.kind === 'union') return this.indexedTypeOfMembers(access, objectType, indexType);
     const property = this.c.propertyOf(objectType, name);
-    // A unique symbol matches no string or number index signature.
-    if (!property) return typeof value === 'symbol' ? undefined : this.indexSignatureType(objectType, name);
+    // A unique symbol matches the symbol index signature only.
+    if (!property)
+      return typeof value === 'symbol'
+        ? this.c.structureOf(objectType).symbolIndex?.type
+        : this.indexSignatureType(objectType, name);
     this.checkPropertyAvailability(access.indexNode, objectType, name, property);
     this.c.expressions.expandos.checkAssignedBefore(access.node, access.indexNode, property);
     // `o["secret"]` reads a private or protected member, which TypeScript leaves as a way around its access checks.
@@ -474,6 +481,7 @@ export class MemberChecker {
     const structure = this.c.structureOf(objectType);
     if (isNumeric && structure.numberIndex) return structure.numberIndex.type;
     if ((isNumeric || isStringy) && structure.stringIndex) return structure.stringIndex.type;
+    if (structure.symbolIndex && this.c.relations.isAssignable(index, symbolType)) return structure.symbolIndex.type;
     if (index.kind === 'union' && index.types.every((member) => member.kind === 'literal')) {
       return unionOf(index.types.map((member) => this.indexedTypeAt(access, objectType, member)));
     }
