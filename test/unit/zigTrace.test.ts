@@ -475,3 +475,24 @@ test('large byte strings and nested numeric arrays use bounded reference preview
   if (previews?.s.kind === 'value') expect(String(previews.s.value)).toContain('… (20000 bytes)');
   expect(previews?.a).toMatchObject({ kind: 'array', entries: { '…': { kind: 'value', value: '… (20000 items)' } } });
 });
+
+test.each(['u8', 'u16'])('repeated %s array views share a bounded trace preview allowance', (type) => {
+  const views = Array.from({ length: 100 }, (_, i) => `const a${i}:[]const ${type}=&a;`).join('');
+  const uses = Array.from({ length: 100 }, (_, i) => `_=a${i};`).join('');
+  const source = `const std=@import("std");pub fn main()void{var a:[9999]${type}=@splat(97);_=&a;${views}${uses}std.debug.print("done",.{});}`;
+  const result = traceProgram('zig', source, source);
+  expect(result.stderr).toBe('done');
+  expect(result.uncaughtException).toBeUndefined();
+  expect(result.traceItems.length).toBeGreaterThan(100);
+  expect(result.traceItems.at(-1)?.referenceVars['…']).toMatchObject({ kind: 'value', value: '…', verbatim: true });
+  expect(JSON.stringify(result.traceItems).length).toBeLessThan(10_000_000);
+});
+
+test('oversized numeric preview attempts consume the shared trace allowance', () => {
+  const source = `pub fn main()void{const x:u65535=1<<65534;for(0..100)|_|{_=x;}}`;
+  const result = traceProgram('zig', source, source);
+  expect(result.uncaughtException).toBeUndefined();
+  expect(result.traceItems.length).toBeGreaterThan(100);
+  expect(result.traceItems.at(-1)?.referenceVars['…']).toMatchObject({ kind: 'value', value: '…', verbatim: true });
+  expect(result.finalVars).not.toHaveProperty('x');
+});

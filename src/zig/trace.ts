@@ -1,9 +1,10 @@
 // code-gauge-allow-file duplicateLines 17 -- Library types repeat the same shape of method on purpose, each over its own state.
+import { LIMITS } from '../interpreter/limits';
 import type { ProgramRecording } from '../interpreter/program';
 import type { ProgramInput } from '../interpreter/programIo';
 import type { TraceOptions } from '../interpreter/traceAnnotations';
 import { TraceRecorder, type TraceVariables } from '../interpreter/traceRecorder';
-import type { DisplayNode, TraceItemVariable, TraceScalar } from '../problems/trace';
+import type { DisplayNode, TraceItemVariable } from '../problems/trace';
 import { type CompiledProgram, compileSource } from './compiler';
 import { runProgram } from './execute';
 import {
@@ -53,31 +54,53 @@ export function traceZigProgram(program: string, trace: TraceOptions, input?: Pr
   return { traceItems: recorder.traceItems, finalVars, ...run };
 }
 
+interface PreviewPool {
+  remaining: number;
+  deadline: number;
+}
+
 class Snapshotter {
+  private readonly previews: PreviewPool = {
+    remaining: LIMITS.maxSlots,
+    deadline: performance.now() + LIMITS.maxMilliseconds,
+  };
   constructor(private readonly program: CompiledProgram) {}
 
   /**
    * The variables a frame shows: its locals in scope, then, when `withGlobals`, the container-level variables. A
    * method's receiver also shows its fields as `self.x`, as Java's `this.x`.
    */
+  // code-gauge-allow functionCognitiveComplexity 16 -- Preserves visible variable order while enforcing the shared preview allowance.
   variablesOf(frame: Frame, withGlobals: boolean): TraceVariables {
     const variables: TraceVariables = {
       vars: Object.create(null) as TraceVariables['vars'],
       referenceVars: Object.create(null) as TraceVariables['referenceVars'],
     };
     if (frame.fn.internal) return variables;
+    if (previewRemaining(this.previews) === 0) {
+      variables.referenceVars['…'] = TRUNCATED;
+      return variables;
+    }
     const shown = new Set<string>();
     for (const local of frame.fn.locals) {
+      if (previewRemaining(this.previews) === 0) {
+        variables.referenceVars['…'] = TRUNCATED;
+        break;
+      }
       const value = frame.slots[local.slot];
       if (value === UNASSIGNED || local.name.startsWith('\0') || local.name === '_') continue;
       shown.add(local.name);
-      addVariable(variables, local.name, value, local.type);
-      if (local.isReceiver) addReceiverFields(variables, local.name, value, local.type);
+      addVariable(variables, local.name, value, local.type, this.previews);
+      if (local.isReceiver) addReceiverFields(variables, local.name, value, local.type, this.previews);
     }
     if (!withGlobals) return variables;
     for (const global of this.program.globals) {
+      if (previewRemaining(this.previews) === 0) {
+        variables.referenceVars['…'] = TRUNCATED;
+        break;
+      }
       if (shown.has(global.name)) continue;
-      addVariable(variables, global.name, global.cell.slots[0], global.type);
+      addVariable(variables, global.name, global.cell.slots[0], global.type, this.previews);
     }
     return variables;
   }
@@ -87,18 +110,33 @@ type Scalar = TraceItemVariable[string];
 const NOT_SCALAR = Symbol('notScalar');
 const MAX_SCALAR_EXPANSION = 10_000;
 const MAX_DISPLAY_EXPANSION = 2000;
-interface PreviewBudget {
-  remaining: number;
+class PreviewBudget {
+  constructor(
+    private available: number,
+    private readonly pool?: PreviewPool
+  ) {}
+
+  get remaining(): number {
+    return Math.min(this.available, this.pool ? previewRemaining(this.pool) : Infinity);
+  }
+
+  spend(cost = 1): boolean {
+    const accepted = cost <= this.remaining;
+    this.available = Math.max(0, this.available - cost);
+    if (this.pool) this.pool.remaining = Math.max(0, this.pool.remaining - cost);
+    return accepted;
+  }
 }
 const TRUNCATED: DisplayNode = { kind: 'value', value: '…', verbatim: true };
 
-function addVariable(variables: TraceVariables, name: string, value: Value, type: Type): void {
+function addVariable(variables: TraceVariables, name: string, value: Value, type: Type, pool: PreviewPool): void {
   if (isHiddenType(type)) return;
-  const scalar = scalarOf(value, type);
+  if (!spendPreview(pool, name.length)) return;
+  const scalar = scalarOf(value, type, previewBudget(MAX_SCALAR_EXPANSION, pool));
   if (scalar !== NOT_SCALAR) variables.vars[name] = scalar;
   // Arrays and slices also appear as references so that learners can expand their elements.
   if (scalar !== NOT_SCALAR && !isSequence(type)) return;
-  const node = displayNodeOf(value, type, new Set());
+  const node = displayNodeOf(value, type, new Set(), previewBudget(MAX_DISPLAY_EXPANSION, pool));
   if (node) variables.referenceVars[name] = node;
 }
 
@@ -114,7 +152,7 @@ function isSequence(type: Type): boolean {
 }
 
 /** A receiver's fields show as `self.x`, as Java shows `this.x`. */
-function addReceiverFields(variables: TraceVariables, name: string, value: Value, type: Type): void {
+function addReceiverFields(variables: TraceVariables, name: string, value: Value, type: Type, pool: PreviewPool): void {
   let struct = value;
   let structType = type;
   if (type.kind === 'pointer' && type.size === 'one') {
@@ -123,7 +161,8 @@ function addReceiverFields(variables: TraceVariables, name: string, value: Value
   }
   if (structType.kind !== 'struct' || !(struct instanceof ZStruct)) return;
   for (const [index, field] of (structType.fields ?? []).entries()) {
-    const scalar = scalarOf(struct.slots[index], field.type);
+    if (!spendPreview(pool, name.length + field.name.length + 1)) break;
+    const scalar = scalarOf(struct.slots[index], field.type, previewBudget(MAX_SCALAR_EXPANSION, pool));
     if (scalar !== NOT_SCALAR) variables.vars[`${name}.${field.name}`] = scalar;
   }
 }
@@ -138,33 +177,34 @@ function isString(type: Type): boolean {
   return false;
 }
 
-// code-gauge-allow functionCognitiveComplexity 25 -- Dispatches scalar conversion while sharing one expansion budget.
-// code-gauge-allow functionNcss 42 -- Keeps supported scalar type cases together.
+// code-gauge-allow functionCognitiveComplexity 27 -- Dispatches scalar conversion while sharing one expansion budget.
+// code-gauge-allow functionNcss 44 -- Keeps supported scalar type cases together.
 function scalarOf(
   value: Value,
   type: Type,
   budget: PreviewBudget = previewBudget(MAX_SCALAR_EXPANSION),
   depth = 0
 ): Scalar | typeof NOT_SCALAR {
-  if (budget.remaining-- <= 0 || depth >= 128) return NOT_SCALAR;
+  if (!budget.spend() || depth >= 128) return NOT_SCALAR;
   if (value === UNASSIGNED) return NOT_SCALAR;
   if (isUndefinedMemory(value)) return 'undefined';
+  if (value instanceof BigFloat && !budget.spend(1 + Math.ceil(Math.abs(value.exponent) / 64))) return NOT_SCALAR;
   switch (type.kind) {
     case 'int':
     case 'comptime_int':
     case 'comptime_float':
     case 'bool': {
-      return basicScalar(value);
+      return basicScalar(value, 128, budget);
     }
     case 'float': {
-      return floatScalar(value, type.bits);
+      return floatScalar(value, type.bits, budget);
     }
     case 'enum': {
       const field = type.fields?.find((each) => each.value === value);
-      return field ? `.${field.name}` : basicScalar(value);
+      return field ? textScalar(`.${field.name}`, budget) : basicScalar(value, 128, budget);
     }
     case 'error_set': {
-      return value instanceof ErrorValue ? `error.${value.name}` : NOT_SCALAR;
+      return value instanceof ErrorValue ? textScalar(`error.${value.name}`, budget) : NOT_SCALAR;
     }
     case 'optional': {
       // An optional object is a reference, which shows among the references as Java's null references do.
@@ -174,7 +214,7 @@ function scalarOf(
       return scalarOf(value instanceof Some ? value.value : value, type.child, budget, depth + 1);
     }
     case 'error_union': {
-      if (value instanceof ErrorValue) return `error.${value.name}`;
+      if (value instanceof ErrorValue) return textScalar(`error.${value.name}`, budget);
       return scalarOf(value, type.payload, budget, depth + 1);
     }
     case 'pointer': {
@@ -196,8 +236,8 @@ function scalarOf(
   }
 }
 
-function floatScalar(value: Value, bits: FloatBits): TraceScalar {
-  if (bits > 32 || typeof value !== 'number' || !Number.isFinite(value)) return basicScalar(value, bits);
+function floatScalar(value: Value, bits: FloatBits, budget: PreviewBudget): Scalar | typeof NOT_SCALAR {
+  if (bits > 32 || typeof value !== 'number' || !Number.isFinite(value)) return basicScalar(value, bits, budget);
   const decimal = shortestDecimal(value, bits);
   return Number(`${decimal.sign ? '-' : ''}${decimal.mantissa}e${decimal.exponent}`);
 }
@@ -205,7 +245,7 @@ function floatScalar(value: Value, bits: FloatBits): TraceScalar {
 function stringScalar(value: Value, budget: PreviewBudget): Scalar | typeof NOT_SCALAR {
   const sequence = sequenceOf(value);
   if (sequence.lengthValue > BigInt(budget.remaining)) return NOT_SCALAR;
-  budget.remaining -= sequence.length;
+  budget.spend(sequence.length);
   return decodeUtf8(Array.from({ length: sequence.length }, (_, index) => Number(sequence.get(index))));
 }
 
@@ -236,20 +276,28 @@ function hasScalarElements(type: Type): boolean {
   return type.kind === 'int' || type.kind === 'float' || type.kind === 'bool' || type.kind === 'enum' || isString(type);
 }
 
-function basicScalar(value: Value, bits: FloatBits = 128): TraceScalar {
+function basicScalar(value: Value, bits: FloatBits, budget: PreviewBudget): Scalar | typeof NOT_SCALAR {
   if (typeof value === 'bigint') {
     const number = Number(value);
-    return Number.isSafeInteger(number) ? number : value;
+    return Number.isSafeInteger(number) ? number : integerScalar(value, budget);
   }
   if (typeof value === 'number' || typeof value === 'boolean') return value;
   if (value instanceof BigFloat) {
     const number = toNumber(value);
     if (value.kind !== 'finite' || compareFloats(value, number) === 0) return number;
-    if (isIntegral(value)) return truncateToBigInt(value);
-    return decimalText(value, bits);
+    if (isIntegral(value)) return integerScalar(truncateToBigInt(value), budget);
+    return textScalar(decimalText(value, bits), budget);
   }
   // oxlint-disable-next-line unicorn/no-null -- The trace format shows a missing value as null.
   return null;
+}
+
+function integerScalar(value: bigint, budget: PreviewBudget): Scalar | typeof NOT_SCALAR {
+  return budget.spend(value.toString().length) ? value : NOT_SCALAR;
+}
+
+function textScalar(value: string, budget: PreviewBudget): Scalar | typeof NOT_SCALAR {
+  return budget.spend(value.length) ? value : NOT_SCALAR;
 }
 
 function decimalText(value: BigFloat, bits: FloatBits): string {
@@ -275,7 +323,7 @@ function displayNodeOf(
   seen: Set<unknown>,
   budget: PreviewBudget = previewBudget(MAX_DISPLAY_EXPANSION)
 ): DisplayNode | undefined {
-  if (budget.remaining-- <= 0 || seen.size >= 128) return TRUNCATED;
+  if (!budget.spend() || seen.size >= 128) return TRUNCATED;
   try {
     return guardedDisplayNode(value, type, seen, budget);
   } catch (error) {
@@ -301,8 +349,8 @@ function guardedDisplayNode(
   }
 }
 
-// code-gauge-allow functionCognitiveComplexity 30 -- Dispatches bounded reference previews over Zig value representations.
-// code-gauge-allow functionNcss 49 -- Keeps scalar, wrapper and aggregate display selection together.
+// code-gauge-allow functionCognitiveComplexity 22 -- Dispatches reference graphs while keeping wrapper payloads transparent.
+// code-gauge-allow functionNcss 43 -- Keeps aggregate representation cases together.
 function displayValue(value: Value, type: Type, seen: Set<unknown>, budget: PreviewBudget): DisplayNode | undefined {
   if (budget.remaining <= 0) return TRUNCATED;
   if (value === UNASSIGNED) return undefined;
@@ -316,21 +364,8 @@ function displayValue(value: Value, type: Type, seen: Set<unknown>, budget: Prev
       entries: { x: { kind: 'value', value: turtle.x }, y: { kind: 'value', value: turtle.y } },
     };
   }
-  const scalar = isSequence(type) && !isString(type) ? NOT_SCALAR : scalarOf(value, type, budget);
-  if (scalar !== NOT_SCALAR && !Array.isArray(scalar)) {
-    return {
-      kind: 'value',
-      value: scalar,
-      ...(isFloatScalar(type) && typeof scalar === 'string' ? { verbatim: true as const } : {}),
-    };
-  }
-  if (isString(type) && !isUndefinedMemory(value)) {
-    const sequence = sequenceOf(value);
-    const length = Math.min(sequence.length, budget.remaining);
-    budget.remaining -= length;
-    const text = decodeUtf8(Array.from({ length }, (_, index) => Number(sequence.get(index))));
-    return { kind: 'value', value: `${text}… (${sequence.lengthValue} bytes)` };
-  }
+  const scalar = scalarNodeOf(value, type, budget);
+  if (scalar) return scalar;
   switch (type.kind) {
     case 'optional': {
       if (value === NULL) return NULL_NODE;
@@ -363,6 +398,37 @@ function displayValue(value: Value, type: Type, seen: Set<unknown>, budget: Prev
   }
 }
 
+function scalarNodeOf(value: Value, type: Type, budget: PreviewBudget): DisplayNode | undefined {
+  const scalar = isSequence(type) && !isString(type) ? NOT_SCALAR : scalarOf(value, type, budget);
+  if (scalar !== NOT_SCALAR && !Array.isArray(scalar)) {
+    return {
+      kind: 'value',
+      value: scalar,
+      ...(isFloatScalar(type) && typeof scalar === 'string' ? { verbatim: true as const } : {}),
+    };
+  }
+  if (isString(type) && !isUndefinedMemory(value)) {
+    const sequence = sequenceOf(value);
+    const length = Math.min(sequence.length, budget.remaining);
+    budget.spend(length);
+    const text = decodeUtf8(Array.from({ length }, (_, index) => Number(sequence.get(index))));
+    return { kind: 'value', value: `${text}… (${sequence.lengthValue} bytes)` };
+  }
+  switch (type.kind) {
+    case 'int':
+    case 'comptime_int':
+    case 'float':
+    case 'comptime_float':
+    case 'enum':
+    case 'error_set': {
+      return TRUNCATED;
+    }
+    default: {
+      return undefined;
+    }
+  }
+}
+
 function structNode(
   value: Value,
   type: Extract<Type, { kind: 'struct' }>,
@@ -372,7 +438,7 @@ function structNode(
   if (!(value instanceof ZStruct)) return undefined;
   const entries = Object.create(null) as Record<string, DisplayNode>;
   for (const [index, field] of (type.fields ?? []).entries()) {
-    if (budget.remaining <= 0) {
+    if (!budget.spend(field.name.length)) {
       let marker = '…';
       while (Object.hasOwn(entries, marker)) marker += '…';
       entries[marker] = TRUNCATED;
@@ -407,6 +473,20 @@ function sequenceNode(items: ZArray | Slice, child: Type, seen: Set<unknown>, bu
   return { kind: 'array', entries };
 }
 
-function previewBudget(remaining: number): PreviewBudget {
-  return { remaining };
+function previewBudget(remaining: number, pool?: PreviewPool): PreviewBudget {
+  return new PreviewBudget(remaining, pool);
+}
+
+function previewRemaining(pool: PreviewPool): number {
+  if (performance.now() >= pool.deadline) pool.remaining = 0;
+  return pool.remaining;
+}
+
+function spendPreview(pool: PreviewPool, cost: number): boolean {
+  if (cost > previewRemaining(pool)) {
+    pool.remaining = 0;
+    return false;
+  }
+  pool.remaining -= cost;
+  return true;
 }
