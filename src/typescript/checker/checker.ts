@@ -200,9 +200,7 @@ export class Checker {
   /** A generic interface or class applied to type arguments. */
   reference(target: ObjectType, typeArguments: Type[]): ObjectType {
     const parameters = target.typeParameters ?? [];
-    const filled = parameters.map(
-      (parameter, index) => typeArguments[index] ?? this.defaultOf(parameter, typeArguments)
-    );
+    const filled = this.fillTypeArguments(parameters, typeArguments);
     if (filled.every((argument, index) => argument === parameters[index])) return target;
     const key = `${target.id}<${filled.map((type) => type.id).join(',')}>`;
     let reference = this.referenceCache.get(key);
@@ -227,8 +225,13 @@ export class Checker {
     return reference;
   }
 
-  private defaultOf(parameter: TypeParameter, typeArguments: Type[]): Type {
-    return parameter.default?.() ?? (typeArguments.length === 0 ? unknownType : unknownType);
+  fillTypeArguments(parameters: TypeParameter[], typeArguments: Type[]): Type[] {
+    const mapper: Mapper = new Map();
+    return parameters.map((parameter, index) => {
+      const argument = typeArguments[index] ?? this.instantiate(parameter.default?.() ?? unknownType, mapper);
+      mapper.set(parameter.id, argument);
+      return argument;
+    });
   }
 
   instantiate(type: Type, mapper: Mapper): Type {

@@ -4,6 +4,7 @@ import { ExecutionBudget, LIMITS } from '../interpreter/limits';
 import { type ProgramInput, ProgramIO } from '../interpreter/programIo';
 import { StepTracker } from '../interpreter/stepTracker';
 import { TurtleWorld } from '../interpreter/turtleWorld';
+import { redefineArgument } from './argumentsObject';
 import { Evaluator } from './evaluator';
 import { findReachableTurtles } from './garbageCollection';
 import { DONE, type HostIterator, stepHostIterator, ValueIterator } from './iteration';
@@ -272,7 +273,6 @@ export class Runtime {
     return `Cannot assign to read only property '${String(key)}' of ${kind} '${this.receiverText(target)}'`;
   }
 
-  /** How V8 names an object in the TypeError of a refused write: by its source, its class, or its tag. */
   /**
    * The text of a function as `Function.prototype.toString` gives it; a program that rejects it ends with a compile
    * error on the row that asked for it.
@@ -288,6 +288,7 @@ export class Runtime {
     return behavior.node.source;
   }
 
+  /** V8 names refused-write receivers by their source, class, or tag. */
   receiverText(target: JsObject): string {
     if (target instanceof JsArray) return '[object Array]';
     if (target.regexp) return '[object RegExp]';
@@ -369,15 +370,14 @@ export class Runtime {
       this.grow(array, length);
       return;
     }
-    if (array.sealed) {
-      const last = elements.findLastIndex((element, index) => index >= length && element !== HOLE);
-      if (last !== -1) {
-        elements.length = last + 1;
-        this.refuse(strict, `Cannot delete property '${last}' of [object Array]`);
+    this.scan(elements.length - length);
+    for (let index = elements.length - 1; index >= length; index--) {
+      if (!this.deleteProperty(array, String(index), false)) {
+        elements.length = index + 1;
+        this.refuse(strict, `Cannot delete property '${index}' of [object Array]`);
         return;
       }
     }
-    for (const index of array.definedElements?.keys() ?? []) if (index >= length) array.definedElements?.delete(index);
     elements.length = length;
   }
 
@@ -387,6 +387,7 @@ export class Runtime {
     while (elements.length < length) elements.push(HOLE);
   }
 
+  // code-gauge-allow functionCognitiveComplexity 17 -- Keeps exotic string, array, and arguments definitions at the property-definition boundary.
   defineProperty(object: JsObject, key: Key, property: Property): void {
     // A String object's indices and length are read-only and never stored: a definition compatible with them changes
     // nothing, and any other, such as a class field of that name, throws.
@@ -414,8 +415,9 @@ export class Runtime {
       object.isLengthWritable &&= property.writable;
       return;
     }
-    if (!object.properties.has(key)) this.allocate(1);
-    object.properties.set(key, property);
+    const current = object.properties.get(key);
+    if (!current) this.allocate(1);
+    object.properties.set(key, object.isArguments && current ? redefineArgument(current, property) : property);
   }
 
   /** Defines an element, remembering attributes other than a plain element's, or an accessor, in `definedElements`. */
@@ -913,7 +915,6 @@ export class Runtime {
     return this.iterator(value, undefined, source).rest();
   }
 
-  /** A short description of a value for error messages. */
   /** How V8 names a value by its type, as `number 5`, `string "a"`, `object null`, or just `object`. */
   describeTyped(value: Value): string {
     if (value === undefined) return 'undefined';

@@ -345,6 +345,7 @@ export class TypeOperators {
   }
 
   // code-gauge-allow functionCognitiveComplexity 16 -- Follows TypeScript's getConditionalType: deferral, distribution, and each branch.
+  // code-gauge-allow functionNcss 33 -- Keeps conditional inference and lazy branch substitution together.
   resolveConditional(type: ConditionalType, outer: Mapper): Type {
     // An instantiated copy resolves from its declaration, so that it still distributes over its check type parameter.
     if (type.root && type.mapper) return this.resolveConditional(type.root, this.compose(type.mapper, outer));
@@ -368,13 +369,18 @@ export class TypeOperators {
     const extendsType = this.c.instantiate(type.extendsType, mapper);
     if (this.c.relations.isGeneric(checkType) || this.c.relations.isGeneric(extendsType, inferTypeParameters)) {
       if (outer.size === 0) return type;
+      const checker = this.c;
       return {
         ...type,
         id: newTypeId(),
         checkType,
         extendsType,
-        trueType: this.c.instantiate(type.trueType, mapper),
-        falseType: this.c.instantiate(type.falseType, outer),
+        get trueType() {
+          return checker.instantiate(type.trueType, mapper);
+        },
+        get falseType() {
+          return checker.instantiate(type.falseType, outer);
+        },
         inferTypeParameters,
         root: type,
         mapper: outer,

@@ -1,0 +1,33 @@
+function redefine(a: number) {
+  Object.defineProperty(arguments, "0", { value: 5 });
+  console.log(a, arguments[0]);
+  a = 7;
+  console.log(a, arguments[0]);
+  Object.defineProperty(arguments, "0", { enumerable: false });
+  a = 9;
+  console.log(a, arguments[0]);
+  Object.defineProperty(arguments, "0", { value: 11, writable: false });
+  console.log(a, arguments[0]);
+  a = 13;
+  console.log(a, arguments[0]);
+}
+function remove(a: number) {
+  delete arguments[0];
+  Object.defineProperty(arguments, "0", { value: 5, writable: true });
+  a = 7;
+  console.log(a, arguments[0]);
+}
+function access(a: number) {
+  Object.defineProperty(arguments, "0", { get() { return 5; } });
+  a = 7;
+  console.log(a, arguments[0]);
+}
+function frozen(a: number) {
+  Object.freeze(arguments);
+  a = 7;
+  console.log(a, arguments[0]);
+}
+redefine(1);
+remove(1);
+access(1);
+frozen(1);

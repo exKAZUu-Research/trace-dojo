@@ -1466,6 +1466,22 @@ const g = function* inner() { yield inner === g; }; console.log(g().next());
 const a = async function* ai() { yield typeof ai; }; a().next().then(console.log);`,
   ],
   [
+    'Array.from reading iterator and length getters once before construction',
+    `let reads = 0;
+const iterable = { get [Symbol.iterator]() {
+  console.log('iterator', ++reads);
+  return reads === 1 ? function* () { yield 1; yield 2; } : undefined;
+} };
+console.log(Array.from(iterable), reads);
+let lengths = 0;
+const arrayLike = { 0: 'a', 1: 'b', get length() { return ++lengths; }, [Symbol.iterator]: null };
+class List extends Array { constructor(...args) { super(...args); console.log('construct', args); } }
+console.log(List.from(arrayLike), lengths);
+let constructed = 0;
+class Result extends Array { constructor(...args) { super(...args); constructed++; } }
+try { Result.from({ [Symbol.iterator]: 1 }); } catch (e) { console.log(e.name, constructed); }`,
+  ],
+  [
     'failing disposers after null await using resources',
     `async function f() { try { { await using a = null; await using b = { async [Symbol.asyncDispose]() { console.log('dispose'); throw 'err'; } }; } } catch (e) { console.log('caught', e); } }
 async function g() { try { { await using a = null; await using b = { [Symbol.dispose]() { console.log('sdispose'); throw 'serr'; } }; } } catch (e) { console.log('caught', e); } }

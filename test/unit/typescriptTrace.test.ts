@@ -171,3 +171,17 @@ twice(t);
 t.右を向く();`;
   expect(traceProgram('typescript', program, program).traceItems.map((item) => item.line)).toEqual([0, 1, 6, 7]);
 });
+
+test('static object and turtle array fields stay visible after a move', () => {
+  const source = `class Shared {
+  static turtle = new Turtle();
+  static turtles = [Shared.turtle];
+}
+Shared.turtle.forward();`;
+  const recording = traceProgram('typescript', source, source);
+  const turtle = { kind: 'object', entries: { x: { kind: 'value', value: 0 }, y: { kind: 'value', value: 1 } } };
+  expect(recording.traceItems.at(-1)?.referenceVars).toEqual({
+    'Shared.turtle': turtle,
+    'Shared.turtles': { kind: 'array', entries: { 0: turtle } },
+  });
+});

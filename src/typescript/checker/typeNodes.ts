@@ -278,7 +278,7 @@ export class TypeNodes {
       );
       return errorType;
     }
-    const filled = parameters.map((parameter, index) => typeArguments[index] ?? parameter.default?.() ?? unknownType);
+    const filled = this.c.fillTypeArguments(parameters, typeArguments);
     this.checkTypeArgumentConstraints(node, parameters, filled);
     if (symbol.typeKind === 'alias') {
       const mapper: Mapper = new Map(parameters.map((parameter, index) => [parameter.id, filled[index]]));

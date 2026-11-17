@@ -94,42 +94,36 @@ function buildWith(
   return result;
 }
 
-// code-gauge-allow functionCognitiveComplexity 25 -- Transcribes the specification's Array.from step by step, whose branches mirror its steps.
+// code-gauge-allow functionCognitiveComplexity 26 -- Transcribes the specification's Array.from step by step, whose branches mirror its steps.
 function arrayFrom({ runtime, thisValue, args, callRow }: NativeCall): JsObject {
   const [source, mapper, thisArg] = args;
   if (mapper !== undefined && !isCallable(mapper)) {
     runtime.throwError('TypeError', `${runtime.describeTyped(mapper)} is not a function`);
   }
-  const iterable =
-    source !== undefined && source !== null && runtime.get(source, WELL_KNOWN_SYMBOLS.iterator) !== undefined;
-  return buildWith(
-    runtime,
-    thisValue,
-    iterable ? undefined : toLength(runtime, runtime.get(runtime.toObject(source), 'length')),
-    (result) => {
-      const add = (value: Value, index: number): void =>
-        result.set(index, mapper ? runtime.call(mapper, thisArg, [value, index], callRow) : value);
-      const method =
-        source === undefined || source === null ? undefined : runtime.get(source, WELL_KNOWN_SYMBOLS.iterator);
-      if (method !== undefined && method !== null) {
-        // Each value is read just before its mapper runs, as JavaScript's iteration does.
-        const iterator = runtime.iterator(source, method);
-        try {
-          for (let index = 0, value = iterator.next(); value !== DONE; index++, value = iterator.next())
-            add(value, index);
-        } catch (error) {
-          // A mapper that throws closes the iterator; a failed `next()` has already ended it.
-          if (error instanceof JsThrow) iterator.close('throw');
-          throw error;
-        }
-        return;
+  const method = source === undefined || source === null ? undefined : runtime.get(source, WELL_KNOWN_SYMBOLS.iterator);
+  if (method !== undefined && method !== null && !isCallable(method))
+    runtime.throwError('TypeError', `${runtime.describeTyped(method)} is not a function`);
+  const iterable = method !== undefined && method !== null;
+  const length = iterable ? undefined : toLength(runtime, runtime.get(runtime.toObject(source), 'length'));
+  return buildWith(runtime, thisValue, length, (result) => {
+    const add = (value: Value, index: number): void =>
+      result.set(index, mapper ? runtime.call(mapper, thisArg, [value, index], callRow) : value);
+    if (method !== undefined && method !== null) {
+      // Each value is read just before its mapper runs, as JavaScript's iteration does.
+      const iterator = runtime.iterator(source, method);
+      try {
+        for (let index = 0, value = iterator.next(); value !== DONE; index++, value = iterator.next())
+          add(value, index);
+      } catch (error) {
+        // A mapper that throws closes the iterator; a failed `next()` has already ended it.
+        if (error instanceof JsThrow) iterator.close('throw');
+        throw error;
       }
-      // Null and undefined are neither iterable nor array-like, which JavaScript reports as a TypeError.
-      const object = runtime.toObject(source);
-      const length = toLength(runtime, runtime.get(object, 'length'));
-      for (let index = 0; index < length; index++) add(runtime.get(object, String(index)), index);
+      return;
     }
-  );
+    const object = runtime.toObject(source);
+    for (let index = 0; index < (length ?? 0); index++) add(runtime.get(object, String(index)), index);
+  });
 }
 
 function toLength(runtime: Runtime, value: Value): number {

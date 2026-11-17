@@ -1,7 +1,7 @@
 import type { FunctionNode } from './ast';
 import { WELL_KNOWN_SYMBOLS } from './realmIterators';
 import type { Runtime } from './runtime';
-import { type Binding, isAccessor, type JsFunction, type JsObject, type Value } from './values';
+import { type Binding, isAccessor, type JsFunction, type JsObject, type Property, type Value } from './values';
 
 /** The `arguments` object of a call, whose `callee` a strict mode function refuses to give. */
 export function createArgumentsObject(runtime: Runtime, fn: JsFunction, node: FunctionNode, args: Value[]): JsObject {
@@ -33,8 +33,9 @@ export function createArgumentsObject(runtime: Runtime, fn: JsFunction, node: Fu
 
 /**
  * Links each parameter to its element of `arguments`, as a function that is not strict mode code with only simple
- * parameters does, until the element is deleted or redefined.
+ * parameters does, until the element is deleted, becomes an accessor, or becomes read-only.
  */
+// code-gauge-allow functionCognitiveComplexity 16 -- Tracks detachment and the independent parameter value after deletion, accessor conversion, or a read-only definition.
 export function mapArguments(bindings: Map<string, Binding>, names: string[], argumentsObject: JsObject): void {
   for (const [index, name] of names.entries()) {
     const element = argumentsObject.properties.get(String(index));
@@ -42,7 +43,7 @@ export function mapArguments(bindings: Map<string, Binding>, names: string[], ar
     let isLinked = true;
     let own = element.value;
     const linked = (): boolean => {
-      if (isLinked && argumentsObject.properties.get(String(index)) !== element) {
+      if (isLinked && (argumentsObject.properties.get(String(index)) !== element || !element.writable)) {
         isLinked = false;
         own = element.value;
       }
@@ -59,4 +60,11 @@ export function mapArguments(bindings: Map<string, Binding>, names: string[], ar
       isMutable: true,
     });
   }
+}
+
+export function redefineArgument(current: Property, property: Property): Property {
+  if (isAccessor(current) || isAccessor(property)) return property;
+  // V8 disconnects arguments with custom attributes before a read-only definition updates their value.
+  if (property.writable || (current.enumerable && current.configurable)) current.value = property.value;
+  return property.writable ? Object.assign(current, property) : property;
 }

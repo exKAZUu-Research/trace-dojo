@@ -83,8 +83,7 @@ class Snapshotter {
           property.value instanceof JsFunction
         )
           continue;
-        const scalar = scalarOf(property.value, new Set());
-        if (scalar !== NOT_SCALAR) variables.vars[`${className}.${key}`] = scalar;
+        addVariable(variables, `${className}.${key}`, property.value);
       }
     }
   }
