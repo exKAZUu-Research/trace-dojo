@@ -17,6 +17,7 @@ import {
   intersectionOf,
   isAnyLike,
   isIntrinsic,
+  type LiteralType,
   literalType,
   neverType,
   newTypeId,
@@ -173,7 +174,7 @@ export class TypeNodes {
       ];
       const keys = indexType.kind === 'union' ? indexType.types : [indexType];
       const isMissing = (key: Type): boolean =>
-        (key.kind === 'literal' || isIntrinsic(key, 'string') || isIntrinsic(key, 'number')) &&
+        (key.kind === 'literal' || (key.kind === 'intrinsic' && ['string', 'number', 'symbol'].includes(key.name))) &&
         !constraints.some((constraint) => this.hasKey(constraint, key));
       if (keys.some(isMissing)) {
         this.c.error(index, `型 '${this.c.print(indexType)}' は型 '${objectType.name}' のインデックスに使えません。`);
@@ -218,13 +219,27 @@ export class TypeNodes {
 
   private structureHasKey(type: Type, key: Type): boolean {
     const structure = this.c.structureOf(type);
+    const name = key.kind === 'literal' ? key.value : undefined;
+    if (isIntrinsic(key, 'symbol') || typeof name === 'symbol')
+      return structure.symbolIndex !== undefined || (key.kind === 'literal' && this.propertyHasKey(structure, key));
     if (structure.stringIndex) return true;
     if (key.kind !== 'literal') return isIntrinsic(key, 'number') && structure.numberIndex !== undefined;
-    const name = key.value;
     if (typeof name !== 'string' && typeof name !== 'number') return false;
     if (structure.numberIndex && (typeof name === 'number' || isNumericName(name))) return true;
-    const property = structure.properties.get(String(name));
-    return property !== undefined && (typeof name === 'number') === this.c.typeOperators.isNumericKey(property);
+    return this.propertyHasKey(structure, key);
+  }
+
+  /**
+   * Whether a property is named by a literal key: by its name type when a mapped type gives it one, which may hold
+   * keys of both kinds, as `0 | "0"`, else by whether its name is written as a number.
+   */
+  private propertyHasKey(structure: Structure, key: LiteralType): boolean {
+    const property = structure.properties.get(String(key.value));
+    if (!property?.nameType)
+      return property !== undefined && (typeof key.value === 'number') === this.c.typeOperators.isNumericKey(property);
+    return (property.nameType.kind === 'union' ? property.nameType.types : [property.nameType]).some(
+      (member) => member.kind === 'literal' && member.value === key.value
+    );
   }
 
   /**
