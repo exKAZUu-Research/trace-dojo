@@ -687,15 +687,46 @@ test('a non-child hiding name leaves its independent value imported', () => {
   ).toMatchObject({ kind: 'executed', stdout: 'EQ\n', uncaughtException: undefined });
 });
 
-test('compact shared types compile without exponential memory growth', { timeout: 30_000 }, () => {
-  const output = execFileSync('bun', ['run', 'test/helpers/haskellCompilerMemory.ts'], {
-    encoding: 'utf8',
-    timeout: 30_000,
+test.each(['types', 'classes'])(
+  'compact shared %s compile without exponential memory growth',
+  { timeout: 30_000 },
+  (graph) => {
+    const output = execFileSync('bun', ['run', 'test/helpers/haskellCompilerMemory.ts', graph], {
+      encoding: 'utf8',
+      timeout: 30_000,
+    });
+    const result = z
+      .object({ kind: z.literal('executed'), stdout: z.literal('1\n'), peakRatio: z.number() })
+      .parse(JSON.parse(output));
+    expect(result.peakRatio).toBeLessThan(1.5);
+  }
+);
+
+test('shared superclass paths retain runtime evidence and remove redundant constraints', () => {
+  const count = 8;
+  const declarations = [
+    'class Eq a=>C0 a',
+    'class C0 a=>C1 a',
+    ...Array.from({ length: count - 1 }, (_, offset) => {
+      const index = offset + 2;
+      return `class (C${index - 1} a,C${index - 2} a)=>C${index} a`;
+    }),
+    ...Array.from({ length: count + 1 }, (_, index) => `instance C${index} Int`),
+  ];
+  const source = `${declarations.join('\n')}
+f::C${count} a=>a->a->Bool
+f x y=x==y
+g::(C${count} a,Eq a)=>a->a->Bool
+g x y=x==y
+main=print(f (1::Int) 1,f (1::Int) 2,g (1::Int) 1)`;
+  expect(executeProgram('haskell', source)).toMatchObject({
+    kind: 'executed',
+    stdout: '(True,False,True)\n',
+    uncaughtException: undefined,
   });
-  const result = z
-    .object({ kind: z.literal('executed'), stdout: z.literal('1\n'), peakRatio: z.number() })
-    .parse(JSON.parse(output));
-  expect(result.peakRatio).toBeLessThan(1.5);
+  expect(
+    executeProgram('haskell', 'class C a\nf::C a=>a->Ordering\nf x=compare x x\nmain=print(1::Int)')
+  ).toMatchObject({ kind: 'compileError' });
 });
 
 test.each([2, 3])('shared %i-way types remain bounded while recording', { timeout: 30_000 }, (branches) => {

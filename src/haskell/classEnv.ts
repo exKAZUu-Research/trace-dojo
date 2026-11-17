@@ -1,5 +1,6 @@
 import type { ClassEntity, Evidence, InstanceInfo } from './entities';
 import { couldMatch, matchType, type Pred, prune, splitApp, type Type, typesEqual } from './types';
+import { chargeTypeWork } from './typeWorkBudget';
 
 /** The instances visible to a module: the library's, and the module's own. */
 export class ClassEnv {
@@ -43,37 +44,52 @@ export function hasConstructorHead(type: Type): boolean {
   return splitApp(type).head.tag === 'tcon';
 }
 
-/** The superclasses of a class, transitively, with the selection path to each from the class's dictionary. */
-export function superclassPaths(cls: ClassEntity): { cls: ClassEntity; path: number[] }[] {
-  const result: { cls: ClassEntity; path: number[] }[] = [];
-  const visit = (current: ClassEntity, path: number[]): void => {
-    for (const [index, sup] of current.supers.entries()) {
-      const next = [...path, index];
-      result.push({ cls: sup, path: next });
-      visit(sup, next);
-    }
-  };
-  visit(cls, []);
-  return result;
-}
-
 export function isSubclassOf(cls: ClassEntity, ancestor: ClassEntity): boolean {
-  return cls === ancestor || superclassPaths(cls).some((entry) => entry.cls === ancestor);
+  return superclassPath(cls, ancestor) !== undefined;
 }
 
-/** Finds evidence for a constraint among given ones, directly or through their superclasses. */
 export function entailByGivens(
   givens: readonly { pred: Pred; evidence: Evidence }[],
   pred: Pred
 ): Evidence | undefined {
   for (const given of givens) {
     if (!typesEqual(given.pred.type, pred.type)) continue;
-    if (given.pred.cls === pred.cls) return given.evidence;
-    for (const { cls, path } of superclassPaths(given.pred.cls)) {
-      if (cls !== pred.cls) continue;
-      let evidence = given.evidence;
-      for (const index of path) evidence = { kind: 'super', of: evidence, index };
-      return evidence;
+    const path = superclassPath(given.pred.cls, pred.cls);
+    if (!path) continue;
+    let evidence = given.evidence;
+    for (const index of path) {
+      chargeTypeWork();
+      evidence = { kind: 'super', of: evidence, index };
+    }
+    return evidence;
+  }
+  return undefined;
+}
+
+interface SuperclassStep {
+  index: number;
+  parent: SuperclassStep | undefined;
+}
+
+function superclassPath(cls: ClassEntity, ancestor: ClassEntity): number[] | undefined {
+  const seen = new Set<ClassEntity>();
+  const work: { cls: ClassEntity; path: SuperclassStep | undefined }[] = [{ cls, path: undefined }];
+  while (work.length > 0) {
+    chargeTypeWork();
+    const current = work.pop()!;
+    if (seen.has(current.cls)) continue;
+    seen.add(current.cls);
+    if (current.cls === ancestor) {
+      const path: number[] = [];
+      for (let step = current.path; step; step = step.parent) {
+        chargeTypeWork();
+        path.push(step.index);
+      }
+      return path.toReversed();
+    }
+    for (let index = current.cls.supers.length - 1; index >= 0; index--) {
+      chargeTypeWork();
+      work.push({ cls: current.cls.supers[index], path: { index, parent: current.path } });
     }
   }
   return undefined;
