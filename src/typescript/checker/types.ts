@@ -121,7 +121,6 @@ export interface ClassInfo {
   declaration: TreeNode;
   instanceType: ObjectType;
   staticType: ObjectType;
-  baseClass?: ClassInfo;
   isAbstract: boolean;
 }
 

@@ -372,13 +372,31 @@ export class Flow {
   narrowByInstanceof(type: Type, instance: Type, assumeTrue: boolean): Type {
     if (assumeTrue) {
       if (isAnyLike(type) || isIntrinsic(type, 'unknown')) return instance;
-      const filtered = filterType(type, (member) => this.c.relations.isAssignable(member, instance));
-      if (filtered.kind !== 'intrinsic' || filtered.name !== 'never') return filtered;
-      const candidates = filterType(type, (member) => this.c.relations.isAssignable(instance, member));
-      if (!isIntrinsic(candidates, 'never')) return mapType(candidates, () => instance);
-      return instance;
+      const related = mapType(type, (member) =>
+        this.isDerivedFrom(member, instance) ? member : this.isDerivedFrom(instance, member) ? instance : neverType
+      );
+      return isIntrinsic(related, 'never') ? instance : related;
     }
-    return filterType(type, (member) => !this.c.relations.isAssignable(member, instance) || isAnyLike(member));
+    return filterType(type, (member) => isAnyLike(member) || !this.isDerivedFrom(member, instance));
+  }
+
+  /**
+   * Whether a type derives from a class's instance type, as TypeScript's `instanceof` narrowing decides by the base
+   * classes, not by shape; a type that is not a class of the program, as a library one, is compared by its shape.
+   */
+  private isDerivedFrom(source: Type, target: Type): boolean {
+    if (source.kind === 'union') return source.types.some((member) => this.isDerivedFrom(member, target));
+    if (target.kind === 'union') return target.types.some((member) => this.isDerivedFrom(source, member));
+    if (source.kind === 'typeParameter') {
+      const constraint = this.c.constraintOf(source);
+      return constraint !== undefined && this.isDerivedFrom(constraint, target);
+    }
+    const targetClass = target.kind === 'object' && !target.isClassStatic ? target.classInfo : undefined;
+    if (!targetClass) return this.c.relations.isAssignable(source, target);
+    let info = source.kind === 'object' && !source.isClassStatic ? source.classInfo : undefined;
+    for (; info; info = this.c.classes.baseClassInfo(info))
+      if (info.declaration.id === targetClass.declaration.id) return true;
+    return false;
   }
 
   /** The part of a type that `"name" in value` keeps. */
