@@ -1000,13 +1000,15 @@ export abstract class StatementCompiler extends CallCompiler {
     }
     return {
       stmt,
-      value: {
+      value: this.checkedControlResult({
         ...runtime(stmt.noreturn ? NORETURN : type, run, expression),
         staticResult: this.singleReturningResult([
-          ...target.breaks.map((site) => site.final ?? site.value),
+          ...target.breaks
+            .filter((site) => site.value.type.kind !== 'noreturn')
+            .map((site) => site.final ?? site.value),
           ...(!body.noreturn ? [known(VOID, undefined, expression)] : []),
         ]),
-      },
+      }),
     };
   }
 
@@ -1217,16 +1219,6 @@ export abstract class StatementCompiler extends CallCompiler {
     return { stmt, value };
   }
 
-  /** A value whose type exists only at compile time, such as `comptime_int`, cannot depend on a runtime condition. */
-  private rejectRuntimeComptime(type: Type, span: Span): void {
-    if (type.kind === 'comptime_int' || type.kind === 'comptime_float') {
-      this.error(
-        span,
-        `${typeName(type)} 型の値が、実行時の条件で変わります（@as(i32, ...) のように型を決めてください）。`
-      );
-    }
-  }
-
   private branch(
     expression: Expression,
     _capture: undefined,
@@ -1278,14 +1270,13 @@ export abstract class StatementCompiler extends CallCompiler {
       resultType && !this.requiresComptime(resultType, span)
         ? resultType
         : this.peerType([thenValue, otherwiseValue], span);
-    this.rejectRuntimeComptime(type, span);
     const a = this.coerce(thenValue, type, thenValue.span);
     const b = this.coerce(otherwiseValue, type, otherwiseValue.span);
     const evaluateA = a.eval;
     const evaluateB = b.eval;
     const noreturn = thenValue.type.kind === 'noreturn' && otherwiseValue.type.kind === 'noreturn';
     const choose = (frame: Frame): Value => (select(frame) === 0 ? evaluateA(frame) : evaluateB(frame));
-    const value: TExpr = {
+    const value = this.checkedControlResult({
       ...runtime(
         noreturn ? NORETURN : type,
         slots.length === 0
@@ -1303,7 +1294,7 @@ export abstract class StatementCompiler extends CallCompiler {
         ...(thenValue.type.kind === 'noreturn' ? [] : [a]),
         ...(otherwiseValue.type.kind === 'noreturn' ? [] : [b]),
       ]),
-    };
+    });
     return {
       stmt: { exec: (frame) => void value.eval(frame), noreturn },
       value,
@@ -1519,14 +1510,19 @@ export abstract class StatementCompiler extends CallCompiler {
     };
     return {
       stmt,
-      value: runtime(
-        stmt.noreturn ? NORETURN : valueType,
-        (frame) => {
-          const result = loop(frame);
-          if (result instanceof Jump) throw result;
-          return result?.value;
-        },
-        expression
+      value: this.loopResult(
+        target,
+        otherwise?.value,
+        infinite,
+        runtime(
+          stmt.noreturn ? NORETURN : valueType,
+          (frame) => {
+            const result = loop(frame);
+            if (result instanceof Jump) throw result;
+            return result?.value;
+          },
+          expression
+        )
       ),
     };
   }
@@ -1585,6 +1581,7 @@ export abstract class StatementCompiler extends CallCompiler {
       type: Type;
       staticLength?: bigint;
       elementFact?: { value: Value };
+      loadType?: Type;
     }
     const operands: Operand[] = expression.operands.map((operand, index) => {
       const capture = expression.captures[index];
@@ -1619,6 +1616,8 @@ export abstract class StatementCompiler extends CallCompiler {
     });
     const lengths = operands.flatMap((operand) => (operand.staticLength === undefined ? [] : [operand.staticLength]));
     if (lengths.some((length) => length !== lengths[0])) this.error(expression, 'for の対象の長さが違います。');
+    if (!lengths.includes(0n))
+      for (const operand of operands) if (operand.loadType) this.rejectRuntimeComptime(operand.loadType, expression);
     const locals = new Map<string, LocalBinding>();
     const bindings = expression.captures.map((capture, index) => {
       if (isDiscardName(capture)) return;
@@ -1700,19 +1699,23 @@ export abstract class StatementCompiler extends CallCompiler {
     };
     return {
       stmt,
-      value: runtime(
-        valueType,
-        (frame) => {
-          const result = loop(frame);
-          if (result instanceof Jump) throw result;
-          return result?.value;
-        },
-        expression
+      value: this.loopResult(
+        target,
+        otherwise?.value,
+        false,
+        runtime(
+          valueType,
+          (frame) => {
+            const result = loop(frame);
+            if (result instanceof Jump) throw result;
+            return result?.value;
+          },
+          expression
+        )
       ),
     };
   }
 
-  /** How a `for` reads an array, a pointer to one, or a slice, by value or by pointer. */
   private forOperand(
     compiled: TExpr,
     capture: Capture | undefined,
@@ -1724,6 +1727,7 @@ export abstract class StatementCompiler extends CallCompiler {
     type: Type;
     staticLength?: bigint;
     elementFact?: { value: Value };
+    loadType?: Type;
   } {
     const byPointer = capture?.byPointer ?? false;
     const readsElement = capture !== undefined && !isDiscardName(capture) && !byPointer;
@@ -1785,6 +1789,7 @@ export abstract class StatementCompiler extends CallCompiler {
     return {
       type: elementType,
       elementFact,
+      loadType: readsElement || (byPointer && type.kind === 'pointer' && type.size === 'one') ? child : undefined,
       evaluate,
       staticLength,
       lengthOf: (_frame, value) => staticLength ?? viewOf(value).length,
@@ -2076,7 +2081,6 @@ export abstract class StatementCompiler extends CallCompiler {
           : all.length > 0
             ? this.peerType(all, expression)
             : VOID;
-      if (!operandResult) this.rejectRuntimeComptime(type, expression);
       for (const site of target.breaks) site.final = this.coerce(site.value, type, site.value.span);
     }
     const coerced = new Map<TExpr, TExpr>();
@@ -2140,24 +2144,53 @@ export abstract class StatementCompiler extends CallCompiler {
         },
         noreturn: allNoreturn,
       },
-      value: {
-        ...runtime(
-          allNoreturn ? NORETURN : type,
-          (frame) => {
-            const result = run(frame);
-            if (result instanceof Jump) throw result;
-            return result?.value;
-          },
-          expression
-        ),
-        staticResult: this.singleReturningResult([
-          ...[...coerced.entries()].filter(([source]) => source.type.kind !== 'noreturn').map(([, value]) => value),
-          ...target.breaks
-            .filter((site) => site.value.type.kind !== 'noreturn')
-            .map((site) => site.final ?? site.value),
-        ]),
-      },
+      value: this.checkedControlResult(
+        {
+          ...runtime(
+            allNoreturn ? NORETURN : type,
+            (frame) => {
+              const result = run(frame);
+              if (result instanceof Jump) throw result;
+              return result?.value;
+            },
+            expression
+          ),
+          staticResult: this.singleReturningResult([
+            ...[...coerced.entries()].filter(([source]) => source.type.kind !== 'noreturn').map(([, value]) => value),
+            ...target.breaks
+              .filter((site) => site.value.type.kind !== 'noreturn')
+              .map((site) => site.final ?? site.value),
+          ]),
+        },
+        Boolean(operandResult)
+      ),
     };
+  }
+
+  private loopResult(target: JumpTarget, otherwise: TExpr | undefined, infinite: boolean, value: TExpr): TExpr {
+    return this.checkedControlResult({
+      ...value,
+      staticResult: this.singleReturningResult([
+        ...target.breaks.filter((site) => site.value.type.kind !== 'noreturn').map((site) => site.final ?? site.value),
+        ...(!infinite && otherwise?.type.kind !== 'noreturn'
+          ? [otherwise ? this.coerce(otherwise, value.type, value.span) : known(VOID, undefined, value.span)]
+          : []),
+      ]),
+    });
+  }
+
+  private checkedControlResult(value: TExpr, knownControl = false): TExpr {
+    if (!knownControl && !staticResultOf(value)) this.rejectRuntimeComptime(value.type, value.span);
+    return value;
+  }
+
+  private rejectRuntimeComptime(type: Type, span: Span): void {
+    if (this.requiresComptime(type, span)) {
+      this.error(
+        span,
+        `${typeName(type)} 型の値が、実行時の条件で変わります（@as(i32, ...) のように型を決めてください）。`
+      );
+    }
   }
 
   private checkCaseRanges(seen: Map<unknown, Span>): void {

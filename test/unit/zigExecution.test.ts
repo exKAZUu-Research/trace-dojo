@@ -7717,3 +7717,67 @@ test.each(['struct{t:type}', 'union(enum){t:type}'])(
     });
   }
 );
+
+test.each([
+  'if(b) u8 else u16',
+  'if(b) .a else .b',
+  'if(b) @as(?type,null) else u8',
+  'if(b) u8 else u8',
+  'switch(b){true=>u8,false=>u16}',
+  'blk:{if(b)break :blk u8;break :blk u16;}',
+  'while(b){break u8;}else u16',
+  'for(0..@intFromBool(b))|_|{break u8;}else u16',
+])('runtime control cannot select comptime-only values: %s', (choice) => {
+  const source = `const std=@import("std");pub fn main()void{var b=true;_=&b;const x=${choice};std.debug.print("{any}",.{x});}`;
+  expect(executeProgram('zig', source)).toMatchObject({ kind: 'compileError' });
+});
+
+test.each([
+  'if(b) u8 else unreachable',
+  'switch(b){true=>u8,false=>unreachable}',
+  'blk:{if(b)break :blk u8;unreachable;}',
+  'while(b){break u8;}else unreachable',
+  'for(0..@intFromBool(b))|_|{break u8;}else unreachable',
+])('a single proven control result retains runtime effects: %s', (choice) => {
+  const source = `const std=@import("std");pub fn main()void{var b=true;_=&b;const x=${choice};std.debug.print("{any}",.{x});}`;
+  expect(executeProgram('zig', source)).toMatchObject({ kind: 'executed', stderr: 'u8', uncaughtException: undefined });
+  expect(executeProgram('zig', source.replace('var b=true', 'var b=false'))).toMatchObject({
+    kind: 'executed',
+    stderr: '',
+    uncaughtException: 'panic: reached unreachable code',
+  });
+});
+
+test.each(['struct{t:type}', 'union(enum){t:type}'])(
+  'ordinary %s descriptor loops enforce runtime-index load rules',
+  (type) => {
+    for (const helper of ['fn f(o:[]const ?D)void{for(o)|v|{_=v;}}', 'fn f(o:*const [1]?D)void{for(o)|*p|{_=p;}}']) {
+      const source = `const D=${type};${helper}pub fn main()void{const a=[1]?D{null};f(&a);}`;
+      expect(executeProgram('zig', source)).toMatchObject({ kind: 'compileError' });
+    }
+    for (const helper of ['fn f(o:[]const ?D)void{for(o)|_|{}}', 'fn f(o:[]const ?D)void{for(o)|*p|{_=p;}}']) {
+      const source = `const D=${type};${helper}pub fn main()void{const a=[1]?D{null};f(&a);}`;
+      expect(executeProgram('zig', source)).toMatchObject({ kind: 'executed', uncaughtException: undefined });
+    }
+    const local = `const D=${type};pub fn main()void{const a=[1]?D{null};for(a)|v|{_=v;}}`;
+    expect(executeProgram('zig', local)).toMatchObject({ kind: 'compileError' });
+    const empty = `const D=${type};fn f(o:[]const ?D)void{for(o,0..0)|v,i|{_=v;_=i;}}pub fn main()void{const a=[0]?D{};f(&a);}`;
+    expect(executeProgram('zig', empty)).toMatchObject({ kind: 'executed', uncaughtException: undefined });
+  }
+);
+
+test.each([
+  ['u8', '2', 'u.b'],
+  ['u8', '2', '(&u.b).*'],
+  ['[1]u8', '.{2}', 'u.b[0]'],
+  ['[1]u8', '.{2}', '(&u.b[0]).*'],
+])('mutable global union %s locations check their active tag during execution: %s %s', (type, value, access) => {
+  const source = `const std=@import("std");const U=union(enum){a:u8,b:${type}};var u:U=.{.a=1};pub fn main()void{u=.{.b=${value}};std.debug.print("{}",.{${access}});}`;
+  expect(executeProgram('zig', source)).toMatchObject({ kind: 'executed', stderr: '2', uncaughtException: undefined });
+  const inactive = source.replace(`u=.{.b=${value}};`, '');
+  expect(executeProgram('zig', inactive)).toMatchObject({
+    kind: 'executed',
+    stderr: '',
+    uncaughtException: "panic: access of union field 'b' while field 'a' is active",
+  });
+});

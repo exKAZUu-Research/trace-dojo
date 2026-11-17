@@ -526,12 +526,18 @@ export abstract class ExpressionCompiler extends SemaBase {
   private projectedPlace(base: TExpr, child: Type, project: (parent: Pointer) => Pointer): Place | undefined {
     const place = base.place;
     if (!place) return undefined;
+    const stable = base.type.kind !== 'union' || staticResultOf(base) !== undefined;
+    const addressType = pointerTo(child, place.isConst);
     return {
       isConst: place.isConst,
       locate: (frame) => project(place.locate(frame)),
-      compileTimePointer: place.compileTimePointer && project(place.compileTimePointer),
-      address: () =>
-        this.derived(this.addressOf(base), pointerTo(child, place.isConst), (value) => project(value as Pointer)),
+      compileTimePointer: stable && place.compileTimePointer ? project(place.compileTimePointer) : undefined,
+      address: () => {
+        const parent = this.addressOf(base);
+        return stable
+          ? this.derived(parent, addressType, (value) => project(value as Pointer))
+          : runtime(addressType, (frame) => project(parent.eval(frame) as Pointer), base.span);
+      },
     };
   }
 
