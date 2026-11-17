@@ -117,13 +117,20 @@ export class TypeOperators {
       name: name.text,
       constraint: constraintNode
         ? () => this.c.typeNodes.typeFromNode(constraintNode)
-        : node.parent?.type === 'template_type'
-          ? () => stringType
-          : // An `infer` that takes a tuple's rest is an array, as TypeScript implies.
-            node.parent?.type === 'rest_type'
-            ? () => this.c.arrayType(unknownType)
-            : undefined,
+        : this.impliedInferConstraint(node),
     });
+  }
+
+  /** The constraint TypeScript implies for an unconstrained `infer` from where it is written. */
+  private impliedInferConstraint(node: TreeNode): (() => Type) | undefined {
+    if (node.parent?.type === 'template_type') return () => stringType;
+    const holder = node.parent?.type === 'type_annotation' ? node.parent.parent : node.parent;
+    // A rest parameter writes its name as `pattern`, a named tuple member as `name`.
+    const isRest =
+      holder?.type === 'rest_type' ||
+      (holder?.type === 'required_parameter' &&
+        (holder.childForFieldName('pattern') ?? holder.childForFieldName('name'))?.type === 'rest_pattern');
+    return isRest ? () => this.c.arrayType(unknownType) : undefined;
   }
 
   inferParameterFor(node: TreeNode, name: string): TypeParameter | undefined {
