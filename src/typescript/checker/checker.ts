@@ -13,7 +13,7 @@ import { ExpressionChecker } from './expressions';
 import { Flow } from './flow';
 import { FunctionChecker } from './functions';
 import { TypeInference } from './inference';
-import { libraryScope, libraryTree, markUnsupported, nativeOverloadTree } from './library';
+import { domInterfaceTree, libraryScope, libraryTree, markUnsupported, nativeOverloadTree } from './library';
 import { LiteralChecker } from './literals';
 import { MemberChecker } from './members';
 import { OperatorChecker } from './operators';
@@ -178,7 +178,7 @@ export class Checker {
   }
 
   isLibrary(node: TreeNode): boolean {
-    return node.tree === libraryTree || node.tree === nativeOverloadTree;
+    return node.tree === libraryTree || node.tree === nativeOverloadTree || node.tree === domInterfaceTree;
   }
 
   nativeOverload(node: TreeNode): TreeNode {

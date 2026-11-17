@@ -2,6 +2,7 @@ import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import type { Checker } from './checker';
 import { isGenericObjectOrIndexType } from './genericTypes';
+import { withDomMembers } from './library';
 import type { Sym } from './scopes';
 import { named } from './syntax';
 import { anyType, isAnyLike, nonPrimitiveType, type ObjectType, type Type } from './types';
@@ -56,7 +57,9 @@ export class InterfaceBases {
 
   /** The valid types the `extends` clauses of interface declarations name, reporting the others. */
   basesOf(declarations: TreeNode[]): Type[] {
-    return declarations.flatMap((declaration) => heritageNodes(declaration)).flatMap((node) => this.validBase(node));
+    return declarations
+      .flatMap((declaration) => heritageNodes(withDomMembers(declaration)))
+      .flatMap((node) => this.validBase(node));
   }
 
   /**
@@ -107,7 +110,7 @@ export class InterfaceBases {
   }
 
   private validBase(baseNode: TreeNode): Type[] {
-    const base = this.c.typeNodes.typeFromNode(baseNode);
+    const base = this.c.typeNodes.baseType(baseNode);
     if (isValidBaseType(base)) return [base];
     this.c.errorWhileResolving(
       baseNode,

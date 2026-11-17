@@ -1,3 +1,5 @@
+import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
+
 import { loadParser } from '../../interpreter/treeSitter';
 import { TURTLE_METHOD_NAMES } from '../../interpreter/turtleWorld';
 import {
@@ -7,6 +9,7 @@ import {
   DOM_TYPE_ALIASES,
   SHARED_HOST_GLOBALS,
 } from './domGlobals';
+import { DOM_INTERFACE_MEMBERS } from './domMembers';
 import { ECMASCRIPT_LIBRARY } from './ecmascriptLibrary';
 import { Scope, type Sym } from './scopes';
 
@@ -84,7 +87,7 @@ declare var Reflect: any;
  * The rest of the DOM library, whose values the reference `tsc` accepts but Node.js lacks (so they fail when the program
  * runs) or this interpreter lacks. Declaration kinds and type names preserve script-global redeclaration checks and
  * declaration merging; the DOM's structural types remain opaque, as its interfaces stand for `any` until a program merges
- * into them.
+ * into them, when {@link withDomMembers} gives them their members.
  */
 const BROWSER_LIBRARY = [
   ...omittedLibraryGlobals.map((name) => `declare var ${name}: any; type ${name} = any;`),
@@ -113,6 +116,42 @@ export const libraryTree = (() => {
   if (!tree) throw new Error('The parser returned no tree for the library');
   return tree;
 })();
+
+/**
+ * The DOM interfaces with the names, modifiers, and heritage of their members, whose types stay opaque `any`. They live
+ * in a tree of their own, read only for an interface a program merges into, as binding them with the library would slow
+ * down every program.
+ */
+export const domInterfaceTree = (() => {
+  const source = Object.entries(DOM_INTERFACE_MEMBERS)
+    .map(([name, entry]) => {
+      const [bases, members] = entry.split('|');
+      const heritage = bases ? ` extends ${bases.replaceAll(',', ', ')}` : '';
+      // A member without a type annotation is `any`.
+      const declarations = members
+        .split(' ')
+        .filter(Boolean)
+        .map((member) => ` ${member.replace(/^!/, 'readonly ').replace(/^((?:readonly )?)\?(.*)$/, '$1$2?')};`);
+      return `interface ${name}${heritage} {${declarations.join('')} }`;
+    })
+    .join('\n');
+  const tree = parser.parse(source);
+  if (!tree) throw new Error('The parser returned no tree for the DOM interfaces');
+  return tree;
+})();
+
+let domDeclarations: Map<string, TreeNode> | undefined;
+
+/** The declaration of a library DOM interface with its members, or any other declaration as it is. */
+export function withDomMembers(declaration: TreeNode): TreeNode {
+  if (declaration.tree !== libraryTree || declaration.type !== 'interface_declaration') return declaration;
+  domDeclarations ??= new Map(
+    domInterfaceTree.rootNode.namedChildren
+      .filter((node): node is TreeNode => node !== null)
+      .map((node) => [node.childForFieldName('name')?.text ?? '', node])
+  );
+  return domDeclarations.get(declaration.childForFieldName('name')?.text ?? '') ?? declaration;
+}
 
 export const nativeOverloadTree = (() => {
   const tree = parser.parse(Object.values(DOM_FUNCTION_CONSTRAINTS).join('\n'));

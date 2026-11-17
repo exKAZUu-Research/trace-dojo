@@ -1,6 +1,7 @@
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import type { Checker } from './checker';
+import { withDomMembers } from './library';
 import { nativeGlobalRedeclaration } from './nativeGlobalIdentity';
 import type { Scope, Sym } from './scopes';
 import { hasToken, isConstructorName, named } from './syntax';
@@ -175,7 +176,9 @@ function mergedParameterTypesAgree(
 
 /** A property declared again in a merged interface, or in the class it merges with, must have the same type. */
 function checkMergedProperties(c: Checker, symbol: Sym): void {
-  const properties = symbol.typeDeclarations.flatMap((declaration) => propertyDeclarationsOf(c, declaration));
+  const properties = symbol.typeDeclarations.flatMap((declaration) =>
+    propertyDeclarationsOf(c, withDomMembers(declaration))
+  );
   // TypeScript binds computed names after the others, so a plain name declares the property first.
   const seen = new Map<string, TreeNode>();
   for (const member of [...properties.filter((member) => !isComputed(member)), ...properties.filter(isComputed)])

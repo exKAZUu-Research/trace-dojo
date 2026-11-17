@@ -5,6 +5,7 @@ import type { Checker, Mapper, UnionAlias } from './checker';
 import { BROWSER_INTERFACES } from './domGlobals';
 import { IndexedAccessKeys } from './indexedAccessKeys';
 import { InterfaceBases } from './interfaceBases';
+import { withDomMembers } from './library';
 import type { Sym } from './scopes';
 import { nameSuggestionHint } from './spelling';
 import { hasToken, named, numberValue, propertyNameText, stringValue } from './syntax';
@@ -66,6 +67,8 @@ const domInterfaceNames = new Set(BROWSER_INTERFACES.map((entry) => (typeof entr
 /** Resolves the types the program writes: annotations, type references, and type declarations. */
 export class TypeNodes {
   private readonly typeNodeCache = new Map<number, Type>();
+  /** The member types of the DOM interfaces that a merged DOM interface extends, by symbol id. */
+  private readonly domBaseTypes = new Map<number, Type>();
   private readonly restConstraintsInValidation = new Set<number>();
   /** The type each kind of type syntax denotes; the others are `any`. */
   private readonly typeSyntaxes = new Map<string, (node: TreeNode) => Type>([
@@ -684,7 +687,8 @@ export class TypeNodes {
     };
   }
 
-  interfaceOwnMembers(declarations: TreeNode[]): Structure {
+  interfaceOwnMembers(merged: TreeNode[]): Structure {
+    const declarations = merged.map((declaration) => withDomMembers(declaration));
     // TypeScript merges the overloads of later declarations before those of earlier ones.
     return this.membersStructure(
       declarations.toReversed().flatMap((declaration) => {
@@ -692,6 +696,18 @@ export class TypeNodes {
         return body ? named(body) : [];
       })
     );
+  }
+
+  /** A DOM interface the library extends lends its members, though it stands for `any` where a program names it. */
+  baseType(base: TreeNode): Type {
+    const symbol = this.c.isLibrary(base) ? this.c.scopeOf(base).lookupType(base.text) : undefined;
+    if (!symbol || !this.isOpaqueDomInterface(symbol)) return this.typeFromNode(base);
+    let type = this.domBaseTypes.get(symbol.id);
+    if (!type) {
+      type = this.interfaceType(symbol);
+      this.domBaseTypes.set(symbol.id, type);
+    }
+    return type;
   }
 }
 
