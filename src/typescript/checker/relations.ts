@@ -1,7 +1,7 @@
 // code-gauge-allow-file fileNcss 683 -- Decides assignability and comparability for every kind of type, as TypeScript's checker does in one place.
 import type { Checker } from './checker';
 import { isUnit } from './flow';
-import { childTypes, isGenericObjectOrIndexType } from './genericTypes';
+import { childTypes, isGenericObjectOrIndexType, mappedOptionality } from './genericTypes';
 import {
   applicableIndex,
   hasIndexSignature,
@@ -19,6 +19,7 @@ import {
   errorType,
   filterType,
   type IndexedAccessType,
+  intersectionOf,
   type IntersectionType,
   isAnyLike,
   isIntrinsic,
@@ -371,21 +372,25 @@ export class Relations {
   }
 
   /**
-   * `{ [P in K]: S[P] }` with its optionality kept holds what `S` does, and `{ [P in keyof S]: S[P] }` what is related to
-   * `S` too, as TypeScript's rules for a generic mapped target relate `T` to `Partial<T>` and `Readonly<Partial<T>>`.
+   * As TypeScript's rules for a generic mapped target `{ [P in K]: O[P] }` that keeps its optionality: `O` is related
+   * to it, and so is a type related to `O` that has every key in `K`, or with `?` some key in `K`, as `T` is to
+   * `Partial<T>` and `Readonly<Partial<T>>`.
    */
   private relatedToHomomorphicMapped(s: Type, t: ObjectType, relation: Relation): boolean {
     const mapped = t.objectKind === 'mapped' ? t.mapped : undefined;
     if (!mapped || mapped.optionalModifier === '-' || mapped.nameType) return false;
     const { template, typeParameter, constraint } = mapped;
-    if (template.kind !== 'indexedAccess' || template.indexType !== typeParameter) return false;
-    if (this.identical(template.objectType, s)) return true;
-    // Only over the keys of `S` does a type related to `S` have every key, as `Pick<S, K>` need not.
-    return (
-      constraint.kind === 'keyof' &&
-      this.identical(constraint.type, template.objectType) &&
-      this.isRelated(s, template.objectType, relation)
-    );
+    // An optional template holds `undefined` too, as `Partial<T>[P]` in `Readonly<Partial<T>>` is `T[P] | undefined`.
+    const component = this.removeNullish(template);
+    if (component.kind !== 'indexedAccess' || component.indexType !== typeParameter) return false;
+    if (template === component && this.identical(template.objectType, s)) return true;
+    if (s.kind === 'object' && s.objectKind === 'mapped') return false;
+    const sourceKeys = this.c.typeOperators.keyofType(s);
+    const hasKeys =
+      mapped.optionalModifier === '+'
+        ? !isIntrinsic(intersectionOf([constraint, sourceKeys], this.c.budget), 'never')
+        : this.isRelated(constraint, sourceKeys, relation);
+    return hasKeys && this.isRelated(s, component.objectType, relation);
   }
 
   /**
@@ -1091,18 +1096,6 @@ function recursionIdentity(type: Type): unknown {
       return type;
     }
   }
-}
-
-/** Whether a mapped type adds (1) or removes (-1) optionality, as TypeScript's `getCombinedMappedTypeOptionality` decides. */
-function mappedOptionality(type: Type | undefined): number {
-  if (type?.kind === 'intersection') {
-    const [first, ...rest] = type.types.map((member) => mappedOptionality(member));
-    return rest.every((optionality) => optionality === first) ? (first ?? 0) : 0;
-  }
-  if (type?.kind !== 'object' || !type.mapped) return 0;
-  const { optionalModifier, source } = type.mapped;
-  if (optionalModifier) return optionalModifier === '+' ? 1 : -1;
-  return mappedOptionality(source);
 }
 
 /** A tuple's shape, which TypeScript's tuple target, its recursion identity, stands for. */

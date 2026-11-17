@@ -1,7 +1,7 @@
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import type { Checker, Mapper } from './checker';
-import { conditionalBranch, isGenericObjectOrIndexType } from './genericTypes';
+import { conditionalBranch, isGenericObjectOrIndexType, mappedOptionality } from './genericTypes';
 import { applicableIndex, isPatternKey } from './indexInfos';
 import { printedPropertyName } from './print';
 import { named, templateFragmentText } from './syntax';
@@ -301,6 +301,8 @@ export class TypeOperators {
   }
 
   keyofType(type: Type): Type {
+    // As TypeScript's `getIndexTypeForMappedType`, `keyof { [P in K]: X }` is `K`.
+    if (type.kind === 'object' && type.mapped && !type.mapped.nameType) return type.mapped.constraint;
     if (this.c.relations.isGeneric(type)) return { kind: 'keyof', id: newTypeId(), type };
     if (isAnyLike(type) || isIntrinsic(type, 'never')) return unionOf([stringType, numberType, symbolType]);
     if (type.kind === 'union')
@@ -360,9 +362,7 @@ export class TypeOperators {
   indexedAccess(object: Type, index: Type, node?: TreeNode): Type {
     // A mapped type indexed by its own keys, `{ [P in K]: X }[K]`, is its template for those keys.
     if (object.kind === 'object' && object.objectKind === 'mapped' && object.mapped && !object.mapped.nameType) {
-      const { constraint, typeParameter, template } = object.mapped;
-      if (this.c.relations.isAssignable(index, constraint))
-        return this.c.instantiate(template, new Map([[typeParameter.id, index]]));
+      return this.substituteIndexedMapped(object.mapped, index);
     }
     if (this.c.relations.isGeneric(object) || this.c.relations.isGeneric(index)) {
       return (
@@ -383,6 +383,16 @@ export class TypeOperators {
     if (node)
       this.c.error(node, `型 '${this.c.print(index)}' は型 '${this.c.print(object)}' のインデックスに使えません。`);
     return errorType;
+  }
+
+  /**
+   * As TypeScript's `substituteIndexedMappedType`, a mapped type's template for `index`, with `undefined` when the
+   * mapped type, or the one whose modifiers it keeps, adds `?`.
+   */
+  private substituteIndexedMapped(mapped: MappedInfo, index: Type): Type {
+    const type = this.c.instantiate(mapped.template, new Map([[mapped.typeParameter.id, index]]));
+    const optional = mapped.optionalModifier === '+' || mappedOptionality(mapped.source) > 0;
+    return optional ? unionOf([type, undefinedType]) : type;
   }
 
   private propertyAccess(object: Type, key: string | number | symbol, node: TreeNode | undefined): Type {

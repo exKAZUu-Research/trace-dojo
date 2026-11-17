@@ -138,3 +138,15 @@ export function childTypes(type: Type): readonly Type[] {
     }
   }
 }
+
+/** Whether a mapped type adds (1) or removes (-1) optionality, as TypeScript's `getCombinedMappedTypeOptionality` decides. */
+export function mappedOptionality(type: Type | undefined): number {
+  if (type?.kind === 'intersection') {
+    const [first, ...rest] = type.types.map((member) => mappedOptionality(member));
+    return rest.every((optionality) => optionality === first) ? (first ?? 0) : 0;
+  }
+  if (type?.kind !== 'object' || !type.mapped) return 0;
+  const { optionalModifier, source } = type.mapped;
+  if (optionalModifier) return optionalModifier === '+' ? 1 : -1;
+  return mappedOptionality(source);
+}
