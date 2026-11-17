@@ -44,14 +44,43 @@ export type FrameKind = 'main' | 'method' | 'block' | 'class';
 
 /** One activation on the call stack: the program, a method, a class body, or a block. */
 export class Frame implements TracedFrame {
+  readonly executionContext = rt().activeCursor;
   /** Values that only native code holds, which garbage collection must keep. */
   readonly temporaries: Value[] = [];
-  /** The visibility that `def` gives in a class body after `private` or `public` without arguments. */
-  defaultVisibility: Visibility = 'public';
-  /** Whether `module_function` without arguments is in effect in a module body. */
-  moduleFunction = false;
+  private definitionMode: { visibility: Visibility; moduleFunction: boolean } = {
+    visibility: 'public',
+    moduleFunction: false,
+  };
   /** The exception being handled by a `rescue` of this frame, which a bare `raise` re-raises. */
   handling: RObject[] = [];
+
+  get defaultVisibility(): Visibility {
+    return this.definitionMode.visibility;
+  }
+
+  set defaultVisibility(value: Visibility) {
+    this.definitionMode.visibility = value;
+  }
+
+  get moduleFunction(): boolean {
+    return this.definitionMode.moduleFunction;
+  }
+
+  set moduleFunction(value: boolean) {
+    this.definitionMode.moduleFunction = value;
+  }
+
+  shareDefinitionMode(outer: Frame): void {
+    this.definitionMode = outer.definitionMode;
+  }
+
+  get definitionOwner(): RClass | undefined {
+    if (this.extra.definee) return this.extra.definee;
+    if (this.extra.definitionTarget) return this.extra.definitionTarget;
+    if (this.extra.lexicalDefinitionOwner) return this.extra.lexicalDefinitionOwner;
+    if (this.kind === 'class') return this.self as RClass;
+    return this.home.kind === 'class' ? (this.home.self as RClass) : undefined;
+  }
 
   // code-gauge-allow functionParameterCount 8 -- A frame carries the call context needed by Ruby method, block, and class execution.
   constructor(
@@ -71,19 +100,27 @@ export class Frame implements TracedFrame {
   get home(): Frame {
     return this.extra.home ?? this;
   }
+  get lexicalBlock(): RProc | undefined {
+    const home = this.home;
+    return (home.extra.lexicalBlockHome ?? home).extra.block;
+  }
 }
 
 export function rootValues(frame: Frame, values: readonly Value[]): void {
   for (const value of values) frame.temporaries.push(value);
 }
 
+export type MissingReason = 'vcall' | 'private' | 'protected' | 'super';
+
 export interface FrameExtra {
   definitionTarget?: RClass;
+  lexicalDefinitionOwner?: RClass;
+  forbidSingletonDefinition?: boolean;
   /** The running method. */
   method?: RMethod;
   def?: MethodDef;
-  /** The block the method received, which `yield` calls. */
   block?: RProc;
+  lexicalBlockHome?: Frame;
   /** The arguments the method received, which `super` without arguments passes on. */
   args?: Value[];
   keywords?: Value;
@@ -95,41 +132,59 @@ export interface FrameExtra {
   blockDef?: BlockDef;
   /** For a lambda's frame, where `return` returns from the lambda itself. */
   isLambda?: boolean;
+  /** The MatchData of the last match a method this frame called made, which `$~` and `$1` read. */
+  lastMatch?: Value;
+  /** The module where `def` defines methods, for a block that `class_eval` or `instance_eval` runs. */
+  definee?: RClass;
   /** Whether this frame's method has returned, after which a `return` in a block it made cannot reach it. */
   finished?: boolean;
 }
 
+export abstract class RubyJump {}
+
 /** A Ruby exception raised in the program, carrying the exception object. */
-export class RubyError {
-  constructor(readonly exception: RObject) {}
+export class RubyError extends RubyJump {
+  constructor(readonly exception: RObject) {
+    super();
+  }
 }
 
 /** Leaves a loop (`inBlock` false) or the call that received a block (`tag` is the call's tag). */
-export class BreakSignal {
+export class BreakSignal extends RubyJump {
   constructor(
     readonly value: Value,
     readonly tag: object | undefined
-  ) {}
+  ) {
+    super();
+  }
 }
 
-export class NextSignal {
-  constructor(readonly value: Value) {}
+export class NextSignal extends RubyJump {
+  constructor(readonly value: Value) {
+    super();
+  }
 }
 
-export class ReturnSignal {
+export class ReturnSignal extends RubyJump {
   constructor(
     readonly value: Value,
     readonly target: Frame
-  ) {}
+  ) {
+    super();
+  }
 }
 
-export class RetrySignal {}
+export class RetrySignal extends RubyJump {}
 
-export class ThrowSignal {
+export class RedoSignal extends RubyJump {}
+
+export class ThrowSignal extends RubyJump {
   constructor(
     readonly tag: Value,
     readonly value: Value
-  ) {}
+  ) {
+    super();
+  }
 }
 
 /** Ends the program as `exit` does, which the trace and the grader do not count as a failure. */
@@ -145,6 +200,14 @@ export class UnsupportedFeatureError extends Error {
   }
 }
 
+interface RecursionContext {
+  inspecting: Set<object>;
+  comparablePairs: Map<Value, Set<Value>>;
+  arrayComparisonPairs: Map<RArray, Set<RArray>>;
+  arrayComparisonDepth: number;
+  setInspectDepth: number;
+}
+
 export class Runtime implements TracedRuntime<Frame> {
   readonly world = new TurtleWorld();
   readonly steps = new StepTracker();
@@ -153,23 +216,51 @@ export class Runtime implements TracedRuntime<Frame> {
   readonly frames: Frame[] = [];
   readonly globals = new Map<string, Value>();
   readonly symbols = new Map<string, RSymbol>();
+  readonly internedIds = new Set<string>();
   readonly coreStrings = new Map<string, RString>();
+  programName?: RString;
+  missingReason?: MissingReason;
+  sleptNanoseconds = 0n;
+  frozenStringLiterals = false;
+  readonly frozenStrings = new Map<string, RString>();
+  readonly regexpLiterals = new WeakMap<object, RObject>();
   /** Values native code holds while it calls back into the program, such as the array `each` iterates. */
   readonly held: Value[] = [];
   currentNumericReceiver?: Value;
   readonly heldArrays: Value[][] = [];
+  readonly heldSnapshots: { values: Value[]; arrays: Value[][] }[] = [];
+  activeCursor?: object;
   /** The tags of the `catch` blocks running now, innermost last, which `throw` must match. */
   readonly catchTags: Value[] = [];
-  readonly comparablePairs = new Map<Value, Set<Value>>();
-  readonly arrayComparisonPairs = new Map<RArray, Set<RArray>>();
-  arrayComparisonDepth = 0;
+  /** The blocks `at_exit` and `END` registered, which run when the program ends, the last first. */
+  readonly atExit: RProc[] = [];
+  readonly registeredEndBlocks = new WeakSet<object>();
+  readonly completedExitHandlers: RProc[] = [];
+  private readonly recursionContexts = new WeakMap<object, RecursionContext>();
+
+  get recursionContext(): RecursionContext {
+    const key = this.activeCursor ?? this;
+    let context = this.recursionContexts.get(key);
+    if (!context) {
+      context = {
+        inspecting: new Set(),
+        comparablePairs: new Map(),
+        arrayComparisonPairs: new Map(),
+        arrayComparisonDepth: 0,
+        setInspectDepth: 0,
+      };
+      this.recursionContexts.set(key, context);
+    }
+    return context;
+  }
   /** The row of the statement running now, which a call records as its frame's call row. */
   currentRow = 0;
   containerVersion = 0;
   userCallVersion = 0;
-  setInspectDepth = 0;
   /** The fake addresses `inspect` shows for objects, assigned in the order the program shows them. */
   readonly addresses = new Map<object, number>();
+  readonly methodHashIds = new WeakMap<object, number>();
+  nextMethodHashId = 1;
   c!: CoreClasses;
   mainObject!: RObject;
   /** The state of the default random number generator, which `srand` reseeds. */
@@ -182,6 +273,10 @@ export class Runtime implements TracedRuntime<Frame> {
 
   spend(cost = 1): void {
     this.budget.spend(cost);
+  }
+
+  get remainingSlots(): number {
+    return Math.max(0, LIMITS.maxSlots - this.allocatedSlots);
   }
 
   chargeSlots(count: number): void {

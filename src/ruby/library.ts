@@ -10,4 +10,13 @@ import './libRange';
 import './libRandom';
 import './libTurtle';
 import './libSet';
+import './libMeta';
+import './libStruct';
+import './libRegexp';
+import './libTime';
+import './libRational';
+import './libEncoding';
 import './libUnsupported';
+
+import './exitHandlers';
+import './libData';

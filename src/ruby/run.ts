@@ -5,8 +5,12 @@ import type { ProgramInput } from '../interpreter/programIo';
 import type { Program } from './ast';
 import { bootstrap } from './bootstrap';
 import { describeException } from './describe';
+import { runAtExit } from './exitHandlers';
+import { initializeInternedIds } from './internedIds';
 import { evalBody, runToEnd, STACK_OVERFLOW } from './interp';
+import { makeData } from './libData';
 import { parseRuby } from './parse';
+import { releaseNativeCasefold } from './regexpCasefoldParity';
 import {
   BreakSignal,
   ExitSignal,
@@ -47,20 +51,40 @@ export function executeRubyProgram(source: string, input?: ProgramInput): Progra
  *
  * @param onEnd Called when the program ends, while its frame still holds its variables.
  */
-// code-gauge-allow duplicateLines 23 -- The interpreter entry points mirror the other languages so callers use one contract.
+// code-gauge-allow functionCognitiveComplexity 20 -- The ordered cases for Ruby execution lifecycle share state; splitting them solely for the metric would hide their sequencing.
+// code-gauge-allow functionNcss 35 -- The ordered cases for Ruby execution lifecycle share state; splitting them solely for the metric would hide their sequencing.
 export function runProgram(runtime: Runtime, program: Program, onEnd?: (frame: Frame) => void): ProgramRun {
   return withRuntime(runtime, () => {
     bootstrap(runtime);
+    initializeInternedIds(program);
+    for (const warning of program.warnings ?? [])
+      runtime.io.stderr.write(`main.rb:${warning.row + 1}: warning: ${warning.message}\n`);
+    runtime.frozenStringLiterals = program.frozenStringLiterals ?? false;
     const frame = new Frame('main', runtime.mainObject, new Scope(), [runtime.c.Object], undefined, false, false, {});
     frame.defaultVisibility = 'private';
     runtime.pushFrame(frame);
     try {
-      let uncaughtException: string | undefined;
+      let mainError: unknown;
+      if (program.data !== undefined)
+        runtime.c.Object.constants.set('DATA', makeData(program.data, program.dataFile ?? program.data));
       try {
         runToEnd(evalBody(program.body, frame));
       } catch (error) {
-        uncaughtException = describeUncaught(runtime, error, frame);
+        if (error instanceof RubyError) runtime.globals.set('$!', error.exception);
+        mainError = error;
       }
+      let hookErrors: (RubyError | ExitSignal | UnsupportedFeatureError)[] = [];
+      try {
+        hookErrors = runToEnd(runAtExit());
+      } catch (error) {
+        if (error instanceof RubyError || error instanceof ExitSignal || error instanceof UnsupportedFeatureError)
+          hookErrors.push(error);
+        else throw error;
+      }
+      const messages = (mainError === undefined ? hookErrors : [...hookErrors, mainError])
+        .map((error) => describeUncaught(runtime, error, frame))
+        .filter(Boolean);
+      const uncaughtException = messages.length > 0 ? messages.join('\n') : undefined;
       onEnd?.(frame);
       runtime.collectGarbage();
       return {
@@ -70,8 +94,12 @@ export function runProgram(runtime: Runtime, program: Program, onEnd?: (frame: F
         ...runtime.io.output(),
       };
     } finally {
-      frame.extra.finished = true;
-      runtime.popFrame();
+      try {
+        releaseNativeCasefold(runtime);
+      } finally {
+        frame.extra.finished = true;
+        runtime.popFrame();
+      }
     }
   });
 }
@@ -83,6 +111,7 @@ function describeUncaught(runtime: Runtime, error: unknown, frame: Frame): strin
   if (error instanceof ReturnSignal && error.target === frame) return undefined;
   if (error instanceof RubyError) {
     if (isA(error.exception, runtime.c.SystemExit)) return undefined;
+    if (error.exception.internal?.get('hookReturn') === true) return 'unexpected return';
     return describeException(error.exception);
   }
   if (error instanceof ThrowSignal || error instanceof BreakSignal || error instanceof NextSignal) {

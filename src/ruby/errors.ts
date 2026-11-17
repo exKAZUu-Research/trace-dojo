@@ -1,6 +1,8 @@
+import { className } from './conversions';
 import { NIL, type RClass, RObject, RString, RSymbol, type Value } from './objects';
-import { rt, RubyError } from './runtime';
-import { realClassOf, str } from './values';
+import { rt, RubyError, UnsupportedFeatureError } from './runtime';
+import { isAsciiText } from './unicodeText';
+import { realClassOf, str, stringBytes, stringFromBytes } from './values';
 
 /** Creates a Ruby exception of `cls` with `message`, to throw. */
 export function rubyError(cls: RClass, message: string | Value): RubyError {
@@ -38,26 +40,46 @@ export function floatDomainError(message: string): RubyError {
 }
 
 export function nameError(message: string, receiver: Value = NIL, name?: string): RubyError {
-  const error = rubyError(rt().c.NameError, message);
+  const error = rubyError(rt().c.NameError, namedErrorMessage(message, name));
   setNameErrorFields(error.exception, receiver, name);
   return error;
 }
 
 export function noMethodError(message: string, receiver: Value, name: string): RubyError {
-  const error = rubyError(rt().c.NoMethodError, message);
+  const error = rubyError(rt().c.NoMethodError, namedErrorMessage(message, name));
   setNameErrorFields(error.exception, receiver, name);
   return error;
 }
 
+export function undefinedMethodError(owner: RClass, name: string): RubyError {
+  return nameError(
+    `undefined method '${name}' for ${owner.isModule ? 'module' : 'class'} '${className(owner)}'`,
+    owner,
+    name
+  );
+}
+
+function namedErrorMessage(message: string, name: string | undefined): string | RString {
+  if (name === undefined) return message;
+  const symbol = RSymbol.fromKey(name);
+  if (!symbol.binary && !symbol.usAscii) return message;
+  if (!isAsciiText(message.split(name).join('')))
+    throw new UnsupportedFeatureError('非ASCIIの所有者とバイト識別子の例外メッセージ');
+  const shown = name.replaceAll(/[\uDD80-\uDDFF]/gu, (character) =>
+    String.fromCodePoint(0xdc_00 + (character.codePointAt(0)! & 255))
+  );
+  return stringFromBytes(stringBytes(str(message.replaceAll(name, shown))), symbol.binary, symbol.usAscii);
+}
+
 function setNameErrorFields(exception: RObject, receiver: Value, name: string | undefined): void {
-  exception.ivars ??= new Map();
-  exception.ivars.set('@__receiver', receiver);
-  exception.ivars.set('@__name', name === undefined ? NIL : RSymbol.of(name));
+  exception.internal ??= new Map();
+  exception.internal.set('receiver', receiver);
+  exception.internal.set('name', name === undefined ? NIL : RSymbol.fromKey(name));
 }
 
 export function frozenError(value: Value, shown: string): RubyError {
-  const error = rubyError(rt().c.FrozenError, `can't modify frozen ${realClassOf(value).name}: ${shown}`);
-  error.exception.ivars = new Map([['@__receiver', value]]);
+  const error = rubyError(rt().c.FrozenError, `can't modify frozen ${className(realClassOf(value))}: ${shown}`);
+  error.exception.internal = new Map([['receiver', value]]);
   return error;
 }
 
@@ -79,17 +101,13 @@ export function receiverDescription(value: Value): string {
   if (value === false) return 'false';
   if (value === runtime.mainObject) return 'main';
   if (value instanceof RObject || value instanceof RString || !(typeof value === 'object')) {
-    return `an instance of ${realClassOf(value).name}`;
+    return `an instance of ${className(realClassOf(value))}`;
   }
   const cls = value as RClass;
   if ('isModule' in cls && cls.constants !== undefined) {
-    return `${cls.isModule ? 'module' : 'class'} ${cls.name ?? inspectAnonymous(cls)}`;
+    return `${cls.isModule ? 'module' : 'class'} ${className(cls)}`;
   }
-  return `an instance of ${realClassOf(value).name}`;
-}
-
-function inspectAnonymous(cls: RClass): string {
-  return `#<${cls.isModule ? 'Module' : 'Class'}:0x${'0'.repeat(16)}>`;
+  return `an instance of ${className(realClassOf(value))}`;
 }
 
 /** How "no implicit conversion of X into Y" names a value: `nil`, `true`, `false`, or its class. */
