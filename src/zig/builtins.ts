@@ -396,11 +396,8 @@ export abstract class BuiltinCompiler extends ExpressionCompiler {
         if (type.kind === 'union' && type.tagType) {
           const tagType = type.tagType;
           const tags = this.enumFields(tagType);
-          const fields = this.unionFields(type);
-          return this.derived(operand, tagType.tagType as IntType, (value) => {
-            const name = fields[(value as ZUnion).tag].name;
-            return tags.find((field) => field.name === name)?.value;
-          });
+          this.unionFields(type);
+          return this.derived(operand, tagType.tagType as IntType, (value) => tags[(value as ZUnion).tag].value);
         }
         if (type.kind !== 'enum')
           return this.error(args[0], `@intFromEnum は enum の値にだけ使えます（${typeName(type)} 型です）。`);

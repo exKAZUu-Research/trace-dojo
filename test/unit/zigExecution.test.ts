@@ -5015,3 +5015,47 @@ test('fmt.count limits formatting work without applying an output limit', () => 
   const source = `const std=@import("std");pub fn main()void{_=std.fmt.count("{s: >1000001}",.{""});}`;
   expect(executeProgram('zig', source)).toMatchObject({ kind: 'limitExceeded', limit: 'operations' });
 });
+
+test.each(['insertion', 'heap', 'pdq', 'block', 'isSorted'])(
+  'sort callback %s must be known during compilation',
+  (method) => {
+    const source = `const std=@import("std");fn less(_:void,a:u8,b:u8)bool{return a<b;}fn greater(_:void,a:u8,b:u8)bool{return a>b;}pub fn main()void{var flag=true;_=&flag;var a=[_]u8{2,1};_=std.sort.${method}(u8,&a,{},if(flag) less else greater);}`;
+    expect(executeProgram('zig', source)).toMatchObject({ kind: 'compileError' });
+  }
+);
+
+test.each(['enum{u8,bool}', 'enum(u8){u8=3,bool=5}'])('enum fields retain builtin-type token names: %s', (type) => {
+  const source = `const std=@import("std");const E=${type};pub fn main()void{const x:E=.u8;const y:E=.bool;std.debug.print("{t}:{} {t}:{}",.{x,@intFromEnum(x),y,@intFromEnum(y)});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: type.includes('=') ? 'u8:3 bool:5' : 'u8:0 bool:1',
+    uncaughtException: undefined,
+  });
+});
+
+test('union tag conversions reuse the validated enum field order and explicit values', () => {
+  const count = 5000;
+  const tags = Array.from({ length: count }, (_, i) => `t${i}=${2 * i + 1}`).join(',');
+  const fields = Array.from({ length: count }, (_, i) => `t${i}:u8`).join(',');
+  const source = `const std=@import("std");const E=enum(u16){${tags}};const U=union(E){${fields}};pub fn main()void{var u:U=.{.t${count - 1}=1};_=&u;var n:u64=0;for(0..100000)|_|{const e:E=u;n+=@intFromEnum(e);n+=@intFromEnum(u);}std.debug.print("{}",.{n});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: '1999800000',
+    uncaughtException: undefined,
+  });
+});
+
+test.each(['[80000]u8', 'struct{data:[80000]u8}'])('union tag changes account for fresh %s payloads', (type) => {
+  const value = type.startsWith('struct') ? '.{.data=@splat(1)}' : '@splat(1)';
+  const source = `const U=union(enum){a:${type},b:void};pub fn main()void{var u:U=.{.b={}};for(0..60)|_|{u=.{.a=${value}};u=.{.b={}};}_=&u;}`;
+  expect(executeProgram('zig', source)).toMatchObject({ kind: 'limitExceeded', limit: 'storage' });
+});
+
+test('zero-bit union payload changes remain bounded without consuming aggregate slots', () => {
+  const source = `const std=@import("std");const U=union(enum){a:struct{},b:void};pub fn main()void{var u:U=.{.b={}};var n:u16=0;for(0..1000)|_|{u=.{.a=.{}};u=.{.b={}};n+=1;}_=&u;std.debug.print("{}",.{n});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: '1000',
+    uncaughtException: undefined,
+  });
+});

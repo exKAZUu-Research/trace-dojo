@@ -146,6 +146,7 @@ export function receiverAddress(
 
 export function callbackFunction(sema: SemaApi, value: TExpr, span: Span): ReturnType<SemaApi['functionOf']> {
   if (value.type.kind !== 'fn') return sema.error(span, '関数へのポインタではなく、関数の値を渡してください。');
+  if (!value.known) return sema.error(span, 'コールバックの関数は、コンパイルのときに決まっていなければなりません。');
   return sema.functionOf(value, span);
 }
 

@@ -241,7 +241,7 @@ function containerField(node: Node, tupleElement = false): ContainerField {
     };
   }
   if (!nameNode) fail(node, '書き方に誤りがあります。');
-  if (nameNode.type === 'identifier' && !tupleElement) return { ...spanOf(node), ...identifierName(nameNode), value };
+  if (!tupleElement) return { ...spanOf(node), ...identifierName(nameNode), value };
   return { ...spanOf(node), type: typeExpression(nameNode), value };
 }
 

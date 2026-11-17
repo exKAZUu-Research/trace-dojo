@@ -2,7 +2,7 @@ import { type Frame, withHeldValues } from '../runtime';
 import { copyForFrame, known, type SemaApi } from '../semaBase';
 import { BOOL, fnType, optionalOf, type StructType, type Type, typeName, USIZE, VOID } from '../types';
 import { FnValue, NULL, optionalSome, Slice, type Value, ZStruct } from '../values';
-import { blockSortFunction, runBlockSort } from './blockSort';
+import { blockSorter } from './blockSort';
 import {
   compareScalars,
   constSlice,
@@ -49,14 +49,15 @@ export function sorter(name: string, algorithm: SortAlgorithm): () => Member {
     const lessThan = callbackFunction(sema, sema.compile(lessThanArg), lessThanArg);
     checkCallback(sema, name, lessThan, [context.type, type, type], BOOL, lessThanArg);
     const cost = nativeTransferCost(sema, type, call.span);
-    const block = algorithm === 'block' ? blockSortFunction(sema, type, context.type, call.span) : undefined;
+    const block =
+      algorithm === 'block' ? blockSorter(sema, type, [items, context], lessThan, cost, call.span) : undefined;
     return nativeCall(VOID, [items, context], call.span, ([value, contextValue], frame) => {
       const slice = value as Slice;
       const compare = (args: Value[]): Value => {
         frame.runtime.spend(cost * 2);
         return lessThan.call(frame, args);
       };
-      if (block) runBlockSort(sema, block, frame, slice, contextValue, compare);
+      if (block) block(frame, slice, contextValue);
       else
         sortValues(
           slice,

@@ -153,7 +153,7 @@ function appendHashBytes(
       const union = value as ZUnion;
       const field = type.fields![union.tag];
       const tag = type.tagType!;
-      const tagValue = tag.fields!.find((entry) => entry.name === field.name)!.value;
+      const tagValue = tag.fields![union.tag].value;
       appendHashBytes(bytes, tagValue, tag, identityOf, spend);
       appendHashBytes(bytes, union.slots[0], field.type, identityOf, spend);
       return;

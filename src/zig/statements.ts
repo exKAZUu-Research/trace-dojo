@@ -1,3 +1,4 @@
+import { valueSlots } from './allocation';
 // code-gauge-allow-file duplicateLines 20 -- Library types repeat the same shape of method on purpose, each over its own state.
 import { PANIC, panic } from './arith';
 import { isDiscardName } from './ast';
@@ -745,11 +746,18 @@ export abstract class StatementCompiler extends CallCompiler {
     if (tag === -1) return this.error(init, `${typeName(type)} 型には、フィールド「${init.name}」がありません。`);
     const fieldType = fields[tag].type;
     const store = this.slotStore(init.value, fieldType);
+    const slots = sizeOf(fieldType) === 0 ? 0 : valueSlots(fieldType);
     return (frame, holder, index) => {
       const union = holder.slots[index] as ZUnion;
       const changed = union.tag !== tag;
+      let payload: Value;
+      if (changed) {
+        frame.runtime.reserveStorage(slots);
+        frame.runtime.spend(slots);
+        payload = undefinedValue(fieldType);
+      }
       union.tag = tag;
-      if (changed) union.slots[0] = undefinedValue(fieldType);
+      if (changed) union.slots[0] = payload;
       store(frame, union, 0);
     };
   }

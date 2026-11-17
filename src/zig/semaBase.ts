@@ -169,7 +169,14 @@ export interface SemaApi {
   reserveStorage(type: Type, span: Span): void;
   resolveStorage(type: Type, span: Span): void;
   spendCompilation(cost?: number): void;
-  libraryFunction(file: SourceFile, element: Type, name: string, params: readonly Type[], span: Span): FunctionInstance;
+  libraryFunction(
+    file: SourceFile,
+    element: Type,
+    name: string,
+    params: readonly Type[],
+    span: Span,
+    args?: readonly TExpr[]
+  ): FunctionInstance;
   coerce(expression: TExpr, type: Type, span?: Span): TExpr;
   error(span: Span, message: string): never;
   knownValue(expression: TExpr, what: string): Value;
@@ -730,13 +737,9 @@ export abstract class SemaBase implements SemaApi {
           return known(to, field.value, span);
         }
         if (from.kind === 'union' && from.tagType === to) {
-          const fields = this.unionFields(from);
+          this.unionFields(from);
           const tags = this.enumFields(to);
-          return this.derived(
-            expression,
-            to,
-            (value) => tags.find((tag) => tag.name === fields[(value as ZUnion).tag].name)?.value
-          );
+          return this.derived(expression, to, (value) => tags[(value as ZUnion).tag].value);
         }
         return undefined;
       }

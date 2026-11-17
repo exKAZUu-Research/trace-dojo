@@ -456,7 +456,8 @@ export abstract class CallCompiler extends BuiltinCompiler {
     element: Type,
     name: string,
     params: readonly Type[],
-    span: Span
+    span: Span,
+    args: readonly TExpr[] = []
   ): FunctionInstance {
     let types = this.libraryNamespaces.get(file);
     if (!types) {
@@ -472,7 +473,7 @@ export abstract class CallCompiler extends BuiltinCompiler {
     }
     const decl = namespace.decls.get(name);
     if (decl?.kind !== 'fn') throw new Error(`Missing library function ${name}`);
-    return this.instantiate(new FnRef(decl), params, span);
+    return this.instantiate(new FnRef(decl), params, span, args);
   }
 
   /** Runs a function in a new frame, as the call at `callRow` of the caller's frame. */
