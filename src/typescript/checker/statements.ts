@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 543 -- Follows the flow of control through each kind of statement.
+// code-gauge-allow-file fileNcss 556 -- Follows the flow of control through each kind of statement.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import type { Checker } from './checker';
