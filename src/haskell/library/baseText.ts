@@ -136,7 +136,12 @@ data FFFormat = FFExponent | FFFixed | FFGeneric
 
 floatToDigits10 :: RealFloat a => a -> ([Int], Int)
 floatToDigits10 0 = ([0],0)
-floatToDigits10 x = (map fromInteger (reverse digits), k)
+floatToDigits10 x
+  | primitive "hasNativeFloatDigits" x = primitive "nativeFloatToDigits10" (floatDigits x) x
+  | otherwise = floatToDigits10Generic x
+
+floatToDigits10Generic :: RealFloat a => a -> ([Int], Int)
+floatToDigits10Generic x = (map fromInteger (reverse digits), k)
   where
     (f0,e0) = decodeFloat x
     (minExp0,_) = floatRange x

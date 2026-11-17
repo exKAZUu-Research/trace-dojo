@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 519 -- The primitive table lists every built-in operation the Haskell library calls.
+// code-gauge-allow-file fileNcss 520 -- The primitive table lists every built-in operation the Haskell library calls.
 import { TURTLE_METHOD_NAMES } from '../interpreter/turtleWorld';
 import { CONS_CON, tupleCon, UNIT_CON } from './builtinTypes';
 import type { ConInfo } from './entities';
@@ -14,7 +14,9 @@ import {
   IOReturn,
   IOThen,
   type Slot,
+  Thunk,
   TurtleValue,
+  untypedSlot,
   type Value,
 } from './values';
 
@@ -456,6 +458,19 @@ function rationalToBinary(
   const result = Number(q) * 2 ** exponent;
   return negative ? -result : result;
 }
+
+define('hasNativeFloatDigits', 1, [], ([slot]) => {
+  const raw = untypedSlot(slot);
+  const value = raw instanceof Thunk ? (raw.state === 'done' ? raw.value : undefined) : raw;
+  return bool(typeof value === 'number' && Number.isFinite(value) && value > 0);
+});
+
+strict('nativeFloatToDigits10', 2, ([precision, value], runtime) => {
+  const { digits, exponent } = floatToDigits(value as number, precision === 24n);
+  runtime.spend(digits.length);
+  runtime.allocate(digits.length * 2 + 2);
+  return tuple(listOf(digits.map(BigInt)), BigInt(exponent));
+});
 
 /** GHC's `floatToDigits` in base 10: the digits of a float and its exponent, x = 0.d1d2... * 10^exponent. */
 export function floatToDigits(value: number, isFloat: boolean): { digits: number[]; exponent: number } {

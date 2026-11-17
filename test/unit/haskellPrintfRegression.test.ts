@@ -83,3 +83,67 @@ test.each([
     uncaughtException,
   });
 });
+
+test.each([
+  ['Float', '0.14285715', '71.42857'],
+  ['Double', '0.14285714285714285', '71.42857142857143'],
+])('printing a table of %s ratios stays within the execution budget', (type, first, last) => {
+  const source = `import Control.Monad\nmain=forM_ [1..500::Int] $ \\i->print(fromIntegral i/7::${type})`;
+  const result = executeProgram('haskell', source);
+  expect(result.kind).toBe('executed');
+  if (result.kind !== 'executed') return;
+  expect(result.uncaughtException).toBeUndefined();
+  const lines = result.stdout.trimEnd().split('\n');
+  expect(lines).toHaveLength(500);
+  expect(lines[0]).toBe(first);
+  expect(lines.at(-1)).toBe(last);
+});
+
+test.each(['Float', 'Double'])('formatting a table of %s ratios stays within the execution budget', (type) => {
+  const source = `import Control.Monad\nimport Text.Printf\nmain=forM_ [1..250::Int] $ \\i->printf "%6.2f\\n" (fromIntegral i/7::${type})`;
+  const result = executeProgram('haskell', source);
+  expect(result.kind).toBe('executed');
+  if (result.kind !== 'executed') return;
+  expect(result.uncaughtException).toBeUndefined();
+  const lines = result.stdout.trimEnd().split('\n');
+  expect(lines).toHaveLength(250);
+  expect(lines[0]).toBe('  0.14');
+  expect(lines.at(-1)).toBe(' 35.71');
+});
+
+test('generic RealFloat formatting retains nonstrict user methods', () => {
+  const source = `import Numeric
+
+data N=N
+instance Eq N where _==_=False
+instance Ord N where compare _ _=GT
+instance Num N where
+ fromInteger _=N
+ (+) _ _=N
+ (*) _ _=N
+ negate _=N
+ abs _=N
+ signum _=N
+instance Real N where toRational _=0
+instance Fractional N where fromRational _=N
+instance RealFrac N where properFraction _=(0,N)
+instance Floating N
+instance RealFloat N where
+ floatRadix _=2
+ floatDigits _=53
+ floatRange _=(-1021,1024)
+ decodeFloat _=(4503599627370496,-52)
+ encodeFloat _ _=N
+ isNaN _=False
+ isInfinite _=False
+ isDenormalized _=False
+ isNegativeZero _=False
+ isIEEE _=True
+main=putStrLn(showGFloat Nothing (undefined::N) "")
+`;
+  expect(executeProgram('haskell', source)).toMatchObject({
+    kind: 'executed',
+    stdout: '-1.0\n',
+    uncaughtException: undefined,
+  });
+});
