@@ -88,6 +88,22 @@ test.each([
   expect(diagnosticsOf(source)).toEqual([`${source.split('\n').length}: ${message}`]);
 });
 
+test('turning a function or a class into text is not supported, as Node.js shows the source tsx printed', () => {
+  const source = `function add(a: number, b: number): number { return a + b; }
+class A {}
+console.log(String(add));
+console.log(add.toString());
+console.log(\`\${add}\`);
+console.log('' + add);
+console.log('%s', A);
+let s = 'x';
+s += add;
+console.log(add, add.name, '%d', typeof A);`;
+  expect(diagnosticsOf(source)).toEqual(
+    [3, 4, 5, 6, 7, 9].map((row) => `${row}: 関数やクラスの文字列への変換は、この採点環境では使えません。`)
+  );
+});
+
 test('Node.js names are unknown, as the reference tsc has no Node.js types', () => {
   expect(diagnosticsOf('process.exit(0);')).toEqual([
     '1: 名前 process が見つかりません。Node.js の機能は、この採点環境では使えません。',

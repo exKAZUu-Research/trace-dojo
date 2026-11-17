@@ -83,6 +83,22 @@ export class ExpressionChecker {
   }
 
   /** Whether a type is a symbol (not `any`), which converting to a string implicitly throws for. */
+  /**
+   * Reports a function or a class turned into text: Node.js shows the source tsx's esbuild printed for it, which this
+   * interpreter does not reproduce.
+   */
+  checkFunctionText(node: TreeNode, type: Type): void {
+    if (isAnyLike(type)) return;
+    const isFunction = (member: Type): boolean =>
+      member.kind === 'object' &&
+      (member.name === 'Function' ||
+        this.c.signaturesOf(member, 'call').length > 0 ||
+        this.c.signaturesOf(member, 'construct').length > 0);
+    if ((type.kind === 'union' ? type.types : [type]).some(isFunction)) {
+      this.c.error(node, unsupportedMessage('関数やクラスの文字列への変換'));
+    }
+  }
+
   isSymbolLike(type: Type): boolean {
     return !isAnyLike(type) && !isIntrinsic(type, 'never') && this.c.relations.isAssignable(type, symbolType);
   }
@@ -97,6 +113,7 @@ export class ExpressionChecker {
       }
       const expression = named(child)[0];
       const type = this.check(expression);
+      this.checkFunctionText(expression, type);
       if (this.isSymbolLike(type)) {
         this.c.error(
           expression,

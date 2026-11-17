@@ -1,3 +1,4 @@
+// code-gauge-allow-file fileNcss 413 -- Resolves calls as TypeScript does: callees, overloads, inference, and the effects of calls on the flow.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import type { Checker, Mapper } from './checker';
@@ -35,7 +36,7 @@ export class Calls {
   constructor(private readonly c: Checker) {}
 
   // code-gauge-allow functionCognitiveComplexity 20 -- Follows TypeScript's checks of a call's callee in order, each with its own error.
-  // code-gauge-allow functionNcss 38 -- Follows TypeScript's checks of a call's callee in order, each with its own error.
+  // code-gauge-allow functionNcss 39 -- Follows TypeScript's checks of a call's callee in order, each with its own error.
   call(node: TreeNode, contextual?: Type): Type {
     const callee = node.childForFieldName('function') as TreeNode;
     const argumentsNode = node.childForFieldName('arguments');
@@ -78,6 +79,7 @@ export class Calls {
     if (!resolution) return errorType;
     this.resolved.set(node.id, resolution.signature);
     this.checkThisContext(callee, resolution.signature);
+    this.checkTextConversions(callee, args);
     const result = resolution.returnType;
     return chained || (optional && this.c.relations.isNullable(this.c.silently(() => this.c.expressions.check(callee))))
       ? this.c.members.chainResult(node, result)
@@ -278,6 +280,21 @@ export class Calls {
   /** Resolves a call to one of `signatures`, as `super(...)` does with its base class's constructors. */
   resolveWith(node: TreeNode, callee: TreeNode, signatures: Signature[], args: TreeNode[]): Type {
     return this.resolve(node, callee, signatures, args, undefined, undefined)?.returnType ?? errorType;
+  }
+
+  /** Reports the functions `String(...)` and a `%s` of `console` turn into text. */
+  private checkTextConversions(callee: TreeNode, args: TreeNode[]): void {
+    const typeOf = (arg: TreeNode): Type => this.c.silently(() => this.c.expressions.check(arg));
+    const symbol = callee.type === 'identifier' ? this.c.scopeOf(callee).lookupValue(callee.text) : undefined;
+    const declaration = symbol?.valueDeclaration;
+    if (callee.text === 'String' && declaration && this.c.isLibrary(declaration) && args[0]) {
+      this.c.expressions.checkFunctionText(args[0], typeOf(args[0]));
+      return;
+    }
+    const object = callee.type === 'member_expression' ? callee.childForFieldName('object') : undefined;
+    const format = args[0];
+    if (object?.text !== 'console' || format?.type !== 'string' || !format.text.includes('%s')) return;
+    for (const arg of args.slice(1)) this.c.expressions.checkFunctionText(arg, typeOf(arg));
   }
 
   /** Whether a call ends the flow, calling through a name a function declared to return `never`. */

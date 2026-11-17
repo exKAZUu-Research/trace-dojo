@@ -214,6 +214,8 @@ export class OperatorChecker {
       }
     }
     if (this.isStringLike(leftType) || this.isStringLike(rightType)) {
+      this.c.expressions.checkFunctionText(left, leftType);
+      this.c.expressions.checkFunctionText(right, rightType);
       return stringType;
     }
     if (isAnyLike(leftType) || isAnyLike(rightType)) return anyType;

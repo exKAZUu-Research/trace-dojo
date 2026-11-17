@@ -213,6 +213,8 @@ export class MemberChecker {
     // A stack trace names the files and lines of the host, which differ from the program's.
     if (owner === 'Error' && property.name === 'stack') return 'Error の stack';
     if (owner === 'RegExp' && property.name === 'compile') return 'RegExp の compile';
+    // Node.js shows a function's source as tsx's esbuild printed it, which this interpreter does not reproduce.
+    if (owner === 'Function' && property.name === 'toString') return '関数やクラスの文字列への変換';
     return undefined;
   }
 
