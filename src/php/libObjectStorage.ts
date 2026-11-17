@@ -6,8 +6,9 @@ import { deprecated, throwError } from './errors';
 import { magicSerializationMethods, serializationMethods } from './libArrayObject';
 import { defineClass, type NativeMethod } from './native';
 import { strictEquals, toKey } from './operators';
+import { share } from './places';
 import { rt } from './runtime';
-import { dropped, type Key, type NativeFunction, PhpArray, PhpObject, type Value } from './values';
+import { dropped, type Key, type NativeFunction, NativeValueIndex, PhpArray, PhpObject, type Value } from './values';
 
 interface StorageEntry {
   object: PhpObject;
@@ -15,6 +16,7 @@ interface StorageEntry {
 }
 
 class ObjectStorage {
+  readonly nativeValues = new NativeValueIndex();
   slots: (StorageEntry | undefined)[] = [];
   entries = new Map<string | PhpObject, StorageEntry>();
   /** The slot the iteration is at, which may be an empty one before the next element. */
@@ -54,17 +56,22 @@ class ObjectStorage {
   }
 
   attach(object: PhpObject, info: Value): void {
+    info = share(info);
     const hash = this.hash(object);
     const entry = this.entries.get(hash);
     if (entry) {
       const old = entry.info;
       entry.info = info;
+      this.nativeValues.add(info);
+      this.nativeValues.delete(old);
       if (old !== info) dropped(old);
     } else {
       rt().allocate(1);
       const entry = { object, info };
       this.entries.set(hash, entry);
       this.slots.push(entry);
+      this.nativeValues.add(object);
+      this.nativeValues.add(info);
     }
   }
 
@@ -73,6 +80,8 @@ class ObjectStorage {
     const entry = this.entries.get(hash);
     if (!entry) return false;
     this.entries.delete(hash);
+    this.nativeValues.delete(entry.object);
+    this.nativeValues.delete(entry.info);
     this.slots[this.slots.indexOf(entry)] = undefined;
     rt().release([entry.object, entry.info]);
     return true;
@@ -91,7 +100,9 @@ class ObjectStorage {
     const entry = this.slots[this.validPosition()];
     if (entry) {
       const old = entry.info;
-      entry.info = value;
+      entry.info = share(value);
+      this.nativeValues.add(value);
+      this.nativeValues.delete(old);
       if (old !== value) dropped(old);
     }
   }

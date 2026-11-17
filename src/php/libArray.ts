@@ -165,7 +165,7 @@ defineFunction('array_push(array &$array, mixed ...$values): int', (ctx) => {
 defineFunction('array_pop(array &$array): mixed', (ctx) => {
   checkArrayRef(ctx, 0, 'array_pop', 'array');
   const array = writableArray(ctx, 0);
-  const last = [...array.map.keys()].at(-1);
+  const last = array.lastKey();
   if (last === undefined) return null;
   const value = array.get(last) as Value;
   array.delete(last);
@@ -222,11 +222,11 @@ defineFunction('array_key_first(array $array): int|string|null', ({ args }) => {
   return first.done ? null : keyValue(first.value);
 });
 defineFunction('array_key_last(array $array): int|string|null', ({ args }) => {
-  const last = [...arr(args[0]).map.keys()].at(-1);
+  const last = arr(args[0]).lastKey();
   return last === undefined ? null : keyValue(last);
 });
-defineFunction('array_first(array $array): mixed', ({ args }) => arr(args[0]).values()[0] ?? null);
-defineFunction('array_last(array $array): mixed', ({ args }) => arr(args[0]).values().at(-1) ?? null);
+defineFunction('array_first(array $array): mixed', ({ args }) => arr(args[0]).firstValue() ?? null);
+defineFunction('array_last(array $array): mixed', ({ args }) => arr(args[0]).lastValue() ?? null);
 defineFunction('array_keys(array $array, mixed $filter_value = UNKNOWN, bool $strict = false): array', ({ args }) => {
   const array = arr(args[0]);
   const keys = new PhpArray();
@@ -370,7 +370,7 @@ defineFunction('array_replace_recursive(array $array, array ...$replacements): a
 });
 defineFunction('array_combine(array $keys, array $values): array', ({ args }) => {
   const keys = arr(args[0]).values();
-  const values = arr(args[1]).values();
+  const values = [...arr(args[1]).map.values()];
   if (keys.length !== values.length) {
     throwError(
       'ValueError',
@@ -378,7 +378,7 @@ defineFunction('array_combine(array $keys, array $values): array', ({ args }) =>
     );
   }
   const result = new PhpArray();
-  for (const [index, key] of keys.entries()) result.set(toKey(toStrKey(key)), share(values[index]));
+  for (const [index, key] of keys.entries()) result.setSlot(toKey(toStrKey(key)), copyValueSlot(values[index]));
   return result;
 });
 
@@ -1359,7 +1359,7 @@ defineFunction('reset(array|object &$array): mixed', (ctx) =>
 );
 defineFunction('end(array|object &$array): mixed', (ctx) =>
   withPointer(pointerValue(ctx), 'end', (array) => {
-    const last = [...array.map.keys()].at(-1);
+    const last = array.lastKey();
     array.pointer = last;
     return last === undefined ? false : (array.get(last) as Value);
   })

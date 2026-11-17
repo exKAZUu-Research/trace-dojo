@@ -1,0 +1,41 @@
+
+Warning: Cannot bind an instance to a static closure, this will be an error in PHP 9 in /main.php on line 6
+
+Warning: Cannot bind an instance to a static closure, this will be an error in PHP 9 in /main.php on line 6
+bool(true)
+bool(true)
+
+Warning: Cannot bind an instance to a static closure, this will be an error in PHP 9 in /main.php on line 6
+
+Warning: Cannot bind an instance to a static closure, this will be an error in PHP 9 in /main.php on line 6
+bool(true)
+bool(true)
+
+Warning: Cannot rebind scope of closure created from method, this will be an error in PHP 9 in /main.php on line 8
+
+Warning: Cannot rebind scope of closure created from method, this will be an error in PHP 9 in /main.php on line 8
+bool(true)
+bool(true)
+
+Warning: Cannot rebind scope of closure created from method, this will be an error in PHP 9 in /main.php on line 8
+
+Warning: Cannot rebind scope of closure created from method, this will be an error in PHP 9 in /main.php on line 8
+bool(true)
+bool(true)
+
+Warning: Cannot bind closure to scope of internal class stdClass, this will be an error in PHP 9 in /main.php on line 8
+
+Warning: Cannot bind closure to scope of internal class stdClass, this will be an error in PHP 9 in /main.php on line 8
+bool(true)
+bool(true)
+bool(false)
+bool(false)
+
+Warning: Cannot bind closure to scope of internal class stdClass, this will be an error in PHP 9 in /main.php on line 10
+bool(true)
+
+Warning: Cannot bind closure to scope of internal class ArrayObject, this will be an error in PHP 9 in /main.php on line 10
+bool(true)
+bool(false)
+bool(false)
+int(3)

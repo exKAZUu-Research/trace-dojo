@@ -717,6 +717,14 @@ test.each([
   'class A{public int $x=[];}',
   'class A{public int $x=null;}',
   'class A{public false $x=true;}',
+  'function f(int $x=-1.5){}',
+  'function f(false $x=!false){}',
+  'class A{public int $x=-1.5;}',
+  'class A{public false $x=!false;}',
+  'function f(string $x=+true){}',
+  'function f(string $x=-null){}',
+  'function f(string $x=+"12.5"){}',
+  'function f(string $x=![]){}',
 ])('rejects incompatible declaration defaults before output: %s', (declaration) => {
   expect(run(`<?php echo 'before'; ${declaration}`).kind).toBe('compileError');
 });
@@ -733,6 +741,9 @@ test.each([
   '<?php echo "before"; $s=<<<\'TXT\'\n\thello\n  TXT;',
   '<?php echo "before"; $s=<<<TXT\n  hello\n\tTXT;',
   '<?php echo "before"; $s=<<<TXT\n  hello\n \tTXT;',
+  '<?php echo "before"; $s=<<<TXT\n  hello\n \t\n  TXT;',
+  '<?php echo "before"; $s=<<<"TXT"\n  hello\n\t\n  TXT;',
+  '<?php echo "before"; $s=<<<\'TXT\'\n  hello\n \t\n  TXT;',
 ])('rejects mixed heredoc indentation before output: %s', (source) => {
   expect(run(source).kind).toBe('compileError');
 });
@@ -823,4 +834,66 @@ test('destructor-created temporaries do not rescan the remaining object chain', 
       '<?php class Node{public $next;function __construct($next){$this->next=$next;}function __destruct(){$t=new stdClass;}}$n=null;for($i=0;$i<10000;$i++)$n=new Node($n);unset($n);echo "done";'
     )
   ).toMatchObject({ kind: 'executed', stdout: 'done' });
+});
+
+test.each([
+  'echo "before";namespace A;echo "after";',
+  'namespace A;echo "before";namespace B{echo "after";}',
+  'namespace A{}echo "after";',
+  'namespace A{}declare(ticks=1);',
+  'echo "before"; $a=["x"=>["y"=>1]]; echo "${a[\'x\'][\'y\']}";',
+  'echo "before"; $a=[]; echo "${a[\'x\']->p}";',
+  'echo "before"; class A{function __construct(public readonly $x){}}',
+  'echo "before"; class A{function __construct(public callable $x){}}',
+  'echo "before"; class A{function __get(int $name):mixed{return 1;}}',
+  'echo "before"; class A{function __isset(int $name):bool{return true;}}',
+  'echo "before"; class A{function __call(string $name,string $args):mixed{return 1;}}',
+])('rejects invalid file structure and declaration contracts before output: %s', (source) => {
+  expect(run(`<?php ${source}`).kind).toBe('compileError');
+});
+
+test.each([`$a=new ArrayObject([1]);$a->exchangeArray($a);`, `$a=new ArrayIterator([1]);$a->__construct($a);`])(
+  'rejects self property-backed native storage explicitly: %s',
+  (source) => {
+    expect(run(`<?php ${source} echo 'never';`)).toMatchObject({
+      kind: 'executed',
+      uncaughtException: expect.stringContaining('この採点環境では使えません。'),
+    });
+  }
+);
+
+test.each([
+  `'["'.str_repeat(chr(255),400000).'"]'`,
+  `'{"x":"'.str_repeat(chr(255),400000).'"}'`,
+  `'{"'.str_repeat(chr(255),400000).'":1}'`,
+])('bounds malformed JSON strings inside containers before storing them: %s', (json) => {
+  const result = run(`<?php json_decode(${json},true,512,JSON_INVALID_UTF8_SUBSTITUTE);echo 'never';`);
+  expect(result.kind === 'executed' && result.stdout).toMatch(/^\nFatal error: Allowed memory size/);
+  expect(result.kind === 'executed' && result.stdout).not.toContain('never');
+});
+
+test.each([
+  ['$a=range(1,20000);$sum=0;while(count($a)>0){$sum+=array_pop($a);}echo $sum;', '200010000'],
+  ['$a=range(1,20000);$sum=0;while(next($a)!==false)$sum++;echo $sum;', '19999'],
+  [
+    '$a=range(1,20000);$sum=0;for($i=0;$i<20000;$i++)$sum+=end($a)+array_key_last($a)+array_last($a);echo $sum;',
+    '1199980000',
+  ],
+])('keeps array order operations linear across a loop: %s', (source, stdout) => {
+  vi.restoreAllMocks();
+  expect(run(`<?php ${source}`)).toMatchObject({ kind: 'executed', stdout });
+});
+
+test.each([
+  '$s=new SplQueue;for($i=0;$i<10000;$i++)$s->enqueue($i);',
+  '$s=new SplQueue;for($i=0;$i<10000;$i++)$s->enqueue(new stdClass);',
+  '$s=new SplStack;for($i=0;$i<10000;$i++)$s->push($i);',
+  '$s=new SplFixedArray(20000);',
+  '$s=new SplMinHeap;for($i=0;$i<10000;$i++)$s->insert($i);',
+])('does not rescan native storage during unrelated object churn: %s', (source) => {
+  vi.restoreAllMocks();
+  expect(run(`<?php ${source} for($i=0;$i<10000;$i++)$z=new stdClass;echo 'ok';`)).toMatchObject({
+    kind: 'executed',
+    stdout: 'ok',
+  });
 });

@@ -1,0 +1,4 @@
+
+Fatal error: T and U define the same hooked property ($x) in the composition of A. Conflict resolution between hooked properties is currently not supported. Class was composed in /main.php on line 2
+Stack trace:
+#0 {main}

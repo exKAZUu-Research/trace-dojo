@@ -35,7 +35,6 @@ export class PhpThrow {
   }
 }
 
-/** An error PHP cannot recover from, which ends the program with `Fatal error: ...`. */
 /** Captures the calls running when a fatal error happens, which the call machinery provides. */
 let captureCalls: () => unknown[] = () => [];
 
@@ -43,6 +42,7 @@ export function setCallCapture(capture: () => unknown[]): void {
   captureCalls = capture;
 }
 
+/** An error PHP cannot recover from, which ends the program with `Fatal error: ...`. */
 export class FatalError {
   /** The calls running when the error happened, innermost first. */
   readonly calls = captureCalls();
@@ -126,6 +126,8 @@ export class Runtime {
   readonly objects = new Map<number, PhpObject>();
   readonly turtleObjects = new Set<PhpObject>();
   readonly arrayCycles = new Set<PhpArray>();
+  readonly objectCycles = new Set<PhpObject>();
+  readonly collectingObjects = new Set<PhpObject>();
   readonly collectingArrays = new Set<PhpArray>();
   collectingCycles = false;
   readonly internalObjects = new Set<PhpObject>();
@@ -260,8 +262,11 @@ export class Runtime {
   freeObject(object: PhpObject): void {
     if (this.objects.get(object.id) !== object) return;
     this.objects.delete(object.id);
+    this.objectCycles.delete(object);
+    this.collectingObjects.delete(object);
     this.turtleObjects.delete(object);
     this.internalObjects.delete(object);
+    object.nativeValues?.detach();
     for (const slot of object.props.values())
       if (slot instanceof Ref) {
         slot.rc--;

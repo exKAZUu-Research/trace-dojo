@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 925 -- One converter of the statements and expressions, which share the converter state.
+// code-gauge-allow-file fileNcss 973 -- One converter of the statements and expressions, which share the converter state.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import type { Node } from '@willbooster/web-tree-sitter';
 
@@ -15,6 +15,7 @@ export type { CompileNotice } from './converterBase';
 export class Converter extends DeclarationConverter {
   private readonly staticNames = new WeakMap<object, Set<string>>();
   convertProgram(root: Node): Program {
+    this.checkNamespaces(root);
     const body: Stmt[] = [];
     let index = 0;
     const children = root.children;
@@ -115,11 +116,11 @@ export class Converter extends DeclarationConverter {
       }
       case 'while_statement': {
         const cond = this.condition(node);
-        const body = this.loopBody(() => this.blockOf(node.childrenForFieldName('body')));
+        const body = this.loopBody(() => this.controlBody(node));
         return [{ k: 'while', cond, body, row }];
       }
       case 'do_statement': {
-        const body = this.loopBody(() => this.blockOf(node.childrenForFieldName('body')));
+        const body = this.loopBody(() => this.controlBody(node));
         return [{ k: 'do', body, cond: this.condition(node), row }];
       }
       case 'for_statement': {
@@ -130,7 +131,7 @@ export class Converter extends DeclarationConverter {
         const init = part('initialize');
         const cond = part('condition');
         const update = part('update');
-        const body = this.loopBody(() => this.blockOf(node.childrenForFieldName('body')));
+        const body = this.loopBody(() => this.controlBody(node));
         return [{ k: 'for', init, cond, update, body, row }];
       }
       case 'foreach_statement': {
@@ -295,19 +296,43 @@ export class Converter extends DeclarationConverter {
   private ifStatement(node: Node): Stmt {
     const row = node.startPosition.row;
     const cond = this.condition(node);
-    const consequent = this.blockOf(node.childrenForFieldName('body'));
-    const alternate = this.alternatives(node.childrenForFieldName('alternative'));
+    const consequent = this.controlBody(node);
+    const alternate = this.alternatives(this.clauseGroups(node.namedChildren, ['else_clause', 'else_if_clause']));
     return { k: 'if', cond, consequent, alternate, row };
   }
 
-  private alternatives(alternatives: Node[]): Stmt[] | undefined {
-    if (alternatives.length === 0) return undefined;
-    const [first, ...rest] = alternatives;
-    const row = first.startPosition.row;
-    if (first.type === 'else_clause') return this.blockOf(first.childrenForFieldName('body'));
-    const cond = this.condition(first);
-    const consequent = this.blockOf(first.childrenForFieldName('body'));
-    return [{ k: 'if', cond, consequent, alternate: this.alternatives(rest), row }];
+  private alternatives(groups: { clause: Node; tail: Node[] }[]): Stmt[] | undefined {
+    if (groups.length === 0) return undefined;
+    const [{ clause, tail }, ...rest] = groups;
+    if (clause.type === 'else_clause') return this.controlBody(clause, tail);
+    const cond = this.condition(clause);
+    const consequent = this.controlBody(clause, tail);
+    return [
+      {
+        k: 'if',
+        cond,
+        consequent,
+        alternate: this.alternatives(rest),
+        row: clause.startPosition.row,
+      },
+    ];
+  }
+
+  private controlBody(node: Node, tail: Node[] = []): Stmt[] {
+    const colon = node.children.find((child) => child.type === ':' || child.type === 'colon_block');
+    if (!colon) return this.blockOf(node.childrenForFieldName('body'));
+    const end = node.childrenForFieldName('alternative')[0]?.startIndex ?? node.endIndex;
+    const nodes = node.namedChildren.filter((child) => child.startIndex >= colon.startIndex && child.startIndex < end);
+    return this.blockOf([...nodes, ...tail]);
+  }
+
+  private clauseGroups(nodes: Node[], types: string[]): { clause: Node; tail: Node[] }[] {
+    const groups: { clause: Node; tail: Node[] }[] = [];
+    for (const node of nodes) {
+      if (types.includes(node.type)) groups.push({ clause: node, tail: [] });
+      else groups.at(-1)?.tail.push(node);
+    }
+    return groups;
   }
 
   private foreachStatement(node: Node): Stmt {
@@ -332,11 +357,10 @@ export class Converter extends DeclarationConverter {
     const value = ['list_literal', 'array_creation_expression'].includes(valueNode.type)
       ? this.listLiteral(valueNode)
       : this.writable(valueNode);
-    const body = this.loopBody(() => this.blockOf(node.childrenForFieldName('body')));
+    const body = this.loopBody(() => this.controlBody(node));
     return { k: 'foreach', subject, key, value, byRef, body, row };
   }
 
-  // code-gauge-allow functionCognitiveComplexity 16 -- One case per grammar node kind, each converted where PHP gives it its own meaning.
   private switchStatement(node: Node): Stmt {
     const row = node.startPosition.row;
     const subject = this.condition(node);
@@ -344,9 +368,8 @@ export class Converter extends DeclarationConverter {
     let defaults = 0;
     const cases = this.loopBody(
       () =>
-        block.namedChildren
-          .filter((child) => child.type === 'case_statement' || child.type === 'default_statement')
-          .map((child): SwitchCase => {
+        this.clauseGroups(block.namedChildren, ['case_statement', 'default_statement']).map(
+          ({ clause: child, tail }): SwitchCase => {
             const value = child.childForFieldName('value');
             if (child.type === 'default_statement') {
               defaults++;
@@ -367,10 +390,11 @@ export class Converter extends DeclarationConverter {
             const statements = child.namedChildren.filter((part) => part.id !== value?.id && part.type !== 'comment');
             return {
               test: value ? this.expr(value) : undefined,
-              body: statements.flatMap((statement) => this.statement(statement, false)),
+              body: [...statements, ...tail].flatMap((statement) => this.statement(statement, false)),
               row: child.startPosition.row,
             };
-          }),
+          }
+        ),
       true
     );
     return { k: 'switch', subject, cases, row };
@@ -494,7 +518,35 @@ export class Converter extends DeclarationConverter {
     return body.flatMap((child) => this.statement(child, topLevel));
   }
 
+  private checkNamespaces(root: Node): void {
+    const statements = root.namedChildren.filter((child) => !this.namespaceTrivia(child));
+    const namespaces = statements.filter((child) => child.type === 'namespace_definition');
+    if (namespaces.length === 0) return;
+    const first = statements.indexOf(namespaces[0]);
+    if (statements.slice(0, first).some((child) => child.type !== 'declare_statement'))
+      this.error(
+        namespaces[0],
+        'Namespace declaration statement has to be the very first statement or after any declare call in the script'
+      );
+    const bracketed = namespaces[0].childForFieldName('body') !== null;
+    if (namespaces.some((child) => (child.childForFieldName('body') !== null) !== bracketed))
+      this.error(namespaces[0], 'Cannot mix bracketed namespace declarations with unbracketed namespace declarations');
+    if (bracketed && statements.slice(first).some((child) => child.type !== 'namespace_definition'))
+      this.error(namespaces[0], 'No code may exist outside of namespace {}');
+  }
+
+  private namespaceTrivia(node: Node): boolean {
+    if (['php_tag', 'php_end_tag', 'comment', 'empty_statement'].includes(node.type)) return true;
+    if (node.type !== 'text_interpolation') return false;
+    const end = node.namedChildren.find((child) => child.type === 'php_end_tag');
+    const tag = node.namedChildren.find((child) => child.type === 'php_tag');
+    if (!end || tag?.text === '<?=') return false;
+    const text = this.source.slice(end.endIndex, tag?.startIndex ?? node.endIndex);
+    return text.replace(/^\r?\n/, '') === '';
+  }
+
   private namespaceDefinition(node: Node): Stmt[] {
+    if (node.parent?.type !== 'program') this.error(node, 'Namespace declarations cannot be nested');
     const nameNode = node.childForFieldName('name');
     const body = node.childForFieldName('body');
     const name = nameNode ? this.nameText(nameNode) : '';
@@ -648,6 +700,8 @@ export class Converter extends DeclarationConverter {
           inner.type === 'subscript_expression' &&
           parts[0]?.type === 'name' &&
           node.text.startsWith('${' + parts[0].text + '[');
+        if (interpolating && !indexedName && /^\$\{[A-Z_a-z\u0080-\uFFFF][\w\u0080-\uFFFF]*\[/.test(node.text))
+          this.error(node, 'syntax error, unexpected token, expecting "}"');
         if (interpolating) {
           this.notices.push({
             level: 'Deprecated',
@@ -1215,9 +1269,16 @@ export class Converter extends DeclarationConverter {
     const body = node.childForFieldName('value');
     const end = node.childForFieldName('end_tag') as Node;
     const indent = end.startPosition.column;
+    this.checkMultilineIndent(node, end);
     let raw = body ? this.source.slice(body.startIndex, body.endIndex) : '';
     raw = raw.replace(/^\r?\n/, '').replace(/\r?\n$/, '');
     return enc(this.removeIndent(raw, indent, end));
+  }
+
+  private checkMultilineIndent(node: Node, end: Node): void {
+    const start = this.source.indexOf('\n', node.startIndex) + 1;
+    const limit = this.source.lastIndexOf('\n', end.startIndex - 1) + 1;
+    this.checkIndentKinds(this.source.slice(start, limit), end);
   }
 
   private checkIndentKinds(raw: string, end: Node): void {
@@ -1235,7 +1296,6 @@ export class Converter extends DeclarationConverter {
   }
 
   private removeIndent(raw: string, indent: number, end: Node): string {
-    this.checkIndentKinds(raw, end);
     if (indent === 0) return raw;
     const lines = raw.split('\n');
     return lines
@@ -1256,7 +1316,7 @@ export class Converter extends DeclarationConverter {
    * Converts a double-quoted string or heredoc, reading its literal text from the source between the interpolated
    * expressions, since the grammar leaves line breaks out of its content nodes.
    */
-  // code-gauge-allow functionNcss 59 -- One case per grammar node kind, each converted where PHP gives it its own meaning.
+  // code-gauge-allow functionNcss 60 -- One case per grammar node kind, each converted where PHP gives it its own meaning.
   private interpolated(node: Node): Expr {
     const row = node.startPosition.row;
     const isHeredoc = node.type === 'heredoc';
@@ -1264,12 +1324,12 @@ export class Converter extends DeclarationConverter {
     const end = isHeredoc ? (node.childForFieldName('end_tag') as Node) : undefined;
     const indent = end ? end.startPosition.column : 0;
     const parts: (string | Expr)[] = [];
+    if (end) this.checkMultilineIndent(node, end);
     if (!container) return { k: 'lit', v: '', row };
     const children = container.children;
     let cursor = isHeredoc ? container.startIndex : (children[0]?.endIndex ?? container.startIndex);
     let limit = isHeredoc ? container.endIndex : (children.at(-1)?.startIndex ?? container.endIndex);
     if (isHeredoc) {
-      this.checkIndentKinds(this.source.slice(cursor, limit), end as Node);
       // The body runs from the line after the opening marker to the line break before the closing one.
       if (this.source.startsWith('\r\n', cursor)) cursor += 2;
       else if (this.source[cursor] === '\n') cursor++;

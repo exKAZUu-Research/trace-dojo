@@ -8,7 +8,7 @@ import { formatFloatRepr } from './conversions';
 import { newThrowable, throwError } from './errors';
 import { defineConstant, defineFunction } from './native';
 import { PhpThrow, rt } from './runtime';
-import { PhpArray, type PhpClass, type PhpObject, Ref, UNINIT, type Value } from './values';
+import { copyValueSlot, PhpArray, type PhpClass, type PhpObject, Ref, UNINIT, type Value } from './values';
 
 const FLAGS: [string, bigint][] = [
   ['JSON_HEX_TAG', 1n],
@@ -166,15 +166,18 @@ class JsonEncoder {
   }
 
   private *arrayMembers(value: PhpArray, level: number, list: boolean): Generator<string> {
-    const snapshot = [...value.entries()];
-    for (const [key, item] of snapshot)
+    const snapshot = [...value.map];
+    for (const [key, slot] of snapshot) {
+      const item = slot instanceof Ref ? slot.v : slot;
       yield list ? this.encode(item, level + 1) : this.member(String(key), item, level);
+    }
   }
 
   private encodeObject(object: PhpObject, level: number): string {
     return wrap(this.objectMembers(object, level), '{', '}', this.flags, level);
   }
 
+  // code-gauge-allow functionCognitiveComplexity 22 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
   private *objectMembers(object: PhpObject, level: number): Generator<string> {
     const table = (object.internal as { properties?: () => PhpArray } | undefined)?.properties?.();
     if (table) {
@@ -184,11 +187,23 @@ class JsonEncoder {
       }
       return;
     }
-    for (const [key, slot] of object.props) {
-      if (slot === UNINIT) continue;
-      const decl = declForKey(object.cls, key);
-      if (decl && !canAccessProp(decl, undefined)) continue;
-      yield this.member(propNameOf(key), slot instanceof Ref ? slot.v : slot, level);
+    const keys = [...object.props.keys()];
+    const dynamic = new PhpArray();
+    for (const [key, slot] of object.props)
+      if (!declForKey(object.cls, key) && slot !== UNINIT) dynamic.setSlot(key, copyValueSlot(slot));
+    const runtime = rt();
+    runtime.held.push(dynamic);
+    try {
+      for (const key of keys) {
+        const decl = declForKey(object.cls, key);
+        if (decl && !canAccessProp(decl, undefined)) continue;
+        const slot = decl ? object.props.get(key) : dynamic.map.get(key);
+        if (slot === UNINIT || slot === undefined) continue;
+        yield this.member(propNameOf(key), slot instanceof Ref ? slot.v : slot, level);
+      }
+    } finally {
+      runtime.held.pop();
+      runtime.release([dynamic]);
     }
   }
 
@@ -452,8 +467,6 @@ class JsonParser {
     return array;
   }
 
-  // code-gauge-allow functionCognitiveComplexity 30 -- Transcribes PHP's algorithm for this function step by step, whose branches mirror PHP's.
-  // code-gauge-allow functionNcss 37 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
   private string(): string {
     this.index++;
     let result = '';
@@ -461,31 +474,31 @@ class JsonParser {
       if (this.index >= this.text.length) throw new JsonError(4);
       const char = this.text[this.index++];
       if (char === '"') return result;
-      const code = char.charCodeAt(0);
-      if (code < 0x20) throw new JsonError(3);
-      if (code >= 0x80) {
-        const length = utf8Length(this.text, this.index - 1);
-        if (length === 1) {
-          if ((this.flags & 2_097_152n) !== 0n) {
-            result += enc('�');
-            continue;
-          }
-          if ((this.flags & 1_048_576n) !== 0n) continue;
-          throw new JsonError(5);
-        }
-        result += this.text.slice(this.index - 1, this.index - 1 + length);
-        this.index += length - 1;
-        continue;
-      }
-      if (char !== '\\') {
-        result += char;
-        continue;
-      }
-      const escape = this.text[this.index++];
-      if (escape === 'u') result += codePointBytes(this.unicodeEscape());
-      else if (Object.hasOwn(SIMPLE_ESCAPES, escape)) result += SIMPLE_ESCAPES[escape];
-      else throw new JsonError(4);
+      const chunk = this.stringCharacter(char);
+      rt().ensureStringFits(result.length + chunk.length);
+      result += chunk;
     }
+  }
+
+  private stringCharacter(char: string): string {
+    const code = char.charCodeAt(0);
+    if (code < 0x20) throw new JsonError(3);
+    if (code >= 0x80) {
+      const length = utf8Length(this.text, this.index - 1);
+      if (length === 1) {
+        if ((this.flags & 2_097_152n) !== 0n) return enc('�');
+        if ((this.flags & 1_048_576n) !== 0n) return '';
+        throw new JsonError(5);
+      }
+      const chunk = this.text.slice(this.index - 1, this.index - 1 + length);
+      this.index += length - 1;
+      return chunk;
+    }
+    if (char !== '\\') return char;
+    const escape = this.text[this.index++];
+    if (escape === 'u') return codePointBytes(this.unicodeEscape());
+    if (Object.hasOwn(SIMPLE_ESCAPES, escape)) return SIMPLE_ESCAPES[escape];
+    throw new JsonError(4);
   }
 
   private unicodeEscape(): number {

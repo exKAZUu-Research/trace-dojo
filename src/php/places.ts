@@ -15,6 +15,7 @@ export interface Place {
   unset(): void;
   /** The declaration of the property the place is, whose type limits what the place holds. */
   declaration?(): PropDecl | undefined;
+  typeSources?(): Ref['typedBy'];
   /**
    * The place a nested write (`$place[] = 1`) changes: the place itself, or another one for a property that `__get`
    * provides or an element that `offsetGet` provides. Throws where the place may not change that way.
@@ -47,6 +48,10 @@ export class VarPlace implements Place {
     if (ref) ref.assign(value);
     else this.frame.vars.set(this.name, new Ref(value));
     return this.get() as Value;
+  }
+
+  typeSources(): Ref['typedBy'] {
+    return this.frame.vars.get(this.name)?.typeOwners();
   }
 
   ref(): Ref {
@@ -93,6 +98,10 @@ export class RefPlace implements Place {
     return this.target.v;
   }
 
+  typeSources(): Ref['typedBy'] {
+    return this.target.typeOwners();
+  }
+
   ref(): Ref {
     return this.target;
   }
@@ -125,6 +134,11 @@ export class ElementPlace implements Place {
     }
     this.array.set(this.key, value);
     return this.array.get(this.key) as Value;
+  }
+
+  typeSources(): Ref['typedBy'] {
+    const ref = this.key === undefined ? undefined : this.array.map.get(this.key);
+    return ref instanceof Ref ? ref.typeOwners() : undefined;
   }
 
   ref(): Ref {
@@ -202,6 +216,12 @@ function initializeArray(place: Place): PhpArray {
       'TypeError',
       `Cannot auto-initialize an array inside property ${decl.cls.name}::$${decl.name} of type ${describeType(decl.type, decl.cls)}`
     );
+  for (const { decl: source } of place.typeSources?.() ?? [])
+    if (source.type && !isSubtype({ k: 'named', name: 'array' }, undefined, source.type, source.cls))
+      throwError(
+        'TypeError',
+        `Cannot auto-initialize an array inside a reference held by property ${source.cls.name}::$${source.name} of type ${describeType(source.type, source.cls)}`
+      );
   const array = new PhpArray();
   place.set(array);
   return array;

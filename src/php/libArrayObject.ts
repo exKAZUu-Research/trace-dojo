@@ -10,7 +10,16 @@ import { arrayIsShared, share } from './places';
 import './splInterfaces';
 import { rt } from './runtime';
 import { UnsupportedFeatureError } from './unsupported';
-import { type ArrayCursor, type Key, PhpArray, type PhpClass, PhpObject, Ref, type Value } from './values';
+import {
+  type ArrayCursor,
+  type Key,
+  NativeValueIndex,
+  PhpArray,
+  type PhpClass,
+  PhpObject,
+  Ref,
+  type Value,
+} from './values';
 
 const STD_PROP_LIST = 1;
 const ARRAY_AS_PROPS = 2;
@@ -20,6 +29,7 @@ const INTERNAL_FLAGS = 0xff_ff_00_00;
 
 /** The storage of an ArrayObject or ArrayIterator: its own array, or the ArrayObject whose storage it uses. */
 export class ArrayStorage {
+  readonly nativeValues = new NativeValueIndex();
   private cursorArray: PhpArray | undefined;
   private iteratorCursor: ArrayCursor | undefined;
   private readonly watchers = new Set<WeakRef<ArrayStorage>>();
@@ -38,7 +48,9 @@ export class ArrayStorage {
     readonly owner: string,
     private own: PhpArray,
     private backing?: PhpObject
-  ) {}
+  ) {
+    this.nativeValues.reset(this.held());
+  }
 
   cursor(): ArrayCursor {
     const array = this.array;
@@ -54,6 +66,7 @@ export class ArrayStorage {
   set array(array: PhpArray) {
     const root = this.chain().at(-1) as ArrayStorage;
     root.own = array;
+    root.nativeValues.reset(root.held());
     root.syncCursors('replace');
   }
 
@@ -62,6 +75,7 @@ export class ArrayStorage {
     this.backing = storage.backing;
     this.flags = storage.flags;
     this.iteratorClass = storage.iteratorClass;
+    this.nativeValues.reset(this.held());
     this.syncCursors('replace');
   }
 
@@ -74,7 +88,6 @@ export class ArrayStorage {
     if (this.owner === 'ArrayIterator' && this.holder) copy = new ArrayStorage(this.owner, this.own, this.holder);
     else if (this.backing) copy = new ArrayStorage(this.owner, this.own, this.backing);
     else {
-      this.own.shared = true;
       copy = new ArrayStorage(this.owner, this.own);
     }
     copy.flags = this.flags;
@@ -86,6 +99,7 @@ export class ArrayStorage {
     const root = this.chain().at(-1) as ArrayStorage;
     if (arrayIsShared(root.own)) {
       root.own = root.own.copy();
+      root.nativeValues.reset(root.held());
       root.syncCursors('copy');
     }
     return root.own;
@@ -192,13 +206,13 @@ function setStorage(object: PhpObject, value: Value, method: string, flags: numb
   let storage: ArrayStorage;
   let newFlags = flags;
   if (value instanceof PhpArray) {
-    value.shared = true;
     storage = new ArrayStorage(name, value);
   } else {
     const other = value as PhpObject;
     deprecated(
       `${name}::${method}(): Using an object as a backing array for ${name} is deprecated, as it allows violating class constraints and invariants`
     );
+    if (other === object) throw new UnsupportedFeatureError('通常のオブジェクトを配列ストレージにする操作');
     if (other.internal instanceof ArrayStorage) {
       if (justArray) newFlags = storageOf(other).flags & ~INTERNAL_FLAGS;
       storage = new ArrayStorage(name, new PhpArray(), other);
@@ -208,6 +222,9 @@ function setStorage(object: PhpObject, value: Value, method: string, flags: numb
   }
   storage.flags = checkFlags(old.flags | newFlags);
   storage.iteratorClass = old.iteratorClass;
+  rt()
+    .nativeHeld.at(-1)
+    ?.push(...old.held());
   old.replaceWith(storage);
 }
 

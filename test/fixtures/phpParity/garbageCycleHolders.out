@@ -1,0 +1,6 @@
+before;after;int(3)
+dparent dchild 2
+dother d1 d2 2
+d4 1
+d5 d6 3
+d7 2

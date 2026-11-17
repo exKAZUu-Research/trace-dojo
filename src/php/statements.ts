@@ -565,6 +565,7 @@ function foreachObject(statement: Extract<Stmt, { k: 'foreach' }>, object: PhpOb
     return foreachArrayByRef(statement, storage.writable());
   }
   if (iterator) {
+    if (statement.byRef) throwError('Error', 'An iterator cannot be used with foreach by reference');
     // PHP's engine wraps the iterator in an iterator object of its own, which takes an object handle while the loop
     // runs and releases the iterator before itself.
     const handle = runtime.newObject(FOREACH_ITERATOR);
@@ -575,7 +576,6 @@ function foreachObject(statement: Extract<Stmt, { k: 'foreach' }>, object: PhpOb
       runtime.spend();
       const value = callMethod(iterator, 'current', []);
       const key = statement.key ? callMethod(iterator, 'key', []) : null;
-      if (statement.byRef) throwError('Error', 'An iterator cannot be used with foreach by reference');
       const completion = foreachIteration(statement, key, value);
       if (completion !== 'next') return completion;
       callMethod(iterator, 'next', []);

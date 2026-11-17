@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 478 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 485 -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import { LIMITS } from '../interpreter/limits';
 import type { FunctionDecl } from './ast';
@@ -370,7 +370,7 @@ function callerIsStrict(): boolean {
 
 // User functions -----------------------------------------------------------------------------------------------------
 
-// code-gauge-allow functionCognitiveComplexity 20 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+// code-gauge-allow functionCognitiveComplexity 26 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 function invokeUser(target: CallTarget, fn: UserFunction, args: ArgValue[], row: number | undefined): Value {
   const runtime = rt();
   const { decl } = fn;
@@ -431,8 +431,15 @@ function invokeUser(target: CallTarget, fn: UserFunction, args: ArgValue[], row:
       }
       throw error;
     }
-    if (decl.returnType) result = checkReturn(result, decl.returnType, name, frame);
-    else if (decl.byRefReturn === false) result = share(result);
+    if (decl.returnType) {
+      result = checkReturn(result, decl.returnType, name, frame);
+      if (decl.byRefReturn && frame.returnRef) {
+        frame.returnRef.assign(result);
+        if (!Object.is(frame.returnRef.v, result))
+          throwReturnTypeError(frame.returnRef.v, decl.returnType, name, frame);
+        result = frame.returnRef.v;
+      }
+    } else if (decl.byRefReturn === false) result = share(result);
     returned = result;
   } finally {
     nativeDepth = outerNative;
@@ -674,6 +681,10 @@ function checkReturn(value: Value, type: TypeDecl, name: string, frame: Frame): 
     staticClass: frame.staticClass,
   });
   if (coerced !== NO_MATCH) return share(coerced);
+  return throwReturnTypeError(value, type, name, frame);
+}
+
+function throwReturnTypeError(value: Value, type: TypeDecl, name: string, frame: Frame): never {
   const display = describeType(type, frame.scope, frame.staticClass);
   // A body that ends without `return` returns nothing, which PHP names apart from null.
   const returned = frame.returning === undefined && !frame.decl?.arrowBody ? 'none' : valueName(value);

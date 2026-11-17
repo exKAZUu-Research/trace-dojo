@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 574 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 626 -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import type { Node } from '@willbooster/web-tree-sitter';
 
@@ -14,32 +14,35 @@ import type {
   TraitRule,
 } from './ast';
 import { lower } from './bytes';
+import { parseTypeText } from './calls';
+import { numericPrefix, toBool } from './conversions';
 import { BUILTIN_TYPES, ConverterBase } from './converterBase';
 import { SCRIPT_PATH } from './runtime';
 import { typeToString } from './types';
-import type { TypeDecl, Visibility } from './values';
+import { INT_MAX, INT_MIN, type TypeDecl, type Visibility } from './values';
 import { isSubtype } from './variance';
 
-/**
- * What PHP requires of each magic method: the number of parameters, whether it is static, whether it must be public,
- * and the return type it may declare ('' for none). An undefined field is not checked.
- */
-const MAGIC_METHODS: Record<string, { args?: number; isStatic?: boolean; isPublic?: boolean; returnType?: string }> = {
+type LiteralValue = Extract<Expr, { k: 'lit' }>['v'];
+
+const MAGIC_METHODS: Record<
+  string,
+  { args?: number; isStatic?: boolean; isPublic?: boolean; returnType?: string; parameterTypes?: string[] }
+> = {
   __construct: { isStatic: false, returnType: '' },
   __destruct: { args: 0, isStatic: false, returnType: '' },
   __clone: { args: 0, isStatic: false, returnType: 'void' },
-  __get: { args: 1, isStatic: false, isPublic: true },
-  __set: { args: 2, isStatic: false, isPublic: true, returnType: 'void' },
-  __isset: { args: 1, isStatic: false, isPublic: true, returnType: 'bool' },
-  __unset: { args: 1, isStatic: false, isPublic: true, returnType: 'void' },
-  __call: { args: 2, isStatic: false, isPublic: true },
-  __callstatic: { args: 2, isStatic: true, isPublic: true },
+  __get: { parameterTypes: ['string'], args: 1, isStatic: false, isPublic: true },
+  __set: { parameterTypes: ['string', 'mixed'], args: 2, isStatic: false, isPublic: true, returnType: 'void' },
+  __isset: { parameterTypes: ['string'], args: 1, isStatic: false, isPublic: true, returnType: 'bool' },
+  __unset: { parameterTypes: ['string'], args: 1, isStatic: false, isPublic: true, returnType: 'void' },
+  __call: { parameterTypes: ['string', 'array'], args: 2, isStatic: false, isPublic: true },
+  __callstatic: { parameterTypes: ['string', 'array'], args: 2, isStatic: true, isPublic: true },
   __tostring: { args: 0, isStatic: false, isPublic: true, returnType: 'string' },
   __debuginfo: { args: 0, isStatic: false, isPublic: true, returnType: '?array' },
   __invoke: { isStatic: false, isPublic: true },
   __serialize: { args: 0, isStatic: false, isPublic: true, returnType: 'array' },
-  __unserialize: { args: 1, isStatic: false, isPublic: true, returnType: 'void' },
-  __set_state: { args: 1, isStatic: true, isPublic: true, returnType: 'object' },
+  __unserialize: { parameterTypes: ['array'], args: 1, isStatic: false, isPublic: true, returnType: 'void' },
+  __set_state: { parameterTypes: ['array'], args: 1, isStatic: true, isPublic: true, returnType: 'object' },
 };
 
 /** Converts the declarations of functions, parameters, types, and classes. */
@@ -386,9 +389,9 @@ export abstract class DeclarationConverter extends ConverterBase {
     }
   }
 
-  /** Rejects a literal default value the parameter's type can never hold, as PHP does at compile time. */
   // code-gauge-allow functionCognitiveComplexity 28 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
   private checkDefaultType(node: Node, name: string, type: TypeDecl, value: Expr, property?: string): void {
+    value = knownScalarDefault(value) ?? value;
     if (value.k !== 'lit' && value.k !== 'array') return;
     if (value.k === 'lit' && value.v === null && !property) return;
     const literalType =
@@ -559,6 +562,7 @@ export abstract class DeclarationConverter extends ConverterBase {
             param.row,
             '可変長引数はプロパティに昇格できません（Cannot declare variadic promoted property）。'
           );
+        this.checkPropertyType(param.row, decl.name, param.type, param.promote.isReadonly || decl.isReadonly, false);
         decl.props.push({
           name: param.name,
           visibility: param.promote.visibility,
@@ -658,7 +662,31 @@ export abstract class DeclarationConverter extends ConverterBase {
     }
   }
 
+  private checkPropertyType(
+    node: Node | number,
+    className: string,
+    type: TypeDecl | undefined,
+    isReadonly: boolean,
+    isStatic: boolean
+  ): void {
+    if (
+      type &&
+      (type.k === 'named'
+        ? ['void', 'never', 'callable'].includes(type.name)
+        : type.types.some((part) => part.k === 'named' && ['void', 'never', 'callable'].includes(part.name)))
+    )
+      this.error(node, 'Property cannot have type void, never or callable');
+    if (isReadonly && !type && !isStatic)
+      this.error(
+        node,
+        `readonly のプロパティには型が必要です（Readonly property ${className}::$... must have type）。`
+      );
+    if (isReadonly && isStatic)
+      this.error(node, 'static のプロパティは readonly にできません（Static property cannot be readonly）。');
+  }
+
   // code-gauge-allow functionNcss 39 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+  // code-gauge-allow functionCognitiveComplexity 29 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
   protected properties(member: Node, decl: ClassDecl, kind: ClassDecl['kind']): void {
     const attributes = member.childForFieldName('attributes');
     if (attributes) this.unsupported(attributes, '属性（#[...]）');
@@ -672,22 +700,8 @@ export abstract class DeclarationConverter extends ConverterBase {
     const typeNode = member.childForFieldName('type');
     const type = typeNode ? this.typeDecl(typeNode) : undefined;
     if (typeNode && type) this.checkTypeScope(typeNode, type);
-    if (
-      type &&
-      (type.k === 'named'
-        ? ['void', 'never', 'callable'].includes(type.name)
-        : type.types.some((part) => part.k === 'named' && ['void', 'never', 'callable'].includes(part.name)))
-    )
-      this.error(member, 'Property cannot have type void, never or callable');
     const isReadonly = modifiers.isReadonly || decl.isReadonly;
-    if (isReadonly && !type && !modifiers.isStatic) {
-      this.error(
-        member,
-        `readonly のプロパティには型が必要です（Readonly property ${decl.name}::$... must have type）。`
-      );
-    }
-    if (isReadonly && modifiers.isStatic)
-      this.error(member, 'static のプロパティは readonly にできません（Static property cannot be readonly）。');
+    this.checkPropertyType(member, decl.name, type, isReadonly, modifiers.isStatic);
     const hookList = member.namedChildren.find((child) => child.type === 'property_hook_list');
     for (const element of member.namedChildren.filter((child) => child.type === 'property_element')) {
       const name = this.variableName(element.childForFieldName('name') as Node);
@@ -851,9 +865,12 @@ export abstract class DeclarationConverter extends ConverterBase {
           className,
           isClosure: false,
         };
-        if (kind === 'get') hooks.get = fn;
-        else if (kind === 'set') {
+        if (kind === 'get') {
+          hooks.get = fn;
+          hooks.abstractGet = !body;
+        } else if (kind === 'set') {
           hooks.set = fn;
+          hooks.abstractSet = !body;
           hooks.setParam = params[0]?.name;
         } else
           this.error(
@@ -922,7 +939,7 @@ export abstract class DeclarationConverter extends ConverterBase {
   }
 
   /** Checks the declaration of a magic method as PHP's zend_check_magic_method_implementation does, in its order. */
-  // code-gauge-allow functionCognitiveComplexity 17 -- Checks PHP's rules for each magic method in PHP's order, which decides the error shown.
+  // code-gauge-allow functionCognitiveComplexity 21 -- Checks PHP's rules for each magic method in PHP's order, which decides the error shown.
   private checkMagicMethod(
     member: Node,
     className: string,
@@ -947,9 +964,14 @@ export abstract class DeclarationConverter extends ConverterBase {
         row: member.startPosition.row,
       });
     }
+    for (const [index, expected] of (rule.parameterTypes ?? []).entries()) {
+      const param = fn.params[index];
+      if (param?.type && !isSubtype(parseTypeText(expected), undefined, param.type, undefined))
+        fail(`${where}: Parameter #${index + 1} ($${param.name}) must be of type ${expected} when declared`);
+    }
     if (fn.returnType === undefined || rule.returnType === undefined) return;
     if (rule.returnType === '') fail(`Method ${where} cannot declare a return type`);
-    else if (typeToString(fn.returnType) !== rule.returnType) {
+    else if (!isSubtype(fn.returnType, undefined, parseTypeText(rule.returnType), undefined)) {
       fail(`${className}::${fn.name}(): Return type must be ${rule.returnType} when declared`);
     }
   }
@@ -1036,4 +1058,40 @@ function defaultFits(type: TypeDecl, literalType: string): boolean {
 
 function builtinType(type: TypeDecl): boolean {
   return type.k === 'named' ? BUILTIN_TYPES.has(type.name) : type.types.every(builtinType);
+}
+
+function knownScalarDefault(value: Expr): Expr | undefined {
+  if (value.k === 'lit') return value;
+  if (value.k !== 'unary') return;
+  if (value.op === '!' && value.e.k === 'array' && value.e.items.length === 0)
+    return { k: 'lit', v: true, row: value.row };
+  const operand = knownScalarDefault(value.e);
+  if (operand?.k !== 'lit') return;
+  const result = unaryDefaultValue(value.op, operand.v);
+  return result === undefined ? undefined : { k: 'lit', v: result, row: value.row };
+}
+
+// code-gauge-allow functionCognitiveComplexity 22 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+function unaryDefaultValue(op: string, input: LiteralValue): LiteralValue | undefined {
+  if (op === '!') return !toBool(input);
+  if (op === '~') {
+    if (typeof input === 'bigint') return ~input;
+    if (typeof input === 'string')
+      return input
+        .split('')
+        .map((char) => String.fromCodePoint((char.codePointAt(0) as number) ^ 255))
+        .join('');
+    return;
+  }
+  if (op !== '+' && op !== '-') return;
+  let number: bigint | number;
+  if (typeof input === 'number' || typeof input === 'bigint') number = input;
+  else if (input === null || typeof input === 'boolean') number = input ? 1n : 0n;
+  else if (typeof input === 'string') {
+    const parsed = numericPrefix(input);
+    if (!parsed?.whole) return;
+    number = parsed.value;
+  } else return;
+  const result = op === '-' ? -number : number;
+  return typeof result === 'bigint' && (result < INT_MIN || result > INT_MAX) ? Number(result) : result;
 }

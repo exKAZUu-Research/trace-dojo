@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 775 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 776 -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 // oxlint-disable unicorn/text-encoding-identifier-case -- mbstring names its encodings in this case.
 // oxlint-disable typescript/no-misused-spread -- PHP splits strings into bytes or code points, never into grapheme clusters.
@@ -75,13 +75,11 @@ defineUtf8Function(
     return encodeCodes(UTF8.decode(list.slice(start, end).join('')), UTF8);
   }
 );
-defineUtf8Function('mb_strtoupper(string $string, ?string $encoding = null): string', ({ args }) => {
-  checkEncoding('mb_strtoupper', args, 2);
-  return enc(dec(s(args[0])).toUpperCase());
+defineFunction('mb_strtoupper(string $string, ?string $encoding = null): string', ({ args }) => {
+  return convertCase(args, 2, 'mb_strtoupper', (text) => text.toUpperCase());
 });
-defineUtf8Function('mb_strtolower(string $string, ?string $encoding = null): string', ({ args }) => {
-  checkEncoding('mb_strtolower', args, 2);
-  return enc(dec(s(args[0])).toLowerCase());
+defineFunction('mb_strtolower(string $string, ?string $encoding = null): string', ({ args }) => {
+  return convertCase(args, 2, 'mb_strtolower', (text) => wordCase(text, 'lower'));
 });
 defineUtf8Function('mb_str_split(string $string, int $length = 1, ?string $encoding = null): array', ({ args }) => {
   const list: string[] = [];
@@ -101,9 +99,11 @@ defineUtf8Function('mb_str_split(string $string, int $length = 1, ?string $encod
 });
 
 function mbSearch(args: Value[], reverse: boolean, insensitive: boolean, name: string): Value {
-  checkEncoding(name, args, 4);
-  const haystack = chars(insensitive ? enc(mapChars(dec(s(args[0])), foldSimple)) : args[0]);
-  const needle = chars(insensitive ? enc(mapChars(dec(s(args[1])), foldSimple)) : args[1]);
+  const codec = encodingArgument(args, 4, name);
+  const tokens = (value: Value): string[] =>
+    chars(!insensitive && codec === UTF8 ? s(value) : searchableUtf8(codec.decode(s(value)), insensitive));
+  const haystack = tokens(args[0]);
+  const needle = tokens(args[1]);
   let offset = args[2] === undefined ? 0 : n(args[2]);
   if (offset > haystack.length || offset < -haystack.length) {
     throwError('ValueError', `${name}(): Argument #3 ($offset) must be contained in argument #1 ($haystack)`);
@@ -145,15 +145,15 @@ function searchCharacters(text: string[], needle: string[], start: number, limit
   return found;
 }
 
-defineUtf8Function(
+defineFunction(
   'mb_strpos(string $haystack, string $needle, int $offset = 0, ?string $encoding = null): int|false',
   ({ args }) => mbSearch(args, false, false, 'mb_strpos')
 );
-defineUtf8Function(
+defineFunction(
   'mb_strrpos(string $haystack, string $needle, int $offset = 0, ?string $encoding = null): int|false',
   ({ args }) => mbSearch(args, true, false, 'mb_strrpos')
 );
-defineUtf8Function(
+defineFunction(
   'mb_stripos(string $haystack, string $needle, int $offset = 0, ?string $encoding = null): int|false',
   ({ args }) => mbSearch(args, false, true, 'mb_stripos')
 );
@@ -175,12 +175,12 @@ defineUtf8Function('mb_strwidth(string $string, ?string $encoding = null): int',
   for (const char of dec(s(args[0]))) width += eastAsianWidth(char.codePointAt(0) as number) === 2 ? 2 : 1;
   return BigInt(width);
 });
-defineUtf8Function('mb_convert_case(string $string, int $mode, ?string $encoding = null): string', ({ args }) => {
+defineFunction('mb_convert_case(string $string, int $mode, ?string $encoding = null): string', ({ args }) => {
   checkEncoding('mb_convert_case', args, 3);
   const convert = CASE_MODES[n(args[1])] as ((text: string) => string) | undefined;
   if (!convert)
     throwError('ValueError', 'mb_convert_case(): Argument #2 ($mode) must be one of the MB_CASE_* constants');
-  return enc(convert(dec(s(args[0]))));
+  return convertCase(args, 3, 'mb_convert_case', convert);
 });
 defineFunction('mb_internal_encoding(?string $encoding = null): string|bool', ({ args }) => {
   checkEncoding('mb_internal_encoding', args, 1);
@@ -201,19 +201,29 @@ defineUtf8Function('mb_lcfirst(string $string, ?string $encoding = null): string
   return enc(dec(list[0]).toLowerCase()) + list.slice(1).join('');
 });
 
+function convertCase(args: Value[], position: number, name: string, convert: (text: string) => string): string {
+  const codec = encodingArgument(args, position, name);
+  const text = codec
+    .decode(s(args[0]))
+    .map((code) => (code === BAD ? '\uDC00' : String.fromCodePoint(code)))
+    .join('');
+  const codes = [...convert(text)].map((char) => (char === '\uDC00' ? BAD : (char.codePointAt(0) as number)));
+  return encodeCodes(codes, codec);
+}
+
 /** The conversions of `mb_convert_case` by the value of their MB_CASE_* constant. */
 const CASE_MODES: readonly ((text: string) => string)[] = [
   (text) => text.toUpperCase(),
-  (text) => text.toLowerCase(),
-  (text) => titleCase(text, false),
+  (text) => wordCase(text, 'lower'),
+  (text) => wordCase(text, 'title'),
   (text) => mapChars(text, foldFull),
   (text) => mapChars(text, upperSimple),
   (text) => mapChars(text, lowerSimple),
-  (text) => titleCase(text, true),
+  (text) => wordCase(text, 'title-simple'),
   (text) => mapChars(text, foldSimple),
 ];
 const CASED = /\p{Cased}/u;
-const CASE_IGNORABLE = /\p{Case_Ignorable}/u;
+const CASE_IGNORABLE = /\p{Case_Ignorable}|\uDC00/u;
 const GEORGIAN = /^[\u10D0-\u10FA\u10FD-\u10FF]$/;
 // The characters whose titlecase in Unicode's UnicodeData.txt and SpecialCasing.txt differs from their uppercase.
 const TITLE_EXCEPTIONS = new Map<string, string>([
@@ -238,9 +248,9 @@ const TITLE_EXCEPTIONS = new Map<string, string>([
   ['ῷ', 'Ω\u0342\u0345'],
 ]);
 
-/** Title-cases each word as mbstring does: a cased character after another, skipping case-ignorable ones, is lowercased. */
-// code-gauge-allow functionCognitiveComplexity 20 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
-function titleCase(text: string, simple: boolean): string {
+// code-gauge-allow functionCognitiveComplexity 21 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+function wordCase(text: string, mode: 'lower' | 'title' | 'title-simple'): string {
+  const simple = mode === 'title-simple';
   const list = [...text];
   const following = new Uint8Array(list.length);
   let after = false;
@@ -255,8 +265,8 @@ function titleCase(text: string, simple: boolean): string {
   for (const [index, char] of list.entries()) {
     rt().spend();
     if (simple) result += afterCased ? lowerSimple(char) : titleSimple(char);
-    else if (!afterCased) result += titleFull(char);
-    else result += char === 'Σ' && !following[index] ? 'ς' : char.toLowerCase();
+    else if (mode !== 'lower' && !afterCased) result += titleFull(char);
+    else result += char === 'Σ' && afterCased && !following[index] ? 'ς' : char.toLowerCase();
     if (!CASE_IGNORABLE.test(char)) afterCased = CASED.test(char);
   }
   return result;
@@ -363,7 +373,7 @@ defineFunction('mb_ord(string $string, ?string $encoding = null): int|false', ({
 
 // Searching and cutting, which decode strings as mbstring's UTF-8 decoder does -----------------------------------------
 
-defineUtf8Function(
+defineFunction(
   'mb_strripos(string $haystack, string $needle, int $offset = 0, ?string $encoding = null): int|false',
   ({ args }) => mbSearch(args, true, true, 'mb_strripos')
 );
@@ -1152,12 +1162,7 @@ function defineUtf8Function(signature: string, impl: NativeFunction['impl']): vo
     )
       return impl(context);
     const codec = encodingArgument(context.args, position, name);
-    if (codec === UTF8) {
-      if (!['mb_strtoupper', 'mb_strtolower', 'mb_convert_case'].includes(name)) return impl(context);
-      const args = [...context.args];
-      args[0] = encodeCodes(UTF8.decode(s(args[0])), UTF8);
-      return impl({ ...context, args });
-    }
+    if (codec === UTF8) return impl(context);
     const args = context.args.map((value, index) =>
       typeof value === 'string' && index !== position - 1 ? encodeCodes(codec.decode(value), UTF8) : value
     );

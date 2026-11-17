@@ -295,7 +295,7 @@ export function staticCallExpression(e: Extract<Expr, { k: 'scall' }>): Value {
 }
 
 /** Calls a method of an object by name, as native code calls `offsetGet` or `__toString`. */
-export function callMethod(object: PhpObject, name: string, args: Value[]): Value {
+export function callMethod(object: PhpObject, name: string, args: Value[], row?: number): Value {
   const method = object.cls.findMethod(lower(name));
   if (!method) {
     const magic = object.cls.findMethod('__call');
@@ -303,7 +303,7 @@ export function callMethod(object: PhpObject, name: string, args: Value[]): Valu
       return invoke(
         { fn: magic.fn, thisObj: object, scope: magic.scope, staticClass: object.cls, method: magic },
         [{ v: name }, { v: PhpArray.list(args) }],
-        undefined
+        row
       );
     }
     throwError('Error', `Call to undefined method ${object.cls.name}::${name}()`);
@@ -315,9 +315,13 @@ export function callMethod(object: PhpObject, name: string, args: Value[]): Valu
       scope: method.scope,
       staticClass: object.cls,
       method,
+      inline:
+        row !== undefined &&
+        method.fn.kind === 'native' &&
+        ['splfixedarray', 'arrayobject', 'arrayiterator'].includes(lower(method.scope.name)),
     },
     args.map((v) => ({ v })),
-    undefined
+    row
   );
 }
 
@@ -565,7 +569,8 @@ export function closureFromCallable(target: CallTarget): PhpObject {
   const closureClass = runtime.classes.get('closure') as PhpClass;
   const object = runtime.newObject(closureClass);
   const data: ClosureData = {
-    fn: target.fn,
+    fn:
+      target.fn.kind === 'native' && target.fn.name === 'die' ? (runtime.functions.get('exit') as Callable) : target.fn,
     bound: new Map(),
     thisObj: target.thisObj,
     scope: target.scope,

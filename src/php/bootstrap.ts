@@ -74,7 +74,8 @@ defineClass({
   methods: [{ signature: 'jsonSerialize(): mixed', impl: () => null, isAbstract: true }],
 });
 
-// code-gauge-allow functionCognitiveComplexity 16 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+// code-gauge-allow functionCognitiveComplexity 22 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+// code-gauge-allow functionNcss 32 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 function bindClosure(closure: PhpObject, newThis: Value, newScope: Value | undefined): Value {
   const data = closure.internal as ClosureData;
   let scope = data.scope;
@@ -84,7 +85,11 @@ function bindClosure(closure: PhpObject, newThis: Value, newScope: Value | undef
     else scope = requireClass(newScope as string);
   }
   if (newThis !== null && !(newThis instanceof PhpObject)) return null;
-  if (newThis instanceof PhpObject && data.isStatic && data.fn.kind === 'user' && data.fn.decl.isClosure) {
+  if (
+    newThis instanceof PhpObject &&
+    data.isStatic &&
+    (data.method || (data.fn.kind === 'user' && data.fn.decl.isClosure))
+  ) {
     warn('Cannot bind an instance to a static closure, this will be an error in PHP 9');
     return null;
   }
@@ -96,6 +101,14 @@ function bindClosure(closure: PhpObject, newThis: Value, newScope: Value | undef
     warn(
       `Cannot bind method ${data.method.scope.name}::${data.method.name}() to object of class ${newThis.cls.name}, this will be an error in PHP 9`
     );
+    return null;
+  }
+  if (scope && !scope.decl && scope !== data.scope) {
+    warn(`Cannot bind closure to scope of internal class ${scope.name}, this will be an error in PHP 9`);
+    return null;
+  }
+  if (data.method && scope !== data.scope) {
+    warn('Cannot rebind scope of closure created from method, this will be an error in PHP 9');
     return null;
   }
   const runtime = rt();

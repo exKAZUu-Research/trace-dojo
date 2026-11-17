@@ -57,7 +57,7 @@ export function toStr(value: Value): string {
 }
 
 /** Converts a value to an int as `(int)` and `intval` do. */
-// code-gauge-allow duplicateLines 19 -- Mirrors toFloat, as PHP converts each type to int and to float by separate rules.
+// code-gauge-allow duplicateLines 20 -- Mirrors toFloat, as PHP converts each type to int and to float by separate rules.
 export function toInt(value: Value): bigint {
   if (value === null) return 0n;
   switch (typeof value) {
@@ -77,6 +77,7 @@ export function toInt(value: Value): bigint {
     }
   }
   if (value instanceof PhpArray) return value.size > 0 ? 1n : 0n;
+  if (value instanceof PhpObject && value.isResource) return BigInt(value.id);
   warn(`Object of class ${(value as PhpObject).cls.name} could not be converted to int`);
   return 1n;
 }
@@ -100,7 +101,7 @@ function floatToIntCap(value: number): bigint {
 }
 
 /** Converts a value to a float as `(float)` and `floatval` do. */
-// code-gauge-allow duplicateLines 20 -- Mirrors toInt, as PHP converts each type to int and to float by separate rules.
+// code-gauge-allow duplicateLines 21 -- Mirrors toInt, as PHP converts each type to int and to float by separate rules.
 export function toFloat(value: Value): number {
   if (value === null) return 0;
   switch (typeof value) {
@@ -119,6 +120,7 @@ export function toFloat(value: Value): number {
     }
   }
   if (value instanceof PhpArray) return value.size > 0 ? 1 : 0;
+  if (value instanceof PhpObject && value.isResource) return value.id;
   warn(`Object of class ${(value as PhpObject).cls.name} could not be converted to float`);
   return 1;
 }

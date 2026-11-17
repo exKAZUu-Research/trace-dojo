@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 545 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 550 -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import type { Expr, ListItem } from './ast';
 import { callMethod } from './callables';
@@ -89,7 +89,7 @@ export function placeOf(e: Expr): Place {
       const value = ev(e);
       const returned = runtime.lastReturnRef;
       runtime.lastReturnRef = undefined;
-      return returned ? new RefPlace(returned) : new ValuePlace(value);
+      return new RefPlace(returned ?? Ref.temporary(value));
     }
     default: {
       return new ValuePlace(ev(e));
@@ -115,6 +115,10 @@ class StaticPlace implements Place {
 
   private get target(): Ref {
     return staticPropRef(this.cls, this.name, this.scope);
+  }
+
+  typeSources(): Ref['typedBy'] {
+    return this.target.typeOwners();
   }
 
   declaration(): PropDecl | undefined {
@@ -177,6 +181,11 @@ function propPlace(object: PhpObject, name: string): Place {
     ref: () => propRef(object, name, scope),
     unset: () => unsetProp(object, name, scope),
     declaration: () => classesModule.lookupProp(object.cls, name, scope),
+    typeSources: () => {
+      const decl = classesModule.lookupProp(object.cls, name, scope);
+      const ref = object.props.get(decl?.key ?? name);
+      return ref instanceof Ref ? ref.typeOwners() : undefined;
+    },
     getForIsset: () => (issetProp(object, name, scope) ? readProp(object, name, scope, true) : undefined),
     warnUndefined: () => {
       if (object.cls.findMethod('__get')) return;
@@ -248,18 +257,18 @@ function arrayAccessPlace(object: PhpObject, key: Value | undefined): Place {
   if (!isArrayAccess(object)) throwError('Error', `Cannot use object of type ${object.cls.name} as array`);
   return {
     getForIsset: () =>
-      toBool(callMethod(object, 'offsetExists', [key ?? null]))
-        ? callMethod(object, 'offsetGet', [key ?? null])
+      toBool(callMethod(object, 'offsetExists', [key ?? null], rt().row))
+        ? callMethod(object, 'offsetGet', [key ?? null], rt().row)
         : undefined,
     nested: () => arrayAccessNestedPlace(object, key),
-    get: () => callMethod(object, 'offsetGet', [key ?? null]),
+    get: () => callMethod(object, 'offsetGet', [key ?? null], rt().row),
     set: (value) => {
-      callMethod(object, 'offsetSet', [key ?? null, value]);
+      callMethod(object, 'offsetSet', [key ?? null, value], rt().row);
       return value;
     },
     ref: () => arrayAccessNestedPlace(object, key).ref(),
     unset: () => {
-      callMethod(object, 'offsetUnset', [key ?? null]);
+      callMethod(object, 'offsetUnset', [key ?? null], rt().row);
     },
   };
 }
@@ -284,7 +293,7 @@ function arrayAccessNestedPlace(object: PhpObject, key: Value | undefined): Plac
   }
   const runtime = rt();
   runtime.lastReturnRef = undefined;
-  const value = callMethod(object, 'offsetGet', [key ?? null]);
+  const value = callMethod(object, 'offsetGet', [key ?? null], rt().row);
   const returned = runtime.lastReturnRef as Ref | undefined;
   runtime.lastReturnRef = undefined;
   if (returned) return new RefPlace(returned);
@@ -634,7 +643,7 @@ export function unsetTarget(target: Expr): void {
       if (base instanceof PhpArray) base.delete(toKey(index, 'unset'));
       else if (base instanceof PhpObject) {
         if (!isArrayAccess(base)) throwError('Error', `Cannot use object of type ${base.cls.name} as array`);
-        callMethod(base, 'offsetUnset', [index]);
+        callMethod(base, 'offsetUnset', [index], rt().row);
       } else if (typeof base === 'string') throwError('Error', 'Cannot unset string offsets');
       return;
     }
@@ -755,5 +764,5 @@ function issetArrayAccess(object: PhpObject, index: Value): boolean {
   if (!isArrayAccess(object)) throwError('Error', `Cannot use object of type ${object.cls.name} as array`);
   if (nativeArrayStorage(object.internal) && object.cls.findMethod('offsetexists')?.fn.kind === 'native')
     return (object.internal.array.get(toKey(index, 'isset')) ?? null) !== null;
-  return toBool(callMethod(object, 'offsetExists', [index]));
+  return toBool(callMethod(object, 'offsetExists', [index], rt().row));
 }

@@ -170,7 +170,7 @@ export interface PropertyDeclAst {
   isReadonly: boolean;
   type?: TypeDecl;
   defaultExpr?: Expr;
-  hooks?: { get?: FunctionDecl; set?: FunctionDecl; setParam?: string };
+  hooks?: { get?: FunctionDecl; set?: FunctionDecl; setParam?: string; abstractGet?: boolean; abstractSet?: boolean };
   /** Whether the hooks never read or write the property itself, so it has no storage. */
   isVirtual?: boolean;
   row: number;

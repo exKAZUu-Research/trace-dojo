@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 889 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 953 -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import type { ClassDecl, Expr, FunctionDecl, MethodDeclAst, PropertyDeclAst } from './ast';
 import builtinNames from './builtinNames.json';
@@ -6,6 +6,7 @@ import { lower } from './bytes';
 import { type ArgValue, invoke } from './calls';
 import { debugType, normalizeKeyString, toBool, valueName } from './conversions';
 import { deprecated, notice, throwError, warn } from './errors';
+import { strictEquals } from './operators';
 import { share } from './places';
 import { FatalError, rt, SCRIPT_PATH } from './runtime';
 import tentativeReturnMethods from './tentativeReturnMethods.json';
@@ -134,8 +135,8 @@ export function declareClass(decl: ClassDecl, row: number): PhpClass {
     for (const [name, constant] of iface.consts) if (!cls.consts.has(name)) cls.consts.set(name, constant);
   }
   for (const prop of decl.props) addProperty(cls, prop);
-  applyTraits(cls, decl);
   for (const method of decl.methods) addMethod(cls, method);
+  applyTraits(cls, decl);
   checkInheritance(cls, row);
   if (!decl.isAnonymous) runtime.classes.set(key, cls);
   runtime.userClasses.push(cls);
@@ -221,13 +222,10 @@ function addProperty(cls: PhpClass, ast: PropertyDeclAst): void {
         `Cannot redeclare ${inherited.isReadonly ? 'readonly' : 'non-readonly'} property ${inherited.cls.name}::$${ast.name} as ${ast.isReadonly ? 'readonly' : 'non-readonly'} ${cls.name}::$${ast.name}`,
         ast.row
       );
-    if (inherited.type && (!ast.type || !propertyTypeCompatible(inherited, ast, cls))) {
-      throw new FatalError(
-        `Type of ${cls.name}::$${ast.name} must be ${describeType(inherited.type, inherited.cls)} (as in class ${inherited.cls.name})`,
-        ast.row
-      );
+    if (inherited.type && !propertyTypeCompatible(inherited, ast, cls)) {
+      propertyTypeError(inherited, cls, ast.name, ast.row);
     }
-    if (!inherited.type && ast.type) {
+    if (!inherited.type && ast.type && !propertyTypeCompatible(inherited, ast, cls)) {
       throw new FatalError(
         `Type of ${cls.name}::$${ast.name} must not be defined (as in class ${inherited.cls.name})`,
         ast.row
@@ -267,6 +265,8 @@ function addProperty(cls: PhpClass, ast: PropertyDeclAst): void {
       get: ast.hooks.get ? hookFunction(ast.hooks.get) : undefined,
       set: ast.hooks.set ? hookFunction(ast.hooks.set) : undefined,
       setParam: ast.hooks.setParam,
+      abstractGet: ast.hooks.abstractGet,
+      abstractSet: ast.hooks.abstractSet,
     };
   }
   if (ast.isStatic) {
@@ -287,9 +287,10 @@ function addProperty(cls: PhpClass, ast: PropertyDeclAst): void {
   if (decl.visibility === 'private') cls.privateProps.set(ast.name, decl);
 }
 
-function propertyTypeCompatible(parent: PropDecl, child: PropertyDeclAst, cls: PhpClass): boolean {
-  const parentType = parent.type as TypeDecl;
-  const childType = child.type as TypeDecl;
+function propertyTypeCompatible(parent: PropDecl, child: Pick<PropertyDeclAst, 'type'>, cls: PhpClass): boolean {
+  if (Boolean(parent.type) !== Boolean(child.type)) return false;
+  const parentType: TypeDecl = parent.type ?? { k: 'named', name: 'mixed' };
+  const childType: TypeDecl = child.type ?? { k: 'named', name: 'mixed' };
   const acceptsChild = isSubtype(childType, cls, parentType, parent.cls);
   const acceptsParent = isSubtype(parentType, parent.cls, childType, cls);
   if (parent.isVirtual && parent.hooks) {
@@ -297,6 +298,26 @@ function propertyTypeCompatible(parent: PropDecl, child: PropertyDeclAst, cls: P
     if (!parent.hooks.get) return acceptsParent;
   }
   return acceptsChild && acceptsParent;
+}
+
+function propertyTypeError(parent: PropDecl, child: PhpClass, name: string, row: number): never {
+  if (!parent.type)
+    throw new FatalError(
+      `Type of ${child.name}::$${name} must be omitted to match the parent definition in class ${parent.cls.name}`,
+      row
+    );
+  const variance =
+    parent.isVirtual && parent.hooks
+      ? !parent.hooks.set
+        ? 'subtype of '
+        : !parent.hooks.get
+          ? 'supertype of '
+          : ''
+      : '';
+  throw new FatalError(
+    `Type of ${child.name}::$${name} must be ${variance}${describeType(parent.type, parent.cls)} (as in class ${parent.cls.name})`,
+    row
+  );
 }
 
 function checkPropertyDefault(decl: PropDecl, value: Value): Value {
@@ -335,7 +356,7 @@ function addMethod(cls: PhpClass, ast: MethodDeclAst, scope = cls): void {
   cls.methods.set(method.lname, method);
 }
 
-// code-gauge-allow functionNcss 47 -- Follows PHP's class linking and property access rules in their order of checks.
+// code-gauge-allow functionNcss 54 -- Follows PHP's class linking and property access rules in their order of checks.
 function applyTraits(cls: PhpClass, decl: ClassDecl): void {
   if (cls.traits.length === 0) return;
   const rules = decl.traits.flatMap((use) => use.rules);
@@ -346,9 +367,16 @@ function applyTraits(cls: PhpClass, decl: ClassDecl): void {
   }
   const ownMethods = new Set(decl.methods.map((method) => lower(method.fn.name)));
   const added = new Map<string, PhpClass>();
+  const contracts: Method[] = [];
+  const propertyOrigins = new Map<string, string>();
   for (const trait of cls.traits) {
     for (const [lname, method] of allTraitMethods(trait)) {
       if (excluded.has(`${lower(trait.name)}::${lname}`)) continue;
+      if (method.isAbstract) {
+        contracts.push({ ...method, cls, scope: trait });
+        if (!cls.findMethod(lname)) cls.methods.set(lname, { ...method, cls, scope: cls, fn: copyFunction(method.fn) });
+        continue;
+      }
       if (ownMethods.has(lname)) continue;
       const previous = added.get(lname);
       if (previous && previous !== trait) {
@@ -360,11 +388,7 @@ function applyTraits(cls: PhpClass, decl: ClassDecl): void {
       added.set(lname, trait);
       cls.methods.set(lname, { ...method, cls, scope: cls, fn: copyFunction(method.fn) });
     }
-    for (const prop of trait.decl?.props ?? []) {
-      const existing = cls.propByName.get(prop.name);
-      if (existing && existing.cls === cls) continue;
-      addProperty(cls, prop);
-    }
+    applyTraitProperties(cls, trait, propertyOrigins, decl.row);
     for (const [name, constant] of trait.consts) {
       if (!cls.consts.has(name)) cls.consts.set(name, { ...constant, cls, evaluate: constant.evaluate });
     }
@@ -397,6 +421,54 @@ function applyTraits(cls: PhpClass, decl: ClassDecl): void {
       if (own) cls.methods.set(own.lname, { ...own, visibility: rule.visibility });
     }
   }
+  for (const contract of contracts) {
+    const implementation = cls.findMethod(contract.lname);
+    if (implementation) checkOverride(cls, implementation, contract);
+  }
+}
+
+function applyTraitProperties(cls: PhpClass, trait: PhpClass, origins: Map<string, string>, row: number): void {
+  for (const prop of trait.decl?.props ?? []) {
+    const existing = cls.propByName.get(prop.name);
+    if (existing && existing.cls === cls) {
+      if (existing.hooks || prop.hooks)
+        throw new FatalError(
+          `${origins.get(prop.name) ?? cls.name} and ${trait.name} define the same hooked property ($${prop.name}) in the composition of ${cls.name}. Conflict resolution between hooked properties is currently not supported. Class was composed`,
+          row
+        );
+      if (!traitPropertyCompatible(existing, prop, cls))
+        throw new FatalError(
+          `${origins.get(prop.name) ?? cls.name} and ${trait.name} define the same property ($${prop.name}) in the composition of ${cls.name}. However, the definition differs and is considered incompatible. Class was composed`,
+          row
+        );
+      continue;
+    }
+    addProperty(cls, prop);
+    origins.set(prop.name, trait.name);
+  }
+}
+
+// code-gauge-allow functionCognitiveComplexity 18 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+function traitPropertyCompatible(existing: PropDecl, property: PropertyDeclAst, cls: PhpClass): boolean {
+  if (
+    existing.visibility !== property.visibility ||
+    existing.isStatic !== property.isStatic ||
+    existing.isReadonly !== property.isReadonly ||
+    existing.isFinal !== (property.isFinal || property.setVisibility === 'private') ||
+    existing.setVisibility !==
+      (property.setVisibility ?? (property.isReadonly && property.visibility === 'public' ? 'protected' : undefined))
+  )
+    return false;
+  if (Boolean(existing.type) !== Boolean(property.type)) return false;
+  if (
+    existing.type &&
+    property.type &&
+    !(isSubtype(existing.type, cls, property.type, cls) && isSubtype(property.type, cls, existing.type, cls))
+  )
+    return false;
+  const left = existing.defaultValue ? existing.defaultValue() : existing.type ? UNINIT : null;
+  const right = property.defaultExpr ? evaluateInClass(property.defaultExpr, cls) : property.type ? UNINIT : null;
+  return left === UNINIT || right === UNINIT ? left === right : strictEquals(left, right);
 }
 
 function allTraitMethods(trait: PhpClass): Map<string, Method> {
@@ -408,7 +480,7 @@ function copyFunction(fn: Callable): Callable {
   return { ...fn, statics: new Map() };
 }
 
-// code-gauge-allow functionNcss 44 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+// code-gauge-allow functionNcss 46 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 function checkInheritance(cls: PhpClass, row: number): void {
   const ancestors: PhpClass[] = [];
   for (let parent = cls.parent; parent; parent = parent.parent) ancestors.push(parent);
@@ -452,14 +524,50 @@ function checkInheritance(cls: PhpClass, row: number): void {
       missing.push(method);
     }
   }
-  if (missing.length > 0) {
-    const names = missing.slice(0, 3).map((method) => `${method.cls.name}::${method.name}`);
-    const count = missing.length;
+  const hooks = missingPropertyHooks(cls, ancestors, row);
+  if (missing.length > 0 || hooks.length > 0) {
+    const allNames = [...missing.map((method) => `${method.cls.name}::${method.name}`), ...hooks];
+    const names = allNames.slice(0, 3);
+    const count = allNames.length;
     throw new FatalError(
       `Class ${cls.name} contains ${count} abstract method${count === 1 ? '' : 's'} and must therefore be declared abstract or implement the remaining method${count === 1 ? '' : 's'} (${names.join(', ')}${count > 3 ? ', ...' : ''})`,
       row
     );
   }
+}
+
+// code-gauge-allow functionCognitiveComplexity 23 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+function missingPropertyHooks(cls: PhpClass, ancestors: PhpClass[], row: number): string[] {
+  const missing = new Set<string>();
+  const contracts = [...ancestors, ...cls.interfaces, cls].flatMap((parent) => [...parent.propByName.values()]);
+  for (const contract of contracts) {
+    if (!contract.hooks?.abstractGet && !contract.hooks?.abstractSet) continue;
+    const property = cls.propByName.get(contract.name);
+    if (property && property !== contract) {
+      if (
+        property.isStatic !== contract.isStatic ||
+        visibilityRank(property.visibility) < visibilityRank(contract.visibility)
+      )
+        throw new FatalError(
+          `Access level to ${cls.name}::$${property.name} must be ${contract.visibility} (as in class ${contract.cls.name})`,
+          row
+        );
+      if (!propertyTypeCompatible(contract, property, property.cls))
+        propertyTypeError(contract, cls, property.name, row);
+    }
+    for (const kind of ['get', 'set'] as const) {
+      const required = kind === 'get' ? contract.hooks.abstractGet : contract.hooks.abstractSet;
+      if (required && !implementsPropertyHook(property, kind))
+        missing.add(`${contract.cls.name}::$${contract.name}::${kind}`);
+    }
+  }
+  return [...missing];
+}
+
+function implementsPropertyHook(property: PropDecl | undefined, kind: 'get' | 'set'): boolean {
+  if (!property || (kind === 'set' && property.isReadonly)) return false;
+  if (property.isVirtual && !property.hooks?.[kind]) return false;
+  return !(kind === 'get' ? property.hooks?.abstractGet : property.hooks?.abstractSet);
 }
 
 // code-gauge-allow functionCognitiveComplexity 21 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
@@ -1039,14 +1147,12 @@ export function attachPropertyReference(ref: Ref, decl: PropDecl, object?: PhpOb
 setReferenceTypeCheck(checkReferenceValue);
 
 function checkReferenceValue(ref: Ref, value: Value): Value {
-  ref.typedBy = ref.typedBy?.filter(({ decl, object }) =>
-    object ? object.props.get(decl.key) === ref : decl.cls.findStatic(decl.name)?.ref === ref
-  );
+  const owners = ref.typeOwners();
   let coerced = value;
-  for (const { decl, object } of ref.typedBy ?? []) {
+  for (const { decl, object } of owners) {
     coerced = coerceProperty(decl, coerced, object, 'reference held by property');
   }
-  for (const { decl, object } of ref.typedBy ?? []) {
+  for (const { decl, object } of owners) {
     if (!Object.is(coerceProperty(decl, coerced, object, 'reference held by property'), coerced)) {
       throwError(
         'TypeError',
@@ -1158,7 +1264,12 @@ export function resolveStatic(ref: LazyRef): Ref {
   if (ref.lazy) {
     const lazy = ref.lazy;
     ref.lazy = undefined;
-    ref.v = lazy();
+    try {
+      ref.v = lazy();
+    } catch (error) {
+      ref.lazy = lazy;
+      throw error;
+    }
   }
   return ref;
 }

@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 585 -- Keeps one PHP runtime concern and its shared helpers in one module.
+// code-gauge-allow-file fileNcss 644 -- Keeps one PHP runtime concern and its shared helpers in one module.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import type { TurtleState } from '../interpreter/turtleWorld';
 import type { ClassDecl, FunctionDecl } from './ast';
@@ -46,6 +46,13 @@ export class Ref {
     this.typedBy ??= [];
     if (!this.typedBy.some((owner) => owner.decl === decl && owner.object === object))
       this.typedBy.push({ decl, object });
+  }
+
+  typeOwners(): NonNullable<Ref['typedBy']> {
+    this.typedBy = this.typedBy?.filter(({ decl, object }) =>
+      object ? object.props.get(decl.key) === this : decl.cls.findStatic(decl.name)?.ref === this
+    );
+    return this.typedBy ?? [];
   }
 
   get v(): Value {
@@ -131,8 +138,7 @@ export class PhpArray {
   }
 
   cursor(): ArrayCursor {
-    this.order ??= new ArrayOrder(this.map.keys());
-    return this.order.cursor();
+    return this.ordered().cursor();
   }
 
   get size(): number {
@@ -268,23 +274,31 @@ export class PhpArray {
     for (const [key, slot] of this.map) yield [key, slot instanceof Ref ? slot.v : slot];
   }
 
-  /** The key after `key` in order, for the internal pointer. */
+  firstValue(): Value | undefined {
+    const slot = this.map.values().next().value;
+    return slot instanceof Ref ? slot.v : slot;
+  }
+
+  lastValue(): Value | undefined {
+    const key = this.lastKey();
+    return key === undefined ? undefined : this.get(key);
+  }
+
+  lastKey(): Key | undefined {
+    return this.ordered().last?.key;
+  }
+
   keyAfter(key: Key): Key | undefined {
-    let found = false;
-    for (const candidate of this.map.keys()) {
-      if (found) return candidate;
-      if (candidate === key) found = true;
-    }
-    return undefined;
+    return this.ordered().entries.get(key)?.next?.key;
   }
 
   keyBefore(key: Key): Key | undefined {
-    let previous: Key | undefined;
-    for (const candidate of this.map.keys()) {
-      if (candidate === key) return previous;
-      previous = candidate;
-    }
-    return undefined;
+    return this.ordered().entries.get(key)?.previous?.key;
+  }
+
+  private ordered(): ArrayOrder {
+    this.order ??= new ArrayOrder(this.map.keys());
+    return this.order;
   }
 
   /** The key the internal pointer is at, starting at the first element. */
@@ -417,7 +431,7 @@ export interface PropDecl {
   /** The initial value's expression, or undefined for none (null if untyped, uninitialized if typed). */
   hasDefault: boolean;
   defaultValue?: () => Value;
-  hooks?: { get?: Callable; set?: Callable; setParam?: string };
+  hooks?: { get?: Callable; set?: Callable; setParam?: string; abstractGet?: boolean; abstractSet?: boolean };
   /** Whether a hooked property has storage of its own. */
   isVirtual?: boolean;
 }
@@ -527,7 +541,7 @@ interface ArrayEntry {
 class ArrayOrder {
   readonly entries = new Map<Key, ArrayEntry>();
   first: ArrayEntry | undefined;
-  private last: ArrayEntry | undefined;
+  last: ArrayEntry | undefined;
   private nextIndex = 0;
   private readonly cursors = new Set<WeakRef<ArrayCursor>>();
 
@@ -622,9 +636,15 @@ export class PhpObject {
     return this.internalValue;
   }
   set internal(value: unknown) {
+    this.nativeValues?.detach();
     this.internalValue = value;
+    this.nativeValues?.attach(this);
     internalHandler(this);
     nativeOwnershipChanged(this);
+  }
+  get nativeValues(): NativeValueIndex | undefined {
+    const index = (this.internalValue as { nativeValues?: unknown } | undefined)?.nativeValues;
+    return index instanceof NativeValueIndex ? index : undefined;
   }
   turtle?: TurtleState;
   /** Whether the destructor ran or must not run. */
@@ -661,6 +681,62 @@ export function isClosure(value: Value): boolean {
 
 export function deref(slot: Value | Ref): Value {
   return slot instanceof Ref ? slot.v : slot;
+}
+
+const nativeOwners = new WeakMap<object, Set<PhpObject>>();
+
+export class NativeValueIndex {
+  private readonly counts = new Map<PhpArray | PhpObject, number>();
+  private owner: PhpObject | undefined;
+
+  attach(owner: PhpObject): void {
+    this.detach();
+    this.owner = owner;
+    for (const value of this.counts.keys()) this.link(value, false);
+    nativeOwnershipChanged(owner);
+  }
+
+  detach(): void {
+    if (this.owner) for (const value of this.counts.keys()) nativeOwners.get(value)?.delete(this.owner);
+    this.owner = undefined;
+  }
+
+  add(value: Value): void {
+    if (!(value instanceof PhpArray || value instanceof PhpObject)) return;
+    if (value instanceof PhpArray) value.shared = true;
+    this.counts.set(value, (this.counts.get(value) ?? 0) + 1);
+    this.link(value);
+  }
+
+  delete(value: Value): void {
+    if (!(value instanceof PhpArray || value instanceof PhpObject)) return;
+    const count = this.counts.get(value) ?? 0;
+    if (count > 1) this.counts.set(value, count - 1);
+    else {
+      this.counts.delete(value);
+      if (this.owner) nativeOwners.get(value)?.delete(this.owner);
+    }
+    if (this.owner) nativeOwnershipChanged(this.owner);
+  }
+
+  reset(values: Iterable<Value>): void {
+    const owner = this.owner;
+    this.detach();
+    this.counts.clear();
+    for (const value of values) this.add(value);
+    if (owner) this.attach(owner);
+  }
+
+  private link(value: object, notify = true): void {
+    if (!this.owner) return;
+    let holders = nativeOwners.get(value);
+    if (!holders) {
+      holders = new Set();
+      nativeOwners.set(value, holders);
+    }
+    holders.add(this.owner);
+    if (notify) nativeOwnershipChanged(this.owner);
+  }
 }
 
 type Owner = Ref | PhpArray | PhpObject;
@@ -712,8 +788,8 @@ function trackOwner(value: unknown, parent: Owner, key?: Key): void {
 
 export function valueOwners(value: object): Owner[] {
   const parents = owners.get(value);
-  if (!parents) return [];
-  const result: Owner[] = [];
+  const result: Owner[] = [...(nativeOwners.get(value) ?? [])];
+  if (!parents) return result;
   for (const [parent, keys] of parents) {
     const holds =
       parent instanceof Ref

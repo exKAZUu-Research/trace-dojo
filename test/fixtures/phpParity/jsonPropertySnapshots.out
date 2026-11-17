@@ -1,0 +1,6 @@
+string(13) "{"a":1,"b":2}"
+string(13) "{"a":1,"b":2}"
+string(13) "{"a":1,"b":4}"
+string(13) "{"a":1,"b":4}"
+string(5) "[1,4]"
+destroy;next;done;

@@ -446,8 +446,8 @@ export function readIndex(base: Value, index: Value, quiet: boolean): Value {
   if (typeof base === 'string') return readStringOffset(base, index, quiet);
   if (base instanceof PhpObject) {
     if (base.cls.findMethod('offsetget') && isArrayAccess(base)) {
-      if (quiet && !toBool(callMethod(base, 'offsetExists', [index]))) return null;
-      return callMethod(base, 'offsetGet', [index]);
+      if (quiet && !toBool(callMethod(base, 'offsetExists', [index], rt().row))) return null;
+      return callMethod(base, 'offsetGet', [index], rt().row);
     }
     throwError('Error', `Cannot use object of type ${base.cls.name} as array`);
   }

@@ -13,7 +13,7 @@ import { compare, toInt, toKey } from './operators';
 import { share } from './places';
 import { PhpThrow, rt } from './runtime';
 import { UnsupportedFeatureError } from './unsupported';
-import { PhpArray, type PhpClass, PhpObject, type Value } from './values';
+import { dropped, NativeValueIndex, PhpArray, type PhpClass, PhpObject, type Value } from './values';
 
 /** Lists methods in the order PHP declares them, which get_class_methods shows. */
 function inPhpOrder(methods: NativeMethod[], names: string): NativeMethod[] {
@@ -37,6 +37,7 @@ interface ListNode {
 }
 
 class ListStorage {
+  readonly nativeValues = new NativeValueIndex();
   nodes: ListNode[] = [];
   flags = 0;
   pointer: ListNode | undefined;
@@ -53,9 +54,22 @@ class ListStorage {
   clone(): ListStorage {
     rt().allocate(this.nodes.length);
     const copy = new ListStorage(this.flags);
-    copy.nodes = this.nodes.map((node) => ({ v: node.v }));
+    copy.nodes = this.nodes.map((node) => copy.node(node.v));
     copy.pointer = copy.nodes[0];
     return copy;
+  }
+
+  node(value: Value): ListNode {
+    this.nativeValues.add(value);
+    return { v: value };
+  }
+
+  setNode(node: ListNode, value: Value): void {
+    const old = node.v;
+    node.v = value;
+    this.nativeValues.add(value);
+    this.nativeValues.delete(old);
+    if (old !== value) dropped(old);
   }
 
   debugEntries(): [string, Value][] {
@@ -79,15 +93,20 @@ class ListStorage {
   /** Transcribes spl_dllist_it_helper_move_forward, which `next` calls with the list's flags and `prev` with LIFO flipped. */
   moveForward(flags: number): void {
     if (!this.pointer) return;
+    let removed: ListNode | undefined;
     const index = this.nodes.indexOf(this.pointer);
     if (flags & IT_MODE_LIFO) {
       this.pointer = index > 0 ? this.nodes[index - 1] : undefined;
       this.position--;
-      if (flags & IT_MODE_DELETE) this.nodes.pop();
+      if (flags & IT_MODE_DELETE) removed = this.nodes.pop();
     } else {
       this.pointer = index === -1 ? undefined : this.nodes[index + 1];
-      if (flags & IT_MODE_DELETE) this.nodes.shift();
+      if (flags & IT_MODE_DELETE) removed = this.nodes.shift();
       else this.position++;
+    }
+    if (removed) {
+      this.nativeValues.delete(removed.v);
+      dropped(removed.v);
     }
   }
 }
@@ -111,6 +130,7 @@ function removeListNode(list: ListStorage, first: boolean): Value {
   const node = (first ? list.nodes.shift() : list.nodes.pop()) as ListNode;
   const value = node.v;
   node.v = null;
+  list.nativeValues.delete(value);
   return value;
 }
 
@@ -121,8 +141,8 @@ const listMethods: NativeMethod[] = [
       const list = listOf(thisObj);
       const index = checkListIndex(list, args[0], 'add', true);
       rt().allocate(1);
-      if (index === list.nodes.length) list.nodes.push({ v: share(args[1]) });
-      else list.nodes.splice(list.nodes.indexOf(list.nodeAt(index)), 0, { v: share(args[1]) });
+      if (index === list.nodes.length) list.nodes.push(list.node(args[1]));
+      else list.nodes.splice(list.nodes.indexOf(list.nodeAt(index)), 0, list.node(args[1]));
       return null;
     },
   },
@@ -136,11 +156,11 @@ const listMethods: NativeMethod[] = [
   },
   {
     signature: 'push(mixed $value): void',
-    impl: ({ thisObj, args }) => (rt().allocate(1), listOf(thisObj).nodes.push({ v: share(args[0]) }), null),
+    impl: ({ thisObj, args }) => (rt().allocate(1), listOf(thisObj).nodes.push(listOf(thisObj).node(args[0])), null),
   },
   {
     signature: 'unshift(mixed $value): void',
-    impl: ({ thisObj, args }) => (rt().allocate(1), listOf(thisObj).nodes.unshift({ v: share(args[0]) }), null),
+    impl: ({ thisObj, args }) => (rt().allocate(1), listOf(thisObj).nodes.unshift(listOf(thisObj).node(args[0])), null),
   },
   {
     signature: 'top(): mixed',
@@ -184,8 +204,8 @@ const listMethods: NativeMethod[] = [
       const list = listOf(thisObj);
       if (args[0] === null) {
         rt().allocate(1);
-        list.nodes.push({ v: share(args[1]) });
-      } else list.nodeAt(checkListIndex(list, args[0], 'offsetSet')).v = share(args[1]);
+        list.nodes.push(list.node(args[1]));
+      } else list.setNode(list.nodeAt(checkListIndex(list, args[0], 'offsetSet')), args[1]);
       return null;
     },
   },
@@ -196,6 +216,8 @@ const listMethods: NativeMethod[] = [
       const node = list.nodeAt(checkListIndex(list, args[0], 'offsetUnset'));
       list.nodes.splice(list.nodes.indexOf(node), 1);
       if (list.pointer === node) list.pointer = undefined;
+      list.nativeValues.delete(node.v);
+      dropped(node.v);
       return null;
     },
   },
@@ -226,7 +248,7 @@ defineClass({
   methods: [
     {
       signature: 'enqueue(mixed $value): void',
-      impl: ({ thisObj, args }) => (rt().allocate(1), listOf(thisObj).nodes.push({ v: share(args[0]) }), null),
+      impl: ({ thisObj, args }) => (rt().allocate(1), listOf(thisObj).nodes.push(listOf(thisObj).node(args[0])), null),
     },
     {
       signature: 'dequeue(): mixed',
@@ -256,6 +278,7 @@ const EXTR_BOTH = 3;
 type HeapElement = Value | QueueEntry;
 
 class HeapStorage {
+  readonly nativeValues = new NativeValueIndex();
   elements: HeapElement[] = [];
   /** The extract flags of a priority queue, or 0 for a heap. */
   flags: number;
@@ -284,6 +307,7 @@ class HeapStorage {
     copy.elements = this.elements.map((element) =>
       isEntry(element) ? { data: share(element.data), priority: share(element.priority) } : share(element)
     );
+    copy.nativeValues.reset(copy.held());
     copy.corrupted = this.corrupted;
     return copy;
   }
@@ -314,6 +338,7 @@ class HeapStorage {
       position = (position - 1) >> 1;
     }
     this.elements[position] = element;
+    for (const value of isEntry(element) ? [element.data, element.priority] : [element]) this.nativeValues.add(value);
     this.finishSift();
   }
 
@@ -335,6 +360,7 @@ class HeapStorage {
     }
     this.elements[parent] = bottom;
     this.elements.length = count;
+    for (const value of isEntry(top) ? [top.data, top.priority] : [top]) this.nativeValues.delete(value);
     this.finishSift();
     return top;
   }
@@ -534,7 +560,25 @@ defineClass({
 // Fixed arrays and object storage ------------------------------------------------------------------------------------
 
 class FixedStorage {
-  items: Value[] = [];
+  readonly nativeValues = new NativeValueIndex();
+  private data: Value[] = [];
+  get items(): Value[] {
+    return this.data;
+  }
+  set items(items: Value[]) {
+    const old = this.data;
+    this.data = items;
+    this.nativeValues.reset(items);
+    rt().release(old);
+  }
+
+  set(index: number, value: Value): void {
+    const old = this.data[index];
+    this.data[index] = value;
+    this.nativeValues.add(value);
+    this.nativeValues.delete(old);
+    if (old !== value) dropped(old);
+  }
   position = 0;
 
   held(): Value[] {
@@ -614,14 +658,14 @@ defineClass({
         impl: ({ thisObj, args }) => {
           // `$array[] = $value` passes null, which PHP rejects before converting the offset.
           if (args[0] === null) throwError('Error', '[] operator not supported for SplFixedArray');
-          fixedOf(thisObj).items[fixedIndex(thisObj, args[0])] = share(args[1]);
+          fixedOf(thisObj).set(fixedIndex(thisObj, args[0]), args[1]);
           return null;
         },
       },
       {
         signature: 'offsetUnset($index): void',
         impl: ({ thisObj, args }) => {
-          fixedOf(thisObj).items[fixedIndex(thisObj, args[0])] = null;
+          fixedOf(thisObj).set(fixedIndex(thisObj, args[0]), null);
           return null;
         },
       },
