@@ -532,8 +532,8 @@ instance Enum Word where
   fromEnum x = if x > 9223372036854775807 then errorWithoutStackTrace ("Enum.fromEnum{Word}: value (" ++ show x ++ ") is outside of Int's bounds (-9223372036854775808,9223372036854775807)") else fromInteger (toInteger x)
   enumFrom x = map fromInteger (enumFromTo (toInteger x) 18446744073709551615)
   enumFromTo x y = map fromInteger (enumFromTo (toInteger x) (toInteger y))
-  enumFromThen x y = map fromInteger (enumFromThenTo (toInteger x) (toInteger y) (if y >= x then 18446744073709551615 else 0))
-  enumFromThenTo x1 x2 y = map fromInteger (enumFromThenTo (toInteger x1) (toInteger x2) (toInteger y))
+  enumFromThen x y = x ${BT}seq${BT} y ${BT}seq${BT} map fromInteger (enumFromThenTo (toInteger x) (toInteger y) (if y >= x then 18446744073709551615 else 0))
+  enumFromThenTo x1 x2 y = x1 ${BT}seq${BT} x2 ${BT}seq${BT} map fromInteger (enumFromThenTo (toInteger x1) (toInteger x2) (toInteger y))
 
 instance Num Double where
   (+) = primitive "doubleAdd"
@@ -857,13 +857,17 @@ instance Enum Integer where
   pred x = x - 1
   toEnum x = toInteger x
   fromEnum x = fromInteger x
-  enumFrom x = x : enumFrom (x + 1)
+  enumFrom x = integerEnumFrom x 1
   enumFromTo x y = if x > y then [] else x : enumFromTo (x + 1) y
-  enumFromThen x y = x : enumFromThen y (y + y - x)
+  enumFromThen x y = integerEnumFrom x (y - x)
   enumFromThenTo x1 x2 y =
-    if x2 >= x1
-      then (if x1 > y then [] else x1 : enumFromThenTo x2 (x2 + x2 - x1) y)
-      else (if x1 < y then [] else x1 : enumFromThenTo x2 (x2 + x2 - x1) y)
+    if delta >= 0 then up x1 else down x1
+    where delta = x2 - x1
+          up x = if x > y then [] else x : up (x + delta)
+          down x = if x < y then [] else x : down (x + delta)
+
+integerEnumFrom :: Integer -> Integer -> [Integer]
+integerEnumFrom x delta = x ${BT}seq${BT} (x : integerEnumFrom (x + delta) delta)
 
 instance Bounded Char where
   minBound = '\0'
@@ -887,20 +891,21 @@ chr = primitive "chr"
 
 numericEnumFrom :: Fractional a => a -> [a]
 numericEnumFrom n = go 0
-  where go k = (n + fromInteger k) : go (k + 1)
+  where go k = k ${BT}seq${BT} let x = n + k in x ${BT}seq${BT} (x : go (k + 1))
 
 numericEnumFromThen :: Fractional a => a -> a -> [a]
 numericEnumFromThen n m = go 0
   where step = m - n
-        go k = (n + fromInteger k * step) : go (k + 1)
+        go k = k ${BT}seq${BT} let x = n + k * step in x ${BT}seq${BT} (x : go (k + 1))
 
 numericEnumFromTo :: (Ord a, Fractional a) => a -> a -> [a]
-numericEnumFromTo n m = takeWhile (<= m + fromRational (1 :% 2)) (numericEnumFrom n)
+numericEnumFromTo n m = n ${BT}seq${BT} let bound = m + 1 / 2
+                                         in bound ${BT}seq${BT} takeWhile (<= bound) (numericEnumFrom n)
 
 numericEnumFromThenTo :: (Ord a, Fractional a) => a -> a -> a -> [a]
-numericEnumFromThenTo e1 e2 e3 = takeWhile predicate (numericEnumFromThen e1 e2)
-  where mid = (e2 - e1) / fromInteger 2
-        predicate x = if e2 >= e1 then x <= e3 + mid else x >= e3 + mid
+numericEnumFromThenTo e1 e2 e3 = e3 ${BT}seq${BT} mid ${BT}seq${BT} predicate ${BT}seq${BT} takeWhile predicate (numericEnumFromThen e1 e2)
+  where mid = (e2 - e1) / 2
+        predicate = if e2 >= e1 then (<= e3 + mid) else (>= e3 + mid)
 
 instance Enum Double where
   succ x = x + 1.0
@@ -909,7 +914,7 @@ instance Enum Double where
   fromEnum x = fromInteger (primDoubleTruncate x)
   enumFrom = numericEnumFrom
   enumFromTo = numericEnumFromTo
-  enumFromThen = numericEnumFromThen
+  enumFromThen n m = m ${BT}seq${BT} numericEnumFromThen n m
   enumFromThenTo = numericEnumFromThenTo
 
 instance Enum Float where
@@ -919,7 +924,7 @@ instance Enum Float where
   fromEnum x = fromInteger (primFloatTruncate x)
   enumFrom = numericEnumFrom
   enumFromTo = numericEnumFromTo
-  enumFromThen = numericEnumFromThen
+  enumFromThen n m = m ${BT}seq${BT} numericEnumFromThen n m
   enumFromThenTo = numericEnumFromThenTo
 
 instance Integral a => Enum (Ratio a) where

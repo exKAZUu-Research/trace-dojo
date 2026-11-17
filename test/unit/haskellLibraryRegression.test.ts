@@ -822,3 +822,52 @@ instance Ord K where
     }
   );
 });
+
+test.each([
+  ['Int', ['start', 'start', 'next', 'next', 'start', 'start', 'start', 'start', 'next', '0']],
+  ['Integer', ['start', 'start', '1', 'next', 'start', 'next', 'next', 'start', 'next', '0']],
+  ['Word', ['start', 'start', 'next', 'next', 'start', 'start', 'start', 'start', 'next', '0']],
+  ['Double', ['start', 'next', 'next', 'next', 'start', 'bound', 'next', 'bound', 'bound', '0']],
+  ['Float', ['start', 'next', 'next', 'next', 'start', 'bound', 'next', 'bound', 'bound', '0']],
+  ['Rational', ['start', 'start', 'next', 'next', 'start', 'bound', 'next', 'bound', 'bound', '0']],
+  ['Ratio Int', ['start', 'start', 'next', 'next', 'start', 'bound', 'next', 'bound', 'bound', '0']],
+  ['Char', ['start', 'start', 'next', 'next', 'start', 'start', 'start', 'start', 'next', '0']],
+])('%s enumeration spines preserve GHC start, step and bound demand', (type, expected) => {
+  const [zero, one, bound] = type === 'Char' ? ["'a'", "'b'", "'d'"] : ['0', '1', '3'];
+  const cases: [string, number][] = [
+    ['[error "start" ..]', 1],
+    ['[error "start",error "next" ..]', 1],
+    [`[${zero},error "next" ..]`, 1],
+    [`[${zero},error "next" ..]`, 2],
+    ['[error "start" .. error "bound"]', 1],
+    ['[error "start",error "next" .. error "bound"]', 1],
+    [`[error "start",error "next" .. ${bound}]`, 1],
+    [`[error "start",${one} .. error "bound"]`, 1],
+    [`[${zero},error "next" .. error "bound"]`, 1],
+    ['[error "start",error "next" .. error "bound"]', 0],
+  ];
+  for (const [index, [range, count]] of cases.entries()) {
+    const source = `import Data.Ratio\nmain=print(length(take ${count} (${range}::[${type}])))`;
+    const result = expected[index];
+    expect(executeProgram('haskell', source), source).toMatchObject({
+      kind: 'executed',
+      stdout: result === '0' || result === '1' ? `${result}\n` : '',
+      uncaughtException: result === '0' || result === '1' ? undefined : result,
+    });
+  }
+});
+
+test('strict numeric enumeration spines retain finite values and floating-point stability', () => {
+  const source = `import Data.Ratio
+main=do
+ print(take 5 [10,8..]::[Integer],[10,8..1]::[Integer])
+ print(take 4 [1.25,1.5..]::[Double],[1.25,1.5..2]::[Double])
+ print([2,1.75..1]::[Rational])
+ print(take 5 [9007199254740990..]::[Double])`;
+  expect(executeProgram('haskell', source)).toMatchObject({
+    kind: 'executed',
+    stdout:
+      '([10,8,6,4,2],[10,8,6,4,2])\n([1.25,1.5,1.75,2.0],[1.25,1.5,1.75,2.0])\n[2 % 1,7 % 4,3 % 2,5 % 4,1 % 1]\n[9.00719925474099e15,9.007199254740991e15,9.007199254740992e15,9.007199254740992e15,9.007199254740994e15]\n',
+    uncaughtException: undefined,
+  });
+});
