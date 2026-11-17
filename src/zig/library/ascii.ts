@@ -30,15 +30,15 @@ function bytes(value: Value): number[] {
   return elements(value).map((byte) => Number(byte as bigint));
 }
 
-function caseFold(a: number[], b: number[], spend: () => void, start = 0, end = a.length): number {
-  const length = Math.min(end - start, b.length);
-  for (let index = 0; index < length; index++) {
+function caseFold(a: Slice, b: Slice, spend: () => void, start = 0n, end = a.lengthValue): number {
+  const length = end - start < b.lengthValue ? end - start : b.lengthValue;
+  for (let index = 0n; index < length; index++) {
     spend();
-    const x = toLower(a[start + index]);
-    const y = toLower(b[index]);
+    const x = toLower(Number(a.get(Number(start + index))));
+    const y = toLower(Number(b.get(Number(index))));
     if (x !== y) return x < y ? -1 : 1;
   }
-  return end - start - b.length;
+  return end - start < b.lengthValue ? -1 : end - start > b.lengthValue ? 1 : 0;
 }
 
 /** `upperString(output, ascii_string)`, which writes into output and returns the written part. */
@@ -73,17 +73,16 @@ function allocMapper(name: string, map: (c: number) => number): () => Member {
 
 function comparer(
   name: string,
-  compute: (a: number[], b: number[], spend: (cost?: number) => void) => Value,
+  compute: (a: Slice, b: Slice, spend: (cost?: number) => void) => Value,
   resultType: Type = BOOL
 ): () => Member {
   return concreteFnMember(name, [CONST_U8_SLICE, CONST_U8_SLICE], resultType, ([x, y], frame) => {
     const spend = (cost?: number): void => frame.runtime.spend(cost);
-    spend((x as Slice).length + (y as Slice).length);
-    return compute(bytes(x), bytes(y), spend);
+    return compute(x as Slice, y as Slice, spend);
   });
 }
 
-function findIgnoreCase(text: number[], pattern: number[], spend: () => void): number {
+function findIgnoreCase(text: Slice, pattern: Slice, spend: () => void): number {
   const found = findSequence(foldedSequence(text), foldedSequence(pattern), 0n, (a, b) => {
     spend();
     return a === b;
@@ -91,9 +90,9 @@ function findIgnoreCase(text: number[], pattern: number[], spend: () => void): n
   return found === undefined ? -1 : Number(found);
 }
 
-const foldedSequence = (values: number[]): { length: bigint; get: (index: bigint) => number } => ({
-  length: BigInt(values.length),
-  get: (index) => toLower(values[Number(index)]),
+const foldedSequence = (values: Slice): { length: bigint; get: (index: bigint) => number } => ({
+  length: values.lengthValue,
+  get: (index) => toLower(Number(values.get(Number(index)))),
 });
 
 const MEMBERS: Record<string, () => Member> = {
@@ -117,15 +116,15 @@ const MEMBERS: Record<string, () => Member> = {
   allocLowerString: allocMapper('std.ascii.allocLowerString', toLower),
   eqlIgnoreCase: comparer(
     'std.ascii.eqlIgnoreCase',
-    (a, b, spend) => a.length === b.length && caseFold(a, b, spend) === 0
+    (a, b, spend) => a.lengthValue === b.lengthValue && caseFold(a, b, spend) === 0
   ),
   startsWithIgnoreCase: comparer(
     'std.ascii.startsWithIgnoreCase',
-    (a, b, spend) => b.length <= a.length && caseFold(a, b, spend, 0, b.length) === 0
+    (a, b, spend) => b.lengthValue <= a.lengthValue && caseFold(a, b, spend, 0n, b.lengthValue) === 0
   ),
   endsWithIgnoreCase: comparer(
     'std.ascii.endsWithIgnoreCase',
-    (a, b, spend) => b.length <= a.length && caseFold(a, b, spend, a.length - b.length) === 0
+    (a, b, spend) => b.lengthValue <= a.lengthValue && caseFold(a, b, spend, a.lengthValue - b.lengthValue) === 0
   ),
   lessThanIgnoreCase: comparer('std.ascii.lessThanIgnoreCase', (a, b, spend) => caseFold(a, b, spend) < 0),
   orderIgnoreCase: comparer('std.ascii.orderIgnoreCase', (a, b, spend) => orderValue(caseFold(a, b, spend)), ORDER),

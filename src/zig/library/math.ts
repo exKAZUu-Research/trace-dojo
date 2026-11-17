@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 578 -- Groups the related standard library operations that share this module.
+// code-gauge-allow-file fileNcss 580 -- Groups the related standard library operations that share this module.
 import {
   checked,
   divCeil,
@@ -40,7 +40,7 @@ import { spendIntegerOperation } from '../integerWork';
 import { isArithmeticType, isIntegerType } from '../operands';
 import { referenceBinary, referenceUnary } from '../referenceMath';
 import type { BinaryOperation, UnaryOperation } from '../referenceMathOperations';
-import { known, type NativeCall, runtime, type SemaApi, type TExpr } from '../semaBase';
+import { known, type NativeCall, runtime, type SemaApi, staticResultOf, type TExpr } from '../semaBase';
 import {
   BOOL,
   COMPTIME_FLOAT,
@@ -610,18 +610,20 @@ const MEMBERS: Record<string, () => Member> = {
     const value = sema.compile(arg);
     const type = value.type;
     if (type.kind === 'comptime_int') {
-      const integer = value.value as bigint;
+      const integer = (staticResultOf(value)?.value ?? sema.knownValue(value, '整数の平方根')) as bigint;
       if (integer < 0n || integer > maxInt(intType(false, 128)))
         return sema.error(arg, '整数の平方根には、0 以上で u128 の範囲内の値を渡してください。');
-      return known(COMPTIME_INT, integerSqrt(integer), call.span);
+      return computed(COMPTIME_INT, [value], call.span, ([x]) => integerSqrt(x as bigint));
     }
     if (type.kind === 'int') {
       if (type.signed) return sema.error(arg, '整数の平方根には、符号なしの整数を渡してください。');
+      if (type.bits + 1 > Number(maxInt(intType(false, 16))))
+        return sema.error(arg, '整数の平方根の型計算で、u16 の範囲を超えます。');
       const result = intType(false, Math.ceil(type.bits / 2));
       return computed(result, [value], call.span, ([x]) => integerSqrt(x as bigint));
     }
-    const float = floatArg(sema, arg, 'comptime');
-    return computed(float.type, [float], call.span, ([x]) => floatSqrt(x as AnyFloat, bitsOf(float.type)));
+    checkFloatDomain(sema, type, 'comptime', arg);
+    return computed(type, [value], call.span, ([x]) => floatSqrt(x as AnyFloat, bitsOf(type)));
   }),
   cbrt: unaryFloat('std.math.cbrt'),
   exp: unaryFloat('std.math.exp', 'comptime'),

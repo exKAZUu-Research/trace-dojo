@@ -2,7 +2,16 @@ import { transferCost } from '../allocation';
 import type { Expression, Span } from '../ast';
 import { BigFloat, compareFloats } from '../floats';
 import { type Frame, withHeldValues, ZigPanic } from '../runtime';
-import { copyForStorage, evaluateHeld, known, runtime, type SemaApi, type TExpr, valueEvaluators } from '../semaBase';
+import {
+  copyForStorage,
+  evaluateHeld,
+  known,
+  runtime,
+  type SemaApi,
+  staticResultOf,
+  type TExpr,
+  valueEvaluators,
+} from '../semaBase';
 import {
   BOOL,
   type EnumType,
@@ -124,24 +133,29 @@ export function computed(
   span: Span,
   compute: (values: Value[], frame?: Frame) => Value
 ): TExpr {
-  if (isComptimeOnly(type) && args.every((arg) => arg.known && compileTimeReadable(arg.value))) {
+  let result: { value: Value } | undefined;
+  const facts = args.map(staticResultOf);
+  if (isComptimeOnly(type) && facts.every((fact) => fact && compileTimeReadable(fact.value))) {
     try {
-      return known(type, compute(args.map((arg) => arg.value)), span);
+      result = { value: compute(facts.map((fact) => fact!.value)) };
+      if (args.every((arg) => arg.known)) return known(type, result.value, span);
     } catch (error) {
-      // A library function runs when the program does, so a panic for known arguments still happens at run time.
       if (!(error instanceof ZigPanic)) throw error;
     }
   }
   const evaluators = valueEvaluators(args);
-  return runtime(
-    type,
-    (frame) => {
-      frame.runtime.spend(1 + Math.floor(args.length));
-      const values = evaluateHeld(frame, evaluators);
-      return withHeldValues(frame, values, () => compute(values, frame));
-    },
-    span
-  );
+  return {
+    ...runtime(
+      type,
+      (frame) => {
+        frame.runtime.spend(1 + Math.floor(args.length));
+        const values = evaluateHeld(frame, evaluators);
+        return withHeldValues(frame, values, () => (result ? result.value : compute(values, frame)));
+      },
+      span
+    ),
+    staticResult: result,
+  };
 }
 
 /** An allocating function's result type: `Allocator.Error!T`. */

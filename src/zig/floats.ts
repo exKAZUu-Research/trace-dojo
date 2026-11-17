@@ -1,3 +1,4 @@
+import { spendIntegerOperation, spendIntegerShift } from './integerWork';
 import { spendMemory } from './memoryAccounting';
 
 /**
@@ -367,23 +368,34 @@ export function floatSqrt(value: AnyFloat, bits: FloatBits): AnyFloat {
   const shift = 2 * (format.precision + 4) - bitLength(mantissa);
   let extra = Math.max(shift, 0);
   if ((exponent - extra) % 2 !== 0) extra++;
+  spendIntegerShift(mantissa, BigInt(extra), true, spendMemory);
   mantissa <<= BigInt(extra);
   exponent -= extra;
   const root = integerSqrt(mantissa);
+  spendIntegerOperation(root, root, true, spendMemory);
   const exact = root * root === mantissa;
   // A sticky bit makes the inexact root round as the exact one would.
+  spendIntegerShift(root, 1n, true, spendMemory);
   const num = (root << 1n) | (exact ? 0n : 1n);
   const resultExponent = exponent / 2 - 1;
-  return resultExponent >= 0
-    ? roundRational(false, num << BigInt(resultExponent), 1n, format)
-    : roundRational(false, num, 1n << BigInt(-resultExponent), format);
+  spendMemory(8 * Math.ceil(bitLength(num) / 64));
+  const rounded = roundRational(false, num, 1n, format);
+  return new BigFloat(false, rounded.kind, rounded.mantissa, rounded.exponent + resultExponent);
 }
 
-export function integerSqrt(value: bigint): bigint {
+export function integerSqrt(value: bigint, spend: (cost: number) => void = spendMemory): bigint {
   if (value < 2n) return value;
-  let x = 1n << BigInt(Math.ceil(bitLength(value) / 2));
+  const shift = BigInt(Math.ceil(bitLength(value) / 2));
+  spendIntegerShift(1n, shift, true, spend);
+  let x = 1n << shift;
   for (;;) {
-    const y = (x + value / x) >> 1n;
+    spendIntegerOperation(value, x, false, spend);
+    const quotient = value / x;
+    spendIntegerOperation(x, quotient, false, spend);
+    const sum = x + quotient;
+    spendIntegerShift(sum, 1n, false, spend);
+    const y = sum >> 1n;
+    spendIntegerOperation(y, x, false, spend);
     if (y >= x) return x;
     x = y;
   }
@@ -443,8 +455,8 @@ export interface Decimal {
  * last digit), which is what Ryu computes. A float halfway between two decimals of the interval's ends belongs to it
  * when the float's significand is even, as round-to-nearest-even reads it back.
  */
-// code-gauge-allow functionNcss 45 -- Transcribes the corresponding function of Zig's standard library or compiler step by step.
-// code-gauge-allow functionCognitiveComplexity 27 -- Transcribes the corresponding function of Zig's standard library or compiler step by step.
+// code-gauge-allow functionNcss 48 -- Keeps the exact rounding interval and shortest decimal candidate selection together.
+// code-gauge-allow functionCognitiveComplexity 27 -- Keeps the exact rounding interval and shortest decimal candidate selection together.
 export function shortestDecimal(value: AnyFloat, bits: FloatBits): Decimal {
   const big = asBigFloat(value);
   if (big.kind === 'nan') return { sign: big.sign, mantissa: 1n, exponent: 0, special: 'nan' };
@@ -455,10 +467,10 @@ export function shortestDecimal(value: AnyFloat, bits: FloatBits): Decimal {
   let significand = big.mantissa;
   let quantum = big.exponent;
   const minQuantum = format.minExponent - (format.precision - 1);
-  while (bitLength(significand) < format.precision && quantum > minQuantum) {
-    significand <<= 1n;
-    quantum--;
-  }
+  const extra = Math.max(0, Math.min(format.precision - bitLength(significand), quantum - minQuantum));
+  spendIntegerShift(significand, BigInt(extra), true, spendMemory);
+  significand <<= BigInt(extra);
+  quantum -= extra;
   const lowerIsCloser = significand === 1n << BigInt(format.precision - 1) && quantum > minQuantum;
   // Work in units of 2^(E-2), so that the interval's ends are integers.
   const scale = quantum - 2;
@@ -466,11 +478,13 @@ export function shortestDecimal(value: AnyFloat, bits: FloatBits): Decimal {
   const upper = v + 2n;
   const lower = lowerIsCloser ? v - 1n : v - 2n;
   const inclusive = (significand & 1n) === 0n;
+  spendMemory(Math.ceil((Math.abs(scale) + bitLength(upper)) / 64));
   const [num, numDen] = scale >= 0 ? [1n << BigInt(scale), 1n] : [1n, 1n << BigInt(-scale)];
   // A decimal d * 10^k lies in the interval when lower <= d * 10^k / (2^scale) <= upper.
   const high = Math.ceil((bitLength(upper) + scale) * LOG10_2) + 1;
   for (let k = high; ; k--) {
     // d * 10^k * numDen <= upper * num   and   d * 10^k * numDen >= lower * num
+    spendDecimalCandidate(upper, scale, k);
     const [left, right] = k >= 0 ? [10n ** BigInt(k) * numDen, 1n] : [numDen, 10n ** BigInt(-k)];
     // d * left <= upper * num * right
     const upperBound = upper * num * right;
@@ -489,4 +503,11 @@ export function shortestDecimal(value: AnyFloat, bits: FloatBits): Decimal {
     if (d > dMax) d = dMax;
     return { sign: big.sign, mantissa: d, exponent: k };
   }
+}
+
+function spendDecimalCandidate(upper: bigint, scale: number, decimalExponent: number): void {
+  const decimalWidth = Math.ceil(Math.abs(decimalExponent) * Math.log2(10));
+  const boundWidth = bitLength(upper) + Math.max(scale, 0) + (decimalExponent < 0 ? decimalWidth : 0);
+  const denominatorWidth = Math.max(-scale, 0) + (decimalExponent >= 0 ? decimalWidth : 0);
+  spendMemory(Math.ceil((decimalWidth + 4 * boundWidth + 4 * denominatorWidth) / 64));
 }

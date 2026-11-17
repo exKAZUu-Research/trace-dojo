@@ -183,7 +183,9 @@ function spendTransfers(list: List, count: number | bigint, copies = 1): void {
 
 function capacitySlice(list: List, unused: boolean): Slice {
   const start = unused ? list.items.lengthValue : 0n;
-  const length = (list.struct.slots[1] as bigint) - start;
+  const capacity = list.struct.slots[1] as bigint;
+  if (start > capacity) panic(`start index ${start} is larger than end index ${capacity}`);
+  const length = capacity - start;
   return sizeOf(list.child) === 0
     ? zeroSlice(list.items, length, list.child)
     : new Slice(list.items.target, list.items.start + Number(start), length);

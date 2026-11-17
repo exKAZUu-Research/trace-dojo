@@ -12,6 +12,8 @@ import {
   roundTo,
   truncateToBigInt,
 } from './floats';
+import { spendIntegerOperation, spendIntegerShift } from './integerWork';
+import { spendMemory } from './memoryAccounting';
 import { ZigPanic } from './runtime';
 import { fitsInt, type IntType, maxInt, minInt, wrapInt } from './types';
 
@@ -158,12 +160,23 @@ export function floatRem(a: AnyFloat, b: AnyFloat, bits: FloatBits): AnyFloat {
   if (typeof a === 'number' && typeof b === 'number') return a % b;
   const x = asBigFloat(a);
   const y = asBigFloat(b);
-  if (x.kind === 'finite' && y.kind === 'inf') return roundTo(x, bits);
+  if (x.kind === 'finite' && y.kind === 'inf') return roundRemainder(x, bits);
   if (x.kind !== 'finite' || y.kind !== 'finite' || y.isZero) return new BigFloat(false, 'nan', 0n, 0);
   const exponent = Math.min(x.exponent, y.exponent);
-  const dividend = x.mantissa << BigInt(x.exponent - exponent);
-  const divisor = y.mantissa << BigInt(y.exponent - exponent);
-  return roundTo(new BigFloat(x.sign, 'finite', dividend % divisor, exponent), bits);
+  const xShift = BigInt(x.exponent - exponent),
+    yShift = BigInt(y.exponent - exponent);
+  spendIntegerShift(x.mantissa, xShift, true, spendMemory);
+  const dividend = x.mantissa << xShift;
+  spendIntegerShift(y.mantissa, yShift, true, spendMemory);
+  const divisor = y.mantissa << yShift;
+  spendIntegerOperation(dividend, divisor, false, spendMemory);
+  const result = new BigFloat(x.sign, 'finite', dividend % divisor, exponent);
+  return roundRemainder(result, bits);
+}
+
+function roundRemainder(value: BigFloat, bits: FloatBits): BigFloat {
+  if (!value.isZero) spendMemory(Math.ceil((Math.abs(value.exponent) + value.mantissa.toString(2).length) / 64));
+  return roundTo(value, bits);
 }
 
 /** `@mod` of floats as Zig computes it: `fmod(fmod(a, b) + b, b)` for a negative `a`, else `fmod(a, b)`. */

@@ -7831,3 +7831,90 @@ test('integer precision accepts the maximum usize and ignores it as Zig does', (
   const source = `const std=@import("std");pub fn main()void{std.debug.print("{d:.18446744073709551615}",.{@as(u8,7)});}`;
   expect(executeProgram('zig', source)).toMatchObject({ kind: 'executed', stderr: '7', uncaughtException: undefined });
 });
+
+test.each([0, 1])('shared singleton type proofs stay bounded for arrays of length %s', (length) => {
+  const definitions = Array.from({ length: 19 }, (_, i) => `const S${i + 1}=struct{a:S${i},b:S${i}};`).join('');
+  const source = `const S0=struct{};${definitions}pub fn main()void{const a:[${length}]S19=undefined;_=a;}`;
+  expect(executeProgram('zig', source)).toMatchObject({ kind: 'executed', uncaughtException: undefined });
+});
+
+test.each(['@as(u65535,1)', 'blk:{var x:u65535=1;_=&x;break :blk x;}'])(
+  'integer sqrt rejects overflow in its reference result-width calculation: %s',
+  (operand) => {
+    const source = `const std=@import("std");pub fn main()void{_=std.math.sqrt(${operand});}`;
+    expect(executeProgram('zig', source)).toMatchObject({ kind: 'compileError' });
+  }
+);
+
+test('integer sqrt accepts the adjacent representable result-width calculation', () => {
+  const source = `const std=@import("std");pub fn main()void{var x:u65534=1;_=&x;std.debug.print("{}",.{std.math.sqrt(x)});}`;
+  expect(executeProgram('zig', source)).toMatchObject({ kind: 'executed', stderr: '1', uncaughtException: undefined });
+});
+
+test.each(['blk:{std.debug.print("g",.{});break :blk 9;}', 'if(get()) |_| 9 else |_| unreachable'])(
+  'comptime integer sqrt preserves proven operand effects: %s',
+  (operand) => {
+    const source = `const std=@import("std");fn get()error{}!void{std.debug.print("g",.{});}pub fn main()void{const x=std.math.sqrt(${operand});std.debug.print("{}",.{x});}`;
+    expect(executeProgram('zig', source)).toMatchObject({
+      kind: 'executed',
+      stderr: 'g3',
+      uncaughtException: undefined,
+    });
+  }
+);
+
+test.each(['@rem(x,y)', '@mod(x,y)', 'std.math.rem(f128,x,y) catch 0'])(
+  'extended remainder %s meters exponent alignment and divisions',
+  (operation) => {
+    const source = `const std=@import("std");pub fn main()void{var x:f128=0x1p16000;var y:f128=0x1.8p-15999;_=&x;_=&y;for(0..10000)|_|{_=${operation};}}`;
+    expect(executeProgram('zig', source)).toMatchObject({ kind: 'limitExceeded', limit: 'operations' });
+  }
+);
+
+test.each(['u8', 'void'])('unused capacity views of %s check their start before subtracting lengths', (type) => {
+  const source = `const std=@import("std");pub fn main()void{var a:[1]${type}=.{${type === 'void' ? '{}' : '1'}};var l=std.ArrayList(${type}).fromOwnedSlice(&a);l.capacity=0;std.debug.print("{}|",.{l.allocatedSlice().len});_=l.unusedCapacitySlice();}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: '0|',
+    uncaughtException: 'panic: start index 1 is larger than end index 0',
+  });
+});
+
+test.each(['0x1.1p-16000', '0x1.1p16000'])('wide float decimal conversion %s charges size-dependent work', (value) => {
+  const source = `const std=@import("std");pub fn main()void{var x:f128=${value};_=&x;for(0..3000)|_|{_=std.fmt.count("{e}",.{x});}}`;
+  expect(executeProgram('zig', source)).toMatchObject({ kind: 'limitExceeded', limit: 'operations' });
+});
+
+test('ordinary decimal conversion remains within the work budget', () => {
+  const source = `const std=@import("std");pub fn main()void{var x:f128=1.25;_=&x;for(0..3000)|_|{_=std.fmt.count("{e}",.{x});}}`;
+  expect(executeProgram('zig', source)).toMatchObject({ kind: 'executed', uncaughtException: undefined });
+});
+
+test.each(['@sqrt(x)', 'std.math.sqrt(x)'])('extended float %s meters bounded significand root work', (operation) => {
+  const source = `const std=@import("std");pub fn main()void{var x:f128=0x1p16000;_=&x;for(0..20000)|_|{_=${operation};}}`;
+  expect(executeProgram('zig', source)).toMatchObject({ kind: 'limitExceeded', limit: 'operations' });
+});
+
+test('wide integer square roots meter Newton divisions', () => {
+  const source = `const std=@import("std");pub fn main()void{var x:u4096=1<<4095;_=&x;for(0..5000)|_|{_=std.math.sqrt(x);}}`;
+  expect(executeProgram('zig', source)).toMatchObject({ kind: 'limitExceeded', limit: 'operations' });
+});
+
+test.each([
+  ['startsWithIgnoreCase', 'true'],
+  ['endsWithIgnoreCase', 'true'],
+  ['findIgnoreCase', '0'],
+  ['eqlIgnoreCase', 'false'],
+])('ASCII %s applies empty-pattern and length shortcuts before reading data', (method, expected) => {
+  const source = `const std=@import("std");pub fn main()void{const a:[300000]u8=@splat(97);for(0..4)|_|{std.debug.print("{any}|",.{std.ascii.${method}(&a,"")});}}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: `${expected}|`.repeat(4),
+    uncaughtException: undefined,
+  });
+});
+
+test('extended remainder with an infinite divisor meters finite result rounding', () => {
+  const source = `const std=@import("std");pub fn main()void{var x:f128=0x1p16000;var y:f128=std.math.inf(f128);_=&x;_=&y;for(0..10000)|_|{_=@rem(x,y);}}`;
+  expect(executeProgram('zig', source)).toMatchObject({ kind: 'limitExceeded', limit: 'operations' });
+});
