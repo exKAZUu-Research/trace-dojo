@@ -1,6 +1,6 @@
 import { OrderedMap } from 'immutable';
 
-// code-gauge-allow-file fileNcss 961 -- The Core generator covers every construct of the language in one pass over shared state.
+// code-gauge-allow-file fileNcss 975 -- The Core generator covers every construct of the language in one pass over shared state.
 import { ExecutionLimitError, LIMITS } from '../interpreter/limits';
 import {
   CONS_CON,
@@ -77,6 +77,11 @@ export interface CodegenOptions {
   traceTypes?: boolean;
 }
 
+interface PreviewNode {
+  owner: object;
+  previous: PreviewNode | undefined;
+}
+
 class FrameScope {
   size = 0;
   readonly slots = new Map<LocalVar | DictParam, number>();
@@ -113,8 +118,15 @@ export class Codegen {
   /** The dictionary parameters of the bindings whose bodies are being generated, for their recursive uses. */
   private readonly ownDictParams = new Map<LocalVar | ValueEntity, DictParam[]>();
   readonly claimedAtomicRows = new Set<number>();
+  private readonly previewNodes = new WeakMap<object, PreviewNode>();
+  private readonly registeredPreviewNodes = new WeakSet<PreviewNode>();
+  private readonly previewOwners = new Set<object>();
 
   constructor(private readonly options: CodegenOptions) {}
+
+  get previewBindingCount(): number {
+    return this.previewOwners.size;
+  }
 
   // -------------------------------------------------------------------------------------------------------------
   // Top level
@@ -1257,6 +1269,15 @@ export class Codegen {
   }
 
   private snapshotVisible(): VisibleScope {
+    for (
+      let node = this.previewNodes.get(this.visible);
+      node && !this.registeredPreviewNodes.has(node);
+      node = node.previous
+    ) {
+      chargeTypeWork();
+      this.previewOwners.add(node.owner);
+      this.registeredPreviewNodes.add(node);
+    }
     return { level: this.frame.level, bindings: this.visible };
   }
 
@@ -1264,7 +1285,9 @@ export class Codegen {
     const type = local.scheme?.type ?? local.type;
     if (!type) return;
     chargeTypeWork();
-    this.visible = this.visible.set(local.name, { level: this.frame.level, index: slot, type });
+    const previous = this.previewNodes.get(this.visible);
+    this.visible = this.visible.set(local.name, { level: this.frame.level, index: slot, type, previewOwner: local });
+    this.previewNodes.set(this.visible, { owner: local, previous });
   }
 
   private withVisible<T>(entries: OrderedMap<string, VisibleBinding>, build: () => T): T {

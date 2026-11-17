@@ -185,11 +185,12 @@ function bindingDisplaysAnswer(runtime: Runtime, env: Env, visible: VisibleScope
       const slot = env.at(visible.level - binding.level).slots[binding.index];
       if (slot === undefined) return;
       const type = slotDisplayType(slot, binding.type);
-      return { slot, type, scalar: isScalarType(type) };
+      return { slot, type, scalar: isScalarType(type), previewOwner: binding.previewOwner };
     });
     return (
       candidate !== undefined &&
-      (candidate.scalar || runtime.displaysAnswer?.(name, candidate.slot, candidate.type) === true)
+      (candidate.scalar ||
+        runtime.displaysAnswer?.(name, candidate.slot, candidate.type, candidate.previewOwner) === true)
     );
   } catch (error) {
     if (error instanceof DisplayAbort) return false;

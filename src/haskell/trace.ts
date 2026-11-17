@@ -5,8 +5,7 @@ import { TraceRecorder, type TraceVariables } from '../interpreter/traceRecorder
 import type { DisplayNode, TraceItemVariable } from '../problems/trace';
 import { CHAR_TYPE, CONS_CON, FLOAT_TYPE, NIL_CON, UNIT_CON } from './builtinTypes';
 import { compileProgram } from './compile';
-import { constructorFieldType, isScalarType, slotDisplayType, UNKNOWN_TYPE } from './displayTypes';
-import type { PreviewKind } from './previewBudget';
+import { constructorFieldType, slotDisplayType, UNKNOWN_TYPE } from './displayTypes';
 import { floatToDigits } from './primitives';
 import { runProgram } from './run';
 import { DisplayAbort, Runtime, type TraceFrame } from './runtime';
@@ -28,8 +27,8 @@ import { visibleVariables } from './visibleScope';
 
 export function traceHaskellProgram(program: string, trace: TraceOptions, input?: ProgramInput): ProgramRecording {
   const compiled = compileProgram(program, new Set(trace.atomicAnnotations.keys()), true);
-  const runtime = new Runtime(input);
-  runtime.displaysAnswer = (name, slot, type) => slotDisplaysAnswer(runtime, name, slot, type);
+  const runtime = new Runtime(input, compiled.previewBindingCount);
+  runtime.displaysAnswer = (name, slot, type, owner) => slotDisplaysAnswer(runtime, name, slot, type, owner);
   const recorder = new TraceRecorder(runtime, {
     isAtomic: (frame) => frame.isAtomic,
     variablesOf: (frame) => variablesOf(runtime, frame),
@@ -49,9 +48,15 @@ export function traceHaskellProgram(program: string, trace: TraceOptions, input?
 
 type VariableDisplay = Pick<TraceVariables, 'vars'> & Partial<Pick<TraceVariables, 'referenceVars'>>;
 
-function slotDisplaysAnswer(runtime: Runtime, name: string, slot: Slot, type: Type): boolean {
+interface VariableEntry {
+  value: Value;
+  type: Type;
+  owner: object;
+}
+
+function slotDisplaysAnswer(runtime: Runtime, name: string, slot: Slot, type: Type, owner: object): boolean {
   const variables: VariableDisplay = { vars: Object.create(null) };
-  const entry = addSlotVariable(runtime, variables, name, slot, type);
+  const entry = addSlotVariable(runtime, variables, name, slot, type, owner);
   if (name === 'this') addSelfFields(runtime, variables, entry);
   return Object.values(variables.vars).some((value) => typeof value !== 'object');
 }
@@ -61,11 +66,11 @@ function variablesOf(runtime: Runtime, frame: TraceFrame): TraceVariables {
   const variables: TraceVariables = { vars: Object.create(null), referenceVars: Object.create(null) };
   const context = frame.contexts.at(-1);
   if (!context) return variables;
-  let self: { value: Value; type: Type } | undefined;
+  let self: VariableEntry | undefined;
   for (const visible of visibleVariables(context.visible)) {
     const slot = context.env.at(visible.depth).slots[visible.index];
     if (slot === undefined) continue;
-    const entry = addSlotVariable(runtime, variables, visible.name, slot, visible.type);
+    const entry = addSlotVariable(runtime, variables, visible.name, slot, visible.type, visible.previewOwner);
     if (visible.name === 'this') self = entry;
   }
   addSelfFields(runtime, variables, self);
@@ -77,31 +82,47 @@ function addSlotVariable(
   variables: VariableDisplay,
   name: string,
   slot: Slot,
-  type: Type
-): { value: Value; type: Type } | undefined {
+  type: Type,
+  owner: object
+): VariableEntry | undefined {
   return displayAttempt(runtime, () => {
-    const value = forceForDisplay(runtime, slot, previewKind(slotDisplayType(slot, type), name === 'this'));
-    if (value === undefined) return;
-    const displayType = slotDisplayType(slot, type);
-    addVariable(runtime, variables, name, value, displayType);
-    return { value, type: displayType };
+    const entry = runtime.withPreviewBudget(owner, 'root', 1, () => {
+      const value = forceForDisplay(runtime, slot);
+      return value === undefined ? undefined : { value, type: slotDisplayType(slot, type), owner };
+    });
+    if (!entry) return;
+    const fields = entry.value instanceof ConValue ? entry.value.con.fieldNames : undefined;
+    const share = name === 'this' && fields ? 1 / 3 : 1;
+    try {
+      runtime.withPreviewBudget(owner, 'value', share, () =>
+        addVariable(runtime, variables, name, entry.value, entry.type)
+      );
+    } catch (error) {
+      if (!(error instanceof DisplayAbort)) throw error;
+    }
+    return entry;
   });
 }
 
-function addSelfFields(
-  runtime: Runtime,
-  variables: VariableDisplay,
-  entry: { value: Value; type: Type } | undefined
-): void {
+function addSelfFields(runtime: Runtime, variables: VariableDisplay, entry: VariableEntry | undefined): void {
   if (!entry) return;
   const self = entry.value;
   if (!(self instanceof ConValue) || !self.con.fieldNames) return;
   for (const [index, field] of self.fields.entries()) {
-    const scalar = displayAttempt(runtime, () => {
-      const fieldType = slotDisplayType(field, constructorFieldType(self.con, entry.type, index));
-      const forced = forceForDisplay(runtime, field, previewKind(fieldType));
-      return forced === undefined ? NOT_SCALAR : scalarForDisplay(runtime, forced, slotDisplayType(field, fieldType));
-    });
+    const scalar = displayAttempt(runtime, () =>
+      runtime.withPreviewBudget(
+        entry.owner,
+        `field:${self.con.fieldNames![index]}`,
+        1 / (3 * Math.max(self.con.type.fields.size, self.fields.length)),
+        () => {
+          const fieldType = slotDisplayType(field, constructorFieldType(self.con, entry.type, index));
+          const forced = forceForDisplay(runtime, field);
+          return forced === undefined
+            ? NOT_SCALAR
+            : scalarForDisplay(runtime, forced, slotDisplayType(field, fieldType));
+        }
+      )
+    );
     if (scalar !== undefined && scalar !== NOT_SCALAR) variables.vars[`this.${self.con.fieldNames[index]}`] = scalar;
   }
 }
@@ -119,13 +140,13 @@ function displayAttempt<T>(runtime: Runtime, work: () => T): T | undefined {
 }
 
 /** Evaluates a value for display, leaving it unevaluated when that fails or takes too long. */
-function forceForDisplay(runtime: Runtime, slot: Slot, kind: PreviewKind = 'composite'): Value | undefined {
+function forceForDisplay(runtime: Runtime, slot: Slot): Value | undefined {
   slot = untypedSlot(slot);
   const ready = peek(slot);
   if (ready !== undefined) return ready;
   return runtime.withDisplayBudget(DISPLAY_OPERATIONS, () => {
     try {
-      return slot instanceof Thunk ? runtime.forcePreview(slot, kind) : slot;
+      return slot instanceof Thunk ? runtime.forcePreview(slot) : slot;
     } catch (error) {
       if (error instanceof HaskellException || error instanceof DisplayAbort) return;
       throw error;
@@ -144,7 +165,7 @@ function addVariable(runtime: Runtime, variables: VariableDisplay, name: string,
   // Lists also appear as references so that learners can expand their elements.
   if (scalar !== NOT_SCALAR && !isListValue(value, type)) return;
   try {
-    const node = runtime.withPreviewBudget(() => new DisplayNodes(runtime).build(value, type, 0));
+    const node = new DisplayNodes(runtime).build(value, type, 0);
     if (node) variables.referenceVars[name] = node;
   } catch (error) {
     if (!(error instanceof DisplayAbort)) throw error;
@@ -155,24 +176,11 @@ function addVariable(runtime: Runtime, variables: VariableDisplay, name: string,
 function scalarForDisplay(runtime: Runtime, value: Value, type: Type): ReturnType<typeof scalarOf> {
   if (!(value instanceof ConValue) || value.fields.length === 0) return scalarOf(runtime, value, type, 0);
   try {
-    return runtime.withPreviewBudget(() => scalarOf(runtime, value, type, 0), previewKind(type));
+    return scalarOf(runtime, value, type, 0);
   } catch (error) {
     if (error instanceof DisplayAbort) return NOT_SCALAR;
     throw error;
   }
-}
-
-function previewKind(type: Type, self = false): PreviewKind {
-  if (isScalarType(type)) return 'scalar';
-  const { head } = splitApp(prune(type));
-  if (head.tag !== 'tcon') return 'discovery';
-  const entity = head.entity;
-  if (self && entity.fields.size > 0) return 'discovery';
-  if (entity.special || (entity.module === 'Base' && entity.name === 'Maybe')) return 'composite';
-  if (entity.module === 'Base' && entity.name === 'Ratio') return 'scalar';
-  const scalar = (con: (typeof entity.cons)[number]): boolean => con.arity === 0 && !con.isLibraryPrivate;
-  if (!entity.cons.some(scalar)) return 'composite';
-  return entity.cons.every(scalar) ? 'scalar' : 'discovery';
 }
 
 /** Functions, actions, and `()` are not variables to learners. */

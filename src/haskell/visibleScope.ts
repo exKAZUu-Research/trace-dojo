@@ -4,6 +4,7 @@ import type { Type } from './types';
 import { chargeTypeWork } from './typeWorkBudget';
 
 export interface VisibleBinding {
+  previewOwner: object;
   level: number;
   index: number;
   type: Type;
@@ -16,9 +17,15 @@ export interface VisibleScope {
 
 export function* visibleVariables(
   scope: VisibleScope
-): Generator<{ name: string; depth: number; index: number; type: Type }> {
+): Generator<{ name: string; depth: number; index: number; type: Type; previewOwner: object }> {
   for (const [name, entry] of scope.bindings) {
     chargeTypeWork();
-    yield { name, depth: scope.level - entry.level, index: entry.index, type: entry.type };
+    yield {
+      name,
+      depth: scope.level - entry.level,
+      index: entry.index,
+      type: entry.type,
+      previewOwner: entry.previewOwner,
+    };
   }
 }

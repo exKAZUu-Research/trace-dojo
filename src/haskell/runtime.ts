@@ -8,7 +8,7 @@ import type { InstanceInfo } from './entities';
 import { markReachable } from './gc';
 import type { TraceContext } from './ioBlocks';
 import { Machine } from './machine';
-import { DisplayAbort, PreviewBudget, type PreviewKind } from './previewBudget';
+import { DisplayAbort, PreviewBudget } from './previewBudget';
 import type { Type } from './types';
 import { withTypeWorkBudget } from './typeWorkBudget';
 import { Dict, type Env, type Slot, Thunk, type Value } from './values';
@@ -53,14 +53,15 @@ export class Runtime implements TracedRuntime<TraceFrame> {
   readonly steps = new StepTracker();
   readonly frames: TraceFrame[] = [];
   readonly machine: Machine;
-  displaysAnswer?: (name: string, slot: Slot, type: Type) => boolean;
+  displaysAnswer?: (name: string, slot: Slot, type: Type, previewOwner: object) => boolean;
   private readonly globals = new Map<GlobalDef, Slot>();
   private readonly dictCache = new Map<InstanceInfo, Dict>();
   private allocated = 0;
   private gcMilliseconds = 0;
-  private readonly previews = new PreviewBudget();
+  private readonly previews: PreviewBudget;
 
-  constructor(input?: ProgramInput) {
+  constructor(input?: ProgramInput, previewBindings = 1) {
+    this.previews = new PreviewBudget(previewBindings);
     this.io = new ProgramIO(this.budget, input);
     this.machine = new Machine(this);
   }
@@ -84,12 +85,12 @@ export class Runtime implements TracedRuntime<TraceFrame> {
     }
   }
 
-  withPreviewBudget<T>(run: () => T, kind: PreviewKind = 'composite'): T {
-    return this.previews.run(run, kind);
+  withPreviewBudget<T>(owner: object, view: string, share: number, run: () => T): T {
+    return this.previews.run(owner, view, share, run);
   }
 
-  forcePreview(slot: Thunk, kind: PreviewKind): Value {
-    return this.previews.force(slot, () => this.machine.force(slot), kind);
+  forcePreview(slot: Thunk): Value {
+    return this.previews.force(slot, () => this.machine.force(slot));
   }
 
   consumePreview(slot: Thunk): void {

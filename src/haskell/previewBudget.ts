@@ -1,24 +1,32 @@
 import { LIMITS } from '../interpreter/limits';
 import { type Thunk, type Value } from './values';
 
-export type PreviewKind = 'scalar' | 'composite' | 'discovery';
+interface PreviewFamily {
+  operations: number;
+  limit: number;
+  views: Map<string, PreviewUsage>;
+}
 
 interface PreviewUsage {
+  family: PreviewFamily;
   operations: number;
-  milliseconds: number;
+  limit: number;
+}
+
+interface PreviewCost {
+  usage: PreviewUsage;
+  operations: number;
 }
 
 interface PreviewTransaction {
-  kind: PreviewKind;
+  usage: PreviewUsage;
   deadline: number;
   forcing: boolean;
   frames: PreviewFrame[];
 }
 
 interface PreviewDebt {
-  scalarOperations: number;
-  compositeOperations: number;
-  discoveryOperations: number;
+  costs: PreviewCost[];
   executionOperations: number;
   allocations: number;
   consumed: boolean;
@@ -28,9 +36,7 @@ interface PreviewDebt {
 interface PreviewFrame {
   thunk: Thunk;
   debt: PreviewDebt;
-  scalarOperations: number;
-  compositeOperations: number;
-  discoveryOperations: number;
+  costs: PreviewCost[] | undefined;
   executionOperations: number;
   allocations: number;
   dependenciesLength: number;
@@ -44,68 +50,68 @@ export class DisplayAbort extends Error {
 }
 
 export class PreviewBudget {
-  private readonly usage: Record<PreviewKind, PreviewUsage> = {
-    scalar: { operations: 0, milliseconds: 0 },
-    composite: { operations: 0, milliseconds: 0 },
-    discovery: { operations: 0, milliseconds: 0 },
-  };
+  private readonly families = new WeakMap<object, PreviewFamily>();
   private readonly debts = new WeakMap<Thunk, PreviewDebt>();
-  private readonly aborted = new WeakMap<Thunk, Partial<Record<PreviewKind, true>>>();
+  private readonly aborted = new WeakMap<Thunk, WeakSet<PreviewUsage>>();
+  private milliseconds = 0;
   private active: PreviewTransaction | undefined;
+  private readonly familyLimit: number;
+
+  constructor(bindings: number) {
+    this.familyLimit = LIMITS.maxOperations / Math.max(1, bindings);
+  }
 
   spend(operations: number, executionOperations: number, allocations: number): void {
     const active = this.active;
     if (!active) return;
     if (active.forcing) {
-      this.usage[active.kind].operations += operations;
+      const { usage } = active;
+      usage.operations += operations;
+      usage.family.operations += operations;
       const debt = active.frames.at(-1)?.debt;
       if (debt) {
-        if (active.kind === 'scalar') debt.scalarOperations += operations;
-        else if (active.kind === 'composite') debt.compositeOperations += operations;
-        else debt.discoveryOperations += operations;
+        const previous = debt.costs.at(-1);
+        if (previous?.usage === usage) previous.operations += operations;
+        else debt.costs.push({ usage, operations });
         debt.executionOperations += executionOperations;
         debt.allocations += allocations;
       }
-      if (this.remainingOperations(active.kind) < 0) throw new DisplayAbort();
+      if (this.remainingOperations(usage) < 0) throw new DisplayAbort();
     }
     if (performance.now() > active.deadline) throw new DisplayAbort();
   }
 
-  force(slot: Thunk, work: () => Value, kind: PreviewKind): Value {
-    kind = this.active?.kind ?? kind;
-    const aborted = this.aborted.get(slot);
-    if (aborted?.[kind]) throw new DisplayAbort();
-    try {
-      return this.run(() => this.forceInTransaction(work), kind);
-    } catch (error) {
-      if (error instanceof DisplayAbort) {
-        const failed = this.aborted.get(slot) ?? {};
-        failed[kind] = true;
-        this.aborted.set(slot, failed);
-      }
-      throw error;
-    }
-  }
-
-  private forceInTransaction(work: () => Value): Value {
-    const active = this.active as PreviewTransaction;
-    if (this.remainingOperations(active.kind) <= 0) throw new DisplayAbort();
+  force(slot: Thunk, work: () => Value): Value {
+    const active = this.active;
+    if (!active) throw new Error('Preview evaluation requires a display view');
+    if (this.aborted.get(slot)?.has(active.usage)) throw new DisplayAbort();
+    if (this.remainingOperations(active.usage) <= 0) throw new DisplayAbort();
     const savedForcing = active.forcing;
     active.forcing = true;
     try {
       return work();
+    } catch (error) {
+      if (error instanceof DisplayAbort) {
+        let failed = this.aborted.get(slot);
+        if (!failed) {
+          failed = new WeakSet();
+          this.aborted.set(slot, failed);
+        }
+        failed.add(active.usage);
+      }
+      throw error;
     } finally {
       active.forcing = savedForcing;
     }
   }
 
-  run<T>(work: () => T, kind: PreviewKind = 'composite'): T {
+  run<T>(owner: object, view: string, share: number, work: () => T): T {
     if (this.active) return work();
-    const remainingTime = this.remainingMilliseconds(kind);
+    const remainingTime = LIMITS.maxMilliseconds - this.milliseconds;
     if (remainingTime <= 0) throw new DisplayAbort();
     const started = performance.now();
     this.active = {
-      kind,
+      usage: this.usageFor(owner, view, share),
       deadline: started + remainingTime,
       forcing: false,
       frames: [],
@@ -113,7 +119,7 @@ export class PreviewBudget {
     try {
       return work();
     } finally {
-      this.usage[kind].milliseconds += performance.now() - started;
+      this.milliseconds += performance.now() - started;
       this.active = undefined;
     }
   }
@@ -125,9 +131,7 @@ export class PreviewBudget {
     active.frames.push({
       thunk,
       debt,
-      scalarOperations: debt.scalarOperations,
-      compositeOperations: debt.compositeOperations,
-      discoveryOperations: debt.discoveryOperations,
+      costs: debt.costs.length > 0 ? debt.costs.map((cost) => ({ ...cost })) : undefined,
       executionOperations: debt.executionOperations,
       allocations: debt.allocations,
       dependenciesLength: debt.dependencies.length,
@@ -141,9 +145,8 @@ export class PreviewBudget {
     if (frame?.thunk !== thunk) throw new Error('Unbalanced preview thunk frames');
     if (!aborted) return;
     const { debt } = frame;
-    debt.scalarOperations = frame.scalarOperations;
-    debt.compositeOperations = frame.compositeOperations;
-    debt.discoveryOperations = frame.discoveryOperations;
+    if (frame.costs) debt.costs = frame.costs;
+    else debt.costs.length = 0;
     debt.executionOperations = frame.executionOperations;
     debt.allocations = frame.allocations;
     debt.dependencies.length = frame.dependenciesLength;
@@ -160,6 +163,10 @@ export class PreviewBudget {
     }
     const debt = this.debts.get(slot);
     if (!debt || debt.consumed) return;
+    return this.settleDebt(debt);
+  }
+
+  private settleDebt(debt: PreviewDebt): { operations: number; allocations: number } {
     const pending = [debt];
     let executionOperations = 0;
     let allocations = 0;
@@ -167,24 +174,39 @@ export class PreviewBudget {
       const current = pending.pop() as PreviewDebt;
       if (current.consumed) continue;
       current.consumed = true;
-      this.usage.scalar.operations -= current.scalarOperations;
-      this.usage.composite.operations -= current.compositeOperations;
-      this.usage.discovery.operations -= current.discoveryOperations;
+      for (const { usage, operations } of current.costs) {
+        usage.operations -= operations;
+        usage.family.operations -= operations;
+      }
       executionOperations += current.executionOperations;
       allocations += current.allocations;
       for (const dependency of current.dependencies) pending.push(dependency);
+      current.costs = [];
       current.dependencies = [];
     }
     return { operations: executionOperations, allocations };
+  }
+
+  private usageFor(owner: object, view: string, share: number): PreviewUsage {
+    let family = this.families.get(owner);
+    if (!family) {
+      family = { operations: 0, limit: this.familyLimit, views: new Map() };
+      this.families.set(owner, family);
+    }
+    let usage = family.views.get(view);
+    const limit = family.limit * share;
+    if (!usage) {
+      usage = { family, operations: 0, limit };
+      family.views.set(view, usage);
+    } else usage.limit = Math.min(usage.limit, limit);
+    return usage;
   }
 
   private debtFor(slot: Thunk): PreviewDebt {
     let debt = this.debts.get(slot);
     if (!debt || debt.consumed) {
       debt = {
-        scalarOperations: 0,
-        compositeOperations: 0,
-        discoveryOperations: 0,
+        costs: [],
         executionOperations: 0,
         allocations: 0,
         consumed: false,
@@ -195,15 +217,7 @@ export class PreviewBudget {
     return debt;
   }
 
-  private remainingOperations(kind: PreviewKind): number {
-    const { scalar, composite, discovery } = this.usage;
-    const total = LIMITS.maxOperations - scalar.operations - composite.operations - discovery.operations;
-    return kind === 'scalar' ? total : Math.min(total, LIMITS.maxOperations / 4 - this.usage[kind].operations);
-  }
-
-  private remainingMilliseconds(kind: PreviewKind): number {
-    const { scalar, composite, discovery } = this.usage;
-    const total = LIMITS.maxMilliseconds - scalar.milliseconds - composite.milliseconds - discovery.milliseconds;
-    return kind === 'scalar' ? total : Math.min(total, LIMITS.maxMilliseconds / 4 - this.usage[kind].milliseconds);
+  private remainingOperations(usage: PreviewUsage): number {
+    return Math.min(usage.limit - usage.operations, usage.family.limit - usage.family.operations);
   }
 }

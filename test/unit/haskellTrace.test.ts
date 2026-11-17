@@ -1039,6 +1039,30 @@ main=forM_ [1..1000::Int] $ \\i -> do
   for (const item of assignments) expect(item.vars.n).toBe('E');
 });
 
+test.each([
+  ['', 'n', 'if even i then E else E', 'n', 'E'],
+  ['data P=P {x::Int}', 'this', 'P (i*2)', 'this.x', 2000],
+  ['data P=P {items::[Int],x::Int}', 'this', 'P (reverse [1..200]) (i*2)', 'this.x', 2000],
+])(
+  'independent bindings retain cheap views after expensive previews: %s %s',
+  (declaration, name, expression, shown, last) => {
+    const source = `import Control.Monad
+data T=E|T [Int]
+${declaration}
+main=forM_ [1..1000::Int] $ \\i -> do
+ let a=last(map T(replicate 100 [1..10]))
+ let ${name}=${expression}
+ print i`;
+    const recording = traceProgram('haskell', source, source);
+    expect(recording.uncaughtException).toBeUndefined();
+    expect(recording.stdout).toBe(Array.from({ length: 1000 }, (_, i) => `${i + 1}\n`).join(''));
+    const assignments = recording.traceItems.filter((item) => item.line === 6);
+    expect(assignments).toHaveLength(1000);
+    for (const item of assignments) expect(Object.hasOwn(item.vars, shown)).toBe(true);
+    expect(assignments.at(-1)?.vars[shown]).toBe(last);
+  }
+);
+
 test.each([20, 30, 77])('demanded scalar previews preserve every loop assignment: sum 1..%i', (count) => {
   const source = `import Control.Monad
 main=forM_ [1..1000::Int] $ \\i -> do

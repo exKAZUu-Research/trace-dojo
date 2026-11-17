@@ -17,7 +17,7 @@ export function executeHaskellProgram(source: string, input?: ProgramInput): Pro
     throw error;
   }
   try {
-    return { kind: 'executed', ...runProgram(new Runtime(input), compiled) };
+    return { kind: 'executed', ...runProgram(new Runtime(input, compiled.previewBindingCount), compiled) };
   } catch (error) {
     if (error instanceof ExecutionLimitError) return { kind: 'limitExceeded', limit: error.limit };
     throw error;
