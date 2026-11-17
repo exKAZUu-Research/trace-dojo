@@ -1,5 +1,6 @@
 /** Zig's Wyhash (`std.hash.Wyhash`) and `std.hash.autoHash`, which decide a hash map's iteration order. */
-import { sizeOf } from '../layout';
+import { physicalBytes } from '../bufferMemory';
+import { bitSizeOf, sizeOf } from '../layout';
 import type { Type } from '../types';
 import { encodeIdentifierText } from '../utf8';
 import {
@@ -99,8 +100,8 @@ export function autoHashBytes(
   return bytes;
 }
 
-// code-gauge-allow functionNcss 50 -- Serializes each key representation while charging work before materialization.
-// code-gauge-allow functionCognitiveComplexity 23 -- Serializes each key representation while charging work before materialization.
+// code-gauge-allow functionNcss 53 -- Serializes each key representation while charging work before materialization.
+// code-gauge-allow functionCognitiveComplexity 24 -- Serializes each key representation while charging work before materialization.
 function appendHashBytes(
   bytes: number[],
   value: Value,
@@ -109,6 +110,14 @@ function appendHashBytes(
   spend: (cost?: number) => void
 ): void {
   spend();
+  if (
+    (type.kind === 'array' || type.kind === 'struct' || type.kind === 'union') &&
+    hasPhysicalHashLayout(type, spend)
+  ) {
+    const encoded = physicalBytes(value, type, (reference) => hashAddress(reference as Value, identityOf), spend);
+    for (const byte of encoded) bytes.push(byte);
+    return;
+  }
   switch (type.kind) {
     case 'int': {
       const unique = type.bits % 8 === 0 && sizeOf(type) * 8 === type.bits;
@@ -151,11 +160,7 @@ function appendHashBytes(
     }
     case 'pointer':
     case 'fn': {
-      const location = value instanceof Pointer ? value.storageLocation() : undefined;
-      const address = location
-        ? (identityOf(location.storage) << 32n) + BigInt(location.index * 8)
-        : identityOf((value as FnValue).fn) << 32n;
-      appendInteger(bytes, address, 8, spend);
+      appendInteger(bytes, hashAddress(value, identityOf), 8, spend);
       return;
     }
     case 'error_set': {
@@ -172,6 +177,53 @@ function appendHashBytes(
       if (value !== NULL)
         appendHashBytes(bytes, value instanceof Some ? value.value : value, type.child, identityOf, spend);
       return;
+    }
+  }
+}
+
+function hashAddress(value: Value, identityOf: (value: object) => bigint): bigint {
+  if (value instanceof Pointer) {
+    const location = value.storageLocation();
+    return (identityOf(location.storage) << 32n) + BigInt(location.index * 8);
+  }
+  return identityOf((value as FnValue).fn) << 32n;
+}
+
+export function hasPhysicalHashLayout(type: Type, spend: (cost?: number) => void): boolean {
+  spend();
+  switch (type.kind) {
+    case 'int': {
+      return sizeOf(type) * 8 === type.bits;
+    }
+    case 'enum': {
+      return type.tagType !== undefined && hasPhysicalHashLayout(type.tagType, spend);
+    }
+    case 'pointer': {
+      return type.size !== 'slice';
+    }
+    case 'optional': {
+      return type.child.kind === 'pointer' && type.child.size !== 'slice';
+    }
+    case 'array': {
+      return hasPhysicalHashLayout(type.child, spend);
+    }
+    case 'struct': {
+      spend(type.fields?.length ?? 0);
+      const fields = (type.fields ?? []).filter((field) => field.comptimeValue === undefined);
+      if (type.layout === 'packed') return sizeOf(type) * 8 === bitSizeOf(type);
+      return (
+        fields.every((field) => hasPhysicalHashLayout(field.type, spend)) &&
+        sizeOf(type) === fields.reduce((sum, field) => sum + sizeOf(field.type), 0)
+      );
+    }
+    case 'union': {
+      return (type.fields ?? []).every(
+        (field) => sizeOf(field.type) === sizeOf(type) && hasPhysicalHashLayout(field.type, spend)
+      );
+    }
+    // Compiler error IDs are unavailable, so error-containing keys retain field hashing.
+    default: {
+      return false;
     }
   }
 }

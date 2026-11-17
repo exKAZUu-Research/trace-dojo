@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 417 -- Keeps hash-map state, storage layout, and public method registration together.
+// code-gauge-allow-file fileNcss 418 -- Keeps hash-map state, storage layout, and public method registration together.
 import { allocationSlots } from '../allocation';
 import { reserveAllocatorBytes } from '../allocatorStorage';
 // code-gauge-allow-file duplicateLines 19 -- Library types repeat the same shape of method on purpose, each over its own state.
@@ -39,7 +39,7 @@ import {
 } from '../values';
 import { WeakValueMap } from '../weakValueMap';
 import { elements, equalValues } from './common';
-import { autoHashBytes, wyhash } from './hashing';
+import { autoHashBytes, hasPhysicalHashLayout, wyhash } from './hashing';
 import {
   ALLOCATOR,
   ALLOCATOR_ERROR,
@@ -732,8 +732,9 @@ function mapFactory(name: string, kind: KeyKind, managed: boolean): () => Member
   });
 }
 
-// code-gauge-allow functionNcss 32 -- Checks the supported key representations recursively before a hashing operation.
+// code-gauge-allow functionNcss 34 -- Checks the supported key representations recursively before a hashing operation.
 function validateAutoKey(sema: SemaApi, type: Type, span: Span): void {
+  if (hasPhysicalHashLayout(type, (cost) => sema.spendCompilation(cost))) return;
   switch (type.kind) {
     case 'void':
     case 'int':

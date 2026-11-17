@@ -4087,3 +4087,24 @@ test('fixed zero-sized slice bounds reject the exact end index', () => {
   const source = `const std=@import("std");pub fn main(init:std.process.Init)!void{var a:std.ArrayList(void)=.empty;try a.append(init.gpa,{});const x=a.allocatedSlice()[0..9007199254740993];_=x[9007199254740993];}`;
   expect(executeProgram('zig', source)).toMatchObject({ kind: 'compileError' });
 });
+
+test.each([
+  ['struct{a:u8,b:u16,c:u8}', '.{.a=@intCast(i),.b=123,.c=45}', 'k.a', '0 2 3 5 1 4 '],
+  ['packed struct{a:u4,b:u4}', '.{.a=@intCast(i),.b=7}', 'k.a', '3 2 0 1 4 5 '],
+  ['struct{a:u8,b:u32}', '.{.a=@intCast(i),.b=123}', 'k.a', '2 5 1 3 0 4 '],
+  [
+    'struct{inner:struct{a:u8,b:u16,c:u8},tail:u32}',
+    '.{.inner=.{.a=@intCast(i),.b=123,.c=45},.tail=99}',
+    'k.inner.a',
+    '5 0 1 4 2 3 ',
+  ],
+  ['packed struct{inner:packed struct{a:u3},b:u5}', '.{.inner=.{.a=@intCast(i)},.b=7}', 'k.inner.a', '2 1 4 3 5 0 '],
+  ['packed struct{a:f32,b:u32}', '.{.a=@floatFromInt(i),.b=7}', '@as(u32,@intFromFloat(k.a))', '1 5 0 3 4 2 '],
+])('aggregate map keys hash the reference physical layout: %s', (definition, initializer, access, expected) => {
+  const source = `const std=@import("std");const K=${definition};pub fn main(init:std.process.Init)!void{var map=std.AutoHashMap(K,u8).init(init.gpa);defer map.deinit();for(0..6)|i|try map.put(${initializer},0);var it=map.keyIterator();while(it.next())|k|std.debug.print("{} ",.{${access}});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: expected,
+    uncaughtException: undefined,
+  });
+});

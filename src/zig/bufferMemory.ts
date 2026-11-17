@@ -35,6 +35,20 @@ export class BufferMemorySpace {
   nextErrorReferenceId = 1n;
 }
 
+export function physicalBytes(
+  value: Value,
+  type: Type,
+  addressOf: (value: object) => bigint,
+  spend: (cost?: number) => void
+): number[] {
+  const length = sizeOf(type);
+  spend(length);
+  const bytes = Array.from<Value>({ length }).fill(0n);
+  const memory = new BufferMemory(bytes, () => spend(), new BufferMemorySpace(), addressOf);
+  memory.write(type, 0, value);
+  return bytes.map(Number);
+}
+
 // code-gauge-allow functionParameterCount 7 -- Binds typed storage, its byte region, work budget, and initialized prefix together.
 export function bindBufferMemory(
   memory: object,
@@ -75,7 +89,8 @@ class BufferMemory {
   constructor(
     private readonly bytes: Value[],
     private readonly spend: () => void,
-    private readonly space: BufferMemorySpace
+    private readonly space: BufferMemorySpace,
+    private readonly addressOf?: (value: object) => bigint
   ) {}
 
   slots(fields: readonly FieldLocation[]): Value[] {
@@ -210,7 +225,7 @@ class BufferMemory {
 
   // code-gauge-allow functionNcss 45 -- Encodes each scalar representation and transparent wrapper into shared bytes.
   // code-gauge-allow functionCognitiveComplexity 23 -- Encodes each scalar representation and transparent wrapper into shared bytes.
-  private write(type: Type, offset: number, value: Value, packed?: number): void {
+  write(type: Type, offset: number, value: Value, packed?: number): void {
     if (type.kind === 'array' || type.kind === 'struct' || type.kind === 'union') {
       this.writeAggregate(type, offset, value);
       return;
@@ -353,6 +368,10 @@ class BufferMemory {
   private writeReference(offset: number, value: Value, type: Type, bits = 64): void {
     if (typeof value !== 'object') {
       this.writeBits(offset, bits, 0n);
+      return;
+    }
+    if (this.addressOf) {
+      this.writeBits(offset, bits, this.addressOf(value));
       return;
     }
     let id: bigint;
