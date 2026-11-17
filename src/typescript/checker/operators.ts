@@ -1,6 +1,7 @@
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import type { Checker } from './checker';
+import { nonNullableType, nullishConstraint } from './nullishConstraints';
 import { named, numberValue, skipParentheses } from './syntax';
 import {
   anyType,
@@ -8,7 +9,6 @@ import {
   booleanType,
   errorType,
   freshLiteralType,
-  intersectionOf,
   isAnyLike,
   isIntrinsic,
   literalType,
@@ -23,7 +23,6 @@ import {
   type Type,
   undefinedType,
   unionOf,
-  unknownType,
 } from './types';
 
 const typeofResult = unionOf(
@@ -413,48 +412,16 @@ export class OperatorChecker {
 
   /** The type of `left || right`, which is `left` when it cannot be falsy, as TypeScript's `getTypeFacts` decides. */
   disjunctionType(left: Type, right: Type): Type {
-    if (isIntrinsic(this.c.flow.narrowByTruthiness(this.nullishConstraint(left), false), 'never')) return left;
+    if (isIntrinsic(this.c.flow.narrowByTruthiness(nullishConstraint(this.c, left), false), 'never')) return left;
     return this.c.literals.subtypeReduced([this.c.flow.narrowByTruthiness(left, true), right]);
   }
 
   /** The type of `left ?? right`, which is `left` when it cannot be nullish, as TypeScript's `getTypeFacts` decides. */
   coalescingType(left: Type, right: Type): Type {
-    const constraint = this.nullishConstraint(left);
+    const constraint = nullishConstraint(this.c, left);
     if (!this.c.relations.isNullable(constraint) && !isAnyLike(constraint) && !isIntrinsic(constraint, 'unknown'))
       return left;
-    const nonNullish = mapType(left, (member): Type => {
-      if (member.kind !== 'typeParameter') return this.c.relations.removeNullish(member);
-      const bound = this.nullishConstraint(member);
-      return isAnyLike(bound) ? member : intersectionOf([member, this.c.relations.removeNullish(bound)], this.c.budget);
-    });
-    return this.c.literals.subtypeReduced([nonNullish, right]);
-  }
-
-  private nullishConstraint(type: Type, seen = new Set<number>()): Type {
-    this.c.budget.spend();
-    if (seen.has(type.id)) return unknownType;
-    seen.add(type.id);
-    try {
-      if (type.kind === 'typeParameter') {
-        const constraint = this.c.constraintOf(type);
-        return constraint ? this.nullishConstraint(constraint, seen) : unknownType;
-      }
-      if (type.kind === 'union') return unionOf(type.types.map((member) => this.nullishConstraint(member, seen)));
-      if (type.kind === 'conditional')
-        return unionOf([this.nullishConstraint(type.trueType, seen), this.nullishConstraint(type.falseType, seen)]);
-      if (type.kind === 'indexedAccess') {
-        const constraint = this.c.baseConstraint(type);
-        return constraint.kind === 'indexedAccess' ? unknownType : this.nullishConstraint(constraint, seen);
-      }
-      if (type.kind === 'intersection')
-        return intersectionOf(
-          type.types.map((member) => this.nullishConstraint(member, seen)),
-          this.c.budget
-        );
-      return type;
-    } finally {
-      seen.delete(type.id);
-    }
+    return this.c.literals.subtypeReduced([nonNullableType(this.c, left), right]);
   }
 
   private instanceofExpression(left: TreeNode, right: TreeNode): Type {

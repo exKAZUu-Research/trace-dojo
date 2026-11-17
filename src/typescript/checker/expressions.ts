@@ -9,6 +9,7 @@ import { Expandos, laterRunningTypes } from './expandos';
 import { ExpressionTypeCache } from './expressionTypeCache';
 import type { FlowEntry } from './flow';
 import { applicableIndex, applicablePatternIndexes } from './indexInfos';
+import { nonNullableType } from './nullishConstraints';
 import { printedPropertyName } from './print';
 import type { Sym } from './scopes';
 import { nameSuggestionHint } from './spelling';
@@ -66,7 +67,7 @@ export class ExpressionChecker {
     ['false', () => freshLiteralType(false)],
     ['null', () => nullType],
     ['undefined', () => undefinedType],
-    ['identifier', (node) => this.identifier(node)],
+    ['identifier', (node, contextual) => this.identifier(node, contextual)],
     ['this', (node) => this.thisExpression(node)],
     ['parenthesized_expression', (node, contextual) => this.check(named(node)[0], contextual)],
     ['array', (node, contextual) => this.c.literals.arrayLiteral(node, contextual)],
@@ -91,10 +92,7 @@ export class ExpressionChecker {
     ['as_expression', (node) => this.c.operators.assertion(node)],
     ['type_assertion', (node) => this.c.operators.assertion(node)],
     ['satisfies_expression', (node, contextual) => this.check(named(node)[0], contextual)],
-    [
-      'non_null_expression',
-      (node, contextual) => this.c.relations.removeNullish(this.check(named(node)[0], contextual)),
-    ],
+    ['non_null_expression', (node, contextual) => nonNullableType(this.c, this.check(named(node)[0], contextual))],
     ['spread_element', (node) => this.check(named(node)[0])],
   ]);
 
@@ -247,7 +245,7 @@ export class ExpressionChecker {
 
   // Identifiers --------------------------------------------------------------------------------------------------
 
-  identifier(node: TreeNode): Type {
+  identifier(node: TreeNode, contextual?: Type): Type {
     const name = node.text;
     const symbol = this.c.scopeOf(node).lookupValue(name);
     if (!symbol) {
@@ -264,10 +262,10 @@ export class ExpressionChecker {
     if (this.isOuterVariable(node, symbol)) {
       // A nested function checks the assignment of a variable of an enclosing one only when nothing ever assigns it.
       if (this.isNeverInitialized(symbol))
-        return this.flowVariableType(node, symbol, entry ?? { type: declared, assigned: false }, declared);
+        return this.flowVariableType(node, symbol, entry ?? { type: declared, assigned: false }, declared, contextual);
       return entry?.type ?? this.closureVariableType(node, symbol, declared);
     }
-    return entry ? this.flowVariableType(node, symbol, entry, declared) : declared;
+    return entry ? this.flowVariableType(node, symbol, entry, declared, contextual) : declared;
   }
 
   /** Whether a reference reads a variable that {@link isNeverInitialized} holds for. */
@@ -306,7 +304,13 @@ export class ExpressionChecker {
   }
 
   /** The type of a variable of the running function where its flow is followed, checking it was assigned first. */
-  private flowVariableType(node: TreeNode, symbol: Sym, entry: FlowEntry, declared: Type): Type {
+  private flowVariableType(
+    node: TreeNode,
+    symbol: Sym,
+    entry: FlowEntry,
+    declared: Type,
+    contextual: Type | undefined
+  ): Type {
     const unassignedAuto =
       !entry.assigned && this.c.assignments.isAutoTyped(symbol) && isIntrinsic(entry.type, 'undefined');
     if (
@@ -318,7 +322,13 @@ export class ExpressionChecker {
       this.c.error(node, `変数 ${symbol.name} は値を代入する前に使われています。`);
       if (unassignedAuto) return errorType;
     }
-    if (entry.constraint && this.isConstraintPosition(node)) return entry.constraint;
+    // As TypeScript's `getNarrowableTypeForReference`, the narrowed constraint stands for the value where only its
+    // constraint matters: where its members are read, or where a type without type parameters is expected.
+    if (
+      entry.constraint &&
+      (this.isConstraintPosition(node) || (contextual && !this.c.relations.isGeneric(contextual)))
+    )
+      return entry.constraint;
     // As TypeScript does, `x!` where the flow leaves `x` only `null` or `undefined` takes the declared type, as after a
     // callback assigned it.
     if (

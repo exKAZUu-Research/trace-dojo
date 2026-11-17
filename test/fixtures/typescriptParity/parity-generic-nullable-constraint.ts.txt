@@ -1,0 +1,52 @@
+function asserted<K extends number>(index: K, items: (string | undefined)[]): string {
+  const item: string = items[index]!;
+  return item;
+}
+
+function compared<K extends number>(index: K, items: (string | undefined)[]): string {
+  const item = items[index];
+  if (item !== undefined) {
+    const text: string = item;
+    return text;
+  }
+  return "-";
+}
+
+function truthy<K extends number>(index: K, items: (string | undefined)[]): number {
+  const item = items[index];
+  if (item) return item.length;
+  return 0;
+}
+
+function filled<K extends number>(index: K, items: (string | undefined)[]): string {
+  const item: string = (items[index] ??= "filled");
+  return item;
+}
+
+function defaulted<K extends number>(index: K, items: (string | undefined)[]): string {
+  const item: string = items[index] ?? "default";
+  return item;
+}
+
+function parameterCompared<T extends string | undefined>(value: T): string {
+  if (value !== undefined) {
+    const text: string = value;
+    return text;
+  }
+  return "-";
+}
+
+function parameterAsserted<T extends string | undefined>(value: T): number {
+  return value!.length;
+}
+
+function keepsIdentity<T extends string | undefined>(value: T): T {
+  if (value !== undefined) return value;
+  return value;
+}
+
+const items = ["a", undefined, "ccc"];
+console.log(asserted(0, items), compared(0, items), compared(1, items));
+console.log(truthy(2, items), truthy(1, items), defaulted(1, items));
+console.log(filled(1, items), items);
+console.log(parameterCompared("p"), parameterCompared(undefined), parameterAsserted("four"), keepsIdentity("k"));

@@ -241,9 +241,9 @@ export class Flow {
     }
     const current = this.c.expressions.checkReferenceSilently(node);
     const entry = this.current.entries.get(key);
-    // A value of a type parameter constrained to a union also narrows the constraint, which reading its members uses.
-    const declaredConstraint = current.kind === 'typeParameter' ? this.c.constraintOf(current) : undefined;
-    const constraint = entry?.constraint ?? (declaredConstraint?.kind === 'union' ? declaredConstraint : undefined);
+    // A value of a type parameter or an indexed access constrained to a union also narrows the constraint, which
+    // reading its members uses.
+    const constraint = entry?.constraint ?? this.unionConstraint(current);
     const assigned = entry ? entry.assigned : !this.c.expressions.readsNeverInitialized(node);
     this.current.entries.set(key, {
       type: narrow(current),
@@ -252,6 +252,15 @@ export class Flow {
       evolving: entry?.evolving,
       constraint: constraint && narrow(constraint),
     });
+  }
+
+  /** As TypeScript's `isGenericTypeWithUnionConstraint`, the base constraint of a type variable that may be a union. */
+  private unionConstraint(type: Type): Type | undefined {
+    if (type.kind !== 'typeParameter' && type.kind !== 'indexedAccess') return undefined;
+    const constraint = this.c.baseConstraint(type);
+    return constraint !== type && (constraint.kind === 'union' || this.c.relations.isNullable(constraint))
+      ? constraint
+      : undefined;
   }
 
   // Narrowing operations ----------------------------------------------------------------------------------------
