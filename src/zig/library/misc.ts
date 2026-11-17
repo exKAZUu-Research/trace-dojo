@@ -313,7 +313,7 @@ function deepEqual(a: Value, b: Value): boolean {
   if (a instanceof Slice && b instanceof Slice) {
     const left = storageLocation(a.target.slots, a.start);
     const right = storageLocation(b.target.slots, b.start);
-    return left.storage === right.storage && left.index === right.index && a.length === b.length;
+    return left.storage === right.storage && left.index === right.index && a.lengthValue === b.lengthValue;
   }
   return equalValues(a, b);
 }

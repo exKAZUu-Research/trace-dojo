@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 531 -- Groups the related standard library operations that share this module.
+// code-gauge-allow-file fileNcss 541 -- Groups the related standard library operations that share this module.
 import { checked, divCeil, divExact, divFloor, divTrunc, floatMod, floatRem, mod, PANIC, panic, rem } from '../arith';
 import type { Expression } from '../ast';
 import { fusedMultiplyAdd, intFittingRange, roundFloat } from '../builtins';
@@ -52,13 +52,21 @@ import { compareScalars, computed, generic, ORDER, ORDER_EQ, ORDER_GT, ORDER_LT,
 import { nativeEnum } from './heap';
 import { addMembers, expectArgs, fnMember, type Member, nativeStruct, typeMember } from './native';
 
-function floatArg(sema: SemaApi, arg: Expression, type?: Type): TExpr {
-  let compiled = sema.compile(arg, type);
-  if (compiled.type.kind === 'comptime_int') compiled = sema.coerce(compiled, type ?? COMPTIME_FLOAT, arg);
-  if (compiled.type.kind !== 'float' && compiled.type.kind !== 'comptime_float') {
-    sema.error(arg, `浮動小数点数が必要です（${typeName(compiled.type)} 型です）。`);
-  }
+type FloatDomain = 'float' | 'comptime' | 'numeric' | 'f32-f64' | 'angle';
+
+function floatArg(sema: SemaApi, arg: Expression, domain: FloatDomain): TExpr {
+  let compiled = sema.compile(arg);
+  if (domain === 'angle' && compiled.type.kind === 'comptime_int')
+    compiled = sema.coerce(compiled, COMPTIME_FLOAT, arg);
+  checkFloatDomain(sema, compiled.type, domain, arg);
   return compiled;
+}
+
+function checkFloatDomain(sema: SemaApi, type: Type, domain: FloatDomain, span: Expression): void {
+  if (type.kind === 'float' && (domain !== 'f32-f64' || type.bits === 32 || type.bits === 64)) return;
+  if (type.kind === 'comptime_float' && (domain === 'comptime' || domain === 'numeric' || domain === 'angle')) return;
+  if (isIntegerType(type) && domain === 'numeric') return;
+  sema.error(span, `この数学関数には ${typeName(type)} 型を渡せません。`);
 }
 
 function bitsOf(type: Type): 16 | 32 | 64 | 80 | 128 {
@@ -66,14 +74,18 @@ function bitsOf(type: Type): 16 | 32 | 64 | 80 | 128 {
 }
 
 /** A function of one float, computed in double precision and rounded to its type, as `std.math` does for f32/f64. */
-function unaryFloat(name: string, compute: (x: number) => number): () => Member {
-  return fnMember(name, unaryFloatCall(name, compute));
+function unaryFloat(name: string, compute: (x: number) => number, domain: FloatDomain = 'f32-f64'): () => Member {
+  return fnMember(name, unaryFloatCall(name, compute, domain));
 }
 
-function unaryFloatCall(name: string, compute: (x: number) => number): (sema: SemaApi, call: NativeCall) => TExpr {
+function unaryFloatCall(
+  name: string,
+  compute: (x: number) => number,
+  domain: FloatDomain
+): (sema: SemaApi, call: NativeCall) => TExpr {
   return (sema, call) => {
     const [arg] = expectArgs(sema, call, 1, name);
-    const value = floatArg(sema, arg, call.resultType?.kind === 'float' ? call.resultType : undefined);
+    const value = floatArg(sema, arg, domain);
     const bits = bitsOf(value.type);
     return computed(value.type, [value], call.span, ([x]) => fromDouble(compute(toDouble(x as AnyFloat)), bits));
   };
@@ -81,7 +93,7 @@ function unaryFloatCall(name: string, compute: (x: number) => number): (sema: Se
 
 /** `log2` and `log10`, which give the floor of the logarithm for integers and the logarithm for floats. */
 function logarithm(name: string, base: bigint, compute: (x: number) => number): () => Member {
-  const forFloats = unaryFloatCall(name, compute);
+  const forFloats = unaryFloatCall(name, compute, 'comptime');
   return fnMember(name, (sema, call) => {
     const [arg] = expectArgs(sema, call, 1, name);
     const value = sema.compile(arg);
@@ -114,7 +126,7 @@ function angleConversion(name: string, constant: string): () => Member {
   const factor128 = parseFloatLiteral(constant, 128);
   return fnMember(name, (sema, call) => {
     const [arg] = expectArgs(sema, call, 1, name);
-    const value = floatArg(sema, arg, call.resultType?.kind === 'float' ? call.resultType : undefined);
+    const value = floatArg(sema, arg, 'angle');
     const bits = bitsOf(value.type);
     const factor = floatOf(factor128, bits);
     return computed(value.type, [value], call.span, ([x]) => floatArithmetic(x as AnyFloat, factor, '*', bits));
@@ -122,10 +134,12 @@ function angleConversion(name: string, constant: string): () => Member {
 }
 
 /** A function of two floats whose type is `@TypeOf(x, y)`, computed in double precision. */
-function binaryFloat(name: string, compute: (x: number, y: number) => number): () => Member {
+function binaryFloat(name: string, compute: (x: number, y: number) => number, domain: FloatDomain): () => Member {
   return fnMember(name, (sema, call) => {
-    const args = expectArgs(sema, call, 2, name).map((arg) => floatArg(sema, arg));
+    const sourceArgs = expectArgs(sema, call, 2, name);
+    const args = sourceArgs.map((arg) => sema.compile(arg));
     const type = sema.peerType(args, call.span);
+    checkFloatDomain(sema, type, domain, sourceArgs[0]);
     const [a, b] = args.map((arg) => sema.coerce(arg, type, arg.span));
     return computed(type, [a, b], call.span, ([x, y]) =>
       fromDouble(compute(toDouble(x as AnyFloat), toDouble(y as AnyFloat)), bitsOf(type))
@@ -141,11 +155,11 @@ function fromDouble(value: number, bits: 16 | 32 | 64 | 80 | 128): AnyFloat {
   return bits <= 64 ? roundNumber(value, bits as 16 | 32 | 64) : roundTo(asBigFloat(value), bits);
 }
 
-function predicate(name: string, test: (value: AnyFloat) => boolean): () => Member {
+function predicate(name: string, test: (value: AnyFloat | bigint) => boolean, domain: FloatDomain): () => Member {
   return fnMember(name, (sema, call) => {
     const [arg] = expectArgs(sema, call, 1, name);
-    const value = floatArg(sema, arg);
-    return computed(BOOL, [value], call.span, ([x]) => test(x as AnyFloat));
+    const value = floatArg(sema, arg, domain);
+    return computed(BOOL, [value], call.span, ([x]) => test(x as AnyFloat | bigint));
   });
 }
 
@@ -496,12 +510,20 @@ const MEMBERS: Record<string, () => Member> = {
               );
     return known(type, value, call.span);
   }),
-  isNan: predicate('std.math.isNan', (x) => isNaNFloat(x)),
-  isInf: predicate('std.math.isInf', (x) => isInfinite(x)),
-  isPositiveInf: predicate('std.math.isPositiveInf', (x) => isInfinite(x) && !signBit(x)),
-  isNegativeInf: predicate('std.math.isNegativeInf', (x) => isInfinite(x) && signBit(x)),
-  isFinite: predicate('std.math.isFinite', (x) => !isInfinite(x) && !isNaNFloat(x)),
-  signbit: predicate('std.math.signbit', (x) => signBit(x)),
+  isNan: predicate('std.math.isNan', (x) => typeof x !== 'bigint' && isNaNFloat(x), 'numeric'),
+  isInf: predicate('std.math.isInf', (x) => isInfinite(x as AnyFloat), 'float'),
+  isPositiveInf: predicate(
+    'std.math.isPositiveInf',
+    (x) => isInfinite(x as AnyFloat) && !signBit(x as AnyFloat),
+    'comptime'
+  ),
+  isNegativeInf: predicate(
+    'std.math.isNegativeInf',
+    (x) => isInfinite(x as AnyFloat) && signBit(x as AnyFloat),
+    'comptime'
+  ),
+  isFinite: predicate('std.math.isFinite', (x) => !isInfinite(x as AnyFloat) && !isNaNFloat(x as AnyFloat), 'float'),
+  signbit: predicate('std.math.signbit', (x) => (typeof x === 'bigint' ? x < 0n : signBit(x)), 'numeric'),
   sqrt: fnMember('std.math.sqrt', (sema, call) => {
     const [arg] = expectArgs(sema, call, 1, 'std.math.sqrt');
     const value = sema.compile(arg);
@@ -517,18 +539,18 @@ const MEMBERS: Record<string, () => Member> = {
       const result = intType(false, Math.ceil(type.bits / 2));
       return computed(result, [value], call.span, ([x]) => integerSqrt(x as bigint));
     }
-    const float = floatArg(sema, arg);
+    const float = floatArg(sema, arg, 'comptime');
     return computed(float.type, [float], call.span, ([x]) => floatSqrt(x as AnyFloat, bitsOf(float.type)));
   }),
   cbrt: unaryFloat('std.math.cbrt', Math.cbrt),
-  exp: unaryFloat('std.math.exp', Math.exp),
-  exp2: unaryFloat('std.math.exp2', (x) => 2 ** x),
+  exp: unaryFloat('std.math.exp', Math.exp, 'comptime'),
+  exp2: unaryFloat('std.math.exp2', (x) => 2 ** x, 'comptime'),
   log2: logarithm('std.math.log2', 2n, Math.log2),
   log10: logarithm('std.math.log10', 10n, Math.log10),
   log1p: unaryFloat('std.math.log1p', Math.log1p),
-  acos: unaryFloat('std.math.acos', Math.acos),
-  asin: unaryFloat('std.math.asin', Math.asin),
-  atan: unaryFloat('std.math.atan', Math.atan),
+  acos: unaryFloat('std.math.acos', Math.acos, 'float'),
+  asin: unaryFloat('std.math.asin', Math.asin, 'float'),
+  atan: unaryFloat('std.math.atan', Math.atan, 'float'),
   sinh: unaryFloat('std.math.sinh', Math.sinh),
   cosh: unaryFloat('std.math.cosh', Math.cosh),
   tanh: unaryFloat('std.math.tanh', Math.tanh),
@@ -540,8 +562,8 @@ const MEMBERS: Record<string, () => Member> = {
     'std.math.radiansToDegrees',
     '57.295779513082320876798154814105170332405472466564321549160243861'
   ),
-  atan2: binaryFloat('std.math.atan2', Math.atan2),
-  hypot: binaryFloat('std.math.hypot', Math.hypot),
+  atan2: binaryFloat('std.math.atan2', Math.atan2, 'f32-f64'),
+  hypot: binaryFloat('std.math.hypot', Math.hypot, 'comptime'),
   // code-gauge-allow functionCognitiveComplexity 24 -- Keeps integer and float logarithm analysis with their generated computation.
   log: generic('std.math.log', 3, (sema, call, type, [baseArg, xArg]) => {
     const base = sema.coerce(sema.compile(baseArg, type), type, baseArg);
@@ -702,21 +724,29 @@ const MEMBERS: Record<string, () => Member> = {
   }),
   copysign: fnMember('std.math.copysign', (sema, call) => {
     const [magnitudeArg, signArg] = expectArgs(sema, call, 2, 'std.math.copysign');
-    const magnitude = floatArg(sema, magnitudeArg);
-    const sign = sema.coerce(floatArg(sema, signArg, magnitude.type), magnitude.type, signArg);
+    const magnitude = floatArg(sema, magnitudeArg, 'float');
+    const sign = sema.coerce(sema.compile(signArg, magnitude.type), magnitude.type, signArg);
     return computed(magnitude.type, [magnitude, sign], call.span, ([m, s]) =>
       signBit(m as AnyFloat) === signBit(s as AnyFloat) ? m : negate(m as AnyFloat)
     );
   }),
-  isPositiveZero: predicate('std.math.isPositiveZero', (x) => compareFloats(x, 0) === 0 && !signBit(x)),
-  isNegativeZero: predicate('std.math.isNegativeZero', (x) => compareFloats(x, 0) === 0 && signBit(x)),
+  isPositiveZero: predicate(
+    'std.math.isPositiveZero',
+    (x) => compareFloats(x as AnyFloat, 0) === 0 && !signBit(x as AnyFloat),
+    'float'
+  ),
+  isNegativeZero: predicate(
+    'std.math.isNegativeZero',
+    (x) => compareFloats(x as AnyFloat, 0) === 0 && signBit(x as AnyFloat),
+    'float'
+  ),
   asinh: unaryFloat('std.math.asinh', Math.asinh),
   acosh: unaryFloat('std.math.acosh', Math.acosh),
   atanh: unaryFloat('std.math.atanh', Math.atanh),
   expm1: unaryFloat('std.math.expm1', Math.expm1),
   isNormal: fnMember('std.math.isNormal', (sema, call) => {
     const [arg] = expectArgs(sema, call, 1, 'std.math.isNormal');
-    const value = floatArg(sema, arg);
+    const value = floatArg(sema, arg, 'float');
     const minExponent = FORMATS[bitsOf(value.type)].minExponent;
     return computed(BOOL, [value], call.span, ([x]) => {
       if (isNaNFloat(x as AnyFloat) || isInfinite(x as AnyFloat)) return false;
@@ -726,7 +756,7 @@ const MEMBERS: Record<string, () => Member> = {
   }),
   ldexp: fnMember('std.math.ldexp', (sema, call) => {
     const [xArg, nArg] = expectArgs(sema, call, 2, 'std.math.ldexp');
-    const x = floatArg(sema, xArg);
+    const x = floatArg(sema, xArg, 'float');
     const n = sema.coerce(sema.compile(nArg, intType(true, 32)), intType(true, 32), nArg);
     const bits = bitsOf(x.type);
     return computed(x.type, [x, n], call.span, ([value, exponent]) => {

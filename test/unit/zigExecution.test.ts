@@ -3510,3 +3510,45 @@ test.each(['if(get()) @as(u8,3) else @as(u8,3)', 'switch(get()){true=>@as(u8,3),
     expect(executeProgram('zig', source)).toMatchObject({ kind: 'compileError' });
   }
 );
+
+test.each(['allocatedSlice', 'unusedCapacitySlice'])(
+  'virtual %s lengths survive fixed-buffer storage and meta equality',
+  (method) => {
+    const source = `const std=@import("std");pub fn main(init:std.process.Init)!void{var a:std.ArrayList(void)=.empty;try a.append(init.gpa,{});var bytes:[128]u8=undefined;var f=std.heap.FixedBufferAllocator.init(&bytes);const p=try f.allocator().create([]void);const view=a.${method}();p.*=view;std.debug.print("{} {} {} {}",.{view.len,p.*.len,std.meta.eql(view,p.*),std.meta.eql(a.allocatedSlice(),a.unusedCapacitySlice())});}`;
+    const length = method === 'allocatedSlice' ? '18446744073709551615' : '18446744073709551614';
+    expect(executeProgram('zig', source)).toMatchObject({
+      kind: 'executed',
+      stderr: `${length} ${length} true false`,
+      uncaughtException: undefined,
+    });
+  }
+);
+
+test.each([
+  'std.math.cbrt(8.0)',
+  'std.math.atan2(1.0,2.0)',
+  'std.math.isFinite(1.0)',
+  'std.math.copysign(1.0,-2.0)',
+  'std.math.ldexp(1.0,3)',
+  'std.math.cbrt(@as(f16,8))',
+  'std.math.hypot(3,4)',
+])('math operand domains reject unsupported calls: %s', (call) => {
+  expect(executeProgram('zig', `const std=@import("std");pub fn main()void{const x=${call};_=x;}`)).toMatchObject({
+    kind: 'compileError',
+  });
+});
+
+test('a destination float type does not specialize an anytype math argument', () => {
+  expect(
+    executeProgram('zig', 'const std=@import("std");pub fn main()void{const x:f64=std.math.cbrt(8.0);_=x;}')
+  ).toMatchObject({ kind: 'compileError' });
+});
+
+test('math domains retain explicit float widths, comptime hypot, and numeric predicates', () => {
+  const source = `const std=@import("std");pub fn main()void{var i:i64=-7;_=&i;std.debug.print("{d} {d} {d} {} {} {} {d}",.{std.math.cbrt(@as(f32,8)),std.math.hypot(3.0,4.0),std.math.asin(@as(f80,0)),std.math.isFinite(@as(f16,1)),std.math.signbit(i),std.math.isNan(i),std.math.copysign(@as(f16,1),-1)});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: '2 5 0 true true false -1',
+    uncaughtException: undefined,
+  });
+});
