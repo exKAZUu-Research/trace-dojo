@@ -17,7 +17,7 @@ import {
   KNOWN_LIBRARY_VALUE_REEXPORTS,
   KNOWN_LIBRARY_VALUES,
 } from './library/knownValues';
-import { type CompiledModuleInfo, emptyExports, type ExportTable, type TypeLike } from './modules';
+import { emptyExports, type ExportTable, type TypeLike } from './modules';
 import { misplacedHaskellAtomicMessage, parseHaskell } from './parse';
 import { setPrimitiveTypes } from './primitives';
 import { renameModule, type RModule } from './rename';
@@ -27,7 +27,7 @@ import { withCompilationBudget } from './typeWorkBudget';
 
 /** The library compiled once per process: its modules, instances, and the entities the compiler refers to. */
 interface Library {
-  modules: Map<string, CompiledModuleInfo>;
+  modules: Map<string, ExportTable>;
   env: ClassEnv;
   builtins: Builtins;
   support: CodegenSupport;
@@ -74,7 +74,7 @@ const TURTLE_VALUE_NAMES = [
 /** Compiles the library's modules in order, the first of which (Base) defines what the compiler refers to. */
 class LibraryCompiler {
   readonly env = new ClassEnv();
-  private readonly internal = new Map<string, CompiledModuleInfo>();
+  private readonly internal = new Map<string, ExportTable>();
   private base: RModule | undefined;
   readonly builtins = makeBuiltins(
     (name) => this.baseType(name),
@@ -160,17 +160,13 @@ class LibraryCompiler {
     codegen.compileTopBindings(renamed.values);
     for (const instance of checked.instances) codegen.compileInstance(instance.info, instance.bindings);
     for (const binding of checked.defaults) codegen.compileDefault(binding);
-    this.internal.set(name, {
-      name,
-      exports: renamed.exports,
-      instances: checked.instances.map((instance) => instance.info),
-    });
+    this.internal.set(name, renamed.exports);
   }
 
   /** `printf`'s result in IO is `IO ()`, which the instance `(a ~ ()) => PrintfType (IO a)` tells the type checker. */
   markPrintfResults(): void {
     for (const className of ['PrintfType', 'HPrintfType']) {
-      const printfType = this.internal.get('Text.Printf.Internal')?.exports.types.get(className);
+      const printfType = this.internal.get('Text.Printf.Internal')?.types.get(className);
       if (printfType?.entity.kind !== 'class') continue;
       for (const instance of this.env.instancesOf(printfType.entity.entity)) {
         const head = instance.head;
@@ -182,10 +178,10 @@ class LibraryCompiler {
   }
 
   // code-gauge-allow functionCognitiveComplexity 21 -- The export pass combines explicit selections, implemented identities and unsupported API entries.
-  publicModules(): Map<string, CompiledModuleInfo> {
-    const modules = new Map<string, CompiledModuleInfo>();
+  publicModules(): Map<string, ExportTable> {
+    const modules = new Map<string, ExportTable>();
     for (const [name, spec] of Object.entries(PUBLIC_MODULES)) {
-      const source = this.internal.get(spec.from) as CompiledModuleInfo;
+      const source = this.internal.get(spec.from) as ExportTable;
       const exports = emptyExports();
       this.exportValues(exports, spec.from, spec.values, name);
       if (spec.overrides) this.exportValues(exports, spec.overrides.from, spec.overrides.values, name);
@@ -195,7 +191,7 @@ class LibraryCompiler {
           const reexport = Object.entries(KNOWN_LIBRARY_VALUE_REEXPORTS[name] ?? {}).find(([, names]) =>
             names.includes(value)
           );
-          const shared = reexport && modules.get(reexport[0])?.exports.values.get(value);
+          const shared = reexport && modules.get(reexport[0])?.values.get(value);
           assert.ok(!reexport || shared, `Missing library re-export ${reexport?.[0]}.${value}`);
           exports.values.set(
             value,
@@ -212,7 +208,7 @@ class LibraryCompiler {
       }
       for (const type of KNOWN_LIBRARY_TYPES[name] ?? []) {
         if (!exports.types.has(type)) {
-          const implemented = source.exports.types.get(type);
+          const implemented = source.types.get(type);
           if (implemented) {
             exports.types.set(type, {
               entity: implemented.entity,
@@ -241,16 +237,16 @@ class LibraryCompiler {
       }
       attachKnownTypeChildren(exports);
       assertPublicExports(name, exports);
-      modules.set(name, { name, exports, instances: [] });
+      modules.set(name, exports);
     }
     this.markConstructorVisibility(modules);
     return modules;
   }
 
-  private markConstructorVisibility(modules: Map<string, CompiledModuleInfo>): void {
-    const exported = new Set([...modules.values()].flatMap((module) => [...module.exports.values.values()]));
-    for (const module of this.internal.values()) {
-      for (const entry of module.exports.types.values()) {
+  private markConstructorVisibility(modules: Map<string, ExportTable>): void {
+    const exported = new Set([...modules.values()].flatMap((exports) => [...exports.values.values()]));
+    for (const exports of this.internal.values()) {
+      for (const entry of exports.types.values()) {
         if (entry.entity.kind !== 'type') continue;
         for (const con of entry.entity.entity.cons) {
           if (!exported.has(con.entity)) con.isLibraryPrivate = true;
@@ -260,9 +256,9 @@ class LibraryCompiler {
   }
 
   private exportValues(exports: ExportTable, from: string, names: string[], moduleName: string): void {
-    const source = this.internal.get(from) as CompiledModuleInfo;
+    const source = this.internal.get(from) as ExportTable;
     for (const valueName of names) {
-      const entity = source.exports.values.get(valueName);
+      const entity = source.values.get(valueName);
       if (!entity) throw new Error(`${from} has no ${valueName} for ${moduleName}`);
       exports.values.set(valueName, entity);
     }
@@ -297,7 +293,7 @@ function attachKnownTypeChildren(exports: ExportTable): void {
 
 function exportType(
   exports: ExportTable,
-  source: CompiledModuleInfo,
+  source: ExportTable,
   typeName: string,
   children: 'all' | 'none' | string[],
   moduleName: string
@@ -305,7 +301,7 @@ function exportType(
   const primitive = PRIMITIVE_TYPES.find((type) => type.name === typeName);
   const entry = primitive
     ? { entity: { kind: 'type', entity: primitive } as TypeLike, children: [] }
-    : source.exports.types.get(typeName);
+    : source.types.get(typeName);
   if (!entry) throw new Error(`The library has no type ${typeName} for ${moduleName}`);
   const selected =
     children === 'all'

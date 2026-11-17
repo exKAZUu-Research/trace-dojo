@@ -24,8 +24,6 @@ export interface PublicModule {
   from: string;
   values: string[];
   types: [string, 'all' | 'none' | string[]][];
-  /** Further modules whose whole export lists this one re-exports. */
-  include?: string[];
   /** Values taken from another library module in place of the ones of `from` with the same names. */
   overrides?: { from: string; values: string[] };
 }

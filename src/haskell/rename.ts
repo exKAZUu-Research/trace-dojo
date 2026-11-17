@@ -13,7 +13,7 @@ import { compileError, unsupportedError } from './errors';
 import { ExportTableBuilder } from './exportTable';
 import { DEFAULT_FIXITY, resolveExprChain, resolvePatChain, sectionOperand } from './fixity';
 import { LocalScope } from './localScope';
-import { type CompiledModuleInfo, emptyExports, type ExportTable, type TypeLike } from './modules';
+import { emptyExports, type ExportTable, type TypeLike } from './modules';
 import type {
   Binder,
   LocalVar,
@@ -100,7 +100,7 @@ export interface RModule {
 
 export interface RenameOptions {
   /** The modules the module may import, by name. */
-  modules: ReadonlyMap<string, CompiledModuleInfo>;
+  modules: ReadonlyMap<string, ExportTable>;
   /** Tells why a module this environment knows but does not provide cannot be imported. */
   unsupportedModule?: (name: string) => string | undefined;
   /** Whether to import `Prelude` unless the module imports it explicitly. */
@@ -247,13 +247,12 @@ class Renamer {
 
   // code-gauge-allow functionCognitiveComplexity 23 -- Each branch is one form of an import declaration: qualified, aliased, listed, or hiding.
   private importOne(imp: Import): void {
-    const info = this.options.modules.get(imp.module);
-    if (!info) {
+    const exports = this.options.modules.get(imp.module);
+    if (!exports) {
       const reason = this.options.unsupportedModule?.(imp.module);
       if (reason !== undefined) throw unsupportedError(imp.span, reason);
       throw unsupportedError(imp.span, `モジュール ${imp.module}`);
     }
-    const exports = info.exports;
     let table: ExportTable = exports;
     if (imp.items) {
       const selected = emptyExports();

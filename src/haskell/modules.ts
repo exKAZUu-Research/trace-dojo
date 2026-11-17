@@ -1,4 +1,4 @@
-import type { ClassEntity, InstanceInfo, TypeEntity, ValueEntity } from './entities';
+import type { ClassEntity, TypeEntity, ValueEntity } from './entities';
 
 export type TypeLike = { kind: 'type'; entity: TypeEntity } | { kind: 'class'; entity: ClassEntity };
 
@@ -10,11 +10,4 @@ export interface ExportTable {
 
 export function emptyExports(): ExportTable {
   return { values: new Map(), types: new Map() };
-}
-
-/** A module after compiling, which other modules import. */
-export interface CompiledModuleInfo {
-  name: string;
-  exports: ExportTable;
-  instances: InstanceInfo[];
 }
