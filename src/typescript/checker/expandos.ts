@@ -158,15 +158,23 @@ function assignedBefore(node: TreeNode, statements: Set<number>, container: Tree
 function definitelyRuns(statement: TreeNode, statements: Set<number>): boolean {
   if (statements.has(statement.id)) return true;
   const runs = (child: TreeNode | null): boolean => child !== null && definitelyRuns(child, statements);
+  // A branch that never completes, as one that throws, leaves the paths of the others.
+  const covers = (child: TreeNode | null): boolean => child !== null && (runs(child) || neverCompletes(child));
   switch (statement.type) {
-    case 'statement_block': {
-      return named(statement).some((child) => definitelyRuns(child, statements));
-    }
+    case 'statement_block':
     case 'else_clause': {
       return named(statement).some((child) => definitelyRuns(child, statements));
     }
     case 'if_statement': {
-      return runs(statement.childForFieldName('consequence')) && runs(statement.childForFieldName('alternative'));
+      const consequence = statement.childForFieldName('consequence');
+      const alternative = statement.childForFieldName('alternative');
+      return covers(consequence) && covers(alternative) && (runs(consequence) || runs(alternative));
+    }
+    case 'do_statement': {
+      return runs(statement.childForFieldName('body'));
+    }
+    case 'switch_statement': {
+      return switchRuns(statement, statements);
     }
     case 'try_statement': {
       const handler = statement.childForFieldName('handler');
@@ -176,6 +184,46 @@ function definitelyRuns(statement: TreeNode, statements: Set<number>): boolean {
         (body && (handler === null || runs(handler.childForFieldName('body')))) ||
         (finalizer !== null && runs(finalizer.childForFieldName('body')))
       );
+    }
+    default: {
+      return false;
+    }
+  }
+}
+
+/**
+ * Whether a switch with a `default` runs an assignment whichever clause it enters: each clause, falling through to the
+ * next until a `break`, runs one before leaving or never completes.
+ */
+function switchRuns(statement: TreeNode, statements: Set<number>): boolean {
+  const clauses = named(statement.childForFieldName('body') ?? statement);
+  if (!clauses.some((clause) => clause.type === 'switch_default')) return false;
+  return clauses.every((_, start) => {
+    for (const clause of clauses.slice(start)) {
+      for (const child of named(clause).filter((node) => node.id !== clause.childForFieldName('value')?.id)) {
+        if (definitelyRuns(child, statements) || neverCompletes(child)) return true;
+        if (child.type === 'break_statement') return false;
+      }
+    }
+    return false;
+  });
+}
+
+/** Whether a statement always leaves by throwing or returning, so no code after it runs on its path. */
+function neverCompletes(statement: TreeNode): boolean {
+  switch (statement.type) {
+    case 'throw_statement':
+    case 'return_statement': {
+      return true;
+    }
+    case 'statement_block':
+    case 'else_clause': {
+      return named(statement).some(neverCompletes);
+    }
+    case 'if_statement': {
+      const consequence = statement.childForFieldName('consequence');
+      const alternative = statement.childForFieldName('alternative');
+      return consequence !== null && alternative !== null && neverCompletes(consequence) && neverCompletes(alternative);
     }
     default: {
       return false;
