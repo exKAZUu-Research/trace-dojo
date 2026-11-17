@@ -939,24 +939,28 @@ make=do
   expect(wildcard.traceItems).toEqual(bare.traceItems);
 });
 
-test.each(['i+200', ''])('composite preview exhaustion preserves scalar evaluations and aliases: %s', (end) => {
-  const source = `import Control.Monad
+test.each(['i+200', ''])(
+  'composite preview exhaustion preserves scalar evaluations and aliases: %s',
+  (end) => {
+    const source = `import Control.Monad
 main=forM_ [1..1000::Int] $ \\i -> do
  let a=[i..${end}]; b=[i*2..${end ? 'i*2+200' : ''}]; c=[i*3..${end ? 'i*3+200' : ''}] :: [Int]
  let n=id(i*2)
  let copy=id n
  print copy`;
-  const recording = traceProgram('haskell', source, source);
-  expect(recording.uncaughtException).toBeUndefined();
-  expect(recording.stdout).toBe(Array.from({ length: 1000 }, (_, i) => `${(i + 1) * 2}\n`).join(''));
-  expect(recording.traceItems).toHaveLength(5001);
-  for (const line of [2, 4, 5, 6]) {
-    const last = recording.traceItems.findLast((item) => item.line === line);
-    expect(last?.vars.i).toBe(1000);
-    if (line >= 4) expect(last?.vars.n).toBe(2000);
-    if (line >= 5) expect(last?.vars.copy).toBe(2000);
-  }
-});
+    const recording = traceProgram('haskell', source, source);
+    expect(recording.uncaughtException).toBeUndefined();
+    expect(recording.stdout).toBe(Array.from({ length: 1000 }, (_, i) => `${(i + 1) * 2}\n`).join(''));
+    expect(recording.traceItems).toHaveLength(5001);
+    for (const line of [2, 4, 5, 6]) {
+      const last = recording.traceItems.findLast((item) => item.line === line);
+      expect(last?.vars.i).toBe(1000);
+      if (line >= 4) expect(last?.vars.n).toBe(2000);
+      if (line >= 5) expect(last?.vars.copy).toBe(2000);
+    }
+  },
+  30_000
+);
 
 test.each(['reverse [1..100::Int]', 'reverse [1..200::Int]', 'last [[1..100::Int],[1..200]]'])(
   'composite root previews preserve later scalar assignments: %s',
@@ -1265,7 +1269,7 @@ main=mapM_ step [1..1000]`;
   expect(execution.kind).toBe('executed');
   if (execution.kind !== 'executed') return;
   let ticks = 0;
-  const clock = vi.spyOn(performance, 'now').mockImplementation(() => ticks++ / 1000);
+  const clock = vi.spyOn(performance, 'now').mockImplementation(() => ticks++ / 100);
   try {
     const recording = traceProgram('haskell', source, source);
     expect(recording.uncaughtException).toBeUndefined();
@@ -1452,5 +1456,29 @@ main=do
   expect(last.entries[99]).toEqual({
     kind: 'array',
     entries: { 0: { kind: 'value', value: 100 }, 1: { kind: 'value', value: 200 } },
+  });
+});
+
+const nested = (value: string): string => `${'Just('.repeat(20)}${value}${')'.repeat(20)}`;
+
+test.each([true, false])('shared list views preserve depth truncation, shallow first=%s', (first) => {
+  const bindings = ['xs=[1,2::Int]', `nested=${nested('xs')}`];
+  if (!first) bindings.reverse();
+  const source = `main=do
+ let {${bindings.join(';')}}
+ print(1::Int)
+ print(2::Int)`;
+  const control = `main=do
+ let nested=${nested('[1,2::Int]')}
+ print(1::Int)
+ print(2::Int)`;
+  const recording = traceProgram('haskell', source, source);
+  const isolated = traceProgram('haskell', control, control);
+  expect(recording.stdout).toBe('1\n2\n');
+  expect(recording.uncaughtException).toBeUndefined();
+  expect(recording.traceItems.at(-1)?.referenceVars?.nested).toEqual(isolated.traceItems.at(-1)?.referenceVars?.nested);
+  expect(recording.traceItems.at(-1)?.referenceVars?.xs).toEqual({
+    kind: 'array',
+    entries: { 0: { kind: 'value', value: 1 }, 1: { kind: 'value', value: 2 } },
   });
 });

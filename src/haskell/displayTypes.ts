@@ -251,7 +251,7 @@ function refineHint(template: TypeHint | undefined, actual: TypeHint): TypeHint 
   return template ? { tag: 'refinement', template, actual } : actual;
 }
 
-function isConcreteType(type: Type): boolean {
+export function isConcreteType(type: Type): boolean {
   return mapGraph<Type, boolean>(
     type,
     prune,

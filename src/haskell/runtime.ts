@@ -101,15 +101,13 @@ export class Runtime implements TracedRuntime<TraceFrame> {
     return this.previews.force(slot, () => this.machine.force(slot));
   }
 
-  trackPreview(slot: Thunk): void {
-    this.previews.track(slot);
+  trackPreview(slot: Slot): void {
+    slot = untypedSlot(slot);
+    if (slot instanceof Thunk) this.previews.track(slot);
   }
 
   completePreview(...slots: Slot[]): void {
-    for (let slot of slots) {
-      slot = untypedSlot(slot);
-      if (slot instanceof Thunk) this.previews.track(slot);
-    }
+    for (const slot of slots) this.trackPreview(slot);
     this.previews.completeView();
   }
 

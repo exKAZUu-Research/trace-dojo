@@ -5,7 +5,8 @@ import { TraceRecorder, type TraceVariables } from '../interpreter/traceRecorder
 import type { DisplayNode, TraceItemVariable } from '../problems/trace';
 import { CHAR_TYPE, CONS_CON, FLOAT_TYPE, NIL_CON, UNIT_CON } from './builtinTypes';
 import { compileProgram } from './compile';
-import { constructorFieldType, slotDisplayType, UNKNOWN_TYPE } from './displayTypes';
+import { constructorFieldType, isConcreteType, slotDisplayType, UNKNOWN_TYPE } from './displayTypes';
+import { DISPLAY_OPERATIONS } from './previewBudget';
 import { floatToDigits } from './primitives';
 import { runProgram } from './run';
 import { DisplayAbort, Runtime, type TraceFrame } from './runtime';
@@ -156,9 +157,6 @@ function scalarSlotForDisplay(runtime: Runtime, slot: Slot, type: Type, owner: S
   return scalar;
 }
 
-/** The limit of the work that showing one variable may do, which a variable bound to a long computation exceeds. */
-const DISPLAY_OPERATIONS = 20_000;
-
 function displayAttempt<T>(runtime: Runtime, work: () => T): T | undefined {
   try {
     return runtime.withDisplayBudget(DISPLAY_OPERATIONS, work);
@@ -260,20 +258,66 @@ function peek(slot: Slot): Value | undefined {
 }
 
 const MAX_ELEMENTS = 1000;
+const MAX_DISPLAY_DEPTH = 20;
+
+interface ListItem {
+  slot: Slot;
+  value: Value;
+  type: Type;
+}
+
+interface ListView {
+  spine: Slot[];
+  items: ListItem[];
+  primitive: boolean;
+  scalar: Scalar | undefined;
+  node: DisplayNode | undefined;
+}
+
+const listViews = new WeakMap<ConValue, WeakMap<Type, ListView>>();
 
 /** The elements of a list, forcing it as far as display allows. */
-function listItems(runtime: Runtime, value: ConValue, type: Type): { value: Value; type: Type }[] | undefined {
-  const items: { value: Value; type: Type }[] = [];
+function listItems(runtime: Runtime, value: ConValue, type: Type): ListItem[] | undefined {
+  const cached = listViews.get(value)?.get(type);
+  if (cached) return reuseListItems(runtime, cached);
+  const items: ListItem[] = [];
+  const spine: Slot[] = [];
   let current: Value | undefined = value;
   while (current instanceof ConValue && current.con === CONS_CON) {
     runtime.spend();
     if (items.length >= MAX_ELEMENTS) return undefined;
     const head = forceForDisplay(runtime, current.fields[0]);
     if (head === undefined) return undefined;
-    items.push({ value: head, type: slotDisplayType(current.fields[0], elementType(type, 0)) });
+    items.push({
+      slot: current.fields[0],
+      value: head,
+      type: slotDisplayType(current.fields[0], elementType(type, 0)),
+    });
+    spine.push(current.fields[1]);
     current = forceForDisplay(runtime, current.fields[1]);
   }
-  return current instanceof ConValue && current.con === NIL_CON ? items : undefined;
+  if (!(current instanceof ConValue) || current.con !== NIL_CON) return undefined;
+  if (isConcreteType(type)) {
+    let views = listViews.get(value);
+    if (!views) {
+      views = new WeakMap();
+      listViews.set(value, views);
+    }
+    views.set(type, {
+      spine,
+      items,
+      primitive: items.every((item) => typeof item.value !== 'object'),
+      scalar: undefined,
+      node: undefined,
+    });
+  }
+  return items;
+}
+
+function reuseListItems(runtime: Runtime, view: ListView): ListItem[] {
+  for (const slot of view.spine) runtime.trackPreview(slot);
+  for (const item of view.items) runtime.trackPreview(item.slot);
+  return view.items;
 }
 
 function charsOf(items: { value: Value }[]): string {
@@ -293,10 +337,9 @@ function traceFloat(value: number, type: Type): number {
 }
 
 // code-gauge-allow functionCognitiveComplexity 29 -- One branch per kind of value shown as a scalar.
-// code-gauge-allow functionNcss 38 -- Scalar formatting handles primitive values and library abstract values together.
 function scalarOf(runtime: Runtime, value: Value, type: Type, depth: number): Scalar | typeof NOT_SCALAR {
   runtime.spend();
-  if (depth > 20) return NOT_SCALAR;
+  if (depth > MAX_DISPLAY_DEPTH) return NOT_SCALAR;
   if (typeof value === 'bigint') return traceInt(value);
   if (typeof value === 'number') return traceFloat(value, type);
   if (typeof value === 'string') return value;
@@ -310,21 +353,30 @@ function scalarOf(runtime: Runtime, value: Value, type: Type, depth: number): Sc
       : NOT_SCALAR;
   }
   if (value.con.type.traceKind === 'bool') return value.con.tag === 1;
-  if (value.con === CONS_CON || value.con === NIL_CON) {
-    const items = listItems(runtime, value, type);
-    if (!items) return NOT_SCALAR;
-    if (isStringType(type, value)) return charsOf(items);
-    const scalars: Scalar[] = [];
-    for (const item of items) {
-      const scalar = scalarOf(runtime, item.value, item.type, depth + 1);
-      if (scalar === NOT_SCALAR) return NOT_SCALAR;
-      scalars.push(scalar);
-    }
-    return scalars as Scalar;
-  }
+  if (value.con === CONS_CON || value.con === NIL_CON) return listScalarOf(runtime, value, type, depth);
   if (value.con === UNIT_CON || value.con.type.traceKind === 'maybe') return NOT_SCALAR;
   if (value.fields.length === 0 && !value.con.isLibraryPrivate) return value.con.name;
   return NOT_SCALAR;
+}
+
+function listScalarOf(runtime: Runtime, value: ConValue, type: Type, depth: number): Scalar | typeof NOT_SCALAR {
+  const items = listItems(runtime, value, type);
+  if (!items) return NOT_SCALAR;
+  const view = listViews.get(value)?.get(type);
+  if (view?.scalar !== undefined && depth < MAX_DISPLAY_DEPTH) return view.scalar;
+  if (isStringType(type, value)) {
+    const scalar = charsOf(items);
+    if (view?.primitive) view.scalar = scalar;
+    return scalar;
+  }
+  const scalars: Scalar[] = [];
+  for (const item of items) {
+    const scalar = scalarOf(runtime, item.value, item.type, depth + 1);
+    if (scalar === NOT_SCALAR) return NOT_SCALAR;
+    scalars.push(scalar);
+  }
+  if (view?.primitive) view.scalar = scalars as Scalar;
+  return scalars as Scalar;
 }
 
 // oxlint-disable-next-line unicorn/no-null -- The trace format shows Nothing as null.
@@ -355,7 +407,7 @@ class DisplayNodes {
   // code-gauge-allow functionCognitiveComplexity 27 -- One branch per kind of value shown as a node.
   // code-gauge-allow functionNcss 34 -- Node formatting dispatches on each supported value representation.
   private nodeOf(value: Value, type: Type, depth: number): DisplayNode | undefined {
-    if (depth > 20) return this.truncated();
+    if (depth > MAX_DISPLAY_DEPTH) return this.truncated();
     if (typeof value === 'bigint') return { kind: 'value', value: traceInt(value) };
     if (typeof value === 'number') return { kind: 'value', value: traceFloat(value, type) };
     if (typeof value === 'string') return { kind: 'value', value };
@@ -419,12 +471,16 @@ class DisplayNodes {
   private listNodeOf(value: ConValue, type: Type, depth: number): DisplayNode {
     const items = listItems(this.runtime, value, type);
     if (!items) return this.truncated();
+    const view = listViews.get(value)?.get(type);
+    if (view?.node && depth < MAX_DISPLAY_DEPTH) return view.node;
     if (isStringType(type, value)) return { kind: 'value', value: charsOf(items) };
     const entries: Record<string, DisplayNode> = Object.create(null);
     for (const [index, item] of items.entries()) {
       entries[index] = this.build(item.value, item.type, depth + 1) ?? NULL_NODE;
     }
-    return { kind: 'array', entries };
+    const node: DisplayNode = { kind: 'array', entries };
+    if (view?.primitive && depth < MAX_DISPLAY_DEPTH) view.node = node;
+    return node;
   }
 
   private truncated(): DisplayNode {

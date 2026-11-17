@@ -1,6 +1,8 @@
 import { LIMITS } from '../interpreter/limits';
 import { type Thunk, type Value } from './values';
 
+export const DISPLAY_OPERATIONS = 20_000;
+
 interface PreviewFamily {
   activeScopes: number;
   activeWorkScopes: number;
@@ -12,7 +14,6 @@ interface PreviewFamily {
 
 interface PreviewUsage {
   epoch: number;
-  unpaidOperations: number;
   family: PreviewFamily;
   operations: number;
   share: number;
@@ -34,7 +35,6 @@ interface PreviewScope {
 }
 
 interface PreviewCost {
-  released: boolean;
   epoch: number;
   usage: PreviewUsage;
   operations: number;
@@ -44,6 +44,10 @@ interface PreviewTransaction {
   scope: PreviewScope;
   usage: PreviewUsage;
   deadline: number;
+  remainingMilliseconds: number;
+  milliseconds: number;
+  operations: number;
+  allowance: number;
   forcing: boolean;
   frames: PreviewFrame[];
   debts: Set<PreviewDebt>;
@@ -118,7 +122,6 @@ export class PreviewBudget {
     for (const usage of family.views.values()) {
       usage.epoch++;
       usage.operations = 0;
-      usage.unpaidOperations = 0;
       usage.milliseconds = 0;
       usage.share = 1;
       usage.timeLimit = family.timeLimit;
@@ -131,20 +134,19 @@ export class PreviewBudget {
     if (active.forcing) {
       const { usage } = active;
       usage.operations += operations;
-      usage.unpaidOperations += operations;
       usage.family.operations += operations;
       this.activeOperations += operations;
       const debt = active.frames.at(-1)?.debt;
       if (debt) {
         debt.quotaReleased = false;
         const previous = debt.costs.at(-1);
-        if (previous?.usage === usage && previous.epoch === usage.epoch && !previous.released)
-          previous.operations += operations;
-        else debt.costs.push({ released: false, epoch: usage.epoch, usage, operations });
+        if (previous?.usage === usage && previous.epoch === usage.epoch) previous.operations += operations;
+        else debt.costs.push({ epoch: usage.epoch, usage, operations });
         debt.executionOperations += executionOperations;
         debt.allocations += allocations;
       }
-      if (this.remainingOperations(usage) < 0) throw new DisplayAbort();
+      active.operations += operations;
+      if (active.operations > active.allowance || this.remainingOperations(usage) < 0) throw new DisplayAbort();
     }
     if (active.forcing && performance.now() >= active.deadline) throw new DisplayAbort();
   }
@@ -153,13 +155,11 @@ export class PreviewBudget {
     const active = this.active;
     if (!active) throw new Error('Preview evaluation requires a display view');
     if (this.aborted.get(slot)?.has(active.usage)) throw new DisplayAbort();
-    const family = active.usage.family;
-    if (!active.scope.workFamilies.has(family)) {
-      active.scope.workFamilies.add(family);
-      if (family.activeWorkScopes++ === 0) this.activeFamilies++;
-    }
-    if (this.remainingOperations(active.usage) <= 0 || performance.now() >= active.deadline) throw new DisplayAbort();
+    this.activateWork(active);
     const savedForcing = active.forcing;
+    const started = savedForcing ? undefined : performance.now();
+    if (started !== undefined) active.deadline = started + Math.max(0, active.remainingMilliseconds);
+    if (this.remainingOperations(active.usage) <= 0 || performance.now() >= active.deadline) throw new DisplayAbort();
     active.forcing = true;
     try {
       return work();
@@ -175,7 +175,19 @@ export class PreviewBudget {
       throw error;
     } finally {
       active.forcing = savedForcing;
+      if (started !== undefined) {
+        const elapsed = performance.now() - started;
+        active.milliseconds += elapsed;
+        active.remainingMilliseconds -= elapsed;
+      }
     }
+  }
+
+  private activateWork(active: PreviewTransaction): void {
+    const family = active.usage.family;
+    if (active.scope.workFamilies.has(family)) return;
+    active.scope.workFamilies.add(family);
+    if (family.activeWorkScopes++ === 0) this.activeFamilies++;
   }
 
   run<T>(view: PreviewView, work: () => T): T {
@@ -188,19 +200,20 @@ export class PreviewBudget {
         usage.family.timeLimit = (LIMITS.maxMilliseconds - this.milliseconds) / 2;
       }
     }
-    const workFamilies = this.activeFamilies + (usage.family.activeWorkScopes === 0 ? 1 : 0);
-    const familyTime = Math.min(usage.family.timeLimit, LIMITS.maxMilliseconds / Math.max(2, workFamilies));
     const remainingTime = Math.min(
       LIMITS.maxMilliseconds - this.milliseconds,
       usage.timeLimit - usage.milliseconds,
-      familyTime * usage.share - usage.milliseconds,
-      familyTime - usage.family.milliseconds
+      usage.family.timeLimit - usage.family.milliseconds
     );
     const started = performance.now();
     const active: PreviewTransaction = {
       scope,
       usage,
       deadline: started + Math.max(0, remainingTime),
+      remainingMilliseconds: remainingTime,
+      milliseconds: 0,
+      operations: 0,
+      allowance: DISPLAY_OPERATIONS * Math.max(0, 1 - this.milliseconds / LIMITS.maxMilliseconds),
       forcing: false,
       frames: [],
       debts: new Set(),
@@ -212,7 +225,7 @@ export class PreviewBudget {
       return work();
     } finally {
       const finished = performance.now();
-      const elapsed = finished - started;
+      const elapsed = active.milliseconds;
       this.milliseconds += elapsed;
       usage.milliseconds += elapsed;
       usage.family.milliseconds += elapsed;
@@ -295,7 +308,8 @@ export class PreviewBudget {
       const current = pending.pop() as PreviewDebt;
       if (current.consumed || current.quotaReleased) continue;
       current.quotaReleased = true;
-      for (const cost of current.costs) this.refund(cost, false);
+      for (const cost of current.costs) this.refund(cost);
+      current.costs = [];
       for (const dependency of current.dependencies) pending.push(dependency);
     }
   }
@@ -318,19 +332,13 @@ export class PreviewBudget {
     return { operations: executionOperations, allocations };
   }
 
-  private refund(cost: PreviewCost, demanded = true): void {
-    const { epoch, usage, operations } = cost;
+  private refund({ epoch, usage, operations }: PreviewCost): void {
     if (epoch !== usage.epoch) return;
-    if (demanded) {
-      if (operations > 0) {
-        const milliseconds = (usage.milliseconds * operations) / usage.unpaidOperations;
-        usage.milliseconds -= milliseconds;
-        usage.family.milliseconds = Math.max(0, usage.family.milliseconds - milliseconds);
-      }
-      usage.unpaidOperations -= operations;
+    if (operations > 0) {
+      const milliseconds = (usage.milliseconds * operations) / usage.operations;
+      usage.milliseconds -= milliseconds;
+      usage.family.milliseconds = Math.max(0, usage.family.milliseconds - milliseconds);
     }
-    if (cost.released) return;
-    cost.released = true;
     usage.operations -= operations;
     usage.family.operations -= operations;
     this.activeOperations -= operations;
@@ -361,7 +369,7 @@ export class PreviewBudget {
     let usage = family.views.get(view);
     const timeLimit = family.timeLimit * share;
     if (!usage) {
-      usage = { epoch: 0, unpaidOperations: 0, family, operations: 0, share, milliseconds: 0, timeLimit };
+      usage = { epoch: 0, family, operations: 0, share, milliseconds: 0, timeLimit };
       family.views.set(view, usage);
     } else {
       usage.share = Math.min(usage.share, share);
