@@ -47,7 +47,7 @@ export class Signatures {
         return returnType;
       },
     };
-    if (!contextual) this.signatureCache.set(node.id, signature);
+    if (!contextual && this.c.silent === 0) this.signatureCache.set(node.id, signature);
     return signature;
   }
 
