@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 424 -- Types array and object literals with their spreads, members, and widening, which share one literal state.
+// code-gauge-allow-file fileNcss 447 -- Types array and object literals with their spreads, members, and widening, which share one literal state.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import type { Checker } from './checker';
@@ -8,6 +8,7 @@ import {
   anyType,
   emptyStructure,
   errorType,
+  type IndexInfo,
   intersectionOf,
   isAnyLike,
   isIntrinsic,
@@ -26,13 +27,17 @@ import {
 } from './types';
 
 type MemberKind = 'property' | 'get' | 'set';
+type Indexes = Pick<Structure, 'stringIndex' | 'numberIndex'>;
 
 /** An object literal being checked, with the members checked so far. */
 interface ObjectLiteral {
   contextual: Type | undefined;
   isConstContext: boolean;
   properties: Map<string, Property>;
+  /** The index signature that the members written since the last spread give the literal with computed keys. */
   stringIndex?: Type;
+  /** Whether members are written since the last spread, which TypeScript spreads as one object literal. */
+  hasPendingMembers?: boolean;
   /** Spreads of type parameters, which the literal's type intersects. */
   genericSpreads: Type[];
   /**
@@ -40,8 +45,11 @@ interface ObjectLiteral {
    * members written since) then override.
    */
   alternatives?: Map<string, Property>[];
-  /** The index signatures of the one value the literal only spreads. */
-  spreadIndexes?: Pick<Structure, 'stringIndex' | 'numberIndex'>;
+  /**
+   * Once the literal spreads, the index signatures of each alternative (or of the literal without union spreads),
+   * which TypeScript keeps only where every spread part has them.
+   */
+  spreadIndexes?: Indexes[];
   /** Whether its spreads made more alternatives than TypeScript represents, which makes the literal an error. */
   isTooComplex?: boolean;
   /**
@@ -186,26 +194,25 @@ export class LiteralChecker {
       object: anonymousObject(
         () => ({
           ...emptyStructure(),
-          ...literal.spreadIndexes,
+          ...(literal.spreadIndexes?.[0] ?? this.writtenIndexes(literal)),
           properties,
-          ...(literal.stringIndex && { stringIndex: { type: literal.stringIndex, readonly: false } }),
         }),
         { isLiteral: true }
       ),
     };
     for (const member of named(node)) this.declareObjectMember(literal, member);
     for (const member of named(node)) this.objectMember(literal, member);
-    literal.spreadIndexes = this.soleSpreadIndexes(node);
+    if (literal.spreadIndexes && literal.hasPendingMembers) this.spreadWrittenIndexes(literal);
     if (contextual) this.addPatternDefaults(properties, contextual);
     const { object, genericSpreads, alternatives } = literal;
     if (literal.isTooComplex) return errorType;
     if (alternatives) {
-      const variants = alternatives.map((alternative) => {
+      const variants = alternatives.map((alternative, index) => {
         const variant = anonymousObject(
           () => ({
             ...emptyStructure(),
+            ...literal.spreadIndexes?.[index],
             properties: new Map([...alternative, ...properties]),
-            stringIndex: literal.stringIndex && { type: literal.stringIndex, readonly: false },
           }),
           { isLiteral: true, isUnionSpread: true }
         );
@@ -299,12 +306,13 @@ export class LiteralChecker {
       }
       case 'spread_element': {
         this.spreadMember(literal, member);
-        break;
+        return;
       }
       default: {
-        break;
+        return;
       }
     }
+    literal.hasPendingMembers = true;
   }
 
   private pairMember(literal: ObjectLiteral, member: TreeNode): void {
@@ -462,16 +470,23 @@ export class LiteralChecker {
       return;
     }
     if (literal.isTooComplex) return;
+    if (literal.hasPendingMembers) this.spreadWrittenIndexes(literal);
     const objectMembers = members.filter((type) => type.kind === 'object' || type.kind === 'intersection');
     // A spread of `null` or `undefined` adds nothing, which leaves the properties of an object it may be optional.
     const mayBeNullish = objectPart !== spread;
     if (objectMembers.length < 2) {
+      if (objectMembers.length === 1) this.addSpreadIndexes(literal, this.indexesOf(objectPart));
       this.spreadSingle(literal, objectPart, mayBeNullish);
       return;
     }
+    this.spreadUnion(literal, member, [...objectMembers, ...(mayBeNullish ? [undefined] : [])]);
+  }
+
+  /** Spreads each of `parts`, a union's objects and `undefined` when it may be nullish, into its own alternative. */
+  private spreadUnion(literal: ObjectLiteral, member: TreeNode, parts: (Type | undefined)[]): void {
     // Each alternative of a union spreads its own properties, as TypeScript gives the literal a union type.
     const bases = literal.alternatives ?? [new Map<string, Property>()];
-    const count = bases.length * objectMembers.length;
+    const count = bases.length * parts.filter(Boolean).length;
     // TypeScript refuses a cross product of union spreads of 100,000 alternatives or more.
     if (count >= 100_000) {
       this.c.error(member, 'この式の型は、表せないほど複雑な共用体型になります。');
@@ -479,8 +494,12 @@ export class LiteralChecker {
       return;
     }
     this.c.budget.spend(count);
+    const baseIndexes = literal.spreadIndexes;
+    literal.spreadIndexes = bases.flatMap((_, index) =>
+      parts.map((type) => this.spreadIndexesOnto(baseIndexes?.[index], this.indexesOf(type)))
+    );
     literal.alternatives = bases.flatMap((base) =>
-      [...objectMembers, ...(mayBeNullish ? [undefined] : [])].map((type) => {
+      parts.map((type) => {
         const alternative = new Map([...base, ...literal.properties]);
         if (type) this.spreadInto(alternative, type);
         return alternative;
@@ -489,23 +508,50 @@ export class LiteralChecker {
     literal.properties.clear();
   }
 
+  /** Spreads the members written since the last spread as the one object literal TypeScript makes of them. */
+  private spreadWrittenIndexes(literal: ObjectLiteral): void {
+    this.addSpreadIndexes(literal, this.writtenIndexes(literal));
+    literal.stringIndex = undefined;
+    literal.hasPendingMembers = false;
+  }
+
+  private writtenIndexes(literal: ObjectLiteral): Indexes {
+    return { stringIndex: literal.stringIndex && { type: literal.stringIndex, readonly: false } };
+  }
+
+  private addSpreadIndexes(literal: ObjectLiteral, indexes: Indexes): void {
+    literal.spreadIndexes = literal.spreadIndexes?.map((left) => this.spreadIndexesOnto(left, indexes)) ?? [indexes];
+  }
+
+  /**
+   * The index signatures of a spread onto an object with `left`'s (none before the first spread): TypeScript keeps
+   * the spread's own for the first, and afterwards each signature both sides have for the same key type.
+   */
+  private spreadIndexesOnto(left: Indexes | undefined, right: Indexes): Indexes {
+    if (!left) return right;
+    const combine = (key: keyof Indexes): IndexInfo | undefined => {
+      const [leftIndex, rightIndex] = [left[key], right[key]];
+      return leftIndex && rightIndex
+        ? { type: unionOf([leftIndex.type, rightIndex.type]), readonly: false }
+        : undefined;
+    };
+    return { stringIndex: combine('stringIndex'), numberIndex: combine('numberIndex') };
+  }
+
+  /** The index signatures a spread copies, which are writable in the copy. */
+  private indexesOf(type: Type | undefined): Indexes {
+    if (type?.kind !== 'object' && type?.kind !== 'intersection') return {};
+    const { stringIndex, numberIndex } = this.c.structureOf(type);
+    return {
+      stringIndex: stringIndex && { ...stringIndex, readonly: false },
+      numberIndex: numberIndex && { ...numberIndex, readonly: false },
+    };
+  }
+
   /**
    * Spreads a value that is not a union of objects; after a union spread, into each alternative, whose properties its
    * optional ones may leave.
    */
-  /**
-   * The index signatures a literal that only spreads one value keeps from it; TypeScript keeps only those every part of
-   * a spread has, so any other member leaves them out.
-   */
-  private soleSpreadIndexes(node: TreeNode): Pick<Structure, 'stringIndex' | 'numberIndex'> | undefined {
-    const members = named(node);
-    if (members.length !== 1 || members[0].type !== 'spread_element') return undefined;
-    const spread = this.c.relations.removeNullish(this.c.expressions.check(named(members[0])[0]));
-    if (spread.kind !== 'object' && spread.kind !== 'intersection') return undefined;
-    const { stringIndex, numberIndex } = this.c.structureOf(spread);
-    return { stringIndex, numberIndex };
-  }
-
   private spreadSingle(literal: ObjectLiteral, spread: Type, optional = false): void {
     if (!literal.alternatives) {
       this.spreadInto(literal.properties, spread, optional);
