@@ -103,6 +103,11 @@ function view(node: TreeNode): ViewNode {
     case 'field_definition': {
       return generic(node, 'field_definition');
     }
+    case 'parenthesized_expression': {
+      // tsx's esbuild drops parentheses around a name, which V8 then prints without them in errors.
+      const inner = unwrappedName(node);
+      return inner ? view(inner) : generic(node, node.type);
+    }
     case 'undefined': {
       // tsx's esbuild emits `undefined` as `(void 0)`, which V8 then names in errors.
       return leaf(node, 'undefined', '(void 0)');
@@ -111,6 +116,20 @@ function view(node: TreeNode): ViewNode {
       return typeDeclarations.has(node.type) ? leaf(node, 'empty_statement') : generic(node, node.type);
     }
   }
+}
+
+/** The name parentheses wrap, through nested parentheses and type assertions, as `((x))` and `(x as any)`. */
+function unwrappedName(node: TreeNode): TreeNode | undefined {
+  let inner = node;
+  while (inner.type === 'parenthesized_expression' || assertionTypes.has(inner.type)) {
+    const next =
+      inner.type === 'parenthesized_expression'
+        ? inner.namedChildren.find((child) => child?.type !== 'comment')
+        : assertedExpression(inner);
+    if (!next) return undefined;
+    inner = next;
+  }
+  return inner.type === 'identifier' ? inner : undefined;
 }
 
 /** The expression an assertion wraps, which follows the type in `<T>x` and precedes it otherwise. */

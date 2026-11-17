@@ -1553,6 +1553,22 @@ function main() {
 main();`,
   ],
   [
+    'object literals with accessors and spreads named in iteration errors',
+    `const o = { a: 1 }, k = "z";
+function main() {
+  for (const run of [() => { for (const v of { get g() { return 1; } }); }, () => { for (const v of { get g() { return 1; }, set g(v) {} }); },
+    () => { for (const v of { get 'g'() { return 1; }, p: 1 }); }, () => { for (const v of { ...o, get g() { return 1; } }); },
+    () => { for (const v of { get g() { return 1; }, ...o }); }, () => { for (const v of { get g() { return 1; }, m() {} }); },
+    () => { for (const v of { get [k]() { return 1; } }); }, () => { for (const v of { p: 1, ...o }); }, () => { for (const v of { ...o, p: 1 }); },
+    () => { for (const v of { ...o }); }, () => { for (const v of { ...o, ...o }); }, () => { for (const v of { p: 1, q: 2, ...o }); },
+    () => { for (const v of { set s(v) {} }); }, () => { for (const v of { p: 1, get g() { return 1; } }); }, () => { for (const v of { ...o, get g() { return 1; }, p: 1 }); },
+    () => { for (const v of { 'p': 1, 2: 3 }); }, () => { for (const v of { __proto__: null }); }, () => { for (const v of { p: 1, __proto__: null }); }]) {
+    try { run(); } catch (e) { console.log(e.message); }
+  }
+}
+main();`,
+  ],
+  [
     'object literals and conditionals named in iteration and call errors',
     `const x = 5, o1 = { p: 1 }, k = "z";
 function main() {

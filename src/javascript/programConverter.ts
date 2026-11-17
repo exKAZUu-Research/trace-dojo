@@ -678,18 +678,28 @@ function coalescingIterationSource(operand: Node): IterationSource | undefined {
 }
 
 /**
- * How V8 names a `for...of` iterable written as an object literal: by a part for each member when all of them are
- * `key: value` pairs with written keys or spreads, and otherwise, with a computed key, a shorthand, or a method, by its
- * value.
+ * How V8 names a `for...of` iterable written as an object literal: by a part for each member when every member is a
+ * `key: value` pair or an accessor with a written key, or when only accessors follow a leading spread; and otherwise,
+ * as with a computed key, a shorthand, a method, or a later spread, by its value.
  */
 function objectIterationSource(operand: Node): IterationSource | undefined {
   const members = namedChildren(operand).filter((member) => member.type !== 'comment');
-  const printable = members.every(
-    (member) =>
-      member.type === 'spread_element' ||
-      (member.type === 'pair' && member.childForFieldName('key')?.type !== 'computed_property_name')
-  );
+  const [first, ...rest] = members;
+  const printable =
+    first?.type === 'spread_element'
+      ? rest.every((member) => isAccessor(member) && !hasComputedKey(member))
+      : members.every((member) => (member.type === 'pair' || isAccessor(member)) && !hasComputedKey(member));
   return printable ? { text: `{${'(intermediate value)'.repeat(members.length)}}` } : undefined;
+}
+
+function isAccessor(member: Node): boolean {
+  return (
+    member.type === 'method_definition' && member.children.some((child) => child.type === 'get' || child.type === 'set')
+  );
+}
+
+function hasComputedKey(member: Node): boolean {
+  return (member.childForFieldName('key') ?? member.childForFieldName('name'))?.type === 'computed_property_name';
 }
 
 /** How V8 prints an operand of `??` in a loop's error, a call as its callee and an optional chain as a value. */
