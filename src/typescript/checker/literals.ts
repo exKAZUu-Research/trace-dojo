@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 526 -- Types array and object literals with their spreads, members, and widening, which share one literal state.
+// code-gauge-allow-file fileNcss 556 -- Types array and object literals with their spreads, members, and widening, which share one literal state.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import type { Checker } from './checker';
@@ -76,7 +76,8 @@ interface ObjectLiteral {
   seenKeys: Map<string, Set<MemberKind>>;
   stopsKeyCheck?: boolean;
   object: ObjectType;
-  receiver: ObjectType;
+  /** What `this` is in the literal's methods. */
+  receiver: Type;
   declarations: Map<string, Property>;
 }
 
@@ -86,6 +87,8 @@ export class LiteralChecker {
   private readonly tupleLiterals = new Set<number>();
   /** The node of each object literal type, whose members alone TypeScript checks for excess properties. */
   private readonly objectLiteralNodes = new Map<number, TreeNode>();
+  /** The contextual type of each object literal checked, by node, which the `this` of a literal inside it may need. */
+  private readonly objectLiteralContexts = new Map<number, Type | undefined>();
 
   constructor(private readonly c: Checker) {}
 
@@ -216,12 +219,18 @@ export class LiteralChecker {
   objectLiteral(node: TreeNode, contextual?: Type): Type {
     const properties = new Map<string, Property>();
     const declarations = new Map<string, Property>();
+    const discriminated = contextual && this.discriminatedContext(node, contextual);
+    this.objectLiteralContexts.set(node.id, discriminated);
     const literal: ObjectLiteral = {
-      contextual: contextual && this.discriminatedContext(node, contextual),
+      contextual: discriminated,
       isConstContext: this.isConstContext(node),
       properties,
       declarations,
-      receiver: anonymousObject(() => ({ ...emptyStructure(), properties: declarations })),
+      receiver: this.receiverOf(
+        node,
+        discriminated,
+        anonymousObject(() => ({ ...emptyStructure(), properties: declarations }))
+      ),
       genericSpreads: [],
       writtenNames: new Set(),
       computedMembers: [],
@@ -263,6 +272,48 @@ export class LiteralChecker {
     const fresh: ObjectType = { ...object, id: object.id, fresh: true, regular: object };
     if (genericSpreads.length > 0) return intersectionOf([...genericSpreads, object], this.c.budget);
     return fresh;
+  }
+
+  /**
+   * What `this` is in an object literal's methods, as TypeScript's `getContextualThisParameterType` decides: the `T` of a
+   * `ThisType<T>` in the contextual type of the literal or of an object literal it is a property value of, else the
+   * contextual type without `null` and `undefined`, else the literal itself.
+   */
+  private receiverOf(node: TreeNode, contextual: Type | undefined, literal: Type): Type {
+    const marked = this.thisTypeMarkerOf(node, contextual);
+    if (marked) return marked;
+    const context = contextual && this.c.relations.removeNullish(contextual);
+    // A contextual type parameter not yet inferred stands for the literal, as the instantiated signature TypeScript
+    // checks the argument against last gives it.
+    return context && !this.c.relations.isGeneric(context) ? this.c.widen(context) : literal;
+  }
+
+  /** TypeScript's `getThisTypeOfObjectLiteral`. */
+  private thisTypeMarkerOf(node: TreeNode, contextual: Type | undefined): Type | undefined {
+    let current = node;
+    let context = contextual;
+    for (;;) {
+      const marked = context && this.thisTypeArgument(context);
+      if (marked) return marked;
+      const pair = current.parent;
+      const outer = pair?.parent;
+      if (pair?.type !== 'pair' || pair.childForFieldName('value')?.id !== current.id || outer?.type !== 'object')
+        return undefined;
+      current = outer;
+      context = this.objectLiteralContexts.get(outer.id);
+    }
+  }
+
+  /** The `T` of the `ThisType<T>` a type is or intersects, or of each union member's. */
+  private thisTypeArgument(type: Type): Type | undefined {
+    if (type.kind === 'union') {
+      const types = type.types.map((member) => this.thisTypeArgument(member)).filter((member) => member !== undefined);
+      return types.length > 0 ? unionOf(types) : undefined;
+    }
+    if (type.kind === 'intersection')
+      return type.types.map((member) => this.thisTypeArgument(member)).find((member) => member !== undefined);
+    const marker = this.c.globalType('ThisType');
+    return type.kind === 'object' && type.target === marker ? type.typeArguments?.[0] : undefined;
   }
 
   /** Gives an object literal a binding pattern takes apart the properties the pattern has defaults for. */

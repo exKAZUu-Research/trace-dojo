@@ -1,0 +1,24 @@
+const marked: { f(): number } & ThisType<{ value: number }> = {
+  f() {
+    return this.missing;
+  },
+};
+const contextual: { f(): number } = {
+  f() {
+    return this.g();
+  },
+};
+const nested: { inner: { f(): number } } & ThisType<{ k: number }> = {
+  inner: {
+    f: function () {
+      return this.other;
+    },
+  },
+};
+const optional: { n: number; m(): number } | undefined = {
+  n: 1,
+  m() {
+    return this.k;
+  },
+};
+console.log(marked, contextual, nested, optional);

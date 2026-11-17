@@ -76,7 +76,7 @@ function memberKey(name: string, info: ClassInfo): string {
 /** Classes: their instance and constructor types, `this` and `super`, and the checks of their declarations. */
 export class ClassChecker {
   private readonly infos = new Map<number, ClassInfo>();
-  private readonly objectThis: ObjectType[] = [];
+  private readonly objectThis: Type[] = [];
   private readonly fieldTypes = new Map<number, Type>();
   private readonly resolvingFields: { member: TreeNode; nameNode: TreeNode }[] = [];
   private globalThis?: ObjectType;
@@ -605,10 +605,10 @@ export class ClassChecker {
     }
   }
 
-  /** The object literals whose methods' `this` is the literal, by method, for return types inferred later. */
-  private readonly objectThisByMethod = new Map<number, ObjectType>();
+  /** The `this` types of object literal methods, by method, for return types inferred later. */
+  private readonly objectThisByMethod = new Map<number, Type>();
 
-  withObjectThis<T>(object: ObjectType, run: () => T, method?: TreeNode): T {
+  withObjectThis<T>(object: Type, run: () => T, method?: TreeNode): T {
     if (method) this.registerObjectThis(method, object);
     this.objectThis.push(object);
     try {
@@ -618,7 +618,7 @@ export class ClassChecker {
     }
   }
 
-  registerObjectThis(method: TreeNode, object: ObjectType): void {
+  registerObjectThis(method: TreeNode, object: Type): void {
     this.objectThisByMethod.set(method.id, object);
   }
 
