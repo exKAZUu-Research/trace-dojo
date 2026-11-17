@@ -335,6 +335,10 @@ export class BindingPatterns {
     if (isAnyLike(type)) return anyType;
     if (type.kind === 'object' && type.objectKind === 'tuple') {
       const elements = type.tuple?.elements ?? [];
+      const restIndex = elements.findIndex((member) => member.rest);
+      // At or past a rest element, any of the rest's values or the elements after it may take the position.
+      if (restIndex !== -1 && index >= restIndex && restIndex < elements.length - 1)
+        return this.valuesFrom(elements, restIndex);
       const element = elements[index];
       if (!element) {
         const rest = elements.find((member) => member.rest);
@@ -355,9 +359,20 @@ export class BindingPatterns {
 
   restOfIterable(pattern: TreeNode, type: Type, from: number): Type {
     if (type.kind === 'object' && type.objectKind === 'tuple') {
-      return this.c.tupleType((type.tuple?.elements ?? []).slice(from));
+      const elements = type.tuple?.elements ?? [];
+      const restIndex = elements.findIndex((member) => member.rest);
+      // Past a rest element, the remaining values are no longer at known positions.
+      if (restIndex !== -1 && from > restIndex) return this.c.arrayType(this.valuesFrom(elements, restIndex));
+      return this.c.tupleType(elements.slice(from));
     }
     return this.c.arrayType(this.iteratedType(pattern, type));
+  }
+
+  /** The values a tuple's rest element and the elements after it hold. */
+  private valuesFrom(elements: TupleElement[], restIndex: number): Type {
+    return unionOf(
+      elements.slice(restIndex).map((member) => (member.rest ? this.c.restElementType(member.type) : member.type))
+    );
   }
 
   /** The type of the elements a `for...of` loop or a spread takes from a value. */
