@@ -19,7 +19,7 @@ import {
 import { coreMethod, def, sdef, sundef } from './define';
 import { argumentError, frozenError, indexError, nameError, rubyError, typeError } from './errors';
 import { validateKeywords } from './exceptionOption';
-import { digest, hashKeyOf, hashSet } from './hashes';
+import { digest, hashKeyOf, hashSet, withHashTraversal } from './hashes';
 import {
   addMethod,
   assertMutableClass,
@@ -90,11 +90,6 @@ class StructValues {
 
   copy(): StructValues {
     return new StructValues(this.values);
-  }
-
-  /** The values whose keys make the struct's key in a Hash, with its class's. */
-  hashParts(): Value[] {
-    return this.values;
   }
 }
 
@@ -511,33 +506,17 @@ function* sameValues(self: RObject, other: Value, equal: (a: Value, b: Value) =>
 }
 
 function* structuralHash(self: RObject): Gen<bigint> {
-  const runtime = rt();
-  const state = contextState();
-  if (state.hashing.has(self)) return 0n;
-  if (state.hashDepth >= LIMITS.maxCallDepth) throw new ExecutionLimitError('output');
-  state.hashDepth++;
-  state.hashing.add(self);
-  try {
-    let classId = runtime.structClassHashIds.get(self.cls);
-    if (classId === undefined) {
-      classId = runtime.nextStructClassHashId++;
-      runtime.structClassHashIds.set(self.cls, classId);
-    }
-    const parts: (number | string)[] = [classId];
+  return yield* withHashTraversal(function* () {
+    const parts = [yield* hashKeyOf(realClassOf(self))];
     for (const value of valuesOf(self)) parts.push(yield* hashKeyOf(value));
     return BigInt(`0x${digest(JSON.stringify(parts))}`);
-  } finally {
-    state.hashDepth--;
-    state.hashing.delete(self);
-  }
+  });
 }
 
 interface StructContextState {
   inspecting: Set<RObject>;
   comparisonPairs: Map<RObject, Set<RObject>>;
   comparisonDepth: number;
-  hashing: Set<RObject>;
-  hashDepth: number;
 }
 
 const structContexts = new WeakMap<object, StructContextState>();
@@ -550,8 +529,6 @@ function contextState(): StructContextState {
       inspecting: new Set<RObject>(),
       comparisonPairs: new Map<RObject, Set<RObject>>(),
       comparisonDepth: 0,
-      hashing: new Set<RObject>(),
-      hashDepth: 0,
     };
     structContexts.set(context, state);
   }

@@ -1,29 +1,113 @@
-import { inspect, toInt } from './conversions';
-import { isCoreMethod } from './define';
+import { ExecutionLimitError, LIMITS } from '../interpreter/limits';
+import { inspect, rEql, toInt } from './conversions';
+import { coreMethod, isCoreMethod } from './define';
 import { frozenError, runtimeError } from './errors';
-import { callMethod, callProc, type Gen, isGenerator, runToEnd } from './interp';
-import { type HashEntry, RArray, RBasic, RHash, RRange, RString, RSymbol, type Value } from './objects';
-import { rt, UnsupportedFeatureError } from './runtime';
-import { classOf, internFrozenString, sameIdentity, snapshot, str, stringBytes, truthy } from './values';
+import { callMethod, callProc, type Gen, invoke, isGenerator, runToEnd } from './interp';
+import {
+  type HashEntry,
+  isRubyFloat,
+  NIL,
+  RArray,
+  RBasic,
+  RHash,
+  RRange,
+  RString,
+  RSymbol,
+  type Value,
+} from './objects';
+import { rt, RubyJump, UnsupportedFeatureError } from './runtime';
+import { classOf, internFrozenString, sameIdentity, snapshot, str, stringBytes } from './values';
 
 interface HashTraversal {
-  cycle: boolean;
+  active: Set<Value>;
   callbacks: number;
   memo: WeakMap<RBasic, { key: string; callbacks: number }>;
 }
 
-/** A bounded structural digest for container hash methods, based on each child's public hash. */
-// code-gauge-allow functionCognitiveComplexity 23 -- Hash keys have distinct primitive, composite, and user-defined hash rules.
-export function* hashKeyOf(value: Value, ancestors: RBasic[] = [], traversal?: HashTraversal): Gen<string> {
-  traversal ??= { cycle: false, callbacks: 0, memo: new WeakMap() };
-  rt().spend();
-  if (value instanceof RBasic && ancestors.includes(value)) {
-    traversal.cycle = true;
-    return 'cycle';
+const hashTraversals = new WeakMap<object, HashTraversal>();
+
+class RecursiveHashSignal extends RubyJump {
+  constructor(readonly traversal: HashTraversal) {
+    super();
   }
+}
+
+export function* hashKeyOf(value: Value): Gen<string> {
+  rt().spend();
   if (value instanceof RString) return digest(String(stringKeyHash(value)));
-  const method = classOf(value).findMethod('hash');
-  const structuralOwner =
+  const classes = rt().c;
+  const primitiveOwner =
+    typeof value === 'bigint'
+      ? classes.Integer
+      : isRubyFloat(value)
+        ? classes.Float
+        : value instanceof RSymbol
+          ? classes.Symbol
+          : value === NIL || typeof value === 'boolean'
+            ? classes.Kernel
+            : undefined;
+  if (primitiveOwner)
+    return digest(
+      String(yield* toInt(yield* invoke(coreMethod(primitiveOwner, 'hash'), value, [], undefined, undefined, true)))
+    );
+  return yield* withHashTraversal((traversal) => hashKeyInTraversal(value, traversal));
+}
+
+export function* structuralHashValue(value: RArray | RRange | RHash): Gen<bigint> {
+  return yield* withHashTraversal(() => structuralHash(value));
+}
+
+export function* withHashTraversal<T>(body: (traversal: HashTraversal) => Gen<T>): Gen<T> {
+  const context = rt().activeCursor ?? rt();
+  const existing = hashTraversals.get(context);
+  const traversal: HashTraversal = existing ?? { active: new Set<Value>(), callbacks: 0, memo: new WeakMap() };
+  if (!existing) hashTraversals.set(context, traversal);
+  try {
+    return yield* body(traversal);
+  } finally {
+    if (!existing) hashTraversals.delete(context);
+  }
+}
+
+// code-gauge-allow functionNcss 35 -- Recursive guards end before hash-code conversion, while roots and memoization span both phases.
+function* hashKeyInTraversal(value: Value, traversal: HashTraversal): Gen<string> {
+  if (traversal.active.has(value)) throw new RecursiveHashSignal(traversal);
+  const structural = isStructuralHash(value);
+  const cached = structural ? traversal.memo.get(value) : undefined;
+  if (cached?.callbacks === traversal.callbacks) return cached.key;
+  if (traversal.active.size >= LIMITS.maxCallDepth) throw new ExecutionLimitError('output');
+  const callbacks = traversal.callbacks;
+  const outermost = traversal.active.size === 0;
+  const mark = rt().held.length;
+  rt().held.push(value);
+  let recursive = false;
+  let hash: Value;
+  traversal.active.add(value);
+  try {
+    try {
+      if (structural) hash = (yield structuralHash(value)) as Value;
+      else {
+        traversal.callbacks++;
+        hash = (yield callMethod(value, 'hash', [], undefined, undefined, { fcall: true })) as Value;
+      }
+    } catch (error) {
+      if (!(outermost && error instanceof RecursiveHashSignal && error.traversal === traversal)) throw error;
+      hash = 0n;
+      recursive = true;
+    } finally {
+      traversal.active.delete(value);
+    }
+    rt().held.push(hash);
+    const key = digest(String(yield* toInt(hash)));
+    if (structural && !recursive && callbacks === traversal.callbacks) traversal.memo.set(value, { key, callbacks });
+    return key;
+  } finally {
+    rt().held.length = mark;
+  }
+}
+
+function isStructuralHash(value: Value): value is RArray | RRange | RHash {
+  const owner =
     value instanceof RArray
       ? rt().c.Array
       : value instanceof RRange
@@ -31,57 +115,22 @@ export function* hashKeyOf(value: Value, ancestors: RBasic[] = [], traversal?: H
         : value instanceof RHash
           ? rt().c.Hash
           : undefined;
-  if (
-    (value instanceof RArray || value instanceof RRange || value instanceof RHash) &&
-    structuralOwner &&
-    isCoreMethod(method, structuralOwner, 'hash')
-  ) {
-    const cached = traversal.memo.get(value);
-    if (cached?.callbacks === traversal.callbacks) return cached.key;
-    const callbacks = traversal.callbacks;
-    ancestors.push(value);
-    try {
-      const hash = yield* structuralHash(value, ancestors, traversal);
-      const key = digest(String(traversal.cycle ? 0n : hash));
-      if (callbacks === traversal.callbacks) traversal.memo.set(value, { key, callbacks });
-      return key;
-    } finally {
-      ancestors.pop();
-    }
-  }
-  if (value instanceof RBasic && !(value instanceof RString)) traversal.callbacks++;
-  return digest(String(yield* toInt(yield* callMethod(value, 'hash', [], undefined, undefined, { fcall: true }))));
+  return owner !== undefined && isCoreMethod(classOf(value).findMethod('hash'), owner, 'hash');
 }
 
-export function* structuralHashValue(value: RArray | RRange | RHash): Gen<bigint> {
-  const traversal: HashTraversal = { cycle: false, callbacks: 0, memo: new WeakMap() };
-  const hash = yield* structuralHash(value, [value], traversal);
-  return traversal.cycle ? 0n : hash;
-}
-
-function* structuralHash(value: RArray | RRange | RHash, ancestors: RBasic[], traversal: HashTraversal): Gen<bigint> {
+function* structuralHash(value: RArray | RRange | RHash): Gen<bigint> {
   let parts: string[];
   if (value instanceof RArray) {
     parts = [];
-    for (let index = 0; index < value.items.length; index++)
-      parts.push(yield* hashKeyOf(value.items[index], ancestors, traversal));
+    for (let index = 0; index < value.items.length; index++) parts.push(yield* hashKeyOf(value.items[index]));
   } else if (value instanceof RRange) {
-    parts = [
-      yield* hashKeyOf(value.begin, ancestors, traversal),
-      value.exclusive ? 'exclusive' : 'inclusive',
-      yield* hashKeyOf(value.end, ancestors, traversal),
-    ];
+    parts = [yield* hashKeyOf(value.begin), value.exclusive ? 'exclusive' : 'inclusive', yield* hashKeyOf(value.end)];
   } else {
     parts = [];
     value.iterating++;
     try {
       for (const entry of value.map.values())
-        parts.push(
-          JSON.stringify([
-            yield* hashKeyOf(entry.key, ancestors, traversal),
-            yield* hashKeyOf(entry.value, ancestors, traversal),
-          ])
-        );
+        parts.push(JSON.stringify([yield* hashKeyOf(entry.key), yield* hashKeyOf(entry.value)]));
     } finally {
       value.iterating--;
     }
@@ -130,12 +179,10 @@ function* findEntry(hash: RHash, key: Value): Gen<{ base: string; slot: string; 
           : `${typeof key}:${String(key)}`;
     return yield* findEntryInBucket(hash, key, `h${digest(identity)}`);
   }
-  const keyHash = key instanceof RString ? stringKeyHash(key) : yield* toInt(yield* callMethod(key, 'hash', []));
-  const base = `h${digest(String(keyHash))}`;
+  const base = `h${yield* hashKeyOf(key)}`;
   return yield* findEntryInBucket(hash, key, base);
 }
 
-// code-gauge-allow functionCognitiveComplexity 16 -- The ordered cases for Ruby hash equality and collision handling share state; splitting them solely for the metric would hide their sequencing.
 function* findEntryInBucket(
   hash: RHash,
   key: Value,
@@ -144,21 +191,20 @@ function* findEntryInBucket(
   if (hash.bucketVersion !== hash.map.version) rebuildBuckets(hash);
   for (const slot of hash.buckets.get(base) ?? []) {
     const entry = hash.map.get(slot);
-    if (
-      entry &&
-      (sameIdentity(entry.key, key) ||
-        (hash.byIdentity
-          ? false
-          : key instanceof RString
-            ? stringKeyEquals(key, entry.key)
-            : truthy(yield* callMethod(key, 'eql?', [entry.key]))))
-    )
+    if (entry && (sameIdentity(entry.key, key) || (!hash.byIdentity && (yield* hashKeysEqual(key, entry.key)))))
       return { base, slot, entry };
   }
   for (let index = 0; ; index++) {
     const slot = JSON.stringify([base, index]);
     if (!hash.map.has(slot)) return { base, slot, entry: undefined };
   }
+}
+
+function* hashKeysEqual(key: Value, stored: Value): Gen<boolean> {
+  if (key instanceof RString && key.cls === rt().c.String && stored instanceof RString && stored.cls === rt().c.String)
+    return stringKeyEquals(key, stored);
+  if (key instanceof RSymbol && stored instanceof RSymbol) return key === stored;
+  return yield* rEql(key, stored);
 }
 
 export function* hashSetStored(hash: RHash, storedSlot: string, source: HashEntry): Gen<boolean> {

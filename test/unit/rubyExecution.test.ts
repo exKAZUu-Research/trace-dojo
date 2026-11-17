@@ -35072,3 +35072,970 @@ test.each(nativeRepeatedConversionControlCases)(
     expect(run(source)).toMatchObject({ kind: 'executed', stdout, uncaughtException: undefined });
   }
 );
+
+const nativeRecursiveRecordHashCases = [
+  [
+    'class L;def hash;if $y;y=$y;$y=nil;y<<:pause;end;1;end;end;S=Struct.new(:x);$s=S.new(Set[L.new]);e=Enumerator.new{|y|$y=y;h={$s=>1};y<<h};p e.next;class L;def hash;1;end;end;$h={$s=>2};p e.next[$s];p $h[$s]',
+    ':pause\n1\n2\n',
+  ],
+  [
+    'S=Struct.new(:x);a=S.new;sa=Set[a];a.x=sa;nodes=Array.new(1){S.new};sets=nodes.map{|s|Set[s]};nodes.each_with_index{|s,i|s.x=sets[(i+1)%sets.size]};p a.hash==nodes[0].hash,sa.hash==sets[0].hash;h={a=>1,sa=>2};p h[nodes[0]],h[sets[0]]',
+    'true\ntrue\nnil\nnil\n',
+  ],
+  [
+    'S=Struct.new(:x);a=S.new;sa=Set[a];a.x=sa;nodes=Array.new(2){S.new};sets=nodes.map{|s|Set[s]};nodes.each_with_index{|s,i|s.x=sets[(i+1)%sets.size]};p a.hash==nodes[0].hash,sa.hash==sets[0].hash;h={a=>1,sa=>2};p h[nodes[0]],h[sets[0]]',
+    'true\ntrue\nnil\nnil\n',
+  ],
+  [
+    'S=Struct.new(:x);a=S.new;sa=Set[a];a.x=sa;nodes=Array.new(3){S.new};sets=nodes.map{|s|Set[s]};nodes.each_with_index{|s,i|s.x=sets[(i+1)%sets.size]};p a.hash==nodes[0].hash,sa.hash==sets[0].hash;h={a=>1,sa=>2};p h[nodes[0]],h[sets[0]]',
+    'true\ntrue\nnil\nnil\n',
+  ],
+  [
+    'S=Struct.new(:x,:n){def <=>(x);0;end};def make(n,k,v);a=Array.new(n){S.new(nil,v)};a.each_with_index{|s,i|x=a[(i+1)%n];s.x=case k;when :record;x;when :array;[x];when :hash;{x:x};when :range;(x..x);end};a[0];end;a=make(1,:record,1);b=make(1,:record,1);p a.eql?(b),a.hash==b.hash,{a=>1}[b],[a,b].uniq.size',
+    'true\ntrue\n1\n1\n',
+  ],
+  [
+    'S=Struct.new(:x,:n){def <=>(x);0;end};def make(n,k,v);a=Array.new(n){S.new(nil,v)};a.each_with_index{|s,i|x=a[(i+1)%n];s.x=case k;when :record;x;when :array;[x];when :hash;{x:x};when :range;(x..x);end};a[0];end;a=make(1,:record,1);b=make(1,:record,2);p a.eql?(b),a.hash==b.hash,{a=>1}[b],[a,b].uniq.size',
+    'false\nfalse\nnil\n2\n',
+  ],
+  [
+    'S=Struct.new(:x,:n){def <=>(x);0;end};def make(n,k,v);a=Array.new(n){S.new(nil,v)};a.each_with_index{|s,i|x=a[(i+1)%n];s.x=case k;when :record;x;when :array;[x];when :hash;{x:x};when :range;(x..x);end};a[0];end;a=make(1,:record,1);b=make(2,:record,1);p a.eql?(b),a.hash==b.hash,{a=>1}[b],[a,b].uniq.size',
+    'true\ntrue\n1\n1\n',
+  ],
+  [
+    'S=Struct.new(:x,:n){def <=>(x);0;end};def make(n,k,v);a=Array.new(n){S.new(nil,v)};a.each_with_index{|s,i|x=a[(i+1)%n];s.x=case k;when :record;x;when :array;[x];when :hash;{x:x};when :range;(x..x);end};a[0];end;a=make(1,:record,1);b=make(2,:record,2);p a.eql?(b),a.hash==b.hash,{a=>1}[b],[a,b].uniq.size',
+    'false\nfalse\nnil\n2\n',
+  ],
+  [
+    'S=Struct.new(:x,:n){def <=>(x);0;end};def make(n,k,v);a=Array.new(n){S.new(nil,v)};a.each_with_index{|s,i|x=a[(i+1)%n];s.x=case k;when :record;x;when :array;[x];when :hash;{x:x};when :range;(x..x);end};a[0];end;a=make(1,:record,1);b=make(3,:record,1);p a.eql?(b),a.hash==b.hash,{a=>1}[b],[a,b].uniq.size',
+    'true\ntrue\n1\n1\n',
+  ],
+  [
+    'S=Struct.new(:x,:n){def <=>(x);0;end};def make(n,k,v);a=Array.new(n){S.new(nil,v)};a.each_with_index{|s,i|x=a[(i+1)%n];s.x=case k;when :record;x;when :array;[x];when :hash;{x:x};when :range;(x..x);end};a[0];end;a=make(1,:record,1);b=make(3,:record,2);p a.eql?(b),a.hash==b.hash,{a=>1}[b],[a,b].uniq.size',
+    'false\nfalse\nnil\n2\n',
+  ],
+  [
+    'S=Struct.new(:x,:n){def <=>(x);0;end};def make(n,k,v);a=Array.new(n){S.new(nil,v)};a.each_with_index{|s,i|x=a[(i+1)%n];s.x=case k;when :record;x;when :array;[x];when :hash;{x:x};when :range;(x..x);end};a[0];end;a=make(1,:record,1);b=make(5,:record,1);p a.eql?(b),a.hash==b.hash,{a=>1}[b],[a,b].uniq.size',
+    'true\ntrue\n1\n1\n',
+  ],
+  [
+    'S=Struct.new(:x,:n){def <=>(x);0;end};def make(n,k,v);a=Array.new(n){S.new(nil,v)};a.each_with_index{|s,i|x=a[(i+1)%n];s.x=case k;when :record;x;when :array;[x];when :hash;{x:x};when :range;(x..x);end};a[0];end;a=make(1,:record,1);b=make(5,:record,2);p a.eql?(b),a.hash==b.hash,{a=>1}[b],[a,b].uniq.size',
+    'false\nfalse\nnil\n2\n',
+  ],
+  [
+    'S=Struct.new(:x,:n){def <=>(x);0;end};def make(n,k,v);a=Array.new(n){S.new(nil,v)};a.each_with_index{|s,i|x=a[(i+1)%n];s.x=case k;when :record;x;when :array;[x];when :hash;{x:x};when :range;(x..x);end};a[0];end;a=make(2,:record,1);b=make(1,:record,1);p a.eql?(b),a.hash==b.hash,{a=>1}[b],[a,b].uniq.size',
+    'true\ntrue\n1\n1\n',
+  ],
+  [
+    'S=Struct.new(:x,:n){def <=>(x);0;end};def make(n,k,v);a=Array.new(n){S.new(nil,v)};a.each_with_index{|s,i|x=a[(i+1)%n];s.x=case k;when :record;x;when :array;[x];when :hash;{x:x};when :range;(x..x);end};a[0];end;a=make(2,:record,1);b=make(1,:record,2);p a.eql?(b),a.hash==b.hash,{a=>1}[b],[a,b].uniq.size',
+    'false\nfalse\nnil\n2\n',
+  ],
+  [
+    'S=Struct.new(:x,:n){def <=>(x);0;end};def make(n,k,v);a=Array.new(n){S.new(nil,v)};a.each_with_index{|s,i|x=a[(i+1)%n];s.x=case k;when :record;x;when :array;[x];when :hash;{x:x};when :range;(x..x);end};a[0];end;a=make(2,:record,1);b=make(2,:record,1);p a.eql?(b),a.hash==b.hash,{a=>1}[b],[a,b].uniq.size',
+    'true\ntrue\n1\n1\n',
+  ],
+  [
+    'S=Struct.new(:x,:n){def <=>(x);0;end};def make(n,k,v);a=Array.new(n){S.new(nil,v)};a.each_with_index{|s,i|x=a[(i+1)%n];s.x=case k;when :record;x;when :array;[x];when :hash;{x:x};when :range;(x..x);end};a[0];end;a=make(2,:record,1);b=make(2,:record,2);p a.eql?(b),a.hash==b.hash,{a=>1}[b],[a,b].uniq.size',
+    'false\nfalse\nnil\n2\n',
+  ],
+  [
+    'S=Struct.new(:x,:n){def <=>(x);0;end};def make(n,k,v);a=Array.new(n){S.new(nil,v)};a.each_with_index{|s,i|x=a[(i+1)%n];s.x=case k;when :record;x;when :array;[x];when :hash;{x:x};when :range;(x..x);end};a[0];end;a=make(2,:record,1);b=make(3,:record,1);p a.eql?(b),a.hash==b.hash,{a=>1}[b],[a,b].uniq.size',
+    'true\ntrue\n1\n1\n',
+  ],
+  [
+    'S=Struct.new(:x,:n){def <=>(x);0;end};def make(n,k,v);a=Array.new(n){S.new(nil,v)};a.each_with_index{|s,i|x=a[(i+1)%n];s.x=case k;when :record;x;when :array;[x];when :hash;{x:x};when :range;(x..x);end};a[0];end;a=make(2,:record,1);b=make(3,:record,2);p a.eql?(b),a.hash==b.hash,{a=>1}[b],[a,b].uniq.size',
+    'false\nfalse\nnil\n2\n',
+  ],
+  [
+    'S=Struct.new(:x,:n){def <=>(x);0;end};def make(n,k,v);a=Array.new(n){S.new(nil,v)};a.each_with_index{|s,i|x=a[(i+1)%n];s.x=case k;when :record;x;when :array;[x];when :hash;{x:x};when :range;(x..x);end};a[0];end;a=make(2,:record,1);b=make(5,:record,1);p a.eql?(b),a.hash==b.hash,{a=>1}[b],[a,b].uniq.size',
+    'true\ntrue\n1\n1\n',
+  ],
+  [
+    'S=Struct.new(:x,:n){def <=>(x);0;end};def make(n,k,v);a=Array.new(n){S.new(nil,v)};a.each_with_index{|s,i|x=a[(i+1)%n];s.x=case k;when :record;x;when :array;[x];when :hash;{x:x};when :range;(x..x);end};a[0];end;a=make(2,:record,1);b=make(5,:record,2);p a.eql?(b),a.hash==b.hash,{a=>1}[b],[a,b].uniq.size',
+    'false\nfalse\nnil\n2\n',
+  ],
+  [
+    'S=Struct.new(:x,:n){def <=>(x);0;end};def make(n,k,v);a=Array.new(n){S.new(nil,v)};a.each_with_index{|s,i|x=a[(i+1)%n];s.x=case k;when :record;x;when :array;[x];when :hash;{x:x};when :range;(x..x);end};a[0];end;a=make(3,:record,1);b=make(1,:record,1);p a.eql?(b),a.hash==b.hash,{a=>1}[b],[a,b].uniq.size',
+    'true\ntrue\n1\n1\n',
+  ],
+  [
+    'S=Struct.new(:x,:n){def <=>(x);0;end};def make(n,k,v);a=Array.new(n){S.new(nil,v)};a.each_with_index{|s,i|x=a[(i+1)%n];s.x=case k;when :record;x;when :array;[x];when :hash;{x:x};when :range;(x..x);end};a[0];end;a=make(3,:record,1);b=make(1,:record,2);p a.eql?(b),a.hash==b.hash,{a=>1}[b],[a,b].uniq.size',
+    'false\nfalse\nnil\n2\n',
+  ],
+  [
+    'S=Struct.new(:x,:n){def <=>(x);0;end};def make(n,k,v);a=Array.new(n){S.new(nil,v)};a.each_with_index{|s,i|x=a[(i+1)%n];s.x=case k;when :record;x;when :array;[x];when :hash;{x:x};when :range;(x..x);end};a[0];end;a=make(3,:record,1);b=make(2,:record,1);p a.eql?(b),a.hash==b.hash,{a=>1}[b],[a,b].uniq.size',
+    'true\ntrue\n1\n1\n',
+  ],
+  [
+    'S=Struct.new(:x,:n){def <=>(x);0;end};def make(n,k,v);a=Array.new(n){S.new(nil,v)};a.each_with_index{|s,i|x=a[(i+1)%n];s.x=case k;when :record;x;when :array;[x];when :hash;{x:x};when :range;(x..x);end};a[0];end;a=make(3,:record,1);b=make(2,:record,2);p a.eql?(b),a.hash==b.hash,{a=>1}[b],[a,b].uniq.size',
+    'false\nfalse\nnil\n2\n',
+  ],
+  [
+    'S=Struct.new(:x,:n){def <=>(x);0;end};def make(n,k,v);a=Array.new(n){S.new(nil,v)};a.each_with_index{|s,i|x=a[(i+1)%n];s.x=case k;when :record;x;when :array;[x];when :hash;{x:x};when :range;(x..x);end};a[0];end;a=make(3,:record,1);b=make(3,:record,1);p a.eql?(b),a.hash==b.hash,{a=>1}[b],[a,b].uniq.size',
+    'true\ntrue\n1\n1\n',
+  ],
+  [
+    'S=Struct.new(:x,:n){def <=>(x);0;end};def make(n,k,v);a=Array.new(n){S.new(nil,v)};a.each_with_index{|s,i|x=a[(i+1)%n];s.x=case k;when :record;x;when :array;[x];when :hash;{x:x};when :range;(x..x);end};a[0];end;a=make(3,:record,1);b=make(3,:record,2);p a.eql?(b),a.hash==b.hash,{a=>1}[b],[a,b].uniq.size',
+    'false\nfalse\nnil\n2\n',
+  ],
+  [
+    'S=Struct.new(:x,:n){def <=>(x);0;end};def make(n,k,v);a=Array.new(n){S.new(nil,v)};a.each_with_index{|s,i|x=a[(i+1)%n];s.x=case k;when :record;x;when :array;[x];when :hash;{x:x};when :range;(x..x);end};a[0];end;a=make(3,:record,1);b=make(5,:record,1);p a.eql?(b),a.hash==b.hash,{a=>1}[b],[a,b].uniq.size',
+    'true\ntrue\n1\n1\n',
+  ],
+  [
+    'S=Struct.new(:x,:n){def <=>(x);0;end};def make(n,k,v);a=Array.new(n){S.new(nil,v)};a.each_with_index{|s,i|x=a[(i+1)%n];s.x=case k;when :record;x;when :array;[x];when :hash;{x:x};when :range;(x..x);end};a[0];end;a=make(3,:record,1);b=make(5,:record,2);p a.eql?(b),a.hash==b.hash,{a=>1}[b],[a,b].uniq.size',
+    'false\nfalse\nnil\n2\n',
+  ],
+  [
+    'S=Struct.new(:x,:n){def <=>(x);0;end};def make(n,k,v);a=Array.new(n){S.new(nil,v)};a.each_with_index{|s,i|x=a[(i+1)%n];s.x=case k;when :record;x;when :array;[x];when :hash;{x:x};when :range;(x..x);end};a[0];end;a=make(5,:record,1);b=make(1,:record,1);p a.eql?(b),a.hash==b.hash,{a=>1}[b],[a,b].uniq.size',
+    'true\ntrue\n1\n1\n',
+  ],
+  [
+    'S=Struct.new(:x,:n){def <=>(x);0;end};def make(n,k,v);a=Array.new(n){S.new(nil,v)};a.each_with_index{|s,i|x=a[(i+1)%n];s.x=case k;when :record;x;when :array;[x];when :hash;{x:x};when :range;(x..x);end};a[0];end;a=make(5,:record,1);b=make(1,:record,2);p a.eql?(b),a.hash==b.hash,{a=>1}[b],[a,b].uniq.size',
+    'false\nfalse\nnil\n2\n',
+  ],
+  [
+    'S=Struct.new(:x,:n){def <=>(x);0;end};def make(n,k,v);a=Array.new(n){S.new(nil,v)};a.each_with_index{|s,i|x=a[(i+1)%n];s.x=case k;when :record;x;when :array;[x];when :hash;{x:x};when :range;(x..x);end};a[0];end;a=make(5,:record,1);b=make(2,:record,1);p a.eql?(b),a.hash==b.hash,{a=>1}[b],[a,b].uniq.size',
+    'true\ntrue\n1\n1\n',
+  ],
+  [
+    'S=Struct.new(:x,:n){def <=>(x);0;end};def make(n,k,v);a=Array.new(n){S.new(nil,v)};a.each_with_index{|s,i|x=a[(i+1)%n];s.x=case k;when :record;x;when :array;[x];when :hash;{x:x};when :range;(x..x);end};a[0];end;a=make(5,:record,1);b=make(2,:record,2);p a.eql?(b),a.hash==b.hash,{a=>1}[b],[a,b].uniq.size',
+    'false\nfalse\nnil\n2\n',
+  ],
+  [
+    'S=Struct.new(:x,:n){def <=>(x);0;end};def make(n,k,v);a=Array.new(n){S.new(nil,v)};a.each_with_index{|s,i|x=a[(i+1)%n];s.x=case k;when :record;x;when :array;[x];when :hash;{x:x};when :range;(x..x);end};a[0];end;a=make(5,:record,1);b=make(3,:record,1);p a.eql?(b),a.hash==b.hash,{a=>1}[b],[a,b].uniq.size',
+    'true\ntrue\n1\n1\n',
+  ],
+  [
+    'S=Struct.new(:x,:n){def <=>(x);0;end};def make(n,k,v);a=Array.new(n){S.new(nil,v)};a.each_with_index{|s,i|x=a[(i+1)%n];s.x=case k;when :record;x;when :array;[x];when :hash;{x:x};when :range;(x..x);end};a[0];end;a=make(5,:record,1);b=make(3,:record,2);p a.eql?(b),a.hash==b.hash,{a=>1}[b],[a,b].uniq.size',
+    'false\nfalse\nnil\n2\n',
+  ],
+  [
+    'S=Struct.new(:x,:n){def <=>(x);0;end};def make(n,k,v);a=Array.new(n){S.new(nil,v)};a.each_with_index{|s,i|x=a[(i+1)%n];s.x=case k;when :record;x;when :array;[x];when :hash;{x:x};when :range;(x..x);end};a[0];end;a=make(5,:record,1);b=make(5,:record,1);p a.eql?(b),a.hash==b.hash,{a=>1}[b],[a,b].uniq.size',
+    'true\ntrue\n1\n1\n',
+  ],
+  [
+    'S=Struct.new(:x,:n){def <=>(x);0;end};def make(n,k,v);a=Array.new(n){S.new(nil,v)};a.each_with_index{|s,i|x=a[(i+1)%n];s.x=case k;when :record;x;when :array;[x];when :hash;{x:x};when :range;(x..x);end};a[0];end;a=make(5,:record,1);b=make(5,:record,2);p a.eql?(b),a.hash==b.hash,{a=>1}[b],[a,b].uniq.size',
+    'false\nfalse\nnil\n2\n',
+  ],
+  [
+    'S=Struct.new(:x,:n){def <=>(x);0;end};def make(n,k,v);a=Array.new(n){S.new(nil,v)};a.each_with_index{|s,i|x=a[(i+1)%n];s.x=case k;when :record;x;when :array;[x];when :hash;{x:x};when :range;(x..x);end};a[0];end;a=make(1,:array,1);b=make(1,:array,1);p a.eql?(b),a.hash==b.hash,{a=>1}[b],[a,b].uniq.size',
+    'true\ntrue\n1\n1\n',
+  ],
+  [
+    'S=Struct.new(:x,:n){def <=>(x);0;end};def make(n,k,v);a=Array.new(n){S.new(nil,v)};a.each_with_index{|s,i|x=a[(i+1)%n];s.x=case k;when :record;x;when :array;[x];when :hash;{x:x};when :range;(x..x);end};a[0];end;a=make(1,:array,1);b=make(1,:array,2);p a.eql?(b),a.hash==b.hash,{a=>1}[b],[a,b].uniq.size',
+    'false\nfalse\nnil\n2\n',
+  ],
+  [
+    'S=Struct.new(:x,:n){def <=>(x);0;end};def make(n,k,v);a=Array.new(n){S.new(nil,v)};a.each_with_index{|s,i|x=a[(i+1)%n];s.x=case k;when :record;x;when :array;[x];when :hash;{x:x};when :range;(x..x);end};a[0];end;a=make(1,:array,1);b=make(2,:array,1);p a.eql?(b),a.hash==b.hash,{a=>1}[b],[a,b].uniq.size',
+    'true\ntrue\n1\n1\n',
+  ],
+  [
+    'S=Struct.new(:x,:n){def <=>(x);0;end};def make(n,k,v);a=Array.new(n){S.new(nil,v)};a.each_with_index{|s,i|x=a[(i+1)%n];s.x=case k;when :record;x;when :array;[x];when :hash;{x:x};when :range;(x..x);end};a[0];end;a=make(1,:array,1);b=make(2,:array,2);p a.eql?(b),a.hash==b.hash,{a=>1}[b],[a,b].uniq.size',
+    'false\nfalse\nnil\n2\n',
+  ],
+  [
+    'S=Struct.new(:x,:n){def <=>(x);0;end};def make(n,k,v);a=Array.new(n){S.new(nil,v)};a.each_with_index{|s,i|x=a[(i+1)%n];s.x=case k;when :record;x;when :array;[x];when :hash;{x:x};when :range;(x..x);end};a[0];end;a=make(1,:array,1);b=make(3,:array,1);p a.eql?(b),a.hash==b.hash,{a=>1}[b],[a,b].uniq.size',
+    'true\ntrue\n1\n1\n',
+  ],
+  [
+    'S=Struct.new(:x,:n){def <=>(x);0;end};def make(n,k,v);a=Array.new(n){S.new(nil,v)};a.each_with_index{|s,i|x=a[(i+1)%n];s.x=case k;when :record;x;when :array;[x];when :hash;{x:x};when :range;(x..x);end};a[0];end;a=make(1,:array,1);b=make(3,:array,2);p a.eql?(b),a.hash==b.hash,{a=>1}[b],[a,b].uniq.size',
+    'false\nfalse\nnil\n2\n',
+  ],
+  [
+    'S=Struct.new(:x,:n){def <=>(x);0;end};def make(n,k,v);a=Array.new(n){S.new(nil,v)};a.each_with_index{|s,i|x=a[(i+1)%n];s.x=case k;when :record;x;when :array;[x];when :hash;{x:x};when :range;(x..x);end};a[0];end;a=make(1,:array,1);b=make(5,:array,1);p a.eql?(b),a.hash==b.hash,{a=>1}[b],[a,b].uniq.size',
+    'true\ntrue\n1\n1\n',
+  ],
+  [
+    'S=Struct.new(:x,:n){def <=>(x);0;end};def make(n,k,v);a=Array.new(n){S.new(nil,v)};a.each_with_index{|s,i|x=a[(i+1)%n];s.x=case k;when :record;x;when :array;[x];when :hash;{x:x};when :range;(x..x);end};a[0];end;a=make(1,:array,1);b=make(5,:array,2);p a.eql?(b),a.hash==b.hash,{a=>1}[b],[a,b].uniq.size',
+    'false\nfalse\nnil\n2\n',
+  ],
+  [
+    'S=Struct.new(:x,:n){def <=>(x);0;end};def make(n,k,v);a=Array.new(n){S.new(nil,v)};a.each_with_index{|s,i|x=a[(i+1)%n];s.x=case k;when :record;x;when :array;[x];when :hash;{x:x};when :range;(x..x);end};a[0];end;a=make(2,:array,1);b=make(1,:array,1);p a.eql?(b),a.hash==b.hash,{a=>1}[b],[a,b].uniq.size',
+    'true\ntrue\n1\n1\n',
+  ],
+  [
+    'S=Struct.new(:x,:n){def <=>(x);0;end};def make(n,k,v);a=Array.new(n){S.new(nil,v)};a.each_with_index{|s,i|x=a[(i+1)%n];s.x=case k;when :record;x;when :array;[x];when :hash;{x:x};when :range;(x..x);end};a[0];end;a=make(2,:array,1);b=make(1,:array,2);p a.eql?(b),a.hash==b.hash,{a=>1}[b],[a,b].uniq.size',
+    'false\nfalse\nnil\n2\n',
+  ],
+  [
+    'S=Struct.new(:x,:n){def <=>(x);0;end};def make(n,k,v);a=Array.new(n){S.new(nil,v)};a.each_with_index{|s,i|x=a[(i+1)%n];s.x=case k;when :record;x;when :array;[x];when :hash;{x:x};when :range;(x..x);end};a[0];end;a=make(2,:array,1);b=make(2,:array,1);p a.eql?(b),a.hash==b.hash,{a=>1}[b],[a,b].uniq.size',
+    'true\ntrue\n1\n1\n',
+  ],
+  [
+    'S=Struct.new(:x,:n){def <=>(x);0;end};def make(n,k,v);a=Array.new(n){S.new(nil,v)};a.each_with_index{|s,i|x=a[(i+1)%n];s.x=case k;when :record;x;when :array;[x];when :hash;{x:x};when :range;(x..x);end};a[0];end;a=make(2,:array,1);b=make(2,:array,2);p a.eql?(b),a.hash==b.hash,{a=>1}[b],[a,b].uniq.size',
+    'false\nfalse\nnil\n2\n',
+  ],
+  [
+    'S=Struct.new(:x,:n){def <=>(x);0;end};def make(n,k,v);a=Array.new(n){S.new(nil,v)};a.each_with_index{|s,i|x=a[(i+1)%n];s.x=case k;when :record;x;when :array;[x];when :hash;{x:x};when :range;(x..x);end};a[0];end;a=make(2,:array,1);b=make(3,:array,1);p a.eql?(b),a.hash==b.hash,{a=>1}[b],[a,b].uniq.size',
+    'true\ntrue\n1\n1\n',
+  ],
+  [
+    'S=Struct.new(:x,:n){def <=>(x);0;end};def make(n,k,v);a=Array.new(n){S.new(nil,v)};a.each_with_index{|s,i|x=a[(i+1)%n];s.x=case k;when :record;x;when :array;[x];when :hash;{x:x};when :range;(x..x);end};a[0];end;a=make(2,:array,1);b=make(3,:array,2);p a.eql?(b),a.hash==b.hash,{a=>1}[b],[a,b].uniq.size',
+    'false\nfalse\nnil\n2\n',
+  ],
+  [
+    'S=Struct.new(:x,:n){def <=>(x);0;end};def make(n,k,v);a=Array.new(n){S.new(nil,v)};a.each_with_index{|s,i|x=a[(i+1)%n];s.x=case k;when :record;x;when :array;[x];when :hash;{x:x};when :range;(x..x);end};a[0];end;a=make(2,:array,1);b=make(5,:array,1);p a.eql?(b),a.hash==b.hash,{a=>1}[b],[a,b].uniq.size',
+    'true\ntrue\n1\n1\n',
+  ],
+  [
+    'S=Struct.new(:x,:n){def <=>(x);0;end};def make(n,k,v);a=Array.new(n){S.new(nil,v)};a.each_with_index{|s,i|x=a[(i+1)%n];s.x=case k;when :record;x;when :array;[x];when :hash;{x:x};when :range;(x..x);end};a[0];end;a=make(2,:array,1);b=make(5,:array,2);p a.eql?(b),a.hash==b.hash,{a=>1}[b],[a,b].uniq.size',
+    'false\nfalse\nnil\n2\n',
+  ],
+  [
+    'S=Struct.new(:x,:n){def <=>(x);0;end};def make(n,k,v);a=Array.new(n){S.new(nil,v)};a.each_with_index{|s,i|x=a[(i+1)%n];s.x=case k;when :record;x;when :array;[x];when :hash;{x:x};when :range;(x..x);end};a[0];end;a=make(3,:array,1);b=make(1,:array,1);p a.eql?(b),a.hash==b.hash,{a=>1}[b],[a,b].uniq.size',
+    'true\ntrue\n1\n1\n',
+  ],
+  [
+    'S=Struct.new(:x,:n){def <=>(x);0;end};def make(n,k,v);a=Array.new(n){S.new(nil,v)};a.each_with_index{|s,i|x=a[(i+1)%n];s.x=case k;when :record;x;when :array;[x];when :hash;{x:x};when :range;(x..x);end};a[0];end;a=make(3,:array,1);b=make(1,:array,2);p a.eql?(b),a.hash==b.hash,{a=>1}[b],[a,b].uniq.size',
+    'false\nfalse\nnil\n2\n',
+  ],
+  [
+    'S=Struct.new(:x,:n){def <=>(x);0;end};def make(n,k,v);a=Array.new(n){S.new(nil,v)};a.each_with_index{|s,i|x=a[(i+1)%n];s.x=case k;when :record;x;when :array;[x];when :hash;{x:x};when :range;(x..x);end};a[0];end;a=make(3,:array,1);b=make(2,:array,1);p a.eql?(b),a.hash==b.hash,{a=>1}[b],[a,b].uniq.size',
+    'true\ntrue\n1\n1\n',
+  ],
+  [
+    'S=Struct.new(:x,:n){def <=>(x);0;end};def make(n,k,v);a=Array.new(n){S.new(nil,v)};a.each_with_index{|s,i|x=a[(i+1)%n];s.x=case k;when :record;x;when :array;[x];when :hash;{x:x};when :range;(x..x);end};a[0];end;a=make(3,:array,1);b=make(2,:array,2);p a.eql?(b),a.hash==b.hash,{a=>1}[b],[a,b].uniq.size',
+    'false\nfalse\nnil\n2\n',
+  ],
+  [
+    'S=Struct.new(:x,:n){def <=>(x);0;end};def make(n,k,v);a=Array.new(n){S.new(nil,v)};a.each_with_index{|s,i|x=a[(i+1)%n];s.x=case k;when :record;x;when :array;[x];when :hash;{x:x};when :range;(x..x);end};a[0];end;a=make(3,:array,1);b=make(3,:array,1);p a.eql?(b),a.hash==b.hash,{a=>1}[b],[a,b].uniq.size',
+    'true\ntrue\n1\n1\n',
+  ],
+  [
+    'S=Struct.new(:x,:n){def <=>(x);0;end};def make(n,k,v);a=Array.new(n){S.new(nil,v)};a.each_with_index{|s,i|x=a[(i+1)%n];s.x=case k;when :record;x;when :array;[x];when :hash;{x:x};when :range;(x..x);end};a[0];end;a=make(3,:array,1);b=make(3,:array,2);p a.eql?(b),a.hash==b.hash,{a=>1}[b],[a,b].uniq.size',
+    'false\nfalse\nnil\n2\n',
+  ],
+  [
+    'S=Struct.new(:x,:n){def <=>(x);0;end};def make(n,k,v);a=Array.new(n){S.new(nil,v)};a.each_with_index{|s,i|x=a[(i+1)%n];s.x=case k;when :record;x;when :array;[x];when :hash;{x:x};when :range;(x..x);end};a[0];end;a=make(3,:array,1);b=make(5,:array,1);p a.eql?(b),a.hash==b.hash,{a=>1}[b],[a,b].uniq.size',
+    'true\ntrue\n1\n1\n',
+  ],
+  [
+    'S=Struct.new(:x,:n){def <=>(x);0;end};def make(n,k,v);a=Array.new(n){S.new(nil,v)};a.each_with_index{|s,i|x=a[(i+1)%n];s.x=case k;when :record;x;when :array;[x];when :hash;{x:x};when :range;(x..x);end};a[0];end;a=make(3,:array,1);b=make(5,:array,2);p a.eql?(b),a.hash==b.hash,{a=>1}[b],[a,b].uniq.size',
+    'false\nfalse\nnil\n2\n',
+  ],
+  [
+    'S=Struct.new(:x,:n){def <=>(x);0;end};def make(n,k,v);a=Array.new(n){S.new(nil,v)};a.each_with_index{|s,i|x=a[(i+1)%n];s.x=case k;when :record;x;when :array;[x];when :hash;{x:x};when :range;(x..x);end};a[0];end;a=make(5,:array,1);b=make(1,:array,1);p a.eql?(b),a.hash==b.hash,{a=>1}[b],[a,b].uniq.size',
+    'true\ntrue\n1\n1\n',
+  ],
+  [
+    'S=Struct.new(:x,:n){def <=>(x);0;end};def make(n,k,v);a=Array.new(n){S.new(nil,v)};a.each_with_index{|s,i|x=a[(i+1)%n];s.x=case k;when :record;x;when :array;[x];when :hash;{x:x};when :range;(x..x);end};a[0];end;a=make(5,:array,1);b=make(1,:array,2);p a.eql?(b),a.hash==b.hash,{a=>1}[b],[a,b].uniq.size',
+    'false\nfalse\nnil\n2\n',
+  ],
+  [
+    'S=Struct.new(:x,:n){def <=>(x);0;end};def make(n,k,v);a=Array.new(n){S.new(nil,v)};a.each_with_index{|s,i|x=a[(i+1)%n];s.x=case k;when :record;x;when :array;[x];when :hash;{x:x};when :range;(x..x);end};a[0];end;a=make(5,:array,1);b=make(2,:array,1);p a.eql?(b),a.hash==b.hash,{a=>1}[b],[a,b].uniq.size',
+    'true\ntrue\n1\n1\n',
+  ],
+  [
+    'S=Struct.new(:x,:n){def <=>(x);0;end};def make(n,k,v);a=Array.new(n){S.new(nil,v)};a.each_with_index{|s,i|x=a[(i+1)%n];s.x=case k;when :record;x;when :array;[x];when :hash;{x:x};when :range;(x..x);end};a[0];end;a=make(5,:array,1);b=make(2,:array,2);p a.eql?(b),a.hash==b.hash,{a=>1}[b],[a,b].uniq.size',
+    'false\nfalse\nnil\n2\n',
+  ],
+  [
+    'S=Struct.new(:x,:n){def <=>(x);0;end};def make(n,k,v);a=Array.new(n){S.new(nil,v)};a.each_with_index{|s,i|x=a[(i+1)%n];s.x=case k;when :record;x;when :array;[x];when :hash;{x:x};when :range;(x..x);end};a[0];end;a=make(5,:array,1);b=make(3,:array,1);p a.eql?(b),a.hash==b.hash,{a=>1}[b],[a,b].uniq.size',
+    'true\ntrue\n1\n1\n',
+  ],
+  [
+    'S=Struct.new(:x,:n){def <=>(x);0;end};def make(n,k,v);a=Array.new(n){S.new(nil,v)};a.each_with_index{|s,i|x=a[(i+1)%n];s.x=case k;when :record;x;when :array;[x];when :hash;{x:x};when :range;(x..x);end};a[0];end;a=make(5,:array,1);b=make(3,:array,2);p a.eql?(b),a.hash==b.hash,{a=>1}[b],[a,b].uniq.size',
+    'false\nfalse\nnil\n2\n',
+  ],
+  [
+    'S=Struct.new(:x,:n){def <=>(x);0;end};def make(n,k,v);a=Array.new(n){S.new(nil,v)};a.each_with_index{|s,i|x=a[(i+1)%n];s.x=case k;when :record;x;when :array;[x];when :hash;{x:x};when :range;(x..x);end};a[0];end;a=make(5,:array,1);b=make(5,:array,1);p a.eql?(b),a.hash==b.hash,{a=>1}[b],[a,b].uniq.size',
+    'true\ntrue\n1\n1\n',
+  ],
+  [
+    'S=Struct.new(:x,:n){def <=>(x);0;end};def make(n,k,v);a=Array.new(n){S.new(nil,v)};a.each_with_index{|s,i|x=a[(i+1)%n];s.x=case k;when :record;x;when :array;[x];when :hash;{x:x};when :range;(x..x);end};a[0];end;a=make(5,:array,1);b=make(5,:array,2);p a.eql?(b),a.hash==b.hash,{a=>1}[b],[a,b].uniq.size',
+    'false\nfalse\nnil\n2\n',
+  ],
+  [
+    'S=Struct.new(:x,:n){def <=>(x);0;end};def make(n,k,v);a=Array.new(n){S.new(nil,v)};a.each_with_index{|s,i|x=a[(i+1)%n];s.x=case k;when :record;x;when :array;[x];when :hash;{x:x};when :range;(x..x);end};a[0];end;a=make(1,:hash,1);b=make(1,:hash,1);p a.eql?(b),a.hash==b.hash,{a=>1}[b],[a,b].uniq.size',
+    'true\ntrue\n1\n1\n',
+  ],
+  [
+    'S=Struct.new(:x,:n){def <=>(x);0;end};def make(n,k,v);a=Array.new(n){S.new(nil,v)};a.each_with_index{|s,i|x=a[(i+1)%n];s.x=case k;when :record;x;when :array;[x];when :hash;{x:x};when :range;(x..x);end};a[0];end;a=make(1,:hash,1);b=make(1,:hash,2);p a.eql?(b),a.hash==b.hash,{a=>1}[b],[a,b].uniq.size',
+    'false\nfalse\nnil\n2\n',
+  ],
+  [
+    'S=Struct.new(:x,:n){def <=>(x);0;end};def make(n,k,v);a=Array.new(n){S.new(nil,v)};a.each_with_index{|s,i|x=a[(i+1)%n];s.x=case k;when :record;x;when :array;[x];when :hash;{x:x};when :range;(x..x);end};a[0];end;a=make(1,:hash,1);b=make(2,:hash,1);p a.eql?(b),a.hash==b.hash,{a=>1}[b],[a,b].uniq.size',
+    'true\ntrue\n1\n1\n',
+  ],
+  [
+    'S=Struct.new(:x,:n){def <=>(x);0;end};def make(n,k,v);a=Array.new(n){S.new(nil,v)};a.each_with_index{|s,i|x=a[(i+1)%n];s.x=case k;when :record;x;when :array;[x];when :hash;{x:x};when :range;(x..x);end};a[0];end;a=make(1,:hash,1);b=make(2,:hash,2);p a.eql?(b),a.hash==b.hash,{a=>1}[b],[a,b].uniq.size',
+    'false\nfalse\nnil\n2\n',
+  ],
+  [
+    'S=Struct.new(:x,:n){def <=>(x);0;end};def make(n,k,v);a=Array.new(n){S.new(nil,v)};a.each_with_index{|s,i|x=a[(i+1)%n];s.x=case k;when :record;x;when :array;[x];when :hash;{x:x};when :range;(x..x);end};a[0];end;a=make(1,:hash,1);b=make(3,:hash,1);p a.eql?(b),a.hash==b.hash,{a=>1}[b],[a,b].uniq.size',
+    'true\ntrue\n1\n1\n',
+  ],
+  [
+    'S=Struct.new(:x,:n){def <=>(x);0;end};def make(n,k,v);a=Array.new(n){S.new(nil,v)};a.each_with_index{|s,i|x=a[(i+1)%n];s.x=case k;when :record;x;when :array;[x];when :hash;{x:x};when :range;(x..x);end};a[0];end;a=make(1,:hash,1);b=make(3,:hash,2);p a.eql?(b),a.hash==b.hash,{a=>1}[b],[a,b].uniq.size',
+    'false\nfalse\nnil\n2\n',
+  ],
+  [
+    'S=Struct.new(:x,:n){def <=>(x);0;end};def make(n,k,v);a=Array.new(n){S.new(nil,v)};a.each_with_index{|s,i|x=a[(i+1)%n];s.x=case k;when :record;x;when :array;[x];when :hash;{x:x};when :range;(x..x);end};a[0];end;a=make(1,:hash,1);b=make(5,:hash,1);p a.eql?(b),a.hash==b.hash,{a=>1}[b],[a,b].uniq.size',
+    'true\ntrue\n1\n1\n',
+  ],
+  [
+    'S=Struct.new(:x,:n){def <=>(x);0;end};def make(n,k,v);a=Array.new(n){S.new(nil,v)};a.each_with_index{|s,i|x=a[(i+1)%n];s.x=case k;when :record;x;when :array;[x];when :hash;{x:x};when :range;(x..x);end};a[0];end;a=make(1,:hash,1);b=make(5,:hash,2);p a.eql?(b),a.hash==b.hash,{a=>1}[b],[a,b].uniq.size',
+    'false\nfalse\nnil\n2\n',
+  ],
+  [
+    'S=Struct.new(:x,:n){def <=>(x);0;end};def make(n,k,v);a=Array.new(n){S.new(nil,v)};a.each_with_index{|s,i|x=a[(i+1)%n];s.x=case k;when :record;x;when :array;[x];when :hash;{x:x};when :range;(x..x);end};a[0];end;a=make(2,:hash,1);b=make(1,:hash,1);p a.eql?(b),a.hash==b.hash,{a=>1}[b],[a,b].uniq.size',
+    'true\ntrue\n1\n1\n',
+  ],
+  [
+    'S=Struct.new(:x,:n){def <=>(x);0;end};def make(n,k,v);a=Array.new(n){S.new(nil,v)};a.each_with_index{|s,i|x=a[(i+1)%n];s.x=case k;when :record;x;when :array;[x];when :hash;{x:x};when :range;(x..x);end};a[0];end;a=make(2,:hash,1);b=make(1,:hash,2);p a.eql?(b),a.hash==b.hash,{a=>1}[b],[a,b].uniq.size',
+    'false\nfalse\nnil\n2\n',
+  ],
+  [
+    'S=Struct.new(:x,:n){def <=>(x);0;end};def make(n,k,v);a=Array.new(n){S.new(nil,v)};a.each_with_index{|s,i|x=a[(i+1)%n];s.x=case k;when :record;x;when :array;[x];when :hash;{x:x};when :range;(x..x);end};a[0];end;a=make(2,:hash,1);b=make(2,:hash,1);p a.eql?(b),a.hash==b.hash,{a=>1}[b],[a,b].uniq.size',
+    'true\ntrue\n1\n1\n',
+  ],
+  [
+    'S=Struct.new(:x,:n){def <=>(x);0;end};def make(n,k,v);a=Array.new(n){S.new(nil,v)};a.each_with_index{|s,i|x=a[(i+1)%n];s.x=case k;when :record;x;when :array;[x];when :hash;{x:x};when :range;(x..x);end};a[0];end;a=make(2,:hash,1);b=make(2,:hash,2);p a.eql?(b),a.hash==b.hash,{a=>1}[b],[a,b].uniq.size',
+    'false\nfalse\nnil\n2\n',
+  ],
+  [
+    'S=Struct.new(:x,:n){def <=>(x);0;end};def make(n,k,v);a=Array.new(n){S.new(nil,v)};a.each_with_index{|s,i|x=a[(i+1)%n];s.x=case k;when :record;x;when :array;[x];when :hash;{x:x};when :range;(x..x);end};a[0];end;a=make(2,:hash,1);b=make(3,:hash,1);p a.eql?(b),a.hash==b.hash,{a=>1}[b],[a,b].uniq.size',
+    'true\ntrue\n1\n1\n',
+  ],
+  [
+    'S=Struct.new(:x,:n){def <=>(x);0;end};def make(n,k,v);a=Array.new(n){S.new(nil,v)};a.each_with_index{|s,i|x=a[(i+1)%n];s.x=case k;when :record;x;when :array;[x];when :hash;{x:x};when :range;(x..x);end};a[0];end;a=make(2,:hash,1);b=make(3,:hash,2);p a.eql?(b),a.hash==b.hash,{a=>1}[b],[a,b].uniq.size',
+    'false\nfalse\nnil\n2\n',
+  ],
+  [
+    'S=Struct.new(:x,:n){def <=>(x);0;end};def make(n,k,v);a=Array.new(n){S.new(nil,v)};a.each_with_index{|s,i|x=a[(i+1)%n];s.x=case k;when :record;x;when :array;[x];when :hash;{x:x};when :range;(x..x);end};a[0];end;a=make(2,:hash,1);b=make(5,:hash,1);p a.eql?(b),a.hash==b.hash,{a=>1}[b],[a,b].uniq.size',
+    'true\ntrue\n1\n1\n',
+  ],
+  [
+    'S=Struct.new(:x,:n){def <=>(x);0;end};def make(n,k,v);a=Array.new(n){S.new(nil,v)};a.each_with_index{|s,i|x=a[(i+1)%n];s.x=case k;when :record;x;when :array;[x];when :hash;{x:x};when :range;(x..x);end};a[0];end;a=make(2,:hash,1);b=make(5,:hash,2);p a.eql?(b),a.hash==b.hash,{a=>1}[b],[a,b].uniq.size',
+    'false\nfalse\nnil\n2\n',
+  ],
+  [
+    'S=Struct.new(:x,:n){def <=>(x);0;end};def make(n,k,v);a=Array.new(n){S.new(nil,v)};a.each_with_index{|s,i|x=a[(i+1)%n];s.x=case k;when :record;x;when :array;[x];when :hash;{x:x};when :range;(x..x);end};a[0];end;a=make(3,:hash,1);b=make(1,:hash,1);p a.eql?(b),a.hash==b.hash,{a=>1}[b],[a,b].uniq.size',
+    'true\ntrue\n1\n1\n',
+  ],
+  [
+    'S=Struct.new(:x,:n){def <=>(x);0;end};def make(n,k,v);a=Array.new(n){S.new(nil,v)};a.each_with_index{|s,i|x=a[(i+1)%n];s.x=case k;when :record;x;when :array;[x];when :hash;{x:x};when :range;(x..x);end};a[0];end;a=make(3,:hash,1);b=make(1,:hash,2);p a.eql?(b),a.hash==b.hash,{a=>1}[b],[a,b].uniq.size',
+    'false\nfalse\nnil\n2\n',
+  ],
+  [
+    'S=Struct.new(:x,:n){def <=>(x);0;end};def make(n,k,v);a=Array.new(n){S.new(nil,v)};a.each_with_index{|s,i|x=a[(i+1)%n];s.x=case k;when :record;x;when :array;[x];when :hash;{x:x};when :range;(x..x);end};a[0];end;a=make(3,:hash,1);b=make(2,:hash,1);p a.eql?(b),a.hash==b.hash,{a=>1}[b],[a,b].uniq.size',
+    'true\ntrue\n1\n1\n',
+  ],
+  [
+    'S=Struct.new(:x,:n){def <=>(x);0;end};def make(n,k,v);a=Array.new(n){S.new(nil,v)};a.each_with_index{|s,i|x=a[(i+1)%n];s.x=case k;when :record;x;when :array;[x];when :hash;{x:x};when :range;(x..x);end};a[0];end;a=make(3,:hash,1);b=make(2,:hash,2);p a.eql?(b),a.hash==b.hash,{a=>1}[b],[a,b].uniq.size',
+    'false\nfalse\nnil\n2\n',
+  ],
+  [
+    'S=Struct.new(:x,:n){def <=>(x);0;end};def make(n,k,v);a=Array.new(n){S.new(nil,v)};a.each_with_index{|s,i|x=a[(i+1)%n];s.x=case k;when :record;x;when :array;[x];when :hash;{x:x};when :range;(x..x);end};a[0];end;a=make(3,:hash,1);b=make(3,:hash,1);p a.eql?(b),a.hash==b.hash,{a=>1}[b],[a,b].uniq.size',
+    'true\ntrue\n1\n1\n',
+  ],
+  [
+    'S=Struct.new(:x,:n){def <=>(x);0;end};def make(n,k,v);a=Array.new(n){S.new(nil,v)};a.each_with_index{|s,i|x=a[(i+1)%n];s.x=case k;when :record;x;when :array;[x];when :hash;{x:x};when :range;(x..x);end};a[0];end;a=make(3,:hash,1);b=make(3,:hash,2);p a.eql?(b),a.hash==b.hash,{a=>1}[b],[a,b].uniq.size',
+    'false\nfalse\nnil\n2\n',
+  ],
+  [
+    'S=Struct.new(:x,:n){def <=>(x);0;end};def make(n,k,v);a=Array.new(n){S.new(nil,v)};a.each_with_index{|s,i|x=a[(i+1)%n];s.x=case k;when :record;x;when :array;[x];when :hash;{x:x};when :range;(x..x);end};a[0];end;a=make(3,:hash,1);b=make(5,:hash,1);p a.eql?(b),a.hash==b.hash,{a=>1}[b],[a,b].uniq.size',
+    'true\ntrue\n1\n1\n',
+  ],
+  [
+    'S=Struct.new(:x,:n){def <=>(x);0;end};def make(n,k,v);a=Array.new(n){S.new(nil,v)};a.each_with_index{|s,i|x=a[(i+1)%n];s.x=case k;when :record;x;when :array;[x];when :hash;{x:x};when :range;(x..x);end};a[0];end;a=make(3,:hash,1);b=make(5,:hash,2);p a.eql?(b),a.hash==b.hash,{a=>1}[b],[a,b].uniq.size',
+    'false\nfalse\nnil\n2\n',
+  ],
+  [
+    'S=Struct.new(:x,:n){def <=>(x);0;end};def make(n,k,v);a=Array.new(n){S.new(nil,v)};a.each_with_index{|s,i|x=a[(i+1)%n];s.x=case k;when :record;x;when :array;[x];when :hash;{x:x};when :range;(x..x);end};a[0];end;a=make(5,:hash,1);b=make(1,:hash,1);p a.eql?(b),a.hash==b.hash,{a=>1}[b],[a,b].uniq.size',
+    'true\ntrue\n1\n1\n',
+  ],
+  [
+    'S=Struct.new(:x,:n){def <=>(x);0;end};def make(n,k,v);a=Array.new(n){S.new(nil,v)};a.each_with_index{|s,i|x=a[(i+1)%n];s.x=case k;when :record;x;when :array;[x];when :hash;{x:x};when :range;(x..x);end};a[0];end;a=make(5,:hash,1);b=make(1,:hash,2);p a.eql?(b),a.hash==b.hash,{a=>1}[b],[a,b].uniq.size',
+    'false\nfalse\nnil\n2\n',
+  ],
+  [
+    'S=Struct.new(:x,:n){def <=>(x);0;end};def make(n,k,v);a=Array.new(n){S.new(nil,v)};a.each_with_index{|s,i|x=a[(i+1)%n];s.x=case k;when :record;x;when :array;[x];when :hash;{x:x};when :range;(x..x);end};a[0];end;a=make(5,:hash,1);b=make(2,:hash,1);p a.eql?(b),a.hash==b.hash,{a=>1}[b],[a,b].uniq.size',
+    'true\ntrue\n1\n1\n',
+  ],
+  [
+    'S=Struct.new(:x,:n){def <=>(x);0;end};def make(n,k,v);a=Array.new(n){S.new(nil,v)};a.each_with_index{|s,i|x=a[(i+1)%n];s.x=case k;when :record;x;when :array;[x];when :hash;{x:x};when :range;(x..x);end};a[0];end;a=make(5,:hash,1);b=make(2,:hash,2);p a.eql?(b),a.hash==b.hash,{a=>1}[b],[a,b].uniq.size',
+    'false\nfalse\nnil\n2\n',
+  ],
+  [
+    'S=Struct.new(:x,:n){def <=>(x);0;end};def make(n,k,v);a=Array.new(n){S.new(nil,v)};a.each_with_index{|s,i|x=a[(i+1)%n];s.x=case k;when :record;x;when :array;[x];when :hash;{x:x};when :range;(x..x);end};a[0];end;a=make(5,:hash,1);b=make(3,:hash,1);p a.eql?(b),a.hash==b.hash,{a=>1}[b],[a,b].uniq.size',
+    'true\ntrue\n1\n1\n',
+  ],
+  [
+    'S=Struct.new(:x,:n){def <=>(x);0;end};def make(n,k,v);a=Array.new(n){S.new(nil,v)};a.each_with_index{|s,i|x=a[(i+1)%n];s.x=case k;when :record;x;when :array;[x];when :hash;{x:x};when :range;(x..x);end};a[0];end;a=make(5,:hash,1);b=make(3,:hash,2);p a.eql?(b),a.hash==b.hash,{a=>1}[b],[a,b].uniq.size',
+    'false\nfalse\nnil\n2\n',
+  ],
+  [
+    'S=Struct.new(:x,:n){def <=>(x);0;end};def make(n,k,v);a=Array.new(n){S.new(nil,v)};a.each_with_index{|s,i|x=a[(i+1)%n];s.x=case k;when :record;x;when :array;[x];when :hash;{x:x};when :range;(x..x);end};a[0];end;a=make(5,:hash,1);b=make(5,:hash,1);p a.eql?(b),a.hash==b.hash,{a=>1}[b],[a,b].uniq.size',
+    'true\ntrue\n1\n1\n',
+  ],
+  [
+    'S=Struct.new(:x,:n){def <=>(x);0;end};def make(n,k,v);a=Array.new(n){S.new(nil,v)};a.each_with_index{|s,i|x=a[(i+1)%n];s.x=case k;when :record;x;when :array;[x];when :hash;{x:x};when :range;(x..x);end};a[0];end;a=make(5,:hash,1);b=make(5,:hash,2);p a.eql?(b),a.hash==b.hash,{a=>1}[b],[a,b].uniq.size',
+    'false\nfalse\nnil\n2\n',
+  ],
+  [
+    'S=Struct.new(:x,:n){def <=>(x);0;end};def make(n,k,v);a=Array.new(n){S.new(nil,v)};a.each_with_index{|s,i|x=a[(i+1)%n];s.x=case k;when :record;x;when :array;[x];when :hash;{x:x};when :range;(x..x);end};a[0];end;a=make(1,:range,1);b=make(1,:range,1);p a.eql?(b),a.hash==b.hash,{a=>1}[b],[a,b].uniq.size',
+    'true\ntrue\n1\n1\n',
+  ],
+  [
+    'S=Struct.new(:x,:n){def <=>(x);0;end};def make(n,k,v);a=Array.new(n){S.new(nil,v)};a.each_with_index{|s,i|x=a[(i+1)%n];s.x=case k;when :record;x;when :array;[x];when :hash;{x:x};when :range;(x..x);end};a[0];end;a=make(1,:range,1);b=make(1,:range,2);p a.eql?(b),a.hash==b.hash,{a=>1}[b],[a,b].uniq.size',
+    'false\nfalse\nnil\n2\n',
+  ],
+  [
+    'S=Struct.new(:x,:n){def <=>(x);0;end};def make(n,k,v);a=Array.new(n){S.new(nil,v)};a.each_with_index{|s,i|x=a[(i+1)%n];s.x=case k;when :record;x;when :array;[x];when :hash;{x:x};when :range;(x..x);end};a[0];end;a=make(1,:range,1);b=make(2,:range,1);p a.eql?(b),a.hash==b.hash,{a=>1}[b],[a,b].uniq.size',
+    'true\ntrue\n1\n1\n',
+  ],
+  [
+    'S=Struct.new(:x,:n){def <=>(x);0;end};def make(n,k,v);a=Array.new(n){S.new(nil,v)};a.each_with_index{|s,i|x=a[(i+1)%n];s.x=case k;when :record;x;when :array;[x];when :hash;{x:x};when :range;(x..x);end};a[0];end;a=make(1,:range,1);b=make(2,:range,2);p a.eql?(b),a.hash==b.hash,{a=>1}[b],[a,b].uniq.size',
+    'false\nfalse\nnil\n2\n',
+  ],
+  [
+    'S=Struct.new(:x,:n){def <=>(x);0;end};def make(n,k,v);a=Array.new(n){S.new(nil,v)};a.each_with_index{|s,i|x=a[(i+1)%n];s.x=case k;when :record;x;when :array;[x];when :hash;{x:x};when :range;(x..x);end};a[0];end;a=make(1,:range,1);b=make(3,:range,1);p a.eql?(b),a.hash==b.hash,{a=>1}[b],[a,b].uniq.size',
+    'true\ntrue\n1\n1\n',
+  ],
+  [
+    'S=Struct.new(:x,:n){def <=>(x);0;end};def make(n,k,v);a=Array.new(n){S.new(nil,v)};a.each_with_index{|s,i|x=a[(i+1)%n];s.x=case k;when :record;x;when :array;[x];when :hash;{x:x};when :range;(x..x);end};a[0];end;a=make(1,:range,1);b=make(3,:range,2);p a.eql?(b),a.hash==b.hash,{a=>1}[b],[a,b].uniq.size',
+    'false\nfalse\nnil\n2\n',
+  ],
+  [
+    'S=Struct.new(:x,:n){def <=>(x);0;end};def make(n,k,v);a=Array.new(n){S.new(nil,v)};a.each_with_index{|s,i|x=a[(i+1)%n];s.x=case k;when :record;x;when :array;[x];when :hash;{x:x};when :range;(x..x);end};a[0];end;a=make(1,:range,1);b=make(5,:range,1);p a.eql?(b),a.hash==b.hash,{a=>1}[b],[a,b].uniq.size',
+    'true\ntrue\n1\n1\n',
+  ],
+  [
+    'S=Struct.new(:x,:n){def <=>(x);0;end};def make(n,k,v);a=Array.new(n){S.new(nil,v)};a.each_with_index{|s,i|x=a[(i+1)%n];s.x=case k;when :record;x;when :array;[x];when :hash;{x:x};when :range;(x..x);end};a[0];end;a=make(1,:range,1);b=make(5,:range,2);p a.eql?(b),a.hash==b.hash,{a=>1}[b],[a,b].uniq.size',
+    'false\nfalse\nnil\n2\n',
+  ],
+  [
+    'S=Struct.new(:x,:n){def <=>(x);0;end};def make(n,k,v);a=Array.new(n){S.new(nil,v)};a.each_with_index{|s,i|x=a[(i+1)%n];s.x=case k;when :record;x;when :array;[x];when :hash;{x:x};when :range;(x..x);end};a[0];end;a=make(2,:range,1);b=make(1,:range,1);p a.eql?(b),a.hash==b.hash,{a=>1}[b],[a,b].uniq.size',
+    'true\ntrue\n1\n1\n',
+  ],
+  [
+    'S=Struct.new(:x,:n){def <=>(x);0;end};def make(n,k,v);a=Array.new(n){S.new(nil,v)};a.each_with_index{|s,i|x=a[(i+1)%n];s.x=case k;when :record;x;when :array;[x];when :hash;{x:x};when :range;(x..x);end};a[0];end;a=make(2,:range,1);b=make(1,:range,2);p a.eql?(b),a.hash==b.hash,{a=>1}[b],[a,b].uniq.size',
+    'false\nfalse\nnil\n2\n',
+  ],
+  [
+    'S=Struct.new(:x,:n){def <=>(x);0;end};def make(n,k,v);a=Array.new(n){S.new(nil,v)};a.each_with_index{|s,i|x=a[(i+1)%n];s.x=case k;when :record;x;when :array;[x];when :hash;{x:x};when :range;(x..x);end};a[0];end;a=make(2,:range,1);b=make(2,:range,1);p a.eql?(b),a.hash==b.hash,{a=>1}[b],[a,b].uniq.size',
+    'true\ntrue\n1\n1\n',
+  ],
+  [
+    'S=Struct.new(:x,:n){def <=>(x);0;end};def make(n,k,v);a=Array.new(n){S.new(nil,v)};a.each_with_index{|s,i|x=a[(i+1)%n];s.x=case k;when :record;x;when :array;[x];when :hash;{x:x};when :range;(x..x);end};a[0];end;a=make(2,:range,1);b=make(2,:range,2);p a.eql?(b),a.hash==b.hash,{a=>1}[b],[a,b].uniq.size',
+    'false\nfalse\nnil\n2\n',
+  ],
+  [
+    'S=Struct.new(:x,:n){def <=>(x);0;end};def make(n,k,v);a=Array.new(n){S.new(nil,v)};a.each_with_index{|s,i|x=a[(i+1)%n];s.x=case k;when :record;x;when :array;[x];when :hash;{x:x};when :range;(x..x);end};a[0];end;a=make(2,:range,1);b=make(3,:range,1);p a.eql?(b),a.hash==b.hash,{a=>1}[b],[a,b].uniq.size',
+    'true\ntrue\n1\n1\n',
+  ],
+  [
+    'S=Struct.new(:x,:n){def <=>(x);0;end};def make(n,k,v);a=Array.new(n){S.new(nil,v)};a.each_with_index{|s,i|x=a[(i+1)%n];s.x=case k;when :record;x;when :array;[x];when :hash;{x:x};when :range;(x..x);end};a[0];end;a=make(2,:range,1);b=make(3,:range,2);p a.eql?(b),a.hash==b.hash,{a=>1}[b],[a,b].uniq.size',
+    'false\nfalse\nnil\n2\n',
+  ],
+  [
+    'S=Struct.new(:x,:n){def <=>(x);0;end};def make(n,k,v);a=Array.new(n){S.new(nil,v)};a.each_with_index{|s,i|x=a[(i+1)%n];s.x=case k;when :record;x;when :array;[x];when :hash;{x:x};when :range;(x..x);end};a[0];end;a=make(2,:range,1);b=make(5,:range,1);p a.eql?(b),a.hash==b.hash,{a=>1}[b],[a,b].uniq.size',
+    'true\ntrue\n1\n1\n',
+  ],
+  [
+    'S=Struct.new(:x,:n){def <=>(x);0;end};def make(n,k,v);a=Array.new(n){S.new(nil,v)};a.each_with_index{|s,i|x=a[(i+1)%n];s.x=case k;when :record;x;when :array;[x];when :hash;{x:x};when :range;(x..x);end};a[0];end;a=make(2,:range,1);b=make(5,:range,2);p a.eql?(b),a.hash==b.hash,{a=>1}[b],[a,b].uniq.size',
+    'false\nfalse\nnil\n2\n',
+  ],
+  [
+    'S=Struct.new(:x,:n){def <=>(x);0;end};def make(n,k,v);a=Array.new(n){S.new(nil,v)};a.each_with_index{|s,i|x=a[(i+1)%n];s.x=case k;when :record;x;when :array;[x];when :hash;{x:x};when :range;(x..x);end};a[0];end;a=make(3,:range,1);b=make(1,:range,1);p a.eql?(b),a.hash==b.hash,{a=>1}[b],[a,b].uniq.size',
+    'true\ntrue\n1\n1\n',
+  ],
+  [
+    'S=Struct.new(:x,:n){def <=>(x);0;end};def make(n,k,v);a=Array.new(n){S.new(nil,v)};a.each_with_index{|s,i|x=a[(i+1)%n];s.x=case k;when :record;x;when :array;[x];when :hash;{x:x};when :range;(x..x);end};a[0];end;a=make(3,:range,1);b=make(1,:range,2);p a.eql?(b),a.hash==b.hash,{a=>1}[b],[a,b].uniq.size',
+    'false\nfalse\nnil\n2\n',
+  ],
+  [
+    'S=Struct.new(:x,:n){def <=>(x);0;end};def make(n,k,v);a=Array.new(n){S.new(nil,v)};a.each_with_index{|s,i|x=a[(i+1)%n];s.x=case k;when :record;x;when :array;[x];when :hash;{x:x};when :range;(x..x);end};a[0];end;a=make(3,:range,1);b=make(2,:range,1);p a.eql?(b),a.hash==b.hash,{a=>1}[b],[a,b].uniq.size',
+    'true\ntrue\n1\n1\n',
+  ],
+  [
+    'S=Struct.new(:x,:n){def <=>(x);0;end};def make(n,k,v);a=Array.new(n){S.new(nil,v)};a.each_with_index{|s,i|x=a[(i+1)%n];s.x=case k;when :record;x;when :array;[x];when :hash;{x:x};when :range;(x..x);end};a[0];end;a=make(3,:range,1);b=make(2,:range,2);p a.eql?(b),a.hash==b.hash,{a=>1}[b],[a,b].uniq.size',
+    'false\nfalse\nnil\n2\n',
+  ],
+  [
+    'S=Struct.new(:x,:n){def <=>(x);0;end};def make(n,k,v);a=Array.new(n){S.new(nil,v)};a.each_with_index{|s,i|x=a[(i+1)%n];s.x=case k;when :record;x;when :array;[x];when :hash;{x:x};when :range;(x..x);end};a[0];end;a=make(3,:range,1);b=make(3,:range,1);p a.eql?(b),a.hash==b.hash,{a=>1}[b],[a,b].uniq.size',
+    'true\ntrue\n1\n1\n',
+  ],
+  [
+    'S=Struct.new(:x,:n){def <=>(x);0;end};def make(n,k,v);a=Array.new(n){S.new(nil,v)};a.each_with_index{|s,i|x=a[(i+1)%n];s.x=case k;when :record;x;when :array;[x];when :hash;{x:x};when :range;(x..x);end};a[0];end;a=make(3,:range,1);b=make(3,:range,2);p a.eql?(b),a.hash==b.hash,{a=>1}[b],[a,b].uniq.size',
+    'false\nfalse\nnil\n2\n',
+  ],
+  [
+    'S=Struct.new(:x,:n){def <=>(x);0;end};def make(n,k,v);a=Array.new(n){S.new(nil,v)};a.each_with_index{|s,i|x=a[(i+1)%n];s.x=case k;when :record;x;when :array;[x];when :hash;{x:x};when :range;(x..x);end};a[0];end;a=make(3,:range,1);b=make(5,:range,1);p a.eql?(b),a.hash==b.hash,{a=>1}[b],[a,b].uniq.size',
+    'true\ntrue\n1\n1\n',
+  ],
+  [
+    'S=Struct.new(:x,:n){def <=>(x);0;end};def make(n,k,v);a=Array.new(n){S.new(nil,v)};a.each_with_index{|s,i|x=a[(i+1)%n];s.x=case k;when :record;x;when :array;[x];when :hash;{x:x};when :range;(x..x);end};a[0];end;a=make(3,:range,1);b=make(5,:range,2);p a.eql?(b),a.hash==b.hash,{a=>1}[b],[a,b].uniq.size',
+    'false\nfalse\nnil\n2\n',
+  ],
+  [
+    'S=Struct.new(:x,:n){def <=>(x);0;end};def make(n,k,v);a=Array.new(n){S.new(nil,v)};a.each_with_index{|s,i|x=a[(i+1)%n];s.x=case k;when :record;x;when :array;[x];when :hash;{x:x};when :range;(x..x);end};a[0];end;a=make(5,:range,1);b=make(1,:range,1);p a.eql?(b),a.hash==b.hash,{a=>1}[b],[a,b].uniq.size',
+    'true\ntrue\n1\n1\n',
+  ],
+  [
+    'S=Struct.new(:x,:n){def <=>(x);0;end};def make(n,k,v);a=Array.new(n){S.new(nil,v)};a.each_with_index{|s,i|x=a[(i+1)%n];s.x=case k;when :record;x;when :array;[x];when :hash;{x:x};when :range;(x..x);end};a[0];end;a=make(5,:range,1);b=make(1,:range,2);p a.eql?(b),a.hash==b.hash,{a=>1}[b],[a,b].uniq.size',
+    'false\nfalse\nnil\n2\n',
+  ],
+  [
+    'S=Struct.new(:x,:n){def <=>(x);0;end};def make(n,k,v);a=Array.new(n){S.new(nil,v)};a.each_with_index{|s,i|x=a[(i+1)%n];s.x=case k;when :record;x;when :array;[x];when :hash;{x:x};when :range;(x..x);end};a[0];end;a=make(5,:range,1);b=make(2,:range,1);p a.eql?(b),a.hash==b.hash,{a=>1}[b],[a,b].uniq.size',
+    'true\ntrue\n1\n1\n',
+  ],
+  [
+    'S=Struct.new(:x,:n){def <=>(x);0;end};def make(n,k,v);a=Array.new(n){S.new(nil,v)};a.each_with_index{|s,i|x=a[(i+1)%n];s.x=case k;when :record;x;when :array;[x];when :hash;{x:x};when :range;(x..x);end};a[0];end;a=make(5,:range,1);b=make(2,:range,2);p a.eql?(b),a.hash==b.hash,{a=>1}[b],[a,b].uniq.size',
+    'false\nfalse\nnil\n2\n',
+  ],
+  [
+    'S=Struct.new(:x,:n){def <=>(x);0;end};def make(n,k,v);a=Array.new(n){S.new(nil,v)};a.each_with_index{|s,i|x=a[(i+1)%n];s.x=case k;when :record;x;when :array;[x];when :hash;{x:x};when :range;(x..x);end};a[0];end;a=make(5,:range,1);b=make(3,:range,1);p a.eql?(b),a.hash==b.hash,{a=>1}[b],[a,b].uniq.size',
+    'true\ntrue\n1\n1\n',
+  ],
+  [
+    'S=Struct.new(:x,:n){def <=>(x);0;end};def make(n,k,v);a=Array.new(n){S.new(nil,v)};a.each_with_index{|s,i|x=a[(i+1)%n];s.x=case k;when :record;x;when :array;[x];when :hash;{x:x};when :range;(x..x);end};a[0];end;a=make(5,:range,1);b=make(3,:range,2);p a.eql?(b),a.hash==b.hash,{a=>1}[b],[a,b].uniq.size',
+    'false\nfalse\nnil\n2\n',
+  ],
+  [
+    'S=Struct.new(:x,:n){def <=>(x);0;end};def make(n,k,v);a=Array.new(n){S.new(nil,v)};a.each_with_index{|s,i|x=a[(i+1)%n];s.x=case k;when :record;x;when :array;[x];when :hash;{x:x};when :range;(x..x);end};a[0];end;a=make(5,:range,1);b=make(5,:range,1);p a.eql?(b),a.hash==b.hash,{a=>1}[b],[a,b].uniq.size',
+    'true\ntrue\n1\n1\n',
+  ],
+  [
+    'S=Struct.new(:x,:n){def <=>(x);0;end};def make(n,k,v);a=Array.new(n){S.new(nil,v)};a.each_with_index{|s,i|x=a[(i+1)%n];s.x=case k;when :record;x;when :array;[x];when :hash;{x:x};when :range;(x..x);end};a[0];end;a=make(5,:range,1);b=make(5,:range,2);p a.eql?(b),a.hash==b.hash,{a=>1}[b],[a,b].uniq.size',
+    'false\nfalse\nnil\n2\n',
+  ],
+  [
+    'D=Data.define(:x,:n){def <=>(x);0;end};def make(n,k,v);a=Array.new(n){[]};d=a.map{|x|D.new(x,v)};a.each_with_index{|x,i|s=d[(i+1)%n];x<<case k;when :array;s;when :hash;{x:s};when :range;(s..s);end};d[0];end;a=make(1,:array,1);b=make(1,:array,1);p a.eql?(b),a.hash==b.hash,{a=>1}[b],[a,b].uniq.size',
+    'true\ntrue\n1\n1\n',
+  ],
+  [
+    'D=Data.define(:x,:n){def <=>(x);0;end};def make(n,k,v);a=Array.new(n){[]};d=a.map{|x|D.new(x,v)};a.each_with_index{|x,i|s=d[(i+1)%n];x<<case k;when :array;s;when :hash;{x:s};when :range;(s..s);end};d[0];end;a=make(1,:array,1);b=make(1,:array,2);p a.eql?(b),a.hash==b.hash,{a=>1}[b],[a,b].uniq.size',
+    'false\nfalse\nnil\n2\n',
+  ],
+  [
+    'D=Data.define(:x,:n){def <=>(x);0;end};def make(n,k,v);a=Array.new(n){[]};d=a.map{|x|D.new(x,v)};a.each_with_index{|x,i|s=d[(i+1)%n];x<<case k;when :array;s;when :hash;{x:s};when :range;(s..s);end};d[0];end;a=make(1,:array,1);b=make(2,:array,1);p a.eql?(b),a.hash==b.hash,{a=>1}[b],[a,b].uniq.size',
+    'true\ntrue\n1\n1\n',
+  ],
+  [
+    'D=Data.define(:x,:n){def <=>(x);0;end};def make(n,k,v);a=Array.new(n){[]};d=a.map{|x|D.new(x,v)};a.each_with_index{|x,i|s=d[(i+1)%n];x<<case k;when :array;s;when :hash;{x:s};when :range;(s..s);end};d[0];end;a=make(1,:array,1);b=make(2,:array,2);p a.eql?(b),a.hash==b.hash,{a=>1}[b],[a,b].uniq.size',
+    'false\nfalse\nnil\n2\n',
+  ],
+  [
+    'D=Data.define(:x,:n){def <=>(x);0;end};def make(n,k,v);a=Array.new(n){[]};d=a.map{|x|D.new(x,v)};a.each_with_index{|x,i|s=d[(i+1)%n];x<<case k;when :array;s;when :hash;{x:s};when :range;(s..s);end};d[0];end;a=make(1,:array,1);b=make(4,:array,1);p a.eql?(b),a.hash==b.hash,{a=>1}[b],[a,b].uniq.size',
+    'true\ntrue\n1\n1\n',
+  ],
+  [
+    'D=Data.define(:x,:n){def <=>(x);0;end};def make(n,k,v);a=Array.new(n){[]};d=a.map{|x|D.new(x,v)};a.each_with_index{|x,i|s=d[(i+1)%n];x<<case k;when :array;s;when :hash;{x:s};when :range;(s..s);end};d[0];end;a=make(1,:array,1);b=make(4,:array,2);p a.eql?(b),a.hash==b.hash,{a=>1}[b],[a,b].uniq.size',
+    'false\nfalse\nnil\n2\n',
+  ],
+  [
+    'D=Data.define(:x,:n){def <=>(x);0;end};def make(n,k,v);a=Array.new(n){[]};d=a.map{|x|D.new(x,v)};a.each_with_index{|x,i|s=d[(i+1)%n];x<<case k;when :array;s;when :hash;{x:s};when :range;(s..s);end};d[0];end;a=make(2,:array,1);b=make(1,:array,1);p a.eql?(b),a.hash==b.hash,{a=>1}[b],[a,b].uniq.size',
+    'true\ntrue\n1\n1\n',
+  ],
+  [
+    'D=Data.define(:x,:n){def <=>(x);0;end};def make(n,k,v);a=Array.new(n){[]};d=a.map{|x|D.new(x,v)};a.each_with_index{|x,i|s=d[(i+1)%n];x<<case k;when :array;s;when :hash;{x:s};when :range;(s..s);end};d[0];end;a=make(2,:array,1);b=make(1,:array,2);p a.eql?(b),a.hash==b.hash,{a=>1}[b],[a,b].uniq.size',
+    'false\nfalse\nnil\n2\n',
+  ],
+  [
+    'D=Data.define(:x,:n){def <=>(x);0;end};def make(n,k,v);a=Array.new(n){[]};d=a.map{|x|D.new(x,v)};a.each_with_index{|x,i|s=d[(i+1)%n];x<<case k;when :array;s;when :hash;{x:s};when :range;(s..s);end};d[0];end;a=make(2,:array,1);b=make(2,:array,1);p a.eql?(b),a.hash==b.hash,{a=>1}[b],[a,b].uniq.size',
+    'true\ntrue\n1\n1\n',
+  ],
+  [
+    'D=Data.define(:x,:n){def <=>(x);0;end};def make(n,k,v);a=Array.new(n){[]};d=a.map{|x|D.new(x,v)};a.each_with_index{|x,i|s=d[(i+1)%n];x<<case k;when :array;s;when :hash;{x:s};when :range;(s..s);end};d[0];end;a=make(2,:array,1);b=make(2,:array,2);p a.eql?(b),a.hash==b.hash,{a=>1}[b],[a,b].uniq.size',
+    'false\nfalse\nnil\n2\n',
+  ],
+  [
+    'D=Data.define(:x,:n){def <=>(x);0;end};def make(n,k,v);a=Array.new(n){[]};d=a.map{|x|D.new(x,v)};a.each_with_index{|x,i|s=d[(i+1)%n];x<<case k;when :array;s;when :hash;{x:s};when :range;(s..s);end};d[0];end;a=make(2,:array,1);b=make(4,:array,1);p a.eql?(b),a.hash==b.hash,{a=>1}[b],[a,b].uniq.size',
+    'true\ntrue\n1\n1\n',
+  ],
+  [
+    'D=Data.define(:x,:n){def <=>(x);0;end};def make(n,k,v);a=Array.new(n){[]};d=a.map{|x|D.new(x,v)};a.each_with_index{|x,i|s=d[(i+1)%n];x<<case k;when :array;s;when :hash;{x:s};when :range;(s..s);end};d[0];end;a=make(2,:array,1);b=make(4,:array,2);p a.eql?(b),a.hash==b.hash,{a=>1}[b],[a,b].uniq.size',
+    'false\nfalse\nnil\n2\n',
+  ],
+  [
+    'D=Data.define(:x,:n){def <=>(x);0;end};def make(n,k,v);a=Array.new(n){[]};d=a.map{|x|D.new(x,v)};a.each_with_index{|x,i|s=d[(i+1)%n];x<<case k;when :array;s;when :hash;{x:s};when :range;(s..s);end};d[0];end;a=make(4,:array,1);b=make(1,:array,1);p a.eql?(b),a.hash==b.hash,{a=>1}[b],[a,b].uniq.size',
+    'true\ntrue\n1\n1\n',
+  ],
+  [
+    'D=Data.define(:x,:n){def <=>(x);0;end};def make(n,k,v);a=Array.new(n){[]};d=a.map{|x|D.new(x,v)};a.each_with_index{|x,i|s=d[(i+1)%n];x<<case k;when :array;s;when :hash;{x:s};when :range;(s..s);end};d[0];end;a=make(4,:array,1);b=make(1,:array,2);p a.eql?(b),a.hash==b.hash,{a=>1}[b],[a,b].uniq.size',
+    'false\nfalse\nnil\n2\n',
+  ],
+  [
+    'D=Data.define(:x,:n){def <=>(x);0;end};def make(n,k,v);a=Array.new(n){[]};d=a.map{|x|D.new(x,v)};a.each_with_index{|x,i|s=d[(i+1)%n];x<<case k;when :array;s;when :hash;{x:s};when :range;(s..s);end};d[0];end;a=make(4,:array,1);b=make(2,:array,1);p a.eql?(b),a.hash==b.hash,{a=>1}[b],[a,b].uniq.size',
+    'true\ntrue\n1\n1\n',
+  ],
+  [
+    'D=Data.define(:x,:n){def <=>(x);0;end};def make(n,k,v);a=Array.new(n){[]};d=a.map{|x|D.new(x,v)};a.each_with_index{|x,i|s=d[(i+1)%n];x<<case k;when :array;s;when :hash;{x:s};when :range;(s..s);end};d[0];end;a=make(4,:array,1);b=make(2,:array,2);p a.eql?(b),a.hash==b.hash,{a=>1}[b],[a,b].uniq.size',
+    'false\nfalse\nnil\n2\n',
+  ],
+  [
+    'D=Data.define(:x,:n){def <=>(x);0;end};def make(n,k,v);a=Array.new(n){[]};d=a.map{|x|D.new(x,v)};a.each_with_index{|x,i|s=d[(i+1)%n];x<<case k;when :array;s;when :hash;{x:s};when :range;(s..s);end};d[0];end;a=make(4,:array,1);b=make(4,:array,1);p a.eql?(b),a.hash==b.hash,{a=>1}[b],[a,b].uniq.size',
+    'true\ntrue\n1\n1\n',
+  ],
+  [
+    'D=Data.define(:x,:n){def <=>(x);0;end};def make(n,k,v);a=Array.new(n){[]};d=a.map{|x|D.new(x,v)};a.each_with_index{|x,i|s=d[(i+1)%n];x<<case k;when :array;s;when :hash;{x:s};when :range;(s..s);end};d[0];end;a=make(4,:array,1);b=make(4,:array,2);p a.eql?(b),a.hash==b.hash,{a=>1}[b],[a,b].uniq.size',
+    'false\nfalse\nnil\n2\n',
+  ],
+  [
+    'D=Data.define(:x,:n){def <=>(x);0;end};def make(n,k,v);a=Array.new(n){[]};d=a.map{|x|D.new(x,v)};a.each_with_index{|x,i|s=d[(i+1)%n];x<<case k;when :array;s;when :hash;{x:s};when :range;(s..s);end};d[0];end;a=make(1,:hash,1);b=make(1,:hash,1);p a.eql?(b),a.hash==b.hash,{a=>1}[b],[a,b].uniq.size',
+    'true\ntrue\n1\n1\n',
+  ],
+  [
+    'D=Data.define(:x,:n){def <=>(x);0;end};def make(n,k,v);a=Array.new(n){[]};d=a.map{|x|D.new(x,v)};a.each_with_index{|x,i|s=d[(i+1)%n];x<<case k;when :array;s;when :hash;{x:s};when :range;(s..s);end};d[0];end;a=make(1,:hash,1);b=make(1,:hash,2);p a.eql?(b),a.hash==b.hash,{a=>1}[b],[a,b].uniq.size',
+    'false\nfalse\nnil\n2\n',
+  ],
+  [
+    'D=Data.define(:x,:n){def <=>(x);0;end};def make(n,k,v);a=Array.new(n){[]};d=a.map{|x|D.new(x,v)};a.each_with_index{|x,i|s=d[(i+1)%n];x<<case k;when :array;s;when :hash;{x:s};when :range;(s..s);end};d[0];end;a=make(1,:hash,1);b=make(2,:hash,1);p a.eql?(b),a.hash==b.hash,{a=>1}[b],[a,b].uniq.size',
+    'true\ntrue\n1\n1\n',
+  ],
+  [
+    'D=Data.define(:x,:n){def <=>(x);0;end};def make(n,k,v);a=Array.new(n){[]};d=a.map{|x|D.new(x,v)};a.each_with_index{|x,i|s=d[(i+1)%n];x<<case k;when :array;s;when :hash;{x:s};when :range;(s..s);end};d[0];end;a=make(1,:hash,1);b=make(2,:hash,2);p a.eql?(b),a.hash==b.hash,{a=>1}[b],[a,b].uniq.size',
+    'false\nfalse\nnil\n2\n',
+  ],
+  [
+    'D=Data.define(:x,:n){def <=>(x);0;end};def make(n,k,v);a=Array.new(n){[]};d=a.map{|x|D.new(x,v)};a.each_with_index{|x,i|s=d[(i+1)%n];x<<case k;when :array;s;when :hash;{x:s};when :range;(s..s);end};d[0];end;a=make(1,:hash,1);b=make(4,:hash,1);p a.eql?(b),a.hash==b.hash,{a=>1}[b],[a,b].uniq.size',
+    'true\ntrue\n1\n1\n',
+  ],
+  [
+    'D=Data.define(:x,:n){def <=>(x);0;end};def make(n,k,v);a=Array.new(n){[]};d=a.map{|x|D.new(x,v)};a.each_with_index{|x,i|s=d[(i+1)%n];x<<case k;when :array;s;when :hash;{x:s};when :range;(s..s);end};d[0];end;a=make(1,:hash,1);b=make(4,:hash,2);p a.eql?(b),a.hash==b.hash,{a=>1}[b],[a,b].uniq.size',
+    'false\nfalse\nnil\n2\n',
+  ],
+  [
+    'D=Data.define(:x,:n){def <=>(x);0;end};def make(n,k,v);a=Array.new(n){[]};d=a.map{|x|D.new(x,v)};a.each_with_index{|x,i|s=d[(i+1)%n];x<<case k;when :array;s;when :hash;{x:s};when :range;(s..s);end};d[0];end;a=make(2,:hash,1);b=make(1,:hash,1);p a.eql?(b),a.hash==b.hash,{a=>1}[b],[a,b].uniq.size',
+    'true\ntrue\n1\n1\n',
+  ],
+  [
+    'D=Data.define(:x,:n){def <=>(x);0;end};def make(n,k,v);a=Array.new(n){[]};d=a.map{|x|D.new(x,v)};a.each_with_index{|x,i|s=d[(i+1)%n];x<<case k;when :array;s;when :hash;{x:s};when :range;(s..s);end};d[0];end;a=make(2,:hash,1);b=make(1,:hash,2);p a.eql?(b),a.hash==b.hash,{a=>1}[b],[a,b].uniq.size',
+    'false\nfalse\nnil\n2\n',
+  ],
+  [
+    'D=Data.define(:x,:n){def <=>(x);0;end};def make(n,k,v);a=Array.new(n){[]};d=a.map{|x|D.new(x,v)};a.each_with_index{|x,i|s=d[(i+1)%n];x<<case k;when :array;s;when :hash;{x:s};when :range;(s..s);end};d[0];end;a=make(2,:hash,1);b=make(2,:hash,1);p a.eql?(b),a.hash==b.hash,{a=>1}[b],[a,b].uniq.size',
+    'true\ntrue\n1\n1\n',
+  ],
+  [
+    'D=Data.define(:x,:n){def <=>(x);0;end};def make(n,k,v);a=Array.new(n){[]};d=a.map{|x|D.new(x,v)};a.each_with_index{|x,i|s=d[(i+1)%n];x<<case k;when :array;s;when :hash;{x:s};when :range;(s..s);end};d[0];end;a=make(2,:hash,1);b=make(2,:hash,2);p a.eql?(b),a.hash==b.hash,{a=>1}[b],[a,b].uniq.size',
+    'false\nfalse\nnil\n2\n',
+  ],
+  [
+    'D=Data.define(:x,:n){def <=>(x);0;end};def make(n,k,v);a=Array.new(n){[]};d=a.map{|x|D.new(x,v)};a.each_with_index{|x,i|s=d[(i+1)%n];x<<case k;when :array;s;when :hash;{x:s};when :range;(s..s);end};d[0];end;a=make(2,:hash,1);b=make(4,:hash,1);p a.eql?(b),a.hash==b.hash,{a=>1}[b],[a,b].uniq.size',
+    'true\ntrue\n1\n1\n',
+  ],
+  [
+    'D=Data.define(:x,:n){def <=>(x);0;end};def make(n,k,v);a=Array.new(n){[]};d=a.map{|x|D.new(x,v)};a.each_with_index{|x,i|s=d[(i+1)%n];x<<case k;when :array;s;when :hash;{x:s};when :range;(s..s);end};d[0];end;a=make(2,:hash,1);b=make(4,:hash,2);p a.eql?(b),a.hash==b.hash,{a=>1}[b],[a,b].uniq.size',
+    'false\nfalse\nnil\n2\n',
+  ],
+  [
+    'D=Data.define(:x,:n){def <=>(x);0;end};def make(n,k,v);a=Array.new(n){[]};d=a.map{|x|D.new(x,v)};a.each_with_index{|x,i|s=d[(i+1)%n];x<<case k;when :array;s;when :hash;{x:s};when :range;(s..s);end};d[0];end;a=make(4,:hash,1);b=make(1,:hash,1);p a.eql?(b),a.hash==b.hash,{a=>1}[b],[a,b].uniq.size',
+    'true\ntrue\n1\n1\n',
+  ],
+  [
+    'D=Data.define(:x,:n){def <=>(x);0;end};def make(n,k,v);a=Array.new(n){[]};d=a.map{|x|D.new(x,v)};a.each_with_index{|x,i|s=d[(i+1)%n];x<<case k;when :array;s;when :hash;{x:s};when :range;(s..s);end};d[0];end;a=make(4,:hash,1);b=make(1,:hash,2);p a.eql?(b),a.hash==b.hash,{a=>1}[b],[a,b].uniq.size',
+    'false\nfalse\nnil\n2\n',
+  ],
+  [
+    'D=Data.define(:x,:n){def <=>(x);0;end};def make(n,k,v);a=Array.new(n){[]};d=a.map{|x|D.new(x,v)};a.each_with_index{|x,i|s=d[(i+1)%n];x<<case k;when :array;s;when :hash;{x:s};when :range;(s..s);end};d[0];end;a=make(4,:hash,1);b=make(2,:hash,1);p a.eql?(b),a.hash==b.hash,{a=>1}[b],[a,b].uniq.size',
+    'true\ntrue\n1\n1\n',
+  ],
+  [
+    'D=Data.define(:x,:n){def <=>(x);0;end};def make(n,k,v);a=Array.new(n){[]};d=a.map{|x|D.new(x,v)};a.each_with_index{|x,i|s=d[(i+1)%n];x<<case k;when :array;s;when :hash;{x:s};when :range;(s..s);end};d[0];end;a=make(4,:hash,1);b=make(2,:hash,2);p a.eql?(b),a.hash==b.hash,{a=>1}[b],[a,b].uniq.size',
+    'false\nfalse\nnil\n2\n',
+  ],
+  [
+    'D=Data.define(:x,:n){def <=>(x);0;end};def make(n,k,v);a=Array.new(n){[]};d=a.map{|x|D.new(x,v)};a.each_with_index{|x,i|s=d[(i+1)%n];x<<case k;when :array;s;when :hash;{x:s};when :range;(s..s);end};d[0];end;a=make(4,:hash,1);b=make(4,:hash,1);p a.eql?(b),a.hash==b.hash,{a=>1}[b],[a,b].uniq.size',
+    'true\ntrue\n1\n1\n',
+  ],
+  [
+    'D=Data.define(:x,:n){def <=>(x);0;end};def make(n,k,v);a=Array.new(n){[]};d=a.map{|x|D.new(x,v)};a.each_with_index{|x,i|s=d[(i+1)%n];x<<case k;when :array;s;when :hash;{x:s};when :range;(s..s);end};d[0];end;a=make(4,:hash,1);b=make(4,:hash,2);p a.eql?(b),a.hash==b.hash,{a=>1}[b],[a,b].uniq.size',
+    'false\nfalse\nnil\n2\n',
+  ],
+  [
+    'D=Data.define(:x,:n){def <=>(x);0;end};def make(n,k,v);a=Array.new(n){[]};d=a.map{|x|D.new(x,v)};a.each_with_index{|x,i|s=d[(i+1)%n];x<<case k;when :array;s;when :hash;{x:s};when :range;(s..s);end};d[0];end;a=make(1,:range,1);b=make(1,:range,1);p a.eql?(b),a.hash==b.hash,{a=>1}[b],[a,b].uniq.size',
+    'true\ntrue\n1\n1\n',
+  ],
+  [
+    'D=Data.define(:x,:n){def <=>(x);0;end};def make(n,k,v);a=Array.new(n){[]};d=a.map{|x|D.new(x,v)};a.each_with_index{|x,i|s=d[(i+1)%n];x<<case k;when :array;s;when :hash;{x:s};when :range;(s..s);end};d[0];end;a=make(1,:range,1);b=make(1,:range,2);p a.eql?(b),a.hash==b.hash,{a=>1}[b],[a,b].uniq.size',
+    'false\nfalse\nnil\n2\n',
+  ],
+  [
+    'D=Data.define(:x,:n){def <=>(x);0;end};def make(n,k,v);a=Array.new(n){[]};d=a.map{|x|D.new(x,v)};a.each_with_index{|x,i|s=d[(i+1)%n];x<<case k;when :array;s;when :hash;{x:s};when :range;(s..s);end};d[0];end;a=make(1,:range,1);b=make(2,:range,1);p a.eql?(b),a.hash==b.hash,{a=>1}[b],[a,b].uniq.size',
+    'true\ntrue\n1\n1\n',
+  ],
+  [
+    'D=Data.define(:x,:n){def <=>(x);0;end};def make(n,k,v);a=Array.new(n){[]};d=a.map{|x|D.new(x,v)};a.each_with_index{|x,i|s=d[(i+1)%n];x<<case k;when :array;s;when :hash;{x:s};when :range;(s..s);end};d[0];end;a=make(1,:range,1);b=make(2,:range,2);p a.eql?(b),a.hash==b.hash,{a=>1}[b],[a,b].uniq.size',
+    'false\nfalse\nnil\n2\n',
+  ],
+  [
+    'D=Data.define(:x,:n){def <=>(x);0;end};def make(n,k,v);a=Array.new(n){[]};d=a.map{|x|D.new(x,v)};a.each_with_index{|x,i|s=d[(i+1)%n];x<<case k;when :array;s;when :hash;{x:s};when :range;(s..s);end};d[0];end;a=make(1,:range,1);b=make(4,:range,1);p a.eql?(b),a.hash==b.hash,{a=>1}[b],[a,b].uniq.size',
+    'true\ntrue\n1\n1\n',
+  ],
+  [
+    'D=Data.define(:x,:n){def <=>(x);0;end};def make(n,k,v);a=Array.new(n){[]};d=a.map{|x|D.new(x,v)};a.each_with_index{|x,i|s=d[(i+1)%n];x<<case k;when :array;s;when :hash;{x:s};when :range;(s..s);end};d[0];end;a=make(1,:range,1);b=make(4,:range,2);p a.eql?(b),a.hash==b.hash,{a=>1}[b],[a,b].uniq.size',
+    'false\nfalse\nnil\n2\n',
+  ],
+  [
+    'D=Data.define(:x,:n){def <=>(x);0;end};def make(n,k,v);a=Array.new(n){[]};d=a.map{|x|D.new(x,v)};a.each_with_index{|x,i|s=d[(i+1)%n];x<<case k;when :array;s;when :hash;{x:s};when :range;(s..s);end};d[0];end;a=make(2,:range,1);b=make(1,:range,1);p a.eql?(b),a.hash==b.hash,{a=>1}[b],[a,b].uniq.size',
+    'true\ntrue\n1\n1\n',
+  ],
+  [
+    'D=Data.define(:x,:n){def <=>(x);0;end};def make(n,k,v);a=Array.new(n){[]};d=a.map{|x|D.new(x,v)};a.each_with_index{|x,i|s=d[(i+1)%n];x<<case k;when :array;s;when :hash;{x:s};when :range;(s..s);end};d[0];end;a=make(2,:range,1);b=make(1,:range,2);p a.eql?(b),a.hash==b.hash,{a=>1}[b],[a,b].uniq.size',
+    'false\nfalse\nnil\n2\n',
+  ],
+  [
+    'D=Data.define(:x,:n){def <=>(x);0;end};def make(n,k,v);a=Array.new(n){[]};d=a.map{|x|D.new(x,v)};a.each_with_index{|x,i|s=d[(i+1)%n];x<<case k;when :array;s;when :hash;{x:s};when :range;(s..s);end};d[0];end;a=make(2,:range,1);b=make(2,:range,1);p a.eql?(b),a.hash==b.hash,{a=>1}[b],[a,b].uniq.size',
+    'true\ntrue\n1\n1\n',
+  ],
+  [
+    'D=Data.define(:x,:n){def <=>(x);0;end};def make(n,k,v);a=Array.new(n){[]};d=a.map{|x|D.new(x,v)};a.each_with_index{|x,i|s=d[(i+1)%n];x<<case k;when :array;s;when :hash;{x:s};when :range;(s..s);end};d[0];end;a=make(2,:range,1);b=make(2,:range,2);p a.eql?(b),a.hash==b.hash,{a=>1}[b],[a,b].uniq.size',
+    'false\nfalse\nnil\n2\n',
+  ],
+  [
+    'D=Data.define(:x,:n){def <=>(x);0;end};def make(n,k,v);a=Array.new(n){[]};d=a.map{|x|D.new(x,v)};a.each_with_index{|x,i|s=d[(i+1)%n];x<<case k;when :array;s;when :hash;{x:s};when :range;(s..s);end};d[0];end;a=make(2,:range,1);b=make(4,:range,1);p a.eql?(b),a.hash==b.hash,{a=>1}[b],[a,b].uniq.size',
+    'true\ntrue\n1\n1\n',
+  ],
+  [
+    'D=Data.define(:x,:n){def <=>(x);0;end};def make(n,k,v);a=Array.new(n){[]};d=a.map{|x|D.new(x,v)};a.each_with_index{|x,i|s=d[(i+1)%n];x<<case k;when :array;s;when :hash;{x:s};when :range;(s..s);end};d[0];end;a=make(2,:range,1);b=make(4,:range,2);p a.eql?(b),a.hash==b.hash,{a=>1}[b],[a,b].uniq.size',
+    'false\nfalse\nnil\n2\n',
+  ],
+  [
+    'D=Data.define(:x,:n){def <=>(x);0;end};def make(n,k,v);a=Array.new(n){[]};d=a.map{|x|D.new(x,v)};a.each_with_index{|x,i|s=d[(i+1)%n];x<<case k;when :array;s;when :hash;{x:s};when :range;(s..s);end};d[0];end;a=make(4,:range,1);b=make(1,:range,1);p a.eql?(b),a.hash==b.hash,{a=>1}[b],[a,b].uniq.size',
+    'true\ntrue\n1\n1\n',
+  ],
+  [
+    'D=Data.define(:x,:n){def <=>(x);0;end};def make(n,k,v);a=Array.new(n){[]};d=a.map{|x|D.new(x,v)};a.each_with_index{|x,i|s=d[(i+1)%n];x<<case k;when :array;s;when :hash;{x:s};when :range;(s..s);end};d[0];end;a=make(4,:range,1);b=make(1,:range,2);p a.eql?(b),a.hash==b.hash,{a=>1}[b],[a,b].uniq.size',
+    'false\nfalse\nnil\n2\n',
+  ],
+  [
+    'D=Data.define(:x,:n){def <=>(x);0;end};def make(n,k,v);a=Array.new(n){[]};d=a.map{|x|D.new(x,v)};a.each_with_index{|x,i|s=d[(i+1)%n];x<<case k;when :array;s;when :hash;{x:s};when :range;(s..s);end};d[0];end;a=make(4,:range,1);b=make(2,:range,1);p a.eql?(b),a.hash==b.hash,{a=>1}[b],[a,b].uniq.size',
+    'true\ntrue\n1\n1\n',
+  ],
+  [
+    'D=Data.define(:x,:n){def <=>(x);0;end};def make(n,k,v);a=Array.new(n){[]};d=a.map{|x|D.new(x,v)};a.each_with_index{|x,i|s=d[(i+1)%n];x<<case k;when :array;s;when :hash;{x:s};when :range;(s..s);end};d[0];end;a=make(4,:range,1);b=make(2,:range,2);p a.eql?(b),a.hash==b.hash,{a=>1}[b],[a,b].uniq.size',
+    'false\nfalse\nnil\n2\n',
+  ],
+  [
+    'D=Data.define(:x,:n){def <=>(x);0;end};def make(n,k,v);a=Array.new(n){[]};d=a.map{|x|D.new(x,v)};a.each_with_index{|x,i|s=d[(i+1)%n];x<<case k;when :array;s;when :hash;{x:s};when :range;(s..s);end};d[0];end;a=make(4,:range,1);b=make(4,:range,1);p a.eql?(b),a.hash==b.hash,{a=>1}[b],[a,b].uniq.size',
+    'true\ntrue\n1\n1\n',
+  ],
+  [
+    'D=Data.define(:x,:n){def <=>(x);0;end};def make(n,k,v);a=Array.new(n){[]};d=a.map{|x|D.new(x,v)};a.each_with_index{|x,i|s=d[(i+1)%n];x<<case k;when :array;s;when :hash;{x:s};when :range;(s..s);end};d[0];end;a=make(4,:range,1);b=make(4,:range,2);p a.eql?(b),a.hash==b.hash,{a=>1}[b],[a,b].uniq.size',
+    'false\nfalse\nnil\n2\n',
+  ],
+  [
+    'class L;def hash;puts :leaf;1;end;end;S=Struct.new(:x,:leaf){};a=Array.new(1){S.new};a.each_with_index{|s,i|s.x=a[(i+1)%a.size];s.leaf=L.new};p a[0].hash==a[0].hash;h={a[0]=>1};p h[a[0]]',
+    'leaf\nleaf\ntrue\n1\n',
+  ],
+  [
+    'class L;def hash;puts :leaf;1;end;end;S=Struct.new(:x,:leaf){def hash;puts :record;super;end};a=Array.new(1){S.new};a.each_with_index{|s,i|s.x=a[(i+1)%a.size];s.leaf=L.new};p a[0].hash==a[0].hash;h={a[0]=>1};p h[a[0]]',
+    'record\nrecord\nleaf\nrecord\nrecord\nleaf\ntrue\nrecord\nrecord\n1\n',
+  ],
+  [
+    'class L;def hash;puts :leaf;1;end;end;S=Struct.new(:x,:leaf){};a=Array.new(2){S.new};a.each_with_index{|s,i|s.x=a[(i+1)%a.size];s.leaf=L.new};p a[0].hash==a[0].hash;h={a[0]=>1};p h[a[0]]',
+    'leaf\nleaf\ntrue\n1\n',
+  ],
+  [
+    'class L;def hash;puts :leaf;1;end;end;S=Struct.new(:x,:leaf){def hash;puts :record;super;end};a=Array.new(2){S.new};a.each_with_index{|s,i|s.x=a[(i+1)%a.size];s.leaf=L.new};p a[0].hash==a[0].hash;h={a[0]=>1};p h[a[0]]',
+    'record\nrecord\nrecord\nleaf\nrecord\nrecord\nrecord\nleaf\ntrue\nrecord\nrecord\nrecord\nrecord\n1\n',
+  ],
+  [
+    'class L;def hash;puts :leaf;1;end;end;S=Struct.new(:x,:leaf){};a=Array.new(3){S.new};a.each_with_index{|s,i|s.x=a[(i+1)%a.size];s.leaf=L.new};p a[0].hash==a[0].hash;h={a[0]=>1};p h[a[0]]',
+    'leaf\nleaf\ntrue\n1\n',
+  ],
+  [
+    'class L;def hash;puts :leaf;1;end;end;S=Struct.new(:x,:leaf){def hash;puts :record;super;end};a=Array.new(3){S.new};a.each_with_index{|s,i|s.x=a[(i+1)%a.size];s.leaf=L.new};p a[0].hash==a[0].hash;h={a[0]=>1};p h[a[0]]',
+    'record\nrecord\nrecord\nrecord\nleaf\nrecord\nrecord\nrecord\nrecord\nleaf\ntrue\nrecord\nrecord\nrecord\nrecord\nrecord\nrecord\n1\n',
+  ],
+  [
+    'class L;def hash;puts :leaf;1;end;end;S=Struct.new(:leaf,:x){};a=Array.new(1){S.new};a.each_with_index{|s,i|s.x=a[(i+1)%a.size];s.leaf=L.new};p a[0].hash==a[0].hash;h={a[0]=>1};p h[a[0]]',
+    'leaf\nleaf\nleaf\nleaf\ntrue\nleaf\nleaf\n1\n',
+  ],
+  [
+    'class L;def hash;puts :leaf;1;end;end;S=Struct.new(:leaf,:x){def hash;puts :record;super;end};a=Array.new(1){S.new};a.each_with_index{|s,i|s.x=a[(i+1)%a.size];s.leaf=L.new};p a[0].hash==a[0].hash;h={a[0]=>1};p h[a[0]]',
+    'record\nleaf\nrecord\nleaf\nrecord\nleaf\nrecord\nleaf\ntrue\nrecord\nleaf\nrecord\nleaf\n1\n',
+  ],
+  [
+    'class L;def hash;puts :leaf;1;end;end;S=Struct.new(:leaf,:x){};a=Array.new(2){S.new};a.each_with_index{|s,i|s.x=a[(i+1)%a.size];s.leaf=L.new};p a[0].hash==a[0].hash;h={a[0]=>1};p h[a[0]]',
+    'leaf\nleaf\nleaf\nleaf\nleaf\nleaf\ntrue\nleaf\nleaf\nleaf\nleaf\n1\n',
+  ],
+  [
+    'class L;def hash;puts :leaf;1;end;end;S=Struct.new(:leaf,:x){def hash;puts :record;super;end};a=Array.new(2){S.new};a.each_with_index{|s,i|s.x=a[(i+1)%a.size];s.leaf=L.new};p a[0].hash==a[0].hash;h={a[0]=>1};p h[a[0]]',
+    'record\nleaf\nrecord\nleaf\nrecord\nleaf\nrecord\nleaf\nrecord\nleaf\nrecord\nleaf\ntrue\nrecord\nleaf\nrecord\nleaf\nrecord\nleaf\nrecord\nleaf\n1\n',
+  ],
+  [
+    'class L;def hash;puts :leaf;1;end;end;S=Struct.new(:leaf,:x){};a=Array.new(3){S.new};a.each_with_index{|s,i|s.x=a[(i+1)%a.size];s.leaf=L.new};p a[0].hash==a[0].hash;h={a[0]=>1};p h[a[0]]',
+    'leaf\nleaf\nleaf\nleaf\nleaf\nleaf\nleaf\nleaf\ntrue\nleaf\nleaf\nleaf\nleaf\nleaf\nleaf\n1\n',
+  ],
+  [
+    'class L;def hash;puts :leaf;1;end;end;S=Struct.new(:leaf,:x){def hash;puts :record;super;end};a=Array.new(3){S.new};a.each_with_index{|s,i|s.x=a[(i+1)%a.size];s.leaf=L.new};p a[0].hash==a[0].hash;h={a[0]=>1};p h[a[0]]',
+    'record\nleaf\nrecord\nleaf\nrecord\nleaf\nrecord\nleaf\nrecord\nleaf\nrecord\nleaf\nrecord\nleaf\nrecord\nleaf\ntrue\nrecord\nleaf\nrecord\nleaf\nrecord\nleaf\nrecord\nleaf\nrecord\nleaf\nrecord\nleaf\n1\n',
+  ],
+  [
+    'S=Struct.new(:x);T=Struct.new(:x);class << S;public;def hash;puts :class_hash;42;end;end;class << T;public;def hash;puts :class_hash;42;end;end;a=S.new;a.x=a;b=S.new;b.x=b;p a.eql?(b),a.hash==b.hash,{a=>1}[b]',
+    'class_hash\nclass_hash\nclass_hash\nclass_hash\nclass_hash\nclass_hash\ntrue\ntrue\n1\n',
+  ],
+  [
+    'S=Struct.new(:x);T=Struct.new(:x);class << S;private;def hash;puts :class_hash;42;end;end;class << T;private;def hash;puts :class_hash;42;end;end;a=S.new;a.x=a;b=S.new;b.x=b;p a.eql?(b),a.hash==b.hash,{a=>1}[b]',
+    'class_hash\nclass_hash\nclass_hash\nclass_hash\nclass_hash\nclass_hash\ntrue\ntrue\n1\n',
+  ],
+  [
+    'S=Struct.new(:x);T=Struct.new(:x);class << S;protected;def hash;puts :class_hash;42;end;end;class << T;protected;def hash;puts :class_hash;42;end;end;a=S.new;a.x=a;b=S.new;b.x=b;p a.eql?(b),a.hash==b.hash,{a=>1}[b]',
+    'class_hash\nclass_hash\nclass_hash\nclass_hash\nclass_hash\nclass_hash\ntrue\ntrue\n1\n',
+  ],
+  [
+    'S=Struct.new(:x);T=Struct.new(:x);class << S;public;def hash;puts :class_hash;42;end;end;class << T;public;def hash;puts :class_hash;42;end;end;a=S.new;a.x=a;b=T.new;b.x=b;p a.eql?(b),a.hash==b.hash,{a=>1}[b]',
+    'class_hash\nclass_hash\nclass_hash\nclass_hash\nclass_hash\nclass_hash\nfalse\ntrue\nnil\n',
+  ],
+  [
+    'S=Struct.new(:x);T=Struct.new(:x);class << S;private;def hash;puts :class_hash;42;end;end;class << T;private;def hash;puts :class_hash;42;end;end;a=S.new;a.x=a;b=T.new;b.x=b;p a.eql?(b),a.hash==b.hash,{a=>1}[b]',
+    'class_hash\nclass_hash\nclass_hash\nclass_hash\nclass_hash\nclass_hash\nfalse\ntrue\nnil\n',
+  ],
+  [
+    'S=Struct.new(:x);T=Struct.new(:x);class << S;protected;def hash;puts :class_hash;42;end;end;class << T;protected;def hash;puts :class_hash;42;end;end;a=S.new;a.x=a;b=T.new;b.x=b;p a.eql?(b),a.hash==b.hash,{a=>1}[b]',
+    'class_hash\nclass_hash\nclass_hash\nclass_hash\nclass_hash\nclass_hash\nfalse\ntrue\nnil\n',
+  ],
+  [
+    'class Integer;private;def hash;puts :overridden;42;end;end;S=Struct.new(:x);a=S.new([1,1.0,:x,nil,true,false]);b=S.new([1,1.0,:x,nil,true,false]);p a.eql?(b),a.hash==b.hash,{a=>1}[b]',
+    'true\ntrue\n1\n',
+  ],
+  [
+    'class Float;private;def hash;puts :overridden;42;end;end;S=Struct.new(:x);a=S.new([1,1.0,:x,nil,true,false]);b=S.new([1,1.0,:x,nil,true,false]);p a.eql?(b),a.hash==b.hash,{a=>1}[b]',
+    'true\ntrue\n1\n',
+  ],
+  [
+    'class Symbol;private;def hash;puts :overridden;42;end;end;S=Struct.new(:x);a=S.new([1,1.0,:x,nil,true,false]);b=S.new([1,1.0,:x,nil,true,false]);p a.eql?(b),a.hash==b.hash,{a=>1}[b]',
+    'true\ntrue\n1\n',
+  ],
+  [
+    'class NilClass;private;def hash;puts :overridden;42;end;end;S=Struct.new(:x);a=S.new([1,1.0,:x,nil,true,false]);b=S.new([1,1.0,:x,nil,true,false]);p a.eql?(b),a.hash==b.hash,{a=>1}[b]',
+    'true\ntrue\n1\n',
+  ],
+  [
+    'class TrueClass;private;def hash;puts :overridden;42;end;end;S=Struct.new(:x);a=S.new([1,1.0,:x,nil,true,false]);b=S.new([1,1.0,:x,nil,true,false]);p a.eql?(b),a.hash==b.hash,{a=>1}[b]',
+    'true\ntrue\n1\n',
+  ],
+  [
+    'class FalseClass;private;def hash;puts :overridden;42;end;end;S=Struct.new(:x);a=S.new([1,1.0,:x,nil,true,false]);b=S.new([1,1.0,:x,nil,true,false]);p a.eql?(b),a.hash==b.hash,{a=>1}[b]',
+    'true\ntrue\n1\n',
+  ],
+  [
+    'class X;def to_r;puts :conversion;$s.hash;puts :converted;2r;end;end;class L;def hash;begin;$s.hash;puts :after;1;rescue Exception;puts :rescued;2;ensure;puts :ensure;end;end;end;S=Struct.new(:x);$s=S.new(L.new);p $s.hash==$s.hash;h={$s=>1};p h[$s]',
+    'ensure\nensure\ntrue\nensure\nensure\n1\n',
+  ],
+  [
+    'class X;def to_r;puts :conversion;$s.hash;puts :converted;2r;end;end;class L;def hash;begin;$s.hash;ensure;puts :ensure;return 5;end;end;end;S=Struct.new(:x);$s=S.new(L.new);p $s.hash==$s.hash;h={$s=>1};p h[$s]',
+    'ensure\nensure\ntrue\nensure\nensure\n1\n',
+  ],
+  [
+    'class X;def to_r;puts :conversion;$s.hash;puts :converted;2r;end;end;class L;def hash;begin;$s.hash;ensure;$s.x=nil;puts :clear;end;1;end;end;S=Struct.new(:x);$s=S.new(L.new);p $s.hash==$s.hash;h={$s=>1};p h[$s]',
+    'clear\nfalse\n1\n',
+  ],
+  [
+    'class X;def to_r;puts :conversion;$s.hash;puts :converted;2r;end;end;class L;def hash;p Rational(X.new,exception:false);puts :after;1;end;end;S=Struct.new(:x);$s=S.new(L.new);p $s.hash==$s.hash;h={$s=>1};p h[$s]',
+    'conversion\nnil\nafter\nconversion\nnil\nafter\ntrue\nconversion\nnil\nafter\nconversion\nnil\nafter\n1\n',
+  ],
+  [
+    'class Code;def to_int;$n+=1;p $n;return 1 if $n>2;$s.hash;1;end;end;class L;def hash;Code.new;end;end;S=Struct.new(:x);$n=0;$s=S.new(L.new);p $s.hash==$s.hash;h={$s=>1};p h[$s]',
+    '1\n2\n3\n4\ntrue\n5\n6\n1\n',
+  ],
+  [
+    'class L;def hash;$s.n=7;puts :leaf;1;end;def eql?(x);x.is_a?(L);end;end;S=Struct.new(:x,:n);$s=S.new(L.new,2);b=S.new(L.new,7);p $s.hash==b.hash;p $s.eql?(b);p({$s=>1}[b])',
+    'leaf\nleaf\ntrue\ntrue\nleaf\nleaf\n1\n',
+  ],
+  [
+    'class L;def hash;$y<<:pause;1;end;end;S=Struct.new(:x,:loop);$s=S.new(L.new);$s.loop=$s;e=Enumerator.new{|y|$y=y;h={$s=>1};y<<h.size};p e.next;class L;def hash;1;end;end;p({$s=>2}[$s]);p e.next',
+    ':pause\n2\n1\n',
+  ],
+  [
+    'class X;private;def hash;puts :called;1;end;public;def eql?(x);true;end;end;a=X.new;b=X.new;h={a=>1};p h[b],[a,b].uniq.size',
+    'called\ncalled\ncalled\ncalled\n1\n1\n',
+  ],
+  [
+    'class X;protected;def hash;puts :called;1;end;public;def eql?(x);true;end;end;a=X.new;b=X.new;h={a=>1};p h[b],[a,b].uniq.size',
+    'called\ncalled\ncalled\ncalled\n1\n1\n',
+  ],
+  [
+    'class X;private;def eql?(x);puts :called;true;end;public;def hash;1;end;end;a=X.new;b=X.new;h={a=>1};p h[b],[a,b].uniq.size',
+    'called\ncalled\n1\n1\n',
+  ],
+  [
+    'class X;protected;def eql?(x);puts :called;true;end;public;def hash;1;end;end;a=X.new;b=X.new;h={a=>1};p h[b],[a,b].uniq.size',
+    'called\ncalled\n1\n1\n',
+  ],
+  [
+    'S=Struct.new(:x);a=S.new;a.x=a;b=S.new;c=S.new;b.x=c;c.x=b;x=[a];y=[b];p x.eql?(y),x.hash==y.hash,{x=>1}[y],[x,y].uniq.size',
+    'true\ntrue\n1\n1\n',
+  ],
+  [
+    'S=Struct.new(:x);a=S.new;a.x=a;b=S.new;c=S.new;b.x=c;c.x=b;x={x:a};y={x:b};p x.eql?(y),x.hash==y.hash,{x=>1}[y],[x,y].uniq.size',
+    'true\ntrue\n1\n1\n',
+  ],
+  ['a=[1];16.times{a=[a,a]};b=[a,a];p b.hash==b.hash;p({b=>1}[b])', 'true\n1\n'],
+  [
+    'S=Struct.new(:x);def graph(prefix,cycle);a=Array.new(prefix+cycle){S.new};a.each_with_index{|s,i|s.x=a[i+1]||a[prefix]};a[0];end;a=graph(0,1);b=graph(2,2);p a.eql?(b),a.hash==b.hash,{a=>1}[b]',
+    'true\ntrue\n1\n',
+  ],
+  [
+    'S=Struct.new(:x);def graph(prefix,cycle);a=Array.new(prefix+cycle){S.new};a.each_with_index{|s,i|s.x=a[i+1]||a[prefix]};a[0];end;a=graph(0,2);b=graph(2,2);p a.eql?(b),a.hash==b.hash,{a=>1}[b]',
+    'true\ntrue\n1\n',
+  ],
+  [
+    'S=Struct.new(:x);def graph(prefix,cycle);a=Array.new(prefix+cycle){S.new};a.each_with_index{|s,i|s.x=a[i+1]||a[prefix]};a[0];end;a=graph(0,4);b=graph(2,2);p a.eql?(b),a.hash==b.hash,{a=>1}[b]',
+    'true\ntrue\n1\n',
+  ],
+  [
+    'S=Struct.new(:x);def graph(prefix,cycle);a=Array.new(prefix+cycle){S.new};a.each_with_index{|s,i|s.x=a[i+1]||a[prefix]};a[0];end;a=graph(1,1);b=graph(2,2);p a.eql?(b),a.hash==b.hash,{a=>1}[b]',
+    'true\ntrue\n1\n',
+  ],
+  [
+    'S=Struct.new(:x);def graph(prefix,cycle);a=Array.new(prefix+cycle){S.new};a.each_with_index{|s,i|s.x=a[i+1]||a[prefix]};a[0];end;a=graph(1,2);b=graph(2,2);p a.eql?(b),a.hash==b.hash,{a=>1}[b]',
+    'true\ntrue\n1\n',
+  ],
+  [
+    'S=Struct.new(:x);def graph(prefix,cycle);a=Array.new(prefix+cycle){S.new};a.each_with_index{|s,i|s.x=a[i+1]||a[prefix]};a[0];end;a=graph(1,4);b=graph(2,2);p a.eql?(b),a.hash==b.hash,{a=>1}[b]',
+    'true\ntrue\n1\n',
+  ],
+  [
+    'S=Struct.new(:x);def graph(prefix,cycle);a=Array.new(prefix+cycle){S.new};a.each_with_index{|s,i|s.x=a[i+1]||a[prefix]};a[0];end;a=graph(3,1);b=graph(2,2);p a.eql?(b),a.hash==b.hash,{a=>1}[b]',
+    'true\ntrue\n1\n',
+  ],
+  [
+    'S=Struct.new(:x);def graph(prefix,cycle);a=Array.new(prefix+cycle){S.new};a.each_with_index{|s,i|s.x=a[i+1]||a[prefix]};a[0];end;a=graph(3,2);b=graph(2,2);p a.eql?(b),a.hash==b.hash,{a=>1}[b]',
+    'true\ntrue\n1\n',
+  ],
+  [
+    'S=Struct.new(:x);def graph(prefix,cycle);a=Array.new(prefix+cycle){S.new};a.each_with_index{|s,i|s.x=a[i+1]||a[prefix]};a[0];end;a=graph(3,4);b=graph(2,2);p a.eql?(b),a.hash==b.hash,{a=>1}[b]',
+    'true\ntrue\n1\n',
+  ],
+  [
+    'S=Struct.new(:x);T=Struct.new(:x);def graph(n);a=Array.new(n){|i|i.even? ? S.new : T.new};a.each_with_index{|s,i|s.x=a[(i+1)%n]};a[0];end;a=graph(2);b=graph(2);p a.eql?(b),a.hash==b.hash,{a=>1}[b]',
+    'true\ntrue\n1\n',
+  ],
+  [
+    'S=Struct.new(:x);T=Struct.new(:x);def graph(n);a=Array.new(n){|i|i.even? ? S.new : T.new};a.each_with_index{|s,i|s.x=a[(i+1)%n]};a[0];end;a=graph(2);b=graph(4);p a.eql?(b),a.hash==b.hash,{a=>1}[b]',
+    'true\ntrue\n1\n',
+  ],
+  [
+    'class Symbol;def hash;puts :hash;1;end;public;def eql?(x);puts :eql;true;end;end;h={aa:1,ab:2};p h.size,h[:aa],h[:ab]',
+    '2\n1\n2\n',
+  ],
+  [
+    'class Symbol;def hash;puts :hash;1;end;private;def eql?(x);puts :eql;true;end;end;h={aa:1,ab:2};p h.size,h[:aa],h[:ab]',
+    '2\n1\n2\n',
+  ],
+  [
+    'class Symbol;def hash;puts :hash;1;end;protected;def eql?(x);puts :eql;true;end;end;h={aa:1,ab:2};p h.size,h[:aa],h[:ab]',
+    '2\n1\n2\n',
+  ],
+  [
+    'class S<String;def hash;puts :hash;1;end;private;def eql?(x);puts :eql;true;end;end;a=S.new("a");b="a";p({a=>1}[b]);p({b=>2}[a])',
+    '1\neql\n2\n',
+  ],
+  [
+    'class S<String;def hash;puts :hash;1;end;protected;def eql?(x);puts :eql;true;end;end;a=S.new("a");b="a";p({a=>1}[b]);p({b=>2}[a])',
+    '1\neql\n2\n',
+  ],
+] as const;
+
+test.each(nativeRecursiveRecordHashCases)(
+  'Recursive record hashing preserves equality buckets and native callback boundaries: %s',
+  (source, stdout) => {
+    expect(run(source)).toMatchObject({ kind: 'executed', stdout, uncaughtException: undefined });
+  }
+);

@@ -230,8 +230,6 @@ export class Runtime implements TracedRuntime<Frame> {
   readonly comparablePairs = new Map<Value, Set<Value>>();
   readonly arrayComparisonPairs = new Map<RArray, Set<RArray>>();
   arrayComparisonDepth = 0;
-  readonly structClassHashIds = new WeakMap<RClass, number>();
-  nextStructClassHashId = 1;
   /** The row of the statement running now, which a call records as its frame's call row. */
   currentRow = 0;
   containerVersion = 0;
