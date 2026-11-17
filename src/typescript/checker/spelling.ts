@@ -21,25 +21,29 @@ export function spellingSuggestion(name: string, candidates: Iterable<string>): 
 function levenshteinWithMax(s1: string, s2: string, max: number): number | undefined {
   let previous: number[] = Array.from({ length: s2.length + 1 }, (_, index) => index);
   let current: number[] = Array.from({ length: s2.length + 1 }, () => 0);
-  const big = max + 0.01;
   for (let i = 1; i <= s1.length; i++) {
-    const minJ = Math.ceil(i > max ? i - max : 1);
-    const maxJ = Math.floor(s2.length > max + i ? max + i : s2.length);
-    current[0] = i;
-    let columnMinimum = i;
-    for (let j = 1; j < minJ; j++) current[j] = big;
-    for (let j = minJ; j <= maxJ; j++) {
-      const substitution =
-        s1[i - 1].toLowerCase() === s2[j - 1].toLowerCase() ? previous[j - 1] + 0.1 : previous[j - 1] + 2;
-      const distance =
-        s1[i - 1] === s2[j - 1] ? previous[j - 1] : Math.min(previous[j] + 1, current[j - 1] + 1, substitution);
-      current[j] = distance;
-      columnMinimum = Math.min(columnMinimum, distance);
-    }
-    for (let j = maxJ + 1; j <= s2.length; j++) current[j] = big;
-    if (columnMinimum > max) return undefined;
+    if (fillRow(s1[i - 1], s2, i, max, previous, current) > max) return undefined;
     [previous, current] = [current, previous];
   }
   const result = previous[s2.length];
   return result > max ? undefined : result;
+}
+
+/** Fills the distances to `s2`'s prefixes after one more letter of the other string, returning their minimum. */
+function fillRow(letter: string, s2: string, i: number, max: number, previous: number[], current: number[]): number {
+  const big = max + 0.01;
+  const minJ = Math.ceil(i > max ? i - max : 1);
+  const maxJ = Math.floor(s2.length > max + i ? max + i : s2.length);
+  current[0] = i;
+  let minimum = i;
+  for (let j = 1; j <= s2.length; j++) {
+    if (j < minJ || j > maxJ) {
+      current[j] = big;
+      continue;
+    }
+    const substitution = letter.toLowerCase() === s2[j - 1].toLowerCase() ? previous[j - 1] + 0.1 : previous[j - 1] + 2;
+    current[j] = letter === s2[j - 1] ? previous[j - 1] : Math.min(previous[j] + 1, current[j - 1] + 1, substitution);
+    minimum = Math.min(minimum, current[j]);
+  }
+  return minimum;
 }
