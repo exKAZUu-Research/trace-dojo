@@ -561,7 +561,7 @@ export class Calls {
     report: boolean,
     at: TreeNode | undefined
   ): boolean {
-    const contexts = restTupleContexts(this.c, restType, args);
+    const contexts = restTupleContexts(this.c, restType, args, (arg) => this.arity.spreadLength(arg));
     // The tuple is built silently, so the arguments' own errors are reported here.
     if (report)
       for (const [index, arg] of args.entries())
@@ -796,19 +796,38 @@ function isTrailingRestTuple(signature: Signature): boolean {
 
 /**
  * The contextual type of each argument a rest of a tuple type takes, as `...a: [...F[], G]`: its leading elements by
- * position, its trailing ones from the last argument back, and the rest's elements between; none past a spread.
+ * position, its trailing ones from the last argument back, and the rest's elements between. A spread of known length,
+ * as a tuple's, keeps the positions after it; one of unknown length keeps only those counted from the other end.
  */
-function restTupleContexts(c: Checker, restType: Type, args: TreeNode[]): (Type | undefined)[] {
+function restTupleContexts(
+  c: Checker,
+  restType: Type,
+  args: TreeNode[],
+  lengthOf: (arg: TreeNode) => number | undefined
+): (Type | undefined)[] {
   const elements = restType.kind === 'object' ? (restType.tuple?.elements ?? []) : [];
   const restIndex = elements.findIndex((element) => element.rest);
-  const spread = args.findIndex((arg) => arg.type === 'spread_element');
-  const known = spread === -1 ? args.length : spread;
-  return args.map((_, index) => {
-    if (index >= known) return;
-    if (restIndex === -1 || index < restIndex) return elements[index]?.type;
-    const fromEnd = args.length - 1 - index;
-    const trailing = elements.length - 1 - restIndex;
-    if (spread === -1 && fromEnd < trailing) return elements[elements.length - 1 - fromEnd].type;
+  const trailing = restIndex === -1 ? 0 : elements.length - 1 - restIndex;
+  const fromStart = offsets(args, lengthOf);
+  const fromEnd = offsets(args.toReversed(), lengthOf).toReversed();
+  return args.map((arg, index) => {
+    if (arg.type === 'spread_element') return;
+    const start = fromStart[index];
+    if (start !== undefined && (restIndex === -1 || start < restIndex)) return elements[start]?.type;
+    const end = fromEnd[index];
+    if (end !== undefined && end < trailing) return elements[elements.length - 1 - end].type;
+    if (restIndex === -1) return;
     return c.restElementType(elements[restIndex].type);
+  });
+}
+
+/** How many values precede each argument, until a spread of unknown length. */
+function offsets(args: TreeNode[], lengthOf: (arg: TreeNode) => number | undefined): (number | undefined)[] {
+  let offset: number | undefined = 0;
+  return args.map((arg) => {
+    const current = offset;
+    const length = lengthOf(arg);
+    offset = offset === undefined || length === undefined ? undefined : offset + length;
+    return current;
   });
 }
