@@ -2265,6 +2265,12 @@ Error [Tagged]: ok
     });
   });
 
+  test('an error tag getter that throws on the first read of a print is ignored, as Node.js ignores it', () => {
+    const source = `let n = 0; const e = new Error(); Object.defineProperty(e, Symbol.toStringTag, { get() { if (n++ === 0) throw 7; return "Tag"; } }); Object.defineProperty(e, "message", { get() { throw 1; } });
+try { console.log(e); } catch (x) { console.log("caught", x); } console.log(n);`;
+    expect(executeProgram('javascript', source)).toMatchObject({ kind: 'executed', stdout: '[object Tag]\n2\n' });
+  });
+
   test('a timer pending through a busy wait fires after its delay, not the wait plus its delay', () => {
     // Node.js prints about 101 here, but late under load, so the check is on the interpreter's clock alone.
     const source = `let sum = 0; const v = Date.now(); setTimeout(() => console.log(Date.now() - v), 100);

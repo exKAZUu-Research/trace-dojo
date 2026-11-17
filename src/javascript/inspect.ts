@@ -297,7 +297,8 @@ function frameOf(ctx: Context, value: JsObject, constructor: string | undefined,
 
 /** Reads an error's tag and works out its stack, as Node.js does before checking the error's own keys against it. */
 function noteErrorStack(ctx: Context, error: JsObject): void {
-  const tag = ctx.runtime.get(error, WELL_KNOWN_SYMBOLS.toStringTag);
+  // Node.js ignores what this first read of the tag throws.
+  const tag = tryOrUndefined(() => ctx.runtime.get(error, WELL_KNOWN_SYMBOLS.toStringTag));
   const own = error.properties.get(WELL_KNOWN_SYMBOLS.toStringTag);
   ctx.errorStacks.set(error, {
     ...errorStackOf(ctx.runtime, error),
