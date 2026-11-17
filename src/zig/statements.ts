@@ -31,7 +31,6 @@ import {
   type ErrorSetType,
   fitsInt,
   type IntType,
-  isComptimeOnly,
   isScalarType,
   maxInt,
   minInt,
@@ -266,7 +265,7 @@ export abstract class StatementCompiler extends CallCompiler {
 
   private declareLocal(name: string, type: Type, isConst: boolean, value: TExpr, quotedName = false): LocalBinding {
     this.resolveStorage(type, value.span);
-    if (!isConst && isComptimeOnly(type))
+    if (!isConst && this.requiresComptime(type, value.span))
       this.error(
         value.span,
         `変数「${name}」の型 ${typeName(type)} は、コンパイルのときだけの型なので、const で宣言してください。`
@@ -1276,7 +1275,9 @@ export abstract class StatementCompiler extends CallCompiler {
     const thenValue = then.value as TExpr;
     const otherwiseValue = otherwise?.value ?? known(VOID, undefined, span);
     const type =
-      resultType && !isComptimeOnly(resultType) ? resultType : this.peerType([thenValue, otherwiseValue], span);
+      resultType && !this.requiresComptime(resultType, span)
+        ? resultType
+        : this.peerType([thenValue, otherwiseValue], span);
     this.rejectRuntimeComptime(type, span);
     const a = this.coerce(thenValue, type, thenValue.span);
     const b = this.coerce(otherwiseValue, type, otherwiseValue.span);
@@ -2066,7 +2067,7 @@ export abstract class StatementCompiler extends CallCompiler {
         for (const each of prong.inline?.values() ?? []) if (each.value) all.push(each.value);
       }
       type =
-        target.resultType && !isComptimeOnly(target.resultType)
+        target.resultType && !this.requiresComptime(target.resultType, expression)
           ? target.resultType
           : all.length > 0
             ? this.peerType(all, expression)

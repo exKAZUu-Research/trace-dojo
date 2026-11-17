@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 570 -- Groups the related standard library operations that share this module.
+// code-gauge-allow-file fileNcss 572 -- Groups the related standard library operations that share this module.
 import {
   checked,
   divCeil,
@@ -690,9 +690,12 @@ const MEMBERS: Record<string, () => Member> = {
     if (type.kind !== 'float' || (type.bits !== 32 && type.bits !== 64)) {
       return sema.error(call.span, `std.math.pow は ${typeName(type)} 型には使えません（f32 か f64 にしてください）。`);
     }
-    return computed(type, [x, y], call.span, ([a, b]) =>
-      fromDouble(toDouble(a as AnyFloat) ** toDouble(b as AnyFloat), bitsOf(type))
-    );
+    return computed(type, [x, y], call.span, ([a, b]) => {
+      const base = toDouble(a as AnyFloat);
+      const exponent = toDouble(b as AnyFloat);
+      const unit = base === 1 || (base === -1 && Math.abs(exponent) === Infinity);
+      return fromDouble(unit ? 1 : base ** exponent, bitsOf(type));
+    });
   }),
   powi: generic('std.math.powi', 3, (sema, call, type, [xArg, yArg]) => {
     if (type.kind !== 'int') return sema.error(call.span, 'std.math.powi は整数の型にだけ使えます。');

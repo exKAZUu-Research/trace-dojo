@@ -74,7 +74,6 @@ import {
   indexableChild,
   type IntType,
   intType,
-  isComptimeOnly,
   maxInt,
   minInt,
   NULL_TYPE,
@@ -869,7 +868,7 @@ export abstract class ExpressionCompiler extends SemaBase {
       if (fromValue > toValue) panic(`start index ${fromValue} is larger than end index ${toValue}`);
       const from = offset + Number(fromValue),
         to = offset + Number(toValue);
-      if (sentinel !== undefined) {
+      if (sentinelExpression && sentinel !== undefined) {
         const actual = sizeOf(child) === 0 ? undefinedValue(child) : target.slots[to];
         if (!scalarValuesEqual(actual, sentinel.value))
           panic(`sentinel mismatch: expected ${String(sentinel.value)}, found ${String(actual)}`);
@@ -1639,7 +1638,7 @@ export abstract class ExpressionCompiler extends SemaBase {
     if (index === undefined)
       return this.error(init, `${typeName(type)} 型には、フィールド「${init.name}」がありません。`);
     const value = this.coerce(this.compile(init.value, fields[index].type), fields[index].type, init.value);
-    return this.aggregate(type, [value], expression, ([payload]) => new ZUnion(index, payload));
+    return this.materializeUnion(type, index, value, expression);
   }
 
   /** `.{ .x = 1 }` without a result type, whose type is an anonymous struct of the fields' types. */
@@ -1649,7 +1648,9 @@ export abstract class ExpressionCompiler extends SemaBase {
       name: init.name,
       type: values[index].type,
       hasDefault: false,
-      comptimeValue: isComptimeOnly(values[index].type) ? staticResultOf(values[index]) : undefined,
+      comptimeValue: this.requiresComptime(values[index].type, values[index].span)
+        ? staticResultOf(values[index])
+        : undefined,
     }));
     const type = this.anonymousStructType(fields);
     return this.aggregate(type, values, expression, (slots) => new ZStruct(slots), true);

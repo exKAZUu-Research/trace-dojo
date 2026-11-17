@@ -277,6 +277,33 @@ export abstract class SemaBase implements SemaApi {
     this.resolveLayout(type, span, new Set());
   }
 
+  protected requiresComptime(type: Type, span: Span): boolean {
+    this.resolveStorage(type, span);
+    return isComptimeOnly(type);
+  }
+
+  private copyForCompilation(value: Value, type: Type, span: Span): Value {
+    this.resolveStorage(type, span);
+    const slots = copiedValueSlots(type, value, () => this.spendCompilation());
+    this.storage.reserveSlots(slots);
+    this.spendCompilation(sizeOf(type) === 0 ? 0 : 1 + slots);
+    return copyForStorage(value);
+  }
+
+  protected materializeUnion(type: UnionType, index: number, payload: TExpr, span: Span): TExpr {
+    this.resolveStorage(type, span);
+    const build = (payload: Value, frame?: Frame): Value => {
+      const value = new ZUnion(index, payload);
+      return frame ? copyForFrame(frame, value, type) : this.copyForCompilation(value, type, span);
+    };
+    if (payload.known) return known(type, build(payload.value), span);
+    const evaluate = payload.eval;
+    return {
+      ...runtime(type, (frame) => build(evaluate(frame), frame), span),
+      staticResult: this.constantResult([payload], ([value]) => build(value), span),
+    };
+  }
+
   reserveStorage(type: Type, span: Span): void {
     this.resolveStorage(type, span);
     this.storage.reserve(type);
@@ -444,7 +471,6 @@ export abstract class SemaBase implements SemaApi {
   }
 
   // code-gauge-allow functionCognitiveComplexity 20 -- Keeps declaration state and its compilation-time storage transaction together.
-  // code-gauge-allow functionNcss 33 -- Keeps declaration state and its compilation-time storage transaction together.
   private resolveVariable(decl: Extract<Decl, { kind: 'const' | 'var' }>): void {
     if (decl.state === 'resolved') return;
     if (decl.state === 'resolving') {
@@ -466,17 +492,13 @@ export abstract class SemaBase implements SemaApi {
         if (!compiled.known) {
           compiled = known(compiled.type, this.evaluateAtCompileTime(compiled), value);
         }
-        if (decl.kind === 'var' && isComptimeOnly(compiled.type)) {
+        if (decl.kind === 'var' && this.requiresComptime(compiled.type, syntax)) {
           this.error(
             syntax,
             `変数「${syntax.name}」の型 ${typeName(compiled.type)} は、コンパイルのときだけの型です。`
           );
         }
-        this.resolveStorage(compiled.type, syntax);
-        const slots = copiedValueSlots(compiled.type, compiled.value, () => this.spendCompilation());
-        this.storage.reserveSlots(slots);
-        this.spendCompilation(sizeOf(compiled.type) === 0 ? 0 : 1 + slots);
-        decl.cell = { slots: [copyForStorage(compiled.value)] };
+        decl.cell = { slots: [this.copyForCompilation(compiled.value, compiled.type, syntax)] };
         decl.type = compiled.type;
         if (decl.kind === 'const') {
           decl.value = compiled.value;
@@ -838,7 +860,7 @@ export abstract class SemaBase implements SemaApi {
           if (fields[index].type.kind !== 'void') {
             this.error(span, `union のフィールド「${name}」には値が要るので、.${name} だけでは作れません。`);
           }
-          return known(to, new ZUnion(index, undefined), span);
+          return this.materializeUnion(to, index, known(VOID, undefined, span), span);
         }
         if (from.kind === 'enum' && to.tagType === from && expression.known) {
           const fields = this.unionFields(to);
@@ -847,7 +869,7 @@ export abstract class SemaBase implements SemaApi {
           );
           const index = tag && this.fieldIndexes(fields).get(tag.name);
           if (index === undefined || fields[index].type.kind !== 'void') return undefined;
-          return known(to, new ZUnion(index, undefined), span);
+          return this.materializeUnion(to, index, known(VOID, undefined, span), span);
         }
         return undefined;
       }

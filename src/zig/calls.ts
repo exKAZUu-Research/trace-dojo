@@ -29,7 +29,6 @@ import {
   errorUnionOf,
   type FnType,
   fnType,
-  isComptimeOnly,
   type Namespace,
   pointerTo,
   TYPE,
@@ -202,7 +201,7 @@ export abstract class CallCompiler extends BuiltinCompiler {
         ref.decl,
         index,
         args.map((each) => each.type),
-        args.map((arg) => (isComptimeOnly(arg.type) ? arg : undefined))
+        args.map((arg) => (this.requiresComptime(arg.type, arg.span) ? arg : undefined))
       );
       declaredTypes.push(declared);
       const compiled = isTExpr(arg) ? arg : this.compile(arg, declared);
@@ -214,7 +213,7 @@ export abstract class CallCompiler extends BuiltinCompiler {
     const instance = this.instantiate(ref, argTypes, expression, args);
     void resultType;
     for (const [index, arg] of args.entries()) {
-      if (declaredTypes[index] === undefined && isComptimeOnly(arg.type) && !arg.known) {
+      if (declaredTypes[index] === undefined && this.requiresComptime(arg.type, arg.span) && !arg.known) {
         this.error(
           params[index],
           'anytype のコンパイルのときだけの引数は、コンパイルのときに値が決まっていなければなりません。'
@@ -228,7 +227,7 @@ export abstract class CallCompiler extends BuiltinCompiler {
       (frame) => this.invoke(instance, evaluateHeld(frame, evaluators), row, frame, true),
       expression
     );
-    return isComptimeOnly(instance.returnType)
+    return this.requiresComptime(instance.returnType, expression)
       ? known(instance.returnType, this.evaluateAtCompileTime(call), expression)
       : call;
   }
@@ -353,7 +352,7 @@ export abstract class CallCompiler extends BuiltinCompiler {
     const { decl } = ref;
     const syntax = decl.syntax;
     const paramTypes: Type[] = [];
-    const comptimeArgs = args.map((arg) => (isComptimeOnly(arg.type) && arg.known ? arg : undefined));
+    const comptimeArgs = args.map((arg) => (this.requiresComptime(arg.type, arg.span) && arg.known ? arg : undefined));
     for (const [index, param] of syntax.params.entries()) {
       const type = param.type ? this.parameterType(decl, index, paramTypes, comptimeArgs) : argTypes[index];
       if (!type)

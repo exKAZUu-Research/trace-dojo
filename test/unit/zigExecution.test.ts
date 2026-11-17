@@ -7352,3 +7352,50 @@ test('native iterator updates preserve retained optional index payloads', () => 
     uncaughtException: undefined,
   });
 });
+
+test.each(['a:u3,b:u4', 'a:u8,b:u16', 'a:u64,b:*u8'])(
+  'discarded unionInit results validate every packed field: %s',
+  (fields) => {
+    const source = `const U=packed union{${fields}};pub fn main()void{_=@unionInit(U,"a",1);}`;
+    expect(executeProgram('zig', source)).toMatchObject({ kind: 'compileError' });
+  }
+);
+
+test('union construction budgets only its active logical payload', () => {
+  const source = `const std=@import("std");const U=union(enum){large:[1000001]u8,empty:void};pub fn main()void{const a=@unionInit(U,"empty",{});const b:U=.empty;const c=U{.empty={}};std.debug.print("{} {} {}",.{a==.empty,b==.empty,c==.empty});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: 'true true true',
+    uncaughtException: undefined,
+  });
+});
+
+test.each(['struct{t:type}', 'union(enum){t:type}'])(
+  'generic null optional %s descriptors retain their known specialization value',
+  (type) => {
+    const source = `const std=@import("std");const D=${type};fn make(o:anytype)(if(o==null) u8 else o.?.t){return 0;}pub fn main()void{const x=make(@as(?D,null));std.debug.print("{} {}",.{x,@TypeOf(x)});}`;
+    expect(executeProgram('zig', source)).toMatchObject({
+      kind: 'executed',
+      stderr: '0 u8',
+      uncaughtException: undefined,
+    });
+  }
+);
+
+test.each(['f32', 'f64'])('floating power %s preserves unit bases with nonfinite exponents', (type) => {
+  const source = `const std=@import("std");pub fn main()void{var i=std.math.inf(${type});var n=std.math.nan(${type});_=&i;_=&n;std.debug.print("{d} {d} {d} {d} {}",.{std.math.pow(${type},-1,i),std.math.pow(${type},-1,-i),std.math.pow(${type},1,i),std.math.pow(${type},1,n),std.math.isNan(std.math.pow(${type},-1,n))});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: '1 1 1 1 true',
+    uncaughtException: undefined,
+  });
+});
+
+test.each(['0..', '0..1'])('ordinary sentinel slice %s inherits its type without asserting its bytes', (range) => {
+  const source = `const std=@import("std");pub fn main()void{var a=[1:0]u8{1};a[1]=9;const s=a[${range}];var n:usize=1;_=&n;std.debug.print("{}",.{s[n]});}`;
+  expect(executeProgram('zig', source)).toMatchObject({ kind: 'executed', stderr: '9', uncaughtException: undefined });
+  expect(executeProgram('zig', source.replace(`a[${range}]`, 'a[0..1:0]'))).toMatchObject({
+    kind: 'executed',
+    uncaughtException: expect.stringContaining('sentinel mismatch'),
+  });
+});

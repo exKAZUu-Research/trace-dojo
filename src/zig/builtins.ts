@@ -88,7 +88,7 @@ import {
   ZArray,
   zeroArray,
   ZStruct,
-  ZUnion,
+  type ZUnion,
 } from './values';
 
 /** Builtins of stages C and D, which this grader rejects with the stage's message. */
@@ -466,7 +466,7 @@ export abstract class BuiltinCompiler extends ExpressionCompiler {
         if (index === undefined)
           return this.error(args[1], `${typeName(type)} 型には、フィールド「${fieldName}」がありません。`);
         const value = this.coerce(this.compile(args[2], fields[index].type), fields[index].type, args[2]);
-        return this.derived(value, type, (payload) => new ZUnion(index, payload));
+        return this.materializeUnion(type, index, value, expression);
       }
       case '@memcpy':
       case '@memmove': {
