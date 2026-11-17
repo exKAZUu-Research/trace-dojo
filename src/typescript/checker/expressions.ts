@@ -9,7 +9,15 @@ import { Expandos, isImmediatelyInvoked, laterRunningTypes } from './expandos';
 import { ExpressionTypeCache } from './expressionTypeCache';
 import type { FlowEntry } from './flow';
 import type { Sym } from './scopes';
-import { hasToken, isNumericName, named, numberValue, patternIdentifiers, stringValue } from './syntax';
+import {
+  hasToken,
+  isNumericName,
+  named,
+  numberValue,
+  patternIdentifiers,
+  stringValue,
+  templateFragmentText,
+} from './syntax';
 import {
   anyType,
   errorType,
@@ -121,7 +129,8 @@ export class ExpressionChecker {
     const types: Type[] = [];
     for (const child of named(node)) {
       if (child.type !== 'template_substitution') {
-        if (child.type === 'string_fragment') texts[texts.length - 1] += child.text;
+        if (child.type === 'string_fragment' || child.type === 'escape_sequence')
+          texts[texts.length - 1] += templateFragmentText(child);
         continue;
       }
       const expression = named(child)[0];

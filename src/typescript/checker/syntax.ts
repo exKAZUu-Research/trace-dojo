@@ -115,6 +115,12 @@ export function stringValue(node: TreeNode): string {
   return value;
 }
 
+/** The text a part of a template spells: an escape sequence decoded, and a line break as `\n`. */
+export function templateFragmentText(node: TreeNode): string {
+  if (node.type === 'escape_sequence') return decodeEscape(node.text);
+  return node.text.replaceAll(/\r\n?/g, '\n');
+}
+
 const simpleEscapes: Record<string, string> = { n: '\n', t: '\t', r: '\r', b: '\b', f: '\f', v: '\v', '0': '\0' };
 
 function decodeEscape(text: string): string {

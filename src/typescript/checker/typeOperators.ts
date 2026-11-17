@@ -1,7 +1,7 @@
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import type { Checker, Mapper } from './checker';
-import { isNumericName, named } from './syntax';
+import { isNumericName, named, templateFragmentText } from './syntax';
 import {
   anonymousObject,
   anyType,
@@ -455,7 +455,7 @@ export class TypeOperators {
         types.push(this.c.typeNodes.typeFromNode(named(child)[0]));
         texts.push('');
       } else {
-        texts[texts.length - 1] += child.text;
+        texts[texts.length - 1] += templateFragmentText(child);
       }
     }
     return this.templateLiteral(texts, types, node);
