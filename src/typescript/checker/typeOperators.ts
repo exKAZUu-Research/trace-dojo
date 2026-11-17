@@ -241,7 +241,8 @@ export class TypeOperators {
       type: this.c.instantiate(info.template, mapper),
       readonly: info.readonlyModifier === '+',
     });
-    if (isIntrinsic(nameMember, 'string')) structure.stringIndex = indexInfo();
+    // A key of `any` maps every string key, as TypeScript gives `{ [K in any]: T }` a string index signature.
+    if (isIntrinsic(nameMember, 'string') || isAnyLike(nameMember)) structure.stringIndex = indexInfo();
     else if (isIntrinsic(nameMember, 'number')) structure.numberIndex = indexInfo();
   }
 
@@ -446,13 +447,18 @@ export class TypeOperators {
         texts[texts.length - 1] += child.text;
       }
     }
-    return this.templateLiteral(texts, types);
+    return this.templateLiteral(texts, types, node);
   }
 
-  templateLiteral(texts: string[], types: Type[]): Type {
+  templateLiteral(texts: string[], types: Type[], node?: TreeNode): Type {
     if (types.some((type) => this.c.relations.isGeneric(type)))
       return { kind: 'templateLiteral', id: newTypeId(), texts, types };
-    // Each union expands into one literal per member, as long as the result stays small.
+    // Each union expands into one literal per member, up to the size TypeScript represents.
+    const size = types.reduce((product, type) => product * (type.kind === 'union' ? type.types.length : 1), 1);
+    if (size >= 100_000) {
+      if (node) this.c.error(node, 'この式の型は、表せないほど複雑な共用体型になります。');
+      return errorType;
+    }
     let combinations: string[] = [texts[0]];
     let isLiteral = true;
     for (const [index, type] of types.entries()) {
@@ -466,9 +472,7 @@ export class TypeOperators {
         isLiteral = false;
         break;
       }
-      const count = combinations.length * members.length;
-      this.c.budget.spend(count);
-      if (count > 10_000) return stringType;
+      this.c.budget.spend(combinations.length * members.length);
       combinations = appendEach(combinations, members, texts[index + 1]);
     }
     if (isLiteral) return unionOf(combinations.map((text) => literalType(text)));

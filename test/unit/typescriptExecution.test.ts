@@ -179,10 +179,10 @@ test.each([
 
 test('type checking stops at the execution limits, as the server checks programs in its own process', () => {
   const heavyTypes = Array.from(
-    { length: 8 },
+    { length: 40 },
     (_, index) => `type D${index} = "0" | "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9";
 type M${index} = { [K in \`\${D${index}}\${D${index}}\${D${index}}\${D${index}}\`]: K };
-const m${index}: Partial<M${index}> = {};`
+const m${index}: keyof Partial<M${index}> = "0000";`
   ).join('\n');
   expect(executeProgram('typescript', heavyTypes)).toMatchObject({ kind: 'limitExceeded' });
 });
@@ -248,13 +248,16 @@ test('recursive type instantiation stops before the host stack is exhausted', ()
   }
 });
 
-test('template literal type products spend their budget before allocating combinations', () => {
+test('template literal type products of 100,000 combinations or more are rejected before allocating them', () => {
   const declarations = Array.from(
     { length: 12 },
     (_, group) => `type Part${group} = ${Array.from({ length: 100 }, (_, index) => group * 100 + index).join(' | ')};`
   ).join('\n');
   const source = `${declarations}\ntype Part = ${Array.from({ length: 12 }, (_, index) => `Part${index}`).join(' | ')};\ntype Product = \`\${Part}\${Part}\`;`;
-  expect(executeProgram('typescript', source)).toEqual({ kind: 'limitExceeded', limit: 'operations' });
+  expect(executeProgram('typescript', source)).toEqual({
+    kind: 'compileError',
+    diagnostics: [{ row: 13, message: 'この式の型は、表せないほど複雑な共用体型になります。' }],
+  });
 });
 
 test('legacy HTML builders enforce string limits before escaping and wrapping', () => {

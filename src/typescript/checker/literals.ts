@@ -449,8 +449,8 @@ export class LiteralChecker {
     // Each alternative of a union spreads its own properties, as TypeScript gives the literal a union type.
     const bases = literal.alternatives ?? [new Map<string, Property>()];
     const count = bases.length * objectMembers.length;
-    // TypeScript refuses a cross product of union spreads past 100,000 alternatives.
-    if (count > 100_000) {
+    // TypeScript refuses a cross product of union spreads of 100,000 alternatives or more.
+    if (count >= 100_000) {
       this.c.error(member, 'この式の型は、表せないほど複雑な共用体型になります。');
       literal.isTooComplex = true;
       return;
