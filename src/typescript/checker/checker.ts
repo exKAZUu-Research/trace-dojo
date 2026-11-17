@@ -695,7 +695,7 @@ export class Checker {
     }
   }
 
-  private readonly circularConstraints = new CircularConstraints(this.budget);
+  private readonly circularConstraints = new CircularConstraints(this);
 
   /** As TypeScript's `getConstraintOfTypeParameter`, none for a circular constraint. */
   constraintOf(parameter: TypeParameter): Type | undefined {
