@@ -42,6 +42,7 @@ import {
   USIZE,
   VOID,
 } from './types';
+import { payloadFacts, valueFactsOf } from './valueFacts';
 import {
   arrayPointerView,
   ErrorValue,
@@ -268,7 +269,7 @@ export abstract class StatementCompiler extends CallCompiler {
       type,
       isConst,
       knownLength: isConst ? value?.knownLength : undefined,
-      undefinedMemory: isConst ? value?.undefinedMemory : undefined,
+      valueFacts: isConst && value ? valueFactsOf(value) : undefined,
       known: Boolean(isConst && (value?.known || value?.staticResult)),
       value: isConst ? (value?.known ? value.value : value?.staticResult?.value) : undefined,
     };
@@ -323,7 +324,6 @@ export abstract class StatementCompiler extends CallCompiler {
   }
 
   // code-gauge-allow functionNcss 49 -- Keeps the analysis and the generated code of one construct together, as Zig's Sema does.
-  // code-gauge-allow functionCognitiveComplexity 29 -- Keeps the analysis and the generated code of one construct together, as Zig's Sema does.
   private destructure(statement: Extract<Statement, { kind: 'destructure' }>): Stmt {
     const sequential = this.sequentialDestructure(statement);
     if (sequential) return sequential;
@@ -1034,6 +1034,7 @@ export abstract class StatementCompiler extends CallCompiler {
     }
     if (kind === 'optional') {
       if (condition.type.kind !== 'optional') return this.error(expression.condition, 'optional の値が必要です。');
+      this.checkMemoryHeader(condition, expression.condition);
       const child = condition.type.child;
       if (expression.elseCapture) this.error(expression.elseCapture, 'optional の条件の else では値を受け取れません。');
       if (conditionResult) {
@@ -1299,7 +1300,17 @@ export abstract class StatementCompiler extends CallCompiler {
         },
       };
     }
-    const binding = this.newLocal(capture.name, type, true);
+    const facts =
+      operand && (operand.type.kind === 'optional' || operand.type.kind === 'error_union')
+        ? payloadFacts(operand)
+        : undefined;
+    const binding = {
+      ...this.newLocal(capture.name, type, true),
+      known: facts?.exact !== undefined,
+      value: facts?.exact?.value,
+      valueFacts: facts,
+      knownLength: facts?.length,
+    };
     return {
       binding,
       bind: (frame, value) => {
@@ -1358,6 +1369,7 @@ export abstract class StatementCompiler extends CallCompiler {
       const evaluate = bool.eval;
       test = (frame) => evaluate(frame) as boolean;
     } else if (kind === 'optional' && condition.type.kind === 'optional') {
+      this.checkMemoryHeader(condition, expression.condition);
       binding = this.captureBinding(expression.capture, condition.type.child, condition);
       const evaluate = condition.eval;
       const bind = binding?.bind;
@@ -1522,7 +1534,7 @@ export abstract class StatementCompiler extends CallCompiler {
       evaluate: (frame: Frame) => Value;
       type: Type;
       staticLength?: bigint;
-      undefinedMemory?: true;
+      elementFact?: { value: Value };
     }
     const operands: Operand[] = expression.operands.map((operand, index) => {
       const capture = expression.captures[index];
@@ -1557,7 +1569,11 @@ export abstract class StatementCompiler extends CallCompiler {
     const bindings = expression.captures.map((capture, index) => {
       if (isDiscardName(capture)) return;
       const operand = operands[index];
-      const binding = { ...this.newLocal(capture.name, operand.type, true), undefinedMemory: operand.undefinedMemory };
+      const binding = {
+        ...this.newLocal(capture.name, operand.type, true),
+        known: operand.elementFact !== undefined,
+        value: operand.elementFact?.value,
+      };
       locals.set(capture.name, binding);
       return binding;
     });
@@ -1639,8 +1655,6 @@ export abstract class StatementCompiler extends CallCompiler {
   }
 
   /** How a `for` reads an array, a pointer to one, or a slice, by value or by pointer. */
-  // code-gauge-allow functionNcss 57 -- Keeps the analysis and the generated code of one construct together, as Zig's Sema does.
-  // code-gauge-allow functionCognitiveComplexity 29 -- Keeps all loop operand views and their exact lengths together.
   private forOperand(
     compiled: TExpr,
     capture: Capture | undefined,
@@ -1651,7 +1665,7 @@ export abstract class StatementCompiler extends CallCompiler {
     evaluate: (frame: Frame) => Value;
     type: Type;
     staticLength?: bigint;
-    undefinedMemory?: true;
+    elementFact?: { value: Value };
   } {
     const byPointer = capture?.byPointer ?? false;
     const readsElement = capture !== undefined && !isDiscardName(capture) && !byPointer;
@@ -1696,15 +1710,23 @@ export abstract class StatementCompiler extends CallCompiler {
     }
     this.resolveStorage(child, span);
     const zero = sizeOf(child) === 0;
-    if (type.kind === 'pointer' && (type.size === 'slice' || (readsElement && !zero && staticLength !== 0n)))
+    if (type.kind === 'pointer' && type.size === 'slice') this.checkMemoryHeader(compiled, span);
+    if (type.kind === 'pointer' && readsElement && !zero && staticLength !== 0n)
       this.checkMemoryOperand(compiled, span);
     if (!compiled.known && type.kind === 'array') {
       const read = evaluate;
       evaluate = (frame) => copyForFrame(frame, read(frame), type);
     }
+    const elementType = byPointer ? pointerTo(child, isConst) : child;
+    const elementFact =
+      byPointer && hasUndefinedMemory(compiled)
+        ? {
+            value: zero ? this.zeroPointer(undefinedValue(elementType) as Pointer, child) : undefinedValue(elementType),
+          }
+        : undefined;
     return {
-      type: byPointer ? pointerTo(child, isConst) : child,
-      undefinedMemory: byPointer && hasUndefinedMemory(compiled) ? true : undefined,
+      type: elementType,
+      elementFact,
       evaluate,
       staticLength,
       lengthOf: (_frame, value) => staticLength ?? viewOf(value).length,
@@ -2349,15 +2371,21 @@ export abstract class StatementCompiler extends CallCompiler {
     const payload = type.kind === 'error_union' ? type.payload : NORETURN;
     const { target } = fn;
     const evaluate = operand.eval;
-    return runtime(
-      payload,
-      (frame) => {
-        const value = evaluate(frame);
-        if (value instanceof ErrorValue) throw new Jump('return', target, value);
-        return value;
-      },
-      expression
-    );
+    const facts = payloadFacts(operand);
+    return {
+      ...runtime(
+        payload,
+        (frame) => {
+          const value = evaluate(frame);
+          if (value instanceof ErrorValue) throw new Jump('return', target, value);
+          return value;
+        },
+        expression
+      ),
+      valueFacts: facts,
+      staticResult: facts?.exact,
+      knownLength: facts?.length,
+    };
   }
 
   /** `x catch handler`; with `discarded`, as in `_ = x catch handler`, the payload and handler need no common type. */
@@ -2384,7 +2412,7 @@ export abstract class StatementCompiler extends CallCompiler {
     }
     if (errorUnionCannotFail(operand)) {
       if (discarded) this.rejectDiscardedError(type.payload, expression.operand);
-      const payload = this.derived(operand, type.payload, (value) => value);
+      const payload = { ...this.derived(operand, type.payload, (value) => value), valueFacts: payloadFacts(operand) };
       return discarded
         ? this.derived(payload, VOID, () => {})
         : resultType

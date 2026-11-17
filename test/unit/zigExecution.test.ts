@@ -5059,3 +5059,62 @@ test('zero-bit union payload changes remain bounded without consuming aggregate 
     uncaughtException: undefined,
   });
 });
+
+test.each([
+  ['const q:?*u8=item;', '_=q.?;'],
+  ['const q=.{.p=item,.n=make()};', 'q.p.*=7;'],
+  ['const q:S=.{.p=item,.n=make()};', 'q.p.*=7;'],
+  ['const s:S=.{.n=make(),.p=item};const q:?S=s;', 'q.?.p.*=7;'],
+  ['const q=[_]*u8{item,other()};', 'q[0].*=7;'],
+  ['const s=.{.p=item,.n=make()};const q=.{.inner=s};', 'q.inner.p.*=7;'],
+  ['const s=.{item,make()};const q=s ++ .{@as(u8,1)};', 'q[0].*=7;'],
+  ['const q:error{}!*u8=item;const x=try q;', 'x.*=7;'],
+  ['const s:S=.{.p=item,.n=make()};const q:error{}!S=s;const x=try q;', 'x.p.*=7;'],
+])('constructor fields and payloads retain known undefined pointer facts (%#)', (declaration, access) => {
+  const source = `const std=@import("std");const S=struct{n:u8,p:*u8};fn make()u8{std.debug.print("m",.{});return 1;}fn other()*u8{return undefined;}pub fn main()!void{const p:*[2]u8=undefined;var access=false;_=&access;for(p)|*item|{${declaration}if(access){${access}}}}`;
+  expect(executeProgram('zig', source)).toMatchObject({ kind: 'compileError' });
+});
+
+test.each([
+  'var q=.{.p=item,.n=make()};_=&q;if(access){q.p.*=7;}',
+  'const q=if(access) item else item;if(access){q.*=7;}',
+  'const q=through(item);if(access){q.*=7;}',
+  'const q=[_]*u8{item,other()};if(access){q[1].*=7;}',
+])('mutation, branch and call barriers retain runtime-only pointer checks (%#)', (body) => {
+  const source = `const std=@import("std");fn make()u8{return 1;}fn other()*u8{return undefined;}fn through(p:*u8)*u8{return p;}pub fn main()void{const p:*[2]u8=undefined;var access=false;_=&access;var n:u8=0;for(p)|*item|{${body}n+=1;}std.debug.print("{}",.{n});}`;
+  expect(executeProgram('zig', source)).toMatchObject({ kind: 'executed', stderr: '2', uncaughtException: undefined });
+});
+
+test('partial constant fields retain constructor effects and runtime field addresses', () => {
+  const source = `const std=@import("std");fn make()u8{std.debug.print("m|",.{});return 1;}pub fn main()void{const q=.{.n=make(),.length=@as(usize,2),.other=@as(usize,2)};const A=[q.length]u8;var a:A=undefined;_=&a;const p=&q.length;std.debug.print("{} {} {}",.{p==&q.length,p!=&q.other,a.len});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: 'm|true true 2',
+    uncaughtException: undefined,
+  });
+});
+
+test.each([
+  ['[0]u8', '[]u8', 'for(s)|_|{n+=1;}', '0'],
+  ['[2]void', '[]void', 'for(s)|_|{n+=1;}', '4'],
+  ['[2]u0', '[]u0', 'for(s)|v|{n+=1;n+=v;}', '4'],
+  ['[0]u8', '[]u8', 'const q:?[]u8=s;n+=q.?.len;', '0'],
+])('constructed %s slice headers stay valid with undefined zero-byte addresses', (array, slice, body, expected) => {
+  const source = `const std=@import("std");pub fn main()void{const p:*[2]${array}=undefined;var n:usize=0;for(p)|*item|{const s:${slice}=item;${body}}std.debug.print("{}",.{n});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: expected,
+    uncaughtException: undefined,
+  });
+});
+
+test('constructed nonempty slice headers allow length and discarded-element operations', () => {
+  const source = `const std=@import("std");pub fn main()void{const p:*[2]u8=undefined;const s:[]u8=p;var n:usize=s.len;for(s)|_|{n+=1;}std.debug.print("{}",.{n});}`;
+  expect(executeProgram('zig', source)).toMatchObject({ kind: 'executed', stderr: '4', uncaughtException: undefined });
+  expect(executeProgram('zig', source.replace('for(s)|_|{n+=1;}', 'for(s)|v|{n+=v;}'))).toMatchObject({
+    kind: 'compileError',
+  });
+  expect(executeProgram('zig', source.replace('const s:[]u8=p;', 'const s:[]u8=undefined;'))).toMatchObject({
+    kind: 'compileError',
+  });
+});

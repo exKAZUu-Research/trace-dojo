@@ -1,4 +1,3 @@
-// code-gauge-allow-file fileNcss 1000 -- The file holds one layer of the compiler, whose parts share its private state.
 import { CompileError } from '../interpreter/diagnostics';
 import { ExecutionBudget } from '../interpreter/limits';
 import { CompilationStorage, valueSlots } from './allocation';
@@ -61,10 +60,13 @@ import {
   USIZE,
   VOID,
 } from './types';
+import { aggregateFacts, fieldFacts, staticResultOf, type ValueFacts, valueFactsOf } from './valueFacts';
 import {
+  arrayPointerView,
   type EnumLiteral,
   ErrorValue,
   FnValue,
+  hasUndefinedHeader,
   isUndefinedMemory,
   markConstantStorage,
   NativeHandle,
@@ -96,7 +98,7 @@ export interface TExpr {
   readonly known: boolean;
   readonly staticResult?: { value: Value };
   readonly knownLength?: bigint;
-  readonly undefinedMemory?: true;
+  readonly valueFacts?: ValueFacts;
   readonly value: Value;
   readonly eval: Eval;
   readonly place?: Place;
@@ -112,7 +114,7 @@ export interface LocalBinding {
   readonly type: Type;
   readonly isConst: boolean;
   readonly knownLength?: bigint;
-  readonly undefinedMemory?: true;
+  readonly valueFacts?: ValueFacts;
   /** The value of a constant that the compiler knows. */
   readonly known: boolean;
   readonly value?: Value;
@@ -199,6 +201,7 @@ export interface SemaApi {
 }
 
 export { UNASSIGNED } from './values';
+export { staticResultOf } from './valueFacts';
 
 export const NATIVE_FN_TYPE: Type = { kind: 'fn', params: [], returnType: VOID };
 
@@ -309,6 +312,11 @@ export abstract class SemaBase implements SemaApi {
 
   protected checkMemoryOperand(value: TExpr, span: Span = value.span): void {
     if (hasUndefinedMemory(value)) this.error(span, 'undefined のポインタは参照できません。');
+  }
+
+  protected checkMemoryHeader(value: TExpr, span: Span = value.span): void {
+    const fact = staticResultOf(value);
+    if (fact && hasUndefinedHeader(fact.value)) this.error(span, 'undefined のヘッダーは参照できません。');
   }
 
   // Values known at compile time ------------------------------------------------------------------------------------
@@ -656,8 +664,7 @@ export abstract class SemaBase implements SemaApi {
   /** Converts an expression to a type as Zig's implicit coercions do, or reports that it cannot. */
   coerce(expression: TExpr, to: Type, span: Span = expression.span): TExpr {
     const converted = this.tryCoerce(expression, to, span);
-    if (converted)
-      return expression.undefinedMemory && to.kind === 'pointer' ? { ...converted, undefinedMemory: true } : converted;
+    if (converted) return converted;
     return this.error(span, mismatch(to, expression.type));
   }
 
@@ -834,8 +841,9 @@ export abstract class SemaBase implements SemaApi {
     if (from.kind === 'optional' && to.child.kind !== 'optional') return undefined;
     const payload = this.tryCoerce(expression, to.child, span);
     if (!payload) return undefined;
-    if (to.child.kind !== 'optional') return { ...payload, type: to, place: undefined };
-    return this.derived(payload, to, (value) => new Some(value));
+    if (to.child.kind !== 'optional')
+      return { ...payload, type: to, place: undefined, valueFacts: { payload: valueFactsOf(payload) } };
+    return { ...this.derived(payload, to, (value) => new Some(value)), valueFacts: { payload: valueFactsOf(payload) } };
   }
 
   private coerceToErrorSet(expression: TExpr, to: ErrorSetType, span: Span): TExpr | undefined {
@@ -872,7 +880,9 @@ export abstract class SemaBase implements SemaApi {
       return converted ? { ...converted, type: to } : undefined;
     }
     const payload = this.tryCoerce(expression, to.payload, span);
-    return payload ? { ...payload, type: to, place: undefined } : undefined;
+    return payload
+      ? { ...payload, type: to, place: undefined, valueFacts: { payload: valueFactsOf(payload) } }
+      : undefined;
   }
 
   // code-gauge-allow functionNcss 31 -- Checks each rule of Zig's type coercion or container analysis in turn.
@@ -902,8 +912,8 @@ export abstract class SemaBase implements SemaApi {
       const { length } = array;
       return {
         ...this.derived(expression, to, (value) => {
-          const array = (value as Pointer).load() as ZArray;
-          return new Slice(array, array.offset, length);
+          const view = arrayPointerView(value as Pointer, array);
+          return new Slice(view, view.offset, length);
         }),
         knownLength: expression.known ? length : expression.knownLength,
       };
@@ -919,24 +929,28 @@ export abstract class SemaBase implements SemaApi {
     const held = new WeakMap<Frame, Value>();
     const result = convert({ ...expression, eval: (frame) => held.get(frame) });
     if (!result) return undefined;
-    return runtime(
-      result.type,
-      (frame) => {
-        const source = expression.eval(frame);
-        const previous = held.get(frame);
-        const mark = frame.temporaries.length;
-        held.set(frame, source);
-        frame.temporaries.push(source);
-        try {
-          return result.eval(frame);
-        } finally {
-          frame.temporaries.length = mark;
-          if (previous === undefined) held.delete(frame);
-          else held.set(frame, previous);
-        }
-      },
-      expression.span
-    );
+    return {
+      ...runtime(
+        result.type,
+        (frame) => {
+          const source = expression.eval(frame);
+          const previous = held.get(frame);
+          const mark = frame.temporaries.length;
+          held.set(frame, source);
+          frame.temporaries.push(source);
+          try {
+            return result.eval(frame);
+          } finally {
+            frame.temporaries.length = mark;
+            if (previous === undefined) held.delete(frame);
+            else held.set(frame, previous);
+          }
+        },
+        expression.span
+      ),
+      staticResult: staticResultOf(result),
+      valueFacts: result.valueFacts,
+    };
   }
 
   private coerceToArray(expression: TExpr, to: Extract<Type, { kind: 'array' }>, span: Span): TExpr | undefined {
@@ -1011,7 +1025,11 @@ export abstract class SemaBase implements SemaApi {
     if (field.comptimeValue !== undefined) return known(field.type, field.comptimeValue.value, span);
     if (expression.known) return known(field.type, (expression.value as ZStruct).slots[index], span);
     const evaluate = expression.eval;
-    return runtime(field.type, (frame) => (evaluate(frame) as ZStruct).slots[index], span);
+    const facts = fieldFacts(valueFactsOf(expression), index);
+    const result = facts?.exact
+      ? this.fixedResult(expression, field.type, facts.exact.value, span)
+      : runtime(field.type, (frame) => (evaluate(frame) as ZStruct).slots[index], span);
+    return { ...result, valueFacts: facts, knownLength: facts?.length };
   }
 
   protected comptimeOperand(operand: TExpr): TExpr {
@@ -1051,7 +1069,13 @@ export abstract class SemaBase implements SemaApi {
   }
 
   /** An aggregate built from elements, known when they all are. */
-  protected aggregate(type: Type, elements: readonly TExpr[], span: Span, build: (values: Value[]) => Value): TExpr {
+  protected aggregate(
+    type: Type,
+    elements: readonly TExpr[],
+    span: Span,
+    build: (values: Value[]) => Value,
+    positions?: readonly number[]
+  ): TExpr {
     this.storage.reserve(type);
     if (elements.every((element) => element.known)) {
       return known(type, build(elements.map((element) => copyForStorage(element.value))), span);
@@ -1067,6 +1091,7 @@ export abstract class SemaBase implements SemaApi {
         span
       ),
       staticResult: this.constantResult(elements, (values) => build(values.map(copyForStorage)), span),
+      valueFacts: aggregateFacts(elements, () => this.spendCompilation(), positions),
     };
   }
 
@@ -1117,7 +1142,6 @@ export abstract class SemaBase implements SemaApi {
         expression.span
       ),
       staticResult: result,
-      undefinedMemory: type.kind === 'pointer' ? expression.undefinedMemory : undefined,
     };
   }
 
@@ -1335,11 +1359,7 @@ export function newArray(values: Value[], sentinel: Value | undefined): ZArray {
 }
 
 export function hasUndefinedMemory(expression: TExpr): boolean {
-  return expression.undefinedMemory === true || isUndefinedMemory(staticResultOf(expression)?.value);
-}
-
-export function staticResultOf(expression: TExpr): { value: Value } | undefined {
-  return expression.known ? { value: expression.value } : expression.staticResult;
+  return isUndefinedMemory(staticResultOf(expression)?.value);
 }
 
 export function knownLengthOf(expression: TExpr): bigint | undefined {
@@ -1459,7 +1479,7 @@ function buildUndefinedValue(type: Type): Value {
       return type.child.kind === 'fn'
         ? buildUndefinedValue(type.child)
         : type.size === 'slice'
-          ? new Slice(UNDEFINED_MEMORY, 0, undefinedInteger(USIZE))
+          ? new Slice(UNDEFINED_MEMORY, 0, undefinedInteger(USIZE), true)
           : new Pointer(UNDEFINED_MEMORY, 0);
     }
     default: {

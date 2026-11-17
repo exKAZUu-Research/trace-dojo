@@ -496,3 +496,17 @@ test('oversized numeric preview attempts consume the shared trace allowance', ()
   expect(result.traceItems.at(-1)?.referenceVars['…']).toMatchObject({ kind: 'value', value: '…', verbatim: true });
   expect(result.finalVars).not.toHaveProperty('x');
 });
+
+test.each([
+  ['[0]u8', '[]u8', ''],
+  ['[2]u0', '[]u0', [0, 0]],
+])('constructed %s slices trace their valid zero-byte values', (array, slice, expected) => {
+  const source = `pub fn main()void{\nconst p:*[1]${array}=undefined;\nfor(p)|*item|{\nconst s:${slice}=item;\n_=s;\n}\n}`;
+  const result = traceProgram('zig', source, source);
+  expect(result.uncaughtException).toBeUndefined();
+  expect(
+    result.traceItems.some(
+      (item) => Object.hasOwn(item.vars, 's') && JSON.stringify(item.vars.s) === JSON.stringify(expected)
+    )
+  ).toBe(true);
+});

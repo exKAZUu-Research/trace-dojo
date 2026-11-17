@@ -16,9 +16,10 @@ import {
   toNumber,
   truncateToBigInt,
 } from './floats';
+import { sizeOf } from './layout';
 import { MemoryFault } from './memoryFault';
 import { type Frame, Runtime } from './runtime';
-import { UNASSIGNED } from './semaBase';
+import { UNASSIGNED, undefinedValue } from './semaBase';
 import type { Type } from './types';
 import { decodeUtf8 } from './utf8';
 import {
@@ -27,7 +28,7 @@ import {
   NativeHandle,
   NULL,
   Pointer,
-  type Slice,
+  Slice,
   Some,
   type Value,
   ZArray,
@@ -187,7 +188,7 @@ function scalarOf(
 ): Scalar | typeof NOT_SCALAR {
   if (!budget.spend() || depth >= 128) return NOT_SCALAR;
   if (value === UNASSIGNED) return NOT_SCALAR;
-  if (isUndefinedMemory(value)) return 'undefined';
+  if (unreadableSnapshot(value, type)) return 'undefined';
   if (value instanceof BigFloat && !budget.spend(1 + Math.ceil(Math.abs(value.exponent) / 64))) return NOT_SCALAR;
   switch (type.kind) {
     case 'int':
@@ -258,7 +259,7 @@ function scalarSequence(
   if (sequence.lengthValue > BigInt(budget.remaining)) return NOT_SCALAR;
   const items: TraceItemVariable[string][] = [];
   for (let index = 0; index < sequence.length; index++) {
-    const item = scalarOf(sequence.get(index), child, budget, depth + 1);
+    const item = scalarOf(sequenceItem(sequence, child, index), child, budget, depth + 1);
     if (item === NOT_SCALAR) return NOT_SCALAR;
     items.push(item);
   }
@@ -465,7 +466,7 @@ function sequenceNode(items: ZArray | Slice, child: Type, seen: Set<unknown>, bu
   const entries = Object.create(null) as Record<string, DisplayNode>;
   let index = 0;
   while (BigInt(index) < items.lengthValue && budget.remaining > 0) {
-    entries[index] = displayNodeOf(items.get(index), child, seen, budget) ?? NULL_NODE;
+    entries[index] = displayNodeOf(sequenceItem(items, child, index), child, seen, budget) ?? NULL_NODE;
     index++;
   }
   if (BigInt(index) < items.lengthValue)
@@ -489,4 +490,16 @@ function spendPreview(pool: PreviewPool, cost: number): boolean {
   }
   pool.remaining -= cost;
   return true;
+}
+
+function unreadableSnapshot(value: Value, type: Type): boolean {
+  if (type.kind === 'optional' || type.kind === 'error_union' || !isUndefinedMemory(value)) return false;
+  if (value instanceof Slice && type.kind === 'pointer' && type.size === 'slice') {
+    return value.undefinedHeader || (value.lengthValue !== 0n && sizeOf(type.child) !== 0);
+  }
+  return true;
+}
+
+function sequenceItem(value: ZArray | Slice, child: Type, index: number): Value {
+  return sizeOf(child) === 0 ? undefinedValue(child) : value.get(index);
 }

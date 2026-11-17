@@ -250,7 +250,8 @@ export class Slice {
   constructor(
     readonly target: Slots,
     readonly start: number,
-    length: number | bigint
+    length: number | bigint,
+    readonly undefinedHeader = false
   ) {
     this.length = Number(length);
     this.lengthValue = typeof length === 'bigint' ? length : BigInt(length);
@@ -306,6 +307,10 @@ export class NativeHandle {
     readonly kind: string,
     readonly state: NativeState
   ) {}
+}
+
+export function hasUndefinedHeader(value: Value): boolean {
+  return value instanceof Slice ? value.undefinedHeader : isUndefinedMemory(value);
 }
 
 export function isUndefinedMemory(value: Value): boolean {
