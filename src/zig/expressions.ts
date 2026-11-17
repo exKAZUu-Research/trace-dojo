@@ -431,7 +431,7 @@ export abstract class ExpressionCompiler extends SemaBase {
       }
       return this.error(span, `${typeName(type)} 型には、フィールド「${name}」がありません。`);
     }
-    if (field.comptimeValue !== undefined) return this.fixedResult(base, field.type, field.comptimeValue, span);
+    if (field.comptimeValue !== undefined) return this.fixedResult(base, field.type, field.comptimeValue.value, span);
     if (base.known) {
       const parent = this.addressOf(base).value as Pointer;
       const pointer = new Pointer(parent.load() as ZStruct, index);
@@ -1297,16 +1297,15 @@ export abstract class ExpressionCompiler extends SemaBase {
   }
 
   /** `a ++ b`: concatenates arrays whose lengths are known at compile time. */
-  // code-gauge-allow functionCognitiveComplexity 17 -- Keeps element typing, immutable backing, and value snapshots together.
   private concatenate(expression: ExpressionOf<'binary'>): TExpr {
     const left = this.compile(expression.left);
     const right = this.compile(expression.right);
     const a = this.arrayOperand(left, expression.left);
     const b = this.arrayOperand(right, expression.right);
-    if (a.child !== b.child && !(a.child.kind === 'comptime_int' || b.child.kind === 'comptime_int')) {
+    if (a.child !== b.child) {
       this.error(expression, `要素の型が違う配列はつなげられません（${typeName(a.child)} と ${typeName(b.child)}）。`);
     }
-    const child = a.child.kind === 'comptime_int' ? b.child : a.child;
+    const child = a.child;
     const sentinel =
       a.sentinel === undefined
         ? b.sentinel
@@ -1406,7 +1405,10 @@ export abstract class ExpressionCompiler extends SemaBase {
         child: fields[0]?.type ?? COMPTIME_INT,
         length: fields.length,
         viaPointer: false,
-        read: (value) => fields.map((field, index) => field.comptimeValue ?? (value as ZStruct).slots[index]),
+        read: (value) =>
+          fields.map((field, index) =>
+            field.comptimeValue ? field.comptimeValue.value : (value as ZStruct).slots[index]
+          ),
       };
     }
     return this.error(span, `++ と ** は、長さが決まった配列にだけ使えます（${typeName(type)} 型です）。`);
@@ -1465,57 +1467,49 @@ export abstract class ExpressionCompiler extends SemaBase {
       name: init.name,
       type: values[index].type,
       hasDefault: false,
-      comptimeValue: isComptimeOnly(values[index].type) ? values[index].value : undefined,
+      comptimeValue: isComptimeOnly(values[index].type) ? staticResultOf(values[index]) : undefined,
     }));
     const type = this.anonymousStructType(fields);
     return this.aggregate(type, values, expression, (slots) => new ZStruct(slots));
   }
 
   private anonymousStructType(fields: StructField[]): StructType {
-    const key = fields
-      .map((field) => {
-        const known = field.comptimeValue === undefined ? '' : `=${valueKey(field.comptimeValue)}`;
-        return `${field.name}:${typeId(field.type)}${known}`;
-      })
-      .join(',');
-    let type = this.anonymousTypes.get(key);
+    return this.structuralStruct(fields, false);
+  }
+
+  tupleType(fields: StructField[]): StructType {
+    return this.structuralStruct(fields, true);
+  }
+
+  private readonly structuralTypes = new Map<string, StructType>();
+
+  private structuralStruct(fields: StructField[], isTuple: boolean): StructType {
+    const key = JSON.stringify([
+      isTuple,
+      fields.map((field) => ({
+        name: field.name,
+        type: typeId(field.type),
+        value:
+          field.comptimeValue === undefined
+            ? undefined
+            : constantKey(field.comptimeValue.value, () => this.spendCompilation()),
+      })),
+    ]);
+    let type = this.structuralTypes.get(key);
     if (!type) {
       type = {
         kind: 'struct',
-        isTuple: false,
+        isTuple,
         namespace: {
-          name: `anonymous struct { ${fields.map((field) => `${field.name}:${typeName(field.type)}`).join(',')} }`,
+          name: isTuple
+            ? 'tuple'
+            : `anonymous struct { ${fields.map((field) => `${field.name}:${typeName(field.type)}`).join(',')} }`,
           decls: new Map(),
         },
         layout: 'auto',
         fields,
       };
-      this.anonymousTypes.set(key, type);
-    }
-    return type;
-  }
-
-  private readonly anonymousTypes = new Map<string, StructType>();
-  private readonly tupleTypes = new Map<string, StructType>();
-
-  tupleType(fields: StructField[]): StructType {
-    const key = fields
-      .map((field) =>
-        field.comptimeValue === undefined
-          ? String(typeId(field.type))
-          : `${typeId(field.type)}=${valueKey(field.comptimeValue)}`
-      )
-      .join(',');
-    let type = this.tupleTypes.get(key);
-    if (!type) {
-      type = {
-        kind: 'struct',
-        isTuple: true,
-        namespace: { name: 'tuple', decls: new Map() },
-        layout: 'auto',
-        fields,
-      };
-      this.tupleTypes.set(key, type);
+      this.structuralTypes.set(key, type);
     }
     return type;
   }
@@ -1574,7 +1568,7 @@ export abstract class ExpressionCompiler extends SemaBase {
       name: String(index),
       type: value.type,
       hasDefault: false,
-      comptimeValue: value.known ? value.value : undefined,
+      comptimeValue: value.type.kind === 'void' ? { value: undefined } : staticResultOf(value),
     }));
     const tuple = this.tupleType(fields);
     return this.aggregate(tuple, values, expression, (slots) => new ZStruct(slots));
@@ -1646,7 +1640,8 @@ function valueKey(value: Value): string {
   if (typeof value === 'number') return `n${Object.is(value, -0) ? '-0' : String(value)}`;
   if (typeof value === 'bigint' || typeof value === 'boolean' || value === undefined)
     return `${typeof value}${String(value)}`;
-  if (value instanceof EnumLiteral || value instanceof ErrorValue) return `${value.constructor.name}.${value.name}`;
+  if (value instanceof EnumLiteral || value instanceof ErrorValue)
+    return `${value.constructor.name}.${JSON.stringify(value.name)}`;
   if (value === NULL) return 'null';
   if (isType(value)) return `type ${typeId(value)}`;
   return `object ${objectId(value)}`;
@@ -1672,6 +1667,7 @@ function constantKey(value: Value, spend: () => void): string {
   }
   if (value instanceof Slice) return `slice ${objectId(value.target.slots)} ${value.start} ${value.lengthValue}`;
   if (value instanceof FnValue) return `fn ${objectId(value.fn)}`;
+  if (value instanceof FnRef) return `fn-ref ${objectId(value.decl)}`;
   return valueKey(value);
 }
 

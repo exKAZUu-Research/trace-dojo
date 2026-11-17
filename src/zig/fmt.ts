@@ -508,7 +508,7 @@ export function printValue(
       for (const [index, field] of fields.entries()) {
         appendBytes(out, utf8(index === 0 ? ' ' : ', '));
         if (!type.isTuple) appendBytes(out, utf8(`.${field.name} = `));
-        const fieldValue = field.comptimeValue ?? struct.slots[index];
+        const fieldValue = field.comptimeValue ? field.comptimeValue.value : struct.slots[index];
         printValue(out, ANY, options, fieldValue, field.type, info, depth - 1);
       }
       appendBytes(out, utf8(' }'));

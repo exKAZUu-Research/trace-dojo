@@ -239,7 +239,11 @@ function displayValue(value: Value, type: Type, seen: Set<unknown>): DisplayNode
       if (!(value instanceof ZStruct)) return undefined;
       const entries: Record<string, DisplayNode> = {};
       for (const [index, field] of (type.fields ?? []).entries()) {
-        const node = displayNodeOf(field.comptimeValue ?? value.slots[index], field.type, seen);
+        const node = displayNodeOf(
+          field.comptimeValue ? field.comptimeValue.value : value.slots[index],
+          field.type,
+          seen
+        );
         if (node) entries[field.name] = node;
       }
       return { kind: type.isTuple ? 'array' : 'object', entries };

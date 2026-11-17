@@ -1,6 +1,6 @@
 import type { Container, FunctionDeclaration, VariableDeclaration } from './ast';
-import { type AnyFloat, BigFloat, shortestDecimal } from './floats';
-import { ErrorValue, Pointer, scalarValueKey, type Value } from './values';
+import { constantText } from './constantText';
+import { scalarValueKey, type Value } from './values';
 import { WeakValueMap } from './weakValueMap';
 
 /** Zig's types. Types that Zig compares by structure are interned, so that `===` tells whether two are the same. */
@@ -89,7 +89,7 @@ export interface StructField {
   defaultValue?: Value;
   hasDefault: boolean;
   /** Whether a tuple's field holds a value known at compile time, which the tuple's type carries. */
-  comptimeValue?: Value;
+  comptimeValue?: { value: Value };
 }
 
 /** What struct, enum, and union types share: their declarations, which the compiler analyzes on demand. */
@@ -508,13 +508,13 @@ export function typeName(type: Type): string {
       return `f${type.bits}`;
     }
     case 'array': {
-      const sentinel = type.sentinel === undefined ? '' : `:${sentinelText(type.sentinel, type.child)}`;
+      const sentinel = type.sentinel === undefined ? '' : `:${constantText(type.sentinel, type.child, typeName)}`;
       return `[${type.length}${sentinel}]${typeName(type.child)}`;
     }
     case 'pointer': {
       const qualifier = type.isConst ? 'const ' : '';
       if (type.size === 'slice') {
-        const sentinel = type.sentinel === undefined ? '' : `:${sentinelText(type.sentinel, type.child)}`;
+        const sentinel = type.sentinel === undefined ? '' : `:${constantText(type.sentinel, type.child, typeName)}`;
         return `[${sentinel}]${qualifier}${typeName(type.child)}`;
       }
       return `*${qualifier}${typeName(type.child)}`;
@@ -537,7 +537,7 @@ export function typeName(type: Type): string {
         const fields = (type.fields ?? []).map((field) =>
           field.comptimeValue === undefined
             ? typeName(field.type)
-            : `comptime ${typeName(field.type)} = ${String(field.comptimeValue)}`
+            : `comptime ${typeName(field.type)} = ${constantText(field.comptimeValue.value, field.type, typeName)}`
         );
         return `struct { ${fields.join(', ')} }`;
       }
@@ -563,25 +563,4 @@ export function typeName(type: Type): string {
       return type.kind;
     }
   }
-}
-
-// code-gauge-allow functionCognitiveComplexity 17 -- Renders typed scalar sentinels and full-range float decimals without the writer buffer limit.
-function sentinelText(value: Value, type: Type): string {
-  if (value instanceof ErrorValue) return `error.${value.name}`;
-  if (type.kind === 'enum') return `.${type.fields?.find((field) => field.value === value)?.name ?? String(value)}`;
-  if (
-    (typeof value === 'number' || value instanceof BigFloat) &&
-    (type.kind === 'float' || type.kind === 'comptime_float')
-  ) {
-    const decimal = shortestDecimal(value as AnyFloat, type.kind === 'float' ? type.bits : 128);
-    const sign = decimal.sign ? '-' : '';
-    if (decimal.special) return sign + decimal.special;
-    const digits = decimal.mantissa.toString();
-    const point = digits.length + decimal.exponent;
-    if (point <= 0) return `${sign}0.${'0'.repeat(-point)}${digits}`;
-    if (point >= digits.length) return sign + digits + '0'.repeat(point - digits.length);
-    return `${sign}${digits.slice(0, point)}.${digits.slice(point)}`;
-  }
-  if (value instanceof Pointer) return '0';
-  return String(value);
 }

@@ -5,6 +5,10 @@ import type { FunctionInstance } from './functions';
 import type { Type } from './types';
 import { WeakValueMap } from './weakValueMap';
 
+export interface FunctionReference {
+  readonly functionName: string;
+}
+
 /**
  * A value of the running program. Integers of every type are bigints, floats are numbers or BigFloats, enums are their
  * integer tags as bigints, `void` is `undefined`, and types are their {@link Type} objects. Aggregates (arrays,
@@ -27,6 +31,7 @@ export type Value =
   | NullValue
   | Some
   | FnValue
+  | FunctionReference
   | NativeHandle;
 
 /** Storage that pointers can refer into: a variable, an array's elements, a struct's fields, or a union's payload. */

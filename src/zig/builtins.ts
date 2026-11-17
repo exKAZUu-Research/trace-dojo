@@ -889,6 +889,7 @@ export abstract class BuiltinCompiler extends ExpressionCompiler {
     });
   }
 
+  // code-gauge-allow functionNcss 34 -- Keeps typed length/alias checks with the matching copy evaluation.
   private memoryCopy(name: string, expression: ExpressionOf<'builtinCall'>): TExpr {
     const destination = this.compile(expression.args[0]);
     const source = this.compile(expression.args[1]);
@@ -912,13 +913,18 @@ export abstract class BuiltinCompiler extends ExpressionCompiler {
         const out = target.view(valuesOf[0]);
         const input = from.view(valuesOf[1]);
         if (out.length !== input.length) panic(PANIC.memcpyLengths);
+        if (sizeOf(target.child) === 0) return;
         if (
           name === '@memcpy' &&
-          storageOverlaps(out.slots, out.start, input.slots, input.start, out.length, sizeOf(target.child))
+          storageOverlaps(out.slots, out.start, input.slots, input.start, Number(out.length), sizeOf(target.child))
         )
           panic(PANIC.memcpyAlias);
-        const values = input.slots.slots.slice(input.start, input.start + input.length).map(copyForStorage);
-        for (const [index, value] of values.entries()) storeInto(out.slots, out.start + index, value);
+        frame.runtime.spend(Number(input.length));
+        const values = input.slots.slots.slice(input.start, input.start + Number(input.length)).map(copyForStorage);
+        for (const [index, value] of values.entries()) {
+          frame.runtime.spend();
+          storeInto(out.slots, out.start + index, value);
+        }
         return;
       },
       expression
@@ -938,8 +944,12 @@ export abstract class BuiltinCompiler extends ExpressionCompiler {
       (frame) => {
         const [destination, value] = evaluateHeld(frame, [evaluateDestination, evaluateValue]);
         const out = target.view(destination);
+        if (sizeOf(target.child) === 0) return;
         const filler = copyForStorage(value);
-        for (let index = 0; index < out.length; index++) storeInto(out.slots, out.start + index, filler);
+        for (let index = 0; index < Number(out.length); index++) {
+          frame.runtime.spend();
+          storeInto(out.slots, out.start + index, filler);
+        }
         return;
       },
       expression
@@ -971,7 +981,7 @@ function elementAccessor(type: Type):
   | {
       child: Type;
       isConst: boolean;
-      view: (value: Value) => { slots: { slots: Value[] }; start: number; length: number };
+      view: (value: Value) => { slots: { slots: Value[] }; start: number; length: bigint };
     }
   | undefined {
   if (type.kind === 'pointer' && type.size === 'slice') {
@@ -980,7 +990,7 @@ function elementAccessor(type: Type):
       isConst: type.isConst,
       view: (value) => {
         const slice = value as Slice;
-        return { slots: slice.target, start: slice.start, length: slice.length };
+        return { slots: slice.target, start: slice.start, length: slice.lengthValue };
       },
     };
   }
@@ -990,7 +1000,7 @@ function elementAccessor(type: Type):
       isConst: type.isConst,
       view: (value) => {
         const array = (value as Pointer).load() as ZArray;
-        return { slots: array, start: array.offset, length: array.length };
+        return { slots: array, start: array.offset, length: BigInt(array.length) };
       },
     };
   }

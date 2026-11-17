@@ -108,7 +108,7 @@ function checkKnownArguments(segment: Extract<Segment, { kind: 'placeholder' }>,
       throw new FormatError(`expected type '?usize', found '${typeName(type)}'`);
     }
   }
-  const value = fields[segment.arg].comptimeValue;
+  const value = fields[segment.arg].comptimeValue?.value;
   const limit = segment.spec === 'c' ? 0xffn : segment.spec === 'u' ? 0x1f_ff_ffn : undefined;
   if (limit !== undefined && typeof value === 'bigint' && (value < 0n || value > limit)) {
     throw new FormatError(`type '${segment.spec === 'c' ? 'u8' : 'u21'}' cannot represent integer value '${value}'`);
@@ -162,7 +162,7 @@ export class PrintWriteError extends Error {
   }
 }
 
-// code-gauge-allow functionCognitiveComplexity 19 -- Expands parsed segments and writes partial output before a formatting panic.
+// code-gauge-allow functionCognitiveComplexity 21 -- Expands parsed segments and writes partial output before a formatting panic.
 // code-gauge-allow functionParameterCount 7 -- The formatter shares one writer, its frame, and the parsed argument context.
 function appendSegments(
   frame: Frame,
@@ -173,7 +173,8 @@ function appendSegments(
   info: TypeInfo,
   formatWithMethod: (arg: number, value: Value) => void
 ): void {
-  const argValue = (index: number): Value => fields[index].comptimeValue ?? args.slots[index];
+  const argValue = (index: number): Value =>
+    fields[index].comptimeValue ? fields[index].comptimeValue.value : args.slots[index];
   for (const segment of segments) {
     if (segment.kind === 'literal') {
       writeFormatted(frame, destination, segment.bytes);

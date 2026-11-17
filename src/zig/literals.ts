@@ -1,6 +1,7 @@
 import type { Node } from '@willbooster/web-tree-sitter';
 
 import { CompileError } from '../interpreter/diagnostics';
+import type { ExecutionBudget } from '../interpreter/limits';
 import { ExecutionLimitError, LIMITS } from '../interpreter/limits';
 import { decodeIdentifierBytes } from './utf8';
 
@@ -153,15 +154,36 @@ function escapeValue(text: string, node: Node): number {
 }
 
 /** An integer literal's value, rejecting what `std.zig.number_literal` rejects. */
-export function parseIntegerText(text: string, node: Node): bigint {
+export function parseIntegerText(text: string, node: Node, budget: ExecutionBudget): bigint {
+  budget.spend(text.length);
   checkNumber(text, node);
   const clean = text.replaceAll('_', '');
-  return BigInt(clean.startsWith('0o') ? `0o${clean.slice(2)}` : clean);
+  checkIntegerMagnitude(clean);
+  return BigInt(clean);
 }
 
 /** Checks a float literal as `std.zig.number_literal` does. */
-export function parseFloatText(text: string, node: Node): void {
+export function parseFloatText(text: string, node: Node, budget: ExecutionBudget): void {
+  budget.spend(text.length);
   checkNumber(text, node);
+}
+
+let integerDecimalLimit: string | undefined;
+
+function checkIntegerMagnitude(text: string): void {
+  const base = text.startsWith('0x') ? 16 : text.startsWith('0o') ? 8 : text.startsWith('0b') ? 2 : 10;
+  const digits = (base === 10 ? text : text.slice(2)).replace(/^0+/, '');
+  if (!digits) return;
+  if (base !== 10) {
+    const bits = (digits.length - 1) * Math.log2(base) + Math.floor(Math.log2(Number.parseInt(digits[0], base))) + 1;
+    if (bits > LIMITS.maxSlots) throw new ExecutionLimitError('storage');
+    return;
+  }
+  const boundaryLength = Math.floor(LIMITS.maxSlots * Math.log10(2)) + 1;
+  if (digits.length < boundaryLength) return;
+  if (digits.length > boundaryLength) throw new ExecutionLimitError('storage');
+  integerDecimalLimit ??= (1n << BigInt(LIMITS.maxSlots)).toString();
+  if (digits >= integerDecimalLimit) throw new ExecutionLimitError('storage');
 }
 
 function checkNumber(text: string, node: Node): void {

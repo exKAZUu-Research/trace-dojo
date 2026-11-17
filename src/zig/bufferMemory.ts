@@ -23,7 +23,7 @@ interface FieldLocation {
   type: Type;
   offset: number;
   packed?: number;
-  constant?: Value;
+  constant?: { value: Value };
 }
 
 const memories = new WeakMap<Value[], BufferMemory>();
@@ -79,7 +79,7 @@ class BufferMemory {
         const index = propertyIndex(property);
         if (index === undefined || index >= fields.length) return Reflect.get(target, property, receiver);
         const field = fields[index];
-        return field.constant ?? this.read(field.type, field.offset, field.packed);
+        return field.constant ? field.constant.value : this.read(field.type, field.offset, field.packed);
       },
       set: (target, property, value: Value, receiver) => {
         const index = propertyIndex(property);

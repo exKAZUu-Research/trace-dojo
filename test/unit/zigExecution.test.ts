@@ -3678,3 +3678,106 @@ test.each(['splatByteAll(65,200)', 'splatBytesAll("ab",100)'])(
     });
   }
 );
+
+test.each([
+  'const value:u8=3;const n=(&(if(get()) |_| value else |_| unreachable)).*;',
+  'const values=[_]u8{3,4};const n=(if(get()) |_| values else |_| unreachable)[0..1][0];',
+])('address and slice composition retain effects around named constants: %s', (statement) => {
+  const source = `const std=@import("std");fn get()error{}!u8{std.debug.print("c",.{});return 1;}pub fn main()void{${statement}std.debug.print("{}",.{n});}`;
+  expect(executeProgram('zig', source)).toMatchObject({ kind: 'executed', stderr: 'c3', uncaughtException: undefined });
+});
+
+test.each([
+  '0x1' + '0'.repeat(250_001),
+  '0o1' + '0'.repeat(333_334),
+  '1' + '0'.repeat(301_030),
+  '0b1' + '0'.repeat(1_000_004),
+])('oversized integer literal storage is bounded before conversion (%#)', (literal) => {
+  expect(executeProgram('zig', `pub fn main()void{const x=${literal};_=x;}`)).toMatchObject({ kind: 'limitExceeded' });
+});
+
+test('integer magnitude checks retain boundary values and insignificant leading zeros', () => {
+  const boundary = '0x8' + '0'.repeat(249_999);
+  expect(executeProgram('zig', `pub fn main()void{const x=${boundary};_=x;}`)).toMatchObject({
+    kind: 'executed',
+    uncaughtException: undefined,
+  });
+  expect(
+    executeProgram(
+      'zig',
+      `const std=@import("std");pub fn main()void{std.debug.print("{}",.{0x${'0'.repeat(10_000)}1});}`
+    )
+  ).toMatchObject({ kind: 'executed', stderr: '1', uncaughtException: undefined });
+});
+
+test.each([
+  '[_]u8{1} ++ [_]comptime_int{300}',
+  '[_]comptime_int{300} ++ [_]u8{1}',
+  '[_]u8{1} ++ [_]comptime_int{2}',
+  '[_]comptime_int{2} ++ [_]u8{1}',
+])('concatenation requires matching element types: %s', (expression) => {
+  expect(executeProgram('zig', `pub fn main()void{const x=${expression};_=x;}`)).toMatchObject({
+    kind: 'compileError',
+  });
+});
+
+test('quoted field names and constant values have unambiguous structural identities', () => {
+  const source = String.raw`const std=@import("std");pub fn main()void{const a=.{.@"a:1,b"=@as(u8,1)};const b=.{.a=@as(u8,2),.b=@as(u8,3)};const c=.{.@"x=ErrorValue.a,b"=error.@"a,b"};const d=.{.x=error.a,.b=error.b};std.debug.print("{} {} {s} {s}",.{a.@"a:1,b",b.b,@errorName(c.@"x=ErrorValue.a,b"),@errorName(d.b)});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: '1 3 a,b b',
+    uncaughtException: undefined,
+  });
+});
+
+test.each(['@memset', '@memcpy', '@memmove'])('%s meters actual nonzero-element work', (method) => {
+  const setup = method === '@memset' ? '' : 'var b:[300000]u8=@splat(1);_=&b;';
+  const second = method === '@memset' ? '0' : '&b';
+  const source = `pub fn main()void{var a:[300000]u8=@splat(0);${setup}for(0..4)|_|{${method}(&a,${second});}}`;
+  expect(executeProgram('zig', source)).toMatchObject({ kind: 'limitExceeded', limit: 'operations' });
+});
+
+test('zero-sized memory builtins evaluate operands without materializing or scanning storage', () => {
+  const source = `const std=@import("std");fn value()void{std.debug.print("v",.{});}fn view(items:[]void)[]void{std.debug.print("s",.{});return items;}pub fn main(init:std.process.Init)!void{var a:std.ArrayList(void)=.empty;try a.appendNTimes(init.gpa,{},1000000000);@memset(view(a.items),value());@memcpy(view(a.items),view(a.items));@memmove(view(a.items),view(a.items));std.debug.print("{}",.{a.items.len});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: 'svssss1000000000',
+    uncaughtException: undefined,
+  });
+});
+
+test.each(['@memcpy', '@memmove'])('%s checks exact virtual lengths before zero-sized elision', (method) => {
+  const source = `const std=@import("std");pub fn main(init:std.process.Init)!void{var a:std.ArrayList(void)=.empty;try a.append(init.gpa,{});${method}(a.allocatedSlice(),a.unusedCapacitySlice());}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    uncaughtException: 'panic: source and destination arguments have non-equal lengths',
+  });
+});
+
+test('tuple type names render typed scalar constants rather than host objects', () => {
+  const source = `const std=@import("std");pub fn main()void{const t=.{1.5,error.Bad,@as(f128,1.5),true,null,@as(?u8,3),@as(?u8,null),@as(u8,9),u8,{},undefined};std.debug.print("{}",.{@TypeOf(t)});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr:
+      'struct { comptime comptime_float = 1.5, comptime error{Bad} = error.Bad, comptime f128 = 1.5, comptime bool = true, comptime @TypeOf(null) = null, comptime ?u8 = 3, comptime ?u8 = null, comptime u8 = 9, comptime type = u8, comptime void = {}, comptime @TypeOf(undefined) = undefined }',
+    uncaughtException: undefined,
+  });
+});
+
+test('tuple type names render byte strings, arrays, slices, and quoted identifiers', () => {
+  const source = String.raw`const std=@import("std");pub fn main()void{const t=.{"日本",[_]u8{1,2},[_]u16{1,2},@as([]const u8,"ab"),error.@"a,b"};std.debug.print("{}",.{@TypeOf(t)});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: String.raw`struct { comptime *const [6:0]u8 = "日本", comptime [2]u8 = "\x01\x02".*, comptime [2]u16 = .{ 1, 2 }, comptime []const u8 = "ab"[0..2], comptime error{a,b} = error.a,b }`,
+    uncaughtException: undefined,
+  });
+});
+
+test('tuple type identity includes structured constant values and undefined presence', () => {
+  const source = `const std=@import("std");pub fn main()void{const a=.{[_]u8{1,2},undefined};const b=.{[_]u8{1,2},undefined};const c=.{[_]u8{1,3},undefined};std.debug.print("{} {}",.{@TypeOf(a)==@TypeOf(b),@TypeOf(a)==@TypeOf(c)});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: 'true false',
+    uncaughtException: undefined,
+  });
+});

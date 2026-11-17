@@ -475,11 +475,11 @@ export function expression(node: Node): Expression {
   switch (node.type) {
     case 'integer': {
       checkNumberBoundary(node);
-      return { kind: 'integer', ...span, value: parseIntegerText(node.text, node) };
+      return { kind: 'integer', ...span, value: parseIntegerText(node.text, node, conversionBudget) };
     }
     case 'float': {
       checkNumberBoundary(node);
-      parseFloatText(node.text, node);
+      parseFloatText(node.text, node, conversionBudget);
       return { kind: 'float', ...span, text: node.text };
     }
     case 'character': {

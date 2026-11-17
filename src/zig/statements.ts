@@ -1156,6 +1156,7 @@ export abstract class StatementCompiler extends CallCompiler {
           known: chosenValue.known && condition.known,
           staticResult: staticResultOf(chosenValue),
           place: undefined,
+          local: undefined,
           eval: (frame: Frame) => run(frame, chosenValue.eval),
         }
       : known(VOID, undefined, condition.span);

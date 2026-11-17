@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 969 -- The file holds one layer of the compiler, whose parts share its private state.
+// code-gauge-allow-file fileNcss 973 -- The file holds one layer of the compiler, whose parts share its private state.
 // code-gauge-allow-file duplicateLines 18 -- Undefined and zero initializers share aggregate shapes but differ in scalar and optional values.
 import { CompileError } from '../interpreter/diagnostics';
 import { ExecutionBudget } from '../interpreter/limits';
@@ -127,6 +127,10 @@ export class FnRef {
     /** The receiver of a method value such as `p.len`, which a call passes first. */
     readonly receiver?: TExpr
   ) {}
+
+  get functionName(): string {
+    return this.decl.syntax.name;
+  }
 }
 
 /**
@@ -138,6 +142,10 @@ export class NativeFn {
     readonly name: string,
     readonly compileCall: (sema: SemaApi, call: NativeCall) => TExpr
   ) {}
+
+  get functionName(): string {
+    return this.name.slice(this.name.lastIndexOf('.') + 1);
+  }
 }
 
 export interface NativeCall {
@@ -978,7 +986,7 @@ export abstract class SemaBase implements SemaApi {
 
   /** The `index`th field of a tuple or anonymous struct value. */
   protected tupleElement(expression: TExpr, index: number, field: StructField, span: Span): TExpr {
-    if (field.comptimeValue !== undefined) return known(field.type, field.comptimeValue, span);
+    if (field.comptimeValue !== undefined) return known(field.type, field.comptimeValue.value, span);
     if (expression.known) return known(field.type, (expression.value as ZStruct).slots[index], span);
     const evaluate = expression.eval;
     return runtime(field.type, (frame) => (evaluate(frame) as ZStruct).slots[index], span);
