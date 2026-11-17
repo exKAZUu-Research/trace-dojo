@@ -8,24 +8,14 @@ import type { InstanceInfo } from './entities';
 import { markReachable } from './gc';
 import type { TraceContext } from './ioBlocks';
 import { Machine } from './machine';
+import { DisplayAbort, PreviewBudget } from './previewBudget';
 import type { Type } from './types';
 import { withTypeWorkBudget } from './typeWorkBudget';
-import { Dict, type Env, type Slot, Thunk } from './values';
+import { Dict, type Env, type Slot, Thunk, type Value } from './values';
+
+export { DisplayAbort } from './previewBudget';
 
 const ALLOCATION_OVERHEAD = 8;
-
-interface PreviewBudget {
-  operations: number;
-  milliseconds: number;
-}
-
-/** Stops evaluating a value for a trace's display, which leaves the value as it was. */
-export class DisplayAbort extends Error {
-  constructor() {
-    super('Display evaluation exceeded its budget');
-    this.name = 'DisplayAbort';
-  }
-}
 
 /** A call shown in a trace: a named function (or the program's `main`) running `IO` statements. */
 export class TraceFrame implements TracedFrame {
@@ -69,12 +59,7 @@ export class Runtime implements TracedRuntime<TraceFrame> {
   private readonly dictCache = new Map<InstanceInfo, Dict>();
   private allocated = 0;
   private gcMilliseconds = 0;
-  private readonly previewBudgets: Record<'scalar' | 'composite', PreviewBudget> = {
-    scalar: { operations: LIMITS.maxOperations / 2, milliseconds: 0 },
-    composite: { operations: LIMITS.maxOperations / 2, milliseconds: 0 },
-  };
-  private displayDeadline = 0;
-  private previewing: PreviewBudget | undefined;
+  private readonly previews = new PreviewBudget();
 
   constructor(input?: ProgramInput) {
     this.io = new ProgramIO(this.budget, input);
@@ -83,12 +68,7 @@ export class Runtime implements TracedRuntime<TraceFrame> {
 
   spend(cost = 1): void {
     if (this.displayRemaining !== undefined) {
-      this.displayRemaining -= cost;
-      if (this.displayRemaining < 0) throw new DisplayAbort();
-      if (this.previewing) {
-        this.previewing.operations -= cost;
-        if (this.previewing.operations < 0 || performance.now() > this.displayDeadline) throw new DisplayAbort();
-      }
+      this.spendDisplay(cost, cost);
     } else this.budget.spend(cost);
   }
 
@@ -105,18 +85,19 @@ export class Runtime implements TracedRuntime<TraceFrame> {
     }
   }
 
-  withPreviewBudget<T>(run: () => T, kind: 'scalar' | 'composite' = 'composite'): T {
-    if (this.previewing) return run();
-    const budget = this.previewBudgets[kind];
-    if (budget.operations <= 0 || budget.milliseconds >= LIMITS.maxMilliseconds / 2) throw new DisplayAbort();
-    const started = performance.now();
-    this.displayDeadline = started + LIMITS.maxMilliseconds / 2 - budget.milliseconds;
-    this.previewing = budget;
-    try {
-      return run();
-    } finally {
-      budget.milliseconds += performance.now() - started;
-      this.previewing = undefined;
+  withPreviewBudget<T>(run: () => T): T {
+    return this.previews.run(run);
+  }
+
+  forcePreview(slot: Thunk): Value {
+    return this.previews.force(slot, () => this.machine.force(slot));
+  }
+
+  consumePreview(slot: Thunk): void {
+    const cost = this.previews.consume(slot, this.displayRemaining === undefined);
+    if (cost) {
+      this.budget.spend(cost.operations);
+      this.recordAllocation(cost.allocations);
     }
   }
 
@@ -126,13 +107,23 @@ export class Runtime implements TracedRuntime<TraceFrame> {
 
   allocate(count: number): void {
     if (this.displayRemaining !== undefined) {
-      this.spend(count);
+      this.spendDisplay(count, Math.max(0, count - ALLOCATION_OVERHEAD), count);
       return;
     }
     // Calls and thunk entries cover fixed-size bookkeeping; charging it again rejects ordinary library work.
     if (count > ALLOCATION_OVERHEAD) this.spend(count - ALLOCATION_OVERHEAD);
+    this.recordAllocation(count);
+  }
+
+  private recordAllocation(count: number): void {
     this.allocated += count;
     if (this.allocated > LIMITS.maxSlots * ALLOCATION_OVERHEAD) throw new ExecutionLimitError('operations');
+  }
+
+  private spendDisplay(cost: number, executionCost: number, allocations = 0): void {
+    this.displayRemaining = (this.displayRemaining as number) - cost;
+    if (this.displayRemaining < 0) throw new DisplayAbort();
+    this.previews.spend(cost, executionCost, allocations);
   }
 
   global(def: GlobalDef): Slot {

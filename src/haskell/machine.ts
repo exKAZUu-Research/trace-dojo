@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 441 -- Machine states and frames share one evaluator stack.
+// code-gauge-allow-file fileNcss 445 -- Machine states and frames share one evaluator stack.
 import { CONS_CON, NIL_CON } from './builtinTypes';
 import type { CaseCore, Core, IODoCore } from './core';
 import type { TypeHint } from './displayTypeHints';
@@ -120,6 +120,7 @@ export class Machine {
   force(slot: Slot): Value {
     slot = untypedSlot(slot);
     if (!(slot instanceof Thunk)) return slot;
+    this.runtime.consumePreview(slot);
     if (slot.state === 'done') return slot.value as Value;
     return this.run({ mode: 'enter', slot }) as Value;
   }
@@ -330,6 +331,7 @@ export class Machine {
   private stepEnter(state: RunState): void {
     const entered = state.value;
     const slot = untypedSlot(entered);
+    if (slot instanceof Thunk) this.runtime.consumePreview(slot);
     state.value = slot;
     if (slot instanceof Thunk && slot.state === 'evaluating') throw this.runtime.evaluationLimitError();
     this.inheritTypeHint(entered);
@@ -423,6 +425,7 @@ export class Machine {
       const isStrict = strict === 'all' || strict.includes(frame.position);
       if (isStrict) frame.args[frame.position] = arg;
       if (isStrict && arg instanceof Thunk) {
+        this.runtime.consumePreview(arg);
         if (arg.state !== 'done') {
           state.enter(arg);
           return;

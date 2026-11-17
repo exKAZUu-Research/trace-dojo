@@ -957,3 +957,27 @@ main=forM_ [1..1000::Int] $ \\i -> do
     if (line >= 5) expect(last?.vars.copy).toBe(2000);
   }
 });
+
+test.each([20, 30])('demanded scalar previews preserve every loop assignment: sum 1..%i', (count) => {
+  const source = `import Control.Monad
+main=forM_ [1..1000::Int] $ \\i -> do
+ let n=sum [1..${count}::Int]+i
+ print n`;
+  const recording = traceProgram('haskell', source, source);
+  expect(recording.uncaughtException).toBeUndefined();
+  expect(recording.stdout).toBe(
+    Array.from({ length: 1000 }, (_, i) => `${(count * (count + 1)) / 2 + i + 1}\n`).join('')
+  );
+  const assignments = recording.traceItems.filter((item) => item.line === 3);
+  expect(assignments).toHaveLength(1000);
+  for (const [index, item] of assignments.entries()) {
+    expect(item.vars.i).toBe(index + 1);
+    expect(item.vars.n).toBe((count * (count + 1)) / 2 + index + 1);
+  }
+});
+
+test('demanding previewed computations still enforces the execution budget', () => {
+  const source = 'import Control.Monad\nmain=forM_ [1..1000::Int] $ \\i -> do\n let n=sum [1..100::Int]+i\n print n';
+  expect(executeProgram('haskell', source)).toMatchObject({ kind: 'limitExceeded', limit: 'operations' });
+  expect(() => traceProgram('haskell', source, source)).toThrowError(ExecutionLimitError);
+});

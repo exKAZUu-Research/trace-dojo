@@ -126,7 +126,7 @@ function forceForDisplay(runtime: Runtime, slot: Slot): Value | undefined {
   if (slot instanceof Thunk && slot.state !== 'done' && runtime.displayAborted.has(slot)) return;
   return runtime.withDisplayBudget(DISPLAY_OPERATIONS, () => {
     try {
-      return runtime.withPreviewBudget(() => runtime.machine.force(slot), 'scalar');
+      return slot instanceof Thunk ? runtime.forcePreview(slot) : slot;
     } catch (error) {
       if (error instanceof DisplayAbort && slot instanceof Thunk) runtime.displayAborted.add(slot);
       if (error instanceof HaskellException || error instanceof DisplayAbort) return;
