@@ -9,7 +9,7 @@ import {
   checkTypeMemberDuplicates,
 } from './declarations';
 import { FlowState, type State } from './flow';
-import { checkIndexConformance } from './indexConformance';
+import { checkDuplicateIndexSignatures, checkIndexConformance } from './indexConformance';
 import type { Scope, Sym } from './scopes';
 import { arrayLiteralLength, hasToken, named, skipParentheses } from './syntax';
 import {
@@ -177,6 +177,7 @@ export class StatementChecker {
     if (node.type === 'object_type') {
       checkTypeMemberDuplicates(this.c, node);
       checkOverloadOptionality(this.c, node);
+      checkDuplicateIndexSignatures(this.c, named(node));
       const type = this.c.typeNodes.typeFromNode(node);
       if (type.kind === 'object') checkIndexConformance(this.c, type.resolve(), node);
     }
@@ -200,8 +201,16 @@ export class StatementChecker {
       for (const property of structure.properties.values()) property.type();
       for (const signature of structure.callSignatures) signature.returnType();
       checkIndexConformance(this.c, structure, node.childForFieldName('body') ?? node);
-      const isFirst =
-        symbol.typeDeclarations.find((declaration) => declaration.type === 'interface_declaration')?.id === node.id;
+      const interfaces = symbol.typeDeclarations.filter((declaration) => declaration.type === 'interface_declaration');
+      const isFirst = interfaces[0]?.id === node.id;
+      if (isFirst)
+        checkDuplicateIndexSignatures(
+          this.c,
+          interfaces.flatMap((declaration) => {
+            const declarationBody = declaration.childForFieldName('body');
+            return declarationBody ? named(declarationBody) : [];
+          })
+        );
       if (!isFirst || checkInheritedPropertiesAreIdentical(this.c, symbol, node.childForFieldName('name') ?? node))
         this.checkInterfaceBases(node, symbol, structure);
     }

@@ -83,6 +83,23 @@ export function mergedPatternIndexes(
   }));
 }
 
+/** Whether two index signature key types are the same type, as TypeScript keeps one index signature for each. */
+export function isSameKeyType(left: Type, right: Type): boolean {
+  if (left === right) return true;
+  if (left.kind === 'templateLiteral' && right.kind === 'templateLiteral')
+    return (
+      left.texts.length === right.texts.length &&
+      left.texts.every((text, index) => text === right.texts[index]) &&
+      left.types.every((type, index) => isSameKeyType(type, right.types[index]))
+    );
+  return (
+    left.kind === 'stringMapping' &&
+    right.kind === 'stringMapping' &&
+    left.mapping === right.mapping &&
+    isSameKeyType(left.type, right.type)
+  );
+}
+
 /** Whether two patterns hold the same strings. */
 export function isSamePattern(c: Checker, left: Type, right: Type): boolean {
   return c.relations.isAssignable(left, right) && c.relations.isAssignable(right, left);

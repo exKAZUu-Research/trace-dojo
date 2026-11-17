@@ -1,6 +1,7 @@
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import type { Checker } from './checker';
+import { checkDuplicateIndexSignatures } from './indexConformance';
 import { withDomMembers } from './library';
 import { nativeGlobalRedeclaration } from './nativeGlobalIdentity';
 import type { Scope, Sym } from './scopes';
@@ -230,8 +231,9 @@ function checkMergedProperty(c: Checker, member: TreeNode, seen: Map<string, Tre
 
 const overloadableMethodTypes = new Set(['method_signature', 'method_definition']);
 
-/** Reports class members declared twice: fields, method implementations, and constructors. */
+/** Reports class members declared twice: fields, method implementations, constructors, and index signatures. */
 export function checkDuplicateMembers(c: Checker, body: TreeNode): void {
+  checkDuplicateIndexSignatures(c, named(body));
   const groups = new Map<string, TreeNode[]>();
   for (const member of named(body)) {
     addParameterPropertyDuplicates(member, groups);

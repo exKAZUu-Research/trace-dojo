@@ -1,7 +1,7 @@
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import type { Checker } from './checker';
-import { isIndexKeyOf, isPropertyKeyOf, isSamePattern, keyedIndexes } from './indexInfos';
+import { isIndexKeyOf, isPropertyKeyOf, isSameKeyType, isSamePattern, keyedIndexes } from './indexInfos';
 import { isWithin, named } from './syntax';
 import {
   isSymbolName,
@@ -54,12 +54,36 @@ function checkIndexFitsOthers(c: Checker, index: KeyedIndexInfo, indexes: KeyedI
   }
 }
 
+/** Reports each of the index signatures among `members` that declare the same key type, at every one of them. */
+export function checkDuplicateIndexSignatures(c: Checker, members: TreeNode[]): void {
+  const groups: { keyType: Type; declarations: TreeNode[] }[] = [];
+  for (const member of members) {
+    if (member.type !== 'index_signature' || member.namedChildren.some((child) => child?.type === 'mapped_type_clause'))
+      continue;
+    const declared = declaredKeyType(c, member);
+    for (const keyType of declared.kind === 'union' ? declared.types : [declared]) {
+      const group = groups.find((existing) => isSameKeyType(existing.keyType, keyType));
+      if (group) group.declarations.push(member);
+      else groups.push({ keyType, declarations: [member] });
+    }
+  }
+  for (const { keyType, declarations } of groups) {
+    if (declarations.length < 2) continue;
+    for (const declaration of declarations)
+      c.error(declaration, `型 '${c.print(keyType)}' のインデックス シグネチャが重複しています。`);
+  }
+}
+
+function declaredKeyType(c: Checker, member: TreeNode): Type {
+  const indexType = member.childForFieldName('index_type');
+  return indexType ? c.silently(() => c.typeNodes.typeFromNode(indexType)) : stringType;
+}
+
 /** The index signature `body` declares for a key type. */
 function indexSignatureNode(c: Checker, body: TreeNode, keyType: Type): TreeNode | undefined {
   return named(body).find((member) => {
     if (member.type !== 'index_signature') return false;
-    const indexType = member.childForFieldName('index_type');
-    const declared = indexType ? c.silently(() => c.typeNodes.typeFromNode(indexType)) : stringType;
+    const declared = declaredKeyType(c, member);
     return (declared.kind === 'union' ? declared.types : [declared]).some(
       (key) => key === keyType || isSamePattern(c, key, keyType)
     );

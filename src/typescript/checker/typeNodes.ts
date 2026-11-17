@@ -5,7 +5,7 @@ import { unsupportedMessage } from '../unsupported';
 import type { Checker, Mapper, UnionAlias } from './checker';
 import { BROWSER_INTERFACES } from './domGlobals';
 import { IndexedAccessKeys } from './indexedAccessKeys';
-import { isPatternKey } from './indexInfos';
+import { isPatternKey, isSameKeyType } from './indexInfos';
 import { InterfaceBases } from './interfaceBases';
 import { withDomMembers } from './library';
 import { RecursiveAliases } from './recursiveAliases';
@@ -569,7 +569,10 @@ export class TypeNodes {
     return structure;
   }
 
-  /** Sets the index signature of each key type an index signature declares, as `[k: string | symbol]` declares two. */
+  /**
+   * Adds the index signature of each key type an index signature declares, as `[k: string | symbol]` declares two,
+   * unless an earlier one declares it.
+   */
   addIndexSignature(structure: Structure, member: TreeNode): void {
     if (isMappedMember(member)) {
       // TypeScript reads `[K in T]` after other members as a property with a computed name it rejects.
@@ -584,11 +587,11 @@ export class TypeNodes {
     };
     const keyType = indexType ? this.typeFromNode(indexType) : stringType;
     for (const key of keyType.kind === 'union' ? keyType.types : [keyType]) {
-      if (isIntrinsic(key, 'number')) structure.numberIndex = info;
-      else if (isIntrinsic(key, 'symbol')) structure.symbolIndex = info;
-      else if (isPatternKey(key))
+      if (isIntrinsic(key, 'number')) structure.numberIndex ??= info;
+      else if (isIntrinsic(key, 'symbol')) structure.symbolIndex ??= info;
+      else if (!isPatternKey(key)) structure.stringIndex ??= info;
+      else if (!structure.patternIndexes?.some((existing) => isSameKeyType(existing.keyType, key)))
         structure.patternIndexes = [...(structure.patternIndexes ?? []), { ...info, keyType: key }];
-      else structure.stringIndex = info;
     }
   }
 
@@ -720,18 +723,24 @@ export class TypeNodes {
   }
 
   interfaceOwnMembers(merged: TreeNode[]): Structure {
-    const declarations = merged.map((declaration) => withDomMembers(declaration));
-    // TypeScript merges the overloads of later declarations before those of earlier ones.
-    return this.membersStructure(
-      declarations.toReversed().flatMap((declaration) => {
-        const body = declaration.childForFieldName('body');
-        return body ? named(body) : [];
-      })
-    );
+    const members = merged.map((declaration) => {
+      const body = withDomMembers(declaration).childForFieldName('body');
+      return body ? named(body) : [];
+    });
+    // TypeScript merges the overloads of later declarations before those of earlier ones, but keeps the first index
+    // signature for a key type.
+    return this.membersStructure([
+      ...members.toReversed().flatMap((list) => list.filter((member) => !isIndexSignature(member))),
+      ...members.flat().filter(isIndexSignature),
+    ]);
   }
 }
 
 const mappedTypeMembersMessage = 'マップ型には、プロパティやメソッドを宣言できません。';
+
+function isIndexSignature(member: TreeNode): boolean {
+  return member.type === 'index_signature';
+}
 
 /** Whether a member of an object type is written as a mapped type's `[K in T]: …`. */
 function isMappedMember(member: TreeNode): boolean {
