@@ -35,10 +35,9 @@
         "@willbooster/tree-sitter-javascript": "26.0.0",
         "@willbooster/tree-sitter-python": "21.0.0",
         "@willbooster/tree-sitter-ruby": "20.0.0",
-        "@willbooster/tree-sitter-typescript": "26.0.1",
+        "@willbooster/tree-sitter-typescript": "30.0.0",
         "@willbooster/wb": "23.3.4",
         "@willbooster/web-tree-sitter": "23.0.0",
-        "@willbooster/web-tree-sitter-for-typescript": "npm:@willbooster/web-tree-sitter@20.0.0",
         "at-decorators": "7.1.3",
         "codemirror": "6.0.2",
         "csv-parse": "7.0.3",
@@ -758,13 +757,11 @@
 
     "@willbooster/tree-sitter-ruby": ["@willbooster/tree-sitter-ruby@20.0.0", "", { "peerDependencies": { "@willbooster/web-tree-sitter": "^23.0.0" }, "optionalPeers": ["@willbooster/web-tree-sitter"] }, "sha512-Vm4MpD5HIZDvemrKLogDnt2JG84PqbMHn46wo32MzBtVUxzUZwX0XqxtIBHUFxUOwoUdz4sC3Gq/cNf/IpdAwQ=="],
 
-    "@willbooster/tree-sitter-typescript": ["@willbooster/tree-sitter-typescript@26.0.1", "", { "peerDependencies": { "@willbooster/web-tree-sitter": "^17.0.1" }, "optionalPeers": ["@willbooster/web-tree-sitter"] }, "sha512-4BasplMfK2Ozmpu0HBzuRFyRHRGGVCmCFeO2H8WTJDJcaGF6r5wFQ+fK9E/cxUtJwqYiaJKQ2TfrBX4p4i44DQ=="],
+    "@willbooster/tree-sitter-typescript": ["@willbooster/tree-sitter-typescript@30.0.0", "", { "peerDependencies": { "@willbooster/web-tree-sitter": "^23.0.0" }, "optionalPeers": ["@willbooster/web-tree-sitter"] }, "sha512-rdd0bGfXUhcEb/1V1i0eo96PlgP2AOA1Rlp5PwHXBZ9ZIPWKaNB45Qf8Vd7AmeVnPcEbl3I9E8bByu3kZrrREw=="],
 
     "@willbooster/wb": ["@willbooster/wb@23.3.4", "", { "dependencies": { "@textlint-rule/textlint-rule-no-invalid-control-character": "3.0.0", "@textlint/kernel": "15.8.0", "@textlint/module-interop": "15.8.0", "@textlint/textlint-plugin-markdown": "15.8.0", "chalk": "6.0.1", "code-gauge": "10.3.0", "dotenv": "18.0.9", "dotenv-expand": "13.0.0", "fast-glob": "3.3.3", "fastest-levenshtein": "1.0.16", "globby": "16.2.4", "jsonc-parser": "3.3.1", "minimal-promise-pool": "6.0.4", "semver": "7.8.5", "smol-toml": "1.9.1", "textlint-filter-rule-node-types": "1.1.0", "textlint-rule-ja-space-between-half-and-full-width": "3.0.4", "textlint-rule-no-zero-width-spaces": "1.0.1", "yargs": "18.2.0", "zod": "4.6.7" }, "bin": { "wb": "bin/index.js" } }, "sha512-ruzi0tJgVM8o4+T3x10PxiwUk2OSXn7GXcjxHypDxSFwZK48nm8X0myhI9ki0eOB1HZxx7e+erML37pyKrlt7w=="],
 
     "@willbooster/web-tree-sitter": ["@willbooster/web-tree-sitter@23.0.0", "", { "dependencies": { "@types/emscripten": "^1.41.5" } }, "sha512-1C1SX1YwdjirIVC5iJiR4PK7Mc181JPn0SusXZycORWEWNEFBQgXeTqf/xw675ev81dLxTlQ9x2wlEt3fOzm5g=="],
-
-    "@willbooster/web-tree-sitter-for-typescript": ["@willbooster/web-tree-sitter@20.0.0", "", { "dependencies": { "@types/emscripten": "^1.41.5" } }, "sha512-sykvor5aRETQvwbNRhMI2jk8qsh1jGezsrnP/S/pPRkALRHWPsfMErbsxGSF+YSzPh0aRjz8wcFGgO+xoJKcCg=="],
 
     "@zag-js/dom-query": ["@zag-js/dom-query@0.31.1", "", {}, "sha512-oiuohEXAXhBxpzzNm9k2VHGEOLC1SXlXSbRPcfBZ9so5NRQUA++zCE7cyQJqGLTZR0t3itFLlZqDbYEXRrefwg=="],
 

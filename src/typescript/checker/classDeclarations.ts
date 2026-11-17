@@ -87,7 +87,7 @@ export class ClassDeclarationChecker {
   private checkMember(classNode: TreeNode, member: TreeNode, info: ClassInfo, ctor: TreeNode | undefined): void {
     const isStatic = hasToken(member, 'static');
     switch (member.type) {
-      case 'public_field_definition': {
+      case 'field_definition': {
         const value = member.childForFieldName('value');
         const annotation = this.c.typeNodes.annotationType(member.childForFieldName('type'));
         if (value) {
@@ -293,7 +293,7 @@ export class ClassDeclarationChecker {
 
   /** The name of a field the constructor must assign: one without initializer whose type lacks `undefined`. */
   private uninitializedFieldName(member: TreeNode): TreeNode | undefined {
-    if (member.type !== 'public_field_definition' || hasToken(member, 'static')) return undefined;
+    if (member.type !== 'field_definition' || hasToken(member, 'static')) return undefined;
     if (
       member.childForFieldName('value') ||
       hasToken(member, '!') ||

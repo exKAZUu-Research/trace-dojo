@@ -222,7 +222,7 @@ export class ExpressionChecker {
   private hasArguments(node: TreeNode): boolean {
     for (let current = node.parent; current; current = current.parent) {
       if (['function_declaration', 'function_expression', 'method_definition'].includes(current.type)) return true;
-      if (current.type === 'class_body' || current.type === 'public_field_definition') return false;
+      if (current.type === 'class_body' || current.type === 'field_definition') return false;
     }
     return false;
   }
@@ -380,7 +380,7 @@ export class ExpressionChecker {
       ) {
         return;
       }
-      if (current.type === 'public_field_definition' && !hasToken(current, 'static')) return;
+      if (current.type === 'field_definition' && !hasToken(current, 'static')) return;
     }
     const kind = symbol.valueKind === 'class' ? 'クラス' : '変数';
     this.c.error(node, `${kind} ${symbol.name} は宣言より前で使われています。`);

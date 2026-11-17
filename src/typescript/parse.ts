@@ -1,14 +1,13 @@
 import { CompileError, type SourceDiagnostic } from '../interpreter/diagnostics';
 import { type TraceAnnotation, traceAnnotationsIn, type TraceOptions } from '../interpreter/traceAnnotations';
-import { commentTokens, parseSource } from '../interpreter/treeSitter';
+import { commentTokens, loadParser, parseSource } from '../interpreter/treeSitter';
 import type { Program } from '../javascript/ast';
 import { checkTypeScript } from './checker/checker';
 import { javaScriptViewOf } from './jsView';
 import { TypeScriptProgramConverter } from './programConverter';
-import { loadTypeScriptParser } from './treeSitter';
 import { rejectUnsupportedSyntax } from './unsupported';
 
-const parser = await loadTypeScriptParser();
+const parser = await loadParser('@willbooster/tree-sitter-typescript/tree-sitter-typescript.wasm');
 
 /**
  * Parses and type-checks a program, throwing a `CompileError` for invalid or unsupported syntax and for the type
