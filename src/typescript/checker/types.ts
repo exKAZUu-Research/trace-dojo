@@ -332,7 +332,8 @@ export function unionOf(types: Type[], keepFresh = false): Type {
   for (const type of types) add(type);
   if (flat.some((type) => type === anyType || type === errorType)) return flat.find((type) => isAnyLike(type)) as Type;
   if (flat.some((type) => isIntrinsic(type, 'unknown'))) return unknownType;
-  const hasPrimitive = (name: IntrinsicName): boolean => flat.some((type) => isIntrinsic(type, name));
+  const primitives = new Set(flat.filter((type) => type.kind === 'intrinsic').map((type) => type.name));
+  const hasPrimitive = (name: IntrinsicName): boolean => primitives.has(name);
   const reduced = flat.filter((type) => {
     if (type.kind === 'literal') {
       const primitive = typeof type.value === 'boolean' ? undefined : (typeof type.value as IntrinsicName);
