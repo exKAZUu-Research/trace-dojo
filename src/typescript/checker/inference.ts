@@ -128,9 +128,17 @@ export class TypeInference {
   /** Each candidate in turn replaces the one kept so far if it is assignable to it, as TypeScript's `getCommonSubtype`. */
   private commonSubtype(candidates: Type[]): Type {
     let subtype = candidates[0];
-    for (const candidate of candidates.slice(1))
-      if (this.c.relations.isAssignable(candidate, subtype)) subtype = candidate;
+    for (const candidate of candidates.slice(1)) if (this.isSubtype(candidate, subtype)) subtype = candidate;
     return subtype;
+  }
+
+  /**
+   * Assignability, except that `any` is a subtype only of `any`, so an `any` candidate wins over the others, `unknown`
+   * included, in whatever order they come, as TypeScript infers.
+   */
+  private isSubtype(source: Type, target: Type): boolean {
+    if (isAnyLike(source)) return isAnyLike(target);
+    return this.c.relations.isAssignable(source, target);
   }
 
   private commonSupertype(candidates: Type[]): Type {
@@ -145,9 +153,7 @@ export class TypeInference {
       )
     )
       return this.widenObjectLiterals(unionOf(candidates));
-    const supertype = candidates.find((candidate) =>
-      candidates.every((other) => this.c.relations.isAssignable(other, candidate))
-    );
+    const supertype = candidates.find((candidate) => candidates.every((other) => this.isSubtype(other, candidate)));
     if (supertype) return this.widenObjectLiterals(supertype);
     // Literals of one primitive unite, as `1` and `2` give `1 | 2` (or `number` when widened).
     if (
@@ -241,9 +247,14 @@ export class TypeInference {
   }
 
   private inferToUnion(run: InferenceRun, source: Type, target: UnionType, recurse: Recurse): void {
-    const naked = target.types.filter((member) => member.kind === 'typeParameter' && run.inferences.has(member.id));
-    const others = target.types.filter((member) => !naked.includes(member));
-    const sourceMembers = source.kind === 'union' ? source.types : [source];
+    const { sourceMembers, targetMembers } = inferFromMatchingMembers(
+      source.kind === 'union' ? source.types : [source],
+      target.types,
+      recurse
+    );
+    if (sourceMembers.length === 0) return;
+    const naked = targetMembers.filter((member) => member.kind === 'typeParameter' && run.inferences.has(member.id));
+    const others = targetMembers.filter((member) => !naked.includes(member));
     const inferable = (other: Type): boolean => run.parameters.some((parameter) => this.mentions(other, parameter));
     const remaining = sourceMembers.filter(
       (member) => !others.some((other) => !inferable(other) && this.c.relations.isAssignable(member, other))
@@ -549,4 +560,36 @@ function templateCaptures(value: string, texts: string[]): string[] | undefined 
 function fixedEndLength(elements: TupleElement[]): number {
   const last = elements.findLastIndex((element) => element.rest || element.optional);
   return elements.length - last - 1;
+}
+
+/**
+ * Infers between the members of a source and a target union that instantiate the same generic type, as an
+ * `IteratorYieldResult<X>` with an `IteratorYieldResult<T>`, and returns the members left unmatched, as TypeScript's
+ * `inferFromMatchingTypes` does, so a member never infers to a differently shaped one.
+ */
+function inferFromMatchingMembers(
+  sources: readonly Type[],
+  targets: readonly Type[],
+  recurse: Recurse
+): { sourceMembers: Type[]; targetMembers: Type[] } {
+  const matchedSources = new Set<Type>();
+  const matchedTargets = new Set<Type>();
+  for (const target of targets) {
+    for (const source of sources) {
+      if (!instantiatesSameType(source, target)) continue;
+      recurse(source, target);
+      matchedSources.add(source);
+      matchedTargets.add(target);
+    }
+  }
+  return {
+    sourceMembers: sources.filter((source) => !matchedSources.has(source)),
+    targetMembers: targets.filter((target) => !matchedTargets.has(target)),
+  };
+}
+
+function instantiatesSameType(source: Type, target: Type): boolean {
+  if (source.kind !== 'object' || target.kind !== 'object') return false;
+  if (source.objectKind === 'reference' && target.objectKind === 'reference') return source.target === target.target;
+  return source.origin !== undefined && source.origin === target.origin;
 }

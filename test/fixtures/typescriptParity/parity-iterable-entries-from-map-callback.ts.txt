@@ -1,0 +1,19 @@
+const words = ["apple", "kiwi"];
+const lengths = new Map<string, number>(words.map((w) => [w, w.length]));
+console.log(lengths);
+
+const scores: Record<string, number> = { alice: 3, bob: 5 };
+const doubled = new Map<string, number>(Object.entries(scores).map(([name, score]) => [name, score * 2]));
+console.log(doubled);
+
+function loose(pairs: Iterable<[string, number]>): number {
+  let total = 0;
+  for (const [, value] of pairs) total += value;
+  return total;
+}
+function strict(pairs: Iterable<readonly [string, number]> | null): number {
+  let total = 0;
+  for (const [, value] of pairs ?? []) total += value;
+  return total;
+}
+console.log(loose(words.map((w) => [w, 1])), strict(words.map((w) => [w, 2])));
