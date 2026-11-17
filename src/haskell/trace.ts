@@ -217,8 +217,8 @@ function traceFloat(value: number, type: Type): number {
   return Math.sign(value) * Number(`${digits.join('')}e${exponent - digits.length}`);
 }
 
-// code-gauge-allow functionCognitiveComplexity 26 -- One branch per kind of value shown as a scalar.
-// code-gauge-allow functionNcss 37 -- Scalar formatting handles primitive values and library abstract values together.
+// code-gauge-allow functionCognitiveComplexity 28 -- One branch per kind of value shown as a scalar.
+// code-gauge-allow functionNcss 38 -- Scalar formatting handles primitive values and library abstract values together.
 function scalarOf(runtime: Runtime, value: Value, type: Type, depth: number): Scalar | typeof NOT_SCALAR {
   runtime.spend();
   if (depth > 20) return NOT_SCALAR;
@@ -247,7 +247,9 @@ function scalarOf(runtime: Runtime, value: Value, type: Type, depth: number): Sc
     }
     return scalars as Scalar;
   }
-  if (value.fields.length === 0 && value.con.type.module !== 'Base') return value.con.name;
+  if (value.con === UNIT_CON || (value.con.type.module === 'Base' && value.con.type.name === 'Maybe'))
+    return NOT_SCALAR;
+  if (value.fields.length === 0) return value.con.name;
   return NOT_SCALAR;
 }
 

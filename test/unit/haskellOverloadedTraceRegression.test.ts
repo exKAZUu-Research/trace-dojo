@@ -441,3 +441,46 @@ main=forM_ [C(Just 1),C(Just 1)] $ \\this->do
   expect(result.traceItems.map(({ line }) => line)).toEqual([0, 4, 4]);
   expect(result.traceItems.at(-1)?.vars).not.toHaveProperty('this.ref');
 });
+
+test('library enumeration results populate step and final answer variables', () => {
+  const source = `import Data.Char
+main=do
+ let order=compare(1::Int)2
+ let category=generalCategory 'A'
+ print(1::Int)`;
+  const result = traceProgram('haskell', source, source);
+  expect(result.stdout).toBe('1\n');
+  expect(result.traceItems.find(({ line }) => line === 3)?.vars.order).toBe('LT');
+  expect(result.traceItems.at(-1)?.vars).toEqual({ order: 'LT', category: 'UppercaseLetter' });
+  expect(result.finalVars).toEqual({ order: 'LT', category: 'UppercaseLetter' });
+});
+
+test.each([
+  ['compare(1::Int)2', 'LT'],
+  ["generalCategory 'A'", 'UppercaseLetter'],
+])('library enumeration answers retain repeated loop bindings: %s', (value, answer) => {
+  const source = `import Control.Monad
+import Data.Char
+main=forM_ [${value},${value}] $ \\x->do
+ print(1::Int)`;
+  const result = traceProgram('haskell', source, source);
+  expect(result.stdout).toBe('1\n1\n');
+  expect(result.traceItems.map(({ line }) => line)).toEqual([0, 3, 4, 3, 4]);
+  expect(result.traceItems.slice(1).map(({ vars }) => vars.x)).toEqual([answer, answer, answer, answer]);
+});
+
+test('Maybe and unit preserve their abstract views inside and outside lists', () => {
+  const source = `main=do
+ let u=()
+ let m=Nothing::Maybe Int
+ let ms=[m]
+ let us=[u]
+ print(1::Int)`;
+  const result = traceProgram('haskell', source, source);
+  expect(result.stdout).toBe('1\n');
+  expect(result.finalVars).toEqual({});
+  expect(result.traceItems.at(-1)?.vars).toEqual({});
+  // oxlint-disable-next-line unicorn/no-null -- The trace format represents Nothing as null.
+  expect(result.traceItems.at(-1)?.referenceVars.m).toEqual({ kind: 'value', value: null });
+  expect(result.traceItems.at(-1)?.referenceVars).not.toHaveProperty('u');
+});
