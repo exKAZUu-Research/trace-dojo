@@ -3,7 +3,7 @@ import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 import type { Checker } from './checker';
 import { nativeGlobalRedeclaration } from './nativeGlobalIdentity';
 import type { Scope, Sym } from './scopes';
-import { hasToken, named } from './syntax';
+import { hasToken, isConstructorName, named } from './syntax';
 import { isIntrinsic, type Type, undefinedType, unionOf } from './types';
 
 /** Reports the declarations TypeScript rejects for declaring a name twice, at every declaration it involves. */
@@ -242,7 +242,7 @@ export function checkDuplicateMembers(c: Checker, body: TreeNode): void {
 }
 
 function addParameterPropertyDuplicates(member: TreeNode, groups: Map<string, TreeNode[]>): void {
-  if (member.childForFieldName('name')?.text !== 'constructor') return;
+  if (!isConstructorName(member.childForFieldName('name'))) return;
   const parameters = member.childForFieldName('parameters');
   for (const parameter of parameters ? named(parameters) : []) {
     if (!isParameterProperty(parameter)) continue;

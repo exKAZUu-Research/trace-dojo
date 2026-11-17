@@ -6,7 +6,7 @@ import type { Checker } from './checker';
 import { FlowState, type State } from './flow';
 import { isUsedBeforeInitialization } from './initializationOrder';
 import type { Sym } from './scopes';
-import { hasToken, isClassConstructor, isImmediatelyInvoked, isWithin, named } from './syntax';
+import { hasToken, isClassConstructor, isConstructorName, isImmediatelyInvoked, isWithin, named } from './syntax';
 import {
   anonymousObject,
   anyType,
@@ -240,7 +240,7 @@ export class ClassChecker {
       ? named(body).find(
           (member) =>
             member.type === 'method_definition' &&
-            member.childForFieldName('name')?.text === 'constructor' &&
+            isConstructorName(member.childForFieldName('name')) &&
             member.childForFieldName('body')
         )
       : undefined;
@@ -253,7 +253,7 @@ export class ClassChecker {
     const body = node.childForFieldName('body');
     const overloads = body
       ? named(body).filter(
-          (member) => member.type === 'method_signature' && member.childForFieldName('name')?.text === 'constructor'
+          (member) => member.type === 'method_signature' && isConstructorName(member.childForFieldName('name'))
         )
       : [];
     const ctor = this.constructorNode(node);
@@ -333,7 +333,7 @@ export class ClassChecker {
       case 'method_definition':
       case 'method_signature':
       case 'abstract_method_signature': {
-        if (name !== undefined && name !== 'constructor') this.addMethod(members, name, member);
+        if (name !== undefined && !isConstructorName(nameNode)) this.addMethod(members, name, member);
         break;
       }
       case 'index_signature': {
@@ -841,7 +841,7 @@ export class ClassChecker {
   restrictedConstructor(type: Type): { classNode: TreeNode; visibility: 'private' | 'protected' } | undefined {
     const declaration = this.c.signaturesOf(type, 'construct')[0]?.declaration;
     const classNode = declaration?.parent?.parent;
-    if (declaration?.childForFieldName('name')?.text !== 'constructor' || !classNode || !classTypes.has(classNode.type))
+    if (!isConstructorName(declaration?.childForFieldName('name')) || !classNode || !classTypes.has(classNode.type))
       return undefined;
     const visibility = this.visibilityOf(declaration);
     return visibility === 'public' ? undefined : { classNode, visibility };

@@ -1,6 +1,7 @@
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import type { Node } from '../javascript/convertNodes';
+import { isConstructorDefinition } from '../javascript/programConverter';
 
 /**
  * The type of a synthesized statement that copies a constructor's parameter properties to `this`, which the
@@ -215,7 +216,7 @@ function classBody(node: TreeNode): ViewNode {
   const parameterProperties: ViewNode[] = [];
   for (const [index, child] of node.children.entries()) {
     if (!child || typeMembers.has(child.type) || isTypeOnlyField(child)) continue;
-    const viewed = isConstructor(child) ? constructorWithProperties(child, parameterProperties) : view(child);
+    const viewed = isConstructorDefinition(child) ? constructorWithProperties(child, parameterProperties) : view(child);
     parts.push({ node: viewed, fieldName: node.fieldNameForChild(index) });
   }
   // Fields go after the opening brace, before the members the body declares.
@@ -228,14 +229,6 @@ function isTypeOnlyField(node: TreeNode): boolean {
   return (
     node.type === 'field_definition' &&
     node.children.some((child) => child?.type === 'abstract' || child?.type === 'declare')
-  );
-}
-
-function isConstructor(node: TreeNode): boolean {
-  return (
-    node.type === 'method_definition' &&
-    node.childForFieldName('name')?.text === 'constructor' &&
-    !node.children.some((child) => child?.type === 'static')
   );
 }
 

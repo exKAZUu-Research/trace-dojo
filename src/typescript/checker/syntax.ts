@@ -135,8 +135,14 @@ export function isClassConstructor(node: TreeNode): boolean {
   return (
     node.type === 'method_definition' &&
     node.parent?.type === 'class_body' &&
-    node.childForFieldName('name')?.text === 'constructor'
+    isConstructorName(node.childForFieldName('name'))
   );
+}
+
+/** Whether a class member's name makes it the constructor: `constructor` as a name or a string, but not computed. */
+export function isConstructorName(name: TreeNode | null | undefined): boolean {
+  if (name?.type === 'property_identifier') return name.text === 'constructor';
+  return name?.type === 'string' && stringValue(name) === 'constructor';
 }
 
 /** Whether a property name is numeric, which a number index signature covers: `1`, `1.5`, and `-1` but not `01`. */

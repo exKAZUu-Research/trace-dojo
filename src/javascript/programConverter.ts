@@ -36,6 +36,7 @@ import {
   unwrapParentheses,
 } from './convertNodes';
 import { ExpressionConverter, nameDestructuring, patternSuspends } from './expressionConverter';
+import { decodeStringLiteral } from './literals';
 import { chain } from './operatorPrinter';
 import { isConstantExpression } from './stepRules';
 
@@ -608,9 +609,11 @@ function checkMemberName(member: Node, key: PropertyName, isStatic: boolean, isF
   if (isField && key.key === 'constructor') fail(member, 'フィールドに constructor という名前は使えません。');
 }
 
-function isConstructorDefinition(member: Node): boolean {
+/** Whether a class member is the constructor, whose name is `constructor` written as a name or as a string. */
+export function isConstructorDefinition(member: Node): boolean {
   if (member.type !== 'method_definition' || hasChild(member, 'static')) return false;
   const name = member.childForFieldName('name');
+  if (name?.type === 'string') return decodeStringLiteral(name.text) === 'constructor';
   return name?.type === 'property_identifier' && nameOf(name) === 'constructor';
 }
 

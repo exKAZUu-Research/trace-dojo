@@ -2,7 +2,7 @@ import { CompileError, type SourceDiagnostic } from '../interpreter/diagnostics'
 import type { TraceOptions } from '../interpreter/traceAnnotations';
 import type { ClassNode, IterationSource, Program, Statement } from '../javascript/ast';
 import { type Node, rowOf, unwrapParentheses } from '../javascript/convertNodes';
-import { ProgramConverter } from '../javascript/programConverter';
+import { isConstructorDefinition, ProgramConverter } from '../javascript/programConverter';
 import { PARAMETER_PROPERTY_ASSIGNMENT } from './jsView';
 
 /** Converts a TypeScript program, viewed as JavaScript, to the JavaScript interpreter's AST. */
@@ -70,14 +70,7 @@ export class TypeScriptProgramConverter extends ProgramConverter {
   override classNode(node: Node, name: string): ClassNode {
     const cls = super.classNode(node, name);
     if (!cls.superClass || !cls.ctor) return cls;
-    const constructor = node
-      .childForFieldName('body')
-      ?.namedChildren.find(
-        (member) =>
-          member.type === 'method_definition' &&
-          member.childForFieldName('name')?.text === 'constructor' &&
-          !member.children.some((child) => child?.type === 'static')
-      );
+    const constructor = node.childForFieldName('body')?.namedChildren.find((member) => isConstructorDefinition(member));
     const count =
       constructor?.childForFieldName('body')?.children.filter((child) => child?.type === PARAMETER_PROPERTY_ASSIGNMENT)
         .length ?? 0;
