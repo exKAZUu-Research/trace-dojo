@@ -5381,3 +5381,27 @@ test.each([
     uncaughtException: undefined,
   });
 });
+
+test.each([
+  ['??', 'null', 'p.?.?.x,p.?.?.y'],
+  ['??', '@as(?P,null)', 'p.?.?.x,p.?.?.y'],
+  ['???', 'null', 'p.?.?.?.x,p.?.?.?.y'],
+  ['???', '@as(??P,@as(?P,null))', 'p.?.?.?.x,p.?.?.?.y'],
+])('nested %s optional result locations publish every layer from %s', (wrappers, initial, args) => {
+  const access = `p${'.?'.repeat(wrappers.length)}.x`;
+  const source = `const std=@import("std");const P=struct{x:u8,y:u8};pub fn main()void{var p:${wrappers}P=${initial};p=.{.x=1,.y=${access}};std.debug.print("{} {} {}",.{p==null,${args}});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: 'false 1 1',
+    uncaughtException: undefined,
+  });
+});
+
+test('nested optional array and union result locations retain destination pointers', () => {
+  const source = `const std=@import("std");const U=union(enum){a:[2]u8,b:void};pub fn main()void{var p:??U=@as(?U,null);p=.{.a=.{1,p.?.?.a[0]}};const q=&p.?.?.a[0];p=.{.a=.{2,p.?.?.a[0]}};std.debug.print("{} {} {}",.{q.*,p.?.?.a[0],p.?.?.a[1]});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: '2 2 2',
+    uncaughtException: undefined,
+  });
+});

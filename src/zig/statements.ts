@@ -48,6 +48,7 @@ import {
   Cell,
   ErrorValue,
   NULL,
+  optionalSome,
   Pointer,
   Slice,
   type Slots,
@@ -710,7 +711,7 @@ export abstract class StatementCompiler extends CallCompiler {
     if (value.kind === 'structInit' && !value.type && type.kind === 'union' && value.fields.length === 1) {
       return this.unionStore(value, type);
     }
-    if (type.kind === 'optional' && isAggregateType(type.child)) return this.optionalStore(value, type);
+    if (type.kind === 'optional') return this.optionalStore(value, type);
     return undefined;
   }
 
@@ -719,14 +720,14 @@ export abstract class StatementCompiler extends CallCompiler {
     if (!inner) return undefined;
     return (frame, holder, index) => {
       if (holder.slots[index] === NULL) {
-        const slots = valueSlots(type.child);
+        const nested = type.child.kind === 'optional';
+        const slots = nested ? 0 : valueSlots(type.child);
         frame.runtime.reserveStorage(slots);
         frame.runtime.spend(slots);
-        holder.slots[index] = undefinedValue(type.child);
+        holder.slots[index] = optionalSome(nested ? NULL : undefinedValue(type.child), type.child);
       }
-      const current = holder.slots[index];
-      if (current instanceof Some) inner(frame, { slots: [current.value] }, 0);
-      else inner(frame, holder, index);
+      const payload = this.optionalPayloadPointer(new Pointer(holder, index));
+      inner(frame, payload.target, payload.index);
     };
   }
 
@@ -1435,7 +1436,7 @@ export abstract class StatementCompiler extends CallCompiler {
             this.branch(expression.otherwise as Expression, undefined, target.resultType, asStatement)
           )
         : undefined;
-    const storesAnswer = binding ? storesAnswerValue(binding.binding.type) : false;
+    const storesAnswer = bindingStoresAnswer(binding?.binding);
     const { id } = target;
     const bodyExec = body.exec;
     const otherwiseExec = otherwise?.stmt?.exec;
@@ -1594,7 +1595,7 @@ export abstract class StatementCompiler extends CallCompiler {
       ? this.branch(expression.otherwise, undefined, target.resultType, asStatement)
       : undefined;
     const row = this.stepRow(expression);
-    const storesAnswer = bindings.some((binding) => binding && storesAnswerValue(binding.type));
+    const storesAnswer = bindings.some(bindingStoresAnswer);
     const { id } = target;
     const bodyExec = body.exec;
     const otherwiseExec = otherwise?.stmt?.exec;
@@ -1824,7 +1825,7 @@ export abstract class StatementCompiler extends CallCompiler {
           body: clearingLocals(binding ? [binding.slot] : [], body.exec),
           slot: binding?.slot,
           evaluate: element.eval,
-          storesAnswer: storesAnswerValue(element.type),
+          storesAnswer: bindingStoresAnswer(binding),
         };
       } finally {
         fn.targets.pop();
@@ -2572,7 +2573,10 @@ function conditionKind(type: Type, hasCapture: boolean): 'bool' | 'optional' | '
   return 'bool';
 }
 
-/** Whether a loop variable of a type holds what learners answer, as Java's primitives and strings do. */
+function bindingStoresAnswer(binding: LocalBinding | undefined): boolean {
+  return binding !== undefined && storesAnswerValue(binding.type);
+}
+
 function storesAnswerValue(type: Type): boolean {
   switch (type.kind) {
     case 'int':
@@ -2663,10 +2667,6 @@ function copyJumpValue(value: TExpr): (frame: Frame) => Value {
 
 /** Writes a value into `holder.slots[index]`. */
 type ResultStore = (frame: Frame, holder: Slots, index: number) => void;
-
-function isAggregateType(type: Type): boolean {
-  return type.kind === 'struct' || type.kind === 'array' || type.kind === 'union';
-}
 
 /** The key a prong's value has in a switch: an error's name, or the value itself. */
 function prongKey(value: Value): unknown {

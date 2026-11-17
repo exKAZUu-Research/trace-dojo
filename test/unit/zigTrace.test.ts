@@ -537,3 +537,15 @@ test('quoted underscore locals, parameters and captures remain visible trace var
   expect(result.traceItems.some((item) => item.vars._ === 7)).toBe(true);
   expect(result.traceItems.some((item) => item.vars._ === 9)).toBe(true);
 });
+
+test.each(['for', 'inline for'])('%s discarded captures add no binding steps', (loop) => {
+  const source = `pub fn main()void{\n${loop}(0..2)|_|{}\n}`;
+  expect(traceProgram('zig', source, source).traceItems.map((item) => item.line)).toEqual([0]);
+});
+
+test('inline for quoted underscore captures retain actual answer binding steps', () => {
+  const source = `pub fn main()void{\ninline for([_]u8{7,7})|@"_"|{\n_=@"_";\n}\n}`;
+  const result = traceProgram('zig', source, source);
+  expect(result.traceItems.map((item) => item.line)).toEqual([0, 2, 3, 2, 3]);
+  expect(result.traceItems.filter((item) => item.line === 2).map((item) => item.vars._)).toEqual([7, 7]);
+});
