@@ -99,8 +99,11 @@ export class WriterFormatOutput implements FormatOutput {
     this.length += length;
   }
 
-  repeat(byte: number, count: number): void {
-    this.writeView(count, () => byte);
+  repeat(byte: number, count: bigint): void {
+    if (count === 0n) return;
+    const result = writeRepeated(this.frame, this.destination, [byte], count);
+    if (result instanceof ErrorValue) throw new WriterWriteError(result);
+    this.length += Number(count);
   }
 
   checkSize(length: number): void {
@@ -139,7 +142,7 @@ export function discardedBytes(state: WriterState): bigint {
   return result;
 }
 
-export function discardRepeated(frame: Frame, state: WriterState, bytes: readonly number[], count: bigint): void {
+function discardRepeated(frame: Frame, state: WriterState, bytes: readonly number[], count: bigint): void {
   const requested = BigInt(bytes.length) * count;
   if (requested === 0n) return;
   const end = writerEndAfter(state, requested);
@@ -244,12 +247,21 @@ export function bufferingWriter(): WriterState {
   return { fd: undefined, buffer: new Slice(new ZArray([]), 0, 0), end: 0, capacity: Infinity };
 }
 
-type WriteBytes = readonly number[] | { length: number; get: (index: number) => number };
+type WriteBytes = readonly number[] | { length: number | bigint; get: (index: number) => number };
 
-// code-gauge-allow functionNcss 33 -- Keeps growth, drain, and buffered writes in their observable order.
+export function writeRepeated(frame: Frame, state: WriterState, bytes: readonly number[], count: bigint): Value {
+  if (isDiscardingWriter(state)) {
+    discardRepeated(frame, state, bytes, count);
+    return;
+  }
+  return writeTo(frame, state, { length: BigInt(bytes.length) * count, get: (index) => bytes[index % bytes.length] });
+}
+
+// code-gauge-allow functionNcss 34 -- Keeps growth, drain, and buffered writes in their observable order.
 // code-gauge-allow functionCognitiveComplexity 16 -- Keeps growth and draining ahead of buffer mutation.
 export function writeTo(frame: Frame, state: WriterState, bytes: WriteBytes): Value {
   const get = 'get' in bytes ? bytes.get : (index: number): number => bytes[index];
+  const length = Number(bytes.length);
   frame.runtime.spend();
   const end = writerEndAfter(state, BigInt(bytes.length));
   if (end > state.capacity && state.growth) {
@@ -269,14 +281,14 @@ export function writeTo(frame: Frame, state: WriterState, bytes: WriteBytes): Va
       return ErrorValue.of('WriteFailed');
     }
     checkOutputSize(end);
-    frame.runtime.spend(state.end + bytes.length);
+    frame.runtime.spend(state.end + length);
     frame.runtime.writeOutput(state.fd, [...bufferedBytes(frame, state), ...materializeBytes(frame, bytes)]);
     state.end = 0;
     return undefined;
   }
-  if (!Number.isFinite(state.capacity)) frame.runtime.reserveStorage(bytes.length);
-  frame.runtime.spend(bytes.length);
-  for (let index = 0; index < bytes.length; index++) state.buffer.set(state.end + index, BigInt(get(index)));
+  if (!Number.isFinite(state.capacity)) frame.runtime.reserveStorage(length);
+  frame.runtime.spend(length);
+  for (let index = 0; index < length; index++) state.buffer.set(state.end + index, BigInt(get(index)));
   state.end = end;
   if (!Number.isFinite(state.capacity))
     state.buffer = new Slice(state.buffer.target, state.buffer.start, Math.max(state.buffer.length, end));
@@ -285,8 +297,9 @@ export function writeTo(frame: Frame, state: WriterState, bytes: WriteBytes): Va
 
 function materializeBytes(frame: Frame, bytes: WriteBytes): readonly number[] {
   if (!('get' in bytes)) return bytes;
-  frame.runtime.spend(bytes.length);
-  return Array.from({ length: bytes.length }, (_, index) => bytes.get(index));
+  const length = Number(bytes.length);
+  frame.runtime.spend(length);
+  return Array.from({ length }, (_, index) => bytes.get(index));
 }
 
 export function flushWriter(frame: Frame, state: WriterState): void {

@@ -1326,6 +1326,15 @@ test('source-sized plain, quoted, and base64 output follows the output limit', (
     expect(executeProgram('zig', source)).toMatchObject({ kind: 'limitExceeded', limit: 'output' });
 });
 
+test('base64 formats ordinary and sentinel-terminated byte arrays', () => {
+  const source = `const std=@import("std");pub fn main()void{std.debug.print("{b64} {b64}",.{[_]u8{97,98},[_:0]u8{97,98}});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: 'YWI= YWI=',
+    uncaughtException: undefined,
+  });
+});
+
 test('writer result types use the canonical usize and mutable byte slice', () => {
   const source = `const std=@import("std");fn less(n:usize,a:u8,b:u8)bool{return n>0 and a<b;}
 pub fn main()!void{var b:[2]u8=undefined;var w=std.Io.Writer.fixed(&b);const n=try w.write("x");var a=[_]u8{2,1};std.sort.heap(u8,&a,n,less);std.debug.print("{} {} {}",.{a[0],a[1],@TypeOf(w.buffered())==[]u8});}`;
@@ -8431,9 +8440,32 @@ test.each([
   expect(executeProgram('zig', source)).toMatchObject({ kind: 'executed', stderr, uncaughtException: undefined });
 });
 
+test.each(['find(u8,&a,&a)', 'findLast(u8,&a,&a)', 'indexOfPos(u8,&a,0,&a)'])(
+  'large integer search %s reuses the identical slice',
+  (call) => {
+    const source = `const std=@import("std");pub fn main()void{var a:[400000]u8=@splat(97);_=&a;std.debug.print("{any}",.{std.mem.${call}});}`;
+    expect(executeProgram('zig', source)).toMatchObject({
+      kind: 'executed',
+      stderr: '0',
+      uncaughtException: undefined,
+    });
+  }
+);
+
+test('searching a float slice for itself still checks equality', () => {
+  const source = `const std=@import("std");pub fn main()void{const a=[_]f64{std.math.nan(f64)};std.debug.print("{any}",.{std.mem.find(f64,&a,&a)});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: 'null',
+    uncaughtException: undefined,
+  });
+});
+
 test.each([
   ['{d:1000001}', '32'],
   ['{d:<1000001}', '49'],
+  ['{d:18446744073709551615}', '32'],
+  ['{d:<18446744073709551615}', '49'],
 ])('fixed writers fail after writing the available prefix for %s', (format, byte) => {
   const source = `const std=@import("std");pub fn main()void{var b:[1]u8=undefined;var w=std.Io.Writer.fixed(&b);w.print("${format}",.{1}) catch |err| std.debug.print("{t} {} {}",.{err,w.end,b[0]});}`;
   expect(executeProgram('zig', source)).toMatchObject({
@@ -8441,6 +8473,31 @@ test.each([
     stderr: `WriteFailed 1 ${byte}`,
     uncaughtException: undefined,
   });
+});
+
+test('argument widths preserve the maximum usize through writer padding', () => {
+  const source = `const std=@import("std");pub fn main()void{var b:[1]u8=undefined;var w=std.Io.Writer.fixed(&b);var width:usize=18446744073709551615;_=&width;w.print("{[value]d:[width]}",.{.value=1,.width=width}) catch |err| std.debug.print("{t} {} {}",.{err,w.end,b[0]});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: 'WriteFailed 1 32',
+    uncaughtException: undefined,
+  });
+});
+
+test.each([
+  ['std.debug.print("{e:.1000001}",.{@as(f64,1.5)});', '(float)'],
+  ['std.debug.print("{d:.1000001}",.{@as(f64,0)});', '(float)'],
+  [
+    'var b:[8]u8=undefined;const printed=try std.fmt.bufPrint(&b,"{d:.1000001}",.{@as(f64,1.5)});std.debug.print("{s}",.{printed});',
+    '(float)',
+  ],
+  [
+    'var b:[1]u8=undefined;var w=std.Io.Writer.fixed(&b);w.print("{d:.1000001}",.{@as(f64,1.5)}) catch |err| std.debug.print("{t} {} {c}",.{err,w.end,b[0]});',
+    'WriteFailed 1 (',
+  ],
+])('large decimal precision renders the reference fallback: %s', (body, stderr) => {
+  const source = `const std=@import("std");pub fn main()!void{${body}}`;
+  expect(executeProgram('zig', source)).toMatchObject({ kind: 'executed', stderr, uncaughtException: undefined });
 });
 
 test('bufPrint reports a full buffer before charging unused padding', () => {

@@ -1,4 +1,3 @@
-import { checkOutputSize } from '../allocation';
 import { panic } from '../arith';
 import type { Span } from '../ast';
 import { bytesToText, CONST_U8 } from '../builtins';
@@ -43,14 +42,11 @@ import { compilePrint, printInto } from './print';
 import {
   bufferedBytes,
   bufferedSlice,
-  discardRepeated,
   flushWriter,
-  isDiscardingWriter,
   writeByteTo,
   WRITER,
   writerBytes,
-  writerEndAfter,
-  writerRemaining,
+  writeRepeated,
   type WriterState,
   writerState,
   writerValue,
@@ -240,7 +236,6 @@ const FILE_WRITER: StructType = nativeStruct(
   { kind: 'fileWriter', args: [], storageSlots: 0, byteSize: 72 }
 );
 
-const WRITE_FAILED = ErrorValue.of('WriteFailed');
 const WRITE_ERROR = errorSetOf(['WriteFailed']);
 
 addIoMembers();
@@ -507,33 +502,6 @@ function writerOf(
     const pointer = evaluate(frame) as Pointer;
     return writerState(pointer.load(), pointer);
   };
-}
-
-function writeRepeated(frame: Parameters<TExpr['eval']>[0], state: WriterState, data: number[], count: bigint): Value {
-  const requested = BigInt(data.length) * count;
-  const end = writerEndAfter(state, requested);
-  const length = Number(requested);
-  if (isDiscardingWriter(state)) {
-    discardRepeated(frame, state, data, count);
-    return;
-  }
-  if (state.fd === undefined && !state.growth && end > state.capacity) {
-    const available = writerRemaining(state);
-    frame.runtime.spend(available);
-    writeTo(
-      frame,
-      state,
-      Array.from({ length: available }, (_, index) => data[index % data.length])
-    );
-    return WRITE_FAILED;
-  }
-  if (end > state.capacity || !Number.isFinite(state.capacity)) checkOutputSize(end);
-  frame.runtime.spend(length);
-  return writeTo(
-    frame,
-    state,
-    Array.from({ length }, (_, index) => data[index % data.length])
-  );
 }
 
 // std.process ---------------------------------------------------------------------------------------------------------

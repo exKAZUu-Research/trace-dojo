@@ -26,7 +26,17 @@ import {
   USIZE,
   VOID,
 } from '../types';
-import { NULL, type Pointer, Slice, storageLocation, storageOverlaps, storeInto, type Value, ZStruct } from '../values';
+import {
+  isUndefinedMemory,
+  NULL,
+  type Pointer,
+  Slice,
+  storageLocation,
+  storageOverlaps,
+  storeInto,
+  type Value,
+  ZStruct,
+} from '../values';
 import { WeakValueMap } from '../weakValueMap';
 import { zeroAllocation } from '../zeroSizedMemory';
 import {
@@ -62,7 +72,7 @@ import {
   structReceiver,
   typeMember,
 } from './native';
-import { findSequence, sequenceMatches } from './sequenceSearch';
+import { findSequence, type SearchSequence, sequenceMatches } from './sequenceSearch';
 import { sorter } from './sort';
 
 interface AllocationPlan {
@@ -84,11 +94,22 @@ function comparisonOf(sema: SemaApi, type: Type, span: Span): (frame?: Frame) =>
 class Sequence {
   constructor(
     readonly length: bigint,
-    private readonly read: (index: bigint) => Value
+    private readonly read: (index: bigint) => Value,
+    private readonly location?: ReturnType<typeof storageLocation>
   ) {}
 
   get(index: bigint): Value {
     return this.read(index);
+  }
+
+  sameRange(other: SearchSequence<Value>): boolean {
+    return (
+      other instanceof Sequence &&
+      this.location !== undefined &&
+      this.location.storage === other.location?.storage &&
+      this.location.index === other.location.index &&
+      this.length === other.length
+    );
   }
 
   some(predicate: (value: Value, index: bigint) => boolean): boolean {
@@ -119,16 +140,23 @@ class Sequence {
   }
 }
 
-function sequence(value: Value, spend: () => void, scalar = false): Sequence {
+function sequence(value: Value, spend: () => void, scalar = false, type?: Type): Sequence {
   if (scalar) return new Sequence(1n, () => value);
   const slice = value as Slice;
-  return new Sequence(slice.lengthValue, (index) => {
-    spend();
-    return slice.get(Number(index));
-  });
+  const location =
+    type?.kind === 'int' && !isUndefinedMemory(slice) ? storageLocation(slice.target.slots, slice.start) : undefined;
+  return new Sequence(
+    slice.lengthValue,
+    (index) => {
+      spend();
+      return slice.get(Number(index));
+    },
+    location
+  );
 }
 
 function findSequenceLast(haystack: Sequence, needle: Sequence, equal: typeof equalValues): bigint | undefined {
+  if (haystack.sameRange(needle)) return 0n;
   const found = findSequence(reversedSequence(haystack), reversedSequence(needle), 0n, equal);
   return found === undefined ? undefined : haystack.length - needle.length - found;
 }
@@ -173,16 +201,16 @@ function sliceSearch(
 ): () => Member {
   return generic(name, 3, (sema, call, type, [haystack, operand]) => {
     const a = constSlice(sema, haystack, type);
-    const b =
-      second === 'slice' ? constSlice(sema, operand, type) : sema.coerce(sema.compile(operand, type), type, operand);
+    const b = searchOperand(sema, type, operand, second);
     const equality = comparisonOf(sema, type, call.span);
     return computed(resultType, [a, b], call.span, ([x, y], frame) => {
       const spend = nativeBudget(sema, frame);
-      return compute(sequence(x, spend), sequence(y, spend, second === 'scalar'), equality(frame));
+      return compute(sequence(x, spend, false, type), sequence(y, spend, second === 'scalar', type), equality(frame));
     });
   });
 }
 
+// code-gauge-allow duplicateLines 17 -- Search adapters share typed argument setup while indexed searches retain their start argument.
 function positionSearch(
   name: string,
   second: 'slice' | 'scalar',
@@ -191,16 +219,24 @@ function positionSearch(
   return generic(name, 4, (sema, call, type, [haystack, startArg, operand]) => {
     const a = constSlice(sema, haystack, type);
     const [start] = compileArgs(sema, [startArg], [USIZE]);
-    const b =
-      second === 'slice' ? constSlice(sema, operand, type) : sema.coerce(sema.compile(operand, type), type, operand);
+    const b = searchOperand(sema, type, operand, second);
     const equality = comparisonOf(sema, type, call.span);
     return computed(OPTIONAL_USIZE, [a, start, b], call.span, ([x, from, y], frame) => {
       const spend = nativeBudget(sema, frame);
       return optionalIndex(
-        compute(sequence(x, spend), from as bigint, sequence(y, spend, second === 'scalar'), equality(frame))
+        compute(
+          sequence(x, spend, false, type),
+          from as bigint,
+          sequence(y, spend, second === 'scalar', type),
+          equality(frame)
+        )
       );
     });
   });
+}
+
+function searchOperand(sema: SemaApi, type: Type, arg: Expression, kind: 'slice' | 'scalar'): TExpr {
+  return kind === 'slice' ? constSlice(sema, arg, type) : sema.coerce(sema.compile(arg, type), type, arg);
 }
 
 // code-gauge-allow functionCognitiveComplexity 16 -- Keeps the paired live trim bounds together.
@@ -1106,10 +1142,7 @@ function minMaxIndexes(name: string): Member {
 function cutter(name: string, needleKind: 'slice' | 'scalar', last: boolean): Member {
   return generic(name, 3, (sema, call, type, [haystackArg, needleArg]) => {
     const haystack = constSlice(sema, haystackArg, type);
-    const needle =
-      needleKind === 'slice'
-        ? constSlice(sema, needleArg, type)
-        : sema.coerce(sema.compile(needleArg, type), type, needleArg);
+    const needle = searchOperand(sema, type, needleArg, needleKind);
     const slice = sliceOf(type, true);
     const equality = comparisonOf(sema, type, call.span);
     return computed(optionalOf(tupleOf(sema, [slice, slice])), [haystack, needle], call.span, ([h, n], frame) => {

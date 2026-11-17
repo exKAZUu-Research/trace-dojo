@@ -36,12 +36,12 @@ export type Alignment = 'left' | 'center' | 'right';
 export interface Options {
   fill: number;
   alignment: Alignment;
-  width?: number;
+  width?: bigint;
   precision?: number;
 }
 
 /** A width or precision: a number, or the index of the argument that gives it. */
-export type Specifier = { kind: 'none' } | { kind: 'number'; value: number } | { kind: 'arg'; index: number };
+export type Specifier = { kind: 'none' } | { kind: 'number'; value: bigint } | { kind: 'arg'; index: number };
 
 export interface Placeholder {
   kind: 'placeholder';
@@ -72,7 +72,7 @@ export interface FormatOutput {
   checkMaterializedSize?: (length: number) => void;
   writeView?: (length: number, get: (index: number) => number) => void;
   writeChunks?: (length: number, get: (index: number) => number, chunkSize: number) => void;
-  repeat?: (byte: number, count: number) => void;
+  repeat?: (byte: number, count: bigint) => void;
 }
 
 export interface FormatTemplate {
@@ -92,11 +92,9 @@ export function parseFormat(
   const nameIndexes = new Map(argNames.map((name, index) => [name, index]));
   const used = new Set<number>();
   let nextArg = 0;
-  const argIndex = (
-    spec: { kind: 'named'; name: string } | { kind: 'number'; value: number } | { kind: 'none' }
-  ): number | undefined => {
+  const argIndex = (spec: ParsedSpecifier): number | undefined => {
     if (spec.kind === 'none') return undefined;
-    if (spec.kind === 'number') return spec.value;
+    if (spec.kind === 'number') return Number(spec.value);
     spend(spec.name.length + 1);
     const found = nameIndexes.get(spec.name);
     if (found === undefined) throw new FormatError(`no argument with name '${spec.name}'`);
@@ -171,7 +169,7 @@ export function parseFormatTemplate(format: readonly number[], spend: (cost?: nu
   return { segments, length: format.length, text: decodeUtf8(format) };
 }
 
-type ParsedSpecifier = { kind: 'none' } | { kind: 'number'; value: number } | { kind: 'named'; name: string };
+type ParsedSpecifier = { kind: 'none' } | { kind: 'number'; value: bigint } | { kind: 'named'; name: string };
 
 function specifier(
   parsed: ParsedSpecifier,
@@ -217,7 +215,7 @@ function parsePlaceholder(bytes: readonly number[]): {
       if (value > (1n << 64n) - 1n) throw new FormatError('format option overflows usize');
       i++;
     }
-    return value === undefined ? { kind: 'none' } : { kind: 'number', value: Number(value) };
+    return value === undefined ? { kind: 'none' } : { kind: 'number', value };
   };
   const arg = parseSpecifier();
   const specStart = i;
@@ -678,7 +676,7 @@ const SPECIAL_SPECIFIERS = new Map<
   [
     'b64',
     {
-      accepts: (type) => type.kind === 'pointer' && isByteString(type),
+      accepts: isByteString,
       print: (out, value, _type, options) => {
         forbidOptions(options);
         const bytes = base64Bytes(stringBytes(value));
@@ -693,7 +691,7 @@ const SPECIAL_SPECIFIERS = new Map<
 function appendEscapedString(out: FormatOutput, bytes: ByteView): void {
   const hex = (byte: number): void => {
     appendBytes(out, utf8(String.raw`\x`));
-    alignBuffer(out, utf8(byte.toString(16)), { fill: 0x30, alignment: 'right', width: 2 });
+    alignBuffer(out, utf8(byte.toString(16)), { fill: 0x30, alignment: 'right', width: 2n });
   };
   let index = 0;
   while (index < bytes.length) {
@@ -840,16 +838,17 @@ function hexDigits(byte: number, upper: boolean): number[] {
 }
 
 export function alignBuffer(out: FormatOutput, buffer: readonly number[] | ByteView, options: Options): void {
-  const width = options.width ?? buffer.length;
-  checkFormatSize(out, out.length + Math.max(width, buffer.length));
-  const padding = buffer.length < width ? width - buffer.length : 0;
-  if (padding === 0) {
+  const length = BigInt(buffer.length);
+  const width = options.width ?? length;
+  const padding = width > length ? width - length : 0n;
+  checkFormatSize(out, out.length + buffer.length + Number(padding));
+  if (padding === 0n) {
     appendBuffer(out, buffer);
     return;
   }
-  const fill = (count: number): void => {
+  const fill = (count: bigint): void => {
     if (out.repeat) out.repeat(options.fill, count);
-    else for (let index = 0; index < count; index++) out.push(options.fill);
+    else for (let index = 0; index < Number(count); index++) out.push(options.fill);
   };
   switch (options.alignment) {
     case 'left': {
@@ -858,9 +857,9 @@ export function alignBuffer(out: FormatOutput, buffer: readonly number[] | ByteV
       break;
     }
     case 'center': {
-      fill(Math.floor(padding / 2));
+      fill(padding / 2n);
       appendBuffer(out, buffer);
-      fill(Math.floor((padding + 1) / 2));
+      fill((padding + 1n) / 2n);
       break;
     }
     default: {
@@ -897,7 +896,7 @@ export function printInt(
   if (upper) digits = digits.toUpperCase();
   let text = digits;
   if (value < 0n) text = `-${digits}`;
-  else if (signed && options.width !== undefined && options.width !== 0) text = `+${digits}`;
+  else if (signed && options.width !== undefined && options.width !== 0n) text = `+${digits}`;
   alignBuffer(out, utf8(text), options);
 }
 
@@ -912,7 +911,6 @@ export function printFloat(
   options: Options
 ): void {
   const decimal = shortestDecimal(value, bits);
-  if (!decimal.special) checkPrecisionSize(out, options.precision);
   const text =
     mode === 'scientific' ? formatScientific(decimal, options.precision) : formatDecimal(decimal, options.precision);
   alignBuffer(out, utf8(text), options);

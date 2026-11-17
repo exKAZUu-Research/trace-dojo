@@ -10,6 +10,7 @@ import {
   parseFormatTemplate,
   printValue,
   type Segment,
+  type Specifier,
   type TypeInfo,
 } from '../fmt';
 import { type Frame, withHeldValues } from '../runtime';
@@ -193,8 +194,11 @@ function checkFieldCoercion(sema: SemaApi, field: StructField, target: Type, spa
   sema.coerce(source, target, span);
 }
 
-function formatOption(value: Value): number | undefined {
-  return value === NULL ? undefined : Number((value instanceof Some ? value.value : value) as bigint);
+function formatOption(specifier: Specifier, readArgument: (index: number) => Value): bigint | undefined {
+  if (specifier.kind === 'none') return undefined;
+  if (specifier.kind === 'number') return specifier.value;
+  const value = readArgument(specifier.index);
+  return value === NULL ? undefined : ((value instanceof Some ? value.value : value) as bigint);
 }
 
 function formatMethod(sema: SemaApi, type: Type, span: Span): FormatMethod {
@@ -249,11 +253,13 @@ function appendSegments(
       writeFormatted(frame, destination, segment.bytes);
       continue;
     }
-    const options: Options = { fill: segment.fill, alignment: segment.alignment };
-    if (segment.width.kind === 'number') options.width = segment.width.value;
-    else if (segment.width.kind === 'arg') options.width = formatOption(argValue(segment.width.index));
-    if (segment.precision.kind === 'number') options.precision = segment.precision.value;
-    else if (segment.precision.kind === 'arg') options.precision = formatOption(argValue(segment.precision.index));
+    const precision = formatOption(segment.precision, argValue);
+    const options: Options = {
+      fill: segment.fill,
+      alignment: segment.alignment,
+      width: formatOption(segment.width, argValue),
+      precision: precision === undefined ? undefined : Number(precision),
+    };
     if (segment.spec === 'f') {
       formatWithMethod(segment.arg, argValue(segment.arg));
     } else {
