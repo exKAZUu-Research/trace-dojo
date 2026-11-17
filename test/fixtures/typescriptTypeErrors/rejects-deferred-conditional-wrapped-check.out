@@ -1,0 +1,5 @@
+(7,29): error TS2322: Type '"other"' is not assignable to type 'IsStr<T>'.
+(9,26): error TS2322: Type '2' is not assignable to type 'X<T>'.
+(11,25): error TS2322: Type '2' is not assignable to type 'Y<T>'.
+(16,25): error TS2322: Type '2' is not assignable to type '1'.
+(23,26): error TS2322: Type '"n"' is not assignable to type 'Fn<T>'.

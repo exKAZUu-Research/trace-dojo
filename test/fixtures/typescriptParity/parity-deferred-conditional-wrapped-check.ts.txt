@@ -1,0 +1,13 @@
+type IsStr<T> = { v: T } extends { v: string } ? "str" : "other";
+function f<T>(x: T): IsStr<T> {
+  return (typeof x === "string" ? "str" : "other") as IsStr<T>;
+}
+const a: "str" = f("x");
+const b: "other" = f(1);
+type RetStr<T> = (() => T) extends () => string ? "yes" : "no";
+function k<T>(x: T): RetStr<T> {
+  return (typeof x === "string" ? "yes" : "no") as RetStr<T>;
+}
+const c: "yes" = k("s");
+const d: "no" = k(true);
+console.log(a, b, c, d);

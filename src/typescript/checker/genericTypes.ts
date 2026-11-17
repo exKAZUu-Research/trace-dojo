@@ -1,5 +1,14 @@
 import type { Checker, Mapper } from './checker';
-import { anyType, isAnyLike, isIntrinsic, newTypeId, type Type, type TypeParameter } from './types';
+import {
+  anyType,
+  isAnyLike,
+  isIntrinsic,
+  type MappedInfo,
+  newTypeId,
+  type ObjectType,
+  type Type,
+  type TypeParameter,
+} from './types';
 
 /**
  * Whether a conditional type with this check or extends type waits for its type arguments, as TypeScript's
@@ -59,19 +68,48 @@ export function conditionalBranch(
   return undefined;
 }
 
-/** The type parameters, other than those in `except`, that occur in a type's members, type arguments, and elements. */
+/**
+ * The type parameters, other than those in `except`, that instantiating a type reaches: those in its members, type
+ * arguments, and elements, including the members of object and function types and the parts of mapped types, but not
+ * the type parameters a signature or mapped type declares itself.
+ */
 export function typeParametersIn(type: Type, except: readonly TypeParameter[] = []): TypeParameter[] {
   const found = new Map<number, TypeParameter>();
+  const declared = new Set<number>(except.map((parameter) => parameter.id));
   const seen = new Set<Type>();
   const visit = (current: Type): void => {
     if (seen.has(current)) return;
     seen.add(current);
     for (const child of childTypes(current)) visit(child);
-    if (current.kind === 'typeParameter' && !except.some((parameter) => parameter.id === current.id))
-      found.set(current.id, current);
+    if (current.kind === 'object') for (const child of objectMemberTypes(current, declared)) visit(child);
+    if (current.kind === 'typeParameter') found.set(current.id, current);
   };
   visit(type);
-  return [...found.values()];
+  return [...found.values()].filter((parameter) => !declared.has(parameter.id));
+}
+
+/** The types an anonymous or mapped object type holds, adding the type parameters it declares to `declared`. */
+function objectMemberTypes(type: ObjectType, declared: Set<number>): Type[] {
+  if (type.objectKind === 'mapped') {
+    const mapped = type.mapped as MappedInfo;
+    declared.add(mapped.typeParameter.id);
+    return [mapped.constraint, mapped.template, mapped.nameType, mapped.source].filter((child) => child !== undefined);
+  }
+  if (type.objectKind !== 'anonymous' || type.nonGeneric) return [];
+  const structure = type.resolve();
+  const signatures = [...structure.callSignatures, ...structure.constructSignatures];
+  for (const signature of signatures) for (const parameter of signature.typeParameters) declared.add(parameter.id);
+  return [
+    ...[...structure.properties.values()].map((property) => property.type()),
+    ...signatures.flatMap((signature) => [
+      ...signature.parameters.map((parameter) => parameter.type),
+      signature.returnType(),
+      ...(signature.thisType ? [signature.thisType] : []),
+    ]),
+    ...[structure.stringIndex, structure.numberIndex, structure.symbolIndex].flatMap((info) =>
+      info ? [info.type] : []
+    ),
+  ];
 }
 
 /** The types a type holds as members, type arguments, and elements. */
