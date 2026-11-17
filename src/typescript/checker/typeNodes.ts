@@ -2,6 +2,7 @@ import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import { unsupportedMessage } from '../unsupported';
 import type { Checker, Mapper, UnionAlias } from './checker';
+import { BROWSER_INTERFACES } from './domGlobals';
 import { IndexedAccessKeys } from './indexedAccessKeys';
 import type { Sym } from './scopes';
 import { nameSuggestionHint } from './spelling';
@@ -57,6 +58,8 @@ const predefinedTypes: Record<string, Type> = {
 };
 
 const stringMappings = new Set(['Uppercase', 'Lowercase', 'Capitalize', 'Uncapitalize']);
+
+const domInterfaceNames = new Set(BROWSER_INTERFACES.map((entry) => (typeof entry === 'string' ? entry : entry[0])));
 
 /** Resolves the types the program writes: annotations, type references, and type declarations. */
 export class TypeNodes {
@@ -335,7 +338,6 @@ export class TypeNodes {
   }
 
   /** The type a name refers to in a type position, applied to type arguments. */
-  // code-gauge-allow functionNcss 34 -- Resolves type names, rejects unavailable library types, and checks their type arguments.
   // code-gauge-allow functionCognitiveComplexity 20 -- Resolves type names, rejects unavailable library types, and checks their type arguments.
   private typeReference(node: TreeNode, nameNode: TreeNode, typeArguments: Type[]): Type {
     const name = nameNode.text;
@@ -385,8 +387,13 @@ export class TypeNodes {
     }
     const filled = this.c.fillTypeArguments(parameters, typeArguments);
     this.checkTypeArgumentConstraints(node, parameters, filled);
-    if (symbol.typeKind === 'alias') return this.aliasReference(symbol, declared, parameters, filled);
-    return this.c.reference(declared as ObjectType, filled);
+    return this.appliedType(symbol, declared, parameters, filled);
+  }
+
+  private appliedType(symbol: Sym, declared: Type, parameters: TypeParameter[], typeArguments: Type[]): Type {
+    if (symbol.typeKind === 'alias') return this.aliasReference(symbol, declared, parameters, typeArguments);
+    // An opaque DOM interface is `any`, whatever its type arguments.
+    return declared.kind === 'object' ? this.c.reference(declared, typeArguments) : declared;
   }
 
   private aliasReference(symbol: Sym, declared: Type, parameters: TypeParameter[], typeArguments: Type[]): Type {
@@ -572,7 +579,7 @@ export class TypeNodes {
         break;
       }
       case 'interface': {
-        symbol.declaredType = this.interfaceType(symbol);
+        symbol.declaredType = this.isOpaqueDomInterface(symbol) ? anyType : this.interfaceType(symbol);
         break;
       }
       case 'class': {
@@ -594,6 +601,14 @@ export class TypeNodes {
       }
     }
     return symbol.declaredType;
+  }
+
+  /** A DOM interface the program does not merge into, whose members the library leaves out. */
+  private isOpaqueDomInterface(symbol: Sym): boolean {
+    return (
+      domInterfaceNames.has(symbol.name) &&
+      symbol.typeDeclarations.every((declaration) => this.c.isLibrary(declaration))
+    );
   }
 
   private aliasType(symbol: Sym): Type {

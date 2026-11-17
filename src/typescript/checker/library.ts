@@ -1,8 +1,8 @@
 import { loadParser } from '../../interpreter/treeSitter';
 import { TURTLE_METHOD_NAMES } from '../../interpreter/turtleWorld';
 import {
+  BROWSER_INTERFACES,
   BROWSER_ONLY_GLOBALS,
-  BROWSER_TYPES,
   DOM_FUNCTION_CONSTRAINTS,
   DOM_TYPE_ALIASES,
   SHARED_HOST_GLOBALS,
@@ -82,8 +82,9 @@ declare var Reflect: any;
 
 /**
  * The rest of the DOM library, whose values the reference `tsc` accepts but Node.js lacks (so they fail when the program
- * runs) or this interpreter lacks. Declaration kinds and type names preserve script-global redeclaration checks;
- * the DOM's structural types remain opaque.
+ * runs) or this interpreter lacks. Declaration kinds and type names preserve script-global redeclaration checks and
+ * declaration merging; the DOM's structural types remain opaque, as its interfaces stand for `any` until a program merges
+ * into them.
  */
 const BROWSER_LIBRARY = [
   ...omittedLibraryGlobals.map((name) => `declare var ${name}: any; type ${name} = any;`),
@@ -96,11 +97,12 @@ const BROWSER_LIBRARY = [
           .join('\n')
       : `declare ${kind} ${name}: ${type};`
   ),
-  ...BROWSER_TYPES.map((entry) => {
-    if (typeof entry === 'string') return `type ${entry} = ${DOM_TYPE_ALIASES[entry] ?? 'any'};`;
+  ...BROWSER_INTERFACES.map((entry) => {
+    if (typeof entry === 'string') return `interface ${entry} {}`;
     const [name, count] = entry;
-    return `type ${name}<${Array.from({ length: count }, (_, index) => `T${index} = any`).join(', ')}> = any;`;
+    return `interface ${name}<${Array.from({ length: count }, (_, index) => `T${index} = any`).join(', ')}> {}`;
   }),
+  ...Object.entries(DOM_TYPE_ALIASES).map(([declaration, definition]) => `type ${declaration} = ${definition};`),
 ].join('\n');
 
 const parser = await loadParser('@willbooster/tree-sitter-typescript/tree-sitter-typescript.wasm');
