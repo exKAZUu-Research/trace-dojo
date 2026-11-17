@@ -421,6 +421,28 @@ export class Flow {
     });
   }
 
+  /**
+   * The part of a type that `value == null` keeps, as TypeScript narrows it: its nullish members, and of a generic one
+   * that may be nullish, itself or its constraint's nullish part.
+   */
+  private nullishPart(type: Type): Type {
+    return mapType(type, (member) => {
+      if (
+        isIntrinsic(member, 'null') ||
+        isIntrinsic(member, 'undefined') ||
+        isIntrinsic(member, 'void') ||
+        isIntrinsic(member, 'unknown') ||
+        isAnyLike(member)
+      )
+        return member;
+      if (!this.c.relations.isGeneric(member)) return neverType;
+      // An unconstrained one stays whole, and a constrained one becomes the nullish part of its constraint.
+      const constraint = this.c.baseConstraint(member);
+      if (constraint === member || isIntrinsic(constraint, 'unknown')) return member;
+      return this.nullishPart(constraint);
+    });
+  }
+
   /** The part of a type that `value === other` (or `!==`) keeps, given the other operand's type. */
   narrowByEquality(type: Type, other: Type, assumeTrue: boolean, loose: boolean): Type {
     return assumeTrue ? this.narrowToEqual(type, other, loose) : this.narrowToUnequal(type, other, loose);
@@ -429,17 +451,7 @@ export class Flow {
   // code-gauge-allow functionCognitiveComplexity 17 -- Follows TypeScript's narrowing of each kind of type by equality.
   private narrowToEqual(type: Type, other: Type, loose: boolean): Type {
     const nullish = isIntrinsic(other, 'null') || isIntrinsic(other, 'undefined');
-    if (loose && nullish) {
-      return filterType(
-        type,
-        (member) =>
-          isIntrinsic(member, 'null') ||
-          isIntrinsic(member, 'undefined') ||
-          isIntrinsic(member, 'void') ||
-          isIntrinsic(member, 'unknown') ||
-          isAnyLike(member)
-      );
-    }
+    if (loose && nullish) return this.nullishPart(type);
     if (isAnyLike(type)) return type;
     if (isIntrinsic(type, 'unknown')) return isUnit(other) ? other : type;
     const filtered = filterType(type, (member) => this.c.relations.isComparable(member, other));
