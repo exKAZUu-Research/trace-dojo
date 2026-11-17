@@ -1,0 +1,64 @@
+function first(x: 'a' | 'b'): string {
+  switch (x) {
+    default:
+      const unreachable: never = x;
+      return unreachable;
+    case 'a':
+      return 'A';
+    case 'b':
+      return 'B';
+  }
+}
+
+function middle(x: 'a' | 'b' | 'c'): string {
+  let log = '';
+  switch (x) {
+    case 'a':
+      log += 'a;';
+      break;
+    default:
+      const onlyC: 'c' = x;
+      log += onlyC + ';';
+    case 'b':
+      const bOrC: 'b' | 'c' = x;
+      log += 'then ' + bOrC + ';';
+      break;
+  }
+  return log;
+}
+
+function fallsIntoDefault(x: 'a' | 'b' | 'c'): string {
+  let log = '';
+  switch (x) {
+    case 'a':
+      log += 'a;';
+    default:
+      const aOrC: 'a' | 'c' = x;
+      log += aOrC + ';';
+      break;
+    case 'b':
+      log += 'b;';
+      break;
+    case 'c':
+      log += 'c;';
+      break;
+  }
+  return log;
+}
+
+function conditions(x: string | number | boolean): string {
+  switch (true) {
+    default:
+      const flag: boolean = x;
+      return 'boolean ' + flag;
+    case typeof x === 'string':
+      return 'string ' + x.length;
+    case typeof x === 'number':
+      return 'number ' + x.toFixed(1);
+  }
+}
+
+console.log(first('a'), first('b'));
+console.log(middle('a'), middle('b'), middle('c'));
+console.log(fallsIntoDefault('a'), fallsIntoDefault('b'), fallsIntoDefault('c'));
+console.log(conditions('xy'), conditions(2), conditions(true));

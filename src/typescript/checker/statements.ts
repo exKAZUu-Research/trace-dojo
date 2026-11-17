@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 522 -- Follows the flow of control through each kind of statement.
+// code-gauge-allow-file fileNcss 529 -- Follows the flow of control through each kind of statement.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import type { Checker } from './checker';
@@ -81,10 +81,12 @@ export class StatementChecker {
   /** Checks statements in order, calling `afterEach` with the state after each one that is reached. */
   checkBlockStatements(statements: TreeNode[], afterEach?: (state: State) => void): void {
     for (const statement of statements) {
-      if (!this.c.flow.isReachable) {
+      const current = this.c.flow.current;
+      if (!current) {
         this.checkUnreachable(statement);
         continue;
       }
+      if (current.dead) current.dead = 'after';
       this.check(statement);
       afterEach?.(this.c.flow.current?.clone());
     }
@@ -603,48 +605,18 @@ export class StatementChecker {
     this.c.assignments.assignReference(left, declared, elementType);
   }
 
-  // code-gauge-allow functionNcss 47 -- Follows the flow through the cases, fall-through, and an exhaustive end in one pass.
-  // code-gauge-allow functionCognitiveComplexity 20 -- Follows the flow through the cases, fall-through, `switch (true)`, and an exhaustive end in one pass.
   private switchStatement(node: TreeNode): void {
-    const value = node.childForFieldName('value') as TreeNode;
-    const discriminant = skipParentheses(value);
-    const discriminantType = this.c.expressions.check(discriminant);
+    const discriminant = skipParentheses(node.childForFieldName('value') as TreeNode);
     const body = node.childForFieldName('body') as TreeNode;
     const cases = named(body).filter((child) => child.type === 'switch_case' || child.type === 'switch_default');
-    const entry = this.c.flow.current;
+    const { caseEntries, noMatch } = this.switchCaseEntries(discriminant, cases);
     const target: JumpTarget = { isLoop: false, breaks: [], continues: [] };
     this.jumpTargets.push(target);
     let fallthrough: State;
-    const caseTypes: Type[] = [];
-    let hasDefault = false;
-    // `switch (true)` enters a case where its test is true, and the default where every test is false.
-    const testsConditions = discriminant.type === 'true';
-    let allFalse = entry;
     try {
-      for (const caseNode of cases) {
-        let caseEntry: State;
-        if (caseNode.type === 'switch_case') {
-          this.c.flow.current = entry?.clone();
-          const test = caseNode.childForFieldName('value') as TreeNode;
-          const testType = this.checkCaseTest(test, discriminantType);
-          caseTypes.push(testType);
-          if (testsConditions) {
-            const outer = this.c.flow.current;
-            this.c.flow.current = allFalse?.clone();
-            const { whenTrue, whenFalse } = this.c.silently(() => this.c.conditions.checkCondition(test));
-            this.c.flow.current = outer;
-            caseEntry = whenTrue;
-            allFalse = whenFalse;
-          } else {
-            caseEntry = this.c.conditions.narrowSwitchCase(discriminant, entry, [testType], true);
-          }
-        } else {
-          hasDefault = true;
-          caseEntry = testsConditions
-            ? allFalse
-            : this.c.conditions.narrowSwitchCase(discriminant, entry, caseTypes, false);
-        }
-        this.c.flow.current = this.c.flow.merge([caseEntry, fallthrough]);
+      for (const [index, caseNode] of cases.entries()) {
+        // The default clause is taken where no case matches, including the cases after it.
+        this.c.flow.current = this.c.flow.merge([caseEntries[index] ?? noMatch, fallthrough]);
         const statements = caseNode
           .childrenForFieldName('body')
           .filter((child) => child.isNamed && child.type !== 'comment');
@@ -654,20 +626,55 @@ export class StatementChecker {
     } finally {
       this.jumpTargets.pop();
     }
-    let noMatch = hasDefault
-      ? undefined
-      : testsConditions
-        ? allFalse
-        : this.c.conditions.narrowSwitchCase(discriminant, entry, caseTypes, false);
-    // Cases that cover every value of the discriminant leave no path past the switch, as `default` would.
-    if (noMatch && this.c.flow.referenceKey(discriminant)) {
-      let remaining: Type = neverType;
-      this.c.flow.from(noMatch, () => {
-        remaining = this.c.expressions.checkReferenceSilently(discriminant);
-      });
-      if (isIntrinsic(remaining, 'never')) noMatch = undefined;
-    }
-    this.c.flow.current = this.c.flow.merge([fallthrough!, ...target.breaks, noMatch]);
+    const bypass = cases.some((caseNode) => caseNode.type === 'switch_default') ? undefined : noMatch;
+    this.c.flow.current = this.c.flow.merge([fallthrough, ...target.breaks, this.markExhaustive(discriminant, bypass)]);
+  }
+
+  /** The state each case is entered in where its test matches (undefined for the default), and where none does. */
+  private switchCaseEntries(discriminant: TreeNode, cases: TreeNode[]): { caseEntries: State[]; noMatch: State } {
+    const discriminantType = this.c.expressions.check(discriminant);
+    const entry = this.c.flow.current;
+    const caseTypes: Type[] = [];
+    // `switch (true)` enters a case where its test is true, and the default where every test is false.
+    const testsConditions = discriminant.type === 'true';
+    let allFalse = entry;
+    const caseEntries = cases.map((caseNode): State => {
+      if (caseNode.type !== 'switch_case') return undefined;
+      this.c.flow.current = entry?.clone();
+      const test = caseNode.childForFieldName('value') as TreeNode;
+      const testType = this.checkCaseTest(test, discriminantType);
+      caseTypes.push(testType);
+      if (!testsConditions) return this.c.conditions.narrowSwitchCase(discriminant, entry, [testType], true);
+      this.c.flow.current = allFalse?.clone();
+      const { whenTrue, whenFalse } = this.c.silently(() => this.c.conditions.checkCondition(test));
+      allFalse = whenFalse;
+      return whenTrue;
+    });
+    this.c.flow.current = entry;
+    const noMatch = testsConditions
+      ? allFalse
+      : this.c.conditions.narrowSwitchCase(discriminant, entry, caseTypes, false);
+    return { caseEntries, noMatch };
+  }
+
+  /**
+   * Marks the state past a `switch` without a default as one no path reaches where its cases cover every value of its
+   * discriminant (or of the operand of a `typeof` discriminant), which stays narrowed to `never` there.
+   */
+  private markExhaustive(discriminant: TreeNode, bypass: State): State {
+    const reference =
+      discriminant.type === 'unary_expression' && discriminant.childForFieldName('operator')?.text === 'typeof'
+        ? skipParentheses(discriminant.childForFieldName('argument') as TreeNode)
+        : discriminant;
+    if (!bypass || !this.c.flow.referenceKey(reference)) return bypass;
+    let remaining: Type = neverType;
+    this.c.flow.from(bypass, () => {
+      remaining = this.c.expressions.checkReferenceSilently(reference);
+    });
+    if (!isIntrinsic(remaining, 'never')) return bypass;
+    const exhausted = bypass.clone();
+    exhausted.dead = 'switchEnd';
+    return exhausted;
   }
 
   /** Checks a `case` test, reporting one that cannot equal the discriminant, and returns its type. */

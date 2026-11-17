@@ -343,7 +343,7 @@ export class FunctionChecker {
   private checkBody(body: TreeNode, context: FunctionContext): void {
     if (body.type === 'statement_block') {
       this.c.statements.checkBlockStatements(named(body));
-      context.endReachable = this.c.flow.isReachable;
+      context.endReachable = this.c.flow.isReachable && !this.c.flow.current?.dead;
       return;
     }
     const { declaredReturn } = context;

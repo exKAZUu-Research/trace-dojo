@@ -44,11 +44,17 @@ export class FlowState {
     readonly entries = new Map<string, FlowEntry>(),
     /** The fields of `this` (by reference key) that every path to here assigned, which a constructor must. */
     readonly assignedFields = new Set<string>(),
-    public superCalled = false
+    public superCalled = false,
+    /**
+     * Set where no path reaches, though tsc narrows there as its binder lets the bypass of a `switch` whose cases cover
+     * every value of its discriminant reach it: `'switchEnd'` right past that `switch`, which a merge ignores as tsc
+     * ignores such a bypass, and `'after'` from the next statement on, which a merge joins.
+     */
+    public dead?: 'switchEnd' | 'after'
   ) {}
 
   clone(): FlowState {
-    return new FlowState(new Map(this.entries), new Set(this.assignedFields), this.superCalled);
+    return new FlowState(new Map(this.entries), new Set(this.assignedFields), this.superCalled, this.dead);
   }
 }
 
@@ -63,13 +69,16 @@ export class Flow {
   constructor(private readonly c: Checker) {}
 
   merge(states: State[]): State {
-    const reachable = states.filter((state): state is FlowState => state !== undefined);
+    const defined = states.filter((state): state is FlowState => state !== undefined);
+    const joined = defined.filter((state) => state.dead !== 'switchEnd');
+    const reachable = joined.length > 0 ? joined : defined;
     if (reachable.length === 0) return undefined;
     if (reachable.length === 1) return reachable[0].clone();
     const merged = new FlowState(
       undefined,
       undefined,
-      reachable.every((state) => state.superCalled)
+      reachable.every((state) => state.superCalled),
+      reachable.some((state) => !state.dead) ? undefined : reachable[0].dead
     );
     const [first, ...others] = reachable;
     for (const field of first.assignedFields) {
@@ -132,7 +141,9 @@ export class Flow {
 
   set(key: string, entry: FlowEntry): void {
     if (!this.current) return;
-    this.current.entries.set(key, entry);
+    // tsc gives a reference assigned where no path reaches its declared type.
+    if (this.current.dead && entry.assigned) this.current.entries.delete(key);
+    else this.current.entries.set(key, entry);
   }
 
   /** Forgets what was known about the properties of a reference that is assigned. */
