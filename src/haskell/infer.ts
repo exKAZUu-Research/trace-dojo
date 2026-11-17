@@ -175,8 +175,8 @@ export class Checker {
     const deferred: EvidenceHole[] = [];
     const work = [...holes];
     const depths = new Map<EvidenceHole, number>();
-    while (work.length > 0) {
-      const hole = work.shift() as EvidenceHole;
+    for (let index = 0; index < work.length; index++) {
+      const hole = work[index];
       const depth = depths.get(hole) ?? 0;
       if (--this.reductionsRemaining < 0 || depth > 200) {
         typeError(hole.span, '型クラスの制約の計算が上限を超えました。');

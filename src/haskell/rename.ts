@@ -10,6 +10,7 @@ import {
   type ValueEntity,
 } from './entities';
 import { compileError, unsupportedError } from './errors';
+import { ExportTableBuilder } from './exportTable';
 import { DEFAULT_FIXITY, resolveExprChain, resolvePatChain, sectionOperand } from './fixity';
 import { LocalScope } from './localScope';
 import { type CompiledModuleInfo, emptyExports, type ExportTable, type TypeLike } from './modules';
@@ -344,24 +345,20 @@ class Renamer {
     }
   }
 
-  // code-gauge-allow functionCognitiveComplexity 20 -- Each branch is one form of an export item.
   private buildExports(): ExportTable {
-    const table = emptyExports();
     if (!this.module.exports) {
-      for (const [name, entity] of this.ownValues) {
-        if (entity.sort === 'var' || entity.sort === 'method' || entity.sort === 'field' || entity.sort === 'con') {
-          table.values.set(name, entity);
-        }
-      }
+      const table = emptyExports();
+      for (const [name, entity] of this.ownValues) table.values.set(name, entity);
       for (const [name, entity] of this.ownTypes) {
         table.types.set(name, { entity, children: this.ownTypeChildren.get(entity) ?? [] });
       }
       return table;
     }
+    const builder = new ExportTableBuilder();
     for (const item of this.module.exports) {
       if (item.kind === 'value') {
         const entity = this.lookupValue(item.name, false);
-        table.values.set(item.name.name, entity);
+        builder.addValue(entity, item.name.span);
         continue;
       }
       const entry = this.lookupType(item.name);
@@ -375,10 +372,9 @@ class Renamer {
                 throw compileError(child.span, `${item.name.name} の中に ${child.name} はありません。`);
               return found;
             });
-      table.types.set(item.name.name, { entity: entry, children });
-      for (const child of children) table.values.set(child.name, child);
+      builder.addType(item.name, entry, children);
     }
-    return table;
+    return builder.table;
   }
 
   private childrenOf(entry: TypeLike, qualifier?: string): ValueEntity[] {
