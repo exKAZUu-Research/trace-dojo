@@ -58,7 +58,8 @@ function formatFormatString(
 /** The text a placeholder stands for, or undefined for a `%` that starts no placeholder. */
 function formatPlaceholder(runtime: Runtime, kind: string, value: Value, budget: OutputBudget): string | undefined {
   if (kind === 'o' || kind === 'O') {
-    // Node.js's `%o` shows hidden properties, of which this shows an array's length; a function's are left out.
+    // Node.js's `%o` shows hidden properties, as an array's `[length]` and a function's `[length]`, `[name]`, and
+    // `[prototype]`.
     return kind === 'o'
       ? inspectValue(runtime, value, budget, 4, { showHidden: true })
       : inspectValue(runtime, value, budget);
