@@ -591,3 +591,25 @@ main=do
     uncaughtException: undefined,
   });
 });
+
+test.each(
+  ['Data.Set', 'Data.Map', 'Data.Map.Strict'].flatMap((module) =>
+    ['fromAscList', 'fromDescList'].flatMap((builder) =>
+      ['incoming', 'previous', 'discarded'].map((demand) => ({ module, builder, demand }))
+    )
+  )
+)('ordered $module.$builder preserves $demand duplicate-key demand', ({ module, builder, demand }) => {
+  const keys = demand === 'discarded' ? ['K 1 undefined', 'K 1 0'] : ['K 1 0', 'K 1 undefined', 'K 1 0'];
+  const isSet = module === 'Data.Set';
+  const input = keys.map((key, index) => (isSet ? key : `(${key},${index + 1}::Int)`)).join(',');
+  const source = `import qualified ${module} as C
+data K=K Int Int deriving Show
+instance Eq K where K a x == K b y = ${demand === 'previous' ? 'y' : 'x'} \`seq\` (a==b)
+instance Ord K where compare(K a _)(K b _)=compare a b
+main=print(C.toList(C.${builder}[${input}]))`;
+  expect(executeProgram('haskell', source)).toMatchObject({
+    kind: 'executed',
+    stdout: demand === 'discarded' ? (isSet ? '[K 1 0]\n' : '[(K 1 0,2)]\n') : '',
+    uncaughtException: demand === 'discarded' ? undefined : 'Prelude.undefined',
+  });
+});

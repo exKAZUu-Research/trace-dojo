@@ -120,7 +120,14 @@ fromList xs = finish (B.foldl' next (SetAscending SetEnd) xs)
     finish (SetAscending stack) = finishOrderedSet False STip stack
 
 fromAscList :: Eq a => [a] -> Set a
-fromAscList xs = fromDistinctAscList (B.map B.last (group xs))
+fromAscList = buildOrderedSetWithDuplicates False
+
+buildOrderedSetWithDuplicates :: Eq a => Bool -> [a] -> Set a
+buildOrderedSetWithDuplicates descending xs = finishOrderedSet descending STip (B.foldl' next SetEnd xs)
+  where
+    next stack y = y ${BT}seq${BT} case stack of
+      SetPush x subtree rest -> if y == x then SetPush y subtree rest else pushOrderedSet descending stack y
+      SetEnd -> pushOrderedSet descending stack y
 
 fromDistinctAscList :: [a] -> Set a
 fromDistinctAscList = buildOrderedSet False
@@ -454,7 +461,7 @@ fold :: (a -> b -> b) -> b -> Set a -> b
 fold = foldr
 
 fromDescList :: Eq a => [a] -> Set a
-fromDescList xs = fromDistinctDescList (B.map B.last (group xs))
+fromDescList = buildOrderedSetWithDuplicates True
 
 fromDistinctDescList :: [a] -> Set a
 fromDistinctDescList = buildOrderedSet True
@@ -671,9 +678,15 @@ buildListMap strict combine xs = finish (B.foldl' next (MapAscending MapEnd) xs)
     finish (MapAscending stack) = finishOrderedMap False Tip stack
 
 fromAscList :: Eq k => [(k, a)] -> Map k a
-fromAscList xs = fromDistinctAscList (combine xs)
-  where combine ((k1, x1) : rest@((k2, _) : _)) = if k1 == k2 then combine rest else (k1, x1) : combine rest
-        combine ys = ys
+fromAscList = buildOrderedMapWithDuplicates False
+
+buildOrderedMapWithDuplicates :: Eq k => Bool -> [(k,a)] -> Map k a
+buildOrderedMapWithDuplicates descending xs = finishOrderedMap descending Tip (B.foldl' next MapEnd xs)
+  where
+    next stack (key,value) = key ${BT}seq${BT} case stack of
+      MapPush previous _ subtree rest ->
+        if key == previous then MapPush key value subtree rest else pushOrderedMap descending stack key value
+      MapEnd -> pushOrderedMap descending stack key value
 
 fromDistinctAscList :: [(k, a)] -> Map k a
 fromDistinctAscList = buildOrderedMap False
@@ -1198,7 +1211,7 @@ mapKeysMonotonic f (Bin count k x l r) =
   in right ${BT}seq${BT} left ${BT}seq${BT} Bin count (f k) x left right
 
 fromDescList :: Eq k => [(k,a)] -> Map k a
-fromDescList xs = fromDistinctDescList (B.map B.last (groupBy (\(k,_) (l,_) -> k == l) xs))
+fromDescList = buildOrderedMapWithDuplicates True
 
 fromDistinctDescList :: [(k,a)] -> Map k a
 fromDistinctDescList = buildOrderedMap True
