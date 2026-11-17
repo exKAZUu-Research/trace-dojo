@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 515 -- The primitive table lists every built-in operation the Haskell library calls.
+// code-gauge-allow-file fileNcss 517 -- The primitive table lists every built-in operation the Haskell library calls.
 import { TURTLE_METHOD_NAMES } from '../interpreter/turtleWorld';
 import { CONS_CON, tupleCon, UNIT_CON } from './builtinTypes';
 import type { ConInfo } from './entities';
@@ -914,9 +914,10 @@ defineTurtleMethod(TURTLE_METHOD_NAMES.turnLeft, (runtime, { turtle }) => {
   runtime.world.turn(turtle, 3);
   return unit();
 });
-defineTurtleMethod(TURTLE_METHOD_NAMES.canMoveForward, (runtime, { turtle }) =>
-  bool(runtime.world.canMoveForward(turtle))
-);
+defineTurtleMethod(TURTLE_METHOD_NAMES.canMoveForward, (runtime, receiver) => {
+  runtime.collectGarbage([receiver]);
+  return bool(runtime.world.canMoveForward(receiver.turtle));
+});
 defineTurtleMethod(TURTLE_METHOD_NAMES.isFrontPainted, (runtime, { turtle }) =>
   bool(runtime.world.isFrontPainted(turtle))
 );

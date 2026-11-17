@@ -1,26 +1,34 @@
 import { expect, test } from 'vitest';
 
-import { traceProgram } from '../../src/interpreter/program';
+import { executeProgram, traceProgram } from '../../src/interpreter/program';
 
 const makeTurtle = `make :: Int -> IO Turtle
 make y=do
  newTurtleAt 0 y`;
 const makeAtomicTurtle = makeTurtle.replace('make y=do', 'make y=do -- atomic');
 
-test.each(['_<-newTurtleAt 0 1', 'newTurtleAt 0 1'])(
-  'discarded turtle results leave the board before their statement is recorded: %s',
-  (statement) => {
-    const source = `main=do
+test.each([
+  ['_<-newTurtleAt 0 1', '前に進めるか'],
+  ['newTurtleAt 0 1', '前に進めるか'],
+  ['_<-newTurtleAt 0 1', 'canMoveForward'],
+  ['newTurtleAt 0 1', 'canMoveForward'],
+])('discarded turtle results are collected before their statement is recorded: %s %s', (statement, query) => {
+  const source = `main=do
  t<-newTurtle
  ${statement}
- b<-前に進めるか t
+ b<-${query} t
  print b`;
-    const result = traceProgram('haskell', source, source);
-    expect(result.stdout).toBe('True\n');
-    expect(result.traceItems.find((item) => item.line === 3)?.turtles).toHaveLength(1);
-    expect(result.finalTurtles).toHaveLength(1);
-  }
-);
+  const result = traceProgram('haskell', source, source);
+  expect(result.stdout).toBe('True\n');
+  expect(result.traceItems.find((item) => item.line === 3)?.turtles).toHaveLength(1);
+  expect(result.finalTurtles).toHaveLength(1);
+  expect(executeProgram('haskell', source)).toMatchObject({
+    kind: 'executed',
+    stdout: 'True\n',
+    finalTurtles: [expect.objectContaining({ x: 0, y: 0 })],
+    uncaughtException: undefined,
+  });
+});
 
 test.each([
   { name: 'named result', statement: 'u<-newTurtleAt 0 1', declarations: '', retained: true },
@@ -69,4 +77,11 @@ main=do
   const result = traceProgram('haskell', source, source);
   expect(result.stdout).toBe(retained ? 'False\n' : 'True\n');
   expect(result.finalTurtles).toHaveLength(retained ? 2 : 1);
+  const execution = executeProgram('haskell', source);
+  expect(execution).toMatchObject({
+    kind: 'executed',
+    stdout: retained ? 'False\n' : 'True\n',
+    uncaughtException: undefined,
+  });
+  if (execution.kind === 'executed') expect(execution.finalTurtles).toHaveLength(retained ? 2 : 1);
 });

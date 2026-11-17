@@ -139,8 +139,7 @@ export class Runtime implements TracedRuntime<TraceFrame> {
   /** Runs before each collection; a trace evaluates the variables it shows, which may drop references to turtles. */
   beforeCollect: (() => void) | undefined;
 
-  /** Removes the turtles that nothing the program can still use reaches. */
-  collectGarbage(): void {
+  collectGarbage(temporaryRoots: readonly Slot[] = []): void {
     this.beforeCollect?.();
     if (!this.world.hasTurtles) return;
     this.budget.excludingTime(() => {
@@ -150,7 +149,7 @@ export class Runtime implements TracedRuntime<TraceFrame> {
         if (performance.now() > deadline) throw new ExecutionLimitError('trace');
       };
       try {
-        const reached = withTypeWorkBudget(checkTime, () => markReachable(this, checkTime));
+        const reached = withTypeWorkBudget(checkTime, () => markReachable(this, checkTime, temporaryRoots));
         this.world.retain((turtle) => reached.has(turtle));
         checkTime();
       } finally {

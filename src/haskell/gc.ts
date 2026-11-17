@@ -138,7 +138,11 @@ function statementCodes(stmt: IOStmt): Core[] {
     : [stmt.expr, ...(stmt.kind === 'bind' && stmt.matcher ? [stmt.matcher] : [])];
 }
 
-export function markReachable(runtime: Runtime, checkTime: () => void): Set<TurtleState> {
+export function markReachable(
+  runtime: Runtime,
+  checkTime: () => void,
+  temporaryRoots: readonly Slot[] = []
+): Set<TurtleState> {
   const reached = new Set<TurtleState>();
   const seen = new Set<object>();
   const pending: Slot[] = [];
@@ -146,6 +150,10 @@ export function markReachable(runtime: Runtime, checkTime: () => void): Set<Turt
     slot = slot === undefined ? undefined : untypedSlot(slot);
     if (slot !== undefined && typeof slot === 'object' && !seen.has(slot)) pending.push(slot);
   };
+  for (const root of temporaryRoots) {
+    checkTime();
+    push(root);
+  }
   pushRoots(runtime, push);
   while (pending.length > 0) {
     const value = pending.pop() as Slot;
