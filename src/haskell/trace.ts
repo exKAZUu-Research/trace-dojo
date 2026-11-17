@@ -51,7 +51,7 @@ function slotDisplaysAnswer(runtime: Runtime, name: string, slot: Slot, type: Ty
   const variables: VariableDisplay = { vars: Object.create(null) };
   const entry = addSlotVariable(runtime, variables, name, slot, type);
   if (name === 'this') addSelfFields(runtime, variables, entry);
-  return Object.keys(variables.vars).length > 0;
+  return Object.values(variables.vars).some((value) => typeof value !== 'object');
 }
 
 /** The variables a frame's running statement sees: its parameters and the variables bound before it, in order. */

@@ -378,15 +378,15 @@ test.each([
   { declaration: 'import Data.Ratio', values: '[[1%2],[1%2]]', answer: ['1 % 2'] },
   { declaration: '', values: '[[[1::Int]],[[1]]]', answer: [[1]] },
   { declaration: '', values: '[[],[]]::[[Int]]', answer: [] },
-])('list answer bindings retain each iteration: $values', ({ declaration, values, answer }) => {
+])('read-only list values omit unchanged binding steps: $values', ({ declaration, values, answer }) => {
   const source = `import Control.Monad
 ${declaration}
 main=forM_ (${values}) $ \\x->do
  print(1::Int)`;
   const result = traceProgram('haskell', source, source);
   expect(result.stdout).toBe('1\n1\n');
-  expect(result.traceItems.map(({ line }) => line)).toEqual([0, 3, 4, 3, 4]);
-  expect(result.traceItems.slice(1).map(({ vars }) => vars.x)).toEqual([answer, answer, answer, answer]);
+  expect(result.traceItems.map(({ line }) => line)).toEqual([0, 4, 4]);
+  expect(result.traceItems.slice(1).map(({ vars }) => vars.x)).toEqual([answer, answer]);
   expect(result.traceItems.at(-1)?.referenceVars.x).toBeDefined();
 });
 
@@ -407,7 +407,7 @@ main=forM_ (${values}) $ \\x->do
 test.each([
   { declaration: 'data C=C {a::Int}', values: '[C 1,C 1]', field: 'this.a', answer: 1 },
   { declaration: 'data C=C {flag::Bool}', values: '[C True,C True]', field: 'this.flag', answer: true },
-  { declaration: 'data C=C {xs::[Int]}', values: '[C [1],C [1]]', field: 'this.xs', answer: [1] },
+  { declaration: 'data C=C {xs::String}', values: '[C "x",C "x"]', field: 'this.xs', answer: 'x' },
 ])('record field answers retain each this binding: $declaration', ({ declaration, values, field, answer }) => {
   const source = `import Control.Monad
 ${declaration}
@@ -529,4 +529,37 @@ main=do
     this: { kind: 'object', entries: { sink: { kind: 'object', entries: {} } } },
     handles: { kind: 'array', entries: { 0: { kind: 'object', entries: {} } } },
   });
+});
+
+test.each([
+  { next: 1, hasChangedBinding: false },
+  { next: 2, hasChangedBinding: true },
+])('array loop bindings follow the Java reference-only policy: $next', ({ next, hasChangedBinding }) => {
+  const haskell = `import Control.Monad
+main=forM_ [[1::Int],[${next}]] $ \\x->do
+ print(1::Int)`;
+  const java = `class Main {
+ public static void main(String[] args) {
+  for(int[] x:new int[][]{{1},{${next}}}) {
+   System.out.println(1);
+  }
+ }
+}`;
+  const result = traceProgram('haskell', haskell, haskell);
+  const control = traceProgram('java', java, java);
+  expect(result.stdout).toBe('1\n1\n');
+  expect(result.stdout).toBe(control.stdout);
+  expect(result.traceItems.map(({ vars }) => vars)).toEqual(control.traceItems.map(({ vars }) => vars));
+  expect(result.traceItems.map(({ line }) => line)).toEqual(hasChangedBinding ? [0, 3, 2, 3] : [0, 3, 3]);
+});
+
+test('array-valued this fields remain read-only during repeated bindings', () => {
+  const source = `import Control.Monad
+data C=C {xs::[Int]}
+main=forM_ [C [1],C [1]] $ \\this->do
+ print(1::Int)`;
+  const result = traceProgram('haskell', source, source);
+  expect(result.stdout).toBe('1\n1\n');
+  expect(result.traceItems.map(({ line }) => line)).toEqual([0, 4, 4]);
+  expect(result.traceItems.at(-1)?.vars['this.xs']).toEqual([1]);
 });
