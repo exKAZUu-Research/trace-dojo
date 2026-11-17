@@ -97,17 +97,25 @@ export class MemberChecker {
     return propertyType;
   }
 
-  /** For `a?.b` called as `a?.b()`, the type of `b` itself, which the call reaches only when `a` is not nullish. */
+  /**
+   * For `a?.b` or `a?.[k]` called as `a?.b()` or `a?.[k]()`, the type of the member itself, which the call reaches only
+   * when the chain does not short-circuit.
+   */
   chainedCalleeType(callee: TreeNode): Type | undefined {
-    if (callee.type !== 'member_expression' || !this.isInOptionalChain(callee)) return undefined;
+    const isElement = callee.type === 'subscript_expression';
+    if ((callee.type !== 'member_expression' && !isElement) || !this.isInOptionalChain(callee)) return undefined;
     const objectNode = callee.childForFieldName('object') as TreeNode;
-    const propertyNode = callee.childForFieldName('property') as TreeNode;
     const checked = this.c.expressions.check(objectNode);
     if (isAnyLike(checked)) return anyType;
     const objectType = this.continuedObjectType(objectNode, checked) ?? checked;
     const nonNull = callee.childForFieldName('optional_chain')
       ? this.c.relations.removeNullish(objectType)
       : this.checkNonNullable(objectNode, objectType);
+    if (isElement) {
+      const indexNode = callee.childForFieldName('index') as TreeNode;
+      return this.indexedType(callee, objectNode, indexNode, nonNull, this.c.expressions.check(indexNode));
+    }
+    const propertyNode = callee.childForFieldName('property') as TreeNode;
     return this.propertyAccess(callee, objectNode, propertyNode, nonNull, propertyNode.text);
   }
 
@@ -294,7 +302,9 @@ export class MemberChecker {
     const entry = key ? this.c.flow.entry(key) : undefined;
     if (entry && !this.c.expressions.isAssignmentTarget(node)) return entry.type;
     const result = this.indexedType(node, objectNode, indexNode, objectType, indexType);
-    return optional || continued ? this.chainResult(node, result) : result;
+    // As for a property, `?.` adds `undefined` only where it can short-circuit.
+    const shortCircuits = (optional && this.c.relations.isNullable(continued ?? checked)) || continued;
+    return shortCircuits ? this.chainResult(node, result) : result;
   }
 
   isReadonlyIndex(objectType: Type, indexType: Type): boolean {
