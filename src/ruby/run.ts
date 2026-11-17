@@ -6,6 +6,7 @@ import type { Program } from './ast';
 import { bootstrap } from './bootstrap';
 import { describeException } from './describe';
 import { runAtExit } from './exitHandlers';
+import { initializeInternedIds } from './internedIds';
 import { evalBody, runToEnd, STACK_OVERFLOW } from './interp';
 import { makeData } from './libData';
 import { parseRuby } from './parse';
@@ -51,10 +52,11 @@ export function executeRubyProgram(source: string, input?: ProgramInput): Progra
  * @param onEnd Called when the program ends, while its frame still holds its variables.
  */
 // code-gauge-allow functionCognitiveComplexity 20 -- The ordered cases for Ruby execution lifecycle share state; splitting them solely for the metric would hide their sequencing.
-// code-gauge-allow functionNcss 34 -- The ordered cases for Ruby execution lifecycle share state; splitting them solely for the metric would hide their sequencing.
+// code-gauge-allow functionNcss 35 -- The ordered cases for Ruby execution lifecycle share state; splitting them solely for the metric would hide their sequencing.
 export function runProgram(runtime: Runtime, program: Program, onEnd?: (frame: Frame) => void): ProgramRun {
   return withRuntime(runtime, () => {
     bootstrap(runtime);
+    initializeInternedIds(program);
     for (const warning of program.warnings ?? [])
       runtime.io.stderr.write(`main.rb:${warning.row + 1}: warning: ${warning.message}\n`);
     runtime.frozenStringLiterals = program.frozenStringLiterals ?? false;

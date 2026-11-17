@@ -33,6 +33,7 @@ import {
 import { validateKeywords } from './exceptionOption';
 import { formatString } from './format';
 import { hashDefault, hashGet, stringKeyEquals, stringKeyHash } from './hashes';
+import { internId } from './internedIds';
 import { callBlock, callMethod, type Gen, invoke, nativeProc, requireBlock } from './interp';
 import { validStringEncoding } from './libEncoding';
 import { makeEnumerator } from './libEnumerator';
@@ -1862,13 +1863,7 @@ def('String', 'between?', 2, function* (self: RString, [min, max]) {
 // Symbol --------------------------------------------------------------------------------------------------------------
 
 def('Symbol', ['to_s', 'id2name'], 0, (self: RSymbol) => symbolString(self));
-def('Symbol', 'name', 0, (self: RSymbol) => {
-  if (!self.nameString) {
-    self.nameString = symbolString(self);
-    self.nameString.frozen = true;
-  }
-  return self.nameString;
-});
+def('Symbol', 'name', 0, (self: RSymbol) => symbolNameString(self));
 def('Symbol', 'to_sym', 0, (self) => self);
 def('Symbol', 'intern', 0, (self) => self);
 def('Symbol', 'casecmp', 1, (self: RSymbol, [other]) => {
@@ -1928,6 +1923,7 @@ def('Symbol', 'to_proc', 0, (self: RSymbol) => symbolProc(self.key));
 
 /** The lambda `&:name` passes: it calls the method `name` on its first argument. */
 export function symbolProc(name: string): Value {
+  internId(name);
   const proc = nativeProc(
     -2,
     (args, block, _used, keywords) => {
@@ -1939,6 +1935,14 @@ export function symbolProc(name: string): Value {
   );
   proc.nativeRequired = 1;
   return proc;
+}
+
+export function symbolNameString(self: RSymbol): RString {
+  if (!self.nameString) {
+    self.nameString = symbolString(self);
+    self.nameString.frozen = true;
+  }
+  return self.nameString;
 }
 
 export function symbolString(self: RSymbol): RString {

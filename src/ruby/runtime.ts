@@ -216,6 +216,7 @@ export class Runtime implements TracedRuntime<Frame> {
   readonly frames: Frame[] = [];
   readonly globals = new Map<string, Value>();
   readonly symbols = new Map<string, RSymbol>();
+  readonly internedIds = new Set<string>();
   readonly coreStrings = new Map<string, RString>();
   programName?: RString;
   missingReason?: MissingReason;

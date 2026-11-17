@@ -3,6 +3,7 @@ import { execFileSync } from 'node:child_process';
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 
 import { executeProgram, type ProgramExecution } from '../../src/interpreter/program';
+import { rubyUnderNode } from '../helpers/rubyUnderNode';
 
 // The interpreter's clock stands still in these tests, so that the program, not the load of the host, decides each one.
 beforeEach(() => {
@@ -6346,7 +6347,7 @@ true
   });
 });
 
-test('short regexp matches avoid the expensive watchdog path', () => {
+test('bounded linear counted regexps handle repeated short matches', () => {
   expect(run(String.raw`60000.times { "123".match?(/\A\d{1,3}\z/) }; p :ok`)).toMatchObject({
     kind: 'executed',
     stdout: ':ok\n',
@@ -54568,6 +54569,854 @@ const nativeClassVariableLexicalScopeCases = [
 
 test.each(nativeClassVariableLexicalScopeCases)(
   'Class variable syntax retains lexical scope inside singleton class bodies: %s',
+  (source, stdout) => {
+    expect(run(source)).toMatchObject({ kind: 'executed', stdout, uncaughtException: undefined });
+  }
+);
+
+test('counted nullable regexps respect the execution deadline under Node', () => {
+  const results = rubyUnderNode([
+    'p(/(a?){99999}$/.match?("aaaaaaa!"))',
+    'p(/(b?){9999}$/.match?("bbbbbbb!"))',
+    String.raw`60000.times { "123".match?(/\A\d{1,3}\z/) }; p :ok`,
+    'p(/abc/.match?("abc"))',
+  ]);
+  expect(results).toEqual([
+    { kind: 'limitExceeded', limit: 'time' },
+    { kind: 'limitExceeded', limit: 'time' },
+    { kind: 'executed', stdout: ':ok\n' },
+    { kind: 'executed', stdout: 'true\n' },
+  ]);
+}, 20_000);
+
+const nativeMissingArgsAndRemovalCases = [
+  [
+    'begin;Object.new.send(:method_missing,:foo);rescue NoMethodError=>e;p e.name,e.args,e.args.equal?(e.args);end',
+    ':foo\n[]\ntrue\n',
+  ],
+  [
+    'begin;Object.new.__send__(:method_missing,:foo);rescue NoMethodError=>e;p e.name,e.args,e.args.equal?(e.args);end',
+    ':foo\n[]\ntrue\n',
+  ],
+  [
+    'begin;Object.new.public_send(:method_missing,:foo);rescue NoMethodError=>e;p e.name,e.args,e.args.equal?(e.args);end',
+    ':foo\n[]\ntrue\n',
+  ],
+  [
+    'begin;Object.new.send(:method_missing,:foo,1);rescue NoMethodError=>e;p e.name,e.args,e.args.equal?(e.args);end',
+    ':foo\n[1]\ntrue\n',
+  ],
+  [
+    'begin;Object.new.__send__(:method_missing,:foo,1);rescue NoMethodError=>e;p e.name,e.args,e.args.equal?(e.args);end',
+    ':foo\n[1]\ntrue\n',
+  ],
+  [
+    'begin;Object.new.public_send(:method_missing,:foo,1);rescue NoMethodError=>e;p e.name,e.args,e.args.equal?(e.args);end',
+    ':foo\n[1]\ntrue\n',
+  ],
+  [
+    'begin;Object.new.send(:method_missing,:foo,1,2);rescue NoMethodError=>e;p e.name,e.args,e.args.equal?(e.args);end',
+    ':foo\n[1, 2]\ntrue\n',
+  ],
+  [
+    'begin;Object.new.__send__(:method_missing,:foo,1,2);rescue NoMethodError=>e;p e.name,e.args,e.args.equal?(e.args);end',
+    ':foo\n[1, 2]\ntrue\n',
+  ],
+  [
+    'begin;Object.new.public_send(:method_missing,:foo,1,2);rescue NoMethodError=>e;p e.name,e.args,e.args.equal?(e.args);end',
+    ':foo\n[1, 2]\ntrue\n',
+  ],
+  [
+    'begin;Object.new.send(:method_missing,:foo,x:2);rescue NoMethodError=>e;p e.name,e.args,e.args.equal?(e.args);end',
+    ':foo\n[{x: 2}]\ntrue\n',
+  ],
+  [
+    'begin;Object.new.__send__(:method_missing,:foo,x:2);rescue NoMethodError=>e;p e.name,e.args,e.args.equal?(e.args);end',
+    ':foo\n[{x: 2}]\ntrue\n',
+  ],
+  [
+    'begin;Object.new.public_send(:method_missing,:foo,x:2);rescue NoMethodError=>e;p e.name,e.args,e.args.equal?(e.args);end',
+    ':foo\n[{x: 2}]\ntrue\n',
+  ],
+  [
+    'begin;Object.new.send(:method_missing,:foo,1,x:2);rescue NoMethodError=>e;p e.name,e.args,e.args.equal?(e.args);end',
+    ':foo\n[1, {x: 2}]\ntrue\n',
+  ],
+  [
+    'begin;Object.new.__send__(:method_missing,:foo,1,x:2);rescue NoMethodError=>e;p e.name,e.args,e.args.equal?(e.args);end',
+    ':foo\n[1, {x: 2}]\ntrue\n',
+  ],
+  [
+    'begin;Object.new.public_send(:method_missing,:foo,1,x:2);rescue NoMethodError=>e;p e.name,e.args,e.args.equal?(e.args);end',
+    ':foo\n[1, {x: 2}]\ntrue\n',
+  ],
+  [
+    'begin;Object.new.send(:method_missing,:foo,**{});rescue NoMethodError=>e;p e.name,e.args,e.args.equal?(e.args);end',
+    ':foo\n[]\ntrue\n',
+  ],
+  [
+    'begin;Object.new.__send__(:method_missing,:foo,**{});rescue NoMethodError=>e;p e.name,e.args,e.args.equal?(e.args);end',
+    ':foo\n[]\ntrue\n',
+  ],
+  [
+    'begin;Object.new.public_send(:method_missing,:foo,**{});rescue NoMethodError=>e;p e.name,e.args,e.args.equal?(e.args);end',
+    ':foo\n[]\ntrue\n',
+  ],
+  [
+    'begin;Object.new.send(:method_missing,:foo,1,**{});rescue NoMethodError=>e;p e.name,e.args,e.args.equal?(e.args);end',
+    ':foo\n[1]\ntrue\n',
+  ],
+  [
+    'begin;Object.new.__send__(:method_missing,:foo,1,**{});rescue NoMethodError=>e;p e.name,e.args,e.args.equal?(e.args);end',
+    ':foo\n[1]\ntrue\n',
+  ],
+  [
+    'begin;Object.new.public_send(:method_missing,:foo,1,**{});rescue NoMethodError=>e;p e.name,e.args,e.args.equal?(e.args);end',
+    ':foo\n[1]\ntrue\n',
+  ],
+  [
+    'begin;Object.new.send(:method_missing,:foo,{:x=>2});rescue NoMethodError=>e;p e.name,e.args,e.args.equal?(e.args);end',
+    ':foo\n[{x: 2}]\ntrue\n',
+  ],
+  [
+    'begin;Object.new.__send__(:method_missing,:foo,{:x=>2});rescue NoMethodError=>e;p e.name,e.args,e.args.equal?(e.args);end',
+    ':foo\n[{x: 2}]\ntrue\n',
+  ],
+  [
+    'begin;Object.new.public_send(:method_missing,:foo,{:x=>2});rescue NoMethodError=>e;p e.name,e.args,e.args.equal?(e.args);end',
+    ':foo\n[{x: 2}]\ntrue\n',
+  ],
+  [
+    'class C;def method_missing(n,*a,**k);super;end;end;begin;C.new.foo();rescue NoMethodError=>e;p e.name,e.args;end',
+    ':foo\n[]\n',
+  ],
+  [
+    'class C;def method_missing(n,*a,**k);super(n,*a,**k);end;end;begin;C.new.foo();rescue NoMethodError=>e;p e.name,e.args;end',
+    ':foo\n[]\n',
+  ],
+  [
+    'class C;def method_missing(n,*a,**k);super(n);end;end;begin;C.new.foo();rescue NoMethodError=>e;p e.name,e.args;end',
+    ':foo\n[]\n',
+  ],
+  [
+    'class C;def method_missing(n,*a,**k);super;end;end;begin;C.new.foo(1);rescue NoMethodError=>e;p e.name,e.args;end',
+    ':foo\n[1]\n',
+  ],
+  [
+    'class C;def method_missing(n,*a,**k);super(n,*a,**k);end;end;begin;C.new.foo(1);rescue NoMethodError=>e;p e.name,e.args;end',
+    ':foo\n[1]\n',
+  ],
+  [
+    'class C;def method_missing(n,*a,**k);super(n);end;end;begin;C.new.foo(1);rescue NoMethodError=>e;p e.name,e.args;end',
+    ':foo\n[]\n',
+  ],
+  [
+    'class C;def method_missing(n,*a,**k);super;end;end;begin;C.new.foo(1,2);rescue NoMethodError=>e;p e.name,e.args;end',
+    ':foo\n[1, 2]\n',
+  ],
+  [
+    'class C;def method_missing(n,*a,**k);super(n,*a,**k);end;end;begin;C.new.foo(1,2);rescue NoMethodError=>e;p e.name,e.args;end',
+    ':foo\n[1, 2]\n',
+  ],
+  [
+    'class C;def method_missing(n,*a,**k);super(n);end;end;begin;C.new.foo(1,2);rescue NoMethodError=>e;p e.name,e.args;end',
+    ':foo\n[]\n',
+  ],
+  [
+    'class C;def method_missing(n,*a,**k);super;end;end;begin;C.new.foo(x:2);rescue NoMethodError=>e;p e.name,e.args;end',
+    ':foo\n[{x: 2}]\n',
+  ],
+  [
+    'class C;def method_missing(n,*a,**k);super(n,*a,**k);end;end;begin;C.new.foo(x:2);rescue NoMethodError=>e;p e.name,e.args;end',
+    ':foo\n[{x: 2}]\n',
+  ],
+  [
+    'class C;def method_missing(n,*a,**k);super(n);end;end;begin;C.new.foo(x:2);rescue NoMethodError=>e;p e.name,e.args;end',
+    ':foo\n[]\n',
+  ],
+  [
+    'class C;def method_missing(n,*a,**k);super;end;end;begin;C.new.foo(1,x:2);rescue NoMethodError=>e;p e.name,e.args;end',
+    ':foo\n[1, {x: 2}]\n',
+  ],
+  [
+    'class C;def method_missing(n,*a,**k);super(n,*a,**k);end;end;begin;C.new.foo(1,x:2);rescue NoMethodError=>e;p e.name,e.args;end',
+    ':foo\n[1, {x: 2}]\n',
+  ],
+  [
+    'class C;def method_missing(n,*a,**k);super(n);end;end;begin;C.new.foo(1,x:2);rescue NoMethodError=>e;p e.name,e.args;end',
+    ':foo\n[]\n',
+  ],
+  [
+    'class C;def method_missing(n,*a,**k);super;end;end;begin;C.new.foo(**{});rescue NoMethodError=>e;p e.name,e.args;end',
+    ':foo\n[]\n',
+  ],
+  [
+    'class C;def method_missing(n,*a,**k);super(n,*a,**k);end;end;begin;C.new.foo(**{});rescue NoMethodError=>e;p e.name,e.args;end',
+    ':foo\n[]\n',
+  ],
+  [
+    'class C;def method_missing(n,*a,**k);super(n);end;end;begin;C.new.foo(**{});rescue NoMethodError=>e;p e.name,e.args;end',
+    ':foo\n[]\n',
+  ],
+  [
+    'class C;def method_missing(n,*a,**k);super;end;end;begin;C.new.foo(1,**{});rescue NoMethodError=>e;p e.name,e.args;end',
+    ':foo\n[1]\n',
+  ],
+  [
+    'class C;def method_missing(n,*a,**k);super(n,*a,**k);end;end;begin;C.new.foo(1,**{});rescue NoMethodError=>e;p e.name,e.args;end',
+    ':foo\n[1]\n',
+  ],
+  [
+    'class C;def method_missing(n,*a,**k);super(n);end;end;begin;C.new.foo(1,**{});rescue NoMethodError=>e;p e.name,e.args;end',
+    ':foo\n[]\n',
+  ],
+  [
+    'class C;def method_missing(n,*a,**k);super;end;end;begin;C.new.foo({:x=>2});rescue NoMethodError=>e;p e.name,e.args;end',
+    ':foo\n[{x: 2}]\n',
+  ],
+  [
+    'class C;def method_missing(n,*a,**k);super(n,*a,**k);end;end;begin;C.new.foo({:x=>2});rescue NoMethodError=>e;p e.name,e.args;end',
+    ':foo\n[{x: 2}]\n',
+  ],
+  [
+    'class C;def method_missing(n,*a,**k);super(n);end;end;begin;C.new.foo({:x=>2});rescue NoMethodError=>e;p e.name,e.args;end',
+    ':foo\n[]\n',
+  ],
+  ['class C;end;begin;C.new.foo(1,x:2);rescue NoMethodError=>e;p e.name,e.args;end', ':foo\n[1, {x: 2}]\n'],
+  [
+    'class C;def foo(*a,**k);end;private :foo;end;begin;C.new.foo(1,x:2);rescue NoMethodError=>e;p e.name,e.args;end',
+    ':foo\n[1, {x: 2}]\n',
+  ],
+  [
+    'class C;def foo(*a,**k);end;protected :foo;end;begin;C.new.foo(1,x:2);rescue NoMethodError=>e;p e.name,e.args;end',
+    ':foo\n[1, {x: 2}]\n',
+  ],
+  [
+    'class C;def foo(*a,**k);super;end;end;begin;C.new.foo(1,x:2);rescue NoMethodError=>e;p e.name,e.args;end',
+    ':foo\n[1, {x: 2}]\n',
+  ],
+  [
+    'class C;def x;1;end;end;n=Object.new;n.define_singleton_method(:to_str){puts :convert;"x"};begin;p C.remove_method(*[]);rescue=>e;p e.class,e.message;end;p C.new.respond_to?(:x)',
+    'C\ntrue\n',
+  ],
+  [
+    'class C;def x;1;end;end;n=Object.new;n.define_singleton_method(:to_str){puts :convert;raise "conversion"};begin;p C.remove_method(*[]);rescue=>e;p e.class,e.message;end;p C.new.respond_to?(:x)',
+    'C\ntrue\n',
+  ],
+  [
+    'class C;def x;1;end;end;n=Object.new;n.define_singleton_method(:to_str){puts :convert;C.freeze;"x"};begin;p C.remove_method(*[]);rescue=>e;p e.class,e.message;end;p C.new.respond_to?(:x)',
+    'C\ntrue\n',
+  ],
+  [
+    'class C;def x;1;end;end;n=Object.new;n.define_singleton_method(:to_str){puts :convert;"x"};begin;p C.remove_method(*[:x]);rescue=>e;p e.class,e.message;end;p C.new.respond_to?(:x)',
+    'C\nfalse\n',
+  ],
+  [
+    'class C;def x;1;end;end;n=Object.new;n.define_singleton_method(:to_str){puts :convert;raise "conversion"};begin;p C.remove_method(*[:x]);rescue=>e;p e.class,e.message;end;p C.new.respond_to?(:x)',
+    'C\nfalse\n',
+  ],
+  [
+    'class C;def x;1;end;end;n=Object.new;n.define_singleton_method(:to_str){puts :convert;C.freeze;"x"};begin;p C.remove_method(*[:x]);rescue=>e;p e.class,e.message;end;p C.new.respond_to?(:x)',
+    'C\nfalse\n',
+  ],
+  [
+    'class C;def x;1;end;end;n=Object.new;n.define_singleton_method(:to_str){puts :convert;"x"};begin;p C.remove_method(*[:absent]);rescue=>e;p e.class,e.message;end;p C.new.respond_to?(:x)',
+    'NameError\n"method \'absent\' not defined in C"\ntrue\n',
+  ],
+  [
+    'class C;def x;1;end;end;n=Object.new;n.define_singleton_method(:to_str){puts :convert;raise "conversion"};begin;p C.remove_method(*[:absent]);rescue=>e;p e.class,e.message;end;p C.new.respond_to?(:x)',
+    'NameError\n"method \'absent\' not defined in C"\ntrue\n',
+  ],
+  [
+    'class C;def x;1;end;end;n=Object.new;n.define_singleton_method(:to_str){puts :convert;C.freeze;"x"};begin;p C.remove_method(*[:absent]);rescue=>e;p e.class,e.message;end;p C.new.respond_to?(:x)',
+    'NameError\n"method \'absent\' not defined in C"\ntrue\n',
+  ],
+  [
+    'class C;def x;1;end;end;n=Object.new;n.define_singleton_method(:to_str){puts :convert;"x"};begin;p C.remove_method(*["x"]);rescue=>e;p e.class,e.message;end;p C.new.respond_to?(:x)',
+    'C\nfalse\n',
+  ],
+  [
+    'class C;def x;1;end;end;n=Object.new;n.define_singleton_method(:to_str){puts :convert;raise "conversion"};begin;p C.remove_method(*["x"]);rescue=>e;p e.class,e.message;end;p C.new.respond_to?(:x)',
+    'C\nfalse\n',
+  ],
+  [
+    'class C;def x;1;end;end;n=Object.new;n.define_singleton_method(:to_str){puts :convert;C.freeze;"x"};begin;p C.remove_method(*["x"]);rescue=>e;p e.class,e.message;end;p C.new.respond_to?(:x)',
+    'C\nfalse\n',
+  ],
+  [
+    'class C;def x;1;end;end;n=Object.new;n.define_singleton_method(:to_str){puts :convert;"x"};begin;p C.remove_method(*["brand_new_uninterned_749321"]);rescue=>e;p e.class,e.message;end;p C.new.respond_to?(:x)',
+    'NameError\n"method \'brand_new_uninterned_749321\' not defined in C"\ntrue\n',
+  ],
+  [
+    'class C;def x;1;end;end;n=Object.new;n.define_singleton_method(:to_str){puts :convert;raise "conversion"};begin;p C.remove_method(*["brand_new_uninterned_749321"]);rescue=>e;p e.class,e.message;end;p C.new.respond_to?(:x)',
+    'NameError\n"method \'brand_new_uninterned_749321\' not defined in C"\ntrue\n',
+  ],
+  [
+    'class C;def x;1;end;end;n=Object.new;n.define_singleton_method(:to_str){puts :convert;C.freeze;"x"};begin;p C.remove_method(*["brand_new_uninterned_749321"]);rescue=>e;p e.class,e.message;end;p C.new.respond_to?(:x)',
+    'NameError\n"method \'brand_new_uninterned_749321\' not defined in C"\ntrue\n',
+  ],
+  [
+    'class C;def x;1;end;end;n=Object.new;n.define_singleton_method(:to_str){puts :convert;"x"};begin;p C.remove_method(*[:x,:absent]);rescue=>e;p e.class,e.message;end;p C.new.respond_to?(:x)',
+    'NameError\n"method \'absent\' not defined in C"\nfalse\n',
+  ],
+  [
+    'class C;def x;1;end;end;n=Object.new;n.define_singleton_method(:to_str){puts :convert;raise "conversion"};begin;p C.remove_method(*[:x,:absent]);rescue=>e;p e.class,e.message;end;p C.new.respond_to?(:x)',
+    'NameError\n"method \'absent\' not defined in C"\nfalse\n',
+  ],
+  [
+    'class C;def x;1;end;end;n=Object.new;n.define_singleton_method(:to_str){puts :convert;C.freeze;"x"};begin;p C.remove_method(*[:x,:absent]);rescue=>e;p e.class,e.message;end;p C.new.respond_to?(:x)',
+    'NameError\n"method \'absent\' not defined in C"\nfalse\n',
+  ],
+  [
+    'class C;def x;1;end;end;n=Object.new;n.define_singleton_method(:to_str){puts :convert;"x"};begin;p C.remove_method(*[n]);rescue=>e;p e.class,e.message;end;p C.new.respond_to?(:x)',
+    'convert\nC\nfalse\n',
+  ],
+  [
+    'class C;def x;1;end;end;n=Object.new;n.define_singleton_method(:to_str){puts :convert;raise "conversion"};begin;p C.remove_method(*[n]);rescue=>e;p e.class,e.message;end;p C.new.respond_to?(:x)',
+    'convert\nRuntimeError\n"conversion"\ntrue\n',
+  ],
+  [
+    'class C;def x;1;end;end;n=Object.new;n.define_singleton_method(:to_str){puts :convert;C.freeze;"x"};begin;p C.remove_method(*[n]);rescue=>e;p e.class,e.message;end;p C.new.respond_to?(:x)',
+    'convert\nFrozenError\n"can\'t modify frozen Class: C"\ntrue\n',
+  ],
+  [
+    'class C;def x;1;end;end;n=Object.new;n.define_singleton_method(:to_str){puts :convert;"x"};C.freeze;begin;p C.remove_method(*[]);rescue=>e;p e.class,e.message;end;p C.new.respond_to?(:x)',
+    'C\ntrue\n',
+  ],
+  [
+    'class C;def x;1;end;end;n=Object.new;n.define_singleton_method(:to_str){puts :convert;raise "conversion"};C.freeze;begin;p C.remove_method(*[]);rescue=>e;p e.class,e.message;end;p C.new.respond_to?(:x)',
+    'C\ntrue\n',
+  ],
+  [
+    'class C;def x;1;end;end;n=Object.new;n.define_singleton_method(:to_str){puts :convert;C.freeze;"x"};C.freeze;begin;p C.remove_method(*[]);rescue=>e;p e.class,e.message;end;p C.new.respond_to?(:x)',
+    'C\ntrue\n',
+  ],
+  [
+    'class C;def x;1;end;end;n=Object.new;n.define_singleton_method(:to_str){puts :convert;"x"};C.freeze;begin;p C.remove_method(*[:x]);rescue=>e;p e.class,e.message;end;p C.new.respond_to?(:x)',
+    'FrozenError\n"can\'t modify frozen Class: C"\ntrue\n',
+  ],
+  [
+    'class C;def x;1;end;end;n=Object.new;n.define_singleton_method(:to_str){puts :convert;raise "conversion"};C.freeze;begin;p C.remove_method(*[:x]);rescue=>e;p e.class,e.message;end;p C.new.respond_to?(:x)',
+    'FrozenError\n"can\'t modify frozen Class: C"\ntrue\n',
+  ],
+  [
+    'class C;def x;1;end;end;n=Object.new;n.define_singleton_method(:to_str){puts :convert;C.freeze;"x"};C.freeze;begin;p C.remove_method(*[:x]);rescue=>e;p e.class,e.message;end;p C.new.respond_to?(:x)',
+    'FrozenError\n"can\'t modify frozen Class: C"\ntrue\n',
+  ],
+  [
+    'class C;def x;1;end;end;n=Object.new;n.define_singleton_method(:to_str){puts :convert;"x"};C.freeze;begin;p C.remove_method(*[:absent]);rescue=>e;p e.class,e.message;end;p C.new.respond_to?(:x)',
+    'FrozenError\n"can\'t modify frozen Class: C"\ntrue\n',
+  ],
+  [
+    'class C;def x;1;end;end;n=Object.new;n.define_singleton_method(:to_str){puts :convert;raise "conversion"};C.freeze;begin;p C.remove_method(*[:absent]);rescue=>e;p e.class,e.message;end;p C.new.respond_to?(:x)',
+    'FrozenError\n"can\'t modify frozen Class: C"\ntrue\n',
+  ],
+  [
+    'class C;def x;1;end;end;n=Object.new;n.define_singleton_method(:to_str){puts :convert;C.freeze;"x"};C.freeze;begin;p C.remove_method(*[:absent]);rescue=>e;p e.class,e.message;end;p C.new.respond_to?(:x)',
+    'FrozenError\n"can\'t modify frozen Class: C"\ntrue\n',
+  ],
+  [
+    'class C;def x;1;end;end;n=Object.new;n.define_singleton_method(:to_str){puts :convert;"x"};C.freeze;begin;p C.remove_method(*["x"]);rescue=>e;p e.class,e.message;end;p C.new.respond_to?(:x)',
+    'FrozenError\n"can\'t modify frozen Class: C"\ntrue\n',
+  ],
+  [
+    'class C;def x;1;end;end;n=Object.new;n.define_singleton_method(:to_str){puts :convert;raise "conversion"};C.freeze;begin;p C.remove_method(*["x"]);rescue=>e;p e.class,e.message;end;p C.new.respond_to?(:x)',
+    'FrozenError\n"can\'t modify frozen Class: C"\ntrue\n',
+  ],
+  [
+    'class C;def x;1;end;end;n=Object.new;n.define_singleton_method(:to_str){puts :convert;C.freeze;"x"};C.freeze;begin;p C.remove_method(*["x"]);rescue=>e;p e.class,e.message;end;p C.new.respond_to?(:x)',
+    'FrozenError\n"can\'t modify frozen Class: C"\ntrue\n',
+  ],
+  [
+    'class C;def x;1;end;end;n=Object.new;n.define_singleton_method(:to_str){puts :convert;"x"};C.freeze;begin;p C.remove_method(*["brand_new_uninterned_749321"]);rescue=>e;p e.class,e.message;end;p C.new.respond_to?(:x)',
+    'NameError\n"method \'brand_new_uninterned_749321\' not defined in C"\ntrue\n',
+  ],
+  [
+    'class C;def x;1;end;end;n=Object.new;n.define_singleton_method(:to_str){puts :convert;raise "conversion"};C.freeze;begin;p C.remove_method(*["brand_new_uninterned_749321"]);rescue=>e;p e.class,e.message;end;p C.new.respond_to?(:x)',
+    'NameError\n"method \'brand_new_uninterned_749321\' not defined in C"\ntrue\n',
+  ],
+  [
+    'class C;def x;1;end;end;n=Object.new;n.define_singleton_method(:to_str){puts :convert;C.freeze;"x"};C.freeze;begin;p C.remove_method(*["brand_new_uninterned_749321"]);rescue=>e;p e.class,e.message;end;p C.new.respond_to?(:x)',
+    'NameError\n"method \'brand_new_uninterned_749321\' not defined in C"\ntrue\n',
+  ],
+  [
+    'class C;def x;1;end;end;n=Object.new;n.define_singleton_method(:to_str){puts :convert;"x"};C.freeze;begin;p C.remove_method(*[:x,:absent]);rescue=>e;p e.class,e.message;end;p C.new.respond_to?(:x)',
+    'FrozenError\n"can\'t modify frozen Class: C"\ntrue\n',
+  ],
+  [
+    'class C;def x;1;end;end;n=Object.new;n.define_singleton_method(:to_str){puts :convert;raise "conversion"};C.freeze;begin;p C.remove_method(*[:x,:absent]);rescue=>e;p e.class,e.message;end;p C.new.respond_to?(:x)',
+    'FrozenError\n"can\'t modify frozen Class: C"\ntrue\n',
+  ],
+  [
+    'class C;def x;1;end;end;n=Object.new;n.define_singleton_method(:to_str){puts :convert;C.freeze;"x"};C.freeze;begin;p C.remove_method(*[:x,:absent]);rescue=>e;p e.class,e.message;end;p C.new.respond_to?(:x)',
+    'FrozenError\n"can\'t modify frozen Class: C"\ntrue\n',
+  ],
+  [
+    'class C;def x;1;end;end;n=Object.new;n.define_singleton_method(:to_str){puts :convert;"x"};C.freeze;begin;p C.remove_method(*[n]);rescue=>e;p e.class,e.message;end;p C.new.respond_to?(:x)',
+    'convert\nFrozenError\n"can\'t modify frozen Class: C"\ntrue\n',
+  ],
+  [
+    'class C;def x;1;end;end;n=Object.new;n.define_singleton_method(:to_str){puts :convert;raise "conversion"};C.freeze;begin;p C.remove_method(*[n]);rescue=>e;p e.class,e.message;end;p C.new.respond_to?(:x)',
+    'convert\nRuntimeError\n"conversion"\ntrue\n',
+  ],
+  [
+    'class C;def x;1;end;end;n=Object.new;n.define_singleton_method(:to_str){puts :convert;C.freeze;"x"};C.freeze;begin;p C.remove_method(*[n]);rescue=>e;p e.class,e.message;end;p C.new.respond_to?(:x)',
+    'convert\nFrozenError\n"can\'t modify frozen Class: C"\ntrue\n',
+  ],
+  [
+    'class C;def x;1;end;end;n="native_fresh_871932";begin;nil;rescue=>e;end;C.freeze;begin;p C.remove_method(n);rescue=>e;p e.class,e.message;end',
+    'NameError\n"method \'native_fresh_871932\' not defined in C"\n',
+  ],
+  [
+    'class C;def x;1;end;end;n="native_fresh_871932";begin;nil;rescue=>e;end;C.freeze;begin;p C.remove_method(n.to_sym);rescue=>e;p e.class,e.message;end',
+    'NameError\n"method \'native_fresh_871932\' not defined in C"\n',
+  ],
+  [
+    'class C;def x;1;end;end;n="native_fresh_871932";begin;nil;rescue=>e;end;C.freeze;begin;p C.undef_method(n);rescue=>e;p e.class,e.message;end',
+    "NameError\n\"undefined method 'native_fresh_871932' for class 'C'\"\n",
+  ],
+  [
+    'class C;def x;1;end;end;n="native_fresh_871932";begin;nil;rescue=>e;end;C.freeze;begin;p C.undef_method(n.to_sym);rescue=>e;p e.class,e.message;end',
+    "NameError\n\"undefined method 'native_fresh_871932' for class 'C'\"\n",
+  ],
+  [
+    'class C;def x;1;end;end;n="native_fresh_871932";begin;n.to_sym;rescue=>e;end;C.freeze;begin;p C.remove_method(n);rescue=>e;p e.class,e.message;end',
+    'NameError\n"method \'native_fresh_871932\' not defined in C"\n',
+  ],
+  [
+    'class C;def x;1;end;end;n="native_fresh_871932";begin;n.to_sym;rescue=>e;end;C.freeze;begin;p C.remove_method(n.to_sym);rescue=>e;p e.class,e.message;end',
+    'NameError\n"method \'native_fresh_871932\' not defined in C"\n',
+  ],
+  [
+    'class C;def x;1;end;end;n="native_fresh_871932";begin;n.to_sym;rescue=>e;end;C.freeze;begin;p C.undef_method(n);rescue=>e;p e.class,e.message;end',
+    "NameError\n\"undefined method 'native_fresh_871932' for class 'C'\"\n",
+  ],
+  [
+    'class C;def x;1;end;end;n="native_fresh_871932";begin;n.to_sym;rescue=>e;end;C.freeze;begin;p C.undef_method(n.to_sym);rescue=>e;p e.class,e.message;end',
+    "NameError\n\"undefined method 'native_fresh_871932' for class 'C'\"\n",
+  ],
+  [
+    'class C;def x;1;end;end;n="native_fresh_871932";begin;n.to_sym.to_proc;rescue=>e;end;C.freeze;begin;p C.remove_method(n);rescue=>e;p e.class,e.message;end',
+    'FrozenError\n"can\'t modify frozen Class: C"\n',
+  ],
+  [
+    'class C;def x;1;end;end;n="native_fresh_871932";begin;n.to_sym.to_proc;rescue=>e;end;C.freeze;begin;p C.remove_method(n.to_sym);rescue=>e;p e.class,e.message;end',
+    'FrozenError\n"can\'t modify frozen Class: C"\n',
+  ],
+  [
+    'class C;def x;1;end;end;n="native_fresh_871932";begin;n.to_sym.to_proc;rescue=>e;end;C.freeze;begin;p C.undef_method(n);rescue=>e;p e.class,e.message;end',
+    'FrozenError\n"can\'t modify frozen Class: C"\n',
+  ],
+  [
+    'class C;def x;1;end;end;n="native_fresh_871932";begin;n.to_sym.to_proc;rescue=>e;end;C.freeze;begin;p C.undef_method(n.to_sym);rescue=>e;p e.class,e.message;end',
+    'FrozenError\n"can\'t modify frozen Class: C"\n',
+  ],
+  [
+    'class C;def x;1;end;end;n="native_fresh_871932";begin;Object.new.respond_to?(n);rescue=>e;end;C.freeze;begin;p C.remove_method(n);rescue=>e;p e.class,e.message;end',
+    'NameError\n"method \'native_fresh_871932\' not defined in C"\n',
+  ],
+  [
+    'class C;def x;1;end;end;n="native_fresh_871932";begin;Object.new.respond_to?(n);rescue=>e;end;C.freeze;begin;p C.remove_method(n.to_sym);rescue=>e;p e.class,e.message;end',
+    'NameError\n"method \'native_fresh_871932\' not defined in C"\n',
+  ],
+  [
+    'class C;def x;1;end;end;n="native_fresh_871932";begin;Object.new.respond_to?(n);rescue=>e;end;C.freeze;begin;p C.undef_method(n);rescue=>e;p e.class,e.message;end',
+    "NameError\n\"undefined method 'native_fresh_871932' for class 'C'\"\n",
+  ],
+  [
+    'class C;def x;1;end;end;n="native_fresh_871932";begin;Object.new.respond_to?(n);rescue=>e;end;C.freeze;begin;p C.undef_method(n.to_sym);rescue=>e;p e.class,e.message;end',
+    "NameError\n\"undefined method 'native_fresh_871932' for class 'C'\"\n",
+  ],
+  [
+    'class C;def x;1;end;end;n="native_fresh_871932";begin;Object.new.method(n);rescue=>e;end;C.freeze;begin;p C.remove_method(n);rescue=>e;p e.class,e.message;end',
+    'NameError\n"method \'native_fresh_871932\' not defined in C"\n',
+  ],
+  [
+    'class C;def x;1;end;end;n="native_fresh_871932";begin;Object.new.method(n);rescue=>e;end;C.freeze;begin;p C.remove_method(n.to_sym);rescue=>e;p e.class,e.message;end',
+    'NameError\n"method \'native_fresh_871932\' not defined in C"\n',
+  ],
+  [
+    'class C;def x;1;end;end;n="native_fresh_871932";begin;Object.new.method(n);rescue=>e;end;C.freeze;begin;p C.undef_method(n);rescue=>e;p e.class,e.message;end',
+    "NameError\n\"undefined method 'native_fresh_871932' for class 'C'\"\n",
+  ],
+  [
+    'class C;def x;1;end;end;n="native_fresh_871932";begin;Object.new.method(n);rescue=>e;end;C.freeze;begin;p C.undef_method(n.to_sym);rescue=>e;p e.class,e.message;end',
+    "NameError\n\"undefined method 'native_fresh_871932' for class 'C'\"\n",
+  ],
+  [
+    'class C;def x;1;end;end;n="native_fresh_871932";begin;C.instance_method(n);rescue=>e;end;C.freeze;begin;p C.remove_method(n);rescue=>e;p e.class,e.message;end',
+    'NameError\n"method \'native_fresh_871932\' not defined in C"\n',
+  ],
+  [
+    'class C;def x;1;end;end;n="native_fresh_871932";begin;C.instance_method(n);rescue=>e;end;C.freeze;begin;p C.remove_method(n.to_sym);rescue=>e;p e.class,e.message;end',
+    'NameError\n"method \'native_fresh_871932\' not defined in C"\n',
+  ],
+  [
+    'class C;def x;1;end;end;n="native_fresh_871932";begin;C.instance_method(n);rescue=>e;end;C.freeze;begin;p C.undef_method(n);rescue=>e;p e.class,e.message;end',
+    "NameError\n\"undefined method 'native_fresh_871932' for class 'C'\"\n",
+  ],
+  [
+    'class C;def x;1;end;end;n="native_fresh_871932";begin;C.instance_method(n);rescue=>e;end;C.freeze;begin;p C.undef_method(n.to_sym);rescue=>e;p e.class,e.message;end',
+    "NameError\n\"undefined method 'native_fresh_871932' for class 'C'\"\n",
+  ],
+  [
+    'class C;def x;1;end;end;n="native_fresh_871932";begin;Object.new.send(n);rescue=>e;end;C.freeze;begin;p C.remove_method(n);rescue=>e;p e.class,e.message;end',
+    'NameError\n"method \'native_fresh_871932\' not defined in C"\n',
+  ],
+  [
+    'class C;def x;1;end;end;n="native_fresh_871932";begin;Object.new.send(n);rescue=>e;end;C.freeze;begin;p C.remove_method(n.to_sym);rescue=>e;p e.class,e.message;end',
+    'NameError\n"method \'native_fresh_871932\' not defined in C"\n',
+  ],
+  [
+    'class C;def x;1;end;end;n="native_fresh_871932";begin;Object.new.send(n);rescue=>e;end;C.freeze;begin;p C.undef_method(n);rescue=>e;p e.class,e.message;end',
+    "NameError\n\"undefined method 'native_fresh_871932' for class 'C'\"\n",
+  ],
+  [
+    'class C;def x;1;end;end;n="native_fresh_871932";begin;Object.new.send(n);rescue=>e;end;C.freeze;begin;p C.undef_method(n.to_sym);rescue=>e;p e.class,e.message;end',
+    "NameError\n\"undefined method 'native_fresh_871932' for class 'C'\"\n",
+  ],
+  [
+    'class C;def x;1;end;end;n="native_fresh_871932";begin;Object.new.public_send(n);rescue=>e;end;C.freeze;begin;p C.remove_method(n);rescue=>e;p e.class,e.message;end',
+    'NameError\n"method \'native_fresh_871932\' not defined in C"\n',
+  ],
+  [
+    'class C;def x;1;end;end;n="native_fresh_871932";begin;Object.new.public_send(n);rescue=>e;end;C.freeze;begin;p C.remove_method(n.to_sym);rescue=>e;p e.class,e.message;end',
+    'NameError\n"method \'native_fresh_871932\' not defined in C"\n',
+  ],
+  [
+    'class C;def x;1;end;end;n="native_fresh_871932";begin;Object.new.public_send(n);rescue=>e;end;C.freeze;begin;p C.undef_method(n);rescue=>e;p e.class,e.message;end',
+    "NameError\n\"undefined method 'native_fresh_871932' for class 'C'\"\n",
+  ],
+  [
+    'class C;def x;1;end;end;n="native_fresh_871932";begin;Object.new.public_send(n);rescue=>e;end;C.freeze;begin;p C.undef_method(n.to_sym);rescue=>e;p e.class,e.message;end',
+    "NameError\n\"undefined method 'native_fresh_871932' for class 'C'\"\n",
+  ],
+  [
+    'class C;def x;1;end;end;n="native_fresh_871932";begin;C.define_method(n){1};rescue=>e;end;C.freeze;begin;p C.remove_method(n);rescue=>e;p e.class,e.message;end',
+    'FrozenError\n"can\'t modify frozen Class: C"\n',
+  ],
+  [
+    'class C;def x;1;end;end;n="native_fresh_871932";begin;C.define_method(n){1};rescue=>e;end;C.freeze;begin;p C.remove_method(n.to_sym);rescue=>e;p e.class,e.message;end',
+    'FrozenError\n"can\'t modify frozen Class: C"\n',
+  ],
+  [
+    'class C;def x;1;end;end;n="native_fresh_871932";begin;C.define_method(n){1};rescue=>e;end;C.freeze;begin;p C.undef_method(n);rescue=>e;p e.class,e.message;end',
+    'FrozenError\n"can\'t modify frozen Class: C"\n',
+  ],
+  [
+    'class C;def x;1;end;end;n="native_fresh_871932";begin;C.define_method(n){1};rescue=>e;end;C.freeze;begin;p C.undef_method(n.to_sym);rescue=>e;p e.class,e.message;end',
+    'FrozenError\n"can\'t modify frozen Class: C"\n',
+  ],
+  [
+    'class C;def x;1;end;end;n="native_fresh_871932";begin;C.alias_method(n,:x);rescue=>e;end;C.freeze;begin;p C.remove_method(n);rescue=>e;p e.class,e.message;end',
+    'FrozenError\n"can\'t modify frozen Class: C"\n',
+  ],
+  [
+    'class C;def x;1;end;end;n="native_fresh_871932";begin;C.alias_method(n,:x);rescue=>e;end;C.freeze;begin;p C.remove_method(n.to_sym);rescue=>e;p e.class,e.message;end',
+    'FrozenError\n"can\'t modify frozen Class: C"\n',
+  ],
+  [
+    'class C;def x;1;end;end;n="native_fresh_871932";begin;C.alias_method(n,:x);rescue=>e;end;C.freeze;begin;p C.undef_method(n);rescue=>e;p e.class,e.message;end',
+    'FrozenError\n"can\'t modify frozen Class: C"\n',
+  ],
+  [
+    'class C;def x;1;end;end;n="native_fresh_871932";begin;C.alias_method(n,:x);rescue=>e;end;C.freeze;begin;p C.undef_method(n.to_sym);rescue=>e;p e.class,e.message;end',
+    'FrozenError\n"can\'t modify frozen Class: C"\n',
+  ],
+  [
+    'class C;def x;1;end;end;n="native_fresh_871932";begin;C.alias_method(n,:absent);rescue=>e;end;C.freeze;begin;p C.remove_method(n);rescue=>e;p e.class,e.message;end',
+    'FrozenError\n"can\'t modify frozen Class: C"\n',
+  ],
+  [
+    'class C;def x;1;end;end;n="native_fresh_871932";begin;C.alias_method(n,:absent);rescue=>e;end;C.freeze;begin;p C.remove_method(n.to_sym);rescue=>e;p e.class,e.message;end',
+    'FrozenError\n"can\'t modify frozen Class: C"\n',
+  ],
+  [
+    'class C;def x;1;end;end;n="native_fresh_871932";begin;C.alias_method(n,:absent);rescue=>e;end;C.freeze;begin;p C.undef_method(n);rescue=>e;p e.class,e.message;end',
+    'FrozenError\n"can\'t modify frozen Class: C"\n',
+  ],
+  [
+    'class C;def x;1;end;end;n="native_fresh_871932";begin;C.alias_method(n,:absent);rescue=>e;end;C.freeze;begin;p C.undef_method(n.to_sym);rescue=>e;p e.class,e.message;end',
+    'FrozenError\n"can\'t modify frozen Class: C"\n',
+  ],
+  [
+    'class C;def x;1;end;end;n="native_fresh_871932";begin;C.const_set("FreshConstant871932",1);n="FreshConstant871932";rescue=>e;end;C.freeze;begin;p C.remove_method(n);rescue=>e;p e.class,e.message;end',
+    'FrozenError\n"can\'t modify frozen Class: C"\n',
+  ],
+  [
+    'class C;def x;1;end;end;n="native_fresh_871932";begin;C.const_set("FreshConstant871932",1);n="FreshConstant871932";rescue=>e;end;C.freeze;begin;p C.remove_method(n.to_sym);rescue=>e;p e.class,e.message;end',
+    'FrozenError\n"can\'t modify frozen Class: C"\n',
+  ],
+  [
+    'class C;def x;1;end;end;n="native_fresh_871932";begin;C.const_set("FreshConstant871932",1);n="FreshConstant871932";rescue=>e;end;C.freeze;begin;p C.undef_method(n);rescue=>e;p e.class,e.message;end',
+    'FrozenError\n"can\'t modify frozen Class: C"\n',
+  ],
+  [
+    'class C;def x;1;end;end;n="native_fresh_871932";begin;C.const_set("FreshConstant871932",1);n="FreshConstant871932";rescue=>e;end;C.freeze;begin;p C.undef_method(n.to_sym);rescue=>e;p e.class,e.message;end',
+    'FrozenError\n"can\'t modify frozen Class: C"\n',
+  ],
+  [
+    'class C;def x;1;end;end;n="native_fresh_871932";begin;Object.new.instance_variable_set("@fresh_871932",1);n="@fresh_871932";rescue=>e;end;C.freeze;begin;p C.remove_method(n);rescue=>e;p e.class,e.message;end',
+    'FrozenError\n"can\'t modify frozen Class: C"\n',
+  ],
+  [
+    'class C;def x;1;end;end;n="native_fresh_871932";begin;Object.new.instance_variable_set("@fresh_871932",1);n="@fresh_871932";rescue=>e;end;C.freeze;begin;p C.remove_method(n.to_sym);rescue=>e;p e.class,e.message;end',
+    'FrozenError\n"can\'t modify frozen Class: C"\n',
+  ],
+  [
+    'class C;def x;1;end;end;n="native_fresh_871932";begin;Object.new.instance_variable_set("@fresh_871932",1);n="@fresh_871932";rescue=>e;end;C.freeze;begin;p C.undef_method(n);rescue=>e;p e.class,e.message;end',
+    'FrozenError\n"can\'t modify frozen Class: C"\n',
+  ],
+  [
+    'class C;def x;1;end;end;n="native_fresh_871932";begin;Object.new.instance_variable_set("@fresh_871932",1);n="@fresh_871932";rescue=>e;end;C.freeze;begin;p C.undef_method(n.to_sym);rescue=>e;p e.class,e.message;end',
+    'FrozenError\n"can\'t modify frozen Class: C"\n',
+  ],
+  [
+    'class C;def x;1;end;end;n="native_fresh_871932";begin;C.define_method(n){1};C.remove_method(n);rescue=>e;end;C.freeze;begin;p C.remove_method(n);rescue=>e;p e.class,e.message;end',
+    'FrozenError\n"can\'t modify frozen Class: C"\n',
+  ],
+  [
+    'class C;def x;1;end;end;n="native_fresh_871932";begin;C.define_method(n){1};C.remove_method(n);rescue=>e;end;C.freeze;begin;p C.remove_method(n.to_sym);rescue=>e;p e.class,e.message;end',
+    'FrozenError\n"can\'t modify frozen Class: C"\n',
+  ],
+  [
+    'class C;def x;1;end;end;n="native_fresh_871932";begin;C.define_method(n){1};C.remove_method(n);rescue=>e;end;C.freeze;begin;p C.undef_method(n);rescue=>e;p e.class,e.message;end',
+    'FrozenError\n"can\'t modify frozen Class: C"\n',
+  ],
+  [
+    'class C;def x;1;end;end;n="native_fresh_871932";begin;C.define_method(n){1};C.remove_method(n);rescue=>e;end;C.freeze;begin;p C.undef_method(n.to_sym);rescue=>e;p e.class,e.message;end',
+    'FrozenError\n"can\'t modify frozen Class: C"\n',
+  ],
+  [
+    'class C;def x;1;end;end;n="native_fresh_871932";begin;C.undef_method(n);rescue=>e;end;C.freeze;begin;p C.remove_method(n);rescue=>e;p e.class,e.message;end',
+    'NameError\n"method \'native_fresh_871932\' not defined in C"\n',
+  ],
+  [
+    'class C;def x;1;end;end;n="native_fresh_871932";begin;C.undef_method(n);rescue=>e;end;C.freeze;begin;p C.remove_method(n.to_sym);rescue=>e;p e.class,e.message;end',
+    'NameError\n"method \'native_fresh_871932\' not defined in C"\n',
+  ],
+  [
+    'class C;def x;1;end;end;n="native_fresh_871932";begin;C.undef_method(n);rescue=>e;end;C.freeze;begin;p C.undef_method(n);rescue=>e;p e.class,e.message;end',
+    "NameError\n\"undefined method 'native_fresh_871932' for class 'C'\"\n",
+  ],
+  [
+    'class C;def x;1;end;end;n="native_fresh_871932";begin;C.undef_method(n);rescue=>e;end;C.freeze;begin;p C.undef_method(n.to_sym);rescue=>e;p e.class,e.message;end',
+    "NameError\n\"undefined method 'native_fresh_871932' for class 'C'\"\n",
+  ],
+  [
+    'class C;def x;1;end;end;n="native_fresh_871932";begin;C.remove_method(n);rescue=>e;end;C.freeze;begin;p C.remove_method(n);rescue=>e;p e.class,e.message;end',
+    'NameError\n"method \'native_fresh_871932\' not defined in C"\n',
+  ],
+  [
+    'class C;def x;1;end;end;n="native_fresh_871932";begin;C.remove_method(n);rescue=>e;end;C.freeze;begin;p C.remove_method(n.to_sym);rescue=>e;p e.class,e.message;end',
+    'NameError\n"method \'native_fresh_871932\' not defined in C"\n',
+  ],
+  [
+    'class C;def x;1;end;end;n="native_fresh_871932";begin;C.remove_method(n);rescue=>e;end;C.freeze;begin;p C.undef_method(n);rescue=>e;p e.class,e.message;end',
+    "NameError\n\"undefined method 'native_fresh_871932' for class 'C'\"\n",
+  ],
+  [
+    'class C;def x;1;end;end;n="native_fresh_871932";begin;C.remove_method(n);rescue=>e;end;C.freeze;begin;p C.undef_method(n.to_sym);rescue=>e;p e.class,e.message;end',
+    "NameError\n\"undefined method 'native_fresh_871932' for class 'C'\"\n",
+  ],
+  [
+    'class C;def x;1;end;end;n="new_unknown_name_749321";begin;C.remove_method(n);rescue=>e;p e.class,e.message;if e.is_a?(NameError);p e.name,e.name.class,e.name.equal?(n),e.name.frozen?;end;end',
+    'NameError\n"method \'new_unknown_name_749321\' not defined in C"\n"new_unknown_name_749321"\nString\ntrue\nfalse\n',
+  ],
+  [
+    'class C;def x;1;end;end;n="new_unknown_name_749321";C.freeze;begin;C.remove_method(n);rescue=>e;p e.class,e.message;if e.is_a?(NameError);p e.name,e.name.class,e.name.equal?(n),e.name.frozen?;end;end',
+    'NameError\n"method \'new_unknown_name_749321\' not defined in C"\n"new_unknown_name_749321"\nString\ntrue\nfalse\n',
+  ],
+  [
+    'class C;def x;1;end;end;n="new_unknown_name_749321";begin;C.undef_method(n);rescue=>e;p e.class,e.message;if e.is_a?(NameError);p e.name,e.name.class,e.name.equal?(n),e.name.frozen?;end;end',
+    'NameError\n"undefined method \'new_unknown_name_749321\' for class \'C\'"\n"new_unknown_name_749321"\nString\ntrue\nfalse\n',
+  ],
+  [
+    'class C;def x;1;end;end;n="new_unknown_name_749321";C.freeze;begin;C.undef_method(n);rescue=>e;p e.class,e.message;if e.is_a?(NameError);p e.name,e.name.class,e.name.equal?(n),e.name.frozen?;end;end',
+    'NameError\n"undefined method \'new_unknown_name_749321\' for class \'C\'"\n"new_unknown_name_749321"\nString\ntrue\nfalse\n',
+  ],
+  [
+    'class C;def x;1;end;end;n="new_unknown_name_749321";begin;C.remove_method(n.to_sym);rescue=>e;p e.class,e.message;if e.is_a?(NameError);p e.name,e.name.class,e.name.equal?(n),e.name.frozen?;end;end',
+    'NameError\n"method \'new_unknown_name_749321\' not defined in C"\n"new_unknown_name_749321"\nString\nfalse\ntrue\n',
+  ],
+  [
+    'class C;def x;1;end;end;n="new_unknown_name_749321";C.freeze;begin;C.remove_method(n.to_sym);rescue=>e;p e.class,e.message;if e.is_a?(NameError);p e.name,e.name.class,e.name.equal?(n),e.name.frozen?;end;end',
+    'NameError\n"method \'new_unknown_name_749321\' not defined in C"\n"new_unknown_name_749321"\nString\nfalse\ntrue\n',
+  ],
+  [
+    'class C;def x;1;end;end;n="new_unknown_name_749321";begin;C.undef_method(n.to_sym);rescue=>e;p e.class,e.message;if e.is_a?(NameError);p e.name,e.name.class,e.name.equal?(n),e.name.frozen?;end;end',
+    'NameError\n"undefined method \'new_unknown_name_749321\' for class \'C\'"\n"new_unknown_name_749321"\nString\nfalse\ntrue\n',
+  ],
+  [
+    'class C;def x;1;end;end;n="new_unknown_name_749321";C.freeze;begin;C.undef_method(n.to_sym);rescue=>e;p e.class,e.message;if e.is_a?(NameError);p e.name,e.name.class,e.name.equal?(n),e.name.frozen?;end;end',
+    'NameError\n"undefined method \'new_unknown_name_749321\' for class \'C\'"\n"new_unknown_name_749321"\nString\nfalse\ntrue\n',
+  ],
+  [
+    'class C;def x;1;end;end;n="new_unknown_name_749321";if false;:new_unknown_name_749321;end;begin;C.remove_method(n);rescue=>e;p e.class,e.message;if e.is_a?(NameError);p e.name,e.name.class,e.name.equal?(n),e.name.frozen?;end;end',
+    'NameError\n"method \'new_unknown_name_749321\' not defined in C"\n"new_unknown_name_749321"\nString\ntrue\nfalse\n',
+  ],
+  [
+    'class C;def x;1;end;end;n="new_unknown_name_749321";if false;:new_unknown_name_749321;end;C.freeze;begin;C.remove_method(n);rescue=>e;p e.class,e.message;if e.is_a?(NameError);p e.name,e.name.class,e.name.equal?(n),e.name.frozen?;end;end',
+    'NameError\n"method \'new_unknown_name_749321\' not defined in C"\n"new_unknown_name_749321"\nString\ntrue\nfalse\n',
+  ],
+  [
+    'class C;def x;1;end;end;n="new_unknown_name_749321";if false;:new_unknown_name_749321;end;begin;C.undef_method(n);rescue=>e;p e.class,e.message;if e.is_a?(NameError);p e.name,e.name.class,e.name.equal?(n),e.name.frozen?;end;end',
+    'NameError\n"undefined method \'new_unknown_name_749321\' for class \'C\'"\n"new_unknown_name_749321"\nString\ntrue\nfalse\n',
+  ],
+  [
+    'class C;def x;1;end;end;n="new_unknown_name_749321";if false;:new_unknown_name_749321;end;C.freeze;begin;C.undef_method(n);rescue=>e;p e.class,e.message;if e.is_a?(NameError);p e.name,e.name.class,e.name.equal?(n),e.name.frozen?;end;end',
+    'NameError\n"undefined method \'new_unknown_name_749321\' for class \'C\'"\n"new_unknown_name_749321"\nString\ntrue\nfalse\n',
+  ],
+  [
+    'class C;def x;1;end;end;n="new_unknown_name_749321";C.define_method(n){1};C.remove_method(n);begin;C.remove_method(n);rescue=>e;p e.class,e.message;if e.is_a?(NameError);p e.name,e.name.class,e.name.equal?(n),e.name.frozen?;end;end',
+    'NameError\n"method \'new_unknown_name_749321\' not defined in C"\n:new_unknown_name_749321\nSymbol\nfalse\ntrue\n',
+  ],
+  [
+    'class C;def x;1;end;end;n="new_unknown_name_749321";C.define_method(n){1};C.remove_method(n);C.freeze;begin;C.remove_method(n);rescue=>e;p e.class,e.message;if e.is_a?(NameError);p e.name,e.name.class,e.name.equal?(n),e.name.frozen?;end;end',
+    'FrozenError\n"can\'t modify frozen Class: C"\n',
+  ],
+  [
+    'class C;def x;1;end;end;n="new_unknown_name_749321";C.define_method(n){1};C.remove_method(n);begin;C.undef_method(n);rescue=>e;p e.class,e.message;if e.is_a?(NameError);p e.name,e.name.class,e.name.equal?(n),e.name.frozen?;end;end',
+    'NameError\n"undefined method \'new_unknown_name_749321\' for class \'C\'"\n"new_unknown_name_749321"\nString\nfalse\ntrue\n',
+  ],
+  [
+    'class C;def x;1;end;end;n="new_unknown_name_749321";C.define_method(n){1};C.remove_method(n);C.freeze;begin;C.undef_method(n);rescue=>e;p e.class,e.message;if e.is_a?(NameError);p e.name,e.name.class,e.name.equal?(n),e.name.frozen?;end;end',
+    'FrozenError\n"can\'t modify frozen Class: C"\n',
+  ],
+  [
+    'class C;def x;1;end;end;n="new_unknown_name_749321";o=Object.new;o.define_singleton_method(:to_str){C.define_method(n){1};C.remove_method(n);n};begin;C.remove_method(o);rescue=>e;p e.class,e.message;if e.is_a?(NameError);p e.name,e.name.class,e.name.equal?(n),e.name.frozen?;end;end',
+    'NameError\n"method \'new_unknown_name_749321\' not defined in C"\n:new_unknown_name_749321\nSymbol\nfalse\ntrue\n',
+  ],
+  [
+    'class C;def x;1;end;end;n="new_unknown_name_749321";o=Object.new;o.define_singleton_method(:to_str){C.define_method(n){1};C.remove_method(n);n};C.freeze;begin;C.remove_method(o);rescue=>e;p e.class,e.message;if e.is_a?(NameError);p e.name,e.name.class,e.name.equal?(n),e.name.frozen?;end;end',
+    'FrozenError\n"can\'t modify frozen Class: C"\n',
+  ],
+  [
+    'class C;def x;1;end;end;n="new_unknown_name_749321";o=Object.new;o.define_singleton_method(:to_str){C.define_method(n){1};C.remove_method(n);n};begin;C.undef_method(o);rescue=>e;p e.class,e.message;if e.is_a?(NameError);p e.name,e.name.class,e.name.equal?(n),e.name.frozen?;end;end',
+    'NameError\n"undefined method \'new_unknown_name_749321\' for class \'C\'"\n"new_unknown_name_749321"\nString\nfalse\ntrue\n',
+  ],
+  [
+    'class C;def x;1;end;end;n="new_unknown_name_749321";o=Object.new;o.define_singleton_method(:to_str){C.define_method(n){1};C.remove_method(n);n};C.freeze;begin;C.undef_method(o);rescue=>e;p e.class,e.message;if e.is_a?(NameError);p e.name,e.name.class,e.name.equal?(n),e.name.frozen?;end;end',
+    'FrozenError\n"can\'t modify frozen Class: C"\n',
+  ],
+  ['class C;def x;1;end;end;t=C;t.freeze;begin;p t.remove_method(*[]);rescue=>e;p e.class,e.message;end', 'C\n'],
+  [
+    'class C;def x;1;end;end;t=C;t.freeze;begin;p t.remove_method(*[:x]);rescue=>e;p e.class,e.message;end',
+    'FrozenError\n"can\'t modify frozen Class: C"\n',
+  ],
+  [
+    'class C;def x;1;end;end;t=C;t.freeze;begin;p t.remove_method(*["x"]);rescue=>e;p e.class,e.message;end',
+    'FrozenError\n"can\'t modify frozen Class: C"\n',
+  ],
+  [
+    'class C;def x;1;end;end;t=C;t.freeze;begin;p t.remove_method(*["new_unknown_name_95147"]);rescue=>e;p e.class,e.message;end',
+    'NameError\n"method \'new_unknown_name_95147\' not defined in C"\n',
+  ],
+  ['module C;def x;1;end;end;t=C;t.freeze;begin;p t.remove_method(*[]);rescue=>e;p e.class,e.message;end', 'C\n'],
+  [
+    'module C;def x;1;end;end;t=C;t.freeze;begin;p t.remove_method(*[:x]);rescue=>e;p e.class,e.message;end',
+    'FrozenError\n"can\'t modify frozen Module: C"\n',
+  ],
+  [
+    'module C;def x;1;end;end;t=C;t.freeze;begin;p t.remove_method(*["x"]);rescue=>e;p e.class,e.message;end',
+    'FrozenError\n"can\'t modify frozen Module: C"\n',
+  ],
+  [
+    'module C;def x;1;end;end;t=C;t.freeze;begin;p t.remove_method(*["new_unknown_name_95147"]);rescue=>e;p e.class,e.message;end',
+    'NameError\n"method \'new_unknown_name_95147\' not defined in C"\n',
+  ],
+  [
+    'class C;def self.x;1;end;end;t=C.singleton_class;t.freeze;begin;p t.remove_method(*[]);rescue=>e;p e.class,e.message;end',
+    '#<Class:C>\n',
+  ],
+  [
+    'class C;def self.x;1;end;end;t=C.singleton_class;t.freeze;begin;p t.remove_method(*[:x]);rescue=>e;p e.class,e.message;end',
+    'FrozenError\n"can\'t modify frozen Class: C"\n',
+  ],
+  [
+    'class C;def self.x;1;end;end;t=C.singleton_class;t.freeze;begin;p t.remove_method(*["x"]);rescue=>e;p e.class,e.message;end',
+    'FrozenError\n"can\'t modify frozen Class: C"\n',
+  ],
+  [
+    'class C;def self.x;1;end;end;t=C.singleton_class;t.freeze;begin;p t.remove_method(*["new_unknown_name_95147"]);rescue=>e;p e.class,e.message;end',
+    'NameError\n"method \'new_unknown_name_95147\' not defined in #<Class:C>"\n',
+  ],
+  [
+    'class C;end;:fresh_name_643721;C.freeze;begin;C.remove_method("fresh_name_643721");rescue=>e;p e.class;end',
+    'NameError\n',
+  ],
+  [
+    'class C;end;v=false && :fresh_name_643721;C.freeze;begin;C.remove_method("fresh_name_643721");rescue=>e;p e.class;end',
+    'FrozenError\n',
+  ],
+  [
+    'class C;end;v=true || :fresh_name_643721;C.freeze;begin;C.remove_method("fresh_name_643721");rescue=>e;p e.class;end',
+    'FrozenError\n',
+  ],
+  [
+    'class C;end;v=false || :fresh_name_643721;C.freeze;begin;C.remove_method("fresh_name_643721");rescue=>e;p e.class;end',
+    'FrozenError\n',
+  ],
+  [
+    'class C;end;p [:fresh_name_643721];C.freeze;begin;C.remove_method("fresh_name_643721");rescue=>e;p e.class;end',
+    '[:fresh_name_643721]\nFrozenError\n',
+  ],
+  [
+    'class C;end;[:fresh_name_643721];C.freeze;begin;C.remove_method("fresh_name_643721");rescue=>e;p e.class;end',
+    'NameError\n',
+  ],
+  [
+    'class C;end;if false; :fresh_name_643721;end;C.freeze;begin;C.remove_method("fresh_name_643721");rescue=>e;p e.class;end',
+    'NameError\n',
+  ],
+  [
+    'class C;end;if true; :fresh_name_643721;end;C.freeze;begin;C.remove_method("fresh_name_643721");rescue=>e;p e.class;end',
+    'NameError\n',
+  ],
+  [
+    'class C;end;nil && :fresh_name_643721;C.freeze;begin;C.remove_method("fresh_name_643721");rescue=>e;p e.class;end',
+    'NameError\n',
+  ],
+  [
+    'class C;end;false && :fresh_name_643721;C.freeze;begin;C.remove_method("fresh_name_643721");rescue=>e;p e.class;end',
+    'NameError\n',
+  ],
+  [
+    'class C;end;true || :fresh_name_643721;C.freeze;begin;C.remove_method("fresh_name_643721");rescue=>e;p e.class;end',
+    'NameError\n',
+  ],
+  [
+    'class C;end;false || :fresh_name_643721;C.freeze;begin;C.remove_method("fresh_name_643721");rescue=>e;p e.class;end',
+    'NameError\n',
+  ],
+  [
+    'class C;end;def f;:fresh_name_643721;end;C.freeze;begin;C.remove_method("fresh_name_643721");rescue=>e;p e.class;end',
+    'FrozenError\n',
+  ],
+  [
+    'class C;end;if false;def fresh_name_643721;end;end;C.freeze;begin;C.remove_method("fresh_name_643721");rescue=>e;p e.class;end',
+    'FrozenError\n',
+  ],
+  [
+    'class C;end;class X;def fresh_name_643721;end;end;C.freeze;begin;C.remove_method("fresh_name_643721");rescue=>e;p e.class;end',
+    'FrozenError\n',
+  ],
+  [
+    'class C;end;while false;:fresh_name_643721;end;C.freeze;begin;C.remove_method("fresh_name_643721");rescue=>e;p e.class;end',
+    'NameError\n',
+  ],
+  [
+    'class C;end;if false;p :fresh_name_643721;end;C.freeze;begin;C.remove_method("fresh_name_643721");rescue=>e;p e.class;end',
+    'NameError\n',
+  ],
+  [
+    'class C;end;if true;1;else;p :fresh_name_643721;end;C.freeze;begin;C.remove_method("fresh_name_643721");rescue=>e;p e.class;end',
+    'NameError\n',
+  ],
+] as const;
+
+test.each(nativeMissingArgsAndRemovalCases)(
+  'Missing-handler arguments and method removal preserve Ruby metadata and staging: %s',
   (source, stdout) => {
     expect(run(source)).toMatchObject({ kind: 'executed', stdout, uncaughtException: undefined });
   }

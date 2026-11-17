@@ -39,6 +39,7 @@ import {
   undefinedMethodError,
 } from './errors';
 import { hashGet, hashSet, hashSetStored } from './hashes';
+import { internId } from './internedIds';
 import { builtinEncoding } from './libEncoding';
 import { aliasedMethod } from './libMeta';
 import { makeRational } from './libRational';
@@ -713,6 +714,7 @@ export function ivarGet(self: Value, name: string): Value {
 }
 
 export function ivarSet(self: Value, name: string, value: Value): void {
+  internId(name);
   if (!(self instanceof RBasic)) {
     throw frozenError(self, runToEnd(inspect(self)));
   }
@@ -856,6 +858,7 @@ export function missingConstant(module: RClass, name: string, scoped = false): n
 }
 
 export function constSet(module: RClass, name: string, value: Value, row = rt().currentRow): void {
+  internId(name);
   assertMutableClass(module);
   assertNoDefinitionHook(module, 'const');
   if (module.constants.has(name)) {
@@ -1635,6 +1638,7 @@ const SINGLETON_METHOD_HOOKS = new Set([
 ]);
 
 export function addMethod(owner: RClass, method: RMethod): void {
+  internId(method.name);
   assertMutableClass(owner);
   if (method.name === 'respond_to_missing?' && !owner.isSingleton && method.body.kind !== 'visibility')
     method.visibility = 'private';
@@ -1661,7 +1665,7 @@ export function assertNoDefinitionHook(owner: RClass, action: 'added' | 'removed
 
 export function assertMutableClass(owner: RClass): void {
   const target = owner.attached instanceof RBasic ? owner.attached : owner;
-  if (target.frozen)
+  if (owner.frozen || target.frozen)
     throw frozenError(target, target instanceof RClass ? (target.name ?? '') : runToEnd(inspect(target)));
 }
 
@@ -1871,7 +1875,7 @@ export function* callMethod(
   const method = classOf(recv).findMethod(name);
   if (!method) return yield* callMethodMissing(recv, name, args, keywords, block, options);
   if (recv instanceof RClass && !recv.isModule && name === 'module_function' && method.owner === rt().c.Module)
-    methodMissing(recv, name, options);
+    methodMissing(recv, name, options, undefined, missingMethodArguments(args, keywords));
   const reflectedMissing = options.publicOnly && (method.superName ?? method.name) === 'method_missing';
   if (
     !reflectedMissing &&
@@ -1901,13 +1905,17 @@ function* callMethodMissing(
 ): Gen {
   rt().missingReason = reason;
   if (name === 'method_missing' && options.publicOnly)
-    raiseMethodMissing(recv, keywords ? [...args, keywords] : args, reason);
+    raiseMethodMissing(recv, missingMethodArguments(args, keywords), reason);
   const handler = classOf(recv).findMethod('method_missing');
   if (name === 'method_missing' && (reason === 'super' || !handler))
     throw new UnsupportedFeatureError('既定ハンドラがない method_missing のフォールバック');
   if (handler && !isCoreMethod(handler, rt().c.BasicObject, 'method_missing'))
     return yield* invoke(handler, recv, [RSymbol.fromKey(name), ...args], keywords, block, options.used ?? true);
-  methodMissing(recv, name, options, reason);
+  methodMissing(recv, name, options, reason, missingMethodArguments(args, keywords));
+}
+
+function missingMethodArguments(args: Value[], keywords: RHash | undefined): Value[] {
+  return keywords ? [...args, keywords] : args;
 }
 
 export function raiseMethodMissing(recv: Value, args: Value[], reason?: MissingReason): never {
@@ -1915,18 +1923,27 @@ export function raiseMethodMissing(recv: Value, args: Value[], reason?: MissingR
   const name = args[0];
   if (!(name instanceof RSymbol))
     throw argumentError(`method name must be a Symbol but ${className(realClassOf(name))} is given`);
-  methodMissing(recv, name.key, {}, reason);
+  methodMissing(recv, name.key, {}, reason, args.slice(1));
 }
 
-export function methodMissing(recv: Value, name: string, options: CallOptions, reason?: MissingReason): never {
+export function methodMissing(
+  recv: Value,
+  name: string,
+  options: CallOptions,
+  reason?: MissingReason,
+  args: Value[] = []
+): never {
   rt().missingReason = reason ?? (options.vcall ? 'vcall' : undefined);
+  let message: string;
   if (reason === 'private' || reason === 'protected')
-    throw noMethodError(`${reason} method '${name}' called for ${receiverDescription(recv)}`, recv, name);
-  if (reason === 'super')
-    throw noMethodError(`super: no superclass method '${name}' for ${receiverDescription(recv)}`, recv, name);
-  if (options.vcall || reason === 'vcall')
+    message = `${reason} method '${name}' called for ${receiverDescription(recv)}`;
+  else if (reason === 'super') message = `super: no superclass method '${name}' for ${receiverDescription(recv)}`;
+  else if (options.vcall || reason === 'vcall')
     throw nameError(`undefined local variable or method '${name}' for ${receiverDescription(recv)}`, recv, name);
-  throw noMethodError(`undefined method '${name}' for ${receiverDescription(recv)}`, recv, name);
+  else message = `undefined method '${name}' for ${receiverDescription(recv)}`;
+  const error = noMethodError(message, recv, name);
+  error.exception.internal!.set('args', arr(args));
+  throw error;
 }
 
 /** Calls a method that lookup found. */

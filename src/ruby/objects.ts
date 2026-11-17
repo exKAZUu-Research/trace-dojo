@@ -1,6 +1,7 @@
 import type { TurtleState } from '../interpreter/turtleWorld';
 import type { BlockDef, MethodDef } from './ast';
 import { hierarchyEntries, type HierarchyEntry, initializeHierarchy } from './classHierarchy';
+import { internId } from './internedIds';
 import type { NativeSignature } from './nativeSignatures';
 import { rt } from './runtime';
 
@@ -286,9 +287,16 @@ export interface RMethod {
   lookupOccurrence?: HierarchyEntry;
 }
 
-/** A class or module. */
+class MethodTable extends Map<string, RMethod> {
+  override set(name: string, method: RMethod): this {
+    internId(name);
+    if (method.body.kind === 'reader' || method.body.kind === 'writer') internId(method.body.ivar);
+    return super.set(name, method);
+  }
+}
+
 export class RClass extends RBasic {
-  readonly methods = new Map<string, RMethod>();
+  readonly methods = new MethodTable();
   readonly constants = new Map<string, Value>();
   readonly constantRows = new Map<string, number>();
   readonly classVariables = new Map<string, Value>();

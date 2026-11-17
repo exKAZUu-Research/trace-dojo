@@ -1,5 +1,5 @@
 import { copyHierarchy, copySingletonHierarchy, includeHierarchy } from './classHierarchy';
-// code-gauge-allow-file fileNcss 921 -- Object lifecycle and exception construction share representation and state; splitting registration by size would scatter that concern.
+// code-gauge-allow-file fileNcss 922 -- Object lifecycle and exception construction share representation and state; splitting registration by size would scatter that concern.
 import {
   anonymousClassName,
   anyToS,
@@ -20,6 +20,7 @@ import {
 import { def, sdef } from './define';
 import { argumentCountError, argumentError, frozenError, nameError, rubyError, typeError } from './errors';
 import { hashSet } from './hashes';
+import { internId } from './internedIds';
 import { addMethod, callMethod, callProc, type Gen, invoke, ivarSet, makeBlock, requireBlock } from './interp';
 import { curry, makeEnumerator, sizedEnumerator } from './libEnumerator';
 import { writeStderrLine } from './libIo';
@@ -799,6 +800,7 @@ function* defineAttributes(self: RClass, names: Value[], reader: boolean, writer
   const defined: Value[] = [];
   for (const value of names) {
     const name = yield* symbolName(value);
+    internId(name);
     if (!/^[A-Za-z_\u0080-￿][\w\u0080-￿]*$/u.test(name)) {
       throw nameError(`invalid attribute name '${name}'`, self, name);
     }

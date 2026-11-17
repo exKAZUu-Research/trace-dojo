@@ -61,6 +61,7 @@ import { charIndex, regexpByteIndex, unitIndex } from './regexpPositions';
 import {
   compileHostRegexp,
   hasRegexpProperty,
+  isLinearHostRegexp,
   regexpSyntaxReason,
   requiresNativeCaptureParity,
   supportsRegexpByteView,
@@ -600,7 +601,7 @@ export function makeRegexp(source: string, options: RegexpOptions): RObject {
     multiline: options.multiline ?? false,
     extended: options.extended ?? false,
     js,
-    safeNative: triviallyLinearRegexp(source),
+    safeNative: isLinearHostRegexp(translated),
   };
   regexp.data = data;
   return regexp;
@@ -645,45 +646,6 @@ export function normalizeSlashLiteralSource(source: string): string {
   );
 }
 
-// code-gauge-allow functionCognitiveComplexity 28 -- Native execution is permitted only after excluding every construct that can introduce costly backtracking.
-// code-gauge-allow functionNcss 35 -- The classifier scans once while tracking classes, groups, alternatives, and quantifiers.
-function triviallyLinearRegexp(source: string): boolean {
-  let inClass = false;
-  let quantifier = -1;
-  let alternation = false;
-  let grouped = false;
-  for (let index = 0; index < source.length; index++) {
-    const char = source[index];
-    if (char === '\\') {
-      const next = source[++index];
-      if (next && /[1-9kg]/.test(next)) return false;
-      continue;
-    }
-    if (char === '[') {
-      inClass = true;
-      continue;
-    }
-    if (char === ']') {
-      inClass = false;
-      continue;
-    }
-    if (inClass) continue;
-    if (char === '{' || (char === '(' && source[index + 1] === '?')) return false;
-    alternation ||= char === '|';
-    grouped ||= char === '(';
-    if (!'*+?'.includes(char)) continue;
-    if (quantifier >= 0) return false;
-    quantifier = index;
-  }
-  if (quantifier < 0) return !alternation || !grouped;
-  if (alternation) return false;
-  const tail = source.slice(quantifier + 1).replaceAll(')', '');
-  return (
-    tail === '' ||
-    ((tail === '$' || tail === String.raw`\z`) && (source.startsWith('^') || source.startsWith(String.raw`\A`)))
-  );
-}
-
 export function isRegexp(value: Value): value is RObject {
   return value instanceof RObject && value.cls.isSubclassOf(rt().c.Regexp);
 }
@@ -725,8 +687,9 @@ export function execAt(
   rt().spend();
   const startUnit = unitIndex(text, start);
   js.lastIndex = startUnit;
+  const directWork = Math.max(1, data.translatedSource.length) * Math.max(1, text.length - startUnit);
   const result =
-    data.safeNative || (text.length <= 8 && data.source.length <= 16)
+    data.safeNative && directWork <= LIMITS.maxOperations
       ? js.exec(text)
       : execWithinBudget(data, js, text, binaryMatch, anchored);
   const work =

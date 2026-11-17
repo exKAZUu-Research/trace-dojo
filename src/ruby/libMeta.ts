@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 598 -- Reflection and encoded constant lookup share representation and state; splitting registration by size would scatter that concern.
+// code-gauge-allow-file fileNcss 611 -- Reflection and encoded constant lookup share representation and state; splitting registration by size would scatter that concern.
 import type { Params } from './ast';
 import { prependHierarchy } from './classHierarchy';
 import { getClassVariable, hasClassVariable, setClassVariable } from './classVariables';
@@ -8,6 +8,7 @@ import { EncodedStringBuilder } from './encodedStringJoin';
 import { argumentError, frozenError, nameError, rubyError, typeError, undefinedMethodError } from './errors';
 import { validateKeywords } from './exceptionOption';
 import { digest, hashGet } from './hashes';
+import { internId } from './internedIds';
 import {
   addMethod,
   assertMutableClass,
@@ -27,7 +28,7 @@ import {
   requireBlock,
 } from './interp';
 import { procArity } from './libObject';
-import { inspectStringEncoding, symbolFromString, symbolString } from './libString';
+import { inspectStringEncoding, symbolFromString, symbolNameString, symbolString } from './libString';
 import { nativeOwners } from './nativeOwners';
 import { type NativeSignature, nativeSignatures } from './nativeSignatures';
 import {
@@ -68,15 +69,21 @@ for (const owner of ['Method', 'UnboundMethod']) {
   });
 }
 
-export function* methodKeyOf(value: Value): Gen<string> {
-  return (yield* symbolNameOf(value, true)).key;
+export function* methodKeyOf(value: Value, intern = false): Gen<string> {
+  const name = (yield* symbolNameOf(value, true)).key;
+  if (intern) internId(name);
+  return name;
 }
 
 export function* symbolNameOf(value: Value, identifier = false): Gen<RSymbol> {
-  if (value instanceof RSymbol) return value;
-  if (value instanceof RString) return identifier ? identifierSymbol(value) : symbolFromString(value);
+  const input = yield* symbolNameInput(value);
+  return input instanceof RSymbol ? input : identifier ? identifierSymbol(input) : symbolFromString(input);
+}
+
+function* symbolNameInput(value: Value): Gen<RSymbol | RString> {
+  if (value instanceof RSymbol || value instanceof RString) return value;
   const converted = yield* tryImplicitConversion(value, 'to_str');
-  if (converted instanceof RString) return identifier ? identifierSymbol(converted) : symbolFromString(converted);
+  if (converted instanceof RString) return converted;
   if (converted !== undefined && converted !== NIL) {
     const name = realClassOf(value).name;
     throw typeError(`can't convert ${name} to String (${name}#to_str gives ${realClassOf(converted).name})`);
@@ -671,7 +678,7 @@ def('Kernel', 'define_singleton_method', [1, 2], function* (self, args, block) {
 // Defining methods -----------------------------------------------------------------------------------------------------
 
 function* defineMethodFrom(owner: RClass, args: Value[], block: RProc | undefined, visibility: Visibility): Gen {
-  const name = yield* methodKeyOf(args[0]);
+  const name = yield* methodKeyOf(args[0], true);
   if (!owner.isSingleton && PRIVATE_METHOD_NAMES.has(name)) visibility = 'private';
   const body =
     args.length > 1
@@ -712,7 +719,7 @@ def('Module', 'define_method', [1, 2], function* (self: RClass, args, block) {
   return result;
 });
 def('Module', 'alias_method', 2, function* (self: RClass, [newName, oldName]) {
-  const name = yield* methodKeyOf(newName);
+  const name = yield* methodKeyOf(newName, true);
   const old = yield* methodKeyOf(oldName);
   const method = self.findMethod(old);
   if (!method) throw undefinedMethodError(self, old);
@@ -724,9 +731,8 @@ def('Module', 'alias_method', 2, function* (self: RClass, [newName, oldName]) {
   return sym(name);
 });
 def('Module', 'remove_method', [0, -1], function* (self: RClass, names) {
-  assertMutableClass(self);
   for (const value of names) {
-    const name = yield* methodKeyOf(value);
+    const name = yield* methodRemovalKey(self, value, 'remove');
     const method = self.methods.get(name);
     if (!method || method.body.kind === 'undefined') {
       throw nameError(`method '${name}' not defined in ${className(self)}`, self, name);
@@ -739,14 +745,32 @@ def('Module', 'remove_method', [0, -1], function* (self: RClass, names) {
 });
 def('Module', 'undef_method', [0, -1], function* (self: RClass, names) {
   for (const value of names) {
-    const name = yield* methodKeyOf(value);
+    const name = yield* methodRemovalKey(self, value, 'undef');
     if (!self.findMethod(name)) {
-      throw undefinedMethodError(self, name);
+      const error = undefinedMethodError(self, name);
+      error.exception.internal!.set('name', symbolNameString(sym(name)));
+      throw error;
     }
     addMethod(self, { name, owner: self, visibility: 'public', body: { kind: 'undefined' } });
   }
   return self;
 });
+function* methodRemovalKey(owner: RClass, value: Value, operation: 'remove' | 'undef'): Gen<string> {
+  const input = yield* symbolNameInput(value);
+  const symbol = input instanceof RSymbol ? input : identifierSymbol(input);
+  const name = symbol.key;
+  if (!rt().internedIds.has(name)) {
+    const error =
+      operation === 'remove'
+        ? nameError(`method '${name}' not defined in ${className(owner)}`, owner, name)
+        : undefinedMethodError(owner, name);
+    error.exception.internal!.set('name', input instanceof RString ? input : symbolNameString(input));
+    throw error;
+  }
+  assertMutableClass(owner);
+  return name;
+}
+
 function reflectedMethod(self: RClass, name: string, inherit: boolean): RMethod | undefined {
   const method = inherit ? self.findMethod(name) : self.methods.get(name);
   return method?.body.kind === 'undefined' ? undefined : method;

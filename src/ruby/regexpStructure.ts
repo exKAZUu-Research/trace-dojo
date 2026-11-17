@@ -1,3 +1,4 @@
+// code-gauge-allow-file fileNcss 442 -- Ruby source validation and host execution proofs share their regexp AST models and structural invariants.
 import { type AST, RegExpParser, RegExpSyntaxError, visitRegExpAST } from '@eslint-community/regexpp';
 import {
   type AlternativeNode,
@@ -248,6 +249,69 @@ export function validateRegexpStructure(source: string): void {
     if (error instanceof RegExpSyntaxError) throw new UnsupportedFeatureError('正規表現の構文の検証');
     throw error;
   }
+}
+
+export function isLinearHostRegexp(source: string): boolean {
+  try {
+    const pattern = new RegExpParser().parsePattern(source, 0, source.length, { unicode: true });
+    return pattern.alternatives.every((alternative) => linearHostAlternative(alternative.elements));
+  } catch {
+    return false;
+  }
+}
+
+function linearHostAlternative(elements: AST.Element[]): boolean {
+  const flat = flattenHostElements(elements);
+  if (!flat) return false;
+  const repetitions = flat.filter((element) => element.type === 'Quantifier');
+  if (repetitions.length === 0) return flat.every((element) => linearHostAtom(element) || linearHostBoundary(element));
+  if (repetitions.length !== 1) return false;
+  const repetition = repetitions[0];
+  if (!linearHostAtom(repetition.element)) return false;
+  const position = flat.indexOf(repetition);
+  const prefix = flat.slice(0, position);
+  const suffix = flat.slice(position + 1);
+  if (
+    !prefix.every((element) => linearHostAtom(element) || linearHostBoundary(element)) ||
+    !suffix.every(linearHostBoundary)
+  )
+    return false;
+  return (
+    prefix.some((element) => element.raw === String.raw`(?<![\s\S])`) || (repetition.min <= 1 && suffix.length === 0)
+  );
+}
+
+function flattenHostElements(elements: AST.Element[]): AST.Element[] | undefined {
+  const result: AST.Element[] = [];
+  for (const element of elements) {
+    if (element.type !== 'Group' && element.type !== 'CapturingGroup') {
+      result.push(element);
+      continue;
+    }
+    if (element.alternatives.length !== 1) return undefined;
+    const nested = flattenHostElements(element.alternatives[0].elements);
+    if (!nested) return undefined;
+    result.push(...nested);
+  }
+  return result;
+}
+
+function linearHostAtom(element: AST.Element): boolean {
+  if (element.type === 'Character' || element.type === 'CharacterClass' || element.type === 'CharacterSet') return true;
+  if ((element.type === 'Group' || element.type === 'CapturingGroup') && element.alternatives.length === 1) {
+    const elements = element.alternatives[0].elements;
+    return elements.length === 1 && linearHostAtom(elements[0]);
+  }
+  return false;
+}
+
+function linearHostBoundary(element: AST.Element): boolean {
+  return (
+    element.type === 'Assertion' &&
+    ((element.kind !== 'lookahead' && element.kind !== 'lookbehind') ||
+      element.raw === String.raw`(?<![\s\S])` ||
+      element.raw === String.raw`(?![\s\S])`)
+  );
 }
 
 export function compileHostRegexp(source: string, flags: string): RegExp {

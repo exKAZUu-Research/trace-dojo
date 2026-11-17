@@ -1,6 +1,7 @@
 import { hierarchyEntries, type HierarchyEntry } from './classHierarchy';
 import { className } from './conversions';
 import { frozenError, nameError, rubyError } from './errors';
+import { internId } from './internedIds';
 import { identifierKeyString, inspectStringEncoding } from './libString';
 import { RBasic, RClass, type RString, type Value } from './objects';
 import { rt } from './runtime';
@@ -13,6 +14,7 @@ export function getClassVariable(holder: RClass, name: string): Value {
 }
 
 export function setClassVariable(holder: RClass, name: string, value: Value): void {
+  internId(name);
   const resolved = classVariableOwner(holder, name);
   const owner = resolved ?? holder;
   if (owner.frozen || (owner.isSingleton && owner.attached instanceof RBasic && owner.attached.frozen))
