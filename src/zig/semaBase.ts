@@ -30,6 +30,7 @@ import {
 import { FunctionInstance } from './functions';
 import { MemoryFault, UNDEFINED_MEMORY } from './memoryFault';
 import { type Frame, ZigPanic } from './runtime';
+import { singleValueOf } from './singleValue';
 import {
   arrayOf,
   BOOL,
@@ -63,6 +64,7 @@ import {
 import { aggregateFacts, fieldFacts, staticResultOf, type ValueFacts, valueFactsOf } from './valueFacts';
 import {
   arrayPointerView,
+  copyZeroArray,
   type EnumLiteral,
   ErrorValue,
   FnValue,
@@ -77,6 +79,7 @@ import {
   Some,
   type Value,
   ZArray,
+  zeroArray,
   ZStruct,
   ZUnion,
 } from './values';
@@ -1397,17 +1400,21 @@ export function valueEvaluators(args: readonly TExpr[]): TExpr['eval'][] {
 
 export function copyForFrame(frame: Frame, value: Value, type: Type): Value {
   if (!(type.kind === 'struct' && type.namespace.internal)) frame.runtime.reserveStorage(valueSlots(type));
-  return copyForStorage(value);
+  const singleton = type.kind === 'array' ? singleValueOf(type, () => frame.runtime.spend()) : undefined;
+  return copyForStorage(singleton ? singleton.value : value);
 }
 
 /** A value about to be stored, whose aggregates must not be shared with the value it came from. */
 export function copyForStorage(value: Value): Value {
   if (value instanceof ZArray)
-    return new ZArray(
-      value.values(value.hasSentinel).map((slot) => copyForStorage(slot)),
-      0,
-      value.lengthValue,
-      value.hasSentinel
+    return (
+      copyZeroArray(value, copyForStorage) ??
+      new ZArray(
+        value.values(value.hasSentinel).map((slot) => copyForStorage(slot)),
+        0,
+        value.lengthValue,
+        value.hasSentinel
+      )
     );
   if (value instanceof ZStruct) return new ZStruct(value.slots.map((slot) => copyForStorage(slot)));
   if (value instanceof ZUnion) return new ZUnion(value.tag, copyForStorage(value.slots[0]));
@@ -1428,7 +1435,7 @@ export function undefinedValue(type: Type): Value {
   return buildUndefinedValue(type);
 }
 
-// code-gauge-allow functionNcss 32 -- Mirrors the value shapes for every supported type.
+// code-gauge-allow functionNcss 35 -- Mirrors the value shapes for every supported type.
 function buildUndefinedValue(type: Type): Value {
   switch (type.kind) {
     case 'int': {
@@ -1441,6 +1448,8 @@ function buildUndefinedValue(type: Type): Value {
       return true;
     }
     case 'array': {
+      const child = singleValueOf(type.child, () => {});
+      if (child) return zeroArray(type.length, type.sentinel !== undefined, child.value);
       return newArray(
         Array.from({ length: Number(type.length) }, () => buildUndefinedValue(type.child)),
         type.sentinel

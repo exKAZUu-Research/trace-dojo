@@ -1,7 +1,7 @@
 import { alignOf } from './layout';
 import { undefinedValue } from './semaBase';
 import type { Type } from './types';
-import { registerStorageLocation, Slice, type Slots, storageLocation, type Value, ZArray } from './values';
+import { registerStorageLocation, Slice, storageLocation, ZArray, zeroArray } from './values';
 
 const emptyAllocations = new WeakMap<object, Map<number, Slice>>();
 
@@ -21,13 +21,7 @@ export function zeroAllocation(runtime: object, length: bigint, child: Type): Sl
 }
 
 export function zeroSlice(source: Slice, length: bigint, child: Type): Slice {
-  const storage: Slots = {
-    slots: new Proxy<Value[]>([], {
-      get: (target, key, receiver) =>
-        typeof key === 'string' && /^\d+$/.test(key) ? undefinedValue(child) : Reflect.get(target, key, receiver),
-      set: () => true,
-    }),
-  };
+  const storage = zeroArray(length, false, undefinedValue(child));
   const location = storageLocation(source.target.slots, source.start);
   registerStorageLocation(storage.slots, () => location, true);
   return new Slice(storage, 0, length);

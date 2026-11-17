@@ -1,4 +1,3 @@
-// code-gauge-allow-file fileNcss 665 -- The file holds one layer of the compiler, whose parts share its private state.
 import {
   checkShiftAmount,
   divCeil,
@@ -49,6 +48,8 @@ import {
   type SemaApi,
   type TExpr,
 } from './semaBase';
+// code-gauge-allow-file fileNcss 665 -- The file holds one layer of the compiler, whose parts share its private state.
+import { singleValueOf } from './singleValue';
 import {
   BOOL,
   COMPTIME_INT,
@@ -79,6 +80,7 @@ import {
   storeInto,
   type Value,
   ZArray,
+  zeroArray,
   ZStruct,
   ZUnion,
 } from './values';
@@ -470,14 +472,17 @@ export abstract class BuiltinCompiler extends ExpressionCompiler {
         const element = this.coerce(this.compile(args[0], target.child), target.child, args[0]);
         this.storage.reserve(target);
         const { length, sentinel } = target;
+        const zero = singleValueOf(target.child, () => this.spendCompilation());
         return this.derived(
           element,
           target,
           (value) =>
-            newArray(
-              Array.from({ length: Number(length) }, () => copyForStorage(value)),
-              sentinel
-            ),
+            zero
+              ? zeroArray(length, sentinel !== undefined, value)
+              : newArray(
+                  Array.from({ length: Number(length) }, () => copyForStorage(value)),
+                  sentinel
+                ),
           true
         );
       }

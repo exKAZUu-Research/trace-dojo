@@ -5159,3 +5159,52 @@ test.each(['127,1,-1', '-128,-1,127,3'])(
     });
   }
 );
+
+test.each(['void', 'u0', 'struct{}', '[3]struct{}'])(
+  'zero-sized %s concatenations and array copies retain virtual exact lengths',
+  (type) => {
+    const source = `const std=@import("std");const T=${type};fn part(a:[]T)[]T{std.debug.print("p|",.{});return a;}fn size(a:[2000000000]T)usize{return a.len;}pub fn main(init:std.process.Init)!void{const a=try init.gpa.alloc(T,1000000000);const b=try std.mem.concat(init.gpa,T,&.{part(a),part(a)});const x=b[0..2000000000].*;var y=x;y=x;const z=.{.data=y};std.debug.print("{} {} {}",.{b.len,z.data.len,size(y)});}`;
+    expect(executeProgram('zig', source)).toMatchObject({
+      kind: 'executed',
+      stderr: 'p|p|2000000000 2000000000 2000000000',
+      uncaughtException: undefined,
+    });
+  }
+);
+
+test.each(['void', 'u0', 'struct{}'])(
+  'zero-sized %s array constructors and concatenations evaluate arguments without expanding data',
+  (type) => {
+    const source = `const std=@import("std");const T=${type};fn make()T{std.debug.print("m|",.{});return std.mem.zeroes(T);}pub fn main()void{const a:[1000000000]T=@splat(make());const b:[1000000000]T=undefined;const c=a ++ b;const z=std.mem.zeroes([1000000000]T);std.debug.print("{} {}",.{c.len,z.len});}`;
+    expect(executeProgram('zig', source)).toMatchObject({
+      kind: 'executed',
+      stderr: 'm|2000000000 1000000000',
+      uncaughtException: undefined,
+    });
+  }
+);
+
+test('zero-sized array copies retain exact runtime bounds', () => {
+  const source = `const std=@import("std");pub fn main(init:std.process.Init)!void{const a=try init.gpa.alloc(u0,1000000001);const x=a[0..1000000001].*;var index:usize=1000000001;_=&index;_=x[index];}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    uncaughtException: 'panic: index out of bounds: index 1000000001, len 1000000001',
+  });
+});
+
+test('zero-sized concatenation checks usize overflow before constructing a result', () => {
+  const source = `const std=@import("std");pub fn main(init:std.process.Init)!void{var a:std.ArrayList(void)=.empty;try a.append(init.gpa,{});_=try std.mem.concat(init.gpa,void,&.{a.allocatedSlice(),a.items});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    uncaughtException: 'panic: integer overflow',
+  });
+});
+
+test('nonzero array copies and concatenations retain storage and allocator limits', () => {
+  const source = `const std=@import("std");pub fn main(init:std.process.Init)!void{const a=try init.gpa.alloc(u8,600000);_=try std.mem.concat(init.gpa,u8,&.{a,a});}`;
+  expect(executeProgram('zig', source)).toMatchObject({ kind: 'executed', uncaughtException: 'error: OutOfMemory' });
+  expect(executeProgram('zig', `pub fn main()void{const a:[1000001]u8=@splat(0);_=a;}`)).toMatchObject({
+    kind: 'limitExceeded',
+    limit: 'storage',
+  });
+});

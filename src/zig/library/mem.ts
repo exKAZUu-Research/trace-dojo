@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 620 -- Groups the related standard library operations that share this module.
+// code-gauge-allow-file fileNcss 629 -- Groups the related standard library operations that share this module.
 import { indexOutOfBounds, PANIC, panic } from '../arith';
 import type { Expression, Span } from '../ast';
 import { type AnyFloat, compareFloats, floatFromBigInt, minMaxFloat } from '../floats';
@@ -6,6 +6,7 @@ import { sizeOf } from '../layout';
 import { isArithmeticType } from '../operands';
 import type { Frame } from '../runtime';
 import { copyForStorage, known, newArray, runtime, type SemaApi, type TExpr, undefinedValue } from '../semaBase';
+import { singleValueOf } from '../singleValue';
 import {
   BOOL,
   CONST_U8_SLICE,
@@ -24,6 +25,7 @@ import {
 } from '../types';
 import { NULL, type Pointer, Slice, storageLocation, storageOverlaps, storeInto, type Value, ZStruct } from '../values';
 import { WeakValueMap } from '../weakValueMap';
+import { zeroAllocation } from '../zeroSizedMemory';
 import {
   allocating,
   allocatorArg,
@@ -61,7 +63,7 @@ import {
 import { sorter } from './sort';
 
 interface AllocationPlan {
-  length: number;
+  length: number | bigint;
   build: () => Value[];
 }
 
@@ -756,7 +758,7 @@ const MEMBERS: Record<string, () => Member> = {
       slicesArg
     );
     return allocatingCall(sliceOf(type, false), [allocator, slices], call.span, ([value], frame) =>
-      joiningPlan(elements(value), [], () => frame.runtime.spend())
+      joiningPlan(elements(value), [], () => frame.runtime.spend(), sizeOf(type) === 0)
     );
   }),
   join: fnMember('std.mem.join', (sema, call) => {
@@ -957,16 +959,24 @@ function replacementPlan(
   };
 }
 
-function joiningPlan(parts: readonly Value[], separator: readonly Value[], spend: () => void): AllocationPlan {
+// code-gauge-allow functionCognitiveComplexity 17 -- Plans exact lengths before traversing only stored data.
+function joiningPlan(
+  parts: readonly Value[],
+  separator: readonly Value[],
+  spend: () => void,
+  zero = false
+): AllocationPlan {
   const slices = parts as readonly Slice[];
-  let length = separator.length * Math.max(0, slices.length - 1);
+  let length = BigInt(separator.length) * BigInt(Math.max(0, slices.length - 1));
   for (const slice of slices) {
     spend();
-    length += slice.length;
+    length += slice.lengthValue;
+    if (length > (1n << 64n) - 1n) panic(PANIC.overflow);
   }
   return {
     length,
     build: () => {
+      if (zero) return [];
       const values: Value[] = [];
       for (const [index, slice] of slices.entries()) {
         if (index > 0) for (const value of separator) values.push(value);
@@ -988,7 +998,10 @@ function allocatingCall(
     const child = type.kind === 'pointer' ? type.child : type;
     const complete = reserveNativeAllocation(frame, allocatorState(values[0]), allocation.length, child);
     if (!complete) return ERROR_OUT_OF_MEMORY;
-    const result = newSlice(allocation.build());
+    const result =
+      sizeOf(child) === 0
+        ? zeroAllocation(frame.runtime, BigInt(allocation.length), child)
+        : newSlice(allocation.build());
     complete(result.target);
     return result;
   });
@@ -1011,6 +1024,8 @@ export function zeroValue(type: Type, fieldsOf: (type: StructType) => readonly S
       return NULL;
     }
     case 'array': {
+      const singleton = singleValueOf(type, () => {});
+      if (singleton) return copyForStorage(singleton.value);
       return newArray(
         Array.from({ length: Number(type.length) }, () => zeroValue(type.child, fieldsOf)),
         type.sentinel

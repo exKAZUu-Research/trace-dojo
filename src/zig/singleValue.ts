@@ -1,12 +1,18 @@
 import type { Type } from './types';
-import { registerStorageLocation, type Value, ZArray, ZStruct, ZUnion } from './values';
+import { type Value, ZArray, zeroArray, ZStruct, ZUnion } from './values';
 
 interface Fact {
   value: Value;
 }
 
+const singleValues = new WeakMap<Type, Fact>();
+
 export function singleValueOf(type: Type, spend: () => void): Fact | undefined {
-  return valueOf(type, spend, new Set());
+  const cached = singleValues.get(type);
+  if (cached) return cached;
+  const fact = valueOf(type, spend, new Set());
+  if (fact) singleValues.set(type, fact);
+  return fact;
 }
 
 // code-gauge-allow functionCognitiveComplexity 28 -- Keeps guarded metadata-only singleton construction together.
@@ -57,12 +63,5 @@ function valueOf(type: Type, spend: () => void, seen: Set<Type>): Fact | undefin
 }
 
 function constantArray(type: Extract<Type, { kind: 'array' }>, value: Value): ZArray {
-  const backing: Value[] = [];
-  const slots = new Proxy<Value[]>(backing, {
-    get: (target, key, receiver) =>
-      typeof key === 'string' && /^\d+$/.test(key) ? value : Reflect.get(target, key, receiver),
-    set: () => true,
-  });
-  registerStorageLocation(slots, () => ({ storage: backing, index: 0 }), true);
-  return new ZArray(slots, 0, type.length, type.sentinel !== undefined);
+  return zeroArray(type.length, type.sentinel !== undefined, value);
 }

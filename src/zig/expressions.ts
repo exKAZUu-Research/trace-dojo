@@ -108,6 +108,7 @@ import {
   Some,
   type Value,
   ZArray,
+  zeroArrayElement,
   ZStruct,
   ZUnion,
 } from './values';
@@ -340,6 +341,8 @@ export abstract class ExpressionCompiler extends SemaBase {
   }
 
   private constantPointer(type: Type, value: Value): Pointer {
+    const singleton = type.kind === 'array' ? singleValueOf(type, () => this.spendCompilation()) : undefined;
+    if (singleton) value = singleton.value;
     const key = `${typeId(type)} ${constantKey(value, () => this.spendCompilation())}`;
     let storage = this.constants.get(key);
     if (!storage) {
@@ -1396,8 +1399,8 @@ export abstract class ExpressionCompiler extends SemaBase {
   }
 
   /** `a ++ b`: concatenates arrays whose lengths are known at compile time. */
-  // code-gauge-allow functionNcss 40 -- Keeps tuple/array coercion with the corresponding concatenation representation.
-  // code-gauge-allow functionCognitiveComplexity 24 -- Keeps tuple/array coercion with the corresponding concatenation representation.
+  // code-gauge-allow functionNcss 46 -- Keeps tuple/array coercion with the corresponding concatenation representation.
+  // code-gauge-allow functionCognitiveComplexity 30 -- Keeps tuple/array coercion with the corresponding concatenation representation.
   private concatenate(expression: ExpressionOf<'binary'>): TExpr {
     let left = this.compile(expression.left);
     let right = this.compile(expression.right);
@@ -1439,6 +1442,14 @@ export abstract class ExpressionCompiler extends SemaBase {
     const arrayType = arrayOf(length, child, sentinel);
     this.storage.reserve(arrayType);
     const viaPointer = a.viaPointer || b.viaPointer;
+    const singleton = singleValueOf(arrayType, () => this.spendCompilation());
+    if (singleton) {
+      const type = viaPointer ? pointerTo(arrayType, true) : arrayType;
+      return this.aggregate(type, [left, right], expression, () => {
+        const array = copyForStorage(singleton.value);
+        return viaPointer ? new Pointer(new Constant(array), 0) : array;
+      });
+    }
     const resultType = viaPointer ? pointerTo(arrayType, true) : arrayType;
     const build = (x: Value[], y: Value[]): Value => {
       const array = newArray(
@@ -1789,6 +1800,8 @@ function knownAt(type: Type, pointer: Pointer, span: Span): TExpr {
 
 export function constantKey(value: Value, spend: () => void): string {
   spend();
+  if (value instanceof ZArray && zeroArrayElement(value))
+    return `zero array ${value.lengthValue} ${value.hasSentinel} ${constantKey(zeroArrayElement(value)?.value, spend)}`;
   if (value instanceof ZArray)
     return `array ${JSON.stringify(value.values(value.hasSentinel).map((item) => constantKey(item, spend)))}`;
   if (value instanceof ZStruct) return `struct ${JSON.stringify(value.slots.map((item) => constantKey(item, spend)))}`;

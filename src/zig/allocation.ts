@@ -1,5 +1,6 @@
 import { ExecutionLimitError, LIMITS } from '../interpreter/limits';
 import { sizeOf } from './layout';
+import { singleValueOf } from './singleValue';
 import type { Type } from './types';
 
 export class CompilationStorage {
@@ -11,8 +12,8 @@ export class CompilationStorage {
   }
 }
 
-// code-gauge-allow functionNcss 35 -- Counts the storage of each value representation recursively.
-// code-gauge-allow functionCognitiveComplexity 17 -- Computes nested storage requirements by type without allocating values.
+// code-gauge-allow functionNcss 37 -- Counts the storage of each value representation recursively.
+// code-gauge-allow functionCognitiveComplexity 19 -- Computes nested storage requirements by type without allocating values.
 export function valueSlots(type: Type): number {
   let count = 0;
   switch (type.kind) {
@@ -22,6 +23,7 @@ export function valueSlots(type: Type): number {
       break;
     }
     case 'array': {
+      if (singleValueOf(type.child, () => {})) break;
       count = Number(type.length + (type.sentinel === undefined ? 0n : 1n));
       if (type.length > 0 && count <= LIMITS.maxSlots) count += Number(type.length) * valueSlots(type.child);
       break;

@@ -50,6 +50,7 @@ export function aliasStorage(proxy: Value[], original: Value[]): void {
 }
 
 const virtualStorage = new WeakSet<object>();
+const zeroArrayValues = new WeakMap<object, { value: Value }>();
 const storageLocations = new WeakMap<object, (index: number) => { storage: object; index: number }>();
 
 export function registerStorageLocation(
@@ -335,9 +336,32 @@ export function isAggregate(value: Value): value is ZArray | ZStruct | ZUnion {
   return value instanceof ZArray || value instanceof ZStruct || value instanceof ZUnion;
 }
 
+export function zeroArray(length: bigint, hasSentinel: boolean, value: Value): ZArray {
+  const backing: Value[] = [];
+  const slots = new Proxy<Value[]>(backing, {
+    get: (target, key, receiver) =>
+      typeof key === 'string' && /^\d+$/.test(key) ? value : Reflect.get(target, key, receiver),
+    set: () => true,
+  });
+  zeroArrayValues.set(slots, { value });
+  registerStorageLocation(slots, () => ({ storage: backing, index: 0 }), true);
+  return new ZArray(slots, 0, length, hasSentinel);
+}
+
+export function zeroArrayElement(value: ZArray): { value: Value } | undefined {
+  return zeroArrayValues.get(value.slots);
+}
+
+export function copyZeroArray(value: ZArray, copy: (value: Value) => Value): ZArray | undefined {
+  const element = zeroArrayElement(value);
+  return element ? zeroArray(value.lengthValue, value.hasSentinel, copy(element.value)) : undefined;
+}
+
 /** A copy of a value whose aggregates are fresh, since Zig copies arrays, structs, and unions by value. */
 export function copyValue(value: Value): Value {
   if (value instanceof ZArray) {
+    const virtual = copyZeroArray(value, copyValue);
+    if (virtual) return virtual;
     const copied = value.values(value.hasSentinel).map((slot) => copyValue(slot));
     return new ZArray(copied, 0, value.lengthValue, value.hasSentinel);
   }
@@ -355,6 +379,7 @@ export function storeInto(target: Slots, index: number, value: Value): void {
   storeSnapshotInto(target, index, copyValue(value));
 }
 
+// code-gauge-allow functionCognitiveComplexity 16 -- Preserves existing aggregate locations when storing copied values.
 function storeSnapshotInto(target: Slots, index: number, value: Value): void {
   if (storageLocations.has(target.slots)) {
     target.slots[index] = value;
@@ -362,6 +387,7 @@ function storeSnapshotInto(target: Slots, index: number, value: Value): void {
   }
   const current = target.slots[index];
   if (value instanceof ZArray && current instanceof ZArray && current.length === value.length) {
+    if (zeroArrayValues.has(value.slots) && zeroArrayValues.has(current.slots)) return;
     const source = value.values();
     for (const [at, slot] of source.entries()) storeSnapshotInto(current, current.offset + at, slot);
     return;
