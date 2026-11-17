@@ -538,10 +538,10 @@ defineFunction('iterator_count(Traversable|array $iterator): int', ({ args }) =>
 });
 defineFunction('iterator_apply(Traversable $iterator, callable $callback, ?array $args = null): int', ({ args }) => {
   let count = 0n;
-  const extra = args[2] instanceof PhpArray ? callbackArrayArguments(args[2]) : [];
   const iterator = iterate(args[0], 'none');
   while (!iterator.next().done) {
     count++;
+    const extra = args[2] instanceof PhpArray ? callbackArrayArguments(args[2]) : [];
     if (!toBool(callValue(args[1], extra, undefined))) break;
   }
   return count;
@@ -717,11 +717,7 @@ function callbackArrayArguments(array: PhpArray): ArgValue[] {
     const ref = slot instanceof Ref && slot.isRef ? slot : undefined;
     const v = slot instanceof Ref ? slot.v : slot;
     if (typeof key === 'string') argValues.push({ v, ref, name: key });
-    else {
-      if (argValues.some((arg) => arg.name !== undefined))
-        throwError('Error', 'Cannot use positional argument after named argument');
-      argValues.push({ v, ref });
-    }
+    else argValues.push({ v, ref });
   }
   return argValues;
 }

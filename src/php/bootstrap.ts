@@ -228,7 +228,7 @@ function defineTurtleMethods(): NativeMethod[] {
     collectGarbage(rt());
     return rt().world.canMoveForward(state);
   });
-  add(TURTLE_METHOD_NAMES.isFrontPainted, 'bool', (state) => rt().world.isFrontPainted(state));
+  add([...TURTLE_METHOD_NAMES.isFrontPainted, 'isFrontPainted'], 'bool', (state) => rt().world.isFrontPainted(state));
   add(TURTLE_METHOD_NAMES.remove, 'void', (state) => {
     rt().world.remove(state);
     return null;

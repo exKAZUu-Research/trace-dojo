@@ -16,6 +16,7 @@ import { toStr } from './operators';
 import { rt } from './runtime';
 import { formatPrintf } from './sprintf';
 import { incrementString } from './strings';
+import { allowedTags, stripTags } from './stripTags';
 import { UnsupportedFeatureError } from './unsupported';
 import { PhpArray, type Ref, type Value } from './values';
 
@@ -293,13 +294,13 @@ function replaceAll(
 function strReplace(args: Value[], refs: (Ref | undefined)[], insensitive: boolean): Value {
   const [search, replace, subject] = args;
   const count = { value: 0 };
+  if (!(search instanceof PhpArray) && replace instanceof PhpArray)
+    throwError(
+      'TypeError',
+      `${insensitive ? 'str_ireplace' : 'str_replace'}(): Argument #2 ($replace) must be of type string when argument #1 ($search) is a string`
+    );
   const replaceOne = (text: string): string => {
     if (!(search instanceof PhpArray)) {
-      if (replace instanceof PhpArray)
-        throwError(
-          'TypeError',
-          `${insensitive ? 'str_ireplace' : 'str_replace'}(): Argument #2 ($replace) must be of type string when argument #1 ($search) is a string`
-        );
       return replaceAll(text, toStr(search), toStr(replace), insensitive, count);
     }
     const replacements = replace instanceof PhpArray ? replace.values() : undefined;
@@ -499,14 +500,18 @@ defineFunction('strrchr(string $haystack, string $needle, bool $before_needle = 
   if (index === -1) return false;
   return args[2] === true ? haystack.slice(0, index) : haystack.slice(index);
 });
-// code-gauge-allow functionCognitiveComplexity 16 -- Transcribes PHP's algorithm for this function step by step, whose branches mirror PHP's.
+// code-gauge-allow functionCognitiveComplexity 24 -- Transcribes PHP's algorithm for this function step by step, whose branches mirror PHP's.
+// code-gauge-allow functionNcss 36 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 defineFunction('strtr(string $string, string|array $from, ?string $to = null): string', ({ args }) => {
   const text = s(args[0]);
   const from = args[1];
   if (from instanceof PhpArray) {
-    const pairs = [...from.entries()]
-      .map(([key, value]) => [String(key), toStr(value)] as const)
-      .filter(([key]) => key !== '');
+    if (text === '') return text;
+    if (from.map.has('')) warn('strtr(): Ignoring replacement of empty string');
+    const pairs: (readonly [string, string])[] = [];
+    for (const [key, value] of from.entries()) {
+      if (key !== '') pairs.push([String(key), toStr(value)]);
+    }
     if (pairs.length === 0) return text;
     const sorted = pairs.toSorted((x, y) => y[0].length - x[0].length);
     let result = '';
@@ -575,7 +580,7 @@ function wordwrap(text: string, width: number, breakText: string, cut: boolean):
   let lastSpace = 0;
   for (let current = 0; current < text.length; current++) {
     const char = text[current];
-    if (char === breakText[0] && current + breakLength < text.length && text.startsWith(breakText, current)) {
+    if (char === breakText[0] && current + breakLength <= text.length && text.startsWith(breakText, current)) {
       result += text.slice(lastStart, current + breakLength);
       current += breakLength - 1;
       lastStart = current + 1;
@@ -708,53 +713,6 @@ function htmlCharset(
 defineFunction('strip_tags(string $string, array|string|null $allowed_tags = null): string', ({ args }) =>
   stripTags(s(args[0]), allowedTags(args[1] ?? null))
 );
-
-function allowedTags(value: Value): Set<string> {
-  if (value === null) return new Set();
-  const names =
-    value instanceof PhpArray
-      ? value.values().map((item) => toStr(item))
-      : [...toStr(value).matchAll(/<([A-Za-z\d]+)>/g)].map((match) => match[1]);
-  return new Set(names.map((name) => lower(name)));
-}
-
-/** Removes HTML and PHP tags as PHP's strip_tags does, keeping the allowed tags. */
-// code-gauge-allow functionCognitiveComplexity 26 -- Transcribes PHP's algorithm for this function step by step, whose branches mirror PHP's.
-// code-gauge-allow functionNcss 37 -- Transcribes PHP's algorithm for this function step by step, whose branches mirror PHP's.
-function stripTags(text: string, allowed: Set<string>): string {
-  let result = '';
-  let index = 0;
-  while (index < text.length) {
-    const char = text[index];
-    if (char !== '<' || index + 1 >= text.length || /\s/.test(text[index + 1])) {
-      result += char;
-      index++;
-      continue;
-    }
-    if (text.startsWith('<!--', index)) {
-      const end = text.indexOf('-->', index + 4);
-      index = end === -1 ? text.length : end + 3;
-      continue;
-    }
-    let end = index + 1;
-    let quote = '';
-    let depth = 1;
-    while (end < text.length) {
-      const current = text[end];
-      if (quote) {
-        if (current === quote) quote = '';
-      } else if (current === '"' || current === "'") quote = current;
-      else if (current === '<') depth++;
-      else if (current === '>' && --depth === 0) break;
-      end++;
-    }
-    const tag = text.slice(index, Math.min(end + 1, text.length));
-    const name = /^<\/?\s*([A-Za-z\d]+)/.exec(tag)?.[1];
-    if (name && allowed.has(lower(name))) result += tag;
-    index = end + 1;
-  }
-  return result;
-}
 
 defineFunction('addslashes(string $string): string', ({ args }) =>
   s(args[0]).replaceAll(/["'\\\0]/g, (match) => (match === '\0' ? String.raw`\0` : `\\${match}`))

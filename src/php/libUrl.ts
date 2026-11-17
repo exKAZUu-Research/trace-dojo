@@ -143,8 +143,13 @@ defineFunction('parse_str(string $string, &$result): void', ({ args, refs }) => 
   const result = new PhpArray();
   refs[1]?.assign(result);
   const text = s(args[0]);
+  let count = 0;
   for (const pair of text.slice(0, text.includes('\0') ? text.indexOf('\0') : undefined).split('&')) {
     if (pair === '') continue;
+    if (++count > 1000) {
+      warn('parse_str(): Input variables exceeded 1000. To increase the limit change max_input_vars in php.ini.');
+      break;
+    }
     const equals = pair.indexOf('=');
     const name = untilNul(urlDecode(equals === -1 ? pair : pair.slice(0, equals), false));
     registerVariable(result, name, equals === -1 ? '' : urlDecode(pair.slice(equals + 1), false));

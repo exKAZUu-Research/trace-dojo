@@ -259,7 +259,11 @@ export function setNativeArrayStorage(check: typeof nativeArrayStorage): void {
 
 export function nativeIteratorSlot(object: PhpObject): Value | Ref | undefined {
   const storage = object.internal;
-  if (!nativeArrayStorage(storage) || object.cls.findMethod('current')?.fn.kind !== 'native') return;
+  if (
+    !nativeArrayStorage(storage) ||
+    ['current', 'key', 'next', 'rewind', 'valid'].some((name) => object.cls.findMethod(name)?.fn.kind !== 'native')
+  )
+    return;
   const key = storage.cursor().key;
   return key === undefined ? undefined : storage.array.map.get(key);
 }

@@ -1,5 +1,5 @@
 // oxlint-disable unicorn/prefer-code-point -- PHP pattern strings contain bytes; UTF-8 validation reads each byte separately.
-// code-gauge-allow-file fileNcss 741 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 746 -- Holds the cases of one concern of the interpreter, which share their helpers.
 import { dec, enc, utf8Length } from './bytes';
 import { analyzeRegex } from './regexAnalysis';
 import { rt } from './runtime';
@@ -529,7 +529,7 @@ class PatternConverter {
   }
 
   private property(letter: string): CharacterSet {
-    const match = /^(?:\{(\^?)([\w&]+)\}|(\w))/.exec(this.source.slice(this.index));
+    const match = /^(?:\{(\^?)([\w&=]+)\}|(\w))/.exec(this.source.slice(this.index));
     if (!match) {
       const end = this.source[this.index] === '{' ? this.source.length : this.index + 1;
       this.fail(String.raw`malformed \P or \p sequence`, Math.min(end, this.source.length));
@@ -994,15 +994,20 @@ function unicodeProperty(name: string, negated: boolean): CharacterSet | undefin
     ['Any', String.raw`\s\S`],
     ['L&', String.raw`\p{LC}`],
     ['Xan', String.raw`\p{L}\p{N}`],
-    ['Xwd', String.raw`\p{L}\p{N}_`],
+    ['Xwd', UCP_SETS.get('w') as string],
     ['Xsp', UCP_SETS.get('s') as string],
     ['Xps', UCP_SETS.get('s') as string],
   ]).get(name);
   if (special !== undefined) return { content: special, negated };
   // PCRE matches property names loosely (`\p{han}`); JavaScript wants them capitalized.
+  const explicit = /^(sc|script|scx|script_extensions)=(.+)$/i.exec(name);
+  const script = explicit?.[1].toLowerCase();
+  if (explicit) name = explicit[2];
+  const property = script === 'sc' || script === 'script' ? 'Script' : 'Script_Extensions';
   const capitalized = name[0].toUpperCase() + name.slice(1).toLowerCase();
   for (const candidate of new Set([name, capitalized])) {
-    const content = GENERAL_CATEGORIES.has(candidate) ? `\\p{${candidate}}` : `\\p{Script_Extensions=${candidate}}`;
+    const content =
+      !explicit && GENERAL_CATEGORIES.has(candidate) ? `\\p{${candidate}}` : `\\p{${property}=${candidate}}`;
     try {
       new RegExp(`[${content}]`, 'u');
       return { content, negated };

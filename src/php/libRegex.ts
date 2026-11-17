@@ -174,16 +174,18 @@ function toMatch(
 }
 
 function byteIndexer(text: string): (index: number) => number {
-  const offsets = new Map<number, number>();
+  const offsets = new Map<number, number>([[0, 0]]);
+  let cursor = 0;
   let bytes = 0;
-  let index = 0;
-  for (const char of text) {
-    offsets.set(index, bytes);
-    bytes += enc(char).length;
-    index += char.length;
-  }
-  offsets.set(index, bytes);
-  return (position) => offsets.get(position) ?? bytes;
+  return (position) => {
+    const cached = offsets.get(position);
+    if (cached !== undefined) return cached;
+    if (position < cursor) return enc(text.slice(0, position)).length;
+    bytes += enc(text.slice(cursor, position)).length;
+    cursor = position;
+    offsets.set(position, bytes);
+    return bytes;
+  };
 }
 
 function charIndexOf(text: string, byteOffset: number): number {
@@ -504,6 +506,7 @@ defineFunction('preg_quote(string $str, ?string $delimiter = null): string', ({ 
 defineFunction('preg_grep(string $pattern, array $array, int $flags = 0): array|false', ({ args }) => {
   const compiled = compile('preg_grep', args[0] as string);
   if (!compiled) return false;
+  rt().lastPregError = 0;
   const invert = ((args[2] as bigint | undefined) ?? 0n) === 1n;
   const result = new PhpArray();
   for (const [key, value] of (args[1] as PhpArray).entries()) {

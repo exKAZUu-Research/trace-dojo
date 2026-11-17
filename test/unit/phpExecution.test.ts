@@ -1035,3 +1035,13 @@ test.each(['?self', '?A'])('preserves trait constant declaration type scope: %s'
   expect(result.kind === 'executed' && result.stdout).toContain('definition differs and is considered incompatible');
   expect(result.kind === 'executed' && result.stdout).not.toContain('never');
 });
+
+test('keeps repeated short UTF-8 matches bounded on large subjects', () => {
+  vi.restoreAllMocks();
+  expect(run('<?php $s=str_repeat("a",1000000);for($i=0;$i<100;$i++)preg_match("/a/u",$s);echo "done";')).toMatchObject(
+    {
+      kind: 'executed',
+      stdout: 'done',
+    }
+  );
+});

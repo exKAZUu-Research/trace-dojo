@@ -272,24 +272,11 @@ function bindNative(
   const params = fn.params;
   const values: Value[] = [];
   const refs: (Ref | undefined)[] = [];
-  let named: Map<string, Value> | undefined;
+  const named = checkNamedArgs(params, args);
   const variadic = params.at(-1)?.variadic ? params.at(-1) : undefined;
   const fixed = variadic ? params.length - 1 : params.length;
   const positional = args.filter((arg) => arg.name === undefined);
   const required = params.filter((param) => !param.optional && !param.variadic).length;
-  for (const arg of args) {
-    if (arg.name === undefined) continue;
-    const index = params.findIndex((param) => param.name === arg.name && !param.variadic);
-    if (index === -1) {
-      if (variadic) {
-        named ??= new Map();
-        named.set(arg.name, arg.v);
-        continue;
-      }
-      throwError('Error', `Unknown named parameter $${arg.name}`);
-    }
-    if (index < positional.length) throwError('Error', `Named parameter $${arg.name} overwrites previous argument`);
-  }
   const given = positional.length + args.filter((arg) => arg.name !== undefined && !named?.has(arg.name)).length;
   if (positional.length < required && args.every((arg) => arg.name === undefined)) {
     throwError('ArgumentCountError', argumentCountMessage(name, required, variadic ? -1 : fixed, given));
@@ -436,7 +423,7 @@ function invokeUser(target: CallTarget, fn: UserFunction, args: ArgValue[], row:
   const strict = runtime.strictTypes && nativeDepth === 0;
   const positional = args.filter((arg) => arg.name === undefined);
   const params = fn.params;
-  checkNamedArgs(params, args, positional.length);
+  checkNamedArgs(params, args);
   frame.args = positional.map((arg) => arg.ref?.v ?? arg.v);
   for (const arg of args) {
     const index = arg.name === undefined ? -1 : params.findIndex((param) => !param.variadic && param.name === arg.name);
@@ -641,17 +628,29 @@ function implicitCallRow(): number | undefined {
   return nativeDepth === 0 && !runtime.shuttingDown ? runtime.row : undefined;
 }
 
-function checkNamedArgs(params: Param[], args: ArgValue[], positionalCount: number): void {
+// code-gauge-allow functionCognitiveComplexity 16 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+function checkNamedArgs(params: Param[], args: ArgValue[]): Map<string, Value> | undefined {
   const variadic = params.at(-1)?.variadic;
+  const names = new Set<string>();
+  let positional = 0;
+  let named: Map<string, Value> | undefined;
   for (const arg of args) {
-    if (arg.name === undefined) continue;
-    const index = params.findIndex((param) => param.name === arg.name && !param.variadic);
-    if (index === -1) {
-      if (variadic) continue;
-      throwError('Error', `Unknown named parameter $${arg.name}`);
+    if (arg.name === undefined) {
+      if (names.size > 0) throwError('Error', 'Cannot use positional argument after named argument');
+      positional++;
+      continue;
     }
-    if (index < positionalCount) throwError('Error', `Named parameter $${arg.name} overwrites previous argument`);
+    const index = params.findIndex((param) => param.name === arg.name && !param.variadic);
+    if (names.has(arg.name) || (index !== -1 && index < positional))
+      throwError('Error', `Named parameter $${arg.name} overwrites previous argument`);
+    names.add(arg.name);
+    if (index === -1) {
+      if (!variadic) throwError('Error', `Unknown named parameter $${arg.name}`);
+      named ??= new Map();
+      named.set(arg.name, arg.v);
+    }
   }
+  return named;
 }
 
 /** Evaluates a parameter's default value, which the interpreter provides. */

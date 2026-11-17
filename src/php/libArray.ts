@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 998 -- Keeps one PHP runtime concern and its shared helpers in one module.
+// code-gauge-allow-file fileNcss 1000 -- Keeps one PHP runtime concern and its shared helpers in one module.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 // oxlint-disable unicorn/prefer-code-point -- PHP strings hold bytes as code units 0–255, which charCodeAt and fromCharCode read and write as they are.
 import { type Comparisons, type Entry, SortedWalk } from './arraySetWalk';
@@ -18,6 +18,7 @@ import { rt } from './runtime';
 import {
   copyValueSlot,
   deref,
+  INT_MAX,
   INT_MIN,
   type Key,
   type NativeContext,
@@ -406,6 +407,8 @@ defineFunction('array_fill(int $start_index, int $count, mixed $value): array', 
   const [start, count, value] = args as [bigint, bigint, Value];
   if (count < 0n) throwError('ValueError', 'array_fill(): Argument #2 ($count) must be greater than or equal to 0');
   if (count >= 2n ** 31n) throwError('ValueError', 'array_fill(): Argument #2 ($count) is too large');
+  if (count > 0n && start + count - 1n > INT_MAX)
+    throwError('Error', 'Cannot add element to the array as the next element is already occupied');
   rt().ensureRoom(Number(count));
   const result = new PhpArray();
   rt().spend(Number(count) / 16);
@@ -840,9 +843,10 @@ defineFunction(
     const replacement: [Key, Value | Ref][] =
       replacementValue === undefined
         ? []
-        : replacementValue instanceof PhpArray
-          ? [...replacementValue.map.values()].map((value): [Key, Value | Ref] => [0n, value])
-          : [[0n, replacementValue]];
+        : [...(cast('array', replacementValue) as PhpArray).map.values()].map((value): [Key, Value | Ref] => [
+            0n,
+            value,
+          ]);
     const removed = rebuild(entries.slice(start, end), true);
     rebuild([...entries.slice(0, start), ...replacement, ...entries.slice(end)], true, array);
     array.pointer = null;
