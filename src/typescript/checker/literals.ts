@@ -15,9 +15,11 @@ import {
   mapType,
   neverType,
   newTypeId,
+  numberType,
   type ObjectType,
   type Property,
   regularOf,
+  stringType,
   type Structure,
   type Type,
   type TypeParameter,
@@ -66,6 +68,8 @@ interface ObjectLiteral {
 /** Checks array and object literals and widens the types of their values. */
 export class LiteralChecker {
   private readonly arrayLiterals = new Set<number>();
+  /** The node of each object literal type, whose members alone TypeScript checks for excess properties. */
+  private readonly objectLiteralNodes = new Map<number, TreeNode>();
 
   constructor(private readonly c: Checker) {}
 
@@ -132,6 +136,12 @@ export class LiteralChecker {
 
   isArrayLiteral(type: Type): boolean {
     return this.arrayLiterals.has(type.id);
+  }
+
+  /** Whether a property of an object literal type is written in the literal, rather than copied by a spread. */
+  isWrittenMember(literal: ObjectType, property: Property): boolean {
+    const node = this.objectLiteralNodes.get(literal.id);
+    return node !== undefined && property.declaration?.parent?.id === node.id;
   }
 
   private tupleContext(contextual: Type): ObjectType | undefined {
@@ -216,12 +226,14 @@ export class LiteralChecker {
           }),
           { isLiteral: true, isUnionSpread: true }
         );
+        this.objectLiteralNodes.set(variant.id, node);
         return { ...variant, id: variant.id, fresh: true, regular: variant } as ObjectType;
       });
       return genericSpreads.length > 0
-        ? intersectionOf([...genericSpreads, unionOf(variants)], this.c.budget)
-        : unionOf(variants);
+        ? intersectionOf([...genericSpreads, unionOf(variants, true)], this.c.budget)
+        : unionOf(variants, true);
     }
+    this.objectLiteralNodes.set(object.id, node);
     const fresh: ObjectType = { ...object, id: object.id, fresh: true, regular: object };
     if (genericSpreads.length > 0) return intersectionOf([...genericSpreads, object], this.c.budget);
     return fresh;
@@ -325,25 +337,46 @@ export class LiteralChecker {
       return;
     }
     this.checkDuplicateKey(literal, key, name);
-    const context = this.memberContext(literal, name);
-    const checked = this.c.expressions.check(value, context);
-    const valueType = literal.isConstContext ? checked : this.widenForMutableLocation(checked, context);
-    literal.properties.set(name, this.literalProperty(name, valueType, literal.isConstContext, member));
+    this.namedMember(literal, member, name, value);
   }
 
   private computedMember(literal: ObjectLiteral, member: TreeNode, key: TreeNode, value: TreeNode): void {
     const keyType = this.c.expressions.check(named(key)[0] ?? key);
     if (keyType.kind === 'literal' && (typeof keyType.value === 'string' || typeof keyType.value === 'number')) {
       // A key of one literal names a property, whose value is typed as a written property's is.
-      const name = String(keyType.value);
-      const context = this.memberContext(literal, name);
-      const checked = this.c.expressions.check(value, context);
-      const valueType = literal.isConstContext ? checked : this.widenForMutableLocation(checked, context);
-      literal.properties.set(name, this.literalProperty(name, valueType, literal.isConstContext, member));
-    } else {
-      const valueType = this.c.expressions.checkWidened(value);
-      literal.stringIndex = unionOf([literal.stringIndex ?? neverType, valueType]);
+      this.namedMember(literal, member, String(keyType.value), value);
+      return;
     }
+    const valueType = this.memberValue(literal, value, this.indexContext(literal, keyType));
+    literal.stringIndex = unionOf([literal.stringIndex ?? neverType, valueType], true);
+  }
+
+  private namedMember(literal: ObjectLiteral, member: TreeNode, name: string, value: TreeNode): void {
+    const valueType = this.memberValue(literal, value, this.memberContext(literal, name));
+    literal.properties.set(name, this.literalProperty(name, valueType, literal.isConstContext, member));
+  }
+
+  private memberValue(literal: ObjectLiteral, value: TreeNode, context: Type | undefined): Type {
+    const checked = this.c.expressions.check(value, context);
+    return literal.isConstContext ? checked : this.widenForMutableLocation(checked, context);
+  }
+
+  /**
+   * The type the contextual type's index signatures give a member whose computed key is not one literal: its number
+   * index for a numeric key, else its string index.
+   */
+  private indexContext(literal: ObjectLiteral, keyType: Type): Type | undefined {
+    if (!literal.contextual) return undefined;
+    const isNumeric = this.c.relations.isAssignable(keyType, numberType);
+    const isString = isNumeric || this.c.relations.isAssignable(keyType, stringType);
+    const contextMembers = literal.contextual.kind === 'union' ? literal.contextual.types : [literal.contextual];
+    const types = contextMembers.flatMap((member) => {
+      if (member.kind !== 'object' && member.kind !== 'intersection') return [];
+      const { stringIndex, numberIndex } = this.c.structureOf(member);
+      const index = (isNumeric ? numberIndex : undefined) ?? (isString ? stringIndex : undefined);
+      return index ? [index.type] : [];
+    });
+    return types.length > 0 ? unionOf(types, true) : undefined;
   }
 
   /** Reports a name declared again in an object literal, as TypeScript's grammar check of object literals does. */
@@ -395,16 +428,19 @@ export class LiteralChecker {
     const name = this.memberName(nameNode);
     const isGetter = hasToken(member, 'get');
     const isSetter = hasToken(member, 'set');
+    const context =
+      name === undefined
+        ? this.indexContext(literal, this.c.expressions.check(named(nameNode)[0] ?? nameNode))
+        : this.memberContext(literal, name);
     const methodType = this.c.classes.withObjectThis(
       literal.receiver,
-      () =>
-        this.c.functions.functionExpression(member, name === undefined ? undefined : this.memberContext(literal, name)),
+      () => this.c.functions.functionExpression(member, context),
       member
     );
     // A key that is not a literal gives the object an index signature, as a computed property does.
     if (name === undefined) {
       const valueType = isGetter ? (this.c.signaturesOf(methodType, 'call')[0]?.returnType() ?? anyType) : methodType;
-      if (!isSetter) literal.stringIndex = unionOf([literal.stringIndex ?? neverType, valueType]);
+      if (!isSetter) literal.stringIndex = unionOf([literal.stringIndex ?? neverType, valueType], true);
       return;
     }
     // TypeScript's grammar check compares only names written as literals.
@@ -475,7 +511,8 @@ export class LiteralChecker {
     // A spread of `null` or `undefined` adds nothing, which leaves the properties of an object it may be optional.
     const mayBeNullish = objectPart !== spread;
     if (objectMembers.length < 2) {
-      if (objectMembers.length === 1) this.addSpreadIndexes(literal, this.indexesOf(objectPart));
+      if (objectMembers.length === 1)
+        this.addSpreadIndexes(literal, this.indexesOf(objectPart, literal.isConstContext));
       this.spreadSingle(literal, objectPart, mayBeNullish);
       return;
     }
@@ -496,12 +533,12 @@ export class LiteralChecker {
     this.c.budget.spend(count);
     const baseIndexes = literal.spreadIndexes;
     literal.spreadIndexes = bases.flatMap((_, index) =>
-      parts.map((type) => this.spreadIndexesOnto(baseIndexes?.[index], this.indexesOf(type)))
+      parts.map((type) => this.spreadIndexesOnto(baseIndexes?.[index], this.indexesOf(type, literal.isConstContext)))
     );
     literal.alternatives = bases.flatMap((base) =>
       parts.map((type) => {
         const alternative = new Map([...base, ...literal.properties]);
-        if (type) this.spreadInto(alternative, type);
+        if (type) this.spreadInto(literal, alternative, type);
         return alternative;
       })
     );
@@ -516,7 +553,7 @@ export class LiteralChecker {
   }
 
   private writtenIndexes(literal: ObjectLiteral): Indexes {
-    return { stringIndex: literal.stringIndex && { type: literal.stringIndex, readonly: false } };
+    return { stringIndex: literal.stringIndex && { type: literal.stringIndex, readonly: literal.isConstContext } };
   }
 
   private addSpreadIndexes(literal: ObjectLiteral, indexes: Indexes): void {
@@ -538,13 +575,13 @@ export class LiteralChecker {
     return { stringIndex: combine('stringIndex'), numberIndex: combine('numberIndex') };
   }
 
-  /** The index signatures a spread copies, which are writable in the copy. */
-  private indexesOf(type: Type | undefined): Indexes {
+  /** The index signatures a spread copies, which are writable in the copy unless it is in a `const` context. */
+  private indexesOf(type: Type | undefined, readonly: boolean): Indexes {
     if (type?.kind !== 'object' && type?.kind !== 'intersection') return {};
     const { stringIndex, numberIndex } = this.c.structureOf(type);
     return {
-      stringIndex: stringIndex && { ...stringIndex, readonly: false },
-      numberIndex: numberIndex && { ...numberIndex, readonly: false },
+      stringIndex: stringIndex && { ...stringIndex, readonly },
+      numberIndex: numberIndex && { ...numberIndex, readonly },
     };
   }
 
@@ -554,18 +591,18 @@ export class LiteralChecker {
    */
   private spreadSingle(literal: ObjectLiteral, spread: Type, optional = false): void {
     if (!literal.alternatives) {
-      this.spreadInto(literal.properties, spread, optional);
+      this.spreadInto(literal, literal.properties, spread, optional);
       return;
     }
     for (const alternative of literal.alternatives) {
       for (const [name, property] of literal.properties) alternative.set(name, property);
-      this.spreadInto(alternative, spread, optional);
+      this.spreadInto(literal, alternative, spread, optional);
     }
     literal.properties.clear();
   }
 
-  private spreadInto(properties: Map<string, Property>, spread: Type, optional = false): void {
-    for (const [name, spreadProperty] of this.spreadProperties(spread)) {
+  private spreadInto(literal: ObjectLiteral, properties: Map<string, Property>, spread: Type, optional = false): void {
+    for (const [name, spreadProperty] of this.spreadProperties(spread, literal.isConstContext)) {
       const property = optional ? { ...spreadProperty, optional: true } : spreadProperty;
       const existing = properties.get(name);
       // An optional property spread over one already there may be missing, which leaves the earlier value.
@@ -683,13 +720,13 @@ export class LiteralChecker {
     };
   }
 
-  private spreadProperties(type: Type): Map<string, Property> {
+  private spreadProperties(type: Type, readonly = false): Map<string, Property> {
     const result = new Map<string, Property>();
     for (const member of type.kind === 'union' ? type.types : [type]) {
       if (member.kind !== 'object' && member.kind !== 'intersection') continue;
       for (const [name, property] of this.c.structureOf(member).properties) {
         if (property.isMethod && member.kind === 'object' && member.classInfo) continue;
-        result.set(name, { ...property, readonly: false });
+        result.set(name, { ...property, readonly });
       }
     }
     return result;

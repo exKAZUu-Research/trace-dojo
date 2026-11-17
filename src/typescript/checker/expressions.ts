@@ -617,8 +617,8 @@ export class ExpressionChecker {
       return;
     // A discriminated union checks the members its discriminant selects; an index signature takes any key it covers,
     // whose value is still checked against it.
-    const structure = source.resolve();
-    for (const [name, property] of structure.properties) {
+    for (const [name, property] of source.resolve().properties) {
+      if (!this.c.literals.isWrittenMember(source, property)) continue;
       const known = targets.some(
         (member) =>
           (this.c.propertyOf(member, name) !== undefined && !this.isObjectPrototypeProperty(member, name)) ||
@@ -641,6 +641,15 @@ export class ExpressionChecker {
       );
       return;
     }
+    this.checkExcessIndexValues(node, source, targets);
+  }
+
+  /** Checks the object literals that computed keys give a literal's string index against the targets' string index. */
+  private checkExcessIndexValues(node: TreeNode, source: ObjectType, targets: Type[]): void {
+    const sourceIndex = source.resolve().stringIndex;
+    const targetIndexes = targets.flatMap((member) => this.c.structureOf(member).stringIndex?.type ?? []);
+    if (sourceIndex && targetIndexes.length > 0)
+      this.checkExcessProperties(node, sourceIndex.type, unionOf(targetIndexes));
   }
 
   /**
@@ -659,6 +668,7 @@ export class ExpressionChecker {
     }
     if (!source.fresh) return;
     for (const [name, property] of source.resolve().properties) {
+      if (!this.c.literals.isWrittenMember(source, property)) continue;
       const value = property.declaration?.type === 'pair' ? property.declaration.childForFieldName('value') : undefined;
       const targetType = this.c.literals.contextualPropertyType(target, name);
       if (value && targetType) this.checkAssertedArrayLiterals(value, property.type(), targetType);
