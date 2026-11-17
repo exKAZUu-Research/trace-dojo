@@ -147,14 +147,16 @@ export class FnRef {
   }
 }
 
-/**
- * A function of the standard library or the grader, which analyzes its own calls: it compiles its arguments with the
- * types it expects and returns the analyzed call.
- */
+export interface NativeSignature {
+  type: FnType;
+  receiver?: boolean;
+}
+
 export class NativeFn {
   constructor(
     readonly name: string,
-    readonly compileCall: (sema: SemaApi, call: NativeCall) => TExpr
+    readonly compileCall: (sema: SemaApi, call: NativeCall) => TExpr,
+    readonly signature?: NativeSignature
   ) {}
 
   get functionName(): string {
@@ -173,6 +175,7 @@ export interface NativeCall {
 export interface LibraryFunctionOptions {
   args?: readonly TExpr[];
   namespaceName?: string;
+  members?: Readonly<Record<string, { type: Type; value: Value }>>;
 }
 
 export interface SemaApi {

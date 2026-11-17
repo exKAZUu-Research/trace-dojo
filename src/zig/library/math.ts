@@ -50,6 +50,7 @@ import {
   errorUnionOf,
   fitsInt,
   type FloatType,
+  fnType,
   type IntType,
   intType,
   maxInt,
@@ -215,21 +216,29 @@ function compareHolds(order: number | undefined, operator: bigint): boolean {
 }
 
 addMembers(ORDER as unknown as StructType, {
-  invert: fnMember('Order.invert', (sema, call) => {
-    expectArgs(sema, call, 0, 'invert');
-    const self = orderReceiver(sema, call);
-    return computed(ORDER, [self], call.span, ([order]) =>
-      order === ORDER_LT ? ORDER_GT : order === ORDER_GT ? ORDER_LT : ORDER_EQ
-    );
-  }),
-  compare: fnMember('Order.compare', (sema, call) => {
-    const [opArg] = expectArgs(sema, call, 1, 'compare');
-    const self = orderReceiver(sema, call);
-    const operator = sema.coerce(sema.compile(opArg, COMPARE_OPERATOR), COMPARE_OPERATOR, opArg);
-    return computed(BOOL, [self, operator], call.span, ([order, op]) =>
-      compareHolds(order === ORDER_LT ? -1 : order === ORDER_GT ? 1 : 0, op as bigint)
-    );
-  }),
+  invert: fnMember(
+    'Order.invert',
+    (sema, call) => {
+      expectArgs(sema, call, 0, 'invert');
+      const self = orderReceiver(sema, call);
+      return computed(ORDER, [self], call.span, ([order]) =>
+        order === ORDER_LT ? ORDER_GT : order === ORDER_GT ? ORDER_LT : ORDER_EQ
+      );
+    },
+    () => ({ type: fnType([ORDER], ORDER), receiver: true })
+  ),
+  compare: fnMember(
+    'Order.compare',
+    (sema, call) => {
+      const [opArg] = expectArgs(sema, call, 1, 'compare');
+      const self = orderReceiver(sema, call);
+      const operator = sema.coerce(sema.compile(opArg, COMPARE_OPERATOR), COMPARE_OPERATOR, opArg);
+      return computed(BOOL, [self, operator], call.span, ([order, op]) =>
+        compareHolds(order === ORDER_LT ? -1 : order === ORDER_GT ? 1 : 0, op as bigint)
+      );
+    },
+    () => ({ type: fnType([ORDER, COMPARE_OPERATOR], BOOL), receiver: true })
+  ),
 });
 
 function orderReceiver(sema: SemaApi, call: NativeCall): TExpr {

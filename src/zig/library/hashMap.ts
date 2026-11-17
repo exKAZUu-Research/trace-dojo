@@ -12,6 +12,7 @@ import {
   BOOL,
   CONST_U8_SLICE,
   errorUnionOf,
+  fnType,
   optionalOf,
   pointerTo,
   sliceOf,
@@ -55,6 +56,7 @@ import {
   nativeCall,
   nativeStateCall,
   nativeStruct,
+  receiverAddress,
 } from './native';
 import { validateEquality, valuesEqual } from './valueEquality';
 
@@ -437,22 +439,36 @@ function defineMembers(types: MapTypes, keyType: Type, valueType: Type, kind: Ke
     options: { args: Type[]; result: Type; mutable: boolean; allocates?: boolean },
     run: (state: MapState, args: Value[], frame: Frame) => Value
   ): (() => Member) =>
-    fnMember(`${map.namespace.name}.${name}`, (sema, call) => {
-      sema.resolveStorage(keyType, call.span);
-      sema.resolveStorage(valueType, call.span);
-      if (kind === 'auto' && options.args.includes(keyType)) {
-        validateAutoKey(sema, keyType, call.span);
-        validateEquality(sema, keyType, call.span);
-      }
-      const takesAllocator = options.allocates === true && !managed;
-      const expected = takesAllocator ? [ALLOCATOR, ...options.args] : options.args;
-      const args = compileArgs(sema, expectArgs(sema, call, expected.length, name), expected);
-      const state = stateOf(sema, call.receiver, map, call.span, options.mutable);
-      return nativeStateCall(options.result, args, call.span, state, (received, values, frame) => {
-        if (takesAllocator) received.allocator = allocatorState(values[0]);
-        return run(received, values.slice(takesAllocator ? 1 : 0), frame);
-      });
-    });
+    fnMember(
+      `${map.namespace.name}.${name}`,
+      (sema, call) => {
+        sema.resolveStorage(keyType, call.span);
+        sema.resolveStorage(valueType, call.span);
+        if (kind === 'auto' && options.args.includes(keyType)) {
+          validateAutoKey(sema, keyType, call.span);
+          validateEquality(sema, keyType, call.span);
+        }
+        const takesAllocator = options.allocates === true && !managed;
+        const expected = takesAllocator ? [ALLOCATOR, ...options.args] : options.args;
+        const args = compileArgs(sema, expectArgs(sema, call, expected.length, name), expected);
+        const state = stateOf(sema, call.receiver, map, call.span, options.mutable);
+        return nativeStateCall(options.result, args, call.span, state, (received, values, frame) => {
+          if (takesAllocator) received.allocator = allocatorState(values[0]);
+          return run(received, values.slice(takesAllocator ? 1 : 0), frame);
+        });
+      },
+      () => ({
+        type: fnType(
+          [
+            name === 'iterator' ? pointerTo(map, true) : options.mutable ? pointerTo(map, false) : map,
+            ...(options.allocates && !managed ? [ALLOCATOR] : []),
+            ...options.args,
+          ],
+          options.result
+        ),
+        receiver: true,
+      })
+    );
   const members: Record<string, () => Member> = {
     Entry: () => ({ type: TYPE, value: entry }),
     KV: () => ({ type: TYPE, value: kv }),
@@ -626,10 +642,14 @@ function defineMembers(types: MapTypes, keyType: Type, valueType: Type, kind: Ke
     ),
   };
   if (managed) {
-    members.init = fnMember(`${map.namespace.name}.init`, (sema, call) => {
-      const [allocator] = compileArgs(sema, expectArgs(sema, call, 1, 'init'), [ALLOCATOR]);
-      return nativeCall(map, [allocator], call.span, ([value]) => emptyMapValue(value));
-    });
+    members.init = fnMember(
+      `${map.namespace.name}.init`,
+      (sema, call) => {
+        const [allocator] = compileArgs(sema, expectArgs(sema, call, 1, 'init'), [ALLOCATOR]);
+        return nativeCall(map, [allocator], call.span, ([value]) => emptyMapValue(value));
+      },
+      () => ({ type: fnType([ALLOCATOR], map) })
+    );
   } else {
     members.empty = () => ({ type: map, value: emptyMapValue() });
   }
@@ -685,25 +705,23 @@ function nextMember(
   run: (iteratorState: ZStruct, frame: Frame) => Value
 ): Record<string, () => Member> {
   return {
-    next: fnMember(`${type.namespace.name}.next`, (sema, call) => {
-      expectArgs(sema, call, 0, 'next');
-      const receiver = call.receiver;
-      if (!receiver) return sema.error(call.span, 'イテレータに対して呼び出してください。');
-      let pointer = receiver;
-      if (receiver.type === type) pointer = sema.addressOf(receiver);
-      if (pointer.type.kind !== 'pointer' || pointer.type.child !== type)
-        return sema.error(call.span, 'イテレータに対して呼び出してください。');
-      if (pointer.type.isConst) sema.error(call.span, 'イテレータは var で宣言してください。');
-      const evaluate = pointer.eval;
-      return runtime(
-        result,
-        (frame) => {
-          frame.runtime.spend();
-          return run((evaluate(frame) as Pointer).load() as ZStruct, frame);
-        },
-        call.span
-      );
-    }),
+    next: fnMember(
+      `${type.namespace.name}.next`,
+      (sema, call) => {
+        expectArgs(sema, call, 0, 'next');
+        const pointer = receiverAddress(sema, call, type);
+        const evaluate = pointer.eval;
+        return runtime(
+          result,
+          (frame) => {
+            frame.runtime.spend();
+            return run((evaluate(frame) as Pointer).load() as ZStruct, frame);
+          },
+          call.span
+        );
+      },
+      () => ({ type: fnType([pointerTo(type, false)], result), receiver: true })
+    ),
   };
 }
 

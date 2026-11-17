@@ -6,6 +6,7 @@ import { type Frame, withHeldValues } from '../runtime';
 import { copyForFrame, copyForStorage, known, runtime, type SemaApi, type TExpr, undefinedValue } from '../semaBase';
 import {
   errorUnionOf,
+  fnType,
   optionalOf,
   pointerTo,
   sliceOf,
@@ -183,51 +184,79 @@ function defineMembers(type: StructType, child: Type): void {
     options: { args: Type[]; result: Type; byValue?: boolean; allocator?: boolean },
     run: (list: List, args: Value[], frame: Frame) => Value
   ): (() => Member) =>
-    fnMember(`ArrayList.${name}`, (sema, call) => {
-      sema.resolveStorage(child, call.span);
-      const expected = options.allocator ? [ALLOCATOR, ...options.args] : options.args;
-      const args = compileArgs(sema, expectArgs(sema, call, expected.length, name), expected);
-      const list = receiverOf(sema, call.receiver, type, call.span, options.byValue !== true);
-      return nativeStateCall(
-        options.result,
-        args,
-        call.span,
-        (frame) => ({ receiver: options.byValue ? (copyForFrame(frame, list(frame), type) as ZStruct) : list(frame) }),
-        (state, values, frame) => {
-          const received = listOf(state.receiver, child, frame);
-          if (options.allocator) received.allocator = allocatorState(values[0]);
-          return run(received, options.allocator ? values.slice(1) : values, frame);
-        }
-      );
-    });
+    fnMember(
+      `ArrayList.${name}`,
+      (sema, call) => {
+        sema.resolveStorage(child, call.span);
+        const expected = options.allocator ? [ALLOCATOR, ...options.args] : options.args;
+        const args = compileArgs(sema, expectArgs(sema, call, expected.length, name), expected);
+        const list = receiverOf(sema, call.receiver, type, call.span, options.byValue !== true);
+        return nativeStateCall(
+          options.result,
+          args,
+          call.span,
+          (frame) => ({
+            receiver: options.byValue ? (copyForFrame(frame, list(frame), type) as ZStruct) : list(frame),
+          }),
+          (state, values, frame) => {
+            const received = listOf(state.receiver, child, frame);
+            if (options.allocator) received.allocator = allocatorState(values[0]);
+            return run(received, options.allocator ? values.slice(1) : values, frame);
+          }
+        );
+      },
+      () => ({
+        type: fnType(
+          [options.byValue ? type : pointerTo(type, false), ...(options.allocator ? [ALLOCATOR] : []), ...options.args],
+          options.result
+        ),
+        receiver: true,
+      })
+    );
   const mutateSlice = (name: 'appendSlice' | 'insertSlice' | 'replaceRange'): (() => Member) =>
-    fnMember(`ArrayList.${name}`, (sema, call) => {
-      sema.resolveStorage(child, call.span);
-      const params = [
-        ALLOCATOR,
-        ...(name === 'appendSlice' ? [] : [USIZE]),
-        ...(name === 'replaceRange' ? [USIZE] : []),
-        constItems,
-      ];
-      const args = compileArgs(sema, expectArgs(sema, call, params.length, name), params);
-      const list = receiverOf(sema, call.receiver, type, call.span, true);
-      const fn = sliceMutator(sema, child, type, name, call.span);
-      return nativeStateCall(
-        allocating(VOID),
-        args,
-        call.span,
-        (frame) => ({ receiver: list(frame) }),
-        (state, values, frame) => {
-          const received = listOf(state.receiver, child, frame);
-          received.allocator = allocatorState(values[0]);
-          const removed = name === 'replaceRange' ? (values[2] as bigint) : 0n;
-          if (removed > received.items.lengthValue) panic(PANIC.overflow);
-          const nextLength = received.items.lengthValue - removed + (values.at(-1) as Slice).lengthValue;
-          if (!ensureTotalCapacity(frame, received, nextLength, child)) return ERROR_OUT_OF_MEMORY;
-          return sema.callFunction(fn, [new Pointer({ slots: [state.receiver] }, 0), ...values.slice(1)], frame);
-        }
-      );
-    });
+    fnMember(
+      `ArrayList.${name}`,
+      (sema, call) => {
+        sema.resolveStorage(child, call.span);
+        const params = [
+          ALLOCATOR,
+          ...(name === 'appendSlice' ? [] : [USIZE]),
+          ...(name === 'replaceRange' ? [USIZE] : []),
+          constItems,
+        ];
+        const args = compileArgs(sema, expectArgs(sema, call, params.length, name), params);
+        const list = receiverOf(sema, call.receiver, type, call.span, true);
+        const fn = sliceMutator(sema, child, type, name, call.span);
+        return nativeStateCall(
+          allocating(VOID),
+          args,
+          call.span,
+          (frame) => ({ receiver: list(frame) }),
+          (state, values, frame) => {
+            const received = listOf(state.receiver, child, frame);
+            received.allocator = allocatorState(values[0]);
+            const removed = name === 'replaceRange' ? (values[2] as bigint) : 0n;
+            if (removed > received.items.lengthValue) panic(PANIC.overflow);
+            const nextLength = received.items.lengthValue - removed + (values.at(-1) as Slice).lengthValue;
+            if (!ensureTotalCapacity(frame, received, nextLength, child)) return ERROR_OUT_OF_MEMORY;
+            return sema.callFunction(fn, [new Pointer({ slots: [state.receiver] }, 0), ...values.slice(1)], frame);
+          }
+        );
+      },
+      () => ({
+        type: fnType(
+          [
+            pointerTo(type, false),
+            ALLOCATOR,
+            ...(name === 'appendSlice' ? [] : [USIZE]),
+            ...(name === 'replaceRange' ? [USIZE] : []),
+            constItems,
+          ],
+          allocating(VOID)
+        ),
+        receiver: true,
+      })
+    );
   const insertValues = (frame: Frame, list: List, at: bigint, input: Value[]): Value => {
     const count = BigInt(input.length);
     const length = list.items.lengthValue + count;
@@ -250,44 +279,56 @@ function defineMembers(type: StructType, child: Type): void {
   const members: Record<string, () => Member> = {
     Slice: () => ({ type: TYPE, value: items }),
     empty: () => ({ type, value: emptyList() }),
-    initCapacity: fnMember('ArrayList.initCapacity', (sema, call) => {
-      sema.resolveStorage(child, call.span);
-      const [allocator, count] = compileArgs(sema, expectArgs(sema, call, 2, 'initCapacity'), [ALLOCATOR, USIZE]);
-      const evaluate = count.eval;
-      const evaluateAllocator = allocator.eval;
-      return runtime(
-        allocating(type),
-        (frame) => {
-          const list = listOf(emptyList(), child, frame);
-          list.allocator = allocatorState(evaluateAllocator(frame));
-          if (!reallocate(frame, list, evaluate(frame) as bigint, child)) return ERROR_OUT_OF_MEMORY;
-          return list.struct;
-        },
-        call.span
-      );
-    }),
-    initBuffer: fnMember('ArrayList.initBuffer', (sema, call) => {
-      const [buffer] = compileArgs(sema, expectArgs(sema, call, 1, 'initBuffer'), [items]);
-      return runtime(
-        type,
-        (frame) => {
-          const slice = buffer.eval(frame) as Slice;
-          return new ZStruct([new Slice(slice.target, slice.start, 0), slice.lengthValue, new ZStruct([0n])]);
-        },
-        call.span
-      );
-    }),
-    fromOwnedSlice: fnMember('ArrayList.fromOwnedSlice', (sema, call) => {
-      const [slice] = compileArgs(sema, expectArgs(sema, call, 1, 'fromOwnedSlice'), [items]);
-      return runtime(
-        type,
-        (frame) => {
-          const value = slice.eval(frame) as Slice;
-          return new ZStruct([value, value.lengthValue, new ZStruct([0n])]);
-        },
-        call.span
-      );
-    }),
+    initCapacity: fnMember(
+      'ArrayList.initCapacity',
+      (sema, call) => {
+        sema.resolveStorage(child, call.span);
+        const [allocator, count] = compileArgs(sema, expectArgs(sema, call, 2, 'initCapacity'), [ALLOCATOR, USIZE]);
+        const evaluate = count.eval;
+        const evaluateAllocator = allocator.eval;
+        return runtime(
+          allocating(type),
+          (frame) => {
+            const list = listOf(emptyList(), child, frame);
+            list.allocator = allocatorState(evaluateAllocator(frame));
+            if (!reallocate(frame, list, evaluate(frame) as bigint, child)) return ERROR_OUT_OF_MEMORY;
+            return list.struct;
+          },
+          call.span
+        );
+      },
+      () => ({ type: fnType([ALLOCATOR, USIZE], allocating(type)) })
+    ),
+    initBuffer: fnMember(
+      'ArrayList.initBuffer',
+      (sema, call) => {
+        const [buffer] = compileArgs(sema, expectArgs(sema, call, 1, 'initBuffer'), [items]);
+        return runtime(
+          type,
+          (frame) => {
+            const slice = buffer.eval(frame) as Slice;
+            return new ZStruct([new Slice(slice.target, slice.start, 0), slice.lengthValue, new ZStruct([0n])]);
+          },
+          call.span
+        );
+      },
+      () => ({ type: fnType([items], type) })
+    ),
+    fromOwnedSlice: fnMember(
+      'ArrayList.fromOwnedSlice',
+      (sema, call) => {
+        const [slice] = compileArgs(sema, expectArgs(sema, call, 1, 'fromOwnedSlice'), [items]);
+        return runtime(
+          type,
+          (frame) => {
+            const value = slice.eval(frame) as Slice;
+            return new ZStruct([value, value.lengthValue, new ZStruct([0n])]);
+          },
+          call.span
+        );
+      },
+      () => ({ type: fnType([items], type) })
+    ),
     deinit: method('deinit', { args: [], result: VOID, allocator: true }, (list) => {
       freeList(list);
       return;
@@ -379,19 +420,24 @@ function defineMembers(type: StructType, child: Type): void {
       setLength(list, length as bigint);
       return;
     }),
-    orderedRemoveMany: fnMember('ArrayList.orderedRemoveMany', (sema, call) => {
-      sema.resolveStorage(child, call.span);
-      const args = compileArgs(sema, expectArgs(sema, call, 1, 'orderedRemoveMany'), [sliceOf(USIZE, true)]);
-      const list = receiverOf(sema, call.receiver, type, call.span, true);
-      const fn = orderedRemover(sema, child, type, call.span);
-      return nativeStateCall(
-        VOID,
-        args,
-        call.span,
-        (frame) => ({ receiver: list(frame) }),
-        (state, values, frame) => sema.callFunction(fn, [new Pointer({ slots: [state.receiver] }, 0), values[0]], frame)
-      );
-    }),
+    orderedRemoveMany: fnMember(
+      'ArrayList.orderedRemoveMany',
+      (sema, call) => {
+        sema.resolveStorage(child, call.span);
+        const args = compileArgs(sema, expectArgs(sema, call, 1, 'orderedRemoveMany'), [sliceOf(USIZE, true)]);
+        const list = receiverOf(sema, call.receiver, type, call.span, true);
+        const fn = orderedRemover(sema, child, type, call.span);
+        return nativeStateCall(
+          VOID,
+          args,
+          call.span,
+          (frame) => ({ receiver: list(frame) }),
+          (state, values, frame) =>
+            sema.callFunction(fn, [new Pointer({ slots: [state.receiver] }, 0), values[0]], frame)
+        );
+      },
+      () => ({ type: fnType([pointerTo(type, false), sliceOf(USIZE, true)], VOID), receiver: true })
+    ),
     shrinkAndFree: method(
       'shrinkAndFree',
       { args: [USIZE], result: VOID, allocator: true },

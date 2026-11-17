@@ -12,6 +12,7 @@ import {
   errorSetOf,
   errorUnionOf,
   fitsInt,
+  fnType,
   intType,
   optionalOf,
   pointerTo,
@@ -439,27 +440,41 @@ function priorityQueueType(element: Type, context: Type, compareExpression: TExp
     run: (frame: Frame, queue: ZStruct, values: Value[], allocator: AllocatorState | undefined, state: State) => Value,
     prepare?: (sema: SemaApi, span: Span) => State
   ): (() => Member) =>
-    fnMember(`PriorityQueue.${name}`, (sema, call) => {
-      sema.resolveStorage(element, call.span);
-      const prepared = prepare?.(sema, call.span) as State;
-      const expected = allocator ? [ALLOCATOR, ...args] : args;
-      const compiled = compileArgs(sema, expectArgs(sema, call, expected.length, name), expected);
-      const queue = structReceiver(sema, call, type, !['peek', 'count', 'capacity'].includes(name));
-      return nativeStateCall(
-        result,
-        compiled,
-        call.span,
-        (frame) => ({ receiver: queue(frame) }),
-        (state, values, frame) =>
-          run(
-            frame,
-            state.receiver,
-            values.slice(allocator ? 1 : 0),
-            allocator ? allocatorState(values[0]) : undefined,
-            prepared
-          )
-      );
-    });
+    fnMember(
+      `PriorityQueue.${name}`,
+      (sema, call) => {
+        sema.resolveStorage(element, call.span);
+        const prepared = prepare?.(sema, call.span) as State;
+        const expected = allocator ? [ALLOCATOR, ...args] : args;
+        const compiled = compileArgs(sema, expectArgs(sema, call, expected.length, name), expected);
+        const queue = structReceiver(sema, call, type, !['peek', 'count', 'capacity'].includes(name));
+        return nativeStateCall(
+          result,
+          compiled,
+          call.span,
+          (frame) => ({ receiver: queue(frame) }),
+          (state, values, frame) =>
+            run(
+              frame,
+              state.receiver,
+              values.slice(allocator ? 1 : 0),
+              allocator ? allocatorState(values[0]) : undefined,
+              prepared
+            )
+        );
+      },
+      () => ({
+        type: fnType(
+          [
+            ['peek', 'count', 'capacity'].includes(name) ? type : pointerTo(type, false),
+            ...(allocator ? [ALLOCATOR] : []),
+            ...args,
+          ],
+          result
+        ),
+        receiver: true,
+      })
+    );
   const comparingMethod = (
     name: string,
     args: Type[],
@@ -515,10 +530,14 @@ function priorityQueueType(element: Type, context: Type, compareExpression: TExp
   };
   addMembers(type, {
     empty: () => ({ type, value: new ZStruct([new Slice(new ZArray([]), 0, 0), 0n, undefinedValue(context)]) }),
-    initContext: fnMember('PriorityQueue.initContext', (sema, call) => {
-      const [ctx] = compileArgs(sema, expectArgs(sema, call, 1, 'initContext'), [context]);
-      return computed(type, [ctx], call.span, ([value]) => new ZStruct([new Slice(new ZArray([]), 0, 0), 0n, value]));
-    }),
+    initContext: fnMember(
+      'PriorityQueue.initContext',
+      (sema, call) => {
+        const [ctx] = compileArgs(sema, expectArgs(sema, call, 1, 'initContext'), [context]);
+        return computed(type, [ctx], call.span, ([value]) => new ZStruct([new Slice(new ZArray([]), 0, 0), 0n, value]));
+      },
+      () => ({ type: fnType([context], type) })
+    ),
     deinit: method('deinit', [], VOID, true, (_, queue, _args, allocator) => {
       if ((queue.slots[1] as bigint) > 0n) freeMemory(allocator, (queue.slots[0] as Slice).target);
       queue.slots[0] = new Slice(new ZArray([]), 0, 0);

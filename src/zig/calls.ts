@@ -4,6 +4,7 @@ import type { Expression, ExpressionOf, FunctionDeclaration, SourceFile, Span } 
 import { BuiltinCompiler } from './builtins';
 import { constantKey } from './expressions';
 import { FunctionInstance } from './functions';
+import { callableNative } from './nativeAdapter';
 import { Frame, Jump } from './runtime';
 import {
   addDecls,
@@ -109,6 +110,12 @@ export abstract class CallCompiler extends BuiltinCompiler {
   ): TExpr {
     const value = callee.value as unknown;
     if (callee.known && value instanceof NativeFn) {
+      if (value.signature?.receiver && !receiver)
+        return this.callPointer(
+          known(value.signature.type, new FnValue(callableNative(this, value, expression)), expression),
+          value.signature.type,
+          expression
+        );
       const result = value.compileCall(this, {
         span: expression,
         args: expression.args,
@@ -437,10 +444,10 @@ export abstract class CallCompiler extends BuiltinCompiler {
     this.checkMemoryOperand(value, span);
     this.analyzeFunction(value, span);
     const ref = value.value as unknown;
-    if (value.known && ref instanceof FnRef) {
-      const instance = this.instantiate(ref, [], span);
+    if (value.known && (ref instanceof FnRef || (ref instanceof NativeFn && ref.signature))) {
+      const instance = ref instanceof NativeFn ? callableNative(this, ref, span) : this.instantiate(ref, [], span);
       return {
-        call: (frame, args) => this.invoke(instance, args, span.row, frame),
+        call: (frame, args) => this.invoke(instance, args, frame.nativeCallRow ?? span.row, frame),
         params: instance.params,
         returnType: instance.returnType,
       };
@@ -451,7 +458,7 @@ export abstract class CallCompiler extends BuiltinCompiler {
     if (!fnType) return this.error(span, `関数が必要ですが、${typeName(type)} 型の値です。`);
     const evaluate = value.eval;
     return {
-      call: (frame, args) => this.invoke((evaluate(frame) as FnValue).fn, args, span.row, frame),
+      call: (frame, args) => this.invoke((evaluate(frame) as FnValue).fn, args, frame.nativeCallRow ?? span.row, frame),
       params: fnType.params,
       returnType: fnType.returnType,
     };
@@ -486,6 +493,8 @@ export abstract class CallCompiler extends BuiltinCompiler {
       namespace = { name: options.namespaceName ?? 'std.sort.block', internal: true, decls: new Map() };
       addDecls(namespace, file.members);
       namespace.decls.set('T', { kind: 'native', name: 'T', resolve: () => ({ type: TYPE, value: element }) });
+      for (const [name, member] of Object.entries(options.members ?? {}))
+        namespace.decls.set(name, { kind: 'native', name, resolve: () => member });
       types.set(element, namespace);
     }
     const decl = namespace.decls.get(name);
@@ -505,7 +514,8 @@ export abstract class CallCompiler extends BuiltinCompiler {
     rt.spend();
     if (fn.native) return copyForFrame(caller, fn.native(args, caller), fn.returnType);
     if (!fn.body) return panic('関数がまだ準備できていません。');
-    const frame = new Frame(rt, fn, fn.internal ? undefined : callRow, fn.slotCount);
+    const origin = caller.fn.internal ? caller.nativeCallRow : callRow;
+    const frame = new Frame(rt, fn, fn.internal ? undefined : callRow, fn.slotCount, fn.internal ? origin : undefined);
     for (const [index, slot] of fn.paramSlots.entries())
       frame.slots[slot] = argumentsHaveStorage ? args[index] : copyForFrame(frame, args[index], fn.params[index]);
     rt.pushFrame(frame);

@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 783 -- The file holds one layer of the compiler, whose parts share its private state.
+// code-gauge-allow-file fileNcss 784 -- The file holds one layer of the compiler, whose parts share its private state.
 import type { Node } from '@willbooster/web-tree-sitter';
 
 import { CompileError } from '../interpreter/diagnostics';
@@ -630,12 +630,13 @@ export function expression(node: Node): Expression {
       const errorSet = node.childForFieldName('error');
       const ok = node.childForFieldName('ok') as Node;
       if (!errorSet) fail(node, '書き方に誤りがあります。');
-      return {
+      const payload = typeExpression(ok);
+      return intoPrefixType(typeExpression(errorSet), (inner) => ({
         kind: 'errorUnionType',
         ...span,
-        errorSet: typeExpression(errorSet),
-        payload: typeExpression(ok),
-      };
+        errorSet: inner,
+        payload,
+      }));
     }
     case 'error_set_declaration': {
       const names = node.namedChildren
@@ -715,8 +716,8 @@ function single(captures: Capture[], node: Node): Capture {
 const COMPARISONS = new Set(['==', '!=', '<', '>', '<=', '>=']);
 
 /**
- * Applies a field access or call to the operand of a prefix type such as `*std.Io.Writer`. tree-sitter's grammar binds
- * `*`, `?`, `[]`, and `[N]` tighter than `.` and calls (`(*std).Io.Writer`), while Zig's binds them looser.
+ * Applies a field access, call, or error-union suffix to the operand of a prefix type such as `*std.Io.Writer`. tree-sitter's grammar binds
+ * `*`, `?`, `[]`, and `[N]` tighter than `.`, calls, and named error-union suffixes (`(*std).Io.Writer`), while Zig's binds them looser.
  */
 function intoPrefixType(object: Expression, build: (inner: Expression) => Expression): Expression {
   switch (object.kind) {

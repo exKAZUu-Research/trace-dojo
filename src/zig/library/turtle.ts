@@ -2,7 +2,7 @@ import { TURTLE_METHOD_NAMES, type TurtleState } from '../../interpreter/turtleW
 import { panic } from '../arith';
 import { bytesToText } from '../builtins';
 import { type NativeCall, runtime, type SemaApi, type TExpr } from '../semaBase';
-import { BOOL, CONST_U8_SLICE, type StructType, type Type, typeName, VOID } from '../types';
+import { BOOL, CONST_U8_SLICE, fnType, type StructType, type Type, typeName, VOID } from '../types';
 import { NativeHandle, Pointer, type Value } from '../values';
 import { expectArgs, fnMember, type Member, nativeStruct } from './native';
 
@@ -104,25 +104,30 @@ function compileInit(sema: SemaApi, call: NativeCall): TExpr {
   );
 }
 
+// code-gauge-allow duplicateLines 18 -- Method registration repeats scaffolding while receiver and runtime state representations differ.
 function method(
   name: string,
   returnType: Type,
   run: (state: TurtleState, frame: Parameters<TExpr['eval']>[0]) => Value
 ): () => Member {
-  return fnMember(`Turtle.${name}`, (sema, call) => {
-    expectArgs(sema, call, 0, name);
-    const receiver = call.receiver;
-    if (!receiver) return sema.error(call.span, `${name} は、亀（Turtle の値）に対して呼び出してください。`);
-    const evaluate = receiver.eval;
-    return runtime(
-      returnType,
-      (frame) => {
-        frame.runtime.spend();
-        return run(turtleState(evaluate(frame)), frame);
-      },
-      call.span
-    );
-  });
+  return fnMember(
+    `Turtle.${name}`,
+    (sema, call) => {
+      expectArgs(sema, call, 0, name);
+      const receiver = call.receiver;
+      if (!receiver) return sema.error(call.span, `${name} は、亀（Turtle の値）に対して呼び出してください。`);
+      const evaluate = receiver.eval;
+      return runtime(
+        returnType,
+        (frame) => {
+          frame.runtime.spend();
+          return run(turtleState(evaluate(frame)), frame);
+        },
+        call.span
+      );
+    },
+    () => ({ type: fnType([TURTLE], returnType), receiver: true })
+  );
 }
 
 function turtleState(value: Value): TurtleState {

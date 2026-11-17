@@ -587,3 +587,26 @@ while(i<${count}):(i+=1){a[i%${length}]+=1;}
   expect(result.traceItems).toHaveLength(count * 2 + 3);
   expect(result.traceItems.every((item) => item.referenceVars['…'] === undefined)).toBe(true);
 });
+
+test('stored native methods preserve callback call lines without adapter frames', () => {
+  const source = `const std=@import("std");
+fn compare(_:void,a:u8,b:u8)std.math.Order{
+    const marker:u8=1;
+    _=marker;
+    return std.math.order(a,b);
+}
+const Q=std.PriorityQueue(u8,void,compare);
+pub fn main(init:std.process.Init)!void{
+    var q:Q=.empty;
+    defer q.deinit(init.gpa);
+    const append:*const fn(*Q,std.mem.Allocator,u8)std.mem.Allocator.Error!void=Q.push;
+    try append(&q,init.gpa,2);
+    try append(&q,init.gpa,1);
+}`;
+  const result = traceProgram('zig', source, source);
+  const callLine = source.split('\n').findIndex((line) => line.includes('try append(&q,init.gpa,1)')) + 1;
+  expect(result.uncaughtException).toBeUndefined();
+  const callbacks = result.traceItems.filter((item) => item.vars.marker === 1);
+  expect(callbacks.length).toBeGreaterThan(0);
+  expect(callbacks.every((item) => item.callLines.length === 1 && item.callLines[0] === callLine)).toBe(true);
+});

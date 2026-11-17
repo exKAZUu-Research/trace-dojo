@@ -6,6 +6,7 @@ import {
   errorSetOf,
   errorUnionOf,
   fitsInt,
+  fnType,
   type IntType,
   intType,
   sliceOf,
@@ -182,13 +183,17 @@ const MEMBERS: Record<string, () => Member> = {
       return parseFloat(bytes, type);
     });
   }),
-  charToDigit: fnMember('std.fmt.charToDigit', (sema, call) => {
-    const [c, base] = compileArgs(sema, expectArgs(sema, call, 2, 'std.fmt.charToDigit'), [U8, U8]);
-    return computed(errorUnionOf(errorSetOf(['InvalidCharacter']), U8), [c, base], call.span, ([value, radix]) => {
-      const digit = charToDigit(Number(value as bigint), Number(radix as bigint));
-      return digit === undefined ? INVALID_CHARACTER : BigInt(digit);
-    });
-  }),
+  charToDigit: fnMember(
+    'std.fmt.charToDigit',
+    (sema, call) => {
+      const [c, base] = compileArgs(sema, expectArgs(sema, call, 2, 'std.fmt.charToDigit'), [U8, U8]);
+      return computed(errorUnionOf(errorSetOf(['InvalidCharacter']), U8), [c, base], call.span, ([value, radix]) => {
+        const digit = charToDigit(Number(value as bigint), Number(radix as bigint));
+        return digit === undefined ? INVALID_CHARACTER : BigInt(digit);
+      });
+    },
+    () => ({ type: fnType([U8, U8], errorUnionOf(errorSetOf(['InvalidCharacter']), U8)) })
+  ),
   bufPrint: fnMember('std.fmt.bufPrint', (sema, call) => {
     const [bufferArg, format, args] = expectArgs(sema, call, 3, 'std.fmt.bufPrint');
     const buffer = mutableSlice(sema, bufferArg, U8);
@@ -248,16 +253,20 @@ const MEMBERS: Record<string, () => Member> = {
       call.span
     );
   }),
-  digitToChar: fnMember('std.fmt.digitToChar', (sema, call) => {
-    const [digitArg, caseArg] = expectArgs(sema, call, 2, 'std.fmt.digitToChar');
-    const [digit, letterCase] = compileArgs(sema, [digitArg, caseArg], [U8, CASE]);
-    return computed(U8, [digit, letterCase], call.span, ([value, selectedCase]) => {
-      const offset = selectedCase === 1n ? 0x41 : 0x61;
-      const d = Number(value as bigint);
-      if (d >= 36) panic(PANIC.unreachable);
-      return BigInt(d < 10 ? d + 0x30 : d + offset - 10);
-    });
-  }),
+  digitToChar: fnMember(
+    'std.fmt.digitToChar',
+    (sema, call) => {
+      const [digitArg, caseArg] = expectArgs(sema, call, 2, 'std.fmt.digitToChar');
+      const [digit, letterCase] = compileArgs(sema, [digitArg, caseArg], [U8, CASE]);
+      return computed(U8, [digit, letterCase], call.span, ([value, selectedCase]) => {
+        const offset = selectedCase === 1n ? 0x41 : 0x61;
+        const d = Number(value as bigint);
+        if (d >= 36) panic(PANIC.unreachable);
+        return BigInt(d < 10 ? d + 0x30 : d + offset - 10);
+      });
+    },
+    () => ({ type: fnType([U8, CASE], U8) })
+  ),
 };
 
 let fmt: StructType | undefined;

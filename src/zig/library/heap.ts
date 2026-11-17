@@ -25,6 +25,7 @@ import {
   type EnumType,
   errorSetOf,
   errorUnionOf,
+  fnType,
   pointerTo,
   sliceOf,
   type StructType,
@@ -310,13 +311,17 @@ function allocatorInstanceType(
   const type = nativeStruct(
     name,
     {
-      allocator: fnMember(`${name}.allocator`, (sema, call) => {
-        expectArgs(sema, call, 0, 'allocator');
-        const owner = instancePointer(sema, call, type);
-        return nativeCall(ALLOCATOR, [owner], call.span, ([pointer]) =>
-          handle('allocator', { name: kind, owner: pointer as Pointer })
-        );
-      }),
+      allocator: fnMember(
+        `${name}.allocator`,
+        (sema, call) => {
+          expectArgs(sema, call, 0, 'allocator');
+          const owner = instancePointer(sema, call, type);
+          return nativeCall(ALLOCATOR, [owner], call.span, ([pointer]) =>
+            handle('allocator', { name: kind, owner: pointer as Pointer })
+          );
+        },
+        () => ({ type: fnType([pointerTo(type, false)], ALLOCATOR), receiver: true })
+      ),
       ...members,
     },
     fields.map((field) => ({ ...field, hasDefault: 'defaultValue' in field }))
@@ -343,14 +348,18 @@ const DEBUG_ALLOCATOR: StructType = allocatorInstanceType(
   [{ name: 'live', type: USIZE, defaultValue: 0n }],
   {
     init: () => ({ type: DEBUG_ALLOCATOR_TYPE(), value: new ZStruct([0n]) }),
-    deinit: fnMember('DebugAllocator.deinit', (sema, call) => {
-      expectArgs(sema, call, 0, 'deinit');
-      const owner = instancePointer(sema, call, DEBUG_ALLOCATOR);
-      return nativeCall(CHECK, [owner], call.span, ([pointer]) => {
-        const struct = (pointer as Pointer).load() as ZStruct;
-        return (struct.slots[0] as bigint) > 0n ? 1n : 0n;
-      });
-    }),
+    deinit: fnMember(
+      'DebugAllocator.deinit',
+      (sema, call) => {
+        expectArgs(sema, call, 0, 'deinit');
+        const owner = instancePointer(sema, call, DEBUG_ALLOCATOR);
+        return nativeCall(CHECK, [owner], call.span, ([pointer]) => {
+          const struct = (pointer as Pointer).load() as ZStruct;
+          return (struct.slots[0] as bigint) > 0n ? 1n : 0n;
+        });
+      },
+      () => ({ type: fnType([pointerTo(DEBUG_ALLOCATOR, false)], CHECK), receiver: true })
+    ),
   }
 );
 
@@ -391,32 +400,50 @@ const ARENA_ALLOCATOR: StructType = allocatorInstanceType(
   {
     State: typeMember(() => ARENA_STATE),
     ResetMode: typeMember(() => ARENA_RESET_MODE),
-    init: fnMember('ArenaAllocator.init', (sema, call) => {
-      const [child] = compileArgs(sema, expectArgs(sema, call, 1, 'ArenaAllocator.init'), [ALLOCATOR]);
-      return nativeCall(ARENA_ALLOCATOR, [child], call.span, ([value]) => arenaValue(value));
-    }),
-    deinit: fnMember('ArenaAllocator.deinit', (sema, call) => {
-      expectArgs(sema, call, 0, 'deinit');
-      const value = instanceValue(sema, call, ARENA_ALLOCATOR);
-      return nativeCall(VOID, [value], call.span, ([arena], frame) => {
-        deinitArena(frame, arena as ZStruct);
-        return;
-      });
-    }),
-    queryCapacity: fnMember('ArenaAllocator.queryCapacity', (sema, call) => {
-      expectArgs(sema, call, 0, 'queryCapacity');
-      const value = instanceValue(sema, call, ARENA_ALLOCATOR);
-      return nativeCall(USIZE, [value], call.span, ([arena], frame) => BigInt(arenaCapacity(frame, arena as ZStruct)));
-    }),
-    reset: fnMember('ArenaAllocator.reset', (sema, call) => {
-      const owner = instancePointer(sema, call, ARENA_ALLOCATOR);
-      const [mode] = compileArgs(sema, expectArgs(sema, call, 1, 'reset'), [ARENA_RESET_MODE]);
-      return nativeCall(BOOL, [owner, mode], call.span, ([pointer, value], frame) => {
-        const reset = value as ZUnion;
-        const limit = reset.tag === 0 ? 0 : reset.tag === 2 ? Number(reset.slots[0] as bigint) : undefined;
-        return resetArena(frame, (pointer as Pointer).load() as ZStruct, limit);
-      });
-    }),
+    init: fnMember(
+      'ArenaAllocator.init',
+      (sema, call) => {
+        const [child] = compileArgs(sema, expectArgs(sema, call, 1, 'ArenaAllocator.init'), [ALLOCATOR]);
+        return nativeCall(ARENA_ALLOCATOR, [child], call.span, ([value]) => arenaValue(value));
+      },
+      () => ({ type: fnType([ALLOCATOR], ARENA_ALLOCATOR) })
+    ),
+    deinit: fnMember(
+      'ArenaAllocator.deinit',
+      (sema, call) => {
+        expectArgs(sema, call, 0, 'deinit');
+        const value = instanceValue(sema, call, ARENA_ALLOCATOR);
+        return nativeCall(VOID, [value], call.span, ([arena], frame) => {
+          deinitArena(frame, arena as ZStruct);
+          return;
+        });
+      },
+      () => ({ type: fnType([ARENA_ALLOCATOR], VOID), receiver: true })
+    ),
+    queryCapacity: fnMember(
+      'ArenaAllocator.queryCapacity',
+      (sema, call) => {
+        expectArgs(sema, call, 0, 'queryCapacity');
+        const value = instanceValue(sema, call, ARENA_ALLOCATOR);
+        return nativeCall(USIZE, [value], call.span, ([arena], frame) =>
+          BigInt(arenaCapacity(frame, arena as ZStruct))
+        );
+      },
+      () => ({ type: fnType([ARENA_ALLOCATOR], USIZE), receiver: true })
+    ),
+    reset: fnMember(
+      'ArenaAllocator.reset',
+      (sema, call) => {
+        const owner = instancePointer(sema, call, ARENA_ALLOCATOR);
+        const [mode] = compileArgs(sema, expectArgs(sema, call, 1, 'reset'), [ARENA_RESET_MODE]);
+        return nativeCall(BOOL, [owner, mode], call.span, ([pointer, value], frame) => {
+          const reset = value as ZUnion;
+          const limit = reset.tag === 0 ? 0 : reset.tag === 2 ? Number(reset.slots[0] as bigint) : undefined;
+          return resetArena(frame, (pointer as Pointer).load() as ZStruct, limit);
+        });
+      },
+      () => ({ type: fnType([pointerTo(ARENA_ALLOCATOR, false), ARENA_RESET_MODE], BOOL), receiver: true })
+    ),
   }
 );
 
@@ -432,18 +459,28 @@ const FIXED_BUFFER_ALLOCATOR: StructType = allocatorInstanceType(
     { name: 'buffer', type: sliceOf(U8, false) },
   ],
   {
-    init: fnMember('FixedBufferAllocator.init', (sema, call) => {
-      const [buffer] = compileArgs(sema, expectArgs(sema, call, 1, 'FixedBufferAllocator.init'), [sliceOf(U8, false)]);
-      return nativeCall(FIXED_BUFFER_ALLOCATOR, [buffer], call.span, ([slice]) => new ZStruct([0n, slice]));
-    }),
-    reset: fnMember('FixedBufferAllocator.reset', (sema, call) => {
-      expectArgs(sema, call, 0, 'reset');
-      const owner = instancePointer(sema, call, FIXED_BUFFER_ALLOCATOR);
-      return nativeCall(VOID, [owner], call.span, ([pointer]) => {
-        ((pointer as Pointer).load() as ZStruct).slots[0] = 0n;
-        return;
-      });
-    }),
+    init: fnMember(
+      'FixedBufferAllocator.init',
+      (sema, call) => {
+        const [buffer] = compileArgs(sema, expectArgs(sema, call, 1, 'FixedBufferAllocator.init'), [
+          sliceOf(U8, false),
+        ]);
+        return nativeCall(FIXED_BUFFER_ALLOCATOR, [buffer], call.span, ([slice]) => new ZStruct([0n, slice]));
+      },
+      () => ({ type: fnType([sliceOf(U8, false)], FIXED_BUFFER_ALLOCATOR) })
+    ),
+    reset: fnMember(
+      'FixedBufferAllocator.reset',
+      (sema, call) => {
+        expectArgs(sema, call, 0, 'reset');
+        const owner = instancePointer(sema, call, FIXED_BUFFER_ALLOCATOR);
+        return nativeCall(VOID, [owner], call.span, ([pointer]) => {
+          ((pointer as Pointer).load() as ZStruct).slots[0] = 0n;
+          return;
+        });
+      },
+      () => ({ type: fnType([pointerTo(FIXED_BUFFER_ALLOCATOR, false)], VOID), receiver: true })
+    ),
   }
 );
 

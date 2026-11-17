@@ -6,9 +6,11 @@ import {
   arrayOf,
   BOOL,
   fitsInt,
+  fnType,
   type IntType,
   intType,
   maxInt,
+  pointerTo,
   sliceOf,
   type StructType,
   TYPE,
@@ -262,39 +264,51 @@ function randomSource(frame: Frame, state: ZArray): RandomSource {
 }
 
 addMembers(XOSHIRO, {
-  init: fnMember('Xoshiro256.init', (sema, call) => {
-    const [seed] = compileArgs(sema, expectArgs(sema, call, 1, 'init'), [U64]);
-    const evaluate = seed.eval;
-    return runtime(
-      XOSHIRO,
-      (frame) => {
-        const state = { s: evaluate(frame) as bigint };
-        return new ZStruct([new ZArray([splitMix(state), splitMix(state), splitMix(state), splitMix(state)])]);
-      },
-      call.span
-    );
-  }),
-  next: fnMember('Xoshiro256.next', (sema, call) => {
-    expectArgs(sema, call, 0, 'next');
-    const state = xoshiroState(sema, call.receiver, call.span);
-    return runtime(U64, (frame) => randomSource(frame, state(frame)).next(), call.span);
-  }),
-  random: fnMember('Xoshiro256.random', (sema, call) => {
-    expectArgs(sema, call, 0, 'random');
-    const receiver = call.receiver;
-    if (!receiver) return sema.error(call.span, 'std.Random.DefaultPrng の値に対して呼び出してください。');
-    let pointer = receiver;
-    if (receiver.type === XOSHIRO) pointer = sema.addressOf(receiver);
-    if (pointer.type.kind !== 'pointer' || pointer.type.child !== XOSHIRO || pointer.type.isConst) {
-      return sema.error(call.span, '乱数の生成器は var で宣言してください。');
-    }
-    const evaluate = pointer.eval;
-    return runtime(
-      RANDOM,
-      (frame) => new ZStruct([new NativeHandle('random', { generator: evaluate(frame) })]),
-      call.span
-    );
-  }),
+  init: fnMember(
+    'Xoshiro256.init',
+    (sema, call) => {
+      const [seed] = compileArgs(sema, expectArgs(sema, call, 1, 'init'), [U64]);
+      const evaluate = seed.eval;
+      return runtime(
+        XOSHIRO,
+        (frame) => {
+          const state = { s: evaluate(frame) as bigint };
+          return new ZStruct([new ZArray([splitMix(state), splitMix(state), splitMix(state), splitMix(state)])]);
+        },
+        call.span
+      );
+    },
+    () => ({ type: fnType([U64], XOSHIRO) })
+  ),
+  next: fnMember(
+    'Xoshiro256.next',
+    (sema, call) => {
+      expectArgs(sema, call, 0, 'next');
+      const state = xoshiroState(sema, call.receiver, call.span);
+      return runtime(U64, (frame) => randomSource(frame, state(frame)).next(), call.span);
+    },
+    () => ({ type: fnType([pointerTo(XOSHIRO, false)], U64), receiver: true })
+  ),
+  random: fnMember(
+    'Xoshiro256.random',
+    (sema, call) => {
+      expectArgs(sema, call, 0, 'random');
+      const receiver = call.receiver;
+      if (!receiver) return sema.error(call.span, 'std.Random.DefaultPrng の値に対して呼び出してください。');
+      let pointer = receiver;
+      if (receiver.type === XOSHIRO) pointer = sema.addressOf(receiver);
+      if (pointer.type.kind !== 'pointer' || pointer.type.child !== XOSHIRO || pointer.type.isConst) {
+        return sema.error(call.span, '乱数の生成器は var で宣言してください。');
+      }
+      const evaluate = pointer.eval;
+      return runtime(
+        RANDOM,
+        (frame) => new ZStruct([new NativeHandle('random', { generator: evaluate(frame) })]),
+        call.span
+      );
+    },
+    () => ({ type: fnType([pointerTo(XOSHIRO, false)], RANDOM), receiver: true })
+  ),
 });
 
 /** A method of `std.Random` whose first argument is an integer type. */
@@ -351,27 +365,35 @@ addMembers(RANDOM, {
   intRangeAtMostBiased: intMethod('intRangeAtMostBiased', 3, (state, type, [low, high]) =>
     intRange(state, type, low, high, true, true)
   ),
-  bytes: fnMember('Random.bytes', (sema, call) => {
-    const [buffer] = compileArgs(sema, expectArgs(sema, call, 1, 'bytes'), [sliceOf(U8, false)]);
-    const state = randomState(sema, call.receiver, call.span);
-    const evaluate = buffer.eval;
-    return runtime(
-      VOID,
-      (frame) => {
-        const generator = state(frame);
-        const slice = evaluate(frame) as Slice;
-        frame.runtime.spend(1 + slice.length);
-        for (const [index, byte] of fill(generator, slice.length).entries()) slice.set(index, BigInt(byte));
-        return;
-      },
-      call.span
-    );
-  }),
-  boolean: fnMember('Random.boolean', (sema, call) => {
-    expectArgs(sema, call, 0, 'boolean');
-    const state = randomState(sema, call.receiver, call.span);
-    return runtime(BOOL, (frame) => randomInt(state(frame), intType(false, 1)) !== 0n, call.span);
-  }),
+  bytes: fnMember(
+    'Random.bytes',
+    (sema, call) => {
+      const [buffer] = compileArgs(sema, expectArgs(sema, call, 1, 'bytes'), [sliceOf(U8, false)]);
+      const state = randomState(sema, call.receiver, call.span);
+      const evaluate = buffer.eval;
+      return runtime(
+        VOID,
+        (frame) => {
+          const generator = state(frame);
+          const slice = evaluate(frame) as Slice;
+          frame.runtime.spend(1 + slice.length);
+          for (const [index, byte] of fill(generator, slice.length).entries()) slice.set(index, BigInt(byte));
+          return;
+        },
+        call.span
+      );
+    },
+    () => ({ type: fnType([RANDOM, sliceOf(U8, false)], VOID), receiver: true })
+  ),
+  boolean: fnMember(
+    'Random.boolean',
+    (sema, call) => {
+      expectArgs(sema, call, 0, 'boolean');
+      const state = randomState(sema, call.receiver, call.span);
+      return runtime(BOOL, (frame) => randomInt(state(frame), intType(false, 1)) !== 0n, call.span);
+    },
+    () => ({ type: fnType([RANDOM], BOOL), receiver: true })
+  ),
   float: fnMember('Random.float', (sema, call) => {
     const [typeArg] = expectArgs(sema, call, 1, 'float');
     const type = sema.compileType(typeArg);

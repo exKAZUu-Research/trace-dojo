@@ -49,7 +49,8 @@ export class Frame implements Slots, TracedFrame {
     readonly runtime: Runtime,
     readonly fn: FunctionInstance,
     readonly callRow: number | undefined,
-    slotCount: number
+    slotCount: number,
+    readonly nativeCallRow?: number
   ) {
     this.slots = Array.from<Value>({ length: slotCount }).fill(UNASSIGNED);
   }

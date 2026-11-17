@@ -6,6 +6,7 @@ import {
   NATIVE_FN_TYPE,
   type NativeCall,
   NativeFn,
+  type NativeSignature,
   runtime,
   type SemaApi,
   type TExpr,
@@ -93,11 +94,18 @@ export function typeMember(type: () => Type): () => Member {
 }
 
 /** A namespace member that is a native function, analyzing its own calls. */
-export function fnMember(name: string, compileCall: (sema: SemaApi, call: NativeCall) => TExpr): () => Member {
-  return () => ({
-    type: NATIVE_FN_TYPE,
-    value: new NativeFn(name, compileCall) as unknown as Value,
-  });
+export function fnMember(
+  name: string,
+  compileCall: (sema: SemaApi, call: NativeCall) => TExpr,
+  signature?: NativeSignature | (() => NativeSignature)
+): () => Member {
+  return () => {
+    const concrete = typeof signature === 'function' ? signature() : signature;
+    return {
+      type: concrete?.type ?? NATIVE_FN_TYPE,
+      value: new NativeFn(name, compileCall, concrete) as unknown as Value,
+    };
+  };
 }
 
 export function concreteFnMember(

@@ -13,6 +13,7 @@ import { singleValueOf } from '../singleValue';
 import {
   BOOL,
   CONST_U8_SLICE,
+  fnType,
   optionalOf,
   pointerTo,
   sliceOf,
@@ -286,23 +287,30 @@ function iteratorType(kind: 'split' | 'token', delimiter: DelimiterKind, child: 
     returnType: Type,
     run: (state: ZStruct, equal: typeof equalValues, spend: () => void) => Value
   ): (() => Member) =>
-    fnMember(`${key}.${name}`, (sema, call) => {
-      expectArgs(sema, call, 0, name);
-      const mutable = name !== 'rest' && !(kind === 'split' && name === 'peek');
-      const state = structReceiver(sema, call, created, mutable);
-      const equality =
-        name === 'reset' || (kind === 'split' && name === 'rest')
-          ? () => equalValues
-          : comparisonOf(sema, child, call.span);
-      return runtime(
-        returnType,
-        (frame) => {
-          frame.runtime.spend();
-          return run(state(frame), equality(frame), nativeBudget(sema, frame));
-        },
-        call.span
-      );
-    });
+    fnMember(
+      `${key}.${name}`,
+      (sema, call) => {
+        expectArgs(sema, call, 0, name);
+        const mutable = name !== 'rest' && !(kind === 'split' && name === 'peek');
+        const state = structReceiver(sema, call, created, mutable);
+        const equality =
+          name === 'reset' || (kind === 'split' && name === 'rest')
+            ? () => equalValues
+            : comparisonOf(sema, child, call.span);
+        return runtime(
+          returnType,
+          (frame) => {
+            frame.runtime.spend();
+            return run(state(frame), equality(frame), nativeBudget(sema, frame));
+          },
+          call.span
+        );
+      },
+      () => ({
+        type: fnType([name === 'rest' ? created : pointerTo(created, kind === 'split' && name === 'peek')], returnType),
+        receiver: true,
+      })
+    );
   const tokenPeek = (
     state: ZStruct,
     equal: typeof equalValues,

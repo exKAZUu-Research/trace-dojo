@@ -6847,3 +6847,74 @@ test.each(['1..3', '2..4', '0..2', '2..2'])('list appendSlice checks actual copy
       : { kind: 'executed', stderr: range === '0..2' ? '{ 1, 2, 1, 2 }' : '{ 1, 2 }', uncaughtException: undefined }
   );
 });
+
+test.each([
+  [
+    'ordering',
+    'const invert:*const fn(std.math.Order)std.math.Order=std.math.Order.invert;const compare:*const fn(std.math.Order,std.math.CompareOperator)bool=std.math.Order.compare;std.debug.print("{} {}",.{invert(.lt)==.gt,compare(.lt,.lt)});',
+    'true true',
+  ],
+  [
+    'turtle',
+    'const t=Turtle.init(0,0);const forward:*const fn(Turtle)void=Turtle.forward;forward(t);std.debug.print("{}",.{t.canMoveForward()});',
+    'true',
+  ],
+  [
+    'formatting',
+    'const digit:*const fn(u8,u8)error{InvalidCharacter}!u8=std.fmt.charToDigit;const letter:*const fn(u8,std.fmt.Case)u8=std.fmt.digitToChar;std.debug.print("{} {}",.{try digit(57,10),letter(10,.upper)});',
+    '9 65',
+  ],
+  [
+    'list',
+    'const L=std.ArrayList(u8);const create:*const fn(std.mem.Allocator,usize)std.mem.Allocator.Error!L=L.initCapacity;const append:*const fn(*L,std.mem.Allocator,u8)std.mem.Allocator.Error!void=L.append;const last:*const fn(L)u8=L.getLast;var a=try create(init.gpa,2);defer a.deinit(init.gpa);try append(&a,init.gpa,9);std.debug.print("{}",.{last(a)});',
+    '9',
+  ],
+  [
+    'map',
+    'const M=std.AutoHashMap(u8,u8);var m=M.init(init.gpa);defer m.deinit();try m.put(1,9);const get:*const fn(M,u8)?u8=M.get;const iterator:*const fn(*const M)M.Iterator=M.iterator;var it=iterator(&m);std.debug.print("{} {}",.{get(m,1).?,it.next().?.value_ptr.*});',
+    '9 9',
+  ],
+  [
+    'allocator',
+    'const F=std.heap.FixedBufferAllocator;const create:*const fn([]u8)F=F.init;const allocator:*const fn(*F)std.mem.Allocator=F.allocator;var buffer:[32]u8=undefined;var f=create(&buffer);const a=try allocator(&f).alloc(u8,3);a[0]=9;std.debug.print("{}",.{a[0]});',
+    '9',
+  ],
+  [
+    'random',
+    'const G=std.Random.DefaultPrng;const create:*const fn(u64)G=G.init;const next:*const fn(*G)u64=G.next;var a=create(42);var b=G.init(42);std.debug.print("{}",.{next(&a)==b.next()});',
+    'true',
+  ],
+  [
+    'writer',
+    'const W=std.Io.Writer;const create:*const fn([]u8)W=W.fixed;const write:*const fn(*W,[]const u8)W.Error!void=W.writeAll;const buffered:*const fn(*const W)[]u8=W.buffered;var buffer:[8]u8=undefined;var w=create(&buffer);try write(&w,"abc");std.debug.print("{s}",.{buffered(&w)});',
+    'abc',
+  ],
+  ['file', 'const stdout:*const fn()std.Io.File=std.Io.File.stdout;try stdout().writeStreamingAll(init.io,"abc");', ''],
+  [
+    'iterator',
+    'var it=std.mem.splitScalar(u8,"a,b",\',\');const I=@TypeOf(it);const next:*const fn(*I)?[]const u8=I.next;const peek:*const fn(*const I)?[]const u8=I.peek;std.debug.print("{s} {s}",.{peek(&it).?,next(&it).?});',
+    'a a',
+  ],
+  [
+    'queue',
+    'const C=struct{fn compare(_:void,a:u8,b:u8)std.math.Order{return std.math.order(a,b);}};const Q=std.PriorityQueue(u8,void,C.compare);var q:Q=.empty;defer q.deinit(init.gpa);const push:*const fn(*Q,std.mem.Allocator,u8)std.mem.Allocator.Error!void=Q.push;const count:*const fn(Q)usize=Q.count;try push(&q,init.gpa,9);std.debug.print("{}",.{count(q)});',
+    '1',
+  ],
+])('fixed native %s members are compatible stored function values', (family, body, stderr) => {
+  const source = `const std=@import("std");pub fn main(init:std.process.Init)!void{_=&init;${body}}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr,
+    stdout: family === 'file' ? 'abc' : '',
+    uncaughtException: undefined,
+  });
+});
+
+test('fixed native function adapters retain identity and static receiver calls', () => {
+  const source = `const std=@import("std");pub fn main()!void{const W=std.Io.Writer;var buffer:[8]u8=undefined;var w=W.fixed(&buffer);const f:*const fn(*W,[]const u8)W.Error!void=W.writeAll;try W.writeAll(&w,"a");try f(&w,"b");std.debug.print("{} {s}",.{f==&W.writeAll,W.buffered(&w)});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: 'true ab',
+    uncaughtException: undefined,
+  });
+});

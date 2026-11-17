@@ -31,6 +31,7 @@ import {
 } from './floats';
 import { spendIntegerOperation } from './integerWork';
 import { sizeOf } from './layout';
+import { callableNative } from './nativeAdapter';
 import { asFloat, comparisonTest, isArithmeticType, isIntegerType, isZero, sign } from './operands';
 import { type Frame, Jump, withHeldValues } from './runtime';
 import {
@@ -618,6 +619,8 @@ export abstract class ExpressionCompiler extends SemaBase {
 
   protected knownFunctionValue(expression: TExpr, span: Span): FnValue {
     if (expression.value instanceof FnValue) return expression.value;
+    if (expression.value instanceof NativeFn && expression.value.signature)
+      return new FnValue(callableNative(this, expression.value, span));
     const ref = expression.value as unknown as FnRef;
     if (!(ref instanceof FnRef)) this.error(span, 'この関数は、値として使えません。');
     return new FnValue(this.instantiate(ref, [], span));

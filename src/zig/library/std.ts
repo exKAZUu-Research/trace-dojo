@@ -9,13 +9,14 @@ import {
   CONST_U8_SLICE,
   errorSetOf,
   errorUnionOf,
+  fnType,
   intType,
+  NORETURN,
   pointerTo,
   sliceOf,
   type StructType,
   TYPE,
   type Type,
-  typeName,
   U8,
   USIZE,
   VOID,
@@ -34,6 +35,7 @@ import {
   nativeCall,
   nativeStateCall,
   nativeStruct,
+  receiverAddress,
   typeMember,
   unavailableMember,
 } from './native';
@@ -233,34 +235,54 @@ function addIoMembers(): void {
     Clock: unavailableMember('時刻（std.Io.Clock）'),
   });
   addMembers(FILE, {
-    stdout: fnMember('std.Io.File.stdout', (sema, call) => {
-      expectArgs(sema, call, 0, 'std.Io.File.stdout');
-      return known(FILE, handle('file', { fd: 1 }), call.span);
-    }),
-    stderr: fnMember('std.Io.File.stderr', (sema, call) => {
-      expectArgs(sema, call, 0, 'std.Io.File.stderr');
-      return known(FILE, handle('file', { fd: 2 }), call.span);
-    }),
+    stdout: fnMember(
+      'std.Io.File.stdout',
+      (sema, call) => {
+        expectArgs(sema, call, 0, 'std.Io.File.stdout');
+        return known(FILE, handle('file', { fd: 1 }), call.span);
+      },
+      () => ({ type: fnType([], FILE) })
+    ),
+    stderr: fnMember(
+      'std.Io.File.stderr',
+      (sema, call) => {
+        expectArgs(sema, call, 0, 'std.Io.File.stderr');
+        return known(FILE, handle('file', { fd: 2 }), call.span);
+      },
+      () => ({ type: fnType([], FILE) })
+    ),
     stdin: unavailableMember('標準入力（std.Io.File.stdin）'),
     Writer: typeMember(() => FILE_WRITER),
-    writer: fnMember('File.writer', (sema, call) => fileWriter(sema, call)),
-    writerStreaming: fnMember('File.writerStreaming', (sema, call) => fileWriter(sema, call)),
-    writeStreamingAll: fnMember('File.writeStreamingAll', (sema, call) => {
-      const receiver = fileOf(sema, call);
-      const [io, bytes] = compileArgs(sema, expectArgs(sema, call, 2, 'writeStreamingAll'), [IO, CONST_U8_SLICE]);
-      const evaluate = receiver.eval;
-      return runtime(
-        errorUnionOf(WRITE_ERROR, VOID),
-        (frame) => {
-          const file = evaluate(frame) as NativeHandle;
-          io.eval(frame);
-          const value = bytes.eval(frame);
-          frame.runtime.writeOutput(file.state.fd as number, writerBytes(frame, value));
-          return;
-        },
-        call.span
-      );
-    }),
+    writer: fnMember(
+      'File.writer',
+      (sema, call) => fileWriter(sema, call),
+      () => ({ type: fnType([FILE, IO, sliceOf(U8, false)], FILE_WRITER), receiver: true })
+    ),
+    writerStreaming: fnMember(
+      'File.writerStreaming',
+      (sema, call) => fileWriter(sema, call),
+      () => ({ type: fnType([FILE, IO, sliceOf(U8, false)], FILE_WRITER), receiver: true })
+    ),
+    writeStreamingAll: fnMember(
+      'File.writeStreamingAll',
+      (sema, call) => {
+        const receiver = fileOf(sema, call);
+        const [io, bytes] = compileArgs(sema, expectArgs(sema, call, 2, 'writeStreamingAll'), [IO, CONST_U8_SLICE]);
+        const evaluate = receiver.eval;
+        return runtime(
+          errorUnionOf(WRITE_ERROR, VOID),
+          (frame) => {
+            const file = evaluate(frame) as NativeHandle;
+            io.eval(frame);
+            const value = bytes.eval(frame);
+            frame.runtime.writeOutput(file.state.fd as number, writerBytes(frame, value));
+            return;
+          },
+          call.span
+        );
+      },
+      () => ({ type: fnType([FILE, IO, CONST_U8_SLICE], errorUnionOf(WRITE_ERROR, VOID)), receiver: true })
+    ),
     reader: unavailableMember('標準入力やファイルからの読み込み'),
   });
   addWriterMembers();
@@ -278,92 +300,146 @@ function addWriterMembers(): void {
         printInto(frame, state, print)
       );
     }),
-    writeAll: fnMember('Writer.writeAll', (sema, call) => {
-      const writer = writerOf(sema, call);
-      const [bytes] = compileArgs(sema, expectArgs(sema, call, 1, 'writeAll'), [CONST_U8_SLICE]);
-      return nativeStateCall(errorUnionOf(WRITE_ERROR, VOID), [bytes], call.span, writer, (state, [value], frame) => {
-        const data = writerBytes(frame, value);
-        return data.length === 0 ? undefined : writeTo(frame, state, data);
-      });
-    }),
-    writeByte: fnMember('Writer.writeByte', (sema, call) => {
-      const writer = writerOf(sema, call);
-      const [byte] = compileArgs(sema, expectArgs(sema, call, 1, 'writeByte'), [U8]);
-      return nativeStateCall(errorUnionOf(WRITE_ERROR, VOID), [byte], call.span, writer, (state, [value], frame) =>
-        writeByteTo(frame, state, Number(value as bigint))
-      );
-    }),
-    splatByteAll: fnMember('Writer.splatByteAll', (sema, call) => {
-      const writer = writerOf(sema, call);
-      const [byte, count] = compileArgs(sema, expectArgs(sema, call, 2, 'splatByteAll'), [U8, USIZE]);
-      return nativeStateCall(
-        errorUnionOf(WRITE_ERROR, VOID),
-        [byte, count],
-        call.span,
-        writer,
-        (state, [byte, count], frame) =>
-          (count as bigint) === 0n ? undefined : writeRepeated(frame, state, [Number(byte as bigint)], count as bigint)
-      );
-    }),
-    write: fnMember('Writer.write', (sema, call) => {
-      const writer = writerOf(sema, call);
-      const args = compileArgs(sema, expectArgs(sema, call, 1, 'write'), [CONST_U8_SLICE]);
-      return nativeStateCall(errorUnionOf(WRITE_ERROR, USIZE), args, call.span, writer, (state, [value], frame) => {
-        const data = writerBytes(frame, value);
-        return writeTo(frame, state, data) ?? BigInt(data.length);
-      });
-    }),
-    splatBytesAll: fnMember('Writer.splatBytesAll', (sema, call) => {
-      const writer = writerOf(sema, call);
-      const args = compileArgs(sema, expectArgs(sema, call, 2, 'splatBytesAll'), [CONST_U8_SLICE, USIZE]);
-      return nativeStateCall(errorUnionOf(WRITE_ERROR, VOID), args, call.span, writer, (state, [bytes, count], frame) =>
-        writeRepeated(frame, state, writerBytes(frame, bytes), count as bigint)
-      );
-    }),
-    printUnicodeCodepoint: fnMember('Writer.printUnicodeCodepoint', (sema, call) => {
-      const writer = writerOf(sema, call);
-      const args = compileArgs(sema, expectArgs(sema, call, 1, 'printUnicodeCodepoint'), [intType(false, 21)]);
-      return nativeStateCall(errorUnionOf(WRITE_ERROR, VOID), args, call.span, writer, (state, [point], frame) => {
-        const value = Number(point as bigint);
-        const valid = value <= 0x10_ff_ff && !(value >= 0xd8_00 && value <= 0xdf_ff);
-        return writeTo(frame, state, [...new TextEncoder().encode(String.fromCodePoint(valid ? value : 0xff_fd))]);
-      });
-    }),
-    flush: fnMember('Writer.flush', (sema, call) => {
-      const writer = writerOf(sema, call);
-      expectArgs(sema, call, 0, 'flush');
-      return runtime(
-        errorUnionOf(WRITE_ERROR, VOID),
-        (frame) => {
-          const state = writer(frame);
-          flushWriter(frame, state);
-          return;
-        },
-        call.span
-      );
-    }),
-    fixed: fnMember('std.Io.Writer.fixed', (sema, call) => {
-      const [buffer] = compileArgs(sema, expectArgs(sema, call, 1, 'std.Io.Writer.fixed'), [sliceOf(U8, false)]);
-      const evaluate = buffer.eval;
-      return runtime(
-        WRITER,
-        (frame) => {
-          const slice = evaluate(frame) as Slice;
-          return writerValue({
-            fd: undefined,
-            buffer: slice,
-            end: 0,
-            capacity: slice.length,
-          } satisfies WriterState);
-        },
-        call.span
-      );
-    }),
-    buffered: fnMember('Writer.buffered', (sema, call) => {
-      expectArgs(sema, call, 0, 'Writer.buffered');
-      const writer = writerOf(sema, call, false);
-      return runtime(sliceOf(U8, false), (frame) => bufferedSlice(writer(frame)), call.span);
-    }),
+    writeAll: fnMember(
+      'Writer.writeAll',
+      (sema, call) => {
+        const writer = writerOf(sema, call);
+        const [bytes] = compileArgs(sema, expectArgs(sema, call, 1, 'writeAll'), [CONST_U8_SLICE]);
+        return nativeStateCall(errorUnionOf(WRITE_ERROR, VOID), [bytes], call.span, writer, (state, [value], frame) => {
+          const data = writerBytes(frame, value);
+          return data.length === 0 ? undefined : writeTo(frame, state, data);
+        });
+      },
+      () => ({
+        type: fnType([pointerTo(WRITER, false), CONST_U8_SLICE], errorUnionOf(WRITE_ERROR, VOID)),
+        receiver: true,
+      })
+    ),
+    writeByte: fnMember(
+      'Writer.writeByte',
+      (sema, call) => {
+        const writer = writerOf(sema, call);
+        const [byte] = compileArgs(sema, expectArgs(sema, call, 1, 'writeByte'), [U8]);
+        return nativeStateCall(errorUnionOf(WRITE_ERROR, VOID), [byte], call.span, writer, (state, [value], frame) =>
+          writeByteTo(frame, state, Number(value as bigint))
+        );
+      },
+      () => ({ type: fnType([pointerTo(WRITER, false), U8], errorUnionOf(WRITE_ERROR, VOID)), receiver: true })
+    ),
+    splatByteAll: fnMember(
+      'Writer.splatByteAll',
+      (sema, call) => {
+        const writer = writerOf(sema, call);
+        const [byte, count] = compileArgs(sema, expectArgs(sema, call, 2, 'splatByteAll'), [U8, USIZE]);
+        return nativeStateCall(
+          errorUnionOf(WRITE_ERROR, VOID),
+          [byte, count],
+          call.span,
+          writer,
+          (state, [byte, count], frame) =>
+            (count as bigint) === 0n
+              ? undefined
+              : writeRepeated(frame, state, [Number(byte as bigint)], count as bigint)
+        );
+      },
+      () => ({ type: fnType([pointerTo(WRITER, false), U8, USIZE], errorUnionOf(WRITE_ERROR, VOID)), receiver: true })
+    ),
+    write: fnMember(
+      'Writer.write',
+      (sema, call) => {
+        const writer = writerOf(sema, call);
+        const args = compileArgs(sema, expectArgs(sema, call, 1, 'write'), [CONST_U8_SLICE]);
+        return nativeStateCall(errorUnionOf(WRITE_ERROR, USIZE), args, call.span, writer, (state, [value], frame) => {
+          const data = writerBytes(frame, value);
+          return writeTo(frame, state, data) ?? BigInt(data.length);
+        });
+      },
+      () => ({
+        type: fnType([pointerTo(WRITER, false), CONST_U8_SLICE], errorUnionOf(WRITE_ERROR, USIZE)),
+        receiver: true,
+      })
+    ),
+    splatBytesAll: fnMember(
+      'Writer.splatBytesAll',
+      (sema, call) => {
+        const writer = writerOf(sema, call);
+        const args = compileArgs(sema, expectArgs(sema, call, 2, 'splatBytesAll'), [CONST_U8_SLICE, USIZE]);
+        return nativeStateCall(
+          errorUnionOf(WRITE_ERROR, VOID),
+          args,
+          call.span,
+          writer,
+          (state, [bytes, count], frame) => writeRepeated(frame, state, writerBytes(frame, bytes), count as bigint)
+        );
+      },
+      () => ({
+        type: fnType([pointerTo(WRITER, false), CONST_U8_SLICE, USIZE], errorUnionOf(WRITE_ERROR, VOID)),
+        receiver: true,
+      })
+    ),
+    printUnicodeCodepoint: fnMember(
+      'Writer.printUnicodeCodepoint',
+      (sema, call) => {
+        const writer = writerOf(sema, call);
+        const args = compileArgs(sema, expectArgs(sema, call, 1, 'printUnicodeCodepoint'), [intType(false, 21)]);
+        return nativeStateCall(errorUnionOf(WRITE_ERROR, VOID), args, call.span, writer, (state, [point], frame) => {
+          const value = Number(point as bigint);
+          const valid = value <= 0x10_ff_ff && !(value >= 0xd8_00 && value <= 0xdf_ff);
+          return writeTo(frame, state, [...new TextEncoder().encode(String.fromCodePoint(valid ? value : 0xff_fd))]);
+        });
+      },
+      () => ({
+        type: fnType([pointerTo(WRITER, false), intType(false, 21)], errorUnionOf(WRITE_ERROR, VOID)),
+        receiver: true,
+      })
+    ),
+    flush: fnMember(
+      'Writer.flush',
+      (sema, call) => {
+        const writer = writerOf(sema, call);
+        expectArgs(sema, call, 0, 'flush');
+        return runtime(
+          errorUnionOf(WRITE_ERROR, VOID),
+          (frame) => {
+            const state = writer(frame);
+            flushWriter(frame, state);
+            return;
+          },
+          call.span
+        );
+      },
+      () => ({ type: fnType([pointerTo(WRITER, false)], errorUnionOf(WRITE_ERROR, VOID)), receiver: true })
+    ),
+    fixed: fnMember(
+      'std.Io.Writer.fixed',
+      (sema, call) => {
+        const [buffer] = compileArgs(sema, expectArgs(sema, call, 1, 'std.Io.Writer.fixed'), [sliceOf(U8, false)]);
+        const evaluate = buffer.eval;
+        return runtime(
+          WRITER,
+          (frame) => {
+            const slice = evaluate(frame) as Slice;
+            return writerValue({
+              fd: undefined,
+              buffer: slice,
+              end: 0,
+              capacity: slice.length,
+            } satisfies WriterState);
+          },
+          call.span
+        );
+      },
+      () => ({ type: fnType([sliceOf(U8, false)], WRITER) })
+    ),
+    buffered: fnMember(
+      'Writer.buffered',
+      (sema, call) => {
+        expectArgs(sema, call, 0, 'Writer.buffered');
+        const writer = writerOf(sema, call, false);
+        return runtime(sliceOf(U8, false), (frame) => bufferedSlice(writer(frame)), call.span);
+      },
+      () => ({ type: fnType([pointerTo(WRITER, true)], sliceOf(U8, false)), receiver: true })
+    ),
   });
 }
 
@@ -405,13 +481,7 @@ function writerOf(
   call: NativeCall,
   mutable = true
 ): (frame: Parameters<TExpr['eval']>[0]) => WriterState {
-  const receiver = call.receiver;
-  if (!receiver) return sema.error(call.span, 'std.Io.Writer の値に対して呼び出してください。');
-  const pointer = receiver.type === WRITER ? sema.addressOf(receiver) : receiver;
-  if (pointer.type.kind !== 'pointer' || pointer.type.child !== WRITER)
-    return sema.error(call.span, `${typeName(receiver.type)} 型には、このメソッドがありません。`);
-  if (mutable && pointer.type.isConst)
-    return sema.error(call.span, '定数の std.Io.Writer には書き込めません（var で宣言してください）。');
+  const pointer = receiverAddress(sema, call, WRITER, mutable);
   const evaluate = pointer.eval;
   return (frame) => {
     const pointer = evaluate(frame) as Pointer;
@@ -466,13 +536,17 @@ export const PROCESS_INIT: StructType = nativeStruct(
 
 const PROCESS = nativeStruct('std.process', {
   Init: typeMember(() => PROCESS_INIT),
-  exit: fnMember('std.process.exit', (sema, call) => {
-    const [code] = compileArgs(sema, expectArgs(sema, call, 1, 'std.process.exit'), [U8]);
-    return nativeCall({ kind: 'noreturn' }, [code], call.span, ([value]) => {
-      rejectRuntimeEffect();
-      throw new ExitSignal(Number(value as bigint));
-    });
-  }),
+  exit: fnMember(
+    'std.process.exit',
+    (sema, call) => {
+      const [code] = compileArgs(sema, expectArgs(sema, call, 1, 'std.process.exit'), [U8]);
+      return nativeCall({ kind: 'noreturn' }, [code], call.span, ([value]) => {
+        rejectRuntimeEffect();
+        throw new ExitSignal(Number(value as bigint));
+      });
+    },
+    () => ({ type: fnType([U8], NORETURN) })
+  ),
   ...unavailableMembers({
     Child: '外部のプロセス（std.process.Child）',
     Environ: '環境変数（std.process.Environ）',
