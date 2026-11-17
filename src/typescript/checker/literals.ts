@@ -1,7 +1,8 @@
+// code-gauge-allow-file fileNcss 424 -- Types array and object literals with their spreads, members, and widening, which share one literal state.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import type { Checker } from './checker';
-import { hasToken, isNumericName, named, propertyNameText } from './syntax';
+import { arrayPatternElements, hasToken, isNumericName, named, propertyNameText } from './syntax';
 import {
   anonymousObject,
   anyType,
@@ -16,6 +17,7 @@ import {
   type ObjectType,
   type Property,
   regularOf,
+  type Structure,
   type Type,
   type TypeParameter,
   undefinedType,
@@ -38,6 +40,8 @@ interface ObjectLiteral {
    * members written since) then override.
    */
   alternatives?: Map<string, Property>[];
+  /** The index signatures of the one value the literal only spreads. */
+  spreadIndexes?: Pick<Structure, 'stringIndex' | 'numberIndex'>;
   /** Whether its spreads made more alternatives than TypeScript represents, which makes the literal an error. */
   isTooComplex?: boolean;
   /**
@@ -67,13 +71,14 @@ export class LiteralChecker {
     );
   }
 
-  // code-gauge-allow functionCognitiveComplexity 24 -- Builds a tuple or an array type from elements and spreads as TypeScript does.
   arrayLiteral(node: TreeNode, contextual?: Type): Type {
-    const elements = named(node);
+    const elements = arrayElements(node);
     const tupleContext = contextual ? this.tupleContext(contextual) : undefined;
     const isConstContext = this.isConstContext(node);
     const elementContext = contextual ? this.elementContext(contextual) : undefined;
     const types: { type: Type; spread: boolean }[] = elements.map((element, index) => {
+      // A hole, as in `[, 1]`, reads as `undefined`.
+      if (!element) return { type: undefinedType, spread: false };
       if (element.type === 'spread_element') {
         const spread = this.c.expressions.check(named(element)[0]);
         return { type: spread, spread: true };
@@ -83,21 +88,10 @@ export class LiteralChecker {
       return { type: isConstContext ? type : this.widenForMutableLocation(type, context), spread: false };
     });
     if (tupleContext || isConstContext || isSpreadIntoCall(node)) {
-      const tupleElements = types.flatMap(({ type, spread }, index) => {
-        if (!spread) return [{ type: isConstContext ? regularOf(type) : type, optional: false, rest: false }];
-        if (type.kind === 'object' && type.objectKind === 'tuple') return type.tuple?.elements ?? [];
-        return [
-          {
-            type: this.c.arrayType(this.c.silently(() => this.c.patterns.iteratedType(elements[index], type))),
-            optional: false,
-            rest: true,
-          },
-        ];
-      });
-      return this.c.tupleType(tupleElements, isConstContext);
+      return this.tupleOfElements(node, elements, types, isConstContext);
     }
     const elementTypes = types.map(({ type, spread }, index) =>
-      spread ? this.c.patterns.iteratedType(named(elements[index])[0], type) : type
+      spread ? this.c.patterns.iteratedType(named(elements[index] as TreeNode)[0], type) : type
     );
     const array = {
       ...this.c.arrayType(elementTypes.length === 0 ? neverType : unionOf(elementTypes, true)),
@@ -105,6 +99,27 @@ export class LiteralChecker {
     };
     this.arrayLiterals.add(array.id);
     return array;
+  }
+
+  /** The tuple an array literal is where a tuple or `as const` expects it, with what its spreads spread. */
+  private tupleOfElements(
+    node: TreeNode,
+    elements: (TreeNode | undefined)[],
+    types: { type: Type; spread: boolean }[],
+    isConstContext: boolean
+  ): Type {
+    const tupleElements = types.flatMap(({ type, spread }, index) => {
+      if (!spread) return [{ type: isConstContext ? regularOf(type) : type, optional: false, rest: false }];
+      if (type.kind === 'object' && type.objectKind === 'tuple') return type.tuple?.elements ?? [];
+      return [
+        {
+          type: this.c.arrayType(this.c.silently(() => this.c.patterns.iteratedType(elements[index] ?? node, type))),
+          optional: false,
+          rest: true,
+        },
+      ];
+    });
+    return this.c.tupleType(tupleElements, isConstContext);
   }
 
   isArrayLiteral(type: Type): boolean {
@@ -171,14 +186,16 @@ export class LiteralChecker {
       object: anonymousObject(
         () => ({
           ...emptyStructure(),
+          ...literal.spreadIndexes,
           properties,
-          stringIndex: literal.stringIndex && { type: literal.stringIndex, readonly: false },
+          ...(literal.stringIndex && { stringIndex: { type: literal.stringIndex, readonly: false } }),
         }),
         { isLiteral: true }
       ),
     };
     for (const member of named(node)) this.declareObjectMember(literal, member);
     for (const member of named(node)) this.objectMember(literal, member);
+    literal.spreadIndexes = this.soleSpreadIndexes(node);
     if (contextual) this.addPatternDefaults(properties, contextual);
     const { object, genericSpreads, alternatives } = literal;
     if (literal.isTooComplex) return errorType;
@@ -308,11 +325,15 @@ export class LiteralChecker {
 
   private computedMember(literal: ObjectLiteral, member: TreeNode, key: TreeNode, value: TreeNode): void {
     const keyType = this.c.expressions.check(named(key)[0] ?? key);
-    const valueType = this.c.expressions.checkWidened(value);
     if (keyType.kind === 'literal' && (typeof keyType.value === 'string' || typeof keyType.value === 'number')) {
+      // A key of one literal names a property, whose value is typed as a written property's is.
       const name = String(keyType.value);
+      const context = this.memberContext(literal, name);
+      const checked = this.c.expressions.check(value, context);
+      const valueType = literal.isConstContext ? checked : this.widenForMutableLocation(checked, context);
       literal.properties.set(name, this.literalProperty(name, valueType, literal.isConstContext, member));
     } else {
+      const valueType = this.c.expressions.checkWidened(value);
       literal.stringIndex = unionOf([literal.stringIndex ?? neverType, valueType]);
     }
   }
@@ -442,8 +463,10 @@ export class LiteralChecker {
     }
     if (literal.isTooComplex) return;
     const objectMembers = members.filter((type) => type.kind === 'object' || type.kind === 'intersection');
+    // A spread of `null` or `undefined` adds nothing, which leaves the properties of an object it may be optional.
+    const mayBeNullish = objectPart !== spread;
     if (objectMembers.length < 2) {
-      this.spreadSingle(literal, spread);
+      this.spreadSingle(literal, objectPart, mayBeNullish);
       return;
     }
     // Each alternative of a union spreads its own properties, as TypeScript gives the literal a union type.
@@ -457,9 +480,9 @@ export class LiteralChecker {
     }
     this.c.budget.spend(count);
     literal.alternatives = bases.flatMap((base) =>
-      objectMembers.map((type) => {
+      [...objectMembers, ...(mayBeNullish ? [undefined] : [])].map((type) => {
         const alternative = new Map([...base, ...literal.properties]);
-        this.spreadInto(alternative, type);
+        if (type) this.spreadInto(alternative, type);
         return alternative;
       })
     );
@@ -470,20 +493,34 @@ export class LiteralChecker {
    * Spreads a value that is not a union of objects; after a union spread, into each alternative, whose properties its
    * optional ones may leave.
    */
-  private spreadSingle(literal: ObjectLiteral, spread: Type): void {
+  /**
+   * The index signatures a literal that only spreads one value keeps from it; TypeScript keeps only those every part of
+   * a spread has, so any other member leaves them out.
+   */
+  private soleSpreadIndexes(node: TreeNode): Pick<Structure, 'stringIndex' | 'numberIndex'> | undefined {
+    const members = named(node);
+    if (members.length !== 1 || members[0].type !== 'spread_element') return undefined;
+    const spread = this.c.relations.removeNullish(this.c.expressions.check(named(members[0])[0]));
+    if (spread.kind !== 'object' && spread.kind !== 'intersection') return undefined;
+    const { stringIndex, numberIndex } = this.c.structureOf(spread);
+    return { stringIndex, numberIndex };
+  }
+
+  private spreadSingle(literal: ObjectLiteral, spread: Type, optional = false): void {
     if (!literal.alternatives) {
-      this.spreadInto(literal.properties, spread);
+      this.spreadInto(literal.properties, spread, optional);
       return;
     }
     for (const alternative of literal.alternatives) {
       for (const [name, property] of literal.properties) alternative.set(name, property);
-      this.spreadInto(alternative, spread);
+      this.spreadInto(alternative, spread, optional);
     }
     literal.properties.clear();
   }
 
-  private spreadInto(properties: Map<string, Property>, spread: Type): void {
-    for (const [name, property] of this.spreadProperties(spread)) {
+  private spreadInto(properties: Map<string, Property>, spread: Type, optional = false): void {
+    for (const [name, spreadProperty] of this.spreadProperties(spread)) {
+      const property = optional ? { ...spreadProperty, optional: true } : spreadProperty;
       const existing = properties.get(name);
       // An optional property spread over one already there may be missing, which leaves the earlier value.
       properties.set(
@@ -717,4 +754,13 @@ function isSpreadIntoCall(node: TreeNode): boolean {
   let parent = node.parent;
   while (parent?.type === 'parenthesized_expression') parent = parent.parent;
   return parent?.type === 'spread_element' && parent.parent?.type === 'arguments';
+}
+
+/** The elements of an array literal in their positions, with `undefined` for a hole a comma leaves. */
+function arrayElements(node: TreeNode): (TreeNode | undefined)[] {
+  const positioned = arrayPatternElements(node);
+  const length = positioned.length === 0 ? 0 : (positioned.at(-1)?.index ?? 0) + 1;
+  const elements: (TreeNode | undefined)[] = Array.from({ length });
+  for (const { element, index } of positioned) elements[index] = element;
+  return elements;
 }
