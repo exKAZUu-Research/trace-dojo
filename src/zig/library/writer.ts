@@ -244,6 +244,7 @@ export function bufferingWriter(): WriterState {
 type WriteBytes = readonly number[] | { length: number; get: (index: number) => number };
 
 // code-gauge-allow functionNcss 33 -- Keeps growth, drain, and buffered writes in their observable order.
+// code-gauge-allow functionCognitiveComplexity 16 -- Keeps growth and draining ahead of buffer mutation.
 export function writeTo(frame: Frame, state: WriterState, bytes: WriteBytes): Value {
   const get = 'get' in bytes ? bytes.get : (index: number): number => bytes[index];
   frame.runtime.spend();
