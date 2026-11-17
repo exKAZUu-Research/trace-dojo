@@ -1581,7 +1581,7 @@ const TRANSFORMS: [string, (text: string) => string][] = [
 ];
 
 for (const [name, transform] of TRANSFORMS) {
-  def('String', name, 0, function* (self: RString) {
+  def('String', name, 0, function (self: RString) {
     if ((self.rawBytes || (self.usAscii && !isAsciiText(self.s))) && !self.binary)
       return transformEncodedBytes(self, name);
     if (self.binary && (name === 'succ' || name === 'next'))
@@ -1589,7 +1589,7 @@ for (const [name, transform] of TRANSFORMS) {
     return self.binary ? binaryTransform(self.s, name, transform) : textResult(self, transform(self.s));
   });
   // code-gauge-allow functionCognitiveComplexity 22 -- The ordered cases for String encoding and mutation share state; splitting them solely for the metric would hide their sequencing.
-  def('String', `${name}!`, 0, function* (self: RString) {
+  def('String', `${name}!`, 0, function (self: RString) {
     if (self.binary && (name === 'succ' || name === 'next')) {
       setBytes(self, successorBytes(stringBytes(self), true), true);
       return self;
