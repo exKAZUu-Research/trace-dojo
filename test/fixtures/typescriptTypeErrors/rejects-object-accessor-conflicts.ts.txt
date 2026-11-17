@@ -1,0 +1,14 @@
+const x1 = { a: 1, get a() { return 2; } };
+const x2 = { a() { return 1; }, get a() { return 2; } };
+const x3 = { get a() { return 2; }, a: 1 };
+const x4 = { get a() { return 2; }, set a(v: number) {} };
+const x5 = { set a(v: number) {}, a: 1 };
+const x6 = { get a() { return 2; }, get a() { return 3; } };
+const x7 = { a: 1, a: 2 };
+const x8 = { a: 1, a() { return 1; } };
+const x9 = { get a() { return 2; }, set a(v: number) {}, a: 3 };
+const x10 = { a, get a() { return 2; } };
+var a = 1;
+const x11 = { ["a"]: 1, get a() { return 2; } };
+const x12 = { a: 1, get ["a"]() { return 2; } };
+const x13 = { 1: 1, get "1"() { return 2; } };

@@ -23,6 +23,8 @@ import {
   unknownType,
 } from './types';
 
+type MemberKind = 'property' | 'get' | 'set';
+
 /** An object literal being checked, with the members checked so far. */
 interface ObjectLiteral {
   contextual: Type | undefined;
@@ -36,8 +38,12 @@ interface ObjectLiteral {
    * members written since) then override.
    */
   alternatives?: Map<string, Property>[];
-  /** The property names seen so far, with `get ` or `set ` before an accessor's. */
-  seenKeys: Set<string>;
+  /**
+   * The kinds of member seen so far under each name, and whether an accessor conflict has stopped TypeScript from
+   * checking the rest of the literal's names.
+   */
+  seenKeys: Map<string, Set<MemberKind>>;
+  stopsKeyCheck?: boolean;
   object: ObjectType;
   receiver: ObjectType;
   declarations: Map<string, Property>;
@@ -159,7 +165,7 @@ export class LiteralChecker {
       declarations,
       receiver: anonymousObject(() => ({ ...emptyStructure(), properties: declarations })),
       genericSpreads: [],
-      seenKeys: new Set(),
+      seenKeys: new Map(),
       object: anonymousObject(
         () => ({
           ...emptyStructure(),
@@ -308,10 +314,34 @@ export class LiteralChecker {
     }
   }
 
-  private checkDuplicateKey(literal: ObjectLiteral, keyNode: TreeNode, name: string): void {
-    if (literal.seenKeys.has(name))
+  /** Reports a name declared again in an object literal, as TypeScript's grammar check of object literals does. */
+  private checkDuplicateKey(
+    literal: ObjectLiteral,
+    keyNode: TreeNode,
+    name: string,
+    kind: MemberKind = 'property'
+  ): void {
+    if (literal.stopsKeyCheck) return;
+    const seen = literal.seenKeys.get(name);
+    if (!seen) {
+      literal.seenKeys.set(name, new Set([kind]));
+      return;
+    }
+    if (kind === 'property' && seen.has('property')) {
       this.c.error(keyNode, `オブジェクトリテラルには、同じ名前のプロパティを2つ以上書けません。`);
-    literal.seenKeys.add(name);
+      return;
+    }
+    if (kind !== 'property' && !seen.has('property') && !seen.has(kind)) {
+      seen.add(kind);
+      return;
+    }
+    literal.stopsKeyCheck = true;
+    this.c.error(
+      keyNode,
+      kind !== 'property' && !seen.has('property')
+        ? `オブジェクトリテラルには、同じ名前の get アクセサーや set アクセサーを2つ以上書けません。`
+        : `オブジェクトリテラルには、同じ名前のプロパティとアクセサーを両方は書けません。`
+    );
   }
 
   private memberContext(literal: ObjectLiteral, name: string): Type | undefined {
@@ -352,7 +382,7 @@ export class LiteralChecker {
       return;
     }
     if (!isComputed || propertyNameText(nameNode) !== undefined)
-      this.checkDuplicateKey(literal, nameNode, isGetter ? `get ${name}` : isSetter ? `set ${name}` : name);
+      this.checkDuplicateKey(literal, nameNode, name, isGetter ? 'get' : isSetter ? 'set' : 'property');
     if (isGetter || isSetter) {
       this.accessorMember(literal, member, name, methodType);
       return;
