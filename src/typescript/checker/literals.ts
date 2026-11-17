@@ -298,16 +298,29 @@ export class LiteralChecker {
 
   private methodMember(literal: ObjectLiteral, member: TreeNode): void {
     const nameNode = member.childForFieldName('name') as TreeNode;
-    if (nameNode.type === 'computed_property_name') this.c.expressions.check(named(nameNode)[0]);
-    const name = propertyNameText(nameNode) ?? '';
+    const isComputed = nameNode.type === 'computed_property_name';
+    const keyType = isComputed ? this.c.expressions.check(named(nameNode)[0]) : undefined;
+    const name =
+      propertyNameText(nameNode) ??
+      (keyType?.kind === 'literal' && ['string', 'number'].includes(typeof keyType.value)
+        ? String(keyType.value)
+        : undefined);
     const isGetter = hasToken(member, 'get');
     const isSetter = hasToken(member, 'set');
-    this.checkDuplicateKey(literal, nameNode, isGetter ? `get ${name}` : isSetter ? `set ${name}` : name);
     const methodType = this.c.classes.withObjectThis(
       literal.receiver,
-      () => this.c.functions.functionExpression(member, this.memberContext(literal, name)),
+      () =>
+        this.c.functions.functionExpression(member, name === undefined ? undefined : this.memberContext(literal, name)),
       member
     );
+    // A key that is not a literal gives the object an index signature, as a computed property does.
+    if (name === undefined) {
+      const valueType = isGetter ? (this.c.signaturesOf(methodType, 'call')[0]?.returnType() ?? anyType) : methodType;
+      if (!isSetter) literal.stringIndex = unionOf([literal.stringIndex ?? neverType, valueType]);
+      return;
+    }
+    if (!isComputed || propertyNameText(nameNode) !== undefined)
+      this.checkDuplicateKey(literal, nameNode, isGetter ? `get ${name}` : isSetter ? `set ${name}` : name);
     if (isGetter || isSetter) {
       this.accessorMember(literal, member, name, methodType);
       return;
