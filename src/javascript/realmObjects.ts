@@ -308,7 +308,6 @@ function toPropertyDescriptor(runtime: Runtime, value: Value): Descriptor {
 }
 
 /** The spec's ValidateAndApplyPropertyDescriptor on an ordinary object, which throws where it would return false. */
-// code-gauge-allow functionCognitiveComplexity 23 -- Transcribes the specification's algorithm step by step, whose branches mirror its steps.
 function definePropertyOrThrow(runtime: Runtime, object: JsObject, key: Key, descriptor: Descriptor): void {
   // The spec's ArraySetLength converts a new length before it compares the descriptor with the current one.
   if (object instanceof JsArray && key === 'length' && 'value' in descriptor)
@@ -332,29 +331,30 @@ function definePropertyOrThrow(runtime: Runtime, object: JsObject, key: Key, des
   if (!current.configurable && !isCompatible(current, descriptor, isAccessorDescriptor)) {
     runtime.throwError('TypeError', `Cannot redefine property: ${String(key)}`);
   }
+  runtime.defineProperty(object, key, appliedDescriptor(current, descriptor, isAccessorDescriptor));
+}
+
+/** The property a descriptor makes of an existing one, keeping the attributes the descriptor leaves out. */
+function appliedDescriptor(current: Property, descriptor: Descriptor, isAccessorDescriptor: boolean): Property {
   const flags = {
     enumerable: descriptor.enumerable ?? current.enumerable,
     configurable: descriptor.configurable ?? current.configurable,
   };
-  let next: Property;
   if (isAccessorDescriptor) {
     const previous = isAccessor(current) ? current : { get: undefined, set: undefined };
-    next = {
+    return {
       get: 'get' in descriptor ? descriptor.get : previous.get,
       set: 'set' in descriptor ? descriptor.set : previous.set,
       ...flags,
     };
-  } else if (isAccessor(current) && !('value' in descriptor || 'writable' in descriptor)) {
-    next = { ...current, ...flags };
-  } else {
-    const previous = isAccessor(current) ? { value: undefined, writable: false } : current;
-    next = {
-      value: 'value' in descriptor ? descriptor.value : previous.value,
-      writable: descriptor.writable ?? previous.writable,
-      ...flags,
-    };
   }
-  runtime.defineProperty(object, key, next);
+  if (isAccessor(current) && !('value' in descriptor || 'writable' in descriptor)) return { ...current, ...flags };
+  const previous = isAccessor(current) ? { value: undefined, writable: false } : current;
+  return {
+    value: 'value' in descriptor ? descriptor.value : previous.value,
+    writable: descriptor.writable ?? previous.writable,
+    ...flags,
+  };
 }
 
 /** Whether a descriptor only restates or narrows a non-configurable property, which the spec allows. */

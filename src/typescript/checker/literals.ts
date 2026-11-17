@@ -360,13 +360,7 @@ export class LiteralChecker {
 
   private methodMember(literal: ObjectLiteral, member: TreeNode): void {
     const nameNode = member.childForFieldName('name') as TreeNode;
-    const isComputed = nameNode.type === 'computed_property_name';
-    const keyType = isComputed ? this.c.expressions.check(named(nameNode)[0]) : undefined;
-    const name =
-      propertyNameText(nameNode) ??
-      (keyType?.kind === 'literal' && ['string', 'number'].includes(typeof keyType.value)
-        ? String(keyType.value)
-        : undefined);
+    const name = this.memberName(nameNode);
     const isGetter = hasToken(member, 'get');
     const isSetter = hasToken(member, 'set');
     const methodType = this.c.classes.withObjectThis(
@@ -381,13 +375,25 @@ export class LiteralChecker {
       if (!isSetter) literal.stringIndex = unionOf([literal.stringIndex ?? neverType, valueType]);
       return;
     }
-    if (!isComputed || propertyNameText(nameNode) !== undefined)
+    // TypeScript's grammar check compares only names written as literals.
+    if (propertyNameText(nameNode) !== undefined)
       this.checkDuplicateKey(literal, nameNode, name, isGetter ? 'get' : isSetter ? 'set' : 'property');
     if (isGetter || isSetter) {
       this.accessorMember(literal, member, name, methodType);
       return;
     }
     literal.properties.set(name, { ...this.literalProperty(name, methodType, false, member), isMethod: true });
+  }
+
+  /** The name of a member, which a computed key gives by its literal type. */
+  private memberName(nameNode: TreeNode): string | undefined {
+    const written = propertyNameText(nameNode);
+    if (nameNode.type !== 'computed_property_name') return written;
+    const keyType = this.c.expressions.check(named(nameNode)[0]);
+    if (written !== undefined) return written;
+    return keyType.kind === 'literal' && ['string', 'number'].includes(typeof keyType.value)
+      ? String(keyType.value)
+      : undefined;
   }
 
   private accessorMember(literal: ObjectLiteral, member: TreeNode, name: string, methodType: Type): void {

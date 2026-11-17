@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 687 -- One runtime of the JavaScript interpreter, whose state its builtins and evaluator share.
+// code-gauge-allow-file fileNcss 697 -- One runtime of the JavaScript interpreter, whose state its builtins and evaluator share.
 import { CompileError } from '../interpreter/diagnostics';
 import { ExecutionBudget, LIMITS } from '../interpreter/limits';
 import { type ProgramInput, ProgramIO } from '../interpreter/programIo';
@@ -399,7 +399,6 @@ export class Runtime {
     while (elements.length < length) elements.push(HOLE);
   }
 
-  // code-gauge-allow functionCognitiveComplexity 17 -- Keeps exotic string, array, and arguments definitions at the property-definition boundary.
   defineProperty(object: JsObject, key: Key, property: Property): void {
     // A String object's indices and length are read-only and never stored: a definition compatible with them changes
     // nothing, and any other, such as a class field of that name, throws.
@@ -422,23 +421,27 @@ export class Runtime {
       return;
     }
     if (object instanceof JsArray && key === 'length') {
-      if (isAccessor(property)) this.throwError('TypeError', `Cannot redefine property: length`);
-      // A read-only length, which is non-configurable, can only be restated by a definition, never assigned.
-      if (!object.isLengthWritable) {
-        const restates =
-          !property.writable &&
-          !property.enumerable &&
-          !property.configurable &&
-          this.toArrayLength(property.value) === object.elements.length;
-        if (!restates) this.throwError('TypeError', `Cannot redefine property: length`);
-        return;
-      }
-      this.setLength(object, property.value, true, property.writable);
+      this.defineLength(object, property);
       return;
     }
     const current = object.properties.get(key);
     if (!current) this.allocate(1);
     object.properties.set(key, object.isArguments && current ? redefineArgument(current, property) : property);
+  }
+
+  private defineLength(array: JsArray, property: Property): void {
+    if (isAccessor(property)) this.throwError('TypeError', `Cannot redefine property: length`);
+    // A read-only length, which is non-configurable, can only be restated by a definition, never assigned.
+    if (!array.isLengthWritable) {
+      const restates =
+        !property.writable &&
+        !property.enumerable &&
+        !property.configurable &&
+        this.toArrayLength(property.value) === array.elements.length;
+      if (!restates) this.throwError('TypeError', `Cannot redefine property: length`);
+      return;
+    }
+    this.setLength(array, property.value, true, property.writable);
   }
 
   /** Defines an element, remembering attributes other than a plain element's, or an accessor, in `definedElements`. */

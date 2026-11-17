@@ -482,16 +482,20 @@ export class Relations {
       const fromEnd = sourceElements.length - 1 - index;
       const targetIndex =
         index < startCount ? index : fromEnd < endCount ? targetElements.length - 1 - fromEnd : targetRest;
-      const expected = targetElements[targetIndex];
-      if ((element.rest && !expected.rest) || (isRequired(expected) && !isRequired(element))) return false;
-      const sourceType = element.rest
-        ? this.c.restElementType(element.type)
-        : element.optional && !expected.optional
-          ? unionOf([element.type, undefinedType])
-          : element.type;
-      const targetType = expected.rest ? this.c.restElementType(expected.type) : expected.type;
-      return this.isRelated(sourceType, targetType, relation);
+      return this.tupleElementRelated(element, targetElements[targetIndex], relation);
     });
+  }
+
+  private tupleElementRelated(element: TupleElement, expected: TupleElement, relation: Relation): boolean {
+    if ((element.rest && !expected.rest) || (isRequired(expected) && !isRequired(element))) return false;
+    // A missing optional element reads as `undefined` unless the target's element may be missing too.
+    const sourceType = element.rest
+      ? this.c.restElementType(element.type)
+      : element.optional && !expected.optional
+        ? unionOf([element.type, undefinedType])
+        : element.type;
+    const targetType = expected.rest ? this.c.restElementType(expected.type) : expected.type;
+    return this.isRelated(sourceType, targetType, relation);
   }
 
   private signaturesRelated(sources: Signature[], targets: Signature[], relation: Relation): boolean {
