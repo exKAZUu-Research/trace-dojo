@@ -11,6 +11,7 @@ import {
   Dict,
   type Env,
   IOBind,
+  IOCall,
   IODo,
   IOPrim,
   IOReturn,
@@ -211,8 +212,8 @@ function pushStackFrame(frame: Frame, scannedEnvs: Set<Env>, push: Push): void {
   }
 }
 
-// code-gauge-allow functionCognitiveComplexity 24 -- One branch per kind of runtime value.
-// code-gauge-allow functionNcss 42 -- One branch per kind of runtime value.
+// code-gauge-allow functionCognitiveComplexity 25 -- One branch per kind of runtime value.
+// code-gauge-allow functionNcss 45 -- One branch per kind of runtime value.
 function pushReferences(runtime: Runtime, value: object, push: Push): void {
   if (value instanceof ConValue) {
     for (const field of value.fields) push(field);
@@ -229,6 +230,8 @@ function pushReferences(runtime: Runtime, value: object, push: Push): void {
   } else if (value instanceof IODo) {
     pushRefs(freeVarsOf(value.code), value.env, push);
     pushPreparedActions(value.prepared, push);
+  } else if (value instanceof IOCall) {
+    push(value.action);
   } else if (value instanceof IOBind || value instanceof IOThen) {
     push(value.action);
     push(value.next);

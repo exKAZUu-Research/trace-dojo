@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 481 -- Machine states and frames share one evaluator stack.
+// code-gauge-allow-file fileNcss 523 -- Machine states and frames share one evaluator stack.
 import { CONS_CON, NIL_CON } from './builtinTypes';
 import type { CaseCore, Core, FunctionInfo } from './core';
 import type { TypeHint } from './displayTypeHints';
@@ -14,6 +14,7 @@ import {
 import type { ConInfo } from './entities';
 import {
   type DoFrame,
+  enterCallFrame,
   finishMatch,
   markTailSelfCall,
   prepareBlock,
@@ -23,7 +24,7 @@ import {
 } from './ioBlocks';
 import type { Primitive } from './primitives';
 import { RecursionBudget } from './recursionBudget';
-import type { Runtime } from './runtime';
+import type { Runtime, TraceFrame } from './runtime';
 import {
   Closure,
   ConValue,
@@ -31,6 +32,7 @@ import {
   Env,
   HaskellException,
   IOBind,
+  IOCall,
   IODo,
   IOPrim,
   IOReturn,
@@ -54,7 +56,8 @@ export type Frame =
       target: Thunk | undefined;
     }
   | { k: 'apply'; args: Slot[]; displayType?: TypeHint }
-  | { k: 'functionResult'; info: FunctionInfo }
+  | { k: 'functionResult'; info: FunctionInfo; invocation: Env; atomicScope: boolean }
+  | { k: 'ioScope'; frame: TraceFrame }
   | { k: 'case'; core: CaseCore; env: Env; displayType: TypeHint | undefined }
   | { k: 'charCase'; core: Extract<Core, { k: 'charCase' }>; env: Env }
   | { k: 'method'; index: number }
@@ -67,6 +70,8 @@ export type Frame =
   | DoFrame
   | { k: 'doMatch'; frame: DoFrame }
   | { k: 'base' };
+
+const atomicInfos = new WeakMap<FunctionInfo, FunctionInfo>();
 
 const nullaryCache = new WeakMap<ConInfo, ConValue>();
 
@@ -277,7 +282,7 @@ export class Machine {
       case 'frame': {
         this.runtime.allocate(code.size);
         state.env = new Env(code.size, env, code.info);
-        if (code.functionResult) this.pushFunctionResult(code.info);
+        if (code.functionResult) this.pushFunctionResult(code.info, state.env);
         state.code = code.body;
         return;
       }
@@ -339,9 +344,10 @@ export class Machine {
 
   private consumerRunsIO(): boolean {
     for (let index = this.stack.length - 1; index >= 0; index--) {
-      this.runtime.spend();
       const frame = this.stack[index];
-      if (frame.k !== 'update' && frame.k !== 'functionResult') return frame.k === 'runIO';
+      if (frame.k === 'functionResult') continue;
+      this.runtime.spend();
+      if (frame.k !== 'update') return frame.k === 'runIO';
     }
     return false;
   }
@@ -402,7 +408,7 @@ export class Machine {
     this.runtime.endPreview(top.thunk);
   }
 
-  // code-gauge-allow functionNcss 31 -- Application dispatch keeps partial, primitive and closure entry on the same stack.
+  // code-gauge-allow functionNcss 36 -- Application dispatch keeps partial, primitive and closure entry on the same stack.
   private stepApply(state: RunState): void {
     let { fn, args } = state;
     if (fn instanceof Partial) {
@@ -424,6 +430,8 @@ export class Machine {
       args = args.slice(0, arity);
     }
     if (fn instanceof PrimFn) {
+      const atomicScope = fn.atomicScope || !!fn.info?.isAtomic;
+      if (atomicScope) this.pushFunctionResult(fn.info, new Env(0, undefined, fn.info), true);
       this.runtime.allocate(args.length);
       this.stack.push({ k: 'prim', prim: fn.prim, args: [...args], position: 0 });
       state.mode = 'primNext';
@@ -432,11 +440,12 @@ export class Machine {
     // A call counts as an operation, as does a primitive's (in `stepPrim`), which may charge more for its own work.
     this.runtime.spend();
     this.runtime.allocate(fn.lam.size);
-    markTailSelfCall(this, fn.lam.info);
+    if (!fn.atomicScope || this.inAtomicScope()) markTailSelfCall(this, fn.lam.info);
     const frameEnv = new Env(fn.lam.size, fn.env, fn.lam.info);
     for (let index = 0; index < arity; index++) frameEnv.slots[index] = args[index];
     bindDisplayTypes(frameEnv, fn.lam.displayConstraints ?? [], fn.lam.displayParameters ?? [], args, this.runtime);
-    if (fn.lam.functionResult) this.pushFunctionResult(fn.lam.info);
+    const atomicScope = fn.atomicScope || !!fn.lam.info?.isAtomic;
+    if (fn.lam.functionResult || atomicScope) this.pushFunctionResult(fn.lam.info, frameEnv, atomicScope);
     state.evaluate(fn.lam.body, frameEnv);
   }
 
@@ -472,7 +481,7 @@ export class Machine {
         return true;
       }
       case 'functionResult': {
-        state.returnValue(this.nameFunctionResult(state.value, frame.info));
+        state.returnValue(this.nameFunctionResult(state.value, frame.info, frame.invocation, frame.atomicScope));
         return false;
       }
       case 'update': {
@@ -514,7 +523,7 @@ export class Machine {
       }
       case 'deferredDo': {
         this.inheritTypeHint(frame.ordinary);
-        if (isIOAction(state.value as Value)) state.returnValue(frame.action);
+        if (isIOAction(state.value)) state.returnValue(frame.action);
         return false;
       }
       case 'prim': {
@@ -538,24 +547,51 @@ export class Machine {
     }
   }
 
-  private pushFunctionResult(info: FunctionInfo | undefined): void {
+  private pushFunctionResult(
+    info: FunctionInfo | undefined,
+    invocation: Env,
+    atomicScope = info?.isAtomic ?? false
+  ): void {
     if (!info) return;
     const top = this.stack.at(-1);
-    if (top?.k === 'functionResult') top.info = info;
-    else this.stack.push({ k: 'functionResult', info });
+    if (top?.k === 'functionResult') {
+      top.info = info;
+      top.invocation = invocation;
+      top.atomicScope ||= atomicScope;
+    } else this.stack.push({ k: 'functionResult', info, invocation, atomicScope });
   }
 
-  private nameFunctionResult(value: Slot, info: FunctionInfo): Slot {
-    if (value instanceof Closure) return this.namedClosure(value, info);
-    if (value instanceof Partial && value.fn instanceof Closure) {
-      const fn = this.namedClosure(value.fn, info);
+  private nameFunctionResult(value: Slot, info: FunctionInfo, invocation: Env, atomicScope: boolean): Slot {
+    if (value instanceof Closure || value instanceof PrimFn) return this.namedCallable(value, info, atomicScope);
+    if (value instanceof Partial && (value.fn instanceof Closure || value.fn instanceof PrimFn)) {
+      const fn = this.namedCallable(value.fn, info, atomicScope);
       return fn === value.fn ? value : new Partial(fn, value.args);
+    }
+    if (atomicScope && isIOAction(value)) {
+      const scope = invocation.info?.isAtomic ? invocation : new Env(0, invocation, this.atomicInfo(info));
+      return new IOCall(value, scope);
     }
     return value;
   }
 
-  private namedClosure(value: Closure, info: FunctionInfo): Closure {
-    return value.lam.info ? value : new Closure({ ...value.lam, info }, value.env);
+  private namedCallable(value: Closure | PrimFn, info: FunctionInfo, atomicScope: boolean): Closure | PrimFn {
+    const original = value instanceof Closure ? value.lam.info : value.info;
+    const source = original ?? info;
+    const scope = value.atomicScope || atomicScope;
+    if (source === original && scope === value.atomicScope) return value;
+    return value instanceof Closure
+      ? new Closure({ ...value.lam, info: source }, value.env, scope)
+      : new PrimFn(value.prim, source, scope);
+  }
+
+  private atomicInfo(source: FunctionInfo): FunctionInfo {
+    if (source.isAtomic) return source;
+    let atomic = atomicInfos.get(source);
+    if (!atomic) {
+      atomic = { ...source, isAtomic: true };
+      atomicInfos.set(source, atomic);
+    }
+    return atomic;
   }
 
   private inheritTypeHint(slot: Slot): void {
@@ -599,8 +635,18 @@ export class Machine {
     state.evaluate(core.default, env);
   }
 
+  // code-gauge-allow functionCognitiveComplexity 17 -- One branch dispatches each IO representation and its call scope.
   private stepIO(state: RunState): void {
     const action = state.value as Value;
+    if (action instanceof IOCall) {
+      if (!this.inAtomicScope()) {
+        const scope = enterCallFrame(this, action.invocation);
+        if (scope.pushed) this.stack.push({ k: 'ioScope', frame: scope.traceFrame });
+      }
+      this.stack.push({ k: 'runIO' });
+      state.enter(action.action);
+      return;
+    }
     this.runtime.spend();
     if (action instanceof IOReturn) {
       state.ioResult(action.value);
@@ -631,6 +677,10 @@ export class Machine {
       case 'base': {
         return true;
       }
+      case 'ioScope': {
+        this.runtime.popFrame(frame.frame);
+        return false;
+      }
       case 'ioBind': {
         this.stack.push({ k: 'runIO' }, { k: 'apply', args: [state.value] });
         state.enter(frame.next);
@@ -651,6 +701,10 @@ export class Machine {
     }
   }
 
+  private inAtomicScope(): boolean {
+    return this.runtime.frames.some((frame) => frame.isAtomic);
+  }
+
   private unwind(base: number): void {
     const { stack } = this;
     while (stack.length > base) {
@@ -664,6 +718,8 @@ export class Machine {
         this.runtime.endPreview(frame.thunk, true);
       } else if (frame.k === 'do') {
         unwindBlock(this, frame);
+      } else if (frame.k === 'ioScope' && this.runtime.frames[0] !== frame.frame) {
+        this.runtime.popFrame(frame.frame);
       }
     }
   }

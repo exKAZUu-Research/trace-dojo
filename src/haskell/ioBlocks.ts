@@ -33,42 +33,46 @@ export function runBlock(machine: Machine, state: RunState, action: IODo): void 
   const prefix = prepareBlock(machine, action);
   runtime.allocate(action.code.size);
   const env = new Env(action.code.size, action.env);
-  const invocation = env.invocation();
-  const top = runtime.frames.at(-1);
-  let traceFrame = top;
-  let pushed = false;
-  if (!top || top.invocation !== invocation) {
-    let callRow = top?.currentRow();
-    const callers = top && tailSelfCallers(machine, top, invocation?.info);
-    if (callers && top) {
-      callRow = top.callRow;
-      for (const caller of callers) caller.tailCalled = true;
-      runtime.popFrame(top, false);
-    }
-    traceFrame = runtime.pushFrame(invocation, callRow);
-    pushed = true;
-  } else {
-    markSilentCaller(machine, top);
-  }
+  const { traceFrame, pushed } = enterCallFrame(machine, env.invocation());
   const frame: DoFrame = {
     k: 'do',
     code: action.code,
     env,
     index: 0,
     mark: 0,
-    traceFrame: traceFrame as TraceFrame,
+    traceFrame,
     pushedTraceFrame: pushed,
     prefix,
   };
   frame.traceFrame.contexts.push({ env, prefixEnv: prefix.env, visible: action.code.entryVisible, row: undefined });
   machine.stack.push(frame);
-  if (action.code.bindingRow !== undefined && action.env !== invocation) {
+  if (action.code.bindingRow !== undefined && action.env !== traceFrame.invocation) {
     runtime.steps.stepBinding(
       action.code.bindingRow,
       storesAnswer(runtime, env, action.code.entryVisible, action.code.bindingNames ?? [], frame.traceFrame)
     );
   }
   startStatement(machine, state, frame);
+}
+
+export function enterCallFrame(
+  machine: Machine,
+  invocation: Env | undefined
+): { traceFrame: TraceFrame; pushed: boolean } {
+  const runtime = machine.runtime;
+  const top = runtime.frames.at(-1);
+  if (top && top.invocation === invocation) {
+    markSilentCaller(machine, top);
+    return { traceFrame: top, pushed: false };
+  }
+  let callRow = top?.currentRow();
+  const callers = top && tailSelfCallers(machine, top, invocation?.info);
+  if (callers && top) {
+    callRow = top.callRow;
+    for (const caller of callers) caller.tailCalled = true;
+    runtime.popFrame(top, false);
+  }
+  return { traceFrame: runtime.pushFrame(invocation, callRow), pushed: true };
 }
 
 export function prepareBlock(machine: Machine, action: IODo): PreparedBlock {
@@ -108,6 +112,7 @@ function markSilentCaller(machine: Machine, top: TraceFrame): void {
   if (stmt.kind === 'exp' && stmt.onlyCalls) caller.silent = true;
 }
 
+// code-gauge-allow functionCognitiveComplexity 20 -- One stack walk checks tail statements through their owning call scope.
 function tailSelfCallers(
   machine: Machine,
   frame: TraceFrame,
@@ -118,6 +123,7 @@ function tailSelfCallers(
   const blocks: DoFrame[] = [];
   for (let index = start; index >= 0; index--) {
     const candidate = machine.stack[index];
+    if (candidate.k === 'ioScope' && candidate.frame === frame) return blocks.length > 0 ? blocks : undefined;
     if (candidate.k !== 'do' || candidate.traceFrame !== frame || candidate.tailCalled) return undefined;
     const stmt = candidate.code.stmts[candidate.index];
     if (candidate.index !== candidate.code.stmts.length - 1 || stmt.kind !== 'exp') return undefined;

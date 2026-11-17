@@ -59,7 +59,8 @@ export class ConValue {
 export class Closure {
   constructor(
     readonly lam: LamCore,
-    readonly env: Env | undefined
+    readonly env: Env | undefined,
+    readonly atomicScope = false
   ) {}
 
   get arity(): number {
@@ -68,7 +69,11 @@ export class Closure {
 }
 
 export class PrimFn {
-  constructor(readonly prim: Primitive) {}
+  constructor(
+    readonly prim: Primitive,
+    readonly info?: FunctionInfo,
+    readonly atomicScope = false
+  ) {}
 
   get arity(): number {
     return this.prim.arity;
@@ -135,7 +140,7 @@ export class Thunk {
 }
 
 /** An `IO` action, which only running it performs. */
-export type IOAction = IOReturn | IOBind | IOThen | IOPrim | IODo;
+export type IOAction = IOReturn | IOBind | IOThen | IOPrim | IODo | IOCall;
 
 export class IOReturn {
   constructor(readonly value: Slot) {}
@@ -181,6 +186,13 @@ export class IODo {
   ) {}
 }
 
+export class IOCall {
+  constructor(
+    readonly action: Slot,
+    readonly invocation: Env
+  ) {}
+}
+
 export class Dict {
   constructor(
     readonly instance: InstanceInfo,
@@ -195,13 +207,14 @@ export class TurtleValue {
   constructor(readonly turtle: TurtleState) {}
 }
 
-export function isIOAction(value: Value): value is IOAction {
+export function isIOAction(value: Slot): value is IOAction {
   return (
     value instanceof IOReturn ||
     value instanceof IOBind ||
     value instanceof IOThen ||
     value instanceof IOPrim ||
-    value instanceof IODo
+    value instanceof IODo ||
+    value instanceof IOCall
   );
 }
 
