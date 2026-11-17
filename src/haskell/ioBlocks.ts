@@ -179,18 +179,23 @@ export function unwindBlock(machine: Machine, frame: DoFrame): void {
 }
 
 function storesAnswer(runtime: Runtime, env: Env, visible: VisibleScope, names: readonly string[]): boolean {
-  if (!runtime.steps.recorder) return false;
+  return !!runtime.steps.recorder && names.some((name) => bindingDisplaysAnswer(runtime, env, visible, name));
+}
+
+function bindingDisplaysAnswer(runtime: Runtime, env: Env, visible: VisibleScope, name: string): boolean {
   try {
-    return runtime.withDisplayBudget(20_000, () =>
-      names.some((name) => {
-        runtime.spend();
-        const binding = visible.bindings.get(name);
-        if (!binding) return false;
-        const slot = env.at(visible.level - binding.level).slots[binding.index];
-        if (slot === undefined) return false;
-        const type = slotDisplayType(slot, binding.type);
-        return isScalarType(type) || runtime.displaysAnswer?.(slot, type) === true;
-      })
+    const candidate = runtime.withDisplayBudget(20_000, () => {
+      runtime.spend();
+      const binding = visible.bindings.get(name);
+      if (!binding) return;
+      const slot = env.at(visible.level - binding.level).slots[binding.index];
+      if (slot === undefined) return;
+      const type = slotDisplayType(slot, binding.type);
+      return { slot, type, scalar: isScalarType(type) };
+    });
+    return (
+      candidate !== undefined &&
+      (candidate.scalar || runtime.displaysAnswer?.(name, candidate.slot, candidate.type) === true)
     );
   } catch (error) {
     if (error instanceof DisplayAbort) return false;

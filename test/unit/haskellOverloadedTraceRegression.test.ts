@@ -403,3 +403,41 @@ main=forM_ (${values}) $ \\x->do
     expect(result.traceItems.at(-1)?.vars).not.toHaveProperty('x');
   }
 );
+
+test.each([
+  { declaration: 'data C=C {a::Int}', values: '[C 1,C 1]', field: 'this.a', answer: 1 },
+  { declaration: 'data C=C {flag::Bool}', values: '[C True,C True]', field: 'this.flag', answer: true },
+  { declaration: 'data C=C {xs::[Int]}', values: '[C [1],C [1]]', field: 'this.xs', answer: [1] },
+])('record field answers retain each this binding: $declaration', ({ declaration, values, field, answer }) => {
+  const source = `import Control.Monad
+${declaration}
+main=forM_ ${values} $ \\this->do
+ print(1::Int)`;
+  const result = traceProgram('haskell', source, source);
+  expect(result.stdout).toBe('1\n1\n');
+  expect(result.traceItems.map(({ line }) => line)).toEqual([0, 3, 4, 3, 4]);
+  expect(result.traceItems.slice(1).map(({ vars }) => vars[field])).toEqual([answer, answer, answer, answer]);
+});
+
+test('unrenderable fields do not hide subsequent this answers or force program errors', () => {
+  const source = `import Control.Monad
+data C=C {bad::Int,good::Bool}
+slow n=if n==0 then 1 else slow(n-1)
+main=forM_ [C (slow(5000::Int)) True,C (error "unused") True] $ \\this->do
+ print(1::Int)`;
+  const result = traceProgram('haskell', source, source);
+  expect(result.stdout).toBe('1\n1\n');
+  expect(result.traceItems.map(({ line }) => line)).toEqual([0, 4, 5, 4, 5]);
+  expect(result.traceItems.slice(1).map(({ vars }) => vars['this.good'])).toEqual([true, true, true, true]);
+});
+
+test('reference-only this fields do not add unchanged binding steps', () => {
+  const source = `import Control.Monad
+data C=C {ref::Maybe Int}
+main=forM_ [C(Just 1),C(Just 1)] $ \\this->do
+ print(1::Int)`;
+  const result = traceProgram('haskell', source, source);
+  expect(result.stdout).toBe('1\n1\n');
+  expect(result.traceItems.map(({ line }) => line)).toEqual([0, 4, 4]);
+  expect(result.traceItems.at(-1)?.vars).not.toHaveProperty('this.ref');
+});

@@ -59,7 +59,7 @@ export class Runtime implements TracedRuntime<TraceFrame> {
   readonly frames: TraceFrame[] = [];
   readonly machine: Machine;
   readonly displayAborted = new WeakSet<Thunk>();
-  displaysAnswer?: (slot: Slot, type: Type) => boolean;
+  displaysAnswer?: (name: string, slot: Slot, type: Type) => boolean;
   private readonly globals = new Map<GlobalDef, Slot>();
   private readonly dictCache = new Map<InstanceInfo, Dict>();
   private allocated = 0;

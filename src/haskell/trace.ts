@@ -27,7 +27,7 @@ import { visibleVariables } from './visibleScope';
 export function traceHaskellProgram(program: string, trace: TraceOptions, input?: ProgramInput): ProgramRecording {
   const compiled = compileProgram(program, new Set(trace.atomicAnnotations.keys()), true);
   const runtime = new Runtime(input);
-  runtime.displaysAnswer = (slot, type) => slotDisplaysAnswer(runtime, slot, type);
+  runtime.displaysAnswer = (name, slot, type) => slotDisplaysAnswer(runtime, name, slot, type);
   const recorder = new TraceRecorder(runtime, {
     isAtomic: (frame) => frame.isAtomic,
     variablesOf: (frame) => variablesOf(runtime, frame),
@@ -45,21 +45,16 @@ export function traceHaskellProgram(program: string, trace: TraceOptions, input?
   return { traceItems: recorder.traceItems, finalVars, ...run };
 }
 
-function slotDisplaysAnswer(runtime: Runtime, slot: Slot, type: Type): boolean {
-  return (
-    displayAttempt(runtime, () => {
-      const value = forceForDisplay(runtime, slot);
-      return (
-        value !== undefined &&
-        !isHidden(value, type) &&
-        scalarOf(runtime, value, slotDisplayType(slot, type), 0) !== NOT_SCALAR
-      );
-    }) === true
-  );
+type VariableDisplay = Pick<TraceVariables, 'vars'> & Partial<Pick<TraceVariables, 'referenceVars'>>;
+
+function slotDisplaysAnswer(runtime: Runtime, name: string, slot: Slot, type: Type): boolean {
+  const variables: VariableDisplay = { vars: Object.create(null) };
+  const entry = addSlotVariable(runtime, variables, name, slot, type);
+  if (name === 'this') addSelfFields(runtime, variables, entry);
+  return Object.keys(variables.vars).length > 0;
 }
 
 /** The variables a frame's running statement sees: its parameters and the variables bound before it, in order. */
-// code-gauge-allow functionCognitiveComplexity 18 -- Variables come from each trace context with shadowing and record fields applied.
 function variablesOf(runtime: Runtime, frame: TraceFrame): TraceVariables {
   const variables: TraceVariables = { vars: Object.create(null), referenceVars: Object.create(null) };
   const context = frame.contexts.at(-1);
@@ -68,25 +63,32 @@ function variablesOf(runtime: Runtime, frame: TraceFrame): TraceVariables {
   for (const visible of visibleVariables(context.visible)) {
     const slot = context.env.at(visible.depth).slots[visible.index];
     if (slot === undefined) continue;
-    let displayType = visible.type;
-    const value = displayAttempt(runtime, () => {
-      const forced = forceForDisplay(runtime, slot);
-      if (forced !== undefined) {
-        displayType = slotDisplayType(slot, visible.type);
-        addVariable(runtime, variables, visible.name, forced, displayType);
-      }
-      return forced;
-    });
-    if (value === undefined) continue;
-    if (visible.name === 'this') self = { value, type: displayType };
+    const entry = addSlotVariable(runtime, variables, visible.name, slot, visible.type);
+    if (visible.name === 'this') self = entry;
   }
   addSelfFields(runtime, variables, self);
   return variables;
 }
 
+function addSlotVariable(
+  runtime: Runtime,
+  variables: VariableDisplay,
+  name: string,
+  slot: Slot,
+  type: Type
+): { value: Value; type: Type } | undefined {
+  return displayAttempt(runtime, () => {
+    const value = forceForDisplay(runtime, slot);
+    if (value === undefined) return;
+    const displayType = slotDisplayType(slot, type);
+    addVariable(runtime, variables, name, value, displayType);
+    return { value, type: displayType };
+  });
+}
+
 function addSelfFields(
   runtime: Runtime,
-  variables: TraceVariables,
+  variables: VariableDisplay,
   entry: { value: Value; type: Type } | undefined
 ): void {
   if (!entry) return;
@@ -133,10 +135,11 @@ function forceForDisplay(runtime: Runtime, slot: Slot): Value | undefined {
 type Scalar = TraceItemVariable[string];
 const NOT_SCALAR = Symbol('notScalar');
 
-function addVariable(runtime: Runtime, variables: TraceVariables, name: string, value: Value, type: Type): void {
+function addVariable(runtime: Runtime, variables: VariableDisplay, name: string, value: Value, type: Type): void {
   if (isHidden(value, type)) return;
   const scalar = scalarOf(runtime, value, type, 0);
   if (scalar !== NOT_SCALAR) variables.vars[name] = scalar;
+  if (!variables.referenceVars) return;
   // Lists also appear as references so that learners can expand their elements.
   if (scalar !== NOT_SCALAR && !isListValue(value, type)) return;
   try {
