@@ -22,12 +22,7 @@ export function printedOperation(node: Node, print: Print): string | undefined {
   const operand = (child: Node): string => (isOptionalChain(child) ? undefined : print(child)) ?? INTERMEDIATE;
   switch (node.type) {
     case 'binary_expression': {
-      const operator = field(node, 'operator').text;
-      const negated = operator === '!=' ? '==' : operator === '!==' ? '===' : undefined;
-      const left = field(node, 'left');
-      const right = field(node, 'right');
-      if (negated) return `(!(${operand(left)} ${negated} ${operand(right)}))`;
-      return `(${chain(node, operator).map(operand).join(` ${operator} `)})`;
+      return printedBinary(node, operand);
     }
     case 'unary_expression': {
       const operator = field(node, 'operator').text;
@@ -59,6 +54,13 @@ export function printedOperation(node: Node, print: Print): string | undefined {
       return undefined;
     }
   }
+}
+
+function printedBinary(node: Node, operand: (child: Node) => string): string {
+  const operator = field(node, 'operator').text;
+  const negated = operator === '!=' ? '==' : operator === '!==' ? '===' : undefined;
+  if (negated) return `(!(${operand(field(node, 'left'))} ${negated} ${operand(field(node, 'right'))}))`;
+  return `(${chain(node, operator).map(operand).join(` ${operator} `)})`;
 }
 
 /**

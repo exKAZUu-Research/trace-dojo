@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 424 -- Holds shared type construction, bounded instantiation, structure lookup, and type constraints used by all checker components.
+// code-gauge-allow-file fileNcss 427 -- Holds shared type construction, bounded instantiation, structure lookup, and type constraints used by all checker components.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import type { SourceDiagnostic } from '../../interpreter/diagnostics';
@@ -474,7 +474,6 @@ export class Checker {
     };
   }
 
-  // code-gauge-allow functionCognitiveComplexity 18 -- Flattens rest elements and builds the tuple's members in one lazy structure.
   tupleType(elements: TupleElement[], readonly = false): ObjectType {
     // A rest element of a tuple type spreads into the tuple.
     const flat: TupleElement[] = [];
