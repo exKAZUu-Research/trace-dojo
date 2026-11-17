@@ -52338,3 +52338,557 @@ test.each(nativeMethodOwnerPrintabilityCases)(
     expect(run(source)).toMatchObject({ kind: 'executed', stdout, uncaughtException: undefined });
   }
 );
+
+const nativeMethodDescriptionStagingCases = [
+  [
+    'class A;def x;1;end;end;class B<A;end;$s="before";$calls=[];B.define_singleton_method(:inspect){$calls<<:receiver;$s};A.define_singleton_method(:to_s){$calls<<:owner;$s.replace("after");"A"};begin;s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?;rescue=>e;p e.class,e.message;end;p $calls,$s.bytes,$s.encoding',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 98, 101, 102, 111, 114, 101, 40, 65, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n[:receiver, :owner]\n[97, 102, 116, 101, 114]\n#<Encoding:UTF-8>\n',
+  ],
+  [
+    'class A;def self.x;1;end;end;class B<A;end;$s="before";$calls=[];B.define_singleton_method(:inspect){$calls<<:receiver;$s};A.define_singleton_method(:inspect){$calls<<:owner;$s.replace("after");"A"};begin;s=B.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?;rescue=>e;p e.class,e.message;end;p $calls,$s.bytes,$s.encoding',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 98, 101, 102, 111, 114, 101, 40, 65, 41, 46, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n[:receiver, :owner]\n[97, 102, 116, 101, 114]\n#<Encoding:UTF-8>\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;$s="before";$calls=[];B.define_singleton_method(:inspect){$calls<<:receiver;$s};A.define_singleton_method(:to_s){$calls<<:owner;$s.replace("after");"日"};begin;s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?;rescue=>e;p e.class,e.message;end;p $calls,$s.bytes,$s.encoding',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 98, 101, 102, 111, 114, 101, 40, 230, 151, 165, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:UTF-8>\ntrue\n[:receiver, :owner]\n[97, 102, 116, 101, 114]\n#<Encoding:UTF-8>\n',
+  ],
+  [
+    'class A;def self.x;1;end;end;class B<A;end;$s="before";$calls=[];B.define_singleton_method(:inspect){$calls<<:receiver;$s};A.define_singleton_method(:inspect){$calls<<:owner;$s.replace("after");"日"};begin;s=B.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?;rescue=>e;p e.class,e.message;end;p $calls,$s.bytes,$s.encoding',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 98, 101, 102, 111, 114, 101, 40, 230, 151, 165, 41, 46, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:UTF-8>\ntrue\n[:receiver, :owner]\n[97, 102, 116, 101, 114]\n#<Encoding:UTF-8>\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;$s="before";$calls=[];B.define_singleton_method(:inspect){$calls<<:receiver;$s};A.define_singleton_method(:to_s){$calls<<:owner;$s.replace("after");255.chr};begin;s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?;rescue=>e;p e.class,e.message;end;p $calls,$s.bytes,$s.encoding',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 98, 101, 102, 111, 114, 101, 40, 92, 120, 70, 70, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n[:receiver, :owner]\n[97, 102, 116, 101, 114]\n#<Encoding:UTF-8>\n',
+  ],
+  [
+    'class A;def self.x;1;end;end;class B<A;end;$s="before";$calls=[];B.define_singleton_method(:inspect){$calls<<:receiver;$s};A.define_singleton_method(:inspect){$calls<<:owner;$s.replace("after");255.chr};begin;s=B.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?;rescue=>e;p e.class,e.message;end;p $calls,$s.bytes,$s.encoding',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 98, 101, 102, 111, 114, 101, 40, 92, 120, 70, 70, 41, 46, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n[:receiver, :owner]\n[97, 102, 116, 101, 114]\n#<Encoding:UTF-8>\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;$s="before";$calls=[];B.define_singleton_method(:inspect){$calls<<:receiver;$s};A.define_singleton_method(:to_s){$calls<<:owner;$s.replace(233.chr);"A"};begin;s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?;rescue=>e;p e.class,e.message;end;p $calls,$s.bytes,$s.encoding',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 98, 101, 102, 111, 114, 101, 40, 65, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n[:receiver, :owner]\n[233]\n#<Encoding:BINARY (ASCII-8BIT)>\n',
+  ],
+  [
+    'class A;def self.x;1;end;end;class B<A;end;$s="before";$calls=[];B.define_singleton_method(:inspect){$calls<<:receiver;$s};A.define_singleton_method(:inspect){$calls<<:owner;$s.replace(233.chr);"A"};begin;s=B.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?;rescue=>e;p e.class,e.message;end;p $calls,$s.bytes,$s.encoding',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 98, 101, 102, 111, 114, 101, 40, 65, 41, 46, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n[:receiver, :owner]\n[233]\n#<Encoding:BINARY (ASCII-8BIT)>\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;$s="before";$calls=[];B.define_singleton_method(:inspect){$calls<<:receiver;$s};A.define_singleton_method(:to_s){$calls<<:owner;$s.replace(233.chr);"日"};begin;s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?;rescue=>e;p e.class,e.message;end;p $calls,$s.bytes,$s.encoding',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 98, 101, 102, 111, 114, 101, 40, 230, 151, 165, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:UTF-8>\ntrue\n[:receiver, :owner]\n[233]\n#<Encoding:BINARY (ASCII-8BIT)>\n',
+  ],
+  [
+    'class A;def self.x;1;end;end;class B<A;end;$s="before";$calls=[];B.define_singleton_method(:inspect){$calls<<:receiver;$s};A.define_singleton_method(:inspect){$calls<<:owner;$s.replace(233.chr);"日"};begin;s=B.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?;rescue=>e;p e.class,e.message;end;p $calls,$s.bytes,$s.encoding',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 98, 101, 102, 111, 114, 101, 40, 230, 151, 165, 41, 46, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:UTF-8>\ntrue\n[:receiver, :owner]\n[233]\n#<Encoding:BINARY (ASCII-8BIT)>\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;$s="before";$calls=[];B.define_singleton_method(:inspect){$calls<<:receiver;$s};A.define_singleton_method(:to_s){$calls<<:owner;$s.replace(233.chr);255.chr};begin;s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?;rescue=>e;p e.class,e.message;end;p $calls,$s.bytes,$s.encoding',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 98, 101, 102, 111, 114, 101, 40, 92, 120, 70, 70, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n[:receiver, :owner]\n[233]\n#<Encoding:BINARY (ASCII-8BIT)>\n',
+  ],
+  [
+    'class A;def self.x;1;end;end;class B<A;end;$s="before";$calls=[];B.define_singleton_method(:inspect){$calls<<:receiver;$s};A.define_singleton_method(:inspect){$calls<<:owner;$s.replace(233.chr);255.chr};begin;s=B.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?;rescue=>e;p e.class,e.message;end;p $calls,$s.bytes,$s.encoding',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 98, 101, 102, 111, 114, 101, 40, 92, 120, 70, 70, 41, 46, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n[:receiver, :owner]\n[233]\n#<Encoding:BINARY (ASCII-8BIT)>\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;$s="before";$calls=[];B.define_singleton_method(:inspect){$calls<<:receiver;$s};A.define_singleton_method(:to_s){$calls<<:owner;$s.replace("日");"A"};begin;s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?;rescue=>e;p e.class,e.message;end;p $calls,$s.bytes,$s.encoding',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 98, 101, 102, 111, 114, 101, 40, 65, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n[:receiver, :owner]\n[230, 151, 165]\n#<Encoding:UTF-8>\n',
+  ],
+  [
+    'class A;def self.x;1;end;end;class B<A;end;$s="before";$calls=[];B.define_singleton_method(:inspect){$calls<<:receiver;$s};A.define_singleton_method(:inspect){$calls<<:owner;$s.replace("日");"A"};begin;s=B.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?;rescue=>e;p e.class,e.message;end;p $calls,$s.bytes,$s.encoding',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 98, 101, 102, 111, 114, 101, 40, 65, 41, 46, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n[:receiver, :owner]\n[230, 151, 165]\n#<Encoding:UTF-8>\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;$s="before";$calls=[];B.define_singleton_method(:inspect){$calls<<:receiver;$s};A.define_singleton_method(:to_s){$calls<<:owner;$s.replace("日");"日"};begin;s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?;rescue=>e;p e.class,e.message;end;p $calls,$s.bytes,$s.encoding',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 98, 101, 102, 111, 114, 101, 40, 230, 151, 165, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:UTF-8>\ntrue\n[:receiver, :owner]\n[230, 151, 165]\n#<Encoding:UTF-8>\n',
+  ],
+  [
+    'class A;def self.x;1;end;end;class B<A;end;$s="before";$calls=[];B.define_singleton_method(:inspect){$calls<<:receiver;$s};A.define_singleton_method(:inspect){$calls<<:owner;$s.replace("日");"日"};begin;s=B.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?;rescue=>e;p e.class,e.message;end;p $calls,$s.bytes,$s.encoding',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 98, 101, 102, 111, 114, 101, 40, 230, 151, 165, 41, 46, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:UTF-8>\ntrue\n[:receiver, :owner]\n[230, 151, 165]\n#<Encoding:UTF-8>\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;$s="before";$calls=[];B.define_singleton_method(:inspect){$calls<<:receiver;$s};A.define_singleton_method(:to_s){$calls<<:owner;$s.replace("日");255.chr};begin;s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?;rescue=>e;p e.class,e.message;end;p $calls,$s.bytes,$s.encoding',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 98, 101, 102, 111, 114, 101, 40, 92, 120, 70, 70, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n[:receiver, :owner]\n[230, 151, 165]\n#<Encoding:UTF-8>\n',
+  ],
+  [
+    'class A;def self.x;1;end;end;class B<A;end;$s="before";$calls=[];B.define_singleton_method(:inspect){$calls<<:receiver;$s};A.define_singleton_method(:inspect){$calls<<:owner;$s.replace("日");255.chr};begin;s=B.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?;rescue=>e;p e.class,e.message;end;p $calls,$s.bytes,$s.encoding',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 98, 101, 102, 111, 114, 101, 40, 92, 120, 70, 70, 41, 46, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n[:receiver, :owner]\n[230, 151, 165]\n#<Encoding:UTF-8>\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;$s="before";$calls=[];B.define_singleton_method(:inspect){$calls<<:receiver;$s};A.define_singleton_method(:to_s){$calls<<:owner;$s.replace(String.new("é",encoding:"US-ASCII"));"A"};begin;s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?;rescue=>e;p e.class,e.message;end;p $calls,$s.bytes,$s.encoding',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 98, 101, 102, 111, 114, 101, 40, 65, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n[:receiver, :owner]\n[195, 169]\n#<Encoding:US-ASCII>\n',
+  ],
+  [
+    'class A;def self.x;1;end;end;class B<A;end;$s="before";$calls=[];B.define_singleton_method(:inspect){$calls<<:receiver;$s};A.define_singleton_method(:inspect){$calls<<:owner;$s.replace(String.new("é",encoding:"US-ASCII"));"A"};begin;s=B.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?;rescue=>e;p e.class,e.message;end;p $calls,$s.bytes,$s.encoding',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 98, 101, 102, 111, 114, 101, 40, 65, 41, 46, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n[:receiver, :owner]\n[195, 169]\n#<Encoding:US-ASCII>\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;$s="before";$calls=[];B.define_singleton_method(:inspect){$calls<<:receiver;$s};A.define_singleton_method(:to_s){$calls<<:owner;$s.replace(String.new("é",encoding:"US-ASCII"));"日"};begin;s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?;rescue=>e;p e.class,e.message;end;p $calls,$s.bytes,$s.encoding',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 98, 101, 102, 111, 114, 101, 40, 230, 151, 165, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:UTF-8>\ntrue\n[:receiver, :owner]\n[195, 169]\n#<Encoding:US-ASCII>\n',
+  ],
+  [
+    'class A;def self.x;1;end;end;class B<A;end;$s="before";$calls=[];B.define_singleton_method(:inspect){$calls<<:receiver;$s};A.define_singleton_method(:inspect){$calls<<:owner;$s.replace(String.new("é",encoding:"US-ASCII"));"日"};begin;s=B.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?;rescue=>e;p e.class,e.message;end;p $calls,$s.bytes,$s.encoding',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 98, 101, 102, 111, 114, 101, 40, 230, 151, 165, 41, 46, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:UTF-8>\ntrue\n[:receiver, :owner]\n[195, 169]\n#<Encoding:US-ASCII>\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;$s="before";$calls=[];B.define_singleton_method(:inspect){$calls<<:receiver;$s};A.define_singleton_method(:to_s){$calls<<:owner;$s.replace(String.new("é",encoding:"US-ASCII"));255.chr};begin;s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?;rescue=>e;p e.class,e.message;end;p $calls,$s.bytes,$s.encoding',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 98, 101, 102, 111, 114, 101, 40, 92, 120, 70, 70, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n[:receiver, :owner]\n[195, 169]\n#<Encoding:US-ASCII>\n',
+  ],
+  [
+    'class A;def self.x;1;end;end;class B<A;end;$s="before";$calls=[];B.define_singleton_method(:inspect){$calls<<:receiver;$s};A.define_singleton_method(:inspect){$calls<<:owner;$s.replace(String.new("é",encoding:"US-ASCII"));255.chr};begin;s=B.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?;rescue=>e;p e.class,e.message;end;p $calls,$s.bytes,$s.encoding',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 98, 101, 102, 111, 114, 101, 40, 92, 120, 70, 70, 41, 46, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n[:receiver, :owner]\n[195, 169]\n#<Encoding:US-ASCII>\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;$s="é";$calls=[];B.define_singleton_method(:inspect){$calls<<:receiver;$s};A.define_singleton_method(:to_s){$calls<<:owner;$s.replace("after");"A"};begin;s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?;rescue=>e;p e.class,e.message;end;p $calls,$s.bytes,$s.encoding',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 195, 169, 40, 65, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:UTF-8>\ntrue\n[:receiver, :owner]\n[97, 102, 116, 101, 114]\n#<Encoding:UTF-8>\n',
+  ],
+  [
+    'class A;def self.x;1;end;end;class B<A;end;$s="é";$calls=[];B.define_singleton_method(:inspect){$calls<<:receiver;$s};A.define_singleton_method(:inspect){$calls<<:owner;$s.replace("after");"A"};begin;s=B.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?;rescue=>e;p e.class,e.message;end;p $calls,$s.bytes,$s.encoding',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 195, 169, 40, 65, 41, 46, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:UTF-8>\ntrue\n[:receiver, :owner]\n[97, 102, 116, 101, 114]\n#<Encoding:UTF-8>\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;$s="é";$calls=[];B.define_singleton_method(:inspect){$calls<<:receiver;$s};A.define_singleton_method(:to_s){$calls<<:owner;$s.replace("after");"日"};begin;s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?;rescue=>e;p e.class,e.message;end;p $calls,$s.bytes,$s.encoding',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 195, 169, 40, 230, 151, 165, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:UTF-8>\ntrue\n[:receiver, :owner]\n[97, 102, 116, 101, 114]\n#<Encoding:UTF-8>\n',
+  ],
+  [
+    'class A;def self.x;1;end;end;class B<A;end;$s="é";$calls=[];B.define_singleton_method(:inspect){$calls<<:receiver;$s};A.define_singleton_method(:inspect){$calls<<:owner;$s.replace("after");"日"};begin;s=B.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?;rescue=>e;p e.class,e.message;end;p $calls,$s.bytes,$s.encoding',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 195, 169, 40, 230, 151, 165, 41, 46, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:UTF-8>\ntrue\n[:receiver, :owner]\n[97, 102, 116, 101, 114]\n#<Encoding:UTF-8>\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;$s="é";$calls=[];B.define_singleton_method(:inspect){$calls<<:receiver;$s};A.define_singleton_method(:to_s){$calls<<:owner;$s.replace("after");255.chr};begin;s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?;rescue=>e;p e.class,e.message;end;p $calls,$s.bytes,$s.encoding',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 195, 169, 40, 92, 120, 70, 70, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:UTF-8>\ntrue\n[:receiver, :owner]\n[97, 102, 116, 101, 114]\n#<Encoding:UTF-8>\n',
+  ],
+  [
+    'class A;def self.x;1;end;end;class B<A;end;$s="é";$calls=[];B.define_singleton_method(:inspect){$calls<<:receiver;$s};A.define_singleton_method(:inspect){$calls<<:owner;$s.replace("after");255.chr};begin;s=B.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?;rescue=>e;p e.class,e.message;end;p $calls,$s.bytes,$s.encoding',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 195, 169, 40, 92, 120, 70, 70, 41, 46, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:UTF-8>\ntrue\n[:receiver, :owner]\n[97, 102, 116, 101, 114]\n#<Encoding:UTF-8>\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;$s="é";$calls=[];B.define_singleton_method(:inspect){$calls<<:receiver;$s};A.define_singleton_method(:to_s){$calls<<:owner;$s.replace(233.chr);"A"};begin;s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?;rescue=>e;p e.class,e.message;end;p $calls,$s.bytes,$s.encoding',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 195, 169, 40, 65, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:UTF-8>\ntrue\n[:receiver, :owner]\n[233]\n#<Encoding:BINARY (ASCII-8BIT)>\n',
+  ],
+  [
+    'class A;def self.x;1;end;end;class B<A;end;$s="é";$calls=[];B.define_singleton_method(:inspect){$calls<<:receiver;$s};A.define_singleton_method(:inspect){$calls<<:owner;$s.replace(233.chr);"A"};begin;s=B.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?;rescue=>e;p e.class,e.message;end;p $calls,$s.bytes,$s.encoding',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 195, 169, 40, 65, 41, 46, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:UTF-8>\ntrue\n[:receiver, :owner]\n[233]\n#<Encoding:BINARY (ASCII-8BIT)>\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;$s="é";$calls=[];B.define_singleton_method(:inspect){$calls<<:receiver;$s};A.define_singleton_method(:to_s){$calls<<:owner;$s.replace(233.chr);"日"};begin;s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?;rescue=>e;p e.class,e.message;end;p $calls,$s.bytes,$s.encoding',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 195, 169, 40, 230, 151, 165, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:UTF-8>\ntrue\n[:receiver, :owner]\n[233]\n#<Encoding:BINARY (ASCII-8BIT)>\n',
+  ],
+  [
+    'class A;def self.x;1;end;end;class B<A;end;$s="é";$calls=[];B.define_singleton_method(:inspect){$calls<<:receiver;$s};A.define_singleton_method(:inspect){$calls<<:owner;$s.replace(233.chr);"日"};begin;s=B.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?;rescue=>e;p e.class,e.message;end;p $calls,$s.bytes,$s.encoding',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 195, 169, 40, 230, 151, 165, 41, 46, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:UTF-8>\ntrue\n[:receiver, :owner]\n[233]\n#<Encoding:BINARY (ASCII-8BIT)>\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;$s="é";$calls=[];B.define_singleton_method(:inspect){$calls<<:receiver;$s};A.define_singleton_method(:to_s){$calls<<:owner;$s.replace(233.chr);255.chr};begin;s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?;rescue=>e;p e.class,e.message;end;p $calls,$s.bytes,$s.encoding',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 195, 169, 40, 92, 120, 70, 70, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:UTF-8>\ntrue\n[:receiver, :owner]\n[233]\n#<Encoding:BINARY (ASCII-8BIT)>\n',
+  ],
+  [
+    'class A;def self.x;1;end;end;class B<A;end;$s="é";$calls=[];B.define_singleton_method(:inspect){$calls<<:receiver;$s};A.define_singleton_method(:inspect){$calls<<:owner;$s.replace(233.chr);255.chr};begin;s=B.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?;rescue=>e;p e.class,e.message;end;p $calls,$s.bytes,$s.encoding',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 195, 169, 40, 92, 120, 70, 70, 41, 46, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:UTF-8>\ntrue\n[:receiver, :owner]\n[233]\n#<Encoding:BINARY (ASCII-8BIT)>\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;$s="é";$calls=[];B.define_singleton_method(:inspect){$calls<<:receiver;$s};A.define_singleton_method(:to_s){$calls<<:owner;$s.replace("日");"A"};begin;s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?;rescue=>e;p e.class,e.message;end;p $calls,$s.bytes,$s.encoding',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 195, 169, 40, 65, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:UTF-8>\ntrue\n[:receiver, :owner]\n[230, 151, 165]\n#<Encoding:UTF-8>\n',
+  ],
+  [
+    'class A;def self.x;1;end;end;class B<A;end;$s="é";$calls=[];B.define_singleton_method(:inspect){$calls<<:receiver;$s};A.define_singleton_method(:inspect){$calls<<:owner;$s.replace("日");"A"};begin;s=B.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?;rescue=>e;p e.class,e.message;end;p $calls,$s.bytes,$s.encoding',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 195, 169, 40, 65, 41, 46, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:UTF-8>\ntrue\n[:receiver, :owner]\n[230, 151, 165]\n#<Encoding:UTF-8>\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;$s="é";$calls=[];B.define_singleton_method(:inspect){$calls<<:receiver;$s};A.define_singleton_method(:to_s){$calls<<:owner;$s.replace("日");"日"};begin;s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?;rescue=>e;p e.class,e.message;end;p $calls,$s.bytes,$s.encoding',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 195, 169, 40, 230, 151, 165, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:UTF-8>\ntrue\n[:receiver, :owner]\n[230, 151, 165]\n#<Encoding:UTF-8>\n',
+  ],
+  [
+    'class A;def self.x;1;end;end;class B<A;end;$s="é";$calls=[];B.define_singleton_method(:inspect){$calls<<:receiver;$s};A.define_singleton_method(:inspect){$calls<<:owner;$s.replace("日");"日"};begin;s=B.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?;rescue=>e;p e.class,e.message;end;p $calls,$s.bytes,$s.encoding',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 195, 169, 40, 230, 151, 165, 41, 46, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:UTF-8>\ntrue\n[:receiver, :owner]\n[230, 151, 165]\n#<Encoding:UTF-8>\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;$s="é";$calls=[];B.define_singleton_method(:inspect){$calls<<:receiver;$s};A.define_singleton_method(:to_s){$calls<<:owner;$s.replace("日");255.chr};begin;s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?;rescue=>e;p e.class,e.message;end;p $calls,$s.bytes,$s.encoding',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 195, 169, 40, 92, 120, 70, 70, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:UTF-8>\ntrue\n[:receiver, :owner]\n[230, 151, 165]\n#<Encoding:UTF-8>\n',
+  ],
+  [
+    'class A;def self.x;1;end;end;class B<A;end;$s="é";$calls=[];B.define_singleton_method(:inspect){$calls<<:receiver;$s};A.define_singleton_method(:inspect){$calls<<:owner;$s.replace("日");255.chr};begin;s=B.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?;rescue=>e;p e.class,e.message;end;p $calls,$s.bytes,$s.encoding',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 195, 169, 40, 92, 120, 70, 70, 41, 46, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:UTF-8>\ntrue\n[:receiver, :owner]\n[230, 151, 165]\n#<Encoding:UTF-8>\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;$s="é";$calls=[];B.define_singleton_method(:inspect){$calls<<:receiver;$s};A.define_singleton_method(:to_s){$calls<<:owner;$s.replace(String.new("é",encoding:"US-ASCII"));"A"};begin;s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?;rescue=>e;p e.class,e.message;end;p $calls,$s.bytes,$s.encoding',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 195, 169, 40, 65, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:UTF-8>\ntrue\n[:receiver, :owner]\n[195, 169]\n#<Encoding:US-ASCII>\n',
+  ],
+  [
+    'class A;def self.x;1;end;end;class B<A;end;$s="é";$calls=[];B.define_singleton_method(:inspect){$calls<<:receiver;$s};A.define_singleton_method(:inspect){$calls<<:owner;$s.replace(String.new("é",encoding:"US-ASCII"));"A"};begin;s=B.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?;rescue=>e;p e.class,e.message;end;p $calls,$s.bytes,$s.encoding',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 195, 169, 40, 65, 41, 46, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:UTF-8>\ntrue\n[:receiver, :owner]\n[195, 169]\n#<Encoding:US-ASCII>\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;$s="é";$calls=[];B.define_singleton_method(:inspect){$calls<<:receiver;$s};A.define_singleton_method(:to_s){$calls<<:owner;$s.replace(String.new("é",encoding:"US-ASCII"));"日"};begin;s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?;rescue=>e;p e.class,e.message;end;p $calls,$s.bytes,$s.encoding',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 195, 169, 40, 230, 151, 165, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:UTF-8>\ntrue\n[:receiver, :owner]\n[195, 169]\n#<Encoding:US-ASCII>\n',
+  ],
+  [
+    'class A;def self.x;1;end;end;class B<A;end;$s="é";$calls=[];B.define_singleton_method(:inspect){$calls<<:receiver;$s};A.define_singleton_method(:inspect){$calls<<:owner;$s.replace(String.new("é",encoding:"US-ASCII"));"日"};begin;s=B.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?;rescue=>e;p e.class,e.message;end;p $calls,$s.bytes,$s.encoding',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 195, 169, 40, 230, 151, 165, 41, 46, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:UTF-8>\ntrue\n[:receiver, :owner]\n[195, 169]\n#<Encoding:US-ASCII>\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;$s="é";$calls=[];B.define_singleton_method(:inspect){$calls<<:receiver;$s};A.define_singleton_method(:to_s){$calls<<:owner;$s.replace(String.new("é",encoding:"US-ASCII"));255.chr};begin;s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?;rescue=>e;p e.class,e.message;end;p $calls,$s.bytes,$s.encoding',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 195, 169, 40, 92, 120, 70, 70, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:UTF-8>\ntrue\n[:receiver, :owner]\n[195, 169]\n#<Encoding:US-ASCII>\n',
+  ],
+  [
+    'class A;def self.x;1;end;end;class B<A;end;$s="é";$calls=[];B.define_singleton_method(:inspect){$calls<<:receiver;$s};A.define_singleton_method(:inspect){$calls<<:owner;$s.replace(String.new("é",encoding:"US-ASCII"));255.chr};begin;s=B.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?;rescue=>e;p e.class,e.message;end;p $calls,$s.bytes,$s.encoding',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 195, 169, 40, 92, 120, 70, 70, 41, 46, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:UTF-8>\ntrue\n[:receiver, :owner]\n[195, 169]\n#<Encoding:US-ASCII>\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;$s=233.chr;$calls=[];B.define_singleton_method(:inspect){$calls<<:receiver;$s};A.define_singleton_method(:to_s){$calls<<:owner;$s.replace("after");"A"};begin;s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?;rescue=>e;p e.class,e.message;end;p $calls,$s.bytes,$s.encoding',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 92, 120, 69, 57, 40, 65, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n[:receiver, :owner]\n[97, 102, 116, 101, 114]\n#<Encoding:UTF-8>\n',
+  ],
+  [
+    'class A;def self.x;1;end;end;class B<A;end;$s=233.chr;$calls=[];B.define_singleton_method(:inspect){$calls<<:receiver;$s};A.define_singleton_method(:inspect){$calls<<:owner;$s.replace("after");"A"};begin;s=B.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?;rescue=>e;p e.class,e.message;end;p $calls,$s.bytes,$s.encoding',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 92, 120, 69, 57, 40, 65, 41, 46, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n[:receiver, :owner]\n[97, 102, 116, 101, 114]\n#<Encoding:UTF-8>\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;$s=233.chr;$calls=[];B.define_singleton_method(:inspect){$calls<<:receiver;$s};A.define_singleton_method(:to_s){$calls<<:owner;$s.replace("after");"日"};begin;s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?;rescue=>e;p e.class,e.message;end;p $calls,$s.bytes,$s.encoding',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 92, 120, 69, 57, 40, 230, 151, 165, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:UTF-8>\ntrue\n[:receiver, :owner]\n[97, 102, 116, 101, 114]\n#<Encoding:UTF-8>\n',
+  ],
+  [
+    'class A;def self.x;1;end;end;class B<A;end;$s=233.chr;$calls=[];B.define_singleton_method(:inspect){$calls<<:receiver;$s};A.define_singleton_method(:inspect){$calls<<:owner;$s.replace("after");"日"};begin;s=B.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?;rescue=>e;p e.class,e.message;end;p $calls,$s.bytes,$s.encoding',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 92, 120, 69, 57, 40, 230, 151, 165, 41, 46, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:UTF-8>\ntrue\n[:receiver, :owner]\n[97, 102, 116, 101, 114]\n#<Encoding:UTF-8>\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;$s=233.chr;$calls=[];B.define_singleton_method(:inspect){$calls<<:receiver;$s};A.define_singleton_method(:to_s){$calls<<:owner;$s.replace("after");255.chr};begin;s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?;rescue=>e;p e.class,e.message;end;p $calls,$s.bytes,$s.encoding',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 92, 120, 69, 57, 40, 92, 120, 70, 70, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n[:receiver, :owner]\n[97, 102, 116, 101, 114]\n#<Encoding:UTF-8>\n',
+  ],
+  [
+    'class A;def self.x;1;end;end;class B<A;end;$s=233.chr;$calls=[];B.define_singleton_method(:inspect){$calls<<:receiver;$s};A.define_singleton_method(:inspect){$calls<<:owner;$s.replace("after");255.chr};begin;s=B.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?;rescue=>e;p e.class,e.message;end;p $calls,$s.bytes,$s.encoding',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 92, 120, 69, 57, 40, 92, 120, 70, 70, 41, 46, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n[:receiver, :owner]\n[97, 102, 116, 101, 114]\n#<Encoding:UTF-8>\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;$s=233.chr;$calls=[];B.define_singleton_method(:inspect){$calls<<:receiver;$s};A.define_singleton_method(:to_s){$calls<<:owner;$s.replace(233.chr);"A"};begin;s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?;rescue=>e;p e.class,e.message;end;p $calls,$s.bytes,$s.encoding',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 92, 120, 69, 57, 40, 65, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n[:receiver, :owner]\n[233]\n#<Encoding:BINARY (ASCII-8BIT)>\n',
+  ],
+  [
+    'class A;def self.x;1;end;end;class B<A;end;$s=233.chr;$calls=[];B.define_singleton_method(:inspect){$calls<<:receiver;$s};A.define_singleton_method(:inspect){$calls<<:owner;$s.replace(233.chr);"A"};begin;s=B.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?;rescue=>e;p e.class,e.message;end;p $calls,$s.bytes,$s.encoding',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 92, 120, 69, 57, 40, 65, 41, 46, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n[:receiver, :owner]\n[233]\n#<Encoding:BINARY (ASCII-8BIT)>\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;$s=233.chr;$calls=[];B.define_singleton_method(:inspect){$calls<<:receiver;$s};A.define_singleton_method(:to_s){$calls<<:owner;$s.replace(233.chr);"日"};begin;s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?;rescue=>e;p e.class,e.message;end;p $calls,$s.bytes,$s.encoding',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 92, 120, 69, 57, 40, 230, 151, 165, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:UTF-8>\ntrue\n[:receiver, :owner]\n[233]\n#<Encoding:BINARY (ASCII-8BIT)>\n',
+  ],
+  [
+    'class A;def self.x;1;end;end;class B<A;end;$s=233.chr;$calls=[];B.define_singleton_method(:inspect){$calls<<:receiver;$s};A.define_singleton_method(:inspect){$calls<<:owner;$s.replace(233.chr);"日"};begin;s=B.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?;rescue=>e;p e.class,e.message;end;p $calls,$s.bytes,$s.encoding',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 92, 120, 69, 57, 40, 230, 151, 165, 41, 46, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:UTF-8>\ntrue\n[:receiver, :owner]\n[233]\n#<Encoding:BINARY (ASCII-8BIT)>\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;$s=233.chr;$calls=[];B.define_singleton_method(:inspect){$calls<<:receiver;$s};A.define_singleton_method(:to_s){$calls<<:owner;$s.replace(233.chr);255.chr};begin;s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?;rescue=>e;p e.class,e.message;end;p $calls,$s.bytes,$s.encoding',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 92, 120, 69, 57, 40, 92, 120, 70, 70, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n[:receiver, :owner]\n[233]\n#<Encoding:BINARY (ASCII-8BIT)>\n',
+  ],
+  [
+    'class A;def self.x;1;end;end;class B<A;end;$s=233.chr;$calls=[];B.define_singleton_method(:inspect){$calls<<:receiver;$s};A.define_singleton_method(:inspect){$calls<<:owner;$s.replace(233.chr);255.chr};begin;s=B.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?;rescue=>e;p e.class,e.message;end;p $calls,$s.bytes,$s.encoding',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 92, 120, 69, 57, 40, 92, 120, 70, 70, 41, 46, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n[:receiver, :owner]\n[233]\n#<Encoding:BINARY (ASCII-8BIT)>\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;$s=233.chr;$calls=[];B.define_singleton_method(:inspect){$calls<<:receiver;$s};A.define_singleton_method(:to_s){$calls<<:owner;$s.replace("日");"A"};begin;s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?;rescue=>e;p e.class,e.message;end;p $calls,$s.bytes,$s.encoding',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 92, 120, 69, 57, 40, 65, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n[:receiver, :owner]\n[230, 151, 165]\n#<Encoding:UTF-8>\n',
+  ],
+  [
+    'class A;def self.x;1;end;end;class B<A;end;$s=233.chr;$calls=[];B.define_singleton_method(:inspect){$calls<<:receiver;$s};A.define_singleton_method(:inspect){$calls<<:owner;$s.replace("日");"A"};begin;s=B.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?;rescue=>e;p e.class,e.message;end;p $calls,$s.bytes,$s.encoding',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 92, 120, 69, 57, 40, 65, 41, 46, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n[:receiver, :owner]\n[230, 151, 165]\n#<Encoding:UTF-8>\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;$s=233.chr;$calls=[];B.define_singleton_method(:inspect){$calls<<:receiver;$s};A.define_singleton_method(:to_s){$calls<<:owner;$s.replace("日");"日"};begin;s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?;rescue=>e;p e.class,e.message;end;p $calls,$s.bytes,$s.encoding',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 92, 120, 69, 57, 40, 230, 151, 165, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:UTF-8>\ntrue\n[:receiver, :owner]\n[230, 151, 165]\n#<Encoding:UTF-8>\n',
+  ],
+  [
+    'class A;def self.x;1;end;end;class B<A;end;$s=233.chr;$calls=[];B.define_singleton_method(:inspect){$calls<<:receiver;$s};A.define_singleton_method(:inspect){$calls<<:owner;$s.replace("日");"日"};begin;s=B.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?;rescue=>e;p e.class,e.message;end;p $calls,$s.bytes,$s.encoding',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 92, 120, 69, 57, 40, 230, 151, 165, 41, 46, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:UTF-8>\ntrue\n[:receiver, :owner]\n[230, 151, 165]\n#<Encoding:UTF-8>\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;$s=233.chr;$calls=[];B.define_singleton_method(:inspect){$calls<<:receiver;$s};A.define_singleton_method(:to_s){$calls<<:owner;$s.replace("日");255.chr};begin;s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?;rescue=>e;p e.class,e.message;end;p $calls,$s.bytes,$s.encoding',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 92, 120, 69, 57, 40, 92, 120, 70, 70, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n[:receiver, :owner]\n[230, 151, 165]\n#<Encoding:UTF-8>\n',
+  ],
+  [
+    'class A;def self.x;1;end;end;class B<A;end;$s=233.chr;$calls=[];B.define_singleton_method(:inspect){$calls<<:receiver;$s};A.define_singleton_method(:inspect){$calls<<:owner;$s.replace("日");255.chr};begin;s=B.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?;rescue=>e;p e.class,e.message;end;p $calls,$s.bytes,$s.encoding',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 92, 120, 69, 57, 40, 92, 120, 70, 70, 41, 46, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n[:receiver, :owner]\n[230, 151, 165]\n#<Encoding:UTF-8>\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;$s=233.chr;$calls=[];B.define_singleton_method(:inspect){$calls<<:receiver;$s};A.define_singleton_method(:to_s){$calls<<:owner;$s.replace(String.new("é",encoding:"US-ASCII"));"A"};begin;s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?;rescue=>e;p e.class,e.message;end;p $calls,$s.bytes,$s.encoding',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 92, 120, 69, 57, 40, 65, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n[:receiver, :owner]\n[195, 169]\n#<Encoding:US-ASCII>\n',
+  ],
+  [
+    'class A;def self.x;1;end;end;class B<A;end;$s=233.chr;$calls=[];B.define_singleton_method(:inspect){$calls<<:receiver;$s};A.define_singleton_method(:inspect){$calls<<:owner;$s.replace(String.new("é",encoding:"US-ASCII"));"A"};begin;s=B.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?;rescue=>e;p e.class,e.message;end;p $calls,$s.bytes,$s.encoding',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 92, 120, 69, 57, 40, 65, 41, 46, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n[:receiver, :owner]\n[195, 169]\n#<Encoding:US-ASCII>\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;$s=233.chr;$calls=[];B.define_singleton_method(:inspect){$calls<<:receiver;$s};A.define_singleton_method(:to_s){$calls<<:owner;$s.replace(String.new("é",encoding:"US-ASCII"));"日"};begin;s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?;rescue=>e;p e.class,e.message;end;p $calls,$s.bytes,$s.encoding',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 92, 120, 69, 57, 40, 230, 151, 165, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:UTF-8>\ntrue\n[:receiver, :owner]\n[195, 169]\n#<Encoding:US-ASCII>\n',
+  ],
+  [
+    'class A;def self.x;1;end;end;class B<A;end;$s=233.chr;$calls=[];B.define_singleton_method(:inspect){$calls<<:receiver;$s};A.define_singleton_method(:inspect){$calls<<:owner;$s.replace(String.new("é",encoding:"US-ASCII"));"日"};begin;s=B.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?;rescue=>e;p e.class,e.message;end;p $calls,$s.bytes,$s.encoding',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 92, 120, 69, 57, 40, 230, 151, 165, 41, 46, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:UTF-8>\ntrue\n[:receiver, :owner]\n[195, 169]\n#<Encoding:US-ASCII>\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;$s=233.chr;$calls=[];B.define_singleton_method(:inspect){$calls<<:receiver;$s};A.define_singleton_method(:to_s){$calls<<:owner;$s.replace(String.new("é",encoding:"US-ASCII"));255.chr};begin;s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?;rescue=>e;p e.class,e.message;end;p $calls,$s.bytes,$s.encoding',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 92, 120, 69, 57, 40, 92, 120, 70, 70, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n[:receiver, :owner]\n[195, 169]\n#<Encoding:US-ASCII>\n',
+  ],
+  [
+    'class A;def self.x;1;end;end;class B<A;end;$s=233.chr;$calls=[];B.define_singleton_method(:inspect){$calls<<:receiver;$s};A.define_singleton_method(:inspect){$calls<<:owner;$s.replace(String.new("é",encoding:"US-ASCII"));255.chr};begin;s=B.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?;rescue=>e;p e.class,e.message;end;p $calls,$s.bytes,$s.encoding',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 92, 120, 69, 57, 40, 92, 120, 70, 70, 41, 46, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n[:receiver, :owner]\n[195, 169]\n#<Encoding:US-ASCII>\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;$s=String.new("é",encoding:"US-ASCII");$calls=[];B.define_singleton_method(:inspect){$calls<<:receiver;$s};A.define_singleton_method(:to_s){$calls<<:owner;$s.replace("after");"A"};begin;s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?;rescue=>e;p e.class,e.message;end;p $calls,$s.bytes,$s.encoding',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 92, 120, 67, 51, 92, 120, 65, 57, 40, 65, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n[:receiver, :owner]\n[97, 102, 116, 101, 114]\n#<Encoding:UTF-8>\n',
+  ],
+  [
+    'class A;def self.x;1;end;end;class B<A;end;$s=String.new("é",encoding:"US-ASCII");$calls=[];B.define_singleton_method(:inspect){$calls<<:receiver;$s};A.define_singleton_method(:inspect){$calls<<:owner;$s.replace("after");"A"};begin;s=B.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?;rescue=>e;p e.class,e.message;end;p $calls,$s.bytes,$s.encoding',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 92, 120, 67, 51, 92, 120, 65, 57, 40, 65, 41, 46, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n[:receiver, :owner]\n[97, 102, 116, 101, 114]\n#<Encoding:UTF-8>\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;$s=String.new("é",encoding:"US-ASCII");$calls=[];B.define_singleton_method(:inspect){$calls<<:receiver;$s};A.define_singleton_method(:to_s){$calls<<:owner;$s.replace("after");"日"};begin;s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?;rescue=>e;p e.class,e.message;end;p $calls,$s.bytes,$s.encoding',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 92, 120, 67, 51, 92, 120, 65, 57, 40, 230, 151, 165, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:UTF-8>\ntrue\n[:receiver, :owner]\n[97, 102, 116, 101, 114]\n#<Encoding:UTF-8>\n',
+  ],
+  [
+    'class A;def self.x;1;end;end;class B<A;end;$s=String.new("é",encoding:"US-ASCII");$calls=[];B.define_singleton_method(:inspect){$calls<<:receiver;$s};A.define_singleton_method(:inspect){$calls<<:owner;$s.replace("after");"日"};begin;s=B.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?;rescue=>e;p e.class,e.message;end;p $calls,$s.bytes,$s.encoding',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 92, 120, 67, 51, 92, 120, 65, 57, 40, 230, 151, 165, 41, 46, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:UTF-8>\ntrue\n[:receiver, :owner]\n[97, 102, 116, 101, 114]\n#<Encoding:UTF-8>\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;$s=String.new("é",encoding:"US-ASCII");$calls=[];B.define_singleton_method(:inspect){$calls<<:receiver;$s};A.define_singleton_method(:to_s){$calls<<:owner;$s.replace("after");255.chr};begin;s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?;rescue=>e;p e.class,e.message;end;p $calls,$s.bytes,$s.encoding',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 92, 120, 67, 51, 92, 120, 65, 57, 40, 92, 120, 70, 70, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n[:receiver, :owner]\n[97, 102, 116, 101, 114]\n#<Encoding:UTF-8>\n',
+  ],
+  [
+    'class A;def self.x;1;end;end;class B<A;end;$s=String.new("é",encoding:"US-ASCII");$calls=[];B.define_singleton_method(:inspect){$calls<<:receiver;$s};A.define_singleton_method(:inspect){$calls<<:owner;$s.replace("after");255.chr};begin;s=B.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?;rescue=>e;p e.class,e.message;end;p $calls,$s.bytes,$s.encoding',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 92, 120, 67, 51, 92, 120, 65, 57, 40, 92, 120, 70, 70, 41, 46, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n[:receiver, :owner]\n[97, 102, 116, 101, 114]\n#<Encoding:UTF-8>\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;$s=String.new("é",encoding:"US-ASCII");$calls=[];B.define_singleton_method(:inspect){$calls<<:receiver;$s};A.define_singleton_method(:to_s){$calls<<:owner;$s.replace(233.chr);"A"};begin;s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?;rescue=>e;p e.class,e.message;end;p $calls,$s.bytes,$s.encoding',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 92, 120, 67, 51, 92, 120, 65, 57, 40, 65, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n[:receiver, :owner]\n[233]\n#<Encoding:BINARY (ASCII-8BIT)>\n',
+  ],
+  [
+    'class A;def self.x;1;end;end;class B<A;end;$s=String.new("é",encoding:"US-ASCII");$calls=[];B.define_singleton_method(:inspect){$calls<<:receiver;$s};A.define_singleton_method(:inspect){$calls<<:owner;$s.replace(233.chr);"A"};begin;s=B.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?;rescue=>e;p e.class,e.message;end;p $calls,$s.bytes,$s.encoding',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 92, 120, 67, 51, 92, 120, 65, 57, 40, 65, 41, 46, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n[:receiver, :owner]\n[233]\n#<Encoding:BINARY (ASCII-8BIT)>\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;$s=String.new("é",encoding:"US-ASCII");$calls=[];B.define_singleton_method(:inspect){$calls<<:receiver;$s};A.define_singleton_method(:to_s){$calls<<:owner;$s.replace(233.chr);"日"};begin;s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?;rescue=>e;p e.class,e.message;end;p $calls,$s.bytes,$s.encoding',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 92, 120, 67, 51, 92, 120, 65, 57, 40, 230, 151, 165, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:UTF-8>\ntrue\n[:receiver, :owner]\n[233]\n#<Encoding:BINARY (ASCII-8BIT)>\n',
+  ],
+  [
+    'class A;def self.x;1;end;end;class B<A;end;$s=String.new("é",encoding:"US-ASCII");$calls=[];B.define_singleton_method(:inspect){$calls<<:receiver;$s};A.define_singleton_method(:inspect){$calls<<:owner;$s.replace(233.chr);"日"};begin;s=B.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?;rescue=>e;p e.class,e.message;end;p $calls,$s.bytes,$s.encoding',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 92, 120, 67, 51, 92, 120, 65, 57, 40, 230, 151, 165, 41, 46, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:UTF-8>\ntrue\n[:receiver, :owner]\n[233]\n#<Encoding:BINARY (ASCII-8BIT)>\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;$s=String.new("é",encoding:"US-ASCII");$calls=[];B.define_singleton_method(:inspect){$calls<<:receiver;$s};A.define_singleton_method(:to_s){$calls<<:owner;$s.replace(233.chr);255.chr};begin;s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?;rescue=>e;p e.class,e.message;end;p $calls,$s.bytes,$s.encoding',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 92, 120, 67, 51, 92, 120, 65, 57, 40, 92, 120, 70, 70, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n[:receiver, :owner]\n[233]\n#<Encoding:BINARY (ASCII-8BIT)>\n',
+  ],
+  [
+    'class A;def self.x;1;end;end;class B<A;end;$s=String.new("é",encoding:"US-ASCII");$calls=[];B.define_singleton_method(:inspect){$calls<<:receiver;$s};A.define_singleton_method(:inspect){$calls<<:owner;$s.replace(233.chr);255.chr};begin;s=B.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?;rescue=>e;p e.class,e.message;end;p $calls,$s.bytes,$s.encoding',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 92, 120, 67, 51, 92, 120, 65, 57, 40, 92, 120, 70, 70, 41, 46, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n[:receiver, :owner]\n[233]\n#<Encoding:BINARY (ASCII-8BIT)>\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;$s=String.new("é",encoding:"US-ASCII");$calls=[];B.define_singleton_method(:inspect){$calls<<:receiver;$s};A.define_singleton_method(:to_s){$calls<<:owner;$s.replace("日");"A"};begin;s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?;rescue=>e;p e.class,e.message;end;p $calls,$s.bytes,$s.encoding',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 92, 120, 67, 51, 92, 120, 65, 57, 40, 65, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n[:receiver, :owner]\n[230, 151, 165]\n#<Encoding:UTF-8>\n',
+  ],
+  [
+    'class A;def self.x;1;end;end;class B<A;end;$s=String.new("é",encoding:"US-ASCII");$calls=[];B.define_singleton_method(:inspect){$calls<<:receiver;$s};A.define_singleton_method(:inspect){$calls<<:owner;$s.replace("日");"A"};begin;s=B.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?;rescue=>e;p e.class,e.message;end;p $calls,$s.bytes,$s.encoding',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 92, 120, 67, 51, 92, 120, 65, 57, 40, 65, 41, 46, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n[:receiver, :owner]\n[230, 151, 165]\n#<Encoding:UTF-8>\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;$s=String.new("é",encoding:"US-ASCII");$calls=[];B.define_singleton_method(:inspect){$calls<<:receiver;$s};A.define_singleton_method(:to_s){$calls<<:owner;$s.replace("日");"日"};begin;s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?;rescue=>e;p e.class,e.message;end;p $calls,$s.bytes,$s.encoding',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 92, 120, 67, 51, 92, 120, 65, 57, 40, 230, 151, 165, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:UTF-8>\ntrue\n[:receiver, :owner]\n[230, 151, 165]\n#<Encoding:UTF-8>\n',
+  ],
+  [
+    'class A;def self.x;1;end;end;class B<A;end;$s=String.new("é",encoding:"US-ASCII");$calls=[];B.define_singleton_method(:inspect){$calls<<:receiver;$s};A.define_singleton_method(:inspect){$calls<<:owner;$s.replace("日");"日"};begin;s=B.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?;rescue=>e;p e.class,e.message;end;p $calls,$s.bytes,$s.encoding',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 92, 120, 67, 51, 92, 120, 65, 57, 40, 230, 151, 165, 41, 46, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:UTF-8>\ntrue\n[:receiver, :owner]\n[230, 151, 165]\n#<Encoding:UTF-8>\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;$s=String.new("é",encoding:"US-ASCII");$calls=[];B.define_singleton_method(:inspect){$calls<<:receiver;$s};A.define_singleton_method(:to_s){$calls<<:owner;$s.replace("日");255.chr};begin;s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?;rescue=>e;p e.class,e.message;end;p $calls,$s.bytes,$s.encoding',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 92, 120, 67, 51, 92, 120, 65, 57, 40, 92, 120, 70, 70, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n[:receiver, :owner]\n[230, 151, 165]\n#<Encoding:UTF-8>\n',
+  ],
+  [
+    'class A;def self.x;1;end;end;class B<A;end;$s=String.new("é",encoding:"US-ASCII");$calls=[];B.define_singleton_method(:inspect){$calls<<:receiver;$s};A.define_singleton_method(:inspect){$calls<<:owner;$s.replace("日");255.chr};begin;s=B.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?;rescue=>e;p e.class,e.message;end;p $calls,$s.bytes,$s.encoding',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 92, 120, 67, 51, 92, 120, 65, 57, 40, 92, 120, 70, 70, 41, 46, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n[:receiver, :owner]\n[230, 151, 165]\n#<Encoding:UTF-8>\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;$s=String.new("é",encoding:"US-ASCII");$calls=[];B.define_singleton_method(:inspect){$calls<<:receiver;$s};A.define_singleton_method(:to_s){$calls<<:owner;$s.replace(String.new("é",encoding:"US-ASCII"));"A"};begin;s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?;rescue=>e;p e.class,e.message;end;p $calls,$s.bytes,$s.encoding',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 92, 120, 67, 51, 92, 120, 65, 57, 40, 65, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n[:receiver, :owner]\n[195, 169]\n#<Encoding:US-ASCII>\n',
+  ],
+  [
+    'class A;def self.x;1;end;end;class B<A;end;$s=String.new("é",encoding:"US-ASCII");$calls=[];B.define_singleton_method(:inspect){$calls<<:receiver;$s};A.define_singleton_method(:inspect){$calls<<:owner;$s.replace(String.new("é",encoding:"US-ASCII"));"A"};begin;s=B.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?;rescue=>e;p e.class,e.message;end;p $calls,$s.bytes,$s.encoding',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 92, 120, 67, 51, 92, 120, 65, 57, 40, 65, 41, 46, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n[:receiver, :owner]\n[195, 169]\n#<Encoding:US-ASCII>\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;$s=String.new("é",encoding:"US-ASCII");$calls=[];B.define_singleton_method(:inspect){$calls<<:receiver;$s};A.define_singleton_method(:to_s){$calls<<:owner;$s.replace(String.new("é",encoding:"US-ASCII"));"日"};begin;s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?;rescue=>e;p e.class,e.message;end;p $calls,$s.bytes,$s.encoding',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 92, 120, 67, 51, 92, 120, 65, 57, 40, 230, 151, 165, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:UTF-8>\ntrue\n[:receiver, :owner]\n[195, 169]\n#<Encoding:US-ASCII>\n',
+  ],
+  [
+    'class A;def self.x;1;end;end;class B<A;end;$s=String.new("é",encoding:"US-ASCII");$calls=[];B.define_singleton_method(:inspect){$calls<<:receiver;$s};A.define_singleton_method(:inspect){$calls<<:owner;$s.replace(String.new("é",encoding:"US-ASCII"));"日"};begin;s=B.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?;rescue=>e;p e.class,e.message;end;p $calls,$s.bytes,$s.encoding',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 92, 120, 67, 51, 92, 120, 65, 57, 40, 230, 151, 165, 41, 46, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:UTF-8>\ntrue\n[:receiver, :owner]\n[195, 169]\n#<Encoding:US-ASCII>\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;$s=String.new("é",encoding:"US-ASCII");$calls=[];B.define_singleton_method(:inspect){$calls<<:receiver;$s};A.define_singleton_method(:to_s){$calls<<:owner;$s.replace(String.new("é",encoding:"US-ASCII"));255.chr};begin;s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?;rescue=>e;p e.class,e.message;end;p $calls,$s.bytes,$s.encoding',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 92, 120, 67, 51, 92, 120, 65, 57, 40, 92, 120, 70, 70, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n[:receiver, :owner]\n[195, 169]\n#<Encoding:US-ASCII>\n',
+  ],
+  [
+    'class A;def self.x;1;end;end;class B<A;end;$s=String.new("é",encoding:"US-ASCII");$calls=[];B.define_singleton_method(:inspect){$calls<<:receiver;$s};A.define_singleton_method(:inspect){$calls<<:owner;$s.replace(String.new("é",encoding:"US-ASCII"));255.chr};begin;s=B.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?;rescue=>e;p e.class,e.message;end;p $calls,$s.bytes,$s.encoding',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 92, 120, 67, 51, 92, 120, 65, 57, 40, 92, 120, 70, 70, 41, 46, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n[:receiver, :owner]\n[195, 169]\n#<Encoding:US-ASCII>\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;$s="";$calls=[];B.define_singleton_method(:inspect){$calls<<:receiver;$s};A.define_singleton_method(:to_s){$calls<<:owner;$s.replace("after");"A"};begin;s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?;rescue=>e;p e.class,e.message;end;p $calls,$s.bytes,$s.encoding',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 40, 65, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n[:receiver, :owner]\n[97, 102, 116, 101, 114]\n#<Encoding:UTF-8>\n',
+  ],
+  [
+    'class A;def self.x;1;end;end;class B<A;end;$s="";$calls=[];B.define_singleton_method(:inspect){$calls<<:receiver;$s};A.define_singleton_method(:inspect){$calls<<:owner;$s.replace("after");"A"};begin;s=B.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?;rescue=>e;p e.class,e.message;end;p $calls,$s.bytes,$s.encoding',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 40, 65, 41, 46, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n[:receiver, :owner]\n[97, 102, 116, 101, 114]\n#<Encoding:UTF-8>\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;$s="";$calls=[];B.define_singleton_method(:inspect){$calls<<:receiver;$s};A.define_singleton_method(:to_s){$calls<<:owner;$s.replace("after");"日"};begin;s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?;rescue=>e;p e.class,e.message;end;p $calls,$s.bytes,$s.encoding',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 40, 230, 151, 165, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:UTF-8>\ntrue\n[:receiver, :owner]\n[97, 102, 116, 101, 114]\n#<Encoding:UTF-8>\n',
+  ],
+  [
+    'class A;def self.x;1;end;end;class B<A;end;$s="";$calls=[];B.define_singleton_method(:inspect){$calls<<:receiver;$s};A.define_singleton_method(:inspect){$calls<<:owner;$s.replace("after");"日"};begin;s=B.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?;rescue=>e;p e.class,e.message;end;p $calls,$s.bytes,$s.encoding',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 40, 230, 151, 165, 41, 46, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:UTF-8>\ntrue\n[:receiver, :owner]\n[97, 102, 116, 101, 114]\n#<Encoding:UTF-8>\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;$s="";$calls=[];B.define_singleton_method(:inspect){$calls<<:receiver;$s};A.define_singleton_method(:to_s){$calls<<:owner;$s.replace("after");255.chr};begin;s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?;rescue=>e;p e.class,e.message;end;p $calls,$s.bytes,$s.encoding',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 40, 92, 120, 70, 70, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n[:receiver, :owner]\n[97, 102, 116, 101, 114]\n#<Encoding:UTF-8>\n',
+  ],
+  [
+    'class A;def self.x;1;end;end;class B<A;end;$s="";$calls=[];B.define_singleton_method(:inspect){$calls<<:receiver;$s};A.define_singleton_method(:inspect){$calls<<:owner;$s.replace("after");255.chr};begin;s=B.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?;rescue=>e;p e.class,e.message;end;p $calls,$s.bytes,$s.encoding',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 40, 92, 120, 70, 70, 41, 46, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n[:receiver, :owner]\n[97, 102, 116, 101, 114]\n#<Encoding:UTF-8>\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;$s="";$calls=[];B.define_singleton_method(:inspect){$calls<<:receiver;$s};A.define_singleton_method(:to_s){$calls<<:owner;$s.replace(233.chr);"A"};begin;s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?;rescue=>e;p e.class,e.message;end;p $calls,$s.bytes,$s.encoding',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 40, 65, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n[:receiver, :owner]\n[233]\n#<Encoding:BINARY (ASCII-8BIT)>\n',
+  ],
+  [
+    'class A;def self.x;1;end;end;class B<A;end;$s="";$calls=[];B.define_singleton_method(:inspect){$calls<<:receiver;$s};A.define_singleton_method(:inspect){$calls<<:owner;$s.replace(233.chr);"A"};begin;s=B.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?;rescue=>e;p e.class,e.message;end;p $calls,$s.bytes,$s.encoding',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 40, 65, 41, 46, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n[:receiver, :owner]\n[233]\n#<Encoding:BINARY (ASCII-8BIT)>\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;$s="";$calls=[];B.define_singleton_method(:inspect){$calls<<:receiver;$s};A.define_singleton_method(:to_s){$calls<<:owner;$s.replace(233.chr);"日"};begin;s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?;rescue=>e;p e.class,e.message;end;p $calls,$s.bytes,$s.encoding',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 40, 230, 151, 165, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:UTF-8>\ntrue\n[:receiver, :owner]\n[233]\n#<Encoding:BINARY (ASCII-8BIT)>\n',
+  ],
+  [
+    'class A;def self.x;1;end;end;class B<A;end;$s="";$calls=[];B.define_singleton_method(:inspect){$calls<<:receiver;$s};A.define_singleton_method(:inspect){$calls<<:owner;$s.replace(233.chr);"日"};begin;s=B.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?;rescue=>e;p e.class,e.message;end;p $calls,$s.bytes,$s.encoding',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 40, 230, 151, 165, 41, 46, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:UTF-8>\ntrue\n[:receiver, :owner]\n[233]\n#<Encoding:BINARY (ASCII-8BIT)>\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;$s="";$calls=[];B.define_singleton_method(:inspect){$calls<<:receiver;$s};A.define_singleton_method(:to_s){$calls<<:owner;$s.replace(233.chr);255.chr};begin;s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?;rescue=>e;p e.class,e.message;end;p $calls,$s.bytes,$s.encoding',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 40, 92, 120, 70, 70, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n[:receiver, :owner]\n[233]\n#<Encoding:BINARY (ASCII-8BIT)>\n',
+  ],
+  [
+    'class A;def self.x;1;end;end;class B<A;end;$s="";$calls=[];B.define_singleton_method(:inspect){$calls<<:receiver;$s};A.define_singleton_method(:inspect){$calls<<:owner;$s.replace(233.chr);255.chr};begin;s=B.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?;rescue=>e;p e.class,e.message;end;p $calls,$s.bytes,$s.encoding',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 40, 92, 120, 70, 70, 41, 46, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n[:receiver, :owner]\n[233]\n#<Encoding:BINARY (ASCII-8BIT)>\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;$s="";$calls=[];B.define_singleton_method(:inspect){$calls<<:receiver;$s};A.define_singleton_method(:to_s){$calls<<:owner;$s.replace("日");"A"};begin;s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?;rescue=>e;p e.class,e.message;end;p $calls,$s.bytes,$s.encoding',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 40, 65, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n[:receiver, :owner]\n[230, 151, 165]\n#<Encoding:UTF-8>\n',
+  ],
+  [
+    'class A;def self.x;1;end;end;class B<A;end;$s="";$calls=[];B.define_singleton_method(:inspect){$calls<<:receiver;$s};A.define_singleton_method(:inspect){$calls<<:owner;$s.replace("日");"A"};begin;s=B.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?;rescue=>e;p e.class,e.message;end;p $calls,$s.bytes,$s.encoding',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 40, 65, 41, 46, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n[:receiver, :owner]\n[230, 151, 165]\n#<Encoding:UTF-8>\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;$s="";$calls=[];B.define_singleton_method(:inspect){$calls<<:receiver;$s};A.define_singleton_method(:to_s){$calls<<:owner;$s.replace("日");"日"};begin;s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?;rescue=>e;p e.class,e.message;end;p $calls,$s.bytes,$s.encoding',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 40, 230, 151, 165, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:UTF-8>\ntrue\n[:receiver, :owner]\n[230, 151, 165]\n#<Encoding:UTF-8>\n',
+  ],
+  [
+    'class A;def self.x;1;end;end;class B<A;end;$s="";$calls=[];B.define_singleton_method(:inspect){$calls<<:receiver;$s};A.define_singleton_method(:inspect){$calls<<:owner;$s.replace("日");"日"};begin;s=B.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?;rescue=>e;p e.class,e.message;end;p $calls,$s.bytes,$s.encoding',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 40, 230, 151, 165, 41, 46, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:UTF-8>\ntrue\n[:receiver, :owner]\n[230, 151, 165]\n#<Encoding:UTF-8>\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;$s="";$calls=[];B.define_singleton_method(:inspect){$calls<<:receiver;$s};A.define_singleton_method(:to_s){$calls<<:owner;$s.replace("日");255.chr};begin;s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?;rescue=>e;p e.class,e.message;end;p $calls,$s.bytes,$s.encoding',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 40, 92, 120, 70, 70, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n[:receiver, :owner]\n[230, 151, 165]\n#<Encoding:UTF-8>\n',
+  ],
+  [
+    'class A;def self.x;1;end;end;class B<A;end;$s="";$calls=[];B.define_singleton_method(:inspect){$calls<<:receiver;$s};A.define_singleton_method(:inspect){$calls<<:owner;$s.replace("日");255.chr};begin;s=B.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?;rescue=>e;p e.class,e.message;end;p $calls,$s.bytes,$s.encoding',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 40, 92, 120, 70, 70, 41, 46, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n[:receiver, :owner]\n[230, 151, 165]\n#<Encoding:UTF-8>\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;$s="";$calls=[];B.define_singleton_method(:inspect){$calls<<:receiver;$s};A.define_singleton_method(:to_s){$calls<<:owner;$s.replace(String.new("é",encoding:"US-ASCII"));"A"};begin;s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?;rescue=>e;p e.class,e.message;end;p $calls,$s.bytes,$s.encoding',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 40, 65, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n[:receiver, :owner]\n[195, 169]\n#<Encoding:US-ASCII>\n',
+  ],
+  [
+    'class A;def self.x;1;end;end;class B<A;end;$s="";$calls=[];B.define_singleton_method(:inspect){$calls<<:receiver;$s};A.define_singleton_method(:inspect){$calls<<:owner;$s.replace(String.new("é",encoding:"US-ASCII"));"A"};begin;s=B.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?;rescue=>e;p e.class,e.message;end;p $calls,$s.bytes,$s.encoding',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 40, 65, 41, 46, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n[:receiver, :owner]\n[195, 169]\n#<Encoding:US-ASCII>\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;$s="";$calls=[];B.define_singleton_method(:inspect){$calls<<:receiver;$s};A.define_singleton_method(:to_s){$calls<<:owner;$s.replace(String.new("é",encoding:"US-ASCII"));"日"};begin;s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?;rescue=>e;p e.class,e.message;end;p $calls,$s.bytes,$s.encoding',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 40, 230, 151, 165, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:UTF-8>\ntrue\n[:receiver, :owner]\n[195, 169]\n#<Encoding:US-ASCII>\n',
+  ],
+  [
+    'class A;def self.x;1;end;end;class B<A;end;$s="";$calls=[];B.define_singleton_method(:inspect){$calls<<:receiver;$s};A.define_singleton_method(:inspect){$calls<<:owner;$s.replace(String.new("é",encoding:"US-ASCII"));"日"};begin;s=B.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?;rescue=>e;p e.class,e.message;end;p $calls,$s.bytes,$s.encoding',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 40, 230, 151, 165, 41, 46, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:UTF-8>\ntrue\n[:receiver, :owner]\n[195, 169]\n#<Encoding:US-ASCII>\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;$s="";$calls=[];B.define_singleton_method(:inspect){$calls<<:receiver;$s};A.define_singleton_method(:to_s){$calls<<:owner;$s.replace(String.new("é",encoding:"US-ASCII"));255.chr};begin;s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?;rescue=>e;p e.class,e.message;end;p $calls,$s.bytes,$s.encoding',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 40, 92, 120, 70, 70, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n[:receiver, :owner]\n[195, 169]\n#<Encoding:US-ASCII>\n',
+  ],
+  [
+    'class A;def self.x;1;end;end;class B<A;end;$s="";$calls=[];B.define_singleton_method(:inspect){$calls<<:receiver;$s};A.define_singleton_method(:inspect){$calls<<:owner;$s.replace(String.new("é",encoding:"US-ASCII"));255.chr};begin;s=B.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?;rescue=>e;p e.class,e.message;end;p $calls,$s.bytes,$s.encoding',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 40, 92, 120, 70, 70, 41, 46, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n[:receiver, :owner]\n[195, 169]\n#<Encoding:US-ASCII>\n',
+  ],
+  [
+    'class A;def x(a);1;end;end;s=A.instance_method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 85, 110, 98, 111, 117, 110, 100, 77, 101, 116, 104, 111, 100, 58, 32, 65, 35, 120, 40, 97, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x(a);1;end;end;s=A.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 65, 35, 120, 40, 97, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x(a);1;end;alias y x;end;s=A.instance_method(:y).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 85, 110, 98, 111, 117, 110, 100, 77, 101, 116, 104, 111, 100, 58, 32, 65, 35, 121, 40, 120, 41, 40, 97, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x(a);1;end;alias y x;end;s=A.new.method(:y).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 65, 35, 121, 40, 120, 41, 40, 97, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x(é);1;end;end;s=A.instance_method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 85, 110, 98, 111, 117, 110, 100, 77, 101, 116, 104, 111, 100, 58, 32, 65, 35, 120, 40, 195, 169, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:UTF-8>\ntrue\n',
+  ],
+  [
+    'class A;def x(é);1;end;end;s=A.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 65, 35, 120, 40, 195, 169, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:UTF-8>\ntrue\n',
+  ],
+  [
+    'class A;def x(é);1;end;alias y x;end;s=A.instance_method(:y).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 85, 110, 98, 111, 117, 110, 100, 77, 101, 116, 104, 111, 100, 58, 32, 65, 35, 121, 40, 120, 41, 40, 195, 169, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:UTF-8>\ntrue\n',
+  ],
+  [
+    'class A;def x(é);1;end;alias y x;end;s=A.new.method(:y).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 65, 35, 121, 40, 120, 41, 40, 195, 169, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:UTF-8>\ntrue\n',
+  ],
+  [
+    'class A;def x(名);1;end;end;s=A.instance_method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 85, 110, 98, 111, 117, 110, 100, 77, 101, 116, 104, 111, 100, 58, 32, 65, 35, 120, 40, 229, 144, 141, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:UTF-8>\ntrue\n',
+  ],
+  [
+    'class A;def x(名);1;end;end;s=A.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 65, 35, 120, 40, 229, 144, 141, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:UTF-8>\ntrue\n',
+  ],
+  [
+    'class A;def x(名);1;end;alias y x;end;s=A.instance_method(:y).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 85, 110, 98, 111, 117, 110, 100, 77, 101, 116, 104, 111, 100, 58, 32, 65, 35, 121, 40, 120, 41, 40, 229, 144, 141, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:UTF-8>\ntrue\n',
+  ],
+  [
+    'class A;def x(名);1;end;alias y x;end;s=A.new.method(:y).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 65, 35, 121, 40, 120, 41, 40, 229, 144, 141, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:UTF-8>\ntrue\n',
+  ],
+  [
+    'class A;def x(*é);1;end;end;s=A.instance_method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 85, 110, 98, 111, 117, 110, 100, 77, 101, 116, 104, 111, 100, 58, 32, 65, 35, 120, 40, 42, 195, 169, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:UTF-8>\ntrue\n',
+  ],
+  [
+    'class A;def x(*é);1;end;end;s=A.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 65, 35, 120, 40, 42, 195, 169, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:UTF-8>\ntrue\n',
+  ],
+  [
+    'class A;def x(*é);1;end;alias y x;end;s=A.instance_method(:y).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 85, 110, 98, 111, 117, 110, 100, 77, 101, 116, 104, 111, 100, 58, 32, 65, 35, 121, 40, 120, 41, 40, 42, 195, 169, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:UTF-8>\ntrue\n',
+  ],
+  [
+    'class A;def x(*é);1;end;alias y x;end;s=A.new.method(:y).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 65, 35, 121, 40, 120, 41, 40, 42, 195, 169, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:UTF-8>\ntrue\n',
+  ],
+] as const;
+
+test.each(nativeMethodDescriptionStagingCases)(
+  'Method descriptions snapshot callback labels before subsequent mutations: %s',
+  (source, stdout) => {
+    expect(run(source)).toMatchObject({ kind: 'executed', stdout, uncaughtException: undefined });
+  }
+);

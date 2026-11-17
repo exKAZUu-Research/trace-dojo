@@ -1,9 +1,9 @@
-// code-gauge-allow-file fileNcss 582 -- Reflection and encoded constant lookup share representation and state; splitting registration by size would scatter that concern.
+// code-gauge-allow-file fileNcss 598 -- Reflection and encoded constant lookup share representation and state; splitting registration by size would scatter that concern.
 import type { Params } from './ast';
 import { prependHierarchy } from './classHierarchy';
 import { addressOf, className, inspect, inspectValue, toSValue, tryImplicitConversion } from './conversions';
 import { def, findCoreMethod, isCoreMethod, sdef, sundef } from './define';
-import { joinEncodedStrings } from './encodedStringJoin';
+import { EncodedStringBuilder } from './encodedStringJoin';
 import { argumentError, frozenError, nameError, rubyError, typeError, undefinedMethodError } from './errors';
 import { validateKeywords } from './exceptionOption';
 import { digest, hashGet } from './hashes';
@@ -312,7 +312,10 @@ function* methodDescription(self: RObject): Gen<RString> {
   const { recv, method, name, owner: definingOwner, moduleBound } = self.data as MethodData;
   const unbound = self.cls === rt().c.UnboundMethod;
   const inspectedOwner = method.reflectionOwner ? (method.nativeIdentityOwner ?? method.owner) : definingOwner;
-  const owner = yield* methodOwnerPrefix(inspectedOwner, recv, unbound || moduleBound);
+  const builder = new EncodedStringBuilder();
+  const kind = unbound ? 'UnboundMethod' : 'Method';
+  builder.append(methodDescriptionText(`#<${kind}: `));
+  yield* appendMethodOwner(builder, inspectedOwner, recv, unbound || moduleBound);
   const definition =
     method.body.kind === 'user'
       ? method.body.def
@@ -326,14 +329,14 @@ function* methodDescription(self: RObject): Gen<RString> {
       ? '*'
       : Array.from({ length: methodArity(method) }, () => '_').join(', ');
   const row = definition?.row ?? method.row;
-  const kind = unbound ? 'UnboundMethod' : 'Method';
-  return joinEncodedStrings([
-    methodDescriptionText(`#<${kind}: `),
-    owner,
-    symbolString(sym(name)),
-    ...(name === method.name ? [] : [str('('), symbolString(sym(method.name)), str(')')]),
-    str(`(${signature})${row === undefined ? '' : ` main.rb:${row + 1}`}>`),
-  ]);
+  builder.append(symbolString(sym(name)));
+  if (name !== method.name) {
+    builder.append(methodDescriptionText('('));
+    builder.append(symbolString(sym(method.name)));
+    builder.append(methodDescriptionText(')'));
+  }
+  builder.append(str(`(${signature})${row === undefined ? '' : ` main.rb:${row + 1}`}>`));
+  return builder.finish();
 }
 
 // code-gauge-allow functionCognitiveComplexity 20 -- Ruby renders named, anonymous, forwarding, destructured and no-keyword parameter kinds differently.
@@ -359,29 +362,37 @@ function methodParameterSignature(params: Params): string {
   return signature.join(', ');
 }
 
-function* methodOwnerPrefix(definingOwner: RClass, recv: Value, unbound: boolean): Gen<RString> {
-  if (unbound) return joinEncodedStrings([yield* methodObjectLabel(definingOwner), methodDescriptionText('#')]);
+function* appendMethodOwner(
+  builder: EncodedStringBuilder,
+  definingOwner: RClass,
+  recv: Value,
+  unbound: boolean
+): Gen<void> {
+  if (unbound) {
+    builder.append(yield* methodObjectLabel(definingOwner));
+    builder.append(methodDescriptionText('#'));
+    return;
+  }
   if (!definingOwner.isSingleton) {
     const receiverClass =
       recv instanceof RClass && (!recv.isModule || recv.singletonExposed) ? classOf(recv) : realClassOf(recv);
-    const receiver = yield* methodObjectLabel(receiverClass);
-    return joinEncodedStrings([
-      receiver,
-      ...(receiverClass === definingOwner
-        ? []
-        : [
-            methodDescriptionText('('),
-            methodInspectionLabel(yield* toSValue(definingOwner), 'quoted'),
-            methodDescriptionText(')'),
-          ]),
-      methodDescriptionText('#'),
-    ]);
+    builder.append(yield* methodObjectLabel(receiverClass));
+    if (receiverClass !== definingOwner) {
+      builder.append(methodDescriptionText('('));
+      builder.append(methodInspectionLabel(yield* toSValue(definingOwner), 'quoted'));
+      builder.append(methodDescriptionText(')'));
+    }
+    builder.append(methodDescriptionText('#'));
+    return;
   }
   const attached = definingOwner.attached as Value;
-  if (recv === attached) return joinEncodedStrings([yield* methodObjectLabel(attached), methodDescriptionText('.')]);
-  const receiver = yield* methodObjectLabel(recv);
-  const owner = yield* methodObjectLabel(attached);
-  return joinEncodedStrings([receiver, methodDescriptionText('('), owner, methodDescriptionText(').')]);
+  builder.append(yield* methodObjectLabel(recv));
+  if (recv !== attached) {
+    builder.append(methodDescriptionText('('));
+    builder.append(yield* methodObjectLabel(attached));
+    builder.append(methodDescriptionText(')'));
+  }
+  builder.append(methodDescriptionText('.'));
 }
 
 function* methodObjectLabel(value: Value): Gen<RString> {
