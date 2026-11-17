@@ -1737,7 +1737,10 @@ function* substituteRegexp(
       block,
       LIMITS.maxStringLength - output.length
     );
-    if (mode !== 'sub') cursor.refresh();
+    if (mode !== 'sub') {
+      cursor.refresh();
+      cursor.checkLength();
+    }
     if (!global) {
       const bytes = stringBytes(cursor.snapshot);
       const retainedAscii =
@@ -1849,6 +1852,7 @@ wrapFirst('scan', function* (self, args, block) {
     setLastMatch(state);
     yield* callBlock(block, [scanValue(state)], false);
     cursor.refresh();
+    cursor.checkLength();
     lastSearch = search;
     search = next;
     state = cursor.match(search);
@@ -1874,8 +1878,8 @@ wrapFirst('split', function* (self, args, block) {
   return yield* splitRegexp(self, cursor, limit, block, !literalSeparator);
 });
 
-// code-gauge-allow functionCognitiveComplexity 28 -- Separator search, field/capture emission and terminal match state share one cursor lifecycle.
-// code-gauge-allow functionNcss 34 -- Separator search, field/capture emission and terminal match state share one cursor lifecycle.
+// code-gauge-allow functionCognitiveComplexity 29 -- Native split sequencing shares the nullable-match state, field/capture emission, limit checks and terminal match state.
+// code-gauge-allow functionNcss 40 -- Native split sequencing keeps the ordered empty-match transitions, field/capture emissions and limit break in one loop.
 function* splitRegexp(
   self: RString,
   cursor: RegexpCursor,
@@ -1889,30 +1893,35 @@ function* splitRegexp(
   let fields = 0;
   let position = 0;
   let search = 0;
-  while (search <= cursor.length) {
-    if (limit > 0 && fields === limit - 1) break;
+  let lastNull = false;
+  for (;;) {
     const state = cursor.match(search);
     if (trackMatch) setLastMatch(state);
     if (!state) break;
     const [from, to] = cursor.range(state)!;
-    const next = cursor.next(state);
-    if (from === to && from === position && position === 0) {
-      search = next;
-      continue;
-    }
-    if (!(from === to && from === position)) {
-      yield* emit(position, from);
-      fields++;
-      for (let group = 1; group < state.groups.length; group++) {
-        const range = cursor.range(state, group);
-        if (range) yield* emit(range[0], range[1]);
+    if (search === from && from === to) {
+      if (lastNull) {
+        yield* emit(position, position + (cursor.sourceCharacterLength(position) ?? 1));
+        position = search;
+      } else {
+        search = cursor.nextSource(state);
+        lastNull = true;
+        continue;
       }
-      position = to;
+    } else {
+      yield* emit(position, from);
+      position = search = to;
     }
-    search = next;
+    lastNull = false;
+    for (let group = 1; group < state.groups.length; group++) {
+      const range = cursor.range(state, group);
+      if (range) yield* emit(range[0], range[1]);
+    }
+    fields++;
+    if (limit > 0 && fields >= limit - 1) break;
+    if (trackMatch) setLastMatch(state);
   }
-  if (search > cursor.length && trackMatch && (limit <= 0 || fields < limit - 1)) setLastMatch(undefined);
-  yield* emit(position, cursor.length);
+  if (limit !== 0 || position < cursor.length) yield* emit(position, cursor.length);
   return block ? self : arr(parts);
 }
 
@@ -1924,7 +1933,9 @@ function* splitCharacters(self: RString, cursor: RegexpCursor, limit: number, bl
   let fields = 0;
   while (position < cursor.length && (limit <= 0 || fields < limit - 1)) {
     rt().spend();
-    const next = cursor.nextCharacter(position);
+    const width = cursor.sourceCharacterLength(position, true);
+    if (width === undefined) break;
+    const next = position + width;
     yield* emit(position, next);
     fields++;
     position = next;
@@ -1959,6 +1970,7 @@ function splitEmitter(
       if (block) {
         yield* callBlock(block, [part], false);
         cursor.refresh();
+        cursor.checkLength();
       } else parts.push(part);
     }
   };

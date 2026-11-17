@@ -83,16 +83,23 @@ export class RegexpCursor {
 
   nextSource(state: MatchState): number {
     const [from, to] = this.range(state)!;
-    if (from !== to) return to;
-    if (to >= this.length || this.sourceBinary || this.sourceUsAscii || this.bytes[to] < 0x80) return to + 1;
-    const first = this.bytes[to];
+    return from === to ? to + (this.sourceCharacterLength(to) ?? 1) : to;
+  }
+
+  sourceCharacterLength(from: number, precise = false): number | undefined {
+    if (from >= this.bytes.length) return undefined;
+    const first = this.bytes[from];
+    if (this.sourceBinary || first < 0x80) return 1;
+    if (this.sourceUsAscii) return precise ? undefined : 1;
     const width = first < 0xe0 ? 2 : first < 0xf0 ? 3 : 4;
-    const segment = this.bytes.subarray(to, to + width);
+    const segment = this.bytes.subarray(from, from + width);
     try {
-      new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(segment, { stream: segment.length < width });
-      return to + segment.length;
+      new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(segment, {
+        stream: !precise && segment.length < width,
+      });
+      return segment.length;
     } catch {
-      return to + 1;
+      return precise ? undefined : 1;
     }
   }
 
@@ -115,10 +122,13 @@ export class RegexpCursor {
     )
       return;
     const bytes = stringBytes(subject);
-    if (bytes.length !== this.length) throw rubyError(rt().c.RuntimeError, 'string modified');
     this.validated = false;
     this.snapshot = matchSnapshot(subject, this.snapshotPolicy);
     this.bytes = bytes;
+  }
+
+  checkLength(): void {
+    if (this.bytes.length !== this.length) throw rubyError(rt().c.RuntimeError, 'string modified');
   }
 
   sliceSource(from: number, to = this.length): RString {
