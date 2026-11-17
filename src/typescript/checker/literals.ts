@@ -523,7 +523,7 @@ export class LiteralChecker {
   private spreadUnion(literal: ObjectLiteral, member: TreeNode, parts: (Type | undefined)[]): void {
     // Each alternative of a union spreads its own properties, as TypeScript gives the literal a union type.
     const bases = literal.alternatives ?? [new Map<string, Property>()];
-    const count = bases.length * parts.filter(Boolean).length;
+    const count = bases.length * parts.length;
     // TypeScript refuses a cross product of union spreads of 100,000 alternatives or more.
     if (count >= 100_000) {
       this.c.error(member, 'この式の型は、表せないほど複雑な共用体型になります。');
