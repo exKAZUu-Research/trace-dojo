@@ -325,7 +325,8 @@ export class FunctionChecker {
       if (!value || !symbol) continue;
       const declared = this.c.expressions.valueTypeOf(symbol);
       if (!mayBeUndefined(declared)) continue;
-      if (mayBeUndefined(this.c.silently(() => this.c.expressions.check(value, declared)))) continue;
+      if (this.c.patterns.defaultMayBeUndefined(this.c.silently(() => this.c.expressions.check(value, declared))))
+        continue;
       this.c.flow.set(`s${symbol.id}`, { type: this.c.relations.removeUndefined(declared), assigned: true });
     }
   }

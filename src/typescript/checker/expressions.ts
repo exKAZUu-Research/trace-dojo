@@ -5,7 +5,7 @@ import { unsupportedMessage } from '../unsupported';
 import { Calls } from './calls';
 import type { Checker } from './checker';
 import { arrayTargets, Elaboration, targetElementType } from './elaboration';
-import { Expandos, laterRunningTypes } from './expandos';
+import { Expandos, isImmediatelyInvoked, laterRunningTypes } from './expandos';
 import { ExpressionTypeCache } from './expressionTypeCache';
 import type { FlowEntry } from './flow';
 import type { Sym } from './scopes';
@@ -392,7 +392,7 @@ export class ExpressionChecker {
       if (
         laterRunningTypes.has(current.type) &&
         !(current.startIndex <= declaration.startIndex && declaration.endIndex <= current.endIndex) &&
-        !this.immediatelyInvoked(current)
+        !isImmediatelyInvoked(current)
       ) {
         return;
       }
@@ -415,13 +415,6 @@ export class ExpressionChecker {
         return true;
     }
     return false;
-  }
-
-  private immediatelyInvoked(node: TreeNode): boolean {
-    let expression = node;
-    while (expression.parent?.type === 'parenthesized_expression') expression = expression.parent;
-    const parent = expression.parent;
-    return parent?.type === 'call_expression' && parent.childForFieldName('function')?.id === expression.id;
   }
 
   /** The type of a value a symbol declares. */

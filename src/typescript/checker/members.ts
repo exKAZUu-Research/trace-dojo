@@ -355,6 +355,7 @@ export class MemberChecker {
     const property = this.c.propertyOf(objectType, name);
     if (!property) return this.indexSignatureType(objectType, name);
     this.checkPropertyAvailability(access.indexNode, objectType, name, property);
+    this.c.expressions.expandos.checkAssignedBefore(access.node, access.indexNode, property);
     // `o["secret"]` reads a private or protected member, which TypeScript leaves as a way around its access checks.
     return property.optional ? unionOf([property.type(), undefinedType]) : property.type();
   }

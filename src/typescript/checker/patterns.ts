@@ -61,9 +61,7 @@ export class BindingPatterns {
         this.checkInitializer(left, right, defaultType, implied);
         const withoutUndefined = this.c.relations.removeUndefined(type);
         if (annotated && !isIntrinsic(withoutUndefined, 'never')) {
-          // A default that can be `undefined` keeps it; one typed `any` does not, as TypeScript's type facts have it.
-          const keepsUndefined = !isAnyLike(defaultType) && this.c.relations.isAssignable(undefinedType, defaultType);
-          const declared = keepsUndefined ? type : withoutUndefined;
+          const declared = this.defaultMayBeUndefined(defaultType) ? type : withoutUndefined;
           this.c.expressions.checkAssignable(right, defaultType, declared);
           this.bindPattern(left, declared, bind, annotated);
           return;
@@ -83,6 +81,20 @@ export class BindingPatterns {
         return;
       }
     }
+  }
+
+  /**
+   * Whether a default value of a type may be `undefined`, which keeps `undefined` in what an annotated pattern or a
+   * parameter defaults: a generic type may by its constraint, while `any`, `unknown`, and `void` may not, as
+   * TypeScript 7 decides.
+   */
+  defaultMayBeUndefined(type: Type, seen = new Set<Type>()): boolean {
+    if (seen.has(type)) return false;
+    seen.add(type);
+    if (type.kind === 'union') return type.types.some((member) => this.defaultMayBeUndefined(member, seen));
+    if (type.kind === 'intersection') return type.types.every((member) => this.defaultMayBeUndefined(member, seen));
+    const constraint = this.c.baseConstraint(type);
+    return constraint === type ? isIntrinsic(type, 'undefined') : this.defaultMayBeUndefined(constraint, seen);
   }
 
   /**

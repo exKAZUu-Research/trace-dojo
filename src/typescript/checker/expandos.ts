@@ -106,25 +106,54 @@ export class Expandos {
   }
 
   /**
-   * Reports a read of a property a program adds to a function where no statement adding it has run yet: before
-   * them, or after them only in a block that does not hold the read.
+   * Reports a read of a property a program adds to a function where no statement adding it has run yet, when the read
+   * names the property as those statements do and runs in the same function or file as the first of them. Other
+   * references to the function, such as a variable it was returned to, have the property's declared type, as
+   * TypeScript's control flow analysis gives them.
    */
   checkAssignedBefore(node: TreeNode, propertyNode: TreeNode, property: Property): void {
     const assignments = property.declaration ? this.assignmentsByFirst.get(property.declaration.id) : undefined;
     if (!assignments || assignments.some((assignment) => assignment.childForFieldName('left')?.id === node.id)) return;
-    const assignedBefore = assignments.some((assignment) => {
-      const statement = assignment.parent as TreeNode;
-      const container = statement.parent as TreeNode;
-      return (
-        statement.endIndex <= node.startIndex &&
-        container.startIndex <= node.startIndex &&
-        node.endIndex <= container.endIndex
-      );
-    });
-    if (assignedBefore) return;
-    for (let current = node.parent; current; current = current.parent) if (laterRunningTypes.has(current.type)) return;
+    const key = this.c.flow.referenceKey(node);
+    if (!key || key !== this.c.flow.referenceKey(assignments[0].childForFieldName('left') as TreeNode)) return;
+    if (controlFlowContainer(node).id !== controlFlowContainer(assignments[0]).id) return;
+    if (assignments.some((assignment) => hasRunBefore(assignment.parent as TreeNode, node))) return;
     this.c.error(propertyNode, `プロパティ '${property.name}' は、代入される前に使われています。`);
   }
+}
+
+/**
+ * The function, field initializer, or program whose control flow holds a node, which includes the functions it calls
+ * immediately.
+ */
+function controlFlowContainer(node: TreeNode): TreeNode {
+  let current = node.parent as TreeNode;
+  while (
+    current.parent &&
+    !(laterRunningTypes.has(current.type) && !isImmediatelyInvoked(current)) &&
+    current.type !== 'field_definition'
+  )
+    current = current.parent;
+  return current;
+}
+
+/** Whether a statement has run whenever a later node runs: it precedes the node, nested only in plain blocks. */
+function hasRunBefore(statement: TreeNode, node: TreeNode): boolean {
+  if (statement.endIndex > node.startIndex) return false;
+  let container = statement.parent as TreeNode;
+  while (container.endIndex < node.endIndex) {
+    if (container.type !== 'statement_block' || !['program', 'statement_block'].includes(container.parent?.type ?? ''))
+      return false;
+    container = container.parent as TreeNode;
+  }
+  return true;
+}
+
+export function isImmediatelyInvoked(node: TreeNode): boolean {
+  let expression = node;
+  while (expression.parent?.type === 'parenthesized_expression') expression = expression.parent;
+  const parent = expression.parent;
+  return parent?.type === 'call_expression' && parent.childForFieldName('function')?.id === expression.id;
 }
 
 /** Whether a `const` declares a function TypeScript lets a program add properties to. */

@@ -443,7 +443,7 @@ export class LiteralChecker {
     if (literal.isTooComplex) return;
     const objectMembers = members.filter((type) => type.kind === 'object' || type.kind === 'intersection');
     if (objectMembers.length < 2) {
-      this.spreadInto(literal.properties, spread);
+      this.spreadSingle(literal, spread);
       return;
     }
     // Each alternative of a union spreads its own properties, as TypeScript gives the literal a union type.
@@ -463,6 +463,22 @@ export class LiteralChecker {
         return alternative;
       })
     );
+    literal.properties.clear();
+  }
+
+  /**
+   * Spreads a value that is not a union of objects; after a union spread, into each alternative, whose properties its
+   * optional ones may leave.
+   */
+  private spreadSingle(literal: ObjectLiteral, spread: Type): void {
+    if (!literal.alternatives) {
+      this.spreadInto(literal.properties, spread);
+      return;
+    }
+    for (const alternative of literal.alternatives) {
+      for (const [name, property] of literal.properties) alternative.set(name, property);
+      this.spreadInto(alternative, spread);
+    }
     literal.properties.clear();
   }
 
