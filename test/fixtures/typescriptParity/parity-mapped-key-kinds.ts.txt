@@ -1,0 +1,12 @@
+type M = { [K in 0 | 1]: string };
+type Key = keyof M;
+const key: Key = 0;
+const m: M = { 0: "zero", 1: "one" };
+console.log(key, m[key]);
+type C = { a?: number; b?: string };
+type D = { [K in keyof C as "x"]: C[K] };
+const d: D = {};
+console.log(d);
+type Same<T> = T extends unknown ? number : string;
+const n: Same<any> = 1;
+console.log(n);

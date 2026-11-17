@@ -402,8 +402,8 @@ export class TypeOperators {
     return composed;
   }
 
-  // code-gauge-allow functionCognitiveComplexity 19 -- Resolves distribution, deferred branches, infer parameters, and failed template-literal inference as one conditional-type operation.
-  // code-gauge-allow functionNcss 35 -- Keeps conditional inference and lazy branch substitution together.
+  // code-gauge-allow functionCognitiveComplexity 17 -- Resolves distribution, deferred branches, infer parameters, and failed template-literal inference as one conditional-type operation.
+  // code-gauge-allow functionNcss 31 -- Keeps conditional inference and lazy branch substitution together.
   resolveConditional(type: ConditionalType, outer: Mapper): Type {
     // An instantiated copy resolves from its declaration, so that it still distributes over its check type parameter.
     if (type.root && type.mapper) return this.resolveConditional(type.root, this.compose(type.mapper, outer));
@@ -461,16 +461,20 @@ export class TypeOperators {
       }
     }
     const extendsInstantiated = this.c.instantiate(extendsType, inferred);
-    if (isAnyLike(checkType)) {
-      return unionOf([
-        this.c.instantiate(this.c.instantiate(type.trueType, mapper), inferred),
-        this.c.instantiate(type.falseType, outer),
-      ]);
-    }
-    if (this.c.relations.isAssignable(checkType, extendsInstantiated)) {
-      return this.c.instantiate(this.c.instantiate(type.trueType, mapper), inferred);
-    }
-    return this.c.instantiate(type.falseType, outer);
+    return this.resolvedBranch(
+      checkType,
+      extendsInstantiated,
+      () => this.c.instantiate(this.c.instantiate(type.trueType, mapper), inferred),
+      () => this.c.instantiate(type.falseType, outer)
+    );
+  }
+
+  /** The branch a conditional type takes once neither its check type nor its extends type is generic. */
+  private resolvedBranch(checkType: Type, extendsType: Type, trueType: () => Type, falseType: () => Type): Type {
+    // Every type extends `any` and `unknown`, `any` included; it extends any other type ambiguously.
+    if (isAnyLike(extendsType) || isIntrinsic(extendsType, 'unknown')) return trueType();
+    if (isAnyLike(checkType)) return unionOf([trueType(), falseType()]);
+    return this.c.relations.isAssignable(checkType, extendsType) ? trueType() : falseType();
   }
 
   templateLiteralFromNode(node: TreeNode): Type {
