@@ -35,6 +35,7 @@ function contextualMessage(
       return `Cannot destructure property 'Symbol(Symbol.iterator)' of '${source.text}' as it is ${String(value)}.`;
     }
     case 'forOf': {
+      if (source.unreadName) return unread(source.unreadName);
       return source.isOptionalChain ? unread(source.callee ?? typed) : undefined;
     }
     case 'finalCallSpread': {

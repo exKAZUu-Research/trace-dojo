@@ -1543,6 +1543,77 @@ main();
 for (const n of [1234.123456789, -1234.5678, 0.0001234, 1e21, -0.12345, 1.123, 1234n]) console.dir({ n }, { numericSeparator: true });`,
   ],
   [
+    'for-of over every operand kind of nullish coalescing',
+    `const o = { a: 1, b: null }; let x = 5; let n = null; const g = () => 1; const h = () => null;
+function main() {
+  try { for (const v of x ?? x); } catch (e) { console.log("id1      id1      ", e.message.includes("cannot read") ? "TYPED" : "PRINTED", e.message); }
+  try { for (const v of x ?? n); } catch (e) { console.log("id1      idNull   ", e.message.includes("cannot read") ? "TYPED" : "PRINTED", e.message); }
+  try { for (const v of x ?? 5); } catch (e) { console.log("id1      lit      ", e.message.includes("cannot read") ? "TYPED" : "PRINTED", e.message); }
+  try { for (const v of x ?? null); } catch (e) { console.log("id1      litNull  ", e.message.includes("cannot read") ? "TYPED" : "PRINTED", e.message); }
+  try { for (const v of x ?? o.a); } catch (e) { console.log("id1      mem      ", e.message.includes("cannot read") ? "TYPED" : "PRINTED", e.message); }
+  try { for (const v of x ?? o.b); } catch (e) { console.log("id1      memNull  ", e.message.includes("cannot read") ? "TYPED" : "PRINTED", e.message); }
+  try { for (const v of x ?? g()); } catch (e) { console.log("id1      call     ", e.message.includes("cannot read") ? "TYPED" : "PRINTED", e.message); }
+  try { for (const v of x ?? h()); } catch (e) { console.log("id1      callNull ", e.message.includes("cannot read") ? "TYPED" : "PRINTED", e.message); }
+  try { for (const v of n ?? x); } catch (e) { console.log("idNull   id1      ", e.message.includes("cannot read") ? "TYPED" : "PRINTED", e.message); }
+  try { for (const v of n ?? n); } catch (e) { console.log("idNull   idNull   ", e.message.includes("cannot read") ? "TYPED" : "PRINTED", e.message); }
+  try { for (const v of n ?? 5); } catch (e) { console.log("idNull   lit      ", e.message.includes("cannot read") ? "TYPED" : "PRINTED", e.message); }
+  try { for (const v of n ?? null); } catch (e) { console.log("idNull   litNull  ", e.message.includes("cannot read") ? "TYPED" : "PRINTED", e.message); }
+  try { for (const v of n ?? o.a); } catch (e) { console.log("idNull   mem      ", e.message.includes("cannot read") ? "TYPED" : "PRINTED", e.message); }
+  try { for (const v of n ?? o.b); } catch (e) { console.log("idNull   memNull  ", e.message.includes("cannot read") ? "TYPED" : "PRINTED", e.message); }
+  try { for (const v of n ?? g()); } catch (e) { console.log("idNull   call     ", e.message.includes("cannot read") ? "TYPED" : "PRINTED", e.message); }
+  try { for (const v of n ?? h()); } catch (e) { console.log("idNull   callNull ", e.message.includes("cannot read") ? "TYPED" : "PRINTED", e.message); }
+  try { for (const v of 5 ?? x); } catch (e) { console.log("lit      id1      ", e.message.includes("cannot read") ? "TYPED" : "PRINTED", e.message); }
+  try { for (const v of 5 ?? n); } catch (e) { console.log("lit      idNull   ", e.message.includes("cannot read") ? "TYPED" : "PRINTED", e.message); }
+  try { for (const v of 5 ?? 5); } catch (e) { console.log("lit      lit      ", e.message.includes("cannot read") ? "TYPED" : "PRINTED", e.message); }
+  try { for (const v of 5 ?? null); } catch (e) { console.log("lit      litNull  ", e.message.includes("cannot read") ? "TYPED" : "PRINTED", e.message); }
+  try { for (const v of 5 ?? o.a); } catch (e) { console.log("lit      mem      ", e.message.includes("cannot read") ? "TYPED" : "PRINTED", e.message); }
+  try { for (const v of 5 ?? o.b); } catch (e) { console.log("lit      memNull  ", e.message.includes("cannot read") ? "TYPED" : "PRINTED", e.message); }
+  try { for (const v of 5 ?? g()); } catch (e) { console.log("lit      call     ", e.message.includes("cannot read") ? "TYPED" : "PRINTED", e.message); }
+  try { for (const v of 5 ?? h()); } catch (e) { console.log("lit      callNull ", e.message.includes("cannot read") ? "TYPED" : "PRINTED", e.message); }
+  try { for (const v of null ?? x); } catch (e) { console.log("litNull  id1      ", e.message.includes("cannot read") ? "TYPED" : "PRINTED", e.message); }
+  try { for (const v of null ?? n); } catch (e) { console.log("litNull  idNull   ", e.message.includes("cannot read") ? "TYPED" : "PRINTED", e.message); }
+  try { for (const v of null ?? 5); } catch (e) { console.log("litNull  lit      ", e.message.includes("cannot read") ? "TYPED" : "PRINTED", e.message); }
+  try { for (const v of null ?? null); } catch (e) { console.log("litNull  litNull  ", e.message.includes("cannot read") ? "TYPED" : "PRINTED", e.message); }
+  try { for (const v of null ?? o.a); } catch (e) { console.log("litNull  mem      ", e.message.includes("cannot read") ? "TYPED" : "PRINTED", e.message); }
+  try { for (const v of null ?? o.b); } catch (e) { console.log("litNull  memNull  ", e.message.includes("cannot read") ? "TYPED" : "PRINTED", e.message); }
+  try { for (const v of null ?? g()); } catch (e) { console.log("litNull  call     ", e.message.includes("cannot read") ? "TYPED" : "PRINTED", e.message); }
+  try { for (const v of null ?? h()); } catch (e) { console.log("litNull  callNull ", e.message.includes("cannot read") ? "TYPED" : "PRINTED", e.message); }
+  try { for (const v of o.a ?? x); } catch (e) { console.log("mem      id1      ", e.message.includes("cannot read") ? "TYPED" : "PRINTED", e.message); }
+  try { for (const v of o.a ?? n); } catch (e) { console.log("mem      idNull   ", e.message.includes("cannot read") ? "TYPED" : "PRINTED", e.message); }
+  try { for (const v of o.a ?? 5); } catch (e) { console.log("mem      lit      ", e.message.includes("cannot read") ? "TYPED" : "PRINTED", e.message); }
+  try { for (const v of o.a ?? null); } catch (e) { console.log("mem      litNull  ", e.message.includes("cannot read") ? "TYPED" : "PRINTED", e.message); }
+  try { for (const v of o.a ?? o.a); } catch (e) { console.log("mem      mem      ", e.message.includes("cannot read") ? "TYPED" : "PRINTED", e.message); }
+  try { for (const v of o.a ?? o.b); } catch (e) { console.log("mem      memNull  ", e.message.includes("cannot read") ? "TYPED" : "PRINTED", e.message); }
+  try { for (const v of o.a ?? g()); } catch (e) { console.log("mem      call     ", e.message.includes("cannot read") ? "TYPED" : "PRINTED", e.message); }
+  try { for (const v of o.a ?? h()); } catch (e) { console.log("mem      callNull ", e.message.includes("cannot read") ? "TYPED" : "PRINTED", e.message); }
+  try { for (const v of o.b ?? x); } catch (e) { console.log("memNull  id1      ", e.message.includes("cannot read") ? "TYPED" : "PRINTED", e.message); }
+  try { for (const v of o.b ?? n); } catch (e) { console.log("memNull  idNull   ", e.message.includes("cannot read") ? "TYPED" : "PRINTED", e.message); }
+  try { for (const v of o.b ?? 5); } catch (e) { console.log("memNull  lit      ", e.message.includes("cannot read") ? "TYPED" : "PRINTED", e.message); }
+  try { for (const v of o.b ?? null); } catch (e) { console.log("memNull  litNull  ", e.message.includes("cannot read") ? "TYPED" : "PRINTED", e.message); }
+  try { for (const v of o.b ?? o.a); } catch (e) { console.log("memNull  mem      ", e.message.includes("cannot read") ? "TYPED" : "PRINTED", e.message); }
+  try { for (const v of o.b ?? o.b); } catch (e) { console.log("memNull  memNull  ", e.message.includes("cannot read") ? "TYPED" : "PRINTED", e.message); }
+  try { for (const v of o.b ?? g()); } catch (e) { console.log("memNull  call     ", e.message.includes("cannot read") ? "TYPED" : "PRINTED", e.message); }
+  try { for (const v of o.b ?? h()); } catch (e) { console.log("memNull  callNull ", e.message.includes("cannot read") ? "TYPED" : "PRINTED", e.message); }
+  try { for (const v of g() ?? x); } catch (e) { console.log("call     id1      ", e.message.includes("cannot read") ? "TYPED" : "PRINTED", e.message); }
+  try { for (const v of g() ?? n); } catch (e) { console.log("call     idNull   ", e.message.includes("cannot read") ? "TYPED" : "PRINTED", e.message); }
+  try { for (const v of g() ?? 5); } catch (e) { console.log("call     lit      ", e.message.includes("cannot read") ? "TYPED" : "PRINTED", e.message); }
+  try { for (const v of g() ?? null); } catch (e) { console.log("call     litNull  ", e.message.includes("cannot read") ? "TYPED" : "PRINTED", e.message); }
+  try { for (const v of g() ?? o.a); } catch (e) { console.log("call     mem      ", e.message.includes("cannot read") ? "TYPED" : "PRINTED", e.message); }
+  try { for (const v of g() ?? o.b); } catch (e) { console.log("call     memNull  ", e.message.includes("cannot read") ? "TYPED" : "PRINTED", e.message); }
+  try { for (const v of g() ?? g()); } catch (e) { console.log("call     call     ", e.message.includes("cannot read") ? "TYPED" : "PRINTED", e.message); }
+  try { for (const v of g() ?? h()); } catch (e) { console.log("call     callNull ", e.message.includes("cannot read") ? "TYPED" : "PRINTED", e.message); }
+  try { for (const v of h() ?? x); } catch (e) { console.log("callNull id1      ", e.message.includes("cannot read") ? "TYPED" : "PRINTED", e.message); }
+  try { for (const v of h() ?? n); } catch (e) { console.log("callNull idNull   ", e.message.includes("cannot read") ? "TYPED" : "PRINTED", e.message); }
+  try { for (const v of h() ?? 5); } catch (e) { console.log("callNull lit      ", e.message.includes("cannot read") ? "TYPED" : "PRINTED", e.message); }
+  try { for (const v of h() ?? null); } catch (e) { console.log("callNull litNull  ", e.message.includes("cannot read") ? "TYPED" : "PRINTED", e.message); }
+  try { for (const v of h() ?? o.a); } catch (e) { console.log("callNull mem      ", e.message.includes("cannot read") ? "TYPED" : "PRINTED", e.message); }
+  try { for (const v of h() ?? o.b); } catch (e) { console.log("callNull memNull  ", e.message.includes("cannot read") ? "TYPED" : "PRINTED", e.message); }
+  try { for (const v of h() ?? g()); } catch (e) { console.log("callNull call     ", e.message.includes("cannot read") ? "TYPED" : "PRINTED", e.message); }
+  try { for (const v of h() ?? h()); } catch (e) { console.log("callNull callNull ", e.message.includes("cannot read") ? "TYPED" : "PRINTED", e.message); }
+}
+main();`,
+  ],
+  [
     'for-of over nullish coalescing named by value or by operand',
     `const o = { a: 1, b: null, c: 0 }; const a = 1, b = 2;
 function main() {

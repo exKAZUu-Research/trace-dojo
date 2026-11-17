@@ -17,6 +17,7 @@ import type {
 import { initializerContext, newContext } from './converterBase';
 import {
   accessorOf,
+  calleeText,
   fail,
   field,
   hasChild,
@@ -629,25 +630,54 @@ function namedParameter(param: Pattern): Pattern {
 
 /**
  * How V8 names the iterable of a `for...of` loop, which it names by its value instead when it is a conditional, an
- * object literal, a logical `&&` or `||` after a name, a `??` after anything but a name or a literal, a `!` of an
- * operation or a property, or a chain of more than two operands of one operator or of commas.
+ * object literal, a logical `&&` or `||` after a name, a `!` of an operation or a property, or a chain of more than
+ * two operands of one operator or of commas; and `??` as `coalescingIterationSource` names it.
  */
 function forOfIterationSource(node: Node): IterationSource | undefined {
   const operand = unwrapParentheses(node);
   const operator = operand.type === 'binary_expression' ? field(operand, 'operator').text : undefined;
   const isLogical = operator === '&&' || operator === '||';
   const isNegation = operand.type === 'unary_expression' && field(operand, 'operator').text === '!';
+  if (operator === '??') return coalescingIterationSource(operand);
   if (
     operand.type === 'ternary_expression' ||
     operand.type === 'object' ||
     (isLogical && !LITERAL_TYPES.has(unwrapParentheses(field(operand, 'left')).type)) ||
-    (operator === '??' && !['identifier', ...LITERAL_TYPES].includes(unwrapParentheses(field(operand, 'left')).type)) ||
     (isNegation && NEGATED_BY_VALUE.has(unwrapParentheses(field(operand, 'argument')).type)) ||
     (operator !== undefined && !isLogical && chain(operand, operator).length > 2) ||
     (operand.type === 'sequence_expression' && namedChildren(operand).flatMap(sequenceParts).length > 2)
   )
     return undefined;
   return iterationSource(node);
+}
+
+/**
+ * How V8 names a `for...of` iterable written as `a ?? b`, which it prints with a call as its callee, by what the right
+ * operand is: a call as a callee that returns no iterable, a name always, a literal after a name or a literal (after a
+ * call, by that call's callee), and a property only after a literal other than `null`; otherwise by its value.
+ */
+function coalescingIterationSource(operand: Node): IterationSource | undefined {
+  const left = unwrapParentheses(field(operand, 'left'));
+  const right = unwrapParentheses(field(operand, 'right'));
+  const text = `(${printed(left)} ?? ${printed(right)})`;
+  if (right.type === 'call_expression') return { text, callee: text };
+  if (left.type === 'call_expression' && isLiteral(right)) return { text, unreadName: printed(left) };
+  const named =
+    right.type === 'identifier' ||
+    (isLiteral(right) && (left.type === 'identifier' || isLiteral(left))) ||
+    ((right.type === 'member_expression' || right.type === 'subscript_expression') &&
+      isLiteral(left) &&
+      left.type !== 'null');
+  return named ? { text } : undefined;
+}
+
+/** How V8 prints an operand of `??` in a loop's error, a call as its callee. */
+function printed(side: Node): string {
+  return side.type === 'call_expression' ? calleeText(field(side, 'function')) : calleeText(side);
+}
+
+function isLiteral(side: Node): boolean {
+  return LITERAL_TYPES.has(side.type);
 }
 
 const LITERAL_TYPES = new Set(['number', 'string', 'true', 'false', 'null']);

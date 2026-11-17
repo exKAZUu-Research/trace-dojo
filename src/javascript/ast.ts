@@ -175,6 +175,8 @@ export interface IterationSource {
   callee?: string;
   /** Whether the operand is an optional chain, which V8 prints as `(intermediate value)` or names by its value. */
   isOptionalChain?: boolean;
+  /** The name a loop's error gives a value without an iterator in place of its type, as a `??` operand's callee. */
+  unreadName?: string;
 }
 
 /**
