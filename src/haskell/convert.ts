@@ -1194,14 +1194,11 @@ function convertLiteral(node: Node): SourceLiteral {
 // ---------------------------------------------------------------------------------------------------------------
 // Patterns
 
-// code-gauge-allow functionNcss 52 -- One short case per pattern node kind of the grammar.
+// code-gauge-allow functionNcss 53 -- One short case per pattern node kind of the grammar.
 export function convertPattern(node: Node): Pat {
   rejectUnsupported(node);
   const span = spanOf(node);
   switch (node.type) {
-    case 'variable': {
-      return { kind: 'pvar', name: { name: node.text, span }, span };
-    }
     case 'wildcard': {
       return { kind: 'pwild', span };
     }
@@ -1212,14 +1209,14 @@ export function convertPattern(node: Node): Pat {
       const number = required(node, 'number');
       return { kind: 'plit', lit: convertLiteral(number), negative: true, span };
     }
+    case 'variable':
     case 'constructor':
     case 'qualified':
     case 'prefix_id': {
       const { name, isConstructor } = qualifiedName(node);
-      if (!isConstructor && !name.name.startsWith(':')) {
-        throw syntaxError(span, 'パターンには、変数か構成子を書いてください。');
-      }
-      return { kind: 'pcon', con: name, args: [], span };
+      if (isConstructor || name.name.startsWith(':')) return { kind: 'pcon', con: name, args: [], span };
+      if (name.qualifier) throw syntaxError(span, 'パターンには、修飾されていない変数か構成子を書いてください。');
+      return { kind: 'pvar', name: { name: name.name, span }, span };
     }
     case 'apply': {
       const fn = required(node, 'function');

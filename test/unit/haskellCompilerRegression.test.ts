@@ -862,3 +862,19 @@ test('compiler and native evaluation recursion remain bounded under Node', { tim
       diagnostics: [expect.objectContaining({ message: expect.stringContaining('循環しています') })],
     });
 });
+
+test.each([
+  ['f (+)=1+2\nmain=print(f (*))', '2\n'],
+  [String.raw`main=print((\(+) -> 3+4) (*))`, '12\n'],
+  ['main=print(case (*) of {(+) -> 3+4})', '12\n'],
+  ['main=print[1+2 | (+)<-[(*),(+)]]', '[2,3]\n'],
+  ['main=do {(+) <- pure (*); print(3+4)}', '12\n'],
+  ['main=print(let ((+),x)=((*),4::Int) in 3+x)', '12\n'],
+  ['data T=Int :# Int\nf ((:#) a b)=a+b\nmain=print(f(1:#2))', '3\n'],
+])('operator patterns bind local variables and retain constructors: %s', (source, stdout) => {
+  expect(executeProgram('haskell', source)).toMatchObject({ kind: 'executed', stdout, uncaughtException: undefined });
+});
+
+test('qualified value operators cannot bind pattern variables', () => {
+  expect(executeProgram('haskell', 'f (Prelude.+)=1\nmain=print(1::Int)')).toMatchObject({ kind: 'compileError' });
+});
