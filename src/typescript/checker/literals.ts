@@ -38,6 +38,8 @@ interface ObjectLiteral {
    * members written since) then override.
    */
   alternatives?: Map<string, Property>[];
+  /** Whether its spreads made more alternatives than TypeScript represents, which makes the literal an error. */
+  isTooComplex?: boolean;
   /**
    * The kinds of member seen so far under each name, and whether an accessor conflict has stopped TypeScript from
    * checking the rest of the literal's names.
@@ -179,6 +181,7 @@ export class LiteralChecker {
     for (const member of named(node)) this.objectMember(literal, member);
     if (contextual) this.addPatternDefaults(properties, contextual);
     const { object, genericSpreads, alternatives } = literal;
+    if (literal.isTooComplex) return errorType;
     if (alternatives) {
       const variants = alternatives.map((alternative) => {
         const variant = anonymousObject(
@@ -428,6 +431,7 @@ export class LiteralChecker {
       literal.genericSpreads.push(spread);
       return;
     }
+    if (literal.isTooComplex) return;
     const objectMembers = members.filter((type) => type.kind === 'object' || type.kind === 'intersection');
     if (objectMembers.length < 2) {
       this.spreadInto(literal.properties, spread);
@@ -435,6 +439,14 @@ export class LiteralChecker {
     }
     // Each alternative of a union spreads its own properties, as TypeScript gives the literal a union type.
     const bases = literal.alternatives ?? [new Map<string, Property>()];
+    const count = bases.length * objectMembers.length;
+    // TypeScript refuses a cross product of union spreads past 100,000 alternatives.
+    if (count > 100_000) {
+      this.c.error(member, 'この式の型は、表せないほど複雑な共用体型になります。');
+      literal.isTooComplex = true;
+      return;
+    }
+    this.c.budget.spend(count);
     literal.alternatives = bases.flatMap((base) =>
       objectMembers.map((type) => {
         const alternative = new Map([...base, ...literal.properties]);
