@@ -695,7 +695,7 @@ export class Checker {
   // -------------------------------------------------------------------------------------------------------------
   // Patterns
 
-  // code-gauge-allow functionNcss 36 -- One short case per pattern kind.
+  // code-gauge-allow functionNcss 38 -- Pattern typing keeps binder updates and literal dictionaries in one exhaustive dispatch.
   inferPat(pat: RPat, type: Type): void {
     switch (pat.k) {
       case 'var': {
@@ -733,6 +733,7 @@ export class Checker {
             break;
           }
         }
+        if (pat.negative) pat.negate = this.want({ cls: this.builtins.num, type }, pat.span, '負のリテラルのパターン');
         break;
       }
       case 'con': {

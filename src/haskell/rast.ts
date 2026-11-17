@@ -67,9 +67,9 @@ export type RPat = (
       lit: Literal;
       negative: boolean;
       span: Span;
-      /** The `Eq` dictionary for comparing, and the `Num` or `Fractional` one for building the literal. */
       eq?: Evidence;
       num?: Evidence;
+      negate?: Evidence;
       type?: Type;
     }
   | { k: 'con'; con: ConInfo; args: RPat[]; order?: number[]; span: Span }

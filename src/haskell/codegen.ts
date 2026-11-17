@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 910 -- The Core generator covers every construct of the language in one pass over shared state.
+// code-gauge-allow-file fileNcss 912 -- The Core generator covers every construct of the language in one pass over shared state.
 import { ExecutionLimitError, LIMITS } from '../interpreter/limits';
 import {
   CHAR_TYPE,
@@ -548,10 +548,14 @@ export class Codegen {
     if (pat.lit.kind === 'char')
       return { k: 'charCase', scrut, value: pat.lit.value, matched: success, unmatched: fail };
     const eq = this.methodOf(pat.eq as Evidence, this.options.support.eq(), '==');
-    const literal: Core =
-      pat.lit.kind === 'string'
-        ? { k: 'str', value: pat.lit.value }
-        : this.literalCore(pat.lit, pat.negative, pat.num as Evidence);
+    let literal: Core =
+      pat.lit.kind === 'string' ? { k: 'str', value: pat.lit.value } : this.literalCore(pat.lit, pat.num);
+    if (pat.negative)
+      literal = {
+        k: 'app',
+        fn: this.methodOf(pat.negate as Evidence, this.options.support.num(), 'negate'),
+        args: [literal],
+      };
     return this.ifCore({ k: 'app', fn: eq, args: [scrut, literal] }, success, fail);
   }
 
@@ -620,7 +624,7 @@ export class Codegen {
         return { k: 'global', global: Codegen.constructorGlobal(expr.con) };
       }
       case 'lit': {
-        return this.literalCore(expr.lit, false, expr.evidence);
+        return this.literalCore(expr.lit, expr.evidence);
       }
       case 'app': {
         return this.compileApp(expr);
@@ -1231,21 +1235,16 @@ export class Codegen {
     return globalOf(entity, entity.name, entity);
   }
 
-  /** A numeric literal: a constant for the standard types, else `fromInteger` or `fromRational` of it. */
   // code-gauge-allow functionCognitiveComplexity 24 -- Each branch is one literal kind with its overloaded or fixed type.
   // code-gauge-allow functionNcss 32 -- Literal lowering keeps numeric precision and overloaded evidence together.
-  private literalCore(
-    lit: Extract<RPat, { k: 'lit' }>['lit'],
-    negative: boolean,
-    evidence: Evidence | undefined
-  ): Core {
+  private literalCore(lit: Extract<RPat, { k: 'lit' }>['lit'], evidence: Evidence | undefined): Core {
     if (lit.kind === 'char') return { k: 'lit', value: lit.value };
     if (lit.kind === 'string') return { k: 'str', value: lit.value };
     const resolved = evidence ? resolveEvidence(evidence) : undefined;
     const instanceType = resolved?.kind === 'instance' ? splitApp(resolved.instance.head).head : undefined;
     const typeEntity = instanceType?.tag === 'tcon' ? instanceType.entity : undefined;
     if (lit.kind === 'int') {
-      const value = negative ? -lit.value : lit.value;
+      const value = lit.value;
       if (typeEntity === INTEGER_TYPE) return { k: 'lit', value };
       if (typeEntity === INT_TYPE) return { k: 'lit', value: BigInt.asIntN(64, value) };
       if (typeEntity === WORD_TYPE) return { k: 'lit', value: BigInt.asUintN(64, value) };
@@ -1258,12 +1257,12 @@ export class Codegen {
         args: [{ k: 'lit', value }],
       };
     }
-    const value = negative ? -lit.value : lit.value;
+    const value = lit.value;
     if (typeEntity === DOUBLE_TYPE) return { k: 'lit', value };
     if (typeEntity === FLOAT_TYPE && (!Number.isFinite(value) || value === 0)) {
       return { k: 'lit', value: Math.fround(value) };
     }
-    const { numerator, denominator } = exactRatio(lit.text, negative);
+    const { numerator, denominator } = exactRatio(lit.text);
     if (typeEntity === FLOAT_TYPE) return { k: 'lit', value: rationalToFloat(numerator, denominator) };
     const ratio: Core = {
       k: 'con',
@@ -1459,8 +1458,7 @@ function patternText(pat: RPat): string {
   }
 }
 
-/** The exact rational value of a decimal literal, as `fromRational` receives it. */
-function exactRatio(text: string, negative: boolean): { numerator: bigint; denominator: bigint } {
+function exactRatio(text: string): { numerator: bigint; denominator: bigint } {
   const match = /^(\d+)(?:\.(\d+))?(?:[eE]([+-]?\d+))?$/.exec(text) as RegExpExecArray;
   const digits = BigInt(`${match[1]}${match[2] ?? ''}`);
   const exponent = (match[3] ? Number(match[3]) : 0) - (match[2]?.length ?? 0);
@@ -1473,7 +1471,7 @@ function exactRatio(text: string, negative: boolean): { numerator: bigint; denom
   const divisor = gcd(numerator, denominator);
   numerator /= divisor;
   denominator /= divisor;
-  return { numerator: negative ? -numerator : numerator, denominator };
+  return { numerator, denominator };
 }
 
 function gcd(a: bigint, b: bigint): bigint {

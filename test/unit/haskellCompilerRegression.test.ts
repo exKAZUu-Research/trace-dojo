@@ -729,6 +729,56 @@ main=print(f (1::Int) 1,f (1::Int) 2,g (1::Int) 1)`;
   ).toMatchObject({ kind: 'compileError' });
 });
 
+test('negative numeric patterns convert positive literals before dictionary negation', () => {
+  const source = `data N=N Integer deriving(Eq,Show)
+instance Num N where
+ fromInteger n=N(n+10)
+ negate(N n)=N(-n)
+f::(Eq a,Num a)=>a->Bool
+f (-1)=True
+f _=False
+z (-0)=True
+z _=False
+data F=F Rational deriving Eq
+instance Num F where
+ fromInteger n=F(fromInteger n+10)
+ negate(F n)=F(-n)
+instance Fractional F where fromRational n=F(n+10)
+g::(Eq a,Fractional a)=>a->Bool
+g (-1.5)=True
+g _=False
+main=do
+ print(f(N(-11)),f(N 9),(-1::N),z(N(-10)),z(N 10))
+ print(g(F(-11.5)),g(F 8.5))
+ print(case [N(-11)] of [-1]->True; _->False)`;
+  expect(executeProgram('haskell', source)).toMatchObject({
+    kind: 'executed',
+    stdout: '(True,False,N (-11),True,False)\n(True,False)\nTrue\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('negative pattern conversions remain lazy under negate and equality methods', () => {
+  const source = `data N=N
+instance Eq N where N==_=False
+instance Num N where
+ fromInteger _=error "conversion"
+ negate _=error "negation"
+f (-1)=True
+f _=False
+main=print(f N)`;
+  expect(executeProgram('haskell', source)).toMatchObject({
+    kind: 'executed',
+    stdout: 'False\n',
+    uncaughtException: undefined,
+  });
+  expect(executeProgram('haskell', source.replace('N==_=False', 'N==x=x `seq` True'))).toMatchObject({
+    kind: 'executed',
+    stdout: '',
+    uncaughtException: 'negation',
+  });
+});
+
 test.each([2, 3])('shared %i-way types remain bounded while recording', { timeout: 30_000 }, (branches) => {
   const output = execFileSync('bun', ['run', 'test/helpers/haskellCompilerMemory.ts', 'trace', String(branches)], {
     encoding: 'utf8',
