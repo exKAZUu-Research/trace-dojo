@@ -163,26 +163,59 @@ export class Relations {
   }
 
   /**
-   * Writing `o[k]` with a generic key must suit the property, or the index signature, of every key the constraint
-   * allows.
+   * Writing `o[k]` must suit the property, or the index signature, of every key the constraint of `k` allows in the
+   * constraint of `o`. As in TypeScript, the constraint of `o` offers only its number index signature, since a type
+   * argument may lack the others.
    */
   private relatedToIndexedAccess(s: Type, t: IndexedAccessType, relation: Relation): boolean {
-    const keys = this.c.baseConstraint(t.indexType);
-    if (isGenericObjectOrIndexType(t.objectType) || isGenericObjectOrIndexType(keys)) return false;
+    const object = this.constraintForWriting(t.objectType);
+    const keys = this.constraintForWriting(t.indexType);
+    if (isGenericObjectOrIndexType(object) || isGenericObjectOrIndexType(keys)) return false;
+    const numberIndexOnly = object !== t.objectType;
     return (keys.kind === 'union' ? keys.types : [keys]).every((key) => {
-      const writeType = this.writeTypeOf(t.objectType, key);
+      const writeType = this.writeTypeOf(object, key, numberIndexOnly);
       return writeType !== undefined && this.isRelated(s, writeType, relation);
     });
   }
 
-  private writeTypeOf(object: Type, key: Type): Type | undefined {
-    if (key.kind === 'literal') return this.c.typeOperators.indexedAccess(object, key);
+  /**
+   * TypeScript's `getBaseConstraintOfType(type) || type`: the constraint of a type parameter followed through type
+   * parameters, or the type parameter itself when it has none.
+   */
+  private constraintForWriting(type: Type): Type {
+    let current = type;
+    for (
+      let constraint = this.constraintOfParameter(current);
+      constraint;
+      constraint = this.constraintOfParameter(current)
+    )
+      current = constraint;
+    return current.kind === 'typeParameter' ? current : this.c.baseConstraint(current);
+  }
+
+  private constraintOfParameter(type: Type): Type | undefined {
+    return type.kind === 'typeParameter' ? this.c.constraintOf(type) : undefined;
+  }
+
+  private writeTypeOf(object: Type, key: Type, numberIndexOnly: boolean): Type | undefined {
     const { stringIndex, numberIndex, symbolIndex } = this.c.structureOf(object);
-    if (isIntrinsic(key, 'number')) return (numberIndex ?? stringIndex)?.type;
+    if (key.kind === 'literal') {
+      const indexed = typeof key.value === 'number' && numberIndex !== undefined;
+      if (numberIndexOnly && !indexed && !this.hasProperty(object, String(key.value))) return undefined;
+      return this.c.typeOperators.indexedAccess(object, key);
+    }
+    if (isIntrinsic(key, 'number')) return (numberIndex ?? (numberIndexOnly ? undefined : stringIndex))?.type;
+    if (numberIndexOnly) return undefined;
     if (isIntrinsic(key, 'string') || key.kind === 'templateLiteral' || key.kind === 'stringMapping')
       return stringIndex?.type;
     if (isIntrinsic(key, 'symbol')) return symbolIndex?.type;
     return undefined;
+  }
+
+  private hasProperty(object: Type, name: string): boolean {
+    return object.kind === 'union'
+      ? object.types.every((member) => this.hasProperty(member, name))
+      : this.c.propertyOf(object, name) !== undefined;
   }
 
   private genericSourceRelated(s: Type, t: Type, relation: Relation): boolean {
