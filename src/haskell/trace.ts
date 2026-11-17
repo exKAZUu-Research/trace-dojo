@@ -22,6 +22,7 @@ import {
   untypedSlot,
   type Value,
 } from './values';
+import { visibleVariables } from './visibleScope';
 
 export function traceHaskellProgram(program: string, trace: TraceOptions, input?: ProgramInput): ProgramRecording {
   const compiled = compileProgram(program, new Set(trace.atomicAnnotations.keys()), true);
@@ -50,7 +51,7 @@ function variablesOf(runtime: Runtime, frame: TraceFrame): TraceVariables {
   const context = frame.contexts.at(-1);
   if (!context) return variables;
   let self: { value: Value; type: Type } | undefined;
-  for (const visible of context.visible) {
+  for (const visible of visibleVariables(context.visible)) {
     const slot = context.env.at(visible.depth).slots[visible.index];
     if (slot === undefined) continue;
     let displayType = visible.type;

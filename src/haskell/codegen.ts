@@ -1,3 +1,5 @@
+import { OrderedMap } from 'immutable';
+
 // code-gauge-allow-file fileNcss 930 -- The Core generator covers every construct of the language in one pass over shared state.
 import { ExecutionLimitError, LIMITS } from '../interpreter/limits';
 import {
@@ -13,7 +15,7 @@ import {
   UNIT_CON,
   WORD_TYPE,
 } from './builtinTypes';
-import type { CaseCore, Core, FunctionInfo, GlobalDef, IODoCore, IOStmt, VisibleVar } from './core';
+import type { CaseCore, Core, FunctionInfo, GlobalDef, IODoCore, IOStmt } from './core';
 import {
   type ClassEntity,
   type ConInfo,
@@ -33,7 +35,9 @@ import type { LocalVar, RAlt, RBindGroup, RBinding, RClause, RExpr, RGuard, RPat
 import { type DictBuilders, dictBuilders, type Runtime } from './runtime';
 import type { Span } from './syntax';
 import { prune, type Scheme, splitApp, type Type } from './types';
+import { chargeTypeWork } from './typeWorkBudget';
 import { type Dict, Env, HaskellException, type Slot, Thunk } from './values';
+import type { VisibleBinding, VisibleScope } from './visibleScope';
 
 /** The file name GHC's messages show for the program, which runs as `Main.hs`. */
 export const PROGRAM_FILE = 'Main.hs';
@@ -76,17 +80,15 @@ class FrameScope {
   size = 0;
   readonly slots = new Map<LocalVar | DictParam, number>();
 
-  constructor(readonly parent: FrameScope | undefined) {}
+  readonly level: number;
+
+  constructor(readonly parent: FrameScope | undefined) {
+    this.level = parent ? parent.level + 1 : 0;
+  }
 
   alloc(): number {
     return this.size++;
   }
-}
-
-interface VisibleEntry {
-  local: LocalVar;
-  frame: FrameScope;
-  slot: number;
 }
 
 export function sourceSpanText(span: Span): string {
@@ -103,7 +105,7 @@ export class Codegen {
   /** The scope of top-level code, which has no frame at run time. */
   private readonly rootFrame = new FrameScope(undefined);
   private frame: FrameScope = this.rootFrame;
-  private visible: VisibleEntry[] = [];
+  private visible = OrderedMap<string, VisibleBinding>();
   /** The dictionary parameters of the bindings whose bodies are being generated, for their recursive uses. */
   private readonly ownDictParams = new Map<LocalVar | ValueEntity, DictParam[]>();
   readonly claimedAtomicRows = new Set<number>();
@@ -134,7 +136,9 @@ export class Codegen {
     const frame = new FrameScope(undefined);
     whole.code = this.withFrame(frame, () => {
       const slot = frame.alloc();
-      const rhs = this.withVisible([], () => this.compileRhs(binding.rhs, this.patternFail(binding.span)));
+      const rhs = this.withVisible(OrderedMap<string, VisibleBinding>(), () =>
+        this.compileRhs(binding.rhs, this.patternFail(binding.span))
+      );
       const matched = this.matchBoundPattern(binding, slot);
       return {
         k: 'frame',
@@ -323,7 +327,9 @@ export class Codegen {
     if (dictParams.length + arity === 0) {
       const frame = new FrameScope(this.frame);
       return this.withFrame(frame, () => {
-        const body = this.withVisible(isTop ? [] : [...this.visible], () => this.compileClauseBody(binding, [], name));
+        const body = this.withVisible(isTop ? OrderedMap<string, VisibleBinding>() : this.visible, () =>
+          this.compileClauseBody(binding, [], name)
+        );
         return { k: 'frame', size: frame.size, body, info } as Core;
       });
     }
@@ -331,7 +337,7 @@ export class Codegen {
     return this.withFrame(frame, () => {
       for (const param of dictParams) frame.slots.set(param, frame.alloc());
       const argSlots = Array.from({ length: arity }, () => frame.alloc());
-      const visible = isTop ? [] : [...this.visible];
+      const visible = isTop ? OrderedMap<string, VisibleBinding>() : this.visible;
       const body = this.withVisible(visible, () => this.compileClauseBody(binding, argSlots, name));
       return { k: 'lam', arity: dictParams.length + arity, size: frame.size, body, info } as Core;
     });
@@ -373,7 +379,7 @@ export class Codegen {
         const local = (binding.binder as { kind: 'local'; local: LocalVar }).local;
         const slot = this.frame.alloc();
         this.frame.slots.set(local, slot);
-        this.visible.push({ local, frame: this.frame, slot });
+        this.addVisible(local, slot);
         slots.set(binding, [slot]);
         if (binding.dictParams && binding.dictParams.length > 0) this.ownDictParams.set(local, binding.dictParams);
       } else {
@@ -381,7 +387,7 @@ export class Codegen {
         for (const local of binding.binders) {
           const slot = this.frame.alloc();
           this.frame.slots.set(local, slot);
-          this.visible.push({ local, frame: this.frame, slot });
+          this.addVisible(local, slot);
           own.push(slot);
         }
         slots.set(binding, own);
@@ -419,7 +425,7 @@ export class Codegen {
   private matchBoundPattern(binding: Extract<RBinding, { k: 'pat' }>, slot: number): Core {
     const { pat, span } = binding;
     const saved = new Map(this.frame.slots);
-    const savedVisible = this.visible.length;
+    const savedVisible = this.visible;
     try {
       const plan = this.planPattern(pat, slot, false);
       const text = pat.surface ? surfacePatternText(pat.surface) : patternText(pat);
@@ -432,7 +438,7 @@ export class Codegen {
     } finally {
       this.frame.slots.clear();
       for (const [key, value] of saved) this.frame.slots.set(key, value);
-      this.visible.length = savedVisible;
+      this.visible = savedVisible;
     }
   }
 
@@ -453,12 +459,12 @@ export class Codegen {
         failRef = { k: 'local', depth: 0, index: failSlot };
       }
       const clause = clauses[index];
-      const savedVisible = this.visible.length;
+      const savedVisible = this.visible;
       const plans = clause.pats.map((pat, position) => this.planPattern(pat, slots[position], true));
       let code = this.compileRhs(clause.rhs, failRef, ioResult);
       for (let position = plans.length - 1; position >= 0; position--)
         code = this.matchPlan(plans[position], code, failRef);
-      this.visible.length = savedVisible;
+      this.visible = savedVisible;
       if (failSlot !== undefined) code = { k: 'let', binds: [{ index: failSlot, expr: next }], body: code };
       next = code;
     }
@@ -475,7 +481,7 @@ export class Codegen {
       const { pat, slot, target, index } = job;
       if (pat.k === 'var' || pat.k === 'as') {
         this.frame.slots.set(pat.local, slot);
-        if (visible) this.visible.push({ local: pat.local, frame: this.frame, slot });
+        if (visible) this.addVisible(pat.local, slot);
       }
       if (pat.k === 'as') {
         pending.push({ ...job, pat: pat.pat });
@@ -577,7 +583,7 @@ export class Codegen {
   }
 
   private compileRhs(rhs: RRhs, fail: Core, ioResult = false): Core {
-    const savedVisible = this.visible.length;
+    const savedVisible = this.visible;
     const binds = this.compileLocalGroup(rhs.where);
     let body: Core;
     if (rhs.body.k === 'plain') {
@@ -587,7 +593,7 @@ export class Codegen {
       for (const branch of rhs.body.branches.toReversed())
         body = this.compileGuarded(branch.guards, 0, branch.expr, body, ioResult);
     }
-    this.visible.length = savedVisible;
+    this.visible = savedVisible;
     return binds.length > 0 ? { k: 'let', binds, body } : body;
   }
 
@@ -595,10 +601,10 @@ export class Codegen {
     if (index >= guards.length) return this.bodyExpr(expr, ioResult);
     const guard = guards[index];
     if (guard.k === 'let') {
-      const savedVisible = this.visible.length;
+      const savedVisible = this.visible;
       const binds = this.compileLocalGroup(guard.binds);
       const rest = this.compileGuarded(guards, index + 1, expr, fail, ioResult);
-      this.visible.length = savedVisible;
+      this.visible = savedVisible;
       return { k: 'let', binds, body: rest };
     }
     if (isOtherwise(guard.expr, this.options.support))
@@ -639,10 +645,10 @@ export class Codegen {
         return this.compileLambda(expr);
       }
       case 'let': {
-        const savedVisible = this.visible.length;
+        const savedVisible = this.visible;
         const binds = this.compileLocalGroup(expr.binds);
         const body = this.compileExpr(expr.body);
-        this.visible.length = savedVisible;
+        this.visible = savedVisible;
         return { k: 'let', binds, body };
       }
       case 'if': {
@@ -796,7 +802,7 @@ export class Codegen {
         message: `${sourceSpanText(expr.span)}: Non-exhaustive patterns in lambda`,
         kind: 'patternMatch',
       };
-      const savedVisible = this.visible.length;
+      const savedVisible = this.visible;
       const plans = expr.pats.map((pat, index) => this.planPattern(pat, slots[index], true));
       let body: Core;
       if (ioResult) {
@@ -806,7 +812,7 @@ export class Codegen {
         body = this.compileExpr(expr.body);
       }
       for (let index = plans.length - 1; index >= 0; index--) body = this.matchPlan(plans[index], body, fail);
-      this.visible.length = savedVisible;
+      this.visible = savedVisible;
       return { k: 'lam', arity: expr.pats.length, size: frame.size, body } as Core;
     });
   }
@@ -884,10 +890,10 @@ export class Codegen {
         const frame = new FrameScope(this.frame);
         const lambda = this.withFrame(frame, () => {
           const slot = frame.alloc();
-          const savedVisible = this.visible.length;
+          const savedVisible = this.visible;
           const plan = this.planPattern(qual.pat, slot, false);
           const rest = this.compileComprehension(quals, index + 1, result);
-          this.visible.length = savedVisible;
+          this.visible = savedVisible;
           return { k: 'lam', arity: 1, size: frame.size, body: this.matchPlan(plan, rest, nil) } as Core;
         });
         const concatMap: Core = { k: 'global', global: this.supportGlobal('concatMapList') };
@@ -897,10 +903,10 @@ export class Codegen {
         return this.ifCore(this.compileExpr(qual.expr), this.compileComprehension(quals, index + 1, result), nil);
       }
       case 'let': {
-        const savedVisible = this.visible.length;
+        const savedVisible = this.visible;
         const binds = this.compileLocalGroup(qual.binds);
         const rest = this.compileComprehension(quals, index + 1, result);
-        this.visible.length = savedVisible;
+        this.visible = savedVisible;
         return { k: 'let', binds, body: rest };
       }
     }
@@ -934,10 +940,10 @@ export class Codegen {
     const stmt = stmts[index];
     if (stmt.k === 'exp') return this.compileExpr(stmt.expr);
     if (stmt.k !== 'let') throw new Error('A bind statement in a block without a monad');
-    const savedVisible = this.visible.length;
+    const savedVisible = this.visible;
     const binds = this.compileLocalGroup(stmt.binds);
     const body = this.compileLetChain(stmts, index + 1);
-    this.visible.length = savedVisible;
+    this.visible = savedVisible;
     return { k: 'let', binds, body };
   }
 
@@ -955,10 +961,10 @@ export class Codegen {
         };
       }
       case 'let': {
-        const savedVisible = this.visible.length;
+        const savedVisible = this.visible;
         const binds = this.compileLocalGroup(stmt.binds);
         const body = this.compileMonadic(stmts, index + 1, monad);
-        this.visible.length = savedVisible;
+        this.visible = savedVisible;
         return { k: 'let', binds, body };
       }
       case 'bind': {
@@ -967,10 +973,10 @@ export class Codegen {
         const frame = new FrameScope(this.frame);
         const lambda = this.withFrame(frame, () => {
           const slot = frame.alloc();
-          const savedVisible = this.visible.length;
+          const savedVisible = this.visible;
           const plan = this.planPattern(stmt.pat, slot, true);
           const rest = this.compileMonadic(stmts, index + 1, monad);
-          this.visible.length = savedVisible;
+          this.visible = savedVisible;
           const fail: Core = stmt.fail
             ? {
                 k: 'app',
@@ -997,7 +1003,7 @@ export class Codegen {
     expr: Extract<RExpr, { k: 'do' }>,
     binding?: { row: number; storesAnswer: boolean }
   ): Omit<IODoCore, 'size'> {
-    const savedVisible = this.visible.length;
+    const savedVisible = this.visible;
     const entryVisible = this.snapshotVisible();
     const stmts: IOStmt[] = [];
     for (const stmt of expr.stmts) {
@@ -1021,7 +1027,7 @@ export class Codegen {
           let matcher: Core | undefined;
           if (stmt.pat.k === 'var') {
             this.frame.slots.set(stmt.pat.local, slot);
-            this.visible.push({ local: stmt.pat.local, frame: this.frame, slot });
+            this.addVisible(stmt.pat.local, slot);
           } else {
             const plan = this.planPattern(stmt.pat, slot, true);
             const fail: Core = {
@@ -1049,7 +1055,7 @@ export class Codegen {
         }
       }
     }
-    this.visible.length = savedVisible;
+    this.visible = savedVisible;
     return { k: 'iodo', stmts, bindingRow: binding?.row, bindingStoresAnswer: binding?.storesAnswer, entryVisible };
   }
 
@@ -1144,24 +1150,18 @@ export class Codegen {
     return { ...block, size: frame.size };
   }
 
-  /** The variables a statement sees, innermost last, each name once. */
-  private snapshotVisible(): VisibleVar[] {
-    const byName = new Map<string, VisibleVar>();
-    // A variable that hides an earlier one of the same name takes its place, as an assignment in Java would.
-    for (const entry of this.visible) {
-      const type = entry.local.scheme?.type ?? entry.local.type;
-      if (!type) continue;
-      byName.set(entry.local.name, {
-        name: entry.local.name,
-        depth: this.depthOf(entry.frame),
-        index: entry.slot,
-        type,
-      });
-    }
-    return [...byName.values()];
+  private snapshotVisible(): VisibleScope {
+    return { level: this.frame.level, bindings: this.visible };
   }
 
-  private withVisible<T>(entries: VisibleEntry[], build: () => T): T {
+  private addVisible(local: LocalVar, slot: number): void {
+    const type = local.scheme?.type ?? local.type;
+    if (!type) return;
+    chargeTypeWork();
+    this.visible = this.visible.set(local.name, { level: this.frame.level, index: slot, type });
+  }
+
+  private withVisible<T>(entries: OrderedMap<string, VisibleBinding>, build: () => T): T {
     const saved = this.visible;
     this.visible = entries;
     try {
@@ -1173,15 +1173,6 @@ export class Codegen {
 
   // -------------------------------------------------------------------------------------------------------------
   // References and evidence
-
-  private depthOf(frame: FrameScope): number {
-    let depth = 0;
-    for (let current: FrameScope | undefined = this.frame; current; current = current.parent) {
-      if (current === frame) return depth;
-      depth++;
-    }
-    throw new Error('A variable outside its frame');
-  }
 
   private lookup(key: LocalVar | DictParam): Core {
     let depth = 0;

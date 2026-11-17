@@ -2,6 +2,7 @@ import type { ConInfo, InstanceInfo, ValueEntity } from './entities';
 import type { Primitive } from './primitives';
 import type { Type } from './types';
 import type { Value } from './values';
+import type { VisibleScope } from './visibleScope';
 
 export interface LocalRef {
   depth: number;
@@ -56,14 +57,6 @@ export interface CaseCore {
   default?: Core;
 }
 
-/** A variable a trace shows while a statement runs: its name, where it lives, and its type for display. */
-export interface VisibleVar {
-  name: string;
-  depth: number;
-  index: number;
-  type: Type;
-}
-
 export type IOStmt =
   | {
       kind: 'exp';
@@ -73,7 +66,7 @@ export type IOStmt =
       onlyCalls: boolean;
       /** Whether the statement is a control statement (`if`, `case`, `when`), which records no step itself. */
       noStep: boolean;
-      visible: VisibleVar[];
+      visible: VisibleScope;
     }
   | {
       kind: 'bind';
@@ -88,13 +81,13 @@ export type IOStmt =
        * initialized by creating an object does, whose steps may show what it did.
        */
       onlyCalls: boolean;
-      visible: VisibleVar[];
+      visible: VisibleScope;
     }
   | {
       kind: 'let';
       row: number;
       binds: { index: number; expr: Core }[];
-      visible: VisibleVar[];
+      visible: VisibleScope;
       /** Whether the statement defines only functions and actions, which records no step. */
       noStep: boolean;
     };
@@ -108,7 +101,7 @@ export interface IODoCore {
   /** Whether the lambda's parameters hold values learners answer, such as numbers and strings. */
   bindingStoresAnswer?: boolean;
   /** The variables visible when the block starts. */
-  entryVisible: VisibleVar[];
+  entryVisible: VisibleScope;
 }
 
 /** A top-level binding of the library or the program, which each run evaluates at most once. */

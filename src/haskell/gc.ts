@@ -2,6 +2,7 @@ import type { TurtleState } from '../interpreter/turtleWorld';
 import type { Core, IODoCore, LocalRef } from './core';
 import type { Frame } from './machine';
 import type { Runtime } from './runtime';
+import { chargeTypeWork } from './typeWorkBudget';
 import {
   Closure,
   ConValue,
@@ -18,6 +19,7 @@ import {
   TurtleValue,
   untypedSlot,
 } from './values';
+import { visibleVariables } from './visibleScope';
 
 const freeCache = new WeakMap<Core, LocalRef[]>();
 
@@ -25,6 +27,7 @@ const freeCache = new WeakMap<Core, LocalRef[]>();
 export function freeVarsOf(code: Core): LocalRef[] {
   const pending: { code: Core; visited: boolean }[] = [{ code, visited: false }];
   while (pending.length > 0) {
+    chargeTypeWork();
     const current = pending.pop()!;
     if (freeCache.has(current.code)) continue;
     const children = childCodes(current.code);
@@ -50,9 +53,11 @@ function cachedNodeReferences(code: Core, children: [Core, boolean][]): LocalRef
       else if (ref.depth > 0) add({ depth: ref.depth - 1, index: ref.index });
     }
   }
-  if (code.k === 'iodo') {
-    const visible = code.stmts.flatMap((stmt) => stmt.visible);
-    for (const ref of visible.filter((ref) => ref.depth > 0)) add({ depth: ref.depth - 1, index: ref.index });
+  if (code.k !== 'iodo') return [...refs.values()];
+  for (const stmt of code.stmts) {
+    for (const ref of visibleVariables(stmt.visible)) {
+      if (ref.depth > 0) add({ depth: ref.depth - 1, index: ref.index });
+    }
   }
   return [...refs.values()];
 }
@@ -162,7 +167,8 @@ function pushRoots(runtime: Runtime, push: Push): void {
   for (const frame of runtime.frames) {
     for (const [index, context] of frame.contexts.entries()) {
       if (context.env !== frame.contexts[index + 1]?.env.parent || !context.block || context.index === undefined) {
-        for (const visible of context.visible) push(context.env.at(visible.depth).slots[visible.index]);
+        for (const visible of visibleVariables(context.visible))
+          push(context.env.at(visible.depth).slots[visible.index]);
       } else {
         pushRefs(liveAfter(context.block, context.index), context.env, push);
       }

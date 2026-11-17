@@ -147,7 +147,7 @@ export class Runtime implements TracedRuntime<TraceFrame> {
         if (performance.now() > deadline) throw new ExecutionLimitError('trace');
       };
       try {
-        const reached = markReachable(this, checkTime);
+        const reached = withTypeWorkBudget(checkTime, () => markReachable(this, checkTime));
         this.world.retain((turtle) => reached.has(turtle));
         checkTime();
       } finally {

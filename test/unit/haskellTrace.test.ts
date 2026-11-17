@@ -530,3 +530,20 @@ main=do
   expect(executeProgram('haskell', demanded)).toMatchObject({ kind: 'limitExceeded', limit: 'operations' });
   expect(() => traceProgram('haskell', demanded, demanded)).toThrowError(ExecutionLimitError);
 });
+
+test('shared visibility scopes preserve shadowing order and restore enclosing bindings', () => {
+  const source = `main=do
+  let x=1::Int
+  let y=2::Int
+  let x=True
+  if True then do
+    let x='z'
+    print x
+  else pure ()
+  print x`;
+  const recording = traceProgram('haskell', source, source);
+  expect(recording.stdout).toBe("'z'\nTrue\n");
+  expect(recording.finalVars).toEqual({ x: true, y: 2 });
+  expect(Object.keys(recording.finalVars)).toEqual(['x', 'y']);
+  expect(recording.traceItems.find((item) => item.line === 6)?.vars).toEqual({ x: 'z', y: 2 });
+});

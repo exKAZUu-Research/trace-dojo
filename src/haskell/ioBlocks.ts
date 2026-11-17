@@ -1,7 +1,8 @@
-import type { FunctionInfo, IODoCore, VisibleVar } from './core';
+import type { FunctionInfo, IODoCore } from './core';
 import type { Machine, RunState } from './machine';
 import type { TraceFrame } from './runtime';
 import { Env, type IODo, type Slot } from './values';
+import type { VisibleScope } from './visibleScope';
 
 export interface DoFrame {
   k: 'do';
@@ -18,7 +19,7 @@ export interface DoFrame {
 
 export interface TraceContext {
   env: Env;
-  visible: VisibleVar[];
+  visible: VisibleScope;
   row: number | undefined;
   block?: IODoCore;
   index?: number;

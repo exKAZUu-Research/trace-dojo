@@ -909,3 +909,31 @@ test.each(['main=print("hello"#)', "main=print('a'#)", 'main=print(1#)', 'main=p
     expect(executeProgram('haskell', source).kind).toBe('compileError');
   }
 );
+
+test('large IO scopes execute and record within a bounded Node heap', { timeout: 30_000 }, () => {
+  const bundle = execFileSync(
+    'bun',
+    ['build', 'test/helpers/haskellScopeMemory.ts', '--target=node', '--packages=external'],
+    { encoding: 'utf8', timeout: 30_000, maxBuffer: 16 * 1024 * 1024 }
+  );
+  const output = execFileSync('node', ['--max-old-space-size=192', '--input-type=module'], {
+    input: bundle,
+    encoding: 'utf8',
+    timeout: 30_000,
+  });
+  const result = z
+    .object({
+      execution: z.object({ kind: z.literal('executed'), stdout: z.string(), finalTurtles: z.array(z.unknown()) }),
+      recording: z.object({
+        stdout: z.string(),
+        first: z.number(),
+        last: z.number(),
+        count: z.number(),
+        turtles: z.number(),
+      }),
+    })
+    .parse(JSON.parse(output));
+  expect(result.execution.stdout).toBe('1\n');
+  expect(result.execution.finalTurtles).toHaveLength(1);
+  expect(result.recording).toEqual({ stdout: '1\n', first: 1, last: 1, count: 4000, turtles: 1 });
+});
