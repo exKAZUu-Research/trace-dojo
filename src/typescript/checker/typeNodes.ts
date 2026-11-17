@@ -205,6 +205,10 @@ export class TypeNodes {
       const constraint = this.c.relations.isGeneric(type) ? this.c.baseConstraint(type) : this.c.apparentType(type);
       return constraint !== type && this.hasKey(constraint, key, path);
     }
+    return this.structureHasKey(type, key);
+  }
+
+  private structureHasKey(type: Type, key: Type): boolean {
     const structure = this.c.structureOf(type);
     if (structure.stringIndex) return true;
     if (key.kind !== 'literal') return isIntrinsic(key, 'number') && structure.numberIndex !== undefined;

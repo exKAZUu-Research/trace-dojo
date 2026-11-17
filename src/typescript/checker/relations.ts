@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 538 -- Decides assignability and comparability for every kind of type, as TypeScript's checker does in one place.
+// code-gauge-allow-file fileNcss 553 -- Decides assignability and comparability for every kind of type, as TypeScript's checker does in one place.
 import type { Checker } from './checker';
 import { isUnit } from './flow';
 import { isNumericName } from './syntax';
@@ -7,6 +7,7 @@ import {
   booleanType,
   errorType,
   filterType,
+  type IndexedAccessType,
   isAnyLike,
   isIntrinsic,
   type ObjectType,
@@ -96,8 +97,8 @@ export class Relations {
     }
   }
 
-  // code-gauge-allow functionCognitiveComplexity 29 -- Follows TypeScript's order of checks for each kind of type.
-  // code-gauge-allow functionNcss 35 -- Follows TypeScript's order of checks for each kind of type.
+  // code-gauge-allow functionCognitiveComplexity 24 -- Follows TypeScript's order of checks for each kind of type.
+  // code-gauge-allow functionNcss 32 -- Follows TypeScript's order of checks for each kind of type.
   private structuredRelated(source: Type, target: Type, relation: Relation, checkWeak: boolean): boolean {
     const s = regularOf(source);
     const t = regularOf(target);
@@ -120,18 +121,18 @@ export class Relations {
       if (t.kind !== 'typeParameter') return false;
     }
     if (t.kind === 'typeParameter') return relation === 'comparable' && this.constraintAdmits(s, t);
-    if (t.kind === 'indexedAccess' && !this.isGeneric(t.objectType)) {
-      // Writing `o[k]` with a generic key must suit the property of every key the constraint allows.
-      const keys = this.c.baseConstraint(t.indexType);
-      const members = keys.kind === 'union' ? keys.types : [keys];
-      if (keys !== t.indexType && members.every((member) => member.kind === 'literal')) {
-        return members.every((key) =>
-          this.isRelated(s, this.c.typeOperators.indexedAccess(t.objectType, key), relation)
-        );
-      }
-    }
-    if (t.kind === 'indexedAccess' || t.kind === 'keyof' || t.kind === 'conditional') return false;
+    if (t.kind === 'indexedAccess') return this.relatedToIndexedAccess(s, t, relation);
+    if (t.kind === 'keyof' || t.kind === 'conditional') return false;
     return this.relatedToConcrete(s, t, relation);
+  }
+
+  /** Writing `o[k]` with a generic key must suit the property of every key the constraint allows. */
+  private relatedToIndexedAccess(s: Type, t: IndexedAccessType, relation: Relation): boolean {
+    if (this.isGeneric(t.objectType)) return false;
+    const keys = this.c.baseConstraint(t.indexType);
+    const members = keys.kind === 'union' ? keys.types : [keys];
+    if (keys === t.indexType || !members.every((member) => member.kind === 'literal')) return false;
+    return members.every((key) => this.isRelated(s, this.c.typeOperators.indexedAccess(t.objectType, key), relation));
   }
 
   private genericSourceRelated(s: Type, t: Type, relation: Relation): boolean {
@@ -595,7 +596,6 @@ export class Relations {
     return true;
   }
 
-  // code-gauge-allow functionCognitiveComplexity 21 -- Compares parameters and return types as TypeScript does.
   signatureRelated(source: Signature, target: Signature, relation: Relation): boolean {
     let sourceSignature = source;
     if (source.typeParameters.length > 0) {
@@ -610,18 +610,12 @@ export class Relations {
       ? Number.POSITIVE_INFINITY
       : target.parameters.length;
     if (sourceRequired > targetCount) return false;
-    const count = Math.max(sourceSignature.parameters.length, target.parameters.length);
     const bivariant = source.isMethod === true || target.isMethod === true;
-    if (!this.thisTypesRelated(sourceSignature, target, relation, bivariant)) return false;
-    for (let index = 0; index < count; index++) {
-      const sourceType = this.parameterTypeAt(sourceSignature, index);
-      const targetType = this.parameterTypeAt(target, index);
-      if (!sourceType || !targetType) continue;
-      const related =
-        this.isRelated(targetType, sourceType, relation) ||
-        (bivariant && this.isRelated(sourceType, targetType, relation));
-      if (!related) return false;
-    }
+    if (
+      !this.thisTypesRelated(sourceSignature, target, relation, bivariant) ||
+      !this.parametersRelated(sourceSignature, target, relation, bivariant)
+    )
+      return false;
     const targetReturn = target.returnType();
     if (isIntrinsic(targetReturn, 'void')) return true;
     const sourceReturn = sourceSignature.returnType();
@@ -638,9 +632,23 @@ export class Relations {
   /** Whether the target's `this` suits the source's, which only a source that declares a non-`void` one requires. */
   private thisTypesRelated(source: Signature, target: Signature, relation: Relation, bivariant: boolean): boolean {
     if (!source.thisType || isIntrinsic(source.thisType, 'void') || !target.thisType) return true;
+    return this.parameterRelated(source.thisType, target.thisType, relation, bivariant);
+  }
+
+  private parametersRelated(source: Signature, target: Signature, relation: Relation, bivariant: boolean): boolean {
+    const count = Math.max(source.parameters.length, target.parameters.length);
+    for (let index = 0; index < count; index++) {
+      const sourceType = this.parameterTypeAt(source, index);
+      const targetType = this.parameterTypeAt(target, index);
+      if (sourceType && targetType && !this.parameterRelated(sourceType, targetType, relation, bivariant)) return false;
+    }
+    return true;
+  }
+
+  private parameterRelated(sourceType: Type, targetType: Type, relation: Relation, bivariant: boolean): boolean {
     return (
-      this.isRelated(target.thisType, source.thisType, relation) ||
-      (bivariant && this.isRelated(source.thisType, target.thisType, relation))
+      this.isRelated(targetType, sourceType, relation) ||
+      (bivariant && this.isRelated(sourceType, targetType, relation))
     );
   }
 
