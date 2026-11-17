@@ -9,7 +9,7 @@ import { constructorFieldType, isConcreteType, slotDisplayType, UNKNOWN_TYPE } f
 import { DISPLAY_OPERATIONS } from './previewBudget';
 import { floatToDigits } from './primitives';
 import { runProgram } from './run';
-import { DisplayAbort, Runtime, type TraceFrame } from './runtime';
+import { DisplayAbort, type PreviewContext, Runtime, type TraceFrame } from './runtime';
 import { prune, splitApp, type Type } from './types';
 import { chargeTypeWork } from './typeWorkBudget';
 import {
@@ -29,8 +29,7 @@ import { visibleVariables } from './visibleScope';
 export function traceHaskellProgram(program: string, trace: TraceOptions, input?: ProgramInput): ProgramRecording {
   const compiled = compileProgram(program, new Set(trace.atomicAnnotations.keys()), true);
   const runtime = new Runtime(input);
-  runtime.displaysAnswer = (name, slot, type, owner, frame) =>
-    slotDisplaysAnswer(runtime, name, slot, type, owner, frame);
+  runtime.displaysAnswer = (name, slot, type, context) => slotDisplaysAnswer(runtime, name, slot, type, context);
   const recorder = new TraceRecorder(runtime, {
     isAtomic: (frame) => frame.isAtomic,
     variablesOf: (frame) => variablesOf(runtime, frame),
@@ -50,24 +49,15 @@ export function traceHaskellProgram(program: string, trace: TraceOptions, input?
 
 type VariableDisplay = Pick<TraceVariables, 'vars'> & Partial<Pick<TraceVariables, 'referenceVars'>>;
 
-interface VariableEntry {
+interface VariableEntry extends PreviewContext {
   slot: Slot;
   value: Value;
   type: Type;
-  owner: object;
-  frame: TraceFrame;
 }
 
-function slotDisplaysAnswer(
-  runtime: Runtime,
-  name: string,
-  slot: Slot,
-  type: Type,
-  owner: object,
-  frame: TraceFrame
-): boolean {
+function slotDisplaysAnswer(runtime: Runtime, name: string, slot: Slot, type: Type, context: PreviewContext): boolean {
   const variables: VariableDisplay = { vars: Object.create(null) };
-  const entry = addSlotVariable(runtime, variables, name, slot, type, { owner, frame });
+  const entry = addSlotVariable(runtime, variables, name, slot, type, context);
   if (name === 'this') addSelfFields(runtime, variables, entry);
   return Object.values(variables.vars).some((value) => typeof value !== 'object');
 }
@@ -79,11 +69,13 @@ function variablesOf(runtime: Runtime, frame: TraceFrame): TraceVariables {
   if (!context) return variables;
   let self: VariableEntry | undefined;
   for (const visible of visibleVariables(context.visible)) {
-    const slot = context.env.at(visible.depth).slots[visible.index];
+    const ownerEnv = context.env.at(visible.depth);
+    const slot = ownerEnv.slots[visible.index];
     if (slot === undefined) continue;
     const entry = addSlotVariable(runtime, variables, visible.name, slot, visible.type, {
       owner: visible.previewOwner,
       frame,
+      scope: runtime.previewScope(frame, ownerEnv),
     });
     if (visible.name === 'this') self = entry;
   }
@@ -97,7 +89,7 @@ function addSlotVariable(
   name: string,
   slot: Slot,
   type: Type,
-  context: Pick<VariableEntry, 'owner' | 'frame'>
+  context: PreviewContext
 ): VariableEntry | undefined {
   return displayAttempt(runtime, () => {
     const entry = runtime.withPreviewBudget({ ...context, key: 'root', share: 1 }, () => {
@@ -135,6 +127,7 @@ function addSelfFields(runtime: Runtime, variables: VariableDisplay, entry: Vari
         {
           owner: entry.owner,
           frame: entry.frame,
+          scope: entry.scope,
           key: `field:${self.con.fieldNames![index]}`,
           share: 1 / (3 * Math.max(self.con.type.fields.size, self.fields.length)),
         },

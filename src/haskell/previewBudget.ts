@@ -5,6 +5,7 @@ export const DISPLAY_OPERATIONS = 20_000;
 
 interface PreviewFamily {
   activeScopes: number;
+  activeFrames: number;
   activeWorkScopes: number;
   operations: number;
   milliseconds: number;
@@ -14,6 +15,7 @@ interface PreviewFamily {
 
 interface PreviewUsage {
   epoch: number;
+  retiredMilliseconds: number;
   family: PreviewFamily;
   operations: number;
   share: number;
@@ -24,12 +26,12 @@ interface PreviewUsage {
 export interface PreviewView {
   owner: object;
   frame: object;
+  scope: object;
   key: string;
   share: number;
 }
 
 interface PreviewScope {
-  statement: object | undefined;
   families: Set<PreviewFamily>;
   workFamilies: Set<PreviewFamily>;
 }
@@ -88,23 +90,29 @@ export class PreviewBudget {
   private milliseconds = 0;
   private active: PreviewTransaction | undefined;
   private activeOperations = 0;
-  private readonly scopes = new Map<object, PreviewScope>();
+  private readonly scopes = new Map<object, Map<object, PreviewScope>>();
+  private readonly frameFamilies = new Map<object, Set<PreviewFamily>>();
   private activeFamilies = 0;
   private readonly familyTimeLimit = LIMITS.maxMilliseconds / 2;
 
-  beginStatement(statement: object, frame: object): void {
-    const scope = this.scopeFor(frame);
-    scope.statement ??= statement;
-  }
-
-  endStatement(statement: object, frame: object): void {
-    if (this.scopes.get(frame)?.statement === statement) this.endFrame(frame);
-  }
-
   endFrame(frame: object): void {
-    const scope = this.scopes.get(frame);
+    const scopes = this.scopes.get(frame);
+    if (scopes) for (const owner of scopes.keys()) this.endScope(frame, owner);
+    const families = this.frameFamilies.get(frame);
+    this.frameFamilies.delete(frame);
+    if (families)
+      for (const family of families) {
+        if (--family.activeFrames === 0) for (const usage of family.views.values()) usage.retiredMilliseconds = 0;
+      }
+  }
+
+  endScope(frame: object, scopeKey: object): void {
+    const scopes = this.scopes.get(frame);
+    if (!scopes) return;
+    const scope = scopes.get(scopeKey);
     if (!scope) return;
-    this.scopes.delete(frame);
+    scopes.delete(scopeKey);
+    if (scopes.size === 0) this.scopes.delete(frame);
     for (const family of scope.workFamilies) {
       family.activeWorkScopes--;
       if (family.activeWorkScopes === 0) this.activeFamilies--;
@@ -121,6 +129,7 @@ export class PreviewBudget {
     family.milliseconds = 0;
     for (const usage of family.views.values()) {
       usage.epoch++;
+      usage.retiredMilliseconds += usage.milliseconds;
       usage.operations = 0;
       usage.milliseconds = 0;
       usage.share = 1;
@@ -193,7 +202,8 @@ export class PreviewBudget {
   run<T>(view: PreviewView, work: () => T): T {
     if (this.active) return work();
     const usage = this.usageFor(view.owner, view.key, view.share);
-    const scope = this.scopeFor(view.frame);
+    this.registerFrame(view.frame, usage.family);
+    const scope = this.scopeFor(view.frame, view.scope);
     if (!scope.families.has(usage.family)) {
       scope.families.add(usage.family);
       if (usage.family.activeScopes++ === 0) {
@@ -202,7 +212,7 @@ export class PreviewBudget {
     }
     const remainingTime = Math.min(
       LIMITS.maxMilliseconds - this.milliseconds,
-      usage.timeLimit - usage.milliseconds,
+      Math.min(usage.timeLimit, usage.family.timeLimit * usage.share) - usage.milliseconds - usage.retiredMilliseconds,
       usage.family.timeLimit - usage.family.milliseconds
     );
     const started = performance.now();
@@ -344,11 +354,28 @@ export class PreviewBudget {
     this.activeOperations -= operations;
   }
 
-  private scopeFor(frame: object): PreviewScope {
-    let scope = this.scopes.get(frame);
+  private registerFrame(frame: object, family: PreviewFamily): void {
+    let families = this.frameFamilies.get(frame);
+    if (!families) {
+      families = new Set();
+      this.frameFamilies.set(frame, families);
+    }
+    if (!families.has(family)) {
+      families.add(family);
+      family.activeFrames++;
+    }
+  }
+
+  private scopeFor(frame: object, scopeKey: object): PreviewScope {
+    let scopes = this.scopes.get(frame);
+    if (!scopes) {
+      scopes = new Map();
+      this.scopes.set(frame, scopes);
+    }
+    let scope = scopes.get(scopeKey);
     if (!scope) {
-      scope = { statement: undefined, families: new Set(), workFamilies: new Set() };
-      this.scopes.set(frame, scope);
+      scope = { families: new Set(), workFamilies: new Set() };
+      scopes.set(scopeKey, scope);
     }
     return scope;
   }
@@ -358,6 +385,7 @@ export class PreviewBudget {
     if (!family) {
       family = {
         activeScopes: 0,
+        activeFrames: 0,
         activeWorkScopes: 0,
         operations: 0,
         milliseconds: 0,
@@ -369,7 +397,7 @@ export class PreviewBudget {
     let usage = family.views.get(view);
     const timeLimit = family.timeLimit * share;
     if (!usage) {
-      usage = { epoch: 0, family, operations: 0, share, milliseconds: 0, timeLimit };
+      usage = { epoch: 0, retiredMilliseconds: 0, family, operations: 0, share, milliseconds: 0, timeLimit };
       family.views.set(view, usage);
     } else {
       usage.share = Math.min(usage.share, share);

@@ -21,6 +21,7 @@ export interface DoFrame {
 
 export interface TraceContext {
   env: Env;
+  prefixEnv: Env;
   visible: VisibleScope;
   row: number | undefined;
   block?: IODoCore;
@@ -59,7 +60,7 @@ export function runBlock(machine: Machine, state: RunState, action: IODo): void 
     pushedTraceFrame: pushed,
     prefix,
   };
-  frame.traceFrame.contexts.push({ env, visible: action.code.entryVisible, row: undefined });
+  frame.traceFrame.contexts.push({ env, prefixEnv: prefix.env, visible: action.code.entryVisible, row: undefined });
   machine.stack.push(frame);
   if (action.code.bindingRow !== undefined) {
     runtime.steps.stepBinding(
@@ -129,7 +130,6 @@ function tailSelfCallers(
 
 function startStatement(machine: Machine, state: RunState, frame: DoFrame): void {
   do {
-    machine.runtime.beginPreviewStatement(frame, frame.traceFrame);
     const stmt = frame.code.stmts[frame.index];
     const context = frame.traceFrame.contexts.at(-1) as TraceContext;
     context.visible = stmt.visible;
@@ -223,15 +223,20 @@ function bindingDisplaysAnswer(
       runtime.spend();
       const binding = visible.bindings.get(name);
       if (!binding) return;
-      const slot = env.at(visible.level - binding.level).slots[binding.index];
+      const ownerEnv = env.at(visible.level - binding.level);
+      const slot = ownerEnv.slots[binding.index];
       if (slot === undefined) return;
       const type = slotDisplayType(slot, binding.type);
-      return { slot, type, scalar: isScalarType(type), previewOwner: binding.previewOwner };
+      return { slot, type, scalar: isScalarType(type), previewOwner: binding.previewOwner, ownerEnv };
     });
     return (
       candidate !== undefined &&
       (candidate.scalar ||
-        runtime.displaysAnswer?.(name, candidate.slot, candidate.type, candidate.previewOwner, frame) === true)
+        runtime.displaysAnswer?.(name, candidate.slot, candidate.type, {
+          owner: candidate.previewOwner,
+          frame,
+          scope: runtime.previewScope(frame, candidate.ownerEnv),
+        }) === true)
     );
   } catch (error) {
     if (error instanceof DisplayAbort) return false;

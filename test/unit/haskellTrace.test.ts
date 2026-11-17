@@ -1482,3 +1482,58 @@ test.each([true, false])('shared list views preserve depth truncation, shallow f
     entries: { 0: { kind: 'value', value: 1 }, 1: { kind: 'value', value: 2 } },
   });
 });
+
+test.each([false, true])('failed loop values do not hide later cheap values, prefix=%s', (prefix) => {
+  const source = `import Control.Monad
+main=do
+${prefix ? ' putStrLn "start"' : ''}
+ forM_ [1..1000::Int] $ \\i -> do
+  let x=if i \`mod\` 20==0 then sum [1..5000::Int] else i
+  print i`;
+  const recording = traceProgram('haskell', source, source);
+  expect(recording.uncaughtException).toBeUndefined();
+  expect(recording.stdout).toBe(
+    `${prefix ? 'start\n' : ''}${Array.from({ length: 1000 }, (_, i) => `${i + 1}\n`).join('')}`
+  );
+  const assignments = recording.traceItems.filter((item) => item.line === 5);
+  expect(assignments).toHaveLength(1000);
+  for (const [index, item] of assignments.entries()) {
+    if ((index + 1) % 20 !== 0) expect(item.vars.x).toBe(index + 1);
+  }
+});
+
+test('failed list previews leave later cheap values available', () => {
+  const source = `import Control.Monad
+main=do
+ putStrLn "start"
+ forM_ [1..1000::Int] $ \\i -> do
+  let xs=take (if i \`mod\` 20==0 then 3000 else 3) [i..]
+  print i`;
+  const recording = traceProgram('haskell', source, source);
+  expect(recording.uncaughtException).toBeUndefined();
+  expect(recording.stdout).toBe(`start\n${Array.from({ length: 1000 }, (_, i) => `${i + 1}\n`).join('')}`);
+  const assignments = recording.traceItems.filter((item) => item.line === 5);
+  expect(assignments).toHaveLength(1000);
+  for (const [index, item] of assignments.entries()) {
+    if ((index + 1) % 20 !== 0) expect(item.vars.xs).toEqual(Array.from({ length: 3 }, (_, j) => index + j + 1));
+  }
+}, 30_000);
+
+test('nested local calls retire their own failed preview work', () => {
+  const source = `import Control.Monad
+main=do
+ let work i=do
+      let x=if even i then sum [1..5000::Int] else i
+      print i
+      when (i<100) (work(i+1))
+      print(0::Int)
+ work(1::Int)`;
+  const recording = traceProgram('haskell', source, source);
+  expect(recording.uncaughtException).toBeUndefined();
+  expect(recording.stdout).toBe(`${Array.from({ length: 100 }, (_, i) => `${i + 1}\n`).join('')}${'0\n'.repeat(100)}`);
+  const assignments = recording.traceItems.filter((item) => item.line === 4);
+  expect(assignments).toHaveLength(100);
+  for (const [index, item] of assignments.entries()) {
+    if (index % 2 === 0) expect(item.vars.x).toBe(index + 1);
+  }
+});

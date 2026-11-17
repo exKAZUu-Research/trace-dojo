@@ -6,7 +6,7 @@ import { TurtleWorld } from '../interpreter/turtleWorld';
 import type { FunctionInfo, GlobalDef } from './core';
 import type { InstanceInfo } from './entities';
 import { markReachable } from './gc';
-import type { TraceContext } from './ioBlocks';
+import type { DoFrame, TraceContext } from './ioBlocks';
 import { Machine } from './machine';
 import { DisplayAbort, PreviewBudget, type PreviewView } from './previewBudget';
 import type { Type } from './types';
@@ -46,6 +46,8 @@ export class TraceFrame implements TracedFrame {
   }
 }
 
+export type PreviewContext = Pick<PreviewView, 'owner' | 'scope'> & { frame: TraceFrame };
+
 /** The state of one run: its globals, its machine, its trace frames, its turtles, and its output. */
 export class Runtime implements TracedRuntime<TraceFrame> {
   readonly world = new TurtleWorld();
@@ -54,7 +56,7 @@ export class Runtime implements TracedRuntime<TraceFrame> {
   readonly steps = new StepTracker();
   readonly frames: TraceFrame[] = [];
   readonly machine: Machine;
-  displaysAnswer?: (name: string, slot: Slot, type: Type, previewOwner: object, frame: TraceFrame) => boolean;
+  displaysAnswer?: (name: string, slot: Slot, type: Type, context: PreviewContext) => boolean;
   private readonly globals = new Map<GlobalDef, Slot>();
   private readonly dictCache = new Map<InstanceInfo, Dict>();
   private allocated = 0;
@@ -85,12 +87,22 @@ export class Runtime implements TracedRuntime<TraceFrame> {
     }
   }
 
-  beginPreviewStatement(owner: object, frame: TraceFrame): void {
-    if (this.steps.recorder) this.previews.beginStatement(owner, frame);
+  endPreviewStatement(owner: DoFrame, frame: TraceFrame): void {
+    this.previews.endScope(frame, owner.env);
   }
 
-  endPreviewStatement(owner: object, frame: TraceFrame): void {
-    this.previews.endStatement(owner, frame);
+  previewScope(frame: TraceFrame, owner: Env): object {
+    for (const context of frame.contexts) {
+      if (owner === context.env || owner === context.prefixEnv) return context.env;
+    }
+    for (let index = frame.contexts.length - 1; index >= 0; index--) {
+      const context = frame.contexts[index];
+      for (let env = context.env.parent; env; env = env.parent) {
+        if (frame.contexts.some((outer) => env === outer.env || env === outer.prefixEnv)) break;
+        if (env === owner) return context.env;
+      }
+    }
+    return frame.contexts[0]?.env ?? owner;
   }
 
   withPreviewBudget<T>(view: PreviewView, run: () => T): T {
