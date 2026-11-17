@@ -102,6 +102,7 @@ export abstract class CallCompiler extends BuiltinCompiler {
     return { callee: this.resolveDecl(decl, span) };
   }
 
+  // code-gauge-allow functionCognitiveComplexity 19 -- Preserves receiver and result contracts when dispatching direct and coerced function calls.
   private callValue(
     callee: TExpr,
     receiver: TExpr | undefined,
@@ -110,11 +111,16 @@ export abstract class CallCompiler extends BuiltinCompiler {
   ): TExpr {
     const value = callee.value as unknown;
     if (callee.known && value instanceof NativeFn) {
-      if (value.signature?.receiver && !receiver)
+      if (
+        value.signature &&
+        callee.type.kind === 'fn' &&
+        (callee.type !== value.signature.type || (value.signature.receiver && !receiver))
+      )
         return this.callPointer(
-          known(value.signature.type, new FnValue(callableNative(this, value, expression)), expression),
-          value.signature.type,
-          expression
+          known(callee.type, this.knownFunctionValue(callee, expression), expression),
+          callee.type,
+          expression,
+          receiver
         );
       const result = value.compileCall(this, {
         span: expression,
@@ -126,6 +132,13 @@ export abstract class CallCompiler extends BuiltinCompiler {
       return { ...result, eval: (frame) => copyForFrame(frame, result.eval(frame), result.type) };
     }
     if (callee.known && value instanceof FnRef) {
+      if (callee.type.kind === 'fn' && callee.type !== this.declarationType(value.decl, expression))
+        return this.callPointer(
+          known(callee.type, this.knownFunctionValue(callee, expression), expression),
+          callee.type,
+          expression,
+          receiver
+        );
       return this.callDeclaration(value, receiver, expression, resultType);
     }
     const type = callee.type;
@@ -334,8 +347,8 @@ export abstract class CallCompiler extends BuiltinCompiler {
   }
 
   /** The instance of a function for argument types, compiling its body the first time. */
-  // code-gauge-allow functionCognitiveComplexity 24 -- Resolves parameter and return types in the same specialization scope.
-  // code-gauge-allow functionNcss 34 -- Keeps specialization identity and its compilation inputs together.
+  // code-gauge-allow functionCognitiveComplexity 25 -- Resolves parameter and return types in the same specialization scope.
+  // code-gauge-allow functionNcss 36 -- Keeps specialization identity and its compilation inputs together.
   instantiate(ref: FnRef, argTypes: readonly Type[], span: Span, args: readonly TExpr[] = []): FunctionInstance {
     const { decl } = ref;
     const syntax = decl.syntax;
@@ -376,6 +389,7 @@ export abstract class CallCompiler extends BuiltinCompiler {
       comptimeArgs
     );
     const instance = new FunctionInstance(syntax.name, paramTypes, returnType);
+    if (syntax.params.every((param) => param.type !== undefined)) instance.identity = decl;
     instance.internal = decl.namespace.internal ?? false;
     instance.isAtomic = !instance.internal && this.atomicRow(syntax);
     this.instances.set(key, instance);
@@ -428,8 +442,6 @@ export abstract class CallCompiler extends BuiltinCompiler {
   }
 
   functionSignature(value: TExpr, span: Span): FnType {
-    const ref = value.value as unknown;
-    if (value.known && ref instanceof FnRef) return this.declarationType(ref.decl, span);
     const type = value.type;
     if (type.kind === 'fn') return type;
     if (type.kind === 'pointer' && type.child.kind === 'fn') return type.child;
@@ -446,10 +458,12 @@ export abstract class CallCompiler extends BuiltinCompiler {
     const ref = value.value as unknown;
     if (value.known && (ref instanceof FnRef || (ref instanceof NativeFn && ref.signature))) {
       const instance = ref instanceof NativeFn ? callableNative(this, ref, span) : this.instantiate(ref, [], span);
+      const original = ref instanceof FnRef ? this.declarationType(ref.decl, span) : ref.signature?.type;
+      const signature = value.type === original ? instance : this.functionSignature(value, span);
       return {
         call: (frame, args) => this.invoke(instance, args, frame.nativeCallRow ?? span.row, frame),
-        params: instance.params,
-        returnType: instance.returnType,
+        params: signature.params,
+        returnType: signature.returnType,
       };
     }
     const type = value.type;
@@ -469,8 +483,8 @@ export abstract class CallCompiler extends BuiltinCompiler {
     if (value instanceof FnValue) value.fn.analyze?.(this, span);
   }
 
-  callFunction(fn: FunctionInstance, args: Value[], frame: Frame): Value {
-    return this.invoke(fn, args, undefined, frame);
+  callFunction(fn: FunctionInstance, args: Value[], frame: Frame, callRow?: number): Value {
+    return this.invoke(fn, args, callRow, frame);
   }
 
   private readonly libraryNamespaces = new WeakMap<SourceFile, WeakMap<Type, Namespace>>();
@@ -515,7 +529,13 @@ export abstract class CallCompiler extends BuiltinCompiler {
     if (fn.native) return copyForFrame(caller, fn.native(args, caller), fn.returnType);
     if (!fn.body) return panic('関数がまだ準備できていません。');
     const origin = caller.fn.internal ? caller.nativeCallRow : callRow;
-    const frame = new Frame(rt, fn, fn.internal ? undefined : callRow, fn.slotCount, fn.internal ? origin : undefined);
+    const frame = new Frame(
+      rt,
+      fn,
+      fn.internal ? undefined : (origin ?? callRow),
+      fn.slotCount,
+      fn.internal ? origin : undefined
+    );
     for (const [index, slot] of fn.paramSlots.entries())
       frame.slots[slot] = argumentsHaveStorage ? args[index] : copyForFrame(frame, args[index], fn.params[index]);
     rt.pushFrame(frame);

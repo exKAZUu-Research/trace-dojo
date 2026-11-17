@@ -199,7 +199,8 @@ export interface SemaApi {
   error(span: Span, message: string): never;
   knownValue(expression: TExpr, what: string): Value;
   peerType(expressions: readonly TExpr[], span: Span): Type;
-  callFunction(fn: FunctionInstance, args: Value[], frame: Frame): Value;
+  callFunction(fn: FunctionInstance, args: Value[], frame: Frame, callRow?: number): Value;
+  knownFunctionValue(expression: TExpr, span: Span): FnValue;
   instantiate(ref: FnRef, argTypes: readonly Type[], span: Span): FunctionInstance;
   functionSignature(value: TExpr, span: Span): FnType;
   functionOf(
@@ -291,7 +292,7 @@ export abstract class SemaBase implements SemaApi {
   abstract compile(expression: Expression, resultType?: Type): TExpr;
   abstract nameSlice(text: string, frame?: Frame): Slice;
   abstract valueComparator(type: Type, ordered: boolean, span: Span): (a: Value, b: Value) => number;
-  abstract callFunction(fn: FunctionInstance, args: Value[], frame: Frame): Value;
+  abstract callFunction(fn: FunctionInstance, args: Value[], frame: Frame, callRow?: number): Value;
   protected abstract declarationType(decl: Extract<Decl, { kind: 'fn' }>, span: Span): FnType;
   abstract instantiate(ref: FnRef, argTypes: readonly Type[], span: Span): FunctionInstance;
   abstract functionSignature(value: TExpr, span: Span): FnType;
@@ -796,11 +797,15 @@ export abstract class SemaBase implements SemaApi {
         return this.coerceToErrorSet(expression, to, span);
       }
       case 'fn': {
-        // A function body type such as `fn (i32) i32` takes a function declared with that signature.
-        if (!(expression.value instanceof FnRef)) return undefined;
-        const fn = this.functionOf(expression, span);
-        if (!sameFnType(fn.params, fn.returnType, to)) return undefined;
-        return known(to, this.knownFunctionValue(expression, span), span);
+        if (from.kind !== 'fn' || (expression.value instanceof NativeFn && !expression.value.signature))
+          return undefined;
+        const signature = this.functionSignature(expression, span);
+        const fn =
+          signature.returnType.kind === 'error_union' && signature.returnType.errorSet.resolved === false
+            ? this.functionOf(expression, span)
+            : signature;
+        if (!fnTypeCoercible(fn.params, fn.returnType, to)) return undefined;
+        return { ...expression, type: to };
       }
       case 'pointer': {
         return this.coerceToPointer(expression, to, span);
@@ -961,9 +966,9 @@ export abstract class SemaBase implements SemaApi {
   private coerceToPointer(expression: TExpr, to: Extract<Type, { kind: 'pointer' }>, span: Span): TExpr | undefined {
     const from = expression.type;
     if (from.kind === 'fn') {
-      if (to.size !== 'one' || to.child.kind !== 'fn') return undefined;
+      if (!to.isConst || to.size !== 'one' || to.child.kind !== 'fn') return undefined;
       const fn = this.functionOf(expression, span);
-      if (!sameFnType(fn.params, fn.returnType, to.child)) return undefined;
+      if (!fnTypeCoercible(fn.params, fn.returnType, to.child)) return undefined;
       return known(to, this.knownFunctionValue(expression, span), span);
     }
     if (from.kind !== 'pointer') return undefined;
@@ -997,7 +1002,7 @@ export abstract class SemaBase implements SemaApi {
   }
 
   /** A function value that the compiler knows, as a runtime function pointer. */
-  protected abstract knownFunctionValue(expression: TExpr, span: Span): FnValue;
+  abstract knownFunctionValue(expression: TExpr, span: Span): FnValue;
 
   private coerceAggregateSource(expression: TExpr, convert: (source: TExpr) => TExpr | undefined): TExpr | undefined {
     if (expression.known) return convert(expression);
@@ -1354,12 +1359,14 @@ export function intWidens(from: IntType, to: IntType): boolean {
 // code-gauge-allow functionCognitiveComplexity 24 -- Checks each rule of Zig's type coercion or container analysis in turn.
 export function inMemoryCoercible(from: Type, to: Type): boolean {
   if (from === to) return true;
-  if (from.kind === 'pointer' && to.kind === 'pointer') {
-    if (from.size !== to.size || (from.isConst && !to.isConst)) return false;
-    if (to.sentinel !== undefined && !sameSentinel(from.sentinel, to.sentinel)) return false;
-    return pointerChildCoercible(from.child, to.child, to.isConst);
+  const sourcePointer = pointerRepresentation(from);
+  const targetPointer = pointerRepresentation(to);
+  if (sourcePointer && targetPointer) return pointerRepresentationCoercible(from, to, sourcePointer, targetPointer);
+  if (from.kind === 'optional' && to.kind === 'optional') {
+    if (Boolean(sourcePointer) !== Boolean(targetPointer)) return false;
+    return inMemoryCoercible(from.child, to.child);
   }
-  if (from.kind === 'optional' && to.kind === 'optional') return inMemoryCoercible(from.child, to.child);
+  if (from.kind === 'fn' && to.kind === 'fn') return fnTypeCoercible(from.params, from.returnType, to);
   if (from.kind === 'error_set' && to.kind === 'error_set') return errorSetIncludes(to, from);
   if (from.kind === 'error_union' && to.kind === 'error_union') {
     return errorSetIncludes(to.errorSet, from.errorSet) && inMemoryCoercible(from.payload, to.payload);
@@ -1373,6 +1380,24 @@ export function inMemoryCoercible(from: Type, to: Type): boolean {
   }
   if (from.kind === 'int' && to.kind === 'int') return from.bits === to.bits && from.signed === to.signed;
   return false;
+}
+
+function pointerRepresentation(type: Type): Extract<Type, { kind: 'pointer' }> | undefined {
+  if (type.kind === 'pointer') return type;
+  if (type.kind === 'optional' && type.child.kind === 'pointer' && type.child.size !== 'slice') return type.child;
+  return undefined;
+}
+
+function pointerRepresentationCoercible(
+  from: Type,
+  to: Type,
+  source: Extract<Type, { kind: 'pointer' }>,
+  target: Extract<Type, { kind: 'pointer' }>
+): boolean {
+  if (from.kind === 'optional' && to.kind !== 'optional') return false;
+  if (source.size !== target.size || (source.isConst && !target.isConst)) return false;
+  if (target.sentinel !== undefined && !sameSentinel(source.sentinel, target.sentinel)) return false;
+  return pointerChildCoercible(source.child, target.child, target.isConst);
 }
 
 export function errorSetIncludes(set: ErrorSetType, subset: ErrorSetType): boolean {
@@ -1433,12 +1458,21 @@ function elementOf(pointer: Extract<Type, { kind: 'pointer' }>): Type | undefine
   return pointer.child.kind === 'array' ? pointer.child.child : undefined;
 }
 
-function sameFnType(params: readonly Type[], returnType: Type, fn: Extract<Type, { kind: 'fn' }>): boolean {
+function fnTypeCoercible(params: readonly Type[], returnType: Type, fn: Extract<Type, { kind: 'fn' }>): boolean {
   return (
     params.length === fn.params.length &&
-    params.every((param, index) => param === fn.params[index]) &&
-    returnType === fn.returnType
+    params.every((param, index) => functionValueCoercible(fn.params[index], param)) &&
+    (returnType.kind === 'noreturn' || functionValueCoercible(returnType, fn.returnType))
   );
+}
+
+function functionValueCoercible(from: Type, to: Type): boolean {
+  if (!inMemoryCoercible(from, to)) return false;
+  if (from.kind === 'array' && to.kind === 'array')
+    return sameSentinel(from.sentinel, to.sentinel) && functionValueCoercible(from.child, to.child);
+  if (from.kind === 'optional' && to.kind === 'optional') return functionValueCoercible(from.child, to.child);
+  if (from.kind === 'error_union' && to.kind === 'error_union') return functionValueCoercible(from.payload, to.payload);
+  return true;
 }
 
 export function isAnonymous(type: StructType): boolean {

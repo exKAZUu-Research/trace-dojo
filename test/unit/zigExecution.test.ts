@@ -6897,7 +6897,7 @@ test.each([
   ],
   [
     'queue',
-    'const C=struct{fn compare(_:void,a:u8,b:u8)std.math.Order{return std.math.order(a,b);}};const Q=std.PriorityQueue(u8,void,C.compare);var q:Q=.empty;defer q.deinit(init.gpa);const push:*const fn(*Q,std.mem.Allocator,u8)std.mem.Allocator.Error!void=Q.push;const count:*const fn(Q)usize=Q.count;try push(&q,init.gpa,9);std.debug.print("{}",.{count(q)});',
+    'const C=struct{fn compare(_:void,a:u8,b:u8)std.math.Order{return std.math.order(a,b);}};const Q=std.PriorityQueue(u8,void,C.compare);var q:Q=.empty;defer q.deinit(init.gpa);const push:*const fn(*Q,std.mem.Allocator,u8)std.mem.Allocator.Error!void=Q.push;const count:*const fn(*const Q)usize=Q.count;try push(&q,init.gpa,9);std.debug.print("{}",.{count(&q)});',
     '1',
   ],
 ])('fixed native %s members are compatible stored function values', (family, body, stderr) => {
@@ -6947,3 +6947,108 @@ test.each(['union(enum){one:void}', 'struct{u:union(enum){one:void}}'])(
     });
   }
 );
+
+test.each(['try q.push(init.gpa,1);', 'try q.pushSlice(init.gpa,&.{1});'])(
+  'queue movement reloads public headers after comparisons: %s',
+  (push) => {
+    const source = `const std=@import("std");const Q=std.PriorityQueue(u8,void,cmp);var qp:?*Q=null;var b=[_]u8{8,9};fn cmp(_:void,a:u8,c:u8)std.math.Order{qp.?.items=&b;return std.math.order(a,c);}pub fn main(init:std.process.Init)!void{var q:Q=.empty;qp=&q;try q.push(init.gpa,2);const old=q.items;defer{q.items=old;q.deinit(init.gpa);}${push}std.debug.print("{} {} {}",.{q.items[0],q.items[1],old[0]});}`;
+    expect(executeProgram('zig', source)).toMatchObject({
+      kind: 'executed',
+      stderr: '1 2 2',
+      uncaughtException: undefined,
+    });
+  }
+);
+
+test('queue removal reloads public headers after comparisons', () => {
+  const source = `const std=@import("std");const Q=std.PriorityQueue(u8,void,cmp);var qp:?*Q=null;var armed=false;var b=[_]u8{8,9,10};fn cmp(_:void,a:u8,c:u8)std.math.Order{if(armed)qp.?.items=&b;return std.math.order(a,c);}pub fn main(init:std.process.Init)!void{var q:Q=.empty;qp=&q;try q.pushSlice(init.gpa,&.{1,2,3,4});const old=q.items;defer{q.items=old;q.deinit(init.gpa);}armed=true;const out=q.pop().?;std.debug.print("{} {} {} {}",.{out,q.items[0],q.items[1],old[0]});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: '1 4 9 4',
+    uncaughtException: undefined,
+  });
+});
+
+test.each([
+  ['const a=[1:0]u8{7};', 'a', '1'],
+  ['var a=[1:0]u8{7};const p=&a;', 'p', '1'],
+  ['var a=[1:0]u8{7};const s:[:0]u8=&a;', 's', '1'],
+  ['const a=[0:0]u8{};', 'a', '0'],
+])('sentinel element panics keep logical lengths: %s', (setup, value, length) => {
+  const source = (index: string): string =>
+    `const std=@import("std");pub fn main()void{${setup}var n:usize=${index};_=&n;std.debug.print("{}",.{${value}[n]});}`;
+  expect(executeProgram('zig', source(String(Number(length) + 1)))).toMatchObject({
+    kind: 'executed',
+    uncaughtException: `panic: index out of bounds: index ${Number(length) + 1}, len ${length}`,
+  });
+  expect(executeProgram('zig', source(length))).toMatchObject({
+    kind: 'executed',
+    stderr: '0',
+    uncaughtException: undefined,
+  });
+});
+
+test.each([
+  'error{AccessDenied,BrokenPipe,Canceled,DeviceBusy,DiskQuota,FileBusy,FileTooBig,InputOutput,LockViolation,NoDevice,NoSpaceLeft,NotOpenForWriting,PermissionDenied,SystemResources,Unexpected,WouldBlock}',
+  'std.Io.File.Writer.Error',
+  'std.Io.Writer.Error',
+])('file write callbacks use the file-write contract: %s', (errorSet) => {
+  const source = `const std=@import("std");pub fn main(init:std.process.Init)!void{const E=${errorSet};const f:*const fn(std.Io.File,std.Io,[]const u8)E!void=std.Io.File.writeStreamingAll;try f(std.Io.File.stdout(),init.io,"ok");}`;
+  expect(executeProgram('zig', source)).toMatchObject(
+    errorSet === 'std.Io.Writer.Error'
+      ? { kind: 'compileError' }
+      : { kind: 'executed', stdout: 'ok', uncaughtException: undefined }
+  );
+});
+
+test.each([
+  'const S=struct{var n=[1:0]u8{9};fn get()*const [1:0]u8{return &n;}};const f:*const fn()*const [1]u8=S.get;std.debug.print("{}",.{f()[0]});',
+  'const f:*const fn(u8)void=std.process.exit;std.debug.print("9",.{});f(0);',
+  'const f:*const fn(u8,u8)anyerror!u8=std.fmt.charToDigit;std.debug.print("{}",.{try f(57,10)});',
+  'const f:fn(u8,u8)anyerror!u8=std.fmt.charToDigit;std.debug.print("{}",.{try f(57,10)});',
+  'const S=struct{fn get(p:*const u8)u8{return p.*;}};var n:u8=9;const f:*const fn(*u8)u8=S.get;std.debug.print("{}",.{f(&n)});',
+  'const S=struct{fn get(p:?*const u8)u8{return if(p)|v|v.* else 0;}};var n:u8=9;const f:*const fn(*u8)u8=S.get;std.debug.print("{}",.{f(&n)});',
+  'const S=struct{fn get(p:*const u8)u8{return p.*;}};var n:u8=9;var f:*const fn(*const u8)u8=S.get;_=&f;const g:*const fn(*u8)u8=f;std.debug.print("{}",.{g(&n)});',
+])('function coercions preserve compatible parameter and return representations: %s', (body) => {
+  expect(executeProgram('zig', `const std=@import("std");pub fn main()!void{${body}}`)).toMatchObject({
+    kind: 'executed',
+    stderr: '9',
+    uncaughtException: undefined,
+  });
+});
+
+test.each([
+  'const S=struct{fn get()[1:0]u8{return .{9};}};const f:*const fn()[1]u8=S.get;_=f;',
+  'const f:*fn(u8,u8)error{InvalidCharacter}!u8=std.fmt.charToDigit;_=f;',
+  'const f:*const fn(u8,u8)anyerror!u16=std.fmt.charToDigit;_=f;',
+  'const S=struct{fn get(p:u16)u8{return @intCast(p);}};const f:*const fn(u8)u8=S.get;_=f;',
+  'const S=struct{fn get(p:*u8)u8{return p.*;}};const f:*const fn(*const u8)u8=S.get;_=f;',
+  'const S=struct{fn get(p:*const u8)u8{return p.*;}};const f:*const fn(?*const u8)u8=S.get;_=f;',
+  'const f:*const fn(u8,u8)error{}!u8=std.fmt.charToDigit;_=f;',
+])('function coercions reject incompatible parameter and return representations: %s', (body) => {
+  expect(executeProgram('zig', `const std=@import("std");pub fn main()void{${body}}`)).toMatchObject({
+    kind: 'compileError',
+  });
+});
+
+test.each(['sort', 'queue'])('native %s callbacks share function variance rules', (operation) => {
+  const source = `const std=@import("std");const C=struct{offset:u8};fn less(c:*const C,a:u8,b:u8)bool{return a+c.offset<b+c.offset;}fn order(c:*const C,a:u8,b:u8)std.math.Order{return std.math.order(a+c.offset,b+c.offset);}pub fn main(init:std.process.Init)!void{_=&init;var c=C{.offset=0};${operation === 'sort' ? 'var a=[_]u8{2,1};std.mem.sort(u8,&a,&c,less);std.debug.print("{}",.{a[0]});' : 'var q=std.PriorityQueue(u8,*C,order).initContext(&c);defer q.deinit(init.gpa);try q.pushSlice(init.gpa,&.{2,1});std.debug.print("{}",.{q.pop().?});'}}`;
+  expect(executeProgram('zig', source)).toMatchObject({ kind: 'executed', stderr: '1', uncaughtException: undefined });
+});
+
+test.each(['@as(F,compare)', '@as(F,(&compare).*)'])(
+  'queue type identity survives compatible comparator coercions: %s',
+  (cast) => {
+    const source = `const std=@import("std");const C=struct{};fn compare(_: *const C,a:u8,b:u8)std.math.Order{return std.math.order(a,b);}const F=fn(*C,u8,u8)std.math.Order;const A=std.PriorityQueue(u8,*C,compare);const B=std.PriorityQueue(u8,*C,${cast});pub fn main()void{std.debug.print("{}",.{A==B});}`;
+    expect(executeProgram('zig', source)).toMatchObject({
+      kind: 'executed',
+      stderr: 'true',
+      uncaughtException: undefined,
+    });
+  }
+);
+
+test('comparator body-type coercions keep queue construction lazy', () => {
+  const source = `const std=@import("std");const C=struct{};const F=fn(*C,u8,u8)std.math.Order;const Q=std.PriorityQueue(u8,*C,@as(F,compare));var qp:?*Q=null;fn compare(_: *const C,a:u8,b:u8)std.math.Order{_=qp.?.count();return std.math.order(a,b);}pub fn main(init:std.process.Init)!void{var c:C=.{};var q=Q.initContext(&c);defer q.deinit(init.gpa);qp=&q;try q.pushSlice(init.gpa,&.{2,1});std.debug.print("{}",.{q.pop().?});}`;
+  expect(executeProgram('zig', source)).toMatchObject({ kind: 'executed', stderr: '1', uncaughtException: undefined });
+});

@@ -617,7 +617,7 @@ export abstract class ExpressionCompiler extends SemaBase {
     return fnType(fn.params, fn.returnType);
   }
 
-  protected knownFunctionValue(expression: TExpr, span: Span): FnValue {
+  knownFunctionValue(expression: TExpr, span: Span): FnValue {
     if (expression.value instanceof FnValue) return expression.value;
     if (expression.value instanceof NativeFn && expression.value.signature)
       return new FnValue(callableNative(this, expression.value, span));
@@ -753,7 +753,7 @@ export abstract class ExpressionCompiler extends SemaBase {
       const limit = type.length + (type.sentinel === undefined ? 0n : 1n);
       return (value, index) => {
         const array = value as ZArray;
-        if (index >= limit) indexOutOfBounds(index, limit);
+        if (index >= limit) indexOutOfBounds(index, type.length);
         return { slots: array, position: array.offset + Number(index) };
       };
     }
@@ -762,7 +762,7 @@ export abstract class ExpressionCompiler extends SemaBase {
       const limit = array.length + (array.sentinel === undefined ? 0n : 1n);
       return (value, index) => {
         const target = arrayPointerView(value as Pointer, array);
-        if (index >= limit) indexOutOfBounds(index, limit);
+        if (index >= limit) indexOutOfBounds(index, array.length);
         return { slots: target, position: target.offset + Number(index) };
       };
     }
@@ -770,7 +770,7 @@ export abstract class ExpressionCompiler extends SemaBase {
     return (value, index) => {
       const slice = value as Slice;
       const limit = slice.lengthValue + (sentinel === undefined ? 0n : 1n);
-      if (index >= limit) indexOutOfBounds(index, limit);
+      if (index >= limit) indexOutOfBounds(index, slice.lengthValue);
       return { slots: slice.target, position: slice.start + Number(index) };
     };
   }

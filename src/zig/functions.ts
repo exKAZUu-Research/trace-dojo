@@ -15,6 +15,7 @@ export interface LocalInfo {
 
 /** A function compiled for one set of argument types (a generic function has one instance per set). */
 export class FunctionInstance {
+  identity?: object;
   slotCount = 0;
   readonly locals: LocalInfo[] = [];
   /** The slots that receive the arguments, in order. */

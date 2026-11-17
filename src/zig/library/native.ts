@@ -3,6 +3,7 @@ import { FunctionInstance } from '../functions';
 import { type Frame, withHeldValues } from '../runtime';
 import {
   evaluateHeld,
+  inMemoryCoercible,
   NATIVE_FN_TYPE,
   type NativeCall,
   NativeFn,
@@ -180,12 +181,7 @@ export function checkCallback(
   result: Type,
   span: Span
 ): void {
-  if (
-    callback.returnType === result &&
-    callback.params.length === expected.length &&
-    callback.params.every((param, index) => param === expected[index])
-  )
-    return;
+  if (inMemoryCoercible(fnType(callback.params, callback.returnType), fnType(expected, result))) return;
   sema.error(span, `${name} に渡す関数は ${typeName(fnType(expected, result))} にしてください。`);
 }
 

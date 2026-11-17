@@ -212,10 +212,29 @@ const FILE: StructType = nativeStruct('Io.File', {}, [], {
   byteAlignment: 4,
 });
 
+const FILE_WRITE_ERROR = errorSetOf([
+  'AccessDenied',
+  'BrokenPipe',
+  'Canceled',
+  'DeviceBusy',
+  'DiskQuota',
+  'FileBusy',
+  'FileTooBig',
+  'InputOutput',
+  'LockViolation',
+  'NoDevice',
+  'NoSpaceLeft',
+  'NotOpenForWriting',
+  'PermissionDenied',
+  'SystemResources',
+  'Unexpected',
+  'WouldBlock',
+]);
+
 /** `std.Io.File.Writer`, whose `interface` field is the `std.Io.Writer` to write through. */
 const FILE_WRITER: StructType = nativeStruct(
   'Io.File.Writer',
-  {},
+  { Error: typeMember(() => FILE_WRITE_ERROR) },
   [{ name: 'interface', type: WRITER, hasDefault: false }],
   { kind: 'fileWriter', args: [], storageSlots: 0, byteSize: 72 }
 );
@@ -270,7 +289,7 @@ function addIoMembers(): void {
         const [io, bytes] = compileArgs(sema, expectArgs(sema, call, 2, 'writeStreamingAll'), [IO, CONST_U8_SLICE]);
         const evaluate = receiver.eval;
         return runtime(
-          errorUnionOf(WRITE_ERROR, VOID),
+          errorUnionOf(FILE_WRITE_ERROR, VOID),
           (frame) => {
             const file = evaluate(frame) as NativeHandle;
             io.eval(frame);
@@ -281,7 +300,7 @@ function addIoMembers(): void {
           call.span
         );
       },
-      () => ({ type: fnType([FILE, IO, CONST_U8_SLICE], errorUnionOf(WRITE_ERROR, VOID)), receiver: true })
+      () => ({ type: fnType([FILE, IO, CONST_U8_SLICE], errorUnionOf(FILE_WRITE_ERROR, VOID)), receiver: true })
     ),
     reader: unavailableMember('標準入力やファイルからの読み込み'),
   });
