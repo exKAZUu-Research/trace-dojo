@@ -356,3 +356,37 @@ test('optional and error union wrappers preserve aggregate and pointer trace chi
     e: { kind: 'object', entries: { v: { kind: 'value', value: 4 }, next: leaf } },
   });
 });
+
+test('prototype-like names survive trace dictionaries and snapshot comparisons', () => {
+  const source = `pub fn main()void{
+var __proto__:i32=1;
+const valueOf:i32=2;
+const constructor:i32=3;
+const s=.{.__proto__=@as(i32,4),.valueOf=@as(i32,5),.constructor=@as(i32,6)};
+__proto__+=1;
+_=.{__proto__,valueOf,constructor,s};
+}`;
+  const result = traceProgram('zig', source, source);
+  expect(result.uncaughtException).toBeUndefined();
+  expect(result.finalVars).toMatchObject({ ['__proto__']: 2, valueOf: 2, constructor: 3 });
+  expect(result.traceItems.at(-1)?.referenceVars.s).toMatchObject({
+    kind: 'object',
+    entries: {
+      ['__proto__']: { kind: 'value', value: 4 },
+      valueOf: { kind: 'value', value: 5 },
+      constructor: { kind: 'value', value: 6 },
+    },
+  });
+});
+
+test('tracing undefined pointer metadata does not dereference it', () => {
+  const source = `pub fn main()void{
+var q:*i32=undefined;
+_=&q;
+}`;
+  const result = traceProgram('zig', source, source);
+  expect(result.uncaughtException).toBeUndefined();
+  expect(result.finalVars).toMatchObject({ q: 'undefined' });
+  const faulting = source.replace('_=&q;', '_=&q; q.*=3;');
+  expect(traceProgram('zig', faulting, faulting).uncaughtException).toBe('Segmentation fault');
+});

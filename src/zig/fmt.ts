@@ -212,7 +212,7 @@ export function checkFormat(spec: string, type: Type, info: TypeInfo, hasOptions
     throw new FormatError(`invalid format string '${spec}' for type '${typeName(type)}'`);
   };
   const kind = type.kind;
-  const special = SPECIAL_SPECIFIERS[spec];
+  const special = SPECIAL_SPECIFIERS.get(spec);
   if (special) {
     if (!special.accepts(type)) invalid();
     return;
@@ -384,7 +384,7 @@ export function printValue(
   depth = MAX_DEPTH
 ): void {
   const kind = type.kind;
-  const special = SPECIAL_SPECIFIERS[spec];
+  const special = SPECIAL_SPECIFIERS.get(spec);
   if (special) return special.print(out, value, type, options);
   if (spec.length === 1) {
     switch (spec) {
@@ -580,36 +580,48 @@ function addressOf(value: Value): bigint {
 }
 
 /** Specifiers for strings and byte counts, which `printValue` handles before the others. */
-const SPECIAL_SPECIFIERS: Record<
+const SPECIAL_SPECIFIERS = new Map<
   string,
   { accepts: (type: Type) => boolean; print: (out: number[], value: Value, type: Type, options: Options) => void }
-> = {
-  q: {
-    accepts: isByteString,
-    print: (out, value, type) => {
-      out.push(0x22);
-      appendBytes(out, escapeString(stringBytes(value, type).map(Number)));
-      out.push(0x22);
+>([
+  [
+    'q',
+    {
+      accepts: isByteString,
+      print: (out, value, type) => {
+        out.push(0x22);
+        appendBytes(out, escapeString(stringBytes(value, type).map(Number)));
+        out.push(0x22);
+      },
     },
-  },
-  B: {
-    accepts: (type) => type.kind === 'int' || type.kind === 'comptime_int',
-    print: (out, value, _type, options) => printByteSize(out, value as bigint, false, options),
-  },
-  Bi: {
-    accepts: (type) => type.kind === 'int' || type.kind === 'comptime_int',
-    print: (out, value, _type, options) => printByteSize(out, value as bigint, true, options),
-  },
-  b64: {
-    accepts: (type) => type.kind === 'pointer' && isByteString(type),
-    print: (out, value, type, options) => {
-      forbidOptions(options);
-      const bytes = stringBytes(value, type);
-      checkOutputSize(Math.ceil(bytes.length / 3) * 4);
-      appendBytes(out, utf8(btoa(bytes.map((byte) => String.fromCodePoint(Number(byte))).join(''))));
+  ],
+  [
+    'B',
+    {
+      accepts: (type) => type.kind === 'int' || type.kind === 'comptime_int',
+      print: (out, value, _type, options) => printByteSize(out, value as bigint, false, options),
     },
-  },
-};
+  ],
+  [
+    'Bi',
+    {
+      accepts: (type) => type.kind === 'int' || type.kind === 'comptime_int',
+      print: (out, value, _type, options) => printByteSize(out, value as bigint, true, options),
+    },
+  ],
+  [
+    'b64',
+    {
+      accepts: (type) => type.kind === 'pointer' && isByteString(type),
+      print: (out, value, type, options) => {
+        forbidOptions(options);
+        const bytes = stringBytes(value, type);
+        checkOutputSize(Math.ceil(bytes.length / 3) * 4);
+        appendBytes(out, utf8(btoa(bytes.map((byte) => String.fromCodePoint(Number(byte))).join(''))));
+      },
+    },
+  ],
+]);
 
 /** `std.zig.stringEscape`: escapes quotes, backslashes, control characters, and invalid or special UTF-8. */
 function escapeString(bytes: readonly number[]): number[] {

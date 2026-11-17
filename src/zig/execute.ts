@@ -4,6 +4,7 @@ import type { ProgramExecution, ProgramRun } from '../interpreter/program';
 import type { ProgramInput } from '../interpreter/programIo';
 import { type CompiledProgram, compileSource } from './compiler';
 import { ExitSignal, processInit } from './library/std';
+import { MemoryFault } from './memoryFault';
 import { Frame, OutOfMemory, Runtime, StackOverflow, ZigPanic } from './runtime';
 import { ErrorValue } from './values';
 
@@ -64,6 +65,7 @@ export function runProgram(runtime: Runtime, program: CompiledProgram, onEnd?: (
 }
 
 function describeUncaught(error: unknown): string | undefined {
+  if (error instanceof MemoryFault) return 'Segmentation fault';
   if (error instanceof ExitSignal) return undefined;
   if (error instanceof ZigPanic) return `panic: ${error.text}`;
   if (error instanceof OutOfMemory) return 'error: OutOfMemory';

@@ -14,6 +14,7 @@ import type { Type } from './types';
 import { decodeUtf8 } from './utf8';
 import {
   ErrorValue,
+  isUndefinedMemory,
   NativeHandle,
   NULL,
   type Pointer,
@@ -36,7 +37,7 @@ export function traceZigProgram(program: string, trace: TraceOptions, input?: Pr
     variablesOf: (frame) => snapshotter.variablesOf(frame, true),
   });
   runtime.steps.recorder = recorder;
-  let finalVars: TraceItemVariable = {};
+  let finalVars = Object.create(null) as TraceItemVariable;
   // A model program may end with a panic to show how one stops the program.
   const run = runProgram(runtime, compiled, (frame) => {
     finalVars = snapshotter.variablesOf(frame, false).vars;
@@ -52,7 +53,10 @@ class Snapshotter {
    * method's receiver also shows its fields as `self.x`, as Java's `this.x`.
    */
   variablesOf(frame: Frame, withGlobals: boolean): TraceVariables {
-    const variables: TraceVariables = { vars: {}, referenceVars: {} };
+    const variables: TraceVariables = {
+      vars: Object.create(null) as TraceVariables['vars'],
+      referenceVars: Object.create(null) as TraceVariables['referenceVars'],
+    };
     if (frame.fn.internal) return variables;
     const shown = new Set<string>();
     for (const local of frame.fn.locals) {
@@ -116,10 +120,11 @@ function isString(type: Type): boolean {
   return false;
 }
 
-// code-gauge-allow functionNcss 41 -- One case per kind of syntax node, type, or format specifier, as Zig defines them.
-// code-gauge-allow functionCognitiveComplexity 27 -- One case per kind of syntax node, type, or format specifier, as Zig defines them.
+// code-gauge-allow functionNcss 43 -- One case per kind of syntax node, type, or format specifier, as Zig defines them.
+// code-gauge-allow functionCognitiveComplexity 28 -- One case per kind of syntax node, type, or format specifier, as Zig defines them.
 function scalarOf(value: Value, type: Type): Scalar | typeof NOT_SCALAR {
   if (value === UNASSIGNED) return NOT_SCALAR;
+  if (isUndefinedMemory(value)) return 'undefined';
   switch (type.kind) {
     case 'int':
     case 'comptime_int':
@@ -237,7 +242,7 @@ function displayValue(value: Value, type: Type, seen: Set<unknown>): DisplayNode
     }
     case 'struct': {
       if (!(value instanceof ZStruct)) return undefined;
-      const entries: Record<string, DisplayNode> = {};
+      const entries = Object.create(null) as Record<string, DisplayNode>;
       for (const [index, field] of (type.fields ?? []).entries()) {
         const node = displayNodeOf(
           field.comptimeValue ? field.comptimeValue.value : value.slots[index],
@@ -262,7 +267,7 @@ function displayValue(value: Value, type: Type, seen: Set<unknown>): DisplayNode
 }
 
 function sequenceNode(items: Value[], child: Type, seen: Set<unknown>): DisplayNode {
-  const entries: Record<string, DisplayNode> = {};
+  const entries = Object.create(null) as Record<string, DisplayNode>;
   for (const [index, item] of items.entries()) entries[index] = displayNodeOf(item, child, seen) ?? NULL_NODE;
   return { kind: 'array', entries };
 }

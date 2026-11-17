@@ -6,6 +6,7 @@ import type { FunctionDeclaration, SourceFile, Span } from './ast';
 import { checkSource } from './astCheck';
 import { duringComptime } from './comptimeMemory';
 import type { FunctionInstance } from './functions';
+import { MemoryFault } from './memoryFault';
 import { parseZig } from './parse';
 import './library/registry';
 import { PROCESS_INIT } from './library/std';
@@ -168,6 +169,7 @@ class Compiler extends StatementCompiler {
     try {
       return duringComptime(() => expression.eval(frame));
     } catch (error) {
+      if (error instanceof MemoryFault) return this.error(expression.span, 'undefined のポインタは参照できません。');
       if (error instanceof ZigPanic)
         return this.error(expression.span, `コンパイルのときの計算が失敗しました: ${error.text}`);
       throw error;

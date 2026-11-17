@@ -1,4 +1,4 @@
-import fastDeepEqual from 'fast-deep-equal';
+import { isEqual } from 'es-toolkit/predicate';
 
 import type { TraceItem } from '../problems/trace';
 import { ExecutionLimitError, MAX_TRACE_ITEMS } from './limits';
@@ -70,8 +70,8 @@ export class TraceRecorder<F extends TracedFrame> implements StepRecorder {
     const shownVars = this.varsAtLastStep.get(frame);
     return (
       last.board === world.boardText() &&
-      fastDeepEqual(last.turtles, world.turtleTraces()) &&
-      (shownVars === undefined || fastDeepEqual(shownVars, this.frames.variablesOf(frame).vars))
+      isEqual(last.turtles, world.turtleTraces()) &&
+      (shownVars === undefined || isEqual(shownVars, this.frames.variablesOf(frame).vars))
     );
   }
 }

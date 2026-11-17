@@ -59,15 +59,14 @@ export function nativeStruct(
 }
 
 export function unavailableDeclarations(name: string): Record<string, () => Member> {
-  const base = name.split('(')[0];
   return Object.fromEntries(
-    (PUBLIC_STD_MEMBERS[base] ?? []).map((member) => [member, unavailableMember(`${name}.${member}`)])
+    (publicMembers(name) ?? []).map((member) => [member, unavailableMember(`${name}.${member}`)])
   );
 }
 
 /** Adds declarations to a native struct, which may refer to the struct itself. */
 export function addMembers(type: { namespace: Namespace }, members: Record<string, () => Member>): void {
-  const allowed = PUBLIC_STD_MEMBERS[type.namespace.name.split('(')[0]];
+  const allowed = publicMembers(type.namespace.name);
   for (const [key, resolve] of Object.entries(members)) {
     if (allowed && !allowed.includes(key)) continue;
     let resolved: Member | undefined;
@@ -81,6 +80,11 @@ export function addMembers(type: { namespace: Namespace }, members: Record<strin
     };
     type.namespace.decls.set(key, decl);
   }
+}
+
+function publicMembers(name: string): readonly string[] | undefined {
+  const base = name.split('(')[0];
+  return Object.hasOwn(PUBLIC_STD_MEMBERS, base) ? PUBLIC_STD_MEMBERS[base] : undefined;
 }
 
 /** A namespace member that is a type. */

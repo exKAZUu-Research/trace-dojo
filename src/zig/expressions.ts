@@ -27,6 +27,7 @@ import {
   negate,
   parseFloatLiteral,
 } from './floats';
+import { sizeOf } from './layout';
 import { asFloat, comparisonTest, isArithmeticType, isIntegerType, isZero, sign } from './operands';
 import { type Frame, Jump, withHeldValues } from './runtime';
 import {
@@ -49,6 +50,7 @@ import {
   SemaBase,
   staticResultOf,
   type TExpr,
+  undefinedValue,
 } from './semaBase';
 import {
   ANYERROR,
@@ -86,6 +88,7 @@ import {
   wrapInt,
 } from './types';
 import {
+  arrayPointerView,
   compileTimeReadable,
   EnumLiteral,
   ErrorValue,
@@ -93,6 +96,7 @@ import {
   markConstantStorage,
   NULL,
   Pointer,
+  registerStorageLocation,
   scalarValueKey,
   scalarValuesEqual,
   Slice,
@@ -485,16 +489,29 @@ export abstract class ExpressionCompiler extends SemaBase {
     if (type.kind !== 'pointer' || type.size !== 'one') {
       return this.error(span, `${typeName(type)} 型はポインタではないので、.* で参照できません。`);
     }
+    if (type.child.kind === 'fn') return { ...pointer, type: type.child, place: undefined, local: undefined };
+    this.resolveStorage(type.child, span);
+    if (sizeOf(type.child) !== 0) this.checkMemoryOperand(pointer, span);
     const evaluate = pointer.eval;
+    const zero = sizeOf(type.child) === 0;
     const place: Place = {
       isConst: type.isConst,
-      locate: (frame) => evaluate(frame) as Pointer,
+      locate: (frame) =>
+        zero ? this.zeroPointer(evaluate(frame) as Pointer, type.child) : (evaluate(frame) as Pointer),
       compileTimePointer: pointer.known && pointer.value instanceof Pointer ? pointer.value : undefined,
     };
+    if (zero) return { ...this.fixedResult(pointer, type.child, undefinedValue(type.child), span), place };
     const fact = staticResultOf(pointer);
     return type.isConst && isConstantData(fact?.value)
       ? { ...this.derived(pointer, type.child, (value) => (value as Pointer).load()), span, place }
       : runtime(type.child, (frame) => (evaluate(frame) as Pointer).load(), span, place);
+  }
+
+  private zeroPointer(pointer: Pointer, type: Type): Pointer {
+    const storage = { slots: [undefinedValue(type)] };
+    const location = pointer.storageLocation();
+    registerStorageLocation(storage.slots, () => location, true);
+    return new Pointer(storage, 0);
   }
 
   private dereference(expression: ExpressionOf<'deref'>): TExpr {
@@ -575,8 +592,6 @@ export abstract class ExpressionCompiler extends SemaBase {
 
   // Indexing and slicing ----------------------------------------------------------------------------------------------
 
-  // code-gauge-allow functionCognitiveComplexity 22 -- Keeps static bounds and the corresponding storage location together.
-  // code-gauge-allow functionNcss 34 -- Keeps static bounds and the corresponding storage location together.
   protected index(expression: ExpressionOf<'index'>): TExpr {
     const object = this.compile(expression.object);
     const index = this.coerce(this.compile(expression.index, USIZE), USIZE, expression.index);
@@ -587,6 +602,10 @@ export abstract class ExpressionCompiler extends SemaBase {
     }
     const child = indexableChild(type);
     if (!child) return this.error(expression, `${typeName(type)} 型には、添字が使えません。`);
+    this.resolveStorage(child, expression);
+    if (sizeOf(child) !== 0 || (type.kind === 'pointer' && type.size === 'slice'))
+      this.checkMemoryOperand(object, expression);
+    const zero = sizeOf(child) === 0;
     const length = knownLengthOf(object);
     if (
       index.known &&
@@ -620,7 +639,8 @@ export abstract class ExpressionCompiler extends SemaBase {
       isConst,
       locate: (frame) => {
         const { slots, position } = locate(frame);
-        return new Pointer(slots, position);
+        const pointer = new Pointer(slots, position);
+        return zero ? this.zeroPointer(pointer, child) : pointer;
       },
       compileTimePointer: staticElement ? new Pointer(staticElement.slots, staticElement.position) : undefined,
     };
@@ -629,7 +649,7 @@ export abstract class ExpressionCompiler extends SemaBase {
         child,
         (frame) => {
           const { slots, position } = locate(frame);
-          return slots.slots[position];
+          return zero ? undefinedValue(child) : slots.slots[position];
         },
         expression,
         place
@@ -640,7 +660,7 @@ export abstract class ExpressionCompiler extends SemaBase {
               [object, index],
               ([value, position]) => {
                 const element = access(value, position as bigint);
-                return element.slots.slots[element.position];
+                return zero ? undefinedValue(child) : element.slots.slots[element.position];
               },
               expression
             )
@@ -664,7 +684,7 @@ export abstract class ExpressionCompiler extends SemaBase {
       const array = type.child;
       const limit = array.length + (array.sentinel === undefined ? 0 : 1);
       return (value, index) => {
-        const target = (value as Pointer).load() as ZArray;
+        const target = arrayPointerView(value as Pointer, array);
         if (index >= BigInt(limit)) indexOutOfBounds(index, array.length);
         return { slots: target, position: target.offset + Number(index) };
       };
@@ -707,7 +727,6 @@ export abstract class ExpressionCompiler extends SemaBase {
     } else {
       return this.error(expression, `${typeName(type)} 型はスライスできません。`);
     }
-    const fromArray = staticLen !== undefined;
     staticLen ??= knownLengthOf(base);
     const reachesSentinel = !end || (end.known && staticLen !== undefined && end.value === BigInt(staticLen));
     const sentinel = expression.sentinel
@@ -740,13 +759,16 @@ export abstract class ExpressionCompiler extends SemaBase {
       resultLength === undefined
         ? sliceOf(child, isConst, sentinel)
         : pointerTo(arrayOf(resultLength, child, sentinel), isConst);
+    if (!(type.kind === 'pointer' && type.child.kind === 'array' && resultLength === 0))
+      this.checkMemoryOperand(operand, expression);
+    const arrayType = type.kind === 'pointer' && type.child.kind === 'array' ? type.child : undefined;
     const operands = [base, start, ...(end ? [end] : [])];
     const render = ([value, first, last]: Value[]): Value => {
       let target: Slots;
       let offset: number;
       let length: bigint;
-      if (fromArray) {
-        const array = (value as Pointer).load() as ZArray;
+      if (arrayType) {
+        const array = arrayPointerView(value as Pointer, arrayType);
         target = array;
         offset = array.offset;
         length = BigInt(staticLen as number);

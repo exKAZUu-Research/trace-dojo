@@ -36,6 +36,7 @@ import {
 } from './floats';
 import { sizeOf } from './layout';
 import { importStd } from './library/std';
+import { MemoryFault } from './memoryFault';
 import { isIntegerType } from './operands';
 import {
   copyForStorage,
@@ -67,7 +68,19 @@ import {
   wrapInt,
 } from './types';
 import { decodeIdentifierBytes, decodeUtf8, encodeIdentifierText } from './utf8';
-import { ErrorValue, Pointer, Slice, storageOverlaps, storeInto, type Value, ZArray, ZStruct, ZUnion } from './values';
+import {
+  arrayPointerView,
+  ErrorValue,
+  isUndefinedMemory,
+  Pointer,
+  Slice,
+  storageOverlaps,
+  storeInto,
+  type Value,
+  ZArray,
+  ZStruct,
+  ZUnion,
+} from './values';
 
 /** Builtins of stages C and D, which this grader rejects with the stage's message. */
 const UNAVAILABLE = new Map<string, string>([
@@ -889,10 +902,13 @@ export abstract class BuiltinCompiler extends ExpressionCompiler {
     });
   }
 
-  // code-gauge-allow functionNcss 34 -- Keeps typed length/alias checks with the matching copy evaluation.
+  // code-gauge-allow functionNcss 38 -- Keeps typed length/alias checks with the matching copy evaluation.
+  // code-gauge-allow functionCognitiveComplexity 19 -- Keeps typed length/alias checks with the matching copy evaluation.
   private memoryCopy(name: string, expression: ExpressionOf<'builtinCall'>): TExpr {
     const destination = this.compile(expression.args[0]);
     const source = this.compile(expression.args[1]);
+    this.checkMemoryOperand(destination, expression);
+    this.checkMemoryOperand(source, expression);
     const target = elementAccessor(destination.type);
     const from = elementAccessor(source.type);
     if (!target || target.isConst)
@@ -913,12 +929,13 @@ export abstract class BuiltinCompiler extends ExpressionCompiler {
         const out = target.view(valuesOf[0]);
         const input = from.view(valuesOf[1]);
         if (out.length !== input.length) panic(PANIC.memcpyLengths);
-        if (sizeOf(target.child) === 0) return;
+        if (out.length === 0n || sizeOf(target.child) === 0) return;
         if (
           name === '@memcpy' &&
           storageOverlaps(out.slots, out.start, input.slots, input.start, Number(out.length), sizeOf(target.child))
         )
           panic(PANIC.memcpyAlias);
+        if (isUndefinedMemory(valuesOf[0]) || isUndefinedMemory(valuesOf[1])) throw new MemoryFault();
         frame.runtime.spend(Number(input.length));
         const values = input.slots.slots.slice(input.start, input.start + Number(input.length)).map(copyForStorage);
         for (const [index, value] of values.entries()) {
@@ -936,6 +953,7 @@ export abstract class BuiltinCompiler extends ExpressionCompiler {
     const target = elementAccessor(destination.type);
     if (!target || target.isConst)
       return this.error(expression.args[0], '@memset の書き込み先には、変更できる配列やスライスを指定してください。');
+    if (sizeOf(target.child) !== 0) this.checkMemoryOperand(destination, expression);
     const value = this.coerce(this.compile(expression.args[1], target.child), target.child, expression.args[1]);
     const evaluateDestination = destination.eval;
     const evaluateValue = value.eval;
@@ -995,11 +1013,12 @@ function elementAccessor(type: Type):
     };
   }
   if (type.kind === 'pointer' && type.size === 'one' && type.child.kind === 'array') {
+    const arrayType = type.child;
     return {
       child: type.child.child,
       isConst: type.isConst,
       view: (value) => {
-        const array = (value as Pointer).load() as ZArray;
+        const array = arrayPointerView(value as Pointer, arrayType);
         return { slots: array, start: array.offset, length: BigInt(array.length) };
       },
     };

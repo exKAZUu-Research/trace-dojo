@@ -120,6 +120,7 @@ export abstract class CallCompiler extends BuiltinCompiler {
   }
 
   private callPointer(callee: TExpr, fnType: FnType, expression: ExpressionOf<'call'>): TExpr {
+    this.checkMemoryOperand(callee, expression);
     if (expression.args.length !== fnType.params.length) {
       this.error(
         expression,
@@ -344,6 +345,7 @@ export abstract class CallCompiler extends BuiltinCompiler {
     value: TExpr,
     span: Span
   ): { call: (frame: Frame, args: Value[]) => Value; params: readonly Type[]; returnType: Type } {
+    this.checkMemoryOperand(value, span);
     const ref = value.value as unknown;
     if (value.known && ref instanceof FnRef) {
       const instance = this.instantiate(ref, [], span);

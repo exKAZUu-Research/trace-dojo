@@ -2,6 +2,7 @@ import { ExecutionLimitError, LIMITS } from '../interpreter/limits';
 import type { TurtleState } from '../interpreter/turtleWorld';
 import { BigFloat, compareFloats } from './floats';
 import type { FunctionInstance } from './functions';
+import { MemoryFault, UNDEFINED_MEMORY } from './memoryFault';
 import type { Type } from './types';
 import { WeakValueMap } from './weakValueMap';
 
@@ -219,7 +220,8 @@ export class Pointer {
 
   storageLocation(): { storage: object; index: number } {
     const slots = this.target.slots;
-    if (storageLocations.has(slots)) return storageLocation(slots, this.index);
+    const location = storageLocation(slots, this.index);
+    if (storageLocations.has(slots) || location.storage === UNDEFINED_MEMORY.slots) return location;
     const value = (storageAliases.get(slots) ?? slots)[this.index];
     if (value instanceof ZArray) return storageLocation(value.slots, value.offset);
     return storageLocation(
@@ -257,6 +259,7 @@ export class Slice {
   }
 
   values(): Value[] {
+    if (this.lengthValue !== 0n && isUndefinedMemory(this)) throw new MemoryFault();
     if (this.lengthValue > BigInt(LIMITS.maxSlots)) throw new ExecutionLimitError('storage');
     return virtualStorage.has(this.target.slots)
       ? Array.from({ length: this.length }, (_, index) => this.get(index))
@@ -284,7 +287,10 @@ export function optionalSome(value: Value, payload: Type): Value {
 
 /** A function, as a value of a function type or a function pointer. */
 export class FnValue {
-  constructor(readonly fn: FunctionInstance) {}
+  constructor(
+    readonly fn: FunctionInstance,
+    readonly isUndefined = false
+  ) {}
 }
 
 /** A value that the grader implements natively, such as a turtle, an allocator, or a writer. */
@@ -293,6 +299,19 @@ export class NativeHandle {
     readonly kind: string,
     readonly state: NativeState
   ) {}
+}
+
+export function isUndefinedMemory(value: Value): boolean {
+  if (value instanceof Pointer) return value.storageLocation().storage === UNDEFINED_MEMORY.slots;
+  if (value instanceof Slice)
+    return storageLocation(value.target.slots, value.start).storage === UNDEFINED_MEMORY.slots;
+  return value instanceof FnValue && value.isUndefined;
+}
+
+export function arrayPointerView(value: Pointer, type: Extract<Type, { kind: 'array' }>): ZArray {
+  return isUndefinedMemory(value)
+    ? new ZArray(UNDEFINED_MEMORY.slots, 0, type.length, type.sentinel !== undefined)
+    : (value.load() as ZArray);
 }
 
 export type NativeState = { turtle?: TurtleState } & Record<string, unknown>;

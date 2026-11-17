@@ -1,5 +1,4 @@
-// code-gauge-allow-file fileNcss 973 -- The file holds one layer of the compiler, whose parts share its private state.
-// code-gauge-allow-file duplicateLines 18 -- Undefined and zero initializers share aggregate shapes but differ in scalar and optional values.
+// code-gauge-allow-file fileNcss 988 -- The file holds one layer of the compiler, whose parts share its private state.
 import { CompileError } from '../interpreter/diagnostics';
 import { ExecutionBudget } from '../interpreter/limits';
 import { CompilationStorage, valueSlots } from './allocation';
@@ -29,7 +28,8 @@ import {
   roundTo,
   truncateToBigInt,
 } from './floats';
-import type { FunctionInstance } from './functions';
+import { FunctionInstance } from './functions';
+import { MemoryFault, UNDEFINED_MEMORY } from './memoryFault';
 import { type Frame, ZigPanic } from './runtime';
 import {
   arrayOf,
@@ -43,6 +43,7 @@ import {
   errorUnionOf,
   fitsInt,
   type FloatType,
+  type FnType,
   type IntType,
   intType,
   isComptimeOnly,
@@ -57,12 +58,14 @@ import {
   typeName,
   UNDEFINED_TYPE,
   type UnionType,
+  USIZE,
   VOID,
 } from './types';
 import {
   type EnumLiteral,
   ErrorValue,
-  type FnValue,
+  FnValue,
+  isUndefinedMemory,
   markConstantStorage,
   NativeHandle,
   NULL,
@@ -290,6 +293,10 @@ export abstract class SemaBase implements SemaApi {
       if (scope.namespace) return scope.namespace;
     }
     return this.root;
+  }
+
+  protected checkMemoryOperand(value: TExpr, span: Span = value.span): void {
+    if (value.known && isUndefinedMemory(value.value)) this.error(span, 'undefined のポインタは参照できません。');
   }
 
   // Values known at compile time ------------------------------------------------------------------------------------
@@ -1014,6 +1021,7 @@ export abstract class SemaBase implements SemaApi {
       try {
         result = { value: compute(facts.map((fact) => fact.value)) };
       } catch (error) {
+        if (error instanceof MemoryFault) return this.error(span, 'undefined のポインタは参照できません。');
         if (error instanceof ZigPanic)
           return this.error(span, `値が決まっている計算が、実行時のエラー（${error.text}）になります。`);
         throw error;
@@ -1070,6 +1078,7 @@ export abstract class SemaBase implements SemaApi {
       try {
         result = { value: convert(sourceResult.value) };
       } catch (error) {
+        if (error instanceof MemoryFault) return this.error(expression.span, 'undefined のポインタは参照できません。');
         if (error instanceof ZigPanic)
           return this.error(expression.span, `コンパイルのときの計算が失敗しました: ${error.text}`);
         throw error;
@@ -1366,6 +1375,7 @@ export function copyForStorage(value: Value): Value {
 // Undefined values ------------------------------------------------------------------------------------------------
 
 const undefinedIntegers = new WeakMap<IntType, bigint>();
+const undefinedFunctions = new WeakMap<FnType, FnValue>();
 
 /** The value that `undefined` memory holds in a Debug build, which fills it with the byte 0xAA. */
 export function undefinedValue(type: Type): Value {
@@ -1373,6 +1383,7 @@ export function undefinedValue(type: Type): Value {
   return buildUndefinedValue(type);
 }
 
+// code-gauge-allow functionNcss 32 -- Mirrors the value shapes for every supported type.
 function buildUndefinedValue(type: Type): Value {
   switch (type.kind) {
     case 'int': {
@@ -1406,17 +1417,31 @@ function buildUndefinedValue(type: Type): Value {
       const fields = type.fields ?? [];
       return new ZUnion(0, fields[0] ? buildUndefinedValue(fields[0].type) : undefined);
     }
+    case 'fn': {
+      let value = undefinedFunctions.get(type);
+      if (!value) {
+        value = new FnValue(
+          new FunctionInstance('undefined', type.params, type.returnType, () => {
+            throw new MemoryFault();
+          }),
+          true
+        );
+        undefinedFunctions.set(type, value);
+      }
+      return value;
+    }
     case 'pointer': {
-      return type.size === 'slice' ? new Slice(UNDEFINED_STORAGE, 0, 0) : new Pointer(UNDEFINED_STORAGE, 0);
+      return type.child.kind === 'fn'
+        ? buildUndefinedValue(type.child)
+        : type.size === 'slice'
+          ? new Slice(UNDEFINED_MEMORY, 0, undefinedInteger(USIZE))
+          : new Pointer(UNDEFINED_MEMORY, 0);
     }
     default: {
       return undefined;
     }
   }
 }
-
-/** What an undefined pointer points to. */
-const UNDEFINED_STORAGE: Slots = { slots: [] };
 
 function undefinedInteger(type: IntType): bigint {
   let value = undefinedIntegers.get(type);

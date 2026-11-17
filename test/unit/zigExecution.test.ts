@@ -3781,3 +3781,80 @@ test('tuple type identity includes structured constant values and undefined pres
     uncaughtException: undefined,
   });
 });
+
+test('source identifiers can name prototype-like locals and methods', () => {
+  const source = `const std=@import("std");
+const S=struct{x:i32,fn toString(self:S)i32{return self.x;}};
+pub fn main()void{const constructor:i32=5;const valueOf:i32=7;const __proto__:i32=9;const s=S{.x=3};std.debug.print("{} {} {} {}",.{s.toString(),constructor,valueOf,__proto__});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: '3 5 7 9',
+    uncaughtException: undefined,
+  });
+});
+
+test.each(['toString', 'valueOf', 'constructor', '__proto__', 'hasOwnProperty'])(
+  'prototype-like names require declarations and valid format specifiers: %s',
+  (name) => {
+    for (const body of [`const x=${name};_=x;`, `const x:${name}=1;_=x;`, `std.debug.print("{${name}}",.{1});`]) {
+      expect(executeProgram('zig', `const std=@import("std");pub fn main()void{${body}}`)).toMatchObject({
+        kind: 'compileError',
+      });
+    }
+  }
+);
+
+test.each([
+  'var q:*i32=undefined;_=&q;q.*+=1;',
+  'var p:?*i32=undefined;_=&p;std.debug.print("{}",.{p.?.*});',
+  'var a:[3]*i32=undefined;_=&a;_=a[1].*;',
+  'var s:[]i32=undefined;_=&s;s[0]=1;',
+  'var f:*const fn()void=undefined;_=&f;f();',
+  'var f:*const fn()void=undefined;_=&f;f.*();',
+  'var p:*struct{x:i32}=undefined;_=&p;p.x=2;',
+])('undefined runtime memory faults without running defers: %s', (body) => {
+  const source = `const std=@import("std");pub fn main()void{defer std.debug.print("deferred",.{});${body}}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: '',
+    uncaughtException: 'Segmentation fault',
+  });
+});
+
+test('undefined memory cannot transfer writes between executions', () => {
+  for (const body of ['_=q.*;', 'q.*=3;', '_=q.*;']) {
+    expect(executeProgram('zig', `pub fn main()void{var q:*i32=undefined;_=&q;${body}}`)).toMatchObject({
+      kind: 'executed',
+      uncaughtException: 'Segmentation fault',
+    });
+  }
+  expect(executeProgram('zig', 'pub fn main()void{var n:i32=1;const p=&n;p.*+=1;}')).toMatchObject({
+    kind: 'executed',
+    uncaughtException: undefined,
+  });
+});
+
+test.each([
+  'const p:*const i32=undefined;_=p.*;',
+  'const s:[]void=undefined;_=s[0];',
+  'const f:*const fn()void=undefined;f();',
+  'const p:*[0]u8=undefined;@memcpy(p,p);',
+])('known undefined memory use is a compile error: %s', (body) => {
+  expect(executeProgram('zig', `pub fn main()void{${body}}`)).toMatchObject({ kind: 'compileError' });
+});
+
+test('undefined pointers retain metadata and permit operations with no memory access', () => {
+  const source = `const std=@import("std");pub fn main()void{
+const p:*void=undefined;_=p.*;p.*={};
+const a:*[2]void=undefined;_=a[0];
+var b:*[2]u8=undefined;_=&b;const view=b[0..];
+var s:[]u8=undefined;_=&s;
+const z:[]void=undefined;@memset(z,{});
+var empty:*[0]u8=undefined;_=&empty;@memcpy(empty,empty);
+std.debug.print("{} {} {}",.{view.len,s.len,empty[0..].len});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: '2 12297829382473034410 0',
+    uncaughtException: undefined,
+  });
+});

@@ -5,6 +5,7 @@ import {
   EnumLiteral,
   ErrorValue,
   FnValue,
+  isUndefinedMemory,
   NULL,
   Pointer,
   type Slice,
@@ -15,8 +16,9 @@ import {
   type ZUnion,
 } from './values';
 
-// code-gauge-allow functionNcss 35 -- Dispatches typed constants while aggregate and scalar renderers share the same recursion.
+// code-gauge-allow functionNcss 37 -- Dispatches typed constants while aggregate and scalar renderers share the same recursion.
 export function constantText(value: Value, type: Type, nameOf: (type: Type) => string): string {
+  if (isUndefinedMemory(value)) return 'undefined';
   if (value === NULL) return 'null';
   if (value instanceof ErrorValue) return `error.${value.name}`;
   if (value instanceof EnumLiteral) return `.${value.name}`;

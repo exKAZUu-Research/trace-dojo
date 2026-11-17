@@ -233,17 +233,17 @@ export const F80 = floatType(80);
 export const F128 = floatType(128);
 
 /** The C integer types, as on the reference toolchain's platform (64-bit macOS). */
-const C_INTEGERS: Record<string, [boolean, number]> = {
-  c_char: [true, 8],
-  c_short: [true, 16],
-  c_ushort: [false, 16],
-  c_int: [true, 32],
-  c_uint: [false, 32],
-  c_long: [true, 64],
-  c_ulong: [false, 64],
-  c_longlong: [true, 64],
-  c_ulonglong: [false, 64],
-};
+const C_INTEGERS = new Map<string, [boolean, number]>([
+  ['c_char', [true, 8]],
+  ['c_short', [true, 16]],
+  ['c_ushort', [false, 16]],
+  ['c_int', [true, 32]],
+  ['c_uint', [false, 32]],
+  ['c_long', [true, 64]],
+  ['c_ulong', [false, 64]],
+  ['c_longlong', [true, 64]],
+  ['c_ulonglong', [false, 64]],
+]);
 
 /** The type a primitive name such as `i32`, `usize`, or `bool` denotes, or undefined for other names. */
 // code-gauge-allow functionNcss 41 -- One case per kind of syntax node, type, or format specifier, as Zig defines them.
@@ -303,7 +303,7 @@ export function primitiveType(name: string): Type | undefined {
       return COMPTIME_FLOAT;
     }
     default: {
-      const c = C_INTEGERS[name];
+      const c = C_INTEGERS.get(name);
       return c ? intType(c[0], c[1], name) : undefined;
     }
   }
