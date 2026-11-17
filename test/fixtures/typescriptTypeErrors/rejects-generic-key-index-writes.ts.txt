@@ -1,0 +1,12 @@
+function a<K extends string>(k: K, r: Record<string, number>) { r[k] = "x"; }
+function b<K extends string>(k: K, r: { a: number }) { r[k] = 1; }
+function c<K extends number>(k: K, r: Record<string, boolean>) { r[k] = true; r[k] = 1; }
+function d<K extends string>(k: K, r: number[]) { r[k] = 1; }
+function e<K extends "a" | "b">(k: K, r: { a: number; b: string }) { r[k] = 1; }
+function f<K extends "a" | "b">(k: K, r: { a: number; b: number }) { r[k] = 1; }
+function g<K extends string, V>(k: K, v: V, r: Record<string, V>) { r[k] = v; r[k] = 1; }
+function h<T, K extends keyof T>(t: T, k: K) { t[k] = 1; }
+function i<K extends `x${string}`>(k: K, r: Record<string, number>) { r[k] = 2; }
+function j<K extends symbol>(k: K, r: Record<string, number>) { r[k] = 2; }
+function m<K extends string>(k: K, r: Map<string, number>) { r[k] = 2; }
+function n<K extends string>(k: K, r: Record<string, number>) { const x: number = r[k]; return x; }

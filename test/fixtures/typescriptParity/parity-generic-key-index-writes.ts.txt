@@ -1,0 +1,10 @@
+function count<T extends string>(xs: T[]): Record<string, number> {
+  const r: Record<string, number> = {};
+  for (const x of xs) r[x] = (r[x] ?? 0) + 1;
+  return r;
+}
+console.log(count(["a", "b", "a"]));
+function a<K extends string>(k: K, r: Record<string, number>) { r[k] = 1; r[k] += 1; }
+function d<K extends number>(k: K, r: number[]): number { r[k] = 1; return r[k]; }
+function e<T extends string | number>(k: T, r: Record<string | number, string>) { r[k] = "x"; }
+function g<K extends string, V>(k: K, v: V, r: Record<string, V>) { r[k] = v; }

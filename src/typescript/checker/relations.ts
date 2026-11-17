@@ -1,6 +1,7 @@
 // code-gauge-allow-file fileNcss 562 -- Decides assignability and comparability for every kind of type, as TypeScript's checker does in one place.
 import type { Checker } from './checker';
 import { isUnit } from './flow';
+import { isGenericObjectOrIndexType } from './genericTypes';
 import { isNumericName } from './syntax';
 import {
   anonymousObject,
@@ -146,7 +147,8 @@ export class Relations {
       return t.kind === 'object' && this.objectRelated(s, t, relation);
     }
     if (s.kind === 'typeParameter') {
-      return (t.kind === 'typeParameter' && s.id === t.id) || this.constraintRelated(s, t, relation);
+      if ((t.kind === 'typeParameter' && s.id === t.id) || this.constraintRelated(s, t, relation)) return true;
+      return t.kind === 'indexedAccess' && this.relatedToIndexedAccess(s, t, relation);
     }
     if (s.kind === 'indexedAccess' || s.kind === 'keyof' || s.kind === 'conditional') {
       if (this.genericSourceRelated(s, t, relation)) return true;
@@ -158,13 +160,27 @@ export class Relations {
     return this.relatedToConcrete(s, t, relation);
   }
 
-  /** Writing `o[k]` with a generic key must suit the property of every key the constraint allows. */
+  /**
+   * Writing `o[k]` with a generic key must suit the property, or the index signature, of every key the constraint
+   * allows.
+   */
   private relatedToIndexedAccess(s: Type, t: IndexedAccessType, relation: Relation): boolean {
-    if (this.isGeneric(t.objectType)) return false;
     const keys = this.c.baseConstraint(t.indexType);
-    const members = keys.kind === 'union' ? keys.types : [keys];
-    if (keys === t.indexType || !members.every((member) => member.kind === 'literal')) return false;
-    return members.every((key) => this.isRelated(s, this.c.typeOperators.indexedAccess(t.objectType, key), relation));
+    if (isGenericObjectOrIndexType(t.objectType) || isGenericObjectOrIndexType(keys)) return false;
+    return (keys.kind === 'union' ? keys.types : [keys]).every((key) => {
+      const writeType = this.writeTypeOf(t.objectType, key);
+      return writeType !== undefined && this.isRelated(s, writeType, relation);
+    });
+  }
+
+  private writeTypeOf(object: Type, key: Type): Type | undefined {
+    if (key.kind === 'literal') return this.c.typeOperators.indexedAccess(object, key);
+    const { stringIndex, numberIndex, symbolIndex } = this.c.structureOf(object);
+    if (isIntrinsic(key, 'number')) return (numberIndex ?? stringIndex)?.type;
+    if (isIntrinsic(key, 'string') || key.kind === 'templateLiteral' || key.kind === 'stringMapping')
+      return stringIndex?.type;
+    if (isIntrinsic(key, 'symbol')) return symbolIndex?.type;
+    return undefined;
   }
 
   private genericSourceRelated(s: Type, t: Type, relation: Relation): boolean {
