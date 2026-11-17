@@ -19,7 +19,6 @@ import {
   Ref,
   setAllocationHandler,
   setDropHandler,
-  type UserFunction,
   type Value,
 } from './values';
 
@@ -139,7 +138,6 @@ export class Runtime {
   program?: Program;
   notices: CompileNotice[] = [];
   /** The function a closure literal compiles to, created once so that its static variables persist. */
-  readonly closureFunctions = new WeakMap<FunctionDecl, UserFunction>();
   /** The reference the last call to a function returning by reference returned, for `$x = &f()`. */
   lastReturnRef: Ref | undefined;
   /** The number of user calls running, bounded by the call depth limit. */

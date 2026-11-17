@@ -883,11 +883,26 @@ function setOperation(name: string, args: Value[], keep: boolean, same: SetCompa
   checkSetArguments(name, args);
   const [first, ...others] = args as PhpArray[];
   const result = new PhpArray();
+  const keyOf = (entry: [Key, Value]): string | Key =>
+    same === sameKey
+      ? entry[0]
+      : same === sameValue
+        ? toStr(entry[1])
+        : JSON.stringify([String(entry[0]), toStr(entry[1])]);
+  const lookups = others.map(
+    (other) =>
+      new Set(
+        [...other.entries()].map((entry) => {
+          rt().spend();
+          return keyOf(entry);
+        })
+      )
+  );
   for (const entry of first.entries()) {
     rt().spend();
-    const inAll = others.every((other) => [...other.entries()].some((candidate) => same(entry, candidate)));
-    const inAny = others.some((other) => [...other.entries()].some((candidate) => same(entry, candidate)));
-    if (keep ? inAll : !inAny) result.set(entry[0], share(entry[1]));
+    const key = keyOf(entry);
+    const present = keep ? lookups.every((lookup) => lookup.has(key)) : lookups.some((lookup) => lookup.has(key));
+    if (keep ? present : !present) result.set(entry[0], share(entry[1]));
   }
   return result;
 }

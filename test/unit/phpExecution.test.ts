@@ -222,3 +222,26 @@ test('decodes a base64 payload within the string budget without host argument sp
     stdout: '720000',
   });
 });
+
+test('set operations use indexed membership for ordinary collections', () => {
+  expect(
+    run(
+      '<?php $a=range(1,5000);$b=range(5001,10000);echo count(array_intersect($a,$b))," ",count(array_diff_key($a,$b));'
+    )
+  ).toMatchObject({ kind: 'executed', stdout: '0 0' });
+});
+
+test('query-string separator expansion is bounded before joining', () => {
+  const execution = run('<?php http_build_query(range(1,1000),"",str_repeat("x",10000));');
+  expect(execution.kind === 'executed' && execution.stdout).toMatch(/^\nFatal error: Allowed memory size/);
+});
+
+test.each(['<?php bcadd("1","2");', '<?php pack("C",1);', '<?php new NumberFormatter("en",0);'])(
+  'unavailable PHP builtins are rejected explicitly: %s',
+  (source) => {
+    expect(run(source)).toMatchObject({
+      kind: 'executed',
+      uncaughtException: expect.stringContaining('この採点環境では使えません。'),
+    });
+  }
+);

@@ -1,6 +1,7 @@
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import { placeOf } from './assignment';
 import type { Arg, Expr } from './ast';
+import builtinNames from './builtinNames.json';
 import { lower } from './bytes';
 import { type ArgValue, type CallTarget, closureFunction, functionDisplayName, invoke, paramIsByRef } from './calls';
 import { canCall, lookupMethod, requireClass } from './classes';
@@ -10,6 +11,7 @@ import { type Chain, ev, evChain, iterate, resolveClassRef, SHORT } from './inte
 import { toStr } from './operators';
 import { ElementPlace, share, VarPlace, writableContainer } from './places';
 import { type Frame, rt } from './runtime';
+import { UnsupportedFeatureError } from './unsupported';
 import {
   type Callable,
   type ClosureData,
@@ -107,7 +109,11 @@ export function callExpression(e: Extract<Expr, { k: 'call' }>): Value {
     const fn =
       runtime.functions.get(lower(name.name)) ??
       (name.fallback ? runtime.functions.get(lower(name.fallback)) : undefined);
-    if (!fn) throwError('Error', `Call to undefined function ${name.name}()`);
+    if (!fn) {
+      if (builtinNames.functions.includes(lower(name.fallback ?? name.name)))
+        throw new UnsupportedFeatureError(`PHP の組み込み関数（${name.fallback ?? name.name}）`);
+      throwError('Error', `Call to undefined function ${name.name}()`);
+    }
     if (e.fcc) return closureFromCallable({ fn });
     const args = evalArgs(e.args, fn, fn.name);
     runtime.row = e.row;
@@ -356,7 +362,11 @@ export function callTargetOf(value: Value, forCall: boolean): CallTarget {
     const separator = value.indexOf('::');
     if (separator !== -1) return staticCallable(value.slice(0, separator), value.slice(separator + 2), scope);
     const fn = runtime.functions.get(lower(value.startsWith('\\') ? value.slice(1) : value));
-    if (!fn) throwError('Error', `Call to undefined function ${value}()`);
+    if (!fn) {
+      if (builtinNames.functions.includes(lower(value.replace(/^\\/, ''))))
+        throw new UnsupportedFeatureError(`PHP の組み込み関数（${value}）`);
+      throwError('Error', `Call to undefined function ${value}()`);
+    }
     return { fn };
   }
   if (value instanceof PhpArray && value.size === 2) {

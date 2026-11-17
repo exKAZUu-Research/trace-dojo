@@ -298,14 +298,7 @@ export function bindRef(target: Expr, ref: Ref): void {
     const object = ev(target.obj);
     if (!(object instanceof PhpObject)) throwError('Error', 'Cannot assign by reference to a property of a non-object');
     const name = memberName(target.name);
-    const decl = classesModule.lookupProp(object.cls, name, rt().frame.scope);
-    propRef(object, name, rt().frame.scope);
-    if (decl?.type) {
-      classesModule.attachPropertyReference(ref, decl, object);
-    }
-    ref.isRef = true;
-    ref.rc++;
-    object.props.set(decl && !decl.isStatic ? decl.key : name, ref);
+    classesModule.bindPropertyReference(object, name, ref, rt().frame.scope);
     return;
   }
   if (target.k === 'sprop') {

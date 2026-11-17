@@ -747,14 +747,30 @@ export function parseTypeText(text: string): TypeDecl {
 }
 
 export function closureFunction(decl: FunctionDecl): UserFunction {
-  const runtime = rt();
-  let fn = runtime.closureFunctions.get(decl);
-  if (!fn) {
-    fn = { kind: 'user', name: '{closure}', decl, params: decl.params, statics: new Map() };
-    runtime.closureFunctions.set(decl, fn);
-  }
-  return fn;
+  return { kind: 'user', name: '{closure}', decl, params: decl.params, statics: new Map() };
 }
+
+export function copyClosureData(data: ClosureData): ClosureData {
+  return {
+    ...data,
+    bound: copyClosureRefs(data.bound),
+    fn:
+      data.fn.kind === 'user' && data.fn.decl.isClosure
+        ? { ...data.fn, statics: copyClosureRefs(data.fn.statics) }
+        : data.fn,
+  };
+}
+
+const copyClosureRefs = (refs: Map<string, Ref>): Map<string, Ref> =>
+  new Map(
+    [...refs].map(([name, ref]) => {
+      if (ref.isRef && ref.rc > 1) {
+        ref.rc++;
+        return [name, ref];
+      }
+      return [name, new Ref(share(ref.v))];
+    })
+  );
 
 export function isObject(value: Value): value is PhpObject {
   return value instanceof PhpObject;

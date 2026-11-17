@@ -1,6 +1,7 @@
 // code-gauge-allow-file fileNcss 710 -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import type { ClassDecl, Expr, FunctionDecl, MethodDeclAst, PropertyDeclAst } from './ast';
+import builtinNames from './builtinNames.json';
 import { lower } from './bytes';
 import { type ArgValue, invoke } from './calls';
 import { debugType, normalizeKeyString, toBool, valueName } from './conversions';
@@ -8,6 +9,7 @@ import { deprecated, notice, throwError, warn } from './errors';
 import { share } from './places';
 import { FatalError, rt, SCRIPT_PATH } from './runtime';
 import { coerce, describeType, NO_MATCH, typeToString } from './types';
+import { UnsupportedFeatureError } from './unsupported';
 import {
   type Callable,
   type ClassConst,
@@ -42,7 +44,11 @@ export function findClass(name: string): PhpClass | undefined {
 
 export function requireClass(name: string): PhpClass {
   const cls = findClass(name);
-  if (!cls) throwError('Error', `Class "${name}" not found`);
+  if (!cls) {
+    if (builtinNames.classes.some((builtin) => lower(builtin) === lower(name)))
+      throw new UnsupportedFeatureError(`PHP の組み込みクラス（${name}）`);
+    throwError('Error', `Class "${name}" not found`);
+  }
   return cls;
 }
 
@@ -870,6 +876,25 @@ export function propRef(object: PhpObject, name: string, scope: PhpClass | undef
   if (decl?.type && !decl.isStatic) ref.typedBy = [{ decl, object }];
   object.props.set(key, ref);
   return ref;
+}
+
+export function bindPropertyReference(object: PhpObject, name: string, ref: Ref, scope: PhpClass | undefined): void {
+  const decl = lookupProp(object.cls, name, scope);
+  if (decl && !decl.isStatic) {
+    if (!canAccessProp(decl, scope))
+      throwError('Error', `Cannot access ${decl.visibility} property ${object.cls.name}::$${name}`);
+    if (decl.isReadonly) throwError('Error', `Cannot indirectly modify readonly property ${decl.cls.name}::$${name}`);
+    checkIndirectModification(object, name, scope);
+    if (decl.type) attachPropertyReference(ref, decl, object);
+  } else if (!object.props.has(name)) createDynamicProp(object, name);
+  const key = decl && !decl.isStatic ? decl.key : name;
+  const old = object.props.get(key);
+  if (old === ref) return;
+  if (old instanceof Ref) old.rc--;
+  ref.isRef = true;
+  ref.rc++;
+  object.props.set(key, ref);
+  dropped(old);
 }
 
 export function attachPropertyReference(ref: Ref, decl: PropDecl, object?: PhpObject): void {

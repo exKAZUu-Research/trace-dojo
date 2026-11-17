@@ -2,9 +2,9 @@
 import { callMethod } from './callables';
 import { declForKey, propNameOf } from './classes';
 import { formatFloat, formatFloatRepr } from './conversions';
-import { warn } from './errors';
+import { deprecated, warn } from './errors';
 import { toStr } from './operators';
-import { rt } from './runtime';
+import { FatalError, rt } from './runtime';
 import { describeType } from './types';
 import { type ClosureData, isClosure, PhpArray, PhpObject, Ref, type Slot, UNINIT, type Value } from './values';
 
@@ -13,6 +13,11 @@ import { type ClosureData, isClosure, PhpArray, PhpObject, Ref, type Slot, UNINI
 function debugEntries(object: PhpObject): [string | bigint, Slot, string][] {
   if (object.cls.findMethod('__debuginfo')) {
     const info = callMethod(object, '__debugInfo', []);
+    if (info === null) {
+      deprecated(`Returning null from ${object.cls.name}::__debugInfo() is deprecated, return an empty array instead`);
+      return [];
+    }
+    if (!(info instanceof PhpArray)) throw new FatalError('__debuginfo() must return an array', rt().row);
     if (info instanceof PhpArray)
       return [...info.entries()].map(([key, value]) => [key, value, typeof key === 'string' ? `"${key}"` : `${key}`]);
   }

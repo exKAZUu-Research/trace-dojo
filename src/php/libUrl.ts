@@ -97,7 +97,12 @@ defineFunction(
       length: 0,
     };
     buildQuery(query, data as PhpArray | PhpObject, undefined);
-    return query.parts.join(args[2] === undefined || args[2] === null ? '&' : s(args[2]));
+    const separator = args[2] === undefined || args[2] === null ? '&' : s(args[2]);
+    const length =
+      query.parts.reduce((sum, part) => sum + part.length, 0) + Math.max(0, query.parts.length - 1) * separator.length;
+    rt().ensureStringFits(length);
+    rt().spend(Math.ceil(length / 64));
+    return query.parts.join(separator);
   }
 );
 

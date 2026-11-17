@@ -1,7 +1,7 @@
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import { TURTLE_METHOD_NAMES, type TurtleState } from '../interpreter/turtleWorld';
 import { callTargetOf, closureFromCallable, closureTarget } from './callables';
-import { invoke } from './calls';
+import { copyClosureData, invoke } from './calls';
 import { requireClass } from './classes';
 import { debugType } from './conversions';
 import { throwError } from './errors';
@@ -89,8 +89,7 @@ function bindClosure(closure: PhpObject, newThis: Value, newScope: Value | undef
   const runtime = rt();
   const bound = runtime.newObject(closure.cls);
   bound.internal = {
-    ...data,
-    bound: new Map(data.bound),
+    ...copyClosureData(data),
     thisObj: newThis instanceof PhpObject ? newThis : undefined,
     scope,
     calledClass: newThis instanceof PhpObject ? newThis.cls : scope,
