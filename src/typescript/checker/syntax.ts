@@ -74,6 +74,21 @@ export function arrayPatternElements(pattern: TreeNode): { element: TreeNode; in
   return elements;
 }
 
+/**
+ * How an assignment changes a node, as tsc's `getAssignmentTargetKind` tells: an update or an arithmetic compound
+ * assignment reads it first, while `=` and the logical assignments count as assigning it outright.
+ */
+export function assignmentKind(node: TreeNode): 'definite' | 'compound' | undefined {
+  let target = node;
+  while (target.parent?.type === 'parenthesized_expression') target = target.parent;
+  const { parent } = target;
+  if (parent?.type === 'update_expression') return 'compound';
+  if (parent?.childForFieldName('left')?.id !== target.id) return undefined;
+  if (parent.type === 'assignment_expression') return 'definite';
+  if (parent.type !== 'augmented_assignment_expression') return undefined;
+  return ['&&=', '||=', '??='].includes(parent.childForFieldName('operator')?.text ?? '') ? 'definite' : 'compound';
+}
+
 /** The expression inside parentheses. */
 export function skipParentheses(node: TreeNode): TreeNode {
   let current = node;

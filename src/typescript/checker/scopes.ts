@@ -25,6 +25,8 @@ export class Sym {
   classInfo?: ClassInfo;
   /** Whether the program assigns the variable anywhere but its declaration. */
   isReassigned = false;
+  /** Whether the program assigns the variable anywhere with `=`, a logical assignment, or a destructuring or `for` head. */
+  isDefinitelyAssigned = false;
   /** Where the program assigns the variable, by source offset, which decides whether a closure keeps its narrowing. */
   readonly assignmentOffsets: number[] = [];
   /** Whether a nested function uses this variable, whose type then cannot always be followed. */

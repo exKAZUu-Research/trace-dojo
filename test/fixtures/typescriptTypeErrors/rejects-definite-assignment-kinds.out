@@ -1,0 +1,12 @@
+(2,48): error TS2454: Variable 'x' is used before being assigned.
+(2,51): error TS2454: Variable 'x' is used before being assigned.
+(9,54): error TS2454: Variable 'x' is used before being assigned.
+(9,74): error TS2454: Variable 'x' is used before being assigned.
+(10,32): error TS2454: Variable 'x' is used before being assigned.
+(10,53): error TS2454: Variable 'x' is used before being assigned.
+(14,55): error TS2454: Variable 'x' is used before being assigned.
+(15,55): error TS2454: Variable 'x' is used before being assigned.
+(19,7): error TS2454: Variable 'x' is used before being assigned.
+(22,10): error TS2454: Variable 'x' is used before being assigned.
+(27,9): error TS2454: Variable 'x' is used before being assigned.
+(30,12): error TS2454: Variable 'x' is used before being assigned.

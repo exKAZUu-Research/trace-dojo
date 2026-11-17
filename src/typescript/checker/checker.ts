@@ -23,6 +23,7 @@ import { Relations } from './relations';
 import type { Scope } from './scopes';
 import { Signatures } from './signatures';
 import { StatementChecker } from './statements';
+import { assignmentKind } from './syntax';
 import { TypeNodes } from './typeNodes';
 import { TypeOperators } from './typeOperators';
 import {
@@ -107,6 +108,7 @@ export class Checker {
       const symbol = this.binder.scopeOf(identifier).lookupValue(identifier.text);
       if (symbol) {
         symbol.isReassigned = true;
+        symbol.isDefinitelyAssigned ||= assignmentKind(identifier) !== 'compound';
         symbol.assignmentOffsets.push(identifier.startIndex);
       }
     }

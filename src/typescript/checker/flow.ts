@@ -242,9 +242,11 @@ export class Flow {
     // A value of a type parameter constrained to a union also narrows the constraint, which reading its members uses.
     const declaredConstraint = current.kind === 'typeParameter' ? this.c.constraintOf(current) : undefined;
     const constraint = entry?.constraint ?? (declaredConstraint?.kind === 'union' ? declaredConstraint : undefined);
+    const assigned = entry ? entry.assigned : !this.c.expressions.readsNeverInitialized(node);
     this.current.entries.set(key, {
       type: narrow(current),
-      assigned: entry?.assigned ?? true,
+      // A check that rules out `undefined` shows that the variable was assigned, as it narrows away tsc's `undefined`.
+      assigned: assigned || !this.c.relations.isAssignable(undefinedType, narrow(unionOf([current, undefinedType]))),
       evolving: entry?.evolving,
       constraint: constraint && narrow(constraint),
     });

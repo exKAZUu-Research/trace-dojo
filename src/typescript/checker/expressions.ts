@@ -11,6 +11,7 @@ import type { FlowEntry } from './flow';
 import type { Sym } from './scopes';
 import {
   arrayLiteralLength,
+  assignmentKind,
   hasToken,
   isImmediatelyInvoked,
   isNumericName,
@@ -234,9 +235,33 @@ export class ExpressionChecker {
     const key = `s${symbol.id}`;
     this.c.flow.declaredTypes.set(key, declared);
     const entry = this.c.flow.entry(key);
-    // A nested function narrows a variable of an enclosing one from the type it sees, never checking its assignment.
-    if (this.isOuterVariable(node, symbol)) return entry?.type ?? this.closureVariableType(node, symbol, declared);
+    if (this.isOuterVariable(node, symbol)) {
+      // A nested function checks the assignment of a variable of an enclosing one only when nothing ever assigns it.
+      if (this.isNeverInitialized(symbol))
+        return this.flowVariableType(node, symbol, entry ?? { type: declared, assigned: false }, declared);
+      return entry?.type ?? this.closureVariableType(node, symbol, declared);
+    }
     return entry ? this.flowVariableType(node, symbol, entry, declared) : declared;
+  }
+
+  /** Whether a reference reads a variable that {@link isNeverInitialized} holds for. */
+  readsNeverInitialized(node: TreeNode): boolean {
+    const symbol = node.type === 'identifier' ? this.c.scopeOf(node).lookupValue(node.text) : undefined;
+    return symbol !== undefined && this.isNeverInitialized(symbol);
+  }
+
+  /** Whether a `let` of a function or block is declared without a value or `!` and never definitely assigned. */
+  private isNeverInitialized(symbol: Sym): boolean {
+    const declaration = symbol.valueDeclaration;
+    return (
+      symbol.valueKind === 'let' &&
+      symbol.scope !== this.c.binder.moduleScope &&
+      !symbol.isDefinitelyAssigned &&
+      declaration?.type === 'variable_declarator' &&
+      declaration.childForFieldName('name')?.type === 'identifier' &&
+      !declaration.childForFieldName('value') &&
+      !hasToken(declaration, '!')
+    );
   }
 
   private reportUnavailableValue(node: TreeNode, symbol: Sym): boolean {
@@ -261,7 +286,8 @@ export class ExpressionChecker {
     if (
       !entry.assigned &&
       (unassignedAuto || this.needsDefiniteAssignment(symbol, declared)) &&
-      !this.isAssignmentTarget(node)
+      assignmentKind(node) !== 'definite' &&
+      node.parent?.type !== 'non_null_expression'
     ) {
       this.c.error(node, `変数 ${symbol.name} は値を代入する前に使われています。`);
       if (unassignedAuto) return errorType;
