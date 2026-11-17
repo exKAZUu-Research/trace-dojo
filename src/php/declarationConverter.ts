@@ -1,8 +1,18 @@
-// code-gauge-allow-file fileNcss 466 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 565 -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import type { Node } from '@willbooster/web-tree-sitter';
 
-import type { ClassDecl, Expr, FunctionDecl, MethodDeclAst, ParamDecl, PropertyDeclAst, Stmt, TraitRule } from './ast';
+import type {
+  ClassDecl,
+  ClassRef,
+  Expr,
+  FunctionDecl,
+  MethodDeclAst,
+  ParamDecl,
+  PropertyDeclAst,
+  Stmt,
+  TraitRule,
+} from './ast';
 import { lower } from './bytes';
 import { BUILTIN_TYPES, ConverterBase } from './converterBase';
 import { SCRIPT_PATH } from './runtime';
@@ -275,18 +285,105 @@ export abstract class DeclarationConverter extends ConverterBase {
   }
 
   protected constantExpr(node: Node, allowNew = false): Expr {
-    const invalid = (child: Node): boolean =>
-      [
-        'variable_name',
-        'dynamic_variable_name',
-        'function_call_expression',
-        'anonymous_function',
-        'arrow_function',
-      ].includes(child.type) ||
-      (!allowNew && child.type === 'object_creation_expression') ||
-      child.namedChildren.some(invalid);
-    if (invalid(node)) this.error(node, 'Constant expression contains invalid operations');
-    return this.expr(node);
+    const expression = this.expr(node);
+    this.checkConstantExpr(expression, allowNew);
+    return expression;
+  }
+
+  private checkConstantExpr(expression: Expr, allowNew: boolean): void {
+    const check = (value: Expr): void => this.checkConstantExpr(value, allowNew);
+    const invalid = (): never => this.error(expression.row, 'Constant expression contains invalid operations');
+    const className = (cls: ClassRef, suffix = ''): void => {
+      if (cls.k === 'static') {
+        const message =
+          suffix === 'class'
+            ? 'static::class cannot be used for compile-time class name resolution'
+            : suffix
+              ? '"static::" is not allowed in compile-time constants'
+              : '"static" is not allowed in compile-time constants';
+        this.error(expression.row, message);
+      }
+      if (cls.k === 'expr') invalid();
+    };
+    switch (expression.k) {
+      case 'lit':
+      case 'const':
+      case 'magic': {
+        return;
+      }
+      case 'interp': {
+        for (const part of expression.parts) if (typeof part !== 'string') check(part);
+        return;
+      }
+      case 'array': {
+        for (const item of expression.items) {
+          if (item.byRef) invalid();
+          if (item.key) check(item.key);
+          check(item.value);
+        }
+        return;
+      }
+      case 'idx': {
+        check(expression.base);
+        if (!expression.index) return invalid();
+        check(expression.index);
+        return;
+      }
+      case 'bin': {
+        check(expression.l);
+        check(expression.r);
+        return;
+      }
+      case 'unary': {
+        if (!['+', '-', '~', '!'].includes(expression.op)) invalid();
+        check(expression.e);
+        return;
+      }
+      case 'cast': {
+        if (expression.type === 'object') invalid();
+        check(expression.e);
+        return;
+      }
+      case 'cond': {
+        check(expression.test);
+        if (expression.consequent) check(expression.consequent);
+        check(expression.alternate);
+        return;
+      }
+      case 'cconst': {
+        className(expression.cls, expression.name);
+        return;
+      }
+      case 'call': {
+        if (!expression.fcc || 'k' in expression.fn) invalid();
+        return;
+      }
+      case 'scall': {
+        if (!expression.fcc || typeof expression.name !== 'string') return invalid();
+        className(expression.cls, expression.name);
+        return;
+      }
+      case 'new': {
+        if (!allowNew) invalid();
+        className(expression.cls);
+        for (const arg of expression.args) {
+          if (arg.spread) this.error(expression.row, 'Argument unpacking in constant expressions is not supported');
+          check(arg.e);
+        }
+        return;
+      }
+      case 'newAnon': {
+        this.error(expression.row, 'Cannot use anonymous class in constant expression');
+      }
+      case 'closure': {
+        if (!expression.isStatic) this.error(expression.row, 'Closures in constant expressions must be static');
+        if (expression.uses.length > 0) this.error(expression.row, 'Cannot use(...) variables in constant expression');
+        return;
+      }
+      default: {
+        invalid();
+      }
+    }
   }
 
   /** Rejects a literal default value the parameter's type can never hold, as PHP does at compile time. */
@@ -555,7 +652,7 @@ export abstract class DeclarationConverter extends ConverterBase {
     }
   }
 
-  // code-gauge-allow functionNcss 34 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+  // code-gauge-allow functionNcss 36 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
   protected properties(member: Node, decl: ClassDecl, kind: ClassDecl['kind']): void {
     const attributes = member.childForFieldName('attributes');
     if (attributes) this.unsupported(attributes, '属性（#[...]）');
@@ -613,6 +710,7 @@ export abstract class DeclarationConverter extends ConverterBase {
         isAbstract: modifiers.isAbstract,
         isFinal: modifiers.isFinal,
       };
+      if (hookList && modifiers.isStatic) this.error(hookList, 'Cannot declare hooks for static property');
       if (modifiers.isAbstract && !hookList) this.error(member, 'Only hooked properties may be declared abstract');
       if (modifiers.isAbstract && hookList && !hookList.namedChildren.some((hook) => !hook.childForFieldName('body')))
         this.error(member, `Abstract property ${decl.name}::$${name} must specify at least one abstract hook`);
@@ -621,26 +719,59 @@ export abstract class DeclarationConverter extends ConverterBase {
     }
   }
 
-  // code-gauge-allow functionNcss 49 -- Checks PHP's rules on the modifiers and parts of each declaration.
   protected hooks(list: Node, prop: PropertyDeclAst, className: string): void {
+    const declarations = list.namedChildren.filter((child) => child.type === 'property_hook');
+    for (const hook of declarations) {
+      const kind = lower(hook.namedChildren.find((child) => child.type === 'name')?.text ?? '');
+      const parameters = hook.childForFieldName('parameters');
+      if (kind === 'get' && parameters)
+        this.error(hook, `get hook of property ${className}::$${prop.name} must not have a parameter list`);
+      if (
+        kind === 'set' &&
+        parameters &&
+        parameters.namedChildren.filter((child) => child.type !== 'comment').length !== 1
+      )
+        this.error(hook, `set hook of property ${className}::$${prop.name} must accept exactly one parameters`);
+    }
     const hooks: NonNullable<PropertyDeclAst['hooks']> = {};
     let referencesBacking = false;
-    for (const hook of list.namedChildren.filter((child) => child.type === 'property_hook')) {
+    for (const hook of declarations) {
       const attributes = hook.childForFieldName('attributes');
       if (attributes) this.unsupported(attributes, '属性（#[...]）');
       const kind = lower(hook.namedChildren.find((child) => child.type === 'name')?.text ?? '');
       const body = hook.childForFieldName('body');
       const paramsNode = hook.childForFieldName('parameters');
       const outerFn = this.fn;
-      this.fn = { isGenerator: false, labels: new Set(), gotos: [], className, isMethod: true };
+      const byRefReturn = hook.childForFieldName('reference_modifier') !== null;
+      if (kind === 'set' && byRefReturn)
+        this.notices.push({
+          level: 'Deprecated',
+          message: `${className}::$${prop.name}::set(): Returning by reference from a void function is deprecated`,
+          row: hook.startPosition.row,
+        });
+      this.fn = {
+        isGenerator: false,
+        labels: new Set(),
+        gotos: [],
+        className,
+        isMethod: true,
+        returnType: kind === 'set' ? { k: 'named', name: 'void' } : undefined,
+      };
       try {
         let params: ParamDecl[] = [];
         if (paramsNode) params = this.params(paramsNode, `$${prop.name}::${kind}`, className);
-        if (kind === 'set' && params.some((param) => param.defaultExpr !== undefined))
-          this.error(
-            hook,
-            `Parameter $${params[0].name} of set hook ${className}::$${prop.name} must not have a default value`
-          );
+        if (kind === 'set' && params[0]) {
+          const param = params[0];
+          const prohibited = param.byRef
+            ? 'be pass-by-reference'
+            : param.variadic
+              ? 'be variadic'
+              : param.defaultExpr !== undefined
+                ? 'have a default value'
+                : undefined;
+          if (prohibited)
+            this.error(hook, `Parameter $${param.name} of set hook ${className}::$${prop.name} must not ${prohibited}`);
+        }
         if (
           kind === 'set' &&
           paramsNode &&
@@ -702,7 +833,7 @@ export abstract class DeclarationConverter extends ConverterBase {
           params,
           body: statements,
           arrowBody,
-          byRefReturn: false,
+          byRefReturn,
           row: hook.startPosition.row,
           endRow: hook.endPosition.row,
           isAtomic: false,

@@ -1,5 +1,5 @@
 // oxlint-disable unicorn/prefer-code-point -- PHP pattern strings contain bytes; UTF-8 validation reads each byte separately.
-// code-gauge-allow-file fileNcss 734 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 740 -- Holds the cases of one concern of the interpreter, which share their helpers.
 import { dec, enc, utf8Length } from './bytes';
 import { analyzeRegex } from './regexAnalysis';
 import { rt } from './runtime';
@@ -59,6 +59,7 @@ const MODIFIERS = new Map<string, PatternOption | undefined>([
 ]);
 
 export function translate(pattern: string): Compiled {
+  if (pattern.length > 32_768) throw new UnsupportedFeatureError('大きすぎる正規表現');
   const { body, modifiers } = splitDelimiters(pattern);
   const options: PatternOptions = {
     caseless: false,
@@ -82,8 +83,10 @@ export function translate(pattern: string): Compiled {
   }
   const offsetBase = leadingFlags?.[0].length ?? 0;
   const layout = new PatternConverter(source, options, offsetBase).layout();
+  if (layout.names.length > 256) throw new UnsupportedFeatureError('キャプチャが多すぎる正規表現');
   const converter = new PatternConverter(source, options, offsetBase, layout);
   const converted = converter.convert();
+  if (converted.length > 65_536) throw new UnsupportedFeatureError('大きすぎる正規表現');
   const flags = `d${options.caseless ? 'i' : ''}${converter.unicode ? 'u' : ''}`;
   const byteCaselessReferences = analyzeRegex(converted, converter.unicode, options.utf8, options.caseless);
   return {

@@ -1,0 +1,4 @@
+
+Fatal error: Type of parameter $named of hook U2::$a::set must be compatible with property type in /main.php on line 4
+Stack trace:
+#0 {main}

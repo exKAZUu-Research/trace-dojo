@@ -1,5 +1,5 @@
 import { warn } from './errors';
-import { exactDecimal, significantDigits } from './strings';
+import { trimmedSignificantDigits } from './strings';
 import { INT_MAX, INT_MIN, type Key, PhpArray, type PhpObject, type Value } from './values';
 
 /** Formats a float as PHP's `echo` does, with 14 significant digits (`precision=14`). */
@@ -7,7 +7,7 @@ export function formatFloat(value: number, precision = 14): string {
   if (Number.isNaN(value)) return 'NAN';
   if (!Number.isFinite(value)) return value > 0 ? 'INF' : '-INF';
   if (value === 0) return Object.is(value, -0) ? '-0' : '0';
-  const [digits, exponent] = decimalDigits(value, precision);
+  const { digits, exponent } = trimmedSignificantDigits(value, precision);
   return layoutDigits(value < 0, digits, exponent + 1, precision, 'E', false);
 }
 
@@ -20,14 +20,6 @@ export function formatFloatRepr(value: number, exponentChar = 'E', zeroFraction 
   const text = layoutDigits(value < 0, digits, exponent + 1, 17, exponentChar, true);
   if (zeroFraction && !/[.eEN]/.test(text)) return `${text}.0`;
   return text;
-}
-
-/** The significant digits of `|value|` rounded to `precision`, without trailing zeros, and the decimal exponent. */
-function decimalDigits(value: number, precision: number): [string, number] {
-  const { digits, exponent } = significantDigits(value, precision);
-  const original = exactDecimal(value).digits.replace(/^0+/, '');
-  const tie = /^50*$/.test(original.slice(precision)) && digits === original.slice(0, precision);
-  return [tie ? digits : digits.replace(/0+$/, '') || '0', exponent];
 }
 
 function shortestDigits(value: number): [string, number] {

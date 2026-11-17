@@ -85,6 +85,36 @@ export function fixedDigits(value: number, precision: number): string {
   return precision > 0 ? `${integer}.${fraction}` : integer;
 }
 
+/** Formats a float as printf's `%g` does, through `php_gcvt`. */
+export function generalText(value: number, precision: number, upper: boolean): string {
+  const count = precision === 0 ? 1 : precision;
+  if (value === 0) return '0';
+  const { digits, exponent } = trimmedSignificantDigits(value, count);
+  const decpt = exponent + 1;
+  if (decpt < -3 || decpt > count) {
+    const mantissa = digits.length > 1 ? `${digits[0]}.${digits.slice(1)}` : `${digits}.0`;
+    return `${mantissa}${upper ? 'E' : 'e'}${exponent < 0 ? '-' : '+'}${Math.abs(exponent)}`;
+  }
+  if (decpt <= 0) return `0.${'0'.repeat(-decpt)}${digits}`;
+  if (digits.length <= decpt) return digits + '0'.repeat(decpt - digits.length);
+  return `${digits.slice(0, decpt)}.${digits.slice(decpt)}`;
+}
+
+/** Formats a float as printf's `%e` does: `1.234568e+4`, with at least one exponent digit. */
+export function exponentialText(value: number, precision: number, upper: boolean): string {
+  const { digits, exponent } = significantDigits(value, precision + 1);
+  const mantissa = precision > 0 ? `${digits[0]}.${digits.slice(1)}` : digits[0];
+  return `${mantissa}${upper ? 'E' : 'e'}${exponent < 0 ? '-' : '+'}${Math.abs(exponent)}`;
+}
+
+export function trimmedSignificantDigits(value: number, count: number): { digits: string; exponent: number } {
+  const { digits: raw, exponent } = significantDigits(value, count);
+  const original = exactDecimal(value).digits.replace(/^0+/, '');
+  const smallIntegerTie =
+    Number.isInteger(value) && exponent < 15 && /^50*$/.test(original.slice(count)) && raw === original.slice(0, count);
+  return { digits: smallIntegerTie ? raw : raw.replace(/0+$/, '') || '0', exponent };
+}
+
 /** The first `count` significant digits of `|value|` rounded half to even, and its decimal exponent. */
 export function significantDigits(value: number, count: number): { digits: string; exponent: number } {
   if (value === 0) return { digits: '0'.repeat(count), exponent: 0 };
@@ -95,31 +125,6 @@ export function significantDigits(value: number, count: number): { digits: strin
   const { digits: rounded, carried } = roundDigits(significant, count);
   if (carried) return { digits: rounded.slice(0, count), exponent: exponent + 1 };
   return { digits: rounded, exponent };
-}
-
-/** Formats a float as printf's `%e` does: `1.234568e+4`, with at least one exponent digit. */
-export function exponentialText(value: number, precision: number, upper: boolean): string {
-  const { digits, exponent } = significantDigits(value, precision + 1);
-  const mantissa = precision > 0 ? `${digits[0]}.${digits.slice(1)}` : digits[0];
-  return `${mantissa}${upper ? 'E' : 'e'}${exponent < 0 ? '-' : '+'}${Math.abs(exponent)}`;
-}
-
-/** Formats a float as printf's `%g` does, through `php_gcvt`. */
-export function generalText(value: number, precision: number, upper: boolean): string {
-  const count = precision === 0 ? 1 : precision;
-  if (value === 0) return '0';
-  const { digits: raw, exponent } = significantDigits(value, count);
-  const original = exactDecimal(value).digits.replace(/^0+/, '');
-  const tie = /^50*$/.test(original.slice(count)) && raw === original.slice(0, count);
-  const digits = tie ? raw : raw.replace(/0+$/, '') || '0';
-  const decpt = exponent + 1;
-  if (decpt < -3 || decpt > count) {
-    const mantissa = digits.length > 1 ? `${digits[0]}.${digits.slice(1)}` : `${digits}.0`;
-    return `${mantissa}${upper ? 'E' : 'e'}${exponent < 0 ? '-' : '+'}${Math.abs(exponent)}`;
-  }
-  if (decpt <= 0) return `0.${'0'.repeat(-decpt)}${digits}`;
-  if (digits.length <= decpt) return digits + '0'.repeat(decpt - digits.length);
-  return `${digits.slice(0, decpt)}.${digits.slice(decpt)}`;
 }
 
 const POWERS_OF_TEN = Array.from({ length: 23 }, (_, index) => Number(`1e${index}`));

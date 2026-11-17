@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 527 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 536 -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import type { Expr, ListItem } from './ast';
 import { callMethod } from './callables';
@@ -136,6 +136,8 @@ function writtenObject(e: Expr): Value {
   return e.k === 'var' ? evQuiet(e) : ev(e);
 }
 
+// code-gauge-allow functionNcss 32 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+// code-gauge-allow functionCognitiveComplexity 23 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 function propPlace(object: PhpObject, name: string): Place {
   const scope = rt().frame.scope;
   return {
@@ -161,6 +163,19 @@ function propPlace(object: PhpObject, name: string): Place {
       warn(`Undefined property: ${object.cls.name}::$${name}`);
     },
     nested() {
+      const decl = classesModule.lookupProp(object.cls, name, scope);
+      if (decl?.hooks?.get && !object.guards?.has(`hook:${name}`)) {
+        classesModule.checkIndirectModification(object, name, scope);
+        const runtime = rt();
+        runtime.lastReturnRef = undefined;
+        const value = readProp(object, name, scope, true);
+        const returned = runtime.lastReturnRef;
+        runtime.lastReturnRef = undefined;
+        if (returned) return new RefPlace(returned);
+        if (!(value instanceof PhpObject))
+          throwError('Error', `Indirect modification of ${decl.cls.name}::$${name} is not allowed`);
+        return new RefPlace(new Ref(value));
+      }
       if (!issetPropExists(object, name, scope) && object.cls.findMethod('__get')) {
         return new RefPlace(propRef(object, name, scope));
       }
@@ -594,7 +609,7 @@ export function unsetTarget(target: Expr): void {
 /** The container an unset of an element writes into, or undefined when it does not exist. */
 function unsetContainer(e: Expr): PhpArray | PhpObject | string | undefined {
   const place = unsetPlace(e);
-  const value = e.k === 'prop' && place?.getForIsset ? place.getForIsset() : place?.get();
+  const value = place?.get();
   if (value === undefined && e.k !== 'idx') warnUndefinedBase(e);
   if (value instanceof PhpArray) return writableContainer(place as Place, value) as PhpArray;
   if (value instanceof PhpObject || typeof value === 'string') return value;

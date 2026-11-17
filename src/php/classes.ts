@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 795 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 810 -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import type { ClassDecl, Expr, FunctionDecl, MethodDeclAst, PropertyDeclAst } from './ast';
 import builtinNames from './builtinNames.json';
@@ -250,7 +250,7 @@ function addProperty(cls: PhpClass, ast: PropertyDeclAst): void {
     const setterType = ast.hooks.set?.params[0]?.type;
     if (ast.type && setterType && !isSubtype(ast.type, cls, setterType, cls))
       throw new FatalError(
-        `Type of parameter of hook ${cls.name}::$${ast.name}::set must be compatible with property type`,
+        `Type of parameter $${ast.hooks.set?.params[0]?.name} of hook ${cls.name}::$${ast.name}::set must be compatible with property type`,
         ast.row
       );
     decl.hooks = {
@@ -385,16 +385,31 @@ function copyFunction(fn: Callable): Callable {
   return { ...fn, statics: new Map() };
 }
 
-// code-gauge-allow functionNcss 31 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+// code-gauge-allow functionNcss 44 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 function checkInheritance(cls: PhpClass, row: number): void {
-  for (const parentMethod of cls.parent?.methods.values() ?? []) {
+  const ancestors: PhpClass[] = [];
+  for (let parent = cls.parent; parent; parent = parent.parent) ancestors.push(parent);
+  const inherited = new Map<string, Method>();
+  for (const parent of ancestors.toReversed()) {
+    for (const method of parent.methods.values()) inherited.set(method.lname, method);
+  }
+  const checked = new Set<string>();
+  for (const parentMethod of inherited.values()) {
     const method = cls.methods.get(parentMethod.lname);
-    if (method && parentMethod.visibility !== 'private') checkOverride(cls, method, parentMethod);
+    if (method && parentMethod.visibility !== 'private') {
+      checkOverride(cls, method, parentMethod);
+      checked.add(method.lname);
+    }
   }
   for (const iface of cls.interfaces) {
     for (const ifaceMethod of iface.methods.values()) {
-      const method = cls.methods.get(ifaceMethod.lname);
-      if (method && ifaceMethod !== method) checkOverride(cls, method, ifaceMethod);
+      const own = cls.methods.get(ifaceMethod.lname);
+      if (!own && cls.parent?.interfaces.includes(iface)) continue;
+      const method = own ?? inherited.get(ifaceMethod.lname);
+      if (method && ifaceMethod !== method) {
+        checkOverride(cls, method, ifaceMethod, !checked.has(method.lname));
+        checked.add(method.lname);
+      }
     }
   }
   if (cls.kind !== 'class' || cls.isAbstract) return;
@@ -424,8 +439,8 @@ function checkInheritance(cls: PhpClass, row: number): void {
   }
 }
 
-// code-gauge-allow functionCognitiveComplexity 20 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
-function checkOverride(cls: PhpClass, method: Method, parent: Method): void {
+// code-gauge-allow functionCognitiveComplexity 21 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+function checkOverride(cls: PhpClass, method: Method, parent: Method, reportTentative = true): void {
   if (parent.isFinal && method.cls === cls && !parent.cls.decl?.isAnonymous) {
     throw new FatalError(
       `Cannot override final method ${parent.cls.name}::${parent.name}()`,
@@ -456,7 +471,7 @@ function checkOverride(cls: PhpClass, method: Method, parent: Method): void {
       row
     );
   }
-  if (tentative) {
+  if (tentative && reportTentative) {
     const expected = returnTypeOf(parent.fn);
     const actual = returnTypeOf(method.fn);
     if (expected && (!actual || !isSubtype(actual, method.cls, expected, parent.cls))) {
@@ -506,7 +521,7 @@ function returnTypeOf(fn: Callable): TypeDecl | undefined {
   return fn.kind === 'user' ? fn.decl.returnType : fn.returnType;
 }
 
-// code-gauge-allow functionCognitiveComplexity 17 -- Follows PHP's class linking and property access rules in their order of checks.
+// code-gauge-allow functionCognitiveComplexity 19 -- Follows PHP's class linking and property access rules in their order of checks.
 function signatureText(method: Method): string {
   const fn = method.fn;
   const params = fn.params
@@ -525,7 +540,7 @@ function signatureText(method: Method): string {
     })
     .join(', ');
   const returnType = fn.kind === 'user' ? fn.decl.returnType : fn.returnType;
-  return `${method.scope.name}::${method.name}(${params})${returnType ? `: ${typeToString(returnType)}` : ''}`;
+  return `${fn.kind === 'user' && fn.decl.byRefReturn ? '& ' : ''}${method.scope.name}::${method.name}(${params})${returnType ? `: ${typeToString(returnType)}` : ''}`;
 }
 
 function defaultText(e: Expr): string {
@@ -976,7 +991,8 @@ function checkReferenceValue(ref: Ref, value: Value): Value {
   return coerced;
 }
 
-// code-gauge-allow functionCognitiveComplexity 18 -- Follows PHP's class linking and property access rules in their order of checks.
+// code-gauge-allow functionCognitiveComplexity 20 -- Follows PHP's class linking and property access rules in their order of checks.
+// code-gauge-allow functionNcss 32 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 export function unsetProp(object: PhpObject, name: string, scope: PhpClass | undefined): void {
   const decl = lookupProp(object.cls, name, scope);
   if (decl && !decl.isStatic) {
@@ -989,6 +1005,11 @@ export function unsetProp(object: PhpObject, name: string, scope: PhpClass | und
       throwError('Error', `Cannot access ${decl.visibility} property ${object.cls.name}::$${name}`);
     }
     if (decl.isReadonly) throwError('Error', `Cannot unset readonly property ${decl.cls.name}::$${name}`);
+    if (!canWriteProp(decl, scope))
+      throwError(
+        'Error',
+        `Cannot unset ${decl.setVisibility ?? decl.visibility}(set) property ${decl.cls.name}::$${name} from ${scopeText(scope)}`
+      );
     const slot = object.props.get(decl.key);
     if (slot instanceof Ref) slot.rc--;
     if (decl.type) object.props.set(decl.key, UNINIT);

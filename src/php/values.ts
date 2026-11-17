@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 445 -- Keeps one PHP runtime concern and its shared helpers in one module.
+// code-gauge-allow-file fileNcss 457 -- Keeps one PHP runtime concern and its shared helpers in one module.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import type { TurtleState } from '../interpreter/turtleWorld';
 import type { ClassDecl, FunctionDecl } from './ast';
@@ -14,7 +14,18 @@ export type Key = bigint | string;
 /** A variable or element slot that references share (`$a = &$b`). */
 export class Ref {
   /** How many variables, elements, and properties hold this slot, once it is a reference. */
-  rc = 1;
+  private holders = 1;
+  get rc(): number {
+    return this.holders;
+  }
+  set rc(count: number) {
+    const wasLive = this.holders > 0;
+    this.holders = count;
+    if (wasLive && count <= 0) {
+      if (this.value !== null && typeof this.value === 'object') owners.get(this.value)?.delete(this);
+      invalidateOwner(this);
+    } else if (!wasLive && count > 0) trackOwner(this.value, this);
+  }
   isRef = false;
   /** The typed property this reference was taken from, whose type every write through the reference must keep. */
   typedBy?: { decl: PropDecl; object?: PhpObject }[];

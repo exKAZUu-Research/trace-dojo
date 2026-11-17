@@ -420,9 +420,13 @@ test('compares long linked object structures without a fixed recursion cutoff', 
   ).toMatchObject({ kind: 'executed', stdout: 'bool(true)\n' });
 });
 
-test.each(['(a)+', '(b){2}'])('regex translation scales with repeated items: %s', (item) => {
+test.each([
+  ['(a)+', 20_000],
+  ['(b){2}', 20_000],
+  ['(a)', 300],
+])('regex translation bounds repeated items: %s x %i', (item, count) => {
   vi.restoreAllMocks();
-  expect(run(`<?php @preg_match('/'.str_repeat('${item}',20000).'/', '');echo 'done';`)).toMatchObject({
+  expect(run(`<?php @preg_match('/'.str_repeat('${item}',${count}).'/', '');echo 'done';`)).toMatchObject({
     kind: 'executed',
     uncaughtException: expect.stringContaining('この採点環境では使えません。'),
   });
@@ -488,5 +492,78 @@ test('title casing computes final sigma context without rescanning prefixes', ()
   expect(run('<?php echo strlen(mb_convert_case(str_repeat("Σ",50000),MB_CASE_TITLE));')).toMatchObject({
     kind: 'executed',
     stdout: '100000',
+  });
+});
+
+test.each([
+  [
+    'class A{final function f(){}}class B extends A{}class C extends B{function f(){}}',
+    'Cannot override final method A::f()',
+  ],
+  [
+    'class A{function f():int{return 1;}}class B extends A{}class C extends B{function f():string{return "x";}}',
+    'Declaration of C::f(): string must be compatible with A::f(): int',
+  ],
+])('checks inherited methods through intermediate classes: %s', (source, message) => {
+  const result = run(`<?php ${source} echo 'never';`);
+  expect(result.kind === 'executed' && result.stdout).toContain(message);
+  expect(result.kind === 'executed' && result.stdout).not.toContain('never');
+});
+
+test.each([
+  ['public static $a {set($v=1){}}', 'Cannot declare hooks for static property'],
+  ['public $a {get($i){return $i;}set($v=1){}}', 'get hook of property A::$a must not have a parameter list'],
+  ['public $a {set($v,$w=1){}}', 'set hook of property A::$a must accept exactly one parameters'],
+  ['public $a {set(&$v=1){}}', 'Parameter $v of set hook A::$a must not be pass-by-reference'],
+  ['public $a {set(...$v){}}', 'Parameter $v of set hook A::$a must not be variadic'],
+  ['public $a {get(){}}', 'get hook of property A::$a must not have a parameter list'],
+  ['public $a {set(){}}', 'set hook of property A::$a must accept exactly one parameters'],
+])('validates hook declarations before defaults and bodies: %s', (property, message) => {
+  expect(run(`<?php class A{${property}} echo 'never';`)).toMatchObject({
+    kind: 'compileError',
+    diagnostics: [{ message }],
+  });
+});
+
+test.each([
+  'K::m()',
+  'G instanceof P',
+  'print 1',
+  'clone G',
+  'match(G){default=>1}',
+  'throw new Exception',
+  'new class{}',
+  'new static',
+  'new P(...[1])',
+  'static::X',
+  'static::class',
+  'static fn()=>1',
+  'function(){}',
+  'static function()use($x){}',
+])('rejects executable operations in constant declarations and defaults: %s', (expression) => {
+  const declarations = [`const X=${expression};`, `function f($x=${expression}){}`];
+  for (const declaration of declarations) {
+    expect(run(`<?php class P{}class K{static function m(){}}const G=5;${declaration} echo 'never';`).kind).toBe(
+      'compileError'
+    );
+  }
+});
+
+test.each(['$k', '$k[0]'])(
+  'retiring argument references keeps repeated object-returning calls bounded: %s',
+  (argument) => {
+    vi.restoreAllMocks();
+    expect(
+      run(
+        `<?php class N{function __destruct(){echo 'end';}}function f($o){return $o;}$k=${argument === '$k' ? 'new N' : '[new N]'};for($i=0;$i<8000;$i++)$r=f(${argument});echo 'done';`
+      )
+    ).toMatchObject({ kind: 'executed', stdout: 'doneend' });
+  }
+);
+
+test('keeps ordinary patterns within the supported capture envelope', () => {
+  expect(run("<?php var_dump(preg_match('/'.str_repeat('(a)',255).'/',str_repeat('a',255)));")).toMatchObject({
+    kind: 'executed',
+    stdout: 'int(1)\n',
   });
 });
