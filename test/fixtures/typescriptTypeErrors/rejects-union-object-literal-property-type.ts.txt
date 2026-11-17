@@ -1,0 +1,24 @@
+type Base = { a: number } | { a: number; b: number };
+function take(x: Base) { return x; }
+take({ a: 2, b: true });
+const wrong: Base = { a: 2, b: "s" };
+const right: Base = { a: 1, b: 2 };
+type Opt = { a: number } | { a: number; b?: string };
+const optOk: Opt = { a: 1, b: undefined };
+const optBad: Opt = { a: 1, b: 3 };
+type Dict = { a: number } | { [key: string]: number };
+const dictOk: Dict = { a: 1, z: 2 };
+const dictBad: Dict = { a: 1, z: "s" };
+type Nested = { a: number } | { a: number; b: { x: number } };
+const nestedBad: Nested = { a: 1, b: { x: "s" } };
+const nestedOk: Nested = { a: 1, b: { x: 1 } };
+type Lit = { a: number } | { a: number; b: "x" | "y" };
+const litOk: Lit = { a: 1, b: "x" };
+const litBad: Lit = { a: 1, b: "z" };
+function takeOptional(v: Base | undefined) { return v; }
+takeOptional({ a: 1, b: "x" });
+const list: Base[] = [{ a: 1, b: false }];
+type Two = { a: string } | { b: number };
+const twoOk: Two = { a: "s", b: 1 };
+const twoBad: Two = { a: 1, b: 1 };
+console.log(wrong, right, optOk, optBad, dictOk, dictBad, nestedBad, nestedOk, litOk, litBad, list, twoOk, twoBad);

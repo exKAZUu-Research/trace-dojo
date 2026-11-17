@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 509 -- Types array and object literals with their spreads, members, and widening, which share one literal state.
+// code-gauge-allow-file fileNcss 525 -- Types array and object literals with their spreads, members, and widening, which share one literal state.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import type { Checker } from './checker';
@@ -8,6 +8,7 @@ import {
   anyType,
   emptyStructure,
   errorType,
+  filterType,
   type IndexInfo,
   intersectionOf,
   isAnyLike,
@@ -64,6 +65,8 @@ interface ObjectLiteral {
   complexity?: number;
   /** Whether its spreads made more alternatives than TypeScript represents, which makes the literal an error. */
   isTooComplex?: boolean;
+  /** Whether it spreads a value of type `any` or one that cannot be spread, which makes the literal's type `any`. */
+  spreadsAny?: boolean;
   /**
    * The kinds of member seen so far under each name, and whether an accessor conflict has stopped TypeScript from
    * checking the rest of the literal's names.
@@ -136,7 +139,7 @@ export class LiteralChecker {
       if (type.kind === 'object' && type.objectKind === 'tuple') return type.tuple?.elements ?? [];
       return [
         {
-          type: this.c.arrayType(this.c.silently(() => this.c.patterns.iteratedType(elements[index] ?? node, type))),
+          type: this.c.arrayType(this.c.patterns.iteratedType(named(elements[index] as TreeNode)[0], type)),
           optional: false,
           rest: true,
         },
@@ -236,6 +239,7 @@ export class LiteralChecker {
     if (contextual) this.addPatternDefaults(properties, contextual);
     const { object, genericSpreads, alternatives } = literal;
     if (literal.isTooComplex) return errorType;
+    if (literal.spreadsAny) return anyType;
     if (alternatives) {
       const variants = alternatives.map((alternative, index) => {
         const variant = anonymousObject(
@@ -351,7 +355,7 @@ export class LiteralChecker {
     const key = member.childForFieldName('key') as TreeNode;
     const value = member.childForFieldName('value') as TreeNode;
     const name = propertyNameText(key);
-    if (key.type === 'computed_property_name' && name !== undefined) this.c.expressions.check(named(key)[0]);
+    if (key.type === 'computed_property_name' && name !== undefined) this.c.expressions.checkComputedPropertyName(key);
     if (name === undefined) {
       this.computedMember(literal, member, key, value);
       return;
@@ -361,7 +365,7 @@ export class LiteralChecker {
   }
 
   private computedMember(literal: ObjectLiteral, member: TreeNode, key: TreeNode, value: TreeNode): void {
-    const keyType = this.c.expressions.check(named(key)[0] ?? key);
+    const keyType = this.c.expressions.checkComputedPropertyName(key);
     if (isPropertyKeyLiteral(keyType)) {
       // A key of one literal names a property, whose value is typed as a written property's is.
       this.namedMember(literal, member, String(keyType.value), value);
@@ -515,7 +519,7 @@ export class LiteralChecker {
   private memberName(nameNode: TreeNode): string | undefined {
     const written = propertyNameText(nameNode);
     if (nameNode.type !== 'computed_property_name') return written;
-    const keyType = this.c.expressions.check(named(nameNode)[0]);
+    const keyType = this.c.expressions.checkComputedPropertyName(nameNode);
     if (written !== undefined) return written;
     return isPropertyKeyLiteral(keyType) ? String(keyType.value) : undefined;
   }
@@ -540,15 +544,14 @@ export class LiteralChecker {
   private spreadMember(literal: ObjectLiteral, member: TreeNode): void {
     const operand = named(member)[0];
     const spread = this.c.expressions.check(operand);
-    const objectPart = this.c.relations.removeNullish(spread);
+    const objectPart = filterType(spread, (type) => !isDefinitelyFalsy(type));
     const members = objectPart.kind === 'union' ? objectPart.types : [objectPart];
-    if (
-      !members.every(
-        (type) =>
-          isAnyLike(type) || type.kind === 'object' || type.kind === 'intersection' || type.kind === 'typeParameter'
-      )
-    )
-      this.c.error(operand, 'スプレッド構文は、オブジェクト型にのみ使えます。');
+    const isValid = members.every(isSpreadableMember);
+    if (!isValid) this.c.error(member, 'スプレッド構文は、オブジェクト型にのみ使えます。');
+    if (!isValid || isAnyLike(objectPart)) {
+      literal.spreadsAny = true;
+      return;
+    }
     if (spread.kind === 'typeParameter') {
       literal.genericSpreads.push(spread);
       return;
@@ -556,16 +559,22 @@ export class LiteralChecker {
     if (literal.isTooComplex) return;
     if (literal.hasPendingMembers) this.spreadWrittenIndexes(literal);
     const objectMembers = members.filter((type) => type.kind === 'object' || type.kind === 'intersection');
-    // A spread of `null` or `undefined` adds nothing, which leaves the properties of an object it may be optional.
-    const mayBeNullish = objectPart !== spread;
+    // A spread of `null`, `undefined`, or a falsy primitive adds nothing, which leaves the properties of an object it
+    // may be optional.
+    const mayBeNullish = (spread.kind === 'union' ? spread.types : [spread]).some(isDefinitelyFalsy);
     if (objectMembers.length < 2) {
       if (objectMembers.length === 1)
         this.addSpreadIndexes(literal, this.indexesOf(objectPart, literal.isConstContext));
       this.spreadSingle(literal, objectPart, mayBeNullish);
       return;
     }
+    this.spreadObjectUnion(literal, member, spread, [...objectMembers, ...(mayBeNullish ? [undefined] : [])]);
+  }
+
+  /** Spreads a union of several objects, unless the alternatives it makes are more than TypeScript represents. */
+  private spreadObjectUnion(literal: ObjectLiteral, member: TreeNode, spread: Type, parts: (Type | undefined)[]): void {
     // TypeScript refuses a cross product of union spreads of 100,000 alternatives or more, counting every member of
-    // each union, though the members `null`, `undefined`, and `void` all leave the same alternative.
+    // each union, though the members that spread nothing all leave the same alternative.
     const complexity = (literal.complexity ?? 1) * (spread.kind === 'union' ? spread.types.length : 1);
     if (complexity >= 100_000) {
       this.c.error(member, 'この式の型は、表せないほど複雑な共用体型になります。');
@@ -573,7 +582,7 @@ export class LiteralChecker {
       return;
     }
     literal.complexity = complexity;
-    this.spreadUnion(literal, [...objectMembers, ...(mayBeNullish ? [undefined] : [])]);
+    this.spreadUnion(literal, parts);
   }
 
   /** Spreads each of `parts`, a union's objects and `undefined` when it may be nullish, into its own alternative. */
@@ -799,7 +808,8 @@ export class LiteralChecker {
     for (const member of type.kind === 'union' ? type.types : [type]) {
       if (member.kind !== 'object' && member.kind !== 'intersection') continue;
       for (const [name, property] of this.c.structureOf(member).properties) {
-        if (property.isMethod && member.kind === 'object' && member.classInfo) continue;
+        if (!isSpreadableProperty(property) || (property.isMethod && member.kind === 'object' && member.classInfo))
+          continue;
         result.set(name, spreadCopy(property, readonly));
       }
     }
@@ -899,6 +909,32 @@ export class LiteralChecker {
       );
     });
   }
+}
+
+function isSpreadableMember(type: Type): boolean {
+  return isAnyLike(type) || type.kind === 'object' || type.kind === 'intersection' || type.kind === 'typeParameter';
+}
+
+/** Whether a spread's member is never truthy, which TypeScript accepts in a spread that adds nothing for it. */
+function isDefinitelyFalsy(type: Type): boolean {
+  return (
+    isIntrinsic(type, 'undefined') ||
+    isIntrinsic(type, 'null') ||
+    isIntrinsic(type, 'void') ||
+    (type.kind === 'literal' && !type.value)
+  );
+}
+
+/** Whether a spread copies a property: a class's methods, accessors, and private names stay out of the copy. */
+function isSpreadableProperty(property: Property): boolean {
+  const { declaration } = property;
+  return (
+    !property.isPrivateName &&
+    !(
+      declaration?.parent?.type === 'class_body' &&
+      ['method_definition', 'method_signature', 'abstract_method_signature'].includes(declaration.type)
+    )
+  );
 }
 
 function indexKeyOfName(name: string): IndexKey {

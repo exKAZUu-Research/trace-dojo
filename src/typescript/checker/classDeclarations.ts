@@ -206,7 +206,7 @@ export class ClassDeclarationChecker {
 
   private checkMemberDeclaration(member: TreeNode, info: ClassInfo): void {
     const name = member.childForFieldName('name');
-    if (name?.type === 'computed_property_name') this.c.expressions.check(named(name)[0]);
+    if (name?.type === 'computed_property_name') this.c.expressions.checkComputedPropertyName(name);
     if (hasToken(member, 'abstract') && !info.isAbstract)
       this.c.error(name ?? member, '抽象メンバーは抽象クラスの中でのみ宣言できます。');
     if (isClassConstructor(member) && hasToken(member, 'static'))

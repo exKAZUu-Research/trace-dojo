@@ -407,7 +407,8 @@ export class OperatorChecker {
     });
     this.c.flow.current = this.c.flow.merge([operator === '&&' ? whenFalse : whenTrue, after]);
     void node;
-    if (operator === '&&') return unionOf([this.c.flow.narrowByTruthiness(leftType, false), rightType], true);
+    if (operator === '&&')
+      return unionOf([falsyValuesOf(this.c.flow.narrowByTruthiness(leftType, false)), rightType], true);
     return this.c.literals.subtypeReduced([this.c.flow.narrowByTruthiness(leftType, true), rightType]);
   }
 
@@ -637,5 +638,14 @@ function baseTypeOfLiteral(type: Type): Type {
   return mapType(type, (member) => {
     if (member.kind === 'literal' && typeof member.value !== 'symbol') return primitiveOfLiteral(member);
     return member.kind === 'templateLiteral' || member.kind === 'stringMapping' ? stringType : member;
+  });
+}
+
+/** The falsy values that `&&` gives for a type: `0` for a number, `""` for a string, and `0n` for a bigint. */
+function falsyValuesOf(type: Type): Type {
+  return mapType(type, (member) => {
+    if (isIntrinsic(member, 'number')) return literalType(0);
+    if (isIntrinsic(member, 'string')) return literalType('');
+    return isIntrinsic(member, 'bigint') ? literalType(0n) : member;
   });
 }

@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 455 -- Resolves expressions, lexical references, closure captures, and contextual assignment diagnostics; memoization is separate.
+// code-gauge-allow-file fileNcss 477 -- Resolves expressions, lexical references, closure captures, and contextual assignment diagnostics; memoization is separate.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import { unsupportedMessage } from '../unsupported';
@@ -31,6 +31,7 @@ import {
   isIntrinsic,
   isSymbolName,
   nullType,
+  numberType,
   type ObjectType,
   type Property,
   regularOf,
@@ -177,6 +178,17 @@ export class ExpressionChecker {
         "symbol を文字列に暗黙に変換すると、実行時にエラーになります。'String(...)' で囲んでください。"
       );
     }
+    return type;
+  }
+
+  /** Checks the expression of a computed property name, whose type must be a string, number, symbol, or `any`. */
+  checkComputedPropertyName(name: TreeNode): Type {
+    const type = this.check(named(name)[0] ?? name);
+    if (!isAnyLike(type) && !this.c.relations.isAssignable(type, unionOf([stringType, numberType, symbolType])))
+      this.c.error(
+        name,
+        "計算されたプロパティ名は、'string'、'number'、'symbol'、'any' のいずれかの型でなければいけません。"
+      );
     return type;
   }
 
@@ -651,19 +663,28 @@ export class ExpressionChecker {
     if (targets.length === 0 || this.acceptsAnyProperty(targets)) return;
     // A discriminated union checks the members its discriminant selects; an index signature takes any key it covers,
     // whose value is still checked against it.
-    for (const [name, property] of source.resolve().properties) {
-      if (!this.c.literals.isWrittenMember(source, property)) continue;
-      if (this.isKnownProperty(targets, name)) {
-        this.checkExcessPropertyValue(property, target);
-        continue;
-      }
-      this.c.error(
-        property.declaration?.childForFieldName('key') ?? property.declaration ?? node,
-        `オブジェクトリテラルには既知のプロパティしか書けません。'${name}' は型 '${this.c.print(target)}' にありません。`
-      );
-      return;
+    for (const property of source.resolve().properties.values()) {
+      if (
+        this.c.literals.isWrittenMember(source, property) &&
+        !this.checkWrittenProperty(node, property, targets, target)
+      )
+        return;
     }
     this.checkExcessIndexValues(node, source, targets);
+  }
+
+  /** Checks a written property of a fresh object literal against the targets, returning whether it fits them. */
+  private checkWrittenProperty(node: TreeNode, property: Property, targets: Type[], target: Type): boolean {
+    if (!this.isKnownProperty(targets, property.name)) {
+      this.c.error(
+        property.declaration?.childForFieldName('key') ?? property.declaration ?? node,
+        `オブジェクトリテラルには既知のプロパティしか書けません。'${property.name}' は型 '${this.c.print(target)}' にありません。`
+      );
+      return false;
+    }
+    if (target.kind === 'union' && !this.fitsUnionProperty(node, property, targets, target)) return false;
+    this.checkExcessPropertyValue(property, target);
+    return true;
   }
 
   private acceptsAnyProperty(targets: Type[]): boolean {
@@ -683,6 +704,34 @@ export class ExpressionChecker {
         (isNumericName(name) && this.c.structureOf(member).numberIndex !== undefined) ||
         (isSymbolName(name) && this.c.structureOf(member).symbolIndex !== undefined)
     );
+  }
+
+  /**
+   * Reports a written property of a literal assigned to a union whose value does not fit the property's type in the
+   * selected members, `undefined` where a member lacks it: a union member without the property may accept the literal
+   * as a whole, yet TypeScript rejects the value.
+   */
+  private fitsUnionProperty(node: TreeNode, property: Property, targets: Type[], target: Type): boolean {
+    const declared = unionOf(targets.map((member) => this.typeOfPropertyIn(member, property.name)));
+    if (this.c.relations.isAssignable(property.type(), declared)) return true;
+    const { declaration } = property;
+    const value = declaration?.type === 'pair' ? declaration.childForFieldName('value') : undefined;
+    this.reportNotAssignable(
+      declaration?.childForFieldName('key') ?? declaration ?? node,
+      property.type(),
+      this.c.literals.contextualPropertyType(target, property.name) ?? declared,
+      value ?? undefined
+    );
+    return false;
+  }
+
+  /** The type a member of a union gives a property, as its own or by an index signature, or `undefined`. */
+  private typeOfPropertyIn(member: Type, name: string): Type {
+    const property = this.c.propertyOf(member, name);
+    if (property) return property.optional ? unionOf([property.type(), undefinedType]) : property.type();
+    const { stringIndex, numberIndex, symbolIndex } = this.c.structureOf(member);
+    const index = isSymbolName(name) ? symbolIndex : ((isNumericName(name) ? numberIndex : undefined) ?? stringIndex);
+    return index?.type ?? undefinedType;
   }
 
   /** Checks the object literal a written property's value spells against the target's type of the property. */
