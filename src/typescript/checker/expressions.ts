@@ -268,8 +268,8 @@ export class ExpressionChecker {
     }
     if (entry.constraint && this.isConstraintPosition(node)) return entry.constraint;
     if (!entry.evolving || this.isEvolvingUse(node)) return entry.type;
-    // An array a nested function pushes to has no type here when nothing pushed to it in this flow.
-    if (symbol.usedInClosure && this.isNeverEvolved(entry.type)) return this.reportUndeterminedType(node, symbol);
+    // An array nothing has added to in this flow has no type here.
+    if (this.isNeverEvolved(entry.type)) return this.reportUndeterminedType(node, symbol);
     return this.finishEvolving(entry.type);
   }
 
@@ -295,14 +295,13 @@ export class ExpressionChecker {
     const parent = node.parent;
     if (parent?.type === 'member_expression' && parent.childForFieldName('object')?.id === node.id) {
       const property = parent.childForFieldName('property')?.text;
-      return property === 'push' || property === 'unshift';
+      return property === 'length' || property === 'push' || property === 'unshift';
     }
-    if (parent?.type === 'subscript_expression' && parent.childForFieldName('object')?.id === node.id) {
-      return (
-        parent.parent?.type === 'assignment_expression' && parent.parent.childForFieldName('left')?.id === parent.id
-      );
-    }
-    return false;
+    return (
+      parent?.type === 'subscript_expression' &&
+      parent.childForFieldName('object')?.id === node.id &&
+      this.c.assignments.isElementWrite(parent)
+    );
   }
 
   private finishEvolving(type: Type): Type {

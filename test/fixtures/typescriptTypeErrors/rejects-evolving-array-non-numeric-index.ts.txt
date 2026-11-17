@@ -1,0 +1,15 @@
+const values = [];
+values["extra"] = 1;
+console.log(values);
+const flags = [];
+flags[true] = 1;
+console.log(flags);
+const ok = [];
+ok[0] = "a";
+const i: number = 1;
+ok[i] = "b";
+const s: string[] = ok;
+const keyed = [];
+const key: string = "k";
+keyed[key] = 2;
+console.log(keyed, s);

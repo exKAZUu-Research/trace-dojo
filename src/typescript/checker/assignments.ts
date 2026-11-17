@@ -63,10 +63,19 @@ export class AssignmentChecker {
   }
 
   private isEvolvingArrayAssignment(target: TreeNode): boolean {
-    if (target.type !== 'subscript_expression') return false;
+    if (target.type !== 'subscript_expression' || !this.isElementWrite(target)) return false;
     const object = target.childForFieldName('object');
     const key = object ? this.c.flow.referenceKey(object) : undefined;
     return key !== undefined && this.c.flow.entry(key)?.evolving === true;
+  }
+
+  /** Whether `x[i] = …` writes an element, with a numeric index, which adds to the element type of an evolving array. */
+  isElementWrite(subscript: TreeNode): boolean {
+    const assignment = subscript.parent;
+    if (assignment?.type !== 'assignment_expression' || assignment.childForFieldName('left')?.id !== subscript.id)
+      return false;
+    const index = subscript.childForFieldName('index') as TreeNode;
+    return this.c.operators.isNumberLike(this.c.silently(() => this.c.expressions.check(index)));
   }
 
   /** Adds an element type to an evolving array, as `push` does to one declared as `[]`. */

@@ -1,0 +1,13 @@
+const items = [];
+console.log(items.length);
+const index = 0;
+items[index] = "a";
+items[1] = "b";
+items.push("c");
+console.log(items.length, items.join(","));
+const later = [];
+for (let i = 0; i < 3; i++) {
+  if (later.length > 0) console.log(later[later.length - 1]);
+  later.push(i * 2);
+}
+console.log(later);

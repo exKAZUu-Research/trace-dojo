@@ -1,0 +1,12 @@
+(1,7): error TS7034: Variable 'values' implicitly has type 'any[]' in some locations where its type cannot be determined.
+(2,1): error TS7005: Variable 'values' implicitly has an 'any[]' type.
+(2,8): error TS7015: Element implicitly has an 'any' type because index expression is not of type 'number'.
+(3,13): error TS7005: Variable 'values' implicitly has an 'any[]' type.
+(4,7): error TS7034: Variable 'flags' implicitly has type 'any[]' in some locations where its type cannot be determined.
+(5,1): error TS7005: Variable 'flags' implicitly has an 'any[]' type.
+(5,7): error TS2538: Type 'true' cannot be used as an index type.
+(6,13): error TS7005: Variable 'flags' implicitly has an 'any[]' type.
+(12,7): error TS7034: Variable 'keyed' implicitly has type 'any[]' in some locations where its type cannot be determined.
+(14,1): error TS7005: Variable 'keyed' implicitly has an 'any[]' type.
+(14,7): error TS7015: Element implicitly has an 'any' type because index expression is not of type 'number'.
+(15,13): error TS7005: Variable 'keyed' implicitly has an 'any[]' type.
