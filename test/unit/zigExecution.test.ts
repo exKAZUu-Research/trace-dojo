@@ -5492,3 +5492,88 @@ test('byte-backed union tags reuse their budgeted ordinal index', () => {
     uncaughtException: undefined,
   });
 });
+
+test.each(['u8', 'void', 'u0'])(
+  'effectful known %s slice bounds retain static extent diagnostics and effects',
+  (type) => {
+    for (const bound of [
+      '(if(get()) |_| @as(usize,1) else |_| unreachable)',
+      '@as(usize,(if(get()) |_| 1 else |_| unreachable))',
+    ]) {
+      const prefix = `const std=@import("std");fn get()error{}!u8{std.debug.print("g",.{});return 0;}pub fn main()void{`;
+      const view = `const s:[]${type}=p;const q=s[0..${bound}];std.debug.print("{} {}",.{q.len,@TypeOf(q)==*[1]${type}});}`;
+      expect(executeProgram('zig', `${prefix}const p:*[2]${type}=undefined;${view}`)).toMatchObject({
+        kind: 'compileError',
+      });
+      expect(executeProgram('zig', `${prefix}var a:[2]${type}=undefined;const p=&a;${view}`)).toMatchObject({
+        kind: 'executed',
+        stderr: 'g1 true',
+        uncaughtException: undefined,
+      });
+    }
+  }
+);
+
+test.each(['f80', 'f128'])('computed %s remainder sentinels use canonical finite representations', (type) => {
+  for (const [value, divisor, sentinel] of [
+    ['0.5', '0.5', '0.0'],
+    ['-0.5', '0.5', '-0.0'],
+    ['1.5', '1.0', '0.5'],
+  ]) {
+    const source = `const std=@import("std");pub fn main()void{const a=[_:@rem(@as(${type},${value}),@as(${type},${divisor}))]${type}{3};const b:[1:${sentinel}]${type}=a;const s:[:${sentinel}]const ${type}=&b;std.debug.print("{d}",.{s[1]});}`;
+    expect(executeProgram('zig', source)).toMatchObject({
+      kind: 'executed',
+      stderr: sentinel === '0.0' ? '0' : sentinel === '-0.0' ? '-0' : '0.5',
+      uncaughtException: undefined,
+    });
+  }
+});
+
+test('tag and error names share immutable backing across calls and matching names', () => {
+  const source = `const std=@import("std");const E=enum{apple,banana};const F=enum{apple};const U=union(enum){apple:void};pub fn main()void{var e:E=.apple;_=&e;var f:F=.apple;_=&f;var u:U=.{.apple={}};_=&u;var err:anyerror=error.apple;_=&err;const a=@tagName(e);const b=@tagName(e);const c=@errorName(err);const d=@tagName(f);const q=@tagName(u);std.debug.print("{} {} {} {} {}",.{&a[0]==&b[0],&a[0]==&c[0],&a[0]==&d[0],&a[0]==&q[0],a[a.len]});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: 'true true true true 0',
+    uncaughtException: undefined,
+  });
+});
+
+test.each(['error', 'enum'])('long %s names are reused through retained pointer identities', (kind) => {
+  const name = 'x'.repeat(100_000);
+  const declaration = kind === 'error' ? '' : `const E=enum{@"${name}"};`;
+  const value = kind === 'error' ? `var e:anyerror=error.@"${name}";` : `var e:E=.@"${name}";`;
+  const call = kind === 'error' ? '@errorName(e)' : '@tagName(e)';
+  const source = `const std=@import("std");${declaration}pub fn main()void{${value}_=&e;const first=${call};var same=true;for(0..30)|_|{const next=${call};same=same and &first[0]==&next[0];}std.debug.print("{} {}",.{same,first.len});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: 'true 100000',
+    uncaughtException: undefined,
+  });
+});
+
+test('shared nested layouts reach storage limits without expanding the type graph', () => {
+  const types = Array.from({ length: 30 }, (_, i) => `const S${i + 1}=struct{a:S${i},b:S${i}};`).join('');
+  const source = `const std=@import("std");const S0=struct{x:u8};${types}pub fn main(init:std.process.Init)!void{var list:std.ArrayList(S30)=.empty;try list.ensureTotalCapacity(init.gpa,0);}`;
+  expect(executeProgram('zig', source)).toMatchObject({ kind: 'limitExceeded', limit: 'storage' });
+});
+
+test('shared packed and ordinary nested layouts preserve allocator byte offsets', () => {
+  const source = `const std=@import("std");const A=packed struct{x:u3,y:u5};const B=extern struct{a:A,b:A};const C=extern struct{a:B,b:B};pub fn main()!void{var buf:[16]u8=undefined;var f=std.heap.FixedBufferAllocator.init(&buf);const p=try f.allocator().create(C);p.*=.{.a=.{.a=.{.x=1,.y=2},.b=.{.x=3,.y=4}},.b=.{.a=.{.x=5,.y=6},.b=.{.x=7,.y=8}}};std.debug.print("{} {} {} {}",.{buf[0],buf[1],buf[2],buf[3]});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: '17 35 53 71',
+    uncaughtException: undefined,
+  });
+});
+
+test('indexed member lookup retains quoted tags, callable fields and methods', () => {
+  const source = `const std=@import("std");fn next(x:u8)u8{return x+1;}const S=struct{x:u8,callback:*const fn(u8)u8,fn method(self:*S)u8{return self.x;}};const U=union(enum){@"late field":u8,callback:*const fn(u8)u8};pub fn main()void{var s=S{.x=7,.callback=&next};var u:U=.{.callback=&next};_=&u;const v=@unionInit(U,"late field",9);const tag=U.@"late field";std.debug.print("{} {} {} {} {}",.{s.method(),s.callback(3),u.callback(5),v.@"late field",@intFromEnum(tag)});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: '7 4 6 9 0',
+    uncaughtException: undefined,
+  });
+  expect(
+    executeProgram('zig', `const U=union(enum){a:u8};pub fn main()void{_=@unionInit(U,"missing",1);}`)
+  ).toMatchObject({ kind: 'compileError' });
+});

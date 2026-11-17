@@ -549,3 +549,12 @@ test('inline for quoted underscore captures retain actual answer binding steps',
   expect(result.traceItems.map((item) => item.line)).toEqual([0, 2, 3, 2, 3]);
   expect(result.traceItems.filter((item) => item.line === 2).map((item) => item.vars._)).toEqual([7, 7]);
 });
+
+test('wide enum snapshots retain late names in scalars, arrays and optionals', () => {
+  const fields = Array.from({ length: 30_000 }, (_, i) => `f${i}`).join(',');
+  const source = `const E=enum{${fields}};pub fn main()void{\nconst e:E=.f29999;\nconst a=[_]E{.f29999,.f29998};\nconst o:?E=.f29997;\nfor(0..1000)|i|{\n_=i;\n}\n_=e;_=a;_=o;\n}`;
+  const result = traceProgram('zig', source, source);
+  expect(result.uncaughtException).toBeUndefined();
+  expect(result.finalVars).toMatchObject({ e: '.f29999', a: ['.f29999', '.f29998'], o: '.f29997' });
+  expect(result.traceItems.filter((item) => item.vars.e === '.f29999').length).toBeGreaterThan(1000);
+});

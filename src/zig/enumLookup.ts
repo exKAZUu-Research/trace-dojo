@@ -8,6 +8,10 @@ interface EnumLookup {
 
 const indexes = new WeakMap<readonly EnumField[], EnumLookup>();
 
+export function cachedEnumLookup(fields: readonly EnumField[]): EnumLookup | undefined {
+  return indexes.get(fields);
+}
+
 export function enumLookup(fields: readonly EnumField[], spend: () => void): EnumLookup {
   const cached = indexes.get(fields);
   if (cached) return cached;

@@ -28,7 +28,19 @@ export class BigFloat {
     readonly kind: 'finite' | 'inf' | 'nan',
     readonly mantissa: bigint,
     readonly exponent: number
-  ) {}
+  ) {
+    if (kind === 'finite') {
+      if (mantissa === 0n) this.exponent = 0;
+      else {
+        while ((mantissa & 1n) === 0n) {
+          mantissa >>= 1n;
+          exponent++;
+        }
+        this.mantissa = mantissa;
+        this.exponent = exponent;
+      }
+    }
+  }
 
   static zero(sign = false): BigFloat {
     return new BigFloat(sign, 'finite', 0n, 0);
@@ -89,19 +101,7 @@ export function roundRational(sign: boolean, num: bigint, den: bigint, format: F
     e++;
   }
   if (q !== 0n && e + precision - 1 > maxExponent) return new BigFloat(sign, 'inf', 0n, 0);
-  return normalize(new BigFloat(sign, 'finite', q, e));
-}
-
-/** Removes trailing zero bits, so that equal values compare equal field by field. */
-function normalize(value: BigFloat): BigFloat {
-  if (value.kind !== 'finite' || value.mantissa === 0n)
-    return value.kind === 'finite' ? BigFloat.zero(value.sign) : value;
-  let { mantissa, exponent } = value;
-  while ((mantissa & 1n) === 0n) {
-    mantissa >>= 1n;
-    exponent++;
-  }
-  return new BigFloat(value.sign, 'finite', mantissa, exponent);
+  return new BigFloat(sign, 'finite', q, e);
 }
 
 function toRational(value: BigFloat): Rational {
@@ -124,8 +124,8 @@ export function bigFloatOf(value: number): BigFloat {
   const bits = view.getBigUint64(0);
   const biased = Number(bits >> 52n);
   const fraction = bits & ((1n << 52n) - 1n);
-  if (biased === 0) return normalize(new BigFloat(sign, 'finite', fraction, -1074));
-  return normalize(new BigFloat(sign, 'finite', fraction | (1n << 52n), biased - 1075));
+  if (biased === 0) return new BigFloat(sign, 'finite', fraction, -1074);
+  return new BigFloat(sign, 'finite', fraction | (1n << 52n), biased - 1075);
 }
 
 /** Rounds a BigFloat to a width that JavaScript numbers hold exactly. */

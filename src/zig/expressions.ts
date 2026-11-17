@@ -16,6 +16,7 @@ import {
   shiftRight,
 } from './arith';
 import type { BinaryOperator, Expression, ExpressionOf, Span } from './ast';
+import { enumLookup } from './enumLookup';
 import {
   type AnyFloat,
   BigFloat,
@@ -428,13 +429,13 @@ export abstract class ExpressionCompiler extends SemaBase {
     const decl = this.findDecl(type, name);
     if (decl) return this.resolveDecl(decl, span);
     if (type.kind === 'enum') {
-      const field = this.enumFields(type).find((each) => each.name === name);
+      const field = enumLookup(this.enumFields(type), () => this.spendCompilation()).byName.get(name);
       if (field) return known(type, field.value, span);
     }
     if (type.kind === 'union') {
       // The fields resolve first, which gives `union(enum)` its tag type.
-      const field = this.unionFields(type).find((each) => each.name === name);
-      if (field && type.tagType) return this.typeMember(type.tagType, name, span);
+      const hasField = this.fieldIndexes(this.unionFields(type)).has(name);
+      if (hasField && type.tagType) return this.typeMember(type.tagType, name, span);
     }
     return this.error(span, `${typeName(type)} には、「${name}」という宣言がありません。`);
   }
@@ -782,29 +783,25 @@ export abstract class ExpressionCompiler extends SemaBase {
       return this.error(expression, `${typeName(type)} 型はスライスできません。`);
     }
     staticLen ??= knownLengthOf(base);
-    const reachesSentinel = !end || (end.known && staticLen !== undefined && end.value === staticLen);
+    const first = staticResultOf(start)?.value as bigint | undefined;
+    const last = end ? (staticResultOf(end)?.value as bigint | undefined) : staticLen;
+    const reachesSentinel = !end || (last !== undefined && staticLen !== undefined && last === staticLen);
     const sentinel = expression.sentinel
       ? this.sentinelValue(expression.sentinel, child)
       : reachesSentinel
         ? sourceSentinel
         : undefined;
     const limitOf = (length: bigint): bigint => length + (sourceSentinel === undefined ? 0n : 1n);
-    if (start.known && end?.known && (start.value as bigint) > (end.value as bigint)) {
-      this.error(
-        expression,
-        `スライスの始まり ${start.value as bigint} が、終わり ${end.value as bigint} より大きくなっています。`
-      );
+    if (first !== undefined && last !== undefined && first > last) {
+      this.error(expression, `スライスの始まり ${first} が、終わり ${last} より大きくなっています。`);
     }
-    if (staticLen !== undefined && end?.known && (end.value as bigint) > limitOf(staticLen)) {
-      this.error(expression, `スライスの終わり ${end.value as bigint} は、長さ ${staticLen} の範囲の外です。`);
+    if (staticLen !== undefined && last !== undefined && last > limitOf(staticLen)) {
+      this.error(expression, `スライスの終わり ${last} は、長さ ${staticLen} の範囲の外です。`);
     }
-    if (staticLen !== undefined && start.known && (start.value as bigint) > (end ? limitOf(staticLen) : staticLen)) {
-      this.error(expression, `スライスの始まり ${start.value as bigint} は、長さ ${staticLen} の範囲の外です。`);
+    if (staticLen !== undefined && first !== undefined && first > (end ? limitOf(staticLen) : staticLen)) {
+      this.error(expression, `スライスの始まり ${first} は、長さ ${staticLen} の範囲の外です。`);
     }
-    const resultLength =
-      start.known && (end ? end.known : staticLen !== undefined)
-        ? (end ? (end.value as bigint) : (staticLen as bigint)) - (start.value as bigint)
-        : undefined;
+    const resultLength = first !== undefined && last !== undefined ? last - first : undefined;
     const resultType =
       resultLength === undefined
         ? sliceOf(child, isConst, sentinel)

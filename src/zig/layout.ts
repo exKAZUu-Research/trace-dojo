@@ -1,3 +1,4 @@
+import { ExecutionBudget, ExecutionLimitError, LIMITS } from '../interpreter/limits';
 import { intType, type StructType, type Type, type UnionType } from './types';
 
 /** `@sizeOf` and `@alignOf` as on the reference toolchain's target (aarch64), which the library's growth depends on. */
@@ -10,36 +11,44 @@ export function alignOf(type: Type): number {
 }
 
 export function fieldOffsets(type: StructType): number[] {
+  const query = new LayoutQuery();
   const fields = type.fields ?? [];
   const offsets = fields.map(() => 0);
   const ordered = fields
     .map((field, index) => ({ field, index }))
     .filter(({ field }) => field.comptimeValue === undefined);
-  if (type.layout === 'auto') ordered.sort((a, b) => alignOf(b.field.type) - alignOf(a.field.type));
+  if (type.layout === 'auto')
+    ordered.sort((a, b) => {
+      query.spend();
+      return query.layout(b.field.type).align - query.layout(a.field.type).align;
+    });
   let offset = 0;
   for (const { field, index } of ordered) {
+    query.spend();
     if (type.layout === 'packed') {
       offsets[index] = offset;
-      offset += bitSizeOf(field.type);
+      offset += query.bits(field.type);
     } else {
-      offset = alignTo(offset, alignOf(field.type));
+      offset = alignTo(offset, query.layout(field.type).align);
       offsets[index] = offset * 8;
-      offset += sizeOf(field.type);
+      offset += query.layout(field.type).size;
     }
   }
   return offsets;
 }
 
 export function unionOffsets(type: UnionType): { payload: number; tag: number } {
-  const { size: payloadSize, align: payloadAlign } = unionPayload(type);
-  const tag = layoutOf(type.tagType ?? intType(false, 8));
+  const query = new LayoutQuery();
+  const { size: payloadSize, align: payloadAlign } = unionPayload(type, query);
+  const tag = query.layout(type.tagType ?? intType(false, 8));
   return tag.align >= payloadAlign
     ? { tag: 0, payload: alignTo(tag.size, payloadAlign) }
     : { payload: 0, tag: alignTo(payloadSize, tag.align) };
 }
 
 export function errorUnionOffsets(payload: Type): { payload: number; error: number } {
-  return alignOf(payload) >= 2 ? { payload: 0, error: sizeOf(payload) } : { payload: 2, error: 0 };
+  const layout = layoutOf(payload);
+  return layout.align >= 2 ? { payload: 0, error: layout.size } : { payload: 2, error: 0 };
 }
 
 interface Layout {
@@ -60,9 +69,70 @@ function intLayout(bits: number): Layout {
   return { size, align: Math.min(size, 16) };
 }
 
-// code-gauge-allow functionNcss 51 -- One case per kind of syntax node, type, or format specifier, as Zig defines them.
-// code-gauge-allow functionCognitiveComplexity 21 -- One case per kind of syntax node, type, or format specifier, as Zig defines them.
+const leafLayouts = new WeakMap<Type, Layout>();
+
+class LayoutQuery {
+  private readonly layouts = new Map<Type, Layout>();
+  private readonly bitSizes = new Map<Type, number>();
+  private readonly active = new Set<Type>();
+  private readonly budget = new ExecutionBudget();
+
+  spend(): void {
+    this.budget.spend();
+  }
+
+  layout(type: Type): Layout {
+    const cached = this.layouts.get(type) ?? leafLayouts.get(type);
+    if (cached) return cached;
+    this.enter(type);
+    try {
+      const result = computeLayout(type, this);
+      this.layouts.set(type, result);
+      if (['int', 'float', 'bool', 'pointer', 'error_set', 'void', 'noreturn'].includes(type.kind))
+        leafLayouts.set(type, result);
+      return result;
+    } finally {
+      this.active.delete(type);
+    }
+  }
+
+  bits(type: Type): number {
+    const cached = this.bitSizes.get(type);
+    if (cached !== undefined) return cached;
+    let result: number;
+    if (type.kind === 'struct' && type.layout === 'packed') {
+      this.enter(type);
+      try {
+        result = 0;
+        for (const field of type.fields ?? []) {
+          this.spend();
+          result += this.bits(field.type);
+        }
+      } finally {
+        this.active.delete(type);
+      }
+    } else if (type.kind === 'int' || type.kind === 'float') result = type.bits;
+    else if (type.kind === 'bool') result = 1;
+    else if (type.kind === 'enum') result = type.tagType?.bits ?? 0;
+    else result = this.layout(type).size * 8;
+    this.bitSizes.set(type, result);
+    return result;
+  }
+
+  private enter(type: Type): void {
+    this.spend();
+    if (this.active.has(type) || this.active.size >= LIMITS.maxCallDepth) throw new ExecutionLimitError('storage');
+    this.active.add(type);
+  }
+}
+
 function layoutOf(type: Type): Layout {
+  return leafLayouts.get(type) ?? new LayoutQuery().layout(type);
+}
+
+// code-gauge-allow functionNcss 59 -- One case per kind of syntax node, type, or format specifier, as Zig defines them.
+// code-gauge-allow functionCognitiveComplexity 24 -- One case per kind of syntax node, type, or format specifier, as Zig defines them.
+function computeLayout(type: Type, query: LayoutQuery): Layout {
   switch (type.kind) {
     case 'int': {
       return intLayout(type.bits);
@@ -78,22 +148,22 @@ function layoutOf(type: Type): Layout {
       return type.size === 'slice' ? { size: 16, align: 8 } : { size: 8, align: 8 };
     }
     case 'array': {
-      const child = layoutOf(type.child);
+      const child = query.layout(type.child);
       return {
         size: child.size * Number(type.length + (type.sentinel === undefined ? 0n : 1n)),
         align: child.align,
       };
     }
     case 'optional': {
-      if (optionalNicheBits(type.child)) return layoutOf(type.child);
-      const child = layoutOf(type.child);
+      if (optionalNicheBits(type.child)) return query.layout(type.child);
+      const child = query.layout(type.child);
       return { size: alignTo(child.size + 1, child.align), align: child.align };
     }
     case 'error_set': {
       return { size: 2, align: 2 };
     }
     case 'error_union': {
-      const payload = layoutOf(type.payload);
+      const payload = query.layout(type.payload);
       const align = Math.max(payload.align, 2);
       return { size: alignTo(payload.size + 2, align), align };
     }
@@ -105,11 +175,25 @@ function layoutOf(type: Type): Layout {
         return { size: type.native.byteSize, align: type.native.byteAlignment ?? 8 };
       const fields = (type.fields ?? [])
         .filter((field) => field.comptimeValue === undefined)
-        .map((field) => layoutOf(field.type));
+        .map((field) => {
+          query.spend();
+          return query.layout(field.type);
+        });
       if (type.layout === 'packed') {
-        return intLayout((type.fields ?? []).reduce((sum, field) => sum + bitSizeOf(field.type), 0));
+        let bits = 0;
+        for (const field of type.fields ?? []) {
+          query.spend();
+          bits += query.bits(field.type);
+        }
+        return intLayout(bits);
       }
-      const sorted = type.layout === 'extern' ? fields : fields.toSorted((a, b) => b.align - a.align);
+      const sorted =
+        type.layout === 'extern'
+          ? fields
+          : fields.toSorted((a, b) => {
+              query.spend();
+              return b.align - a.align;
+            });
       let size = 0;
       let align = 1;
       for (const field of sorted) {
@@ -119,7 +203,7 @@ function layoutOf(type: Type): Layout {
       return { size: alignTo(size, align), align };
     }
     case 'union': {
-      const payload = unionPayload(type);
+      const payload = unionPayload(type, query);
       let size = payload.size;
       let align = payload.align;
       const tag = type.tagType ? intLayout(type.tagType.tagType?.bits ?? 0) : intLayout(8);
@@ -140,19 +224,15 @@ export function optionalNicheBits(child: Type): number | undefined {
 }
 
 export function bitSizeOf(type: Type): number {
-  if (type.kind === 'int' || type.kind === 'float') return type.bits;
-  if (type.kind === 'bool') return 1;
-  if (type.kind === 'enum') return type.tagType?.bits ?? 0;
-  if (type.kind === 'struct' && type.layout === 'packed')
-    return (type.fields ?? []).reduce((sum, field) => sum + bitSizeOf(field.type), 0);
-  return sizeOf(type) * 8;
+  return new LayoutQuery().bits(type);
 }
 
-function unionPayload(type: UnionType): Layout {
+function unionPayload(type: UnionType, query: LayoutQuery): Layout {
   let size = 0;
   let align = 1;
   for (const field of type.fields ?? []) {
-    const child = layoutOf(field.type);
+    query.spend();
+    const child = query.layout(field.type);
     size = Math.max(size, child.size);
     align = Math.max(align, child.align);
   }

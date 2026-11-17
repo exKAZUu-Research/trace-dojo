@@ -91,10 +91,10 @@ export abstract class CallCompiler extends BuiltinCompiler {
     let type = object.type;
     if (type.kind === 'pointer' && type.size === 'one') type = type.child;
     if (type.kind !== 'struct' && type.kind !== 'enum' && type.kind !== 'union') return undefined;
-    if (type.kind === 'struct' && this.structFields(type, span).some((field) => field.name === name)) return undefined;
+    if (type.kind === 'struct' && this.fieldIndexes(this.structFields(type, span)).has(name)) return undefined;
     const decl = this.findDecl(type, name);
     if (!decl) {
-      if (type.kind === 'union' && this.unionFields(type).some((field) => field.name === name)) return undefined;
+      if (type.kind === 'union' && this.fieldIndexes(this.unionFields(type)).has(name)) return undefined;
       return this.error(span, `${typeName(type)} 型には、メソッド「${name}」がありません。`);
     }
     return { callee: this.resolveDecl(decl, span) };

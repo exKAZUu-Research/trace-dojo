@@ -40,3 +40,16 @@ export function encodeIdentifierText(text: string): number[] {
   }
   return bytes;
 }
+
+export function identifierTextByteLength(text: string): number {
+  let length = 0;
+  for (const character of text) {
+    const point = character.codePointAt(0) as number;
+    if (point >= 0xdc_80 && point <= 0xdc_ff) length++;
+    else if (point <= 0x7f) length++;
+    else if (point <= 0x7_ff) length += 2;
+    else if (point <= 0xff_ff) length += 3;
+    else length += 4;
+  }
+  return length;
+}

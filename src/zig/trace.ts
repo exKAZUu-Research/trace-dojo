@@ -6,6 +6,7 @@ import type { TraceOptions } from '../interpreter/traceAnnotations';
 import { TraceRecorder, type TraceVariables } from '../interpreter/traceRecorder';
 import type { DisplayNode, TraceItemVariable } from '../problems/trace';
 import { type CompiledProgram, compileSource } from './compiler';
+import { cachedEnumLookup, enumLookup } from './enumLookup';
 import { runProgram } from './execute';
 import {
   BigFloat,
@@ -121,6 +122,10 @@ class PreviewBudget {
     return Math.min(this.available, this.pool ? previewRemaining(this.pool) : Infinity);
   }
 
+  spendMetadata(cost: number): boolean {
+    return this.pool ? spendPreview(this.pool, cost) : this.spend(cost);
+  }
+
   spend(cost = 1): boolean {
     const accepted = cost <= this.remaining;
     this.available = Math.max(0, this.available - cost);
@@ -201,8 +206,7 @@ function scalarOf(
       return floatScalar(value, type.bits, budget);
     }
     case 'enum': {
-      const field = type.fields?.find((each) => each.value === value);
-      return field ? textScalar(`.${field.name}`, budget) : basicScalar(value, 128, budget);
+      return enumScalar(value, type, budget);
     }
     case 'error_set': {
       return value instanceof ErrorValue ? textScalar(`error.${value.name}`, budget) : NOT_SCALAR;
@@ -235,6 +239,21 @@ function scalarOf(
       return NOT_SCALAR;
     }
   }
+}
+
+function enumScalar(
+  value: Value,
+  type: Extract<Type, { kind: 'enum' }>,
+  budget: PreviewBudget
+): Scalar | typeof NOT_SCALAR {
+  const fields = type.fields ?? [];
+  let index = cachedEnumLookup(fields);
+  if (!index) {
+    if (!budget.spendMetadata(fields.length)) return NOT_SCALAR;
+    index = enumLookup(fields, () => {});
+  }
+  const field = index.byValue.get(value as bigint);
+  return field ? textScalar(`.${field.name}`, budget) : basicScalar(value, 128, budget);
 }
 
 function floatScalar(value: Value, bits: FloatBits, budget: PreviewBudget): Scalar | typeof NOT_SCALAR {

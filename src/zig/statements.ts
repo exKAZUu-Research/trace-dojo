@@ -4,6 +4,7 @@ import { PANIC, panic } from './arith';
 import { isDiscardName } from './ast';
 import type { Capture, Expression, ExpressionOf, Label, Span, Statement, SwitchCase } from './ast';
 import { CallCompiler, type FunctionCompilation } from './calls';
+import { enumLookup } from './enumLookup';
 import type { FunctionInstance } from './functions';
 import { sizeOf } from './layout';
 import { type Frame, Jump, withHeldValues } from './runtime';
@@ -1970,7 +1971,10 @@ export abstract class StatementCompiler extends CallCompiler {
     if (unnamedProng && (tagType.kind !== 'enum' || tagType.exhaustive)) {
       this.error(expression, '「_」の枝は、「_」で終わる enum の switch にだけ書けます。');
     }
-    const namedValues = new Set(tagType.kind === 'enum' ? this.enumFields(tagType).map((field) => field.value) : []);
+    const namedValues =
+      unnamedProng && tagType.kind === 'enum'
+        ? enumLookup(this.enumFields(tagType), () => this.spendCompilation()).byValue
+        : undefined;
     this.checkExhaustive(expression, tagType, seen, elseProng !== undefined || unnamedProng !== undefined, union);
     // Dispatch: a map from keys to prongs, then the ranges, then else.
     const table = new Map<unknown, Prong>();
@@ -1991,7 +1995,7 @@ export abstract class StatementCompiler extends CallCompiler {
           else if (key > range.high) start = middle + 1;
           else return range.prong;
         }
-        if (unnamedProng && !namedValues.has(key)) return unnamedProng;
+        if (unnamedProng && !namedValues?.has(key as bigint)) return unnamedProng;
       }
       return elseProng;
     };
@@ -2311,7 +2315,7 @@ export abstract class StatementCompiler extends CallCompiler {
     return all.filter((key) => !seen.has(key));
   }
 
-  // code-gauge-allow functionNcss 36 -- Keeps the analysis and the generated code of one construct together, as Zig's Sema does.
+  // code-gauge-allow functionNcss 45 -- Keeps the analysis and the generated code of one construct together, as Zig's Sema does.
   // code-gauge-allow functionCognitiveComplexity 24 -- Keeps the analysis and the generated code of one construct together, as Zig's Sema does.
   private checkExhaustive(
     expression: ExpressionOf<'switch'>,
@@ -2320,17 +2324,28 @@ export abstract class StatementCompiler extends CallCompiler {
     hasElse: boolean,
     union: Extract<Type, { kind: 'union' }> | undefined
   ): void {
-    let missing: string[] = [];
+    let missing: (() => string[]) | undefined;
     let complete = false;
+    let covered = false;
     if (tagType.kind === 'enum') {
       const fields = this.enumFields(tagType);
-      missing = fields.filter((field) => !seen.has(field.value)).map((field) => field.name);
       complete = tagType.exhaustive;
+      covered = seen.size === fields.length;
+      missing = () => {
+        this.compilationBudget.spend(fields.length);
+        return fields.filter((field) => !seen.has(field.value)).map((field) => field.name);
+      };
     } else if (tagType.kind === 'bool') {
-      missing = [true, false].filter((value) => !seen.has(value)).map(String);
+      covered = seen.size === 2;
+      missing = () => [true, false].filter((value) => !seen.has(value)).map(String);
       complete = true;
     } else if (tagType.kind === 'error_set' && tagType.names) {
-      missing = [...tagType.names].filter((name) => !seen.has(name));
+      const names = tagType.names;
+      covered = seen.size === names.size;
+      missing = () => {
+        this.compilationBudget.spend(names.size);
+        return [...names].filter((name) => !seen.has(name));
+      };
       complete = true;
     } else if (tagType.kind === 'int') {
       complete = coversRange(seen, tagType);
@@ -2345,11 +2360,11 @@ export abstract class StatementCompiler extends CallCompiler {
       if (!hasElse) this.error(expression, 'switch には、すべての値を扱うための else の枝が要ります。');
       return;
     }
-    if (missing.length > 0 && !hasElse) {
+    if (!covered && !hasElse) {
       const what = union ? 'union' : tagType.kind === 'enum' ? 'enum' : '値';
-      this.error(expression, `switch で扱っていない${what}の値があります: ${missing.join(', ')}`);
+      this.error(expression, `switch で扱っていない${what}の値があります: ${missing?.().join(', ')}`);
     }
-    if (missing.length === 0 && hasElse) this.unreachableElse(expression);
+    if (covered && hasElse) this.unreachableElse(expression);
   }
 
   private unreachableElse(expression: ExpressionOf<'switch'>): never {

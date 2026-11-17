@@ -15,7 +15,7 @@ import {
   rem,
 } from './arith';
 import type { Expression, ExpressionOf, Span } from './ast';
-// code-gauge-allow-file fileNcss 671 -- The file holds one layer of the compiler, whose parts share its private state.
+// code-gauge-allow-file fileNcss 691 -- The file holds one layer of the compiler, whose parts share its private state.
 import { enumLookup } from './enumLookup';
 import { ExpressionCompiler, log2IntType } from './expressions';
 import {
@@ -40,6 +40,7 @@ import { sizeOf } from './layout';
 import { importStd } from './library/std';
 import { MemoryFault } from './memoryFault';
 import { isIntegerType } from './operands';
+import type { Frame } from './runtime';
 import {
   copyForStorage,
   evaluateHeld,
@@ -53,6 +54,7 @@ import {
 } from './semaBase';
 import { singleValueOf } from './singleValue';
 import {
+  arrayOf,
   BOOL,
   COMPTIME_INT,
   type EnumType,
@@ -71,11 +73,12 @@ import {
   VOID,
   wrapInt,
 } from './types';
-import { decodeIdentifierBytes, decodeUtf8, encodeIdentifierText } from './utf8';
+import { decodeIdentifierBytes, decodeUtf8, encodeIdentifierText, identifierTextByteLength } from './utf8';
 import {
   arrayPointerView,
   ErrorValue,
   isUndefinedMemory,
+  markConstantStorage,
   Pointer,
   Slice,
   storageOverlaps,
@@ -227,6 +230,7 @@ interface CastTargets {
 }
 
 export abstract class BuiltinCompiler extends ExpressionCompiler {
+  private readonly nameSlices = new Map<string, Slice>();
   protected compileBuiltin(expression: ExpressionOf<'builtinCall'>, resultType: Type | undefined): TExpr {
     const { name, args } = expression;
     const unavailable = UNAVAILABLE.get(name);
@@ -438,7 +442,7 @@ export abstract class BuiltinCompiler extends ExpressionCompiler {
         const operand = this.compile(args[0]);
         if (operand.type.kind !== 'error_set')
           this.error(args[0], `@errorName はエラーの値にだけ使えます（${typeName(operand.type)} 型です）。`);
-        return this.derived(operand, CONST_U8, (value) => bytesSlice((value as ErrorValue).name));
+        return this.derived(operand, NAME_SLICE, (value, frame) => this.nameSlice((value as ErrorValue).name, frame));
       }
       case '@errorCast': {
         return this.errorCast(expression, resultType);
@@ -450,8 +454,8 @@ export abstract class BuiltinCompiler extends ExpressionCompiler {
           byteValues(this.knownValue(this.compile(args[1], CONST_U8), 'フィールドの名前')).map(Number)
         );
         const fields = this.unionFields(type);
-        const index = fields.findIndex((field) => field.name === fieldName);
-        if (index === -1)
+        const index = this.fieldIndexes(fields).get(fieldName);
+        if (index === undefined)
           return this.error(args[1], `${typeName(type)} 型には、フィールド「${fieldName}」がありません。`);
         const value = this.coerce(this.compile(args[2], fields[index].type), fields[index].type, args[2]);
         return this.derived(value, type, (payload) => new ZUnion(index, payload));
@@ -887,11 +891,15 @@ export abstract class BuiltinCompiler extends ExpressionCompiler {
     const operand = this.compile(expression.args[0]);
     const type = operand.type;
     if (type.kind === 'enum_literal') {
-      return this.derived(operand, CONST_U8, (value) => bytesSlice((value as { name: string }).name));
+      return this.derived(operand, NAME_SLICE, (value, frame) =>
+        this.nameSlice((value as { name: string }).name, frame)
+      );
     }
     if (type.kind === 'union' && type.tagType) {
       const fields = this.unionFields(type);
-      return this.derived(operand, CONST_U8, (value) => bytesSlice(fields[(value as ZUnion).tag].name));
+      return this.derived(operand, NAME_SLICE, (value, frame) =>
+        this.nameSlice(fields[(value as ZUnion).tag].name, frame)
+      );
     }
     if (type.kind !== 'enum')
       return this.error(expression, `@tagName は enum の値にだけ使えます（${typeName(type)} 型です）。`);
@@ -901,11 +909,30 @@ export abstract class BuiltinCompiler extends ExpressionCompiler {
       if (!field)
         this.error(expression, `enum ${typeName(type)} には、値 ${operand.value as bigint} のフィールドがありません。`);
     }
-    return this.derived(operand, CONST_U8, (value) => {
+    return this.derived(operand, NAME_SLICE, (value, frame) => {
       const field = fields.get(value as bigint);
       if (!field) panic(PANIC.invalidEnum);
-      return bytesSlice(field.name);
+      return this.nameSlice(field.name, frame);
     });
+  }
+
+  private nameSlice(text: string, frame?: Frame): Slice {
+    const cached = this.nameSlices.get(text);
+    if (cached) return cached;
+    const spend = (cost: number): void => (frame ? frame.runtime.spend(cost) : this.spendCompilation(cost));
+    spend(text.length);
+    const length = identifierTextByteLength(text);
+    const slots = 2 * (length + 1);
+    if (frame) frame.runtime.reserveStorage(slots);
+    else this.storage.reserve(arrayOf(BigInt(slots), U8));
+    spend(slots);
+    const bytes = encodeIdentifierText(text).map(BigInt);
+    bytes.push(0n);
+    const array = new ZArray(bytes, 0, length, true);
+    markConstantStorage(array);
+    const slice = new Slice(array, 0, length);
+    this.nameSlices.set(text, slice);
+    return slice;
   }
 
   // code-gauge-allow functionNcss 39 -- Keeps typed length/alias checks with the matching copy evaluation.
@@ -987,11 +1014,7 @@ export abstract class BuiltinCompiler extends ExpressionCompiler {
 
 export const CONST_U8: Type = sliceOf(U8, true);
 
-/** A string's UTF-8 bytes as a slice of constants. */
-export function bytesSlice(text: string): Slice {
-  const bytes = encodeIdentifierText(text).map(BigInt);
-  return new Slice(new ZArray([...bytes, 0n], 0, bytes.length, true), 0, bytes.length);
-}
+const NAME_SLICE = sliceOf(U8, true, 0n);
 
 /** The text of a byte slice or a pointer to a byte array, decoded as UTF-8. */
 export function bytesToText(value: Value): string {
