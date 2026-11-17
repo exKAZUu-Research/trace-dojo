@@ -543,3 +543,51 @@ test('strict combining builders skip discarded new payloads while lazy builders 
     )
   ).toMatchObject({ kind: 'executed', stdout: '1\n', uncaughtException: undefined });
 });
+
+test.each([['S.fromList [[1,undefined],[2],[3],[4]::[Int]]'], ['S.fromList [[1],[2],[3,undefined],[4]::[Int]]']])(
+  'set disjointness stops after a shared root without comparing other keys: %s',
+  (set) => {
+    const source = `import qualified Data.Set as S\nmain=let s=${set} in print(S.disjoint s s)`;
+    expect(executeProgram('haskell', source)).toMatchObject({
+      kind: 'executed',
+      stdout: 'False\n',
+      uncaughtException: undefined,
+    });
+  }
+);
+
+test('set disjointness preserves empty, singleton and recursive search demand', () => {
+  const source = `import qualified Data.Set as S
+main=do
+  print(S.disjoint S.empty (undefined::S.Set Int))
+  print(S.disjoint (S.singleton(1::Int)) S.empty)
+  print(S.disjoint (S.fromList[1,3,5::Int]) (S.fromList[2,4,6]))
+  print(S.disjoint (S.fromList[1,3,5::Int]) (S.singleton 5))
+  print(S.disjoint (S.fromList[1,3,5::Int]) (S.singleton 1))
+  print(S.disjoint (S.singleton(2::Int)) (S.fromList[1,2,3]))`;
+  expect(executeProgram('haskell', source)).toMatchObject({
+    kind: 'executed',
+    stdout: 'True\nTrue\nTrue\nFalse\nFalse\nFalse\n',
+    uncaughtException: undefined,
+  });
+  expect(
+    executeProgram('haskell', 'import qualified Data.Set as S\nmain=print(S.disjoint (undefined::S.Set Int) S.empty)')
+  ).toMatchObject({ kind: 'executed', stdout: '', uncaughtException: 'Prelude.undefined' });
+});
+
+test('set subset queries reject missing roots before comparing unrelated lazy keys', () => {
+  const source = `import qualified Data.Set as S
+main=do
+  let a=S.fromList [[1,undefined],[2],[3],[4]::[Int]]
+      b=S.fromList [[1,undefined],[5],[6],[7]::[Int]]
+  print(S.isSubsetOf a b)
+  print(S.isProperSubsetOf a (S.insert [8] b))
+  print(S.isSubsetOf (S.fromList[1,3::Int]) (S.fromList[1..4]))
+  print(S.isProperSubsetOf (S.fromList[1,3::Int]) (S.fromList[1..4]))
+  print(S.isProperSubsetOf (S.fromList[1,3::Int]) (S.fromList[1,3]))`;
+  expect(executeProgram('haskell', source)).toMatchObject({
+    kind: 'executed',
+    stdout: 'False\nFalse\nTrue\nTrue\nFalse\n',
+    uncaughtException: undefined,
+  });
+});

@@ -219,13 +219,26 @@ difference a (SBin _ x l r) = case split x a of
 m1 \\ m2 = difference m1 m2
 
 isSubsetOf :: Ord a => Set a -> Set a -> Bool
-isSubsetOf a b = size a <= size b && all (\x -> member x b) (toAscList a)
+isSubsetOf a b = size a <= size b && subsetOf a b
 
 isProperSubsetOf :: Ord a => Set a -> Set a -> Bool
-isProperSubsetOf a b = size a < size b && isSubsetOf a b
+isProperSubsetOf a b = size a < size b && subsetOf a b
+
+subsetOf :: Ord a => Set a -> Set a -> Bool
+subsetOf STip _ = True
+subsetOf _ STip = False
+subsetOf (SBin 1 x _ _) b = member x b
+subsetOf (SBin _ x l r) b =
+  let (bl,found,br) = splitMember x b
+  in found && size l <= size bl && size r <= size br && subsetOf l bl && subsetOf r br
 
 disjoint :: Ord a => Set a -> Set a -> Bool
-disjoint a b = null (intersection a b)
+disjoint STip _ = True
+disjoint _ STip = True
+disjoint (SBin 1 x _ _) b = notMember x b
+disjoint (SBin _ x l r) b =
+  let (bl,found,br) = splitMember x b
+  in not found && disjoint l bl && disjoint r br
 
 map :: Ord b => (a -> b) -> Set a -> Set b
 map f s = fromList (B.map f (toAscList s))
