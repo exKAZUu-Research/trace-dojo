@@ -81,7 +81,7 @@ function bindClosure(closure: PhpObject, newThis: Value, newScope: Value | undef
   if (newScope !== undefined && newScope !== 'static') {
     if (newScope instanceof PhpObject) scope = newScope.cls;
     else if (newScope === null) scope = undefined;
-    else scope = requireClass(String(newScope));
+    else scope = requireClass(newScope as string);
   }
   if (newThis !== null && !(newThis instanceof PhpObject)) return null;
   if (newThis instanceof PhpObject && data.isStatic && data.fn.kind === 'user' && data.fn.decl.isClosure) {
