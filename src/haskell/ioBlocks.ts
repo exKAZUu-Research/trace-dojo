@@ -2,7 +2,7 @@ import type { FunctionInfo, IODoCore } from './core';
 import { isScalarType, slotDisplayType } from './displayTypes';
 import type { Machine, RunState } from './machine';
 import { DisplayAbort, type Runtime, type TraceFrame } from './runtime';
-import { Env, type IODo, type Slot } from './values';
+import { Env, type IODo, type PreparedBlock, type Slot } from './values';
 import type { VisibleScope } from './visibleScope';
 
 export interface DoFrame {
@@ -13,6 +13,7 @@ export interface DoFrame {
   mark: number;
   traceFrame: TraceFrame;
   pushedTraceFrame: boolean;
+  prefix: PreparedBlock;
   tailCalled?: boolean;
   silent?: boolean;
   result?: Slot;
@@ -28,6 +29,7 @@ export interface TraceContext {
 
 export function runBlock(machine: Machine, state: RunState, action: IODo): void {
   const runtime = machine.runtime;
+  const prefix = prepareBlock(machine, action);
   runtime.allocate(action.code.size);
   const env = new Env(action.code.size, action.env);
   const invocation = env.invocation();
@@ -55,6 +57,7 @@ export function runBlock(machine: Machine, state: RunState, action: IODo): void 
     mark: 0,
     traceFrame: traceFrame as TraceFrame,
     pushedTraceFrame: pushed,
+    prefix,
   };
   frame.traceFrame.contexts.push({ env, visible: action.code.entryVisible, row: undefined });
   machine.stack.push(frame);
@@ -65,6 +68,26 @@ export function runBlock(machine: Machine, state: RunState, action: IODo): void 
     );
   }
   startStatement(machine, state, frame);
+}
+
+export function prepareBlock(machine: Machine, action: IODo): PreparedBlock {
+  if (action.prepared) return action.prepared;
+  machine.runtime.allocate(action.code.size);
+  const env = new Env(action.code.size, action.env);
+  const actions = new Map<number, Slot>();
+  let end = 0;
+  for (const [index, stmt] of action.code.stmts.entries()) {
+    machine.runtime.spend();
+    if (stmt.kind === 'let') {
+      for (const bind of stmt.binds) env.slots[bind.index] = machine.makeLetSlot(bind.expr, env);
+    } else {
+      actions.set(index, machine.makeSlot(stmt.expr, env));
+    }
+    end = index + 1;
+    if (stmt.kind === 'bind') break;
+  }
+  action.prepared = { env, actions, end };
+  return action.prepared;
 }
 
 export function markTailSelfCall(machine: Machine, info: FunctionInfo | undefined): void {
@@ -116,11 +139,14 @@ function startStatement(machine: Machine, state: RunState, frame: DoFrame): void
     frame.mark = machine.runtime.steps.statementMark();
     if (stmt.kind !== 'let') {
       machine.stack.push({ k: 'runIO' });
-      state.enter(machine.makeSlot(stmt.expr, frame.env));
+      state.enter(frame.prefix.actions.get(frame.index) ?? machine.makeSlot(stmt.expr, frame.env));
       return;
     }
     machine.runtime.spend();
-    for (const bind of stmt.binds) frame.env.slots[bind.index] = machine.makeLetSlot(bind.expr, frame.env);
+    for (const bind of stmt.binds) {
+      frame.env.slots[bind.index] =
+        frame.index < frame.prefix.end ? frame.prefix.env.slots[bind.index] : machine.makeLetSlot(bind.expr, frame.env);
+    }
     completeStatement(machine, frame);
   } while (advanceStatement(machine, state, frame));
 }

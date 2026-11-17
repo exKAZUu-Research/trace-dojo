@@ -1,6 +1,6 @@
-// code-gauge-allow-file fileNcss 449 -- Machine states and frames share one evaluator stack.
+// code-gauge-allow-file fileNcss 454 -- Machine states and frames share one evaluator stack.
 import { CONS_CON, NIL_CON } from './builtinTypes';
-import type { CaseCore, Core, IODoCore } from './core';
+import type { CaseCore, Core } from './core';
 import type { TypeHint } from './displayTypeHints';
 import {
   bindDisplayTypes,
@@ -12,7 +12,15 @@ import {
   typedSlot,
 } from './displayTypes';
 import type { ConInfo } from './entities';
-import { type DoFrame, finishMatch, markTailSelfCall, runBlock, statementDone, unwindBlock } from './ioBlocks';
+import {
+  type DoFrame,
+  finishMatch,
+  markTailSelfCall,
+  prepareBlock,
+  runBlock,
+  statementDone,
+  unwindBlock,
+} from './ioBlocks';
 import type { Primitive } from './primitives';
 import { RecursionBudget } from './recursionBudget';
 import type { Runtime } from './runtime';
@@ -50,7 +58,7 @@ export type Frame =
   | { k: 'charCase'; core: Extract<Core, { k: 'charCase' }>; env: Env }
   | { k: 'method'; index: number }
   | { k: 'super'; index: number }
-  | { k: 'deferredDo'; io: IODoCore; env: Env; ordinary: Slot }
+  | { k: 'deferredDo'; action: IODo; ordinary: Slot }
   | { k: 'prim'; prim: Primitive; args: Slot[]; position: number }
   | { k: 'runIO' }
   | { k: 'ioBind'; next: Slot }
@@ -294,13 +302,7 @@ export class Machine {
         return;
       }
       case 'deferredDo': {
-        if (this.consumerRunsIO()) {
-          state.returnValue(new IODo(code.io, env as Env));
-        } else {
-          const ordinary = this.makeSlot(code.ordinary, env);
-          this.stack.push({ k: 'deferredDo', io: code.io, env: env as Env, ordinary });
-          state.enter(ordinary);
-        }
+        this.beginDeferredDo(state, code, env);
         return;
       }
       case 'dict': {
@@ -317,6 +319,20 @@ export class Machine {
         throw new HaskellException(code.message, code.kind === 'patternMatch' ? 'PatternMatchFail' : 'ErrorCall');
       }
     }
+  }
+
+  private beginDeferredDo(state: RunState, code: Extract<Core, { k: 'deferredDo' }>, env: Env | undefined): void {
+    const action = new IODo(code.io, env as Env);
+    if (this.consumerRunsIO()) {
+      state.returnValue(action);
+      return;
+    }
+    const ordinary = code.ordinary
+      ? this.makeSlot(code.ordinary, env)
+      : prepareBlock(this, action).actions.values().next().value;
+    if (ordinary === undefined) throw new Error('A deferred IO block requires an action');
+    this.stack.push({ k: 'deferredDo', action, ordinary });
+    state.enter(ordinary);
   }
 
   private consumerRunsIO(): boolean {
@@ -490,7 +506,7 @@ export class Machine {
       }
       case 'deferredDo': {
         this.inheritTypeHint(frame.ordinary);
-        if (isIOAction(state.value as Value)) state.returnValue(new IODo(frame.io, frame.env));
+        if (isIOAction(state.value as Value)) state.returnValue(frame.action);
         return false;
       }
       case 'prim': {

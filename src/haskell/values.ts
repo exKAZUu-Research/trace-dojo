@@ -165,8 +165,16 @@ export class IOPrim {
   ) {}
 }
 
+export interface PreparedBlock {
+  env: Env;
+  actions: Map<number, Slot>;
+  end: number;
+}
+
 /** A `do` block in `IO`, which runs its statements one by one, recording a step after each when tracing. */
 export class IODo {
+  prepared: PreparedBlock | undefined;
+
   constructor(
     readonly code: IODoCore,
     readonly env: Env

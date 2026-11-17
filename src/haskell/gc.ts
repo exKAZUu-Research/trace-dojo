@@ -16,6 +16,7 @@ import {
   IOReturn,
   IOThen,
   Partial,
+  type PreparedBlock,
   type Slot,
   Thunk,
   TurtleValue,
@@ -90,7 +91,7 @@ function childCodes(code: Core): [Core, boolean][] {
       return outer(code.args);
     }
     case 'deferredDo': {
-      return outer([code.ordinary, code.io]);
+      return outer(code.ordinary ? [code.ordinary, code.io] : [code.io]);
     }
     case 'method':
     case 'super': {
@@ -196,9 +197,13 @@ function pushStackFrame(frame: Frame, scannedEnvs: Set<Env>, push: Push): void {
   if (frame.k === 'update' && frame.code) pushRefs(freeVarsOf(frame.code), frame.env, push);
   else if (frame.k === 'apply' || frame.k === 'prim') for (const arg of frame.args) push(arg);
   else if (frame.k === 'ioBind' || frame.k === 'ioThen') push(frame.next);
-  else if (frame.k === 'do') push(frame.result);
-  else if (frame.k === 'case' || frame.k === 'charCase' || frame.k === 'deferredDo') {
-    if (frame.k === 'deferredDo') push(frame.ordinary);
+  else if (frame.k === 'do') {
+    push(frame.result);
+    pushPreparedActions(frame.prefix, push, frame.index);
+  } else if (frame.k === 'deferredDo') {
+    push(frame.ordinary);
+    push(frame.action);
+  } else if (frame.k === 'case' || frame.k === 'charCase') {
     for (let current: Env | undefined = frame.env; current && !scannedEnvs.has(current); current = current.parent) {
       scannedEnvs.add(current);
       for (const slot of current.slots) push(slot);
@@ -207,7 +212,7 @@ function pushStackFrame(frame: Frame, scannedEnvs: Set<Env>, push: Push): void {
 }
 
 // code-gauge-allow functionCognitiveComplexity 22 -- One branch per kind of runtime value.
-// code-gauge-allow functionNcss 39 -- One branch per kind of runtime value.
+// code-gauge-allow functionNcss 40 -- One branch per kind of runtime value.
 function pushReferences(value: object, push: Push): void {
   if (value instanceof ConValue) {
     for (const field of value.fields) push(field);
@@ -222,6 +227,7 @@ function pushReferences(value: object, push: Push): void {
     for (const arg of value.args) push(arg);
   } else if (value instanceof IODo) {
     pushRefs(freeVarsOf(value.code), value.env, push);
+    pushPreparedActions(value.prepared, push);
   } else if (value instanceof IOBind || value instanceof IOThen) {
     push(value.action);
     push(value.next);
@@ -232,4 +238,9 @@ function pushReferences(value: object, push: Push): void {
   } else if (value instanceof Dict) {
     for (const slot of [...value.methods, ...value.supers, ...value.args]) push(slot);
   }
+}
+
+function pushPreparedActions(block: PreparedBlock | undefined, push: Push, start = 0): void {
+  if (!block) return;
+  for (const [index, action] of block.actions) if (index >= start) push(action);
 }

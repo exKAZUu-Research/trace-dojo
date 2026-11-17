@@ -109,7 +109,6 @@ export class Codegen {
   private visible = OrderedMap<string, VisibleBinding>();
   private readonly recursion = new RecursionBudget();
   private readonly untracedDoTypes = new Set<object>();
-  private ordinaryIO = false;
   /** The dictionary parameters of the bindings whose bodies are being generated, for their recursive uses. */
   private readonly ownDictParams = new Map<LocalVar | ValueEntity, DictParam[]>();
   readonly claimedAtomicRows = new Set<number>();
@@ -627,7 +626,7 @@ export class Codegen {
   }
 
   private bodyExpr(expr: RExpr, ioResult: boolean): Core {
-    return ioResult && !this.ordinaryIO ? this.ioBlock(expr) : this.compileExpr(expr);
+    return ioResult ? this.ioBlock(expr) : this.compileExpr(expr);
   }
 
   // -------------------------------------------------------------------------------------------------------------
@@ -828,7 +827,7 @@ export class Codegen {
       let body: Core;
       const inner = stripParens(expr.body);
       const binding = { row: expr.span.row, names: expr.pats.flatMap(patternLocals).map((local) => local.name) };
-      if (ioResult && !this.ordinaryIO) {
+      if (ioResult) {
         body = this.ioBlock(expr.body, binding);
       } else if (this.options.isProgram && inner.k === 'do') {
         body = this.compileDo(inner, binding);
@@ -974,8 +973,7 @@ export class Codegen {
 
   private compileDo(expr: Extract<RExpr, { k: 'do' }>, binding?: { row: number; names: string[] }): Core {
     if (this.options.isProgram && expr.type && isIOType(expr.type)) {
-      if (!this.ordinaryIO) return this.ioBlock(expr, binding);
-      return this.hasSequencing(expr.stmts) ? this.compileIODo(expr, binding) : this.compileLetChain(expr.stmts, 0);
+      return this.ioBlock(expr, binding);
     }
     const head = expr.type ? splitApp(expr.type).head : undefined;
     const key = head?.tag === 'tcon' ? head.entity : (head ?? expr);
@@ -983,13 +981,13 @@ export class Codegen {
       return this.compileOrdinaryDo(expr);
     }
     this.untracedDoTypes.add(key);
-    let ordinary: Core;
+    let ordinary: Core | undefined;
     try {
-      ordinary = this.compileOrdinaryDo(expr);
+      if (this.hasSequencing(expr.stmts)) ordinary = this.compileOrdinaryDo(expr);
     } finally {
       this.untracedDoTypes.delete(key);
     }
-    if (this.options.traceTypes) ordinary.displayType = expr.type;
+    if (this.options.traceTypes && ordinary) ordinary.displayType = expr.type;
     return { k: 'deferredDo', ordinary, io: this.compileIODo(expr, binding) };
   }
 
@@ -1206,7 +1204,6 @@ export class Codegen {
     const inner = stripParens(expr);
     if (inner.k === 'do' && this.hasSequencing(inner.stmts)) return this.compileIODo(inner, binding);
     if (!binding && isReturnUnit(inner, this.options.support)) return this.compileExpr(inner);
-    const ordinary = this.compileOrdinaryIO(inner);
     const io =
       inner.k === 'do'
         ? this.compileIODo(inner, binding)
@@ -1229,17 +1226,7 @@ export class Codegen {
               entryVisible: this.snapshotVisible(),
             };
           });
-    return { k: 'deferredDo', ordinary, io };
-  }
-
-  private compileOrdinaryIO(expr: RExpr): Core {
-    const saved = this.ordinaryIO;
-    this.ordinaryIO = true;
-    try {
-      return this.compileExpr(expr);
-    } finally {
-      this.ordinaryIO = saved;
-    }
+    return { k: 'deferredDo', io };
   }
 
   private hasSequencing(stmts: readonly RStmt[]): boolean {
