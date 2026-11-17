@@ -118,6 +118,8 @@ export interface Signature {
 export interface IndexInfo {
   type: Type;
   readonly: boolean;
+  /** The template literal patterns a string index signature is declared for, as `` `a${string}` ``, absent for all strings. */
+  keyPatterns?: Type[];
 }
 
 export interface Structure {

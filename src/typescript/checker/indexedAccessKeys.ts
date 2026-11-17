@@ -2,6 +2,8 @@ import type { Checker } from './checker';
 import { isNumericName } from './syntax';
 import {
   type ConditionalType,
+  type IndexInfo,
+  intersectionOf,
   isAnyLike,
   isIntrinsic,
   type LiteralType,
@@ -14,6 +16,14 @@ import {
 /** The types that the conditional types around an indexed access check a type parameter against. */
 type ExtendsTypes = (parameter: TypeParameter) => Type[];
 
+/** The indexed type parameter and what stands for it along the path to a key. */
+interface KeyContext {
+  object: TypeParameter;
+  constraints: Type[];
+  extendsTypes: ExtendsTypes;
+  visited: Set<number>;
+}
+
 /** Decides which keys may index a type parameter, as TypeScript's TS2536 does for an indexed access type. */
 export class IndexedAccessKeys {
   constructor(private readonly c: Checker) {}
@@ -23,19 +33,23 @@ export class IndexedAccessKeys {
    * is as unconstrained as `T`, and the types conditional types narrow it to.
    */
   isInvalid(object: TypeParameter, key: Type, extendsTypes: ExtendsTypes): boolean {
-    return this.isInvalidKey(object, constraintsOf(this.c, object, extendsTypes), key, extendsTypes, new Set());
+    const context = {
+      object,
+      constraints: constraintsOf(this.c, object, extendsTypes),
+      extendsTypes,
+      visited: new Set<number>(),
+    };
+    return this.isInvalidKey(context, key, true);
   }
 
-  /** A type parameter key is valid when one of its constraints is, and `keyof X` when `object` stands for a subtype of `X`. */
-  private isInvalidKey(
-    object: TypeParameter,
-    constraints: Type[],
-    key: Type,
-    extendsTypes: ExtendsTypes,
-    visited: Set<number>
-  ): boolean {
-    const next = (member: Type): boolean => this.isInvalidKey(object, constraints, member, extendsTypes, visited);
-    const isMissing = (): boolean => !constraints.some((constraint) => this.hasKey(constraint, key));
+  /**
+   * A type parameter key is valid when one of its constraints is, and `keyof X` when `object` stands for a subtype of `X`.
+   * Only a key written as a union member of the index, not one a constraint gives, indexes a number index signature by
+   * a numeric string, as TypeScript tests only the index's own members for that.
+   */
+  private isInvalidKey(context: KeyContext, key: Type, written: boolean): boolean {
+    const next = (member: Type): boolean => this.isInvalidKey(context, member, written);
+    const isMissing = (): boolean => !context.constraints.some((constraint) => this.hasKey(constraint, key, written));
     switch (key.kind) {
       case 'union': {
         return key.types.some(next);
@@ -52,23 +66,23 @@ export class IndexedAccessKeys {
       }
       case 'templateLiteral':
       case 'stringMapping': {
-        const constraint = this.stringKeyConstraint(key);
-        return constraint === key ? isMissing() : next(constraint);
+        const constraint = this.stringKeyConstraint(key, context.extendsTypes);
+        return constraint === key ? isMissing() : this.isInvalidKey(context, constraint, false);
       }
       case 'conditional': {
-        return this.isInvalidConditional(object, constraints, key, extendsTypes, visited);
+        return this.isInvalidConditional(context, key);
       }
       case 'object': {
         return true;
       }
       case 'keyof': {
         return (
-          key.type.id !== object.id &&
-          !constraints.some((constraint) => this.c.relations.isAssignable(constraint, key.type))
+          key.type.id !== context.object.id &&
+          !context.constraints.some((constraint) => this.c.relations.isAssignable(constraint, key.type))
         );
       }
       case 'typeParameter': {
-        return this.isInvalidParameterKey(key, extendsTypes, visited, next);
+        return this.isInvalidParameterKey(context, key);
       }
       default: {
         return false;
@@ -77,16 +91,14 @@ export class IndexedAccessKeys {
   }
 
   /** A type parameter key is invalid when each of its constraints is; one met again on the same path adds nothing. */
-  private isInvalidParameterKey(
-    key: TypeParameter,
-    extendsTypes: ExtendsTypes,
-    visited: Set<number>,
-    next: (member: Type) => boolean
-  ): boolean {
+  private isInvalidParameterKey(context: KeyContext, key: TypeParameter): boolean {
+    const { visited } = context;
     if (visited.has(key.id)) return false;
     visited.add(key.id);
     try {
-      return constraintsOf(this.c, key, extendsTypes).every(next);
+      return constraintsOf(this.c, key, context.extendsTypes).every((member) =>
+        this.isInvalidKey(context, member, false)
+      );
     } finally {
       visited.delete(key.id);
     }
@@ -94,21 +106,17 @@ export class IndexedAccessKeys {
 
   /**
    * A conditional key is valid when both branches are, the true one seeing its check type narrowed to the extends type,
-   * or else, when it distributes, when it is valid for the constraint of its check type.
+   * or else, when it distributes, when it is valid for each type its check type's constraint may stand for.
    */
-  private isInvalidConditional(
-    object: TypeParameter,
-    constraints: Type[],
-    key: ConditionalType,
-    extendsTypes: ExtendsTypes,
-    visited: Set<number>
-  ): boolean {
+  private isInvalidConditional(context: KeyContext, key: ConditionalType): boolean {
     const { checkType } = key;
     const trueExtendsTypes: ExtendsTypes = (parameter) =>
-      parameter.id === checkType.id ? [...extendsTypes(parameter), key.extendsType] : extendsTypes(parameter);
+      parameter.id === checkType.id
+        ? [...context.extendsTypes(parameter), key.extendsType]
+        : context.extendsTypes(parameter);
     if (
-      !this.isInvalidKey(object, constraints, key.trueType, trueExtendsTypes, visited) &&
-      !this.isInvalidKey(object, constraints, key.falseType, extendsTypes, visited)
+      !this.isInvalidKey({ ...context, extendsTypes: trueExtendsTypes }, key.trueType, false) &&
+      !this.isInvalidKey(context, key.falseType, false)
     )
       return false;
     const checkConstraint = checkType.kind === 'typeParameter' ? this.c.constraintOf(checkType) : undefined;
@@ -117,15 +125,37 @@ export class IndexedAccessKeys {
     return (
       isIntrinsic(distributed, 'never') ||
       distributed.kind === 'conditional' ||
-      this.isInvalidKey(object, constraints, distributed, extendsTypes, visited)
+      this.isInvalidKey(context, distributed, false) ||
+      this.subtypeTrueBranches(key, checkConstraint).some((branch) => this.isInvalidKey(context, branch, false))
     );
   }
 
-  /** A template literal or string mapping key with its type parameters replaced by their constraints. */
-  private stringKeyConstraint(key: Type): Type {
+  /**
+   * The true branches a conditional takes for subtypes of a member of its check type's constraint that it does not
+   * take for the member itself, as for `K extends "b" ? K : "a"` with `K extends string`, where `K` may be `"b"`.
+   */
+  private subtypeTrueBranches(key: ConditionalType, checkConstraint: Type): Type[] {
+    const members = checkConstraint.kind === 'union' ? checkConstraint.types : [checkConstraint];
+    return members.flatMap((member) => {
+      const mapper = new Map([[key.checkType.id, member]]);
+      const extendsType = this.c.instantiate(key.extendsType, mapper);
+      const extendsMembers = extendsType.kind === 'union' ? extendsType.types : [extendsType];
+      return !this.c.relations.isAssignable(member, extendsType) &&
+        extendsMembers.some((extendsMember) => this.c.relations.isAssignable(extendsMember, member))
+        ? [this.c.instantiate(key.trueType, mapper)]
+        : [];
+    });
+  }
+
+  /**
+   * A template literal or string mapping key with its type parameters replaced by their constraints, narrowed by the
+   * conditional types around it.
+   */
+  private stringKeyConstraint(key: Type, extendsTypes: ExtendsTypes): Type {
     const mapper = new Map<number, Type>();
     const collect = (type: Type): void => {
-      if (type.kind === 'typeParameter') mapper.set(type.id, this.c.baseConstraint(type));
+      if (type.kind === 'typeParameter')
+        mapper.set(type.id, intersectionOf([this.c.baseConstraint(type), ...extendsTypes(type)], this.c.budget));
       else if (type.kind === 'templateLiteral') for (const member of type.types) collect(member);
       else if (type.kind === 'stringMapping') collect(type.type);
     };
@@ -135,10 +165,16 @@ export class IndexedAccessKeys {
 
   /**
    * Whether `key`, a literal, a primitive key type, or a template literal or string mapping without type parameters, is
-   * assignable to `keyof type`. Visited types are tracked per path, so a member shared by sibling alternatives keeps its
-   * answer, which one lookup remembers for every path.
+   * assignable to `keyof type`, or, when `written`, indexes its number index signature. Visited types are tracked per
+   * path, so a member shared by sibling alternatives keeps its answer, which one lookup remembers for every path.
    */
-  private hasKey(type: Type, key: Type, path = new Set<number>(), answers = new Map<number, boolean>()): boolean {
+  private hasKey(
+    type: Type,
+    key: Type,
+    written: boolean,
+    path = new Set<number>(),
+    answers = new Map<number, boolean>()
+  ): boolean {
     if (isAnyLike(type) || isIntrinsic(type, 'never')) return true;
     const known = answers.get(type.id);
     if (known !== undefined) return known;
@@ -146,7 +182,7 @@ export class IndexedAccessKeys {
     this.c.budget.spend();
     path.add(type.id);
     try {
-      const result = this.hasKeyOnPath(type, key, path, answers);
+      const result = this.hasKeyOnPath(type, key, written, path, answers);
       answers.set(type.id, result);
       return result;
     } finally {
@@ -154,8 +190,14 @@ export class IndexedAccessKeys {
     }
   }
 
-  private hasKeyOnPath(type: Type, key: Type, path: Set<number>, answers: Map<number, boolean>): boolean {
-    const next = (member: Type): boolean => this.hasKey(member, key, path, answers);
+  private hasKeyOnPath(
+    type: Type,
+    key: Type,
+    written: boolean,
+    path: Set<number>,
+    answers: Map<number, boolean>
+  ): boolean {
+    const next = (member: Type): boolean => this.hasKey(member, key, written, path, answers);
     if (type.kind === 'union') return type.types.every(next);
     if (type.kind === 'intersection') return type.types.some(next);
     if (type.kind !== 'object') {
@@ -164,19 +206,23 @@ export class IndexedAccessKeys {
       const constraint = this.c.relations.isGeneric(type) ? this.c.baseConstraint(type) : this.c.apparentType(type);
       return constraint !== type && next(constraint);
     }
-    return this.structureHasKey(type, key);
+    return this.structureHasKey(type, key, written);
   }
 
-  private structureHasKey(type: Type, key: Type): boolean {
+  private structureHasKey(type: Type, key: Type, written: boolean): boolean {
     const structure = this.c.structureOf(type);
     const name = key.kind === 'literal' ? key.value : undefined;
     if (isIntrinsic(key, 'symbol') || typeof name === 'symbol')
       return structure.symbolIndex !== undefined || (key.kind === 'literal' && this.propertyHasKey(structure, key));
-    if (structure.stringIndex) return true;
-    if (key.kind !== 'literal') return isNumberLikeKey(key) && structure.numberIndex !== undefined;
-    if (typeof name !== 'string' && typeof name !== 'number') return false;
-    if (structure.numberIndex && (typeof name === 'number' || isNumericName(name))) return true;
-    return this.propertyHasKey(structure, key);
+    if (structure.stringIndex && this.stringIndexHasKey(structure.stringIndex, key)) return true;
+    if (structure.numberIndex && (isIntrinsic(key, 'number') || typeof name === 'number')) return true;
+    if (structure.numberIndex && written && isNumericStringKey(key)) return true;
+    return key.kind === 'literal' && this.propertyHasKey(structure, key);
+  }
+
+  /** Whether a string index signature, which covers numbers too when declared for all strings, covers a key. */
+  private stringIndexHasKey(index: IndexInfo, key: Type): boolean {
+    return index.keyPatterns?.some((pattern) => this.c.relations.isAssignable(key, pattern)) ?? true;
   }
 
   /**
@@ -198,10 +244,13 @@ function constraintsOf(c: Checker, parameter: TypeParameter, extendsTypes: Exten
   return [constraint && !isIntrinsic(constraint, 'any') ? constraint : unknownType, ...extendsTypes(parameter)];
 }
 
-/** Whether a key may index a number index signature: `number` or `` `${number}` ``. */
-function isNumberLikeKey(key: Type): boolean {
+/** Whether a key is a string that a number index signature applies to: `` `${number}` `` or a numeric literal. */
+function isNumericStringKey(key: Type): boolean {
+  if (key.kind === 'literal') return typeof key.value === 'string' && isNumericName(key.value);
   return (
-    isIntrinsic(key, 'number') ||
-    (key.kind === 'templateLiteral' && key.texts.every((text) => text === '') && isIntrinsic(key.types[0], 'number'))
+    key.kind === 'templateLiteral' &&
+    key.types.length === 1 &&
+    key.texts.every((text) => text === '') &&
+    isIntrinsic(key.types[0], 'number')
   );
 }

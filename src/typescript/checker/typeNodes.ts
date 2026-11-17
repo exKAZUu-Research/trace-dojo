@@ -539,12 +539,9 @@ export class TypeNodes {
     };
     const keyType = indexType ? this.typeFromNode(indexType) : stringType;
     for (const key of keyType.kind === 'union' ? keyType.types : [keyType]) {
-      const indexKey = isIntrinsic(key, 'number')
-        ? 'numberIndex'
-        : isIntrinsic(key, 'symbol')
-          ? 'symbolIndex'
-          : 'stringIndex';
-      structure[indexKey] = info;
+      if (isIntrinsic(key, 'number')) structure.numberIndex = info;
+      else if (isIntrinsic(key, 'symbol')) structure.symbolIndex = info;
+      else structure.stringIndex = { ...info, keyPatterns: stringIndexPatterns(structure.stringIndex, key) };
     }
   }
 
@@ -708,4 +705,10 @@ function isOutsideGenericDeclarations(node: TreeNode): boolean {
 
 function unionAlias(symbol: Sym): UnionAlias {
   return { id: symbol.id, type: () => symbol.declaredType };
+}
+
+/** The patterns a string index signature covers once one declared for `key` joins `existing`, absent for all strings. */
+function stringIndexPatterns(existing: IndexInfo | undefined, key: Type): Type[] | undefined {
+  if (isIntrinsic(key, 'string') || (existing && !existing.keyPatterns)) return undefined;
+  return [...(existing?.keyPatterns ?? []), key];
 }
