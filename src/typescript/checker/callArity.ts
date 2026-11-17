@@ -27,14 +27,17 @@ export class CallArity {
       : signature.parameters.length;
   }
 
-  /** How many arguments an argument passes: a spread one passes its tuple's length, or an unknown count. */
+  /**
+   * How many arguments an argument passes: a spread one passes its tuple's length, optional elements included as
+   * TypeScript counts them, or an unknown count.
+   */
   spreadLength(arg: TreeNode): number | undefined {
     if (arg.type !== 'spread_element') return 1;
     const type = this.c.silently(() => this.c.expressions.check(named(arg)[0]));
     if (
       type.kind === 'object' &&
       type.objectKind === 'tuple' &&
-      !(type.tuple?.elements ?? []).some((element) => element.rest || element.optional)
+      !(type.tuple?.elements ?? []).some((element) => element.rest)
     )
       return type.tuple?.elements.length;
     return undefined;

@@ -578,14 +578,17 @@ export class Calls {
   ): { count: number; fits: boolean } {
     const spreadType = this.c.expressions.check(named(arg)[0]);
     if (spreadType.kind === 'object' && spreadType.objectKind === 'tuple') {
-      const elements = spreadType.tuple?.elements ?? [];
+      // An optional element passes `undefined` when the tuple is shorter.
+      const elements = (spreadType.tuple?.elements ?? []).map((element) =>
+        element.optional ? unionOf([element.type, undefinedType]) : element.type
+      );
       const misfit = elements.findIndex((element, offset) => {
         const parameterType = this.parameterTypeAt(signature, index + offset);
-        return parameterType && !this.c.relations.isAssignable(element.type, parameterType);
+        return parameterType && !this.c.relations.isAssignable(element, parameterType);
       });
       // TypeScript reports the first element that does not fit.
       if (report && misfit !== -1)
-        this.reportArgument(arg, elements[misfit].type, this.parameterTypeAt(signature, index + misfit) as Type);
+        this.reportArgument(arg, elements[misfit], this.parameterTypeAt(signature, index + misfit) as Type);
       return { count: elements.length, fits: misfit === -1 };
     }
     const element = this.c.patterns.iteratedType(arg, spreadType);
