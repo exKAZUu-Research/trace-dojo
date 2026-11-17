@@ -10,6 +10,7 @@ import {
   errorType,
   isIntrinsic,
   literalType,
+  neverType,
   numberType,
   type ObjectType,
   type Property,
@@ -205,7 +206,13 @@ export class AssignmentChecker {
     const operator = node.childForFieldName('operator')?.text ?? '+=';
     const targetType = this.targetType(left, true);
     if (operator === '&&=' || operator === '||=' || operator === '??=') {
-      const valueType = this.c.expressions.check(right, targetType);
+      // The right operand runs only on some paths, so its effects join the path that skips it.
+      const skipped = this.c.flow.current;
+      let valueType: Type = neverType;
+      const evaluated = this.c.flow.from(skipped, () => {
+        valueType = this.c.expressions.check(right, targetType);
+      });
+      this.c.flow.current = this.c.flow.merge([skipped, evaluated]);
       if (targetType !== errorType)
         this.c.expressions.checkAssignable(skipParentheses(left), valueType, this.declaredTargetType(left));
       const kept =
