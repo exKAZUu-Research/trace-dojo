@@ -1553,6 +1553,19 @@ function main() {
 main();`,
   ],
   [
+    'apply checking its receiver first, and receivers named as V8 names them',
+    `const apply = Function.prototype.apply;
+for (const recv of [{}, 1, "s", null, undefined, [1], Symbol("q")]) {
+  try { apply.call(recv, null, { get length() { console.log("read"); return 0; } }); } catch (e) { console.log(e.constructor.name, e.message); }
+}
+try { apply.call(() => 1, null, { get length() { throw "custom"; } }); } catch (e) { console.log("caught", e); }
+try { Math.max.apply(null, 5); } catch (e) { console.log(e.message); }
+for (const r of [new Map(), Object.create(null), new (class Foo {})(), new Date(0), /x/, 1n, true]) try { apply.call(r, null, []); } catch (e) { console.log(e.message); }
+for (const r of [new Error("x"), new TypeError(""), new Boolean(true), new Number(1), new String("s"), Object(Symbol("z")), Object(2n)]) try { apply.call(r, null, []); } catch (e) { console.log(e.message); }
+const m = new Map(); try { Map.prototype.get.call(new Date(0), 1); } catch (e) { console.log(e.message); }
+try { Set.prototype.has.call(new Error("boom"), 1); } catch (e) { console.log(e.message); }`,
+  ],
+  [
     'localeCompare with locales and options',
     `console.log(["file10", "file9", "File2"].sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" })));
 console.log("a".localeCompare("A", undefined, { sensitivity: "base" }), "10".localeCompare("9", undefined, { numeric: true }), "ä".localeCompare("z", "sv"), "ä".localeCompare("z"));

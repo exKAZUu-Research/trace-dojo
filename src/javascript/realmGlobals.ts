@@ -175,6 +175,14 @@ function defineFunction(builder: RealmBuilder): void {
     runtime.call(thisValue, args[0], args.slice(1), callRow)
   );
   builder.method(functionPrototype, 'apply', 2, ({ runtime, thisValue, args, callRow }) => {
+    // The receiver is checked before the argument list, whose getters may have effects.
+    if (!isCallable(thisValue)) {
+      const kind = thisValue === null ? 'null' : typeof thisValue === 'object' ? 'an object' : `a ${typeof thisValue}`;
+      runtime.throwError(
+        'TypeError',
+        `Function.prototype.apply was called on ${runtime.describePlain(thisValue)}, which is ${thisValue === undefined ? 'undefined' : kind} and not a function`
+      );
+    }
     return runtime.call(thisValue, args[0], listFromArrayLike(runtime, args[1]), callRow);
   });
   builder.method(functionPrototype, 'bind', 1, ({ runtime, thisValue, args }) => {

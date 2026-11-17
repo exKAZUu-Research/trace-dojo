@@ -13,6 +13,7 @@ import { notIterableMessage } from './iterationErrors';
 import { defineFunctionProperties } from './memberProperties';
 import { EventLoop } from './promises';
 import { createRealm, type ErrorName, type Realm } from './realm';
+import { dateValueOf } from './realmDate';
 import { WELL_KNOWN_SYMBOLS } from './realmIterators';
 import {
   type AccessorProperty,
@@ -304,6 +305,9 @@ export class Runtime {
   receiverText(target: JsObject): string {
     if (target instanceof JsArray) return '[object Array]';
     if (target.regexp) return '[object RegExp]';
+    if (dateValueOf(target) !== undefined) return '[object Date]';
+    if (target.primitive !== undefined) return `[object ${primitiveClassName(target.primitive)}]`;
+    if (target.isError) return this.errorReceiverText(target);
     // A builtin iterator has no constructor of its own, so V8 names it by its tag.
     if (target.hostIterator) return `[object ${this.toString(this.get(target, WELL_KNOWN_SYMBOLS.toStringTag))}]`;
     if (target instanceof JsFunction) return this.functionSource(target);
@@ -313,6 +317,18 @@ export class Runtime {
         ? this.functionName(constructor.value)
         : '';
     return name ? `#<${name}>` : '[object Object]';
+  }
+
+  /** V8's side-effect-free text of an error: its `name` and `message` when both are plain data, as `Error: x`. */
+  private errorReceiverText(error: JsObject): string {
+    const read = (key: string, fallback: string): string => {
+      const property = this.findProperty(error, key);
+      if (!property) return fallback;
+      return !isAccessor(property) && typeof property.value === 'string' ? property.value : fallback;
+    };
+    const name = read('name', 'Error');
+    const message = read('message', '');
+    return message === '' ? name : name === '' ? message : `${name}: ${message}`;
   }
 
   /** Throws the TypeError of a refused assignment or deletion in strict mode code, which other code ignores. */
@@ -1026,4 +1042,24 @@ function ownElement(value: Value, key: Key): Value | typeof MISSING {
 /** Defines a non-enumerable data property, as builtin methods and `name` are. */
 export function defineHidden(object: JsObject, key: Key, value: Value, writable = true): void {
   object.properties.set(key, { value, writable, enumerable: false, configurable: true });
+}
+
+function primitiveClassName(primitive: Value): string {
+  switch (typeof primitive) {
+    case 'string': {
+      return 'String';
+    }
+    case 'number': {
+      return 'Number';
+    }
+    case 'boolean': {
+      return 'Boolean';
+    }
+    case 'bigint': {
+      return 'BigInt';
+    }
+    default: {
+      return 'Symbol';
+    }
+  }
 }
