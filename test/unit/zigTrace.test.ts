@@ -2,6 +2,7 @@ import { expect, test } from 'vitest';
 
 import { executeProgram, traceProgram } from '../../src/interpreter/program';
 import type { TraceItem } from '../../src/problems/trace';
+import { traceZigProgram } from '../../src/zig/trace';
 
 const javaMain = (body: string, members = ''): string => `public class Main {
   public static void main(String[] args) {
@@ -392,9 +393,15 @@ _=&q;
 });
 
 test.each([false, true])('many atomic function headers are indexed (multiline: %s)', (multiline) => {
-  const headers = Array.from({ length: 8000 }, (_, index) =>
-    multiline ? `fn fun${index}(\n) void // atomic\n{\n}\n` : `fn fun${index}() void { // atomic\n}\n`
-  ).join('');
-  const source = `${headers}pub fn main()void{}`;
-  expect(traceProgram('zig', source, source).uncaughtException).toBeUndefined();
+  const atomicAnnotations = new Map<number, number>();
+  let offset = 0;
+  let row = 0;
+  const headers = Array.from({ length: 8000 }, (_, index) => {
+    const header = multiline ? `fn fun${index}(\n) void // atomic\n{\n}\n` : `fn fun${index}() void { // atomic\n}\n`;
+    atomicAnnotations.set(row + (multiline ? 1 : 0), offset + header.indexOf('// atomic'));
+    offset += header.length;
+    row += multiline ? 4 : 2;
+    return header;
+  }).join('');
+  expect(traceZigProgram(`${headers}pub fn main()void{}`, { atomicAnnotations }).uncaughtException).toBeUndefined();
 });

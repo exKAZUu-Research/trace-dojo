@@ -659,22 +659,17 @@ const ESCAPES: Record<number, string> = {
   0x22: String.raw`\"`,
 };
 
-/** The UTF-8 sequence at a byte, and whether `stringEscape` writes it as hex escapes. */
-// code-gauge-allow functionCognitiveComplexity 16 -- Transcribes the corresponding function of Zig's standard library or compiler step by step.
+const quotedUtf8Decoder = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true });
+
 function utf8Sequence(bytes: readonly number[], index: number): { length: number; escape: boolean } {
   const byte = bytes[index];
-  const length = byte >= 0xf0 && byte < 0xf8 ? 4 : byte >= 0xe0 ? 3 : byte >= 0xc0 ? 2 : 0;
-  // A truncated sequence, a stray continuation byte, or a bad lead byte is escaped one byte at a time.
-  if (length === 0 || index + length > bytes.length) return { length: 1, escape: true };
-  let codePoint = byte & (0xff >> (length + 1));
-  for (const continuation of bytes.slice(index + 1, index + length)) {
-    if ((continuation & 0xc0) !== 0x80) return { length: 1, escape: true };
-    codePoint = (codePoint << 6) | (continuation & 0x3f);
+  const length = byte >= 0xf0 ? 4 : byte >= 0xe0 ? 3 : 2;
+  try {
+    const point = quotedUtf8Decoder.decode(new Uint8Array(bytes.slice(index, index + length))).codePointAt(0);
+    return { length, escape: point !== undefined && [0xfe_ff, 0x85, 0x20_28, 0x20_29].includes(point) };
+  } catch {
+    return { length: 1, escape: true };
   }
-  const overlong = codePoint < [0, 0, 0x80, 0x8_00, 0x1_00_00][length];
-  if (overlong || (codePoint >= 0xd8_00 && codePoint <= 0xdf_ff)) return { length: 1, escape: true };
-  const special = codePoint > 0x10_ff_ff || [0xfe_ff, 0x85, 0x20_28, 0x20_29].includes(codePoint);
-  return { length, escape: special };
 }
 
 /** `printByteSize`: a byte count in SI (`kB`, `MB`, ...) or IEC (`KiB`, `MiB`, ...) units. */

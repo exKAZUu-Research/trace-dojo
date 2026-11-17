@@ -4191,3 +4191,71 @@ test('generic container contexts canonicalize function declaration arguments', (
     uncaughtException: undefined,
   });
 });
+
+test.each([
+  ['packed struct{a:f80,b:u48}', '.{.a=1.5,.b=0x123456789abc}', 'p.a'],
+  ['packed struct{inner:packed struct{a:f80},b:u48}', '.{.inner=.{.a=1.5},.b=0x123456789abc}', 'p.inner.a'],
+])('packed f80 fields use their logical width: %s', (type, value, access) => {
+  const source = `const std=@import("std");const S=${type};pub fn main()!void{var bytes:[31]u8=undefined;var f=std.heap.FixedBufferAllocator.init(&bytes);const p=try f.allocator().create(S);p.*=${value};std.debug.print("allocated {d} {x}",.{${access},p.b});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: 'allocated 1.5 123456789abc',
+    uncaughtException: undefined,
+  });
+});
+
+test.each([
+  ['u8', 'x'],
+  ['bool', 'x==7'],
+  ['*const u8', '&x'],
+])('nested functions cannot capture an outer runtime constant as %s', (type, value) => {
+  const source = `const std=@import("std");fn outer(n:u8)${type}{const x=n;const S=struct{fn get()${type}{return ${value};}};return S.get();}pub fn main()void{_=outer(7);}`;
+  expect(executeProgram('zig', source)).toMatchObject({ kind: 'compileError' });
+});
+
+test('nested functions retain compile-time values without reading another frame', () => {
+  const source = `const std=@import("std");pub fn main()void{const x:u8=7;const S=struct{fn get()*const u8{return &x;}};std.debug.print("{} {}",.{S.get().*,S.get()==&x});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: '7 true',
+    uncaughtException: undefined,
+  });
+});
+
+test.each([
+  ['*[0]u8', '|_|{n+=1;}', '0'],
+  ['*[2]void', '|_|{n+=1;}', '2'],
+  ['*[2]void', '|*item|{item.*={};n+=1;}', '2'],
+])('array pointer loops avoid zero-byte dereferences: %s %s', (type, body, expected) => {
+  const source = `const std=@import("std");pub fn main()void{var p:${type}=undefined;_=&p;var n:usize=0;for(p)${body}std.debug.print("{}",.{n});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: expected,
+    uncaughtException: undefined,
+  });
+});
+
+test('array pointer loops still fault when they actually read memory', () => {
+  expect(executeProgram('zig', 'pub fn main()void{var p:*[2]u8=undefined;_=&p;for(p)|item|{_=item;}}')).toMatchObject({
+    kind: 'executed',
+    uncaughtException: 'Segmentation fault',
+  });
+});
+
+test.each([
+  [String.raw`\xff\x80\x80`, String.raw`"\xff\x80\x80"`],
+  [String.raw`\xf8\x80\x80`, String.raw`"\xf8\x80\x80"`],
+  [String.raw`\xf5\x80\x80\x80`, String.raw`"\xf5\x80\x80\x80"`],
+  [String.raw`\xc0\x80`, String.raw`"\xc0\x80"`],
+  [String.raw`\xe3\x81`, String.raw`"\xe3\x81"`],
+  [String.raw`\xe3\x81\x82`, '"あ"'],
+  [String.raw`\xf0\x9f\x98\x80`, '"😀"'],
+  [String.raw`\xef\xbb\xbf`, String.raw`"\xef\xbb\xbf"`],
+])('quoted strings retain malformed UTF-8 byte identity: %s', (bytes, expected) => {
+  const source = `const std=@import("std");pub fn main()void{std.debug.print("{q}",.{"${bytes}"});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: expected,
+    uncaughtException: undefined,
+  });
+});

@@ -47,6 +47,7 @@ import {
   nullUnwrapPanic,
   type Place,
   runtime,
+  type Scope,
   SemaBase,
   staticResultOf,
   type TExpr,
@@ -283,6 +284,17 @@ export abstract class ExpressionCompiler extends SemaBase {
   }
 
   protected localReference(binding: LocalBinding, span: Span): TExpr {
+    let crossedNamespace = false;
+    for (let scope: Scope | undefined = this.scope; scope; scope = scope.parent) {
+      if (scope.locals?.get(binding.name) === binding) {
+        if (crossedNamespace) {
+          if (!binding.known) return this.error(span, `「${binding.name}」は、内側の関数や型から参照できません。`);
+          return known(binding.type, binding.value, span);
+        }
+        break;
+      }
+      crossedNamespace ||= scope.namespace !== undefined;
+    }
     const { slot } = binding;
     const place: Place = { isConst: binding.isConst, locate: (frame) => new Pointer(frame, slot) };
     if (binding.known) return { ...known(binding.type, binding.value, span), place, local: binding };
@@ -507,7 +519,7 @@ export abstract class ExpressionCompiler extends SemaBase {
       : runtime(type.child, (frame) => (evaluate(frame) as Pointer).load(), span, place);
   }
 
-  private zeroPointer(pointer: Pointer, type: Type): Pointer {
+  protected zeroPointer(pointer: Pointer, type: Type): Pointer {
     const storage = { slots: [undefinedValue(type)] };
     const location = pointer.storageLocation();
     registerStorageLocation(storage.slots, () => location, true);

@@ -4,6 +4,7 @@ import { isDiscardName } from './ast';
 import type { Capture, Expression, ExpressionOf, Label, Span, Statement, SwitchCase } from './ast';
 import { CallCompiler, type FunctionCompilation } from './calls';
 import type { FunctionInstance } from './functions';
+import { sizeOf } from './layout';
 import { type Frame, Jump, withHeldValues } from './runtime';
 import {
   copyForFrame,
@@ -40,6 +41,7 @@ import {
   VOID,
 } from './types';
 import {
+  arrayPointerView,
   ErrorValue,
   NULL,
   Pointer,
@@ -1627,8 +1629,8 @@ export abstract class StatementCompiler extends CallCompiler {
   }
 
   /** How a `for` reads an array, a pointer to one, or a slice, by value or by pointer. */
-  // code-gauge-allow functionNcss 51 -- Keeps the analysis and the generated code of one construct together, as Zig's Sema does.
-  // code-gauge-allow functionCognitiveComplexity 20 -- Keeps all loop operand views and their exact lengths together.
+  // code-gauge-allow functionNcss 57 -- Keeps the analysis and the generated code of one construct together, as Zig's Sema does.
+  // code-gauge-allow functionCognitiveComplexity 26 -- Keeps all loop operand views and their exact lengths together.
   private forOperand(
     compiled: TExpr,
     byPointer: boolean,
@@ -1656,11 +1658,12 @@ export abstract class StatementCompiler extends CallCompiler {
         return { slots: array, start: array.offset, length: array.lengthValue };
       };
     } else if (type.kind === 'pointer' && type.size === 'one' && type.child.kind === 'array') {
-      child = type.child.child;
+      const arrayType = type.child;
+      child = arrayType.child;
       isConst = type.isConst;
-      staticLength = type.child.length;
+      staticLength = arrayType.length;
       viewOf = (value) => {
-        const array = (value as Pointer).load() as ZArray;
+        const array = arrayPointerView(value as Pointer, arrayType);
         return { slots: array, start: array.offset, length: array.lengthValue };
       };
     } else if (type.kind === 'pointer' && type.size === 'slice') {
@@ -1678,10 +1681,11 @@ export abstract class StatementCompiler extends CallCompiler {
     } else {
       return this.error(span, `${typeName(type)} 型は、for で回せません。`);
     }
-    if (compiled.known && type.kind === 'array') {
-      const value = compiled.value;
-      evaluate = () => value;
-    } else if (type.kind === 'array') {
+    this.resolveStorage(child, span);
+    const zero = sizeOf(child) === 0;
+    if (type.kind === 'pointer' && (type.size === 'slice' || (!zero && staticLength !== 0n)))
+      this.checkMemoryOperand(compiled, span);
+    if (!compiled.known && type.kind === 'array') {
       const read = evaluate;
       evaluate = (frame) => copyForFrame(frame, read(frame), type);
     }
@@ -1689,13 +1693,15 @@ export abstract class StatementCompiler extends CallCompiler {
       type: byPointer ? pointerTo(child, isConst) : child,
       evaluate,
       staticLength,
-      lengthOf: (_frame, value) => viewOf(value).length,
+      lengthOf: (_frame, value) => staticLength ?? viewOf(value).length,
       element: byPointer
         ? (value, index) => {
             const view = viewOf(value);
-            return new Pointer(view.slots, view.start + index);
+            const pointer = new Pointer(view.slots, view.start + index);
+            return zero ? this.zeroPointer(pointer, child) : pointer;
           }
         : (value, index, frame) => {
+            if (zero) return undefinedValue(child);
             const view = viewOf(value);
             return copyForFrame(frame, view.slots.slots[view.start + index], child);
           },

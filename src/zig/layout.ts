@@ -140,7 +140,7 @@ export function optionalNicheBits(child: Type): number | undefined {
 }
 
 export function bitSizeOf(type: Type): number {
-  if (type.kind === 'int') return type.bits;
+  if (type.kind === 'int' || type.kind === 'float') return type.bits;
   if (type.kind === 'bool') return 1;
   if (type.kind === 'enum') return type.tagType?.bits ?? 0;
   if (type.kind === 'struct' && type.layout === 'packed')
