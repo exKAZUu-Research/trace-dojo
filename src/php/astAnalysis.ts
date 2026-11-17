@@ -207,3 +207,10 @@ export function validateReads(body: Stmt[]): void {
   };
   visit(body, false);
 }
+
+/** Whether a destructuring assigns any element by reference, at any depth. */
+export function hasReferenceItem(list: Extract<Expr, { k: 'list' }>): boolean {
+  return list.items.some(
+    (item) => item !== undefined && (item.byRef || (item.target.k === 'list' && hasReferenceItem(item.target)))
+  );
+}

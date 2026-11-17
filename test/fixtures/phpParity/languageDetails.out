@@ -1,0 +1,58 @@
+float(1)
+float(1)
+float(1)
+float(1)
+float(INF)
+float(0)
+float(1.844674407370955E+19)
+float(3.6893488147419103E+19)
+float(4.722366482869645E+21)
+float(7.378697629483821E+19)
+float(1.0E+19)
+Cannot access offset of type array on array
+Cannot access offset of type array on array
+Cannot access offset of type array in isset or empty
+Cannot unset offset of type array on array
+Cannot access offset of type stdClass on array
+Cannot access offset of type array in isset or empty
+Cannot access offset of type array on array
+
+Warning: Undefined property: stdClass::$p in /main.php on line 12
+
+Warning: Undefined property: stdClass::$q in /main.php on line 12
+
+Warning: Decrement on type null has no effect, this will change in the next major version of PHP in /main.php on line 12
+
+Warning: Undefined property: stdClass::$r in /main.php on line 12
+
+Warning: Undefined property: stdClass::$s in /main.php on line 12
+object(stdClass)#2 (4) {
+  ["p"]=>
+  int(1)
+  ["q"]=>
+  NULL
+  ["r"]=>
+  string(1) "x"
+  ["s"]=>
+  int(1)
+}
+
+Deprecated: Creation of dynamic property C::$w is deprecated in /main.php on line 13
+
+Warning: Undefined property: C::$w in /main.php on line 13
+array(2) {
+  [0]=>
+  string(4) "zero"
+  [12]=>
+  string(2) "tw"
+}
+bool(true)
+bool(true)
+4437
+30719
+f
+array(1) {
+  [0]=>
+  int(5)
+}
+first

@@ -37,6 +37,8 @@ export const MAGIC_RUNTIME = new Set(['__CLASS__', '__FUNCTION__', '__METHOD__',
 export interface LoopContext {
   /** The number of loops and switches enclosing the current statement in its function. */
   depth: number;
+  /** Whether each enclosing construct is a switch, innermost last, which `continue` treats as `break`. */
+  switches: boolean[];
 }
 
 export interface FunctionContext {
@@ -46,6 +48,9 @@ export interface FunctionContext {
   gotos: { label: string; row: number }[];
   className?: string;
   isMethod: boolean;
+  /** Whether the code is a function's body (not the file's), and whether that function is a closure. */
+  isFunction?: boolean;
+  isClosure?: boolean;
   /** The function's name in the names of the closures it defines, such as `A::m()`; undefined at the top level. */
   displayName?: string;
 }
@@ -58,13 +63,15 @@ export abstract class ConverterBase {
   protected classImports = new Map<string, string>();
   protected functionImports = new Map<string, string>();
   protected constImports = new Map<string, string>();
-  protected loop: LoopContext = { depth: 0 };
+  protected loop: LoopContext = { depth: 0, switches: [] };
   protected fn: FunctionContext = { isGenerator: false, labels: new Set(), gotos: [], isMethod: false };
   protected strictTypes = false;
   protected declaredFunctions = new Map<string, number>();
   /** The classes declared at run time so far (anonymous ones and those inside blocks), which number anonymous classes. */
   protected runtimeClasses = 0;
   protected currentClass?: string;
+  protected currentClassKind?: 'class' | 'interface' | 'trait';
+  protected currentClassHasParent = false;
   /** Whether the statement to convert follows `<?=`, which echoes it. */
   protected pendingEcho = false;
 
@@ -120,21 +127,34 @@ export abstract class ConverterBase {
   }
 
   protected classRef(node: Node): ClassRef {
-    if (node.type === 'relative_scope') {
-      const word = lower(node.text);
-      if (word === 'self') return { k: 'self' };
-      if (word === 'parent') return { k: 'parent' };
-      return { k: 'static' };
+    const isName = node.type === 'name' || node.type === 'qualified_name' || node.type === 'relative_name';
+    if (node.type !== 'relative_scope' && !isName) return { k: 'expr', e: this.expr(node) };
+    const raw = this.nameText(node);
+    const word = lower(raw);
+    if (word === 'self' || word === 'parent' || word === 'static') {
+      this.checkClassScope(node, word);
+      return { k: word };
     }
-    if (node.type === 'name' || node.type === 'qualified_name' || node.type === 'relative_name') {
-      const raw = this.nameText(node);
-      const word = lower(raw);
-      if (word === 'self') return { k: 'self' };
-      if (word === 'parent') return { k: 'parent' };
-      if (word === 'static') return { k: 'static' };
-      return { k: 'named', name: this.resolveClassName(raw) };
+    return { k: 'named', name: this.resolveClassName(raw) };
+  }
+
+  /**
+   * Rejects `self`, `static`, or `parent` where PHP knows at compile time that they name no class: outside a class, or
+   * `parent` in a class without one. A closure or the file's own code may run in any class, so PHP checks neither.
+   */
+  protected checkClassScope(node: Node, word: 'self' | 'static' | 'parent', context = this.fn): void {
+    const known =
+      !context.isClosure &&
+      (this.currentClass === undefined ? context.isFunction === true : this.currentClassKind !== 'trait');
+    if (!known) return;
+    if (this.currentClass === undefined) {
+      this.error(node, `クラスの外では「${word}」を使えません（Cannot use "${word}" when no class scope is active）。`);
+    } else if (word === 'parent' && !this.currentClassHasParent) {
+      this.error(
+        node,
+        `親のないクラスでは「parent」を使えません（Cannot use "parent" when current class scope has no parent）。`
+      );
     }
-    return { k: 'expr', e: this.expr(node) };
   }
 
   // Statements --------------------------------------------------------------------------------------------------------

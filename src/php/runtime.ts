@@ -71,8 +71,11 @@ export class Frame {
   row = 0;
   /** The reference a function returning by reference returns. */
   returnRef?: Ref;
-  /** The value a `return` statement is returning, which the statements it leaves must not free. */
-  returning: Value = null;
+  /**
+   * The value a `return` statement is returning, which the statements it leaves must not free; undefined until one
+   * runs, as when the body ends without `return`.
+   */
+  returning: Value | undefined;
 
   // code-gauge-allow functionParameterCount 8 -- A frame takes the parts of a call that stay fixed while it runs.
   constructor(
@@ -119,6 +122,8 @@ export class Runtime {
   errorReporting = 30_719n;
   errorHandlers: { handler: Value; mask: bigint }[] = [];
   exceptionHandler: Value = null;
+  /** The handlers `set_exception_handler` replaced, latest last, which `restore_exception_handler` brings back. */
+  replacedExceptionHandlers: Value[] = [];
   readonly mt = new MersenneTwister();
   /** Values held by native code (such as the array a sort is sorting), which garbage collection must keep. */
   readonly held: Value[] = [];

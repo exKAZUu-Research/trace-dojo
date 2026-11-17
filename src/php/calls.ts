@@ -1,3 +1,4 @@
+// code-gauge-allow-file fileNcss 409 -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import { LIMITS } from '../interpreter/limits';
 import type { FunctionDecl } from './ast';
@@ -192,6 +193,15 @@ function bindNative(
   if (positional.length < required && args.every((arg) => arg.name === undefined)) {
     throwError('ArgumentCountError', argumentCountMessage(name, required, variadic ? -1 : fixed, given));
   }
+  // Only call_user_func passes on named arguments its variadic parameter collects; PHP's other functions refuse them,
+  // after checking the arguments they did match.
+  const refusesNamed = named !== undefined && fn.name !== 'call_user_func';
+  if (refusesNamed && given < required) {
+    throwError(
+      'ArgumentCountError',
+      `${name}() expects ${variadic ? 'at least' : 'exactly'} ${required} argument${required === 1 ? '' : 's'}, ${given} given`
+    );
+  }
   if (!variadic && positional.length > fixed) {
     throwError('ArgumentCountError', argumentCountMessage(name, required, fixed, positional.length));
   }
@@ -230,6 +240,7 @@ function bindNative(
     values.pop();
     refs.pop();
   }
+  if (refusesNamed) throwError('ArgumentCountError', `${name}() does not accept unknown named parameters`);
   return { values, refs, named };
 }
 
@@ -342,7 +353,7 @@ function invokeUser(target: CallTarget, fn: UserFunction, args: ArgValue[], row:
   try {
     runtime.row = decl.row;
     bindParams(frame, fn, args, positional, name, strict, row);
-    if (args.length > positional.length) tracedNamedArgs(record, params, frame, args, positional.length);
+    recordBoundArgs(record, params, frame, args, positional.length);
     let result: Value;
     try {
       result = runBody(decl, frame);
@@ -375,6 +386,24 @@ function invokeUser(target: CallTarget, fn: UserFunction, args: ArgValue[], row:
     collectGarbage(runtime);
   }
   return returned;
+}
+
+/**
+ * Records a call's arguments as PHP's traces show them once bound: converted to the parameters' types, and with the
+ * parameters that named arguments reach.
+ */
+function recordBoundArgs(
+  record: CallRecord,
+  params: Param[],
+  frame: Frame,
+  args: ArgValue[],
+  positional: number
+): void {
+  if (args.length > positional) tracedNamedArgs(record, params, frame, args, positional);
+  for (const [index, param] of params.entries()) {
+    if (param.variadic || index >= record.args.length) break;
+    record.args[index] = frame.vars.get(param.name)?.v ?? null;
+  }
 }
 
 /**
@@ -542,7 +571,9 @@ function checkReturn(value: Value, type: TypeDecl, name: string, frame: Frame): 
   });
   if (coerced !== NO_MATCH) return share(coerced);
   const display = describeType(type, frame.scope, frame.staticClass);
-  throwError('TypeError', `${name}(): Return value must be of type ${display}, ${valueName(value)} returned`);
+  // A body that ends without `return` returns nothing, which PHP names apart from null.
+  const returned = frame.returning === undefined && !frame.decl?.arrowBody ? 'none' : valueName(value);
+  throwError('TypeError', `${name}(): Return value must be of type ${display}, ${returned} returned`);
 }
 
 /** Whether a user function's parameter `index` takes a reference. */

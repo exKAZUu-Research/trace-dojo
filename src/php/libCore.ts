@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 500 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 502 -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import { lower } from './bytes';
 import { callCallback, callTargetOf, callValue } from './callables';
@@ -29,7 +29,7 @@ import {
   warn,
 } from './errors';
 import { collectGarbage } from './garbage';
-import { cast, iterate } from './interp';
+import { cast, deprecatedConstant, iterate } from './interp';
 import { defineAlias, defineConstant, defineFunction, markInlined } from './native';
 import { toFloat, toInt, toStr } from './operators';
 import { printR, varDump, varExport } from './output';
@@ -258,7 +258,7 @@ defineFunction('constant(string $name): mixed', ({ args }) => {
   }
   const value = rt().constants.get(constantKey(name));
   if (value === undefined) throwError('Error', `Undefined constant "${name}"`);
-  return value;
+  return deprecatedConstant(name, value);
 });
 
 defineFunction('function_exists(string $function): bool', ({ args }) =>
@@ -562,16 +562,20 @@ defineFunction('restore_error_handler(): true', () => {
 defineFunction('set_exception_handler(?callable $callback)', ({ args }) => {
   const runtime = rt();
   const previous = runtime.exceptionHandler;
+  runtime.replacedExceptionHandlers.push(previous);
   runtime.exceptionHandler = args[0];
   return previous;
 });
 defineFunction('restore_exception_handler(): true', () => {
-  rt().exceptionHandler = null;
+  const runtime = rt();
+  runtime.exceptionHandler = runtime.replacedExceptionHandlers.pop() ?? null;
   return true;
 });
 defineFunction('error_reporting(?int $error_level = null): int', ({ args }) => {
   const runtime = rt();
-  const previous = runtime.errorReporting;
+  // While `@` silences errors, PHP reports only the fatal levels (E_ERROR, E_PARSE, E_CORE_ERROR, E_COMPILE_ERROR,
+  // E_USER_ERROR, E_RECOVERABLE_ERROR).
+  const previous = runtime.silence > 0 ? runtime.errorReporting & 4437n : runtime.errorReporting;
   if (args[0] !== undefined && args[0] !== null) runtime.errorReporting = args[0] as bigint;
   return previous;
 });

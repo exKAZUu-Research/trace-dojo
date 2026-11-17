@@ -34,7 +34,11 @@ defineConstant('PHP_ROUND_HALF_DOWN', 2n);
 defineConstant('PHP_ROUND_HALF_EVEN', 3n);
 defineConstant('PHP_ROUND_HALF_ODD', 4n);
 defineConstant('MT_RAND_MT19937', 0n);
-defineConstant('MT_RAND_PHP', 1n);
+defineConstant(
+  'MT_RAND_PHP',
+  1n,
+  'Constant MT_RAND_PHP is deprecated since 8.3, as it uses a biased non-standard variant of Mt19937'
+);
 
 /** A number as `int|float` parameters receive it. */
 function num(value: Value): bigint | number {
@@ -260,10 +264,14 @@ function groupThousands(digits: string, separator: string): string {
 
 // Random numbers -----------------------------------------------------------------------------------------------------
 
-defineFunction('mt_srand(int $seed = 0, int $mode = MT_RAND_MT19937): void', ({ args }) => {
-  if (args[1] === 1n) deprecated('The MT_RAND_PHP variant of Mt19937 is deprecated');
-  if (args.length === 0) rt().mt.seed(Math.floor(Math.random() * 2 ** 32));
-  else rt().mt.seed(Number(BigInt.asUintN(32, args[0] as bigint)));
+defineFunction('mt_srand(?int $seed = null, int $mode = MT_RAND_MT19937): void', ({ args }) => {
+  const phpMode = args[1] === 1n;
+  if (phpMode) deprecated('The MT_RAND_PHP variant of Mt19937 is deprecated');
+  const seed = args[0] ?? null;
+  rt().mt.seed(
+    seed === null ? Math.floor(Math.random() * 2 ** 32) : Number(BigInt.asUintN(32, seed as bigint)),
+    phpMode
+  );
   return null;
 });
 defineAlias('srand', 'mt_srand');
@@ -273,15 +281,23 @@ defineFunction('mt_rand(int $min = UNKNOWN, int $max = UNKNOWN): int', ({ args }
   const [min, max] = args as [bigint, bigint];
   if (max < min)
     throwError('ValueError', 'mt_rand(): Argument #2 ($max) must be greater than or equal to argument #1 ($min)');
-  return rt().mt.range(min, max);
+  return mtRandCommon(min, max);
 });
 defineFunction('rand(int $min = UNKNOWN, int $max = UNKNOWN): int', ({ args }) => {
   if (args.length === 0) return BigInt(rt().mt.next() >>> 1);
   if (args.length === 1) throwError('ArgumentCountError', 'rand() expects exactly 2 arguments, 1 given');
   const [min, max] = args as [bigint, bigint];
-  if (max < min) return rt().mt.range(max, min);
-  return rt().mt.range(min, max);
+  return max < min ? mtRandCommon(max, min) : mtRandCommon(min, max);
 });
+
+/** Transcribes php_mt_rand_common, whose MT_RAND_PHP mode scales a 31-bit output into the range with floats. */
+function mtRandCommon(min: bigint, max: bigint): bigint {
+  const mt = rt().mt;
+  if (!mt.phpMode) return mt.range(min, max);
+  const r = mt.next() >>> 1;
+  const offset = Math.trunc((Number(max) - Number(min) + 1) * (r / 2_147_483_648));
+  return BigInt.asIntN(64, BigInt(offset) + min);
+}
 defineFunction('mt_getrandmax(): int', () => 2_147_483_647n);
 defineAlias('getrandmax', 'mt_getrandmax');
 defineFunction('random_int(int $min, int $max): int', ({ args }) => {

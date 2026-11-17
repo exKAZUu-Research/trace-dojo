@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 413 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 419 -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/prefer-code-point -- PHP strings hold bytes as code units 0–255, which charCodeAt and fromCharCode read and write as they are.
 import { ExecutionLimitError, LIMITS } from '../interpreter/limits';
 import {
@@ -194,7 +194,13 @@ function power(a: bigint | number, b: bigint | number): bigint | number {
   if (Number(a) === 0 && Number(b) < 0) {
     deprecated('Power of base 0 and negative exponent is deprecated');
   }
-  return Math.pow(Number(a), Number(b));
+  return cPow(Number(a), Number(b));
+}
+
+/** `x ** y` as C's pow, which PHP calls: unlike JavaScript, 1 to any power and -1 to an infinite one are 1. */
+function cPow(x: number, y: number): number {
+  if (x === 1 || (x === -1 && (y === Infinity || y === -Infinity))) return 1;
+  return Math.pow(x, y);
 }
 
 /**
@@ -484,8 +490,11 @@ export function strictEquals(a: Value, b: Value): boolean {
 
 // Keys -----------------------------------------------------------------------------------------------------------------
 
+/** What an array key is used for, which PHP names in the error for a key of an invalid type. */
+export type KeyUse = 'access' | 'isset' | 'unset';
+
 /** Converts a value to an array key, as `$a[$key]` does, throwing for keys PHP rejects. */
-export function toKey(value: Value): Key {
+export function toKey(value: Value, use: KeyUse = 'access'): Key {
   if (typeof value === 'bigint') return value;
   if (typeof value === 'string') return normalizeKeyString(value);
   if (value === null) {
@@ -494,6 +503,7 @@ export function toKey(value: Value): Key {
   }
   if (typeof value === 'boolean') return value ? 1n : 0n;
   if (typeof value === 'number') return toIntForOperator(value);
-  if (value instanceof PhpArray) throwError('TypeError', 'Illegal offset type');
-  throwError('TypeError', `Cannot access offset of type ${debugType(value)} on array`);
+  const type = debugType(value);
+  if (use === 'isset') throwError('TypeError', `Cannot access offset of type ${type} in isset or empty`);
+  throwError('TypeError', `Cannot ${use === 'unset' ? 'unset' : 'access'} offset of type ${type} on array`);
 }

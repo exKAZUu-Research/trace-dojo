@@ -1,0 +1,11 @@
+array(2) {
+  [0]=>
+  int(1)
+  [1]=>
+  array(1) {
+    [0]=>
+    &int(9)
+  }
+}
+
+Notice: Attempting to set reference to non referenceable value in /main.php on line 3

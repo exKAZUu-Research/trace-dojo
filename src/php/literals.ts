@@ -10,8 +10,24 @@ export function parseIntegerLiteral(text: string): bigint | number {
   else if (/^0\d/.test(clean)) value = BigInt(`0o${clean.slice(1)}`);
   else value = BigInt(clean);
   if (value > 9_223_372_036_854_775_807n) {
-    if (/^0[xXbBoO]|^0\d/.test(clean)) return Number(value);
+    if (/^0[xXbBoO]|^0\d/.test(clean)) return accumulateDigits(clean);
     return Number.parseFloat(clean);
+  }
+  return value;
+}
+
+/**
+ * The float an overflowing hexadecimal, octal, or binary literal becomes: PHP adds its digits one by one in floating
+ * point (zend_hex_strtod and its siblings), whose rounding can differ from the exact value's.
+ */
+function accumulateDigits(literal: string): number {
+  const radix = /^0[xX]/.test(literal) ? 16 : /^0[bB]/.test(literal) ? 2 : 8;
+  const digits = literal.replace(/^0[xXbBoO]?/, '');
+  let value = 0;
+  for (const digit of digits) {
+    // zend_bin_strtod and zend_oct_strtod add the character code and then subtract '0', rounding twice.
+    value =
+      radix === 16 ? value * radix + Number.parseInt(digit, 16) : value * radix + (digit.codePointAt(0) as number) - 48;
   }
   return value;
 }
@@ -28,23 +44,30 @@ const SIMPLE_ESCAPES: Record<string, string> = {
 };
 
 /** Decodes one escape sequence of a double-quoted string or heredoc, as bytes. */
-function decodeEscape(text: string, doubleQuoted: boolean): string {
+function decodeEscape(text: string, doubleQuoted: boolean, onOverflow?: (escape: string) => void): string {
   const body = text.slice(1);
   if (body === '"') return doubleQuoted ? '"' : String.raw`\"`;
   if (body in SIMPLE_ESCAPES) return SIMPLE_ESCAPES[body];
-  if (/^[0-7]{1,3}$/.test(body)) return String.fromCharCode(Number.parseInt(body, 8) & 0xff);
+  if (/^[0-7]{1,3}$/.test(body)) {
+    const code = Number.parseInt(body, 8);
+    if (code > 0xff) onOverflow?.(text);
+    return String.fromCharCode(code & 0xff);
+  }
   if (/^x[0-9A-Fa-f]{1,2}$/.test(body)) return String.fromCharCode(Number.parseInt(body.slice(1), 16));
   const unicode = /^u\{([0-9A-Fa-f]+)\}$/.exec(body);
   if (unicode) return codePointBytes(Number.parseInt(unicode[1], 16));
   return enc(text);
 }
 
-/** Decodes the escapes of a literal part of a double-quoted string or heredoc into bytes. */
-export function decodeLiteral(raw: string, doubleQuoted: boolean): string {
+/**
+ * Decodes the escapes of a literal part of a double-quoted string or heredoc into bytes, reporting octal escapes past
+ * a byte, which PHP warns about.
+ */
+export function decodeLiteral(raw: string, doubleQuoted: boolean, onOverflow?: (escape: string) => void): string {
   let result = '';
   let last = 0;
   for (const match of raw.matchAll(/\\(u\{[0-9A-Fa-f]+\}|x[0-9A-Fa-f]{1,2}|[0-7]{1,3}|[ntrvef\\$"])/g)) {
-    result += enc(raw.slice(last, match.index)) + decodeEscape(match[0], doubleQuoted);
+    result += enc(raw.slice(last, match.index)) + decodeEscape(match[0], doubleQuoted, onOverflow);
     last = match.index + match[0].length;
   }
   return result + enc(raw.slice(last));

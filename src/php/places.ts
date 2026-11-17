@@ -18,6 +18,10 @@ export interface Place {
    * provides or an element that `offsetGet` provides. Throws where the place may not change that way.
    */
   nested?(): Place;
+  /** Warns that the place does not exist, as a read-modify-write (`++`, `.=`) of it does, creating what PHP creates. */
+  warnUndefined?(): void;
+  /** The value as `isset` and `??` read it, asking `__isset` or `offsetExists` first; undefined when unset. */
+  getForIsset?(): Value | undefined;
 }
 
 /** Marks an array as held by more than one holder, so that the next write copies it. */

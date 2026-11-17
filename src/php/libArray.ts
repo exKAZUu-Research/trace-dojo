@@ -1,8 +1,9 @@
-// code-gauge-allow-file fileNcss 815 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 883 -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 // oxlint-disable unicorn/prefer-code-point -- PHP strings hold bytes as code units 0–255, which charCodeAt and fromCharCode read and write as they are.
 import { lower } from './bytes';
 import { callCallback, callCallbackRefs, callMethod } from './callables';
+import { canAccessProp, issetProp, lookupProp, objectToArray, readProp } from './classes';
 import * as conversionsModule from './conversions';
 import { compareBytes, compareNumbers, debugType, floatFitsInt, normalizeKeyString, valueName } from './conversions';
 import { deprecated, throwError, warn } from './errors';
@@ -12,7 +13,7 @@ import { defineAlias, defineConstant, defineFunction, markInlined } from './nati
 import { arithmetic, compare, looseEquals, strictEquals, toFloat, toKey, toStr } from './operators';
 import { ElementPlace, share, VarPlace } from './places';
 import { rt } from './runtime';
-import { INT_MIN, type Key, type NativeContext, PhpArray, PhpObject, Ref, type Value } from './values';
+import { INT_MIN, type Key, type NativeContext, PhpArray, PhpObject, Ref, UNINIT, type Value } from './values';
 import { zendSort } from './zendSort';
 
 defineConstant('SORT_REGULAR', 0n);
@@ -143,23 +144,25 @@ defineFunction('array_unshift(array &$array, mixed ...$values): int', (ctx) => {
   return BigInt(array.size);
 });
 
-defineFunction('array_key_exists($key, array $array): bool', ({ args }) => {
+defineFunction('array_key_exists($key, array $array): bool', ({ args, row }) => {
   const [key, array] = args;
   if (!(array instanceof PhpArray))
     throwError(
       'TypeError',
       `array_key_exists(): Argument #2 ($array) must be of type array, ${valueName(array)} given`
     );
-  return array.has(arrayKeyOf(key));
+  return array.has(arrayKeyOf(key, row !== undefined));
 });
 markInlined('array_key_exists');
 defineAlias('key_exists', 'array_key_exists');
 
-function arrayKeyOf(key: Value): Key {
-  if (key instanceof PhpArray || key instanceof PhpObject) {
-    throwError('TypeError', 'Illegal offset type');
-  }
-  return toKey(key);
+/** The key `array_key_exists` looks up; the opcode a direct call compiles to rejects an invalid key as an offset does. */
+function arrayKeyOf(key: Value, inlined: boolean): Key {
+  if ((key instanceof PhpArray || key instanceof PhpObject) && !inlined)
+    throwError('TypeError', 'array_key_exists(): Argument #1 ($key) must be a valid array offset type');
+  if (key !== null) return toKey(key);
+  deprecated('Using null as the key parameter for array_key_exists() is deprecated, use an empty string instead');
+  return '';
 }
 
 defineFunction('array_key_first(array $array): int|string|null', ({ args }) => {
@@ -361,7 +364,12 @@ function range(startInput: RangeInput, endInput: RangeInput, stepInput: bigint |
 }
 
 /** The size of a step of `range`, which PHP makes positive and reads as an int when a float holds an integer. */
-function rangeStep(input: bigint | number): { int: bigint; float: number; isFloat: boolean; isNegative: boolean } {
+function rangeStep(input: bigint | number): {
+  int: bigint;
+  float: number;
+  isFloat: boolean;
+  isNegative: boolean;
+} {
   if (typeof input === 'number') {
     const value = finiteRangeNumber(input, 3);
     const float = Math.abs(value);
@@ -417,7 +425,11 @@ function rangeValue(input: RangeInput, position: number): RangeValue {
   if (typeof numeric === 'number')
     return { kind: RangeKind.Float, int: 0n, float: finiteRangeNumber(numeric, position) };
   if (numeric !== undefined)
-    return { kind: input.length === 1 ? RangeKind.Digit : RangeKind.Int, int: numeric, float: Number(numeric) };
+    return {
+      kind: input.length === 1 ? RangeKind.Digit : RangeKind.Int,
+      int: numeric,
+      float: Number(numeric),
+    };
   if (input.length !== 1)
     warn(
       `range(): Argument #${position} (${RANGE_ARGUMENTS[position]}) must be a single byte, subsequent bytes are ignored`
@@ -508,28 +520,69 @@ defineFunction(
   true
 );
 defineFunction(
-  'extract(array &~$array, int $flags = EXTR_OVERWRITE, string $prefix = ""): int',
+  'extract(array &~$array, int $flags = EXTR_OVERWRITE, string $prefix = UNKNOWN): int',
   ({ args, refs }) => {
-    const array = (refs[0]?.v ?? args[0]) as PhpArray;
     const flags = (args[1] as bigint | undefined) ?? 0n;
-    const prefix = (args[2] as string | undefined) ?? '';
+    const mode = Number(flags & 0xffn);
+    const prefix = args[2] as string | undefined;
+    checkExtractArguments(mode, prefix);
+    const byReference = (flags & 256n) !== 0n;
+    let array = (refs[0]?.v ?? args[0]) as PhpArray;
+    if (byReference && array.shared) {
+      array = array.copy();
+      if (refs[0]) refs[0].v = array;
+    }
     const frame = rt().frame;
     let count = 0n;
-    for (const [key, value] of array.entries()) {
-      let name = String(key);
-      const exists = frame.vars.has(name);
-      const mode = flags & 255n;
-      if (mode === 1n && exists) continue;
-      if (mode === 6n && !exists) continue;
-      if (mode === 3n || (mode === 2n && exists) || (mode === 5n && exists)) name = `${prefix}_${name}`;
-      if (!/^[A-Za-z_\u0080-￿][\w\u0080-￿]*$/.test(name) || name === 'this') continue;
-      new VarPlace(frame, name).set(share(value));
+    for (const key of array.keys()) {
+      const name = extractedName(key, mode, `${prefix ?? ''}_`, (candidate) => frame.vars.has(candidate));
+      if (name === undefined) continue;
+      if (name === 'this') throwError('Error', 'Cannot re-assign $this');
+      const place = new VarPlace(frame, name);
+      if (byReference) place.bind(new ElementPlace(array, key).ref());
+      else place.set(share(array.get(key) as Value));
       count++;
     }
     return count;
   },
   true
 );
+
+function checkExtractArguments(mode: number, prefix: string | undefined): void {
+  if (mode > 6) throwError('ValueError', 'extract(): Argument #2 ($flags) must be a valid extract type');
+  if (mode > 1 && mode <= 5 && prefix === undefined)
+    throwError('ValueError', 'extract(): Argument #3 ($prefix) is required when using this extract type');
+  if (prefix && !isVariableName(prefix))
+    throwError('ValueError', 'extract(): Argument #3 ($prefix) must be a valid identifier');
+}
+
+/** How each extract mode (EXTR_OVERWRITE to EXTR_IF_EXISTS) names the variable of a string key. */
+const EXTRACT_MODES: ((key: string, prefixed: () => string | undefined, exists: boolean) => string | undefined)[] = [
+  (key, _prefixed, exists) => (key === 'GLOBALS' && exists ? undefined : validName(key)),
+  (key, _prefixed, exists) => (key === 'this' || exists ? undefined : validName(key)),
+  (key, prefixed, exists) => {
+    if (key !== '') return exists || key === 'this' ? prefixed() : validName(key);
+  },
+  (_key, prefixed) => prefixed(),
+  (key, prefixed) => (key !== 'this' && isVariableName(key) ? key : prefixed()),
+  (_key, prefixed, exists) => (exists ? prefixed() : undefined),
+  (key, _prefixed, exists) => (exists && key !== 'GLOBALS' ? validName(key) : undefined),
+];
+
+/** The variable `extract` writes an element to in `mode`, or undefined to skip it, as ext/standard/array.c decides. */
+function extractedName(key: Key, mode: number, prefix: string, exists: (name: string) => boolean): string | undefined {
+  const prefixed = (): string | undefined => validName(prefix + key);
+  if (typeof key === 'bigint') return mode === 3 || mode === 4 ? prefixed() : undefined;
+  return EXTRACT_MODES[mode](key, prefixed, exists(key));
+}
+
+function validName(name: string): string | undefined {
+  return isVariableName(name) ? name : undefined;
+}
+
+function isVariableName(name: string): boolean {
+  return /^[A-Za-z_\u007F-ÿ][\w\u007F-ÿ]*$/.test(name);
+}
 
 // Transforming arrays ------------------------------------------------------------------------------------------------
 
@@ -707,17 +760,6 @@ function accumulate(name: string, op: string, word: string, total: Value, value:
   return arithmetic(op, total, value === null || typeof value === 'boolean' ? (value ? 1n : 0n) : value);
 }
 
-/** A row's field for `array_column`: an element of an array row or a property of an object row. */
-function columnField(row: Value, key: Value): Value | undefined {
-  if (row instanceof PhpArray) return row.get(toKey(key));
-  if (row instanceof PhpObject) {
-    const slot = row.props.get(toStr(key));
-    if (slot === undefined || typeof slot === 'symbol') return undefined;
-    return slot instanceof Ref ? slot.v : slot;
-  }
-  return undefined;
-}
-
 defineFunction(
   'array_column(array $array, int|string|null $column_key, int|string|null $index_key = null): array',
   ({ args }) => {
@@ -728,11 +770,27 @@ defineFunction(
       if (value === undefined) continue;
       const indexValue = index === null || index === undefined ? undefined : columnField(row, index);
       if (indexValue === undefined) result.append(share(value));
-      else result.set(toKey(toStrKey(indexValue)), share(value));
+      else result.set(toKey(indexValue), share(value));
     }
     return result;
   }
 );
+
+/** A row's field for `array_column`: an element of an array row or a property of an object row that the caller can read. */
+function columnField(row: Value, key: Value): Value | undefined {
+  if (row instanceof PhpArray) return row.get(toKey(key));
+  if (!(row instanceof PhpObject)) return undefined;
+  const name = toStr(key);
+  const scope = rt().frame.scope;
+  const decl = lookupProp(row.cls, name, scope);
+  let exists = row.props.has(name);
+  if (decl && !decl.isStatic) {
+    const slot = row.props.get(decl.key);
+    exists = canAccessProp(decl, scope) && ((slot !== undefined && slot !== UNINIT) || decl.hooks?.get !== undefined);
+  }
+  return exists || issetProp(row, name, scope) ? readProp(row, name, scope) : undefined;
+}
+
 defineFunction('array_chunk(array $array, int $length, bool $preserve_keys = false): array', ({ args }) => {
   const length = Number(args[1]);
   if (length < 1) throwError('ValueError', 'array_chunk(): Argument #2 ($length) must be greater than 0');
@@ -765,14 +823,7 @@ type SetCompare = (a: [Key, Value], b: [Key, Value]) => boolean;
 
 function setOperation(name: string, args: Value[], keep: boolean, same: SetCompare, callbacks = 0): PhpArray {
   const arrays = args.slice(0, args.length - callbacks);
-  for (const [index, value] of arrays.entries()) {
-    if (!(value instanceof PhpArray)) {
-      throwError(
-        'TypeError',
-        `${name}(): Argument #${index + 1}${index === 0 ? ' ($array)' : ''} must be of type array, ${valueName(value)} given`
-      );
-    }
-  }
+  checkSetArguments(name, arrays);
   const [first, ...others] = arrays as PhpArray[];
   const result = new PhpArray();
   for (const entry of first.entries()) {
@@ -784,13 +835,53 @@ function setOperation(name: string, args: Value[], keep: boolean, same: SetCompa
   return result;
 }
 
+function checkSetArguments(name: string, arrays: Value[]): void {
+  for (const [index, value] of arrays.entries()) {
+    if (!(value instanceof PhpArray)) {
+      throwError(
+        'TypeError',
+        `${name}(): Argument #${index + 1}${index === 0 ? ' ($array)' : ''} must be of type array, ${valueName(value)} given`
+      );
+    }
+  }
+}
+
 const sameValue: SetCompare = (a, b) => toStr(a[1]) === toStr(b[1]);
 const sameKey: SetCompare = (a, b) => a[0] === b[0];
 const sameAssoc: SetCompare = (a, b) => a[0] === b[0] && toStr(a[1]) === toStr(b[1]);
 
-defineFunction('array_diff(array $array, array ...$arrays): array', ({ args }) =>
-  setOperation('array_diff', args, false, sameValue)
-);
+defineFunction('array_diff(array $array, array ...$arrays): array', ({ args }) => {
+  const [first, ...others] = args;
+  checkSetArguments('array_diff', [first]);
+  return diffByString(first as PhpArray, others);
+});
+
+/** Transcribes PHP's array_diff, which converts each value to a string once, so each conversion warns once. */
+function diffByString(first: PhpArray, others: Value[]): PhpArray {
+  if (first.size === 0) {
+    checkSetArguments('array_diff', [first, ...others]);
+    return new PhpArray();
+  }
+  if (first.size === 1) return diffSingle(first, others);
+  checkSetArguments('array_diff', [first, ...others]);
+  const exclude = new Set<string>();
+  for (const other of others) for (const value of (other as PhpArray).values()) exclude.add(toStr(value));
+  const result = new PhpArray();
+  for (const [key, value] of first.entries()) if (!exclude.has(toStr(value))) result.set(key, share(value));
+  return result;
+}
+
+function diffSingle(first: PhpArray, others: Value[]): PhpArray {
+  const search = toStr(first.values()[0]);
+  let found = false;
+  for (const [index, other] of others.entries()) {
+    checkSetArguments('array_diff', [first, ...others.slice(0, index + 1)]);
+    found ||= (other as PhpArray).values().some((value) => toStr(value) === search);
+  }
+  if (found) return new PhpArray();
+  first.shared = true;
+  return first;
+}
 defineFunction('array_diff_key(array $array, array ...$arrays): array', ({ args }) =>
   setOperation('array_diff_key', args, false, sameKey)
 );
@@ -861,7 +952,7 @@ defineFunction('array_rand(array $array, int $num = 1): int|string|array', ({ ar
   const array = arr(args[0]);
   const count = Number(args[1] ?? 1n);
   const keys = [...array.map.keys()];
-  if (keys.length === 0) throwError('ValueError', 'array_rand(): Argument #1 ($array) cannot be empty');
+  if (keys.length === 0) throwError('ValueError', 'array_rand(): Argument #1 ($array) must not be empty');
   const mt = rt().mt;
   if (count === 1) return keyValue(keys[Number(mt.range(0n, BigInt(keys.length - 1)))]);
   if (count <= 0 || count > keys.length) {
@@ -1064,44 +1155,63 @@ defineFunction('array_multisort(&~$array, &~...$rest): bool', (ctx) => {
 
 // The internal pointer -----------------------------------------------------------------------------------------------
 
-function pointerArray(value: Value, name: string): PhpArray {
-  if (value instanceof PhpArray) return value;
-  throwError('TypeError', `${name}(): Argument #1 ($array) must be of type array, ${valueName(value)} given`);
-}
-
-defineFunction('current(array|object $array): mixed', ({ args }) => {
-  const array = pointerArray(args[0], 'current');
-  const key = array.currentKey();
-  return key === undefined ? false : (array.get(key) as Value);
-});
+defineFunction('current(array|object $array): mixed', ({ args }) =>
+  withPointer(args[0], 'current', (array) => {
+    const key = array.currentKey();
+    return key === undefined ? false : (array.get(key) as Value);
+  })
+);
 defineAlias('pos', 'current');
-defineFunction('key(array|object $array): int|string|null', ({ args }) => {
-  const key = pointerArray(args[0], 'key').currentKey();
-  return key === undefined ? null : keyValue(key);
-});
-defineFunction('next(array|object &$array): mixed', (ctx) => {
-  const array = pointerArray(ctx.refs[0]?.v ?? ctx.args[0], 'next');
-  const key = array.currentKey();
-  if (key === undefined) return false;
-  array.pointer = array.keyAfter(key);
-  return array.pointer === undefined ? false : (array.get(array.pointer) as Value);
-});
-defineFunction('prev(array|object &$array): mixed', (ctx) => {
-  const array = pointerArray(ctx.refs[0]?.v ?? ctx.args[0], 'prev');
-  const key = array.currentKey();
-  if (key === undefined) return false;
-  array.pointer = array.keyBefore(key);
-  return array.pointer === undefined ? false : (array.get(array.pointer) as Value);
-});
-defineFunction('reset(array|object &$array): mixed', (ctx) => {
-  const array = pointerArray(ctx.refs[0]?.v ?? ctx.args[0], 'reset');
-  array.pointer = null;
-  const key = array.currentKey();
-  return key === undefined ? false : (array.get(key) as Value);
-});
-defineFunction('end(array|object &$array): mixed', (ctx) => {
-  const array = pointerArray(ctx.refs[0]?.v ?? ctx.args[0], 'end');
-  const last = [...array.map.keys()].at(-1);
-  array.pointer = last;
-  return last === undefined ? false : (array.get(last) as Value);
-});
+defineFunction('key(array|object $array): int|string|null', ({ args }) =>
+  withPointer(args[0], 'key', (array) => {
+    const key = array.currentKey();
+    return key === undefined ? null : keyValue(key);
+  })
+);
+defineFunction('next(array|object &$array): mixed', (ctx) =>
+  withPointer(ctx.refs[0]?.v ?? ctx.args[0], 'next', (array) => {
+    const key = array.currentKey();
+    if (key === undefined) return false;
+    array.pointer = array.keyAfter(key);
+    return array.pointer === undefined ? false : (array.get(array.pointer) as Value);
+  })
+);
+defineFunction('prev(array|object &$array): mixed', (ctx) =>
+  withPointer(ctx.refs[0]?.v ?? ctx.args[0], 'prev', (array) => {
+    const key = array.currentKey();
+    if (key === undefined) return false;
+    array.pointer = array.keyBefore(key);
+    return array.pointer === undefined ? false : (array.get(array.pointer) as Value);
+  })
+);
+defineFunction('reset(array|object &$array): mixed', (ctx) =>
+  withPointer(ctx.refs[0]?.v ?? ctx.args[0], 'reset', (array) => {
+    array.pointer = null;
+    const key = array.currentKey();
+    return key === undefined ? false : (array.get(key) as Value);
+  })
+);
+defineFunction('end(array|object &$array): mixed', (ctx) =>
+  withPointer(ctx.refs[0]?.v ?? ctx.args[0], 'end', (array) => {
+    const last = [...array.map.keys()].at(-1);
+    array.pointer = last;
+    return last === undefined ? false : (array.get(last) as Value);
+  })
+);
+
+/** The internal pointers of objects, which PHP keeps in the property table that the pointer functions walk. */
+const objectPointers = new WeakMap<PhpObject, { pointer: Key | undefined | null }>();
+
+/** Runs a pointer function on an array, or deprecatedly on an object's property table with the object's pointer. */
+function withPointer(value: Value, name: string, action: (array: PhpArray) => Value): Value {
+  if (value instanceof PhpArray) return action(value);
+  if (!(value instanceof PhpObject))
+    throwError('TypeError', `${name}(): Argument #1 ($array) must be of type array, ${valueName(value)} given`);
+  deprecated(`${name}(): Calling ${name}() on an object is deprecated`);
+  const table = objectToArray(value);
+  const saved = objectPointers.get(value);
+  table.pointer = saved ? saved.pointer : null;
+  const result = action(table);
+  objectPointers.set(value, { pointer: table.pointer });
+  return result;
+}

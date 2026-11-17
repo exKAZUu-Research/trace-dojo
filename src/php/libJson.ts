@@ -37,6 +37,9 @@ const FLAGS: [string, bigint][] = [
   ['JSON_ERROR_RECURSION', 6n],
   ['JSON_ERROR_INF_OR_NAN', 7n],
   ['JSON_ERROR_UNSUPPORTED_TYPE', 8n],
+  ['JSON_ERROR_INVALID_PROPERTY_NAME', 9n],
+  ['JSON_ERROR_UTF16', 10n],
+  ['JSON_ERROR_NON_BACKED_ENUM', 11n],
 ];
 for (const [name, value] of FLAGS) defineConstant(name, value);
 
@@ -50,7 +53,12 @@ const MESSAGES: Record<number, string> = {
   6: 'Recursion detected',
   7: 'Inf and NaN cannot be JSON encoded',
   8: 'Type is not supported',
+  9: 'The decoded property name is invalid',
+  10: 'Single unpaired UTF-16 surrogate in unicode escape',
+  11: 'Non-backed enums have no default serialization',
 };
+const PARTIAL_OUTPUT_ON_ERROR = 512n;
+const THROW_ON_ERROR = 4_194_304n;
 
 class JsonError {
   constructor(readonly code: number) {}
@@ -60,97 +68,202 @@ const has = (flags: bigint, flag: bigint): boolean => (flags & flag) !== 0n;
 
 defineFunction('json_encode(mixed $value, int $flags = 0, int $depth = 512): string|false', ({ args }) => {
   const flags = (args[1] as bigint | undefined) ?? 0n;
-  const depth = Number((args[2] as bigint | undefined) ?? 512n);
-  const runtime = rt();
+  const encoder = new JsonEncoder(flags, Number((args[2] as bigint | undefined) ?? 512n));
+  let text: string | undefined;
   try {
-    const text = encode(args[0], flags, 0, depth, new Set());
-    runtime.lastJsonError = 0;
-    return text;
+    text = encoder.encode(args[0], 0);
   } catch (error) {
     if (!(error instanceof JsonError)) throw error;
-    if (has(flags, 4_194_304n))
-      throw new PhpThrow(newThrowable('JsonException', MESSAGES[error.code], BigInt(error.code)));
-    runtime.lastJsonError = error.code;
-    return false;
   }
+  const partial = has(flags, PARTIAL_OUTPUT_ON_ERROR);
+  if (!has(flags, THROW_ON_ERROR) || partial) {
+    rt().lastJsonError = encoder.error;
+    return encoder.error !== 0 && !partial ? false : (text as string);
+  }
+  if (encoder.error !== 0)
+    throw new PhpThrow(newThrowable('JsonException', MESSAGES[encoder.error], BigInt(encoder.error)));
+  return text as string;
 });
 
-// code-gauge-allow functionNcss 57 -- Transcribes PHP's algorithm for this function step by step, whose branches mirror PHP's.
-function encode(value: Value, flags: bigint, level: number, maxDepth: number, active: Set<object>): string {
-  rt().spend();
-  if (value === null) return 'null';
-  switch (typeof value) {
-    case 'boolean': {
-      return value ? 'true' : 'false';
-    }
-    case 'bigint': {
-      return value.toString();
-    }
-    case 'number': {
-      if (!Number.isFinite(value)) throw new JsonError(7);
-      const text = formatFloatRepr(value, 'e');
-      if (has(flags, 1024n) && Number.isInteger(value) && !/[.e]/.test(text)) return `${text}.0`;
-      return text;
-    }
-    case 'string': {
-      if (has(flags, 32n)) {
-        const numeric = conversionsModule.numericValue(value);
-        if (numeric !== undefined) return encode(numeric, flags, level, maxDepth, active);
+/** Transcribes ext/json/json_encoder.c: an error sets `error`, and without JSON_PARTIAL_OUTPUT_ON_ERROR aborts the encoding where PHP returns FAILURE. */
+class JsonEncoder {
+  error = 0;
+  private readonly active = new Set<object>();
+
+  constructor(
+    private readonly flags: bigint,
+    private readonly maxDepth: number
+  ) {}
+
+  encode(value: Value, level: number): string {
+    rt().spend();
+    if (value === null) return 'null';
+    switch (typeof value) {
+      case 'boolean': {
+        return value ? 'true' : 'false';
       }
-      return encodeString(value, flags);
+      case 'bigint': {
+        return value.toString();
+      }
+      case 'number': {
+        if (Number.isFinite(value)) return this.encodeFloat(value);
+        // PHP keeps encoding after this error, so a later error decides the error code.
+        this.error = 7;
+        return '0';
+      }
+      case 'string': {
+        const numeric = has(this.flags, 32n) ? conversionsModule.numericValue(value) : undefined;
+        if (numeric !== undefined && (typeof numeric === 'bigint' || Number.isFinite(numeric)))
+          return this.encode(numeric, level);
+        return this.encodeString(value, this.flags);
+      }
+    }
+    const serializable = rt().classes.get('jsonserializable') as PhpClass;
+    if (value instanceof PhpArray || !value.cls.isSubclassOf(serializable)) return this.encodeContainer(value, level);
+    if (this.active.has(value)) return this.fail(6);
+    this.active.add(value);
+    try {
+      return this.encode(callMethod(value, 'jsonSerialize', []), level);
+    } finally {
+      this.active.delete(value);
     }
   }
-  if (level >= maxDepth) throw new JsonError(1);
-  if (value instanceof PhpArray) {
-    if (active.has(value)) throw new JsonError(6);
-    active.add(value);
+
+  private encodeFloat(value: number): string {
+    const text = formatFloatRepr(value, 'e');
+    if (has(this.flags, 1024n) && Number.isInteger(value) && !/[.e]/.test(text)) return `${text}.0`;
+    return text;
+  }
+
+  private encodeContainer(value: PhpArray | PhpObject, level: number): string {
+    if (this.active.has(value)) {
+      this.error = 6;
+      if (has(this.flags, PARTIAL_OUTPUT_ON_ERROR)) return 'null';
+      throw new JsonError(6);
+    }
+    this.active.add(value);
+    let text: string;
     try {
-      const asList = value.isList() && !has(flags, 16n);
-      const entries = [...value.entries()];
+      text = value instanceof PhpArray ? this.encodeArray(value, level) : this.encodeObject(value, level);
+    } finally {
+      this.active.delete(value);
+    }
+    if (level + 1 > this.maxDepth) {
+      this.error = 1;
+      if (!has(this.flags, PARTIAL_OUTPUT_ON_ERROR)) throw new JsonError(1);
+    }
+    return text;
+  }
+
+  private encodeArray(value: PhpArray, level: number): string {
+    const entries = [...value.entries()];
+    if (value.isList() && !has(this.flags, 16n))
       return wrap(
-        asList
-          ? entries.map(([, item]) => encode(item, flags, level + 1, maxDepth, active))
-          : entries.map(
-              ([key, item]) =>
-                `${encodeString(String(key), flags)}:${has(flags, 128n) ? ' ' : ''}${encode(item, flags, level + 1, maxDepth, active)}`
-            ),
-        asList ? '[' : '{',
-        asList ? ']' : '}',
-        flags,
+        entries.map(([, item]) => this.encode(item, level + 1)),
+        '[',
+        ']',
+        this.flags,
         level
       );
-    } finally {
-      active.delete(value);
-    }
+    return wrap(
+      entries.map(([key, item]) => this.member(String(key), item, level)),
+      '{',
+      '}',
+      this.flags,
+      level
+    );
   }
-  const object = value as PhpObject;
-  const serializable = rt().classes.get('jsonserializable') as PhpClass;
-  if (object.cls.isSubclassOf(serializable)) {
-    if (active.has(object)) throw new JsonError(6);
-    active.add(object);
-    try {
-      return encode(callMethod(object, 'jsonSerialize', []), flags, level, maxDepth, active);
-    } finally {
-      active.delete(object);
-    }
-  }
-  if (active.has(object)) throw new JsonError(6);
-  active.add(object);
-  try {
+
+  private encodeObject(object: PhpObject, level: number): string {
     const parts: string[] = [];
+    const table = (object.internal as { properties?: () => PhpArray } | undefined)?.properties?.();
+    if (table) {
+      for (const [key, item] of table.entries()) {
+        if (typeof key === 'string' && key.startsWith('\0')) continue;
+        parts.push(this.member(String(key), item, level));
+      }
+      return wrap(parts, '{', '}', this.flags, level);
+    }
     for (const [key, slot] of object.props) {
       if (slot === UNINIT) continue;
       const decl = declForKey(object.cls, key);
       if (decl && !canAccessProp(decl, undefined)) continue;
-      const item = slot instanceof Ref ? slot.v : slot;
-      parts.push(
-        `${encodeString(propNameOf(key), flags)}:${has(flags, 128n) ? ' ' : ''}${encode(item, flags, level + 1, maxDepth, active)}`
-      );
+      parts.push(this.member(propNameOf(key), slot instanceof Ref ? slot.v : slot, level));
     }
-    return wrap(parts, '{', '}', flags, level);
-  } finally {
-    active.delete(object);
+    return wrap(parts, '{', '}', this.flags, level);
   }
+
+  private member(key: string, item: Value, level: number): string {
+    let name = this.encodeString(key, this.flags & ~32n);
+    if (name === 'null') name = '""';
+    return `${name}:${has(this.flags, 128n) ? ' ' : ''}${this.encode(item, level + 1)}`;
+  }
+
+  private fail(code: number): string {
+    this.error = code;
+    if (has(this.flags, PARTIAL_OUTPUT_ON_ERROR)) return 'null';
+    throw new JsonError(code);
+  }
+
+  private encodeString(text: string, flags: bigint): string {
+    let result = '"';
+    let index = 0;
+    while (index < text.length) {
+      if (text.charCodeAt(index) < 0x80) {
+        result += escapeAscii(text[index++], flags);
+        continue;
+      }
+      const length = utf8Length(text, index);
+      const encoded = length === 1 ? invalidByte(flags) : encodeCharacter(text.slice(index, index + length), flags);
+      if (encoded === undefined) return this.fail(5);
+      result += encoded;
+      index += length;
+    }
+    return `${result}"`;
+  }
+}
+
+/** The escapes that a flag switches: the flag, the text with the flag, and the text without it. */
+const FLAGGED_ESCAPES: Record<string, [bigint, string, string]> = {
+  '"': [8n, String.raw`\u0022`, String.raw`\"`],
+  '/': [64n, '/', String.raw`\/`],
+  '<': [1n, String.raw`\u003C`, '<'],
+  '>': [1n, String.raw`\u003E`, '>'],
+  '&': [2n, String.raw`\u0026`, '&'],
+  "'": [4n, String.raw`\u0027`, "'"],
+};
+
+const FIXED_ESCAPES: Record<string, string> = {
+  '\\': String.raw`\\`,
+  '\b': String.raw`\b`,
+  '\f': String.raw`\f`,
+  '\n': String.raw`\n`,
+  '\r': String.raw`\r`,
+  '\t': String.raw`\t`,
+};
+
+function escapeAscii(char: string, flags: bigint): string {
+  const flagged = FLAGGED_ESCAPES[char] as [bigint, string, string] | undefined;
+  if (flagged) return has(flags, flagged[0]) ? flagged[1] : flagged[2];
+  const fixed = FIXED_ESCAPES[char] as string | undefined;
+  if (fixed !== undefined) return fixed;
+  const code = char.charCodeAt(0);
+  return code < 0x20 ? `\\u${code.toString(16).padStart(4, '0')}` : char;
+}
+
+/** What an invalid UTF-8 byte becomes, or undefined when it is an error. */
+function invalidByte(flags: bigint): string | undefined {
+  if (has(flags, 1_048_576n)) return '';
+  if (has(flags, 2_097_152n)) return has(flags, 256n) ? '\u00EF\u00BF\u00BD' : String.raw`\ufffd`;
+  return undefined;
+}
+
+function encodeCharacter(bytes: string, flags: bigint): string {
+  const point = decodePoint(bytes);
+  if (has(flags, 256n) && (has(flags, 2048n) || (point !== 0x20_28 && point !== 0x20_29))) return bytes;
+  if (point < 0x1_00_00) return `\\u${point.toString(16).padStart(4, '0')}`;
+  const offset = point - 0x1_00_00;
+  return `\\u${(0xd8_00 + (offset >> 10)).toString(16)}\\u${(0xdc_00 + (offset & 0x3_ff)).toString(16)}`;
 }
 
 function wrap(parts: string[], open: string, close: string, flags: bigint, level: number): string {
@@ -158,96 +271,6 @@ function wrap(parts: string[], open: string, close: string, flags: bigint, level
   if (!has(flags, 128n)) return `${open}${parts.join(',')}${close}`;
   const inner = '    '.repeat(level + 1);
   return `${open}\n${parts.map((part) => inner + part).join(',\n')}\n${'    '.repeat(level)}${close}`;
-}
-
-function encodeString(text: string, flags: bigint): string {
-  let result = '"';
-  let index = 0;
-  while (index < text.length) {
-    const code = text.charCodeAt(index);
-    if (code >= 0x80) {
-      const length = utf8Length(text, index);
-      if (length === 1) {
-        if (has(flags, 1_048_576n)) {
-          index++;
-          continue;
-        }
-        if (has(flags, 2_097_152n)) {
-          result += has(flags, 256n) ? 'ï¿½' : String.raw`\ufffd`;
-          index++;
-          continue;
-        }
-        throw new JsonError(5);
-      }
-      const bytes = text.slice(index, index + length);
-      const point = decodePoint(bytes);
-      index += length;
-      if (has(flags, 256n) && !((point === 0x20_28 || point === 0x20_29) && !has(flags, 2048n))) {
-        result += bytes;
-        continue;
-      }
-      if (point >= 0x1_00_00) {
-        const offset = point - 0x1_00_00;
-        result += `\\u${(0xd8_00 + (offset >> 10)).toString(16)}\\u${(0xdc_00 + (offset & 0x3_ff)).toString(16)}`;
-      } else result += `\\u${point.toString(16).padStart(4, '0')}`;
-      continue;
-    }
-    const char = text[index++];
-    switch (char) {
-      case '"': {
-        result += has(flags, 8n) ? String.raw`\u0022` : String.raw`\"`;
-        break;
-      }
-      case '\\': {
-        result += String.raw`\\`;
-        break;
-      }
-      case '/': {
-        result += has(flags, 64n) ? '/' : String.raw`\/`;
-        break;
-      }
-      case '\b': {
-        result += String.raw`\b`;
-        break;
-      }
-      case '\f': {
-        result += String.raw`\f`;
-        break;
-      }
-      case '\n': {
-        result += String.raw`\n`;
-        break;
-      }
-      case '\r': {
-        result += String.raw`\r`;
-        break;
-      }
-      case '\t': {
-        result += String.raw`\t`;
-        break;
-      }
-      case '<': {
-        result += has(flags, 1n) ? String.raw`\u003C` : '<';
-        break;
-      }
-      case '>': {
-        result += has(flags, 1n) ? String.raw`\u003E` : '>';
-        break;
-      }
-      case '&': {
-        result += has(flags, 2n) ? String.raw`\u0026` : '&';
-        break;
-      }
-      case "'": {
-        result += has(flags, 4n) ? String.raw`\u0027` : "'";
-        break;
-      }
-      default: {
-        result += code < 0x20 ? `\\u${code.toString(16).padStart(4, '0')}` : char;
-      }
-    }
-  }
-  return `${result}"`;
 }
 
 function decodePoint(bytes: string): number {
@@ -269,23 +292,20 @@ defineFunction(
   'json_decode(string $json, ?bool $associative = null, int $depth = 512, int $flags = 0): mixed',
   ({ args }) => {
     const text = args[0] as string;
-    let flags = (args[3] as bigint | undefined) ?? 0n;
+    const flags = (args[3] as bigint | undefined) ?? 0n;
     const associative = args[1] === true || (args[1] !== false && has(flags, 1n));
     const depth = Number((args[2] as bigint | undefined) ?? 512n);
-    if (depth <= 0) throwError('ValueError', 'json_decode(): Argument #3 ($depth) must be greater than 0');
+    const throws = has(flags, THROW_ON_ERROR);
     const runtime = rt();
+    if (!throws) runtime.lastJsonError = 0;
     try {
       if (text === '') throw new JsonError(4);
-      const parser = new JsonParser(text, associative, depth, flags);
-      const value = parser.parseDocument();
-      runtime.lastJsonError = 0;
-      return value;
+      if (depth <= 0) throwError('ValueError', 'json_decode(): Argument #3 ($depth) must be greater than 0');
+      return new JsonParser(text, associative, depth, flags).parseDocument();
     } catch (error) {
       if (!(error instanceof JsonError)) throw error;
-      if (has(flags, 4_194_304n))
-        throw new PhpThrow(newThrowable('JsonException', MESSAGES[error.code], BigInt(error.code)));
+      if (throws) throw new PhpThrow(newThrowable('JsonException', MESSAGES[error.code], BigInt(error.code)));
       runtime.lastJsonError = error.code;
-      flags = 0n;
       return null;
     }
   }
@@ -293,10 +313,12 @@ defineFunction(
 defineFunction('json_last_error(): int', () => BigInt(rt().lastJsonError));
 defineFunction('json_last_error_msg(): string', () => MESSAGES[rt().lastJsonError]);
 defineFunction('json_validate(string $json, int $depth = 512, int $flags = 0): bool', ({ args }) => {
+  const depth = Number((args[1] as bigint | undefined) ?? 512n);
   try {
     if (args[0] === '') throw new JsonError(4);
-    new JsonParser(args[0] as string, true, Number((args[1] as bigint | undefined) ?? 512n), 0n).parseDocument();
     rt().lastJsonError = 0;
+    if (depth <= 0) throwError('ValueError', 'json_validate(): Argument #2 ($depth) must be greater than 0');
+    new JsonParser(args[0] as string, true, depth, 0n).parseDocument();
     return true;
   } catch (error) {
     if (!(error instanceof JsonError)) throw error;
@@ -304,6 +326,18 @@ defineFunction('json_validate(string $json, int $depth = 512, int $flags = 0): b
     return false;
   }
 });
+
+/** The characters of JSON's escapes other than `\\u`, by the letter after the backslash. */
+const SIMPLE_ESCAPES: Record<string, string> = {
+  '"': '"',
+  '\\': '\\',
+  '/': '/',
+  b: '\b',
+  f: '\f',
+  n: '\n',
+  r: '\r',
+  t: '\t',
+};
 
 class JsonParser {
   private index = 0;
@@ -349,8 +383,7 @@ class JsonParser {
     throw new JsonError(4);
   }
 
-  // code-gauge-allow functionCognitiveComplexity 16 -- Transcribes PHP's algorithm for this function step by step, whose branches mirror PHP's.
-  // code-gauge-allow functionNcss 34 -- Transcribes PHP's algorithm for this function step by step, whose branches mirror PHP's.
+  // code-gauge-allow functionNcss 31 -- Transcribes PHP's algorithm for this function step by step, whose branches mirror PHP's.
   private object(depth: number): Value {
     this.index++;
     const array = new PhpArray();
@@ -374,8 +407,7 @@ class JsonParser {
       this.index++;
       const value = this.value(depth);
       createIfNeeded();
-      if (object) object.props.set(key, value);
-      else array.set(conversionsModule.normalizeKeyString(key), value);
+      storeMember(object ?? array, key, value);
       this.skipSpace();
       const next = this.text[this.index++];
       if (next === '}') break;
@@ -402,8 +434,7 @@ class JsonParser {
     return array;
   }
 
-  // code-gauge-allow functionCognitiveComplexity 28 -- Transcribes PHP's algorithm for this function step by step, whose branches mirror PHP's.
-  // code-gauge-allow functionNcss 41 -- Transcribes PHP's algorithm for this function step by step, whose branches mirror PHP's.
+  // code-gauge-allow functionCognitiveComplexity 18 -- Transcribes PHP's algorithm for this function step by step, whose branches mirror PHP's.
   private string(): string {
     this.index++;
     let result = '';
@@ -425,30 +456,19 @@ class JsonParser {
         continue;
       }
       const escape = this.text[this.index++];
-      const simple: Record<string, string> = {
-        '"': '"',
-        '\\': '\\',
-        '/': '/',
-        b: '\b',
-        f: '\f',
-        n: '\n',
-        r: '\r',
-        t: '\t',
-      };
-      if (escape in simple) {
-        result += simple[escape];
-        continue;
-      }
-      if (escape !== 'u') throw new JsonError(4);
-      let point = this.hex4();
-      if (point >= 0xd8_00 && point <= 0xdb_ff && this.text.startsWith(String.raw`\u`, this.index)) {
-        this.index += 2;
-        const low = this.hex4();
-        if (low >= 0xdc_00 && low <= 0xdf_ff) point = 0x1_00_00 + ((point - 0xd8_00) << 10) + (low - 0xdc_00);
-        else throw new JsonError(4);
-      } else if (point >= 0xd8_00 && point <= 0xdf_ff) throw new JsonError(4);
-      result += codePointBytes(point);
+      if (escape === 'u') result += codePointBytes(this.unicodeEscape());
+      else if (Object.hasOwn(SIMPLE_ESCAPES, escape)) result += SIMPLE_ESCAPES[escape];
+      else throw new JsonError(4);
     }
+  }
+
+  private unicodeEscape(): number {
+    const point = this.hex4();
+    if (point < 0xd8_00 || point > 0xdf_ff) return point;
+    const low = /^\\u([Dd][C-Fc-f][\dA-Fa-f]{2})/.exec(this.text.slice(this.index, this.index + 6));
+    if (point > 0xdb_ff || !low) throw new JsonError(10);
+    this.index += 6;
+    return 0x1_00_00 + ((point - 0xd8_00) << 10) + (Number.parseInt(low[1], 16) - 0xdc_00);
   }
 
   private hex4(): number {
@@ -471,4 +491,14 @@ class JsonParser {
     }
     return Number(match[0]);
   }
+}
+
+/** Stores a decoded member, where PHP rejects a property name starting with NUL as it marks a mangled name. */
+function storeMember(target: PhpArray | PhpObject, key: string, value: Value): void {
+  if (target instanceof PhpArray) {
+    target.set(conversionsModule.normalizeKeyString(key), value);
+    return;
+  }
+  if (key.startsWith('\0')) throw new JsonError(9);
+  target.props.set(key, value);
 }

@@ -15,6 +15,7 @@ import {
 
 const functions: NativeFunction[] = [];
 const constants: [string, Value][] = [];
+const constantDeprecations = new Map<string, string>();
 const classDefinitions: ClassDefinition[] = [];
 
 /** Defines a builtin function from its signature as PHP's stubs write it. */
@@ -36,8 +37,15 @@ export function defineAlias(alias: string, target: string): void {
   functions.push({ ...fn, name: alias });
 }
 
-export function defineConstant(name: string, value: Value): void {
+/** Defines a builtin constant; reading one with a `deprecation` should report that message as E_DEPRECATED. */
+export function defineConstant(name: string, value: Value, deprecation?: string): void {
   constants.push([name, value]);
+  if (deprecation) constantDeprecations.set(name, deprecation);
+}
+
+/** The E_DEPRECATED message PHP reports when a script reads the builtin constant `name`, if PHP deprecates it. */
+export function constantDeprecation(name: string): string | undefined {
+  return constantDeprecations.get(name);
 }
 
 export interface NativeMethod {

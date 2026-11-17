@@ -1,9 +1,9 @@
-// code-gauge-allow-file fileNcss 861 -- One converter of the statements and expressions, which share the converter state.
+// code-gauge-allow-file fileNcss 885 -- One converter of the statements and expressions, which share the converter state.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import type { Node } from '@willbooster/web-tree-sitter';
 
 import type { Arg, ArrayItem, CatchClause, Expr, ListItem, MatchArm, Program, Stmt, SwitchCase } from './ast';
-import { collectMainVars, collectVariables, onlyCalls, validateReads } from './astAnalysis';
+import { collectMainVars, collectVariables, hasReferenceItem, onlyCalls, validateReads } from './astAnalysis';
 import { enc, lower } from './bytes';
 import { MAGIC_RUNTIME } from './converterBase';
 import { DeclarationConverter } from './declarationConverter';
@@ -150,6 +150,9 @@ export class Converter extends DeclarationConverter {
       }
       case 'global_declaration': {
         const names = node.namedChildren.filter((child) => child.type !== 'comment').map((child) => this.expr(child));
+        if (names.some((name) => name.k === 'var' && name.name === 'this')) {
+          this.error(node, '$this は global にできません（Cannot use $this as global variable）。');
+        }
         return [{ k: 'global', names, row }];
       }
       case 'function_static_declaration': {
@@ -267,9 +270,9 @@ export class Converter extends DeclarationConverter {
     return this.expr(node);
   }
 
-  private loopBody<T>(convert: () => T): T {
+  private loopBody<T>(convert: () => T, isSwitch = false): T {
     const outer = this.loop;
-    this.loop = { depth: outer.depth + 1 };
+    this.loop = { depth: outer.depth + 1, switches: [...outer.switches, isSwitch] };
     try {
       return convert();
     } finally {
@@ -325,34 +328,36 @@ export class Converter extends DeclarationConverter {
     const subject = this.condition(node);
     const block = node.childForFieldName('body') as Node;
     let defaults = 0;
-    const cases = this.loopBody(() =>
-      block.namedChildren
-        .filter((child) => child.type === 'case_statement' || child.type === 'default_statement')
-        .map((child): SwitchCase => {
-          const value = child.childForFieldName('value');
-          if (child.type === 'default_statement') {
-            defaults++;
-            if (defaults > 1)
-              this.error(
-                child,
-                'switch に default が2つあります（Switch statements may only contain one default clause）。'
-              );
-          }
-          const separator = child.children.find((part) => part.type === ':' || part.type === ';');
-          if (separator?.type === ';') {
-            this.notices.push({
-              level: 'Deprecated',
-              message: 'Case statements followed by a semicolon (;) are deprecated, use a colon (:) instead',
+    const cases = this.loopBody(
+      () =>
+        block.namedChildren
+          .filter((child) => child.type === 'case_statement' || child.type === 'default_statement')
+          .map((child): SwitchCase => {
+            const value = child.childForFieldName('value');
+            if (child.type === 'default_statement') {
+              defaults++;
+              if (defaults > 1)
+                this.error(
+                  child,
+                  'switch に default が2つあります（Switch statements may only contain one default clause）。'
+                );
+            }
+            const separator = child.children.find((part) => part.type === ':' || part.type === ';');
+            if (separator?.type === ';') {
+              this.notices.push({
+                level: 'Deprecated',
+                message: 'Case statements followed by a semicolon (;) are deprecated, use a colon (:) instead',
+                row: child.startPosition.row,
+              });
+            }
+            const statements = child.namedChildren.filter((part) => part.id !== value?.id && part.type !== 'comment');
+            return {
+              test: value ? this.expr(value) : undefined,
+              body: statements.flatMap((statement) => this.statement(statement, false)),
               row: child.startPosition.row,
-            });
-          }
-          const statements = child.namedChildren.filter((part) => part.id !== value?.id && part.type !== 'comment');
-          return {
-            test: value ? this.expr(value) : undefined,
-            body: statements.flatMap((statement) => this.statement(statement, false)),
-            row: child.startPosition.row,
-          };
-        })
+            };
+          }),
+      true
     );
     return { k: 'switch', subject, cases, row };
   }
@@ -379,7 +384,18 @@ export class Converter extends DeclarationConverter {
     if (depth > this.loop.depth) {
       this.error(node, `${depth} 段の '${kind}' はできません（Cannot '${kind}' ${depth} levels）。`);
     }
+    if (kind === 'continue' && this.loop.switches.at(-depth)) this.warnContinueInSwitch(node, depth);
     return { k: kind, depth, row: node.startPosition.row };
+  }
+
+  private warnContinueInSwitch(node: Node, depth: number): void {
+    const levels = depth > 1 ? ` ${depth}` : '';
+    const hasOuterLoop = this.loop.switches.slice(0, -depth).includes(false);
+    this.notices.push({
+      level: 'Warning',
+      message: `"continue${levels}" targeting switch is equivalent to "break${levels}"${hasOuterLoop ? `. Did you mean to use "continue ${depth + 1}"?` : ''}`,
+      row: node.startPosition.row,
+    });
   }
 
   private returnStatement(node: Node): Stmt {
@@ -532,9 +548,15 @@ export class Converter extends DeclarationConverter {
         if (e.name === 'this') this.error(node, '$this には代入できません（Cannot re-assign $this）。');
         return;
       }
+      case 'idx': {
+        this.checkWriteBase(e.base, node);
+        return;
+      }
+      case 'prop': {
+        this.checkWriteBase(e.obj, node);
+        return;
+      }
       case 'varvar':
-      case 'idx':
-      case 'prop':
       case 'sprop':
       case 'list': {
         return;
@@ -549,6 +571,19 @@ export class Converter extends DeclarationConverter {
         this.error(node, 'この式には代入できません（Cannot use temporary expression in write context）。');
       }
     }
+  }
+
+  /**
+   * Rejects a write into what an expression produces, such as `(new A)->p = 1`, which PHP compiles as a temporary value;
+   * the value a call returns may be written into, as it may be an object.
+   */
+  private checkWriteBase(base: Expr, node: Node): void {
+    if (base.k === 'idx' || base.k === 'prop') {
+      this.checkWritable(base, node);
+      return;
+    }
+    if (['var', 'varvar', 'sprop', 'call', 'mcall', 'scall'].includes(base.k)) return;
+    this.error(node, 'この式には代入できません（Cannot use temporary expression in write context）。');
   }
 
   expr(node: Node): Expr {
@@ -593,6 +628,13 @@ export class Converter extends DeclarationConverter {
           return { k: 'var', name: enc(inner.text), row };
         }
         if (inner.type === 'name') return { k: 'var', name: enc(inner.text), row };
+        if (node.text.startsWith('${') && node.parent?.type === 'encapsed_string') {
+          this.notices.push({
+            level: 'Deprecated',
+            message: 'Using ${expr} (variable variables) in strings is deprecated, use {${expr}} instead',
+            row,
+          });
+        }
         return { k: 'varvar', name: this.expr(inner), row };
       }
       case 'name':
@@ -674,7 +716,18 @@ export class Converter extends DeclarationConverter {
         ) {
           this.error(node, '$this には代入できません（Cannot use $this as array）。');
         }
-        return { k: 'assign', target, value: this.expr(right), row };
+        const value = this.expr(right);
+        if (
+          target.k === 'list' &&
+          hasReferenceItem(target) &&
+          !['var', 'varvar', 'idx', 'prop', 'sprop', 'call', 'mcall', 'scall'].includes(value.k)
+        ) {
+          this.error(
+            node,
+            '参照で分割代入できるのは変数だけです（Cannot assign reference to non referenceable value）。'
+          );
+        }
+        return { k: 'assign', target, value, row };
       }
       case 'reference_assignment_expression': {
         const target = this.writable(node.childForFieldName('left') as Node);
@@ -1165,7 +1218,15 @@ export class Converter extends DeclarationConverter {
     const flush = (): void => {
       if (raw === '') return;
       const text = isHeredoc && indent > 0 ? this.dedent(raw, indent, rawAtLineStart, end as Node) : raw;
-      parts.push(decodeLiteral(text, !isHeredoc));
+      parts.push(
+        decodeLiteral(text, !isHeredoc, (escape) =>
+          this.notices.push({
+            level: 'Warning',
+            message: `Octal escape sequence overflow ${escape} is greater than \\377`,
+            row: container.startPosition.row,
+          })
+        )
+      );
       raw = '';
     };
     let braced = false;

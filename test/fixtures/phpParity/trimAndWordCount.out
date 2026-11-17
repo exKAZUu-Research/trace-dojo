@@ -1,0 +1,89 @@
+
+Warning: trim(): Invalid '..'-range, no character to the right of '..' in /main.php on line 2
+string(2) "bc"
+
+Warning: trim(): Invalid '..'-range, no character to the left of '..' in /main.php on line 3
+string(2) "ab"
+
+Warning: trim(): Invalid '..'-range, '..'-range needs to be incrementing in /main.php on line 4
+string(1) "b"
+
+Warning: trim(): Invalid '..'-range in /main.php on line 5
+string(0) ""
+
+Warning: trim(): Invalid '..'-range, no character to the left of '..' in /main.php on line 6
+string(3) "abc"
+string(0) ""
+
+Warning: ltrim(): Invalid '..'-range, no character to the right of '..' in /main.php on line 8
+string(3) "abc"
+
+Warning: rtrim(): Invalid '..'-range, no character to the left of '..' in /main.php on line 9
+string(3) "abc"
+string(0) ""
+string(3) "abc"
+
+Warning: trim(): Invalid '..'-range, no character to the right of '..' in /main.php on line 12
+string(3) "abc"
+string(2) "
+"
+string(1) "|"
+string(5) "ab|c|"
+array(6) {
+  [0]=>
+  string(5) "Hello"
+  [1]=>
+  string(6) "fri3nd"
+  [2]=>
+  string(6) "you're"
+  [3]=>
+  string(7) "looking"
+  [4]=>
+  string(4) "good"
+  [5]=>
+  string(5) "today"
+}
+array(6) {
+  [1]=>
+  string(5) "hello"
+  [7]=>
+  string(6) "world-"
+  [14]=>
+  string(4) "-foo"
+  [19]=>
+  string(7) "bar-baz"
+  [27]=>
+  string(3) "'x'"
+  [31]=>
+  string(4) "a--b"
+}
+array(2) {
+  [0]=>
+  string(8) "636166c3"
+  [1]=>
+  string(10) "6e61ef7665"
+}
+array(2) {
+  [0]=>
+  string(4) "a1b2"
+  [1]=>
+  string(2) "c3"
+}
+array(2) {
+  [0]=>
+  string(3) "a.b"
+  [1]=>
+  string(1) "c"
+}
+array(2) {
+  [0]=>
+  string(4) "a-b-"
+  [5]=>
+  string(2) "c'"
+}
+array(2) {
+  [0]=>
+  string(5) "'abc'"
+  [1]=>
+  string(2) "-x"
+}

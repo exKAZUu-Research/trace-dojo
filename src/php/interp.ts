@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 661 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 673 -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import { ExecutionLimitError, LIMITS } from '../interpreter/limits';
 import {
@@ -12,6 +12,7 @@ import {
   placeOf,
 } from './assignment';
 import type { ClassDecl, ClassRef, Expr } from './ast';
+import { hasReferenceItem } from './astAnalysis';
 import { lower } from './bytes';
 import {
   callExpression,
@@ -43,6 +44,7 @@ import * as classesModule from './classes';
 import * as conversionsModule from './conversions';
 import { debugType, toBool, valueName } from './conversions';
 import { deprecated, notice, throwError, warn } from './errors';
+import { constantDeprecation } from './native';
 import {
   bitwiseNot,
   compare,
@@ -196,6 +198,9 @@ export function evChain(e: Expr): Chain {
       if (e.target.k === 'list') {
         const value = ev(e.value);
         runtime.frame.temporaries.push(value);
+        if (['call', 'mcall', 'scall'].includes(e.value.k) && hasReferenceItem(e.target)) {
+          notice('Attempting to set reference to non referenceable value');
+        }
         destructure(e.target, value);
         return value;
       }
@@ -411,7 +416,7 @@ function globalsArray(): PhpArray {
 }
 
 export function readIndex(base: Value, index: Value, quiet: boolean): Value {
-  if (base instanceof PhpArray) return readElement(base, toKey(index), quiet);
+  if (base instanceof PhpArray) return readElement(base, toKey(index, quiet ? 'isset' : 'access'), quiet);
   if (typeof base === 'string') return readStringOffset(base, index, quiet);
   if (base instanceof PhpObject) {
     if (base.cls.findMethod('offsetget') && isArrayAccess(base)) {
@@ -575,12 +580,19 @@ function readConstant(name: string, fallback: string | undefined): Value {
     throw new UnsupportedFeatureError(`実行環境の情報（${global}）`);
   }
   const value = runtime.constants.get(constantKey(name));
-  if (value !== undefined) return value;
+  if (value !== undefined) return deprecatedConstant(name, value);
   if (fallback !== undefined) {
     const global = runtime.constants.get(fallback);
-    if (global !== undefined) return global;
+    if (global !== undefined) return deprecatedConstant(fallback, global);
   }
   throwError('Error', `Undefined constant "${name}"`);
+}
+
+/** Returns a constant's value after the deprecation PHP reports when a program reads a deprecated builtin one. */
+export function deprecatedConstant(name: string, value: Value): Value {
+  const message = constantDeprecation(name);
+  if (message) deprecated(message);
+  return value;
 }
 
 // code-gauge-allow functionCognitiveComplexity 23 -- One case per expression kind, as PHP evaluates each kind differently.
@@ -860,6 +872,9 @@ export function cast(type: string, value: Value): Value {
 
 function objectToArrayCast(object: PhpObject): PhpArray {
   if (isClosure(object)) return PhpArray.list([object]);
+  // ArrayObject and ArrayIterator cast to the array they hold.
+  const storage = (object.internal as { properties?: () => PhpArray } | undefined)?.properties;
+  if (typeof storage === 'function') return storage.call(object.internal).copy();
   return classesModule.objectToArray(object);
 }
 

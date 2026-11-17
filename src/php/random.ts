@@ -1,9 +1,15 @@
 const N = 624;
 const M = 397;
 
-function twist(m: number, u: number, v: number): number {
+function twistStandard(m: number, u: number, v: number): number {
   const mixed = ((u & 0x80_00_00_00) | (v & 0x7f_ff_ff_ff)) >>> 1;
   return (m ^ mixed ^ (v & 1 ? 0x99_08_b0_df : 0)) >>> 0;
+}
+
+/** The twist of PHP's MT_RAND_PHP mode, which tests the low bit of `u` instead of `v`. */
+function twistPhp(m: number, u: number, v: number): number {
+  const mixed = ((u & 0x80_00_00_00) | (v & 0x7f_ff_ff_ff)) >>> 1;
+  return (m ^ mixed ^ (u & 1 ? 0x99_08_b0_df : 0)) >>> 0;
 }
 
 /** PHP's Mersenne Twister (`mt_rand`, `rand`, `shuffle`), which the same seed makes produce PHP's sequence. */
@@ -11,8 +17,11 @@ export class MersenneTwister {
   private readonly state = new Uint32Array(N);
   private count = N;
   private seeded = false;
+  /** Whether the generator runs in PHP's biased MT_RAND_PHP mode. */
+  phpMode = false;
 
-  seed(seed: number): void {
+  seed(seed: number, phpMode = false): void {
+    this.phpMode = phpMode;
     const s = this.state;
     s[0] = seed >>> 0;
     for (let index = 1; index < N; index++) {
@@ -25,6 +34,7 @@ export class MersenneTwister {
 
   private reload(): void {
     const s = this.state;
+    const twist = this.phpMode ? twistPhp : twistStandard;
     let p = 0;
     for (let index = N - M; index > 0; index--, p++) s[p] = twist(s[p + M], s[p], s[p + 1]);
     for (let index = M; --index > 0; p++) s[p] = twist(s[p + M - N], s[p], s[p + 1]);

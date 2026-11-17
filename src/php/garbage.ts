@@ -101,7 +101,7 @@ export function mark(runtime: Runtime): Set<PhpObject> {
     for (const method of cls.methods.values()) if (method.fn.kind === 'user') roots.push(...method.fn.statics.values());
   }
   for (const value of runtime.constants.values()) roots.push(value);
-  roots.push(...runtime.held, runtime.exceptionHandler);
+  roots.push(...runtime.held, runtime.exceptionHandler, ...runtime.replacedExceptionHandlers);
   for (const { handler } of runtime.errorHandlers) roots.push(handler);
   // A stack visits the first of the items pushed together first when they are pushed in reverse.
   const pending = roots.toReversed();

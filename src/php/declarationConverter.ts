@@ -1,3 +1,4 @@
+// code-gauge-allow-file fileNcss 415 -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import type { Node } from '@willbooster/web-tree-sitter';
 
@@ -32,6 +33,7 @@ const MAGIC_METHODS: Record<string, { args?: number; isStatic?: boolean; isPubli
 
 /** Converts the declarations of functions, parameters, types, and classes. */
 export abstract class DeclarationConverter extends ConverterBase {
+  // code-gauge-allow functionNcss 31 -- Converts every part of a function declaration and checks it as PHP does at compile time.
   protected functionDecl(node: Node, isClosure: boolean, className?: string): FunctionDecl {
     const attributes = node.childForFieldName('attributes');
     if (attributes) this.unsupported(attributes, '属性（#[...]）');
@@ -57,10 +59,13 @@ export abstract class DeclarationConverter extends ConverterBase {
       gotos: [],
       className: className ?? outerFn.className,
       isMethod: className !== undefined,
+      isFunction: true,
+      isClosure,
       displayName: isClosure ? name : `${className === undefined ? '' : `${className}::`}${name}()`,
     };
-    this.loop = { depth: 0 };
+    this.loop = { depth: 0, switches: [] };
     try {
+      if (returnTypeNode && returnType) this.checkTypeScope(returnTypeNode, returnType);
       const params = this.params(node.childForFieldName('parameters') as Node, name, className);
       const isAtomic = this.claimAtomic(node, body);
       let statements: Stmt[] = [];
@@ -93,7 +98,6 @@ export abstract class DeclarationConverter extends ConverterBase {
     }
   }
 
-  // code-gauge-allow functionNcss 49 -- Checks PHP's rules on the modifiers and parts of each declaration.
   protected params(node: Node, functionName: string, className?: string): ParamDecl[] {
     const params: ParamDecl[] = [];
     const seen = new Set<string>();
@@ -109,10 +113,15 @@ export abstract class DeclarationConverter extends ConverterBase {
       seen.add(name);
       const typeNode = child.childForFieldName('type');
       const type = typeNode ? this.typeDecl(typeNode) : undefined;
+      if (typeNode && type) this.checkTypeScope(typeNode, type);
       const defaultNode = child.childForFieldName('default_value');
       const defaultExpr = defaultNode ? this.expr(defaultNode) : undefined;
       const byRef = child.childForFieldName('reference_modifier') !== null;
       const variadic = child.type === 'variadic_parameter';
+      if (params.at(-1)?.variadic) {
+        this.error(child, '可変長の引数は最後にしか書けません（Only the last parameter can be variadic）。');
+      }
+      if (type && defaultExpr) this.checkDefaultType(child, name, type, defaultExpr);
       const param: ParamDecl = {
         name,
         type,
@@ -219,6 +228,35 @@ export abstract class DeclarationConverter extends ConverterBase {
     }
   }
 
+  /** Rejects a literal default value the parameter's type can never hold, as PHP does at compile time. */
+  private checkDefaultType(node: Node, name: string, type: TypeDecl, value: Expr): void {
+    if (value.k !== 'lit' || value.v === null) return;
+    const literalType =
+      typeof value.v === 'bigint'
+        ? 'int'
+        : typeof value.v === 'number'
+          ? 'float'
+          : typeof value.v === 'boolean'
+            ? 'bool'
+            : typeof value.v === 'string'
+              ? 'string'
+              : undefined;
+    if (literalType === undefined || defaultFits(type, literalType)) return;
+    this.error(
+      node,
+      `引数 $${name} の型に合わない既定値です（Cannot use ${literalType} as default value for parameter $${name} of type ${typeToString(type)}）。`
+    );
+  }
+
+  /** Checks the `self`, `static`, and `parent` a declared type names, as {@link checkClassScope} does. */
+  protected checkTypeScope(node: Node, type: TypeDecl): void {
+    if (type.k !== 'named') {
+      for (const part of type.types) this.checkTypeScope(node, part);
+      return;
+    }
+    if (type.name === 'self' || type.name === 'static' || type.name === 'parent') this.checkClassScope(node, type.name);
+  }
+
   protected typeName(node: Node): TypeDecl {
     const raw = this.nameText(node);
     const word = lower(raw);
@@ -287,7 +325,11 @@ export abstract class DeclarationConverter extends ConverterBase {
       isAnonymous: anonymous,
     };
     const outerClass = this.currentClass;
+    const outerKind = this.currentClassKind;
+    const outerHasParent = this.currentClassHasParent;
     this.currentClass = name;
+    this.currentClassKind = kind;
+    this.currentClassHasParent = parent !== undefined;
     try {
       const body = node.childForFieldName('body') as Node;
       const memberNames = new Set<string>();
@@ -333,6 +375,8 @@ export abstract class DeclarationConverter extends ConverterBase {
       }
     } finally {
       this.currentClass = outerClass;
+      this.currentClassKind = outerKind;
+      this.currentClassHasParent = outerHasParent;
     }
     // Promoted constructor parameters declare properties.
     const constructor = decl.methods.find((method) => lower(method.fn.name) === '__construct');
@@ -425,7 +469,7 @@ export abstract class DeclarationConverter extends ConverterBase {
     }
   }
 
-  // code-gauge-allow functionCognitiveComplexity 19 -- Checks PHP's rules on the modifiers and parts of each declaration.
+  // code-gauge-allow functionCognitiveComplexity 21 -- Checks PHP's rules on the modifiers and parts of each declaration.
   protected properties(member: Node, decl: ClassDecl, kind: ClassDecl['kind']): void {
     const attributes = member.childForFieldName('attributes');
     if (attributes) this.unsupported(attributes, '属性（#[...]）');
@@ -438,6 +482,7 @@ export abstract class DeclarationConverter extends ConverterBase {
     const modifiers = this.memberModifiers(member);
     const typeNode = member.childForFieldName('type');
     const type = typeNode ? this.typeDecl(typeNode) : undefined;
+    if (typeNode && type) this.checkTypeScope(typeNode, type);
     const isReadonly = modifiers.isReadonly || decl.isReadonly;
     if (isReadonly && !type && !modifiers.isStatic) {
       this.error(
@@ -715,4 +760,15 @@ function referencesProperty(node: Node, name: string): boolean {
     }
   }
   return node.namedChildren.some((child) => referencesProperty(child, name));
+}
+
+/** Whether a literal of a scalar type may be the default value of a parameter of `type`; an int may stand for a float. */
+function defaultFits(type: TypeDecl, literalType: string): boolean {
+  if (type.k === 'inter') return false;
+  if (type.k === 'union') return type.types.some((part) => defaultFits(part, literalType));
+  const name = type.name;
+  if (name === 'mixed' || name === literalType) return true;
+  if (literalType === 'int' && name === 'float') return true;
+  if (literalType === 'bool') return name === 'true' || name === 'false';
+  return false;
 }

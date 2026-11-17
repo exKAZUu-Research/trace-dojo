@@ -1,3 +1,6 @@
+// oxlint-disable unicorn/prefer-code-point -- PHP strings hold bytes as code units 0–255, which charCodeAt reads as they are.
+import { codePointBytes } from './bytes';
+
 /** The named entities of HTML 4.01, which `htmlentities` writes and `html_entity_decode` reads, by code point. */
 export const HTML401_ENTITIES: readonly (readonly [number, string])[] = [
   [34, 'quot'],
@@ -253,3 +256,206 @@ export const HTML401_ENTITIES: readonly (readonly [number, string])[] = [
   [9829, 'hearts'],
   [9830, 'diams'],
 ];
+
+const QUOTE_SINGLE = 1n;
+const QUOTE_DOUBLE = 2n;
+const IGNORE = 4n;
+const SUBSTITUTE = 8n;
+const DISALLOWED = 128n;
+enum Doctype {
+  Html401 = 0,
+  Xml1 = 16,
+  Xhtml = 32,
+  Html5 = 48,
+}
+const REPLACEMENT = codePointBytes(0xff_fd);
+const ENTITY_BY_CODE = new Map(HTML401_ENTITIES.map(([code, name]) => [code, name]));
+const CODE_BY_ENTITY = new Map(HTML401_ENTITIES.map(([code, name]) => [name, code]));
+const NAME = /([\dA-Za-z]+);/y;
+const DIGITS = /\d+/y;
+const HEX_DIGITS = /[\dA-Fa-f]+/y;
+const BASIC_ENTITIES = new Map([
+  [38, 'amp'],
+  [60, 'lt'],
+  [62, 'gt'],
+  [34, 'quot'],
+]);
+const BASIC_CODES = new Map([...BASIC_ENTITIES].map(([code, name]) => [name, code]));
+
+/**
+ * Escapes UTF-8 text as `htmlspecialchars` (`all` false) or `htmlentities` (`all` true) does. HTML5 uses the
+ * HTML 4.01 entities plus `&apos;`.
+ */
+// code-gauge-allow functionCognitiveComplexity 23 -- Transcribes PHP's algorithm for this function step by step, whose branches mirror PHP's.
+export function escapeHtml(text: string, flags: bigint, all: boolean, doubleEncode: boolean): string {
+  const doctype = doctypeOf(flags);
+  let result = '';
+  for (let index = 0; index < text.length;) {
+    const [length, code] = nextChar(text, index);
+    const char = text.slice(index, index + length);
+    index += length;
+    if (code === undefined) {
+      if (flags & IGNORE) continue;
+      if (!(flags & SUBSTITUTE)) return '';
+      result += REPLACEMENT;
+    } else if (code === 0x26) {
+      const entityLength = doubleEncode ? 0 : validEntityLength(text, index, flags);
+      result += entityLength > 0 ? text.slice(index - 1, index + entityLength) : '&amp;';
+      index += entityLength;
+    } else {
+      const name = entityFor(code, flags, all);
+      if (name) result += `&${name};`;
+      else if (flags & DISALLOWED && !isAllowed(code, doctype)) result += REPLACEMENT;
+      else result += char;
+    }
+  }
+  return result;
+}
+
+/** Decodes the entities of UTF-8 text as `html_entity_decode` (`all` true) or `htmlspecialchars_decode` does. */
+export function decodeHtml(text: string, flags: bigint, all: boolean): string {
+  const doctype = doctypeOf(flags);
+  let result = '';
+  for (let index = 0; index < text.length; index++) {
+    if (text[index] !== '&' || index + 3 >= text.length) {
+      result += text[index];
+      continue;
+    }
+    const entity =
+      text[index + 1] === '#' ? numericEntity(text, index + 2) : namedEntity(text, index + 1, doctype, all);
+    if (
+      entity === undefined ||
+      (text[index + 1] === '#' && !numericDecodable(entity.code, doctype, all)) ||
+      !quoteAllowed(entity.code, flags)
+    ) {
+      result += '&';
+      continue;
+    }
+    result += codePointBytes(entity.code);
+    index = entity.end;
+  }
+  return result;
+}
+
+function doctypeOf(flags: bigint): Doctype {
+  return Number(flags & 48n) as Doctype;
+}
+
+/** The length and code point of the UTF-8 character at `index`, without a code point when invalid, as PHP's get_next_char reads them. */
+// code-gauge-allow functionCognitiveComplexity 17 -- Transcribes PHP's algorithm for this function step by step, whose branches mirror PHP's.
+function nextChar(text: string, index: number): [number, number | undefined] {
+  const lead = text.charCodeAt(index);
+  if (lead < 0x80) return [1, lead];
+  if (lead < 0xc2 || lead > 0xf4) return [1, undefined];
+  const size = lead < 0xe0 ? 2 : lead < 0xf0 ? 3 : 4;
+  const available = text.length - index;
+  let code = lead & (0xff >> (size + 1));
+  for (let offset = 1; offset < size; offset++) {
+    const byte = text.charCodeAt(index + offset);
+    if (offset >= available || byte < 0x80 || byte > 0xbf) return [invalidLength(text, index, size), undefined];
+    code = (code << 6) | (byte & 0x3f);
+  }
+  if (size === 3 && (code < 0x8_00 || (code >= 0xd8_00 && code <= 0xdf_ff))) return [3, undefined];
+  if (size === 4 && (code < 0x1_00_00 || code > 0x10_ff_ff)) return [4, undefined];
+  return [size, code];
+}
+
+/** How many bytes PHP skips for a truncated or broken sequence: up to the first byte that could start a character. */
+function invalidLength(text: string, index: number, size: number): number {
+  for (let offset = 1; offset < size; offset++) {
+    const byte = text.charCodeAt(index + offset);
+    if (index + offset >= text.length || byte < 0x80 || (byte >= 0xc2 && byte <= 0xf4)) return offset;
+  }
+  return size;
+}
+
+/** The length after `&` of the valid entity at `index` that `double_encode` false keeps, or 0. */
+function validEntityLength(text: string, index: number, flags: bigint): number {
+  const doctype = doctypeOf(flags);
+  if (text[index] === '#') {
+    const entity = numericEntity(text, index + 1);
+    if (!entity || (flags & DISALLOWED && !numericAllowed(entity.code, doctype))) return 0;
+    return entity.end + 1 - index;
+  }
+  const entity = namedEntity(text, index, doctype, true);
+  return entity ? entity.end + 1 - index : 0;
+}
+
+/** The code point and the index of `;` of the numeric entity whose digits start at `index`. */
+function numericEntity(text: string, index: number): { code: number; end: number } | undefined {
+  const hex = text[index] === 'x' || text[index] === 'X';
+  const pattern = hex ? HEX_DIGITS : DIGITS;
+  pattern.lastIndex = hex ? index + 1 : index;
+  const digits = pattern.exec(text)?.[0];
+  if (!digits) return undefined;
+  const end = index + (hex ? 1 : 0) + digits.length;
+  const code = Number.parseInt(digits, hex ? 16 : 10);
+  if (text[end] !== ';' || code > 0x10_ff_ff) return undefined;
+  return { code, end };
+}
+
+/** The code point and the index of `;` of the named entity whose name starts at `index`, if the doctype knows it. */
+function namedEntity(
+  text: string,
+  index: number,
+  doctype: Doctype,
+  all: boolean
+): { code: number; end: number } | undefined {
+  NAME.lastIndex = index;
+  const name = NAME.exec(text)?.[1];
+  if (!name) return undefined;
+  let code = (all && doctype !== Doctype.Xml1 ? CODE_BY_ENTITY : BASIC_CODES).get(name);
+  if (name === 'apos' && doctype !== Doctype.Html401) code = 0x27;
+  return code === undefined ? undefined : { code, end: index + name.length };
+}
+
+function numericDecodable(code: number, doctype: Doctype, all: boolean): boolean {
+  if (!all && ![0x22, 0x26, 0x27, 0x3c, 0x3e].includes(code)) return false;
+  return isAllowed(code, doctype) && !(doctype === Doctype.Html5 && code === 0x0d);
+}
+
+function quoteAllowed(code: number, flags: bigint): boolean {
+  if (code === 0x27) return (flags & QUOTE_SINGLE) !== 0n;
+  if (code === 0x22) return (flags & QUOTE_DOUBLE) !== 0n;
+  return true;
+}
+
+function entityFor(code: number, flags: bigint, all: boolean): string | undefined {
+  if (!quoteAllowed(code, flags)) return undefined;
+  const doctype = doctypeOf(flags);
+  if (code === 0x27) return doctype === Doctype.Html401 || (all && doctype === Doctype.Xhtml) ? '#039' : 'apos';
+  return (all && doctype !== Doctype.Xml1 ? ENTITY_BY_CODE : BASIC_ENTITIES).get(code);
+}
+
+/** Whether a document type allows a code point as a character, as PHP's unicode_cp_is_allowed says. */
+function isAllowed(code: number, doctype: Doctype): boolean {
+  if (doctype === Doctype.Xml1 || doctype === Doctype.Xhtml) {
+    return (
+      (code >= 0x20 && code <= 0xd7_ff) ||
+      code === 0x0a ||
+      code === 0x09 ||
+      code === 0x0d ||
+      (code >= 0xe0_00 && code <= 0x10_ff_ff && code !== 0xff_fe && code !== 0xff_ff)
+    );
+  }
+  const control =
+    doctype === Doctype.Html5 ? code >= 0x09 && code <= 0x0d && code !== 0x0b : [0x09, 0x0a, 0x0d].includes(code);
+  return (code >= 0x20 && code <= 0x7e) || control || (code >= 0xa0 && code <= 0xd7_ff) || isAllowedHigh(code);
+}
+
+function isAllowedHigh(code: number): boolean {
+  return code >= 0xe0_00 && code <= 0x10_ff_ff && (code & 0xff_ff) < 0xff_fe && (code < 0xfd_d0 || code > 0xfd_ef);
+}
+
+/** Whether `double_encode` false with ENT_DISALLOWED keeps a numeric entity, as PHP's numeric_entity_is_allowed says. */
+function numericAllowed(code: number, doctype: Doctype): boolean {
+  if (doctype === Doctype.Html401) return true;
+  if (doctype === Doctype.Html5) {
+    return (
+      (code >= 0x20 && code <= 0x7e) ||
+      (code >= 0x09 && code <= 0x0c && code !== 0x0b) ||
+      (code >= 0xa0 && (code & 0xff_ff) < 0xff_fe && (code < 0xfd_d0 || code > 0xfd_ef))
+    );
+  }
+  return isAllowed(code, doctype);
+}

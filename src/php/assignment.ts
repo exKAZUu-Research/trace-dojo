@@ -127,6 +127,16 @@ function propPlace(object: PhpObject, name: string): Place {
     ref: () => propRef(object, name, scope),
     unset: () => unsetProp(object, name, scope),
     declaration: () => classesModule.lookupProp(object.cls, name, scope),
+    getForIsset: () => (issetProp(object, name, scope) ? readProp(object, name, scope, true) : undefined),
+    warnUndefined: () => {
+      if (object.cls.findMethod('__get')) return;
+      // PHP creates the property (deprecating a dynamic one) before it warns about reading it.
+      if (!classesModule.lookupProp(object.cls, name, scope)) {
+        classesModule.createDynamicProp(object, name);
+        object.props.set(name, null);
+      }
+      warn(`Undefined property: ${object.cls.name}::$${name}`);
+    },
     nested() {
       if (!issetPropExists(object, name, scope) && object.cls.findMethod('__get')) {
         return new RefPlace(propRef(object, name, scope));
@@ -146,6 +156,10 @@ function issetPropExists(object: PhpObject, name: string, scope: PhpClass | unde
 function arrayAccessPlace(object: PhpObject, key: Value | undefined): Place {
   if (!isArrayAccess(object)) throwError('Error', `Cannot use object of type ${object.cls.name} as array`);
   return {
+    getForIsset: () =>
+      toBool(callMethod(object, 'offsetExists', [key ?? null]))
+        ? callMethod(object, 'offsetGet', [key ?? null])
+        : undefined,
     nested: () => {
       const runtime = rt();
       runtime.lastReturnRef = undefined;
@@ -342,15 +356,13 @@ function destructureItem(item: ListItem, value: Value, key: Key): void {
   else placeOf(item.target).set(share(element));
 }
 
-// code-gauge-allow functionCognitiveComplexity 16 -- Handles each kind of writable expression, whose write rules PHP defines separately.
 export function compoundAssign(e: Extract<Expr, { k: 'assignOp' }>): Value {
   const runtime = rt();
   if (e.op === '??') {
-    if (isset(e.target)) {
-      const current = evQuiet(e.target);
-      if (current !== null) return current;
-    }
+    // PHP evaluates the target's parts once, for both the read and the write.
     const place = placeOf(e.target);
+    const current = place.getForIsset ? place.getForIsset() : place.get();
+    if (current !== undefined && current !== null) return current;
     const value = ev(e.value);
     place.set(share(value));
     return value;
@@ -360,10 +372,7 @@ export function compoundAssign(e: Extract<Expr, { k: 'assignOp' }>): Value {
   runtime.row = e.row;
   let current = place.get();
   if (current === undefined) {
-    if (e.target.k === 'var' || e.target.k === 'varvar') warn(`Undefined variable $${(place as VarPlace).name}`);
-    else if (e.target.k === 'idx' && place instanceof ElementPlace && place.key !== undefined) {
-      warn(`Undefined array key ${typeof place.key === 'bigint' ? place.key : `"${place.key}"`}`);
-    } else if (e.target.k === 'prop') warn(`Undefined property: ${''}`);
+    warnUndefinedTarget(e.target, place);
     current = null;
   }
   const result = applyOperator(e.op, current, value);
@@ -436,7 +445,7 @@ function warnUndefinedTarget(target: Expr, place: Place): void {
   if (target.k === 'var' || target.k === 'varvar') warn(`Undefined variable $${(place as VarPlace).name}`);
   else if (place instanceof ElementPlace && place.key !== undefined) {
     warn(`Undefined array key ${typeof place.key === 'bigint' ? place.key : `"${place.key}"`}`);
-  }
+  } else place.warnUndefined?.();
 }
 
 /** Throws PHP's TypeError when `++` or `--` takes a property typed int past the range of ints. */
@@ -492,7 +501,7 @@ export function unsetTarget(target: Expr): void {
       const base = unsetContainer(target.base);
       const index = ev(target.index);
       if (base === undefined) return;
-      if (base instanceof PhpArray) base.delete(toKey(index));
+      if (base instanceof PhpArray) base.delete(toKey(index, 'unset'));
       else if (base instanceof PhpObject) {
         if (!isArrayAccess(base)) throwError('Error', `Cannot use object of type ${base.cls.name} as array`);
         callMethod(base, 'offsetUnset', [index]);
@@ -563,7 +572,7 @@ export function isset(e: Expr): boolean {
       // PHP fetches the containers of an isset quietly, once, asking `__isset` before `__get`.
       const base = evQuiet(e.base);
       const index = ev(e.index);
-      if (base instanceof PhpArray) return (base.get(toKey(index)) ?? null) !== null;
+      if (base instanceof PhpArray) return (base.get(toKey(index, 'isset')) ?? null) !== null;
       if (typeof base === 'string') {
         if (typeof index === 'string' && !/^\s*-?\d+\s*$/.test(index)) return false;
         const position = stringOffset(base, index, true);

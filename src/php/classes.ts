@@ -1,9 +1,9 @@
-// code-gauge-allow-file fileNcss 706 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 709 -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import type { ClassDecl, Expr, FunctionDecl, MethodDeclAst, PropertyDeclAst } from './ast';
 import { lower } from './bytes';
 import { type ArgValue, invoke } from './calls';
-import { debugType, toBool, valueName } from './conversions';
+import { debugType, normalizeKeyString, toBool, valueName } from './conversions';
 import { deprecated, notice, throwError, warn } from './errors';
 import { share } from './places';
 import { FatalError, rt, SCRIPT_PATH } from './runtime';
@@ -629,7 +629,6 @@ function guarded(object: PhpObject, key: string, run: () => Value): Value {
   }
 }
 
-// code-gauge-allow functionNcss 35 -- Follows PHP's class linking and property access rules in their order of checks.
 export function readProp(object: PhpObject, name: string, scope: PhpClass | undefined, quiet = false): Value {
   rt().spend();
   const decl = lookupProp(object.cls, name, scope);
@@ -674,7 +673,9 @@ export function readProp(object: PhpObject, name: string, scope: PhpClass | unde
   const magic = object.cls.findMethod('__get');
   if (magic && !object.guards?.has(`get:${name}`))
     return guarded(object, `get:${name}`, () => callMagic(object, magic, [name]));
-  if (!quiet) warn(`Undefined property: ${object.cls.name}::$${name}`);
+  if (quiet) return null;
+  if (decl?.isStatic) notice(`Accessing static property ${object.cls.name}::$${name} as non static`);
+  warn(`Undefined property: ${object.cls.name}::$${name}`);
   return null;
 }
 
@@ -1008,7 +1009,7 @@ export function objectToArray(object: PhpObject): PhpArray {
     const decl = declForKey(object.cls, key);
     let arrayKey = key;
     if (decl?.visibility === 'protected') arrayKey = `\0*\0${decl.name}`;
-    array.set(arrayKey, slot instanceof Ref ? slot.v : slot);
+    array.set(normalizeKeyString(arrayKey), slot instanceof Ref ? slot.v : slot);
   }
   return array;
 }
