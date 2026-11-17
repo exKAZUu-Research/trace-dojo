@@ -4108,3 +4108,33 @@ test.each([
     uncaughtException: undefined,
   });
 });
+
+test.each([
+  ['[_]u8{1} ++ "ab"', '*const [3:0]u8'],
+  ['"ab" ++ [_]u8{1}', '*const [3:0]u8'],
+  ['.{@as(u8,1)} ++ "ab"', '*const [3:0]u8'],
+  ['"ab" ++ .{@as(u8,1)}', '*const [3:0]u8'],
+  ['[_]u8{1} ++ "ab" ++ [_]u8{4}', '*const [4:0]u8'],
+])('either pointer concatenation operand makes a pointer result: %s', (expression, expected) => {
+  expect(
+    executeProgram(
+      'zig',
+      `const std=@import("std");pub fn main()void{const x=${expression};std.debug.print("{}",.{@TypeOf(x)});}`
+    )
+  ).toMatchObject({ kind: 'executed', stderr: expected, uncaughtException: undefined });
+});
+
+test('a right array pointer preserves left value snapshots and runtime reads', () => {
+  const source = `const std=@import("std");fn bump(a:*[2]u8)*[2]u8{a[0]=9;return a;}pub fn main()void{var a=[_]u8{1,2};const x=a ++ bump(&a);std.debug.print("{any} {}",.{x,@TypeOf(x)});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: '{ 1, 2, 9, 2 } *const [4]u8',
+    uncaughtException: undefined,
+  });
+});
+
+test('a concatenated pointer does not implicitly become an array value', () => {
+  expect(executeProgram('zig', 'pub fn main()void{const x=[_]u8{1} ++ "ab";const y:[3:0]u8=x;_=y;}')).toMatchObject({
+    kind: 'compileError',
+  });
+});

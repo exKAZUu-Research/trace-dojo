@@ -1311,8 +1311,8 @@ export abstract class ExpressionCompiler extends SemaBase {
   }
 
   /** `a ++ b`: concatenates arrays whose lengths are known at compile time. */
-  // code-gauge-allow functionNcss 39 -- Keeps tuple/array coercion with the corresponding concatenation representation.
-  // code-gauge-allow functionCognitiveComplexity 22 -- Keeps tuple/array coercion with the corresponding concatenation representation.
+  // code-gauge-allow functionNcss 40 -- Keeps tuple/array coercion with the corresponding concatenation representation.
+  // code-gauge-allow functionCognitiveComplexity 23 -- Keeps tuple/array coercion with the corresponding concatenation representation.
   private concatenate(expression: ExpressionOf<'binary'>): TExpr {
     let left = this.compile(expression.left);
     let right = this.compile(expression.right);
@@ -1350,13 +1350,14 @@ export abstract class ExpressionCompiler extends SemaBase {
     const length = a.length + b.length;
     const arrayType = arrayOf(length, child, sentinel);
     this.storage.reserve(arrayType);
-    const resultType = a.viaPointer ? pointerTo(arrayType, true) : arrayType;
+    const viaPointer = a.viaPointer || b.viaPointer;
+    const resultType = viaPointer ? pointerTo(arrayType, true) : arrayType;
     const build = (x: Value[], y: Value[]): Value => {
       const array = newArray(
         [...x, ...y].map((value) => copyForStorage(value)),
         sentinel
       );
-      return a.viaPointer ? new Pointer(new Constant(array), 0) : array;
+      return viaPointer ? new Pointer(new Constant(array), 0) : array;
     };
     const readable =
       (!a.viaPointer || isConstantData(staticResultOf(left)?.value)) &&
