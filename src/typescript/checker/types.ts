@@ -296,6 +296,8 @@ export function freshLiteralType(value: LiteralValue): LiteralType {
 
 export const trueType = literalType(true);
 export const falseType = literalType(false);
+/** The key `unionOf` gives `true | false`, whose members it sorts. */
+const booleanUnionKey = [falseType.id, trueType.id].toSorted((a, b) => a - b).join('|');
 export const booleanType: UnionType = { kind: 'union', id: newTypeId(), types: [falseType, trueType] };
 
 /**
@@ -403,7 +405,7 @@ export function unionOf(types: Type[], keepFresh = false): Type {
   const key = reduced.map((type) => type.id).join('|');
   let union = unionCache.get(key);
   if (!union) {
-    if (key === booleanType.types.map((type) => type.id).join('|')) return booleanType;
+    if (key === booleanUnionKey) return booleanType;
     union = { kind: 'union', id: newTypeId(), types: reduced };
     unionCache.set(key, union);
   }

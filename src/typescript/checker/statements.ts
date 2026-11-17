@@ -743,9 +743,10 @@ export class StatementChecker {
       !isAnyLike(testType) &&
       !this.c.relations.isComparable(regularOf(discriminantType), regularOf(testType))
     ) {
+      const target = regularOf(discriminantType);
       this.c.error(
         test,
-        `型 '${this.c.print(regularOf(testType))}' は型 '${this.c.print(regularOf(discriminantType))}' と比べられません。`
+        `型 '${this.c.print(this.c.widenLiteralForMessage(testType, target))}' は型 '${this.c.print(target)}' と比べられません。`
       );
     }
     return regularOf(testType);

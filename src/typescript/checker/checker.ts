@@ -33,6 +33,7 @@ import {
   emptyStructure,
   type IndexInfo,
   intersectionOf,
+  isIntrinsic,
   literalType,
   type MappedInfo,
   newTypeId,
@@ -802,12 +803,26 @@ export class Checker {
     return regularOf(type);
   }
 
-  /** The source type an assignability message shows: literals widened unless the target lists literals. */
+  /**
+   * The source type a relation message shows: a literal source generalized to its primitive unless the target could
+   * hold a literal, as TypeScript's `reportRelationError` does.
+   */
   widenLiteralForMessage(source: Type, target: Type): Type {
-    const targetMembers = target.kind === 'union' ? target.types : [target];
-    if (targetMembers.some((member) => member.kind === 'literal' || member.kind === 'templateLiteral'))
-      return regularOf(source);
-    return this.widenLiteral(source);
+    const regular = regularOf(source);
+    if (!isLiteralType(regular) || this.couldHaveTopLevelSingletonTypes(target)) return regular;
+    return regular.kind === 'union' ? unionOf(regular.types.map(baseTypeOfUnit)) : baseTypeOfUnit(regular);
+  }
+
+  /** TypeScript's `typeCouldHaveTopLevelSingletonTypes`, which treats `boolean` itself as holding no literal. */
+  private couldHaveTopLevelSingletonTypes(type: Type): boolean {
+    if (type === booleanType) return false;
+    if (type.kind === 'union' || type.kind === 'intersection')
+      return type.types.some((member) => this.couldHaveTopLevelSingletonTypes(member));
+    if (instantiableKinds.has(type.kind)) {
+      const constraint = this.baseConstraint(type);
+      return constraint !== type && this.couldHaveTopLevelSingletonTypes(constraint);
+    }
+    return isUnitType(type) || type.kind === 'templateLiteral';
   }
 
   /** The type of a variable initialized with `type`: literals widened, `null` and `undefined` kept. */
@@ -823,6 +838,29 @@ export function checkTypeScript(root: TreeNode): SourceDiagnostic[] {
 }
 
 export { regularOf };
+
+const instantiableKinds = new Set<Type['kind']>([
+  'typeParameter',
+  'indexedAccess',
+  'keyof',
+  'conditional',
+  'stringMapping',
+]);
+
+/** TypeScript's `isUnitType`: a literal, `null`, or `undefined`. */
+function isUnitType(type: Type): boolean {
+  return type.kind === 'literal' || isIntrinsic(type, 'null') || isIntrinsic(type, 'undefined');
+}
+
+/** TypeScript's `isLiteralType`: a unit type or a union of them, `boolean` included. */
+function isLiteralType(type: Type): boolean {
+  return type.kind === 'union' ? type.types.every((member) => isUnitType(member)) : isUnitType(type);
+}
+
+/** The primitive of a literal other than a unique symbol, which TypeScript's `getBaseTypeOfLiteralType` keeps. */
+function baseTypeOfUnit(type: Type): Type {
+  return type.kind === 'literal' && typeof type.value !== 'symbol' ? primitiveOfLiteral(type) : type;
+}
 
 /** Tuple elements with each rest element of a tuple type spread into its own elements. */
 function flattenTupleElements(elements: TupleElement[]): TupleElement[] {
