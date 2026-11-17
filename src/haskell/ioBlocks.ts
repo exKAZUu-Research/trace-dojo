@@ -1,7 +1,7 @@
 import type { FunctionInfo, IODoCore, VisibleVar } from './core';
 import type { Machine, RunState } from './machine';
 import type { TraceFrame } from './runtime';
-import type { Env, IODo, Slot } from './values';
+import { Env, type IODo, type Slot } from './values';
 
 export interface DoFrame {
   k: 'do';
@@ -26,7 +26,9 @@ export interface TraceContext {
 
 export function runBlock(machine: Machine, state: RunState, action: IODo): void {
   const runtime = machine.runtime;
-  const invocation = action.env.invocation();
+  runtime.allocate(action.code.size);
+  const env = new Env(action.code.size, action.env);
+  const invocation = env.invocation();
   const top = runtime.frames.at(-1);
   let traceFrame = top;
   let pushed = false;
@@ -46,13 +48,13 @@ export function runBlock(machine: Machine, state: RunState, action: IODo): void 
   const frame: DoFrame = {
     k: 'do',
     code: action.code,
-    env: action.env,
+    env,
     index: 0,
     mark: 0,
     traceFrame: traceFrame as TraceFrame,
     pushedTraceFrame: pushed,
   };
-  frame.traceFrame.contexts.push({ env: action.env, visible: action.code.entryVisible, row: undefined });
+  frame.traceFrame.contexts.push({ env, visible: action.code.entryVisible, row: undefined });
   machine.stack.push(frame);
   if (action.code.bindingRow !== undefined) {
     runtime.steps.stepBinding(action.code.bindingRow, action.code.bindingStoresAnswer ?? false);

@@ -1,8 +1,3 @@
-/**
- * The intermediate code the evaluator runs: an untyped lambda calculus with explicit dictionaries, simple case
- * analysis, and `IO` blocks that carry what tracing needs. Local variables live in frames addressed by depth and
- * index; each lambda (and each top-level body) has one frame for its parameters and the variables it binds.
- */
 import type { ConInfo, InstanceInfo, ValueEntity } from './entities';
 import type { Primitive } from './primitives';
 import type { Type } from './types';
@@ -106,6 +101,7 @@ export type IOStmt =
 
 export interface IODoCore {
   k: 'iodo';
+  size: number;
   stmts: IOStmt[];
   /** The row of the lambda whose parameters a block binds, which records a binding step when the block starts. */
   bindingRow?: number;

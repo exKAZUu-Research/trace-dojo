@@ -51,8 +51,8 @@ function cachedNodeReferences(code: Core, children: [Core, boolean][]): LocalRef
     }
   }
   if (code.k === 'iodo') {
-    for (const stmt of code.stmts)
-      for (const visible of stmt.visible) add({ depth: visible.depth, index: visible.index });
+    const visible = code.stmts.flatMap((stmt) => stmt.visible);
+    for (const ref of visible.filter((ref) => ref.depth > 0)) add({ depth: ref.depth - 1, index: ref.index });
   }
   return [...refs.values()];
 }
@@ -89,13 +89,13 @@ function childCodes(code: Core): [Core, boolean][] {
       return outer([code.dict]);
     }
     case 'iodo': {
-      return outer(
-        code.stmts.flatMap((stmt) =>
+      return code.stmts
+        .flatMap((stmt) =>
           stmt.kind === 'let'
             ? stmt.binds.map((bind) => bind.expr)
             : [stmt.expr, ...(stmt.kind === 'bind' && stmt.matcher ? [stmt.matcher] : [])]
         )
-      );
+        .map((child) => [child, true]);
     }
     default: {
       return [];
@@ -160,10 +160,8 @@ function pushRefs(refs: readonly LocalRef[], env: Env | undefined, push: Push): 
 /** The roots: the variables each trace frame's running statement sees, and what the evaluator's stack holds. */
 function pushRoots(runtime: Runtime, push: Push): void {
   for (const frame of runtime.frames) {
-    // Blocks sharing an environment can shadow a turtle like Java assignment; a local call has a separate
-    // environment and must keep its caller's locals alive even when the caller never reads them again.
     for (const [index, context] of frame.contexts.entries()) {
-      if (context.env !== frame.contexts[index + 1]?.env || !context.block || context.index === undefined) {
+      if (context.env !== frame.contexts[index + 1]?.env.parent || !context.block || context.index === undefined) {
         for (const visible of context.visible) push(context.env.at(visible.depth).slots[visible.index]);
       } else {
         pushRefs(liveAfter(context.block, context.index), context.env, push);

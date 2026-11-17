@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 906 -- The Core generator covers every construct of the language in one pass over shared state.
+// code-gauge-allow-file fileNcss 910 -- The Core generator covers every construct of the language in one pass over shared state.
 import { ExecutionLimitError, LIMITS } from '../interpreter/limits';
 import {
   CHAR_TYPE,
@@ -978,9 +978,15 @@ export class Codegen {
     }
   }
 
-  /** Generates an `IO` block whose statements record steps, with the variables each statement sees. */
-  // code-gauge-allow functionNcss 31 -- The statement kinds share the per-statement trace data computed here.
   private compileIODo(expr: Extract<RExpr, { k: 'do' }>, binding?: { row: number; storesAnswer: boolean }): IODoCore {
+    return this.withIOFrame(() => this.compileIOStatements(expr, binding));
+  }
+
+  // code-gauge-allow functionNcss 31 -- The statement kinds share the per-statement trace data computed here.
+  private compileIOStatements(
+    expr: Extract<RExpr, { k: 'do' }>,
+    binding?: { row: number; storesAnswer: boolean }
+  ): Omit<IODoCore, 'size'> {
     const savedVisible = this.visible.length;
     const entryVisible = this.snapshotVisible();
     const stmts: IOStmt[] = [];
@@ -1101,23 +1107,31 @@ export class Codegen {
     const inner = stripParens(expr);
     if (inner.k === 'do') return this.compileIODo(inner, binding);
     if (!binding && isReturnUnit(inner, this.options.support)) return this.compileExpr(inner);
-    const { code, noStep } = this.compileStatementExpr(inner);
-    return {
-      k: 'iodo',
-      stmts: [
-        {
-          kind: 'exp',
-          row: inner.span.row,
-          expr: code,
-          onlyCalls: isCall(inner),
-          noStep,
-          visible: this.snapshotVisible(),
-        },
-      ],
-      bindingRow: binding?.row,
-      bindingStoresAnswer: binding?.storesAnswer,
-      entryVisible: this.snapshotVisible(),
-    };
+    return this.withIOFrame(() => {
+      const { code, noStep } = this.compileStatementExpr(inner);
+      return {
+        k: 'iodo',
+        stmts: [
+          {
+            kind: 'exp',
+            row: inner.span.row,
+            expr: code,
+            onlyCalls: isCall(inner),
+            noStep,
+            visible: this.snapshotVisible(),
+          },
+        ],
+        bindingRow: binding?.row,
+        bindingStoresAnswer: binding?.storesAnswer,
+        entryVisible: this.snapshotVisible(),
+      };
+    });
+  }
+
+  private withIOFrame(build: () => Omit<IODoCore, 'size'>): IODoCore {
+    const frame = new FrameScope(this.frame);
+    const block = this.withFrame(frame, build);
+    return { ...block, size: frame.size };
   }
 
   /** The variables a statement sees, innermost last, each name once. */

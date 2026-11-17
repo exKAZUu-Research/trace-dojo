@@ -214,6 +214,43 @@ test('local IO calls retain caller turtles like top-level calls', () => {
   expect(actual.traceItems.map((item) => item.turtles)).toEqual(expected.traceItems.map((item) => item.turtles));
 });
 
+test.each(['execute', 'trace'])('reused IO blocks retain independent lazy and pattern-bound results: %s', (mode) => {
+  for (const binding of ['b<-canMoveForward t', 'Just b<-fmap Just(canMoveForward t)']) {
+    const source = `main=do
+  t<-newTurtleAt 0 5
+  let q=do
+        ${binding}
+        let result=not b
+        return result
+  a<-q
+  forward t
+  z<-q
+  print(a,z)`;
+    const result = mode === 'execute' ? executeProgram('haskell', source) : traceProgram('haskell', source, source);
+    expect(result).toMatchObject({ stdout: '(False,True)\n', uncaughtException: undefined });
+  }
+});
+
+test.each(['execute', 'trace'])('reused IO factories retain each returned closure and turtle: %s', (mode) => {
+  const source = String.raw`make=do
+  t<-newTurtle
+  return (\_->forward t)
+main=do
+  a<-make
+  b<-make
+  a ()
+  b ()`;
+  const result = mode === 'execute' ? executeProgram('haskell', source) : traceProgram('haskell', source, source);
+  expect(result).toMatchObject({
+    stdout: '',
+    uncaughtException: undefined,
+    finalTurtles: [
+      { x: 0, y: 1 },
+      { x: 0, y: 1 },
+    ],
+  });
+});
+
 test('abstract collections display ordered contents and ratios display their value', () => {
   const source = `import qualified Data.Map as M
 import qualified Data.Set as S
