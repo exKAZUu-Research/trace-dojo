@@ -1,5 +1,5 @@
-// code-gauge-allow-file fileNcss 420 -- Keeps hash-map state, storage layout, and public method registration together.
-import { allocationSlots, valueSlots } from '../allocation';
+// code-gauge-allow-file fileNcss 464 -- Keeps hash-map state, storage layout, and public method registration together.
+import { allocationSlots, transferCost, valueSlots } from '../allocation';
 import { reserveAllocatorBytes } from '../allocatorStorage';
 // code-gauge-allow-file duplicateLines 19 -- Library types repeat the same shape of method on purpose, each over its own state.
 import { panic } from '../arith';
@@ -7,7 +7,7 @@ import type { Expression, Span } from '../ast';
 import { bindBufferMemory } from '../bufferMemory';
 import { alignOf, sizeOf } from '../layout';
 import type { Frame } from '../runtime';
-import { copyForFrame, copyForStorage, known, runtime, type SemaApi, type TExpr, undefinedValue } from '../semaBase';
+import { copyForFrame, known, runtime, type SemaApi, type TExpr, undefinedValue } from '../semaBase';
 import {
   BOOL,
   CONST_U8_SLICE,
@@ -30,15 +30,17 @@ import {
   optionalSome,
   Pointer,
   type Slice,
+  type Slots,
   Some,
   storeInto,
   type Value,
   ZArray,
+  zeroArrayElement,
   ZStruct,
   ZUnion,
 } from '../values';
 import { WeakValueMap } from '../weakValueMap';
-import { elements, equalValues } from './common';
+import { equalValues } from './common';
 import { autoHashBytes, hasPhysicalHashLayout, wyhash } from './hashing';
 import {
   ALLOCATOR,
@@ -78,34 +80,71 @@ const MINIMAL_CAPACITY = 8;
 const MAX_LOAD = 80;
 
 function hashOf(frame: Frame, key: Value, keyType: Type, kind: KeyKind): bigint {
-  const bytes =
-    kind === 'string'
-      ? elements(key).map((byte) => Number(byte as bigint))
-      : autoHashBytes(
-          key,
-          keyType,
-          (value) => frame.runtime.identityOf(value),
-          (cost) => frame.runtime.spend(cost)
-        );
+  if (kind === 'string') {
+    const slice = key as Slice;
+    frame.runtime.spend(1 + Number(slice.lengthValue));
+    return wyhash(
+      0n,
+      Array.from({ length: slice.length }, (_, index) => Number(slice.get(index) as bigint))
+    );
+  }
+  const bytes = autoHashBytes(
+    key,
+    keyType,
+    (value) => frame.runtime.identityOf(value),
+    (cost) => frame.runtime.spend(cost)
+  );
   frame.runtime.spend(1 + bytes.length);
   return wyhash(0n, bytes);
 }
 
-function keysEqual(a: Value, b: Value, kind: KeyKind): boolean {
-  if (kind === 'string') {
-    const x = elements(a);
-    const y = elements(b);
-    return x.length === y.length && x.every((value, index) => value === y[index]);
+// code-gauge-allow functionCognitiveComplexity 17 -- Compares each supported representation with the same runtime budget.
+function keysEqual(frame: Frame, a: Value, b: Value, kind: KeyKind): boolean {
+  frame.runtime.spend();
+  if (kind === 'string') return stringKeysEqual(frame, a as Slice, b as Slice);
+  if (a instanceof ZStruct && b instanceof ZStruct) {
+    if (a.slots.length !== b.slots.length) return false;
+    for (let index = 0; index < a.slots.length; index++)
+      if (!keysEqual(frame, a.slots[index], b.slots[index], 'auto')) return false;
+    return true;
   }
-  if (a instanceof ZStruct && b instanceof ZStruct)
-    return (
-      a.slots.length === b.slots.length && a.slots.every((value, index) => keysEqual(value, b.slots[index], 'auto'))
-    );
-  if (a instanceof ZArray && b instanceof ZArray)
-    return a.length === b.length && a.values().every((value, index) => keysEqual(value, b.get(index), 'auto'));
-  if (a instanceof ZUnion && b instanceof ZUnion) return a.tag === b.tag && keysEqual(a.slots[0], b.slots[0], 'auto');
-  if (a instanceof Some && b instanceof Some) return keysEqual(a.value, b.value, 'auto');
+  if (a instanceof ZArray && b instanceof ZArray) return arrayKeysEqual(frame, a, b);
+  if (a instanceof ZUnion && b instanceof ZUnion)
+    return a.tag === b.tag && keysEqual(frame, a.slots[0], b.slots[0], 'auto');
+  if (a instanceof Some && b instanceof Some) return keysEqual(frame, a.value, b.value, 'auto');
   return equalValues(a, b);
+}
+
+function stringKeysEqual(frame: Frame, x: Slice, y: Slice): boolean {
+  if (x.lengthValue !== y.lengthValue) return false;
+  for (let index = 0; index < x.length; index++) {
+    frame.runtime.spend();
+    if (x.get(index) !== y.get(index)) return false;
+  }
+  return true;
+}
+
+function arrayKeysEqual(frame: Frame, a: ZArray, b: ZArray): boolean {
+  if (a.lengthValue !== b.lengthValue) return false;
+  const x = zeroArrayElement(a),
+    y = zeroArrayElement(b);
+  if (x && y) return keysEqual(frame, x.value, y.value, 'auto');
+  for (let index = 0; index < a.length; index++)
+    if (!keysEqual(frame, a.get(index), b.get(index), 'auto')) return false;
+  return true;
+}
+
+function storeMapSlot(frame: Frame, storage: Slots, index: number, value: Value, type: Type): void {
+  frame.runtime.spend(2 * transferCost(type));
+  storeInto(storage, index, value);
+}
+
+function snapshotEntry(frame: Frame, state: MapState, index: number, keyType: Type, valueType: Type): ZStruct {
+  frame.runtime.spend(transferCost(keyType) + transferCost(valueType));
+  return new ZStruct([
+    copyForFrame(frame, state.keys.slots[index], keyType),
+    copyForFrame(frame, state.values.slots[index], valueType),
+  ]);
 }
 
 function capacityForSize(size: number): number {
@@ -140,14 +179,23 @@ function getIndex(frame: Frame, state: MapState, key: Value, keyType: Type, kind
   let index = Number(hash & BigInt(mask));
   while (state.metadata[index] !== 0 && limit !== 0) {
     frame.runtime.spend();
-    if (state.metadata[index] === (0x80 | print) && keysEqual(key, state.keys.slots[index], kind)) return index;
+    if (state.metadata[index] === (0x80 | print) && keysEqual(frame, key, state.keys.slots[index], kind)) return index;
     limit--;
     index = (index + 1) & mask;
   }
   return -1;
 }
 
-function putNoClobber(frame: Frame, state: MapState, key: Value, value: Value, keyType: Type, kind: KeyKind): void {
+// code-gauge-allow functionParameterCount 7 -- Rehashing binds both typed payloads to the table, runtime and key strategy.
+function putNoClobber(
+  frame: Frame,
+  state: MapState,
+  key: Value,
+  value: Value,
+  keyType: Type,
+  valueType: Type,
+  kind: KeyKind
+): void {
   const hash = hashOf(frame, key, keyType, kind);
   const mask = state.capacity - 1;
   let index = Number(hash & BigInt(mask));
@@ -157,13 +205,13 @@ function putNoClobber(frame: Frame, state: MapState, key: Value, value: Value, k
   }
   state.available--;
   state.metadata[index] = 0x80 | fingerprint(hash);
-  storeInto(state.keys, index, key);
-  storeInto(state.values, index, value);
+  storeMapSlot(frame, state.keys, index, key, keyType);
+  storeMapSlot(frame, state.values, index, value, valueType);
   state.size++;
 }
 
 /** Grows the table to a new capacity, reinserting the used entries in slot order. */
-// code-gauge-allow functionNcss 40 -- Reserves backing bytes before rebuilding the table in reference slot order.
+// code-gauge-allow functionNcss 41 -- Reserves backing bytes before rebuilding the table in reference slot order.
 function grow(
   frame: Frame,
   state: MapState,
@@ -182,6 +230,7 @@ function grow(
   const old = { ...state, metadata: state.metadata, keys: state.keys, values: state.values };
   const memory = {};
   reserved.complete(memory);
+  frame.runtime.spend(capacity * (transferCost(keyType) + transferCost(valueType)));
   const keys = new ZArray(Array.from({ length: capacity }, () => undefinedValue(keyType)));
   const values = new ZArray(Array.from({ length: capacity }, () => undefinedValue(valueType)));
   let metadata = Array.from<number>({ length: capacity }).fill(0);
@@ -202,8 +251,9 @@ function grow(
   const size = old.size;
   state.size = 0;
   for (let index = 0; index < old.capacity && state.size < size; index++) {
+    frame.runtime.spend();
     if ((old.metadata[index] & 0x80) === 0) continue;
-    putNoClobber(frame, state, old.keys.slots[index], old.values.slots[index], keyType, kind);
+    putNoClobber(frame, state, old.keys.slots[index], old.values.slots[index], keyType, valueType, kind);
   }
   if (old.memory) freeMemory(old.allocator, old.memory);
   return true;
@@ -279,7 +329,7 @@ function getOrPut(
   while (state.metadata[index] !== 0 && limit !== 0) {
     frame.runtime.spend();
     if (state.metadata[index] === (0x80 | print)) {
-      if (keysEqual(key, state.keys.slots[index], kind)) return { index, found: true };
+      if (keysEqual(frame, key, state.keys.slots[index], kind)) return { index, found: true };
     } else if (firstTombstone === state.capacity && state.metadata[index] === 1) {
       firstTombstone = index;
     }
@@ -289,16 +339,18 @@ function getOrPut(
   if (firstTombstone < state.capacity) index = firstTombstone;
   state.available--;
   state.metadata[index] = 0x80 | print;
-  storeInto(state.keys, index, undefinedValue(keyType));
-  storeInto(state.values, index, undefinedValue(valueType));
+  frame.runtime.spend(transferCost(keyType) + transferCost(valueType));
+  storeMapSlot(frame, state.keys, index, undefinedValue(keyType), keyType);
+  storeMapSlot(frame, state.values, index, undefinedValue(valueType), valueType);
   state.size++;
   return { index, found: false };
 }
 
-function removeAt(state: MapState, index: number, keyType: Type, valueType: Type): void {
+function removeAt(frame: Frame, state: MapState, index: number, keyType: Type, valueType: Type): void {
   state.metadata[index] = 1;
-  storeInto(state.keys, index, undefinedValue(keyType));
-  storeInto(state.values, index, undefinedValue(valueType));
+  frame.runtime.spend(transferCost(keyType) + transferCost(valueType));
+  storeMapSlot(frame, state.keys, index, undefinedValue(keyType), keyType);
+  storeMapSlot(frame, state.values, index, undefinedValue(valueType), valueType);
   state.size--;
   state.available++;
 }
@@ -415,7 +467,19 @@ function defineMembers(types: MapTypes, keyType: Type, valueType: Type, kind: Ke
       const expected = takesAllocator ? [ALLOCATOR, ...options.args] : options.args;
       const args = compileArgs(sema, expectArgs(sema, call, expected.length, name), expected);
       const state = stateOf(sema, call.receiver, map, call.span, options.mutable);
-      return nativeStateCall(options.result, args, call.span, state, (received, values, frame) => {
+      const transfers = args.map((arg) => {
+        const evaluate = arg.eval;
+        const cost = transferCost(arg.type);
+        return {
+          ...arg,
+          eval: (frame: Frame) => {
+            const value = evaluate(frame);
+            frame.runtime.spend(cost);
+            return value;
+          },
+        };
+      });
+      return nativeStateCall(options.result, transfers, call.span, state, (received, values, frame) => {
         if (takesAllocator) received.allocator = allocatorState(values[0]);
         return run(received, values.slice(takesAllocator ? 1 : 0), frame);
       });
@@ -437,8 +501,8 @@ function defineMembers(types: MapTypes, keyType: Type, valueType: Type, kind: Ke
       (state, [key, value], frame) => {
         const slot = getOrPut(frame, state, key, keyType, valueType, kind);
         if (!slot) return ERROR_OUT_OF_MEMORY;
-        if (!slot.found) storeInto(state.keys, slot.index, key);
-        storeInto(state.values, slot.index, value);
+        if (!slot.found) storeMapSlot(frame, state.keys, slot.index, key, keyType);
+        storeMapSlot(frame, state.values, slot.index, value, valueType);
         return;
       }
     ),
@@ -449,8 +513,8 @@ function defineMembers(types: MapTypes, keyType: Type, valueType: Type, kind: Ke
         const slot = getOrPut(frame, state, key, keyType, valueType, kind);
         if (!slot) return ERROR_OUT_OF_MEMORY;
         if (slot.found) panic('reached unreachable code');
-        storeInto(state.keys, slot.index, key);
-        storeInto(state.values, slot.index, value);
+        storeMapSlot(frame, state.keys, slot.index, key, keyType);
+        storeMapSlot(frame, state.values, slot.index, value, valueType);
         return;
       }
     ),
@@ -465,11 +529,9 @@ function defineMembers(types: MapTypes, keyType: Type, valueType: Type, kind: Ke
       (state, [key, value], frame) => {
         const slot = getOrPut(frame, state, key, keyType, valueType, kind);
         if (!slot) return ERROR_OUT_OF_MEMORY;
-        const previous = slot.found
-          ? new ZStruct([copyForStorage(state.keys.slots[slot.index]), copyForStorage(state.values.slots[slot.index])])
-          : NULL;
-        if (!slot.found) storeInto(state.keys, slot.index, key);
-        storeInto(state.values, slot.index, value);
+        const previous = slot.found ? snapshotEntry(frame, state, slot.index, keyType, valueType) : NULL;
+        if (!slot.found) storeMapSlot(frame, state.keys, slot.index, key, keyType);
+        storeMapSlot(frame, state.values, slot.index, value, valueType);
         return previous;
       }
     ),
@@ -479,7 +541,7 @@ function defineMembers(types: MapTypes, keyType: Type, valueType: Type, kind: Ke
       (state, [key], frame) => {
         const slot = getOrPut(frame, state, key, keyType, valueType, kind);
         if (!slot) return ERROR_OUT_OF_MEMORY;
-        if (!slot.found) storeInto(state.keys, slot.index, key);
+        if (!slot.found) storeMapSlot(frame, state.keys, slot.index, key, keyType);
         return new ZStruct([new Pointer(state.keys, slot.index), new Pointer(state.values, slot.index), slot.found]);
       }
     ),
@@ -490,8 +552,8 @@ function defineMembers(types: MapTypes, keyType: Type, valueType: Type, kind: Ke
         const slot = getOrPut(frame, state, key, keyType, valueType, kind);
         if (!slot) return ERROR_OUT_OF_MEMORY;
         if (!slot.found) {
-          storeInto(state.keys, slot.index, key);
-          storeInto(state.values, slot.index, value);
+          storeMapSlot(frame, state.keys, slot.index, key, keyType);
+          storeMapSlot(frame, state.values, slot.index, value, valueType);
         }
         return new ZStruct([new Pointer(state.keys, slot.index), new Pointer(state.values, slot.index)]);
       }
@@ -532,7 +594,7 @@ function defineMembers(types: MapTypes, keyType: Type, valueType: Type, kind: Ke
     remove: method('remove', { args: [keyType], result: BOOL, mutable: true }, (state, [key], frame) => {
       const index = getIndex(frame, state, key, keyType, kind);
       if (index === -1) return false;
-      removeAt(state, index, keyType, valueType);
+      removeAt(frame, state, index, keyType, valueType);
       return true;
     }),
     fetchRemove: method(
@@ -541,11 +603,8 @@ function defineMembers(types: MapTypes, keyType: Type, valueType: Type, kind: Ke
       (state, [key], frame) => {
         const index = getIndex(frame, state, key, keyType, kind);
         if (index === -1) return NULL;
-        const removed = new ZStruct([
-          copyForStorage(state.keys.slots[index]),
-          copyForStorage(state.values.slots[index]),
-        ]);
-        removeAt(state, index, keyType, valueType);
+        const removed = snapshotEntry(frame, state, index, keyType, valueType);
+        removeAt(frame, state, index, keyType, valueType);
         return removed;
       }
     ),

@@ -1,6 +1,6 @@
 import { CompileError } from '../interpreter/diagnostics';
 import { ExecutionBudget } from '../interpreter/limits';
-import { CompilationStorage, valueSlots } from './allocation';
+import { CompilationStorage, resolveTypeSlots, valueSlots } from './allocation';
 import { PANIC, panic } from './arith';
 import { isDiscardName } from './ast';
 import type {
@@ -551,8 +551,10 @@ export abstract class SemaBase implements SemaApi {
         this.resolveLayout(field.type, span, seen);
       }
     }
-    if (this.resolvingFields === 0 && this.resolvingUnionFields === 0)
+    if (this.resolvingFields === 0 && this.resolvingUnionFields === 0) {
       resolveTypeLayout(type, () => this.spendCompilation());
+      resolveTypeSlots(type, () => this.spendCompilation());
+    }
   }
 
   /** Whether a value of `type` contains a `target` in place, not behind a pointer, which would have no size. */

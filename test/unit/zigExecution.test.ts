@@ -1,3 +1,5 @@
+import { spawnSync } from 'node:child_process';
+
 import { expect, test } from 'vitest';
 
 import { executeProgram } from '../../src/interpreter/program';
@@ -5774,4 +5776,55 @@ test.each(['@as(u8,true)', 'takes(true)'])(
 test('arena capacity queries charge each retained allocation node', () => {
   const source = `const std=@import("std");pub fn main(init:std.process.Init)!void{var a=std.heap.ArenaAllocator.init(init.gpa);defer a.deinit();const g=a.allocator();for(0..10000)|_|{_=try g.alloc(u8,1);}for(0..120000)|_|{_=a.queryCapacity();}}`;
   expect(executeProgram('zig', source)).toMatchObject({ kind: 'limitExceeded', limit: 'operations' });
+});
+
+test.each([2, 3])('shared union storage counts remain bounded with %s repeated children', (arity) => {
+  const definitions = Array.from(
+    { length: 26 },
+    (_, index) =>
+      `const U${index + 1}=union(enum){${Array.from({ length: arity }, (_, field) => `f${field}:U${index}`).join(',')}};`
+  ).join('');
+  const source = `const std=@import("std");const U0=union(enum){a:u8,b:u8};${definitions}pub fn main()void{var x:[1]U26=undefined;_=&x;std.debug.print("ready {}",.{x.len});}`;
+  const result = spawnSync(
+    'bun',
+    [
+      '-e',
+      `import {executeProgram} from './src/interpreter/program'; process.stdout.write(JSON.stringify(executeProgram('zig',${JSON.stringify(source)})));`,
+    ],
+    { encoding: 'utf8', timeout: 5000 }
+  );
+  expect(result.error).toBeUndefined();
+  expect(result.status, result.stderr).toBe(0);
+  expect(JSON.parse(result.stdout)).toMatchObject({ kind: 'executed', stderr: 'ready 1' });
+});
+
+test.each(['_=try m.fetchPut(1,x);', '_=m.fetchRemove(1);try m.put(1,x);'])(
+  'hash map mutations meter aggregate snapshots and stores: %s',
+  (operation) => {
+    const source = `const std=@import("std");const P=struct{a:[1000]u8};pub fn main(init:std.process.Init)!void{var m=std.AutoHashMap(u8,P).init(init.gpa);defer m.deinit();const x=P{.a=@splat(1)};try m.put(1,x);for(0..600)|_|{${operation}}}`;
+    expect(executeProgram('zig', source)).toMatchObject({ kind: 'limitExceeded', limit: 'operations' });
+  }
+);
+
+test('hash map mutation results retain independent aggregate snapshots', () => {
+  const source = `const std=@import("std");const P=struct{a:[2]u8};pub fn main(init:std.process.Init)!void{var m=std.AutoHashMap(u8,P).init(init.gpa);defer m.deinit();try m.put(1,.{.a=.{1,2}});const previous=(try m.fetchPut(1,.{.a=.{3,4}})).?;const removed=m.fetchRemove(1).?;try m.put(1,.{.a=.{5,6}});std.debug.print("{} {} {}",.{previous.value.a[1],removed.value.a[1],m.get(1).?.a[1]});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: '2 4 6',
+    uncaughtException: undefined,
+  });
+});
+
+test('StringHashMap compares equal live byte views within the shared budget', () => {
+  const source = `const std=@import("std");pub fn main(init:std.process.Init)!void{const a:[200000]u8=@splat(97);var b:[200000]u8=@splat(97);_=&b;var m=std.StringHashMap(u8).init(init.gpa);defer m.deinit();try m.put(&a,1);for(0..3)|_|{_=m.get(&b);}std.debug.print("ok",.{});}`;
+  expect(executeProgram('zig', source)).toMatchObject({ kind: 'limitExceeded', limit: 'operations' });
+});
+
+test('map key comparisons preserve independently backed strings and nested aggregates', () => {
+  const source = `const std=@import("std");pub fn main(init:std.process.Init)!void{var s=std.StringHashMap(u8).init(init.gpa);defer s.deinit();var text=[_]u8{97,98};_=&text;try s.put("ab",7);const yes=s.get(&text).?;text[1]=99;const absent=s.get(&text)==null;var m=std.AutoHashMap([2][2]u8,u8).init(init.gpa);defer m.deinit();try m.put(.{.{1,2},.{3,4}},9);var key=[2][2]u8{.{1,2},.{3,4}};_=&key;const nested=m.get(key).?;key[1][1]=5;std.debug.print("{} {} {} {}",.{yes,absent,nested,m.get(key)==null});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: '7 true 9 true',
+    uncaughtException: undefined,
+  });
 });
