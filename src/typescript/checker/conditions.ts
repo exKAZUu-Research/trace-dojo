@@ -3,7 +3,9 @@ import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 import type { Checker } from './checker';
 import { isConstantReference } from './constantReferences';
 import type { State } from './flow';
+import type { Sym } from './scopes';
 import {
+  arrayPatternElements,
   chainObject,
   isOptionalChain,
   named,
@@ -484,9 +486,8 @@ export class ConditionChecker {
   private narrowDestructuredSiblings(reference: TreeNode, objectType: Type): void {
     if (reference.type !== 'identifier') return;
     const symbol = this.c.scopeOf(reference).lookupValue(reference.text);
-    const declaration = symbol?.valueDeclaration;
-    const pattern = declaration?.childForFieldName(symbol?.valueKind === 'parameter' ? 'pattern' : 'name');
-    if (pattern?.type !== 'object_pattern') return;
+    const pattern = symbol && destructuringPattern(symbol);
+    if (!pattern) return;
     for (const identifier of patternIdentifiers(pattern)) {
       const source = this.destructuredFrom(identifier);
       if (!source) continue;
@@ -497,22 +498,26 @@ export class ConditionChecker {
     }
   }
 
+  /**
+   * Where a constant or a parameter is destructured from an object or a tuple directly, the value it is destructured
+   * from and the property or the position it takes.
+   */
   private destructuredFrom(identifier: TreeNode): { object?: TreeNode; name: string; type: Type } | undefined {
     if (!['identifier', 'shorthand_property_identifier_pattern'].includes(identifier.type)) return undefined;
     const symbol = this.c.scopeOf(identifier).lookupValue(identifier.text);
     const declarator = symbol?.valueDeclaration;
     const pattern = symbol?.valueEntries[0]?.name;
-    if (!symbol || !declarator || !pattern || !['const', 'parameter'].includes(symbol.valueKind ?? ''))
-      return undefined;
+    if (!symbol || !declarator || !pattern) return undefined;
     const pair = pattern.parent?.type === 'pair_pattern' ? pattern.parent : undefined;
     const container = pair?.parent ?? pattern.parent;
-    const field = symbol.valueKind === 'parameter' ? 'pattern' : 'name';
-    if (container?.id !== declarator.childForFieldName(field)?.id || container?.type !== 'object_pattern') {
-      return undefined;
-    }
+    if (!container || container.id !== destructuringPattern(symbol)?.id) return undefined;
     const object = declarator.childForFieldName('value') ?? undefined;
     const type = this.c.patterns.correlatedSources.get(container.id);
     if (!type) return undefined;
+    if (container.type === 'array_pattern') {
+      const position = arrayPatternElements(container).find(({ element }) => element.id === pattern.id)?.index;
+      return position === undefined ? undefined : { object, name: String(position), type };
+    }
     if (pattern.type === 'shorthand_property_identifier_pattern') return { object, name: pattern.text, type };
     const key = pair?.childForFieldName('key');
     const names = key ? this.c.silently(() => this.c.patterns.propertyNames(key)) : undefined;
@@ -643,4 +648,13 @@ function withoutAssertions(node: TreeNode): TreeNode {
 /** Whether checking an expression again would declare or assign something, which an aliased condition must not. */
 function hasSideEffects(expression: TreeNode): boolean {
   return sideEffectTypes.has(expression.type) || named(expression).some((child) => hasSideEffects(child));
+}
+
+/** The object or array pattern that a constant or a parameter destructures its value with directly. */
+function destructuringPattern(symbol: Sym): TreeNode | undefined {
+  if (!['const', 'parameter'].includes(symbol.valueKind ?? '')) return undefined;
+  const declared = symbol.valueDeclaration?.childForFieldName(symbol.valueKind === 'parameter' ? 'pattern' : 'name');
+  // A rest parameter destructures the tuple of the arguments it takes, as `...[kind, value]` does.
+  const pattern = declared?.type === 'rest_pattern' ? named(declared)[0] : declared;
+  return pattern?.type === 'object_pattern' || pattern?.type === 'array_pattern' ? pattern : undefined;
 }

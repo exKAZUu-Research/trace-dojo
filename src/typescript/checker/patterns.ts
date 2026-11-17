@@ -19,6 +19,7 @@ import {
   type Type,
   undefinedType,
   unionOf,
+  type UnionType,
 } from './types';
 
 /** Gives the names a binding pattern declares the types of what it destructures. */
@@ -336,8 +337,29 @@ export class BindingPatterns {
 
   elementAt(node: TreeNode, type: Type, index: number): Type {
     if (isAnyLike(type)) return anyType;
-    if (type.kind === 'object' && type.objectKind === 'tuple') return this.tupleElementAt(node, type, index);
+    if (isTuple(type)) return this.tupleElementAt(node, type, index);
+    if (type.kind === 'union' && type.types.some(isTuple)) return this.unionElementAt(node, type, index);
     return this.iteratedType(node, type);
+  }
+
+  /**
+   * As TypeScript's indexed access of a union: each member's element at the position, where a tuple too short gives
+   * `undefined` among tuples and its elements among arrays. A position no tuple of a union of tuples reaches is missing.
+   */
+  private unionElementAt(node: TreeNode, type: UnionType, index: number): Type {
+    const reaches = (member: ObjectType): boolean =>
+      (member.tuple?.elements ?? []).some((element, position) => element.rest || position === index);
+    const allTuples = type.types.every(isTuple);
+    if (allTuples && !type.types.some((member) => reaches(member as ObjectType))) {
+      this.c.error(node, `プロパティ '${index}' は型 '${this.c.print(type)}' にありません。`);
+      return errorType;
+    }
+    return unionOf(
+      type.types.map((member) => {
+        if (!isTuple(member) || reaches(member)) return this.elementAt(node, member, index);
+        return allTuples ? undefinedType : this.iteratedType(node, member);
+      })
+    );
   }
 
   private tupleElementAt(node: TreeNode, type: ObjectType, index: number): Type {
@@ -360,7 +382,9 @@ export class BindingPatterns {
   }
 
   restOfIterable(pattern: TreeNode, type: Type, from: number): Type {
-    if (type.kind === 'object' && type.objectKind === 'tuple') {
+    if (type.kind === 'union' && type.types.some(isTuple))
+      return unionOf(type.types.map((member) => this.restOfIterable(pattern, member, from)));
+    if (isTuple(type)) {
       const elements = type.tuple?.elements ?? [];
       const restIndex = elements.findIndex((member) => member.rest);
       // Past a rest element, the remaining values are no longer at known positions.
@@ -409,4 +433,8 @@ export function defaultedTarget(element: TreeNode): TreeNode | undefined {
   return ['assignment_expression', 'assignment_pattern', 'object_assignment_pattern'].includes(element.type)
     ? (element.childForFieldName('left') ?? undefined)
     : undefined;
+}
+
+function isTuple(type: Type): type is ObjectType {
+  return type.kind === 'object' && type.objectKind === 'tuple';
 }

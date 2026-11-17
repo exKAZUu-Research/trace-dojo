@@ -185,24 +185,21 @@ export class FunctionChecker {
       const pattern = parameterNode.childForFieldName('pattern') ?? parameterNode;
       const type = this.sourceParameterType(parameterNode, pattern, signature, index);
       if (!type) continue;
+      const bound = pattern.type === 'rest_pattern' ? named(pattern)[0] : pattern;
       if (
-        pattern.type === 'object_pattern' &&
-        patternIdentifiers(pattern).every((identifier) => !scope.values.get(identifier.text)?.isReassigned)
+        (bound.type === 'object_pattern' || bound.type === 'array_pattern') &&
+        patternIdentifiers(bound).every((identifier) => !scope.values.get(identifier.text)?.isReassigned)
       )
-        this.c.patterns.correlatedSources.set(pattern.id, type);
+        this.c.patterns.correlatedSources.set(bound.id, type);
       if (pattern.type === 'identifier') {
         const symbol = scope.values.get(pattern.text);
         if (symbol) this.parameterTypes.set(symbol.id, type);
       } else {
         this.c.silently(() =>
-          this.c.patterns.bindPattern(
-            pattern.type === 'rest_pattern' ? named(pattern)[0] : pattern,
-            type,
-            (identifier, identifierType) => {
-              const symbol = scope.values.get(identifier.text);
-              if (symbol) this.parameterTypes.set(symbol.id, identifierType);
-            }
-          )
+          this.c.patterns.bindPattern(bound, type, (identifier, identifierType) => {
+            const symbol = scope.values.get(identifier.text);
+            if (symbol) this.parameterTypes.set(symbol.id, identifierType);
+          })
         );
       }
     }
