@@ -5238,3 +5238,104 @@ test.each(['u8', 'void', 'u0'])('empty %s reslices need only their valid headers
   const source = `const std=@import("std");pub fn main()void{const p:*[2]${type}=undefined;const s:[]${type}=p;std.debug.print("{}",.{s[0..0].len});}`;
   expect(executeProgram('zig', source)).toMatchObject({ kind: 'executed', stderr: '0', uncaughtException: undefined });
 });
+
+test.each(['[:&x]const *const u8', '[1:&x]*const u8'])(
+  'sentinel pointer collections coerce readonly elements by address: %s',
+  (target) => {
+    const value = target.startsWith('[:') ? '&a' : 'a';
+    const source = `const std=@import("std");var x:u8=1;var y:u8=2;pub fn main()void{const a=[_:&x]*u8{&x};const s:${target}=${value};std.debug.print("{} {}",.{s[0].*,s[1]==&x});}`;
+    expect(executeProgram('zig', source)).toMatchObject({
+      kind: 'executed',
+      stderr: '1 true',
+      uncaughtException: undefined,
+    });
+    expect(
+      executeProgram('zig', source.replace(`const s:${target}`, `const s:${target.replace('&x', '&y')}`))
+    ).toMatchObject({ kind: 'compileError' });
+  }
+);
+
+test.each(['@memcpy(&b,&a)', '@memmove(&b,&a)', '@memset(&b,a[0])'])(
+  'memory builtin charges nested aggregate transfers: %s',
+  (operation) => {
+    const source = `const P=struct{a:[1000]u8};pub fn main()void{const a=[_]P{.{.a=@splat(1)},.{.a=@splat(2)}};var b=[_]P{.{.a=@splat(0)},.{.a=@splat(0)}};for(0..300)|_|{${operation};}}`;
+    expect(executeProgram('zig', source)).toMatchObject({ kind: 'limitExceeded', limit: 'operations' });
+  }
+);
+
+test('sign derives the one-bit signed result and checks its intermediate casts', () => {
+  const source = `const std=@import("std");pub fn main()void{var x:i1=0;_=&x;const y:i1=std.math.sign(x);std.debug.print("{}",.{y});}`;
+  expect(executeProgram('zig', source)).toMatchObject({ kind: 'executed', stderr: '0', uncaughtException: undefined });
+  expect(executeProgram('zig', source.replace('var x:i1=0', 'var x:i1=-1'))).toMatchObject({
+    kind: 'executed',
+    uncaughtException: 'panic: integer does not fit in destination type',
+  });
+});
+
+test.each([
+  ['const P=struct{x:u8,y:u8};', 'var p:?P=null;p=.{.x=1,.y=p.?.x};', 'p.?.x,p.?.y'],
+  ['', 'var p:?[2]u8=null;p=.{1,p.?[0]};', 'p.?[0],p.?[1]'],
+  [
+    'const P=struct{x:u8,y:u8};const U=union(enum){s:P,n:u8};',
+    'var p:?U=null;p=.{.s=.{.x=1,.y=p.?.s.x}};',
+    'p.?.s.x,p.?.s.y',
+  ],
+])(
+  'optional aggregate initialization establishes its result location before field effects (%#)',
+  (types, body, args) => {
+    const source = `const std=@import("std");${types}pub fn main()void{${body}std.debug.print("{} {}",.{${args}});}`;
+    expect(executeProgram('zig', source)).toMatchObject({
+      kind: 'executed',
+      stderr: '1 1',
+      uncaughtException: undefined,
+    });
+  }
+);
+
+test('runtime enum lookup indexes preserve explicit tags, names and absent values', () => {
+  const source = `const std=@import("std");const E=enum(u16){a=3,@"__proto__"=700,@"日本語"=900};pub fn main()void{var n:u16=700;_=&n;const a:E=@enumFromInt(n);std.debug.print("{s}|{s}|{t}|{t}|{}",.{@tagName(a),std.enums.tagName(E,a).?,std.enums.fromInt(E,n).?,std.meta.stringToEnum(E,"日本語").?,std.enums.fromInt(E,701)==null});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: '__proto__|__proto__|__proto__|日本語|true',
+    uncaughtException: undefined,
+  });
+  expect(executeProgram('zig', source.replace('n:u16=700', 'n:u16=701'))).toMatchObject({
+    kind: 'executed',
+    uncaughtException: 'panic: invalid enum value',
+  });
+});
+
+test.each(['[1:2]u8{8}', '[1]u8{8}'])('array pointer peers intersect sentinel guarantees with %s', (other) => {
+  for (const reverse of [false, true]) {
+    const a = '[1:1]u8{9}';
+    const source = `const std=@import("std");pub fn main()void{const a=${reverse ? other : a};const b=${reverse ? a : other};var flag=false;_=&flag;const p=if(flag) &a else &b;std.debug.print("{} {}",.{p.len,p[0]});}`;
+    expect(executeProgram('zig', source)).toMatchObject({
+      kind: 'executed',
+      stderr: reverse ? '1 9' : '1 8',
+      uncaughtException: undefined,
+    });
+    expect(executeProgram('zig', source.replace('p[0]', 'p[1]'))).toMatchObject({ kind: 'compileError' });
+  }
+});
+
+test.each(['struct{}', 'enum{a}', 'union(enum){a:void}'])(
+  'declared %s types share the canonical metatype with builtin type expressions',
+  (type) => {
+    const init = type.startsWith('struct') ? 'S{}' : type.startsWith('enum') ? '@as(S,.a)' : '@as(S,.{.a={}})';
+    const source = `const std=@import("std");const S=${type};pub fn main()void{std.debug.print("{} {} {}",.{@TypeOf(${init})==S,S==u8,S==S});}`;
+    expect(executeProgram('zig', source)).toMatchObject({
+      kind: 'executed',
+      stderr: 'true false true',
+      uncaughtException: undefined,
+    });
+  }
+);
+
+test('star formatting renders pointer types without dereferencing their data', () => {
+  const source = `const std=@import("std");const P=struct{x:u8};pub fn main()void{var a=[_]u8{65,66};var p:*P=undefined;_=&p;const s:[]u8=&a;const q:?*u8=null;std.debug.print("{*}|{*}|{*}|{*}|{*: >20}",.{&a,p,s,q,&a});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: '[2]u8@0|main.P@0|u8@0|*u8@0|[2]u8@0',
+    uncaughtException: undefined,
+  });
+});

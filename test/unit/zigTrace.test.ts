@@ -510,3 +510,30 @@ test.each([
     )
   ).toBe(true);
 });
+
+test.each(['|p,n|', '|_,n|'])('mixed for captures record repeated numeric bindings: %s', (captures) => {
+  const source = `const P=struct{x:u8};\npub fn main()void{\nfor([_]P{.{.x=1},.{.x=1}},[_]u8{7,7}) ${captures} {\n${captures === '|p,n|' ? '_=p;' : ''}_=n;\n}\n}`;
+  const result = traceProgram('zig', source, source);
+  expect(result.traceItems.map((item) => item.line)).toEqual(
+    captures === '|p,n|' ? [0, 3, 4, 4, 3, 4, 4] : [0, 3, 4, 3, 4]
+  );
+});
+
+test('discarded loop captures produce no binding steps', () => {
+  const source = `pub fn main()void{\nfor([_]u8{7,7},[_]u8{7,7})|_,_|{\n}\n}`;
+  expect(traceProgram('zig', source, source).traceItems.map((item) => item.line)).toEqual([0]);
+});
+
+test.each(['u8', 'u16'])('single %s pointer captures remain reference-only bindings', (type) => {
+  const source = `pub fn main()void{\nvar a=[_]${type}{1,1};\nfor(&a)|*p|{\n_=p;\n}\n}`;
+  expect(traceProgram('zig', source, source).traceItems.map((item) => item.line)).toEqual([0, 2, 4, 4]);
+});
+
+test('quoted underscore locals, parameters and captures remain visible trace variables', () => {
+  const source = `fn add(@"_":u8)u8{\nreturn @"_"+1;\n}\nfn capture()void{\nfor([_]u8{9})|@"_"|{\n_=@"_";\n}\n}\npub fn main()void{\nvar @"_":u8=7;\n@"_"=add(@"_");\ncapture();\n}`;
+  const result = traceProgram('zig', source, source);
+  expect(result.uncaughtException).toBeUndefined();
+  expect(result.finalVars).toHaveProperty('_', 8);
+  expect(result.traceItems.some((item) => item.vars._ === 7)).toBe(true);
+  expect(result.traceItems.some((item) => item.vars._ === 9)).toBe(true);
+});

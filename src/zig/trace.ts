@@ -89,7 +89,7 @@ class Snapshotter {
         break;
       }
       const value = frame.slots[local.slot];
-      if (value === UNASSIGNED || local.name.startsWith('\0') || local.name === '_') continue;
+      if (value === UNASSIGNED || local.name.startsWith('\0')) continue;
       shown.add(local.name);
       addVariable(variables, local.name, value, local.type, this.previews);
       if (local.isReceiver) addReceiverFields(variables, local.name, value, local.type, this.previews);

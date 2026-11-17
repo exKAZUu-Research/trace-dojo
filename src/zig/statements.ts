@@ -713,15 +713,18 @@ export abstract class StatementCompiler extends CallCompiler {
     return undefined;
   }
 
-  /** `x = .{ ... }` for an optional `x`: a non-null value is written in place, and a null one takes the whole value. */
   private optionalStore(value: Expression, type: Extract<Type, { kind: 'optional' }>): ResultStore | undefined {
     const inner = this.resultLocationStore(value, type.child);
     if (!inner) return undefined;
-    const whole = this.coerce(this.compile(value, type), type, value).eval;
     return (frame, holder, index) => {
+      if (holder.slots[index] === NULL) {
+        const slots = valueSlots(type.child);
+        frame.runtime.reserveStorage(slots);
+        frame.runtime.spend(slots);
+        holder.slots[index] = undefinedValue(type.child);
+      }
       const current = holder.slots[index];
-      if (current === NULL) storeInto(holder, index, whole(frame));
-      else if (current instanceof Some) inner(frame, { slots: [current.value] }, 0);
+      if (current instanceof Some) inner(frame, { slots: [current.value] }, 0);
       else inner(frame, holder, index);
     };
   }
@@ -743,8 +746,9 @@ export abstract class StatementCompiler extends CallCompiler {
   private unionStore(value: ExpressionOf<'structInit'>, type: Extract<Type, { kind: 'union' }>): ResultStore {
     const [init] = value.fields;
     const fields = this.unionFields(type);
-    const tag = fields.findIndex((field) => field.name === init.name);
-    if (tag === -1) return this.error(init, `${typeName(type)} 型には、フィールド「${init.name}」がありません。`);
+    const tag = this.fieldIndexes(fields).get(init.name);
+    if (tag === undefined)
+      return this.error(init, `${typeName(type)} 型には、フィールド「${init.name}」がありません。`);
     const fieldType = fields[tag].type;
     const store = this.slotStore(init.value, fieldType);
     const slots = sizeOf(fieldType) === 0 ? 0 : valueSlots(fieldType);
@@ -1589,7 +1593,7 @@ export abstract class StatementCompiler extends CallCompiler {
       ? this.branch(expression.otherwise, undefined, target.resultType, asStatement)
       : undefined;
     const row = this.stepRow(expression);
-    const storesAnswer = bindings.every((binding) => !binding || storesAnswerValue(binding.type));
+    const storesAnswer = bindings.some((binding) => binding && storesAnswerValue(binding.type));
     const { id } = target;
     const bodyExec = body.exec;
     const otherwiseExec = otherwise?.stmt?.exec;
@@ -2570,7 +2574,10 @@ function storesAnswerValue(type: Type): boolean {
       return storesAnswerValue(type.child);
     }
     case 'pointer': {
-      return type.child === U8 || (type.child.kind === 'array' && type.child.child === U8);
+      return (
+        (type.size === 'slice' && type.child === U8) ||
+        (type.size === 'one' && type.child.kind === 'array' && type.child.child === U8)
+      );
     }
     default: {
       return false;

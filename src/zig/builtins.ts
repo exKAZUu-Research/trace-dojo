@@ -1,3 +1,4 @@
+import { transferCost } from './allocation';
 import {
   checkShiftAmount,
   divCeil,
@@ -14,6 +15,8 @@ import {
   rem,
 } from './arith';
 import type { Expression, ExpressionOf, Span } from './ast';
+// code-gauge-allow-file fileNcss 671 -- The file holds one layer of the compiler, whose parts share its private state.
+import { enumLookup } from './enumLookup';
 import { ExpressionCompiler, log2IntType } from './expressions';
 import {
   type AnyFloat,
@@ -48,7 +51,6 @@ import {
   type SemaApi,
   type TExpr,
 } from './semaBase';
-// code-gauge-allow-file fileNcss 665 -- The file holds one layer of the compiler, whose parts share its private state.
 import { singleValueOf } from './singleValue';
 import {
   BOOL,
@@ -408,7 +410,7 @@ export abstract class BuiltinCompiler extends ExpressionCompiler {
       }
       case '@enumFromInt': {
         const target = this.castTarget(expression, resultType, 'enum');
-        const fields = this.enumFields(target);
+        const fields = enumLookup(this.enumFields(target), () => this.spendCompilation()).byValue;
         const tagType = target.tagType as IntType;
         const operand = this.compile(args[0], tagType);
         if (!isIntegerType(operand.type)) this.error(args[0], '@enumFromInt の引数は整数にしてください。');
@@ -416,7 +418,7 @@ export abstract class BuiltinCompiler extends ExpressionCompiler {
           this.error(args[0], `enum ${typeName(target)} の整数型で値を表せません。`);
         if (operand.known) {
           const value = operand.value as bigint;
-          if (target.exhaustive && !fields.some((field) => field.value === value)) {
+          if (target.exhaustive && !fields.has(value as bigint)) {
             this.error(expression, `enum ${typeName(target)} には、値 ${value} のフィールドがありません。`);
           }
           return known(target, value, expression);
@@ -425,7 +427,7 @@ export abstract class BuiltinCompiler extends ExpressionCompiler {
         const exhaustive = target.exhaustive;
         return this.derived(coerced, target, (value) => {
           if (!fitsInt(value as bigint, tagType)) panic(PANIC.invalidEnum);
-          if (exhaustive && !fields.some((field) => field.value === value)) panic(PANIC.invalidEnum);
+          if (exhaustive && !fields.has(value as bigint)) panic(PANIC.invalidEnum);
           return value;
         });
       }
@@ -893,20 +895,20 @@ export abstract class BuiltinCompiler extends ExpressionCompiler {
     }
     if (type.kind !== 'enum')
       return this.error(expression, `@tagName は enum の値にだけ使えます（${typeName(type)} 型です）。`);
-    const fields = this.enumFields(type);
+    const fields = enumLookup(this.enumFields(type), () => this.spendCompilation()).byValue;
     if (operand.known) {
-      const field = fields.find((each) => each.value === operand.value);
+      const field = fields.get(operand.value as bigint);
       if (!field)
         this.error(expression, `enum ${typeName(type)} には、値 ${operand.value as bigint} のフィールドがありません。`);
     }
     return this.derived(operand, CONST_U8, (value) => {
-      const field = fields.find((each) => each.value === value);
+      const field = fields.get(value as bigint);
       if (!field) panic(PANIC.invalidEnum);
       return bytesSlice(field.name);
     });
   }
 
-  // code-gauge-allow functionNcss 38 -- Keeps typed length/alias checks with the matching copy evaluation.
+  // code-gauge-allow functionNcss 39 -- Keeps typed length/alias checks with the matching copy evaluation.
   // code-gauge-allow functionCognitiveComplexity 19 -- Keeps typed length/alias checks with the matching copy evaluation.
   private memoryCopy(name: string, expression: ExpressionOf<'builtinCall'>): TExpr {
     const destination = this.compile(expression.args[0]);
@@ -920,6 +922,7 @@ export abstract class BuiltinCompiler extends ExpressionCompiler {
     if (!from) return this.error(expression.args[1], `${name} の読み込み元には、配列やスライスを指定してください。`);
     if (!inMemoryCoercible(from.child, target.child)) this.error(expression, `${name} の要素の型が一致しません。`);
     this.resolveStorage(target.child, expression);
+    const cost = transferCost(target.child);
     const destinationLength = knownLengthOf(destination);
     const sourceLength = knownLengthOf(source);
     if (destinationLength !== undefined && sourceLength !== undefined && destinationLength !== sourceLength)
@@ -940,10 +943,10 @@ export abstract class BuiltinCompiler extends ExpressionCompiler {
         )
           panic(PANIC.memcpyAlias);
         if (isUndefinedMemory(valuesOf[0]) || isUndefinedMemory(valuesOf[1])) throw new MemoryFault();
-        frame.runtime.spend(Number(input.length));
+        frame.runtime.spend(Number(input.length) * cost);
         const values = input.slots.slots.slice(input.start, input.start + Number(input.length)).map(copyForStorage);
         for (const [index, value] of values.entries()) {
-          frame.runtime.spend();
+          frame.runtime.spend(cost * 2);
           storeInto(out.slots, out.start + index, value);
         }
         return;
@@ -959,6 +962,8 @@ export abstract class BuiltinCompiler extends ExpressionCompiler {
       return this.error(expression.args[0], '@memset の書き込み先には、変更できる配列やスライスを指定してください。');
     if (sizeOf(target.child) !== 0) this.checkMemoryOperand(destination, expression);
     const value = this.coerce(this.compile(expression.args[1], target.child), target.child, expression.args[1]);
+    this.resolveStorage(target.child, expression);
+    const cost = transferCost(target.child);
     const evaluateDestination = destination.eval;
     const evaluateValue = value.eval;
     return runtime(
@@ -967,9 +972,10 @@ export abstract class BuiltinCompiler extends ExpressionCompiler {
         const [destination, value] = evaluateHeld(frame, [evaluateDestination, evaluateValue]);
         const out = target.view(destination);
         if (sizeOf(target.child) === 0) return;
+        frame.runtime.spend(cost);
         const filler = copyForStorage(value);
         for (let index = 0; index < Number(out.length); index++) {
-          frame.runtime.spend();
+          frame.runtime.spend(cost * 2);
           storeInto(out.slots, out.start + index, filler);
         }
         return;

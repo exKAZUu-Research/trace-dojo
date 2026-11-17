@@ -13,6 +13,7 @@ import type {
   Span,
 } from './ast';
 import { markRuntimeStorage } from './comptimeMemory';
+import { enumLookup } from './enumLookup';
 import {
   type AnyFloat,
   asBigFloat,
@@ -54,6 +55,7 @@ import {
   sliceOf,
   type StructField,
   type StructType,
+  TYPE,
   type Type,
   typeName,
   UNDEFINED_TYPE,
@@ -74,6 +76,7 @@ import {
   NativeHandle,
   NULL,
   Pointer,
+  scalarValuesEqual,
   Slice,
   type Slots,
   Some,
@@ -464,7 +467,7 @@ export abstract class SemaBase implements SemaApi {
   protected compileDeclValue(value: Expression, declared: Type | undefined, name: string, owner?: string): TExpr {
     if (value.kind === 'container') {
       const qualified = `${this.enclosingNamespace().name}.${owner ? `${owner}.` : ''}${name}`;
-      return known(TYPE_TYPE, this.containerType(value, qualified), value);
+      return known(TYPE, this.containerType(value, qualified), value);
     }
     return this.compile(value, declared);
   }
@@ -742,7 +745,7 @@ export abstract class SemaBase implements SemaApi {
       case 'enum': {
         if (from.kind === 'enum_literal' && expression.known) {
           const { name } = expression.value as EnumLiteral;
-          const field = this.enumFields(to).find((each) => each.name === name);
+          const field = enumLookup(this.enumFields(to), () => this.spendCompilation()).byName.get(name);
           if (!field) this.error(span, `enum ${typeName(to)} には、フィールド「${name}」がありません。`);
           return known(to, field.value, span);
         }
@@ -757,8 +760,8 @@ export abstract class SemaBase implements SemaApi {
         if (from.kind === 'enum_literal' && expression.known) {
           const { name } = expression.value as EnumLiteral;
           const fields = this.unionFields(to);
-          const index = fields.findIndex((field) => field.name === name);
-          if (index === -1) this.error(span, `union ${typeName(to)} には、フィールド「${name}」がありません。`);
+          const index = this.fieldIndexes(fields).get(name);
+          if (index === undefined) this.error(span, `union ${typeName(to)} には、フィールド「${name}」がありません。`);
           if (fields[index].type.kind !== 'void') {
             this.error(span, `union のフィールド「${name}」には値が要るので、.${name} だけでは作れません。`);
           }
@@ -766,9 +769,11 @@ export abstract class SemaBase implements SemaApi {
         }
         if (from.kind === 'enum' && to.tagType === from && expression.known) {
           const fields = this.unionFields(to);
-          const tag = this.enumFields(from).find((field) => field.value === expression.value);
-          const index = fields.findIndex((field) => field.name === tag?.name);
-          if (index === -1 || fields[index].type.kind !== 'void') return undefined;
+          const tag = enumLookup(this.enumFields(from), () => this.spendCompilation()).byValue.get(
+            expression.value as bigint
+          );
+          const index = tag && this.fieldIndexes(fields).get(tag.name);
+          if (index === undefined || fields[index].type.kind !== 'void') return undefined;
           return known(to, new ZUnion(index, undefined), span);
         }
         return undefined;
@@ -904,14 +909,14 @@ export abstract class SemaBase implements SemaApi {
     if (from.isConst && !to.isConst && !empty) return undefined;
     if (from.size === to.size) {
       if (!inMemoryCoercible(from.child, to.child)) return undefined;
-      if (to.sentinel !== undefined && from.sentinel !== to.sentinel) return undefined;
+      if (to.sentinel !== undefined && !scalarValuesEqual(from.sentinel, to.sentinel)) return undefined;
       return { ...expression, type: to };
     }
     // `*[N]T` to `[]T`
     if (from.size === 'one' && to.size === 'slice' && from.child.kind === 'array') {
       const array = from.child;
       if (!inMemoryCoercible(array.child, to.child)) return undefined;
-      if (to.sentinel !== undefined && array.sentinel !== to.sentinel) return undefined;
+      if (to.sentinel !== undefined && !scalarValuesEqual(array.sentinel, to.sentinel)) return undefined;
       const { length } = array;
       return {
         ...this.derived(expression, to, (value) => {
@@ -960,7 +965,7 @@ export abstract class SemaBase implements SemaApi {
     const from = expression.type;
     if (from.kind === 'array') {
       if (from.length !== to.length || !inMemoryCoercible(from.child, to.child)) return undefined;
-      if (to.sentinel !== undefined && from.sentinel !== to.sentinel) return undefined;
+      if (to.sentinel !== undefined && !scalarValuesEqual(from.sentinel, to.sentinel)) return undefined;
       return { ...expression, type: to };
     }
     if (from.kind === 'struct' && from.isTuple) {
@@ -1219,8 +1224,6 @@ export abstract class SemaBase implements SemaApi {
   }
 }
 
-const TYPE_TYPE: Type = { kind: 'type' };
-
 function addDecls(namespace: Namespace, members: readonly ContainerMember[]): void {
   for (const member of members) {
     if (member.kind === 'fn') {
@@ -1281,7 +1284,7 @@ export function inMemoryCoercible(from: Type, to: Type): boolean {
   if (from === to) return true;
   if (from.kind === 'pointer' && to.kind === 'pointer') {
     if (from.size !== to.size || (from.isConst && !to.isConst)) return false;
-    if (to.sentinel !== undefined && from.sentinel !== to.sentinel) return false;
+    if (to.sentinel !== undefined && !scalarValuesEqual(from.sentinel, to.sentinel)) return false;
     return inMemoryCoercible(from.child, to.child);
   }
   if (from.kind === 'optional' && to.kind === 'optional') return inMemoryCoercible(from.child, to.child);
@@ -1293,7 +1296,7 @@ export function inMemoryCoercible(from: Type, to: Type): boolean {
     return (
       from.length === to.length &&
       inMemoryCoercible(from.child, to.child) &&
-      (to.sentinel === undefined || from.sentinel === to.sentinel)
+      (to.sentinel === undefined || scalarValuesEqual(from.sentinel, to.sentinel))
     );
   }
   if (from.kind === 'int' && to.kind === 'int') return from.bits === to.bits && from.signed === to.signed;
@@ -1313,6 +1316,7 @@ export function mergeErrorSets(a: ErrorSetType, b: ErrorSetType): ErrorSetType {
   return errorSetOf([...a.names, ...b.names]);
 }
 
+// code-gauge-allow functionCognitiveComplexity 20 -- Intersects pointer qualifiers, array lengths and sentinel guarantees.
 function peerPointers(a: Extract<Type, { kind: 'pointer' }>, b: Extract<Type, { kind: 'pointer' }>): Type | undefined {
   const isConst = a.isConst || b.isConst;
   if (a.size === 'slice' || b.size === 'slice') {
@@ -1321,8 +1325,19 @@ function peerPointers(a: Extract<Type, { kind: 'pointer' }>, b: Extract<Type, { 
     if (!elementA || elementA !== elementB) return undefined;
     return sliceOf(elementA, isConst);
   }
-  if (a.child.kind === 'array' && b.child.kind === 'array' && a.child.child === b.child.child) {
-    return a.child.length === b.child.length ? pointerTo(a.child, isConst) : sliceOf(a.child.child, isConst);
+  if (a.child.kind === 'array' && b.child.kind === 'array') {
+    const left = a.child,
+      right = b.child;
+    const child = inMemoryCoercible(left.child, right.child)
+      ? right.child
+      : inMemoryCoercible(right.child, left.child)
+        ? left.child
+        : undefined;
+    if (!child) return undefined;
+    const sentinel = scalarValuesEqual(left.sentinel, right.sentinel) ? left.sentinel : undefined;
+    return left.length === right.length
+      ? pointerTo(arrayOf(left.length, child, sentinel), isConst)
+      : sliceOf(child, isConst);
   }
   if (a.child === b.child) return pointerTo(a.child, isConst);
   return undefined;

@@ -1,5 +1,5 @@
 import { checkOutputSize } from './allocation';
-// code-gauge-allow-file fileNcss 746 -- The file holds one layer of the compiler, whose parts share its private state.
+// code-gauge-allow-file fileNcss 754 -- The file holds one layer of the compiler, whose parts share its private state.
 /**
  * Zig's formatted printing (`std.Io.Writer.print` and `printValue`), transcribed so that output matches byte for byte.
  * Formatting works on bytes, as Zig's strings are bytes.
@@ -14,7 +14,7 @@ import {
   FORMATS,
   shortestDecimal,
 } from './floats';
-import { type EnumType, type StructField, type Type, typeName, type UnionType } from './types';
+import { type EnumType, type StructField, type Type, typeName, type UnionType, USIZE } from './types';
 import { decodeIdentifierBytes, decodeUtf8, encodeIdentifierText } from './utf8';
 import {
   type EnumLiteral,
@@ -241,7 +241,7 @@ function parsePlaceholder(bytes: readonly number[]): {
 /** What the formatter needs to know of types that the compiler resolves. */
 export interface TypeInfo {
   structFields(type: Extract<Type, { kind: 'struct' }>): StructField[];
-  enumFields(type: EnumType): { name: string; value: bigint }[];
+  enumFields(type: EnumType): ReadonlyMap<bigint, { name: string; value: bigint }>;
   unionFields(type: UnionType): { name: string; type: Type }[];
 }
 
@@ -251,6 +251,7 @@ export function checkFormat(spec: string, type: Type, info: TypeInfo, hasOptions
     throw new FormatError(`invalid format string '${spec}' for type '${typeName(type)}'`);
   };
   const kind = type.kind;
+  if (kind === 'enum') info.enumFields(type);
   const special = SPECIAL_SPECIFIERS.get(spec);
   if (special) {
     if (!special.accepts(type)) invalid();
@@ -427,6 +428,14 @@ export function printValue(
   if (special) return special.print(out, value, type, options);
   if (spec.length === 1) {
     switch (spec) {
+      case '*': {
+        if (kind === 'pointer' || kind === 'optional') {
+          appendBytes(out, utf8(`${typeName(type.child)}@`));
+          printInt(out, addressOf(value), USIZE, 16, false, { fill: 32, alignment: 'right' });
+          return;
+        }
+        break;
+      }
       case 'd': {
         if (kind === 'float' || kind === 'comptime_float')
           return printFloat(out, value as AnyFloat, floatBits(type), 'decimal', options);
@@ -565,7 +574,7 @@ export function printValue(
           return printValue(out, spec, options, (value as Pointer).load(), child, info, depth);
         }
         appendBytes(out, utf8(`${typeName(child)}@`));
-        printInt(out, addressOf(value), { kind: 'int', signed: false, bits: 64, name: 'usize' }, 16, false, options);
+        printInt(out, addressOf(value), USIZE, 16, false, options);
         return;
       }
       if (depth === 0) {
@@ -734,7 +743,7 @@ function floatBits(type: Type): FloatBits {
 }
 
 function enumName(value: bigint, type: EnumType, info: TypeInfo): string | undefined {
-  return info.enumFields(type).find((field) => field.value === value)?.name;
+  return info.enumFields(type).get(value)?.name;
 }
 
 /** The bytes of a byte string: a slice, a pointer to an array, or an array. */

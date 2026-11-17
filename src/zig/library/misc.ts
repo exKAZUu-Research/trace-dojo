@@ -1,5 +1,6 @@
 import { indexOutOfBounds, PANIC, panic } from '../arith';
 import type { Span } from '../ast';
+import { enumLookup } from '../enumLookup';
 import { isIntegerType } from '../operands';
 import { type Frame, withHeldValues } from '../runtime';
 import { copyForStorage, FnRef, known, runtime, type SemaApi, type TExpr, undefinedValue } from '../semaBase';
@@ -348,11 +349,11 @@ const META: Record<string, () => Member> = {
     const type = sema.compileType(typeArg);
     if (type.kind !== 'enum')
       return sema.error(typeArg, `stringToEnum には enum の型を渡してください（${typeName(type)} です）。`);
-    const fields = sema.enumFields(type);
+    const fields = enumLookup(sema.enumFields(type), () => sema.spendCompilation());
     const text = constSlice(sema, textArg, U8);
     return computed(optionalOf(type), [text], call.span, ([value], frame) => {
       const name = decodeIdentifierBytes(byteNumbers(value, nativeBudget(sema, frame)));
-      return fields.find((field) => field.name === name)?.value ?? NULL;
+      return fields.byName.get(name)?.value ?? NULL;
     });
   }),
   activeTag: fnMember('std.meta.activeTag', (sema, call) => {
@@ -372,10 +373,10 @@ const ENUMS: Record<string, () => Member> = {
     const [typeArg, valueArg] = expectArgs(sema, call, 2, 'std.enums.tagName');
     const type = sema.compileType(typeArg);
     if (type.kind !== 'enum') return sema.error(typeArg, 'tagName には enum の型を渡してください。');
-    const fields = sema.enumFields(type);
+    const fields = enumLookup(sema.enumFields(type), () => sema.spendCompilation());
     const value = sema.coerce(sema.compile(valueArg, type), type, valueArg);
     return computed(optionalOf(CONST_U8_SLICE), [value], call.span, ([tag]) => {
-      const field = fields.find((each) => each.value === tag);
+      const field = fields.byValue.get(tag as bigint);
       if (!field) return NULL;
       return newSlice(encodeIdentifierText(field.name).map(BigInt));
     });
@@ -384,11 +385,11 @@ const ENUMS: Record<string, () => Member> = {
     const [typeArg, valueArg] = expectArgs(sema, call, 2, 'std.enums.fromInt');
     const type = sema.compileType(typeArg);
     if (type.kind !== 'enum') return sema.error(typeArg, 'fromInt には enum の型を渡してください。');
-    const fields = sema.enumFields(type);
+    const fields = enumLookup(sema.enumFields(type), () => sema.spendCompilation());
     const value = sema.compile(valueArg);
     if (!isIntegerType(value.type)) return sema.error(valueArg, 'fromInt の値は整数にしてください。');
     return computed(optionalOf(type), [value], call.span, ([n]) =>
-      fitsInt(n as bigint, type.tagType!) && (!type.exhaustive || fields.some((field) => field.value === n)) ? n : NULL
+      fitsInt(n as bigint, type.tagType!) && (!type.exhaustive || fields.byValue.has(n as bigint)) ? n : NULL
     );
   }),
   values: fnMember('std.enums.values', (sema, call) => {

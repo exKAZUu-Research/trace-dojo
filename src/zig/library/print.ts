@@ -1,5 +1,6 @@
 import type { Expression, Span } from '../ast';
 import { byteValues } from '../builtins';
+import { enumLookup } from '../enumLookup';
 import {
   checkFormat,
   FormatError,
@@ -226,7 +227,7 @@ function formatMethod(sema: SemaApi, type: Type, span: Span): FormatMethod {
 export function typeInfo(sema: SemaApi, span: Span): TypeInfo {
   return {
     structFields: (type) => sema.structFields(type, span),
-    enumFields: (type) => sema.enumFields(type),
+    enumFields: (type) => enumLookup(sema.enumFields(type), () => sema.spendCompilation()).byValue,
     unionFields: (type) => sema.unionFields(type),
   };
 }

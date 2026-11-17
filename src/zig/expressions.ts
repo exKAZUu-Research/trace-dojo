@@ -1589,8 +1589,9 @@ export abstract class ExpressionCompiler extends SemaBase {
     if (expression.fields.length !== 1) this.error(expression, 'union は、フィールドを1つだけ初期化してください。');
     const [init] = expression.fields;
     const fields = this.unionFields(type);
-    const index = fields.findIndex((field) => field.name === init.name);
-    if (index === -1) return this.error(init, `${typeName(type)} 型には、フィールド「${init.name}」がありません。`);
+    const index = this.fieldIndexes(fields).get(init.name);
+    if (index === undefined)
+      return this.error(init, `${typeName(type)} 型には、フィールド「${init.name}」がありません。`);
     const value = this.coerce(this.compile(init.value, fields[index].type), fields[index].type, init.value);
     return this.aggregate(type, [value], expression, ([payload]) => new ZUnion(index, payload));
   }

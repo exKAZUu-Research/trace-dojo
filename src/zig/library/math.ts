@@ -1,5 +1,18 @@
-// code-gauge-allow-file fileNcss 558 -- Groups the related standard library operations that share this module.
-import { checked, divCeil, divExact, divFloor, divTrunc, floatMod, floatRem, mod, PANIC, panic, rem } from '../arith';
+// code-gauge-allow-file fileNcss 561 -- Groups the related standard library operations that share this module.
+import {
+  checked,
+  divCeil,
+  divExact,
+  divFloor,
+  divTrunc,
+  floatMod,
+  floatRem,
+  intCast,
+  mod,
+  PANIC,
+  panic,
+  rem,
+} from '../arith';
 import type { Expression, Span } from '../ast';
 import { fusedMultiplyAdd, intFittingRange, roundFloat } from '../builtins';
 import { log2IntType } from '../expressions';
@@ -829,19 +842,23 @@ const MEMBERS: Record<string, () => Member> = {
   sin: builtinAlias('std.math.sin', '@sin'),
   cos: builtinAlias('std.math.cos', '@cos'),
   tan: builtinAlias('std.math.tan', '@tan'),
-  // code-gauge-allow functionCognitiveComplexity 18 -- Resolves the sign result type and value for integer and float arguments.
+  // code-gauge-allow functionCognitiveComplexity 24 -- Resolves the sign result type and value for integer and float arguments.
   sign: fnMember('std.math.sign', (sema, call) => {
     const [arg] = expectArgs(sema, call, 1, 'std.math.sign');
     const value = sema.compile(arg);
     const type = value.type;
     let result: Type;
     if (type.kind === 'comptime_int' || type.kind === 'comptime_float') result = COMPTIME_INT;
-    else if (type.kind === 'int')
-      result = intFittingRange(type.signed ? -1n : 0n, type.bits === 0 ? 0n : 1n, sema, call.span);
+    else if (type.kind === 'int') result = intType(type.signed, Math.min(type.bits, type.signed ? 2 : 1));
     else if (type.kind === 'float') result = intFittingRange(-1n, 1n, sema, call.span);
     else return sema.error(arg, `std.math.sign には数を渡してください（${typeName(type)} 型です）。`);
     return computed(result, [value], call.span, ([x]) => {
       const order = typeof x === 'bigint' ? (x > 0n ? 1 : x < 0n ? -1 : 0) : (compareFloats(x as AnyFloat, 0) ?? 0);
+      if (result.kind === 'int') {
+        const positive = intCast(order > 0 ? 1n : 0n, result);
+        const negative = intCast(order < 0 ? 1n : 0n, result);
+        return positive - negative;
+      }
       return BigInt(order);
     });
   }),
