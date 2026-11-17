@@ -574,9 +574,11 @@ export class Calls {
     const spreadType = this.c.expressions.check(named(arg)[0]);
     if (spreadType.kind === 'object' && spreadType.objectKind === 'tuple') {
       // An optional element passes `undefined` when the tuple is shorter.
-      const elements = (spreadType.tuple?.elements ?? []).map((element) =>
-        element.optional ? unionOf([element.type, undefinedType]) : element.type
-      );
+      const elements = (spreadType.tuple?.elements ?? []).map((element) => {
+        // A rest element passes its elements, each checked as the argument at its position.
+        if (element.rest) return this.c.restElementType(element.type);
+        return element.optional ? unionOf([element.type, undefinedType]) : element.type;
+      });
       const misfit = elements.findIndex((element, offset) => {
         const parameterType = this.parameterTypeAt(signature, index + offset);
         return parameterType && !this.c.relations.isAssignable(element, parameterType);
@@ -696,8 +698,7 @@ export class Calls {
       const element = this.c.silently(() => this.c.patterns.iteratedType(undefined, spreadType));
       return [{ type: this.c.arrayType(element), optional: false, rest: true }];
     });
-    // A tuple of only a rest element is the array it spreads, as TypeScript normalizes `[...T[]]`.
-    return elements.length === 1 && elements[0].rest ? elements[0].type : this.c.tupleType(elements);
+    return this.c.tupleType(elements);
   }
 
   /** Where a rest parameter typed by one of the signature's own type parameters starts, as in `...args: T`. */

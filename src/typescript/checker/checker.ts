@@ -485,6 +485,10 @@ export class Checker {
         flat.push(element);
       }
     }
+    // A tuple of only an array's rest is that array, as TypeScript normalizes `[...values: number[]]`.
+    const [only] = flat;
+    if (flat.length === 1 && only.rest && (this.isArrayType(only.type) || this.isReadonlyArrayType(only.type)))
+      return readonly ? this.arrayType(this.elementTypeOf(only.type as ObjectType), true) : (only.type as ObjectType);
     let structure: Structure | undefined;
     const tuple: ObjectType = {
       kind: 'object',
