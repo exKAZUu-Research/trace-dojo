@@ -10,6 +10,7 @@ import {
   falseType,
   filterType,
   intersectionOf,
+  type IntersectionType,
   isAnyLike,
   isIntrinsic,
   mapType,
@@ -280,12 +281,13 @@ export class Flow {
           ? unionOf([nonPrimitiveType, nullType])
           : undefined);
     if (!narrowed) return member;
-    return member.kind === 'typeParameter' ? intersectionOf([member, narrowed], this.c.budget) : narrowed;
+    return member.kind === 'typeParameter' || member.kind === 'intersection'
+      ? intersectionOf([member, narrowed], this.c.budget)
+      : narrowed;
   }
 
   /** Whether `typeof` a value of the type gives `name`: always, never, or maybe. */
   // code-gauge-allow functionNcss 37 -- One case per `typeof` result.
-  // code-gauge-allow functionCognitiveComplexity 16 -- One case per `typeof` result.
   private typeofMatches(type: Type, name: string): boolean | 'maybe' {
     switch (type.kind) {
       case 'literal': {
@@ -313,27 +315,56 @@ export class Flow {
           case 'object': {
             return name === 'object' || name === 'function' ? 'maybe' : false;
           }
+          case 'never': {
+            return false;
+          }
           default: {
             return 'maybe';
           }
         }
       }
       case 'object': {
-        const isFunction =
-          this.c.signaturesOf(type, 'call').length > 0 || this.c.signaturesOf(type, 'construct').length > 0;
-        if (name === 'function') return isFunction;
-        if (name === 'object') return !isFunction;
-        return false;
+        return this.objectTypeofMatches(type, name);
       }
       case 'typeParameter': {
         const constraint = this.c.constraintOf(type);
         if (!constraint) return 'maybe';
         return this.typeofMatches(constraint, name) === false ? false : 'maybe';
       }
+      case 'intersection': {
+        return this.intersectionTypeofMatches(type, name);
+      }
       default: {
         return 'maybe';
       }
     }
+  }
+
+  /**
+   * Whether `typeof` a value of an intersection gives `name`. As TypeScript decides, object members beside a primitive
+   * are tags it ignores, and an intersection with other object members is an object, a function when it is callable.
+   */
+  private intersectionTypeofMatches(type: IntersectionType, name: string): boolean | 'maybe' {
+    const tagged = type.types.some(
+      (member) =>
+        member.kind === 'literal' ||
+        member.kind === 'templateLiteral' ||
+        member.kind === 'stringMapping' ||
+        (member.kind === 'intrinsic' && member.name !== 'object')
+    );
+    if (!tagged && type.types.some((member) => member.kind === 'object')) return this.objectTypeofMatches(type, name);
+    const results = type.types
+      .filter((member) => member.kind !== 'object')
+      .map((member) => this.typeofMatches(member, name));
+    if (results.includes(false)) return false;
+    return results.every((result) => result === true) ? true : 'maybe';
+  }
+
+  private objectTypeofMatches(type: Type, name: string): boolean {
+    const isFunction =
+      this.c.signaturesOf(type, 'call').length > 0 || this.c.signaturesOf(type, 'construct').length > 0;
+    if (name === 'function') return isFunction;
+    return name === 'object' && !isFunction;
   }
 
   /** The part of a type that a truthy (or falsy) value has. */
