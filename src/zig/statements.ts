@@ -1925,13 +1925,21 @@ export abstract class StatementCompiler extends CallCompiler {
     // Dispatch: a map from keys to prongs, then the ranges, then else.
     const table = new Map<unknown, Prong>();
     for (const prong of prongs) for (const value of prong.values) table.set(value, prong);
-    const ranged = prongs.filter((prong) => prong.ranges.length > 0);
-    const find = (key: unknown): Prong | undefined => {
+    const ranged = prongs.flatMap((prong) => prong.ranges.map(([low, high]) => ({ low, high, prong })));
+    ranged.sort((a, b) => (a.low < b.low ? -1 : a.low > b.low ? 1 : 0));
+    const find = (key: unknown, frame: Frame): Prong | undefined => {
       const direct = table.get(key);
       if (direct) return direct;
       if (typeof key === 'bigint') {
-        for (const prong of ranged) {
-          if (prong.ranges.some(([low, high]) => key >= low && key <= high)) return prong;
+        let start = 0;
+        let end = ranged.length;
+        while (start < end) {
+          frame.runtime.spend();
+          const middle = start + Math.floor((end - start) / 2);
+          const range = ranged[middle];
+          if (key < range.low) end = middle;
+          else if (key > range.high) start = middle + 1;
+          else return range.prong;
         }
         if (unnamedProng && !namedValues.has(key)) return unnamedProng;
       }
@@ -1980,7 +1988,7 @@ export abstract class StatementCompiler extends CallCompiler {
       for (;;) {
         frame.runtime.spend();
         const key = keyOf(value);
-        const prong = find(key);
+        const prong = find(key, frame);
         if (!prong) return panic(PANIC.unreachable);
         const chosen = prong.inline?.get(key) ?? prong;
         chosen.bind?.(frame, value, pointer);

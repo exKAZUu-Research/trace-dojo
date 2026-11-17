@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 662 -- The file holds one layer of the compiler, whose parts share its private state.
+// code-gauge-allow-file fileNcss 664 -- The file holds one layer of the compiler, whose parts share its private state.
 import {
   checkShiftAmount,
   divCeil,
@@ -819,8 +819,8 @@ export abstract class BuiltinCompiler extends ExpressionCompiler {
     );
   }
 
-  // code-gauge-allow functionNcss 39 -- Keeps the analysis and the generated code of one construct together, as Zig's Sema does.
-  // code-gauge-allow functionCognitiveComplexity 17 -- Keeps the analysis and the generated code of one construct together, as Zig's Sema does.
+  // code-gauge-allow functionNcss 42 -- Keeps the analysis and the generated code of one construct together, as Zig's Sema does.
+  // code-gauge-allow functionCognitiveComplexity 18 -- Keeps the analysis and the generated code of one construct together, as Zig's Sema does.
   private bitBuiltin(name: string, expression: ExpressionOf<'builtinCall'>): TExpr {
     const operand = this.compile(expression.args[0]);
     const type = operand.type;
@@ -829,33 +829,35 @@ export abstract class BuiltinCompiler extends ExpressionCompiler {
     const { bits } = type;
     const unsigned = (value: bigint): bigint => BigInt.asUintN(bits, value);
     const countType = log2IntType(intType(false, bits + 1));
+    const derive = (resultType: Type, convert: (value: Value) => Value): TExpr =>
+      this.derived(operand, resultType, (value, frame) => {
+        if (frame) frame.runtime.spend(bits);
+        else this.spendCompilation(bits);
+        return convert(value);
+      });
     switch (name) {
       case '@clz': {
-        return this.derived(operand, countType, (value) => {
+        return derive(countType, (value) => {
           const text = unsigned(value as bigint).toString(2);
           return BigInt(value === 0n ? bits : bits - text.length);
         });
       }
       case '@ctz': {
-        return this.derived(operand, countType, (value) => {
-          let x = unsigned(value as bigint);
+        return derive(countType, (value) => {
+          const x = unsigned(value as bigint);
           if (x === 0n) return BigInt(bits);
-          let count = 0n;
-          while ((x & 1n) === 0n) {
-            x >>= 1n;
-            count++;
-          }
-          return count;
+          const text = x.toString(2);
+          return BigInt(text.length - text.lastIndexOf('1') - 1);
         });
       }
       case '@popCount': {
-        return this.derived(operand, countType, (value) =>
+        return derive(countType, (value) =>
           BigInt([...unsigned(value as bigint).toString(2)].filter((digit) => digit === '1').length)
         );
       }
       case '@byteSwap': {
         if (bits % 8 !== 0) this.error(expression, '@byteSwap は、8 の倍数のビット数の整数にだけ使えます。');
-        return this.derived(operand, type, (value) => {
+        return derive(type, (value) => {
           let x = unsigned(value as bigint);
           let result = 0n;
           for (let index = 0; index < bits / 8; index++) {
@@ -866,7 +868,7 @@ export abstract class BuiltinCompiler extends ExpressionCompiler {
         });
       }
       default: {
-        return this.derived(operand, type, (value) => {
+        return derive(type, (value) => {
           const text = unsigned(value as bigint)
             .toString(2)
             .padStart(bits, '0');

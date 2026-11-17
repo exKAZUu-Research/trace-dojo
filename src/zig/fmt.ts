@@ -15,7 +15,7 @@ import {
   shortestDecimal,
 } from './floats';
 import { type EnumType, type StructField, type Type, typeName, type UnionType } from './types';
-import { decodeUtf8, encodeIdentifierText } from './utf8';
+import { decodeIdentifierBytes, decodeUtf8, encodeIdentifierText } from './utf8';
 import {
   type EnumLiteral,
   ErrorValue,
@@ -60,8 +60,14 @@ const ANY = 'any';
 export const MAX_DEPTH = 3;
 
 /** Parses a format string as `Writer.print` does at compile time, checking it against the arguments. */
-export function parseFormat(format: readonly number[], argNames: readonly string[]): Segment[] {
+export function parseFormat(
+  format: readonly number[],
+  argNames: readonly string[],
+  spend: (cost?: number) => void = () => {}
+): Segment[] {
   const segments: Segment[] = [];
+  spend(argNames.length);
+  const nameIndexes = new Map(argNames.map((name, index) => [name, index]));
   const used = new Set<number>();
   let nextArg = 0;
   let literal: number[] = [];
@@ -71,8 +77,9 @@ export function parseFormat(format: readonly number[], argNames: readonly string
   ): number | undefined => {
     if (spec.kind === 'none') return undefined;
     if (spec.kind === 'number') return spec.value;
-    const found = argNames.indexOf(spec.name);
-    if (found === -1) throw new FormatError(`no argument with name '${spec.name}'`);
+    spend(spec.name.length + 1);
+    const found = nameIndexes.get(spec.name);
+    if (found === undefined) throw new FormatError(`no argument with name '${spec.name}'`);
     return found;
   };
   const next = (position: number | undefined): number => {
@@ -103,6 +110,7 @@ export function parseFormat(format: readonly number[], argNames: readonly string
     const begin = index;
     while (index < format.length && format[index] !== 0x7d) index++;
     if (index >= format.length) throw new FormatError('missing closing }');
+    spend(index - begin + 1);
     const placeholder = parsePlaceholder(format.slice(begin, index));
     index++;
     const position = argIndex(placeholder.arg);
@@ -161,7 +169,7 @@ function parsePlaceholder(bytes: readonly number[]): {
       i++;
       const start = i;
       while (i < bytes.length && bytes[i] !== 0x5d) i++;
-      const name = decodeUtf8(bytes.slice(start, i));
+      const name = decodeIdentifierBytes(bytes.slice(start, i));
       if (peek(0) !== 0x5d) throw new FormatError('Expected closing ]');
       i++;
       return { kind: 'named', name };

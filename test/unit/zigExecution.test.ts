@@ -4332,3 +4332,163 @@ test('memory replacement charges each transferred replacement element', () => {
   const source = `const std=@import("std");pub fn main()void{const a:[300000]u8=@splat(97);var b:[300000]u8=undefined;for(0..4)|_|{_=std.mem.replace(u8,"x","x",&a,&b);}}`;
   expect(executeProgram('zig', source)).toMatchObject({ kind: 'limitExceeded', limit: 'operations' });
 });
+
+test.each(['@ctz', '@clz', '@popCount', '@bitReverse', '@byteSwap'])(
+  'wide bit traversal shares the work budget: %s',
+  (method) => {
+    const source = `pub fn main()void{var n:u65528=1<<65527;_=&n;for(0..20)|_|{_=${method}(n);}}`;
+    expect(executeProgram('zig', source)).toMatchObject({ kind: 'limitExceeded', limit: 'operations' });
+  }
+);
+
+test.each([
+  'log2_int(u65535,n)',
+  'log2_int_ceil(u65535,n)',
+  'log10_int(n)',
+  'floorPowerOfTwo(u65535,n)',
+  'ceilPowerOfTwo(u65535,n)',
+])('wide integer library conversions share the work budget: %s', (method) => {
+  const source = `const std=@import("std");pub fn main()void{var n:u65535=1<<65534;_=&n;for(0..60)|_|{_=std.math.${method}${method.startsWith('ceilPowerOfTwo') ? ' catch unreachable' : ''};}}`;
+  expect(executeProgram('zig', source)).toMatchObject({ kind: 'limitExceeded', limit: 'operations' });
+});
+
+test.each(['0..2', '1..3'])('constant array keys exclude trailing backing storage: %s', (range) => {
+  const backing = range === '0..2' ? '1,2,9,5' : '1,2,3,5';
+  const source = `const std=@import("std");pub fn main()void{const a=[_]u8{1,2,3,4};const b=[_]u8{${backing}};const x=.{a[${range}].*};const y=.{b[${range}].*};std.debug.print("{}",.{@TypeOf(x)==@TypeOf(y)});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: 'true',
+    uncaughtException: undefined,
+  });
+});
+
+test('saturating shifts accept unrestricted unsigned counts without materializing huge integers', () => {
+  const source = `const std=@import("std");pub fn main()void{var x:u8=1;_=&x;var n:u8=8;_=&n;var neg:i8=-1;_=&neg;std.debug.print("{} {} {} {} {} {}",.{x<<|8,x<<|255,x<<|n,x<<|@as(u64,18446744073709551615),neg<<|255,@as(u8,0)<<|255});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: '255 255 255 255 -128 0',
+    uncaughtException: undefined,
+  });
+});
+
+test.each(['@as(i8,1)', '-1'])('saturating shifts reject invalid count domains: %s', (amount) => {
+  expect(
+    executeProgram(
+      'zig',
+      `pub fn main()void{var x:u8=1;_=&x;${amount.startsWith('@as') ? `var n=${amount};_=&n;` : ''}_=x<<|${amount.startsWith('@as') ? 'n' : amount};}`
+    )
+  ).toMatchObject({
+    kind: 'compileError',
+  });
+});
+
+test('named format arguments preserve byte identity for values, width and precision', () => {
+  const source = String.raw`const std=@import("std");pub fn main()void{std.debug.print("{[\xff]:[\xfe].[\xfd]}|{[�]}",.{.@"\xff"=@as(f32,1.5),.@"\xfe"=5,.@"\xfd"=1,.@"�"=7});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: '  1.5|7',
+    uncaughtException: undefined,
+  });
+});
+
+test.each(['clearRetainingCapacity', 'keyIterator', 'valueIterator', 'iterator'])(
+  'hash map capacity scans consume the work budget: %s',
+  (method) => {
+    const body =
+      method === 'clearRetainingCapacity'
+        ? 'map.clearRetainingCapacity();'
+        : `var it=map.${method}();while(it.next())|_|{}`;
+    const source = `const std=@import("std");pub fn main(init:std.process.Init)!void{var map=std.AutoHashMap(u32,u8).init(init.gpa);try map.ensureTotalCapacity(100000);try map.put(1,1);for(0..8)|_|{${body}}}`;
+    expect(executeProgram('zig', source)).toMatchObject({ kind: 'limitExceeded', limit: 'operations' });
+  }
+);
+
+test('range-heavy switch dispatch uses an indexed live lookup', () => {
+  const cases = Array.from({ length: 2000 }, (_, i) => `${i * 3}...${i * 3 + 1}=>{},`).join('');
+  const source = `pub fn main()void{var n:u32=100000;_=&n;for(0..600)|_|{switch(n){${cases}else=>{},}}}`;
+  expect(executeProgram('zig', source)).toMatchObject({ kind: 'executed', uncaughtException: undefined });
+});
+
+test.each(['binarySearch', 'lowerBound', 'upperBound', 'partitionPoint', 'equalRange'])(
+  'sort query indices retain exact virtual lengths: %s',
+  (method) => {
+    const predicate = method === 'partitionPoint' ? 'bool{return true;}' : 'std.math.Order{return .gt;}';
+    const output =
+      method === 'binarySearch'
+        ? 'result==null'
+        : method === 'equalRange'
+          ? 'result[0]==18446744073709551615 and result[1]==18446744073709551615'
+          : 'result==18446744073709551615';
+    const source = `const std=@import("std");fn compare(count:*usize,_:void)${predicate.replace('return', 'count.*+=1;return')}pub fn main(init:std.process.Init)!void{var list:std.ArrayList(void)=.empty;try list.append(init.gpa,{});var calls:usize=0;const result=std.sort.${method}(void,list.allocatedSlice(),&calls,compare);std.debug.print("{}",.{${output} and calls>0});}`;
+    expect(executeProgram('zig', source)).toMatchObject({
+      kind: 'executed',
+      stderr: 'true',
+      uncaughtException: undefined,
+    });
+  }
+);
+
+test.each(['@as(?usize,3)', '@as(?usize,null)', 'null'])(
+  'format options use the optional usize contract: %s',
+  (width) => {
+    const source = `const std=@import("std");pub fn main()void{${width === 'null' ? 'const' : 'var'} n=${width};_=&n;std.debug.print("{0d:[1]}|{0d:.[1]}",.{3,n});}`;
+    expect(executeProgram('zig', source)).toMatchObject({
+      kind: 'executed',
+      stderr: width === '@as(?usize,3)' ? '  3|3' : '3|3',
+      uncaughtException: undefined,
+    });
+  }
+);
+
+test.each(['@as(i32,-1)', '@as(u128,3)', '-1', '18446744073709551616'])(
+  'format options reject values outside optional usize: %s',
+  (width) => {
+    expect(
+      executeProgram(
+        'zig',
+        `const std=@import("std");pub fn main()void{${width.startsWith('@as') ? `var n=${width};_=&n;` : ''}std.debug.print("{d:[1]}",.{3,${width.startsWith('@as') ? 'n' : width}});}`
+      )
+    ).toMatchObject({ kind: 'compileError' });
+  }
+);
+
+test.each(['B', 'Bi'])('byte-size formats apply their u64 argument contract: %s', (spec) => {
+  for (const value of ['@as(i32,-5)', '@as(u128,3)', '-1', '18446744073709551616'])
+    expect(
+      executeProgram(
+        'zig',
+        `const std=@import("std");pub fn main()void{${value.startsWith('@as') ? `var n=${value};_=&n;` : ''}std.debug.print("{${spec}}",.{${value.startsWith('@as') ? 'n' : value}});}`
+      )
+    ).toMatchObject({ kind: 'compileError' });
+  expect(
+    executeProgram('zig', `const std=@import("std");pub fn main()void{std.debug.print("{${spec}}",.{@as(u32,5)});}`)
+  ).toMatchObject({ kind: 'executed', stderr: '5B', uncaughtException: undefined });
+});
+
+test('large named format tables share the compilation budget', () => {
+  const count = 60_000;
+  const format = Array.from({ length: count }, (_, index) => `{[f${index}]}`).join('');
+  const args = Array.from({ length: count }, (_, index) => `.f${index}=0`).join(',');
+  expect(
+    executeProgram('zig', `const std=@import("std");pub fn main()void{std.debug.print("${format}",.{${args}});}`)
+  ).toMatchObject({ kind: 'limitExceeded', limit: 'operations' });
+});
+
+test('known widths retain value coercion while byte-size parameters enforce typed ranges', () => {
+  expect(
+    executeProgram('zig', 'const std=@import("std");pub fn main()void{std.debug.print("{d:[1]}",.{3,@as(u128,3)});}')
+  ).toMatchObject({ kind: 'executed', stderr: '  3', uncaughtException: undefined });
+  for (const spec of ['B', 'Bi'])
+    expect(
+      executeProgram('zig', `const std=@import("std");pub fn main()void{std.debug.print("{${spec}}",.{@as(u128,5)});}`)
+    ).toMatchObject({ kind: 'compileError' });
+});
+
+test('known signed nonnegative shift counts coerce by value', () => {
+  expect(
+    executeProgram(
+      'zig',
+      'const std=@import("std");pub fn main()void{var x:u8=1;_=&x;std.debug.print("{}",.{x<<|@as(i8,1)});}'
+    )
+  ).toMatchObject({ kind: 'executed', stderr: '2', uncaughtException: undefined });
+});

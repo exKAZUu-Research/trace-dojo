@@ -1078,7 +1078,12 @@ export abstract class SemaBase implements SemaApi {
   }
 
   /** An expression of another type whose value a function computes from the original's. */
-  protected derived(expression: TExpr, type: Type, convert: (value: Value) => Value, allocates = false): TExpr {
+  protected derived(
+    expression: TExpr,
+    type: Type,
+    convert: (value: Value, frame?: Frame) => Value,
+    allocates = false
+  ): TExpr {
     const sourceResult = staticResultOf(expression);
     let result: { value: Value } | undefined;
     if (sourceResult) {
@@ -1099,7 +1104,7 @@ export abstract class SemaBase implements SemaApi {
         (frame) => {
           const value = evaluate(frame);
           if (allocates) frame.runtime.reserveStorage(valueSlots(type));
-          return convert(value);
+          return convert(value, frame);
         },
         expression.span
       ),

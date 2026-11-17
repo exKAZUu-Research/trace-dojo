@@ -1272,7 +1272,7 @@ export abstract class ExpressionCompiler extends SemaBase {
     }
   }
 
-  // code-gauge-allow functionCognitiveComplexity 17 -- Keeps unbounded and fixed-width shift contracts together.
+  // code-gauge-allow functionCognitiveComplexity 18 -- Keeps unbounded and fixed-width shift contracts together.
   private shift(expression: ExpressionOf<'binary'>, resultType: Type | undefined): TExpr {
     const left = this.compile(expression.left, resultType);
     const type = left.type;
@@ -1303,7 +1303,10 @@ export abstract class ExpressionCompiler extends SemaBase {
 
     const int = type;
     const amountType = log2IntType(int);
-    const right = this.coerce(this.compile(expression.right, amountType), amountType, expression.right);
+    const right =
+      expression.operator === '<<|'
+        ? this.unsignedShiftCount(expression.right)
+        : this.coerce(this.compile(expression.right, amountType), amountType, expression.right);
     if (expression.operator !== '<<|') this.checkKnownShift(right, int, expression.right);
     const operation =
       expression.operator === '<<'
@@ -1312,6 +1315,16 @@ export abstract class ExpressionCompiler extends SemaBase {
           ? (a: Value, b: Value): Value => shiftRight(a as bigint, b as bigint, int)
           : (a: Value, b: Value): Value => shiftLeftSaturating(a as bigint, b as bigint, int);
     return this.combine([left, right], type, ([a, b]) => operation(a, b), expression);
+  }
+
+  private unsignedShiftCount(expression: Expression): TExpr {
+    const amount = this.compile(expression);
+    if (amount.type.kind === 'comptime_int' || (amount.type.kind === 'int' && amount.known)) {
+      if ((this.knownValue(amount, 'シフト量') as bigint) < 0n) this.error(expression, 'シフトの量が負の数です。');
+    } else if (amount.type.kind !== 'int' || amount.type.signed) {
+      this.error(expression, '飽和シフトの量は符号なし整数にしてください。');
+    }
+    return amount;
   }
 
   protected checkKnownShift(amount: TExpr, type: IntType, span: Span): void {
@@ -1705,7 +1718,7 @@ function knownAt(type: Type, pointer: Pointer, span: Span): TExpr {
 export function constantKey(value: Value, spend: () => void): string {
   spend();
   if (value instanceof ZArray)
-    return `array ${JSON.stringify(value.values(true).map((item) => constantKey(item, spend)))}`;
+    return `array ${JSON.stringify(value.values(value.hasSentinel).map((item) => constantKey(item, spend)))}`;
   if (value instanceof ZStruct) return `struct ${JSON.stringify(value.slots.map((item) => constantKey(item, spend)))}`;
   if (value instanceof ZUnion) return `union ${value.tag} ${constantKey(value.slots[0], spend)}`;
   if (value instanceof Some) return `some ${constantKey(value.value, spend)}`;

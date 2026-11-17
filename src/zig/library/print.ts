@@ -2,18 +2,21 @@ import type { Expression, Span } from '../ast';
 import { byteValues } from '../builtins';
 import { checkFormat, FormatError, type Options, parseFormat, printValue, type Segment, type TypeInfo } from '../fmt';
 import { type Frame, withHeldValues, ZigPanic } from '../runtime';
-import { copyForFrame, runtime, type SemaApi } from '../semaBase';
+import { copyForFrame, known, runtime, type SemaApi } from '../semaBase';
 import {
   CONST_U8_SLICE,
   errorSetOf,
   errorUnionOf,
+  optionalOf,
   pointerTo,
   type StructField,
   type Type,
   typeName,
+  U64,
+  USIZE,
   VOID,
 } from '../types';
-import { compileTimeReadable, ErrorValue, Pointer, type Value, type ZStruct } from '../values';
+import { compileTimeReadable, ErrorValue, NULL, Pointer, Some, type Value, type ZStruct } from '../values';
 import { bufferedBytes, bufferingWriter, WRITER, type WriterState, writerState, writerValue, writeTo } from './writer';
 
 export interface PreparedPrint {
@@ -46,7 +49,7 @@ export function compilePrint(sema: SemaApi, formatArg: Expression, argsArg: Expr
   const names = fields.map((field) => field.name);
   let segments: Segment[];
   try {
-    segments = parseFormat(formatBytes, names);
+    segments = parseFormat(formatBytes, names, (cost) => sema.spendCompilation(cost));
   } catch (error) {
     if (error instanceof FormatError) return sema.error(span, `書式の文字列に誤りがあります: ${error.message}`);
     throw error;
@@ -59,7 +62,7 @@ export function compilePrint(sema: SemaApi, formatArg: Expression, argsArg: Expr
     try {
       if (segment.spec === 'f') formatMethods.set(segment.arg, formatMethod(sema, fields[segment.arg].type, span));
       else checkFormat(segment.spec, fields[segment.arg].type, info, hasOptions);
-      checkKnownArguments(segment, fields);
+      checkKnownArguments(sema, segment, fields, span);
     } catch (error) {
       if (error instanceof FormatError) return sema.error(span, `書式に誤りがあります: ${error.message}`);
       throw error;
@@ -99,20 +102,34 @@ export function printInto(frame: Frame, destination: WriterState, print: Compile
 
 type FormatMethod = (frame: Frame, value: Value, destination: WriterState) => void;
 
-/** The checks Zig makes on known arguments: a width or precision is an integer, and `{c}`/`{u}` fit `u8`/`u21`. */
-function checkKnownArguments(segment: Extract<Segment, { kind: 'placeholder' }>, fields: readonly StructField[]): void {
+function checkKnownArguments(
+  sema: SemaApi,
+  segment: Extract<Segment, { kind: 'placeholder' }>,
+  fields: readonly StructField[],
+  span: Span
+): void {
   for (const option of [segment.width, segment.precision]) {
     if (option.kind !== 'arg') continue;
-    const type = fields[option.index].type;
-    if (type.kind !== 'int' && type.kind !== 'comptime_int') {
-      throw new FormatError(`expected type '?usize', found '${typeName(type)}'`);
-    }
+    checkFieldCoercion(sema, fields[option.index], optionalOf(USIZE), span);
   }
+  if (segment.spec === 'B' || segment.spec === 'Bi') checkFieldCoercion(sema, fields[segment.arg], U64, span, true);
   const value = fields[segment.arg].comptimeValue?.value;
   const limit = segment.spec === 'c' ? 0xffn : segment.spec === 'u' ? 0x1f_ff_ffn : undefined;
   if (limit !== undefined && typeof value === 'bigint' && (value < 0n || value > limit)) {
     throw new FormatError(`type '${segment.spec === 'c' ? 'u8' : 'u21'}' cannot represent integer value '${value}'`);
   }
+}
+
+function checkFieldCoercion(sema: SemaApi, field: StructField, target: Type, span: Span, parameter = false): void {
+  const source =
+    field.comptimeValue && (!parameter || field.type.kind === 'comptime_int')
+      ? known(field.type, field.comptimeValue.value, span)
+      : runtime(field.type, () => {}, span);
+  sema.coerce(source, target, span);
+}
+
+function formatOption(value: Value): number | undefined {
+  return value === NULL ? undefined : Number((value instanceof Some ? value.value : value) as bigint);
 }
 
 function formatMethod(sema: SemaApi, type: Type, span: Span): FormatMethod {
@@ -182,9 +199,9 @@ function appendSegments(
     }
     const options: Options = { fill: segment.fill, alignment: segment.alignment };
     if (segment.width.kind === 'number') options.width = segment.width.value;
-    else if (segment.width.kind === 'arg') options.width = Number(argValue(segment.width.index) as bigint);
+    else if (segment.width.kind === 'arg') options.width = formatOption(argValue(segment.width.index));
     if (segment.precision.kind === 'number') options.precision = segment.precision.value;
-    else if (segment.precision.kind === 'arg') options.precision = Number(argValue(segment.precision.index) as bigint);
+    else if (segment.precision.kind === 'arg') options.precision = formatOption(argValue(segment.precision.index));
     if (segment.spec === 'f') {
       formatWithMethod(segment.arg, argValue(segment.arg));
     } else {

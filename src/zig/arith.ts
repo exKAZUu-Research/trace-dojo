@@ -142,6 +142,7 @@ export function shiftRight(a: bigint, amount: bigint, type: IntType): bigint {
 
 export function shiftLeftSaturating(a: bigint, amount: bigint, type: IntType): bigint {
   if (a === 0n) return 0n;
+  if (amount >= BigInt(type.bits)) return a < 0n ? minInt(type) : maxInt(type);
   return saturate(a << amount, type);
 }
 

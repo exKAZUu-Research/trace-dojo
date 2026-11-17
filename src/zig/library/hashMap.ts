@@ -1,5 +1,5 @@
-// code-gauge-allow-file fileNcss 418 -- Keeps hash-map state, storage layout, and public method registration together.
-import { allocationSlots } from '../allocation';
+// code-gauge-allow-file fileNcss 420 -- Keeps hash-map state, storage layout, and public method registration together.
+import { allocationSlots, valueSlots } from '../allocation';
 import { reserveAllocatorBytes } from '../allocatorStorage';
 // code-gauge-allow-file duplicateLines 19 -- Library types repeat the same shape of method on purpose, each over its own state.
 import { panic } from '../arith';
@@ -551,16 +551,21 @@ function defineMembers(types: MapTypes, keyType: Type, valueType: Type, kind: Ke
     ),
     count: method('count', { args: [], result: U32, mutable: false }, (state) => BigInt(state.size)),
     capacity: method('capacity', { args: [], result: U32, mutable: false }, (state) => BigInt(state.capacity)),
-    clearRetainingCapacity: method('clearRetainingCapacity', { args: [], result: VOID, mutable: true }, (state) => {
-      state.metadata.fill(0);
-      for (let index = 0; index < state.capacity; index++) {
-        state.keys.slots[index] = undefinedValue(keyType);
-        state.values.slots[index] = undefinedValue(valueType);
+    clearRetainingCapacity: method(
+      'clearRetainingCapacity',
+      { args: [], result: VOID, mutable: true },
+      (state, _args, frame) => {
+        frame.runtime.spend(state.capacity * (1 + valueSlots(keyType) + valueSlots(valueType)));
+        state.metadata.fill(0);
+        for (let index = 0; index < state.capacity; index++) {
+          state.keys.slots[index] = undefinedValue(keyType);
+          state.values.slots[index] = undefinedValue(valueType);
+        }
+        state.size = 0;
+        state.available = Math.floor((state.capacity * MAX_LOAD) / 100);
+        return;
       }
-      state.size = 0;
-      state.available = Math.floor((state.capacity * MAX_LOAD) / 100);
-      return;
-    }),
+    ),
     clearAndFree: method('clearAndFree', { args: [], result: VOID, mutable: true, allocates: true }, (state) => {
       if (state.memory) freeMemory(state.allocator, state.memory);
       Object.assign(state, emptyState());
@@ -628,12 +633,13 @@ function defineMembers(types: MapTypes, keyType: Type, valueType: Type, kind: Ke
 }
 
 /** An iterator's `next`: the entry of the next used slot from the iterator's index. */
-function advance(returns: (state: MapState, index: number) => Value): (iteratorState: ZStruct) => Value {
-  return (iteratorState) => {
+function advance(returns: (state: MapState, index: number) => Value): (iteratorState: ZStruct, frame: Frame) => Value {
+  return (iteratorState, frame) => {
     const state = (iteratorState.slots[0] as NativeHandle).state as MapState;
     let index = Number(iteratorState.slots[1] as bigint);
     if (state.size === 0) return NULL;
     while (index < state.capacity) {
+      frame.runtime.spend();
       if ((state.metadata[index] & 0x80) !== 0) {
         iteratorState.slots[1] = BigInt(index + 1);
         return returns(state, index);
@@ -648,7 +654,7 @@ function advance(returns: (state: MapState, index: number) => Value): (iteratorS
 function nextMember(
   type: StructType,
   result: Type,
-  run: (iteratorState: ZStruct) => Value
+  run: (iteratorState: ZStruct, frame: Frame) => Value
 ): Record<string, () => Member> {
   return {
     next: fnMember(`${type.namespace.name}.next`, (sema, call) => {
@@ -665,7 +671,7 @@ function nextMember(
         result,
         (frame) => {
           frame.runtime.spend();
-          return run((evaluate(frame) as Pointer).load() as ZStruct);
+          return run((evaluate(frame) as Pointer).load() as ZStruct, frame);
         },
         call.span
       );

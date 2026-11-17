@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 546 -- Groups the related standard library operations that share this module.
+// code-gauge-allow-file fileNcss 551 -- Groups the related standard library operations that share this module.
 import { checked, divCeil, divExact, divFloor, divTrunc, floatMod, floatRem, mod, PANIC, panic, rem } from '../arith';
 import type { Expression } from '../ast';
 import { fusedMultiplyAdd, intFittingRange, roundFloat } from '../builtins';
@@ -693,11 +693,13 @@ const MEMBERS: Record<string, () => Member> = {
     if (type.kind !== 'int')
       return sema.error(call.span, `std.math.floorPowerOfTwo には整数の型を渡してください（${typeName(type)} です）。`);
     const value = sema.coerce(sema.compile(valueArg, type), type, valueArg);
-    return computed(type, [value], call.span, ([x]) => {
+    return computed(type, [value], call.span, ([x], frame) => {
+      nativeBudget(sema, frame)(type.bits);
       const n = x as bigint;
       return n <= 0n ? 0n : 1n << BigInt(n.toString(2).length - 1);
     });
   }),
+  // code-gauge-allow duplicateLines 15 -- These named integer adapters independently retain their type contracts.
   ceilPowerOfTwo: generic('std.math.ceilPowerOfTwo', 2, (sema, call, type, [valueArg]) => {
     if (type.kind !== 'int' || type.signed) {
       return sema.error(
@@ -706,13 +708,15 @@ const MEMBERS: Record<string, () => Member> = {
       );
     }
     const value = sema.coerce(sema.compile(valueArg, type), type, valueArg);
-    return computed(errorUnionOf(OVERFLOW_ERROR, type), [value], call.span, ([x]) => {
+    return computed(errorUnionOf(OVERFLOW_ERROR, type), [value], call.span, ([x], frame) => {
+      nativeBudget(sema, frame)(type.bits);
       const n = x as bigint;
       if (n === 0n) panic(PANIC.unreachable);
       const power = n === 1n ? 1n : 1n << BigInt((n - 1n).toString(2).length);
       return fitsInt(power, type) ? power : ErrorValue.of('Overflow');
     });
   }),
+  // code-gauge-allow duplicateLines 15 -- These named integer adapters independently retain their type contracts.
   log2_int_ceil: generic('std.math.log2_int_ceil', 2, (sema, call, type, [xArg]) => {
     if (type.kind !== 'int' || type.signed) {
       return sema.error(
@@ -721,7 +725,8 @@ const MEMBERS: Record<string, () => Member> = {
       );
     }
     const x = sema.coerce(sema.compile(xArg, type), type, xArg);
-    return computed(log2IntType(intType(false, type.bits + 1)), [x], call.span, ([value]) => {
+    return computed(log2IntType(intType(false, type.bits + 1)), [x], call.span, ([value], frame) => {
+      nativeBudget(sema, frame)(type.bits);
       const n = value as bigint;
       if (n === 0n) panic(PANIC.unreachable);
       return n === 1n ? 0n : BigInt((n - 1n).toString(2).length);
@@ -778,7 +783,8 @@ const MEMBERS: Record<string, () => Member> = {
     if (type.kind !== 'int' || type.signed) {
       return sema.error(arg, `std.math.log10_int には符号なし整数を渡してください（${typeName(type)} 型です）。`);
     }
-    return computed(log2IntType(type), [value], call.span, ([x]) => {
+    return computed(log2IntType(type), [value], call.span, ([x], frame) => {
+      nativeBudget(sema, frame)(type.bits);
       if ((x as bigint) === 0n) panic(PANIC.unreachable);
       return BigInt((x as bigint).toString().length - 1);
     });
@@ -847,7 +853,8 @@ const MEMBERS: Record<string, () => Member> = {
       );
     }
     const x = sema.coerce(sema.compile(xArg, type), type, xArg);
-    return computed(log2IntType(type), [x], call.span, ([value]) => {
+    return computed(log2IntType(type), [x], call.span, ([value], frame) => {
+      nativeBudget(sema, frame)(type.bits);
       if ((value as bigint) === 0n) panic(PANIC.unreachable);
       return BigInt((value as bigint).toString(2).length - 1);
     });

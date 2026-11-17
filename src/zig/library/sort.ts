@@ -95,33 +95,33 @@ function reader(
 }
 
 function binarySearch(items: Slice, order: (item: Value) => bigint): Value {
-  let low = 0;
-  let high = items.length;
+  let low = 0n;
+  let high = items.lengthValue;
   while (low < high) {
-    const middle = low + Math.floor((high - low) / 2);
-    const comparison = order(items.get(middle));
-    if (comparison === ORDER_EQ) return BigInt(middle);
-    if (comparison === ORDER_GT) low = middle + 1;
+    const middle = low + (high - low) / 2n;
+    const comparison = order(items.get(Number(middle)));
+    if (comparison === ORDER_EQ) return middle;
+    if (comparison === ORDER_GT) low = middle + 1n;
     else high = middle;
   }
   return NULL;
 }
 
 /** `partitionPoint`: the first index whose element the predicate rejects. */
-function partitionPoint(items: Slice, predicate: (item: Value) => boolean): number {
-  let position = 0;
-  let length = items.length;
-  while (length > 1) {
-    const half = Math.floor(length / 2);
+function partitionPoint(items: Slice, predicate: (item: Value) => boolean): bigint {
+  let position = 0n;
+  let length = items.lengthValue;
+  while (length > 1n) {
+    const half = length / 2n;
     length -= half;
-    if (predicate(items.get(position + half - 1))) position += half;
+    if (predicate(items.get(Number(position + half - 1n)))) position += half;
   }
-  if (position < items.length && predicate(items.get(position))) position++;
+  if (position < items.lengthValue && predicate(items.get(Number(position)))) position++;
   return position;
 }
 
-function subSlice(items: Slice, start: number, end: number): Slice {
-  return new Slice(items.target, items.start + start, end - start);
+function subSlice(items: Slice, start: bigint, end: bigint): Slice {
+  return new Slice(items.target, items.start + Number(start), end - start);
 }
 
 function extremum(items: Slice, call: (args: Value[]) => Value, frame: Frame, type: Type, maximum: boolean): Value {
@@ -151,20 +151,20 @@ function equalRangeMember(): Member {
     (_type, sema) => tupleOf(sema, [USIZE, USIZE]),
     (values, call) => {
       const order = (item: Value): bigint => call([item]) as bigint;
-      let low = 0;
-      let high = values.length;
+      let low = 0n;
+      let high = values.lengthValue;
       while (low < high) {
-        const middle = low + Math.floor((high - low) / 2);
-        const comparison = order(values.get(middle));
-        if (comparison === ORDER_GT) low = middle + 1;
+        const middle = low + (high - low) / 2n;
+        const comparison = order(values.get(Number(middle)));
+        if (comparison === ORDER_GT) low = middle + 1n;
         else if (comparison === ORDER_LT) high = middle;
         else {
           const lower = low + partitionPoint(subSlice(values, low, middle), (item) => order(item) === ORDER_GT);
           const upper = middle + partitionPoint(subSlice(values, middle, high), (item) => order(item) !== ORDER_LT);
-          return new ZStruct([BigInt(lower), BigInt(upper)]);
+          return new ZStruct([lower, upper]);
         }
       }
-      return new ZStruct([BigInt(low), BigInt(low)]);
+      return new ZStruct([low, low]);
     }
   )();
 }
