@@ -642,12 +642,7 @@ export class Checker {
           properties.set(name, property);
           continue;
         }
-        properties.set(name, {
-          ...existing,
-          optional: existing.optional && property.optional,
-          readonly: existing.readonly && property.readonly,
-          type: () => intersectionOf([existing.type(), property.type()], this.budget),
-        });
+        properties.set(name, this.intersectedProperty(existing, property));
       }
     }
     return {
@@ -656,6 +651,25 @@ export class Checker {
       constructSignatures: structures.flatMap((structure) => structure.constructSignatures),
       stringIndex: this.intersectedIndex(structures.map((structure) => structure.stringIndex)),
       numberIndex: this.intersectedIndex(structures.map((structure) => structure.numberIndex)),
+    };
+  }
+
+  /** A property two members of an intersection both have, writable if either one is. */
+  private intersectedProperty(existing: Property, property: Property): Property {
+    const hasWriteType = existing.writeType !== undefined || property.writeType !== undefined;
+    return {
+      ...existing,
+      optional: existing.optional && property.optional,
+      readonly: existing.readonly && property.readonly,
+      getterOnly: existing.getterOnly === true && property.getterOnly === true,
+      type: () => intersectionOf([existing.type(), property.type()], this.budget),
+      writeType: hasWriteType
+        ? () =>
+            intersectionOf(
+              [(existing.writeType ?? existing.type)(), (property.writeType ?? property.type)()],
+              this.budget
+            )
+        : undefined,
     };
   }
 
