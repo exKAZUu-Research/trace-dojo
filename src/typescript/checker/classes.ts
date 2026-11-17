@@ -53,6 +53,8 @@ const classTypes = new Set(['class_declaration', 'abstract_class_declaration', '
 export class ClassChecker {
   private readonly infos = new Map<number, ClassInfo>();
   private readonly objectThis: ObjectType[] = [];
+  private readonly fieldTypes = new Map<number, Type>();
+  private readonly resolvingFields: { member: TreeNode; nameNode: TreeNode }[] = [];
 
   constructor(private readonly c: Checker) {}
 
@@ -408,6 +410,32 @@ export class ClassChecker {
   private fieldType(member: TreeNode, nameNode: TreeNode): Type {
     const annotation = this.c.typeNodes.annotationType(member.childForFieldName('type'));
     if (annotation) return annotation;
+    const cached = this.fieldTypes.get(member.id);
+    if (cached) return cached;
+    const resolving = this.resolvingFields.findIndex((field) => field.member.id === member.id);
+    // Fields whose initializers read one another have no type to infer, as TypeScript reports for each of them.
+    if (resolving !== -1) {
+      for (const field of this.resolvingFields.slice(resolving)) {
+        if (this.fieldTypes.has(field.member.id)) continue;
+        this.fieldTypes.set(field.member.id, anyType);
+        this.c.errorWhileResolving(
+          field.nameNode,
+          `${field.nameNode.text} の型が、自分自身を参照しているため暗黙に any になります。`
+        );
+      }
+      return anyType;
+    }
+    this.resolvingFields.push({ member, nameNode });
+    try {
+      const type = this.inferredFieldType(member, nameNode);
+      if (!this.fieldTypes.has(member.id)) this.fieldTypes.set(member.id, type);
+      return this.fieldTypes.get(member.id) as Type;
+    } finally {
+      this.resolvingFields.pop();
+    }
+  }
+
+  private inferredFieldType(member: TreeNode, nameNode: TreeNode): Type {
     const value = member.childForFieldName('value');
     if (value) {
       const owner = member.parent?.parent;
