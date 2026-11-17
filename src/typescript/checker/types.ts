@@ -148,6 +148,8 @@ export interface ObjectType {
   mapped?: MappedInfo;
   /** For a function or object literal whose type was inferred from an expression. */
   isLiteral?: boolean;
+  /** For an object literal typed by one alternative of a union it spreads, which TypeScript leaves unnormalized. */
+  isUnionSpread?: boolean;
   /** The alias the type was written with, for printing. */
   aliasName?: string;
   aliasArguments?: Type[];

@@ -31,6 +31,11 @@ interface ObjectLiteral {
   stringIndex?: Type;
   /** Spreads of type parameters, which the literal's type intersects. */
   genericSpreads: Type[];
+  /**
+   * After a spread of a union, the properties each of its alternatives gives the literal, which `properties` (the
+   * members written since) then override.
+   */
+  alternatives?: Map<string, Property>[];
   /** The property names seen so far, with `get ` or `set ` before an accessor's. */
   seenKeys: Set<string>;
   object: ObjectType;
@@ -166,7 +171,23 @@ export class LiteralChecker {
     };
     for (const member of named(node)) this.declareObjectMember(literal, member);
     for (const member of named(node)) this.objectMember(literal, member);
-    const { object, genericSpreads } = literal;
+    const { object, genericSpreads, alternatives } = literal;
+    if (alternatives) {
+      const variants = alternatives.map((alternative) => {
+        const variant = anonymousObject(
+          () => ({
+            ...emptyStructure(),
+            properties: new Map([...alternative, ...properties]),
+            stringIndex: literal.stringIndex && { type: literal.stringIndex, readonly: false },
+          }),
+          { isLiteral: true, isUnionSpread: true }
+        );
+        return { ...variant, id: variant.id, fresh: true, regular: variant } as ObjectType;
+      });
+      return genericSpreads.length > 0
+        ? intersectionOf([...genericSpreads, unionOf(variants)], this.c.budget)
+        : unionOf(variants);
+    }
     const fresh: ObjectType = { ...object, id: object.id, fresh: true, regular: object };
     if (genericSpreads.length > 0) return intersectionOf([...genericSpreads, object], this.c.budget);
     return fresh;
@@ -360,10 +381,28 @@ export class LiteralChecker {
       literal.genericSpreads.push(spread);
       return;
     }
+    const objectMembers = members.filter((type) => type.kind === 'object' || type.kind === 'intersection');
+    if (objectMembers.length < 2) {
+      this.spreadInto(literal.properties, spread);
+      return;
+    }
+    // Each alternative of a union spreads its own properties, as TypeScript gives the literal a union type.
+    const bases = literal.alternatives ?? [new Map<string, Property>()];
+    literal.alternatives = bases.flatMap((base) =>
+      objectMembers.map((type) => {
+        const alternative = new Map([...base, ...literal.properties]);
+        this.spreadInto(alternative, type);
+        return alternative;
+      })
+    );
+    literal.properties.clear();
+  }
+
+  private spreadInto(properties: Map<string, Property>, spread: Type): void {
     for (const [name, property] of this.spreadProperties(spread)) {
-      const existing = literal.properties.get(name);
+      const existing = properties.get(name);
       // An optional property spread over one already there may be missing, which leaves the earlier value.
-      literal.properties.set(
+      properties.set(
         name,
         existing && property.optional
           ? {
@@ -544,7 +583,7 @@ export class LiteralChecker {
             }
             return { ...structure, properties };
           },
-          { isLiteral: true }
+          { isLiteral: true, isUnionSpread: type.isUnionSpread }
         );
       }
     }
@@ -556,11 +595,11 @@ export class LiteralChecker {
    * `[{ a: 1 }, { a: 2, b: 3 }]` has elements whose `b` can be read.
    */
   normalizeObjectLiterals(types: Type[]): Type[] {
-    const literals = types.filter(isObjectLiteral);
+    const literals = types.filter((type) => isObjectLiteral(type) && !type.isUnionSpread);
     if (literals.length < 2) return types;
     const names = new Set(literals.flatMap((literal) => [...this.c.structureOf(literal).properties.keys()]));
     return types.map((type) => {
-      if (!isObjectLiteral(type)) return type;
+      if (!isObjectLiteral(type) || type.isUnionSpread) return type;
       const missing = [...names].filter((name) => !this.c.structureOf(type).properties.has(name));
       if (missing.length === 0) return type;
       return anonymousObject(
