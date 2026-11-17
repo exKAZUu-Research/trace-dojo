@@ -422,8 +422,8 @@ export class Flow {
   }
 
   /**
-   * The part of a type that `value == null` keeps, as TypeScript narrows it: its nullish members, and of a generic one
-   * that may be nullish, itself or its constraint's nullish part.
+   * The part of a type that `value == null` keeps, as TypeScript narrows it: its nullish members, and a generic one
+   * that may be nullish, whole or with the nullish part of its constraint.
    */
   private nullishPart(type: Type): Type {
     return mapType(type, (member) => {
@@ -436,10 +436,12 @@ export class Flow {
       )
         return member;
       if (!this.c.relations.isGeneric(member)) return neverType;
-      // An unconstrained one stays whole, and a constrained one becomes the nullish part of its constraint.
+      // An unconstrained one stays whole, and a constrained one keeps its identity with the nullish part of its
+      // constraint, so it still fits where the type parameter does.
       const constraint = this.c.baseConstraint(member);
       if (constraint === member || isIntrinsic(constraint, 'unknown')) return member;
-      return this.nullishPart(constraint);
+      const nullish = this.nullishPart(constraint);
+      return isIntrinsic(nullish, 'never') ? neverType : intersectionOf([member, nullish], this.c.budget);
     });
   }
 
