@@ -136,7 +136,10 @@ export class Calls {
   /** The callee's type without `null` and `undefined`, reporting them unless the call is optional. */
   private nonNullableCallee(callee: TreeNode, type: Type, optional: boolean): Type {
     if (optional) return this.c.relations.removeNullish(type);
-    if (isAnyLike(type) || !this.c.relations.isNullable(type)) return type;
+    // A `void` callee is reported as not callable, as TypeScript does, rather than as possibly undefined.
+    const members = type.kind === 'union' ? type.types : [type];
+    if (isAnyLike(type) || !members.some((member) => isIntrinsic(member, 'null') || isIntrinsic(member, 'undefined')))
+      return type;
     const withoutUndefined = this.c.relations.removeUndefined(type);
     const what = isIntrinsic(withoutUndefined, 'never')
       ? 'undefined'
