@@ -40,6 +40,7 @@ export interface CallTarget {
   staticClass?: PhpClass;
   method?: Method;
   closure?: PhpObject;
+  inline?: boolean;
 }
 
 /** One call on the stack, as stack traces report it. */
@@ -141,14 +142,27 @@ export function invoke(target: CallTarget, args: ArgValue[], callRow: number | u
 
 function invokeNative(target: CallTarget, fn: NativeFunction, args: ArgValue[], row: number | undefined): Value {
   const runtime = rt();
+  runtime.spend();
   const name = functionDisplayName(target);
-  if (fn.inlined && row !== undefined) {
+  if (target.inline && row !== undefined) {
     const { values, refs, named } = bindNative(fn, args, name, callerIsStrict());
-    return fn.impl({ args: values, refs, thisObj: target.thisObj, calledClass: target.staticClass, named, row });
+    return runNative(runtime, fn, {
+      args: values,
+      refs,
+      thisObj: target.thisObj,
+      calledClass: target.staticClass,
+      named,
+      row,
+    });
   }
   const strict = callerIsStrict();
   // The frame exists while PHP checks the arguments, so a TypeError about them shows the call in its trace.
   const passed = args.filter((arg) => arg.name === undefined).map((arg) => arg.ref?.v ?? arg.v);
+  for (const arg of args) {
+    if (arg.name === undefined) continue;
+    const index = fn.params.findIndex((param) => param.name === arg.name && !param.variadic);
+    if (index !== -1) passed[index] = arg.ref?.v ?? arg.v;
+  }
   callStack.push(recordFor(target, passed, nativeDepth > 0 && row === undefined ? undefined : row));
   nativeDepth++;
   runtime.nativeCalls++;
@@ -187,7 +201,10 @@ function runNative(runtime: Runtime, fn: NativeFunction, context: NativeContext)
     return result;
   } catch (error) {
     // The host refuses a string or an array past its own limit, which only a structure far past ours reaches.
-    if (error instanceof RangeError && /^Invalid (string|array) length/.test(error.message)) {
+    if (
+      error instanceof RangeError &&
+      /Invalid (string|array) length|Out of memory|Maximum call stack size exceeded|out of memory/i.test(error.message)
+    ) {
       throw runtime.memoryExhausted(2 ** 31);
     }
     throw error;
@@ -547,7 +564,8 @@ function bindParams(
       }
       for (const arg of args) {
         if (arg.name !== undefined && !params.some((other) => other.name === arg.name && !other.variadic)) {
-          rest.set(arg.name, checkParam(arg.v, param, index, name, strict, frame, callRow));
+          if (param.byRef) rest.setSlot(arg.name, bindRef(arg));
+          else rest.set(arg.name, checkParam(arg.v, param, index, name, strict, frame, callRow));
         }
       }
       frame.vars.set(param.name, new Ref(rest));

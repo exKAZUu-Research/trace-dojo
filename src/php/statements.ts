@@ -22,7 +22,7 @@ import { E_DEPRECATED, E_WARNING, emitError, throwError, warn } from './errors';
 import { collectBeforeAllocation, collectGarbage, setDestructor } from './garbage';
 import { ev, evReturn } from './interp';
 import { looseEquals, setObjectConversions, toStr } from './operators';
-import { ElementPlace, share, VarPlace, writableContainer } from './places';
+import { ElementPlace, RefPlace, share, ValuePlace, VarPlace, writableContainer } from './places';
 import { ExitSignal, FatalError, Frame, PhpThrow, rt, type Runtime } from './runtime';
 import { type Callable, type Key, PhpArray, PhpClass, PhpObject, Ref, UNINIT, type Value } from './values';
 
@@ -470,7 +470,8 @@ function foreachStatement(statement: Extract<Stmt, { k: 'foreach' }>): Completio
   const runtime = rt();
   const frame = runtime.frame;
   if (statement.byRef) {
-    const place = placeOf(statement.subject);
+    const resolved = placeOf(statement.subject);
+    const place = resolved instanceof ValuePlace ? new RefPlace(new Ref(resolved.value)) : resolved;
     const container = place.get();
     if (container instanceof PhpObject) return foreachObject(statement, container);
     if (!(container instanceof PhpArray)) {

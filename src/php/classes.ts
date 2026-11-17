@@ -852,14 +852,26 @@ export function propRef(object: PhpObject, name: string, scope: PhpClass | undef
   if (slot === UNINIT || slot === undefined) slot = null;
   const ref = new Ref(slot);
   ref.isRef = true;
-  if (decl?.type && !decl.isStatic) ref.typedBy = { decl, object };
+  if (decl?.type && !decl.isStatic) ref.typedBy = [{ decl, object }];
   object.props.set(key, ref);
   return ref;
 }
 
 setReferenceTypeCheck((ref, value) => {
-  const { decl, object } = ref.typedBy as NonNullable<Ref['typedBy']>;
-  return coerceProperty(decl, value, object, 'reference held by property');
+  ref.typedBy = ref.typedBy?.filter(({ decl, object }) => object.props.get(decl.key) === ref);
+  let coerced = value;
+  for (const { decl, object } of ref.typedBy ?? []) {
+    coerced = coerceProperty(decl, coerced, object, 'reference held by property');
+  }
+  for (const { decl, object } of ref.typedBy ?? []) {
+    if (coerceProperty(decl, coerced, object, 'reference held by property') !== coerced) {
+      throwError(
+        'TypeError',
+        `Cannot assign ${valueName(value)} to reference held by property ${decl.cls.name}::$${decl.name} of type ${describeType(decl.type as TypeDecl, decl.cls)}`
+      );
+    }
+  }
+  return coerced;
 });
 
 // code-gauge-allow functionCognitiveComplexity 18 -- Follows PHP's class linking and property access rules in their order of checks.
@@ -1019,7 +1031,10 @@ export function objectToArray(object: PhpObject): PhpArray {
     const decl = declForKey(object.cls, key);
     let arrayKey = key;
     if (decl?.visibility === 'protected') arrayKey = `\0*\0${decl.name}`;
-    array.set(normalizeKeyString(arrayKey), slot instanceof Ref ? slot.v : slot);
+    if (slot instanceof Ref && slot.isRef) {
+      slot.rc++;
+      array.setSlot(normalizeKeyString(arrayKey), slot);
+    } else array.set(normalizeKeyString(arrayKey), share(slot instanceof Ref ? slot.v : slot));
   }
   return array;
 }

@@ -266,8 +266,9 @@ class HeapStorage {
     return this.elements.flatMap((element) => (isEntry(element) ? [element.data, element.priority] : [element]));
   }
 
-  clone(): HeapStorage {
-    const copy = new HeapStorage(this.owner, this.compareMethod, this.flags);
+  clone(object: PhpObject): HeapStorage {
+    const fresh = object.cls.createInternal?.(object) as HeapStorage;
+    const copy = new HeapStorage(this.owner, fresh.compareMethod, this.flags);
     copy.elements = [...this.elements];
     copy.corrupted = this.corrupted;
     return copy;
@@ -527,6 +528,7 @@ class FixedStorage {
 
   clone(): FixedStorage {
     const copy = new FixedStorage();
+    rt().allocate(this.items.length);
     copy.items = [...this.items];
     return copy;
   }
@@ -571,6 +573,7 @@ defineClass({
               'ValueError',
               'SplFixedArray::__construct(): Argument #1 ($size) must be greater than or equal to 0'
             );
+          rt().allocate(size);
           fixedOf(thisObj).items = Array.from({ length: size }, () => null);
           return null;
         },
@@ -606,6 +609,12 @@ defineClass({
         impl: ({ thisObj, args }) => {
           const storage = fixedOf(thisObj);
           const size = Number(args[0]);
+          if (size < 0)
+            throwError(
+              'ValueError',
+              'SplFixedArray::setSize(): Argument #1 ($size) must be greater than or equal to 0'
+            );
+          rt().allocate(Math.max(0, size - storage.items.length));
           storage.items = Array.from({ length: size }, (_, index) => storage.items[index] ?? null);
           return true;
         },
@@ -625,10 +634,13 @@ defineClass({
         impl: ({ args }) => {
           const object = createObject(rt().classes.get('splfixedarray') as PhpClass);
           const array = args[0] as PhpArray;
-          if (args[1] === false) fixedOf(object).items = array.values();
-          else {
+          if (args[1] === false) {
+            rt().allocate(array.size);
+            fixedOf(object).items = array.values();
+          } else {
             const keys = array.keys().map(Number);
             const size = keys.length === 0 ? 0 : Math.max(...keys) + 1;
+            rt().allocate(size);
             const items = Array.from({ length: size }, (): Value => null);
             for (const [key, value] of array.entries()) items[Number(key)] = value;
             fixedOf(object).items = items;

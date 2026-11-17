@@ -14,7 +14,7 @@ import { defineConstant, defineFunction } from './native';
 import { toStr } from './operators';
 import { rt } from './runtime';
 import { UnsupportedFeatureError } from './unsupported';
-import { PhpArray, type Value } from './values';
+import { type NativeFunction, PhpArray, type Value } from './values';
 
 defineConstant('MB_CASE_UPPER', 0n);
 defineConstant('MB_CASE_LOWER', 1n);
@@ -29,7 +29,7 @@ const s = (value: Value): string => value as string;
 const n = (value: Value): number => Number(value as bigint);
 const chars = (value: Value): string[] => utf8Chars(s(value));
 
-// Every name, alias, and MIME name of `mb_list_encodings()`, lowercased; most functions handle strings as UTF-8.
+// Names accepted by mbstring, including encodings rejected by codecFor.
 const ENCODINGS = new Set(
   lower(
     'Shift_JIS x-uuencode HZ-GB-2312 BIG5 BASE64 UUENCODE HTML-ENTITIES HTML Quoted-Printable qprint 7bit 8bit binary UCS-4 ISO-10646-UCS-4 UCS4 UCS-4BE byte4be UCS-4LE byte4le UCS-2 ISO-10646-UCS-2 UCS2 UNICODE UCS-2BE byte2be UCS-2LE byte2le UTF-32 utf32 UTF-32BE UTF-32LE UTF-16 utf16 UTF-16BE UTF-16LE UTF-8 utf8 UTF-7 utf7 UTF7-IMAP mUTF-7 ASCII ANSI_X3.4-1968 iso-ir-6 ANSI_X3.4-1986 ISO_646.irv:1991 US-ASCII ISO646-US us IBM367 IBM-367 cp367 csASCII EUC-JP EUC EUC_JP eucJP x-euc-jp SJIS x-sjis SHIFT-JIS eucJP-win eucJP-open eucJP-ms EUC-JP-2004 EUC_JP-2004 SJIS-Mobile#DOCOMO SJIS-DOCOMO shift_jis-imode x-sjis-emoji-docomo SJIS-Mobile#KDDI SJIS-KDDI shift_jis-kddi x-sjis-emoji-kddi SJIS-Mobile#SOFTBANK SJIS-SOFTBANK shift_jis-softbank x-sjis-emoji-softbank SJIS-mac MacJapanese x-Mac-Japanese SJIS-2004 SJIS2004 Shift_JIS-2004 UTF-8-Mobile#DOCOMO UTF-8-DOCOMO UTF8-DOCOMO UTF-8-Mobile#KDDI-A UTF-8-Mobile#KDDI-B UTF-8-Mobile#KDDI UTF-8-KDDI UTF8-KDDI UTF-8-Mobile#SOFTBANK UTF-8-SOFTBANK UTF8-SOFTBANK CP932 MS932 Windows-31J MS_Kanji SJIS-win SJIS-ms SJIS-open CP51932 JIS ISO-2022-JP ISO-2022-JP-MS ISO2022JPMS GB18030 gb-18030 gb-18030-2000 GB18030-2022 Windows-1252 cp1252 Windows-1254 CP1254 CP-1254 ISO-8859-1 ISO8859-1 latin1 ISO-8859-2 ISO8859-2 latin2 ISO-8859-3 ISO8859-3 latin3 ISO-8859-4 ISO8859-4 latin4 ISO-8859-5 ISO8859-5 cyrillic ISO-8859-6 ISO8859-6 arabic ISO-8859-7 ISO8859-7 greek ISO-8859-8 ISO8859-8 hebrew ISO-8859-9 ISO8859-9 latin5 ISO-8859-10 ISO8859-10 latin6 ISO-8859-13 ISO8859-13 ISO-8859-14 ISO8859-14 latin8 ISO-8859-15 ISO8859-15 ISO-8859-16 ISO8859-16 EUC-CN CN-GB EUC_CN eucCN x-euc-cn gb2312 CP936 CP-936 GBK HZ EUC-TW EUC_TW eucTW x-euc-tw BIG-5 CN-BIG5 BIG-FIVE BIGFIVE CP950 EUC-KR EUC_KR eucKR x-euc-kr UHC CP949 ISO-2022-KR Windows-1251 CP1251 CP-1251 CP866 CP-866 IBM866 IBM-866 KOI8-R KOI8R KOI8-U KOI8U ArmSCII-8 ArmSCII8 CP850 CP-850 IBM850 IBM-850 ISO-2022-JP-2004 ISO-2022-JP-MOBILE#KDDI ISO-2022-JP-KDDI CP50220 cp50220raw cp50220-raw JIS-ms CP50221 CP50222'
@@ -46,11 +46,11 @@ function checkEncoding(name: string, args: Value[], position: number, parameter 
   }
 }
 
-defineFunction('mb_strlen(string $string, ?string $encoding = null): int', ({ args }) => {
+defineUtf8Function('mb_strlen(string $string, ?string $encoding = null): int', ({ args }) => {
   checkEncoding('mb_strlen', args, 2);
   return BigInt(chars(args[0]).length);
 });
-defineFunction(
+defineUtf8Function(
   'mb_substr(string $string, int $start, ?int $length = null, ?string $encoding = null): string',
   ({ args }) => {
     checkEncoding('mb_substr', args, 4);
@@ -66,15 +66,15 @@ defineFunction(
     return list.slice(start, end).join('');
   }
 );
-defineFunction('mb_strtoupper(string $string, ?string $encoding = null): string', ({ args }) => {
+defineUtf8Function('mb_strtoupper(string $string, ?string $encoding = null): string', ({ args }) => {
   checkEncoding('mb_strtoupper', args, 2);
   return enc(dec(s(args[0])).toUpperCase());
 });
-defineFunction('mb_strtolower(string $string, ?string $encoding = null): string', ({ args }) => {
+defineUtf8Function('mb_strtolower(string $string, ?string $encoding = null): string', ({ args }) => {
   checkEncoding('mb_strtolower', args, 2);
   return enc(dec(s(args[0])).toLowerCase());
 });
-defineFunction('mb_str_split(string $string, int $length = 1, ?string $encoding = null): array', ({ args }) => {
+defineUtf8Function('mb_str_split(string $string, int $length = 1, ?string $encoding = null): array', ({ args }) => {
   const list = chars(args[0]);
   const length = args[1] === undefined ? 1 : n(args[1]);
   if (length < 1) throwError('ValueError', 'mb_str_split(): Argument #2 ($length) must be greater than 0');
@@ -107,37 +107,37 @@ function mbSearch(args: Value[], reverse: boolean, insensitive: boolean, name: s
   return false;
 }
 
-defineFunction(
+defineUtf8Function(
   'mb_strpos(string $haystack, string $needle, int $offset = 0, ?string $encoding = null): int|false',
   ({ args }) => mbSearch(args, false, false, 'mb_strpos')
 );
-defineFunction(
+defineUtf8Function(
   'mb_strrpos(string $haystack, string $needle, int $offset = 0, ?string $encoding = null): int|false',
   ({ args }) => mbSearch(args, true, false, 'mb_strrpos')
 );
-defineFunction(
+defineUtf8Function(
   'mb_stripos(string $haystack, string $needle, int $offset = 0, ?string $encoding = null): int|false',
   ({ args }) => mbSearch(args, false, true, 'mb_stripos')
 );
-defineFunction('mb_substr_count(string $haystack, string $needle, ?string $encoding = null): int', ({ args }) => {
+defineUtf8Function('mb_substr_count(string $haystack, string $needle, ?string $encoding = null): int', ({ args }) => {
   if (s(args[1]) === '') throwError('ValueError', 'mb_substr_count(): Argument #2 ($needle) must not be empty');
   checkEncoding('mb_substr_count', args, 3);
   return BigInt(s(args[0]).split(s(args[1])).length - 1);
 });
-defineFunction(
+defineUtf8Function(
   'mb_str_pad(string $string, int $length, string $pad_string = " ", int $pad_type = STR_PAD_RIGHT, ?string $encoding = null): string',
   ({ args }) => {
     checkEncoding('mb_str_pad', args, 5);
     return padUnits('mb_str_pad', chars(args[0]), args, args[2] === undefined ? [' '] : chars(args[2]));
   }
 );
-defineFunction('mb_strwidth(string $string, ?string $encoding = null): int', ({ args }) => {
+defineUtf8Function('mb_strwidth(string $string, ?string $encoding = null): int', ({ args }) => {
   checkEncoding('mb_strwidth', args, 2);
   let width = 0;
   for (const char of dec(s(args[0]))) width += eastAsianWidth(char.codePointAt(0) as number) === 2 ? 2 : 1;
   return BigInt(width);
 });
-defineFunction('mb_convert_case(string $string, int $mode, ?string $encoding = null): string', ({ args }) => {
+defineUtf8Function('mb_convert_case(string $string, int $mode, ?string $encoding = null): string', ({ args }) => {
   checkEncoding('mb_convert_case', args, 3);
   const convert = CASE_MODES[n(args[1])] as ((text: string) => string) | undefined;
   if (!convert)
@@ -146,16 +146,17 @@ defineFunction('mb_convert_case(string $string, int $mode, ?string $encoding = n
 });
 defineFunction('mb_internal_encoding(?string $encoding = null): string|bool', ({ args }) => {
   checkEncoding('mb_internal_encoding', args, 1);
-  // oxlint-disable-next-line unicorn/text-encoding-identifier-case -- PHP returns the encoding's name as `UTF-8`.
-  return args[0] ? true : 'UTF-8';
+  if (typeof args[0] !== 'string') return rt().mbEncoding;
+  rt().mbEncoding = codecFor(args[0], 'mb_internal_encoding').name;
+  return true;
 });
-defineFunction('mb_ucfirst(string $string, ?string $encoding = null): string', ({ args }) => {
+defineUtf8Function('mb_ucfirst(string $string, ?string $encoding = null): string', ({ args }) => {
   checkEncoding('mb_ucfirst', args, 2);
   const list = chars(args[0]);
   if (list.length === 0) return '';
   return enc(titleFull(dec(list[0]))) + list.slice(1).join('');
 });
-defineFunction('mb_lcfirst(string $string, ?string $encoding = null): string', ({ args }) => {
+defineUtf8Function('mb_lcfirst(string $string, ?string $encoding = null): string', ({ args }) => {
   checkEncoding('mb_lcfirst', args, 2);
   const list = chars(args[0]);
   if (list.length === 0) return '';
@@ -307,13 +308,13 @@ function trimCodes(text: string, set: Set<number>, mode: number, codec: Codec): 
   return encodeCodes(codes.slice(left, right), codec);
 }
 
-defineFunction('mb_chr(int $codepoint, ?string $encoding = null): string|false', ({ args }) => {
+defineUtf8Function('mb_chr(int $codepoint, ?string $encoding = null): string|false', ({ args }) => {
   checkEncoding('mb_chr', args, 2);
   const code = n(args[0]);
   if (code < 0 || code > 0x10_ff_ff || (code >= 0xd8_00 && code <= 0xdf_ff)) return false;
   return codePointBytes(code);
 });
-defineFunction('mb_ord(string $string, ?string $encoding = null): int|false', ({ args }) => {
+defineUtf8Function('mb_ord(string $string, ?string $encoding = null): int|false', ({ args }) => {
   const text = dec(s(args[0]));
   if (text === '') throwError('ValueError', 'mb_ord(): Argument #1 ($string) must not be empty');
   checkEncoding('mb_ord', args, 2);
@@ -670,7 +671,7 @@ function codecFor(name: string, functionName: string): Codec {
 function encodingArgument(args: Value[], position: number, functionName: string): Codec {
   checkEncoding(functionName, args, position);
   const name = args[position - 1];
-  return typeof name === 'string' ? codecFor(name, functionName) : UTF8;
+  return codecFor(typeof name === 'string' ? name : rt().mbEncoding, functionName);
 }
 
 defineFunction('mb_scrub(string $string, ?string $encoding = null): string', ({ args }) => {
@@ -1092,4 +1093,33 @@ function halfToFull(code: number, next: number, mode: number): [number, boolean]
     if (next === 0xff_9f && index >= 42 && index <= 46) return [0x30_02 + table[index], true];
   }
   return [0x30_00 + table[index], false];
+}
+
+function defineUtf8Function(signature: string, impl: NativeFunction['impl']): void {
+  const name = signature.slice(0, signature.indexOf('('));
+  const parameters = signature.slice(signature.indexOf('(') + 1, signature.indexOf(')')).split(',');
+  const position = parameters.findIndex((param) => param.includes('$encoding')) + 1;
+  defineFunction(signature, (context) => {
+    if (
+      (name === 'mb_str_split' && Number(context.args[1] ?? 1n) < 1) ||
+      (name === 'mb_substr_count' && context.args[1] === '') ||
+      (name === 'mb_ord' && context.args[0] === '')
+    )
+      return impl(context);
+    const codec = encodingArgument(context.args, position, name);
+    if (codec === UTF8) return impl(context);
+    const args = context.args.map((value, index) =>
+      typeof value === 'string' && index !== position - 1 ? encodeCodes(codec.decode(value), UTF8) : value
+    );
+    args[position - 1] = 'UTF-8';
+    const result = impl({ ...context, args });
+    const convert = (value: Value): Value => {
+      if (typeof value === 'string') return encodeCodes(UTF8.decode(value), codec);
+      if (value instanceof PhpArray) {
+        for (const [key, item] of value.entries()) value.set(key, convert(item));
+      }
+      return value;
+    };
+    return convert(result);
+  });
 }

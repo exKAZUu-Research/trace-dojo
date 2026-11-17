@@ -103,6 +103,7 @@ export class Frame {
 
 /** The order in which a program declared its global variables, which PHP's shutdown follows. */
 export class Runtime {
+  mbEncoding = 'utf8';
   readonly budget = new ExecutionBudget();
   readonly io: ProgramIO;
   readonly world = new TurtleWorld();

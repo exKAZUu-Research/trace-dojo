@@ -109,7 +109,9 @@ export function generalText(value: number, precision: number, upper: boolean): s
   const count = precision === 0 ? 1 : precision;
   if (value === 0) return '0';
   const { digits: raw, exponent } = significantDigits(value, count);
-  const digits = raw.replace(/0+$/, '') || '0';
+  const original = exactDecimal(value).digits.replace(/^0+/, '');
+  const tie = /^50*$/.test(original.slice(count));
+  const digits = tie ? raw : raw.replace(/0+$/, '') || '0';
   const decpt = exponent + 1;
   if (decpt < -3 || decpt > count) {
     const mantissa = digits.length > 1 ? `${digits[0]}.${digits.slice(1)}` : `${digits}.0`;

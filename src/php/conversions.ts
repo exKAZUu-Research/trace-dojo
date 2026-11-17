@@ -1,4 +1,5 @@
 import { warn } from './errors';
+import { exactDecimal, significantDigits } from './strings';
 import { INT_MAX, INT_MIN, type Key, PhpArray, type PhpObject, type Value } from './values';
 
 /** Formats a float as PHP's `echo` does, with 14 significant digits (`precision=14`). */
@@ -23,10 +24,10 @@ export function formatFloatRepr(value: number, exponentChar = 'E', zeroFraction 
 
 /** The significant digits of `|value|` rounded to `precision`, without trailing zeros, and the decimal exponent. */
 function decimalDigits(value: number, precision: number): [string, number] {
-  const text = Math.abs(value).toExponential(precision - 1);
-  const [mantissa, exponentText] = text.split('e');
-  const digits = mantissa.replace('.', '').replace(/0+$/, '') || '0';
-  return [digits, Number(exponentText)];
+  const { digits, exponent } = significantDigits(value, precision);
+  const original = exactDecimal(value).digits.replace(/^0+/, '');
+  const tie = /^50*$/.test(original.slice(precision));
+  return [tie ? digits : digits.replace(/0+$/, '') || '0', exponent];
 }
 
 function shortestDigits(value: number): [string, number] {

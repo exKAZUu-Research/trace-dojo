@@ -80,6 +80,8 @@ function rebuild(entries: [Key, Value | Ref][], renumber: boolean): PhpArray {
 
 defineFunction('count(Countable|array $value, int $mode = COUNT_NORMAL): int', ({ args }) => {
   const [value, mode = 0n] = args;
+  if (mode !== 0n && mode !== 1n)
+    throwError('ValueError', 'count(): Argument #2 ($mode) must be either COUNT_NORMAL or COUNT_RECURSIVE');
   if (value instanceof PhpArray) return BigInt(mode === 1n ? countRecursive(value) : value.size);
   if (value instanceof PhpObject) {
     const countable = rt().classes.get('countable');
@@ -686,7 +688,7 @@ function walkValues(ref: Ref, ctx: NativeContext, recursive: boolean, active: Se
         if (slot === undefined || slot === UNINIT) continue;
         elementRef = slot instanceof Ref ? slot : new Ref(slot);
         const decl = declForKey(container.cls, name);
-        if (decl?.type) elementRef.typedBy = { decl, object: container };
+        if (decl?.type) elementRef.typedBy = [...(elementRef.typedBy ?? []), { decl, object: container }];
         container.props.set(name, elementRef);
       }
       if (recursive && elementRef.v instanceof PhpArray) {

@@ -111,7 +111,7 @@ export function callExpression(e: Extract<Expr, { k: 'call' }>): Value {
     if (e.fcc) return closureFromCallable({ fn });
     const args = evalArgs(e.args, fn, fn.name);
     runtime.row = e.row;
-    const result = invoke({ fn }, args, e.row);
+    const result = invoke({ fn, inline: inlineCall(fn, e.args) }, args, e.row);
     runtime.frame.temporaries.push(result);
     return result;
   }
@@ -519,3 +519,22 @@ function newClosure(fn: UserFunction, bound: Map<string, Ref>, isStatic: boolean
 }
 
 // Function bodies ----------------------------------------------------------------------------------------------------
+
+function inlineCall(fn: Callable, args: Arg[]): boolean {
+  if (fn.kind !== 'native' || args.some((arg) => arg.spread || arg.name !== undefined)) return false;
+  const name = lower(fn.name);
+  if (['strval', 'floatval', 'doubleval', 'boolval'].includes(name)) return args.length === 1;
+  if (name === 'intval') return args.length === 1;
+  if (name === 'sprintf') {
+    const format = args[0]?.e;
+    if (format?.k !== 'lit' || typeof format.v !== 'string') return false;
+    const conversions = format.v.match(/%[sd]/g) ?? [];
+    return !format.v.replaceAll(/%[sd]/g, '').includes('%') && args.length === conversions.length + 1;
+  }
+  if (!fn.inlined) return false;
+  if (name === 'array_key_exists') return args.length === 2;
+  if (name === 'get_class') return args.length <= 1;
+  if (name === 'call_user_func') return args.length > 0;
+  if (name === 'call_user_func_array') return args.length === 2;
+  return args.length === 1;
+}

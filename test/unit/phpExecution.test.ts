@@ -153,3 +153,30 @@ test('object replacement remains within the execution budget beside a large scal
   );
   expect(execution).toMatchObject({ kind: 'executed', stdout: '49995000' });
 });
+
+test.each([
+  '<?php $s=str_repeat("a",10000); similar_text($s,$s);',
+  '<?php $it=new LimitIterator(new InfiniteIterator(new ArrayIterator([1])),1000000000); $it->rewind();',
+])('native loops stop at the operation limit: %s', (source) => {
+  expect(run(source)).toEqual({ kind: 'limitExceeded', limit: 'operations' });
+});
+
+test.each([
+  '<?php new SplFixedArray(1000001);',
+  '<?php $a=new SplFixedArray(); $a->setSize(1000001);',
+  '<?php SplFixedArray::fromArray([1000001 => 1]);',
+  '<?php $a=[]; $b=&$a; for($i=0;$i<20000;$i++){ $b[0]=[]; $b=&$b[0]; } unset($b); echo count($a,1);',
+])('native allocation or host recursion failure remains a PHP result: %s', (source) => {
+  const execution = run(source);
+  expect(execution.kind === 'executed' && execution.stdout).toMatch(/^\nFatal error: Allowed memory size/);
+});
+
+test.each(['<?php file_put_contents("a.txt","x",FILE_APPEND|LOCK_EX);', '<?php mb_strlen("abc","sjis");'])(
+  'unsupported arguments produce the unsupported-feature message: %s',
+  (source) => {
+    expect(run(source)).toMatchObject({
+      kind: 'executed',
+      uncaughtException: expect.stringContaining('この採点環境では使えません。'),
+    });
+  }
+);

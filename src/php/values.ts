@@ -16,7 +16,7 @@ export class Ref {
   rc = 1;
   isRef = false;
   /** The typed property this reference was taken from, whose type every write through the reference must keep. */
-  typedBy?: { decl: PropDecl; object: PhpObject };
+  typedBy?: { decl: PropDecl; object: PhpObject }[];
 
   constructor(public v: Value = null) {}
 
@@ -276,7 +276,7 @@ export interface NativeFunction {
   /** Whether the function reads its caller's variables (compact, extract, func_get_args). */
   needsCaller?: boolean;
   /**
-   * Whether PHP compiles a direct call of the function into an instruction of its own (strlen, count, call_user_func),
+   * Whether PHP compiles eligible direct calls into an instruction of their own (strlen, count, call_user_func),
    * so that stack traces show no frame for it and what it calls shows the caller's line.
    */
   inlined?: boolean;

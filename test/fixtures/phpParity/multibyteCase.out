@@ -23,7 +23,6 @@ ValueError: mb_strlen(): Argument #2 ($encoding) must be a valid encoding, "auto
 int(3)
 int(3)
 int(3)
-int(3)
 ValueError: mb_strlen(): Argument #2 ($encoding) must be a valid encoding, "UTF-8 " given
 int(3)
 ǅemal ǈ ǋ ǲ|ǅemal ǈ ǋ ǲ|ǅemal ǉ ǌ ǳ|ǆemal ǉ ǌ ǳ

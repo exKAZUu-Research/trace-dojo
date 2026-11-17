@@ -509,9 +509,11 @@ function arrayLiteral(e: Extract<Expr, { k: 'array' }>): PhpArray {
 
 function spreadInto(array: PhpArray, value: Value): void {
   if (value instanceof PhpArray) {
-    for (const [key, item] of value.entries()) {
-      if (typeof key === 'string') array.set(key, share(item));
-      else if (!array.append(share(item)))
+    for (const [key, slot] of value.map) {
+      const item = slot instanceof Ref && slot.isRef ? slot : share(slot instanceof Ref ? slot.v : slot);
+      if (item instanceof Ref) item.rc++;
+      if (typeof key === 'string') array.setSlot(key, item);
+      else if (!array.append(item))
         throwError('Error', 'Cannot add element to the array as the next element is already occupied');
     }
     return;
@@ -576,6 +578,9 @@ function readConstant(name: string, fallback: string | undefined): Value {
   const global = fallback ?? name;
   if (ENVIRONMENT_CONSTANTS.has(global) && !runtime.constants.has(constantKey(name))) {
     throw new UnsupportedFeatureError(`実行環境の情報（${global}）`);
+  }
+  if (/^(?:FILE_|LOCK_|DATE_|PASSWORD_|STREAM_|CURLOPT_|CURL_|FILTER_)/.test(global)) {
+    throw new UnsupportedFeatureError(`実行環境の機能（${global}）`);
   }
   const value = runtime.constants.get(constantKey(name));
   if (value !== undefined) return deprecatedConstant(name, value);
@@ -735,7 +740,7 @@ export function cloneObject(original: PhpObject, withValue?: Value): PhpObject {
       } else copy.props.set(key, share(slot.v));
     } else copy.props.set(key, typeof slot === 'symbol' ? slot : share(slot));
   }
-  copy.internal = cloneInternal(original);
+  copy.internal = cloneInternal(original, copy);
   copy.cloning = true;
   try {
     if (cloneMethod) {
@@ -764,9 +769,9 @@ export function cloneObject(original: PhpObject, withValue?: Value): PhpObject {
   return copy;
 }
 
-function cloneInternal(original: PhpObject): unknown {
-  const internal = original.internal as { clone?: () => unknown } | undefined;
-  if (internal && typeof internal.clone === 'function') return internal.clone();
+function cloneInternal(original: PhpObject, copy: PhpObject): unknown {
+  const internal = original.internal as { clone?: (copy: PhpObject) => unknown } | undefined;
+  if (internal && typeof internal.clone === 'function') return internal.clone(copy);
   if (isClosure(original)) return { ...(original.internal as ClosureData) };
   return internal;
 }
@@ -866,7 +871,12 @@ export function cast(type: string, value: Value): Value {
       if (value instanceof PhpObject) return value;
       const object = createObject(rt().classes.get('stdclass') as PhpClass);
       if (value instanceof PhpArray) {
-        for (const [key, item] of value.entries()) object.props.set(String(key), share(item));
+        for (const [key, slot] of value.map) {
+          if (slot instanceof Ref && slot.isRef) {
+            slot.rc++;
+            object.props.set(String(key), slot);
+          } else object.props.set(String(key), share(slot instanceof Ref ? slot.v : slot));
+        }
       } else if (value !== null) object.props.set('scalar', value);
       return object;
     }

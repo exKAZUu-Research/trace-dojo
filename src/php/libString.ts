@@ -5,7 +5,7 @@
 import { createHash, createHmac } from 'node:crypto';
 
 import { byteAt, charAt, enc, lower, untilNul, upper } from './bytes';
-import { compareBytes, valueName } from './conversions';
+import { valueName } from './conversions';
 import { deprecated, throwError, warn } from './errors';
 import { decodeHtml, escapeHtml, nextChar, translationTable } from './htmlEntities';
 import { isStream } from './libCore';
@@ -135,7 +135,7 @@ defineFunction('str_split(string $string, int $length = 1): array', ({ args }) =
   const text = s(args[0]);
   const length = args[1] === undefined ? 1 : n(args[1]);
   if (length < 1) throwError('ValueError', 'str_split(): Argument #2 ($length) must be greater than 0');
-  if (text === '') return PhpArray.list(['']);
+  if (text === '') return new PhpArray();
   const parts: string[] = [];
   for (let index = 0; index < text.length; index += length) parts.push(text.slice(index, index + length));
   return PhpArray.list(parts);
@@ -377,20 +377,20 @@ defineFunction(
 );
 defineFunction('strrev(string $string): string', ({ args }) => [...s(args[0])].toReversed().join(''));
 defineFunction('strcmp(string $string1, string $string2): int', ({ args }) =>
-  BigInt(compareBytes(s(args[0]), s(args[1])))
+  BigInt(compareLimited(s(args[0]), s(args[1]), Math.max(s(args[0]).length, s(args[1]).length), false))
 );
 defineFunction('strcasecmp(string $string1, string $string2): int', ({ args }) =>
-  BigInt(compareBytes(lower(s(args[0])), lower(s(args[1]))))
+  BigInt(compareLimited(s(args[0]), s(args[1]), Math.max(s(args[0]).length, s(args[1]).length), true))
 );
 defineFunction('strncmp(string $string1, string $string2, int $length): int', ({ args }) => {
   const length = n(args[2]);
   if (length < 0) throwError('ValueError', 'strncmp(): Argument #3 ($length) must be greater than or equal to 0');
-  return BigInt(compareBytes(s(args[0]).slice(0, length), s(args[1]).slice(0, length)));
+  return BigInt(compareLimited(s(args[0]), s(args[1]), length, false));
 });
 defineFunction('strncasecmp(string $string1, string $string2, int $length): int', ({ args }) => {
   const length = n(args[2]);
   if (length < 0) throwError('ValueError', 'strncasecmp(): Argument #3 ($length) must be greater than or equal to 0');
-  return BigInt(compareBytes(lower(s(args[0]).slice(0, length)), lower(s(args[1]).slice(0, length))));
+  return BigInt(compareLimited(s(args[0]), s(args[1]), length, true));
 });
 defineFunction('strnatcmp(string $string1, string $string2): int', ({ args }) =>
   BigInt(naturalCompare(s(args[0]), s(args[1]), false))
@@ -877,8 +877,12 @@ function similarChars(a: string, b: string): number {
   let posB = 0;
   for (let i = 0; i < a.length; i++) {
     for (let j = 0; j < b.length; j++) {
+      rt().spend();
       let k = 0;
-      while (i + k < a.length && j + k < b.length && a[i + k] === b[j + k]) k++;
+      while (i + k < a.length && j + k < b.length && a[i + k] === b[j + k]) {
+        rt().spend();
+        k++;
+      }
       if (k > max) {
         max = k;
         posA = i;

@@ -298,6 +298,12 @@ export function bindRef(target: Expr, ref: Ref): void {
     if (!(object instanceof PhpObject)) throwError('Error', 'Cannot assign by reference to a property of a non-object');
     const name = memberName(target.name);
     const decl = classesModule.lookupProp(object.cls, name, rt().frame.scope);
+    propRef(object, name, rt().frame.scope);
+    if (decl?.type) {
+      ref.assign(classesModule.coerceProperty(decl, ref.v, object));
+      ref.typedBy ??= [];
+      ref.typedBy.push({ decl, object });
+    }
     ref.isRef = true;
     ref.rc++;
     object.props.set(decl && !decl.isStatic ? decl.key : name, ref);

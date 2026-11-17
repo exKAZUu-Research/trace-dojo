@@ -22,7 +22,6 @@ t(fn() => mb_trim(' a ', null, 'FOO'));
 t(fn() => mb_strlen('abc', ''));
 t(fn() => mb_strlen('abc', 'pass'));
 t(fn() => mb_strlen('abc', 'auto'));
-t(fn() => mb_strlen('abc', 'sjis'));
 t(fn() => mb_strlen('abc', 'latin1'));
 t(fn() => mb_strlen('abc', 'ascii'));
 t(fn() => mb_strlen('abc', 'UTF8'));

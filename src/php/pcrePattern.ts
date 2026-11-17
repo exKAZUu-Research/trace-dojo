@@ -164,8 +164,7 @@ interface Layout {
   names: (string | undefined)[];
   /**
    * The groups that back references read and no quantifier repeats, which get markers telling whether they took part:
-   * PCRE fails a reference to a group that did not, where JavaScript matches the empty string. JavaScript also forgets
-   * captures at each repetition where PCRE keeps them, so repeated groups keep JavaScript's way.
+   * PCRE fails a reference to a group that did not, where JavaScript matches the empty string.
    */
   marked: Set<number>;
 }
