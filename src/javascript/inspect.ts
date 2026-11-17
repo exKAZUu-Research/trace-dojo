@@ -5,6 +5,7 @@ import { ExecutionLimitError, LIMITS } from '../interpreter/limits';
 import type { PromiseState } from './promises';
 import { type CollectionEntry, CollectionIterator } from './realmCollections';
 import { dateValueOf, inspectDate } from './realmDate';
+import { objectToString } from './realmGlobals';
 import { WELL_KNOWN_SYMBOLS } from './realmIterators';
 import type { Runtime } from './runtime';
 import {
@@ -408,11 +409,13 @@ export function errorHeadline(runtime: Runtime, error: JsObject): string {
  */
 function errorText(runtime: Runtime, error: JsObject, constructor: string | undefined): string {
   const text = headlineOf(runtime, error);
+  // Without a stack, Node.js tries `Error.prototype.toString`, bracketed, and then `Object.prototype.toString`.
+  const fallback = text === undefined ? tryOrUndefined(() => v8Headline(runtime, error)) : undefined;
+  if (text === undefined && fallback === undefined) return objectToString(runtime, error);
   const improvedName = readIgnoringThrows(runtime, error, 'name');
   // Node.js also reads the message on each print, which a getter observes.
   readIgnoringThrows(runtime, error, 'message');
-  // Node.js prints an error whose first line V8 could not format as `Object.prototype.toString` names it.
-  if (text === undefined) return '[object Error]';
+  if (text === undefined) return `[${fallback}]`;
   if (improvedName === undefined || improvedName === null) return improveErrorName(text, 'Error', constructor);
   if (typeof improvedName === 'string') return improveErrorName(text, improvedName, constructor);
   // Node.js marks a name that is not a string with the error's class, as `42 [Error]: bad`.
@@ -447,8 +450,13 @@ function headlineOf(runtime: Runtime, error: JsObject): string | undefined {
 }
 
 function readIgnoringThrows(runtime: Runtime, object: JsObject, key: Key): Value {
+  return tryOrUndefined(() => runtime.get(object, key));
+}
+
+/** What `run` returns, or undefined when the program's code it runs throws. */
+function tryOrUndefined<T>(run: () => T): T | undefined {
   try {
-    return runtime.get(object, key);
+    return run();
   } catch (error) {
     if (!(error instanceof JsThrow)) throw error;
     return undefined;

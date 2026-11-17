@@ -2221,6 +2221,29 @@ Error: fine
     });
   });
 
+  test('an error that cannot be formatted falls back to Error.prototype.toString, then to its object tag', () => {
+    // Node.js prints each error's stack trace after its first line, which the interpreter leaves out.
+    const source = `let m = 0; const g = new Error("bad"); Object.defineProperty(g, "name", { get() { m++; if (m === 1) throw 1; return "Custom"; } });
+console.log(g); console.log(m);
+const t = new TypeError("x"); Object.defineProperty(t, Symbol.toStringTag, { value: "Oops" }); Object.defineProperty(t, "name", { get() { throw 1; } });
+console.log(t);
+let n = 0; const f = new Error("bad"); Object.defineProperty(f, "name", { get() { n++; throw new Error("nm"); } });
+console.log(f); console.log(n); console.log([f]); console.log(n);
+const e = new Error("bad"); Object.defineProperty(e, "message", { get() { throw "oops"; } }); console.log(e);`;
+    expect(executeProgram('javascript', source)).toMatchObject({
+      kind: 'executed',
+      stdout: `[Custom: bad]
+3
+[object Oops]
+[object Error]
+2
+[ [object Error] ]
+4
+[object Error]
+`,
+    });
+  });
+
   test('a timer pending through a busy wait fires after its delay, not the wait plus its delay', () => {
     // Node.js prints about 101 here, but late under load, so the check is on the interpreter's clock alone.
     const source = `let sum = 0; const v = Date.now(); setTimeout(() => console.log(Date.now() - v), 100);
