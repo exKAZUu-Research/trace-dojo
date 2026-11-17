@@ -8431,6 +8431,12 @@ test('count reads the value of a one-element needle once', () => {
   });
 });
 
+test('recursive frames reserve slots for locals in untaken branches', () => {
+  const locals = Array.from({ length: 20_000 }, (_, index) => `const a${index}:u8=0;_=a${index};`).join('');
+  const source = `fn f(n:u16)void{if(n==65535){${locals}}if(n>0)f(n-1);}pub fn main()void{f(200);}`;
+  expect(executeProgram('zig', source)).toMatchObject({ kind: 'limitExceeded', limit: 'storage' });
+});
+
 test.each([
   ['std.mem.count(u8,&a,"aa")', '100000'],
   ['std.mem.containsAtLeast(u8,&a,100000,"aa")', 'true'],

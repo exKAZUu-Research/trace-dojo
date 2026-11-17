@@ -53,7 +53,9 @@ export class Frame implements Slots, TracedFrame {
     slotCount: number,
     readonly nativeCallRow?: number
   ) {
-    this.slots = Array.from<Value>({ length: slotCount }).fill(UNASSIGNED);
+    runtime.reserveStorage(slotCount);
+    runtime.spend(Math.ceil(slotCount / 16));
+    this.slots = Array.from({ length: slotCount }, () => UNASSIGNED);
   }
 }
 
