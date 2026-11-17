@@ -3,15 +3,23 @@ import { RArray, RBasic, RClass, RHash, RObject, RProc, RRange, type Value } fro
 import type { Frame, Runtime, Scope } from './runtime';
 
 /** Removes the turtles that nothing the program can still reach refers to, as Java's garbage collection would. */
+// code-gauge-allow functionCognitiveComplexity 24 -- The root walker keeps live and suspended value/array lifecycles explicit; elementwise insertion avoids host argument limits.
+// code-gauge-allow functionNcss 35 -- Reachability traversal shares one pending stack and preserves roots for frames, handlers and suspended cursors.
 export function collectGarbage(runtime: Runtime): void {
   if (!runtime.world.hasTurtles) return;
   const reached = new Set<TurtleState>();
   const visited = new Set<object>();
   const pending: Value[] = [];
-  for (const frame of runtime.frames) pushFrame(frame, pending);
+  for (const frame of runtime.frames) pushFrameReferences(frame, pending);
   for (const value of runtime.globals.values()) pending.push(value);
   for (const value of runtime.held) pending.push(value);
+  for (const handler of runtime.atExit) pending.push(handler);
+  for (const handler of runtime.completedExitHandlers) pending.push(handler);
   for (const values of runtime.heldArrays) for (const value of values) pending.push(value);
+  for (const snapshot of runtime.heldSnapshots) {
+    for (const value of snapshot.values) pending.push(value);
+    for (const values of snapshot.arrays) for (const value of values) pending.push(value);
+  }
   pending.push(runtime.c.Object);
   while (pending.length > 0) {
     const value = pending.pop() as Value;
@@ -23,7 +31,7 @@ export function collectGarbage(runtime: Runtime): void {
   runtime.world.retain((turtle) => reached.has(turtle));
 }
 
-function pushFrame(frame: Frame, pending: Value[]): void {
+export function pushFrameReferences(frame: Frame, pending: Value[]): void {
   pending.push(frame.self);
   for (const value of frame.temporaries) pending.push(value);
   for (const value of frame.handling) pending.push(value);
@@ -34,14 +42,14 @@ function pushFrame(frame: Frame, pending: Value[]): void {
   if (extra.args) for (const arg of extra.args) pending.push(arg);
   if (extra.keywords) pending.push(extra.keywords);
   if (extra.proc) pending.push(extra.proc);
+  if (extra.lastMatch) pending.push(extra.lastMatch);
 }
 
 /** Pushes the values an object refers to. */
 // code-gauge-allow functionCognitiveComplexity 18 -- The walker visits each runtime value kind and its reachable fields.
-// code-gauge-allow functionNcss 31 -- The walker visits each runtime value kind and its reachable fields.
 function pushReferences(value: RBasic, pending: Value[]): void {
   pending.push(value.cls);
-  if (value.ivars) for (const item of value.ivars.values()) pending.push(item);
+  for (const fields of [value.ivars, value.internal]) for (const item of fields?.values() ?? []) pending.push(item);
   if (value.singleton) pending.push(value.singleton);
   if (value instanceof RObject) {
     if (value.exception) pending.push(value.exception.message, value.exception.cause);
@@ -55,20 +63,25 @@ function pushReferences(value: RBasic, pending: Value[]): void {
     pending.push(value.begin, value.end);
   } else if (value instanceof RProc) {
     pushProcReferences(value, pending);
-  } else if (value instanceof RClass) {
-    for (const item of value.constants.values()) pending.push(item);
-    for (const item of value.classVariables.values()) pending.push(item);
-    for (const item of value.includes) pending.push(item);
-    for (const item of value.prepends) pending.push(item);
-    if (value.superclass) pending.push(value.superclass);
-  }
+  } else if (value instanceof RClass) pushClassReferences(value, pending);
+}
+
+function pushClassReferences(value: RClass, pending: Value[]): void {
+  for (const item of value.constants.values()) pending.push(item);
+  for (const item of value.classVariables.values()) pending.push(item);
+  for (const method of value.methods.values()) if (method.body.kind === 'proc') pending.push(method.body.proc);
+  if (value.sharedSingletonOrigin) pending.push(value.sharedSingletonOrigin);
+  if (value.attached !== undefined) pending.push(value.attached);
+  for (const item of value.includes) pending.push(item);
+  for (const item of value.prepends) pending.push(item);
+  if (value.superclass) pending.push(value.superclass);
 }
 
 function pushProcReferences(value: RProc, pending: Value[]): void {
   pending.push(value.self);
   if (value.captured) for (const item of value.captured) pending.push(item);
   const outer = value.outer as unknown as Frame | undefined;
-  if (outer) pushFrame(outer, pending);
+  if (outer) pushFrameReferences(outer, pending);
 }
 
 /** Visits the values that a library object's native state holds, such as an enumerator's receiver. */

@@ -1,6 +1,9 @@
 import { ExecutionLimitError, LIMITS } from '../interpreter/limits';
+import { endlessSequence, rationalSequenceLast, rationalSequenceSize } from './arithmeticSequence';
 import {
   addressOf,
+  caseEquals,
+  className,
   comparisonFailed,
   inspect,
   numericCompare,
@@ -8,13 +11,41 @@ import {
   toIndex,
   toIndexExact,
   toInt,
+  toS,
   toStepFloat,
+  tryImplicitConversion,
 } from './conversions';
-import { def, sdef } from './define';
-import { argumentCountError, argumentError, floatDomainError, rangeError } from './errors';
+import { coreMethod, def, iundef, sdef } from './define';
+import { customReceiverSize, cycleSize, windowSize } from './enumeratorSize';
+import {
+  argumentCountError,
+  argumentError,
+  floatDomainError,
+  frozenError,
+  rangeError,
+  rubyError,
+  typeError,
+} from './errors';
 import { floatStepCount } from './floatMath';
-import { callMethod, callProc, type Gen, isGenerator, nativeProc, runToEnd } from './interp';
-import { rangeSize } from './libRange';
+import { pushFrameReferences } from './garbageCollection';
+import { hashGet, hashSet } from './hashes';
+import {
+  callMethod,
+  callProc,
+  flattenGenerator,
+  type Gen,
+  invoke,
+  isGenerator,
+  nativeProc,
+  requireBlock,
+  respondsTo,
+  runToEnd,
+} from './interp';
+import { lazyDisplaySource, lazySourceDescription, setLazyDisplaySource } from './lazyDisplay';
+import { iterateYielded, type IterationResult, STOP, zipCollections } from './libEnumerable';
+import { advertisesPublicMethod, respondsToName } from './libMeta';
+import { isNumericRangeOperand, rangeSize } from './libRange';
+import { fractionOf, isRational } from './libRational';
 import { setSize } from './libSet';
 import {
   isRubyFloat,
@@ -29,14 +60,18 @@ import {
   RSymbol,
   type Value,
 } from './objects';
-import { rt, UnsupportedFeatureError } from './runtime';
-import { arr, str, stringBytes, stringCharacterCount } from './values';
+import { type Frame, type MissingReason, rt, RubyError, UnsupportedFeatureError } from './runtime';
+import { unavailableMethod } from './unavailableMethod';
+import { arr, isA, newHash, realClassOf, str, stringBytes, stringCharacterCount, sym, truthy } from './values';
 
 /** What an enumerator iterates: a method of a receiver, called with the block it is given. */
 export interface EnumeratorSource {
+  /** The state of `next`: the suspended iteration and the calls it was inside when it suspended. */
+  cursor?: Cursor;
   recv: Value;
   method: string;
   args: Value[];
+  iterationArgs?: Value[];
   keywords?: RHash;
   size?: () => Value | Gen<Value>;
   arithmetic?: boolean;
@@ -44,8 +79,10 @@ export interface EnumeratorSource {
   generatorAddress?: string;
   iterate?: (block: RProc) => Gen;
   held: () => Value[];
+  copy?: () => EnumeratorSource;
 }
 
+// code-gauge-allow functionCognitiveComplexity 17 -- The ordered cases for enumerator lifecycle and lazy iteration share state; splitting them solely for the metric would hide their sequencing.
 export function makeEnumerator(
   recv: Value,
   method: string,
@@ -57,9 +94,9 @@ export function makeEnumerator(
   const spec = method === 'step' || method === '%' ? arithmeticSpec(recv, args, keywords) : undefined;
   const arithmetic =
     spec !== undefined &&
-    (spec.end === NIL || isRubyNumber(spec.end)) &&
-    isRubyNumber(spec.step) &&
-    (isRubyNumber(recv) || (recv instanceof RRange && isRubyNumber(recv.begin)));
+    (spec.end === NIL || isNumericRangeOperand(spec.end)) &&
+    isNumericRangeOperand(spec.step) &&
+    (isNumericRangeOperand(recv) || (recv instanceof RRange && isNumericRangeOperand(recv.begin)));
   const enumerator = new RObject(arithmetic ? rt().c['Enumerator::ArithmeticSequence'] : rt().c.Enumerator);
   const source: EnumeratorSource = {
     recv,
@@ -80,15 +117,28 @@ export function makeEnumerator(
         ...this.args,
         ...(this.keywords ? [this.keywords] : []),
         ...(this.sizeBlock ? [this.sizeBlock] : []),
+        ...cursorRoots(this.cursor),
       ];
+    },
+    copy() {
+      if (hasExecutionContext(this.cursor)) throw typeError("can't copy execution context");
+      return {
+        ...this,
+        args: [...this.args],
+        iterationArgs: this.iterationArgs && [...this.iterationArgs],
+        cursor: undefined,
+      };
     },
   };
   enumerator.data = source;
   return enumerator;
 }
 
+// code-gauge-allow functionNcss 36 -- The ordered cases for enumerator lifecycle and lazy iteration share state; splitting them solely for the metric would hide their sequencing.
 function* enumeratorSize(recv: Value, method: string, args: Value[], keywords?: RHash): Gen<Value> {
   if (method === 'step' || method === '%') return yield* stepSize(recv, args, keywords);
+  if (NIL_SIZE_METHODS.has(method)) return NIL;
+  if (method === 'loop') return Number.POSITIVE_INFINITY;
   if (recv instanceof RString && method === 'each_byte') return BigInt(stringBytes(recv).length);
   if (recv instanceof RArray && ARRAY_SELECTION_METHODS.has(method))
     return arraySelectionSize(recv.items.length, method, args[0] === undefined ? undefined : yield* toInt(args[0]));
@@ -106,42 +156,32 @@ function* enumeratorSize(recv: Value, method: string, args: Value[], keywords?: 
       return distance < 0n ? 0n : distance + 1n;
     }
   }
-  const base = receiverSize(recv);
-  if (method === 'each_slice' && args[0] !== undefined && typeof base === 'bigint') {
-    const count = (yield* toIndexExact(args[0])).integer;
-    if (count <= 0n) throw argumentError('invalid slice size');
-    return (base + count - 1n) / count;
+  if (method === 'cycle')
+    return recv instanceof RArray && recv.items.length === 0 ? 0n : yield* cycleSize(() => receiverSize(recv), args[0]);
+  const base = yield* receiverSize(recv);
+  if ((method === 'each_slice' || method === 'each_cons') && args[0] !== undefined && base !== NIL) {
+    return yield* windowSize(base, method, args[0]);
   }
-  if (method === 'each_cons' && args[0] !== undefined && typeof base === 'bigint') {
-    const count = (yield* toIndexExact(args[0])).integer;
-    if (count <= 0n) throw argumentError('invalid size');
-    return base >= count ? base - count + 1n : 0n;
-  }
-  if (method === 'cycle' && typeof base === 'bigint') {
-    if (base === 0n) return 0n;
-    const count = args[0] === undefined || args[0] === NIL ? undefined : (yield* toIndexExact(args[0])).integer;
-    if (count !== undefined && count <= 0n) return 0n;
-    return count === undefined ? Number.POSITIVE_INFINITY : base * count;
-  }
-  if (method === 'loop') return Number.POSITIVE_INFINITY;
-  if (NIL_SIZE_METHODS.has(method)) return NIL;
   if (FIXED_SIZE_METHODS.has(method)) return base;
   return NIL;
 }
 
-export function receiverSize(recv: Value): Value {
+export function* receiverSize(recv: Value): Gen<Value> {
   if (recv instanceof RArray) return BigInt(recv.items.length);
   if (recv instanceof RHash) return BigInt(recv.map.size);
   if (recv instanceof RString) return BigInt(stringCharacterCount(recv));
-  if (recv instanceof RRange) return rangeSize(recv);
+  if (recv instanceof RRange) return yield* rangeSize(recv);
   if (recv instanceof RObject && recv.cls.isSubclassOf(rt().c.Set)) return setSize(recv);
   if (recv instanceof RObject && recv.cls.isSubclassOf(rt().c.Enumerator)) {
     const size = sourceOf(recv).size?.() ?? NIL;
-    return isGenerator(size) ? runToEnd(size) : size;
+    return isGenerator(size) ? yield* size : size;
   }
+  if (recv instanceof RObject) return yield* customReceiverSize(recv);
   return NIL;
 }
 
+// code-gauge-allow functionCognitiveComplexity 26 -- The ordered cases for Enumerator lifecycle and lazy iteration share state; splitting them solely for the metric would hide their sequencing.
+// code-gauge-allow functionNcss 42 -- The ordered cases for Enumerator lifecycle and lazy iteration share state; splitting them solely for the metric would hide their sequencing.
 function arraySelectionSize(length: number, method: string, requested: bigint | undefined): Value {
   if (length === 0 && requested !== undefined && requested > 0n) return 0n;
   if (requested !== undefined && requested >= 0n && length === 1 && method.startsWith('repeated_')) return 1n;
@@ -186,6 +226,7 @@ function arraySelectionSize(length: number, method: string, requested: bigint | 
   return result;
 }
 
+// code-gauge-allow functionCognitiveComplexity 22 -- The ordered cases for Enumerator lifecycle and lazy iteration share state; splitting them solely for the metric would hide their sequencing.
 function* stepSize(recv: Value, args: Value[], keywords?: RHash): Gen<Value> {
   const { start, end: originalEnd, step, exclusive } = arithmeticSpec(recv, args, keywords);
   const end =
@@ -195,14 +236,18 @@ function* stepSize(recv: Value, args: Value[], keywords?: RHash): Gen<Value> {
     (isRubyFloat(start) || isRubyFloat(step))
       ? yield* toStepFloat(originalEnd)
       : originalEnd;
-  if (!isRubyNumber(start) || (!isRubyNumber(end) && end !== NIL) || !isRubyNumber(step)) return NIL;
+  if (!isNumericRangeOperand(start) || (!isNumericRangeOperand(end) && end !== NIL) || !isNumericRangeOperand(step))
+    return NIL;
   if (end === NIL) return Number.POSITIVE_INFINITY;
   if (typeof start === 'bigint' && typeof end === 'bigint' && typeof step === 'bigint') {
     const distance = step > 0n ? end - start : start - end;
     const adjusted = distance - (exclusive ? 1n : 0n);
     return adjusted < 0n ? 0n : adjusted / (step > 0n ? step : -step) + 1n;
   }
-  const count = floatStepCount(Number(start), Number(end), Number(step), exclusive);
+  if ([start, end, step].some(isRational) && ![start, end, step].some(isRubyFloat)) {
+    return yield* rationalSequenceSize(start, end, step, exclusive);
+  }
+  const count = floatStepCount(yield* toStepFloat(start), yield* toStepFloat(end), yield* toStepFloat(step), exclusive);
   if (Number.isNaN(count)) throw floatDomainError('NaN');
   return Number.isFinite(count) ? BigInt(count) : Number.POSITIVE_INFINITY;
 }
@@ -273,7 +318,7 @@ const FIXED_SIZE_METHODS = new Set([
 const NIL_SIZE_METHODS = new Set(['find', 'find_index', 'take_while', 'drop_while', 'bsearch', 'each_line']);
 const ARRAY_SELECTION_METHODS = new Set(['combination', 'permutation', 'repeated_combination', 'repeated_permutation']);
 
-export function sizedEnumerator(recv: Value, method: string, args: Value[], size: () => Value): RObject {
+export function sizedEnumerator(recv: Value, method: string, args: Value[], size: () => Value | Gen<Value>): RObject {
   const enumerator = makeEnumerator(recv, method, args);
   (enumerator.data as EnumeratorSource).size = size;
   return enumerator;
@@ -283,19 +328,39 @@ export function customEnumerator(recv: Value, method: string, held: Value[], ite
   const enumerator = makeEnumerator(recv, method, []);
   const source = enumerator.data as EnumeratorSource;
   source.iterate = iterate;
-  source.held = () => [recv, ...held];
+  source.held = function () {
+    return [this.recv, ...held, ...cursorRoots(this.cursor)];
+  };
   source.generatorAddress = addressOf(enumerator);
   return enumerator;
 }
 
 function sourceOf(self: RObject): EnumeratorSource {
-  return self.data as EnumeratorSource;
+  if (self.cls === rt().c['Enumerator::Lazy']) {
+    const data = lazyDataOf(self);
+    data.enumerator ??= {
+      recv: self,
+      method: 'each',
+      args: [],
+      size: () => lazySize(self),
+      iterate: (block) => callMethod(self, 'each', [], undefined, block),
+      held: () => [self, ...data.held()],
+    };
+    return data.enumerator;
+  }
+  const source = self.data as EnumeratorSource | undefined;
+  if (!source) throw argumentError('uninitialized enumerator');
+  return source;
 }
 
 /** Runs the enumerator's method, passing each yielded value (several packed into an array) to `visit`. */
 export function* iterateEnumerator(self: RObject, visit: (value: Value) => Gen): Gen {
+  return yield* iterateEnumeratorArgs(self, (args) => visit(packedYield(args)));
+}
+
+function* iterateEnumeratorArgs(self: RObject, visit: (args: Value[]) => Gen): Gen {
   const source = sourceOf(self);
-  const block = nativeProc(-1, (args) => visit(args.length === 1 ? args[0] : arr(args)));
+  const block = nativeProc(-1, visit);
   return yield* runSource(source, block);
 }
 
@@ -305,37 +370,73 @@ function* runSource(source: EnumeratorSource, block: RProc, args: Value[] = []):
     if (source.method === 'chain' && count > 0) throw argumentCountError(count, 0, 0);
     return yield* source.iterate(block);
   }
-  return yield* callMethod(source.recv, source.method, [...source.args, ...args], source.keywords, block);
+  if (source.arithmetic) {
+    const { start, end, step } = arithmeticSpec(source.recv, source.iterationArgs ?? source.args, source.keywords);
+    if (end === NIL && !isRubyFloat(start) && !isRubyFloat(step)) {
+      yield* endlessSequence(start, step, block);
+      return source.recv;
+    }
+  }
+  return yield* callMethod(
+    source.recv,
+    source.method,
+    ...enumeratorArguments(source, args, source.iterationArgs ?? source.args),
+    block,
+    {
+      fcall: true,
+    }
+  );
+}
+
+function hasExecutionContext(cursor: Cursor | undefined): boolean {
+  return cursor !== undefined && cursor.state !== 'new' && cursor.state !== 'completed';
 }
 
 def('Enumerator', 'each', [0, -1], function* (self: RObject, args, block) {
   const source = sourceOf(self);
   if (source.arithmetic && args.length > 0) throw argumentCountError(args.length, 0, 0);
+  if (args.length > 0 && hasExecutionContext(source.cursor)) throw typeError("can't copy execution context");
   if (!block) {
     if (args.length === 0) return self;
+    const [appendedArgs, keywords] = enumeratorArguments(source, args);
     if (source.iterate) {
       const enumerator = new RObject(rt().c.Enumerator);
-      enumerator.data = { ...source, args: [...source.args, ...args], size: () => NIL } satisfies EnumeratorSource;
+      enumerator.data = {
+        ...source,
+        args: appendedArgs,
+        keywords,
+        cursor: undefined,
+        size: () => NIL,
+      } satisfies EnumeratorSource;
       return enumerator;
     }
-    const enumerator = makeEnumerator(source.recv, source.method, [...source.args, ...args], source.keywords);
+    const enumerator = makeEnumerator(source.recv, source.method, appendedArgs, keywords);
     sourceOf(enumerator).size = () => NIL;
     return enumerator;
   }
   return yield* runSource(source, block, args);
 });
+function enumeratorArguments(
+  source: EnumeratorSource,
+  extra: Value[],
+  base = source.args
+): [Value[], RHash | undefined] {
+  if (extra.length === 0) return [base, source.keywords];
+  return [[...base, ...(source.keywords ? [source.keywords] : []), ...extra], undefined];
+}
+
 def('Enumerator', 'with_index', [0, 1], (self: RObject, args, block) => withIndex(self, args, block, 'with_index'));
 def('Enumerator', 'each_with_index', 0, (self: RObject, args, block) =>
   withIndex(self, args, block, 'each_with_index')
 );
 
 function* withIndex(self: RObject, args: Value[], block: RProc | undefined, name: string): Gen {
-  let index = args.length > 0 && args[0] !== NIL ? yield* toInt(args[0]) : 0n;
   if (!block) return makeEnumerator(self, name, args);
+  let index = args.length > 0 && args[0] !== NIL ? yield* toInt(args[0]) : 0n;
   const userBlock = block;
   const source = sourceOf(self);
   const proc = nativeProc(-1, (yielded, _block, used) => {
-    const value = yielded.length === 1 ? yielded[0] : arr(yielded);
+    const value = packedYield(yielded);
     return callProc(userBlock, [value, index++], { used });
   });
   return yield* runSource(source, proc);
@@ -345,7 +446,7 @@ def('Enumerator', ['with_object', 'each_with_object'], 1, function* (self: RObje
   const userBlock = block;
   const source = sourceOf(self);
   const proc = nativeProc(-1, (yielded, _block, used) => {
-    const value = yielded.length === 1 ? yielded[0] : arr(yielded);
+    const value = packedYield(yielded);
     return callProc(userBlock, [value, memo], { used });
   });
   yield* runSource(source, proc);
@@ -357,23 +458,30 @@ def('Enumerator', 'size', 0, function* (self: RObject) {
   const result = source.size();
   return isGenerator(result) ? yield* result : result;
 });
+def('Enumerator::ArithmeticSequence', 'each', 0, function* (self: RObject, _args, block) {
+  if (!block) return self;
+  yield* runSource(sourceOf(self), block);
+  return self;
+});
 for (const name of ['begin', 'end', 'step'] as const)
   def('Enumerator::ArithmeticSequence', name, 0, (self: RObject) => {
     const source = sourceOf(self);
-    const spec = arithmeticSpec(source.recv, source.args, source.keywords);
+    const spec = arithmeticSpec(source.recv, source.iterationArgs ?? source.args, source.keywords);
     return name === 'begin' ? spec.start : name === 'end' ? spec.end : spec.step;
   });
 def('Enumerator::ArithmeticSequence', 'exclude_end?', 0, (self: RObject) => {
   const source = sourceOf(self);
-  return arithmeticSpec(source.recv, source.args, source.keywords).exclusive;
+  return arithmeticSpec(source.recv, source.iterationArgs ?? source.args, source.keywords).exclusive;
 });
+// code-gauge-allow functionCognitiveComplexity 27 -- The ordered cases for enumerator lifecycle and lazy iteration share state; splitting them solely for the metric would hide their sequencing.
 def('Enumerator::ArithmeticSequence', 'first', [0, 1], function* (self: RObject, args) {
   const source = sourceOf(self);
-  const { start, end, step } = arithmeticSpec(source.recv, source.args, source.keywords);
+  const { start, end, step } = arithmeticSpec(source.recv, source.iterationArgs ?? source.args, source.keywords);
   const floatSequence = isRubyFloat(start) || isRubyFloat(end) || isRubyFloat(step);
-  const first = floatSequence ? Number(start) : start;
+  const first = floatSequence ? yield* toStepFloat(start) : start;
+  const stepSign = isRational(step) ? fractionOf(step).numerator : Number(step);
   const order = yield* arithmeticFirstOrder(start, end, floatSequence, args.length === 0);
-  const empty = order !== undefined && ((Number(step) > 0 && order > 0) || (Number(step) < 0 && order < 0));
+  const empty = order !== undefined && ((stepSign > 0 && order > 0) || (stepSign < 0 && order < 0));
   if (args.length === 0) {
     if (isRubyFloat(step) && Number.isNaN(Number(step))) throw comparisonFailed(step, 0n);
     return empty ? NIL : start;
@@ -410,10 +518,16 @@ function* arithmeticFirstOrder(
   return yield* spaceship(start, customFloatEnd ? yield* toStepFloat(end) : end);
 }
 
+// code-gauge-allow functionCognitiveComplexity 17 -- The ordered cases for enumerator lifecycle and lazy iteration share state; splitting them solely for the metric would hide their sequencing.
 def('Enumerator::ArithmeticSequence', 'last', [0, 1], function* (self: RObject, args) {
   const source = sourceOf(self);
-  const { start, step, end, exclusive } = arithmeticSpec(source.recv, source.args, source.keywords);
+  const { start, step, end, exclusive } = arithmeticSpec(
+    source.recv,
+    source.iterationArgs ?? source.args,
+    source.keywords
+  );
   if (end === NIL) throw rangeError('cannot get the last element of endless arithmetic sequence');
+  if ([start, end, step].some(isRational)) return yield* rationalSequenceLast(start, end, step, exclusive, args);
   if (isRubyFloat(step) && Number.isNaN(Number(step))) throw floatDomainError('NaN');
   const index = arithmeticLastIndex(
     start as bigint | number,
@@ -463,7 +577,11 @@ def('Enumerator::ArithmeticSequence', 'last', [0, 1], function* (self: RObject, 
 });
 def('Enumerator::ArithmeticSequence', 'hash', 0, (self: RObject) => {
   const source = sourceOf(self);
-  const { start, end, step, exclusive } = arithmeticSpec(source.recv, source.args, source.keywords);
+  const { start, end, step, exclusive } = arithmeticSpec(
+    source.recv,
+    source.iterationArgs ?? source.args,
+    source.keywords
+  );
   const parts = [
     canonicalNumber(start),
     end === NIL ? 'nil' : canonicalNumber(end),
@@ -476,6 +594,7 @@ def('Enumerator::ArithmeticSequence', 'hash', 0, (self: RObject) => {
   return hash;
 });
 
+// code-gauge-allow functionCognitiveComplexity 18 -- The ordered cases for Enumerator lifecycle and lazy iteration share state; splitting them solely for the metric would hide their sequencing.
 function arithmeticLastIndex(
   start: bigint | number,
   end: bigint | number,
@@ -515,25 +634,30 @@ function arithmeticLastValue(
 
 function canonicalNumber(value: Value): string {
   if (typeof value === 'bigint') return `i${value}`;
+  if (isRational(value)) {
+    const fraction = fractionOf(value);
+    return `q${fraction.numerator}/${fraction.denominator}`;
+  }
   return `f${Number(value) === 0 ? 0 : Number(value)}`;
 }
 for (const name of ['==', '===', 'eql?'])
-  def('Enumerator::ArithmeticSequence', name, 1, (self: RObject, [other]) => {
+  def('Enumerator::ArithmeticSequence', name, 1, function* (self: RObject, [other]) {
     if (!(other instanceof RObject) || other.cls !== rt().c['Enumerator::ArithmeticSequence']) return false;
     const left = sourceOf(self);
     const right = sourceOf(other);
-    const a = arithmeticSpec(left.recv, left.args, left.keywords);
-    const b = arithmeticSpec(right.recv, right.args, right.keywords);
+    const a = arithmeticSpec(left.recv, left.iterationArgs ?? left.args, left.keywords);
+    const b = arithmeticSpec(right.recv, right.iterationArgs ?? right.args, right.keywords);
     return (
       a.exclusive === b.exclusive &&
-      numericCompare(a.start as bigint | number, b.start as bigint | number) === 0 &&
-      (a.end === NIL
-        ? b.end === NIL
-        : b.end !== NIL && numericCompare(a.end as bigint | number, b.end as bigint | number) === 0) &&
-      numericCompare(a.step as bigint | number, b.step as bigint | number) === 0
+      (yield* spaceship(a.start, b.start)) === 0 &&
+      (a.end === NIL ? b.end === NIL : b.end !== NIL && (yield* spaceship(a.end, b.end)) === 0) &&
+      (yield* spaceship(a.step, b.step)) === 0
     );
   });
-def('Enumerator', ['inspect', 'to_s'], 0, function* (self: RObject) {
+// code-gauge-allow functionCognitiveComplexity 30 -- The ordered cases for enumerator lifecycle and lazy iteration share state; splitting them solely for the metric would hide their sequencing.
+// code-gauge-allow functionNcss 33 -- The ordered cases for enumerator lifecycle and lazy iteration share state; splitting them solely for the metric would hide their sequencing.
+def('Enumerator', 'inspect', 0, function* (self: RObject) {
+  if (self.data === undefined) return str(`#<${className(realClassOf(self))}: uninitialized>`);
   const source = sourceOf(self);
   if (self.cls === rt().c['Enumerator::Chain']) {
     const elements = new BoundedTextParts('#<Enumerator::Chain: []>'.length);
@@ -547,7 +671,7 @@ def('Enumerator', ['inspect', 'to_s'], 0, function* (self: RObject) {
     return str(`${prefix}${argumentsText.count > 0 ? `(${argumentsText.text()})` : ''}>`);
   }
   if (source.arithmetic) {
-    const receiver = yield* inspect(source.recv);
+    const receiver = yield* toS(source.recv);
     const prefix = `(${source.recv instanceof RRange ? `(${receiver})` : receiver}.${source.method}`;
     const argumentsText = new BoundedTextParts(prefix.length + 3);
     for (const arg of source.args) argumentsText.add(yield* inspect(arg));
@@ -591,15 +715,6 @@ class BoundedTextParts {
     return this.parts.join(', ');
   }
 }
-for (const name of ['next', 'peek', 'rewind', 'next_values', 'peek_values', 'feed', 'lazy', 'produce']) {
-  def('Enumerator', name, [0, -1], () => {
-    throw new UnsupportedFeatureError(`外部イテレータ（Enumerator#${name}）`);
-  });
-}
-sdef('Enumerator', 'new', [0, -1], () => {
-  throw new UnsupportedFeatureError('Enumerator.new');
-});
-
 /** A curried lambda: it collects arguments until it has `arity`, then calls `proc` with them. */
 export function curry(proc: RProc, arity: number, collected: Value[]): Value {
   const curried = nativeProc(
@@ -613,4 +728,932 @@ export function curry(proc: RProc, arity: number, collected: Value[]): Value {
   );
   curried.captured = [proc, ...collected];
   return curried;
+}
+
+// External iteration ---------------------------------------------------------------------------------------------------
+
+/** A value the iteration hands to `next`, suspending the generators that run the enumerator's method. */
+class Suspension {
+  constructor(readonly args: Value[]) {}
+}
+
+interface Cursor {
+  runner: Generator<unknown, Value, unknown>;
+  /** The frames, held values, and catch tags of the suspended calls, put back while the iteration resumes. */
+  frames: Frame[];
+  held: Value[];
+  heldArrays: Value[][];
+  catchTags: Value[];
+  exception: Value;
+  missingReason?: MissingReason;
+  peeked: Value[][];
+  feed?: Value;
+  feedSet: boolean;
+  state: 'new' | 'running' | 'suspended' | 'failed' | 'completed';
+  result?: Value;
+}
+
+function cursorRoots(cursor: Cursor | undefined): Value[] {
+  if (!cursor) return [];
+  const values = [...cursor.held, ...cursor.heldArrays.flat(), ...cursor.catchTags, ...cursor.peeked.flat()];
+  if (cursor.feedSet) values.push(cursor.feed as Value);
+  if (cursor.result !== undefined) values.push(cursor.result);
+  values.push(cursor.exception);
+  for (const frame of cursor.frames) pushFrameReferences(frame, values);
+  return values;
+}
+
+function startCursor(self: RObject): Cursor {
+  const runner = flattenGenerator(
+    (function* () {
+      return yield* iterateEnumeratorArgs(self, function* (args) {
+        if (!rt().activeCursor) throw rubyError(rt().c.FiberError, 'attempt to yield on a not resumed fiber');
+        return (yield new Suspension(args)) as Value;
+      });
+    })()
+  );
+  return {
+    runner,
+    frames: [],
+    held: [],
+    heldArrays: [],
+    catchTags: [],
+    exception: NIL,
+    peeked: [],
+    feedSet: false,
+    state: 'new',
+  };
+}
+
+/** Resumes the iteration until it yields its next value, or raises StopIteration when it has ended. */
+function nextValues(self: RObject): Value[] {
+  assertMutableEnumerator(self);
+  const source = sourceOf(self);
+  if (source.cursor?.state === 'failed') {
+    const { feed, feedSet } = source.cursor;
+    source.cursor = { ...startCursor(self), feed, feedSet };
+  }
+  source.cursor ??= startCursor(self);
+  const cursor = source.cursor;
+  if (cursor.state === 'running')
+    throw rubyError(
+      rt().c.FiberError,
+      rt().activeCursor === cursor
+        ? 'attempt to resume the current fiber'
+        : 'attempt to resume a resumed fiber (double resume)'
+    );
+  if (cursor.peeked.length > 0) return cursor.peeked.shift() as Value[];
+  if (cursor.result !== undefined) throw stopIteration(cursor.result);
+  const runtime = rt();
+  const frameBase = runtime.frames.length;
+  const heldBase = runtime.held.length;
+  const arraysBase = runtime.heldArrays.length;
+  const callerHeld = [...runtime.held];
+  const callerArrays = [...runtime.heldArrays];
+  const callerException = runtime.globals.get('$!') ?? NIL;
+  const callerMissingReason = runtime.missingReason;
+  runtime.heldSnapshots.push({ values: [...callerHeld, callerException], arrays: callerArrays });
+  const row = runtime.currentRow;
+  const callerTags = runtime.catchTags.splice(0);
+  runtime.globals.set('$!', cursor.exception);
+  runtime.missingReason = cursor.missingReason;
+  if (cursor.frames[0]?.callRow !== undefined) cursor.frames[0].callRow = row;
+  for (const frame of cursor.frames) runtime.frames.push(frame);
+  for (const value of cursor.held) runtime.held.push(value);
+  for (const values of cursor.heldArrays) runtime.heldArrays.push(values);
+  for (const tag of cursor.catchTags) runtime.catchTags.push(tag);
+  let step: IteratorResult<unknown, Value>;
+  const previousCursor = runtime.activeCursor;
+  try {
+    const resumed = cursor.state === 'suspended';
+    cursor.state = 'running';
+    runtime.activeCursor = cursor;
+    const feed = resumed && cursor.feedSet ? cursor.feed : NIL;
+    if (resumed) {
+      cursor.feedSet = false;
+      cursor.feed = undefined;
+    }
+    step = cursor.runner.next(feed);
+    cursor.state = step.done ? 'completed' : 'suspended';
+  } catch (error) {
+    cursor.state = 'failed';
+    throw error;
+  } finally {
+    runtime.activeCursor = previousCursor;
+    for (let index = 0; index < heldBase; index++) runtime.held[index] = callerHeld[index];
+    for (let index = 0; index < arraysBase; index++) runtime.heldArrays[index] = callerArrays[index];
+    cursor.frames = runtime.frames.splice(frameBase);
+    cursor.held = runtime.held.splice(heldBase);
+    cursor.heldArrays = runtime.heldArrays.splice(arraysBase);
+    cursor.catchTags = runtime.catchTags.splice(0);
+    cursor.exception = runtime.globals.get('$!') ?? NIL;
+    runtime.globals.set('$!', callerException);
+    cursor.missingReason = runtime.missingReason;
+    runtime.missingReason = callerMissingReason;
+    for (const tag of callerTags) runtime.catchTags.push(tag);
+    runtime.currentRow = row;
+    runtime.heldSnapshots.pop();
+  }
+  if (step.done) {
+    cursor.result = step.value;
+    cursor.frames = [];
+    cursor.held = [];
+    cursor.heldArrays = [];
+    cursor.catchTags = [];
+    throw stopIteration(step.value);
+  }
+  if (!(step.value instanceof Suspension)) throw new TypeError('An enumerator suspended for another reason');
+  return step.value.args;
+}
+
+function nextValue(self: RObject): Value {
+  const args = nextValues(self);
+  return packedYield(args);
+}
+
+function stopIteration(result: Value): unknown {
+  const error = rubyError(rt().c.StopIteration, 'iteration reached an end');
+  error.exception.internal = new Map([['result', result]]);
+  return error;
+}
+
+def('Enumerator', 'next', 0, (self: RObject) => nextValue(self));
+def('Enumerator', 'peek', 0, (self: RObject) => {
+  const args = nextValues(self);
+  (sourceOf(self).cursor as Cursor).peeked.unshift(args);
+  return packedYield(args);
+});
+def('Enumerator', 'rewind', 0, function* (self: RObject) {
+  assertMutableEnumerator(self);
+  const receiver = sourceOf(self).recv;
+  if (receiver !== self) yield* tryImplicitConversion(receiver, 'rewind');
+  if (self.cls === rt().c['Enumerator::Lazy']) {
+    const data = lazyDataOf(self);
+    if (data.steps.length === 0) yield* tryImplicitConversion(data.source, 'rewind');
+  }
+  sourceOf(self).cursor = undefined;
+  return self;
+});
+def('Enumerator', 'next_values', 0, (self: RObject) => {
+  return arr(nextValues(self));
+});
+def('Enumerator', 'peek_values', 0, (self: RObject) => {
+  const args = nextValues(self);
+  (sourceOf(self).cursor as Cursor).peeked.unshift(args);
+  return arr(args);
+});
+def('Enumerator', 'feed', 1, (self: RObject, [value]) => {
+  assertMutableEnumerator(self);
+  const source = sourceOf(self);
+  source.cursor ??= startCursor(self);
+  if (source.cursor.feedSet) throw typeError('feed value already set');
+  source.cursor.feed = value;
+  source.cursor.feedSet = true;
+  return NIL;
+});
+iundef('Enumerator::Chain', ['next', 'peek', 'next_values', 'peek_values', 'feed']);
+
+// Enumerator.new and its yielder --------------------------------------------------------------------------------------
+
+/** The object `Enumerator.new` iterates: its block, which receives a yielder. */
+interface GeneratorData {
+  block: RProc;
+  held(): Value[];
+}
+
+def(
+  'Enumerator',
+  'initialize',
+  [0, -1],
+  function* (self: RObject, args, block) {
+    if (self.cls.isSubclassOf(rt().c['Enumerator::Lazy']))
+      throw new UnsupportedFeatureError('Enumerator::Lazy#initialize');
+    if (!block) throw argumentError('tried to create Proc object without a block');
+    if (args.length > 1) throw argumentCountError(args.length, 0, 1);
+    const producer = block;
+    let size = args[0] ?? NIL;
+    if (
+      size !== NIL &&
+      !(yield* advertisesPublicMethod(size, 'call')) &&
+      !(isRubyFloat(size) && Number(size) === Infinity)
+    )
+      size = yield* toInt(size);
+    const sizeProvider = function* (): Gen<Value> {
+      return (yield* tryImplicitConversion(size, 'call')) ?? size;
+    };
+    assertMutableEnumerator(self);
+    if (self.cls.isSubclassOf(rt().c['Enumerator::Chain']))
+      throw typeError('wrong argument type chain (expected enumerator)');
+    const generator = new RObject(rt().c['Enumerator::Generator']);
+    const data: GeneratorData = {
+      block: producer,
+      held() {
+        return [this.block, size];
+      },
+    };
+    generator.data = data;
+    const enumerator = makeEnumerator(generator, 'each', [], undefined, {});
+    const source = enumerator.data as EnumeratorSource;
+    source.size = sizeProvider;
+    self.data = source;
+    return self;
+  },
+  { visibility: 'private' }
+);
+function assertMutableEnumerator(self: RObject): void {
+  if (self.frozen) throw frozenError(self, runToEnd(inspect(self)));
+}
+
+def('Enumerator::Chain', 'initialize', [0, -1], unavailableMethod('Enumerator::Chain#initialize'), {
+  visibility: 'private',
+});
+def('Enumerator::Lazy', 'initialize', [0, -1], unavailableMethod('Enumerator::Lazy#initialize'), {
+  visibility: 'private',
+});
+sdef('Enumerator::Lazy', 'new', [0, -1], () => {
+  throw new UnsupportedFeatureError('Enumerator::Lazy.new');
+});
+def('Enumerator::Generator', 'each', [0, -1], function* (self: RObject, args, block) {
+  const producer = (self.data as GeneratorData | undefined)?.block;
+  if (!producer) throw argumentError('uninitialized generator');
+  const yielder = new RObject(rt().c['Enumerator::Yielder']);
+  const consumer =
+    block ??
+    nativeProc(-1, () => {
+      throw rubyError(rt().c.LocalJumpError, 'no block given');
+    });
+  const data: { consumer: RProc; held(): Value[] } = {
+    consumer,
+    held() {
+      return [this.consumer];
+    },
+  };
+  yielder.data = data;
+  return yield* callProc(producer, [yielder, ...args]);
+});
+
+def(
+  'Enumerator::Generator',
+  'initialize',
+  0,
+  (self: RObject, _args, block) => {
+    if (!block) throw rubyError(rt().c.LocalJumpError, 'no block given');
+    assertMutableEnumerator(self);
+    self.data = { block, held: () => [block] } satisfies GeneratorData;
+    return NIL;
+  },
+  { visibility: 'private' }
+);
+
+function consumerOf(self: RObject): RProc {
+  const consumer = (self.data as { consumer?: RProc } | undefined)?.consumer;
+  if (!consumer) throw argumentError('uninitialized yielder');
+  return consumer;
+}
+
+def(
+  'Enumerator::Yielder',
+  'initialize',
+  0,
+  (self: RObject, _args, block) => {
+    if (!block) throw rubyError(rt().c.LocalJumpError, 'no block given');
+    self.data = { consumer: block, held: () => [block] };
+    return NIL;
+  },
+  { visibility: 'private' }
+);
+
+def('Enumerator::Yielder', ['<<'], 1, function* (self: RObject, [value]) {
+  yield* callProc(consumerOf(self), [value]);
+  return self;
+});
+def(
+  'Enumerator::Yielder',
+  'yield',
+  [0, -1],
+  function* (self: RObject, args, _block, keywords) {
+    return yield* callProc(consumerOf(self), args, { keywords });
+  },
+  { keywords: true }
+);
+def('Enumerator::Yielder', 'to_proc', 0, (self: RObject) => {
+  const proc = nativeProc(
+    -1,
+    (args, _block, _used, keywords) => callProc(consumerOf(self), args, { keywords }),
+    false,
+    true
+  );
+  proc.captured = [self];
+  return proc;
+});
+def('Enumerator::Producer', 'each', 0, function* (self: RObject, _args, block) {
+  if (!block) throw rubyError(rt().c.LocalJumpError, 'no block given');
+  if (!self.data) throw argumentError('uninitialized producer');
+  return yield* invoke(coreMethod(rt().c['Enumerator::Generator'], 'each'), self, [], undefined, block, true);
+});
+
+sdef('Enumerator', 'produce', [0, 1], function (_self, args, block) {
+  const step = requireBlock(block, rt().c.ArgumentError, 'no block given');
+  const runtime = rt();
+  const generator = new RObject(runtime.c['Enumerator::Producer']);
+  const producer = nativeProc(1, function* ([yielder]) {
+    try {
+      let value = args.length > 0 ? args[0] : yield* callProc(step, [NIL]);
+      for (;;) {
+        yield* callMethod(yielder, '<<', [value]);
+        value = yield* callProc(step, [value]);
+      }
+    } catch (error) {
+      if (error instanceof RubyError && isA(error.exception, runtime.c.StopIteration)) return NIL;
+      throw error;
+    }
+  });
+  generator.data = {
+    block: producer,
+    held() {
+      return [step, ...args];
+    },
+  };
+  const enumerator = makeEnumerator(generator, 'each', []);
+  (enumerator.data as EnumeratorSource).size = () => Number.POSITIVE_INFINITY;
+  return enumerator;
+});
+
+// Lazy -----------------------------------------------------------------------------------------------------------------
+
+type LazyStep = (
+  | { kind: 'map' | 'select' | 'reject' | 'take_while' | 'drop_while' | 'filter_map' | 'flat_map'; block: RProc }
+  | { kind: 'take' | 'drop'; count: number; exactCount: bigint }
+  | { kind: 'compact' }
+  | { kind: 'with_index'; offset: bigint; block?: RProc }
+  | { kind: 'grep' | 'grep_v'; pattern: Value; block?: RProc }
+  | { kind: 'uniq'; block?: RProc }
+  | { kind: 'zip'; others: Value[] }
+  | { kind: 'each_slice' | 'each_cons'; count: number; exactCount: bigint }
+) & { label?: string; args?: Value[] };
+
+interface LazyData {
+  source: Value;
+  steps: LazyStep[];
+  enumerator?: EnumeratorSource;
+  held(): Value[];
+  copy(): LazyData;
+}
+
+function lazyDataOf(self: RObject): LazyData {
+  const data = self.data as LazyData | undefined;
+  if (!data) throw argumentError('uninitialized enumerator');
+  return data;
+}
+
+function lazyIterationSource(source: Value, args: Value[], displayArgs: Value[]): RObject {
+  const enumerator = makeEnumerator(source, 'each', args);
+  setLazyDisplaySource(enumerator, source, displayArgs);
+  return enumerator;
+}
+
+function* lazySize(self: RObject): Gen {
+  const { source, steps } = lazyDataOf(self);
+  let size = (yield* tryImplicitConversion(source, 'size')) ?? NIL;
+  for (const step of steps) size = yield* nextLazySize(size, step);
+  return size;
+}
+
+function* nextLazySize(size: Value, step: LazyStep): Gen<Value> {
+  if (size === NIL) return NIL;
+  const smallInteger = typeof size === 'bigint' && size >= -(1n << 62n) && size < 1n << 62n;
+  if (step.kind === 'take') return smallInteger && size < step.exactCount ? size : step.exactCount;
+  if (step.kind === 'drop')
+    return smallInteger
+      ? size > step.exactCount
+        ? size - step.exactCount
+        : 0n
+      : yield* callMethod(size, '-', [step.exactCount]);
+  if (step.kind === 'each_slice' || step.kind === 'each_cons')
+    return yield* windowSize(size, step.kind, step.exactCount);
+  return ['map', 'with_index', 'zip'].includes(step.kind) ? size : NIL;
+}
+
+function lazyPipeline(self: RObject): Pick<LazyData, 'source' | 'steps'> {
+  const data = lazyDataOf(self);
+  return data.steps.length === 0 ? { source: self, steps: [] } : data;
+}
+
+function makeLazyAdapter(self: RObject, method: string, args: Value[]): RObject {
+  const enumerator = makeEnumerator(self, method, args);
+  setLazyDisplaySource(enumerator, self, args, method);
+  return makeLazy(enumerator, []);
+}
+
+function makeLazy(source: Value, steps: LazyStep[]): RObject {
+  rt().chargeSlots(steps.length);
+  const lazy = new RObject(rt().c['Enumerator::Lazy']);
+  const data: LazyData = {
+    source,
+    steps,
+    held() {
+      return [
+        this.source,
+        ...this.steps.flatMap((step) => ('block' in step && step.block ? [step.block] : [])),
+        ...this.steps.flatMap((step) => step.args ?? []),
+        ...this.steps.flatMap((step) => ('pattern' in step ? [step.pattern] : 'others' in step ? step.others : [])),
+        ...cursorRoots(this.enumerator?.cursor),
+      ];
+    },
+    copy() {
+      if (hasExecutionContext(this.enumerator?.cursor)) throw typeError("can't copy execution context");
+      return { ...this, enumerator: undefined };
+    },
+  };
+  lazy.data = data;
+  return lazy;
+}
+
+def('Enumerable', 'lazy', 0, (self) => makeLazy(self, []));
+def('Enumerator::Lazy', 'lazy', 0, (self) => self);
+const lazyEnumerableMethods = new Set([
+  'map',
+  'collect',
+  'flat_map',
+  'collect_concat',
+  'select',
+  'find_all',
+  'filter',
+  'filter_map',
+  'reject',
+  'grep',
+  'grep_v',
+  'zip',
+  'take',
+  'take_while',
+  'drop',
+  'drop_while',
+  'uniq',
+  'with_index',
+]);
+
+def('Enumerator::Lazy', ['to_enum', 'enum_for'], [0, -1], function* (self, args, block) {
+  const enumerator = (yield* invoke(
+    coreMethod(rt().c.Kernel, 'to_enum'),
+    self,
+    args,
+    undefined,
+    block,
+    true
+  )) as RObject;
+  const source = sourceOf(enumerator);
+  if (lazyEnumerableMethods.has(source.method)) source.method = `_enumerable_${source.method}`;
+  setLazyDisplaySource(enumerator, self, source.args, source.method);
+  return makeLazy(enumerator, []);
+});
+
+for (const kind of [
+  'map',
+  'collect',
+  'select',
+  'filter',
+  'reject',
+  'take_while',
+  'drop_while',
+  'filter_map',
+  'flat_map',
+  'collect_concat',
+  'find_all',
+] as const) {
+  def('Enumerator::Lazy', kind, 0, (self: RObject, _args, block) => {
+    const normalized =
+      kind === 'collect'
+        ? 'map'
+        : kind === 'filter' || kind === 'find_all'
+          ? 'select'
+          : kind === 'collect_concat'
+            ? 'flat_map'
+            : kind;
+    if (!block) throw argumentError(`tried to call lazy ${normalized} without a block`);
+    const data = lazyPipeline(self);
+    return makeLazy(data.source, [...data.steps, { kind: normalized, block, label: kind }]);
+  });
+}
+for (const kind of ['grep', 'grep_v'] as const) {
+  def('Enumerator::Lazy', kind, 1, (self: RObject, [pattern], block) => {
+    const data = lazyPipeline(self);
+    return makeLazy(data.source, [...data.steps, { kind, pattern, block, args: [pattern] }]);
+  });
+}
+def('Enumerator::Lazy', 'uniq', 0, (self: RObject, _args, block) => {
+  const data = lazyPipeline(self);
+  return makeLazy(data.source, [...data.steps, { kind: 'uniq', block }]);
+});
+for (const kind of ['each_slice', 'each_cons'] as const) {
+  def('Enumerator::Lazy', kind, 1, function* (self: RObject, [count], block) {
+    const { number: size, integer: exactCount } = yield* toIndexExact(count);
+    if (size <= 0) throw argumentError(kind === 'each_cons' ? 'invalid size' : 'invalid slice size');
+    if (!block) return makeLazyAdapter(self, kind, [count]);
+    const lazy = makeLazy(self, [{ kind, count: size, exactCount, args: [count] }]);
+    yield* runLazy(lazy, (value) => callProc(block, [value], { used: false }));
+    return self;
+  });
+}
+def('Enumerator::Lazy', 'each_entry', [0, -1], function* (self: RObject, args, block) {
+  if (!block) return makeLazyAdapter(self, 'each_entry', args);
+  return yield* invoke(coreMethod(rt().c.Enumerable, 'each_entry'), self, args, undefined, block, true);
+});
+for (const name of ['each_with_object', 'with_object']) {
+  def('Enumerator::Lazy', name, 1, function* (self: RObject, [memo], block) {
+    if (block) {
+      yield* runLazy(self, (value) => callProc(block, [value, memo], { used: false }));
+      return memo;
+    }
+    return makeLazyAdapter(self, name, [memo]);
+  });
+}
+for (const name of ['slice_when', 'slice_before', 'slice_after', 'chunk', 'chunk_while'])
+  def('Enumerator::Lazy', name, [0, -1], unavailableMethod(`Enumerator::Lazy#${name}`));
+def('Enumerator::Lazy', 'zip', [0, -1], function* (self: RObject, others, block) {
+  if (block) return yield* zipCollections(self, others, block);
+  const converted: Value[] = [];
+  rt().heldArrays.push(converted);
+  try {
+    for (const other of others) {
+      if (other instanceof RArray) {
+        converted.push(other);
+        continue;
+      }
+      const array = yield* tryImplicitConversion(other, 'to_ary');
+      if (array instanceof RArray) converted.push(array);
+      else if (array !== undefined && array !== NIL)
+        throw typeError(
+          `can't convert ${realClassOf(other).name} to Array (${realClassOf(other).name}#to_ary gives ${realClassOf(array).name})`
+        );
+      else if (
+        respondsTo(other, 'respond_to?', true)
+          ? truthy(yield* callMethod(other, 'respond_to?', [sym('each')], undefined, undefined, { fcall: true }))
+          : yield* respondsToName(other, 'each', false)
+      )
+        converted.push(other);
+      else throw typeError(`wrong argument type ${realClassOf(other).name} (must respond to :each)`);
+    }
+    const data = lazyPipeline(self);
+    return makeLazy(data.source, [...data.steps, { kind: 'zip', others: converted, args: others }]);
+  } finally {
+    rt().heldArrays.pop();
+  }
+});
+for (const kind of ['take', 'drop'] as const) {
+  def('Enumerator::Lazy', kind, 1, function* (self: RObject, [count]) {
+    const data = lazyPipeline(self);
+    const { number: n, integer: exactCount } = yield* toIndexExact(count);
+    if (n < 0) throw argumentError(`attempt to ${kind} negative size`);
+    return makeLazy(data.source, [...data.steps, { kind, count: n, exactCount, args: [count] }]);
+  });
+}
+def('Enumerator::Lazy', 'compact', 0, (self: RObject) => {
+  const data = lazyPipeline(self);
+  return makeLazy(data.source, [...data.steps, { kind: 'compact' }]);
+});
+def('Enumerator::Lazy', 'with_index', [0, 1], function* (self: RObject, args, block) {
+  const data = lazyPipeline(self);
+  const offset = args.length > 0 && args[0] !== NIL ? yield* toInt(args[0]) : 0n;
+  return makeLazy(data.source, [...data.steps, { kind: 'with_index', offset, block, args: [offset] }]);
+});
+def('Enumerator::Lazy', 'each_with_index', 0, function* (self: RObject, _args, block) {
+  if (!block) return makeLazyAdapter(self, 'each_with_index', []);
+  let index = 0n;
+  return yield* runLazy(self, (value) => callProc(block, [value, index++], { used: false }));
+});
+
+/** Runs a lazy chain: each element of the source passes the steps in turn, and `take` ends the iteration. */
+// code-gauge-allow functionCognitiveComplexity 26 -- Lazy transformations share one stopping, rooting and yielded-tuple lifecycle.
+// code-gauge-allow functionNcss 31 -- Lazy transformations share one stopping, rooting and yielded-tuple lifecycle.
+function* runLazy(
+  self: RObject,
+  visit: (value: Value, yielded?: Value[]) => Gen<IterationResult>,
+  args: Value[] = []
+): Gen {
+  const data = lazyDataOf(self);
+  const states: LazyState[] = data.steps.map((step) => ({
+    seen: 0,
+    dropping: true,
+    index: 'offset' in step ? step.offset : 0n,
+  }));
+  const takeZero = data.steps.some((step) => step.kind === 'take' && step.count === 0);
+  if (takeZero) return NIL;
+  const held = rt().held.length;
+  const arrays = rt().heldArrays;
+  const arrayMark = arrays.length;
+  let visitorStopped = false;
+  const visitWithStop = function* (value: Value, yielded?: Value[]): Gen<IterationResult> {
+    const outcome = yield* visit(value, yielded);
+    if (outcome === STOP) visitorStopped = true;
+    return outcome;
+  };
+  try {
+    const result = yield* iterateYielded(
+      data.source,
+      function* (yielded) {
+        const value = packedYield(yielded);
+        const args = yielded.length === 0 && data.steps.length > 0 ? [NIL] : yielded;
+        return yield* streamLazyStep(data.steps, states, 0, value, visitWithStop, args);
+      },
+      lazySourceArgs(data, args)
+    );
+    if (!visitorStopped)
+      for (const [position, step] of data.steps.entries()) {
+        const buffer = states[position].buffer;
+        if (step.kind === 'each_slice' && buffer && buffer.length > 0) {
+          states[position].buffer = [];
+          const outcome = yield* streamLazyStep(data.steps, states, position + 1, arr(buffer), visitWithStop);
+          if (outcome === STOP) break;
+        }
+      }
+    return data.steps.length === 0 ? result : NIL;
+  } finally {
+    rt().held.length = held;
+    arrays.length = arrayMark;
+  }
+}
+
+function lazySourceArgs(data: LazyData, args: Value[]): Value[] {
+  return data.steps.length === 0 ? args : [];
+}
+
+interface LazyState {
+  seen: number;
+  dropping: boolean;
+  index: bigint;
+  keys?: RHash;
+  cursors?: Value[];
+  buffer?: Value[];
+}
+
+interface LazyFeedback {
+  value: Value;
+}
+
+// code-gauge-allow functionParameterCount 7 -- The traversal passes source tuples and their segment feedback independently.
+function* streamLazyStep(
+  steps: LazyStep[],
+  states: LazyState[],
+  position: number,
+  item: Value,
+  visit: (value: Value, yielded?: Value[]) => Gen<IterationResult>,
+  yielded: Value[] = [item],
+  feedback?: LazyFeedback
+): Gen<IterationResult> {
+  const step = steps[position];
+  const adapter = step && ['each_slice', 'each_cons'].includes(step.kind);
+  const memo = adapter ? undefined : (feedback ?? (step ? { value: item } : undefined));
+  const outcome = yield* runLazyStep(steps, states, position, item, visit, yielded, memo);
+  return lazySegmentResult(outcome, memo);
+}
+
+// code-gauge-allow functionParameterCount 7 -- Each transformation uses the current tuple and the shared segment feedback.
+function* runLazyStep(
+  steps: LazyStep[],
+  states: LazyState[],
+  position: number,
+  item: Value,
+  visit: (value: Value, yielded?: Value[]) => Gen<IterationResult>,
+  yielded: Value[] = [item],
+  feedback?: LazyFeedback
+): Gen<IterationResult> {
+  const held = rt().held;
+  const rootIndex = held.push(item) - 1;
+  try {
+    const step = steps[position];
+    if (!step) return yield* visit(item, feedback ? [item] : yielded);
+    const state = states[position];
+    const next = function* (value: Value, args: Value[] = [value]): Gen<IterationResult> {
+      if (feedback) feedback.value = value;
+      const outcome = yield* streamLazyStep(steps, states, position + 1, value, visit, args, feedback);
+      return lazySegmentResult(outcome, feedback);
+    };
+    switch (step.kind) {
+      case 'map': {
+        return yield* next(yield* callProc(step.block, yielded));
+      }
+      case 'select':
+      case 'reject': {
+        return truthy(yield* callProc(step.block, [item])) === (step.kind === 'select')
+          ? yield* next(item, yielded)
+          : undefined;
+      }
+      case 'filter_map': {
+        const mapped = yield* callProc(step.block, yielded);
+        return truthy(mapped) ? yield* next(mapped) : undefined;
+      }
+      case 'flat_map': {
+        return yield* streamFlattened(yield* callProc(step.block, yielded), next);
+      }
+      case 'take_while': {
+        return truthy(yield* callProc(step.block, yielded)) ? yield* next(item, yielded) : STOP;
+      }
+      case 'drop_while': {
+        if (state.dropping && truthy(yield* callProc(step.block, yielded))) return undefined;
+        state.dropping = false;
+        return yield* next(item, yielded);
+      }
+      case 'take': {
+        if (state.seen >= step.count) return STOP;
+        state.seen++;
+        const result = yield* next(item, yielded);
+        return result === STOP || state.seen >= step.count ? STOP : undefined;
+      }
+      case 'drop': {
+        return state.seen++ >= step.count ? yield* next(item, yielded) : undefined;
+      }
+      case 'compact': {
+        return item === NIL ? undefined : yield* next(item, yielded);
+      }
+      case 'with_index': {
+        const index = state.index++;
+        if (step.block) yield* callProc(step.block, [item, index]);
+        if (step.block) return yield* next(item);
+        const pair = [item, index];
+        const packed = arr(pair);
+        return yield* next(packed, pair);
+      }
+      case 'grep':
+      case 'grep_v': {
+        if (truthy(yield* caseEquals(step.pattern, item)) !== (step.kind === 'grep')) return;
+        return step.block ? yield* next(yield* callProc(step.block, [item])) : yield* next(item, yielded);
+      }
+      case 'uniq': {
+        const key = step.block ? yield* callProc(step.block, [item]) : item;
+        if (!state.keys) {
+          state.keys = newHash();
+          rt().held.push(state.keys);
+        }
+        if (yield* hashGet(state.keys, key)) return;
+        yield* hashSet(state.keys, key, true);
+        return yield* next(item, yielded);
+      }
+      case 'zip': {
+        if (!state.cursors) {
+          const cursors: Value[] = [];
+          for (const other of step.others) {
+            const cursor = other instanceof RArray ? other : yield* callMethod(other, 'to_enum', []);
+            cursors.push(cursor);
+            rt().held.push(cursor);
+          }
+          state.cursors = cursors;
+        }
+        const tuple: Value[] = [item];
+        const arrays = rt().heldArrays;
+        arrays.push(tuple);
+        const index = state.seen++;
+        try {
+          for (const [position, other] of step.others.entries()) {
+            if (other instanceof RArray) {
+              tuple.push(other.items[index] ?? NIL);
+              continue;
+            }
+            const cursor = state.cursors?.[position];
+            if (cursor === undefined) throw new Error('Missing lazy zip cursor');
+            try {
+              tuple.push(yield* callMethod(cursor, 'next', []));
+            } catch (error) {
+              if (!(error instanceof RubyError) || !isA(error.exception, rt().c.StopIteration)) throw error;
+              tuple.push(NIL);
+            }
+          }
+          const packed = arr(tuple);
+          return yield* next(packed, yielded.length > 1 ? tuple : [packed]);
+        } finally {
+          const root = arrays.lastIndexOf(tuple);
+          if (root !== -1) arrays.splice(root, 1);
+        }
+      }
+      case 'each_slice':
+      case 'each_cons': {
+        if (!state.buffer) {
+          state.buffer = [];
+          rt().heldArrays.push(state.buffer);
+        }
+        state.buffer.push(item);
+        if (state.buffer.length < step.count) return;
+        const values = arr([...state.buffer]);
+        if (step.kind === 'each_slice') state.buffer.length = 0;
+        else state.buffer.shift();
+        return yield* next(values);
+      }
+    }
+  } finally {
+    held.splice(rootIndex, 1);
+  }
+}
+
+// code-gauge-allow functionCognitiveComplexity 21 -- Lazy flattening retains recursive roots and distinguishes arrays from user to_ary conversions.
+function* streamFlattened(
+  mapped: Value,
+  next: (value: Value, yielded?: Value[]) => Gen<IterationResult>
+): Gen<IterationResult> {
+  const held = rt().held;
+  const rootIndex = held.push(mapped) - 1;
+  try {
+    if (mapped instanceof RArray) {
+      for (const item of mapped.items) if ((yield* next(item)) === STOP) return STOP;
+      return;
+    }
+    if (
+      mapped instanceof RObject &&
+      (yield* advertisesPublicMethod(mapped, 'force')) &&
+      (yield* advertisesPublicMethod(mapped, 'each'))
+    ) {
+      let stopped = false;
+      yield* iterateYielded(mapped, function* (yielded) {
+        const item = packedYield(yielded);
+        const result = yield* next(item, yielded.length === 0 ? [NIL] : yielded);
+        if (result === STOP) stopped = true;
+        return result;
+      });
+      return stopped ? STOP : undefined;
+    }
+    const array = yield* tryImplicitConversion(mapped, 'to_ary');
+    if (array !== undefined) {
+      if (array instanceof RArray) return yield* streamFlattened(array, next);
+      if (array !== NIL)
+        throw typeError(
+          `can't convert ${realClassOf(mapped).name} to Array (${realClassOf(mapped).name}#to_ary gives ${realClassOf(array).name})`
+        );
+    }
+    return yield* next(mapped);
+  } finally {
+    held.splice(rootIndex, 1);
+  }
+}
+
+def('Enumerator::Lazy', 'each', [0, -1], function* (self: RObject, args, block) {
+  const data = lazyDataOf(self);
+  if (args.length > 0 && hasExecutionContext(data.enumerator?.cursor)) throw typeError("can't copy execution context");
+  if (!block) {
+    if (args.length === 0) return self;
+    return makeLazy(lazyIterationSource(data.source, lazySourceArgs(data, args), args), data.steps);
+  }
+  return yield* runLazy(self, (value, yielded) => callProc(block, yielded ?? [value], { used: false }), args);
+});
+// code-gauge-allow duplicateLines 15 -- Collection methods retain separate iteration, return-value and rooting lifecycles despite similar accumulation blocks.
+def('Enumerator::Lazy', ['force', 'to_a'], [0, -1], function* (self: RObject, args) {
+  const items: Value[] = [];
+  rt().heldArrays.push(items);
+  try {
+    yield* runLazy(
+      self,
+      function* (value) {
+        items.push(value);
+        yield* [];
+      },
+      args
+    );
+    return arr(items);
+  } finally {
+    rt().heldArrays.pop();
+  }
+});
+def('Enumerator::Lazy', 'first', [0, 1], function* (self: RObject, args) {
+  const items: Value[] = [];
+  const count = args.length > 0 ? (yield* toIndexExact(args[0])).number : 1;
+  if (count < 0) throw argumentError('attempt to take negative size');
+  rt().heldArrays.push(items);
+  try {
+    if (count > 0) {
+      yield* runLazy(self, function* (value) {
+        items.push(value);
+        yield* [];
+        return items.length >= count ? STOP : undefined;
+      });
+    }
+    if (args.length === 0) return items[0] ?? NIL;
+    return arr(items);
+  } finally {
+    rt().heldArrays.pop();
+  }
+});
+def('Enumerator::Lazy', 'eager', 0, function (self: RObject) {
+  return makeEnumerator(self, 'each', []);
+});
+def('Enumerator::Lazy', 'inspect', 0, function* (self: RObject) {
+  if (self.data === undefined) return str(`#<${className(realClassOf(self))}: uninitialized>`);
+  const data = lazyDataOf(self);
+  const source = lazyDisplaySource(data.source);
+  const description = yield* lazySourceDescription(data.source);
+  let text =
+    data.steps.length > 0 && source instanceof RObject && source.cls.isSubclassOf(rt().c['Enumerator::Lazy'])
+      ? description
+      : `#<Enumerator::Lazy: ${description}>`;
+  for (const step of data.steps) {
+    const argumentsText: string[] = [];
+    for (const argument of step.args ?? []) argumentsText.push(yield* inspect(argument));
+    const suffix = argumentsText.length > 0 ? `(${argumentsText.join(', ')})` : '';
+    text = `#<Enumerator::Lazy: ${text}:${step.label ?? step.kind}${suffix}>`;
+  }
+  return str(text);
+});
+
+function packedYield(args: Value[]): Value {
+  return args.length === 0 ? NIL : args.length === 1 ? args[0] : arr(args);
+}
+
+function lazySegmentResult(outcome: IterationResult, feedback?: LazyFeedback): IterationResult {
+  return outcome === STOP ? STOP : feedback ? feedback.value : outcome;
 }

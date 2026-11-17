@@ -1,0 +1,38 @@
+#<struct Point x=3, y=4>
+3
+4
+4
+3
+5.0
+[3, 4]
+{x: 3, y: 4}
+[:x, :y]
+[:x, :y]
+true
+false
+(3, 4)
+#<struct Point x=10, y=20>
+2
+[10, 20]
+#<struct Point x=1, y=nil>
+#<struct Point x=5, y=6>
+"struct size differs"
+"no member 'z' in struct"
+:first
+nil
+#<struct K name="Al", age=3>
+"Al"
+1
+[1, 2]
+#<struct S v=nil>
+#<data Coord lat=1.5, lng=2>
+#<data Coord lat=3, lng=4>
+1.5
+{lat: 1.5, lng: 2}
+#<data Coord lat=1.5, lng=9>
+true
+true
+1.5,2
+"missing keyword: :lng"
+FrozenError
+"#<struct a=1>"

@@ -1,4 +1,5 @@
 import { numericCompare } from './conversions';
+import { isCoreMethod } from './define';
 import type { Gen } from './interp';
 import { isRubyFloat, type Value } from './objects';
 import { classOf } from './values';
@@ -97,7 +98,12 @@ export function* platformSort<T>(items: T[], compare: (a: T, b: T) => Gen<number
 export function isUniformKey(value: Value): boolean {
   if (isRubyFloat(value) && Number.isNaN(Number(value))) return false;
   if (typeof value === 'bigint' && (value < -(2n ** 62n) || value >= 2n ** 62n)) return false;
-  return (isRubyFloat(value) || typeof value === 'bigint') && classOf(value).findMethod('<=>')?.body.kind === 'native';
+  const method = classOf(value).findMethod('<=>');
+  return (
+    (isRubyFloat(value) || typeof value === 'bigint') &&
+    method !== undefined &&
+    isCoreMethod(method, method.owner, '<=>')
+  );
 }
 
 function less(a: Value, b: Value): boolean {
