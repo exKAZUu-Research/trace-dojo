@@ -1543,6 +1543,17 @@ main();
 for (const n of [1234.123456789, -1234.5678, 0.0001234, 1e21, -0.12345, 1.123, 1234n]) console.dir({ n }, { numericSeparator: true });`,
   ],
   [
+    'for-of over nullish coalescing named by value or by operand',
+    `const o = { a: 1, b: null, c: 0 }; const a = 1, b = 2;
+function main() {
+  for (const run of [() => { for (const v of o.a ?? o.b); }, () => { for (const v of (o.b ?? o.a)); }, () => { for (const v of o.c ?? 2); },
+    () => { for (const v of a ?? b); }, () => { for (const v of null ?? 1); }, () => [...(o.a ?? o.b)]]) {
+    try { run(); } catch (e) { console.log(e.message); }
+  }
+}
+main();`,
+  ],
+  [
     'definitions restating or changing a read-only array length',
     `for (const descriptor of [{writable:false},{value:1},{value:'1'},{value:2},{value:0},{writable:true},{enumerable:true},{},{value:-1}]) {
   const a = [1]; Object.defineProperty(a, 'length', { writable: false });

@@ -629,8 +629,8 @@ function namedParameter(param: Pattern): Pattern {
 
 /**
  * How V8 names the iterable of a `for...of` loop, which it names by its value instead when it is a conditional, an
- * object literal, a logical `&&` or `||` after a name, a `!` of an operation or a property, or a chain of more than two
- * operands of one operator or of commas.
+ * object literal, a logical `&&` or `||` after a name, a `??` after anything but a name or a literal, a `!` of an
+ * operation or a property, or a chain of more than two operands of one operator or of commas.
  */
 function forOfIterationSource(node: Node): IterationSource | undefined {
   const operand = unwrapParentheses(node);
@@ -641,6 +641,7 @@ function forOfIterationSource(node: Node): IterationSource | undefined {
     operand.type === 'ternary_expression' ||
     operand.type === 'object' ||
     (isLogical && !LITERAL_TYPES.has(unwrapParentheses(field(operand, 'left')).type)) ||
+    (operator === '??' && !['identifier', ...LITERAL_TYPES].includes(unwrapParentheses(field(operand, 'left')).type)) ||
     (isNegation && NEGATED_BY_VALUE.has(unwrapParentheses(field(operand, 'argument')).type)) ||
     (operator !== undefined && !isLogical && chain(operand, operator).length > 2) ||
     (operand.type === 'sequence_expression' && namedChildren(operand).flatMap(sequenceParts).length > 2)
