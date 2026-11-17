@@ -802,8 +802,11 @@ export abstract class ExpressionCompiler extends SemaBase {
     const first = staticResultOf(start)?.value as bigint | undefined;
     const last = end ? (staticResultOf(end)?.value as bigint | undefined) : staticLen;
     const reachesSentinel = !end || (last !== undefined && staticLen !== undefined && last === staticLen);
-    const sentinel = expression.sentinel
-      ? this.sentinelValue(expression.sentinel, child)
+    const sentinelExpression = expression.sentinel
+      ? this.coerce(this.compile(expression.sentinel, child), child, expression.sentinel)
+      : undefined;
+    const sentinel = sentinelExpression
+      ? (staticResultOf(sentinelExpression) ?? { value: this.knownValue(sentinelExpression, '番兵') }).value
       : reachesSentinel
         ? sourceSentinel
         : undefined;
@@ -827,7 +830,7 @@ export abstract class ExpressionCompiler extends SemaBase {
       this.checkMemoryOperand(operand, expression);
     const arrayType =
       type.kind === 'pointer' && type.size === 'one' && type.child.kind === 'array' ? type.child : undefined;
-    const operands = [base, start, ...(end ? [end] : [])];
+    const operands = [base, start, ...(end ? [end] : []), ...(sentinelExpression ? [sentinelExpression] : [])];
     const render = ([value, first, last]: Value[]): Value => {
       let target: Slots;
       let offset: number;

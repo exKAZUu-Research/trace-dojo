@@ -6092,3 +6092,21 @@ test.each([
     uncaughtException: undefined,
   });
 });
+
+test.each([
+  ['start', 'first:{get();break :first @as(usize,0);}..1', 'g'],
+  ['end', '0..last:{get();break :last @as(usize,1);}', 'g'],
+  [
+    'both bounds and sentinel',
+    'first:{get();break :first @as(usize,0);}..last:{get();break :last @as(usize,1);}:0',
+    'gg',
+  ],
+  ['end and sentinel labels', '0..last:{get();break :last @as(usize,1);}:zero:{get();break :zero @as(u8,0);}', 'gg'],
+])('raw labeled slice %s keeps each expression and its effects', (_name, bounds, effects) => {
+  const source = `const std=@import("std");fn get()void{std.debug.print("g",.{});}pub fn main()void{var a=[_]u8{7,0};_=&a;const s:[]u8=&a;const q=s[${bounds}];std.debug.print("{} {}",.{q.len,q[0]});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: `${effects}1 7`,
+    uncaughtException: undefined,
+  });
+});
