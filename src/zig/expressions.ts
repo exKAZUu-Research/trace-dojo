@@ -82,6 +82,7 @@ import {
   pointerTo,
   primitiveType,
   sameSentinel,
+  Sentinel,
   sliceOf,
   type StructField,
   type StructType,
@@ -791,7 +792,7 @@ export abstract class ExpressionCompiler extends SemaBase {
     let child: Type;
     let isConst: boolean;
     let staticLen: bigint | undefined;
-    let sourceSentinel: Value | undefined;
+    let sourceSentinel: Sentinel | undefined;
     if (type.kind === 'pointer' && type.size === 'one' && type.child.kind === 'array') {
       child = type.child.child;
       isConst = type.isConst;
@@ -812,7 +813,9 @@ export abstract class ExpressionCompiler extends SemaBase {
       ? this.coerce(this.compile(expression.sentinel, child), child, expression.sentinel)
       : undefined;
     const sentinel = sentinelExpression
-      ? (staticResultOf(sentinelExpression) ?? { value: this.knownValue(sentinelExpression, '番兵') }).value
+      ? new Sentinel(
+          (staticResultOf(sentinelExpression) ?? { value: this.knownValue(sentinelExpression, '番兵') }).value
+        )
       : reachesSentinel
         ? sourceSentinel
         : undefined;
@@ -868,8 +871,8 @@ export abstract class ExpressionCompiler extends SemaBase {
         to = offset + Number(toValue);
       if (sentinel !== undefined) {
         const actual = sizeOf(child) === 0 ? undefinedValue(child) : target.slots[to];
-        if (!scalarValuesEqual(actual, sentinel))
-          panic(`sentinel mismatch: expected ${String(sentinel)}, found ${String(actual)}`);
+        if (!scalarValuesEqual(actual, sentinel.value))
+          panic(`sentinel mismatch: expected ${String(sentinel.value)}, found ${String(actual)}`);
       }
       return resultLength === undefined
         ? new Slice(target, from, toValue - fromValue)
@@ -892,8 +895,8 @@ export abstract class ExpressionCompiler extends SemaBase {
       : { operand: value, read: (value) => value };
   }
 
-  private sentinelValue(expression: Expression, child: Type): Value {
-    return this.knownValue(this.coerce(this.compile(expression, child), child, expression), '番兵');
+  private sentinelValue(expression: Expression, child: Type): Sentinel {
+    return new Sentinel(this.knownValue(this.coerce(this.compile(expression, child), child, expression), '番兵'));
   }
 
   // Operators -------------------------------------------------------------------------------------------------------
@@ -1556,7 +1559,7 @@ export abstract class ExpressionCompiler extends SemaBase {
   ): {
     child: Type;
     length: bigint;
-    sentinel?: Value;
+    sentinel?: Sentinel;
     viaPointer: boolean;
     read: (value: Value) => Value[];
   } {

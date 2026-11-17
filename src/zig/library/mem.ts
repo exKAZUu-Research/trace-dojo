@@ -1068,7 +1068,7 @@ function zeroValue(type: Type, sema: SemaApi, span: Span): Value {
     case 'pointer': {
       if (type.size === 'slice') {
         if (type.sentinel === undefined) return new Slice(newArray([], undefined), 0, 0);
-        if (type.isConst && type.child === U8 && type.sentinel === 0n) return new Slice(newArray([], 0n), 0, 0);
+        if (type.isConst && type.child === U8 && type.sentinel.value === 0n) return new Slice(newArray([], 0n), 0, 0);
       }
       break;
     }

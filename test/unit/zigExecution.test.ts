@@ -7192,3 +7192,28 @@ test.each([false, true])('anytype preserves known type-bearing unions nested in 
     uncaughtException: undefined,
   });
 });
+
+test('void sentinel types retain distinct array and slice metadata and their sentinel access', () => {
+  const source = `const std=@import("std");pub fn main()void{
+    const a=[1:{}]void{{}};
+    const plain=[1]void{{}};
+    const s:[:{}]const void=&a;
+    var n:usize=1;_=&n;
+    const dynamic=a[0..(n):{}];
+    std.debug.print("{} {}|{} {}|{} {}|{}",.{@TypeOf(a),a[1],@TypeOf(s),s[1],@TypeOf(dynamic),dynamic[1],@TypeOf(a)==@TypeOf(plain)});
+  }`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: '[1:{}]void void|[:{}]const void void|[:{}]const void void|false',
+    uncaughtException: undefined,
+  });
+});
+
+test('large virtual void sentinel arrays retain their extra logical element', () => {
+  const source = `const std=@import("std");pub fn main()void{const a:[1000001:{}]void=@splat({});std.debug.print("{} {} {}",.{a.len,@TypeOf(a),a[1000001]});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: '1000001 [1000001:{}]void void',
+    uncaughtException: undefined,
+  });
+});

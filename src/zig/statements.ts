@@ -714,7 +714,7 @@ export abstract class StatementCompiler extends CallCompiler {
         const offset = aggregate instanceof ZArray ? aggregate.offset : 0;
         for (const [position, store] of stores.entries()) store(frame, aggregate, offset + position);
         if (type.kind === 'array' && type.sentinel !== undefined)
-          storeInto(aggregate, offset + value.elements.length, type.sentinel);
+          storeInto(aggregate, offset + value.elements.length, type.sentinel.value);
       };
     }
     if (value.kind === 'structInit' && !value.type && type.kind === 'union' && value.fields.length === 1) {

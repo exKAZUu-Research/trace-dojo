@@ -495,7 +495,7 @@ export class BufferMemory {
         for (let index = 0; index < type.length; index++)
           this.write(type.child, offset + index * sizeOf(type.child) * 8, array.get(index));
         if (type.sentinel !== undefined)
-          this.write(type.child, offset + Number(type.length) * sizeOf(type.child) * 8, type.sentinel);
+          this.write(type.child, offset + Number(type.length) * sizeOf(type.child) * 8, type.sentinel.value);
         return;
       }
       case 'struct': {

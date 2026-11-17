@@ -55,6 +55,7 @@ import {
   optionalOf,
   pointerTo,
   sameSentinel,
+  Sentinel,
   sliceOf,
   type StructField,
   type StructType,
@@ -1452,7 +1453,7 @@ function pointerChildCoercible(from: Type, to: Type, isConst: boolean): boolean 
   return inMemoryCoercible(from, to) && (isConst || inMemoryCoercible(to, from));
 }
 
-function pointerSentinel(pointer: Extract<Type, { kind: 'pointer' }>): Value | undefined {
+function pointerSentinel(pointer: Extract<Type, { kind: 'pointer' }>): Sentinel | undefined {
   if (pointer.size === 'slice') return pointer.sentinel;
   return pointer.child.kind === 'array' ? pointer.child.sentinel : undefined;
 }
@@ -1490,12 +1491,12 @@ export function smallestUnsigned(value: number): IntType {
   return intType(false, bits);
 }
 
-export function withSentinel(values: Value[], sentinel: Value | undefined): Value[] {
-  return sentinel === undefined ? values : [...values, sentinel];
+export function withSentinel(values: Value[], sentinel: Value | Sentinel): Value[] {
+  return sentinel === undefined ? values : [...values, sentinel instanceof Sentinel ? sentinel.value : sentinel];
 }
 
 /** A new array of the elements, followed by the sentinel of a sentinel-terminated array type. */
-export function newArray(values: Value[], sentinel: Value | undefined): ZArray {
+export function newArray(values: Value[], sentinel: Value | Sentinel): ZArray {
   return new ZArray(withSentinel(values, sentinel), 0, values.length, sentinel !== undefined);
 }
 

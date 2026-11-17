@@ -46,11 +46,15 @@ export interface SimpleType {
     | 'anytype';
 }
 
+export class Sentinel {
+  constructor(readonly value: Value) {}
+}
+
 export interface ArrayType {
   readonly kind: 'array';
   readonly length: bigint;
   readonly child: Type;
-  readonly sentinel?: Value;
+  readonly sentinel?: Sentinel;
 }
 
 export interface PointerType {
@@ -59,7 +63,7 @@ export interface PointerType {
   readonly size: 'one' | 'slice';
   readonly child: Type;
   readonly isConst: boolean;
-  readonly sentinel?: Value;
+  readonly sentinel?: Sentinel;
 }
 
 export interface OptionalType {
@@ -330,7 +334,7 @@ export function typeId(type: Type): number {
 }
 
 const interned = new WeakValueMap<string, Type>();
-const sentinelValues = new WeakValueMap<string, Value & object>();
+const sentinelValues = new WeakValueMap<string, Sentinel>();
 
 function intern<T extends Type>(key: string, create: () => T): T {
   let type = interned.get(key) as T | undefined;
@@ -341,21 +345,21 @@ function intern<T extends Type>(key: string, create: () => T): T {
   return type;
 }
 
-export function sameSentinel(left: Value, right: Value): boolean {
+export function sameSentinel(left: Sentinel | undefined, right: Sentinel | undefined): boolean {
   return sentinelKey(left) === sentinelKey(right);
 }
 
-function sentinelKey(sentinel: Value | undefined): string {
-  return sentinel === undefined ? '' : `:${scalarValueKey(sentinel)}`;
+function sentinelKey(sentinel: Sentinel | undefined): string {
+  return sentinel === undefined ? '' : `:${scalarValueKey(sentinel.value)}`;
 }
 
-export function arrayOf(length: number | bigint, child: Type, sentinel?: Value): ArrayType {
-  sentinel = canonicalSentinel(child, sentinel);
-  return intern(`array ${length} ${typeId(child)}${sentinelKey(sentinel)}`, () => ({
+export function arrayOf(length: number | bigint, child: Type, sentinel?: Value | Sentinel): ArrayType {
+  const canonical = canonicalSentinel(child, sentinel);
+  return intern(`array ${length} ${typeId(child)}${sentinelKey(canonical)}`, () => ({
     kind: 'array',
     length: BigInt(length),
     child,
-    sentinel,
+    sentinel: canonical,
   }));
 }
 
@@ -368,24 +372,26 @@ export function pointerTo(child: Type, isConst: boolean): PointerType {
   }));
 }
 
-export function sliceOf(child: Type, isConst: boolean, sentinel?: Value): PointerType {
-  sentinel = canonicalSentinel(child, sentinel);
-  return intern(`pointer slice ${typeId(child)} ${isConst}${sentinelKey(sentinel)}`, () => ({
+export function sliceOf(child: Type, isConst: boolean, sentinel?: Value | Sentinel): PointerType {
+  const canonical = canonicalSentinel(child, sentinel);
+  return intern(`pointer slice ${typeId(child)} ${isConst}${sentinelKey(canonical)}`, () => ({
     kind: 'pointer',
     size: 'slice',
     child,
     isConst,
-    sentinel,
+    sentinel: canonical,
   }));
 }
 
-function canonicalSentinel(type: Type, value: Value | undefined): Value | undefined {
-  if (typeof value !== 'object') return value;
+function canonicalSentinel(type: Type, sentinel: Value | Sentinel): Sentinel | undefined {
+  if (sentinel === undefined) return;
+  const value = sentinel instanceof Sentinel ? sentinel.value : sentinel;
   const key = `${typeId(type)} ${scalarValueKey(value)}`;
   const existing = sentinelValues.get(key);
   if (existing) return existing;
-  sentinelValues.set(key, value);
-  return value;
+  const canonical = new Sentinel(value);
+  sentinelValues.set(key, canonical);
+  return canonical;
 }
 
 export function optionalOf(child: Type): OptionalType {
@@ -530,13 +536,14 @@ export function typeName(type: Type): string {
       return `f${type.bits}`;
     }
     case 'array': {
-      const sentinel = type.sentinel === undefined ? '' : `:${constantText(type.sentinel, type.child, typeName)}`;
+      const sentinel = type.sentinel === undefined ? '' : `:${constantText(type.sentinel.value, type.child, typeName)}`;
       return `[${type.length}${sentinel}]${typeName(type.child)}`;
     }
     case 'pointer': {
       const qualifier = type.isConst ? 'const ' : '';
       if (type.size === 'slice') {
-        const sentinel = type.sentinel === undefined ? '' : `:${constantText(type.sentinel, type.child, typeName)}`;
+        const sentinel =
+          type.sentinel === undefined ? '' : `:${constantText(type.sentinel.value, type.child, typeName)}`;
         return `[${sentinel}]${qualifier}${typeName(type.child)}`;
       }
       return `*${qualifier}${typeName(type.child)}`;
