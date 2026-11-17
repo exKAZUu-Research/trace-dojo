@@ -487,7 +487,9 @@ function plainFunctionBase(fn: JsFunction, name: string, constructor: string | u
  * error's own properties, name places on the host, which a program here does not have.
  */
 export function errorHeadline(runtime: Runtime, error: JsObject): string {
-  return errorText(runtime, error, constructorName(runtime, error));
+  const constructor = constructorName(runtime, error);
+  // An error whose prototype no longer leads to an Error class prints as the plain object `console.log` shows.
+  return constructor === 'Object' ? inspect(runtime, error) : errorText(runtime, error, constructor);
 }
 
 /**

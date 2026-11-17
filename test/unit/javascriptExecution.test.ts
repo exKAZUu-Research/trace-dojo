@@ -189,6 +189,11 @@ test.each([
   ['a thrown negative zero, converted to a string', 'throw -0;', '0'],
   ['a thrown symbol, which cannot be converted to a string', "throw Symbol('s');", ''],
   [
+    'a thrown error whose prototype is a plain object',
+    "throw Object.setPrototypeOf(new Error('y'), { marker: 1 });",
+    '{}',
+  ],
+  [
     'a thrown error without a prototype',
     "throw Object.setPrototypeOf(new Error('x'), null);",
     '[Error: null prototype]: x',
