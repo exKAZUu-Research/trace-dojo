@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 478 -- Resolves expressions, lexical references, closure captures, and contextual assignment diagnostics; memoization is separate.
+// code-gauge-allow-file fileNcss 480 -- Resolves expressions, lexical references, closure captures, and contextual assignment diagnostics; memoization is separate.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import { unsupportedMessage } from '../unsupported';
@@ -153,6 +153,8 @@ export class ExpressionChecker {
       types.push(this.templateSubstitution(named(child)[0]));
       texts.push('');
     }
+    // A template without substitutions is a string literal, as TypeScript's `NoSubstitutionTemplateLiteral` is.
+    if (types.length === 0) return freshLiteralType(texts[0]);
     // A template a literal or template literal type expects has the type its parts spell.
     if (!contextual || !this.c.literals.hasLiteralConstituent(contextual, 'string')) return stringType;
     const spellable = types.every((type) =>
