@@ -3991,3 +3991,42 @@ test.each(['1...4=>{},3=>{},', '3=>{},1...4=>{},', '1...4=>{},4...8=>{},', '1=>{
     });
   }
 );
+
+test.each([
+  ['struct{value:T}', 'b.value'],
+  ['union(enum){value:T,none}', 'b.value'],
+])('generic container factories retain specialization identity: %s', (container, field) => {
+  const source = `const std=@import("std");fn Box(T:anytype)type{return ${container};}pub fn main()void{const A=Box(u8);const Again=Box(u8);const B=Box(u16);const b:B=.{.value=300};std.debug.print("{} {} {} {}",.{A==Again,A==B,@TypeOf(${field}),${field}});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: 'true false u16 300',
+    uncaughtException: undefined,
+  });
+});
+
+test('local containers carry the declaring function name', () => {
+  const source = `const std=@import("std");pub fn main()void{const S=struct{x:u8};const E=enum{a};const U=union(enum){a:u8};std.debug.print("{} {} {}",.{S,E,U});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: 'main.main.S main.main.E main.main.U',
+    uncaughtException: undefined,
+  });
+});
+
+test('function type observations resolve signatures without analyzing bodies', () => {
+  const source = `const std=@import("std");fn add(a:i32,b:i32)i32{return a+b;}fn unused(a:u8)u16{_=a;return true;}pub fn main()void{const f=add;std.debug.print("{} {} {}",.{@TypeOf(f),@TypeOf(&add),@TypeOf(unused)});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: 'fn (i32, i32) i32 *const fn (i32, i32) i32 fn (u8) u16',
+    uncaughtException: undefined,
+  });
+});
+
+test('generic function signatures preserve anytype dependencies and fixed types', () => {
+  const source = `const std=@import("std");fn id(x:anytype)@TypeOf(x){return x;}fn add(x:anytype,y:i32)u8{_=.{x,y};return 1;}fn take(T:anytype,x:T)T{return x;}pub fn main()void{std.debug.print("{} {} {}",.{@TypeOf(id),@TypeOf(add),@TypeOf(take)});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: 'fn (anytype) anytype fn (anytype, i32) u8 fn (anytype, anytype) anytype',
+    uncaughtException: undefined,
+  });
+});

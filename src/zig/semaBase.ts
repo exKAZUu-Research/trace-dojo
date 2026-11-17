@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 988 -- The file holds one layer of the compiler, whose parts share its private state.
+// code-gauge-allow-file fileNcss 995 -- The file holds one layer of the compiler, whose parts share its private state.
 import { CompileError } from '../interpreter/diagnostics';
 import { ExecutionBudget } from '../interpreter/limits';
 import { CompilationStorage, valueSlots } from './allocation';
@@ -209,8 +209,8 @@ export function isType(value: Value): value is Type {
 export abstract class SemaBase implements SemaApi {
   protected readonly storage = new CompilationStorage();
   protected scope: Scope;
-  /** The namespaces of user containers, by syntax, so that a container expression evaluates to one type. */
-  protected readonly containerTypes = new Map<Container, Type>();
+  protected readonly namespaceTypes = new WeakMap<Namespace, Type>();
+  private readonly containerTypes = new WeakMap<Scope, Map<Container, Type>>();
   /** The container-level variables the program uses, as the trace shows them. */
   protected readonly globalVariables: { name: string; type: Type; cell: Slots }[] = [];
   private anonymousCount = 0;
@@ -252,6 +252,7 @@ export abstract class SemaBase implements SemaApi {
 
   abstract compile(expression: Expression, resultType?: Type): TExpr;
   abstract callFunction(fn: FunctionInstance, args: Value[], frame: Frame): Value;
+  protected abstract declarationType(decl: Extract<Decl, { kind: 'fn' }>, span: Span): FnType;
   abstract instantiate(ref: FnRef, argTypes: readonly Type[], span: Span): FunctionInstance;
   abstract functionOf(
     value: TExpr,
@@ -319,7 +320,12 @@ export abstract class SemaBase implements SemaApi {
 
   /** Creates the type of a container expression, whose fields the compiler resolves when the type is first used. */
   protected containerType(container: Container, name: string | undefined): Type {
-    const existing = this.containerTypes.get(container);
+    let types = this.containerTypes.get(this.scope);
+    if (!types) {
+      types = new Map();
+      this.containerTypes.set(this.scope, types);
+    }
+    const existing = types.get(container);
     if (existing) return existing;
     const parent = this.enclosingNamespace();
     const qualified = name ?? `${parent.name}__${container.containerKind}_${++this.anonymousCount}`;
@@ -347,7 +353,8 @@ export abstract class SemaBase implements SemaApi {
         fields: undefined,
       };
     }
-    this.containerTypes.set(container, type);
+    types.set(container, type);
+    this.namespaceTypes.set(namespace, type);
     addDecls(namespace, container.members);
     return type;
   }
@@ -356,7 +363,7 @@ export abstract class SemaBase implements SemaApi {
   resolveDecl(decl: Decl, span: Span): TExpr {
     switch (decl.kind) {
       case 'fn': {
-        return known(NATIVE_FN_TYPE, new FnRef(decl) as unknown as Value, span);
+        return known(this.declarationType(decl, span), new FnRef(decl) as unknown as Value, span);
       }
       case 'native': {
         const { type, value, unavailable } = decl.resolve();
@@ -432,9 +439,9 @@ export abstract class SemaBase implements SemaApi {
   }
 
   /** A declaration's value, where a container takes the declaration's name. */
-  private compileDeclValue(value: Expression, declared: Type | undefined, name: string): TExpr {
+  protected compileDeclValue(value: Expression, declared: Type | undefined, name: string, owner?: string): TExpr {
     if (value.kind === 'container') {
-      const qualified = `${this.enclosingNamespace().name}.${name}`;
+      const qualified = `${this.enclosingNamespace().name}.${owner ? `${owner}.` : ''}${name}`;
       return known(TYPE_TYPE, this.containerType(value, qualified), value);
     }
     return this.compile(value, declared);
@@ -702,7 +709,7 @@ export abstract class SemaBase implements SemaApi {
       }
       case 'fn': {
         // A function body type such as `fn (i32) i32` takes a function declared with that signature.
-        if (from !== NATIVE_FN_TYPE || !(expression.value instanceof FnRef)) return undefined;
+        if (!(expression.value instanceof FnRef)) return undefined;
         const fn = this.functionOf(expression, span);
         if (!sameFnType(fn.params, fn.returnType, to)) return undefined;
         return known(to, this.knownFunctionValue(expression, span), span);
@@ -864,7 +871,7 @@ export abstract class SemaBase implements SemaApi {
   // code-gauge-allow functionCognitiveComplexity 27 -- Checks each rule of Zig's type coercion or container analysis in turn.
   private coerceToPointer(expression: TExpr, to: Extract<Type, { kind: 'pointer' }>, span: Span): TExpr | undefined {
     const from = expression.type;
-    if (from.kind === 'fn' || (from === NATIVE_FN_TYPE && expression.value instanceof FnRef)) {
+    if (from.kind === 'fn') {
       if (to.size !== 'one' || to.child.kind !== 'fn') return undefined;
       const fn = this.functionOf(expression, span);
       if (!sameFnType(fn.params, fn.returnType, to.child)) return undefined;

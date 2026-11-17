@@ -41,7 +41,8 @@ export interface SimpleType {
     | 'null'
     | 'undefined'
     | 'enum_literal'
-    | 'anyopaque';
+    | 'anyopaque'
+    | 'anytype';
 }
 
 export interface ArrayType {
@@ -185,6 +186,7 @@ function simple(kind: SimpleType['kind']): SimpleType {
 export const COMPTIME_INT = simple('comptime_int');
 export const COMPTIME_FLOAT = simple('comptime_float');
 export const BOOL = simple('bool');
+export const ANYTYPE = simple('anytype');
 export const VOID = simple('void');
 export const NORETURN = simple('noreturn');
 export const TYPE = simple('type');

@@ -18,10 +18,12 @@ import {
   type TExpr,
 } from './semaBase';
 import {
+  ANYTYPE,
   type Decl,
   type ErrorSetType,
   errorUnionOf,
   type FnType,
+  fnType,
   isComptimeOnly,
   type Namespace,
   pointerTo,
@@ -217,6 +219,52 @@ export abstract class CallCompiler extends BuiltinCompiler {
       return this.dereferenced(receiver, span);
     }
     return this.coerce(receiver, declared, span);
+  }
+
+  private readonly declarationTypes = new WeakMap<Decl, FnType>();
+  private readonly resolvingSignatures = new Set<Decl>();
+
+  protected declarationType(decl: Extract<Decl, { kind: 'fn' }>, span: Span): FnType {
+    const cached = this.declarationTypes.get(decl);
+    if (cached) return cached;
+    if (this.resolvingSignatures.has(decl)) return this.error(span, '関数の型が、それ自身に依存しています。');
+    this.resolvingSignatures.add(decl);
+    try {
+      const unknown = new Set<string>();
+      const params: Type[] = [];
+      for (const [index, param] of decl.syntax.params.entries()) {
+        const generic = !param.type || this.dependsOnParameters(param.type, unknown);
+        params.push(generic ? ANYTYPE : (this.parameterType(decl, index, params) as Type));
+        if (generic) unknown.add(param.name);
+      }
+      let result = this.dependsOnParameters(decl.syntax.returnType, unknown)
+        ? ANYTYPE
+        : this.inParameterScope(decl, params, () => this.compileType(decl.syntax.returnType));
+      if (decl.syntax.inferredErrorSet && result !== ANYTYPE)
+        result = errorUnionOf(
+          {
+            kind: 'error_set',
+            names: new Set(),
+            inferredFrom: `${decl.namespace.name}.${decl.syntax.name}`,
+            resolved: false,
+          },
+          result
+        );
+      const type = fnType(params, result);
+      this.declarationTypes.set(decl, type);
+      return type;
+    } finally {
+      this.resolvingSignatures.delete(decl);
+    }
+  }
+
+  private dependsOnParameters(node: unknown, names: ReadonlySet<string>): boolean {
+    if (names.size === 0) return false;
+    this.spendCompilation();
+    if (!node || typeof node !== 'object') return false;
+    if ('kind' in node && node.kind === 'identifier' && 'name' in node && typeof node.name === 'string')
+      return names.has(node.name);
+    return Object.values(node).some((value) => this.dependsOnParameters(value, names));
   }
 
   /** The declared type of a parameter (undefined for `anytype`), seeing the earlier parameters' types. */

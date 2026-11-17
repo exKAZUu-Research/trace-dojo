@@ -297,7 +297,7 @@ export abstract class StatementCompiler extends CallCompiler {
     const declared = statement.type ? this.compileType(statement.type) : undefined;
     const valueSyntax = statement.value as Expression;
     const isUndefined = valueSyntax.kind === 'undefined';
-    let value = this.compile(valueSyntax, declared);
+    let value = this.compileDeclValue(valueSyntax, declared, statement.name, this.fn?.instance.name);
     if (declared) value = this.coerce(value, declared, valueSyntax);
     const type = value.type;
     if (!statement.isConst && isComptimeOnly(type)) {
@@ -1627,7 +1627,7 @@ export abstract class StatementCompiler extends CallCompiler {
 
   /** How a `for` reads an array, a pointer to one, or a slice, by value or by pointer. */
   // code-gauge-allow functionNcss 51 -- Keeps the analysis and the generated code of one construct together, as Zig's Sema does.
-  // code-gauge-allow functionCognitiveComplexity 18 -- Keeps all loop operand views and their exact lengths together.
+  // code-gauge-allow functionCognitiveComplexity 20 -- Keeps all loop operand views and their exact lengths together.
   private forOperand(
     compiled: TExpr,
     byPointer: boolean,

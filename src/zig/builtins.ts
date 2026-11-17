@@ -528,9 +528,8 @@ export abstract class BuiltinCompiler extends ExpressionCompiler {
   /** `@This()`: the innermost struct, enum, or union being declared. */
   protected thisType(span: Span): Type {
     const namespace = this.enclosingNamespace();
-    for (const type of this.containerTypes.values()) {
-      if ((type as { namespace?: unknown }).namespace === namespace) return type;
-    }
+    const type = this.namespaceTypes.get(namespace);
+    if (type) return type;
     if (namespace === this.root) return this.rootType();
     return this.error(span, '@This() の型が見つかりません。');
   }
