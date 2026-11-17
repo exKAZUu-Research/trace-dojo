@@ -40578,3 +40578,3207 @@ test.each(nativeRegexpPieceEncodingCases)(
     expect(run(source)).toMatchObject({ kind: 'executed', stdout, uncaughtException: undefined });
   }
 );
+
+const nativeDeclaredStringEncodingCases = [
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("é",encoding:"US-ASCII");[:delete_prefix,:delete_suffix].each{|m|begin;p [m,desc(s.send(m,"x"))];rescue=>x;p [m,x.class,x.message];end};[:ljust,:rjust,:center].each{|m|[-1,1,3,4].each{|w|begin;p [m,w,desc(s.send(m,w))];rescue=>x;p [m,w,x.class,x.message];end}};p desc(s.split(",",1));s.split(",",1){|x|p desc(x)}',
+    '[:delete_prefix, [[195, 169], #<Encoding:US-ASCII>, false]]\n[:delete_suffix, [[195, 169], #<Encoding:US-ASCII>, false]]\n[:ljust, -1, [[195, 169], #<Encoding:US-ASCII>, false]]\n[:ljust, 1, [[195, 169], #<Encoding:US-ASCII>, false]]\n[:ljust, 3, [[195, 169, 32], #<Encoding:US-ASCII>, false]]\n[:ljust, 4, [[195, 169, 32, 32], #<Encoding:US-ASCII>, false]]\n[:rjust, -1, [[195, 169], #<Encoding:US-ASCII>, false]]\n[:rjust, 1, [[195, 169], #<Encoding:US-ASCII>, false]]\n[:rjust, 3, [[32, 195, 169], #<Encoding:US-ASCII>, false]]\n[:rjust, 4, [[32, 32, 195, 169], #<Encoding:US-ASCII>, false]]\n[:center, -1, [[195, 169], #<Encoding:US-ASCII>, false]]\n[:center, 1, [[195, 169], #<Encoding:US-ASCII>, false]]\n[:center, 3, [[195, 169, 32], #<Encoding:US-ASCII>, false]]\n[:center, 4, [[32, 195, 169, 32], #<Encoding:US-ASCII>, false]]\n[[[195, 169], #<Encoding:US-ASCII>, false]]\n[[195, 169], #<Encoding:US-ASCII>, false]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("é",encoding:"US-ASCII");[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,"a"))];rescue=>x;p [m,x.class,x.message,s.bytes];end}',
+    '[:count, ArgumentError, "invalid byte sequence in US-ASCII", [195, 169]]\n[:delete, ArgumentError, "invalid byte sequence in US-ASCII", [195, 169]]\n[:delete!, ArgumentError, "invalid byte sequence in US-ASCII", [195, 169]]\n[:split, ArgumentError, "invalid byte sequence in US-ASCII", [195, 169]]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("é",encoding:"US-ASCII");s.freeze;[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,"a"))];rescue=>x;p [m,x.class,x.message,s.bytes];end}',
+    '[:count, ArgumentError, "invalid byte sequence in US-ASCII", [195, 169]]\n[:delete, ArgumentError, "invalid byte sequence in US-ASCII", [195, 169]]\n[:delete!, FrozenError, "can\'t modify frozen String: \\"\\\\xC3\\\\xA9\\"", [195, 169]]\n[:split, ArgumentError, "invalid byte sequence in US-ASCII", [195, 169]]\n',
+  ],
+  [
+    's=String.new("é",encoding:"US-ASCII");n=String.new("a",encoding:"US-ASCII");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, false]\n[:index, nil]\n[:rindex, nil]\n[:start_with?, false]\n[:end_with?, false]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, nil]\n[:rindex, -1, nil]\n[:index, 0, nil]\n[:rindex, 0, nil]\n[:index, 1, nil]\n[:rindex, 1, nil]\n[:index, 2, nil]\n[:rindex, 2, nil]\n[:index, 3, nil]\n[:rindex, 3, nil]\n[:index, 4, nil]\n[:rindex, 4, nil]\n',
+  ],
+  [
+    's=String.new("é",encoding:"US-ASCII");n=String.new("é",encoding:"US-ASCII");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, false]\n[:index, nil]\n[:rindex, nil]\n[:start_with?, true]\n[:end_with?, true]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, nil]\n[:rindex, -1, nil]\n[:index, 0, nil]\n[:rindex, 0, nil]\n[:index, 1, nil]\n[:rindex, 1, nil]\n[:index, 2, nil]\n[:rindex, 2, nil]\n[:index, 3, nil]\n[:rindex, 3, nil]\n[:index, 4, nil]\n[:rindex, 4, nil]\n',
+  ],
+  [
+    's=String.new("é",encoding:"US-ASCII");n=String.new("x",encoding:"US-ASCII");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, false]\n[:index, nil]\n[:rindex, nil]\n[:start_with?, false]\n[:end_with?, false]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, nil]\n[:rindex, -1, nil]\n[:index, 0, nil]\n[:rindex, 0, nil]\n[:index, 1, nil]\n[:rindex, 1, nil]\n[:index, 2, nil]\n[:rindex, 2, nil]\n[:index, 3, nil]\n[:rindex, 3, nil]\n[:index, 4, nil]\n[:rindex, 4, nil]\n',
+  ],
+  [
+    's=String.new("é",encoding:"US-ASCII");n=String.new("",encoding:"US-ASCII");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, true]\n[:index, 0]\n[:rindex, 2]\n[:start_with?, true]\n[:end_with?, true]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, 1]\n[:rindex, -1, 1]\n[:index, 0, 0]\n[:rindex, 0, 0]\n[:index, 1, 1]\n[:rindex, 1, 1]\n[:index, 2, 2]\n[:rindex, 2, 2]\n[:index, 3, nil]\n[:rindex, 3, 2]\n[:index, 4, nil]\n[:rindex, 4, 2]\n',
+  ],
+  [
+    's=String.new("é",encoding:"US-ASCII");n=String.new(255.chr,encoding:"US-ASCII");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, false]\n[:index, nil]\n[:rindex, nil]\n[:start_with?, false]\n[:end_with?, false]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, nil]\n[:rindex, -1, nil]\n[:index, 0, nil]\n[:rindex, 0, nil]\n[:index, 1, nil]\n[:rindex, 1, nil]\n[:index, 2, nil]\n[:rindex, 2, nil]\n[:index, 3, nil]\n[:rindex, 3, nil]\n[:index, 4, nil]\n[:rindex, 4, nil]\n',
+  ],
+  [
+    's=String.new("é",encoding:"US-ASCII");n=String.new("a",encoding:"UTF-8");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, false]\n[:index, nil]\n[:rindex, nil]\n[:start_with?, false]\n[:end_with?, false]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, nil]\n[:rindex, -1, nil]\n[:index, 0, nil]\n[:rindex, 0, nil]\n[:index, 1, nil]\n[:rindex, 1, nil]\n[:index, 2, nil]\n[:rindex, 2, nil]\n[:index, 3, nil]\n[:rindex, 3, nil]\n[:index, 4, nil]\n[:rindex, 4, nil]\n',
+  ],
+  [
+    's=String.new("é",encoding:"US-ASCII");n=String.new("é",encoding:"UTF-8");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and UTF-8"]\n[:index, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and UTF-8"]\n[:rindex, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and UTF-8"]\n[:start_with?, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and UTF-8"]\n[:end_with?, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and UTF-8"]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and UTF-8"]\n[:rindex, -1, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and UTF-8"]\n[:index, 0, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and UTF-8"]\n[:rindex, 0, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and UTF-8"]\n[:index, 1, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and UTF-8"]\n[:rindex, 1, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and UTF-8"]\n[:index, 2, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and UTF-8"]\n[:rindex, 2, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and UTF-8"]\n[:index, 3, nil]\n[:rindex, 3, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and UTF-8"]\n[:index, 4, nil]\n[:rindex, 4, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and UTF-8"]\n',
+  ],
+  [
+    's=String.new("é",encoding:"US-ASCII");n=String.new("x",encoding:"UTF-8");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, false]\n[:index, nil]\n[:rindex, nil]\n[:start_with?, false]\n[:end_with?, false]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, nil]\n[:rindex, -1, nil]\n[:index, 0, nil]\n[:rindex, 0, nil]\n[:index, 1, nil]\n[:rindex, 1, nil]\n[:index, 2, nil]\n[:rindex, 2, nil]\n[:index, 3, nil]\n[:rindex, 3, nil]\n[:index, 4, nil]\n[:rindex, 4, nil]\n',
+  ],
+  [
+    's=String.new("é",encoding:"US-ASCII");n=String.new("",encoding:"UTF-8");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, true]\n[:index, 0]\n[:rindex, 2]\n[:start_with?, true]\n[:end_with?, true]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, 1]\n[:rindex, -1, 1]\n[:index, 0, 0]\n[:rindex, 0, 0]\n[:index, 1, 1]\n[:rindex, 1, 1]\n[:index, 2, 2]\n[:rindex, 2, 2]\n[:index, 3, nil]\n[:rindex, 3, 2]\n[:index, 4, nil]\n[:rindex, 4, 2]\n',
+  ],
+  [
+    's=String.new("é",encoding:"US-ASCII");n=String.new(255.chr,encoding:"UTF-8");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and UTF-8"]\n[:index, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and UTF-8"]\n[:rindex, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and UTF-8"]\n[:start_with?, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and UTF-8"]\n[:end_with?, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and UTF-8"]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and UTF-8"]\n[:rindex, -1, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and UTF-8"]\n[:index, 0, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and UTF-8"]\n[:rindex, 0, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and UTF-8"]\n[:index, 1, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and UTF-8"]\n[:rindex, 1, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and UTF-8"]\n[:index, 2, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and UTF-8"]\n[:rindex, 2, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and UTF-8"]\n[:index, 3, nil]\n[:rindex, 3, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and UTF-8"]\n[:index, 4, nil]\n[:rindex, 4, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and UTF-8"]\n',
+  ],
+  [
+    's=String.new("é",encoding:"US-ASCII");n=String.new("a",encoding:"ASCII-8BIT");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, false]\n[:index, nil]\n[:rindex, nil]\n[:start_with?, false]\n[:end_with?, false]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, nil]\n[:rindex, -1, nil]\n[:index, 0, nil]\n[:rindex, 0, nil]\n[:index, 1, nil]\n[:rindex, 1, nil]\n[:index, 2, nil]\n[:rindex, 2, nil]\n[:index, 3, nil]\n[:rindex, 3, nil]\n[:index, 4, nil]\n[:rindex, 4, nil]\n',
+  ],
+  [
+    's=String.new("é",encoding:"US-ASCII");n=String.new("é",encoding:"ASCII-8BIT");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and BINARY (ASCII-8BIT)"]\n[:index, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and BINARY (ASCII-8BIT)"]\n[:rindex, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and BINARY (ASCII-8BIT)"]\n[:start_with?, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and BINARY (ASCII-8BIT)"]\n[:end_with?, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and BINARY (ASCII-8BIT)"]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and BINARY (ASCII-8BIT)"]\n[:rindex, -1, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and BINARY (ASCII-8BIT)"]\n[:index, 0, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and BINARY (ASCII-8BIT)"]\n[:rindex, 0, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and BINARY (ASCII-8BIT)"]\n[:index, 1, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and BINARY (ASCII-8BIT)"]\n[:rindex, 1, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and BINARY (ASCII-8BIT)"]\n[:index, 2, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and BINARY (ASCII-8BIT)"]\n[:rindex, 2, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and BINARY (ASCII-8BIT)"]\n[:index, 3, nil]\n[:rindex, 3, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and BINARY (ASCII-8BIT)"]\n[:index, 4, nil]\n[:rindex, 4, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and BINARY (ASCII-8BIT)"]\n',
+  ],
+  [
+    's=String.new("é",encoding:"US-ASCII");n=String.new("x",encoding:"ASCII-8BIT");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, false]\n[:index, nil]\n[:rindex, nil]\n[:start_with?, false]\n[:end_with?, false]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, nil]\n[:rindex, -1, nil]\n[:index, 0, nil]\n[:rindex, 0, nil]\n[:index, 1, nil]\n[:rindex, 1, nil]\n[:index, 2, nil]\n[:rindex, 2, nil]\n[:index, 3, nil]\n[:rindex, 3, nil]\n[:index, 4, nil]\n[:rindex, 4, nil]\n',
+  ],
+  [
+    's=String.new("é",encoding:"US-ASCII");n=String.new("",encoding:"ASCII-8BIT");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, true]\n[:index, 0]\n[:rindex, 2]\n[:start_with?, true]\n[:end_with?, true]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, 1]\n[:rindex, -1, 1]\n[:index, 0, 0]\n[:rindex, 0, 0]\n[:index, 1, 1]\n[:rindex, 1, 1]\n[:index, 2, 2]\n[:rindex, 2, 2]\n[:index, 3, nil]\n[:rindex, 3, 2]\n[:index, 4, nil]\n[:rindex, 4, 2]\n',
+  ],
+  [
+    's=String.new("é",encoding:"US-ASCII");n=String.new(255.chr,encoding:"ASCII-8BIT");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and BINARY (ASCII-8BIT)"]\n[:index, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and BINARY (ASCII-8BIT)"]\n[:rindex, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and BINARY (ASCII-8BIT)"]\n[:start_with?, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and BINARY (ASCII-8BIT)"]\n[:end_with?, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and BINARY (ASCII-8BIT)"]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and BINARY (ASCII-8BIT)"]\n[:rindex, -1, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and BINARY (ASCII-8BIT)"]\n[:index, 0, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and BINARY (ASCII-8BIT)"]\n[:rindex, 0, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and BINARY (ASCII-8BIT)"]\n[:index, 1, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and BINARY (ASCII-8BIT)"]\n[:rindex, 1, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and BINARY (ASCII-8BIT)"]\n[:index, 2, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and BINARY (ASCII-8BIT)"]\n[:rindex, 2, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and BINARY (ASCII-8BIT)"]\n[:index, 3, nil]\n[:rindex, 3, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and BINARY (ASCII-8BIT)"]\n[:index, 4, nil]\n[:rindex, 4, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and BINARY (ASCII-8BIT)"]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("éa",encoding:"US-ASCII");[:delete_prefix,:delete_suffix].each{|m|begin;p [m,desc(s.send(m,"x"))];rescue=>x;p [m,x.class,x.message];end};[:ljust,:rjust,:center].each{|m|[-1,1,3,4].each{|w|begin;p [m,w,desc(s.send(m,w))];rescue=>x;p [m,w,x.class,x.message];end}};p desc(s.split(",",1));s.split(",",1){|x|p desc(x)}',
+    '[:delete_prefix, [[195, 169, 97], #<Encoding:US-ASCII>, false]]\n[:delete_suffix, [[195, 169, 97], #<Encoding:US-ASCII>, false]]\n[:ljust, -1, [[195, 169, 97], #<Encoding:US-ASCII>, false]]\n[:ljust, 1, [[195, 169, 97], #<Encoding:US-ASCII>, false]]\n[:ljust, 3, [[195, 169, 97], #<Encoding:US-ASCII>, false]]\n[:ljust, 4, [[195, 169, 97, 32], #<Encoding:US-ASCII>, false]]\n[:rjust, -1, [[195, 169, 97], #<Encoding:US-ASCII>, false]]\n[:rjust, 1, [[195, 169, 97], #<Encoding:US-ASCII>, false]]\n[:rjust, 3, [[195, 169, 97], #<Encoding:US-ASCII>, false]]\n[:rjust, 4, [[32, 195, 169, 97], #<Encoding:US-ASCII>, false]]\n[:center, -1, [[195, 169, 97], #<Encoding:US-ASCII>, false]]\n[:center, 1, [[195, 169, 97], #<Encoding:US-ASCII>, false]]\n[:center, 3, [[195, 169, 97], #<Encoding:US-ASCII>, false]]\n[:center, 4, [[195, 169, 97, 32], #<Encoding:US-ASCII>, false]]\n[[[195, 169, 97], #<Encoding:US-ASCII>, false]]\n[[195, 169, 97], #<Encoding:US-ASCII>, false]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("éa",encoding:"US-ASCII");[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,"a"))];rescue=>x;p [m,x.class,x.message,s.bytes];end}',
+    '[:count, ArgumentError, "invalid byte sequence in US-ASCII", [195, 169, 97]]\n[:delete, ArgumentError, "invalid byte sequence in US-ASCII", [195, 169, 97]]\n[:delete!, ArgumentError, "invalid byte sequence in US-ASCII", [195, 169, 97]]\n[:split, ArgumentError, "invalid byte sequence in US-ASCII", [195, 169, 97]]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("éa",encoding:"US-ASCII");s.freeze;[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,"a"))];rescue=>x;p [m,x.class,x.message,s.bytes];end}',
+    '[:count, ArgumentError, "invalid byte sequence in US-ASCII", [195, 169, 97]]\n[:delete, ArgumentError, "invalid byte sequence in US-ASCII", [195, 169, 97]]\n[:delete!, FrozenError, "can\'t modify frozen String: \\"\\\\xC3\\\\xA9a\\"", [195, 169, 97]]\n[:split, ArgumentError, "invalid byte sequence in US-ASCII", [195, 169, 97]]\n',
+  ],
+  [
+    's=String.new("éa",encoding:"US-ASCII");n=String.new("a",encoding:"US-ASCII");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, true]\n[:index, 2]\n[:rindex, 2]\n[:start_with?, false]\n[:end_with?, true]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, 2]\n[:rindex, -1, 2]\n[:index, 0, 2]\n[:rindex, 0, nil]\n[:index, 1, 2]\n[:rindex, 1, nil]\n[:index, 2, 2]\n[:rindex, 2, 2]\n[:index, 3, nil]\n[:rindex, 3, 2]\n[:index, 4, nil]\n[:rindex, 4, 2]\n',
+  ],
+  [
+    's=String.new("éa",encoding:"US-ASCII");n=String.new("é",encoding:"US-ASCII");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, false]\n[:index, nil]\n[:rindex, nil]\n[:start_with?, true]\n[:end_with?, false]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, nil]\n[:rindex, -1, nil]\n[:index, 0, nil]\n[:rindex, 0, nil]\n[:index, 1, nil]\n[:rindex, 1, nil]\n[:index, 2, nil]\n[:rindex, 2, nil]\n[:index, 3, nil]\n[:rindex, 3, nil]\n[:index, 4, nil]\n[:rindex, 4, nil]\n',
+  ],
+  [
+    's=String.new("éa",encoding:"US-ASCII");n=String.new("x",encoding:"US-ASCII");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, false]\n[:index, nil]\n[:rindex, nil]\n[:start_with?, false]\n[:end_with?, false]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, nil]\n[:rindex, -1, nil]\n[:index, 0, nil]\n[:rindex, 0, nil]\n[:index, 1, nil]\n[:rindex, 1, nil]\n[:index, 2, nil]\n[:rindex, 2, nil]\n[:index, 3, nil]\n[:rindex, 3, nil]\n[:index, 4, nil]\n[:rindex, 4, nil]\n',
+  ],
+  [
+    's=String.new("éa",encoding:"US-ASCII");n=String.new("",encoding:"US-ASCII");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, true]\n[:index, 0]\n[:rindex, 3]\n[:start_with?, true]\n[:end_with?, true]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, 2]\n[:rindex, -1, 2]\n[:index, 0, 0]\n[:rindex, 0, 0]\n[:index, 1, 1]\n[:rindex, 1, 1]\n[:index, 2, 2]\n[:rindex, 2, 2]\n[:index, 3, 3]\n[:rindex, 3, 3]\n[:index, 4, nil]\n[:rindex, 4, 3]\n',
+  ],
+  [
+    's=String.new("éa",encoding:"US-ASCII");n=String.new(255.chr,encoding:"US-ASCII");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, false]\n[:index, nil]\n[:rindex, nil]\n[:start_with?, false]\n[:end_with?, false]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, nil]\n[:rindex, -1, nil]\n[:index, 0, nil]\n[:rindex, 0, nil]\n[:index, 1, nil]\n[:rindex, 1, nil]\n[:index, 2, nil]\n[:rindex, 2, nil]\n[:index, 3, nil]\n[:rindex, 3, nil]\n[:index, 4, nil]\n[:rindex, 4, nil]\n',
+  ],
+  [
+    's=String.new("éa",encoding:"US-ASCII");n=String.new("a",encoding:"UTF-8");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, true]\n[:index, 2]\n[:rindex, 2]\n[:start_with?, false]\n[:end_with?, true]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, 2]\n[:rindex, -1, 2]\n[:index, 0, 2]\n[:rindex, 0, nil]\n[:index, 1, 2]\n[:rindex, 1, nil]\n[:index, 2, 2]\n[:rindex, 2, 2]\n[:index, 3, nil]\n[:rindex, 3, 2]\n[:index, 4, nil]\n[:rindex, 4, 2]\n',
+  ],
+  [
+    's=String.new("éa",encoding:"US-ASCII");n=String.new("é",encoding:"UTF-8");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and UTF-8"]\n[:index, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and UTF-8"]\n[:rindex, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and UTF-8"]\n[:start_with?, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and UTF-8"]\n[:end_with?, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and UTF-8"]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and UTF-8"]\n[:rindex, -1, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and UTF-8"]\n[:index, 0, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and UTF-8"]\n[:rindex, 0, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and UTF-8"]\n[:index, 1, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and UTF-8"]\n[:rindex, 1, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and UTF-8"]\n[:index, 2, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and UTF-8"]\n[:rindex, 2, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and UTF-8"]\n[:index, 3, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and UTF-8"]\n[:rindex, 3, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and UTF-8"]\n[:index, 4, nil]\n[:rindex, 4, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and UTF-8"]\n',
+  ],
+  [
+    's=String.new("éa",encoding:"US-ASCII");n=String.new("x",encoding:"UTF-8");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, false]\n[:index, nil]\n[:rindex, nil]\n[:start_with?, false]\n[:end_with?, false]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, nil]\n[:rindex, -1, nil]\n[:index, 0, nil]\n[:rindex, 0, nil]\n[:index, 1, nil]\n[:rindex, 1, nil]\n[:index, 2, nil]\n[:rindex, 2, nil]\n[:index, 3, nil]\n[:rindex, 3, nil]\n[:index, 4, nil]\n[:rindex, 4, nil]\n',
+  ],
+  [
+    's=String.new("éa",encoding:"US-ASCII");n=String.new("",encoding:"UTF-8");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, true]\n[:index, 0]\n[:rindex, 3]\n[:start_with?, true]\n[:end_with?, true]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, 2]\n[:rindex, -1, 2]\n[:index, 0, 0]\n[:rindex, 0, 0]\n[:index, 1, 1]\n[:rindex, 1, 1]\n[:index, 2, 2]\n[:rindex, 2, 2]\n[:index, 3, 3]\n[:rindex, 3, 3]\n[:index, 4, nil]\n[:rindex, 4, 3]\n',
+  ],
+  [
+    's=String.new("éa",encoding:"US-ASCII");n=String.new(255.chr,encoding:"UTF-8");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and UTF-8"]\n[:index, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and UTF-8"]\n[:rindex, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and UTF-8"]\n[:start_with?, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and UTF-8"]\n[:end_with?, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and UTF-8"]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and UTF-8"]\n[:rindex, -1, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and UTF-8"]\n[:index, 0, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and UTF-8"]\n[:rindex, 0, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and UTF-8"]\n[:index, 1, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and UTF-8"]\n[:rindex, 1, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and UTF-8"]\n[:index, 2, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and UTF-8"]\n[:rindex, 2, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and UTF-8"]\n[:index, 3, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and UTF-8"]\n[:rindex, 3, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and UTF-8"]\n[:index, 4, nil]\n[:rindex, 4, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and UTF-8"]\n',
+  ],
+  [
+    's=String.new("éa",encoding:"US-ASCII");n=String.new("a",encoding:"ASCII-8BIT");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, true]\n[:index, 2]\n[:rindex, 2]\n[:start_with?, false]\n[:end_with?, true]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, 2]\n[:rindex, -1, 2]\n[:index, 0, 2]\n[:rindex, 0, nil]\n[:index, 1, 2]\n[:rindex, 1, nil]\n[:index, 2, 2]\n[:rindex, 2, 2]\n[:index, 3, nil]\n[:rindex, 3, 2]\n[:index, 4, nil]\n[:rindex, 4, 2]\n',
+  ],
+  [
+    's=String.new("éa",encoding:"US-ASCII");n=String.new("é",encoding:"ASCII-8BIT");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and BINARY (ASCII-8BIT)"]\n[:index, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and BINARY (ASCII-8BIT)"]\n[:rindex, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and BINARY (ASCII-8BIT)"]\n[:start_with?, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and BINARY (ASCII-8BIT)"]\n[:end_with?, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and BINARY (ASCII-8BIT)"]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and BINARY (ASCII-8BIT)"]\n[:rindex, -1, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and BINARY (ASCII-8BIT)"]\n[:index, 0, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and BINARY (ASCII-8BIT)"]\n[:rindex, 0, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and BINARY (ASCII-8BIT)"]\n[:index, 1, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and BINARY (ASCII-8BIT)"]\n[:rindex, 1, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and BINARY (ASCII-8BIT)"]\n[:index, 2, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and BINARY (ASCII-8BIT)"]\n[:rindex, 2, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and BINARY (ASCII-8BIT)"]\n[:index, 3, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and BINARY (ASCII-8BIT)"]\n[:rindex, 3, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and BINARY (ASCII-8BIT)"]\n[:index, 4, nil]\n[:rindex, 4, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and BINARY (ASCII-8BIT)"]\n',
+  ],
+  [
+    's=String.new("éa",encoding:"US-ASCII");n=String.new("x",encoding:"ASCII-8BIT");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, false]\n[:index, nil]\n[:rindex, nil]\n[:start_with?, false]\n[:end_with?, false]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, nil]\n[:rindex, -1, nil]\n[:index, 0, nil]\n[:rindex, 0, nil]\n[:index, 1, nil]\n[:rindex, 1, nil]\n[:index, 2, nil]\n[:rindex, 2, nil]\n[:index, 3, nil]\n[:rindex, 3, nil]\n[:index, 4, nil]\n[:rindex, 4, nil]\n',
+  ],
+  [
+    's=String.new("éa",encoding:"US-ASCII");n=String.new("",encoding:"ASCII-8BIT");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, true]\n[:index, 0]\n[:rindex, 3]\n[:start_with?, true]\n[:end_with?, true]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, 2]\n[:rindex, -1, 2]\n[:index, 0, 0]\n[:rindex, 0, 0]\n[:index, 1, 1]\n[:rindex, 1, 1]\n[:index, 2, 2]\n[:rindex, 2, 2]\n[:index, 3, 3]\n[:rindex, 3, 3]\n[:index, 4, nil]\n[:rindex, 4, 3]\n',
+  ],
+  [
+    's=String.new("éa",encoding:"US-ASCII");n=String.new(255.chr,encoding:"ASCII-8BIT");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and BINARY (ASCII-8BIT)"]\n[:index, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and BINARY (ASCII-8BIT)"]\n[:rindex, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and BINARY (ASCII-8BIT)"]\n[:start_with?, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and BINARY (ASCII-8BIT)"]\n[:end_with?, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and BINARY (ASCII-8BIT)"]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and BINARY (ASCII-8BIT)"]\n[:rindex, -1, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and BINARY (ASCII-8BIT)"]\n[:index, 0, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and BINARY (ASCII-8BIT)"]\n[:rindex, 0, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and BINARY (ASCII-8BIT)"]\n[:index, 1, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and BINARY (ASCII-8BIT)"]\n[:rindex, 1, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and BINARY (ASCII-8BIT)"]\n[:index, 2, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and BINARY (ASCII-8BIT)"]\n[:rindex, 2, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and BINARY (ASCII-8BIT)"]\n[:index, 3, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and BINARY (ASCII-8BIT)"]\n[:rindex, 3, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and BINARY (ASCII-8BIT)"]\n[:index, 4, nil]\n[:rindex, 4, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and BINARY (ASCII-8BIT)"]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("日a",encoding:"US-ASCII");[:delete_prefix,:delete_suffix].each{|m|begin;p [m,desc(s.send(m,"x"))];rescue=>x;p [m,x.class,x.message];end};[:ljust,:rjust,:center].each{|m|[-1,1,3,4].each{|w|begin;p [m,w,desc(s.send(m,w))];rescue=>x;p [m,w,x.class,x.message];end}};p desc(s.split(",",1));s.split(",",1){|x|p desc(x)}',
+    '[:delete_prefix, [[230, 151, 165, 97], #<Encoding:US-ASCII>, false]]\n[:delete_suffix, [[230, 151, 165, 97], #<Encoding:US-ASCII>, false]]\n[:ljust, -1, [[230, 151, 165, 97], #<Encoding:US-ASCII>, false]]\n[:ljust, 1, [[230, 151, 165, 97], #<Encoding:US-ASCII>, false]]\n[:ljust, 3, [[230, 151, 165, 97], #<Encoding:US-ASCII>, false]]\n[:ljust, 4, [[230, 151, 165, 97], #<Encoding:US-ASCII>, false]]\n[:rjust, -1, [[230, 151, 165, 97], #<Encoding:US-ASCII>, false]]\n[:rjust, 1, [[230, 151, 165, 97], #<Encoding:US-ASCII>, false]]\n[:rjust, 3, [[230, 151, 165, 97], #<Encoding:US-ASCII>, false]]\n[:rjust, 4, [[230, 151, 165, 97], #<Encoding:US-ASCII>, false]]\n[:center, -1, [[230, 151, 165, 97], #<Encoding:US-ASCII>, false]]\n[:center, 1, [[230, 151, 165, 97], #<Encoding:US-ASCII>, false]]\n[:center, 3, [[230, 151, 165, 97], #<Encoding:US-ASCII>, false]]\n[:center, 4, [[230, 151, 165, 97], #<Encoding:US-ASCII>, false]]\n[[[230, 151, 165, 97], #<Encoding:US-ASCII>, false]]\n[[230, 151, 165, 97], #<Encoding:US-ASCII>, false]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("日a",encoding:"US-ASCII");[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,"a"))];rescue=>x;p [m,x.class,x.message,s.bytes];end}',
+    '[:count, ArgumentError, "invalid byte sequence in US-ASCII", [230, 151, 165, 97]]\n[:delete, ArgumentError, "invalid byte sequence in US-ASCII", [230, 151, 165, 97]]\n[:delete!, ArgumentError, "invalid byte sequence in US-ASCII", [230, 151, 165, 97]]\n[:split, ArgumentError, "invalid byte sequence in US-ASCII", [230, 151, 165, 97]]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("日a",encoding:"US-ASCII");s.freeze;[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,"a"))];rescue=>x;p [m,x.class,x.message,s.bytes];end}',
+    '[:count, ArgumentError, "invalid byte sequence in US-ASCII", [230, 151, 165, 97]]\n[:delete, ArgumentError, "invalid byte sequence in US-ASCII", [230, 151, 165, 97]]\n[:delete!, FrozenError, "can\'t modify frozen String: \\"\\\\xE6\\\\x97\\\\xA5a\\"", [230, 151, 165, 97]]\n[:split, ArgumentError, "invalid byte sequence in US-ASCII", [230, 151, 165, 97]]\n',
+  ],
+  [
+    's=String.new("日a",encoding:"US-ASCII");n=String.new("a",encoding:"US-ASCII");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, true]\n[:index, 3]\n[:rindex, 3]\n[:start_with?, false]\n[:end_with?, true]\n[:index, -4, 3]\n[:rindex, -4, nil]\n[:index, -1, 3]\n[:rindex, -1, 3]\n[:index, 0, 3]\n[:rindex, 0, nil]\n[:index, 1, 3]\n[:rindex, 1, nil]\n[:index, 2, 3]\n[:rindex, 2, nil]\n[:index, 3, 3]\n[:rindex, 3, 3]\n[:index, 4, nil]\n[:rindex, 4, 3]\n',
+  ],
+  [
+    's=String.new("日a",encoding:"US-ASCII");n=String.new("é",encoding:"US-ASCII");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, false]\n[:index, nil]\n[:rindex, nil]\n[:start_with?, false]\n[:end_with?, false]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, nil]\n[:rindex, -1, nil]\n[:index, 0, nil]\n[:rindex, 0, nil]\n[:index, 1, nil]\n[:rindex, 1, nil]\n[:index, 2, nil]\n[:rindex, 2, nil]\n[:index, 3, nil]\n[:rindex, 3, nil]\n[:index, 4, nil]\n[:rindex, 4, nil]\n',
+  ],
+  [
+    's=String.new("日a",encoding:"US-ASCII");n=String.new("x",encoding:"US-ASCII");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, false]\n[:index, nil]\n[:rindex, nil]\n[:start_with?, false]\n[:end_with?, false]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, nil]\n[:rindex, -1, nil]\n[:index, 0, nil]\n[:rindex, 0, nil]\n[:index, 1, nil]\n[:rindex, 1, nil]\n[:index, 2, nil]\n[:rindex, 2, nil]\n[:index, 3, nil]\n[:rindex, 3, nil]\n[:index, 4, nil]\n[:rindex, 4, nil]\n',
+  ],
+  [
+    's=String.new("日a",encoding:"US-ASCII");n=String.new("",encoding:"US-ASCII");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, true]\n[:index, 0]\n[:rindex, 4]\n[:start_with?, true]\n[:end_with?, true]\n[:index, -4, 0]\n[:rindex, -4, 0]\n[:index, -1, 3]\n[:rindex, -1, 3]\n[:index, 0, 0]\n[:rindex, 0, 0]\n[:index, 1, 1]\n[:rindex, 1, 1]\n[:index, 2, 2]\n[:rindex, 2, 2]\n[:index, 3, 3]\n[:rindex, 3, 3]\n[:index, 4, 4]\n[:rindex, 4, 4]\n',
+  ],
+  [
+    's=String.new("日a",encoding:"US-ASCII");n=String.new(255.chr,encoding:"US-ASCII");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, false]\n[:index, nil]\n[:rindex, nil]\n[:start_with?, false]\n[:end_with?, false]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, nil]\n[:rindex, -1, nil]\n[:index, 0, nil]\n[:rindex, 0, nil]\n[:index, 1, nil]\n[:rindex, 1, nil]\n[:index, 2, nil]\n[:rindex, 2, nil]\n[:index, 3, nil]\n[:rindex, 3, nil]\n[:index, 4, nil]\n[:rindex, 4, nil]\n',
+  ],
+  [
+    's=String.new("日a",encoding:"US-ASCII");n=String.new("a",encoding:"UTF-8");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, true]\n[:index, 3]\n[:rindex, 3]\n[:start_with?, false]\n[:end_with?, true]\n[:index, -4, 3]\n[:rindex, -4, nil]\n[:index, -1, 3]\n[:rindex, -1, 3]\n[:index, 0, 3]\n[:rindex, 0, nil]\n[:index, 1, 3]\n[:rindex, 1, nil]\n[:index, 2, 3]\n[:rindex, 2, nil]\n[:index, 3, 3]\n[:rindex, 3, 3]\n[:index, 4, nil]\n[:rindex, 4, 3]\n',
+  ],
+  [
+    's=String.new("日a",encoding:"US-ASCII");n=String.new("é",encoding:"UTF-8");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and UTF-8"]\n[:index, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and UTF-8"]\n[:rindex, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and UTF-8"]\n[:start_with?, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and UTF-8"]\n[:end_with?, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and UTF-8"]\n[:index, -4, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and UTF-8"]\n[:rindex, -4, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and UTF-8"]\n[:index, -1, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and UTF-8"]\n[:rindex, -1, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and UTF-8"]\n[:index, 0, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and UTF-8"]\n[:rindex, 0, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and UTF-8"]\n[:index, 1, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and UTF-8"]\n[:rindex, 1, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and UTF-8"]\n[:index, 2, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and UTF-8"]\n[:rindex, 2, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and UTF-8"]\n[:index, 3, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and UTF-8"]\n[:rindex, 3, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and UTF-8"]\n[:index, 4, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and UTF-8"]\n[:rindex, 4, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and UTF-8"]\n',
+  ],
+  [
+    's=String.new("日a",encoding:"US-ASCII");n=String.new("x",encoding:"UTF-8");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, false]\n[:index, nil]\n[:rindex, nil]\n[:start_with?, false]\n[:end_with?, false]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, nil]\n[:rindex, -1, nil]\n[:index, 0, nil]\n[:rindex, 0, nil]\n[:index, 1, nil]\n[:rindex, 1, nil]\n[:index, 2, nil]\n[:rindex, 2, nil]\n[:index, 3, nil]\n[:rindex, 3, nil]\n[:index, 4, nil]\n[:rindex, 4, nil]\n',
+  ],
+  [
+    's=String.new("日a",encoding:"US-ASCII");n=String.new("",encoding:"UTF-8");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, true]\n[:index, 0]\n[:rindex, 4]\n[:start_with?, true]\n[:end_with?, true]\n[:index, -4, 0]\n[:rindex, -4, 0]\n[:index, -1, 3]\n[:rindex, -1, 3]\n[:index, 0, 0]\n[:rindex, 0, 0]\n[:index, 1, 1]\n[:rindex, 1, 1]\n[:index, 2, 2]\n[:rindex, 2, 2]\n[:index, 3, 3]\n[:rindex, 3, 3]\n[:index, 4, 4]\n[:rindex, 4, 4]\n',
+  ],
+  [
+    's=String.new("日a",encoding:"US-ASCII");n=String.new(255.chr,encoding:"UTF-8");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and UTF-8"]\n[:index, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and UTF-8"]\n[:rindex, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and UTF-8"]\n[:start_with?, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and UTF-8"]\n[:end_with?, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and UTF-8"]\n[:index, -4, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and UTF-8"]\n[:rindex, -4, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and UTF-8"]\n[:index, -1, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and UTF-8"]\n[:rindex, -1, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and UTF-8"]\n[:index, 0, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and UTF-8"]\n[:rindex, 0, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and UTF-8"]\n[:index, 1, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and UTF-8"]\n[:rindex, 1, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and UTF-8"]\n[:index, 2, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and UTF-8"]\n[:rindex, 2, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and UTF-8"]\n[:index, 3, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and UTF-8"]\n[:rindex, 3, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and UTF-8"]\n[:index, 4, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and UTF-8"]\n[:rindex, 4, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and UTF-8"]\n',
+  ],
+  [
+    's=String.new("日a",encoding:"US-ASCII");n=String.new("a",encoding:"ASCII-8BIT");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, true]\n[:index, 3]\n[:rindex, 3]\n[:start_with?, false]\n[:end_with?, true]\n[:index, -4, 3]\n[:rindex, -4, nil]\n[:index, -1, 3]\n[:rindex, -1, 3]\n[:index, 0, 3]\n[:rindex, 0, nil]\n[:index, 1, 3]\n[:rindex, 1, nil]\n[:index, 2, 3]\n[:rindex, 2, nil]\n[:index, 3, 3]\n[:rindex, 3, 3]\n[:index, 4, nil]\n[:rindex, 4, 3]\n',
+  ],
+  [
+    's=String.new("日a",encoding:"US-ASCII");n=String.new("é",encoding:"ASCII-8BIT");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and BINARY (ASCII-8BIT)"]\n[:index, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and BINARY (ASCII-8BIT)"]\n[:rindex, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and BINARY (ASCII-8BIT)"]\n[:start_with?, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and BINARY (ASCII-8BIT)"]\n[:end_with?, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and BINARY (ASCII-8BIT)"]\n[:index, -4, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and BINARY (ASCII-8BIT)"]\n[:rindex, -4, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and BINARY (ASCII-8BIT)"]\n[:index, -1, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and BINARY (ASCII-8BIT)"]\n[:rindex, -1, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and BINARY (ASCII-8BIT)"]\n[:index, 0, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and BINARY (ASCII-8BIT)"]\n[:rindex, 0, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and BINARY (ASCII-8BIT)"]\n[:index, 1, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and BINARY (ASCII-8BIT)"]\n[:rindex, 1, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and BINARY (ASCII-8BIT)"]\n[:index, 2, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and BINARY (ASCII-8BIT)"]\n[:rindex, 2, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and BINARY (ASCII-8BIT)"]\n[:index, 3, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and BINARY (ASCII-8BIT)"]\n[:rindex, 3, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and BINARY (ASCII-8BIT)"]\n[:index, 4, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and BINARY (ASCII-8BIT)"]\n[:rindex, 4, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and BINARY (ASCII-8BIT)"]\n',
+  ],
+  [
+    's=String.new("日a",encoding:"US-ASCII");n=String.new("x",encoding:"ASCII-8BIT");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, false]\n[:index, nil]\n[:rindex, nil]\n[:start_with?, false]\n[:end_with?, false]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, nil]\n[:rindex, -1, nil]\n[:index, 0, nil]\n[:rindex, 0, nil]\n[:index, 1, nil]\n[:rindex, 1, nil]\n[:index, 2, nil]\n[:rindex, 2, nil]\n[:index, 3, nil]\n[:rindex, 3, nil]\n[:index, 4, nil]\n[:rindex, 4, nil]\n',
+  ],
+  [
+    's=String.new("日a",encoding:"US-ASCII");n=String.new("",encoding:"ASCII-8BIT");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, true]\n[:index, 0]\n[:rindex, 4]\n[:start_with?, true]\n[:end_with?, true]\n[:index, -4, 0]\n[:rindex, -4, 0]\n[:index, -1, 3]\n[:rindex, -1, 3]\n[:index, 0, 0]\n[:rindex, 0, 0]\n[:index, 1, 1]\n[:rindex, 1, 1]\n[:index, 2, 2]\n[:rindex, 2, 2]\n[:index, 3, 3]\n[:rindex, 3, 3]\n[:index, 4, 4]\n[:rindex, 4, 4]\n',
+  ],
+  [
+    's=String.new("日a",encoding:"US-ASCII");n=String.new(255.chr,encoding:"ASCII-8BIT");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and BINARY (ASCII-8BIT)"]\n[:index, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and BINARY (ASCII-8BIT)"]\n[:rindex, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and BINARY (ASCII-8BIT)"]\n[:start_with?, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and BINARY (ASCII-8BIT)"]\n[:end_with?, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and BINARY (ASCII-8BIT)"]\n[:index, -4, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and BINARY (ASCII-8BIT)"]\n[:rindex, -4, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and BINARY (ASCII-8BIT)"]\n[:index, -1, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and BINARY (ASCII-8BIT)"]\n[:rindex, -1, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and BINARY (ASCII-8BIT)"]\n[:index, 0, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and BINARY (ASCII-8BIT)"]\n[:rindex, 0, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and BINARY (ASCII-8BIT)"]\n[:index, 1, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and BINARY (ASCII-8BIT)"]\n[:rindex, 1, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and BINARY (ASCII-8BIT)"]\n[:index, 2, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and BINARY (ASCII-8BIT)"]\n[:rindex, 2, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and BINARY (ASCII-8BIT)"]\n[:index, 3, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and BINARY (ASCII-8BIT)"]\n[:rindex, 3, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and BINARY (ASCII-8BIT)"]\n[:index, 4, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and BINARY (ASCII-8BIT)"]\n[:rindex, 4, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and BINARY (ASCII-8BIT)"]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new(255.chr,encoding:"US-ASCII");[:delete_prefix,:delete_suffix].each{|m|begin;p [m,desc(s.send(m,"x"))];rescue=>x;p [m,x.class,x.message];end};[:ljust,:rjust,:center].each{|m|[-1,1,3,4].each{|w|begin;p [m,w,desc(s.send(m,w))];rescue=>x;p [m,w,x.class,x.message];end}};p desc(s.split(",",1));s.split(",",1){|x|p desc(x)}',
+    '[:delete_prefix, [[255], #<Encoding:US-ASCII>, false]]\n[:delete_suffix, [[255], #<Encoding:US-ASCII>, false]]\n[:ljust, -1, [[255], #<Encoding:US-ASCII>, false]]\n[:ljust, 1, [[255], #<Encoding:US-ASCII>, false]]\n[:ljust, 3, [[255, 32, 32], #<Encoding:US-ASCII>, false]]\n[:ljust, 4, [[255, 32, 32, 32], #<Encoding:US-ASCII>, false]]\n[:rjust, -1, [[255], #<Encoding:US-ASCII>, false]]\n[:rjust, 1, [[255], #<Encoding:US-ASCII>, false]]\n[:rjust, 3, [[32, 32, 255], #<Encoding:US-ASCII>, false]]\n[:rjust, 4, [[32, 32, 32, 255], #<Encoding:US-ASCII>, false]]\n[:center, -1, [[255], #<Encoding:US-ASCII>, false]]\n[:center, 1, [[255], #<Encoding:US-ASCII>, false]]\n[:center, 3, [[32, 255, 32], #<Encoding:US-ASCII>, false]]\n[:center, 4, [[32, 255, 32, 32], #<Encoding:US-ASCII>, false]]\n[[[255], #<Encoding:US-ASCII>, false]]\n[[255], #<Encoding:US-ASCII>, false]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new(255.chr,encoding:"US-ASCII");[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,"a"))];rescue=>x;p [m,x.class,x.message,s.bytes];end}',
+    '[:count, ArgumentError, "invalid byte sequence in US-ASCII", [255]]\n[:delete, ArgumentError, "invalid byte sequence in US-ASCII", [255]]\n[:delete!, ArgumentError, "invalid byte sequence in US-ASCII", [255]]\n[:split, ArgumentError, "invalid byte sequence in US-ASCII", [255]]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new(255.chr,encoding:"US-ASCII");s.freeze;[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,"a"))];rescue=>x;p [m,x.class,x.message,s.bytes];end}',
+    '[:count, ArgumentError, "invalid byte sequence in US-ASCII", [255]]\n[:delete, ArgumentError, "invalid byte sequence in US-ASCII", [255]]\n[:delete!, FrozenError, "can\'t modify frozen String: \\"\\\\xFF\\"", [255]]\n[:split, ArgumentError, "invalid byte sequence in US-ASCII", [255]]\n',
+  ],
+  [
+    's=String.new(255.chr,encoding:"US-ASCII");n=String.new("a",encoding:"US-ASCII");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, false]\n[:index, nil]\n[:rindex, nil]\n[:start_with?, false]\n[:end_with?, false]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, nil]\n[:rindex, -1, nil]\n[:index, 0, nil]\n[:rindex, 0, nil]\n[:index, 1, nil]\n[:rindex, 1, nil]\n[:index, 2, nil]\n[:rindex, 2, nil]\n[:index, 3, nil]\n[:rindex, 3, nil]\n[:index, 4, nil]\n[:rindex, 4, nil]\n',
+  ],
+  [
+    's=String.new(255.chr,encoding:"US-ASCII");n=String.new("é",encoding:"US-ASCII");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, false]\n[:index, nil]\n[:rindex, nil]\n[:start_with?, false]\n[:end_with?, false]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, nil]\n[:rindex, -1, nil]\n[:index, 0, nil]\n[:rindex, 0, nil]\n[:index, 1, nil]\n[:rindex, 1, nil]\n[:index, 2, nil]\n[:rindex, 2, nil]\n[:index, 3, nil]\n[:rindex, 3, nil]\n[:index, 4, nil]\n[:rindex, 4, nil]\n',
+  ],
+  [
+    's=String.new(255.chr,encoding:"US-ASCII");n=String.new("x",encoding:"US-ASCII");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, false]\n[:index, nil]\n[:rindex, nil]\n[:start_with?, false]\n[:end_with?, false]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, nil]\n[:rindex, -1, nil]\n[:index, 0, nil]\n[:rindex, 0, nil]\n[:index, 1, nil]\n[:rindex, 1, nil]\n[:index, 2, nil]\n[:rindex, 2, nil]\n[:index, 3, nil]\n[:rindex, 3, nil]\n[:index, 4, nil]\n[:rindex, 4, nil]\n',
+  ],
+  [
+    's=String.new(255.chr,encoding:"US-ASCII");n=String.new("",encoding:"US-ASCII");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, true]\n[:index, 0]\n[:rindex, 1]\n[:start_with?, true]\n[:end_with?, true]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, 0]\n[:rindex, -1, 0]\n[:index, 0, 0]\n[:rindex, 0, 0]\n[:index, 1, 1]\n[:rindex, 1, 1]\n[:index, 2, nil]\n[:rindex, 2, 1]\n[:index, 3, nil]\n[:rindex, 3, 1]\n[:index, 4, nil]\n[:rindex, 4, 1]\n',
+  ],
+  [
+    's=String.new(255.chr,encoding:"US-ASCII");n=String.new(255.chr,encoding:"US-ASCII");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, false]\n[:index, nil]\n[:rindex, nil]\n[:start_with?, true]\n[:end_with?, true]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, nil]\n[:rindex, -1, nil]\n[:index, 0, nil]\n[:rindex, 0, nil]\n[:index, 1, nil]\n[:rindex, 1, nil]\n[:index, 2, nil]\n[:rindex, 2, nil]\n[:index, 3, nil]\n[:rindex, 3, nil]\n[:index, 4, nil]\n[:rindex, 4, nil]\n',
+  ],
+  [
+    's=String.new(255.chr,encoding:"US-ASCII");n=String.new("a",encoding:"UTF-8");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, false]\n[:index, nil]\n[:rindex, nil]\n[:start_with?, false]\n[:end_with?, false]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, nil]\n[:rindex, -1, nil]\n[:index, 0, nil]\n[:rindex, 0, nil]\n[:index, 1, nil]\n[:rindex, 1, nil]\n[:index, 2, nil]\n[:rindex, 2, nil]\n[:index, 3, nil]\n[:rindex, 3, nil]\n[:index, 4, nil]\n[:rindex, 4, nil]\n',
+  ],
+  [
+    's=String.new(255.chr,encoding:"US-ASCII");n=String.new("é",encoding:"UTF-8");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and UTF-8"]\n[:index, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and UTF-8"]\n[:rindex, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and UTF-8"]\n[:start_with?, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and UTF-8"]\n[:end_with?, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and UTF-8"]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and UTF-8"]\n[:rindex, -1, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and UTF-8"]\n[:index, 0, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and UTF-8"]\n[:rindex, 0, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and UTF-8"]\n[:index, 1, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and UTF-8"]\n[:rindex, 1, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and UTF-8"]\n[:index, 2, nil]\n[:rindex, 2, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and UTF-8"]\n[:index, 3, nil]\n[:rindex, 3, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and UTF-8"]\n[:index, 4, nil]\n[:rindex, 4, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and UTF-8"]\n',
+  ],
+  [
+    's=String.new(255.chr,encoding:"US-ASCII");n=String.new("x",encoding:"UTF-8");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, false]\n[:index, nil]\n[:rindex, nil]\n[:start_with?, false]\n[:end_with?, false]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, nil]\n[:rindex, -1, nil]\n[:index, 0, nil]\n[:rindex, 0, nil]\n[:index, 1, nil]\n[:rindex, 1, nil]\n[:index, 2, nil]\n[:rindex, 2, nil]\n[:index, 3, nil]\n[:rindex, 3, nil]\n[:index, 4, nil]\n[:rindex, 4, nil]\n',
+  ],
+  [
+    's=String.new(255.chr,encoding:"US-ASCII");n=String.new("",encoding:"UTF-8");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, true]\n[:index, 0]\n[:rindex, 1]\n[:start_with?, true]\n[:end_with?, true]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, 0]\n[:rindex, -1, 0]\n[:index, 0, 0]\n[:rindex, 0, 0]\n[:index, 1, 1]\n[:rindex, 1, 1]\n[:index, 2, nil]\n[:rindex, 2, 1]\n[:index, 3, nil]\n[:rindex, 3, 1]\n[:index, 4, nil]\n[:rindex, 4, 1]\n',
+  ],
+  [
+    's=String.new(255.chr,encoding:"US-ASCII");n=String.new(255.chr,encoding:"UTF-8");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and UTF-8"]\n[:index, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and UTF-8"]\n[:rindex, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and UTF-8"]\n[:start_with?, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and UTF-8"]\n[:end_with?, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and UTF-8"]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and UTF-8"]\n[:rindex, -1, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and UTF-8"]\n[:index, 0, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and UTF-8"]\n[:rindex, 0, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and UTF-8"]\n[:index, 1, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and UTF-8"]\n[:rindex, 1, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and UTF-8"]\n[:index, 2, nil]\n[:rindex, 2, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and UTF-8"]\n[:index, 3, nil]\n[:rindex, 3, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and UTF-8"]\n[:index, 4, nil]\n[:rindex, 4, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and UTF-8"]\n',
+  ],
+  [
+    's=String.new(255.chr,encoding:"US-ASCII");n=String.new("a",encoding:"ASCII-8BIT");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, false]\n[:index, nil]\n[:rindex, nil]\n[:start_with?, false]\n[:end_with?, false]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, nil]\n[:rindex, -1, nil]\n[:index, 0, nil]\n[:rindex, 0, nil]\n[:index, 1, nil]\n[:rindex, 1, nil]\n[:index, 2, nil]\n[:rindex, 2, nil]\n[:index, 3, nil]\n[:rindex, 3, nil]\n[:index, 4, nil]\n[:rindex, 4, nil]\n',
+  ],
+  [
+    's=String.new(255.chr,encoding:"US-ASCII");n=String.new("é",encoding:"ASCII-8BIT");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and BINARY (ASCII-8BIT)"]\n[:index, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and BINARY (ASCII-8BIT)"]\n[:rindex, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and BINARY (ASCII-8BIT)"]\n[:start_with?, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and BINARY (ASCII-8BIT)"]\n[:end_with?, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and BINARY (ASCII-8BIT)"]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and BINARY (ASCII-8BIT)"]\n[:rindex, -1, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and BINARY (ASCII-8BIT)"]\n[:index, 0, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and BINARY (ASCII-8BIT)"]\n[:rindex, 0, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and BINARY (ASCII-8BIT)"]\n[:index, 1, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and BINARY (ASCII-8BIT)"]\n[:rindex, 1, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and BINARY (ASCII-8BIT)"]\n[:index, 2, nil]\n[:rindex, 2, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and BINARY (ASCII-8BIT)"]\n[:index, 3, nil]\n[:rindex, 3, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and BINARY (ASCII-8BIT)"]\n[:index, 4, nil]\n[:rindex, 4, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and BINARY (ASCII-8BIT)"]\n',
+  ],
+  [
+    's=String.new(255.chr,encoding:"US-ASCII");n=String.new("x",encoding:"ASCII-8BIT");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, false]\n[:index, nil]\n[:rindex, nil]\n[:start_with?, false]\n[:end_with?, false]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, nil]\n[:rindex, -1, nil]\n[:index, 0, nil]\n[:rindex, 0, nil]\n[:index, 1, nil]\n[:rindex, 1, nil]\n[:index, 2, nil]\n[:rindex, 2, nil]\n[:index, 3, nil]\n[:rindex, 3, nil]\n[:index, 4, nil]\n[:rindex, 4, nil]\n',
+  ],
+  [
+    's=String.new(255.chr,encoding:"US-ASCII");n=String.new("",encoding:"ASCII-8BIT");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, true]\n[:index, 0]\n[:rindex, 1]\n[:start_with?, true]\n[:end_with?, true]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, 0]\n[:rindex, -1, 0]\n[:index, 0, 0]\n[:rindex, 0, 0]\n[:index, 1, 1]\n[:rindex, 1, 1]\n[:index, 2, nil]\n[:rindex, 2, 1]\n[:index, 3, nil]\n[:rindex, 3, 1]\n[:index, 4, nil]\n[:rindex, 4, 1]\n',
+  ],
+  [
+    's=String.new(255.chr,encoding:"US-ASCII");n=String.new(255.chr,encoding:"ASCII-8BIT");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and BINARY (ASCII-8BIT)"]\n[:index, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and BINARY (ASCII-8BIT)"]\n[:rindex, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and BINARY (ASCII-8BIT)"]\n[:start_with?, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and BINARY (ASCII-8BIT)"]\n[:end_with?, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and BINARY (ASCII-8BIT)"]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and BINARY (ASCII-8BIT)"]\n[:rindex, -1, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and BINARY (ASCII-8BIT)"]\n[:index, 0, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and BINARY (ASCII-8BIT)"]\n[:rindex, 0, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and BINARY (ASCII-8BIT)"]\n[:index, 1, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and BINARY (ASCII-8BIT)"]\n[:rindex, 1, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and BINARY (ASCII-8BIT)"]\n[:index, 2, nil]\n[:rindex, 2, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and BINARY (ASCII-8BIT)"]\n[:index, 3, nil]\n[:rindex, 3, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and BINARY (ASCII-8BIT)"]\n[:index, 4, nil]\n[:rindex, 4, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and BINARY (ASCII-8BIT)"]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("abc",encoding:"US-ASCII");[:delete_prefix,:delete_suffix].each{|m|begin;p [m,desc(s.send(m,"x"))];rescue=>x;p [m,x.class,x.message];end};[:ljust,:rjust,:center].each{|m|[-1,1,3,4].each{|w|begin;p [m,w,desc(s.send(m,w))];rescue=>x;p [m,w,x.class,x.message];end}};p desc(s.split(",",1));s.split(",",1){|x|p desc(x)}',
+    '[:delete_prefix, [[97, 98, 99], #<Encoding:US-ASCII>, true]]\n[:delete_suffix, [[97, 98, 99], #<Encoding:US-ASCII>, true]]\n[:ljust, -1, [[97, 98, 99], #<Encoding:US-ASCII>, true]]\n[:ljust, 1, [[97, 98, 99], #<Encoding:US-ASCII>, true]]\n[:ljust, 3, [[97, 98, 99], #<Encoding:US-ASCII>, true]]\n[:ljust, 4, [[97, 98, 99, 32], #<Encoding:US-ASCII>, true]]\n[:rjust, -1, [[97, 98, 99], #<Encoding:US-ASCII>, true]]\n[:rjust, 1, [[97, 98, 99], #<Encoding:US-ASCII>, true]]\n[:rjust, 3, [[97, 98, 99], #<Encoding:US-ASCII>, true]]\n[:rjust, 4, [[32, 97, 98, 99], #<Encoding:US-ASCII>, true]]\n[:center, -1, [[97, 98, 99], #<Encoding:US-ASCII>, true]]\n[:center, 1, [[97, 98, 99], #<Encoding:US-ASCII>, true]]\n[:center, 3, [[97, 98, 99], #<Encoding:US-ASCII>, true]]\n[:center, 4, [[97, 98, 99, 32], #<Encoding:US-ASCII>, true]]\n[[[97, 98, 99], #<Encoding:US-ASCII>, true]]\n[[97, 98, 99], #<Encoding:US-ASCII>, true]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("abc",encoding:"US-ASCII");[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,"a"))];rescue=>x;p [m,x.class,x.message,s.bytes];end}',
+    '[:count, 1]\n[:delete, [[98, 99], #<Encoding:US-ASCII>, true]]\n[:delete!, [[98, 99], #<Encoding:US-ASCII>, true]]\n[:split, [[[98, 99], #<Encoding:US-ASCII>, true]]]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("abc",encoding:"US-ASCII");s.freeze;[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,"a"))];rescue=>x;p [m,x.class,x.message,s.bytes];end}',
+    '[:count, 1]\n[:delete, [[98, 99], #<Encoding:US-ASCII>, true]]\n[:delete!, FrozenError, "can\'t modify frozen String: \\"abc\\"", [97, 98, 99]]\n[:split, [[[], #<Encoding:US-ASCII>, true], [[98, 99], #<Encoding:US-ASCII>, true]]]\n',
+  ],
+  [
+    's=String.new("abc",encoding:"US-ASCII");n=String.new("a",encoding:"US-ASCII");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, true]\n[:index, 0]\n[:rindex, 0]\n[:start_with?, true]\n[:end_with?, false]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, nil]\n[:rindex, -1, 0]\n[:index, 0, 0]\n[:rindex, 0, 0]\n[:index, 1, nil]\n[:rindex, 1, 0]\n[:index, 2, nil]\n[:rindex, 2, 0]\n[:index, 3, nil]\n[:rindex, 3, 0]\n[:index, 4, nil]\n[:rindex, 4, 0]\n',
+  ],
+  [
+    's=String.new("abc",encoding:"US-ASCII");n=String.new("é",encoding:"US-ASCII");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, false]\n[:index, nil]\n[:rindex, nil]\n[:start_with?, false]\n[:end_with?, false]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, nil]\n[:rindex, -1, nil]\n[:index, 0, nil]\n[:rindex, 0, nil]\n[:index, 1, nil]\n[:rindex, 1, nil]\n[:index, 2, nil]\n[:rindex, 2, nil]\n[:index, 3, nil]\n[:rindex, 3, nil]\n[:index, 4, nil]\n[:rindex, 4, nil]\n',
+  ],
+  [
+    's=String.new("abc",encoding:"US-ASCII");n=String.new("x",encoding:"US-ASCII");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, false]\n[:index, nil]\n[:rindex, nil]\n[:start_with?, false]\n[:end_with?, false]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, nil]\n[:rindex, -1, nil]\n[:index, 0, nil]\n[:rindex, 0, nil]\n[:index, 1, nil]\n[:rindex, 1, nil]\n[:index, 2, nil]\n[:rindex, 2, nil]\n[:index, 3, nil]\n[:rindex, 3, nil]\n[:index, 4, nil]\n[:rindex, 4, nil]\n',
+  ],
+  [
+    's=String.new("abc",encoding:"US-ASCII");n=String.new("",encoding:"US-ASCII");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, true]\n[:index, 0]\n[:rindex, 3]\n[:start_with?, true]\n[:end_with?, true]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, 2]\n[:rindex, -1, 2]\n[:index, 0, 0]\n[:rindex, 0, 0]\n[:index, 1, 1]\n[:rindex, 1, 1]\n[:index, 2, 2]\n[:rindex, 2, 2]\n[:index, 3, 3]\n[:rindex, 3, 3]\n[:index, 4, nil]\n[:rindex, 4, 3]\n',
+  ],
+  [
+    's=String.new("abc",encoding:"US-ASCII");n=String.new(255.chr,encoding:"US-ASCII");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, false]\n[:index, nil]\n[:rindex, nil]\n[:start_with?, false]\n[:end_with?, false]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, nil]\n[:rindex, -1, nil]\n[:index, 0, nil]\n[:rindex, 0, nil]\n[:index, 1, nil]\n[:rindex, 1, nil]\n[:index, 2, nil]\n[:rindex, 2, nil]\n[:index, 3, nil]\n[:rindex, 3, nil]\n[:index, 4, nil]\n[:rindex, 4, nil]\n',
+  ],
+  [
+    's=String.new("abc",encoding:"US-ASCII");n=String.new("a",encoding:"UTF-8");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, true]\n[:index, 0]\n[:rindex, 0]\n[:start_with?, true]\n[:end_with?, false]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, nil]\n[:rindex, -1, 0]\n[:index, 0, 0]\n[:rindex, 0, 0]\n[:index, 1, nil]\n[:rindex, 1, 0]\n[:index, 2, nil]\n[:rindex, 2, 0]\n[:index, 3, nil]\n[:rindex, 3, 0]\n[:index, 4, nil]\n[:rindex, 4, 0]\n',
+  ],
+  [
+    's=String.new("abc",encoding:"US-ASCII");n=String.new("é",encoding:"UTF-8");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, false]\n[:index, nil]\n[:rindex, nil]\n[:start_with?, false]\n[:end_with?, false]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, nil]\n[:rindex, -1, nil]\n[:index, 0, nil]\n[:rindex, 0, nil]\n[:index, 1, nil]\n[:rindex, 1, nil]\n[:index, 2, nil]\n[:rindex, 2, nil]\n[:index, 3, nil]\n[:rindex, 3, nil]\n[:index, 4, nil]\n[:rindex, 4, nil]\n',
+  ],
+  [
+    's=String.new("abc",encoding:"US-ASCII");n=String.new("x",encoding:"UTF-8");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, false]\n[:index, nil]\n[:rindex, nil]\n[:start_with?, false]\n[:end_with?, false]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, nil]\n[:rindex, -1, nil]\n[:index, 0, nil]\n[:rindex, 0, nil]\n[:index, 1, nil]\n[:rindex, 1, nil]\n[:index, 2, nil]\n[:rindex, 2, nil]\n[:index, 3, nil]\n[:rindex, 3, nil]\n[:index, 4, nil]\n[:rindex, 4, nil]\n',
+  ],
+  [
+    's=String.new("abc",encoding:"US-ASCII");n=String.new("",encoding:"UTF-8");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, true]\n[:index, 0]\n[:rindex, 3]\n[:start_with?, true]\n[:end_with?, true]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, 2]\n[:rindex, -1, 2]\n[:index, 0, 0]\n[:rindex, 0, 0]\n[:index, 1, 1]\n[:rindex, 1, 1]\n[:index, 2, 2]\n[:rindex, 2, 2]\n[:index, 3, 3]\n[:rindex, 3, 3]\n[:index, 4, nil]\n[:rindex, 4, 3]\n',
+  ],
+  [
+    's=String.new("abc",encoding:"US-ASCII");n=String.new(255.chr,encoding:"UTF-8");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, false]\n[:index, nil]\n[:rindex, nil]\n[:start_with?, false]\n[:end_with?, false]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, nil]\n[:rindex, -1, nil]\n[:index, 0, nil]\n[:rindex, 0, nil]\n[:index, 1, nil]\n[:rindex, 1, nil]\n[:index, 2, nil]\n[:rindex, 2, nil]\n[:index, 3, nil]\n[:rindex, 3, nil]\n[:index, 4, nil]\n[:rindex, 4, nil]\n',
+  ],
+  [
+    's=String.new("abc",encoding:"US-ASCII");n=String.new("a",encoding:"ASCII-8BIT");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, true]\n[:index, 0]\n[:rindex, 0]\n[:start_with?, true]\n[:end_with?, false]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, nil]\n[:rindex, -1, 0]\n[:index, 0, 0]\n[:rindex, 0, 0]\n[:index, 1, nil]\n[:rindex, 1, 0]\n[:index, 2, nil]\n[:rindex, 2, 0]\n[:index, 3, nil]\n[:rindex, 3, 0]\n[:index, 4, nil]\n[:rindex, 4, 0]\n',
+  ],
+  [
+    's=String.new("abc",encoding:"US-ASCII");n=String.new("é",encoding:"ASCII-8BIT");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, false]\n[:index, nil]\n[:rindex, nil]\n[:start_with?, false]\n[:end_with?, false]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, nil]\n[:rindex, -1, nil]\n[:index, 0, nil]\n[:rindex, 0, nil]\n[:index, 1, nil]\n[:rindex, 1, nil]\n[:index, 2, nil]\n[:rindex, 2, nil]\n[:index, 3, nil]\n[:rindex, 3, nil]\n[:index, 4, nil]\n[:rindex, 4, nil]\n',
+  ],
+  [
+    's=String.new("abc",encoding:"US-ASCII");n=String.new("x",encoding:"ASCII-8BIT");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, false]\n[:index, nil]\n[:rindex, nil]\n[:start_with?, false]\n[:end_with?, false]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, nil]\n[:rindex, -1, nil]\n[:index, 0, nil]\n[:rindex, 0, nil]\n[:index, 1, nil]\n[:rindex, 1, nil]\n[:index, 2, nil]\n[:rindex, 2, nil]\n[:index, 3, nil]\n[:rindex, 3, nil]\n[:index, 4, nil]\n[:rindex, 4, nil]\n',
+  ],
+  [
+    's=String.new("abc",encoding:"US-ASCII");n=String.new("",encoding:"ASCII-8BIT");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, true]\n[:index, 0]\n[:rindex, 3]\n[:start_with?, true]\n[:end_with?, true]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, 2]\n[:rindex, -1, 2]\n[:index, 0, 0]\n[:rindex, 0, 0]\n[:index, 1, 1]\n[:rindex, 1, 1]\n[:index, 2, 2]\n[:rindex, 2, 2]\n[:index, 3, 3]\n[:rindex, 3, 3]\n[:index, 4, nil]\n[:rindex, 4, 3]\n',
+  ],
+  [
+    's=String.new("abc",encoding:"US-ASCII");n=String.new(255.chr,encoding:"ASCII-8BIT");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, false]\n[:index, nil]\n[:rindex, nil]\n[:start_with?, false]\n[:end_with?, false]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, nil]\n[:rindex, -1, nil]\n[:index, 0, nil]\n[:rindex, 0, nil]\n[:index, 1, nil]\n[:rindex, 1, nil]\n[:index, 2, nil]\n[:rindex, 2, nil]\n[:index, 3, nil]\n[:rindex, 3, nil]\n[:index, 4, nil]\n[:rindex, 4, nil]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("",encoding:"US-ASCII");[:delete_prefix,:delete_suffix].each{|m|begin;p [m,desc(s.send(m,"x"))];rescue=>x;p [m,x.class,x.message];end};[:ljust,:rjust,:center].each{|m|[-1,1,3,4].each{|w|begin;p [m,w,desc(s.send(m,w))];rescue=>x;p [m,w,x.class,x.message];end}};p desc(s.split(",",1));s.split(",",1){|x|p desc(x)}',
+    '[:delete_prefix, [[], #<Encoding:US-ASCII>, true]]\n[:delete_suffix, [[], #<Encoding:US-ASCII>, true]]\n[:ljust, -1, [[], #<Encoding:US-ASCII>, true]]\n[:ljust, 1, [[32], #<Encoding:US-ASCII>, true]]\n[:ljust, 3, [[32, 32, 32], #<Encoding:US-ASCII>, true]]\n[:ljust, 4, [[32, 32, 32, 32], #<Encoding:US-ASCII>, true]]\n[:rjust, -1, [[], #<Encoding:US-ASCII>, true]]\n[:rjust, 1, [[32], #<Encoding:US-ASCII>, true]]\n[:rjust, 3, [[32, 32, 32], #<Encoding:US-ASCII>, true]]\n[:rjust, 4, [[32, 32, 32, 32], #<Encoding:US-ASCII>, true]]\n[:center, -1, [[], #<Encoding:US-ASCII>, true]]\n[:center, 1, [[32], #<Encoding:US-ASCII>, true]]\n[:center, 3, [[32, 32, 32], #<Encoding:US-ASCII>, true]]\n[:center, 4, [[32, 32, 32, 32], #<Encoding:US-ASCII>, true]]\n[]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("",encoding:"US-ASCII");[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,"a"))];rescue=>x;p [m,x.class,x.message,s.bytes];end}',
+    '[:count, 0]\n[:delete, [[], #<Encoding:US-ASCII>, true]]\n[:delete!, nil]\n[:split, []]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("",encoding:"US-ASCII");s.freeze;[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,"a"))];rescue=>x;p [m,x.class,x.message,s.bytes];end}',
+    '[:count, 0]\n[:delete, [[], #<Encoding:US-ASCII>, true]]\n[:delete!, nil]\n[:split, []]\n',
+  ],
+  [
+    's=String.new("",encoding:"US-ASCII");n=String.new("a",encoding:"US-ASCII");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, false]\n[:index, nil]\n[:rindex, nil]\n[:start_with?, false]\n[:end_with?, false]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, nil]\n[:rindex, -1, nil]\n[:index, 0, nil]\n[:rindex, 0, nil]\n[:index, 1, nil]\n[:rindex, 1, nil]\n[:index, 2, nil]\n[:rindex, 2, nil]\n[:index, 3, nil]\n[:rindex, 3, nil]\n[:index, 4, nil]\n[:rindex, 4, nil]\n',
+  ],
+  [
+    's=String.new("",encoding:"US-ASCII");n=String.new("é",encoding:"US-ASCII");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, false]\n[:index, nil]\n[:rindex, nil]\n[:start_with?, false]\n[:end_with?, false]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, nil]\n[:rindex, -1, nil]\n[:index, 0, nil]\n[:rindex, 0, nil]\n[:index, 1, nil]\n[:rindex, 1, nil]\n[:index, 2, nil]\n[:rindex, 2, nil]\n[:index, 3, nil]\n[:rindex, 3, nil]\n[:index, 4, nil]\n[:rindex, 4, nil]\n',
+  ],
+  [
+    's=String.new("",encoding:"US-ASCII");n=String.new("x",encoding:"US-ASCII");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, false]\n[:index, nil]\n[:rindex, nil]\n[:start_with?, false]\n[:end_with?, false]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, nil]\n[:rindex, -1, nil]\n[:index, 0, nil]\n[:rindex, 0, nil]\n[:index, 1, nil]\n[:rindex, 1, nil]\n[:index, 2, nil]\n[:rindex, 2, nil]\n[:index, 3, nil]\n[:rindex, 3, nil]\n[:index, 4, nil]\n[:rindex, 4, nil]\n',
+  ],
+  [
+    's=String.new("",encoding:"US-ASCII");n=String.new("",encoding:"US-ASCII");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, true]\n[:index, 0]\n[:rindex, 0]\n[:start_with?, true]\n[:end_with?, true]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, nil]\n[:rindex, -1, nil]\n[:index, 0, 0]\n[:rindex, 0, 0]\n[:index, 1, nil]\n[:rindex, 1, 0]\n[:index, 2, nil]\n[:rindex, 2, 0]\n[:index, 3, nil]\n[:rindex, 3, 0]\n[:index, 4, nil]\n[:rindex, 4, 0]\n',
+  ],
+  [
+    's=String.new("",encoding:"US-ASCII");n=String.new(255.chr,encoding:"US-ASCII");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, false]\n[:index, nil]\n[:rindex, nil]\n[:start_with?, false]\n[:end_with?, false]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, nil]\n[:rindex, -1, nil]\n[:index, 0, nil]\n[:rindex, 0, nil]\n[:index, 1, nil]\n[:rindex, 1, nil]\n[:index, 2, nil]\n[:rindex, 2, nil]\n[:index, 3, nil]\n[:rindex, 3, nil]\n[:index, 4, nil]\n[:rindex, 4, nil]\n',
+  ],
+  [
+    's=String.new("",encoding:"US-ASCII");n=String.new("a",encoding:"UTF-8");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, false]\n[:index, nil]\n[:rindex, nil]\n[:start_with?, false]\n[:end_with?, false]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, nil]\n[:rindex, -1, nil]\n[:index, 0, nil]\n[:rindex, 0, nil]\n[:index, 1, nil]\n[:rindex, 1, nil]\n[:index, 2, nil]\n[:rindex, 2, nil]\n[:index, 3, nil]\n[:rindex, 3, nil]\n[:index, 4, nil]\n[:rindex, 4, nil]\n',
+  ],
+  [
+    's=String.new("",encoding:"US-ASCII");n=String.new("é",encoding:"UTF-8");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, false]\n[:index, nil]\n[:rindex, nil]\n[:start_with?, false]\n[:end_with?, false]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, nil]\n[:rindex, -1, nil]\n[:index, 0, nil]\n[:rindex, 0, nil]\n[:index, 1, nil]\n[:rindex, 1, nil]\n[:index, 2, nil]\n[:rindex, 2, nil]\n[:index, 3, nil]\n[:rindex, 3, nil]\n[:index, 4, nil]\n[:rindex, 4, nil]\n',
+  ],
+  [
+    's=String.new("",encoding:"US-ASCII");n=String.new("x",encoding:"UTF-8");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, false]\n[:index, nil]\n[:rindex, nil]\n[:start_with?, false]\n[:end_with?, false]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, nil]\n[:rindex, -1, nil]\n[:index, 0, nil]\n[:rindex, 0, nil]\n[:index, 1, nil]\n[:rindex, 1, nil]\n[:index, 2, nil]\n[:rindex, 2, nil]\n[:index, 3, nil]\n[:rindex, 3, nil]\n[:index, 4, nil]\n[:rindex, 4, nil]\n',
+  ],
+  [
+    's=String.new("",encoding:"US-ASCII");n=String.new("",encoding:"UTF-8");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, true]\n[:index, 0]\n[:rindex, 0]\n[:start_with?, true]\n[:end_with?, true]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, nil]\n[:rindex, -1, nil]\n[:index, 0, 0]\n[:rindex, 0, 0]\n[:index, 1, nil]\n[:rindex, 1, 0]\n[:index, 2, nil]\n[:rindex, 2, 0]\n[:index, 3, nil]\n[:rindex, 3, 0]\n[:index, 4, nil]\n[:rindex, 4, 0]\n',
+  ],
+  [
+    's=String.new("",encoding:"US-ASCII");n=String.new(255.chr,encoding:"UTF-8");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, false]\n[:index, nil]\n[:rindex, nil]\n[:start_with?, false]\n[:end_with?, false]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, nil]\n[:rindex, -1, nil]\n[:index, 0, nil]\n[:rindex, 0, nil]\n[:index, 1, nil]\n[:rindex, 1, nil]\n[:index, 2, nil]\n[:rindex, 2, nil]\n[:index, 3, nil]\n[:rindex, 3, nil]\n[:index, 4, nil]\n[:rindex, 4, nil]\n',
+  ],
+  [
+    's=String.new("",encoding:"US-ASCII");n=String.new("a",encoding:"ASCII-8BIT");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, false]\n[:index, nil]\n[:rindex, nil]\n[:start_with?, false]\n[:end_with?, false]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, nil]\n[:rindex, -1, nil]\n[:index, 0, nil]\n[:rindex, 0, nil]\n[:index, 1, nil]\n[:rindex, 1, nil]\n[:index, 2, nil]\n[:rindex, 2, nil]\n[:index, 3, nil]\n[:rindex, 3, nil]\n[:index, 4, nil]\n[:rindex, 4, nil]\n',
+  ],
+  [
+    's=String.new("",encoding:"US-ASCII");n=String.new("é",encoding:"ASCII-8BIT");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, false]\n[:index, nil]\n[:rindex, nil]\n[:start_with?, false]\n[:end_with?, false]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, nil]\n[:rindex, -1, nil]\n[:index, 0, nil]\n[:rindex, 0, nil]\n[:index, 1, nil]\n[:rindex, 1, nil]\n[:index, 2, nil]\n[:rindex, 2, nil]\n[:index, 3, nil]\n[:rindex, 3, nil]\n[:index, 4, nil]\n[:rindex, 4, nil]\n',
+  ],
+  [
+    's=String.new("",encoding:"US-ASCII");n=String.new("x",encoding:"ASCII-8BIT");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, false]\n[:index, nil]\n[:rindex, nil]\n[:start_with?, false]\n[:end_with?, false]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, nil]\n[:rindex, -1, nil]\n[:index, 0, nil]\n[:rindex, 0, nil]\n[:index, 1, nil]\n[:rindex, 1, nil]\n[:index, 2, nil]\n[:rindex, 2, nil]\n[:index, 3, nil]\n[:rindex, 3, nil]\n[:index, 4, nil]\n[:rindex, 4, nil]\n',
+  ],
+  [
+    's=String.new("",encoding:"US-ASCII");n=String.new("",encoding:"ASCII-8BIT");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, true]\n[:index, 0]\n[:rindex, 0]\n[:start_with?, true]\n[:end_with?, true]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, nil]\n[:rindex, -1, nil]\n[:index, 0, 0]\n[:rindex, 0, 0]\n[:index, 1, nil]\n[:rindex, 1, 0]\n[:index, 2, nil]\n[:rindex, 2, 0]\n[:index, 3, nil]\n[:rindex, 3, 0]\n[:index, 4, nil]\n[:rindex, 4, 0]\n',
+  ],
+  [
+    's=String.new("",encoding:"US-ASCII");n=String.new(255.chr,encoding:"ASCII-8BIT");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, false]\n[:index, nil]\n[:rindex, nil]\n[:start_with?, false]\n[:end_with?, false]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, nil]\n[:rindex, -1, nil]\n[:index, 0, nil]\n[:rindex, 0, nil]\n[:index, 1, nil]\n[:rindex, 1, nil]\n[:index, 2, nil]\n[:rindex, 2, nil]\n[:index, 3, nil]\n[:rindex, 3, nil]\n[:index, 4, nil]\n[:rindex, 4, nil]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("é",encoding:"UTF-8");[:delete_prefix,:delete_suffix].each{|m|begin;p [m,desc(s.send(m,"x"))];rescue=>x;p [m,x.class,x.message];end};[:ljust,:rjust,:center].each{|m|[-1,1,3,4].each{|w|begin;p [m,w,desc(s.send(m,w))];rescue=>x;p [m,w,x.class,x.message];end}};p desc(s.split(",",1));s.split(",",1){|x|p desc(x)}',
+    '[:delete_prefix, [[195, 169], #<Encoding:UTF-8>, true]]\n[:delete_suffix, [[195, 169], #<Encoding:UTF-8>, true]]\n[:ljust, -1, [[195, 169], #<Encoding:UTF-8>, true]]\n[:ljust, 1, [[195, 169], #<Encoding:UTF-8>, true]]\n[:ljust, 3, [[195, 169, 32, 32], #<Encoding:UTF-8>, true]]\n[:ljust, 4, [[195, 169, 32, 32, 32], #<Encoding:UTF-8>, true]]\n[:rjust, -1, [[195, 169], #<Encoding:UTF-8>, true]]\n[:rjust, 1, [[195, 169], #<Encoding:UTF-8>, true]]\n[:rjust, 3, [[32, 32, 195, 169], #<Encoding:UTF-8>, true]]\n[:rjust, 4, [[32, 32, 32, 195, 169], #<Encoding:UTF-8>, true]]\n[:center, -1, [[195, 169], #<Encoding:UTF-8>, true]]\n[:center, 1, [[195, 169], #<Encoding:UTF-8>, true]]\n[:center, 3, [[32, 195, 169, 32], #<Encoding:UTF-8>, true]]\n[:center, 4, [[32, 195, 169, 32, 32], #<Encoding:UTF-8>, true]]\n[[[195, 169], #<Encoding:UTF-8>, true]]\n[[195, 169], #<Encoding:UTF-8>, true]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("é",encoding:"UTF-8");[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,"a"))];rescue=>x;p [m,x.class,x.message,s.bytes];end}',
+    '[:count, 0]\n[:delete, [[195, 169], #<Encoding:UTF-8>, true]]\n[:delete!, nil]\n[:split, [[[195, 169], #<Encoding:UTF-8>, true]]]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("é",encoding:"UTF-8");s.freeze;[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,"a"))];rescue=>x;p [m,x.class,x.message,s.bytes];end}',
+    '[:count, 0]\n[:delete, [[195, 169], #<Encoding:UTF-8>, true]]\n[:delete!, FrozenError, "can\'t modify frozen String: \\"é\\"", [195, 169]]\n[:split, [[[195, 169], #<Encoding:UTF-8>, true]]]\n',
+  ],
+  [
+    's=String.new("é",encoding:"UTF-8");n=String.new("a",encoding:"US-ASCII");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, false]\n[:index, nil]\n[:rindex, nil]\n[:start_with?, false]\n[:end_with?, false]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, nil]\n[:rindex, -1, nil]\n[:index, 0, nil]\n[:rindex, 0, nil]\n[:index, 1, nil]\n[:rindex, 1, nil]\n[:index, 2, nil]\n[:rindex, 2, nil]\n[:index, 3, nil]\n[:rindex, 3, nil]\n[:index, 4, nil]\n[:rindex, 4, nil]\n',
+  ],
+  [
+    's=String.new("é",encoding:"UTF-8");n=String.new("é",encoding:"US-ASCII");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and US-ASCII"]\n[:index, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and US-ASCII"]\n[:rindex, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and US-ASCII"]\n[:start_with?, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and US-ASCII"]\n[:end_with?, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and US-ASCII"]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and US-ASCII"]\n[:rindex, -1, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and US-ASCII"]\n[:index, 0, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and US-ASCII"]\n[:rindex, 0, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and US-ASCII"]\n[:index, 1, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and US-ASCII"]\n[:rindex, 1, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and US-ASCII"]\n[:index, 2, nil]\n[:rindex, 2, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and US-ASCII"]\n[:index, 3, nil]\n[:rindex, 3, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and US-ASCII"]\n[:index, 4, nil]\n[:rindex, 4, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and US-ASCII"]\n',
+  ],
+  [
+    's=String.new("é",encoding:"UTF-8");n=String.new("x",encoding:"US-ASCII");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, false]\n[:index, nil]\n[:rindex, nil]\n[:start_with?, false]\n[:end_with?, false]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, nil]\n[:rindex, -1, nil]\n[:index, 0, nil]\n[:rindex, 0, nil]\n[:index, 1, nil]\n[:rindex, 1, nil]\n[:index, 2, nil]\n[:rindex, 2, nil]\n[:index, 3, nil]\n[:rindex, 3, nil]\n[:index, 4, nil]\n[:rindex, 4, nil]\n',
+  ],
+  [
+    's=String.new("é",encoding:"UTF-8");n=String.new("",encoding:"US-ASCII");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, true]\n[:index, 0]\n[:rindex, 1]\n[:start_with?, true]\n[:end_with?, true]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, 0]\n[:rindex, -1, 0]\n[:index, 0, 0]\n[:rindex, 0, 0]\n[:index, 1, 1]\n[:rindex, 1, 1]\n[:index, 2, nil]\n[:rindex, 2, 1]\n[:index, 3, nil]\n[:rindex, 3, 1]\n[:index, 4, nil]\n[:rindex, 4, 1]\n',
+  ],
+  [
+    's=String.new("é",encoding:"UTF-8");n=String.new(255.chr,encoding:"US-ASCII");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and US-ASCII"]\n[:index, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and US-ASCII"]\n[:rindex, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and US-ASCII"]\n[:start_with?, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and US-ASCII"]\n[:end_with?, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and US-ASCII"]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and US-ASCII"]\n[:rindex, -1, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and US-ASCII"]\n[:index, 0, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and US-ASCII"]\n[:rindex, 0, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and US-ASCII"]\n[:index, 1, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and US-ASCII"]\n[:rindex, 1, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and US-ASCII"]\n[:index, 2, nil]\n[:rindex, 2, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and US-ASCII"]\n[:index, 3, nil]\n[:rindex, 3, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and US-ASCII"]\n[:index, 4, nil]\n[:rindex, 4, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and US-ASCII"]\n',
+  ],
+  [
+    's=String.new("é",encoding:"UTF-8");n=String.new("a",encoding:"UTF-8");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, false]\n[:index, nil]\n[:rindex, nil]\n[:start_with?, false]\n[:end_with?, false]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, nil]\n[:rindex, -1, nil]\n[:index, 0, nil]\n[:rindex, 0, nil]\n[:index, 1, nil]\n[:rindex, 1, nil]\n[:index, 2, nil]\n[:rindex, 2, nil]\n[:index, 3, nil]\n[:rindex, 3, nil]\n[:index, 4, nil]\n[:rindex, 4, nil]\n',
+  ],
+  [
+    's=String.new("é",encoding:"UTF-8");n=String.new("é",encoding:"UTF-8");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, true]\n[:index, 0]\n[:rindex, 0]\n[:start_with?, true]\n[:end_with?, true]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, 0]\n[:rindex, -1, 0]\n[:index, 0, 0]\n[:rindex, 0, 0]\n[:index, 1, nil]\n[:rindex, 1, 0]\n[:index, 2, nil]\n[:rindex, 2, 0]\n[:index, 3, nil]\n[:rindex, 3, 0]\n[:index, 4, nil]\n[:rindex, 4, 0]\n',
+  ],
+  [
+    's=String.new("é",encoding:"UTF-8");n=String.new("x",encoding:"UTF-8");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, false]\n[:index, nil]\n[:rindex, nil]\n[:start_with?, false]\n[:end_with?, false]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, nil]\n[:rindex, -1, nil]\n[:index, 0, nil]\n[:rindex, 0, nil]\n[:index, 1, nil]\n[:rindex, 1, nil]\n[:index, 2, nil]\n[:rindex, 2, nil]\n[:index, 3, nil]\n[:rindex, 3, nil]\n[:index, 4, nil]\n[:rindex, 4, nil]\n',
+  ],
+  [
+    's=String.new("é",encoding:"UTF-8");n=String.new("",encoding:"UTF-8");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, true]\n[:index, 0]\n[:rindex, 1]\n[:start_with?, true]\n[:end_with?, true]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, 0]\n[:rindex, -1, 0]\n[:index, 0, 0]\n[:rindex, 0, 0]\n[:index, 1, 1]\n[:rindex, 1, 1]\n[:index, 2, nil]\n[:rindex, 2, 1]\n[:index, 3, nil]\n[:rindex, 3, 1]\n[:index, 4, nil]\n[:rindex, 4, 1]\n',
+  ],
+  [
+    's=String.new("é",encoding:"UTF-8");n=String.new(255.chr,encoding:"UTF-8");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, false]\n[:index, nil]\n[:rindex, nil]\n[:start_with?, false]\n[:end_with?, false]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, nil]\n[:rindex, -1, nil]\n[:index, 0, nil]\n[:rindex, 0, nil]\n[:index, 1, nil]\n[:rindex, 1, nil]\n[:index, 2, nil]\n[:rindex, 2, nil]\n[:index, 3, nil]\n[:rindex, 3, nil]\n[:index, 4, nil]\n[:rindex, 4, nil]\n',
+  ],
+  [
+    's=String.new("é",encoding:"UTF-8");n=String.new("a",encoding:"ASCII-8BIT");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, false]\n[:index, nil]\n[:rindex, nil]\n[:start_with?, false]\n[:end_with?, false]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, nil]\n[:rindex, -1, nil]\n[:index, 0, nil]\n[:rindex, 0, nil]\n[:index, 1, nil]\n[:rindex, 1, nil]\n[:index, 2, nil]\n[:rindex, 2, nil]\n[:index, 3, nil]\n[:rindex, 3, nil]\n[:index, 4, nil]\n[:rindex, 4, nil]\n',
+  ],
+  [
+    's=String.new("é",encoding:"UTF-8");n=String.new("é",encoding:"ASCII-8BIT");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and BINARY (ASCII-8BIT)"]\n[:index, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and BINARY (ASCII-8BIT)"]\n[:rindex, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and BINARY (ASCII-8BIT)"]\n[:start_with?, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and BINARY (ASCII-8BIT)"]\n[:end_with?, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and BINARY (ASCII-8BIT)"]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and BINARY (ASCII-8BIT)"]\n[:rindex, -1, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and BINARY (ASCII-8BIT)"]\n[:index, 0, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and BINARY (ASCII-8BIT)"]\n[:rindex, 0, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and BINARY (ASCII-8BIT)"]\n[:index, 1, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and BINARY (ASCII-8BIT)"]\n[:rindex, 1, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and BINARY (ASCII-8BIT)"]\n[:index, 2, nil]\n[:rindex, 2, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and BINARY (ASCII-8BIT)"]\n[:index, 3, nil]\n[:rindex, 3, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and BINARY (ASCII-8BIT)"]\n[:index, 4, nil]\n[:rindex, 4, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and BINARY (ASCII-8BIT)"]\n',
+  ],
+  [
+    's=String.new("é",encoding:"UTF-8");n=String.new("x",encoding:"ASCII-8BIT");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, false]\n[:index, nil]\n[:rindex, nil]\n[:start_with?, false]\n[:end_with?, false]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, nil]\n[:rindex, -1, nil]\n[:index, 0, nil]\n[:rindex, 0, nil]\n[:index, 1, nil]\n[:rindex, 1, nil]\n[:index, 2, nil]\n[:rindex, 2, nil]\n[:index, 3, nil]\n[:rindex, 3, nil]\n[:index, 4, nil]\n[:rindex, 4, nil]\n',
+  ],
+  [
+    's=String.new("é",encoding:"UTF-8");n=String.new("",encoding:"ASCII-8BIT");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, true]\n[:index, 0]\n[:rindex, 1]\n[:start_with?, true]\n[:end_with?, true]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, 0]\n[:rindex, -1, 0]\n[:index, 0, 0]\n[:rindex, 0, 0]\n[:index, 1, 1]\n[:rindex, 1, 1]\n[:index, 2, nil]\n[:rindex, 2, 1]\n[:index, 3, nil]\n[:rindex, 3, 1]\n[:index, 4, nil]\n[:rindex, 4, 1]\n',
+  ],
+  [
+    's=String.new("é",encoding:"UTF-8");n=String.new(255.chr,encoding:"ASCII-8BIT");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and BINARY (ASCII-8BIT)"]\n[:index, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and BINARY (ASCII-8BIT)"]\n[:rindex, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and BINARY (ASCII-8BIT)"]\n[:start_with?, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and BINARY (ASCII-8BIT)"]\n[:end_with?, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and BINARY (ASCII-8BIT)"]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and BINARY (ASCII-8BIT)"]\n[:rindex, -1, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and BINARY (ASCII-8BIT)"]\n[:index, 0, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and BINARY (ASCII-8BIT)"]\n[:rindex, 0, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and BINARY (ASCII-8BIT)"]\n[:index, 1, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and BINARY (ASCII-8BIT)"]\n[:rindex, 1, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and BINARY (ASCII-8BIT)"]\n[:index, 2, nil]\n[:rindex, 2, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and BINARY (ASCII-8BIT)"]\n[:index, 3, nil]\n[:rindex, 3, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and BINARY (ASCII-8BIT)"]\n[:index, 4, nil]\n[:rindex, 4, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and BINARY (ASCII-8BIT)"]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("éa",encoding:"UTF-8");[:delete_prefix,:delete_suffix].each{|m|begin;p [m,desc(s.send(m,"x"))];rescue=>x;p [m,x.class,x.message];end};[:ljust,:rjust,:center].each{|m|[-1,1,3,4].each{|w|begin;p [m,w,desc(s.send(m,w))];rescue=>x;p [m,w,x.class,x.message];end}};p desc(s.split(",",1));s.split(",",1){|x|p desc(x)}',
+    '[:delete_prefix, [[195, 169, 97], #<Encoding:UTF-8>, true]]\n[:delete_suffix, [[195, 169, 97], #<Encoding:UTF-8>, true]]\n[:ljust, -1, [[195, 169, 97], #<Encoding:UTF-8>, true]]\n[:ljust, 1, [[195, 169, 97], #<Encoding:UTF-8>, true]]\n[:ljust, 3, [[195, 169, 97, 32], #<Encoding:UTF-8>, true]]\n[:ljust, 4, [[195, 169, 97, 32, 32], #<Encoding:UTF-8>, true]]\n[:rjust, -1, [[195, 169, 97], #<Encoding:UTF-8>, true]]\n[:rjust, 1, [[195, 169, 97], #<Encoding:UTF-8>, true]]\n[:rjust, 3, [[32, 195, 169, 97], #<Encoding:UTF-8>, true]]\n[:rjust, 4, [[32, 32, 195, 169, 97], #<Encoding:UTF-8>, true]]\n[:center, -1, [[195, 169, 97], #<Encoding:UTF-8>, true]]\n[:center, 1, [[195, 169, 97], #<Encoding:UTF-8>, true]]\n[:center, 3, [[195, 169, 97, 32], #<Encoding:UTF-8>, true]]\n[:center, 4, [[32, 195, 169, 97, 32], #<Encoding:UTF-8>, true]]\n[[[195, 169, 97], #<Encoding:UTF-8>, true]]\n[[195, 169, 97], #<Encoding:UTF-8>, true]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("éa",encoding:"UTF-8");[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,"a"))];rescue=>x;p [m,x.class,x.message,s.bytes];end}',
+    '[:count, 1]\n[:delete, [[195, 169], #<Encoding:UTF-8>, true]]\n[:delete!, [[195, 169], #<Encoding:UTF-8>, true]]\n[:split, [[[195, 169], #<Encoding:UTF-8>, true]]]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("éa",encoding:"UTF-8");s.freeze;[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,"a"))];rescue=>x;p [m,x.class,x.message,s.bytes];end}',
+    '[:count, 1]\n[:delete, [[195, 169], #<Encoding:UTF-8>, true]]\n[:delete!, FrozenError, "can\'t modify frozen String: \\"éa\\"", [195, 169, 97]]\n[:split, [[[195, 169], #<Encoding:UTF-8>, true]]]\n',
+  ],
+  [
+    's=String.new("éa",encoding:"UTF-8");n=String.new("a",encoding:"US-ASCII");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, true]\n[:index, 1]\n[:rindex, 1]\n[:start_with?, false]\n[:end_with?, true]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, 1]\n[:rindex, -1, 1]\n[:index, 0, 1]\n[:rindex, 0, nil]\n[:index, 1, 1]\n[:rindex, 1, 1]\n[:index, 2, nil]\n[:rindex, 2, 1]\n[:index, 3, nil]\n[:rindex, 3, 1]\n[:index, 4, nil]\n[:rindex, 4, 1]\n',
+  ],
+  [
+    's=String.new("éa",encoding:"UTF-8");n=String.new("é",encoding:"US-ASCII");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and US-ASCII"]\n[:index, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and US-ASCII"]\n[:rindex, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and US-ASCII"]\n[:start_with?, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and US-ASCII"]\n[:end_with?, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and US-ASCII"]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and US-ASCII"]\n[:rindex, -1, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and US-ASCII"]\n[:index, 0, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and US-ASCII"]\n[:rindex, 0, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and US-ASCII"]\n[:index, 1, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and US-ASCII"]\n[:rindex, 1, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and US-ASCII"]\n[:index, 2, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and US-ASCII"]\n[:rindex, 2, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and US-ASCII"]\n[:index, 3, nil]\n[:rindex, 3, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and US-ASCII"]\n[:index, 4, nil]\n[:rindex, 4, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and US-ASCII"]\n',
+  ],
+  [
+    's=String.new("éa",encoding:"UTF-8");n=String.new("x",encoding:"US-ASCII");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, false]\n[:index, nil]\n[:rindex, nil]\n[:start_with?, false]\n[:end_with?, false]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, nil]\n[:rindex, -1, nil]\n[:index, 0, nil]\n[:rindex, 0, nil]\n[:index, 1, nil]\n[:rindex, 1, nil]\n[:index, 2, nil]\n[:rindex, 2, nil]\n[:index, 3, nil]\n[:rindex, 3, nil]\n[:index, 4, nil]\n[:rindex, 4, nil]\n',
+  ],
+  [
+    's=String.new("éa",encoding:"UTF-8");n=String.new("",encoding:"US-ASCII");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, true]\n[:index, 0]\n[:rindex, 2]\n[:start_with?, true]\n[:end_with?, true]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, 1]\n[:rindex, -1, 1]\n[:index, 0, 0]\n[:rindex, 0, 0]\n[:index, 1, 1]\n[:rindex, 1, 1]\n[:index, 2, 2]\n[:rindex, 2, 2]\n[:index, 3, nil]\n[:rindex, 3, 2]\n[:index, 4, nil]\n[:rindex, 4, 2]\n',
+  ],
+  [
+    's=String.new("éa",encoding:"UTF-8");n=String.new(255.chr,encoding:"US-ASCII");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and US-ASCII"]\n[:index, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and US-ASCII"]\n[:rindex, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and US-ASCII"]\n[:start_with?, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and US-ASCII"]\n[:end_with?, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and US-ASCII"]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and US-ASCII"]\n[:rindex, -1, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and US-ASCII"]\n[:index, 0, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and US-ASCII"]\n[:rindex, 0, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and US-ASCII"]\n[:index, 1, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and US-ASCII"]\n[:rindex, 1, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and US-ASCII"]\n[:index, 2, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and US-ASCII"]\n[:rindex, 2, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and US-ASCII"]\n[:index, 3, nil]\n[:rindex, 3, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and US-ASCII"]\n[:index, 4, nil]\n[:rindex, 4, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and US-ASCII"]\n',
+  ],
+  [
+    's=String.new("éa",encoding:"UTF-8");n=String.new("a",encoding:"UTF-8");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, true]\n[:index, 1]\n[:rindex, 1]\n[:start_with?, false]\n[:end_with?, true]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, 1]\n[:rindex, -1, 1]\n[:index, 0, 1]\n[:rindex, 0, nil]\n[:index, 1, 1]\n[:rindex, 1, 1]\n[:index, 2, nil]\n[:rindex, 2, 1]\n[:index, 3, nil]\n[:rindex, 3, 1]\n[:index, 4, nil]\n[:rindex, 4, 1]\n',
+  ],
+  [
+    's=String.new("éa",encoding:"UTF-8");n=String.new("é",encoding:"UTF-8");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, true]\n[:index, 0]\n[:rindex, 0]\n[:start_with?, true]\n[:end_with?, false]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, nil]\n[:rindex, -1, 0]\n[:index, 0, 0]\n[:rindex, 0, 0]\n[:index, 1, nil]\n[:rindex, 1, 0]\n[:index, 2, nil]\n[:rindex, 2, 0]\n[:index, 3, nil]\n[:rindex, 3, 0]\n[:index, 4, nil]\n[:rindex, 4, 0]\n',
+  ],
+  [
+    's=String.new("éa",encoding:"UTF-8");n=String.new("x",encoding:"UTF-8");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, false]\n[:index, nil]\n[:rindex, nil]\n[:start_with?, false]\n[:end_with?, false]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, nil]\n[:rindex, -1, nil]\n[:index, 0, nil]\n[:rindex, 0, nil]\n[:index, 1, nil]\n[:rindex, 1, nil]\n[:index, 2, nil]\n[:rindex, 2, nil]\n[:index, 3, nil]\n[:rindex, 3, nil]\n[:index, 4, nil]\n[:rindex, 4, nil]\n',
+  ],
+  [
+    's=String.new("éa",encoding:"UTF-8");n=String.new("",encoding:"UTF-8");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, true]\n[:index, 0]\n[:rindex, 2]\n[:start_with?, true]\n[:end_with?, true]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, 1]\n[:rindex, -1, 1]\n[:index, 0, 0]\n[:rindex, 0, 0]\n[:index, 1, 1]\n[:rindex, 1, 1]\n[:index, 2, 2]\n[:rindex, 2, 2]\n[:index, 3, nil]\n[:rindex, 3, 2]\n[:index, 4, nil]\n[:rindex, 4, 2]\n',
+  ],
+  [
+    's=String.new("éa",encoding:"UTF-8");n=String.new(255.chr,encoding:"UTF-8");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, false]\n[:index, nil]\n[:rindex, nil]\n[:start_with?, false]\n[:end_with?, false]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, nil]\n[:rindex, -1, nil]\n[:index, 0, nil]\n[:rindex, 0, nil]\n[:index, 1, nil]\n[:rindex, 1, nil]\n[:index, 2, nil]\n[:rindex, 2, nil]\n[:index, 3, nil]\n[:rindex, 3, nil]\n[:index, 4, nil]\n[:rindex, 4, nil]\n',
+  ],
+  [
+    's=String.new("éa",encoding:"UTF-8");n=String.new("a",encoding:"ASCII-8BIT");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, true]\n[:index, 1]\n[:rindex, 1]\n[:start_with?, false]\n[:end_with?, true]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, 1]\n[:rindex, -1, 1]\n[:index, 0, 1]\n[:rindex, 0, nil]\n[:index, 1, 1]\n[:rindex, 1, 1]\n[:index, 2, nil]\n[:rindex, 2, 1]\n[:index, 3, nil]\n[:rindex, 3, 1]\n[:index, 4, nil]\n[:rindex, 4, 1]\n',
+  ],
+  [
+    's=String.new("éa",encoding:"UTF-8");n=String.new("é",encoding:"ASCII-8BIT");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and BINARY (ASCII-8BIT)"]\n[:index, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and BINARY (ASCII-8BIT)"]\n[:rindex, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and BINARY (ASCII-8BIT)"]\n[:start_with?, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and BINARY (ASCII-8BIT)"]\n[:end_with?, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and BINARY (ASCII-8BIT)"]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and BINARY (ASCII-8BIT)"]\n[:rindex, -1, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and BINARY (ASCII-8BIT)"]\n[:index, 0, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and BINARY (ASCII-8BIT)"]\n[:rindex, 0, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and BINARY (ASCII-8BIT)"]\n[:index, 1, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and BINARY (ASCII-8BIT)"]\n[:rindex, 1, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and BINARY (ASCII-8BIT)"]\n[:index, 2, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and BINARY (ASCII-8BIT)"]\n[:rindex, 2, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and BINARY (ASCII-8BIT)"]\n[:index, 3, nil]\n[:rindex, 3, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and BINARY (ASCII-8BIT)"]\n[:index, 4, nil]\n[:rindex, 4, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and BINARY (ASCII-8BIT)"]\n',
+  ],
+  [
+    's=String.new("éa",encoding:"UTF-8");n=String.new("x",encoding:"ASCII-8BIT");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, false]\n[:index, nil]\n[:rindex, nil]\n[:start_with?, false]\n[:end_with?, false]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, nil]\n[:rindex, -1, nil]\n[:index, 0, nil]\n[:rindex, 0, nil]\n[:index, 1, nil]\n[:rindex, 1, nil]\n[:index, 2, nil]\n[:rindex, 2, nil]\n[:index, 3, nil]\n[:rindex, 3, nil]\n[:index, 4, nil]\n[:rindex, 4, nil]\n',
+  ],
+  [
+    's=String.new("éa",encoding:"UTF-8");n=String.new("",encoding:"ASCII-8BIT");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, true]\n[:index, 0]\n[:rindex, 2]\n[:start_with?, true]\n[:end_with?, true]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, 1]\n[:rindex, -1, 1]\n[:index, 0, 0]\n[:rindex, 0, 0]\n[:index, 1, 1]\n[:rindex, 1, 1]\n[:index, 2, 2]\n[:rindex, 2, 2]\n[:index, 3, nil]\n[:rindex, 3, 2]\n[:index, 4, nil]\n[:rindex, 4, 2]\n',
+  ],
+  [
+    's=String.new("éa",encoding:"UTF-8");n=String.new(255.chr,encoding:"ASCII-8BIT");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and BINARY (ASCII-8BIT)"]\n[:index, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and BINARY (ASCII-8BIT)"]\n[:rindex, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and BINARY (ASCII-8BIT)"]\n[:start_with?, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and BINARY (ASCII-8BIT)"]\n[:end_with?, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and BINARY (ASCII-8BIT)"]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and BINARY (ASCII-8BIT)"]\n[:rindex, -1, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and BINARY (ASCII-8BIT)"]\n[:index, 0, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and BINARY (ASCII-8BIT)"]\n[:rindex, 0, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and BINARY (ASCII-8BIT)"]\n[:index, 1, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and BINARY (ASCII-8BIT)"]\n[:rindex, 1, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and BINARY (ASCII-8BIT)"]\n[:index, 2, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and BINARY (ASCII-8BIT)"]\n[:rindex, 2, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and BINARY (ASCII-8BIT)"]\n[:index, 3, nil]\n[:rindex, 3, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and BINARY (ASCII-8BIT)"]\n[:index, 4, nil]\n[:rindex, 4, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and BINARY (ASCII-8BIT)"]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("日a",encoding:"UTF-8");[:delete_prefix,:delete_suffix].each{|m|begin;p [m,desc(s.send(m,"x"))];rescue=>x;p [m,x.class,x.message];end};[:ljust,:rjust,:center].each{|m|[-1,1,3,4].each{|w|begin;p [m,w,desc(s.send(m,w))];rescue=>x;p [m,w,x.class,x.message];end}};p desc(s.split(",",1));s.split(",",1){|x|p desc(x)}',
+    '[:delete_prefix, [[230, 151, 165, 97], #<Encoding:UTF-8>, true]]\n[:delete_suffix, [[230, 151, 165, 97], #<Encoding:UTF-8>, true]]\n[:ljust, -1, [[230, 151, 165, 97], #<Encoding:UTF-8>, true]]\n[:ljust, 1, [[230, 151, 165, 97], #<Encoding:UTF-8>, true]]\n[:ljust, 3, [[230, 151, 165, 97, 32], #<Encoding:UTF-8>, true]]\n[:ljust, 4, [[230, 151, 165, 97, 32, 32], #<Encoding:UTF-8>, true]]\n[:rjust, -1, [[230, 151, 165, 97], #<Encoding:UTF-8>, true]]\n[:rjust, 1, [[230, 151, 165, 97], #<Encoding:UTF-8>, true]]\n[:rjust, 3, [[32, 230, 151, 165, 97], #<Encoding:UTF-8>, true]]\n[:rjust, 4, [[32, 32, 230, 151, 165, 97], #<Encoding:UTF-8>, true]]\n[:center, -1, [[230, 151, 165, 97], #<Encoding:UTF-8>, true]]\n[:center, 1, [[230, 151, 165, 97], #<Encoding:UTF-8>, true]]\n[:center, 3, [[230, 151, 165, 97, 32], #<Encoding:UTF-8>, true]]\n[:center, 4, [[32, 230, 151, 165, 97, 32], #<Encoding:UTF-8>, true]]\n[[[230, 151, 165, 97], #<Encoding:UTF-8>, true]]\n[[230, 151, 165, 97], #<Encoding:UTF-8>, true]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("日a",encoding:"UTF-8");[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,"a"))];rescue=>x;p [m,x.class,x.message,s.bytes];end}',
+    '[:count, 1]\n[:delete, [[230, 151, 165], #<Encoding:UTF-8>, true]]\n[:delete!, [[230, 151, 165], #<Encoding:UTF-8>, true]]\n[:split, [[[230, 151, 165], #<Encoding:UTF-8>, true]]]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("日a",encoding:"UTF-8");s.freeze;[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,"a"))];rescue=>x;p [m,x.class,x.message,s.bytes];end}',
+    '[:count, 1]\n[:delete, [[230, 151, 165], #<Encoding:UTF-8>, true]]\n[:delete!, FrozenError, "can\'t modify frozen String: \\"日a\\"", [230, 151, 165, 97]]\n[:split, [[[230, 151, 165], #<Encoding:UTF-8>, true]]]\n',
+  ],
+  [
+    's=String.new("日a",encoding:"UTF-8");n=String.new("a",encoding:"US-ASCII");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, true]\n[:index, 1]\n[:rindex, 1]\n[:start_with?, false]\n[:end_with?, true]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, 1]\n[:rindex, -1, 1]\n[:index, 0, 1]\n[:rindex, 0, nil]\n[:index, 1, 1]\n[:rindex, 1, 1]\n[:index, 2, nil]\n[:rindex, 2, 1]\n[:index, 3, nil]\n[:rindex, 3, 1]\n[:index, 4, nil]\n[:rindex, 4, 1]\n',
+  ],
+  [
+    's=String.new("日a",encoding:"UTF-8");n=String.new("é",encoding:"US-ASCII");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and US-ASCII"]\n[:index, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and US-ASCII"]\n[:rindex, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and US-ASCII"]\n[:start_with?, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and US-ASCII"]\n[:end_with?, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and US-ASCII"]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and US-ASCII"]\n[:rindex, -1, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and US-ASCII"]\n[:index, 0, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and US-ASCII"]\n[:rindex, 0, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and US-ASCII"]\n[:index, 1, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and US-ASCII"]\n[:rindex, 1, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and US-ASCII"]\n[:index, 2, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and US-ASCII"]\n[:rindex, 2, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and US-ASCII"]\n[:index, 3, nil]\n[:rindex, 3, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and US-ASCII"]\n[:index, 4, nil]\n[:rindex, 4, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and US-ASCII"]\n',
+  ],
+  [
+    's=String.new("日a",encoding:"UTF-8");n=String.new("x",encoding:"US-ASCII");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, false]\n[:index, nil]\n[:rindex, nil]\n[:start_with?, false]\n[:end_with?, false]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, nil]\n[:rindex, -1, nil]\n[:index, 0, nil]\n[:rindex, 0, nil]\n[:index, 1, nil]\n[:rindex, 1, nil]\n[:index, 2, nil]\n[:rindex, 2, nil]\n[:index, 3, nil]\n[:rindex, 3, nil]\n[:index, 4, nil]\n[:rindex, 4, nil]\n',
+  ],
+  [
+    's=String.new("日a",encoding:"UTF-8");n=String.new("",encoding:"US-ASCII");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, true]\n[:index, 0]\n[:rindex, 2]\n[:start_with?, true]\n[:end_with?, true]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, 1]\n[:rindex, -1, 1]\n[:index, 0, 0]\n[:rindex, 0, 0]\n[:index, 1, 1]\n[:rindex, 1, 1]\n[:index, 2, 2]\n[:rindex, 2, 2]\n[:index, 3, nil]\n[:rindex, 3, 2]\n[:index, 4, nil]\n[:rindex, 4, 2]\n',
+  ],
+  [
+    's=String.new("日a",encoding:"UTF-8");n=String.new(255.chr,encoding:"US-ASCII");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and US-ASCII"]\n[:index, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and US-ASCII"]\n[:rindex, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and US-ASCII"]\n[:start_with?, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and US-ASCII"]\n[:end_with?, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and US-ASCII"]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and US-ASCII"]\n[:rindex, -1, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and US-ASCII"]\n[:index, 0, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and US-ASCII"]\n[:rindex, 0, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and US-ASCII"]\n[:index, 1, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and US-ASCII"]\n[:rindex, 1, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and US-ASCII"]\n[:index, 2, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and US-ASCII"]\n[:rindex, 2, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and US-ASCII"]\n[:index, 3, nil]\n[:rindex, 3, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and US-ASCII"]\n[:index, 4, nil]\n[:rindex, 4, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and US-ASCII"]\n',
+  ],
+  [
+    's=String.new("日a",encoding:"UTF-8");n=String.new("a",encoding:"UTF-8");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, true]\n[:index, 1]\n[:rindex, 1]\n[:start_with?, false]\n[:end_with?, true]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, 1]\n[:rindex, -1, 1]\n[:index, 0, 1]\n[:rindex, 0, nil]\n[:index, 1, 1]\n[:rindex, 1, 1]\n[:index, 2, nil]\n[:rindex, 2, 1]\n[:index, 3, nil]\n[:rindex, 3, 1]\n[:index, 4, nil]\n[:rindex, 4, 1]\n',
+  ],
+  [
+    's=String.new("日a",encoding:"UTF-8");n=String.new("é",encoding:"UTF-8");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, false]\n[:index, nil]\n[:rindex, nil]\n[:start_with?, false]\n[:end_with?, false]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, nil]\n[:rindex, -1, nil]\n[:index, 0, nil]\n[:rindex, 0, nil]\n[:index, 1, nil]\n[:rindex, 1, nil]\n[:index, 2, nil]\n[:rindex, 2, nil]\n[:index, 3, nil]\n[:rindex, 3, nil]\n[:index, 4, nil]\n[:rindex, 4, nil]\n',
+  ],
+  [
+    's=String.new("日a",encoding:"UTF-8");n=String.new("x",encoding:"UTF-8");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, false]\n[:index, nil]\n[:rindex, nil]\n[:start_with?, false]\n[:end_with?, false]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, nil]\n[:rindex, -1, nil]\n[:index, 0, nil]\n[:rindex, 0, nil]\n[:index, 1, nil]\n[:rindex, 1, nil]\n[:index, 2, nil]\n[:rindex, 2, nil]\n[:index, 3, nil]\n[:rindex, 3, nil]\n[:index, 4, nil]\n[:rindex, 4, nil]\n',
+  ],
+  [
+    's=String.new("日a",encoding:"UTF-8");n=String.new("",encoding:"UTF-8");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, true]\n[:index, 0]\n[:rindex, 2]\n[:start_with?, true]\n[:end_with?, true]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, 1]\n[:rindex, -1, 1]\n[:index, 0, 0]\n[:rindex, 0, 0]\n[:index, 1, 1]\n[:rindex, 1, 1]\n[:index, 2, 2]\n[:rindex, 2, 2]\n[:index, 3, nil]\n[:rindex, 3, 2]\n[:index, 4, nil]\n[:rindex, 4, 2]\n',
+  ],
+  [
+    's=String.new("日a",encoding:"UTF-8");n=String.new(255.chr,encoding:"UTF-8");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, false]\n[:index, nil]\n[:rindex, nil]\n[:start_with?, false]\n[:end_with?, false]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, nil]\n[:rindex, -1, nil]\n[:index, 0, nil]\n[:rindex, 0, nil]\n[:index, 1, nil]\n[:rindex, 1, nil]\n[:index, 2, nil]\n[:rindex, 2, nil]\n[:index, 3, nil]\n[:rindex, 3, nil]\n[:index, 4, nil]\n[:rindex, 4, nil]\n',
+  ],
+  [
+    's=String.new("日a",encoding:"UTF-8");n=String.new("a",encoding:"ASCII-8BIT");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, true]\n[:index, 1]\n[:rindex, 1]\n[:start_with?, false]\n[:end_with?, true]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, 1]\n[:rindex, -1, 1]\n[:index, 0, 1]\n[:rindex, 0, nil]\n[:index, 1, 1]\n[:rindex, 1, 1]\n[:index, 2, nil]\n[:rindex, 2, 1]\n[:index, 3, nil]\n[:rindex, 3, 1]\n[:index, 4, nil]\n[:rindex, 4, 1]\n',
+  ],
+  [
+    's=String.new("日a",encoding:"UTF-8");n=String.new("é",encoding:"ASCII-8BIT");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and BINARY (ASCII-8BIT)"]\n[:index, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and BINARY (ASCII-8BIT)"]\n[:rindex, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and BINARY (ASCII-8BIT)"]\n[:start_with?, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and BINARY (ASCII-8BIT)"]\n[:end_with?, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and BINARY (ASCII-8BIT)"]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and BINARY (ASCII-8BIT)"]\n[:rindex, -1, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and BINARY (ASCII-8BIT)"]\n[:index, 0, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and BINARY (ASCII-8BIT)"]\n[:rindex, 0, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and BINARY (ASCII-8BIT)"]\n[:index, 1, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and BINARY (ASCII-8BIT)"]\n[:rindex, 1, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and BINARY (ASCII-8BIT)"]\n[:index, 2, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and BINARY (ASCII-8BIT)"]\n[:rindex, 2, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and BINARY (ASCII-8BIT)"]\n[:index, 3, nil]\n[:rindex, 3, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and BINARY (ASCII-8BIT)"]\n[:index, 4, nil]\n[:rindex, 4, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and BINARY (ASCII-8BIT)"]\n',
+  ],
+  [
+    's=String.new("日a",encoding:"UTF-8");n=String.new("x",encoding:"ASCII-8BIT");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, false]\n[:index, nil]\n[:rindex, nil]\n[:start_with?, false]\n[:end_with?, false]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, nil]\n[:rindex, -1, nil]\n[:index, 0, nil]\n[:rindex, 0, nil]\n[:index, 1, nil]\n[:rindex, 1, nil]\n[:index, 2, nil]\n[:rindex, 2, nil]\n[:index, 3, nil]\n[:rindex, 3, nil]\n[:index, 4, nil]\n[:rindex, 4, nil]\n',
+  ],
+  [
+    's=String.new("日a",encoding:"UTF-8");n=String.new("",encoding:"ASCII-8BIT");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, true]\n[:index, 0]\n[:rindex, 2]\n[:start_with?, true]\n[:end_with?, true]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, 1]\n[:rindex, -1, 1]\n[:index, 0, 0]\n[:rindex, 0, 0]\n[:index, 1, 1]\n[:rindex, 1, 1]\n[:index, 2, 2]\n[:rindex, 2, 2]\n[:index, 3, nil]\n[:rindex, 3, 2]\n[:index, 4, nil]\n[:rindex, 4, 2]\n',
+  ],
+  [
+    's=String.new("日a",encoding:"UTF-8");n=String.new(255.chr,encoding:"ASCII-8BIT");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and BINARY (ASCII-8BIT)"]\n[:index, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and BINARY (ASCII-8BIT)"]\n[:rindex, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and BINARY (ASCII-8BIT)"]\n[:start_with?, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and BINARY (ASCII-8BIT)"]\n[:end_with?, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and BINARY (ASCII-8BIT)"]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and BINARY (ASCII-8BIT)"]\n[:rindex, -1, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and BINARY (ASCII-8BIT)"]\n[:index, 0, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and BINARY (ASCII-8BIT)"]\n[:rindex, 0, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and BINARY (ASCII-8BIT)"]\n[:index, 1, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and BINARY (ASCII-8BIT)"]\n[:rindex, 1, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and BINARY (ASCII-8BIT)"]\n[:index, 2, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and BINARY (ASCII-8BIT)"]\n[:rindex, 2, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and BINARY (ASCII-8BIT)"]\n[:index, 3, nil]\n[:rindex, 3, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and BINARY (ASCII-8BIT)"]\n[:index, 4, nil]\n[:rindex, 4, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and BINARY (ASCII-8BIT)"]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new(255.chr,encoding:"UTF-8");[:delete_prefix,:delete_suffix].each{|m|begin;p [m,desc(s.send(m,"x"))];rescue=>x;p [m,x.class,x.message];end};[:ljust,:rjust,:center].each{|m|[-1,1,3,4].each{|w|begin;p [m,w,desc(s.send(m,w))];rescue=>x;p [m,w,x.class,x.message];end}};p desc(s.split(",",1));s.split(",",1){|x|p desc(x)}',
+    '[:delete_prefix, [[255], #<Encoding:UTF-8>, false]]\n[:delete_suffix, [[255], #<Encoding:UTF-8>, false]]\n[:ljust, -1, [[255], #<Encoding:UTF-8>, false]]\n[:ljust, 1, [[255], #<Encoding:UTF-8>, false]]\n[:ljust, 3, [[255, 32, 32], #<Encoding:UTF-8>, false]]\n[:ljust, 4, [[255, 32, 32, 32], #<Encoding:UTF-8>, false]]\n[:rjust, -1, [[255], #<Encoding:UTF-8>, false]]\n[:rjust, 1, [[255], #<Encoding:UTF-8>, false]]\n[:rjust, 3, [[32, 32, 255], #<Encoding:UTF-8>, false]]\n[:rjust, 4, [[32, 32, 32, 255], #<Encoding:UTF-8>, false]]\n[:center, -1, [[255], #<Encoding:UTF-8>, false]]\n[:center, 1, [[255], #<Encoding:UTF-8>, false]]\n[:center, 3, [[32, 255, 32], #<Encoding:UTF-8>, false]]\n[:center, 4, [[32, 255, 32, 32], #<Encoding:UTF-8>, false]]\n[[[255], #<Encoding:UTF-8>, false]]\n[[255], #<Encoding:UTF-8>, false]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new(255.chr,encoding:"UTF-8");[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,"a"))];rescue=>x;p [m,x.class,x.message,s.bytes];end}',
+    '[:count, ArgumentError, "invalid byte sequence in UTF-8", [255]]\n[:delete, ArgumentError, "invalid byte sequence in UTF-8", [255]]\n[:delete!, ArgumentError, "invalid byte sequence in UTF-8", [255]]\n[:split, ArgumentError, "invalid byte sequence in UTF-8", [255]]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new(255.chr,encoding:"UTF-8");s.freeze;[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,"a"))];rescue=>x;p [m,x.class,x.message,s.bytes];end}',
+    '[:count, ArgumentError, "invalid byte sequence in UTF-8", [255]]\n[:delete, ArgumentError, "invalid byte sequence in UTF-8", [255]]\n[:delete!, FrozenError, "can\'t modify frozen String: \\"\\\\xFF\\"", [255]]\n[:split, ArgumentError, "invalid byte sequence in UTF-8", [255]]\n',
+  ],
+  [
+    's=String.new(255.chr,encoding:"UTF-8");n=String.new("a",encoding:"US-ASCII");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, false]\n[:index, nil]\n[:rindex, nil]\n[:start_with?, false]\n[:end_with?, false]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, nil]\n[:rindex, -1, nil]\n[:index, 0, nil]\n[:rindex, 0, nil]\n[:index, 1, nil]\n[:rindex, 1, nil]\n[:index, 2, nil]\n[:rindex, 2, nil]\n[:index, 3, nil]\n[:rindex, 3, nil]\n[:index, 4, nil]\n[:rindex, 4, nil]\n',
+  ],
+  [
+    's=String.new(255.chr,encoding:"UTF-8");n=String.new("é",encoding:"US-ASCII");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and US-ASCII"]\n[:index, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and US-ASCII"]\n[:rindex, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and US-ASCII"]\n[:start_with?, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and US-ASCII"]\n[:end_with?, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and US-ASCII"]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and US-ASCII"]\n[:rindex, -1, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and US-ASCII"]\n[:index, 0, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and US-ASCII"]\n[:rindex, 0, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and US-ASCII"]\n[:index, 1, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and US-ASCII"]\n[:rindex, 1, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and US-ASCII"]\n[:index, 2, nil]\n[:rindex, 2, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and US-ASCII"]\n[:index, 3, nil]\n[:rindex, 3, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and US-ASCII"]\n[:index, 4, nil]\n[:rindex, 4, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and US-ASCII"]\n',
+  ],
+  [
+    's=String.new(255.chr,encoding:"UTF-8");n=String.new("x",encoding:"US-ASCII");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, false]\n[:index, nil]\n[:rindex, nil]\n[:start_with?, false]\n[:end_with?, false]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, nil]\n[:rindex, -1, nil]\n[:index, 0, nil]\n[:rindex, 0, nil]\n[:index, 1, nil]\n[:rindex, 1, nil]\n[:index, 2, nil]\n[:rindex, 2, nil]\n[:index, 3, nil]\n[:rindex, 3, nil]\n[:index, 4, nil]\n[:rindex, 4, nil]\n',
+  ],
+  [
+    's=String.new(255.chr,encoding:"UTF-8");n=String.new("",encoding:"US-ASCII");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, true]\n[:index, 0]\n[:rindex, 1]\n[:start_with?, true]\n[:end_with?, true]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, 0]\n[:rindex, -1, 0]\n[:index, 0, 0]\n[:rindex, 0, 0]\n[:index, 1, 1]\n[:rindex, 1, 1]\n[:index, 2, nil]\n[:rindex, 2, 1]\n[:index, 3, nil]\n[:rindex, 3, 1]\n[:index, 4, nil]\n[:rindex, 4, 1]\n',
+  ],
+  [
+    's=String.new(255.chr,encoding:"UTF-8");n=String.new(255.chr,encoding:"US-ASCII");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and US-ASCII"]\n[:index, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and US-ASCII"]\n[:rindex, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and US-ASCII"]\n[:start_with?, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and US-ASCII"]\n[:end_with?, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and US-ASCII"]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and US-ASCII"]\n[:rindex, -1, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and US-ASCII"]\n[:index, 0, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and US-ASCII"]\n[:rindex, 0, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and US-ASCII"]\n[:index, 1, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and US-ASCII"]\n[:rindex, 1, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and US-ASCII"]\n[:index, 2, nil]\n[:rindex, 2, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and US-ASCII"]\n[:index, 3, nil]\n[:rindex, 3, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and US-ASCII"]\n[:index, 4, nil]\n[:rindex, 4, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and US-ASCII"]\n',
+  ],
+  [
+    's=String.new(255.chr,encoding:"UTF-8");n=String.new("a",encoding:"UTF-8");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, false]\n[:index, nil]\n[:rindex, nil]\n[:start_with?, false]\n[:end_with?, false]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, nil]\n[:rindex, -1, nil]\n[:index, 0, nil]\n[:rindex, 0, nil]\n[:index, 1, nil]\n[:rindex, 1, nil]\n[:index, 2, nil]\n[:rindex, 2, nil]\n[:index, 3, nil]\n[:rindex, 3, nil]\n[:index, 4, nil]\n[:rindex, 4, nil]\n',
+  ],
+  [
+    's=String.new(255.chr,encoding:"UTF-8");n=String.new("é",encoding:"UTF-8");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, false]\n[:index, nil]\n[:rindex, nil]\n[:start_with?, false]\n[:end_with?, false]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, nil]\n[:rindex, -1, nil]\n[:index, 0, nil]\n[:rindex, 0, nil]\n[:index, 1, nil]\n[:rindex, 1, nil]\n[:index, 2, nil]\n[:rindex, 2, nil]\n[:index, 3, nil]\n[:rindex, 3, nil]\n[:index, 4, nil]\n[:rindex, 4, nil]\n',
+  ],
+  [
+    's=String.new(255.chr,encoding:"UTF-8");n=String.new("x",encoding:"UTF-8");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, false]\n[:index, nil]\n[:rindex, nil]\n[:start_with?, false]\n[:end_with?, false]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, nil]\n[:rindex, -1, nil]\n[:index, 0, nil]\n[:rindex, 0, nil]\n[:index, 1, nil]\n[:rindex, 1, nil]\n[:index, 2, nil]\n[:rindex, 2, nil]\n[:index, 3, nil]\n[:rindex, 3, nil]\n[:index, 4, nil]\n[:rindex, 4, nil]\n',
+  ],
+  [
+    's=String.new(255.chr,encoding:"UTF-8");n=String.new("",encoding:"UTF-8");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, true]\n[:index, 0]\n[:rindex, 1]\n[:start_with?, true]\n[:end_with?, true]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, 0]\n[:rindex, -1, 0]\n[:index, 0, 0]\n[:rindex, 0, 0]\n[:index, 1, 1]\n[:rindex, 1, 1]\n[:index, 2, nil]\n[:rindex, 2, 1]\n[:index, 3, nil]\n[:rindex, 3, 1]\n[:index, 4, nil]\n[:rindex, 4, 1]\n',
+  ],
+  [
+    's=String.new(255.chr,encoding:"UTF-8");n=String.new(255.chr,encoding:"UTF-8");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, false]\n[:index, nil]\n[:rindex, nil]\n[:start_with?, true]\n[:end_with?, true]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, nil]\n[:rindex, -1, nil]\n[:index, 0, nil]\n[:rindex, 0, nil]\n[:index, 1, nil]\n[:rindex, 1, nil]\n[:index, 2, nil]\n[:rindex, 2, nil]\n[:index, 3, nil]\n[:rindex, 3, nil]\n[:index, 4, nil]\n[:rindex, 4, nil]\n',
+  ],
+  [
+    's=String.new(255.chr,encoding:"UTF-8");n=String.new("a",encoding:"ASCII-8BIT");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, false]\n[:index, nil]\n[:rindex, nil]\n[:start_with?, false]\n[:end_with?, false]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, nil]\n[:rindex, -1, nil]\n[:index, 0, nil]\n[:rindex, 0, nil]\n[:index, 1, nil]\n[:rindex, 1, nil]\n[:index, 2, nil]\n[:rindex, 2, nil]\n[:index, 3, nil]\n[:rindex, 3, nil]\n[:index, 4, nil]\n[:rindex, 4, nil]\n',
+  ],
+  [
+    's=String.new(255.chr,encoding:"UTF-8");n=String.new("é",encoding:"ASCII-8BIT");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and BINARY (ASCII-8BIT)"]\n[:index, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and BINARY (ASCII-8BIT)"]\n[:rindex, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and BINARY (ASCII-8BIT)"]\n[:start_with?, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and BINARY (ASCII-8BIT)"]\n[:end_with?, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and BINARY (ASCII-8BIT)"]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and BINARY (ASCII-8BIT)"]\n[:rindex, -1, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and BINARY (ASCII-8BIT)"]\n[:index, 0, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and BINARY (ASCII-8BIT)"]\n[:rindex, 0, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and BINARY (ASCII-8BIT)"]\n[:index, 1, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and BINARY (ASCII-8BIT)"]\n[:rindex, 1, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and BINARY (ASCII-8BIT)"]\n[:index, 2, nil]\n[:rindex, 2, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and BINARY (ASCII-8BIT)"]\n[:index, 3, nil]\n[:rindex, 3, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and BINARY (ASCII-8BIT)"]\n[:index, 4, nil]\n[:rindex, 4, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and BINARY (ASCII-8BIT)"]\n',
+  ],
+  [
+    's=String.new(255.chr,encoding:"UTF-8");n=String.new("x",encoding:"ASCII-8BIT");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, false]\n[:index, nil]\n[:rindex, nil]\n[:start_with?, false]\n[:end_with?, false]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, nil]\n[:rindex, -1, nil]\n[:index, 0, nil]\n[:rindex, 0, nil]\n[:index, 1, nil]\n[:rindex, 1, nil]\n[:index, 2, nil]\n[:rindex, 2, nil]\n[:index, 3, nil]\n[:rindex, 3, nil]\n[:index, 4, nil]\n[:rindex, 4, nil]\n',
+  ],
+  [
+    's=String.new(255.chr,encoding:"UTF-8");n=String.new("",encoding:"ASCII-8BIT");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, true]\n[:index, 0]\n[:rindex, 1]\n[:start_with?, true]\n[:end_with?, true]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, 0]\n[:rindex, -1, 0]\n[:index, 0, 0]\n[:rindex, 0, 0]\n[:index, 1, 1]\n[:rindex, 1, 1]\n[:index, 2, nil]\n[:rindex, 2, 1]\n[:index, 3, nil]\n[:rindex, 3, 1]\n[:index, 4, nil]\n[:rindex, 4, 1]\n',
+  ],
+  [
+    's=String.new(255.chr,encoding:"UTF-8");n=String.new(255.chr,encoding:"ASCII-8BIT");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and BINARY (ASCII-8BIT)"]\n[:index, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and BINARY (ASCII-8BIT)"]\n[:rindex, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and BINARY (ASCII-8BIT)"]\n[:start_with?, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and BINARY (ASCII-8BIT)"]\n[:end_with?, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and BINARY (ASCII-8BIT)"]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and BINARY (ASCII-8BIT)"]\n[:rindex, -1, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and BINARY (ASCII-8BIT)"]\n[:index, 0, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and BINARY (ASCII-8BIT)"]\n[:rindex, 0, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and BINARY (ASCII-8BIT)"]\n[:index, 1, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and BINARY (ASCII-8BIT)"]\n[:rindex, 1, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and BINARY (ASCII-8BIT)"]\n[:index, 2, nil]\n[:rindex, 2, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and BINARY (ASCII-8BIT)"]\n[:index, 3, nil]\n[:rindex, 3, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and BINARY (ASCII-8BIT)"]\n[:index, 4, nil]\n[:rindex, 4, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and BINARY (ASCII-8BIT)"]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("abc",encoding:"UTF-8");[:delete_prefix,:delete_suffix].each{|m|begin;p [m,desc(s.send(m,"x"))];rescue=>x;p [m,x.class,x.message];end};[:ljust,:rjust,:center].each{|m|[-1,1,3,4].each{|w|begin;p [m,w,desc(s.send(m,w))];rescue=>x;p [m,w,x.class,x.message];end}};p desc(s.split(",",1));s.split(",",1){|x|p desc(x)}',
+    '[:delete_prefix, [[97, 98, 99], #<Encoding:UTF-8>, true]]\n[:delete_suffix, [[97, 98, 99], #<Encoding:UTF-8>, true]]\n[:ljust, -1, [[97, 98, 99], #<Encoding:UTF-8>, true]]\n[:ljust, 1, [[97, 98, 99], #<Encoding:UTF-8>, true]]\n[:ljust, 3, [[97, 98, 99], #<Encoding:UTF-8>, true]]\n[:ljust, 4, [[97, 98, 99, 32], #<Encoding:UTF-8>, true]]\n[:rjust, -1, [[97, 98, 99], #<Encoding:UTF-8>, true]]\n[:rjust, 1, [[97, 98, 99], #<Encoding:UTF-8>, true]]\n[:rjust, 3, [[97, 98, 99], #<Encoding:UTF-8>, true]]\n[:rjust, 4, [[32, 97, 98, 99], #<Encoding:UTF-8>, true]]\n[:center, -1, [[97, 98, 99], #<Encoding:UTF-8>, true]]\n[:center, 1, [[97, 98, 99], #<Encoding:UTF-8>, true]]\n[:center, 3, [[97, 98, 99], #<Encoding:UTF-8>, true]]\n[:center, 4, [[97, 98, 99, 32], #<Encoding:UTF-8>, true]]\n[[[97, 98, 99], #<Encoding:UTF-8>, true]]\n[[97, 98, 99], #<Encoding:UTF-8>, true]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("abc",encoding:"UTF-8");[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,"a"))];rescue=>x;p [m,x.class,x.message,s.bytes];end}',
+    '[:count, 1]\n[:delete, [[98, 99], #<Encoding:UTF-8>, true]]\n[:delete!, [[98, 99], #<Encoding:UTF-8>, true]]\n[:split, [[[98, 99], #<Encoding:UTF-8>, true]]]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("abc",encoding:"UTF-8");s.freeze;[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,"a"))];rescue=>x;p [m,x.class,x.message,s.bytes];end}',
+    '[:count, 1]\n[:delete, [[98, 99], #<Encoding:UTF-8>, true]]\n[:delete!, FrozenError, "can\'t modify frozen String: \\"abc\\"", [97, 98, 99]]\n[:split, [[[], #<Encoding:UTF-8>, true], [[98, 99], #<Encoding:UTF-8>, true]]]\n',
+  ],
+  [
+    's=String.new("abc",encoding:"UTF-8");n=String.new("a",encoding:"US-ASCII");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, true]\n[:index, 0]\n[:rindex, 0]\n[:start_with?, true]\n[:end_with?, false]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, nil]\n[:rindex, -1, 0]\n[:index, 0, 0]\n[:rindex, 0, 0]\n[:index, 1, nil]\n[:rindex, 1, 0]\n[:index, 2, nil]\n[:rindex, 2, 0]\n[:index, 3, nil]\n[:rindex, 3, 0]\n[:index, 4, nil]\n[:rindex, 4, 0]\n',
+  ],
+  [
+    's=String.new("abc",encoding:"UTF-8");n=String.new("é",encoding:"US-ASCII");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, false]\n[:index, nil]\n[:rindex, nil]\n[:start_with?, false]\n[:end_with?, false]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, nil]\n[:rindex, -1, nil]\n[:index, 0, nil]\n[:rindex, 0, nil]\n[:index, 1, nil]\n[:rindex, 1, nil]\n[:index, 2, nil]\n[:rindex, 2, nil]\n[:index, 3, nil]\n[:rindex, 3, nil]\n[:index, 4, nil]\n[:rindex, 4, nil]\n',
+  ],
+  [
+    's=String.new("abc",encoding:"UTF-8");n=String.new("x",encoding:"US-ASCII");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, false]\n[:index, nil]\n[:rindex, nil]\n[:start_with?, false]\n[:end_with?, false]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, nil]\n[:rindex, -1, nil]\n[:index, 0, nil]\n[:rindex, 0, nil]\n[:index, 1, nil]\n[:rindex, 1, nil]\n[:index, 2, nil]\n[:rindex, 2, nil]\n[:index, 3, nil]\n[:rindex, 3, nil]\n[:index, 4, nil]\n[:rindex, 4, nil]\n',
+  ],
+  [
+    's=String.new("abc",encoding:"UTF-8");n=String.new("",encoding:"US-ASCII");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, true]\n[:index, 0]\n[:rindex, 3]\n[:start_with?, true]\n[:end_with?, true]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, 2]\n[:rindex, -1, 2]\n[:index, 0, 0]\n[:rindex, 0, 0]\n[:index, 1, 1]\n[:rindex, 1, 1]\n[:index, 2, 2]\n[:rindex, 2, 2]\n[:index, 3, 3]\n[:rindex, 3, 3]\n[:index, 4, nil]\n[:rindex, 4, 3]\n',
+  ],
+  [
+    's=String.new("abc",encoding:"UTF-8");n=String.new(255.chr,encoding:"US-ASCII");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, false]\n[:index, nil]\n[:rindex, nil]\n[:start_with?, false]\n[:end_with?, false]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, nil]\n[:rindex, -1, nil]\n[:index, 0, nil]\n[:rindex, 0, nil]\n[:index, 1, nil]\n[:rindex, 1, nil]\n[:index, 2, nil]\n[:rindex, 2, nil]\n[:index, 3, nil]\n[:rindex, 3, nil]\n[:index, 4, nil]\n[:rindex, 4, nil]\n',
+  ],
+  [
+    's=String.new("abc",encoding:"UTF-8");n=String.new("a",encoding:"UTF-8");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, true]\n[:index, 0]\n[:rindex, 0]\n[:start_with?, true]\n[:end_with?, false]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, nil]\n[:rindex, -1, 0]\n[:index, 0, 0]\n[:rindex, 0, 0]\n[:index, 1, nil]\n[:rindex, 1, 0]\n[:index, 2, nil]\n[:rindex, 2, 0]\n[:index, 3, nil]\n[:rindex, 3, 0]\n[:index, 4, nil]\n[:rindex, 4, 0]\n',
+  ],
+  [
+    's=String.new("abc",encoding:"UTF-8");n=String.new("é",encoding:"UTF-8");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, false]\n[:index, nil]\n[:rindex, nil]\n[:start_with?, false]\n[:end_with?, false]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, nil]\n[:rindex, -1, nil]\n[:index, 0, nil]\n[:rindex, 0, nil]\n[:index, 1, nil]\n[:rindex, 1, nil]\n[:index, 2, nil]\n[:rindex, 2, nil]\n[:index, 3, nil]\n[:rindex, 3, nil]\n[:index, 4, nil]\n[:rindex, 4, nil]\n',
+  ],
+  [
+    's=String.new("abc",encoding:"UTF-8");n=String.new("x",encoding:"UTF-8");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, false]\n[:index, nil]\n[:rindex, nil]\n[:start_with?, false]\n[:end_with?, false]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, nil]\n[:rindex, -1, nil]\n[:index, 0, nil]\n[:rindex, 0, nil]\n[:index, 1, nil]\n[:rindex, 1, nil]\n[:index, 2, nil]\n[:rindex, 2, nil]\n[:index, 3, nil]\n[:rindex, 3, nil]\n[:index, 4, nil]\n[:rindex, 4, nil]\n',
+  ],
+  [
+    's=String.new("abc",encoding:"UTF-8");n=String.new("",encoding:"UTF-8");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, true]\n[:index, 0]\n[:rindex, 3]\n[:start_with?, true]\n[:end_with?, true]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, 2]\n[:rindex, -1, 2]\n[:index, 0, 0]\n[:rindex, 0, 0]\n[:index, 1, 1]\n[:rindex, 1, 1]\n[:index, 2, 2]\n[:rindex, 2, 2]\n[:index, 3, 3]\n[:rindex, 3, 3]\n[:index, 4, nil]\n[:rindex, 4, 3]\n',
+  ],
+  [
+    's=String.new("abc",encoding:"UTF-8");n=String.new(255.chr,encoding:"UTF-8");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, false]\n[:index, nil]\n[:rindex, nil]\n[:start_with?, false]\n[:end_with?, false]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, nil]\n[:rindex, -1, nil]\n[:index, 0, nil]\n[:rindex, 0, nil]\n[:index, 1, nil]\n[:rindex, 1, nil]\n[:index, 2, nil]\n[:rindex, 2, nil]\n[:index, 3, nil]\n[:rindex, 3, nil]\n[:index, 4, nil]\n[:rindex, 4, nil]\n',
+  ],
+  [
+    's=String.new("abc",encoding:"UTF-8");n=String.new("a",encoding:"ASCII-8BIT");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, true]\n[:index, 0]\n[:rindex, 0]\n[:start_with?, true]\n[:end_with?, false]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, nil]\n[:rindex, -1, 0]\n[:index, 0, 0]\n[:rindex, 0, 0]\n[:index, 1, nil]\n[:rindex, 1, 0]\n[:index, 2, nil]\n[:rindex, 2, 0]\n[:index, 3, nil]\n[:rindex, 3, 0]\n[:index, 4, nil]\n[:rindex, 4, 0]\n',
+  ],
+  [
+    's=String.new("abc",encoding:"UTF-8");n=String.new("é",encoding:"ASCII-8BIT");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, false]\n[:index, nil]\n[:rindex, nil]\n[:start_with?, false]\n[:end_with?, false]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, nil]\n[:rindex, -1, nil]\n[:index, 0, nil]\n[:rindex, 0, nil]\n[:index, 1, nil]\n[:rindex, 1, nil]\n[:index, 2, nil]\n[:rindex, 2, nil]\n[:index, 3, nil]\n[:rindex, 3, nil]\n[:index, 4, nil]\n[:rindex, 4, nil]\n',
+  ],
+  [
+    's=String.new("abc",encoding:"UTF-8");n=String.new("x",encoding:"ASCII-8BIT");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, false]\n[:index, nil]\n[:rindex, nil]\n[:start_with?, false]\n[:end_with?, false]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, nil]\n[:rindex, -1, nil]\n[:index, 0, nil]\n[:rindex, 0, nil]\n[:index, 1, nil]\n[:rindex, 1, nil]\n[:index, 2, nil]\n[:rindex, 2, nil]\n[:index, 3, nil]\n[:rindex, 3, nil]\n[:index, 4, nil]\n[:rindex, 4, nil]\n',
+  ],
+  [
+    's=String.new("abc",encoding:"UTF-8");n=String.new("",encoding:"ASCII-8BIT");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, true]\n[:index, 0]\n[:rindex, 3]\n[:start_with?, true]\n[:end_with?, true]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, 2]\n[:rindex, -1, 2]\n[:index, 0, 0]\n[:rindex, 0, 0]\n[:index, 1, 1]\n[:rindex, 1, 1]\n[:index, 2, 2]\n[:rindex, 2, 2]\n[:index, 3, 3]\n[:rindex, 3, 3]\n[:index, 4, nil]\n[:rindex, 4, 3]\n',
+  ],
+  [
+    's=String.new("abc",encoding:"UTF-8");n=String.new(255.chr,encoding:"ASCII-8BIT");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, false]\n[:index, nil]\n[:rindex, nil]\n[:start_with?, false]\n[:end_with?, false]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, nil]\n[:rindex, -1, nil]\n[:index, 0, nil]\n[:rindex, 0, nil]\n[:index, 1, nil]\n[:rindex, 1, nil]\n[:index, 2, nil]\n[:rindex, 2, nil]\n[:index, 3, nil]\n[:rindex, 3, nil]\n[:index, 4, nil]\n[:rindex, 4, nil]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("",encoding:"UTF-8");[:delete_prefix,:delete_suffix].each{|m|begin;p [m,desc(s.send(m,"x"))];rescue=>x;p [m,x.class,x.message];end};[:ljust,:rjust,:center].each{|m|[-1,1,3,4].each{|w|begin;p [m,w,desc(s.send(m,w))];rescue=>x;p [m,w,x.class,x.message];end}};p desc(s.split(",",1));s.split(",",1){|x|p desc(x)}',
+    '[:delete_prefix, [[], #<Encoding:UTF-8>, true]]\n[:delete_suffix, [[], #<Encoding:UTF-8>, true]]\n[:ljust, -1, [[], #<Encoding:UTF-8>, true]]\n[:ljust, 1, [[32], #<Encoding:UTF-8>, true]]\n[:ljust, 3, [[32, 32, 32], #<Encoding:UTF-8>, true]]\n[:ljust, 4, [[32, 32, 32, 32], #<Encoding:UTF-8>, true]]\n[:rjust, -1, [[], #<Encoding:UTF-8>, true]]\n[:rjust, 1, [[32], #<Encoding:UTF-8>, true]]\n[:rjust, 3, [[32, 32, 32], #<Encoding:UTF-8>, true]]\n[:rjust, 4, [[32, 32, 32, 32], #<Encoding:UTF-8>, true]]\n[:center, -1, [[], #<Encoding:UTF-8>, true]]\n[:center, 1, [[32], #<Encoding:UTF-8>, true]]\n[:center, 3, [[32, 32, 32], #<Encoding:UTF-8>, true]]\n[:center, 4, [[32, 32, 32, 32], #<Encoding:UTF-8>, true]]\n[]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("",encoding:"UTF-8");[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,"a"))];rescue=>x;p [m,x.class,x.message,s.bytes];end}',
+    '[:count, 0]\n[:delete, [[], #<Encoding:UTF-8>, true]]\n[:delete!, nil]\n[:split, []]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("",encoding:"UTF-8");s.freeze;[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,"a"))];rescue=>x;p [m,x.class,x.message,s.bytes];end}',
+    '[:count, 0]\n[:delete, [[], #<Encoding:UTF-8>, true]]\n[:delete!, nil]\n[:split, []]\n',
+  ],
+  [
+    's=String.new("",encoding:"UTF-8");n=String.new("a",encoding:"US-ASCII");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, false]\n[:index, nil]\n[:rindex, nil]\n[:start_with?, false]\n[:end_with?, false]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, nil]\n[:rindex, -1, nil]\n[:index, 0, nil]\n[:rindex, 0, nil]\n[:index, 1, nil]\n[:rindex, 1, nil]\n[:index, 2, nil]\n[:rindex, 2, nil]\n[:index, 3, nil]\n[:rindex, 3, nil]\n[:index, 4, nil]\n[:rindex, 4, nil]\n',
+  ],
+  [
+    's=String.new("",encoding:"UTF-8");n=String.new("é",encoding:"US-ASCII");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, false]\n[:index, nil]\n[:rindex, nil]\n[:start_with?, false]\n[:end_with?, false]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, nil]\n[:rindex, -1, nil]\n[:index, 0, nil]\n[:rindex, 0, nil]\n[:index, 1, nil]\n[:rindex, 1, nil]\n[:index, 2, nil]\n[:rindex, 2, nil]\n[:index, 3, nil]\n[:rindex, 3, nil]\n[:index, 4, nil]\n[:rindex, 4, nil]\n',
+  ],
+  [
+    's=String.new("",encoding:"UTF-8");n=String.new("x",encoding:"US-ASCII");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, false]\n[:index, nil]\n[:rindex, nil]\n[:start_with?, false]\n[:end_with?, false]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, nil]\n[:rindex, -1, nil]\n[:index, 0, nil]\n[:rindex, 0, nil]\n[:index, 1, nil]\n[:rindex, 1, nil]\n[:index, 2, nil]\n[:rindex, 2, nil]\n[:index, 3, nil]\n[:rindex, 3, nil]\n[:index, 4, nil]\n[:rindex, 4, nil]\n',
+  ],
+  [
+    's=String.new("",encoding:"UTF-8");n=String.new("",encoding:"US-ASCII");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, true]\n[:index, 0]\n[:rindex, 0]\n[:start_with?, true]\n[:end_with?, true]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, nil]\n[:rindex, -1, nil]\n[:index, 0, 0]\n[:rindex, 0, 0]\n[:index, 1, nil]\n[:rindex, 1, 0]\n[:index, 2, nil]\n[:rindex, 2, 0]\n[:index, 3, nil]\n[:rindex, 3, 0]\n[:index, 4, nil]\n[:rindex, 4, 0]\n',
+  ],
+  [
+    's=String.new("",encoding:"UTF-8");n=String.new(255.chr,encoding:"US-ASCII");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, false]\n[:index, nil]\n[:rindex, nil]\n[:start_with?, false]\n[:end_with?, false]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, nil]\n[:rindex, -1, nil]\n[:index, 0, nil]\n[:rindex, 0, nil]\n[:index, 1, nil]\n[:rindex, 1, nil]\n[:index, 2, nil]\n[:rindex, 2, nil]\n[:index, 3, nil]\n[:rindex, 3, nil]\n[:index, 4, nil]\n[:rindex, 4, nil]\n',
+  ],
+  [
+    's=String.new("",encoding:"UTF-8");n=String.new("a",encoding:"UTF-8");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, false]\n[:index, nil]\n[:rindex, nil]\n[:start_with?, false]\n[:end_with?, false]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, nil]\n[:rindex, -1, nil]\n[:index, 0, nil]\n[:rindex, 0, nil]\n[:index, 1, nil]\n[:rindex, 1, nil]\n[:index, 2, nil]\n[:rindex, 2, nil]\n[:index, 3, nil]\n[:rindex, 3, nil]\n[:index, 4, nil]\n[:rindex, 4, nil]\n',
+  ],
+  [
+    's=String.new("",encoding:"UTF-8");n=String.new("é",encoding:"UTF-8");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, false]\n[:index, nil]\n[:rindex, nil]\n[:start_with?, false]\n[:end_with?, false]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, nil]\n[:rindex, -1, nil]\n[:index, 0, nil]\n[:rindex, 0, nil]\n[:index, 1, nil]\n[:rindex, 1, nil]\n[:index, 2, nil]\n[:rindex, 2, nil]\n[:index, 3, nil]\n[:rindex, 3, nil]\n[:index, 4, nil]\n[:rindex, 4, nil]\n',
+  ],
+  [
+    's=String.new("",encoding:"UTF-8");n=String.new("x",encoding:"UTF-8");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, false]\n[:index, nil]\n[:rindex, nil]\n[:start_with?, false]\n[:end_with?, false]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, nil]\n[:rindex, -1, nil]\n[:index, 0, nil]\n[:rindex, 0, nil]\n[:index, 1, nil]\n[:rindex, 1, nil]\n[:index, 2, nil]\n[:rindex, 2, nil]\n[:index, 3, nil]\n[:rindex, 3, nil]\n[:index, 4, nil]\n[:rindex, 4, nil]\n',
+  ],
+  [
+    's=String.new("",encoding:"UTF-8");n=String.new("",encoding:"UTF-8");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, true]\n[:index, 0]\n[:rindex, 0]\n[:start_with?, true]\n[:end_with?, true]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, nil]\n[:rindex, -1, nil]\n[:index, 0, 0]\n[:rindex, 0, 0]\n[:index, 1, nil]\n[:rindex, 1, 0]\n[:index, 2, nil]\n[:rindex, 2, 0]\n[:index, 3, nil]\n[:rindex, 3, 0]\n[:index, 4, nil]\n[:rindex, 4, 0]\n',
+  ],
+  [
+    's=String.new("",encoding:"UTF-8");n=String.new(255.chr,encoding:"UTF-8");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, false]\n[:index, nil]\n[:rindex, nil]\n[:start_with?, false]\n[:end_with?, false]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, nil]\n[:rindex, -1, nil]\n[:index, 0, nil]\n[:rindex, 0, nil]\n[:index, 1, nil]\n[:rindex, 1, nil]\n[:index, 2, nil]\n[:rindex, 2, nil]\n[:index, 3, nil]\n[:rindex, 3, nil]\n[:index, 4, nil]\n[:rindex, 4, nil]\n',
+  ],
+  [
+    's=String.new("",encoding:"UTF-8");n=String.new("a",encoding:"ASCII-8BIT");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, false]\n[:index, nil]\n[:rindex, nil]\n[:start_with?, false]\n[:end_with?, false]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, nil]\n[:rindex, -1, nil]\n[:index, 0, nil]\n[:rindex, 0, nil]\n[:index, 1, nil]\n[:rindex, 1, nil]\n[:index, 2, nil]\n[:rindex, 2, nil]\n[:index, 3, nil]\n[:rindex, 3, nil]\n[:index, 4, nil]\n[:rindex, 4, nil]\n',
+  ],
+  [
+    's=String.new("",encoding:"UTF-8");n=String.new("é",encoding:"ASCII-8BIT");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, false]\n[:index, nil]\n[:rindex, nil]\n[:start_with?, false]\n[:end_with?, false]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, nil]\n[:rindex, -1, nil]\n[:index, 0, nil]\n[:rindex, 0, nil]\n[:index, 1, nil]\n[:rindex, 1, nil]\n[:index, 2, nil]\n[:rindex, 2, nil]\n[:index, 3, nil]\n[:rindex, 3, nil]\n[:index, 4, nil]\n[:rindex, 4, nil]\n',
+  ],
+  [
+    's=String.new("",encoding:"UTF-8");n=String.new("x",encoding:"ASCII-8BIT");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, false]\n[:index, nil]\n[:rindex, nil]\n[:start_with?, false]\n[:end_with?, false]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, nil]\n[:rindex, -1, nil]\n[:index, 0, nil]\n[:rindex, 0, nil]\n[:index, 1, nil]\n[:rindex, 1, nil]\n[:index, 2, nil]\n[:rindex, 2, nil]\n[:index, 3, nil]\n[:rindex, 3, nil]\n[:index, 4, nil]\n[:rindex, 4, nil]\n',
+  ],
+  [
+    's=String.new("",encoding:"UTF-8");n=String.new("",encoding:"ASCII-8BIT");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, true]\n[:index, 0]\n[:rindex, 0]\n[:start_with?, true]\n[:end_with?, true]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, nil]\n[:rindex, -1, nil]\n[:index, 0, 0]\n[:rindex, 0, 0]\n[:index, 1, nil]\n[:rindex, 1, 0]\n[:index, 2, nil]\n[:rindex, 2, 0]\n[:index, 3, nil]\n[:rindex, 3, 0]\n[:index, 4, nil]\n[:rindex, 4, 0]\n',
+  ],
+  [
+    's=String.new("",encoding:"UTF-8");n=String.new(255.chr,encoding:"ASCII-8BIT");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, false]\n[:index, nil]\n[:rindex, nil]\n[:start_with?, false]\n[:end_with?, false]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, nil]\n[:rindex, -1, nil]\n[:index, 0, nil]\n[:rindex, 0, nil]\n[:index, 1, nil]\n[:rindex, 1, nil]\n[:index, 2, nil]\n[:rindex, 2, nil]\n[:index, 3, nil]\n[:rindex, 3, nil]\n[:index, 4, nil]\n[:rindex, 4, nil]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("é",encoding:"ASCII-8BIT");[:delete_prefix,:delete_suffix].each{|m|begin;p [m,desc(s.send(m,"x"))];rescue=>x;p [m,x.class,x.message];end};[:ljust,:rjust,:center].each{|m|[-1,1,3,4].each{|w|begin;p [m,w,desc(s.send(m,w))];rescue=>x;p [m,w,x.class,x.message];end}};p desc(s.split(",",1));s.split(",",1){|x|p desc(x)}',
+    '[:delete_prefix, [[195, 169], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:delete_suffix, [[195, 169], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:ljust, -1, [[195, 169], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:ljust, 1, [[195, 169], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:ljust, 3, [[195, 169, 32], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:ljust, 4, [[195, 169, 32, 32], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:rjust, -1, [[195, 169], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:rjust, 1, [[195, 169], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:rjust, 3, [[32, 195, 169], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:rjust, 4, [[32, 32, 195, 169], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:center, -1, [[195, 169], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:center, 1, [[195, 169], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:center, 3, [[195, 169, 32], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:center, 4, [[32, 195, 169, 32], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[[[195, 169], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[[195, 169], #<Encoding:BINARY (ASCII-8BIT)>, true]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("é",encoding:"ASCII-8BIT");[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,"a"))];rescue=>x;p [m,x.class,x.message,s.bytes];end}',
+    '[:count, 0]\n[:delete, [[195, 169], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:delete!, nil]\n[:split, [[[195, 169], #<Encoding:BINARY (ASCII-8BIT)>, true]]]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("é",encoding:"ASCII-8BIT");s.freeze;[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,"a"))];rescue=>x;p [m,x.class,x.message,s.bytes];end}',
+    '[:count, 0]\n[:delete, [[195, 169], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:delete!, FrozenError, "can\'t modify frozen String: \\"\\\\xC3\\\\xA9\\"", [195, 169]]\n[:split, [[[195, 169], #<Encoding:BINARY (ASCII-8BIT)>, true]]]\n',
+  ],
+  [
+    's=String.new("é",encoding:"ASCII-8BIT");n=String.new("a",encoding:"US-ASCII");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, false]\n[:index, nil]\n[:rindex, nil]\n[:start_with?, false]\n[:end_with?, false]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, nil]\n[:rindex, -1, nil]\n[:index, 0, nil]\n[:rindex, 0, nil]\n[:index, 1, nil]\n[:rindex, 1, nil]\n[:index, 2, nil]\n[:rindex, 2, nil]\n[:index, 3, nil]\n[:rindex, 3, nil]\n[:index, 4, nil]\n[:rindex, 4, nil]\n',
+  ],
+  [
+    's=String.new("é",encoding:"ASCII-8BIT");n=String.new("é",encoding:"US-ASCII");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and US-ASCII"]\n[:index, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and US-ASCII"]\n[:rindex, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and US-ASCII"]\n[:start_with?, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and US-ASCII"]\n[:end_with?, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and US-ASCII"]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and US-ASCII"]\n[:rindex, -1, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and US-ASCII"]\n[:index, 0, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and US-ASCII"]\n[:rindex, 0, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and US-ASCII"]\n[:index, 1, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and US-ASCII"]\n[:rindex, 1, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and US-ASCII"]\n[:index, 2, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and US-ASCII"]\n[:rindex, 2, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and US-ASCII"]\n[:index, 3, nil]\n[:rindex, 3, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and US-ASCII"]\n[:index, 4, nil]\n[:rindex, 4, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and US-ASCII"]\n',
+  ],
+  [
+    's=String.new("é",encoding:"ASCII-8BIT");n=String.new("x",encoding:"US-ASCII");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, false]\n[:index, nil]\n[:rindex, nil]\n[:start_with?, false]\n[:end_with?, false]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, nil]\n[:rindex, -1, nil]\n[:index, 0, nil]\n[:rindex, 0, nil]\n[:index, 1, nil]\n[:rindex, 1, nil]\n[:index, 2, nil]\n[:rindex, 2, nil]\n[:index, 3, nil]\n[:rindex, 3, nil]\n[:index, 4, nil]\n[:rindex, 4, nil]\n',
+  ],
+  [
+    's=String.new("é",encoding:"ASCII-8BIT");n=String.new("",encoding:"US-ASCII");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, true]\n[:index, 0]\n[:rindex, 2]\n[:start_with?, true]\n[:end_with?, true]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, 1]\n[:rindex, -1, 1]\n[:index, 0, 0]\n[:rindex, 0, 0]\n[:index, 1, 1]\n[:rindex, 1, 1]\n[:index, 2, 2]\n[:rindex, 2, 2]\n[:index, 3, nil]\n[:rindex, 3, 2]\n[:index, 4, nil]\n[:rindex, 4, 2]\n',
+  ],
+  [
+    's=String.new("é",encoding:"ASCII-8BIT");n=String.new(255.chr,encoding:"US-ASCII");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and US-ASCII"]\n[:index, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and US-ASCII"]\n[:rindex, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and US-ASCII"]\n[:start_with?, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and US-ASCII"]\n[:end_with?, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and US-ASCII"]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and US-ASCII"]\n[:rindex, -1, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and US-ASCII"]\n[:index, 0, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and US-ASCII"]\n[:rindex, 0, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and US-ASCII"]\n[:index, 1, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and US-ASCII"]\n[:rindex, 1, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and US-ASCII"]\n[:index, 2, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and US-ASCII"]\n[:rindex, 2, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and US-ASCII"]\n[:index, 3, nil]\n[:rindex, 3, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and US-ASCII"]\n[:index, 4, nil]\n[:rindex, 4, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and US-ASCII"]\n',
+  ],
+  [
+    's=String.new("é",encoding:"ASCII-8BIT");n=String.new("a",encoding:"UTF-8");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, false]\n[:index, nil]\n[:rindex, nil]\n[:start_with?, false]\n[:end_with?, false]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, nil]\n[:rindex, -1, nil]\n[:index, 0, nil]\n[:rindex, 0, nil]\n[:index, 1, nil]\n[:rindex, 1, nil]\n[:index, 2, nil]\n[:rindex, 2, nil]\n[:index, 3, nil]\n[:rindex, 3, nil]\n[:index, 4, nil]\n[:rindex, 4, nil]\n',
+  ],
+  [
+    's=String.new("é",encoding:"ASCII-8BIT");n=String.new("é",encoding:"UTF-8");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and UTF-8"]\n[:index, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and UTF-8"]\n[:rindex, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and UTF-8"]\n[:start_with?, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and UTF-8"]\n[:end_with?, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and UTF-8"]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and UTF-8"]\n[:rindex, -1, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and UTF-8"]\n[:index, 0, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and UTF-8"]\n[:rindex, 0, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and UTF-8"]\n[:index, 1, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and UTF-8"]\n[:rindex, 1, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and UTF-8"]\n[:index, 2, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and UTF-8"]\n[:rindex, 2, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and UTF-8"]\n[:index, 3, nil]\n[:rindex, 3, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and UTF-8"]\n[:index, 4, nil]\n[:rindex, 4, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and UTF-8"]\n',
+  ],
+  [
+    's=String.new("é",encoding:"ASCII-8BIT");n=String.new("x",encoding:"UTF-8");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, false]\n[:index, nil]\n[:rindex, nil]\n[:start_with?, false]\n[:end_with?, false]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, nil]\n[:rindex, -1, nil]\n[:index, 0, nil]\n[:rindex, 0, nil]\n[:index, 1, nil]\n[:rindex, 1, nil]\n[:index, 2, nil]\n[:rindex, 2, nil]\n[:index, 3, nil]\n[:rindex, 3, nil]\n[:index, 4, nil]\n[:rindex, 4, nil]\n',
+  ],
+  [
+    's=String.new("é",encoding:"ASCII-8BIT");n=String.new("",encoding:"UTF-8");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, true]\n[:index, 0]\n[:rindex, 2]\n[:start_with?, true]\n[:end_with?, true]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, 1]\n[:rindex, -1, 1]\n[:index, 0, 0]\n[:rindex, 0, 0]\n[:index, 1, 1]\n[:rindex, 1, 1]\n[:index, 2, 2]\n[:rindex, 2, 2]\n[:index, 3, nil]\n[:rindex, 3, 2]\n[:index, 4, nil]\n[:rindex, 4, 2]\n',
+  ],
+  [
+    's=String.new("é",encoding:"ASCII-8BIT");n=String.new(255.chr,encoding:"UTF-8");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and UTF-8"]\n[:index, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and UTF-8"]\n[:rindex, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and UTF-8"]\n[:start_with?, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and UTF-8"]\n[:end_with?, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and UTF-8"]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and UTF-8"]\n[:rindex, -1, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and UTF-8"]\n[:index, 0, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and UTF-8"]\n[:rindex, 0, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and UTF-8"]\n[:index, 1, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and UTF-8"]\n[:rindex, 1, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and UTF-8"]\n[:index, 2, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and UTF-8"]\n[:rindex, 2, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and UTF-8"]\n[:index, 3, nil]\n[:rindex, 3, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and UTF-8"]\n[:index, 4, nil]\n[:rindex, 4, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and UTF-8"]\n',
+  ],
+  [
+    's=String.new("é",encoding:"ASCII-8BIT");n=String.new("a",encoding:"ASCII-8BIT");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, false]\n[:index, nil]\n[:rindex, nil]\n[:start_with?, false]\n[:end_with?, false]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, nil]\n[:rindex, -1, nil]\n[:index, 0, nil]\n[:rindex, 0, nil]\n[:index, 1, nil]\n[:rindex, 1, nil]\n[:index, 2, nil]\n[:rindex, 2, nil]\n[:index, 3, nil]\n[:rindex, 3, nil]\n[:index, 4, nil]\n[:rindex, 4, nil]\n',
+  ],
+  [
+    's=String.new("é",encoding:"ASCII-8BIT");n=String.new("é",encoding:"ASCII-8BIT");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, true]\n[:index, 0]\n[:rindex, 0]\n[:start_with?, true]\n[:end_with?, true]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, nil]\n[:rindex, -1, 0]\n[:index, 0, 0]\n[:rindex, 0, 0]\n[:index, 1, nil]\n[:rindex, 1, 0]\n[:index, 2, nil]\n[:rindex, 2, 0]\n[:index, 3, nil]\n[:rindex, 3, 0]\n[:index, 4, nil]\n[:rindex, 4, 0]\n',
+  ],
+  [
+    's=String.new("é",encoding:"ASCII-8BIT");n=String.new("x",encoding:"ASCII-8BIT");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, false]\n[:index, nil]\n[:rindex, nil]\n[:start_with?, false]\n[:end_with?, false]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, nil]\n[:rindex, -1, nil]\n[:index, 0, nil]\n[:rindex, 0, nil]\n[:index, 1, nil]\n[:rindex, 1, nil]\n[:index, 2, nil]\n[:rindex, 2, nil]\n[:index, 3, nil]\n[:rindex, 3, nil]\n[:index, 4, nil]\n[:rindex, 4, nil]\n',
+  ],
+  [
+    's=String.new("é",encoding:"ASCII-8BIT");n=String.new("",encoding:"ASCII-8BIT");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, true]\n[:index, 0]\n[:rindex, 2]\n[:start_with?, true]\n[:end_with?, true]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, 1]\n[:rindex, -1, 1]\n[:index, 0, 0]\n[:rindex, 0, 0]\n[:index, 1, 1]\n[:rindex, 1, 1]\n[:index, 2, 2]\n[:rindex, 2, 2]\n[:index, 3, nil]\n[:rindex, 3, 2]\n[:index, 4, nil]\n[:rindex, 4, 2]\n',
+  ],
+  [
+    's=String.new("é",encoding:"ASCII-8BIT");n=String.new(255.chr,encoding:"ASCII-8BIT");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, false]\n[:index, nil]\n[:rindex, nil]\n[:start_with?, false]\n[:end_with?, false]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, nil]\n[:rindex, -1, nil]\n[:index, 0, nil]\n[:rindex, 0, nil]\n[:index, 1, nil]\n[:rindex, 1, nil]\n[:index, 2, nil]\n[:rindex, 2, nil]\n[:index, 3, nil]\n[:rindex, 3, nil]\n[:index, 4, nil]\n[:rindex, 4, nil]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("éa",encoding:"ASCII-8BIT");[:delete_prefix,:delete_suffix].each{|m|begin;p [m,desc(s.send(m,"x"))];rescue=>x;p [m,x.class,x.message];end};[:ljust,:rjust,:center].each{|m|[-1,1,3,4].each{|w|begin;p [m,w,desc(s.send(m,w))];rescue=>x;p [m,w,x.class,x.message];end}};p desc(s.split(",",1));s.split(",",1){|x|p desc(x)}',
+    '[:delete_prefix, [[195, 169, 97], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:delete_suffix, [[195, 169, 97], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:ljust, -1, [[195, 169, 97], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:ljust, 1, [[195, 169, 97], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:ljust, 3, [[195, 169, 97], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:ljust, 4, [[195, 169, 97, 32], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:rjust, -1, [[195, 169, 97], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:rjust, 1, [[195, 169, 97], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:rjust, 3, [[195, 169, 97], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:rjust, 4, [[32, 195, 169, 97], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:center, -1, [[195, 169, 97], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:center, 1, [[195, 169, 97], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:center, 3, [[195, 169, 97], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:center, 4, [[195, 169, 97, 32], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[[[195, 169, 97], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[[195, 169, 97], #<Encoding:BINARY (ASCII-8BIT)>, true]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("éa",encoding:"ASCII-8BIT");[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,"a"))];rescue=>x;p [m,x.class,x.message,s.bytes];end}',
+    '[:count, 1]\n[:delete, [[195, 169], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:delete!, [[195, 169], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:split, [[[195, 169], #<Encoding:BINARY (ASCII-8BIT)>, true]]]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("éa",encoding:"ASCII-8BIT");s.freeze;[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,"a"))];rescue=>x;p [m,x.class,x.message,s.bytes];end}',
+    '[:count, 1]\n[:delete, [[195, 169], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:delete!, FrozenError, "can\'t modify frozen String: \\"\\\\xC3\\\\xA9a\\"", [195, 169, 97]]\n[:split, [[[195, 169], #<Encoding:BINARY (ASCII-8BIT)>, true]]]\n',
+  ],
+  [
+    's=String.new("éa",encoding:"ASCII-8BIT");n=String.new("a",encoding:"US-ASCII");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, true]\n[:index, 2]\n[:rindex, 2]\n[:start_with?, false]\n[:end_with?, true]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, 2]\n[:rindex, -1, 2]\n[:index, 0, 2]\n[:rindex, 0, nil]\n[:index, 1, 2]\n[:rindex, 1, nil]\n[:index, 2, 2]\n[:rindex, 2, 2]\n[:index, 3, nil]\n[:rindex, 3, 2]\n[:index, 4, nil]\n[:rindex, 4, 2]\n',
+  ],
+  [
+    's=String.new("éa",encoding:"ASCII-8BIT");n=String.new("é",encoding:"US-ASCII");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and US-ASCII"]\n[:index, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and US-ASCII"]\n[:rindex, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and US-ASCII"]\n[:start_with?, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and US-ASCII"]\n[:end_with?, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and US-ASCII"]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and US-ASCII"]\n[:rindex, -1, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and US-ASCII"]\n[:index, 0, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and US-ASCII"]\n[:rindex, 0, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and US-ASCII"]\n[:index, 1, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and US-ASCII"]\n[:rindex, 1, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and US-ASCII"]\n[:index, 2, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and US-ASCII"]\n[:rindex, 2, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and US-ASCII"]\n[:index, 3, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and US-ASCII"]\n[:rindex, 3, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and US-ASCII"]\n[:index, 4, nil]\n[:rindex, 4, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and US-ASCII"]\n',
+  ],
+  [
+    's=String.new("éa",encoding:"ASCII-8BIT");n=String.new("x",encoding:"US-ASCII");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, false]\n[:index, nil]\n[:rindex, nil]\n[:start_with?, false]\n[:end_with?, false]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, nil]\n[:rindex, -1, nil]\n[:index, 0, nil]\n[:rindex, 0, nil]\n[:index, 1, nil]\n[:rindex, 1, nil]\n[:index, 2, nil]\n[:rindex, 2, nil]\n[:index, 3, nil]\n[:rindex, 3, nil]\n[:index, 4, nil]\n[:rindex, 4, nil]\n',
+  ],
+  [
+    's=String.new("éa",encoding:"ASCII-8BIT");n=String.new("",encoding:"US-ASCII");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, true]\n[:index, 0]\n[:rindex, 3]\n[:start_with?, true]\n[:end_with?, true]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, 2]\n[:rindex, -1, 2]\n[:index, 0, 0]\n[:rindex, 0, 0]\n[:index, 1, 1]\n[:rindex, 1, 1]\n[:index, 2, 2]\n[:rindex, 2, 2]\n[:index, 3, 3]\n[:rindex, 3, 3]\n[:index, 4, nil]\n[:rindex, 4, 3]\n',
+  ],
+  [
+    's=String.new("éa",encoding:"ASCII-8BIT");n=String.new(255.chr,encoding:"US-ASCII");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and US-ASCII"]\n[:index, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and US-ASCII"]\n[:rindex, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and US-ASCII"]\n[:start_with?, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and US-ASCII"]\n[:end_with?, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and US-ASCII"]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and US-ASCII"]\n[:rindex, -1, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and US-ASCII"]\n[:index, 0, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and US-ASCII"]\n[:rindex, 0, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and US-ASCII"]\n[:index, 1, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and US-ASCII"]\n[:rindex, 1, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and US-ASCII"]\n[:index, 2, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and US-ASCII"]\n[:rindex, 2, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and US-ASCII"]\n[:index, 3, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and US-ASCII"]\n[:rindex, 3, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and US-ASCII"]\n[:index, 4, nil]\n[:rindex, 4, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and US-ASCII"]\n',
+  ],
+  [
+    's=String.new("éa",encoding:"ASCII-8BIT");n=String.new("a",encoding:"UTF-8");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, true]\n[:index, 2]\n[:rindex, 2]\n[:start_with?, false]\n[:end_with?, true]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, 2]\n[:rindex, -1, 2]\n[:index, 0, 2]\n[:rindex, 0, nil]\n[:index, 1, 2]\n[:rindex, 1, nil]\n[:index, 2, 2]\n[:rindex, 2, 2]\n[:index, 3, nil]\n[:rindex, 3, 2]\n[:index, 4, nil]\n[:rindex, 4, 2]\n',
+  ],
+  [
+    's=String.new("éa",encoding:"ASCII-8BIT");n=String.new("é",encoding:"UTF-8");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and UTF-8"]\n[:index, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and UTF-8"]\n[:rindex, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and UTF-8"]\n[:start_with?, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and UTF-8"]\n[:end_with?, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and UTF-8"]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and UTF-8"]\n[:rindex, -1, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and UTF-8"]\n[:index, 0, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and UTF-8"]\n[:rindex, 0, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and UTF-8"]\n[:index, 1, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and UTF-8"]\n[:rindex, 1, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and UTF-8"]\n[:index, 2, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and UTF-8"]\n[:rindex, 2, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and UTF-8"]\n[:index, 3, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and UTF-8"]\n[:rindex, 3, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and UTF-8"]\n[:index, 4, nil]\n[:rindex, 4, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and UTF-8"]\n',
+  ],
+  [
+    's=String.new("éa",encoding:"ASCII-8BIT");n=String.new("x",encoding:"UTF-8");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, false]\n[:index, nil]\n[:rindex, nil]\n[:start_with?, false]\n[:end_with?, false]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, nil]\n[:rindex, -1, nil]\n[:index, 0, nil]\n[:rindex, 0, nil]\n[:index, 1, nil]\n[:rindex, 1, nil]\n[:index, 2, nil]\n[:rindex, 2, nil]\n[:index, 3, nil]\n[:rindex, 3, nil]\n[:index, 4, nil]\n[:rindex, 4, nil]\n',
+  ],
+  [
+    's=String.new("éa",encoding:"ASCII-8BIT");n=String.new("",encoding:"UTF-8");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, true]\n[:index, 0]\n[:rindex, 3]\n[:start_with?, true]\n[:end_with?, true]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, 2]\n[:rindex, -1, 2]\n[:index, 0, 0]\n[:rindex, 0, 0]\n[:index, 1, 1]\n[:rindex, 1, 1]\n[:index, 2, 2]\n[:rindex, 2, 2]\n[:index, 3, 3]\n[:rindex, 3, 3]\n[:index, 4, nil]\n[:rindex, 4, 3]\n',
+  ],
+  [
+    's=String.new("éa",encoding:"ASCII-8BIT");n=String.new(255.chr,encoding:"UTF-8");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and UTF-8"]\n[:index, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and UTF-8"]\n[:rindex, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and UTF-8"]\n[:start_with?, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and UTF-8"]\n[:end_with?, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and UTF-8"]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and UTF-8"]\n[:rindex, -1, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and UTF-8"]\n[:index, 0, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and UTF-8"]\n[:rindex, 0, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and UTF-8"]\n[:index, 1, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and UTF-8"]\n[:rindex, 1, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and UTF-8"]\n[:index, 2, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and UTF-8"]\n[:rindex, 2, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and UTF-8"]\n[:index, 3, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and UTF-8"]\n[:rindex, 3, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and UTF-8"]\n[:index, 4, nil]\n[:rindex, 4, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and UTF-8"]\n',
+  ],
+  [
+    's=String.new("éa",encoding:"ASCII-8BIT");n=String.new("a",encoding:"ASCII-8BIT");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, true]\n[:index, 2]\n[:rindex, 2]\n[:start_with?, false]\n[:end_with?, true]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, 2]\n[:rindex, -1, 2]\n[:index, 0, 2]\n[:rindex, 0, nil]\n[:index, 1, 2]\n[:rindex, 1, nil]\n[:index, 2, 2]\n[:rindex, 2, 2]\n[:index, 3, nil]\n[:rindex, 3, 2]\n[:index, 4, nil]\n[:rindex, 4, 2]\n',
+  ],
+  [
+    's=String.new("éa",encoding:"ASCII-8BIT");n=String.new("é",encoding:"ASCII-8BIT");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, true]\n[:index, 0]\n[:rindex, 0]\n[:start_with?, true]\n[:end_with?, false]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, nil]\n[:rindex, -1, 0]\n[:index, 0, 0]\n[:rindex, 0, 0]\n[:index, 1, nil]\n[:rindex, 1, 0]\n[:index, 2, nil]\n[:rindex, 2, 0]\n[:index, 3, nil]\n[:rindex, 3, 0]\n[:index, 4, nil]\n[:rindex, 4, 0]\n',
+  ],
+  [
+    's=String.new("éa",encoding:"ASCII-8BIT");n=String.new("x",encoding:"ASCII-8BIT");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, false]\n[:index, nil]\n[:rindex, nil]\n[:start_with?, false]\n[:end_with?, false]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, nil]\n[:rindex, -1, nil]\n[:index, 0, nil]\n[:rindex, 0, nil]\n[:index, 1, nil]\n[:rindex, 1, nil]\n[:index, 2, nil]\n[:rindex, 2, nil]\n[:index, 3, nil]\n[:rindex, 3, nil]\n[:index, 4, nil]\n[:rindex, 4, nil]\n',
+  ],
+  [
+    's=String.new("éa",encoding:"ASCII-8BIT");n=String.new("",encoding:"ASCII-8BIT");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, true]\n[:index, 0]\n[:rindex, 3]\n[:start_with?, true]\n[:end_with?, true]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, 2]\n[:rindex, -1, 2]\n[:index, 0, 0]\n[:rindex, 0, 0]\n[:index, 1, 1]\n[:rindex, 1, 1]\n[:index, 2, 2]\n[:rindex, 2, 2]\n[:index, 3, 3]\n[:rindex, 3, 3]\n[:index, 4, nil]\n[:rindex, 4, 3]\n',
+  ],
+  [
+    's=String.new("éa",encoding:"ASCII-8BIT");n=String.new(255.chr,encoding:"ASCII-8BIT");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, false]\n[:index, nil]\n[:rindex, nil]\n[:start_with?, false]\n[:end_with?, false]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, nil]\n[:rindex, -1, nil]\n[:index, 0, nil]\n[:rindex, 0, nil]\n[:index, 1, nil]\n[:rindex, 1, nil]\n[:index, 2, nil]\n[:rindex, 2, nil]\n[:index, 3, nil]\n[:rindex, 3, nil]\n[:index, 4, nil]\n[:rindex, 4, nil]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("日a",encoding:"ASCII-8BIT");[:delete_prefix,:delete_suffix].each{|m|begin;p [m,desc(s.send(m,"x"))];rescue=>x;p [m,x.class,x.message];end};[:ljust,:rjust,:center].each{|m|[-1,1,3,4].each{|w|begin;p [m,w,desc(s.send(m,w))];rescue=>x;p [m,w,x.class,x.message];end}};p desc(s.split(",",1));s.split(",",1){|x|p desc(x)}',
+    '[:delete_prefix, [[230, 151, 165, 97], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:delete_suffix, [[230, 151, 165, 97], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:ljust, -1, [[230, 151, 165, 97], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:ljust, 1, [[230, 151, 165, 97], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:ljust, 3, [[230, 151, 165, 97], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:ljust, 4, [[230, 151, 165, 97], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:rjust, -1, [[230, 151, 165, 97], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:rjust, 1, [[230, 151, 165, 97], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:rjust, 3, [[230, 151, 165, 97], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:rjust, 4, [[230, 151, 165, 97], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:center, -1, [[230, 151, 165, 97], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:center, 1, [[230, 151, 165, 97], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:center, 3, [[230, 151, 165, 97], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:center, 4, [[230, 151, 165, 97], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[[[230, 151, 165, 97], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[[230, 151, 165, 97], #<Encoding:BINARY (ASCII-8BIT)>, true]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("日a",encoding:"ASCII-8BIT");[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,"a"))];rescue=>x;p [m,x.class,x.message,s.bytes];end}',
+    '[:count, 1]\n[:delete, [[230, 151, 165], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:delete!, [[230, 151, 165], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:split, [[[230, 151, 165], #<Encoding:BINARY (ASCII-8BIT)>, true]]]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("日a",encoding:"ASCII-8BIT");s.freeze;[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,"a"))];rescue=>x;p [m,x.class,x.message,s.bytes];end}',
+    '[:count, 1]\n[:delete, [[230, 151, 165], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:delete!, FrozenError, "can\'t modify frozen String: \\"\\\\xE6\\\\x97\\\\xA5a\\"", [230, 151, 165, 97]]\n[:split, [[[230, 151, 165], #<Encoding:BINARY (ASCII-8BIT)>, true]]]\n',
+  ],
+  [
+    's=String.new("日a",encoding:"ASCII-8BIT");n=String.new("a",encoding:"US-ASCII");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, true]\n[:index, 3]\n[:rindex, 3]\n[:start_with?, false]\n[:end_with?, true]\n[:index, -4, 3]\n[:rindex, -4, nil]\n[:index, -1, 3]\n[:rindex, -1, 3]\n[:index, 0, 3]\n[:rindex, 0, nil]\n[:index, 1, 3]\n[:rindex, 1, nil]\n[:index, 2, 3]\n[:rindex, 2, nil]\n[:index, 3, 3]\n[:rindex, 3, 3]\n[:index, 4, nil]\n[:rindex, 4, 3]\n',
+  ],
+  [
+    's=String.new("日a",encoding:"ASCII-8BIT");n=String.new("é",encoding:"US-ASCII");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and US-ASCII"]\n[:index, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and US-ASCII"]\n[:rindex, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and US-ASCII"]\n[:start_with?, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and US-ASCII"]\n[:end_with?, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and US-ASCII"]\n[:index, -4, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and US-ASCII"]\n[:rindex, -4, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and US-ASCII"]\n[:index, -1, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and US-ASCII"]\n[:rindex, -1, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and US-ASCII"]\n[:index, 0, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and US-ASCII"]\n[:rindex, 0, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and US-ASCII"]\n[:index, 1, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and US-ASCII"]\n[:rindex, 1, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and US-ASCII"]\n[:index, 2, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and US-ASCII"]\n[:rindex, 2, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and US-ASCII"]\n[:index, 3, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and US-ASCII"]\n[:rindex, 3, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and US-ASCII"]\n[:index, 4, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and US-ASCII"]\n[:rindex, 4, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and US-ASCII"]\n',
+  ],
+  [
+    's=String.new("日a",encoding:"ASCII-8BIT");n=String.new("x",encoding:"US-ASCII");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, false]\n[:index, nil]\n[:rindex, nil]\n[:start_with?, false]\n[:end_with?, false]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, nil]\n[:rindex, -1, nil]\n[:index, 0, nil]\n[:rindex, 0, nil]\n[:index, 1, nil]\n[:rindex, 1, nil]\n[:index, 2, nil]\n[:rindex, 2, nil]\n[:index, 3, nil]\n[:rindex, 3, nil]\n[:index, 4, nil]\n[:rindex, 4, nil]\n',
+  ],
+  [
+    's=String.new("日a",encoding:"ASCII-8BIT");n=String.new("",encoding:"US-ASCII");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, true]\n[:index, 0]\n[:rindex, 4]\n[:start_with?, true]\n[:end_with?, true]\n[:index, -4, 0]\n[:rindex, -4, 0]\n[:index, -1, 3]\n[:rindex, -1, 3]\n[:index, 0, 0]\n[:rindex, 0, 0]\n[:index, 1, 1]\n[:rindex, 1, 1]\n[:index, 2, 2]\n[:rindex, 2, 2]\n[:index, 3, 3]\n[:rindex, 3, 3]\n[:index, 4, 4]\n[:rindex, 4, 4]\n',
+  ],
+  [
+    's=String.new("日a",encoding:"ASCII-8BIT");n=String.new(255.chr,encoding:"US-ASCII");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and US-ASCII"]\n[:index, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and US-ASCII"]\n[:rindex, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and US-ASCII"]\n[:start_with?, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and US-ASCII"]\n[:end_with?, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and US-ASCII"]\n[:index, -4, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and US-ASCII"]\n[:rindex, -4, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and US-ASCII"]\n[:index, -1, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and US-ASCII"]\n[:rindex, -1, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and US-ASCII"]\n[:index, 0, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and US-ASCII"]\n[:rindex, 0, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and US-ASCII"]\n[:index, 1, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and US-ASCII"]\n[:rindex, 1, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and US-ASCII"]\n[:index, 2, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and US-ASCII"]\n[:rindex, 2, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and US-ASCII"]\n[:index, 3, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and US-ASCII"]\n[:rindex, 3, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and US-ASCII"]\n[:index, 4, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and US-ASCII"]\n[:rindex, 4, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and US-ASCII"]\n',
+  ],
+  [
+    's=String.new("日a",encoding:"ASCII-8BIT");n=String.new("a",encoding:"UTF-8");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, true]\n[:index, 3]\n[:rindex, 3]\n[:start_with?, false]\n[:end_with?, true]\n[:index, -4, 3]\n[:rindex, -4, nil]\n[:index, -1, 3]\n[:rindex, -1, 3]\n[:index, 0, 3]\n[:rindex, 0, nil]\n[:index, 1, 3]\n[:rindex, 1, nil]\n[:index, 2, 3]\n[:rindex, 2, nil]\n[:index, 3, 3]\n[:rindex, 3, 3]\n[:index, 4, nil]\n[:rindex, 4, 3]\n',
+  ],
+  [
+    's=String.new("日a",encoding:"ASCII-8BIT");n=String.new("é",encoding:"UTF-8");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and UTF-8"]\n[:index, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and UTF-8"]\n[:rindex, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and UTF-8"]\n[:start_with?, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and UTF-8"]\n[:end_with?, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and UTF-8"]\n[:index, -4, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and UTF-8"]\n[:rindex, -4, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and UTF-8"]\n[:index, -1, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and UTF-8"]\n[:rindex, -1, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and UTF-8"]\n[:index, 0, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and UTF-8"]\n[:rindex, 0, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and UTF-8"]\n[:index, 1, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and UTF-8"]\n[:rindex, 1, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and UTF-8"]\n[:index, 2, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and UTF-8"]\n[:rindex, 2, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and UTF-8"]\n[:index, 3, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and UTF-8"]\n[:rindex, 3, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and UTF-8"]\n[:index, 4, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and UTF-8"]\n[:rindex, 4, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and UTF-8"]\n',
+  ],
+  [
+    's=String.new("日a",encoding:"ASCII-8BIT");n=String.new("x",encoding:"UTF-8");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, false]\n[:index, nil]\n[:rindex, nil]\n[:start_with?, false]\n[:end_with?, false]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, nil]\n[:rindex, -1, nil]\n[:index, 0, nil]\n[:rindex, 0, nil]\n[:index, 1, nil]\n[:rindex, 1, nil]\n[:index, 2, nil]\n[:rindex, 2, nil]\n[:index, 3, nil]\n[:rindex, 3, nil]\n[:index, 4, nil]\n[:rindex, 4, nil]\n',
+  ],
+  [
+    's=String.new("日a",encoding:"ASCII-8BIT");n=String.new("",encoding:"UTF-8");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, true]\n[:index, 0]\n[:rindex, 4]\n[:start_with?, true]\n[:end_with?, true]\n[:index, -4, 0]\n[:rindex, -4, 0]\n[:index, -1, 3]\n[:rindex, -1, 3]\n[:index, 0, 0]\n[:rindex, 0, 0]\n[:index, 1, 1]\n[:rindex, 1, 1]\n[:index, 2, 2]\n[:rindex, 2, 2]\n[:index, 3, 3]\n[:rindex, 3, 3]\n[:index, 4, 4]\n[:rindex, 4, 4]\n',
+  ],
+  [
+    's=String.new("日a",encoding:"ASCII-8BIT");n=String.new(255.chr,encoding:"UTF-8");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and UTF-8"]\n[:index, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and UTF-8"]\n[:rindex, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and UTF-8"]\n[:start_with?, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and UTF-8"]\n[:end_with?, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and UTF-8"]\n[:index, -4, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and UTF-8"]\n[:rindex, -4, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and UTF-8"]\n[:index, -1, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and UTF-8"]\n[:rindex, -1, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and UTF-8"]\n[:index, 0, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and UTF-8"]\n[:rindex, 0, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and UTF-8"]\n[:index, 1, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and UTF-8"]\n[:rindex, 1, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and UTF-8"]\n[:index, 2, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and UTF-8"]\n[:rindex, 2, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and UTF-8"]\n[:index, 3, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and UTF-8"]\n[:rindex, 3, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and UTF-8"]\n[:index, 4, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and UTF-8"]\n[:rindex, 4, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and UTF-8"]\n',
+  ],
+  [
+    's=String.new("日a",encoding:"ASCII-8BIT");n=String.new("a",encoding:"ASCII-8BIT");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, true]\n[:index, 3]\n[:rindex, 3]\n[:start_with?, false]\n[:end_with?, true]\n[:index, -4, 3]\n[:rindex, -4, nil]\n[:index, -1, 3]\n[:rindex, -1, 3]\n[:index, 0, 3]\n[:rindex, 0, nil]\n[:index, 1, 3]\n[:rindex, 1, nil]\n[:index, 2, 3]\n[:rindex, 2, nil]\n[:index, 3, 3]\n[:rindex, 3, 3]\n[:index, 4, nil]\n[:rindex, 4, 3]\n',
+  ],
+  [
+    's=String.new("日a",encoding:"ASCII-8BIT");n=String.new("é",encoding:"ASCII-8BIT");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, false]\n[:index, nil]\n[:rindex, nil]\n[:start_with?, false]\n[:end_with?, false]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, nil]\n[:rindex, -1, nil]\n[:index, 0, nil]\n[:rindex, 0, nil]\n[:index, 1, nil]\n[:rindex, 1, nil]\n[:index, 2, nil]\n[:rindex, 2, nil]\n[:index, 3, nil]\n[:rindex, 3, nil]\n[:index, 4, nil]\n[:rindex, 4, nil]\n',
+  ],
+  [
+    's=String.new("日a",encoding:"ASCII-8BIT");n=String.new("x",encoding:"ASCII-8BIT");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, false]\n[:index, nil]\n[:rindex, nil]\n[:start_with?, false]\n[:end_with?, false]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, nil]\n[:rindex, -1, nil]\n[:index, 0, nil]\n[:rindex, 0, nil]\n[:index, 1, nil]\n[:rindex, 1, nil]\n[:index, 2, nil]\n[:rindex, 2, nil]\n[:index, 3, nil]\n[:rindex, 3, nil]\n[:index, 4, nil]\n[:rindex, 4, nil]\n',
+  ],
+  [
+    's=String.new("日a",encoding:"ASCII-8BIT");n=String.new("",encoding:"ASCII-8BIT");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, true]\n[:index, 0]\n[:rindex, 4]\n[:start_with?, true]\n[:end_with?, true]\n[:index, -4, 0]\n[:rindex, -4, 0]\n[:index, -1, 3]\n[:rindex, -1, 3]\n[:index, 0, 0]\n[:rindex, 0, 0]\n[:index, 1, 1]\n[:rindex, 1, 1]\n[:index, 2, 2]\n[:rindex, 2, 2]\n[:index, 3, 3]\n[:rindex, 3, 3]\n[:index, 4, 4]\n[:rindex, 4, 4]\n',
+  ],
+  [
+    's=String.new("日a",encoding:"ASCII-8BIT");n=String.new(255.chr,encoding:"ASCII-8BIT");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, false]\n[:index, nil]\n[:rindex, nil]\n[:start_with?, false]\n[:end_with?, false]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, nil]\n[:rindex, -1, nil]\n[:index, 0, nil]\n[:rindex, 0, nil]\n[:index, 1, nil]\n[:rindex, 1, nil]\n[:index, 2, nil]\n[:rindex, 2, nil]\n[:index, 3, nil]\n[:rindex, 3, nil]\n[:index, 4, nil]\n[:rindex, 4, nil]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new(255.chr,encoding:"ASCII-8BIT");[:delete_prefix,:delete_suffix].each{|m|begin;p [m,desc(s.send(m,"x"))];rescue=>x;p [m,x.class,x.message];end};[:ljust,:rjust,:center].each{|m|[-1,1,3,4].each{|w|begin;p [m,w,desc(s.send(m,w))];rescue=>x;p [m,w,x.class,x.message];end}};p desc(s.split(",",1));s.split(",",1){|x|p desc(x)}',
+    '[:delete_prefix, [[255], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:delete_suffix, [[255], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:ljust, -1, [[255], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:ljust, 1, [[255], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:ljust, 3, [[255, 32, 32], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:ljust, 4, [[255, 32, 32, 32], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:rjust, -1, [[255], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:rjust, 1, [[255], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:rjust, 3, [[32, 32, 255], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:rjust, 4, [[32, 32, 32, 255], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:center, -1, [[255], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:center, 1, [[255], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:center, 3, [[32, 255, 32], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:center, 4, [[32, 255, 32, 32], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[[[255], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[[255], #<Encoding:BINARY (ASCII-8BIT)>, true]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new(255.chr,encoding:"ASCII-8BIT");[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,"a"))];rescue=>x;p [m,x.class,x.message,s.bytes];end}',
+    '[:count, 0]\n[:delete, [[255], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:delete!, nil]\n[:split, [[[255], #<Encoding:BINARY (ASCII-8BIT)>, true]]]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new(255.chr,encoding:"ASCII-8BIT");s.freeze;[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,"a"))];rescue=>x;p [m,x.class,x.message,s.bytes];end}',
+    '[:count, 0]\n[:delete, [[255], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:delete!, FrozenError, "can\'t modify frozen String: \\"\\\\xFF\\"", [255]]\n[:split, [[[255], #<Encoding:BINARY (ASCII-8BIT)>, true]]]\n',
+  ],
+  [
+    's=String.new(255.chr,encoding:"ASCII-8BIT");n=String.new("a",encoding:"US-ASCII");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, false]\n[:index, nil]\n[:rindex, nil]\n[:start_with?, false]\n[:end_with?, false]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, nil]\n[:rindex, -1, nil]\n[:index, 0, nil]\n[:rindex, 0, nil]\n[:index, 1, nil]\n[:rindex, 1, nil]\n[:index, 2, nil]\n[:rindex, 2, nil]\n[:index, 3, nil]\n[:rindex, 3, nil]\n[:index, 4, nil]\n[:rindex, 4, nil]\n',
+  ],
+  [
+    's=String.new(255.chr,encoding:"ASCII-8BIT");n=String.new("é",encoding:"US-ASCII");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and US-ASCII"]\n[:index, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and US-ASCII"]\n[:rindex, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and US-ASCII"]\n[:start_with?, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and US-ASCII"]\n[:end_with?, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and US-ASCII"]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and US-ASCII"]\n[:rindex, -1, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and US-ASCII"]\n[:index, 0, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and US-ASCII"]\n[:rindex, 0, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and US-ASCII"]\n[:index, 1, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and US-ASCII"]\n[:rindex, 1, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and US-ASCII"]\n[:index, 2, nil]\n[:rindex, 2, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and US-ASCII"]\n[:index, 3, nil]\n[:rindex, 3, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and US-ASCII"]\n[:index, 4, nil]\n[:rindex, 4, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and US-ASCII"]\n',
+  ],
+  [
+    's=String.new(255.chr,encoding:"ASCII-8BIT");n=String.new("x",encoding:"US-ASCII");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, false]\n[:index, nil]\n[:rindex, nil]\n[:start_with?, false]\n[:end_with?, false]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, nil]\n[:rindex, -1, nil]\n[:index, 0, nil]\n[:rindex, 0, nil]\n[:index, 1, nil]\n[:rindex, 1, nil]\n[:index, 2, nil]\n[:rindex, 2, nil]\n[:index, 3, nil]\n[:rindex, 3, nil]\n[:index, 4, nil]\n[:rindex, 4, nil]\n',
+  ],
+  [
+    's=String.new(255.chr,encoding:"ASCII-8BIT");n=String.new("",encoding:"US-ASCII");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, true]\n[:index, 0]\n[:rindex, 1]\n[:start_with?, true]\n[:end_with?, true]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, 0]\n[:rindex, -1, 0]\n[:index, 0, 0]\n[:rindex, 0, 0]\n[:index, 1, 1]\n[:rindex, 1, 1]\n[:index, 2, nil]\n[:rindex, 2, 1]\n[:index, 3, nil]\n[:rindex, 3, 1]\n[:index, 4, nil]\n[:rindex, 4, 1]\n',
+  ],
+  [
+    's=String.new(255.chr,encoding:"ASCII-8BIT");n=String.new(255.chr,encoding:"US-ASCII");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and US-ASCII"]\n[:index, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and US-ASCII"]\n[:rindex, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and US-ASCII"]\n[:start_with?, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and US-ASCII"]\n[:end_with?, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and US-ASCII"]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and US-ASCII"]\n[:rindex, -1, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and US-ASCII"]\n[:index, 0, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and US-ASCII"]\n[:rindex, 0, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and US-ASCII"]\n[:index, 1, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and US-ASCII"]\n[:rindex, 1, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and US-ASCII"]\n[:index, 2, nil]\n[:rindex, 2, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and US-ASCII"]\n[:index, 3, nil]\n[:rindex, 3, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and US-ASCII"]\n[:index, 4, nil]\n[:rindex, 4, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and US-ASCII"]\n',
+  ],
+  [
+    's=String.new(255.chr,encoding:"ASCII-8BIT");n=String.new("a",encoding:"UTF-8");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, false]\n[:index, nil]\n[:rindex, nil]\n[:start_with?, false]\n[:end_with?, false]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, nil]\n[:rindex, -1, nil]\n[:index, 0, nil]\n[:rindex, 0, nil]\n[:index, 1, nil]\n[:rindex, 1, nil]\n[:index, 2, nil]\n[:rindex, 2, nil]\n[:index, 3, nil]\n[:rindex, 3, nil]\n[:index, 4, nil]\n[:rindex, 4, nil]\n',
+  ],
+  [
+    's=String.new(255.chr,encoding:"ASCII-8BIT");n=String.new("é",encoding:"UTF-8");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and UTF-8"]\n[:index, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and UTF-8"]\n[:rindex, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and UTF-8"]\n[:start_with?, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and UTF-8"]\n[:end_with?, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and UTF-8"]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and UTF-8"]\n[:rindex, -1, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and UTF-8"]\n[:index, 0, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and UTF-8"]\n[:rindex, 0, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and UTF-8"]\n[:index, 1, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and UTF-8"]\n[:rindex, 1, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and UTF-8"]\n[:index, 2, nil]\n[:rindex, 2, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and UTF-8"]\n[:index, 3, nil]\n[:rindex, 3, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and UTF-8"]\n[:index, 4, nil]\n[:rindex, 4, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and UTF-8"]\n',
+  ],
+  [
+    's=String.new(255.chr,encoding:"ASCII-8BIT");n=String.new("x",encoding:"UTF-8");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, false]\n[:index, nil]\n[:rindex, nil]\n[:start_with?, false]\n[:end_with?, false]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, nil]\n[:rindex, -1, nil]\n[:index, 0, nil]\n[:rindex, 0, nil]\n[:index, 1, nil]\n[:rindex, 1, nil]\n[:index, 2, nil]\n[:rindex, 2, nil]\n[:index, 3, nil]\n[:rindex, 3, nil]\n[:index, 4, nil]\n[:rindex, 4, nil]\n',
+  ],
+  [
+    's=String.new(255.chr,encoding:"ASCII-8BIT");n=String.new("",encoding:"UTF-8");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, true]\n[:index, 0]\n[:rindex, 1]\n[:start_with?, true]\n[:end_with?, true]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, 0]\n[:rindex, -1, 0]\n[:index, 0, 0]\n[:rindex, 0, 0]\n[:index, 1, 1]\n[:rindex, 1, 1]\n[:index, 2, nil]\n[:rindex, 2, 1]\n[:index, 3, nil]\n[:rindex, 3, 1]\n[:index, 4, nil]\n[:rindex, 4, 1]\n',
+  ],
+  [
+    's=String.new(255.chr,encoding:"ASCII-8BIT");n=String.new(255.chr,encoding:"UTF-8");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and UTF-8"]\n[:index, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and UTF-8"]\n[:rindex, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and UTF-8"]\n[:start_with?, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and UTF-8"]\n[:end_with?, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and UTF-8"]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and UTF-8"]\n[:rindex, -1, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and UTF-8"]\n[:index, 0, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and UTF-8"]\n[:rindex, 0, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and UTF-8"]\n[:index, 1, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and UTF-8"]\n[:rindex, 1, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and UTF-8"]\n[:index, 2, nil]\n[:rindex, 2, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and UTF-8"]\n[:index, 3, nil]\n[:rindex, 3, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and UTF-8"]\n[:index, 4, nil]\n[:rindex, 4, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and UTF-8"]\n',
+  ],
+  [
+    's=String.new(255.chr,encoding:"ASCII-8BIT");n=String.new("a",encoding:"ASCII-8BIT");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, false]\n[:index, nil]\n[:rindex, nil]\n[:start_with?, false]\n[:end_with?, false]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, nil]\n[:rindex, -1, nil]\n[:index, 0, nil]\n[:rindex, 0, nil]\n[:index, 1, nil]\n[:rindex, 1, nil]\n[:index, 2, nil]\n[:rindex, 2, nil]\n[:index, 3, nil]\n[:rindex, 3, nil]\n[:index, 4, nil]\n[:rindex, 4, nil]\n',
+  ],
+  [
+    's=String.new(255.chr,encoding:"ASCII-8BIT");n=String.new("é",encoding:"ASCII-8BIT");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, false]\n[:index, nil]\n[:rindex, nil]\n[:start_with?, false]\n[:end_with?, false]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, nil]\n[:rindex, -1, nil]\n[:index, 0, nil]\n[:rindex, 0, nil]\n[:index, 1, nil]\n[:rindex, 1, nil]\n[:index, 2, nil]\n[:rindex, 2, nil]\n[:index, 3, nil]\n[:rindex, 3, nil]\n[:index, 4, nil]\n[:rindex, 4, nil]\n',
+  ],
+  [
+    's=String.new(255.chr,encoding:"ASCII-8BIT");n=String.new("x",encoding:"ASCII-8BIT");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, false]\n[:index, nil]\n[:rindex, nil]\n[:start_with?, false]\n[:end_with?, false]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, nil]\n[:rindex, -1, nil]\n[:index, 0, nil]\n[:rindex, 0, nil]\n[:index, 1, nil]\n[:rindex, 1, nil]\n[:index, 2, nil]\n[:rindex, 2, nil]\n[:index, 3, nil]\n[:rindex, 3, nil]\n[:index, 4, nil]\n[:rindex, 4, nil]\n',
+  ],
+  [
+    's=String.new(255.chr,encoding:"ASCII-8BIT");n=String.new("",encoding:"ASCII-8BIT");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, true]\n[:index, 0]\n[:rindex, 1]\n[:start_with?, true]\n[:end_with?, true]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, 0]\n[:rindex, -1, 0]\n[:index, 0, 0]\n[:rindex, 0, 0]\n[:index, 1, 1]\n[:rindex, 1, 1]\n[:index, 2, nil]\n[:rindex, 2, 1]\n[:index, 3, nil]\n[:rindex, 3, 1]\n[:index, 4, nil]\n[:rindex, 4, 1]\n',
+  ],
+  [
+    's=String.new(255.chr,encoding:"ASCII-8BIT");n=String.new(255.chr,encoding:"ASCII-8BIT");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, true]\n[:index, 0]\n[:rindex, 0]\n[:start_with?, true]\n[:end_with?, true]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, 0]\n[:rindex, -1, 0]\n[:index, 0, 0]\n[:rindex, 0, 0]\n[:index, 1, nil]\n[:rindex, 1, 0]\n[:index, 2, nil]\n[:rindex, 2, 0]\n[:index, 3, nil]\n[:rindex, 3, 0]\n[:index, 4, nil]\n[:rindex, 4, 0]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("abc",encoding:"ASCII-8BIT");[:delete_prefix,:delete_suffix].each{|m|begin;p [m,desc(s.send(m,"x"))];rescue=>x;p [m,x.class,x.message];end};[:ljust,:rjust,:center].each{|m|[-1,1,3,4].each{|w|begin;p [m,w,desc(s.send(m,w))];rescue=>x;p [m,w,x.class,x.message];end}};p desc(s.split(",",1));s.split(",",1){|x|p desc(x)}',
+    '[:delete_prefix, [[97, 98, 99], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:delete_suffix, [[97, 98, 99], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:ljust, -1, [[97, 98, 99], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:ljust, 1, [[97, 98, 99], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:ljust, 3, [[97, 98, 99], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:ljust, 4, [[97, 98, 99, 32], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:rjust, -1, [[97, 98, 99], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:rjust, 1, [[97, 98, 99], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:rjust, 3, [[97, 98, 99], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:rjust, 4, [[32, 97, 98, 99], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:center, -1, [[97, 98, 99], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:center, 1, [[97, 98, 99], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:center, 3, [[97, 98, 99], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:center, 4, [[97, 98, 99, 32], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[[[97, 98, 99], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[[97, 98, 99], #<Encoding:BINARY (ASCII-8BIT)>, true]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("abc",encoding:"ASCII-8BIT");[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,"a"))];rescue=>x;p [m,x.class,x.message,s.bytes];end}',
+    '[:count, 1]\n[:delete, [[98, 99], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:delete!, [[98, 99], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:split, [[[98, 99], #<Encoding:BINARY (ASCII-8BIT)>, true]]]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("abc",encoding:"ASCII-8BIT");s.freeze;[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,"a"))];rescue=>x;p [m,x.class,x.message,s.bytes];end}',
+    '[:count, 1]\n[:delete, [[98, 99], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:delete!, FrozenError, "can\'t modify frozen String: \\"abc\\"", [97, 98, 99]]\n[:split, [[[], #<Encoding:BINARY (ASCII-8BIT)>, true], [[98, 99], #<Encoding:BINARY (ASCII-8BIT)>, true]]]\n',
+  ],
+  [
+    's=String.new("abc",encoding:"ASCII-8BIT");n=String.new("a",encoding:"US-ASCII");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, true]\n[:index, 0]\n[:rindex, 0]\n[:start_with?, true]\n[:end_with?, false]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, nil]\n[:rindex, -1, 0]\n[:index, 0, 0]\n[:rindex, 0, 0]\n[:index, 1, nil]\n[:rindex, 1, 0]\n[:index, 2, nil]\n[:rindex, 2, 0]\n[:index, 3, nil]\n[:rindex, 3, 0]\n[:index, 4, nil]\n[:rindex, 4, 0]\n',
+  ],
+  [
+    's=String.new("abc",encoding:"ASCII-8BIT");n=String.new("é",encoding:"US-ASCII");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, false]\n[:index, nil]\n[:rindex, nil]\n[:start_with?, false]\n[:end_with?, false]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, nil]\n[:rindex, -1, nil]\n[:index, 0, nil]\n[:rindex, 0, nil]\n[:index, 1, nil]\n[:rindex, 1, nil]\n[:index, 2, nil]\n[:rindex, 2, nil]\n[:index, 3, nil]\n[:rindex, 3, nil]\n[:index, 4, nil]\n[:rindex, 4, nil]\n',
+  ],
+  [
+    's=String.new("abc",encoding:"ASCII-8BIT");n=String.new("x",encoding:"US-ASCII");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, false]\n[:index, nil]\n[:rindex, nil]\n[:start_with?, false]\n[:end_with?, false]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, nil]\n[:rindex, -1, nil]\n[:index, 0, nil]\n[:rindex, 0, nil]\n[:index, 1, nil]\n[:rindex, 1, nil]\n[:index, 2, nil]\n[:rindex, 2, nil]\n[:index, 3, nil]\n[:rindex, 3, nil]\n[:index, 4, nil]\n[:rindex, 4, nil]\n',
+  ],
+  [
+    's=String.new("abc",encoding:"ASCII-8BIT");n=String.new("",encoding:"US-ASCII");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, true]\n[:index, 0]\n[:rindex, 3]\n[:start_with?, true]\n[:end_with?, true]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, 2]\n[:rindex, -1, 2]\n[:index, 0, 0]\n[:rindex, 0, 0]\n[:index, 1, 1]\n[:rindex, 1, 1]\n[:index, 2, 2]\n[:rindex, 2, 2]\n[:index, 3, 3]\n[:rindex, 3, 3]\n[:index, 4, nil]\n[:rindex, 4, 3]\n',
+  ],
+  [
+    's=String.new("abc",encoding:"ASCII-8BIT");n=String.new(255.chr,encoding:"US-ASCII");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, false]\n[:index, nil]\n[:rindex, nil]\n[:start_with?, false]\n[:end_with?, false]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, nil]\n[:rindex, -1, nil]\n[:index, 0, nil]\n[:rindex, 0, nil]\n[:index, 1, nil]\n[:rindex, 1, nil]\n[:index, 2, nil]\n[:rindex, 2, nil]\n[:index, 3, nil]\n[:rindex, 3, nil]\n[:index, 4, nil]\n[:rindex, 4, nil]\n',
+  ],
+  [
+    's=String.new("abc",encoding:"ASCII-8BIT");n=String.new("a",encoding:"UTF-8");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, true]\n[:index, 0]\n[:rindex, 0]\n[:start_with?, true]\n[:end_with?, false]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, nil]\n[:rindex, -1, 0]\n[:index, 0, 0]\n[:rindex, 0, 0]\n[:index, 1, nil]\n[:rindex, 1, 0]\n[:index, 2, nil]\n[:rindex, 2, 0]\n[:index, 3, nil]\n[:rindex, 3, 0]\n[:index, 4, nil]\n[:rindex, 4, 0]\n',
+  ],
+  [
+    's=String.new("abc",encoding:"ASCII-8BIT");n=String.new("é",encoding:"UTF-8");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, false]\n[:index, nil]\n[:rindex, nil]\n[:start_with?, false]\n[:end_with?, false]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, nil]\n[:rindex, -1, nil]\n[:index, 0, nil]\n[:rindex, 0, nil]\n[:index, 1, nil]\n[:rindex, 1, nil]\n[:index, 2, nil]\n[:rindex, 2, nil]\n[:index, 3, nil]\n[:rindex, 3, nil]\n[:index, 4, nil]\n[:rindex, 4, nil]\n',
+  ],
+  [
+    's=String.new("abc",encoding:"ASCII-8BIT");n=String.new("x",encoding:"UTF-8");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, false]\n[:index, nil]\n[:rindex, nil]\n[:start_with?, false]\n[:end_with?, false]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, nil]\n[:rindex, -1, nil]\n[:index, 0, nil]\n[:rindex, 0, nil]\n[:index, 1, nil]\n[:rindex, 1, nil]\n[:index, 2, nil]\n[:rindex, 2, nil]\n[:index, 3, nil]\n[:rindex, 3, nil]\n[:index, 4, nil]\n[:rindex, 4, nil]\n',
+  ],
+  [
+    's=String.new("abc",encoding:"ASCII-8BIT");n=String.new("",encoding:"UTF-8");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, true]\n[:index, 0]\n[:rindex, 3]\n[:start_with?, true]\n[:end_with?, true]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, 2]\n[:rindex, -1, 2]\n[:index, 0, 0]\n[:rindex, 0, 0]\n[:index, 1, 1]\n[:rindex, 1, 1]\n[:index, 2, 2]\n[:rindex, 2, 2]\n[:index, 3, 3]\n[:rindex, 3, 3]\n[:index, 4, nil]\n[:rindex, 4, 3]\n',
+  ],
+  [
+    's=String.new("abc",encoding:"ASCII-8BIT");n=String.new(255.chr,encoding:"UTF-8");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, false]\n[:index, nil]\n[:rindex, nil]\n[:start_with?, false]\n[:end_with?, false]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, nil]\n[:rindex, -1, nil]\n[:index, 0, nil]\n[:rindex, 0, nil]\n[:index, 1, nil]\n[:rindex, 1, nil]\n[:index, 2, nil]\n[:rindex, 2, nil]\n[:index, 3, nil]\n[:rindex, 3, nil]\n[:index, 4, nil]\n[:rindex, 4, nil]\n',
+  ],
+  [
+    's=String.new("abc",encoding:"ASCII-8BIT");n=String.new("a",encoding:"ASCII-8BIT");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, true]\n[:index, 0]\n[:rindex, 0]\n[:start_with?, true]\n[:end_with?, false]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, nil]\n[:rindex, -1, 0]\n[:index, 0, 0]\n[:rindex, 0, 0]\n[:index, 1, nil]\n[:rindex, 1, 0]\n[:index, 2, nil]\n[:rindex, 2, 0]\n[:index, 3, nil]\n[:rindex, 3, 0]\n[:index, 4, nil]\n[:rindex, 4, 0]\n',
+  ],
+  [
+    's=String.new("abc",encoding:"ASCII-8BIT");n=String.new("é",encoding:"ASCII-8BIT");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, false]\n[:index, nil]\n[:rindex, nil]\n[:start_with?, false]\n[:end_with?, false]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, nil]\n[:rindex, -1, nil]\n[:index, 0, nil]\n[:rindex, 0, nil]\n[:index, 1, nil]\n[:rindex, 1, nil]\n[:index, 2, nil]\n[:rindex, 2, nil]\n[:index, 3, nil]\n[:rindex, 3, nil]\n[:index, 4, nil]\n[:rindex, 4, nil]\n',
+  ],
+  [
+    's=String.new("abc",encoding:"ASCII-8BIT");n=String.new("x",encoding:"ASCII-8BIT");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, false]\n[:index, nil]\n[:rindex, nil]\n[:start_with?, false]\n[:end_with?, false]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, nil]\n[:rindex, -1, nil]\n[:index, 0, nil]\n[:rindex, 0, nil]\n[:index, 1, nil]\n[:rindex, 1, nil]\n[:index, 2, nil]\n[:rindex, 2, nil]\n[:index, 3, nil]\n[:rindex, 3, nil]\n[:index, 4, nil]\n[:rindex, 4, nil]\n',
+  ],
+  [
+    's=String.new("abc",encoding:"ASCII-8BIT");n=String.new("",encoding:"ASCII-8BIT");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, true]\n[:index, 0]\n[:rindex, 3]\n[:start_with?, true]\n[:end_with?, true]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, 2]\n[:rindex, -1, 2]\n[:index, 0, 0]\n[:rindex, 0, 0]\n[:index, 1, 1]\n[:rindex, 1, 1]\n[:index, 2, 2]\n[:rindex, 2, 2]\n[:index, 3, 3]\n[:rindex, 3, 3]\n[:index, 4, nil]\n[:rindex, 4, 3]\n',
+  ],
+  [
+    's=String.new("abc",encoding:"ASCII-8BIT");n=String.new(255.chr,encoding:"ASCII-8BIT");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, false]\n[:index, nil]\n[:rindex, nil]\n[:start_with?, false]\n[:end_with?, false]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, nil]\n[:rindex, -1, nil]\n[:index, 0, nil]\n[:rindex, 0, nil]\n[:index, 1, nil]\n[:rindex, 1, nil]\n[:index, 2, nil]\n[:rindex, 2, nil]\n[:index, 3, nil]\n[:rindex, 3, nil]\n[:index, 4, nil]\n[:rindex, 4, nil]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("",encoding:"ASCII-8BIT");[:delete_prefix,:delete_suffix].each{|m|begin;p [m,desc(s.send(m,"x"))];rescue=>x;p [m,x.class,x.message];end};[:ljust,:rjust,:center].each{|m|[-1,1,3,4].each{|w|begin;p [m,w,desc(s.send(m,w))];rescue=>x;p [m,w,x.class,x.message];end}};p desc(s.split(",",1));s.split(",",1){|x|p desc(x)}',
+    '[:delete_prefix, [[], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:delete_suffix, [[], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:ljust, -1, [[], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:ljust, 1, [[32], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:ljust, 3, [[32, 32, 32], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:ljust, 4, [[32, 32, 32, 32], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:rjust, -1, [[], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:rjust, 1, [[32], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:rjust, 3, [[32, 32, 32], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:rjust, 4, [[32, 32, 32, 32], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:center, -1, [[], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:center, 1, [[32], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:center, 3, [[32, 32, 32], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:center, 4, [[32, 32, 32, 32], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("",encoding:"ASCII-8BIT");[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,"a"))];rescue=>x;p [m,x.class,x.message,s.bytes];end}',
+    '[:count, 0]\n[:delete, [[], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:delete!, nil]\n[:split, []]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("",encoding:"ASCII-8BIT");s.freeze;[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,"a"))];rescue=>x;p [m,x.class,x.message,s.bytes];end}',
+    '[:count, 0]\n[:delete, [[], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:delete!, nil]\n[:split, []]\n',
+  ],
+  [
+    's=String.new("",encoding:"ASCII-8BIT");n=String.new("a",encoding:"US-ASCII");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, false]\n[:index, nil]\n[:rindex, nil]\n[:start_with?, false]\n[:end_with?, false]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, nil]\n[:rindex, -1, nil]\n[:index, 0, nil]\n[:rindex, 0, nil]\n[:index, 1, nil]\n[:rindex, 1, nil]\n[:index, 2, nil]\n[:rindex, 2, nil]\n[:index, 3, nil]\n[:rindex, 3, nil]\n[:index, 4, nil]\n[:rindex, 4, nil]\n',
+  ],
+  [
+    's=String.new("",encoding:"ASCII-8BIT");n=String.new("é",encoding:"US-ASCII");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, false]\n[:index, nil]\n[:rindex, nil]\n[:start_with?, false]\n[:end_with?, false]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, nil]\n[:rindex, -1, nil]\n[:index, 0, nil]\n[:rindex, 0, nil]\n[:index, 1, nil]\n[:rindex, 1, nil]\n[:index, 2, nil]\n[:rindex, 2, nil]\n[:index, 3, nil]\n[:rindex, 3, nil]\n[:index, 4, nil]\n[:rindex, 4, nil]\n',
+  ],
+  [
+    's=String.new("",encoding:"ASCII-8BIT");n=String.new("x",encoding:"US-ASCII");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, false]\n[:index, nil]\n[:rindex, nil]\n[:start_with?, false]\n[:end_with?, false]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, nil]\n[:rindex, -1, nil]\n[:index, 0, nil]\n[:rindex, 0, nil]\n[:index, 1, nil]\n[:rindex, 1, nil]\n[:index, 2, nil]\n[:rindex, 2, nil]\n[:index, 3, nil]\n[:rindex, 3, nil]\n[:index, 4, nil]\n[:rindex, 4, nil]\n',
+  ],
+  [
+    's=String.new("",encoding:"ASCII-8BIT");n=String.new("",encoding:"US-ASCII");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, true]\n[:index, 0]\n[:rindex, 0]\n[:start_with?, true]\n[:end_with?, true]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, nil]\n[:rindex, -1, nil]\n[:index, 0, 0]\n[:rindex, 0, 0]\n[:index, 1, nil]\n[:rindex, 1, 0]\n[:index, 2, nil]\n[:rindex, 2, 0]\n[:index, 3, nil]\n[:rindex, 3, 0]\n[:index, 4, nil]\n[:rindex, 4, 0]\n',
+  ],
+  [
+    's=String.new("",encoding:"ASCII-8BIT");n=String.new(255.chr,encoding:"US-ASCII");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, false]\n[:index, nil]\n[:rindex, nil]\n[:start_with?, false]\n[:end_with?, false]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, nil]\n[:rindex, -1, nil]\n[:index, 0, nil]\n[:rindex, 0, nil]\n[:index, 1, nil]\n[:rindex, 1, nil]\n[:index, 2, nil]\n[:rindex, 2, nil]\n[:index, 3, nil]\n[:rindex, 3, nil]\n[:index, 4, nil]\n[:rindex, 4, nil]\n',
+  ],
+  [
+    's=String.new("",encoding:"ASCII-8BIT");n=String.new("a",encoding:"UTF-8");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, false]\n[:index, nil]\n[:rindex, nil]\n[:start_with?, false]\n[:end_with?, false]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, nil]\n[:rindex, -1, nil]\n[:index, 0, nil]\n[:rindex, 0, nil]\n[:index, 1, nil]\n[:rindex, 1, nil]\n[:index, 2, nil]\n[:rindex, 2, nil]\n[:index, 3, nil]\n[:rindex, 3, nil]\n[:index, 4, nil]\n[:rindex, 4, nil]\n',
+  ],
+  [
+    's=String.new("",encoding:"ASCII-8BIT");n=String.new("é",encoding:"UTF-8");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, false]\n[:index, nil]\n[:rindex, nil]\n[:start_with?, false]\n[:end_with?, false]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, nil]\n[:rindex, -1, nil]\n[:index, 0, nil]\n[:rindex, 0, nil]\n[:index, 1, nil]\n[:rindex, 1, nil]\n[:index, 2, nil]\n[:rindex, 2, nil]\n[:index, 3, nil]\n[:rindex, 3, nil]\n[:index, 4, nil]\n[:rindex, 4, nil]\n',
+  ],
+  [
+    's=String.new("",encoding:"ASCII-8BIT");n=String.new("x",encoding:"UTF-8");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, false]\n[:index, nil]\n[:rindex, nil]\n[:start_with?, false]\n[:end_with?, false]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, nil]\n[:rindex, -1, nil]\n[:index, 0, nil]\n[:rindex, 0, nil]\n[:index, 1, nil]\n[:rindex, 1, nil]\n[:index, 2, nil]\n[:rindex, 2, nil]\n[:index, 3, nil]\n[:rindex, 3, nil]\n[:index, 4, nil]\n[:rindex, 4, nil]\n',
+  ],
+  [
+    's=String.new("",encoding:"ASCII-8BIT");n=String.new("",encoding:"UTF-8");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, true]\n[:index, 0]\n[:rindex, 0]\n[:start_with?, true]\n[:end_with?, true]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, nil]\n[:rindex, -1, nil]\n[:index, 0, 0]\n[:rindex, 0, 0]\n[:index, 1, nil]\n[:rindex, 1, 0]\n[:index, 2, nil]\n[:rindex, 2, 0]\n[:index, 3, nil]\n[:rindex, 3, 0]\n[:index, 4, nil]\n[:rindex, 4, 0]\n',
+  ],
+  [
+    's=String.new("",encoding:"ASCII-8BIT");n=String.new(255.chr,encoding:"UTF-8");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, false]\n[:index, nil]\n[:rindex, nil]\n[:start_with?, false]\n[:end_with?, false]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, nil]\n[:rindex, -1, nil]\n[:index, 0, nil]\n[:rindex, 0, nil]\n[:index, 1, nil]\n[:rindex, 1, nil]\n[:index, 2, nil]\n[:rindex, 2, nil]\n[:index, 3, nil]\n[:rindex, 3, nil]\n[:index, 4, nil]\n[:rindex, 4, nil]\n',
+  ],
+  [
+    's=String.new("",encoding:"ASCII-8BIT");n=String.new("a",encoding:"ASCII-8BIT");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, false]\n[:index, nil]\n[:rindex, nil]\n[:start_with?, false]\n[:end_with?, false]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, nil]\n[:rindex, -1, nil]\n[:index, 0, nil]\n[:rindex, 0, nil]\n[:index, 1, nil]\n[:rindex, 1, nil]\n[:index, 2, nil]\n[:rindex, 2, nil]\n[:index, 3, nil]\n[:rindex, 3, nil]\n[:index, 4, nil]\n[:rindex, 4, nil]\n',
+  ],
+  [
+    's=String.new("",encoding:"ASCII-8BIT");n=String.new("é",encoding:"ASCII-8BIT");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, false]\n[:index, nil]\n[:rindex, nil]\n[:start_with?, false]\n[:end_with?, false]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, nil]\n[:rindex, -1, nil]\n[:index, 0, nil]\n[:rindex, 0, nil]\n[:index, 1, nil]\n[:rindex, 1, nil]\n[:index, 2, nil]\n[:rindex, 2, nil]\n[:index, 3, nil]\n[:rindex, 3, nil]\n[:index, 4, nil]\n[:rindex, 4, nil]\n',
+  ],
+  [
+    's=String.new("",encoding:"ASCII-8BIT");n=String.new("x",encoding:"ASCII-8BIT");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, false]\n[:index, nil]\n[:rindex, nil]\n[:start_with?, false]\n[:end_with?, false]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, nil]\n[:rindex, -1, nil]\n[:index, 0, nil]\n[:rindex, 0, nil]\n[:index, 1, nil]\n[:rindex, 1, nil]\n[:index, 2, nil]\n[:rindex, 2, nil]\n[:index, 3, nil]\n[:rindex, 3, nil]\n[:index, 4, nil]\n[:rindex, 4, nil]\n',
+  ],
+  [
+    's=String.new("",encoding:"ASCII-8BIT");n=String.new("",encoding:"ASCII-8BIT");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, true]\n[:index, 0]\n[:rindex, 0]\n[:start_with?, true]\n[:end_with?, true]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, nil]\n[:rindex, -1, nil]\n[:index, 0, 0]\n[:rindex, 0, 0]\n[:index, 1, nil]\n[:rindex, 1, 0]\n[:index, 2, nil]\n[:rindex, 2, 0]\n[:index, 3, nil]\n[:rindex, 3, 0]\n[:index, 4, nil]\n[:rindex, 4, 0]\n',
+  ],
+  [
+    's=String.new("",encoding:"ASCII-8BIT");n=String.new(255.chr,encoding:"ASCII-8BIT");[:include?,:index,:rindex,:start_with?,:end_with?].each{|m|begin;p [m,s.send(m,n)];rescue=>x;p [m,x.class,x.message];end};[-4,-1,0,1,2,3,4].each{|i|[:index,:rindex].each{|m|begin;p [m,i,s.send(m,n,i)];rescue=>x;p [m,i,x.class,x.message];end}}',
+    '[:include?, false]\n[:index, nil]\n[:rindex, nil]\n[:start_with?, false]\n[:end_with?, false]\n[:index, -4, nil]\n[:rindex, -4, nil]\n[:index, -1, nil]\n[:rindex, -1, nil]\n[:index, 0, nil]\n[:rindex, 0, nil]\n[:index, 1, nil]\n[:rindex, 1, nil]\n[:index, 2, nil]\n[:rindex, 2, nil]\n[:index, 3, nil]\n[:rindex, 3, nil]\n[:index, 4, nil]\n[:rindex, 4, nil]\n',
+  ],
+  [
+    'a=String.new("é",encoding:"US-ASCII");b=String.new("É",encoding:"US-ASCII");[:casecmp,:casecmp?].each{|m|begin;p [m,a.send(m,b)];rescue=>x;p [m,x.class,x.message];end}',
+    '[:casecmp, 1]\n[:casecmp?, false]\n',
+  ],
+  [
+    'a=String.new("ß",encoding:"US-ASCII");b=String.new("SS",encoding:"US-ASCII");[:casecmp,:casecmp?].each{|m|begin;p [m,a.send(m,b)];rescue=>x;p [m,x.class,x.message];end}',
+    '[:casecmp, 1]\n[:casecmp?, false]\n',
+  ],
+  [
+    'a=String.new("aA",encoding:"US-ASCII");b=String.new("Aa",encoding:"US-ASCII");[:casecmp,:casecmp?].each{|m|begin;p [m,a.send(m,b)];rescue=>x;p [m,x.class,x.message];end}',
+    '[:casecmp, 0]\n[:casecmp?, true]\n',
+  ],
+  [
+    'a=String.new("é",encoding:"US-ASCII");b=String.new("é",encoding:"US-ASCII");[:casecmp,:casecmp?].each{|m|begin;p [m,a.send(m,b)];rescue=>x;p [m,x.class,x.message];end}',
+    '[:casecmp, 0]\n[:casecmp?, true]\n',
+  ],
+  [
+    'a=String.new("日",encoding:"US-ASCII");b=String.new("日",encoding:"US-ASCII");[:casecmp,:casecmp?].each{|m|begin;p [m,a.send(m,b)];rescue=>x;p [m,x.class,x.message];end}',
+    '[:casecmp, 0]\n[:casecmp?, true]\n',
+  ],
+  [
+    'a=String.new("",encoding:"US-ASCII");b=String.new("é",encoding:"US-ASCII");[:casecmp,:casecmp?].each{|m|begin;p [m,a.send(m,b)];rescue=>x;p [m,x.class,x.message];end}',
+    '[:casecmp, -1]\n[:casecmp?, false]\n',
+  ],
+  [
+    'a=String.new("abc",encoding:"US-ASCII");b=String.new("ABC",encoding:"US-ASCII");[:casecmp,:casecmp?].each{|m|begin;p [m,a.send(m,b)];rescue=>x;p [m,x.class,x.message];end}',
+    '[:casecmp, 0]\n[:casecmp?, true]\n',
+  ],
+  [
+    'a=String.new("é",encoding:"US-ASCII");b=String.new("É",encoding:"UTF-8");[:casecmp,:casecmp?].each{|m|begin;p [m,a.send(m,b)];rescue=>x;p [m,x.class,x.message];end}',
+    '[:casecmp, nil]\n[:casecmp?, nil]\n',
+  ],
+  [
+    'a=String.new("ß",encoding:"US-ASCII");b=String.new("SS",encoding:"UTF-8");[:casecmp,:casecmp?].each{|m|begin;p [m,a.send(m,b)];rescue=>x;p [m,x.class,x.message];end}',
+    '[:casecmp, 1]\n[:casecmp?, false]\n',
+  ],
+  [
+    'a=String.new("aA",encoding:"US-ASCII");b=String.new("Aa",encoding:"UTF-8");[:casecmp,:casecmp?].each{|m|begin;p [m,a.send(m,b)];rescue=>x;p [m,x.class,x.message];end}',
+    '[:casecmp, 0]\n[:casecmp?, true]\n',
+  ],
+  [
+    'a=String.new("é",encoding:"US-ASCII");b=String.new("é",encoding:"UTF-8");[:casecmp,:casecmp?].each{|m|begin;p [m,a.send(m,b)];rescue=>x;p [m,x.class,x.message];end}',
+    '[:casecmp, nil]\n[:casecmp?, nil]\n',
+  ],
+  [
+    'a=String.new("日",encoding:"US-ASCII");b=String.new("日",encoding:"UTF-8");[:casecmp,:casecmp?].each{|m|begin;p [m,a.send(m,b)];rescue=>x;p [m,x.class,x.message];end}',
+    '[:casecmp, nil]\n[:casecmp?, nil]\n',
+  ],
+  [
+    'a=String.new("",encoding:"US-ASCII");b=String.new("é",encoding:"UTF-8");[:casecmp,:casecmp?].each{|m|begin;p [m,a.send(m,b)];rescue=>x;p [m,x.class,x.message];end}',
+    '[:casecmp, -1]\n[:casecmp?, false]\n',
+  ],
+  [
+    'a=String.new("abc",encoding:"US-ASCII");b=String.new("ABC",encoding:"UTF-8");[:casecmp,:casecmp?].each{|m|begin;p [m,a.send(m,b)];rescue=>x;p [m,x.class,x.message];end}',
+    '[:casecmp, 0]\n[:casecmp?, true]\n',
+  ],
+  [
+    'a=String.new("é",encoding:"US-ASCII");b=String.new("É",encoding:"ASCII-8BIT");[:casecmp,:casecmp?].each{|m|begin;p [m,a.send(m,b)];rescue=>x;p [m,x.class,x.message];end}',
+    '[:casecmp, nil]\n[:casecmp?, nil]\n',
+  ],
+  [
+    'a=String.new("ß",encoding:"US-ASCII");b=String.new("SS",encoding:"ASCII-8BIT");[:casecmp,:casecmp?].each{|m|begin;p [m,a.send(m,b)];rescue=>x;p [m,x.class,x.message];end}',
+    '[:casecmp, 1]\n[:casecmp?, false]\n',
+  ],
+  [
+    'a=String.new("aA",encoding:"US-ASCII");b=String.new("Aa",encoding:"ASCII-8BIT");[:casecmp,:casecmp?].each{|m|begin;p [m,a.send(m,b)];rescue=>x;p [m,x.class,x.message];end}',
+    '[:casecmp, 0]\n[:casecmp?, true]\n',
+  ],
+  [
+    'a=String.new("é",encoding:"US-ASCII");b=String.new("é",encoding:"ASCII-8BIT");[:casecmp,:casecmp?].each{|m|begin;p [m,a.send(m,b)];rescue=>x;p [m,x.class,x.message];end}',
+    '[:casecmp, nil]\n[:casecmp?, nil]\n',
+  ],
+  [
+    'a=String.new("日",encoding:"US-ASCII");b=String.new("日",encoding:"ASCII-8BIT");[:casecmp,:casecmp?].each{|m|begin;p [m,a.send(m,b)];rescue=>x;p [m,x.class,x.message];end}',
+    '[:casecmp, nil]\n[:casecmp?, nil]\n',
+  ],
+  [
+    'a=String.new("",encoding:"US-ASCII");b=String.new("é",encoding:"ASCII-8BIT");[:casecmp,:casecmp?].each{|m|begin;p [m,a.send(m,b)];rescue=>x;p [m,x.class,x.message];end}',
+    '[:casecmp, -1]\n[:casecmp?, false]\n',
+  ],
+  [
+    'a=String.new("abc",encoding:"US-ASCII");b=String.new("ABC",encoding:"ASCII-8BIT");[:casecmp,:casecmp?].each{|m|begin;p [m,a.send(m,b)];rescue=>x;p [m,x.class,x.message];end}',
+    '[:casecmp, 0]\n[:casecmp?, true]\n',
+  ],
+  [
+    'a=String.new("é",encoding:"UTF-8");b=String.new("É",encoding:"US-ASCII");[:casecmp,:casecmp?].each{|m|begin;p [m,a.send(m,b)];rescue=>x;p [m,x.class,x.message];end}',
+    '[:casecmp, nil]\n[:casecmp?, nil]\n',
+  ],
+  [
+    'a=String.new("ß",encoding:"UTF-8");b=String.new("SS",encoding:"US-ASCII");[:casecmp,:casecmp?].each{|m|begin;p [m,a.send(m,b)];rescue=>x;p [m,x.class,x.message];end}',
+    '[:casecmp, 1]\n[:casecmp?, true]\n',
+  ],
+  [
+    'a=String.new("aA",encoding:"UTF-8");b=String.new("Aa",encoding:"US-ASCII");[:casecmp,:casecmp?].each{|m|begin;p [m,a.send(m,b)];rescue=>x;p [m,x.class,x.message];end}',
+    '[:casecmp, 0]\n[:casecmp?, true]\n',
+  ],
+  [
+    'a=String.new("é",encoding:"UTF-8");b=String.new("é",encoding:"US-ASCII");[:casecmp,:casecmp?].each{|m|begin;p [m,a.send(m,b)];rescue=>x;p [m,x.class,x.message];end}',
+    '[:casecmp, nil]\n[:casecmp?, nil]\n',
+  ],
+  [
+    'a=String.new("日",encoding:"UTF-8");b=String.new("日",encoding:"US-ASCII");[:casecmp,:casecmp?].each{|m|begin;p [m,a.send(m,b)];rescue=>x;p [m,x.class,x.message];end}',
+    '[:casecmp, nil]\n[:casecmp?, nil]\n',
+  ],
+  [
+    'a=String.new("",encoding:"UTF-8");b=String.new("é",encoding:"US-ASCII");[:casecmp,:casecmp?].each{|m|begin;p [m,a.send(m,b)];rescue=>x;p [m,x.class,x.message];end}',
+    '[:casecmp, -1]\n[:casecmp?, false]\n',
+  ],
+  [
+    'a=String.new("abc",encoding:"UTF-8");b=String.new("ABC",encoding:"US-ASCII");[:casecmp,:casecmp?].each{|m|begin;p [m,a.send(m,b)];rescue=>x;p [m,x.class,x.message];end}',
+    '[:casecmp, 0]\n[:casecmp?, true]\n',
+  ],
+  [
+    'a=String.new("é",encoding:"UTF-8");b=String.new("É",encoding:"UTF-8");[:casecmp,:casecmp?].each{|m|begin;p [m,a.send(m,b)];rescue=>x;p [m,x.class,x.message];end}',
+    '[:casecmp, 1]\n[:casecmp?, true]\n',
+  ],
+  [
+    'a=String.new("ß",encoding:"UTF-8");b=String.new("SS",encoding:"UTF-8");[:casecmp,:casecmp?].each{|m|begin;p [m,a.send(m,b)];rescue=>x;p [m,x.class,x.message];end}',
+    '[:casecmp, 1]\n[:casecmp?, true]\n',
+  ],
+  [
+    'a=String.new("aA",encoding:"UTF-8");b=String.new("Aa",encoding:"UTF-8");[:casecmp,:casecmp?].each{|m|begin;p [m,a.send(m,b)];rescue=>x;p [m,x.class,x.message];end}',
+    '[:casecmp, 0]\n[:casecmp?, true]\n',
+  ],
+  [
+    'a=String.new("é",encoding:"UTF-8");b=String.new("é",encoding:"UTF-8");[:casecmp,:casecmp?].each{|m|begin;p [m,a.send(m,b)];rescue=>x;p [m,x.class,x.message];end}',
+    '[:casecmp, 0]\n[:casecmp?, true]\n',
+  ],
+  [
+    'a=String.new("日",encoding:"UTF-8");b=String.new("日",encoding:"UTF-8");[:casecmp,:casecmp?].each{|m|begin;p [m,a.send(m,b)];rescue=>x;p [m,x.class,x.message];end}',
+    '[:casecmp, 0]\n[:casecmp?, true]\n',
+  ],
+  [
+    'a=String.new("",encoding:"UTF-8");b=String.new("é",encoding:"UTF-8");[:casecmp,:casecmp?].each{|m|begin;p [m,a.send(m,b)];rescue=>x;p [m,x.class,x.message];end}',
+    '[:casecmp, -1]\n[:casecmp?, false]\n',
+  ],
+  [
+    'a=String.new("abc",encoding:"UTF-8");b=String.new("ABC",encoding:"UTF-8");[:casecmp,:casecmp?].each{|m|begin;p [m,a.send(m,b)];rescue=>x;p [m,x.class,x.message];end}',
+    '[:casecmp, 0]\n[:casecmp?, true]\n',
+  ],
+  [
+    'a=String.new("é",encoding:"UTF-8");b=String.new("É",encoding:"ASCII-8BIT");[:casecmp,:casecmp?].each{|m|begin;p [m,a.send(m,b)];rescue=>x;p [m,x.class,x.message];end}',
+    '[:casecmp, nil]\n[:casecmp?, nil]\n',
+  ],
+  [
+    'a=String.new("ß",encoding:"UTF-8");b=String.new("SS",encoding:"ASCII-8BIT");[:casecmp,:casecmp?].each{|m|begin;p [m,a.send(m,b)];rescue=>x;p [m,x.class,x.message];end}',
+    '[:casecmp, 1]\n[:casecmp?, true]\n',
+  ],
+  [
+    'a=String.new("aA",encoding:"UTF-8");b=String.new("Aa",encoding:"ASCII-8BIT");[:casecmp,:casecmp?].each{|m|begin;p [m,a.send(m,b)];rescue=>x;p [m,x.class,x.message];end}',
+    '[:casecmp, 0]\n[:casecmp?, true]\n',
+  ],
+  [
+    'a=String.new("é",encoding:"UTF-8");b=String.new("é",encoding:"ASCII-8BIT");[:casecmp,:casecmp?].each{|m|begin;p [m,a.send(m,b)];rescue=>x;p [m,x.class,x.message];end}',
+    '[:casecmp, nil]\n[:casecmp?, nil]\n',
+  ],
+  [
+    'a=String.new("日",encoding:"UTF-8");b=String.new("日",encoding:"ASCII-8BIT");[:casecmp,:casecmp?].each{|m|begin;p [m,a.send(m,b)];rescue=>x;p [m,x.class,x.message];end}',
+    '[:casecmp, nil]\n[:casecmp?, nil]\n',
+  ],
+  [
+    'a=String.new("",encoding:"UTF-8");b=String.new("é",encoding:"ASCII-8BIT");[:casecmp,:casecmp?].each{|m|begin;p [m,a.send(m,b)];rescue=>x;p [m,x.class,x.message];end}',
+    '[:casecmp, -1]\n[:casecmp?, false]\n',
+  ],
+  [
+    'a=String.new("abc",encoding:"UTF-8");b=String.new("ABC",encoding:"ASCII-8BIT");[:casecmp,:casecmp?].each{|m|begin;p [m,a.send(m,b)];rescue=>x;p [m,x.class,x.message];end}',
+    '[:casecmp, 0]\n[:casecmp?, true]\n',
+  ],
+  [
+    'a=String.new("é",encoding:"ASCII-8BIT");b=String.new("É",encoding:"US-ASCII");[:casecmp,:casecmp?].each{|m|begin;p [m,a.send(m,b)];rescue=>x;p [m,x.class,x.message];end}',
+    '[:casecmp, nil]\n[:casecmp?, nil]\n',
+  ],
+  [
+    'a=String.new("ß",encoding:"ASCII-8BIT");b=String.new("SS",encoding:"US-ASCII");[:casecmp,:casecmp?].each{|m|begin;p [m,a.send(m,b)];rescue=>x;p [m,x.class,x.message];end}',
+    '[:casecmp, 1]\n[:casecmp?, false]\n',
+  ],
+  [
+    'a=String.new("aA",encoding:"ASCII-8BIT");b=String.new("Aa",encoding:"US-ASCII");[:casecmp,:casecmp?].each{|m|begin;p [m,a.send(m,b)];rescue=>x;p [m,x.class,x.message];end}',
+    '[:casecmp, 0]\n[:casecmp?, true]\n',
+  ],
+  [
+    'a=String.new("é",encoding:"ASCII-8BIT");b=String.new("é",encoding:"US-ASCII");[:casecmp,:casecmp?].each{|m|begin;p [m,a.send(m,b)];rescue=>x;p [m,x.class,x.message];end}',
+    '[:casecmp, nil]\n[:casecmp?, nil]\n',
+  ],
+  [
+    'a=String.new("日",encoding:"ASCII-8BIT");b=String.new("日",encoding:"US-ASCII");[:casecmp,:casecmp?].each{|m|begin;p [m,a.send(m,b)];rescue=>x;p [m,x.class,x.message];end}',
+    '[:casecmp, nil]\n[:casecmp?, nil]\n',
+  ],
+  [
+    'a=String.new("",encoding:"ASCII-8BIT");b=String.new("é",encoding:"US-ASCII");[:casecmp,:casecmp?].each{|m|begin;p [m,a.send(m,b)];rescue=>x;p [m,x.class,x.message];end}',
+    '[:casecmp, -1]\n[:casecmp?, false]\n',
+  ],
+  [
+    'a=String.new("abc",encoding:"ASCII-8BIT");b=String.new("ABC",encoding:"US-ASCII");[:casecmp,:casecmp?].each{|m|begin;p [m,a.send(m,b)];rescue=>x;p [m,x.class,x.message];end}',
+    '[:casecmp, 0]\n[:casecmp?, true]\n',
+  ],
+  [
+    'a=String.new("é",encoding:"ASCII-8BIT");b=String.new("É",encoding:"UTF-8");[:casecmp,:casecmp?].each{|m|begin;p [m,a.send(m,b)];rescue=>x;p [m,x.class,x.message];end}',
+    '[:casecmp, nil]\n[:casecmp?, nil]\n',
+  ],
+  [
+    'a=String.new("ß",encoding:"ASCII-8BIT");b=String.new("SS",encoding:"UTF-8");[:casecmp,:casecmp?].each{|m|begin;p [m,a.send(m,b)];rescue=>x;p [m,x.class,x.message];end}',
+    '[:casecmp, 1]\n[:casecmp?, false]\n',
+  ],
+  [
+    'a=String.new("aA",encoding:"ASCII-8BIT");b=String.new("Aa",encoding:"UTF-8");[:casecmp,:casecmp?].each{|m|begin;p [m,a.send(m,b)];rescue=>x;p [m,x.class,x.message];end}',
+    '[:casecmp, 0]\n[:casecmp?, true]\n',
+  ],
+  [
+    'a=String.new("é",encoding:"ASCII-8BIT");b=String.new("é",encoding:"UTF-8");[:casecmp,:casecmp?].each{|m|begin;p [m,a.send(m,b)];rescue=>x;p [m,x.class,x.message];end}',
+    '[:casecmp, nil]\n[:casecmp?, nil]\n',
+  ],
+  [
+    'a=String.new("日",encoding:"ASCII-8BIT");b=String.new("日",encoding:"UTF-8");[:casecmp,:casecmp?].each{|m|begin;p [m,a.send(m,b)];rescue=>x;p [m,x.class,x.message];end}',
+    '[:casecmp, nil]\n[:casecmp?, nil]\n',
+  ],
+  [
+    'a=String.new("",encoding:"ASCII-8BIT");b=String.new("é",encoding:"UTF-8");[:casecmp,:casecmp?].each{|m|begin;p [m,a.send(m,b)];rescue=>x;p [m,x.class,x.message];end}',
+    '[:casecmp, -1]\n[:casecmp?, false]\n',
+  ],
+  [
+    'a=String.new("abc",encoding:"ASCII-8BIT");b=String.new("ABC",encoding:"UTF-8");[:casecmp,:casecmp?].each{|m|begin;p [m,a.send(m,b)];rescue=>x;p [m,x.class,x.message];end}',
+    '[:casecmp, 0]\n[:casecmp?, true]\n',
+  ],
+  [
+    'a=String.new("é",encoding:"ASCII-8BIT");b=String.new("É",encoding:"ASCII-8BIT");[:casecmp,:casecmp?].each{|m|begin;p [m,a.send(m,b)];rescue=>x;p [m,x.class,x.message];end}',
+    '[:casecmp, 1]\n[:casecmp?, false]\n',
+  ],
+  [
+    'a=String.new("ß",encoding:"ASCII-8BIT");b=String.new("SS",encoding:"ASCII-8BIT");[:casecmp,:casecmp?].each{|m|begin;p [m,a.send(m,b)];rescue=>x;p [m,x.class,x.message];end}',
+    '[:casecmp, 1]\n[:casecmp?, false]\n',
+  ],
+  [
+    'a=String.new("aA",encoding:"ASCII-8BIT");b=String.new("Aa",encoding:"ASCII-8BIT");[:casecmp,:casecmp?].each{|m|begin;p [m,a.send(m,b)];rescue=>x;p [m,x.class,x.message];end}',
+    '[:casecmp, 0]\n[:casecmp?, true]\n',
+  ],
+  [
+    'a=String.new("é",encoding:"ASCII-8BIT");b=String.new("é",encoding:"ASCII-8BIT");[:casecmp,:casecmp?].each{|m|begin;p [m,a.send(m,b)];rescue=>x;p [m,x.class,x.message];end}',
+    '[:casecmp, 0]\n[:casecmp?, true]\n',
+  ],
+  [
+    'a=String.new("日",encoding:"ASCII-8BIT");b=String.new("日",encoding:"ASCII-8BIT");[:casecmp,:casecmp?].each{|m|begin;p [m,a.send(m,b)];rescue=>x;p [m,x.class,x.message];end}',
+    '[:casecmp, 0]\n[:casecmp?, true]\n',
+  ],
+  [
+    'a=String.new("",encoding:"ASCII-8BIT");b=String.new("é",encoding:"ASCII-8BIT");[:casecmp,:casecmp?].each{|m|begin;p [m,a.send(m,b)];rescue=>x;p [m,x.class,x.message];end}',
+    '[:casecmp, -1]\n[:casecmp?, false]\n',
+  ],
+  [
+    'a=String.new("abc",encoding:"ASCII-8BIT");b=String.new("ABC",encoding:"ASCII-8BIT");[:casecmp,:casecmp?].each{|m|begin;p [m,a.send(m,b)];rescue=>x;p [m,x.class,x.message];end}',
+    '[:casecmp, 0]\n[:casecmp?, true]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("a",encoding:"US-ASCII");e=String.new("c",encoding:"US-ASCII");[false,true].each{|ex|begin;p desc(s.upto(e,ex).take(3));rescue=>x;p [x.class,x.message];end}',
+    '[[[97], #<Encoding:US-ASCII>, true], [[98], #<Encoding:US-ASCII>, true], [[99], #<Encoding:US-ASCII>, true]]\n[[[97], #<Encoding:US-ASCII>, true], [[98], #<Encoding:US-ASCII>, true]]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("09",encoding:"US-ASCII");e=String.new("11",encoding:"US-ASCII");[false,true].each{|ex|begin;p desc(s.upto(e,ex).take(3));rescue=>x;p [x.class,x.message];end}',
+    '[[[48, 57], #<Encoding:US-ASCII>, true], [[49, 48], #<Encoding:US-ASCII>, true], [[49, 49], #<Encoding:US-ASCII>, true]]\n[[[48, 57], #<Encoding:US-ASCII>, true], [[49, 48], #<Encoding:US-ASCII>, true]]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("aa",encoding:"US-ASCII");e=String.new("ac",encoding:"US-ASCII");[false,true].each{|ex|begin;p desc(s.upto(e,ex).take(3));rescue=>x;p [x.class,x.message];end}',
+    '[[[97, 97], #<Encoding:US-ASCII>, true], [[97, 98], #<Encoding:US-ASCII>, true], [[97, 99], #<Encoding:US-ASCII>, true]]\n[[[97, 97], #<Encoding:US-ASCII>, true], [[97, 98], #<Encoding:US-ASCII>, true]]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("aé9",encoding:"US-ASCII");e=String.new("bé0",encoding:"US-ASCII");[false,true].each{|ex|begin;p desc(s.upto(e,ex).take(3));rescue=>x;p [x.class,x.message];end}',
+    '[[[97, 195, 169, 57], #<Encoding:US-ASCII>, false], [[98, 195, 169, 48], #<Encoding:US-ASCII>, false]]\n[[[97, 195, 169, 57], #<Encoding:US-ASCII>, false]]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("aé",encoding:"US-ASCII");e=String.new("bé",encoding:"US-ASCII");[false,true].each{|ex|begin;p desc(s.upto(e,ex).take(3));rescue=>x;p [x.class,x.message];end}',
+    '[[[97, 195, 169], #<Encoding:US-ASCII>, false], [[98, 195, 169], #<Encoding:US-ASCII>, false]]\n[[[97, 195, 169], #<Encoding:US-ASCII>, false]]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("a",encoding:"US-ASCII");e=String.new("c",encoding:"UTF-8");[false,true].each{|ex|begin;p desc(s.upto(e,ex).take(3));rescue=>x;p [x.class,x.message];end}',
+    '[[[97], #<Encoding:US-ASCII>, true], [[98], #<Encoding:US-ASCII>, true], [[99], #<Encoding:US-ASCII>, true]]\n[[[97], #<Encoding:US-ASCII>, true], [[98], #<Encoding:US-ASCII>, true]]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("09",encoding:"US-ASCII");e=String.new("11",encoding:"UTF-8");[false,true].each{|ex|begin;p desc(s.upto(e,ex).take(3));rescue=>x;p [x.class,x.message];end}',
+    '[[[48, 57], #<Encoding:US-ASCII>, true], [[49, 48], #<Encoding:US-ASCII>, true], [[49, 49], #<Encoding:US-ASCII>, true]]\n[[[48, 57], #<Encoding:US-ASCII>, true], [[49, 48], #<Encoding:US-ASCII>, true]]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("aa",encoding:"US-ASCII");e=String.new("ac",encoding:"UTF-8");[false,true].each{|ex|begin;p desc(s.upto(e,ex).take(3));rescue=>x;p [x.class,x.message];end}',
+    '[[[97, 97], #<Encoding:US-ASCII>, true], [[97, 98], #<Encoding:US-ASCII>, true], [[97, 99], #<Encoding:US-ASCII>, true]]\n[[[97, 97], #<Encoding:US-ASCII>, true], [[97, 98], #<Encoding:US-ASCII>, true]]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("aé9",encoding:"US-ASCII");e=String.new("bé0",encoding:"UTF-8");[false,true].each{|ex|begin;p desc(s.upto(e,ex).take(3));rescue=>x;p [x.class,x.message];end}',
+    '[Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and UTF-8"]\n[Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and UTF-8"]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("aé",encoding:"US-ASCII");e=String.new("bé",encoding:"UTF-8");[false,true].each{|ex|begin;p desc(s.upto(e,ex).take(3));rescue=>x;p [x.class,x.message];end}',
+    '[Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and UTF-8"]\n[Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and UTF-8"]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("a",encoding:"US-ASCII");e=String.new("c",encoding:"ASCII-8BIT");[false,true].each{|ex|begin;p desc(s.upto(e,ex).take(3));rescue=>x;p [x.class,x.message];end}',
+    '[[[97], #<Encoding:US-ASCII>, true], [[98], #<Encoding:US-ASCII>, true], [[99], #<Encoding:US-ASCII>, true]]\n[[[97], #<Encoding:US-ASCII>, true], [[98], #<Encoding:US-ASCII>, true]]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("09",encoding:"US-ASCII");e=String.new("11",encoding:"ASCII-8BIT");[false,true].each{|ex|begin;p desc(s.upto(e,ex).take(3));rescue=>x;p [x.class,x.message];end}',
+    '[[[48, 57], #<Encoding:US-ASCII>, true], [[49, 48], #<Encoding:US-ASCII>, true], [[49, 49], #<Encoding:US-ASCII>, true]]\n[[[48, 57], #<Encoding:US-ASCII>, true], [[49, 48], #<Encoding:US-ASCII>, true]]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("aa",encoding:"US-ASCII");e=String.new("ac",encoding:"ASCII-8BIT");[false,true].each{|ex|begin;p desc(s.upto(e,ex).take(3));rescue=>x;p [x.class,x.message];end}',
+    '[[[97, 97], #<Encoding:US-ASCII>, true], [[97, 98], #<Encoding:US-ASCII>, true], [[97, 99], #<Encoding:US-ASCII>, true]]\n[[[97, 97], #<Encoding:US-ASCII>, true], [[97, 98], #<Encoding:US-ASCII>, true]]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("aé9",encoding:"US-ASCII");e=String.new("bé0",encoding:"ASCII-8BIT");[false,true].each{|ex|begin;p desc(s.upto(e,ex).take(3));rescue=>x;p [x.class,x.message];end}',
+    '[Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and BINARY (ASCII-8BIT)"]\n[Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and BINARY (ASCII-8BIT)"]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("aé",encoding:"US-ASCII");e=String.new("bé",encoding:"ASCII-8BIT");[false,true].each{|ex|begin;p desc(s.upto(e,ex).take(3));rescue=>x;p [x.class,x.message];end}',
+    '[Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and BINARY (ASCII-8BIT)"]\n[Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and BINARY (ASCII-8BIT)"]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("a",encoding:"UTF-8");e=String.new("c",encoding:"US-ASCII");[false,true].each{|ex|begin;p desc(s.upto(e,ex).take(3));rescue=>x;p [x.class,x.message];end}',
+    '[[[97], #<Encoding:UTF-8>, true], [[98], #<Encoding:UTF-8>, true], [[99], #<Encoding:UTF-8>, true]]\n[[[97], #<Encoding:UTF-8>, true], [[98], #<Encoding:UTF-8>, true]]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("09",encoding:"UTF-8");e=String.new("11",encoding:"US-ASCII");[false,true].each{|ex|begin;p desc(s.upto(e,ex).take(3));rescue=>x;p [x.class,x.message];end}',
+    '[[[48, 57], #<Encoding:US-ASCII>, true], [[49, 48], #<Encoding:US-ASCII>, true], [[49, 49], #<Encoding:US-ASCII>, true]]\n[[[48, 57], #<Encoding:US-ASCII>, true], [[49, 48], #<Encoding:US-ASCII>, true]]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("aa",encoding:"UTF-8");e=String.new("ac",encoding:"US-ASCII");[false,true].each{|ex|begin;p desc(s.upto(e,ex).take(3));rescue=>x;p [x.class,x.message];end}',
+    '[[[97, 97], #<Encoding:UTF-8>, true], [[97, 98], #<Encoding:UTF-8>, true], [[97, 99], #<Encoding:UTF-8>, true]]\n[[[97, 97], #<Encoding:UTF-8>, true], [[97, 98], #<Encoding:UTF-8>, true]]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("aé9",encoding:"UTF-8");e=String.new("bé0",encoding:"US-ASCII");[false,true].each{|ex|begin;p desc(s.upto(e,ex).take(3));rescue=>x;p [x.class,x.message];end}',
+    '[Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and US-ASCII"]\n[Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and US-ASCII"]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("aé",encoding:"UTF-8");e=String.new("bé",encoding:"US-ASCII");[false,true].each{|ex|begin;p desc(s.upto(e,ex).take(3));rescue=>x;p [x.class,x.message];end}',
+    '[Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and US-ASCII"]\n[Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and US-ASCII"]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("a",encoding:"UTF-8");e=String.new("c",encoding:"UTF-8");[false,true].each{|ex|begin;p desc(s.upto(e,ex).take(3));rescue=>x;p [x.class,x.message];end}',
+    '[[[97], #<Encoding:UTF-8>, true], [[98], #<Encoding:UTF-8>, true], [[99], #<Encoding:UTF-8>, true]]\n[[[97], #<Encoding:UTF-8>, true], [[98], #<Encoding:UTF-8>, true]]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("09",encoding:"UTF-8");e=String.new("11",encoding:"UTF-8");[false,true].each{|ex|begin;p desc(s.upto(e,ex).take(3));rescue=>x;p [x.class,x.message];end}',
+    '[[[48, 57], #<Encoding:US-ASCII>, true], [[49, 48], #<Encoding:US-ASCII>, true], [[49, 49], #<Encoding:US-ASCII>, true]]\n[[[48, 57], #<Encoding:US-ASCII>, true], [[49, 48], #<Encoding:US-ASCII>, true]]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("aa",encoding:"UTF-8");e=String.new("ac",encoding:"UTF-8");[false,true].each{|ex|begin;p desc(s.upto(e,ex).take(3));rescue=>x;p [x.class,x.message];end}',
+    '[[[97, 97], #<Encoding:UTF-8>, true], [[97, 98], #<Encoding:UTF-8>, true], [[97, 99], #<Encoding:UTF-8>, true]]\n[[[97, 97], #<Encoding:UTF-8>, true], [[97, 98], #<Encoding:UTF-8>, true]]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("aé9",encoding:"UTF-8");e=String.new("bé0",encoding:"UTF-8");[false,true].each{|ex|begin;p desc(s.upto(e,ex).take(3));rescue=>x;p [x.class,x.message];end}',
+    '[[[97, 195, 169, 57], #<Encoding:UTF-8>, true], [[97, 195, 170, 48], #<Encoding:UTF-8>, true], [[97, 195, 170, 49], #<Encoding:UTF-8>, true]]\n[[[97, 195, 169, 57], #<Encoding:UTF-8>, true], [[97, 195, 170, 48], #<Encoding:UTF-8>, true], [[97, 195, 170, 49], #<Encoding:UTF-8>, true]]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("aé",encoding:"UTF-8");e=String.new("bé",encoding:"UTF-8");[false,true].each{|ex|begin;p desc(s.upto(e,ex).take(3));rescue=>x;p [x.class,x.message];end}',
+    '[[[97, 195, 169], #<Encoding:UTF-8>, true], [[97, 195, 170], #<Encoding:UTF-8>, true], [[97, 195, 171], #<Encoding:UTF-8>, true]]\n[[[97, 195, 169], #<Encoding:UTF-8>, true], [[97, 195, 170], #<Encoding:UTF-8>, true], [[97, 195, 171], #<Encoding:UTF-8>, true]]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("a",encoding:"UTF-8");e=String.new("c",encoding:"ASCII-8BIT");[false,true].each{|ex|begin;p desc(s.upto(e,ex).take(3));rescue=>x;p [x.class,x.message];end}',
+    '[[[97], #<Encoding:UTF-8>, true], [[98], #<Encoding:UTF-8>, true], [[99], #<Encoding:UTF-8>, true]]\n[[[97], #<Encoding:UTF-8>, true], [[98], #<Encoding:UTF-8>, true]]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("09",encoding:"UTF-8");e=String.new("11",encoding:"ASCII-8BIT");[false,true].each{|ex|begin;p desc(s.upto(e,ex).take(3));rescue=>x;p [x.class,x.message];end}',
+    '[[[48, 57], #<Encoding:US-ASCII>, true], [[49, 48], #<Encoding:US-ASCII>, true], [[49, 49], #<Encoding:US-ASCII>, true]]\n[[[48, 57], #<Encoding:US-ASCII>, true], [[49, 48], #<Encoding:US-ASCII>, true]]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("aa",encoding:"UTF-8");e=String.new("ac",encoding:"ASCII-8BIT");[false,true].each{|ex|begin;p desc(s.upto(e,ex).take(3));rescue=>x;p [x.class,x.message];end}',
+    '[[[97, 97], #<Encoding:UTF-8>, true], [[97, 98], #<Encoding:UTF-8>, true], [[97, 99], #<Encoding:UTF-8>, true]]\n[[[97, 97], #<Encoding:UTF-8>, true], [[97, 98], #<Encoding:UTF-8>, true]]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("aé9",encoding:"UTF-8");e=String.new("bé0",encoding:"ASCII-8BIT");[false,true].each{|ex|begin;p desc(s.upto(e,ex).take(3));rescue=>x;p [x.class,x.message];end}',
+    '[Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and BINARY (ASCII-8BIT)"]\n[Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and BINARY (ASCII-8BIT)"]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("aé",encoding:"UTF-8");e=String.new("bé",encoding:"ASCII-8BIT");[false,true].each{|ex|begin;p desc(s.upto(e,ex).take(3));rescue=>x;p [x.class,x.message];end}',
+    '[Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and BINARY (ASCII-8BIT)"]\n[Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and BINARY (ASCII-8BIT)"]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("a",encoding:"ASCII-8BIT");e=String.new("c",encoding:"US-ASCII");[false,true].each{|ex|begin;p desc(s.upto(e,ex).take(3));rescue=>x;p [x.class,x.message];end}',
+    '[[[97], #<Encoding:BINARY (ASCII-8BIT)>, true], [[98], #<Encoding:BINARY (ASCII-8BIT)>, true], [[99], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[[[97], #<Encoding:BINARY (ASCII-8BIT)>, true], [[98], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("09",encoding:"ASCII-8BIT");e=String.new("11",encoding:"US-ASCII");[false,true].each{|ex|begin;p desc(s.upto(e,ex).take(3));rescue=>x;p [x.class,x.message];end}',
+    '[[[48, 57], #<Encoding:US-ASCII>, true], [[49, 48], #<Encoding:US-ASCII>, true], [[49, 49], #<Encoding:US-ASCII>, true]]\n[[[48, 57], #<Encoding:US-ASCII>, true], [[49, 48], #<Encoding:US-ASCII>, true]]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("aa",encoding:"ASCII-8BIT");e=String.new("ac",encoding:"US-ASCII");[false,true].each{|ex|begin;p desc(s.upto(e,ex).take(3));rescue=>x;p [x.class,x.message];end}',
+    '[[[97, 97], #<Encoding:BINARY (ASCII-8BIT)>, true], [[97, 98], #<Encoding:BINARY (ASCII-8BIT)>, true], [[97, 99], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[[[97, 97], #<Encoding:BINARY (ASCII-8BIT)>, true], [[97, 98], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("aé9",encoding:"ASCII-8BIT");e=String.new("bé0",encoding:"US-ASCII");[false,true].each{|ex|begin;p desc(s.upto(e,ex).take(3));rescue=>x;p [x.class,x.message];end}',
+    '[Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and US-ASCII"]\n[Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and US-ASCII"]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("aé",encoding:"ASCII-8BIT");e=String.new("bé",encoding:"US-ASCII");[false,true].each{|ex|begin;p desc(s.upto(e,ex).take(3));rescue=>x;p [x.class,x.message];end}',
+    '[Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and US-ASCII"]\n[Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and US-ASCII"]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("a",encoding:"ASCII-8BIT");e=String.new("c",encoding:"UTF-8");[false,true].each{|ex|begin;p desc(s.upto(e,ex).take(3));rescue=>x;p [x.class,x.message];end}',
+    '[[[97], #<Encoding:BINARY (ASCII-8BIT)>, true], [[98], #<Encoding:BINARY (ASCII-8BIT)>, true], [[99], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[[[97], #<Encoding:BINARY (ASCII-8BIT)>, true], [[98], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("09",encoding:"ASCII-8BIT");e=String.new("11",encoding:"UTF-8");[false,true].each{|ex|begin;p desc(s.upto(e,ex).take(3));rescue=>x;p [x.class,x.message];end}',
+    '[[[48, 57], #<Encoding:US-ASCII>, true], [[49, 48], #<Encoding:US-ASCII>, true], [[49, 49], #<Encoding:US-ASCII>, true]]\n[[[48, 57], #<Encoding:US-ASCII>, true], [[49, 48], #<Encoding:US-ASCII>, true]]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("aa",encoding:"ASCII-8BIT");e=String.new("ac",encoding:"UTF-8");[false,true].each{|ex|begin;p desc(s.upto(e,ex).take(3));rescue=>x;p [x.class,x.message];end}',
+    '[[[97, 97], #<Encoding:BINARY (ASCII-8BIT)>, true], [[97, 98], #<Encoding:BINARY (ASCII-8BIT)>, true], [[97, 99], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[[[97, 97], #<Encoding:BINARY (ASCII-8BIT)>, true], [[97, 98], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("aé9",encoding:"ASCII-8BIT");e=String.new("bé0",encoding:"UTF-8");[false,true].each{|ex|begin;p desc(s.upto(e,ex).take(3));rescue=>x;p [x.class,x.message];end}',
+    '[Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and UTF-8"]\n[Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and UTF-8"]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("aé",encoding:"ASCII-8BIT");e=String.new("bé",encoding:"UTF-8");[false,true].each{|ex|begin;p desc(s.upto(e,ex).take(3));rescue=>x;p [x.class,x.message];end}',
+    '[Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and UTF-8"]\n[Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and UTF-8"]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("a",encoding:"ASCII-8BIT");e=String.new("c",encoding:"ASCII-8BIT");[false,true].each{|ex|begin;p desc(s.upto(e,ex).take(3));rescue=>x;p [x.class,x.message];end}',
+    '[[[97], #<Encoding:BINARY (ASCII-8BIT)>, true], [[98], #<Encoding:BINARY (ASCII-8BIT)>, true], [[99], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[[[97], #<Encoding:BINARY (ASCII-8BIT)>, true], [[98], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("09",encoding:"ASCII-8BIT");e=String.new("11",encoding:"ASCII-8BIT");[false,true].each{|ex|begin;p desc(s.upto(e,ex).take(3));rescue=>x;p [x.class,x.message];end}',
+    '[[[48, 57], #<Encoding:US-ASCII>, true], [[49, 48], #<Encoding:US-ASCII>, true], [[49, 49], #<Encoding:US-ASCII>, true]]\n[[[48, 57], #<Encoding:US-ASCII>, true], [[49, 48], #<Encoding:US-ASCII>, true]]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("aa",encoding:"ASCII-8BIT");e=String.new("ac",encoding:"ASCII-8BIT");[false,true].each{|ex|begin;p desc(s.upto(e,ex).take(3));rescue=>x;p [x.class,x.message];end}',
+    '[[[97, 97], #<Encoding:BINARY (ASCII-8BIT)>, true], [[97, 98], #<Encoding:BINARY (ASCII-8BIT)>, true], [[97, 99], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[[[97, 97], #<Encoding:BINARY (ASCII-8BIT)>, true], [[97, 98], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("aé9",encoding:"ASCII-8BIT");e=String.new("bé0",encoding:"ASCII-8BIT");[false,true].each{|ex|begin;p desc(s.upto(e,ex).take(3));rescue=>x;p [x.class,x.message];end}',
+    '[[[97, 195, 169, 57], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[[[97, 195, 169, 57], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("aé",encoding:"ASCII-8BIT");e=String.new("bé",encoding:"ASCII-8BIT");[false,true].each{|ex|begin;p desc(s.upto(e,ex).take(3));rescue=>x;p [x.class,x.message];end}',
+    '[[[97, 195, 169], #<Encoding:BINARY (ASCII-8BIT)>, true], [[98, 195, 169], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[[[97, 195, 169], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;class Selector;def to_str;puts :converted;"a";end;end;s=String.new("é",encoding:"US-ASCII");begin;p desc(s.count(Selector.new));rescue=>x;p x.class,x.message;end',
+    'converted\nArgumentError\n"invalid byte sequence in US-ASCII"\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;class Selector;def to_str;puts :converted;"a";end;end;s=String.new("é",encoding:"US-ASCII");begin;p desc(s.delete(Selector.new));rescue=>x;p x.class,x.message;end',
+    'converted\nArgumentError\n"invalid byte sequence in US-ASCII"\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;class Selector;def to_str;puts :converted;"a";end;end;s=String.new("é",encoding:"US-ASCII");begin;p desc(s.delete!(Selector.new));rescue=>x;p x.class,x.message;end',
+    'converted\nArgumentError\n"invalid byte sequence in US-ASCII"\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;class Selector;def to_str;puts :converted;"a";end;end;s=String.new("é",encoding:"US-ASCII");begin;p desc(s.split(Selector.new));rescue=>x;p x.class,x.message;end',
+    'converted\nArgumentError\n"invalid byte sequence in US-ASCII"\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;class Selector;def to_str;puts :converted;"a";end;end;s=String.new("é",encoding:"US-ASCII");s.freeze;begin;p desc(s.count(Selector.new));rescue=>x;p x.class,x.message;end',
+    'converted\nArgumentError\n"invalid byte sequence in US-ASCII"\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;class Selector;def to_str;puts :converted;"a";end;end;s=String.new("é",encoding:"US-ASCII");s.freeze;begin;p desc(s.delete(Selector.new));rescue=>x;p x.class,x.message;end',
+    'converted\nArgumentError\n"invalid byte sequence in US-ASCII"\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;class Selector;def to_str;puts :converted;"a";end;end;s=String.new("é",encoding:"US-ASCII");s.freeze;begin;p desc(s.delete!(Selector.new));rescue=>x;p x.class,x.message;end',
+    'converted\nFrozenError\n"can\'t modify frozen String: \\"\\\\xC3\\\\xA9\\""\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;class Selector;def to_str;puts :converted;"a";end;end;s=String.new("é",encoding:"US-ASCII");s.freeze;begin;p desc(s.split(Selector.new));rescue=>x;p x.class,x.message;end',
+    'converted\nArgumentError\n"invalid byte sequence in US-ASCII"\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;class Selector;def to_str;puts :converted;"a";end;end;s=String.new("",encoding:"US-ASCII");begin;p desc(s.count(Selector.new));rescue=>x;p x.class,x.message;end',
+    'converted\n0\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;class Selector;def to_str;puts :converted;"a";end;end;s=String.new("",encoding:"US-ASCII");begin;p desc(s.delete(Selector.new));rescue=>x;p x.class,x.message;end',
+    '[[], #<Encoding:US-ASCII>, true]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;class Selector;def to_str;puts :converted;"a";end;end;s=String.new("",encoding:"US-ASCII");begin;p desc(s.delete!(Selector.new));rescue=>x;p x.class,x.message;end',
+    'nil\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;class Selector;def to_str;puts :converted;"a";end;end;s=String.new("",encoding:"US-ASCII");begin;p desc(s.split(Selector.new));rescue=>x;p x.class,x.message;end',
+    'converted\n[]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;class Selector;def to_str;puts :converted;"a";end;end;s=String.new("",encoding:"US-ASCII");s.freeze;begin;p desc(s.count(Selector.new));rescue=>x;p x.class,x.message;end',
+    'converted\n0\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;class Selector;def to_str;puts :converted;"a";end;end;s=String.new("",encoding:"US-ASCII");s.freeze;begin;p desc(s.delete(Selector.new));rescue=>x;p x.class,x.message;end',
+    '[[], #<Encoding:US-ASCII>, true]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;class Selector;def to_str;puts :converted;"a";end;end;s=String.new("",encoding:"US-ASCII");s.freeze;begin;p desc(s.delete!(Selector.new));rescue=>x;p x.class,x.message;end',
+    'nil\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;class Selector;def to_str;puts :converted;"a";end;end;s=String.new("",encoding:"US-ASCII");s.freeze;begin;p desc(s.split(Selector.new));rescue=>x;p x.class,x.message;end',
+    'converted\n[]\n',
+  ],
+] as const;
+
+test.each(nativeDeclaredStringEncodingCases)(
+  'String operations preserve declared charsets, validation stages and byte positions: %s',
+  (source, stdout) => {
+    expect(run(source)).toMatchObject({ kind: 'executed', stdout, uncaughtException: undefined });
+  }
+);
+
+const nativeStringEncodingStageCases = [
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("éa",encoding:"US-ASCII");n=String.new("é",encoding:"US-ASCII");[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,n))];rescue=>x;p [m,x.class,x.message];end}',
+    '[:count, ArgumentError, "invalid byte sequence in US-ASCII"]\n[:delete, ArgumentError, "invalid byte sequence in US-ASCII"]\n[:delete!, ArgumentError, "invalid byte sequence in US-ASCII"]\n[:split, ArgumentError, "invalid byte sequence in US-ASCII"]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("éa",encoding:"US-ASCII");n=String.new("é",encoding:"US-ASCII");s.freeze;[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,n))];rescue=>x;p [m,x.class,x.message];end}',
+    '[:count, ArgumentError, "invalid byte sequence in US-ASCII"]\n[:delete, ArgumentError, "invalid byte sequence in US-ASCII"]\n[:delete!, ArgumentError, "invalid byte sequence in US-ASCII"]\n[:split, ArgumentError, "invalid byte sequence in US-ASCII"]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("éa",encoding:"US-ASCII");n=String.new(255.chr,encoding:"US-ASCII");[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,n))];rescue=>x;p [m,x.class,x.message];end}',
+    '[:count, ArgumentError, "invalid byte sequence in US-ASCII"]\n[:delete, ArgumentError, "invalid byte sequence in US-ASCII"]\n[:delete!, ArgumentError, "invalid byte sequence in US-ASCII"]\n[:split, ArgumentError, "invalid byte sequence in US-ASCII"]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("éa",encoding:"US-ASCII");n=String.new(255.chr,encoding:"US-ASCII");s.freeze;[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,n))];rescue=>x;p [m,x.class,x.message];end}',
+    '[:count, ArgumentError, "invalid byte sequence in US-ASCII"]\n[:delete, ArgumentError, "invalid byte sequence in US-ASCII"]\n[:delete!, ArgumentError, "invalid byte sequence in US-ASCII"]\n[:split, ArgumentError, "invalid byte sequence in US-ASCII"]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("éa",encoding:"US-ASCII");n=String.new("z-a",encoding:"US-ASCII");[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,n))];rescue=>x;p [m,x.class,x.message];end}',
+    '[:count, ArgumentError, "invalid range \\"z-a\\" in string transliteration"]\n[:delete, ArgumentError, "invalid range \\"z-a\\" in string transliteration"]\n[:delete!, ArgumentError, "invalid range \\"z-a\\" in string transliteration"]\n[:split, ArgumentError, "invalid byte sequence in US-ASCII"]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("éa",encoding:"US-ASCII");n=String.new("z-a",encoding:"US-ASCII");s.freeze;[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,n))];rescue=>x;p [m,x.class,x.message];end}',
+    '[:count, ArgumentError, "invalid range \\"z-a\\" in string transliteration"]\n[:delete, ArgumentError, "invalid range \\"z-a\\" in string transliteration"]\n[:delete!, ArgumentError, "invalid range \\"z-a\\" in string transliteration"]\n[:split, ArgumentError, "invalid byte sequence in US-ASCII"]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("éa",encoding:"US-ASCII");n=String.new("",encoding:"US-ASCII");[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,n))];rescue=>x;p [m,x.class,x.message];end}',
+    '[:count, ArgumentError, "invalid byte sequence in US-ASCII"]\n[:delete, ArgumentError, "invalid byte sequence in US-ASCII"]\n[:delete!, ArgumentError, "invalid byte sequence in US-ASCII"]\n[:split, ArgumentError, "invalid byte sequence in US-ASCII"]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("éa",encoding:"US-ASCII");n=String.new("",encoding:"US-ASCII");s.freeze;[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,n))];rescue=>x;p [m,x.class,x.message];end}',
+    '[:count, ArgumentError, "invalid byte sequence in US-ASCII"]\n[:delete, ArgumentError, "invalid byte sequence in US-ASCII"]\n[:delete!, FrozenError, "can\'t modify frozen String: \\"\\\\xC3\\\\xA9a\\""]\n[:split, ArgumentError, "invalid byte sequence in US-ASCII"]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("",encoding:"US-ASCII");n=String.new("é",encoding:"US-ASCII");[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,n))];rescue=>x;p [m,x.class,x.message];end}',
+    '[:count, ArgumentError, "invalid byte sequence in US-ASCII"]\n[:delete, [[], #<Encoding:US-ASCII>, true]]\n[:delete!, nil]\n[:split, ArgumentError, "invalid byte sequence in US-ASCII"]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("",encoding:"US-ASCII");n=String.new("é",encoding:"US-ASCII");s.freeze;[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,n))];rescue=>x;p [m,x.class,x.message];end}',
+    '[:count, ArgumentError, "invalid byte sequence in US-ASCII"]\n[:delete, [[], #<Encoding:US-ASCII>, true]]\n[:delete!, nil]\n[:split, ArgumentError, "invalid byte sequence in US-ASCII"]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("",encoding:"US-ASCII");n=String.new(255.chr,encoding:"US-ASCII");[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,n))];rescue=>x;p [m,x.class,x.message];end}',
+    '[:count, ArgumentError, "invalid byte sequence in US-ASCII"]\n[:delete, [[], #<Encoding:US-ASCII>, true]]\n[:delete!, nil]\n[:split, ArgumentError, "invalid byte sequence in US-ASCII"]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("",encoding:"US-ASCII");n=String.new(255.chr,encoding:"US-ASCII");s.freeze;[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,n))];rescue=>x;p [m,x.class,x.message];end}',
+    '[:count, ArgumentError, "invalid byte sequence in US-ASCII"]\n[:delete, [[], #<Encoding:US-ASCII>, true]]\n[:delete!, nil]\n[:split, ArgumentError, "invalid byte sequence in US-ASCII"]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("",encoding:"US-ASCII");n=String.new("z-a",encoding:"US-ASCII");[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,n))];rescue=>x;p [m,x.class,x.message];end}',
+    '[:count, ArgumentError, "invalid range \\"z-a\\" in string transliteration"]\n[:delete, [[], #<Encoding:US-ASCII>, true]]\n[:delete!, nil]\n[:split, []]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("",encoding:"US-ASCII");n=String.new("z-a",encoding:"US-ASCII");s.freeze;[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,n))];rescue=>x;p [m,x.class,x.message];end}',
+    '[:count, ArgumentError, "invalid range \\"z-a\\" in string transliteration"]\n[:delete, [[], #<Encoding:US-ASCII>, true]]\n[:delete!, nil]\n[:split, []]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("",encoding:"US-ASCII");n=String.new("",encoding:"US-ASCII");[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,n))];rescue=>x;p [m,x.class,x.message];end}',
+    '[:count, 0]\n[:delete, [[], #<Encoding:US-ASCII>, true]]\n[:delete!, nil]\n[:split, []]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("",encoding:"US-ASCII");n=String.new("",encoding:"US-ASCII");s.freeze;[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,n))];rescue=>x;p [m,x.class,x.message];end}',
+    '[:count, 0]\n[:delete, [[], #<Encoding:US-ASCII>, true]]\n[:delete!, nil]\n[:split, []]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("abc",encoding:"US-ASCII");n=String.new("é",encoding:"US-ASCII");[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,n))];rescue=>x;p [m,x.class,x.message];end}',
+    '[:count, ArgumentError, "invalid byte sequence in US-ASCII"]\n[:delete, ArgumentError, "invalid byte sequence in US-ASCII"]\n[:delete!, ArgumentError, "invalid byte sequence in US-ASCII"]\n[:split, ArgumentError, "invalid byte sequence in US-ASCII"]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("abc",encoding:"US-ASCII");n=String.new("é",encoding:"US-ASCII");s.freeze;[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,n))];rescue=>x;p [m,x.class,x.message];end}',
+    '[:count, ArgumentError, "invalid byte sequence in US-ASCII"]\n[:delete, ArgumentError, "invalid byte sequence in US-ASCII"]\n[:delete!, ArgumentError, "invalid byte sequence in US-ASCII"]\n[:split, ArgumentError, "invalid byte sequence in US-ASCII"]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("abc",encoding:"US-ASCII");n=String.new(255.chr,encoding:"US-ASCII");[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,n))];rescue=>x;p [m,x.class,x.message];end}',
+    '[:count, ArgumentError, "invalid byte sequence in US-ASCII"]\n[:delete, ArgumentError, "invalid byte sequence in US-ASCII"]\n[:delete!, ArgumentError, "invalid byte sequence in US-ASCII"]\n[:split, ArgumentError, "invalid byte sequence in US-ASCII"]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("abc",encoding:"US-ASCII");n=String.new(255.chr,encoding:"US-ASCII");s.freeze;[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,n))];rescue=>x;p [m,x.class,x.message];end}',
+    '[:count, ArgumentError, "invalid byte sequence in US-ASCII"]\n[:delete, ArgumentError, "invalid byte sequence in US-ASCII"]\n[:delete!, ArgumentError, "invalid byte sequence in US-ASCII"]\n[:split, ArgumentError, "invalid byte sequence in US-ASCII"]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("abc",encoding:"US-ASCII");n=String.new("z-a",encoding:"US-ASCII");[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,n))];rescue=>x;p [m,x.class,x.message];end}',
+    '[:count, ArgumentError, "invalid range \\"z-a\\" in string transliteration"]\n[:delete, ArgumentError, "invalid range \\"z-a\\" in string transliteration"]\n[:delete!, ArgumentError, "invalid range \\"z-a\\" in string transliteration"]\n[:split, [[[97, 98, 99], #<Encoding:US-ASCII>, true]]]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("abc",encoding:"US-ASCII");n=String.new("z-a",encoding:"US-ASCII");s.freeze;[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,n))];rescue=>x;p [m,x.class,x.message];end}',
+    '[:count, ArgumentError, "invalid range \\"z-a\\" in string transliteration"]\n[:delete, ArgumentError, "invalid range \\"z-a\\" in string transliteration"]\n[:delete!, ArgumentError, "invalid range \\"z-a\\" in string transliteration"]\n[:split, [[[97, 98, 99], #<Encoding:US-ASCII>, true]]]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("abc",encoding:"US-ASCII");n=String.new("",encoding:"US-ASCII");[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,n))];rescue=>x;p [m,x.class,x.message];end}',
+    '[:count, 0]\n[:delete, [[97, 98, 99], #<Encoding:US-ASCII>, true]]\n[:delete!, nil]\n[:split, [[[97], #<Encoding:US-ASCII>, true], [[98], #<Encoding:US-ASCII>, true], [[99], #<Encoding:US-ASCII>, true]]]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("abc",encoding:"US-ASCII");n=String.new("",encoding:"US-ASCII");s.freeze;[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,n))];rescue=>x;p [m,x.class,x.message];end}',
+    '[:count, 0]\n[:delete, [[97, 98, 99], #<Encoding:US-ASCII>, true]]\n[:delete!, FrozenError, "can\'t modify frozen String: \\"abc\\""]\n[:split, [[[97], #<Encoding:US-ASCII>, true], [[98], #<Encoding:US-ASCII>, true], [[99], #<Encoding:US-ASCII>, true]]]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("éa",encoding:"US-ASCII");n=String.new("é",encoding:"UTF-8");[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,n))];rescue=>x;p [m,x.class,x.message];end}',
+    '[:count, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and UTF-8"]\n[:delete, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and UTF-8"]\n[:delete!, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and UTF-8"]\n[:split, ArgumentError, "invalid byte sequence in US-ASCII"]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("éa",encoding:"US-ASCII");n=String.new("é",encoding:"UTF-8");s.freeze;[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,n))];rescue=>x;p [m,x.class,x.message];end}',
+    '[:count, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and UTF-8"]\n[:delete, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and UTF-8"]\n[:delete!, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and UTF-8"]\n[:split, ArgumentError, "invalid byte sequence in US-ASCII"]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("éa",encoding:"US-ASCII");n=String.new(255.chr,encoding:"UTF-8");[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,n))];rescue=>x;p [m,x.class,x.message];end}',
+    '[:count, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and UTF-8"]\n[:delete, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and UTF-8"]\n[:delete!, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and UTF-8"]\n[:split, ArgumentError, "invalid byte sequence in UTF-8"]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("éa",encoding:"US-ASCII");n=String.new(255.chr,encoding:"UTF-8");s.freeze;[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,n))];rescue=>x;p [m,x.class,x.message];end}',
+    '[:count, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and UTF-8"]\n[:delete, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and UTF-8"]\n[:delete!, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and UTF-8"]\n[:split, ArgumentError, "invalid byte sequence in UTF-8"]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("éa",encoding:"US-ASCII");n=String.new("z-a",encoding:"UTF-8");[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,n))];rescue=>x;p [m,x.class,x.message];end}',
+    '[:count, ArgumentError, "invalid range \\"z-a\\" in string transliteration"]\n[:delete, ArgumentError, "invalid range \\"z-a\\" in string transliteration"]\n[:delete!, ArgumentError, "invalid range \\"z-a\\" in string transliteration"]\n[:split, ArgumentError, "invalid byte sequence in US-ASCII"]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("éa",encoding:"US-ASCII");n=String.new("z-a",encoding:"UTF-8");s.freeze;[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,n))];rescue=>x;p [m,x.class,x.message];end}',
+    '[:count, ArgumentError, "invalid range \\"z-a\\" in string transliteration"]\n[:delete, ArgumentError, "invalid range \\"z-a\\" in string transliteration"]\n[:delete!, ArgumentError, "invalid range \\"z-a\\" in string transliteration"]\n[:split, ArgumentError, "invalid byte sequence in US-ASCII"]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("éa",encoding:"US-ASCII");n=String.new("",encoding:"UTF-8");[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,n))];rescue=>x;p [m,x.class,x.message];end}',
+    '[:count, ArgumentError, "invalid byte sequence in US-ASCII"]\n[:delete, ArgumentError, "invalid byte sequence in US-ASCII"]\n[:delete!, ArgumentError, "invalid byte sequence in US-ASCII"]\n[:split, ArgumentError, "invalid byte sequence in US-ASCII"]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("éa",encoding:"US-ASCII");n=String.new("",encoding:"UTF-8");s.freeze;[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,n))];rescue=>x;p [m,x.class,x.message];end}',
+    '[:count, ArgumentError, "invalid byte sequence in US-ASCII"]\n[:delete, ArgumentError, "invalid byte sequence in US-ASCII"]\n[:delete!, FrozenError, "can\'t modify frozen String: \\"\\\\xC3\\\\xA9a\\""]\n[:split, ArgumentError, "invalid byte sequence in US-ASCII"]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("",encoding:"US-ASCII");n=String.new("é",encoding:"UTF-8");[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,n))];rescue=>x;p [m,x.class,x.message];end}',
+    '[:count, 0]\n[:delete, [[], #<Encoding:US-ASCII>, true]]\n[:delete!, nil]\n[:split, []]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("",encoding:"US-ASCII");n=String.new("é",encoding:"UTF-8");s.freeze;[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,n))];rescue=>x;p [m,x.class,x.message];end}',
+    '[:count, 0]\n[:delete, [[], #<Encoding:US-ASCII>, true]]\n[:delete!, nil]\n[:split, []]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("",encoding:"US-ASCII");n=String.new(255.chr,encoding:"UTF-8");[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,n))];rescue=>x;p [m,x.class,x.message];end}',
+    '[:count, ArgumentError, "invalid byte sequence in UTF-8"]\n[:delete, [[], #<Encoding:US-ASCII>, true]]\n[:delete!, nil]\n[:split, ArgumentError, "invalid byte sequence in UTF-8"]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("",encoding:"US-ASCII");n=String.new(255.chr,encoding:"UTF-8");s.freeze;[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,n))];rescue=>x;p [m,x.class,x.message];end}',
+    '[:count, ArgumentError, "invalid byte sequence in UTF-8"]\n[:delete, [[], #<Encoding:US-ASCII>, true]]\n[:delete!, nil]\n[:split, ArgumentError, "invalid byte sequence in UTF-8"]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("",encoding:"US-ASCII");n=String.new("z-a",encoding:"UTF-8");[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,n))];rescue=>x;p [m,x.class,x.message];end}',
+    '[:count, ArgumentError, "invalid range \\"z-a\\" in string transliteration"]\n[:delete, [[], #<Encoding:US-ASCII>, true]]\n[:delete!, nil]\n[:split, []]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("",encoding:"US-ASCII");n=String.new("z-a",encoding:"UTF-8");s.freeze;[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,n))];rescue=>x;p [m,x.class,x.message];end}',
+    '[:count, ArgumentError, "invalid range \\"z-a\\" in string transliteration"]\n[:delete, [[], #<Encoding:US-ASCII>, true]]\n[:delete!, nil]\n[:split, []]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("",encoding:"US-ASCII");n=String.new("",encoding:"UTF-8");[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,n))];rescue=>x;p [m,x.class,x.message];end}',
+    '[:count, 0]\n[:delete, [[], #<Encoding:US-ASCII>, true]]\n[:delete!, nil]\n[:split, []]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("",encoding:"US-ASCII");n=String.new("",encoding:"UTF-8");s.freeze;[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,n))];rescue=>x;p [m,x.class,x.message];end}',
+    '[:count, 0]\n[:delete, [[], #<Encoding:US-ASCII>, true]]\n[:delete!, nil]\n[:split, []]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("abc",encoding:"US-ASCII");n=String.new("é",encoding:"UTF-8");[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,n))];rescue=>x;p [m,x.class,x.message];end}',
+    '[:count, 0]\n[:delete, [[97, 98, 99], #<Encoding:US-ASCII>, true]]\n[:delete!, nil]\n[:split, [[[97, 98, 99], #<Encoding:US-ASCII>, true]]]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("abc",encoding:"US-ASCII");n=String.new("é",encoding:"UTF-8");s.freeze;[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,n))];rescue=>x;p [m,x.class,x.message];end}',
+    '[:count, 0]\n[:delete, [[97, 98, 99], #<Encoding:US-ASCII>, true]]\n[:delete!, FrozenError, "can\'t modify frozen String: \\"abc\\""]\n[:split, [[[97, 98, 99], #<Encoding:US-ASCII>, true]]]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("abc",encoding:"US-ASCII");n=String.new(255.chr,encoding:"UTF-8");[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,n))];rescue=>x;p [m,x.class,x.message];end}',
+    '[:count, ArgumentError, "invalid byte sequence in UTF-8"]\n[:delete, ArgumentError, "invalid byte sequence in UTF-8"]\n[:delete!, ArgumentError, "invalid byte sequence in UTF-8"]\n[:split, ArgumentError, "invalid byte sequence in UTF-8"]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("abc",encoding:"US-ASCII");n=String.new(255.chr,encoding:"UTF-8");s.freeze;[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,n))];rescue=>x;p [m,x.class,x.message];end}',
+    '[:count, ArgumentError, "invalid byte sequence in UTF-8"]\n[:delete, ArgumentError, "invalid byte sequence in UTF-8"]\n[:delete!, ArgumentError, "invalid byte sequence in UTF-8"]\n[:split, ArgumentError, "invalid byte sequence in UTF-8"]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("abc",encoding:"US-ASCII");n=String.new("z-a",encoding:"UTF-8");[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,n))];rescue=>x;p [m,x.class,x.message];end}',
+    '[:count, ArgumentError, "invalid range \\"z-a\\" in string transliteration"]\n[:delete, ArgumentError, "invalid range \\"z-a\\" in string transliteration"]\n[:delete!, ArgumentError, "invalid range \\"z-a\\" in string transliteration"]\n[:split, [[[97, 98, 99], #<Encoding:US-ASCII>, true]]]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("abc",encoding:"US-ASCII");n=String.new("z-a",encoding:"UTF-8");s.freeze;[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,n))];rescue=>x;p [m,x.class,x.message];end}',
+    '[:count, ArgumentError, "invalid range \\"z-a\\" in string transliteration"]\n[:delete, ArgumentError, "invalid range \\"z-a\\" in string transliteration"]\n[:delete!, ArgumentError, "invalid range \\"z-a\\" in string transliteration"]\n[:split, [[[97, 98, 99], #<Encoding:US-ASCII>, true]]]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("abc",encoding:"US-ASCII");n=String.new("",encoding:"UTF-8");[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,n))];rescue=>x;p [m,x.class,x.message];end}',
+    '[:count, 0]\n[:delete, [[97, 98, 99], #<Encoding:US-ASCII>, true]]\n[:delete!, nil]\n[:split, [[[97], #<Encoding:US-ASCII>, true], [[98], #<Encoding:US-ASCII>, true], [[99], #<Encoding:US-ASCII>, true]]]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("abc",encoding:"US-ASCII");n=String.new("",encoding:"UTF-8");s.freeze;[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,n))];rescue=>x;p [m,x.class,x.message];end}',
+    '[:count, 0]\n[:delete, [[97, 98, 99], #<Encoding:US-ASCII>, true]]\n[:delete!, FrozenError, "can\'t modify frozen String: \\"abc\\""]\n[:split, [[[97], #<Encoding:US-ASCII>, true], [[98], #<Encoding:US-ASCII>, true], [[99], #<Encoding:US-ASCII>, true]]]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("éa",encoding:"US-ASCII");n=String.new("é",encoding:"ASCII-8BIT");[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,n))];rescue=>x;p [m,x.class,x.message];end}',
+    '[:count, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and BINARY (ASCII-8BIT)"]\n[:delete, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and BINARY (ASCII-8BIT)"]\n[:delete!, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and BINARY (ASCII-8BIT)"]\n[:split, ArgumentError, "invalid byte sequence in US-ASCII"]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("éa",encoding:"US-ASCII");n=String.new("é",encoding:"ASCII-8BIT");s.freeze;[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,n))];rescue=>x;p [m,x.class,x.message];end}',
+    '[:count, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and BINARY (ASCII-8BIT)"]\n[:delete, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and BINARY (ASCII-8BIT)"]\n[:delete!, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and BINARY (ASCII-8BIT)"]\n[:split, ArgumentError, "invalid byte sequence in US-ASCII"]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("éa",encoding:"US-ASCII");n=String.new(255.chr,encoding:"ASCII-8BIT");[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,n))];rescue=>x;p [m,x.class,x.message];end}',
+    '[:count, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and BINARY (ASCII-8BIT)"]\n[:delete, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and BINARY (ASCII-8BIT)"]\n[:delete!, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and BINARY (ASCII-8BIT)"]\n[:split, ArgumentError, "invalid byte sequence in US-ASCII"]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("éa",encoding:"US-ASCII");n=String.new(255.chr,encoding:"ASCII-8BIT");s.freeze;[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,n))];rescue=>x;p [m,x.class,x.message];end}',
+    '[:count, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and BINARY (ASCII-8BIT)"]\n[:delete, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and BINARY (ASCII-8BIT)"]\n[:delete!, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and BINARY (ASCII-8BIT)"]\n[:split, ArgumentError, "invalid byte sequence in US-ASCII"]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("éa",encoding:"US-ASCII");n=String.new("z-a",encoding:"ASCII-8BIT");[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,n))];rescue=>x;p [m,x.class,x.message];end}',
+    '[:count, ArgumentError, "invalid range \\"z-a\\" in string transliteration"]\n[:delete, ArgumentError, "invalid range \\"z-a\\" in string transliteration"]\n[:delete!, ArgumentError, "invalid range \\"z-a\\" in string transliteration"]\n[:split, ArgumentError, "invalid byte sequence in US-ASCII"]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("éa",encoding:"US-ASCII");n=String.new("z-a",encoding:"ASCII-8BIT");s.freeze;[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,n))];rescue=>x;p [m,x.class,x.message];end}',
+    '[:count, ArgumentError, "invalid range \\"z-a\\" in string transliteration"]\n[:delete, ArgumentError, "invalid range \\"z-a\\" in string transliteration"]\n[:delete!, ArgumentError, "invalid range \\"z-a\\" in string transliteration"]\n[:split, ArgumentError, "invalid byte sequence in US-ASCII"]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("éa",encoding:"US-ASCII");n=String.new("",encoding:"ASCII-8BIT");[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,n))];rescue=>x;p [m,x.class,x.message];end}',
+    '[:count, ArgumentError, "invalid byte sequence in US-ASCII"]\n[:delete, ArgumentError, "invalid byte sequence in US-ASCII"]\n[:delete!, ArgumentError, "invalid byte sequence in US-ASCII"]\n[:split, ArgumentError, "invalid byte sequence in US-ASCII"]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("éa",encoding:"US-ASCII");n=String.new("",encoding:"ASCII-8BIT");s.freeze;[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,n))];rescue=>x;p [m,x.class,x.message];end}',
+    '[:count, ArgumentError, "invalid byte sequence in US-ASCII"]\n[:delete, ArgumentError, "invalid byte sequence in US-ASCII"]\n[:delete!, FrozenError, "can\'t modify frozen String: \\"\\\\xC3\\\\xA9a\\""]\n[:split, ArgumentError, "invalid byte sequence in US-ASCII"]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("",encoding:"US-ASCII");n=String.new("é",encoding:"ASCII-8BIT");[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,n))];rescue=>x;p [m,x.class,x.message];end}',
+    '[:count, 0]\n[:delete, [[], #<Encoding:US-ASCII>, true]]\n[:delete!, nil]\n[:split, []]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("",encoding:"US-ASCII");n=String.new("é",encoding:"ASCII-8BIT");s.freeze;[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,n))];rescue=>x;p [m,x.class,x.message];end}',
+    '[:count, 0]\n[:delete, [[], #<Encoding:US-ASCII>, true]]\n[:delete!, nil]\n[:split, []]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("",encoding:"US-ASCII");n=String.new(255.chr,encoding:"ASCII-8BIT");[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,n))];rescue=>x;p [m,x.class,x.message];end}',
+    '[:count, 0]\n[:delete, [[], #<Encoding:US-ASCII>, true]]\n[:delete!, nil]\n[:split, []]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("",encoding:"US-ASCII");n=String.new(255.chr,encoding:"ASCII-8BIT");s.freeze;[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,n))];rescue=>x;p [m,x.class,x.message];end}',
+    '[:count, 0]\n[:delete, [[], #<Encoding:US-ASCII>, true]]\n[:delete!, nil]\n[:split, []]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("",encoding:"US-ASCII");n=String.new("z-a",encoding:"ASCII-8BIT");[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,n))];rescue=>x;p [m,x.class,x.message];end}',
+    '[:count, ArgumentError, "invalid range \\"z-a\\" in string transliteration"]\n[:delete, [[], #<Encoding:US-ASCII>, true]]\n[:delete!, nil]\n[:split, []]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("",encoding:"US-ASCII");n=String.new("z-a",encoding:"ASCII-8BIT");s.freeze;[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,n))];rescue=>x;p [m,x.class,x.message];end}',
+    '[:count, ArgumentError, "invalid range \\"z-a\\" in string transliteration"]\n[:delete, [[], #<Encoding:US-ASCII>, true]]\n[:delete!, nil]\n[:split, []]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("",encoding:"US-ASCII");n=String.new("",encoding:"ASCII-8BIT");[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,n))];rescue=>x;p [m,x.class,x.message];end}',
+    '[:count, 0]\n[:delete, [[], #<Encoding:US-ASCII>, true]]\n[:delete!, nil]\n[:split, []]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("",encoding:"US-ASCII");n=String.new("",encoding:"ASCII-8BIT");s.freeze;[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,n))];rescue=>x;p [m,x.class,x.message];end}',
+    '[:count, 0]\n[:delete, [[], #<Encoding:US-ASCII>, true]]\n[:delete!, nil]\n[:split, []]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("abc",encoding:"US-ASCII");n=String.new("é",encoding:"ASCII-8BIT");[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,n))];rescue=>x;p [m,x.class,x.message];end}',
+    '[:count, 0]\n[:delete, [[97, 98, 99], #<Encoding:US-ASCII>, true]]\n[:delete!, nil]\n[:split, [[[97, 98, 99], #<Encoding:US-ASCII>, true]]]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("abc",encoding:"US-ASCII");n=String.new("é",encoding:"ASCII-8BIT");s.freeze;[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,n))];rescue=>x;p [m,x.class,x.message];end}',
+    '[:count, 0]\n[:delete, [[97, 98, 99], #<Encoding:US-ASCII>, true]]\n[:delete!, FrozenError, "can\'t modify frozen String: \\"abc\\""]\n[:split, [[[97, 98, 99], #<Encoding:US-ASCII>, true]]]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("abc",encoding:"US-ASCII");n=String.new(255.chr,encoding:"ASCII-8BIT");[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,n))];rescue=>x;p [m,x.class,x.message];end}',
+    '[:count, 0]\n[:delete, [[97, 98, 99], #<Encoding:US-ASCII>, true]]\n[:delete!, nil]\n[:split, [[[97, 98, 99], #<Encoding:US-ASCII>, true]]]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("abc",encoding:"US-ASCII");n=String.new(255.chr,encoding:"ASCII-8BIT");s.freeze;[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,n))];rescue=>x;p [m,x.class,x.message];end}',
+    '[:count, 0]\n[:delete, [[97, 98, 99], #<Encoding:US-ASCII>, true]]\n[:delete!, FrozenError, "can\'t modify frozen String: \\"abc\\""]\n[:split, [[[97, 98, 99], #<Encoding:US-ASCII>, true]]]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("abc",encoding:"US-ASCII");n=String.new("z-a",encoding:"ASCII-8BIT");[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,n))];rescue=>x;p [m,x.class,x.message];end}',
+    '[:count, ArgumentError, "invalid range \\"z-a\\" in string transliteration"]\n[:delete, ArgumentError, "invalid range \\"z-a\\" in string transliteration"]\n[:delete!, ArgumentError, "invalid range \\"z-a\\" in string transliteration"]\n[:split, [[[97, 98, 99], #<Encoding:US-ASCII>, true]]]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("abc",encoding:"US-ASCII");n=String.new("z-a",encoding:"ASCII-8BIT");s.freeze;[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,n))];rescue=>x;p [m,x.class,x.message];end}',
+    '[:count, ArgumentError, "invalid range \\"z-a\\" in string transliteration"]\n[:delete, ArgumentError, "invalid range \\"z-a\\" in string transliteration"]\n[:delete!, ArgumentError, "invalid range \\"z-a\\" in string transliteration"]\n[:split, [[[97, 98, 99], #<Encoding:US-ASCII>, true]]]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("abc",encoding:"US-ASCII");n=String.new("",encoding:"ASCII-8BIT");[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,n))];rescue=>x;p [m,x.class,x.message];end}',
+    '[:count, 0]\n[:delete, [[97, 98, 99], #<Encoding:US-ASCII>, true]]\n[:delete!, nil]\n[:split, [[[97], #<Encoding:US-ASCII>, true], [[98], #<Encoding:US-ASCII>, true], [[99], #<Encoding:US-ASCII>, true]]]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("abc",encoding:"US-ASCII");n=String.new("",encoding:"ASCII-8BIT");s.freeze;[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,n))];rescue=>x;p [m,x.class,x.message];end}',
+    '[:count, 0]\n[:delete, [[97, 98, 99], #<Encoding:US-ASCII>, true]]\n[:delete!, FrozenError, "can\'t modify frozen String: \\"abc\\""]\n[:split, [[[97], #<Encoding:US-ASCII>, true], [[98], #<Encoding:US-ASCII>, true], [[99], #<Encoding:US-ASCII>, true]]]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("éa",encoding:"UTF-8");n=String.new("é",encoding:"US-ASCII");[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,n))];rescue=>x;p [m,x.class,x.message];end}',
+    '[:count, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and US-ASCII"]\n[:delete, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and US-ASCII"]\n[:delete!, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and US-ASCII"]\n[:split, ArgumentError, "invalid byte sequence in US-ASCII"]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("éa",encoding:"UTF-8");n=String.new("é",encoding:"US-ASCII");s.freeze;[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,n))];rescue=>x;p [m,x.class,x.message];end}',
+    '[:count, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and US-ASCII"]\n[:delete, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and US-ASCII"]\n[:delete!, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and US-ASCII"]\n[:split, ArgumentError, "invalid byte sequence in US-ASCII"]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("éa",encoding:"UTF-8");n=String.new(255.chr,encoding:"US-ASCII");[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,n))];rescue=>x;p [m,x.class,x.message];end}',
+    '[:count, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and US-ASCII"]\n[:delete, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and US-ASCII"]\n[:delete!, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and US-ASCII"]\n[:split, ArgumentError, "invalid byte sequence in US-ASCII"]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("éa",encoding:"UTF-8");n=String.new(255.chr,encoding:"US-ASCII");s.freeze;[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,n))];rescue=>x;p [m,x.class,x.message];end}',
+    '[:count, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and US-ASCII"]\n[:delete, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and US-ASCII"]\n[:delete!, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and US-ASCII"]\n[:split, ArgumentError, "invalid byte sequence in US-ASCII"]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("éa",encoding:"UTF-8");n=String.new("z-a",encoding:"US-ASCII");[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,n))];rescue=>x;p [m,x.class,x.message];end}',
+    '[:count, ArgumentError, "invalid range \\"z-a\\" in string transliteration"]\n[:delete, ArgumentError, "invalid range \\"z-a\\" in string transliteration"]\n[:delete!, ArgumentError, "invalid range \\"z-a\\" in string transliteration"]\n[:split, [[[195, 169, 97], #<Encoding:UTF-8>, true]]]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("éa",encoding:"UTF-8");n=String.new("z-a",encoding:"US-ASCII");s.freeze;[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,n))];rescue=>x;p [m,x.class,x.message];end}',
+    '[:count, ArgumentError, "invalid range \\"z-a\\" in string transliteration"]\n[:delete, ArgumentError, "invalid range \\"z-a\\" in string transliteration"]\n[:delete!, ArgumentError, "invalid range \\"z-a\\" in string transliteration"]\n[:split, [[[195, 169, 97], #<Encoding:UTF-8>, true]]]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("éa",encoding:"UTF-8");n=String.new("",encoding:"US-ASCII");[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,n))];rescue=>x;p [m,x.class,x.message];end}',
+    '[:count, 0]\n[:delete, [[195, 169, 97], #<Encoding:UTF-8>, true]]\n[:delete!, nil]\n[:split, [[[195, 169], #<Encoding:UTF-8>, true], [[97], #<Encoding:UTF-8>, true]]]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("éa",encoding:"UTF-8");n=String.new("",encoding:"US-ASCII");s.freeze;[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,n))];rescue=>x;p [m,x.class,x.message];end}',
+    '[:count, 0]\n[:delete, [[195, 169, 97], #<Encoding:UTF-8>, true]]\n[:delete!, FrozenError, "can\'t modify frozen String: \\"éa\\""]\n[:split, [[[195, 169], #<Encoding:UTF-8>, true], [[97], #<Encoding:UTF-8>, true]]]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("",encoding:"UTF-8");n=String.new("é",encoding:"US-ASCII");[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,n))];rescue=>x;p [m,x.class,x.message];end}',
+    '[:count, ArgumentError, "invalid byte sequence in US-ASCII"]\n[:delete, [[], #<Encoding:UTF-8>, true]]\n[:delete!, nil]\n[:split, ArgumentError, "invalid byte sequence in US-ASCII"]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("",encoding:"UTF-8");n=String.new("é",encoding:"US-ASCII");s.freeze;[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,n))];rescue=>x;p [m,x.class,x.message];end}',
+    '[:count, ArgumentError, "invalid byte sequence in US-ASCII"]\n[:delete, [[], #<Encoding:UTF-8>, true]]\n[:delete!, nil]\n[:split, ArgumentError, "invalid byte sequence in US-ASCII"]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("",encoding:"UTF-8");n=String.new(255.chr,encoding:"US-ASCII");[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,n))];rescue=>x;p [m,x.class,x.message];end}',
+    '[:count, ArgumentError, "invalid byte sequence in US-ASCII"]\n[:delete, [[], #<Encoding:UTF-8>, true]]\n[:delete!, nil]\n[:split, ArgumentError, "invalid byte sequence in US-ASCII"]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("",encoding:"UTF-8");n=String.new(255.chr,encoding:"US-ASCII");s.freeze;[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,n))];rescue=>x;p [m,x.class,x.message];end}',
+    '[:count, ArgumentError, "invalid byte sequence in US-ASCII"]\n[:delete, [[], #<Encoding:UTF-8>, true]]\n[:delete!, nil]\n[:split, ArgumentError, "invalid byte sequence in US-ASCII"]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("",encoding:"UTF-8");n=String.new("z-a",encoding:"US-ASCII");[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,n))];rescue=>x;p [m,x.class,x.message];end}',
+    '[:count, ArgumentError, "invalid range \\"z-a\\" in string transliteration"]\n[:delete, [[], #<Encoding:UTF-8>, true]]\n[:delete!, nil]\n[:split, []]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("",encoding:"UTF-8");n=String.new("z-a",encoding:"US-ASCII");s.freeze;[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,n))];rescue=>x;p [m,x.class,x.message];end}',
+    '[:count, ArgumentError, "invalid range \\"z-a\\" in string transliteration"]\n[:delete, [[], #<Encoding:UTF-8>, true]]\n[:delete!, nil]\n[:split, []]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("",encoding:"UTF-8");n=String.new("",encoding:"US-ASCII");[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,n))];rescue=>x;p [m,x.class,x.message];end}',
+    '[:count, 0]\n[:delete, [[], #<Encoding:UTF-8>, true]]\n[:delete!, nil]\n[:split, []]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("",encoding:"UTF-8");n=String.new("",encoding:"US-ASCII");s.freeze;[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,n))];rescue=>x;p [m,x.class,x.message];end}',
+    '[:count, 0]\n[:delete, [[], #<Encoding:UTF-8>, true]]\n[:delete!, nil]\n[:split, []]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("abc",encoding:"UTF-8");n=String.new("é",encoding:"US-ASCII");[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,n))];rescue=>x;p [m,x.class,x.message];end}',
+    '[:count, ArgumentError, "invalid byte sequence in US-ASCII"]\n[:delete, ArgumentError, "invalid byte sequence in US-ASCII"]\n[:delete!, ArgumentError, "invalid byte sequence in US-ASCII"]\n[:split, ArgumentError, "invalid byte sequence in US-ASCII"]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("abc",encoding:"UTF-8");n=String.new("é",encoding:"US-ASCII");s.freeze;[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,n))];rescue=>x;p [m,x.class,x.message];end}',
+    '[:count, ArgumentError, "invalid byte sequence in US-ASCII"]\n[:delete, ArgumentError, "invalid byte sequence in US-ASCII"]\n[:delete!, ArgumentError, "invalid byte sequence in US-ASCII"]\n[:split, ArgumentError, "invalid byte sequence in US-ASCII"]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("abc",encoding:"UTF-8");n=String.new(255.chr,encoding:"US-ASCII");[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,n))];rescue=>x;p [m,x.class,x.message];end}',
+    '[:count, ArgumentError, "invalid byte sequence in US-ASCII"]\n[:delete, ArgumentError, "invalid byte sequence in US-ASCII"]\n[:delete!, ArgumentError, "invalid byte sequence in US-ASCII"]\n[:split, ArgumentError, "invalid byte sequence in US-ASCII"]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("abc",encoding:"UTF-8");n=String.new(255.chr,encoding:"US-ASCII");s.freeze;[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,n))];rescue=>x;p [m,x.class,x.message];end}',
+    '[:count, ArgumentError, "invalid byte sequence in US-ASCII"]\n[:delete, ArgumentError, "invalid byte sequence in US-ASCII"]\n[:delete!, ArgumentError, "invalid byte sequence in US-ASCII"]\n[:split, ArgumentError, "invalid byte sequence in US-ASCII"]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("abc",encoding:"UTF-8");n=String.new("z-a",encoding:"US-ASCII");[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,n))];rescue=>x;p [m,x.class,x.message];end}',
+    '[:count, ArgumentError, "invalid range \\"z-a\\" in string transliteration"]\n[:delete, ArgumentError, "invalid range \\"z-a\\" in string transliteration"]\n[:delete!, ArgumentError, "invalid range \\"z-a\\" in string transliteration"]\n[:split, [[[97, 98, 99], #<Encoding:UTF-8>, true]]]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("abc",encoding:"UTF-8");n=String.new("z-a",encoding:"US-ASCII");s.freeze;[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,n))];rescue=>x;p [m,x.class,x.message];end}',
+    '[:count, ArgumentError, "invalid range \\"z-a\\" in string transliteration"]\n[:delete, ArgumentError, "invalid range \\"z-a\\" in string transliteration"]\n[:delete!, ArgumentError, "invalid range \\"z-a\\" in string transliteration"]\n[:split, [[[97, 98, 99], #<Encoding:UTF-8>, true]]]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("abc",encoding:"UTF-8");n=String.new("",encoding:"US-ASCII");[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,n))];rescue=>x;p [m,x.class,x.message];end}',
+    '[:count, 0]\n[:delete, [[97, 98, 99], #<Encoding:UTF-8>, true]]\n[:delete!, nil]\n[:split, [[[97], #<Encoding:UTF-8>, true], [[98], #<Encoding:UTF-8>, true], [[99], #<Encoding:UTF-8>, true]]]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("abc",encoding:"UTF-8");n=String.new("",encoding:"US-ASCII");s.freeze;[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,n))];rescue=>x;p [m,x.class,x.message];end}',
+    '[:count, 0]\n[:delete, [[97, 98, 99], #<Encoding:UTF-8>, true]]\n[:delete!, FrozenError, "can\'t modify frozen String: \\"abc\\""]\n[:split, [[[97], #<Encoding:UTF-8>, true], [[98], #<Encoding:UTF-8>, true], [[99], #<Encoding:UTF-8>, true]]]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("éa",encoding:"UTF-8");n=String.new("é",encoding:"UTF-8");[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,n))];rescue=>x;p [m,x.class,x.message];end}',
+    '[:count, 1]\n[:delete, [[97], #<Encoding:UTF-8>, true]]\n[:delete!, [[97], #<Encoding:UTF-8>, true]]\n[:split, [[[97], #<Encoding:UTF-8>, true]]]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("éa",encoding:"UTF-8");n=String.new("é",encoding:"UTF-8");s.freeze;[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,n))];rescue=>x;p [m,x.class,x.message];end}',
+    '[:count, 1]\n[:delete, [[97], #<Encoding:UTF-8>, true]]\n[:delete!, FrozenError, "can\'t modify frozen String: \\"éa\\""]\n[:split, [[[], #<Encoding:UTF-8>, true], [[97], #<Encoding:UTF-8>, true]]]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("éa",encoding:"UTF-8");n=String.new(255.chr,encoding:"UTF-8");[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,n))];rescue=>x;p [m,x.class,x.message];end}',
+    '[:count, ArgumentError, "invalid byte sequence in UTF-8"]\n[:delete, ArgumentError, "invalid byte sequence in UTF-8"]\n[:delete!, ArgumentError, "invalid byte sequence in UTF-8"]\n[:split, ArgumentError, "invalid byte sequence in UTF-8"]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("éa",encoding:"UTF-8");n=String.new(255.chr,encoding:"UTF-8");s.freeze;[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,n))];rescue=>x;p [m,x.class,x.message];end}',
+    '[:count, ArgumentError, "invalid byte sequence in UTF-8"]\n[:delete, ArgumentError, "invalid byte sequence in UTF-8"]\n[:delete!, ArgumentError, "invalid byte sequence in UTF-8"]\n[:split, ArgumentError, "invalid byte sequence in UTF-8"]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("éa",encoding:"UTF-8");n=String.new("z-a",encoding:"UTF-8");[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,n))];rescue=>x;p [m,x.class,x.message];end}',
+    '[:count, ArgumentError, "invalid range \\"z-a\\" in string transliteration"]\n[:delete, ArgumentError, "invalid range \\"z-a\\" in string transliteration"]\n[:delete!, ArgumentError, "invalid range \\"z-a\\" in string transliteration"]\n[:split, [[[195, 169, 97], #<Encoding:UTF-8>, true]]]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("éa",encoding:"UTF-8");n=String.new("z-a",encoding:"UTF-8");s.freeze;[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,n))];rescue=>x;p [m,x.class,x.message];end}',
+    '[:count, ArgumentError, "invalid range \\"z-a\\" in string transliteration"]\n[:delete, ArgumentError, "invalid range \\"z-a\\" in string transliteration"]\n[:delete!, ArgumentError, "invalid range \\"z-a\\" in string transliteration"]\n[:split, [[[195, 169, 97], #<Encoding:UTF-8>, true]]]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("éa",encoding:"UTF-8");n=String.new("",encoding:"UTF-8");[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,n))];rescue=>x;p [m,x.class,x.message];end}',
+    '[:count, 0]\n[:delete, [[195, 169, 97], #<Encoding:UTF-8>, true]]\n[:delete!, nil]\n[:split, [[[195, 169], #<Encoding:UTF-8>, true], [[97], #<Encoding:UTF-8>, true]]]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("éa",encoding:"UTF-8");n=String.new("",encoding:"UTF-8");s.freeze;[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,n))];rescue=>x;p [m,x.class,x.message];end}',
+    '[:count, 0]\n[:delete, [[195, 169, 97], #<Encoding:UTF-8>, true]]\n[:delete!, FrozenError, "can\'t modify frozen String: \\"éa\\""]\n[:split, [[[195, 169], #<Encoding:UTF-8>, true], [[97], #<Encoding:UTF-8>, true]]]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("",encoding:"UTF-8");n=String.new("é",encoding:"UTF-8");[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,n))];rescue=>x;p [m,x.class,x.message];end}',
+    '[:count, 0]\n[:delete, [[], #<Encoding:UTF-8>, true]]\n[:delete!, nil]\n[:split, []]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("",encoding:"UTF-8");n=String.new("é",encoding:"UTF-8");s.freeze;[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,n))];rescue=>x;p [m,x.class,x.message];end}',
+    '[:count, 0]\n[:delete, [[], #<Encoding:UTF-8>, true]]\n[:delete!, nil]\n[:split, []]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("",encoding:"UTF-8");n=String.new(255.chr,encoding:"UTF-8");[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,n))];rescue=>x;p [m,x.class,x.message];end}',
+    '[:count, ArgumentError, "invalid byte sequence in UTF-8"]\n[:delete, [[], #<Encoding:UTF-8>, true]]\n[:delete!, nil]\n[:split, ArgumentError, "invalid byte sequence in UTF-8"]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("",encoding:"UTF-8");n=String.new(255.chr,encoding:"UTF-8");s.freeze;[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,n))];rescue=>x;p [m,x.class,x.message];end}',
+    '[:count, ArgumentError, "invalid byte sequence in UTF-8"]\n[:delete, [[], #<Encoding:UTF-8>, true]]\n[:delete!, nil]\n[:split, ArgumentError, "invalid byte sequence in UTF-8"]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("",encoding:"UTF-8");n=String.new("z-a",encoding:"UTF-8");[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,n))];rescue=>x;p [m,x.class,x.message];end}',
+    '[:count, ArgumentError, "invalid range \\"z-a\\" in string transliteration"]\n[:delete, [[], #<Encoding:UTF-8>, true]]\n[:delete!, nil]\n[:split, []]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("",encoding:"UTF-8");n=String.new("z-a",encoding:"UTF-8");s.freeze;[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,n))];rescue=>x;p [m,x.class,x.message];end}',
+    '[:count, ArgumentError, "invalid range \\"z-a\\" in string transliteration"]\n[:delete, [[], #<Encoding:UTF-8>, true]]\n[:delete!, nil]\n[:split, []]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("",encoding:"UTF-8");n=String.new("",encoding:"UTF-8");[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,n))];rescue=>x;p [m,x.class,x.message];end}',
+    '[:count, 0]\n[:delete, [[], #<Encoding:UTF-8>, true]]\n[:delete!, nil]\n[:split, []]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("",encoding:"UTF-8");n=String.new("",encoding:"UTF-8");s.freeze;[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,n))];rescue=>x;p [m,x.class,x.message];end}',
+    '[:count, 0]\n[:delete, [[], #<Encoding:UTF-8>, true]]\n[:delete!, nil]\n[:split, []]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("abc",encoding:"UTF-8");n=String.new("é",encoding:"UTF-8");[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,n))];rescue=>x;p [m,x.class,x.message];end}',
+    '[:count, 0]\n[:delete, [[97, 98, 99], #<Encoding:UTF-8>, true]]\n[:delete!, nil]\n[:split, [[[97, 98, 99], #<Encoding:UTF-8>, true]]]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("abc",encoding:"UTF-8");n=String.new("é",encoding:"UTF-8");s.freeze;[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,n))];rescue=>x;p [m,x.class,x.message];end}',
+    '[:count, 0]\n[:delete, [[97, 98, 99], #<Encoding:UTF-8>, true]]\n[:delete!, FrozenError, "can\'t modify frozen String: \\"abc\\""]\n[:split, [[[97, 98, 99], #<Encoding:UTF-8>, true]]]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("abc",encoding:"UTF-8");n=String.new(255.chr,encoding:"UTF-8");[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,n))];rescue=>x;p [m,x.class,x.message];end}',
+    '[:count, ArgumentError, "invalid byte sequence in UTF-8"]\n[:delete, ArgumentError, "invalid byte sequence in UTF-8"]\n[:delete!, ArgumentError, "invalid byte sequence in UTF-8"]\n[:split, ArgumentError, "invalid byte sequence in UTF-8"]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("abc",encoding:"UTF-8");n=String.new(255.chr,encoding:"UTF-8");s.freeze;[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,n))];rescue=>x;p [m,x.class,x.message];end}',
+    '[:count, ArgumentError, "invalid byte sequence in UTF-8"]\n[:delete, ArgumentError, "invalid byte sequence in UTF-8"]\n[:delete!, ArgumentError, "invalid byte sequence in UTF-8"]\n[:split, ArgumentError, "invalid byte sequence in UTF-8"]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("abc",encoding:"UTF-8");n=String.new("z-a",encoding:"UTF-8");[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,n))];rescue=>x;p [m,x.class,x.message];end}',
+    '[:count, ArgumentError, "invalid range \\"z-a\\" in string transliteration"]\n[:delete, ArgumentError, "invalid range \\"z-a\\" in string transliteration"]\n[:delete!, ArgumentError, "invalid range \\"z-a\\" in string transliteration"]\n[:split, [[[97, 98, 99], #<Encoding:UTF-8>, true]]]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("abc",encoding:"UTF-8");n=String.new("z-a",encoding:"UTF-8");s.freeze;[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,n))];rescue=>x;p [m,x.class,x.message];end}',
+    '[:count, ArgumentError, "invalid range \\"z-a\\" in string transliteration"]\n[:delete, ArgumentError, "invalid range \\"z-a\\" in string transliteration"]\n[:delete!, ArgumentError, "invalid range \\"z-a\\" in string transliteration"]\n[:split, [[[97, 98, 99], #<Encoding:UTF-8>, true]]]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("abc",encoding:"UTF-8");n=String.new("",encoding:"UTF-8");[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,n))];rescue=>x;p [m,x.class,x.message];end}',
+    '[:count, 0]\n[:delete, [[97, 98, 99], #<Encoding:UTF-8>, true]]\n[:delete!, nil]\n[:split, [[[97], #<Encoding:UTF-8>, true], [[98], #<Encoding:UTF-8>, true], [[99], #<Encoding:UTF-8>, true]]]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("abc",encoding:"UTF-8");n=String.new("",encoding:"UTF-8");s.freeze;[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,n))];rescue=>x;p [m,x.class,x.message];end}',
+    '[:count, 0]\n[:delete, [[97, 98, 99], #<Encoding:UTF-8>, true]]\n[:delete!, FrozenError, "can\'t modify frozen String: \\"abc\\""]\n[:split, [[[97], #<Encoding:UTF-8>, true], [[98], #<Encoding:UTF-8>, true], [[99], #<Encoding:UTF-8>, true]]]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("éa",encoding:"UTF-8");n=String.new("é",encoding:"ASCII-8BIT");[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,n))];rescue=>x;p [m,x.class,x.message];end}',
+    '[:count, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and BINARY (ASCII-8BIT)"]\n[:delete, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and BINARY (ASCII-8BIT)"]\n[:delete!, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and BINARY (ASCII-8BIT)"]\n[:split, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and BINARY (ASCII-8BIT)"]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("éa",encoding:"UTF-8");n=String.new("é",encoding:"ASCII-8BIT");s.freeze;[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,n))];rescue=>x;p [m,x.class,x.message];end}',
+    '[:count, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and BINARY (ASCII-8BIT)"]\n[:delete, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and BINARY (ASCII-8BIT)"]\n[:delete!, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and BINARY (ASCII-8BIT)"]\n[:split, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and BINARY (ASCII-8BIT)"]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("éa",encoding:"UTF-8");n=String.new(255.chr,encoding:"ASCII-8BIT");[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,n))];rescue=>x;p [m,x.class,x.message];end}',
+    '[:count, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and BINARY (ASCII-8BIT)"]\n[:delete, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and BINARY (ASCII-8BIT)"]\n[:delete!, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and BINARY (ASCII-8BIT)"]\n[:split, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and BINARY (ASCII-8BIT)"]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("éa",encoding:"UTF-8");n=String.new(255.chr,encoding:"ASCII-8BIT");s.freeze;[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,n))];rescue=>x;p [m,x.class,x.message];end}',
+    '[:count, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and BINARY (ASCII-8BIT)"]\n[:delete, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and BINARY (ASCII-8BIT)"]\n[:delete!, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and BINARY (ASCII-8BIT)"]\n[:split, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and BINARY (ASCII-8BIT)"]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("éa",encoding:"UTF-8");n=String.new("z-a",encoding:"ASCII-8BIT");[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,n))];rescue=>x;p [m,x.class,x.message];end}',
+    '[:count, ArgumentError, "invalid range \\"z-a\\" in string transliteration"]\n[:delete, ArgumentError, "invalid range \\"z-a\\" in string transliteration"]\n[:delete!, ArgumentError, "invalid range \\"z-a\\" in string transliteration"]\n[:split, [[[195, 169, 97], #<Encoding:UTF-8>, true]]]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("éa",encoding:"UTF-8");n=String.new("z-a",encoding:"ASCII-8BIT");s.freeze;[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,n))];rescue=>x;p [m,x.class,x.message];end}',
+    '[:count, ArgumentError, "invalid range \\"z-a\\" in string transliteration"]\n[:delete, ArgumentError, "invalid range \\"z-a\\" in string transliteration"]\n[:delete!, ArgumentError, "invalid range \\"z-a\\" in string transliteration"]\n[:split, [[[195, 169, 97], #<Encoding:UTF-8>, true]]]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("éa",encoding:"UTF-8");n=String.new("",encoding:"ASCII-8BIT");[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,n))];rescue=>x;p [m,x.class,x.message];end}',
+    '[:count, 0]\n[:delete, [[195, 169, 97], #<Encoding:UTF-8>, true]]\n[:delete!, nil]\n[:split, [[[195, 169], #<Encoding:UTF-8>, true], [[97], #<Encoding:UTF-8>, true]]]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("éa",encoding:"UTF-8");n=String.new("",encoding:"ASCII-8BIT");s.freeze;[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,n))];rescue=>x;p [m,x.class,x.message];end}',
+    '[:count, 0]\n[:delete, [[195, 169, 97], #<Encoding:UTF-8>, true]]\n[:delete!, FrozenError, "can\'t modify frozen String: \\"éa\\""]\n[:split, [[[195, 169], #<Encoding:UTF-8>, true], [[97], #<Encoding:UTF-8>, true]]]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("",encoding:"UTF-8");n=String.new("é",encoding:"ASCII-8BIT");[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,n))];rescue=>x;p [m,x.class,x.message];end}',
+    '[:count, 0]\n[:delete, [[], #<Encoding:UTF-8>, true]]\n[:delete!, nil]\n[:split, []]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("",encoding:"UTF-8");n=String.new("é",encoding:"ASCII-8BIT");s.freeze;[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,n))];rescue=>x;p [m,x.class,x.message];end}',
+    '[:count, 0]\n[:delete, [[], #<Encoding:UTF-8>, true]]\n[:delete!, nil]\n[:split, []]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("",encoding:"UTF-8");n=String.new(255.chr,encoding:"ASCII-8BIT");[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,n))];rescue=>x;p [m,x.class,x.message];end}',
+    '[:count, 0]\n[:delete, [[], #<Encoding:UTF-8>, true]]\n[:delete!, nil]\n[:split, []]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("",encoding:"UTF-8");n=String.new(255.chr,encoding:"ASCII-8BIT");s.freeze;[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,n))];rescue=>x;p [m,x.class,x.message];end}',
+    '[:count, 0]\n[:delete, [[], #<Encoding:UTF-8>, true]]\n[:delete!, nil]\n[:split, []]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("",encoding:"UTF-8");n=String.new("z-a",encoding:"ASCII-8BIT");[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,n))];rescue=>x;p [m,x.class,x.message];end}',
+    '[:count, ArgumentError, "invalid range \\"z-a\\" in string transliteration"]\n[:delete, [[], #<Encoding:UTF-8>, true]]\n[:delete!, nil]\n[:split, []]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("",encoding:"UTF-8");n=String.new("z-a",encoding:"ASCII-8BIT");s.freeze;[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,n))];rescue=>x;p [m,x.class,x.message];end}',
+    '[:count, ArgumentError, "invalid range \\"z-a\\" in string transliteration"]\n[:delete, [[], #<Encoding:UTF-8>, true]]\n[:delete!, nil]\n[:split, []]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("",encoding:"UTF-8");n=String.new("",encoding:"ASCII-8BIT");[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,n))];rescue=>x;p [m,x.class,x.message];end}',
+    '[:count, 0]\n[:delete, [[], #<Encoding:UTF-8>, true]]\n[:delete!, nil]\n[:split, []]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("",encoding:"UTF-8");n=String.new("",encoding:"ASCII-8BIT");s.freeze;[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,n))];rescue=>x;p [m,x.class,x.message];end}',
+    '[:count, 0]\n[:delete, [[], #<Encoding:UTF-8>, true]]\n[:delete!, nil]\n[:split, []]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("abc",encoding:"UTF-8");n=String.new("é",encoding:"ASCII-8BIT");[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,n))];rescue=>x;p [m,x.class,x.message];end}',
+    '[:count, 0]\n[:delete, [[97, 98, 99], #<Encoding:UTF-8>, true]]\n[:delete!, nil]\n[:split, [[[97, 98, 99], #<Encoding:UTF-8>, true]]]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("abc",encoding:"UTF-8");n=String.new("é",encoding:"ASCII-8BIT");s.freeze;[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,n))];rescue=>x;p [m,x.class,x.message];end}',
+    '[:count, 0]\n[:delete, [[97, 98, 99], #<Encoding:UTF-8>, true]]\n[:delete!, FrozenError, "can\'t modify frozen String: \\"abc\\""]\n[:split, [[[97, 98, 99], #<Encoding:UTF-8>, true]]]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("abc",encoding:"UTF-8");n=String.new(255.chr,encoding:"ASCII-8BIT");[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,n))];rescue=>x;p [m,x.class,x.message];end}',
+    '[:count, 0]\n[:delete, [[97, 98, 99], #<Encoding:UTF-8>, true]]\n[:delete!, nil]\n[:split, [[[97, 98, 99], #<Encoding:UTF-8>, true]]]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("abc",encoding:"UTF-8");n=String.new(255.chr,encoding:"ASCII-8BIT");s.freeze;[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,n))];rescue=>x;p [m,x.class,x.message];end}',
+    '[:count, 0]\n[:delete, [[97, 98, 99], #<Encoding:UTF-8>, true]]\n[:delete!, FrozenError, "can\'t modify frozen String: \\"abc\\""]\n[:split, [[[97, 98, 99], #<Encoding:UTF-8>, true]]]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("abc",encoding:"UTF-8");n=String.new("z-a",encoding:"ASCII-8BIT");[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,n))];rescue=>x;p [m,x.class,x.message];end}',
+    '[:count, ArgumentError, "invalid range \\"z-a\\" in string transliteration"]\n[:delete, ArgumentError, "invalid range \\"z-a\\" in string transliteration"]\n[:delete!, ArgumentError, "invalid range \\"z-a\\" in string transliteration"]\n[:split, [[[97, 98, 99], #<Encoding:UTF-8>, true]]]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("abc",encoding:"UTF-8");n=String.new("z-a",encoding:"ASCII-8BIT");s.freeze;[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,n))];rescue=>x;p [m,x.class,x.message];end}',
+    '[:count, ArgumentError, "invalid range \\"z-a\\" in string transliteration"]\n[:delete, ArgumentError, "invalid range \\"z-a\\" in string transliteration"]\n[:delete!, ArgumentError, "invalid range \\"z-a\\" in string transliteration"]\n[:split, [[[97, 98, 99], #<Encoding:UTF-8>, true]]]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("abc",encoding:"UTF-8");n=String.new("",encoding:"ASCII-8BIT");[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,n))];rescue=>x;p [m,x.class,x.message];end}',
+    '[:count, 0]\n[:delete, [[97, 98, 99], #<Encoding:UTF-8>, true]]\n[:delete!, nil]\n[:split, [[[97], #<Encoding:UTF-8>, true], [[98], #<Encoding:UTF-8>, true], [[99], #<Encoding:UTF-8>, true]]]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("abc",encoding:"UTF-8");n=String.new("",encoding:"ASCII-8BIT");s.freeze;[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,n))];rescue=>x;p [m,x.class,x.message];end}',
+    '[:count, 0]\n[:delete, [[97, 98, 99], #<Encoding:UTF-8>, true]]\n[:delete!, FrozenError, "can\'t modify frozen String: \\"abc\\""]\n[:split, [[[97], #<Encoding:UTF-8>, true], [[98], #<Encoding:UTF-8>, true], [[99], #<Encoding:UTF-8>, true]]]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("éa",encoding:"ASCII-8BIT");n=String.new("é",encoding:"US-ASCII");[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,n))];rescue=>x;p [m,x.class,x.message];end}',
+    '[:count, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and US-ASCII"]\n[:delete, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and US-ASCII"]\n[:delete!, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and US-ASCII"]\n[:split, ArgumentError, "invalid byte sequence in US-ASCII"]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("éa",encoding:"ASCII-8BIT");n=String.new("é",encoding:"US-ASCII");s.freeze;[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,n))];rescue=>x;p [m,x.class,x.message];end}',
+    '[:count, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and US-ASCII"]\n[:delete, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and US-ASCII"]\n[:delete!, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and US-ASCII"]\n[:split, ArgumentError, "invalid byte sequence in US-ASCII"]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("éa",encoding:"ASCII-8BIT");n=String.new(255.chr,encoding:"US-ASCII");[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,n))];rescue=>x;p [m,x.class,x.message];end}',
+    '[:count, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and US-ASCII"]\n[:delete, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and US-ASCII"]\n[:delete!, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and US-ASCII"]\n[:split, ArgumentError, "invalid byte sequence in US-ASCII"]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("éa",encoding:"ASCII-8BIT");n=String.new(255.chr,encoding:"US-ASCII");s.freeze;[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,n))];rescue=>x;p [m,x.class,x.message];end}',
+    '[:count, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and US-ASCII"]\n[:delete, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and US-ASCII"]\n[:delete!, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and US-ASCII"]\n[:split, ArgumentError, "invalid byte sequence in US-ASCII"]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("éa",encoding:"ASCII-8BIT");n=String.new("z-a",encoding:"US-ASCII");[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,n))];rescue=>x;p [m,x.class,x.message];end}',
+    '[:count, ArgumentError, "invalid range \\"z-a\\" in string transliteration"]\n[:delete, ArgumentError, "invalid range \\"z-a\\" in string transliteration"]\n[:delete!, ArgumentError, "invalid range \\"z-a\\" in string transliteration"]\n[:split, [[[195, 169, 97], #<Encoding:BINARY (ASCII-8BIT)>, true]]]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("éa",encoding:"ASCII-8BIT");n=String.new("z-a",encoding:"US-ASCII");s.freeze;[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,n))];rescue=>x;p [m,x.class,x.message];end}',
+    '[:count, ArgumentError, "invalid range \\"z-a\\" in string transliteration"]\n[:delete, ArgumentError, "invalid range \\"z-a\\" in string transliteration"]\n[:delete!, ArgumentError, "invalid range \\"z-a\\" in string transliteration"]\n[:split, [[[195, 169, 97], #<Encoding:BINARY (ASCII-8BIT)>, true]]]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("éa",encoding:"ASCII-8BIT");n=String.new("",encoding:"US-ASCII");[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,n))];rescue=>x;p [m,x.class,x.message];end}',
+    '[:count, 0]\n[:delete, [[195, 169, 97], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:delete!, nil]\n[:split, [[[195], #<Encoding:BINARY (ASCII-8BIT)>, true], [[169], #<Encoding:BINARY (ASCII-8BIT)>, true], [[97], #<Encoding:BINARY (ASCII-8BIT)>, true]]]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("éa",encoding:"ASCII-8BIT");n=String.new("",encoding:"US-ASCII");s.freeze;[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,n))];rescue=>x;p [m,x.class,x.message];end}',
+    '[:count, 0]\n[:delete, [[195, 169, 97], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:delete!, FrozenError, "can\'t modify frozen String: \\"\\\\xC3\\\\xA9a\\""]\n[:split, [[[195], #<Encoding:BINARY (ASCII-8BIT)>, true], [[169], #<Encoding:BINARY (ASCII-8BIT)>, true], [[97], #<Encoding:BINARY (ASCII-8BIT)>, true]]]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("",encoding:"ASCII-8BIT");n=String.new("é",encoding:"US-ASCII");[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,n))];rescue=>x;p [m,x.class,x.message];end}',
+    '[:count, ArgumentError, "invalid byte sequence in US-ASCII"]\n[:delete, [[], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:delete!, nil]\n[:split, ArgumentError, "invalid byte sequence in US-ASCII"]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("",encoding:"ASCII-8BIT");n=String.new("é",encoding:"US-ASCII");s.freeze;[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,n))];rescue=>x;p [m,x.class,x.message];end}',
+    '[:count, ArgumentError, "invalid byte sequence in US-ASCII"]\n[:delete, [[], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:delete!, nil]\n[:split, ArgumentError, "invalid byte sequence in US-ASCII"]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("",encoding:"ASCII-8BIT");n=String.new(255.chr,encoding:"US-ASCII");[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,n))];rescue=>x;p [m,x.class,x.message];end}',
+    '[:count, ArgumentError, "invalid byte sequence in US-ASCII"]\n[:delete, [[], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:delete!, nil]\n[:split, ArgumentError, "invalid byte sequence in US-ASCII"]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("",encoding:"ASCII-8BIT");n=String.new(255.chr,encoding:"US-ASCII");s.freeze;[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,n))];rescue=>x;p [m,x.class,x.message];end}',
+    '[:count, ArgumentError, "invalid byte sequence in US-ASCII"]\n[:delete, [[], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:delete!, nil]\n[:split, ArgumentError, "invalid byte sequence in US-ASCII"]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("",encoding:"ASCII-8BIT");n=String.new("z-a",encoding:"US-ASCII");[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,n))];rescue=>x;p [m,x.class,x.message];end}',
+    '[:count, ArgumentError, "invalid range \\"z-a\\" in string transliteration"]\n[:delete, [[], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:delete!, nil]\n[:split, []]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("",encoding:"ASCII-8BIT");n=String.new("z-a",encoding:"US-ASCII");s.freeze;[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,n))];rescue=>x;p [m,x.class,x.message];end}',
+    '[:count, ArgumentError, "invalid range \\"z-a\\" in string transliteration"]\n[:delete, [[], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:delete!, nil]\n[:split, []]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("",encoding:"ASCII-8BIT");n=String.new("",encoding:"US-ASCII");[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,n))];rescue=>x;p [m,x.class,x.message];end}',
+    '[:count, 0]\n[:delete, [[], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:delete!, nil]\n[:split, []]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("",encoding:"ASCII-8BIT");n=String.new("",encoding:"US-ASCII");s.freeze;[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,n))];rescue=>x;p [m,x.class,x.message];end}',
+    '[:count, 0]\n[:delete, [[], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:delete!, nil]\n[:split, []]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("abc",encoding:"ASCII-8BIT");n=String.new("é",encoding:"US-ASCII");[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,n))];rescue=>x;p [m,x.class,x.message];end}',
+    '[:count, ArgumentError, "invalid byte sequence in US-ASCII"]\n[:delete, ArgumentError, "invalid byte sequence in US-ASCII"]\n[:delete!, ArgumentError, "invalid byte sequence in US-ASCII"]\n[:split, ArgumentError, "invalid byte sequence in US-ASCII"]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("abc",encoding:"ASCII-8BIT");n=String.new("é",encoding:"US-ASCII");s.freeze;[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,n))];rescue=>x;p [m,x.class,x.message];end}',
+    '[:count, ArgumentError, "invalid byte sequence in US-ASCII"]\n[:delete, ArgumentError, "invalid byte sequence in US-ASCII"]\n[:delete!, ArgumentError, "invalid byte sequence in US-ASCII"]\n[:split, ArgumentError, "invalid byte sequence in US-ASCII"]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("abc",encoding:"ASCII-8BIT");n=String.new(255.chr,encoding:"US-ASCII");[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,n))];rescue=>x;p [m,x.class,x.message];end}',
+    '[:count, ArgumentError, "invalid byte sequence in US-ASCII"]\n[:delete, ArgumentError, "invalid byte sequence in US-ASCII"]\n[:delete!, ArgumentError, "invalid byte sequence in US-ASCII"]\n[:split, ArgumentError, "invalid byte sequence in US-ASCII"]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("abc",encoding:"ASCII-8BIT");n=String.new(255.chr,encoding:"US-ASCII");s.freeze;[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,n))];rescue=>x;p [m,x.class,x.message];end}',
+    '[:count, ArgumentError, "invalid byte sequence in US-ASCII"]\n[:delete, ArgumentError, "invalid byte sequence in US-ASCII"]\n[:delete!, ArgumentError, "invalid byte sequence in US-ASCII"]\n[:split, ArgumentError, "invalid byte sequence in US-ASCII"]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("abc",encoding:"ASCII-8BIT");n=String.new("z-a",encoding:"US-ASCII");[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,n))];rescue=>x;p [m,x.class,x.message];end}',
+    '[:count, ArgumentError, "invalid range \\"z-a\\" in string transliteration"]\n[:delete, ArgumentError, "invalid range \\"z-a\\" in string transliteration"]\n[:delete!, ArgumentError, "invalid range \\"z-a\\" in string transliteration"]\n[:split, [[[97, 98, 99], #<Encoding:BINARY (ASCII-8BIT)>, true]]]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("abc",encoding:"ASCII-8BIT");n=String.new("z-a",encoding:"US-ASCII");s.freeze;[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,n))];rescue=>x;p [m,x.class,x.message];end}',
+    '[:count, ArgumentError, "invalid range \\"z-a\\" in string transliteration"]\n[:delete, ArgumentError, "invalid range \\"z-a\\" in string transliteration"]\n[:delete!, ArgumentError, "invalid range \\"z-a\\" in string transliteration"]\n[:split, [[[97, 98, 99], #<Encoding:BINARY (ASCII-8BIT)>, true]]]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("abc",encoding:"ASCII-8BIT");n=String.new("",encoding:"US-ASCII");[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,n))];rescue=>x;p [m,x.class,x.message];end}',
+    '[:count, 0]\n[:delete, [[97, 98, 99], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:delete!, nil]\n[:split, [[[97], #<Encoding:BINARY (ASCII-8BIT)>, true], [[98], #<Encoding:BINARY (ASCII-8BIT)>, true], [[99], #<Encoding:BINARY (ASCII-8BIT)>, true]]]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("abc",encoding:"ASCII-8BIT");n=String.new("",encoding:"US-ASCII");s.freeze;[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,n))];rescue=>x;p [m,x.class,x.message];end}',
+    '[:count, 0]\n[:delete, [[97, 98, 99], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:delete!, FrozenError, "can\'t modify frozen String: \\"abc\\""]\n[:split, [[[97], #<Encoding:BINARY (ASCII-8BIT)>, true], [[98], #<Encoding:BINARY (ASCII-8BIT)>, true], [[99], #<Encoding:BINARY (ASCII-8BIT)>, true]]]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("éa",encoding:"ASCII-8BIT");n=String.new("é",encoding:"UTF-8");[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,n))];rescue=>x;p [m,x.class,x.message];end}',
+    '[:count, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and UTF-8"]\n[:delete, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and UTF-8"]\n[:delete!, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and UTF-8"]\n[:split, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and UTF-8"]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("éa",encoding:"ASCII-8BIT");n=String.new("é",encoding:"UTF-8");s.freeze;[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,n))];rescue=>x;p [m,x.class,x.message];end}',
+    '[:count, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and UTF-8"]\n[:delete, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and UTF-8"]\n[:delete!, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and UTF-8"]\n[:split, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and UTF-8"]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("éa",encoding:"ASCII-8BIT");n=String.new(255.chr,encoding:"UTF-8");[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,n))];rescue=>x;p [m,x.class,x.message];end}',
+    '[:count, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and UTF-8"]\n[:delete, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and UTF-8"]\n[:delete!, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and UTF-8"]\n[:split, ArgumentError, "invalid byte sequence in UTF-8"]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("éa",encoding:"ASCII-8BIT");n=String.new(255.chr,encoding:"UTF-8");s.freeze;[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,n))];rescue=>x;p [m,x.class,x.message];end}',
+    '[:count, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and UTF-8"]\n[:delete, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and UTF-8"]\n[:delete!, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and UTF-8"]\n[:split, ArgumentError, "invalid byte sequence in UTF-8"]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("éa",encoding:"ASCII-8BIT");n=String.new("z-a",encoding:"UTF-8");[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,n))];rescue=>x;p [m,x.class,x.message];end}',
+    '[:count, ArgumentError, "invalid range \\"z-a\\" in string transliteration"]\n[:delete, ArgumentError, "invalid range \\"z-a\\" in string transliteration"]\n[:delete!, ArgumentError, "invalid range \\"z-a\\" in string transliteration"]\n[:split, [[[195, 169, 97], #<Encoding:BINARY (ASCII-8BIT)>, true]]]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("éa",encoding:"ASCII-8BIT");n=String.new("z-a",encoding:"UTF-8");s.freeze;[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,n))];rescue=>x;p [m,x.class,x.message];end}',
+    '[:count, ArgumentError, "invalid range \\"z-a\\" in string transliteration"]\n[:delete, ArgumentError, "invalid range \\"z-a\\" in string transliteration"]\n[:delete!, ArgumentError, "invalid range \\"z-a\\" in string transliteration"]\n[:split, [[[195, 169, 97], #<Encoding:BINARY (ASCII-8BIT)>, true]]]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("éa",encoding:"ASCII-8BIT");n=String.new("",encoding:"UTF-8");[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,n))];rescue=>x;p [m,x.class,x.message];end}',
+    '[:count, 0]\n[:delete, [[195, 169, 97], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:delete!, nil]\n[:split, [[[195], #<Encoding:BINARY (ASCII-8BIT)>, true], [[169], #<Encoding:BINARY (ASCII-8BIT)>, true], [[97], #<Encoding:BINARY (ASCII-8BIT)>, true]]]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("éa",encoding:"ASCII-8BIT");n=String.new("",encoding:"UTF-8");s.freeze;[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,n))];rescue=>x;p [m,x.class,x.message];end}',
+    '[:count, 0]\n[:delete, [[195, 169, 97], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:delete!, FrozenError, "can\'t modify frozen String: \\"\\\\xC3\\\\xA9a\\""]\n[:split, [[[195], #<Encoding:BINARY (ASCII-8BIT)>, true], [[169], #<Encoding:BINARY (ASCII-8BIT)>, true], [[97], #<Encoding:BINARY (ASCII-8BIT)>, true]]]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("",encoding:"ASCII-8BIT");n=String.new("é",encoding:"UTF-8");[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,n))];rescue=>x;p [m,x.class,x.message];end}',
+    '[:count, 0]\n[:delete, [[], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:delete!, nil]\n[:split, []]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("",encoding:"ASCII-8BIT");n=String.new("é",encoding:"UTF-8");s.freeze;[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,n))];rescue=>x;p [m,x.class,x.message];end}',
+    '[:count, 0]\n[:delete, [[], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:delete!, nil]\n[:split, []]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("",encoding:"ASCII-8BIT");n=String.new(255.chr,encoding:"UTF-8");[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,n))];rescue=>x;p [m,x.class,x.message];end}',
+    '[:count, ArgumentError, "invalid byte sequence in UTF-8"]\n[:delete, [[], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:delete!, nil]\n[:split, ArgumentError, "invalid byte sequence in UTF-8"]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("",encoding:"ASCII-8BIT");n=String.new(255.chr,encoding:"UTF-8");s.freeze;[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,n))];rescue=>x;p [m,x.class,x.message];end}',
+    '[:count, ArgumentError, "invalid byte sequence in UTF-8"]\n[:delete, [[], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:delete!, nil]\n[:split, ArgumentError, "invalid byte sequence in UTF-8"]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("",encoding:"ASCII-8BIT");n=String.new("z-a",encoding:"UTF-8");[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,n))];rescue=>x;p [m,x.class,x.message];end}',
+    '[:count, ArgumentError, "invalid range \\"z-a\\" in string transliteration"]\n[:delete, [[], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:delete!, nil]\n[:split, []]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("",encoding:"ASCII-8BIT");n=String.new("z-a",encoding:"UTF-8");s.freeze;[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,n))];rescue=>x;p [m,x.class,x.message];end}',
+    '[:count, ArgumentError, "invalid range \\"z-a\\" in string transliteration"]\n[:delete, [[], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:delete!, nil]\n[:split, []]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("",encoding:"ASCII-8BIT");n=String.new("",encoding:"UTF-8");[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,n))];rescue=>x;p [m,x.class,x.message];end}',
+    '[:count, 0]\n[:delete, [[], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:delete!, nil]\n[:split, []]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("",encoding:"ASCII-8BIT");n=String.new("",encoding:"UTF-8");s.freeze;[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,n))];rescue=>x;p [m,x.class,x.message];end}',
+    '[:count, 0]\n[:delete, [[], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:delete!, nil]\n[:split, []]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("abc",encoding:"ASCII-8BIT");n=String.new("é",encoding:"UTF-8");[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,n))];rescue=>x;p [m,x.class,x.message];end}',
+    '[:count, 0]\n[:delete, [[97, 98, 99], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:delete!, nil]\n[:split, [[[97, 98, 99], #<Encoding:BINARY (ASCII-8BIT)>, true]]]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("abc",encoding:"ASCII-8BIT");n=String.new("é",encoding:"UTF-8");s.freeze;[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,n))];rescue=>x;p [m,x.class,x.message];end}',
+    '[:count, 0]\n[:delete, [[97, 98, 99], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:delete!, FrozenError, "can\'t modify frozen String: \\"abc\\""]\n[:split, [[[97, 98, 99], #<Encoding:BINARY (ASCII-8BIT)>, true]]]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("abc",encoding:"ASCII-8BIT");n=String.new(255.chr,encoding:"UTF-8");[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,n))];rescue=>x;p [m,x.class,x.message];end}',
+    '[:count, ArgumentError, "invalid byte sequence in UTF-8"]\n[:delete, ArgumentError, "invalid byte sequence in UTF-8"]\n[:delete!, ArgumentError, "invalid byte sequence in UTF-8"]\n[:split, ArgumentError, "invalid byte sequence in UTF-8"]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("abc",encoding:"ASCII-8BIT");n=String.new(255.chr,encoding:"UTF-8");s.freeze;[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,n))];rescue=>x;p [m,x.class,x.message];end}',
+    '[:count, ArgumentError, "invalid byte sequence in UTF-8"]\n[:delete, ArgumentError, "invalid byte sequence in UTF-8"]\n[:delete!, ArgumentError, "invalid byte sequence in UTF-8"]\n[:split, ArgumentError, "invalid byte sequence in UTF-8"]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("abc",encoding:"ASCII-8BIT");n=String.new("z-a",encoding:"UTF-8");[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,n))];rescue=>x;p [m,x.class,x.message];end}',
+    '[:count, ArgumentError, "invalid range \\"z-a\\" in string transliteration"]\n[:delete, ArgumentError, "invalid range \\"z-a\\" in string transliteration"]\n[:delete!, ArgumentError, "invalid range \\"z-a\\" in string transliteration"]\n[:split, [[[97, 98, 99], #<Encoding:BINARY (ASCII-8BIT)>, true]]]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("abc",encoding:"ASCII-8BIT");n=String.new("z-a",encoding:"UTF-8");s.freeze;[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,n))];rescue=>x;p [m,x.class,x.message];end}',
+    '[:count, ArgumentError, "invalid range \\"z-a\\" in string transliteration"]\n[:delete, ArgumentError, "invalid range \\"z-a\\" in string transliteration"]\n[:delete!, ArgumentError, "invalid range \\"z-a\\" in string transliteration"]\n[:split, [[[97, 98, 99], #<Encoding:BINARY (ASCII-8BIT)>, true]]]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("abc",encoding:"ASCII-8BIT");n=String.new("",encoding:"UTF-8");[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,n))];rescue=>x;p [m,x.class,x.message];end}',
+    '[:count, 0]\n[:delete, [[97, 98, 99], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:delete!, nil]\n[:split, [[[97], #<Encoding:BINARY (ASCII-8BIT)>, true], [[98], #<Encoding:BINARY (ASCII-8BIT)>, true], [[99], #<Encoding:BINARY (ASCII-8BIT)>, true]]]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("abc",encoding:"ASCII-8BIT");n=String.new("",encoding:"UTF-8");s.freeze;[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,n))];rescue=>x;p [m,x.class,x.message];end}',
+    '[:count, 0]\n[:delete, [[97, 98, 99], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:delete!, FrozenError, "can\'t modify frozen String: \\"abc\\""]\n[:split, [[[97], #<Encoding:BINARY (ASCII-8BIT)>, true], [[98], #<Encoding:BINARY (ASCII-8BIT)>, true], [[99], #<Encoding:BINARY (ASCII-8BIT)>, true]]]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("éa",encoding:"ASCII-8BIT");n=String.new("é",encoding:"ASCII-8BIT");[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,n))];rescue=>x;p [m,x.class,x.message];end}',
+    '[:count, 2]\n[:delete, [[97], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:delete!, [[97], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:split, [[[97], #<Encoding:BINARY (ASCII-8BIT)>, true]]]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("éa",encoding:"ASCII-8BIT");n=String.new("é",encoding:"ASCII-8BIT");s.freeze;[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,n))];rescue=>x;p [m,x.class,x.message];end}',
+    '[:count, 2]\n[:delete, [[97], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:delete!, FrozenError, "can\'t modify frozen String: \\"\\\\xC3\\\\xA9a\\""]\n[:split, [[[], #<Encoding:BINARY (ASCII-8BIT)>, true], [[97], #<Encoding:BINARY (ASCII-8BIT)>, true]]]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("éa",encoding:"ASCII-8BIT");n=String.new(255.chr,encoding:"ASCII-8BIT");[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,n))];rescue=>x;p [m,x.class,x.message];end}',
+    '[:count, 0]\n[:delete, [[195, 169, 97], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:delete!, nil]\n[:split, [[[195, 169, 97], #<Encoding:BINARY (ASCII-8BIT)>, true]]]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("éa",encoding:"ASCII-8BIT");n=String.new(255.chr,encoding:"ASCII-8BIT");s.freeze;[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,n))];rescue=>x;p [m,x.class,x.message];end}',
+    '[:count, 0]\n[:delete, [[195, 169, 97], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:delete!, FrozenError, "can\'t modify frozen String: \\"\\\\xC3\\\\xA9a\\""]\n[:split, [[[195, 169, 97], #<Encoding:BINARY (ASCII-8BIT)>, true]]]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("éa",encoding:"ASCII-8BIT");n=String.new("z-a",encoding:"ASCII-8BIT");[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,n))];rescue=>x;p [m,x.class,x.message];end}',
+    '[:count, ArgumentError, "invalid range \\"z-a\\" in string transliteration"]\n[:delete, ArgumentError, "invalid range \\"z-a\\" in string transliteration"]\n[:delete!, ArgumentError, "invalid range \\"z-a\\" in string transliteration"]\n[:split, [[[195, 169, 97], #<Encoding:BINARY (ASCII-8BIT)>, true]]]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("éa",encoding:"ASCII-8BIT");n=String.new("z-a",encoding:"ASCII-8BIT");s.freeze;[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,n))];rescue=>x;p [m,x.class,x.message];end}',
+    '[:count, ArgumentError, "invalid range \\"z-a\\" in string transliteration"]\n[:delete, ArgumentError, "invalid range \\"z-a\\" in string transliteration"]\n[:delete!, ArgumentError, "invalid range \\"z-a\\" in string transliteration"]\n[:split, [[[195, 169, 97], #<Encoding:BINARY (ASCII-8BIT)>, true]]]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("éa",encoding:"ASCII-8BIT");n=String.new("",encoding:"ASCII-8BIT");[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,n))];rescue=>x;p [m,x.class,x.message];end}',
+    '[:count, 0]\n[:delete, [[195, 169, 97], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:delete!, nil]\n[:split, [[[195], #<Encoding:BINARY (ASCII-8BIT)>, true], [[169], #<Encoding:BINARY (ASCII-8BIT)>, true], [[97], #<Encoding:BINARY (ASCII-8BIT)>, true]]]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("éa",encoding:"ASCII-8BIT");n=String.new("",encoding:"ASCII-8BIT");s.freeze;[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,n))];rescue=>x;p [m,x.class,x.message];end}',
+    '[:count, 0]\n[:delete, [[195, 169, 97], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:delete!, FrozenError, "can\'t modify frozen String: \\"\\\\xC3\\\\xA9a\\""]\n[:split, [[[195], #<Encoding:BINARY (ASCII-8BIT)>, true], [[169], #<Encoding:BINARY (ASCII-8BIT)>, true], [[97], #<Encoding:BINARY (ASCII-8BIT)>, true]]]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("",encoding:"ASCII-8BIT");n=String.new("é",encoding:"ASCII-8BIT");[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,n))];rescue=>x;p [m,x.class,x.message];end}',
+    '[:count, 0]\n[:delete, [[], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:delete!, nil]\n[:split, []]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("",encoding:"ASCII-8BIT");n=String.new("é",encoding:"ASCII-8BIT");s.freeze;[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,n))];rescue=>x;p [m,x.class,x.message];end}',
+    '[:count, 0]\n[:delete, [[], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:delete!, nil]\n[:split, []]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("",encoding:"ASCII-8BIT");n=String.new(255.chr,encoding:"ASCII-8BIT");[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,n))];rescue=>x;p [m,x.class,x.message];end}',
+    '[:count, 0]\n[:delete, [[], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:delete!, nil]\n[:split, []]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("",encoding:"ASCII-8BIT");n=String.new(255.chr,encoding:"ASCII-8BIT");s.freeze;[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,n))];rescue=>x;p [m,x.class,x.message];end}',
+    '[:count, 0]\n[:delete, [[], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:delete!, nil]\n[:split, []]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("",encoding:"ASCII-8BIT");n=String.new("z-a",encoding:"ASCII-8BIT");[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,n))];rescue=>x;p [m,x.class,x.message];end}',
+    '[:count, ArgumentError, "invalid range \\"z-a\\" in string transliteration"]\n[:delete, [[], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:delete!, nil]\n[:split, []]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("",encoding:"ASCII-8BIT");n=String.new("z-a",encoding:"ASCII-8BIT");s.freeze;[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,n))];rescue=>x;p [m,x.class,x.message];end}',
+    '[:count, ArgumentError, "invalid range \\"z-a\\" in string transliteration"]\n[:delete, [[], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:delete!, nil]\n[:split, []]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("",encoding:"ASCII-8BIT");n=String.new("",encoding:"ASCII-8BIT");[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,n))];rescue=>x;p [m,x.class,x.message];end}',
+    '[:count, 0]\n[:delete, [[], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:delete!, nil]\n[:split, []]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("",encoding:"ASCII-8BIT");n=String.new("",encoding:"ASCII-8BIT");s.freeze;[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,n))];rescue=>x;p [m,x.class,x.message];end}',
+    '[:count, 0]\n[:delete, [[], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:delete!, nil]\n[:split, []]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("abc",encoding:"ASCII-8BIT");n=String.new("é",encoding:"ASCII-8BIT");[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,n))];rescue=>x;p [m,x.class,x.message];end}',
+    '[:count, 0]\n[:delete, [[97, 98, 99], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:delete!, nil]\n[:split, [[[97, 98, 99], #<Encoding:BINARY (ASCII-8BIT)>, true]]]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("abc",encoding:"ASCII-8BIT");n=String.new("é",encoding:"ASCII-8BIT");s.freeze;[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,n))];rescue=>x;p [m,x.class,x.message];end}',
+    '[:count, 0]\n[:delete, [[97, 98, 99], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:delete!, FrozenError, "can\'t modify frozen String: \\"abc\\""]\n[:split, [[[97, 98, 99], #<Encoding:BINARY (ASCII-8BIT)>, true]]]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("abc",encoding:"ASCII-8BIT");n=String.new(255.chr,encoding:"ASCII-8BIT");[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,n))];rescue=>x;p [m,x.class,x.message];end}',
+    '[:count, 0]\n[:delete, [[97, 98, 99], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:delete!, nil]\n[:split, [[[97, 98, 99], #<Encoding:BINARY (ASCII-8BIT)>, true]]]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("abc",encoding:"ASCII-8BIT");n=String.new(255.chr,encoding:"ASCII-8BIT");s.freeze;[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,n))];rescue=>x;p [m,x.class,x.message];end}',
+    '[:count, 0]\n[:delete, [[97, 98, 99], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:delete!, FrozenError, "can\'t modify frozen String: \\"abc\\""]\n[:split, [[[97, 98, 99], #<Encoding:BINARY (ASCII-8BIT)>, true]]]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("abc",encoding:"ASCII-8BIT");n=String.new("z-a",encoding:"ASCII-8BIT");[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,n))];rescue=>x;p [m,x.class,x.message];end}',
+    '[:count, ArgumentError, "invalid range \\"z-a\\" in string transliteration"]\n[:delete, ArgumentError, "invalid range \\"z-a\\" in string transliteration"]\n[:delete!, ArgumentError, "invalid range \\"z-a\\" in string transliteration"]\n[:split, [[[97, 98, 99], #<Encoding:BINARY (ASCII-8BIT)>, true]]]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("abc",encoding:"ASCII-8BIT");n=String.new("z-a",encoding:"ASCII-8BIT");s.freeze;[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,n))];rescue=>x;p [m,x.class,x.message];end}',
+    '[:count, ArgumentError, "invalid range \\"z-a\\" in string transliteration"]\n[:delete, ArgumentError, "invalid range \\"z-a\\" in string transliteration"]\n[:delete!, ArgumentError, "invalid range \\"z-a\\" in string transliteration"]\n[:split, [[[97, 98, 99], #<Encoding:BINARY (ASCII-8BIT)>, true]]]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("abc",encoding:"ASCII-8BIT");n=String.new("",encoding:"ASCII-8BIT");[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,n))];rescue=>x;p [m,x.class,x.message];end}',
+    '[:count, 0]\n[:delete, [[97, 98, 99], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:delete!, nil]\n[:split, [[[97], #<Encoding:BINARY (ASCII-8BIT)>, true], [[98], #<Encoding:BINARY (ASCII-8BIT)>, true], [[99], #<Encoding:BINARY (ASCII-8BIT)>, true]]]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("abc",encoding:"ASCII-8BIT");n=String.new("",encoding:"ASCII-8BIT");s.freeze;[:count,:delete,:delete!,:split].each{|m|begin;p [m,desc(s.send(m,n))];rescue=>x;p [m,x.class,x.message];end}',
+    '[:count, 0]\n[:delete, [[97, 98, 99], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:delete!, FrozenError, "can\'t modify frozen String: \\"abc\\""]\n[:split, [[[97], #<Encoding:BINARY (ASCII-8BIT)>, true], [[98], #<Encoding:BINARY (ASCII-8BIT)>, true], [[99], #<Encoding:BINARY (ASCII-8BIT)>, true]]]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("é",encoding:"US-ASCII");pad=String.new("é",encoding:"US-ASCII");[:ljust,:rjust,:center].each{|m|[-1,1,4].each{|w|begin;p [m,w,desc(s.send(m,w,pad))];rescue=>x;p [m,w,x.class,x.message];end}}',
+    '[:ljust, -1, [[195, 169], #<Encoding:US-ASCII>, false]]\n[:ljust, 1, [[195, 169], #<Encoding:US-ASCII>, false]]\n[:ljust, 4, [[195, 169, 195, 169], #<Encoding:US-ASCII>, false]]\n[:rjust, -1, [[195, 169], #<Encoding:US-ASCII>, false]]\n[:rjust, 1, [[195, 169], #<Encoding:US-ASCII>, false]]\n[:rjust, 4, [[195, 169, 195, 169], #<Encoding:US-ASCII>, false]]\n[:center, -1, [[195, 169], #<Encoding:US-ASCII>, false]]\n[:center, 1, [[195, 169], #<Encoding:US-ASCII>, false]]\n[:center, 4, [[195, 195, 169, 195], #<Encoding:US-ASCII>, false]]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("é",encoding:"US-ASCII");pad=String.new(255.chr,encoding:"US-ASCII");[:ljust,:rjust,:center].each{|m|[-1,1,4].each{|w|begin;p [m,w,desc(s.send(m,w,pad))];rescue=>x;p [m,w,x.class,x.message];end}}',
+    '[:ljust, -1, [[195, 169], #<Encoding:US-ASCII>, false]]\n[:ljust, 1, [[195, 169], #<Encoding:US-ASCII>, false]]\n[:ljust, 4, [[195, 169, 255, 255], #<Encoding:US-ASCII>, false]]\n[:rjust, -1, [[195, 169], #<Encoding:US-ASCII>, false]]\n[:rjust, 1, [[195, 169], #<Encoding:US-ASCII>, false]]\n[:rjust, 4, [[255, 255, 195, 169], #<Encoding:US-ASCII>, false]]\n[:center, -1, [[195, 169], #<Encoding:US-ASCII>, false]]\n[:center, 1, [[195, 169], #<Encoding:US-ASCII>, false]]\n[:center, 4, [[255, 195, 169, 255], #<Encoding:US-ASCII>, false]]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("é",encoding:"US-ASCII");pad=String.new("",encoding:"US-ASCII");[:ljust,:rjust,:center].each{|m|[-1,1,4].each{|w|begin;p [m,w,desc(s.send(m,w,pad))];rescue=>x;p [m,w,x.class,x.message];end}}',
+    '[:ljust, -1, ArgumentError, "zero width padding"]\n[:ljust, 1, ArgumentError, "zero width padding"]\n[:ljust, 4, ArgumentError, "zero width padding"]\n[:rjust, -1, ArgumentError, "zero width padding"]\n[:rjust, 1, ArgumentError, "zero width padding"]\n[:rjust, 4, ArgumentError, "zero width padding"]\n[:center, -1, ArgumentError, "zero width padding"]\n[:center, 1, ArgumentError, "zero width padding"]\n[:center, 4, ArgumentError, "zero width padding"]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("é",encoding:"US-ASCII");pad=String.new("x",encoding:"US-ASCII");[:ljust,:rjust,:center].each{|m|[-1,1,4].each{|w|begin;p [m,w,desc(s.send(m,w,pad))];rescue=>x;p [m,w,x.class,x.message];end}}',
+    '[:ljust, -1, [[195, 169], #<Encoding:US-ASCII>, false]]\n[:ljust, 1, [[195, 169], #<Encoding:US-ASCII>, false]]\n[:ljust, 4, [[195, 169, 120, 120], #<Encoding:US-ASCII>, false]]\n[:rjust, -1, [[195, 169], #<Encoding:US-ASCII>, false]]\n[:rjust, 1, [[195, 169], #<Encoding:US-ASCII>, false]]\n[:rjust, 4, [[120, 120, 195, 169], #<Encoding:US-ASCII>, false]]\n[:center, -1, [[195, 169], #<Encoding:US-ASCII>, false]]\n[:center, 1, [[195, 169], #<Encoding:US-ASCII>, false]]\n[:center, 4, [[120, 195, 169, 120], #<Encoding:US-ASCII>, false]]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("",encoding:"US-ASCII");pad=String.new("é",encoding:"US-ASCII");[:ljust,:rjust,:center].each{|m|[-1,1,4].each{|w|begin;p [m,w,desc(s.send(m,w,pad))];rescue=>x;p [m,w,x.class,x.message];end}}',
+    '[:ljust, -1, [[], #<Encoding:US-ASCII>, true]]\n[:ljust, 1, [[195], #<Encoding:US-ASCII>, false]]\n[:ljust, 4, [[195, 169, 195, 169], #<Encoding:US-ASCII>, false]]\n[:rjust, -1, [[], #<Encoding:US-ASCII>, true]]\n[:rjust, 1, [[195], #<Encoding:US-ASCII>, false]]\n[:rjust, 4, [[195, 169, 195, 169], #<Encoding:US-ASCII>, false]]\n[:center, -1, [[], #<Encoding:US-ASCII>, true]]\n[:center, 1, [[195], #<Encoding:US-ASCII>, false]]\n[:center, 4, [[195, 169, 195, 169], #<Encoding:US-ASCII>, false]]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("",encoding:"US-ASCII");pad=String.new(255.chr,encoding:"US-ASCII");[:ljust,:rjust,:center].each{|m|[-1,1,4].each{|w|begin;p [m,w,desc(s.send(m,w,pad))];rescue=>x;p [m,w,x.class,x.message];end}}',
+    '[:ljust, -1, [[], #<Encoding:US-ASCII>, true]]\n[:ljust, 1, [[255], #<Encoding:US-ASCII>, false]]\n[:ljust, 4, [[255, 255, 255, 255], #<Encoding:US-ASCII>, false]]\n[:rjust, -1, [[], #<Encoding:US-ASCII>, true]]\n[:rjust, 1, [[255], #<Encoding:US-ASCII>, false]]\n[:rjust, 4, [[255, 255, 255, 255], #<Encoding:US-ASCII>, false]]\n[:center, -1, [[], #<Encoding:US-ASCII>, true]]\n[:center, 1, [[255], #<Encoding:US-ASCII>, false]]\n[:center, 4, [[255, 255, 255, 255], #<Encoding:US-ASCII>, false]]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("",encoding:"US-ASCII");pad=String.new("",encoding:"US-ASCII");[:ljust,:rjust,:center].each{|m|[-1,1,4].each{|w|begin;p [m,w,desc(s.send(m,w,pad))];rescue=>x;p [m,w,x.class,x.message];end}}',
+    '[:ljust, -1, ArgumentError, "zero width padding"]\n[:ljust, 1, ArgumentError, "zero width padding"]\n[:ljust, 4, ArgumentError, "zero width padding"]\n[:rjust, -1, ArgumentError, "zero width padding"]\n[:rjust, 1, ArgumentError, "zero width padding"]\n[:rjust, 4, ArgumentError, "zero width padding"]\n[:center, -1, ArgumentError, "zero width padding"]\n[:center, 1, ArgumentError, "zero width padding"]\n[:center, 4, ArgumentError, "zero width padding"]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("",encoding:"US-ASCII");pad=String.new("x",encoding:"US-ASCII");[:ljust,:rjust,:center].each{|m|[-1,1,4].each{|w|begin;p [m,w,desc(s.send(m,w,pad))];rescue=>x;p [m,w,x.class,x.message];end}}',
+    '[:ljust, -1, [[], #<Encoding:US-ASCII>, true]]\n[:ljust, 1, [[120], #<Encoding:US-ASCII>, true]]\n[:ljust, 4, [[120, 120, 120, 120], #<Encoding:US-ASCII>, true]]\n[:rjust, -1, [[], #<Encoding:US-ASCII>, true]]\n[:rjust, 1, [[120], #<Encoding:US-ASCII>, true]]\n[:rjust, 4, [[120, 120, 120, 120], #<Encoding:US-ASCII>, true]]\n[:center, -1, [[], #<Encoding:US-ASCII>, true]]\n[:center, 1, [[120], #<Encoding:US-ASCII>, true]]\n[:center, 4, [[120, 120, 120, 120], #<Encoding:US-ASCII>, true]]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("abc",encoding:"US-ASCII");pad=String.new("é",encoding:"US-ASCII");[:ljust,:rjust,:center].each{|m|[-1,1,4].each{|w|begin;p [m,w,desc(s.send(m,w,pad))];rescue=>x;p [m,w,x.class,x.message];end}}',
+    '[:ljust, -1, [[97, 98, 99], #<Encoding:US-ASCII>, true]]\n[:ljust, 1, [[97, 98, 99], #<Encoding:US-ASCII>, true]]\n[:ljust, 4, [[97, 98, 99, 195], #<Encoding:US-ASCII>, false]]\n[:rjust, -1, [[97, 98, 99], #<Encoding:US-ASCII>, true]]\n[:rjust, 1, [[97, 98, 99], #<Encoding:US-ASCII>, true]]\n[:rjust, 4, [[195, 97, 98, 99], #<Encoding:US-ASCII>, false]]\n[:center, -1, [[97, 98, 99], #<Encoding:US-ASCII>, true]]\n[:center, 1, [[97, 98, 99], #<Encoding:US-ASCII>, true]]\n[:center, 4, [[97, 98, 99, 195], #<Encoding:US-ASCII>, false]]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("abc",encoding:"US-ASCII");pad=String.new(255.chr,encoding:"US-ASCII");[:ljust,:rjust,:center].each{|m|[-1,1,4].each{|w|begin;p [m,w,desc(s.send(m,w,pad))];rescue=>x;p [m,w,x.class,x.message];end}}',
+    '[:ljust, -1, [[97, 98, 99], #<Encoding:US-ASCII>, true]]\n[:ljust, 1, [[97, 98, 99], #<Encoding:US-ASCII>, true]]\n[:ljust, 4, [[97, 98, 99, 255], #<Encoding:US-ASCII>, false]]\n[:rjust, -1, [[97, 98, 99], #<Encoding:US-ASCII>, true]]\n[:rjust, 1, [[97, 98, 99], #<Encoding:US-ASCII>, true]]\n[:rjust, 4, [[255, 97, 98, 99], #<Encoding:US-ASCII>, false]]\n[:center, -1, [[97, 98, 99], #<Encoding:US-ASCII>, true]]\n[:center, 1, [[97, 98, 99], #<Encoding:US-ASCII>, true]]\n[:center, 4, [[97, 98, 99, 255], #<Encoding:US-ASCII>, false]]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("abc",encoding:"US-ASCII");pad=String.new("",encoding:"US-ASCII");[:ljust,:rjust,:center].each{|m|[-1,1,4].each{|w|begin;p [m,w,desc(s.send(m,w,pad))];rescue=>x;p [m,w,x.class,x.message];end}}',
+    '[:ljust, -1, ArgumentError, "zero width padding"]\n[:ljust, 1, ArgumentError, "zero width padding"]\n[:ljust, 4, ArgumentError, "zero width padding"]\n[:rjust, -1, ArgumentError, "zero width padding"]\n[:rjust, 1, ArgumentError, "zero width padding"]\n[:rjust, 4, ArgumentError, "zero width padding"]\n[:center, -1, ArgumentError, "zero width padding"]\n[:center, 1, ArgumentError, "zero width padding"]\n[:center, 4, ArgumentError, "zero width padding"]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("abc",encoding:"US-ASCII");pad=String.new("x",encoding:"US-ASCII");[:ljust,:rjust,:center].each{|m|[-1,1,4].each{|w|begin;p [m,w,desc(s.send(m,w,pad))];rescue=>x;p [m,w,x.class,x.message];end}}',
+    '[:ljust, -1, [[97, 98, 99], #<Encoding:US-ASCII>, true]]\n[:ljust, 1, [[97, 98, 99], #<Encoding:US-ASCII>, true]]\n[:ljust, 4, [[97, 98, 99, 120], #<Encoding:US-ASCII>, true]]\n[:rjust, -1, [[97, 98, 99], #<Encoding:US-ASCII>, true]]\n[:rjust, 1, [[97, 98, 99], #<Encoding:US-ASCII>, true]]\n[:rjust, 4, [[120, 97, 98, 99], #<Encoding:US-ASCII>, true]]\n[:center, -1, [[97, 98, 99], #<Encoding:US-ASCII>, true]]\n[:center, 1, [[97, 98, 99], #<Encoding:US-ASCII>, true]]\n[:center, 4, [[97, 98, 99, 120], #<Encoding:US-ASCII>, true]]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("é",encoding:"US-ASCII");pad=String.new("é",encoding:"UTF-8");[:ljust,:rjust,:center].each{|m|[-1,1,4].each{|w|begin;p [m,w,desc(s.send(m,w,pad))];rescue=>x;p [m,w,x.class,x.message];end}}',
+    '[:ljust, -1, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and UTF-8"]\n[:ljust, 1, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and UTF-8"]\n[:ljust, 4, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and UTF-8"]\n[:rjust, -1, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and UTF-8"]\n[:rjust, 1, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and UTF-8"]\n[:rjust, 4, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and UTF-8"]\n[:center, -1, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and UTF-8"]\n[:center, 1, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and UTF-8"]\n[:center, 4, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and UTF-8"]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("é",encoding:"US-ASCII");pad=String.new(255.chr,encoding:"UTF-8");[:ljust,:rjust,:center].each{|m|[-1,1,4].each{|w|begin;p [m,w,desc(s.send(m,w,pad))];rescue=>x;p [m,w,x.class,x.message];end}}',
+    '[:ljust, -1, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and UTF-8"]\n[:ljust, 1, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and UTF-8"]\n[:ljust, 4, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and UTF-8"]\n[:rjust, -1, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and UTF-8"]\n[:rjust, 1, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and UTF-8"]\n[:rjust, 4, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and UTF-8"]\n[:center, -1, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and UTF-8"]\n[:center, 1, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and UTF-8"]\n[:center, 4, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and UTF-8"]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("é",encoding:"US-ASCII");pad=String.new("",encoding:"UTF-8");[:ljust,:rjust,:center].each{|m|[-1,1,4].each{|w|begin;p [m,w,desc(s.send(m,w,pad))];rescue=>x;p [m,w,x.class,x.message];end}}',
+    '[:ljust, -1, ArgumentError, "zero width padding"]\n[:ljust, 1, ArgumentError, "zero width padding"]\n[:ljust, 4, ArgumentError, "zero width padding"]\n[:rjust, -1, ArgumentError, "zero width padding"]\n[:rjust, 1, ArgumentError, "zero width padding"]\n[:rjust, 4, ArgumentError, "zero width padding"]\n[:center, -1, ArgumentError, "zero width padding"]\n[:center, 1, ArgumentError, "zero width padding"]\n[:center, 4, ArgumentError, "zero width padding"]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("é",encoding:"US-ASCII");pad=String.new("x",encoding:"UTF-8");[:ljust,:rjust,:center].each{|m|[-1,1,4].each{|w|begin;p [m,w,desc(s.send(m,w,pad))];rescue=>x;p [m,w,x.class,x.message];end}}',
+    '[:ljust, -1, [[195, 169], #<Encoding:US-ASCII>, false]]\n[:ljust, 1, [[195, 169], #<Encoding:US-ASCII>, false]]\n[:ljust, 4, [[195, 169, 120, 120], #<Encoding:US-ASCII>, false]]\n[:rjust, -1, [[195, 169], #<Encoding:US-ASCII>, false]]\n[:rjust, 1, [[195, 169], #<Encoding:US-ASCII>, false]]\n[:rjust, 4, [[120, 120, 195, 169], #<Encoding:US-ASCII>, false]]\n[:center, -1, [[195, 169], #<Encoding:US-ASCII>, false]]\n[:center, 1, [[195, 169], #<Encoding:US-ASCII>, false]]\n[:center, 4, [[120, 195, 169, 120], #<Encoding:US-ASCII>, false]]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("",encoding:"US-ASCII");pad=String.new("é",encoding:"UTF-8");[:ljust,:rjust,:center].each{|m|[-1,1,4].each{|w|begin;p [m,w,desc(s.send(m,w,pad))];rescue=>x;p [m,w,x.class,x.message];end}}',
+    '[:ljust, -1, [[], #<Encoding:US-ASCII>, true]]\n[:ljust, 1, [[195, 169], #<Encoding:UTF-8>, true]]\n[:ljust, 4, [[195, 169, 195, 169, 195, 169, 195, 169], #<Encoding:UTF-8>, true]]\n[:rjust, -1, [[], #<Encoding:US-ASCII>, true]]\n[:rjust, 1, [[195, 169], #<Encoding:UTF-8>, true]]\n[:rjust, 4, [[195, 169, 195, 169, 195, 169, 195, 169], #<Encoding:UTF-8>, true]]\n[:center, -1, [[], #<Encoding:US-ASCII>, true]]\n[:center, 1, [[195, 169], #<Encoding:UTF-8>, true]]\n[:center, 4, [[195, 169, 195, 169, 195, 169, 195, 169], #<Encoding:UTF-8>, true]]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("",encoding:"US-ASCII");pad=String.new(255.chr,encoding:"UTF-8");[:ljust,:rjust,:center].each{|m|[-1,1,4].each{|w|begin;p [m,w,desc(s.send(m,w,pad))];rescue=>x;p [m,w,x.class,x.message];end}}',
+    '[:ljust, -1, [[], #<Encoding:US-ASCII>, true]]\n[:ljust, 1, [[255], #<Encoding:UTF-8>, false]]\n[:ljust, 4, [[255, 255, 255, 255], #<Encoding:UTF-8>, false]]\n[:rjust, -1, [[], #<Encoding:US-ASCII>, true]]\n[:rjust, 1, [[255], #<Encoding:UTF-8>, false]]\n[:rjust, 4, [[255, 255, 255, 255], #<Encoding:UTF-8>, false]]\n[:center, -1, [[], #<Encoding:US-ASCII>, true]]\n[:center, 1, [[255], #<Encoding:UTF-8>, false]]\n[:center, 4, [[255, 255, 255, 255], #<Encoding:UTF-8>, false]]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("",encoding:"US-ASCII");pad=String.new("",encoding:"UTF-8");[:ljust,:rjust,:center].each{|m|[-1,1,4].each{|w|begin;p [m,w,desc(s.send(m,w,pad))];rescue=>x;p [m,w,x.class,x.message];end}}',
+    '[:ljust, -1, ArgumentError, "zero width padding"]\n[:ljust, 1, ArgumentError, "zero width padding"]\n[:ljust, 4, ArgumentError, "zero width padding"]\n[:rjust, -1, ArgumentError, "zero width padding"]\n[:rjust, 1, ArgumentError, "zero width padding"]\n[:rjust, 4, ArgumentError, "zero width padding"]\n[:center, -1, ArgumentError, "zero width padding"]\n[:center, 1, ArgumentError, "zero width padding"]\n[:center, 4, ArgumentError, "zero width padding"]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("",encoding:"US-ASCII");pad=String.new("x",encoding:"UTF-8");[:ljust,:rjust,:center].each{|m|[-1,1,4].each{|w|begin;p [m,w,desc(s.send(m,w,pad))];rescue=>x;p [m,w,x.class,x.message];end}}',
+    '[:ljust, -1, [[], #<Encoding:US-ASCII>, true]]\n[:ljust, 1, [[120], #<Encoding:US-ASCII>, true]]\n[:ljust, 4, [[120, 120, 120, 120], #<Encoding:US-ASCII>, true]]\n[:rjust, -1, [[], #<Encoding:US-ASCII>, true]]\n[:rjust, 1, [[120], #<Encoding:US-ASCII>, true]]\n[:rjust, 4, [[120, 120, 120, 120], #<Encoding:US-ASCII>, true]]\n[:center, -1, [[], #<Encoding:US-ASCII>, true]]\n[:center, 1, [[120], #<Encoding:US-ASCII>, true]]\n[:center, 4, [[120, 120, 120, 120], #<Encoding:US-ASCII>, true]]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("abc",encoding:"US-ASCII");pad=String.new("é",encoding:"UTF-8");[:ljust,:rjust,:center].each{|m|[-1,1,4].each{|w|begin;p [m,w,desc(s.send(m,w,pad))];rescue=>x;p [m,w,x.class,x.message];end}}',
+    '[:ljust, -1, [[97, 98, 99], #<Encoding:US-ASCII>, true]]\n[:ljust, 1, [[97, 98, 99], #<Encoding:US-ASCII>, true]]\n[:ljust, 4, [[97, 98, 99, 195, 169], #<Encoding:UTF-8>, true]]\n[:rjust, -1, [[97, 98, 99], #<Encoding:US-ASCII>, true]]\n[:rjust, 1, [[97, 98, 99], #<Encoding:US-ASCII>, true]]\n[:rjust, 4, [[195, 169, 97, 98, 99], #<Encoding:UTF-8>, true]]\n[:center, -1, [[97, 98, 99], #<Encoding:US-ASCII>, true]]\n[:center, 1, [[97, 98, 99], #<Encoding:US-ASCII>, true]]\n[:center, 4, [[97, 98, 99, 195, 169], #<Encoding:UTF-8>, true]]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("abc",encoding:"US-ASCII");pad=String.new(255.chr,encoding:"UTF-8");[:ljust,:rjust,:center].each{|m|[-1,1,4].each{|w|begin;p [m,w,desc(s.send(m,w,pad))];rescue=>x;p [m,w,x.class,x.message];end}}',
+    '[:ljust, -1, [[97, 98, 99], #<Encoding:US-ASCII>, true]]\n[:ljust, 1, [[97, 98, 99], #<Encoding:US-ASCII>, true]]\n[:ljust, 4, [[97, 98, 99, 255], #<Encoding:UTF-8>, false]]\n[:rjust, -1, [[97, 98, 99], #<Encoding:US-ASCII>, true]]\n[:rjust, 1, [[97, 98, 99], #<Encoding:US-ASCII>, true]]\n[:rjust, 4, [[255, 97, 98, 99], #<Encoding:UTF-8>, false]]\n[:center, -1, [[97, 98, 99], #<Encoding:US-ASCII>, true]]\n[:center, 1, [[97, 98, 99], #<Encoding:US-ASCII>, true]]\n[:center, 4, [[97, 98, 99, 255], #<Encoding:UTF-8>, false]]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("abc",encoding:"US-ASCII");pad=String.new("",encoding:"UTF-8");[:ljust,:rjust,:center].each{|m|[-1,1,4].each{|w|begin;p [m,w,desc(s.send(m,w,pad))];rescue=>x;p [m,w,x.class,x.message];end}}',
+    '[:ljust, -1, ArgumentError, "zero width padding"]\n[:ljust, 1, ArgumentError, "zero width padding"]\n[:ljust, 4, ArgumentError, "zero width padding"]\n[:rjust, -1, ArgumentError, "zero width padding"]\n[:rjust, 1, ArgumentError, "zero width padding"]\n[:rjust, 4, ArgumentError, "zero width padding"]\n[:center, -1, ArgumentError, "zero width padding"]\n[:center, 1, ArgumentError, "zero width padding"]\n[:center, 4, ArgumentError, "zero width padding"]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("abc",encoding:"US-ASCII");pad=String.new("x",encoding:"UTF-8");[:ljust,:rjust,:center].each{|m|[-1,1,4].each{|w|begin;p [m,w,desc(s.send(m,w,pad))];rescue=>x;p [m,w,x.class,x.message];end}}',
+    '[:ljust, -1, [[97, 98, 99], #<Encoding:US-ASCII>, true]]\n[:ljust, 1, [[97, 98, 99], #<Encoding:US-ASCII>, true]]\n[:ljust, 4, [[97, 98, 99, 120], #<Encoding:US-ASCII>, true]]\n[:rjust, -1, [[97, 98, 99], #<Encoding:US-ASCII>, true]]\n[:rjust, 1, [[97, 98, 99], #<Encoding:US-ASCII>, true]]\n[:rjust, 4, [[120, 97, 98, 99], #<Encoding:US-ASCII>, true]]\n[:center, -1, [[97, 98, 99], #<Encoding:US-ASCII>, true]]\n[:center, 1, [[97, 98, 99], #<Encoding:US-ASCII>, true]]\n[:center, 4, [[97, 98, 99, 120], #<Encoding:US-ASCII>, true]]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("é",encoding:"US-ASCII");pad=String.new("é",encoding:"ASCII-8BIT");[:ljust,:rjust,:center].each{|m|[-1,1,4].each{|w|begin;p [m,w,desc(s.send(m,w,pad))];rescue=>x;p [m,w,x.class,x.message];end}}',
+    '[:ljust, -1, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and BINARY (ASCII-8BIT)"]\n[:ljust, 1, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and BINARY (ASCII-8BIT)"]\n[:ljust, 4, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and BINARY (ASCII-8BIT)"]\n[:rjust, -1, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and BINARY (ASCII-8BIT)"]\n[:rjust, 1, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and BINARY (ASCII-8BIT)"]\n[:rjust, 4, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and BINARY (ASCII-8BIT)"]\n[:center, -1, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and BINARY (ASCII-8BIT)"]\n[:center, 1, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and BINARY (ASCII-8BIT)"]\n[:center, 4, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and BINARY (ASCII-8BIT)"]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("é",encoding:"US-ASCII");pad=String.new(255.chr,encoding:"ASCII-8BIT");[:ljust,:rjust,:center].each{|m|[-1,1,4].each{|w|begin;p [m,w,desc(s.send(m,w,pad))];rescue=>x;p [m,w,x.class,x.message];end}}',
+    '[:ljust, -1, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and BINARY (ASCII-8BIT)"]\n[:ljust, 1, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and BINARY (ASCII-8BIT)"]\n[:ljust, 4, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and BINARY (ASCII-8BIT)"]\n[:rjust, -1, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and BINARY (ASCII-8BIT)"]\n[:rjust, 1, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and BINARY (ASCII-8BIT)"]\n[:rjust, 4, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and BINARY (ASCII-8BIT)"]\n[:center, -1, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and BINARY (ASCII-8BIT)"]\n[:center, 1, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and BINARY (ASCII-8BIT)"]\n[:center, 4, Encoding::CompatibilityError, "incompatible character encodings: US-ASCII and BINARY (ASCII-8BIT)"]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("é",encoding:"US-ASCII");pad=String.new("",encoding:"ASCII-8BIT");[:ljust,:rjust,:center].each{|m|[-1,1,4].each{|w|begin;p [m,w,desc(s.send(m,w,pad))];rescue=>x;p [m,w,x.class,x.message];end}}',
+    '[:ljust, -1, ArgumentError, "zero width padding"]\n[:ljust, 1, ArgumentError, "zero width padding"]\n[:ljust, 4, ArgumentError, "zero width padding"]\n[:rjust, -1, ArgumentError, "zero width padding"]\n[:rjust, 1, ArgumentError, "zero width padding"]\n[:rjust, 4, ArgumentError, "zero width padding"]\n[:center, -1, ArgumentError, "zero width padding"]\n[:center, 1, ArgumentError, "zero width padding"]\n[:center, 4, ArgumentError, "zero width padding"]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("é",encoding:"US-ASCII");pad=String.new("x",encoding:"ASCII-8BIT");[:ljust,:rjust,:center].each{|m|[-1,1,4].each{|w|begin;p [m,w,desc(s.send(m,w,pad))];rescue=>x;p [m,w,x.class,x.message];end}}',
+    '[:ljust, -1, [[195, 169], #<Encoding:US-ASCII>, false]]\n[:ljust, 1, [[195, 169], #<Encoding:US-ASCII>, false]]\n[:ljust, 4, [[195, 169, 120, 120], #<Encoding:US-ASCII>, false]]\n[:rjust, -1, [[195, 169], #<Encoding:US-ASCII>, false]]\n[:rjust, 1, [[195, 169], #<Encoding:US-ASCII>, false]]\n[:rjust, 4, [[120, 120, 195, 169], #<Encoding:US-ASCII>, false]]\n[:center, -1, [[195, 169], #<Encoding:US-ASCII>, false]]\n[:center, 1, [[195, 169], #<Encoding:US-ASCII>, false]]\n[:center, 4, [[120, 195, 169, 120], #<Encoding:US-ASCII>, false]]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("",encoding:"US-ASCII");pad=String.new("é",encoding:"ASCII-8BIT");[:ljust,:rjust,:center].each{|m|[-1,1,4].each{|w|begin;p [m,w,desc(s.send(m,w,pad))];rescue=>x;p [m,w,x.class,x.message];end}}',
+    '[:ljust, -1, [[], #<Encoding:US-ASCII>, true]]\n[:ljust, 1, [[195], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:ljust, 4, [[195, 169, 195, 169], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:rjust, -1, [[], #<Encoding:US-ASCII>, true]]\n[:rjust, 1, [[195], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:rjust, 4, [[195, 169, 195, 169], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:center, -1, [[], #<Encoding:US-ASCII>, true]]\n[:center, 1, [[195], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:center, 4, [[195, 169, 195, 169], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("",encoding:"US-ASCII");pad=String.new(255.chr,encoding:"ASCII-8BIT");[:ljust,:rjust,:center].each{|m|[-1,1,4].each{|w|begin;p [m,w,desc(s.send(m,w,pad))];rescue=>x;p [m,w,x.class,x.message];end}}',
+    '[:ljust, -1, [[], #<Encoding:US-ASCII>, true]]\n[:ljust, 1, [[255], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:ljust, 4, [[255, 255, 255, 255], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:rjust, -1, [[], #<Encoding:US-ASCII>, true]]\n[:rjust, 1, [[255], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:rjust, 4, [[255, 255, 255, 255], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:center, -1, [[], #<Encoding:US-ASCII>, true]]\n[:center, 1, [[255], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:center, 4, [[255, 255, 255, 255], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("",encoding:"US-ASCII");pad=String.new("",encoding:"ASCII-8BIT");[:ljust,:rjust,:center].each{|m|[-1,1,4].each{|w|begin;p [m,w,desc(s.send(m,w,pad))];rescue=>x;p [m,w,x.class,x.message];end}}',
+    '[:ljust, -1, ArgumentError, "zero width padding"]\n[:ljust, 1, ArgumentError, "zero width padding"]\n[:ljust, 4, ArgumentError, "zero width padding"]\n[:rjust, -1, ArgumentError, "zero width padding"]\n[:rjust, 1, ArgumentError, "zero width padding"]\n[:rjust, 4, ArgumentError, "zero width padding"]\n[:center, -1, ArgumentError, "zero width padding"]\n[:center, 1, ArgumentError, "zero width padding"]\n[:center, 4, ArgumentError, "zero width padding"]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("",encoding:"US-ASCII");pad=String.new("x",encoding:"ASCII-8BIT");[:ljust,:rjust,:center].each{|m|[-1,1,4].each{|w|begin;p [m,w,desc(s.send(m,w,pad))];rescue=>x;p [m,w,x.class,x.message];end}}',
+    '[:ljust, -1, [[], #<Encoding:US-ASCII>, true]]\n[:ljust, 1, [[120], #<Encoding:US-ASCII>, true]]\n[:ljust, 4, [[120, 120, 120, 120], #<Encoding:US-ASCII>, true]]\n[:rjust, -1, [[], #<Encoding:US-ASCII>, true]]\n[:rjust, 1, [[120], #<Encoding:US-ASCII>, true]]\n[:rjust, 4, [[120, 120, 120, 120], #<Encoding:US-ASCII>, true]]\n[:center, -1, [[], #<Encoding:US-ASCII>, true]]\n[:center, 1, [[120], #<Encoding:US-ASCII>, true]]\n[:center, 4, [[120, 120, 120, 120], #<Encoding:US-ASCII>, true]]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("abc",encoding:"US-ASCII");pad=String.new("é",encoding:"ASCII-8BIT");[:ljust,:rjust,:center].each{|m|[-1,1,4].each{|w|begin;p [m,w,desc(s.send(m,w,pad))];rescue=>x;p [m,w,x.class,x.message];end}}',
+    '[:ljust, -1, [[97, 98, 99], #<Encoding:US-ASCII>, true]]\n[:ljust, 1, [[97, 98, 99], #<Encoding:US-ASCII>, true]]\n[:ljust, 4, [[97, 98, 99, 195], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:rjust, -1, [[97, 98, 99], #<Encoding:US-ASCII>, true]]\n[:rjust, 1, [[97, 98, 99], #<Encoding:US-ASCII>, true]]\n[:rjust, 4, [[195, 97, 98, 99], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:center, -1, [[97, 98, 99], #<Encoding:US-ASCII>, true]]\n[:center, 1, [[97, 98, 99], #<Encoding:US-ASCII>, true]]\n[:center, 4, [[97, 98, 99, 195], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("abc",encoding:"US-ASCII");pad=String.new(255.chr,encoding:"ASCII-8BIT");[:ljust,:rjust,:center].each{|m|[-1,1,4].each{|w|begin;p [m,w,desc(s.send(m,w,pad))];rescue=>x;p [m,w,x.class,x.message];end}}',
+    '[:ljust, -1, [[97, 98, 99], #<Encoding:US-ASCII>, true]]\n[:ljust, 1, [[97, 98, 99], #<Encoding:US-ASCII>, true]]\n[:ljust, 4, [[97, 98, 99, 255], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:rjust, -1, [[97, 98, 99], #<Encoding:US-ASCII>, true]]\n[:rjust, 1, [[97, 98, 99], #<Encoding:US-ASCII>, true]]\n[:rjust, 4, [[255, 97, 98, 99], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:center, -1, [[97, 98, 99], #<Encoding:US-ASCII>, true]]\n[:center, 1, [[97, 98, 99], #<Encoding:US-ASCII>, true]]\n[:center, 4, [[97, 98, 99, 255], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("abc",encoding:"US-ASCII");pad=String.new("",encoding:"ASCII-8BIT");[:ljust,:rjust,:center].each{|m|[-1,1,4].each{|w|begin;p [m,w,desc(s.send(m,w,pad))];rescue=>x;p [m,w,x.class,x.message];end}}',
+    '[:ljust, -1, ArgumentError, "zero width padding"]\n[:ljust, 1, ArgumentError, "zero width padding"]\n[:ljust, 4, ArgumentError, "zero width padding"]\n[:rjust, -1, ArgumentError, "zero width padding"]\n[:rjust, 1, ArgumentError, "zero width padding"]\n[:rjust, 4, ArgumentError, "zero width padding"]\n[:center, -1, ArgumentError, "zero width padding"]\n[:center, 1, ArgumentError, "zero width padding"]\n[:center, 4, ArgumentError, "zero width padding"]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("abc",encoding:"US-ASCII");pad=String.new("x",encoding:"ASCII-8BIT");[:ljust,:rjust,:center].each{|m|[-1,1,4].each{|w|begin;p [m,w,desc(s.send(m,w,pad))];rescue=>x;p [m,w,x.class,x.message];end}}',
+    '[:ljust, -1, [[97, 98, 99], #<Encoding:US-ASCII>, true]]\n[:ljust, 1, [[97, 98, 99], #<Encoding:US-ASCII>, true]]\n[:ljust, 4, [[97, 98, 99, 120], #<Encoding:US-ASCII>, true]]\n[:rjust, -1, [[97, 98, 99], #<Encoding:US-ASCII>, true]]\n[:rjust, 1, [[97, 98, 99], #<Encoding:US-ASCII>, true]]\n[:rjust, 4, [[120, 97, 98, 99], #<Encoding:US-ASCII>, true]]\n[:center, -1, [[97, 98, 99], #<Encoding:US-ASCII>, true]]\n[:center, 1, [[97, 98, 99], #<Encoding:US-ASCII>, true]]\n[:center, 4, [[97, 98, 99, 120], #<Encoding:US-ASCII>, true]]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("é",encoding:"UTF-8");pad=String.new("é",encoding:"US-ASCII");[:ljust,:rjust,:center].each{|m|[-1,1,4].each{|w|begin;p [m,w,desc(s.send(m,w,pad))];rescue=>x;p [m,w,x.class,x.message];end}}',
+    '[:ljust, -1, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and US-ASCII"]\n[:ljust, 1, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and US-ASCII"]\n[:ljust, 4, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and US-ASCII"]\n[:rjust, -1, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and US-ASCII"]\n[:rjust, 1, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and US-ASCII"]\n[:rjust, 4, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and US-ASCII"]\n[:center, -1, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and US-ASCII"]\n[:center, 1, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and US-ASCII"]\n[:center, 4, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and US-ASCII"]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("é",encoding:"UTF-8");pad=String.new(255.chr,encoding:"US-ASCII");[:ljust,:rjust,:center].each{|m|[-1,1,4].each{|w|begin;p [m,w,desc(s.send(m,w,pad))];rescue=>x;p [m,w,x.class,x.message];end}}',
+    '[:ljust, -1, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and US-ASCII"]\n[:ljust, 1, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and US-ASCII"]\n[:ljust, 4, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and US-ASCII"]\n[:rjust, -1, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and US-ASCII"]\n[:rjust, 1, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and US-ASCII"]\n[:rjust, 4, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and US-ASCII"]\n[:center, -1, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and US-ASCII"]\n[:center, 1, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and US-ASCII"]\n[:center, 4, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and US-ASCII"]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("é",encoding:"UTF-8");pad=String.new("",encoding:"US-ASCII");[:ljust,:rjust,:center].each{|m|[-1,1,4].each{|w|begin;p [m,w,desc(s.send(m,w,pad))];rescue=>x;p [m,w,x.class,x.message];end}}',
+    '[:ljust, -1, ArgumentError, "zero width padding"]\n[:ljust, 1, ArgumentError, "zero width padding"]\n[:ljust, 4, ArgumentError, "zero width padding"]\n[:rjust, -1, ArgumentError, "zero width padding"]\n[:rjust, 1, ArgumentError, "zero width padding"]\n[:rjust, 4, ArgumentError, "zero width padding"]\n[:center, -1, ArgumentError, "zero width padding"]\n[:center, 1, ArgumentError, "zero width padding"]\n[:center, 4, ArgumentError, "zero width padding"]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("é",encoding:"UTF-8");pad=String.new("x",encoding:"US-ASCII");[:ljust,:rjust,:center].each{|m|[-1,1,4].each{|w|begin;p [m,w,desc(s.send(m,w,pad))];rescue=>x;p [m,w,x.class,x.message];end}}',
+    '[:ljust, -1, [[195, 169], #<Encoding:UTF-8>, true]]\n[:ljust, 1, [[195, 169], #<Encoding:UTF-8>, true]]\n[:ljust, 4, [[195, 169, 120, 120, 120], #<Encoding:UTF-8>, true]]\n[:rjust, -1, [[195, 169], #<Encoding:UTF-8>, true]]\n[:rjust, 1, [[195, 169], #<Encoding:UTF-8>, true]]\n[:rjust, 4, [[120, 120, 120, 195, 169], #<Encoding:UTF-8>, true]]\n[:center, -1, [[195, 169], #<Encoding:UTF-8>, true]]\n[:center, 1, [[195, 169], #<Encoding:UTF-8>, true]]\n[:center, 4, [[120, 195, 169, 120, 120], #<Encoding:UTF-8>, true]]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("",encoding:"UTF-8");pad=String.new("é",encoding:"US-ASCII");[:ljust,:rjust,:center].each{|m|[-1,1,4].each{|w|begin;p [m,w,desc(s.send(m,w,pad))];rescue=>x;p [m,w,x.class,x.message];end}}',
+    '[:ljust, -1, [[], #<Encoding:UTF-8>, true]]\n[:ljust, 1, [[195], #<Encoding:US-ASCII>, false]]\n[:ljust, 4, [[195, 169, 195, 169], #<Encoding:US-ASCII>, false]]\n[:rjust, -1, [[], #<Encoding:UTF-8>, true]]\n[:rjust, 1, [[195], #<Encoding:US-ASCII>, false]]\n[:rjust, 4, [[195, 169, 195, 169], #<Encoding:US-ASCII>, false]]\n[:center, -1, [[], #<Encoding:UTF-8>, true]]\n[:center, 1, [[195], #<Encoding:US-ASCII>, false]]\n[:center, 4, [[195, 169, 195, 169], #<Encoding:US-ASCII>, false]]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("",encoding:"UTF-8");pad=String.new(255.chr,encoding:"US-ASCII");[:ljust,:rjust,:center].each{|m|[-1,1,4].each{|w|begin;p [m,w,desc(s.send(m,w,pad))];rescue=>x;p [m,w,x.class,x.message];end}}',
+    '[:ljust, -1, [[], #<Encoding:UTF-8>, true]]\n[:ljust, 1, [[255], #<Encoding:US-ASCII>, false]]\n[:ljust, 4, [[255, 255, 255, 255], #<Encoding:US-ASCII>, false]]\n[:rjust, -1, [[], #<Encoding:UTF-8>, true]]\n[:rjust, 1, [[255], #<Encoding:US-ASCII>, false]]\n[:rjust, 4, [[255, 255, 255, 255], #<Encoding:US-ASCII>, false]]\n[:center, -1, [[], #<Encoding:UTF-8>, true]]\n[:center, 1, [[255], #<Encoding:US-ASCII>, false]]\n[:center, 4, [[255, 255, 255, 255], #<Encoding:US-ASCII>, false]]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("",encoding:"UTF-8");pad=String.new("",encoding:"US-ASCII");[:ljust,:rjust,:center].each{|m|[-1,1,4].each{|w|begin;p [m,w,desc(s.send(m,w,pad))];rescue=>x;p [m,w,x.class,x.message];end}}',
+    '[:ljust, -1, ArgumentError, "zero width padding"]\n[:ljust, 1, ArgumentError, "zero width padding"]\n[:ljust, 4, ArgumentError, "zero width padding"]\n[:rjust, -1, ArgumentError, "zero width padding"]\n[:rjust, 1, ArgumentError, "zero width padding"]\n[:rjust, 4, ArgumentError, "zero width padding"]\n[:center, -1, ArgumentError, "zero width padding"]\n[:center, 1, ArgumentError, "zero width padding"]\n[:center, 4, ArgumentError, "zero width padding"]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("",encoding:"UTF-8");pad=String.new("x",encoding:"US-ASCII");[:ljust,:rjust,:center].each{|m|[-1,1,4].each{|w|begin;p [m,w,desc(s.send(m,w,pad))];rescue=>x;p [m,w,x.class,x.message];end}}',
+    '[:ljust, -1, [[], #<Encoding:UTF-8>, true]]\n[:ljust, 1, [[120], #<Encoding:UTF-8>, true]]\n[:ljust, 4, [[120, 120, 120, 120], #<Encoding:UTF-8>, true]]\n[:rjust, -1, [[], #<Encoding:UTF-8>, true]]\n[:rjust, 1, [[120], #<Encoding:UTF-8>, true]]\n[:rjust, 4, [[120, 120, 120, 120], #<Encoding:UTF-8>, true]]\n[:center, -1, [[], #<Encoding:UTF-8>, true]]\n[:center, 1, [[120], #<Encoding:UTF-8>, true]]\n[:center, 4, [[120, 120, 120, 120], #<Encoding:UTF-8>, true]]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("abc",encoding:"UTF-8");pad=String.new("é",encoding:"US-ASCII");[:ljust,:rjust,:center].each{|m|[-1,1,4].each{|w|begin;p [m,w,desc(s.send(m,w,pad))];rescue=>x;p [m,w,x.class,x.message];end}}',
+    '[:ljust, -1, [[97, 98, 99], #<Encoding:UTF-8>, true]]\n[:ljust, 1, [[97, 98, 99], #<Encoding:UTF-8>, true]]\n[:ljust, 4, [[97, 98, 99, 195], #<Encoding:US-ASCII>, false]]\n[:rjust, -1, [[97, 98, 99], #<Encoding:UTF-8>, true]]\n[:rjust, 1, [[97, 98, 99], #<Encoding:UTF-8>, true]]\n[:rjust, 4, [[195, 97, 98, 99], #<Encoding:US-ASCII>, false]]\n[:center, -1, [[97, 98, 99], #<Encoding:UTF-8>, true]]\n[:center, 1, [[97, 98, 99], #<Encoding:UTF-8>, true]]\n[:center, 4, [[97, 98, 99, 195], #<Encoding:US-ASCII>, false]]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("abc",encoding:"UTF-8");pad=String.new(255.chr,encoding:"US-ASCII");[:ljust,:rjust,:center].each{|m|[-1,1,4].each{|w|begin;p [m,w,desc(s.send(m,w,pad))];rescue=>x;p [m,w,x.class,x.message];end}}',
+    '[:ljust, -1, [[97, 98, 99], #<Encoding:UTF-8>, true]]\n[:ljust, 1, [[97, 98, 99], #<Encoding:UTF-8>, true]]\n[:ljust, 4, [[97, 98, 99, 255], #<Encoding:US-ASCII>, false]]\n[:rjust, -1, [[97, 98, 99], #<Encoding:UTF-8>, true]]\n[:rjust, 1, [[97, 98, 99], #<Encoding:UTF-8>, true]]\n[:rjust, 4, [[255, 97, 98, 99], #<Encoding:US-ASCII>, false]]\n[:center, -1, [[97, 98, 99], #<Encoding:UTF-8>, true]]\n[:center, 1, [[97, 98, 99], #<Encoding:UTF-8>, true]]\n[:center, 4, [[97, 98, 99, 255], #<Encoding:US-ASCII>, false]]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("abc",encoding:"UTF-8");pad=String.new("",encoding:"US-ASCII");[:ljust,:rjust,:center].each{|m|[-1,1,4].each{|w|begin;p [m,w,desc(s.send(m,w,pad))];rescue=>x;p [m,w,x.class,x.message];end}}',
+    '[:ljust, -1, ArgumentError, "zero width padding"]\n[:ljust, 1, ArgumentError, "zero width padding"]\n[:ljust, 4, ArgumentError, "zero width padding"]\n[:rjust, -1, ArgumentError, "zero width padding"]\n[:rjust, 1, ArgumentError, "zero width padding"]\n[:rjust, 4, ArgumentError, "zero width padding"]\n[:center, -1, ArgumentError, "zero width padding"]\n[:center, 1, ArgumentError, "zero width padding"]\n[:center, 4, ArgumentError, "zero width padding"]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("abc",encoding:"UTF-8");pad=String.new("x",encoding:"US-ASCII");[:ljust,:rjust,:center].each{|m|[-1,1,4].each{|w|begin;p [m,w,desc(s.send(m,w,pad))];rescue=>x;p [m,w,x.class,x.message];end}}',
+    '[:ljust, -1, [[97, 98, 99], #<Encoding:UTF-8>, true]]\n[:ljust, 1, [[97, 98, 99], #<Encoding:UTF-8>, true]]\n[:ljust, 4, [[97, 98, 99, 120], #<Encoding:UTF-8>, true]]\n[:rjust, -1, [[97, 98, 99], #<Encoding:UTF-8>, true]]\n[:rjust, 1, [[97, 98, 99], #<Encoding:UTF-8>, true]]\n[:rjust, 4, [[120, 97, 98, 99], #<Encoding:UTF-8>, true]]\n[:center, -1, [[97, 98, 99], #<Encoding:UTF-8>, true]]\n[:center, 1, [[97, 98, 99], #<Encoding:UTF-8>, true]]\n[:center, 4, [[97, 98, 99, 120], #<Encoding:UTF-8>, true]]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("é",encoding:"UTF-8");pad=String.new("é",encoding:"UTF-8");[:ljust,:rjust,:center].each{|m|[-1,1,4].each{|w|begin;p [m,w,desc(s.send(m,w,pad))];rescue=>x;p [m,w,x.class,x.message];end}}',
+    '[:ljust, -1, [[195, 169], #<Encoding:UTF-8>, true]]\n[:ljust, 1, [[195, 169], #<Encoding:UTF-8>, true]]\n[:ljust, 4, [[195, 169, 195, 169, 195, 169, 195, 169], #<Encoding:UTF-8>, true]]\n[:rjust, -1, [[195, 169], #<Encoding:UTF-8>, true]]\n[:rjust, 1, [[195, 169], #<Encoding:UTF-8>, true]]\n[:rjust, 4, [[195, 169, 195, 169, 195, 169, 195, 169], #<Encoding:UTF-8>, true]]\n[:center, -1, [[195, 169], #<Encoding:UTF-8>, true]]\n[:center, 1, [[195, 169], #<Encoding:UTF-8>, true]]\n[:center, 4, [[195, 169, 195, 169, 195, 169, 195, 169], #<Encoding:UTF-8>, true]]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("é",encoding:"UTF-8");pad=String.new(255.chr,encoding:"UTF-8");[:ljust,:rjust,:center].each{|m|[-1,1,4].each{|w|begin;p [m,w,desc(s.send(m,w,pad))];rescue=>x;p [m,w,x.class,x.message];end}}',
+    '[:ljust, -1, [[195, 169], #<Encoding:UTF-8>, true]]\n[:ljust, 1, [[195, 169], #<Encoding:UTF-8>, true]]\n[:ljust, 4, [[195, 169, 255, 255, 255], #<Encoding:UTF-8>, false]]\n[:rjust, -1, [[195, 169], #<Encoding:UTF-8>, true]]\n[:rjust, 1, [[195, 169], #<Encoding:UTF-8>, true]]\n[:rjust, 4, [[255, 255, 255, 195, 169], #<Encoding:UTF-8>, false]]\n[:center, -1, [[195, 169], #<Encoding:UTF-8>, true]]\n[:center, 1, [[195, 169], #<Encoding:UTF-8>, true]]\n[:center, 4, [[255, 195, 169, 255, 255], #<Encoding:UTF-8>, false]]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("é",encoding:"UTF-8");pad=String.new("",encoding:"UTF-8");[:ljust,:rjust,:center].each{|m|[-1,1,4].each{|w|begin;p [m,w,desc(s.send(m,w,pad))];rescue=>x;p [m,w,x.class,x.message];end}}',
+    '[:ljust, -1, ArgumentError, "zero width padding"]\n[:ljust, 1, ArgumentError, "zero width padding"]\n[:ljust, 4, ArgumentError, "zero width padding"]\n[:rjust, -1, ArgumentError, "zero width padding"]\n[:rjust, 1, ArgumentError, "zero width padding"]\n[:rjust, 4, ArgumentError, "zero width padding"]\n[:center, -1, ArgumentError, "zero width padding"]\n[:center, 1, ArgumentError, "zero width padding"]\n[:center, 4, ArgumentError, "zero width padding"]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("é",encoding:"UTF-8");pad=String.new("x",encoding:"UTF-8");[:ljust,:rjust,:center].each{|m|[-1,1,4].each{|w|begin;p [m,w,desc(s.send(m,w,pad))];rescue=>x;p [m,w,x.class,x.message];end}}',
+    '[:ljust, -1, [[195, 169], #<Encoding:UTF-8>, true]]\n[:ljust, 1, [[195, 169], #<Encoding:UTF-8>, true]]\n[:ljust, 4, [[195, 169, 120, 120, 120], #<Encoding:UTF-8>, true]]\n[:rjust, -1, [[195, 169], #<Encoding:UTF-8>, true]]\n[:rjust, 1, [[195, 169], #<Encoding:UTF-8>, true]]\n[:rjust, 4, [[120, 120, 120, 195, 169], #<Encoding:UTF-8>, true]]\n[:center, -1, [[195, 169], #<Encoding:UTF-8>, true]]\n[:center, 1, [[195, 169], #<Encoding:UTF-8>, true]]\n[:center, 4, [[120, 195, 169, 120, 120], #<Encoding:UTF-8>, true]]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("",encoding:"UTF-8");pad=String.new("é",encoding:"UTF-8");[:ljust,:rjust,:center].each{|m|[-1,1,4].each{|w|begin;p [m,w,desc(s.send(m,w,pad))];rescue=>x;p [m,w,x.class,x.message];end}}',
+    '[:ljust, -1, [[], #<Encoding:UTF-8>, true]]\n[:ljust, 1, [[195, 169], #<Encoding:UTF-8>, true]]\n[:ljust, 4, [[195, 169, 195, 169, 195, 169, 195, 169], #<Encoding:UTF-8>, true]]\n[:rjust, -1, [[], #<Encoding:UTF-8>, true]]\n[:rjust, 1, [[195, 169], #<Encoding:UTF-8>, true]]\n[:rjust, 4, [[195, 169, 195, 169, 195, 169, 195, 169], #<Encoding:UTF-8>, true]]\n[:center, -1, [[], #<Encoding:UTF-8>, true]]\n[:center, 1, [[195, 169], #<Encoding:UTF-8>, true]]\n[:center, 4, [[195, 169, 195, 169, 195, 169, 195, 169], #<Encoding:UTF-8>, true]]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("",encoding:"UTF-8");pad=String.new(255.chr,encoding:"UTF-8");[:ljust,:rjust,:center].each{|m|[-1,1,4].each{|w|begin;p [m,w,desc(s.send(m,w,pad))];rescue=>x;p [m,w,x.class,x.message];end}}',
+    '[:ljust, -1, [[], #<Encoding:UTF-8>, true]]\n[:ljust, 1, [[255], #<Encoding:UTF-8>, false]]\n[:ljust, 4, [[255, 255, 255, 255], #<Encoding:UTF-8>, false]]\n[:rjust, -1, [[], #<Encoding:UTF-8>, true]]\n[:rjust, 1, [[255], #<Encoding:UTF-8>, false]]\n[:rjust, 4, [[255, 255, 255, 255], #<Encoding:UTF-8>, false]]\n[:center, -1, [[], #<Encoding:UTF-8>, true]]\n[:center, 1, [[255], #<Encoding:UTF-8>, false]]\n[:center, 4, [[255, 255, 255, 255], #<Encoding:UTF-8>, false]]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("",encoding:"UTF-8");pad=String.new("",encoding:"UTF-8");[:ljust,:rjust,:center].each{|m|[-1,1,4].each{|w|begin;p [m,w,desc(s.send(m,w,pad))];rescue=>x;p [m,w,x.class,x.message];end}}',
+    '[:ljust, -1, ArgumentError, "zero width padding"]\n[:ljust, 1, ArgumentError, "zero width padding"]\n[:ljust, 4, ArgumentError, "zero width padding"]\n[:rjust, -1, ArgumentError, "zero width padding"]\n[:rjust, 1, ArgumentError, "zero width padding"]\n[:rjust, 4, ArgumentError, "zero width padding"]\n[:center, -1, ArgumentError, "zero width padding"]\n[:center, 1, ArgumentError, "zero width padding"]\n[:center, 4, ArgumentError, "zero width padding"]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("",encoding:"UTF-8");pad=String.new("x",encoding:"UTF-8");[:ljust,:rjust,:center].each{|m|[-1,1,4].each{|w|begin;p [m,w,desc(s.send(m,w,pad))];rescue=>x;p [m,w,x.class,x.message];end}}',
+    '[:ljust, -1, [[], #<Encoding:UTF-8>, true]]\n[:ljust, 1, [[120], #<Encoding:UTF-8>, true]]\n[:ljust, 4, [[120, 120, 120, 120], #<Encoding:UTF-8>, true]]\n[:rjust, -1, [[], #<Encoding:UTF-8>, true]]\n[:rjust, 1, [[120], #<Encoding:UTF-8>, true]]\n[:rjust, 4, [[120, 120, 120, 120], #<Encoding:UTF-8>, true]]\n[:center, -1, [[], #<Encoding:UTF-8>, true]]\n[:center, 1, [[120], #<Encoding:UTF-8>, true]]\n[:center, 4, [[120, 120, 120, 120], #<Encoding:UTF-8>, true]]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("abc",encoding:"UTF-8");pad=String.new("é",encoding:"UTF-8");[:ljust,:rjust,:center].each{|m|[-1,1,4].each{|w|begin;p [m,w,desc(s.send(m,w,pad))];rescue=>x;p [m,w,x.class,x.message];end}}',
+    '[:ljust, -1, [[97, 98, 99], #<Encoding:UTF-8>, true]]\n[:ljust, 1, [[97, 98, 99], #<Encoding:UTF-8>, true]]\n[:ljust, 4, [[97, 98, 99, 195, 169], #<Encoding:UTF-8>, true]]\n[:rjust, -1, [[97, 98, 99], #<Encoding:UTF-8>, true]]\n[:rjust, 1, [[97, 98, 99], #<Encoding:UTF-8>, true]]\n[:rjust, 4, [[195, 169, 97, 98, 99], #<Encoding:UTF-8>, true]]\n[:center, -1, [[97, 98, 99], #<Encoding:UTF-8>, true]]\n[:center, 1, [[97, 98, 99], #<Encoding:UTF-8>, true]]\n[:center, 4, [[97, 98, 99, 195, 169], #<Encoding:UTF-8>, true]]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("abc",encoding:"UTF-8");pad=String.new(255.chr,encoding:"UTF-8");[:ljust,:rjust,:center].each{|m|[-1,1,4].each{|w|begin;p [m,w,desc(s.send(m,w,pad))];rescue=>x;p [m,w,x.class,x.message];end}}',
+    '[:ljust, -1, [[97, 98, 99], #<Encoding:UTF-8>, true]]\n[:ljust, 1, [[97, 98, 99], #<Encoding:UTF-8>, true]]\n[:ljust, 4, [[97, 98, 99, 255], #<Encoding:UTF-8>, false]]\n[:rjust, -1, [[97, 98, 99], #<Encoding:UTF-8>, true]]\n[:rjust, 1, [[97, 98, 99], #<Encoding:UTF-8>, true]]\n[:rjust, 4, [[255, 97, 98, 99], #<Encoding:UTF-8>, false]]\n[:center, -1, [[97, 98, 99], #<Encoding:UTF-8>, true]]\n[:center, 1, [[97, 98, 99], #<Encoding:UTF-8>, true]]\n[:center, 4, [[97, 98, 99, 255], #<Encoding:UTF-8>, false]]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("abc",encoding:"UTF-8");pad=String.new("",encoding:"UTF-8");[:ljust,:rjust,:center].each{|m|[-1,1,4].each{|w|begin;p [m,w,desc(s.send(m,w,pad))];rescue=>x;p [m,w,x.class,x.message];end}}',
+    '[:ljust, -1, ArgumentError, "zero width padding"]\n[:ljust, 1, ArgumentError, "zero width padding"]\n[:ljust, 4, ArgumentError, "zero width padding"]\n[:rjust, -1, ArgumentError, "zero width padding"]\n[:rjust, 1, ArgumentError, "zero width padding"]\n[:rjust, 4, ArgumentError, "zero width padding"]\n[:center, -1, ArgumentError, "zero width padding"]\n[:center, 1, ArgumentError, "zero width padding"]\n[:center, 4, ArgumentError, "zero width padding"]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("abc",encoding:"UTF-8");pad=String.new("x",encoding:"UTF-8");[:ljust,:rjust,:center].each{|m|[-1,1,4].each{|w|begin;p [m,w,desc(s.send(m,w,pad))];rescue=>x;p [m,w,x.class,x.message];end}}',
+    '[:ljust, -1, [[97, 98, 99], #<Encoding:UTF-8>, true]]\n[:ljust, 1, [[97, 98, 99], #<Encoding:UTF-8>, true]]\n[:ljust, 4, [[97, 98, 99, 120], #<Encoding:UTF-8>, true]]\n[:rjust, -1, [[97, 98, 99], #<Encoding:UTF-8>, true]]\n[:rjust, 1, [[97, 98, 99], #<Encoding:UTF-8>, true]]\n[:rjust, 4, [[120, 97, 98, 99], #<Encoding:UTF-8>, true]]\n[:center, -1, [[97, 98, 99], #<Encoding:UTF-8>, true]]\n[:center, 1, [[97, 98, 99], #<Encoding:UTF-8>, true]]\n[:center, 4, [[97, 98, 99, 120], #<Encoding:UTF-8>, true]]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("é",encoding:"UTF-8");pad=String.new("é",encoding:"ASCII-8BIT");[:ljust,:rjust,:center].each{|m|[-1,1,4].each{|w|begin;p [m,w,desc(s.send(m,w,pad))];rescue=>x;p [m,w,x.class,x.message];end}}',
+    '[:ljust, -1, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and BINARY (ASCII-8BIT)"]\n[:ljust, 1, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and BINARY (ASCII-8BIT)"]\n[:ljust, 4, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and BINARY (ASCII-8BIT)"]\n[:rjust, -1, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and BINARY (ASCII-8BIT)"]\n[:rjust, 1, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and BINARY (ASCII-8BIT)"]\n[:rjust, 4, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and BINARY (ASCII-8BIT)"]\n[:center, -1, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and BINARY (ASCII-8BIT)"]\n[:center, 1, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and BINARY (ASCII-8BIT)"]\n[:center, 4, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and BINARY (ASCII-8BIT)"]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("é",encoding:"UTF-8");pad=String.new(255.chr,encoding:"ASCII-8BIT");[:ljust,:rjust,:center].each{|m|[-1,1,4].each{|w|begin;p [m,w,desc(s.send(m,w,pad))];rescue=>x;p [m,w,x.class,x.message];end}}',
+    '[:ljust, -1, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and BINARY (ASCII-8BIT)"]\n[:ljust, 1, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and BINARY (ASCII-8BIT)"]\n[:ljust, 4, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and BINARY (ASCII-8BIT)"]\n[:rjust, -1, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and BINARY (ASCII-8BIT)"]\n[:rjust, 1, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and BINARY (ASCII-8BIT)"]\n[:rjust, 4, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and BINARY (ASCII-8BIT)"]\n[:center, -1, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and BINARY (ASCII-8BIT)"]\n[:center, 1, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and BINARY (ASCII-8BIT)"]\n[:center, 4, Encoding::CompatibilityError, "incompatible character encodings: UTF-8 and BINARY (ASCII-8BIT)"]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("é",encoding:"UTF-8");pad=String.new("",encoding:"ASCII-8BIT");[:ljust,:rjust,:center].each{|m|[-1,1,4].each{|w|begin;p [m,w,desc(s.send(m,w,pad))];rescue=>x;p [m,w,x.class,x.message];end}}',
+    '[:ljust, -1, ArgumentError, "zero width padding"]\n[:ljust, 1, ArgumentError, "zero width padding"]\n[:ljust, 4, ArgumentError, "zero width padding"]\n[:rjust, -1, ArgumentError, "zero width padding"]\n[:rjust, 1, ArgumentError, "zero width padding"]\n[:rjust, 4, ArgumentError, "zero width padding"]\n[:center, -1, ArgumentError, "zero width padding"]\n[:center, 1, ArgumentError, "zero width padding"]\n[:center, 4, ArgumentError, "zero width padding"]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("é",encoding:"UTF-8");pad=String.new("x",encoding:"ASCII-8BIT");[:ljust,:rjust,:center].each{|m|[-1,1,4].each{|w|begin;p [m,w,desc(s.send(m,w,pad))];rescue=>x;p [m,w,x.class,x.message];end}}',
+    '[:ljust, -1, [[195, 169], #<Encoding:UTF-8>, true]]\n[:ljust, 1, [[195, 169], #<Encoding:UTF-8>, true]]\n[:ljust, 4, [[195, 169, 120, 120, 120], #<Encoding:UTF-8>, true]]\n[:rjust, -1, [[195, 169], #<Encoding:UTF-8>, true]]\n[:rjust, 1, [[195, 169], #<Encoding:UTF-8>, true]]\n[:rjust, 4, [[120, 120, 120, 195, 169], #<Encoding:UTF-8>, true]]\n[:center, -1, [[195, 169], #<Encoding:UTF-8>, true]]\n[:center, 1, [[195, 169], #<Encoding:UTF-8>, true]]\n[:center, 4, [[120, 195, 169, 120, 120], #<Encoding:UTF-8>, true]]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("",encoding:"UTF-8");pad=String.new("é",encoding:"ASCII-8BIT");[:ljust,:rjust,:center].each{|m|[-1,1,4].each{|w|begin;p [m,w,desc(s.send(m,w,pad))];rescue=>x;p [m,w,x.class,x.message];end}}',
+    '[:ljust, -1, [[], #<Encoding:UTF-8>, true]]\n[:ljust, 1, [[195], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:ljust, 4, [[195, 169, 195, 169], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:rjust, -1, [[], #<Encoding:UTF-8>, true]]\n[:rjust, 1, [[195], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:rjust, 4, [[195, 169, 195, 169], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:center, -1, [[], #<Encoding:UTF-8>, true]]\n[:center, 1, [[195], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:center, 4, [[195, 169, 195, 169], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("",encoding:"UTF-8");pad=String.new(255.chr,encoding:"ASCII-8BIT");[:ljust,:rjust,:center].each{|m|[-1,1,4].each{|w|begin;p [m,w,desc(s.send(m,w,pad))];rescue=>x;p [m,w,x.class,x.message];end}}',
+    '[:ljust, -1, [[], #<Encoding:UTF-8>, true]]\n[:ljust, 1, [[255], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:ljust, 4, [[255, 255, 255, 255], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:rjust, -1, [[], #<Encoding:UTF-8>, true]]\n[:rjust, 1, [[255], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:rjust, 4, [[255, 255, 255, 255], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:center, -1, [[], #<Encoding:UTF-8>, true]]\n[:center, 1, [[255], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:center, 4, [[255, 255, 255, 255], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("",encoding:"UTF-8");pad=String.new("",encoding:"ASCII-8BIT");[:ljust,:rjust,:center].each{|m|[-1,1,4].each{|w|begin;p [m,w,desc(s.send(m,w,pad))];rescue=>x;p [m,w,x.class,x.message];end}}',
+    '[:ljust, -1, ArgumentError, "zero width padding"]\n[:ljust, 1, ArgumentError, "zero width padding"]\n[:ljust, 4, ArgumentError, "zero width padding"]\n[:rjust, -1, ArgumentError, "zero width padding"]\n[:rjust, 1, ArgumentError, "zero width padding"]\n[:rjust, 4, ArgumentError, "zero width padding"]\n[:center, -1, ArgumentError, "zero width padding"]\n[:center, 1, ArgumentError, "zero width padding"]\n[:center, 4, ArgumentError, "zero width padding"]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("",encoding:"UTF-8");pad=String.new("x",encoding:"ASCII-8BIT");[:ljust,:rjust,:center].each{|m|[-1,1,4].each{|w|begin;p [m,w,desc(s.send(m,w,pad))];rescue=>x;p [m,w,x.class,x.message];end}}',
+    '[:ljust, -1, [[], #<Encoding:UTF-8>, true]]\n[:ljust, 1, [[120], #<Encoding:UTF-8>, true]]\n[:ljust, 4, [[120, 120, 120, 120], #<Encoding:UTF-8>, true]]\n[:rjust, -1, [[], #<Encoding:UTF-8>, true]]\n[:rjust, 1, [[120], #<Encoding:UTF-8>, true]]\n[:rjust, 4, [[120, 120, 120, 120], #<Encoding:UTF-8>, true]]\n[:center, -1, [[], #<Encoding:UTF-8>, true]]\n[:center, 1, [[120], #<Encoding:UTF-8>, true]]\n[:center, 4, [[120, 120, 120, 120], #<Encoding:UTF-8>, true]]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("abc",encoding:"UTF-8");pad=String.new("é",encoding:"ASCII-8BIT");[:ljust,:rjust,:center].each{|m|[-1,1,4].each{|w|begin;p [m,w,desc(s.send(m,w,pad))];rescue=>x;p [m,w,x.class,x.message];end}}',
+    '[:ljust, -1, [[97, 98, 99], #<Encoding:UTF-8>, true]]\n[:ljust, 1, [[97, 98, 99], #<Encoding:UTF-8>, true]]\n[:ljust, 4, [[97, 98, 99, 195], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:rjust, -1, [[97, 98, 99], #<Encoding:UTF-8>, true]]\n[:rjust, 1, [[97, 98, 99], #<Encoding:UTF-8>, true]]\n[:rjust, 4, [[195, 97, 98, 99], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:center, -1, [[97, 98, 99], #<Encoding:UTF-8>, true]]\n[:center, 1, [[97, 98, 99], #<Encoding:UTF-8>, true]]\n[:center, 4, [[97, 98, 99, 195], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("abc",encoding:"UTF-8");pad=String.new(255.chr,encoding:"ASCII-8BIT");[:ljust,:rjust,:center].each{|m|[-1,1,4].each{|w|begin;p [m,w,desc(s.send(m,w,pad))];rescue=>x;p [m,w,x.class,x.message];end}}',
+    '[:ljust, -1, [[97, 98, 99], #<Encoding:UTF-8>, true]]\n[:ljust, 1, [[97, 98, 99], #<Encoding:UTF-8>, true]]\n[:ljust, 4, [[97, 98, 99, 255], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:rjust, -1, [[97, 98, 99], #<Encoding:UTF-8>, true]]\n[:rjust, 1, [[97, 98, 99], #<Encoding:UTF-8>, true]]\n[:rjust, 4, [[255, 97, 98, 99], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:center, -1, [[97, 98, 99], #<Encoding:UTF-8>, true]]\n[:center, 1, [[97, 98, 99], #<Encoding:UTF-8>, true]]\n[:center, 4, [[97, 98, 99, 255], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("abc",encoding:"UTF-8");pad=String.new("",encoding:"ASCII-8BIT");[:ljust,:rjust,:center].each{|m|[-1,1,4].each{|w|begin;p [m,w,desc(s.send(m,w,pad))];rescue=>x;p [m,w,x.class,x.message];end}}',
+    '[:ljust, -1, ArgumentError, "zero width padding"]\n[:ljust, 1, ArgumentError, "zero width padding"]\n[:ljust, 4, ArgumentError, "zero width padding"]\n[:rjust, -1, ArgumentError, "zero width padding"]\n[:rjust, 1, ArgumentError, "zero width padding"]\n[:rjust, 4, ArgumentError, "zero width padding"]\n[:center, -1, ArgumentError, "zero width padding"]\n[:center, 1, ArgumentError, "zero width padding"]\n[:center, 4, ArgumentError, "zero width padding"]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("abc",encoding:"UTF-8");pad=String.new("x",encoding:"ASCII-8BIT");[:ljust,:rjust,:center].each{|m|[-1,1,4].each{|w|begin;p [m,w,desc(s.send(m,w,pad))];rescue=>x;p [m,w,x.class,x.message];end}}',
+    '[:ljust, -1, [[97, 98, 99], #<Encoding:UTF-8>, true]]\n[:ljust, 1, [[97, 98, 99], #<Encoding:UTF-8>, true]]\n[:ljust, 4, [[97, 98, 99, 120], #<Encoding:UTF-8>, true]]\n[:rjust, -1, [[97, 98, 99], #<Encoding:UTF-8>, true]]\n[:rjust, 1, [[97, 98, 99], #<Encoding:UTF-8>, true]]\n[:rjust, 4, [[120, 97, 98, 99], #<Encoding:UTF-8>, true]]\n[:center, -1, [[97, 98, 99], #<Encoding:UTF-8>, true]]\n[:center, 1, [[97, 98, 99], #<Encoding:UTF-8>, true]]\n[:center, 4, [[97, 98, 99, 120], #<Encoding:UTF-8>, true]]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("é",encoding:"ASCII-8BIT");pad=String.new("é",encoding:"US-ASCII");[:ljust,:rjust,:center].each{|m|[-1,1,4].each{|w|begin;p [m,w,desc(s.send(m,w,pad))];rescue=>x;p [m,w,x.class,x.message];end}}',
+    '[:ljust, -1, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and US-ASCII"]\n[:ljust, 1, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and US-ASCII"]\n[:ljust, 4, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and US-ASCII"]\n[:rjust, -1, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and US-ASCII"]\n[:rjust, 1, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and US-ASCII"]\n[:rjust, 4, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and US-ASCII"]\n[:center, -1, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and US-ASCII"]\n[:center, 1, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and US-ASCII"]\n[:center, 4, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and US-ASCII"]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("é",encoding:"ASCII-8BIT");pad=String.new(255.chr,encoding:"US-ASCII");[:ljust,:rjust,:center].each{|m|[-1,1,4].each{|w|begin;p [m,w,desc(s.send(m,w,pad))];rescue=>x;p [m,w,x.class,x.message];end}}',
+    '[:ljust, -1, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and US-ASCII"]\n[:ljust, 1, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and US-ASCII"]\n[:ljust, 4, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and US-ASCII"]\n[:rjust, -1, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and US-ASCII"]\n[:rjust, 1, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and US-ASCII"]\n[:rjust, 4, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and US-ASCII"]\n[:center, -1, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and US-ASCII"]\n[:center, 1, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and US-ASCII"]\n[:center, 4, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and US-ASCII"]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("é",encoding:"ASCII-8BIT");pad=String.new("",encoding:"US-ASCII");[:ljust,:rjust,:center].each{|m|[-1,1,4].each{|w|begin;p [m,w,desc(s.send(m,w,pad))];rescue=>x;p [m,w,x.class,x.message];end}}',
+    '[:ljust, -1, ArgumentError, "zero width padding"]\n[:ljust, 1, ArgumentError, "zero width padding"]\n[:ljust, 4, ArgumentError, "zero width padding"]\n[:rjust, -1, ArgumentError, "zero width padding"]\n[:rjust, 1, ArgumentError, "zero width padding"]\n[:rjust, 4, ArgumentError, "zero width padding"]\n[:center, -1, ArgumentError, "zero width padding"]\n[:center, 1, ArgumentError, "zero width padding"]\n[:center, 4, ArgumentError, "zero width padding"]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("é",encoding:"ASCII-8BIT");pad=String.new("x",encoding:"US-ASCII");[:ljust,:rjust,:center].each{|m|[-1,1,4].each{|w|begin;p [m,w,desc(s.send(m,w,pad))];rescue=>x;p [m,w,x.class,x.message];end}}',
+    '[:ljust, -1, [[195, 169], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:ljust, 1, [[195, 169], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:ljust, 4, [[195, 169, 120, 120], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:rjust, -1, [[195, 169], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:rjust, 1, [[195, 169], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:rjust, 4, [[120, 120, 195, 169], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:center, -1, [[195, 169], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:center, 1, [[195, 169], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:center, 4, [[120, 195, 169, 120], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("",encoding:"ASCII-8BIT");pad=String.new("é",encoding:"US-ASCII");[:ljust,:rjust,:center].each{|m|[-1,1,4].each{|w|begin;p [m,w,desc(s.send(m,w,pad))];rescue=>x;p [m,w,x.class,x.message];end}}',
+    '[:ljust, -1, [[], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:ljust, 1, [[195], #<Encoding:US-ASCII>, false]]\n[:ljust, 4, [[195, 169, 195, 169], #<Encoding:US-ASCII>, false]]\n[:rjust, -1, [[], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:rjust, 1, [[195], #<Encoding:US-ASCII>, false]]\n[:rjust, 4, [[195, 169, 195, 169], #<Encoding:US-ASCII>, false]]\n[:center, -1, [[], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:center, 1, [[195], #<Encoding:US-ASCII>, false]]\n[:center, 4, [[195, 169, 195, 169], #<Encoding:US-ASCII>, false]]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("",encoding:"ASCII-8BIT");pad=String.new(255.chr,encoding:"US-ASCII");[:ljust,:rjust,:center].each{|m|[-1,1,4].each{|w|begin;p [m,w,desc(s.send(m,w,pad))];rescue=>x;p [m,w,x.class,x.message];end}}',
+    '[:ljust, -1, [[], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:ljust, 1, [[255], #<Encoding:US-ASCII>, false]]\n[:ljust, 4, [[255, 255, 255, 255], #<Encoding:US-ASCII>, false]]\n[:rjust, -1, [[], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:rjust, 1, [[255], #<Encoding:US-ASCII>, false]]\n[:rjust, 4, [[255, 255, 255, 255], #<Encoding:US-ASCII>, false]]\n[:center, -1, [[], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:center, 1, [[255], #<Encoding:US-ASCII>, false]]\n[:center, 4, [[255, 255, 255, 255], #<Encoding:US-ASCII>, false]]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("",encoding:"ASCII-8BIT");pad=String.new("",encoding:"US-ASCII");[:ljust,:rjust,:center].each{|m|[-1,1,4].each{|w|begin;p [m,w,desc(s.send(m,w,pad))];rescue=>x;p [m,w,x.class,x.message];end}}',
+    '[:ljust, -1, ArgumentError, "zero width padding"]\n[:ljust, 1, ArgumentError, "zero width padding"]\n[:ljust, 4, ArgumentError, "zero width padding"]\n[:rjust, -1, ArgumentError, "zero width padding"]\n[:rjust, 1, ArgumentError, "zero width padding"]\n[:rjust, 4, ArgumentError, "zero width padding"]\n[:center, -1, ArgumentError, "zero width padding"]\n[:center, 1, ArgumentError, "zero width padding"]\n[:center, 4, ArgumentError, "zero width padding"]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("",encoding:"ASCII-8BIT");pad=String.new("x",encoding:"US-ASCII");[:ljust,:rjust,:center].each{|m|[-1,1,4].each{|w|begin;p [m,w,desc(s.send(m,w,pad))];rescue=>x;p [m,w,x.class,x.message];end}}',
+    '[:ljust, -1, [[], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:ljust, 1, [[120], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:ljust, 4, [[120, 120, 120, 120], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:rjust, -1, [[], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:rjust, 1, [[120], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:rjust, 4, [[120, 120, 120, 120], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:center, -1, [[], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:center, 1, [[120], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:center, 4, [[120, 120, 120, 120], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("abc",encoding:"ASCII-8BIT");pad=String.new("é",encoding:"US-ASCII");[:ljust,:rjust,:center].each{|m|[-1,1,4].each{|w|begin;p [m,w,desc(s.send(m,w,pad))];rescue=>x;p [m,w,x.class,x.message];end}}',
+    '[:ljust, -1, [[97, 98, 99], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:ljust, 1, [[97, 98, 99], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:ljust, 4, [[97, 98, 99, 195], #<Encoding:US-ASCII>, false]]\n[:rjust, -1, [[97, 98, 99], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:rjust, 1, [[97, 98, 99], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:rjust, 4, [[195, 97, 98, 99], #<Encoding:US-ASCII>, false]]\n[:center, -1, [[97, 98, 99], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:center, 1, [[97, 98, 99], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:center, 4, [[97, 98, 99, 195], #<Encoding:US-ASCII>, false]]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("abc",encoding:"ASCII-8BIT");pad=String.new(255.chr,encoding:"US-ASCII");[:ljust,:rjust,:center].each{|m|[-1,1,4].each{|w|begin;p [m,w,desc(s.send(m,w,pad))];rescue=>x;p [m,w,x.class,x.message];end}}',
+    '[:ljust, -1, [[97, 98, 99], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:ljust, 1, [[97, 98, 99], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:ljust, 4, [[97, 98, 99, 255], #<Encoding:US-ASCII>, false]]\n[:rjust, -1, [[97, 98, 99], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:rjust, 1, [[97, 98, 99], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:rjust, 4, [[255, 97, 98, 99], #<Encoding:US-ASCII>, false]]\n[:center, -1, [[97, 98, 99], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:center, 1, [[97, 98, 99], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:center, 4, [[97, 98, 99, 255], #<Encoding:US-ASCII>, false]]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("abc",encoding:"ASCII-8BIT");pad=String.new("",encoding:"US-ASCII");[:ljust,:rjust,:center].each{|m|[-1,1,4].each{|w|begin;p [m,w,desc(s.send(m,w,pad))];rescue=>x;p [m,w,x.class,x.message];end}}',
+    '[:ljust, -1, ArgumentError, "zero width padding"]\n[:ljust, 1, ArgumentError, "zero width padding"]\n[:ljust, 4, ArgumentError, "zero width padding"]\n[:rjust, -1, ArgumentError, "zero width padding"]\n[:rjust, 1, ArgumentError, "zero width padding"]\n[:rjust, 4, ArgumentError, "zero width padding"]\n[:center, -1, ArgumentError, "zero width padding"]\n[:center, 1, ArgumentError, "zero width padding"]\n[:center, 4, ArgumentError, "zero width padding"]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("abc",encoding:"ASCII-8BIT");pad=String.new("x",encoding:"US-ASCII");[:ljust,:rjust,:center].each{|m|[-1,1,4].each{|w|begin;p [m,w,desc(s.send(m,w,pad))];rescue=>x;p [m,w,x.class,x.message];end}}',
+    '[:ljust, -1, [[97, 98, 99], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:ljust, 1, [[97, 98, 99], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:ljust, 4, [[97, 98, 99, 120], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:rjust, -1, [[97, 98, 99], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:rjust, 1, [[97, 98, 99], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:rjust, 4, [[120, 97, 98, 99], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:center, -1, [[97, 98, 99], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:center, 1, [[97, 98, 99], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:center, 4, [[97, 98, 99, 120], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("é",encoding:"ASCII-8BIT");pad=String.new("é",encoding:"UTF-8");[:ljust,:rjust,:center].each{|m|[-1,1,4].each{|w|begin;p [m,w,desc(s.send(m,w,pad))];rescue=>x;p [m,w,x.class,x.message];end}}',
+    '[:ljust, -1, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and UTF-8"]\n[:ljust, 1, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and UTF-8"]\n[:ljust, 4, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and UTF-8"]\n[:rjust, -1, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and UTF-8"]\n[:rjust, 1, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and UTF-8"]\n[:rjust, 4, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and UTF-8"]\n[:center, -1, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and UTF-8"]\n[:center, 1, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and UTF-8"]\n[:center, 4, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and UTF-8"]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("é",encoding:"ASCII-8BIT");pad=String.new(255.chr,encoding:"UTF-8");[:ljust,:rjust,:center].each{|m|[-1,1,4].each{|w|begin;p [m,w,desc(s.send(m,w,pad))];rescue=>x;p [m,w,x.class,x.message];end}}',
+    '[:ljust, -1, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and UTF-8"]\n[:ljust, 1, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and UTF-8"]\n[:ljust, 4, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and UTF-8"]\n[:rjust, -1, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and UTF-8"]\n[:rjust, 1, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and UTF-8"]\n[:rjust, 4, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and UTF-8"]\n[:center, -1, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and UTF-8"]\n[:center, 1, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and UTF-8"]\n[:center, 4, Encoding::CompatibilityError, "incompatible character encodings: BINARY (ASCII-8BIT) and UTF-8"]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("é",encoding:"ASCII-8BIT");pad=String.new("",encoding:"UTF-8");[:ljust,:rjust,:center].each{|m|[-1,1,4].each{|w|begin;p [m,w,desc(s.send(m,w,pad))];rescue=>x;p [m,w,x.class,x.message];end}}',
+    '[:ljust, -1, ArgumentError, "zero width padding"]\n[:ljust, 1, ArgumentError, "zero width padding"]\n[:ljust, 4, ArgumentError, "zero width padding"]\n[:rjust, -1, ArgumentError, "zero width padding"]\n[:rjust, 1, ArgumentError, "zero width padding"]\n[:rjust, 4, ArgumentError, "zero width padding"]\n[:center, -1, ArgumentError, "zero width padding"]\n[:center, 1, ArgumentError, "zero width padding"]\n[:center, 4, ArgumentError, "zero width padding"]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("é",encoding:"ASCII-8BIT");pad=String.new("x",encoding:"UTF-8");[:ljust,:rjust,:center].each{|m|[-1,1,4].each{|w|begin;p [m,w,desc(s.send(m,w,pad))];rescue=>x;p [m,w,x.class,x.message];end}}',
+    '[:ljust, -1, [[195, 169], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:ljust, 1, [[195, 169], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:ljust, 4, [[195, 169, 120, 120], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:rjust, -1, [[195, 169], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:rjust, 1, [[195, 169], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:rjust, 4, [[120, 120, 195, 169], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:center, -1, [[195, 169], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:center, 1, [[195, 169], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:center, 4, [[120, 195, 169, 120], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("",encoding:"ASCII-8BIT");pad=String.new("é",encoding:"UTF-8");[:ljust,:rjust,:center].each{|m|[-1,1,4].each{|w|begin;p [m,w,desc(s.send(m,w,pad))];rescue=>x;p [m,w,x.class,x.message];end}}',
+    '[:ljust, -1, [[], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:ljust, 1, [[195, 169], #<Encoding:UTF-8>, true]]\n[:ljust, 4, [[195, 169, 195, 169, 195, 169, 195, 169], #<Encoding:UTF-8>, true]]\n[:rjust, -1, [[], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:rjust, 1, [[195, 169], #<Encoding:UTF-8>, true]]\n[:rjust, 4, [[195, 169, 195, 169, 195, 169, 195, 169], #<Encoding:UTF-8>, true]]\n[:center, -1, [[], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:center, 1, [[195, 169], #<Encoding:UTF-8>, true]]\n[:center, 4, [[195, 169, 195, 169, 195, 169, 195, 169], #<Encoding:UTF-8>, true]]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("",encoding:"ASCII-8BIT");pad=String.new(255.chr,encoding:"UTF-8");[:ljust,:rjust,:center].each{|m|[-1,1,4].each{|w|begin;p [m,w,desc(s.send(m,w,pad))];rescue=>x;p [m,w,x.class,x.message];end}}',
+    '[:ljust, -1, [[], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:ljust, 1, [[255], #<Encoding:UTF-8>, false]]\n[:ljust, 4, [[255, 255, 255, 255], #<Encoding:UTF-8>, false]]\n[:rjust, -1, [[], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:rjust, 1, [[255], #<Encoding:UTF-8>, false]]\n[:rjust, 4, [[255, 255, 255, 255], #<Encoding:UTF-8>, false]]\n[:center, -1, [[], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:center, 1, [[255], #<Encoding:UTF-8>, false]]\n[:center, 4, [[255, 255, 255, 255], #<Encoding:UTF-8>, false]]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("",encoding:"ASCII-8BIT");pad=String.new("",encoding:"UTF-8");[:ljust,:rjust,:center].each{|m|[-1,1,4].each{|w|begin;p [m,w,desc(s.send(m,w,pad))];rescue=>x;p [m,w,x.class,x.message];end}}',
+    '[:ljust, -1, ArgumentError, "zero width padding"]\n[:ljust, 1, ArgumentError, "zero width padding"]\n[:ljust, 4, ArgumentError, "zero width padding"]\n[:rjust, -1, ArgumentError, "zero width padding"]\n[:rjust, 1, ArgumentError, "zero width padding"]\n[:rjust, 4, ArgumentError, "zero width padding"]\n[:center, -1, ArgumentError, "zero width padding"]\n[:center, 1, ArgumentError, "zero width padding"]\n[:center, 4, ArgumentError, "zero width padding"]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("",encoding:"ASCII-8BIT");pad=String.new("x",encoding:"UTF-8");[:ljust,:rjust,:center].each{|m|[-1,1,4].each{|w|begin;p [m,w,desc(s.send(m,w,pad))];rescue=>x;p [m,w,x.class,x.message];end}}',
+    '[:ljust, -1, [[], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:ljust, 1, [[120], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:ljust, 4, [[120, 120, 120, 120], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:rjust, -1, [[], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:rjust, 1, [[120], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:rjust, 4, [[120, 120, 120, 120], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:center, -1, [[], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:center, 1, [[120], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:center, 4, [[120, 120, 120, 120], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("abc",encoding:"ASCII-8BIT");pad=String.new("é",encoding:"UTF-8");[:ljust,:rjust,:center].each{|m|[-1,1,4].each{|w|begin;p [m,w,desc(s.send(m,w,pad))];rescue=>x;p [m,w,x.class,x.message];end}}',
+    '[:ljust, -1, [[97, 98, 99], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:ljust, 1, [[97, 98, 99], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:ljust, 4, [[97, 98, 99, 195, 169], #<Encoding:UTF-8>, true]]\n[:rjust, -1, [[97, 98, 99], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:rjust, 1, [[97, 98, 99], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:rjust, 4, [[195, 169, 97, 98, 99], #<Encoding:UTF-8>, true]]\n[:center, -1, [[97, 98, 99], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:center, 1, [[97, 98, 99], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:center, 4, [[97, 98, 99, 195, 169], #<Encoding:UTF-8>, true]]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("abc",encoding:"ASCII-8BIT");pad=String.new(255.chr,encoding:"UTF-8");[:ljust,:rjust,:center].each{|m|[-1,1,4].each{|w|begin;p [m,w,desc(s.send(m,w,pad))];rescue=>x;p [m,w,x.class,x.message];end}}',
+    '[:ljust, -1, [[97, 98, 99], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:ljust, 1, [[97, 98, 99], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:ljust, 4, [[97, 98, 99, 255], #<Encoding:UTF-8>, false]]\n[:rjust, -1, [[97, 98, 99], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:rjust, 1, [[97, 98, 99], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:rjust, 4, [[255, 97, 98, 99], #<Encoding:UTF-8>, false]]\n[:center, -1, [[97, 98, 99], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:center, 1, [[97, 98, 99], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:center, 4, [[97, 98, 99, 255], #<Encoding:UTF-8>, false]]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("abc",encoding:"ASCII-8BIT");pad=String.new("",encoding:"UTF-8");[:ljust,:rjust,:center].each{|m|[-1,1,4].each{|w|begin;p [m,w,desc(s.send(m,w,pad))];rescue=>x;p [m,w,x.class,x.message];end}}',
+    '[:ljust, -1, ArgumentError, "zero width padding"]\n[:ljust, 1, ArgumentError, "zero width padding"]\n[:ljust, 4, ArgumentError, "zero width padding"]\n[:rjust, -1, ArgumentError, "zero width padding"]\n[:rjust, 1, ArgumentError, "zero width padding"]\n[:rjust, 4, ArgumentError, "zero width padding"]\n[:center, -1, ArgumentError, "zero width padding"]\n[:center, 1, ArgumentError, "zero width padding"]\n[:center, 4, ArgumentError, "zero width padding"]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("abc",encoding:"ASCII-8BIT");pad=String.new("x",encoding:"UTF-8");[:ljust,:rjust,:center].each{|m|[-1,1,4].each{|w|begin;p [m,w,desc(s.send(m,w,pad))];rescue=>x;p [m,w,x.class,x.message];end}}',
+    '[:ljust, -1, [[97, 98, 99], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:ljust, 1, [[97, 98, 99], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:ljust, 4, [[97, 98, 99, 120], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:rjust, -1, [[97, 98, 99], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:rjust, 1, [[97, 98, 99], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:rjust, 4, [[120, 97, 98, 99], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:center, -1, [[97, 98, 99], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:center, 1, [[97, 98, 99], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:center, 4, [[97, 98, 99, 120], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("é",encoding:"ASCII-8BIT");pad=String.new("é",encoding:"ASCII-8BIT");[:ljust,:rjust,:center].each{|m|[-1,1,4].each{|w|begin;p [m,w,desc(s.send(m,w,pad))];rescue=>x;p [m,w,x.class,x.message];end}}',
+    '[:ljust, -1, [[195, 169], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:ljust, 1, [[195, 169], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:ljust, 4, [[195, 169, 195, 169], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:rjust, -1, [[195, 169], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:rjust, 1, [[195, 169], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:rjust, 4, [[195, 169, 195, 169], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:center, -1, [[195, 169], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:center, 1, [[195, 169], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:center, 4, [[195, 195, 169, 195], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("é",encoding:"ASCII-8BIT");pad=String.new(255.chr,encoding:"ASCII-8BIT");[:ljust,:rjust,:center].each{|m|[-1,1,4].each{|w|begin;p [m,w,desc(s.send(m,w,pad))];rescue=>x;p [m,w,x.class,x.message];end}}',
+    '[:ljust, -1, [[195, 169], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:ljust, 1, [[195, 169], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:ljust, 4, [[195, 169, 255, 255], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:rjust, -1, [[195, 169], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:rjust, 1, [[195, 169], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:rjust, 4, [[255, 255, 195, 169], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:center, -1, [[195, 169], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:center, 1, [[195, 169], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:center, 4, [[255, 195, 169, 255], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("é",encoding:"ASCII-8BIT");pad=String.new("",encoding:"ASCII-8BIT");[:ljust,:rjust,:center].each{|m|[-1,1,4].each{|w|begin;p [m,w,desc(s.send(m,w,pad))];rescue=>x;p [m,w,x.class,x.message];end}}',
+    '[:ljust, -1, ArgumentError, "zero width padding"]\n[:ljust, 1, ArgumentError, "zero width padding"]\n[:ljust, 4, ArgumentError, "zero width padding"]\n[:rjust, -1, ArgumentError, "zero width padding"]\n[:rjust, 1, ArgumentError, "zero width padding"]\n[:rjust, 4, ArgumentError, "zero width padding"]\n[:center, -1, ArgumentError, "zero width padding"]\n[:center, 1, ArgumentError, "zero width padding"]\n[:center, 4, ArgumentError, "zero width padding"]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("é",encoding:"ASCII-8BIT");pad=String.new("x",encoding:"ASCII-8BIT");[:ljust,:rjust,:center].each{|m|[-1,1,4].each{|w|begin;p [m,w,desc(s.send(m,w,pad))];rescue=>x;p [m,w,x.class,x.message];end}}',
+    '[:ljust, -1, [[195, 169], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:ljust, 1, [[195, 169], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:ljust, 4, [[195, 169, 120, 120], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:rjust, -1, [[195, 169], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:rjust, 1, [[195, 169], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:rjust, 4, [[120, 120, 195, 169], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:center, -1, [[195, 169], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:center, 1, [[195, 169], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:center, 4, [[120, 195, 169, 120], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("",encoding:"ASCII-8BIT");pad=String.new("é",encoding:"ASCII-8BIT");[:ljust,:rjust,:center].each{|m|[-1,1,4].each{|w|begin;p [m,w,desc(s.send(m,w,pad))];rescue=>x;p [m,w,x.class,x.message];end}}',
+    '[:ljust, -1, [[], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:ljust, 1, [[195], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:ljust, 4, [[195, 169, 195, 169], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:rjust, -1, [[], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:rjust, 1, [[195], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:rjust, 4, [[195, 169, 195, 169], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:center, -1, [[], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:center, 1, [[195], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:center, 4, [[195, 169, 195, 169], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("",encoding:"ASCII-8BIT");pad=String.new(255.chr,encoding:"ASCII-8BIT");[:ljust,:rjust,:center].each{|m|[-1,1,4].each{|w|begin;p [m,w,desc(s.send(m,w,pad))];rescue=>x;p [m,w,x.class,x.message];end}}',
+    '[:ljust, -1, [[], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:ljust, 1, [[255], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:ljust, 4, [[255, 255, 255, 255], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:rjust, -1, [[], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:rjust, 1, [[255], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:rjust, 4, [[255, 255, 255, 255], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:center, -1, [[], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:center, 1, [[255], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:center, 4, [[255, 255, 255, 255], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("",encoding:"ASCII-8BIT");pad=String.new("",encoding:"ASCII-8BIT");[:ljust,:rjust,:center].each{|m|[-1,1,4].each{|w|begin;p [m,w,desc(s.send(m,w,pad))];rescue=>x;p [m,w,x.class,x.message];end}}',
+    '[:ljust, -1, ArgumentError, "zero width padding"]\n[:ljust, 1, ArgumentError, "zero width padding"]\n[:ljust, 4, ArgumentError, "zero width padding"]\n[:rjust, -1, ArgumentError, "zero width padding"]\n[:rjust, 1, ArgumentError, "zero width padding"]\n[:rjust, 4, ArgumentError, "zero width padding"]\n[:center, -1, ArgumentError, "zero width padding"]\n[:center, 1, ArgumentError, "zero width padding"]\n[:center, 4, ArgumentError, "zero width padding"]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("",encoding:"ASCII-8BIT");pad=String.new("x",encoding:"ASCII-8BIT");[:ljust,:rjust,:center].each{|m|[-1,1,4].each{|w|begin;p [m,w,desc(s.send(m,w,pad))];rescue=>x;p [m,w,x.class,x.message];end}}',
+    '[:ljust, -1, [[], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:ljust, 1, [[120], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:ljust, 4, [[120, 120, 120, 120], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:rjust, -1, [[], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:rjust, 1, [[120], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:rjust, 4, [[120, 120, 120, 120], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:center, -1, [[], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:center, 1, [[120], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:center, 4, [[120, 120, 120, 120], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("abc",encoding:"ASCII-8BIT");pad=String.new("é",encoding:"ASCII-8BIT");[:ljust,:rjust,:center].each{|m|[-1,1,4].each{|w|begin;p [m,w,desc(s.send(m,w,pad))];rescue=>x;p [m,w,x.class,x.message];end}}',
+    '[:ljust, -1, [[97, 98, 99], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:ljust, 1, [[97, 98, 99], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:ljust, 4, [[97, 98, 99, 195], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:rjust, -1, [[97, 98, 99], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:rjust, 1, [[97, 98, 99], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:rjust, 4, [[195, 97, 98, 99], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:center, -1, [[97, 98, 99], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:center, 1, [[97, 98, 99], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:center, 4, [[97, 98, 99, 195], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("abc",encoding:"ASCII-8BIT");pad=String.new(255.chr,encoding:"ASCII-8BIT");[:ljust,:rjust,:center].each{|m|[-1,1,4].each{|w|begin;p [m,w,desc(s.send(m,w,pad))];rescue=>x;p [m,w,x.class,x.message];end}}',
+    '[:ljust, -1, [[97, 98, 99], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:ljust, 1, [[97, 98, 99], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:ljust, 4, [[97, 98, 99, 255], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:rjust, -1, [[97, 98, 99], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:rjust, 1, [[97, 98, 99], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:rjust, 4, [[255, 97, 98, 99], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:center, -1, [[97, 98, 99], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:center, 1, [[97, 98, 99], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:center, 4, [[97, 98, 99, 255], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("abc",encoding:"ASCII-8BIT");pad=String.new("",encoding:"ASCII-8BIT");[:ljust,:rjust,:center].each{|m|[-1,1,4].each{|w|begin;p [m,w,desc(s.send(m,w,pad))];rescue=>x;p [m,w,x.class,x.message];end}}',
+    '[:ljust, -1, ArgumentError, "zero width padding"]\n[:ljust, 1, ArgumentError, "zero width padding"]\n[:ljust, 4, ArgumentError, "zero width padding"]\n[:rjust, -1, ArgumentError, "zero width padding"]\n[:rjust, 1, ArgumentError, "zero width padding"]\n[:rjust, 4, ArgumentError, "zero width padding"]\n[:center, -1, ArgumentError, "zero width padding"]\n[:center, 1, ArgumentError, "zero width padding"]\n[:center, 4, ArgumentError, "zero width padding"]\n',
+  ],
+  [
+    'def desc(v);if v.is_a?(String);[v.bytes,v.encoding,v.valid_encoding?];elsif v.is_a?(Array);v.map{|x|desc(x)};else;v;end;end;s=String.new("abc",encoding:"ASCII-8BIT");pad=String.new("x",encoding:"ASCII-8BIT");[:ljust,:rjust,:center].each{|m|[-1,1,4].each{|w|begin;p [m,w,desc(s.send(m,w,pad))];rescue=>x;p [m,w,x.class,x.message];end}}',
+    '[:ljust, -1, [[97, 98, 99], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:ljust, 1, [[97, 98, 99], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:ljust, 4, [[97, 98, 99, 120], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:rjust, -1, [[97, 98, 99], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:rjust, 1, [[97, 98, 99], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:rjust, 4, [[120, 97, 98, 99], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:center, -1, [[97, 98, 99], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:center, 1, [[97, 98, 99], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n[:center, 4, [[97, 98, 99, 120], #<Encoding:BINARY (ASCII-8BIT)>, true]]\n',
+  ],
+  [
+    '$s=String.new("abc",encoding:"US-ASCII");class Pattern;def to_str;puts :converted;$s.replace(String.new("éa",encoding:"US-ASCII"));"a";end;end;begin;x=$s.count(Pattern.new);p x;rescue=>e;p e.class,e.message;end;p $s.bytes,$s.encoding',
+    'converted\nArgumentError\n"invalid byte sequence in US-ASCII"\n[195, 169, 97]\n#<Encoding:US-ASCII>\n',
+  ],
+  [
+    '$s=String.new("abc",encoding:"UTF-8");class Pattern;def to_str;puts :converted;$s.replace(String.new("éa",encoding:"US-ASCII"));"a";end;end;begin;x=$s.count(Pattern.new);p x;rescue=>e;p e.class,e.message;end;p $s.bytes,$s.encoding',
+    'converted\nArgumentError\n"invalid byte sequence in US-ASCII"\n[195, 169, 97]\n#<Encoding:US-ASCII>\n',
+  ],
+  [
+    '$s=String.new("abc",encoding:"ASCII-8BIT");class Pattern;def to_str;puts :converted;$s.replace(String.new("éa",encoding:"US-ASCII"));"a";end;end;begin;x=$s.count(Pattern.new);p x;rescue=>e;p e.class,e.message;end;p $s.bytes,$s.encoding',
+    'converted\nArgumentError\n"invalid byte sequence in US-ASCII"\n[195, 169, 97]\n#<Encoding:US-ASCII>\n',
+  ],
+  [
+    '$s=String.new("abc",encoding:"US-ASCII");class Pattern;def to_str;puts :converted;$s.replace(String.new("éa",encoding:"US-ASCII"));"a";end;end;begin;x=$s.delete(Pattern.new);p x;rescue=>e;p e.class,e.message;end;p $s.bytes,$s.encoding',
+    'converted\n"bc"\n[195, 169, 97]\n#<Encoding:US-ASCII>\n',
+  ],
+  [
+    '$s=String.new("abc",encoding:"UTF-8");class Pattern;def to_str;puts :converted;$s.replace(String.new("éa",encoding:"US-ASCII"));"a";end;end;begin;x=$s.delete(Pattern.new);p x;rescue=>e;p e.class,e.message;end;p $s.bytes,$s.encoding',
+    'converted\n"bc"\n[195, 169, 97]\n#<Encoding:US-ASCII>\n',
+  ],
+  [
+    '$s=String.new("abc",encoding:"ASCII-8BIT");class Pattern;def to_str;puts :converted;$s.replace(String.new("éa",encoding:"US-ASCII"));"a";end;end;begin;x=$s.delete(Pattern.new);p x;rescue=>e;p e.class,e.message;end;p $s.bytes,$s.encoding',
+    'converted\n"bc"\n[195, 169, 97]\n#<Encoding:US-ASCII>\n',
+  ],
+  [
+    '$s=String.new("abc",encoding:"US-ASCII");class Pattern;def to_str;puts :converted;$s.replace(String.new("éa",encoding:"US-ASCII"));"a";end;end;begin;x=$s.delete!(Pattern.new);p x;rescue=>e;p e.class,e.message;end;p $s.bytes,$s.encoding',
+    'converted\nArgumentError\n"invalid byte sequence in US-ASCII"\n[195, 169, 97]\n#<Encoding:US-ASCII>\n',
+  ],
+  [
+    '$s=String.new("abc",encoding:"UTF-8");class Pattern;def to_str;puts :converted;$s.replace(String.new("éa",encoding:"US-ASCII"));"a";end;end;begin;x=$s.delete!(Pattern.new);p x;rescue=>e;p e.class,e.message;end;p $s.bytes,$s.encoding',
+    'converted\nArgumentError\n"invalid byte sequence in US-ASCII"\n[195, 169, 97]\n#<Encoding:US-ASCII>\n',
+  ],
+  [
+    '$s=String.new("abc",encoding:"ASCII-8BIT");class Pattern;def to_str;puts :converted;$s.replace(String.new("éa",encoding:"US-ASCII"));"a";end;end;begin;x=$s.delete!(Pattern.new);p x;rescue=>e;p e.class,e.message;end;p $s.bytes,$s.encoding',
+    'converted\nArgumentError\n"invalid byte sequence in US-ASCII"\n[195, 169, 97]\n#<Encoding:US-ASCII>\n',
+  ],
+  [
+    '$s=String.new("abc",encoding:"US-ASCII");class Pattern;def to_str;puts :converted;$s.replace(String.new("éa",encoding:"US-ASCII"));"a";end;end;begin;x=$s.split(Pattern.new);p x;rescue=>e;p e.class,e.message;end;p $s.bytes,$s.encoding',
+    'converted\nArgumentError\n"invalid byte sequence in US-ASCII"\n[195, 169, 97]\n#<Encoding:US-ASCII>\n',
+  ],
+  [
+    '$s=String.new("abc",encoding:"UTF-8");class Pattern;def to_str;puts :converted;$s.replace(String.new("éa",encoding:"US-ASCII"));"a";end;end;begin;x=$s.split(Pattern.new);p x;rescue=>e;p e.class,e.message;end;p $s.bytes,$s.encoding',
+    'converted\nArgumentError\n"invalid byte sequence in US-ASCII"\n[195, 169, 97]\n#<Encoding:US-ASCII>\n',
+  ],
+  [
+    '$s=String.new("abc",encoding:"ASCII-8BIT");class Pattern;def to_str;puts :converted;$s.replace(String.new("éa",encoding:"US-ASCII"));"a";end;end;begin;x=$s.split(Pattern.new);p x;rescue=>e;p e.class,e.message;end;p $s.bytes,$s.encoding',
+    'converted\nArgumentError\n"invalid byte sequence in US-ASCII"\n[195, 169, 97]\n#<Encoding:US-ASCII>\n',
+  ],
+  [
+    's=String.new("éa",encoding:"US-ASCII");class Needle;def to_str;puts :needle;"a";end;end;class Position;def initialize(n);@n=n;end;def to_int;puts :position;@n;end;end;begin;p s.index(Needle.new,Position.new(-9));rescue=>e;p e.class,e.message;end',
+    'position\nnil\n',
+  ],
+  [
+    's=String.new("éa",encoding:"US-ASCII");class Needle;def to_str;puts :needle;"a";end;end;class Position;def initialize(n);@n=n;end;def to_int;puts :position;@n;end;end;begin;p s.index(Needle.new,Position.new(0));rescue=>e;p e.class,e.message;end',
+    'position\nneedle\n2\n',
+  ],
+  [
+    's=String.new("éa",encoding:"US-ASCII");class Needle;def to_str;puts :needle;"a";end;end;class Position;def initialize(n);@n=n;end;def to_int;puts :position;@n;end;end;begin;p s.index(Needle.new,Position.new(9));rescue=>e;p e.class,e.message;end',
+    'position\nnil\n',
+  ],
+  [
+    's=String.new("éa",encoding:"US-ASCII");class Needle;def to_str;puts :needle;"a";end;end;class Position;def initialize(n);@n=n;end;def to_int;puts :position;@n;end;end;begin;p s.rindex(Needle.new,Position.new(-9));rescue=>e;p e.class,e.message;end',
+    'position\nnil\n',
+  ],
+  [
+    's=String.new("éa",encoding:"US-ASCII");class Needle;def to_str;puts :needle;"a";end;end;class Position;def initialize(n);@n=n;end;def to_int;puts :position;@n;end;end;begin;p s.rindex(Needle.new,Position.new(0));rescue=>e;p e.class,e.message;end',
+    'position\nneedle\nnil\n',
+  ],
+  [
+    's=String.new("éa",encoding:"US-ASCII");class Needle;def to_str;puts :needle;"a";end;end;class Position;def initialize(n);@n=n;end;def to_int;puts :position;@n;end;end;begin;p s.rindex(Needle.new,Position.new(9));rescue=>e;p e.class,e.message;end',
+    'position\nneedle\n2\n',
+  ],
+  [
+    's=String.new("a",encoding:"US-ASCII");s.upto("c"){|x|p [x.bytes,x.encoding];s.replace("é")};p s.bytes,s.encoding',
+    '[[97], #<Encoding:US-ASCII>]\n[[98], #<Encoding:US-ASCII>]\n[[99], #<Encoding:US-ASCII>]\n[195, 169]\n#<Encoding:UTF-8>\n',
+  ],
+  [
+    's=String.new("a",encoding:"UTF-8");s.upto("c"){|x|p [x.bytes,x.encoding];s.replace("é")};p s.bytes,s.encoding',
+    '[[97], #<Encoding:UTF-8>]\n[[98], #<Encoding:UTF-8>]\n[[99], #<Encoding:UTF-8>]\n[195, 169]\n#<Encoding:UTF-8>\n',
+  ],
+  [
+    's=String.new("a",encoding:"ASCII-8BIT");s.upto("c"){|x|p [x.bytes,x.encoding];s.replace("é")};p s.bytes,s.encoding',
+    '[[97], #<Encoding:BINARY (ASCII-8BIT)>]\n[[98], #<Encoding:BINARY (ASCII-8BIT)>]\n[[99], #<Encoding:BINARY (ASCII-8BIT)>]\n[195, 169]\n#<Encoding:UTF-8>\n',
+  ],
+  [
+    'class String;alias old_succ succ;def succ;puts "succ #{bytes}";old_succ;end;end;s=String.new("aa",encoding:"US-ASCII");p s.upto("ac").map{|x|[x.bytes,x.encoding]}',
+    'succ [97, 99]\nsucc [97, 97]\nsucc [97, 98]\n[[[97, 97], #<Encoding:US-ASCII>], [[97, 98], #<Encoding:US-ASCII>], [[97, 99], #<Encoding:US-ASCII>]]\n',
+  ],
+  [
+    'e=String.new("ac",encoding:"US-ASCII");s=String.new("aa",encoding:"US-ASCII");s.upto(e){|x|p [x.bytes,x.encoding];e.replace("a")};p e.bytes',
+    '[[97, 97], #<Encoding:US-ASCII>]\n[97]\n',
+  ],
+  [
+    's=String.new("aa",encoding:"US-ASCII");p s.upto("ac").map{|x|x.replace("x");[x.bytes,x.encoding]}',
+    '[[[120], #<Encoding:UTF-8>], [[120], #<Encoding:UTF-8>], [[120], #<Encoding:UTF-8>]]\n',
+  ],
+] as const;
+
+test.each(nativeStringEncodingStageCases)(
+  'String encoding checks retain native early returns, errors and callback mutations: %s',
+  (source, stdout) => {
+    expect(run(source)).toMatchObject({ kind: 'executed', stdout, uncaughtException: undefined });
+  }
+);

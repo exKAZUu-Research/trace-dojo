@@ -167,7 +167,7 @@ export function stringCharacters(value: RString): RString[] {
 }
 
 export function stringCharacterCount(value: RString): number {
-  if (value.binary) return stringBytes(value).length;
+  if (value.binary || value.usAscii) return stringBytes(value).length;
   let count = 0;
   for (let index = 0; index < value.s.length; index++) {
     if ((value.s.codePointAt(index) as number) > 0xff_ff) index++;

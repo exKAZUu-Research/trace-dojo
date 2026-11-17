@@ -33,8 +33,25 @@ export function checkStringEncodingCompatibility(
   rightAscii: boolean
 ): void {
   if (!leftAscii && !rightAscii && stringEncodingName(left) !== stringEncodingName(right))
-    throw rubyError(
-      rt().c['Encoding::CompatibilityError'],
-      `incompatible character encodings: ${stringEncodingName(left)} and ${stringEncodingName(right)}`
-    );
+    throwIncompatibleStringEncodings(left, right);
+}
+
+export function requireCompatibleStringEncoding(left: RString, right: RString): RString {
+  const encoding = compatibleStringEncoding(left, right);
+  if (encoding === undefined) throwIncompatibleStringEncodings(left, right);
+  return encoding;
+}
+
+export function compatibleStringEncoding(left: RString, right: RString): RString | undefined {
+  if (stringEncodingName(left) === stringEncodingName(right)) return left;
+  const rightAscii = stringBytes(right).every((byte) => byte < 0x80);
+  if (rightAscii) return left;
+  return stringBytes(left).every((byte) => byte < 0x80) ? right : undefined;
+}
+
+function throwIncompatibleStringEncodings(left: RString, right: RString): never {
+  throw rubyError(
+    rt().c['Encoding::CompatibilityError'],
+    `incompatible character encodings: ${stringEncodingName(left)} and ${stringEncodingName(right)}`
+  );
 }

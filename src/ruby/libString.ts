@@ -8,6 +8,7 @@ import {
   inspect,
   rangeCovers,
   rubyEncodingName,
+  stringEncodingName,
   strInspect,
   symInspect,
   toIndex,
@@ -18,6 +19,7 @@ import {
   toSValue,
 } from './conversions';
 import { coreMethod, def, sdef } from './define';
+import { compatibleStringEncoding, requireCompatibleStringEncoding } from './encodedStringJoin';
 import {
   argumentError,
   frozenError,
@@ -32,6 +34,7 @@ import { validateKeywords } from './exceptionOption';
 import { formatString } from './format';
 import { hashDefault, hashGet, stringKeyEquals, stringKeyHash } from './hashes';
 import { callBlock, callMethod, type Gen, invoke, nativeProc, requireBlock } from './interp';
+import { validStringEncoding } from './libEncoding';
 import { makeEnumerator } from './libEnumerator';
 import { parseFloatLenient, parseIntegerLenient } from './libNumeric';
 import { makeRegexp, type MatchState, setLastMatch, setLiteralMatch } from './libRegexp';
@@ -125,19 +128,13 @@ function* stringArgValue(value: Value): Gen<RString> {
   return yield* toStrValue(value);
 }
 
-function* patternText(value: Value, kind: 'characters' | 'regexp', self?: RString): Gen<string> {
+function* regexpPatternText(value: Value, self: RString): Gen<string> {
   const pattern = yield* stringArgValue(value);
-  if (self)
-    combinedStringEncoding(
-      self.binary,
-      stringBytes(self).every((byte) => byte < 0x80),
-      pattern
-    );
-  if (pattern.rawBytes && !pattern.binary) {
-    if (kind === 'characters') throw argumentError('invalid byte sequence in UTF-8');
+  requireCompatibleStringEncoding(self, pattern);
+  if (!validStringEncoding(pattern)) {
     throw rubyError(
       rt().c.RegexpError,
-      `invalid multibyte character: /${inspectRawBytes(pattern.rawBytes).slice(1, -1)}/`
+      `invalid multibyte character: /${inspectStringEncoding(pattern).slice(1, -1)}/`
     );
   }
   return pattern.s;
@@ -145,13 +142,13 @@ function* patternText(value: Value, kind: 'characters' | 'regexp', self?: RStrin
 
 function* characterSetPattern(self: RString, value: Value): Gen<RString> {
   const pattern = yield* stringArgValue(value);
-  if (pattern.rawBytes && !pattern.binary) throw argumentError('invalid byte sequence in UTF-8');
-  combinedStringEncoding(
-    self.binary,
-    stringBytes(self).every((byte) => byte < 0x80),
-    pattern
-  );
+  requireCompatibleStringEncoding(self, pattern);
+  checkCharacterEncoding(pattern);
   return pattern;
+}
+
+function checkCharacterEncoding(value: RString): void {
+  if (!validStringEncoding(value)) throw argumentError(`invalid byte sequence in ${stringEncodingName(value)}`);
 }
 
 function regexpUnsupported(value: Value): void {
@@ -273,9 +270,7 @@ sdef(
 );
 def('String', ['to_s', 'to_str'], 0, (self: RString) => (self.cls === rt().c.String ? self : copyStringEncoding(self)));
 export function copyStringEncoding(self: RString): RString {
-  const copy = stringFromBytes(stringBytes(self), self.binary);
-  copy.usAscii = self.usAscii;
-  return copy;
+  return stringFromBytes(stringBytes(self), self.binary, self.usAscii);
 }
 
 export function sliceStringEncoding(self: RString, from: number, to = self.s.length): RString {
@@ -400,6 +395,7 @@ def('String', 'casecmp', 1, function (self: RString, [other]) {
     if (other instanceof RSymbol) throw implicitConversionError(other, 'String');
     return NIL;
   }
+  if (!compatibleStringEncoding(self, other)) return NIL;
   return BigInt(compareBytes(foldAsciiBytes(self), foldAsciiBytes(other)));
 });
 def('String', 'casecmp?', 1, function (self: RString, [other]) {
@@ -407,9 +403,15 @@ def('String', 'casecmp?', 1, function (self: RString, [other]) {
     if (other instanceof RSymbol) throw implicitConversionError(other, 'String');
     return NIL;
   }
-  if ((self.rawBytes && !self.binary) || (other.rawBytes && !other.binary)) throw argumentError('input string invalid');
-  return foldCase(self.s) === foldCase(other.s);
+  if (!compatibleStringEncoding(self, other)) return NIL;
+  return compareBytes(foldCaseBytes(self), foldCaseBytes(other)) === 0;
 });
+
+function foldCaseBytes(value: RString): Uint8Array {
+  if (value.binary || value.usAscii) return foldAsciiBytes(value);
+  if (!validStringEncoding(value)) throw argumentError('input string invalid');
+  return new TextEncoder().encode(foldCase(value.s));
+}
 
 function foldAsciiBytes(value: RString): Uint8Array {
   return stringBytes(value).map((byte) => (byte >= 65 && byte <= 90 ? byte + 32 : byte));
@@ -932,17 +934,17 @@ def(
 
 def('String', 'include?', 1, function* (self: RString, [other]) {
   const target = yield* searchString(self, other);
-  return !(target.rawBytes && !target.binary) && self.s.includes(target.s);
+  return validStringEncoding(target) && searchText(self).includes(searchText(target));
 });
 
 function* searchString(self: RString, value: Value): Gen<RString> {
   const target = yield* stringArgValue(value);
-  combinedStringEncoding(
-    self.binary,
-    stringBytes(self).every((byte) => byte < 0x80),
-    target
-  );
+  requireCompatibleStringEncoding(self, target);
   return target;
+}
+
+function searchText(value: RString): string {
+  return value.usAscii ? stringFromBytes(stringBytes(value), true).s : value.s;
 }
 def('String', 'start_with?', [0, -1], function* (self: RString, args) {
   for (const arg of args) {
@@ -964,11 +966,11 @@ function hasStringAffix(self: RString, target: RString, prefix: boolean): boolea
 }
 def('String', 'delete_prefix', 1, function* (self: RString, [prefix]) {
   const bytes = yield* withoutAffix(self, prefix, true);
-  return stringFromBytes(bytes ?? stringBytes(self), self.binary);
+  return stringFromBytes(bytes ?? stringBytes(self), self.binary, self.usAscii);
 });
 def('String', 'delete_suffix', 1, function* (self: RString, [suffix]) {
   const bytes = yield* withoutAffix(self, suffix, false);
-  return stringFromBytes(bytes ?? stringBytes(self), self.binary);
+  return stringFromBytes(bytes ?? stringBytes(self), self.binary, self.usAscii);
 });
 for (const [name, prefix] of [
   ['delete_prefix!', true],
@@ -986,11 +988,7 @@ for (const [name, prefix] of [
 function* withoutAffix(self: RString, value: Value, prefix: boolean): Gen<Uint8Array | undefined> {
   const affix = yield* stringArgValue(value);
   const source = stringBytes(self);
-  combinedStringEncoding(
-    self.binary,
-    source.every((byte) => byte < 0x80),
-    affix
-  );
+  requireCompatibleStringEncoding(self, affix);
   const target = stringBytes(affix);
   if (target.length === 0 || target.length > source.length) return undefined;
   const offset = prefix ? 0 : source.length - target.length;
@@ -1011,60 +1009,58 @@ function charPosition(text: string, offset: number): number {
 
 def('String', 'index', [1, 2], function* (self: RString, args) {
   regexpUnsupported(args[0]);
-  const target = yield* searchString(self, args[0]);
-  const length = charLength(self.s);
+  const length = stringCharacterCount(self);
   let start = args.length > 1 ? yield* toIndex(args[1]) : 0;
   if (start < 0) start += length;
   if (start < 0 || start > length) return NIL;
-  if (target.rawBytes && !target.binary) return NIL;
-  const found = self.s.indexOf(target.s, unitOffset(self.s, start));
-  return found === -1 ? NIL : BigInt(charPosition(self.s, found));
+  const target = yield* searchString(self, args[0]);
+  if (!validStringEncoding(target)) return NIL;
+  const text = searchText(self);
+  const found = text.indexOf(searchText(target), unitOffset(text, start));
+  return found === -1 ? NIL : BigInt(charPosition(text, found));
 });
 def('String', 'rindex', [1, 2], function* (self: RString, args) {
   regexpUnsupported(args[0]);
-  const target = yield* searchString(self, args[0]);
-  const length = charLength(self.s);
+  const length = stringCharacterCount(self);
   let start = args.length > 1 ? yield* toIndex(args[1]) : length;
   if (start < 0) start += length;
   if (start < 0) return NIL;
-  if (target.rawBytes && !target.binary) return NIL;
-  const found = self.s.lastIndexOf(target.s, unitOffset(self.s, Math.min(start, length)));
-  return found === -1 ? NIL : BigInt(charPosition(self.s, found));
+  const target = yield* searchString(self, args[0]);
+  if (!validStringEncoding(target)) return NIL;
+  const text = searchText(self);
+  const found = text.lastIndexOf(searchText(target), unitOffset(text, Math.min(start, length)));
+  return found === -1 ? NIL : BigInt(charPosition(text, found));
 });
 def('String', 'count', [1, -1], function* (self: RString, args) {
-  if (self.rawBytes && !self.binary) throw argumentError('invalid byte sequence in UTF-8');
-  const sets: string[] = [];
-  for (const arg of args) sets.push((yield* characterSetPattern(self, arg)).s);
-  const matches = characterSetMatcher(sets);
+  const matches = yield* stringCharacterSet(self, args);
+  checkCharacterEncoding(self);
   return BigInt(charsOf(self.s).filter((char) => matches(char)).length);
 });
 def('String', 'delete', [1, -1], function* (self: RString, args) {
-  if (self.rawBytes && !self.binary) throw argumentError('invalid byte sequence in UTF-8');
-  if (self.s.length === 0) return stringFromBytes(stringBytes(self), self.binary);
-  const sets: string[] = [];
-  for (const arg of args) sets.push((yield* characterSetPattern(self, arg)).s);
-  const matches = characterSetMatcher(sets);
-  return textResult(
-    self,
-    charsOf(self.s)
-      .filter((char) => !matches(char))
-      .join('')
-  );
+  const result = copyStringEncoding(self);
+  yield* deleteCharacters(result, args);
+  return result;
 });
-def('String', 'delete!', [1, -1], function* (self: RString, args) {
-  if (self.rawBytes && !self.binary) throw argumentError('invalid byte sequence in UTF-8');
+def('String', 'delete!', [1, -1], (self: RString, args) => deleteCharacters(self, args));
+
+function* deleteCharacters(self: RString, args: Value[]): Gen {
   if (self.s.length === 0) return NIL;
+  const matches = yield* stringCharacterSet(self, args);
   modify(self);
-  const sets: string[] = [];
-  for (const arg of args) sets.push((yield* characterSetPattern(self, arg)).s);
-  const matches = characterSetMatcher(sets);
+  checkCharacterEncoding(self);
   const result = charsOf(self.s)
     .filter((char) => !matches(char))
     .join('');
   if (result === self.s) return NIL;
   setText(self, result);
   return self;
-});
+}
+
+function* stringCharacterSet(self: RString, args: Value[]): Gen<(char: string) => boolean> {
+  const tests: ((char: string) => boolean)[] = [];
+  for (const arg of args) tests.push(characterSetMatcher([(yield* characterSetPattern(self, arg)).s]));
+  return (char) => tests.every((test) => test(char));
+}
 
 function squeeze(text: string, sets: string[]): string {
   const matches = sets.length > 0 ? characterSetMatcher(sets) : () => true;
@@ -1281,7 +1277,7 @@ function* substitute(
   const [pattern, replacement] = args;
   const snapshotPolicy = !global && !mutating ? 'plainCopy' : 'plainString';
   regexpUnsupported(pattern);
-  const target = yield* patternText(pattern, 'regexp', self);
+  const target = yield* regexpPatternText(pattern, self);
   if (replacement === undefined && !block) {
     if (global) throw new UnsupportedFeatureError('ブロックを渡さない gsub（Enumerator）');
     throw argumentError('wrong number of arguments (given 1, expected 2)');
@@ -1427,7 +1423,7 @@ def('String', 'gsub!', [1, 2], function* (self: RString, args, block) {
 def('String', 'scan', 1, function* (self: RString, [pattern], block) {
   if (self.rawBytes && !self.binary) throw argumentError('invalid byte sequence in UTF-8');
   regexpUnsupported(pattern);
-  const target = yield* patternText(pattern, 'regexp', self);
+  const target = yield* regexpPatternText(pattern, self);
   if (target.length === 0) return yield* scanEmpty(self, block);
   const found: Value[] = [];
   let text = self.s;
@@ -1675,65 +1671,74 @@ export function succ(text: string): string {
   return stringFromBytes(successorBytes(stringBytes(str(text)))).s;
 }
 
-// code-gauge-allow functionCognitiveComplexity 27 -- upto uses numeric-string width rules or String successor iteration with exclusive bounds.
-// code-gauge-allow functionNcss 35 -- The ordered cases for String encoding and mutation share state; splitting them solely for the metric would hide their sequencing.
+// code-gauge-allow functionCognitiveComplexity 17 -- Single-byte and numeric fast paths precede callback-driven successor iteration, with distinct native charset rules.
 def('String', 'upto', [1, 2], function* (self: RString, args, block) {
   if (!block) return makeEnumerator(self, 'upto', args);
   const end = yield* stringArgValue(args[0]);
-  const last = end.s;
+  const { binary, usAscii } = requireCompatibleStringEncoding(self, end);
   const exclusive = args.length > 1 && truthy(args[1]);
-  if (/^\d+$/.test(self.s) && /^\d+$/.test(last)) {
-    const width = self.s.length;
-    for (let value = BigInt(self.s); exclusive ? value < BigInt(last) : value <= BigInt(last); value++) {
-      yield* callBlock(block, [str(String(value).padStart(width, '0'))], false);
+  const beginBytes = stringBytes(self);
+  const endBytes = stringBytes(end);
+  const ascii = beginBytes.every((byte) => byte < 128) && endBytes.every((byte) => byte < 128);
+  if (ascii && beginBytes.length === 1 && endBytes.length === 1) {
+    for (let byte = beginBytes[0]; exclusive ? byte < endBytes[0] : byte <= endBytes[0]; byte++)
+      yield* callBlock(block, [stringFromBytes(Uint8Array.of(byte), binary, usAscii)], false);
+    return self;
+  }
+  if (ascii && /^\d+$/.test(self.s) && /^\d+$/.test(end.s)) {
+    const width = beginBytes.length;
+    const last = BigInt(end.s);
+    for (let value = BigInt(self.s); exclusive ? value < last : value <= last; value++) {
+      yield* callBlock(block, [asciiString(String(value).padStart(width, '0'))], false);
     }
     return self;
   }
-  const beginBytes = stringBytes(self);
-  const endBytes = stringBytes(end);
-  if (beginBytes.length === 1 && endBytes.length === 1 && beginBytes[0] < 128 && endBytes[0] < 128) {
-    for (let byte = beginBytes[0]; exclusive ? byte < endBytes[0] : byte <= endBytes[0]; byte++)
-      yield* callBlock(block, [stringFromBytes(Uint8Array.of(byte))], false);
-    return self;
-  }
-  let current = stringFromBytes(stringBytes(self), self.binary);
-  const limit = stringBytes(end);
-  if (compareBytes(stringBytes(current), limit) > 0) return self;
-  const afterEnd = successorBytes(limit, self.binary);
-  for (;;) {
-    const bytes = stringBytes(current);
-    if (compareBytes(bytes, afterEnd) === 0 || (exclusive && compareBytes(bytes, limit) === 0)) break;
-    yield* callBlock(block, [current], false);
-    if (compareBytes(bytes, limit) === 0) break;
-    const next = successorBytes(bytes, self.binary);
-    if (next.length > limit.length || next.length === 0) break;
-    current = stringFromBytes(next, self.binary);
-    rt().spend();
-  }
-  return self;
+  return yield* iterateStringSuccessors(self, end, exclusive, block);
 });
+
+// code-gauge-allow functionCognitiveComplexity 20 -- Native successor iteration computes the next value before yielding and checks the live endpoint afterward.
+function* iterateStringSuccessors(self: RString, end: RString, exclusive: boolean, block: RProc): Gen {
+  if (compareRubyStrings(self, end) > 0 || (exclusive && stringKeyEquals(self, end))) return self;
+  const roots = arr([end]);
+  return yield* whileHeld(roots, function* () {
+    const afterEnd = yield* callMethod(end, 'succ', [], undefined, undefined, { fcall: true });
+    let current = copyStringEncoding(self);
+    roots.items.push(afterEnd, current);
+    while (!stringKeyEquals(current, afterEnd)) {
+      const next =
+        exclusive || !stringKeyEquals(current, end)
+          ? yield* callMethod(current, 'succ', [], undefined, undefined, { fcall: true })
+          : NIL;
+      roots.items[3] = next;
+      yield* callBlock(block, [current], false);
+      if (isNil(next)) break;
+      current = yield* stringArgValue(next);
+      roots.items[2] = current;
+      if (exclusive && stringKeyEquals(current, end)) break;
+      if (stringBytes(current).length > stringBytes(end).length || current.s.length === 0) break;
+      rt().spend();
+    }
+    return self;
+  });
+}
 
 function* justify(self: RString, args: Value[], kind: 'left' | 'right' | 'center'): Gen {
   const width = yield* toIndex(args[0]);
   const padding = args.length > 1 ? yield* stringArgValue(args[1]) : str(' ');
+  const encoding = args.length > 1 ? requireCompatibleStringEncoding(self, padding) : self;
   const paddingChars = stringCharacters(padding);
   if (paddingChars.length === 0) throw argumentError('zero width padding');
   const chars = stringCharacters(self);
   const length = chars.length;
-  const binary = combinedStringEncoding(
-    self.binary,
-    stringBytes(self).every((byte) => byte < 0x80),
-    padding
-  );
-  if (width <= length) return stringFromBytes(stringBytes(self), self.binary);
+  if (width <= length) return copyStringEncoding(self);
   rt().checkStringLength(width);
   const total = width - length;
   const fill = (count: number): RString[] =>
     Array.from({ length: count }, (_, index) => paddingChars[index % paddingChars.length]);
-  if (kind === 'left') return joinStringCharacters([...chars, ...fill(total)], binary);
-  if (kind === 'right') return joinStringCharacters([...fill(total), ...chars], binary);
+  if (kind === 'left') return joinStringCharacters([...chars, ...fill(total)], encoding.binary, encoding.usAscii);
+  if (kind === 'right') return joinStringCharacters([...fill(total), ...chars], encoding.binary, encoding.usAscii);
   const left = Math.floor(total / 2);
-  return joinStringCharacters([...fill(left), ...chars, ...fill(total - left)], binary);
+  return joinStringCharacters([...fill(left), ...chars, ...fill(total - left)], encoding.binary, encoding.usAscii);
 }
 
 def('String', 'ljust', [1, 2], (self: RString, args) => justify(self, args, 'left'));
@@ -1743,27 +1748,30 @@ def('String', 'center', [1, 2], (self: RString, args) => justify(self, args, 'ce
 // Splitting -----------------------------------------------------------------------------------------------------------
 
 // code-gauge-allow functionCognitiveComplexity 23 -- The ordered cases for String encoding and mutation share state; splitting them solely for the metric would hide their sequencing.
+// code-gauge-allow functionNcss 31 -- Limit-one copies, separator conversion and charset validation must retain their native order before splitting and yielding.
 def('String', 'split', [0, 2], function* (self: RString, args, block) {
   const [pattern = NIL, limitValue] = args;
   const limit = limitValue === undefined ? 0 : yield* toIndex(limitValue);
   if (limit === 1) {
     if (self.s.length === 0) return block ? self : arr([]);
-    const value = stringFromBytes(stringBytes(self), self.binary);
+    const value = copyStringEncoding(self);
     if (block) {
       yield* callBlock(block, [value], false);
       return self;
     }
     return arr([value]);
   }
-  if (self.rawBytes && !self.binary) throw argumentError('invalid byte sequence in UTF-8');
   regexpUnsupported(pattern);
-  const text = self.s;
   let parts: string[];
   if (isNil(pattern) || (pattern instanceof RString && pattern.s === ' ')) {
-    parts = splitWhitespace(text, limit);
+    checkCharacterEncoding(self);
+    parts = splitWhitespace(self.s, limit);
   } else {
-    const separator = yield* patternText(pattern, 'characters', self);
-    parts = separator === '' ? splitChars(text, limit) : splitString(text, separator, limit);
+    const separator = yield* stringArgValue(pattern);
+    checkCharacterEncoding(separator);
+    checkCharacterEncoding(self);
+    requireCompatibleStringEncoding(self, separator);
+    parts = separator.s === '' ? splitChars(self.s, limit) : splitString(self.s, separator.s, limit);
   }
   if (limit === 0) while (parts.length > 0 && parts.at(-1) === '') parts.pop();
   const values = parts.map((part) => textResult(self, part));
