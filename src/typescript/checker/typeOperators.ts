@@ -2,8 +2,9 @@ import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import type { Checker, Mapper } from './checker';
 import { conditionalBranch, isGenericObjectOrIndexType } from './genericTypes';
+import { applicableIndex, isPatternKey } from './indexInfos';
 import { printedPropertyName } from './print';
-import { isNumericName, named, templateFragmentText } from './syntax';
+import { named, templateFragmentText } from './syntax';
 import { tupleElementBeyond } from './tupleIndexes';
 import {
   anonymousObject,
@@ -266,6 +267,8 @@ export class TypeOperators {
     if (isIntrinsic(nameMember, 'string') || isAnyLike(nameMember)) structure.stringIndex = indexInfo();
     else if (isIntrinsic(nameMember, 'number')) structure.numberIndex = indexInfo();
     else if (isIntrinsic(nameMember, 'symbol')) structure.symbolIndex = indexInfo();
+    else if (isPatternKey(nameMember))
+      structure.patternIndexes = [...(structure.patternIndexes ?? []), { ...indexInfo(), keyType: nameMember }];
   }
 
   /** The property that `keys` map to, which takes the modifiers of the source property the first key names. */
@@ -339,7 +342,6 @@ export class TypeOperators {
   }
 
   /** `object[index]`, reporting a missing property at `node` when given. */
-  // code-gauge-allow functionCognitiveComplexity 22 -- Follows TypeScript's rules for each kind of index type.
   indexedAccess(object: Type, index: Type, node?: TreeNode): Type {
     // A mapped type indexed by its own keys, `{ [P in K]: X }[K]`, is its template for those keys.
     if (object.kind === 'object' && object.objectKind === 'mapped' && object.mapped && !object.mapped.nameType) {
@@ -361,13 +363,8 @@ export class TypeOperators {
     if (isAnyLike(object)) return anyType;
     if (object.kind === 'union') return unionOf(object.types.map((member) => this.indexedAccess(member, index, node)));
     if (isPropertyKeyLiteral(index)) return this.propertyAccess(object, index.value, node);
-    const structure = this.c.structureOf(object);
-    if (isIntrinsic(index, 'number') || (index.kind === 'literal' && typeof index.value === 'number')) {
-      if (structure.numberIndex) return structure.numberIndex.type;
-      if (structure.stringIndex) return structure.stringIndex.type;
-    }
-    if (isIntrinsic(index, 'string') && structure.stringIndex) return structure.stringIndex.type;
-    if (isIntrinsic(index, 'symbol') && structure.symbolIndex) return structure.symbolIndex.type;
+    const applicable = applicableIndex(this.c, this.c.structureOf(object), index);
+    if (applicable) return applicable.type;
     if (node)
       this.c.error(node, `型 '${this.c.print(index)}' は型 '${this.c.print(object)}' のインデックスに使えません。`);
     return errorType;
@@ -380,10 +377,9 @@ export class TypeOperators {
     const element = tupleElementBeyond(this.c, object, name, node);
     if (element) return element;
     const structure = this.c.structureOf(object);
-    const numeric = typeof key === 'number' || isNumericName(name);
-    if (numeric && structure.numberIndex) return structure.numberIndex.type;
-    if (typeof key !== 'symbol' && structure.stringIndex) return structure.stringIndex.type;
-    if (typeof key === 'symbol' && structure.symbolIndex) return structure.symbolIndex.type;
+    const applicable =
+      typeof key === 'symbol' ? structure.symbolIndex : applicableIndex(this.c, structure, literalType(key));
+    if (applicable) return applicable.type;
     if (node)
       this.c.error(node, `プロパティ '${printedPropertyName(name)}' は型 '${this.c.print(object)}' にありません。`);
     return errorType;
@@ -635,5 +631,6 @@ function indexKeys(structure: Structure): Type[] {
   if (structure.stringIndex) keys.push(stringType, numberType);
   else if (structure.numberIndex) keys.push(numberType);
   if (structure.symbolIndex) keys.push(symbolType);
+  keys.push(...(structure.patternIndexes ?? []).map((info) => info.keyType));
   return keys;
 }

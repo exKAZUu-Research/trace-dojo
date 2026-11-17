@@ -1,8 +1,8 @@
 import type { Checker } from './checker';
+import { applicablePatternIndexes } from './indexInfos';
 import { isNumericName } from './syntax';
 import {
   type ConditionalType,
-  type IndexInfo,
   intersectionOf,
   isAnyLike,
   isIntrinsic,
@@ -214,15 +214,10 @@ export class IndexedAccessKeys {
     const name = key.kind === 'literal' ? key.value : undefined;
     if (isIntrinsic(key, 'symbol') || typeof name === 'symbol')
       return structure.symbolIndex !== undefined || (key.kind === 'literal' && this.propertyHasKey(structure, key));
-    if (structure.stringIndex && this.stringIndexHasKey(structure.stringIndex, key)) return true;
+    if (structure.stringIndex || applicablePatternIndexes(this.c, structure, key).length > 0) return true;
     if (structure.numberIndex && (isIntrinsic(key, 'number') || typeof name === 'number')) return true;
     if (structure.numberIndex && written && isNumericStringKey(key)) return true;
     return key.kind === 'literal' && this.propertyHasKey(structure, key);
-  }
-
-  /** Whether a string index signature, which covers numbers too when declared for all strings, covers a key. */
-  private stringIndexHasKey(index: IndexInfo, key: Type): boolean {
-    return index.keyPatterns?.some((pattern) => this.c.relations.isAssignable(key, pattern)) ?? true;
   }
 
   /**

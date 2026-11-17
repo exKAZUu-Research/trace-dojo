@@ -1,7 +1,8 @@
-// code-gauge-allow-file fileNcss 525 -- Types array and object literals with their spreads, members, and widening, which share one literal state.
+// code-gauge-allow-file fileNcss 526 -- Types array and object literals with their spreads, members, and widening, which share one literal state.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import type { Checker } from './checker';
+import { applicableIndex, isSamePattern } from './indexInfos';
 import { arrayLiteralLength, arrayPatternElements, hasToken, isNumericName, named, propertyNameText } from './syntax';
 import {
   anonymousObject,
@@ -15,6 +16,7 @@ import {
   isIntrinsic,
   isPropertyKeyLiteral,
   isSymbolName,
+  literalType,
   mapType,
   neverType,
   newTypeId,
@@ -34,7 +36,7 @@ import {
 
 type MemberKind = 'property' | 'get' | 'set';
 type IndexKey = 'stringIndex' | 'numberIndex' | 'symbolIndex';
-type Indexes = Pick<Structure, IndexKey>;
+type Indexes = Pick<Structure, IndexKey | 'patternIndexes'>;
 
 /** An object literal being checked, with the members checked so far. */
 interface ObjectLiteral {
@@ -405,22 +407,15 @@ export class LiteralChecker {
   }
 
   /**
-   * The type the contextual type's index signatures give a member whose computed key is not one literal: its number
-   * index for a numeric key, its symbol index for a symbol key, else its string index.
+   * The type the contextual type's index signatures give a member whose computed key is not one literal: those that
+   * apply to the key.
    */
   private indexContext(literal: ObjectLiteral, keyType: Type): Type | undefined {
     if (!literal.contextual) return undefined;
-    const isNumeric = this.c.relations.isAssignable(keyType, numberType);
-    const isString = isNumeric || this.c.relations.isAssignable(keyType, stringType);
-    const isSymbol = this.c.relations.isAssignable(keyType, symbolType);
     const contextMembers = literal.contextual.kind === 'union' ? literal.contextual.types : [literal.contextual];
     const types = contextMembers.flatMap((member) => {
       if (member.kind !== 'object' && member.kind !== 'intersection') return [];
-      const { stringIndex, numberIndex, symbolIndex } = this.c.structureOf(member);
-      const index =
-        (isNumeric ? numberIndex : undefined) ??
-        (isString ? stringIndex : undefined) ??
-        (isSymbol ? symbolIndex : undefined);
+      const index = applicableIndex(this.c, this.c.structureOf(member), keyType);
       return index ? [index.type] : [];
     });
     return types.length > 0 ? unionOf(types, true) : undefined;
@@ -644,27 +639,32 @@ export class LiteralChecker {
    */
   private spreadIndexesOnto(left: Indexes | undefined, right: Indexes): Indexes {
     if (!left) return right;
-    const combine = (key: keyof Indexes): IndexInfo | undefined => {
+    const combine = (key: IndexKey): IndexInfo | undefined => {
       const [leftIndex, rightIndex] = [left[key], right[key]];
-      return leftIndex && rightIndex
-        ? { type: unionOf([leftIndex.type, rightIndex.type]), readonly: leftIndex.readonly || rightIndex.readonly }
-        : undefined;
+      return leftIndex && rightIndex ? unitedIndex(leftIndex, rightIndex) : undefined;
     };
     return {
       stringIndex: combine('stringIndex'),
       numberIndex: combine('numberIndex'),
       symbolIndex: combine('symbolIndex'),
+      patternIndexes: left.patternIndexes?.flatMap((leftIndex) => {
+        const rightIndex = right.patternIndexes?.find((index) =>
+          isSamePattern(this.c, index.keyType, leftIndex.keyType)
+        );
+        return rightIndex ? [{ ...unitedIndex(leftIndex, rightIndex), keyType: leftIndex.keyType }] : [];
+      }),
     };
   }
 
   /** The index signatures a spread copies, which are writable in the copy unless it is in a `const` context. */
   private indexesOf(type: Type | undefined, readonly: boolean): Indexes {
     if (type?.kind !== 'object' && type?.kind !== 'intersection') return {};
-    const { stringIndex, numberIndex, symbolIndex } = this.c.structureOf(type);
+    const { stringIndex, numberIndex, symbolIndex, patternIndexes } = this.c.structureOf(type);
     return {
       stringIndex: stringIndex && { ...stringIndex, readonly },
       numberIndex: numberIndex && { ...numberIndex, readonly },
       symbolIndex: symbolIndex && { ...symbolIndex, readonly },
+      patternIndexes: patternIndexes?.map((index) => ({ ...index, readonly })),
     };
   }
 
@@ -830,9 +830,7 @@ export class LiteralChecker {
         continue;
       }
       const structure = this.c.structureOf(apparent);
-      const index = isSymbolName(name)
-        ? structure.symbolIndex
-        : (structure.stringIndex ?? (isNumericName(name) ? structure.numberIndex : undefined));
+      const index = isSymbolName(name) ? structure.symbolIndex : applicableIndex(this.c, structure, literalType(name));
       if (index) types.push(index.type);
     }
     return types.length > 0 ? unionOf(types, true) : undefined;
@@ -935,6 +933,11 @@ function isSpreadableProperty(property: Property): boolean {
       ['method_definition', 'method_signature', 'abstract_method_signature'].includes(declaration.type)
     )
   );
+}
+
+/** The index signature of a spread onto an object with another for the same key type. */
+function unitedIndex(left: IndexInfo, right: IndexInfo): IndexInfo {
+  return { type: unionOf([left.type, right.type]), readonly: left.readonly || right.readonly };
 }
 
 function indexKeyOfName(name: string): IndexKey {

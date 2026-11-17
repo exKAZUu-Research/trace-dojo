@@ -5,8 +5,9 @@ import type { Checker } from './checker';
 import { checkCircularConstraints } from './circularConstraints';
 import { checkInheritedPropertiesAreIdentical, checkTypeMemberDuplicates } from './declarations';
 import { FlowState, type State } from './flow';
+import { checkIndexConformance } from './indexConformance';
 import type { Scope, Sym } from './scopes';
-import { arrayLiteralLength, hasToken, isNumericName, isWithin, named, skipParentheses } from './syntax';
+import { arrayLiteralLength, hasToken, named, skipParentheses } from './syntax';
 import {
   anyType,
   errorType,
@@ -18,7 +19,6 @@ import {
   type Structure,
   type Type,
   undefinedType,
-  unionOf,
 } from './types';
 
 interface JumpTarget {
@@ -172,7 +172,7 @@ export class StatementChecker {
     if (node.type === 'object_type') {
       checkTypeMemberDuplicates(this.c, node);
       const type = this.c.typeNodes.typeFromNode(node);
-      if (type.kind === 'object') this.checkIndexConformance(type.resolve(), node);
+      if (type.kind === 'object') checkIndexConformance(this.c, type.resolve(), node);
     }
     if (eagerTypeSyntaxes.has(node.type)) this.c.typeNodes.typeFromNode(node);
     if (node.type === 'infer_type') this.c.typeNodes.checkInferPlacement(node);
@@ -190,7 +190,7 @@ export class StatementChecker {
       const structure = type.resolve();
       for (const property of structure.properties.values()) property.type();
       for (const signature of structure.callSignatures) signature.returnType();
-      this.checkIndexConformance(structure, node.childForFieldName('body') ?? node);
+      checkIndexConformance(this.c, structure, node.childForFieldName('body') ?? node);
       const isFirst =
         symbol.typeDeclarations.find((declaration) => declaration.type === 'interface_declaration')?.id === node.id;
       if (!isFirst || checkInheritedPropertiesAreIdentical(this.c, symbol, node.childForFieldName('name') ?? node))
@@ -225,45 +225,6 @@ export class StatementChecker {
         );
         return;
       }
-    }
-  }
-
-  /**
-   * Reports properties that an index signature of the same type does not allow, and a number index that does not fit
-   * the string index. A property inherited from elsewhere is reported at the index signature of `owner`, the body
-   * declaring the type.
-   */
-  // code-gauge-allow functionCognitiveComplexity 21 -- Follows TypeScript's checks of properties and number indexes against index signatures.
-  checkIndexConformance(structure: Structure, owner?: TreeNode): void {
-    for (const property of structure.properties.values()) {
-      const nameNode = property.declaration?.childForFieldName('name');
-      if (!nameNode || !property.declaration || this.c.isLibrary(property.declaration)) continue;
-      const type = property.optional ? unionOf([property.type(), undefinedType]) : property.type();
-      const inherited = owner !== undefined && !isWithin(property.declaration, owner);
-      for (const [index, kind] of [
-        [structure.stringIndex, 'string'],
-        [isNumericName(property.name) ? structure.numberIndex : undefined, 'number'],
-      ] as const) {
-        if (index && !this.c.relations.isAssignable(type, index.type)) {
-          this.c.error(
-            (inherited && owner && indexSignatureNode(owner, kind)) || nameNode,
-            `型 '${this.c.print(type)}' のプロパティ '${property.name}' は、'${kind}' のインデックスの型 '${this.c.print(index.type)}' に代入できません。`
-          );
-        }
-      }
-    }
-    const { stringIndex, numberIndex } = structure;
-    const numberNode = owner && indexSignatureNode(owner, 'number');
-    if (
-      stringIndex &&
-      numberIndex &&
-      numberNode &&
-      !this.c.relations.isAssignable(numberIndex.type, stringIndex.type)
-    ) {
-      this.c.error(
-        numberNode,
-        `'number' のインデックスの型 '${this.c.print(numberIndex.type)}' は、'string' のインデックスの型 '${this.c.print(stringIndex.type)}' に代入できません。`
-      );
     }
   }
 
@@ -839,12 +800,6 @@ export class StatementChecker {
 }
 
 /** The index signature for `string` or `number` keys that a type's body declares. */
-function indexSignatureNode(body: TreeNode, kind: 'string' | 'number'): TreeNode | undefined {
-  return named(body).find(
-    (member) => member.type === 'index_signature' && new RegExp(`^\\[\\s*\\w+\\s*:\\s*${kind}\\b`).test(member.text)
-  );
-}
-
 /**
  * `state` without the references that a loop pass from `start` assigned or narrowed by its back edge `backEdge`, which
  * then read with their declared types.

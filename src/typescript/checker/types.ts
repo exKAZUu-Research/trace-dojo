@@ -118,8 +118,11 @@ export interface Signature {
 export interface IndexInfo {
   type: Type;
   readonly: boolean;
-  /** The template literal patterns a string index signature is declared for, as `` `a${string}` ``, absent for all strings. */
-  keyPatterns?: Type[];
+}
+
+/** An index signature with the key type it is declared for, as `` [k: `a${string}`]: T `` is for `` `a${string}` ``. */
+export interface KeyedIndexInfo extends IndexInfo {
+  keyType: Type;
 }
 
 export interface Structure {
@@ -129,6 +132,8 @@ export interface Structure {
   stringIndex?: IndexInfo;
   numberIndex?: IndexInfo;
   symbolIndex?: IndexInfo;
+  /** The index signatures for template literal or string mapping patterns, one for each pattern. */
+  patternIndexes?: KeyedIndexInfo[];
 }
 
 /** The information about a class that its instances' private and protected members and its checks need. */

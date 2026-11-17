@@ -1,4 +1,5 @@
 import type { Checker, Mapper } from './checker';
+import { keyedIndexes } from './indexInfos';
 import {
   anyType,
   isAnyLike,
@@ -106,9 +107,7 @@ function objectMemberTypes(type: ObjectType, declared: Set<number>): Type[] {
       signature.returnType(),
       ...(signature.thisType ? [signature.thisType] : []),
     ]),
-    ...[structure.stringIndex, structure.numberIndex, structure.symbolIndex].flatMap((info) =>
-      info ? [info.type] : []
-    ),
+    ...keyedIndexes(structure).flatMap((info) => [info.type, info.keyType]),
   ];
 }
 

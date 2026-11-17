@@ -3,6 +3,7 @@ import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 import type { Checker } from './checker';
 import { checkDuplicateMembers } from './declarations';
 import { FlowState, propertyReferenceKey, type State } from './flow';
+import { checkIndexConformance } from './indexConformance';
 import { hasToken, isClassConstructor, isWithin, named } from './syntax';
 import {
   anyType,
@@ -40,7 +41,7 @@ export class ClassDeclarationChecker {
     if (!ctor) this.checkPropertyInitialization(node, undefined, new FlowState(), []);
     else if (clause) this.checkSuperCallPresence(node, ctor);
     this.checkImplements(node, info);
-    this.c.statements.checkIndexConformance(this.c.classes.membersOf(node, info, false));
+    checkIndexConformance(this.c, this.c.classes.membersOf(node, info, false));
     this.checkAbstractMembers(node, info);
     this.checkBaseCompatibility(node, info);
     this.checkStaticCompatibility(node, info);

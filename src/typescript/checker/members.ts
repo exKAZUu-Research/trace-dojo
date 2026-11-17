@@ -3,9 +3,10 @@ import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 import { unsupportedMessage } from '../unsupported';
 import type { Checker } from './checker';
 import type { State } from './flow';
+import { applicableIndex } from './indexInfos';
 import { printedPropertyName } from './print';
 import { spellingSuggestion } from './spelling';
-import { chainObject, isNumericName, isOptionalChain, skipParentheses } from './syntax';
+import { chainObject, isOptionalChain, skipParentheses } from './syntax';
 import { tupleElementBeyond } from './tupleIndexes';
 import {
   anyType,
@@ -13,6 +14,7 @@ import {
   isAnyLike,
   isIntrinsic,
   isPropertyKeyLiteral,
+  literalType,
   numberType,
   type Property,
   regularOf,
@@ -328,10 +330,7 @@ export class MemberChecker {
   }
 
   indexSignatureType(type: Type, name: string): Type | undefined {
-    const structure = this.c.structureOf(type);
-    if (isNumericName(name) && structure.numberIndex) return structure.numberIndex.type;
-    if (structure.stringIndex) return structure.stringIndex.type;
-    return undefined;
+    return applicableIndex(this.c, this.c.structureOf(type), literalType(name))?.type;
   }
 
   private lacksProperty(member: Type, name: string): boolean {
@@ -406,16 +405,7 @@ export class MemberChecker {
     if (objectType.kind === 'union') return objectType.types.some((member) => this.isReadonlyIndex(member, indexType));
     if (indexType.kind === 'union') return indexType.types.some((member) => this.isReadonlyIndex(objectType, member));
     if (indexType.kind === 'literal' && this.c.propertyOf(objectType, String(indexType.value))) return false;
-    const structure = this.c.structureOf(objectType);
-    const numeric =
-      this.c.relations.isAssignable(indexType, numberType) ||
-      (indexType.kind === 'literal' && typeof indexType.value === 'string' && isNumericName(indexType.value));
-    const signature = this.c.relations.isAssignable(indexType, symbolType)
-      ? structure.symbolIndex
-      : numeric
-        ? (structure.numberIndex ?? structure.stringIndex)
-        : structure.stringIndex;
-    return signature?.readonly === true;
+    return applicableIndex(this.c, this.c.structureOf(objectType), indexType)?.readonly === true;
   }
 
   indexedType(node: TreeNode, objectNode: TreeNode, indexNode: TreeNode, objectType: Type, indexType: Type): Type {
@@ -460,8 +450,6 @@ export class MemberChecker {
   }
 
   private computedIndexedType(access: IndexAccess, objectType: Type, index: Type, indexType: Type): Type {
-    const isNumeric = this.c.relations.isAssignable(index, numberType);
-    const isStringy = this.c.relations.isAssignable(index, stringType);
     // A key may mix kinds, as `0 | "a"`, so long as each member is a string, a number, or a symbol.
     const keyTypes = unionOf([stringType, numberType, symbolType, this.c.globalType('Symbol')]);
     if (!this.c.relations.isAssignable(index, keyTypes)) {
@@ -470,10 +458,12 @@ export class MemberChecker {
     }
     if (objectType.kind === 'union') return this.indexedTypeOfMembers(access, objectType, indexType);
     const structure = this.c.structureOf(objectType);
-    if (isNumeric && structure.numberIndex) return structure.numberIndex.type;
-    if ((isNumeric || isStringy) && structure.stringIndex) return structure.stringIndex.type;
-    if (structure.symbolIndex && this.c.relations.isAssignable(index, symbolType)) return structure.symbolIndex.type;
-    if (index.kind === 'union' && index.types.every((member) => member.kind === 'literal')) {
+    const applicable = applicableIndex(this.c, structure, index);
+    if (applicable) return applicable.type;
+    if (
+      index.kind === 'union' &&
+      index.types.every((member) => member.kind === 'literal' || applicableIndex(this.c, structure, member))
+    ) {
       return unionOf(index.types.map((member) => this.indexedTypeAt(access, objectType, member)));
     }
     if (objectType.kind === 'indexedAccess') return this.c.typeOperators.indexedAccess(objectType, index);

@@ -1,9 +1,10 @@
-// code-gauge-allow-file fileNcss 580 -- Holds the types of classes with `this`, `super`, and accessibility, which all read the class information.
+// code-gauge-allow-file fileNcss 581 -- Holds the types of classes with `this`, `super`, and accessibility, which all read the class information.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import { typesAtConstructorExit } from './assignmentFlow';
 import type { Checker } from './checker';
 import { FlowState, type State } from './flow';
+import { mergedPatternIndexes } from './indexInfos';
 import { isUsedBeforeInitialization } from './initializationOrder';
 import type { Sym, ValueKind } from './scopes';
 import {
@@ -164,6 +165,7 @@ export class ClassChecker {
       stringIndex: own.stringIndex ?? declared.stringIndex,
       numberIndex: own.numberIndex ?? declared.numberIndex,
       symbolIndex: own.symbolIndex ?? declared.symbolIndex,
+      patternIndexes: mergedPatternIndexes(this.c, [own.patternIndexes, declared.patternIndexes]),
     };
   }
 
@@ -221,6 +223,7 @@ export class ClassChecker {
       stringIndex: own.stringIndex ?? inherited.stringIndex,
       numberIndex: own.numberIndex ?? inherited.numberIndex,
       symbolIndex: own.symbolIndex ?? inherited.symbolIndex,
+      patternIndexes: mergedPatternIndexes(this.c, [own.patternIndexes, inherited.patternIndexes]),
     };
   }
 

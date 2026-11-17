@@ -1,7 +1,8 @@
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import type { Checker } from './checker';
-import { isNumericName, named, propertyNameText, skipParentheses } from './syntax';
+import { applicableIndex } from './indexInfos';
+import { named, propertyNameText, skipParentheses } from './syntax';
 import {
   anonymousObject,
   bigintType,
@@ -13,6 +14,7 @@ import {
   type IntersectionType,
   isAnyLike,
   isIntrinsic,
+  literalType,
   mapType,
   neverType,
   nonPrimitiveType,
@@ -542,8 +544,7 @@ export class Flow {
   private isPresencePossible(type: Type, name: string, assumeTrue: boolean): boolean {
     const property = this.c.propertyOf(type, name);
     if (property) return property.optional || assumeTrue;
-    const { stringIndex, numberIndex } = this.c.structureOf(type);
-    return stringIndex !== undefined || (numberIndex !== undefined && isNumericName(name)) || !assumeTrue;
+    return applicableIndex(this.c, this.c.structureOf(type), literalType(name)) !== undefined || !assumeTrue;
   }
 
   /** The members of a union whose property `name` may be `value`, as `x.kind === "a"` narrows `x`. */

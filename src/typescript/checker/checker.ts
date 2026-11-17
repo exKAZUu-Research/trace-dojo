@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 505 -- Holds shared type construction, bounded instantiation, structure lookup, and type constraints used by all checker components.
+// code-gauge-allow-file fileNcss 509 -- Holds shared type construction, bounded instantiation, structure lookup, and type constraints used by all checker components.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import type { SourceDiagnostic } from '../../interpreter/diagnostics';
@@ -13,6 +13,7 @@ import { checkDuplicateDeclarations } from './declarations';
 import { ExpressionChecker } from './expressions';
 import { Flow } from './flow';
 import { FunctionChecker } from './functions';
+import { mergedPatternIndexes } from './indexInfos';
 import { TypeInference } from './inference';
 import { domInterfaceTree, libraryScope, libraryTree, markUnsupported, nativeOverloadTree } from './library';
 import { LiteralChecker } from './literals';
@@ -520,11 +521,7 @@ export class Checker {
       });
     }
     const index = (info: IndexInfo | undefined): IndexInfo | undefined =>
-      info && {
-        ...info,
-        type: this.instantiate(info.type, mapper),
-        keyPatterns: info.keyPatterns?.map((pattern) => this.instantiate(pattern, mapper)),
-      };
+      info && { ...info, type: this.instantiate(info.type, mapper) };
     return {
       properties,
       callSignatures: structure.callSignatures.map((signature) => this.instantiateSignature(signature, mapper)),
@@ -534,6 +531,11 @@ export class Checker {
       stringIndex: index(structure.stringIndex),
       numberIndex: index(structure.numberIndex),
       symbolIndex: index(structure.symbolIndex),
+      patternIndexes: structure.patternIndexes?.map((info) => ({
+        type: this.instantiate(info.type, mapper),
+        readonly: info.readonly,
+        keyType: this.instantiate(info.keyType, mapper),
+      })),
     };
   }
 
@@ -748,6 +750,11 @@ export class Checker {
       stringIndex: this.intersectedIndex(structures.map((structure) => structure.stringIndex)),
       numberIndex: this.intersectedIndex(structures.map((structure) => structure.numberIndex)),
       symbolIndex: this.intersectedIndex(structures.map((structure) => structure.symbolIndex)),
+      patternIndexes: mergedPatternIndexes(
+        this,
+        structures.map((structure) => structure.patternIndexes),
+        true
+      ),
     };
   }
 
@@ -820,9 +827,11 @@ export class Checker {
     let { stringIndex, numberIndex, symbolIndex } = own;
     const callSignatures = [...own.callSignatures];
     const constructSignatures = [...own.constructSignatures];
+    const patternIndexLists = [own.patternIndexes];
     for (const base of bases) {
       if (base.kind !== 'object' && base.kind !== 'intersection') continue;
       const baseStructure = this.structureOf(base);
+      patternIndexLists.push(baseStructure.patternIndexes);
       for (const [name, property] of baseStructure.properties)
         if (!properties.has(name)) properties.set(name, property);
       stringIndex ??= baseStructure.stringIndex;
@@ -832,7 +841,8 @@ export class Checker {
       callSignatures.push(...baseStructure.callSignatures);
       constructSignatures.push(...baseStructure.constructSignatures);
     }
-    return { properties, callSignatures, constructSignatures, stringIndex, numberIndex, symbolIndex };
+    const patternIndexes = mergedPatternIndexes(this, patternIndexLists);
+    return { properties, callSignatures, constructSignatures, stringIndex, numberIndex, symbolIndex, patternIndexes };
   }
 
   // Helpers ------------------------------------------------------------------------------------------------------

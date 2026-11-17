@@ -283,6 +283,7 @@ export class BindingPatterns {
         structure.stringIndex = source.stringIndex;
         structure.numberIndex = source.numberIndex;
         structure.symbolIndex = source.symbolIndex;
+        structure.patternIndexes = source.patternIndexes;
         // A rest copies each value into a plain, writable property, as a spread does.
         for (const [name, property] of source.properties) {
           if (!omitted.includes(name) && !(property.isMethod && property.declaringClass))

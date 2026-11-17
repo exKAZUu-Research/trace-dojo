@@ -1,8 +1,9 @@
-// code-gauge-allow-file fileNcss 674 -- Decides assignability and comparability for every kind of type, as TypeScript's checker does in one place.
+// code-gauge-allow-file fileNcss 679 -- Decides assignability and comparability for every kind of type, as TypeScript's checker does in one place.
 import type { Checker } from './checker';
 import { isUnit } from './flow';
 import { childTypes, isGenericObjectOrIndexType } from './genericTypes';
-import { isNumericName } from './syntax';
+import { applicableIndex, hasIndexSignature, isIndexKeyOf, isPatternKey, keyedIndexes } from './indexInfos';
+import { templateParts } from './templateParts';
 import {
   anonymousObject,
   anyType,
@@ -11,11 +12,11 @@ import {
   errorType,
   filterType,
   type IndexedAccessType,
-  type IndexInfo,
   type IntersectionType,
   isAnyLike,
   isIntrinsic,
   isSymbolName,
+  literalType,
   numberType,
   type ObjectType,
   type Property,
@@ -23,6 +24,7 @@ import {
   type Signature,
   stringType,
   type Structure,
+  type TemplateLiteralType,
   type TupleElement,
   type TupleInfo,
   type Type,
@@ -35,7 +37,6 @@ import {
 
 type Relation = 'assignable' | 'comparable';
 type SignatureMode = 'signature' | 'strictCallback' | 'bivariantCallback';
-type KeyKind = 'string' | 'number' | 'symbol';
 
 const MAX_RELATION_DEPTH = 100;
 const EXPANDING_SOURCE = 1;
@@ -241,7 +242,8 @@ export class Relations {
   }
 
   private writeTypeOf(object: Type, key: Type, numberIndexOnly: boolean): Type | undefined {
-    const { stringIndex, numberIndex, symbolIndex } = this.c.structureOf(object);
+    const structure = this.c.structureOf(object);
+    const { stringIndex, numberIndex } = structure;
     if (key.kind === 'literal') {
       const indexed = typeof key.value === 'number' && numberIndex !== undefined;
       if (numberIndexOnly && !indexed && !this.hasProperty(object, String(key.value))) return undefined;
@@ -249,9 +251,8 @@ export class Relations {
     }
     if (isIntrinsic(key, 'number')) return (numberIndex ?? (numberIndexOnly ? undefined : stringIndex))?.type;
     if (numberIndexOnly) return undefined;
-    if (isIntrinsic(key, 'string') || key.kind === 'templateLiteral' || key.kind === 'stringMapping')
-      return stringIndex?.type;
-    if (isIntrinsic(key, 'symbol')) return symbolIndex?.type;
+    if (isIntrinsic(key, 'string') || isIntrinsic(key, 'symbol') || isPatternKey(key))
+      return applicableIndex(this.c, structure, key)?.type;
     return undefined;
   }
 
@@ -325,19 +326,8 @@ export class Relations {
       case 'templateLiteral':
       case 'stringMapping': {
         if (s.kind === 'literal' && typeof s.value === 'string') return this.matchesTemplate(s.value, t);
-        if (s.kind === 'templateLiteral' && t.kind === 'templateLiteral') {
-          // `id-${number}` fits `id-${string}`: the same texts around types that each fit.
-          const sameTexts =
-            s.texts.length === t.texts.length && s.texts.every((text, index) => text === t.texts[index]);
-          return (
-            this.sameGeneric(s, t) ||
-            (sameTexts &&
-              s.types.every(
-                // A `${string}` placeholder takes any value spelled into a template.
-                (type, index) => isIntrinsic(t.types[index], 'string') || this.isRelated(type, t.types[index], relation)
-              ))
-          );
-        }
+        if (s.kind === 'templateLiteral' && t.kind === 'templateLiteral')
+          return this.sameGeneric(s, t) || this.templateMatchesTemplate(s, t, relation);
         return relation === 'comparable' && isIntrinsic(s, 'string');
       }
       case 'object': {
@@ -498,6 +488,32 @@ export class Relations {
     return parts?.every((text, index) => this.matchesPlaceholder(text, target.types[index])) ?? false;
   }
 
+  /**
+   * Whether a template literal type fits another, as `` `ab${number}` `` fits `` `a${string}` ``: TypeScript's
+   * `isTypeMatchedByTemplateLiteralType` splits the source at the target's texts and fits each part to a placeholder.
+   */
+  private templateMatchesTemplate(
+    source: TemplateLiteralType,
+    target: TemplateLiteralType,
+    relation: Relation
+  ): boolean {
+    const parts = templateParts(source, target, (texts, types) => this.c.typeOperators.templateLiteral(texts, types));
+    return parts?.every((part, index) => this.fitsPlaceholder(part, target.types[index], relation)) ?? false;
+  }
+
+  /** TypeScript's `isValidTypeForTemplateLiteralPlaceholder`. */
+  private fitsPlaceholder(part: Type, placeholder: Type, relation: Relation): boolean {
+    if (isIntrinsic(placeholder, 'string') || this.isRelated(part, placeholder, relation)) return true;
+    if (part.kind === 'literal' && typeof part.value === 'string')
+      return this.matchesPlaceholder(part.value, placeholder);
+    return (
+      part.kind === 'templateLiteral' &&
+      part.texts.length === 2 &&
+      part.texts.every((text) => text === '') &&
+      this.isRelated(part.types[0], placeholder, relation)
+    );
+  }
+
   private matchesPlaceholder(text: string, type: Type): boolean {
     if (isIntrinsic(type, 'string') || isAnyLike(type)) return true;
     if (isIntrinsic(type, 'number')) return text !== '' && Number.isFinite(Number(text));
@@ -543,9 +559,7 @@ export class Relations {
       structure.properties.size === 0 &&
       structure.callSignatures.length === 0 &&
       structure.constructSignatures.length === 0 &&
-      !structure.stringIndex &&
-      !structure.numberIndex &&
-      !structure.symbolIndex
+      !hasIndexSignature(structure)
     );
   }
 
@@ -592,14 +606,13 @@ export class Relations {
     if (byElements !== undefined) return byElements;
     const sourceStructure = this.c.structureOf(source);
     const targetStructure = this.c.structureOf(target);
-    const { stringIndex, numberIndex, symbolIndex } = targetStructure;
     return (
       this.propertiesRelated(source, sourceStructure, targetStructure, relation) &&
       this.signaturesRelated(sourceStructure.callSignatures, targetStructure.callSignatures, relation) &&
       this.signaturesRelated(sourceStructure.constructSignatures, targetStructure.constructSignatures, relation) &&
-      (!stringIndex || this.indexRelated(sourceStructure, source, stringIndex.type, 'string', relation, state)) &&
-      (!numberIndex || this.indexRelated(sourceStructure, source, numberIndex.type, 'number', relation, state)) &&
-      (!symbolIndex || this.indexRelated(sourceStructure, source, symbolIndex.type, 'symbol', relation, state))
+      keyedIndexes(targetStructure).every((index) =>
+        this.indexRelated(sourceStructure, source, index.type, index.keyType, relation, state)
+      )
     );
   }
 
@@ -735,21 +748,29 @@ export class Relations {
     structure: Structure,
     source: Type,
     target: Type,
-    keyKind: KeyKind,
+    keyType: Type,
     relation: Relation,
     state: number
   ): boolean {
-    const sourceIndex = applicableIndex(structure, keyKind);
+    const sourceIndex = applicableIndex(this.c, structure, keyType);
     if (sourceIndex) return this.isRelated(sourceIndex.type, target, relation);
     // TypeScript infers no index signature for a member of an intersection, only for the intersection as a whole.
     if (state & INTERSECTION_SOURCE || !this.hasInferableIndex(source, structure)) return false;
+    const narrowerIndexes = keyedIndexes(structure).filter((index) => isIndexKeyOf(this.c, index.keyType, keyType));
+    if (narrowerIndexes.some((index) => !this.isRelated(index.type, target, relation))) return false;
     for (const [name, property] of structure.properties) {
-      if (!isNameOfKind(name, keyKind)) continue;
+      if (!this.isNameOfKey(name, keyType)) continue;
       if (property.isMethod && source.kind === 'object' && source.objectKind !== 'anonymous') continue;
       const type = property.optional ? unionOf([property.type(), undefinedType]) : property.type();
       if (!this.isRelated(type, target, relation)) return false;
     }
     return true;
+  }
+
+  /** Whether a property name is a key an index signature applies to, as `"0"` is both a string and a numeric key. */
+  private isNameOfKey(name: string, keyType: Type): boolean {
+    if (isSymbolName(name)) return isIntrinsic(keyType, 'symbol');
+    return isIndexKeyOf(this.c, literalType(name), keyType);
   }
 
   /**
@@ -1021,26 +1042,12 @@ function isWeakCheckedSource(source: Type): boolean {
   return ['object', 'intersection', 'literal', 'templateLiteral', 'stringMapping'].includes(source.kind);
 }
 
-/** The index signature of a structure that applies to keys of a kind, as a string index does to numeric keys. */
-function applicableIndex(structure: Structure, keyKind: KeyKind): IndexInfo | undefined {
-  if (keyKind === 'symbol') return structure.symbolIndex;
-  return keyKind === 'number' ? (structure.numberIndex ?? structure.stringIndex) : structure.stringIndex;
-}
-
-/** Whether a property name is a key of a kind, as `"0"` is both a string and a numeric key. */
-function isNameOfKind(name: string, keyKind: KeyKind): boolean {
-  if (isSymbolName(name)) return keyKind === 'symbol';
-  return keyKind === 'string' || (keyKind === 'number' && isNumericName(name));
-}
-
 function isWeakStructure(structure: Structure): boolean {
   return (
     structure.properties.size > 0 &&
     [...structure.properties.values()].every((property) => property.optional) &&
     !hasSignatures(structure) &&
-    !structure.stringIndex &&
-    !structure.numberIndex &&
-    !structure.symbolIndex
+    !hasIndexSignature(structure)
   );
 }
 

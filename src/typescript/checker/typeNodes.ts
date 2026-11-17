@@ -5,6 +5,7 @@ import { unsupportedMessage } from '../unsupported';
 import type { Checker, Mapper, UnionAlias } from './checker';
 import { BROWSER_INTERFACES } from './domGlobals';
 import { IndexedAccessKeys } from './indexedAccessKeys';
+import { isPatternKey } from './indexInfos';
 import { InterfaceBases } from './interfaceBases';
 import { withDomMembers } from './library';
 import type { Sym } from './scopes';
@@ -564,7 +565,9 @@ export class TypeNodes {
     for (const key of keyType.kind === 'union' ? keyType.types : [keyType]) {
       if (isIntrinsic(key, 'number')) structure.numberIndex = info;
       else if (isIntrinsic(key, 'symbol')) structure.symbolIndex = info;
-      else structure.stringIndex = { ...info, keyPatterns: stringIndexPatterns(structure.stringIndex, key) };
+      else if (isPatternKey(key))
+        structure.patternIndexes = [...(structure.patternIndexes ?? []), { ...info, keyType: key }];
+      else structure.stringIndex = info;
     }
   }
 
@@ -743,10 +746,4 @@ function isOutsideGenericDeclarations(node: TreeNode): boolean {
 
 function unionAlias(symbol: Sym): UnionAlias {
   return { id: symbol.id, type: () => symbol.declaredType };
-}
-
-/** The patterns a string index signature covers once one declared for `key` joins `existing`, absent for all strings. */
-function stringIndexPatterns(existing: IndexInfo | undefined, key: Type): Type[] | undefined {
-  if (isIntrinsic(key, 'string') || (existing && !existing.keyPatterns)) return undefined;
-  return [...(existing?.keyPatterns ?? []), key];
 }

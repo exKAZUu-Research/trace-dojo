@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 477 -- Resolves expressions, lexical references, closure captures, and contextual assignment diagnostics; memoization is separate.
+// code-gauge-allow-file fileNcss 478 -- Resolves expressions, lexical references, closure captures, and contextual assignment diagnostics; memoization is separate.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import { unsupportedMessage } from '../unsupported';
@@ -8,6 +8,7 @@ import { arrayTargets, Elaboration, targetElementType } from './elaboration';
 import { Expandos, laterRunningTypes } from './expandos';
 import { ExpressionTypeCache } from './expressionTypeCache';
 import type { FlowEntry } from './flow';
+import { applicableIndex, applicablePatternIndexes } from './indexInfos';
 import { printedPropertyName } from './print';
 import type { Sym } from './scopes';
 import { nameSuggestionHint } from './spelling';
@@ -30,6 +31,7 @@ import {
   isAnyLike,
   isIntrinsic,
   isSymbolName,
+  literalType,
   nullType,
   numberType,
   type ObjectType,
@@ -702,7 +704,9 @@ export class ExpressionChecker {
         (this.c.propertyOf(member, name) !== undefined && !this.isObjectPrototypeProperty(member, name)) ||
         this.c.structureOf(member).stringIndex !== undefined ||
         (isNumericName(name) && this.c.structureOf(member).numberIndex !== undefined) ||
-        (isSymbolName(name) && this.c.structureOf(member).symbolIndex !== undefined)
+        (isSymbolName(name)
+          ? this.c.structureOf(member).symbolIndex !== undefined
+          : applicablePatternIndexes(this.c, this.c.structureOf(member), literalType(name)).length > 0)
     );
   }
 
@@ -729,8 +733,8 @@ export class ExpressionChecker {
   private typeOfPropertyIn(member: Type, name: string): Type {
     const property = this.c.propertyOf(member, name);
     if (property) return property.optional ? unionOf([property.type(), undefinedType]) : property.type();
-    const { stringIndex, numberIndex, symbolIndex } = this.c.structureOf(member);
-    const index = isSymbolName(name) ? symbolIndex : ((isNumericName(name) ? numberIndex : undefined) ?? stringIndex);
+    const structure = this.c.structureOf(member);
+    const index = isSymbolName(name) ? structure.symbolIndex : applicableIndex(this.c, structure, literalType(name));
     return index?.type ?? undefinedType;
   }
 
