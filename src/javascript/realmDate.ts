@@ -164,7 +164,10 @@ export function hostOptions(runtime: Runtime, value: Value): unknown {
       get: (_, key) => {
         if (typeof key !== 'string') return;
         const option = runtime.get(value, key);
-        return isObject(option) ? runtime.toString(option) : option;
+        // The host converts an object option as the option needs, a boolean one without calling the object's methods.
+        return isObject(option)
+          ? { [Symbol.toPrimitive]: (hint: 'string' | 'number' | 'default') => runtime.toPrimitive(option, hint) }
+          : option;
       },
     }
   );

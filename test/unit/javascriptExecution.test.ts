@@ -1566,6 +1566,14 @@ const m = new Map(); try { Map.prototype.get.call(new Date(0), 1); } catch (e) {
 try { Set.prototype.has.call(new Error("boom"), 1); } catch (e) { console.log(e.message); }`,
   ],
   [
+    'locale options of objects converted only where the option is a string',
+    `const numeric = { toString() { console.log("toString"); return ""; } };
+console.log("2".localeCompare("10", undefined, { numeric }));
+console.log("a".localeCompare("A", undefined, { sensitivity: { toString() { console.log("sens"); return "base"; } } }));
+try { "2".localeCompare("10", undefined, { numeric: { toString() { throw "boom"; } } }); console.log("ok"); } catch (e) { console.log("caught", e); }
+console.log(new Date(0).toLocaleString("en-US", { timeZone: { toString() { return "UTC"; } }, hour12: {} }));`,
+  ],
+  [
     'localeCompare with locales and options',
     `console.log(["file10", "file9", "File2"].sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" })));
 console.log("a".localeCompare("A", undefined, { sensitivity: "base" }), "10".localeCompare("9", undefined, { numeric: true }), "ä".localeCompare("z", "sv"), "ä".localeCompare("z"));
