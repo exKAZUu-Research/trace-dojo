@@ -120,7 +120,6 @@ function addVariable(variables: TraceVariables, name: string, value: Value): voi
     });
 }
 
-// code-gauge-allow functionNcss 31 -- The ordered cases for runtime value graph serialization share state; splitting them solely for the metric would hide their sequencing.
 function scalarOf(value: Value, seen: Set<object>, budget: { remaining: number }): Scalar | typeof NOT_SCALAR {
   if (budget.remaining-- <= 0) throw new ExecutionLimitError('trace');
   rt().spend();
@@ -215,40 +214,57 @@ function rangeText(value: RRange): string {
 function containerNodeOf(value: RBasic, seen: Set<object>, budget: { remaining: number }): DisplayNode {
   const entries: Record<string, DisplayNode> = {};
   if (value instanceof RArray) {
-    for (const [index, item] of value.items.entries()) {
-      entries[index] = displayNodeOf(item, seen, budget) ?? NULL_NODE;
-      if (budget.remaining <= 0) {
-        if (index + 1 < value.items.length) markTruncated(entries, String(index + 1));
-        break;
-      }
-    }
+    addArrayEntries(entries, value, seen, budget);
     return { kind: 'array', entries };
   }
-  if (value instanceof RHash) {
-    const ordered: HashEntry[] = [];
-    for (const entry of value.map.values()) {
-      if (ordered.length >= Math.max(1, budget.remaining)) break;
-      ordered.push(entry);
-    }
-    const labels = keyLabels(ordered.map((entry) => entry.key));
-    for (const [index, entry] of ordered.entries()) {
-      Object.defineProperty(entries, labels[index], {
-        value: displayNodeOf(entry.value, seen, budget) ?? NULL_NODE,
-        enumerable: true,
-        configurable: true,
-        writable: true,
-      });
-      if (budget.remaining <= 0) {
-        if (index + 1 < value.map.size) {
-          let marker = '…';
-          while (Object.hasOwn(entries, marker)) marker += '…';
-          markTruncated(entries, marker);
-        }
-        break;
-      }
-    }
-  } else addInstanceEntries(entries, value, seen, budget);
+  if (value instanceof RHash) addHashEntries(entries, value, seen, budget);
+  else addInstanceEntries(entries, value, seen, budget);
   return { kind: 'object', entries };
+}
+
+function addArrayEntries(
+  entries: Record<string, DisplayNode>,
+  value: RArray,
+  seen: Set<object>,
+  budget: { remaining: number }
+): void {
+  for (const [index, item] of value.items.entries()) {
+    entries[index] = displayNodeOf(item, seen, budget) ?? NULL_NODE;
+    if (budget.remaining <= 0) {
+      if (index + 1 < value.items.length) markTruncated(entries, String(index + 1));
+      break;
+    }
+  }
+}
+
+function addHashEntries(
+  entries: Record<string, DisplayNode>,
+  value: RHash,
+  seen: Set<object>,
+  budget: { remaining: number }
+): void {
+  const ordered: HashEntry[] = [];
+  for (const entry of value.map.values()) {
+    if (ordered.length >= Math.max(1, budget.remaining)) break;
+    ordered.push(entry);
+  }
+  const labels = keyLabels(ordered.map((entry) => entry.key));
+  for (const [index, entry] of ordered.entries()) {
+    Object.defineProperty(entries, labels[index], {
+      value: displayNodeOf(entry.value, seen, budget) ?? NULL_NODE,
+      enumerable: true,
+      configurable: true,
+      writable: true,
+    });
+    if (budget.remaining <= 0) {
+      if (index + 1 < value.map.size) {
+        let marker = '…';
+        while (Object.hasOwn(entries, marker)) marker += '…';
+        markTruncated(entries, marker);
+      }
+      break;
+    }
+  }
 }
 
 function addInstanceEntries(
