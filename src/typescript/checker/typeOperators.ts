@@ -487,25 +487,27 @@ export class TypeOperators {
       if (node) this.c.error(node, 'この式の型は、表せないほど複雑な共用体型になります。');
       return errorType;
     }
+    const combinations = this.literalCombinations(texts, types);
+    if (combinations === 'never') return neverType;
+    if (combinations) return unionOf(combinations.map((text) => literalType(text)));
+    if (types.length === 1 && isIntrinsic(types[0], 'string') && texts.every((text) => text === '')) return stringType;
+    return { kind: 'templateLiteral', id: newTypeId(), texts, types };
+  }
+
+  /**
+   * The strings a template spells when each placeholder is a literal or a union of them, `never` when one is `never`,
+   * or `undefined` when one is not a literal.
+   */
+  private literalCombinations(texts: string[], types: Type[]): string[] | 'never' | undefined {
     let combinations: string[] = [texts[0]];
-    let isLiteral = true;
     for (const [index, type] of types.entries()) {
       const members = type.kind === 'union' ? type.types : [type];
-      if (members.some((member) => isIntrinsic(member, 'never'))) return neverType;
-      if (
-        !members.every(
-          (member) => member.kind === 'literal' || isIntrinsic(member, 'null') || isIntrinsic(member, 'undefined')
-        )
-      ) {
-        isLiteral = false;
-        break;
-      }
+      if (members.some((member) => isIntrinsic(member, 'never'))) return 'never';
+      if (!members.every(isSpelledLiteral)) return undefined;
       this.c.budget.spend(combinations.length * members.length);
       combinations = appendEach(combinations, members, texts[index + 1]);
     }
-    if (isLiteral) return unionOf(combinations.map((text) => literalType(text)));
-    if (types.length === 1 && isIntrinsic(types[0], 'string') && texts.every((text) => text === '')) return stringType;
-    return { kind: 'templateLiteral', id: newTypeId(), texts, types };
+    return combinations;
   }
 
   /** `Uppercase<T>` and its kin, which TypeScript pushes into a template literal's texts and placeholders. */
@@ -566,4 +568,9 @@ function appendEach(prefixes: string[], members: Type[], suffix: string): string
         prefix + (member.kind === 'literal' ? String(member.value) : (member as { name: string }).name) + suffix
     )
   );
+}
+
+/** Whether a template placeholder spells one text, as a literal, `null`, or `undefined` does. */
+function isSpelledLiteral(member: Type): boolean {
+  return member.kind === 'literal' || isIntrinsic(member, 'null') || isIntrinsic(member, 'undefined');
 }

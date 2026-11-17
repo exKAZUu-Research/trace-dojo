@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 433 -- Resolves calls as TypeScript does: callees, overloads, inference, and the effects of calls on the flow.
+// code-gauge-allow-file fileNcss 454 -- Resolves calls as TypeScript does: callees, overloads, inference, and the effects of calls on the flow.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import { unsupportedMessage } from '../unsupported';
@@ -52,19 +52,7 @@ export class Calls {
     if (callee.type === 'super') return this.c.classes.superCall(node, args);
     if (callee.type === 'import') return this.checkArgumentsOnly(args, anyType);
     const optional = node.childForFieldName('optional_chain') !== null;
-    if (this.isEvolvingPush(callee)) {
-      const object = callee.childForFieldName('object') as TreeNode;
-      for (const arg of args) {
-        // A spread adds the elements of what it spreads.
-        const element =
-          arg.type === 'spread_element'
-            ? this.c.patterns.iteratedType(arg, this.c.expressions.check(named(arg)[0]))
-            : this.c.expressions.check(arg);
-        this.c.assignments.evolve(object, element);
-      }
-      // `push` and `unshift` return the new length.
-      return numberType;
-    }
+    if (this.isEvolvingPush(callee)) return this.evolvingPush(callee, args);
     const chained = this.c.members.chainedCalleeType(callee);
     const checkedCallee = chained ?? this.c.expressions.check(callee, this.immediateCallContext(callee, args));
     if (checkedCallee === errorType) return this.checkArgumentsOnly(args, errorType);
@@ -185,6 +173,21 @@ export class Calls {
 
   private isName(node: TreeNode): boolean {
     return node.type === 'identifier';
+  }
+
+  /** `push` or `unshift` on an evolving array, which adds what it passes to the array's element type. */
+  private evolvingPush(callee: TreeNode, args: TreeNode[]): Type {
+    const object = callee.childForFieldName('object') as TreeNode;
+    for (const arg of args) {
+      // A spread adds the elements of what it spreads.
+      const element =
+        arg.type === 'spread_element'
+          ? this.c.patterns.iteratedType(arg, this.c.expressions.check(named(arg)[0]))
+          : this.c.expressions.check(arg);
+      this.c.assignments.evolve(object, element);
+    }
+    // `push` and `unshift` return the new length.
+    return numberType;
   }
 
   private isEvolvingPush(callee: TreeNode): boolean {

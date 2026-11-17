@@ -35,8 +35,6 @@ const typeofResult = unionOf(
 export class OperatorChecker {
   constructor(private readonly c: Checker) {}
 
-  // code-gauge-allow functionNcss 42 -- One case per unary operator.
-  // code-gauge-allow functionCognitiveComplexity 26 -- One case per unary operator.
   unary(node: TreeNode): Type {
     const operator = node.childForFieldName('operator')?.text ?? '';
     const argument = node.childForFieldName('argument') as TreeNode;
@@ -64,32 +62,37 @@ export class OperatorChecker {
       case '-':
       case '+':
       case '~': {
-        const type = this.c.expressions.check(argument);
-        if (argument.type === 'number' && operator === '-') {
-          const value = numberValue(argument.text);
-          return freshLiteralType(typeof value === 'bigint' ? -value : -value);
-        }
-        // TypeScript rejects a numeric unary operator on a value that may be a symbol, even through a constraint.
-        if (this.maySymbol(type)) {
-          this.c.error(argument, `演算子 '${operator}' は型 'symbol' には使えません。`);
-          return numberType;
-        }
-        if (operator === '+') {
-          if (this.isBigintLike(type)) this.c.error(argument, "演算子 '+' は型 'bigint' には使えません。");
-          return numberType;
-        }
-        if (isIntrinsic(type, 'null') || isIntrinsic(type, 'undefined')) {
-          this.c.error(argument, `値 '${this.c.print(type)}' はここでは使えません。`);
-          return numberType;
-        }
-        if (!isAnyLike(type) && this.c.relations.isNullable(type)) this.c.members.checkNonNullable(argument, type);
-        return this.isBigintLike(type) ? bigintType : numberType;
+        return this.numericUnary(operator, argument);
       }
       default: {
         this.c.expressions.check(argument);
         return anyType;
       }
     }
+  }
+
+  /** `-x`, `+x`, or `~x`, which convert their operand to a number, or keep a bigint for `-` and `~`. */
+  private numericUnary(operator: string, argument: TreeNode): Type {
+    const type = this.c.expressions.check(argument);
+    if (argument.type === 'number' && operator === '-') {
+      const value = numberValue(argument.text);
+      return freshLiteralType(typeof value === 'bigint' ? -value : -value);
+    }
+    // TypeScript rejects a numeric unary operator on a value that may be a symbol, even through a constraint.
+    if (this.maySymbol(type)) {
+      this.c.error(argument, `演算子 '${operator}' は型 'symbol' には使えません。`);
+      return numberType;
+    }
+    if (operator === '+') {
+      if (this.isBigintLike(type)) this.c.error(argument, "演算子 '+' は型 'bigint' には使えません。");
+      return numberType;
+    }
+    if (isIntrinsic(type, 'null') || isIntrinsic(type, 'undefined')) {
+      this.c.error(argument, `値 '${this.c.print(type)}' はここでは使えません。`);
+      return numberType;
+    }
+    if (!isAnyLike(type) && this.c.relations.isNullable(type)) this.c.members.checkNonNullable(argument, type);
+    return this.isBigintLike(type) ? bigintType : numberType;
   }
 
   private maySymbol(type: Type): boolean {

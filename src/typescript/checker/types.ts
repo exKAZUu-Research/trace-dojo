@@ -334,14 +334,13 @@ export function unionOf(types: Type[], keepFresh = false): Type {
   for (const type of types) add(type);
   if (flat.some((type) => type === anyType || type === errorType)) return flat.find((type) => isAnyLike(type)) as Type;
   if (flat.some((type) => isIntrinsic(type, 'unknown'))) return unknownType;
-  const primitives = new Set(flat.filter((type) => type.kind === 'intrinsic').map((type) => type.name));
-  const hasPrimitive = (name: IntrinsicName): boolean => primitives.has(name);
+  const primitives = new Set<IntrinsicName>(flat.filter((type) => type.kind === 'intrinsic').map((type) => type.name));
   const reduced = flat.filter((type) => {
     if (type.kind === 'literal') {
       const primitive = typeof type.value === 'boolean' ? undefined : (typeof type.value as IntrinsicName);
-      return !primitive || !hasPrimitive(primitive);
+      return !primitive || !primitives.has(primitive);
     }
-    if (type.kind === 'templateLiteral' || type.kind === 'stringMapping') return !hasPrimitive('string');
+    if (type.kind === 'templateLiteral' || type.kind === 'stringMapping') return !primitives.has('string');
     return true;
   });
   if (reduced.length === 0) return neverType;

@@ -133,16 +133,7 @@ export class ExpressionChecker {
           texts[texts.length - 1] += templateFragmentText(child);
         continue;
       }
-      const expression = named(child)[0];
-      const type = this.check(expression);
-      this.checkFunctionText(expression, type);
-      if (this.isSymbolLike(type)) {
-        this.c.error(
-          expression,
-          "symbol を文字列に暗黙に変換すると、実行時にエラーになります。'String(...)' で囲んでください。"
-        );
-      }
-      types.push(type);
+      types.push(this.templateSubstitution(named(child)[0]));
       texts.push('');
     }
     // A template a literal or template literal type expects has the type its parts spell.
@@ -160,6 +151,19 @@ export class ExpressionChecker {
     if (!spellable) return stringType;
     const spelled = this.c.typeOperators.templateLiteral(texts, types.map(regularOf));
     return spelled.kind === 'literal' ? freshLiteralType(spelled.value as string) : spelled;
+  }
+
+  /** The type of a template's substitution, which a function or a symbol cannot stand in as text. */
+  private templateSubstitution(expression: TreeNode): Type {
+    const type = this.check(expression);
+    this.checkFunctionText(expression, type);
+    if (this.isSymbolLike(type)) {
+      this.c.error(
+        expression,
+        "symbol を文字列に暗黙に変換すると、実行時にエラーになります。'String(...)' で囲んでください。"
+      );
+    }
+    return type;
   }
 
   /** The type of an expression as a mutable location holds it, with its literals widened. */
@@ -463,7 +467,6 @@ export class ExpressionChecker {
     this.variableTypes.set(symbol.id, type);
   }
 
-  // code-gauge-allow functionCognitiveComplexity 30 -- One case per kind of declaration.
   // code-gauge-allow functionNcss 31 -- Keeps declaration-kind dispatch together; function overload resolution has its own helper.
   private computeValueType(symbol: Sym): Type {
     const declaration = symbol.valueDeclaration;
@@ -583,7 +586,6 @@ export class ExpressionChecker {
 
   /** Reports the properties of a fresh object literal that its target does not declare. */
   // code-gauge-allow functionCognitiveComplexity 29 -- Follows TypeScript's excess property check, including nested object literals.
-  // code-gauge-allow functionNcss 33 -- Follows TypeScript's excess property check through unions, arrays, discriminants, and nested literals.
   checkExcessProperties(node: TreeNode, source: Type, target: Type): void {
     // Each object literal a union, an array, or a tuple holds is checked against where it goes.
     if (source.kind === 'union') {
