@@ -338,21 +338,13 @@ export class Codegen {
         return { k: 'frame', size: frame.size, body, info } as Core;
       });
     }
-    const frame = new FrameScope(this.frame);
-    return this.withFrame(frame, () => {
-      for (const param of dictParams) frame.slots.set(param, frame.alloc());
-      const argSlots = Array.from({ length: arity }, () => frame.alloc());
-      const visible = isTop ? OrderedMap<string, VisibleBinding>() : this.visible;
-      const body = this.withVisible(visible, () => this.compileClauseBody(binding, argSlots, name));
-      return {
-        k: 'lam',
-        arity: dictParams.length + arity,
-        size: frame.size,
-        body,
-        info,
-        displayConstraints: this.options.traceTypes ? dictParams.map((param) => param.pred.type) : undefined,
-      } as Core;
-    });
+    const visible = isTop ? OrderedMap<string, VisibleBinding>() : this.visible;
+    return this.compileDictionaryLambda(
+      dictParams,
+      arity,
+      (args) => this.withVisible(visible, () => this.compileClauseBody(binding, args, name)),
+      info
+    );
   }
 
   private infoForBinding(binding: Extract<RBinding, { k: 'fun' }>, name: string): FunctionInfo {
@@ -944,13 +936,30 @@ export class Codegen {
   private compileTyped(expr: Extract<RExpr, { k: 'typed' }>, build = () => this.compileExpr(expr.expr)): Core {
     const params = expr.dictParams ?? [];
     if (params.length === 0) return build();
-    const frame = new FrameScope(this.frame);
-    const fn = this.withFrame(frame, (): Core => {
-      for (const param of params) frame.slots.set(param, frame.alloc());
-      const body = build();
-      return { k: 'lam', arity: params.length, size: frame.size, body };
-    });
+    const fn = this.compileDictionaryLambda(params, 0, build);
     return { k: 'app', fn, args: (expr.evidence ?? []).map((evidence) => this.compileEvidence(evidence)) };
+  }
+
+  private compileDictionaryLambda(
+    params: readonly DictParam[],
+    arity: number,
+    build: (args: number[]) => Core,
+    info?: FunctionInfo
+  ): Core {
+    const frame = new FrameScope(this.frame);
+    return this.withFrame(frame, () => {
+      for (const param of params) frame.slots.set(param, frame.alloc());
+      const args = Array.from({ length: arity }, () => frame.alloc());
+      const body = build(args);
+      return {
+        k: 'lam',
+        arity: params.length + arity,
+        size: frame.size,
+        body,
+        info,
+        displayConstraints: this.options.traceTypes ? params.map((param) => param.pred.type) : undefined,
+      };
+    });
   }
 
   private compileDo(expr: Extract<RExpr, { k: 'do' }>, binding?: { row: number; names: string[] }): Core {

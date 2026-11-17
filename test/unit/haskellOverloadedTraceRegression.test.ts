@@ -166,3 +166,35 @@ main=loop(0.1::Float,1::Int)`;
     expect(result.traceItems.filter(({ vars }) => vars.i === 1)).toHaveLength(4);
   }
 );
+
+test.each([
+  ['Fractional', 'Float', '0.1', '0.1'],
+  ['Num', 'Int', '0', '1'],
+])(
+  'constrained %s expression annotations retain lambda and statement type scopes',
+  (constraint, type, seed, increment) => {
+    const sources = [
+      `import Control.Monad
+main =
+ ((\\n -> do
+    forM_ [n+${increment},n+${increment}] $ \\i -> do
+      print(0::Int)
+  ) :: ${constraint} a => a -> IO ()) (${seed}::${type})`,
+      `import Control.Monad
+main=do
+ x<-((do
+   let n=${seed}
+   forM_ [n+${increment},n+${increment}] $ \\i->do
+    print(0::Int)
+   pure n
+  )::${constraint} a=>IO a)
+ print(x::${type})`,
+    ];
+    for (const source of sources) {
+      const specialized = source.replace(`${constraint} a => a`, type).replace(`${constraint} a=>IO a`, `IO ${type}`);
+      const result = traceProgram('haskell', source, source);
+      expect(result.stdout).toBe(source === sources[0] ? '0\n0\n' : `0\n0\n${seed}\n`);
+      expect(result.traceItems).toEqual(traceProgram('haskell', specialized, specialized).traceItems);
+    }
+  }
+);
