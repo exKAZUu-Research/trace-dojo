@@ -6,6 +6,8 @@ export interface Span {
 export interface Program {
   body: Statement[];
   scope: ScopeDeclarations;
+  /** Whether the program's own code is strict mode code, outside which failed assignments do nothing. */
+  isStrict: boolean;
 }
 
 /** The names a function body or block declares, which its scope creates before running its statements. */
@@ -119,6 +121,8 @@ export interface FunctionNode extends Span {
   isAtomic: boolean;
   /** The text `toString()` returns. */
   source: string;
+  /** Whether the function is strict mode code, which a class or a `"use strict"` directive makes it. */
+  isStrict: boolean;
 }
 
 export interface ClassNode extends Span {

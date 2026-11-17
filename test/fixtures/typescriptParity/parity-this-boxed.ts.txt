@@ -1,0 +1,2 @@
+function f(this: any) { return typeof this; }
+console.log(f.call(1), f.call("s"), f.call(null) === f.call(undefined));

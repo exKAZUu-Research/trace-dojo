@@ -79,6 +79,7 @@ const PRIMITIVE_TAGS: Partial<Record<string, string>> = { string: 'String', numb
 function objectTagOf(object: JsObject): string {
   if (object instanceof JsArray) return 'Array';
   if (object instanceof JsFunction) return 'Function';
+  if (object.isArguments) return 'Arguments';
   if (object.primitive !== undefined) return tagOf(object.primitive);
   if (object.regexp) return 'RegExp';
   if (dateValueOf(object) !== undefined) return 'Date';

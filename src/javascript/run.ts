@@ -37,10 +37,13 @@ export function executeParsedProgram(parse: () => Program, input?: ProgramInput)
 // code-gauge-allow duplicateLines 20 -- Each language's runner wraps its own runtime and collects the same output contract.
 export function runProgram(runtime: Runtime, program: Program, onEnd?: (scope: Scope) => void): ProgramRun {
   const scope = new Scope(runtime.realm.globals, {
-    thisValue: undefined,
+    // A CommonJS script's `this` is its empty `module.exports`.
+    thisValue: program.isStrict ? undefined : runtime.newObject(),
     homeObject: undefined,
     constructing: undefined,
     newTarget: undefined,
+    isStrict: program.isStrict,
+    hasImplicitThis: !program.isStrict,
   });
   runtime.pushFrame(scope, undefined, false);
   try {

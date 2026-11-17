@@ -19,6 +19,7 @@ import {
   fail,
   field,
   hasChild,
+  hasUseStrictDirective,
   keyName,
   namedChildren,
   namedField,
@@ -47,6 +48,8 @@ const declarationTypes = new Set([
 export class ProgramConverter extends ExpressionConverter {
   /** Whether the class being converted extends another, which lets its constructor call `super()`. */
   private derivedConstructor = false;
+  /** Whether a program without a `"use strict"` directive is strict mode code, as a module or a JavaScript file is. */
+  protected readonly isStrictByDefault: boolean = true;
 
   protected readonly statementConverters: Record<string, StatementConverter> = {
     expression_statement: (node) =>
@@ -114,11 +117,12 @@ export class ProgramConverter extends ExpressionConverter {
   convert(root: Node): Program {
     const scope = this.pushScope(true);
     const statements = namedChildren(root).filter((child) => child.type !== 'hash_bang_line');
+    this.isStrict = this.isStrictByDefault || hasUseStrictDirective(statements);
     rejectUsingIn(statements, 'using 宣言はプログラムの一番外側には書けません。');
     const body = this.statementList(statements);
     this.popScope();
     this.assignAtomicAnnotations();
-    const program = { body, scope };
+    const program = { body, scope, isStrict: this.isStrict };
     return program;
   }
 
@@ -368,6 +372,8 @@ export class ProgramConverter extends ExpressionConverter {
     context.isAsync = isAsync;
     context.isAsyncGenerator = isAsync && isGenerator;
     context.isGenerator = isGenerator;
+    const outerStrict = this.isStrict;
+    this.isStrict ||= bodyNode.type === 'statement_block' && hasUseStrictDirective(namedChildren(bodyNode));
     return this.withContext(context, () => {
       const scope = this.pushScope(true);
       try {
@@ -392,12 +398,14 @@ export class ProgramConverter extends ExpressionConverter {
           scope,
           isAtomic: false,
           source: this.sourceOf(node),
+          isStrict: this.isStrict,
           row: rowOf(node),
         };
         this.addFunction(node, bodyNode, fn);
         return fn;
       } finally {
         this.popScope();
+        this.isStrict = outerStrict;
       }
     });
   }
@@ -418,7 +426,18 @@ export class ProgramConverter extends ExpressionConverter {
     return { params, rest };
   }
 
+  /** Converts a class, all of whose code is strict mode code. */
   classNode(node: Node, name: string): ClassNode {
+    const outerStrict = this.isStrict;
+    this.isStrict = true;
+    try {
+      return this.strictClassNode(node, name);
+    } finally {
+      this.isStrict = outerStrict;
+    }
+  }
+
+  private strictClassNode(node: Node, name: string): ClassNode {
     if (namedChildren(node).some((child) => child.type === 'decorator')) unsupported(node, 'デコレータ');
     const heritage = namedChildren(node).find((child) => child.type === 'class_heritage');
     const superClass = heritage ? this.expression(namedChildren(heritage)[0]) : undefined;

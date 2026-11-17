@@ -1,0 +1,4 @@
+function f() { "use strict"; const o: any = Object.freeze({ a: 1 }); o.a = 2; }
+try { f(); } catch (e) { console.log((e as Error).message); }
+function g(this: any) { "use strict"; return this; }
+console.log(g());

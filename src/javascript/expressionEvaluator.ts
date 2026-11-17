@@ -425,7 +425,7 @@ export abstract class ExpressionEvaluator extends EvaluatorBase {
     if (reference === SHORT_CIRCUIT) return true;
     if (reference.kind === 'super') return runtime.throwError('ReferenceError', "Unsupported reference to 'super'");
     if (reference.kind !== 'property') return runtime.throwError('TypeError', 'Private fields can not be deleted');
-    return runtime.deleteProperty(reference.base, reference.key);
+    return runtime.deleteProperty(reference.base, reference.key, this.isStrict());
   }
 
   private unary(operator: string, argument: Expression): Value {

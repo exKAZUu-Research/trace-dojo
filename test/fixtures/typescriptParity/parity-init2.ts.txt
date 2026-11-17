@@ -1,0 +1,6 @@
+class A { x!: number; y = this.x; }
+class B { x?: number; y = this.x; }
+class C { m() { return 1; } y = this.m(); }
+class D { get g() { return 1; } y = this.g; }
+class E { static s = 1; y = E.s; }
+console.log(new C().y);

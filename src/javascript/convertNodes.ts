@@ -21,6 +21,16 @@ export function namedChildren(node: Node): Node[] {
   return node.namedChildren.filter((child) => child.type !== 'comment');
 }
 
+/** Whether a function body or a program starts with a `"use strict"` directive. */
+export function hasUseStrictDirective(statements: Node[]): boolean {
+  for (const statement of statements) {
+    const expression = statement.type === 'expression_statement' ? namedChildren(statement)[0] : undefined;
+    if (expression?.type !== 'string') return false;
+    if (expression.text.slice(1, -1) === 'use strict') return true;
+  }
+  return false;
+}
+
 /** The first named child in a field, skipping the `;` and empty statements that the `for` header puts there. */
 export function namedField(node: Node, name: string): Node | undefined {
   return node.childrenForFieldName(name).find((child) => child.isNamed && child.type !== 'empty_statement');

@@ -108,6 +108,11 @@ export abstract class EvaluatorBase {
     return this.runtime.frame.scope.nearestFunctionFrame();
   }
 
+  /** Whether the running code is strict mode code. */
+  isStrict(): boolean {
+    return this.functionFrame()?.isStrict ?? true;
+  }
+
   thisValue(): Value {
     const thisValue = this.functionFrame()?.thisValue;
     if (thisValue === UNINITIALIZED) {
@@ -194,7 +199,6 @@ export abstract class EvaluatorBase {
     return this.runtime.toPropertyKey(this.evaluate(name.expression));
   }
 
-  // code-gauge-allow duplicateLines 17 -- Reading and writing a reference switch over the same kinds of reference.
   getReference(reference: Reference): Value {
     const { runtime } = this;
     switch (reference.kind) {
@@ -214,7 +218,6 @@ export abstract class EvaluatorBase {
     }
   }
 
-  // code-gauge-allow duplicateLines 17 -- Reading and writing a reference switch over the same kinds of reference.
   putReference(reference: Reference, value: Value): void {
     const { runtime } = this;
     switch (reference.kind) {
@@ -223,7 +226,7 @@ export abstract class EvaluatorBase {
         return;
       }
       case 'property': {
-        runtime.set(reference.base, reference.key, value);
+        runtime.set(reference.base, reference.key, value, undefined, this.isStrict());
         return;
       }
       case 'private': {
@@ -233,7 +236,7 @@ export abstract class EvaluatorBase {
       case 'super': {
         // The property is looked up from the parent's prototype, while a setter or a data write acts on `this`.
         const home = this.functionFrame()?.homeObject;
-        runtime.set(reference.thisValue, reference.key, value, home?.proto ?? undefined);
+        runtime.set(reference.thisValue, reference.key, value, home?.proto ?? undefined, this.isStrict());
         return;
       }
     }

@@ -36,7 +36,10 @@ export function isAccessor(property: Property): property is AccessorProperty {
 
 /** Makes an object's properties read-only and stops it from gaining new ones, as `Object.freeze` does. */
 export function freeze(object: JsObject): void {
-  if (object instanceof JsArray) object.frozen = object.sealed = true;
+  if (object instanceof JsArray) {
+    object.frozen = object.sealed = true;
+    object.isLengthWritable = false;
+  }
   object.extensible = false;
   for (const property of object.properties.values()) {
     property.configurable = false;
@@ -65,6 +68,8 @@ export class JsObject {
   promise?: PromiseState;
   /** Set on a Map, Set, WeakMap, or WeakSet. */
   collection?: CollectionState;
+  /** Set on a function's `arguments` object, which shows and is tagged as `Arguments`. */
+  isArguments = false;
   /** Set on a primitive boxed by `Object(value)`, whose prototype methods read it; a string's are its own indices. */
   primitive?: string | number | boolean | bigint | symbol;
 
@@ -89,6 +94,8 @@ export class JsArray extends JsObject {
   sealed = false;
   /** Set by Object.freeze, which also leaves the elements and the length read-only. */
   frozen = false;
+  /** Cleared by Object.freeze or by defining `length` as read-only, after which nothing changes the length. */
+  isLengthWritable = true;
 
   constructor(
     proto: JsObject | null,
@@ -181,6 +188,10 @@ export interface FunctionFrame {
   /** The class whose constructor is running, for `super()` and field initialization. */
   constructing: JsFunction | undefined;
   newTarget: JsFunction | undefined;
+  /** Whether the running code is strict mode code, outside which refused assignments and deletions do nothing. */
+  isStrict: boolean;
+  /** Set where `this` is the module's or the global object, which code that is not strict mode code gets for none. */
+  hasImplicitThis?: boolean;
 }
 
 /** A value a `using` declaration declared, with the method that disposes of it when its scope ends. */

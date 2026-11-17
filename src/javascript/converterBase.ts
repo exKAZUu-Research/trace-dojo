@@ -73,6 +73,8 @@ export abstract class ConverterBase {
     ...newContext(false, false, false),
     canUseNewTarget: false,
   };
+  /** Whether the code being converted is strict mode code. */
+  protected isStrict = true;
   private readonly scopes: ScopeBuilder[] = [];
   /** The functions converted so far, among which the annotations find their owners once the program is converted. */
   private readonly functions: ConvertedFunction[] = [];

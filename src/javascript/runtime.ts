@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 592 -- One runtime of the JavaScript interpreter, whose state its builtins and evaluator share.
+// code-gauge-allow-file fileNcss 612 -- One runtime of the JavaScript interpreter, whose state its builtins and evaluator share.
 import { ExecutionBudget, LIMITS } from '../interpreter/limits';
 import { type ProgramInput, ProgramIO } from '../interpreter/programIo';
 import { StepTracker } from '../interpreter/stepTracker';
@@ -60,6 +60,8 @@ export class Frame {
 }
 
 type Primitive = undefined | null | boolean | number | bigint | string | symbol;
+
+const readOnlyLengthMessage = "Cannot assign to read only property 'length' of object '[object Array]'";
 
 export class Runtime {
   readonly world = new TurtleWorld();
@@ -158,7 +160,7 @@ export class Runtime {
       if (key === 'length')
         return {
           value: object.elements.length,
-          writable: !object.frozen,
+          writable: object.isLengthWritable,
           enumerable: false,
           configurable: false,
         };
@@ -201,59 +203,92 @@ export class Runtime {
    *
    * @param lookupStart Where the property is looked up instead of `target`, as `super[key] = value` starts at the
    * parent's prototype while acting on `this`.
+   * @param strict Whether an assignment the property refuses throws, as it does in strict mode code and in builtins.
    */
-  set(target: Value, key: Key, value: Value, lookupStart?: JsObject): void {
+  set(target: Value, key: Key, value: Value, lookupStart?: JsObject, strict = true): void {
     if (!(target instanceof JsObject)) {
-      if (target === undefined || target === null) {
-        this.throwError('TypeError', `Cannot set properties of ${String(target)} (setting '${String(key)}')`);
-      }
-      return this.throwError(
-        'TypeError',
-        `Cannot create property '${String(key)}' on ${typeof target} '${String(target)}'`
-      );
+      this.setOnPrimitive(target, key, value, strict);
+      return;
     }
-    if (!lookupStart && target instanceof JsArray && this.setArrayProperty(target, key, value)) return;
+    if (!lookupStart && target instanceof JsArray && this.setArrayProperty(target, key, value, strict)) return;
     const property = this.findProperty(lookupStart ?? target, key);
     if (property && isAccessor(property)) {
-      if (!property.set) {
-        this.throwError(
-          'TypeError',
-          `Cannot set property ${String(key)} of ${this.describe(target)} which has only a getter`
+      if (property.set) this.call(property.set, target, [value], this.currentRow);
+      else
+        this.refuse(
+          strict,
+          `Cannot set property ${String(key)} of ${this.receiverText(target)} which has only a getter`
         );
-      }
-      this.call(property.set, target, [value], this.currentRow);
       return;
     }
     if (property && !property.writable) {
-      this.throwError('TypeError', `Cannot assign to read only property '${String(key)}' of ${this.describe(target)}`);
+      this.refuse(strict, this.readOnlyMessage(key, target));
+      return;
     }
-    this.writeOwnData(target, key, value);
+    this.writeOwnData(target, key, value, strict);
+  }
+
+  /** Assigns a property of a primitive, which only a setter of its prototype accepts. */
+  private setOnPrimitive(target: Primitive, key: Key, value: Value, strict: boolean): void {
+    if (target === undefined || target === null) {
+      this.throwError('TypeError', `Cannot set properties of ${String(target)} (setting '${String(key)}')`);
+    }
+    const property = this.findProperty(this.objectFor(target, key), key);
+    if (property && isAccessor(property) && property.set) {
+      this.call(property.set, target, [value], this.currentRow);
+      return;
+    }
+    this.refuse(strict, `Cannot create property '${String(key)}' on ${typeof target} '${String(target)}'`);
   }
 
   /** Stores a data property of the object assigned to, which an own accessor or a read-only property refuses. */
-  private writeOwnData(target: JsObject, key: Key, value: Value): void {
+  private writeOwnData(target: JsObject, key: Key, value: Value, strict: boolean): void {
     const own = target.properties.get(key);
-    if (own && isAccessor(own)) this.throwError('TypeError', `Cannot redefine property: ${String(key)}`);
-    if (own) {
-      if (!own.writable)
-        this.throwError(
-          'TypeError',
-          `Cannot assign to read only property '${String(key)}' of ${this.describe(target)}`
-        );
-      own.value = value;
-      return;
+    if (own && isAccessor(own)) {
+      this.refuse(strict, `Cannot redefine property: ${String(key)}`);
+    } else if (own) {
+      if (own.writable) own.value = value;
+      else this.refuse(strict, this.readOnlyMessage(key, target));
+    } else if (target.extensible) {
+      this.allocate(1);
+      target.properties.set(key, { value, writable: true, enumerable: true, configurable: true });
+    } else {
+      this.refuse(strict, `Cannot add property ${String(key)}, object is not extensible`);
     }
-    if (!target.extensible)
-      this.throwError('TypeError', `Cannot add property ${String(key)}, object is not extensible`);
-    this.allocate(1);
-    target.properties.set(key, { value, writable: true, enumerable: true, configurable: true });
+  }
+
+  private readOnlyMessage(key: Key, target: JsObject): string {
+    const kind = target instanceof JsFunction ? 'function' : 'object';
+    return `Cannot assign to read only property '${String(key)}' of ${kind} '${this.receiverText(target)}'`;
+  }
+
+  /** How V8 names an object in the TypeError of a refused write: by its source, its class, or its tag. */
+  private receiverText(target: JsObject): string {
+    if (target instanceof JsArray) return '[object Array]';
+    if (target instanceof JsFunction) {
+      const { behavior } = target;
+      return behavior.kind === 'native'
+        ? `function ${this.functionName(target)}() { [native code] }`
+        : behavior.node.source;
+    }
+    const constructor = this.findProperty(target, 'constructor');
+    const name =
+      constructor && !isAccessor(constructor) && constructor.value instanceof JsFunction
+        ? this.functionName(constructor.value)
+        : '';
+    return name ? `#<${name}>` : '[object Object]';
+  }
+
+  /** Throws the TypeError of a refused assignment or deletion in strict mode code, which other code ignores. */
+  private refuse(strict: boolean, message: string): void {
+    if (strict) this.throwError('TypeError', message);
   }
 
   /** Sets an element or the length of an array, returning false for any other property. */
-  private setArrayProperty(array: JsArray, key: Key, value: Value): boolean {
+  private setArrayProperty(array: JsArray, key: Key, value: Value, strict: boolean): boolean {
     const index = arrayIndexOf(key);
-    if (index !== undefined) this.setElement(array, index, value);
-    else if (key === 'length') this.setLength(array, value);
+    if (index !== undefined) this.setElement(array, index, value, strict);
+    else if (key === 'length') this.setLength(array, value, strict);
     else return false;
     return true;
   }
@@ -268,25 +303,35 @@ export class Runtime {
   }
 
   /** Assigns an element, which a frozen array refuses and a non-extensible one refuses where it has none. */
-  setElement(array: JsArray, index: number, value: Value): void {
+  setElement(array: JsArray, index: number, value: Value, strict = true): void {
     const { elements } = array;
     if (index >= elements.length || elements[index] === HOLE) {
-      if (!array.extensible) this.throwError('TypeError', `Cannot add property ${index}, object is not extensible`);
+      if (!array.extensible) {
+        this.refuse(strict, `Cannot add property ${index}, object is not extensible`);
+        return;
+      }
     } else if (array.frozen) {
-      this.throwError('TypeError', `Cannot assign to read only property '${index}' of object '[object Array]'`);
+      this.refuse(strict, `Cannot assign to read only property '${index}' of object '[object Array]'`);
+      return;
+    }
+    if (index >= elements.length && !array.isLengthWritable) {
+      this.refuse(strict, readOnlyLengthMessage);
+      return;
     }
     if (index >= elements.length) this.grow(array, index + 1);
     elements[index] = value;
   }
 
   /** The spec's ArraySetLength, which stops shrinking at the last element a sealed array cannot delete. */
-  setLength(array: JsArray, value: Value): void {
+  setLength(array: JsArray, value: Value, strict = true): void {
     const length = this.toNumber(value);
     if (!Number.isInteger(length) || length < 0 || length >= 2 ** 32)
       this.throwError('RangeError', 'Invalid array length');
     const { elements } = array;
-    if (array.frozen) {
-      this.throwError('TypeError', "Cannot assign to read only property 'length' of object '[object Array]'");
+    // V8 refuses even a write of the same length.
+    if (!array.isLengthWritable) {
+      this.refuse(strict, readOnlyLengthMessage);
+      return;
     }
     if (length >= elements.length) {
       this.grow(array, length);
@@ -296,7 +341,8 @@ export class Runtime {
       const last = elements.findLastIndex((element, index) => index >= length && element !== HOLE);
       if (last !== -1) {
         elements.length = last + 1;
-        this.throwError('TypeError', `Cannot delete property '${last}' of [object Array]`);
+        this.refuse(strict, `Cannot delete property '${last}' of [object Array]`);
+        return;
       }
     }
     elements.length = length;
@@ -327,6 +373,7 @@ export class Runtime {
     if (object instanceof JsArray && (arrayIndexOf(key) !== undefined || key === 'length')) {
       if (isAccessor(property)) this.throwError('TypeError', 'Accessors on array elements are not supported');
       this.set(object, key, property.value);
+      object.isLengthWritable &&= key !== 'length' || property.writable;
       return;
     }
     if (!object.properties.has(key)) this.allocate(1);
@@ -342,7 +389,8 @@ export class Runtime {
     });
   }
 
-  deleteProperty(target: Value, key: Key): boolean {
+  /** Deletes a property as `delete target[key]` does, returning false where code that is not strict fails to. */
+  deleteProperty(target: Value, key: Key, strict = true): boolean {
     if (target === undefined || target === null)
       this.throwError('TypeError', 'Cannot convert undefined or null to object');
     if (!(target instanceof JsObject)) return true;
@@ -350,14 +398,18 @@ export class Runtime {
       const index = arrayIndexOf(key);
       // Deleting a hole changes nothing, which a sealed array allows.
       if (index !== undefined && index < target.elements.length && target.elements[index] !== HOLE) {
-        if (target.sealed) this.throwError('TypeError', `Cannot delete property '${index}' of [object Array]`);
+        if (target.sealed) {
+          this.refuse(strict, `Cannot delete property '${index}' of [object Array]`);
+          return false;
+        }
         target.elements[index] = HOLE;
       }
       if (index !== undefined) return true;
     }
     const property = this.getOwnProperty(target, key);
     if (property && !property.configurable) {
-      this.throwError('TypeError', `Cannot delete property '${String(key)}' of ${this.describe(target)}`);
+      this.refuse(strict, `Cannot delete property '${String(key)}' of ${this.receiverText(target)}`);
+      return false;
     }
     target.properties.delete(key);
     return true;

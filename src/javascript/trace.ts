@@ -59,7 +59,8 @@ class Snapshotter {
     const variables: Variables = { vars: {}, referenceVars: {} };
     for (const [name, value] of this.visibleBindings(scope)) addVariable(variables, name, value);
     if (withThis && this.showsStatics) this.addStatics(variables, scope);
-    const thisValue = scope.nearestFunctionFrame()?.thisValue;
+    const frame = scope.nearestFunctionFrame();
+    const thisValue = frame?.hasImplicitThis ? undefined : frame?.thisValue;
     if (withThis && thisValue instanceof JsObject && !(thisValue instanceof JsFunction)) addThis(variables, thisValue);
     return variables;
   }

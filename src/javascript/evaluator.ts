@@ -1,3 +1,4 @@
+import { createArgumentsObject, mapArguments } from './argumentsObject';
 // code-gauge-allow-file fileNcss 486 -- One executor of every statement kind and of functions and classes, which share its scopes.
 import type {
   Block,
@@ -51,6 +52,9 @@ type UserBehavior = Extract<FunctionBehavior, { kind: 'user' }>;
 type ClassBehavior = Extract<FunctionBehavior, { kind: 'class' }>;
 
 export class Evaluator extends SuspendableStatementEvaluator {
+  /** What `this` is for a plain call of a function that is not strict mode code, created when first needed. */
+  private globalObject: JsObject | undefined;
+
   /** Runs a program in the frame the caller pushed, whose scope becomes the program's own. */
   runProgram(program: Program): void {
     this.instantiate(this.runtime.frame.scope, program.scope);
@@ -455,14 +459,21 @@ export class Evaluator extends SuspendableStatementEvaluator {
       behavior.scope,
       node.kind === 'arrow'
         ? undefined
-        : { thisValue, homeObject: behavior.homeObject, constructing: undefined, newTarget },
+        : {
+            thisValue: node.isStrict ? thisValue : this.sloppyThis(thisValue),
+            homeObject: behavior.homeObject,
+            constructing: undefined,
+            newTarget,
+            isStrict: node.isStrict,
+            hasImplicitThis: !node.isStrict && (thisValue === undefined || thisValue === null),
+          },
       true
     );
     runtime.pushFrame(scope, callRow, node.isAtomic);
     try {
       if (node.isAsync && !node.isGenerator)
-        return startAsyncFunction(runtime, runtime.frame, this.asyncBody(node, args));
-      this.bindParameters(node, args);
+        return startAsyncFunction(runtime, runtime.frame, this.asyncBody(fn, node, args));
+      this.bindParameters(fn, node, args);
       if (!Array.isArray(node.body)) return this.evaluate(node.body);
       this.instantiate(scope, node.scope);
       if (node.isGenerator) {
@@ -479,28 +490,39 @@ export class Evaluator extends SuspendableStatementEvaluator {
     }
   }
 
+  /**
+   * `this` of a call of a function that is not strict mode code, which sees the global object for null or undefined and
+   * a box for a primitive.
+   */
+  private sloppyThis(thisValue: Value): Value {
+    if (thisValue !== undefined && thisValue !== null) return this.runtime.toObject(thisValue);
+    this.globalObject ??= this.runtime.newObject();
+    return this.globalObject;
+  }
+
   /** Runs an async function's body, whose parameters' errors reject its promise as the body's own errors do. */
-  private *asyncBody(node: FunctionNode, args: Value[]): Steps<Completion> {
-    this.bindParameters(node, args);
+  private *asyncBody(fn: JsFunction, node: FunctionNode, args: Value[]): Steps<Completion> {
+    this.bindParameters(fn, node, args);
     if (!Array.isArray(node.body)) return { kind: 'return', value: yield* this.valueSteps(node.body) };
     this.instantiate(this.runtime.frame.scope, node.scope);
     return yield* this.bodySteps(node.body, node.scope);
   }
 
   /** Binds parameters in order after creating them all, so a default reading a later parameter throws as in JavaScript. */
-  private bindParameters(node: FunctionNode, args: Value[]): void {
+  private bindParameters(fn: JsFunction, node: FunctionNode, args: Value[]): void {
     const { runtime } = this;
-    if (node.usesArguments) {
-      runtime.frame.scope.bindings.set('arguments', {
-        value: runtime.newArray([...args]),
-        isMutable: false,
-      });
-    }
     const params = node.rest ? [...node.params, node.rest] : node.params;
     const { bindings } = runtime.frame.scope;
     const names = params.flatMap((param) => patternNames(param));
     runtime.allocate(names.length);
     for (const name of names) bindings.set(name, { value: UNINITIALIZED, isMutable: true });
+    if (node.usesArguments) {
+      const argumentsObject = createArgumentsObject(runtime, fn, node, args);
+      bindings.set('arguments', { value: argumentsObject, isMutable: false });
+      if (!node.isStrict && params.every((param) => param.kind === 'identifier')) {
+        mapArguments(bindings, names, argumentsObject);
+      }
+    }
     for (const [index, param] of node.params.entries()) this.bindPattern(param, args[index], 'initialize');
     if (node.rest) this.bindPattern(node.rest, runtime.newArray(args.slice(node.params.length)), 'initialize');
   }
@@ -671,6 +693,7 @@ export class Evaluator extends SuspendableStatementEvaluator {
       homeObject,
       constructing: undefined,
       newTarget: undefined,
+      isStrict: true,
     });
   }
 
@@ -709,6 +732,7 @@ export class Evaluator extends SuspendableStatementEvaluator {
       homeObject: behavior.homeObject,
       constructing: fn,
       newTarget,
+      isStrict: true,
     };
     const scope = new Scope(behavior.scope, functionFrame);
     runtime.pushFrame(scope, callRow, behavior.ctor?.isAtomic ?? false);
@@ -719,7 +743,7 @@ export class Evaluator extends SuspendableStatementEvaluator {
       let result: Value;
       const { ctor } = behavior;
       if (ctor) {
-        this.bindParameters(ctor, args);
+        this.bindParameters(fn, ctor, args);
         this.instantiate(scope, ctor.scope);
         const completion = ctor.scope.disposes
           ? this.disposing(() => this.statements(ctor.body as Statement[]))

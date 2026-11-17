@@ -5,6 +5,9 @@ import { PARAMETER_PROPERTY_ASSIGNMENT } from './jsView';
 
 /** Converts a TypeScript program, viewed as JavaScript, to the JavaScript interpreter's AST. */
 export class TypeScriptProgramConverter extends ProgramConverter {
+  // The reference runs a file without `import` or `export` as a CommonJS script, which is not strict mode code.
+  protected override readonly isStrictByDefault = false;
+
   constructor(source: string, trace: TraceOptions | undefined) {
     super(source, trace);
     // `this.name = name` for a parameter property, which steps on the parameter's row as the assignment it stands for.

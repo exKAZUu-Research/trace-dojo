@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 413 -- One port of Node.js's util.inspect, whose formatters share its context.
+// code-gauge-allow-file fileNcss 416 -- One port of Node.js's util.inspect, whose formatters share its context.
 import { eastAsianWidthType } from 'get-east-asian-width';
 
 import { ExecutionLimitError, LIMITS } from '../interpreter/limits';
@@ -214,8 +214,8 @@ function formatRaw(ctx: Context, value: JsObject, recurseTimes: number): string 
 }
 
 /** What surrounds the entries of an object, or its whole text when it has no entries to list. */
-// code-gauge-allow functionCognitiveComplexity 22 -- Ports Node.js's util.inspect, so the two stay comparable.
-// code-gauge-allow functionNcss 35 -- Ports Node.js's util.inspect, so the two stay comparable.
+// code-gauge-allow functionCognitiveComplexity 23 -- Ports Node.js's util.inspect, so the two stay comparable.
+// code-gauge-allow functionNcss 38 -- Ports Node.js's util.inspect, so the two stay comparable.
 function frameOf(ctx: Context, value: JsObject, constructor: string | undefined, hasKeys: boolean): Frame | string {
   const { runtime } = ctx;
   if (value instanceof JsArray) {
@@ -233,6 +233,7 @@ function frameOf(ctx: Context, value: JsObject, constructor: string | undefined,
   else if (dateValueOf(value) !== undefined) base = dateBase(value, constructor);
   else if (value.isError && constructor !== 'Object') base = errorText(value);
   else if (value.primitive !== undefined) base = boxedBase(ctx, value.primitive, constructor, toStringTagOf(value));
+  else if (value.isArguments) open = '[Arguments] {';
   else {
     const tag = toStringTagOf(value);
     if (tag && tag !== constructor) open = `${prefixOf(constructor, 'Object')}[${tag}] {`;
