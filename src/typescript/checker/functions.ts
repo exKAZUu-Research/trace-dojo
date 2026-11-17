@@ -225,8 +225,11 @@ export class FunctionChecker {
       );
     }
     if (!parameter) return undefined;
-    // A default replaces `undefined`, which a parameter before a required one admits for callers.
-    if (node.childForFieldName('value')) return this.c.relations.removeUndefined(parameter.type);
+    if (node.childForFieldName('value')) {
+      // A pattern destructures the default in place of `undefined`, which a parameter before a required one admits
+      // for callers; a name narrows by its flow instead.
+      return pattern.type === 'identifier' ? parameter.type : this.c.relations.removeUndefined(parameter.type);
+    }
     return parameter.optional ? unionOf([parameter.type, undefinedType]) : parameter.type;
   }
 
