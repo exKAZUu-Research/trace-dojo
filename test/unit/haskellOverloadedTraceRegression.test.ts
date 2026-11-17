@@ -237,3 +237,86 @@ main=loop(0.1::Float)`;
     expect(result.traceItems).toEqual(traceProgram('haskell', control, control).traceItems);
   }
 );
+
+test.each([
+  ['Float', '0.1'],
+  ['Int', '1'],
+  ['String', '""'],
+])('ordinary %s arguments instantiate pending results with or without dictionary evidence', (type, value) => {
+  for (const phantom of [false, true]) {
+    const context = phantom ? 'PairType(a,a)=>' : '';
+    const source = `import Control.Monad
+${phantom ? 'class PairType a\ninstance PairType(a,b)\n' : ''}loop::${context}a->IO ()
+loop n=do
+ forM_ [id n,id n] $ \\i->do
+  print(0::Int)
+main=loop(${value}::${type})`;
+    const control = source.replace(`${context}a->IO ()`, `${type}->IO ()`);
+    const result = traceProgram('haskell', source, source);
+    expect(result.stdout).toBe('0\n0\n');
+    expect(result.traceItems).toEqual(traceProgram('haskell', control, control).traceItems);
+    expect(result.traceItems).toHaveLength(5);
+  }
+});
+
+test.each([
+  {
+    signature: '(a,b)->IO ()',
+    specialized: '(Float,String)->IO ()',
+    definition:
+      'loop(x,y)=do\n forM_ [id x,id x] $ \\i->do {print(0::Int)}\n forM_ [id y,id y] $ \\i->do {print(0::Int)}',
+    call: 'loop(0.1::Float,""::String)',
+    stdout: '0\n0\n0\n0\n',
+  },
+  {
+    signature: '(a->b)->a->IO ()',
+    specialized: '(Int->String)->Int->IO ()',
+    definition: String.raw`loop f n=forM_ [f n,f n] $ \i->do {print(0::Int)}`,
+    call: 'loop (show::Int->String) (1::Int)',
+    stdout: '0\n0\n',
+  },
+  {
+    signature: '(a->b)->a->IO ()',
+    specialized: '(Int->Float)->Int->IO ()',
+    definition: String.raw`loop f n=forM_ [f n,f n] $ \i->do {print(0::Int)}`,
+    call: 'loop (error "unused"::Int->Float) (1::Int)',
+    stdout: '0\n0\n',
+  },
+])(
+  'structured parameter types retain pending results without operand demand: $signature',
+  ({ signature, specialized, definition, call, stdout }) => {
+    const source = `import Control.Monad\nloop::${signature}\n${definition}\nmain=${call}`;
+    const control = source.replace(signature, specialized);
+    const result = traceProgram('haskell', source, source);
+    expect(result.stdout).toBe(stdout);
+    expect(result.traceItems).toEqual(traceProgram('haskell', control, control).traceItems);
+  }
+);
+
+test('stored unconstrained expression lambdas retain their ordinary argument type', () => {
+  const source = `import Control.Monad
+main=do
+ let loop=((\\n->do
+       forM_ [id n,id n] $ \\i->do {print(0::Int)}
+      )::a->IO ())
+ loop(0.1::Float)`;
+  const control = source.replace('a->IO ()', 'Float->IO ()');
+  const result = traceProgram('haskell', source, source);
+  expect(result.stdout).toBe('0\n0\n');
+  expect(result.traceItems).toEqual(traceProgram('haskell', control, control).traceItems);
+});
+
+test('recursive generic traces reuse resolved call types while retaining every scalar binding', () => {
+  const source = `import Control.Monad
+loop::Int->a->IO ()
+loop 0 _=pure()
+loop n x=do
+ forM_ [id x] $ \\i->do
+  print(0::Int)
+ loop(n-1)x
+main=loop 1000(0.1::Float)`;
+  const result = traceProgram('haskell', source, source);
+  expect(result.stdout).toBe('0\n'.repeat(1000));
+  expect(result.traceItems).toHaveLength(2001);
+  expect(result.traceItems.filter(({ vars }) => vars.i === 0.1)).toHaveLength(2000);
+});

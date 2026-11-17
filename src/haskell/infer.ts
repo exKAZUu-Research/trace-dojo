@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 730 -- The type checker keeps its inference rules beside the substitution state they share.
+// code-gauge-allow-file fileNcss 731 -- The type checker keeps its inference rules beside the substitution state they share.
 import { LIMITS } from '../interpreter/limits';
 import { CHAR_TYPE, FUNCTION_TYPE, LIST_TYPE, tupleCon } from './builtinTypes';
 import { type ClassEnv, entailByGivens, hasConstructorHead, isSubclassOf, predsEqual } from './classEnv';
@@ -789,6 +789,7 @@ export class Checker {
       this.checkRhs(binding.rhs, type);
       return;
     }
+    binding.type = type;
     for (const clause of binding.clauses) {
       let remaining = type;
       for (const pat of clause.pats) {

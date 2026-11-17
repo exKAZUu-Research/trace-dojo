@@ -40,6 +40,7 @@ export type Core = (
 
 export interface LamCore {
   displayConstraints?: Type[];
+  displayParameters?: Type[];
   k: 'lam';
   arity: number;
   /** The number of slots of the lambda's frame: its parameters, then the variables its body binds. */

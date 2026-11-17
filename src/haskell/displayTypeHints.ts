@@ -10,7 +10,7 @@ export type TypeHint =
   | TypeHintRef
   | { tag: 'refinement'; template: TypeHint; actual: TypeHint }
   | { tag: 'fieldType'; parent: TypeHint; con: ConInfo; position: number }
-  | { tag: 'scopedType'; template: Type; scope: DisplayTypeScope; children?: TypeHint[] }
+  | { tag: 'scopedType'; template: Type; scope: DisplayTypeScope; children?: TypeHint[]; concrete?: Type }
   | { tag: 'matchedType'; pattern: Type; variable: Type; parent: TypeHint }
   | { tag: 'dictionaryArgumentType'; slot: Slot; runtime: Runtime; resolved?: TypeHint }
   | { tag: 'dictionaryType'; dict: Dict; runtime: Runtime; arguments?: TypeHint[] }

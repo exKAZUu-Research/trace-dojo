@@ -34,16 +34,25 @@ function scopedTypeHint(type: Type, scope: DisplayTypeScope | undefined): TypeHi
   return hint;
 }
 
-export function bindDisplayTypes(env: Env, patterns: readonly Type[], args: readonly Slot[], runtime: Runtime): void {
+export function bindDisplayTypes(
+  env: Env,
+  patterns: readonly Type[],
+  parameters: readonly Type[],
+  args: readonly Slot[],
+  runtime: Runtime
+): void {
   if (!runtime.steps.recorder) return;
-  if (patterns.length > 0)
-    env.displayScope = {
-      parent: env.displayScope,
-      constraints: patterns.map((pattern, index) => ({
+  if (patterns.length + parameters.length === 0) return;
+  env.displayScope = {
+    parent: env.displayScope,
+    constraints: [
+      ...patterns.map((pattern, index) => ({
         pattern,
-        actual: { tag: 'dictionaryArgumentType', slot: args[index], runtime },
+        actual: { tag: 'dictionaryArgumentType' as const, slot: args[index], runtime },
       })),
-    };
+      ...parameters.map((pattern, index) => ({ pattern, actual: slotTypeHint(args[patterns.length + index]) })),
+    ],
+  };
 }
 
 export function methodTypeHint(dict: Dict, index: number, runtime: Runtime): TypeHint {
@@ -90,45 +99,55 @@ export function constructorFieldHint(con: ConInfo, parent: TypeHint, position: n
 }
 
 function resolveHint(hint: TypeHint): Type {
+  const resolved = new Map<TypeHint, Type>();
   return mapGraph<TypeHint, Type>(
     hint,
     (node) => node,
-    hintChildren,
+    (node) => hintChildren(node, resolved),
     (node, mapped) => {
-      switch (node.tag) {
-        case 'hint': {
-          return mapped[0];
-        }
-        case 'refinement': {
-          return mapped.length === 1 ? mapped[0] : refineType(mapped[0], mapped[1]);
-        }
-        case 'dictionaryArgumentType': {
-          return mapped[0];
-        }
-        case 'scopedType': {
-          return mappedScopedType(node.template, mapped);
-        }
-        case 'matchedType': {
-          return matchedParameterType(node.pattern, mapped[0], node.variable);
-        }
-        case 'dictionaryType': {
-          return dictionaryDisplayType(node.dict, mapped);
-        }
-        case 'methodType': {
-          return instantiatedMethodType(node, mapped[0]);
-        }
-        case 'applicationType': {
-          return applicationResultType(mapped[0], node.arguments);
-        }
-        case 'fieldType': {
-          return constructorFieldType(node.con, mapped[0], node.position);
-        }
-        default: {
-          return prune(node);
-        }
-      }
+      const type = rebuildHint(node, mapped);
+      resolved.set(node, type);
+      return type;
     }
   );
+}
+
+function rebuildHint(node: TypeHint, mapped: Type[]): Type {
+  switch (node.tag) {
+    case 'hint': {
+      return mapped[0];
+    }
+    case 'refinement': {
+      return mapped.length === 1 ? mapped[0] : refineType(mapped[0], mapped[1]);
+    }
+    case 'dictionaryArgumentType': {
+      return mapped[0];
+    }
+    case 'scopedType': {
+      if (node.concrete) return node.concrete;
+      const type = mappedScopedType(node.template, mapped);
+      if (isConcreteType(type)) node.concrete = type;
+      return type;
+    }
+    case 'matchedType': {
+      return matchedParameterType(node.pattern, mapped[0], node.variable);
+    }
+    case 'dictionaryType': {
+      return dictionaryDisplayType(node.dict, mapped);
+    }
+    case 'methodType': {
+      return instantiatedMethodType(node, mapped[0]);
+    }
+    case 'applicationType': {
+      return applicationResultType(mapped[0], node.arguments);
+    }
+    case 'fieldType': {
+      return constructorFieldType(node.con, mapped[0], node.position);
+    }
+    default: {
+      return prune(node);
+    }
+  }
 }
 
 function mappedScopedType(template: Type, mapped: Type[]): Type {
@@ -178,8 +197,9 @@ function applicationResultType(type: Type, argumentsCount: number): Type {
   return type;
 }
 
-function hintChildren(hint: TypeHint): TypeHint[] {
-  if (hint.tag === 'scopedType') return (hint.children ??= scopedTypeChildren(hint.template, hint.scope));
+function hintChildren(hint: TypeHint, resolved: ReadonlyMap<TypeHint, Type>): TypeHint[] {
+  if (hint.tag === 'scopedType')
+    return hint.concrete ? [hint.concrete] : (hint.children ??= scopedTypeChildren(hint.template, hint.scope));
   if (hint.tag === 'matchedType') return [hint.parent];
   if (hint.tag === 'dictionaryArgumentType')
     return [(hint.resolved ??= dictionaryTypeHint(hint.runtime.machine.force(hint.slot) as Dict, hint.runtime))];
@@ -192,6 +212,8 @@ function hintChildren(hint: TypeHint): TypeHint[] {
   }
   if (hint.tag !== 'refinement') return [];
   const template = hint.template;
+  const alreadyResolved = resolved.get(template);
+  if (alreadyResolved && isConcreteType(alreadyResolved)) return [template];
   const known = template.tag === 'tgen' || template.tag === 'tvar' || template.tag === 'tcon' || template.tag === 'tap';
   return known && isConcreteType(template) ? [template] : [template, hint.actual];
 }

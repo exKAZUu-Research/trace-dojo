@@ -411,7 +411,7 @@ export class Machine {
     markTailSelfCall(this, fn.lam.info);
     const frameEnv = new Env(fn.lam.size, fn.env, fn.lam.info);
     for (let index = 0; index < arity; index++) frameEnv.slots[index] = args[index];
-    bindDisplayTypes(frameEnv, fn.lam.displayConstraints ?? [], args, this.runtime);
+    bindDisplayTypes(frameEnv, fn.lam.displayConstraints ?? [], fn.lam.displayParameters ?? [], args, this.runtime);
     state.evaluate(fn.lam.body, frameEnv);
   }
 

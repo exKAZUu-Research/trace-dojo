@@ -1,6 +1,6 @@
 import { OrderedMap } from 'immutable';
 
-// code-gauge-allow-file fileNcss 930 -- The Core generator covers every construct of the language in one pass over shared state.
+// code-gauge-allow-file fileNcss 933 -- The Core generator covers every construct of the language in one pass over shared state.
 import { ExecutionLimitError, LIMITS } from '../interpreter/limits';
 import {
   CONS_CON,
@@ -343,7 +343,10 @@ export class Codegen {
       dictParams,
       arity,
       (args) => this.withVisible(visible, () => this.compileClauseBody(binding, args, name)),
-      info
+      {
+        info,
+        displayParameters: this.options.traceTypes && binding.type ? parameterTypes(binding.type, arity) : undefined,
+      }
     );
   }
 
@@ -633,7 +636,14 @@ export class Codegen {
   compileExpr(expr: RExpr): Core {
     return this.recursion.run(() => {
       const code = this.compileExprInner(expr);
-      return this.options.traceTypes && expr.type ? { ...code, displayType: expr.type } : code;
+      if (!this.options.traceTypes || !expr.type) return code;
+      return code.k === 'lam'
+        ? {
+            ...code,
+            displayType: expr.type,
+            displayParameters: code.displayParameters ?? parameterTypes(expr.type, code.arity),
+          }
+        : { ...code, displayType: expr.type };
     });
   }
 
@@ -944,7 +954,7 @@ export class Codegen {
     params: readonly DictParam[],
     arity: number,
     build: (args: number[]) => Core,
-    info?: FunctionInfo
+    options?: { info?: FunctionInfo; displayParameters?: Type[] }
   ): Core {
     const frame = new FrameScope(this.frame);
     return this.withFrame(frame, () => {
@@ -956,7 +966,7 @@ export class Codegen {
         arity: params.length + arity,
         size: frame.size,
         body,
-        info,
+        ...options,
         displayConstraints: this.options.traceTypes ? params.map((param) => param.pred.type) : undefined,
       };
     });
@@ -1358,7 +1368,17 @@ function binderKey(binding: Extract<RBinding, { k: 'fun' }>): LocalVar | ValueEn
   return binding.binder.kind === 'local' ? binding.binder.local : binding.binder.entity;
 }
 
-/** The type after a function type's first `count` arguments. */
+function parameterTypes(type: Type, count: number): Type[] {
+  const parameters: Type[] = [];
+  for (let index = 0; index < count; index++) {
+    const { head, args } = splitApp(type);
+    if (head.tag !== 'tcon' || head.entity.special !== 'function' || args.length !== 2) break;
+    parameters.push(args[0]);
+    type = args[1];
+  }
+  return parameters;
+}
+
 export function resultAfter(type: Type, count: number): Type {
   let current = prune(type);
   for (let index = 0; index < count; index++) {
