@@ -1709,8 +1709,6 @@ function expand(replacement: RString, state: MatchState, limit: number): RString
   return output.finish();
 }
 
-// code-gauge-allow functionCognitiveComplexity 28 -- Substitution separates callback, Hash and replacement-string values while preserving each operation's match-state rules.
-// code-gauge-allow functionNcss 53 -- Substitution shares one byte cursor and output builder across the four Ruby operations.
 function* substituteRegexp(
   self: RString,
   regexp: RObject,
@@ -1718,15 +1716,57 @@ function* substituteRegexp(
   block: RProc | undefined,
   mode: 'sub' | 'sub!' | 'gsub' | 'gsub!'
 ): Gen<{ value: RString; matched: boolean }> {
+  return mode === 'gsub' || mode === 'gsub!'
+    ? yield* substituteAllRegexp(self, regexp, replacement, block)
+    : yield* substituteOnceRegexp(self, regexp, replacement, block, mode === 'sub!');
+}
+
+function* substituteOnceRegexp(
+  self: RString,
+  regexp: RObject,
+  replacement: Value | undefined,
+  block: RProc | undefined,
+  bang: boolean
+): Gen<{ value: RString; matched: boolean }> {
+  const target = bang ? self : copyStringEncoding(self);
   replacement = yield* regexpReplacement(replacement);
-  const cursor = new RegexpCursor(regexp, self, mode === 'sub' ? 'plainCopy' : 'preserveClass');
-  const global = mode === 'gsub' || mode === 'gsub!';
+  if (target.frozen) throw frozenError(target, inspectStringEncoding(target));
+  const cursor = new RegexpCursor(regexp, target);
+  const state = cursor.match(0);
+  setLastMatch(state);
+  if (!state) return { value: target, matched: false };
+  const [from, to] = cursor.range(state)!;
+  const piece = yield* regexpReplacementPiece(cursor, state, replacement, block, LIMITS.maxStringLength);
+  cursor.refresh();
+  cursor.checkLength();
+  if (target.frozen) throw frozenError(target, inspectStringEncoding(target));
+  const bytes = stringBytes(cursor.snapshot);
+  const retainedAscii =
+    bytes.subarray(0, from).every((byte) => byte < 0x80) && bytes.subarray(to).every((byte) => byte < 0x80);
+  checkStringEncodingCompatibility(
+    cursor.snapshot,
+    retainedAscii,
+    piece,
+    stringBytes(piece).every((byte) => byte < 0x80)
+  );
+  if (!block && !(replacement instanceof RHash)) setLastMatch(state);
+  const value = joinEncodedStrings([cursor.slice(0, 0), cursor.slice(0, from), piece, cursor.slice(to)]);
+  return { value, matched: true };
+}
+
+function* substituteAllRegexp(
+  self: RString,
+  regexp: RObject,
+  replacement: Value | undefined,
+  block: RProc | undefined
+): Gen<{ value: RString; matched: boolean }> {
+  replacement = yield* regexpReplacement(replacement);
+  const cursor = new RegexpCursor(regexp, self);
   const output = new EncodedStringBuilder(LIMITS.maxStringLength, cursor.slice(0, 0));
   let position = 0;
   let search = 0;
   let lastSearch: number | undefined;
   let state = cursor.match(search);
-  let last: MatchState | undefined;
   while (state) {
     const [from, to] = cursor.range(state)!;
     setLastMatch(state);
@@ -1737,39 +1777,24 @@ function* substituteRegexp(
       block,
       LIMITS.maxStringLength - output.length
     );
-    if (mode !== 'sub') {
-      cursor.refresh();
-      cursor.checkLength();
-    }
-    if (!global) {
-      const bytes = stringBytes(cursor.snapshot);
-      const retainedAscii =
-        bytes.subarray(0, from).every((byte) => byte < 0x80) && bytes.subarray(to).every((byte) => byte < 0x80);
-      checkStringEncodingCompatibility(
-        cursor.snapshot,
-        retainedAscii,
-        piece,
-        stringBytes(piece).every((byte) => byte < 0x80)
-      );
-    }
+    cursor.refresh();
+    cursor.checkLength();
     if (position < from) output.append(cursor.sliceSource(position, from));
     output.append(piece);
     position = to;
     lastSearch = search;
-    last = state;
-    if (global && from === to && to >= cursor.length) break;
+    if (from === to && to >= cursor.length) break;
     search = cursor.nextSource(state);
-    if (global && from === to && to < cursor.length) {
+    if (from === to) {
       output.append(cursor.sliceSource(to, search));
       position = search;
     }
-    state = global ? cursor.match(search) : undefined;
-    if (global) setLastMatch(state);
+    state = cursor.match(search);
+    setLastMatch(state);
   }
-  if (!global && ((!block && !(replacement instanceof RHash)) || !last)) setLastMatch(last);
   output.append(cursor.sliceSource(position));
-  if (global) setLastMatch(lastSearch === undefined ? undefined : cursor.match(lastSearch));
-  return { value: output.finish(), matched: last !== undefined };
+  setLastMatch(lastSearch === undefined ? undefined : cursor.match(lastSearch));
+  return { value: output.finish(), matched: lastSearch !== undefined };
 }
 
 function* regexpReplacementPiece(
@@ -1823,7 +1848,7 @@ for (const [name, global, bang] of [
   ['gsub!', true, true],
 ] as const) {
   wrapFirst(name, function* (self, args, block) {
-    if (bang && self.frozen) throw frozenError(self, inspectStringEncoding(self));
+    if (bang && global && self.frozen) throw frozenError(self, inspectStringEncoding(self));
     if (args.length === 1 && !block) {
       if (global) return makeEnumerator(self, name, args);
       throw argumentError('wrong number of arguments (given 1, expected 2)');
