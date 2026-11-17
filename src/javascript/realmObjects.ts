@@ -65,31 +65,19 @@ function defineLegacyAccessorMethods(builder: RealmBuilder): void {
       if (!(accessor instanceof JsFunction)) {
         return runtime.throwError('TypeError', `Object.prototype.__define${name}__: Expecting function`);
       }
-      defineAccessorHalf(runtime, runtime.toObject(thisValue), runtime.toPropertyKey(key), kind, accessor);
+      const object = runtime.toObject(thisValue);
+      // An accessor defined over the other half of one keeps that half, as `Object.defineProperty` does.
+      definePropertyOrThrow(runtime, object, runtime.toPropertyKey(key), {
+        [kind]: accessor,
+        enumerable: true,
+        configurable: true,
+      });
       return;
     });
     builder.method(objectPrototype, `__lookup${name}__`, 1, ({ runtime, thisValue, args }) =>
       lookupAccessor(runtime, runtime.toObject(thisValue), runtime.toPropertyKey(args[0]), kind)
     );
   }
-}
-
-/** Defines the getter or the setter of a property, keeping the other half of an accessor already there. */
-function defineAccessorHalf(
-  runtime: Runtime,
-  object: JsObject,
-  key: Key,
-  kind: 'get' | 'set',
-  accessor: JsFunction
-): void {
-  const current = runtime.getOwnProperty(object, key);
-  const kept = current && isAccessor(current) ? current : undefined;
-  runtime.defineProperty(object, key, {
-    get: kind === 'get' ? accessor : kept?.get,
-    set: kind === 'set' ? accessor : kept?.set,
-    enumerable: true,
-    configurable: true,
-  });
 }
 
 /** The getter or the setter of the nearest property of the name, if it is an accessor. */

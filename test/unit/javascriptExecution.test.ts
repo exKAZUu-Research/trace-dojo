@@ -1502,6 +1502,19 @@ function* afterYield(){f(yield 1,...g());}
 const iterator=afterYield();iterator.next();try{iterator.next(1);}catch(e){console.log(e.message);}`,
   ],
   [
+    'legacy accessor definitions on frozen, sealed, and non-extensible objects',
+    `const cases = [
+  ['frozen get', () => { const x = Object.freeze({ a: 1 }); x.__defineGetter__('a', () => 42); return x.a; }],
+  ['nonext set', () => { const x = Object.preventExtensions({}); x.__defineSetter__('a', (v) => {}); return Object.keys(x); }],
+  ['plain', () => { const x = { a: 1 }; x.__defineGetter__('a', () => 42); return [x.a, Object.getOwnPropertyDescriptor(x, 'a').enumerable]; }],
+  ['half kept', () => { const x = {}; x.__defineGetter__('a', () => 1); x.__defineSetter__('a', (v) => { console.log('set', v); }); x.a = 5; return x.a; }],
+  ['sealed existing accessor', () => { const x = {}; x.__defineGetter__('a', () => 1); Object.seal(x); x.__defineSetter__('a', () => {}); return 'no'; }],
+  ['not callable', () => ({}).__defineGetter__('a', 1)],
+  ['array index', () => { const a = [1]; a.__defineGetter__('0', () => 9); return a[0]; }],
+];
+for (const [n, f] of cases) { try { console.log(n, f()); } catch (e) { console.log(n, e.name, e.message); } }`,
+  ],
+  [
     'definitions restating or changing a read-only array length',
     `for (const descriptor of [{writable:false},{value:1},{value:'1'},{value:2},{value:0},{writable:true},{enumerable:true},{},{value:-1}]) {
   const a = [1]; Object.defineProperty(a, 'length', { writable: false });
