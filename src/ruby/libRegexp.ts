@@ -16,7 +16,7 @@ import {
   tryImplicitConversion,
 } from './conversions';
 import { coreMethod, def, extend, sdef, sundef } from './define';
-import { checkStringEncodingCompatibility, joinEncodedStrings } from './encodedStringJoin';
+import { checkStringEncodingCompatibility, EncodedStringBuilder, joinEncodedStrings } from './encodedStringJoin';
 import { argumentError, frozenError, indexError, rubyError, typeError } from './errors';
 import { validateKeywords } from './exceptionOption';
 import { digest, hashDefault, hashGet, hashSet, stringKeyEquals, stringKeyHash } from './hashes';
@@ -1624,28 +1624,19 @@ def('MatchData', 'deconstruct_keys', 1, function* (self: RObject, [keys]) {
 /** Expands capture references and match-context escapes in a replacement string. */
 function expand(replacement: RString, state: MatchState, limit: number): RString {
   const replacementBytes = stringBytes(replacement);
-  const parts: RString[] = [];
+  const output = new EncodedStringBuilder(limit);
   let literalBytes: number[] = [];
-  let length = 0;
-  const append = (part: RString): void => {
-    const bytes = stringBytes(part).length;
-    if (bytes === 0) return;
-    length += bytes;
-    if (length > limit) throw new ExecutionLimitError('storage');
-    rt().spend(Math.ceil(bytes / 256));
-    parts.push(part);
-  };
   const flushLiteral = (): void => {
     if (literalBytes.length === 0) return;
     const literal = stringFromBytes(Uint8Array.from(literalBytes), replacement.binary);
     literal.usAscii = replacement.usAscii;
     literalBytes = [];
-    append(literal);
+    output.append(literal);
   };
   const appendLiteral = (from: number, to: number): void => {
     for (let index = from; index < to; index++) {
       literalBytes.push(replacementBytes[index]);
-      if (length + literalBytes.length > limit) throw new ExecutionLimitError('storage');
+      if (output.length + literalBytes.length > limit) throw new ExecutionLimitError('storage');
       if (literalBytes.length === 4096) flushLiteral();
     }
   };
@@ -1706,7 +1697,7 @@ function expand(replacement: RString, state: MatchState, limit: number): RString
     }
     if (stringBytes(part).length > 0) {
       flushLiteral();
-      append(part);
+      output.append(part);
     }
     position = match.index + match[0].length;
     bytePosition += textByteLengthOf(replacement, match[0]);
@@ -1715,7 +1706,7 @@ function expand(replacement: RString, state: MatchState, limit: number): RString
     appendLiteral(bytePosition, replacementBytes.length);
   }
   flushLiteral();
-  return joinEncodedStrings(parts, limit);
+  return output.finish();
 }
 
 // code-gauge-allow functionCognitiveComplexity 28 -- Substitution separates callback, Hash and replacement-string values while preserving each operation's match-state rules.
@@ -1728,18 +1719,9 @@ function* substituteRegexp(
   mode: 'sub' | 'sub!' | 'gsub' | 'gsub!'
 ): Gen<{ value: RString; matched: boolean }> {
   replacement = yield* regexpReplacement(replacement);
-  const replacementText = replacement instanceof RString ? replacement : undefined;
   const cursor = new RegexpCursor(regexp, self, mode === 'sub' ? 'plainCopy' : 'preserveClass');
   const global = mode === 'gsub' || mode === 'gsub!';
-  const chunks: RString[] = [cursor.slice(0, 0)];
-  let length = 0;
-  const append = (part: RString): void => {
-    const bytes = stringBytes(part);
-    length += bytes.length;
-    if (length > LIMITS.maxStringLength) throw new ExecutionLimitError('storage');
-    rt().spend(Math.ceil(bytes.length / 256));
-    chunks.push(part);
-  };
+  const output = new EncodedStringBuilder(LIMITS.maxStringLength, cursor.slice(0, 0));
   let position = 0;
   let search = 0;
   let lastSearch: number | undefined;
@@ -1748,16 +1730,13 @@ function* substituteRegexp(
   while (state) {
     const [from, to] = cursor.range(state)!;
     setLastMatch(state);
-    let piece: RString;
-    if (replacement instanceof RHash) {
-      const key = cursor.slice(from, to);
-      const entry = yield* hashGet(replacement, key);
-      piece = yield* toSValue(entry ? entry.value : yield* hashDefault(replacement, key));
-    } else if (replacementText !== undefined) {
-      piece = expand(replacementText, state, LIMITS.maxStringLength - length);
-    } else {
-      piece = yield* toSValue(yield* callBlock(block as RProc, [cursor.slice(from, to)]));
-    }
+    const piece = yield* regexpReplacementPiece(
+      cursor,
+      state,
+      replacement,
+      block,
+      LIMITS.maxStringLength - output.length
+    );
     if (mode !== 'sub') cursor.refresh();
     if (!global) {
       const bytes = stringBytes(cursor.snapshot);
@@ -1770,18 +1749,40 @@ function* substituteRegexp(
         stringBytes(piece).every((byte) => byte < 0x80)
       );
     }
-    if (position < from) append(cursor.slice(position, from));
-    append(piece);
+    if (position < from) output.append(cursor.slice(position, from));
+    output.append(piece);
     position = to;
     lastSearch = search;
     last = state;
     search = cursor.next(state, true);
+    if (global && from === to && to < cursor.length) {
+      output.append(cursor.slice(to, search));
+      position = search;
+    }
     state = global ? cursor.match(search) : undefined;
+    if (global) setLastMatch(state);
   }
+  if (!global && ((!block && !(replacement instanceof RHash)) || !last)) setLastMatch(last);
+  output.append(cursor.slice(position));
   if (global) setLastMatch(lastSearch === undefined ? undefined : cursor.match(lastSearch));
-  else if ((!block && !(replacement instanceof RHash)) || !last) setLastMatch(last);
-  append(cursor.slice(position));
-  return { value: joinEncodedStrings(chunks, LIMITS.maxStringLength), matched: last !== undefined };
+  return { value: output.finish(), matched: last !== undefined };
+}
+
+function* regexpReplacementPiece(
+  cursor: RegexpCursor,
+  state: MatchState,
+  replacement: Value | undefined,
+  block: RProc | undefined,
+  limit: number
+): Gen<RString> {
+  const [from, to] = cursor.range(state)!;
+  if (replacement instanceof RHash) {
+    const key = cursor.slice(from, to);
+    const entry = yield* hashGet(replacement, key);
+    return yield* toSValue(entry ? entry.value : yield* hashDefault(replacement, key));
+  }
+  if (replacement instanceof RString) return expand(replacement, state, limit);
+  return yield* toSValue(yield* callBlock(block as RProc, [cursor.slice(from, to)]));
 }
 
 function* regexpReplacement(value: Value | undefined): Gen<RHash | RString | undefined> {

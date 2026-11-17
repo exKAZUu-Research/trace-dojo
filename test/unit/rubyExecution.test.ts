@@ -43782,3 +43782,1165 @@ test.each(nativeStringEncodingStageCases)(
     expect(run(source)).toMatchObject({ kind: 'executed', stdout, uncaughtException: undefined });
   }
 );
+
+const nativeRegexpAppendStageCases = [
+  [
+    'class Box;def initialize(s);@s=s;end;def to_s;puts :converted;@s;end;end;first=String.new("é",encoding:"US-ASCII");second=String.new("é",encoding:"US-ASCII");s="aaa";n=0;begin;x=s.gsub(/a/){n+=1;n==1 ? first : second};p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    '[[195, 169, 195, 169, 195, 169], #<Encoding:US-ASCII>]\n3\n[97, 97, 97]\n#<Encoding:UTF-8>\n"a"\n',
+  ],
+  [
+    'class Box;def initialize(s);@s=s;end;def to_s;puts :converted;@s;end;end;first=String.new("é",encoding:"US-ASCII");second=String.new("é",encoding:"US-ASCII");s="aéaa";n=0;begin;x=s.gsub(/a/){n+=1;n==1 ? first : second};p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'Encoding::CompatibilityError\n"incompatible character encodings: US-ASCII and UTF-8"\n2\n[97, 195, 169, 97, 97]\n#<Encoding:UTF-8>\n"a"\n',
+  ],
+  [
+    'class Box;def initialize(s);@s=s;end;def to_s;puts :converted;@s;end;end;first=String.new("é",encoding:"US-ASCII");second=String.new("é",encoding:"US-ASCII");s="aaéa";n=0;begin;x=s.gsub(/a/){n+=1;n==1 ? first : second};p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'Encoding::CompatibilityError\n"incompatible character encodings: US-ASCII and UTF-8"\n3\n[97, 97, 195, 169, 97]\n#<Encoding:UTF-8>\n"a"\n',
+  ],
+  [
+    'class Box;def initialize(s);@s=s;end;def to_s;puts :converted;@s;end;end;first=String.new("é",encoding:"US-ASCII");second=String.new("é",encoding:"US-ASCII");s="aaa";n=0;begin;x=s.gsub(/a/,Hash.new{|h,k|n+=1;n==1 ? first : second});p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    '[[195, 169, 195, 169, 195, 169], #<Encoding:US-ASCII>]\n3\n[97, 97, 97]\n#<Encoding:UTF-8>\n"a"\n',
+  ],
+  [
+    'class Box;def initialize(s);@s=s;end;def to_s;puts :converted;@s;end;end;first=String.new("é",encoding:"US-ASCII");second=String.new("é",encoding:"US-ASCII");s="aéaa";n=0;begin;x=s.gsub(/a/,Hash.new{|h,k|n+=1;n==1 ? first : second});p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'Encoding::CompatibilityError\n"incompatible character encodings: US-ASCII and UTF-8"\n2\n[97, 195, 169, 97, 97]\n#<Encoding:UTF-8>\n"a"\n',
+  ],
+  [
+    'class Box;def initialize(s);@s=s;end;def to_s;puts :converted;@s;end;end;first=String.new("é",encoding:"US-ASCII");second=String.new("é",encoding:"US-ASCII");s="aaéa";n=0;begin;x=s.gsub(/a/,Hash.new{|h,k|n+=1;n==1 ? first : second});p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'Encoding::CompatibilityError\n"incompatible character encodings: US-ASCII and UTF-8"\n3\n[97, 97, 195, 169, 97]\n#<Encoding:UTF-8>\n"a"\n',
+  ],
+  [
+    'class Box;def initialize(s);@s=s;end;def to_s;puts :converted;@s;end;end;first=String.new("é",encoding:"US-ASCII");second=String.new("é",encoding:"US-ASCII");s="aaa";n=0;begin;x=s.gsub(/a/,Hash.new{|h,k|n+=1;Box.new(n==1 ? first : second)});p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'converted\nconverted\nconverted\n[[195, 169, 195, 169, 195, 169], #<Encoding:US-ASCII>]\n3\n[97, 97, 97]\n#<Encoding:UTF-8>\n"a"\n',
+  ],
+  [
+    'class Box;def initialize(s);@s=s;end;def to_s;puts :converted;@s;end;end;first=String.new("é",encoding:"US-ASCII");second=String.new("é",encoding:"US-ASCII");s="aéaa";n=0;begin;x=s.gsub(/a/,Hash.new{|h,k|n+=1;Box.new(n==1 ? first : second)});p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'converted\nconverted\nEncoding::CompatibilityError\n"incompatible character encodings: US-ASCII and UTF-8"\n2\n[97, 195, 169, 97, 97]\n#<Encoding:UTF-8>\n"a"\n',
+  ],
+  [
+    'class Box;def initialize(s);@s=s;end;def to_s;puts :converted;@s;end;end;first=String.new("é",encoding:"US-ASCII");second=String.new("é",encoding:"US-ASCII");s="aaéa";n=0;begin;x=s.gsub(/a/,Hash.new{|h,k|n+=1;Box.new(n==1 ? first : second)});p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'converted\nconverted\nconverted\nEncoding::CompatibilityError\n"incompatible character encodings: US-ASCII and UTF-8"\n3\n[97, 97, 195, 169, 97]\n#<Encoding:UTF-8>\n"a"\n',
+  ],
+  [
+    'class Box;def initialize(s);@s=s;end;def to_s;puts :converted;@s;end;end;first=String.new("é",encoding:"US-ASCII");second=String.new("é",encoding:"US-ASCII");s="aaa";n=0;begin;x=s.gsub!(/a/){n+=1;n==1 ? first : second};p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    '[[195, 169, 195, 169, 195, 169], #<Encoding:US-ASCII>]\n3\n[195, 169, 195, 169, 195, 169]\n#<Encoding:US-ASCII>\n"a"\n',
+  ],
+  [
+    'class Box;def initialize(s);@s=s;end;def to_s;puts :converted;@s;end;end;first=String.new("é",encoding:"US-ASCII");second=String.new("é",encoding:"US-ASCII");s="aéaa";n=0;begin;x=s.gsub!(/a/){n+=1;n==1 ? first : second};p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'Encoding::CompatibilityError\n"incompatible character encodings: US-ASCII and UTF-8"\n2\n[97, 195, 169, 97, 97]\n#<Encoding:UTF-8>\n"a"\n',
+  ],
+  [
+    'class Box;def initialize(s);@s=s;end;def to_s;puts :converted;@s;end;end;first=String.new("é",encoding:"US-ASCII");second=String.new("é",encoding:"US-ASCII");s="aaéa";n=0;begin;x=s.gsub!(/a/){n+=1;n==1 ? first : second};p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'Encoding::CompatibilityError\n"incompatible character encodings: US-ASCII and UTF-8"\n3\n[97, 97, 195, 169, 97]\n#<Encoding:UTF-8>\n"a"\n',
+  ],
+  [
+    'class Box;def initialize(s);@s=s;end;def to_s;puts :converted;@s;end;end;first=String.new("é",encoding:"US-ASCII");second=String.new("é",encoding:"US-ASCII");s="aaa";n=0;begin;x=s.gsub!(/a/,Hash.new{|h,k|n+=1;n==1 ? first : second});p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    '[[195, 169, 195, 169, 195, 169], #<Encoding:US-ASCII>]\n3\n[195, 169, 195, 169, 195, 169]\n#<Encoding:US-ASCII>\n"a"\n',
+  ],
+  [
+    'class Box;def initialize(s);@s=s;end;def to_s;puts :converted;@s;end;end;first=String.new("é",encoding:"US-ASCII");second=String.new("é",encoding:"US-ASCII");s="aéaa";n=0;begin;x=s.gsub!(/a/,Hash.new{|h,k|n+=1;n==1 ? first : second});p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'Encoding::CompatibilityError\n"incompatible character encodings: US-ASCII and UTF-8"\n2\n[97, 195, 169, 97, 97]\n#<Encoding:UTF-8>\n"a"\n',
+  ],
+  [
+    'class Box;def initialize(s);@s=s;end;def to_s;puts :converted;@s;end;end;first=String.new("é",encoding:"US-ASCII");second=String.new("é",encoding:"US-ASCII");s="aaéa";n=0;begin;x=s.gsub!(/a/,Hash.new{|h,k|n+=1;n==1 ? first : second});p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'Encoding::CompatibilityError\n"incompatible character encodings: US-ASCII and UTF-8"\n3\n[97, 97, 195, 169, 97]\n#<Encoding:UTF-8>\n"a"\n',
+  ],
+  [
+    'class Box;def initialize(s);@s=s;end;def to_s;puts :converted;@s;end;end;first=String.new("é",encoding:"US-ASCII");second=String.new("é",encoding:"US-ASCII");s="aaa";n=0;begin;x=s.gsub!(/a/,Hash.new{|h,k|n+=1;Box.new(n==1 ? first : second)});p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'converted\nconverted\nconverted\n[[195, 169, 195, 169, 195, 169], #<Encoding:US-ASCII>]\n3\n[195, 169, 195, 169, 195, 169]\n#<Encoding:US-ASCII>\n"a"\n',
+  ],
+  [
+    'class Box;def initialize(s);@s=s;end;def to_s;puts :converted;@s;end;end;first=String.new("é",encoding:"US-ASCII");second=String.new("é",encoding:"US-ASCII");s="aéaa";n=0;begin;x=s.gsub!(/a/,Hash.new{|h,k|n+=1;Box.new(n==1 ? first : second)});p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'converted\nconverted\nEncoding::CompatibilityError\n"incompatible character encodings: US-ASCII and UTF-8"\n2\n[97, 195, 169, 97, 97]\n#<Encoding:UTF-8>\n"a"\n',
+  ],
+  [
+    'class Box;def initialize(s);@s=s;end;def to_s;puts :converted;@s;end;end;first=String.new("é",encoding:"US-ASCII");second=String.new("é",encoding:"US-ASCII");s="aaéa";n=0;begin;x=s.gsub!(/a/,Hash.new{|h,k|n+=1;Box.new(n==1 ? first : second)});p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'converted\nconverted\nconverted\nEncoding::CompatibilityError\n"incompatible character encodings: US-ASCII and UTF-8"\n3\n[97, 97, 195, 169, 97]\n#<Encoding:UTF-8>\n"a"\n',
+  ],
+  [
+    'class Box;def initialize(s);@s=s;end;def to_s;puts :converted;@s;end;end;first=String.new("é",encoding:"US-ASCII");second=String.new("é",encoding:"UTF-8");s="aaa";n=0;begin;x=s.gsub(/a/){n+=1;n==1 ? first : second};p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'Encoding::CompatibilityError\n"incompatible character encodings: US-ASCII and UTF-8"\n2\n[97, 97, 97]\n#<Encoding:UTF-8>\n"a"\n',
+  ],
+  [
+    'class Box;def initialize(s);@s=s;end;def to_s;puts :converted;@s;end;end;first=String.new("é",encoding:"US-ASCII");second=String.new("é",encoding:"UTF-8");s="aéaa";n=0;begin;x=s.gsub(/a/){n+=1;n==1 ? first : second};p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'Encoding::CompatibilityError\n"incompatible character encodings: US-ASCII and UTF-8"\n2\n[97, 195, 169, 97, 97]\n#<Encoding:UTF-8>\n"a"\n',
+  ],
+  [
+    'class Box;def initialize(s);@s=s;end;def to_s;puts :converted;@s;end;end;first=String.new("é",encoding:"US-ASCII");second=String.new("é",encoding:"UTF-8");s="aaéa";n=0;begin;x=s.gsub(/a/){n+=1;n==1 ? first : second};p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'Encoding::CompatibilityError\n"incompatible character encodings: US-ASCII and UTF-8"\n2\n[97, 97, 195, 169, 97]\n#<Encoding:UTF-8>\n"a"\n',
+  ],
+  [
+    'class Box;def initialize(s);@s=s;end;def to_s;puts :converted;@s;end;end;first=String.new("é",encoding:"US-ASCII");second=String.new("é",encoding:"UTF-8");s="aaa";n=0;begin;x=s.gsub(/a/,Hash.new{|h,k|n+=1;n==1 ? first : second});p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'Encoding::CompatibilityError\n"incompatible character encodings: US-ASCII and UTF-8"\n2\n[97, 97, 97]\n#<Encoding:UTF-8>\n"a"\n',
+  ],
+  [
+    'class Box;def initialize(s);@s=s;end;def to_s;puts :converted;@s;end;end;first=String.new("é",encoding:"US-ASCII");second=String.new("é",encoding:"UTF-8");s="aéaa";n=0;begin;x=s.gsub(/a/,Hash.new{|h,k|n+=1;n==1 ? first : second});p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'Encoding::CompatibilityError\n"incompatible character encodings: US-ASCII and UTF-8"\n2\n[97, 195, 169, 97, 97]\n#<Encoding:UTF-8>\n"a"\n',
+  ],
+  [
+    'class Box;def initialize(s);@s=s;end;def to_s;puts :converted;@s;end;end;first=String.new("é",encoding:"US-ASCII");second=String.new("é",encoding:"UTF-8");s="aaéa";n=0;begin;x=s.gsub(/a/,Hash.new{|h,k|n+=1;n==1 ? first : second});p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'Encoding::CompatibilityError\n"incompatible character encodings: US-ASCII and UTF-8"\n2\n[97, 97, 195, 169, 97]\n#<Encoding:UTF-8>\n"a"\n',
+  ],
+  [
+    'class Box;def initialize(s);@s=s;end;def to_s;puts :converted;@s;end;end;first=String.new("é",encoding:"US-ASCII");second=String.new("é",encoding:"UTF-8");s="aaa";n=0;begin;x=s.gsub(/a/,Hash.new{|h,k|n+=1;Box.new(n==1 ? first : second)});p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'converted\nconverted\nEncoding::CompatibilityError\n"incompatible character encodings: US-ASCII and UTF-8"\n2\n[97, 97, 97]\n#<Encoding:UTF-8>\n"a"\n',
+  ],
+  [
+    'class Box;def initialize(s);@s=s;end;def to_s;puts :converted;@s;end;end;first=String.new("é",encoding:"US-ASCII");second=String.new("é",encoding:"UTF-8");s="aéaa";n=0;begin;x=s.gsub(/a/,Hash.new{|h,k|n+=1;Box.new(n==1 ? first : second)});p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'converted\nconverted\nEncoding::CompatibilityError\n"incompatible character encodings: US-ASCII and UTF-8"\n2\n[97, 195, 169, 97, 97]\n#<Encoding:UTF-8>\n"a"\n',
+  ],
+  [
+    'class Box;def initialize(s);@s=s;end;def to_s;puts :converted;@s;end;end;first=String.new("é",encoding:"US-ASCII");second=String.new("é",encoding:"UTF-8");s="aaéa";n=0;begin;x=s.gsub(/a/,Hash.new{|h,k|n+=1;Box.new(n==1 ? first : second)});p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'converted\nconverted\nEncoding::CompatibilityError\n"incompatible character encodings: US-ASCII and UTF-8"\n2\n[97, 97, 195, 169, 97]\n#<Encoding:UTF-8>\n"a"\n',
+  ],
+  [
+    'class Box;def initialize(s);@s=s;end;def to_s;puts :converted;@s;end;end;first=String.new("é",encoding:"US-ASCII");second=String.new("é",encoding:"UTF-8");s="aaa";n=0;begin;x=s.gsub!(/a/){n+=1;n==1 ? first : second};p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'Encoding::CompatibilityError\n"incompatible character encodings: US-ASCII and UTF-8"\n2\n[97, 97, 97]\n#<Encoding:UTF-8>\n"a"\n',
+  ],
+  [
+    'class Box;def initialize(s);@s=s;end;def to_s;puts :converted;@s;end;end;first=String.new("é",encoding:"US-ASCII");second=String.new("é",encoding:"UTF-8");s="aéaa";n=0;begin;x=s.gsub!(/a/){n+=1;n==1 ? first : second};p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'Encoding::CompatibilityError\n"incompatible character encodings: US-ASCII and UTF-8"\n2\n[97, 195, 169, 97, 97]\n#<Encoding:UTF-8>\n"a"\n',
+  ],
+  [
+    'class Box;def initialize(s);@s=s;end;def to_s;puts :converted;@s;end;end;first=String.new("é",encoding:"US-ASCII");second=String.new("é",encoding:"UTF-8");s="aaéa";n=0;begin;x=s.gsub!(/a/){n+=1;n==1 ? first : second};p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'Encoding::CompatibilityError\n"incompatible character encodings: US-ASCII and UTF-8"\n2\n[97, 97, 195, 169, 97]\n#<Encoding:UTF-8>\n"a"\n',
+  ],
+  [
+    'class Box;def initialize(s);@s=s;end;def to_s;puts :converted;@s;end;end;first=String.new("é",encoding:"US-ASCII");second=String.new("é",encoding:"UTF-8");s="aaa";n=0;begin;x=s.gsub!(/a/,Hash.new{|h,k|n+=1;n==1 ? first : second});p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'Encoding::CompatibilityError\n"incompatible character encodings: US-ASCII and UTF-8"\n2\n[97, 97, 97]\n#<Encoding:UTF-8>\n"a"\n',
+  ],
+  [
+    'class Box;def initialize(s);@s=s;end;def to_s;puts :converted;@s;end;end;first=String.new("é",encoding:"US-ASCII");second=String.new("é",encoding:"UTF-8");s="aéaa";n=0;begin;x=s.gsub!(/a/,Hash.new{|h,k|n+=1;n==1 ? first : second});p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'Encoding::CompatibilityError\n"incompatible character encodings: US-ASCII and UTF-8"\n2\n[97, 195, 169, 97, 97]\n#<Encoding:UTF-8>\n"a"\n',
+  ],
+  [
+    'class Box;def initialize(s);@s=s;end;def to_s;puts :converted;@s;end;end;first=String.new("é",encoding:"US-ASCII");second=String.new("é",encoding:"UTF-8");s="aaéa";n=0;begin;x=s.gsub!(/a/,Hash.new{|h,k|n+=1;n==1 ? first : second});p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'Encoding::CompatibilityError\n"incompatible character encodings: US-ASCII and UTF-8"\n2\n[97, 97, 195, 169, 97]\n#<Encoding:UTF-8>\n"a"\n',
+  ],
+  [
+    'class Box;def initialize(s);@s=s;end;def to_s;puts :converted;@s;end;end;first=String.new("é",encoding:"US-ASCII");second=String.new("é",encoding:"UTF-8");s="aaa";n=0;begin;x=s.gsub!(/a/,Hash.new{|h,k|n+=1;Box.new(n==1 ? first : second)});p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'converted\nconverted\nEncoding::CompatibilityError\n"incompatible character encodings: US-ASCII and UTF-8"\n2\n[97, 97, 97]\n#<Encoding:UTF-8>\n"a"\n',
+  ],
+  [
+    'class Box;def initialize(s);@s=s;end;def to_s;puts :converted;@s;end;end;first=String.new("é",encoding:"US-ASCII");second=String.new("é",encoding:"UTF-8");s="aéaa";n=0;begin;x=s.gsub!(/a/,Hash.new{|h,k|n+=1;Box.new(n==1 ? first : second)});p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'converted\nconverted\nEncoding::CompatibilityError\n"incompatible character encodings: US-ASCII and UTF-8"\n2\n[97, 195, 169, 97, 97]\n#<Encoding:UTF-8>\n"a"\n',
+  ],
+  [
+    'class Box;def initialize(s);@s=s;end;def to_s;puts :converted;@s;end;end;first=String.new("é",encoding:"US-ASCII");second=String.new("é",encoding:"UTF-8");s="aaéa";n=0;begin;x=s.gsub!(/a/,Hash.new{|h,k|n+=1;Box.new(n==1 ? first : second)});p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'converted\nconverted\nEncoding::CompatibilityError\n"incompatible character encodings: US-ASCII and UTF-8"\n2\n[97, 97, 195, 169, 97]\n#<Encoding:UTF-8>\n"a"\n',
+  ],
+  [
+    'class Box;def initialize(s);@s=s;end;def to_s;puts :converted;@s;end;end;first=String.new("é",encoding:"US-ASCII");second=String.new("é",encoding:"ASCII-8BIT");s="aaa";n=0;begin;x=s.gsub(/a/){n+=1;n==1 ? first : second};p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'Encoding::CompatibilityError\n"incompatible character encodings: US-ASCII and BINARY (ASCII-8BIT)"\n2\n[97, 97, 97]\n#<Encoding:UTF-8>\n"a"\n',
+  ],
+  [
+    'class Box;def initialize(s);@s=s;end;def to_s;puts :converted;@s;end;end;first=String.new("é",encoding:"US-ASCII");second=String.new("é",encoding:"ASCII-8BIT");s="aéaa";n=0;begin;x=s.gsub(/a/){n+=1;n==1 ? first : second};p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'Encoding::CompatibilityError\n"incompatible character encodings: US-ASCII and UTF-8"\n2\n[97, 195, 169, 97, 97]\n#<Encoding:UTF-8>\n"a"\n',
+  ],
+  [
+    'class Box;def initialize(s);@s=s;end;def to_s;puts :converted;@s;end;end;first=String.new("é",encoding:"US-ASCII");second=String.new("é",encoding:"ASCII-8BIT");s="aaéa";n=0;begin;x=s.gsub(/a/){n+=1;n==1 ? first : second};p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'Encoding::CompatibilityError\n"incompatible character encodings: US-ASCII and BINARY (ASCII-8BIT)"\n2\n[97, 97, 195, 169, 97]\n#<Encoding:UTF-8>\n"a"\n',
+  ],
+  [
+    'class Box;def initialize(s);@s=s;end;def to_s;puts :converted;@s;end;end;first=String.new("é",encoding:"US-ASCII");second=String.new("é",encoding:"ASCII-8BIT");s="aaa";n=0;begin;x=s.gsub(/a/,Hash.new{|h,k|n+=1;n==1 ? first : second});p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'Encoding::CompatibilityError\n"incompatible character encodings: US-ASCII and BINARY (ASCII-8BIT)"\n2\n[97, 97, 97]\n#<Encoding:UTF-8>\n"a"\n',
+  ],
+  [
+    'class Box;def initialize(s);@s=s;end;def to_s;puts :converted;@s;end;end;first=String.new("é",encoding:"US-ASCII");second=String.new("é",encoding:"ASCII-8BIT");s="aéaa";n=0;begin;x=s.gsub(/a/,Hash.new{|h,k|n+=1;n==1 ? first : second});p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'Encoding::CompatibilityError\n"incompatible character encodings: US-ASCII and UTF-8"\n2\n[97, 195, 169, 97, 97]\n#<Encoding:UTF-8>\n"a"\n',
+  ],
+  [
+    'class Box;def initialize(s);@s=s;end;def to_s;puts :converted;@s;end;end;first=String.new("é",encoding:"US-ASCII");second=String.new("é",encoding:"ASCII-8BIT");s="aaéa";n=0;begin;x=s.gsub(/a/,Hash.new{|h,k|n+=1;n==1 ? first : second});p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'Encoding::CompatibilityError\n"incompatible character encodings: US-ASCII and BINARY (ASCII-8BIT)"\n2\n[97, 97, 195, 169, 97]\n#<Encoding:UTF-8>\n"a"\n',
+  ],
+  [
+    'class Box;def initialize(s);@s=s;end;def to_s;puts :converted;@s;end;end;first=String.new("é",encoding:"US-ASCII");second=String.new("é",encoding:"ASCII-8BIT");s="aaa";n=0;begin;x=s.gsub(/a/,Hash.new{|h,k|n+=1;Box.new(n==1 ? first : second)});p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'converted\nconverted\nEncoding::CompatibilityError\n"incompatible character encodings: US-ASCII and BINARY (ASCII-8BIT)"\n2\n[97, 97, 97]\n#<Encoding:UTF-8>\n"a"\n',
+  ],
+  [
+    'class Box;def initialize(s);@s=s;end;def to_s;puts :converted;@s;end;end;first=String.new("é",encoding:"US-ASCII");second=String.new("é",encoding:"ASCII-8BIT");s="aéaa";n=0;begin;x=s.gsub(/a/,Hash.new{|h,k|n+=1;Box.new(n==1 ? first : second)});p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'converted\nconverted\nEncoding::CompatibilityError\n"incompatible character encodings: US-ASCII and UTF-8"\n2\n[97, 195, 169, 97, 97]\n#<Encoding:UTF-8>\n"a"\n',
+  ],
+  [
+    'class Box;def initialize(s);@s=s;end;def to_s;puts :converted;@s;end;end;first=String.new("é",encoding:"US-ASCII");second=String.new("é",encoding:"ASCII-8BIT");s="aaéa";n=0;begin;x=s.gsub(/a/,Hash.new{|h,k|n+=1;Box.new(n==1 ? first : second)});p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'converted\nconverted\nEncoding::CompatibilityError\n"incompatible character encodings: US-ASCII and BINARY (ASCII-8BIT)"\n2\n[97, 97, 195, 169, 97]\n#<Encoding:UTF-8>\n"a"\n',
+  ],
+  [
+    'class Box;def initialize(s);@s=s;end;def to_s;puts :converted;@s;end;end;first=String.new("é",encoding:"US-ASCII");second=String.new("é",encoding:"ASCII-8BIT");s="aaa";n=0;begin;x=s.gsub!(/a/){n+=1;n==1 ? first : second};p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'Encoding::CompatibilityError\n"incompatible character encodings: US-ASCII and BINARY (ASCII-8BIT)"\n2\n[97, 97, 97]\n#<Encoding:UTF-8>\n"a"\n',
+  ],
+  [
+    'class Box;def initialize(s);@s=s;end;def to_s;puts :converted;@s;end;end;first=String.new("é",encoding:"US-ASCII");second=String.new("é",encoding:"ASCII-8BIT");s="aéaa";n=0;begin;x=s.gsub!(/a/){n+=1;n==1 ? first : second};p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'Encoding::CompatibilityError\n"incompatible character encodings: US-ASCII and UTF-8"\n2\n[97, 195, 169, 97, 97]\n#<Encoding:UTF-8>\n"a"\n',
+  ],
+  [
+    'class Box;def initialize(s);@s=s;end;def to_s;puts :converted;@s;end;end;first=String.new("é",encoding:"US-ASCII");second=String.new("é",encoding:"ASCII-8BIT");s="aaéa";n=0;begin;x=s.gsub!(/a/){n+=1;n==1 ? first : second};p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'Encoding::CompatibilityError\n"incompatible character encodings: US-ASCII and BINARY (ASCII-8BIT)"\n2\n[97, 97, 195, 169, 97]\n#<Encoding:UTF-8>\n"a"\n',
+  ],
+  [
+    'class Box;def initialize(s);@s=s;end;def to_s;puts :converted;@s;end;end;first=String.new("é",encoding:"US-ASCII");second=String.new("é",encoding:"ASCII-8BIT");s="aaa";n=0;begin;x=s.gsub!(/a/,Hash.new{|h,k|n+=1;n==1 ? first : second});p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'Encoding::CompatibilityError\n"incompatible character encodings: US-ASCII and BINARY (ASCII-8BIT)"\n2\n[97, 97, 97]\n#<Encoding:UTF-8>\n"a"\n',
+  ],
+  [
+    'class Box;def initialize(s);@s=s;end;def to_s;puts :converted;@s;end;end;first=String.new("é",encoding:"US-ASCII");second=String.new("é",encoding:"ASCII-8BIT");s="aéaa";n=0;begin;x=s.gsub!(/a/,Hash.new{|h,k|n+=1;n==1 ? first : second});p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'Encoding::CompatibilityError\n"incompatible character encodings: US-ASCII and UTF-8"\n2\n[97, 195, 169, 97, 97]\n#<Encoding:UTF-8>\n"a"\n',
+  ],
+  [
+    'class Box;def initialize(s);@s=s;end;def to_s;puts :converted;@s;end;end;first=String.new("é",encoding:"US-ASCII");second=String.new("é",encoding:"ASCII-8BIT");s="aaéa";n=0;begin;x=s.gsub!(/a/,Hash.new{|h,k|n+=1;n==1 ? first : second});p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'Encoding::CompatibilityError\n"incompatible character encodings: US-ASCII and BINARY (ASCII-8BIT)"\n2\n[97, 97, 195, 169, 97]\n#<Encoding:UTF-8>\n"a"\n',
+  ],
+  [
+    'class Box;def initialize(s);@s=s;end;def to_s;puts :converted;@s;end;end;first=String.new("é",encoding:"US-ASCII");second=String.new("é",encoding:"ASCII-8BIT");s="aaa";n=0;begin;x=s.gsub!(/a/,Hash.new{|h,k|n+=1;Box.new(n==1 ? first : second)});p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'converted\nconverted\nEncoding::CompatibilityError\n"incompatible character encodings: US-ASCII and BINARY (ASCII-8BIT)"\n2\n[97, 97, 97]\n#<Encoding:UTF-8>\n"a"\n',
+  ],
+  [
+    'class Box;def initialize(s);@s=s;end;def to_s;puts :converted;@s;end;end;first=String.new("é",encoding:"US-ASCII");second=String.new("é",encoding:"ASCII-8BIT");s="aéaa";n=0;begin;x=s.gsub!(/a/,Hash.new{|h,k|n+=1;Box.new(n==1 ? first : second)});p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'converted\nconverted\nEncoding::CompatibilityError\n"incompatible character encodings: US-ASCII and UTF-8"\n2\n[97, 195, 169, 97, 97]\n#<Encoding:UTF-8>\n"a"\n',
+  ],
+  [
+    'class Box;def initialize(s);@s=s;end;def to_s;puts :converted;@s;end;end;first=String.new("é",encoding:"US-ASCII");second=String.new("é",encoding:"ASCII-8BIT");s="aaéa";n=0;begin;x=s.gsub!(/a/,Hash.new{|h,k|n+=1;Box.new(n==1 ? first : second)});p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'converted\nconverted\nEncoding::CompatibilityError\n"incompatible character encodings: US-ASCII and BINARY (ASCII-8BIT)"\n2\n[97, 97, 195, 169, 97]\n#<Encoding:UTF-8>\n"a"\n',
+  ],
+  [
+    'class Box;def initialize(s);@s=s;end;def to_s;puts :converted;@s;end;end;first=String.new("é",encoding:"UTF-8");second=String.new("é",encoding:"US-ASCII");s="aaa";n=0;begin;x=s.gsub(/a/){n+=1;n==1 ? first : second};p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'Encoding::CompatibilityError\n"incompatible character encodings: UTF-8 and US-ASCII"\n2\n[97, 97, 97]\n#<Encoding:UTF-8>\n"a"\n',
+  ],
+  [
+    'class Box;def initialize(s);@s=s;end;def to_s;puts :converted;@s;end;end;first=String.new("é",encoding:"UTF-8");second=String.new("é",encoding:"US-ASCII");s="aéaa";n=0;begin;x=s.gsub(/a/){n+=1;n==1 ? first : second};p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'Encoding::CompatibilityError\n"incompatible character encodings: UTF-8 and US-ASCII"\n2\n[97, 195, 169, 97, 97]\n#<Encoding:UTF-8>\n"a"\n',
+  ],
+  [
+    'class Box;def initialize(s);@s=s;end;def to_s;puts :converted;@s;end;end;first=String.new("é",encoding:"UTF-8");second=String.new("é",encoding:"US-ASCII");s="aaéa";n=0;begin;x=s.gsub(/a/){n+=1;n==1 ? first : second};p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'Encoding::CompatibilityError\n"incompatible character encodings: UTF-8 and US-ASCII"\n2\n[97, 97, 195, 169, 97]\n#<Encoding:UTF-8>\n"a"\n',
+  ],
+  [
+    'class Box;def initialize(s);@s=s;end;def to_s;puts :converted;@s;end;end;first=String.new("é",encoding:"UTF-8");second=String.new("é",encoding:"US-ASCII");s="aaa";n=0;begin;x=s.gsub(/a/,Hash.new{|h,k|n+=1;n==1 ? first : second});p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'Encoding::CompatibilityError\n"incompatible character encodings: UTF-8 and US-ASCII"\n2\n[97, 97, 97]\n#<Encoding:UTF-8>\n"a"\n',
+  ],
+  [
+    'class Box;def initialize(s);@s=s;end;def to_s;puts :converted;@s;end;end;first=String.new("é",encoding:"UTF-8");second=String.new("é",encoding:"US-ASCII");s="aéaa";n=0;begin;x=s.gsub(/a/,Hash.new{|h,k|n+=1;n==1 ? first : second});p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'Encoding::CompatibilityError\n"incompatible character encodings: UTF-8 and US-ASCII"\n2\n[97, 195, 169, 97, 97]\n#<Encoding:UTF-8>\n"a"\n',
+  ],
+  [
+    'class Box;def initialize(s);@s=s;end;def to_s;puts :converted;@s;end;end;first=String.new("é",encoding:"UTF-8");second=String.new("é",encoding:"US-ASCII");s="aaéa";n=0;begin;x=s.gsub(/a/,Hash.new{|h,k|n+=1;n==1 ? first : second});p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'Encoding::CompatibilityError\n"incompatible character encodings: UTF-8 and US-ASCII"\n2\n[97, 97, 195, 169, 97]\n#<Encoding:UTF-8>\n"a"\n',
+  ],
+  [
+    'class Box;def initialize(s);@s=s;end;def to_s;puts :converted;@s;end;end;first=String.new("é",encoding:"UTF-8");second=String.new("é",encoding:"US-ASCII");s="aaa";n=0;begin;x=s.gsub(/a/,Hash.new{|h,k|n+=1;Box.new(n==1 ? first : second)});p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'converted\nconverted\nEncoding::CompatibilityError\n"incompatible character encodings: UTF-8 and US-ASCII"\n2\n[97, 97, 97]\n#<Encoding:UTF-8>\n"a"\n',
+  ],
+  [
+    'class Box;def initialize(s);@s=s;end;def to_s;puts :converted;@s;end;end;first=String.new("é",encoding:"UTF-8");second=String.new("é",encoding:"US-ASCII");s="aéaa";n=0;begin;x=s.gsub(/a/,Hash.new{|h,k|n+=1;Box.new(n==1 ? first : second)});p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'converted\nconverted\nEncoding::CompatibilityError\n"incompatible character encodings: UTF-8 and US-ASCII"\n2\n[97, 195, 169, 97, 97]\n#<Encoding:UTF-8>\n"a"\n',
+  ],
+  [
+    'class Box;def initialize(s);@s=s;end;def to_s;puts :converted;@s;end;end;first=String.new("é",encoding:"UTF-8");second=String.new("é",encoding:"US-ASCII");s="aaéa";n=0;begin;x=s.gsub(/a/,Hash.new{|h,k|n+=1;Box.new(n==1 ? first : second)});p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'converted\nconverted\nEncoding::CompatibilityError\n"incompatible character encodings: UTF-8 and US-ASCII"\n2\n[97, 97, 195, 169, 97]\n#<Encoding:UTF-8>\n"a"\n',
+  ],
+  [
+    'class Box;def initialize(s);@s=s;end;def to_s;puts :converted;@s;end;end;first=String.new("é",encoding:"UTF-8");second=String.new("é",encoding:"US-ASCII");s="aaa";n=0;begin;x=s.gsub!(/a/){n+=1;n==1 ? first : second};p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'Encoding::CompatibilityError\n"incompatible character encodings: UTF-8 and US-ASCII"\n2\n[97, 97, 97]\n#<Encoding:UTF-8>\n"a"\n',
+  ],
+  [
+    'class Box;def initialize(s);@s=s;end;def to_s;puts :converted;@s;end;end;first=String.new("é",encoding:"UTF-8");second=String.new("é",encoding:"US-ASCII");s="aéaa";n=0;begin;x=s.gsub!(/a/){n+=1;n==1 ? first : second};p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'Encoding::CompatibilityError\n"incompatible character encodings: UTF-8 and US-ASCII"\n2\n[97, 195, 169, 97, 97]\n#<Encoding:UTF-8>\n"a"\n',
+  ],
+  [
+    'class Box;def initialize(s);@s=s;end;def to_s;puts :converted;@s;end;end;first=String.new("é",encoding:"UTF-8");second=String.new("é",encoding:"US-ASCII");s="aaéa";n=0;begin;x=s.gsub!(/a/){n+=1;n==1 ? first : second};p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'Encoding::CompatibilityError\n"incompatible character encodings: UTF-8 and US-ASCII"\n2\n[97, 97, 195, 169, 97]\n#<Encoding:UTF-8>\n"a"\n',
+  ],
+  [
+    'class Box;def initialize(s);@s=s;end;def to_s;puts :converted;@s;end;end;first=String.new("é",encoding:"UTF-8");second=String.new("é",encoding:"US-ASCII");s="aaa";n=0;begin;x=s.gsub!(/a/,Hash.new{|h,k|n+=1;n==1 ? first : second});p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'Encoding::CompatibilityError\n"incompatible character encodings: UTF-8 and US-ASCII"\n2\n[97, 97, 97]\n#<Encoding:UTF-8>\n"a"\n',
+  ],
+  [
+    'class Box;def initialize(s);@s=s;end;def to_s;puts :converted;@s;end;end;first=String.new("é",encoding:"UTF-8");second=String.new("é",encoding:"US-ASCII");s="aéaa";n=0;begin;x=s.gsub!(/a/,Hash.new{|h,k|n+=1;n==1 ? first : second});p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'Encoding::CompatibilityError\n"incompatible character encodings: UTF-8 and US-ASCII"\n2\n[97, 195, 169, 97, 97]\n#<Encoding:UTF-8>\n"a"\n',
+  ],
+  [
+    'class Box;def initialize(s);@s=s;end;def to_s;puts :converted;@s;end;end;first=String.new("é",encoding:"UTF-8");second=String.new("é",encoding:"US-ASCII");s="aaéa";n=0;begin;x=s.gsub!(/a/,Hash.new{|h,k|n+=1;n==1 ? first : second});p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'Encoding::CompatibilityError\n"incompatible character encodings: UTF-8 and US-ASCII"\n2\n[97, 97, 195, 169, 97]\n#<Encoding:UTF-8>\n"a"\n',
+  ],
+  [
+    'class Box;def initialize(s);@s=s;end;def to_s;puts :converted;@s;end;end;first=String.new("é",encoding:"UTF-8");second=String.new("é",encoding:"US-ASCII");s="aaa";n=0;begin;x=s.gsub!(/a/,Hash.new{|h,k|n+=1;Box.new(n==1 ? first : second)});p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'converted\nconverted\nEncoding::CompatibilityError\n"incompatible character encodings: UTF-8 and US-ASCII"\n2\n[97, 97, 97]\n#<Encoding:UTF-8>\n"a"\n',
+  ],
+  [
+    'class Box;def initialize(s);@s=s;end;def to_s;puts :converted;@s;end;end;first=String.new("é",encoding:"UTF-8");second=String.new("é",encoding:"US-ASCII");s="aéaa";n=0;begin;x=s.gsub!(/a/,Hash.new{|h,k|n+=1;Box.new(n==1 ? first : second)});p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'converted\nconverted\nEncoding::CompatibilityError\n"incompatible character encodings: UTF-8 and US-ASCII"\n2\n[97, 195, 169, 97, 97]\n#<Encoding:UTF-8>\n"a"\n',
+  ],
+  [
+    'class Box;def initialize(s);@s=s;end;def to_s;puts :converted;@s;end;end;first=String.new("é",encoding:"UTF-8");second=String.new("é",encoding:"US-ASCII");s="aaéa";n=0;begin;x=s.gsub!(/a/,Hash.new{|h,k|n+=1;Box.new(n==1 ? first : second)});p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'converted\nconverted\nEncoding::CompatibilityError\n"incompatible character encodings: UTF-8 and US-ASCII"\n2\n[97, 97, 195, 169, 97]\n#<Encoding:UTF-8>\n"a"\n',
+  ],
+  [
+    'class Box;def initialize(s);@s=s;end;def to_s;puts :converted;@s;end;end;first=String.new("é",encoding:"UTF-8");second=String.new("é",encoding:"UTF-8");s="aaa";n=0;begin;x=s.gsub(/a/){n+=1;n==1 ? first : second};p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    '[[195, 169, 195, 169, 195, 169], #<Encoding:UTF-8>]\n3\n[97, 97, 97]\n#<Encoding:UTF-8>\n"a"\n',
+  ],
+  [
+    'class Box;def initialize(s);@s=s;end;def to_s;puts :converted;@s;end;end;first=String.new("é",encoding:"UTF-8");second=String.new("é",encoding:"UTF-8");s="aéaa";n=0;begin;x=s.gsub(/a/){n+=1;n==1 ? first : second};p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    '[[195, 169, 195, 169, 195, 169, 195, 169], #<Encoding:UTF-8>]\n3\n[97, 195, 169, 97, 97]\n#<Encoding:UTF-8>\n"a"\n',
+  ],
+  [
+    'class Box;def initialize(s);@s=s;end;def to_s;puts :converted;@s;end;end;first=String.new("é",encoding:"UTF-8");second=String.new("é",encoding:"UTF-8");s="aaéa";n=0;begin;x=s.gsub(/a/){n+=1;n==1 ? first : second};p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    '[[195, 169, 195, 169, 195, 169, 195, 169], #<Encoding:UTF-8>]\n3\n[97, 97, 195, 169, 97]\n#<Encoding:UTF-8>\n"a"\n',
+  ],
+  [
+    'class Box;def initialize(s);@s=s;end;def to_s;puts :converted;@s;end;end;first=String.new("é",encoding:"UTF-8");second=String.new("é",encoding:"UTF-8");s="aaa";n=0;begin;x=s.gsub(/a/,Hash.new{|h,k|n+=1;n==1 ? first : second});p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    '[[195, 169, 195, 169, 195, 169], #<Encoding:UTF-8>]\n3\n[97, 97, 97]\n#<Encoding:UTF-8>\n"a"\n',
+  ],
+  [
+    'class Box;def initialize(s);@s=s;end;def to_s;puts :converted;@s;end;end;first=String.new("é",encoding:"UTF-8");second=String.new("é",encoding:"UTF-8");s="aéaa";n=0;begin;x=s.gsub(/a/,Hash.new{|h,k|n+=1;n==1 ? first : second});p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    '[[195, 169, 195, 169, 195, 169, 195, 169], #<Encoding:UTF-8>]\n3\n[97, 195, 169, 97, 97]\n#<Encoding:UTF-8>\n"a"\n',
+  ],
+  [
+    'class Box;def initialize(s);@s=s;end;def to_s;puts :converted;@s;end;end;first=String.new("é",encoding:"UTF-8");second=String.new("é",encoding:"UTF-8");s="aaéa";n=0;begin;x=s.gsub(/a/,Hash.new{|h,k|n+=1;n==1 ? first : second});p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    '[[195, 169, 195, 169, 195, 169, 195, 169], #<Encoding:UTF-8>]\n3\n[97, 97, 195, 169, 97]\n#<Encoding:UTF-8>\n"a"\n',
+  ],
+  [
+    'class Box;def initialize(s);@s=s;end;def to_s;puts :converted;@s;end;end;first=String.new("é",encoding:"UTF-8");second=String.new("é",encoding:"UTF-8");s="aaa";n=0;begin;x=s.gsub(/a/,Hash.new{|h,k|n+=1;Box.new(n==1 ? first : second)});p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'converted\nconverted\nconverted\n[[195, 169, 195, 169, 195, 169], #<Encoding:UTF-8>]\n3\n[97, 97, 97]\n#<Encoding:UTF-8>\n"a"\n',
+  ],
+  [
+    'class Box;def initialize(s);@s=s;end;def to_s;puts :converted;@s;end;end;first=String.new("é",encoding:"UTF-8");second=String.new("é",encoding:"UTF-8");s="aéaa";n=0;begin;x=s.gsub(/a/,Hash.new{|h,k|n+=1;Box.new(n==1 ? first : second)});p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'converted\nconverted\nconverted\n[[195, 169, 195, 169, 195, 169, 195, 169], #<Encoding:UTF-8>]\n3\n[97, 195, 169, 97, 97]\n#<Encoding:UTF-8>\n"a"\n',
+  ],
+  [
+    'class Box;def initialize(s);@s=s;end;def to_s;puts :converted;@s;end;end;first=String.new("é",encoding:"UTF-8");second=String.new("é",encoding:"UTF-8");s="aaéa";n=0;begin;x=s.gsub(/a/,Hash.new{|h,k|n+=1;Box.new(n==1 ? first : second)});p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'converted\nconverted\nconverted\n[[195, 169, 195, 169, 195, 169, 195, 169], #<Encoding:UTF-8>]\n3\n[97, 97, 195, 169, 97]\n#<Encoding:UTF-8>\n"a"\n',
+  ],
+  [
+    'class Box;def initialize(s);@s=s;end;def to_s;puts :converted;@s;end;end;first=String.new("é",encoding:"UTF-8");second=String.new("é",encoding:"UTF-8");s="aaa";n=0;begin;x=s.gsub!(/a/){n+=1;n==1 ? first : second};p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    '[[195, 169, 195, 169, 195, 169], #<Encoding:UTF-8>]\n3\n[195, 169, 195, 169, 195, 169]\n#<Encoding:UTF-8>\n"a"\n',
+  ],
+  [
+    'class Box;def initialize(s);@s=s;end;def to_s;puts :converted;@s;end;end;first=String.new("é",encoding:"UTF-8");second=String.new("é",encoding:"UTF-8");s="aéaa";n=0;begin;x=s.gsub!(/a/){n+=1;n==1 ? first : second};p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    '[[195, 169, 195, 169, 195, 169, 195, 169], #<Encoding:UTF-8>]\n3\n[195, 169, 195, 169, 195, 169, 195, 169]\n#<Encoding:UTF-8>\n"a"\n',
+  ],
+  [
+    'class Box;def initialize(s);@s=s;end;def to_s;puts :converted;@s;end;end;first=String.new("é",encoding:"UTF-8");second=String.new("é",encoding:"UTF-8");s="aaéa";n=0;begin;x=s.gsub!(/a/){n+=1;n==1 ? first : second};p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    '[[195, 169, 195, 169, 195, 169, 195, 169], #<Encoding:UTF-8>]\n3\n[195, 169, 195, 169, 195, 169, 195, 169]\n#<Encoding:UTF-8>\n"a"\n',
+  ],
+  [
+    'class Box;def initialize(s);@s=s;end;def to_s;puts :converted;@s;end;end;first=String.new("é",encoding:"UTF-8");second=String.new("é",encoding:"UTF-8");s="aaa";n=0;begin;x=s.gsub!(/a/,Hash.new{|h,k|n+=1;n==1 ? first : second});p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    '[[195, 169, 195, 169, 195, 169], #<Encoding:UTF-8>]\n3\n[195, 169, 195, 169, 195, 169]\n#<Encoding:UTF-8>\n"a"\n',
+  ],
+  [
+    'class Box;def initialize(s);@s=s;end;def to_s;puts :converted;@s;end;end;first=String.new("é",encoding:"UTF-8");second=String.new("é",encoding:"UTF-8");s="aéaa";n=0;begin;x=s.gsub!(/a/,Hash.new{|h,k|n+=1;n==1 ? first : second});p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    '[[195, 169, 195, 169, 195, 169, 195, 169], #<Encoding:UTF-8>]\n3\n[195, 169, 195, 169, 195, 169, 195, 169]\n#<Encoding:UTF-8>\n"a"\n',
+  ],
+  [
+    'class Box;def initialize(s);@s=s;end;def to_s;puts :converted;@s;end;end;first=String.new("é",encoding:"UTF-8");second=String.new("é",encoding:"UTF-8");s="aaéa";n=0;begin;x=s.gsub!(/a/,Hash.new{|h,k|n+=1;n==1 ? first : second});p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    '[[195, 169, 195, 169, 195, 169, 195, 169], #<Encoding:UTF-8>]\n3\n[195, 169, 195, 169, 195, 169, 195, 169]\n#<Encoding:UTF-8>\n"a"\n',
+  ],
+  [
+    'class Box;def initialize(s);@s=s;end;def to_s;puts :converted;@s;end;end;first=String.new("é",encoding:"UTF-8");second=String.new("é",encoding:"UTF-8");s="aaa";n=0;begin;x=s.gsub!(/a/,Hash.new{|h,k|n+=1;Box.new(n==1 ? first : second)});p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'converted\nconverted\nconverted\n[[195, 169, 195, 169, 195, 169], #<Encoding:UTF-8>]\n3\n[195, 169, 195, 169, 195, 169]\n#<Encoding:UTF-8>\n"a"\n',
+  ],
+  [
+    'class Box;def initialize(s);@s=s;end;def to_s;puts :converted;@s;end;end;first=String.new("é",encoding:"UTF-8");second=String.new("é",encoding:"UTF-8");s="aéaa";n=0;begin;x=s.gsub!(/a/,Hash.new{|h,k|n+=1;Box.new(n==1 ? first : second)});p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'converted\nconverted\nconverted\n[[195, 169, 195, 169, 195, 169, 195, 169], #<Encoding:UTF-8>]\n3\n[195, 169, 195, 169, 195, 169, 195, 169]\n#<Encoding:UTF-8>\n"a"\n',
+  ],
+  [
+    'class Box;def initialize(s);@s=s;end;def to_s;puts :converted;@s;end;end;first=String.new("é",encoding:"UTF-8");second=String.new("é",encoding:"UTF-8");s="aaéa";n=0;begin;x=s.gsub!(/a/,Hash.new{|h,k|n+=1;Box.new(n==1 ? first : second)});p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'converted\nconverted\nconverted\n[[195, 169, 195, 169, 195, 169, 195, 169], #<Encoding:UTF-8>]\n3\n[195, 169, 195, 169, 195, 169, 195, 169]\n#<Encoding:UTF-8>\n"a"\n',
+  ],
+  [
+    'class Box;def initialize(s);@s=s;end;def to_s;puts :converted;@s;end;end;first=String.new("é",encoding:"UTF-8");second=String.new("é",encoding:"ASCII-8BIT");s="aaa";n=0;begin;x=s.gsub(/a/){n+=1;n==1 ? first : second};p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'Encoding::CompatibilityError\n"incompatible character encodings: UTF-8 and BINARY (ASCII-8BIT)"\n2\n[97, 97, 97]\n#<Encoding:UTF-8>\n"a"\n',
+  ],
+  [
+    'class Box;def initialize(s);@s=s;end;def to_s;puts :converted;@s;end;end;first=String.new("é",encoding:"UTF-8");second=String.new("é",encoding:"ASCII-8BIT");s="aéaa";n=0;begin;x=s.gsub(/a/){n+=1;n==1 ? first : second};p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'Encoding::CompatibilityError\n"incompatible character encodings: UTF-8 and BINARY (ASCII-8BIT)"\n2\n[97, 195, 169, 97, 97]\n#<Encoding:UTF-8>\n"a"\n',
+  ],
+  [
+    'class Box;def initialize(s);@s=s;end;def to_s;puts :converted;@s;end;end;first=String.new("é",encoding:"UTF-8");second=String.new("é",encoding:"ASCII-8BIT");s="aaéa";n=0;begin;x=s.gsub(/a/){n+=1;n==1 ? first : second};p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'Encoding::CompatibilityError\n"incompatible character encodings: UTF-8 and BINARY (ASCII-8BIT)"\n2\n[97, 97, 195, 169, 97]\n#<Encoding:UTF-8>\n"a"\n',
+  ],
+  [
+    'class Box;def initialize(s);@s=s;end;def to_s;puts :converted;@s;end;end;first=String.new("é",encoding:"UTF-8");second=String.new("é",encoding:"ASCII-8BIT");s="aaa";n=0;begin;x=s.gsub(/a/,Hash.new{|h,k|n+=1;n==1 ? first : second});p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'Encoding::CompatibilityError\n"incompatible character encodings: UTF-8 and BINARY (ASCII-8BIT)"\n2\n[97, 97, 97]\n#<Encoding:UTF-8>\n"a"\n',
+  ],
+  [
+    'class Box;def initialize(s);@s=s;end;def to_s;puts :converted;@s;end;end;first=String.new("é",encoding:"UTF-8");second=String.new("é",encoding:"ASCII-8BIT");s="aéaa";n=0;begin;x=s.gsub(/a/,Hash.new{|h,k|n+=1;n==1 ? first : second});p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'Encoding::CompatibilityError\n"incompatible character encodings: UTF-8 and BINARY (ASCII-8BIT)"\n2\n[97, 195, 169, 97, 97]\n#<Encoding:UTF-8>\n"a"\n',
+  ],
+  [
+    'class Box;def initialize(s);@s=s;end;def to_s;puts :converted;@s;end;end;first=String.new("é",encoding:"UTF-8");second=String.new("é",encoding:"ASCII-8BIT");s="aaéa";n=0;begin;x=s.gsub(/a/,Hash.new{|h,k|n+=1;n==1 ? first : second});p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'Encoding::CompatibilityError\n"incompatible character encodings: UTF-8 and BINARY (ASCII-8BIT)"\n2\n[97, 97, 195, 169, 97]\n#<Encoding:UTF-8>\n"a"\n',
+  ],
+  [
+    'class Box;def initialize(s);@s=s;end;def to_s;puts :converted;@s;end;end;first=String.new("é",encoding:"UTF-8");second=String.new("é",encoding:"ASCII-8BIT");s="aaa";n=0;begin;x=s.gsub(/a/,Hash.new{|h,k|n+=1;Box.new(n==1 ? first : second)});p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'converted\nconverted\nEncoding::CompatibilityError\n"incompatible character encodings: UTF-8 and BINARY (ASCII-8BIT)"\n2\n[97, 97, 97]\n#<Encoding:UTF-8>\n"a"\n',
+  ],
+  [
+    'class Box;def initialize(s);@s=s;end;def to_s;puts :converted;@s;end;end;first=String.new("é",encoding:"UTF-8");second=String.new("é",encoding:"ASCII-8BIT");s="aéaa";n=0;begin;x=s.gsub(/a/,Hash.new{|h,k|n+=1;Box.new(n==1 ? first : second)});p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'converted\nconverted\nEncoding::CompatibilityError\n"incompatible character encodings: UTF-8 and BINARY (ASCII-8BIT)"\n2\n[97, 195, 169, 97, 97]\n#<Encoding:UTF-8>\n"a"\n',
+  ],
+  [
+    'class Box;def initialize(s);@s=s;end;def to_s;puts :converted;@s;end;end;first=String.new("é",encoding:"UTF-8");second=String.new("é",encoding:"ASCII-8BIT");s="aaéa";n=0;begin;x=s.gsub(/a/,Hash.new{|h,k|n+=1;Box.new(n==1 ? first : second)});p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'converted\nconverted\nEncoding::CompatibilityError\n"incompatible character encodings: UTF-8 and BINARY (ASCII-8BIT)"\n2\n[97, 97, 195, 169, 97]\n#<Encoding:UTF-8>\n"a"\n',
+  ],
+  [
+    'class Box;def initialize(s);@s=s;end;def to_s;puts :converted;@s;end;end;first=String.new("é",encoding:"UTF-8");second=String.new("é",encoding:"ASCII-8BIT");s="aaa";n=0;begin;x=s.gsub!(/a/){n+=1;n==1 ? first : second};p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'Encoding::CompatibilityError\n"incompatible character encodings: UTF-8 and BINARY (ASCII-8BIT)"\n2\n[97, 97, 97]\n#<Encoding:UTF-8>\n"a"\n',
+  ],
+  [
+    'class Box;def initialize(s);@s=s;end;def to_s;puts :converted;@s;end;end;first=String.new("é",encoding:"UTF-8");second=String.new("é",encoding:"ASCII-8BIT");s="aéaa";n=0;begin;x=s.gsub!(/a/){n+=1;n==1 ? first : second};p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'Encoding::CompatibilityError\n"incompatible character encodings: UTF-8 and BINARY (ASCII-8BIT)"\n2\n[97, 195, 169, 97, 97]\n#<Encoding:UTF-8>\n"a"\n',
+  ],
+  [
+    'class Box;def initialize(s);@s=s;end;def to_s;puts :converted;@s;end;end;first=String.new("é",encoding:"UTF-8");second=String.new("é",encoding:"ASCII-8BIT");s="aaéa";n=0;begin;x=s.gsub!(/a/){n+=1;n==1 ? first : second};p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'Encoding::CompatibilityError\n"incompatible character encodings: UTF-8 and BINARY (ASCII-8BIT)"\n2\n[97, 97, 195, 169, 97]\n#<Encoding:UTF-8>\n"a"\n',
+  ],
+  [
+    'class Box;def initialize(s);@s=s;end;def to_s;puts :converted;@s;end;end;first=String.new("é",encoding:"UTF-8");second=String.new("é",encoding:"ASCII-8BIT");s="aaa";n=0;begin;x=s.gsub!(/a/,Hash.new{|h,k|n+=1;n==1 ? first : second});p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'Encoding::CompatibilityError\n"incompatible character encodings: UTF-8 and BINARY (ASCII-8BIT)"\n2\n[97, 97, 97]\n#<Encoding:UTF-8>\n"a"\n',
+  ],
+  [
+    'class Box;def initialize(s);@s=s;end;def to_s;puts :converted;@s;end;end;first=String.new("é",encoding:"UTF-8");second=String.new("é",encoding:"ASCII-8BIT");s="aéaa";n=0;begin;x=s.gsub!(/a/,Hash.new{|h,k|n+=1;n==1 ? first : second});p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'Encoding::CompatibilityError\n"incompatible character encodings: UTF-8 and BINARY (ASCII-8BIT)"\n2\n[97, 195, 169, 97, 97]\n#<Encoding:UTF-8>\n"a"\n',
+  ],
+  [
+    'class Box;def initialize(s);@s=s;end;def to_s;puts :converted;@s;end;end;first=String.new("é",encoding:"UTF-8");second=String.new("é",encoding:"ASCII-8BIT");s="aaéa";n=0;begin;x=s.gsub!(/a/,Hash.new{|h,k|n+=1;n==1 ? first : second});p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'Encoding::CompatibilityError\n"incompatible character encodings: UTF-8 and BINARY (ASCII-8BIT)"\n2\n[97, 97, 195, 169, 97]\n#<Encoding:UTF-8>\n"a"\n',
+  ],
+  [
+    'class Box;def initialize(s);@s=s;end;def to_s;puts :converted;@s;end;end;first=String.new("é",encoding:"UTF-8");second=String.new("é",encoding:"ASCII-8BIT");s="aaa";n=0;begin;x=s.gsub!(/a/,Hash.new{|h,k|n+=1;Box.new(n==1 ? first : second)});p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'converted\nconverted\nEncoding::CompatibilityError\n"incompatible character encodings: UTF-8 and BINARY (ASCII-8BIT)"\n2\n[97, 97, 97]\n#<Encoding:UTF-8>\n"a"\n',
+  ],
+  [
+    'class Box;def initialize(s);@s=s;end;def to_s;puts :converted;@s;end;end;first=String.new("é",encoding:"UTF-8");second=String.new("é",encoding:"ASCII-8BIT");s="aéaa";n=0;begin;x=s.gsub!(/a/,Hash.new{|h,k|n+=1;Box.new(n==1 ? first : second)});p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'converted\nconverted\nEncoding::CompatibilityError\n"incompatible character encodings: UTF-8 and BINARY (ASCII-8BIT)"\n2\n[97, 195, 169, 97, 97]\n#<Encoding:UTF-8>\n"a"\n',
+  ],
+  [
+    'class Box;def initialize(s);@s=s;end;def to_s;puts :converted;@s;end;end;first=String.new("é",encoding:"UTF-8");second=String.new("é",encoding:"ASCII-8BIT");s="aaéa";n=0;begin;x=s.gsub!(/a/,Hash.new{|h,k|n+=1;Box.new(n==1 ? first : second)});p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'converted\nconverted\nEncoding::CompatibilityError\n"incompatible character encodings: UTF-8 and BINARY (ASCII-8BIT)"\n2\n[97, 97, 195, 169, 97]\n#<Encoding:UTF-8>\n"a"\n',
+  ],
+  [
+    'class Box;def initialize(s);@s=s;end;def to_s;puts :converted;@s;end;end;first=String.new("é",encoding:"ASCII-8BIT");second=String.new("é",encoding:"US-ASCII");s="aaa";n=0;begin;x=s.gsub(/a/){n+=1;n==1 ? first : second};p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'Encoding::CompatibilityError\n"incompatible character encodings: BINARY (ASCII-8BIT) and US-ASCII"\n2\n[97, 97, 97]\n#<Encoding:UTF-8>\n"a"\n',
+  ],
+  [
+    'class Box;def initialize(s);@s=s;end;def to_s;puts :converted;@s;end;end;first=String.new("é",encoding:"ASCII-8BIT");second=String.new("é",encoding:"US-ASCII");s="aéaa";n=0;begin;x=s.gsub(/a/){n+=1;n==1 ? first : second};p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'Encoding::CompatibilityError\n"incompatible character encodings: BINARY (ASCII-8BIT) and UTF-8"\n2\n[97, 195, 169, 97, 97]\n#<Encoding:UTF-8>\n"a"\n',
+  ],
+  [
+    'class Box;def initialize(s);@s=s;end;def to_s;puts :converted;@s;end;end;first=String.new("é",encoding:"ASCII-8BIT");second=String.new("é",encoding:"US-ASCII");s="aaéa";n=0;begin;x=s.gsub(/a/){n+=1;n==1 ? first : second};p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'Encoding::CompatibilityError\n"incompatible character encodings: BINARY (ASCII-8BIT) and US-ASCII"\n2\n[97, 97, 195, 169, 97]\n#<Encoding:UTF-8>\n"a"\n',
+  ],
+  [
+    'class Box;def initialize(s);@s=s;end;def to_s;puts :converted;@s;end;end;first=String.new("é",encoding:"ASCII-8BIT");second=String.new("é",encoding:"US-ASCII");s="aaa";n=0;begin;x=s.gsub(/a/,Hash.new{|h,k|n+=1;n==1 ? first : second});p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'Encoding::CompatibilityError\n"incompatible character encodings: BINARY (ASCII-8BIT) and US-ASCII"\n2\n[97, 97, 97]\n#<Encoding:UTF-8>\n"a"\n',
+  ],
+  [
+    'class Box;def initialize(s);@s=s;end;def to_s;puts :converted;@s;end;end;first=String.new("é",encoding:"ASCII-8BIT");second=String.new("é",encoding:"US-ASCII");s="aéaa";n=0;begin;x=s.gsub(/a/,Hash.new{|h,k|n+=1;n==1 ? first : second});p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'Encoding::CompatibilityError\n"incompatible character encodings: BINARY (ASCII-8BIT) and UTF-8"\n2\n[97, 195, 169, 97, 97]\n#<Encoding:UTF-8>\n"a"\n',
+  ],
+  [
+    'class Box;def initialize(s);@s=s;end;def to_s;puts :converted;@s;end;end;first=String.new("é",encoding:"ASCII-8BIT");second=String.new("é",encoding:"US-ASCII");s="aaéa";n=0;begin;x=s.gsub(/a/,Hash.new{|h,k|n+=1;n==1 ? first : second});p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'Encoding::CompatibilityError\n"incompatible character encodings: BINARY (ASCII-8BIT) and US-ASCII"\n2\n[97, 97, 195, 169, 97]\n#<Encoding:UTF-8>\n"a"\n',
+  ],
+  [
+    'class Box;def initialize(s);@s=s;end;def to_s;puts :converted;@s;end;end;first=String.new("é",encoding:"ASCII-8BIT");second=String.new("é",encoding:"US-ASCII");s="aaa";n=0;begin;x=s.gsub(/a/,Hash.new{|h,k|n+=1;Box.new(n==1 ? first : second)});p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'converted\nconverted\nEncoding::CompatibilityError\n"incompatible character encodings: BINARY (ASCII-8BIT) and US-ASCII"\n2\n[97, 97, 97]\n#<Encoding:UTF-8>\n"a"\n',
+  ],
+  [
+    'class Box;def initialize(s);@s=s;end;def to_s;puts :converted;@s;end;end;first=String.new("é",encoding:"ASCII-8BIT");second=String.new("é",encoding:"US-ASCII");s="aéaa";n=0;begin;x=s.gsub(/a/,Hash.new{|h,k|n+=1;Box.new(n==1 ? first : second)});p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'converted\nconverted\nEncoding::CompatibilityError\n"incompatible character encodings: BINARY (ASCII-8BIT) and UTF-8"\n2\n[97, 195, 169, 97, 97]\n#<Encoding:UTF-8>\n"a"\n',
+  ],
+  [
+    'class Box;def initialize(s);@s=s;end;def to_s;puts :converted;@s;end;end;first=String.new("é",encoding:"ASCII-8BIT");second=String.new("é",encoding:"US-ASCII");s="aaéa";n=0;begin;x=s.gsub(/a/,Hash.new{|h,k|n+=1;Box.new(n==1 ? first : second)});p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'converted\nconverted\nEncoding::CompatibilityError\n"incompatible character encodings: BINARY (ASCII-8BIT) and US-ASCII"\n2\n[97, 97, 195, 169, 97]\n#<Encoding:UTF-8>\n"a"\n',
+  ],
+  [
+    'class Box;def initialize(s);@s=s;end;def to_s;puts :converted;@s;end;end;first=String.new("é",encoding:"ASCII-8BIT");second=String.new("é",encoding:"US-ASCII");s="aaa";n=0;begin;x=s.gsub!(/a/){n+=1;n==1 ? first : second};p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'Encoding::CompatibilityError\n"incompatible character encodings: BINARY (ASCII-8BIT) and US-ASCII"\n2\n[97, 97, 97]\n#<Encoding:UTF-8>\n"a"\n',
+  ],
+  [
+    'class Box;def initialize(s);@s=s;end;def to_s;puts :converted;@s;end;end;first=String.new("é",encoding:"ASCII-8BIT");second=String.new("é",encoding:"US-ASCII");s="aéaa";n=0;begin;x=s.gsub!(/a/){n+=1;n==1 ? first : second};p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'Encoding::CompatibilityError\n"incompatible character encodings: BINARY (ASCII-8BIT) and UTF-8"\n2\n[97, 195, 169, 97, 97]\n#<Encoding:UTF-8>\n"a"\n',
+  ],
+  [
+    'class Box;def initialize(s);@s=s;end;def to_s;puts :converted;@s;end;end;first=String.new("é",encoding:"ASCII-8BIT");second=String.new("é",encoding:"US-ASCII");s="aaéa";n=0;begin;x=s.gsub!(/a/){n+=1;n==1 ? first : second};p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'Encoding::CompatibilityError\n"incompatible character encodings: BINARY (ASCII-8BIT) and US-ASCII"\n2\n[97, 97, 195, 169, 97]\n#<Encoding:UTF-8>\n"a"\n',
+  ],
+  [
+    'class Box;def initialize(s);@s=s;end;def to_s;puts :converted;@s;end;end;first=String.new("é",encoding:"ASCII-8BIT");second=String.new("é",encoding:"US-ASCII");s="aaa";n=0;begin;x=s.gsub!(/a/,Hash.new{|h,k|n+=1;n==1 ? first : second});p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'Encoding::CompatibilityError\n"incompatible character encodings: BINARY (ASCII-8BIT) and US-ASCII"\n2\n[97, 97, 97]\n#<Encoding:UTF-8>\n"a"\n',
+  ],
+  [
+    'class Box;def initialize(s);@s=s;end;def to_s;puts :converted;@s;end;end;first=String.new("é",encoding:"ASCII-8BIT");second=String.new("é",encoding:"US-ASCII");s="aéaa";n=0;begin;x=s.gsub!(/a/,Hash.new{|h,k|n+=1;n==1 ? first : second});p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'Encoding::CompatibilityError\n"incompatible character encodings: BINARY (ASCII-8BIT) and UTF-8"\n2\n[97, 195, 169, 97, 97]\n#<Encoding:UTF-8>\n"a"\n',
+  ],
+  [
+    'class Box;def initialize(s);@s=s;end;def to_s;puts :converted;@s;end;end;first=String.new("é",encoding:"ASCII-8BIT");second=String.new("é",encoding:"US-ASCII");s="aaéa";n=0;begin;x=s.gsub!(/a/,Hash.new{|h,k|n+=1;n==1 ? first : second});p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'Encoding::CompatibilityError\n"incompatible character encodings: BINARY (ASCII-8BIT) and US-ASCII"\n2\n[97, 97, 195, 169, 97]\n#<Encoding:UTF-8>\n"a"\n',
+  ],
+  [
+    'class Box;def initialize(s);@s=s;end;def to_s;puts :converted;@s;end;end;first=String.new("é",encoding:"ASCII-8BIT");second=String.new("é",encoding:"US-ASCII");s="aaa";n=0;begin;x=s.gsub!(/a/,Hash.new{|h,k|n+=1;Box.new(n==1 ? first : second)});p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'converted\nconverted\nEncoding::CompatibilityError\n"incompatible character encodings: BINARY (ASCII-8BIT) and US-ASCII"\n2\n[97, 97, 97]\n#<Encoding:UTF-8>\n"a"\n',
+  ],
+  [
+    'class Box;def initialize(s);@s=s;end;def to_s;puts :converted;@s;end;end;first=String.new("é",encoding:"ASCII-8BIT");second=String.new("é",encoding:"US-ASCII");s="aéaa";n=0;begin;x=s.gsub!(/a/,Hash.new{|h,k|n+=1;Box.new(n==1 ? first : second)});p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'converted\nconverted\nEncoding::CompatibilityError\n"incompatible character encodings: BINARY (ASCII-8BIT) and UTF-8"\n2\n[97, 195, 169, 97, 97]\n#<Encoding:UTF-8>\n"a"\n',
+  ],
+  [
+    'class Box;def initialize(s);@s=s;end;def to_s;puts :converted;@s;end;end;first=String.new("é",encoding:"ASCII-8BIT");second=String.new("é",encoding:"US-ASCII");s="aaéa";n=0;begin;x=s.gsub!(/a/,Hash.new{|h,k|n+=1;Box.new(n==1 ? first : second)});p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'converted\nconverted\nEncoding::CompatibilityError\n"incompatible character encodings: BINARY (ASCII-8BIT) and US-ASCII"\n2\n[97, 97, 195, 169, 97]\n#<Encoding:UTF-8>\n"a"\n',
+  ],
+  [
+    'class Box;def initialize(s);@s=s;end;def to_s;puts :converted;@s;end;end;first=String.new("é",encoding:"ASCII-8BIT");second=String.new("é",encoding:"UTF-8");s="aaa";n=0;begin;x=s.gsub(/a/){n+=1;n==1 ? first : second};p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'Encoding::CompatibilityError\n"incompatible character encodings: BINARY (ASCII-8BIT) and UTF-8"\n2\n[97, 97, 97]\n#<Encoding:UTF-8>\n"a"\n',
+  ],
+  [
+    'class Box;def initialize(s);@s=s;end;def to_s;puts :converted;@s;end;end;first=String.new("é",encoding:"ASCII-8BIT");second=String.new("é",encoding:"UTF-8");s="aéaa";n=0;begin;x=s.gsub(/a/){n+=1;n==1 ? first : second};p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'Encoding::CompatibilityError\n"incompatible character encodings: BINARY (ASCII-8BIT) and UTF-8"\n2\n[97, 195, 169, 97, 97]\n#<Encoding:UTF-8>\n"a"\n',
+  ],
+  [
+    'class Box;def initialize(s);@s=s;end;def to_s;puts :converted;@s;end;end;first=String.new("é",encoding:"ASCII-8BIT");second=String.new("é",encoding:"UTF-8");s="aaéa";n=0;begin;x=s.gsub(/a/){n+=1;n==1 ? first : second};p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'Encoding::CompatibilityError\n"incompatible character encodings: BINARY (ASCII-8BIT) and UTF-8"\n2\n[97, 97, 195, 169, 97]\n#<Encoding:UTF-8>\n"a"\n',
+  ],
+  [
+    'class Box;def initialize(s);@s=s;end;def to_s;puts :converted;@s;end;end;first=String.new("é",encoding:"ASCII-8BIT");second=String.new("é",encoding:"UTF-8");s="aaa";n=0;begin;x=s.gsub(/a/,Hash.new{|h,k|n+=1;n==1 ? first : second});p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'Encoding::CompatibilityError\n"incompatible character encodings: BINARY (ASCII-8BIT) and UTF-8"\n2\n[97, 97, 97]\n#<Encoding:UTF-8>\n"a"\n',
+  ],
+  [
+    'class Box;def initialize(s);@s=s;end;def to_s;puts :converted;@s;end;end;first=String.new("é",encoding:"ASCII-8BIT");second=String.new("é",encoding:"UTF-8");s="aéaa";n=0;begin;x=s.gsub(/a/,Hash.new{|h,k|n+=1;n==1 ? first : second});p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'Encoding::CompatibilityError\n"incompatible character encodings: BINARY (ASCII-8BIT) and UTF-8"\n2\n[97, 195, 169, 97, 97]\n#<Encoding:UTF-8>\n"a"\n',
+  ],
+  [
+    'class Box;def initialize(s);@s=s;end;def to_s;puts :converted;@s;end;end;first=String.new("é",encoding:"ASCII-8BIT");second=String.new("é",encoding:"UTF-8");s="aaéa";n=0;begin;x=s.gsub(/a/,Hash.new{|h,k|n+=1;n==1 ? first : second});p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'Encoding::CompatibilityError\n"incompatible character encodings: BINARY (ASCII-8BIT) and UTF-8"\n2\n[97, 97, 195, 169, 97]\n#<Encoding:UTF-8>\n"a"\n',
+  ],
+  [
+    'class Box;def initialize(s);@s=s;end;def to_s;puts :converted;@s;end;end;first=String.new("é",encoding:"ASCII-8BIT");second=String.new("é",encoding:"UTF-8");s="aaa";n=0;begin;x=s.gsub(/a/,Hash.new{|h,k|n+=1;Box.new(n==1 ? first : second)});p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'converted\nconverted\nEncoding::CompatibilityError\n"incompatible character encodings: BINARY (ASCII-8BIT) and UTF-8"\n2\n[97, 97, 97]\n#<Encoding:UTF-8>\n"a"\n',
+  ],
+  [
+    'class Box;def initialize(s);@s=s;end;def to_s;puts :converted;@s;end;end;first=String.new("é",encoding:"ASCII-8BIT");second=String.new("é",encoding:"UTF-8");s="aéaa";n=0;begin;x=s.gsub(/a/,Hash.new{|h,k|n+=1;Box.new(n==1 ? first : second)});p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'converted\nconverted\nEncoding::CompatibilityError\n"incompatible character encodings: BINARY (ASCII-8BIT) and UTF-8"\n2\n[97, 195, 169, 97, 97]\n#<Encoding:UTF-8>\n"a"\n',
+  ],
+  [
+    'class Box;def initialize(s);@s=s;end;def to_s;puts :converted;@s;end;end;first=String.new("é",encoding:"ASCII-8BIT");second=String.new("é",encoding:"UTF-8");s="aaéa";n=0;begin;x=s.gsub(/a/,Hash.new{|h,k|n+=1;Box.new(n==1 ? first : second)});p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'converted\nconverted\nEncoding::CompatibilityError\n"incompatible character encodings: BINARY (ASCII-8BIT) and UTF-8"\n2\n[97, 97, 195, 169, 97]\n#<Encoding:UTF-8>\n"a"\n',
+  ],
+  [
+    'class Box;def initialize(s);@s=s;end;def to_s;puts :converted;@s;end;end;first=String.new("é",encoding:"ASCII-8BIT");second=String.new("é",encoding:"UTF-8");s="aaa";n=0;begin;x=s.gsub!(/a/){n+=1;n==1 ? first : second};p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'Encoding::CompatibilityError\n"incompatible character encodings: BINARY (ASCII-8BIT) and UTF-8"\n2\n[97, 97, 97]\n#<Encoding:UTF-8>\n"a"\n',
+  ],
+  [
+    'class Box;def initialize(s);@s=s;end;def to_s;puts :converted;@s;end;end;first=String.new("é",encoding:"ASCII-8BIT");second=String.new("é",encoding:"UTF-8");s="aéaa";n=0;begin;x=s.gsub!(/a/){n+=1;n==1 ? first : second};p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'Encoding::CompatibilityError\n"incompatible character encodings: BINARY (ASCII-8BIT) and UTF-8"\n2\n[97, 195, 169, 97, 97]\n#<Encoding:UTF-8>\n"a"\n',
+  ],
+  [
+    'class Box;def initialize(s);@s=s;end;def to_s;puts :converted;@s;end;end;first=String.new("é",encoding:"ASCII-8BIT");second=String.new("é",encoding:"UTF-8");s="aaéa";n=0;begin;x=s.gsub!(/a/){n+=1;n==1 ? first : second};p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'Encoding::CompatibilityError\n"incompatible character encodings: BINARY (ASCII-8BIT) and UTF-8"\n2\n[97, 97, 195, 169, 97]\n#<Encoding:UTF-8>\n"a"\n',
+  ],
+  [
+    'class Box;def initialize(s);@s=s;end;def to_s;puts :converted;@s;end;end;first=String.new("é",encoding:"ASCII-8BIT");second=String.new("é",encoding:"UTF-8");s="aaa";n=0;begin;x=s.gsub!(/a/,Hash.new{|h,k|n+=1;n==1 ? first : second});p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'Encoding::CompatibilityError\n"incompatible character encodings: BINARY (ASCII-8BIT) and UTF-8"\n2\n[97, 97, 97]\n#<Encoding:UTF-8>\n"a"\n',
+  ],
+  [
+    'class Box;def initialize(s);@s=s;end;def to_s;puts :converted;@s;end;end;first=String.new("é",encoding:"ASCII-8BIT");second=String.new("é",encoding:"UTF-8");s="aéaa";n=0;begin;x=s.gsub!(/a/,Hash.new{|h,k|n+=1;n==1 ? first : second});p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'Encoding::CompatibilityError\n"incompatible character encodings: BINARY (ASCII-8BIT) and UTF-8"\n2\n[97, 195, 169, 97, 97]\n#<Encoding:UTF-8>\n"a"\n',
+  ],
+  [
+    'class Box;def initialize(s);@s=s;end;def to_s;puts :converted;@s;end;end;first=String.new("é",encoding:"ASCII-8BIT");second=String.new("é",encoding:"UTF-8");s="aaéa";n=0;begin;x=s.gsub!(/a/,Hash.new{|h,k|n+=1;n==1 ? first : second});p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'Encoding::CompatibilityError\n"incompatible character encodings: BINARY (ASCII-8BIT) and UTF-8"\n2\n[97, 97, 195, 169, 97]\n#<Encoding:UTF-8>\n"a"\n',
+  ],
+  [
+    'class Box;def initialize(s);@s=s;end;def to_s;puts :converted;@s;end;end;first=String.new("é",encoding:"ASCII-8BIT");second=String.new("é",encoding:"UTF-8");s="aaa";n=0;begin;x=s.gsub!(/a/,Hash.new{|h,k|n+=1;Box.new(n==1 ? first : second)});p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'converted\nconverted\nEncoding::CompatibilityError\n"incompatible character encodings: BINARY (ASCII-8BIT) and UTF-8"\n2\n[97, 97, 97]\n#<Encoding:UTF-8>\n"a"\n',
+  ],
+  [
+    'class Box;def initialize(s);@s=s;end;def to_s;puts :converted;@s;end;end;first=String.new("é",encoding:"ASCII-8BIT");second=String.new("é",encoding:"UTF-8");s="aéaa";n=0;begin;x=s.gsub!(/a/,Hash.new{|h,k|n+=1;Box.new(n==1 ? first : second)});p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'converted\nconverted\nEncoding::CompatibilityError\n"incompatible character encodings: BINARY (ASCII-8BIT) and UTF-8"\n2\n[97, 195, 169, 97, 97]\n#<Encoding:UTF-8>\n"a"\n',
+  ],
+  [
+    'class Box;def initialize(s);@s=s;end;def to_s;puts :converted;@s;end;end;first=String.new("é",encoding:"ASCII-8BIT");second=String.new("é",encoding:"UTF-8");s="aaéa";n=0;begin;x=s.gsub!(/a/,Hash.new{|h,k|n+=1;Box.new(n==1 ? first : second)});p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'converted\nconverted\nEncoding::CompatibilityError\n"incompatible character encodings: BINARY (ASCII-8BIT) and UTF-8"\n2\n[97, 97, 195, 169, 97]\n#<Encoding:UTF-8>\n"a"\n',
+  ],
+  [
+    'class Box;def initialize(s);@s=s;end;def to_s;puts :converted;@s;end;end;first=String.new("é",encoding:"ASCII-8BIT");second=String.new("é",encoding:"ASCII-8BIT");s="aaa";n=0;begin;x=s.gsub(/a/){n+=1;n==1 ? first : second};p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    '[[195, 169, 195, 169, 195, 169], #<Encoding:BINARY (ASCII-8BIT)>]\n3\n[97, 97, 97]\n#<Encoding:UTF-8>\n"a"\n',
+  ],
+  [
+    'class Box;def initialize(s);@s=s;end;def to_s;puts :converted;@s;end;end;first=String.new("é",encoding:"ASCII-8BIT");second=String.new("é",encoding:"ASCII-8BIT");s="aéaa";n=0;begin;x=s.gsub(/a/){n+=1;n==1 ? first : second};p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'Encoding::CompatibilityError\n"incompatible character encodings: BINARY (ASCII-8BIT) and UTF-8"\n2\n[97, 195, 169, 97, 97]\n#<Encoding:UTF-8>\n"a"\n',
+  ],
+  [
+    'class Box;def initialize(s);@s=s;end;def to_s;puts :converted;@s;end;end;first=String.new("é",encoding:"ASCII-8BIT");second=String.new("é",encoding:"ASCII-8BIT");s="aaéa";n=0;begin;x=s.gsub(/a/){n+=1;n==1 ? first : second};p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'Encoding::CompatibilityError\n"incompatible character encodings: BINARY (ASCII-8BIT) and UTF-8"\n3\n[97, 97, 195, 169, 97]\n#<Encoding:UTF-8>\n"a"\n',
+  ],
+  [
+    'class Box;def initialize(s);@s=s;end;def to_s;puts :converted;@s;end;end;first=String.new("é",encoding:"ASCII-8BIT");second=String.new("é",encoding:"ASCII-8BIT");s="aaa";n=0;begin;x=s.gsub(/a/,Hash.new{|h,k|n+=1;n==1 ? first : second});p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    '[[195, 169, 195, 169, 195, 169], #<Encoding:BINARY (ASCII-8BIT)>]\n3\n[97, 97, 97]\n#<Encoding:UTF-8>\n"a"\n',
+  ],
+  [
+    'class Box;def initialize(s);@s=s;end;def to_s;puts :converted;@s;end;end;first=String.new("é",encoding:"ASCII-8BIT");second=String.new("é",encoding:"ASCII-8BIT");s="aéaa";n=0;begin;x=s.gsub(/a/,Hash.new{|h,k|n+=1;n==1 ? first : second});p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'Encoding::CompatibilityError\n"incompatible character encodings: BINARY (ASCII-8BIT) and UTF-8"\n2\n[97, 195, 169, 97, 97]\n#<Encoding:UTF-8>\n"a"\n',
+  ],
+  [
+    'class Box;def initialize(s);@s=s;end;def to_s;puts :converted;@s;end;end;first=String.new("é",encoding:"ASCII-8BIT");second=String.new("é",encoding:"ASCII-8BIT");s="aaéa";n=0;begin;x=s.gsub(/a/,Hash.new{|h,k|n+=1;n==1 ? first : second});p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'Encoding::CompatibilityError\n"incompatible character encodings: BINARY (ASCII-8BIT) and UTF-8"\n3\n[97, 97, 195, 169, 97]\n#<Encoding:UTF-8>\n"a"\n',
+  ],
+  [
+    'class Box;def initialize(s);@s=s;end;def to_s;puts :converted;@s;end;end;first=String.new("é",encoding:"ASCII-8BIT");second=String.new("é",encoding:"ASCII-8BIT");s="aaa";n=0;begin;x=s.gsub(/a/,Hash.new{|h,k|n+=1;Box.new(n==1 ? first : second)});p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'converted\nconverted\nconverted\n[[195, 169, 195, 169, 195, 169], #<Encoding:BINARY (ASCII-8BIT)>]\n3\n[97, 97, 97]\n#<Encoding:UTF-8>\n"a"\n',
+  ],
+  [
+    'class Box;def initialize(s);@s=s;end;def to_s;puts :converted;@s;end;end;first=String.new("é",encoding:"ASCII-8BIT");second=String.new("é",encoding:"ASCII-8BIT");s="aéaa";n=0;begin;x=s.gsub(/a/,Hash.new{|h,k|n+=1;Box.new(n==1 ? first : second)});p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'converted\nconverted\nEncoding::CompatibilityError\n"incompatible character encodings: BINARY (ASCII-8BIT) and UTF-8"\n2\n[97, 195, 169, 97, 97]\n#<Encoding:UTF-8>\n"a"\n',
+  ],
+  [
+    'class Box;def initialize(s);@s=s;end;def to_s;puts :converted;@s;end;end;first=String.new("é",encoding:"ASCII-8BIT");second=String.new("é",encoding:"ASCII-8BIT");s="aaéa";n=0;begin;x=s.gsub(/a/,Hash.new{|h,k|n+=1;Box.new(n==1 ? first : second)});p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'converted\nconverted\nconverted\nEncoding::CompatibilityError\n"incompatible character encodings: BINARY (ASCII-8BIT) and UTF-8"\n3\n[97, 97, 195, 169, 97]\n#<Encoding:UTF-8>\n"a"\n',
+  ],
+  [
+    'class Box;def initialize(s);@s=s;end;def to_s;puts :converted;@s;end;end;first=String.new("é",encoding:"ASCII-8BIT");second=String.new("é",encoding:"ASCII-8BIT");s="aaa";n=0;begin;x=s.gsub!(/a/){n+=1;n==1 ? first : second};p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    '[[195, 169, 195, 169, 195, 169], #<Encoding:BINARY (ASCII-8BIT)>]\n3\n[195, 169, 195, 169, 195, 169]\n#<Encoding:BINARY (ASCII-8BIT)>\n"a"\n',
+  ],
+  [
+    'class Box;def initialize(s);@s=s;end;def to_s;puts :converted;@s;end;end;first=String.new("é",encoding:"ASCII-8BIT");second=String.new("é",encoding:"ASCII-8BIT");s="aéaa";n=0;begin;x=s.gsub!(/a/){n+=1;n==1 ? first : second};p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'Encoding::CompatibilityError\n"incompatible character encodings: BINARY (ASCII-8BIT) and UTF-8"\n2\n[97, 195, 169, 97, 97]\n#<Encoding:UTF-8>\n"a"\n',
+  ],
+  [
+    'class Box;def initialize(s);@s=s;end;def to_s;puts :converted;@s;end;end;first=String.new("é",encoding:"ASCII-8BIT");second=String.new("é",encoding:"ASCII-8BIT");s="aaéa";n=0;begin;x=s.gsub!(/a/){n+=1;n==1 ? first : second};p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'Encoding::CompatibilityError\n"incompatible character encodings: BINARY (ASCII-8BIT) and UTF-8"\n3\n[97, 97, 195, 169, 97]\n#<Encoding:UTF-8>\n"a"\n',
+  ],
+  [
+    'class Box;def initialize(s);@s=s;end;def to_s;puts :converted;@s;end;end;first=String.new("é",encoding:"ASCII-8BIT");second=String.new("é",encoding:"ASCII-8BIT");s="aaa";n=0;begin;x=s.gsub!(/a/,Hash.new{|h,k|n+=1;n==1 ? first : second});p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    '[[195, 169, 195, 169, 195, 169], #<Encoding:BINARY (ASCII-8BIT)>]\n3\n[195, 169, 195, 169, 195, 169]\n#<Encoding:BINARY (ASCII-8BIT)>\n"a"\n',
+  ],
+  [
+    'class Box;def initialize(s);@s=s;end;def to_s;puts :converted;@s;end;end;first=String.new("é",encoding:"ASCII-8BIT");second=String.new("é",encoding:"ASCII-8BIT");s="aéaa";n=0;begin;x=s.gsub!(/a/,Hash.new{|h,k|n+=1;n==1 ? first : second});p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'Encoding::CompatibilityError\n"incompatible character encodings: BINARY (ASCII-8BIT) and UTF-8"\n2\n[97, 195, 169, 97, 97]\n#<Encoding:UTF-8>\n"a"\n',
+  ],
+  [
+    'class Box;def initialize(s);@s=s;end;def to_s;puts :converted;@s;end;end;first=String.new("é",encoding:"ASCII-8BIT");second=String.new("é",encoding:"ASCII-8BIT");s="aaéa";n=0;begin;x=s.gsub!(/a/,Hash.new{|h,k|n+=1;n==1 ? first : second});p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'Encoding::CompatibilityError\n"incompatible character encodings: BINARY (ASCII-8BIT) and UTF-8"\n3\n[97, 97, 195, 169, 97]\n#<Encoding:UTF-8>\n"a"\n',
+  ],
+  [
+    'class Box;def initialize(s);@s=s;end;def to_s;puts :converted;@s;end;end;first=String.new("é",encoding:"ASCII-8BIT");second=String.new("é",encoding:"ASCII-8BIT");s="aaa";n=0;begin;x=s.gsub!(/a/,Hash.new{|h,k|n+=1;Box.new(n==1 ? first : second)});p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'converted\nconverted\nconverted\n[[195, 169, 195, 169, 195, 169], #<Encoding:BINARY (ASCII-8BIT)>]\n3\n[195, 169, 195, 169, 195, 169]\n#<Encoding:BINARY (ASCII-8BIT)>\n"a"\n',
+  ],
+  [
+    'class Box;def initialize(s);@s=s;end;def to_s;puts :converted;@s;end;end;first=String.new("é",encoding:"ASCII-8BIT");second=String.new("é",encoding:"ASCII-8BIT");s="aéaa";n=0;begin;x=s.gsub!(/a/,Hash.new{|h,k|n+=1;Box.new(n==1 ? first : second)});p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'converted\nconverted\nEncoding::CompatibilityError\n"incompatible character encodings: BINARY (ASCII-8BIT) and UTF-8"\n2\n[97, 195, 169, 97, 97]\n#<Encoding:UTF-8>\n"a"\n',
+  ],
+  [
+    'class Box;def initialize(s);@s=s;end;def to_s;puts :converted;@s;end;end;first=String.new("é",encoding:"ASCII-8BIT");second=String.new("é",encoding:"ASCII-8BIT");s="aaéa";n=0;begin;x=s.gsub!(/a/,Hash.new{|h,k|n+=1;Box.new(n==1 ? first : second)});p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'converted\nconverted\nconverted\nEncoding::CompatibilityError\n"incompatible character encodings: BINARY (ASCII-8BIT) and UTF-8"\n3\n[97, 97, 195, 169, 97]\n#<Encoding:UTF-8>\n"a"\n',
+  ],
+  [
+    'r=String.new("é",encoding:"US-ASCII");s="aaa";n=0;begin;x=s.gsub(/a/){n+=1;if n==2;r.replace("x");end;r};p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    '[[195, 169, 120, 120], #<Encoding:US-ASCII>]\n3\n[97, 97, 97]\n#<Encoding:UTF-8>\n"a"\n',
+  ],
+  [
+    'r=String.new("é",encoding:"US-ASCII");s="aaa";n=0;begin;x=s.gsub(/a/){n+=1;if n==2;r.replace(String.new("é",encoding:"ASCII-8BIT"));end;r};p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'Encoding::CompatibilityError\n"incompatible character encodings: US-ASCII and BINARY (ASCII-8BIT)"\n2\n[97, 97, 97]\n#<Encoding:UTF-8>\n"a"\n',
+  ],
+  [
+    'r=String.new("é",encoding:"US-ASCII");s="aaa";n=0;begin;x=s.gsub(/a/){n+=1;if n==2;r.clear;end;r};p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    '[[195, 169], #<Encoding:US-ASCII>]\n3\n[97, 97, 97]\n#<Encoding:UTF-8>\n"a"\n',
+  ],
+  [
+    'r=String.new("é",encoding:"US-ASCII");s="aaa";n=0;begin;x=s.gsub!(/a/){n+=1;if n==2;r.replace("x");end;r};p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    '[[195, 169, 120, 120], #<Encoding:US-ASCII>]\n3\n[195, 169, 120, 120]\n#<Encoding:US-ASCII>\n"a"\n',
+  ],
+  [
+    'r=String.new("é",encoding:"US-ASCII");s="aaa";n=0;begin;x=s.gsub!(/a/){n+=1;if n==2;r.replace(String.new("é",encoding:"ASCII-8BIT"));end;r};p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'Encoding::CompatibilityError\n"incompatible character encodings: US-ASCII and BINARY (ASCII-8BIT)"\n2\n[97, 97, 97]\n#<Encoding:UTF-8>\n"a"\n',
+  ],
+  [
+    'r=String.new("é",encoding:"US-ASCII");s="aaa";n=0;begin;x=s.gsub!(/a/){n+=1;if n==2;r.clear;end;r};p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    '[[195, 169], #<Encoding:US-ASCII>]\n3\n[195, 169]\n#<Encoding:US-ASCII>\n"a"\n',
+  ],
+  [
+    'r=String.new("é",encoding:"UTF-8");s="aaa";n=0;begin;x=s.gsub(/a/){n+=1;if n==2;r.replace("x");end;r};p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    '[[195, 169, 120, 120], #<Encoding:UTF-8>]\n3\n[97, 97, 97]\n#<Encoding:UTF-8>\n"a"\n',
+  ],
+  [
+    'r=String.new("é",encoding:"UTF-8");s="aaa";n=0;begin;x=s.gsub(/a/){n+=1;if n==2;r.replace(String.new("é",encoding:"ASCII-8BIT"));end;r};p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'Encoding::CompatibilityError\n"incompatible character encodings: UTF-8 and BINARY (ASCII-8BIT)"\n2\n[97, 97, 97]\n#<Encoding:UTF-8>\n"a"\n',
+  ],
+  [
+    'r=String.new("é",encoding:"UTF-8");s="aaa";n=0;begin;x=s.gsub(/a/){n+=1;if n==2;r.clear;end;r};p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    '[[195, 169], #<Encoding:UTF-8>]\n3\n[97, 97, 97]\n#<Encoding:UTF-8>\n"a"\n',
+  ],
+  [
+    'r=String.new("é",encoding:"UTF-8");s="aaa";n=0;begin;x=s.gsub!(/a/){n+=1;if n==2;r.replace("x");end;r};p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    '[[195, 169, 120, 120], #<Encoding:UTF-8>]\n3\n[195, 169, 120, 120]\n#<Encoding:UTF-8>\n"a"\n',
+  ],
+  [
+    'r=String.new("é",encoding:"UTF-8");s="aaa";n=0;begin;x=s.gsub!(/a/){n+=1;if n==2;r.replace(String.new("é",encoding:"ASCII-8BIT"));end;r};p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'Encoding::CompatibilityError\n"incompatible character encodings: UTF-8 and BINARY (ASCII-8BIT)"\n2\n[97, 97, 97]\n#<Encoding:UTF-8>\n"a"\n',
+  ],
+  [
+    'r=String.new("é",encoding:"UTF-8");s="aaa";n=0;begin;x=s.gsub!(/a/){n+=1;if n==2;r.clear;end;r};p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    '[[195, 169], #<Encoding:UTF-8>]\n3\n[195, 169]\n#<Encoding:UTF-8>\n"a"\n',
+  ],
+  [
+    'r=String.new("é",encoding:"ASCII-8BIT");s="aaa";n=0;begin;x=s.gsub(/a/){n+=1;if n==2;r.replace("x");end;r};p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    '[[195, 169, 120, 120], #<Encoding:BINARY (ASCII-8BIT)>]\n3\n[97, 97, 97]\n#<Encoding:UTF-8>\n"a"\n',
+  ],
+  [
+    'r=String.new("é",encoding:"ASCII-8BIT");s="aaa";n=0;begin;x=s.gsub(/a/){n+=1;if n==2;r.replace(String.new("é",encoding:"ASCII-8BIT"));end;r};p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    '[[195, 169, 195, 169, 195, 169], #<Encoding:BINARY (ASCII-8BIT)>]\n3\n[97, 97, 97]\n#<Encoding:UTF-8>\n"a"\n',
+  ],
+  [
+    'r=String.new("é",encoding:"ASCII-8BIT");s="aaa";n=0;begin;x=s.gsub(/a/){n+=1;if n==2;r.clear;end;r};p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    '[[195, 169], #<Encoding:BINARY (ASCII-8BIT)>]\n3\n[97, 97, 97]\n#<Encoding:UTF-8>\n"a"\n',
+  ],
+  [
+    'r=String.new("é",encoding:"ASCII-8BIT");s="aaa";n=0;begin;x=s.gsub!(/a/){n+=1;if n==2;r.replace("x");end;r};p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    '[[195, 169, 120, 120], #<Encoding:BINARY (ASCII-8BIT)>]\n3\n[195, 169, 120, 120]\n#<Encoding:BINARY (ASCII-8BIT)>\n"a"\n',
+  ],
+  [
+    'r=String.new("é",encoding:"ASCII-8BIT");s="aaa";n=0;begin;x=s.gsub!(/a/){n+=1;if n==2;r.replace(String.new("é",encoding:"ASCII-8BIT"));end;r};p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    '[[195, 169, 195, 169, 195, 169], #<Encoding:BINARY (ASCII-8BIT)>]\n3\n[195, 169, 195, 169, 195, 169]\n#<Encoding:BINARY (ASCII-8BIT)>\n"a"\n',
+  ],
+  [
+    'r=String.new("é",encoding:"ASCII-8BIT");s="aaa";n=0;begin;x=s.gsub!(/a/){n+=1;if n==2;r.clear;end;r};p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    '[[195, 169], #<Encoding:BINARY (ASCII-8BIT)>]\n3\n[195, 169]\n#<Encoding:BINARY (ASCII-8BIT)>\n"a"\n',
+  ],
+  [
+    'first=String.new("é",encoding:"US-ASCII");second=String.new("é",encoding:"US-ASCII");s="éaa";n=0;begin;x=s.gsub(//){n+=1;n==1 ? first : second};p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'Encoding::CompatibilityError\n"incompatible character encodings: US-ASCII and UTF-8"\n1\n[195, 169, 97, 97]\n#<Encoding:UTF-8>\n""\n',
+  ],
+  [
+    'first=String.new("é",encoding:"US-ASCII");second=String.new("é",encoding:"US-ASCII");s="éaa";n=0;begin;x=s.gsub(/(?=a)/){n+=1;n==1 ? first : second};p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'Encoding::CompatibilityError\n"incompatible character encodings: UTF-8 and US-ASCII"\n1\n[195, 169, 97, 97]\n#<Encoding:UTF-8>\n""\n',
+  ],
+  [
+    'first=String.new("é",encoding:"US-ASCII");second=String.new("é",encoding:"US-ASCII");s="aéa";n=0;begin;x=s.gsub(//){n+=1;n==1 ? first : second};p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'Encoding::CompatibilityError\n"incompatible character encodings: US-ASCII and UTF-8"\n2\n[97, 195, 169, 97]\n#<Encoding:UTF-8>\n""\n',
+  ],
+  [
+    'first=String.new("é",encoding:"US-ASCII");second=String.new("é",encoding:"US-ASCII");s="aéa";n=0;begin;x=s.gsub(/(?=a)/){n+=1;n==1 ? first : second};p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'Encoding::CompatibilityError\n"incompatible character encodings: US-ASCII and UTF-8"\n2\n[97, 195, 169, 97]\n#<Encoding:UTF-8>\n""\n',
+  ],
+  [
+    'first=String.new("é",encoding:"US-ASCII");second=String.new("é",encoding:"US-ASCII");s="aaé";n=0;begin;x=s.gsub(//){n+=1;n==1 ? first : second};p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'Encoding::CompatibilityError\n"incompatible character encodings: US-ASCII and UTF-8"\n3\n[97, 97, 195, 169]\n#<Encoding:UTF-8>\n""\n',
+  ],
+  [
+    'first=String.new("é",encoding:"US-ASCII");second=String.new("é",encoding:"US-ASCII");s="aaé";n=0;begin;x=s.gsub(/(?=a)/){n+=1;n==1 ? first : second};p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'Encoding::CompatibilityError\n"incompatible character encodings: US-ASCII and UTF-8"\n2\n[97, 97, 195, 169]\n#<Encoding:UTF-8>\nnil\n',
+  ],
+  [
+    'first=String.new("é",encoding:"US-ASCII");second=String.new("é",encoding:"US-ASCII");s="éaa";n=0;begin;x=s.gsub!(//){n+=1;n==1 ? first : second};p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'Encoding::CompatibilityError\n"incompatible character encodings: US-ASCII and UTF-8"\n1\n[195, 169, 97, 97]\n#<Encoding:UTF-8>\n""\n',
+  ],
+  [
+    'first=String.new("é",encoding:"US-ASCII");second=String.new("é",encoding:"US-ASCII");s="éaa";n=0;begin;x=s.gsub!(/(?=a)/){n+=1;n==1 ? first : second};p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'Encoding::CompatibilityError\n"incompatible character encodings: UTF-8 and US-ASCII"\n1\n[195, 169, 97, 97]\n#<Encoding:UTF-8>\n""\n',
+  ],
+  [
+    'first=String.new("é",encoding:"US-ASCII");second=String.new("é",encoding:"US-ASCII");s="aéa";n=0;begin;x=s.gsub!(//){n+=1;n==1 ? first : second};p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'Encoding::CompatibilityError\n"incompatible character encodings: US-ASCII and UTF-8"\n2\n[97, 195, 169, 97]\n#<Encoding:UTF-8>\n""\n',
+  ],
+  [
+    'first=String.new("é",encoding:"US-ASCII");second=String.new("é",encoding:"US-ASCII");s="aéa";n=0;begin;x=s.gsub!(/(?=a)/){n+=1;n==1 ? first : second};p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'Encoding::CompatibilityError\n"incompatible character encodings: US-ASCII and UTF-8"\n2\n[97, 195, 169, 97]\n#<Encoding:UTF-8>\n""\n',
+  ],
+  [
+    'first=String.new("é",encoding:"US-ASCII");second=String.new("é",encoding:"US-ASCII");s="aaé";n=0;begin;x=s.gsub!(//){n+=1;n==1 ? first : second};p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'Encoding::CompatibilityError\n"incompatible character encodings: US-ASCII and UTF-8"\n3\n[97, 97, 195, 169]\n#<Encoding:UTF-8>\n""\n',
+  ],
+  [
+    'first=String.new("é",encoding:"US-ASCII");second=String.new("é",encoding:"US-ASCII");s="aaé";n=0;begin;x=s.gsub!(/(?=a)/){n+=1;n==1 ? first : second};p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'Encoding::CompatibilityError\n"incompatible character encodings: US-ASCII and UTF-8"\n2\n[97, 97, 195, 169]\n#<Encoding:UTF-8>\nnil\n',
+  ],
+  [
+    'first=String.new("é",encoding:"US-ASCII");second=String.new("é",encoding:"UTF-8");s="éaa";n=0;begin;x=s.gsub(//){n+=1;n==1 ? first : second};p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'Encoding::CompatibilityError\n"incompatible character encodings: US-ASCII and UTF-8"\n1\n[195, 169, 97, 97]\n#<Encoding:UTF-8>\n""\n',
+  ],
+  [
+    'first=String.new("é",encoding:"US-ASCII");second=String.new("é",encoding:"UTF-8");s="éaa";n=0;begin;x=s.gsub(/(?=a)/){n+=1;n==1 ? first : second};p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'Encoding::CompatibilityError\n"incompatible character encodings: UTF-8 and US-ASCII"\n1\n[195, 169, 97, 97]\n#<Encoding:UTF-8>\n""\n',
+  ],
+  [
+    'first=String.new("é",encoding:"US-ASCII");second=String.new("é",encoding:"UTF-8");s="aéa";n=0;begin;x=s.gsub(//){n+=1;n==1 ? first : second};p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'Encoding::CompatibilityError\n"incompatible character encodings: US-ASCII and UTF-8"\n2\n[97, 195, 169, 97]\n#<Encoding:UTF-8>\n""\n',
+  ],
+  [
+    'first=String.new("é",encoding:"US-ASCII");second=String.new("é",encoding:"UTF-8");s="aéa";n=0;begin;x=s.gsub(/(?=a)/){n+=1;n==1 ? first : second};p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'Encoding::CompatibilityError\n"incompatible character encodings: US-ASCII and UTF-8"\n2\n[97, 195, 169, 97]\n#<Encoding:UTF-8>\n""\n',
+  ],
+  [
+    'first=String.new("é",encoding:"US-ASCII");second=String.new("é",encoding:"UTF-8");s="aaé";n=0;begin;x=s.gsub(//){n+=1;n==1 ? first : second};p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'Encoding::CompatibilityError\n"incompatible character encodings: US-ASCII and UTF-8"\n2\n[97, 97, 195, 169]\n#<Encoding:UTF-8>\n""\n',
+  ],
+  [
+    'first=String.new("é",encoding:"US-ASCII");second=String.new("é",encoding:"UTF-8");s="aaé";n=0;begin;x=s.gsub(/(?=a)/){n+=1;n==1 ? first : second};p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'Encoding::CompatibilityError\n"incompatible character encodings: US-ASCII and UTF-8"\n2\n[97, 97, 195, 169]\n#<Encoding:UTF-8>\n""\n',
+  ],
+  [
+    'first=String.new("é",encoding:"US-ASCII");second=String.new("é",encoding:"UTF-8");s="éaa";n=0;begin;x=s.gsub!(//){n+=1;n==1 ? first : second};p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'Encoding::CompatibilityError\n"incompatible character encodings: US-ASCII and UTF-8"\n1\n[195, 169, 97, 97]\n#<Encoding:UTF-8>\n""\n',
+  ],
+  [
+    'first=String.new("é",encoding:"US-ASCII");second=String.new("é",encoding:"UTF-8");s="éaa";n=0;begin;x=s.gsub!(/(?=a)/){n+=1;n==1 ? first : second};p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'Encoding::CompatibilityError\n"incompatible character encodings: UTF-8 and US-ASCII"\n1\n[195, 169, 97, 97]\n#<Encoding:UTF-8>\n""\n',
+  ],
+  [
+    'first=String.new("é",encoding:"US-ASCII");second=String.new("é",encoding:"UTF-8");s="aéa";n=0;begin;x=s.gsub!(//){n+=1;n==1 ? first : second};p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'Encoding::CompatibilityError\n"incompatible character encodings: US-ASCII and UTF-8"\n2\n[97, 195, 169, 97]\n#<Encoding:UTF-8>\n""\n',
+  ],
+  [
+    'first=String.new("é",encoding:"US-ASCII");second=String.new("é",encoding:"UTF-8");s="aéa";n=0;begin;x=s.gsub!(/(?=a)/){n+=1;n==1 ? first : second};p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'Encoding::CompatibilityError\n"incompatible character encodings: US-ASCII and UTF-8"\n2\n[97, 195, 169, 97]\n#<Encoding:UTF-8>\n""\n',
+  ],
+  [
+    'first=String.new("é",encoding:"US-ASCII");second=String.new("é",encoding:"UTF-8");s="aaé";n=0;begin;x=s.gsub!(//){n+=1;n==1 ? first : second};p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'Encoding::CompatibilityError\n"incompatible character encodings: US-ASCII and UTF-8"\n2\n[97, 97, 195, 169]\n#<Encoding:UTF-8>\n""\n',
+  ],
+  [
+    'first=String.new("é",encoding:"US-ASCII");second=String.new("é",encoding:"UTF-8");s="aaé";n=0;begin;x=s.gsub!(/(?=a)/){n+=1;n==1 ? first : second};p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'Encoding::CompatibilityError\n"incompatible character encodings: US-ASCII and UTF-8"\n2\n[97, 97, 195, 169]\n#<Encoding:UTF-8>\n""\n',
+  ],
+  [
+    'first=String.new("é",encoding:"US-ASCII");second=String.new("é",encoding:"ASCII-8BIT");s="éaa";n=0;begin;x=s.gsub(//){n+=1;n==1 ? first : second};p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'Encoding::CompatibilityError\n"incompatible character encodings: US-ASCII and UTF-8"\n1\n[195, 169, 97, 97]\n#<Encoding:UTF-8>\n""\n',
+  ],
+  [
+    'first=String.new("é",encoding:"US-ASCII");second=String.new("é",encoding:"ASCII-8BIT");s="éaa";n=0;begin;x=s.gsub(/(?=a)/){n+=1;n==1 ? first : second};p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'Encoding::CompatibilityError\n"incompatible character encodings: UTF-8 and US-ASCII"\n1\n[195, 169, 97, 97]\n#<Encoding:UTF-8>\n""\n',
+  ],
+  [
+    'first=String.new("é",encoding:"US-ASCII");second=String.new("é",encoding:"ASCII-8BIT");s="aéa";n=0;begin;x=s.gsub(//){n+=1;n==1 ? first : second};p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'Encoding::CompatibilityError\n"incompatible character encodings: US-ASCII and BINARY (ASCII-8BIT)"\n2\n[97, 195, 169, 97]\n#<Encoding:UTF-8>\n""\n',
+  ],
+  [
+    'first=String.new("é",encoding:"US-ASCII");second=String.new("é",encoding:"ASCII-8BIT");s="aéa";n=0;begin;x=s.gsub(/(?=a)/){n+=1;n==1 ? first : second};p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'Encoding::CompatibilityError\n"incompatible character encodings: US-ASCII and UTF-8"\n2\n[97, 195, 169, 97]\n#<Encoding:UTF-8>\n""\n',
+  ],
+  [
+    'first=String.new("é",encoding:"US-ASCII");second=String.new("é",encoding:"ASCII-8BIT");s="aaé";n=0;begin;x=s.gsub(//){n+=1;n==1 ? first : second};p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'Encoding::CompatibilityError\n"incompatible character encodings: US-ASCII and BINARY (ASCII-8BIT)"\n2\n[97, 97, 195, 169]\n#<Encoding:UTF-8>\n""\n',
+  ],
+  [
+    'first=String.new("é",encoding:"US-ASCII");second=String.new("é",encoding:"ASCII-8BIT");s="aaé";n=0;begin;x=s.gsub(/(?=a)/){n+=1;n==1 ? first : second};p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'Encoding::CompatibilityError\n"incompatible character encodings: US-ASCII and BINARY (ASCII-8BIT)"\n2\n[97, 97, 195, 169]\n#<Encoding:UTF-8>\n""\n',
+  ],
+  [
+    'first=String.new("é",encoding:"US-ASCII");second=String.new("é",encoding:"ASCII-8BIT");s="éaa";n=0;begin;x=s.gsub!(//){n+=1;n==1 ? first : second};p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'Encoding::CompatibilityError\n"incompatible character encodings: US-ASCII and UTF-8"\n1\n[195, 169, 97, 97]\n#<Encoding:UTF-8>\n""\n',
+  ],
+  [
+    'first=String.new("é",encoding:"US-ASCII");second=String.new("é",encoding:"ASCII-8BIT");s="éaa";n=0;begin;x=s.gsub!(/(?=a)/){n+=1;n==1 ? first : second};p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'Encoding::CompatibilityError\n"incompatible character encodings: UTF-8 and US-ASCII"\n1\n[195, 169, 97, 97]\n#<Encoding:UTF-8>\n""\n',
+  ],
+  [
+    'first=String.new("é",encoding:"US-ASCII");second=String.new("é",encoding:"ASCII-8BIT");s="aéa";n=0;begin;x=s.gsub!(//){n+=1;n==1 ? first : second};p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'Encoding::CompatibilityError\n"incompatible character encodings: US-ASCII and BINARY (ASCII-8BIT)"\n2\n[97, 195, 169, 97]\n#<Encoding:UTF-8>\n""\n',
+  ],
+  [
+    'first=String.new("é",encoding:"US-ASCII");second=String.new("é",encoding:"ASCII-8BIT");s="aéa";n=0;begin;x=s.gsub!(/(?=a)/){n+=1;n==1 ? first : second};p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'Encoding::CompatibilityError\n"incompatible character encodings: US-ASCII and UTF-8"\n2\n[97, 195, 169, 97]\n#<Encoding:UTF-8>\n""\n',
+  ],
+  [
+    'first=String.new("é",encoding:"US-ASCII");second=String.new("é",encoding:"ASCII-8BIT");s="aaé";n=0;begin;x=s.gsub!(//){n+=1;n==1 ? first : second};p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'Encoding::CompatibilityError\n"incompatible character encodings: US-ASCII and BINARY (ASCII-8BIT)"\n2\n[97, 97, 195, 169]\n#<Encoding:UTF-8>\n""\n',
+  ],
+  [
+    'first=String.new("é",encoding:"US-ASCII");second=String.new("é",encoding:"ASCII-8BIT");s="aaé";n=0;begin;x=s.gsub!(/(?=a)/){n+=1;n==1 ? first : second};p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'Encoding::CompatibilityError\n"incompatible character encodings: US-ASCII and BINARY (ASCII-8BIT)"\n2\n[97, 97, 195, 169]\n#<Encoding:UTF-8>\n""\n',
+  ],
+  [
+    'first=String.new("é",encoding:"UTF-8");second=String.new("é",encoding:"US-ASCII");s="éaa";n=0;begin;x=s.gsub(//){n+=1;n==1 ? first : second};p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'Encoding::CompatibilityError\n"incompatible character encodings: UTF-8 and US-ASCII"\n2\n[195, 169, 97, 97]\n#<Encoding:UTF-8>\n""\n',
+  ],
+  [
+    'first=String.new("é",encoding:"UTF-8");second=String.new("é",encoding:"US-ASCII");s="éaa";n=0;begin;x=s.gsub(/(?=a)/){n+=1;n==1 ? first : second};p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'Encoding::CompatibilityError\n"incompatible character encodings: UTF-8 and US-ASCII"\n2\n[195, 169, 97, 97]\n#<Encoding:UTF-8>\n""\n',
+  ],
+  [
+    'first=String.new("é",encoding:"UTF-8");second=String.new("é",encoding:"US-ASCII");s="aéa";n=0;begin;x=s.gsub(//){n+=1;n==1 ? first : second};p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'Encoding::CompatibilityError\n"incompatible character encodings: UTF-8 and US-ASCII"\n2\n[97, 195, 169, 97]\n#<Encoding:UTF-8>\n""\n',
+  ],
+  [
+    'first=String.new("é",encoding:"UTF-8");second=String.new("é",encoding:"US-ASCII");s="aéa";n=0;begin;x=s.gsub(/(?=a)/){n+=1;n==1 ? first : second};p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'Encoding::CompatibilityError\n"incompatible character encodings: UTF-8 and US-ASCII"\n2\n[97, 195, 169, 97]\n#<Encoding:UTF-8>\n""\n',
+  ],
+  [
+    'first=String.new("é",encoding:"UTF-8");second=String.new("é",encoding:"US-ASCII");s="aaé";n=0;begin;x=s.gsub(//){n+=1;n==1 ? first : second};p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'Encoding::CompatibilityError\n"incompatible character encodings: UTF-8 and US-ASCII"\n2\n[97, 97, 195, 169]\n#<Encoding:UTF-8>\n""\n',
+  ],
+  [
+    'first=String.new("é",encoding:"UTF-8");second=String.new("é",encoding:"US-ASCII");s="aaé";n=0;begin;x=s.gsub(/(?=a)/){n+=1;n==1 ? first : second};p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'Encoding::CompatibilityError\n"incompatible character encodings: UTF-8 and US-ASCII"\n2\n[97, 97, 195, 169]\n#<Encoding:UTF-8>\n""\n',
+  ],
+  [
+    'first=String.new("é",encoding:"UTF-8");second=String.new("é",encoding:"US-ASCII");s="éaa";n=0;begin;x=s.gsub!(//){n+=1;n==1 ? first : second};p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'Encoding::CompatibilityError\n"incompatible character encodings: UTF-8 and US-ASCII"\n2\n[195, 169, 97, 97]\n#<Encoding:UTF-8>\n""\n',
+  ],
+  [
+    'first=String.new("é",encoding:"UTF-8");second=String.new("é",encoding:"US-ASCII");s="éaa";n=0;begin;x=s.gsub!(/(?=a)/){n+=1;n==1 ? first : second};p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'Encoding::CompatibilityError\n"incompatible character encodings: UTF-8 and US-ASCII"\n2\n[195, 169, 97, 97]\n#<Encoding:UTF-8>\n""\n',
+  ],
+  [
+    'first=String.new("é",encoding:"UTF-8");second=String.new("é",encoding:"US-ASCII");s="aéa";n=0;begin;x=s.gsub!(//){n+=1;n==1 ? first : second};p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'Encoding::CompatibilityError\n"incompatible character encodings: UTF-8 and US-ASCII"\n2\n[97, 195, 169, 97]\n#<Encoding:UTF-8>\n""\n',
+  ],
+  [
+    'first=String.new("é",encoding:"UTF-8");second=String.new("é",encoding:"US-ASCII");s="aéa";n=0;begin;x=s.gsub!(/(?=a)/){n+=1;n==1 ? first : second};p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'Encoding::CompatibilityError\n"incompatible character encodings: UTF-8 and US-ASCII"\n2\n[97, 195, 169, 97]\n#<Encoding:UTF-8>\n""\n',
+  ],
+  [
+    'first=String.new("é",encoding:"UTF-8");second=String.new("é",encoding:"US-ASCII");s="aaé";n=0;begin;x=s.gsub!(//){n+=1;n==1 ? first : second};p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'Encoding::CompatibilityError\n"incompatible character encodings: UTF-8 and US-ASCII"\n2\n[97, 97, 195, 169]\n#<Encoding:UTF-8>\n""\n',
+  ],
+  [
+    'first=String.new("é",encoding:"UTF-8");second=String.new("é",encoding:"US-ASCII");s="aaé";n=0;begin;x=s.gsub!(/(?=a)/){n+=1;n==1 ? first : second};p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'Encoding::CompatibilityError\n"incompatible character encodings: UTF-8 and US-ASCII"\n2\n[97, 97, 195, 169]\n#<Encoding:UTF-8>\n""\n',
+  ],
+  [
+    'first=String.new("é",encoding:"UTF-8");second=String.new("é",encoding:"UTF-8");s="éaa";n=0;begin;x=s.gsub(//){n+=1;n==1 ? first : second};p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    '[[195, 169, 195, 169, 195, 169, 97, 195, 169, 97, 195, 169], #<Encoding:UTF-8>]\n4\n[195, 169, 97, 97]\n#<Encoding:UTF-8>\n""\n',
+  ],
+  [
+    'first=String.new("é",encoding:"UTF-8");second=String.new("é",encoding:"UTF-8");s="éaa";n=0;begin;x=s.gsub(/(?=a)/){n+=1;n==1 ? first : second};p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    '[[195, 169, 195, 169, 97, 195, 169, 97], #<Encoding:UTF-8>]\n2\n[195, 169, 97, 97]\n#<Encoding:UTF-8>\n""\n',
+  ],
+  [
+    'first=String.new("é",encoding:"UTF-8");second=String.new("é",encoding:"UTF-8");s="aéa";n=0;begin;x=s.gsub(//){n+=1;n==1 ? first : second};p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    '[[195, 169, 97, 195, 169, 195, 169, 195, 169, 97, 195, 169], #<Encoding:UTF-8>]\n4\n[97, 195, 169, 97]\n#<Encoding:UTF-8>\n""\n',
+  ],
+  [
+    'first=String.new("é",encoding:"UTF-8");second=String.new("é",encoding:"UTF-8");s="aéa";n=0;begin;x=s.gsub(/(?=a)/){n+=1;n==1 ? first : second};p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    '[[195, 169, 97, 195, 169, 195, 169, 97], #<Encoding:UTF-8>]\n2\n[97, 195, 169, 97]\n#<Encoding:UTF-8>\n""\n',
+  ],
+  [
+    'first=String.new("é",encoding:"UTF-8");second=String.new("é",encoding:"UTF-8");s="aaé";n=0;begin;x=s.gsub(//){n+=1;n==1 ? first : second};p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    '[[195, 169, 97, 195, 169, 97, 195, 169, 195, 169, 195, 169], #<Encoding:UTF-8>]\n4\n[97, 97, 195, 169]\n#<Encoding:UTF-8>\n""\n',
+  ],
+  [
+    'first=String.new("é",encoding:"UTF-8");second=String.new("é",encoding:"UTF-8");s="aaé";n=0;begin;x=s.gsub(/(?=a)/){n+=1;n==1 ? first : second};p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    '[[195, 169, 97, 195, 169, 97, 195, 169], #<Encoding:UTF-8>]\n2\n[97, 97, 195, 169]\n#<Encoding:UTF-8>\n""\n',
+  ],
+  [
+    'first=String.new("é",encoding:"UTF-8");second=String.new("é",encoding:"UTF-8");s="éaa";n=0;begin;x=s.gsub!(//){n+=1;n==1 ? first : second};p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    '[[195, 169, 195, 169, 195, 169, 97, 195, 169, 97, 195, 169], #<Encoding:UTF-8>]\n4\n[195, 169, 195, 169, 195, 169, 97, 195, 169, 97, 195, 169]\n#<Encoding:UTF-8>\n""\n',
+  ],
+  [
+    'first=String.new("é",encoding:"UTF-8");second=String.new("é",encoding:"UTF-8");s="éaa";n=0;begin;x=s.gsub!(/(?=a)/){n+=1;n==1 ? first : second};p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    '[[195, 169, 195, 169, 97, 195, 169, 97], #<Encoding:UTF-8>]\n2\n[195, 169, 195, 169, 97, 195, 169, 97]\n#<Encoding:UTF-8>\n""\n',
+  ],
+  [
+    'first=String.new("é",encoding:"UTF-8");second=String.new("é",encoding:"UTF-8");s="aéa";n=0;begin;x=s.gsub!(//){n+=1;n==1 ? first : second};p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    '[[195, 169, 97, 195, 169, 195, 169, 195, 169, 97, 195, 169], #<Encoding:UTF-8>]\n4\n[195, 169, 97, 195, 169, 195, 169, 195, 169, 97, 195, 169]\n#<Encoding:UTF-8>\n""\n',
+  ],
+  [
+    'first=String.new("é",encoding:"UTF-8");second=String.new("é",encoding:"UTF-8");s="aéa";n=0;begin;x=s.gsub!(/(?=a)/){n+=1;n==1 ? first : second};p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    '[[195, 169, 97, 195, 169, 195, 169, 97], #<Encoding:UTF-8>]\n2\n[195, 169, 97, 195, 169, 195, 169, 97]\n#<Encoding:UTF-8>\n""\n',
+  ],
+  [
+    'first=String.new("é",encoding:"UTF-8");second=String.new("é",encoding:"UTF-8");s="aaé";n=0;begin;x=s.gsub!(//){n+=1;n==1 ? first : second};p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    '[[195, 169, 97, 195, 169, 97, 195, 169, 195, 169, 195, 169], #<Encoding:UTF-8>]\n4\n[195, 169, 97, 195, 169, 97, 195, 169, 195, 169, 195, 169]\n#<Encoding:UTF-8>\n""\n',
+  ],
+  [
+    'first=String.new("é",encoding:"UTF-8");second=String.new("é",encoding:"UTF-8");s="aaé";n=0;begin;x=s.gsub!(/(?=a)/){n+=1;n==1 ? first : second};p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    '[[195, 169, 97, 195, 169, 97, 195, 169], #<Encoding:UTF-8>]\n2\n[195, 169, 97, 195, 169, 97, 195, 169]\n#<Encoding:UTF-8>\n""\n',
+  ],
+  [
+    'first=String.new("é",encoding:"UTF-8");second=String.new("é",encoding:"ASCII-8BIT");s="éaa";n=0;begin;x=s.gsub(//){n+=1;n==1 ? first : second};p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'Encoding::CompatibilityError\n"incompatible character encodings: UTF-8 and BINARY (ASCII-8BIT)"\n2\n[195, 169, 97, 97]\n#<Encoding:UTF-8>\n""\n',
+  ],
+  [
+    'first=String.new("é",encoding:"UTF-8");second=String.new("é",encoding:"ASCII-8BIT");s="éaa";n=0;begin;x=s.gsub(/(?=a)/){n+=1;n==1 ? first : second};p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'Encoding::CompatibilityError\n"incompatible character encodings: UTF-8 and BINARY (ASCII-8BIT)"\n2\n[195, 169, 97, 97]\n#<Encoding:UTF-8>\n""\n',
+  ],
+  [
+    'first=String.new("é",encoding:"UTF-8");second=String.new("é",encoding:"ASCII-8BIT");s="aéa";n=0;begin;x=s.gsub(//){n+=1;n==1 ? first : second};p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'Encoding::CompatibilityError\n"incompatible character encodings: UTF-8 and BINARY (ASCII-8BIT)"\n2\n[97, 195, 169, 97]\n#<Encoding:UTF-8>\n""\n',
+  ],
+  [
+    'first=String.new("é",encoding:"UTF-8");second=String.new("é",encoding:"ASCII-8BIT");s="aéa";n=0;begin;x=s.gsub(/(?=a)/){n+=1;n==1 ? first : second};p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'Encoding::CompatibilityError\n"incompatible character encodings: UTF-8 and BINARY (ASCII-8BIT)"\n2\n[97, 195, 169, 97]\n#<Encoding:UTF-8>\n""\n',
+  ],
+  [
+    'first=String.new("é",encoding:"UTF-8");second=String.new("é",encoding:"ASCII-8BIT");s="aaé";n=0;begin;x=s.gsub(//){n+=1;n==1 ? first : second};p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'Encoding::CompatibilityError\n"incompatible character encodings: UTF-8 and BINARY (ASCII-8BIT)"\n2\n[97, 97, 195, 169]\n#<Encoding:UTF-8>\n""\n',
+  ],
+  [
+    'first=String.new("é",encoding:"UTF-8");second=String.new("é",encoding:"ASCII-8BIT");s="aaé";n=0;begin;x=s.gsub(/(?=a)/){n+=1;n==1 ? first : second};p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'Encoding::CompatibilityError\n"incompatible character encodings: UTF-8 and BINARY (ASCII-8BIT)"\n2\n[97, 97, 195, 169]\n#<Encoding:UTF-8>\n""\n',
+  ],
+  [
+    'first=String.new("é",encoding:"UTF-8");second=String.new("é",encoding:"ASCII-8BIT");s="éaa";n=0;begin;x=s.gsub!(//){n+=1;n==1 ? first : second};p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'Encoding::CompatibilityError\n"incompatible character encodings: UTF-8 and BINARY (ASCII-8BIT)"\n2\n[195, 169, 97, 97]\n#<Encoding:UTF-8>\n""\n',
+  ],
+  [
+    'first=String.new("é",encoding:"UTF-8");second=String.new("é",encoding:"ASCII-8BIT");s="éaa";n=0;begin;x=s.gsub!(/(?=a)/){n+=1;n==1 ? first : second};p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'Encoding::CompatibilityError\n"incompatible character encodings: UTF-8 and BINARY (ASCII-8BIT)"\n2\n[195, 169, 97, 97]\n#<Encoding:UTF-8>\n""\n',
+  ],
+  [
+    'first=String.new("é",encoding:"UTF-8");second=String.new("é",encoding:"ASCII-8BIT");s="aéa";n=0;begin;x=s.gsub!(//){n+=1;n==1 ? first : second};p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'Encoding::CompatibilityError\n"incompatible character encodings: UTF-8 and BINARY (ASCII-8BIT)"\n2\n[97, 195, 169, 97]\n#<Encoding:UTF-8>\n""\n',
+  ],
+  [
+    'first=String.new("é",encoding:"UTF-8");second=String.new("é",encoding:"ASCII-8BIT");s="aéa";n=0;begin;x=s.gsub!(/(?=a)/){n+=1;n==1 ? first : second};p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'Encoding::CompatibilityError\n"incompatible character encodings: UTF-8 and BINARY (ASCII-8BIT)"\n2\n[97, 195, 169, 97]\n#<Encoding:UTF-8>\n""\n',
+  ],
+  [
+    'first=String.new("é",encoding:"UTF-8");second=String.new("é",encoding:"ASCII-8BIT");s="aaé";n=0;begin;x=s.gsub!(//){n+=1;n==1 ? first : second};p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'Encoding::CompatibilityError\n"incompatible character encodings: UTF-8 and BINARY (ASCII-8BIT)"\n2\n[97, 97, 195, 169]\n#<Encoding:UTF-8>\n""\n',
+  ],
+  [
+    'first=String.new("é",encoding:"UTF-8");second=String.new("é",encoding:"ASCII-8BIT");s="aaé";n=0;begin;x=s.gsub!(/(?=a)/){n+=1;n==1 ? first : second};p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'Encoding::CompatibilityError\n"incompatible character encodings: UTF-8 and BINARY (ASCII-8BIT)"\n2\n[97, 97, 195, 169]\n#<Encoding:UTF-8>\n""\n',
+  ],
+  [
+    'first=String.new("é",encoding:"ASCII-8BIT");second=String.new("é",encoding:"US-ASCII");s="éaa";n=0;begin;x=s.gsub(//){n+=1;n==1 ? first : second};p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'Encoding::CompatibilityError\n"incompatible character encodings: BINARY (ASCII-8BIT) and UTF-8"\n1\n[195, 169, 97, 97]\n#<Encoding:UTF-8>\n""\n',
+  ],
+  [
+    'first=String.new("é",encoding:"ASCII-8BIT");second=String.new("é",encoding:"US-ASCII");s="éaa";n=0;begin;x=s.gsub(/(?=a)/){n+=1;n==1 ? first : second};p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'Encoding::CompatibilityError\n"incompatible character encodings: UTF-8 and BINARY (ASCII-8BIT)"\n1\n[195, 169, 97, 97]\n#<Encoding:UTF-8>\n""\n',
+  ],
+  [
+    'first=String.new("é",encoding:"ASCII-8BIT");second=String.new("é",encoding:"US-ASCII");s="aéa";n=0;begin;x=s.gsub(//){n+=1;n==1 ? first : second};p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'Encoding::CompatibilityError\n"incompatible character encodings: BINARY (ASCII-8BIT) and US-ASCII"\n2\n[97, 195, 169, 97]\n#<Encoding:UTF-8>\n""\n',
+  ],
+  [
+    'first=String.new("é",encoding:"ASCII-8BIT");second=String.new("é",encoding:"US-ASCII");s="aéa";n=0;begin;x=s.gsub(/(?=a)/){n+=1;n==1 ? first : second};p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'Encoding::CompatibilityError\n"incompatible character encodings: BINARY (ASCII-8BIT) and UTF-8"\n2\n[97, 195, 169, 97]\n#<Encoding:UTF-8>\n""\n',
+  ],
+  [
+    'first=String.new("é",encoding:"ASCII-8BIT");second=String.new("é",encoding:"US-ASCII");s="aaé";n=0;begin;x=s.gsub(//){n+=1;n==1 ? first : second};p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'Encoding::CompatibilityError\n"incompatible character encodings: BINARY (ASCII-8BIT) and US-ASCII"\n2\n[97, 97, 195, 169]\n#<Encoding:UTF-8>\n""\n',
+  ],
+  [
+    'first=String.new("é",encoding:"ASCII-8BIT");second=String.new("é",encoding:"US-ASCII");s="aaé";n=0;begin;x=s.gsub(/(?=a)/){n+=1;n==1 ? first : second};p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'Encoding::CompatibilityError\n"incompatible character encodings: BINARY (ASCII-8BIT) and US-ASCII"\n2\n[97, 97, 195, 169]\n#<Encoding:UTF-8>\n""\n',
+  ],
+  [
+    'first=String.new("é",encoding:"ASCII-8BIT");second=String.new("é",encoding:"US-ASCII");s="éaa";n=0;begin;x=s.gsub!(//){n+=1;n==1 ? first : second};p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'Encoding::CompatibilityError\n"incompatible character encodings: BINARY (ASCII-8BIT) and UTF-8"\n1\n[195, 169, 97, 97]\n#<Encoding:UTF-8>\n""\n',
+  ],
+  [
+    'first=String.new("é",encoding:"ASCII-8BIT");second=String.new("é",encoding:"US-ASCII");s="éaa";n=0;begin;x=s.gsub!(/(?=a)/){n+=1;n==1 ? first : second};p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'Encoding::CompatibilityError\n"incompatible character encodings: UTF-8 and BINARY (ASCII-8BIT)"\n1\n[195, 169, 97, 97]\n#<Encoding:UTF-8>\n""\n',
+  ],
+  [
+    'first=String.new("é",encoding:"ASCII-8BIT");second=String.new("é",encoding:"US-ASCII");s="aéa";n=0;begin;x=s.gsub!(//){n+=1;n==1 ? first : second};p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'Encoding::CompatibilityError\n"incompatible character encodings: BINARY (ASCII-8BIT) and US-ASCII"\n2\n[97, 195, 169, 97]\n#<Encoding:UTF-8>\n""\n',
+  ],
+  [
+    'first=String.new("é",encoding:"ASCII-8BIT");second=String.new("é",encoding:"US-ASCII");s="aéa";n=0;begin;x=s.gsub!(/(?=a)/){n+=1;n==1 ? first : second};p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'Encoding::CompatibilityError\n"incompatible character encodings: BINARY (ASCII-8BIT) and UTF-8"\n2\n[97, 195, 169, 97]\n#<Encoding:UTF-8>\n""\n',
+  ],
+  [
+    'first=String.new("é",encoding:"ASCII-8BIT");second=String.new("é",encoding:"US-ASCII");s="aaé";n=0;begin;x=s.gsub!(//){n+=1;n==1 ? first : second};p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'Encoding::CompatibilityError\n"incompatible character encodings: BINARY (ASCII-8BIT) and US-ASCII"\n2\n[97, 97, 195, 169]\n#<Encoding:UTF-8>\n""\n',
+  ],
+  [
+    'first=String.new("é",encoding:"ASCII-8BIT");second=String.new("é",encoding:"US-ASCII");s="aaé";n=0;begin;x=s.gsub!(/(?=a)/){n+=1;n==1 ? first : second};p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'Encoding::CompatibilityError\n"incompatible character encodings: BINARY (ASCII-8BIT) and US-ASCII"\n2\n[97, 97, 195, 169]\n#<Encoding:UTF-8>\n""\n',
+  ],
+  [
+    'first=String.new("é",encoding:"ASCII-8BIT");second=String.new("é",encoding:"UTF-8");s="éaa";n=0;begin;x=s.gsub(//){n+=1;n==1 ? first : second};p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'Encoding::CompatibilityError\n"incompatible character encodings: BINARY (ASCII-8BIT) and UTF-8"\n1\n[195, 169, 97, 97]\n#<Encoding:UTF-8>\n""\n',
+  ],
+  [
+    'first=String.new("é",encoding:"ASCII-8BIT");second=String.new("é",encoding:"UTF-8");s="éaa";n=0;begin;x=s.gsub(/(?=a)/){n+=1;n==1 ? first : second};p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'Encoding::CompatibilityError\n"incompatible character encodings: UTF-8 and BINARY (ASCII-8BIT)"\n1\n[195, 169, 97, 97]\n#<Encoding:UTF-8>\n""\n',
+  ],
+  [
+    'first=String.new("é",encoding:"ASCII-8BIT");second=String.new("é",encoding:"UTF-8");s="aéa";n=0;begin;x=s.gsub(//){n+=1;n==1 ? first : second};p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'Encoding::CompatibilityError\n"incompatible character encodings: BINARY (ASCII-8BIT) and UTF-8"\n2\n[97, 195, 169, 97]\n#<Encoding:UTF-8>\n""\n',
+  ],
+  [
+    'first=String.new("é",encoding:"ASCII-8BIT");second=String.new("é",encoding:"UTF-8");s="aéa";n=0;begin;x=s.gsub(/(?=a)/){n+=1;n==1 ? first : second};p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'Encoding::CompatibilityError\n"incompatible character encodings: BINARY (ASCII-8BIT) and UTF-8"\n2\n[97, 195, 169, 97]\n#<Encoding:UTF-8>\n""\n',
+  ],
+  [
+    'first=String.new("é",encoding:"ASCII-8BIT");second=String.new("é",encoding:"UTF-8");s="aaé";n=0;begin;x=s.gsub(//){n+=1;n==1 ? first : second};p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'Encoding::CompatibilityError\n"incompatible character encodings: BINARY (ASCII-8BIT) and UTF-8"\n2\n[97, 97, 195, 169]\n#<Encoding:UTF-8>\n""\n',
+  ],
+  [
+    'first=String.new("é",encoding:"ASCII-8BIT");second=String.new("é",encoding:"UTF-8");s="aaé";n=0;begin;x=s.gsub(/(?=a)/){n+=1;n==1 ? first : second};p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'Encoding::CompatibilityError\n"incompatible character encodings: BINARY (ASCII-8BIT) and UTF-8"\n2\n[97, 97, 195, 169]\n#<Encoding:UTF-8>\n""\n',
+  ],
+  [
+    'first=String.new("é",encoding:"ASCII-8BIT");second=String.new("é",encoding:"UTF-8");s="éaa";n=0;begin;x=s.gsub!(//){n+=1;n==1 ? first : second};p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'Encoding::CompatibilityError\n"incompatible character encodings: BINARY (ASCII-8BIT) and UTF-8"\n1\n[195, 169, 97, 97]\n#<Encoding:UTF-8>\n""\n',
+  ],
+  [
+    'first=String.new("é",encoding:"ASCII-8BIT");second=String.new("é",encoding:"UTF-8");s="éaa";n=0;begin;x=s.gsub!(/(?=a)/){n+=1;n==1 ? first : second};p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'Encoding::CompatibilityError\n"incompatible character encodings: UTF-8 and BINARY (ASCII-8BIT)"\n1\n[195, 169, 97, 97]\n#<Encoding:UTF-8>\n""\n',
+  ],
+  [
+    'first=String.new("é",encoding:"ASCII-8BIT");second=String.new("é",encoding:"UTF-8");s="aéa";n=0;begin;x=s.gsub!(//){n+=1;n==1 ? first : second};p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'Encoding::CompatibilityError\n"incompatible character encodings: BINARY (ASCII-8BIT) and UTF-8"\n2\n[97, 195, 169, 97]\n#<Encoding:UTF-8>\n""\n',
+  ],
+  [
+    'first=String.new("é",encoding:"ASCII-8BIT");second=String.new("é",encoding:"UTF-8");s="aéa";n=0;begin;x=s.gsub!(/(?=a)/){n+=1;n==1 ? first : second};p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'Encoding::CompatibilityError\n"incompatible character encodings: BINARY (ASCII-8BIT) and UTF-8"\n2\n[97, 195, 169, 97]\n#<Encoding:UTF-8>\n""\n',
+  ],
+  [
+    'first=String.new("é",encoding:"ASCII-8BIT");second=String.new("é",encoding:"UTF-8");s="aaé";n=0;begin;x=s.gsub!(//){n+=1;n==1 ? first : second};p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'Encoding::CompatibilityError\n"incompatible character encodings: BINARY (ASCII-8BIT) and UTF-8"\n2\n[97, 97, 195, 169]\n#<Encoding:UTF-8>\n""\n',
+  ],
+  [
+    'first=String.new("é",encoding:"ASCII-8BIT");second=String.new("é",encoding:"UTF-8");s="aaé";n=0;begin;x=s.gsub!(/(?=a)/){n+=1;n==1 ? first : second};p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'Encoding::CompatibilityError\n"incompatible character encodings: BINARY (ASCII-8BIT) and UTF-8"\n2\n[97, 97, 195, 169]\n#<Encoding:UTF-8>\n""\n',
+  ],
+  [
+    'first=String.new("é",encoding:"ASCII-8BIT");second=String.new("é",encoding:"ASCII-8BIT");s="éaa";n=0;begin;x=s.gsub(//){n+=1;n==1 ? first : second};p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'Encoding::CompatibilityError\n"incompatible character encodings: BINARY (ASCII-8BIT) and UTF-8"\n1\n[195, 169, 97, 97]\n#<Encoding:UTF-8>\n""\n',
+  ],
+  [
+    'first=String.new("é",encoding:"ASCII-8BIT");second=String.new("é",encoding:"ASCII-8BIT");s="éaa";n=0;begin;x=s.gsub(/(?=a)/){n+=1;n==1 ? first : second};p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'Encoding::CompatibilityError\n"incompatible character encodings: UTF-8 and BINARY (ASCII-8BIT)"\n1\n[195, 169, 97, 97]\n#<Encoding:UTF-8>\n""\n',
+  ],
+  [
+    'first=String.new("é",encoding:"ASCII-8BIT");second=String.new("é",encoding:"ASCII-8BIT");s="aéa";n=0;begin;x=s.gsub(//){n+=1;n==1 ? first : second};p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'Encoding::CompatibilityError\n"incompatible character encodings: BINARY (ASCII-8BIT) and UTF-8"\n2\n[97, 195, 169, 97]\n#<Encoding:UTF-8>\n""\n',
+  ],
+  [
+    'first=String.new("é",encoding:"ASCII-8BIT");second=String.new("é",encoding:"ASCII-8BIT");s="aéa";n=0;begin;x=s.gsub(/(?=a)/){n+=1;n==1 ? first : second};p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'Encoding::CompatibilityError\n"incompatible character encodings: BINARY (ASCII-8BIT) and UTF-8"\n2\n[97, 195, 169, 97]\n#<Encoding:UTF-8>\n""\n',
+  ],
+  [
+    'first=String.new("é",encoding:"ASCII-8BIT");second=String.new("é",encoding:"ASCII-8BIT");s="aaé";n=0;begin;x=s.gsub(//){n+=1;n==1 ? first : second};p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'Encoding::CompatibilityError\n"incompatible character encodings: BINARY (ASCII-8BIT) and UTF-8"\n3\n[97, 97, 195, 169]\n#<Encoding:UTF-8>\n""\n',
+  ],
+  [
+    'first=String.new("é",encoding:"ASCII-8BIT");second=String.new("é",encoding:"ASCII-8BIT");s="aaé";n=0;begin;x=s.gsub(/(?=a)/){n+=1;n==1 ? first : second};p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'Encoding::CompatibilityError\n"incompatible character encodings: BINARY (ASCII-8BIT) and UTF-8"\n2\n[97, 97, 195, 169]\n#<Encoding:UTF-8>\nnil\n',
+  ],
+  [
+    'first=String.new("é",encoding:"ASCII-8BIT");second=String.new("é",encoding:"ASCII-8BIT");s="éaa";n=0;begin;x=s.gsub!(//){n+=1;n==1 ? first : second};p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'Encoding::CompatibilityError\n"incompatible character encodings: BINARY (ASCII-8BIT) and UTF-8"\n1\n[195, 169, 97, 97]\n#<Encoding:UTF-8>\n""\n',
+  ],
+  [
+    'first=String.new("é",encoding:"ASCII-8BIT");second=String.new("é",encoding:"ASCII-8BIT");s="éaa";n=0;begin;x=s.gsub!(/(?=a)/){n+=1;n==1 ? first : second};p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'Encoding::CompatibilityError\n"incompatible character encodings: UTF-8 and BINARY (ASCII-8BIT)"\n1\n[195, 169, 97, 97]\n#<Encoding:UTF-8>\n""\n',
+  ],
+  [
+    'first=String.new("é",encoding:"ASCII-8BIT");second=String.new("é",encoding:"ASCII-8BIT");s="aéa";n=0;begin;x=s.gsub!(//){n+=1;n==1 ? first : second};p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'Encoding::CompatibilityError\n"incompatible character encodings: BINARY (ASCII-8BIT) and UTF-8"\n2\n[97, 195, 169, 97]\n#<Encoding:UTF-8>\n""\n',
+  ],
+  [
+    'first=String.new("é",encoding:"ASCII-8BIT");second=String.new("é",encoding:"ASCII-8BIT");s="aéa";n=0;begin;x=s.gsub!(/(?=a)/){n+=1;n==1 ? first : second};p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'Encoding::CompatibilityError\n"incompatible character encodings: BINARY (ASCII-8BIT) and UTF-8"\n2\n[97, 195, 169, 97]\n#<Encoding:UTF-8>\n""\n',
+  ],
+  [
+    'first=String.new("é",encoding:"ASCII-8BIT");second=String.new("é",encoding:"ASCII-8BIT");s="aaé";n=0;begin;x=s.gsub!(//){n+=1;n==1 ? first : second};p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'Encoding::CompatibilityError\n"incompatible character encodings: BINARY (ASCII-8BIT) and UTF-8"\n3\n[97, 97, 195, 169]\n#<Encoding:UTF-8>\n""\n',
+  ],
+  [
+    'first=String.new("é",encoding:"ASCII-8BIT");second=String.new("é",encoding:"ASCII-8BIT");s="aaé";n=0;begin;x=s.gsub!(/(?=a)/){n+=1;n==1 ? first : second};p [x.bytes,x.encoding];rescue=>e;p e.class,e.message;end;p n,s.bytes,s.encoding,$&',
+    'Encoding::CompatibilityError\n"incompatible character encodings: BINARY (ASCII-8BIT) and UTF-8"\n2\n[97, 97, 195, 169]\n#<Encoding:UTF-8>\nnil\n',
+  ],
+] as const;
+
+test.each(nativeRegexpAppendStageCases)(
+  'Regexp output appends snapshot bytes and stop incompatible callbacks in native order: %s',
+  (source, stdout) => {
+    expect(run(source)).toMatchObject({ kind: 'executed', stdout, uncaughtException: undefined });
+  }
+);

@@ -6,24 +6,46 @@ import { rt } from './runtime';
 import { stringBytes, stringFromBytes } from './values';
 
 export function joinEncodedStrings(parts: RString[], limit = LIMITS.maxStringLength): RString {
-  const buffers = parts.map(stringBytes);
-  const length = buffers.reduce((sum, bytes) => sum + bytes.length, 0);
-  if (length > limit) throw new ExecutionLimitError('storage');
-  let encoding = parts[0];
-  let ascii = true;
-  for (const [index, part] of parts.entries()) {
-    const partAscii = buffers[index].every((byte) => byte < 0x80);
-    if (encoding) checkStringEncodingCompatibility(encoding, ascii, part, partAscii);
-    if (ascii && !partAscii) encoding = part;
-    ascii &&= partAscii;
+  const builder = new EncodedStringBuilder(limit);
+  for (const part of parts) builder.append(part);
+  return builder.finish();
+}
+
+export class EncodedStringBuilder {
+  length = 0;
+  private readonly buffers: Uint8Array[] = [];
+  private encoding?: RString;
+  private ascii = true;
+
+  constructor(
+    private readonly limit = LIMITS.maxStringLength,
+    initial?: RString
+  ) {
+    if (initial) this.encoding = stringFromBytes(new Uint8Array(), initial.binary, initial.usAscii);
   }
-  const bytes = new Uint8Array(length);
-  let offset = 0;
-  for (const buffer of buffers) {
-    bytes.set(buffer, offset);
-    offset += buffer.length;
+
+  append(part: RString): void {
+    const bytes = stringBytes(part);
+    if (this.length + bytes.length > this.limit) throw new ExecutionLimitError('storage');
+    const partAscii = bytes.every((byte) => byte < 0x80);
+    if (this.encoding) checkStringEncodingCompatibility(this.encoding, this.ascii, part, partAscii);
+    if (!this.encoding || (this.ascii && !partAscii))
+      this.encoding = stringFromBytes(new Uint8Array(), part.binary, part.usAscii);
+    this.ascii &&= partAscii;
+    this.length += bytes.length;
+    rt().spend(Math.ceil(bytes.length / 256));
+    this.buffers.push(Uint8Array.from(bytes));
   }
-  return stringFromBytes(bytes, encoding?.binary ?? false, encoding?.usAscii ?? false);
+
+  finish(): RString {
+    const bytes = new Uint8Array(this.length);
+    let offset = 0;
+    for (const buffer of this.buffers) {
+      bytes.set(buffer, offset);
+      offset += buffer.length;
+    }
+    return stringFromBytes(bytes, this.encoding?.binary ?? false, this.encoding?.usAscii ?? false);
+  }
 }
 
 export function checkStringEncodingCompatibility(
