@@ -125,36 +125,38 @@ export class InterfaceBases {
 
   private validBase(baseNode: TreeNode): Type[] {
     const base = this.baseType(baseNode);
-    if (isValidBaseType(base)) return [base];
+    if (this.isValidBaseType(base)) return [base];
     this.c.errorWhileResolving(
       baseNode,
       'インターフェースが継承できるのは、メンバーが静的に決まるオブジェクト型か、その交差型だけです。'
     );
     return [];
   }
-}
 
-/**
- * Whether a type may be a base type, as TypeScript's `isValidBaseType` decides: an object type other than a generic
- * mapped type, `object`, `any`, an intersection of such types, or a type parameter constrained to one.
- */
-function isValidBaseType(type: Type): boolean {
-  switch (type.kind) {
-    case 'intrinsic': {
-      return isAnyLike(type) || type === nonPrimitiveType;
-    }
-    case 'object': {
-      return type.objectKind !== 'mapped' || !isGenericObjectOrIndexType(type.mapped?.constraint ?? anyType);
-    }
-    case 'intersection': {
-      return type.types.every((member) => isValidBaseType(member));
-    }
-    case 'typeParameter': {
-      const constraint = type.constraint?.();
-      return constraint !== undefined && isValidBaseType(constraint);
-    }
-    default: {
-      return false;
+  /**
+   * Whether a type may be a base type, as TypeScript's `isValidBaseType` decides: an object type other than a generic
+   * mapped type, `object`, `any`, an intersection of such types, or a type parameter whose non-circular constraint is
+   * one.
+   */
+  private isValidBaseType(type: Type): boolean {
+    this.c.budget.spend();
+    switch (type.kind) {
+      case 'intrinsic': {
+        return isAnyLike(type) || type === nonPrimitiveType;
+      }
+      case 'object': {
+        return type.objectKind !== 'mapped' || !isGenericObjectOrIndexType(type.mapped?.constraint ?? anyType);
+      }
+      case 'intersection': {
+        return type.types.every((member) => this.isValidBaseType(member));
+      }
+      case 'typeParameter': {
+        const constraint = this.c.constraintOf(type);
+        return constraint !== undefined && this.isValidBaseType(constraint);
+      }
+      default: {
+        return false;
+      }
     }
   }
 }
