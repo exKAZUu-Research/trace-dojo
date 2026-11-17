@@ -21,8 +21,18 @@ import {
 } from './places';
 import { rt } from './runtime';
 import { incrementString } from './strings';
-import { typeToString } from './types';
-import { type Key, PhpArray, type PhpClass, PhpObject, type PropDecl, Ref, type TypeDecl, type Value } from './values';
+import { coerce, NO_MATCH, typeToString } from './types';
+import {
+  type Key,
+  PhpArray,
+  type PhpClass,
+  PhpObject,
+  type PropDecl,
+  Ref,
+  type TypeDecl,
+  UNINIT,
+  type Value,
+} from './values';
 
 // Assignment ---------------------------------------------------------------------------------------------------------
 
@@ -96,6 +106,18 @@ class StaticPlace extends RefPlace {
 
   declaration(): PropDecl | undefined {
     return this.decl;
+  }
+
+  override ref(): Ref {
+    if ((this.target.v as unknown) === UNINIT && this.decl?.type) {
+      if (coerce(null, this.decl.type, { strict: true, internal: false, scope: this.decl.cls }) === NO_MATCH)
+        throwError(
+          'Error',
+          `Cannot access uninitialized non-nullable property ${this.decl.cls.name}::$${this.decl.name} by reference`
+        );
+      this.target.v = null;
+    }
+    return this.target;
   }
 
   override set(value: Value): Value {
@@ -182,6 +204,15 @@ function arrayAccessPlace(object: PhpObject, key: Value | undefined): Place {
         object.cls.findMethod('offsetget')?.fn.kind === 'native'
       ) {
         return new ElementPlace(object.internal.writable(), toKey(key ?? null));
+      }
+      if (
+        key === undefined &&
+        object.internal !== undefined &&
+        nativeArrayStorage(object.internal) &&
+        object.cls.findMethod('offsetget')?.fn.kind === 'native'
+      ) {
+        notice(`Indirect modification of overloaded element of ${object.cls.name} has no effect`);
+        return new RefPlace(new Ref(null));
       }
       const runtime = rt();
       runtime.lastReturnRef = undefined;
@@ -293,6 +324,10 @@ export function bindRef(target: Expr, ref: Ref): void {
     const parent = placeOf(target.base);
     const key = target.index === undefined ? undefined : toKey(ev(target.index));
     const container = writableContainer(parent);
+    if (container instanceof PhpObject) {
+      arrayAccessPlace(container, key).nested?.();
+      throwError('Error', 'Cannot assign by reference to an array dimension of an object');
+    }
     if (!(container instanceof PhpArray)) throwError('Error', 'Cannot create references to elements of this value');
     ref.isRef = true;
     ref.rc++;
@@ -555,7 +590,7 @@ function unsetContainer(e: Expr): PhpArray | PhpObject | string | undefined {
   const place = unsetPlace(e);
   const value = place?.get();
   if (value === undefined && e.k !== 'idx') warnUndefinedBase(e);
-  if (value instanceof PhpArray) return writableContainer(place as Place) as PhpArray;
+  if (value instanceof PhpArray) return writableContainer(place as Place, value) as PhpArray;
   if (value instanceof PhpObject || typeof value === 'string') return value;
   return undefined;
 }
@@ -579,7 +614,9 @@ function unsetPlace(e: Expr): Place | undefined {
   if (e.k === 'prop') {
     const object = ev(e.obj);
     const name = memberName(e.name);
-    return object instanceof PhpObject ? propPlace(object, name) : undefined;
+    if (!(object instanceof PhpObject)) return undefined;
+    const place = propPlace(object, name);
+    return place.nested?.() ?? place;
   }
   if (e.k === 'var' || e.k === 'varvar' || e.k === 'sprop') {
     return placeOf(e);

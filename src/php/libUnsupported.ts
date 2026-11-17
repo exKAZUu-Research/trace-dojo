@@ -1,5 +1,6 @@
 import { defineClass, defineFunction } from './native';
 import { UnsupportedFeatureError } from './unsupported';
+import { unsupportedClasses } from './unsupportedCatalog';
 
 /** The builtin functions this grader rejects, grouped by what learners would call them. */
 const UNSUPPORTED_FUNCTIONS: [string, string[]][] = [
@@ -173,6 +174,7 @@ const UNSUPPORTED_CLASSES: [string, string[]][] = [
 
 for (const [what, names] of UNSUPPORTED_CLASSES) {
   for (const name of names) {
+    unsupportedClasses.set(name.toLowerCase(), `${what}（${name}）`);
     defineClass({
       name,
       methods: [

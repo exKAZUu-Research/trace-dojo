@@ -638,8 +638,12 @@ defineClass({
             rt().allocate(array.size);
             fixedOf(object).items = array.values();
           } else {
-            const keys = array.keys().map(Number);
-            const size = keys.length === 0 ? 0 : Math.max(...keys) + 1;
+            const rawKeys = array.keys();
+            if (rawKeys.some((key) => typeof key !== 'bigint' || key < 0n))
+              throwError('InvalidArgumentException', 'array must contain only positive integer keys');
+            const keys = rawKeys.map(Number);
+            let size = 0;
+            for (const key of keys) size = Math.max(size, key + 1);
             rt().allocate(size);
             const items = Array.from({ length: size }, (): Value => null);
             for (const [key, value] of array.entries()) items[Number(key)] = value;

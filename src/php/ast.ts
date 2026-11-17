@@ -125,7 +125,7 @@ export type Stmt = { row: number } & (
   | { k: 'func'; decl: FunctionDecl }
   | { k: 'class'; decl: ClassDecl }
   | { k: 'const'; items: { name: string; value: Expr }[] }
-  | { k: 'goto'; label: string }
+  | { k: 'goto'; label: string; offset: number }
   | { k: 'label'; name: string }
   | { k: 'nop' }
 );

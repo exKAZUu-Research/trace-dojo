@@ -429,7 +429,8 @@ class PatternConverter {
   /** Notes the groups in the item that a quantifier repeats, whose captures JavaScript forgets at each repetition. */
   private repeatItem(): void {
     const groups = [...this.groupStarts.entries()].filter(([, start]) => start >= this.itemStart);
-    if (groups.length > 1) unsupported('入れ子のキャプチャを含む繰り返し');
+    if (groups.length > 1 || groups.some(([, start]) => start > this.itemStart))
+      unsupported('入れ子のキャプチャを含む繰り返し');
     for (const [group] of groups) this.repeated.add(group);
     if (this.keepStarts.some((start) => start >= this.itemStart)) unsupported(String.raw`繰り返される \K`);
   }

@@ -171,6 +171,7 @@ export class Runtime {
 
   /** Charges for `count` new array elements or object properties, added to a structure that then holds `size`. */
   allocate(count: number, size = count): void {
+    if (!Number.isFinite(count) || count < 0) throw this.memoryExhausted(2_097_152);
     const before = this.slots;
     this.slots += count;
     if (this.slots > LIMITS.maxSlots) throw this.memoryExhausted(tableBytes(size));
@@ -223,7 +224,7 @@ export class Runtime {
 
   /** Frees what letting go of some values frees, as {@link releaseDropped} describes, when that is safe now. */
   release(dropped: unknown[]): void {
-    this.pendingReleases.push(...dropped);
+    for (const value of dropped) this.pendingReleases.push(value);
     if (this.nativeCalls === 0) this.flushReleases();
   }
 

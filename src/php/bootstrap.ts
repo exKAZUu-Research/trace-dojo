@@ -46,7 +46,7 @@ defineClass({
   name: 'IteratorAggregate',
   kind: 'interface',
   interfaces: ['Traversable'],
-  methods: [{ signature: 'getIterator(): Iterator', impl: () => null, isAbstract: true }],
+  methods: [{ signature: 'getIterator(): Traversable', impl: () => null, isAbstract: true }],
 });
 defineClass({
   name: 'ArrayAccess',

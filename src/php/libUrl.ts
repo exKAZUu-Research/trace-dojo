@@ -83,6 +83,7 @@ interface QueryBuild {
   visiting: Set<PhpArray | PhpObject>;
   /** The length of the query built so far. */
   length: number;
+  separator: string;
 }
 
 defineFunction(
@@ -95,6 +96,7 @@ defineFunction(
       numericPrefix: args[1] === undefined ? '' : s(args[1]),
       visiting: new Set(),
       length: 0,
+      separator: args[2] === undefined || args[2] === null ? '&' : s(args[2]),
     };
     buildQuery(query, data as PhpArray | PhpObject, undefined);
     const separator = args[2] === undefined || args[2] === null ? '&' : s(args[2]);
@@ -122,7 +124,7 @@ function buildQuery(query: QueryBuild, data: PhpArray | PhpObject, prefix: strin
       buildQuery(query, value, prefix === undefined ? `${name}%5B` : `${prefix}${name}%5D%5B`);
     } else if (value !== null) {
       const part = `${fullName}=${queryValue(value, query.raw)}`;
-      query.length += part.length + 1;
+      query.length += part.length + (query.parts.length === 0 ? 0 : query.separator.length);
       rt().ensureStringFits(query.length);
       query.parts.push(part);
     }

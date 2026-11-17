@@ -470,8 +470,13 @@ function foreachStatement(statement: Extract<Stmt, { k: 'foreach' }>): Completio
   const runtime = rt();
   const frame = runtime.frame;
   if (statement.byRef) {
+    runtime.lastReturnRef = undefined;
     const resolved = placeOf(statement.subject);
-    const place = resolved instanceof ValuePlace ? new RefPlace(new Ref(resolved.value)) : resolved;
+    const returned = ['call', 'mcall', 'scall'].includes(statement.subject.k)
+      ? (runtime.lastReturnRef as Ref | undefined)
+      : undefined;
+    runtime.lastReturnRef = undefined;
+    const place = resolved instanceof ValuePlace ? new RefPlace(returned ?? new Ref(resolved.value)) : resolved;
     const container = place.get();
     if (container instanceof PhpObject) return foreachObject(statement, container);
     if (!(container instanceof PhpArray)) {

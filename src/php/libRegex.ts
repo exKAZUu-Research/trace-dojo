@@ -75,9 +75,12 @@ interface Match {
  * finds them: after an empty match, PCRE looks for a non-empty one at the same place before moving on. Sets the PCRE
  * error and yields nothing for a bad subject or offset.
  */
-function* matchesOf(compiled: Compiled, subject: string, offset = 0): Generator<Match> {
+function* matchesOf(compiled: Compiled, subject: string, offset = 0, status?: { error: number }): Generator<Match> {
   const prepared = prepareSubject(compiled, subject, offset);
-  if (!prepared) return;
+  if (!prepared) {
+    if (status) status.error = rt().lastPregError;
+    return;
+  }
   const { text, byteOffset } = prepared;
   let { position } = prepared;
   let retry = false;
@@ -300,17 +303,18 @@ function replaceCompiled(
   count: { value: number },
   replace: (match: Match) => string
 ): string | undefined {
+  const status = { error: 0 };
   let result = '';
   let last = 0;
   let done = 0;
-  for (const match of matchesOf(compiled, subject)) {
+  for (const match of matchesOf(compiled, subject, 0, status)) {
     if (limit >= 0 && done >= limit) break;
     result += subject.slice(last, match.starts[0]) + replace(match);
     last = match.ends[0];
     done++;
     rt().ensureStringFits(result.length);
   }
-  if (rt().lastPregError !== 0) return undefined;
+  if (status.error !== 0) return undefined;
   count.value += done;
   return result + subject.slice(last);
 }

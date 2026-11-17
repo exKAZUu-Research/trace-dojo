@@ -605,6 +605,17 @@ export abstract class DeclarationConverter extends ConverterBase {
       try {
         let params: ParamDecl[] = [];
         if (paramsNode) params = this.params(paramsNode, `$${prop.name}::${kind}`, className);
+        if (
+          kind === 'set' &&
+          paramsNode &&
+          prop.type &&
+          (!params[0]?.type ||
+            (typeToString(params[0].type) !== 'mixed' && typeToString(params[0].type) !== typeToString(prop.type)))
+        )
+          this.error(
+            hook,
+            `Type of parameter $${params[0]?.name ?? 'value'} of hook ${className}::$${prop.name}::set must be compatible with property type`
+          );
         if (kind === 'set' && params.length === 0) {
           params = [
             {
@@ -678,6 +689,8 @@ export abstract class DeclarationConverter extends ConverterBase {
     }
     prop.hooks = hooks;
     prop.isVirtual = !referencesBacking;
+    if (prop.isVirtual && prop.defaultExpr)
+      this.error(list, `Cannot specify default value for virtual hooked property ${className}::$${prop.name}`);
   }
 
   protected methodDecl(member: Node, decl: ClassDecl): MethodDeclAst {

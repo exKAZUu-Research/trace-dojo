@@ -1,3 +1,4 @@
+import { type Comparisons, type Entry, SortedWalk } from './arraySetWalk';
 // code-gauge-allow-file fileNcss 883 -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 // oxlint-disable unicorn/prefer-code-point -- PHP strings hold bytes as code units 0–255, which charCodeAt and fromCharCode read and write as they are.
@@ -13,7 +14,17 @@ import { defineAlias, defineConstant, defineFunction, markInlined } from './nati
 import { arithmetic, compare, looseEquals, strictEquals, toFloat, toKey, toStr } from './operators';
 import { arrayIsShared, ElementPlace, share, VarPlace } from './places';
 import { rt } from './runtime';
-import { INT_MIN, type Key, type NativeContext, PhpArray, PhpObject, Ref, UNINIT, type Value } from './values';
+import {
+  copyValueSlot,
+  INT_MIN,
+  type Key,
+  type NativeContext,
+  PhpArray,
+  PhpObject,
+  Ref,
+  UNINIT,
+  type Value,
+} from './values';
 import { zendSort } from './zendSort';
 
 defineConstant('SORT_REGULAR', 0n);
@@ -82,8 +93,8 @@ function rebuild(entries: [Key, Value | Ref][], renumber: boolean, target?: PhpA
     array.replaceTable(map, nextFree);
     return array;
   }
-  for (const [key, slot] of entries) {
-    if (slot instanceof Ref) slot.rc++;
+  for (const [key, source] of entries) {
+    const slot = copyValueSlot(source);
     if (renumber && typeof key === 'bigint') array.append(slot);
     else if (slot instanceof Ref) array.setSlot(key, slot);
     else array.set(key, share(slot));
@@ -246,8 +257,7 @@ defineFunction('array_merge(array ...$arrays): array', ({ args }) => {
     if (!(value instanceof PhpArray))
       throwError('TypeError', `array_merge(): Argument #${index + 1} must be of type array, ${valueName(value)} given`);
     for (const [key, slot] of value.map) {
-      const item = slot instanceof Ref && slot.isRef ? slot : share(slot instanceof Ref ? slot.v : slot);
-      if (item instanceof Ref) item.rc++;
+      const item = copyValueSlot(slot);
       if (typeof key === 'bigint') result.append(item);
       else result.setSlot(key, item);
     }
@@ -669,7 +679,7 @@ defineFunction('array_filter(array $array, ?callable $callback = null, int $mode
       else if (mode === 2n) keep = callCallback(callback, [key]);
       else if (mode === 1n) keep = callCallback(callback, [value, key]);
       else keep = callCallback(callback, [value]);
-      if (conversionsModule.toBool(keep)) result.set(key, share(value));
+      if (conversionsModule.toBool(keep)) result.setSlot(key, copyValueSlot(arr(args[0]).map.get(key) as Value | Ref));
     }
   } finally {
     rt().held.pop();
@@ -716,7 +726,9 @@ function walkValues(ref: Ref, ctx: NativeContext, recursive: boolean, active: Se
         walkValues(elementRef, ctx, true, active);
         continue;
       }
-      const args = [{ v: elementRef.v, ref: elementRef }, { v: keyValue(key) }];
+      const decl = container instanceof PhpObject ? declForKey(container.cls, key as string) : undefined;
+      const callbackKey = decl?.visibility === 'protected' ? `\0*\0${decl.name}` : keyValue(key);
+      const args = [{ v: elementRef.v, ref: elementRef }, { v: callbackKey }];
       if (ctx.args.length > 2) args.push({ v: ctx.args[2] });
       callCallbackRefs(ctx.args[1], args);
     }
@@ -774,6 +786,26 @@ defineFunction('array_reverse(array $array, bool $preserve_keys = false): array'
 defineFunction('array_unique(array $array, int $flags = SORT_STRING): array', ({ args }) => {
   const flags = (args[1] as bigint | undefined) ?? 2n;
   const result = new PhpArray();
+  if (flags !== 2n) {
+    const compare = sortComparator(flags);
+    const entries = [...arr(args[0]).entries()].map(([key, value], position) => ({ key, value, position }));
+    zendSort(entries, (a, b) => {
+      rt().spend();
+      return compare(a.value, b.value) || a.position - b.position;
+    });
+    const retained = new Set<number>();
+    let previous: (typeof entries)[number] | undefined;
+    for (const entry of entries) {
+      rt().spend();
+      if (!previous || compare(previous.value, entry.value) !== 0) {
+        retained.add(entry.position);
+        previous = entry;
+      }
+    }
+    for (const [position, [key]] of [...arr(args[0]).entries()].entries())
+      if (retained.has(position)) result.setSlot(key, copyValueSlot(arr(args[0]).map.get(key) as Value | Ref));
+    return result;
+  }
   const kept: Value[] = [];
   const strings = new Set<string>();
   for (const [key, value] of arr(args[0]).entries()) {
@@ -789,7 +821,7 @@ defineFunction('array_unique(array $array, int $flags = SORT_STRING): array', ({
     if (text !== undefined) strings.add(text);
     if (duplicate) continue;
     kept.push(value);
-    result.set(key, share(value));
+    result.setSlot(key, copyValueSlot(arr(args[0]).map.get(key) as Value | Ref));
   }
   return result;
 });
@@ -854,13 +886,13 @@ defineFunction('array_chunk(array $array, int $length, bool $preserve_keys = fal
   if (length < 1) throwError('ValueError', 'array_chunk(): Argument #2 ($length) must be greater than 0');
   const result = new PhpArray();
   let chunk: PhpArray | undefined;
-  for (const [key, value] of arr(args[0]).entries()) {
+  for (const key of arr(args[0]).keys()) {
     if (!chunk || chunk.size >= length) {
       chunk = new PhpArray();
       result.append(chunk);
     }
-    if (args[2] === true) chunk.set(key, share(value));
-    else chunk.append(share(value));
+    if (args[2] === true) chunk.setSlot(key, copyValueSlot(arr(args[0]).map.get(key) as Value | Ref));
+    else chunk.append(copyValueSlot(arr(args[0]).map.get(key) as Value | Ref));
   }
   return result;
 });
@@ -883,26 +915,28 @@ function setOperation(name: string, args: Value[], keep: boolean, same: SetCompa
   checkSetArguments(name, args);
   const [first, ...others] = args as PhpArray[];
   const result = new PhpArray();
-  const keyOf = (entry: [Key, Value]): string | Key =>
-    same === sameKey
-      ? entry[0]
-      : same === sameValue
-        ? toStr(entry[1])
-        : JSON.stringify([String(entry[0]), toStr(entry[1])]);
-  const lookups = others.map(
-    (other) =>
-      new Set(
-        [...other.entries()].map((entry) => {
-          rt().spend();
-          return keyOf(entry);
-        })
-      )
-  );
+  if (same === sameValue) {
+    const comparisons: Comparisons = {
+      data: compareSetValues,
+      key: (a, b) => compareBytes(String(a.key), String(b.key)),
+      useKey: () => {},
+      useData: () => {},
+    };
+    const lists = [first, ...others].map((array) => {
+      const list = [...array.entries()].map(([key, value]) => ({ key, value }));
+      if (list.length > 1) zendSort(list, compareSetValues);
+      return list;
+    });
+    const walk = new SortedWalk(lists, 'normal', comparisons);
+    const copied = first.copy();
+    for (const key of keep ? walk.intersect() : walk.diff()) copied.delete(key);
+    return copied;
+  }
   for (const entry of first.entries()) {
     rt().spend();
-    const key = keyOf(entry);
-    const present = keep ? lookups.every((lookup) => lookup.has(key)) : lookups.some((lookup) => lookup.has(key));
-    if (keep ? present : !present) result.set(entry[0], share(entry[1]));
+    const matches = (other: PhpArray): boolean =>
+      other.has(entry[0]) && same(entry, [entry[0], other.get(entry[0]) as Value]);
+    if (keep ? others.every(matches) : !others.some(matches)) result.set(entry[0], share(entry[1]));
   }
   return result;
 }
@@ -1260,4 +1294,9 @@ function withPointer(value: Value, name: string, action: (array: PhpArray) => Va
   const result = action(table);
   objectPointers.set(value, { pointer: table.pointer });
   return result;
+}
+
+function compareSetValues(a: Entry, b: Entry): number {
+  rt().spend();
+  return compareBytes(toStr(a.value), toStr(b.value));
 }

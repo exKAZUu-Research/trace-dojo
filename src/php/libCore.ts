@@ -4,7 +4,7 @@ import { lower } from './bytes';
 import { callCallback, callTargetOf, callValue } from './callables';
 import { type ArgValue, callStack, setCallableExplainer } from './calls';
 import * as classesModule from './classes';
-import { findClass, lookupMethod, visibleProps } from './classes';
+import { findClass, lookupMethod } from './classes';
 import { debugType, getType, isNumericString, normalizeKeyString, valueName } from './conversions';
 import {
   E_ALL,
@@ -38,7 +38,7 @@ import { formatPrintf } from './sprintf';
 import { constantKey, defineConstant as defineUserConstant } from './statements';
 import { setCallableCheck } from './types';
 import { UnsupportedFeatureError } from './unsupported';
-import { isClosure, PhpArray, PhpClass, PhpObject, Ref, type Value } from './values';
+import { isClosure, PhpArray, PhpClass, PhpObject, Ref, UNINIT, type Value } from './values';
 
 // Constants ------------------------------------------------------------------------------------------------------------
 
@@ -349,7 +349,7 @@ defineFunction('call_user_func_array(callable $callback, array $args): mixed', (
     if (typeof key === 'string') argValues.push({ v, ref, name: key });
     else {
       if (argValues.some((arg) => arg.name !== undefined))
-        throwError('Error', 'Cannot use positional argument after named argument during unpacking');
+        throwError('Error', 'Cannot use positional argument after named argument');
       argValues.push({ v, ref });
     }
   }
@@ -429,8 +429,20 @@ defineFunction('get_called_class(): string', () => {
 });
 defineFunction('get_object_vars(object $object): array', ({ args }) => {
   const object = args[0] as PhpObject;
+  const scope = rt().frame.scope;
   const array = new PhpArray();
-  for (const [name, value] of visibleProps(object, rt().frame.scope)) array.set(normalizeKeyString(name), value);
+  const declaredKeys = new Set(object.cls.props.map((decl) => decl.key));
+  for (const decl of object.cls.props) {
+    if (decl.isStatic || !classesModule.canAccessProp(decl, scope)) continue;
+    if (decl.hooks?.get) array.set(decl.name, classesModule.readProp(object, decl.name, scope));
+    else {
+      const slot = object.props.get(decl.key);
+      if (slot !== undefined && slot !== UNINIT) array.set(decl.name, slot instanceof Ref ? slot.v : slot);
+    }
+  }
+  for (const [key, slot] of object.props) {
+    if (!declaredKeys.has(key) && slot !== UNINIT) array.set(key, slot instanceof Ref ? slot.v : slot);
+  }
   return array;
 });
 defineFunction('get_class_methods(object|string $object_or_class): array', ({ args }) => {

@@ -169,8 +169,7 @@ export class ValuePlace implements Place {
  * The array a nested write goes into, after separating it from other holders or creating it, or the ArrayAccess
  * object that receives the write.
  */
-export function writableContainer(place: Place): PhpArray | PhpObject | string {
-  const value = place.get();
+export function writableContainer(place: Place, value = place.get()): PhpArray | PhpObject | string {
   if (value instanceof PhpArray) {
     if (arrayIsShared(value)) {
       const copy = value.copy();

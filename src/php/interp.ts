@@ -41,8 +41,8 @@ import {
   writeProp,
 } from './classes';
 import * as classesModule from './classes';
+import { debugType, numericPrefix, toBool, valueName } from './conversions';
 import * as conversionsModule from './conversions';
-import { debugType, toBool, valueName } from './conversions';
 import { deprecated, notice, throwError, warn } from './errors';
 import { constantDeprecation } from './native';
 import {
@@ -61,7 +61,16 @@ import { readElement, share } from './places';
 import { ExitSignal, PhpThrow, rt } from './runtime';
 import { constantKey, iteratorOf } from './statements';
 import { UnsupportedFeatureError } from './unsupported';
-import { type ClosureData, isClosure, PhpArray, type PhpClass, PhpObject, Ref, type Value } from './values';
+import {
+  type ClosureData,
+  copyValueSlot,
+  isClosure,
+  PhpArray,
+  type PhpClass,
+  PhpObject,
+  Ref,
+  type Value,
+} from './values';
 
 export const SHORT = Symbol('nullsafe');
 export type Chain = Value | typeof SHORT;
@@ -442,6 +451,10 @@ export function stringOffset(text: string, index: Value, quiet: boolean): number
   else if (typeof index === 'string') {
     if (/^[ \t\n\r\v\f]*[+-]?\d+[ \t\n\r\v\f]*$/.test(index)) offset = BigInt(index);
     else {
+      if (numericPrefix(index)?.whole) {
+        if (quiet) return undefined;
+        throwError('TypeError', 'Cannot access offset of type string on string');
+      }
       const leading = /^[ \t\n\r\v\f]*[+-]?\d+/.exec(index);
       if (!leading || quiet) {
         if (quiet) return undefined;
@@ -502,7 +515,7 @@ function arrayLiteral(e: Extract<Expr, { k: 'array' }>): PhpArray {
     if (key === undefined) {
       if (!array.append(value))
         throwError('Error', 'Cannot add element to the array as the next element is already occupied');
-    } else array.set(key, value);
+    } else array.setSlot(key, value);
     runtime.spend();
   }
   return array;
@@ -511,8 +524,7 @@ function arrayLiteral(e: Extract<Expr, { k: 'array' }>): PhpArray {
 function spreadInto(array: PhpArray, value: Value): void {
   if (value instanceof PhpArray) {
     for (const [key, slot] of value.map) {
-      const item = slot instanceof Ref && slot.isRef ? slot : share(slot instanceof Ref ? slot.v : slot);
-      if (item instanceof Ref) item.rc++;
+      const item = copyValueSlot(slot);
       if (typeof key === 'string') array.setSlot(key, item);
       else if (!array.append(item))
         throwError('Error', 'Cannot add element to the array as the next element is already occupied');
@@ -873,10 +885,7 @@ export function cast(type: string, value: Value): Value {
       const object = createObject(rt().classes.get('stdclass') as PhpClass);
       if (value instanceof PhpArray) {
         for (const [key, slot] of value.map) {
-          if (slot instanceof Ref && slot.isRef) {
-            slot.rc++;
-            object.props.set(String(key), slot);
-          } else object.props.set(String(key), share(slot instanceof Ref ? slot.v : slot));
+          object.props.set(String(key), copyValueSlot(slot));
         }
       } else if (value !== null) object.props.set('scalar', value);
       return object;

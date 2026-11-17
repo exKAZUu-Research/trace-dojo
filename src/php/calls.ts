@@ -383,6 +383,11 @@ function invokeUser(target: CallTarget, fn: UserFunction, args: ArgValue[], row:
   const params = fn.params;
   checkNamedArgs(params, args, positional.length);
   frame.args = positional.map((arg) => arg.ref?.v ?? arg.v);
+  for (const arg of args) {
+    const index = arg.name === undefined ? -1 : params.findIndex((param) => !param.variadic && param.name === arg.name);
+    if (index >= 0) frame.args[index] = arg.ref?.v ?? arg.v;
+  }
+  frame.args = Array.from({ length: frame.args.length }, (_, index) => frame.args[index] ?? null);
   const record = recordFor(target, [...frame.args], row ?? implicitCallRow());
   const savedRow = runtime.row;
   runtime.frames.push(frame);
@@ -398,6 +403,7 @@ function invokeUser(target: CallTarget, fn: UserFunction, args: ArgValue[], row:
     bindParams(frame, fn, args, positional, name, strict, row);
     handOverArgs(caller, args);
     recordBoundArgs(record, params, frame, args, positional.length);
+    frame.args = [...record.args];
     let result: Value;
     try {
       result = runBody(decl, frame);
@@ -479,7 +485,7 @@ function tracedNamedArgs(
     else count = Math.max(count, index + 1);
   }
   record.args = [
-    ...record.args,
+    ...record.args.slice(0, positional),
     ...params.slice(positional, count).map((param) => frame.vars.get(param.name)?.v ?? null),
   ];
   record.named = named;

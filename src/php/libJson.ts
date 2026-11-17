@@ -315,15 +315,15 @@ defineFunction('json_last_error_msg(): string', () => MESSAGES[rt().lastJsonErro
 defineFunction('json_validate(string $json, int $depth = 512, int $flags = 0): bool', ({ args }) => {
   const depth = Number((args[1] as bigint | undefined) ?? 512n);
   try {
-    if (args[0] === '') throw new JsonError(4);
-    rt().lastJsonError = 0;
-    if (depth <= 0) throwError('ValueError', 'json_validate(): Argument #2 ($depth) must be greater than 0');
     const flags = (args[2] as bigint | undefined) ?? 0n;
     if ((flags & ~1_048_576n) !== 0n)
       throwError(
         'ValueError',
         'json_validate(): Argument #3 ($flags) must be a valid flag (allowed flags: JSON_INVALID_UTF8_IGNORE)'
       );
+    if (args[0] === '') throw new JsonError(4);
+    rt().lastJsonError = 0;
+    if (depth <= 0) throwError('ValueError', 'json_validate(): Argument #2 ($depth) must be greater than 0');
     new JsonParser(args[0] as string, true, depth, flags).parseDocument();
     return true;
   } catch (error) {
@@ -371,7 +371,7 @@ class JsonParser {
     this.skipSpace();
     const char = this.text[this.index];
     if (char === '{' || char === '[') {
-      if (depth >= this.maxDepth) throw new JsonError(1);
+      if (depth + 1 >= this.maxDepth) throw new JsonError(1);
       return char === '{' ? this.object(depth + 1) : this.array(depth + 1);
     }
     if (char === '"') return this.string();
@@ -458,6 +458,7 @@ class JsonParser {
             result += enc('�');
             continue;
           }
+          if ((this.flags & 1_048_576n) !== 0n) continue;
           throw new JsonError(5);
         }
         result += this.text.slice(this.index - 1, this.index - 1 + length);

@@ -194,13 +194,13 @@ function objectsWithin(values: unknown[]): PhpObject[] {
     else if (item instanceof PhpArray) {
       if (!item.composite || seenArrays.has(item)) continue;
       seenArrays.add(item);
-      pending.push(...item.map.values());
+      appendValues(pending, [...item.map.values()]);
     } else if (item instanceof PhpObject) {
       if (found.has(item)) continue;
       found.add(item);
       pushObject(item, pending);
-    } else if (item instanceof Map) pending.push(...item.values());
-    else if (Array.isArray(item)) pending.push(...item);
+    } else if (item instanceof Map) appendValues(pending, [...item.values()]);
+    else if (Array.isArray(item)) appendValues(pending, [...item]);
   }
   return [...found];
 }
@@ -214,7 +214,7 @@ function heldArrayCount(freed: PhpObject[]): number {
     if (item instanceof Ref) pending.push(item.v);
     else if (item instanceof PhpArray && item.composite && !arrays.has(item)) {
       arrays.add(item);
-      pending.push(...item.map.values());
+      appendValues(pending, [...item.map.values()]);
     }
   }
   return arrays.size;
@@ -241,15 +241,21 @@ export function mark(runtime: Runtime): Set<PhpObject> {
   const visitedArrays = new Set<PhpArray>();
   const roots: unknown[] = [];
   for (const frame of runtime.frames) pushFrame(frame, roots);
-  for (const fn of runtime.functions.values()) if (fn.kind === 'user') roots.push(...fn.statics.values());
+  for (const fn of runtime.functions.values()) if (fn.kind === 'user') appendValues(roots, [...fn.statics.values()]);
   for (const cls of runtime.classes.values()) {
     for (const { ref } of cls.staticProps.values()) roots.push(ref);
     for (const constant of cls.consts.values()) if (constant.value !== undefined) roots.push(constant.value);
-    for (const method of cls.methods.values()) if (method.fn.kind === 'user') roots.push(...method.fn.statics.values());
+    for (const method of cls.methods.values())
+      if (method.fn.kind === 'user') appendValues(roots, [...method.fn.statics.values()]);
   }
   for (const value of runtime.constants.values()) roots.push(value);
-  roots.push(...runtime.held, runtime.exceptionHandler, ...runtime.replacedExceptionHandlers, runtime.thrown);
-  for (const held of runtime.nativeHeld) roots.push(...held);
+  appendValues(roots, [
+    ...runtime.held,
+    runtime.exceptionHandler,
+    ...runtime.replacedExceptionHandlers,
+    runtime.thrown,
+  ]);
+  for (const held of runtime.nativeHeld) appendValues(roots, [...held]);
   for (const { handler } of runtime.errorHandlers) roots.push(handler);
   // A stack visits the first of the items pushed together first when they are pushed in reverse.
   const pending = roots.toReversed();
@@ -285,7 +291,7 @@ export function mark(runtime: Runtime): Set<PhpObject> {
 
 function pushFrame(frame: Frame, pending: unknown[]): void {
   for (const ref of frame.vars.values()) pending.push(ref);
-  pending.push(...frame.temporaries, ...frame.args, frame.returning);
+  appendValues(pending, [...frame.temporaries, ...frame.args, frame.returning]);
   if (frame.thisObj) pending.push(frame.thisObj);
   if (frame.closure) pending.push(frame.closure);
 }
@@ -296,13 +302,13 @@ function pushObject(object: PhpObject, pending: unknown[]): void {
   if (internal === undefined) return;
   if (isClosure(object)) {
     const data = internal as ClosureData;
-    pending.push(...data.bound.values());
+    appendValues(pending, [...data.bound.values()]);
     if (data.thisObj) pending.push(data.thisObj);
-    if (data.fn.kind === 'user') pending.push(...data.fn.statics.values());
+    if (data.fn.kind === 'user') appendValues(pending, [...data.fn.statics.values()]);
     return;
   }
   const held = (internal as { held?: () => unknown[] }).held;
-  if (typeof held === 'function') pending.push(...held.call(internal));
+  if (typeof held === 'function') appendValues(pending, [...held.call(internal)]);
 }
 
 /**
@@ -373,7 +379,7 @@ function freeable(garbage: PhpObject[]): PhpObject[] {
     const object = pending.pop() as PhpObject;
     if (kept.has(object)) continue;
     kept.add(object);
-    pending.push(...(edges.get(object) as PhpObject[]));
+    appendValues(pending, [...(edges.get(object) as PhpObject[])]);
   }
   return garbage.filter((object) => !kept.has(object));
 }
@@ -420,17 +426,18 @@ export function referencedObjects(object: PhpObject): PhpObject[] {
   const found: PhpObject[] = [];
   const pending: unknown[] = [];
   pushObject(object, pending);
+  pending.reverse();
   const seenArrays = new Set<PhpArray>();
   while (pending.length > 0) {
-    const item = pending.shift();
-    if (item instanceof Ref) pending.unshift(item.v);
+    const item = pending.pop();
+    if (item instanceof Ref) pending.push(item.v);
     else if (item instanceof PhpObject) found.push(item);
     else if (item instanceof PhpArray) {
       if (seenArrays.has(item)) continue;
       seenArrays.add(item);
-      pending.unshift(...item.map.values());
-    } else if (item instanceof Map) pending.unshift(...item.values());
-    else if (Array.isArray(item)) pending.unshift(...item);
+      appendReversed(pending, item.map.values());
+    } else if (item instanceof Map) appendReversed(pending, item.values());
+    else if (Array.isArray(item)) appendReversed(pending, item);
   }
   return found;
 }
@@ -509,12 +516,12 @@ export function arrayIsShared(runtime: Runtime, target: PhpArray): boolean {
   const pending: unknown[] = [];
   for (const frame of runtime.frames) {
     for (const ref of frame.vars.values()) pending.push(ref);
-    pending.push(...frame.temporaries, frame.returning, frame.thisObj, frame.closure);
+    appendValues(pending, [...frame.temporaries, frame.returning, frame.thisObj, frame.closure]);
   }
   for (const cls of runtime.classes.values()) for (const { ref } of cls.staticProps.values()) pending.push(ref);
-  for (const fn of runtime.functions.values()) if (fn.kind === 'user') pending.push(...fn.statics.values());
+  for (const fn of runtime.functions.values()) if (fn.kind === 'user') appendValues(pending, [...fn.statics.values()]);
   for (const value of runtime.constants.values()) pending.push(value);
-  pending.push(...runtime.held);
+  appendValues(pending, [...runtime.held]);
   let visits = 0;
   while (pending.length > 0) {
     if (++visits % 8 === 0) runtime.spend();
@@ -529,8 +536,8 @@ export function arrayIsShared(runtime: Runtime, target: PhpArray): boolean {
     else if (value instanceof PhpArray && value.composite) {
       for (const slot of value.map.values()) if (slot !== null && typeof slot === 'object') pending.push(slot);
     } else if (value instanceof PhpObject) pushObject(value, pending);
-    else if (Array.isArray(value)) pending.push(...value);
-    else if (value instanceof Map) pending.push(...value.values());
+    else if (Array.isArray(value)) appendValues(pending, [...value]);
+    else if (value instanceof Map) appendValues(pending, [...value.values()]);
   }
   return false;
 }
@@ -538,11 +545,12 @@ export function arrayIsShared(runtime: Runtime, target: PhpArray): boolean {
 function ownershipRoots(runtime: Runtime): Set<unknown> {
   const roots: unknown[] = [];
   for (const frame of runtime.frames) pushFrame(frame, roots);
-  for (const fn of runtime.functions.values()) if (fn.kind === 'user') roots.push(...fn.statics.values());
+  for (const fn of runtime.functions.values()) if (fn.kind === 'user') appendValues(roots, [...fn.statics.values()]);
   for (const cls of runtime.classes.values()) {
     for (const { ref } of cls.staticProps.values()) roots.push(ref);
     for (const constant of cls.consts.values()) roots.push(constant.value);
-    for (const method of cls.methods.values()) if (method.fn.kind === 'user') roots.push(...method.fn.statics.values());
+    for (const method of cls.methods.values())
+      if (method.fn.kind === 'user') appendValues(roots, [...method.fn.statics.values()]);
   }
   roots.push(
     ...runtime.constants.values(),
@@ -551,7 +559,7 @@ function ownershipRoots(runtime: Runtime): Set<unknown> {
     runtime.exceptionHandler,
     ...runtime.replacedExceptionHandlers
   );
-  for (const held of runtime.nativeHeld) roots.push(...held);
+  for (const held of runtime.nativeHeld) appendValues(roots, [...held]);
   for (const { handler } of runtime.errorHandlers) roots.push(handler);
   return new Set(roots);
 }
@@ -592,4 +600,12 @@ function ownedReachable(value: Ref | PhpArray | PhpObject, roots: Set<unknown>, 
     }
   }
   return false;
+}
+
+function appendValues(target: unknown[], values: Iterable<unknown>): void {
+  for (const value of values) target.push(value);
+}
+function appendReversed(target: unknown[], values: Iterable<unknown>): void {
+  const list = [...values];
+  for (let index = list.length - 1; index >= 0; index--) target.push(list[index]);
 }

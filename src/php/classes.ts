@@ -11,9 +11,11 @@ import { FatalError, rt, SCRIPT_PATH } from './runtime';
 import tentativeReturnMethods from './tentativeReturnMethods.json';
 import { coerce, describeType, NO_MATCH, typeToString } from './types';
 import { UnsupportedFeatureError } from './unsupported';
+import { unsupportedClasses } from './unsupportedCatalog';
 import {
   type Callable,
   type ClassConst,
+  copyValueSlot,
   dropped,
   type Method,
   type Param,
@@ -44,6 +46,8 @@ export function findClass(name: string): PhpClass | undefined {
 }
 
 export function requireClass(name: string): PhpClass {
+  const unsupported = unsupportedClasses.get(lower(name.replace(/^\\/, '')));
+  if (unsupported) throw new UnsupportedFeatureError(unsupported);
   const cls = findClass(name);
   if (!cls) {
     if (builtinNames.classes.some((builtin) => lower(builtin) === lower(name)))
@@ -899,6 +903,14 @@ export function propRef(object: PhpObject, name: string, scope: PhpClass | undef
 
 export function bindPropertyReference(object: PhpObject, name: string, ref: Ref, scope: PhpClass | undefined): void {
   const decl = lookupProp(object.cls, name, scope);
+  if ((!decl || !canAccessProp(decl, scope)) && object.cls.findMethod('__get')) {
+    rt().lastReturnRef = undefined;
+    const value = readProp(object, name, scope, true);
+    if (!(value instanceof PhpObject) && !rt().lastReturnRef)
+      notice(`Indirect modification of overloaded property ${object.cls.name}::$${name} has no effect`);
+    rt().lastReturnRef = undefined;
+    throwError('Error', 'Cannot assign by reference to overloaded object');
+  }
   if (decl && !decl.isStatic) {
     if (!canAccessProp(decl, scope))
       throwError('Error', `Cannot access ${decl.visibility} property ${object.cls.name}::$${name}`);
@@ -918,8 +930,8 @@ export function bindPropertyReference(object: PhpObject, name: string, ref: Ref,
 
 export function attachPropertyReference(ref: Ref, decl: PropDecl, object?: PhpObject): void {
   const value = coerceProperty(decl, ref.v, object);
-  ref.assign(value);
-  if (!Object.is(ref.v, value)) {
+  const checked = checkReferenceValue(ref, value);
+  if (!Object.is(checked, value)) {
     const source = ref.typedBy?.[0]?.decl;
     if (source)
       throwError(
@@ -927,11 +939,14 @@ export function attachPropertyReference(ref: Ref, decl: PropDecl, object?: PhpOb
         `Reference with value of type ${valueName(ref.v)} held by property ${source.cls.name}::$${source.name} of type ${describeType(source.type as TypeDecl, source.cls)} is not compatible with property ${decl.cls.name}::$${decl.name} of type ${describeType(decl.type as TypeDecl, decl.cls)}`
       );
   }
+  ref.assign(value);
   ref.typedBy ??= [];
   ref.typedBy.push({ decl, object });
 }
 
-setReferenceTypeCheck((ref, value) => {
+setReferenceTypeCheck(checkReferenceValue);
+
+function checkReferenceValue(ref: Ref, value: Value): Value {
   ref.typedBy = ref.typedBy?.filter(({ decl, object }) =>
     object ? object.props.get(decl.key) === ref : decl.cls.findStatic(decl.name)?.ref === ref
   );
@@ -948,7 +963,7 @@ setReferenceTypeCheck((ref, value) => {
     }
   }
   return coerced;
-});
+}
 
 // code-gauge-allow functionCognitiveComplexity 18 -- Follows PHP's class linking and property access rules in their order of checks.
 export function unsetProp(object: PhpObject, name: string, scope: PhpClass | undefined): void {
@@ -1114,10 +1129,7 @@ export function objectToArray(object: PhpObject): PhpArray {
     const decl = declForKey(object.cls, key);
     let arrayKey = key;
     if (decl?.visibility === 'protected') arrayKey = `\0*\0${decl.name}`;
-    if (slot instanceof Ref && slot.isRef) {
-      slot.rc++;
-      array.setSlot(normalizeKeyString(arrayKey), slot);
-    } else array.set(normalizeKeyString(arrayKey), share(slot instanceof Ref ? slot.v : slot));
+    array.setSlot(normalizeKeyString(arrayKey), copyValueSlot(slot));
   }
   return array;
 }

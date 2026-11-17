@@ -3,6 +3,7 @@ import { callStack } from './calls';
 import { floatFitsInt, formatFloatRepr, numericPrefix } from './conversions';
 import { fatal, notice, throwError, warn } from './errors';
 import { toFloat, toInt, toStr } from './operators';
+import { rt } from './runtime';
 import { exponentialText, fixedDigits, generalText } from './strings';
 import type { Value } from './values';
 
@@ -252,6 +253,7 @@ function fitField(text: string, spec: Spec, position: number, options: FieldOpti
   const count = Math.max(spec.width - length, 0);
   const fieldWidth = Math.max(spec.width, length);
   if (fieldWidth > INT_LIMIT - position - 1) fatal(`Field width ${fieldWidth} is too long`);
+  rt().ensureStringFits(position + fieldWidth);
   if (spec.alignLeft) return text.slice(0, length) + spec.padding.repeat(count);
   let body = text;
   let sign = '';

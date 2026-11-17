@@ -223,8 +223,8 @@ export class Converter extends DeclarationConverter {
       }
       case 'goto_statement': {
         const label = this.nameText(node.namedChildren[0]);
-        this.fn.gotos.push({ label, row });
-        return [{ k: 'goto', label, row }];
+        this.fn.gotos.push({ label, row, offset: node.startIndex });
+        return [{ k: 'goto', label, row, offset: node.startIndex }];
       }
       case 'declare_statement': {
         return this.declareStatement(node, topLevel);
@@ -636,6 +636,7 @@ export class Converter extends DeclarationConverter {
         const inner = node.namedChildren.find((child) => child.type !== 'comment') as Node;
         const interpolating =
           node.text.startsWith('${') &&
+          this.source[node.startIndex - 1] !== '{' &&
           (node.parent?.type === 'encapsed_string' || node.parent?.type === 'heredoc_body');
         const parts = inner.namedChildren.filter((child) => child.type !== 'comment');
         const indexedName =
@@ -1049,7 +1050,11 @@ export class Converter extends DeclarationConverter {
       return { k: 'instanceof', e: l, cls, row };
     }
     const r = this.expr(rightNode);
-    if (operator === '|>') return { k: 'pipe', l, r, row };
+    if (operator === '|>') {
+      if (rightNode.type === 'arrow_function')
+        this.error(rightNode, 'Arrow functions on the right hand side of |> must be parenthesized');
+      return { k: 'pipe', l, r, row };
+    }
     return { k: 'bin', op: lower(operator) === '<>' ? '!=' : lower(operator), l, r, row };
   }
 

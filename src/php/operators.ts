@@ -409,11 +409,14 @@ function compareArrays(a: PhpArray, b: PhpArray): number {
 }
 
 const comparing = new Set<PhpObject | PhpArray>();
+let comparisonDepth = 0;
 
 function compareObjects(a: PhpObject, b: PhpObject): number {
   if (a === b) return 0;
   if (a.cls !== b.cls) return 1;
   if (comparing.has(a)) throwError('Error', 'Nesting level too deep - recursive dependency?');
+  if (comparisonDepth >= 512) throwError('Error', 'Maximum call stack size reached during comparison');
+  comparisonDepth++;
   comparing.add(a);
   try {
     const left = objectProps(a);
@@ -429,6 +432,7 @@ function compareObjects(a: PhpObject, b: PhpObject): number {
     return 0;
   } finally {
     comparing.delete(a);
+    comparisonDepth--;
   }
 }
 
@@ -517,10 +521,13 @@ export function toKey(value: Value, use: KeyUse = 'access'): Key {
 
 function guardComparison<T>(value: PhpArray, compare: () => T): T {
   if (comparing.has(value)) throwError('Error', 'Nesting level too deep - recursive dependency?');
+  if (comparisonDepth >= 512) throwError('Error', 'Maximum call stack size reached during comparison');
+  comparisonDepth++;
   comparing.add(value);
   try {
     return compare();
   } finally {
     comparing.delete(value);
+    comparisonDepth--;
   }
 }

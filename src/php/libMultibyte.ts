@@ -308,17 +308,18 @@ function trimCodes(text: string, set: Set<number>, mode: number, codec: Codec): 
   return encodeCodes(codes.slice(left, right), codec);
 }
 
-defineUtf8Function('mb_chr(int $codepoint, ?string $encoding = null): string|false', ({ args }) => {
+defineFunction('mb_chr(int $codepoint, ?string $encoding = null): string|false', ({ args }) => {
   checkEncoding('mb_chr', args, 2);
   const code = n(args[0]);
   if (code < 0 || code > 0x10_ff_ff || (code >= 0xd8_00 && code <= 0xdf_ff)) return false;
-  return codePointBytes(code);
+  return encodingArgument(args, 2, 'mb_chr').encode(code) ?? false;
 });
-defineUtf8Function('mb_ord(string $string, ?string $encoding = null): int|false', ({ args }) => {
-  const text = dec(s(args[0]));
+defineFunction('mb_ord(string $string, ?string $encoding = null): int|false', ({ args }) => {
+  const text = s(args[0]);
   if (text === '') throwError('ValueError', 'mb_ord(): Argument #1 ($string) must not be empty');
   checkEncoding('mb_ord', args, 2);
-  return BigInt(text.codePointAt(0) as number);
+  const code = encodingArgument(args, 2, 'mb_ord').decode(text)[0];
+  return code === BAD || code === undefined ? false : BigInt(code);
 });
 
 // Searching and cutting, which decode strings as mbstring's UTF-8 decoder does -----------------------------------------

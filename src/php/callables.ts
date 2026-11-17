@@ -35,12 +35,10 @@ export function evalArgs(args: Arg[], fn: Callable | undefined, name: string | u
   const frame = runtime.frame;
   for (const [index, arg] of args.entries()) {
     if (arg.spread) {
-      const source =
-        fn?.params.some((param) => param.byRef) && ['var', 'varvar', 'idx', 'prop', 'sprop'].includes(arg.e.k)
-          ? placeOf(arg.e)
-          : undefined;
+      const source = fn?.params.some((param) => param.byRef) && arg.e.k === 'var' ? placeOf(arg.e) : undefined;
       let value = source ? source.get() : ev(arg.e);
       if (value instanceof PhpArray && source) value = writableContainer(source);
+      else if (value instanceof PhpArray && fn?.params.some((param) => param.byRef)) value = value.copy();
       if (value instanceof PhpArray) {
         for (const [key, item] of value.entries()) {
           const argumentName = typeof key === 'string' ? key : undefined;

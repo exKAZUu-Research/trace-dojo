@@ -45,7 +45,7 @@ export interface FunctionContext {
   returnType?: TypeDecl;
   isGenerator: boolean;
   labels: Set<string>;
-  gotos: { label: string; row: number }[];
+  gotos: { label: string; row: number; offset: number }[];
   className?: string;
   isMethod: boolean;
   /** Whether the code is a function's body (not the file's), and whether that function is a closure. */
@@ -170,7 +170,7 @@ export abstract class ConverterBase {
   }
 
   protected checkGotos(context: FunctionContext, body: Stmt[]): void {
-    for (const { label, row } of context.gotos) {
+    for (const { label, row, offset } of context.gotos) {
       if (!context.labels.has(label))
         this.error(row, `goto の行き先のラベル「${label}」がありません（'goto' to undefined label '${label}'）。`);
       const scopes = (
@@ -188,7 +188,10 @@ export abstract class ConverterBase {
         return undefined;
       };
       const source =
-        scopes(body, (statement) => statement.k === 'goto' && statement.label === label && statement.row === row) ?? [];
+        scopes(
+          body,
+          (statement) => statement.k === 'goto' && statement.label === label && statement.offset === offset
+        ) ?? [];
       const destination = scopes(body, (statement) => statement.k === 'label' && statement.name === label) ?? [];
       if (destination.some((scope) => !source.includes(scope))) {
         this.error(

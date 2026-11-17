@@ -53,7 +53,8 @@ export class ArrayStorage {
 
   clone(): ArrayStorage {
     let copy: ArrayStorage;
-    if (this.backing) copy = new ArrayStorage(this.owner, this.own, this.backing);
+    if (this.owner === 'ArrayIterator' && this.holder) copy = new ArrayStorage(this.owner, this.own, this.holder);
+    else if (this.backing) copy = new ArrayStorage(this.owner, this.own, this.backing);
     else {
       this.own.shared = true;
       copy = new ArrayStorage(this.owner, this.own);
@@ -294,6 +295,7 @@ const iteratorMethods: NativeMethod[] = [
     impl: ({ thisObj, args }) => {
       const storage = storageOf(thisObj);
       const offset = Number(args[0]);
+      if (offset >= 0) storage.position = offset;
       if (offset < 0 || offset >= storage.array.size)
         throwError('OutOfBoundsException', `Seek position ${offset} is out of range`);
       storage.position = offset;

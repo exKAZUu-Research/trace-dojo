@@ -592,7 +592,7 @@ function invalidateOwner(owner: object): void {
     reachProofs.delete(value);
     const children = proofChildren.get(value);
     if (children) {
-      pending.push(...children);
+      for (const child of children) pending.push(child);
       proofChildren.delete(value);
     }
   }
@@ -617,4 +617,14 @@ export function rememberOwnership(path: object[], root: object): void {
       children.add(child);
     }
   }
+}
+
+export function copyValueSlot(slot: Value | Ref): Value | Ref {
+  if (slot instanceof Ref && slot.isRef && slot.rc > 1) {
+    slot.rc++;
+    return slot;
+  }
+  const value = slot instanceof Ref ? slot.v : slot;
+  if (value instanceof PhpArray) value.shared = true;
+  return value;
 }

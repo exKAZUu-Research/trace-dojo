@@ -126,13 +126,16 @@ test('string offset padding stops at the string limit before allocating', () => 
   expect(execution.kind === 'executed' && execution.stdout).toMatch(/^\nFatal error: Allowed memory size/);
 });
 
-test('rejects repeated nested captures rather than returning JavaScript capture semantics', () => {
-  const execution = run('<?php preg_match("/(a|(b))+/", "aba", $m);');
-  expect(execution).toMatchObject({
-    kind: 'executed',
-    uncaughtException: expect.stringContaining('この採点環境では使えません。'),
-  });
-});
+test.each(['/(a|(b))+/', '/(?:a|(b))+/', '/(?>(a)|b)+/'])(
+  'rejects repeated nested captures rather than returning JavaScript capture semantics: %s',
+  (pattern) => {
+    const execution = run(`<?php preg_match('${pattern}', 'aba', $m);`);
+    expect(execution).toMatchObject({
+      kind: 'executed',
+      uncaughtException: expect.stringContaining('この採点環境では使えません。'),
+    });
+  }
+);
 
 test.each(['<?php echo "hello"; declare(strict_types=1);', '<?php function f() {} declare(strict_types=1);'])(
   'rejects a late strict_types declaration before execution: %s',
@@ -284,4 +287,39 @@ test('ownership tracking keeps append loops and linked lists within the operatio
       '<?php class N{public $next=null;function __construct(public $v){}} $head=new N(0);$c=$head;for($i=1;$i<3000;$i++){$c->next=new N($i);$c=$c->next;}$n=0;for($p=$head;$p!==null;$p=$p->next)$n++;echo $n;'
     )
   ).toMatchObject({ kind: 'executed', stdout: '3000' });
+});
+
+test.each([
+  '<?php class A {public int $v {set($v){}}}',
+  '<?php class A {public string $v {set(int $v){}}}',
+  '<?php class A {public int $v=1 {get => 2;}}',
+  '<?php echo 1 |> fn($x) => $x;',
+  '<?php while(false){goto x; x: echo "ok";} goto x;',
+])('rejects invalid hook, pipe and same-line goto syntax: %s', (source) => {
+  expect(run(source).kind).toBe('compileError');
+});
+
+test('bounded comparisons of deeply nested arrays report a PHP error', () => {
+  const source =
+    '<?php $a=1;$b=1;for($i=0;$i<1000;$i++){$a=[$a];$b=[$b];}try{var_dump($a===$b);}catch(Error $e){echo "caught";}';
+  expect(run(source)).toMatchObject({ kind: 'executed', stdout: 'caught' });
+});
+
+test('releasing a large object-containing array does not exhaust the host argument stack', () => {
+  expect(run('<?php $a=array_fill(0,200000,1);$a[]=new stdClass;unset($a);echo "done";')).toMatchObject({
+    kind: 'executed',
+    stdout: 'done',
+  });
+});
+
+test('format padding checks its allocation before constructing the field', () => {
+  const result = run('<?php sprintf("%1000000000s", "x");');
+  expect(result.kind === 'executed' && result.stdout).toMatch(/^\nFatal error: Allowed memory size/);
+});
+
+test('array_unique scales with distinct values in numeric sort mode', () => {
+  expect(run('<?php echo count(array_unique(range(1,5000),SORT_NUMERIC));')).toMatchObject({
+    kind: 'executed',
+    stdout: '5000',
+  });
 });
