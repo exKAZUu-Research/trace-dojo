@@ -1278,3 +1278,35 @@ main=print(minBound::T F Bool,maxBound::T F Bool)`;
     uncaughtException: undefined,
   });
 });
+
+test.each([
+  'f x=g []\ng ys=if null ys then "empty" else show ys++f ()\nmain=putStrLn(g [True])',
+  'f x=g []\ng ys=if null ys then True else ys==ys && f ()\nmain=print(g [True])',
+  'f x=g []\ng ys=if null ys then True else ys==ys && f ()\nmain=putStrLn "ok"',
+  'main=do\n let f x=g []\n     g ys=if null ys then True else ys==ys && f ()\n print(g [True])',
+  'main=print(g [True]) where\n f x=g []\n g ys=if null ys then True else ys==ys && f ()',
+  'run x=let f y=g [];g ys=if null ys then x==x else ys==ys && f () in g [True]\nmain=print(run(1::Int))',
+  'f x=g []\ng ys=h ys\nh zs=if null zs then True else zs==zs && f ()\nmain=print(g [True])',
+])('each inferred recursive binding must have an unambiguous context: %s', (source) => {
+  expect(executeProgram('haskell', source).kind).toBe('compileError');
+});
+
+test.each([
+  [
+    'f xs=g xs\ng ys=if null ys then "empty" else show ys++f []\nmain=do\n putStrLn(f [True])\n putStrLn(f [1::Int])',
+    '[True]empty\n[1]empty\n',
+  ],
+  ['f x=g ([]::[Bool])\ng ys=if null ys then "empty" else show ys++f ()\nmain=putStrLn(g [True])', '[True]empty\n'],
+  [
+    'f x=g []\ng ys=if null ys then True else sum ys>0 && f ()\nmain=print(g [0.5::Double],g [1::Int],f ())',
+    '(True,True,True)\n',
+  ],
+  ['f x=g []\ng ys=if null ys then show(sum ys) else f ()\nmain=print(g [0.5::Double],f ())', '("0.0","0")\n'],
+  ['f x=g []\ng ys=if null ys then 0 else sum ys+f ()\nmain=print(g [1::Int],g [0.5::Double])', '(1,0.5)\n'],
+  ['run x=let f ys=g ys;g zs=if null zs then x==x else zs==zs && f [] in g [True]\nmain=print(run(1::Int))', 'True\n'],
+])('recursive contexts preserve polymorphism, numeric defaulting and enclosing constraints: %s', (source, stdout) => {
+  expect(executeProgram('haskell', source)).toMatchObject({ kind: 'executed', stdout, uncaughtException: undefined });
+  const traced = traceProgram('haskell', source, source);
+  expect(traced.stdout).toBe(stdout);
+  expect(traced.uncaughtException).toBeUndefined();
+});

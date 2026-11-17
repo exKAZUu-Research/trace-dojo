@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 731 -- The type checker keeps its inference rules beside the substitution state they share.
+// code-gauge-allow-file fileNcss 739 -- The type checker keeps its inference rules beside the substitution state they share.
 import { LIMITS } from '../interpreter/limits';
 import { CHAR_TYPE, FUNCTION_TYPE, LIST_TYPE, tupleCon } from './builtinTypes';
 import { type ClassEnv, entailByGivens, hasConstructorHead, isSubclassOf, predsEqual } from './classEnv';
@@ -254,7 +254,10 @@ export class Checker {
         byVar.set(type, list);
       }
       for (const [variable, holes] of byVar) {
-        const chosen = this.defaultFor(variable, holes);
+        const chosen = this.defaultFor(
+          variable,
+          holes.map((hole) => hole.pred)
+        );
         if (!chosen) this.ambiguous(holes[0]);
         this.unify(variable, tcon(chosen), holes[0].span);
       }
@@ -271,9 +274,9 @@ export class Checker {
     return found;
   }
 
-  private defaultFor(variable: TVar, holes: EvidenceHole[]): TypeEntity | undefined {
+  private defaultFor(variable: TVar, preds: readonly Pred[]): TypeEntity | undefined {
     if (pruneKind(variable.kind).tag !== 'star' && pruneKind(variable.kind).tag !== 'kvar') return undefined;
-    const classes = holes.map((hole) => hole.pred.cls);
+    const classes = preds.map((pred) => pred.cls);
     if (!classes.some((cls) => this.builtins.numericClasses.has(cls))) return undefined;
     if (!classes.every((cls) => this.builtins.standardClasses.has(cls))) return undefined;
     for (const candidate of [this.builtins.integer, this.builtins.double]) {
@@ -904,12 +907,12 @@ export class Checker {
   private generalizeBinding(binding: RBinding, monoType: Type, params: DictParam[], outer: number): void {
     binding.dictParams = params;
     if (binding.k === 'fun') {
-      setBinderScheme(binding.binder, this.generalize(monoType, params, outer));
+      setBinderScheme(binding.binder, this.generalize(monoType, params, outer, binding.span));
       if (binding.binder.kind === 'global') this.globalMono.delete(binding.binder.entity);
       return;
     }
     for (const [index, local] of binding.binders.entries()) {
-      local.scheme = this.generalize(local.type as Type, params, outer);
+      local.scheme = this.generalize(local.type as Type, params, outer, binding.span);
       const sig = binding.patSigs?.get(local);
       if (sig) {
         const inferred = local.scheme;
@@ -932,8 +935,7 @@ export class Checker {
     else this.globalMono.set(binder.entity, type);
   }
 
-  /** Quantifies the variables of a type that no enclosing binding shares, with the given dictionaries' constraints. */
-  generalize(type: Type, params: readonly DictParam[], outer: number): Scheme {
+  private generalize(type: Type, params: readonly DictParam[], outer: number, span: Span): Scheme {
     const zonked = zonk(type);
     const vars: TVar[] = [];
     const seen = new Set<TVar>();
@@ -946,12 +948,18 @@ export class Checker {
     };
     add(zonked);
     for (const param of params) add(param.pred.type);
-    return {
+    const scheme = {
       kinds: vars.map((variable) => defaultKind(variable.kind)),
       names: vars.map((variable) => variable.name ?? 'a'),
       preds: params.map((param) => ({ cls: param.pred.cls, type: quantifyType(param.pred.type, vars) })),
       type: quantifyType(zonked, vars),
     };
+    checkSchemeAmbiguity(scheme, span, (index) => {
+      const variable = vars[index];
+      const preds = params.filter((param) => occursIn(variable, param.pred.type)).map((param) => param.pred);
+      return preds.every((pred) => prune(pred.type) === variable) && this.defaultFor(variable, preds) !== undefined;
+    });
+    return scheme;
   }
 
   /**
@@ -1084,14 +1092,16 @@ export function typeVarNames(types: readonly RType[]): string[] {
   return names;
 }
 
-export function checkSchemeAmbiguity(scheme: Scheme, span: Span): void {
+export function checkSchemeAmbiguity(scheme: Scheme, span: Span, defaultable?: (index: number) => boolean): void {
   const visible = genericIndices(scheme.type);
+  const ambiguous = new Set<number>();
   for (const pred of scheme.preds) {
     for (const index of genericIndices(pred.type)) {
-      if (!visible.has(index)) {
-        throw compileError(span, '型シグネチャの制約に、結果の型から決まらない型変数があります。');
-      }
+      if (!visible.has(index)) ambiguous.add(index);
     }
+  }
+  for (const index of ambiguous) {
+    if (!defaultable?.(index)) throw compileError(span, '型の制約に、結果の型から決まらない型変数があります。');
   }
 }
 
