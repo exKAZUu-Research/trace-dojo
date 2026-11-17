@@ -33,8 +33,13 @@ const nestedFunctionTypes = new Set([
  * The types `this.<name>` may hold when a constructor finishes, from which a field without a type annotation or an
  * initializer takes its type: TypeScript follows the constructor's control flow from `undefined` to each of its exits.
  */
-export function typesAtConstructorExit(body: TreeNode, name: string, assignedType: (value: TreeNode) => Type): Type[] {
-  const flow = new AssignmentFlow((left) => isThisField(left, name), assignedType);
+export function typesAtConstructorExit(
+  body: TreeNode,
+  name: string,
+  assignedType: (value: TreeNode) => Type,
+  spend: () => void
+): Type[] {
+  const flow = new AssignmentFlow((left) => isThisField(left, name), assignedType, spend);
   const end = flow.statement(body, [undefinedType]);
   return (merge([end, ...flow.returns]) ?? []).filter((value) => !isLoopEntry(value)) as Type[];
 }
@@ -46,10 +51,11 @@ const ASSIGNED = { kind: 'assigned' };
  * Whether an assignment of the targets may not have run on some path from the start of `body` to `read`, as
  * TypeScript reports a property a program adds to a function before one of its assignments runs.
  */
-export function mayBeUnassignedAt(body: TreeNode, targets: Set<number>, read: TreeNode): boolean {
+export function mayBeUnassignedAt(body: TreeNode, targets: Set<number>, read: TreeNode, spend: () => void): boolean {
   const flow = new AssignmentFlow(
     (left) => targets.has(left.id),
     () => ASSIGNED,
+    spend,
     read
   );
   flow.statement(body, [UNASSIGNED]);
@@ -68,11 +74,14 @@ class AssignmentFlow {
   constructor(
     private readonly isTarget: (left: TreeNode) => boolean,
     private readonly assignedValue: (right: TreeNode) => Value,
+    /** Charges the checker's budget for each statement followed, which bounds the paths through nested blocks. */
+    private readonly spend: () => void,
     private readonly read?: TreeNode
   ) {}
 
   statement(node: TreeNode, values: Values): Values {
     if (!values) return undefined;
+    this.spend();
     switch (node.type) {
       case 'program':
       case 'statement_block': {
@@ -228,10 +237,9 @@ class AssignmentFlow {
     const completed = this.tryAndCatch(node, values);
     if (!finalBody) return completed;
     // A return leaving the `try` or `catch` runs the `finally` block on its way out; TypeScript's flow lets a `break`
-    // or `continue` skip it.
-    const end = this.returns.length;
-    for (let index = returnCount; index < end; index++)
-      this.returns[index] = this.statement(finalBody, this.returns[index]);
+    // or `continue` skip it. The returns run it together, which gives what running it from each would.
+    const returning = merge(this.returns.splice(returnCount));
+    if (returning) this.returns.push(this.statement(finalBody, returning));
     return this.statement(finalBody, completed);
   }
 

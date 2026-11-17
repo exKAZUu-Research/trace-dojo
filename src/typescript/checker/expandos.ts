@@ -119,7 +119,7 @@ export class Expandos {
     if (!key || key !== this.c.flow.referenceKey(assignments[0].childForFieldName('left') as TreeNode)) return;
     if (controlFlowContainer(node).id !== controlFlowContainer(assignments[0]).id) return;
     const targets = new Set(assignments.map((assignment) => (assignment.childForFieldName('left') as TreeNode).id));
-    if (!mayBeUnassignedAt(flowBody(controlFlowContainer(node)), targets, node)) return;
+    if (!mayBeUnassignedAt(flowBody(controlFlowContainer(node)), targets, node, () => this.c.budget.spend())) return;
     this.c.error(propertyNode, `プロパティ '${property.name}' は、代入される前に使われています。`);
   }
 }

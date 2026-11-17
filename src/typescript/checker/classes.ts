@@ -470,8 +470,11 @@ export class ClassChecker {
     const body =
       classNode && !hasToken(member, 'static') ? this.constructorNode(classNode)?.childForFieldName('body') : undefined;
     const types = body
-      ? typesAtConstructorExit(body, nameNode.text, (right) =>
-          this.c.widen(this.c.silently(() => this.c.expressions.check(right)))
+      ? typesAtConstructorExit(
+          body,
+          nameNode.text,
+          (right) => this.c.widen(this.c.silently(() => this.c.expressions.check(right))),
+          () => this.c.budget.spend()
         )
       : [];
     // A field the constructor leaves `undefined` or `null` on every path has no type to infer.
