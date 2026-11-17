@@ -1,7 +1,9 @@
 import { panic } from './arith';
+import { enumLookup } from './enumLookup';
 import { asBigFloat, BigFloat, type FloatBits, floatOf, FORMATS } from './floats';
 import { bitSizeOf, errorUnionOffsets, fieldOffsets, optionalNicheBits, sizeOf, unionOffsets } from './layout';
 import { copyForStorage, undefinedValue } from './semaBase';
+import { singleValueOf } from './singleValue';
 import { type Type, typeId } from './types';
 import {
   ErrorValue,
@@ -14,6 +16,7 @@ import {
   storageLocation,
   type Value,
   ZArray,
+  zeroArray,
   ZStruct,
   ZUnion,
 } from './values';
@@ -63,7 +66,7 @@ export function bindBufferMemory(
   const space = execution.bufferMemory;
   if (!('slots' in memory) || !Array.isArray(memory.slots)) return;
   const destination = memory as Slots;
-  const initial = destination.slots.slice(0, initialized).map(copyForStorage);
+  const initial = singleValueOf(type, spend) ? [] : destination.slots.slice(0, initialized).map(copyForStorage);
   const location = storageLocation(buffer.target.slots, buffer.start);
   const bytes = location.storage as Value[];
   let backing = space.memories.get(bytes);
@@ -72,14 +75,13 @@ export function bindBufferMemory(
     space.memories.set(bytes, backing);
   }
   const start = location.index + offset;
-  for (let index = 0; index < sizeOf(type) * count; index++) {
+  const byteLength = sizeOf(type) * count;
+  for (let index = 0; index < byteLength; index++) {
     spend();
     bytes[start + index] = 0xaan;
   }
-  destination.slots = backing.slots(
-    Array.from({ length: count }, (_, index) => ({ type, offset: (start + sizeOf(type) * index) * 8 }))
-  );
-  for (let index = 0; index < initialized; index++) destination.slots[index] = initial[index];
+  destination.slots = backing.arrayView(type, BigInt(count), start * 8).slots;
+  for (const [index, value] of initial.entries()) destination.slots[index] = value;
 }
 
 class BufferMemory {
@@ -164,7 +166,6 @@ class BufferMemory {
     }
   }
 
-  // code-gauge-allow functionNcss 32 -- Builds stable typed views for arrays, structs, and tagged unions.
   // code-gauge-allow functionCognitiveComplexity 21 -- Builds stable typed views for arrays, structs, and tagged unions.
   private readAggregate(type: Extract<Type, { kind: 'array' | 'struct' | 'union' }>, offset: number): Value {
     const key = `${typeId(type)} ${offset}`;
@@ -174,14 +175,7 @@ class BufferMemory {
     if (cached) return cached;
     let value: Value;
     if (type.kind === 'array') {
-      const count = Number(type.length + (type.sentinel === undefined ? 0n : 1n));
-      const slots = this.slots(
-        Array.from({ length: count }, (_, index) => ({
-          type: type.child,
-          offset: offset + index * sizeOf(type.child) * 8,
-        }))
-      );
-      value = new ZArray(slots, 0, type.length, type.sentinel !== undefined);
+      value = this.arrayView(type.child, type.length, offset, type.sentinel !== undefined);
     } else if (type.kind === 'struct') {
       const offsets = fieldOffsets(type);
       value = new ZStruct(
@@ -221,6 +215,39 @@ class BufferMemory {
     }
     this.views.set(key, value);
     return value;
+  }
+
+  arrayView(child: Type, length: bigint, offset: number, hasSentinel = false): ZArray {
+    const singleton = singleValueOf(child, this.spend);
+    if (singleton) {
+      const array = zeroArray(length, hasSentinel, copyForStorage(singleton.value));
+      registerStorageLocation(array.slots, () => ({ storage: this.bytes, index: offset / 8 }), true);
+      return array;
+    }
+    const count = length + (hasSentinel ? 1n : 0n);
+    const stride = sizeOf(child);
+    const slots = new Proxy<Value[]>([], {
+      get: (target, property, receiver) => {
+        if (property === 'length') return Number(count);
+        const index = propertyIndex(property);
+        return index !== undefined && BigInt(index) < count
+          ? this.read(child, offset + index * stride * 8)
+          : Reflect.get(target, property, receiver);
+      },
+      has: (target, property) => {
+        const index = propertyIndex(property);
+        return index !== undefined && BigInt(index) < count ? true : Reflect.has(target, property);
+      },
+      set: (target, property, value: Value, receiver) => {
+        const index = propertyIndex(property);
+        if (index === undefined) return Reflect.set(target, property, value, receiver);
+        if (BigInt(index) >= count) panic('index out of bounds');
+        this.write(child, offset + index * stride * 8, value);
+        return true;
+      },
+    });
+    registerStorageLocation(slots, (index) => ({ storage: this.bytes, index: offset / 8 + index * stride }), true);
+    return new ZArray(slots, 0, length, hasSentinel);
   }
 
   // code-gauge-allow functionNcss 45 -- Encodes each scalar representation and transparent wrapper into shared bytes.
@@ -281,7 +308,7 @@ class BufferMemory {
     }
   }
 
-  // code-gauge-allow functionCognitiveComplexity 19 -- Writes aggregate contents using their physical layout without replacing interior views.
+  // code-gauge-allow functionCognitiveComplexity 21 -- Writes aggregate contents using their physical layout without replacing interior views.
   private writeAggregate(
     type: Extract<Type, { kind: 'array' | 'struct' | 'union' }>,
     offset: number,
@@ -289,6 +316,7 @@ class BufferMemory {
   ): void {
     switch (type.kind) {
       case 'array': {
+        if (singleValueOf(type.child, this.spend)) return;
         const array = value as ZArray;
         for (let index = 0; index < type.length; index++)
           this.write(type.child, offset + index * sizeOf(type.child) * 8, array.get(index));
@@ -397,8 +425,7 @@ class BufferMemory {
   private unionTag(type: Extract<Type, { kind: 'union' }>, offset: number): number {
     if (!type.tagType) return Number(this.readBits(offset, 8));
     const value = this.read(type.tagType, offset);
-    const index = type.tagType.fields!.findIndex((field) => field.value === value);
-    return index;
+    return enumLookup(type.tagType.fields!, this.spend).indexByValue.get(value as bigint) ?? -1;
   }
 }
 

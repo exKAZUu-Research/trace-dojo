@@ -5448,3 +5448,47 @@ test('runtime zero-bit sentinel views validate bounds without a compile-time dat
   const source = `const std=@import("std");pub fn main()void{const p:*[2]u0=undefined;const s:[]u0=p;var i:usize=0;_=&i;std.debug.print("{}",.{s[0..i:0].len});}`;
   expect(executeProgram('zig', source)).toMatchObject({ kind: 'executed', stderr: '0', uncaughtException: undefined });
 });
+
+test.each(['void', 'struct{}', 'u0', '[2]struct{}'])(
+  'byte-backed %s array fields retain virtual lengths through reads, copies and stores',
+  (type) => {
+    const source = `const std=@import("std");const T=${type};const P=struct{a:[4294967296]T,b:u8};pub fn main()!void{var buf:[64]u8=undefined;var f=std.heap.FixedBufferAllocator.init(&buf);const p=try f.allocator().create(P);p.b=3;const x=p.*;p.a=undefined;p.b=7;std.debug.print("{} {} {} {} {} {}",.{p.a.len,x.a.len,x.b,p.b,buf[0],&p.a[0]==&p.a[4294967295]});}`;
+    expect(executeProgram('zig', source)).toMatchObject({
+      kind: 'executed',
+      stderr: '4294967296 4294967296 3 7 7 true',
+      uncaughtException: undefined,
+    });
+  }
+);
+
+test.each([
+  ['[4294967296]void', 'p.a=undefined;', 'p.a'],
+  ['?[4294967296]void', 'const seed:[4294967296]void=undefined;p.a=seed;', 'p.a.?'],
+  ['union(enum){v:[4294967296]void,n:u8}', 'p.a=.{.v=undefined};', 'p.a.v'],
+])('byte-backed zero-data arrays stay virtual inside %s', (field, initialize, access) => {
+  const source = `const std=@import("std");const P=struct{a:${field},b:u8};pub fn main()!void{var buf:[64]u8=undefined;var f=std.heap.FixedBufferAllocator.init(&buf);const p=try f.allocator().create(P);${initialize}p.b=5;const a=${access};std.debug.print("{any}|{} {}",.{a[4294967295],a.len,p.b});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: 'void|4294967296 5',
+    uncaughtException: undefined,
+  });
+});
+
+test('lazy byte-backed record arrays preserve initialized values through reallocation', () => {
+  const source = `const std=@import("std");const P=struct{a:[4294967296]void,b:u8};pub fn main()!void{var buf:[64]u8=undefined;var f=std.heap.FixedBufferAllocator.init(&buf);var a=try f.allocator().alloc(P,2);a[0].b=3;a[1].b=5;a=try f.allocator().realloc(a,4);a[2].b=7;std.debug.print("{} {} {} {}",.{a[0].b,a[1].b,a[2].b,a.len});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: '3 5 7 4',
+    uncaughtException: undefined,
+  });
+});
+
+test('byte-backed union tags reuse their budgeted ordinal index', () => {
+  const fields = Array.from({ length: 10_000 }, (_, i) => `f${i}:void`).join(',');
+  const source = `const std=@import("std");const U=union(enum){${fields}};pub fn main()!void{var buf:[64]u8=undefined;var f=std.heap.FixedBufferAllocator.init(&buf);const p=try f.allocator().create(U);p.*=.{.f9999={}};var n:u64=0;for(0..50000)|_|{n+=@intFromEnum(p.*);}std.debug.print("{}",.{n});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: '499950000',
+    uncaughtException: undefined,
+  });
+});
