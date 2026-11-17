@@ -5339,3 +5339,45 @@ test('star formatting renders pointer types without dereferencing their data', (
     uncaughtException: undefined,
   });
 });
+
+test.each(['u8', 'u16'])('inline union else excludes all explicit %s cases independently of prong order', (integer) => {
+  const inline = 'inline else=>|v,tag|{if(v)std.debug.print("{t}",.{tag});},';
+  for (const prongs of [`${inline}.a=>{},.c=>{},`, `.a=>{},${inline}.c=>{},`, `.a=>{},.c=>{},${inline}`]) {
+    const source = `const std=@import("std");const U=union(enum){a:${integer},b:bool,c:u32};pub fn main()void{var u:U=.{.b=true};_=&u;switch(u){${prongs}}}`;
+    expect(executeProgram('zig', source)).toMatchObject({
+      kind: 'executed',
+      stderr: 'b',
+      uncaughtException: undefined,
+    });
+  }
+});
+
+test('ordinary union else captures the entire copied union across different payload types', () => {
+  const source = `const std=@import("std");const U=union(enum){a:u8,b:bool,c:u16};pub fn main()void{var u:U=.{.b=true};_=&u;switch(u){.a=>{},else=>|v|{u=.{.c=7};std.debug.print("{} {} {}",.{v.b,@intFromEnum(v),@intFromEnum(u)});}}}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: 'true 1 2',
+    uncaughtException: undefined,
+  });
+});
+
+test('ordinary union else pointer captures alias the whole switched destination', () => {
+  const source = `const std=@import("std");const U=union(enum){a:u8,b:bool,c:u16};pub fn main()void{var u:U=.{.b=true};_=&u;switch(u){else=>|*v|{v.b=false;std.debug.print("{} {}|",.{v.b,@intFromEnum(v.*)});},.a=>{}}std.debug.print("{}",.{u.b});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: 'false 1|false',
+    uncaughtException: undefined,
+  });
+});
+
+test.each([
+  ['fn f(@"_":anytype)@TypeOf(@"_"){return @"_";}', 'f(@as(u8,3))', '3'],
+  ['fn f(@"_":anytype,y:@TypeOf(@"_"))@TypeOf(@"_"){return y;}', 'f(@as(u8,3),7)', '7'],
+])('quoted underscore signature parameters retain dependent types (%#)', (declaration, call, expected) => {
+  const source = `const std=@import("std");${declaration}pub fn main()void{std.debug.print("{}",.{${call}});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: expected,
+    uncaughtException: undefined,
+  });
+});

@@ -45,6 +45,7 @@ import {
 import { payloadFacts, valueFactsOf } from './valueFacts';
 import {
   arrayPointerView,
+  Cell,
   ErrorValue,
   NULL,
   Pointer,
@@ -1923,6 +1924,11 @@ export abstract class StatementCompiler extends CallCompiler {
       inline?: Map<unknown, { body: Stmt | undefined; value: TExpr | undefined; bind?: Prong['bind'] }>;
     }
     const seen = new Map<unknown, Span>();
+    const matches = expression.cases.map((each) => ({
+      each,
+      match: this.switchMatches(each, tagType, Boolean(union), keyOf, seen),
+    }));
+    this.checkCaseRanges(seen);
     const prongs: Prong[] = [];
     let elseProng: Prong | undefined;
     // A labeled switch may `continue` into any prong, so only an unlabeled one skips the prongs it never reaches.
@@ -1932,20 +1938,23 @@ export abstract class StatementCompiler extends CallCompiler {
         : undefined;
     fn.targets.push(target);
     try {
-      for (const each of expression.cases) {
-        const prong = this.switchProng(each, {
-          skipped: reached !== undefined && each !== reached,
-          operand,
-          operandType,
-          tagType,
-          union,
-          unionFields,
-          fieldForTag: (key) => fieldsByTag.get(key),
-          resultType: target.resultType,
-          asStatement,
-          keyOf,
-          seen,
-        });
+      for (const { each, match } of matches) {
+        const prong = this.switchProng(
+          each,
+          {
+            skipped: reached !== undefined && each !== reached,
+            operand,
+            operandType,
+            tagType,
+            union,
+            unionFields,
+            fieldForTag: (key) => fieldsByTag.get(key),
+            resultType: target.resultType,
+            asStatement,
+            seen,
+          },
+          match
+        );
         if (each.isElse) {
           if (elseProng) this.error(each, 'else の枝が2つあります。');
           elseProng = prong as Prong;
@@ -1956,7 +1965,6 @@ export abstract class StatementCompiler extends CallCompiler {
     } finally {
       fn.targets.pop();
     }
-    this.checkCaseRanges(seen);
     const unnamedProng = prongs.find((prong) => prong.isUnnamed);
     if (unnamedProng && (tagType.kind !== 'enum' || tagType.exhaustive)) {
       this.error(expression, '「_」の枝は、「_」で終わる enum の switch にだけ書けます。');
@@ -2103,25 +2111,15 @@ export abstract class StatementCompiler extends CallCompiler {
     }
   }
 
-  private switchProng(
+  // code-gauge-allow functionCognitiveComplexity 19 -- Validates the complete case domain before any body specialization.
+  private switchMatches(
     each: SwitchCase,
-    context: {
-      operand: TExpr;
-      operandType: Type;
-      tagType: Type;
-      union: Extract<Type, { kind: 'union' }> | undefined;
-      unionFields: { name: string; type: Type }[] | undefined;
-      fieldForTag: (key: unknown) => { name: string; type: Type } | undefined;
-      resultType: Type | undefined;
-      asStatement: boolean;
-      keyOf: (value: Value) => unknown;
-      seen: Map<unknown, Span>;
-      skipped: boolean;
-    }
-  ): unknown {
+    tagType: Type,
+    union: boolean,
+    keyOf: (value: Value) => unknown,
+    seen: Map<unknown, Span>
+  ): { values: unknown[]; ranges: [bigint, bigint][]; isUnnamed: boolean } {
     this.compilationBudget.spend();
-    const { operand, operandType, tagType, union, unionFields, fieldForTag, resultType, asStatement, keyOf, seen } =
-      context;
     const values: unknown[] = [];
     const ranges: [bigint, bigint][] = [];
     const isUnnamed = each.items.some((item) => item.value.kind === 'identifier' && isDiscardName(item.value));
@@ -2148,7 +2146,29 @@ export abstract class StatementCompiler extends CallCompiler {
       seen.set(key, item);
       values.push(key);
     }
-    // The capture's type: a union's payload, or the operand's value.
+    return { values, ranges, isUnnamed };
+  }
+
+  private switchProng(
+    each: SwitchCase,
+    context: {
+      operand: TExpr;
+      operandType: Type;
+      tagType: Type;
+      union: Extract<Type, { kind: 'union' }> | undefined;
+      unionFields: { name: string; type: Type }[] | undefined;
+      fieldForTag: (key: unknown) => { name: string; type: Type } | undefined;
+      resultType: Type | undefined;
+      asStatement: boolean;
+      seen: Map<unknown, Span>;
+      skipped: boolean;
+    },
+    match: { values: unknown[]; ranges: [bigint, bigint][]; isUnnamed: boolean }
+  ): unknown {
+    this.compilationBudget.spend();
+    const { operand, operandType, tagType, union, unionFields, fieldForTag, resultType, asStatement, seen } = context;
+    const { values, ranges, isUnnamed } = match;
+    const capturePayload = Boolean(union && (!each.isElse || each.isInline));
     const captureFor = (keys: unknown[]): Type => {
       if (!union || !unionFields) return operandType;
       const types = keys.map((key) => {
@@ -2177,13 +2197,19 @@ export abstract class StatementCompiler extends CallCompiler {
           const binding = this.newLocal(capture.name, pointerTo(captureType, operand.place?.isConst ?? true), true);
           locals.set(capture.name, binding);
           bind = (frame, value, pointer) => {
-            frame.slots[binding.slot] = union ? new Pointer(value as ZUnion, 0) : pointer;
+            frame.slots[binding.slot] = capturePayload
+              ? new Pointer(value as ZUnion, 0)
+              : (pointer ?? new Pointer(new Cell(value), 0));
           };
         } else {
           const binding = this.newLocal(capture.name, captureType, true);
           locals.set(capture.name, binding);
           bind = (frame, value) => {
-            frame.slots[binding.slot] = copyForFrame(frame, union ? (value as ZUnion).slots[0] : value, binding.type);
+            frame.slots[binding.slot] = copyForFrame(
+              frame,
+              capturePayload ? (value as ZUnion).slots[0] : value,
+              binding.type
+            );
           };
         }
       }
@@ -2219,7 +2245,6 @@ export abstract class StatementCompiler extends CallCompiler {
       });
     };
     if (each.isInline) {
-      // One copy of the body per value the prong matches, each knowing the value.
       const keys = each.isElse ? this.remainingKeys(tagType, seen, each) : [...values];
       if (!each.isElse)
         for (const [first, last] of ranges) {
@@ -2250,18 +2275,7 @@ export abstract class StatementCompiler extends CallCompiler {
         inline,
       };
     }
-    const keys = each.isElse ? this.remainingKeys(tagType, seen, each, true) : values;
-    if (each.isElse && union && each.capture) {
-      const types = keys.map((key) => {
-        this.compilationBudget.spend();
-        return fieldForTag(key)?.type ?? VOID;
-      });
-      if (types.some((type) => type !== types[0]))
-        this.error(each, 'else の枝の値の型がそろわないので受け取れません（inline else を使ってください）。');
-    }
-    // Only a prong that captures needs its values' payloads to share a type.
-    const captureType =
-      !each.capture || (each.isElse && !union) ? operandType : captureFor(keys.length > 0 ? keys : values);
+    const captureType = !each.capture || each.isElse ? operandType : captureFor(values);
     const compiled = compileBody(captureType, undefined);
     return { values, ranges, ...compiled, isElse: each.isElse, isUnnamed };
   }
@@ -2286,12 +2300,11 @@ export abstract class StatementCompiler extends CallCompiler {
   }
 
   /** The values of an enum, union, bool, or error set that no prong lists, which `else` matches. */
-  private remainingKeys(tagType: Type, seen: Map<unknown, Span>, span: Span, lenient = false): unknown[] {
+  private remainingKeys(tagType: Type, seen: Map<unknown, Span>, span: Span): unknown[] {
     let all: unknown[];
     if (tagType.kind === 'enum') all = this.enumFields(tagType).map((field) => field.value);
     else if (tagType.kind === 'bool') all = [true, false];
     else if (tagType.kind === 'error_set' && tagType.names) all = [...tagType.names];
-    else if (lenient) return [];
     else return this.error(span, 'inline else は、enum・union・bool・エラー集合の switch にだけ書けます。');
     this.compilationBudget.spend(all.length);
     return all.filter((key) => !seen.has(key));

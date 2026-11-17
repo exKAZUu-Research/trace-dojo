@@ -1,4 +1,5 @@
 import { PANIC, panic } from './arith';
+import { isDiscardName } from './ast';
 import type { Expression, ExpressionOf, FunctionDeclaration, SourceFile, Span } from './ast';
 import { BuiltinCompiler } from './builtins';
 import { constantKey } from './expressions';
@@ -299,7 +300,7 @@ export abstract class CallCompiler extends BuiltinCompiler {
     const locals = new Map<string, LocalBinding>();
     for (const [index, type] of types.entries()) {
       const param = decl.syntax.params[index];
-      if (param && param.name !== '_') {
+      if (param && !isDiscardName(param)) {
         const argument = values[index];
         locals.set(param.name, {
           kind: 'local',
