@@ -320,13 +320,15 @@ export class TypeInference {
     recurse: Recurse
   ): void {
     const end = targetElements.slice(restIndex + 1);
-    const middleEnd = sourceElements.length - end.length;
-    const fixedSource = sourceElements.every((element) => !element.rest && !element.optional);
-    if (end.some((element) => element.rest) || !fixedSource || middleEnd < restIndex) {
+    // As TypeScript does, the fixed elements ending both tuples pair up from the end, and the rest takes the middle.
+    const endLength = Math.min(fixedEndLength(sourceElements), end.length);
+    const middleEnd = sourceElements.length - endLength;
+    if (end.some((element) => element.rest) || endLength < end.length || middleEnd < restIndex) {
       recurse(this.c.tupleType(sourceElements.slice(restIndex)), targetElements[restIndex].type);
       return;
     }
-    for (const [offset, element] of end.entries()) recurse(sourceElements[middleEnd + offset].type, element.type);
+    for (const [offset, element] of end.slice(end.length - endLength).entries())
+      recurse(sourceElements[middleEnd + offset].type, element.type);
     recurse(this.c.tupleType(sourceElements.slice(restIndex, middleEnd)), targetElements[restIndex].type);
   }
 
@@ -531,4 +533,10 @@ function templateCaptures(value: string, texts: string[]): string[] | undefined 
     position = end + delimiter.length;
   }
   return position === value.length ? captures : undefined;
+}
+
+/** How many required elements end a tuple after its last rest or optional element. */
+function fixedEndLength(elements: TupleElement[]): number {
+  const last = elements.findLastIndex((element) => element.rest || element.optional);
+  return elements.length - last - 1;
 }
