@@ -3956,3 +3956,38 @@ test('serialized references can cross distinct fixed buffers within one executio
     uncaughtException: undefined,
   });
 });
+
+test.each(['a.allocatedSlice(),a.unusedCapacitySlice()', '0..18446744073709551615,a.unusedCapacitySlice()'])(
+  'for compares virtual slice lengths exactly before the body: %s',
+  (operands) => {
+    const source = `const std=@import("std");pub fn main(init:std.process.Init)!void{var a:std.ArrayList(void)=.empty;try a.append(init.gpa,{});for(${operands})|_,_|{std.debug.print("body",.{});break;}}`;
+    expect(executeProgram('zig', source)).toMatchObject({
+      kind: 'executed',
+      stderr: '',
+      uncaughtException: 'panic: for loop over objects with non-equal lengths',
+    });
+  }
+);
+
+test.each(['5..3', '1..0'])('descending inline ranges are compile errors: %s', (range) => {
+  expect(executeProgram('zig', `pub fn main()void{inline for(${range})|_|{}}`)).toMatchObject({ kind: 'compileError' });
+});
+
+test.each([false, true])('large disjoint switch cases compile with bounded indexing (ranges: %s)', (ranges) => {
+  const cases = Array.from({ length: 8000 }, (_, index) =>
+    ranges ? `${index * 2}...${index * 2 + 1}=>{},` : `${index}=>{},`
+  ).join('');
+  expect(executeProgram('zig', `pub fn main()void{var x:u32=0;_=&x;switch(x){${cases}else=>{}}}`)).toMatchObject({
+    kind: 'executed',
+    uncaughtException: undefined,
+  });
+});
+
+test.each(['1...4=>{},3=>{},', '3=>{},1...4=>{},', '1...4=>{},4...8=>{},', '1=>{},1=>{},'])(
+  'switch interval validation rejects overlapping cases: %s',
+  (cases) => {
+    expect(executeProgram('zig', `pub fn main()void{var x:u8=0;_=&x;switch(x){${cases}else=>{}}}`)).toMatchObject({
+      kind: 'compileError',
+    });
+  }
+);

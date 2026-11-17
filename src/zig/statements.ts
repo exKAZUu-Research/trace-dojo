@@ -43,7 +43,7 @@ import {
   ErrorValue,
   NULL,
   Pointer,
-  type Slice,
+  Slice,
   type Slots,
   Some,
   storeInto,
@@ -1504,11 +1504,11 @@ export abstract class StatementCompiler extends CallCompiler {
       broken: false,
     };
     interface Operand {
-      lengthOf?: (frame: Frame, value: Value) => number;
+      lengthOf?: (frame: Frame, value: Value) => bigint;
       element: (value: Value, index: number, frame: Frame) => Value;
       evaluate: (frame: Frame) => Value;
       type: Type;
-      staticLength?: number;
+      staticLength?: bigint;
     }
     const operands: Operand[] = expression.operands.map((operand, index) => {
       const capture = expression.captures[index];
@@ -1527,11 +1527,11 @@ export abstract class StatementCompiler extends CallCompiler {
                 const [from, to] = value as unknown as [bigint, bigint];
                 // Zig computes the length as `end - start` in usize.
                 if (to < from) panic(PANIC.overflow);
-                return Number(to - from);
+                return to - from;
               }
             : undefined,
           element: (value, position) => (value as unknown as [bigint, bigint])[0] + BigInt(position),
-          staticLength: start.known && end?.known ? Number((end.value as bigint) - (start.value as bigint)) : undefined,
+          staticLength: start.known && end?.known ? (end.value as bigint) - (start.value as bigint) : undefined,
         };
       }
       const compiled = this.compile(operand.value);
@@ -1573,14 +1573,14 @@ export abstract class StatementCompiler extends CallCompiler {
       );
       for (const value of values) frame.temporaries.push(value);
       try {
-        let count: number | undefined;
+        let count: bigint | undefined;
         for (const [index, operand] of operands.entries()) {
           if (!operand.lengthOf) continue;
           const length = operand.lengthOf(frame, values[index]);
           if (count !== undefined && length !== count) panic(PANIC.forLengths);
           count = length;
         }
-        for (let position = 0; position < (count as number); position++) {
+        for (let position = 0; BigInt(position) < (count as bigint); position++) {
           frame.runtime.spend();
           for (const [index, slot] of slots.entries()) {
             if (slot !== undefined) frame.slots[slot] = operands[index].element(values[index], position, frame);
@@ -1627,47 +1627,50 @@ export abstract class StatementCompiler extends CallCompiler {
 
   /** How a `for` reads an array, a pointer to one, or a slice, by value or by pointer. */
   // code-gauge-allow functionNcss 51 -- Keeps the analysis and the generated code of one construct together, as Zig's Sema does.
+  // code-gauge-allow functionCognitiveComplexity 18 -- Keeps all loop operand views and their exact lengths together.
   private forOperand(
     compiled: TExpr,
     byPointer: boolean,
     span: Span
   ): {
-    lengthOf?: (frame: Frame, value: Value) => number;
+    lengthOf?: (frame: Frame, value: Value) => bigint;
     element: (value: Value, index: number, frame: Frame) => Value;
     evaluate: (frame: Frame) => Value;
     type: Type;
-    staticLength?: number;
+    staticLength?: bigint;
   } {
     const type = compiled.type;
     let child: Type;
     let isConst: boolean;
-    let viewOf: (value: Value) => { slots: { slots: Value[] }; start: number; length: number };
+    let viewOf: (value: Value) => { slots: { slots: Value[] }; start: number; length: bigint };
     let evaluate = compiled.eval;
-    let staticLength: number | undefined;
+    let staticLength: bigint | undefined;
     if (type.kind === 'array') {
       child = type.child;
-      staticLength = type.length;
+      staticLength = BigInt(type.length);
       if (byPointer) this.error(span, '配列を |*x| で受け取るには、for (&arr) |*x| と書いてください。');
       isConst = true;
       viewOf = (value) => {
         const array = value as ZArray;
-        return { slots: array, start: array.offset, length: array.length };
+        return { slots: array, start: array.offset, length: BigInt(array.length) };
       };
     } else if (type.kind === 'pointer' && type.size === 'one' && type.child.kind === 'array') {
       child = type.child.child;
       isConst = type.isConst;
-      staticLength = type.child.length;
+      staticLength = BigInt(type.child.length);
       viewOf = (value) => {
         const array = (value as Pointer).load() as ZArray;
-        return { slots: array, start: array.offset, length: array.length };
+        return { slots: array, start: array.offset, length: BigInt(array.length) };
       };
     } else if (type.kind === 'pointer' && type.size === 'slice') {
       child = type.child;
       isConst = type.isConst;
-      staticLength = knownLengthOf(compiled);
+      const length = knownLengthOf(compiled);
+      const value = staticResultOf(compiled)?.value;
+      staticLength = value instanceof Slice ? value.lengthValue : length === undefined ? undefined : BigInt(length);
       viewOf = (value) => {
         const slice = value as Slice;
-        return { slots: slice.target, start: slice.start, length: slice.length };
+        return { slots: slice.target, start: slice.start, length: slice.lengthValue };
       };
     } else if (type.kind === 'struct' && type.isTuple) {
       return this.error(span, 'タプルは inline for で回してください。');
@@ -1720,6 +1723,7 @@ export abstract class StatementCompiler extends CallCompiler {
         this.coerce(this.compile(operand.rangeEnd, USIZE), USIZE, operand.rangeEnd),
         '範囲'
       ) as bigint;
+      if (end < start) this.error(operand, '範囲の始まりが終わりより大きくなっています。');
       this.compilationBudget.spend(Number(end - start));
       for (let value = start; value < end; value++) elements.push(known(USIZE, value, operand));
     } else {
@@ -1904,6 +1908,7 @@ export abstract class StatementCompiler extends CallCompiler {
     } finally {
       fn.targets.pop();
     }
+    this.checkCaseRanges(seen);
     const unnamedProng = prongs.find((prong) => prong.isUnnamed);
     if (unnamedProng && (tagType.kind !== 'enum' || tagType.exhaustive)) {
       this.error(expression, '「_」の枝は、「_」で終わる enum の switch にだけ書けます。');
@@ -2024,6 +2029,24 @@ export abstract class StatementCompiler extends CallCompiler {
     };
   }
 
+  private checkCaseRanges(seen: Map<unknown, Span>): void {
+    const intervals: { low: bigint; high: bigint; span: Span }[] = [];
+    for (const [key, span] of seen) {
+      this.compilationBudget.spend();
+      if (typeof key === 'bigint') intervals.push({ low: key, high: key, span });
+      else if (Array.isArray(key)) intervals.push({ low: key[0], high: key[1], span });
+    }
+    intervals.sort((a, b) => {
+      this.compilationBudget.spend();
+      return a.low < b.low ? -1 : a.low > b.low ? 1 : 0;
+    });
+    for (let index = 1; index < intervals.length; index++) {
+      this.compilationBudget.spend();
+      if (intervals[index].low <= intervals[index - 1].high)
+        this.error(intervals[index].span, '同じ値の枝が2つあります。');
+    }
+  }
+
   private switchProng(
     each: SwitchCase,
     context: {
@@ -2060,27 +2083,11 @@ export abstract class StatementCompiler extends CallCompiler {
           'switch の枝の値'
         ) as bigint;
         if (last < (first as bigint)) this.error(item, '範囲の始まりが終わりより大きくなっています。');
-        // Ranges are kept in `seen` under a key of their own, with their bounds, to compare with later items.
-        for (const [key] of seen) {
-          const overlaps = Array.isArray(key)
-            ? !(last < (key[0] as bigint) || (first as bigint) > (key[1] as bigint))
-            : typeof key === 'bigint' && key >= (first as bigint) && key <= last;
-          if (overlaps) this.error(item, '同じ値の枝が2つあります。');
-        }
         ranges.push([first as bigint, last]);
         seen.set([first as bigint, last], item);
         continue;
       }
       const key = union ? (first as bigint) : keyOf(first);
-      // Zig checks single values before ranges, so it reports a value inside an earlier range at the range.
-      const range = [...seen.entries()].find(
-        ([seenKey]) =>
-          typeof key === 'bigint' &&
-          Array.isArray(seenKey) &&
-          key >= (seenKey[0] as bigint) &&
-          key <= (seenKey[1] as bigint)
-      );
-      if (range) this.error(range[1], '同じ値の枝が2つあります。');
       if (seen.has(key)) this.error(item, '同じ値の枝が2つあります。');
       seen.set(key, item);
       values.push(key);

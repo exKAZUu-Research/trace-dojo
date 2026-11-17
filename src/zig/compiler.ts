@@ -66,6 +66,7 @@ function firstErrors(errors: readonly SourceDiagnostic[]): SourceDiagnostic[] {
 class Compiler extends StatementCompiler {
   protected readonly tracing: boolean;
   private readonly atomicRows: ReadonlySet<number>;
+  private readonly atomicFunctions = new WeakSet<FunctionDeclaration>();
   private root_: StructType | undefined;
 
   constructor(
@@ -125,17 +126,33 @@ class Compiler extends StatementCompiler {
 
   /** Every `// atomic` must stand on a function's header, from `fn` to the body's `{`. */
   private checkAnnotations(): void {
-    const headers = this.file.functions;
-    for (const row of this.atomicRows) {
-      if (!headers.some((fn) => fn.row <= row && row <= fn.bodyRow)) {
-        throw new CompileError([{ row, message: misplacedAtomicMessage }]);
+    if (this.atomicRows.size === 0) return;
+    const rows = [...this.atomicRows].toSorted((a, b) => {
+      this.compilationBudget.spend();
+      return a - b;
+    });
+    const covered = new Set<number>();
+    for (const fn of this.file.functions) {
+      this.compilationBudget.spend();
+      let low = 0;
+      let high = rows.length;
+      while (low < high) {
+        this.compilationBudget.spend();
+        const mid = low + Math.floor((high - low) / 2);
+        if (rows[mid] < fn.row) low = mid + 1;
+        else high = mid;
+      }
+      for (let index = low; index < rows.length && rows[index] <= fn.bodyRow; index++) {
+        this.compilationBudget.spend();
+        covered.add(rows[index]);
+        this.atomicFunctions.add(fn);
       }
     }
+    for (const row of rows) if (!covered.has(row)) throw new CompileError([{ row, message: misplacedAtomicMessage }]);
   }
 
   protected atomicRow(fn: FunctionDeclaration): boolean {
-    for (const row of this.atomicRows) if (fn.row <= row && row <= fn.bodyRow) return true;
-    return false;
+    return this.atomicFunctions.has(fn);
   }
 
   protected rootType(): Type {

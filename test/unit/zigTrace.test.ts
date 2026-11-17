@@ -390,3 +390,11 @@ _=&q;
   const faulting = source.replace('_=&q;', '_=&q; q.*=3;');
   expect(traceProgram('zig', faulting, faulting).uncaughtException).toBe('Segmentation fault');
 });
+
+test.each([false, true])('many atomic function headers are indexed (multiline: %s)', (multiline) => {
+  const headers = Array.from({ length: 8000 }, (_, index) =>
+    multiline ? `fn fun${index}(\n) void // atomic\n{\n}\n` : `fn fun${index}() void { // atomic\n}\n`
+  ).join('');
+  const source = `${headers}pub fn main()void{}`;
+  expect(traceProgram('zig', source, source).uncaughtException).toBeUndefined();
+});
