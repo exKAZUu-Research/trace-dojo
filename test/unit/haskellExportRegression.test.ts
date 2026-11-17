@@ -24,6 +24,61 @@ test.each([
   });
 });
 
+test('large child lists resolve while repeated wildcard expansion stays bounded', { timeout: 30_000 }, () => {
+  const constructors = Array.from({ length: 6000 }, (_, index) => `C${index}`);
+  const declarations = `data T=${constructors.join('|')}\nmain=print(1::Int)`;
+  const named = `module Main(main,T(${constructors.join(',')})) where\n${declarations}`;
+  expect(executeProgram('haskell', named)).toMatchObject({
+    kind: 'executed',
+    stdout: '1\n',
+    uncaughtException: undefined,
+  });
+  const repeated = `module Main(main,${constructors.map(() => 'T(..)').join(',')}) where\n${declarations}`;
+  expect(executeProgram('haskell', repeated)).toMatchObject({ kind: 'limitExceeded', limit: 'operations' });
+});
+
+test.each([
+  ['T(null)', 'data T=T {null::Int}'],
+  ['T(length)', 'data T=T {length::Int}'],
+  ['T(Main.null)', 'data T=T {null::Int}'],
+  ['Main.T(null)', 'data T=T {null::Int}'],
+  ['C(null)', 'class C a where\n null::a->Bool'],
+  ['T(Just)', 'data T=Just Int'],
+  ['Prelude.Maybe(Just)', 'data T=Just Int'],
+  ['D.Down(getDown)', 'import qualified Data.Ord as D'],
+  ['D.Down(D.getDown)', 'import qualified Data.Ord as D'],
+  ['D.Down(getDown)', 'import qualified Data.Ord as D\ndata T=T {getDown::Int}'],
+  ['Down(getDown)', 'import Data.Ord(Down)\nimport qualified Data.Ord as D(Down(..))'],
+  ['Down(D.getDown)', 'import Data.Ord(Down)\nimport qualified Data.Ord as D(Down(..))'],
+  ['A.Down(getDown)', 'import qualified Data.Ord as A(Down)\nimport qualified Data.Ord as B(Down(..))'],
+  ['A.Down(B.getDown)', 'import qualified Data.Ord as A(Down)\nimport qualified Data.Ord as B(Down(..))'],
+])('explicit export children resolve within their parent: %s', (exports, declarations) => {
+  const source = `module Main(main,${exports}) where\n${declarations}\nmain=print(1::Int)`;
+  expect(executeProgram('haskell', source)).toMatchObject({
+    kind: 'executed',
+    stdout: '1\n',
+    uncaughtException: undefined,
+  });
+});
+
+test.each([
+  ['T(Prelude.null)', 'data T=T {null::Int}'],
+  ['T(Wrong.null)', 'data T=T {null::Int}'],
+  ['T(D.null)', 'import qualified Data.Ord as D\ndata T=T {null::Int}'],
+  ['D.Down(getDown)', 'import qualified Data.Ord as D(Down)'],
+  ['T(..),Down(..)', 'import Data.Ord(Down)\nimport qualified Data.Ord as D(Down(..))\ndata T=T {getDown::Int}'],
+  [
+    'T(..),A.Down(..)',
+    'import qualified Data.Ord as A(Down)\nimport qualified Data.Ord as B(Down(..))\ndata T=T {getDown::Int}',
+  ],
+])('export child selection preserves visibility and conflicts: %s', (exports, declarations) => {
+  const source = `module Main(main,${exports}) where\n${declarations}\nmain=print(1::Int)`;
+  expect(executeProgram('haskell', source)).toMatchObject({
+    kind: 'compileError',
+    diagnostics: [expect.objectContaining({ row: 0 })],
+  });
+});
+
 test.each([
   ['Prelude.filter, L.filter', 'import qualified Data.List as L'],
   ['L.Map, S.Map', 'import qualified Data.Map as L\nimport qualified Data.Map.Strict as S'],

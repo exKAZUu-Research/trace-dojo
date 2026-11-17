@@ -53,6 +53,7 @@ import type {
   TypeExpr,
 } from './syntax';
 import { STAR } from './types';
+import { chargeTypeWork } from './typeWorkBudget';
 
 export interface RDataDecl {
   entity: TypeEntity;
@@ -362,37 +363,43 @@ class Renamer {
         continue;
       }
       const entry = this.lookupType(item.name);
-      const all = this.childrenOf(entry, item.name.qualifier);
-      const children =
-        item.children === 'all'
-          ? all
-          : (item.children ?? []).map((child) => {
-              const found = this.lookupValue(child, false);
-              if (!this.childrenOf(entry, child.qualifier).includes(found))
-                throw compileError(child.span, `${item.name.name} の中に ${child.name} はありません。`);
-              return found;
-            });
-      builder.addType(item.name, entry, children);
+      builder.addType(item.name, entry, this.resolveExportChildren(item, entry));
     }
     return builder.table;
   }
 
-  private childrenOf(entry: TypeLike, qualifier?: string): ValueEntity[] {
+  private resolveExportChildren(item: ImportItem, parent: TypeLike): ValueEntity[] {
+    if (item.children === undefined) return [];
+    const available = this.visibleChildrenOf(parent);
+    if (item.children === 'all') return available;
+    const byName = new Map(available.map((child) => [child.name, child]));
+    return item.children.map((child) => {
+      chargeTypeWork();
+      const found = byName.get(child.name);
+      if (
+        !found ||
+        (child.qualifier && !this.scope.qualifiedValues.get(child.qualifier)?.get(child.name).includes(found))
+      ) {
+        throw compileError(child.span, `${item.name.name} の中に ${child.name} はありません。`);
+      }
+      return found;
+    });
+  }
+
+  private visibleChildrenOf(entry: TypeLike): ValueEntity[] {
     const own = this.ownTypeChildren.get(entry);
-    if (own) return own;
     const children =
-      entry.kind === 'class'
+      own ??
+      (entry.kind === 'class'
         ? entry.entity.methods
         : [
             ...entry.entity.cons.map((con) => con.entity),
             ...[...entry.entity.fields.values()].map((field) => field.entity),
-          ];
-    return children.filter((child) =>
-      (qualifier
-        ? (this.scope.qualifiedValues.get(qualifier)?.get(child.name) ?? [])
-        : this.scope.values.get(child.name)
-      ).includes(child)
-    );
+          ]);
+    return children.filter((child) => {
+      chargeTypeWork();
+      return own !== undefined || this.importOrigins.has(child) || this.scope.values.get(child.name).includes(child);
+    });
   }
 
   // -------------------------------------------------------------------------------------------------------------
