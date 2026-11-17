@@ -62,7 +62,7 @@ export function runBlock(machine: Machine, state: RunState, action: IODo): void 
   };
   frame.traceFrame.contexts.push({ env, prefixEnv: prefix.env, visible: action.code.entryVisible, row: undefined });
   machine.stack.push(frame);
-  if (action.code.bindingRow !== undefined) {
+  if (action.code.bindingRow !== undefined && action.env !== invocation) {
     runtime.steps.stepBinding(
       action.code.bindingRow,
       storesAnswer(runtime, env, action.code.entryVisible, action.code.bindingNames ?? [], frame.traceFrame)
@@ -95,7 +95,7 @@ export function markTailSelfCall(machine: Machine, info: FunctionInfo | undefine
   const top = machine.runtime.frames.at(-1);
   if (!info || top?.info !== info || top === machine.runtime.frames[0]) return;
   let index = machine.stack.length - 1;
-  while (machine.stack[index]?.k === 'update') index--;
+  while (machine.stack[index]?.k === 'update' || machine.stack[index]?.k === 'functionResult') index--;
   if (machine.stack[index]?.k !== 'runIO') return;
   const callers = tailSelfCallers(machine, top, info, index - 1);
   if (callers) callers[0].silent = true;

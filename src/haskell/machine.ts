@@ -1,6 +1,6 @@
-// code-gauge-allow-file fileNcss 454 -- Machine states and frames share one evaluator stack.
+// code-gauge-allow-file fileNcss 481 -- Machine states and frames share one evaluator stack.
 import { CONS_CON, NIL_CON } from './builtinTypes';
-import type { CaseCore, Core } from './core';
+import type { CaseCore, Core, FunctionInfo } from './core';
 import type { TypeHint } from './displayTypeHints';
 import {
   bindDisplayTypes,
@@ -54,6 +54,7 @@ export type Frame =
       target: Thunk | undefined;
     }
   | { k: 'apply'; args: Slot[]; displayType?: TypeHint }
+  | { k: 'functionResult'; info: FunctionInfo }
   | { k: 'case'; core: CaseCore; env: Env; displayType: TypeHint | undefined }
   | { k: 'charCase'; core: Extract<Core, { k: 'charCase' }>; env: Env }
   | { k: 'method'; index: number }
@@ -276,6 +277,7 @@ export class Machine {
       case 'frame': {
         this.runtime.allocate(code.size);
         state.env = new Env(code.size, env, code.info);
+        if (code.functionResult) this.pushFunctionResult(code.info);
         state.code = code.body;
         return;
       }
@@ -339,7 +341,7 @@ export class Machine {
     for (let index = this.stack.length - 1; index >= 0; index--) {
       this.runtime.spend();
       const frame = this.stack[index];
-      if (frame.k !== 'update') return frame.k === 'runIO';
+      if (frame.k !== 'update' && frame.k !== 'functionResult') return frame.k === 'runIO';
     }
     return false;
   }
@@ -400,6 +402,7 @@ export class Machine {
     this.runtime.endPreview(top.thunk);
   }
 
+  // code-gauge-allow functionNcss 31 -- Application dispatch keeps partial, primitive and closure entry on the same stack.
   private stepApply(state: RunState): void {
     let { fn, args } = state;
     if (fn instanceof Partial) {
@@ -433,6 +436,7 @@ export class Machine {
     const frameEnv = new Env(fn.lam.size, fn.env, fn.lam.info);
     for (let index = 0; index < arity; index++) frameEnv.slots[index] = args[index];
     bindDisplayTypes(frameEnv, fn.lam.displayConstraints ?? [], fn.lam.displayParameters ?? [], args, this.runtime);
+    if (fn.lam.functionResult) this.pushFunctionResult(fn.lam.info);
     state.evaluate(fn.lam.body, frameEnv);
   }
 
@@ -460,12 +464,16 @@ export class Machine {
     else state.enter(result);
   }
 
-  // code-gauge-allow functionNcss 44 -- One short case per kind of frame a value returns to.
+  // code-gauge-allow functionNcss 47 -- One short case per kind of frame a value returns to.
   private stepReturn(state: RunState): boolean {
     const frame = this.stack.pop() as Frame;
     switch (frame.k) {
       case 'base': {
         return true;
+      }
+      case 'functionResult': {
+        state.returnValue(this.nameFunctionResult(state.value, frame.info));
+        return false;
       }
       case 'update': {
         frame.thunk.update(state.value as Value);
@@ -530,8 +538,30 @@ export class Machine {
     }
   }
 
-  private inheritTypeHint(slot: Slot): void {
+  private pushFunctionResult(info: FunctionInfo | undefined): void {
+    if (!info) return;
     const top = this.stack.at(-1);
+    if (top?.k === 'functionResult') top.info = info;
+    else this.stack.push({ k: 'functionResult', info });
+  }
+
+  private nameFunctionResult(value: Slot, info: FunctionInfo): Slot {
+    if (value instanceof Closure) return this.namedClosure(value, info);
+    if (value instanceof Partial && value.fn instanceof Closure) {
+      const fn = this.namedClosure(value.fn, info);
+      return fn === value.fn ? value : new Partial(fn, value.args);
+    }
+    return value;
+  }
+
+  private namedClosure(value: Closure, info: FunctionInfo): Closure {
+    return value.lam.info ? value : new Closure({ ...value.lam, info }, value.env);
+  }
+
+  private inheritTypeHint(slot: Slot): void {
+    let index = this.stack.length - 1;
+    while (this.stack[index]?.k === 'functionResult') index--;
+    const top = this.stack[index];
     if (!this.runtime.steps.recorder) return;
     if (top?.k === 'apply') {
       top.displayType = slotTypeHint(slot, top.displayType);

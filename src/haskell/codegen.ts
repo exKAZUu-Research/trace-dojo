@@ -157,6 +157,7 @@ export class Codegen {
         size: 0,
         body: patternProjection({ k: 'global', global: whole }, index, binding.binders.length),
         info: { name: global.name, row: binding.span.row, isAtomic: false },
+        functionResult: global.scheme ? isFunctionType(global.scheme.type) : false,
       };
     }
   }
@@ -329,13 +330,15 @@ export class Codegen {
     // Only top-level functions are frames in a trace: a local function (in `where` or `let`) runs as part of the
     // function that defines it, as a loop or a block inside a Java method does.
     const info = isTop ? this.infoForBinding(binding, name) : undefined;
+    const resultType = info ? this.bindingResultType(binding) : undefined;
+    const functionResult = resultType ? isFunctionType(resultType) : false;
     if (dictParams.length + arity === 0) {
       const frame = new FrameScope(this.frame);
       return this.withFrame(frame, () => {
         const body = this.withVisible(isTop ? OrderedMap<string, VisibleBinding>() : this.visible, () =>
           this.compileClauseBody(binding, [], name)
         );
-        return { k: 'frame', size: frame.size, body, info } as Core;
+        return { k: 'frame', size: frame.size, body, info, functionResult } as Core;
       });
     }
     const visible = isTop ? OrderedMap<string, VisibleBinding>() : this.visible;
@@ -345,6 +348,7 @@ export class Codegen {
       (args) => this.withVisible(visible, () => this.compileClauseBody(binding, args, name)),
       {
         info,
+        functionResult,
         displayParameters: this.options.traceTypes && binding.type ? parameterTypes(binding.type, arity) : undefined,
       }
     );
@@ -367,12 +371,16 @@ export class Codegen {
   /** Whether a binding's body (after its arguments) is an `IO` action, whose expressions run as statements. */
   private bindingReturnsIO(binding: Extract<RBinding, { k: 'fun' }>): boolean {
     if (!this.options.isProgram) return false;
+    const type = this.bindingResultType(binding);
+    return type ? isIOType(type) : false;
+  }
+
+  private bindingResultType(binding: Extract<RBinding, { k: 'fun' }>): Type | undefined {
     const scheme: Scheme | undefined =
       binding.binder.kind === 'local' ? binding.binder.local.scheme : binding.binder.entity.scheme;
     const type =
       binding.type ?? scheme?.type ?? (binding.binder.kind === 'local' ? binding.binder.local.type : undefined);
-    if (!type) return false;
-    return isIOType(resultAfter(type, binding.clauses[0].pats.length));
+    return type ? resultAfter(type, binding.clauses[0].pats.length) : undefined;
   }
 
   // code-gauge-allow functionCognitiveComplexity 16 -- Local functions and pattern bindings need separate slot set-ups in one recursive group.
@@ -836,7 +844,13 @@ export class Codegen {
       }
       for (let index = plans.length - 1; index >= 0; index--) body = this.matchPlan(plans[index], body, fail);
       this.visible = savedVisible;
-      return { k: 'lam', arity: expr.pats.length, size: frame.size, body } as Core;
+      return {
+        k: 'lam',
+        arity: expr.pats.length,
+        size: frame.size,
+        body,
+        functionResult: expr.type ? isFunctionType(resultAfter(expr.type, expr.pats.length)) : false,
+      } as Core;
     });
   }
 
@@ -918,7 +932,7 @@ export class Codegen {
         const lambda = this.withFrame(frame, () => {
           const slot = frame.alloc();
           const savedVisible = this.visible;
-          const plan = this.planPattern(qual.pat, slot, false);
+          const plan = this.planPattern(qual.pat, slot, true);
           const rest = this.compileComprehension(quals, index + 1, result);
           this.visible = savedVisible;
           return { k: 'lam', arity: 1, size: frame.size, body: this.matchPlan(plan, rest, nil) } as Core;
@@ -953,7 +967,7 @@ export class Codegen {
     params: readonly DictParam[],
     arity: number,
     build: (args: number[]) => Core,
-    options?: { info?: FunctionInfo; displayParameters?: Type[] }
+    options?: { info?: FunctionInfo; displayParameters?: Type[]; functionResult?: boolean }
   ): Core {
     const frame = new FrameScope(this.frame);
     return this.withFrame(frame, () => {
@@ -1405,6 +1419,11 @@ export function resultAfter(type: Type, count: number): Type {
     current = prune(args[1]);
   }
   return current;
+}
+
+function isFunctionType(type: Type): boolean {
+  const { head, args } = splitApp(type);
+  return head.tag === 'tcon' && head.entity.special === 'function' && args.length === 2;
 }
 
 function isIOType(type: Type): boolean {
