@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 430 -- Resolves expressions, lexical references, closure captures, and contextual assignment diagnostics; memoization is separate.
+// code-gauge-allow-file fileNcss 436 -- Resolves expressions, lexical references, closure captures, and contextual assignment diagnostics; memoization is separate.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import { unsupportedMessage } from '../unsupported';
@@ -28,6 +28,7 @@ import {
   isIntrinsic,
   nullType,
   type ObjectType,
+  type Property,
   regularOf,
   stringType,
   symbolType,
@@ -587,7 +588,6 @@ export class ExpressionChecker {
   }
 
   /** Reports the properties of a fresh object literal that its target does not declare. */
-  // code-gauge-allow functionCognitiveComplexity 29 -- Follows TypeScript's excess property check, including nested object literals.
   checkExcessProperties(node: TreeNode, source: Type, target: Type): void {
     // Each object literal a union, an array, or a tuple holds is checked against where it goes.
     if (source.kind === 'union') {
@@ -599,40 +599,14 @@ export class ExpressionChecker {
       return;
     }
     if (source.kind !== 'object' || !source.fresh) return;
-    const targets = this.discriminatedTargets(
-      source,
-      (target.kind === 'union' ? target.types : [target]).filter(
-        (member) => member.kind === 'object' || member.kind === 'intersection'
-      )
-    );
-    if (targets.length === 0) return;
-    if (
-      targets.some(
-        (member) =>
-          member.kind === 'object' &&
-          (this.c.relations.isEmptyObjectType(member) ||
-            (member.objectKind === 'mapped' && this.c.relations.isGeneric(member)))
-      )
-    )
-      return;
+    const targets = this.discriminatedTargets(source, objectTargets(target));
+    if (targets.length === 0 || this.acceptsAnyProperty(targets)) return;
     // A discriminated union checks the members its discriminant selects; an index signature takes any key it covers,
     // whose value is still checked against it.
     for (const [name, property] of source.resolve().properties) {
       if (!this.c.literals.isWrittenMember(source, property)) continue;
-      const known = targets.some(
-        (member) =>
-          (this.c.propertyOf(member, name) !== undefined && !this.isObjectPrototypeProperty(member, name)) ||
-          this.c.structureOf(member).stringIndex !== undefined ||
-          (isNumericName(name) && this.c.structureOf(member).numberIndex !== undefined)
-      );
-      if (known) {
-        const declaration = property.declaration;
-        if (declaration?.type === 'pair') {
-          const value = declaration.childForFieldName('value');
-          const valueType = property.type();
-          const targetType = this.c.literals.contextualPropertyType(target, name);
-          if (value && targetType) this.checkExcessProperties(value, valueType, targetType);
-        }
+      if (this.isKnownProperty(targets, name)) {
+        this.checkExcessPropertyValue(property, target);
         continue;
       }
       this.c.error(
@@ -642,6 +616,31 @@ export class ExpressionChecker {
       return;
     }
     this.checkExcessIndexValues(node, source, targets);
+  }
+
+  private acceptsAnyProperty(targets: Type[]): boolean {
+    return targets.some(
+      (member) =>
+        member.kind === 'object' &&
+        (this.c.relations.isEmptyObjectType(member) ||
+          (member.objectKind === 'mapped' && this.c.relations.isGeneric(member)))
+    );
+  }
+
+  private isKnownProperty(targets: Type[], name: string): boolean {
+    return targets.some(
+      (member) =>
+        (this.c.propertyOf(member, name) !== undefined && !this.isObjectPrototypeProperty(member, name)) ||
+        this.c.structureOf(member).stringIndex !== undefined ||
+        (isNumericName(name) && this.c.structureOf(member).numberIndex !== undefined)
+    );
+  }
+
+  /** Checks the object literal a written property's value spells against the target's type of the property. */
+  private checkExcessPropertyValue(property: Property, target: Type): void {
+    const value = property.declaration?.type === 'pair' ? property.declaration.childForFieldName('value') : undefined;
+    const targetType = this.c.literals.contextualPropertyType(target, property.name);
+    if (value && targetType) this.checkExcessProperties(value, property.type(), targetType);
   }
 
   /** Checks the object literals that computed keys give a literal's string index against the targets' string index. */
@@ -726,6 +725,13 @@ function nodeGlobalHint(name: string): string {
   return ['process', 'require', 'module', 'exports', '__dirname', '__filename', 'Buffer'].includes(name)
     ? 'Node.js の機能は、この採点環境では使えません。'
     : '';
+}
+
+/** The members of a target that an object literal's excess properties are checked against. */
+function objectTargets(target: Type): Type[] {
+  return (target.kind === 'union' ? target.types : [target]).filter(
+    (member) => member.kind === 'object' || member.kind === 'intersection'
+  );
 }
 
 /** Whether an expression, through parentheses, is what a call or `new` calls. */
