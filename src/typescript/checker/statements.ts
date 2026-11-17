@@ -3,7 +3,11 @@ import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import type { Checker } from './checker';
 import { checkCircularConstraints } from './circularConstraints';
-import { checkInheritedPropertiesAreIdentical, checkTypeMemberDuplicates } from './declarations';
+import {
+  checkInheritedPropertiesAreIdentical,
+  checkOverloadOptionality,
+  checkTypeMemberDuplicates,
+} from './declarations';
 import { FlowState, type State } from './flow';
 import { checkIndexConformance } from './indexConformance';
 import type { Scope, Sym } from './scopes';
@@ -172,6 +176,7 @@ export class StatementChecker {
     }
     if (node.type === 'object_type') {
       checkTypeMemberDuplicates(this.c, node);
+      checkOverloadOptionality(this.c, node);
       const type = this.c.typeNodes.typeFromNode(node);
       if (type.kind === 'object') checkIndexConformance(this.c, type.resolve(), node);
     }
@@ -184,7 +189,10 @@ export class StatementChecker {
     const symbol = name ? this.c.scopeOf(node).lookupType(name) : undefined;
     if (!symbol) return;
     const body = node.childForFieldName('body');
-    if (body) checkTypeMemberDuplicates(this.c, body);
+    if (body) {
+      checkTypeMemberDuplicates(this.c, body);
+      checkOverloadOptionality(this.c, body);
+    }
     this.c.signatures.typeParametersOf(node);
     const type = this.c.typeNodes.declaredTypeOf(symbol);
     if (type.kind === 'object') {

@@ -228,6 +228,8 @@ function checkMergedProperty(c: Checker, member: TreeNode, seen: Map<string, Tre
   }
 }
 
+const overloadableMethodTypes = new Set(['method_signature', 'method_definition']);
+
 /** Reports class members declared twice: fields, method implementations, and constructors. */
 export function checkDuplicateMembers(c: Checker, body: TreeNode): void {
   const groups = new Map<string, TreeNode[]>();
@@ -300,6 +302,31 @@ export function checkTypeMemberDuplicates(c: Checker, body: TreeNode): void {
     if (members.length < 2 || isAllowedRedeclaration(members)) continue;
     for (const member of members) {
       c.error(member.childForFieldName('name') ?? member, `${name} はすでに宣言されています。`);
+    }
+  }
+}
+
+/**
+ * Reports the declarations of one method that differ from the others in being optional, at each one that differs from
+ * the implementation, or from the first declaration when there is none.
+ */
+export function checkOverloadOptionality(c: Checker, body: TreeNode): void {
+  const byKey = new Map<string, TreeNode[]>();
+  for (const member of named(body)) {
+    if (!overloadableMethodTypes.has(member.type) || hasToken(member, 'get') || hasToken(member, 'set')) continue;
+    const name = memberName(c, member);
+    if (name === undefined) continue;
+    const key = `${hasToken(member, 'static') ? 'static ' : ''}${name}`;
+    byKey.set(key, [...(byKey.get(key) ?? []), member]);
+  }
+  for (const declarations of byKey.values()) {
+    const canonical = declarations.find((declaration) => declaration.childForFieldName('body')) ?? declarations[0];
+    for (const declaration of declarations) {
+      if (hasToken(declaration, '?') !== hasToken(canonical, '?'))
+        c.error(
+          memberNameNode(declaration),
+          'オーバーロードは、すべて省略可能にするか、すべて省略不可にしてください。'
+        );
     }
   }
 }

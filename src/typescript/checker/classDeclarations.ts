@@ -1,7 +1,7 @@
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import type { Checker } from './checker';
-import { checkDuplicateMembers } from './declarations';
+import { checkDuplicateMembers, checkOverloadOptionality } from './declarations';
 import { FlowState, propertyReferenceKey, type State } from './flow';
 import { checkIndexConformance } from './indexConformance';
 import { hasToken, isClassConstructor, isWithin, named } from './syntax';
@@ -34,7 +34,10 @@ export class ClassDeclarationChecker {
     if (baseValue) this.checkBaseValue(node, baseValue);
     const body = node.childForFieldName('body');
     const members = body ? named(body) : [];
-    if (body) checkDuplicateMembers(this.c, body);
+    if (body) {
+      checkDuplicateMembers(this.c, body);
+      checkOverloadOptionality(this.c, body);
+    }
     this.resolveMemberTypes(node, info);
     const ctor = this.c.classes.constructorNode(node);
     for (const member of members) this.checkMember(node, member, info, ctor);

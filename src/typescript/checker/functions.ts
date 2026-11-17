@@ -404,6 +404,9 @@ export class FunctionChecker {
     if (this.c.isLibrary(node)) return;
     const siblings = node.parent ? named(node.parent) : [];
     const index = siblings.findIndex((sibling) => sibling.id === node.id);
+    // An optional method needs no implementation, unless a later declaration of the method follows.
+    if (hasToken(node, '?') && !siblings.slice(index + 1).some((sibling) => this.declaresSameMethod(node, sibling)))
+      return;
     const next = siblings[index + 1];
     const nextName = next?.childForFieldName('name');
     if (
@@ -421,6 +424,14 @@ export class FunctionChecker {
       }
     }
     this.c.error(node.childForFieldName('name') ?? node, '関数の実装がないか、宣言の直後にありません。');
+  }
+
+  private declaresSameMethod(node: TreeNode, other: TreeNode): boolean {
+    return (
+      ['method_signature', 'method_definition'].includes(other.type) &&
+      hasToken(other, 'static') === hasToken(node, 'static') &&
+      this.matchingOverloadNames(node, other)
+    );
   }
 
   private matchingOverloadNames(node: TreeNode, next: TreeNode): boolean {
