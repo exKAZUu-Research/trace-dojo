@@ -924,7 +924,7 @@ export function compareBytes(a: Uint8Array, b: Uint8Array): number {
 }
 
 export function* caseEquals(pattern: Value, value: Value): Gen<boolean> {
-  if (isOverridden(pattern, '==='))
+  if (isOverridden(pattern, '===') || typeof pattern === 'bigint' || isRubyFloat(pattern))
     return truthy(yield* callMethod(pattern, '===', [value], undefined, undefined, { fcall: true }));
   if (pattern instanceof RClass) return isA(value, pattern);
   if (pattern instanceof RRange) return yield* rangeCovers(pattern, value);

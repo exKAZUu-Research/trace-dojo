@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 679 -- Ruby calendar fields and formatting share representation and state; splitting registration by size would scatter that concern.
+// code-gauge-allow-file fileNcss 684 -- Ruby calendar fields and formatting share representation and state; splitting registration by size would scatter that concern.
 // code-gauge-allow-file duplicateLines 15 -- English calendar names mirror the C interpreter because both expose the same fixed calendar vocabulary.
 import { ExecutionLimitError, LIMITS } from '../interpreter/limits';
 import {
@@ -19,7 +19,7 @@ import { argumentError, floatDomainError, frozenError, rangeError, rubyError, ty
 import { bigintRatio } from './floatMath';
 import { callMethod, type Gen } from './interp';
 import { floatToRational, fractionOf, isRational, makeRational } from './libRational';
-import { isRubyFloat, NIL, type RClass, type RHash, RObject, RString, type Value } from './objects';
+import { isRubyFloat, NIL, type RClass, type RFloat, type RHash, RObject, RString, type Value } from './objects';
 import { rt, UnsupportedFeatureError } from './runtime';
 import { arr, isA, realClassOf, str, stringBytes, stringFromBytes } from './values';
 
@@ -204,27 +204,24 @@ function* exactRational(value: Value): Gen<bigint | RObject | undefined> {
   return rational;
 }
 
-function* parseOffset(value: Value): Gen<{ offset: number; zone: TimeData['zone']; exact?: Value }> {
+function* parseOffset(
+  value: Value,
+  initializing = false
+): Gen<{ offset: number; zone: TimeData['zone']; exact?: Value }> {
   const converted =
     value === NIL || typeof value === 'bigint' || isRubyFloat(value) || isRational(value)
       ? value
       : yield* toStrValue(value);
-  return { offset: yield* offsetValue(converted), zone: zoneFromOffset(converted), exact: exactOffset(converted) };
+  return {
+    offset: yield* offsetValue(converted, !(initializing && (isRational(converted) || isRubyFloat(converted)))),
+    zone: zoneFromOffset(converted),
+    exact: exactOffset(converted),
+  };
 }
 
-function* offsetValue(value: Value): Gen<number> {
+function* offsetValue(value: Value, validate = true): Gen<number> {
   if (value === NIL) return LOCAL_OFFSET;
-  if (typeof value === 'bigint' || isRubyFloat(value) || isRational(value)) {
-    if (typeof value === 'bigint' || isRational(value)) {
-      const integral = yield* toInt(value);
-      if (integral <= -86_400n || integral >= 86_400n) throw argumentError('utc_offset out of range');
-    }
-    const offset = yield* toFloat(value);
-    if (!Number.isFinite(offset))
-      throw floatDomainError(Number.isNaN(offset) ? 'NaN' : offset > 0 ? 'Infinity' : '-Infinity');
-    if (isRubyFloat(value) && Math.abs(offset) >= 86_400) throw argumentError('utc_offset out of range');
-    return offset;
-  }
+  if (typeof value === 'bigint' || isRubyFloat(value) || isRational(value)) return numericOffset(value, validate);
   const text = yield* toStr(value);
   if (text === 'UTC' || text === 'Z') return 0;
   if (/^[A-IK-Y]$/.test(text)) {
@@ -240,8 +237,27 @@ function* offsetValue(value: Value): Gen<number> {
   return offset;
 }
 
+// code-gauge-allow functionCognitiveComplexity 16 -- Exact fractions and Float domain checks retain distinct native validation paths.
+function numericOffset(value: bigint | number | RFloat | RObject, validate: boolean): number {
+  if (isRational(value) || typeof value === 'bigint') {
+    const { numerator, denominator } =
+      typeof value === 'bigint' ? { numerator: value, denominator: 1n } : fractionOf(value);
+    if (validate && (numerator <= -86_400n * denominator || numerator >= 86_400n * denominator))
+      throw argumentError('utc_offset out of range');
+    return bigintRatio(numerator, denominator);
+  }
+  const offset = Number(value);
+  if (!Number.isFinite(offset))
+    throw floatDomainError(Number.isNaN(offset) ? 'NaN' : offset > 0 ? 'Infinity' : '-Infinity');
+  if (validate && Math.abs(offset) >= 86_400) throw argumentError('utc_offset out of range');
+  return offset;
+}
+
 function exactOffset(value: Value): Value | undefined {
-  if (isRational(value)) return value;
+  if (isRational(value)) {
+    const { numerator, denominator } = fractionOf(value);
+    return denominator === 1n ? numerator : value;
+  }
   if (isRubyFloat(value) && !Number.isInteger(Number(value))) return floatToRational(Number(value));
   return undefined;
 }
@@ -351,7 +367,7 @@ function* initializeTime(cls: RClass, args: Value[], keywords: RHash | undefined
       );
   }
   if (args.length === 7 && args[6] !== NIL) {
-    const zone = yield* parseOffset(args[6]);
+    const zone = yield* parseOffset(args[6], true);
     return yield* buildTime(cls, args.slice(0, 6), zone.offset, zone.zone, undefined, zone.exact);
   }
   return yield* buildTime(cls, args, LOCAL_OFFSET, 'local');
@@ -471,7 +487,7 @@ function pad(value: number, width: number, flag: string): string {
   return String(value).padStart(width, flag === '_' ? ' ' : '0');
 }
 
-// code-gauge-allow functionNcss 38 -- The ordered cases for Ruby calendar fields and formatting share state; splitting them solely for the metric would hide their sequencing.
+// code-gauge-allow functionNcss 40 -- The ordered cases for Ruby calendar fields and formatting share state; splitting them solely for the metric would hide their sequencing.
 function strftime(data: TimeData, format: string): string {
   if (format.length > LIMITS.maxStringLength) throw new ExecutionLimitError('storage');
   const date = data.fields();
@@ -485,7 +501,13 @@ function strftime(data: TimeData, format: string): string {
         return value;
       };
       const width = widthText ? Number(widthText) : undefined;
-      const flag = /([-_0])[^-_0]*$/.exec(flags)?.[1] ?? '';
+      const noPadding = flags.includes('-');
+      const padding =
+        flags
+          .slice(flags.lastIndexOf('-') + 1)
+          .match(/[_0]/g)
+          ?.at(-1) ?? '';
+      const flag = noPadding ? '-' : padding;
       const renderFlag = width !== undefined && 'YCymdejwuUWVGgHkIlMSs'.includes(directive) ? '-' : flag;
       const rendered =
         calendarDirective(data, date, directive, renderFlag) ??
@@ -500,9 +522,9 @@ function strftime(data: TimeData, format: string): string {
         return finish(fractionDigits(data, width));
       }
       let result = caseText(rendered, directive, flags);
-      if (directive === 'z') return finish(padOffset(result, width, flag));
+      if (directive === 'z') return finish(padOffset(result, width, padding));
       if (width !== undefined && (flag !== '-' || 'TXRDxFcrv'.includes(directive))) {
-        const pad = flag === '_' || (flag !== '0' && defaultSpacePad(directive)) ? ' ' : '0';
+        const pad = padding === '_' || (padding !== '0' && defaultSpacePad(directive)) ? ' ' : '0';
         result =
           pad === '0' && result.startsWith('-') && ['Y', 'C', 'G', 's'].includes(directive)
             ? `-${result.slice(1).padStart(width - 1, '0')}`

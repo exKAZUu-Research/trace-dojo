@@ -767,6 +767,7 @@ function startCursor(self: RObject): Cursor {
   const runner = flattenGenerator(
     (function* () {
       return yield* iterateEnumeratorArgs(self, function* (args) {
+        if (!rt().activeCursor) throw rubyError(rt().c.FiberError, 'attempt to yield on a not resumed fiber');
         return (yield new Suspension(args)) as Value;
       });
     })()
@@ -976,8 +977,11 @@ def('Enumerator::Generator', 'each', [0, -1], function* (self: RObject, args, bl
   const producer = (self.data as GeneratorData | undefined)?.block;
   if (!producer) throw argumentError('uninitialized generator');
   const yielder = new RObject(rt().c['Enumerator::Yielder']);
-  if (!block) throw rubyError(rt().c.LocalJumpError, 'no block given');
-  const consumer = block;
+  const consumer =
+    block ??
+    nativeProc(-1, () => {
+      throw rubyError(rt().c.LocalJumpError, 'no block given');
+    });
   const data: { consumer: RProc; held(): Value[] } = {
     consumer,
     held() {

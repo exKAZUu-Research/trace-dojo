@@ -3,50 +3,71 @@ import { NIL, type RNil, RString } from './objects';
 import { rt } from './runtime';
 import { str, stringBytes, stringCharacters, stringFromBytes } from './values';
 
-export function transformInvalid(self: RString, name: string, separator: RString | RNil | undefined): RString {
-  if (['upcase', 'downcase', 'capitalize', 'swapcase'].includes(name)) throw argumentError('input string invalid');
+// code-gauge-allow functionCognitiveComplexity 20 -- Each transform retains the charset-specific validation and output metadata of the same byte sequence.
+export function transformEncodedBytes(self: RString, name: string, separator: RString | RNil | undefined): RString {
+  if (['upcase', 'downcase', 'capitalize', 'swapcase'].includes(name)) {
+    if (!self.usAscii) throw argumentError('input string invalid');
+    return stringFromBytes(asciiCaseBytes(stringBytes(self), name), false, true);
+  }
   if (name === 'strip' || name === 'lstrip') {
     let start = 0;
     while (start < self.s.length && '\t\n\v\f\r '.includes(self.s[start])) start++;
     const point = self.s.codePointAt(start) ?? -1;
-    if (point >= 0xdc_80 && point <= 0xdc_ff) throw argumentError('invalid byte sequence in UTF-8');
-    if (name === 'lstrip') return str(self.s.slice(start));
+    if (!self.usAscii && point >= 0xdc_80 && point <= 0xdc_ff) throw argumentError('invalid byte sequence in UTF-8');
+    if (name === 'lstrip') return stringFromBytes(stringBytes(self).slice(start), false, self.usAscii);
   }
   if (name === 'rstrip' || name === 'strip')
-    throw rubyError(rt().c['Encoding::CompatibilityError'], 'invalid byte sequence in UTF-8');
+    throw rubyError(
+      rt().c['Encoding::CompatibilityError'],
+      self.usAscii ? 'invalid byte sequence in US-ASCII' : 'invalid byte sequence in UTF-8'
+    );
   const bytes = stringBytes(self);
-  if (name === 'succ' || name === 'next') return stringFromBytes(successorBytes(bytes));
+  if (name === 'succ' || name === 'next')
+    return stringFromBytes(successorBytes(bytes, false, self.usAscii), false, self.usAscii);
   if (name === 'chop') return chopInvalidBytes(self, bytes);
-  return chompInvalidBytes(bytes, separator);
+  return chompInvalidBytes(bytes, separator, self.usAscii);
+}
+
+function asciiCaseBytes(bytes: Uint8Array, name: string): Uint8Array {
+  return bytes.map((byte, index) => {
+    const upper = name === 'upcase' || (name === 'capitalize' && index === 0);
+    if (byte >= 97 && byte <= 122 && (upper || name === 'swapcase')) return byte - 32;
+    if (byte >= 65 && byte <= 90 && !upper) return byte + 32;
+    return byte;
+  });
 }
 
 function chopInvalidBytes(self: RString, bytes: Uint8Array): RString {
   const width =
     bytes.length >= 2 && bytes.at(-2) === 13 && bytes.at(-1) === 10
       ? 2
-      : stringBytes(stringCharacters(self).at(-1) ?? str('')).length;
-  return stringFromBytes(bytes.slice(0, bytes.length - width));
+      : self.usAscii
+        ? 1
+        : stringBytes(stringCharacters(self).at(-1) ?? str('')).length;
+  return stringFromBytes(bytes.slice(0, bytes.length - width), false, self.usAscii);
 }
 
-function chompInvalidBytes(bytes: Uint8Array, separator: RString | RNil | undefined): RString {
-  if (separator === NIL) return stringFromBytes(bytes);
+// code-gauge-allow functionCognitiveComplexity 21 -- Paragraph, newline and literal suffix modes share byte boundaries and preserve the source charset.
+function chompInvalidBytes(bytes: Uint8Array, separator: RString | RNil | undefined, usAscii: boolean): RString {
+  const result = (value: Uint8Array): RString => stringFromBytes(value, false, usAscii);
+  if (separator === NIL) return result(bytes);
   const suffix = separator instanceof RString ? stringBytes(separator) : Uint8Array.of(10);
   if (suffix.length === 0) {
     let end = bytes.length;
     while (end > 0 && bytes[end - 1] === 10) end -= end > 1 && bytes[end - 2] === 13 ? 2 : 1;
-    return stringFromBytes(bytes.slice(0, end));
+    return result(bytes.slice(0, end));
   }
   if (suffix.length === 1 && suffix[0] === 10) {
-    if (bytes.at(-1) === 13) return stringFromBytes(bytes.slice(0, -1));
-    if (bytes.at(-1) === 10) return stringFromBytes(bytes.slice(0, bytes.at(-2) === 13 ? -2 : -1));
+    if (bytes.at(-1) === 13) return result(bytes.slice(0, -1));
+    if (bytes.at(-1) === 10) return result(bytes.slice(0, bytes.at(-2) === 13 ? -2 : -1));
   }
   const matches =
     bytes.length >= suffix.length &&
     suffix.every((byte, index) => byte === bytes[bytes.length - suffix.length + index]);
-  return stringFromBytes(bytes.slice(0, matches ? bytes.length - suffix.length : bytes.length));
+  return result(bytes.slice(0, matches ? bytes.length - suffix.length : bytes.length));
 }
 
-export function successorBytes(source: Uint8Array, binary = false): Uint8Array {
+export function successorBytes(source: Uint8Array, binary = false, usAscii = false): Uint8Array {
   if (source.length === 0) return source;
   if (
     binary &&
@@ -54,7 +75,7 @@ export function successorBytes(source: Uint8Array, binary = false): Uint8Array {
   )
     return incrementBinaryBytes(source);
   const parts: { bytes: Uint8Array; point: number | undefined }[] = stringCharacters(
-    stringFromBytes(source, binary)
+    stringFromBytes(source, binary, usAscii)
   ).map((character) => ({
     bytes: stringBytes(character),
     point:

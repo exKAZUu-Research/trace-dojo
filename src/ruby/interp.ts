@@ -351,7 +351,7 @@ export function* ev(e: Expr, frame: Frame): Gen {
       const value = e.value ? yield* ev(e.value, frame) : NIL;
       if (!e.inBlock) throw new BreakSignal(value, undefined);
       const proc = frame.extra.proc as RProc;
-      if (!frame.extra.isLambda && !proc.callSiteState?.active)
+      if (!frame.extra.isLambda && (!proc.callSiteState?.active || proc.callSiteState.context !== rt().activeCursor))
         throw rubyError(rt().c.LocalJumpError, 'break from proc-closure');
       throw new BreakSignal(value, proc.breakTag);
     }
@@ -1783,7 +1783,7 @@ export interface CallOptions {
 }
 
 // code-gauge-allow functionCognitiveComplexity 20 -- The ordered cases for Ruby evaluation and control flow share state; splitting them solely for the metric would hide their sequencing.
-// code-gauge-allow functionNcss 44 -- Calls retain receiver and argument roots while forwarding blocks, keywords, and break signals.
+// code-gauge-allow functionNcss 45 -- Calls retain receiver and argument roots while forwarding blocks, keywords, and break signals.
 function* evalCall(e: Call, frame: Frame): Gen {
   let recv: Value;
   if (e.recv) {
@@ -1814,7 +1814,10 @@ function* evalCall(e: Call, frame: Frame): Gen {
           used,
         });
       const proc = block as RProc;
-      if (proc.callSiteState) proc.callSiteState.active = true;
+      if (proc.callSiteState) {
+        proc.callSiteState.active = true;
+        proc.callSiteState.context = rt().activeCursor;
+      }
       try {
         return yield* callMethod(recv, e.name, args, keywords, proc, {
           fcall: e.fcall,
@@ -2112,7 +2115,10 @@ function* evalSuper(e: Extract<Expr, { k: 'super' }>, frame: Frame): Gen {
         : callMethodMissing(home.self, superName, args, keywords, block, { used }, 'super');
     if (!e.block) return yield* dispatch();
     const proc = block as RProc;
-    if (proc.callSiteState) proc.callSiteState.active = true;
+    if (proc.callSiteState) {
+      proc.callSiteState.active = true;
+      proc.callSiteState.context = rt().activeCursor;
+    }
     try {
       return yield* dispatch();
     } catch (error) {
@@ -2195,7 +2201,7 @@ function* addSuperKeywordRest(target: RHash, rest: RHash): Gen<void> {
 declare module './objects' {
   interface RProc {
     /** Shared by block copies so `break` uses the original call's lifetime. */
-    callSiteState?: { active: boolean };
+    callSiteState?: { active: boolean; context?: object };
     literalAtCall?: boolean;
   }
 }

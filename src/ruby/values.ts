@@ -131,9 +131,9 @@ function encodeInvalidText(text: string): Uint8Array {
   return Uint8Array.from(bytes);
 }
 
-// code-gauge-allow functionCognitiveComplexity 27 -- Character slices share byte offsets and encoding flags across UTF-8, US-ASCII, binary and invalid-byte representations.
+// code-gauge-allow functionCognitiveComplexity 28 -- Character slices share byte offsets and encoding flags across UTF-8, US-ASCII, binary and invalid-byte representations.
 export function stringCharacters(value: RString): RString[] {
-  if (!value.rawBytes && !value.binary)
+  if (!value.rawBytes && !value.binary && !value.usAscii)
     return codePointCharacters(value.s).map((char) => {
       const result = str(char);
       result.usAscii = value.usAscii;
@@ -144,10 +144,10 @@ export function stringCharacters(value: RString): RString[] {
   for (let index = 0; index < bytes.length;) {
     rt().spend();
     const first = bytes[index];
-    const width = value.binary ? 1 : first < 0x80 ? 1 : first < 0xe0 ? 2 : first < 0xf0 ? 3 : 4;
+    const width = value.binary || value.usAscii ? 1 : first < 0x80 ? 1 : first < 0xe0 ? 2 : first < 0xf0 ? 3 : 4;
     const segment = bytes.slice(index, Math.min(bytes.length, index + width));
     let valid = value.binary || first < 0x80;
-    if (!valid && segment.length === width) {
+    if (!valid && !value.usAscii && segment.length === width) {
       try {
         new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(segment);
         valid = true;

@@ -36039,3 +36039,808 @@ test.each(nativeRecursiveRecordHashCases)(
     expect(run(source)).toMatchObject({ kind: 'executed', stdout, uncaughtException: undefined });
   }
 );
+
+const nativeCaseRegexpIteratorTimeEncodingCases = [
+  ['n=Float::NAN;p(n===n);p(case n;when n;:yes;else;:no;end);p [n].grep(n);p((n in ^n))', 'false\n:no\n[]\nfalse\n'],
+  [
+    'm=/(?<word>cat)|(?<word>dog)/.match("cat");p m;m && p(m.named_captures,m[:word]);p Regexp.union(/(?<word>cat)/,/(?<word>dog)/).match("cat")',
+    '#<MatchData "cat" word:"cat" word:nil>\n{"word" => "cat"}\n"cat"\n#<MatchData "cat" word:"cat" word:nil>\n',
+  ],
+  [
+    'm=/(?<word>cat)|(?<word>dog)/.match("dog");p m;m && p(m.named_captures,m[:word]);p Regexp.union(/(?<word>cat)/,/(?<word>dog)/).match("dog")',
+    '#<MatchData "dog" word:nil word:"dog">\n{"word" => "dog"}\n"dog"\n#<MatchData "dog" word:nil word:"dog">\n',
+  ],
+  [
+    'm=/(?<word>cat)|(?<word>dog)/.match("");p m;m && p(m.named_captures,m[:word]);p Regexp.union(/(?<word>cat)/,/(?<word>dog)/).match("")',
+    'nil\nnil\n',
+  ],
+  [
+    String.raw`p /^(a)(b)(c)(d)(e)(f)(g)(h)(i)(j)(k)\11$/.match?("abcdefghijkk"),/^(a)(b)(c)(d)(e)(f)(g)(h)(i)(j)(k)\11$/.match?("abcdefghijk\t")`,
+    'true\nfalse\n',
+  ],
+  [
+    'r=Regexp.new(1.chr);p r.inspect.bytes,r.to_s.bytes,r.source.bytes',
+    '[47, 92, 120, 48, 49, 47]\n[40, 63, 45, 109, 105, 120, 58, 92, 120, 48, 49, 41]\n[1]\n',
+  ],
+  [
+    'r=Regexp.new(7.chr);p r.inspect.bytes,r.to_s.bytes,r.source.bytes',
+    '[47, 92, 120, 48, 55, 47]\n[40, 63, 45, 109, 105, 120, 58, 92, 120, 48, 55, 41]\n[7]\n',
+  ],
+  [
+    'r=Regexp.new(8.chr);p r.inspect.bytes,r.to_s.bytes,r.source.bytes',
+    '[47, 92, 120, 48, 56, 47]\n[40, 63, 45, 109, 105, 120, 58, 92, 120, 48, 56, 41]\n[8]\n',
+  ],
+  [
+    'r=Regexp.new(9.chr);p r.inspect.bytes,r.to_s.bytes,r.source.bytes',
+    '[47, 9, 47]\n[40, 63, 45, 109, 105, 120, 58, 9, 41]\n[9]\n',
+  ],
+  [
+    'r=Regexp.new(10.chr);p r.inspect.bytes,r.to_s.bytes,r.source.bytes',
+    '[47, 10, 47]\n[40, 63, 45, 109, 105, 120, 58, 10, 41]\n[10]\n',
+  ],
+  [
+    'r=Regexp.new(11.chr);p r.inspect.bytes,r.to_s.bytes,r.source.bytes',
+    '[47, 11, 47]\n[40, 63, 45, 109, 105, 120, 58, 11, 41]\n[11]\n',
+  ],
+  [
+    'r=Regexp.new(12.chr);p r.inspect.bytes,r.to_s.bytes,r.source.bytes',
+    '[47, 12, 47]\n[40, 63, 45, 109, 105, 120, 58, 12, 41]\n[12]\n',
+  ],
+  [
+    'r=Regexp.new(13.chr);p r.inspect.bytes,r.to_s.bytes,r.source.bytes',
+    '[47, 13, 47]\n[40, 63, 45, 109, 105, 120, 58, 13, 41]\n[13]\n',
+  ],
+  [
+    'r=Regexp.new(27.chr);p r.inspect.bytes,r.to_s.bytes,r.source.bytes',
+    '[47, 92, 120, 49, 66, 47]\n[40, 63, 45, 109, 105, 120, 58, 92, 120, 49, 66, 41]\n[27]\n',
+  ],
+  [
+    'r=Regexp.new(31.chr);p r.inspect.bytes,r.to_s.bytes,r.source.bytes',
+    '[47, 92, 120, 49, 70, 47]\n[40, 63, 45, 109, 105, 120, 58, 92, 120, 49, 70, 41]\n[31]\n',
+  ],
+  [
+    'r=Regexp.new(127.chr);p r.inspect.bytes,r.to_s.bytes,r.source.bytes',
+    '[47, 92, 120, 55, 70, 47]\n[40, 63, 45, 109, 105, 120, 58, 92, 120, 55, 70, 41]\n[127]\n',
+  ],
+  [
+    'def f(&b);e=Enumerator.new{|y|b.call};begin;p e.next;rescue=>x;p x.class,x.message;end;:after;end;p(f{break :done})',
+    'LocalJumpError\n"break from proc-closure"\n:after\n',
+  ],
+  [
+    'class Rational;def to_int;puts :int;3600;end;def to_f;puts :float;7200.0;end;end;t=Time.new(2024,1,1,0,0,0,1r/2);p t,t.utc_offset',
+    '2024-01-01 00:00:00.5 +000001\n(1/2)\n',
+  ],
+  [
+    'class Rational;def to_f;raise "bad";end;end;begin;p Time.at(0).getlocal(1r/2);rescue=>e;p e.class,e.message;end',
+    '1970-01-01 00:00:00 +000001\n',
+  ],
+  ['t=Time.utc(2024,2,3);p t.strftime("%-0d|%0-d|%-_d|%_-d|%-010d|%0-10d")', '"3|3|3|3|3|3"\n'],
+  [
+    'g=Enumerator::Generator.new{|y|puts :started;42};begin;p g.each;rescue=>e;p e.class,e.message;end',
+    'started\n42\n',
+  ],
+  [
+    'g=Enumerator::Generator.new{|y|begin;y<<1;rescue LocalJumpError=>e;p e.message;end;:done};begin;p g.each;rescue=>e;p e.class,e.message;end',
+    '"no block given"\n:done\n',
+  ],
+  [
+    'e=Enumerator.new{|y|$y=y;y<<1;y<<2};p e.next;begin;$y<<3;p :sent;rescue=>x;p x.class,x.message;end;p e.next',
+    '1\nFiberError\n"attempt to yield on a not resumed fiber"\n2\n',
+  ],
+  [
+    's=String.new(255.chr,encoding:"US-ASCII");[:upcase,:downcase,:capitalize,:swapcase,:succ].each{|m|begin;v=s.send(m);p [m,v.bytes,v.encoding];rescue=>e;p [m,e.class,e.message];end}',
+    '[:upcase, [255], #<Encoding:US-ASCII>]\n[:downcase, [255], #<Encoding:US-ASCII>]\n[:capitalize, [255], #<Encoding:US-ASCII>]\n[:swapcase, [255], #<Encoding:US-ASCII>]\n[:succ, [1, 255], #<Encoding:US-ASCII>]\n',
+  ],
+  ['n=Float::NAN;p [n].grep(n);p(case n;when n;:yes;else;:no;end);p((n in ^n));p [n]==[n]', '[]\n:no\nfalse\ntrue\n'],
+  [
+    'class Float;def ==(x);puts :equal;true;end;end;n=Float::NAN;p [n].grep(n);p(case n;when n;:yes;else;:no;end);p((n in ^n));p [n]==[n]',
+    '[]\n:no\nfalse\ntrue\n',
+  ],
+  [
+    'class Float;private;def ===(x);puts :case;false;end;end;n=Float::NAN;p [n].grep(n);p(case n;when n;:yes;else;:no;end);p((n in ^n));p [n]==[n]',
+    'case\n[]\ncase\n:no\ncase\nfalse\ntrue\n',
+  ],
+  ['n=0.0;p [n].grep(n);p(case n;when n;:yes;else;:no;end);p((n in ^n));p [n]==[n]', '[0.0]\n:yes\ntrue\ntrue\n'],
+  [
+    'class Float;def ==(x);puts :equal;true;end;end;n=0.0;p [n].grep(n);p(case n;when n;:yes;else;:no;end);p((n in ^n));p [n]==[n]',
+    '[0.0]\n:yes\ntrue\ntrue\n',
+  ],
+  [
+    'class Float;private;def ===(x);puts :case;false;end;end;n=0.0;p [n].grep(n);p(case n;when n;:yes;else;:no;end);p((n in ^n));p [n]==[n]',
+    'case\n[]\ncase\n:no\ncase\nfalse\ntrue\n',
+  ],
+  ['n=-0.0;p [n].grep(n);p(case n;when n;:yes;else;:no;end);p((n in ^n));p [n]==[n]', '[-0.0]\n:yes\ntrue\ntrue\n'],
+  [
+    'class Float;def ==(x);puts :equal;true;end;end;n=-0.0;p [n].grep(n);p(case n;when n;:yes;else;:no;end);p((n in ^n));p [n]==[n]',
+    '[-0.0]\n:yes\ntrue\ntrue\n',
+  ],
+  [
+    'class Float;private;def ===(x);puts :case;false;end;end;n=-0.0;p [n].grep(n);p(case n;when n;:yes;else;:no;end);p((n in ^n));p [n]==[n]',
+    'case\n[]\ncase\n:no\ncase\nfalse\ntrue\n',
+  ],
+  [
+    'n=Float::INFINITY;p [n].grep(n);p(case n;when n;:yes;else;:no;end);p((n in ^n));p [n]==[n]',
+    '[Infinity]\n:yes\ntrue\ntrue\n',
+  ],
+  [
+    'class Float;def ==(x);puts :equal;true;end;end;n=Float::INFINITY;p [n].grep(n);p(case n;when n;:yes;else;:no;end);p((n in ^n));p [n]==[n]',
+    '[Infinity]\n:yes\ntrue\ntrue\n',
+  ],
+  [
+    'class Float;private;def ===(x);puts :case;false;end;end;n=Float::INFINITY;p [n].grep(n);p(case n;when n;:yes;else;:no;end);p((n in ^n));p [n]==[n]',
+    'case\n[]\ncase\n:no\ncase\nfalse\ntrue\n',
+  ],
+  ['n=1.0;p [n].grep(n);p(case n;when n;:yes;else;:no;end);p((n in ^n));p [n]==[n]', '[1.0]\n:yes\ntrue\ntrue\n'],
+  [
+    'class Float;def ==(x);puts :equal;true;end;end;n=1.0;p [n].grep(n);p(case n;when n;:yes;else;:no;end);p((n in ^n));p [n]==[n]',
+    '[1.0]\n:yes\ntrue\ntrue\n',
+  ],
+  [
+    'class Float;private;def ===(x);puts :case;false;end;end;n=1.0;p [n].grep(n);p(case n;when n;:yes;else;:no;end);p((n in ^n));p [n]==[n]',
+    'case\n[]\ncase\n:no\ncase\nfalse\ntrue\n',
+  ],
+  ['n=1;p [n].grep(n);p(case n;when n;:yes;else;:no;end);p((n in ^n));p [n]==[n]', '[1]\n:yes\ntrue\ntrue\n'],
+  [
+    'class Float;def ==(x);puts :equal;true;end;end;n=1;p [n].grep(n);p(case n;when n;:yes;else;:no;end);p((n in ^n));p [n]==[n]',
+    '[1]\n:yes\ntrue\ntrue\n',
+  ],
+  [
+    'class Float;private;def ===(x);puts :case;false;end;end;n=1;p [n].grep(n);p(case n;when n;:yes;else;:no;end);p((n in ^n));p [n]==[n]',
+    '[1]\n:yes\ntrue\ntrue\n',
+  ],
+  [
+    'r=Regexp.new("(?<x>a)|(?<x>b)");m=r.match("a");p m;m && p(m.inspect,m.names,m.named_captures)',
+    '#<MatchData "a" x:"a" x:nil>\n"#<MatchData \\"a\\" x:\\"a\\" x:nil>"\n["x"]\n{"x" => "a"}\n',
+  ],
+  [
+    'r=Regexp.new("(?<x>a)|(?<x>b)");m=r.match("b");p m;m && p(m.inspect,m.names,m.named_captures)',
+    '#<MatchData "b" x:nil x:"b">\n"#<MatchData \\"b\\" x:nil x:\\"b\\">"\n["x"]\n{"x" => "b"}\n',
+  ],
+  [
+    'r=Regexp.new("(?<x>a)|(?<x>b)");m=r.match("ac");p m;m && p(m.inspect,m.names,m.named_captures)',
+    '#<MatchData "a" x:"a" x:nil>\n"#<MatchData \\"a\\" x:\\"a\\" x:nil>"\n["x"]\n{"x" => "a"}\n',
+  ],
+  [
+    'r=Regexp.new("(?<x>a)|(?<x>b)");m=r.match("ab");p m;m && p(m.inspect,m.names,m.named_captures)',
+    '#<MatchData "a" x:"a" x:nil>\n"#<MatchData \\"a\\" x:\\"a\\" x:nil>"\n["x"]\n{"x" => "a"}\n',
+  ],
+  [
+    'r=Regexp.new("(?<x>a)|(?<y>b)|(?<x>c)");m=r.match("a");p m;m && p(m.inspect,m.names,m.named_captures)',
+    '#<MatchData "a" x:"a" y:nil x:nil>\n"#<MatchData \\"a\\" x:\\"a\\" y:nil x:nil>"\n["x", "y"]\n{"x" => "a", "y" => nil}\n',
+  ],
+  [
+    'r=Regexp.new("(?<x>a)|(?<y>b)|(?<x>c)");m=r.match("b");p m;m && p(m.inspect,m.names,m.named_captures)',
+    '#<MatchData "b" x:nil y:"b" x:nil>\n"#<MatchData \\"b\\" x:nil y:\\"b\\" x:nil>"\n["x", "y"]\n{"x" => nil, "y" => "b"}\n',
+  ],
+  [
+    'r=Regexp.new("(?<x>a)|(?<y>b)|(?<x>c)");m=r.match("ac");p m;m && p(m.inspect,m.names,m.named_captures)',
+    '#<MatchData "a" x:"a" y:nil x:nil>\n"#<MatchData \\"a\\" x:\\"a\\" y:nil x:nil>"\n["x", "y"]\n{"x" => "a", "y" => nil}\n',
+  ],
+  [
+    'r=Regexp.new("(?<x>a)|(?<y>b)|(?<x>c)");m=r.match("ab");p m;m && p(m.inspect,m.names,m.named_captures)',
+    '#<MatchData "a" x:"a" y:nil x:nil>\n"#<MatchData \\"a\\" x:\\"a\\" y:nil x:nil>"\n["x", "y"]\n{"x" => "a", "y" => nil}\n',
+  ],
+  [
+    String.raw`begin;r=Regexp.new("\\1");["a","\t","\b","8"].each{|s|begin;p r.match?(s);rescue=>e;p e.class;end};rescue=>e;p e.class,e.message;end`,
+    'RegexpError\n"invalid backref number/name: /\\\\1/"\n',
+  ],
+  [
+    String.raw`begin;r=Regexp.new("\\9");["a","\t","\b","8"].each{|s|begin;p r.match?(s);rescue=>e;p e.class;end};rescue=>e;p e.class,e.message;end`,
+    'RegexpError\n"invalid backref number/name: /\\\\9/"\n',
+  ],
+  [
+    String.raw`begin;r=Regexp.new("\\10");["a","\t","\b","8"].each{|s|begin;p r.match?(s);rescue=>e;p e.class;end};rescue=>e;p e.class,e.message;end`,
+    'false\nfalse\ntrue\nfalse\n',
+  ],
+  [
+    String.raw`begin;r=Regexp.new("\\11");["a","\t","\b","8"].each{|s|begin;p r.match?(s);rescue=>e;p e.class;end};rescue=>e;p e.class,e.message;end`,
+    'false\ntrue\nfalse\nfalse\n',
+  ],
+  [
+    String.raw`begin;r=Regexp.new("\\12");["a","\t","\b","8"].each{|s|begin;p r.match?(s);rescue=>e;p e.class;end};rescue=>e;p e.class,e.message;end`,
+    'false\nfalse\nfalse\nfalse\n',
+  ],
+  [
+    String.raw`begin;r=Regexp.new("\\18");["a","\t","\b","8"].each{|s|begin;p r.match?(s);rescue=>e;p e.class;end};rescue=>e;p e.class,e.message;end`,
+    'false\nfalse\nfalse\nfalse\n',
+  ],
+  [
+    String.raw`begin;r=Regexp.new("\\80");["a","\t","\b","8"].each{|s|begin;p r.match?(s);rescue=>e;p e.class;end};rescue=>e;p e.class,e.message;end`,
+    'false\nfalse\nfalse\nfalse\n',
+  ],
+  [
+    String.raw`begin;r=Regexp.new("\\118");["a","\t","\b","8"].each{|s|begin;p r.match?(s);rescue=>e;p e.class;end};rescue=>e;p e.class,e.message;end`,
+    'false\nfalse\nfalse\nfalse\n',
+  ],
+  [
+    String.raw`begin;r=Regexp.new("(a)\\1");["aa","a\t","a\b","a8"].each{|s|begin;p r.match?(s);rescue=>e;p e.class;end};rescue=>e;p e.class,e.message;end`,
+    'true\nfalse\nfalse\nfalse\n',
+  ],
+  [
+    String.raw`begin;r=Regexp.new("(a)\\9");["aa","a\t","a\b","a8"].each{|s|begin;p r.match?(s);rescue=>e;p e.class;end};rescue=>e;p e.class,e.message;end`,
+    'RegexpError\n"invalid backref number/name: /(a)\\\\9/"\n',
+  ],
+  [
+    String.raw`begin;r=Regexp.new("(a)\\10");["aa","a\t","a\b","a8"].each{|s|begin;p r.match?(s);rescue=>e;p e.class;end};rescue=>e;p e.class,e.message;end`,
+    'false\nfalse\ntrue\nfalse\n',
+  ],
+  [
+    String.raw`begin;r=Regexp.new("(a)\\11");["aa","a\t","a\b","a8"].each{|s|begin;p r.match?(s);rescue=>e;p e.class;end};rescue=>e;p e.class,e.message;end`,
+    'false\ntrue\nfalse\nfalse\n',
+  ],
+  [
+    String.raw`begin;r=Regexp.new("(a)\\12");["aa","a\t","a\b","a8"].each{|s|begin;p r.match?(s);rescue=>e;p e.class;end};rescue=>e;p e.class,e.message;end`,
+    'false\nfalse\nfalse\nfalse\n',
+  ],
+  [
+    String.raw`begin;r=Regexp.new("(a)\\18");["aa","a\t","a\b","a8"].each{|s|begin;p r.match?(s);rescue=>e;p e.class;end};rescue=>e;p e.class,e.message;end`,
+    'false\nfalse\nfalse\nfalse\n',
+  ],
+  [
+    String.raw`begin;r=Regexp.new("(a)\\80");["aa","a\t","a\b","a8"].each{|s|begin;p r.match?(s);rescue=>e;p e.class;end};rescue=>e;p e.class,e.message;end`,
+    'false\nfalse\nfalse\nfalse\n',
+  ],
+  [
+    String.raw`begin;r=Regexp.new("(a)\\118");["aa","a\t","a\b","a8"].each{|s|begin;p r.match?(s);rescue=>e;p e.class;end};rescue=>e;p e.class,e.message;end`,
+    'false\nfalse\nfalse\nfalse\n',
+  ],
+  [
+    String.raw`begin;r=Regexp.new("(a)(a)(a)(a)(a)(a)(a)(a)(a)\\1");["aaaaaaaaaa","aaaaaaaaa\t","aaaaaaaaa\b","aaaaaaaaa8"].each{|s|begin;p r.match?(s);rescue=>e;p e.class;end};rescue=>e;p e.class,e.message;end`,
+    'true\nfalse\nfalse\nfalse\n',
+  ],
+  [
+    String.raw`begin;r=Regexp.new("(a)(a)(a)(a)(a)(a)(a)(a)(a)\\9");["aaaaaaaaaa","aaaaaaaaa\t","aaaaaaaaa\b","aaaaaaaaa8"].each{|s|begin;p r.match?(s);rescue=>e;p e.class;end};rescue=>e;p e.class,e.message;end`,
+    'true\nfalse\nfalse\nfalse\n',
+  ],
+  [
+    String.raw`begin;r=Regexp.new("(a)(a)(a)(a)(a)(a)(a)(a)(a)\\10");["aaaaaaaaaa","aaaaaaaaa\t","aaaaaaaaa\b","aaaaaaaaa8"].each{|s|begin;p r.match?(s);rescue=>e;p e.class;end};rescue=>e;p e.class,e.message;end`,
+    'false\nfalse\ntrue\nfalse\n',
+  ],
+  [
+    String.raw`begin;r=Regexp.new("(a)(a)(a)(a)(a)(a)(a)(a)(a)\\11");["aaaaaaaaaa","aaaaaaaaa\t","aaaaaaaaa\b","aaaaaaaaa8"].each{|s|begin;p r.match?(s);rescue=>e;p e.class;end};rescue=>e;p e.class,e.message;end`,
+    'false\ntrue\nfalse\nfalse\n',
+  ],
+  [
+    String.raw`begin;r=Regexp.new("(a)(a)(a)(a)(a)(a)(a)(a)(a)\\12");["aaaaaaaaaa","aaaaaaaaa\t","aaaaaaaaa\b","aaaaaaaaa8"].each{|s|begin;p r.match?(s);rescue=>e;p e.class;end};rescue=>e;p e.class,e.message;end`,
+    'false\nfalse\nfalse\nfalse\n',
+  ],
+  [
+    String.raw`begin;r=Regexp.new("(a)(a)(a)(a)(a)(a)(a)(a)(a)\\18");["aaaaaaaaaa","aaaaaaaaa\t","aaaaaaaaa\b","aaaaaaaaa8"].each{|s|begin;p r.match?(s);rescue=>e;p e.class;end};rescue=>e;p e.class,e.message;end`,
+    'false\nfalse\nfalse\nfalse\n',
+  ],
+  [
+    String.raw`begin;r=Regexp.new("(a)(a)(a)(a)(a)(a)(a)(a)(a)\\80");["aaaaaaaaaa","aaaaaaaaa\t","aaaaaaaaa\b","aaaaaaaaa8"].each{|s|begin;p r.match?(s);rescue=>e;p e.class;end};rescue=>e;p e.class,e.message;end`,
+    'false\nfalse\nfalse\nfalse\n',
+  ],
+  [
+    String.raw`begin;r=Regexp.new("(a)(a)(a)(a)(a)(a)(a)(a)(a)\\118");["aaaaaaaaaa","aaaaaaaaa\t","aaaaaaaaa\b","aaaaaaaaa8"].each{|s|begin;p r.match?(s);rescue=>e;p e.class;end};rescue=>e;p e.class,e.message;end`,
+    'false\nfalse\nfalse\nfalse\n',
+  ],
+  [
+    String.raw`begin;r=Regexp.new("(a)(a)(a)(a)(a)(a)(a)(a)(a)(a)\\1");["aaaaaaaaaaa","aaaaaaaaaa\t","aaaaaaaaaa\b","aaaaaaaaaa8"].each{|s|begin;p r.match?(s);rescue=>e;p e.class;end};rescue=>e;p e.class,e.message;end`,
+    'true\nfalse\nfalse\nfalse\n',
+  ],
+  [
+    String.raw`begin;r=Regexp.new("(a)(a)(a)(a)(a)(a)(a)(a)(a)(a)\\9");["aaaaaaaaaaa","aaaaaaaaaa\t","aaaaaaaaaa\b","aaaaaaaaaa8"].each{|s|begin;p r.match?(s);rescue=>e;p e.class;end};rescue=>e;p e.class,e.message;end`,
+    'true\nfalse\nfalse\nfalse\n',
+  ],
+  [
+    String.raw`begin;r=Regexp.new("(a)(a)(a)(a)(a)(a)(a)(a)(a)(a)\\10");["aaaaaaaaaaa","aaaaaaaaaa\t","aaaaaaaaaa\b","aaaaaaaaaa8"].each{|s|begin;p r.match?(s);rescue=>e;p e.class;end};rescue=>e;p e.class,e.message;end`,
+    'true\nfalse\nfalse\nfalse\n',
+  ],
+  [
+    String.raw`begin;r=Regexp.new("(a)(a)(a)(a)(a)(a)(a)(a)(a)(a)\\11");["aaaaaaaaaaa","aaaaaaaaaa\t","aaaaaaaaaa\b","aaaaaaaaaa8"].each{|s|begin;p r.match?(s);rescue=>e;p e.class;end};rescue=>e;p e.class,e.message;end`,
+    'false\ntrue\nfalse\nfalse\n',
+  ],
+  [
+    String.raw`begin;r=Regexp.new("(a)(a)(a)(a)(a)(a)(a)(a)(a)(a)\\12");["aaaaaaaaaaa","aaaaaaaaaa\t","aaaaaaaaaa\b","aaaaaaaaaa8"].each{|s|begin;p r.match?(s);rescue=>e;p e.class;end};rescue=>e;p e.class,e.message;end`,
+    'false\nfalse\nfalse\nfalse\n',
+  ],
+  [
+    String.raw`begin;r=Regexp.new("(a)(a)(a)(a)(a)(a)(a)(a)(a)(a)\\18");["aaaaaaaaaaa","aaaaaaaaaa\t","aaaaaaaaaa\b","aaaaaaaaaa8"].each{|s|begin;p r.match?(s);rescue=>e;p e.class;end};rescue=>e;p e.class,e.message;end`,
+    'false\nfalse\nfalse\nfalse\n',
+  ],
+  [
+    String.raw`begin;r=Regexp.new("(a)(a)(a)(a)(a)(a)(a)(a)(a)(a)\\80");["aaaaaaaaaaa","aaaaaaaaaa\t","aaaaaaaaaa\b","aaaaaaaaaa8"].each{|s|begin;p r.match?(s);rescue=>e;p e.class;end};rescue=>e;p e.class,e.message;end`,
+    'false\nfalse\nfalse\nfalse\n',
+  ],
+  [
+    String.raw`begin;r=Regexp.new("(a)(a)(a)(a)(a)(a)(a)(a)(a)(a)\\118");["aaaaaaaaaaa","aaaaaaaaaa\t","aaaaaaaaaa\b","aaaaaaaaaa8"].each{|s|begin;p r.match?(s);rescue=>e;p e.class;end};rescue=>e;p e.class,e.message;end`,
+    'false\nfalse\nfalse\nfalse\n',
+  ],
+  [
+    String.raw`begin;r=Regexp.new("(a)(a)(a)(a)(a)(a)(a)(a)(a)(a)(a)\\1");["aaaaaaaaaaaa","aaaaaaaaaaa\t","aaaaaaaaaaa\b","aaaaaaaaaaa8"].each{|s|begin;p r.match?(s);rescue=>e;p e.class;end};rescue=>e;p e.class,e.message;end`,
+    'true\nfalse\nfalse\nfalse\n',
+  ],
+  [
+    String.raw`begin;r=Regexp.new("(a)(a)(a)(a)(a)(a)(a)(a)(a)(a)(a)\\9");["aaaaaaaaaaaa","aaaaaaaaaaa\t","aaaaaaaaaaa\b","aaaaaaaaaaa8"].each{|s|begin;p r.match?(s);rescue=>e;p e.class;end};rescue=>e;p e.class,e.message;end`,
+    'true\nfalse\nfalse\nfalse\n',
+  ],
+  [
+    String.raw`begin;r=Regexp.new("(a)(a)(a)(a)(a)(a)(a)(a)(a)(a)(a)\\10");["aaaaaaaaaaaa","aaaaaaaaaaa\t","aaaaaaaaaaa\b","aaaaaaaaaaa8"].each{|s|begin;p r.match?(s);rescue=>e;p e.class;end};rescue=>e;p e.class,e.message;end`,
+    'true\nfalse\nfalse\nfalse\n',
+  ],
+  [
+    String.raw`begin;r=Regexp.new("(a)(a)(a)(a)(a)(a)(a)(a)(a)(a)(a)\\11");["aaaaaaaaaaaa","aaaaaaaaaaa\t","aaaaaaaaaaa\b","aaaaaaaaaaa8"].each{|s|begin;p r.match?(s);rescue=>e;p e.class;end};rescue=>e;p e.class,e.message;end`,
+    'true\nfalse\nfalse\nfalse\n',
+  ],
+  [
+    String.raw`begin;r=Regexp.new("(a)(a)(a)(a)(a)(a)(a)(a)(a)(a)(a)\\12");["aaaaaaaaaaaa","aaaaaaaaaaa\t","aaaaaaaaaaa\b","aaaaaaaaaaa8"].each{|s|begin;p r.match?(s);rescue=>e;p e.class;end};rescue=>e;p e.class,e.message;end`,
+    'false\nfalse\nfalse\nfalse\n',
+  ],
+  [
+    String.raw`begin;r=Regexp.new("(a)(a)(a)(a)(a)(a)(a)(a)(a)(a)(a)\\18");["aaaaaaaaaaaa","aaaaaaaaaaa\t","aaaaaaaaaaa\b","aaaaaaaaaaa8"].each{|s|begin;p r.match?(s);rescue=>e;p e.class;end};rescue=>e;p e.class,e.message;end`,
+    'false\nfalse\nfalse\nfalse\n',
+  ],
+  [
+    String.raw`begin;r=Regexp.new("(a)(a)(a)(a)(a)(a)(a)(a)(a)(a)(a)\\80");["aaaaaaaaaaaa","aaaaaaaaaaa\t","aaaaaaaaaaa\b","aaaaaaaaaaa8"].each{|s|begin;p r.match?(s);rescue=>e;p e.class;end};rescue=>e;p e.class,e.message;end`,
+    'false\nfalse\nfalse\nfalse\n',
+  ],
+  [
+    String.raw`begin;r=Regexp.new("(a)(a)(a)(a)(a)(a)(a)(a)(a)(a)(a)\\118");["aaaaaaaaaaaa","aaaaaaaaaaa\t","aaaaaaaaaaa\b","aaaaaaaaaaa8"].each{|s|begin;p r.match?(s);rescue=>e;p e.class;end};rescue=>e;p e.class,e.message;end`,
+    'false\nfalse\nfalse\nfalse\n',
+  ],
+  [
+    String.raw`begin;r=Regexp.new("(a)(a)(a)(a)(a)(a)(a)(a)(a)(a)(a)(a)\\1");["aaaaaaaaaaaaa","aaaaaaaaaaaa\t","aaaaaaaaaaaa\b","aaaaaaaaaaaa8"].each{|s|begin;p r.match?(s);rescue=>e;p e.class;end};rescue=>e;p e.class,e.message;end`,
+    'true\nfalse\nfalse\nfalse\n',
+  ],
+  [
+    String.raw`begin;r=Regexp.new("(a)(a)(a)(a)(a)(a)(a)(a)(a)(a)(a)(a)\\9");["aaaaaaaaaaaaa","aaaaaaaaaaaa\t","aaaaaaaaaaaa\b","aaaaaaaaaaaa8"].each{|s|begin;p r.match?(s);rescue=>e;p e.class;end};rescue=>e;p e.class,e.message;end`,
+    'true\nfalse\nfalse\nfalse\n',
+  ],
+  [
+    String.raw`begin;r=Regexp.new("(a)(a)(a)(a)(a)(a)(a)(a)(a)(a)(a)(a)\\10");["aaaaaaaaaaaaa","aaaaaaaaaaaa\t","aaaaaaaaaaaa\b","aaaaaaaaaaaa8"].each{|s|begin;p r.match?(s);rescue=>e;p e.class;end};rescue=>e;p e.class,e.message;end`,
+    'true\nfalse\nfalse\nfalse\n',
+  ],
+  [
+    String.raw`begin;r=Regexp.new("(a)(a)(a)(a)(a)(a)(a)(a)(a)(a)(a)(a)\\11");["aaaaaaaaaaaaa","aaaaaaaaaaaa\t","aaaaaaaaaaaa\b","aaaaaaaaaaaa8"].each{|s|begin;p r.match?(s);rescue=>e;p e.class;end};rescue=>e;p e.class,e.message;end`,
+    'true\nfalse\nfalse\nfalse\n',
+  ],
+  [
+    String.raw`begin;r=Regexp.new("(a)(a)(a)(a)(a)(a)(a)(a)(a)(a)(a)(a)\\12");["aaaaaaaaaaaaa","aaaaaaaaaaaa\t","aaaaaaaaaaaa\b","aaaaaaaaaaaa8"].each{|s|begin;p r.match?(s);rescue=>e;p e.class;end};rescue=>e;p e.class,e.message;end`,
+    'true\nfalse\nfalse\nfalse\n',
+  ],
+  [
+    String.raw`begin;r=Regexp.new("(a)(a)(a)(a)(a)(a)(a)(a)(a)(a)(a)(a)\\18");["aaaaaaaaaaaaa","aaaaaaaaaaaa\t","aaaaaaaaaaaa\b","aaaaaaaaaaaa8"].each{|s|begin;p r.match?(s);rescue=>e;p e.class;end};rescue=>e;p e.class,e.message;end`,
+    'false\nfalse\nfalse\nfalse\n',
+  ],
+  [
+    String.raw`begin;r=Regexp.new("(a)(a)(a)(a)(a)(a)(a)(a)(a)(a)(a)(a)\\80");["aaaaaaaaaaaaa","aaaaaaaaaaaa\t","aaaaaaaaaaaa\b","aaaaaaaaaaaa8"].each{|s|begin;p r.match?(s);rescue=>e;p e.class;end};rescue=>e;p e.class,e.message;end`,
+    'false\nfalse\nfalse\nfalse\n',
+  ],
+  [
+    String.raw`begin;r=Regexp.new("(a)(a)(a)(a)(a)(a)(a)(a)(a)(a)(a)(a)\\118");["aaaaaaaaaaaaa","aaaaaaaaaaaa\t","aaaaaaaaaaaa\b","aaaaaaaaaaaa8"].each{|s|begin;p r.match?(s);rescue=>e;p e.class;end};rescue=>e;p e.class,e.message;end`,
+    'false\nfalse\nfalse\nfalse\n',
+  ],
+  [
+    'begin;r=Regexp.new(""+0.chr);p r.inspect.bytes,r.to_s.bytes,r.source.bytes;rescue=>e;p e.class,e.message;end',
+    '[47, 92, 120, 48, 48, 47]\n[40, 63, 45, 109, 105, 120, 58, 92, 120, 48, 48, 41]\n[0]\n',
+  ],
+  [
+    String.raw`begin;r=Regexp.new("\\"+0.chr);p r.inspect.bytes,r.to_s.bytes,r.source.bytes;rescue=>e;p e.class,e.message;end`,
+    '[47, 92, 0, 47]\n[40, 63, 45, 109, 105, 120, 58, 92, 0, 41]\n[92, 0]\n',
+  ],
+  [
+    'begin;r=Regexp.new(""+1.chr);p r.inspect.bytes,r.to_s.bytes,r.source.bytes;rescue=>e;p e.class,e.message;end',
+    '[47, 92, 120, 48, 49, 47]\n[40, 63, 45, 109, 105, 120, 58, 92, 120, 48, 49, 41]\n[1]\n',
+  ],
+  [
+    String.raw`begin;r=Regexp.new("\\"+1.chr);p r.inspect.bytes,r.to_s.bytes,r.source.bytes;rescue=>e;p e.class,e.message;end`,
+    '[47, 92, 1, 47]\n[40, 63, 45, 109, 105, 120, 58, 92, 1, 41]\n[92, 1]\n',
+  ],
+  [
+    'begin;r=Regexp.new(""+8.chr);p r.inspect.bytes,r.to_s.bytes,r.source.bytes;rescue=>e;p e.class,e.message;end',
+    '[47, 92, 120, 48, 56, 47]\n[40, 63, 45, 109, 105, 120, 58, 92, 120, 48, 56, 41]\n[8]\n',
+  ],
+  [
+    String.raw`begin;r=Regexp.new("\\"+8.chr);p r.inspect.bytes,r.to_s.bytes,r.source.bytes;rescue=>e;p e.class,e.message;end`,
+    '[47, 92, 8, 47]\n[40, 63, 45, 109, 105, 120, 58, 92, 8, 41]\n[92, 8]\n',
+  ],
+  [
+    'begin;r=Regexp.new(""+9.chr);p r.inspect.bytes,r.to_s.bytes,r.source.bytes;rescue=>e;p e.class,e.message;end',
+    '[47, 9, 47]\n[40, 63, 45, 109, 105, 120, 58, 9, 41]\n[9]\n',
+  ],
+  [
+    String.raw`begin;r=Regexp.new("\\"+9.chr);p r.inspect.bytes,r.to_s.bytes,r.source.bytes;rescue=>e;p e.class,e.message;end`,
+    '[47, 92, 9, 47]\n[40, 63, 45, 109, 105, 120, 58, 92, 9, 41]\n[92, 9]\n',
+  ],
+  [
+    'begin;r=Regexp.new(""+10.chr);p r.inspect.bytes,r.to_s.bytes,r.source.bytes;rescue=>e;p e.class,e.message;end',
+    '[47, 10, 47]\n[40, 63, 45, 109, 105, 120, 58, 10, 41]\n[10]\n',
+  ],
+  [
+    String.raw`begin;r=Regexp.new("\\"+10.chr);p r.inspect.bytes,r.to_s.bytes,r.source.bytes;rescue=>e;p e.class,e.message;end`,
+    '[47, 92, 10, 47]\n[40, 63, 45, 109, 105, 120, 58, 92, 10, 41]\n[92, 10]\n',
+  ],
+  [
+    'begin;r=Regexp.new(""+11.chr);p r.inspect.bytes,r.to_s.bytes,r.source.bytes;rescue=>e;p e.class,e.message;end',
+    '[47, 11, 47]\n[40, 63, 45, 109, 105, 120, 58, 11, 41]\n[11]\n',
+  ],
+  [
+    String.raw`begin;r=Regexp.new("\\"+11.chr);p r.inspect.bytes,r.to_s.bytes,r.source.bytes;rescue=>e;p e.class,e.message;end`,
+    '[47, 92, 11, 47]\n[40, 63, 45, 109, 105, 120, 58, 92, 11, 41]\n[92, 11]\n',
+  ],
+  [
+    'begin;r=Regexp.new(""+12.chr);p r.inspect.bytes,r.to_s.bytes,r.source.bytes;rescue=>e;p e.class,e.message;end',
+    '[47, 12, 47]\n[40, 63, 45, 109, 105, 120, 58, 12, 41]\n[12]\n',
+  ],
+  [
+    String.raw`begin;r=Regexp.new("\\"+12.chr);p r.inspect.bytes,r.to_s.bytes,r.source.bytes;rescue=>e;p e.class,e.message;end`,
+    '[47, 92, 12, 47]\n[40, 63, 45, 109, 105, 120, 58, 92, 12, 41]\n[92, 12]\n',
+  ],
+  [
+    'begin;r=Regexp.new(""+13.chr);p r.inspect.bytes,r.to_s.bytes,r.source.bytes;rescue=>e;p e.class,e.message;end',
+    '[47, 13, 47]\n[40, 63, 45, 109, 105, 120, 58, 13, 41]\n[13]\n',
+  ],
+  [
+    String.raw`begin;r=Regexp.new("\\"+13.chr);p r.inspect.bytes,r.to_s.bytes,r.source.bytes;rescue=>e;p e.class,e.message;end`,
+    '[47, 92, 13, 47]\n[40, 63, 45, 109, 105, 120, 58, 92, 13, 41]\n[92, 13]\n',
+  ],
+  [
+    'begin;r=Regexp.new(""+27.chr);p r.inspect.bytes,r.to_s.bytes,r.source.bytes;rescue=>e;p e.class,e.message;end',
+    '[47, 92, 120, 49, 66, 47]\n[40, 63, 45, 109, 105, 120, 58, 92, 120, 49, 66, 41]\n[27]\n',
+  ],
+  [
+    String.raw`begin;r=Regexp.new("\\"+27.chr);p r.inspect.bytes,r.to_s.bytes,r.source.bytes;rescue=>e;p e.class,e.message;end`,
+    '[47, 92, 27, 47]\n[40, 63, 45, 109, 105, 120, 58, 92, 27, 41]\n[92, 27]\n',
+  ],
+  [
+    'begin;r=Regexp.new(""+31.chr);p r.inspect.bytes,r.to_s.bytes,r.source.bytes;rescue=>e;p e.class,e.message;end',
+    '[47, 92, 120, 49, 70, 47]\n[40, 63, 45, 109, 105, 120, 58, 92, 120, 49, 70, 41]\n[31]\n',
+  ],
+  [
+    String.raw`begin;r=Regexp.new("\\"+31.chr);p r.inspect.bytes,r.to_s.bytes,r.source.bytes;rescue=>e;p e.class,e.message;end`,
+    '[47, 92, 31, 47]\n[40, 63, 45, 109, 105, 120, 58, 92, 31, 41]\n[92, 31]\n',
+  ],
+  [
+    'begin;r=Regexp.new(""+32.chr);p r.inspect.bytes,r.to_s.bytes,r.source.bytes;rescue=>e;p e.class,e.message;end',
+    '[47, 32, 47]\n[40, 63, 45, 109, 105, 120, 58, 32, 41]\n[32]\n',
+  ],
+  [
+    String.raw`begin;r=Regexp.new("\\"+32.chr);p r.inspect.bytes,r.to_s.bytes,r.source.bytes;rescue=>e;p e.class,e.message;end`,
+    '[47, 92, 32, 47]\n[40, 63, 45, 109, 105, 120, 58, 92, 32, 41]\n[92, 32]\n',
+  ],
+  [
+    'begin;r=Regexp.new(""+47.chr);p r.inspect.bytes,r.to_s.bytes,r.source.bytes;rescue=>e;p e.class,e.message;end',
+    '[47, 92, 47, 47]\n[40, 63, 45, 109, 105, 120, 58, 92, 47, 41]\n[47]\n',
+  ],
+  [
+    String.raw`begin;r=Regexp.new("\\"+47.chr);p r.inspect.bytes,r.to_s.bytes,r.source.bytes;rescue=>e;p e.class,e.message;end`,
+    '[47, 92, 47, 47]\n[40, 63, 45, 109, 105, 120, 58, 92, 47, 41]\n[92, 47]\n',
+  ],
+  [
+    'begin;r=Regexp.new(""+92.chr);p r.inspect.bytes,r.to_s.bytes,r.source.bytes;rescue=>e;p e.class,e.message;end',
+    'RegexpError\n"too short escape sequence: /\\\\/"\n',
+  ],
+  [
+    String.raw`begin;r=Regexp.new("\\"+92.chr);p r.inspect.bytes,r.to_s.bytes,r.source.bytes;rescue=>e;p e.class,e.message;end`,
+    '[47, 92, 92, 47]\n[40, 63, 45, 109, 105, 120, 58, 92, 92, 41]\n[92, 92]\n',
+  ],
+  [
+    'begin;r=Regexp.new(""+127.chr);p r.inspect.bytes,r.to_s.bytes,r.source.bytes;rescue=>e;p e.class,e.message;end',
+    '[47, 92, 120, 55, 70, 47]\n[40, 63, 45, 109, 105, 120, 58, 92, 120, 55, 70, 41]\n[127]\n',
+  ],
+  [
+    String.raw`begin;r=Regexp.new("\\"+127.chr);p r.inspect.bytes,r.to_s.bytes,r.source.bytes;rescue=>e;p e.class,e.message;end`,
+    '[47, 92, 127, 47]\n[40, 63, 45, 109, 105, 120, 58, 92, 127, 41]\n[92, 127]\n',
+  ],
+  [
+    'def f(&b);e=Enumerator.new{|y|b.call};begin;p e.next;rescue=>x;p x.class,x.message;end;:after;end;p(f{next :next})',
+    'StopIteration\n"iteration reached an end"\n:after\n',
+  ],
+  [
+    'def f(&b);e=Enumerator.new{|y|b.call};begin;p e.next;rescue=>x;p x.class,x.message;end;:after;end;p(f{return :returned})',
+    'LocalJumpError\n"unexpected return"\n:after\n',
+  ],
+  [
+    'def f(&b);e=Enumerator.produce(0){b.call};begin;p e.next;p e.next;rescue=>x;p x.class,x.message;end;:after;end;p(f{break :done})',
+    '0\nLocalJumpError\n"break from proc-closure"\n:after\n',
+  ],
+  [
+    'def f(&b);e=Enumerator.produce(0){b.call};begin;p e.next;p e.next;rescue=>x;p x.class,x.message;end;:after;end;p(f{next :next})',
+    '0\n:next\n:after\n',
+  ],
+  [
+    'def f(&b);e=Enumerator.produce(0){b.call};begin;p e.next;p e.next;rescue=>x;p x.class,x.message;end;:after;end;p(f{return :returned})',
+    '0\nLocalJumpError\n"unexpected return"\n:after\n',
+  ],
+  [
+    'class Rational;def to_int;raise :int.to_s;end;def to_f;raise :float.to_s;end;end;begin;t=Time.new(2024,1,1,0,0,0,1r/2);p t,t.utc_offset;rescue=>e;p e.class,e.message;end',
+    '2024-01-01 00:00:00.5 +000001\n(1/2)\n',
+  ],
+  [
+    'class Rational;def to_int;raise :int.to_s;end;def to_f;raise :float.to_s;end;end;begin;t=Time.at(0).getlocal(1r/2);p t,t.utc_offset;rescue=>e;p e.class,e.message;end',
+    '1970-01-01 00:00:00 +000001\n(1/2)\n',
+  ],
+  [
+    'class Rational;def to_int;raise :int.to_s;end;def to_f;raise :float.to_s;end;end;begin;t=Time.at(0).localtime(1r/2);p t,t.utc_offset;rescue=>e;p e.class,e.message;end',
+    '1970-01-01 00:00:00 +000001\n(1/2)\n',
+  ],
+  [
+    'class Rational;def to_int;raise :int.to_s;end;def to_f;raise :float.to_s;end;end;begin;t=Time.new(2024,1,1,0,0,0,-1r/2);p t,t.utc_offset;rescue=>e;p e.class,e.message;end',
+    '2024-01-01 00:00:00.5 -000001\n(-1/2)\n',
+  ],
+  [
+    'class Rational;def to_int;raise :int.to_s;end;def to_f;raise :float.to_s;end;end;begin;t=Time.at(0).getlocal(-1r/2);p t,t.utc_offset;rescue=>e;p e.class,e.message;end',
+    '1969-12-31 23:59:59 -000001\n(-1/2)\n',
+  ],
+  [
+    'class Rational;def to_int;raise :int.to_s;end;def to_f;raise :float.to_s;end;end;begin;t=Time.at(0).localtime(-1r/2);p t,t.utc_offset;rescue=>e;p e.class,e.message;end',
+    '1969-12-31 23:59:59 -000001\n(-1/2)\n',
+  ],
+  [
+    'class Rational;def to_int;raise :int.to_s;end;def to_f;raise :float.to_s;end;end;begin;t=Time.new(2024,1,1,0,0,0,863999r/10);p t,t.utc_offset;rescue=>e;p e.class,e.message;end',
+    '2024-01-01 00:00:00.1 +2400\n(863999/10)\n',
+  ],
+  [
+    'class Rational;def to_int;raise :int.to_s;end;def to_f;raise :float.to_s;end;end;begin;t=Time.at(0).getlocal(863999r/10);p t,t.utc_offset;rescue=>e;p e.class,e.message;end',
+    '1970-01-01 23:59:59 +2400\n(863999/10)\n',
+  ],
+  [
+    'class Rational;def to_int;raise :int.to_s;end;def to_f;raise :float.to_s;end;end;begin;t=Time.at(0).localtime(863999r/10);p t,t.utc_offset;rescue=>e;p e.class,e.message;end',
+    '1970-01-01 23:59:59 +2400\n(863999/10)\n',
+  ],
+  [
+    'class Rational;def to_int;raise :int.to_s;end;def to_f;raise :float.to_s;end;end;begin;t=Time.new(2024,1,1,0,0,0,-863999r/10);p t,t.utc_offset;rescue=>e;p e.class,e.message;end',
+    '2024-01-01 00:00:00.9 -2400\n(-863999/10)\n',
+  ],
+  [
+    'class Rational;def to_int;raise :int.to_s;end;def to_f;raise :float.to_s;end;end;begin;t=Time.at(0).getlocal(-863999r/10);p t,t.utc_offset;rescue=>e;p e.class,e.message;end',
+    '1969-12-31 00:00:00 -2400\n(-863999/10)\n',
+  ],
+  [
+    'class Rational;def to_int;raise :int.to_s;end;def to_f;raise :float.to_s;end;end;begin;t=Time.at(0).localtime(-863999r/10);p t,t.utc_offset;rescue=>e;p e.class,e.message;end',
+    '1969-12-31 00:00:00 -2400\n(-863999/10)\n',
+  ],
+  [
+    'class Rational;def to_int;raise :int.to_s;end;def to_f;raise :float.to_s;end;end;begin;t=Time.new(2024,1,1,0,0,0,86400r);p t,t.utc_offset;rescue=>e;p e.class,e.message;end',
+    '2024-01-01 00:00:00 +2400\n86400\n',
+  ],
+  [
+    'class Rational;def to_int;raise :int.to_s;end;def to_f;raise :float.to_s;end;end;begin;t=Time.at(0).getlocal(86400r);p t,t.utc_offset;rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"utc_offset out of range"\n',
+  ],
+  [
+    'class Rational;def to_int;raise :int.to_s;end;def to_f;raise :float.to_s;end;end;begin;t=Time.at(0).localtime(86400r);p t,t.utc_offset;rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"utc_offset out of range"\n',
+  ],
+  [
+    'class Rational;def to_int;raise :int.to_s;end;def to_f;raise :float.to_s;end;end;begin;t=Time.new(2024,1,1,0,0,0,-86400r);p t,t.utc_offset;rescue=>e;p e.class,e.message;end',
+    '2024-01-01 00:00:00 -2400\n-86400\n',
+  ],
+  [
+    'class Rational;def to_int;raise :int.to_s;end;def to_f;raise :float.to_s;end;end;begin;t=Time.at(0).getlocal(-86400r);p t,t.utc_offset;rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"utc_offset out of range"\n',
+  ],
+  [
+    'class Rational;def to_int;raise :int.to_s;end;def to_f;raise :float.to_s;end;end;begin;t=Time.at(0).localtime(-86400r);p t,t.utc_offset;rescue=>e;p e.class,e.message;end',
+    'ArgumentError\n"utc_offset out of range"\n',
+  ],
+  [
+    'class Rational;def to_int;raise :int.to_s;end;def to_f;raise :float.to_s;end;end;begin;t=Time.new(2024,1,1,0,0,0,0r);p t,t.utc_offset;rescue=>e;p e.class,e.message;end',
+    '2024-01-01 00:00:00 +0000\n0\n',
+  ],
+  [
+    'class Rational;def to_int;raise :int.to_s;end;def to_f;raise :float.to_s;end;end;begin;t=Time.at(0).getlocal(0r);p t,t.utc_offset;rescue=>e;p e.class,e.message;end',
+    '1970-01-01 00:00:00 +0000\n0\n',
+  ],
+  [
+    'class Rational;def to_int;raise :int.to_s;end;def to_f;raise :float.to_s;end;end;begin;t=Time.at(0).localtime(0r);p t,t.utc_offset;rescue=>e;p e.class,e.message;end',
+    '1970-01-01 00:00:00 +0000\n0\n',
+  ],
+  [
+    't=Time.utc(2024,2,3,4,5,6);["%-0d","%-010d","%0-d","%0-10d","%-_d","%-_10d","%_-d","%_-10d","%-00d","%-0010d","%_0-d","%_0-10d","%-^0d","%-^010d","%_0d","%_010d","%0_d","%0_10d","%-0_d","%-0_10d"].each{|f|p [f,t.strftime(f)]}',
+    '["%-0d", "3"]\n["%-010d", "3"]\n["%0-d", "3"]\n["%0-10d", "3"]\n["%-_d", "3"]\n["%-_10d", "3"]\n["%_-d", "3"]\n["%_-10d", "3"]\n["%-00d", "3"]\n["%-0010d", "3"]\n["%_0-d", "3"]\n["%_0-10d", "3"]\n["%-^0d", "3"]\n["%-^010d", "3"]\n["%_0d", "03"]\n["%_010d", "0000000003"]\n["%0_d", " 3"]\n["%0_10d", "         3"]\n["%-0_d", "3"]\n["%-0_10d", "3"]\n',
+  ],
+  [
+    't=Time.utc(2024,2,3,4,5,6);["%-0Y","%-010Y","%0-Y","%0-10Y","%-_Y","%-_10Y","%_-Y","%_-10Y","%-00Y","%-0010Y","%_0-Y","%_0-10Y","%-^0Y","%-^010Y","%_0Y","%_010Y","%0_Y","%0_10Y","%-0_Y","%-0_10Y"].each{|f|p [f,t.strftime(f)]}',
+    '["%-0Y", "2024"]\n["%-010Y", "2024"]\n["%0-Y", "2024"]\n["%0-10Y", "2024"]\n["%-_Y", "2024"]\n["%-_10Y", "2024"]\n["%_-Y", "2024"]\n["%_-10Y", "2024"]\n["%-00Y", "2024"]\n["%-0010Y", "2024"]\n["%_0-Y", "2024"]\n["%_0-10Y", "2024"]\n["%-^0Y", "2024"]\n["%-^010Y", "2024"]\n["%_0Y", "2024"]\n["%_010Y", "0000002024"]\n["%0_Y", "2024"]\n["%0_10Y", "      2024"]\n["%-0_Y", "2024"]\n["%-0_10Y", "2024"]\n',
+  ],
+  [
+    't=Time.utc(2024,2,3,4,5,6);["%-0C","%-010C","%0-C","%0-10C","%-_C","%-_10C","%_-C","%_-10C","%-00C","%-0010C","%_0-C","%_0-10C","%-^0C","%-^010C","%_0C","%_010C","%0_C","%0_10C","%-0_C","%-0_10C"].each{|f|p [f,t.strftime(f)]}',
+    '["%-0C", "20"]\n["%-010C", "20"]\n["%0-C", "20"]\n["%0-10C", "20"]\n["%-_C", "20"]\n["%-_10C", "20"]\n["%_-C", "20"]\n["%_-10C", "20"]\n["%-00C", "20"]\n["%-0010C", "20"]\n["%_0-C", "20"]\n["%_0-10C", "20"]\n["%-^0C", "20"]\n["%-^010C", "20"]\n["%_0C", "20"]\n["%_010C", "0000000020"]\n["%0_C", "20"]\n["%0_10C", "        20"]\n["%-0_C", "20"]\n["%-0_10C", "20"]\n',
+  ],
+  [
+    't=Time.utc(2024,2,3,4,5,6);["%-0m","%-010m","%0-m","%0-10m","%-_m","%-_10m","%_-m","%_-10m","%-00m","%-0010m","%_0-m","%_0-10m","%-^0m","%-^010m","%_0m","%_010m","%0_m","%0_10m","%-0_m","%-0_10m"].each{|f|p [f,t.strftime(f)]}',
+    '["%-0m", "2"]\n["%-010m", "2"]\n["%0-m", "2"]\n["%0-10m", "2"]\n["%-_m", "2"]\n["%-_10m", "2"]\n["%_-m", "2"]\n["%_-10m", "2"]\n["%-00m", "2"]\n["%-0010m", "2"]\n["%_0-m", "2"]\n["%_0-10m", "2"]\n["%-^0m", "2"]\n["%-^010m", "2"]\n["%_0m", "02"]\n["%_010m", "0000000002"]\n["%0_m", " 2"]\n["%0_10m", "         2"]\n["%-0_m", "2"]\n["%-0_10m", "2"]\n',
+  ],
+  [
+    't=Time.utc(2024,2,3,4,5,6);["%-0e","%-010e","%0-e","%0-10e","%-_e","%-_10e","%_-e","%_-10e","%-00e","%-0010e","%_0-e","%_0-10e","%-^0e","%-^010e","%_0e","%_010e","%0_e","%0_10e","%-0_e","%-0_10e"].each{|f|p [f,t.strftime(f)]}',
+    '["%-0e", "3"]\n["%-010e", "3"]\n["%0-e", "3"]\n["%0-10e", "3"]\n["%-_e", "3"]\n["%-_10e", "3"]\n["%_-e", "3"]\n["%_-10e", "3"]\n["%-00e", "3"]\n["%-0010e", "3"]\n["%_0-e", "3"]\n["%_0-10e", "3"]\n["%-^0e", "3"]\n["%-^010e", "3"]\n["%_0e", "03"]\n["%_010e", "0000000003"]\n["%0_e", " 3"]\n["%0_10e", "         3"]\n["%-0_e", "3"]\n["%-0_10e", "3"]\n',
+  ],
+  [
+    't=Time.utc(2024,2,3,4,5,6);["%-0j","%-010j","%0-j","%0-10j","%-_j","%-_10j","%_-j","%_-10j","%-00j","%-0010j","%_0-j","%_0-10j","%-^0j","%-^010j","%_0j","%_010j","%0_j","%0_10j","%-0_j","%-0_10j"].each{|f|p [f,t.strftime(f)]}',
+    '["%-0j", "34"]\n["%-010j", "34"]\n["%0-j", "34"]\n["%0-10j", "34"]\n["%-_j", "34"]\n["%-_10j", "34"]\n["%_-j", "34"]\n["%_-10j", "34"]\n["%-00j", "34"]\n["%-0010j", "34"]\n["%_0-j", "34"]\n["%_0-10j", "34"]\n["%-^0j", "34"]\n["%-^010j", "34"]\n["%_0j", "034"]\n["%_010j", "0000000034"]\n["%0_j", " 34"]\n["%0_10j", "        34"]\n["%-0_j", "34"]\n["%-0_10j", "34"]\n',
+  ],
+  [
+    't=Time.utc(2024,2,3,4,5,6);["%-0w","%-010w","%0-w","%0-10w","%-_w","%-_10w","%_-w","%_-10w","%-00w","%-0010w","%_0-w","%_0-10w","%-^0w","%-^010w","%_0w","%_010w","%0_w","%0_10w","%-0_w","%-0_10w"].each{|f|p [f,t.strftime(f)]}',
+    '["%-0w", "6"]\n["%-010w", "6"]\n["%0-w", "6"]\n["%0-10w", "6"]\n["%-_w", "6"]\n["%-_10w", "6"]\n["%_-w", "6"]\n["%_-10w", "6"]\n["%-00w", "6"]\n["%-0010w", "6"]\n["%_0-w", "6"]\n["%_0-10w", "6"]\n["%-^0w", "6"]\n["%-^010w", "6"]\n["%_0w", "6"]\n["%_010w", "0000000006"]\n["%0_w", "6"]\n["%0_10w", "         6"]\n["%-0_w", "6"]\n["%-0_10w", "6"]\n',
+  ],
+  [
+    't=Time.utc(2024,2,3,4,5,6);["%-0u","%-010u","%0-u","%0-10u","%-_u","%-_10u","%_-u","%_-10u","%-00u","%-0010u","%_0-u","%_0-10u","%-^0u","%-^010u","%_0u","%_010u","%0_u","%0_10u","%-0_u","%-0_10u"].each{|f|p [f,t.strftime(f)]}',
+    '["%-0u", "6"]\n["%-010u", "6"]\n["%0-u", "6"]\n["%0-10u", "6"]\n["%-_u", "6"]\n["%-_10u", "6"]\n["%_-u", "6"]\n["%_-10u", "6"]\n["%-00u", "6"]\n["%-0010u", "6"]\n["%_0-u", "6"]\n["%_0-10u", "6"]\n["%-^0u", "6"]\n["%-^010u", "6"]\n["%_0u", "6"]\n["%_010u", "0000000006"]\n["%0_u", "6"]\n["%0_10u", "         6"]\n["%-0_u", "6"]\n["%-0_10u", "6"]\n',
+  ],
+  [
+    't=Time.utc(2024,2,3,4,5,6);["%-0U","%-010U","%0-U","%0-10U","%-_U","%-_10U","%_-U","%_-10U","%-00U","%-0010U","%_0-U","%_0-10U","%-^0U","%-^010U","%_0U","%_010U","%0_U","%0_10U","%-0_U","%-0_10U"].each{|f|p [f,t.strftime(f)]}',
+    '["%-0U", "4"]\n["%-010U", "4"]\n["%0-U", "4"]\n["%0-10U", "4"]\n["%-_U", "4"]\n["%-_10U", "4"]\n["%_-U", "4"]\n["%_-10U", "4"]\n["%-00U", "4"]\n["%-0010U", "4"]\n["%_0-U", "4"]\n["%_0-10U", "4"]\n["%-^0U", "4"]\n["%-^010U", "4"]\n["%_0U", "04"]\n["%_010U", "0000000004"]\n["%0_U", " 4"]\n["%0_10U", "         4"]\n["%-0_U", "4"]\n["%-0_10U", "4"]\n',
+  ],
+  [
+    't=Time.utc(2024,2,3,4,5,6);["%-0W","%-010W","%0-W","%0-10W","%-_W","%-_10W","%_-W","%_-10W","%-00W","%-0010W","%_0-W","%_0-10W","%-^0W","%-^010W","%_0W","%_010W","%0_W","%0_10W","%-0_W","%-0_10W"].each{|f|p [f,t.strftime(f)]}',
+    '["%-0W", "5"]\n["%-010W", "5"]\n["%0-W", "5"]\n["%0-10W", "5"]\n["%-_W", "5"]\n["%-_10W", "5"]\n["%_-W", "5"]\n["%_-10W", "5"]\n["%-00W", "5"]\n["%-0010W", "5"]\n["%_0-W", "5"]\n["%_0-10W", "5"]\n["%-^0W", "5"]\n["%-^010W", "5"]\n["%_0W", "05"]\n["%_010W", "0000000005"]\n["%0_W", " 5"]\n["%0_10W", "         5"]\n["%-0_W", "5"]\n["%-0_10W", "5"]\n',
+  ],
+  [
+    't=Time.utc(2024,2,3,4,5,6);["%-0V","%-010V","%0-V","%0-10V","%-_V","%-_10V","%_-V","%_-10V","%-00V","%-0010V","%_0-V","%_0-10V","%-^0V","%-^010V","%_0V","%_010V","%0_V","%0_10V","%-0_V","%-0_10V"].each{|f|p [f,t.strftime(f)]}',
+    '["%-0V", "5"]\n["%-010V", "5"]\n["%0-V", "5"]\n["%0-10V", "5"]\n["%-_V", "5"]\n["%-_10V", "5"]\n["%_-V", "5"]\n["%_-10V", "5"]\n["%-00V", "5"]\n["%-0010V", "5"]\n["%_0-V", "5"]\n["%_0-10V", "5"]\n["%-^0V", "5"]\n["%-^010V", "5"]\n["%_0V", "05"]\n["%_010V", "0000000005"]\n["%0_V", " 5"]\n["%0_10V", "         5"]\n["%-0_V", "5"]\n["%-0_10V", "5"]\n',
+  ],
+  [
+    't=Time.utc(2024,2,3,4,5,6);["%-0G","%-010G","%0-G","%0-10G","%-_G","%-_10G","%_-G","%_-10G","%-00G","%-0010G","%_0-G","%_0-10G","%-^0G","%-^010G","%_0G","%_010G","%0_G","%0_10G","%-0_G","%-0_10G"].each{|f|p [f,t.strftime(f)]}',
+    '["%-0G", "2024"]\n["%-010G", "2024"]\n["%0-G", "2024"]\n["%0-10G", "2024"]\n["%-_G", "2024"]\n["%-_10G", "2024"]\n["%_-G", "2024"]\n["%_-10G", "2024"]\n["%-00G", "2024"]\n["%-0010G", "2024"]\n["%_0-G", "2024"]\n["%_0-10G", "2024"]\n["%-^0G", "2024"]\n["%-^010G", "2024"]\n["%_0G", "2024"]\n["%_010G", "0000002024"]\n["%0_G", "2024"]\n["%0_10G", "      2024"]\n["%-0_G", "2024"]\n["%-0_10G", "2024"]\n',
+  ],
+  [
+    't=Time.utc(2024,2,3,4,5,6);["%-0g","%-010g","%0-g","%0-10g","%-_g","%-_10g","%_-g","%_-10g","%-00g","%-0010g","%_0-g","%_0-10g","%-^0g","%-^010g","%_0g","%_010g","%0_g","%0_10g","%-0_g","%-0_10g"].each{|f|p [f,t.strftime(f)]}',
+    '["%-0g", "24"]\n["%-010g", "24"]\n["%0-g", "24"]\n["%0-10g", "24"]\n["%-_g", "24"]\n["%-_10g", "24"]\n["%_-g", "24"]\n["%_-10g", "24"]\n["%-00g", "24"]\n["%-0010g", "24"]\n["%_0-g", "24"]\n["%_0-10g", "24"]\n["%-^0g", "24"]\n["%-^010g", "24"]\n["%_0g", "24"]\n["%_010g", "0000000024"]\n["%0_g", "24"]\n["%0_10g", "        24"]\n["%-0_g", "24"]\n["%-0_10g", "24"]\n',
+  ],
+  [
+    't=Time.utc(2024,2,3,4,5,6);["%-0H","%-010H","%0-H","%0-10H","%-_H","%-_10H","%_-H","%_-10H","%-00H","%-0010H","%_0-H","%_0-10H","%-^0H","%-^010H","%_0H","%_010H","%0_H","%0_10H","%-0_H","%-0_10H"].each{|f|p [f,t.strftime(f)]}',
+    '["%-0H", "4"]\n["%-010H", "4"]\n["%0-H", "4"]\n["%0-10H", "4"]\n["%-_H", "4"]\n["%-_10H", "4"]\n["%_-H", "4"]\n["%_-10H", "4"]\n["%-00H", "4"]\n["%-0010H", "4"]\n["%_0-H", "4"]\n["%_0-10H", "4"]\n["%-^0H", "4"]\n["%-^010H", "4"]\n["%_0H", "04"]\n["%_010H", "0000000004"]\n["%0_H", " 4"]\n["%0_10H", "         4"]\n["%-0_H", "4"]\n["%-0_10H", "4"]\n',
+  ],
+  [
+    't=Time.utc(2024,2,3,4,5,6);["%-0k","%-010k","%0-k","%0-10k","%-_k","%-_10k","%_-k","%_-10k","%-00k","%-0010k","%_0-k","%_0-10k","%-^0k","%-^010k","%_0k","%_010k","%0_k","%0_10k","%-0_k","%-0_10k"].each{|f|p [f,t.strftime(f)]}',
+    '["%-0k", "4"]\n["%-010k", "4"]\n["%0-k", "4"]\n["%0-10k", "4"]\n["%-_k", "4"]\n["%-_10k", "4"]\n["%_-k", "4"]\n["%_-10k", "4"]\n["%-00k", "4"]\n["%-0010k", "4"]\n["%_0-k", "4"]\n["%_0-10k", "4"]\n["%-^0k", "4"]\n["%-^010k", "4"]\n["%_0k", "04"]\n["%_010k", "0000000004"]\n["%0_k", " 4"]\n["%0_10k", "         4"]\n["%-0_k", "4"]\n["%-0_10k", "4"]\n',
+  ],
+  [
+    't=Time.utc(2024,2,3,4,5,6);["%-0I","%-010I","%0-I","%0-10I","%-_I","%-_10I","%_-I","%_-10I","%-00I","%-0010I","%_0-I","%_0-10I","%-^0I","%-^010I","%_0I","%_010I","%0_I","%0_10I","%-0_I","%-0_10I"].each{|f|p [f,t.strftime(f)]}',
+    '["%-0I", "4"]\n["%-010I", "4"]\n["%0-I", "4"]\n["%0-10I", "4"]\n["%-_I", "4"]\n["%-_10I", "4"]\n["%_-I", "4"]\n["%_-10I", "4"]\n["%-00I", "4"]\n["%-0010I", "4"]\n["%_0-I", "4"]\n["%_0-10I", "4"]\n["%-^0I", "4"]\n["%-^010I", "4"]\n["%_0I", "04"]\n["%_010I", "0000000004"]\n["%0_I", " 4"]\n["%0_10I", "         4"]\n["%-0_I", "4"]\n["%-0_10I", "4"]\n',
+  ],
+  [
+    't=Time.utc(2024,2,3,4,5,6);["%-0l","%-010l","%0-l","%0-10l","%-_l","%-_10l","%_-l","%_-10l","%-00l","%-0010l","%_0-l","%_0-10l","%-^0l","%-^010l","%_0l","%_010l","%0_l","%0_10l","%-0_l","%-0_10l"].each{|f|p [f,t.strftime(f)]}',
+    '["%-0l", "4"]\n["%-010l", "4"]\n["%0-l", "4"]\n["%0-10l", "4"]\n["%-_l", "4"]\n["%-_10l", "4"]\n["%_-l", "4"]\n["%_-10l", "4"]\n["%-00l", "4"]\n["%-0010l", "4"]\n["%_0-l", "4"]\n["%_0-10l", "4"]\n["%-^0l", "4"]\n["%-^010l", "4"]\n["%_0l", "04"]\n["%_010l", "0000000004"]\n["%0_l", " 4"]\n["%0_10l", "         4"]\n["%-0_l", "4"]\n["%-0_10l", "4"]\n',
+  ],
+  [
+    't=Time.utc(2024,2,3,4,5,6);["%-0M","%-010M","%0-M","%0-10M","%-_M","%-_10M","%_-M","%_-10M","%-00M","%-0010M","%_0-M","%_0-10M","%-^0M","%-^010M","%_0M","%_010M","%0_M","%0_10M","%-0_M","%-0_10M"].each{|f|p [f,t.strftime(f)]}',
+    '["%-0M", "5"]\n["%-010M", "5"]\n["%0-M", "5"]\n["%0-10M", "5"]\n["%-_M", "5"]\n["%-_10M", "5"]\n["%_-M", "5"]\n["%_-10M", "5"]\n["%-00M", "5"]\n["%-0010M", "5"]\n["%_0-M", "5"]\n["%_0-10M", "5"]\n["%-^0M", "5"]\n["%-^010M", "5"]\n["%_0M", "05"]\n["%_010M", "0000000005"]\n["%0_M", " 5"]\n["%0_10M", "         5"]\n["%-0_M", "5"]\n["%-0_10M", "5"]\n',
+  ],
+  [
+    't=Time.utc(2024,2,3,4,5,6);["%-0S","%-010S","%0-S","%0-10S","%-_S","%-_10S","%_-S","%_-10S","%-00S","%-0010S","%_0-S","%_0-10S","%-^0S","%-^010S","%_0S","%_010S","%0_S","%0_10S","%-0_S","%-0_10S"].each{|f|p [f,t.strftime(f)]}',
+    '["%-0S", "6"]\n["%-010S", "6"]\n["%0-S", "6"]\n["%0-10S", "6"]\n["%-_S", "6"]\n["%-_10S", "6"]\n["%_-S", "6"]\n["%_-10S", "6"]\n["%-00S", "6"]\n["%-0010S", "6"]\n["%_0-S", "6"]\n["%_0-10S", "6"]\n["%-^0S", "6"]\n["%-^010S", "6"]\n["%_0S", "06"]\n["%_010S", "0000000006"]\n["%0_S", " 6"]\n["%0_10S", "         6"]\n["%-0_S", "6"]\n["%-0_10S", "6"]\n',
+  ],
+  [
+    't=Time.utc(2024,2,3,4,5,6);["%-0s","%-010s","%0-s","%0-10s","%-_s","%-_10s","%_-s","%_-10s","%-00s","%-0010s","%_0-s","%_0-10s","%-^0s","%-^010s","%_0s","%_010s","%0_s","%0_10s","%-0_s","%-0_10s"].each{|f|p [f,t.strftime(f)]}',
+    '["%-0s", "1706933106"]\n["%-010s", "1706933106"]\n["%0-s", "1706933106"]\n["%0-10s", "1706933106"]\n["%-_s", "1706933106"]\n["%-_10s", "1706933106"]\n["%_-s", "1706933106"]\n["%_-10s", "1706933106"]\n["%-00s", "1706933106"]\n["%-0010s", "1706933106"]\n["%_0-s", "1706933106"]\n["%_0-10s", "1706933106"]\n["%-^0s", "1706933106"]\n["%-^010s", "1706933106"]\n["%_0s", "1706933106"]\n["%_010s", "1706933106"]\n["%0_s", "1706933106"]\n["%0_10s", "1706933106"]\n["%-0_s", "1706933106"]\n["%-0_10s", "1706933106"]\n',
+  ],
+  [
+    't=Time.utc(2024,2,3,4,5,6);["%-0N","%-010N","%0-N","%0-10N","%-_N","%-_10N","%_-N","%_-10N","%-00N","%-0010N","%_0-N","%_0-10N","%-^0N","%-^010N","%_0N","%_010N","%0_N","%0_10N","%-0_N","%-0_10N"].each{|f|p [f,t.strftime(f)]}',
+    '["%-0N", "000000000"]\n["%-010N", "0000000000"]\n["%0-N", "000000000"]\n["%0-10N", "0000000000"]\n["%-_N", "000000000"]\n["%-_10N", "0000000000"]\n["%_-N", "000000000"]\n["%_-10N", "0000000000"]\n["%-00N", "000000000"]\n["%-0010N", "0000000000"]\n["%_0-N", "000000000"]\n["%_0-10N", "0000000000"]\n["%-^0N", "000000000"]\n["%-^010N", "0000000000"]\n["%_0N", "000000000"]\n["%_010N", "0000000000"]\n["%0_N", "000000000"]\n["%0_10N", "0000000000"]\n["%-0_N", "000000000"]\n["%-0_10N", "0000000000"]\n',
+  ],
+  [
+    't=Time.utc(2024,2,3,4,5,6);["%-0L","%-010L","%0-L","%0-10L","%-_L","%-_10L","%_-L","%_-10L","%-00L","%-0010L","%_0-L","%_0-10L","%-^0L","%-^010L","%_0L","%_010L","%0_L","%0_10L","%-0_L","%-0_10L"].each{|f|p [f,t.strftime(f)]}',
+    '["%-0L", "000"]\n["%-010L", "0000000000"]\n["%0-L", "000"]\n["%0-10L", "0000000000"]\n["%-_L", "000"]\n["%-_10L", "0000000000"]\n["%_-L", "000"]\n["%_-10L", "0000000000"]\n["%-00L", "000"]\n["%-0010L", "0000000000"]\n["%_0-L", "000"]\n["%_0-10L", "0000000000"]\n["%-^0L", "000"]\n["%-^010L", "0000000000"]\n["%_0L", "000"]\n["%_010L", "0000000000"]\n["%0_L", "000"]\n["%0_10L", "0000000000"]\n["%-0_L", "000"]\n["%-0_10L", "0000000000"]\n',
+  ],
+  [
+    't=Time.utc(2024,2,3,4,5,6);["%-0z","%-010z","%0-z","%0-10z","%-_z","%-_10z","%_-z","%_-10z","%-00z","%-0010z","%_0-z","%_0-10z","%-^0z","%-^010z","%_0z","%_010z","%0_z","%0_10z","%-0_z","%-0_10z"].each{|f|p [f,t.strftime(f)]}',
+    '["%-0z", "-0000"]\n["%-010z", "-000000000"]\n["%0-z", "-0000"]\n["%0-10z", "-000000000"]\n["%-_z", " -000"]\n["%-_10z", "      -000"]\n["%_-z", "-0000"]\n["%_-10z", "-000000000"]\n["%-00z", "-0000"]\n["%-0010z", "-000000000"]\n["%_0-z", "-0000"]\n["%_0-10z", "-000000000"]\n["%-^0z", "-0000"]\n["%-^010z", "-000000000"]\n["%_0z", "+0000"]\n["%_010z", "+000000000"]\n["%0_z", " +000"]\n["%0_10z", "      +000"]\n["%-0_z", " -000"]\n["%-0_10z", "      -000"]\n',
+  ],
+  [
+    't=Time.utc(2024,2,3,4,5,6);["%-0Z","%-010Z","%0-Z","%0-10Z","%-_Z","%-_10Z","%_-Z","%_-10Z","%-00Z","%-0010Z","%_0-Z","%_0-10Z","%-^0Z","%-^010Z","%_0Z","%_010Z","%0_Z","%0_10Z","%-0_Z","%-0_10Z"].each{|f|p [f,t.strftime(f)]}',
+    '["%-0Z", "UTC"]\n["%-010Z", "UTC"]\n["%0-Z", "UTC"]\n["%0-10Z", "UTC"]\n["%-_Z", "UTC"]\n["%-_10Z", "UTC"]\n["%_-Z", "UTC"]\n["%_-10Z", "UTC"]\n["%-00Z", "UTC"]\n["%-0010Z", "UTC"]\n["%_0-Z", "UTC"]\n["%_0-10Z", "UTC"]\n["%-^0Z", "UTC"]\n["%-^010Z", "UTC"]\n["%_0Z", "UTC"]\n["%_010Z", "0000000UTC"]\n["%0_Z", "UTC"]\n["%0_10Z", "       UTC"]\n["%-0_Z", "UTC"]\n["%-0_10Z", "UTC"]\n',
+  ],
+  [
+    't=Time.utc(2024,2,3,4,5,6);["%-0F","%-010F","%0-F","%0-10F","%-_F","%-_10F","%_-F","%_-10F","%-00F","%-0010F","%_0-F","%_0-10F","%-^0F","%-^010F","%_0F","%_010F","%0_F","%0_10F","%-0_F","%-0_10F"].each{|f|p [f,t.strftime(f)]}',
+    '["%-0F", "2024-02-03"]\n["%-010F", "2024-02-03"]\n["%0-F", "2024-02-03"]\n["%0-10F", "2024-02-03"]\n["%-_F", "2024-02-03"]\n["%-_10F", "2024-02-03"]\n["%_-F", "2024-02-03"]\n["%_-10F", "2024-02-03"]\n["%-00F", "2024-02-03"]\n["%-0010F", "2024-02-03"]\n["%_0-F", "2024-02-03"]\n["%_0-10F", "2024-02-03"]\n["%-^0F", "2024-02-03"]\n["%-^010F", "2024-02-03"]\n["%_0F", "2024-02-03"]\n["%_010F", "2024-02-03"]\n["%0_F", "2024-02-03"]\n["%0_10F", "2024-02-03"]\n["%-0_F", "2024-02-03"]\n["%-0_10F", "2024-02-03"]\n',
+  ],
+  [
+    't=Time.utc(2024,2,3,4,5,6);["%-0T","%-010T","%0-T","%0-10T","%-_T","%-_10T","%_-T","%_-10T","%-00T","%-0010T","%_0-T","%_0-10T","%-^0T","%-^010T","%_0T","%_010T","%0_T","%0_10T","%-0_T","%-0_10T"].each{|f|p [f,t.strftime(f)]}',
+    '["%-0T", "04:05:06"]\n["%-010T", "0004:05:06"]\n["%0-T", "04:05:06"]\n["%0-10T", "  04:05:06"]\n["%-_T", "04:05:06"]\n["%-_10T", "  04:05:06"]\n["%_-T", "04:05:06"]\n["%_-10T", "  04:05:06"]\n["%-00T", "04:05:06"]\n["%-0010T", "0004:05:06"]\n["%_0-T", "04:05:06"]\n["%_0-10T", "  04:05:06"]\n["%-^0T", "04:05:06"]\n["%-^010T", "0004:05:06"]\n["%_0T", "04:05:06"]\n["%_010T", "0004:05:06"]\n["%0_T", "04:05:06"]\n["%0_10T", "  04:05:06"]\n["%-0_T", "04:05:06"]\n["%-0_10T", "  04:05:06"]\n',
+  ],
+  [
+    't=Time.utc(2024,2,3,4,5,6);["%-0c","%-010c","%0-c","%0-10c","%-_c","%-_10c","%_-c","%_-10c","%-00c","%-0010c","%_0-c","%_0-10c","%-^0c","%-^010c","%_0c","%_010c","%0_c","%0_10c","%-0_c","%-0_10c"].each{|f|p [f,t.strftime(f)]}',
+    '["%-0c", "Sat Feb  3 04:05:06 2024"]\n["%-010c", "Sat Feb  3 04:05:06 2024"]\n["%0-c", "Sat Feb  3 04:05:06 2024"]\n["%0-10c", "Sat Feb  3 04:05:06 2024"]\n["%-_c", "Sat Feb  3 04:05:06 2024"]\n["%-_10c", "Sat Feb  3 04:05:06 2024"]\n["%_-c", "Sat Feb  3 04:05:06 2024"]\n["%_-10c", "Sat Feb  3 04:05:06 2024"]\n["%-00c", "Sat Feb  3 04:05:06 2024"]\n["%-0010c", "Sat Feb  3 04:05:06 2024"]\n["%_0-c", "Sat Feb  3 04:05:06 2024"]\n["%_0-10c", "Sat Feb  3 04:05:06 2024"]\n["%-^0c", "SAT FEB  3 04:05:06 2024"]\n["%-^010c", "SAT FEB  3 04:05:06 2024"]\n["%_0c", "Sat Feb  3 04:05:06 2024"]\n["%_010c", "Sat Feb  3 04:05:06 2024"]\n["%0_c", "Sat Feb  3 04:05:06 2024"]\n["%0_10c", "Sat Feb  3 04:05:06 2024"]\n["%-0_c", "Sat Feb  3 04:05:06 2024"]\n["%-0_10c", "Sat Feb  3 04:05:06 2024"]\n',
+  ],
+  [
+    't=Time.utc(2024,2,3,4,5,6);["%-0a","%-010a","%0-a","%0-10a","%-_a","%-_10a","%_-a","%_-10a","%-00a","%-0010a","%_0-a","%_0-10a","%-^0a","%-^010a","%_0a","%_010a","%0_a","%0_10a","%-0_a","%-0_10a"].each{|f|p [f,t.strftime(f)]}',
+    '["%-0a", "Sat"]\n["%-010a", "Sat"]\n["%0-a", "Sat"]\n["%0-10a", "Sat"]\n["%-_a", "Sat"]\n["%-_10a", "Sat"]\n["%_-a", "Sat"]\n["%_-10a", "Sat"]\n["%-00a", "Sat"]\n["%-0010a", "Sat"]\n["%_0-a", "Sat"]\n["%_0-10a", "Sat"]\n["%-^0a", "SAT"]\n["%-^010a", "SAT"]\n["%_0a", "Sat"]\n["%_010a", "0000000Sat"]\n["%0_a", "Sat"]\n["%0_10a", "       Sat"]\n["%-0_a", "Sat"]\n["%-0_10a", "Sat"]\n',
+  ],
+  [
+    't=Time.utc(2024,2,3,4,5,6);["%-0B","%-010B","%0-B","%0-10B","%-_B","%-_10B","%_-B","%_-10B","%-00B","%-0010B","%_0-B","%_0-10B","%-^0B","%-^010B","%_0B","%_010B","%0_B","%0_10B","%-0_B","%-0_10B"].each{|f|p [f,t.strftime(f)]}',
+    '["%-0B", "February"]\n["%-010B", "February"]\n["%0-B", "February"]\n["%0-10B", "February"]\n["%-_B", "February"]\n["%-_10B", "February"]\n["%_-B", "February"]\n["%_-10B", "February"]\n["%-00B", "February"]\n["%-0010B", "February"]\n["%_0-B", "February"]\n["%_0-10B", "February"]\n["%-^0B", "FEBRUARY"]\n["%-^010B", "FEBRUARY"]\n["%_0B", "February"]\n["%_010B", "00February"]\n["%0_B", "February"]\n["%0_10B", "  February"]\n["%-0_B", "February"]\n["%-0_10B", "February"]\n',
+  ],
+  [
+    't=Time.utc(2024,2,3,4,5,6);["%-0%","%-010%","%0-%","%0-10%","%-_%","%-_10%","%_-%","%_-10%","%-00%","%-0010%","%_0-%","%_0-10%","%-^0%","%-^010%","%_0%","%_010%","%0_%","%0_10%","%-0_%","%-0_10%"].each{|f|p [f,t.strftime(f)]}',
+    '["%-0%", "%"]\n["%-010%", "%"]\n["%0-%", "%"]\n["%0-10%", "%"]\n["%-_%", "%"]\n["%-_10%", "%"]\n["%_-%", "%"]\n["%_-10%", "%"]\n["%-00%", "%"]\n["%-0010%", "%"]\n["%_0-%", "%"]\n["%_0-10%", "%"]\n["%-^0%", "%"]\n["%-^010%", "%"]\n["%_0%", "%"]\n["%_010%", "000000000%"]\n["%0_%", "%"]\n["%0_10%", "         %"]\n["%-0_%", "%"]\n["%-0_10%", "%"]\n',
+  ],
+  [
+    'g=Enumerator::Generator.new{|y|puts :start;42};2.times{begin;p g.each(3);rescue=>e;p e.class,e.message;end};p(g.each{|x|p x})',
+    'start\n42\nstart\n42\nstart\n42\n',
+  ],
+  [
+    'g=Enumerator::Generator.new{|y|y<<1;:done};2.times{begin;p g.each(3);rescue=>e;p e.class,e.message;end};p(g.each{|x|p x})',
+    'LocalJumpError\n"no block given"\nLocalJumpError\n"no block given"\n1\n:done\n',
+  ],
+  [
+    'g=Enumerator::Generator.new{|y|begin;y.yield(1,2);rescue LocalJumpError=>e;p e.class,e.message;end;:done};2.times{begin;p g.each(3);rescue=>e;p e.class,e.message;end};p(g.each{|x|p x})',
+    'LocalJumpError\n"no block given"\n:done\nLocalJumpError\n"no block given"\n:done\n1\n:done\n',
+  ],
+  [
+    'e=Enumerator.new{|y|$y=y;$p=y.to_proc;y<<1;y<<2};p e.next;2.times{begin;$y<<3;rescue=>x;p x.class,x.message;end};p e.next',
+    '1\nFiberError\n"attempt to yield on a not resumed fiber"\nFiberError\n"attempt to yield on a not resumed fiber"\n2\n',
+  ],
+  [
+    'e=Enumerator.new{|y|$y=y;$p=y.to_proc;y<<1;y<<2};p e.next;2.times{begin;$p.call(3);rescue=>x;p x.class,x.message;end};p e.next',
+    '1\nFiberError\n"attempt to yield on a not resumed fiber"\nFiberError\n"attempt to yield on a not resumed fiber"\n2\n',
+  ],
+  [
+    'e=Enumerator.new{|y|$y=y;y<<1;y<<2};p e.next;f=Enumerator.new{|y|$y<<9;y<<8};p f.next;p e.next;p f.next',
+    '1\n9\n2\n8\n',
+  ],
+  [
+    's=String.new(255.chr,encoding:"US-ASCII");["upcase","downcase","capitalize","swapcase","strip","lstrip","rstrip","chomp","chop","succ","next"].each{|m|begin;v=s.dup.send(m);p [m,v && v.bytes,v && v.encoding];rescue=>e;p [m,e.class,e.message];end}',
+    '["upcase", [255], #<Encoding:US-ASCII>]\n["downcase", [255], #<Encoding:US-ASCII>]\n["capitalize", [255], #<Encoding:US-ASCII>]\n["swapcase", [255], #<Encoding:US-ASCII>]\n["strip", Encoding::CompatibilityError, "invalid byte sequence in US-ASCII"]\n["lstrip", [255], #<Encoding:US-ASCII>]\n["rstrip", Encoding::CompatibilityError, "invalid byte sequence in US-ASCII"]\n["chomp", [255], #<Encoding:US-ASCII>]\n["chop", [], #<Encoding:US-ASCII>]\n["succ", [1, 255], #<Encoding:US-ASCII>]\n["next", [1, 255], #<Encoding:US-ASCII>]\n',
+  ],
+  [
+    's=String.new(255.chr,encoding:"US-ASCII");["upcase!","downcase!","capitalize!","swapcase!","strip!","lstrip!","rstrip!","chomp!","chop!","succ!","next!"].each{|m|begin;v=s.dup.send(m);p [m,v && v.bytes,v && v.encoding];rescue=>e;p [m,e.class,e.message];end}',
+    '["upcase!", nil, nil]\n["downcase!", nil, nil]\n["capitalize!", nil, nil]\n["swapcase!", nil, nil]\n["strip!", Encoding::CompatibilityError, "invalid byte sequence in US-ASCII"]\n["lstrip!", nil, nil]\n["rstrip!", Encoding::CompatibilityError, "invalid byte sequence in US-ASCII"]\n["chomp!", nil, nil]\n["chop!", [], #<Encoding:US-ASCII>]\n["succ!", [1, 255], #<Encoding:US-ASCII>]\n["next!", [1, 255], #<Encoding:US-ASCII>]\n',
+  ],
+  [
+    's=String.new("é",encoding:"US-ASCII");["upcase","downcase","capitalize","swapcase","strip","lstrip","rstrip","chomp","chop","succ","next"].each{|m|begin;v=s.dup.send(m);p [m,v && v.bytes,v && v.encoding];rescue=>e;p [m,e.class,e.message];end}',
+    '["upcase", [195, 169], #<Encoding:US-ASCII>]\n["downcase", [195, 169], #<Encoding:US-ASCII>]\n["capitalize", [195, 169], #<Encoding:US-ASCII>]\n["swapcase", [195, 169], #<Encoding:US-ASCII>]\n["strip", Encoding::CompatibilityError, "invalid byte sequence in US-ASCII"]\n["lstrip", [195, 169], #<Encoding:US-ASCII>]\n["rstrip", Encoding::CompatibilityError, "invalid byte sequence in US-ASCII"]\n["chomp", [195, 169], #<Encoding:US-ASCII>]\n["chop", [195], #<Encoding:US-ASCII>]\n["succ", [1, 195, 169], #<Encoding:US-ASCII>]\n["next", [1, 195, 169], #<Encoding:US-ASCII>]\n',
+  ],
+  [
+    's=String.new("é",encoding:"US-ASCII");["upcase!","downcase!","capitalize!","swapcase!","strip!","lstrip!","rstrip!","chomp!","chop!","succ!","next!"].each{|m|begin;v=s.dup.send(m);p [m,v && v.bytes,v && v.encoding];rescue=>e;p [m,e.class,e.message];end}',
+    '["upcase!", nil, nil]\n["downcase!", nil, nil]\n["capitalize!", nil, nil]\n["swapcase!", nil, nil]\n["strip!", Encoding::CompatibilityError, "invalid byte sequence in US-ASCII"]\n["lstrip!", nil, nil]\n["rstrip!", Encoding::CompatibilityError, "invalid byte sequence in US-ASCII"]\n["chomp!", nil, nil]\n["chop!", [195], #<Encoding:US-ASCII>]\n["succ!", [1, 195, 169], #<Encoding:US-ASCII>]\n["next!", [1, 195, 169], #<Encoding:US-ASCII>]\n',
+  ],
+  [
+    's=String.new("AéZ",encoding:"US-ASCII");["upcase","downcase","capitalize","swapcase","strip","lstrip","rstrip","chomp","chop","succ","next"].each{|m|begin;v=s.dup.send(m);p [m,v && v.bytes,v && v.encoding];rescue=>e;p [m,e.class,e.message];end}',
+    '["upcase", [65, 195, 169, 90], #<Encoding:US-ASCII>]\n["downcase", [97, 195, 169, 122], #<Encoding:US-ASCII>]\n["capitalize", [65, 195, 169, 122], #<Encoding:US-ASCII>]\n["swapcase", [97, 195, 169, 122], #<Encoding:US-ASCII>]\n["strip", Encoding::CompatibilityError, "invalid byte sequence in US-ASCII"]\n["lstrip", [65, 195, 169, 90], #<Encoding:US-ASCII>]\n["rstrip", Encoding::CompatibilityError, "invalid byte sequence in US-ASCII"]\n["chomp", [65, 195, 169, 90], #<Encoding:US-ASCII>]\n["chop", [65, 195, 169], #<Encoding:US-ASCII>]\n["succ", [66, 195, 169, 65], #<Encoding:US-ASCII>]\n["next", [66, 195, 169, 65], #<Encoding:US-ASCII>]\n',
+  ],
+  [
+    's=String.new("AéZ",encoding:"US-ASCII");["upcase!","downcase!","capitalize!","swapcase!","strip!","lstrip!","rstrip!","chomp!","chop!","succ!","next!"].each{|m|begin;v=s.dup.send(m);p [m,v && v.bytes,v && v.encoding];rescue=>e;p [m,e.class,e.message];end}',
+    '["upcase!", nil, nil]\n["downcase!", [97, 195, 169, 122], #<Encoding:US-ASCII>]\n["capitalize!", [65, 195, 169, 122], #<Encoding:US-ASCII>]\n["swapcase!", [97, 195, 169, 122], #<Encoding:US-ASCII>]\n["strip!", Encoding::CompatibilityError, "invalid byte sequence in US-ASCII"]\n["lstrip!", nil, nil]\n["rstrip!", Encoding::CompatibilityError, "invalid byte sequence in US-ASCII"]\n["chomp!", nil, nil]\n["chop!", [65, 195, 169], #<Encoding:US-ASCII>]\n["succ!", [66, 195, 169, 65], #<Encoding:US-ASCII>]\n["next!", [66, 195, 169, 65], #<Encoding:US-ASCII>]\n',
+  ],
+  [
+    's=String.new("a"+255.chr+"z",encoding:"US-ASCII");["upcase","downcase","capitalize","swapcase","strip","lstrip","rstrip","chomp","chop","succ","next"].each{|m|begin;v=s.dup.send(m);p [m,v && v.bytes,v && v.encoding];rescue=>e;p [m,e.class,e.message];end}',
+    '["upcase", [65, 255, 90], #<Encoding:US-ASCII>]\n["downcase", [97, 255, 122], #<Encoding:US-ASCII>]\n["capitalize", [65, 255, 122], #<Encoding:US-ASCII>]\n["swapcase", [65, 255, 90], #<Encoding:US-ASCII>]\n["strip", Encoding::CompatibilityError, "invalid byte sequence in US-ASCII"]\n["lstrip", [97, 255, 122], #<Encoding:US-ASCII>]\n["rstrip", Encoding::CompatibilityError, "invalid byte sequence in US-ASCII"]\n["chomp", [97, 255, 122], #<Encoding:US-ASCII>]\n["chop", [97, 255], #<Encoding:US-ASCII>]\n["succ", [98, 255, 97], #<Encoding:US-ASCII>]\n["next", [98, 255, 97], #<Encoding:US-ASCII>]\n',
+  ],
+  [
+    's=String.new("a"+255.chr+"z",encoding:"US-ASCII");["upcase!","downcase!","capitalize!","swapcase!","strip!","lstrip!","rstrip!","chomp!","chop!","succ!","next!"].each{|m|begin;v=s.dup.send(m);p [m,v && v.bytes,v && v.encoding];rescue=>e;p [m,e.class,e.message];end}',
+    '["upcase!", [65, 255, 90], #<Encoding:US-ASCII>]\n["downcase!", nil, nil]\n["capitalize!", [65, 255, 122], #<Encoding:US-ASCII>]\n["swapcase!", [65, 255, 90], #<Encoding:US-ASCII>]\n["strip!", Encoding::CompatibilityError, "invalid byte sequence in US-ASCII"]\n["lstrip!", nil, nil]\n["rstrip!", Encoding::CompatibilityError, "invalid byte sequence in US-ASCII"]\n["chomp!", nil, nil]\n["chop!", [97, 255], #<Encoding:US-ASCII>]\n["succ!", [98, 255, 97], #<Encoding:US-ASCII>]\n["next!", [98, 255, 97], #<Encoding:US-ASCII>]\n',
+  ],
+  [
+    String.raw`s=String.new(" "+255.chr+"\r\n",encoding:"US-ASCII");["upcase","downcase","capitalize","swapcase","strip","lstrip","rstrip","chomp","chop","succ","next"].each{|m|begin;v=s.dup.send(m);p [m,v && v.bytes,v && v.encoding];rescue=>e;p [m,e.class,e.message];end}`,
+    '["upcase", [32, 255, 13, 10], #<Encoding:US-ASCII>]\n["downcase", [32, 255, 13, 10], #<Encoding:US-ASCII>]\n["capitalize", [32, 255, 13, 10], #<Encoding:US-ASCII>]\n["swapcase", [32, 255, 13, 10], #<Encoding:US-ASCII>]\n["strip", Encoding::CompatibilityError, "invalid byte sequence in US-ASCII"]\n["lstrip", [255, 13, 10], #<Encoding:US-ASCII>]\n["rstrip", Encoding::CompatibilityError, "invalid byte sequence in US-ASCII"]\n["chomp", [32, 255], #<Encoding:US-ASCII>]\n["chop", [32, 255], #<Encoding:US-ASCII>]\n["succ", [32, 255, 13, 11], #<Encoding:US-ASCII>]\n["next", [32, 255, 13, 11], #<Encoding:US-ASCII>]\n',
+  ],
+  [
+    String.raw`s=String.new(" "+255.chr+"\r\n",encoding:"US-ASCII");["upcase!","downcase!","capitalize!","swapcase!","strip!","lstrip!","rstrip!","chomp!","chop!","succ!","next!"].each{|m|begin;v=s.dup.send(m);p [m,v && v.bytes,v && v.encoding];rescue=>e;p [m,e.class,e.message];end}`,
+    '["upcase!", nil, nil]\n["downcase!", nil, nil]\n["capitalize!", nil, nil]\n["swapcase!", nil, nil]\n["strip!", Encoding::CompatibilityError, "invalid byte sequence in US-ASCII"]\n["lstrip!", [255, 13, 10], #<Encoding:US-ASCII>]\n["rstrip!", Encoding::CompatibilityError, "invalid byte sequence in US-ASCII"]\n["chomp!", [32, 255], #<Encoding:US-ASCII>]\n["chop!", [32, 255], #<Encoding:US-ASCII>]\n["succ!", [32, 255, 13, 11], #<Encoding:US-ASCII>]\n["next!", [32, 255, 13, 11], #<Encoding:US-ASCII>]\n',
+  ],
+  [
+    's=String.new(127.chr,encoding:"US-ASCII");["upcase","downcase","capitalize","swapcase","strip","lstrip","rstrip","chomp","chop","succ","next"].each{|m|begin;v=s.dup.send(m);p [m,v && v.bytes,v && v.encoding];rescue=>e;p [m,e.class,e.message];end}',
+    '["upcase", [127], #<Encoding:US-ASCII>]\n["downcase", [127], #<Encoding:US-ASCII>]\n["capitalize", [127], #<Encoding:US-ASCII>]\n["swapcase", [127], #<Encoding:US-ASCII>]\n["strip", [127], #<Encoding:US-ASCII>]\n["lstrip", [127], #<Encoding:US-ASCII>]\n["rstrip", [127], #<Encoding:US-ASCII>]\n["chomp", [127], #<Encoding:US-ASCII>]\n["chop", [], #<Encoding:US-ASCII>]\n["succ", [1, 0], #<Encoding:US-ASCII>]\n["next", [1, 0], #<Encoding:US-ASCII>]\n',
+  ],
+  [
+    's=String.new(127.chr,encoding:"US-ASCII");["upcase!","downcase!","capitalize!","swapcase!","strip!","lstrip!","rstrip!","chomp!","chop!","succ!","next!"].each{|m|begin;v=s.dup.send(m);p [m,v && v.bytes,v && v.encoding];rescue=>e;p [m,e.class,e.message];end}',
+    '["upcase!", nil, nil]\n["downcase!", nil, nil]\n["capitalize!", nil, nil]\n["swapcase!", nil, nil]\n["strip!", nil, nil]\n["lstrip!", nil, nil]\n["rstrip!", nil, nil]\n["chomp!", nil, nil]\n["chop!", [], #<Encoding:US-ASCII>]\n["succ!", [1, 0], #<Encoding:US-ASCII>]\n["next!", [1, 0], #<Encoding:US-ASCII>]\n',
+  ],
+  [
+    's=String.new("9"+255.chr,encoding:"US-ASCII");["upcase","downcase","capitalize","swapcase","strip","lstrip","rstrip","chomp","chop","succ","next"].each{|m|begin;v=s.dup.send(m);p [m,v && v.bytes,v && v.encoding];rescue=>e;p [m,e.class,e.message];end}',
+    '["upcase", [57, 255], #<Encoding:US-ASCII>]\n["downcase", [57, 255], #<Encoding:US-ASCII>]\n["capitalize", [57, 255], #<Encoding:US-ASCII>]\n["swapcase", [57, 255], #<Encoding:US-ASCII>]\n["strip", Encoding::CompatibilityError, "invalid byte sequence in US-ASCII"]\n["lstrip", [57, 255], #<Encoding:US-ASCII>]\n["rstrip", Encoding::CompatibilityError, "invalid byte sequence in US-ASCII"]\n["chomp", [57, 255], #<Encoding:US-ASCII>]\n["chop", [57], #<Encoding:US-ASCII>]\n["succ", [49, 48, 255], #<Encoding:US-ASCII>]\n["next", [49, 48, 255], #<Encoding:US-ASCII>]\n',
+  ],
+  [
+    's=String.new("9"+255.chr,encoding:"US-ASCII");["upcase!","downcase!","capitalize!","swapcase!","strip!","lstrip!","rstrip!","chomp!","chop!","succ!","next!"].each{|m|begin;v=s.dup.send(m);p [m,v && v.bytes,v && v.encoding];rescue=>e;p [m,e.class,e.message];end}',
+    '["upcase!", nil, nil]\n["downcase!", nil, nil]\n["capitalize!", nil, nil]\n["swapcase!", nil, nil]\n["strip!", Encoding::CompatibilityError, "invalid byte sequence in US-ASCII"]\n["lstrip!", nil, nil]\n["rstrip!", Encoding::CompatibilityError, "invalid byte sequence in US-ASCII"]\n["chomp!", nil, nil]\n["chop!", [57], #<Encoding:US-ASCII>]\n["succ!", [49, 48, 255], #<Encoding:US-ASCII>]\n["next!", [49, 48, 255], #<Encoding:US-ASCII>]\n',
+  ],
+  [
+    's=String.new(255.chr+"9",encoding:"US-ASCII");["upcase","downcase","capitalize","swapcase","strip","lstrip","rstrip","chomp","chop","succ","next"].each{|m|begin;v=s.dup.send(m);p [m,v && v.bytes,v && v.encoding];rescue=>e;p [m,e.class,e.message];end}',
+    '["upcase", [255, 57], #<Encoding:US-ASCII>]\n["downcase", [255, 57], #<Encoding:US-ASCII>]\n["capitalize", [255, 57], #<Encoding:US-ASCII>]\n["swapcase", [255, 57], #<Encoding:US-ASCII>]\n["strip", Encoding::CompatibilityError, "invalid byte sequence in US-ASCII"]\n["lstrip", [255, 57], #<Encoding:US-ASCII>]\n["rstrip", Encoding::CompatibilityError, "invalid byte sequence in US-ASCII"]\n["chomp", [255, 57], #<Encoding:US-ASCII>]\n["chop", [255], #<Encoding:US-ASCII>]\n["succ", [255, 49, 48], #<Encoding:US-ASCII>]\n["next", [255, 49, 48], #<Encoding:US-ASCII>]\n',
+  ],
+  [
+    's=String.new(255.chr+"9",encoding:"US-ASCII");["upcase!","downcase!","capitalize!","swapcase!","strip!","lstrip!","rstrip!","chomp!","chop!","succ!","next!"].each{|m|begin;v=s.dup.send(m);p [m,v && v.bytes,v && v.encoding];rescue=>e;p [m,e.class,e.message];end}',
+    '["upcase!", nil, nil]\n["downcase!", nil, nil]\n["capitalize!", nil, nil]\n["swapcase!", nil, nil]\n["strip!", Encoding::CompatibilityError, "invalid byte sequence in US-ASCII"]\n["lstrip!", nil, nil]\n["rstrip!", Encoding::CompatibilityError, "invalid byte sequence in US-ASCII"]\n["chomp!", nil, nil]\n["chop!", [255], #<Encoding:US-ASCII>]\n["succ!", [255, 49, 48], #<Encoding:US-ASCII>]\n["next!", [255, 49, 48], #<Encoding:US-ASCII>]\n',
+  ],
+] as const;
+
+test.each(nativeCaseRegexpIteratorTimeEncodingCases)(
+  'Case, regexp, iterator, time and encoding boundaries match native Ruby: %s',
+  (source, stdout) => {
+    expect(run(source)).toMatchObject({ kind: 'executed', stdout, uncaughtException: undefined });
+  }
+);

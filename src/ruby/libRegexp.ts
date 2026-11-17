@@ -45,7 +45,12 @@ import {
   RSymbol,
   type Value,
 } from './objects';
-import { hostRegexpCaptureNames, regexpCaptureNames, regexpHasNumberedBackref } from './regexpCaptureNames';
+import {
+  hostRegexpCaptureNames,
+  regexpCaptureNames,
+  regexpHasNumberedBackref,
+  regexpNumericEscapes,
+} from './regexpCaptureNames';
 import { regexpNeedsCasefoldParity } from './regexpCasefold';
 import { assertCasefoldParity } from './regexpCasefoldParity';
 import { RegexpCursor } from './regexpCursor';
@@ -188,6 +193,7 @@ export function translate(
   const literalPosix = regexpHasLiteralPosixBracket(source, extended);
   source = regexpLexicalSource(source, extended);
   validateRegexpSourceSyntax(source, false, ascii);
+  const numericReferences = regexpNumericEscapes(source);
   if (characterMode) throw unsupportedSyntax('文字モード');
   if (literalPosix) throw unsupportedSyntax('曖昧な POSIX 文字クラス');
   const classes = ascii ? ASCII_POSIX_CLASSES : POSIX_CLASSES;
@@ -209,6 +215,16 @@ export function translate(
     if (char === '\\') {
       if (index === source.length - 1) throw new SyntaxError('trailing regexp escape');
       if (inClass === 0) atomStart = out.length;
+      const numeric = numericReferences.get(index);
+      const reference =
+        numeric?.kind === 'character' && !ascii
+          ? { ...numeric, ...decodeRegexpByteEscape(source, index, numeric) }
+          : numeric;
+      if (reference) {
+        out += reference.kind === 'reference' ? `\\${reference.value}` : `\\u{${reference.value.toString(16)}}`;
+        index += reference.length - 1;
+        continue;
+      }
       const next = source[++index] ?? '\\';
       const byteEscape =
         next === 'x' ||
@@ -1249,9 +1265,11 @@ function regexpInspect(regexp: RObject): string {
 }
 
 function escapedRegexpSource(source: string): string {
-  return source.replaceAll(/(\\*)\//g, (_match, slashes: string) =>
-    slashes.length % 2 === 0 ? `${slashes}\\/` : `${slashes}/`
-  );
+  return source.replaceAll(/\\[\s\S]|\/|[\u0000-\u0008\u000E-\u001F\u007F]/g, (part) => {
+    if (part.startsWith('\\')) return part;
+    if (part === '/') return String.raw`\/`;
+    return `\\x${part.codePointAt(0)!.toString(16).toUpperCase().padStart(2, '0')}`;
+  });
 }
 
 function literalRegexpText(regexp: RObject): string | undefined {
@@ -1576,7 +1594,8 @@ function matchDataInspect(match: RObject): string {
   const parts = state.groups.map((range, group) => {
     const shown = range ? inspectStringEncoding(groupText(state, group) as RString) : 'nil';
     if (group === 0) return shown;
-    const name = state.names.find((candidate) => state.namedGroups[candidate] === group);
+    const data = dataOf(state.regexp);
+    const name = (data.captureNames ??= hostRegexpCaptureNames(data.translatedSource))[group - 1];
     return `${name ?? group}:${shown}`;
   });
   return `#<MatchData ${parts.join(' ')}>`;

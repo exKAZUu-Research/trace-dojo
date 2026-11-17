@@ -10,7 +10,7 @@ import { type Token, tokenize } from 'oniguruma-parser/tokenizer';
 import { traverse } from 'oniguruma-parser/traverser';
 
 import { ExecutionLimitError } from '../interpreter/limits';
-import { hostRegexpCaptureNames } from './regexpCaptureNames';
+import { hostRegexpCaptureNames, regexpNumericEscapes } from './regexpCaptureNames';
 import { decodeRegexpByteEscape, regexpByteEscape, RegexpEncodingError } from './regexpEscapes';
 import { regexpLexicalSource } from './regexpLexicalSource';
 import { regexpPropertyNames } from './regexpProperties';
@@ -329,14 +329,26 @@ function validateSourceReferences(root: SourceNode): void {
   if (references.some((reference) => !captures.has(reference))) throw new SyntaxError('invalid backref number');
 }
 
+// code-gauge-allow functionCognitiveComplexity 19 -- Reference classification and complete encoded-byte runs must retain source positions during normalization.
 function normalizeRubyRegexpEscapes(source: string, extended: boolean, binary = false): string {
   source = regexpLexicalSource(source, extended);
+  const numericReferences = regexpNumericEscapes(source);
   let result = '';
   let inClass = false;
   for (let index = 0; index < source.length; index++) {
     const char = source[index];
     if (char === '\\') {
-      const escape = normalizedRegexpEscape(source, index, inClass, binary);
+      const numeric = numericReferences.get(index);
+      const reference =
+        numeric?.kind === 'character' && !binary
+          ? { ...numeric, ...decodeRegexpByteEscape(source, index, numeric) }
+          : numeric;
+      const escape = reference
+        ? {
+            text: reference.kind === 'reference' ? `\\k<${reference.value}>` : `\\x{${reference.value.toString(16)}}`,
+            length: reference.length,
+          }
+        : normalizedRegexpEscape(source, index, inClass, binary);
       result += escape.text;
       index += escape.length - 1;
     } else {

@@ -50,7 +50,7 @@ import {
 import { RegexpCursor } from './regexpCursor';
 import { regexpByteIndex, regexpByteUnit } from './regexpPositions';
 import { rt, UnsupportedFeatureError, whileHeld } from './runtime';
-import { successorBytes, transformInvalid } from './stringTransforms';
+import { successorBytes, transformEncodedBytes } from './stringTransforms';
 import { codePointCharacters, isAsciiText } from './unicodeText';
 import {
   arr,
@@ -1578,7 +1578,8 @@ const TRANSFORMS: [string, (text: string, args: string[]) => string, number][] =
 for (const [name, transform, maxArgs] of TRANSFORMS) {
   def('String', name, [0, maxArgs], function* (self: RString, args) {
     const selected = name === 'chomp' && args.length === 0 ? [rt().globals.get('$/') ?? NIL] : args;
-    if (self.rawBytes && !self.binary) return transformInvalid(self, name, yield* invalidSeparator(name, selected));
+    if ((self.rawBytes || (self.usAscii && !isAsciiText(self.s))) && !self.binary)
+      return transformEncodedBytes(self, name, yield* invalidSeparator(name, selected));
     if (self.binary && (name === 'succ' || name === 'next'))
       return stringFromBytes(successorBytes(stringBytes(self), true), true);
     if (name === 'chomp' && selected[0] === NIL) return copyStringEncoding(self);
@@ -1588,7 +1589,7 @@ for (const [name, transform, maxArgs] of TRANSFORMS) {
       ? binaryTransform(self.s, name, strings, transform)
       : textResult(self, transform(self.s, strings));
   });
-  // code-gauge-allow functionCognitiveComplexity 20 -- The ordered cases for String encoding and mutation share state; splitting them solely for the metric would hide their sequencing.
+  // code-gauge-allow functionCognitiveComplexity 22 -- The ordered cases for String encoding and mutation share state; splitting them solely for the metric would hide their sequencing.
   // code-gauge-allow functionNcss 36 -- The ordered cases for String encoding and mutation share state; splitting them solely for the metric would hide their sequencing.
   def('String', `${name}!`, [0, maxArgs], function* (self: RString, args) {
     const selected = name === 'chomp' && args.length === 0 ? [rt().globals.get('$/') ?? NIL] : args;
@@ -1596,8 +1597,8 @@ for (const [name, transform, maxArgs] of TRANSFORMS) {
       setBytes(self, successorBytes(stringBytes(self), true), true);
       return self;
     }
-    if (self.rawBytes && !self.binary) {
-      const result = transformInvalid(self, name, yield* invalidSeparator(name, selected));
+    if ((self.rawBytes || (self.usAscii && !isAsciiText(self.s))) && !self.binary) {
+      const result = transformEncodedBytes(self, name, yield* invalidSeparator(name, selected));
       const before = stringBytes(self);
       const after = stringBytes(result);
       if (
