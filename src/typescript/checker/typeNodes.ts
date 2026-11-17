@@ -572,7 +572,7 @@ export class TypeNodes {
   }
 
   /** The name of a member, which a computed key gives by its literal type, as a constant's. */
-  private memberName(nameNode: TreeNode): string | undefined {
+  memberName(nameNode: TreeNode): string | undefined {
     const written = propertyNameText(nameNode);
     if (written !== undefined || nameNode.type !== 'computed_property_name') return written;
     const names = this.c.silently(() => this.c.patterns.capturePropertyNames(nameNode));

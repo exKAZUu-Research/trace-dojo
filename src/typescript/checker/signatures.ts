@@ -168,20 +168,26 @@ export class Signatures {
     );
   }
 
-  /** A setter's parameter without an annotation has the type its getter returns. */
+  /** A setter's parameter without an annotation has the type its getter of the same property returns. */
   private setterParameterType(node: TreeNode): Type | undefined {
     if (!accessorDeclarationTypes.has(node.type) || !hasToken(node, 'set')) return undefined;
-    const name = node.childForFieldName('name')?.text;
+    const name = this.accessorName(node);
     const getter = node.parent
       ? named(node.parent).find(
           (member) =>
             accessorDeclarationTypes.has(member.type) &&
-            member.childForFieldName('name')?.text === name &&
             hasToken(member, 'get') &&
-            hasToken(member, 'static') === hasToken(node, 'static')
+            hasToken(member, 'static') === hasToken(node, 'static') &&
+            this.accessorName(member) === name
         )
       : undefined;
     return getter ? this.signatureOf(getter).returnType() : undefined;
+  }
+
+  /** The property an accessor declares, as `value`, `"value"`, and `["value"]` declare the same one. */
+  private accessorName(node: TreeNode): string | undefined {
+    const nameNode = node.childForFieldName('name');
+    return nameNode ? (this.c.typeNodes.memberName(nameNode) ?? nameNode.text) : undefined;
   }
 
   /** Parameters whose rest parameter of a tuple type, `...args: [string, number]`, becomes the parameters it lists. */
