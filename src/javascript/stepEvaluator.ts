@@ -157,8 +157,8 @@ export abstract class StepEvaluator extends ExpressionEvaluator {
         if (element === undefined) {
           values.push(HOLE);
         } else if (element.kind === 'spread') {
-          const source = callArguments && !callSpread ? undefined : element.source;
-          const spread = runtime.iterate(yield* this.evaluateSteps(element.argument), source, callSpread);
+          const context = callArguments ? (callSpread ? 'finalCallSpread' : 'loweredCallSpread') : 'syntax';
+          const spread = runtime.iterate(yield* this.evaluateSteps(element.argument), element.source, context);
           runtime.allocate(spread.length);
           appendAll(values, spread);
           appendAll(temporaries, spread);

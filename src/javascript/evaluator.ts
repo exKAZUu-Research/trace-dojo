@@ -273,7 +273,7 @@ export class Evaluator extends SuspendableStatementEvaluator {
     const iterator =
       statement.kind === 'forIn'
         ? new ValueIterator(this.forInKeys(iterable))
-        : runtime.iterator(iterable, undefined, statement.iterableSource);
+        : runtime.iterator(iterable, undefined, statement.iterableSource, 'forOf');
     return this.forEachIterations(statement, labels, iterable, iterator);
   }
 

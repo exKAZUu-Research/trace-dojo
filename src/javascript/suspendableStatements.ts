@@ -379,7 +379,7 @@ export abstract class SuspendableStatementEvaluator extends StepEvaluator {
         ? syncLoopIterator(new ValueIterator(this.forInKeys(iterable)))
         : statement.isAwait
           ? new AwaitingIterator(runtime, asyncIteratorOf(runtime, iterable))
-          : syncLoopIterator(runtime.iterator(iterable, undefined, statement.iterableSource));
+          : syncLoopIterator(runtime.iterator(iterable, undefined, statement.iterableSource, 'forOf'));
     // The iterable and the iterator it gave stay reachable while the loop runs.
     const { temporaries } = runtime.frame;
     const held = temporaries.length;

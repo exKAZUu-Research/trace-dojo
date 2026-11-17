@@ -1,14 +1,15 @@
-// code-gauge-allow-file fileNcss 696 -- One runtime of the JavaScript interpreter, whose state its builtins and evaluator share.
+// code-gauge-allow-file fileNcss 687 -- One runtime of the JavaScript interpreter, whose state its builtins and evaluator share.
 import { CompileError } from '../interpreter/diagnostics';
 import { ExecutionBudget, LIMITS } from '../interpreter/limits';
 import { type ProgramInput, ProgramIO } from '../interpreter/programIo';
 import { StepTracker } from '../interpreter/stepTracker';
 import { TurtleWorld } from '../interpreter/turtleWorld';
 import { redefineArgument } from './argumentsObject';
-import type { IterationSource } from './ast';
+import type { IterationContext, IterationSource } from './ast';
 import { Evaluator } from './evaluator';
 import { findReachableTurtles } from './garbageCollection';
 import { DONE, type HostIterator, stepHostIterator, ValueIterator } from './iteration';
+import { notIterableMessage } from './iterationErrors';
 import { defineFunctionProperties } from './memberProperties';
 import { EventLoop } from './promises';
 import { createRealm, type ErrorName, type Realm } from './realm';
@@ -856,9 +857,10 @@ export class Runtime {
     value: Value,
     method = value === undefined || value === null ? undefined : this.get(value, WELL_KNOWN_SYMBOLS.iterator),
     source?: IterationSource,
-    callSpread = false
+    context: IterationContext = 'syntax'
   ): ValueIterator {
-    if (!isCallable(method)) return this.throwError('TypeError', this.notIterableMessage(value, source, callSpread));
+    if (!isCallable(method))
+      return this.throwError('TypeError', notIterableMessage(value, this.describeTyped(value), source, context));
     const iterator = this.call(method, value, [], this.currentRow);
     if (!isObject(iterator))
       return this.throwError('TypeError', 'Result of the Symbol.iterator method is not an object');
@@ -920,9 +922,9 @@ export class Runtime {
   }
 
   /** All the values an iterable yields, as spread reads them; `source` names it as V8 does where syntax spreads it. */
-  iterate(value: Value, source?: IterationSource, callSpread = false): Value[] {
+  iterate(value: Value, source?: IterationSource, context: IterationContext = 'syntax'): Value[] {
     if (value instanceof JsArray) this.scan(value.elements.length);
-    return this.iterator(value, undefined, source, callSpread).rest();
+    return this.iterator(value, undefined, source, context).rest();
   }
 
   /** How V8 names a value by its type, as `number 5`, `string "a"`, `object null`, or just `object`. */
@@ -939,20 +941,6 @@ export class Runtime {
     if (typeof value === 'symbol') return value.toString();
     if (value instanceof JsObject) return this.receiverText(value);
     return String(value);
-  }
-
-  /** The TypeError of iterating a value without an iterator, naming it by its source where syntax iterates it. */
-  private notIterableMessage(value: Value, source: IterationSource | undefined, callSpread: boolean): string {
-    if (source) {
-      if (callSpread) {
-        if (value === undefined || value === null)
-          return `${source.text} is not iterable (cannot read property ${String(value)})`;
-        return 'Spread syntax requires ...iterable[Symbol.iterator] to be a function';
-      }
-      if (!callSpread && source.callee) return `${source.callee} is not a function or its return value is not iterable`;
-      return `${source.text} is not iterable`;
-    }
-    return `${this.describeTyped(value)} is not iterable (cannot read property Symbol(Symbol.iterator))`;
   }
 
   describe(value: Value): string {

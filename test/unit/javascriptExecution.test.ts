@@ -1485,6 +1485,32 @@ class Result extends Array { constructor(...args) { super(...args); constructed+
 try { Result.from({ [Symbol.iterator]: 1 }); } catch (e) { console.log(e.name, constructed); }`,
   ],
   [
+    'lowered call spreads retain call and constructor names',
+    `const f=(...args)=>args; const g=()=>5; const h=()=>null; const o={m(){}}; class C {}
+for (const run of [()=>f(...g(),1),()=>f(1,...o.m(),2),()=>f(...g(),...g()),()=>Math.max(...g(),1),
+  ()=>new C(...h(),1),()=>f(...g?.(),1),()=>f(...(g()),1),()=>f(...new Number(5),1),()=>f(...g())]) {
+  try {run();} catch(e) {console.log(e.message);}
+}
+function* beforeYield(){f(...g(),yield 1);}
+try{beforeYield().next();}catch(e){console.log(e.message);}
+function* afterYield(){f(yield 1,...g());}
+const iterator=afterYield();iterator.next();try{iterator.next(1);}catch(e){console.log(e.message);}`,
+  ],
+  [
+    'iteration and destructuring errors naming optional chains, constructors, and hidden variables',
+    `const g=()=>5; const h=()=>null; const o={g,h,x:5,n:null}; class C {} let a, b;
+function p({a}) {} function q({a}={}) {} const v={a:5}, n={a:null};
+function main() {
+  for (const run of [()=>{for (const x of g?.());},()=>{for (const x of o?.x);},()=>{const [x]=h?.();},()=>{const {x}=o?.n;},
+    ()=>[...new C()],()=>{for (const x of new C);},()=>{const [x]=new C();},()=>({a}=o.n),()=>({a}=h()),()=>p(null),()=>q(null),
+    ()=>{try {throw null;} catch ({a}) {}},()=>{for (const {a} of [null]);},()=>{for (const [a] of [5]);},()=>{for ({a} of [null]);},
+    ()=>{const {a:[b]}=v;},()=>{const {a:[b]}=n;},()=>{const {a:{b:[c]}}={a:{b:5}};},()=>{const [x]={x:1};},()=>(()=>1)()()]) {
+    try {run();} catch(e) {console.log(e.message);}
+  }
+}
+main();`,
+  ],
+  [
     'console.table validating properties before formatting primitive and function data',
     `function f() {} class Foo {}
 for (const data of [undefined,null,1,'%s',f]) {

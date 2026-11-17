@@ -1,4 +1,4 @@
-import type { Argument, Expression, ObjectMember, Pattern, PropertyName } from './ast';
+import type { Argument, DestructuringSource, Expression, ObjectMember, Pattern, PropertyName } from './ast';
 import { ConverterBase } from './converterBase';
 import {
   accessorOf,
@@ -216,11 +216,13 @@ export abstract class ExpressionConverter extends ConverterBase {
     if (operator !== '=' && !assignableTypes.has(unwrapParentheses(left).type))
       fail(left, 'この式には代入できません。');
     const target = this.assignmentTarget(left);
+    const right = field(node, 'right');
+    if (target.kind === 'objectPattern') nameDestructuring(target, { source: iterationSource(right) });
     return {
       kind: 'assign',
       operator,
       target,
-      value: this.namedValue(field(node, 'right'), target),
+      value: this.namedValue(right, target),
       row: rowOf(node),
     };
   }
@@ -643,6 +645,20 @@ function elementsOf<T>(node: Node, convert: (child: Node) => T): (T | undefined)
     expectsElement = false;
   }
   return elements;
+}
+
+/**
+ * Records how V8 names what a pattern takes apart, which an array pattern that is the value of one of an object
+ * pattern's properties names too, while the patterns deeper inside are named by the values they take apart.
+ */
+export function nameDestructuring(pattern: Pattern, source: DestructuringSource): void {
+  if (pattern.kind !== 'arrayPattern' && pattern.kind !== 'objectPattern') return;
+  Object.assign(pattern, source);
+  if (pattern.kind !== 'objectPattern') return;
+  for (const { value } of pattern.properties) {
+    if (value.kind === 'arrayPattern')
+      Object.assign(value, { source: source.source, iterationContext: 'propertyPattern' });
+  }
 }
 
 /** Marks a pattern inside another, through its default value. */

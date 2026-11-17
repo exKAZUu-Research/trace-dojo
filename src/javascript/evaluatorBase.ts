@@ -291,7 +291,7 @@ export abstract class EvaluatorBase {
   private bindArrayPattern(pattern: Extract<Pattern, { kind: 'arrayPattern' }>, value: Value, mode: BindingMode): void {
     const { runtime } = this;
     // Each binding reads the next value just before it runs, since an earlier default or target may change the array.
-    const iterator = runtime.iterator(value, undefined, pattern.source);
+    const iterator = runtime.iterator(value, undefined, pattern.source, pattern.iterationContext);
     try {
       for (const element of pattern.elements) {
         const next = iterator.next();
@@ -378,8 +378,9 @@ export function referenceBase(reference: Reference): Value {
 function destructuringMessage(pattern: Extract<Pattern, { kind: 'objectPattern' }>, value: null | undefined): string {
   const first = pattern.properties[0]?.key;
   const name = first?.kind === 'key' ? first.key : undefined;
-  if (pattern.isNested && name !== undefined) return `Cannot read properties of ${String(value)} (reading '${name}')`;
-  const source = pattern.source?.text ?? String(value);
+  if (pattern.isNested)
+    return `Cannot read properties of ${String(value)}${name === undefined ? '' : ` (reading '${name}')`}`;
+  const source = pattern.source?.text ?? (pattern.namesType && value === null ? 'object null' : String(value));
   return name === undefined
     ? `Cannot destructure '${source}' as it is ${String(value)}.`
     : `Cannot destructure property '${name}' of '${source}' as it is ${String(value)}.`;

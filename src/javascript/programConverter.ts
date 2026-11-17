@@ -21,6 +21,7 @@ import {
   field,
   hasChild,
   hasUseStrictDirective,
+  isOptionalChain,
   iterationSource,
   keyName,
   namedChildren,
@@ -32,7 +33,7 @@ import {
   unsupported,
   unsupportedFeatures,
 } from './convertNodes';
-import { ExpressionConverter, patternSuspends } from './expressionConverter';
+import { ExpressionConverter, nameDestructuring, patternSuspends } from './expressionConverter';
 import { isConstantExpression } from './stepRules';
 
 export type StatementConverter = (node: Node) => Statement;
@@ -187,9 +188,10 @@ export class ProgramConverter extends ExpressionConverter {
       );
       if (!valueNode && declarationKind === 'const') fail(declarator, 'const で宣言する変数には初期値が必要です。');
       if (!valueNode && target.kind !== 'identifier') fail(declarator, '分割代入には初期値が必要です。');
-      if (valueNode && (target.kind === 'arrayPattern' || target.kind === 'objectPattern')) {
-        target.source =
+      if (valueNode) {
+        const source =
           target.kind === 'arrayPattern' ? this.arrayDestructuringSource(valueNode) : iterationSource(valueNode);
+        nameDestructuring(target, { source });
       }
       return { target, init: valueNode ? this.namedValue(valueNode, target) : undefined };
     });
@@ -205,10 +207,19 @@ export class ProgramConverter extends ExpressionConverter {
   }
 
   protected arrayDestructuringSource(node: Node): IterationSource | undefined {
+    if (isOptionalChain(node)) return undefined;
     if (node.type === 'call_expression' && field(node, 'function').type !== 'identifier') return undefined;
-    return ['identifier', 'call_expression', 'number', 'null', 'undefined', 'true', 'false', 'object'].includes(
-      node.type
-    )
+    return [
+      'identifier',
+      'call_expression',
+      'new_expression',
+      'number',
+      'null',
+      'undefined',
+      'true',
+      'false',
+      'object',
+    ].includes(node.type)
       ? iterationSource(node)
       : undefined;
   }
@@ -260,6 +271,13 @@ export class ProgramConverter extends ExpressionConverter {
         : this.assignmentTarget(leftNode);
       // A loop binds its target in one go, as a destructuring assignment does.
       if (patternSuspends(target)) unsupported(leftNode, 'この位置の yield や await ');
+      // V8 takes apart a declared target from its hidden variable `.for`, but reads an assigned object pattern's
+      // properties directly from the value.
+      if (isOf)
+        nameDestructuring(
+          target,
+          declarationKind ? { source: { text: '.for' } } : { isNested: target.kind === 'objectPattern' }
+        );
       return {
         kind: isOf ? 'forOf' : 'forIn',
         isAwait,
@@ -361,6 +379,8 @@ export class ProgramConverter extends ExpressionConverter {
         const param = parameterNode
           ? this.bindingPattern(parameterNode, (identifier, name) => this.declareLexical(identifier, name))
           : undefined;
+        // V8 takes apart an object from its hidden variable `.catch`, and an iterable by its value.
+        if (param?.kind === 'objectPattern') nameDestructuring(param, { source: { text: '.catch' } });
         return { param, body: this.block(field(handlerNode, 'body')), scope };
       });
     }
@@ -436,7 +456,7 @@ export class ProgramConverter extends ExpressionConverter {
     for (const parameter of parameterNodes) {
       if (rest) fail(parameter, '残余引数は最後の引数にしか書けません。');
       if (parameter.type === 'rest_pattern') rest = this.bindingPattern(namedChildren(parameter)[0], declare);
-      else params.push(this.bindingPattern(parameter, declare));
+      else params.push(namedParameter(this.bindingPattern(parameter, declare)));
     }
     if (kind === 'getter' && (params.length > 0 || rest)) fail(node, 'getter には引数を書けません。');
     if (kind === 'setter' && (params.length !== 1 || rest)) fail(node, 'setter には引数を1つだけ書いてください。');
@@ -589,4 +609,18 @@ function isConstructorDefinition(member: Node): boolean {
   if (member.type !== 'method_definition' || hasChild(member, 'static')) return false;
   const name = member.childForFieldName('name');
   return name?.type === 'property_identifier' && nameOf(name) === 'constructor';
+}
+
+/**
+ * Records how V8 names an object a parameter takes apart: by the value's type, or with a default value, by the
+ * conditional V8 desugars the default to.
+ */
+function namedParameter(param: Pattern): Pattern {
+  if (param.kind === 'objectPattern') nameDestructuring(param, { namesType: true });
+  if (param.kind === 'default' && param.target.kind === 'objectPattern') {
+    nameDestructuring(param.target, {
+      source: { text: '(intermediate value)(intermediate value)(intermediate value)' },
+    });
+  }
+  return param;
 }

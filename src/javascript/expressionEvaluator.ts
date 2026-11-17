@@ -217,8 +217,8 @@ export abstract class ExpressionEvaluator extends EvaluatorBase {
         if (argument === undefined) {
           values.push(HOLE);
         } else if (argument.kind === 'spread') {
-          const source = callArguments && !callSpread ? undefined : argument.source;
-          const spread = runtime.iterate(this.evaluate(argument.argument), source, callSpread);
+          const context = callArguments ? (callSpread ? 'finalCallSpread' : 'loweredCallSpread') : 'syntax';
+          const spread = runtime.iterate(this.evaluate(argument.argument), argument.source, context);
           runtime.allocate(spread.length);
           appendAll(values, spread);
           appendAll(temporaries, spread);

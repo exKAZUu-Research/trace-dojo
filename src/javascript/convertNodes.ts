@@ -66,10 +66,27 @@ export function calleeText(node: Node): string {
 
 export function iterationSource(node: Node): IterationSource {
   const operand = unwrapParentheses(node);
-  return {
-    text: calleeText(operand),
-    callee: operand.type === 'call_expression' ? calleeText(field(operand, 'function')) : undefined,
-  };
+  const callee =
+    operand.type === 'call_expression'
+      ? calleeText(field(operand, 'function'))
+      : operand.type === 'new_expression'
+        ? calleeText(field(operand, 'constructor'))
+        : undefined;
+  if (isOptionalChain(operand)) return { text: '(intermediate value)', callee, isOptionalChain: true };
+  return { text: calleeText(operand), callee };
+}
+
+/** Whether a `?.` short-circuits the expression, which V8 then evaluates as one optional chain. */
+export function isOptionalChain(node: Node): boolean {
+  let current: Node | null = node;
+  while (current) {
+    if (current.childForFieldName('optional_chain')) return true;
+    if (current.type === 'call_expression') current = current.childForFieldName('function');
+    else if (current.type === 'member_expression' || current.type === 'subscript_expression')
+      current = current.childForFieldName('object');
+    else return false;
+  }
+  return false;
 }
 
 // code-gauge-allow functionNcss 40 -- One case per kind of expression V8's CallPrinter names.
@@ -91,7 +108,7 @@ function printedCallee(node: Node): string | undefined {
       return printedCallee(namedChildren(node)[0]);
     }
     case 'object': {
-      return '{}';
+      return namedChildren(node).some((child) => child.type !== 'comment') ? '{(intermediate value)}' : '{}';
     }
     case 'array': {
       return `[${namedChildren(node)
@@ -105,8 +122,7 @@ function printedCallee(node: Node): string | undefined {
       return node.type;
     }
     case 'call_expression': {
-      const callee = printedCallee(field(node, 'function'));
-      return callee === undefined ? undefined : `${callee}(...)`;
+      return `${calleeText(field(node, 'function'))}(...)`;
     }
     case 'member_expression': {
       const object = printedCallee(field(node, 'object'));
