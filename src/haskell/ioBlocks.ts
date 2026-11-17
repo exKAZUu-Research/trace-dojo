@@ -101,21 +101,23 @@ function tailSelfCallers(
 }
 
 function startStatement(machine: Machine, state: RunState, frame: DoFrame): void {
-  const stmt = frame.code.stmts[frame.index];
-  const context = frame.traceFrame.contexts.at(-1) as TraceContext;
-  context.visible = stmt.visible;
-  context.row = stmt.row;
-  context.block = frame.code;
-  context.index = frame.index;
-  frame.mark = machine.runtime.steps.statementMark();
-  if (stmt.kind === 'let') {
+  do {
+    const stmt = frame.code.stmts[frame.index];
+    const context = frame.traceFrame.contexts.at(-1) as TraceContext;
+    context.visible = stmt.visible;
+    context.row = stmt.row;
+    context.block = frame.code;
+    context.index = frame.index;
+    frame.mark = machine.runtime.steps.statementMark();
+    if (stmt.kind !== 'let') {
+      machine.stack.push({ k: 'runIO' });
+      state.enter(machine.makeSlot(stmt.expr, frame.env));
+      return;
+    }
+    machine.runtime.spend();
     for (const bind of stmt.binds) frame.env.slots[bind.index] = machine.makeLetSlot(bind.expr, frame.env);
     completeStatement(machine, frame);
-    afterStatement(machine, state, frame);
-    return;
-  }
-  machine.stack.push({ k: 'runIO' });
-  state.enter(machine.makeSlot(stmt.expr, frame.env));
+  } while (advanceStatement(machine, state, frame));
 }
 
 export function statementDone(machine: Machine, state: RunState, frame: DoFrame): void {
@@ -146,15 +148,19 @@ function completeStatement(machine: Machine, frame: DoFrame): void {
 }
 
 function afterStatement(machine: Machine, state: RunState, frame: DoFrame): void {
+  if (advanceStatement(machine, state, frame)) startStatement(machine, state, frame);
+}
+
+function advanceStatement(machine: Machine, state: RunState, frame: DoFrame): boolean {
   frame.index++;
   if (frame.index < frame.code.stmts.length) {
     frame.result = undefined;
-    startStatement(machine, state, frame);
-    return;
+    return true;
   }
   machine.stack.pop();
   unwindBlock(machine, frame);
   state.ioResult(frame.result as Slot);
+  return false;
 }
 
 export function unwindBlock(machine: Machine, frame: DoFrame): void {

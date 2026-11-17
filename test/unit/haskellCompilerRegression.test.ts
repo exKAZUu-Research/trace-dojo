@@ -835,6 +835,8 @@ test('compiler and native evaluation recursion remain bounded under Node', { tim
     native,
     patterns,
     flatSequences,
+    ioLets,
+    ioLetTrace,
     display,
     recovery,
   } = z
@@ -844,6 +846,8 @@ test('compiler and native evaluation recursion remain bounded under Node', { tim
       native: z.array(resultSchema),
       patterns: z.array(resultSchema),
       flatSequences: z.array(resultSchema),
+      ioLets: z.array(resultSchema),
+      ioLetTrace: z.object({ stdout: z.string(), uncaughtException: z.string().optional(), steps: z.number() }),
       display: z.array(z.object({ stdout: z.string() }).passthrough()),
       recovery: resultSchema,
     })
@@ -862,6 +866,12 @@ test('compiler and native evaluation recursion remain bounded under Node', { tim
       expect(result.uncaughtException).toBeUndefined();
     } else expect(result).toMatchObject({ kind: 'limitExceeded', limit: 'operations' });
   }
+  expect(ioLets).toHaveLength(2);
+  for (const result of ioLets) {
+    expect(result).toMatchObject({ kind: 'executed', stdout: '1\n' });
+    expect(result.uncaughtException).toBeUndefined();
+  }
+  expect(ioLetTrace).toEqual({ stdout: '1\n', steps: 1 });
   expect(patterns).toHaveLength(12);
   for (const [index, result] of patterns.entries()) {
     expect(result).toMatchObject({ kind: 'executed', stdout: index % 4 === 0 ? '0\n' : '1\n' });

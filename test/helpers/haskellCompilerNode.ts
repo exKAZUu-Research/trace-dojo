@@ -48,6 +48,13 @@ const flatSequences = [
   'main=print(length [1::Int | ' + Array.from({ length: 3000 }, () => 'True').join(',') + '])',
   'main=print(do {' + Array.from({ length: 3000 }, () => 'Just ()').join(';') + '; Just(1::Int)})',
 ];
+const ioLetResults = [6000, 10_000].map((size) => {
+  const source = 'main=do {' + Array.from({ length: size }, () => 'let {x=()}').join(';') + ';print(1::Int)}';
+  return executeProgram('haskell', source);
+});
+const atomicLets =
+  'main=do -- atomic\n' + Array.from({ length: 10_000 }, () => ' let {x=()}').join('\n') + '\n print(1::Int)';
+const atomicLetRecording = traceProgram('haskell', atomicLets, atomicLets);
 const primitives = ['error(f(n+1))', 'errorWithoutStackTrace(f(n+1))', 'errorWithoutStackTrace("x"++f(n+1))'];
 const nativeResults = primitives.flatMap((rhs) => {
   const source = `f n=${rhs}\nmain=putStrLn(f(0::Int))`;
@@ -71,6 +78,12 @@ process.stdout.write(
     chains: chains.map((source) => executeProgram('haskell', source)),
     flatSequences: flatSequences.map((source) => executeProgram('haskell', source)),
     patterns: patterns.map((source) => executeProgram('haskell', source)),
+    ioLets: ioLetResults,
+    ioLetTrace: {
+      stdout: atomicLetRecording.stdout,
+      uncaughtException: atomicLetRecording.uncaughtException,
+      steps: atomicLetRecording.traceItems.length,
+    },
     native: nativeResults,
     display: displayResults,
     recovery: executeProgram('haskell', 'f 0="stop"; f n=error(f(n-1)); main=putStrLn(f(32::Int))'),
