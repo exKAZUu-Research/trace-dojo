@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 444 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 466 -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import { LIMITS } from '../interpreter/limits';
 import type { FunctionDecl } from './ast';
@@ -140,6 +140,7 @@ export function invoke(target: CallTarget, args: ArgValue[], callRow: number | u
   return invokeUser(target, target.fn, args, callRow);
 }
 
+// code-gauge-allow functionNcss 34 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 function invokeNative(target: CallTarget, fn: NativeFunction, args: ArgValue[], row: number | undefined): Value {
   const runtime = rt();
   runtime.spend();
@@ -357,7 +358,7 @@ function callerIsStrict(): boolean {
 
 // User functions -----------------------------------------------------------------------------------------------------
 
-// code-gauge-allow functionNcss 58 -- Transcribes PHP's algorithm for this function step by step, whose branches mirror PHP's.
+// code-gauge-allow functionCognitiveComplexity 17 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 function invokeUser(target: CallTarget, fn: UserFunction, args: ArgValue[], row: number | undefined): Value {
   const runtime = rt();
   const { decl } = fn;
@@ -545,7 +546,7 @@ export function setDefaultEvaluator(run: (decl: FunctionDecl, index: number, fra
   evaluateDefault = run;
 }
 
-// code-gauge-allow functionNcss 38 -- Binds arguments to parameters as PHP's call protocol does, in its order of checks.
+// code-gauge-allow functionNcss 45 -- Binds arguments to parameters as PHP's call protocol does, in its order of checks.
 // code-gauge-allow functionParameterCount 7 -- Binds arguments to parameters as PHP's call protocol does, in its order of checks.
 function bindParams(
   frame: Frame,

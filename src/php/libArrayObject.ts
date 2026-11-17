@@ -4,7 +4,6 @@ import { callMethod } from './callables';
 import { invoke } from './calls';
 import { createObject, findClass, objectToArray } from './classes';
 import { deprecated, throwError, warn } from './errors';
-import { iterate } from './interp';
 import { defineClass, type NativeMethod } from './native';
 import { toKey } from './operators';
 import { arrayIsShared, share } from './places';
@@ -132,9 +131,7 @@ function setStorage(object: PhpObject, value: Value, method: string, flags: numb
       if (justArray) newFlags = storageOf(other).flags & ~INTERNAL_FLAGS;
       storage = new ArrayStorage(name, new PhpArray(), other);
     } else {
-      const array = new PhpArray();
-      for (const [key, item] of iterate(other)) array.set(toKey(key), item);
-      storage = new ArrayStorage(name, array);
+      throw new UnsupportedFeatureError('通常のオブジェクトを配列ストレージにする操作');
     }
   }
   storage.flags = checkFlags(old.flags | newFlags);

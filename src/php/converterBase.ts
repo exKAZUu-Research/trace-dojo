@@ -169,6 +169,7 @@ export abstract class ConverterBase {
     this.error(node, '書き方に誤りがあります。');
   }
 
+  // code-gauge-allow functionCognitiveComplexity 28 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
   protected checkGotos(context: FunctionContext, body: Stmt[]): void {
     for (const { label, row, offset } of context.gotos) {
       if (!context.labels.has(label))

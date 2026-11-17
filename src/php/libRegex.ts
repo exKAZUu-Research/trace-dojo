@@ -75,6 +75,7 @@ interface Match {
  * finds them: after an empty match, PCRE looks for a non-empty one at the same place before moving on. Sets the PCRE
  * error and yields nothing for a bad subject or offset.
  */
+// code-gauge-allow functionCognitiveComplexity 16 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 function* matchesOf(compiled: Compiled, subject: string, offset = 0, status?: { error: number }): Generator<Match> {
   const prepared = prepareSubject(compiled, subject, offset);
   if (!prepared) {
@@ -438,7 +439,7 @@ defineFunction(
 defineFunction(
   'preg_split(string $pattern, string $subject, int $limit = -1, int $flags = 0): array|false',
   // code-gauge-allow functionCognitiveComplexity 29 -- Transcribes PHP's algorithm for this function step by step, whose branches mirror PHP's.
-  // code-gauge-allow functionNcss 33 -- Transcribes PHP's algorithm for this function step by step, whose branches mirror PHP's.
+  // code-gauge-allow functionNcss 36 -- Transcribes PHP's algorithm for this function step by step, whose branches mirror PHP's.
   ({ args }) => {
     const compiled = compile('preg_split', args[0] as string);
     if (!compiled) return false;

@@ -323,3 +323,26 @@ test('array_unique scales with distinct values in numeric sort mode', () => {
     stdout: '5000',
   });
 });
+
+test.each([
+  '<?php $a=new stdClass;$b=new stdClass;for($i=0;$i<25;$i++){$a=(object)["l"=>$a,"r"=>$a];$b=(object)["l"=>$b,"r"=>$b];}var_dump($a==$b);',
+  '<?php echo strtr(str_repeat("a",2000),array_fill_keys(range(0,999),"x"));',
+  '<?php $a=["x"];for($i=0;$i<25;$i++)$a=[$a,$a];var_dump(mb_check_encoding($a));',
+])('charges recursive or multiplicative native work against the budget: %s', (source) => {
+  expect(run(source)).toEqual({ kind: 'limitExceeded', limit: 'operations' });
+});
+
+test('rejects detached plain-object SPL backing instead of producing stale views', () => {
+  const result = run('<?php $o=(object)["x"=>1];$a=new ArrayObject($o);');
+  expect(result).toMatchObject({
+    kind: 'executed',
+    uncaughtException: expect.stringContaining('この採点環境では使えません。'),
+  });
+});
+
+test('charges cloned linked-list nodes before allocating their storage', () => {
+  const result = run(
+    '<?php $s=new SplDoublyLinkedList;for($i=0;$i<10000;$i++)$s->push(1);$copies=[];for($i=0;$i<100;$i++)$copies[]=clone $s;echo "never";'
+  );
+  expect(result.kind === 'executed' && result.stdout).toMatch(/^\nFatal error: Allowed memory size/);
+});

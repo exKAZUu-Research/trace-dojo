@@ -5,6 +5,7 @@
 import { createHash, createHmac } from 'node:crypto';
 
 import { byteAt, charAt, enc, lower, untilNul, upper } from './bytes';
+import { callStack } from './calls';
 import { valueName } from './conversions';
 import { deprecated, throwError, warn } from './errors';
 import { decodeHtml, escapeHtml, nextChar, translationTable } from './htmlEntities';
@@ -508,6 +509,7 @@ defineFunction('strtr(string $string, string|array $from, ?string $to = null): s
     let index = 0;
     outer: while (index < text.length) {
       for (const [key, value] of sorted) {
+        rt().spend();
         if (text.startsWith(key, index)) {
           result += value;
           index += key.length;
@@ -635,7 +637,7 @@ defineFunction('nl2br(string $string, bool $use_xhtml = true): string', ({ args 
 });
 defineFunction(
   'htmlspecialchars(string $string, int $flags = ENT_QUOTES | ENT_SUBSTITUTE | ENT_HTML401, ?string $encoding = null, bool $double_encode = true): string',
-  ({ args }) => escapeHtml(s(args[0]), entityFlags(args[1]), false, args[3] !== false)
+  ({ args }) => escapeHtml(s(args[0]), entityFlags(args[1]), false, args[3] !== false, htmlEncoding(args[2]))
 );
 defineFunction(
   'htmlspecialchars_decode(string $string, int $flags = ENT_QUOTES | ENT_SUBSTITUTE | ENT_HTML401): string',
@@ -643,12 +645,19 @@ defineFunction(
 );
 defineFunction(
   'htmlentities(string $string, int $flags = ENT_QUOTES | ENT_SUBSTITUTE | ENT_HTML401, ?string $encoding = null, bool $double_encode = true): string',
-  ({ args }) => escapeHtml(s(args[0]), entityFlags(args[1]), true, args[3] !== false)
+  ({ args }) => escapeHtml(s(args[0]), entityFlags(args[1]), true, args[3] !== false, htmlEncoding(args[2]))
 );
 defineFunction(
   'html_entity_decode(string $string, int $flags = ENT_QUOTES | ENT_SUBSTITUTE | ENT_HTML401, ?string $encoding = null): string',
-  ({ args }) => decodeHtml(s(args[0]), entityFlags(args[1]), true)
+  ({ args }) => decodeHtml(s(args[0]), entityFlags(args[1]), true, htmlEncoding(args[2]))
 );
+
+function htmlEncoding(value: Value): boolean {
+  const name = value === undefined || value === null ? '' : s(value);
+  const charset = htmlCharset(name, callStack.at(-1)?.name ?? 'htmlentities');
+  if (charset !== 'utf8' && charset !== 'latin1') throw new UnsupportedFeatureError(`HTML の文字コード（${name}）`);
+  return charset === 'latin1';
+}
 
 function entityFlags(value: Value): bigint {
   return value === undefined ? 11n : (value as bigint);
@@ -676,11 +685,14 @@ const HTML_CHARSETS =
   );
 
 /** How htmlspecialchars' determine_charset classifies an encoding name for the tables this grader provides. */
-function htmlCharset(name: string): 'utf8' | 'latin1' | 'multibyte' | 'other' {
+function htmlCharset(
+  name: string,
+  functionName = 'get_html_translation_table'
+): 'utf8' | 'latin1' | 'multibyte' | 'other' {
   if (name === '') return 'utf8';
   const known = HTML_CHARSETS.find((candidate) => lower(candidate) === lower(name));
   if (known === undefined) {
-    warn(`get_html_translation_table(): Charset "${name}" is not supported, assuming UTF-8`);
+    warn(`${functionName}(): Charset "${name}" is not supported, assuming UTF-8`);
     return 'utf8';
   }
   // oxlint-disable-next-line unicorn/text-encoding-identifier-case -- PHP names the charset `utf-8`.

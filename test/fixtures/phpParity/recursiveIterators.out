@@ -52,8 +52,6 @@ nextElement
 2=>4
 endIteration
 0=>1
-
-Deprecated: ArrayIterator::__construct(): Using an object as a backing array for ArrayIterator is deprecated, as it allows violating class constraints and invariants in /main.php on line 28
 p=>1
 0=>2
 0=>1

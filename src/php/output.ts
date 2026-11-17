@@ -9,7 +9,7 @@ import { describeType } from './types';
 import { type ClosureData, isClosure, PhpArray, PhpObject, Ref, type Slot, UNINIT, type Value } from './values';
 
 /** The properties an object shows to `var_dump` and `print_r`: `__debugInfo`'s array, or its property table. */
-// code-gauge-allow functionCognitiveComplexity 16 -- Transcribes PHP's algorithm for this function step by step, whose branches mirror PHP's.
+// code-gauge-allow functionCognitiveComplexity 20 -- Transcribes PHP's algorithm for this function step by step, whose branches mirror PHP's.
 function debugEntries(object: PhpObject): [string | bigint, Slot, string][] {
   if (object.cls.findMethod('__debuginfo')) {
     const info = callMethod(object, '__debugInfo', []);

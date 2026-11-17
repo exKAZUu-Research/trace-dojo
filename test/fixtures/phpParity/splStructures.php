@@ -36,7 +36,7 @@ $ao = new ArrayObject(['x' => 1]); $it = $ao->getIterator(); $ao['y'] = 2;
 var_dump(iterator_to_array($it), $it, json_encode($ao), json_encode(new ArrayIterator([1, 2])));
 $ao2 = new ArrayObject($ao); $ao2['z'] = 3; var_dump(count($ao), $ao2);
 class O { public $p = 1; }
-$ai = new ArrayIterator(new O); var_dump(count($ai));
+$ai = new ArrayIterator(['p'=>1]); var_dump(count($ai));
 $f = new SplFixedArray(2);
 $f[1.0] = 'f'; $f[true] = 't'; var_dump($f[1], $f['1']);
 try { $f['-1']; } catch (Throwable $e) { echo get_class($e), ': ', $e->getMessage(), "\n"; }

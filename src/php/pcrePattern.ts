@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 681 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 683 -- Holds the cases of one concern of the interpreter, which share their helpers.
 import { dec, enc } from './bytes';
 import { UnsupportedFeatureError } from './unsupported';
 
@@ -190,9 +190,9 @@ const BYTE_SETS = new Map([
 const UCP_SETS = new Map([
   ['d', String.raw`\p{Nd}`],
   ['w', String.raw`\p{L}\p{N}\p{Mn}\p{Pc}`],
-  ['s', String.raw`\t-\r \x85\xa0 ᠎ -     　`],
+  ['s', String.raw`\t-\r \x85\xa0 ᠎ - \u2028\u2029  　`],
   ['h', String.raw`\t \xa0 ᠎ -   　`],
-  ['v', String.raw`\n-\r\x85  `],
+  ['v', String.raw`\n-\r\x85\u2028\u2029`],
 ]);
 const BYTE_POSIX_CLASSES = new Map([
   ['alpha', 'A-Za-z'],

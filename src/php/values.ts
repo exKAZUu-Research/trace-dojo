@@ -1,3 +1,4 @@
+// code-gauge-allow-file fileNcss 439 -- Keeps one PHP runtime concern and its shared helpers in one module.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import type { TurtleState } from '../interpreter/turtleWorld';
 import type { ClassDecl, FunctionDecl } from './ast';

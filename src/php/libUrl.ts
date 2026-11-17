@@ -109,7 +109,7 @@ defineFunction(
 );
 
 /** Appends the pairs of an array or an object's visible properties as php_url_encode_hash_ex does. */
-// code-gauge-allow functionCognitiveComplexity 17 -- Transcribes PHP's algorithm for this function step by step, whose branches mirror PHP's.
+// code-gauge-allow functionCognitiveComplexity 20 -- Transcribes PHP's algorithm for this function step by step, whose branches mirror PHP's.
 function buildQuery(query: QueryBuild, data: PhpArray | PhpObject, prefix: string | undefined): void {
   if (query.visiting.has(data)) return;
   query.visiting.add(data);

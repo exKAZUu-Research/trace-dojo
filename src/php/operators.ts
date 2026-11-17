@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 422 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 442 -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/prefer-code-point -- PHP strings hold bytes as code units 0–255, which charCodeAt and fromCharCode read and write as they are.
 import {
   compareBytes,
@@ -425,6 +425,7 @@ function compareObjects(a: PhpObject, b: PhpObject): number {
     if (left.length !== right.size && (hasDynamicProps(a) || hasDynamicProps(b)))
       return left.length > right.size ? 1 : -1;
     for (const [name, value] of left) {
+      rt().spend();
       if (!right.has(name)) return 1;
       const result = compare(value, right.get(name) as Value);
       if (result !== 0) return result;
@@ -480,6 +481,7 @@ function isIntegerText(text: string): boolean {
   return /^[ \t\n\r\v\f]*[+-]?\d+[ \t\n\r\v\f]*$/.test(text);
 }
 
+// code-gauge-allow functionCognitiveComplexity 16 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 export function strictEquals(a: Value, b: Value): boolean {
   if (a === b) return typeof a !== 'number' || !Number.isNaN(a);
   if (typeof a === 'number' && typeof b === 'number') return a === b;

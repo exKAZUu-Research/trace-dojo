@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 415 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 456 -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import type { Node } from '@willbooster/web-tree-sitter';
 
@@ -8,6 +8,7 @@ import { BUILTIN_TYPES, ConverterBase } from './converterBase';
 import { SCRIPT_PATH } from './runtime';
 import { typeToString } from './types';
 import type { TypeDecl, Visibility } from './values';
+import { isSubtype } from './variance';
 
 /**
  * What PHP requires of each magic method: the number of parameters, whether it is static, whether it must be public,
@@ -98,6 +99,7 @@ export abstract class DeclarationConverter extends ConverterBase {
     }
   }
 
+  // code-gauge-allow functionNcss 57 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
   protected params(node: Node, functionName: string, className?: string): ParamDecl[] {
     const params: ParamDecl[] = [];
     const seen = new Set<string>();
@@ -188,6 +190,7 @@ export abstract class DeclarationConverter extends ConverterBase {
     return lower(node.text.split('(')[0].trim()) as Visibility;
   }
 
+  // code-gauge-allow functionCognitiveComplexity 17 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
   protected typeDecl(node: Node): TypeDecl {
     const type = this.parseTypeDecl(node);
     if (type.k === 'named' && type.nullable && ['mixed', 'void', 'never', 'null'].includes(type.name))
@@ -492,6 +495,7 @@ export abstract class DeclarationConverter extends ConverterBase {
     };
   }
 
+  // code-gauge-allow functionCognitiveComplexity 18 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
   protected classConsts(member: Node, decl: ClassDecl, kind: ClassDecl['kind']): void {
     const attributes = member.childForFieldName('attributes');
     if (attributes) this.unsupported(attributes, '属性（#[...]）');
@@ -530,7 +534,8 @@ export abstract class DeclarationConverter extends ConverterBase {
     }
   }
 
-  // code-gauge-allow functionCognitiveComplexity 21 -- Checks PHP's rules on the modifiers and parts of each declaration.
+  // code-gauge-allow functionCognitiveComplexity 27 -- Checks PHP's rules on the modifiers and parts of each declaration.
+  // code-gauge-allow functionNcss 32 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
   protected properties(member: Node, decl: ClassDecl, kind: ClassDecl['kind']): void {
     const attributes = member.childForFieldName('attributes');
     if (attributes) this.unsupported(attributes, '属性（#[...]）');
@@ -589,8 +594,8 @@ export abstract class DeclarationConverter extends ConverterBase {
     }
   }
 
-  // code-gauge-allow functionCognitiveComplexity 21 -- Checks PHP's rules on the modifiers and parts of each declaration.
-  // code-gauge-allow functionNcss 43 -- Checks PHP's rules on the modifiers and parts of each declaration.
+  // code-gauge-allow functionCognitiveComplexity 28 -- Checks PHP's rules on the modifiers and parts of each declaration.
+  // code-gauge-allow functionNcss 47 -- Checks PHP's rules on the modifiers and parts of each declaration.
   protected hooks(list: Node, prop: PropertyDeclAst, className: string): void {
     const hooks: NonNullable<PropertyDeclAst['hooks']> = {};
     let referencesBacking = false;
@@ -610,7 +615,9 @@ export abstract class DeclarationConverter extends ConverterBase {
           paramsNode &&
           prop.type &&
           (!params[0]?.type ||
-            (typeToString(params[0].type) !== 'mixed' && typeToString(params[0].type) !== typeToString(prop.type)))
+            (builtinType(prop.type) &&
+              builtinType(params[0].type) &&
+              !isSubtype(prop.type, undefined, params[0].type, undefined)))
         )
           this.error(
             hook,
@@ -850,4 +857,8 @@ function defaultFits(type: TypeDecl, literalType: string): boolean {
   if (literalType === 'int' && name === 'float') return true;
   if (literalType === 'bool') return name === 'true' || name === 'false';
   return false;
+}
+
+function builtinType(type: TypeDecl): boolean {
+  return type.k === 'named' ? BUILTIN_TYPES.has(type.name) : type.types.every(builtinType);
 }

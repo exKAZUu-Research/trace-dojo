@@ -51,6 +51,7 @@ class ListStorage {
   }
 
   clone(): ListStorage {
+    rt().allocate(this.nodes.length);
     const copy = new ListStorage(this.flags);
     copy.nodes = this.nodes.map((node) => ({ v: node.v }));
     copy.pointer = copy.nodes[0];
@@ -112,6 +113,7 @@ const listMethods: NativeMethod[] = [
     impl: ({ thisObj, args }) => {
       const list = listOf(thisObj);
       const index = checkListIndex(list, args[0], 'add', true);
+      rt().allocate(1);
       if (index === list.nodes.length) list.nodes.push({ v: share(args[1]) });
       else list.nodes.splice(list.nodes.indexOf(list.nodeAt(index)), 0, { v: share(args[1]) });
       return null;
@@ -127,11 +129,11 @@ const listMethods: NativeMethod[] = [
   },
   {
     signature: 'push(mixed $value): void',
-    impl: ({ thisObj, args }) => (listOf(thisObj).nodes.push({ v: share(args[0]) }), null),
+    impl: ({ thisObj, args }) => (rt().allocate(1), listOf(thisObj).nodes.push({ v: share(args[0]) }), null),
   },
   {
     signature: 'unshift(mixed $value): void',
-    impl: ({ thisObj, args }) => (listOf(thisObj).nodes.unshift({ v: share(args[0]) }), null),
+    impl: ({ thisObj, args }) => (rt().allocate(1), listOf(thisObj).nodes.unshift({ v: share(args[0]) }), null),
   },
   {
     signature: 'top(): mixed',
@@ -173,8 +175,10 @@ const listMethods: NativeMethod[] = [
     signature: 'offsetSet(?int $index, mixed $value): void',
     impl: ({ thisObj, args }) => {
       const list = listOf(thisObj);
-      if (args[0] === null) list.nodes.push({ v: share(args[1]) });
-      else list.nodeAt(checkListIndex(list, args[0], 'offsetSet')).v = share(args[1]);
+      if (args[0] === null) {
+        rt().allocate(1);
+        list.nodes.push({ v: share(args[1]) });
+      } else list.nodeAt(checkListIndex(list, args[0], 'offsetSet')).v = share(args[1]);
       return null;
     },
   },
@@ -215,7 +219,7 @@ defineClass({
   methods: [
     {
       signature: 'enqueue(mixed $value): void',
-      impl: ({ thisObj, args }) => (listOf(thisObj).nodes.push({ v: share(args[0]) }), null),
+      impl: ({ thisObj, args }) => (rt().allocate(1), listOf(thisObj).nodes.push({ v: share(args[0]) }), null),
     },
     {
       signature: 'dequeue(): mixed',

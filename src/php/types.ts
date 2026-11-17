@@ -133,6 +133,7 @@ function coerceScalar(value: Value, type: TypeDecl): Value | typeof NO_MATCH {
           deprecated(`Implicit conversion from float-string "${value}" to int loses precision`);
           return BigInt(Math.trunc(number));
         }
+        if (wantsBool) return value !== '' && value !== '0';
         return NO_MATCH;
       }
     }
@@ -157,6 +158,7 @@ function coerceScalar(value: Value, type: TypeDecl): Value | typeof NO_MATCH {
     if (wantsInt) {
       if (!Number.isFinite(value) || !floatFitsInt(value)) {
         if (wantsString) return toStr(value);
+        if (wantsBool) return toBool(value);
         return NO_MATCH;
       }
       if (!Number.isInteger(value)) {

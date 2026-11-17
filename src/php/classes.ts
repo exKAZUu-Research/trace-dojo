@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 710 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 793 -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import type { ClassDecl, Expr, FunctionDecl, MethodDeclAst, PropertyDeclAst } from './ast';
 import builtinNames from './builtinNames.json';
@@ -194,7 +194,7 @@ function propertyKey(cls: PhpClass, name: string, visibility: Visibility): strin
   return visibility === 'private' ? `\0${cls.name}\0${name}` : name;
 }
 
-// code-gauge-allow functionNcss 37 -- Follows PHP's class linking and property access rules in their order of checks.
+// code-gauge-allow functionNcss 42 -- Follows PHP's class linking and property access rules in their order of checks.
 function addProperty(cls: PhpClass, ast: PropertyDeclAst): void {
   const inherited = cls.propByName.get(ast.name);
   if (inherited && inherited.cls !== cls && inherited.visibility !== 'private') {
@@ -247,6 +247,12 @@ function addProperty(cls: PhpClass, ast: PropertyDeclAst): void {
     };
   }
   if (ast.hooks) {
+    const setterType = ast.hooks.set?.params[0]?.type;
+    if (ast.type && setterType && !isSubtype(ast.type, cls, setterType, cls))
+      throw new FatalError(
+        `Type of parameter of hook ${cls.name}::$${ast.name}::set must be compatible with property type`,
+        ast.row
+      );
     decl.hooks = {
       get: ast.hooks.get ? hookFunction(ast.hooks.get) : undefined,
       set: ast.hooks.set ? hookFunction(ast.hooks.set) : undefined,
@@ -415,6 +421,7 @@ function checkInheritance(cls: PhpClass, row: number): void {
   }
 }
 
+// code-gauge-allow functionCognitiveComplexity 20 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 function checkOverride(cls: PhpClass, method: Method, parent: Method): void {
   if (parent.isFinal && method.cls === cls && !parent.cls.decl?.isAnonymous) {
     throw new FatalError(
@@ -670,6 +677,7 @@ function guarded(object: PhpObject, key: string, run: () => Value): Value {
   }
 }
 
+// code-gauge-allow functionNcss 38 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 export function readProp(object: PhpObject, name: string, scope: PhpClass | undefined, quiet = false): Value {
   rt().spend();
   const decl = lookupProp(object.cls, name, scope);
@@ -856,8 +864,8 @@ function readonlySetVisibility(decl: PropDecl): Visibility {
 }
 
 /** The reference a property holds, creating it, for `=&`, by-reference arguments, and nested writes. */
-// code-gauge-allow functionCognitiveComplexity 20 -- Follows PHP's class linking and property access rules in their order of checks.
-// code-gauge-allow functionNcss 31 -- Follows PHP's class linking and property access rules in their order of checks.
+// code-gauge-allow functionCognitiveComplexity 25 -- Follows PHP's class linking and property access rules in their order of checks.
+// code-gauge-allow functionNcss 35 -- Follows PHP's class linking and property access rules in their order of checks.
 export function propRef(object: PhpObject, name: string, scope: PhpClass | undefined, acquire = false): Ref {
   const decl = lookupProp(object.cls, name, scope);
   const key = decl && !decl.isStatic ? decl.key : name;
@@ -901,6 +909,7 @@ export function propRef(object: PhpObject, name: string, scope: PhpClass | undef
   return ref;
 }
 
+// code-gauge-allow functionCognitiveComplexity 19 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 export function bindPropertyReference(object: PhpObject, name: string, ref: Ref, scope: PhpClass | undefined): void {
   const decl = lookupProp(object.cls, name, scope);
   if ((!decl || !canAccessProp(decl, scope)) && object.cls.findMethod('__get')) {

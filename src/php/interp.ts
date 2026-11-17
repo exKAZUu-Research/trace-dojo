@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 680 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 686 -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import {
   applyOperator,
@@ -443,8 +443,7 @@ export function isArrayAccess(object: PhpObject): boolean {
 }
 
 /** The position an index selects in a string: -1 when it is out of range, undefined when `quiet` and the index is not an integer. */
-// code-gauge-allow functionCognitiveComplexity 28 -- One case per expression kind, as PHP evaluates each kind differently.
-// code-gauge-allow functionNcss 32 -- One case per expression kind, as PHP evaluates each kind differently.
+// code-gauge-allow functionNcss 36 -- One case per expression kind, as PHP evaluates each kind differently.
 export function stringOffset(text: string, index: Value, quiet: boolean): number | undefined {
   let offset: bigint;
   if (typeof index === 'bigint') offset = index;

@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 522 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 527 -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import { ExecutionLimitError } from '../interpreter/limits';
 import { assignTo, bindRef, destructure, placeOf, unsetTarget } from './assignment';
@@ -372,6 +372,7 @@ function staticDeclaration(statement: Extract<Stmt, { k: 'static' }>, frame: Fra
   }
 }
 
+// code-gauge-allow functionNcss 54 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 function tryStatement(statement: Extract<Stmt, { k: 'try' }>, seek?: string): Completion {
   const runtime = rt();
   let completion: Completion;
@@ -466,6 +467,7 @@ function catches(object: PhpObject, name: string): boolean {
 }
 
 // code-gauge-allow functionCognitiveComplexity 27 -- One case per statement kind, as PHP runs each kind differently.
+// code-gauge-allow functionNcss 34 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 function foreachStatement(statement: Extract<Stmt, { k: 'foreach' }>): Completion {
   const runtime = rt();
   const frame = runtime.frame;

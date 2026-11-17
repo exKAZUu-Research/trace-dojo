@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 502 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 543 -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import { lower } from './bytes';
 import { callCallback, callTargetOf, callValue } from './callables';
@@ -7,6 +7,7 @@ import * as classesModule from './classes';
 import { findClass, lookupMethod } from './classes';
 import { debugType, getType, isNumericString, normalizeKeyString, valueName } from './conversions';
 import {
+  deprecated,
   E_ALL,
   E_COMPILE_ERROR,
   E_COMPILE_WARNING,
@@ -408,8 +409,9 @@ setCallableCheck(isCallable);
 
 // Classes and objects ------------------------------------------------------------------------------------------------
 
-defineFunction('get_class(object $object): string', ({ args }) => {
+defineFunction('get_class(object $object = UNKNOWN): string', ({ args }) => {
   if (args.length === 0) {
+    deprecated('Calling get_class() without arguments is deprecated');
     const scope = rt().frame.scope;
     if (!scope) throwError('Error', 'get_class() without arguments must be called from within a class');
     return scope.name;
@@ -418,7 +420,8 @@ defineFunction('get_class(object $object): string', ({ args }) => {
   return object.cls.fullName;
 });
 markInlined('get_class');
-defineFunction('get_parent_class(object|string $object_or_class): string|false', ({ args }) => {
+defineFunction('get_parent_class(object|string $object_or_class = UNKNOWN): string|false', ({ args }) => {
+  if (args.length === 0) deprecated('Calling get_parent_class() without arguments is deprecated');
   const cls = args.length === 0 ? rt().frame.scope : classOf(args[0]);
   return cls?.parent?.name ?? false;
 });
@@ -427,6 +430,7 @@ defineFunction('get_called_class(): string', () => {
   if (!cls) throwError('Error', 'get_called_class() must be called from within a class');
   return cls.name;
 });
+// code-gauge-allow functionCognitiveComplexity 22 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 defineFunction('get_object_vars(object $object): array', ({ args }) => {
   const object = args[0] as PhpObject;
   const scope = rt().frame.scope;

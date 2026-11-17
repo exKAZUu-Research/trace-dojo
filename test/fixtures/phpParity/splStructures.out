@@ -168,8 +168,6 @@ object(ArrayObject)#11 (1) {
     }
   }
 }
-
-Deprecated: ArrayIterator::__construct(): Using an object as a backing array for ArrayIterator is deprecated, as it allows violating class constraints and invariants in /main.php on line 39
 int(1)
 string(1) "t"
 string(1) "t"

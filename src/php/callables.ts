@@ -28,7 +28,6 @@ import {
 // Calls --------------------------------------------------------------------------------------------------------------
 
 /** Evaluates call arguments, binding by-reference parameters to locations. */
-// code-gauge-allow functionNcss 54 -- Resolves each form of call and callable by PHP's lookup rules, in PHP's order of checks.
 export function evalArgs(args: Arg[], fn: Callable | undefined, name: string | undefined): ArgValue[] {
   const runtime = rt();
   const values: ArgValue[] = [];
@@ -231,8 +230,8 @@ function magicForwarder(magic: Method, name: string, object: PhpObject | undefin
   };
 }
 
-// code-gauge-allow functionCognitiveComplexity 25 -- Resolves each form of call and callable by PHP's lookup rules, in PHP's order of checks.
-// code-gauge-allow functionNcss 42 -- Resolves each form of call and callable by PHP's lookup rules, in PHP's order of checks.
+// code-gauge-allow functionCognitiveComplexity 30 -- Resolves each form of call and callable by PHP's lookup rules, in PHP's order of checks.
+// code-gauge-allow functionNcss 46 -- Resolves each form of call and callable by PHP's lookup rules, in PHP's order of checks.
 export function staticCallExpression(e: Extract<Expr, { k: 'scall' }>): Value {
   const runtime = rt();
   const frame = runtime.frame;
@@ -339,6 +338,7 @@ export function closureTarget(closure: PhpObject): CallTarget {
  * The function a callable value names: a closure, an invokable object, a function name, `"Class::method"`, or
  * `[$objectOrClass, "method"]`.
  */
+// code-gauge-allow functionNcss 42 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 export function callTargetOf(value: Value, forCall: boolean): CallTarget {
   const runtime = rt();
   const scope = runtime.frame.scope;
@@ -410,8 +410,8 @@ function staticCallable(className: string, methodName: string, scope: PhpClass |
       word === 'self'
         ? frame.scope
         : word === 'parent'
-          ? (frame.scope.parent as PhpClass)
-          : (frame.staticClass as PhpClass);
+          ? (frame.scope.parent ?? requireClass(className))
+          : (frame.staticClass ?? requireClass(className));
   } else cls = requireClass(className);
   const method = lookupMethod(cls, lower(methodName), scope);
   if (!method) {

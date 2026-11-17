@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 481 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 523 -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import type { Expr, ListItem } from './ast';
 import { callMethod } from './callables';
@@ -136,6 +136,7 @@ function writtenObject(e: Expr): Value {
   return e.k === 'var' ? evQuiet(e) : ev(e);
 }
 
+// code-gauge-allow functionCognitiveComplexity 22 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 function propPlace(object: PhpObject, name: string): Place {
   const scope = rt().frame.scope;
   return {
@@ -228,6 +229,7 @@ function arrayAccessPlace(object: PhpObject, key: Value | undefined): Place {
     get: () => callMethod(object, 'offsetGet', [key ?? null]),
     set: (value) => {
       callMethod(object, 'offsetSet', [key ?? null, value]);
+      return value;
     },
     ref: () => {
       const value = callMethod(object, 'offsetGet', [key ?? null]);
@@ -254,7 +256,7 @@ function stringOffsetPlace(parent: Place, text: string, key: Value | undefined):
         const requested = Number(toInt(key));
         if (requested < 0) {
           warn(`Illegal string offset ${requested}`);
-          return;
+          return null;
         }
         offset = requested;
       }
@@ -269,6 +271,7 @@ function stringOffsetPlace(parent: Place, text: string, key: Value | undefined):
       const padded = offset >= text.length ? text + ' '.repeat(offset - text.length) + character : text;
       const updated = offset >= text.length ? padded : text.slice(0, offset) + character + text.slice(offset + 1);
       parent.set(updated);
+      return character;
     },
     ref: () => {
       throwError('Error', 'Cannot create references to/from string offsets');
@@ -295,8 +298,7 @@ export function assignExpression(target: Expr, valueExpr: Expr): Value {
   const place = placeOf(target);
   const value = ev(valueExpr);
   runtime.row = target.row;
-  const stored = place.set(share(value));
-  return stored === undefined ? value : stored;
+  return place.set(share(value));
 }
 
 /** Assigns a value to a writable expression, as a foreach binding or list() element does. */
@@ -308,8 +310,8 @@ export function assignTo(target: Expr, value: Value): void {
   placeOf(target).set(share(value));
 }
 
-// code-gauge-allow functionCognitiveComplexity 28 -- Handles each kind of writable expression, whose write rules PHP defines separately.
-// code-gauge-allow functionNcss 47 -- Handles each kind of writable expression, whose write rules PHP defines separately.
+// code-gauge-allow functionCognitiveComplexity 29 -- Handles each kind of writable expression, whose write rules PHP defines separately.
+// code-gauge-allow functionNcss 48 -- Handles each kind of writable expression, whose write rules PHP defines separately.
 export function bindRef(target: Expr, ref: Ref): void {
   if (target.k === 'var') {
     if (target.name === 'this') throwError('Error', 'Cannot re-assign $this');
@@ -422,8 +424,7 @@ export function compoundAssign(e: Extract<Expr, { k: 'assignOp' }>): Value {
     const current = place.getForIsset ? place.getForIsset() : place.get();
     if (current !== undefined && current !== null) return current;
     const value = ev(e.value);
-    place.set(share(value));
-    return value;
+    return place.set(share(value));
   }
   const place = placeOf(e.target);
   const value = ev(e.value);
@@ -434,8 +435,7 @@ export function compoundAssign(e: Extract<Expr, { k: 'assignOp' }>): Value {
     current = null;
   }
   const result = applyOperator(e.op, current, value);
-  place.set(share(result));
-  return result;
+  return place.set(share(result));
 }
 
 export function applyOperator(op: string, left: Value, right: Value): Value {
@@ -495,8 +495,8 @@ export function incDec(e: Extract<Expr, { k: 'incdec' }>): Value {
     throwError('TypeError', `Cannot ${e.inc ? 'increment' : 'decrement'} ${(old as PhpObject).cls.name}`);
   }
   if (typeof old === 'bigint' && typeof updated === 'number') checkIntOverflow(place, e.inc);
-  place.set(updated);
-  return e.prefix ? updated : old;
+  const stored = place.set(updated);
+  return e.prefix ? stored : old;
 }
 
 function warnUndefinedTarget(target: Expr, place: Place): void {
@@ -541,7 +541,8 @@ function incDecString(text: string, inc: boolean): Value {
   return incrementString(text);
 }
 
-// code-gauge-allow functionNcss 38 -- Handles each kind of writable expression, whose write rules PHP defines separately.
+// code-gauge-allow functionNcss 41 -- Handles each kind of writable expression, whose write rules PHP defines separately.
+// code-gauge-allow functionCognitiveComplexity 17 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 export function unsetTarget(target: Expr): void {
   const runtime = rt();
   runtime.row = target.row;
@@ -595,6 +596,7 @@ function unsetContainer(e: Expr): PhpArray | PhpObject | string | undefined {
   return undefined;
 }
 
+// code-gauge-allow functionCognitiveComplexity 17 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 function unsetPlace(e: Expr): Place | undefined {
   if (e.k === 'idx') {
     if (e.index === undefined) throwError('Error', 'Cannot use [] for unsetting');

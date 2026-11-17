@@ -25,7 +25,7 @@ class Hooks extends RecursiveIteratorIterator {
 }
 foreach (new Hooks(new RecursiveArrayIterator([1, [2, 3], 4])) as $k => $v) echo "$k=>$v\n";
 $o = new stdClass; $o->p = 1;
-foreach (new RecursiveIteratorIterator(new RecursiveArrayIterator([1, $o, [2]])) as $k => $v) echo "$k=>", is_object($v) ? 'obj' : $v, "\n";
+foreach (new RecursiveIteratorIterator(new RecursiveArrayIterator([1, (array)$o, [2]])) as $k => $v) echo "$k=>", is_object($v) ? 'obj' : $v, "\n";
 foreach (new RecursiveIteratorIterator(new RecursiveArrayIterator([1, $o, [2]], RecursiveArrayIterator::CHILD_ARRAYS_ONLY)) as $k => $v) echo "$k=>", is_object($v) ? 'obj' : $v, "\n";
 var_dump(RecursiveArrayIterator::CHILD_ARRAYS_ONLY, RecursiveIteratorIterator::LEAVES_ONLY, RecursiveIteratorIterator::SELF_FIRST, RecursiveIteratorIterator::CHILD_FIRST, RecursiveIteratorIterator::CATCH_GET_CHILD);
 $r = new RecursiveArrayIterator([1, [2]]);

@@ -440,7 +440,8 @@ class JsonParser {
     return array;
   }
 
-  // code-gauge-allow functionCognitiveComplexity 18 -- Transcribes PHP's algorithm for this function step by step, whose branches mirror PHP's.
+  // code-gauge-allow functionCognitiveComplexity 30 -- Transcribes PHP's algorithm for this function step by step, whose branches mirror PHP's.
+  // code-gauge-allow functionNcss 37 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
   private string(): string {
     this.index++;
     let result = '';

@@ -1,7 +1,7 @@
-import { type Comparisons, type Entry, SortedWalk } from './arraySetWalk';
-// code-gauge-allow-file fileNcss 883 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 942 -- Keeps one PHP runtime concern and its shared helpers in one module.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 // oxlint-disable unicorn/prefer-code-point -- PHP strings hold bytes as code units 0–255, which charCodeAt and fromCharCode read and write as they are.
+import { type Comparisons, type Entry, SortedWalk } from './arraySetWalk';
 import { lower, upper } from './bytes';
 import { callCallback, callCallbackRefs, callMethod } from './callables';
 import { canAccessProp, declForKey, issetProp, lookupProp, objectToArray, readProp } from './classes';
@@ -54,7 +54,10 @@ const arr = (value: Value): PhpArray => value as PhpArray;
 
 /** The array a by-reference parameter holds, separated from other holders so that the function may change it. */
 function writableArray(ctx: NativeContext, index: number): PhpArray {
-  const ref = ctx.refs[index] as Ref;
+  return writableArrayRef(ctx.refs[index] as Ref);
+}
+
+function writableArrayRef(ref: Ref): PhpArray {
   let array = ref.v as PhpArray;
   if (arrayIsShared(array)) {
     array = array.copy();
@@ -77,6 +80,7 @@ function keyValue(key: Key): Value {
   return key;
 }
 
+// code-gauge-allow functionCognitiveComplexity 20 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 function rebuild(entries: [Key, Value | Ref][], renumber: boolean, target?: PhpArray): PhpArray {
   const array = target ?? new PhpArray();
   if (target) {
@@ -698,6 +702,8 @@ for (const name of ['array_walk', 'array_walk_recursive']) {
   });
 }
 
+// code-gauge-allow functionNcss 36 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+// code-gauge-allow functionCognitiveComplexity 30 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 function walkValues(ref: Ref, ctx: NativeContext, recursive: boolean, active: Set<PhpArray | PhpObject>): void {
   let container = ref.v as PhpArray | PhpObject;
   if (active.has(container)) throwError('Error', 'Recursion detected');
@@ -783,6 +789,7 @@ defineFunction(
 defineFunction('array_reverse(array $array, bool $preserve_keys = false): array', ({ args }) =>
   rebuild([...arr(args[0]).map].toReversed(), args[1] !== true)
 );
+// code-gauge-allow functionCognitiveComplexity 16 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 defineFunction('array_unique(array $array, int $flags = SORT_STRING): array', ({ args }) => {
   const flags = (args[1] as bigint | undefined) ?? 2n;
   const result = new PhpArray();
@@ -806,21 +813,12 @@ defineFunction('array_unique(array $array, int $flags = SORT_STRING): array', ({
       if (retained.has(position)) result.setSlot(key, copyValueSlot(arr(args[0]).map.get(key) as Value | Ref));
     return result;
   }
-  const kept: Value[] = [];
   const strings = new Set<string>();
   for (const [key, value] of arr(args[0]).entries()) {
     rt().spend();
-    const text = flags === 2n ? toStr(value) : undefined;
-    const duplicate =
-      text !== undefined
-        ? strings.has(text)
-        : kept.some((other) => {
-            rt().spend();
-            return sortComparator(flags)(other, value) === 0;
-          });
-    if (text !== undefined) strings.add(text);
-    if (duplicate) continue;
-    kept.push(value);
+    const text = toStr(value);
+    if (strings.has(text)) continue;
+    strings.add(text);
     result.setSlot(key, copyValueSlot(arr(args[0]).map.get(key) as Value | Ref));
   }
   return result;
@@ -911,6 +909,7 @@ defineFunction('array_count_values(array $array): array', ({ args }) => {
 
 type SetCompare = (a: [Key, Value], b: [Key, Value]) => boolean;
 
+// code-gauge-allow functionCognitiveComplexity 16 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 function setOperation(name: string, args: Value[], keep: boolean, same: SetCompare): PhpArray {
   checkSetArguments(name, args);
   const [first, ...others] = args as PhpArray[];
@@ -1223,7 +1222,7 @@ defineFunction('array_multisort(&~$array, &~...$rest): bool', (ctx) => {
     column.ref.v = rebuild(
       order.map((position) => rows[index][position]),
       true,
-      column.ref.v as PhpArray
+      writableArrayRef(column.ref)
     );
   }
   return true;

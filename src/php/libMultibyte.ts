@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 707 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 733 -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 // oxlint-disable unicorn/text-encoding-identifier-case -- mbstring names its encodings in this case.
 // oxlint-disable typescript/no-misused-spread -- PHP splits strings into bytes or code points, never into grapheme clusters.
@@ -324,7 +324,7 @@ defineFunction('mb_ord(string $string, ?string $encoding = null): int|false', ({
 
 // Searching and cutting, which decode strings as mbstring's UTF-8 decoder does -----------------------------------------
 
-defineFunction(
+defineUtf8Function(
   'mb_strripos(string $haystack, string $needle, int $offset = 0, ?string $encoding = null): int|false',
   ({ args }) => mbSearch(args, true, true, 'mb_strripos')
 );
@@ -690,6 +690,7 @@ defineFunction('mb_check_encoding(array|string|null $value = null, ?string $enco
 });
 
 function checkValue(value: Value, codec: Codec, visiting: Set<PhpArray>): boolean {
+  rt().spend();
   if (typeof value === 'string') return !codec.decode(value).includes(BAD);
   if (!(value instanceof PhpArray)) return value === null || typeof value !== 'object';
   if (visiting.has(value)) {
@@ -714,7 +715,7 @@ defineFunction(
     const to = codecFor(s(args[1]), 'mb_convert_encoding');
     const from =
       args[2] === undefined || args[2] === null
-        ? [UTF8]
+        ? [codecFor(rt().mbEncoding, 'mb_convert_encoding')]
         : encodingList(args[2], 'mb_convert_encoding', 3, 'from_encoding', false);
     const convert = (text: string): string => {
       const source = from.length === 1 ? from[0] : (guessEncoding(text, from, false) as Codec);
@@ -1096,6 +1097,7 @@ function halfToFull(code: number, next: number, mode: number): [number, boolean]
   return [0x30_00 + table[index], false];
 }
 
+// code-gauge-allow functionCognitiveComplexity 22 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 function defineUtf8Function(signature: string, impl: NativeFunction['impl']): void {
   const name = signature.slice(0, signature.indexOf('('));
   const parameters = signature.slice(signature.indexOf('(') + 1, signature.indexOf(')')).split(',');

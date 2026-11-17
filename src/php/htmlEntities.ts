@@ -284,20 +284,20 @@ const BASIC_ENTITIES = new Map([
 const BASIC_CODES = new Map([...BASIC_ENTITIES].map(([code, name]) => [name, code]));
 
 /**
- * Escapes UTF-8 text as `htmlspecialchars` (`all` false) or `htmlentities` (`all` true) does.
+ * Escapes text in the selected encoding as `htmlspecialchars` (`all` false) or `htmlentities` (`all` true) does.
  */
-// code-gauge-allow functionCognitiveComplexity 23 -- Transcribes PHP's algorithm for this function step by step, whose branches mirror PHP's.
-export function escapeHtml(text: string, flags: bigint, all: boolean, doubleEncode: boolean): string {
+// code-gauge-allow functionNcss 35 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+export function escapeHtml(text: string, flags: bigint, all: boolean, doubleEncode: boolean, latin1 = false): string {
   const doctype = doctypeOf(flags);
   let result = '';
   for (let index = 0; index < text.length;) {
-    const [length, code] = nextChar(text, index);
+    const [length, code] = latin1 ? [1, text.charCodeAt(index)] : nextChar(text, index);
     const char = text.slice(index, index + length);
     index += length;
     if (code === undefined) {
       if (flags & IGNORE) continue;
       if (!(flags & SUBSTITUTE)) return '';
-      result += REPLACEMENT;
+      result += latin1 ? '?' : REPLACEMENT;
     } else if (code === 0x26) {
       const entityLength = doubleEncode ? 0 : validEntityLength(text, index, flags);
       result += entityLength > 0 ? text.slice(index - 1, index + entityLength) : '&amp;';
@@ -314,15 +314,16 @@ export function escapeHtml(text: string, flags: bigint, all: boolean, doubleEnco
       }
       const name = entityFor(code, flags, all);
       if (name) result += `&${name};`;
-      else if (flags & DISALLOWED && !isAllowed(code, doctype)) result += REPLACEMENT;
+      else if (flags & DISALLOWED && !isAllowed(code, doctype)) result += latin1 ? '?' : REPLACEMENT;
       else result += char;
     }
   }
   return result;
 }
 
-/** Decodes the entities of UTF-8 text as `html_entity_decode` (`all` true) or `htmlspecialchars_decode` does. */
-export function decodeHtml(text: string, flags: bigint, all: boolean): string {
+/** Decodes the entities in the selected encoding as `html_entity_decode` (`all` true) or `htmlspecialchars_decode` does. */
+// code-gauge-allow functionCognitiveComplexity 18 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+export function decodeHtml(text: string, flags: bigint, all: boolean, latin1 = false): string {
   const doctype = doctypeOf(flags);
   let result = '';
   for (let index = 0; index < text.length; index++) {
@@ -340,7 +341,14 @@ export function decodeHtml(text: string, flags: bigint, all: boolean): string {
       result += '&';
       continue;
     }
-    result += ('text' in entity ? entity.text : undefined) ?? codePointBytes(entity.code);
+    const decoded =
+      ('text' in entity && typeof entity.text === 'string' ? entity.text : undefined) ?? codePointBytes(entity.code);
+    const characters = latin1 ? dec(decoded) : decoded;
+    if (latin1 && [...characters].some((char) => (char.codePointAt(0) as number) > 255)) {
+      result += '&';
+      continue;
+    }
+    result += characters;
     index = entity.end;
   }
   return result;
@@ -353,6 +361,7 @@ export function decodeHtml(text: string, flags: bigint, all: boolean): string {
 const HTML5_CANONICAL = new Map(Object.entries(html5Entities.canonical).map(([text, entity]) => [enc(text), entity]));
 const HTML5_NAMES = new Map(Object.entries(html5Entities.names).map(([name, text]) => [name, enc(text)]));
 
+// code-gauge-allow functionCognitiveComplexity 17 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 export function translationTable(all: boolean, flags: bigint, latin1: boolean): [string, string][] {
   if (all && doctypeOf(flags) === Doctype.Html5) {
     return [...HTML5_CANONICAL]

@@ -7,7 +7,7 @@ import { dropped, type Key, PhpArray, PhpObject, type PropDecl, Ref, type Value 
 export interface Place {
   /** The value, or undefined when the location does not exist. */
   get(): Value | undefined;
-  set(value: Value): Value | void;
+  set(value: Value): Value;
   /** The location as a reference, which `=&`, by-reference arguments, and `global` share. */
   ref(): Ref;
   unset(): void;
@@ -154,7 +154,7 @@ export class ValuePlace implements Place {
     return this.value;
   }
 
-  set(): void {
+  set(): never {
     throwError('Error', 'Cannot use temporary expression in write context');
   }
 
