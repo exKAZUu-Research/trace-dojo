@@ -347,12 +347,15 @@ export class TypeOperators {
       if (this.c.relations.isAssignable(index, constraint))
         return this.c.instantiate(template, new Map([[typeParameter.id, index]]));
     }
-    const stringIndexOnly = this.c.relations.isGeneric(index) ? this.stringIndexOnlyType(object) : undefined;
-    // tsc reads an object with only a string index signature by `string` for any string or number key, generic or not.
-    if (stringIndexOnly && this.c.relations.isAssignable(index, unionOf([stringType, numberType])))
-      return stringIndexOnly;
     if (this.c.relations.isGeneric(object) || this.c.relations.isGeneric(index)) {
-      return { kind: 'indexedAccess', id: newTypeId(), objectType: object, indexType: index };
+      return (
+        this.c.relations.stringIndexReadByGenericKey(object, index) ?? {
+          kind: 'indexedAccess',
+          id: newTypeId(),
+          objectType: object,
+          indexType: index,
+        }
+      );
     }
     if (index.kind === 'union') return unionOf(index.types.map((member) => this.indexedAccess(object, member, node)));
     if (isAnyLike(object)) return anyType;
@@ -368,17 +371,6 @@ export class TypeOperators {
     if (node)
       this.c.error(node, `型 '${this.c.print(index)}' は型 '${this.c.print(object)}' のインデックスに使えません。`);
     return errorType;
-  }
-
-  /** The type of the string index signature of an object, or of each union member, that has no other members. */
-  private stringIndexOnlyType(object: Type): Type | undefined {
-    if (object.kind === 'union') {
-      const types = object.types.map((member) => this.stringIndexOnlyType(member));
-      return types.every((type) => type !== undefined) ? unionOf(types) : undefined;
-    }
-    if (object.kind !== 'object' || object.objectKind === 'mapped') return undefined;
-    const { properties, stringIndex, numberIndex, symbolIndex } = this.c.structureOf(object);
-    return properties.size === 0 && !numberIndex && !symbolIndex ? stringIndex?.type : undefined;
   }
 
   private propertyAccess(object: Type, key: string | number | symbol, node: TreeNode | undefined): Type {
