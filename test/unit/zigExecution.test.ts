@@ -4861,3 +4861,33 @@ test('zero-bit mutable value captures retain the namespace barrier', () => {
   const source = `const std=@import("std");pub fn main()void{var x:u0=0;_=&x;const S=struct{fn get()u0{return x;}};std.debug.print("{}",.{S.get()});}`;
   expect(executeProgram('zig', source)).toMatchObject({ kind: 'compileError' });
 });
+
+test('shared format syntax binds each argument layout and backing view independently', () => {
+  const source = `const std=@import("std");const named="{[x]} {[y]}";const base="{d}{x}";const dec=base[0..3];const hex=base[3..6];pub fn main()void{std.debug.print(named,.{.x=3,.y=5});std.debug.print("|",.{});std.debug.print(named,.{.y=7,.x=11});std.debug.print("|",.{});std.debug.print(dec,.{10});std.debug.print(" ",.{});std.debug.print(hex,.{10});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: '3 5|11 7|10 a',
+    uncaughtException: undefined,
+  });
+});
+
+test.each(['x'.repeat(100_000), '{{}}'.repeat(25_000)])(
+  'shared large formats retain the output budget (%#)',
+  (format) => {
+    const calls = 'std.debug.print(fmt,.{});'.repeat(100);
+    expect(
+      executeProgram('zig', `const std=@import("std");const fmt="${format}";pub fn main()void{${calls}}`)
+    ).toMatchObject({ kind: 'limitExceeded', limit: 'output' });
+  }
+);
+
+test('distinct large format views reserve compilation storage before copying', () => {
+  const views = Array.from({ length: 11 }, (_, i) => `const f${i}=base[${i}..${i + 100_000}];`).join('');
+  const calls = Array.from({ length: 11 }, (_, i) => `std.debug.print(f${i},.{});`).join('');
+  expect(
+    executeProgram(
+      'zig',
+      `const std=@import("std");const base="${'x'.repeat(100_010)}";${views}pub fn main()void{${calls}}`
+    )
+  ).toMatchObject({ kind: 'limitExceeded', limit: 'storage' });
+});

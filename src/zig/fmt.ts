@@ -59,9 +59,18 @@ export class FormatError extends Error {}
 const ANY = 'any';
 export const MAX_DEPTH = 3;
 
-/** Parses a format string as `Writer.print` does at compile time, checking it against the arguments. */
+type TemplateSegment =
+  | Extract<Segment, { kind: 'literal' }>
+  | ({ kind: 'placeholder' } & ReturnType<typeof parsePlaceholder>);
+
+export interface FormatTemplate {
+  readonly segments: readonly TemplateSegment[];
+  readonly length: number;
+  readonly text: string;
+}
+
 export function parseFormat(
-  format: readonly number[],
+  template: FormatTemplate,
   argNames: readonly string[],
   spend: (cost?: number) => void = () => {}
 ): Segment[] {
@@ -70,8 +79,6 @@ export function parseFormat(
   const nameIndexes = new Map(argNames.map((name, index) => [name, index]));
   const used = new Set<number>();
   let nextArg = 0;
-  let literal: number[] = [];
-  let index = 0;
   const argIndex = (
     spec: { kind: 'named'; name: string } | { kind: 'number'; value: number } | { kind: 'none' }
   ): number | undefined => {
@@ -88,6 +95,37 @@ export function parseFormat(
     used.add(chosen);
     return chosen;
   };
+  for (const placeholder of template.segments) {
+    spend();
+    if (placeholder.kind === 'literal') {
+      segments.push(placeholder);
+      continue;
+    }
+    const position = argIndex(placeholder.arg);
+    const width = specifier(placeholder.width, argIndex, next);
+    const precision = specifier(placeholder.precision, argIndex, next);
+    segments.push({
+      kind: 'placeholder',
+      arg: next(position),
+      spec: placeholder.spec,
+      fill: placeholder.fill,
+      alignment: placeholder.alignment,
+      width,
+      precision,
+    });
+  }
+  if (used.size !== argNames.length) {
+    const missing = argNames.length - used.size;
+    const text = template.text;
+    throw new FormatError(missing === 1 ? `unused argument in '${text}'` : `${missing} unused arguments in '${text}'`);
+  }
+  return segments;
+}
+
+export function parseFormatTemplate(format: readonly number[], spend: (cost?: number) => void): FormatTemplate {
+  const segments: TemplateSegment[] = [];
+  let literal: number[] = [];
+  let index = 0;
   for (;;) {
     const start = index;
     while (index < format.length && format[index] !== 0x7b && format[index] !== 0x7d) index++;
@@ -113,25 +151,9 @@ export function parseFormat(
     spend(index - begin + 1);
     const placeholder = parsePlaceholder(format.slice(begin, index));
     index++;
-    const position = argIndex(placeholder.arg);
-    const width = specifier(placeholder.width, argIndex, next);
-    const precision = specifier(placeholder.precision, argIndex, next);
-    segments.push({
-      kind: 'placeholder',
-      arg: next(position),
-      spec: placeholder.spec,
-      fill: placeholder.fill,
-      alignment: placeholder.alignment,
-      width,
-      precision,
-    });
+    segments.push({ kind: 'placeholder', ...placeholder });
   }
-  if (used.size !== argNames.length) {
-    const missing = argNames.length - used.size;
-    const text = decodeUtf8(format);
-    throw new FormatError(missing === 1 ? `unused argument in '${text}'` : `${missing} unused arguments in '${text}'`);
-  }
-  return segments;
+  return { segments, length: format.length, text: decodeUtf8(format) };
 }
 
 type ParsedSpecifier = { kind: 'none' } | { kind: 'number'; value: number } | { kind: 'named'; name: string };

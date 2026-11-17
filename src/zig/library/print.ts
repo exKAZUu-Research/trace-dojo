@@ -1,9 +1,20 @@
 import type { Expression, Span } from '../ast';
 import { byteValues } from '../builtins';
-import { checkFormat, FormatError, type Options, parseFormat, printValue, type Segment, type TypeInfo } from '../fmt';
+import {
+  checkFormat,
+  FormatError,
+  type FormatTemplate,
+  type Options,
+  parseFormat,
+  parseFormatTemplate,
+  printValue,
+  type Segment,
+  type TypeInfo,
+} from '../fmt';
 import { type Frame, withHeldValues, ZigPanic } from '../runtime';
 import { copyForFrame, known, runtime, type SemaApi } from '../semaBase';
 import {
+  arrayOf,
   CONST_U8_SLICE,
   errorSetOf,
   errorUnionOf,
@@ -12,11 +23,22 @@ import {
   type StructField,
   type Type,
   typeName,
+  U8,
   U64,
   USIZE,
   VOID,
 } from '../types';
-import { compileTimeReadable, ErrorValue, NULL, Pointer, Some, type Value, type ZStruct } from '../values';
+import {
+  compileTimeReadable,
+  ErrorValue,
+  NULL,
+  Pointer,
+  type Slice,
+  Some,
+  storageLocation,
+  type Value,
+  type ZStruct,
+} from '../values';
 import { bufferedBytes, bufferingWriter, WRITER, type WriterState, writerState, writerValue, writeTo } from './writer';
 
 export interface PreparedPrint {
@@ -30,16 +52,17 @@ export interface CompiledPrint {
   formatLength: number;
 }
 
+const templates = new WeakMap<SemaApi, WeakMap<object, Map<string, FormatTemplate>>>();
+
 // code-gauge-allow functionCognitiveComplexity 22 -- Checks the complete format against its argument types.
 // code-gauge-allow functionNcss 41 -- Keeps format checking and the resulting formatter together.
 export function compilePrint(sema: SemaApi, formatArg: Expression, argsArg: Expression, span: Span): CompiledPrint {
-  const format = sema.compile(formatArg, CONST_U8_SLICE);
+  const format = sema.coerce(sema.compile(formatArg, CONST_U8_SLICE), CONST_U8_SLICE, formatArg);
   if (!format.known || !compileTimeReadable(format.value))
     sema.error(
       formatArg,
       '書式の文字列は、コンパイルのときに決まっていなければなりません（文字列のリテラルを書いてください）。'
     );
-  const formatBytes = byteValues(format.value).map(Number);
   const args = sema.compile(argsArg);
   const type = args.type;
   if (type.kind !== 'struct') {
@@ -48,8 +71,10 @@ export function compilePrint(sema: SemaApi, formatArg: Expression, argsArg: Expr
   const fields = sema.structFields(type, argsArg);
   const names = fields.map((field) => field.name);
   let segments: Segment[];
+  let template: FormatTemplate;
   try {
-    segments = parseFormat(formatBytes, names, (cost) => sema.spendCompilation(cost));
+    template = templateOf(sema, format.value as Slice, formatArg);
+    segments = parseFormat(template, names, (cost) => sema.spendCompilation(cost));
   } catch (error) {
     if (error instanceof FormatError) return sema.error(span, `書式の文字列に誤りがあります: ${error.message}`);
     throw error;
@@ -86,8 +111,31 @@ export function compilePrint(sema: SemaApi, formatArg: Expression, argsArg: Expr
   };
   return Object.assign((frame: Frame, destination?: WriterState) => prepare(frame).write(destination), {
     prepare,
-    formatLength: formatBytes.length,
+    formatLength: template.length,
   });
+}
+
+function templateOf(sema: SemaApi, value: Slice, span: Span): FormatTemplate {
+  let storage = templates.get(sema);
+  if (!storage) {
+    storage = new WeakMap();
+    templates.set(sema, storage);
+  }
+  const location = storageLocation(value.target.slots, value.start);
+  let views = storage.get(location.storage);
+  if (!views) {
+    views = new Map();
+    storage.set(location.storage, views);
+  }
+  const key = `${location.index}:${value.lengthValue}`;
+  let template = views.get(key);
+  if (!template) {
+    sema.reserveStorage(arrayOf(value.lengthValue, U8), span);
+    sema.spendCompilation(Math.ceil(value.length / 64));
+    template = parseFormatTemplate(byteValues(value).map(Number), (cost) => sema.spendCompilation(cost));
+    views.set(key, template);
+  }
+  return template;
 }
 
 export function printInto(frame: Frame, destination: WriterState, print: CompiledPrint): Value {
