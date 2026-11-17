@@ -1,6 +1,7 @@
 // code-gauge-allow-file fileNcss 598 -- Reflection and encoded constant lookup share representation and state; splitting registration by size would scatter that concern.
 import type { Params } from './ast';
 import { prependHierarchy } from './classHierarchy';
+import { getClassVariable, hasClassVariable, setClassVariable } from './classVariables';
 import { addressOf, className, inspect, inspectValue, toSValue, tryImplicitConversion } from './conversions';
 import { def, findCoreMethod, isCoreMethod, sdef, sundef } from './define';
 import { EncodedStringBuilder } from './encodedStringJoin';
@@ -24,7 +25,6 @@ import {
   PRIVATE_METHOD_NAMES,
   raiseMethodMissing,
   requireBlock,
-  setClassVariable,
 } from './interp';
 import { procArity } from './libObject';
 import { inspectStringEncoding, symbolFromString, symbolString } from './libString';
@@ -958,11 +958,7 @@ def('Module', 'constants', [0, 1], () => {
 });
 def('Module', 'class_variable_get', 1, function* (self: RClass, [name]) {
   const variable = yield* classVariableName(name);
-  for (const module of self.ancestors()) {
-    const value = module.classVariables.get(variable);
-    if (value !== undefined) return value;
-  }
-  throw nameError(`uninitialized class variable ${variable} in ${className(self)}`, self, variable);
+  return getClassVariable(self, variable);
 });
 def('Module', 'class_variable_set', 2, function* (self: RClass, [name, value]) {
   setClassVariable(self, yield* classVariableName(name), value);
@@ -970,7 +966,7 @@ def('Module', 'class_variable_set', 2, function* (self: RClass, [name, value]) {
 });
 def('Module', 'class_variable_defined?', 1, function* (self: RClass, [name]) {
   const variable = yield* classVariableName(name);
-  return self.ancestors().some((module) => module.classVariables.has(variable));
+  return hasClassVariable(self, variable);
 });
 def('Module', 'class_variables', [0, 1], () => {
   throw new UnsupportedFeatureError('Module#class_variables（クラス変数の並び順）');

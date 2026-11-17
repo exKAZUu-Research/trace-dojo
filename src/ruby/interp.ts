@@ -12,6 +12,7 @@ import type {
   StrPart,
   Target,
 } from './ast';
+import { getClassVariable, hasClassVariable, setClassVariable } from './classVariables';
 import {
   caseEquals,
   className,
@@ -788,40 +789,20 @@ function globalSet(name: string, value: Value): void {
   rt().globals.set(name, value);
 }
 
-/** The class whose class variables a frame sees: the innermost module of its lexical scope. */
 function classVariableHolder(frame: Frame): RClass {
-  const holder = frame.cref[0];
-  if (holder.isSingleton && holder.attached instanceof RClass) return holder.attached;
-  return holder;
+  return frame.cref.find((module) => !module.isSingleton) ?? rt().c.Object;
 }
 
 function classVariableGet(frame: Frame, name: string): Value {
   const holder = classVariableHolder(frame);
   if (holder === rt().c.Object) throw rubyError(rt().c.RuntimeError, 'class variable access from toplevel');
-  for (const module of holder.ancestors()) {
-    const value = module.classVariables.get(name);
-    if (value !== undefined) return value;
-  }
-  throw nameError(`uninitialized class variable ${name} in ${holder.name}`, holder, name);
+  return getClassVariable(holder, name);
 }
 
 function classVariableSet(frame: Frame, name: string, value: Value): void {
   const holder = classVariableHolder(frame);
   if (holder === rt().c.Object) throw rubyError(rt().c.RuntimeError, 'class variable access from toplevel');
   setClassVariable(holder, name, value);
-}
-
-export function setClassVariable(holder: RClass, name: string, value: Value): void {
-  for (const module of holder.ancestors()) {
-    if (module.classVariables.has(name)) {
-      assertMutableClass(module);
-      module.classVariables.set(name, value);
-      return;
-    }
-  }
-  assertMutableClass(holder);
-  if (holder.isModule) singletonClassOf(holder);
-  holder.classVariables.set(name, value);
 }
 
 function* constGet(e: Extract<Expr, { k: 'const' }>, frame: Frame): Gen {
@@ -1276,10 +1257,8 @@ function* definedText(e: Expr, frame: Frame): Gen {
       );
     }
     case 'cvar': {
-      const holder = frame.cref[0];
-      return text(
-        holder.ancestors().some((module) => module.classVariables.has(e.name)) ? 'class variable' : undefined
-      );
+      const holder = classVariableHolder(frame);
+      return text(hasClassVariable(holder, e.name) ? 'class variable' : undefined);
     }
     case 'const': {
       try {
