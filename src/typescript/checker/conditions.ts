@@ -1,8 +1,8 @@
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import type { Checker } from './checker';
-import { isConstantReference } from './constantReferences';
 import type { State } from './flow';
+import { InlinedConditions } from './inlinedConditions';
 import type { Sym } from './scopes';
 import {
   arrayPatternElements,
@@ -29,7 +29,7 @@ import {
 } from './types';
 
 /** The flow states where a condition is true and where it is false, with the condition's type. */
-interface Condition {
+export interface Condition {
   whenTrue: State;
   whenFalse: State;
   type: Type;
@@ -38,22 +38,13 @@ interface Condition {
 /** The kinds of expressions that are objects, which are always truthy. */
 const alwaysTruthyTypes = new Set(['array', 'arrow_function', 'class', 'function_expression', 'object', 'regex']);
 
-/** The kinds of expressions that declare or assign when checked. */
-const sideEffectTypes = new Set([
-  'arrow_function',
-  'assignment_expression',
-  'augmented_assignment_expression',
-  'class',
-  'function_expression',
-  'update_expression',
-]);
-
 /** Checks conditions, computing the flow states where they are true and false. */
 export class ConditionChecker {
-  /** How many aliased conditions are being inlined into each other. */
-  private aliasDepth = 0;
+  private readonly inlined: InlinedConditions;
 
-  constructor(private readonly c: Checker) {}
+  constructor(private readonly c: Checker) {
+    this.inlined = new InlinedConditions(c);
+  }
 
   /** Checks a condition, returning the flow states where it is true and where it is false. */
   checkCondition(node: TreeNode): { whenTrue: State; whenFalse: State } {
@@ -84,7 +75,7 @@ export class ConditionChecker {
         return this.c.members.chainCondition(expression, () => this.callCondition(expression));
       }
       case 'identifier': {
-        const aliased = this.aliasedCondition(expression);
+        const aliased = this.inlined.aliasedCondition(expression);
         if (aliased) return aliased;
         break;
       }
@@ -162,62 +153,6 @@ export class ConditionChecker {
         rightResult.type,
       ]),
     };
-  }
-
-  /**
-   * The condition a constant stands for, as `const isText = typeof x === "string"` narrows `x` where `isText` is
-   * tested. As in TypeScript, it narrows only references that cannot change after it, through up to five constants.
-   */
-  private aliasedCondition(identifier: TreeNode): Condition | undefined {
-    const symbol = this.c.scopeOf(identifier).lookupValue(identifier.text);
-    const declarator = symbol?.valueDeclaration;
-    if (symbol?.valueKind !== 'const' || declarator?.type !== 'variable_declarator') return undefined;
-    const value = declarator.childForFieldName('value');
-    if (declarator.childForFieldName('name')?.type !== 'identifier' || declarator.childForFieldName('type')) {
-      return undefined;
-    }
-    const outerScope = this.c.flow.narrowingScope;
-    if (!value || this.aliasDepth >= 5 || hasSideEffects(value)) return undefined;
-    const type = this.c.expressions.check(identifier);
-    const base = this.c.flow.current;
-    const keys = new Set<string>();
-    this.c.flow.narrowingScope = { accepts: (node) => isConstantReference(this.c, node), keys };
-    this.aliasDepth++;
-    let aliased: Condition;
-    try {
-      aliased = this.c.silently(() => this.condition(value, false));
-    } finally {
-      this.aliasDepth--;
-      this.c.flow.narrowingScope = outerScope;
-      this.c.flow.current = base;
-    }
-    for (const key of keys) outerScope?.keys.add(key);
-    return {
-      whenTrue: this.aliasNarrowed(base, aliased.whenTrue, keys, identifier, true),
-      whenFalse: this.aliasNarrowed(base, aliased.whenFalse, keys, identifier, false),
-      type,
-    };
-  }
-
-  /**
-   * `base` with the narrowing of `keys` in `aliased` and of the constant `identifier` by its truthiness, apart from
-   * what else checking the aliased condition again changed.
-   */
-  private aliasNarrowed(
-    base: State,
-    aliased: State,
-    keys: Set<string>,
-    identifier: TreeNode,
-    assumeTrue: boolean
-  ): State {
-    const result = aliased && base?.clone();
-    for (const key of keys) {
-      const entry = aliased?.entries.get(key);
-      if (entry) result?.entries.set(key, entry);
-    }
-    return this.c.flow.from(result, () =>
-      this.c.flow.narrowReference(identifier, (current) => this.c.flow.narrowByTruthiness(current, assumeTrue))
-    );
   }
 
   /** Whether every variable an expression refers to is a constant, or a parameter or variable never reassigned. */
@@ -554,8 +489,10 @@ export class ConditionChecker {
     const leftType = this.c.expressions.checkReferenceSilently(left);
     const rightType = this.c.expressions.checkReferenceSilently(right);
     const base = this.c.flow.current;
-    let whenTrue = base?.clone();
-    let whenFalse = base?.clone();
+    let { whenTrue, whenFalse } = this.inlined.booleanComparison(leftExpression, rightExpression, equal) ?? {
+      whenTrue: base?.clone(),
+      whenFalse: base?.clone(),
+    };
     // Each side that is a reference narrows by the other's type.
     for (const [side, otherType] of [
       [leftExpression, rightType],
@@ -643,11 +580,6 @@ function withoutAssertions(node: TreeNode): TreeNode {
     else if (expression.type === 'type_assertion') expression = named(expression).at(-1) as TreeNode;
     else return expression;
   }
-}
-
-/** Whether checking an expression again would declare or assign something, which an aliased condition must not. */
-function hasSideEffects(expression: TreeNode): boolean {
-  return sideEffectTypes.has(expression.type) || named(expression).some((child) => hasSideEffects(child));
 }
 
 /** The object or array pattern that a constant or a parameter destructures its value with directly. */

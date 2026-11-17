@@ -1,0 +1,21 @@
+function viaFalse(x: number | string): string {
+  const isText = typeof x === "string";
+  if (isText === false) return x.toUpperCase();
+  return x.toFixed(1);
+}
+
+function mutableAlias(x: number | string): string {
+  let isText = typeof x === "string";
+  if (isText === true) return x.toUpperCase();
+  return "n";
+}
+
+function comparedItself(x: boolean | string): string {
+  if (x !== true) {
+    const rest: false = x;
+    return `rest ${rest}`;
+  }
+  return "true";
+}
+
+console.log(viaFalse("a"), mutableAlias("b"), comparedItself("c"));
