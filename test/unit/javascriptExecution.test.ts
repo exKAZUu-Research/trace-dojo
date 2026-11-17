@@ -1502,6 +1502,15 @@ function* afterYield(){f(yield 1,...g());}
 const iterator=afterYield();iterator.next();try{iterator.next(1);}catch(e){console.log(e.message);}`,
   ],
   [
+    'definitions restating or changing a read-only array length',
+    `for (const descriptor of [{writable:false},{value:1},{value:'1'},{value:2},{value:0},{writable:true},{enumerable:true},{},{value:-1}]) {
+  const a = [1]; Object.defineProperty(a, 'length', { writable: false });
+  try { Object.defineProperty(a, 'length', descriptor); console.log('ok', a.length); } catch (e) { console.log(e.name, e.message); }
+}
+const b = [1, 2]; Object.defineProperty(b, 1, { value: 2, configurable: false });
+try { Object.defineProperty(b, 'length', { value: 0 }); } catch (e) { console.log(e.message, b.length); }`,
+  ],
+  [
     'iteration and destructuring errors naming optional chains, constructors, and hidden variables',
     `const g=()=>5; const h=()=>null; const o={g,h,x:5,n:null}; class C {} let a, b;
 function p({a}) {} function q({a}={}) {} const v={a:5}, n={a:null};

@@ -360,9 +360,7 @@ export class Runtime {
 
   /** The spec's ArraySetLength, which stops shrinking at the last non-configurable element. */
   setLength(array: JsArray, value: Value, strict = true, writable = true): void {
-    const length = this.toNumber(value);
-    if (!Number.isInteger(length) || length < 0 || length >= 2 ** 32)
-      this.throwError('RangeError', 'Invalid array length');
+    const length = this.toArrayLength(value);
     const { elements } = array;
     // V8 refuses even a write of the same length.
     if (!array.isLengthWritable) {
@@ -385,6 +383,14 @@ export class Runtime {
     }
     elements.length = length;
     array.isLengthWritable &&= writable;
+  }
+
+  /** The length a value gives an array, which must be an integer an array can hold. */
+  toArrayLength(value: Value): number {
+    const length = this.toNumber(value);
+    if (!Number.isInteger(length) || length < 0 || length >= 2 ** 32)
+      this.throwError('RangeError', 'Invalid array length');
+    return length;
   }
 
   private grow(array: JsArray, length: number): void {
@@ -417,6 +423,16 @@ export class Runtime {
     }
     if (object instanceof JsArray && key === 'length') {
       if (isAccessor(property)) this.throwError('TypeError', `Cannot redefine property: length`);
+      // A read-only length, which is non-configurable, can only be restated by a definition, never assigned.
+      if (!object.isLengthWritable) {
+        const restates =
+          !property.writable &&
+          !property.enumerable &&
+          !property.configurable &&
+          this.toArrayLength(property.value) === object.elements.length;
+        if (!restates) this.throwError('TypeError', `Cannot redefine property: length`);
+        return;
+      }
       this.setLength(object, property.value, true, property.writable);
       return;
     }

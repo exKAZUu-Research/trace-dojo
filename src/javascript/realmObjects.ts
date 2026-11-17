@@ -322,6 +322,9 @@ function toPropertyDescriptor(runtime: Runtime, value: Value): Descriptor {
 /** The spec's ValidateAndApplyPropertyDescriptor on an ordinary object, which throws where it would return false. */
 // code-gauge-allow functionCognitiveComplexity 23 -- Transcribes the specification's algorithm step by step, whose branches mirror its steps.
 function definePropertyOrThrow(runtime: Runtime, object: JsObject, key: Key, descriptor: Descriptor): void {
+  // The spec's ArraySetLength converts a new length before it compares the descriptor with the current one.
+  if (object instanceof JsArray && key === 'length' && 'value' in descriptor)
+    descriptor = { ...descriptor, value: runtime.toArrayLength(descriptor.value) };
   const current = runtime.getOwnProperty(object, key);
   const isAccessorDescriptor = 'get' in descriptor || 'set' in descriptor;
   if (!current) {
