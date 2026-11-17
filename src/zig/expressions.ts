@@ -810,7 +810,7 @@ export abstract class ExpressionCompiler extends SemaBase {
         ? sliceOf(child, isConst, sentinel)
         : pointerTo(arrayOf(resultLength, child, sentinel), isConst);
     if (type.size === 'slice') this.checkMemoryHeader(operand, expression);
-    if (sentinel !== undefined && sizeOf(child) !== 0) this.checkMemoryOperand(operand, expression);
+    if (resultLength !== 0n || sentinel !== undefined) this.checkMemoryOperand(operand, expression);
     const arrayType =
       type.kind === 'pointer' && type.size === 'one' && type.child.kind === 'array' ? type.child : undefined;
     const operands = [base, start, ...(end ? [end] : [])];
@@ -1475,9 +1475,6 @@ export abstract class ExpressionCompiler extends SemaBase {
         },
         expression
       ),
-      valueFacts: viaPointer
-        ? undefined
-        : concatenatedFacts(left, right, Number(a.length), Number(b.length), () => this.spendCompilation()),
       staticResult: readable
         ? this.constantResult([left, right], ([x, y]) => build(a.read(x), b.read(y)), expression)
         : undefined,
@@ -1581,17 +1578,11 @@ export abstract class ExpressionCompiler extends SemaBase {
         ? this.coerce(this.compile(value, field.type), field.type, value)
         : known(field.type, field.defaultValue, expression)
     );
-    return this.aggregate(
-      type,
-      elements,
-      expression,
-      (values) => {
-        const slots: Value[] = [];
-        for (const [index, { position }] of plan.entries()) slots[position] = values[index];
-        return new ZStruct(slots);
-      },
-      plan.map(({ position }) => position)
-    );
+    return this.aggregate(type, elements, expression, (values) => {
+      const slots: Value[] = [];
+      for (const [index, { position }] of plan.entries()) slots[position] = values[index];
+      return new ZStruct(slots);
+    });
   }
 
   private unionInit(expression: ExpressionOf<'structInit'>, type: Extract<Type, { kind: 'union' }>): TExpr {
@@ -1601,7 +1592,7 @@ export abstract class ExpressionCompiler extends SemaBase {
     const index = fields.findIndex((field) => field.name === init.name);
     if (index === -1) return this.error(init, `${typeName(type)} 型には、フィールド「${init.name}」がありません。`);
     const value = this.coerce(this.compile(init.value, fields[index].type), fields[index].type, init.value);
-    return this.aggregate(type, [value], expression, ([payload]) => new ZUnion(index, payload), [index]);
+    return this.aggregate(type, [value], expression, ([payload]) => new ZUnion(index, payload));
   }
 
   /** `.{ .x = 1 }` without a result type, whose type is an anonymous struct of the fields' types. */
@@ -1614,7 +1605,7 @@ export abstract class ExpressionCompiler extends SemaBase {
       comptimeValue: isComptimeOnly(values[index].type) ? staticResultOf(values[index]) : undefined,
     }));
     const type = this.anonymousStructType(fields);
-    return this.aggregate(type, values, expression, (slots) => new ZStruct(slots));
+    return this.aggregate(type, values, expression, (slots) => new ZStruct(slots), true);
   }
 
   private anonymousStructType(fields: StructField[]): StructType {
@@ -1715,7 +1706,7 @@ export abstract class ExpressionCompiler extends SemaBase {
       comptimeValue: value.type.kind === 'void' ? { value: undefined } : staticResultOf(value),
     }));
     const tuple = this.tupleType(fields);
-    return this.aggregate(tuple, values, expression, (slots) => new ZStruct(slots));
+    return this.aggregate(tuple, values, expression, (slots) => new ZStruct(slots), true);
   }
 
   private arrayTypeExpression(expression: ExpressionOf<'arrayType'>): TExpr {

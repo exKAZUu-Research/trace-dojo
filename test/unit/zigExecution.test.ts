@@ -5063,13 +5063,9 @@ test('zero-bit union payload changes remain bounded without consuming aggregate 
 test.each([
   ['const q:?*u8=item;', '_=q.?;'],
   ['const q=.{.p=item,.n=make()};', 'q.p.*=7;'],
-  ['const q:S=.{.p=item,.n=make()};', 'q.p.*=7;'],
-  ['const s:S=.{.n=make(),.p=item};const q:?S=s;', 'q.?.p.*=7;'],
-  ['const q=[_]*u8{item,other()};', 'q[0].*=7;'],
   ['const s=.{.p=item,.n=make()};const q=.{.inner=s};', 'q.inner.p.*=7;'],
   ['const s=.{item,make()};const q=s ++ .{@as(u8,1)};', 'q[0].*=7;'],
   ['const q:error{}!*u8=item;const x=try q;', 'x.*=7;'],
-  ['const s:S=.{.p=item,.n=make()};const q:error{}!S=s;const x=try q;', 'x.p.*=7;'],
 ])('constructor fields and payloads retain known undefined pointer facts (%#)', (declaration, access) => {
   const source = `const std=@import("std");const S=struct{n:u8,p:*u8};fn make()u8{std.debug.print("m",.{});return 1;}fn other()*u8{return undefined;}pub fn main()!void{const p:*[2]u8=undefined;var access=false;_=&access;for(p)|*item|{${declaration}if(access){${access}}}}`;
   expect(executeProgram('zig', source)).toMatchObject({ kind: 'compileError' });
@@ -5207,4 +5203,38 @@ test('nonzero array copies and concatenations retain storage and allocator limit
     kind: 'limitExceeded',
     limit: 'storage',
   });
+});
+
+test.each([
+  'const q:S=.{.p=item,.n=make()};if(access){n+=q.p.*;}',
+  'const q=[_]*u8{item,other()};if(access){n+=q[0].*;}',
+  'const a=.{item,other()};const q:[2]*u8=a;if(access){n+=q[0].*;}',
+  'const q:U=.{.s=.{.p=item,.n=make()}};if(access){n+=q.s.p.*;}',
+  'const q:?S=.{.p=item,.n=make()};if(access){n+=q.?.p.*;}',
+  'const q:?S=.{.p=item,.n=make()};if(q)|s|{if(access){n+=s.p.*;}}',
+  'const q:?S=.{.p=item,.n=make()};const s=q orelse unreachable;if(access){n+=s.p.*;}',
+  'const q:error{}!S=.{.p=item,.n=make()};const s=q catch unreachable;if(access){n+=s.p.*;}',
+])('runtime aggregate boundaries retain runtime pointer diagnostics (%#)', (body) => {
+  const source = `const std=@import("std");const S=struct{p:*u8,n:u8};const U=union(enum){s:S,n:u8};fn make()u8{return 1;}fn other()*u8{return undefined;}pub fn main()void{const p:*[2]u8=undefined;var access=false;_=&access;var n:u8=0;for(p)|*item|{${body}n+=1;}std.debug.print("{}",.{n});}`;
+  expect(executeProgram('zig', source)).toMatchObject({ kind: 'executed', stderr: '2', uncaughtException: undefined });
+  expect(executeProgram('zig', source.replace('var access=false', 'var access=true'))).toMatchObject({
+    kind: 'executed',
+    uncaughtException: 'Segmentation fault',
+  });
+});
+
+test.each([
+  ['u8', 's[1..2]'],
+  ['void', 's[0..2]'],
+  ['u0', 's[1..]'],
+  ['u0', 's[0..2:0]'],
+  ['u0', 's[0..0:0]'],
+])('nonempty or sentinel %s reslices require a defined data pointer: %s', (type, view) => {
+  const source = `pub fn main()void{const p:*[2]${type}=undefined;const s:[]${type}=p;_=${view};}`;
+  expect(executeProgram('zig', source)).toMatchObject({ kind: 'compileError' });
+});
+
+test.each(['u8', 'void', 'u0'])('empty %s reslices need only their valid headers', (type) => {
+  const source = `const std=@import("std");pub fn main()void{const p:*[2]${type}=undefined;const s:[]${type}=p;std.debug.print("{}",.{s[0..0].len});}`;
+  expect(executeProgram('zig', source)).toMatchObject({ kind: 'executed', stderr: '0', uncaughtException: undefined });
 });

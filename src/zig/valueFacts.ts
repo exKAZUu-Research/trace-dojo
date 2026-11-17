@@ -16,16 +16,12 @@ export function valueFactsOf(expression: TExpr): ValueFacts | undefined {
   return undefined;
 }
 
-export function aggregateFacts(
-  elements: readonly TExpr[],
-  spend: () => void,
-  positions?: readonly number[]
-): ValueFacts | undefined {
+export function aggregateFacts(elements: readonly TExpr[], spend: () => void): ValueFacts | undefined {
   const fields = new Map<number, ValueFacts>();
   for (const [index, element] of elements.entries()) {
     spend();
     const facts = valueFactsOf(element);
-    if (facts) fields.set(positions?.[index] ?? index, facts);
+    if (facts) fields.set(index, facts);
   }
   return fields.size > 0 ? { fields } : undefined;
 }

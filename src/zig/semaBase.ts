@@ -1077,7 +1077,7 @@ export abstract class SemaBase implements SemaApi {
     elements: readonly TExpr[],
     span: Span,
     build: (values: Value[]) => Value,
-    positions?: readonly number[]
+    retainFacts = false
   ): TExpr {
     this.storage.reserve(type);
     if (elements.every((element) => element.known)) {
@@ -1094,7 +1094,7 @@ export abstract class SemaBase implements SemaApi {
         span
       ),
       staticResult: this.constantResult(elements, (values) => build(values.map(copyForStorage)), span),
-      valueFacts: aggregateFacts(elements, () => this.spendCompilation(), positions),
+      valueFacts: retainFacts ? aggregateFacts(elements, () => this.spendCompilation()) : undefined,
     };
   }
 
