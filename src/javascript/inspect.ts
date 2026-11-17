@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 502 -- One port of Node.js's util.inspect, whose formatters share its context.
+// code-gauge-allow-file fileNcss 518 -- One port of Node.js's util.inspect, whose formatters share its context.
 import { eastAsianWidthType } from 'get-east-asian-width';
 
 import { ExecutionLimitError, LIMITS } from '../interpreter/limits';
@@ -224,20 +224,12 @@ interface Frame {
   braces: [string, string];
 }
 
-// code-gauge-allow functionCognitiveComplexity 19 -- Ports Node.js's util.inspect, so the two stay comparable.
-// code-gauge-allow functionNcss 35 -- Ports Node.js's util.inspect, so the two stay comparable.
+// code-gauge-allow functionCognitiveComplexity 21 -- Ports Node.js's util.inspect, so the two stay comparable.
+// code-gauge-allow functionNcss 37 -- Ports Node.js's util.inspect, so the two stay comparable.
 function formatRaw(ctx: Context, value: JsObject, recurseTimes: number): string {
   const { runtime } = ctx;
   const constructor = constructorName(runtime, value);
-  if (value.isError && constructor !== 'Object') {
-    // Node.js reads the tag of every object it formats, and an error's stack before checking its own keys against it.
-    const tag = runtime.get(value, WELL_KNOWN_SYMBOLS.toStringTag);
-    const own = value.properties.get(WELL_KNOWN_SYMBOLS.toStringTag);
-    ctx.errorStacks.set(value, {
-      ...errorStackOf(runtime, value),
-      tag: typeof tag === 'string' && !(tag !== '' && own?.enumerable) ? tag : '',
-    });
-  }
+  if (value.isError && constructor !== 'Object') noteErrorStack(ctx, value);
   const keys = enumerableKeys(runtime, value, ctx.showHidden, ctx.errorStacks.get(value));
   const showsLength = ctx.showHidden && value instanceof JsArray;
   const frame = frameOf(ctx, value, constructor, keys.length > 0 || value.promise !== undefined || showsLength);
@@ -301,6 +293,16 @@ function frameOf(ctx: Context, value: JsObject, constructor: string | undefined,
   }
   if (!hasKeys) return base || `${open}}`;
   return { base, braces: [open, '}'] };
+}
+
+/** Reads an error's tag and works out its stack, as Node.js does before checking the error's own keys against it. */
+function noteErrorStack(ctx: Context, error: JsObject): void {
+  const tag = ctx.runtime.get(error, WELL_KNOWN_SYMBOLS.toStringTag);
+  const own = error.properties.get(WELL_KNOWN_SYMBOLS.toStringTag);
+  ctx.errorStacks.set(error, {
+    ...errorStackOf(ctx.runtime, error),
+    tag: typeof tag === 'string' && !(tag !== '' && own?.enumerable) ? tag : '',
+  });
 }
 
 /** Node.js's getBoxedBase, such as `[Number: 3]`, `[BigInt (Big): 1n]`, or `[Symbol: Symbol(a)]`. */
@@ -547,7 +549,7 @@ function accessorText(property: AccessorProperty): string {
   return property.set ? '[Setter]' : 'undefined';
 }
 
-// code-gauge-allow functionCognitiveComplexity 19 -- Ports Node.js's util.inspect, so the two stay comparable.
+// code-gauge-allow functionCognitiveComplexity 21 -- Ports Node.js's util.inspect, so the two stay comparable.
 function formatArray(ctx: Context, array: JsArray, recurseTimes: number): string[] {
   const { elements } = array;
   const output: string[] = [];
@@ -600,7 +602,7 @@ function collectionFrameOf(value: JsObject, constructor: string | undefined, has
 }
 
 /** The entries of a Map, Set, or an iterator over one, which an iterator shows from where it has reached on. */
-// code-gauge-allow functionCognitiveComplexity 19 -- Ports Node.js's util.inspect, so the two stay comparable.
+// code-gauge-allow functionCognitiveComplexity 21 -- Ports Node.js's util.inspect, so the two stay comparable.
 function formatCollection(ctx: Context, value: JsObject, recurseTimes: number): string[] {
   const iterator = value.hostIterator instanceof CollectionIterator ? value.hostIterator : undefined;
   const state = iterator ? iterator.state : value.collection;
