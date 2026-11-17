@@ -1454,23 +1454,12 @@ function collectPatNames(pat: Pat, into: Name[]): void {
 
 /** Replaces a pattern binding's fresh variables by the ones its group declared, which other bindings refer to. */
 function replacePatLocals(pat: RPat, scope: LocalScope): void {
-  switch (pat.k) {
-    case 'var': {
-      pat.local = scope.vars.get(pat.local.name) as LocalVar;
-      break;
-    }
-    case 'as': {
-      pat.local = scope.vars.get(pat.local.name) as LocalVar;
-      replacePatLocals(pat.pat, scope);
-      break;
-    }
-    case 'con': {
-      for (const arg of pat.args) replacePatLocals(arg, scope);
-      break;
-    }
-    default: {
-      break;
-    }
+  const pending = [pat];
+  while (pending.length > 0) {
+    const current = pending.pop()!;
+    if (current.k === 'var' || current.k === 'as') current.local = scope.vars.get(current.local.name) as LocalVar;
+    if (current.k === 'as') pending.push(current.pat);
+    else if (current.k === 'con') pending.push(...current.args.toReversed());
   }
 }
 

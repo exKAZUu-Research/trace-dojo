@@ -833,6 +833,7 @@ test('compiler and native evaluation recursion remain bounded under Node', { tim
     synonyms: results,
     chains,
     native,
+    patterns,
     display,
     recovery,
   } = z
@@ -840,6 +841,7 @@ test('compiler and native evaluation recursion remain bounded under Node', { tim
       synonyms: z.array(resultSchema),
       chains: z.array(resultSchema),
       native: z.array(resultSchema),
+      patterns: z.array(resultSchema),
       display: z.array(z.object({ stdout: z.string() }).passthrough()),
       recovery: resultSchema,
     })
@@ -851,6 +853,11 @@ test('compiler and native evaluation recursion remain bounded under Node', { tim
   expect(chains.at(-1)).toMatchObject({ kind: 'executed', stdout: '1\n' });
   for (const result of [...chains.slice(1, 5), chains[7], ...native])
     expect(result).toMatchObject({ kind: 'limitExceeded', limit: 'operations' });
+  expect(patterns).toHaveLength(12);
+  for (const [index, result] of patterns.entries()) {
+    expect(result).toMatchObject({ kind: 'executed', stdout: index % 4 === 0 ? '0\n' : '1\n' });
+    expect(result.uncaughtException).toBeUndefined();
+  }
   expect(native).toHaveLength(6);
   expect(display).toHaveLength(3);
   for (const result of display) {
@@ -885,3 +892,20 @@ test.each([
 test('qualified value operators cannot bind pattern variables', () => {
   expect(executeProgram('haskell', 'f (Prelude.+)=1\nmain=print(1::Int)')).toMatchObject({ kind: 'compileError' });
 });
+
+test.each([
+  ['(#)=(++)\nmain=putStrLn("hello"#"world")', 'helloworld\n'],
+  ['(#)=(+)\nmain=print(1#2)', '3\n'],
+  ['(#)=(+)\nmain=print(0xA#0o7)', '17\n'],
+  ['(#)=(+)\nmain=print(1.5#2.5)', '4.0\n'],
+  ["(#) a b=[a,b]\nmain=putStrLn('a'#'b')", 'ab\n'],
+])('hash operators retain adjacent literal operands: %s', (source, stdout) => {
+  expect(executeProgram('haskell', source)).toMatchObject({ kind: 'executed', stdout, uncaughtException: undefined });
+});
+
+test.each(['main=print("hello"#)', "main=print('a'#)", 'main=print(1#)', 'main=print(1.5#)'])(
+  'unbound hash operators after literals produce compile diagnostics: %s',
+  (source) => {
+    expect(executeProgram('haskell', source).kind).toBe('compileError');
+  }
+);

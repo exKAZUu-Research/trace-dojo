@@ -56,8 +56,9 @@ const MAX_CODE_POINT = 0x10_ff_ff;
 export function parseIntegerLiteral(text: string, span: Span): bigint {
   if (text.includes('_')) throw unsupportedError(span, '数の区切りの _（NumericUnderscores）');
   if (/^0[bB]/.test(text)) throw unsupportedError(span, '2進数のリテラル（BinaryLiterals）');
-  if (/^0[oO]/.test(text)) return BigInt(`0o${text.slice(2)}`);
-  if (/^0[xX]/.test(text)) return BigInt(`0x${text.slice(2)}`);
+  if (/^0[xX].*[.pP]/.test(text)) throw unsupportedError(span, '16進数の小数のリテラル（HexFloatLiterals）');
+  if (/^0[oO][0-7]+$/.test(text)) return BigInt(`0o${text.slice(2)}`);
+  if (/^0[xX][\dA-Fa-f]+$/.test(text)) return BigInt(`0x${text.slice(2)}`);
   if (!/^\d+$/.test(text)) throw syntaxError(span, '書き方に誤りがあります。');
   return BigInt(text);
 }
@@ -70,27 +71,31 @@ export function parseFloatLiteral(text: string, span: Span): number {
 }
 
 export function parseCharLiteral(text: string, span: Span): string {
-  const body = text.slice(1, -1);
-  const { chars, end } = readChars(body, span, false);
-  if (chars.length !== 1 || end !== body.length)
-    throw syntaxError(span, '文字のリテラルには、1文字だけを書いてください。');
+  const body = literalBody(text, "'", span);
+  const chars = readChars(body, span, false);
+  if (chars.length !== 1) throw syntaxError(span, '文字のリテラルには、1文字だけを書いてください。');
   return chars[0];
 }
 
 export function parseStringLiteral(text: string, span: Span): string[] {
   if (text.startsWith('"""')) throw unsupportedError(span, '複数行の文字列（MultilineStrings）');
-  const body = text.slice(1, -1);
-  return readChars(body, span, true).chars;
+  const body = literalBody(text, '"', span);
+  return readChars(body, span, true);
 }
 
-/** Reads the characters of a literal's body, each one code point, resolving escapes and string gaps. */
-function readChars(body: string, span: Span, isString: boolean): { chars: string[]; end: number } {
+function literalBody(text: string, quote: string, span: Span): string {
+  if (text.length < 2 || !text.startsWith(quote) || !text.endsWith(quote))
+    throw syntaxError(span, 'リテラルの区切りの書き方に誤りがあります。');
+  return text.slice(1, -1);
+}
+
+function readChars(body: string, span: Span, isString: boolean): string[] {
   const chars: string[] = [];
   let index = 0;
   while (index < body.length) {
     const char = String.fromCodePoint(body.codePointAt(index) as number);
     if (char !== '\\') {
-      chars.push(graphicChar(char, span));
+      chars.push(graphicChar(char, span, isString));
       index += char.length;
       continue;
     }
@@ -98,7 +103,6 @@ function readChars(body: string, span: Span, isString: boolean): { chars: string
     const next = body[index];
     if (next === undefined) throw syntaxError(span, '文字のエスケープの書き方に誤りがあります。');
     if (isString && /\s/.test(next)) {
-      // A string gap: a backslash, white space, and a backslash, which stand for nothing.
       const close = body.indexOf('\\', index);
       if (close === -1 || !/^\s*$/.test(body.slice(index, close))) {
         throw syntaxError(span, String.raw`文字列の継続（\ と \ の間）の書き方に誤りがあります。`);
@@ -114,11 +118,12 @@ function readChars(body: string, span: Span, isString: boolean): { chars: string
     chars.push(String.fromCodePoint(code));
     index += length;
   }
-  return { chars, end: index };
+  return chars;
 }
 
-function graphicChar(char: string, span: Span): string {
-  if (!/^[\p{L}\p{M}\p{N}\p{P}\p{S}\p{Zs}]$/u.test(char)) throw syntaxError(span, '文字の書き方に誤りがあります。');
+function graphicChar(char: string, span: Span, isString: boolean): string {
+  if (char === (isString ? '"' : "'") || !/^[\p{L}\p{M}\p{N}\p{P}\p{S}\p{Zs}]$/u.test(char))
+    throw syntaxError(span, '文字の書き方に誤りがあります。');
   return char;
 }
 

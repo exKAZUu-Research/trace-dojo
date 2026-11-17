@@ -29,6 +29,16 @@ const chains = [
     ')',
   'main=print(1::Int)',
 ];
+const patterns = [3000, 9000, 9500].flatMap((size) => {
+  const wildcards = Array.from({ length: size }, () => '_').join(',');
+  const binding = 'x,' + Array.from({ length: size - 1 }, () => '_').join(',');
+  return [
+    `main=print(case [] of {[${wildcards}] -> 1; _ -> 0})`,
+    `main=print((\\[${binding}]->x) [1..${size}::Int])`,
+    `[${binding}]=[1..${size}::Int]\nmain=print x`,
+    `main=do {[${binding}] <- return [1..${size}::Int]; print x}`,
+  ];
+});
 const primitives = ['error(f(n+1))', 'errorWithoutStackTrace(f(n+1))', 'errorWithoutStackTrace("x"++f(n+1))'];
 const nativeResults = primitives.flatMap((rhs) => {
   const source = `f n=${rhs}\nmain=putStrLn(f(0::Int))`;
@@ -50,6 +60,7 @@ process.stdout.write(
   JSON.stringify({
     synonyms: synonyms.map((source) => executeProgram('haskell', source)),
     chains: chains.map((source) => executeProgram('haskell', source)),
+    patterns: patterns.map((source) => executeProgram('haskell', source)),
     native: nativeResults,
     display: displayResults,
     recovery: executeProgram('haskell', 'f 0="stop"; f n=error(f(n-1)); main=putStrLn(f(32::Int))'),
