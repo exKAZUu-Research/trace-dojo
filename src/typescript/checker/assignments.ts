@@ -319,7 +319,8 @@ export class AssignmentChecker {
       this.c.error(expression, `名前 ${expression.text} が見つかりません。`);
       return errorType;
     }
-    if (symbol.valueKind === 'const') {
+    // A library constant is declared with the kind `declared`, its entry recording `const`.
+    if (symbol.valueEntries[0]?.kind === 'const') {
       this.c.error(expression, `${expression.text} は定数なので、代入できません。`);
       return errorType;
     }

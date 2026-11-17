@@ -273,6 +273,10 @@ export class StatementChecker {
     const annotation = this.c.typeNodes.annotationType(declarator.childForFieldName('type'));
     const symbol = this.c.scopeOf(nameNode).lookupValue(nameNode.text);
     if (!symbol) return;
+    if (symbol.valueDeclaration?.id !== declarator.id) {
+      this.redeclaredVariable(declarator, symbol, annotation);
+      return;
+    }
     if (!value) {
       this.uninitializedVariable(declarator, symbol, kind, annotation);
       return;
@@ -303,6 +307,20 @@ export class StatementChecker {
           : declared;
     this.c.expressions.setVariableType(symbol, widened);
     this.c.flow.set(key, { type: isConst ? widened : widened === anyType ? declared : widened, assigned: true });
+  }
+
+  /** A variable declared again, which keeps the type its first declaration gives, as TypeScript's merged symbol does. */
+  private redeclaredVariable(declarator: TreeNode, symbol: Sym, annotation: Type | undefined): void {
+    const value = declarator.childForFieldName('value');
+    const nameNode = declarator.childForFieldName('name') as TreeNode;
+    const valueType = value ? this.c.expressions.check(value, annotation) : undefined;
+    if (value && valueType && annotation) this.c.expressions.checkAssignable(nameNode, valueType, annotation, value);
+    if (!valueType) return;
+    const declared = this.c.expressions.valueTypeOf(symbol);
+    this.c.flow.set(`s${symbol.id}`, {
+      type: this.c.flow.assignmentReduced(declared, regularOf(valueType)),
+      assigned: true,
+    });
   }
 
   private uninitializedVariable(declarator: TreeNode, symbol: Sym, kind: string, annotation: Type | undefined): void {
