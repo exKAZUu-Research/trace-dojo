@@ -1,5 +1,5 @@
-// code-gauge-allow-file fileNcss 406 -- Machine states and frames share one evaluator stack.
-import { CONS_CON, NIL_CON } from './builtinTypes';
+// code-gauge-allow-file fileNcss 415 -- Machine states and frames share one evaluator stack.
+import { CONS_CON, IO_TYPE, NIL_CON } from './builtinTypes';
 import type { CaseCore, Core } from './core';
 import type { TypeHint } from './displayTypeHints';
 import { constructorFieldHint, slotTypeHint, thunkTypeHint, typedSlot } from './displayTypes';
@@ -8,6 +8,7 @@ import { type DoFrame, finishMatch, markTailSelfCall, runBlock, statementDone, u
 import type { Primitive } from './primitives';
 import { RecursionBudget } from './recursionBudget';
 import type { Runtime } from './runtime';
+import { splitApp } from './types';
 import {
   Closure,
   ConValue,
@@ -41,6 +42,7 @@ export type Frame =
   | { k: 'charCase'; core: Extract<Core, { k: 'charCase' }>; env: Env }
   | { k: 'method'; index: number }
   | { k: 'super'; index: number }
+  | { k: 'monadChoice'; core: Extract<Core, { k: 'monadChoice' }>; env: Env }
   | { k: 'prim'; prim: Primitive; args: Slot[]; position: number }
   | { k: 'runIO' }
   | { k: 'ioBind'; next: Slot }
@@ -228,7 +230,7 @@ export class Machine {
   }
 
   /** Evaluates one node of code: a value returns, and other nodes push what they continue with. */
-  // code-gauge-allow functionNcss 49 -- One short case per kind of code node.
+  // code-gauge-allow functionNcss 53 -- One short case per kind of code node.
   private stepEval(state: RunState): void {
     const { code, env } = state;
     switch (code.k) {
@@ -280,6 +282,11 @@ export class Machine {
       case 'method':
       case 'super': {
         this.stack.push({ k: code.k, index: code.index });
+        state.code = code.dict;
+        return;
+      }
+      case 'monadChoice': {
+        this.stack.push({ k: 'monadChoice', core: code, env: env as Env });
         state.code = code.dict;
         return;
       }
@@ -440,6 +447,11 @@ export class Machine {
       case 'super': {
         const dict = state.value as Dict;
         state.enter(frame.k === 'method' ? dict.methods[frame.index] : dict.supers[frame.index]);
+        return false;
+      }
+      case 'monadChoice': {
+        const head = splitApp((state.value as Dict).instance.head).head;
+        state.evaluate(head.tag === 'tcon' && head.entity === IO_TYPE ? frame.core.io : frame.core.other, frame.env);
         return false;
       }
       case 'prim': {

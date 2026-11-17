@@ -36,7 +36,7 @@ export function traceHaskellProgram(program: string, trace: TraceOptions, input?
   runtime.beforeCollect = () => {
     for (const frame of runtime.frames) variablesOf(runtime, frame);
   };
-  let finalVars: TraceItemVariable = {};
+  let finalVars: TraceItemVariable = Object.create(null);
   // A model program may end with an uncaught exception to show how one stops the program.
   const run = runProgram(runtime, compiled, (frame) => {
     if (frame) finalVars = variablesOf(runtime, frame).vars;
@@ -47,7 +47,7 @@ export function traceHaskellProgram(program: string, trace: TraceOptions, input?
 /** The variables a frame's running statement sees: its parameters and the variables bound before it, in order. */
 // code-gauge-allow functionCognitiveComplexity 18 -- Variables come from each trace context with shadowing and record fields applied.
 function variablesOf(runtime: Runtime, frame: TraceFrame): TraceVariables {
-  const variables: TraceVariables = { vars: {}, referenceVars: {} };
+  const variables: TraceVariables = { vars: Object.create(null), referenceVars: Object.create(null) };
   const context = frame.contexts.at(-1);
   if (!context) return variables;
   let self: { value: Value; type: Type } | undefined;
@@ -296,7 +296,7 @@ class DisplayNodes {
 
   // code-gauge-allow functionCognitiveComplexity 18 -- One bounded in-order walk handles the shared Set and Map tree representation.
   private containerNodeOf(value: ConValue, type: Type, depth: number, kind: 'map' | 'set'): DisplayNode {
-    const entries: Record<string, DisplayNode> = {};
+    const entries: Record<string, DisplayNode> = Object.create(null);
     let count = 0;
     const visit = (slot: Slot): boolean => {
       this.runtime.spend();
@@ -327,7 +327,7 @@ class DisplayNodes {
     const items = listItems(this.runtime, value, type);
     if (!items) return { kind: 'value', value: '…' };
     if (isStringType(type, value)) return { kind: 'value', value: charsOf(items) };
-    const entries: Record<string, DisplayNode> = {};
+    const entries: Record<string, DisplayNode> = Object.create(null);
     for (const [index, item] of items.entries()) {
       entries[index] = this.build(item.value, item.type, depth + 1) ?? NULL_NODE;
     }
@@ -337,7 +337,7 @@ class DisplayNodes {
   /** A tuple shows as an array, and a constructor with fields as an object of them, by name in a record. */
   private dataNodeOf(value: ConValue, type: Type, depth: number): DisplayNode {
     const { con } = value;
-    const entries: Record<string, DisplayNode> = {};
+    const entries: Record<string, DisplayNode> = Object.create(null);
     const isTuple = con.type.special === 'tuple';
     if (!isTuple && con.type.cons.length > 1) entries['<constructor>'] = { kind: 'value', value: con.name };
     for (const [index, field] of value.fields.entries()) {

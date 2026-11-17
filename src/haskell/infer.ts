@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 729 -- The type checker keeps its inference rules beside the substitution state they share.
+// code-gauge-allow-file fileNcss 730 -- The type checker keeps its inference rules beside the substitution state they share.
 import { LIMITS } from '../interpreter/limits';
 import { CHAR_TYPE, FUNCTION_TYPE, LIST_TYPE, tupleCon } from './builtinTypes';
 import { type ClassEnv, entailByGivens, hasConstructorHead, isSubclassOf, predsEqual } from './classEnv';
@@ -190,8 +190,7 @@ export class Checker {
         continue;
       }
       if (hasConstructorHead(pred.type)) {
-        const found = this.env.findInstance(pred);
-        if (found === 'none') this.noInstance(hole);
+        const found = this.instanceFor(hole);
         if (found !== 'pending') {
           const { instance, args } = found;
           for (const [index, type] of instance.equalities) this.unify(args[index], type, hole.span);
@@ -264,6 +263,15 @@ export class Checker {
       }
       this.wanted = retained;
     }
+  }
+
+  private instanceFor(hole: EvidenceHole): Exclude<ReturnType<ClassEnv['findInstance']>, 'none' | 'overlap'> {
+    const found = this.env.findInstance(hole.pred);
+    if (found === 'none') this.noInstance(hole);
+    if (found === 'overlap') {
+      typeError(hole.span, `${new TypePrinter().showPred(hole.pred)} のインスタンスが重複しています。`);
+    }
+    return found;
   }
 
   private defaultFor(variable: TVar, holes: EvidenceHole[]): TypeEntity | undefined {

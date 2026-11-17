@@ -71,7 +71,15 @@ export class TraceRecorder<F extends TracedFrame> implements StepRecorder {
     return (
       last.board === world.boardText() &&
       fastDeepEqual(last.turtles, world.turtleTraces()) &&
-      (shownVars === undefined || fastDeepEqual(shownVars, this.frames.variablesOf(frame).vars))
+      (shownVars === undefined || sameVariables(shownVars, this.frames.variablesOf(frame).vars))
     );
   }
+}
+
+function sameVariables(a: TraceItem['vars'], b: TraceItem['vars']): boolean {
+  const names = Object.keys(a);
+  return (
+    names.length === Object.keys(b).length &&
+    names.every((name) => Object.hasOwn(b, name) && fastDeepEqual(a[name], b[name]))
+  );
 }

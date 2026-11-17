@@ -89,6 +89,9 @@ function childCodes(code: Core): [Core, boolean][] {
     case 'dict': {
       return outer(code.args);
     }
+    case 'monadChoice': {
+      return outer([code.dict, code.io, code.other]);
+    }
     case 'method':
     case 'super': {
       return outer([code.dict]);
@@ -184,7 +187,7 @@ function pushStackFrame(frame: Frame, scannedEnvs: Set<Env>, push: Push): void {
   else if (frame.k === 'apply' || frame.k === 'prim') for (const arg of frame.args) push(arg);
   else if (frame.k === 'ioBind' || frame.k === 'ioThen') push(frame.next);
   else if (frame.k === 'do') push(frame.result);
-  else if (frame.k === 'case' || frame.k === 'charCase') {
+  else if (frame.k === 'case' || frame.k === 'charCase' || frame.k === 'monadChoice') {
     for (let current: Env | undefined = frame.env; current && !scannedEnvs.has(current); current = current.parent) {
       scannedEnvs.add(current);
       for (const slot of current.slots) push(slot);

@@ -350,7 +350,7 @@ export function makeInstance(
 
 function registerInstance(checker: Checker, info: InstanceInfo, span: Span): void {
   for (const existing of checker.env.instancesOf(info.cls)) {
-    if (headsOverlap(checker, existing, info)) {
+    if (matchType(existing.head, info.head, []) && matchType(info.head, existing.head, [])) {
       const printer = new TypePrinter();
       throw compileError(
         span,
@@ -365,20 +365,6 @@ function registerInstance(checker: Checker, info: InstanceInfo, span: Span): voi
     }
   }
   checker.env.add(info);
-}
-
-/** Whether two instance heads could describe the same type, which Haskell forbids without overlap pragmas. */
-function headsOverlap(checker: Checker, a: InstanceInfo, b: InstanceInfo): boolean {
-  return checker.tryUnify(
-    instantiateType(
-      a.head,
-      a.kinds.map((kind) => checker.freshVar(kind))
-    ),
-    instantiateType(
-      b.head,
-      b.kinds.map((kind) => checker.freshVar(kind))
-    )
-  );
 }
 
 /** Finds each superclass's evidence at the instance's type, from the instance's context and other instances. */

@@ -1,6 +1,7 @@
 import type { FunctionInfo, IODoCore } from './core';
+import { isScalarType, slotDisplayType } from './displayTypes';
 import type { Machine, RunState } from './machine';
-import type { TraceFrame } from './runtime';
+import { DisplayAbort, type Runtime, type TraceFrame } from './runtime';
 import { Env, type IODo, type Slot } from './values';
 import type { VisibleScope } from './visibleScope';
 
@@ -58,7 +59,10 @@ export function runBlock(machine: Machine, state: RunState, action: IODo): void 
   frame.traceFrame.contexts.push({ env, visible: action.code.entryVisible, row: undefined });
   machine.stack.push(frame);
   if (action.code.bindingRow !== undefined) {
-    runtime.steps.stepBinding(action.code.bindingRow, action.code.bindingStoresAnswer ?? false);
+    runtime.steps.stepBinding(
+      action.code.bindingRow,
+      storesAnswer(runtime, env, action.code.entryVisible, action.code.bindingNames ?? [])
+    );
   }
   startStatement(machine, state, frame);
 }
@@ -144,7 +148,13 @@ function completeStatement(machine: Machine, frame: DoFrame): void {
   const stmt = frame.code.stmts[frame.index];
   if ((stmt.kind === 'exp' || stmt.kind === 'let') && stmt.noStep) return;
   if (frame.tailCalled || frame.silent) return;
-  machine.runtime.steps.completeStatement(stmt.row, stmt.kind !== 'let' && stmt.onlyCalls, frame.mark);
+  machine.runtime.steps.completeStatement(
+    stmt.row,
+    stmt.kind !== 'let' &&
+      stmt.onlyCalls &&
+      (stmt.kind !== 'bind' || !storesAnswer(machine.runtime, frame.env, stmt.visible, stmt.answerNames)),
+    frame.mark
+  );
 }
 
 function afterStatement(machine: Machine, state: RunState, frame: DoFrame): void {
@@ -168,4 +178,21 @@ export function unwindBlock(machine: Machine, frame: DoFrame): void {
   if (frame.tailCalled) return;
   if (!frame.pushedTraceFrame) frame.traceFrame.contexts.pop();
   else if (runtime.frames[0] !== frame.traceFrame) runtime.popFrame(frame.traceFrame);
+}
+
+function storesAnswer(runtime: Runtime, env: Env, visible: VisibleScope, names: readonly string[]): boolean {
+  try {
+    return runtime.withDisplayBudget(20_000, () =>
+      names.some((name) => {
+        runtime.spend();
+        const binding = visible.bindings.get(name);
+        if (!binding) return false;
+        const slot = env.at(visible.level - binding.level).slots[binding.index];
+        return slot !== undefined && isScalarType(slotDisplayType(slot, binding.type));
+      })
+    );
+  } catch (error) {
+    if (error instanceof DisplayAbort) return false;
+    throw error;
+  }
 }

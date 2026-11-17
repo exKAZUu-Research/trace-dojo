@@ -319,5 +319,25 @@ export function couldMatch(pattern: Type, type: Type): boolean {
     if (p.tag === 'tcon' && t.tag === 'tcon' && p.entity === t.entity) continue;
     if (p.tag !== 'tap' || t.tag !== 'tap') return false;
   }
-  return true;
+  return (
+    unifyTypes(freshMatchType(pattern), freshMatchType(type), (variable, target) => {
+      if (occursIn(variable, target)) return 'occurs';
+      variable.ref = target;
+      return;
+    }) === undefined
+  );
+}
+
+function freshMatchType(root: Type): Type {
+  const generics = new Map<number, TVar>();
+  return mapType(root, (node) => {
+    if (node.tag === 'tvar') return freshTypeVar(node.kind, 0);
+    if (node.tag !== 'tgen') return node;
+    let variable = generics.get(node.index);
+    if (!variable) {
+      variable = freshTypeVar(STAR, 0);
+      generics.set(node.index, variable);
+    }
+    return variable;
+  });
 }

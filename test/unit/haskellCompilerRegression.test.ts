@@ -39,7 +39,7 @@ test.each([
   'main = do\n  let f :: Eq a => Bool\n      f = True\n  print 2',
   'main = print (f 1 2)\n  where\n    infixl 4 `f`\n    infixr 5 `f`\n    f x y = x + y',
   'module Main (main, Maybe(Nothing)) where\nimport Prelude hiding (Maybe(..))\nimport Data.Maybe (Maybe(Just))\nmain = print 1',
-  'class C a where c :: a -> Int\ninstance C (Either a a) where c _ = 1\ninstance C (Either Int Int) where c _ = 2\nmain = print 1',
+  'class C a where c :: a -> Int\ninstance C (Either a a) where c _ = 1\ninstance C (Either Int Int) where c _ = 2\nmain = print (c (Left 1 :: Either Int Int))',
 ])('invalid declarations produce compile diagnostics: %s', (source) => {
   expect(executeProgram('haskell', source).kind).toBe('compileError');
 });
@@ -1090,4 +1090,24 @@ test('redundant superclass predicates still reject superclass cycles', () => {
     kind: 'compileError',
     diagnostics: [expect.objectContaining({ message: expect.stringContaining('循環しています') })],
   });
+});
+
+test.each([
+  ['unused', 'main = print (1 :: Int)', '1\n'],
+  ['unambiguous', "main = print (c ['x'])", '1\n'],
+  ['deferred', "helper xs = c xs\nmain = print (helper ['x'])", '1\n'],
+])('allows %s potentially overlapping instances', (_name, body, stdout) => {
+  const source = `class C a where c :: a -> Int
+instance C [a] where c _ = 1
+instance C [Int] where c _ = 2
+${body}`;
+  expect(executeProgram('haskell', source)).toMatchObject({ kind: 'executed', stdout, uncaughtException: undefined });
+});
+
+test.each([
+  'class C a where c :: a -> Int\ninstance C [a] where c _ = 1\ninstance C [b] where c _ = 2\nmain = print (1 :: Int)',
+  'class C a where c :: a -> Int\ninstance C [a] where c _ = 1\ninstance C [Int] where c _ = 2\nmain = print (c [1 :: Int])',
+  'class C a where c :: a -> Int\ninstance C [a] where c _ = 1\ninstance C [Int] where c _ = 2\nf :: [a] -> Int\nf = c\nmain = print (1 :: Int)',
+])('rejects duplicate declarations or ambiguous instance uses: %s', (source) => {
+  expect(executeProgram('haskell', source).kind).toBe('compileError');
 });

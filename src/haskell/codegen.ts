@@ -3,7 +3,6 @@ import { OrderedMap } from 'immutable';
 // code-gauge-allow-file fileNcss 930 -- The Core generator covers every construct of the language in one pass over shared state.
 import { ExecutionLimitError, LIMITS } from '../interpreter/limits';
 import {
-  CHAR_TYPE,
   CONS_CON,
   DOUBLE_TYPE,
   FLOAT_TYPE,
@@ -108,6 +107,7 @@ export class Codegen {
   private frame: FrameScope = this.rootFrame;
   private visible = OrderedMap<string, VisibleBinding>();
   private readonly recursion = new RecursionBudget();
+  private readonly untracedMonads = new Set<DictParam>();
   /** The dictionary parameters of the bindings whose bodies are being generated, for their recursive uses. */
   private readonly ownDictParams = new Map<LocalVar | ValueEntity, DictParam[]>();
   readonly claimedAtomicRows = new Set<number>();
@@ -816,9 +816,12 @@ export class Codegen {
       const savedVisible = this.visible;
       const plans = expr.pats.map((pat, index) => this.planPattern(pat, slots[index], true));
       let body: Core;
+      const inner = stripParens(expr.body);
+      const binding = { row: expr.span.row, names: expr.pats.flatMap(patternLocals).map((local) => local.name) };
       if (ioResult) {
-        const storesAnswer = expr.pats.some((pat) => patternStoresAnswer(pat));
-        body = this.ioBlock(expr.body, { row: expr.span.row, storesAnswer });
+        body = this.ioBlock(expr.body, binding);
+      } else if (this.options.isProgram && inner.k === 'do') {
+        body = this.compileDo(inner, binding);
       } else {
         body = this.compileExpr(expr.body);
       }
@@ -942,13 +945,26 @@ export class Codegen {
     return { k: 'app', fn, args: (expr.evidence ?? []).map((evidence) => this.compileEvidence(evidence)) };
   }
 
-  private compileDo(expr: Extract<RExpr, { k: 'do' }>): Core {
-    if (this.options.isProgram && expr.type && isIOType(expr.type)) return this.compileIODo(expr);
+  private compileDo(expr: Extract<RExpr, { k: 'do' }>, binding?: { row: number; names: string[] }): Core {
+    if (this.options.isProgram && expr.type && isIOType(expr.type)) return this.compileIODo(expr, binding);
     if (!expr.monad) {
       // A block of `let` statements and one expression needs no monad: it is a `let` expression.
       return this.compileLetChain(expr.stmts, 0);
     }
-    return this.compileMonadic(expr.stmts, 0, expr.monad);
+    let evidence = resolveEvidence(expr.monad);
+    while (evidence.kind === 'super') evidence = resolveEvidence(evidence.of);
+    const param = evidence.kind === 'param' ? evidence.param : undefined;
+    if (!this.options.isProgram || evidence.kind === 'instance' || (param && this.untracedMonads.has(param))) {
+      return this.compileMonadic(expr.stmts, 0, expr.monad);
+    }
+    let other: Core;
+    if (param) this.untracedMonads.add(param);
+    try {
+      other = this.compileMonadic(expr.stmts, 0, expr.monad);
+    } finally {
+      if (param) this.untracedMonads.delete(param);
+    }
+    return { k: 'monadChoice', dict: this.compileEvidence(expr.monad), io: this.compileIODo(expr, binding), other };
   }
 
   private compileLetChain(stmts: readonly RStmt[], index: number): Core {
@@ -1017,14 +1033,14 @@ export class Codegen {
     }
   }
 
-  private compileIODo(expr: Extract<RExpr, { k: 'do' }>, binding?: { row: number; storesAnswer: boolean }): IODoCore {
+  private compileIODo(expr: Extract<RExpr, { k: 'do' }>, binding?: { row: number; names: string[] }): IODoCore {
     return this.withIOFrame(() => this.compileIOStatements(expr, binding));
   }
 
-  // code-gauge-allow functionNcss 31 -- The statement kinds share the per-statement trace data computed here.
+  // code-gauge-allow functionNcss 32 -- The statement kinds share the per-statement trace data computed here.
   private compileIOStatements(
     expr: Extract<RExpr, { k: 'do' }>,
-    binding?: { row: number; storesAnswer: boolean }
+    binding?: { row: number; names: string[] }
   ): Omit<IODoCore, 'size'> {
     const savedVisible = this.visible;
     const entryVisible = this.snapshotVisible();
@@ -1060,9 +1076,18 @@ export class Codegen {
             };
             matcher = this.matchPlan(plan, { k: 'con', con: UNIT_CON, args: [] }, fail);
           }
-          const onlyCalls =
-            isCall(stmt.expr) && patternLocals(stmt.pat).every((local) => !isScalarType(local.type as Type));
-          stmts.push({ kind: 'bind', row, expr: action, slot, matcher, onlyCalls, visible: this.snapshotVisible() });
+          const onlyCalls = isCall(stmt.expr);
+          const answerNames = patternLocals(stmt.pat).map((local) => local.name);
+          stmts.push({
+            kind: 'bind',
+            row,
+            expr: action,
+            slot,
+            matcher,
+            onlyCalls,
+            answerNames,
+            visible: this.snapshotVisible(),
+          });
           break;
         }
         case 'let': {
@@ -1079,7 +1104,7 @@ export class Codegen {
       }
     }
     this.visible = savedVisible;
-    return { k: 'iodo', stmts, bindingRow: binding?.row, bindingStoresAnswer: binding?.storesAnswer, entryVisible };
+    return { k: 'iodo', stmts, bindingRow: binding?.row, bindingNames: binding?.names, entryVisible };
   }
 
   /**
@@ -1140,7 +1165,7 @@ export class Codegen {
   }
 
   /** An `IO` expression as a block: a `do` block as it is, `return ()` as it is, and others as one statement. */
-  private ioBlock(expr: RExpr, binding?: { row: number; storesAnswer: boolean }): Core {
+  private ioBlock(expr: RExpr, binding?: { row: number; names: string[] }): Core {
     if (expr.k === 'typed' && expr.dictParams?.length)
       return this.compileTyped(expr, () => this.ioBlock(expr.expr, binding));
     const inner = stripParens(expr);
@@ -1161,7 +1186,7 @@ export class Codegen {
           },
         ],
         bindingRow: binding?.row,
-        bindingStoresAnswer: binding?.storesAnswer,
+        bindingNames: binding?.names,
         entryVisible: this.snapshotVisible(),
       };
     });
@@ -1427,24 +1452,6 @@ function patternLocals(pat: RPat): LocalVar[] {
     else if (current.k === 'con') pending.push(...current.args.toReversed());
   }
   return result;
-}
-
-/** Whether a lambda's parameter holds a value learners answer: a number, a character, a string, or a Boolean. */
-function patternStoresAnswer(pat: RPat): boolean {
-  return patternLocals(pat).some((local) => local.type !== undefined && isScalarType(local.type));
-}
-
-export function isScalarType(type: Type): boolean {
-  const { head, args } = splitApp(type);
-  if (head.tag !== 'tcon') return false;
-  const entity = head.entity;
-  if ([INT_TYPE, INTEGER_TYPE, WORD_TYPE, DOUBLE_TYPE, FLOAT_TYPE, CHAR_TYPE].includes(entity)) return true;
-  if (entity.name === 'Bool' && entity.module === 'Base') return true;
-  if (entity.special === 'list' && args.length === 1) {
-    const elem = splitApp(args[0]).head;
-    return elem.tag === 'tcon' && elem.entity === CHAR_TYPE;
-  }
-  return false;
 }
 
 function patternText(pat: RPat): string {

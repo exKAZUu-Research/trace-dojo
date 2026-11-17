@@ -32,6 +32,7 @@ export type Core = (
   | { k: 'prim'; prim: Primitive }
   | { k: 'method'; dict: Core; index: number }
   | { k: 'super'; dict: Core; index: number }
+  | { k: 'monadChoice'; dict: Core; io: Core; other: Core }
   | { k: 'dict'; instance: InstanceInfo; args: Core[] }
   | { k: 'error'; message: string; kind: 'error' | 'patternMatch' }
   | IODoCore
@@ -77,10 +78,11 @@ export type IOStmt =
       /** Code that matches the result against the pattern and binds its variables, if it is not a variable. */
       matcher?: Core;
       /**
-       * Whether the statement binds only references (records, turtles, lists) from a call, as Java's declaration
-       * initialized by creating an object does, whose steps may show what it did.
+       * Whether a call produced the result, so its steps can show the declaration when the instantiated
+       * bindings store only references.
        */
       onlyCalls: boolean;
+      answerNames: string[];
       visible: VisibleScope;
     }
   | {
@@ -98,8 +100,8 @@ export interface IODoCore {
   stmts: IOStmt[];
   /** The row of the lambda whose parameters a block binds, which records a binding step when the block starts. */
   bindingRow?: number;
-  /** Whether the lambda's parameters hold values learners answer, such as numbers and strings. */
-  bindingStoresAnswer?: boolean;
+  /** The lambda's bound names, whose instantiated slots determine whether they store answers. */
+  bindingNames?: string[];
   /** The variables visible when the block starts. */
   entryVisible: VisibleScope;
 }

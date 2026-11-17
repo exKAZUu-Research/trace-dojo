@@ -1,4 +1,4 @@
-import type { ClassEntity, Evidence, InstanceInfo } from './entities';
+import type { ClassEntity, Evidence, InstanceInfo, TypeEntity } from './entities';
 import { couldMatch, matchType, type Pred, prune, splitApp, type Type, typesEqual } from './types';
 import { chargeTypeWork } from './typeWorkBudget';
 
@@ -6,9 +6,12 @@ import { chargeTypeWork } from './typeWorkBudget';
 export class ClassEnv {
   private readonly own = new Map<ClassEntity, InstanceInfo[]>();
 
+  private readonly candidates = new Map<ClassEntity, Map<TypeEntity, InstanceInfo[]>>();
+
   constructor(private readonly parent?: ClassEnv) {}
 
   add(instance: InstanceInfo): void {
+    this.candidates.clear();
     let list = this.own.get(instance.cls);
     if (!list) {
       list = [];
@@ -24,18 +27,40 @@ export class ClassEnv {
 
   /**
    * The instance that solves a constraint whose type has a constructor at its head: `none` when no instance can,
-   * and `pending` when one could once the type's variables are known.
+   * `pending` when selection depends on unknown variables, and `overlap` when multiple instances match.
    */
-  findInstance(pred: Pred): { instance: InstanceInfo; args: Type[] } | 'none' | 'pending' {
+  findInstance(pred: Pred): { instance: InstanceInfo; args: Type[] } | 'none' | 'pending' | 'overlap' {
     let pending = false;
-    for (const instance of this.instancesOf(pred.cls)) {
+    let matched: { instance: InstanceInfo; args: Type[] } | undefined;
+    const head = splitApp(pred.type).head;
+    const instances = head.tag === 'tcon' ? this.instancesForHead(pred.cls, head.entity) : this.instancesOf(pred.cls);
+    for (const instance of instances) {
       const bindings: (Type | undefined)[] = [];
       if (matchType(instance.head, pred.type, bindings)) {
-        return { instance, args: instance.kinds.map((_, index) => bindings[index] as Type) };
+        if (matched) return 'overlap';
+        matched = { instance, args: instance.kinds.map((_, index) => bindings[index] as Type) };
+        continue;
       }
       if (couldMatch(instance.head, pred.type)) pending = true;
     }
-    return pending ? 'pending' : 'none';
+    return pending ? 'pending' : (matched ?? 'none');
+  }
+
+  private instancesForHead(cls: ClassEntity, head: TypeEntity): InstanceInfo[] {
+    let byHead = this.candidates.get(cls);
+    if (!byHead) {
+      byHead = new Map();
+      this.candidates.set(cls, byHead);
+    }
+    let candidates = byHead.get(head);
+    if (!candidates) {
+      candidates = this.instancesOf(cls).filter((instance) => {
+        const pattern = splitApp(instance.head).head;
+        return pattern.tag !== 'tcon' || pattern.entity === head;
+      });
+      byHead.set(head, candidates);
+    }
+    return candidates;
   }
 }
 

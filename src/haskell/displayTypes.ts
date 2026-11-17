@@ -1,3 +1,4 @@
+import { CHAR_TYPE, DOUBLE_TYPE, FLOAT_TYPE, INT_TYPE, INTEGER_TYPE, WORD_TYPE } from './builtinTypes';
 import { type TypeHint, type TypeHintRef, UNKNOWN_TYPE } from './displayTypeHints';
 import type { ConInfo } from './entities';
 import { mapGraph, mapGraphPairs } from './typeGraph';
@@ -105,4 +106,17 @@ export function constructorFieldType(con: ConInfo, type: Type, position: number)
   const { args } = splitApp(prune(type));
   const parameters = Array.from({ length: con.type.arity }, (_, index) => args[index] ?? UNKNOWN_TYPE);
   return instantiateType(con.fieldTypes[position], parameters);
+}
+
+export function isScalarType(type: Type): boolean {
+  const { head, args } = splitApp(type);
+  if (head.tag !== 'tcon') return false;
+  const entity = head.entity;
+  if ([INT_TYPE, INTEGER_TYPE, WORD_TYPE, DOUBLE_TYPE, FLOAT_TYPE, CHAR_TYPE].includes(entity)) return true;
+  if (entity.name === 'Bool' && entity.module === 'Base') return true;
+  if (entity.special === 'list' && args.length === 1) {
+    const elem = splitApp(args[0]).head;
+    return elem.tag === 'tcon' && elem.entity === CHAR_TYPE;
+  }
+  return false;
 }

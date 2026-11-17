@@ -649,3 +649,95 @@ main=do
     { line: 7, vars: { n: 1 } },
   ]);
 });
+
+test.each(['toString', 'valueOf', '__proto__', 'constructor', 'hasOwnProperty'])(
+  'preserves the variable and record field named %s',
+  (name) => {
+    const source = `import Control.Monad
+ data Box = Box { ${name} :: Int }
+ main = do
+   let ${name} = "x"
+   let box = Box 7
+   forM_ [()] $ \\_ -> print (1 :: Int)
+`.replaceAll(/^ /gm, '');
+    const result = traceProgram('haskell', source, source);
+    expect(result.stdout).toBe('1\n');
+    expect(Object.entries(result.finalVars)).toContainEqual([name, 'x']);
+    expect(result.traceItems.at(-1)?.referenceVars.box).toEqual({
+      kind: 'object',
+      entries: { [name]: { kind: 'value', value: 7 } },
+    });
+    expect(result.traceItems).toHaveLength(4);
+  }
+);
+
+test.each([
+  ['[1,1 :: Int]', '1\n1\n', 1],
+  ['["x","x"]', '"x"\n"x"\n', 'x'],
+])('records repeated inferred scalar loop bindings over %s', (values, stdout, value) => {
+  const source = `import Control.Monad
+printAll xs = forM_ xs $ \\n -> do
+  print n
+main = printAll ${values}`;
+  const result = traceProgram('haskell', source, source);
+  expect(result.stdout).toBe(stdout);
+  expect(result.traceItems.map(({ line, vars }) => [line, vars.n])).toEqual([
+    [0, undefined],
+    [2, value],
+    [3, value],
+    [2, value],
+    [3, value],
+  ]);
+});
+
+test('traces each action and call frame of an inferred monadic helper', () => {
+  const source = `repeatAction action = do
+  action
+  action
+main = do
+  t <- newTurtle
+  repeatAction (forward t)`;
+  const result = traceProgram('haskell', source, source);
+  expect(result.traceItems.map(({ line, callLines, turtles }) => [line, callLines, turtles[0]?.y])).toEqual([
+    [0, [], undefined],
+    [5, [], 0],
+    [2, [6], 1],
+    [3, [6], 2],
+  ]);
+  expect(result.finalTurtles[0]?.y).toBe(2);
+});
+
+test('keeps pure monads pure when selecting traced IO blocks', () => {
+  const source = `repeatAction action = do
+  action
+  action
+main = print (repeatAction (Just (2 :: Int)), repeatAction [1,2 :: Int])`;
+  const result = traceProgram('haskell', source, source);
+  expect(result.stdout).toBe('(Just 2,[1,2,1,2])\n');
+  expect(result.traceItems.map(({ line, callLines }) => [line, callLines])).toEqual([
+    [0, []],
+    [4, []],
+  ]);
+});
+
+test.each(['Int', 'Turtle'])('classifies inferred IO result bindings as %s at runtime', (type) => {
+  const record = (signature: string): ReturnType<typeof traceProgram> => {
+    const source = `${signature}
+helper action = do
+  x <- action
+  pure x
+producer = do
+  print (1 :: Int)
+  ${type === 'Int' ? 'pure (1 :: Int)' : 'newTurtle'}
+main = do
+  n <- helper producer
+  print (1 :: Int)`;
+    return traceProgram('haskell', source, source);
+  };
+  const inferred = record('');
+  const annotated = record(`helper :: IO ${type} -> IO ${type}`);
+  expect(inferred.stdout).toBe('1\n1\n');
+  expect(inferred.traceItems).toEqual(annotated.traceItems);
+  expect(inferred.finalVars).toEqual(annotated.finalVars);
+  expect(inferred.finalTurtles).toEqual(annotated.finalTurtles);
+});
