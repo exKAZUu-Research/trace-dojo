@@ -59,18 +59,27 @@ export class Scope {
   readonly values = new Map<string, Sym>();
   readonly types = new Map<string, Sym>();
 
+  /** The names a `declare global` block declares, which inside it stand for the global symbols of those names. */
+  private readonly augmentedNames = new Set<string>();
+
+  /** @param augments For a `declare global` block, the global scope its declarations go to. */
   constructor(
     readonly kind: 'global' | 'module' | 'function' | 'block' | 'class',
     readonly parent: Scope | undefined,
-    readonly node: TreeNode | undefined
+    readonly node: TreeNode | undefined,
+    private readonly augments?: Scope
   ) {}
 
   lookupValue(name: string): Sym | undefined {
-    return this.values.get(name) ?? this.parent?.lookupValue(name);
+    return this.values.get(name) ?? this.augmented(name)?.values.get(name) ?? this.parent?.lookupValue(name);
   }
 
   lookupType(name: string): Sym | undefined {
-    return this.types.get(name) ?? this.parent?.lookupType(name);
+    return this.types.get(name) ?? this.augmented(name)?.types.get(name) ?? this.parent?.lookupType(name);
+  }
+
+  private augmented(name: string): Scope | undefined {
+    return this.augmentedNames.has(name) ? this.augments : undefined;
   }
 
   /** The nearest function (or the module) scope, where `var` and function declarations live. */
@@ -84,6 +93,10 @@ export class Scope {
   }
 
   declareValue(name: string, kind: ValueKind, declaration: TreeNode, nameNode: TreeNode = declaration): Sym {
+    if (this.augments) {
+      this.augmentedNames.add(name);
+      return this.augments.declareValue(name, kind, declaration, nameNode);
+    }
     let symbol = this.values.get(name);
     if (!symbol) {
       symbol = new Sym(name, this);
@@ -96,6 +109,10 @@ export class Scope {
   }
 
   declareType(name: string, kind: TypeKind, declaration: TreeNode, nameNode: TreeNode = declaration): Sym {
+    if (this.augments) {
+      this.augmentedNames.add(name);
+      return this.augments.declareType(name, kind, declaration, nameNode);
+    }
     let symbol = this.types.get(name);
     if (!symbol) {
       // A class is a value and a type of the same name.

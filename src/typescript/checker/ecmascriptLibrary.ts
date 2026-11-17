@@ -1194,7 +1194,6 @@ interface RegExpConstructor {
 interface PromiseConstructor {
     try<T, U extends unknown[]>(callbackFn: (...args: U) => T | PromiseLike<T>, ...args: U): Promise<Awaited<T>>;
 }
-type IteratorObjectConstructor = abstract new <T, TResult = undefined, TNext = unknown>() => IteratorObject<T, TResult, TNext>;
 interface IteratorObject<T, TReturn, TNext> {
         [Symbol.iterator](): IteratorObject<T, TReturn, TNext>;
         map<U>(callbackfn: (value: T, index: number) => U): IteratorObject<U, undefined, unknown>;
@@ -1214,9 +1213,19 @@ interface IteratorObject<T, TReturn, TNext> {
         find(predicate: (value: T, index: number) => unknown): T | undefined;
         readonly [Symbol.toStringTag]: string;
     }
-    interface IteratorConstructor extends IteratorObjectConstructor {
-        from<T>(value: Iterator<T, unknown, undefined> | Iterable<T, unknown, undefined>): IteratorObject<T, undefined, unknown>;
+// The reference library declares the abstract class in a module of its own, which this block stands for.
+{
+    declare abstract class Iterator<T, TResult = undefined, TNext = unknown> {
+        abstract next(value?: TNext): IteratorResult<T, TResult>;
     }
-declare var Iterator: IteratorConstructor;
+    interface Iterator<T, TResult, TNext> extends IteratorObject<T, TResult, TNext> {}
+    type IteratorObjectConstructor = typeof Iterator;
+    declare global {
+        interface IteratorConstructor extends IteratorObjectConstructor {
+            from<T>(value: Iterator<T, unknown, undefined> | Iterable<T, unknown, undefined>): IteratorObject<T, undefined, unknown>;
+        }
+        var Iterator: IteratorConstructor;
+    }
+}
 
 `;

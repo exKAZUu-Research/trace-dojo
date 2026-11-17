@@ -254,7 +254,8 @@ export class ClassDeclarationChecker {
       (property) => property.isAbstract && property.declaringClass !== info
     );
     if (missing.length === 0) return;
-    const base = missing[0].declaringClass?.name ?? '';
+    const baseType = this.c.classes.baseInstanceType(node);
+    const base = baseType ? this.c.print(baseType) : '';
     const nameNode = node.childForFieldName('name') ?? node;
     if (missing.length === 1) {
       this.c.error(

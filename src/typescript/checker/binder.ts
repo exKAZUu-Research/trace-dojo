@@ -79,8 +79,8 @@ export class Binder {
     for (const child of node.namedChildren) if (child) this.bind(child, scope);
   }
 
-  private newScope(node: TreeNode, kind: Scope['kind'], parent: Scope): Scope {
-    const scope = new Scope(kind, parent, node);
+  private newScope(node: TreeNode, kind: Scope['kind'], parent: Scope, augments?: Scope): Scope {
+    const scope = new Scope(kind, parent, node, augments);
     this.scopes.set(node.id, scope);
     return scope;
   }
@@ -252,6 +252,11 @@ export class Binder {
           const name = child.childForFieldName('name');
           if (name) scope.declareValue(name.text, 'function', child, name);
           this.bindFunction(child, scope);
+          break;
+        }
+        case 'statement_block': {
+          // `declare global { ... }`
+          this.bindAmbient(child, this.newScope(child, 'block', scope, this.moduleScope));
           break;
         }
         default: {
