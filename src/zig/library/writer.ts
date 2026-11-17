@@ -44,6 +44,13 @@ export class CountingFormatOutput implements FormatOutput {
     return this.length;
   }
 
+  writeView(length: number, get: (index: number) => number): void {
+    this.frame.runtime.spend(length);
+    const prefix = Math.min(length, 64 - this.prefix.length);
+    for (let index = 0; index < prefix; index++) this.prefix.push(get(index));
+    this.length += length;
+  }
+
   checkSize(length: number): void {
     const extra = Math.max(0, length - this.length);
     this.frame.runtime.spend(extra > LIMITS.maxOperations - this.frame.runtime.budget.spent ? extra : 0);

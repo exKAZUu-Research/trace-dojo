@@ -1,15 +1,16 @@
 import { PANIC, panic } from '../arith';
 import type { Span } from '../ast';
+import { spendIntegerOperation } from '../integerWork';
 import type { Frame } from '../runtime';
 import { copyForStorage, known, runtime, type SemaApi, type TExpr } from '../semaBase';
 import {
   arrayOf,
   BOOL,
-  fitsInt,
   fnType,
   type IntType,
   intType,
   maxInt,
+  minInt,
   pointerTo,
   sliceOf,
   type StructType,
@@ -144,16 +145,24 @@ function intRange(
 
 /** `weightedIndex` with integer proportions: a point below their sum, found in the running totals. */
 function weightedIntIndex(state: RandomSource, type: IntType, proportions: bigint[]): bigint {
+  state.spend(Math.ceil(type.bits / 64) * (type.signed ? 2 : 1));
+  const minimum = minInt(type),
+    maximum = maxInt(type);
+  const accumulate = (current: bigint, proportion: bigint): bigint => {
+    spendIntegerOperation(current, proportion, 'add', state.spend);
+    const result = current + proportion;
+    spendIntegerOperation(result, minimum, 'read', state.spend);
+    spendIntegerOperation(result, maximum, 'read', state.spend);
+    if (result < minimum || result > maximum) panic(PANIC.overflow);
+    return result;
+  };
   let sum = 0n;
-  for (const proportion of proportions) {
-    sum += proportion;
-    if (!fitsInt(sum, type)) panic(PANIC.overflow);
-  }
+  for (const proportion of proportions) sum = accumulate(sum, proportion);
   const point = type.signed ? intRange(state, type, 0n, sum, false) : uintLessThan(state, type, sum);
   let accumulator = 0n;
   for (const [index, proportion] of proportions.entries()) {
-    accumulator += proportion;
-    if (!fitsInt(accumulator, type)) panic(PANIC.overflow);
+    accumulator = accumulate(accumulator, proportion);
+    spendIntegerOperation(point, accumulator, 'read', state.spend);
     if (point < accumulator) return BigInt(index);
   }
   return panic(PANIC.unreachable);

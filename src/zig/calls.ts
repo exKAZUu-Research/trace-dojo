@@ -227,9 +227,26 @@ export abstract class CallCompiler extends BuiltinCompiler {
       (frame) => this.invoke(instance, evaluateHeld(frame, evaluators), row, frame, true),
       expression
     );
-    return this.requiresComptime(instance.returnType, expression)
-      ? known(instance.returnType, this.evaluateAtCompileTime(call), expression)
-      : call;
+    return this.requiresComptime(instance.returnType, expression) ? this.comptimeCall(ref, instance, args, call) : call;
+  }
+
+  private comptimeCall(ref: FnRef, instance: FunctionInstance, args: readonly TExpr[], call: TExpr): TExpr {
+    const syntax = ref.decl.syntax;
+    const parameters = new Set(syntax.params.map((param) => param.name));
+    if (!this.dependsOnParameters(syntax.returnType, parameters))
+      return known(instance.returnType, this.evaluateAtCompileTime(call), call.span);
+    const evaluators = args.map((arg) => {
+      const fact = staticResultOf(arg);
+      const value = fact ? known(arg.type, fact.value, arg.span) : arg;
+      return (frame: Frame) => copyForFrame(frame, value.eval(frame), value.type);
+    });
+    const body = runtime(
+      instance.returnType,
+      (frame) => this.invoke(instance, evaluateHeld(frame, evaluators), call.span.row, frame, true),
+      call.span
+    );
+    const result = this.evaluateAtCompileTime(body);
+    return this.combine(args, instance.returnType, () => result, call.span);
   }
 
   /** Passes a method's receiver, taking its address or dereferencing it to match the first parameter. */

@@ -169,7 +169,7 @@ export function floatRem(a: AnyFloat, b: AnyFloat, bits: FloatBits): AnyFloat {
   const dividend = x.mantissa << xShift;
   spendIntegerShift(y.mantissa, yShift, true, spendMemory);
   const divisor = y.mantissa << yShift;
-  spendIntegerOperation(dividend, divisor, false, spendMemory);
+  spendIntegerOperation(dividend, divisor, 'read', spendMemory);
   const result = new BigFloat(x.sign, 'finite', dividend % divisor, exponent);
   return roundRemainder(result, bits);
 }

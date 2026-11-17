@@ -1,5 +1,5 @@
 import { checkOutputSize } from './allocation';
-// code-gauge-allow-file fileNcss 764 -- The file holds one layer of the compiler, whose parts share its private state.
+// code-gauge-allow-file fileNcss 794 -- The file holds one layer of the compiler, whose parts share its private state.
 /**
  * Zig's formatted printing (`std.Io.Writer.print` and `printValue`), transcribed so that output matches byte for byte.
  * Formatting works on bytes, as Zig's strings are bytes.
@@ -15,6 +15,7 @@ import {
   FORMATS,
   shortestDecimal,
 } from './floats';
+import { spendMemory } from './memoryAccounting';
 import { type EnumType, type StructField, type Type, typeName, type UnionType, USIZE } from './types';
 import { decodeIdentifierBytes, decodeUtf8, encodeIdentifierText } from './utf8';
 import {
@@ -25,7 +26,7 @@ import {
   Slice,
   Some,
   type Value,
-  ZArray,
+  type ZArray,
   type ZStruct,
   type ZUnion,
 } from './values';
@@ -68,6 +69,7 @@ export interface FormatOutput {
   readonly length: number;
   push: (...bytes: number[]) => number;
   checkSize?: (length: number) => void;
+  writeView?: (length: number, get: (index: number) => number) => void;
 }
 
 export interface FormatTemplate {
@@ -466,11 +468,13 @@ export function printValue(
           return printFloatHex(out, value as AnyFloat, floatBits(type), upper, options);
         // A byte string in hexadecimal, which Zig asserts has no width or precision.
         forbidOptions(options);
-        for (const byte of stringBytes(value, type)) appendBytes(out, hexDigits(Number(byte), upper));
+        const bytes = stringBytes(value);
+        checkFormatSize(out, out.length + bytes.length * 2);
+        for (const byte of bytes) appendBytes(out, hexDigits(byte, upper));
         return;
       }
       case 's': {
-        return alignBuffer(out, stringBytes(value, type).map(Number), options);
+        return alignBuffer(out, stringBytes(value), options);
       }
       case 'e':
       case 'E': {
@@ -645,9 +649,11 @@ const SPECIAL_SPECIFIERS = new Map<
     'q',
     {
       accepts: isByteString,
-      print: (out, value, type) => {
+      print: (out, value) => {
+        const bytes = stringBytes(value);
+        checkFormatSize(out, out.length + bytes.length + 2);
         out.push(0x22);
-        appendEscapedString(out, stringBytes(value, type).map(Number));
+        appendEscapedString(out, bytes);
         out.push(0x22);
       },
     },
@@ -670,31 +676,31 @@ const SPECIAL_SPECIFIERS = new Map<
     'b64',
     {
       accepts: (type) => type.kind === 'pointer' && isByteString(type),
-      print: (out, value, type, options) => {
+      print: (out, value, _type, options) => {
         forbidOptions(options);
-        const bytes = stringBytes(value, type);
-        checkFormatSize(out, out.length + Math.ceil(bytes.length / 3) * 4);
-        appendBytes(out, utf8(btoa(bytes.map((byte) => String.fromCodePoint(Number(byte))).join(''))));
+        const bytes = base64Bytes(stringBytes(value));
+        checkFormatSize(out, out.length + bytes.length);
+        appendBuffer(out, bytes);
       },
     },
   ],
 ]);
 
 /** `std.zig.stringEscape`: escapes quotes, backslashes, control characters, and invalid or special UTF-8. */
-function appendEscapedString(out: FormatOutput, bytes: readonly number[]): void {
+function appendEscapedString(out: FormatOutput, bytes: ByteView): void {
   const hex = (byte: number): void => {
     appendBytes(out, utf8(`\\x${byte.toString(16).padStart(2, '0')}`));
   };
   let index = 0;
   while (index < bytes.length) {
-    const byte = bytes[index];
+    const byte = bytes.get(index);
     const named = ESCAPES[byte];
     if (named) appendBytes(out, utf8(named));
     else if (byte < 0x20 || byte === 0x7f) hex(byte);
     else if (byte < 0x80) out.push(byte);
     else {
-      const { length, escape } = utf8Sequence(bytes, index);
-      for (const each of bytes.slice(index, index + length)) {
+      const { length, escape, sequence } = utf8Sequence(bytes, index, byte);
+      for (const each of sequence) {
         if (escape) hex(each);
         else out.push(each);
       }
@@ -716,18 +722,30 @@ const ESCAPES: Record<number, string> = {
 
 const quotedUtf8Decoder = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true });
 
-function utf8Sequence(bytes: readonly number[], index: number): { length: number; escape: boolean } {
-  const byte = bytes[index];
-  const length = byte >= 0xf0 ? 4 : byte >= 0xe0 ? 3 : 2;
+function utf8Sequence(
+  bytes: ByteView,
+  index: number,
+  byte: number
+): { length: number; escape: boolean; sequence: readonly number[] } {
+  const width = byte >= 0xf0 ? 4 : byte >= 0xe0 ? 3 : 2;
+  const sequence = [
+    byte,
+    ...Array.from({ length: Math.min(width - 1, bytes.length - index - 1) }, (_, offset) =>
+      bytes.get(index + offset + 1)
+    ),
+  ];
   try {
-    const point = quotedUtf8Decoder.decode(new Uint8Array(bytes.slice(index, index + length))).codePointAt(0);
-    return { length, escape: point !== undefined && [0xfe_ff, 0x85, 0x20_28, 0x20_29].includes(point) };
+    const point = quotedUtf8Decoder.decode(new Uint8Array(sequence)).codePointAt(0);
+    return {
+      length: sequence.length,
+      escape: point !== undefined && [0xfe_ff, 0x85, 0x20_28, 0x20_29].includes(point),
+      sequence,
+    };
   } catch {
-    return { length: 1, escape: true };
+    return { length: 1, escape: true, sequence: [byte] };
   }
 }
 
-/** `printByteSize`: a byte count in SI (`kB`, `MB`, ...) or IEC (`KiB`, `MiB`, ...) units. */
 function printByteSize(out: FormatOutput, value: bigint, binary: boolean, options: Options): void {
   if (value === 0n) return alignBuffer(out, utf8('0B'), options);
   const log2 = value.toString(2).length - 1;
@@ -755,16 +773,59 @@ function enumName(value: bigint, type: EnumType, info: TypeInfo): string | undef
   return info.enumFields(type).get(value)?.name;
 }
 
-/** The bytes of a byte string: a slice, a pointer to an array, or an array. */
-export function stringBytes(value: Value, type: Type): bigint[] {
-  if (value instanceof Slice) return value.values() as bigint[];
-  if (value instanceof Pointer) {
-    const array = value.load() as ZArray;
-    return array.values() as bigint[];
-  }
-  if (value instanceof ZArray) return value.values() as bigint[];
-  void type;
-  return [];
+interface ByteView extends Iterable<number> {
+  readonly length: number;
+  readonly get: (index: number) => number;
+}
+
+export function stringBytes(value: Value): ByteView {
+  const source = value instanceof Pointer ? (value.load() as ZArray) : (value as Slice | ZArray);
+  return byteView(source.length, (index) => {
+    spendMemory();
+    return Number(source.get(index));
+  });
+}
+
+// code-gauge-allow functionCognitiveComplexity 16 -- Streams three input bytes per quartet with bounded lazy reads and explicit padding.
+function base64Bytes(source: ByteView): ByteView {
+  const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+  let group = -1,
+    a = 0,
+    b = 0,
+    c = 0;
+  return byteView(Math.ceil(source.length / 3) * 4, (index) => {
+    const start = Math.floor(index / 4) * 3;
+    if (start !== group) {
+      group = start;
+      a = source.get(start);
+      b = start + 1 < source.length ? source.get(start + 1) : 0;
+      c = start + 2 < source.length ? source.get(start + 2) : 0;
+    }
+    switch (index % 4) {
+      case 0: {
+        return alphabet.codePointAt(a >> 2)!;
+      }
+      case 1: {
+        return alphabet.codePointAt(((a & 3) << 4) | (b >> 4))!;
+      }
+      case 2: {
+        return start + 1 < source.length ? alphabet.codePointAt(((b & 15) << 2) | (c >> 6))! : 0x3d;
+      }
+      default: {
+        return start + 2 < source.length ? alphabet.codePointAt(c & 63)! : 0x3d;
+      }
+    }
+  });
+}
+
+function byteView(length: number, get: (index: number) => number): ByteView {
+  return {
+    length,
+    get,
+    *[Symbol.iterator]() {
+      for (let index = 0; index < length; index++) yield get(index);
+    },
+  };
 }
 
 export function utf8(text: string): number[] {
@@ -776,12 +837,12 @@ function hexDigits(byte: number, upper: boolean): number[] {
   return utf8(upper ? text.toUpperCase() : text);
 }
 
-export function alignBuffer(out: FormatOutput, buffer: readonly number[], options: Options): void {
+export function alignBuffer(out: FormatOutput, buffer: readonly number[] | ByteView, options: Options): void {
   const width = options.width ?? buffer.length;
   checkFormatSize(out, out.length + Math.max(width, buffer.length));
   const padding = buffer.length < width ? width - buffer.length : 0;
   if (padding === 0) {
-    for (const byte of buffer) out.push(byte);
+    appendBuffer(out, buffer);
     return;
   }
   const fill = (count: number): void => {
@@ -789,19 +850,19 @@ export function alignBuffer(out: FormatOutput, buffer: readonly number[], option
   };
   switch (options.alignment) {
     case 'left': {
-      for (const byte of buffer) out.push(byte);
+      appendBuffer(out, buffer);
       fill(padding);
       break;
     }
     case 'center': {
       fill(Math.floor(padding / 2));
-      for (const byte of buffer) out.push(byte);
+      appendBuffer(out, buffer);
       fill(Math.floor((padding + 1) / 2));
       break;
     }
     default: {
       fill(padding);
-      for (const byte of buffer) out.push(byte);
+      appendBuffer(out, buffer);
     }
   }
 }
@@ -1028,9 +1089,15 @@ function hexFloatDigits(big: BigFloat, bits: FloatBits, upper: boolean, precisio
   return `0x${hex[0]}${point}${fraction}p${exponent}`;
 }
 
+function appendBuffer(out: FormatOutput, bytes: readonly number[] | ByteView): void {
+  const get = 'get' in bytes ? bytes.get : (index: number): number => bytes[index];
+  if (out.writeView) out.writeView(bytes.length, get);
+  else for (let index = 0; index < bytes.length; index++) out.push(get(index));
+}
+
 function appendBytes(out: FormatOutput, bytes: readonly number[]): void {
   checkFormatSize(out, out.length + bytes.length);
-  for (const byte of bytes) out.push(byte);
+  appendBuffer(out, bytes);
 }
 
 function checkFormatSize(out: FormatOutput, length: number): void {

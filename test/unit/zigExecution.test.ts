@@ -7918,3 +7918,114 @@ test('extended remainder with an infinite divisor meters finite result rounding'
   const source = `const std=@import("std");pub fn main()void{var x:f128=0x1p16000;var y:f128=std.math.inf(f128);_=&x;_=&y;for(0..10000)|_|{_=@rem(x,y);}}`;
   expect(executeProgram('zig', source)).toMatchObject({ kind: 'limitExceeded', limit: 'operations' });
 });
+
+test.each(['n==n', '-n<0', '@abs(-n)==n', '@min(-n,n) == -n'])(
+  'non-growing integer operations preserve maximum supported input width: %s',
+  (operation) => {
+    const source = `const std=@import("std");pub fn main()void{const n=1<<999999;std.debug.print("{}",.{${operation}});}`;
+    expect(executeProgram('zig', source)).toMatchObject({
+      kind: 'executed',
+      stderr: 'true',
+      uncaughtException: undefined,
+    });
+  }
+);
+
+test('growing integer intermediates remain bounded before multiplication', () => {
+  expect(executeProgram('zig', 'pub fn main()void{const n=1<<999999;_=n*n;}')).toMatchObject({
+    kind: 'limitExceeded',
+    limit: 'storage',
+  });
+});
+
+test.each([
+  '@divTrunc(x,3)',
+  '@divFloor(x,3)',
+  '@divCeil(x,3)',
+  '@divExact(x,2)',
+  '@mod(x,3)',
+  '@rem(x,3)',
+  '@shlExact(x,1)',
+  '@shrExact(x,1)',
+  '@abs(x)',
+  '@min(x,y)',
+  '@max(x,y)',
+])('wide integer builtin %s shares phase work accounting', (operation) => {
+  const setup = operation === '@abs(x)' ? 'var x:i65535=-(1<<32766);' : 'var x:u65535=1<<32766;';
+  const source = `const std=@import("std");pub fn main()void{${setup}_=&x;${operation.includes('y') ? 'var y:u65535=(1<<32766)+1;_=&y;' : ''}for(0..5000)|_|{_=${operation};}std.debug.print("ok",.{});}`;
+  expect(executeProgram('zig', source)).toMatchObject({ kind: 'limitExceeded', limit: 'operations' });
+});
+
+test.each([0, 1])('gcd checks proven negative values in argument position %s', (position) => {
+  const args = position === 0 ? 'blk:{break :blk -1;},3' : '3,blk:{break :blk -1;}';
+  expect(executeProgram('zig', `const std=@import("std");pub fn main()void{_=std.math.gcd(${args});}`)).toMatchObject({
+    kind: 'compileError',
+  });
+  const valid = `const std=@import("std");pub fn main()void{const x=std.math.gcd(${position === 0 ? 'blk:{std.debug.print("g",.{});break :blk 3;},9' : '9,blk:{std.debug.print("g",.{});break :blk 3;}'});std.debug.print("{}",.{x});}`;
+  expect(executeProgram('zig', valid)).toMatchObject({ kind: 'executed', stderr: 'g3', uncaughtException: undefined });
+});
+
+test.each(['u32760', 'i32760'])('weighted random %s selections meter wide accumulations and bounds', (type) => {
+  const source = `const std=@import("std");pub fn main()void{var p=std.Random.DefaultPrng.init(1);var x:${type}=1<<32000;_=&x;const a:[400]${type}=@splat(x);for(0..20)|_|{_=p.random().weightedIndex(${type},&a);}}`;
+  expect(executeProgram('zig', source)).toMatchObject({ kind: 'limitExceeded', limit: 'operations' });
+});
+
+test.each([
+  ['fn f(x:anytype)@TypeOf(x){return x+1;}', '9', 'x', 'g10'],
+  ['fn f(x:anytype)@TypeOf(x){return x;}', 'u8', 'x', 'gu8'],
+])('dependent comptime-only generic results retain caller effects: %s', (declaration, argument, output, expected) => {
+  const source = `const std=@import("std");${declaration}pub fn main()void{const x=f(blk:{std.debug.print("g",.{});break :blk ${argument};});std.debug.print("{any}",.{${output}});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: expected,
+    uncaughtException: undefined,
+  });
+});
+
+test.each(['struct{t:type}', 'union(enum){t:type}'])(
+  'dependent %s identity results retain argument effects',
+  (type) => {
+    const source = `const std=@import("std");const D=${type};fn f(o:anytype)@TypeOf(o){return o;}pub fn main()void{const o:?D=null;const x=f((blk:{std.debug.print("g",.{});break :blk &o;}).*);std.debug.print("{}",.{x==null});}`;
+    expect(executeProgram('zig', source)).toMatchObject({
+      kind: 'executed',
+      stderr: 'gtrue',
+      uncaughtException: undefined,
+    });
+  }
+);
+
+test.each([
+  'fn f(x:anytype)type{return x;}pub fn main()void{_=f(blk:{std.debug.print("g",.{});break :blk u8;});}',
+  'fn f(x:anytype)@TypeOf(x){std.debug.print("h",.{});return x+1;}pub fn main()void{_=f(blk:{std.debug.print("g",.{});break :blk 9;});}',
+  'fn f(x:anytype,z:u8)@TypeOf(x){_=z;return x+1;}pub fn main()void{var z:u8=7;_=&z;_=f(blk:{std.debug.print("g",.{});break :blk 9;},z);}',
+])('generic compile-time calls still reject forced effects or runtime values: %s', (body) => {
+  expect(executeProgram('zig', `const std=@import("std");${body}`)).toMatchObject({ kind: 'compileError' });
+});
+
+test.each(['q', 'x', 'b64'])('formatted byte strings {%s} meter actual byte visits for counting sinks', (format) => {
+  const source = `const std=@import("std");pub fn main()void{const a:[200000]u8=@splat(97);for(0..3)|_|{_=std.fmt.count("{${format}}",.{&a});}}`;
+  expect(executeProgram('zig', source)).toMatchObject({ kind: 'limitExceeded', limit: 'operations' });
+});
+
+test('plain string counting uses length metadata without traversing full buffers', () => {
+  const source = `const std=@import("std");pub fn main()void{const a:[200000]u8=@splat(97);for(0..3)|_|{std.debug.print("{}|",.{std.fmt.count("{s}",.{&a})});}}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: '200000|200000|200000|',
+    uncaughtException: undefined,
+  });
+});
+
+test.each([0, 1, 2, 3, 47, 48, 49, 63, 64, 65, 255, 256])(
+  'base64 live views preserve bytes, padding and counts at length %s',
+  (length) => {
+    const bytes = Array.from({ length }, (_, i) => i);
+    const expected = Buffer.from(bytes).toString('base64');
+    const source = `const std=@import("std");pub fn main()void{const a=[_]u8{${bytes.join(',')}};std.debug.print("{b64}|{}",.{&a,std.fmt.count("{b64}",.{&a})});}`;
+    expect(executeProgram('zig', source)).toMatchObject({
+      kind: 'executed',
+      stderr: `${expected}|${expected.length}`,
+      uncaughtException: undefined,
+    });
+  }
+);

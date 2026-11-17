@@ -372,7 +372,7 @@ export function floatSqrt(value: AnyFloat, bits: FloatBits): AnyFloat {
   mantissa <<= BigInt(extra);
   exponent -= extra;
   const root = integerSqrt(mantissa);
-  spendIntegerOperation(root, root, true, spendMemory);
+  spendIntegerOperation(root, root, 'multiply', spendMemory);
   const exact = root * root === mantissa;
   // A sticky bit makes the inexact root round as the exact one would.
   spendIntegerShift(root, 1n, true, spendMemory);
@@ -389,13 +389,13 @@ export function integerSqrt(value: bigint, spend: (cost: number) => void = spend
   spendIntegerShift(1n, shift, true, spend);
   let x = 1n << shift;
   for (;;) {
-    spendIntegerOperation(value, x, false, spend);
+    spendIntegerOperation(value, x, 'read', spend);
     const quotient = value / x;
-    spendIntegerOperation(x, quotient, false, spend);
+    spendIntegerOperation(x, quotient, 'add', spend);
     const sum = x + quotient;
     spendIntegerShift(sum, 1n, false, spend);
     const y = sum >> 1n;
-    spendIntegerOperation(y, x, false, spend);
+    spendIntegerOperation(y, x, 'read', spend);
     if (y >= x) return x;
     x = y;
   }

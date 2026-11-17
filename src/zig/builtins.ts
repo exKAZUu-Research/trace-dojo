@@ -1,3 +1,4 @@
+import { ExecutionLimitError } from '../interpreter/limits';
 import { transferCost } from './allocation';
 import {
   checkShiftAmount,
@@ -15,7 +16,7 @@ import {
   rem,
 } from './arith';
 import type { Expression, ExpressionOf, Span } from './ast';
-// code-gauge-allow-file fileNcss 699 -- The file holds one layer of the compiler, whose parts share its private state.
+// code-gauge-allow-file fileNcss 713 -- The file holds one layer of the compiler, whose parts share its private state.
 import { enumLookup } from './enumLookup';
 import { ExpressionCompiler, log2IntType } from './expressions';
 import {
@@ -35,7 +36,7 @@ import {
   signBit,
   truncateToBigInt,
 } from './floats';
-import { spendIntegerShift } from './integerWork';
+import { integerOperationWork, spendIntegerShift } from './integerWork';
 import { sizeOf } from './layout';
 import { importStd } from './library/std';
 import { MemoryFault } from './memoryFault';
@@ -612,7 +613,7 @@ export abstract class BuiltinCompiler extends ExpressionCompiler {
     return this.derived(operand, int, (value) => intCast(value as bigint, int));
   }
 
-  // code-gauge-allow functionNcss 54 -- Keeps the analysis and the generated code of one construct together, as Zig's Sema does.
+  // code-gauge-allow functionNcss 55 -- Keeps the analysis and the generated code of one construct together, as Zig's Sema does.
   // code-gauge-allow functionCognitiveComplexity 29 -- Keeps the analysis and the generated code of one construct together, as Zig's Sema does.
   private divisionBuiltin(name: string, expression: ExpressionOf<'builtinCall'>, resultType: Type | undefined): TExpr {
     const [leftSyntax, rightSyntax] = expression.args;
@@ -651,9 +652,10 @@ export abstract class BuiltinCompiler extends ExpressionCompiler {
     }
     const int = type.kind === 'int' ? type : undefined;
     if (right.known && (right.value as bigint) === 0n) this.error(rightSyntax, '0 で割っています。');
-    const operation = (a: Value, b: Value): Value => {
+    const operation = (a: Value, b: Value, frame?: Frame): Value => {
       const x = a as bigint;
       const y = b as bigint;
+      this.integerWork(x, y, 'read', frame);
       switch (name) {
         case '@divTrunc': {
           return divTrunc(x, y, int);
@@ -678,11 +680,12 @@ export abstract class BuiltinCompiler extends ExpressionCompiler {
     if (left.known && right.known) {
       try {
         return known(type, operation(left.value, right.value), expression);
-      } catch {
+      } catch (error) {
+        if (error instanceof ExecutionLimitError) throw error;
         return this.error(expression, `${name} の計算ができません（0 で割る、割り切れない、あふれるなど）。`);
       }
     }
-    return this.combine([left, right], type, ([a, b]) => operation(a, b), expression);
+    return this.combine([left, right], type, ([a, b], frame) => operation(a, b, frame), expression);
   }
 
   /** `@min` and `@max`, whose integer result type Zig narrows to the range the result can take. */
@@ -705,8 +708,11 @@ export abstract class BuiltinCompiler extends ExpressionCompiler {
       return this.error(expression, `${name} は数の型にだけ使えます（${typeName(peer)} 型です）。`);
     }
     const isMax = name === '@max';
-    const pick = (a: Value, b: Value, comptime = false): Value => {
-      if (typeof a === 'bigint' && typeof b === 'bigint') return isMax ? (a > b ? a : b) : a < b ? a : b;
+    const pick = (a: Value, b: Value, comptime = false, frame?: Frame): Value => {
+      if (typeof a === 'bigint' && typeof b === 'bigint') {
+        this.integerWork(a, b, 'read', frame);
+        return isMax ? (a > b ? a : b) : a < b ? a : b;
+      }
       return minMaxFloat(a as AnyFloat, b as AnyFloat, isMax, comptime);
     };
     let type: Type = peer;
@@ -730,9 +736,9 @@ export abstract class BuiltinCompiler extends ExpressionCompiler {
         ? operands
         : operands.map((operand) => (operand.type === peer ? operand : this.coerce(operand, peer, operand.span)));
     const all = coerced.every((operand) => operand.known);
-    const pickAll = (values: Value[], comptime = false): Value => {
+    const pickAll = (values: Value[], comptime = false, frame?: Frame): Value => {
       let result = values[0];
-      for (const value of values.slice(1)) result = pick(result, value, comptime);
+      for (const value of values.slice(1)) result = pick(result, value, comptime, frame);
       return result;
     };
     if (all)
@@ -744,20 +750,19 @@ export abstract class BuiltinCompiler extends ExpressionCompiler {
         ),
         expression
       );
-    return this.combine(coerced, type, (values) => pickAll(values), expression);
+    return this.combine(coerced, type, (values, frame) => pickAll(values, false, frame), expression);
   }
 
   private absBuiltin(expression: ExpressionOf<'builtinCall'>, resultType: Type | undefined): TExpr {
     const operand = this.compile(expression.args[0], resultType);
     const type = operand.type;
-    if (type.kind === 'int') {
-      const result = type.signed ? intType(false, type.bits) : type;
-      return this.derived(operand, result, (value) =>
-        (value as bigint) < 0n ? -(value as bigint) : (value as bigint)
-      );
+    if (type.kind === 'int' || type.kind === 'comptime_int') {
+      const result = type.kind === 'int' && type.signed ? intType(false, type.bits) : type;
+      return this.derived(operand, result, (value, frame) => {
+        this.integerWork(value as bigint, 0n, 'read', frame);
+        return (value as bigint) < 0n ? -(value as bigint) : value;
+      });
     }
-    if (type.kind === 'comptime_int')
-      return this.derived(operand, type, (value) => ((value as bigint) < 0n ? -(value as bigint) : (value as bigint)));
     if (type.kind === 'float' || type.kind === 'comptime_float') {
       return this.derived(operand, type, (value) => {
         const x = value as AnyFloat;
@@ -802,6 +807,7 @@ export abstract class BuiltinCompiler extends ExpressionCompiler {
       { name: '0', type, hasDefault: false },
       { name: '1', type: bit, hasDefault: false },
     ]);
+    const work = integerOperationWork(name);
     const compute = (a: Value, b: Value, frame?: Frame): Value => {
       const x = a as bigint;
       const y = b as bigint;
@@ -809,7 +815,7 @@ export abstract class BuiltinCompiler extends ExpressionCompiler {
       if (name === '@shlWithOverflow') {
         checkShiftAmount(y, type);
         spendIntegerShift(x, y, true, spend);
-      } else this.integerWork(x, y, name === '@mulWithOverflow', frame);
+      } else this.integerWork(x, y, work, frame);
       const exact =
         name === '@addWithOverflow'
           ? x + y
@@ -835,17 +841,25 @@ export abstract class BuiltinCompiler extends ExpressionCompiler {
     return this.combine(
       [left, right],
       type,
-      ([a, b]) => {
+      ([a, b], frame) => {
         const x = a as bigint;
         const y = b as bigint;
+        const spend = (cost: number): void => (frame ? frame.runtime.spend(cost) : this.spendCompilation(cost));
         checkShiftAmount(y, type);
         if (name === '@shlExact') {
+          spendIntegerShift(x, y, true, spend);
           const shifted = x << y;
+          this.integerWork(shifted, 0n, 'read', frame);
           if (wrapInt(shifted, type) !== shifted) panic(PANIC.leftShiftOverflow);
           return shifted;
         }
-        if ((x >> y) << y !== x) panic(PANIC.rightShiftOverflow);
-        return x >> y;
+        spendIntegerShift(x, y, false, spend);
+        const shifted = x >> y;
+        spendIntegerShift(shifted, y, true, spend);
+        const restored = shifted << y;
+        this.integerWork(restored, x, 'read', frame);
+        if (restored !== x) panic(PANIC.rightShiftOverflow);
+        return shifted;
       },
       expression
     );

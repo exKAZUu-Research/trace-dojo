@@ -28,7 +28,7 @@ import {
   negate,
   parseFloatLiteral,
 } from './floats';
-import { spendIntegerOperation, spendIntegerShift } from './integerWork';
+import { integerOperationWork, type IntegerWork, spendIntegerOperation, spendIntegerShift } from './integerWork';
 import { optionalNicheBits, sizeOf } from './layout';
 import { spendMemory } from './memoryAccounting';
 import { callableNative } from './nativeAdapter';
@@ -978,7 +978,7 @@ export abstract class ExpressionCompiler extends SemaBase {
 
   private integerUnary(operand: TExpr, compute: (value: bigint) => bigint): TExpr {
     return this.derived(operand, operand.type, (value, frame) => {
-      this.integerWork(value as bigint, 0n, false, frame);
+      this.integerWork(value as bigint, 0n, 'read', frame);
       return compute(value as bigint);
     });
   }
@@ -1181,7 +1181,7 @@ export abstract class ExpressionCompiler extends SemaBase {
       case 'enum': {
         if (type.kind === 'enum' && ordered) this.error(span, `enum の値は、大小を比べられません。`);
         return (a, b) => {
-          spendIntegerOperation(a as bigint, b as bigint, false, spendMemory);
+          spendIntegerOperation(a as bigint, b as bigint, 'read', spendMemory);
           return (a as bigint) < (b as bigint) ? -1 : (a as bigint) > (b as bigint) ? 1 : 0;
         };
       }
@@ -1271,10 +1271,12 @@ export abstract class ExpressionCompiler extends SemaBase {
     right = this.coerce(right, type, expression.right);
     this.checkDivision(operator, type, left, right, expression);
     const compute = this.operation(operator, type, expression);
+    const work = integerOperationWork(operator);
     const operation = (a: Value, b: Value, frame?: Frame): Value => {
-      if (type.kind === 'int' || type.kind === 'comptime_int')
-        this.integerWork(a as bigint, b as bigint, operator.startsWith('*'), frame);
-      return compute(a, b);
+      if (type.kind === 'int' || type.kind === 'comptime_int') this.integerWork(a as bigint, b as bigint, work, frame);
+      const result = compute(a, b);
+      if (type.kind === 'comptime_int' && work === 'read') this.integerWork(result as bigint, 0n, 'read', frame);
+      return result;
     };
     // A float of a fixed type divided by zero gives an infinity or NaN, as at run time.
     const dividesByZero =
@@ -1480,8 +1482,8 @@ export abstract class ExpressionCompiler extends SemaBase {
     );
   }
 
-  protected integerWork(left: bigint, right: bigint, multiply: boolean, frame?: Frame): void {
-    spendIntegerOperation(left, right, multiply, (cost) =>
+  protected integerWork(left: bigint, right: bigint, operation: IntegerWork, frame?: Frame): void {
+    spendIntegerOperation(left, right, operation, (cost) =>
       frame ? frame.runtime.spend(cost) : this.spendCompilation(cost)
     );
   }

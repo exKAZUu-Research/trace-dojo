@@ -138,7 +138,7 @@ function integerLogarithm(base: bigint, value: bigint, spend: (cost: number) => 
   if (base === 10n) return BigInt(value.toString().length - 1);
   let result = 0n;
   while (value >= base) {
-    spendIntegerOperation(value, base, false, spend);
+    spendIntegerOperation(value, base, 'read', spend);
     value /= base;
     result++;
   }
@@ -256,7 +256,7 @@ function checkedIntegerResult(
   return computed(errorUnionOf(OVERFLOW_ERROR, type), operands, span, ([a, b], frame) => {
     const left = a as bigint,
       right = b as bigint;
-    spendIntegerOperation(left, right, operator === '*', nativeBudget(sema, frame));
+    spendIntegerOperation(left, right, operator === '*' ? 'multiply' : 'add', nativeBudget(sema, frame));
     const result = operator === '+' ? left + right : operator === '-' ? left - right : left * right;
     return type.kind === 'int' && !fitsInt(result, type) ? ErrorValue.of('Overflow') : result;
   });
@@ -349,7 +349,7 @@ function intDivision(
         if (errors === MOD_ERRORS && (y as bigint) < 0n) return ErrorValue.of('NegativeDenominator');
         let result: bigint;
         try {
-          spendIntegerOperation(x as bigint, y as bigint, false, nativeBudget(sema, frame));
+          spendIntegerOperation(x as bigint, y as bigint, 'read', nativeBudget(sema, frame));
           result = compute(x as bigint, y as bigint);
         } catch (error) {
           if (error instanceof UnexpectedRemainder) return ErrorValue.of('UnexpectedRemainder');
@@ -429,7 +429,8 @@ function gcdMember(lcm: boolean): Member {
     if (
       !lcm &&
       ((type.kind === 'int' && type.signed) ||
-        (type.kind === 'comptime_int' && [a, b].some((x) => (x.value as bigint) < 0n)))
+        (type.kind === 'comptime_int' &&
+          [a, b].some((x) => ((staticResultOf(x)?.value ?? sema.knownValue(x, '最大公約数の引数')) as bigint) < 0n)))
     )
       return sema.error(call.span, 'std.math.gcd の引数は符号なし整数にしてください。');
     return computed(type, [sema.coerce(a, type), sema.coerce(b, type)], call.span, ([x, y], frame) =>
@@ -445,9 +446,9 @@ function gcdResult(left: bigint, right: bigint, type: Type, lcm: boolean, spend:
   const divisor = gcd(left, right, spend);
   if (!lcm) return divisor;
   if (divisor === 0n) return 0n;
-  spendIntegerOperation(left, divisor, false, spend);
+  spendIntegerOperation(left, divisor, 'read', spend);
   const quotient = left / divisor;
-  spendIntegerOperation(quotient, right, true, spend);
+  spendIntegerOperation(quotient, right, 'multiply', spend);
   const product = quotient * right;
   const result = product < 0n ? -product : product;
   return type.kind === 'int' ? checked(result, type) : result;
@@ -457,7 +458,7 @@ function gcd(a: bigint, b: bigint, spend: (cost: number) => void): bigint {
   let x = a < 0n ? -a : a;
   let y = b < 0n ? -b : b;
   while (y !== 0n) {
-    spendIntegerOperation(x, y, false, spend);
+    spendIntegerOperation(x, y, 'read', spend);
     [x, y] = [y, x % y];
   }
   return x;
@@ -481,17 +482,17 @@ function powi(x: bigint, y: bigint, type: IntType, spend: (cost: number) => void
   let accumulator = 1n;
   while (exponent > 1n) {
     if ((exponent & 1n) === 1n) {
-      spendIntegerOperation(accumulator, base, true, spend);
+      spendIntegerOperation(accumulator, base, 'multiply', spend);
       accumulator *= base;
       if (!fitsInt(accumulator, type)) return 'Overflow';
     }
     exponent >>= 1n;
-    spendIntegerOperation(base, base, true, spend);
+    spendIntegerOperation(base, base, 'multiply', spend);
     base *= base;
     if (!fitsInt(base, type)) return 'Overflow';
   }
   if (exponent === 1n) {
-    spendIntegerOperation(accumulator, base, true, spend);
+    spendIntegerOperation(accumulator, base, 'multiply', spend);
     accumulator *= base;
     if (!fitsInt(accumulator, type)) return 'Overflow';
   }
