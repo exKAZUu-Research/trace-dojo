@@ -6139,3 +6139,42 @@ test('enum literals retain equality and inequality', () => {
     executeProgram('zig', `const std=@import("std");pub fn main()void{std.debug.print("{} {}",.{.a==.a,.a!=.b});}`)
   ).toMatchObject({ kind: 'executed', stderr: 'true true', uncaughtException: undefined });
 });
+
+test.each(['_=q.pop();', 'q.clearRetainingCapacity();'])(
+  'queue removals preserve storage reached through independent pointers: %s',
+  (remove) => {
+    const source = `const std=@import("std");fn cmp(_:void,a:u8,b:u8)std.math.Order{return std.math.order(a,b);}pub fn main(init:std.process.Init)!void{var q:std.PriorityQueue(u8,void,cmp)=.empty;defer q.deinit(init.gpa);try q.push(init.gpa,1);try q.push(init.gpa,2);const p=&q.items[1];${remove}std.debug.print("{}",.{p.*});}`;
+    expect(executeProgram('zig', source)).toMatchObject({
+      kind: 'executed',
+      stderr: '2',
+      uncaughtException: undefined,
+    });
+  }
+);
+
+test.each([false, true])('cleared queue roots preserve only live views and independent pointers: %s', (retain) => {
+  const source = `const std=@import("std");fn cmp(_:void,a:Turtle,b:Turtle)std.math.Order{_=a;_=b;return .eq;}pub fn main(init:std.process.Init)!void{var q:std.PriorityQueue(Turtle,void,cmp)=.empty;defer q.deinit(init.gpa);try q.push(init.gpa,Turtle.init(0,1));${retain ? 'const p=&q.items[0];' : ''}q.clearRetainingCapacity();const t=Turtle.init(0,0);std.debug.print("{}",.{t.canMoveForward()});${retain ? '_=p.*;' : ''}}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: retain ? 'false' : 'true',
+    uncaughtException: undefined,
+  });
+});
+
+test.each(['A', '?A', '[1]A'])('shared by-value cycle queries stay within the deadline for %s', (child) => {
+  const n = 40_000;
+  const a = Array.from({ length: n }, (_, index) => `f${index}:u8`).join(',');
+  const b = Array.from({ length: n }, (_, index) => `f${index}:${child}`).join(',');
+  const source = `const A=struct{${a}};const B=struct{${b}};pub fn main()void{var a:A=undefined;_=&a;var b:B=undefined;_=&b;}`;
+  const result = spawnSync(
+    'bun',
+    [
+      '-e',
+      `import {readFileSync} from 'node:fs';import {executeProgram} from './src/interpreter/program';process.stdout.write(JSON.stringify(executeProgram('zig',readFileSync(0,'utf8'))));`,
+    ],
+    { input: source, encoding: 'utf8', timeout: 5000 }
+  );
+  expect(result.error).toBeUndefined();
+  expect(result.status, result.stderr).toBe(0);
+  expect(JSON.parse(result.stdout)).toMatchObject({ kind: 'limitExceeded' });
+});

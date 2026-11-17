@@ -539,8 +539,6 @@ function priorityQueueType(
     store(frame, items, index, last);
     const shrunk = new Slice(items.target, items.start, items.length - 1);
     queue.slots[0] = shrunk;
-    frame.runtime.spend(2 * transferCost(element));
-    items.target.slots[items.start + shrunk.length] = undefinedValue(element);
     return withHeldValues(frame, [item, last], () => {
       if (index === shrunk.length) return item;
       if (index === 0) {
@@ -587,13 +585,8 @@ function priorityQueueType(
     ),
     count: method('count', [], USIZE, false, (_, queue) => BigInt((queue.slots[0] as Slice).length)),
     capacity: method('capacity', [], USIZE, false, (_, queue) => queue.slots[1]),
-    clearRetainingCapacity: method('clearRetainingCapacity', [], VOID, false, (frame, queue) => {
+    clearRetainingCapacity: method('clearRetainingCapacity', [], VOID, false, (_, queue) => {
       const items = queue.slots[0] as Slice;
-      if (sizeOf(element) !== 0) {
-        frame.runtime.spend(items.length * 2 * transferCost(element));
-        for (let index = 0; index < items.length; index++)
-          items.target.slots[items.start + index] = undefinedValue(element);
-      }
       queue.slots[0] = new Slice(items.target, items.start, 0);
       return;
     }),

@@ -517,8 +517,9 @@ export abstract class SemaBase implements SemaApi {
     });
     this.resolvingFields--;
     type.fields = fields;
+    const seen = new Set<Type>();
     for (const [index, field] of fields.entries()) {
-      if (this.holdsByValue(field.type, type, new Set())) {
+      if (this.holdsByValue(field.type, type, seen)) {
         this.error(
           syntax.fields[index],
           `構造体 ${typeName(type)} が、フィールドに自分自身を値として持っています（ポインタにしてください）。`
@@ -568,6 +569,7 @@ export abstract class SemaBase implements SemaApi {
 
   /** Whether a value of `type` contains a `target` in place, not behind a pointer, which would have no size. */
   private holdsByValue(type: Type, target: Type, seen: Set<Type>): boolean {
+    this.spendCompilation();
     if (type === target) return true;
     if (seen.has(type)) return false;
     seen.add(type);

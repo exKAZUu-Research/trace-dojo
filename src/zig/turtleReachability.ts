@@ -10,6 +10,7 @@ import {
   Some,
   type Value,
   ZArray,
+  zeroArrayElement,
   ZStruct,
   ZUnion,
 } from './values';
@@ -194,13 +195,15 @@ export class TurtleReachability {
     }
   }
 
-  // code-gauge-allow functionCognitiveComplexity 23 -- Traverses untyped temporaries and native storage without recursive host calls.
+  // code-gauge-allow functionCognitiveComplexity 24 -- Traverses untyped temporaries and native storage without recursive host calls.
+  // code-gauge-allow functionNcss 31 -- Keeps native handles, logical views and direct pointers in one root dispatcher.
   private children(item: object, push: Push, turtles: Set<unknown>): void {
     if (item instanceof ZUnion && item.backingReferences) {
       for (const reference of item.backingReferences()) push(reference);
-    } else if (item instanceof ZArray || item instanceof ZStruct || item instanceof ZUnion) {
+    } else if (item instanceof ZArray || item instanceof Slice) this.untypedSequence(item, push);
+    else if (item instanceof ZStruct || item instanceof ZUnion) {
       for (const value of item.slots) push(value);
-    } else if (item instanceof Pointer || item instanceof Slice) push(item.target);
+    } else if (item instanceof Pointer) push(item.load());
     else if (item instanceof Some) push(item.value);
     else if (item instanceof NativeHandle) {
       if (item.state.turtle) turtles.add(item.state.turtle);
@@ -209,6 +212,19 @@ export class TurtleReachability {
       for (const value of item) push(value);
     } else if ('slots' in item && Array.isArray((item as Slots).slots)) {
       for (const value of (item as Slots).slots) push(value);
+    }
+  }
+  private untypedSequence(value: ZArray | Slice, push: Push): void {
+    if (value.lengthValue === 0n) return;
+    const storage = value instanceof Slice ? value.target : value;
+    const singleton = storage instanceof ZArray ? zeroArrayElement(storage) : undefined;
+    if (singleton) {
+      push(singleton.value);
+      return;
+    }
+    for (let index = 0; BigInt(index) < value.lengthValue; index++) {
+      this.spend();
+      push(value.get(index));
     }
   }
 }
