@@ -7,7 +7,7 @@ import { TurtleWorld } from '../interpreter/turtleWorld';
 import type { FunctionDecl, Program } from './ast';
 import { dec } from './bytes';
 import type { CompileNotice } from './converter';
-import { collectBeforeAllocation, collectGarbage } from './garbage';
+import { collectBeforeAllocation, collectGarbage, releaseDropped } from './garbage';
 import { MersenneTwister } from './random';
 import {
   type Callable,
@@ -16,6 +16,7 @@ import {
   type PhpClass,
   PhpObject,
   Ref,
+  setDropHandler,
   type UserFunction,
   type Value,
 } from './values';
@@ -25,7 +26,10 @@ export const SCRIPT_PATH = '/main.php';
 
 /** A PHP exception (a Throwable object) propagating through the host stack. */
 export class PhpThrow {
-  constructor(readonly object: PhpObject) {}
+  constructor(readonly object: PhpObject) {
+    // The exception holds itself while it unwinds the statements it leaves, until a catch takes it.
+    if (current) current.thrown = object;
+  }
 }
 
 /** An error PHP cannot recover from, which ends the program with `Fatal error: ...`. */
@@ -159,10 +163,11 @@ export class Runtime {
 
   /** Allocates the handle of a new object, reusing the most recently freed one as PHP does. */
   newObject(cls: PhpClass): PhpObject {
-    if (!this.collecting) {
+    if (!this.collecting && this.mayHoldGarbage) {
       this.collecting = true;
       try {
         collectBeforeAllocation(this);
+        this.mayHoldGarbage = false;
       } finally {
         this.collecting = false;
       }
@@ -179,6 +184,37 @@ export class Runtime {
 
   /** The order in which the last reachability pass reached each object, which decides the order of releasing them. */
   reachOrder = new Map<PhpObject, number>();
+
+  /** The exception being thrown, which no variable holds while it unwinds. */
+  thrown: PhpObject | undefined;
+
+  /**
+   * How many native functions are running, whose values in flight (such as the array `array_map` builds) no root
+   * holds, so that releasing what a callback drops must wait until they return.
+   */
+  nativeCalls = 0;
+
+  /** The values the callbacks of each running native function returned, which it holds until it returns. */
+  nativeHeld: unknown[][] = [];
+
+  /**
+   * Whether garbage may exist that no release freed: a native function may have let go of values silently, or a
+   * release had to wait. The next allocation then collects it, so that the new object reuses a freed handle.
+   */
+  mayHoldGarbage = true;
+
+  /** Frees what letting go of some values frees, as {@link releaseDropped} describes, when that is safe now. */
+  release(dropped: unknown[]): void {
+    if (this.nativeCalls === 0) releaseDropped(this, dropped);
+    else this.mayHoldGarbage = true;
+  }
+
+  /** Lets go of a frame's temporaries from `mark` on, as PHP frees temporary values once they are used. */
+  dropTemporaries(frame: Frame, mark: number): void {
+    if (frame.temporaries.length <= mark) return;
+    const values = frame.temporaries.splice(mark);
+    this.release(values);
+  }
 
   freeObject(object: PhpObject): void {
     if (this.objects.get(object.id) !== object) return;
@@ -243,6 +279,8 @@ let current: Runtime | undefined;
 export function rt(): Runtime {
   return current as Runtime;
 }
+
+setDropHandler((values) => current?.release(values));
 
 export function withRuntime<T>(runtime: Runtime, run: () => T): T {
   const outer = current;

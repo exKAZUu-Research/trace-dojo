@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 673 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 680 -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import { ExecutionLimitError, LIMITS } from '../interpreter/limits';
 import {
@@ -85,9 +85,18 @@ export function evReturn(e: Expr): Value {
 }
 
 export function ev(e: Expr): Value {
+  if (RELEASING_OPERANDS.has(e.k)) {
+    // PHP frees the operands of these expressions as soon as it has used them.
+    const mark = rt().frame.temporaries.length;
+    const value = evChain(e);
+    return keepResult(mark, value === SHORT ? null : value) as Value;
+  }
   const value = evChain(e);
   return value === SHORT ? null : value;
 }
+
+/** The expressions that consume their operands, which PHP frees right after the expression. */
+const RELEASING_OPERANDS = new Set<Expr['k']>(['instanceof', 'unary', 'cast', 'cond', 'empty', 'prop', 'idx']);
 
 export function evChain(e: Expr): Chain {
   const runtime = rt();
@@ -327,9 +336,12 @@ function keepingResult(run: () => Chain): Chain {
 
 /** Releases the temporaries held since `mark`, keeping only a call's result, as {@link keepingResult} describes. */
 function keepResult(mark: number, result: Chain): Chain {
-  const frame = rt().frame;
-  frame.temporaries.length = mark;
-  if (result instanceof PhpObject || result instanceof PhpArray) frame.temporaries.push(result);
+  const runtime = rt();
+  const frame = runtime.frame;
+  const keep = result instanceof PhpObject || result instanceof PhpArray;
+  // The result stays held while the temporaries it was made from are released.
+  if (keep) frame.temporaries.splice(mark, 0, result);
+  runtime.dropTemporaries(frame, keep ? mark + 1 : mark);
   return result;
 }
 

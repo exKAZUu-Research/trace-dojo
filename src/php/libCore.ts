@@ -24,6 +24,7 @@ import {
   E_USER_WARNING,
   E_WARNING,
   emitError,
+  probe,
   throwError,
   warn,
 } from './errors';
@@ -338,7 +339,7 @@ export function isCallable(value: Value): boolean {
   try {
     if (value instanceof PhpObject) return isClosure(value) || value.cls.findMethod('__invoke') !== undefined;
     if (typeof value !== 'string' && !(value instanceof PhpArray)) return false;
-    callTargetOf(value, false);
+    probe(() => callTargetOf(value, false));
     return true;
   } catch (error) {
     if (error instanceof UnsupportedFeatureError) throw error;

@@ -1,3 +1,4 @@
+// code-gauge-allow-file fileNcss 417 -- Holds the cases of one concern of the interpreter, which share their helpers.
 import type { TurtleState } from '../interpreter/turtleWorld';
 import type { Frame, Runtime } from './runtime';
 import { type ClosureData, isClosure, PhpArray, PhpObject, Ref, type Slot } from './values';
@@ -17,10 +18,11 @@ export function setDestructor(run: (object: PhpObject) => void): void {
  * stays until the end, since PHP's counting cannot free it either, unless `cycles` asks to free those too, as
  * `gc_collect_cycles` does. Returns the number of objects and arrays of objects freed.
  */
-// code-gauge-allow functionCognitiveComplexity 20 -- Visits every kind of runtime value that can hold references.
+// code-gauge-allow functionCognitiveComplexity 22 -- Visits every kind of runtime value that can hold references.
 // code-gauge-allow functionNcss 38 -- Visits every kind of runtime value that can hold references.
 export function collectGarbage(runtime: Runtime, cycles = false): number {
-  if (runtime.objects.size === 0) return 0;
+  // While a release runs destructors, it frees the rest of what it released itself, in PHP's order.
+  if (runtime.objects.size === 0 || (releasing > 0 && !cycles)) return 0;
   runtime.spend();
   const previousOrder = runtime.reachOrder;
   const reached = mark(runtime);
@@ -56,6 +58,113 @@ export function collectGarbage(runtime: Runtime, cycles = false): number {
   for (const object of handles) if (!after.has(object)) runtime.freeObject(object);
   retainTurtles(runtime, after);
   return collected;
+}
+
+/**
+ * Frees what letting go of `dropped` frees, at once and in PHP's order, as PHP's reference counting does when a
+ * variable, element, property, or temporary lets go of its value. An object that nothing reachable holds any more is
+ * destroyed from the dropped values outward: its destructor runs, then what it holds is released in order, then its
+ * handle returns to the free list. Objects on a cycle stay, as reference counting cannot free them.
+ */
+export function releaseDropped(runtime: Runtime, dropped: unknown[]): void {
+  if (runtime.shuttingDown || runtime.objects.size === 0 || runtime.objects.size > ALLOCATION_CHECK_LIMIT) return;
+  if (!dropped.some((value) => mayHoldObject(value))) return;
+  const within = objectsWithin(dropped);
+  if (within.length === 0 || heldDirectly(runtime, within)) return;
+  runtime.spend();
+  const reached = mark(runtime);
+  const freed = new Set(freeable(within.filter((object) => !reached.has(object))));
+  if (freed.size === 0) return;
+  const release = new Release(runtime, freed, reached);
+  releasing++;
+  try {
+    for (const value of dropped) release.value(value);
+  } finally {
+    releasing--;
+  }
+  retainTurtles(runtime, release.reached);
+}
+
+/** One run of {@link releaseDropped}, which destroys the freed objects depth-first from the dropped values. */
+class Release {
+  private readonly visited = new Set<PhpObject>();
+  private readonly visitedArrays = new Set<PhpArray>();
+
+  constructor(
+    private readonly runtime: Runtime,
+    private readonly freed: Set<PhpObject>,
+    public reached: Set<PhpObject>
+  ) {}
+
+  value(value: unknown): void {
+    if (value instanceof Ref) this.value(value.v);
+    else if (value instanceof PhpArray) {
+      if (this.visitedArrays.has(value)) return;
+      this.visitedArrays.add(value);
+      for (const slot of value.map.values()) this.value(slot);
+    } else if (value instanceof PhpObject) this.object(value);
+  }
+
+  private object(object: PhpObject): void {
+    if (!this.freed.has(object) || this.visited.has(object) || this.runtime.objects.get(object.id) !== object) return;
+    this.visited.add(object);
+    if (!object.destructed && object.cls.findMethod('__destruct')) {
+      object.destructed = true;
+      this.runtime.destructibles--;
+      destruct(object);
+      // A destructor may store its object, or what it holds, somewhere reachable again.
+      this.reached = mark(this.runtime);
+      for (const freed of this.freed) if (this.reached.has(freed)) this.freed.delete(freed);
+      if (!this.freed.has(object)) return;
+    }
+    const children: unknown[] = [];
+    pushObject(object, children);
+    for (const child of children) this.value(child);
+    this.runtime.freeObject(object);
+  }
+}
+
+/** How many releases are running, during which a collection would free their objects out of order. */
+let releasing = 0;
+
+/**
+ * Whether each object is held directly by a variable or a temporary of a running function, which keeps it alive
+ * without a full reachability pass.
+ */
+function heldDirectly(runtime: Runtime, objects: PhpObject[]): boolean {
+  const held = new Set<unknown>();
+  for (const frame of runtime.frames) {
+    for (const ref of frame.vars.values()) held.add(ref.v);
+    for (const value of frame.temporaries) held.add(value);
+    if (frame.thisObj) held.add(frame.thisObj);
+  }
+  return objects.every((object) => held.has(object));
+}
+
+function mayHoldObject(value: unknown): boolean {
+  return value instanceof PhpObject || (value instanceof PhpArray && value.composite) || value instanceof Ref;
+}
+
+/** The objects reachable from some values, through arrays, references, and what objects hold. */
+function objectsWithin(values: unknown[]): PhpObject[] {
+  const found = new Set<PhpObject>();
+  const seenArrays = new Set<PhpArray>();
+  const pending = [...values];
+  while (pending.length > 0) {
+    const item = pending.pop();
+    if (item instanceof Ref) pending.push(item.v);
+    else if (item instanceof PhpArray) {
+      if (!item.composite || seenArrays.has(item)) continue;
+      seenArrays.add(item);
+      pending.push(...item.map.values());
+    } else if (item instanceof PhpObject) {
+      if (found.has(item)) continue;
+      found.add(item);
+      pushObject(item, pending);
+    } else if (item instanceof Map) pending.push(...item.values());
+    else if (Array.isArray(item)) pending.push(...item);
+  }
+  return [...found];
 }
 
 /** The arrays that hold objects or arrays inside the freed objects, which `gc_collect_cycles` counts as well. */
@@ -101,7 +210,8 @@ export function mark(runtime: Runtime): Set<PhpObject> {
     for (const method of cls.methods.values()) if (method.fn.kind === 'user') roots.push(...method.fn.statics.values());
   }
   for (const value of runtime.constants.values()) roots.push(value);
-  roots.push(...runtime.held, runtime.exceptionHandler, ...runtime.replacedExceptionHandlers);
+  roots.push(...runtime.held, runtime.exceptionHandler, ...runtime.replacedExceptionHandlers, runtime.thrown);
+  for (const held of runtime.nativeHeld) roots.push(...held);
   for (const { handler } of runtime.errorHandlers) roots.push(handler);
   // A stack visits the first of the items pushed together first when they are pushed in reverse.
   const pending = roots.toReversed();
@@ -270,7 +380,6 @@ export function referencedObjects(object: PhpObject): PhpObject[] {
   const found: PhpObject[] = [];
   const pending: unknown[] = [];
   pushObject(object, pending);
-  pending.reverse();
   const seenArrays = new Set<PhpArray>();
   while (pending.length > 0) {
     const item = pending.shift();

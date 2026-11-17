@@ -17,7 +17,27 @@ export function setErrorFactories(
 
 /** Throws a PHP exception of a builtin class, such as `TypeError`. */
 export function throwError(className: string, message: string): never {
+  if (probes > 0) throw new ProbeFailure();
   throw new PhpThrow(createThrowable(className, message));
+}
+
+/** How many checks are running that only ask whether code would throw, such as `is_callable`. */
+let probes = 0;
+
+/** The failure of a check that {@link probe} runs, which PHP reports without creating an exception object. */
+export class ProbeFailure {}
+
+/**
+ * Runs a check that only asks whether code succeeds: an error it raises throws {@link ProbeFailure} instead of an
+ * exception object, since PHP's checks create none, which would take an object handle.
+ */
+export function probe<T>(check: () => T): T {
+  probes++;
+  try {
+    return check();
+  } finally {
+    probes--;
+  }
 }
 
 export function newThrowable(className: string, message: string, code = 0n): PhpObject {

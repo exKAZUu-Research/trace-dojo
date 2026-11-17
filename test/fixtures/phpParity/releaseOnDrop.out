@@ -1,0 +1,62 @@
+ctor a
+ctor b
+ctor a2
+dtor a
+1
+ctor l0
+ctor l1
+ctor l2
+dtor l2
+5
+dtor l0
+1
+dtor l1
+4
+ctor x
+ctor xo
+ctor xl1
+ctor xl2
+dtor x
+dtor xo
+dtor xl1
+dtor xl2
+4
+ctor p
+ctor q
+dtor p
+4
+ctor t
+dtor t
+5
+ctor arg
+dtor arg
+arg
+1
+ctor k1
+ctor k2
+dtor k1
+1
+dtor q
+1
+ctor f1
+ctor f2
+in f1
+in f2
+dtor f1
+1
+dtor f2
+8
+ctor e
+caught
+9
+ctor s1
+
+Deprecated: Method SplObjectStorage::attach() is deprecated since 8.5, use method SplObjectStorage::offsetSet() instead in /main.php on line 17
+dtor s1
+9
+end
+dtor e
+dtor q
+dtor b
+dtor a2
+dtor k2

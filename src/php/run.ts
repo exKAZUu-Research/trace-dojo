@@ -163,7 +163,8 @@ function destroyGlobals(runtime: Runtime): void {
       const ref = runtime.globalFrame.vars.get(name);
       if (!ref) continue;
       const value = ref.v;
-      if (!(value instanceof PhpObject) || ref.rc > 1 || holderCounts(runtime).get(value) !== 1) continue;
+      // A variable that became a reference stays one, which this pass skips even when nothing else holds it.
+      if (!(value instanceof PhpObject) || ref.isRef || holderCounts(runtime).get(value) !== 1) continue;
       runtime.globalFrame.vars.delete(name);
       removed = true;
       runtime.collectGarbage();

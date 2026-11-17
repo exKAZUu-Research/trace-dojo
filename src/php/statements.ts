@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 521 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 522 -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import { ExecutionLimitError } from '../interpreter/limits';
 import { assignTo, bindRef, destructure, placeOf, unsetTarget } from './assignment';
@@ -165,7 +165,7 @@ function execStmt(statement: Stmt, seek?: string): Completion {
       }
       case 'while': {
         for (;;) {
-          frame.temporaries.length = held;
+          runtime.dropTemporaries(frame, held);
           runtime.row = statement.row;
           if (!toBool(ev(statement.cond))) return undefined;
           const result = loopBody(statement.body);
@@ -175,7 +175,7 @@ function execStmt(statement: Stmt, seek?: string): Completion {
       }
       case 'do': {
         for (;;) {
-          frame.temporaries.length = held;
+          runtime.dropTemporaries(frame, held);
           const result = loopBody(statement.body);
           if (result !== 'next') return result;
           runtime.row = statement.row;
@@ -246,7 +246,7 @@ function execStmt(statement: Stmt, seek?: string): Completion {
       }
     }
   } finally {
-    frame.temporaries.length = held;
+    runtime.dropTemporaries(frame, held);
     if (runtime.destructibles > 0 && !runtime.shuttingDown) collectGarbage(runtime);
   }
 }
@@ -313,7 +313,7 @@ function forStatement(statement: Extract<Stmt, { k: 'for' }>, held: number): Com
     runtime.steps.step(statement.row);
   }
   for (;;) {
-    frame.temporaries.length = held;
+    runtime.dropTemporaries(frame, held);
     runtime.row = statement.row;
     let proceed = true;
     for (const [index, e] of statement.cond.entries()) {
@@ -398,6 +398,7 @@ function tryStatement(statement: Extract<Stmt, { k: 'try' }>, seek?: string): Co
             runtime.row = handler.row;
             // Unwinding released the values the throwing code held, which PHP frees before it binds the exception.
             runtime.frame.temporaries.push(error.object);
+            runtime.thrown = undefined;
             collectBeforeAllocation(runtime);
             if (handler.varName !== undefined) new VarPlace(runtime.frame, handler.varName).set(error.object);
             completion = execList(handler.body);

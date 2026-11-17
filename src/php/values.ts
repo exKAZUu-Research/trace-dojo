@@ -22,8 +22,22 @@ export class Ref {
 
   /** Writes a value, converting or rejecting it for the type of the property the reference was taken from. */
   assign(value: Value): void {
+    const old = this.v;
     this.v = this.typedBy ? referenceTypeCheck(this, value) : value;
+    dropped(old);
   }
+}
+
+/** Frees what letting go of a value frees, which the interpreter provides, as PHP's reference counting does. */
+let dropHandler: (values: unknown[]) => void = () => {};
+
+export function setDropHandler(handler: (values: unknown[]) => void): void {
+  dropHandler = handler;
+}
+
+/** Reports a value that a holder let go of, if it may hold objects. */
+export function dropped(value: unknown): void {
+  if (value !== null && typeof value === 'object') dropHandler([value]);
 }
 
 /** Converts a value written through a reference to a typed property, which the interpreter provides. */
@@ -84,6 +98,7 @@ export class PhpArray {
       if (typeof key === 'bigint' && key >= this.nextFree) this.nextFree = key + 1n;
     }
     if (value !== null && typeof value === 'object') this.composite = true;
+    if (!(slot instanceof Ref)) dropped(slot);
   }
 
   setSlot(key: Key, slot: Value | Ref): void {
@@ -92,6 +107,7 @@ export class PhpArray {
     this.insert(key, slot);
     if (typeof key === 'bigint' && key >= this.nextFree) this.nextFree = key + 1n;
     if (slot !== null && typeof slot === 'object') this.composite = true;
+    if (old !== slot) dropped(old);
   }
 
   /** The key that `$array[] = ...` uses: the next integer after the largest one, or 0 when there is none. */
@@ -124,6 +140,7 @@ export class PhpArray {
     // PHP moves a pointer at the deleted element on to the next one.
     if (this.pointer === key) this.pointer = this.keyAfter(key);
     this.map.delete(key);
+    dropped(old);
   }
 
   keys(): Key[] {

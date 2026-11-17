@@ -1,7 +1,7 @@
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import { deprecated, throwError, warn } from './errors';
 import type { Frame } from './runtime';
-import { type Key, PhpArray, PhpObject, type PropDecl, Ref, type Value } from './values';
+import { dropped, type Key, PhpArray, PhpObject, type PropDecl, Ref, type Value } from './values';
 
 /** A location a program writes to: a variable, an element, a property, or a static property. */
 export interface Place {
@@ -60,6 +60,7 @@ export class VarPlace implements Place {
     if (ref) {
       ref.rc--;
       this.frame.vars.delete(this.name);
+      dropped(ref.v);
     }
   }
 
@@ -70,6 +71,7 @@ export class VarPlace implements Place {
     ref.isRef = true;
     ref.rc++;
     this.frame.vars.set(this.name, ref);
+    if (old) dropped(old.v);
   }
 }
 

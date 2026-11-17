@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 409 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 435 -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import { LIMITS } from '../interpreter/limits';
 import type { FunctionDecl } from './ast';
@@ -7,7 +7,7 @@ import { valueName } from './conversions';
 import { throwError } from './errors';
 import { collectGarbage } from './garbage';
 import { share } from './places';
-import { FatalError, Frame, rt, SCRIPT_PATH, setCallCapture } from './runtime';
+import { FatalError, Frame, rt, type Runtime, SCRIPT_PATH, setCallCapture } from './runtime';
 import { coerce, describeType, NO_MATCH, typeToString } from './types';
 import {
   type Callable,
@@ -150,15 +150,26 @@ function invokeNative(target: CallTarget, fn: NativeFunction, args: ArgValue[], 
   const passed = args.filter((arg) => arg.name === undefined).map((arg) => arg.ref?.v ?? arg.v);
   callStack.push(recordFor(target, passed, nativeDepth > 0 && row === undefined ? undefined : row));
   nativeDepth++;
+  runtime.nativeCalls++;
+  runtime.mayHoldGarbage = true;
+  const held: unknown[] = [];
+  runtime.nativeHeld.push(held);
   const savedRow = runtime.row;
+  let result: Value;
   try {
     const { values, refs, named } = bindNative(fn, args, name, strict);
-    return fn.impl({ args: values, refs, thisObj: target.thisObj, calledClass: target.staticClass, named });
+    result = fn.impl({ args: values, refs, thisObj: target.thisObj, calledClass: target.staticClass, named });
   } finally {
     nativeDepth--;
+    runtime.nativeCalls--;
+    runtime.nativeHeld.pop();
     callStack.pop();
     runtime.row = savedRow;
   }
+  // The values the function's callbacks returned are released once it is done with them; its result stays held.
+  if (result instanceof PhpObject || result instanceof PhpArray) runtime.frame.temporaries.push(result);
+  runtime.release(held);
+  return result;
 }
 
 /** Matches arguments to a native function's parameters, coercing them to the declared types. */
@@ -308,7 +319,7 @@ function callerIsStrict(): boolean {
 
 // User functions -----------------------------------------------------------------------------------------------------
 
-// code-gauge-allow functionNcss 57 -- Transcribes PHP's algorithm for this function step by step, whose branches mirror PHP's.
+// code-gauge-allow functionNcss 58 -- Transcribes PHP's algorithm for this function step by step, whose branches mirror PHP's.
 function invokeUser(target: CallTarget, fn: UserFunction, args: ArgValue[], row: number | undefined): Value {
   const runtime = rt();
   const { decl } = fn;
@@ -337,22 +348,21 @@ function invokeUser(target: CallTarget, fn: UserFunction, args: ArgValue[], row:
   const positional = args.filter((arg) => arg.name === undefined);
   const params = fn.params;
   checkNamedArgs(params, args, positional.length);
-  const record = recordFor(
-    target,
-    positional.map((arg) => arg.ref?.v ?? arg.v),
-    row ?? implicitCallRow()
-  );
   frame.args = positional.map((arg) => arg.ref?.v ?? arg.v);
+  const record = recordFor(target, [...frame.args], row ?? implicitCallRow());
   const savedRow = runtime.row;
   runtime.frames.push(frame);
   callStack.push(record);
   runtime.depth++;
   const outerNative = nativeDepth;
+  const outerNativeCalls = runtime.nativeCalls;
   nativeDepth = 0;
+  runtime.nativeCalls = 0;
   let returned: Value;
   try {
     runtime.row = decl.row;
     bindParams(frame, fn, args, positional, name, strict, row);
+    handOverArgs(caller, args);
     recordBoundArgs(record, params, frame, args, positional.length);
     let result: Value;
     try {
@@ -373,6 +383,7 @@ function invokeUser(target: CallTarget, fn: UserFunction, args: ArgValue[], row:
     returned = result;
   } finally {
     nativeDepth = outerNative;
+    runtime.nativeCalls = outerNativeCalls;
     runtime.depth--;
     callStack.pop();
     runtime.frames.pop();
@@ -380,12 +391,20 @@ function invokeUser(target: CallTarget, fn: UserFunction, args: ArgValue[], row:
     runtime.row = savedRow;
     if (decl.isAtomic) runtime.steps.completeAtomicCall();
   }
-  // PHP destroys a function's locals when it returns, so their destructors run before the caller goes on.
-  if (runtime.destructibles > 0) {
-    caller.temporaries.push(returned);
-    collectGarbage(runtime);
-  }
+  releaseFrame(runtime, caller, frame, returned, outerNative > 0);
   return returned;
+}
+
+/**
+ * Destroys a returned function's locals as PHP does, in the order the function declares them, so that their
+ * destructors run before the caller goes on, while the returned value stays held by the caller, or by the native
+ * function that called this one until that is done with it.
+ */
+function releaseFrame(runtime: Runtime, caller: Frame, frame: Frame, returned: Value, fromNative: boolean): void {
+  const holder = fromNative ? runtime.nativeHeld.at(-1) : undefined;
+  if (returned instanceof PhpObject || returned instanceof PhpArray) (holder ?? caller.temporaries).push(returned);
+  runtime.release([...[...frame.vars.values()].map((ref) => ref.v), frame.thisObj, frame.closure]);
+  if (runtime.destructibles > 0) collectGarbage(runtime);
 }
 
 /**
@@ -430,6 +449,24 @@ function tracedNamedArgs(
     ...params.slice(positional, count).map((param) => frame.vars.get(param.name)?.v ?? null),
   ];
   record.named = named;
+}
+
+/**
+ * Takes the arguments of a user function call off the caller's temporaries once the callee's parameters hold them, as
+ * PHP moves a temporary argument into the callee's frame, which frees it with the callee's other variables.
+ */
+function handOverArgs(caller: Frame, args: ArgValue[]): void {
+  for (const arg of args) {
+    if (!(arg.v instanceof PhpObject || arg.v instanceof PhpArray)) continue;
+    // The value may be held twice: as the object `new` made and as the evaluated argument.
+    for (
+      let index = caller.temporaries.lastIndexOf(arg.v);
+      index !== -1;
+      index = caller.temporaries.lastIndexOf(arg.v)
+    ) {
+      caller.temporaries.splice(index, 1);
+    }
+  }
 }
 
 /** Gives a closure's frame the variables the closure captured: shared references, or copies of values. */
