@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 435 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 444 -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import { LIMITS } from '../interpreter/limits';
 import type { FunctionDecl } from './ast';
@@ -7,12 +7,13 @@ import { valueName } from './conversions';
 import { throwError } from './errors';
 import { collectGarbage } from './garbage';
 import { share } from './places';
-import { FatalError, Frame, rt, type Runtime, SCRIPT_PATH, setCallCapture } from './runtime';
+import { FatalError, Frame, memoryExhaustedMessage, rt, type Runtime, SCRIPT_PATH, setCallCapture } from './runtime';
 import { coerce, describeType, NO_MATCH, typeToString } from './types';
 import {
   type Callable,
   type ClosureData,
   type Method,
+  type NativeContext,
   type NativeFunction,
   type Param,
   PhpArray,
@@ -60,8 +61,8 @@ export function setBodyRunner(run: (decl: FunctionDecl, frame: Frame) => Value):
   runBody = run;
 }
 
-/** The fatal error PHP reports when endless recursion uses up its memory. */
-const MEMORY_EXHAUSTED = 'Allowed memory size of 134217728 bytes exhausted (tried to allocate 2097152 bytes)';
+/** The fatal error PHP reports when endless recursion uses up its memory, growing its stack by a 2 MiB page. */
+const MEMORY_EXHAUSTED = memoryExhaustedMessage(2_097_152);
 
 /** Ends a run whose recursion used up the host's stack, which PHP reports as running out of memory. */
 export class HostStackExhaustion {
@@ -158,7 +159,13 @@ function invokeNative(target: CallTarget, fn: NativeFunction, args: ArgValue[], 
   let result: Value;
   try {
     const { values, refs, named } = bindNative(fn, args, name, strict);
-    result = fn.impl({ args: values, refs, thisObj: target.thisObj, calledClass: target.staticClass, named });
+    result = runNative(runtime, fn, {
+      args: values,
+      refs,
+      thisObj: target.thisObj,
+      calledClass: target.staticClass,
+      named,
+    });
   } finally {
     nativeDepth--;
     runtime.nativeCalls--;
@@ -170,6 +177,21 @@ function invokeNative(target: CallTarget, fn: NativeFunction, args: ArgValue[], 
   if (result instanceof PhpObject || result instanceof PhpArray) runtime.frame.temporaries.push(result);
   runtime.release(held);
   return result;
+}
+
+/** Runs a native function's body, refusing a string it builds past the limit as PHP's memory limit would. */
+function runNative(runtime: Runtime, fn: NativeFunction, context: NativeContext): Value {
+  try {
+    const result = fn.impl(context);
+    if (typeof result === 'string') runtime.ensureStringFits(result.length);
+    return result;
+  } catch (error) {
+    // The host refuses a string or an array past its own limit, which only a structure far past ours reaches.
+    if (error instanceof RangeError && /^Invalid (string|array) length/.test(error.message)) {
+      throw runtime.memoryExhausted(2 ** 31);
+    }
+    throw error;
+  }
 }
 
 /** Matches arguments to a native function's parameters, coercing them to the declared types. */
@@ -324,11 +346,7 @@ function invokeUser(target: CallTarget, fn: UserFunction, args: ArgValue[], row:
   const runtime = rt();
   const { decl } = fn;
   if (runtime.depth >= LIMITS.maxCallDepth) {
-    throw new FatalError(
-      'Allowed memory size of 134217728 bytes exhausted (tried to allocate 2097152 bytes)',
-      runtime.row,
-      true
-    );
+    throw new FatalError(MEMORY_EXHAUSTED, runtime.row, true);
   }
   const name = functionDisplayName(target);
   const caller = runtime.frame;

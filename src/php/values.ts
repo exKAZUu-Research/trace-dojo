@@ -35,6 +35,12 @@ export function setDropHandler(handler: (values: unknown[]) => void): void {
   dropHandler = handler;
 }
 
+let allocationHandler: (count: number, size: number) => void = () => {};
+
+export function setAllocationHandler(handler: (count: number, size: number) => void): void {
+  allocationHandler = handler;
+}
+
 /** Reports a value that a holder let go of, if it may hold objects. */
 export function dropped(value: unknown): void {
   if (value !== null && typeof value === 'object') dropHandler([value]);
@@ -68,6 +74,8 @@ export class PhpArray {
 
   constructor(map?: Map<Key, Value | Ref>) {
     this.map = map ?? new Map();
+    // An array costs a slot of its own besides its elements, as a program of many small arrays holds their tables too.
+    allocationHandler(this.map.size + 1, this.map.size);
   }
 
   static list(values: Value[]): PhpArray {
@@ -130,7 +138,10 @@ export class PhpArray {
    * there.
    */
   private insert(key: Key, slot: Value | Ref): void {
-    if (this.pointer === undefined && !this.map.has(key)) this.pointer = key;
+    if (!this.map.has(key)) {
+      allocationHandler(1, this.map.size + 1);
+      if (this.pointer === undefined) this.pointer = key;
+    }
     this.map.set(key, slot);
   }
 

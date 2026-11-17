@@ -4,6 +4,7 @@ import { declForKey, propNameOf } from './classes';
 import { formatFloat, formatFloatRepr } from './conversions';
 import { warn } from './errors';
 import { toStr } from './operators';
+import { rt } from './runtime';
 import { describeType } from './types';
 import { type ClosureData, isClosure, PhpArray, PhpObject, Ref, type Slot, UNINIT, type Value } from './values';
 
@@ -77,6 +78,17 @@ function slotValue(slot: Slot): Value {
   return slot;
 }
 
+/**
+ * Charges for one more element of a dump and refuses a dump past the string limit, as a structure whose arrays share
+ * their elements may print far more than it holds.
+ */
+function grown(text: string): string {
+  const runtime = rt();
+  runtime.spend();
+  runtime.ensureStringFits(text.length);
+  return text;
+}
+
 // print_r ------------------------------------------------------------------------------------------------------------
 
 export function printR(value: Value): string {
@@ -123,7 +135,7 @@ function printRLabel(key: string | bigint, label: string): string {
 function printHash(entries: [string, Value][], indent: number, active: Set<object>): string {
   let text = `${' '.repeat(indent)}(\n`;
   for (const [key, item] of entries) {
-    text += `${' '.repeat(indent + 4)}[${key}] => ${printRValue(item, indent + 8, active)}\n`;
+    text = grown(`${text}${' '.repeat(indent + 4)}[${key}] => ${printRValue(item, indent + 8, active)}\n`);
   }
   return `${text}${' '.repeat(indent)})\n`;
 }
@@ -161,7 +173,9 @@ function dumpValue(value: Value, level: number, active: Set<object>, slot?: Slot
     try {
       let text = `${pad}array(${value.size}) {\n`;
       for (const [key, item] of value.map) {
-        text += `${' '.repeat(level + 1)}[${typeof key === 'bigint' ? key : `"${key}"`}]=>\n${dumpValue(slotValue(item), level + 2, active, item)}`;
+        text = grown(
+          `${text}${' '.repeat(level + 1)}[${typeof key === 'bigint' ? key : `"${key}"`}]=>\n${dumpValue(slotValue(item), level + 2, active, item)}`
+        );
       }
       return `${text}${indent}}\n`;
     } finally {
@@ -181,7 +195,7 @@ function dumpValue(value: Value, level: number, active: Set<object>, slot?: Slot
       if (slot === UNINIT) {
         const decl = declForKey(object.cls, typeof key === 'string' ? keyFor(key, label) : String(key));
         text += `${' '.repeat(level + 1)}uninitialized(${decl?.type ? describeType(decl.type, decl.cls) : 'mixed'})\n`;
-      } else text += dumpValue(slotValue(slot), level + 2, active, slot);
+      } else text = grown(text + dumpValue(slotValue(slot), level + 2, active, slot));
     }
     return `${text}${indent}}\n`;
   } finally {
@@ -232,7 +246,7 @@ function exportValue(value: Value, level: number, active: Set<object>): string {
       let text = `${lead}array (\n`;
       for (const [key, item] of value.entries()) {
         const keyText = typeof key === 'bigint' ? key.toString() : quoteExport(key);
-        text += `${' '.repeat(level + 1)}${keyText} => ${exportValue(item, level + 2, active)},\n`;
+        text = grown(`${text}${' '.repeat(level + 1)}${keyText} => ${exportValue(item, level + 2, active)},\n`);
       }
       return `${text}${close})`;
     } finally {
@@ -248,7 +262,9 @@ function exportValue(value: Value, level: number, active: Set<object>): string {
     for (const [key, slot] of exportedProps(object)) {
       if (slot === UNINIT) continue;
       const keyText = typeof key === 'bigint' ? String(key) : quoteExport(propNameOf(key));
-      text += `${' '.repeat(level + 2)}${keyText} => ${exportValue(slotValue(slot), level + 2, active)},\n`;
+      text = grown(
+        `${text}${' '.repeat(level + 2)}${keyText} => ${exportValue(slotValue(slot), level + 2, active)},\n`
+      );
     }
     return `${text}${close}${isStd ? ')' : '))'}`;
   } finally {

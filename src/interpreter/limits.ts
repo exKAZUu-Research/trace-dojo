@@ -44,6 +44,11 @@ export class ExecutionBudget {
     // checks the clock at once; single operations check it periodically.
     if (cost === 1 && this.operations < this.nextClockCheck) return;
     this.nextClockCheck = this.operations + OPERATIONS_PER_CLOCK_CHECK;
+    this.checkClock();
+  }
+
+  /** Stops the run if its time is up, after native work that may take long without charging operations. */
+  checkClock(): void {
     if (performance.now() > this.deadline) throw new ExecutionLimitError('time');
   }
 

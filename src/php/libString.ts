@@ -38,7 +38,7 @@ const s = (value: Value): string => value as string;
 const n = (value: Value): number => Number(value as bigint);
 
 function checkLength(text: string): string {
-  if (text.length > 1_000_000) throwError('Error', 'Allowed memory size exhausted');
+  rt().ensureStringFits(text.length);
   rt().spend(Math.ceil(text.length / 64));
   return text;
 }
@@ -48,7 +48,7 @@ markInlined('strlen');
 defineFunction('str_repeat(string $string, int $times): string', ({ args }) => {
   const times = n(args[1]);
   if (times < 0) throwError('ValueError', 'str_repeat(): Argument #2 ($times) must be greater than or equal to 0');
-  if (s(args[0]).length * times > 1_000_000) throwError('Error', 'Allowed memory size of 134217728 bytes exhausted');
+  rt().ensureStringFits(s(args[0]).length * times);
   return checkLength(s(args[0]).repeat(times));
 });
 defineFunction('strtoupper(string $string): string', ({ args }) => upper(s(args[0])));
@@ -123,6 +123,8 @@ export function padUnits(name: string, text: string[], args: Value[], pad: strin
   if (type < 0 || type > 2) {
     throwError('ValueError', `${name}(): Argument #4 ($pad_type) must be STR_PAD_LEFT, STR_PAD_RIGHT, or STR_PAD_BOTH`);
   }
+  rt().ensureStringFits(length);
+  rt().spend(Math.ceil(length / 64));
   const total = length - text.length;
   const fill = (count: number): string => Array.from({ length: count }, (_, index) => pad[index % pad.length]).join('');
   const left = type === 0 ? total : type === 1 ? 0 : Math.floor(total / 2);
@@ -175,7 +177,7 @@ defineFunction('implode(array|string $separator, mixed $array = null): string', 
     if (!first) result += separator as string;
     first = false;
     result += toStr(item);
-    if (result.length > 1_000_000) throwError('Error', 'Allowed memory size exhausted');
+    rt().ensureStringFits(result.length);
   }
   return result;
 });

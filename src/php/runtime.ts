@@ -16,6 +16,7 @@ import {
   type PhpClass,
   PhpObject,
   Ref,
+  setAllocationHandler,
   setDropHandler,
   type UserFunction,
   type Value,
@@ -161,6 +162,32 @@ export class Runtime {
     this.budget.spend(cost);
   }
 
+  /** The array elements and object properties allocated so far, which only grows: a run pays for what it dropped too. */
+  private slots = 0;
+
+  /** Charges for `count` new array elements or object properties, added to a structure that then holds `size`. */
+  allocate(count: number, size = count): void {
+    const before = this.slots;
+    this.slots += count;
+    if (this.slots > LIMITS.maxSlots) throw this.memoryExhausted(tableBytes(size));
+    if (this.slots >> 6 !== before >> 6) this.spend((this.slots >> 6) - (before >> 6));
+  }
+
+  /** Refuses an array of a size the program chose before the host builds it, charging nothing. */
+  ensureRoom(count: number): void {
+    if (this.slots + count > LIMITS.maxSlots) throw this.memoryExhausted(tableBytes(count));
+  }
+
+  /** Refuses a string of a length the program chose before the host builds it. */
+  ensureStringFits(length: number): void {
+    if (length > LIMITS.maxStringLength) throw this.memoryExhausted(stringBytes(length));
+  }
+
+  /** The fatal error PHP reports when an allocation of `bytes` passes its memory limit. */
+  memoryExhausted(bytes: number): FatalError {
+    return new FatalError(memoryExhaustedMessage(bytes), this.row, true);
+  }
+
   /** Allocates the handle of a new object, reusing the most recently freed one as PHP does. */
   newObject(cls: PhpClass): PhpObject {
     if (!this.collecting && this.mayHoldGarbage) {
@@ -178,6 +205,7 @@ export class Runtime {
     if (cls.findMethod('__destruct')) this.destructibles++;
     // A new object is a temporary of the running statement until something stores it.
     this.frame.temporaries.push(object);
+    this.allocate(cls.props.length + 1);
     this.spend();
     return object;
   }
@@ -274,6 +302,24 @@ function completePrefix(bytes: string): number {
   return index;
 }
 
+/**
+ * The message of PHP's fatal error for running out of memory. The interpreter's limits are smaller than PHP's
+ * 128 MiB, so `bytes` is the size PHP would request for the structure that passed them, not the size it ran out at.
+ */
+export function memoryExhaustedMessage(bytes: number): string {
+  return `Allowed memory size of 134217728 bytes exhausted (tried to allocate ${bytes} bytes)`;
+}
+
+/** About the size PHP requests for a hash table growing to hold `size` elements: a power of two of 16-byte slots. */
+function tableBytes(size: number): number {
+  return 2 ** Math.ceil(Math.log2(Math.max(size, 8))) * 16;
+}
+
+/** About the size PHP requests for a string of `length` bytes: its header and bytes, rounded up to whole pages. */
+function stringBytes(length: number): number {
+  return Math.ceil((length + 25) / 4096) * 4096;
+}
+
 let current: Runtime | undefined;
 
 export function rt(): Runtime {
@@ -281,6 +327,7 @@ export function rt(): Runtime {
 }
 
 setDropHandler((values) => current?.release(values));
+setAllocationHandler((count, size) => current?.allocate(count, size));
 
 export function withRuntime<T>(runtime: Runtime, run: () => T): T {
   const outer = current;

@@ -95,7 +95,10 @@ markInlined('sizeof');
 
 function countRecursive(array: PhpArray): number {
   let count = array.size;
-  for (const item of array.values()) if (item instanceof PhpArray) count += countRecursive(item);
+  for (const item of array.values()) {
+    rt().spend();
+    if (item instanceof PhpArray) count += countRecursive(item);
+  }
   return count;
 }
 
@@ -311,7 +314,8 @@ defineFunction('array_flip(array $array): array', ({ args }) => {
 defineFunction('array_fill(int $start_index, int $count, mixed $value): array', ({ args }) => {
   const [start, count, value] = args as [bigint, bigint, Value];
   if (count < 0n) throwError('ValueError', 'array_fill(): Argument #2 ($count) must be greater than or equal to 0');
-  if (count > 1_000_000n) throwError('ValueError', 'array_fill(): Argument #2 ($count) is too large');
+  if (count >= 2n ** 31n) throwError('ValueError', 'array_fill(): Argument #2 ($count) is too large');
+  rt().ensureRoom(Number(count));
   const result = new PhpArray();
   rt().spend(Number(count) / 16);
   for (let index = 0n; index < count; index++) result.set(start + index, share(value));
@@ -327,6 +331,7 @@ defineFunction('array_pad(array $array, int $length, mixed $value): array', ({ a
   const length = Number(args[1]);
   const size = Math.abs(length);
   if (size <= array.size) return array;
+  rt().ensureRoom(size);
   const padding: [Key, Value][] = Array.from({ length: size - array.size }, (): [Key, Value] => [0n, share(args[2])]);
   const entries: [Key, Value | Ref][] = length > 0 ? [...array.map, ...padding] : [...padding, ...array.map];
   return rebuild(entries, true);

@@ -33,7 +33,12 @@ defineConstant('PCRE_VERSION_MAJOR', 10n);
 defineConstant('PCRE_VERSION_MINOR', 47n);
 defineConstant('PCRE_JIT_SUPPORT', false);
 
+/**
+ * Translated patterns, shared by all runs in the server's process, so that a pattern in a loop is translated once. It
+ * keeps only the latest ones, as the patterns that programs build are unbounded.
+ */
 const cache = new Map<string, Compiled | string>();
+const CACHE_LIMIT = 256;
 
 /** Compiles a PCRE pattern with delimiters, warning and returning undefined as PHP does for a bad pattern. */
 function compile(name: string, pattern: string): Compiled | undefined {
@@ -45,6 +50,7 @@ function compile(name: string, pattern: string): Compiled | undefined {
       if (error instanceof UnsupportedFeatureError) throw error;
       compiled = error instanceof PatternError ? error.message : `Compilation failed: ${(error as Error).message}`;
     }
+    if (cache.size >= CACHE_LIMIT) cache.delete(cache.keys().next().value as string);
     cache.set(pattern, compiled);
   }
   if (typeof compiled === 'string') {
@@ -80,6 +86,8 @@ function* matchesOf(compiled: Compiled, subject: string, offset = 0): Generator<
     const regex = retry ? compiled.retry : compiled.regex;
     regex.lastIndex = position;
     const result = regex.exec(text) as (RegExpExecArray & { indices: RegExpIndicesArray }) | null;
+    // The host's engine cannot be interrupted and may backtrack for seconds before giving up.
+    rt().budget.checkClock();
     if (!result) {
       if (!retry || position >= text.length) return;
       retry = false;
@@ -300,7 +308,7 @@ function replaceCompiled(
     result += subject.slice(last, match.starts[0]) + replace(match);
     last = match.ends[0];
     done++;
-    if (result.length > 1_000_000) throwError('Error', 'Allowed memory size exhausted');
+    rt().ensureStringFits(result.length);
   }
   count.value += done;
   return result + subject.slice(last);

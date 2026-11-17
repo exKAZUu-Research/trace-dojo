@@ -63,6 +63,39 @@ test('endless recursion ends with the fatal error PHP prints when it runs out of
   );
 });
 
+test.each([
+  ['a string past the length limit', '<?php\n$s = str_pad("", 300000000, "x");', 'str_pad'],
+  [
+    'arrays past the element limit',
+    '<?php\nfor ($i = 0; $i < 10; $i++) $a[] = array_fill(0, 200000, $i);',
+    'array_fill',
+  ],
+  [
+    'a dump of arrays that share their elements',
+    '<?php\n$a = [1];\nfor ($i = 0; $i < 40; $i++) $a = [$a, $a];\nprint_r($a);',
+    'print_r',
+  ],
+])('%s ends with the fatal error PHP prints when it runs out of memory', (_name, program, fn) => {
+  const execution = run(program);
+  expect(execution.kind === 'executed' && execution.stdout).toMatch(
+    new RegExp(
+      String.raw`^\nFatal error: Allowed memory size of 134217728 bytes exhausted \(tried to allocate \d+ bytes\) in /main\.php on line \d\nStack trace:\n#0 /main\.php\(\d\): ${fn}\(`
+    )
+  );
+});
+
+test('running out of memory cannot be caught', () => {
+  const execution = run('<?php\ntry { $s = str_repeat("ab", 900000); } catch (Throwable $e) { echo "caught"; }');
+  expect(execution.kind === 'executed' && execution.stdout).toMatch(/^\nFatal error: Allowed memory size/);
+});
+
+test('walking arrays that share their elements stops at the execution limit', () => {
+  const execution = run(
+    '<?php\n$a = [1];\nfor ($i = 0; $i < 40; $i++) $a = [$a, $a];\necho count($a, COUNT_RECURSIVE);'
+  );
+  expect(execution).toEqual({ kind: 'limitExceeded', limit: 'operations' });
+});
+
 test('an uncaught exception prints its fatal error and reports it', () => {
   const execution = run('<?php\nfunction f() { throw new RuntimeException("boom"); }\nf();');
   expect(execution).toMatchObject({

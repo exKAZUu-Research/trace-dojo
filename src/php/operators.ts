@@ -1,6 +1,5 @@
-// code-gauge-allow-file fileNcss 419 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 422 -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/prefer-code-point -- PHP strings hold bytes as code units 0–255, which charCodeAt and fromCharCode read and write as they are.
-import { ExecutionLimitError, LIMITS } from '../interpreter/limits';
 import {
   compareBytes,
   compareNumbers,
@@ -17,6 +16,7 @@ import {
 } from './conversions';
 import { deprecated, notice, throwError, warn } from './errors';
 import { cPow } from './floatPow';
+import { rt } from './runtime';
 import { INT_MAX, INT_MIN, type Key, PhpArray, PhpObject, type Value } from './values';
 
 /** Converts an object to a string through `__toString`, which the interpreter provides. */
@@ -237,7 +237,7 @@ function arrayUnion(left: PhpArray, right: PhpArray): PhpArray {
 export function concat(left: Value, right: Value): string {
   const a = toStr(left);
   const b = toStr(right);
-  if (a.length + b.length > LIMITS.maxStringLength) throw new ExecutionLimitError('storage');
+  rt().ensureStringFits(a.length + b.length);
   return a + b;
 }
 
@@ -394,8 +394,11 @@ function compareObjectScalar(object: PhpObject, other: Value): number {
 }
 
 function compareArrays(a: PhpArray, b: PhpArray): number {
+  // PHP's zend_hash_compare returns at once for one table, which arrays sharing it until a write are.
+  if (a === b) return 0;
   if (a.size !== b.size) return a.size < b.size ? -1 : 1;
   for (const [key, value] of a.entries()) {
+    rt().spend();
     if (!b.has(key)) return 1;
     const result = compare(value, b.get(key) as Value);
     if (result !== 0) return result;
@@ -434,8 +437,10 @@ function hasDynamicProps(object: PhpObject): boolean {
 // code-gauge-allow functionCognitiveComplexity 25 -- Transcribes PHP's algorithm for this function step by step, whose branches mirror PHP's.
 export function looseEquals(a: Value, b: Value): boolean {
   if (a instanceof PhpArray && b instanceof PhpArray) {
+    if (a === b) return true;
     if (a.size !== b.size) return false;
     for (const [key, value] of a.entries()) {
+      rt().spend();
       if (!b.has(key)) return false;
       if (!looseEquals(value, b.get(key) as Value)) return false;
     }
@@ -475,6 +480,7 @@ export function strictEquals(a: Value, b: Value): boolean {
     const right = [...b.entries()];
     let index = 0;
     for (const [key, value] of a.entries()) {
+      rt().spend();
       const [otherKey, otherValue] = right[index++];
       if (key !== otherKey || !strictEquals(value, otherValue)) return false;
     }

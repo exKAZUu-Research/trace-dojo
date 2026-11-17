@@ -81,6 +81,8 @@ interface QueryBuild {
   numericPrefix: string;
   /** The arrays and objects being encoded, which a nested reference to one of them skips as PHP's recursion guard does. */
   visiting: Set<PhpArray | PhpObject>;
+  /** The length of the query built so far. */
+  length: number;
 }
 
 defineFunction(
@@ -92,6 +94,7 @@ defineFunction(
       raw: args[3] === 2n,
       numericPrefix: args[1] === undefined ? '' : s(args[1]),
       visiting: new Set(),
+      length: 0,
     };
     buildQuery(query, data as PhpArray | PhpObject, undefined);
     return query.parts.join(args[2] === undefined || args[2] === null ? '&' : s(args[2]));
@@ -106,13 +109,17 @@ function buildQuery(query: QueryBuild, data: PhpArray | PhpObject, prefix: strin
   const entries: [string | bigint, Value][] =
     data instanceof PhpArray ? [...data.entries()] : visibleProps(data, rt().frame.scope);
   for (const [key, value] of entries) {
+    rt().spend();
     const numeric = typeof key === 'bigint';
     const name = numeric ? `${prefix === undefined ? query.numericPrefix : ''}${key}` : urlEncode(key, query.raw);
     const fullName = prefix === undefined ? name : `${prefix}${name}%5D`;
     if (value instanceof PhpArray || value instanceof PhpObject) {
       buildQuery(query, value, prefix === undefined ? `${name}%5B` : `${prefix}${name}%5D%5B`);
     } else if (value !== null) {
-      query.parts.push(`${fullName}=${queryValue(value, query.raw)}`);
+      const part = `${fullName}=${queryValue(value, query.raw)}`;
+      query.length += part.length + 1;
+      rt().ensureStringFits(query.length);
+      query.parts.push(part);
     }
   }
   query.visiting.delete(data);

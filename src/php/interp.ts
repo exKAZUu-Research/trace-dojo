@@ -1,6 +1,5 @@
 // code-gauge-allow-file fileNcss 680 -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
-import { ExecutionLimitError, LIMITS } from '../interpreter/limits';
 import {
   applyOperator,
   assignExpression,
@@ -108,7 +107,7 @@ export function evChain(e: Expr): Chain {
       let text = '';
       for (const part of e.parts) {
         text += typeof part === 'string' ? part : toStr(ev(part));
-        if (text.length > LIMITS.maxStringLength) throw new ExecutionLimitError('storage');
+        rt().ensureStringFits(text.length);
       }
       return text;
     }
