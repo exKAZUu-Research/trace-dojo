@@ -244,7 +244,7 @@ export class Calls {
     const { thisType } = signature;
     if (!thisType || isAnyLike(thisType)) return;
     const object = receiverObject(callee);
-    const checked = object ? this.c.silently(() => this.c.expressions.check(object)) : voidType;
+    const checked = object ? this.c.silently(() => this.chainedReceiverType(object)) : voidType;
     // An optional call runs only when its object is not nullish.
     const context = skipParentheses(callee).childForFieldName('optional_chain')
       ? this.c.relations.removeNullish(checked)
@@ -254,6 +254,12 @@ export class Calls {
       callee,
       `'this' の型 '${this.c.print(context)}' は、このメソッドの 'this' の型 '${this.c.print(thisType)}' に代入できません。`
     );
+  }
+
+  /** The type of a call's object where the call runs, which is past any earlier short circuit of its optional chain. */
+  private chainedReceiverType(object: TreeNode): Type {
+    const checked = this.c.expressions.check(object);
+    return this.c.members.continuedObjectType(object, checked) ?? checked;
   }
 
   /** A tagged template, `String.raw\`...\``, which calls the tag with the template's strings and substitutions. */

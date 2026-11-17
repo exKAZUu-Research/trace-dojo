@@ -1,0 +1,28 @@
+function f(this: { x: number }) {
+  return this.x;
+}
+type H = { x: number; f: typeof f };
+
+function viaIndex(o: { a: H } | undefined) {
+  console.log(o?.a['f']());
+}
+function viaProperty(o: { b: { a: H } } | undefined) {
+  console.log(o?.b.a.f(), o?.['b']['a'].f());
+}
+function viaCall(o: { g(): H } | undefined) {
+  console.log(o?.g().f(), o?.g()['f']());
+}
+function viaElement(o: H[] | undefined) {
+  console.log(o?.[0].f());
+}
+function viaOptionalLinks(o: { a: H | undefined } | undefined) {
+  console.log(o?.a?.f(), o?.a?.['f']());
+}
+
+viaIndex({ a: { x: 1, f } });
+viaIndex(undefined);
+viaProperty({ b: { a: { x: 2, f } } });
+viaCall({ g: () => ({ x: 3, f }) });
+viaElement([{ x: 4, f }]);
+viaOptionalLinks({ a: { x: 5, f } });
+viaOptionalLinks({ a: undefined });

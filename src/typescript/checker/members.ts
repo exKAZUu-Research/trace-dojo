@@ -59,7 +59,7 @@ export class MemberChecker {
   }
 
   /** The type of an object that continues an optional chain, which is never what stopping the chain gave. */
-  private continuedObjectType(objectNode: TreeNode, checked: Type): Type | undefined {
+  continuedObjectType(objectNode: TreeNode, checked: Type): Type | undefined {
     if (objectNode.type === 'parenthesized_expression' || !this.isInOptionalChain(objectNode)) return undefined;
     return this.continuedTypes.get(objectNode.id) ?? checked;
   }
