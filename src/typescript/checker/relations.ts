@@ -612,6 +612,7 @@ export class Relations {
     if (sourceRequired > targetCount) return false;
     const count = Math.max(sourceSignature.parameters.length, target.parameters.length);
     const bivariant = source.isMethod === true || target.isMethod === true;
+    if (!this.thisTypesRelated(sourceSignature, target, relation, bivariant)) return false;
     for (let index = 0; index < count; index++) {
       const sourceType = this.parameterTypeAt(sourceSignature, index);
       const targetType = this.parameterTypeAt(target, index);
@@ -632,6 +633,15 @@ export class Relations {
       );
     }
     return this.isRelated(sourceReturn, targetReturn, relation);
+  }
+
+  /** Whether the target's `this` suits the source's, which only a source that declares a non-`void` one requires. */
+  private thisTypesRelated(source: Signature, target: Signature, relation: Relation, bivariant: boolean): boolean {
+    if (!source.thisType || isIntrinsic(source.thisType, 'void') || !target.thisType) return true;
+    return (
+      this.isRelated(target.thisType, source.thisType, relation) ||
+      (bivariant && this.isRelated(source.thisType, target.thisType, relation))
+    );
   }
 
   private parameterTypeAt(signature: Signature, index: number): Type | undefined {
