@@ -605,16 +605,21 @@ export class ExpressionChecker {
     if (
       targets.some(
         (member) =>
-          member.kind === 'object' && (this.c.relations.isEmptyObjectType(member) || member.objectKind === 'mapped')
+          member.kind === 'object' &&
+          (this.c.relations.isEmptyObjectType(member) ||
+            (member.objectKind === 'mapped' && this.c.relations.isGeneric(member)))
       )
     )
       return;
-    if (targets.some((member) => this.c.structureOf(member).stringIndex)) return;
-    // A discriminated union checks the members its discriminant selects.
+    // A discriminated union checks the members its discriminant selects; an index signature takes any key it covers,
+    // whose value is still checked against it.
     const structure = source.resolve();
     for (const [name, property] of structure.properties) {
       const known = targets.some(
-        (member) => this.c.propertyOf(member, name) !== undefined && !this.isObjectPrototypeProperty(member, name)
+        (member) =>
+          (this.c.propertyOf(member, name) !== undefined && !this.isObjectPrototypeProperty(member, name)) ||
+          this.c.structureOf(member).stringIndex !== undefined ||
+          (isNumericName(name) && this.c.structureOf(member).numberIndex !== undefined)
       );
       if (known) {
         const declaration = property.declaration;
@@ -626,7 +631,6 @@ export class ExpressionChecker {
         }
         continue;
       }
-      if (isNumericName(name) && targets.some((member) => this.c.structureOf(member).numberIndex)) continue;
       this.c.error(
         property.declaration?.childForFieldName('key') ?? property.declaration ?? node,
         `オブジェクトリテラルには既知のプロパティしか書けません。'${name}' は型 '${this.c.print(target)}' にありません。`
