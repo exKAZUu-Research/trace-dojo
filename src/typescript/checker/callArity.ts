@@ -54,19 +54,18 @@ export class CallArity {
 
   arityMatches(signature: Signature, args: TreeNode[]): boolean {
     let count = 0;
-    let open = false;
     for (const arg of args) {
       const length = this.spreadLength(arg);
       if (length === undefined) {
-        // A tuple with a rest element passes its leading elements, then as many more as the rest holds.
+        // A tuple with a rest element passes its leading elements, then as many more as the rest holds. As TypeScript
+        // decides, a spread of unknown length fits where it starts past the required parameters and either a rest
+        // parameter or an optional one takes it, whatever follows it.
         count += this.leadingLength(arg);
-        const restIndex = signature.parameters.findIndex((parameter) => parameter.rest);
-        if (restIndex === -1 || count < restIndex) return false;
-        open = true;
-      } else count += length;
+        const hasRest = signature.parameters.some((parameter) => parameter.rest);
+        return count >= this.minimumArguments(signature) && (hasRest || count < signature.parameters.length);
+      }
+      count += length;
     }
-    if (open)
-      return this.maximumArguments(signature) === Number.POSITIVE_INFINITY && count <= this.maximumArguments(signature);
     return count >= this.minimumArguments(signature) && count <= this.maximumArguments(signature);
   }
 
