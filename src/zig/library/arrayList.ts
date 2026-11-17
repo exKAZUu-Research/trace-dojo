@@ -1,4 +1,3 @@
-import { allocationSlots } from '../allocation';
 import { indexOutOfBounds, PANIC, panic } from '../arith';
 import type { Span } from '../ast';
 import { sizeOf } from '../layout';
@@ -64,7 +63,6 @@ const SAFETY_LOCK = nativeStruct('debug.SafetyLock', {}, [
 const CACHE_LINE = 128;
 
 const MAX_CAPACITY = (1n << 64n) - 1n;
-const zeroExtents = new WeakMap<object, number>();
 
 const listTypes = new WeakMap<Type, StructType>();
 
@@ -106,7 +104,13 @@ interface List {
 }
 
 function listOf(struct: ZStruct, child: Type): List {
-  return { child, struct, items: struct.slots[0] as Slice, capacity: Number(struct.slots[1] as bigint) };
+  const items = struct.slots[0] as Slice;
+  return {
+    child,
+    struct,
+    items: sizeOf(child) === 0 ? zeroSlice(items, items.lengthValue, child) : items,
+    capacity: Number(struct.slots[1] as bigint),
+  };
 }
 
 /** `growCapacity`: the capacity a list grows to when it needs `minimum`. */
@@ -117,13 +121,14 @@ function growCapacity(minimum: number, child: Type): number {
 }
 
 /** Gives the list exactly `capacity` slots, copying its items to new storage; false when memory runs out. */
-function reallocate(frame: Frame, list: List, capacity: number, child: Type): boolean {
+function reallocate(frame: Frame, list: List, requested: number | bigint, child: Type): boolean {
+  if (BigInt(requested) > MAX_CAPACITY) return false;
   if (sizeOf(child) === 0) {
     list.struct.slots[1] = MAX_CAPACITY;
     list.capacity = Number(MAX_CAPACITY);
-    if (!zeroExtents.has(list.items.target)) zeroExtents.set(list.items.target, list.items.target.slots.length);
     return true;
   }
+  const capacity = Number(requested);
   const previous = list.capacity > 0 ? list.items.target : undefined;
   const complete = reserveNativeAllocation(frame, list.allocator, capacity, child, previous);
   if (!complete) return false;
@@ -144,42 +149,42 @@ function freeList(list: List): void {
   list.struct.slots[1] = 0n;
 }
 
-function ensureTotalCapacity(frame: Frame, list: List, capacity: number, child: Type): boolean {
-  if (list.capacity >= capacity) return true;
-  return reallocate(frame, list, growCapacity(capacity, child), child);
+function ensureTotalCapacity(frame: Frame, list: List, capacity: number | bigint, child: Type): boolean {
+  if (BigInt(capacity) > MAX_CAPACITY) return false;
+  if ((list.struct.slots[1] as bigint) >= BigInt(capacity)) return true;
+  return reallocate(frame, list, sizeOf(child) === 0 ? capacity : growCapacity(Number(capacity), child), child);
 }
 
-function materializeLength(frame: Frame, list: List, length: number): void {
-  if (sizeOf(list.child) !== 0) return;
-  const target = list.items.target;
-  const previous = zeroExtents.get(target) ?? target.slots.length;
-  const needed = list.items.start + length;
-  if (needed <= previous) return;
-  frame.runtime.reserveStorage(allocationSlots(needed - previous, list.child));
-  zeroExtents.set(target, needed);
-  for (let index = target.slots.length; index < needed; index++) target.slots.push(undefinedValue(list.child));
-}
-
-function setLength(list: List, length: number, frame: Frame): void {
-  materializeLength(frame, list, length);
-  for (let index = length; index < list.items.length; index++)
-    list.items.target.slots[list.items.start + index] = undefinedValue(list.child);
-  list.struct.slots[0] = new Slice(list.items.target, list.items.start, length);
-  list.items = list.struct.slots[0] as Slice;
+function setLength(list: List, length: number | bigint): void {
+  if (BigInt(length) > MAX_CAPACITY || BigInt(length) < 0n) panic(PANIC.overflow);
+  const size = Number(length);
+  if (sizeOf(list.child) === 0) list.items = zeroSlice(list.items, BigInt(length), list.child);
+  else {
+    for (let index = size; index < list.items.length; index++)
+      list.items.target.slots[list.items.start + index] = undefinedValue(list.child);
+    list.items = new Slice(list.items.target, list.items.start, size);
+  }
+  list.struct.slots[0] = list.items;
 }
 
 function capacitySlice(list: List, unused: boolean): Slice {
-  const start = unused ? list.items.length : 0;
-  const length = (list.struct.slots[1] as bigint) - BigInt(start);
-  if (sizeOf(list.child) !== 0) return new Slice(list.items.target, list.items.start + start, length);
+  const start = unused ? list.items.lengthValue : 0n;
+  const length = (list.struct.slots[1] as bigint) - start;
+  return sizeOf(list.child) === 0
+    ? zeroSlice(list.items, length, list.child)
+    : new Slice(list.items.target, list.items.start + Number(start), length);
+}
+
+function zeroSlice(source: Slice, length: bigint, child: Type): Slice {
   const storage: Slots = {
     slots: new Proxy<Value[]>([], {
       get: (target, key, receiver) =>
-        typeof key === 'string' && /^\d+$/.test(key) ? undefinedValue(list.child) : Reflect.get(target, key, receiver),
+        typeof key === 'string' && /^\d+$/.test(key) ? undefinedValue(child) : Reflect.get(target, key, receiver),
       set: () => true,
     }),
   };
-  registerStorageLocation(storage.slots, () => storageLocation(list.items.target.slots, list.items.start), true);
+  const location = storageLocation(source.target.slots, source.start);
+  registerStorageLocation(storage.slots, () => location, true);
   return new Slice(storage, 0, length);
 }
 
@@ -208,17 +213,23 @@ function defineMembers(type: StructType, child: Type): void {
         }
       );
     });
-  const insertValues = (frame: Frame, list: List, index: number, values: Value[]): Value => {
-    if (!ensureTotalCapacity(frame, list, list.items.length + values.length, child)) return ERROR_OUT_OF_MEMORY;
-    // `addManyAt` slices `items[index..]` after growing the list.
-    if (index > list.items.length) panic(`start index ${index} is larger than end index ${list.items.length}`);
-    materializeLength(frame, list, list.items.length + values.length);
+  const insertValues = (frame: Frame, list: List, at: bigint, input: Value[] | Slice): Value => {
+    const count = input instanceof Slice ? input.lengthValue : BigInt(input.length);
+    const length = list.items.lengthValue + count;
+    if (!ensureTotalCapacity(frame, list, length, child)) return ERROR_OUT_OF_MEMORY;
+    if (at > list.items.lengthValue) panic(`start index ${at} is larger than end index ${list.items.lengthValue}`);
+    if (sizeOf(child) === 0) {
+      setLength(list, length);
+      return undefined;
+    }
+    const index = Number(at);
+    const values = input instanceof Slice ? input.values() : input;
     const current = list.items.values().map(copyForStorage);
     const inserted = values.map(copyForStorage);
     const combined = [...current.slice(0, index), ...inserted, ...current.slice(index)];
     for (const [position, value] of combined.entries())
       storeInto(list.items.target, list.items.start + position, value);
-    setLength(list, combined.length, frame);
+    setLength(list, combined.length);
     return undefined;
   };
   const members: Record<string, () => Member> = {
@@ -233,7 +244,7 @@ function defineMembers(type: StructType, child: Type): void {
         (frame) => {
           const list = listOf(emptyList(), child);
           list.allocator = allocatorState(evaluateAllocator(frame));
-          if (!reallocate(frame, list, Number(evaluate(frame) as bigint), child)) return ERROR_OUT_OF_MEMORY;
+          if (!reallocate(frame, list, evaluate(frame) as bigint, child)) return ERROR_OUT_OF_MEMORY;
           return list.struct;
         },
         call.span
@@ -266,112 +277,115 @@ function defineMembers(type: StructType, child: Type): void {
       return;
     }),
     append: method('append', { args: [child], result: allocating(VOID), allocator: true }, (list, [item], frame) => {
-      if (!ensureTotalCapacity(frame, list, list.items.length + 1, child)) return ERROR_OUT_OF_MEMORY;
-      materializeLength(frame, list, list.items.length + 1);
+      if (!ensureTotalCapacity(frame, list, list.items.lengthValue + 1n, child)) return ERROR_OUT_OF_MEMORY;
       storeInto(list.items.target, list.items.start + list.items.length, item);
-      setLength(list, list.items.length + 1, frame);
+      setLength(list, list.items.lengthValue + 1n);
       return;
     }),
-    appendAssumeCapacity: method('appendAssumeCapacity', { args: [child], result: VOID }, (list, [item], frame) => {
-      if (list.items.length >= list.capacity) panic(PANIC.unreachable);
-      materializeLength(frame, list, list.items.length + 1);
+    appendAssumeCapacity: method('appendAssumeCapacity', { args: [child], result: VOID }, (list, [item]) => {
+      if (list.items.lengthValue >= (list.struct.slots[1] as bigint)) panic(PANIC.unreachable);
       storeInto(list.items.target, list.items.start + list.items.length, item);
-      setLength(list, list.items.length + 1, frame);
+      setLength(list, list.items.lengthValue + 1n);
       return;
     }),
     appendSlice: method(
       'appendSlice',
       { args: [constItems], result: allocating(VOID), allocator: true },
-      (list, [slice], frame) => insertValues(frame, list, list.items.length, elements(slice))
+      (list, [slice], frame) => insertValues(frame, list, list.items.lengthValue, slice as Slice)
     ),
     appendNTimes: method(
       'appendNTimes',
       { args: [child, USIZE], result: allocating(VOID), allocator: true },
       (list, [value, count], frame) => {
-        const length = list.items.length + Number(count as bigint);
+        const length = list.items.lengthValue + (count as bigint);
         if (!ensureTotalCapacity(frame, list, length, child)) return ERROR_OUT_OF_MEMORY;
-        materializeLength(frame, list, length);
-        for (let index = list.items.length; index < length; index++)
+        for (let index = list.items.length; sizeOf(child) !== 0 && index < Number(length); index++)
           storeInto(list.items.target, list.items.start + index, value);
-        setLength(list, length, frame);
+        setLength(list, length);
         return;
       }
     ),
     insert: method(
       'insert',
       { args: [USIZE, child], result: allocating(VOID), allocator: true },
-      (list, [index, item], frame) => insertValues(frame, list, Number(index as bigint), [item])
+      (list, [index, item], frame) => insertValues(frame, list, index as bigint, [item])
     ),
     insertSlice: method(
       'insertSlice',
       { args: [USIZE, constItems], result: allocating(VOID), allocator: true },
-      (list, [index, slice], frame) => insertValues(frame, list, Number(index as bigint), elements(slice))
+      (list, [index, slice], frame) => insertValues(frame, list, index as bigint, slice as Slice)
     ),
-    orderedRemove: method('orderedRemove', { args: [USIZE], result: child }, (list, [index], frame) => {
+    orderedRemove: method('orderedRemove', { args: [USIZE], result: child }, (list, [index]) => {
       const position = Number(index as bigint);
-      if (position >= list.items.length) indexOutOfBounds(position, list.items.length);
+      if ((index as bigint) >= list.items.lengthValue) indexOutOfBounds(index as bigint, list.items.lengthValue);
+      if (sizeOf(child) === 0) {
+        setLength(list, list.items.lengthValue - 1n);
+        return undefinedValue(child);
+      }
       const values = list.items.values().map(copyForStorage);
       const [removed] = values.splice(position, 1);
       for (const [at, value] of values.entries()) storeInto(list.items.target, list.items.start + at, value);
-      setLength(list, values.length, frame);
+      setLength(list, values.length);
       return removed;
     }),
-    swapRemove: method('swapRemove', { args: [USIZE], result: child }, (list, [index], frame) => {
+    swapRemove: method('swapRemove', { args: [USIZE], result: child }, (list, [index]) => {
       const position = Number(index as bigint);
-      if (position >= list.items.length) indexOutOfBounds(position, list.items.length);
+      if ((index as bigint) >= list.items.lengthValue) indexOutOfBounds(index as bigint, list.items.lengthValue);
       const removed = copyForStorage(list.items.get(position));
-      storeInto(list.items.target, list.items.start + position, list.items.get(list.items.length - 1));
-      setLength(list, list.items.length - 1, frame);
+      storeInto(list.items.target, list.items.start + position, list.items.get(Number(list.items.lengthValue - 1n)));
+      setLength(list, list.items.lengthValue - 1n);
       return removed;
     }),
-    pop: method('pop', { args: [], result: optionalOf(child) }, (list, _, frame) => {
+    pop: method('pop', { args: [], result: optionalOf(child) }, (list, _) => {
       if (list.items.length === 0) return NULL;
-      const value = copyForStorage(list.items.get(list.items.length - 1));
-      setLength(list, list.items.length - 1, frame);
+      const value = copyForStorage(list.items.get(Number(list.items.lengthValue - 1n)));
+      setLength(list, list.items.lengthValue - 1n);
       return optionalSome(value, child);
     }),
     getLast: method('getLast', { args: [], result: child, byValue: true }, (list) => {
       if (list.items.length === 0) panic(PANIC.overflow);
-      return list.items.get(list.items.length - 1);
+      return list.items.get(Number(list.items.lengthValue - 1n));
     }),
     getLastOrNull: method('getLastOrNull', { args: [], result: optionalOf(child), byValue: true }, (list) =>
-      list.items.length === 0 ? NULL : optionalSome(list.items.get(list.items.length - 1), child)
+      list.items.length === 0 ? NULL : optionalSome(list.items.get(Number(list.items.lengthValue - 1n)), child)
     ),
     last: method('last', { args: [], result: optionalOf(child), byValue: true }, (list) =>
-      list.items.length === 0 ? NULL : optionalSome(list.items.get(list.items.length - 1), child)
+      list.items.length === 0 ? NULL : optionalSome(list.items.get(Number(list.items.lengthValue - 1n)), child)
     ),
-    clearRetainingCapacity: method('clearRetainingCapacity', { args: [], result: VOID }, (list, _, frame) => {
-      setLength(list, 0, frame);
+    clearRetainingCapacity: method('clearRetainingCapacity', { args: [], result: VOID }, (list, _) => {
+      setLength(list, 0);
       return;
     }),
     clearAndFree: method('clearAndFree', { args: [], result: VOID, allocator: true }, (list) => {
       freeList(list);
       return;
     }),
-    shrinkRetainingCapacity: method(
-      'shrinkRetainingCapacity',
-      { args: [USIZE], result: VOID },
-      (list, [length], frame) => {
-        if (Number(length as bigint) > list.items.length) panic(PANIC.unreachable);
-        setLength(list, Number(length as bigint), frame);
-        return;
-      }
-    ),
+    shrinkRetainingCapacity: method('shrinkRetainingCapacity', { args: [USIZE], result: VOID }, (list, [length]) => {
+      if ((length as bigint) > list.items.lengthValue) panic(PANIC.unreachable);
+      setLength(list, length as bigint);
+      return;
+    }),
     orderedRemoveMany: method(
       'orderedRemoveMany',
       { args: [sliceOf(USIZE, true)], result: VOID },
       (list, [indexes], frame) => {
-        const sorted = elements(indexes).map((index) => Number(index as bigint));
-        const values = list.items.values().map(copyForStorage);
-        for (const [position, index] of sorted.entries()) {
-          if (position > 0 && index < sorted[position - 1]) panic(PANIC.overflow);
-          if (index >= values.length) panic(`index out of bounds: index ${index}, len ${values.length}`);
+        const keys = elements(indexes) as bigint[];
+        frame.runtime.spend(keys.length);
+        for (const [position, index] of keys.entries()) {
+          if (position > 0 && index < keys[position - 1]) panic(PANIC.overflow);
+          if (index >= list.items.lengthValue) indexOutOfBounds(index, list.items.lengthValue);
         }
+        if (sizeOf(child) === 0) {
+          setLength(list, list.items.lengthValue - BigInt(new Set(keys).size));
+          return;
+        }
+        const sorted = keys.map(Number);
+        const values = list.items.values().map(copyForStorage);
         const removed = new Set(sorted);
         const kept = values.filter((_, index) => !removed.has(index));
         for (const [position, value] of kept.entries())
           storeInto(list.items.target, list.items.start + position, value);
-        setLength(list, kept.length, frame);
+        setLength(list, kept.length);
         return;
       }
     ),
@@ -379,9 +393,9 @@ function defineMembers(type: StructType, child: Type): void {
       'shrinkAndFree',
       { args: [USIZE], result: VOID, allocator: true },
       (list, [length], frame) => {
-        const size = Number(length as bigint);
-        if (size > list.items.length) panic(PANIC.unreachable);
-        setLength(list, size, frame);
+        const size = length as bigint;
+        if (size > list.items.lengthValue) panic(PANIC.unreachable);
+        setLength(list, size);
         // The memory shrinks to the items, in place where the allocator can.
         if (sizeOf(child) !== 0) reallocate(frame, list, size, child);
         return;
@@ -391,41 +405,40 @@ function defineMembers(type: StructType, child: Type): void {
       'addManyAsSlice',
       { args: [USIZE], result: allocating(items), allocator: true },
       (list, [count], frame) => {
-        const previous = list.items.length;
-        const size = previous + Number(count as bigint);
+        const previous = list.items.lengthValue;
+        const size = previous + (count as bigint);
         if (!ensureTotalCapacity(frame, list, size, child)) return ERROR_OUT_OF_MEMORY;
-        setLength(list, size, frame);
-        return new Slice(list.items.target, list.items.start + previous, size - previous);
+        setLength(list, size);
+        return new Slice(list.items.target, list.items.start + Number(previous), size - previous);
       }
     ),
     unusedCapacitySlice: method('unusedCapacitySlice', { args: [], result: items, byValue: true }, (list) =>
       capacitySlice(list, true)
     ),
-    appendBounded: method('appendBounded', { args: [child], result: allocating(VOID) }, (list, [item], frame) => {
-      if (list.items.length >= list.capacity) return ERROR_OUT_OF_MEMORY;
-      materializeLength(frame, list, list.items.length + 1);
+    appendBounded: method('appendBounded', { args: [child], result: allocating(VOID) }, (list, [item]) => {
+      if (list.items.lengthValue >= (list.struct.slots[1] as bigint)) return ERROR_OUT_OF_MEMORY;
       storeInto(list.items.target, list.items.start + list.items.length, item);
-      setLength(list, list.items.length + 1, frame);
+      setLength(list, list.items.lengthValue + 1n);
       return;
     }),
     resize: method('resize', { args: [USIZE], result: allocating(VOID), allocator: true }, (list, [length], frame) => {
-      const size = Number(length as bigint);
+      const size = length as bigint;
       if (!ensureTotalCapacity(frame, list, size, child)) return ERROR_OUT_OF_MEMORY;
-      setLength(list, size, frame);
+      setLength(list, size);
       return;
     }),
     ensureTotalCapacity: method(
       'ensureTotalCapacity',
       { args: [USIZE], result: allocating(VOID), allocator: true },
       (list, [capacity], frame) =>
-        ensureTotalCapacity(frame, list, Number(capacity as bigint), child) ? undefined : ERROR_OUT_OF_MEMORY
+        ensureTotalCapacity(frame, list, capacity as bigint, child) ? undefined : ERROR_OUT_OF_MEMORY
     ),
     ensureTotalCapacityPrecise: method(
       'ensureTotalCapacityPrecise',
       { args: [USIZE], result: allocating(VOID), allocator: true },
       (list, [capacity], frame) => {
-        const size = Number(capacity as bigint);
-        if (sizeOf(child) !== 0 && list.capacity >= size) return;
+        const size = capacity as bigint;
+        if (sizeOf(child) !== 0 && (list.struct.slots[1] as bigint) >= size) return;
         return reallocate(frame, list, size, child) ? undefined : ERROR_OUT_OF_MEMORY;
       }
     ),
@@ -433,7 +446,7 @@ function defineMembers(type: StructType, child: Type): void {
       'ensureUnusedCapacity',
       { args: [USIZE], result: allocating(VOID), allocator: true },
       (list, [count], frame) =>
-        ensureTotalCapacity(frame, list, list.items.length + Number(count as bigint), child)
+        ensureTotalCapacity(frame, list, list.items.lengthValue + (count as bigint), child)
           ? undefined
           : ERROR_OUT_OF_MEMORY
     ),
@@ -441,13 +454,18 @@ function defineMembers(type: StructType, child: Type): void {
       'addOne',
       { args: [], result: allocating(pointerTo(child, false)), allocator: true },
       (list, _, frame) => {
-        if (!ensureTotalCapacity(frame, list, list.items.length + 1, child)) return ERROR_OUT_OF_MEMORY;
-        setLength(list, list.items.length + 1, frame);
-        return new Pointer(list.items.target, list.items.start + list.items.length - 1);
+        if (!ensureTotalCapacity(frame, list, list.items.lengthValue + 1n, child)) return ERROR_OUT_OF_MEMORY;
+        setLength(list, list.items.lengthValue + 1n);
+        return new Pointer(list.items.target, list.items.start + Number(list.items.lengthValue - 1n));
       }
     ),
     toOwnedSlice: method('toOwnedSlice', { args: [], result: allocating(items), allocator: true }, (list, _, frame) => {
       // The memory shrinks to the items, in place where the allocator can.
+      if (sizeOf(child) === 0) {
+        const owned = list.items;
+        freeList(list);
+        return owned;
+      }
       const complete = reserveNativeAllocation(frame, list.allocator, list.items.length, child, list.items.target);
       if (!complete) return ERROR_OUT_OF_MEMORY;
       const values = list.items.values().map(copyForStorage);
@@ -460,24 +478,34 @@ function defineMembers(type: StructType, child: Type): void {
     clone: method('clone', { args: [], result: allocating(type), byValue: true, allocator: true }, (list, _, frame) => {
       const copy = listOf(emptyList(), child);
       copy.allocator = list.allocator;
-      if (!reallocate(frame, copy, list.capacity, child)) return ERROR_OUT_OF_MEMORY;
-      materializeLength(frame, copy, list.items.length);
-      for (let index = 0; index < list.items.length; index++)
+      if (!reallocate(frame, copy, list.struct.slots[1] as bigint, child)) return ERROR_OUT_OF_MEMORY;
+      for (let index = 0; sizeOf(child) !== 0 && index < list.items.length; index++)
         storeInto(copy.items.target, copy.items.start + index, list.items.get(index));
-      setLength(copy, list.items.length, frame);
+      setLength(copy, list.items.lengthValue);
       return copy.struct;
     }),
     allocatedSlice: method('allocatedSlice', { args: [], result: items, byValue: true }, (list) =>
       capacitySlice(list, false)
     ),
-    expandToCapacity: method('expandToCapacity', { args: [], result: VOID }, (list, _, frame) => {
-      setLength(list, list.capacity, frame);
+    expandToCapacity: method('expandToCapacity', { args: [], result: VOID }, (list, _) => {
+      setLength(list, list.struct.slots[1] as bigint);
       return;
     }),
     replaceRange: method(
       'replaceRange',
       { args: [USIZE, USIZE, constItems], result: allocating(VOID), allocator: true },
       (list, [start, length, slice], frame) => {
+        if (sizeOf(child) === 0) {
+          const from = start as bigint,
+            count = length as bigint;
+          if (count > list.items.lengthValue) panic(PANIC.overflow);
+          const next = list.items.lengthValue - count + (slice as Slice).lengthValue;
+          if (!ensureTotalCapacity(frame, list, next, child)) return ERROR_OUT_OF_MEMORY;
+          if (from + count > list.items.lengthValue)
+            panic(`start index ${from + count} is larger than end index ${list.items.lengthValue}`);
+          setLength(list, next);
+          return;
+        }
         const from = Number(start as bigint);
         const count = Number(length as bigint);
         const values = list.items.values().map(copyForStorage);
@@ -492,7 +520,7 @@ function defineMembers(type: StructType, child: Type): void {
         const combined = [...values.slice(0, from), ...replacement, ...values.slice(from + count)];
         for (const [position, value] of combined.entries())
           storeInto(list.items.target, list.items.start + position, value);
-        setLength(list, combined.length, frame);
+        setLength(list, combined.length);
         return;
       }
     ),
@@ -526,7 +554,7 @@ function defineMembers(type: StructType, child: Type): void {
               capacity: received.capacity,
               growth: new NativeHandle('writerGrowth', {
                 grow: (frame: Frame, writer: WriterState, end: number) => {
-                  setLength(received, writer.end, frame);
+                  setLength(received, writer.end);
                   if (!ensureTotalCapacity(frame, received, end + 1, child)) return false;
                   writer.buffer = new Slice(received.items.target, received.items.start, received.capacity);
                   writer.capacity = received.capacity;
@@ -548,7 +576,7 @@ function defineMembers(type: StructType, child: Type): void {
                 throw error;
               } finally {
                 if (completed) {
-                  setLength(received, destination.end, frame);
+                  setLength(received, destination.end);
                   for (const [index, value] of received.struct.slots.entries()) storeInto(owner, index, value);
                 }
               }

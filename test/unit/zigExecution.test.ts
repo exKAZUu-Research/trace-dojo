@@ -2715,7 +2715,7 @@ test.each(['void', 'struct{}'])('zero-sized ArrayList %s capacity is virtual acr
   });
 });
 
-test('zero-sized ArrayList initialization needs no allocator bytes and materialization stays bounded', () => {
+test('zero-sized ArrayList initialization and growth need no element storage', () => {
   const source = `const std=@import("std");pub fn main()!void{var b:[0]u8=undefined;var f=std.heap.FixedBufferAllocator.init(&b);const g=f.allocator();var l=try std.ArrayList(void).initCapacity(g,0);try l.appendNTimes(g,{},4);l.appendAssumeCapacity({});std.debug.print("{} {} {}",.{l.capacity,l.items.len,f.end_index});}`;
   expect(executeProgram('zig', source)).toMatchObject({
     kind: 'executed',
@@ -2725,9 +2725,9 @@ test('zero-sized ArrayList initialization needs no allocator bytes and materiali
   expect(
     executeProgram(
       'zig',
-      `const std=@import("std");pub fn main(init:std.process.Init)!void{var l:std.ArrayList(void)=.empty;try l.appendNTimes(init.gpa,{},1000000000);}`
-    ).kind
-  ).toBe('limitExceeded');
+      `const std=@import("std");pub fn main(init:std.process.Init)!void{var l:std.ArrayList(void)=.empty;try l.appendNTimes(init.gpa,{},1000000000);std.debug.print("{}",.{l.items.len});}`
+    )
+  ).toMatchObject({ kind: 'executed', stderr: '1000000000', uncaughtException: undefined });
 });
 
 test('ArrayList print reserves before custom formatting while arguments are evaluated first', () => {
@@ -3584,4 +3584,40 @@ test.each([
   });
   const requiringFact = source.replace('std.debug.print("{}",.{n});', 'const a:[n]u8=@splat(7);_=a;');
   expect(executeProgram('zig', requiringFact)).toMatchObject({ kind: 'compileError' });
+});
+
+test.each([
+  ['void', '{}'],
+  ['struct{}', '.{ }'],
+  ['u0', '0'],
+])('virtual lists of %s retain exact lengths through removal and shrinking', (type, value) => {
+  const source = `const std=@import("std");const T=${type};const M=std.math.maxInt(usize);pub fn main(init:std.process.Init)!void{var a:std.ArrayList(T)=.empty;try a.append(init.gpa,${value});var b=std.ArrayList(T).fromOwnedSlice(a.unusedCapacitySlice());_=b.pop();_=b.swapRemove(0);_=b.orderedRemove(M-4);b.orderedRemoveMany(&[_]usize{0,0,1});std.debug.print("{}|",.{b.items.len});b.shrinkRetainingCapacity(M-10);b.shrinkAndFree(init.gpa,M-11);std.debug.print("{} {}",.{b.items.len,b.capacity});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: '18446744073709551609|18446744073709551604 18446744073709551614',
+    uncaughtException: undefined,
+  });
+});
+
+test('virtual list growth preserves usize overflow and bounded append behavior', () => {
+  const source = `const std=@import("std");const M=std.math.maxInt(usize);pub fn main(init:std.process.Init)!void{var a:std.ArrayList(void)=.empty;try a.append(init.gpa,{});var b=std.ArrayList(void).fromOwnedSlice(a.unusedCapacitySlice());_=b.pop();try b.appendNTimes(init.gpa,{},1);try b.insertSlice(init.gpa,1,a.items);b.appendNTimes(init.gpa,{},2) catch |e| std.debug.print("{s}|",.{@errorName(e)});b.ensureUnusedCapacity(init.gpa,1) catch |e| std.debug.print("{s}|",.{@errorName(e)});try b.resize(init.gpa,M-4);const s=try b.addManyAsSlice(init.gpa,2);try b.appendBounded({});std.debug.print("{} {} {}",.{b.items.len,b.capacity,s.len});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: 'OutOfMemory|OutOfMemory|18446744073709551614 18446744073709551615 2',
+    uncaughtException: undefined,
+  });
+});
+
+test('virtual list replacement, cloning, and ownership transfer preserve metadata', () => {
+  const source = `const std=@import("std");const M=std.math.maxInt(usize);pub fn main(init:std.process.Init)!void{var a:std.ArrayList(void)=.empty;try a.append(init.gpa,{});var b=std.ArrayList(void).fromOwnedSlice(a.unusedCapacitySlice());try b.replaceRange(init.gpa,0,M-2,a.items);std.debug.print("{}|",.{b.items.len});b.expandToCapacity();var c=try b.clone(init.gpa);const owned=try c.toOwnedSlice(init.gpa);std.debug.print("{} {} {} {}",.{b.items.len,owned.len,c.items.len,c.capacity});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: '2|18446744073709551614 18446744073709551614 0 0',
+    uncaughtException: undefined,
+  });
+});
+
+test('formatting a virtual zero-sized list obeys the output budget', () => {
+  const source = `const std=@import("std");pub fn main(init:std.process.Init)!void{var l:std.ArrayList(void)=.empty;try l.appendNTimes(init.gpa,{},1000000000);std.debug.print("{any}",.{l.items});}`;
+  expect(executeProgram('zig', source)).toMatchObject({ kind: 'limitExceeded', limit: 'output' });
 });
