@@ -1,6 +1,7 @@
 // code-gauge-allow-file fileNcss 431 -- Resolves calls as TypeScript does: callees, overloads, inference, and the effects of calls on the flow.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
+import { unsupportedMessage } from '../unsupported';
 import type { Checker, Mapper } from './checker';
 import { type InferenceRun, newInferenceRun } from './inference';
 import { named, skipParentheses, stringValue } from './syntax';
@@ -274,6 +275,13 @@ export class Calls {
 
   /** A tagged template, `String.raw\`...\``, which calls the tag with the template's strings and substitutions. */
   private taggedTemplate(callee: TreeNode, template: TreeNode): Type {
+    // The syntax check lets through only a tag spelled `String.raw`, which must name the library's `String`.
+    const object = callee.childForFieldName('object');
+    const declaration = object && this.c.scopeOf(object).lookupValue(object.text)?.valueDeclaration;
+    if (!declaration || !this.c.isLibrary(declaration)) {
+      this.c.error(callee, unsupportedMessage('タグ付きテンプレート'));
+      return errorType;
+    }
     const calleeType = this.c.expressions.check(callee);
     for (const part of named(template)) {
       if (part.type === 'template_substitution') this.c.expressions.check(named(part)[0]);

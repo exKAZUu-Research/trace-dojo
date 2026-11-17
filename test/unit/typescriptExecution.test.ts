@@ -75,6 +75,11 @@ test.each([
     'override 修飾子は、この採点環境では使えません。',
   ],
   ['satisfies', 'const a = 1 satisfies number;', 'satisfies 演算子は、この採点環境では使えません。'],
+  [
+    'a tag spelled String.raw that names a parameter',
+    'const raw = (...a: unknown[]) => 1;\nfunction f(String: { raw: typeof raw }) { return String.raw`x`; }',
+    'タグ付きテンプレートは、この採点環境では使えません。',
+  ],
   ['a Promise', 'Promise.resolve(1);', 'Promise は、この採点環境では使えません。'],
   ['a timer', 'setTimeout(() => {}, 1);', 'setTimeout などのタイマーは、この採点環境では使えません。'],
   ['a Date', 'new Date();', 'Date（日付と時刻）は、この採点環境では使えません。'],
