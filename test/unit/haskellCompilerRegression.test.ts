@@ -1111,3 +1111,16 @@ test.each([
 ])('rejects duplicate declarations or ambiguous instance uses: %s', (source) => {
   expect(executeProgram('haskell', source).kind).toBe('compileError');
 });
+
+test('retains an overlapping generic constraint until its helper is used', () => {
+  const declarations = `class C a where c :: a -> Int
+instance C (Either a a) where c _ = 1
+instance C (Either a b) where c _ = 2
+f x = c (if True then Left x else Right x)`;
+  expect(executeProgram('haskell', `${declarations}\nmain = print (1 :: Int)`)).toMatchObject({
+    kind: 'executed',
+    stdout: '1\n',
+    uncaughtException: undefined,
+  });
+  expect(executeProgram('haskell', `${declarations}\nmain = print (f (1 :: Int))`).kind).toBe('compileError');
+});

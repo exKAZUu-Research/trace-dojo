@@ -1,5 +1,5 @@
 import type { ClassEntity, Evidence, InstanceInfo, TypeEntity } from './entities';
-import { couldMatch, matchType, type Pred, prune, splitApp, type Type, typesEqual } from './types';
+import { couldMatch, matchType, type Pred, prune, splitApp, type Type, typesEqual, typeVarsOf } from './types';
 import { chargeTypeWork } from './typeWorkBudget';
 
 /** The instances visible to a module: the library's, and the module's own. */
@@ -37,7 +37,7 @@ export class ClassEnv {
     for (const instance of instances) {
       const bindings: (Type | undefined)[] = [];
       if (matchType(instance.head, pred.type, bindings)) {
-        if (matched) return 'overlap';
+        if (matched) return typeVarsOf(pred.type).size > 0 ? 'pending' : 'overlap';
         matched = { instance, args: instance.kinds.map((_, index) => bindings[index] as Type) };
         continue;
       }
