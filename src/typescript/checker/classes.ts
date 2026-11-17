@@ -6,7 +6,7 @@ import type { Checker } from './checker';
 import { FlowState, type State } from './flow';
 import { isUsedBeforeInitialization } from './initializationOrder';
 import type { Sym } from './scopes';
-import { hasToken, isWithin, named } from './syntax';
+import { hasToken, isClassConstructor, isWithin, named } from './syntax';
 import {
   anonymousObject,
   anyType,
@@ -618,7 +618,7 @@ export class ClassChecker {
 
   /** Reports `this` in a derived class's constructor before it calls `super(...)`. */
   private checkThisBeforeSuper(node: TreeNode, owner: TreeNode, classNode: TreeNode): void {
-    if (owner.type !== 'method_definition' || owner.childForFieldName('name')?.text !== 'constructor') return;
+    if (!isClassConstructor(owner)) return;
     if (!this.extendsClause(classNode)) return;
     for (let current = node.parent; current && current.id !== owner.id; current = current.parent)
       if (current.type === 'arrow_function') return;
@@ -687,9 +687,7 @@ export class ClassChecker {
     const classNode = this.enclosingClass(node);
     const baseStatic = classNode ? this.baseStaticType(classNode) : undefined;
     const owner = this.c.functions.contexts.at(-1)?.node;
-    const inConstructor =
-      owner?.type === 'method_definition' && owner.childForFieldName('name')?.text === 'constructor';
-    if (!baseStatic || !inConstructor) {
+    if (!baseStatic || !owner || !isClassConstructor(owner)) {
       for (const arg of args) this.c.expressions.check(arg);
       this.c.error(node, "'super' の呼び出しは、派生クラスのコンストラクタの中でしか書けません。");
       return voidType;
@@ -815,7 +813,7 @@ export class ClassChecker {
     for (let current = expression.parent; current && current.id !== owner.id; current = current.parent) {
       if (current.type === 'arrow_function') return true;
     }
-    const isConstructor = owner.type === 'method_definition' && owner.childForFieldName('name')?.text === 'constructor';
+    const isConstructor = isClassConstructor(owner);
     const isInitializer = owner.type === 'field_definition';
     if (!isConstructor && !isInitializer) return true;
     const classNode = owner.parent?.parent;

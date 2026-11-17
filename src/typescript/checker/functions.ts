@@ -4,7 +4,7 @@ import type { Checker } from './checker';
 import { contextualSignatureOf } from './contextualSignatures';
 import { FlowState, type State } from './flow';
 import type { Sym } from './scopes';
-import { hasToken, named, patternIdentifiers, propertyNameText } from './syntax';
+import { hasToken, isClassConstructor, named, patternIdentifiers, propertyNameText } from './syntax';
 import {
   anyType,
   filterType,
@@ -333,7 +333,7 @@ export class FunctionChecker {
       declaredReturn,
       keepsLiterals:
         (declaredReturn ?? contextualReturn) !== undefined && this.hasLiterals(declaredReturn ?? contextualReturn),
-      isConstructor: node.type === 'method_definition' && node.childForFieldName('name')?.text === 'constructor',
+      isConstructor: isClassConstructor(node),
       hasReturnWithValue: false,
       hasReturn: false,
       returnStates: [],

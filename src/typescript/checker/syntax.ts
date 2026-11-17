@@ -115,6 +115,15 @@ export function propertyNameText(node: TreeNode): string | undefined {
   }
 }
 
+/** Whether a node is a class's constructor, not an object literal's method named `constructor`. */
+export function isClassConstructor(node: TreeNode): boolean {
+  return (
+    node.type === 'method_definition' &&
+    node.parent?.type === 'class_body' &&
+    node.childForFieldName('name')?.text === 'constructor'
+  );
+}
+
 /** Whether a property name is numeric, which a number index signature covers: `1`, `1.5`, and `-1` but not `01`. */
 export function isNumericName(name: string): boolean {
   return String(Number(name)) === name;
