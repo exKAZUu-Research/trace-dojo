@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 416 -- Keeps one PHP runtime concern and its shared helpers in one module.
+// code-gauge-allow-file fileNcss 427 -- Keeps one PHP runtime concern and its shared helpers in one module.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import { placeOf } from './assignment';
 import type { Arg, Expr } from './ast';
@@ -34,69 +34,86 @@ export function evalArgs(args: Arg[], fn: Callable | undefined, name: string | u
   const values: ArgValue[] = [];
   const frame = runtime.frame;
   for (const [index, arg] of args.entries()) {
-    if (arg.spread) {
-      const source = fn?.params.some((param) => param.byRef) && arg.e.k === 'var' ? placeOf(arg.e) : undefined;
-      let value = source ? source.get() : ev(arg.e);
-      if (value instanceof PhpArray && source) value = writableContainer(source);
-      else if (value instanceof PhpArray && fn?.params.some((param) => param.byRef)) value = value.copy();
-      if (value instanceof PhpArray) {
-        for (const [key, item] of value.entries()) {
-          const argumentName = typeof key === 'string' ? key : undefined;
-          if (argumentName === undefined && values.some((other) => other.name !== undefined)) {
-            throwError('Error', 'Cannot use positional argument after named argument during unpacking');
+    const mark = frame.temporaries.length;
+    const first = values.length;
+    try {
+      if (arg.spread) {
+        const source = fn?.params.some((param) => param.byRef) && arg.e.k === 'var' ? placeOf(arg.e) : undefined;
+        let value = source ? source.get() : ev(arg.e);
+        if (value instanceof PhpArray && source) value = writableContainer(source);
+        else if (value instanceof PhpArray && fn?.params.some((param) => param.byRef)) value = value.copy();
+        if (value instanceof PhpArray) {
+          for (const [key, item] of value.entries()) {
+            const argumentName = typeof key === 'string' ? key : undefined;
+            if (argumentName === undefined && values.some((other) => other.name !== undefined)) {
+              throwError('Error', 'Cannot use positional argument after named argument during unpacking');
+            }
+            const position = argumentName === undefined ? values.length : -1;
+            if (fn && paramIsByRef(fn, position, argumentName)) {
+              const ref = new ElementPlace(value, key).ref();
+              values.push({ v: ref.v, ref, name: argumentName });
+            } else values.push({ v: share(item), name: argumentName });
           }
-          const position = argumentName === undefined ? values.length : -1;
-          if (fn && paramIsByRef(fn, position, argumentName)) {
-            const ref = new ElementPlace(value, key).ref();
-            values.push({ v: ref.v, ref, name: argumentName });
-          } else values.push({ v: share(item), name: argumentName });
+        } else if (value instanceof PhpObject) {
+          for (const [key, item] of iterate(value)) {
+            if (typeof key === 'string') values.push({ v: share(item), name: key });
+            else values.push({ v: share(item) });
+          }
+        } else throwError('TypeError', 'Only arrays and Traversables can be unpacked');
+        continue;
+      }
+      const position = arg.name === undefined ? values.length : -1;
+      const byRef = fn ? paramIsByRef(fn, position, arg.name) : false;
+      if (byRef) {
+        const e = arg.e;
+        if (['var', 'varvar', 'idx', 'prop', 'sprop'].includes(e.k)) {
+          const ref = placeOf(e).ref();
+          values.push({ v: ref.v, ref, name: arg.name });
+          continue;
         }
-      } else if (value instanceof PhpObject) {
-        for (const [key, item] of iterate(value)) {
-          if (typeof key === 'string') values.push({ v: share(item), name: key });
-          else values.push({ v: share(item) });
+        runtime.lastReturnRef = undefined;
+        const value = ev(e);
+        const returned = runtime.lastReturnRef as Ref | undefined;
+        runtime.lastReturnRef = undefined;
+        if (returned && (e.k === 'call' || e.k === 'mcall' || e.k === 'scall')) {
+          values.push({ v: returned.v, ref: returned, name: arg.name });
+          continue;
         }
-      } else throwError('TypeError', 'Only arrays and Traversables can be unpacked');
-      continue;
+        const param = fn?.params[Math.min(position === -1 ? 0 : position, (fn?.params.length ?? 1) - 1)];
+        if (param?.preferRef) {
+          values.push({ v: value, name: arg.name });
+          continue;
+        }
+        if (e.k === 'call' || e.k === 'mcall' || e.k === 'scall') {
+          notice('Only variables should be passed by reference');
+          values.push({ v: value, ref: new Ref(value), name: arg.name });
+          continue;
+        }
+        const label = name ?? fn?.name ?? '';
+        const paramIndex =
+          arg.name === undefined ? index : (fn?.params.findIndex((param) => param.name === arg.name) ?? 0);
+        const paramName = fn?.params[Math.min(paramIndex, (fn?.params.length ?? 1) - 1)]?.name ?? '';
+        throwError('Error', `${label}(): Argument #${paramIndex + 1} ($${paramName}) could not be passed by reference`);
+      }
+      const value = ev(arg.e);
+      frame.temporaries.push(value);
+      values.push({ v: value, name: arg.name });
+    } finally {
+      claimArgumentTemporaries(frame, values, first, mark);
     }
-    const position = arg.name === undefined ? values.length : -1;
-    const byRef = fn ? paramIsByRef(fn, position, arg.name) : false;
-    if (byRef) {
-      const e = arg.e;
-      if (['var', 'varvar', 'idx', 'prop', 'sprop'].includes(e.k)) {
-        const ref = placeOf(e).ref();
-        values.push({ v: ref.v, ref, name: arg.name });
-        continue;
-      }
-      runtime.lastReturnRef = undefined;
-      const value = ev(e);
-      const returned = runtime.lastReturnRef as Ref | undefined;
-      runtime.lastReturnRef = undefined;
-      if (returned && (e.k === 'call' || e.k === 'mcall' || e.k === 'scall')) {
-        values.push({ v: returned.v, ref: returned, name: arg.name });
-        continue;
-      }
-      const param = fn?.params[Math.min(position === -1 ? 0 : position, (fn?.params.length ?? 1) - 1)];
-      if (param?.preferRef) {
-        values.push({ v: value, name: arg.name });
-        continue;
-      }
-      if (e.k === 'call' || e.k === 'mcall' || e.k === 'scall') {
-        notice('Only variables should be passed by reference');
-        values.push({ v: value, ref: new Ref(value), name: arg.name });
-        continue;
-      }
-      const label = name ?? fn?.name ?? '';
-      const paramIndex =
-        arg.name === undefined ? index : (fn?.params.findIndex((param) => param.name === arg.name) ?? 0);
-      const paramName = fn?.params[Math.min(paramIndex, (fn?.params.length ?? 1) - 1)]?.name ?? '';
-      throwError('Error', `${label}(): Argument #${paramIndex + 1} ($${paramName}) could not be passed by reference`);
-    }
-    const value = ev(arg.e);
-    frame.temporaries.push(value);
-    values.push({ v: value, name: arg.name });
   }
   return values;
+}
+
+function claimArgumentTemporaries(frame: Frame, args: ArgValue[], first: number, mark: number): void {
+  const available = new Map<Value, number>();
+  for (const value of frame.temporaries.slice(mark)) {
+    if (value instanceof PhpObject || value instanceof PhpArray) available.set(value, (available.get(value) ?? 0) + 1);
+  }
+  for (const arg of args.slice(first)) {
+    arg.temporaryCount = available.get(arg.v) ?? 0;
+    available.delete(arg.v);
+  }
 }
 
 export function callExpression(e: Extract<Expr, { k: 'call' }>): Value {
@@ -112,7 +129,10 @@ export function callExpression(e: Extract<Expr, { k: 'call' }>): Value {
         throw new UnsupportedFeatureError(`PHP の組み込み関数（${name.fallback ?? name.name}）`);
       throwError('Error', `Call to undefined function ${name.name}()`);
     }
-    if (e.fcc) return closureFromCallable({ fn });
+    if (e.fcc)
+      return closureFromCallable({
+        fn: fn.kind === 'native' && fn.name === 'die' ? (runtime.functions.get('exit') as Callable) : fn,
+      });
     const args = evalArgs(e.args, fn, fn.name);
     runtime.row = e.row;
     const result = invoke({ fn, inline: inlineCall(fn, e.args) }, args, e.row);
@@ -569,8 +589,7 @@ export function closureFromCallable(target: CallTarget): PhpObject {
   const closureClass = runtime.classes.get('closure') as PhpClass;
   const object = runtime.newObject(closureClass);
   const data: ClosureData = {
-    fn:
-      target.fn.kind === 'native' && target.fn.name === 'die' ? (runtime.functions.get('exit') as Callable) : target.fn,
+    fn: target.fn,
     bound: new Map(),
     thisObj: target.thisObj,
     scope: target.scope,

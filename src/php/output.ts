@@ -65,7 +65,7 @@ function debugLabel(key: string | bigint): string {
   return owner === '*' ? `"${name}":protected` : `"${name}":"${owner}":private`;
 }
 
-// code-gauge-allow functionCognitiveComplexity 20 -- Transcribes PHP's algorithm for this function step by step, whose branches mirror PHP's.
+// code-gauge-allow functionCognitiveComplexity 23 -- Transcribes PHP's algorithm for this function step by step, whose branches mirror PHP's.
 function closureDebug(object: PhpObject): [string, Value, string][] {
   const data = object.internal as ClosureData;
   const entries: [string, Value, string][] = [];
@@ -77,7 +77,15 @@ function closureDebug(object: PhpObject): [string, Value, string][] {
       ['line', BigInt(fn.decl.row + 1), '"line"']
     );
   } else {
-    entries.push(['function', data.method ? `${data.method.scope.name}::${data.method.name}` : fn.name, '"function"']);
+    entries.push([
+      'function',
+      data.method
+        ? `${data.method.scope.name}::${data.method.name}`
+        : data.scope
+          ? `${data.scope.name}::${fn.name}`
+          : fn.name,
+      '"function"',
+    ]);
   }
   const statics = new PhpArray();
   for (const [name, ref] of data.bound) statics.set(name, ref.v);

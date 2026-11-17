@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 988 -- One converter of the statements and expressions, which share the converter state.
+// code-gauge-allow-file fileNcss 996 -- One converter of the statements and expressions, which share the converter state.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import type { Node } from '@willbooster/web-tree-sitter';
 
@@ -365,10 +365,17 @@ export class Converter extends DeclarationConverter {
     return { k: 'foreach', subject, key, value, byRef, body, row };
   }
 
+  // code-gauge-allow functionCognitiveComplexity 24 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
   private switchStatement(node: Node): Stmt {
     const row = node.startPosition.row;
     const subject = this.condition(node);
     const block = node.childForFieldName('body') as Node;
+    for (const child of block.namedChildren) {
+      if (child.type === 'case_statement' || child.type === 'default_statement') break;
+      if (child.type === 'comment') continue;
+      if (child.type === 'text_interpolation' && this.inlineText(child) === '') continue;
+      this.error(child, 'syntax error, unexpected text before switch case');
+    }
     let defaults = 0;
     const cases = this.loopBody(
       () =>

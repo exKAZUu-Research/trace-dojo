@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 506 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 551 -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import { LIMITS } from '../interpreter/limits';
 import type { FunctionDecl } from './ast';
@@ -16,7 +16,7 @@ import {
   SCRIPT_PATH,
   setCallCapture,
 } from './runtime';
-import { coerce, describeType, NO_MATCH, typeToString } from './types';
+import { coerce, describeType, matches, NO_MATCH, typeToString } from './types';
 import {
   type Callable,
   type ClosureData,
@@ -36,6 +36,8 @@ import {
 
 /** An argument as a call passes it: its value, and the reference a by-reference parameter receives. */
 export interface ArgValue {
+  temporaryCount?: number;
+  nativeTransfer?: { values: unknown[]; count: number };
   v: Value;
   ref?: Ref;
   name?: string;
@@ -149,40 +151,43 @@ export function invoke(target: CallTarget, args: ArgValue[], callRow: number | u
   return invokeUser(target, target.fn, args, callRow);
 }
 
-// code-gauge-allow functionNcss 40 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
-// code-gauge-allow functionCognitiveComplexity 16 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+interface NativeHolders {
+  values: unknown[];
+  references: Ref[];
+  argumentCount: number;
+}
+
+// code-gauge-allow functionNcss 51 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 function invokeNative(target: CallTarget, fn: NativeFunction, args: ArgValue[], row: number | undefined): Value {
   const runtime = rt();
   runtime.spend();
+  const caller = runtime.frame;
   const name = functionDisplayName(target);
-  if (target.inline && row !== undefined) {
-    const { values, refs, named } = bindNative(fn, args, name, callerIsStrict());
-    return runNative(runtime, fn, {
-      args: values,
-      refs,
-      thisObj: target.thisObj,
-      calledClass: target.staticClass,
-      named,
-      row,
-    });
-  }
+  const inline = target.inline && row !== undefined;
   const strict = callerIsStrict();
-  // The frame exists while PHP checks the arguments, so a TypeError about them shows the call in its trace.
-  const passed = args.filter((arg) => arg.name === undefined).map((arg) => arg.ref?.v ?? arg.v);
-  for (const arg of args) {
-    if (arg.name === undefined) continue;
-    const index = fn.params.findIndex((param) => param.name === arg.name && !param.variadic);
-    if (index !== -1) passed[index] = arg.ref?.v ?? arg.v;
+  if (!inline) {
+    const passed = args.filter((arg) => arg.name === undefined).map((arg) => arg.ref?.v ?? arg.v);
+    for (const arg of args) {
+      if (arg.name === undefined) continue;
+      const index = fn.params.findIndex((param) => param.name === arg.name && !param.variadic);
+      if (index !== -1) passed[index] = arg.ref?.v ?? arg.v;
+    }
+    callStack.push(recordFor(target, passed, nativeDepth > 0 && row === undefined ? undefined : row));
+    nativeDepth++;
   }
-  callStack.push(recordFor(target, passed, nativeDepth > 0 && row === undefined ? undefined : row));
-  nativeDepth++;
   runtime.nativeCalls++;
-  const held: unknown[] = args.map((arg) => arg.ref ?? arg.v);
-  const retainedRefs = args.flatMap((arg) => (arg.ref ? [arg.ref] : []));
-  for (const ref of retainedRefs) ref.rc++;
-  runtime.nativeHeld.push(held);
+  const held: NativeHolders = {
+    values: args.map((arg) => arg.ref ?? arg.v),
+    references: args.flatMap((arg) => (arg.ref ? [arg.ref] : [])),
+    argumentCount: args.length,
+  };
+  for (const ref of held.references) ref.rc++;
+  runtime.nativeHeld.push(held.values);
+  handOverArgs(caller, args);
   const savedRow = runtime.row;
-  let result: Value;
+  let result: Value = null;
+  let failed = false;
+  let failure: unknown;
   try {
     const { values, refs, named } = bindNative(fn, args, name, strict);
     result = runNative(runtime, fn, {
@@ -191,23 +196,52 @@ function invokeNative(target: CallTarget, fn: NativeFunction, args: ArgValue[], 
       thisObj: target.thisObj,
       calledClass: target.staticClass,
       named,
+      row: inline ? row : undefined,
     });
+  } catch (error) {
+    failed = true;
+    failure = error;
+    throw error;
   } finally {
-    nativeDepth--;
+    if (!inline) {
+      nativeDepth--;
+      callStack.pop();
+    }
     runtime.nativeCalls--;
     runtime.nativeHeld.pop();
-    for (const ref of retainedRefs) ref.rc--;
-    callStack.pop();
+    if (target.thisObj) runtime.pendingGcRoots.add(target.thisObj);
     runtime.row = savedRow;
+    if (!failed || failure instanceof PhpThrow) {
+      if (result instanceof PhpObject || result instanceof PhpArray) caller.temporaries.push(result);
+      releaseNativeValues(runtime, held, failure instanceof PhpThrow ? failure : undefined);
+    } else {
+      for (const ref of held.references) ref.releaseWithoutGc();
+    }
   }
-  // The values the function's callbacks returned are released once it is done with them; its result stays held.
-  if (result instanceof PhpObject || result instanceof PhpArray) runtime.frame.temporaries.push(result);
-  runtime.release(held);
   runtime.lastReturnRef = undefined;
   return result;
 }
 
-/** Runs a native function's body, refusing a string it builds past the limit as PHP's memory limit would. */
+function releaseNativeValues(runtime: Runtime, held: NativeHolders, pending?: PhpThrow): void {
+  const args = held.values.slice(0, held.argumentCount);
+  const transients = held.values.slice(held.argumentCount);
+  let failure: unknown = pending;
+  let failed = false;
+  runtime.nativeHeld.push(args);
+  try {
+    releaseCallValues(runtime, transients, pending);
+  } catch (error) {
+    failure = error;
+    failed = true;
+    throw error;
+  } finally {
+    runtime.nativeHeld.pop();
+    for (const ref of held.references) ref.releaseWithoutGc();
+    if (!failed || failure instanceof PhpThrow)
+      releaseCallValues(runtime, args, failure instanceof PhpThrow ? failure : undefined);
+  }
+}
+
 function runNative(runtime: Runtime, fn: NativeFunction, context: NativeContext): Value {
   try {
     const result = fn.impl(context);
@@ -379,6 +413,7 @@ function callerIsStrict(): boolean {
 
 // User functions -----------------------------------------------------------------------------------------------------
 
+// code-gauge-allow functionCognitiveComplexity 28 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 function invokeUser(target: CallTarget, fn: UserFunction, args: ArgValue[], row: number | undefined): Value {
   const runtime = rt();
   const { decl } = fn;
@@ -446,8 +481,6 @@ function invokeUser(target: CallTarget, fn: UserFunction, args: ArgValue[], row:
       result = checkReturn(result, decl.returnType, name, frame);
       if (decl.byRefReturn && frame.returnRef) {
         frame.returnRef.assign(result);
-        if (!Object.is(frame.returnRef.v, result))
-          throwReturnTypeError(frame.returnRef.v, decl.returnType, name, frame);
         result = frame.returnRef.v;
       }
     } else if (decl.byRefReturn === false) result = share(result);
@@ -493,18 +526,27 @@ function releaseFrame(
   fromNative: boolean,
   pending?: PhpThrow
 ): void {
+  if (frame.thisObj) runtime.pendingGcRoots.add(frame.thisObj);
   const holder = fromNative ? runtime.nativeHeld.at(-1) : undefined;
   if (returned instanceof PhpObject || returned instanceof PhpArray) (holder ?? caller.temporaries).push(returned);
-  let failure: unknown = pending;
-  if (pending) runtime.held.push(pending.object);
-  try {
-    runtime.release([
+  releaseCallValues(
+    runtime,
+    [
       ...[...frame.vars.values()].map((ref) => ref.v),
       ...frame.args,
       ...frame.temporaries,
       frame.thisObj,
       frame.closure,
-    ]);
+    ],
+    pending
+  );
+}
+
+function releaseCallValues(runtime: Runtime, values: unknown[], pending?: PhpThrow): void {
+  let failure: unknown = pending;
+  if (pending) runtime.held.push(pending.object);
+  try {
+    runtime.release(values);
   } catch (error) {
     failure = error;
     if (error instanceof PhpThrow && pending) setPrevious(error.object, pending.object);
@@ -565,13 +607,19 @@ function tracedNamedArgs(
  */
 function handOverArgs(caller: Frame, args: ArgValue[]): void {
   for (const arg of args) {
-    if (!(arg.v instanceof PhpObject || arg.v instanceof PhpArray)) continue;
-    // The value may be held twice: as the object `new` made and as the evaluated argument.
-    for (
-      let index = caller.temporaries.lastIndexOf(arg.v);
-      index !== -1;
-      index = caller.temporaries.lastIndexOf(arg.v)
-    ) {
+    if (arg.nativeTransfer) {
+      const { values, count } = arg.nativeTransfer;
+      for (let index = count - 1; index >= 0; index--) {
+        if (values[index] === arg.v) {
+          values[index] = undefined;
+          break;
+        }
+      }
+    }
+
+    for (let count = arg.temporaryCount ?? 0; count > 0; count--) {
+      const index = caller.temporaries.lastIndexOf(arg.v);
+      if (index === -1) break;
       caller.temporaries.splice(index, 1);
     }
   }
@@ -715,6 +763,12 @@ function checkReturn(value: Value, type: TypeDecl, name: string, frame: Frame): 
   if (type.k === 'named' && type.name === 'never') {
     throwError('TypeError', `${name}(): never-returning function must not implicitly return`);
   }
+  if (
+    frame.decl?.byRefReturn &&
+    frame.returnRef?.typeOwners().length &&
+    !matches(value, type, { scope: frame.scope, staticClass: frame.staticClass })
+  )
+    return throwReturnTypeError(value, type, name, frame);
   const coerced = coerce(value, type, {
     strict: rt().strictTypes,
     internal: false,

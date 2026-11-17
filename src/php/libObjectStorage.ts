@@ -64,7 +64,7 @@ class ObjectStorage {
       entry.info = info;
       this.nativeValues.add(info);
       this.nativeValues.delete(old);
-      if (old !== info) dropped(old);
+      dropped(old);
     } else {
       rt().allocate(1);
       const entry = { object, info };
@@ -103,7 +103,7 @@ class ObjectStorage {
       entry.info = share(value);
       this.nativeValues.add(value);
       this.nativeValues.delete(old);
-      if (old !== value) dropped(old);
+      dropped(old);
     }
   }
 

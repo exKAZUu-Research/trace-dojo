@@ -68,7 +68,7 @@ function hoist(body: Stmt[]): void {
   const declared = new Set<string>();
   for (const statement of body) {
     if (statement.k !== 'class') continue;
-    if (!canDeclareEarly(statement.decl, declared)) continue;
+    if (runtime.classes.has(lower(statement.decl.name)) || !canDeclareEarly(statement.decl, declared)) continue;
     runtime.row = statement.row;
     declareClass(statement.decl, statement.row);
     declared.add(lower(statement.decl.name));
@@ -486,10 +486,12 @@ function foreachStatement(statement: Extract<Stmt, { k: 'foreach' }>): Completio
 
 function foreachArrayByRef(statement: Extract<Stmt, { k: 'foreach' }>, array: PhpArray): Completion {
   const runtime = rt();
-  for (const key of array.map.keys()) {
+  const cursor = array.cursor();
+  while (cursor.key !== undefined) {
     runtime.spend();
-    if (!array.map.has(key)) continue;
+    const key = cursor.key;
     const ref = new ElementPlace(array, key).ref();
+    cursor.next();
     bindForeachRef(statement.value, ref);
     if (statement.key) assignTo(statement.key, key);
     runtime.steps.stepBinding(statement.row, true);

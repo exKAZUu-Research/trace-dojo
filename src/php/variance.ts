@@ -1,5 +1,6 @@
 import { lower } from './bytes';
 import { rt } from './runtime';
+import { typeToString } from './types';
 import type { PhpClass, TypeDecl } from './values';
 
 const BUILTIN = new Set([
@@ -101,4 +102,24 @@ function resolve(name: string, scope: PhpClass | undefined): PhpClass | undefine
   if (name === 'self' || name === lower(scope.name)) return scope;
   if (name === 'parent') return scope.parent;
   return rt().classes.get(name);
+}
+
+export function sameDeclarationType(
+  left: TypeDecl,
+  leftScope: PhpClass,
+  right: TypeDecl,
+  rightScope: PhpClass
+): boolean {
+  left = declarationType(left, leftScope);
+  right = declarationType(right, rightScope);
+  if (lower(typeToString(left)) === lower(typeToString(right))) return true;
+  return isSubtype(left, leftScope, right, rightScope) && isSubtype(right, rightScope, left, leftScope);
+}
+
+function declarationType(type: TypeDecl, scope: PhpClass): TypeDecl {
+  if (type.k !== 'named') return { ...type, types: type.types.map((part) => declarationType(part, scope)) };
+  if (scope.kind === 'trait') return type;
+  const word = lower(type.name);
+  const cls = word === 'self' ? scope : word === 'parent' ? scope.parent : undefined;
+  return cls ? { ...type, name: cls.name } : type;
 }

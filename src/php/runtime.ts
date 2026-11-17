@@ -4,10 +4,11 @@ import { ExecutionBudget, ExecutionLimitError, LIMITS } from '../interpreter/lim
 import { type ProgramInput, ProgramIO } from '../interpreter/programIo';
 import { StepTracker } from '../interpreter/stepTracker';
 import { TurtleWorld } from '../interpreter/turtleWorld';
-import type { FunctionDecl, Program } from './ast';
+import type { Expr, FunctionDecl, Program } from './ast';
 import { dec } from './bytes';
 import type { CompileNotice } from './converter';
-import { arrayIsShared, collectGarbage, releaseDropped } from './garbage';
+import { arrayIsShared, collectGarbage, GC_THRESHOLD_DEFAULT, releaseDropped } from './garbage';
+import { GcRoots } from './gcRoots';
 import { setArraySharingCheck } from './places';
 import { MersenneTwister } from './random';
 import {
@@ -20,6 +21,7 @@ import {
   setAllocationHandler,
   setDropHandler,
   setInternalHandler,
+  setReferenceDropObserver,
   type UserFunction,
   type Value,
 } from './values';
@@ -120,6 +122,8 @@ export class Runtime {
   readonly globalFrame: Frame;
   readonly userFunctions: UserFunction[] = [];
   readonly rootConstants = new Set<Value>();
+  readonly literalArrays = new WeakMap<Expr, Map<PhpClass | undefined, PhpArray>>();
+  constantEvaluationEpoch = 0;
   readonly functions = new Map<string, Callable>();
   readonly classes = new Map<string, PhpClass>();
   /** Constants by name, whose namespace prefix is lowercased. */
@@ -128,6 +132,10 @@ export class Runtime {
   readonly turtleObjects = new Set<PhpObject>();
   readonly arrayCycles = new Set<PhpArray>();
   readonly objectCycles = new Set<PhpObject>();
+  readonly gcRoots = new GcRoots<PhpObject | PhpArray>();
+  readonly pendingGcRoots = new Set<unknown>();
+  gcThreshold = GC_THRESHOLD_DEFAULT;
+  gcEnabled = true;
   readonly collectingObjects = new Set<PhpObject>();
   readonly collectingArrays = new Set<PhpArray>();
   collectingCycles = false;
@@ -236,7 +244,8 @@ export class Runtime {
   nativeHeld: unknown[][] = [];
 
   /** Frees what letting go of some values frees, as {@link releaseDropped} describes, when that is safe now. */
-  release(dropped: unknown[]): void {
+  release(dropped: unknown[], durable = false): void {
+    if (durable) for (const value of dropped) this.pendingGcRoots.add(value instanceof Ref ? value.v : value);
     for (const value of dropped) this.pendingReleases.push(value);
     if (this.nativeCalls === 0) this.flushReleases();
   }
@@ -264,6 +273,7 @@ export class Runtime {
     if (this.objects.get(object.id) !== object) return;
     this.objects.delete(object.id);
     this.objectCycles.delete(object);
+    this.gcRoots.delete(object);
     this.collectingObjects.delete(object);
     this.turtleObjects.delete(object);
     this.internalObjects.delete(object);
@@ -276,6 +286,7 @@ export class Runtime {
           slot.typedBy = constraints.length > 0 ? constraints : undefined;
         }
       }
+    for (const slot of object.props.values()) this.pendingGcRoots.add(slot instanceof Ref ? slot.v : slot);
     object.props.clear();
     this.freeHandles.push(object.id);
     if (object.turtle) object.turtle.isAlive = false;
@@ -356,7 +367,8 @@ export function rt(): Runtime {
   return current as Runtime;
 }
 
-setDropHandler((values) => current?.release(values));
+setReferenceDropObserver((value) => current?.pendingGcRoots.add(value));
+setDropHandler((values) => current?.release(values, true));
 setAllocationHandler((count, size) => current?.allocate(count, size));
 
 export function withRuntime<T>(runtime: Runtime, run: () => T): T {

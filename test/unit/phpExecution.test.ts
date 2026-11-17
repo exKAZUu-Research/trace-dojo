@@ -966,3 +966,72 @@ test.each([
   expect(result.kind === 'executed' && result.stdout).toContain(message);
   expect(result.kind === 'executed' && result.stdout).not.toContain('never');
 });
+
+test.each([
+  'function f(true $x=![1]){}',
+  'class A{public true $x=![1];}',
+  'function f(false $x=!![1]){}',
+  'class A{public true $x=![...[],1];}',
+  'switch(1): ?>\n    <?php case 1:echo 1;endswitch;',
+  'switch(1){ ?>x<?php case 1:echo 1;}',
+])('rejects invalid known array defaults and switch prefixes before output: %s', (source) => {
+  expect(run(`<?php echo 'never';${source}`).kind).toBe('compileError');
+});
+
+test.each([
+  ['abstract class A implements I{public string $x;}', 'Type of A::$x must be subtype of int'],
+  ['abstract class A implements I{protected int $x;}', 'Access level to A::$x must be public'],
+  ['abstract class A implements I{public static int $x;}', 'Cannot redeclare non static I::$x as static A::$x'],
+  ['class A implements I{public static int $x;}', 'Cannot redeclare non static I::$x as static A::$x'],
+])('checks property contracts for every consumer: %s', (declaration, message) => {
+  const result = run(`<?php interface I{public int $x{get;}}${declaration}echo 'never';`);
+  expect(result.kind === 'executed' && result.stdout).toContain(message);
+  expect(result.kind === 'executed' && result.stdout).not.toContain('never');
+});
+
+test.each(['T,U', 'U,T'])('retains abstract trait contracts despite precedence: %s', (order) => {
+  const result = run(
+    `<?php trait T{abstract function f(int $x):int;}trait U{function f(string $x):int{return 1;}}class A{use ${order}{U::f insteadof T;}}echo 'never';`
+  );
+  expect(result.kind === 'executed' && result.stdout).toContain(
+    'Declaration of A::f(string $x): int must be compatible with T::f(int $x): int'
+  );
+  expect(result.kind === 'executed' && result.stdout).not.toContain('never');
+});
+
+test.each([
+  ['self', 'A'],
+  ['self', 'self'],
+  ['?self', '?A'],
+  ['parent', 'P'],
+])('compares trait property declaration scopes: %s / %s', (traitType, classType) => {
+  const result = run(
+    `<?php class P{}trait T{public ${traitType} $x;}class A extends P{use T;public ${classType} $x;}echo 'never';`
+  );
+  expect(result.kind === 'executed' && result.stdout).toContain('definition differs and is considered incompatible');
+  expect(result.kind === 'executed' && result.stdout).not.toContain('never');
+});
+
+test.each([
+  ['$a=range(1,10000);$sum=0;while(count($a)>1){$sum+=array_shift($a);}echo count($a),":",$sum;', '1:49995000'],
+  ['$a=[];for($i=0;$i<20000;$i++)array_unshift($a,$i);echo count($a),":",$a[0],":",$a[19999];', '20000:19999:0'],
+  [
+    '$a=range(1,3000);$sum=0;for($i=0;$i<6000;$i++){$sum+=array_shift($a);$a[]=3001+$i;}echo count($a),":",$sum;',
+    '3000:18003000',
+  ],
+])('keeps packed queues within the execution budget: %s', (source, stdout) => {
+  vi.restoreAllMocks();
+  expect(run(`<?php ${source}`)).toMatchObject({ kind: 'executed', stdout });
+});
+
+test('keeps unrelated object churn bounded after buffered cyclic containers', () => {
+  vi.restoreAllMocks();
+  const source = `<?php gc_disable();class Node{public $prev;public $next;public $data;function __construct($v){$this->data=['v'=>$v,'tag'=>new stdClass];}}function build($n){$head=new Node(0);$cur=$head;for($i=1;$i<$n;$i++){$x=new Node($i);$x->prev=$cur;$cur->next=$x;$cur=$x;}$s=0;for($c=$head;$c;$c=$c->next)$s+=$c->data['v'];return $s;}$t=0;for($k=0;$k<120;$k++)$t+=build(100);echo $t,":",gc_enabled()?1:0,":";$sum=0;for($i=0;$i<20000;$i++){$p=new stdClass;$p->v=$i;$sum+=$p->v;}echo $sum;`;
+  expect(run(source)).toMatchObject({ kind: 'executed', stdout: '594000:0:199990000' });
+});
+
+test.each(['?self', '?A'])('preserves trait constant declaration type scope: %s', (type) => {
+  const result = run(`<?php trait T{const ?self X=null;}class A{use T;const ${type} X=null;}echo 'never';`);
+  expect(result.kind === 'executed' && result.stdout).toContain('definition differs and is considered incompatible');
+  expect(result.kind === 'executed' && result.stdout).not.toContain('never');
+});

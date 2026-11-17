@@ -4,6 +4,7 @@
 import { type Comparisons, type Entry, SortedWalk } from './arraySetWalk';
 import { lower, upper } from './bytes';
 import { callCallback, callCallbackRefs, callMethod } from './callables';
+import type { ArgValue } from './calls';
 import { canAccessProp, declForKey, issetProp, lookupProp, objectToArray, readProp } from './classes';
 import * as conversionsModule from './conversions';
 import { compareBytes, compareNumbers, debugType, floatFitsInt, normalizeKeyString, valueName } from './conversions';
@@ -75,10 +76,6 @@ function checkArrayRef(ctx: NativeContext, index: number, name: string, paramete
       `${name}(): Argument #${index + 1} ($${parameter}) must be of type array, ${valueName(value)} given`
     );
   }
-}
-
-function keyValue(key: Key): Value {
-  return key;
 }
 
 // code-gauge-allow functionCognitiveComplexity 20 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
@@ -176,6 +173,8 @@ defineFunction('array_pop(array &$array): mixed', (ctx) => {
 defineFunction('array_shift(array &$array): mixed', (ctx) => {
   checkArrayRef(ctx, 0, 'array_shift', 'array');
   const array = writableArray(ctx, 0);
+  const shifted = array.shiftList();
+  if (shifted) return shifted.value;
   const first = array.map.keys().next();
   if (first.done) return null;
   const value = array.get(first.value) as Value;
@@ -187,6 +186,7 @@ defineFunction('array_shift(array &$array): mixed', (ctx) => {
 defineFunction('array_unshift(array &$array, mixed ...$values): int', (ctx) => {
   checkArrayRef(ctx, 0, 'array_unshift', 'array');
   const array = writableArray(ctx, 0);
+  if (array.prependList(ctx.args.slice(1).map(share))) return BigInt(array.size);
   const entries: [Key, Value | Ref][] = [
     ...ctx.args.slice(1).map((value): [Key, Value] => [0n, share(value)]),
     ...array.map,
@@ -219,12 +219,9 @@ function arrayKeyOf(key: Value, inlined: boolean): Key {
 
 defineFunction('array_key_first(array $array): int|string|null', ({ args }) => {
   const first = arr(args[0]).map.keys().next();
-  return first.done ? null : keyValue(first.value);
+  return first.done ? null : first.value;
 });
-defineFunction('array_key_last(array $array): int|string|null', ({ args }) => {
-  const last = arr(args[0]).lastKey();
-  return last === undefined ? null : keyValue(last);
-});
+defineFunction('array_key_last(array $array): int|string|null', ({ args }) => arr(args[0]).lastKey() ?? null);
 defineFunction('array_first(array $array): mixed', ({ args }) => arr(args[0]).firstValue() ?? null);
 defineFunction('array_last(array $array): mixed', ({ args }) => arr(args[0]).lastValue() ?? null);
 defineFunction('array_keys(array $array, mixed $filter_value = UNKNOWN, bool $strict = false): array', ({ args }) => {
@@ -235,7 +232,7 @@ defineFunction('array_keys(array $array, mixed $filter_value = UNKNOWN, bool $st
       const matches = args[2] === true ? strictEquals(value, args[1]) : looseEquals(value, args[1]);
       if (!matches) continue;
     }
-    keys.append(keyValue(key));
+    keys.append(key);
   }
   return keys;
 });
@@ -261,7 +258,7 @@ defineFunction('array_search(mixed $needle, array $haystack, bool $strict = fals
   const [needle, haystack, strict] = args;
   for (const [key, value] of arr(haystack).entries()) {
     rt().spend();
-    if (strict === true ? strictEquals(value, needle) : looseEquals(value, needle)) return keyValue(key);
+    if (strict === true ? strictEquals(value, needle) : looseEquals(value, needle)) return key;
   }
   return false;
 });
@@ -401,7 +398,7 @@ defineFunction('array_flip(array $array): array', ({ args }) => {
       warn('array_flip(): Can only flip string and integer values, entry skipped');
       continue;
     }
-    result.set(toKey(value), keyValue(key));
+    result.set(toKey(value), key);
   }
   return result;
 });
@@ -799,8 +796,8 @@ function walkValues(ref: Ref, ctx: NativeContext, recursive: boolean, active: Se
         continue;
       }
       const decl = container instanceof PhpObject ? declForKey(container.cls, key as string) : undefined;
-      const callbackKey = decl?.visibility === 'protected' ? `\0*\0${decl.name}` : keyValue(key);
-      const args = [{ v: elementRef.v, ref: elementRef }, { v: callbackKey }];
+      const callbackKey = decl?.visibility === 'protected' ? `\0*\0${decl.name}` : key;
+      const args: ArgValue[] = [{ v: elementRef.v, ref: elementRef }, { v: callbackKey }];
       if (ctx.args.length > 2) args.push({ v: ctx.args[2] });
       callCallbackRefs(ctx.args[1], args);
     }
@@ -1096,7 +1093,7 @@ defineFunction('array_rand(array $array, int $num = 1): int|string|array', ({ ar
   const keys = [...array.map.keys()];
   if (keys.length === 0) throwError('ValueError', 'array_rand(): Argument #1 ($array) must not be empty');
   const mt = rt().mt;
-  if (count === 1) return keyValue(keys[Number(mt.range(0n, BigInt(keys.length - 1)))]);
+  if (count === 1) return keys[Number(mt.range(0n, BigInt(keys.length - 1)))];
   if (count <= 0 || count > keys.length) {
     throwError(
       'ValueError',
@@ -1111,7 +1108,7 @@ defineFunction('array_rand(array $array, int $num = 1): int|string|array', ({ ar
   }
   const chosen = new Set<number>();
   while (chosen.size < wanted) chosen.add(Number(mt.range(0n, BigInt(keys.length - 1))));
-  return PhpArray.list(keys.filter((_, index) => chosen.has(index) !== negative).map((key) => keyValue(key)));
+  return PhpArray.list(keys.filter((_, index) => chosen.has(index) !== negative));
 });
 defineFunction('shuffle(array &$array): true', (ctx) => {
   const array = writableArray(ctx, 0);
@@ -1230,8 +1227,8 @@ for (const [name, byKey, reverse, renumber] of [
       ctx,
       name,
       (a, b) => {
-        const x = byKey ? keyValue(a[0]) : valueOf(a[1]);
-        const y = byKey ? keyValue(b[0]) : valueOf(b[1]);
+        const x = byKey ? a[0] : valueOf(a[1]);
+        const y = byKey ? b[0] : valueOf(b[1]);
         return reverse ? -comparator(x, y) : comparator(x, y);
       },
       renumber
@@ -1248,7 +1245,7 @@ for (const [name, byKey, renumber] of [
     return sortArray(
       ctx,
       name,
-      (a, b) => (byKey ? comparator(keyValue(a[0]), keyValue(b[0])) : comparator(valueOf(a[1]), valueOf(b[1]))),
+      (a, b) => (byKey ? comparator(a[0], b[0]) : comparator(valueOf(a[1]), valueOf(b[1]))),
       renumber
     );
   });
@@ -1330,10 +1327,7 @@ defineFunction('current(array|object $array): mixed', ({ args }) =>
 );
 defineAlias('pos', 'current');
 defineFunction('key(array|object $array): int|string|null', ({ args }) =>
-  withPointer(args[0], 'key', (array) => {
-    const key = array.currentKey();
-    return key === undefined ? null : keyValue(key);
-  })
+  withPointer(args[0], 'key', (array) => array.currentKey() ?? null)
 );
 defineFunction('next(array|object &$array): mixed', (ctx) =>
   withPointer(pointerValue(ctx), 'next', (array) => {

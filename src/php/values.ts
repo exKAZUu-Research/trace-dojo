@@ -1,7 +1,8 @@
-// code-gauge-allow-file fileNcss 708 -- Keeps one PHP runtime concern and its shared helpers in one module.
+// code-gauge-allow-file fileNcss 785 -- Keeps one PHP runtime concern and its shared helpers in one module.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import type { TurtleState } from '../interpreter/turtleWorld';
-import type { ClassDecl, Expr, FunctionDecl } from './ast';
+import { ArrayTable } from './arrayTable';
+import type { ClassDecl, Expr, FunctionDecl, PropertyDeclAst } from './ast';
 import { lower } from './bytes';
 
 /**
@@ -20,12 +21,22 @@ export class Ref {
     return this.holders;
   }
   set rc(count: number) {
-    const wasLive = this.holders > 0;
+    this.setHolders(count, true);
+  }
+
+  releaseWithoutGc(): void {
+    this.setHolders(this.holders - 1, false);
+  }
+
+  private setHolders(count: number, buffer: boolean): void {
+    const previous = this.holders;
+    const wasLive = previous > 0;
     this.holders = count;
     if (wasLive && count <= 0) {
       if (this.value !== null && typeof this.value === 'object') owners.get(this.value)?.delete(this);
       invalidateOwner(this);
     } else if (!wasLive && count > 0) trackOwner(this.value, this);
+    if (wasLive && count < previous && (buffer || count <= 0)) referenceDropObserver(this.value);
   }
   isRef = false;
   /** The typed property this reference was taken from, whose type every write through the reference must keep. */
@@ -38,7 +49,9 @@ export class Ref {
   }
   static temporary(value: Value): Ref {
     const ref = new Ref(value);
-    ref.rc = 0;
+    ref.holders = 0;
+    if (value !== null && typeof value === 'object') owners.get(value)?.delete(ref);
+    invalidateOwner(ref);
     return ref;
   }
 
@@ -62,13 +75,19 @@ export class Ref {
     const old = this.value;
     this.value = this.typedBy ? referenceTypeCheck(this, value) : value;
     trackOwner(this.value, this);
-    if (old !== this.value) dropped(old);
+    dropped(old);
   }
 
   /** Writes a value, converting or rejecting it for the type of the property the reference was taken from. */
   assign(value: Value): void {
     this.v = value;
   }
+}
+
+let referenceDropObserver: (value: Value) => void = () => {};
+
+export function setReferenceDropObserver(observe: typeof referenceDropObserver): void {
+  referenceDropObserver = observe;
 }
 
 /** Frees what letting go of a value frees, which the interpreter provides, as PHP's reference counting does. */
@@ -109,12 +128,13 @@ export class PhpArray {
   private order: ArrayOrder | undefined;
   private readonly parents = new Set<WeakRef<PhpArray>>();
   private readonly knownParents = new WeakSet<PhpArray>();
-  map: Map<Key, Value | Ref>;
+  map: ArrayTable;
   /** One more than the largest integer key so far, or INT_MIN before any, as PHP's nNextFreeElement. */
   nextFree = INT_MIN;
   /** Whether more than one holder may see this array, so that a write must copy it first. */
   shared = false;
   persistentHolder = false;
+  uncollectable = false;
   /** Whether an element may hold an object, an array, or a reference, which garbage collection must visit. */
   composite = false;
   /** The internal pointer of `current()`, `next()`, and `reset()`, as the key it points at. */
@@ -124,7 +144,7 @@ export class PhpArray {
     map?: Map<Key, Value | Ref>,
     private readonly capacityHint = map?.size ?? 8
   ) {
-    this.map = map ?? new Map();
+    this.map = this.table(map);
     for (const [key, slot] of this.map) this.trackSlot(key, slot);
     // An array costs a slot of its own besides its elements, as a program of many small arrays holds their tables too.
     allocationHandler(this.map.size + 1, this.map.size);
@@ -179,7 +199,7 @@ export class PhpArray {
     this.insert(key, slot);
     if (typeof key === 'bigint' && key >= this.nextFree) this.nextFree = key + 1n;
     if (slot !== null && typeof slot === 'object') this.composite = true;
-    if (old !== slot) dropped(old);
+    dropped(old);
   }
 
   /** The key that `$array[] = ...` uses: the next integer after the largest one, or 0 when there is none. */
@@ -215,12 +235,45 @@ export class PhpArray {
 
   replaceTable(map: Map<Key, Value | Ref>, nextFree: bigint, packed = false): void {
     allocationHandler(Math.max(0, map.size - this.map.size), map.size);
-    this.map = map;
+    this.map = this.table(map);
     this.ordered().replace(map.keys(), packed);
     for (const [key, slot] of map) this.trackSlot(key, slot);
     this.nextFree = nextFree;
     this.composite = [...map.values()].some((value) => value !== null && typeof value === 'object');
     this.invalidate();
+  }
+
+  private table(map?: Map<Key, Value | Ref>): ArrayTable {
+    return new ArrayTable(map, () => {
+      for (const [key, slot] of this.map) this.trackSlot(key, slot);
+    });
+  }
+
+  shiftList(): { value: Value } | undefined {
+    const result = this.map.shiftList();
+    if (!result) return;
+    const { slot } = result;
+    if (slot instanceof Ref) slot.rc--;
+    this.order?.shiftList(this.map.keys());
+    this.nextFree = BigInt(this.size);
+    this.pointer = null;
+    this.invalidate();
+    dropped(slot);
+    const value = deref(slot);
+    if (value instanceof PhpArray) value.shared = true;
+    return { value };
+  }
+
+  prependList(values: Value[]): boolean {
+    if (!this.map.prependList(values)) return false;
+    allocationHandler(values.length, this.size);
+    for (let index = 0; index < values.length; index++) this.trackSlot(BigInt(index), values[index]);
+    if (values.some((value) => value !== null && typeof value === 'object')) this.composite = true;
+    this.order?.prependList(this.map.keys(), values.length);
+    this.nextFree = BigInt(this.size);
+    this.pointer = null;
+    this.invalidate();
+    return true;
   }
 
   private trackSlot(key: Key, slot: Value | Ref): void {
@@ -245,6 +298,7 @@ export class PhpArray {
   }
 
   private invalidate(visited = new Set<PhpArray>()): void {
+    this.uncollectable = false;
     invalidateOwner(this);
     if (visited.has(this)) return;
     visited.add(this);
@@ -338,7 +392,7 @@ export class PhpArray {
       }
     }
     const copy = new PhpArray(map, this.capacityHint);
-    copy.order = this.ordered().copy();
+    copy.order = this.order?.copy();
     copy.nextFree = this.nextFree;
     copy.composite = this.composite;
     copy.pointer = this.pointer;
@@ -428,6 +482,8 @@ export interface Method {
 }
 
 export interface PropDecl {
+  declarationScope?: PhpClass;
+  declarationAst?: PropertyDeclAst;
   name: string;
   /** The key of the property in an object's table: the name, or a mangled name for a private one. */
   key: string;
@@ -629,6 +685,38 @@ class ArrayOrder {
     return entry;
   }
 
+  shiftList(keys: Iterable<Key>): void {
+    if (this.first) this.delete(this.first.key);
+    this.reindex(keys, 0, this.packed === true);
+  }
+
+  prependList(keys: Iterable<Key>, count: number): void {
+    this.capacity = 8;
+    this.reindex(keys, count, true);
+  }
+
+  private reindex(keys: Iterable<Key>, prefix: number, packed: boolean): void {
+    const previous = [...this.entries.values()];
+    this.entries.clear();
+    this.first = undefined;
+    this.last = undefined;
+    let index = 0;
+    for (const key of keys) {
+      const entry: ArrayEntry = index < prefix ? { key, index } : previous[index - prefix];
+      entry.key = key;
+      entry.index = index++;
+      entry.previous = this.last;
+      entry.next = undefined;
+      if (this.last) this.last.next = entry;
+      else this.first = entry;
+      this.last = entry;
+      this.entries.set(key, entry);
+    }
+    this.nextIndex = index;
+    this.packed = packed;
+    while (this.capacity < index) this.capacity *= 2;
+  }
+
   delete(key: Key): void {
     const entry = this.entries.get(key);
     if (!entry) return;
@@ -826,7 +914,7 @@ export function nativeOwnershipChanged(owner: PhpObject): void {
 export function ownershipEdgeExists(change: Extract<OwnershipChange, { kind: 'edge' }>): boolean {
   const { value, owner, key } = change;
   if (owner instanceof Ref) return owner.rc > 0 && owner.v === value;
-  return owner instanceof PhpArray ? owner.map.get(key as Key) === value : owner.props.get(key as string) === value;
+  return owner instanceof PhpArray ? owner.map.hasValue(value, key as Key) : owner.props.get(key as string) === value;
 }
 const owners = new WeakMap<object, Map<Owner, Set<Key | undefined>>>();
 let internalHandler: (object: PhpObject) => void = () => {};
@@ -862,7 +950,7 @@ export function valueOwners(value: object): Owner[] {
         ? parent.v === value
         : [...keys].some((key) =>
             parent instanceof PhpArray
-              ? parent.map.get(key as Key) === value
+              ? parent.map.hasValue(value, key as Key)
               : parent.props.get(key as string) === value
           );
     if (holds) result.push(parent);
@@ -879,7 +967,7 @@ class PropertyMap extends Map<string, Slot> {
     const old = this.get(key);
     super.set(key, value);
     trackOwner(value, this.owner, key);
-    if (old !== value) dropped(old);
+    dropped(old);
     return this;
   }
   override clear(): void {

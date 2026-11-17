@@ -69,7 +69,7 @@ class ListStorage {
     node.v = value;
     this.nativeValues.add(value);
     this.nativeValues.delete(old);
-    if (old !== value) dropped(old);
+    dropped(old);
   }
 
   debugEntries(): [string, Value][] {
@@ -577,7 +577,7 @@ class FixedStorage {
     this.data[index] = value;
     this.nativeValues.add(value);
     this.nativeValues.delete(old);
-    if (old !== value) dropped(old);
+    dropped(old);
   }
   position = 0;
 

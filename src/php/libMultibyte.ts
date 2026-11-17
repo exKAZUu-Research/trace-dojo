@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 776 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 779 -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 // oxlint-disable unicorn/text-encoding-identifier-case -- mbstring names its encodings in this case.
 // oxlint-disable typescript/no-misused-spread -- PHP splits strings into bytes or code points, never into grapheme clusters.
@@ -223,7 +223,7 @@ const CASE_MODES: readonly ((text: string) => string)[] = [
   (text) => mapChars(text, foldSimple),
 ];
 const CASED = /\p{Cased}/u;
-const CASE_IGNORABLE = /\p{Case_Ignorable}|\uDC00/u;
+const CASE_IGNORABLE = /\p{Case_Ignorable}/u;
 const GEORGIAN = /^[\u10D0-\u10FA\u10FD-\u10FF]$/;
 // The characters whose titlecase in Unicode's UnicodeData.txt and SpecialCasing.txt differs from their uppercase.
 const TITLE_EXCEPTIONS = new Map<string, string>([
@@ -248,7 +248,7 @@ const TITLE_EXCEPTIONS = new Map<string, string>([
   ['ῷ', 'Ω\u0342\u0345'],
 ]);
 
-// code-gauge-allow functionCognitiveComplexity 21 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+// code-gauge-allow functionCognitiveComplexity 24 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 function wordCase(text: string, mode: 'lower' | 'title' | 'title-simple'): string {
   const simple = mode === 'title-simple';
   const list = [...text];
@@ -261,13 +261,17 @@ function wordCase(text: string, mode: 'lower' | 'title' | 'title-simple'): strin
       if (!CASE_IGNORABLE.test(list[index])) after = CASED.test(list[index]);
     }
   let afterCased = false;
+  let sigmaBefore = false;
   let result = '';
   for (const [index, char] of list.entries()) {
     rt().spend();
     if (simple) result += afterCased ? lowerSimple(char) : titleSimple(char);
     else if (mode !== 'lower' && !afterCased) result += titleFull(char);
-    else result += char === 'Σ' && afterCased && !following[index] ? 'ς' : char.toLowerCase();
-    if (!CASE_IGNORABLE.test(char)) afterCased = CASED.test(char);
+    else result += char === 'Σ' && sigmaBefore && !following[index] ? 'ς' : char.toLowerCase();
+    if (!CASE_IGNORABLE.test(char)) {
+      sigmaBefore = CASED.test(char);
+      if (char !== '\uDC00') afterCased = sigmaBefore;
+    }
   }
   return result;
 }

@@ -108,7 +108,6 @@ export function normalizeKeyString(text: string): Key {
 }
 
 /** Converts to bool as PHP does. */
-// code-gauge-allow duplicateLines 17 -- Mirrors toStr, as PHP converts each type to bool and to string by separate rules.
 export function toBool(value: Value): boolean {
   if (value === null) return false;
   switch (typeof value) {

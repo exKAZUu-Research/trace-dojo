@@ -345,8 +345,12 @@ markInlined('clone');
 
 defineFunction('call_user_func(callable $callback, mixed ...$args): mixed', ({ args, named, row }) => {
   const [callback, ...rest] = args;
-  const argValues = rest.map((v) => ({ v }));
-  for (const [name, v] of named ?? []) argValues.push({ v, name } as { v: Value; name: string });
+  const argValues: ArgValue[] = rest.map((v) => ({ v }));
+  for (const [name, v] of named ?? []) argValues.push({ v, name });
+  if (row !== undefined) {
+    const values = rt().nativeHeld.at(-1)!;
+    for (const arg of argValues) arg.nativeTransfer = { values, count: args.length + (named?.size ?? 0) };
+  }
   return callValue(callback, argValues, row);
 });
 defineFunction('call_user_func_array(callable $callback, array $args): mixed', ({ args, row }) => {
@@ -626,9 +630,16 @@ defineFunction('usleep(int $microseconds): void', ({ args }) => {
   checkDelay(args[0] as bigint, 'usleep', 'microseconds');
   return null;
 });
+defineFunction('gc_enabled(): bool', () => rt().gcEnabled);
 defineFunction('gc_collect_cycles(): int', () => BigInt(collectGarbage(rt(), true)));
-defineFunction('gc_enable(): void', () => null);
-defineFunction('gc_disable(): void', () => null);
+defineFunction('gc_enable(): void', () => {
+  rt().gcEnabled = true;
+  return null;
+});
+defineFunction('gc_disable(): void', () => {
+  rt().gcEnabled = false;
+  return null;
+});
 defineFunction('debug_print_backtrace(int $options = 0, int $limit = 0): void', ({ args }) => {
   const options = Number(args[0] ?? 0n);
   const limit = backtraceLimit(args[1] as bigint | undefined);

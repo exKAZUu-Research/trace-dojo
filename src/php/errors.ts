@@ -108,6 +108,7 @@ export function clearLastError(): void {
 /** Reports a non-fatal error as PHP's CLI does: through a user handler, or printed to standard output. */
 export function emitError(level: bigint, message: string, row = rt().row): void {
   const runtime = rt();
+  runtime.constantEvaluationEpoch++;
   for (let index = runtime.errorHandlers.length - 1; index >= 0; index--) {
     const { handler, mask } = runtime.errorHandlers[index];
     if (handler === null || runtime.activeErrorHandlers.has(handler)) break;

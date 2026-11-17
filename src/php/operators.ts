@@ -44,6 +44,7 @@ export function toStr(value: Value): string {
       return value.toString();
     }
     case 'number': {
+      rt().constantEvaluationEpoch++;
       if (Number.isNaN(value)) warn('unexpected NAN value was coerced to string');
       return formatFloat(value);
     }

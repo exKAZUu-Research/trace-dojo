@@ -74,7 +74,7 @@ interface TraitConstantConflict {
   existing: ClassConst;
   constant: ClassConst;
   first: string;
-  second: string;
+  trait: PhpClass;
 }
 
 export function applyTraitConstants(cls: PhpClass, trait: PhpClass, origins: Map<string, string>, row: number): void {
@@ -91,7 +91,7 @@ export function applyTraitConstants(cls: PhpClass, trait: PhpClass, origins: Map
     };
     const existing = cls.consts.get(name);
     if (existing && (existing.cls === cls || origins.has(name))) {
-      checkTraitConstant(cls, { existing, constant, first: origins.get(name) ?? cls.name, second: trait.name }, row);
+      checkTraitConstant(cls, { existing, constant, first: origins.get(name) ?? cls.name, trait }, row);
     } else {
       if (existing) checkConstantOverride(cls, constant, existing, row);
       cls.consts.set(name, constant);
@@ -100,28 +100,32 @@ export function applyTraitConstants(cls: PhpClass, trait: PhpClass, origins: Map
   }
 }
 
+// code-gauge-allow functionCognitiveComplexity 16 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 function checkTraitConstant(cls: PhpClass, conflict: TraitConstantConflict, row: number): void {
-  const { existing, constant, first, second } = conflict;
+  const { existing, constant, first, trait } = conflict;
   const sameType =
     (!existing.type && !constant.type) ||
     (existing.type &&
       constant.type &&
-      isSubtype(existing.type, cls, constant.type, cls) &&
-      isSubtype(constant.type, cls, existing.type, cls));
+      isSubtype(existing.type, cls, constant.type, trait) &&
+      isSubtype(constant.type, trait, existing.type, cls));
   let sameValue = false;
   let evaluationFailed = false;
-  try {
-    const left = existing.initializer ? evaluateInClass(existing.initializer, cls) : existing.value;
-    const right = constant.initializer ? evaluateInClass(constant.initializer, cls) : constant.value;
-    sameValue = left !== undefined && right !== undefined && strictEquals(left, right);
-  } catch (error) {
-    if (!(error instanceof PhpThrow)) throw error;
-    evaluationFailed = true;
-    reportUncaughtWarning(error.object);
+  if (existing.visibility === constant.visibility && existing.isFinal === constant.isFinal && sameType) {
+    try {
+      const left = existing.initializer ? evaluateInClass(existing.initializer, cls) : existing.value;
+      const right = constant.initializer ? evaluateInClass(constant.initializer, cls) : constant.value;
+      sameValue = left !== undefined && right !== undefined && strictEquals(left, right);
+    } catch (error) {
+      if (!(error instanceof PhpThrow)) throw error;
+      evaluationFailed = true;
+      reportUncaughtWarning(error.object);
+    }
   }
-  if (existing.visibility !== constant.visibility || existing.isFinal !== constant.isFinal || !sameType || !sameValue) {
+
+  if (!sameValue) {
     throw new FatalError(
-      `${first} and ${second} define the same constant (${constant.name}) in the composition of ${cls.name}. However, the definition differs and is considered incompatible. Class was composed`,
+      `${first} and ${trait.name} define the same constant (${constant.name}) in the composition of ${cls.name}. However, the definition differs and is considered incompatible. Class was composed`,
       row,
       false,
       !evaluationFailed

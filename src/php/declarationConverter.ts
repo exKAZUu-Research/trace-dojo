@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 631 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 635 -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import type { Node } from '@willbooster/web-tree-sitter';
 
@@ -32,7 +32,7 @@ const MAGIC_METHODS: Record<
   __destruct: { args: 0, isStatic: false, returnType: '' },
   __clone: { args: 0, isStatic: false, returnType: 'void' },
   __get: { parameterTypes: ['string'], args: 1, isStatic: false, isPublic: true },
-  __set: { parameterTypes: ['string', 'mixed'], args: 2, isStatic: false, isPublic: true, returnType: 'void' },
+  __set: { parameterTypes: ['string'], args: 2, isStatic: false, isPublic: true, returnType: 'void' },
   __isset: { parameterTypes: ['string'], args: 1, isStatic: false, isPublic: true, returnType: 'bool' },
   __unset: { parameterTypes: ['string'], args: 1, isStatic: false, isPublic: true, returnType: 'void' },
   __call: { parameterTypes: ['string', 'array'], args: 2, isStatic: false, isPublic: true },
@@ -1071,8 +1071,11 @@ function builtinType(type: TypeDecl): boolean {
 function knownScalarDefault(value: Expr): Expr | undefined {
   if (value.k === 'lit') return value;
   if (value.k !== 'unary') return;
-  if (value.op === '!' && value.e.k === 'array' && value.e.items.length === 0)
-    return { k: 'lit', v: true, row: value.row };
+  if (value.op === '!' && value.e.k === 'array') {
+    if (value.e.items.length === 0) return { k: 'lit', v: true, row: value.row };
+    if (value.e.items.some((item) => !item.spread)) return { k: 'lit', v: false, row: value.row };
+    return;
+  }
   const operand = knownScalarDefault(value.e);
   if (operand?.k !== 'lit') return;
   const result = unaryDefaultValue(value.op, operand.v);

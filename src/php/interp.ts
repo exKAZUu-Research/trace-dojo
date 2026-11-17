@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 704 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 780 -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import {
   applyOperator,
@@ -107,14 +107,37 @@ export function evReturn(e: Expr): Value {
 }
 
 export function ev(e: Expr): Value {
+  const runtime = rt();
+  const constant = compileTimeValue(e);
+  const literals = runtime.literalArrays.get(e);
+  const scope = scopedCompileTimeValues.expression.get(e) ? runtime.frame.scope : undefined;
+  const cached = constant ? literals?.get(scope) : undefined;
+  if (cached) return share(cached);
+  const epoch = runtime.constantEvaluationEpoch;
+  let value: Value;
   if (RELEASING_OPERANDS.has(e.k)) {
-    // PHP frees the operands of these expressions as soon as it has used them.
-    const mark = rt().frame.temporaries.length;
-    const value = evChain(e);
-    return keepResult(mark, value === SHORT ? null : value) as Value;
+    const mark = runtime.frame.temporaries.length;
+    const result = evChain(e);
+    value = keepResult(mark, result === SHORT ? null : result) as Value;
+  } else {
+    const result = evChain(e);
+    value = result === SHORT ? null : result;
   }
-  const value = evChain(e);
-  return value === SHORT ? null : value;
+  if (
+    value instanceof PhpArray &&
+    constant &&
+    epoch === runtime.constantEvaluationEpoch &&
+    immutableArrayContents(value)
+  ) {
+    const scopes = literals ?? new Map<PhpClass | undefined, PhpArray>();
+    scopes.set(scope, value);
+    runtime.literalArrays.set(e, scopes);
+    runtime.rootConstants.add(value);
+    value.persistentHolder = true;
+    value.shared = true;
+    value.uncollectable = value.size === 0;
+  }
+  return value;
 }
 
 /** The expressions that consume their operands, which PHP frees right after the expression. */
@@ -513,6 +536,11 @@ export function memberName(name: string | Expr): string {
   return typeof name === 'string' ? name : toStr(ev(name));
 }
 
+const compileTimeConstants = new Set(builtinNames.constants);
+type ConstantContext = 'constant' | 'expression';
+const compileTimeValues = { constant: new WeakMap<Expr, boolean>(), expression: new WeakMap<Expr, boolean>() };
+const scopedCompileTimeValues = { constant: new WeakMap<Expr, boolean>(), expression: new WeakMap<Expr, boolean>() };
+
 // code-gauge-allow functionCognitiveComplexity 21 -- One case per expression kind, as PHP evaluates each kind differently.
 function arrayLiteral(e: Extract<Expr, { k: 'array' }>): PhpArray {
   const runtime = rt();
@@ -542,6 +570,75 @@ function arrayLiteral(e: Extract<Expr, { k: 'array' }>): PhpArray {
     runtime.spend();
   }
   return array;
+}
+
+// code-gauge-allow functionNcss 46 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+function compileTimeValue(e: Expr, context: ConstantContext = 'expression'): boolean {
+  const cached = compileTimeValues[context].get(e);
+  if (cached !== undefined) return cached;
+  let scoped = e.k === 'magic' || (e.k === 'cconst' && e.cls.k !== 'named');
+  const child = (value: Expr, childContext = context): boolean => {
+    const constant = compileTimeValue(value, childContext);
+    if (scopedCompileTimeValues[childContext].get(value)) scoped = true;
+    return constant;
+  };
+  let result = false;
+  switch (e.k) {
+    case 'lit':
+    case 'magic': {
+      result = true;
+      break;
+    }
+    case 'const': {
+      result = compileTimeConstants.has(e.name.name);
+      break;
+    }
+    case 'array': {
+      result = e.items.every(
+        (item) => !item.byRef && (!item.key || child(item.key, 'constant')) && child(item.value, 'constant')
+      );
+      break;
+    }
+    case 'unary': {
+      result = child(e.e);
+      break;
+    }
+    case 'cast': {
+      result = context === 'constant' && e.type !== 'object' && child(e.e);
+      break;
+    }
+    case 'bin': {
+      result = child(e.l) && child(e.r);
+      break;
+    }
+    case 'cond': {
+      result = child(e.test) && (!e.consequent || child(e.consequent)) && child(e.alternate);
+      break;
+    }
+    case 'interp': {
+      result = e.parts.every((part) => typeof part === 'string' || child(part));
+      break;
+    }
+    case 'idx': {
+      result = e.index !== undefined && child(e.base) && child(e.index);
+      break;
+    }
+    case 'cconst': {
+      result = e.name === 'class' && e.cls.k !== 'expr' && e.cls.k !== 'static';
+      break;
+    }
+  }
+  compileTimeValues[context].set(e, result);
+  scopedCompileTimeValues[context].set(e, scoped);
+  return result;
+}
+
+function immutableArrayContents(array: PhpArray): boolean {
+  for (const value of array.map.values()) {
+    if (value instanceof Ref || value instanceof PhpObject) return false;
+    if (value instanceof PhpArray && !immutableArrayContents(value)) return false;
+  }
+  return true;
 }
 
 function spreadInto(array: PhpArray, value: Value): void {

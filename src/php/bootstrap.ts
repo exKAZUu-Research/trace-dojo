@@ -74,8 +74,8 @@ defineClass({
   methods: [{ signature: 'jsonSerialize(): mixed', impl: () => null, isAbstract: true }],
 });
 
-// code-gauge-allow functionCognitiveComplexity 22 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
-// code-gauge-allow functionNcss 32 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+// code-gauge-allow functionCognitiveComplexity 29 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+// code-gauge-allow functionNcss 35 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 function bindClosure(closure: PhpObject, newThis: Value, newScope: Value | undefined): Value {
   const data = closure.internal as ClosureData;
   let scope = data.scope;
@@ -107,15 +107,19 @@ function bindClosure(closure: PhpObject, newThis: Value, newScope: Value | undef
     warn(`Cannot bind closure to scope of internal class ${scope.name}, this will be an error in PHP 9`);
     return null;
   }
-  if (data.method && scope !== data.scope) {
-    warn('Cannot rebind scope of closure created from method, this will be an error in PHP 9');
+  const anonymous = data.fn.kind === 'user' && data.fn.decl.isClosure;
+  if (!anonymous && scope !== data.scope) {
+    warn(
+      `Cannot rebind scope of closure created from ${data.method ? 'method' : 'function'}, this will be an error in PHP 9`
+    );
     return null;
   }
+  if (!scope && newThis instanceof PhpObject && data.fn.kind === 'user') scope = closure.cls;
   const runtime = rt();
   const bound = runtime.newObject(closure.cls);
   bound.internal = {
     ...copyClosureData(data),
-    thisObj: newThis instanceof PhpObject ? newThis : undefined,
+    thisObj: newThis instanceof PhpObject && (data.fn.kind === 'user' || data.method) ? newThis : undefined,
     scope,
     calledClass: newThis instanceof PhpObject ? newThis.cls : scope,
   } satisfies ClosureData;

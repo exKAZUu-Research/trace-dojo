@@ -35,7 +35,7 @@ import {
   type Visibility,
   visibilityRank,
 } from './values';
-import { isSubtype } from './variance';
+import { isSubtype, sameDeclarationType } from './variance';
 
 export function findClass(name: string): PhpClass | undefined {
   return rt().classes.get(lower(name.startsWith('\\') ? name.slice(1) : name));
@@ -163,7 +163,7 @@ function propertyKey(cls: PhpClass, name: string, visibility: Visibility): strin
 }
 
 // code-gauge-allow functionNcss 56 -- Follows PHP's class linking and property access rules in their order of checks.
-function addProperty(cls: PhpClass, ast: PropertyDeclAst): void {
+function addProperty(cls: PhpClass, ast: PropertyDeclAst, declarationScope = cls): void {
   const inherited = cls.propByName.get(ast.name);
   if (inherited && inherited.cls !== cls && inherited.isFinal)
     throw new FatalError(`Cannot override final property ${inherited.cls.name}::$${ast.name}`, ast.row);
@@ -208,6 +208,8 @@ function addProperty(cls: PhpClass, ast: PropertyDeclAst): void {
     }
   }
   const decl: PropDecl = {
+    declarationScope,
+    declarationAst: ast,
     name: ast.name,
     key: propertyKey(cls, ast.name, ast.visibility),
     cls,
@@ -343,12 +345,12 @@ function applyTraits(cls: PhpClass, decl: ClassDecl): void {
   const constantOrigins = new Map<string, string>();
   for (const trait of cls.traits) {
     for (const [lname, method] of allTraitMethods(trait)) {
-      if (excluded.has(`${lower(trait.name)}::${lname}`)) continue;
       if (method.isAbstract) {
         contracts.push({ ...method, cls, scope: trait });
         if (!cls.findMethod(lname)) cls.methods.set(lname, { ...method, cls, scope: cls, fn: copyFunction(method.fn) });
         continue;
       }
+      if (excluded.has(`${lower(trait.name)}::${lname}`)) continue;
       if (ownMethods.has(lname)) continue;
       const previous = added.get(lname);
       if (previous && previous !== trait) {
@@ -398,7 +400,10 @@ function applyTraits(cls: PhpClass, decl: ClassDecl): void {
 }
 
 function applyTraitProperties(cls: PhpClass, trait: PhpClass, origins: Map<string, string>, row: number): void {
-  for (const prop of trait.decl?.props ?? []) {
+  for (const source of trait.props) {
+    const prop = source.declarationAst;
+    if (!prop) continue;
+    const declarationScope = source.declarationScope ?? trait;
     const existing = cls.propByName.get(prop.name);
     if (existing && existing.cls === cls) {
       if (existing.hooks || prop.hooks)
@@ -406,20 +411,25 @@ function applyTraitProperties(cls: PhpClass, trait: PhpClass, origins: Map<strin
           `${origins.get(prop.name) ?? cls.name} and ${trait.name} define the same hooked property ($${prop.name}) in the composition of ${cls.name}. Conflict resolution between hooked properties is currently not supported. Class was composed`,
           row
         );
-      if (!traitPropertyCompatible(existing, prop, cls))
+      if (!traitPropertyCompatible(existing, prop, cls, declarationScope))
         throw new FatalError(
           `${origins.get(prop.name) ?? cls.name} and ${trait.name} define the same property ($${prop.name}) in the composition of ${cls.name}. However, the definition differs and is considered incompatible. Class was composed`,
           row
         );
       continue;
     }
-    addProperty(cls, prop);
+    addProperty(cls, prop, declarationScope);
     origins.set(prop.name, trait.name);
   }
 }
 
 // code-gauge-allow functionCognitiveComplexity 18 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
-function traitPropertyCompatible(existing: PropDecl, property: PropertyDeclAst, cls: PhpClass): boolean {
+function traitPropertyCompatible(
+  existing: PropDecl,
+  property: PropertyDeclAst,
+  cls: PhpClass,
+  declarationScope: PhpClass
+): boolean {
   if (
     existing.visibility !== property.visibility ||
     existing.isStatic !== property.isStatic ||
@@ -433,7 +443,7 @@ function traitPropertyCompatible(existing: PropDecl, property: PropertyDeclAst, 
   if (
     existing.type &&
     property.type &&
-    !(isSubtype(existing.type, cls, property.type, cls) && isSubtype(property.type, cls, existing.type, cls))
+    !sameDeclarationType(existing.type, existing.declarationScope ?? existing.cls, property.type, declarationScope)
   )
     return false;
   const left = existing.defaultValue ? existing.defaultValue() : existing.type ? UNINIT : null;
@@ -477,6 +487,7 @@ function checkInheritance(cls: PhpClass, row: number): void {
       }
     }
   }
+  const hooks = missingPropertyHooks(cls, ancestors, row);
   if (cls.kind !== 'class' || cls.isAbstract) return;
   const missing: Method[] = [];
   const seen = new Set<string>();
@@ -494,7 +505,6 @@ function checkInheritance(cls: PhpClass, row: number): void {
       missing.push(method);
     }
   }
-  const hooks = missingPropertyHooks(cls, ancestors, row);
   if (missing.length > 0 || hooks.length > 0) {
     const allNames = [...missing.map((method) => `${method.cls.name}::${method.name}`), ...hooks];
     const names = allNames.slice(0, 3);
@@ -506,7 +516,7 @@ function checkInheritance(cls: PhpClass, row: number): void {
   }
 }
 
-// code-gauge-allow functionCognitiveComplexity 23 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+// code-gauge-allow functionCognitiveComplexity 29 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 function missingPropertyHooks(cls: PhpClass, ancestors: PhpClass[], row: number): string[] {
   const missing = new Set<string>();
   const contracts = [...ancestors, ...cls.interfaces, cls].flatMap((parent) => [...parent.propByName.values()]);
@@ -514,10 +524,14 @@ function missingPropertyHooks(cls: PhpClass, ancestors: PhpClass[], row: number)
     if (!contract.hooks?.abstractGet && !contract.hooks?.abstractSet) continue;
     const property = cls.propByName.get(contract.name);
     if (property && property !== contract) {
-      if (
-        property.isStatic !== contract.isStatic ||
-        visibilityRank(property.visibility) < visibilityRank(contract.visibility)
-      )
+      if (property.isStatic !== contract.isStatic)
+        throw new FatalError(
+          property.isStatic
+            ? `Cannot redeclare non static ${contract.cls.name}::$${property.name} as static ${cls.name}::$${property.name}`
+            : `Cannot redeclare static ${contract.cls.name}::$${property.name} as non static ${cls.name}::$${property.name}`,
+          row
+        );
+      if (visibilityRank(property.visibility) < visibilityRank(contract.visibility))
         throw new FatalError(
           `Access level to ${cls.name}::$${property.name} must be ${contract.visibility} (as in class ${contract.cls.name})`,
           row
