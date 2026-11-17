@@ -279,9 +279,31 @@ export class MemberChecker {
     if (owner === 'Error' && property.name === 'stack') return 'Error の stack';
     if (owner === 'RegExp' && property.name === 'compile') return 'RegExp の compile';
     // Node.js shows a function's source as tsx's esbuild printed it, which this interpreter does not reproduce.
-    if (owner === 'Function' && property.name === 'toString' && !isOnlyCompared(propertyNode.parent))
+    if (owner === 'Function' && property.name === 'toString' && !this.isNeverCalled(propertyNode.parent))
       return '関数やクラスの文字列への変換';
     return undefined;
+  }
+
+  /**
+   * Whether a value can never be called: it is only compared, or a `const` holds it whose every reference is only
+   * compared. A value passed elsewhere may be called there.
+   */
+  private isNeverCalled(read: TreeNode | null): boolean {
+    if (isOnlyCompared(read)) return true;
+    const declarator = read && outermostParentheses(read).parent;
+    const name = declarator?.childForFieldName('name');
+    if (
+      declarator?.type !== 'variable_declarator' ||
+      declarator.parent?.childForFieldName('kind')?.text !== 'const' ||
+      name?.type !== 'identifier'
+    )
+      return false;
+    const symbol = this.c.scopeOf(name).lookupValue(name.text);
+    let root = declarator;
+    while (root.parent) root = root.parent;
+    return identifiersNamed(root, name.text)
+      .filter((reference) => reference.id !== name.id && this.c.scopeOf(reference).lookupValue(name.text) === symbol)
+      .every((reference) => isOnlyCompared(reference));
   }
 
   private unsupportedMember(objectType: Type, name: string): string | undefined {
@@ -481,14 +503,29 @@ function editDistance(a: string, b: string): number {
  * called afterwards.
  */
 function isOnlyCompared(read: TreeNode | null): boolean {
-  let expression = read;
-  while (expression?.parent?.type === 'parenthesized_expression') expression = expression.parent;
-  const parent = expression?.parent;
+  const parent = read && outermostParentheses(read).parent;
   if (parent?.type === 'unary_expression') return parent.childForFieldName('operator')?.text === 'typeof';
   return (
     parent?.type === 'binary_expression' &&
     ['===', '!==', '==', '!='].includes(parent.childForFieldName('operator')?.text ?? '')
   );
+}
+
+/** The outermost parentheses around an expression, or the expression itself. */
+function outermostParentheses(node: TreeNode): TreeNode {
+  let expression = node;
+  while (expression.parent?.type === 'parenthesized_expression') expression = expression.parent;
+  return expression;
+}
+
+function identifiersNamed(root: TreeNode, name: string): TreeNode[] {
+  const found: TreeNode[] = [];
+  const visit = (node: TreeNode): void => {
+    if (node.type === 'identifier' && node.text === name) found.push(node);
+    for (const child of node.namedChildren) if (child) visit(child);
+  };
+  visit(root);
+  return found;
 }
 
 /** The outermost link of the chain a link belongs to, as `a?.b.c()` for `a?.b`. */
