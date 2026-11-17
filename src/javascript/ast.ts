@@ -63,7 +63,7 @@ export type Statement = Span &
         target: Pattern;
         iterable: Expression;
         /** How V8 names the iterable in the error a value without an iterator throws. */
-        iterableSource: string;
+        iterableSource: IterationSource;
         body: Statement;
         /** Recorded after each binding of the target. */
         stepRow?: number;
@@ -165,8 +165,12 @@ export type ObjectMember =
   /** `__proto__: value`, which sets the prototype of the object to the value when it is an object or null. */
   | { kind: 'prototype'; value: Expression };
 
-/** An argument or an array element; a spread one keeps how V8 names its operand, for the error it may throw. */
-export type Argument = Expression | { kind: 'spread'; argument: Expression; source: string };
+export interface IterationSource {
+  text: string;
+  callee?: string;
+}
+
+export type Argument = Expression | { kind: 'spread'; argument: Expression; source: IterationSource };
 
 export type Expression = Span & {
   /**
@@ -229,7 +233,7 @@ export interface MemberExpression extends Span {
 /** How V8 names what a pattern takes apart, in the TypeError a value it cannot take apart throws. */
 export interface DestructuringSource {
   /** The initializer of a declaration, as V8 prints it. */
-  source?: string;
+  source?: IterationSource;
   /** Whether the pattern is inside another, where V8 reports reading the first property instead. */
   isNested?: boolean;
 }

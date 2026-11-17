@@ -98,6 +98,21 @@ export class TypeInference {
     const candidates = inference.candidates.map((candidate) =>
       shouldWiden ? this.c.widenLiteral(candidate) : regularOf(candidate)
     );
+    return this.commonSupertype(candidates);
+  }
+
+  private commonSupertype(candidates: Type[]): Type {
+    const nullable = candidates.filter(
+      (candidate) => isIntrinsic(candidate, 'null') || isIntrinsic(candidate, 'undefined')
+    );
+    const defined = candidates.filter((candidate) => !nullable.includes(candidate));
+    if (nullable.length > 0 && defined.length > 0) return unionOf([this.commonSupertype(defined), ...nullable]);
+    if (
+      candidates.every(
+        (candidate) => candidate.kind === 'object' && (candidate.isLiteral || this.c.literals.isArrayLiteral(candidate))
+      )
+    )
+      return this.widenObjectLiterals(unionOf(candidates));
     const supertype = candidates.find((candidate) =>
       candidates.every((other) => this.c.relations.isAssignable(other, candidate))
     );

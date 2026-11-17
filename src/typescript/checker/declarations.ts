@@ -3,6 +3,7 @@ import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 import type { Checker } from './checker';
 import type { Scope, Sym } from './scopes';
 import { hasToken, named, propertyNameText } from './syntax';
+import { type Type, undefinedType, unionOf } from './types';
 
 /** Reports the declarations TypeScript rejects for declaring a name twice, at every declaration it involves. */
 export function checkDuplicateDeclarations(c: Checker, scopes: Scope[]): void {
@@ -105,7 +106,51 @@ function checkTypeDuplicates(c: Checker, symbol: Sym): void {
     for (const entry of entries) c.error(entry.name, `${symbol.name} はすでに宣言されています。`);
     return;
   }
+  checkMergedTypeParameters(c, symbol);
   checkMergedProperties(c, symbol);
+}
+
+// code-gauge-allow functionCognitiveComplexity 19 -- Validates parameter order, defaulted additions, and agreement of constraints and defaults across merged declarations.
+function checkMergedTypeParameters(c: Checker, symbol: Sym): void {
+  const lists = symbol.typeDeclarations.map((declaration) => {
+    const parameters = declaration.childForFieldName('type_parameters');
+    return parameters ? named(parameters) : [];
+  });
+  let mismatch = false;
+  const seen = new Map<string, TreeNode>();
+  for (const list of lists) {
+    for (const [index, parameter] of list.entries()) {
+      const name = parameter.childForFieldName('name')?.text ?? '';
+      if (lists.some((other) => other[index] && other[index].childForFieldName('name')?.text !== name)) mismatch = true;
+      if (lists.some((other) => other.length <= index) && !parameter.childForFieldName('value')) mismatch = true;
+      if (!mergedParameterTypesAgree(c, parameter, name, seen)) mismatch = true;
+    }
+  }
+  if (mismatch)
+    for (const entry of symbol.typeEntries)
+      c.error(entry.name, `同じ名前の型 ${symbol.name} の宣言は、同じ型パラメーターを持つ必要があります。`);
+}
+
+function mergedParameterTypesAgree(
+  c: Checker,
+  parameter: TreeNode,
+  name: string,
+  seen: Map<string, TreeNode>
+): boolean {
+  let matches = true;
+  for (const field of ['constraint', 'value']) {
+    const node = parameter.childForFieldName(field);
+    if (!node) continue;
+    const key = `${name}.${field}`;
+    const previous = seen.get(key);
+    if (
+      previous &&
+      !c.relations.identical(c.typeNodes.typeFromNode(named(previous)[0]), c.typeNodes.typeFromNode(named(node)[0]))
+    )
+      matches = false;
+    else seen.set(key, node);
+  }
+  return matches;
 }
 
 /** A property declared again in a merged interface must have the same type. */
@@ -129,8 +174,22 @@ function checkMergedProperty(c: Checker, member: TreeNode, seen: Map<string, Tre
     seen.set(name, member);
     return;
   }
-  const before = c.typeNodes.annotationType(previous.childForFieldName('type'));
-  const after = c.typeNodes.annotationType(member.childForFieldName('type'));
+  const modifiersDiffer = ['?', 'readonly'].some(
+    (modifier) => hasToken(previous, modifier) !== hasToken(member, modifier)
+  );
+  if (modifiersDiffer) {
+    for (const declaration of [previous, member])
+      c.error(
+        declaration.childForFieldName('name') ?? declaration,
+        `プロパティ ${name} の宣言の修飾子は同じでなければいけません。`
+      );
+  }
+  const effectiveType = (declaration: TreeNode): Type | undefined => {
+    const type = c.typeNodes.annotationType(declaration.childForFieldName('type'));
+    return type && hasToken(declaration, '?') ? unionOf([type, undefinedType]) : type;
+  };
+  const before = effectiveType(previous);
+  const after = effectiveType(member);
   if (before && after && !c.relations.identical(before, after)) {
     c.error(
       nameNode,
@@ -150,7 +209,13 @@ export function checkDuplicateMembers(c: Checker, body: TreeNode): void {
     groups.set(key, group);
   }
   for (const [key, members] of groups) {
-    if (members.length >= 2) reportDuplicateMembers(c, key, members);
+    if (members.length < 2) continue;
+    const accessorPair =
+      members.length === 2 &&
+      members.every((member) => member.type === 'method_definition') &&
+      members.some((member) => hasToken(member, 'get')) &&
+      members.some((member) => hasToken(member, 'set'));
+    if (!accessorPair) reportDuplicateMembers(c, key, members);
   }
 }
 
@@ -162,12 +227,11 @@ function duplicateKeyOf(member: TreeNode): string | undefined {
   if (!nameNode || name === undefined) return undefined;
   // A method without a body is an overload signature, and a getter pairs with a setter.
   if (member.type === 'method_definition' && !member.childForFieldName('body')) return undefined;
-  const accessor = hasToken(member, 'get') ? 'get' : hasToken(member, 'set') ? 'set' : '';
-  return `${hasToken(member, 'static') ? 'static ' : ''}${name}${accessor ? ` ${accessor}` : ''}`;
+  return `${hasToken(member, 'static') ? 'static ' : ''}${name}`;
 }
 
 function reportDuplicateMembers(c: Checker, key: string, members: TreeNode[]): void {
-  const name = key.replace(/^static /, '').replace(/ [gs]et$/, '');
+  const name = key.replace(/^static /, '');
   const isConstructor = name === 'constructor' && !key.startsWith('static ');
   for (const member of members) {
     const nameNode = member.childForFieldName('name') ?? member;

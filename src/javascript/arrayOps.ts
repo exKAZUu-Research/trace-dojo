@@ -25,9 +25,7 @@ export class ArrayOps {
 
   has(index: number): boolean {
     this.charge();
-    if (this.own(index) !== HOLE) return true;
-    const { proto } = this.array;
-    return proto !== null && this.runtime.hasProperty(proto, String(index));
+    return this.runtime.hasProperty(this.array, String(index));
   }
 
   get(index: number): Value {

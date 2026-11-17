@@ -65,7 +65,14 @@ export class TypeNodes {
     ['parenthesized_type', (node) => this.typeFromNode(named(node)[0])],
     ['literal_type', (node) => this.literalTypeOf(named(node)[0])],
     ['union_type', (node) => unionOf(named(node).map((member) => this.typeFromNode(member)))],
-    ['intersection_type', (node) => intersectionOf(named(node).map((member) => this.typeFromNode(member)))],
+    [
+      'intersection_type',
+      (node) =>
+        intersectionOf(
+          named(node).map((member) => this.typeFromNode(member)),
+          this.c.budget
+        ),
+    ],
     ['array_type', (node) => this.c.arrayType(this.typeFromNode(named(node)[0]))],
     ['readonly_type', (node) => this.readonlyType(node)],
     ['tuple_type', (node) => this.c.tupleType(named(node).map((element) => this.tupleElement(element)))],

@@ -85,6 +85,7 @@ export class ClassDeclarationChecker {
   }
 
   private checkMember(classNode: TreeNode, member: TreeNode, info: ClassInfo, ctor: TreeNode | undefined): void {
+    this.checkMemberDeclaration(member, info);
     const isStatic = hasToken(member, 'static');
     switch (member.type) {
       case 'field_definition': {
@@ -136,6 +137,13 @@ export class ClassDeclarationChecker {
         break;
       }
     }
+  }
+
+  private checkMemberDeclaration(member: TreeNode, info: ClassInfo): void {
+    const name = member.childForFieldName('name');
+    if (name?.type === 'computed_property_name') this.c.expressions.check(named(name)[0]);
+    if (hasToken(member, 'abstract') && !info.isAbstract)
+      this.c.error(name ?? member, '抽象メンバーは抽象クラスの中でのみ宣言できます。');
   }
 
   // code-gauge-allow functionCognitiveComplexity 16 -- Reports an incompatible member at itself and a missing one at the class, as TypeScript does.
@@ -280,8 +288,7 @@ export class ClassDeclarationChecker {
       const nameNode = this.uninitializedFieldName(member);
       if (!nameNode) continue;
       const key = `this${ownerId}.${nameNode.text}`;
-      const assigned =
-        ctor !== undefined && states.length > 0 && states.every((state) => state.assignedFields.has(key));
+      const assigned = ctor !== undefined && states.every((state) => state.assignedFields.has(key));
       if (!assigned) {
         this.c.error(
           nameNode,

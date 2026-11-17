@@ -1,0 +1,10 @@
+function sum(...args: [number, number]): number {
+  return args[0] + args[1];
+}
+function describe(prefix: string, ...args: [number, string]): string {
+  return prefix + args[0] + args[1].toUpperCase();
+}
+function empty(...args: []) { return args.length; }
+console.log(sum(2, 3), describe("a", 2, "b"), empty());
+const contextual: (...args: [number, string]) => string = (...args) => args[0] + args[1].toUpperCase();
+console.log(contextual(4, "c"));

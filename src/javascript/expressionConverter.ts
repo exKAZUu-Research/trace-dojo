@@ -7,6 +7,7 @@ import {
   fail,
   field,
   hasChild,
+  iterationSource,
   keyName,
   nameAnonymous,
   namedChildren,
@@ -387,7 +388,7 @@ export abstract class ExpressionConverter extends ConverterBase {
   private argument(node: Node): Argument {
     if (node.type === 'spread_element') {
       const operand = namedChildren(node)[0];
-      return { kind: 'spread', argument: this.expression(operand), source: calleeText(operand) };
+      return { kind: 'spread', argument: this.expression(operand), source: iterationSource(operand) };
     }
     return this.expression(node);
   }

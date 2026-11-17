@@ -1,6 +1,6 @@
 import type { TraceOptions } from '../interpreter/traceAnnotations';
-import type { Program } from '../javascript/ast';
-import type { Node } from '../javascript/convertNodes';
+import type { IterationSource, Program } from '../javascript/ast';
+import { type Node, unwrapParentheses } from '../javascript/convertNodes';
 import { ProgramConverter } from '../javascript/programConverter';
 import { PARAMETER_PROPERTY_ASSIGNMENT } from './jsView';
 
@@ -34,6 +34,10 @@ export class TypeScriptProgramConverter extends ProgramConverter {
         row,
       };
     };
+  }
+
+  protected override arrayDestructuringSource(node: Node): IterationSource | undefined {
+    return super.arrayDestructuringSource(unwrapParentheses(node));
   }
 
   override convert(root: Node): Program {

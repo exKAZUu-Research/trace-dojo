@@ -100,7 +100,8 @@ function arrayFrom({ runtime, thisValue, args, callRow }: NativeCall): JsObject 
   if (mapper !== undefined && !isCallable(mapper)) {
     runtime.throwError('TypeError', `${runtime.describeTyped(mapper)} is not a function`);
   }
-  const method = source === undefined || source === null ? undefined : runtime.get(source, WELL_KNOWN_SYMBOLS.iterator);
+  if (source === undefined || source === null) runtime.iterator(source);
+  const method = runtime.get(source, WELL_KNOWN_SYMBOLS.iterator);
   if (method !== undefined && method !== null && !isCallable(method))
     runtime.throwError('TypeError', `${runtime.describeTyped(method)} is not a function`);
   const iterable = method !== undefined && method !== null;

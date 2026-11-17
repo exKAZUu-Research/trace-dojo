@@ -1,0 +1,7 @@
+(1,11): error TS2428: All declarations of 'A' must have identical type parameters.
+(2,11): error TS2428: All declarations of 'A' must have identical type parameters.
+(3,10): error TS2314: Generic type 'A<T, U>' requires 2 type argument(s).
+(4,11): error TS2428: All declarations of 'B' must have identical type parameters.
+(5,11): error TS2428: All declarations of 'B' must have identical type parameters.
+(6,11): error TS2428: All declarations of 'C' must have identical type parameters.
+(7,11): error TS2428: All declarations of 'C' must have identical type parameters.

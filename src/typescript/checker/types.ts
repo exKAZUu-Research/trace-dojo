@@ -1,5 +1,7 @@
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
+import type { ExecutionBudget } from '../../interpreter/limits';
+
 /** A TypeScript type, as the checker represents it. */
 export type Type =
   | IntrinsicType
@@ -350,9 +352,10 @@ export function unionOf(types: Type[], keepFresh = false): Type {
   return union;
 }
 
-// code-gauge-allow functionNcss 33 -- Flattens and reduces members as TypeScript's intersections do.
+// code-gauge-allow functionNcss 34 -- Flattens and reduces members as TypeScript's intersections do.
 // code-gauge-allow functionCognitiveComplexity 27 -- Flattens and reduces members as TypeScript's intersections do.
-export function intersectionOf(types: Type[]): Type {
+export function intersectionOf(types: Type[], budget: ExecutionBudget): Type {
+  budget.spend(types.length);
   const flat: Type[] = [];
   const add = (type: Type): void => {
     if (type.kind === 'intersection') {
@@ -371,7 +374,12 @@ export function intersectionOf(types: Type[]): Type {
   if (unionIndex !== -1) {
     const union = members[unionIndex] as UnionType;
     return unionOf(
-      union.types.map((member) => intersectionOf(members.map((type, index) => (index === unionIndex ? member : type))))
+      union.types.map((member) =>
+        intersectionOf(
+          members.map((type, index) => (index === unionIndex ? member : type)),
+          budget
+        )
+      )
     );
   }
   // Two different primitives or literals have nothing in common.

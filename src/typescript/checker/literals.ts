@@ -12,6 +12,7 @@ import {
   isIntrinsic,
   mapType,
   neverType,
+  newTypeId,
   type ObjectType,
   type Property,
   regularOf,
@@ -33,10 +34,14 @@ interface ObjectLiteral {
   /** The property names seen so far, with `get ` or `set ` before an accessor's. */
   seenKeys: Set<string>;
   object: ObjectType;
+  receiver: ObjectType;
+  declarations: Map<string, Property>;
 }
 
 /** Checks array and object literals and widens the types of their values. */
 export class LiteralChecker {
+  private readonly arrayLiterals = new Set<number>();
+
   constructor(private readonly c: Checker) {}
 
   hasLiteralConstituent(type: Type, primitive: 'string' | 'number' | 'boolean'): boolean {
@@ -81,8 +86,16 @@ export class LiteralChecker {
     const elementTypes = types.map(({ type, spread }, index) =>
       spread ? this.c.patterns.iteratedType(named(elements[index])[0], type) : type
     );
-    if (elementTypes.length === 0) return this.c.arrayType(neverType);
-    return this.c.arrayType(unionOf(elementTypes, true));
+    const array = {
+      ...this.c.arrayType(elementTypes.length === 0 ? neverType : unionOf(elementTypes, true)),
+      id: newTypeId(),
+    };
+    this.arrayLiterals.add(array.id);
+    return array;
+  }
+
+  isArrayLiteral(type: Type): boolean {
+    return this.arrayLiterals.has(type.id);
   }
 
   private tupleContext(contextual: Type): ObjectType | undefined {
@@ -133,10 +146,13 @@ export class LiteralChecker {
 
   objectLiteral(node: TreeNode, contextual?: Type): Type {
     const properties = new Map<string, Property>();
+    const declarations = new Map<string, Property>();
     const literal: ObjectLiteral = {
       contextual: contextual && this.discriminatedContext(node, contextual),
       isConstContext: this.isConstContext(node),
       properties,
+      declarations,
+      receiver: anonymousObject(() => ({ ...emptyStructure(), properties: declarations })),
       genericSpreads: [],
       seenKeys: new Set(),
       object: anonymousObject(
@@ -148,11 +164,54 @@ export class LiteralChecker {
         { isLiteral: true }
       ),
     };
+    for (const member of named(node)) this.declareObjectMember(literal, member);
     for (const member of named(node)) this.objectMember(literal, member);
     const { object, genericSpreads } = literal;
     const fresh: ObjectType = { ...object, id: object.id, fresh: true, regular: object };
-    if (genericSpreads.length > 0) return intersectionOf([...genericSpreads, object]);
+    if (genericSpreads.length > 0) return intersectionOf([...genericSpreads, object], this.c.budget);
     return fresh;
+  }
+
+  private declareObjectMember(literal: ObjectLiteral, member: TreeNode): void {
+    if (member.type === 'spread_element') {
+      this.c.flow.from(this.c.flow.current, () =>
+        this.c.silently(() => {
+          for (const [name, property] of this.spreadProperties(this.c.expressions.check(named(member)[0])))
+            literal.declarations.set(name, property);
+        })
+      );
+      return;
+    }
+    const key = member.childForFieldName('name') ?? member.childForFieldName('key');
+    const name = key
+      ? propertyNameText(key)
+      : member.type === 'shorthand_property_identifier'
+        ? member.text
+        : undefined;
+    if (name === undefined) return;
+    const value = member.type === 'method_definition' ? member : member.childForFieldName('value');
+    if (value && ['method_definition', 'function_expression'].includes(value.type))
+      this.c.classes.registerObjectThis(value, literal.receiver);
+    let resolved: Type | undefined;
+    literal.declarations.set(name, {
+      ...this.literalProperty(name, anyType, literal.isConstContext, member),
+      isMethod: member.type === 'method_definition' && !hasToken(member, 'get') && !hasToken(member, 'set'),
+      type: () => {
+        resolved ??= this.c.silently(() => this.declaredMemberType(literal, member, name, value));
+        return resolved;
+      },
+    });
+  }
+
+  private declaredMemberType(literal: ObjectLiteral, member: TreeNode, name: string, value: TreeNode | null): Type {
+    if (member.type !== 'method_definition')
+      return value ? this.c.expressions.checkWidened(value) : this.c.expressions.identifier(member);
+    const method = this.c.classes.withObjectThis(
+      literal.receiver,
+      () => this.c.functions.functionExpression(member, this.memberContext(literal, name)),
+      member
+    );
+    return hasToken(member, 'get') ? (this.c.signaturesOf(method, 'call')[0]?.returnType() ?? anyType) : method;
   }
 
   private objectMember(literal: ObjectLiteral, member: TreeNode): void {
@@ -183,6 +242,7 @@ export class LiteralChecker {
     const key = member.childForFieldName('key') as TreeNode;
     const value = member.childForFieldName('value') as TreeNode;
     const name = propertyNameText(key);
+    if (key.type === 'computed_property_name' && name !== undefined) this.c.expressions.check(named(key)[0]);
     if (name === undefined) {
       this.computedMember(literal, member, key, value);
       return;
@@ -227,12 +287,13 @@ export class LiteralChecker {
 
   private methodMember(literal: ObjectLiteral, member: TreeNode): void {
     const nameNode = member.childForFieldName('name') as TreeNode;
+    if (nameNode.type === 'computed_property_name') this.c.expressions.check(named(nameNode)[0]);
     const name = propertyNameText(nameNode) ?? '';
     const isGetter = hasToken(member, 'get');
     const isSetter = hasToken(member, 'set');
     this.checkDuplicateKey(literal, nameNode, isGetter ? `get ${name}` : isSetter ? `set ${name}` : name);
     const methodType = this.c.classes.withObjectThis(
-      literal.object,
+      literal.receiver,
       () => this.c.functions.functionExpression(member, this.memberContext(literal, name)),
       member
     );
@@ -413,7 +474,7 @@ export class LiteralChecker {
   }
 
   /** The type a variable declared with this initializer type gets. */
-  // code-gauge-allow functionCognitiveComplexity 29 -- One case per kind of type that a declaration widens.
+  // code-gauge-allow functionCognitiveComplexity 30 -- Widens each type form and clears array-literal inference provenance when storing a declaration.
   widenDeclared(type: Type, isConst: boolean): Type {
     // A constant keeps a fresh literal type, which widens again where a mutable location takes its value.
     // Only a fresh literal widens, which `as const` and annotations make regular.
@@ -428,7 +489,7 @@ export class LiteralChecker {
       if (this.c.isArrayType(type)) {
         const element = this.c.elementTypeOf(type);
         const widened = this.widenDeclared(element, false);
-        return widened === element ? type : this.c.arrayType(widened);
+        return widened === element && !this.isArrayLiteral(type) ? type : this.c.arrayType(widened);
       }
       if (type.objectKind === 'anonymous' && type.isLiteral && !type.isFunction) {
         const source = type.regular ?? type;

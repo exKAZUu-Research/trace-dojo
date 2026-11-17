@@ -248,7 +248,10 @@ export class Checker {
         );
       }
       case 'intersection': {
-        return intersectionOf(type.types.map((member) => this.instantiate(member, mapper)));
+        return intersectionOf(
+          type.types.map((member) => this.instantiate(member, mapper)),
+          this.budget
+        );
       }
       case 'object': {
         return this.instantiateObject(type, mapper);
@@ -571,7 +574,7 @@ export class Checker {
           ...existing,
           optional: existing.optional && property.optional,
           readonly: existing.readonly && property.readonly,
-          type: () => intersectionOf([existing.type(), property.type()]),
+          type: () => intersectionOf([existing.type(), property.type()], this.budget),
         });
       }
     }

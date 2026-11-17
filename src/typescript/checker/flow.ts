@@ -365,13 +365,16 @@ export class Flow {
       !this.c.propertyOf(type, name) &&
       !this.c.structureOf(type).stringIndex
     ) {
-      return intersectionOf([
-        type,
-        anonymousObject(() => ({
-          ...emptyStructure(),
-          properties: new Map([[name, simpleProperty(name, unknownType)]]),
-        })),
-      ]);
+      return intersectionOf(
+        [
+          type,
+          anonymousObject(() => ({
+            ...emptyStructure(),
+            properties: new Map([[name, simpleProperty(name, unknownType)]]),
+          })),
+        ],
+        this.c.budget
+      );
     }
     return filterType(type, (member) => {
       if (member.kind !== 'object' && member.kind !== 'intersection') return assumeTrue;

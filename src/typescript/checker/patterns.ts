@@ -117,7 +117,8 @@ export class BindingPatterns {
       () => {
         const structure = emptyStructure();
         for (const [name, property] of this.c.structureOf(type).properties) {
-          if (!omitted.includes(name) && !property.isMethod) structure.properties.set(name, property);
+          if (!omitted.includes(name) && !(property.isMethod && property.declaringClass))
+            structure.properties.set(name, property);
         }
         return structure;
       },
@@ -138,6 +139,7 @@ export class BindingPatterns {
     if (!property) {
       const structure = this.c.structureOf(type);
       if (structure.stringIndex) return structure.stringIndex.type;
+      if (hasDefault) return undefinedType;
       this.c.error(node, `プロパティ '${name}' は型 '${this.c.print(type)}' にありません。`);
       return errorType;
     }

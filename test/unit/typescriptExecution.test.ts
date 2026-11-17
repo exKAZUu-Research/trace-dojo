@@ -157,3 +157,30 @@ test('nested loops are checked once per loop, not once per pass of every enclosi
   const source = `let x: number | string = 1;\n${loops.join('\n')}\nx = x === 1 ? "a" : 1;\n${'}'.repeat(depth)}\nconsole.log(x);`;
   expect(executeProgram('typescript', source)).toMatchObject({ kind: 'executed', stdout: 'a\n' });
 });
+
+test('intersection expansion stops at the type-checking budget', () => {
+  const factors = Array.from({ length: 21 }, (_, index) => `({a${index}: 1} | {a${index}: 2})`);
+  expect(executeProgram('typescript', `type Product = ${factors.join(' & ')};`)).toMatchObject({
+    kind: 'limitExceeded',
+  });
+});
+
+test('console.table stops before expanding repeated cells or table padding past the output limit', () => {
+  for (const source of [
+    'console.table(Array(10000).fill("x".repeat(10000)));',
+    'const cells = Array(1000).fill(""); cells[0] = "x".repeat(1000); console.table(cells);',
+  ]) {
+    expect(executeProgram('typescript', source)).toEqual({ kind: 'limitExceeded', limit: 'output' });
+  }
+});
+
+test('computed class and object members reject well-known symbols before execution', () => {
+  const source = `class A { [Symbol.iterator]() { return [1, 2].values(); } }
+const object = { [Symbol.iterator]() { return [1].values(); } };
+class B { get [Symbol.toStringTag]() { return 'B'; } }
+const tagged = { get [Symbol.toStringTag]() { return 'tagged'; } };`;
+  const execution = executeProgram('typescript', source);
+  if (execution.kind !== 'compileError') throw new Error(`not rejected: ${JSON.stringify(execution)}`);
+  expect(execution.diagnostics.map(({ row }) => row)).toEqual([0, 1, 2, 3]);
+  expect(execution.diagnostics.every(({ message }) => message.includes('この採点環境では使えません'))).toBe(true);
+});

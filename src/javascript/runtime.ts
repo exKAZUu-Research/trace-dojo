@@ -1,10 +1,11 @@
-// code-gauge-allow-file fileNcss 684 -- One runtime of the JavaScript interpreter, whose state its builtins and evaluator share.
+// code-gauge-allow-file fileNcss 686 -- One runtime of the JavaScript interpreter, whose state its builtins and evaluator share.
 import { CompileError } from '../interpreter/diagnostics';
 import { ExecutionBudget, LIMITS } from '../interpreter/limits';
 import { type ProgramInput, ProgramIO } from '../interpreter/programIo';
 import { StepTracker } from '../interpreter/stepTracker';
 import { TurtleWorld } from '../interpreter/turtleWorld';
 import { redefineArgument } from './argumentsObject';
+import type { IterationSource } from './ast';
 import { Evaluator } from './evaluator';
 import { findReachableTurtles } from './garbageCollection';
 import { DONE, type HostIterator, stepHostIterator, ValueIterator } from './iteration';
@@ -153,7 +154,7 @@ export class Runtime {
     return error;
   }
 
-  // code-gauge-allow functionCognitiveComplexity 20 -- One case per kind of exotic object whose own properties are not stored as properties.
+  // code-gauge-allow functionCognitiveComplexity 21 -- One case per kind of exotic object whose own properties are not stored as properties.
   getOwnProperty(object: JsObject, key: Key): Property | undefined {
     if (typeof object.primitive === 'string') {
       const element = ownElement(object.primitive, key);
@@ -174,7 +175,7 @@ export class Runtime {
         const element = index < object.elements.length ? object.elements[index] : HOLE;
         if (element === HOLE) return undefined;
         const defined = object.definedElements?.get(index);
-        if (defined && isAccessor(defined)) return defined;
+        if (defined && isAccessor(defined)) return { ...defined, configurable: defined.configurable && !object.sealed };
         return {
           value: element,
           writable: (defined?.writable ?? true) && !object.frozen,
@@ -355,7 +356,7 @@ export class Runtime {
     elements[index] = value;
   }
 
-  /** The spec's ArraySetLength, which stops shrinking at the last element a sealed array cannot delete. */
+  /** The spec's ArraySetLength, which stops shrinking at the last non-configurable element. */
   setLength(array: JsArray, value: Value, strict = true): void {
     const length = this.toNumber(value);
     if (!Number.isInteger(length) || length < 0 || length >= 2 ** 32)
@@ -424,7 +425,8 @@ export class Runtime {
   private defineElement(array: JsArray, index: number, property: Property): void {
     const plain = !isAccessor(property) && property.writable && property.enumerable && property.configurable;
     if (index >= array.elements.length) {
-      if (!array.extensible) this.throwError('TypeError', `Cannot define property ${index}, object is not extensible`);
+      if (!array.isLengthWritable || !array.extensible)
+        this.throwError('TypeError', `Cannot define property ${index}, object is not extensible`);
       this.grow(array, index + 1);
     }
     array.elements[index] = isAccessor(property) ? undefined : property.value;
@@ -846,9 +848,10 @@ export class Runtime {
   iterator(
     value: Value,
     method = value === undefined || value === null ? undefined : this.get(value, WELL_KNOWN_SYMBOLS.iterator),
-    source?: string
+    source?: IterationSource,
+    callSpread = false
   ): ValueIterator {
-    if (!isCallable(method)) return this.throwError('TypeError', this.notIterableMessage(value, source));
+    if (!isCallable(method)) return this.throwError('TypeError', this.notIterableMessage(value, source, callSpread));
     const iterator = this.call(method, value, [], this.currentRow);
     if (!isObject(iterator))
       return this.throwError('TypeError', 'Result of the Symbol.iterator method is not an object');
@@ -910,9 +913,9 @@ export class Runtime {
   }
 
   /** All the values an iterable yields, as spread reads them; `source` names it as V8 does where syntax spreads it. */
-  iterate(value: Value, source?: string): Value[] {
+  iterate(value: Value, source?: IterationSource, callSpread = false): Value[] {
     if (value instanceof JsArray) this.scan(value.elements.length);
-    return this.iterator(value, undefined, source).rest();
+    return this.iterator(value, undefined, source, callSpread).rest();
   }
 
   /** How V8 names a value by its type, as `number 5`, `string "a"`, `object null`, or just `object`. */
@@ -932,11 +935,13 @@ export class Runtime {
   }
 
   /** The TypeError of iterating a value without an iterator, naming it by its source where syntax iterates it. */
-  private notIterableMessage(value: Value, source: string | undefined): string {
-    if (value === undefined || value === null) {
-      return `${source ?? String(value)} is not iterable (cannot read property ${String(value)})`;
+  private notIterableMessage(value: Value, source: IterationSource | undefined, callSpread: boolean): string {
+    if (source) {
+      if (callSpread && (value === undefined || value === null))
+        return `${source.text} is not iterable (cannot read property ${String(value)})`;
+      if (!callSpread && source.callee) return `${source.callee} is not a function or its return value is not iterable`;
+      return `${source.text} is not iterable`;
     }
-    if (source !== undefined) return `${source} is not iterable`;
     return `${this.describeTyped(value)} is not iterable (cannot read property Symbol(Symbol.iterator))`;
   }
 

@@ -192,13 +192,9 @@ export class FunctionChecker {
     const single = node.childForFieldName('parameter');
     if (single) parameterNodes.push(single);
     for (const [index, parameterNode] of parameterNodes.entries()) {
-      const parameter = signature.parameters[index];
-      if (!parameter) continue;
       const pattern = parameterNode.childForFieldName('pattern') ?? parameterNode;
-      const type =
-        parameter.optional && !parameterNode.childForFieldName('value')
-          ? unionOf([parameter.type, undefinedType])
-          : parameter.type;
+      const type = this.sourceParameterType(parameterNode, pattern, signature, index);
+      if (!type) continue;
       if (pattern.type === 'identifier') {
         const symbol = scope.values.get(pattern.text);
         if (symbol) this.parameterTypes.set(symbol.id, type);
@@ -215,6 +211,31 @@ export class FunctionChecker {
         );
       }
     }
+  }
+
+  private sourceParameterType(
+    node: TreeNode,
+    pattern: TreeNode,
+    signature: Signature,
+    index: number
+  ): Type | undefined {
+    const parameter = signature.parameters[index];
+    if (pattern.type === 'rest_pattern') {
+      const annotation = this.c.typeNodes.annotationType(node.childForFieldName('type'));
+      if (annotation) return annotation;
+      if (parameter?.rest) return parameter.type;
+      return this.c.tupleType(
+        signature.parameters.slice(index).map((entry) => ({
+          type: entry.type,
+          optional: entry.optional,
+          rest: entry.rest,
+        }))
+      );
+    }
+    if (!parameter) return undefined;
+    return parameter.optional && !node.childForFieldName('value')
+      ? unionOf([parameter.type, undefinedType])
+      : parameter.type;
   }
 
   /** The return type of a function without an annotation, from checking its body silently. */

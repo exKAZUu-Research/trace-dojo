@@ -174,10 +174,10 @@ export class Signatures {
     // The declarations of a merged interface share the first one's type parameters.
     const first = this.firstDeclarationOf(node);
     if (first && first.id !== node.id) return this.typeParametersOf(first);
-    const parametersNode = node.childForFieldName('type_parameters');
-    if (!parametersNode) return [];
-    const scope = this.c.ownScope(node) ?? this.c.scopeOf(node);
-    return named(parametersNode).map((parameterNode) => {
+    const parameterNodes = this.mergedParameterNodes(node);
+    return parameterNodes.map((parameterNode) => {
+      const owner = parameterNode.parent?.parent ?? node;
+      const scope = this.c.ownScope(owner) ?? this.c.scopeOf(owner);
       const name = parameterNode.childForFieldName('name')?.text ?? 'T';
       const symbol = scope.types.get(name);
       return symbol ? this.typeParameterOfSymbol(symbol) : this.newTypeParameter(parameterNode);
@@ -190,8 +190,13 @@ export class Signatures {
     const owner = declaration.parent?.parent;
     const first = owner ? this.firstDeclarationOf(owner) : undefined;
     if (owner && first && first.id !== owner.id) {
-      const index = named(declaration.parent as TreeNode).findIndex((parameter) => parameter.id === declaration.id);
-      const shared = this.typeParametersOf(first)[index];
+      const canonical = this.mergedParameterNodes(first).find(
+        (parameter) => parameter.childForFieldName('name')?.text === symbol.name
+      );
+      const canonicalOwner = canonical?.parent?.parent;
+      const canonicalSymbol = canonicalOwner ? this.c.ownScope(canonicalOwner)?.types.get(symbol.name) : undefined;
+      const shared =
+        canonicalSymbol && canonicalSymbol !== symbol ? this.typeParameterOfSymbol(canonicalSymbol) : undefined;
       if (shared) {
         symbol.typeParameter = shared;
         return shared;
@@ -209,9 +214,39 @@ export class Signatures {
     return this.c.scopeOf(node).lookupType(name)?.typeDeclarations[0];
   }
 
+  private mergedDeclarations(node: TreeNode): TreeNode[] {
+    if (node.type !== 'interface_declaration') return [node];
+    const name = node.childForFieldName('name')?.text;
+    return name ? (this.c.scopeOf(node).lookupType(name)?.typeDeclarations ?? [node]) : [node];
+  }
+
+  private mergedParameterNodes(node: TreeNode): TreeNode[] {
+    const parameters = new Map<string, TreeNode>();
+    for (const declaration of this.mergedDeclarations(node)) {
+      const list = declaration.childForFieldName('type_parameters');
+      for (const parameter of list ? named(list) : []) {
+        const name = parameter.childForFieldName('name')?.text ?? '';
+        if (!parameters.has(name)) parameters.set(name, parameter);
+      }
+    }
+    return [...parameters.values()];
+  }
+
   private newTypeParameter(node: TreeNode): TypeParameter {
-    const constraintNode = node.childForFieldName('constraint');
-    const defaultNode = node.childForFieldName('value');
+    const owner = node.parent?.parent;
+    const declarations = owner ? this.mergedDeclarations(owner) : [];
+    const name = node.childForFieldName('name')?.text;
+    const matches = declarations.flatMap((declaration) => {
+      const parameters = declaration.childForFieldName('type_parameters');
+      return parameters
+        ? named(parameters).filter((parameter) => parameter.childForFieldName('name')?.text === name)
+        : [];
+    });
+    const constraintNode =
+      node.childForFieldName('constraint') ??
+      matches.map((parameter) => parameter.childForFieldName('constraint')).find(Boolean);
+    const defaultNode =
+      node.childForFieldName('value') ?? matches.map((parameter) => parameter.childForFieldName('value')).find(Boolean);
     return {
       kind: 'typeParameter',
       id: newTypeId(),

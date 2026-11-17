@@ -29,7 +29,7 @@ const FLAG_GETTERS = [
  */
 export function defineRegExpBuiltins(builder: RealmBuilder): void {
   const { regExpPrototype } = builder.realm;
-  builder.defineClass('RegExp', 2, regExpPrototype, ({ runtime, args, newTarget }) => {
+  const constructor = builder.defineClass('RegExp', 2, regExpPrototype, ({ runtime, args, newTarget }) => {
     const [pattern, flags] = args;
     const regexp = pattern instanceof JsObject ? pattern.regexp : undefined;
     if (regexp && !newTarget && flags === undefined) return pattern;
@@ -38,6 +38,14 @@ export function defineRegExpBuiltins(builder: RealmBuilder): void {
     const object = newRegExp(runtime, source, flagText);
     object.proto = runtime.prototypeFor(newTarget, regExpPrototype);
     return object;
+  });
+  builder.method(constructor, 'escape', 1, ({ runtime, args }) => {
+    const [text] = args;
+    if (typeof text !== 'string') return runtime.throwError('TypeError', 'input argument must be a string');
+    runtime.scan(text.length);
+    const escaped = RegExp.escape(text);
+    runtime.buildString(escaped.length);
+    return escaped;
   });
   defineRegExpPrototype(builder);
   defineStringMethods(builder);

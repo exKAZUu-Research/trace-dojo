@@ -521,7 +521,7 @@ export class Evaluator extends SuspendableStatementEvaluator {
     if (node.usesArguments) {
       const argumentsObject = createArgumentsObject(runtime, fn, node, args);
       bindings.set('arguments', { value: argumentsObject, isMutable: false });
-      if (!node.isStrict && params.every((param) => param.kind === 'identifier')) {
+      if (!node.isStrict && !node.rest && params.every((param) => param.kind === 'identifier')) {
         mapArguments(bindings, names, argumentsObject);
       }
     }

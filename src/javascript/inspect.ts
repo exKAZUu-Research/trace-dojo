@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 461 -- One port of Node.js's util.inspect, whose formatters share its context.
+// code-gauge-allow-file fileNcss 463 -- One port of Node.js's util.inspect, whose formatters share its context.
 import { eastAsianWidthType } from 'get-east-asian-width';
 
 import { ExecutionLimitError, LIMITS } from '../interpreter/limits';
@@ -456,7 +456,7 @@ function formatArray(ctx: Context, array: JsArray, recurseTimes: number): string
       const defined = array.definedElements?.get(index);
       output.push(
         defined && isAccessor(defined)
-          ? accessorText(defined)
+          ? formatAccessor(ctx, array, defined, recurseTimes)
           : formatIndented(ctx, elements[index] as Value, recurseTimes)
       );
       index++;
@@ -538,7 +538,7 @@ function formatProperty(ctx: Context, object: JsObject, recurseTimes: number, ke
     text = formatIndented(ctx, property.value, recurseTimes, diff);
     if (diff === 3 && ctx.breakLength < text.length) separator = `\n${' '.repeat(ctx.indentationLvl + diff)}`;
   } else if (property && isAccessor(property)) {
-    text = showsGetter(ctx, property) ? gotText(ctx, object, property, recurseTimes) : accessorText(property);
+    text = formatAccessor(ctx, object, property, recurseTimes);
   }
   // A symbol key shows its description with control characters escaped, unlike a symbol value.
   const symbolKey = typeof key === 'symbol' ? escapeControls(key.toString()) : undefined;
@@ -675,4 +675,8 @@ function columnWidth(code: number, character: string): number {
   if (type === 'fullwidth' || type === 'wide') return 2;
   if ((type === 'ambiguous' || type === 'neutral') && EMOJI_PRESENTATION.test(character)) return 2;
   return 1;
+}
+
+function formatAccessor(ctx: Context, object: JsObject, property: AccessorProperty, recurseTimes: number): string {
+  return showsGetter(ctx, property) ? gotText(ctx, object, property, recurseTimes) : accessorText(property);
 }

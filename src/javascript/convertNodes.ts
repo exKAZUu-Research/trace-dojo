@@ -1,5 +1,5 @@
 import { CompileError } from '../interpreter/diagnostics';
-import type { Expression, PropertyName } from './ast';
+import type { Expression, IterationSource, PropertyName } from './ast';
 
 /**
  * The parts of a tree-sitter node that converting reads, which a view of another grammar's tree can also provide.
@@ -62,6 +62,14 @@ export function unwrapParentheses(node: Node): Node {
  */
 export function calleeText(node: Node): string {
   return printedCallee(node) ?? '(intermediate value)';
+}
+
+export function iterationSource(node: Node): IterationSource {
+  const operand = unwrapParentheses(node);
+  return {
+    text: calleeText(operand),
+    callee: operand.type === 'call_expression' ? calleeText(field(operand, 'function')) : undefined,
+  };
 }
 
 // code-gauge-allow functionNcss 40 -- One case per kind of expression V8's CallPrinter names.

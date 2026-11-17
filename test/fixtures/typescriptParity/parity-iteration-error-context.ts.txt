@@ -1,0 +1,14 @@
+const u: any = undefined;
+const n: any = null;
+function missing(): any { return undefined; }
+function take([value]: any) { return value; }
+try { console.log([...u]); } catch (e: any) { console.log(e.message); }
+try { Math.max(...n); } catch (e: any) { console.log(e.message); }
+try { for (const value of n) {} } catch (e: any) { console.log(e.message); }
+try { const [value] = n; } catch (e: any) { console.log(e.message); }
+try { const [value] = missing(); } catch (e: any) { console.log(e.message); }
+try { console.log([...missing()]); } catch (e: any) { console.log(e.message); }
+try { Math.max(...missing()); } catch (e: any) { console.log(e.message); }
+try { take(u); } catch (e: any) { console.log(e.message); }
+try { Array.from(n); } catch (e: any) { console.log(e.message); }
+try { let value: number; [value] = u; } catch (e: any) { console.log(e.message); }

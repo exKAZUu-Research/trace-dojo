@@ -96,6 +96,17 @@ export class AssignmentChecker {
   // code-gauge-allow functionCognitiveComplexity 24 -- One case per kind of destructuring target, in array and object patterns alike.
   private destructuringAssignment(pattern: TreeNode, type: Type): void {
     const assign = (target: TreeNode, valueType: Type): void => {
+      if (['assignment_expression', 'assignment_pattern', 'object_assignment_pattern'].includes(target.type)) {
+        const left = target.childForFieldName('left') as TreeNode;
+        const right = target.childForFieldName('right') as TreeNode;
+        const defaultType = this.c.expressions.check(right);
+        assign(left, unionOf([this.c.relations.removeUndefined(valueType), regularOf(defaultType)]));
+        return;
+      }
+      if (['array', 'object', 'array_pattern', 'object_pattern'].includes(target.type)) {
+        this.destructuringAssignment(target, valueType);
+        return;
+      }
       const declared = this.targetType(target, false);
       if (declared !== errorType && !this.c.relations.isAssignable(valueType, declared))
         this.c.expressions.reportNotAssignable(target, valueType, declared);
@@ -108,16 +119,7 @@ export class AssignmentChecker {
           break;
         }
         const elementType = this.c.patterns.elementAt(element, type, index);
-        if (element.type === 'assignment_expression' || element.type === 'assignment_pattern') {
-          const left = element.childForFieldName('left') as TreeNode;
-          const right = element.childForFieldName('right') as TreeNode;
-          this.c.expressions.check(right);
-          assign(left, this.c.relations.removeUndefined(elementType));
-        } else if (['array', 'object', 'array_pattern', 'object_pattern'].includes(element.type)) {
-          this.destructuringAssignment(element, elementType);
-        } else {
-          assign(element, elementType);
-        }
+        assign(element, elementType);
       }
       return;
     }
@@ -128,15 +130,18 @@ export class AssignmentChecker {
           assign(element, this.c.patterns.destructuredProperty(element, type, element.text));
           break;
         }
+        case 'object_assignment_pattern': {
+          const left = element.childForFieldName('left') as TreeNode;
+          assign(element, this.c.patterns.destructuredProperty(left, type, left.text, true));
+          break;
+        }
         case 'pair':
         case 'pair_pattern': {
           const key = element.childForFieldName('key') as TreeNode;
           const value = element.childForFieldName('value') as TreeNode;
           const name = propertyNameText(key) ?? '';
-          const propertyType = this.c.patterns.destructuredProperty(key, type, name);
-          if (['array', 'object', 'array_pattern', 'object_pattern'].includes(value.type))
-            this.destructuringAssignment(value, propertyType);
-          else assign(value, propertyType);
+          const hasDefault = ['assignment_expression', 'assignment_pattern'].includes(value.type);
+          assign(value, this.c.patterns.destructuredProperty(key, type, name, hasDefault));
           break;
         }
         default: {

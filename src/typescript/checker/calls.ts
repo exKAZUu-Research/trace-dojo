@@ -1,9 +1,9 @@
-// code-gauge-allow-file fileNcss 413 -- Resolves calls as TypeScript does: callees, overloads, inference, and the effects of calls on the flow.
+// code-gauge-allow-file fileNcss 419 -- Resolves calls as TypeScript does: callees, overloads, inference, and the effects of calls on the flow.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import type { Checker, Mapper } from './checker';
 import { type InferenceRun, newInferenceRun } from './inference';
-import { named, skipParentheses } from './syntax';
+import { named, skipParentheses, stringValue } from './syntax';
 import {
   anyType,
   errorType,
@@ -215,7 +215,7 @@ export class Calls {
     let result = types[0];
     for (const type of types.slice(1)) {
       if (this.c.relations.isAssignable(type, result)) result = type;
-      else if (!this.c.relations.isAssignable(result, type)) result = intersectionOf([result, type]);
+      else if (!this.c.relations.isAssignable(result, type)) result = intersectionOf([result, type], this.c.budget);
     }
     return result;
   }
@@ -293,8 +293,14 @@ export class Calls {
     }
     const object = callee.type === 'member_expression' ? callee.childForFieldName('object') : undefined;
     const format = args[0];
-    if (object?.text !== 'console' || format?.type !== 'string' || !format.text.includes('%s')) return;
-    for (const arg of args.slice(1)) this.c.expressions.checkFunctionText(arg, typeOf(arg));
+    if (object?.text !== 'console' || format?.type !== 'string') return;
+    let index = 1;
+    for (const placeholder of stringValue(format).matchAll(/%([%sdifjoOc])/g)) {
+      const kind = placeholder[1];
+      if (kind === '%') continue;
+      const arg = args[index++];
+      if (kind === 's' && arg) this.c.expressions.checkFunctionText(arg, typeOf(arg));
+    }
   }
 
   /** Whether a call ends the flow, calling through a name a function declared to return `never`. */

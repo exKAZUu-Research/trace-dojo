@@ -1,0 +1,13 @@
+const o = { f() { return this.g() + this.v; }, g() { return 2; }, v: 1 };
+const p = { f: function () { return this.v; }, v: 1 };
+const q = { f: function () { return this.g(); }, g: function () { return 2; } };
+const r = { get f() { return this.v; }, v: 3 };
+console.log(o.f(), p.f(), q.f(), r.f);
+const { ...copy } = { greet() { return "hi"; } };
+const { id, ...other } = { id: 7, greet() { return "hello"; } };
+console.log(copy.greet(), id, other.greet());
+const a = { x: 0, get value() { return this.x; }, set value(n: number) { this.x = n; } };
+a.value = 4;
+console.log(a.value);
+const spreadReceiver = { f() { return this.value; }, ...{ value: 5 } };
+console.log(spreadReceiver.f());

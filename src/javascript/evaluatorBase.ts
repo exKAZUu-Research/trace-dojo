@@ -291,12 +291,6 @@ export abstract class EvaluatorBase {
   private bindArrayPattern(pattern: Extract<Pattern, { kind: 'arrayPattern' }>, value: Value, mode: BindingMode): void {
     const { runtime } = this;
     // Each binding reads the next value just before it runs, since an earlier default or target may change the array.
-    if (value === undefined || value === null) {
-      runtime.throwError(
-        'TypeError',
-        `${runtime.describeTyped(value)} is not iterable (cannot read property Symbol(Symbol.iterator))`
-      );
-    }
     const iterator = runtime.iterator(value, undefined, pattern.source);
     try {
       for (const element of pattern.elements) {
@@ -385,7 +379,7 @@ function destructuringMessage(pattern: Extract<Pattern, { kind: 'objectPattern' 
   const first = pattern.properties[0]?.key;
   const name = first?.kind === 'key' ? first.key : undefined;
   if (pattern.isNested && name !== undefined) return `Cannot read properties of ${String(value)} (reading '${name}')`;
-  const source = pattern.source ?? String(value);
+  const source = pattern.source?.text ?? String(value);
   return name === undefined
     ? `Cannot destructure '${source}' as it is ${String(value)}.`
     : `Cannot destructure property '${name}' of '${source}' as it is ${String(value)}.`;

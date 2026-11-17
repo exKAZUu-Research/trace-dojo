@@ -140,12 +140,12 @@ export abstract class StepEvaluator extends ExpressionEvaluator {
 
   private *argumentSteps(args: Argument[]): Steps<Value[]> {
     // Arguments have no elisions, which are the only source of holes.
-    return (yield* this.elementSteps(args)) as Value[];
+    return (yield* this.elementSteps(args, true)) as Value[];
   }
 
   /** Evaluates elements or arguments in order, holding the values so far; an elision leaves a hole. */
   // code-gauge-allow duplicateLines 25 -- Mirrors the synchronous version in expressionEvaluator.ts, as a generator that suspends at yield and await.
-  private *elementSteps(elements: (Argument | undefined)[]): Steps<Element[]> {
+  private *elementSteps(elements: (Argument | undefined)[], callSpread = false): Steps<Element[]> {
     const { runtime } = this;
     const values: Element[] = [];
     const { temporaries } = runtime.frame;
@@ -155,7 +155,7 @@ export abstract class StepEvaluator extends ExpressionEvaluator {
         if (element === undefined) {
           values.push(HOLE);
         } else if (element.kind === 'spread') {
-          const spread = runtime.iterate(yield* this.evaluateSteps(element.argument), element.source);
+          const spread = runtime.iterate(yield* this.evaluateSteps(element.argument), element.source, callSpread);
           runtime.allocate(spread.length);
           appendAll(values, spread);
           appendAll(temporaries, spread);

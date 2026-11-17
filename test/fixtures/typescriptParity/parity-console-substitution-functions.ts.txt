@@ -1,0 +1,6 @@
+function f() {}
+console.log("%s", "hello", f);
+console.log("%%s", f);
+console.log("%d %s", 1, "hello", f);
+console.log("%z %s", "hello", f);
+console.log("%%%s", "hello", f);

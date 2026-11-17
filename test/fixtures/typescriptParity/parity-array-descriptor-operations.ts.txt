@@ -1,0 +1,27 @@
+let reads = 0;
+const values = [0, 2];
+Object.defineProperty(values, "0", { get() { return ++reads; }, configurable: true });
+console.log(values.map(x => x), reads);
+console.log(values.filter(x => x > 0), reads);
+console.dir(values, { getters: true });
+console.dir(values, { getters: "get" });
+console.log(reads);
+Object.freeze(values);
+console.log(Object.getOwnPropertyDescriptor(values, "0")!.configurable);
+try { Object.defineProperty(values, "0", { value: 42 }); } catch (e: any) { console.log(e.message); }
+const protectedLength = [1];
+Object.defineProperty(protectedLength, "length", { writable: false });
+try { Object.defineProperty(protectedLength, "1", { value: 2 }); } catch (e: any) { console.log(e.message); }
+try { Object.defineProperty(protectedLength, "2", { get() { return 3; } }); } catch (e: any) { console.log(e.message); }
+console.log(protectedLength);
+const sealed = [0];
+Object.defineProperty(sealed, "0", { get() { return 1; }, configurable: true });
+Object.seal(sealed);
+console.log(Object.getOwnPropertyDescriptor(sealed, "0")!.configurable);
+try { Object.defineProperty(sealed, "0", { get() { return 2; } }); } catch (e: any) { console.log(e.message); }
+function args(a: number, ...rest: number[]) {
+  a = 5;
+  rest.push(9);
+  console.log(arguments, rest);
+}
+args(1, 2, 3);

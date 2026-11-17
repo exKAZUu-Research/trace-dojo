@@ -442,7 +442,10 @@ test.each([
   [
     'Array.from(null)',
     'Array.from(null);',
-    { kind: 'executed', uncaughtException: 'TypeError: Cannot convert undefined or null to object' },
+    {
+      kind: 'executed',
+      uncaughtException: 'TypeError: object null is not iterable (cannot read property Symbol(Symbol.iterator))',
+    },
   ],
   ['deeply nested blocks', `${'{'.repeat(9000)}${'}'.repeat(9000)}`, { kind: 'compileError' }],
   ['deeply nested negations', `const b = ${'!'.repeat(19_000)}true;`, { kind: 'compileError' }],

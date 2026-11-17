@@ -1,0 +1,13 @@
+[ 1, 2 ] 1
+[ 2, 2 ] 2
+[ [Getter: 3], 2 ]
+[ [Getter: 4], 2 ]
+4
+false
+Cannot redefine property: 0
+Cannot define property 1, object is not extensible
+Cannot define property 2, object is not extensible
+[ 1 ]
+false
+Cannot redefine property: 0
+[Arguments] { '0': 1, '1': 2, '2': 3 } [ 2, 3, 9 ]

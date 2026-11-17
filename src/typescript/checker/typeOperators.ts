@@ -256,8 +256,12 @@ export class TypeOperators {
 
   keyofType(type: Type): Type {
     if (this.c.relations.isGeneric(type)) return { kind: 'keyof', id: newTypeId(), type };
-    if (isAnyLike(type)) return unionOf([stringType, numberType, symbolType]);
-    if (type.kind === 'union') return intersectionOf(type.types.map((member) => this.keyofType(member)));
+    if (isAnyLike(type) || isIntrinsic(type, 'never')) return unionOf([stringType, numberType, symbolType]);
+    if (type.kind === 'union')
+      return intersectionOf(
+        type.types.map((member) => this.keyofType(member)),
+        this.c.budget
+      );
     if (type.kind === 'intersection') return unionOf(type.types.map((member) => this.keyofType(member)));
     if (type.kind !== 'object') {
       if (type.kind === 'intrinsic' && ['unknown', 'null', 'undefined', 'void', 'object'].includes(type.name))
