@@ -109,7 +109,7 @@ function addSlotVariable(
     try {
       runtime.withPreviewBudget({ ...context, key: 'value', share }, () => {
         addVariable(runtime, variables, name, entry.value, entry.type);
-        completeScalarVariable(runtime, variables, name, slot);
+        completeVariable(runtime, variables, name, slot);
       });
     } catch (error) {
       if (!(error instanceof DisplayAbort)) throw error;
@@ -118,9 +118,9 @@ function addSlotVariable(
   });
 }
 
-function completeScalarVariable(runtime: Runtime, variables: VariableDisplay, name: string, slot: Slot): void {
-  if (Object.hasOwn(variables.vars, name) && typeof variables.vars[name] !== 'object') {
-    runtime.completeScalarPreview(slot);
+function completeVariable(runtime: Runtime, variables: VariableDisplay, name: string, slot: Slot): void {
+  if (Object.hasOwn(variables.vars, name) || Object.hasOwn(variables.referenceVars ?? {}, name)) {
+    runtime.completePreview(slot);
   }
 }
 
@@ -152,7 +152,7 @@ function scalarSlotForDisplay(runtime: Runtime, slot: Slot, type: Type, owner: S
   const forced = forceForDisplay(runtime, slot);
   if (forced === undefined) return NOT_SCALAR;
   const scalar = scalarForDisplay(runtime, forced, slotDisplayType(slot, fieldType));
-  if (scalar !== NOT_SCALAR && typeof scalar !== 'object') runtime.completeScalarPreview(slot, owner);
+  if (scalar !== NOT_SCALAR && typeof scalar !== 'object') runtime.completePreview(slot, owner);
   return scalar;
 }
 
@@ -178,7 +178,10 @@ function forceForDisplay(runtime: Runtime, slot: Slot): Value | undefined {
     try {
       return slot instanceof Thunk ? runtime.forcePreview(slot) : slot;
     } catch (error) {
-      if (error instanceof HaskellException || error instanceof DisplayAbort) return;
+      if (error instanceof HaskellException || error instanceof DisplayAbort) {
+        runtime.incompletePreview();
+        return;
+      }
       throw error;
     }
   });
@@ -199,6 +202,7 @@ function addVariable(runtime: Runtime, variables: VariableDisplay, name: string,
     if (node) variables.referenceVars[name] = node;
   } catch (error) {
     if (!(error instanceof DisplayAbort)) throw error;
+    runtime.incompletePreview();
     variables.referenceVars[name] = { kind: 'value', value: '…' };
   }
 }
@@ -208,7 +212,10 @@ function scalarForDisplay(runtime: Runtime, value: Value, type: Type): ReturnTyp
   try {
     return scalarOf(runtime, value, type, 0);
   } catch (error) {
-    if (error instanceof DisplayAbort) return NOT_SCALAR;
+    if (error instanceof DisplayAbort) {
+      runtime.incompletePreview();
+      return NOT_SCALAR;
+    }
     throw error;
   }
 }
@@ -336,7 +343,7 @@ class DisplayNodes {
   build(value: Value, type: Type, depth: number): DisplayNode | undefined {
     this.runtime.spend();
     if (!(value instanceof ConValue)) return this.nodeOf(value, type, depth);
-    if (this.ancestors.has(value)) return { kind: 'value', value: '…' };
+    if (this.ancestors.has(value)) return this.truncated();
     this.ancestors.add(value);
     try {
       return this.nodeOf(value, type, depth);
@@ -348,7 +355,7 @@ class DisplayNodes {
   // code-gauge-allow functionCognitiveComplexity 27 -- One branch per kind of value shown as a node.
   // code-gauge-allow functionNcss 34 -- Node formatting dispatches on each supported value representation.
   private nodeOf(value: Value, type: Type, depth: number): DisplayNode | undefined {
-    if (depth > 20) return { kind: 'value', value: '…' };
+    if (depth > 20) return this.truncated();
     if (typeof value === 'bigint') return { kind: 'value', value: traceInt(value) };
     if (typeof value === 'number') return { kind: 'value', value: traceFloat(value, type) };
     if (typeof value === 'string') return { kind: 'value', value };
@@ -406,18 +413,23 @@ class DisplayNodes {
       } else entries[count++] = keyNode;
       return visit(node.fields[left + 1]);
     };
-    return visit(value) ? { kind: 'array', entries } : { kind: 'value', value: '…' };
+    return visit(value) ? { kind: 'array', entries } : this.truncated();
   }
 
   private listNodeOf(value: ConValue, type: Type, depth: number): DisplayNode {
     const items = listItems(this.runtime, value, type);
-    if (!items) return { kind: 'value', value: '…' };
+    if (!items) return this.truncated();
     if (isStringType(type, value)) return { kind: 'value', value: charsOf(items) };
     const entries: Record<string, DisplayNode> = Object.create(null);
     for (const [index, item] of items.entries()) {
       entries[index] = this.build(item.value, item.type, depth + 1) ?? NULL_NODE;
     }
     return { kind: 'array', entries };
+  }
+
+  private truncated(): DisplayNode {
+    this.runtime.incompletePreview();
+    return { kind: 'value', value: '…' };
   }
 
   /** A tuple shows as an array, and a constructor with fields as an object of them, by name in a record. */

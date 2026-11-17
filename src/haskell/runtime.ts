@@ -105,12 +105,16 @@ export class Runtime implements TracedRuntime<TraceFrame> {
     this.previews.track(slot);
   }
 
-  completeScalarPreview(...slots: Slot[]): void {
+  completePreview(...slots: Slot[]): void {
     for (let slot of slots) {
       slot = untypedSlot(slot);
       if (slot instanceof Thunk) this.previews.track(slot);
     }
-    this.previews.completeScalar();
+    this.previews.completeView();
+  }
+
+  incompletePreview(): void {
+    this.previews.incompleteView();
   }
 
   consumePreview(slot: Thunk): void {

@@ -2,7 +2,7 @@ import { expect, test, vi } from 'vitest';
 
 import { ExecutionLimitError } from '../../src/interpreter/limits';
 import { executeProgram, traceProgram } from '../../src/interpreter/program';
-import type { TraceItem } from '../../src/problems/trace';
+import type { DisplayNode, TraceItem } from '../../src/problems/trace';
 
 const javaMain = (body: string, members = ''): string => `public class Main {
   public static void main(String[] args) {
@@ -1165,6 +1165,71 @@ ${prefix ? ' putStrLn "start"' : ''}
     }
   }
 );
+
+test.each([
+  ['tuple', '(i,sum [1..50::Int]+i)'],
+  ['maybe', 'Just (sum [1..50::Int]+i)'],
+  ['list', 'map (*i) [1..20::Int]'],
+  ['record', 'Pair i (sum [1..50::Int]+i)'],
+  ['map', 'M.fromList [(i,sum [1..50::Int]+i)]'],
+  ['set', 'S.fromList [sum [1..50::Int]+i]'],
+])('completed %s loop views retain preview allowance', (kind, expression) => {
+  const source = `import Control.Monad
+import qualified Data.Map as M
+import qualified Data.Set as S
+data Pair=Pair {first::Int,second::Int}
+main=do
+ putStrLn "start"
+ forM_ [1..1000::Int] $ \\i -> do
+  let xs=${expression}
+  print i`;
+  const execution = executeProgram('haskell', source);
+  expect(execution.kind).toBe('executed');
+  if (execution.kind !== 'executed') return;
+  const recording = traceProgram('haskell', source, source);
+  expect(recording.uncaughtException).toBeUndefined();
+  expect(recording.stdout).toBe(execution.stdout);
+  const assignments = recording.traceItems.filter((item) => item.line === 8);
+  expect(assignments).toHaveLength(1000);
+  for (const [index, item] of assignments.entries()) {
+    const i = index + 1;
+    const total = i + 1275;
+    let expected: DisplayNode | undefined;
+    switch (kind) {
+      case 'tuple': {
+        expected = traceArray([traceValue(i), traceValue(total)]);
+        break;
+      }
+      case 'maybe': {
+        expected = traceValue(total);
+        break;
+      }
+      case 'list': {
+        expected = traceArray(Array.from({ length: 20 }, (_, j) => traceValue(i * (j + 1))));
+        break;
+      }
+      case 'record': {
+        expected = { kind: 'object', entries: { first: traceValue(i), second: traceValue(total) } };
+        break;
+      }
+      case 'map': {
+        expected = traceArray([traceArray([traceValue(i), traceValue(total)])]);
+        break;
+      }
+      case 'set': {
+        expected = traceArray([traceValue(total)]);
+        break;
+      }
+    }
+    expect(item.referenceVars?.xs).toEqual(expected);
+  }
+});
+
+const traceValue = (value: number): DisplayNode => ({ kind: 'value', value });
+const traceArray = (values: DisplayNode[]): DisplayNode => ({
+  kind: 'array',
+  entries: Object.fromEntries(values.map((node, index) => [index, node])),
+});
 
 test('aborted previews leave later cheap loop answers available', () => {
   const source = `step :: Int -> IO ()
