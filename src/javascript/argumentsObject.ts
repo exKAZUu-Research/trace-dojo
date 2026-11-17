@@ -1,4 +1,5 @@
 import type { FunctionNode } from './ast';
+import { WELL_KNOWN_SYMBOLS } from './realmIterators';
 import type { Runtime } from './runtime';
 import { type Binding, isAccessor, type JsFunction, type JsObject, type Value } from './values';
 
@@ -12,7 +13,10 @@ export function createArgumentsObject(runtime: Runtime, fn: JsFunction, node: Fu
   }
   const hidden = { writable: true, enumerable: false, configurable: true };
   object.properties.set('length', { value: args.length, ...hidden });
-  object.properties.set(Symbol.iterator, { value: runtime.get(runtime.realm.arrayPrototype, 'values'), ...hidden });
+  object.properties.set(WELL_KNOWN_SYMBOLS.iterator, {
+    value: runtime.get(runtime.realm.arrayPrototype, 'values'),
+    ...hidden,
+  });
   if (node.isStrict) {
     const thrower = runtime.newNativeFunction('', 0, () =>
       runtime.throwError(
