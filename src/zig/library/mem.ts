@@ -62,7 +62,7 @@ import {
   structReceiver,
   typeMember,
 } from './native';
-import { findSequence } from './sequenceSearch';
+import { findSequence, sequenceMatches } from './sequenceSearch';
 import { sorter } from './sort';
 
 interface AllocationPlan {
@@ -158,13 +158,8 @@ function containsSequence(haystack: Sequence, needle: Sequence, minimum: bigint,
   if (needle.length === 1n) return containsScalar(haystack, needle.get(0n), minimum, equal);
   if (needle.length === 0n) panic(PANIC.unreachable);
   if (minimum === 0n) return true;
-  let count = 0n;
-  for (
-    let index = findSequence(haystack, needle, 0n, equal);
-    index !== undefined;
-    index = findSequence(haystack, needle, index + needle.length, equal)
-  ) {
-    count++;
+  const matches = sequenceMatches(haystack, needle, 0n, equal);
+  for (let count = 1n; !matches.next().done; count++) {
     if (count >= minimum) return true;
   }
   return false;
@@ -511,18 +506,7 @@ const MEMBERS: Record<string, () => Member> = {
   findScalarPos: positionSearch('std.mem.findScalarPos', 'scalar', (h, start, v, equal) =>
     h.findFrom((value) => equal(value, v.get(0n)), start)
   ),
-  count: sliceSearch('std.mem.count', 'slice', USIZE, (h, needle, equal) => {
-    if (needle.length === 0n) panic(PANIC.unreachable);
-    if (needle.length === 1n) return countScalar(h, needle, equal);
-    let found = 0n;
-    for (
-      let index = findSequence(h, needle, 0n, equal);
-      index !== undefined;
-      index = findSequence(h, needle, index + needle.length, equal)
-    )
-      found++;
-    return found;
-  }),
+  count: sliceSearch('std.mem.count', 'slice', USIZE, replacementCount),
   countScalar: sliceSearch('std.mem.countScalar', 'scalar', USIZE, countScalar),
   containsAtLeast: generic('std.mem.containsAtLeast', 4, (sema, call, type, [h, countArg, n]) => {
     const haystack = constSlice(sema, h, type);
@@ -702,7 +686,8 @@ const MEMBERS: Record<string, () => Member> = {
       );
       const text = sequence(source, spend);
       const needle = sequence(pattern, spend);
-      let next = changesSearch ? undefined : findSequence(text, needle, 0n, equal);
+      const matchesInStableInput = changesSearch ? undefined : sequenceMatches(text, needle, 0n, equal);
+      let next = matchesInStableInput?.next().value;
       let index = 0,
         written = 0,
         count = 0;
@@ -736,7 +721,7 @@ const MEMBERS: Record<string, () => Member> = {
           written += replace.length;
           index += pattern.length;
           count++;
-          if (!changesSearch) next = findSequence(text, needle, BigInt(index), equal);
+          next = matchesInStableInput?.next().value;
         } else {
           if (written >= target.length) indexOutOfBounds(written, target.length);
           if (cost !== 0) {
@@ -948,11 +933,7 @@ function replacementCount(
 ): bigint {
   if (needle.length === 0n) panic(PANIC.unreachable);
   let count = 0n;
-  for (
-    let index = findSequence(input, needle, 0n, equal);
-    index !== undefined;
-    index = findSequence(input, needle, index + needle.length, equal)
-  ) {
+  for (const index of sequenceMatches(input, needle, 0n, equal)) {
     count++;
     onMatch?.(index);
   }

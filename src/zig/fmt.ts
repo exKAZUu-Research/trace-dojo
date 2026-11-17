@@ -1,5 +1,5 @@
 import { checkOutputSize } from './allocation';
-// code-gauge-allow-file fileNcss 804 -- The file holds one layer of the compiler, whose parts share its private state.
+// code-gauge-allow-file fileNcss 812 -- Keeps format parsing and rendering with their shared specifiers.
 /**
  * Zig's formatted printing (`std.Io.Writer.print` and `printValue`), transcribed so that output matches byte for byte.
  * Formatting works on bytes, as Zig's strings are bytes.
@@ -69,6 +69,7 @@ export interface FormatOutput {
   readonly length: number;
   push: (...bytes: number[]) => number;
   checkSize?: (length: number) => void;
+  checkMaterializedSize?: (length: number) => void;
   writeView?: (length: number, get: (index: number) => number) => void;
   writeChunks?: (length: number, get: (index: number) => number, chunkSize: number) => void;
   repeat?: (byte: number, count: number) => void;
@@ -911,6 +912,7 @@ export function printFloat(
   options: Options
 ): void {
   const decimal = shortestDecimal(value, bits);
+  if (!decimal.special) checkPrecisionSize(out, options.precision);
   const text =
     mode === 'scientific' ? formatScientific(decimal, options.precision) : formatDecimal(decimal, options.precision);
   alignBuffer(out, utf8(text), options);
@@ -1036,7 +1038,7 @@ function formatDecimal(input: Decimal, precision: number | undefined): string {
 /** `printFloatHex`: a float as `0x1.8p1`. */
 function printFloatHex(out: FormatOutput, value: AnyFloat, bits: FloatBits, upper: boolean, options: Options): void {
   const big = asBigFloat(value);
-  if (big.kind === 'finite') checkFormatSize(out, out.length + (options.precision ?? 0));
+  if (big.kind === 'finite') checkPrecisionSize(out, options.precision);
   let text = big.sign ? '-' : '';
   if (big.kind === 'nan') text += upper ? 'NAN' : 'nan';
   else if (big.kind === 'inf') text += upper ? 'INF' : 'inf';
@@ -1106,4 +1108,9 @@ function appendBytes(out: FormatOutput, bytes: readonly number[]): void {
 function checkFormatSize(out: FormatOutput, length: number): void {
   if (out.checkSize) out.checkSize(length);
   else checkOutputSize(length);
+}
+
+function checkPrecisionSize(out: FormatOutput, precision = 0): void {
+  if (out.checkMaterializedSize) out.checkMaterializedSize(precision);
+  else checkFormatSize(out, out.length + precision);
 }

@@ -8398,6 +8398,48 @@ test('count reads the value of a one-element needle once', () => {
 });
 
 test.each([
+  ['std.mem.count(u8,&a,"aa")', '100000'],
+  ['std.mem.containsAtLeast(u8,&a,100000,"aa")', 'true'],
+  ['std.mem.replacementSize(u8,&a,"aa","b")', '100000'],
+])('repeated matches fit one sequence scan: %s', (expression, stderr) => {
+  const source = `const std=@import("std");pub fn main()void{const a:[200000]u8=@splat(97);std.debug.print("{}",.{${expression}});}`;
+  expect(executeProgram('zig', source)).toMatchObject({ kind: 'executed', stderr, uncaughtException: undefined });
+});
+
+test.each([
+  ['{d:1000001}', '32'],
+  ['{d:<1000001}', '49'],
+])('fixed writers fail after writing the available prefix for %s', (format, byte) => {
+  const source = `const std=@import("std");pub fn main()void{var b:[1]u8=undefined;var w=std.Io.Writer.fixed(&b);w.print("${format}",.{1}) catch |err| std.debug.print("{t} {} {}",.{err,w.end,b[0]});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: `WriteFailed 1 ${byte}`,
+    uncaughtException: undefined,
+  });
+});
+
+test('bufPrint reports a full buffer before charging unused padding', () => {
+  const source = `const std=@import("std");pub fn main()void{var b:[1]u8=undefined;if(std.fmt.bufPrint(&b,"{d:1000001}",.{1})) |_| unreachable else |err| std.debug.print("{t} {}",.{err,b[0]});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: 'NoSpaceLeft 32',
+    uncaughtException: undefined,
+  });
+});
+
+test.each([
+  ['', '9 9'],
+  ['-1', '9 7'],
+])('list insertion moves only the suffix at len%s', (offset, last) => {
+  const source = `const std=@import("std");pub fn main(init:std.process.Init)!void{var a:[200003]u8=@splat(7);var l=std.ArrayList(u8).fromOwnedSlice(&a);l.shrinkRetainingCapacity(200000);for(0..3)|_|{try l.insert(init.gpa,l.items.len${offset},9);}std.debug.print("{} {} {}",.{l.items.len,l.items[200001],l.items[200002]});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: `200003 ${last}`,
+    uncaughtException: undefined,
+  });
+});
+
+test.each([
   ['u16001=1<<16000', '@as(f128,@floatFromInt(x))'],
   ['u16001=1<<16000', 'std.math.lossyCast(f128,x)'],
   ['f128=0x1p16000', '@as(u16001,@intFromFloat(x))'],

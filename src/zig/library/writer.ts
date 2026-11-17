@@ -1,4 +1,3 @@
-import { LIMITS } from '../../interpreter/limits';
 import { checkOutputSize } from '../allocation';
 import { indexOutOfBounds, PANIC, panic } from '../arith';
 import { byteValues } from '../builtins';
@@ -105,9 +104,12 @@ export class WriterFormatOutput implements FormatOutput {
   }
 
   checkSize(length: number): void {
-    if (this.destination.flushAfterFormat) return checkOutputSize(length);
-    const extra = Math.max(0, length - this.length);
-    this.frame.runtime.spend(extra > LIMITS.maxOperations - this.frame.runtime.budget.spent ? extra : 0);
+    if (this.destination.flushAfterFormat) checkOutputSize(length);
+  }
+
+  checkMaterializedSize(length: number): void {
+    this.checkSize(this.length + length);
+    this.frame.runtime.spend(length);
   }
 }
 

@@ -273,9 +273,8 @@ function defineMembers(type: StructType, child: Type): void {
         receiver: true,
       })
     );
-  const insertValues = (frame: Frame, list: List, at: bigint, input: Value[]): Value => {
-    const count = BigInt(input.length);
-    const length = list.items.lengthValue + count;
+  const insertValue = (frame: Frame, list: List, at: bigint, value: Value): Value => {
+    const length = list.items.lengthValue + 1n;
     if (!ensureTotalCapacity(frame, list, length, child)) return ERROR_OUT_OF_MEMORY;
     if (at > list.items.lengthValue) panic(`start index ${at} is larger than end index ${list.items.lengthValue}`);
     if (sizeOf(child) === 0) {
@@ -283,13 +282,11 @@ function defineMembers(type: StructType, child: Type): void {
       return undefined;
     }
     const index = Number(at);
-    spendTransfers(list, list.items.lengthValue + count, 3);
-    const current = list.items.values().map(copyForStorage);
-    const inserted = input.map(copyForStorage);
-    const combined = [...current.slice(0, index), ...inserted, ...current.slice(index)];
-    for (const [position, value] of combined.entries())
-      storeInto(list.items.target, list.items.start + position, value);
-    setLength(list, combined.length);
+    spendTransfers(list, length - at, 2);
+    for (let position = list.items.length; position > index; position--)
+      storeInto(list.items.target, list.items.start + position, list.items.get(position - 1));
+    storeInto(list.items.target, list.items.start + index, value);
+    setLength(list, length);
     return undefined;
   };
   const members: Record<string, () => Member> = {
@@ -380,7 +377,7 @@ function defineMembers(type: StructType, child: Type): void {
     insert: method(
       'insert',
       { args: [USIZE, child], result: allocating(VOID), allocator: true },
-      (list, [index, item], frame) => insertValues(frame, list, index as bigint, [item])
+      (list, [index, item], frame) => insertValue(frame, list, index as bigint, item)
     ),
     insertSlice: mutateSlice('insertSlice'),
     orderedRemove: method('orderedRemove', { args: [USIZE], result: child }, (list, [index]) => {
