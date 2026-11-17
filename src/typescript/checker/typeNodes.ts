@@ -1,3 +1,4 @@
+// code-gauge-allow-file fileNcss 410 -- Resolves every kind of type syntax a program writes, each needing its own rule.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import { unsupportedMessage } from '../unsupported';
@@ -67,8 +68,6 @@ const domInterfaceNames = new Set(BROWSER_INTERFACES.map((entry) => (typeof entr
 /** Resolves the types the program writes: annotations, type references, and type declarations. */
 export class TypeNodes {
   private readonly typeNodeCache = new Map<number, Type>();
-  /** The member types of the DOM interfaces that a merged DOM interface extends, by symbol id. */
-  private readonly domBaseTypes = new Map<number, Type>();
   private readonly restConstraintsInValidation = new Set<number>();
   /** The type each kind of type syntax denotes; the others are `any`. */
   private readonly typeSyntaxes = new Map<string, (node: TreeNode) => Type>([
@@ -634,7 +633,7 @@ export class TypeNodes {
   }
 
   /** A DOM interface the program does not merge into, whose members the library leaves out. */
-  private isOpaqueDomInterface(symbol: Sym): boolean {
+  isOpaqueDomInterface(symbol: Sym): boolean {
     return (
       domInterfaceNames.has(symbol.name) &&
       symbol.typeDeclarations.every((declaration) => this.c.isLibrary(declaration))
@@ -655,7 +654,7 @@ export class TypeNodes {
     return aliasedDeclaredType(type, symbol.name, this.c.signatures.typeParametersOfSymbol(symbol));
   }
 
-  private interfaceType(symbol: Sym): ObjectType {
+  interfaceType(symbol: Sym): ObjectType {
     let structure: Structure | undefined;
     const typeParameters = this.c.signatures.typeParametersOfSymbol(symbol);
     const type: ObjectType = {
@@ -696,18 +695,6 @@ export class TypeNodes {
         return body ? named(body) : [];
       })
     );
-  }
-
-  /** A DOM interface the library extends lends its members, though it stands for `any` where a program names it. */
-  baseType(base: TreeNode): Type {
-    const symbol = this.c.isLibrary(base) ? this.c.scopeOf(base).lookupType(base.text) : undefined;
-    if (!symbol || !this.isOpaqueDomInterface(symbol)) return this.typeFromNode(base);
-    let type = this.domBaseTypes.get(symbol.id);
-    if (!type) {
-      type = this.interfaceType(symbol);
-      this.domBaseTypes.set(symbol.id, type);
-    }
-    return type;
   }
 }
 

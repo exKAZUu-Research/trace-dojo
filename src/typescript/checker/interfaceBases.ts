@@ -21,6 +21,8 @@ export class InterfaceBases {
   /** The interfaces whose base types are resolving, outermost first. */
   private readonly stack: BaseResolution[] = [];
   private deferredChecks: (() => void)[] = [];
+  /** The member types of the DOM interfaces that a merged DOM interface extends, by symbol id. */
+  private readonly domBaseTypes = new Map<number, Type>();
 
   constructor(private readonly c: Checker) {}
 
@@ -109,8 +111,20 @@ export class InterfaceBases {
     return target === symbol || this.baseTypesOf(target).some((base) => this.hasBaseType(base, symbol));
   }
 
+  /** A DOM interface the library extends lends its members, though it stands for `any` where a program names it. */
+  private baseType(base: TreeNode): Type {
+    const symbol = this.c.isLibrary(base) ? this.c.scopeOf(base).lookupType(base.text) : undefined;
+    if (!symbol || !this.c.typeNodes.isOpaqueDomInterface(symbol)) return this.c.typeNodes.typeFromNode(base);
+    let type = this.domBaseTypes.get(symbol.id);
+    if (!type) {
+      type = this.c.typeNodes.interfaceType(symbol);
+      this.domBaseTypes.set(symbol.id, type);
+    }
+    return type;
+  }
+
   private validBase(baseNode: TreeNode): Type[] {
-    const base = this.c.typeNodes.baseType(baseNode);
+    const base = this.baseType(baseNode);
     if (isValidBaseType(base)) return [base];
     this.c.errorWhileResolving(
       baseNode,
