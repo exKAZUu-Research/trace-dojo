@@ -10,7 +10,6 @@ import {
   anyType,
   errorType,
   functionType,
-  intersectionOf,
   isAnyLike,
   isIntrinsic,
   numberType,
@@ -24,6 +23,7 @@ import {
   unknownType,
   voidType,
 } from './types';
+import { UnionSignatures } from './unionSignatures';
 
 interface Resolution {
   signature: Signature;
@@ -38,9 +38,11 @@ export class Calls {
   private readonly resolved = new Map<number, Signature>();
 
   private readonly arity: CallArity;
+  private readonly unionSignatures: UnionSignatures;
 
   constructor(private readonly c: Checker) {
     this.arity = new CallArity(c);
+    this.unionSignatures = new UnionSignatures(c, this.arity);
   }
 
   // code-gauge-allow functionCognitiveComplexity 20 -- Follows TypeScript's checks of a call's callee in order, each with its own error.
@@ -198,65 +200,9 @@ export class Calls {
     return this.c.assignments.isEvolvingArray(callee.childForFieldName('object') as TreeNode);
   }
 
-  /** The call signatures of a type; for a union, those every member has alike. */
   private callSignatures(type: Type): Signature[] {
     if (type.kind !== 'union') return this.c.signaturesOf(type, 'call');
-    const perMember = type.types.map((member) => this.c.signaturesOf(member, 'call'));
-    if (perMember.some((signatures) => signatures.length === 0)) return [];
-    if (perMember.every((signatures) => signatures.length === 1)) {
-      const all = perMember.map((signatures) => signatures[0]);
-      if (all.every((signature) => signature.typeParameters.length === 0)) {
-        let combined = all[0];
-        for (const signature of all.slice(1)) combined = this.combineUnionSignatures(combined, signature);
-        return [combined];
-      }
-    }
-    return perMember[0];
-  }
-
-  /**
-   * The signature a union of two function types is called by, as TypeScript combines them: the longer parameter list,
-   * each parameter the type both accept at its position, a rest when either has one, and either return type.
-   */
-  private combineUnionSignatures(left: Signature, right: Signature): Signature {
-    const typeAt = (signature: Signature, index: number): Type => {
-      const { parameters } = signature;
-      const restIndex = hasRest(signature) ? parameters.length - 1 : -1;
-      if (restIndex !== -1 && index >= restIndex) return this.c.restElementType(parameters[restIndex].type);
-      return index < parameters.length ? parameters[index].type : unknownType;
-    };
-    const both = (index: number): Type => this.intersectParameters([typeAt(left, index), typeAt(right, index)]);
-    const longest = left.parameters.length >= right.parameters.length ? left : right;
-    const eitherRest = hasRest(left) || hasRest(right);
-    const extraRest = eitherRest && !hasRest(longest);
-    const minimum = Math.max(requiredCount(left), requiredCount(right));
-    const parameters: Parameter[] = longest.parameters.map((parameter, index) => {
-      const isRest = eitherRest && !extraRest && index === longest.parameters.length - 1;
-      return {
-        ...parameter,
-        rest: isRest,
-        optional: !isRest && index >= minimum,
-        type: isRest ? this.c.arrayType(both(index)) : both(index),
-      };
-    });
-    if (extraRest) {
-      const index = longest.parameters.length;
-      parameters.push({ name: 'args', rest: true, optional: false, type: this.c.arrayType(both(index)) });
-    }
-    return {
-      typeParameters: [],
-      parameters,
-      returnType: () => unionOf([left.returnType(), right.returnType()]),
-    };
-  }
-
-  private intersectParameters(types: Type[]): Type {
-    let result = types[0];
-    for (const type of types.slice(1)) {
-      if (this.c.relations.isAssignable(type, result)) result = type;
-      else if (!this.c.relations.isAssignable(result, type)) result = intersectionOf([result, type], this.c.budget);
-    }
-    return result;
+    return this.unionSignatures.of(type.types.map((member) => this.c.signaturesOf(member, 'call')));
   }
 
   private explicitTypeArguments(node: TreeNode): Type[] | undefined {
@@ -818,14 +764,6 @@ function isDottedName(node: TreeNode): boolean {
   if (node.type === 'identifier' || node.type === 'this') return true;
   if (node.type !== 'member_expression' || node.childForFieldName('optional_chain')) return false;
   return isDottedName(node.childForFieldName('object') as TreeNode);
-}
-
-function hasRest(signature: Signature): boolean {
-  return signature.parameters.at(-1)?.rest === true;
-}
-
-function requiredCount(signature: Signature): number {
-  return signature.parameters.filter((parameter) => !parameter.optional && !parameter.rest).length;
 }
 
 /** The object a call through a property or an element, as `o.f()` or `o["f"]()`, passes as `this`. */
