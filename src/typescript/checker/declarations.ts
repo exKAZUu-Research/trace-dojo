@@ -357,10 +357,11 @@ export function checkInheritedPropertiesAreIdentical(c: Checker, symbol: Sym, na
   const own = c.typeNodes.interfaceOwnMembers(symbol.typeDeclarations).properties;
   const inherited = new Map<string, { property: Property; base: Type }>();
   for (const base of bases) {
-    for (const property of c.structureOf(base).properties.values()) {
-      if (own.has(property.name)) continue;
-      const existing = inherited.get(property.name);
-      if (!existing) inherited.set(property.name, { property, base });
+    // Keys, unlike names, tell apart the `#name` members of different classes.
+    for (const [key, property] of c.structureOf(base).properties) {
+      if (own.has(key)) continue;
+      const existing = inherited.get(key);
+      if (!existing) inherited.set(key, { property, base });
       else if (!arePropertiesIdentical(c, existing.property, property)) {
         c.error(
           nameNode,
