@@ -22,7 +22,7 @@ import {
   wrapInt,
 } from '../types';
 import { NativeHandle, type Pointer, type Slice, type Value, ZArray, ZStruct } from '../values';
-import { storeSliceValue } from './common';
+import { nativeTransferCost, storeSliceValue } from './common';
 import { addMembers, compileArgs, expectArgs, fnMember, type Member, nativeStruct } from './native';
 
 interface RandomSource {
@@ -398,6 +398,7 @@ addMembers(RANDOM, {
     const type = sema.compileType(typeArg);
     const [buffer] = compileArgs(sema, [bufferArg], [sliceOf(type, false)]);
     const state = randomState(sema, call.receiver, call.span);
+    const cost = nativeTransferCost(sema, type, call.span);
     const evaluate = buffer.eval;
     return runtime(
       VOID,
@@ -405,12 +406,13 @@ addMembers(RANDOM, {
         const generator = state(frame);
         const slice = evaluate(frame) as Slice;
         const usize = intType(false, 64, 'usize');
-        for (let index = 0; index + 1 < slice.length; index++) {
-          frame.runtime.spend();
-          const other = Number(intRange(generator, usize, BigInt(index), BigInt(slice.length), false));
-          const value = copyForStorage(slice.get(index));
+        for (let index = 0n; index + 1n < slice.lengthValue; index++) {
+          frame.runtime.spend(1 + cost * 4);
+          const other = Number(intRange(generator, usize, index, slice.lengthValue, false));
+          if (cost === 0) continue;
+          const value = copyForStorage(slice.get(Number(index)));
           const swapped = copyForStorage(slice.get(other));
-          storeSliceValue(slice, index, swapped);
+          storeSliceValue(slice, Number(index), swapped);
           storeSliceValue(slice, other, value);
         }
         return;

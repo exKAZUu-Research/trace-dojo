@@ -27,6 +27,7 @@ import {
   negate,
   parseFloatLiteral,
 } from './floats';
+import { spendIntegerOperation } from './integerWork';
 import { sizeOf } from './layout';
 import { asFloat, comparisonTest, isArithmeticType, isIntegerType, isZero, sign } from './operands';
 import { type Frame, Jump, withHeldValues } from './runtime';
@@ -1117,11 +1118,9 @@ export abstract class ExpressionCompiler extends SemaBase {
     const leftResult = staticResultOf(left),
       rightResult = staticResultOf(right);
     if (type.kind === 'comptime_int' && leftResult && rightResult) {
-      const aBits = (leftResult.value as bigint).toString(2).length;
-      const bBits = (rightResult.value as bigint).toString(2).length;
-      const resultBits = operator === '*' ? aBits + bBits : Math.max(aBits, bBits) + 1;
-      if (resultBits > LIMITS.maxSlots) throw new ExecutionLimitError('storage');
-      this.compilationBudget.spend(Math.ceil(resultBits / 64));
+      spendIntegerOperation(leftResult.value as bigint, rightResult.value as bigint, operator === '*', (cost) =>
+        this.spendCompilation(cost)
+      );
     }
     const operation = this.operation(operator, type, expression);
     // A float of a fixed type divided by zero gives an infinity or NaN, as at run time.

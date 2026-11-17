@@ -216,9 +216,10 @@ export function nativeFunction(
   name: string,
   params: Type[],
   returnType: Type,
-  run: (args: Value[], frame: Frame) => Value
+  run: (args: Value[], frame: Frame) => Value,
+  analyze?: (sema: SemaApi, span: Span) => void
 ): FunctionInstance {
-  return new FunctionInstance(name, params, returnType, run);
+  return new FunctionInstance(name, params, returnType, run, analyze);
 }
 
 /** The receiver of a native method, by value: a pointer receiver is dereferenced. */

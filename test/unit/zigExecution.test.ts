@@ -4654,3 +4654,97 @@ test('allocator empty sentinel views allocate independently without copying the 
     uncaughtException: undefined,
   });
 });
+
+test.each(['asc', 'desc'])('sort comparators retain lazy analysis and enforce ordering when used: %s', (direction) => {
+  const unused = `const std=@import("std");pub fn main()void{const f=std.sort.${direction}(bool);_=f;std.debug.print("unused",.{});}`;
+  expect(executeProgram('zig', unused)).toMatchObject({
+    kind: 'executed',
+    stderr: 'unused',
+    uncaughtException: undefined,
+  });
+  for (const call of [
+    `const f=std.sort.${direction}(bool);const p=&f;_=p;`,
+    `_=std.sort.${direction}(bool)({},true,false);`,
+    `var a=[_]bool{true,false};std.sort.insertion(bool,&a,{},std.sort.${direction}(bool));`,
+    `var flag=false;_=&flag;if(flag){_=std.sort.${direction}(bool)({},true,false);}`,
+  ])
+    expect(executeProgram('zig', `const std=@import("std");pub fn main()void{${call}}`)).toMatchObject({
+      kind: 'compileError',
+    });
+});
+
+test.each(['insertion', 'heap', 'pdq'])(
+  'sorting charges nested aggregate transfers across algorithms: %s',
+  (algorithm) => {
+    const source = `const std=@import("std");const P=struct{x:u8,data:[1000]u8};fn less(_:void,a:P,b:P)bool{return a.x<b.x;}pub fn main()void{var a=[_]P{.{.x=2,.data=@splat(1)},.{.x=1,.data=@splat(2)}};for(0..300)|_|{std.sort.${algorithm}(P,&a,{},less);a[0].x=2;a[1].x=1;}}`;
+    expect(executeProgram('zig', source)).toMatchObject({ kind: 'limitExceeded', limit: 'operations' });
+  }
+);
+
+test.each(['struct{a:[1000]u8}', '[1000]u8'])('shuffling charges typed aggregate transfers: %s', (type) => {
+  const value = type.startsWith('struct') ? '.{.a=@splat(1)}' : '@splat(1)';
+  const source = `const std=@import("std");const P=${type};pub fn main()void{var p=std.Random.DefaultPrng.init(1);var a=[_]P{${value},${value}};for(0..300)|_|p.random().shuffle(P,&a);}`;
+  expect(executeProgram('zig', source)).toMatchObject({ kind: 'limitExceeded', limit: 'operations' });
+});
+
+test('zero-sized shuffle keeps random draws while eliding data transfers', () => {
+  const source = `const std=@import("std");pub fn main()void{var p=std.Random.DefaultPrng.init(42);var q=std.Random.DefaultPrng.init(42);var a:[4]void=undefined;var b=[_]u8{1,2,3,4};p.random().shuffle(void,&a);q.random().shuffle(u8,&b);std.debug.print("{}",.{p.random().int(u64)==q.random().int(u64)});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: 'true',
+    uncaughtException: undefined,
+  });
+});
+
+test.each([
+  ['add', '7'],
+  ['sub', '-1'],
+  ['mul', '12'],
+])('checked comptime integer math preserves error-union results: %s', (method, result) => {
+  const source = `const std=@import("std");pub fn main()!void{const value=std.math.${method}(comptime_int,3,4);std.debug.print("{} {}",.{@TypeOf(value),try value});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: `error{Overflow}!comptime_int ${result}`,
+    uncaughtException: undefined,
+  });
+});
+
+test.each([
+  'mul(comptime_int,1<<600000,1<<600000)',
+  'add(comptime_int,1<<999999,1<<999999)',
+  'sub(comptime_int,-(1<<999998),1<<999999)',
+])('checked comptime math bounds results before materialization: %s', (expression) => {
+  expect(
+    executeProgram(
+      'zig',
+      `const std=@import("std");pub fn main()!void{const value=try std.math.${expression};_=value;}`
+    )
+  ).toMatchObject({ kind: 'limitExceeded', limit: 'storage' });
+});
+
+test.each(['1<<600000,(1<<600000)-1', '(1<<600000)-1,(1<<600000)+1'])(
+  'comptime LCM bounds its final multiplication: %s',
+  (args) => {
+    expect(
+      executeProgram('zig', `const std=@import("std");pub fn main()void{const value=std.math.lcm(${args});_=value;}`)
+    ).toMatchObject({ kind: 'limitExceeded', limit: 'storage' });
+  }
+);
+
+test.each(['bool,true,true', '[]const u8,"a","b"', 'f80,2,4', 'f128,2,4', 'f16,2,4'])(
+  'logarithm rejects unsupported type domains: %s',
+  (args) => {
+    expect(executeProgram('zig', `const std=@import("std");pub fn main()void{_=std.math.log(${args});}`)).toMatchObject(
+      { kind: 'compileError' }
+    );
+  }
+);
+
+test('comptime integer logarithms use exact integer evaluation', () => {
+  const source = `const std=@import("std");pub fn main()void{std.debug.print("{} {} {}",.{std.math.log(comptime_int,3,81),std.math.log(comptime_int,2,1024),std.math.log(comptime_int,10,999)});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: '4 10 2',
+    uncaughtException: undefined,
+  });
+});

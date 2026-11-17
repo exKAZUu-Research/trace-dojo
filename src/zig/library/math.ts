@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 551 -- Groups the related standard library operations that share this module.
+// code-gauge-allow-file fileNcss 558 -- Groups the related standard library operations that share this module.
 import { checked, divCeil, divExact, divFloor, divTrunc, floatMod, floatRem, mod, PANIC, panic, rem } from '../arith';
 import type { Expression } from '../ast';
 import { fusedMultiplyAdd, intFittingRange, roundFloat } from '../builtins';
@@ -27,6 +27,7 @@ import {
   toNumber,
   truncateToBigInt,
 } from '../floats';
+import { spendIntegerOperation } from '../integerWork';
 import { isArithmeticType, isIntegerType } from '../operands';
 import { known, type NativeCall, runtime, type SemaApi, type TExpr } from '../semaBase';
 import {
@@ -217,16 +218,13 @@ function orderReceiver(sema: SemaApi, call: NativeCall): TExpr {
 /** `add`, `sub`, and `mul` of `(T, a, b)`, returning `error.Overflow` when the result does not fit. */
 function checkedInt(name: string, compute: (a: bigint, b: bigint) => bigint): () => Member {
   return generic(name, 3, (sema, call, type, [aArg, bArg]) => {
-    if (type.kind === 'comptime_int') {
-      const operands = [aArg, bArg].map((arg) => sema.coerce(sema.compile(arg, type), type, arg));
-      return computed(type, operands, call.span, ([a, b]) => compute(a as bigint, b as bigint));
-    }
-    if (type.kind !== 'int')
+    if (type.kind !== 'int' && type.kind !== 'comptime_int')
       return sema.error(call.span, `${name} には整数の型を渡してください（${typeName(type)} です）。`);
     const operands = [aArg, bArg].map((arg) => sema.coerce(sema.compile(arg, type), type, arg));
-    return computed(errorUnionOf(OVERFLOW_ERROR, type), operands, call.span, ([a, b]) => {
+    return computed(errorUnionOf(OVERFLOW_ERROR, type), operands, call.span, ([a, b], frame) => {
+      spendIntegerOperation(a as bigint, b as bigint, name.endsWith('.mul'), nativeBudget(sema, frame));
       const result = compute(a as bigint, b as bigint);
-      return fitsInt(result, type) ? result : ErrorValue.of('Overflow');
+      return type.kind === 'int' && !fitsInt(result, type) ? ErrorValue.of('Overflow') : result;
     });
   });
 }
@@ -380,7 +378,10 @@ function gcdResult(left: bigint, right: bigint, type: Type, lcm: boolean, spend:
   if (!lcm && left === 0n && right === 0n) panic(PANIC.unreachable);
   const divisor = gcd(left, right, spend);
   if (!lcm) return divisor;
-  const product = divisor === 0n ? 0n : (left / divisor) * right;
+  if (divisor === 0n) return 0n;
+  const quotient = left / divisor;
+  spendIntegerOperation(quotient, right, true, spend);
+  const product = quotient * right;
   const result = product < 0n ? -product : product;
   return type.kind === 'int' ? checked(result, type) : result;
 }
@@ -571,12 +572,16 @@ const MEMBERS: Record<string, () => Member> = {
   ),
   atan2: binaryFloat('std.math.atan2', Math.atan2, 'f32-f64'),
   hypot: binaryFloat('std.math.hypot', Math.hypot, 'comptime'),
-  // code-gauge-allow functionCognitiveComplexity 24 -- Keeps integer and float logarithm analysis with their generated computation.
+  // code-gauge-allow functionCognitiveComplexity 29 -- Keeps integer and float logarithm analysis with their generated computation.
   log: generic('std.math.log', 3, (sema, call, type, [baseArg, xArg]) => {
+    if (!isArithmeticType(type)) return sema.error(call.span, 'std.math.log の型は整数か浮動小数点数にしてください。');
+    if (type.kind === 'float' && type.bits !== 32 && type.bits !== 64)
+      return sema.error(call.span, 'std.math.log の浮動小数点数の型は f32 か f64 にしてください。');
     const base = sema.coerce(sema.compile(baseArg, type), type, baseArg);
     const x = sema.coerce(sema.compile(xArg, type), type, xArg);
-    if (type.kind === 'int') {
-      if (type.signed) sema.error(call.span, '整数の対数には、符号なし整数の型を渡してください。');
+    if (type.kind === 'int' || type.kind === 'comptime_int') {
+      if (type.kind === 'int' && type.signed)
+        sema.error(call.span, '整数の対数には、符号なし整数の型を渡してください。');
       return computed(type, [base, x], call.span, ([b, v], frame) => {
         if ((b as bigint) <= 1n || (v as bigint) <= 0n) panic(PANIC.unreachable);
         let result = 0n;

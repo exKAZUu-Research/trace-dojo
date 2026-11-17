@@ -1,4 +1,6 @@
+import type { Span } from './ast';
 import type { Frame } from './runtime';
+import type { SemaApi } from './semaBase';
 import type { Type } from './types';
 import type { Value } from './values';
 
@@ -33,7 +35,8 @@ export class FunctionInstance {
     readonly params: readonly Type[],
     public returnType: Type,
     /** A function the grader implements natively. */
-    readonly native?: (args: Value[], frame: Frame) => Value
+    readonly native?: (args: Value[], frame: Frame) => Value,
+    readonly analyze?: (sema: SemaApi, span: Span) => void
   ) {
     this.createsObject = name === 'init' || name.startsWith('init');
     if (native) this.state = 'compiled';

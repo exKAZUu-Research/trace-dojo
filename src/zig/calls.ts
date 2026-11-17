@@ -16,6 +16,7 @@ import {
   NativeFn,
   runtime,
   type Scope,
+  staticResultOf,
   type TExpr,
 } from './semaBase';
 import {
@@ -33,7 +34,7 @@ import {
   typeName,
   VOID,
 } from './types';
-import { type FnValue, Pointer, type Value } from './values';
+import { FnValue, Pointer, type Value } from './values';
 
 /** What a function body's compilation needs to know about the function. */
 export interface FunctionCompilation {
@@ -125,6 +126,7 @@ export abstract class CallCompiler extends BuiltinCompiler {
 
   private callPointer(callee: TExpr, fnType: FnType, expression: ExpressionOf<'call'>): TExpr {
     this.checkMemoryOperand(callee, expression);
+    this.analyzeFunction(callee, expression);
     if (expression.args.length !== fnType.params.length) {
       this.error(
         expression,
@@ -416,6 +418,7 @@ export abstract class CallCompiler extends BuiltinCompiler {
     span: Span
   ): { call: (frame: Frame, args: Value[]) => Value; params: readonly Type[]; returnType: Type } {
     this.checkMemoryOperand(value, span);
+    this.analyzeFunction(value, span);
     const ref = value.value as unknown;
     if (value.known && ref instanceof FnRef) {
       const instance = this.instantiate(ref, [], span);
@@ -435,6 +438,11 @@ export abstract class CallCompiler extends BuiltinCompiler {
       params: fnType.params,
       returnType: fnType.returnType,
     };
+  }
+
+  private analyzeFunction(expression: TExpr, span: Span): void {
+    const value = staticResultOf(expression)?.value;
+    if (value instanceof FnValue) value.fn.analyze?.(this, span);
   }
 
   callFunction(fn: FunctionInstance, args: Value[], frame: Frame): Value {

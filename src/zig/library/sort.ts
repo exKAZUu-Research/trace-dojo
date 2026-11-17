@@ -8,6 +8,7 @@ import {
   constSlice,
   generic,
   mutableSlice,
+  nativeTransferCost,
   ORDER,
   ORDER_EQ,
   ORDER_GT,
@@ -28,7 +29,10 @@ function comparator(name: string, direction: number): () => Member {
           `${name}(${typeName(type)})`,
           [VOID, type, type],
           BOOL,
-          ([, a, b]) => compareScalars(a, b) * direction < 0
+          ([, a, b]) => compareScalars(a, b) * direction < 0,
+          (sema, span) => {
+            sema.valueComparator(type, true, span);
+          }
         )
       );
       cache.set(type, value);
@@ -44,16 +48,22 @@ export function sorter(name: string, algorithm: SortAlgorithm): () => Member {
     const context = sema.compile(contextArg);
     const lessThan = callbackFunction(sema, sema.compile(lessThanArg), lessThanArg);
     checkCallback(sema, name, lessThan, [context.type, type, type], BOOL, lessThanArg);
+    const cost = nativeTransferCost(sema, type, call.span);
     const block = algorithm === 'block' ? blockSortFunction(sema, type, context.type, call.span) : undefined;
     return nativeCall(VOID, [items, context], call.span, ([value, contextValue], frame) => {
       const slice = value as Slice;
-      if (block) runBlockSort(sema, block, frame, slice, contextValue, (args) => lessThan.call(frame, args));
+      const compare = (args: Value[]): Value => {
+        frame.runtime.spend(cost * 2);
+        return lessThan.call(frame, args);
+      };
+      if (block) runBlockSort(sema, block, frame, slice, contextValue, compare);
       else
         sortValues(
           slice,
-          (a, b) => lessThan.call(frame, [contextValue, a, b]) as boolean,
+          (a, b) => compare([contextValue, a, b]) as boolean,
           algorithm as Exclude<SortAlgorithm, 'block'>,
-          frame
+          frame,
+          cost
         );
       return;
     });

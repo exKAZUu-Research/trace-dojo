@@ -9,7 +9,8 @@ export function sortValues(
   items: Slice,
   lessThan: (a: Value, b: Value) => boolean,
   algorithm: Exclude<SortAlgorithm, 'block'>,
-  frame: Frame
+  frame: Frame,
+  transferCost: number
 ): void {
   const context: Context = {
     lessThan: (a, b) => {
@@ -17,6 +18,8 @@ export function sortValues(
       return lessThan(items.get(a), items.get(b));
     },
     swap: (a, b) => {
+      if (transferCost === 0) return;
+      frame.runtime.spend(transferCost * 4);
       const left = copyForStorage(items.get(a)),
         right = copyForStorage(items.get(b));
       storeSliceValue(items, a, right);
