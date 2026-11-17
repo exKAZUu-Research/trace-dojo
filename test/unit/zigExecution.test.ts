@@ -7151,3 +7151,44 @@ test('captured nested optional aggregate locations survive present and absent as
     uncaughtException: undefined,
   });
 });
+
+test.each(['allocatedSlice()', 'unusedCapacitySlice()'])(
+  'priority queues retain exact zero-sized %s lengths',
+  (view) => {
+    const source = `const std=@import("std");fn cmp(_:void,_:void,_:void)std.math.Order{return .eq;}pub fn main(init:std.process.Init)!void{var a:std.ArrayList(void)=.empty;try a.append(init.gpa,{});var q:std.PriorityQueue(void,void,cmp)=.empty;q.items=a.${view};std.debug.print("{} {}",.{q.items.len,q.count()});}`;
+    const length = view === 'allocatedSlice()' ? '18446744073709551615' : '18446744073709551614';
+    expect(executeProgram('zig', source)).toMatchObject({
+      kind: 'executed',
+      stderr: `${length} ${length}`,
+      uncaughtException: undefined,
+    });
+  }
+);
+
+test.each(['5..3', '2..1'])('known descending for range %s fails in an untaken runtime branch', (range) => {
+  expect(executeProgram('zig', `pub fn main()void{var f=false;_=&f;if(f){for(${range})|_|{}}}`)).toMatchObject({
+    kind: 'compileError',
+  });
+});
+
+test.each(['.b', '@enumFromInt(42)'])('known non-exhaustive enum %s selects its proper fallback', (value) => {
+  const unknown = value !== '.b';
+  const fallback = unknown
+    ? 'else=>std.debug.print("named",.{}),_=>std.debug.print("unknown",.{})'
+    : '_=>std.debug.print("unknown",.{}),else=>std.debug.print("named",.{})';
+  const source = `const std=@import("std");const E=enum(u8){a,b,_};pub fn main()void{const x:E=${value};switch(x){.a=>{},${fallback}}}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: unknown ? 'unknown' : 'named',
+    uncaughtException: undefined,
+  });
+});
+
+test.each([false, true])('anytype preserves known type-bearing unions nested in a struct: %s', (nested) => {
+  const source = `const std=@import("std");const U=union(enum){t:type};const S=struct{u:U};fn zero(v:anytype) ${nested ? 'v.u.t' : 'v.t'}{return 0;}pub fn main()void{const x=zero(${nested ? 'S{.u=U{.t=u8}}' : 'U{.t=u8}'});std.debug.print("{} {}",.{x,@TypeOf(x)});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: '0 u8',
+    uncaughtException: undefined,
+  });
+});

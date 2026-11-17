@@ -475,6 +475,9 @@ export function isComptimeOnly(type: Type, seen = new Set<Type>()): boolean {
     case 'error_union': {
       return isComptimeOnly(type.payload, seen);
     }
+    case 'union': {
+      return (type.fields ?? []).some((field) => isComptimeOnly(field.type, seen));
+    }
     case 'struct': {
       return (type.fields ?? []).some((field) => field.comptimeValue === undefined && isComptimeOnly(field.type, seen));
     }

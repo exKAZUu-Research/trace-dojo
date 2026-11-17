@@ -368,33 +368,37 @@ function priorityQueueType(element: Type, context: Type, compareExpression: TExp
     { name: 'context', type: context, hasDefault: false },
   ]);
   queueTypes.set(key, type);
-  const reserve = (frame: Frame, queue: ZStruct, wanted: number, allocator: AllocatorState | undefined): boolean => {
-    let capacity = Number(queue.slots[1] as bigint);
+  const reserve = (frame: Frame, queue: ZStruct, wanted: bigint, allocator: AllocatorState | undefined): boolean => {
+    if (!fitsInt(wanted, USIZE)) return false;
+    let capacity = queue.slots[1] as bigint;
     if (capacity >= wanted) return true;
-    while (capacity < wanted) capacity += Math.floor(capacity / 2) + 8;
+    while (capacity < wanted) {
+      const grown = capacity + capacity / 2n + 8n;
+      capacity = fitsInt(grown, USIZE) ? grown : wanted;
+    }
     const items = queue.slots[0] as Slice;
     const complete = reserveNativeAllocation(
       frame,
       allocator,
-      capacity,
+      Number(capacity),
       element,
       Number(queue.slots[1] as bigint) > 0 ? items.target : undefined
     );
     if (!complete) return false;
     if (sizeOf(element) === 0) {
-      const storage = zeroAllocation(frame.runtime, BigInt(capacity), element);
-      complete(storage.target, items.length);
+      const storage = zeroAllocation(frame.runtime, capacity, element);
+      complete(storage.target, Number(items.lengthValue));
       queue.slots[0] = new Slice(storage.target, storage.start, items.lengthValue);
-      queue.slots[1] = BigInt(capacity);
+      queue.slots[1] = capacity;
       return true;
     }
-    frame.runtime.spend((capacity + items.length) * transferCost(element));
+    frame.runtime.spend((Number(capacity) + items.length) * transferCost(element));
     const values = items.values().map(copyForStorage);
-    while (values.length < capacity) values.push(undefinedValue(element));
+    while (BigInt(values.length) < capacity) values.push(undefinedValue(element));
     const storage = new ZArray(values, 0, capacity);
     complete(storage, items.length);
     queue.slots[0] = new Slice(storage, 0, items.length);
-    queue.slots[1] = BigInt(capacity);
+    queue.slots[1] = capacity;
     return true;
   };
   const method = <State = undefined>(
@@ -460,7 +464,15 @@ function priorityQueueType(element: Type, context: Type, compareExpression: TExp
     algorithms: QueueAlgorithms
   ): Value => {
     const items = queue.slots[0] as Slice;
-    if (!reserve(frame, queue, items.length + values.length, allocator)) return ERROR_OUT_OF_MEMORY;
+    if (
+      !reserve(
+        frame,
+        queue,
+        items.lengthValue + (values instanceof Slice ? values.lengthValue : BigInt(values.length)),
+        allocator
+      )
+    )
+      return ERROR_OUT_OF_MEMORY;
     for (let index = 0; index < values.length; index++) {
       const value = values instanceof Slice ? values.get(index) : values[index];
       algorithms.push(frame, queue, value);
@@ -499,15 +511,15 @@ function priorityQueueType(element: Type, context: Type, compareExpression: TExp
     ),
     peek: method('peek', [], optionalOf(element), false, (_frame, queue) => {
       const items = queue.slots[0] as Slice;
-      return items.length > 0 ? optionalSome(items.get(0), element) : NULL;
+      return items.lengthValue > 0n ? optionalSome(items.get(0), element) : NULL;
     }),
     pop: comparingMethod('pop', [], optionalOf(element), false, (frame, queue, _values, _allocator, algorithms) =>
-      (queue.slots[0] as Slice).length > 0 ? optionalSome(algorithms.popIndex(frame, queue, 0n), element) : NULL
+      (queue.slots[0] as Slice).lengthValue > 0n ? optionalSome(algorithms.popIndex(frame, queue, 0n), element) : NULL
     ),
     popIndex: comparingMethod('popIndex', [USIZE], element, false, (frame, queue, [index], _allocator, algorithms) =>
       algorithms.popIndex(frame, queue, index as bigint)
     ),
-    count: method('count', [], USIZE, false, (_, queue) => BigInt((queue.slots[0] as Slice).length)),
+    count: method('count', [], USIZE, false, (_, queue) => (queue.slots[0] as Slice).lengthValue),
     capacity: method('capacity', [], USIZE, false, (_, queue) => queue.slots[1]),
     clearRetainingCapacity: method('clearRetainingCapacity', [], VOID, false, (_, queue) => {
       const items = queue.slots[0] as Slice;

@@ -1599,6 +1599,8 @@ export abstract class StatementCompiler extends CallCompiler {
         const evaluateEnd = end?.eval;
         const startFact = staticResultOf(start);
         const endFact = end && staticResultOf(end);
+        if (startFact && endFact && (endFact.value as bigint) < (startFact.value as bigint))
+          this.error(operand.rangeEnd ?? operand.value, 'for の終わりは、始まり以上にしてください。');
         return {
           type: USIZE,
           evaluate: (frame) => [evaluateStart(frame), evaluateEnd?.(frame)] as unknown as Value,
@@ -2356,9 +2358,16 @@ export abstract class StatementCompiler extends CallCompiler {
           return each;
       }
     }
-    return expression.cases.find(
-      (each) => each.isElse || each.items.some((item) => item.value.kind === 'identifier' && isDiscardName(item.value))
-    );
+    const unnamed =
+      tagType.kind === 'enum' &&
+      !tagType.exhaustive &&
+      !enumLookup(this.enumFields(tagType), () => this.spendCompilation()).byValue.has(key as bigint);
+    const fallback = unnamed
+      ? expression.cases.find((each) =>
+          each.items.some((item) => item.value.kind === 'identifier' && isDiscardName(item.value))
+        )
+      : undefined;
+    return fallback ?? expression.cases.find((each) => each.isElse);
   }
 
   /** The values of an enum, union, bool, or error set that no prong lists, which `else` matches. */
