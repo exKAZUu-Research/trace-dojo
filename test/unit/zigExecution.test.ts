@@ -4353,8 +4353,18 @@ test.each([
   'floorPowerOfTwo(u65535,n)',
   'ceilPowerOfTwo(u65535,n)',
 ])('wide integer library conversions share the work budget: %s', (method) => {
-  const source = `const std=@import("std");pub fn main()void{var n:u65535=1<<65534;_=&n;for(0..60)|_|{_=std.math.${method}${method.startsWith('ceilPowerOfTwo') ? ' catch unreachable' : ''};}}`;
-  expect(executeProgram('zig', source)).toMatchObject({ kind: 'limitExceeded', limit: 'operations' });
+  const call = `std.math.${method}${method.startsWith('ceilPowerOfTwo') ? ' catch unreachable' : ''}`;
+  const wide = `const std=@import("std");pub fn main()void{var n:u65535=1<<65534;_=&n;for(0..60)|_|{_=${call};}}`;
+  expect(executeProgram('zig', wide)).toMatchObject({
+    kind: 'limitExceeded',
+    limit: 'operations',
+  });
+  const small = `const std=@import("std");pub fn main()void{var n:u65535=1;_=&n;var sum:usize=0;for(0..60)|_|{sum+=@intCast(${call});}std.debug.print("{}",.{sum});}`;
+  expect(executeProgram('zig', small)).toMatchObject({
+    kind: 'executed',
+    stderr: method.includes('PowerOfTwo') ? '60' : '0',
+    uncaughtException: undefined,
+  });
 });
 
 test.each(['0..2', '1..3'])('constant array keys exclude trailing backing storage: %s', (range) => {
