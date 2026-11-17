@@ -1,10 +1,11 @@
-// code-gauge-allow-file fileNcss 503 -- Holds shared type construction, bounded instantiation, structure lookup, and type constraints used by all checker components.
+// code-gauge-allow-file fileNcss 504 -- Holds shared type construction, bounded instantiation, structure lookup, and type constraints used by all checker components.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import type { SourceDiagnostic } from '../../interpreter/diagnostics';
 import { ExecutionBudget, ExecutionLimitError, LIMITS } from '../../interpreter/limits';
 import { AssignmentChecker } from './assignments';
 import { Binder } from './binder';
+import { CircularConstraints } from './circularConstraints';
 import { ClassDeclarationChecker } from './classDeclarations';
 import { ClassChecker } from './classes';
 import { ConditionChecker } from './conditions';
@@ -691,8 +692,11 @@ export class Checker {
     }
   }
 
+  private readonly circularConstraints = new CircularConstraints(this.budget);
+
+  /** As TypeScript's `getConstraintOfTypeParameter`, none for a circular constraint. */
   constraintOf(parameter: TypeParameter): Type | undefined {
-    return parameter.constraint?.();
+    return this.circularConstraints.has(parameter) ? undefined : parameter.constraint?.();
   }
 
   /** The type a generic type stands for at most, which its members come from. */

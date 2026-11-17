@@ -2,6 +2,7 @@
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import type { Checker } from './checker';
+import { checkCircularConstraints } from './circularConstraints';
 import { checkInheritedPropertiesAreIdentical, checkTypeMemberDuplicates } from './declarations';
 import { FlowState, type State } from './flow';
 import type { Scope, Sym } from './scopes';
@@ -77,6 +78,7 @@ export class StatementChecker {
     this.c.flow.current = new FlowState();
     this.declareHoistedVariables(this.c.binder.moduleScope);
     this.checkBlockStatements(named(root));
+    checkCircularConstraints(this.c, root);
   }
 
   /** Starts each `var` of a scope unassigned, as its hoisted binding holds `undefined` until its declaration runs. */
