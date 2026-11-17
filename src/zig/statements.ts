@@ -328,7 +328,7 @@ export abstract class StatementCompiler extends CallCompiler {
     let elementTypes: Type[];
     if (type.kind === 'struct' && type.isTuple) elementTypes = (type.fields ?? []).map((field) => field.type);
     else if (type.kind === 'array') {
-      if (type.length !== count)
+      if (type.length !== BigInt(count))
         this.error(statement, `分割代入の数が合いません（${count} 個ですが、値は ${type.length} 個です）。`);
       elementTypes = Array.from({ length: count }, () => type.child);
     } else return this.error(statement, `${typeName(type)} 型の値は、分割して代入できません。`);
@@ -685,8 +685,8 @@ export abstract class StatementCompiler extends CallCompiler {
     const tupleTypes =
       type.kind === 'struct' && type.isTuple ? this.structFields(type, value).map((field) => field.type) : undefined;
     if (value.kind === 'arrayInit' && !value.type && (type.kind === 'array' || tupleTypes)) {
-      const length = type.kind === 'array' ? type.length : (tupleTypes as Type[]).length;
-      if (value.elements.length !== length) {
+      const length = type.kind === 'array' ? type.length : BigInt((tupleTypes as Type[]).length);
+      if (BigInt(value.elements.length) !== length) {
         this.error(value, `配列の長さが合いません（${length} 個が必要ですが、${value.elements.length} 個です）。`);
       }
       const stores = value.elements.map((element, index) =>
@@ -696,7 +696,8 @@ export abstract class StatementCompiler extends CallCompiler {
         const aggregate = holder.slots[index] as ZArray | ZStruct;
         const offset = aggregate instanceof ZArray ? aggregate.offset : 0;
         for (const [position, store] of stores.entries()) store(frame, aggregate, offset + position);
-        if (type.kind === 'array' && type.sentinel !== undefined) storeInto(aggregate, offset + length, type.sentinel);
+        if (type.kind === 'array' && type.sentinel !== undefined)
+          storeInto(aggregate, offset + value.elements.length, type.sentinel);
       };
     }
     if (value.kind === 'structInit' && !value.type && type.kind === 'union' && value.fields.length === 1) {
@@ -1647,27 +1648,27 @@ export abstract class StatementCompiler extends CallCompiler {
     let staticLength: bigint | undefined;
     if (type.kind === 'array') {
       child = type.child;
-      staticLength = BigInt(type.length);
+      staticLength = type.length;
       if (byPointer) this.error(span, '配列を |*x| で受け取るには、for (&arr) |*x| と書いてください。');
       isConst = true;
       viewOf = (value) => {
         const array = value as ZArray;
-        return { slots: array, start: array.offset, length: BigInt(array.length) };
+        return { slots: array, start: array.offset, length: array.lengthValue };
       };
     } else if (type.kind === 'pointer' && type.size === 'one' && type.child.kind === 'array') {
       child = type.child.child;
       isConst = type.isConst;
-      staticLength = BigInt(type.child.length);
+      staticLength = type.child.length;
       viewOf = (value) => {
         const array = (value as Pointer).load() as ZArray;
-        return { slots: array, start: array.offset, length: BigInt(array.length) };
+        return { slots: array, start: array.offset, length: array.lengthValue };
       };
     } else if (type.kind === 'pointer' && type.size === 'slice') {
       child = type.child;
       isConst = type.isConst;
       const length = knownLengthOf(compiled);
       const value = staticResultOf(compiled)?.value;
-      staticLength = value instanceof Slice ? value.lengthValue : length === undefined ? undefined : BigInt(length);
+      staticLength = value instanceof Slice ? value.lengthValue : length;
       viewOf = (value) => {
         const slice = value as Slice;
         return { slots: slice.target, start: slice.start, length: slice.lengthValue };
@@ -1732,7 +1733,7 @@ export abstract class StatementCompiler extends CallCompiler {
       if (!source.known) evaluateOperand = (frame) => copyForFrame(frame, source.eval(frame), type);
       const compiled = source.known ? source : runtime(type, (frame) => frame.slots[operandSlot], operand);
       this.compilationBudget.spend(
-        type.kind === 'array' ? type.length : type.kind === 'struct' ? (type.fields?.length ?? 0) : 0
+        type.kind === 'array' ? Number(type.length) : type.kind === 'struct' ? (type.fields?.length ?? 0) : 0
       );
       if (type.kind === 'struct' && type.isTuple) {
         for (const [index, field] of (type.fields ?? []).entries())

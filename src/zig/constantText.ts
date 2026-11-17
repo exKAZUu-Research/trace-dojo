@@ -113,7 +113,7 @@ function arrayText(value: ZArray, child: Type, nameOf: (type: Type) => string): 
 function pointerText(value: Value, type: Extract<Type, { kind: 'pointer' }>, nameOf: (type: Type) => string): string {
   if (type.size === 'slice') {
     const slice = value as Slice;
-    const array = new ZArray(slice.target.slots, slice.start, slice.length);
+    const array = new ZArray(slice.target.slots, slice.start, slice.lengthValue);
     const content = arrayText(array, type.child, nameOf);
     const prefix =
       type.child.kind === 'int' && !type.child.signed && type.child.bits === 8 ? content.slice(0, -2) : `&${content}`;

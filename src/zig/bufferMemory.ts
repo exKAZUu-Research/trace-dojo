@@ -159,7 +159,7 @@ class BufferMemory {
     if (cached) return cached;
     let value: Value;
     if (type.kind === 'array') {
-      const count = type.length + (type.sentinel === undefined ? 0 : 1);
+      const count = Number(type.length + (type.sentinel === undefined ? 0n : 1n));
       const slots = this.slots(
         Array.from({ length: count }, (_, index) => ({
           type: type.child,
@@ -278,7 +278,7 @@ class BufferMemory {
         for (let index = 0; index < type.length; index++)
           this.write(type.child, offset + index * sizeOf(type.child) * 8, array.get(index));
         if (type.sentinel !== undefined)
-          this.write(type.child, offset + type.length * sizeOf(type.child) * 8, type.sentinel);
+          this.write(type.child, offset + Number(type.length) * sizeOf(type.child) * 8, type.sentinel);
         return;
       }
       case 'struct': {

@@ -80,7 +80,7 @@ function layoutOf(type: Type): Layout {
     case 'array': {
       const child = layoutOf(type.child);
       return {
-        size: child.size * (type.length + (type.sentinel === undefined ? 0 : 1)),
+        size: child.size * Number(type.length + (type.sentinel === undefined ? 0n : 1n)),
         align: child.align,
       };
     }

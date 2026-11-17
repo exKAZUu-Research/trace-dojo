@@ -923,7 +923,7 @@ export function zeroValue(type: Type, fieldsOf: (type: StructType) => readonly S
     }
     case 'array': {
       return newArray(
-        Array.from({ length: type.length }, () => zeroValue(type.child, fieldsOf)),
+        Array.from({ length: Number(type.length) }, () => zeroValue(type.child, fieldsOf)),
         type.sentinel
       );
     }

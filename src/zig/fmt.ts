@@ -551,7 +551,7 @@ export function printValue(
       appendBytes(out, utf8('{ '));
       for (let index = 0; index < type.length; index++) {
         printValue(out, spec, options, array.get(index), type.child, info, depth - 1);
-        if (index < type.length - 1) appendBytes(out, utf8(', '));
+        if (index < type.length - 1n) appendBytes(out, utf8(', '));
       }
       appendBytes(out, utf8(' }'));
       return;

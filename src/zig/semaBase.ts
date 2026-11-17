@@ -95,7 +95,7 @@ export interface TExpr {
   /** Whether this expression can be replaced with `value`. */
   readonly known: boolean;
   readonly staticResult?: { value: Value };
-  readonly knownLength?: number;
+  readonly knownLength?: bigint;
   readonly value: Value;
   readonly eval: Eval;
   readonly place?: Place;
@@ -110,7 +110,7 @@ export interface LocalBinding {
   readonly slot: number;
   readonly type: Type;
   readonly isConst: boolean;
-  readonly knownLength?: number;
+  readonly knownLength?: bigint;
   /** The value of a constant that the compiler knows. */
   readonly known: boolean;
   readonly value?: Value;
@@ -879,7 +879,7 @@ export abstract class SemaBase implements SemaApi {
     }
     if (from.kind !== 'pointer') return undefined;
     // A pointer to an empty array has nothing to write, so it coerces to a slice of variables.
-    const empty = from.size === 'one' && from.child.kind === 'array' && from.child.length === 0;
+    const empty = from.size === 'one' && from.child.kind === 'array' && from.child.length === 0n;
     if (from.isConst && !to.isConst && !empty) return undefined;
     if (from.size === to.size) {
       if (!inMemoryCoercible(from.child, to.child)) return undefined;
@@ -940,7 +940,7 @@ export abstract class SemaBase implements SemaApi {
     }
     if (from.kind === 'struct' && from.isTuple) {
       const fields = from.fields ?? [];
-      if (fields.length !== to.length) {
+      if (BigInt(fields.length) !== to.length) {
         this.error(span, `配列の長さが合いません（${to.length} 個が必要ですが、${fields.length} 個です）。`);
       }
       const elements = fields.map((field, index) =>
@@ -1324,14 +1324,14 @@ export function staticResultOf(expression: TExpr): { value: Value } | undefined 
   return expression.known ? { value: expression.value } : expression.staticResult;
 }
 
-export function knownLengthOf(expression: TExpr): number | undefined {
+export function knownLengthOf(expression: TExpr): bigint | undefined {
   const type = expression.type;
   if (type.kind === 'array') return type.length;
   if (type.kind === 'pointer' && type.size === 'one' && type.child.kind === 'array') return type.child.length;
-  const length =
+  return (
     expression.knownLength ??
-    (expression.known && expression.value instanceof Slice ? expression.value.length : undefined);
-  return length !== undefined && Number.isSafeInteger(length) ? length : undefined;
+    (expression.known && expression.value instanceof Slice ? expression.value.lengthValue : undefined)
+  );
 }
 
 export function evaluateHeld(
@@ -1368,7 +1368,7 @@ export function copyForStorage(value: Value): Value {
     return new ZArray(
       value.values(value.hasSentinel).map((slot) => copyForStorage(slot)),
       0,
-      value.length,
+      value.lengthValue,
       value.hasSentinel
     );
   if (value instanceof ZStruct) return new ZStruct(value.slots.map((slot) => copyForStorage(slot)));
@@ -1404,7 +1404,7 @@ function buildUndefinedValue(type: Type): Value {
     }
     case 'array': {
       return newArray(
-        Array.from({ length: type.length }, () => buildUndefinedValue(type.child)),
+        Array.from({ length: Number(type.length) }, () => buildUndefinedValue(type.child)),
         type.sentinel
       );
     }

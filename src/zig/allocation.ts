@@ -21,8 +21,8 @@ export function valueSlots(type: Type): number {
       break;
     }
     case 'array': {
-      count = type.length + (type.sentinel === undefined ? 0 : 1);
-      if (type.length > 0 && count <= LIMITS.maxSlots) count += type.length * valueSlots(type.child);
+      count = Number(type.length + (type.sentinel === undefined ? 0n : 1n));
+      if (type.length > 0 && count <= LIMITS.maxSlots) count += Number(type.length) * valueSlots(type.child);
       break;
     }
     case 'struct': {

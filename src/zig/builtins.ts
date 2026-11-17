@@ -477,7 +477,7 @@ export abstract class BuiltinCompiler extends ExpressionCompiler {
           target,
           (value) =>
             newArray(
-              Array.from({ length }, () => copyForStorage(value)),
+              Array.from({ length: Number(length) }, () => copyForStorage(value)),
               sentinel
             ),
           true
@@ -1018,7 +1018,7 @@ function elementAccessor(type: Type):
       isConst: type.isConst,
       view: (value) => {
         const array = arrayPointerView(value as Pointer, arrayType);
-        return { slots: array, start: array.offset, length: BigInt(array.length) };
+        return { slots: array, start: array.offset, length: array.lengthValue };
       },
     };
   }

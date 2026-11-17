@@ -117,12 +117,17 @@ export class Cell implements Slots {
  * by the sentinel of a sentinel-terminated array.
  */
 export class ZArray implements Slots {
+  readonly length: number;
+  readonly lengthValue: bigint;
   constructor(
     public slots: Value[],
     readonly offset = 0,
-    readonly length = slots.length,
+    length: number | bigint = slots.length,
     readonly hasSentinel = false
-  ) {}
+  ) {
+    this.lengthValue = BigInt(length);
+    this.length = Number(length);
+  }
 
   get(index: number): Value {
     return this.slots[this.offset + index];
@@ -327,7 +332,7 @@ export function isAggregate(value: Value): value is ZArray | ZStruct | ZUnion {
 export function copyValue(value: Value): Value {
   if (value instanceof ZArray) {
     const copied = value.values(value.hasSentinel).map((slot) => copyValue(slot));
-    return new ZArray(copied, 0, value.length, value.hasSentinel);
+    return new ZArray(copied, 0, value.lengthValue, value.hasSentinel);
   }
   if (value instanceof ZStruct) return new ZStruct(value.slots.map((slot) => copyValue(slot)));
   if (value instanceof ZUnion) return new ZUnion(value.tag, copyValue(value.slots[0]));

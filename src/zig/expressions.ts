@@ -342,7 +342,7 @@ export abstract class ExpressionCompiler extends SemaBase {
     let type = object.type;
     if (type.kind === 'pointer' && type.size === 'one') {
       if (type.child.kind === 'array') {
-        if (name === 'len') return this.fixedResult(object, USIZE, BigInt(type.child.length), expression);
+        if (name === 'len') return this.fixedResult(object, USIZE, type.child.length, expression);
         return this.error(expression, `配列へのポインタには、フィールド「${name}」がありません。`);
       }
       base = this.dereferenced(object, expression);
@@ -364,7 +364,7 @@ export abstract class ExpressionCompiler extends SemaBase {
         return this.unionField(base, type, name, expression);
       }
       case 'array': {
-        if (name === 'len') return this.fixedResult(this.typeOnlyOperand(base), USIZE, BigInt(type.length), expression);
+        if (name === 'len') return this.fixedResult(this.typeOnlyOperand(base), USIZE, type.length, expression);
         break;
       }
       case 'pointer': {
@@ -417,7 +417,7 @@ export abstract class ExpressionCompiler extends SemaBase {
     const fact = staticResultOf(value);
     if (fact?.value instanceof Slice) return fact.value.lengthValue;
     const length = knownLengthOf(value);
-    return length === undefined ? undefined : BigInt(length);
+    return length;
   }
 
   private typeOnlyOperand(value: TExpr): TExpr {
@@ -607,11 +607,7 @@ export abstract class ExpressionCompiler extends SemaBase {
       this.checkMemoryOperand(object, expression);
     const zero = sizeOf(child) === 0;
     const length = knownLengthOf(object);
-    if (
-      index.known &&
-      length !== undefined &&
-      (index.value as bigint) >= BigInt(length + (hasSentinel(type) ? 1 : 0))
-    ) {
+    if (index.known && length !== undefined && (index.value as bigint) >= length + (hasSentinel(type) ? 1n : 0n)) {
       this.error(expression.index, `添字 ${index.value as bigint} は、長さ ${length} の範囲の外です。`);
     }
     const isConst = isConstIndexable(type, object.place);
@@ -672,20 +668,20 @@ export abstract class ExpressionCompiler extends SemaBase {
   // code-gauge-allow functionCognitiveComplexity 21 -- Keeps the analysis and the generated code of one construct together, as Zig's Sema does.
   private elementAccess(type: Type): (value: Value, index: bigint) => { slots: Slots; position: number } {
     if (type.kind === 'array') {
-      const limit = type.length + (type.sentinel === undefined ? 0 : 1);
+      const limit = type.length + (type.sentinel === undefined ? 0n : 1n);
       const length = type.length;
       return (value, index) => {
         const array = value as ZArray;
-        if (index >= BigInt(limit)) indexOutOfBounds(index, length);
+        if (index >= limit) indexOutOfBounds(index, length);
         return { slots: array, position: array.offset + Number(index) };
       };
     }
     if (type.kind === 'pointer' && type.size === 'one' && type.child.kind === 'array') {
       const array = type.child;
-      const limit = array.length + (array.sentinel === undefined ? 0 : 1);
+      const limit = array.length + (array.sentinel === undefined ? 0n : 1n);
       return (value, index) => {
         const target = arrayPointerView(value as Pointer, array);
-        if (index >= BigInt(limit)) indexOutOfBounds(index, array.length);
+        if (index >= limit) indexOutOfBounds(index, array.length);
         return { slots: target, position: target.offset + Number(index) };
       };
     }
@@ -713,7 +709,7 @@ export abstract class ExpressionCompiler extends SemaBase {
     }
     let child: Type;
     let isConst: boolean;
-    let staticLen: number | undefined;
+    let staticLen: bigint | undefined;
     let sourceSentinel: Value | undefined;
     if (type.kind === 'pointer' && type.size === 'one' && type.child.kind === 'array') {
       child = type.child.child;
@@ -728,38 +724,34 @@ export abstract class ExpressionCompiler extends SemaBase {
       return this.error(expression, `${typeName(type)} 型はスライスできません。`);
     }
     staticLen ??= knownLengthOf(base);
-    const reachesSentinel = !end || (end.known && staticLen !== undefined && end.value === BigInt(staticLen));
+    const reachesSentinel = !end || (end.known && staticLen !== undefined && end.value === staticLen);
     const sentinel = expression.sentinel
       ? this.sentinelValue(expression.sentinel, child)
       : reachesSentinel
         ? sourceSentinel
         : undefined;
-    const limitOf = (length: number): number => length + (sourceSentinel === undefined ? 0 : 1);
+    const limitOf = (length: bigint): bigint => length + (sourceSentinel === undefined ? 0n : 1n);
     if (start.known && end?.known && (start.value as bigint) > (end.value as bigint)) {
       this.error(
         expression,
         `スライスの始まり ${start.value as bigint} が、終わり ${end.value as bigint} より大きくなっています。`
       );
     }
-    if (staticLen !== undefined && end?.known && (end.value as bigint) > BigInt(limitOf(staticLen))) {
+    if (staticLen !== undefined && end?.known && (end.value as bigint) > limitOf(staticLen)) {
       this.error(expression, `スライスの終わり ${end.value as bigint} は、長さ ${staticLen} の範囲の外です。`);
     }
-    if (
-      staticLen !== undefined &&
-      start.known &&
-      (start.value as bigint) > BigInt(end ? limitOf(staticLen) : staticLen)
-    ) {
+    if (staticLen !== undefined && start.known && (start.value as bigint) > (end ? limitOf(staticLen) : staticLen)) {
       this.error(expression, `スライスの始まり ${start.value as bigint} は、長さ ${staticLen} の範囲の外です。`);
     }
     const resultLength =
       start.known && (end ? end.known : staticLen !== undefined)
-        ? Number((end ? (end.value as bigint) : BigInt(staticLen as number)) - (start.value as bigint))
+        ? (end ? (end.value as bigint) : (staticLen as bigint)) - (start.value as bigint)
         : undefined;
     const resultType =
       resultLength === undefined
         ? sliceOf(child, isConst, sentinel)
         : pointerTo(arrayOf(resultLength, child, sentinel), isConst);
-    if (!(type.kind === 'pointer' && type.child.kind === 'array' && resultLength === 0))
+    if (!(type.kind === 'pointer' && type.child.kind === 'array' && resultLength === 0n))
       this.checkMemoryOperand(operand, expression);
     const arrayType = type.kind === 'pointer' && type.child.kind === 'array' ? type.child : undefined;
     const operands = [base, start, ...(end ? [end] : [])];
@@ -771,7 +763,7 @@ export abstract class ExpressionCompiler extends SemaBase {
         const array = arrayPointerView(value as Pointer, arrayType);
         target = array;
         offset = array.offset;
-        length = BigInt(staticLen as number);
+        length = staticLen as bigint;
       } else {
         const slice = value as Slice;
         target = slice.target;
@@ -788,7 +780,7 @@ export abstract class ExpressionCompiler extends SemaBase {
         panic(`sentinel mismatch: expected ${String(sentinel)}, found ${String(target.slots[to])}`);
       return resultLength === undefined
         ? new Slice(target, from, toValue - fromValue)
-        : new Pointer(new Constant(new ZArray(target.slots, from, to - from, sentinel !== undefined)), 0);
+        : new Pointer(new Constant(new ZArray(target.slots, from, toValue - fromValue, sentinel !== undefined)), 0);
     };
     const evaluators = operands.map((operand) => operand.eval);
     return {
@@ -1399,7 +1391,7 @@ export abstract class ExpressionCompiler extends SemaBase {
       ) as bigint
     );
     const a = this.arrayOperand(left, expression.left);
-    const arrayType = arrayOf(a.length * count, a.child, a.sentinel);
+    const arrayType = arrayOf(a.length * BigInt(count), a.child, a.sentinel);
     const resultType = a.viaPointer ? pointerTo(arrayType, true) : arrayType;
     const build = (x: Value[]): Value => {
       const values: Value[] = [];
@@ -1417,7 +1409,7 @@ export abstract class ExpressionCompiler extends SemaBase {
     span: Span
   ): {
     child: Type;
-    length: number;
+    length: bigint;
     sentinel?: Value;
     viaPointer: boolean;
     read: (value: Value) => Value[];
@@ -1446,7 +1438,7 @@ export abstract class ExpressionCompiler extends SemaBase {
       const fields = type.fields ?? [];
       return {
         child: fields[0]?.type ?? COMPTIME_INT,
-        length: fields.length,
+        length: BigInt(fields.length),
         viaPointer: false,
         read: (value) =>
           fields.map((field, index) =>
@@ -1583,7 +1575,7 @@ export abstract class ExpressionCompiler extends SemaBase {
     }
     if (type?.kind === 'array') {
       const array = type;
-      if (array.length !== expression.elements.length) {
+      if (array.length !== BigInt(expression.elements.length)) {
         this.error(
           expression,
           `配列の長さが合いません（${array.length} 個が必要ですが、${expression.elements.length} 個です）。`
@@ -1626,7 +1618,7 @@ export abstract class ExpressionCompiler extends SemaBase {
     ) as bigint;
     const child = this.compileType(expression.child);
     const sentinel = expression.sentinel ? this.sentinelValue(expression.sentinel, child) : undefined;
-    return known(TYPE, arrayOf(Number(length), child, sentinel), expression);
+    return known(TYPE, arrayOf(length, child, sentinel), expression);
   }
 
   /** Makes a container type from a declaration, to name it after the declaration. */

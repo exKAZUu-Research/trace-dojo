@@ -4063,3 +4063,27 @@ test.each(['.{@as(u8,1),true} ++ [_]u8{2}', '[_]u8{1} ++ .{true}'])(
     });
   }
 );
+
+test.each(['void', 'struct{}', 'u0'])('fixed zero-sized slices retain exact array and slice lengths: %s', (type) => {
+  const item = type === 'void' ? '{}' : type === 'u0' ? '0' : '.{}';
+  const source = `const std=@import("std");const T=${type};pub fn main(init:std.process.Init)!void{var a:std.ArrayList(T)=.empty;try a.append(init.gpa,${item});const x=a.allocatedSlice()[0..9007199254740993];const y=a.allocatedSlice()[1..9007199254740994];const z=a.allocatedSlice()[0..9007199254740992];const s:[]T=x;_=x[9007199254740992];const tail=x[1..];std.debug.print("{} {} {} {} {}",.{x.len,y.len,s.len,tail.len,@TypeOf(x)==@TypeOf(z)});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: '9007199254740993 9007199254740993 9007199254740993 9007199254740992 false',
+    uncaughtException: undefined,
+  });
+});
+
+test('fixed zero-sized slice lengths stay exact through runtime views and memory checks', () => {
+  const source = `const std=@import("std");pub fn main(init:std.process.Init)!void{var a:std.ArrayList(void)=.empty;try a.append(init.gpa,{});const x=a.allocatedSlice()[0..9007199254740993];var n:usize=9007199254740992;_=&n;const short=x[0..n];std.debug.print("{} {}|",.{@TypeOf(x),short.len});@memcpy(x,short);}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: '*[9007199254740993]void 9007199254740992|',
+    uncaughtException: 'panic: source and destination arguments have non-equal lengths',
+  });
+});
+
+test('fixed zero-sized slice bounds reject the exact end index', () => {
+  const source = `const std=@import("std");pub fn main(init:std.process.Init)!void{var a:std.ArrayList(void)=.empty;try a.append(init.gpa,{});const x=a.allocatedSlice()[0..9007199254740993];_=x[9007199254740993];}`;
+  expect(executeProgram('zig', source)).toMatchObject({ kind: 'compileError' });
+});

@@ -47,7 +47,7 @@ export interface SimpleType {
 
 export interface ArrayType {
   readonly kind: 'array';
-  readonly length: number;
+  readonly length: bigint;
   readonly child: Type;
   readonly sentinel?: Value;
 }
@@ -344,11 +344,11 @@ function sentinelKey(sentinel: Value | undefined): string {
   return sentinel === undefined ? '' : `:${scalarValueKey(sentinel)}`;
 }
 
-export function arrayOf(length: number, child: Type, sentinel?: Value): ArrayType {
+export function arrayOf(length: number | bigint, child: Type, sentinel?: Value): ArrayType {
   sentinel = canonicalSentinel(child, sentinel);
   return intern(`array ${length} ${typeId(child)}${sentinelKey(sentinel)}`, () => ({
     kind: 'array',
-    length,
+    length: BigInt(length),
     child,
     sentinel,
   }));
