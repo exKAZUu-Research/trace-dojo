@@ -15,7 +15,7 @@ import {
   rem,
 } from './arith';
 import type { Expression, ExpressionOf, Span } from './ast';
-// code-gauge-allow-file fileNcss 693 -- The file holds one layer of the compiler, whose parts share its private state.
+// code-gauge-allow-file fileNcss 694 -- The file holds one layer of the compiler, whose parts share its private state.
 import { enumLookup } from './enumLookup';
 import { ExpressionCompiler, log2IntType } from './expressions';
 import {
@@ -50,6 +50,7 @@ import {
   newArray,
   runtime,
   type SemaApi,
+  staticResultOf,
   type TExpr,
 } from './semaBase';
 import { singleValueOf } from './singleValue';
@@ -699,7 +700,8 @@ export abstract class BuiltinCompiler extends ExpressionCompiler {
     if (peer.kind === 'int') {
       // The result's range is the min or max of the operands' ranges.
       const ranges = operands.map((operand) => {
-        if (operand.known) return [operand.value as bigint, operand.value as bigint] as const;
+        const fact = staticResultOf(operand);
+        if (fact) return [fact.value as bigint, fact.value as bigint] as const;
         const int = operand.type as IntType;
         return [minInt(int), maxInt(int)] as const;
       });

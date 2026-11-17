@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 778 -- The file holds one layer of the compiler, whose parts share its private state.
+// code-gauge-allow-file fileNcss 779 -- The file holds one layer of the compiler, whose parts share its private state.
 import type { Node } from '@willbooster/web-tree-sitter';
 
 import { CompileError } from '../interpreter/diagnostics';
@@ -549,6 +549,7 @@ export function expression(node: Node): Expression {
       return { kind: 'try', ...span, operand: onlyChild(node) };
     }
     case 'catch_expression': {
+      checkOperatorSpacing(node.children.find((child) => child.type === 'catch') as Node);
       const [operand, handler] = expressionChildren(node).filter((child) => child.type !== 'payload');
       const capture = node.namedChildren.find((child) => child.type === 'payload');
       return {

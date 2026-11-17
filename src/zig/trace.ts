@@ -21,7 +21,7 @@ import { sizeOf } from './layout';
 import { MemoryFault } from './memoryFault';
 import { type Frame, Runtime } from './runtime';
 import { UNASSIGNED, undefinedValue } from './semaBase';
-import type { Type } from './types';
+import { isScalarType, type Type } from './types';
 import { decodeUtf8 } from './utf8';
 import {
   ErrorValue,
@@ -298,7 +298,8 @@ function hasScalarElements(type: Type): boolean {
   if (type.kind === 'array') return hasScalarElements(type.child);
   if (type.kind === 'pointer' && type.size === 'slice' && !isString(type)) return hasScalarElements(type.child);
   if (type.kind === 'optional') return hasScalarElements(type.child);
-  return type.kind === 'int' || type.kind === 'float' || type.kind === 'bool' || type.kind === 'enum' || isString(type);
+  if (type.kind === 'error_union') return true;
+  return isScalarType(type) || isString(type);
 }
 
 function basicScalar(value: Value, bits: FloatBits, budget: PreviewBudget): Scalar | typeof NOT_SCALAR {

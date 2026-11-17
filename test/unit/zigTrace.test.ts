@@ -565,3 +565,15 @@ test.each(['x:u8,', ''])('receiver previews do not dereference undefined pointer
   expect(result).toMatchObject({ stderr: 'ok', uncaughtException: undefined });
   expect(result.traceItems.length).toBeGreaterThan(0);
 });
+
+test('scalar trace answers survive optional and error-union wrappers', () => {
+  const source = `pub fn main()void{\nconst e:error{Bad}!u8=1;\nconst a=[_]error{Bad}!u8{1,error.Bad};\nconst o:?comptime_int=2;\n_=.{e,a,o};\n}`;
+  const result = traceProgram('zig', source, source);
+  expect(result.finalVars).toMatchObject({ e: 1, a: [1, 'error.Bad'], o: 2 });
+});
+
+test('repeated error-union scalar captures retain binding steps', () => {
+  const source = `pub fn main()void{\nfor([_]error{Bad}!u8{1,1})|x|{\n_=x catch unreachable;\n}\n}`;
+  const result = traceProgram('zig', source, source);
+  expect(result.traceItems.map((item) => item.line)).toEqual([0, 2, 3, 2, 3]);
+});

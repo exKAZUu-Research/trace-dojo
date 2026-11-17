@@ -33,6 +33,7 @@ import {
   fitsInt,
   type IntType,
   isComptimeOnly,
+  isScalarType,
   maxInt,
   minInt,
   NORETURN,
@@ -49,6 +50,7 @@ import {
   Cell,
   ErrorValue,
   NULL,
+  optionalPayload,
   optionalSome,
   Pointer,
   Slice,
@@ -1474,7 +1476,6 @@ export abstract class StatementCompiler extends CallCompiler {
             this.branch(expression.otherwise as Expression, undefined, target.resultType, asStatement)
           )
         : undefined;
-    const storesAnswer = bindingStoresAnswer(binding?.binding);
     const { id } = target;
     const bodyExec = body.exec;
     const otherwiseExec = otherwise?.stmt?.exec;
@@ -1487,7 +1488,7 @@ export abstract class StatementCompiler extends CallCompiler {
         if (binding) frame.slots[binding.binding.slot] = UNASSIGNED;
         frame.runtime.spend();
         if (!test(frame)) break;
-        if (hasBinding) frame.runtime.steps.stepBinding(row, storesAnswer);
+        if (hasBinding) frame.runtime.steps.stepBinding(row, bindingStoresAnswer(binding?.binding, frame));
         const completion = loopExit(runBody(bodyExec, frame, id), id);
         if (completion) return completion;
         if (continueExec) {
@@ -1635,7 +1636,6 @@ export abstract class StatementCompiler extends CallCompiler {
       ? this.branch(expression.otherwise, undefined, target.resultType, asStatement)
       : undefined;
     const row = this.stepRow(expression);
-    const storesAnswer = bindings.some(bindingStoresAnswer);
     const { id } = target;
     const bodyExec = body.exec;
     const otherwiseExec = otherwise?.stmt?.exec;
@@ -1661,7 +1661,10 @@ export abstract class StatementCompiler extends CallCompiler {
           for (const [index, slot] of slots.entries()) {
             if (slot !== undefined) frame.slots[slot] = operands[index].element(values[index], position, frame);
           }
-          frame.runtime.steps.stepBinding(row, storesAnswer);
+          frame.runtime.steps.stepBinding(
+            row,
+            bindings.some((binding) => bindingStoresAnswer(binding, frame))
+          );
           const completion = runBody(bodyExec, frame, id);
           if (completion) {
             if (completion.target !== id) return completion;
@@ -1865,7 +1868,7 @@ export abstract class StatementCompiler extends CallCompiler {
           body: clearingLocals(binding ? [binding.slot] : [], body.exec),
           slot: binding?.slot,
           evaluate: element.eval,
-          storesAnswer: bindingStoresAnswer(binding),
+          binding,
         };
       } finally {
         fn.targets.pop();
@@ -1879,7 +1882,7 @@ export abstract class StatementCompiler extends CallCompiler {
           for (const iteration of iterations) {
             frame.runtime.spend();
             if (iteration.slot !== undefined) frame.slots[iteration.slot] = iteration.evaluate(frame);
-            frame.runtime.steps.stepBinding(row, iteration.storesAnswer);
+            frame.runtime.steps.stepBinding(row, bindingStoresAnswer(iteration.binding, frame));
             const completion = runBody(iteration.body, frame, id);
             if (completion) {
               if (completion.target !== id) return completion;
@@ -2345,8 +2348,11 @@ export abstract class StatementCompiler extends CallCompiler {
   /** The values of an enum, union, bool, or error set that no prong lists, which `else` matches. */
   private remainingKeys(tagType: Type, seen: Map<unknown, Span>, span: Span): unknown[] {
     let all: unknown[];
-    if (tagType.kind === 'enum') all = this.enumFields(tagType).map((field) => field.value);
-    else if (tagType.kind === 'bool') all = [true, false];
+    if (tagType.kind === 'enum') {
+      const fields = this.enumFields(tagType);
+      if (!tagType.exhaustive) this.error(span, '名前のない enum の値は、inline else で列挙できません。');
+      all = fields.map((field) => field.value);
+    } else if (tagType.kind === 'bool') all = [true, false];
     else if (tagType.kind === 'error_set' && tagType.names) all = [...tagType.names];
     else return this.error(span, 'inline else は、enum・union・bool・エラー集合の switch にだけ書けます。');
     this.compilationBudget.spend(all.length);
@@ -2424,13 +2430,13 @@ export abstract class StatementCompiler extends CallCompiler {
     }
     const errorSet = type.kind === 'error_union' ? type.errorSet : type;
     const returnType = fn.returnType;
-    // An error set known to be empty, such as a function's that never fails, gives `try` nothing to return.
-    const neverFails = errorSet.names !== undefined && errorSet.names.size === 0;
+    const neverFails = errorUnionCannotFail(operand);
     if (returnType.kind !== 'error_union' && !neverFails) {
       return this.error(expression, `エラーを返さない関数（${typeName(returnType)} 型）では、try は使えません。`);
     }
-    this.recordErrors(type, undefined);
+    if (!neverFails) this.recordErrors(type, operand);
     if (
+      !neverFails &&
       returnType.kind === 'error_union' &&
       fn.inferredErrors !== returnType.errorSet &&
       !errorSetIncludes(returnType.errorSet, errorSet)
@@ -2626,22 +2632,18 @@ function conditionKind(type: Type, hasCapture: boolean): 'bool' | 'optional' | '
   return 'bool';
 }
 
-function bindingStoresAnswer(binding: LocalBinding | undefined): boolean {
-  return binding !== undefined && storesAnswerValue(binding.type);
+function bindingStoresAnswer(binding: LocalBinding | undefined, frame: Frame): boolean {
+  return binding !== undefined && storesAnswerValue(binding.type, frame.slots[binding.slot]);
 }
 
-function storesAnswerValue(type: Type): boolean {
+function storesAnswerValue(type: Type, value: Value): boolean {
+  if (isScalarType(type)) return true;
   switch (type.kind) {
-    case 'int':
-    case 'comptime_int':
-    case 'float':
-    case 'comptime_float':
-    case 'bool':
-    case 'enum': {
-      return true;
-    }
     case 'optional': {
-      return storesAnswerValue(type.child);
+      return storesAnswerValue(type.child, optionalPayload(value));
+    }
+    case 'error_union': {
+      return value instanceof ErrorValue || storesAnswerValue(type.payload, value);
     }
     case 'pointer': {
       return (

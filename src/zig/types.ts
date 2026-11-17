@@ -1,5 +1,6 @@
 import type { Container, FunctionDeclaration, VariableDeclaration } from './ast';
 import { constantText } from './constantText';
+import { spendMemory } from './memoryAccounting';
 import { scalarValueKey, type Value } from './values';
 import { WeakValueMap } from './weakValueMap';
 
@@ -437,8 +438,23 @@ export function isFloating(type: Type): boolean {
   return type.kind === 'float' || type.kind === 'comptime_float';
 }
 
+export function isScalarType(type: Type): boolean {
+  return (
+    type.kind === 'int' ||
+    type.kind === 'comptime_int' ||
+    type.kind === 'float' ||
+    type.kind === 'comptime_float' ||
+    type.kind === 'bool' ||
+    type.kind === 'enum' ||
+    type.kind === 'error_set'
+  );
+}
+
 /** Whether values of a type exist only at compile time. */
-export function isComptimeOnly(type: Type): boolean {
+export function isComptimeOnly(type: Type, seen = new Set<Type>()): boolean {
+  if (seen.has(type)) return false;
+  spendMemory();
+  seen.add(type);
   switch (type.kind) {
     case 'comptime_int':
     case 'comptime_float':
@@ -451,19 +467,16 @@ export function isComptimeOnly(type: Type): boolean {
     }
     case 'array':
     case 'optional': {
-      return isComptimeOnly(type.child);
+      return isComptimeOnly(type.child, seen);
     }
     case 'pointer': {
-      return type.child.kind !== 'fn' && isComptimeOnly(type.child);
+      return type.child.kind !== 'fn' && isComptimeOnly(type.child, seen);
     }
     case 'error_union': {
-      return isComptimeOnly(type.payload);
+      return isComptimeOnly(type.payload, seen);
     }
     case 'struct': {
-      return (
-        type.isTuple &&
-        (type.fields ?? []).some((field) => field.comptimeValue === undefined && isComptimeOnly(field.type))
-      );
+      return (type.fields ?? []).some((field) => field.comptimeValue === undefined && isComptimeOnly(field.type, seen));
     }
     default: {
       return false;

@@ -308,8 +308,7 @@ function intMethod(
     const type = sema.compileType(typeArg);
     if (type.kind !== 'int')
       return sema.error(typeArg, `${name} には整数の型を渡してください（${typeName(type)} です）。`);
-    const maximumBits = name === 'int' ? 65_528 : 32_767;
-    if (type.bits > maximumBits) return sema.error(typeArg, `${name} の補助整数型のビット数が u16 に入りません。`);
+    validateIntegerWidth(sema, type, name, typeArg);
     if (name.startsWith('uint') && type.signed)
       return sema.error(typeArg, `${name} には符号なし整数の型を渡してください。`);
     const args = compileArgs(
@@ -389,6 +388,7 @@ addMembers(RANDOM, {
     if (type.kind !== 'int' && (type.kind !== 'float' || (type.bits !== 32 && type.bits !== 64))) {
       return sema.error(typeArg, `weightedIndex には整数か f32・f64 の型を渡してください（${typeName(type)} です）。`);
     }
+    if (type.kind === 'int') validateIntegerWidth(sema, type, 'weightedIndex', typeArg);
     const [proportions] = compileArgs(sema, [proportionsArg], [sliceOf(type, true)]);
     const state = randomState(sema, call.receiver, call.span);
     const evaluate = proportions.eval;
@@ -463,3 +463,8 @@ addMembers(RANDOM, {
 });
 
 export { known, type Value };
+
+function validateIntegerWidth(sema: SemaApi, type: IntType, name: string, span: Span): void {
+  const auxiliaryBits = name === 'int' ? Math.ceil(type.bits / 8) * 8 : type.bits * 2;
+  if (auxiliaryBits > 65_535) sema.error(span, `${name} の補助整数型のビット数が u16 に入りません。`);
+}

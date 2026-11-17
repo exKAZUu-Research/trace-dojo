@@ -5853,7 +5853,7 @@ test('writer buffer and end fields remain live through aliases and buffer replac
 });
 
 test('writer writes respect a shortened public buffer', () => {
-  const source = `const std=@import("std");pub fn main()!void{var b:[8]u8=undefined;var w=std.Io.Writer.fixed(&b);w.buffer=w.buffer[0..2];w.writeAll("abc") catch|e|{std.debug.print("{s} {s}",.{@errorName(e),w.buffered()});return;};}`;
+  const source = `const std=@import("std");pub fn main()!void{var b:[8]u8=undefined;var w=std.Io.Writer.fixed(&b);w.buffer=w.buffer[0..2];w.writeAll("abc") catch |e|{std.debug.print("{s} {s}",.{@errorName(e),w.buffered()});return;};}`;
   expect(executeProgram('zig', source)).toMatchObject({
     kind: 'executed',
     stderr: 'WriteFailed ab',
@@ -6358,4 +6358,78 @@ test.each(['packed', 'extern'])('explicit %s union formatting reads every shared
     stderr: '.{ .a = 7, .b = 7 }',
     uncaughtException: undefined,
   });
+});
+
+test.each(['S', 'struct{inner:S}'])('named comptime-only %s values specialize generic helpers', (shape) => {
+  const source =
+    shape === 'S'
+      ? `const std=@import("std");const S=struct{T:type};fn zero(s:anytype)s.T{return 0;}pub fn main()void{const s=S{.T=u8};std.debug.print("{} {}",.{zero(s),s.T});}`
+      : `const std=@import("std");const S=struct{T:type};const W=struct{inner:S};fn zero(s:anytype)s.inner.T{return 0;}pub fn main()void{const s=W{.inner=.{.T=u8}};std.debug.print("{} {}",.{zero(s),s.inner.T});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: '0 u8',
+    uncaughtException: undefined,
+  });
+});
+
+test.each(['@as(error{Bad}!u8,1)', 'blk:{std.debug.print("g",.{});break:blk @as(error{Bad}!u8,1);}'])(
+  'try known success preserves effects in void functions: %s',
+  (expression) => {
+    const source = `const std=@import("std");pub fn main()void{const x=try ${expression};std.debug.print("{}",.{x});}`;
+    expect(executeProgram('zig', source)).toMatchObject({
+      kind: 'executed',
+      stderr: expression.startsWith('blk') ? 'g1' : '1',
+      uncaughtException: undefined,
+    });
+  }
+);
+
+test.each(['min', 'max'])('numeric %s types use effectful constant-result facts', (operation) => {
+  const source = `const std=@import("std");pub fn main()void{const x=@${operation}(blk:{std.debug.print("g",.{});break:blk @as(u8,7);},@as(u8,${operation === 'min' ? 10 : 5}));std.debug.print("{} {}",.{@TypeOf(x),x});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: 'gu3 7',
+    uncaughtException: undefined,
+  });
+});
+
+test.each(['x catch(1)', 'x catch|e| blk:{_=e;break:blk 1;}'])(
+  'catch rejects one-sided operator spacing: %s',
+  (expression) => {
+    expect(executeProgram('zig', `pub fn main()void{const x:error{Bad}!u8=error.Bad;_=${expression};}`)).toMatchObject({
+      kind: 'compileError',
+    });
+  }
+);
+
+test.each(['enum(u8){a=1,_}', 'enum(u8){a=1,b=3,_}'])('inline else rejects non-exhaustive enums: %s', (type) => {
+  expect(
+    executeProgram(
+      'zig',
+      `const E=${type};pub fn main()void{var x:E=@enumFromInt(2);_=&x;switch(x){.a=>{},inline else=>|v|{_=v;}}}`
+    )
+  ).toMatchObject({ kind: 'compileError' });
+});
+
+test.each(['Scalar', 'Any', 'Sequence'])('token iterator %s exposes declaration fields in native order', (kind) => {
+  const separator = kind === 'Scalar' ? "','" : '","';
+  const source = `const std=@import("std");pub fn main()void{var it=std.mem.tokenize${kind}(u8,"a,b",${separator});_=it.next();std.debug.print("{any}",.{it});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr:
+      kind === 'Scalar'
+        ? '.{ .buffer = { 97, 44, 98 }, .delimiter = 44, .index = 1 }'
+        : '.{ .buffer = { 97, 44, 98 }, .delimiter = { 44 }, .index = 1 }',
+    uncaughtException: undefined,
+  });
+});
+
+test.each(['u32768', 'i32768'])('weighted random rejects auxiliary integer overflow for %s', (type) => {
+  const source = `const std=@import("std");pub fn main()void{var p=std.Random.DefaultPrng.init(0);const r=p.random();_=r.weightedIndex(${type},&.{1,1});}`;
+  expect(executeProgram('zig', source)).toMatchObject({ kind: 'compileError' });
+});
+
+test.each(['u32767', 'i32767'])('weighted random supports the auxiliary integer boundary for %s', (type) => {
+  const source = `const std=@import("std");pub fn main()void{var p=std.Random.DefaultPrng.init(0);const r=p.random();const n=r.weightedIndex(${type},&.{1});std.debug.print("{}",.{n});}`;
+  expect(executeProgram('zig', source)).toMatchObject({ kind: 'executed', stderr: '0', uncaughtException: undefined });
 });
