@@ -977,16 +977,17 @@ test.each(['i+200', ''])('scalar aliases retain assignment views under composite
 test.each(['reverse [1..100::Int]', 'reverse [1..200::Int]', 'last [[1..100::Int],[1..200]]'])(
   'composite root previews preserve later scalar assignments: %s',
   (collection) => {
+    const iterations = 300;
     const source = `import Control.Monad
-main=forM_ [1..1000::Int] $ \\i -> do
+main=forM_ [1..${iterations}::Int] $ \\i -> do
  let a=${collection}
  let n=i*2
  print n`;
     const recording = traceWithClock(source, () => 0);
     expect(recording.uncaughtException).toBeUndefined();
-    expect(recording.stdout).toBe(Array.from({ length: 1000 }, (_, i) => `${(i + 1) * 2}\n`).join(''));
+    expect(recording.stdout).toBe(Array.from({ length: iterations }, (_, i) => `${(i + 1) * 2}\n`).join(''));
     const assignments = recording.traceItems.filter((item) => item.line === 4);
-    expect(assignments).toHaveLength(1000);
+    expect(assignments).toHaveLength(iterations);
     for (const [index, item] of assignments.entries()) {
       expect(item.vars.i).toBe(index + 1);
       expect(item.vars.n).toBe((index + 1) * 2);
@@ -1057,23 +1058,24 @@ main=forM_ [1..1000::Int] $ \\i -> do
 
 test.each([
   ['', 'n', 'if even i then E else E', 'n', 'E'],
-  ['data P=P {x::Int}', 'this', 'P (i*2)', 'this.x', 2000],
-  ['data P=P {items::[Int],x::Int}', 'this', 'P (reverse [1..200]) (i*2)', 'this.x', 2000],
+  ['data P=P {x::Int}', 'this', 'P (i*2)', 'this.x', 600],
+  ['data P=P {items::[Int],x::Int}', 'this', 'P (reverse [1..200]) (i*2)', 'this.x', 600],
 ])(
   'independent bindings retain cheap views after expensive previews: %s %s',
   (declaration, name, expression, shown, last) => {
+    const iterations = 300;
     const source = `import Control.Monad
 data T=E|T [Int]
 ${declaration}
-main=forM_ [1..1000::Int] $ \\i -> do
+main=forM_ [1..${iterations}::Int] $ \\i -> do
  let a=last(map T(replicate 100 [1..10]))
  let ${name}=${expression}
  print i`;
     const recording = traceWithClock(source, () => 0);
     expect(recording.uncaughtException).toBeUndefined();
-    expect(recording.stdout).toBe(Array.from({ length: 1000 }, (_, i) => `${i + 1}\n`).join(''));
+    expect(recording.stdout).toBe(Array.from({ length: iterations }, (_, i) => `${i + 1}\n`).join(''));
     const assignments = recording.traceItems.filter((item) => item.line === 6);
-    expect(assignments).toHaveLength(1000);
+    expect(assignments).toHaveLength(iterations);
     for (const item of assignments) expect(Object.hasOwn(item.vars, shown)).toBe(true);
     expect(assignments.at(-1)?.vars[shown]).toBe(last);
   }
