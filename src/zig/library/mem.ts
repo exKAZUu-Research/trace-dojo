@@ -263,24 +263,25 @@ function iteratorType(kind: 'split' | 'token', delimiter: DelimiterKind, child: 
   iteratorTypes.set(key, type);
   const isDelimiter = (
     buffer: Slice,
-    index: number,
+    index: bigint,
     value: Value,
     equal: typeof equalValues,
     spend: () => void
   ): boolean => {
     spend();
-    if (delimiter === 'scalar') return equal(buffer.get(index), value);
+    if (delimiter === 'scalar') return equal(buffer.get(Number(index)), value);
     const set = value as Slice;
     if (delimiter === 'any') {
-      for (let offset = 0; offset < set.length; offset++) if (equal(set.get(offset), buffer.get(index))) return true;
+      for (let offset = 0n; offset < set.lengthValue; offset++)
+        if (equal(set.get(Number(offset)), buffer.get(Number(index)))) return true;
       return false;
     }
-    if (index + set.length > buffer.length) return false;
-    for (let offset = 0; offset < set.length; offset++)
-      if (!equal(buffer.get(index + offset), set.get(offset))) return false;
+    if (index + set.lengthValue > buffer.lengthValue) return false;
+    for (let offset = 0n; offset < set.lengthValue; offset++)
+      if (!equal(buffer.get(Number(index + offset)), set.get(Number(offset)))) return false;
     return true;
   };
-  const delimiterLength = (value: Value): number => (delimiter === 'sequence' ? (value as Slice).length : 1);
+  const delimiterLength = (value: Value): bigint => (delimiter === 'sequence' ? (value as Slice).lengthValue : 1n);
   const method = (
     name: string,
     returnType: Type,
@@ -307,15 +308,15 @@ function iteratorType(kind: 'split' | 'token', delimiter: DelimiterKind, child: 
     state: ZStruct,
     equal: typeof equalValues,
     spend: () => void
-  ): { start: number; end: number } | undefined => {
+  ): { start: bigint; end: bigint } | undefined => {
     const buffer = state.slots[0] as Slice;
-    let index = Number(state.slots[1] as bigint);
-    while (index < buffer.length && isDelimiter(buffer, index, state.slots[2], equal, spend))
+    let index = state.slots[1] as bigint;
+    while (index < buffer.lengthValue && isDelimiter(buffer, index, state.slots[2], equal, spend))
       index += delimiterLength(state.slots[2]);
     state.slots[1] = BigInt(index);
-    if (index === buffer.length) return undefined;
+    if (index === buffer.lengthValue) return undefined;
     let end = index;
-    while (end < buffer.length && !isDelimiter(buffer, end, state.slots[2], equal, spend)) end++;
+    while (end < buffer.lengthValue && !isDelimiter(buffer, end, state.slots[2], equal, spend)) end++;
     return { start: index, end };
   };
   const members: Record<string, () => Member> =
@@ -324,18 +325,18 @@ function iteratorType(kind: 'split' | 'token', delimiter: DelimiterKind, child: 
           next: method('next', optionalOf(resultSlice), (state, equal, spend) => {
             const startValue = state.slots[1];
             if (startValue === NULL) return NULL;
-            const start = Number(startValue as bigint);
+            const start = startValue as bigint;
             const buffer = state.slots[0] as Slice;
-            let end = buffer.length;
-            let found = -1;
-            for (let index = start; index < buffer.length; index++) {
+            let end = buffer.lengthValue;
+            let found = -1n;
+            for (let index = start; index < buffer.lengthValue; index++) {
               if (isDelimiter(buffer, index, state.slots[2], equal, spend)) {
                 found = index;
                 break;
               }
             }
-            if (delimiter === 'sequence' && found === -1 && delimiterLength(state.slots[2]) === 0) found = start;
-            if (found === -1) {
+            if (delimiter === 'sequence' && found === -1n && delimiterLength(state.slots[2]) === 0n) found = start;
+            if (found === -1n) {
               state.slots[1] = NULL;
             } else {
               state.slots[1] = BigInt(found + delimiterLength(state.slots[2]));
@@ -347,23 +348,23 @@ function iteratorType(kind: 'split' | 'token', delimiter: DelimiterKind, child: 
             if (state.slots[1] === NULL) panic(PANIC.nullUnwrap);
             if (state.slots[1] !== 0n) panic(PANIC.unreachable);
             const buffer = state.slots[0] as Slice;
-            let end = buffer.length;
-            for (let index = 0; index < buffer.length; index++) {
+            let end = buffer.lengthValue;
+            for (let index = 0n; index < buffer.lengthValue; index++) {
               if (isDelimiter(buffer, index, state.slots[2], equal, spend)) {
                 end = index;
                 break;
               }
             }
-            state.slots[1] = end === buffer.length ? NULL : BigInt(end + delimiterLength(state.slots[2]));
-            return subSlice(state.slots[0] as Slice, 0, end);
+            state.slots[1] = end === buffer.lengthValue ? NULL : BigInt(end + delimiterLength(state.slots[2]));
+            return subSlice(state.slots[0] as Slice, 0n, end);
           }),
           peek: method('peek', optionalOf(resultSlice), (state, equal, spend) => {
             const startValue = state.slots[1];
             if (startValue === NULL) return NULL;
-            const start = Number(startValue as bigint);
+            const start = startValue as bigint;
             const buffer = state.slots[0] as Slice;
-            let end = buffer.length;
-            for (let index = start; index < buffer.length; index++) {
+            let end = buffer.lengthValue;
+            for (let index = start; index < buffer.lengthValue; index++) {
               if (isDelimiter(buffer, index, state.slots[2], equal, spend)) {
                 end = index;
                 break;
@@ -374,8 +375,8 @@ function iteratorType(kind: 'split' | 'token', delimiter: DelimiterKind, child: 
           rest: method('rest', resultSlice, (state) => {
             const buffer = state.slots[0] as Slice;
             const startValue = state.slots[1];
-            const start = startValue === NULL ? buffer.length : Number(startValue as bigint);
-            return subSlice(buffer, start, buffer.length - start);
+            const start = startValue === NULL ? buffer.lengthValue : (startValue as bigint);
+            return subSlice(buffer, start, buffer.lengthValue - start);
           }),
           reset: method('reset', VOID, (state) => {
             state.slots[1] = 0n;
@@ -396,10 +397,10 @@ function iteratorType(kind: 'split' | 'token', delimiter: DelimiterKind, child: 
           }),
           rest: method('rest', resultSlice, (state, equal, spend) => {
             const buffer = state.slots[0] as Slice;
-            let index = Number(state.slots[1] as bigint);
-            while (index < buffer.length && isDelimiter(buffer, index, state.slots[2], equal, spend))
+            let index = state.slots[1] as bigint;
+            while (index < buffer.lengthValue && isDelimiter(buffer, index, state.slots[2], equal, spend))
               index += delimiterLength(state.slots[2]);
-            return subSlice(state.slots[0] as Slice, index, buffer.length - index);
+            return subSlice(state.slots[0] as Slice, index, buffer.lengthValue - index);
           }),
           reset: method('reset', VOID, (state) => {
             state.slots[1] = 0n;

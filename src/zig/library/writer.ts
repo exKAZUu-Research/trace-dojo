@@ -152,6 +152,13 @@ export function writeTo(frame: Frame, state: WriterState, bytes: readonly number
 }
 
 export function flushWriter(frame: Frame, state: WriterState): void {
+  if (isDiscardingWriter(state)) {
+    frame.runtime.spend(state.end);
+    const data = (state.growth as NativeHandle).state;
+    data.count = (data.count as number) + state.end;
+    state.end = 0;
+    return;
+  }
   if (state.fd === undefined) return;
   frame.runtime.writeOutput(state.fd, bufferedBytes(frame, state));
   state.end = 0;

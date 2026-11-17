@@ -137,12 +137,16 @@ function intRange(
 
 /** `weightedIndex` with integer proportions: a point below their sum, found in the running totals. */
 function weightedIntIndex(state: RandomSource, type: IntType, proportions: bigint[]): bigint {
-  const sum = proportions.reduce((total, value) => total + value, 0n);
-  if (!fitsInt(sum, type)) panic(PANIC.overflow);
+  let sum = 0n;
+  for (const proportion of proportions) {
+    sum += proportion;
+    if (!fitsInt(sum, type)) panic(PANIC.overflow);
+  }
   const point = type.signed ? intRange(state, type, 0n, sum, false) : uintLessThan(state, type, sum);
   let accumulator = 0n;
   for (const [index, proportion] of proportions.entries()) {
     accumulator += proportion;
+    if (!fitsInt(accumulator, type)) panic(PANIC.overflow);
     if (point < accumulator) return BigInt(index);
   }
   return panic(PANIC.unreachable);

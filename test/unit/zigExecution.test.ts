@@ -5118,3 +5118,44 @@ test('constructed nonempty slice headers allow length and discarded-element oper
     kind: 'compileError',
   });
 });
+
+test('split iterator views preserve exact virtual usize lengths across state changes', () => {
+  const source = `const std=@import("std");pub fn main(init:std.process.Init)!void{var a:std.ArrayList(void)=.empty;try a.append(init.gpa,{});var it=std.mem.splitScalar(void,a.allocatedSlice(),{});std.debug.print("{}|{}|",.{it.rest().len,it.peek().?.len});_=it.next();std.debug.print("{}|",.{it.rest().len});it.reset();std.debug.print("{}|",.{it.first().len});var spare=std.mem.splitScalar(void,a.unusedCapacitySlice(),{});_=spare.next();std.debug.print("{}",.{spare.rest().len});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: '18446744073709551615|0|18446744073709551614|0|18446744073709551613',
+    uncaughtException: undefined,
+  });
+});
+
+test.each(['splitScalar', 'tokenizeScalar'])(
+  '%s retains ordinary iterator views after peeking and resetting',
+  (method) => {
+    const source = `const std=@import("std");pub fn main()void{var it=std.mem.${method}(u8,"a,b",',');std.debug.print("{s}|{s}|{s}|",.{it.peek().?,it.next().?,it.rest()});it.reset();std.debug.print("{s}",.{it.next().?});}`;
+    expect(executeProgram('zig', source)).toMatchObject({
+      kind: 'executed',
+      stderr: 'a|a|b|a',
+      uncaughtException: undefined,
+    });
+  }
+);
+
+test('discarding formatter flushes drain bytes while preserving total counts', () => {
+  const source = `const std=@import("std");const P=struct{pub fn format(_:P,w:*std.Io.Writer)std.Io.Writer.Error!void{try w.writeAll("abc");try w.flush();std.debug.print("{}|",.{w.buffered().len});try w.flush();try w.writeAll("de");std.debug.print("{}|",.{w.buffered().len});}};pub fn main()void{std.debug.print("{}",.{std.fmt.count("{f}",.{P{}})});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: '0|2|5',
+    uncaughtException: undefined,
+  });
+});
+
+test.each(['127,1,-1', '-128,-1,127,3'])(
+  'weighted integer proportions check intermediate signed overflow: %s',
+  (weights) => {
+    const source = `const std=@import("std");pub fn main()void{var p=std.Random.DefaultPrng.init(1);var a=[_]i8{${weights}};_=&a;_=p.random().weightedIndex(i8,&a);}`;
+    expect(executeProgram('zig', source)).toMatchObject({
+      kind: 'executed',
+      uncaughtException: 'panic: integer overflow',
+    });
+  }
+);

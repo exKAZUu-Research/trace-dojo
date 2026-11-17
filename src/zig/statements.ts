@@ -324,6 +324,7 @@ export abstract class StatementCompiler extends CallCompiler {
   }
 
   // code-gauge-allow functionNcss 49 -- Keeps the analysis and the generated code of one construct together, as Zig's Sema does.
+  // code-gauge-allow functionCognitiveComplexity 26 -- Analyzes tuple and array targets before generating their simultaneous assignments.
   private destructure(statement: Extract<Statement, { kind: 'destructure' }>): Stmt {
     const sequential = this.sequentialDestructure(statement);
     if (sequential) return sequential;
