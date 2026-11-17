@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 457 -- Keeps one PHP runtime concern and its shared helpers in one module.
+// code-gauge-allow-file fileNcss 472 -- Keeps one PHP runtime concern and its shared helpers in one module.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import type { TurtleState } from '../interpreter/turtleWorld';
 import type { ClassDecl, FunctionDecl } from './ast';
@@ -490,6 +490,7 @@ export class PhpObject {
   set internal(value: unknown) {
     this.internalValue = value;
     internalHandler(this);
+    nativeOwnershipChanged(this);
   }
   turtle?: TurtleState;
   /** Whether the destructor ran or must not run. */
@@ -529,6 +530,28 @@ export function deref(slot: Value | Ref): Value {
 }
 
 type Owner = Ref | PhpArray | PhpObject;
+export type OwnershipChange =
+  | { kind: 'edge'; value: object; owner: Owner; key?: Key }
+  | { kind: 'native'; owner: PhpObject };
+const ownershipObservers = new Set<(change: OwnershipChange) => void>();
+
+export function observeOwnership(observer: (change: OwnershipChange) => void): () => void {
+  ownershipObservers.add(observer);
+  return () => {
+    ownershipObservers.delete(observer);
+  };
+}
+
+export function nativeOwnershipChanged(owner: PhpObject): void {
+  invalidateOwner(owner);
+  for (const observer of ownershipObservers) observer({ kind: 'native', owner });
+}
+
+export function ownershipEdgeExists(change: Extract<OwnershipChange, { kind: 'edge' }>): boolean {
+  const { value, owner, key } = change;
+  if (owner instanceof Ref) return owner.rc > 0 && owner.v === value;
+  return owner instanceof PhpArray ? owner.map.get(key as Key) === value : owner.props.get(key as string) === value;
+}
 const owners = new WeakMap<object, Map<Owner, Set<Key | undefined>>>();
 let internalHandler: (object: PhpObject) => void = () => {};
 
@@ -550,6 +573,7 @@ function trackOwner(value: unknown, parent: Owner, key?: Key): void {
     parents.set(parent, keys);
   }
   keys.add(key);
+  for (const observer of ownershipObservers) observer({ kind: 'edge', value, owner: parent, key });
 }
 
 export function valueOwners(value: object): Owner[] {
@@ -595,14 +619,10 @@ class PropertyMap extends Map<string, Slot> {
   }
 }
 
-let ownershipVersion = 0;
-export const ownershipGeneration = (): number => ownershipVersion;
-
 const reachProofs = new WeakMap<object, object>();
 const proofChildren = new WeakMap<object, Set<object>>();
 
 function invalidateOwner(owner: object): void {
-  ownershipVersion++;
   const pending = [owner];
   const visited = new Set<object>();
   while (pending.length > 0) {

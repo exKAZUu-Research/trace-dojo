@@ -122,7 +122,6 @@ export class Runtime {
   readonly constants = new Map<string, Value>();
   readonly objects = new Map<number, PhpObject>();
   readonly internalObjects = new Set<PhpObject>();
-  nativeOwnershipVersion = 0;
   private readonly pendingReleases: unknown[] = [];
   private readonly freeHandles: number[] = [];
   private nextHandle = 1;

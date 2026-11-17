@@ -567,3 +567,18 @@ test('keeps ordinary patterns within the supported capture envelope', () => {
     stdout: 'int(1)\n',
   });
 });
+
+test.each([
+  ['$x=1;', '0'],
+  ['global $d;$d++;', '10000'],
+  ['static $k=0;$k++;', '0'],
+  ['$x=$this->next;', '0'],
+  ['$this->scratch=[$this];', '0'],
+])('destructor writes retain bounded release work: %s', (body, count) => {
+  vi.restoreAllMocks();
+  expect(
+    run(
+      `<?php $d=0;class N{public $next;public $scratch;function __destruct(){${body}}}$head=null;for($i=0;$i<10000;$i++){$n=new N;$n->next=$head;$head=$n;}unset($n);$head=null;echo 'done:',$d;`
+    )
+  ).toMatchObject({ kind: 'executed', stdout: `done:${count}` });
+});

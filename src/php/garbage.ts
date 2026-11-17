@@ -1,10 +1,12 @@
-// code-gauge-allow-file fileNcss 582 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 597 -- Holds the cases of one concern of the interpreter, which share their helpers.
 import type { TurtleState } from '../interpreter/turtleWorld';
 import type { Frame, Runtime } from './runtime';
 import {
   type ClosureData,
   isClosure,
-  ownershipGeneration,
+  observeOwnership,
+  type OwnershipChange,
+  ownershipEdgeExists,
   ownershipProof,
   PhpArray,
   PhpObject,
@@ -166,21 +168,18 @@ class Release {
     if (!object.destructed && object.cls.findMethod('__destruct')) {
       object.destructed = true;
       this.runtime.destructibles--;
-      const generation = ownershipGeneration();
-      const nativeGeneration = this.runtime.nativeOwnershipVersion;
+      const changes: OwnershipChange[] = [];
+      const stopObserving = observeOwnership((change) => changes.push(change));
       try {
         destruct(object);
       } catch (error) {
         failure = error;
         failed = true;
+      } finally {
+        stopObserving();
       }
       const roots = ownershipRoots(this.runtime);
-      if (
-        generation !== ownershipGeneration() ||
-        nativeGeneration !== this.runtime.nativeOwnershipVersion ||
-        roots.size !== this.roots.size ||
-        [...roots].some((root) => !this.roots.has(root))
-      )
+      if ([...roots].some((root) => this.unreachable.has(root as object)) || this.revived(changes, roots))
         this.unreachable.clear();
       this.roots = roots;
       if (ownedReachable(object, this.roots, this.runtime, this.unreachable)) {
@@ -190,6 +189,20 @@ class Release {
       }
     }
     return new ReleaseFinish(object, failed, failure);
+  }
+
+  private revived(changes: OwnershipChange[], roots: Set<unknown>): boolean {
+    for (const change of changes) {
+      if (change.kind === 'edge') {
+        if (!this.unreachable.has(change.value) || !ownershipEdgeExists(change)) continue;
+      } else {
+        const held: unknown[] = [];
+        pushObject(change.owner, held);
+        if (!held.some((value) => this.unreachable.has(value as object))) continue;
+      }
+      if (ownedReachable(change.owner, roots, this.runtime, this.unreachable)) return true;
+    }
+    return false;
   }
 }
 

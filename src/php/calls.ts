@@ -14,6 +14,7 @@ import {
   type Method,
   type NativeContext,
   type NativeFunction,
+  nativeOwnershipChanged,
   type Param,
   PhpArray,
   type PhpClass,
@@ -208,7 +209,7 @@ function runNative(runtime: Runtime, fn: NativeFunction, context: NativeContext)
     }
     throw error;
   } finally {
-    if (context.thisObj) runtime.nativeOwnershipVersion++;
+    if (context.thisObj) nativeOwnershipChanged(context.thisObj);
   }
 }
 
