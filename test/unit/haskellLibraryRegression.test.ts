@@ -398,6 +398,46 @@ test.each([
   });
 });
 
+test.each([
+  String.raw`Just (error "element"::Int)`,
+  '(Right 2::Either () Int)',
+  '((),2::Int)',
+  String.raw`Down (error "element"::Int)`,
+  'Box [2::Int]',
+])('generic strict right folds demand the seed before a discarding callback: %s', (container) => {
+  const source = String.raw`import Data.Foldable
+import Data.Ord
+data Box a=Box [a]
+instance Foldable Box where foldMap f(Box xs)=foldMap f xs
+main=print(foldr' (\_ _->1::Int) (error "seed") (${container}))`;
+  expect(executeProgram('haskell', source)).toMatchObject({
+    kind: 'executed',
+    stdout: '',
+    uncaughtException: 'seed',
+  });
+});
+
+test('strict Foldable defaults retain structure demand, empty seeds and the list override', () => {
+  const source = String.raw`import Data.Foldable
+main=do
+  print(foldr' (\_ _->1::Int) (error "seed") [2::Int])
+  print(foldr' (error "function") (7::Int) (Nothing::Maybe Int))
+  print(foldr (\_ _->1::Int) (error "seed") (Just(2::Int)))
+  print(foldr' (\_ _->Just(1::Int)) (Just(error "inner")) (Just(2::Int)))`;
+  expect(executeProgram('haskell', source)).toMatchObject({
+    kind: 'executed',
+    stdout: '1\n7\n1\nJust 1\n',
+    uncaughtException: undefined,
+  });
+  const failing = String.raw`import Data.Foldable
+main=print(foldr' (\_ _->1::Int) (error "seed") (error "structure"::Maybe Int))`;
+  expect(executeProgram('haskell', failing)).toMatchObject({
+    kind: 'executed',
+    stdout: '',
+    uncaughtException: 'structure',
+  });
+});
+
 test('Integer bit queries avoid index-sized masks and retain sign extension', () => {
   const source =
     'import Data.Bits\nmain=do\n  print(length[i|i<-[1..200::Int],testBit(1::Integer)(1000000+i)])\n  print(testBit(-1::Integer)100000000,testBit(1::Integer)(maxBound::Int),testBit(-2::Integer)(maxBound::Int),testBit(1::Integer)(-1))\n  print([testBit(-3::Integer)i|i<-[0..4]])';

@@ -379,6 +379,9 @@ listFoldr k z = go
   where go [] = z
         go (y:ys) = y ${BT}k${BT} go ys
 
+listFoldr' :: (a -> b -> b) -> b -> [a] -> b
+listFoldr' f z xs = listFoldl (\k x acc -> k $! f x acc) id xs z
+
 listFoldr1 :: (a -> a -> a) -> [a] -> a
 listFoldr1 f = go
   where go [x] = x
@@ -575,7 +578,7 @@ class Foldable t where
   foldMap f = foldr (\x acc -> f x <> acc) mempty
   foldr f z t = runFoldEndo (foldMap (\x -> FoldEndo (f x)) t) z
   foldl f z t = listFoldl f z (toList t)
-  foldr' f z t = foldl (\k x acc -> k $! f x acc) id t z
+  foldr' f z t = foldl (\k x acc -> acc ${BT}seq${BT} k (f x acc)) id t z
   foldl' f z t = listFoldl' f z (toList t)
   foldr1 f t = case toList t of
     [] -> errorWithoutStackTrace "foldr1: empty structure"
@@ -599,6 +602,7 @@ class Foldable t where
 instance Foldable [] where
   foldMap f = listFoldr (\x acc -> f x <> acc) mempty
   foldr = listFoldr
+  foldr' = listFoldr'
   foldl = listFoldl
   foldl' = listFoldl'
   foldr1 = listFoldr1
