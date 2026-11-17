@@ -369,11 +369,14 @@ export class OperatorChecker {
           '左のオペランドが null や undefined になることはないので、?? の右のオペランドは使われません。'
         );
       if (nullishness === 'always') this.c.error(left, 'この式は常に null か undefined です。');
-      const leftType = this.c.expressions.check(left, contextual);
+      // A left optional chain that stops early is nullish, so the right operand runs there too.
+      const { result: leftType, stops } = this.c.members.stoppingChain(skipParentheses(left), () =>
+        this.c.expressions.check(left, contextual)
+      );
       // The right operand runs only when the left one is nullish, so its effects join the path that skips it.
       const { whenTrue: skipped, whenFalse: nullish } = this.c.conditions.presence(left);
       let rightType: Type = neverType;
-      const after = this.c.flow.from(nullish, () => {
+      const after = this.c.flow.from(this.c.flow.merge([nullish, ...stops]), () => {
         rightType = this.c.expressions.check(right, contextual);
       });
       this.c.flow.current = this.c.flow.merge([skipped, after]);

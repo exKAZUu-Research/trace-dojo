@@ -2,7 +2,8 @@ import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import { unsupportedMessage } from '../unsupported';
 import type { Checker } from './checker';
-import { isNumericName, skipParentheses } from './syntax';
+import type { State } from './flow';
+import { chainObject, isNumericName, isOptionalChain, skipParentheses } from './syntax';
 import {
   anyType,
   errorType,
@@ -50,7 +51,55 @@ export class MemberChecker {
    */
   private readonly continuedTypes = new Map<number, Type>();
 
+  /** For each optional chain being checked, its end and the flow states where its `?.` links stop it. */
+  private readonly chainFrames: { end: TreeNode; stops: State[] }[] = [];
+
   constructor(private readonly c: Checker) {}
+
+  /** Checks a link of a chain, which joins where the chain's `?.` links stop it when it is the chain's end. */
+  chainLink(node: TreeNode, check: () => Type): Type {
+    if (this.chainFrames.at(-1)?.end.id === node.id) return check();
+    const start = this.c.flow.current;
+    const { result, stops } = this.stoppingChain(node, check);
+    if (stops.length > 0) this.c.flow.rejoin(start, stops);
+    return result;
+  }
+
+  /** Checks `condition` on `node`, which is false where `node`'s optional chain stops early. */
+  chainCondition<T extends { whenFalse: State }>(node: TreeNode, condition: () => T): T {
+    const start = this.c.flow.current;
+    const { result, stops } = this.stoppingChain(node, condition);
+    if (stops.length === 0) return result;
+    this.c.flow.rejoin(start, stops);
+    return { ...result, whenFalse: this.c.flow.merge([result.whenFalse, ...stops]) };
+  }
+
+  /**
+   * Runs `run`, which checks `node`, returning rather than joining the flow states where `node`'s optional chain stops
+   * early, since a condition or `??` testing the chain routes them to its own false or right-operand path as tsc does.
+   */
+  stoppingChain<T>(node: TreeNode, run: () => T): { result: T; stops: State[] } {
+    if (chainEnd(node).id !== node.id || !isOptionalChain(node)) return { result: run(), stops: [] };
+    const frame = { end: node, stops: [] as State[] };
+    this.chainFrames.push(frame);
+    try {
+      return { result: run(), stops: frame.stops };
+    } finally {
+      this.chainFrames.pop();
+    }
+  }
+
+  /**
+   * Continues an optional chain past the `?.` after `object` only where `object` is neither `null` nor `undefined`,
+   * which the rest of the chain, its indices and arguments included, runs in.
+   */
+  continueChain(object: TreeNode): void {
+    const frame = this.chainFrames.at(-1);
+    if (frame?.end.id !== chainEnd(object).id) return;
+    const { whenTrue, whenFalse } = this.c.conditions.presence(object);
+    frame.stops.push(whenFalse);
+    this.c.flow.current = whenTrue;
+  }
 
   /** Records what an optional chain continues from after `node`, returning `node`'s own type with `undefined`. */
   chainResult(node: TreeNode, continued: Type): Type {
@@ -71,6 +120,7 @@ export class MemberChecker {
     const name = propertyNode.text;
     if (objectNode.type === 'super') return this.c.classes.superProperty(node, propertyNode);
     let objectType = this.c.expressions.check(objectNode);
+    if (optional) this.continueChain(objectNode);
     const key = this.c.flow.referenceKey(node);
     const continued = this.continuedObjectType(objectNode, objectType);
     if (optional) {
@@ -107,9 +157,11 @@ export class MemberChecker {
     if ((callee.type !== 'member_expression' && !isElement) || !this.isInOptionalChain(callee)) return undefined;
     const objectNode = callee.childForFieldName('object') as TreeNode;
     const checked = this.c.expressions.check(objectNode);
+    const optional = callee.childForFieldName('optional_chain') !== null;
+    if (optional) this.continueChain(objectNode);
     if (isAnyLike(checked)) return anyType;
     const objectType = this.continuedObjectType(objectNode, checked) ?? checked;
-    const nonNull = callee.childForFieldName('optional_chain')
+    const nonNull = optional
       ? this.c.relations.removeNullish(objectType)
       : this.checkNonNullable(objectNode, objectType);
     if (isElement) {
@@ -296,6 +348,7 @@ export class MemberChecker {
     const indexNode = node.childForFieldName('index') as TreeNode;
     const optional = node.childForFieldName('optional_chain') !== null;
     const checked = this.c.expressions.check(objectNode);
+    if (optional) this.continueChain(objectNode);
     const indexType = this.c.expressions.check(indexNode);
     const continued = this.continuedObjectType(objectNode, checked);
     const objectType = optional
@@ -433,4 +486,11 @@ function isOnlyCompared(read: TreeNode | null): boolean {
     parent?.type === 'binary_expression' &&
     ['===', '!==', '==', '!='].includes(parent.childForFieldName('operator')?.text ?? '')
   );
+}
+
+/** The outermost link of the chain a link belongs to, as `a?.b.c()` for `a?.b`. */
+function chainEnd(node: TreeNode): TreeNode {
+  let current = node;
+  while (current.parent && chainObject(current.parent)?.id === current.id) current = current.parent;
+  return current;
 }

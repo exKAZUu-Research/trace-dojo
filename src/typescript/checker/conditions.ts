@@ -79,7 +79,7 @@ export class ConditionChecker {
         break;
       }
       case 'call_expression': {
-        return this.callCondition(expression);
+        return this.c.members.chainCondition(expression, () => this.callCondition(expression));
       }
       case 'identifier': {
         const aliased = this.aliasedCondition(expression);
@@ -98,8 +98,10 @@ export class ConditionChecker {
         break;
       }
     }
-    const type = this.c.expressions.check(expression);
-    return { ...this.truthiness(expression), type };
+    return this.c.members.chainCondition(expression, () => {
+      const type = this.c.expressions.check(expression);
+      return { ...this.truthiness(expression), type };
+    });
   }
 
   /** The condition a binary expression is, if its operator narrows. */

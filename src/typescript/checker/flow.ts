@@ -56,6 +56,16 @@ export class FlowState {
   clone(): FlowState {
     return new FlowState(new Map(this.entries), new Set(this.assignedFields), this.superCalled, this.dead);
   }
+
+  /** Makes this state what `other` is, for holders of this state to see it. */
+  copyFrom(other: FlowState): void {
+    this.entries.clear();
+    for (const [key, entry] of other.entries) this.entries.set(key, entry);
+    this.assignedFields.clear();
+    for (const field of other.assignedFields) this.assignedFields.add(field);
+    this.superCalled = other.superCalled;
+    this.dead = other.dead;
+  }
 }
 
 export type State = FlowState | undefined;
@@ -101,6 +111,20 @@ export class Flow {
       });
     }
     return merged;
+  }
+
+  /**
+   * Joins `others` into the current state, which a check running from `start` ended in, keeping `start` as the
+   * current state since callers that narrow may hold it.
+   */
+  rejoin(start: State, others: State[]): void {
+    const merged = this.merge([this.current, ...others]);
+    if (start && merged) {
+      start.copyFrom(merged);
+      this.current = start;
+    } else {
+      this.current = merged;
+    }
   }
 
   private joinTypes(types: Type[]): Type {

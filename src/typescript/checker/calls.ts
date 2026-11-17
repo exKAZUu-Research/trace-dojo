@@ -58,7 +58,9 @@ export class Calls {
     if (this.isEvolvingPush(callee)) return this.evolvingPush(callee, args);
     const chained = this.c.members.chainedCalleeType(callee);
     const checkedCallee = chained ?? this.c.expressions.check(callee, this.immediateCallContext(callee, args));
+    if (optional) this.c.members.continueChain(callee);
     if (checkedCallee === errorType) return this.checkArgumentsOnly(args, errorType);
+    const shortCircuits = chained !== undefined || (optional && this.c.relations.isNullable(checkedCallee));
     const calleeType = this.nonNullableCallee(callee, checkedCallee, optional);
     if (isAnyLike(calleeType)) return this.checkArgumentsOnly(args, anyType);
     if (isIntrinsic(calleeType, 'unknown')) {
@@ -87,9 +89,7 @@ export class Calls {
     this.checkThisContext(callee, resolution.signature);
     this.checkTextConversions(callee, args);
     const result = resolution.returnType;
-    return chained || (optional && this.c.relations.isNullable(this.c.silently(() => this.c.expressions.check(callee))))
-      ? this.c.members.chainResult(node, result)
-      : result;
+    return shortCircuits ? this.c.members.chainResult(node, result) : result;
   }
 
   /** For a function called where it is written, as `((x) => x * 2)(3)`, a context giving its parameters the arguments' types. */
