@@ -15,8 +15,8 @@ import {
   RSymbol,
   type Value,
 } from './objects';
-import { rt, RubyJump, UnsupportedFeatureError } from './runtime';
-import { classOf, internFrozenString, sameIdentity, snapshot, str, stringBytes } from './values';
+import { rt, RubyJump } from './runtime';
+import { classOf, internFrozenString, requireObjectIdentity, sameIdentity, snapshot, str, stringBytes } from './values';
 
 interface HashTraversal {
   active: Set<Value>;
@@ -169,8 +169,7 @@ export function stringKeyEquals(left: RString, other: Value): boolean {
 /** Finds the entry for `key`, checking equality even when distinct keys have the same hash. */
 function* findEntry(hash: RHash, key: Value): Gen<{ base: string; slot: string; entry: HashEntry | undefined }> {
   if (hash.byIdentity) {
-    if (typeof key === 'bigint' && (key < -(1n << 62n) || key >= 1n << 62n))
-      throw new UnsupportedFeatureError('大きな Integer のオブジェクト同一性');
+    requireObjectIdentity(key);
     const identity =
       key instanceof RBasic || key instanceof RSymbol
         ? `o${key.id}`

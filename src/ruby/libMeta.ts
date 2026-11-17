@@ -50,6 +50,8 @@ import {
   classOf,
   isA,
   realClassOf,
+  requireObjectIdentity,
+  sameIdentity,
   singletonClassOf,
   singletonDefinitionClass,
   str,
@@ -432,17 +434,21 @@ for (const owner of ['Method', 'UnboundMethod']) {
     if (!(other instanceof RObject) || other.cls !== self.cls) return false;
     const left = self.data as MethodData;
     const right = other.data as MethodData;
-    return (
-      left.recv === right.recv &&
+    if (left === right) return true;
+    const equal =
+      sameIdentity(left.recv, right.recv) &&
       left.moduleBound === right.moduleBound &&
       (left.method.body.kind === 'native'
         ? (left.method.nativeIdentityOwner ?? left.owner) === (right.method.nativeIdentityOwner ?? right.owner)
         : left.method.owner === right.method.owner) &&
-      methodBodyIdentity(left.method, left.owner) === methodBodyIdentity(right.method, right.owner)
-    );
+      methodBodyIdentity(left.method, left.owner) === methodBodyIdentity(right.method, right.owner);
+    if (!equal) return false;
+    requireObjectIdentity(left.recv);
+    return true;
   });
   def(owner, 'hash', 0, (self: RObject) => {
     const { recv, method, owner: definingOwner } = self.data as MethodData;
+    requireObjectIdentity(recv);
     const receiver =
       recv instanceof RBasic
         ? `o${methodIdentity(recv)}`

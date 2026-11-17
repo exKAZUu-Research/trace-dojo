@@ -49028,3 +49028,277 @@ test.each(nativeScanRefreshCases)(
     expect(run(source)).toMatchObject({ kind: 'executed', stdout, uncaughtException: undefined });
   }
 );
+
+const nativeMethodReceiverIdentityCases = [
+  [
+    'a=-(2**62);b=a;m=a.method(:to_s);n=b.method(:to_s);p [m==n,m.eql?(n),m.hash==n.hash,m==m,m==m.dup,m==m.clone,m.unbind==n.unbind,m.unbind.hash==n.unbind.hash,m.receiver.equal?(a)]',
+    '[true, true, true, true, true, true, true, true, true]\n',
+  ],
+  [
+    'a=-(2**62);b=a;m=a.method(:abs);n=b.method(:abs);p [m==n,m.eql?(n),m.hash==n.hash,m==m,m==m.dup,m==m.clone,m.unbind==n.unbind,m.unbind.hash==n.unbind.hash,m.receiver.equal?(a)]',
+    '[true, true, true, true, true, true, true, true, true]\n',
+  ],
+  [
+    'a=-(2**62);b=a;m=a.method(:+);n=b.method(:+);p [m==n,m.eql?(n),m.hash==n.hash,m==m,m==m.dup,m==m.clone,m.unbind==n.unbind,m.unbind.hash==n.unbind.hash,m.receiver.equal?(a)]',
+    '[true, true, true, true, true, true, true, true, true]\n',
+  ],
+  [
+    'a=-1;b=a;m=a.method(:to_s);n=b.method(:to_s);p [m==n,m.eql?(n),m.hash==n.hash,m==m,m==m.dup,m==m.clone,m.unbind==n.unbind,m.unbind.hash==n.unbind.hash,m.receiver.equal?(a)]',
+    '[true, true, true, true, true, true, true, true, true]\n',
+  ],
+  [
+    'a=-1;b=a;m=a.method(:abs);n=b.method(:abs);p [m==n,m.eql?(n),m.hash==n.hash,m==m,m==m.dup,m==m.clone,m.unbind==n.unbind,m.unbind.hash==n.unbind.hash,m.receiver.equal?(a)]',
+    '[true, true, true, true, true, true, true, true, true]\n',
+  ],
+  [
+    'a=-1;b=a;m=a.method(:+);n=b.method(:+);p [m==n,m.eql?(n),m.hash==n.hash,m==m,m==m.dup,m==m.clone,m.unbind==n.unbind,m.unbind.hash==n.unbind.hash,m.receiver.equal?(a)]',
+    '[true, true, true, true, true, true, true, true, true]\n',
+  ],
+  [
+    'a=0;b=a;m=a.method(:to_s);n=b.method(:to_s);p [m==n,m.eql?(n),m.hash==n.hash,m==m,m==m.dup,m==m.clone,m.unbind==n.unbind,m.unbind.hash==n.unbind.hash,m.receiver.equal?(a)]',
+    '[true, true, true, true, true, true, true, true, true]\n',
+  ],
+  [
+    'a=0;b=a;m=a.method(:abs);n=b.method(:abs);p [m==n,m.eql?(n),m.hash==n.hash,m==m,m==m.dup,m==m.clone,m.unbind==n.unbind,m.unbind.hash==n.unbind.hash,m.receiver.equal?(a)]',
+    '[true, true, true, true, true, true, true, true, true]\n',
+  ],
+  [
+    'a=0;b=a;m=a.method(:+);n=b.method(:+);p [m==n,m.eql?(n),m.hash==n.hash,m==m,m==m.dup,m==m.clone,m.unbind==n.unbind,m.unbind.hash==n.unbind.hash,m.receiver.equal?(a)]',
+    '[true, true, true, true, true, true, true, true, true]\n',
+  ],
+  [
+    'a=1;b=a;m=a.method(:to_s);n=b.method(:to_s);p [m==n,m.eql?(n),m.hash==n.hash,m==m,m==m.dup,m==m.clone,m.unbind==n.unbind,m.unbind.hash==n.unbind.hash,m.receiver.equal?(a)]',
+    '[true, true, true, true, true, true, true, true, true]\n',
+  ],
+  [
+    'a=1;b=a;m=a.method(:abs);n=b.method(:abs);p [m==n,m.eql?(n),m.hash==n.hash,m==m,m==m.dup,m==m.clone,m.unbind==n.unbind,m.unbind.hash==n.unbind.hash,m.receiver.equal?(a)]',
+    '[true, true, true, true, true, true, true, true, true]\n',
+  ],
+  [
+    'a=1;b=a;m=a.method(:+);n=b.method(:+);p [m==n,m.eql?(n),m.hash==n.hash,m==m,m==m.dup,m==m.clone,m.unbind==n.unbind,m.unbind.hash==n.unbind.hash,m.receiver.equal?(a)]',
+    '[true, true, true, true, true, true, true, true, true]\n',
+  ],
+  [
+    'a=2**62-1;b=a;m=a.method(:to_s);n=b.method(:to_s);p [m==n,m.eql?(n),m.hash==n.hash,m==m,m==m.dup,m==m.clone,m.unbind==n.unbind,m.unbind.hash==n.unbind.hash,m.receiver.equal?(a)]',
+    '[true, true, true, true, true, true, true, true, true]\n',
+  ],
+  [
+    'a=2**62-1;b=a;m=a.method(:abs);n=b.method(:abs);p [m==n,m.eql?(n),m.hash==n.hash,m==m,m==m.dup,m==m.clone,m.unbind==n.unbind,m.unbind.hash==n.unbind.hash,m.receiver.equal?(a)]',
+    '[true, true, true, true, true, true, true, true, true]\n',
+  ],
+  [
+    'a=2**62-1;b=a;m=a.method(:+);n=b.method(:+);p [m==n,m.eql?(n),m.hash==n.hash,m==m,m==m.dup,m==m.clone,m.unbind==n.unbind,m.unbind.hash==n.unbind.hash,m.receiver.equal?(a)]',
+    '[true, true, true, true, true, true, true, true, true]\n',
+  ],
+  [
+    'a=1.5;b=a;m=a.method(:to_s);n=b.method(:to_s);p [m==n,m.eql?(n),m.hash==n.hash,m==m,m==m.dup,m==m.clone,m.unbind==n.unbind,m.unbind.hash==n.unbind.hash,m.receiver.equal?(a)]',
+    '[true, true, true, true, true, true, true, true, true]\n',
+  ],
+  [
+    'a=1.5;b=a;m=a.method(:abs);n=b.method(:abs);p [m==n,m.eql?(n),m.hash==n.hash,m==m,m==m.dup,m==m.clone,m.unbind==n.unbind,m.unbind.hash==n.unbind.hash,m.receiver.equal?(a)]',
+    '[true, true, true, true, true, true, true, true, true]\n',
+  ],
+  [
+    'a=1.5;b=a;m=a.method(:+);n=b.method(:+);p [m==n,m.eql?(n),m.hash==n.hash,m==m,m==m.dup,m==m.clone,m.unbind==n.unbind,m.unbind.hash==n.unbind.hash,m.receiver.equal?(a)]',
+    '[true, true, true, true, true, true, true, true, true]\n',
+  ],
+  [
+    'a=0.0;b=a;m=a.method(:to_s);n=b.method(:to_s);p [m==n,m.eql?(n),m.hash==n.hash,m==m,m==m.dup,m==m.clone,m.unbind==n.unbind,m.unbind.hash==n.unbind.hash,m.receiver.equal?(a)]',
+    '[true, true, true, true, true, true, true, true, true]\n',
+  ],
+  [
+    'a=0.0;b=a;m=a.method(:abs);n=b.method(:abs);p [m==n,m.eql?(n),m.hash==n.hash,m==m,m==m.dup,m==m.clone,m.unbind==n.unbind,m.unbind.hash==n.unbind.hash,m.receiver.equal?(a)]',
+    '[true, true, true, true, true, true, true, true, true]\n',
+  ],
+  [
+    'a=0.0;b=a;m=a.method(:+);n=b.method(:+);p [m==n,m.eql?(n),m.hash==n.hash,m==m,m==m.dup,m==m.clone,m.unbind==n.unbind,m.unbind.hash==n.unbind.hash,m.receiver.equal?(a)]',
+    '[true, true, true, true, true, true, true, true, true]\n',
+  ],
+  [
+    'a=-0.0;b=a;m=a.method(:to_s);n=b.method(:to_s);p [m==n,m.eql?(n),m.hash==n.hash,m==m,m==m.dup,m==m.clone,m.unbind==n.unbind,m.unbind.hash==n.unbind.hash,m.receiver.equal?(a)]',
+    '[true, true, true, true, true, true, true, true, true]\n',
+  ],
+  [
+    'a=-0.0;b=a;m=a.method(:abs);n=b.method(:abs);p [m==n,m.eql?(n),m.hash==n.hash,m==m,m==m.dup,m==m.clone,m.unbind==n.unbind,m.unbind.hash==n.unbind.hash,m.receiver.equal?(a)]',
+    '[true, true, true, true, true, true, true, true, true]\n',
+  ],
+  [
+    'a=-0.0;b=a;m=a.method(:+);n=b.method(:+);p [m==n,m.eql?(n),m.hash==n.hash,m==m,m==m.dup,m==m.clone,m.unbind==n.unbind,m.unbind.hash==n.unbind.hash,m.receiver.equal?(a)]',
+    '[true, true, true, true, true, true, true, true, true]\n',
+  ],
+  [
+    'a=Float::NAN;b=a;m=a.method(:to_s);n=b.method(:to_s);p [m==n,m.eql?(n),m.hash==n.hash,m==m,m==m.dup,m==m.clone,m.unbind==n.unbind,m.unbind.hash==n.unbind.hash,m.receiver.equal?(a)]',
+    '[true, true, true, true, true, true, true, true, true]\n',
+  ],
+  [
+    'a=Float::NAN;b=a;m=a.method(:abs);n=b.method(:abs);p [m==n,m.eql?(n),m.hash==n.hash,m==m,m==m.dup,m==m.clone,m.unbind==n.unbind,m.unbind.hash==n.unbind.hash,m.receiver.equal?(a)]',
+    '[true, true, true, true, true, true, true, true, true]\n',
+  ],
+  [
+    'a=Float::NAN;b=a;m=a.method(:+);n=b.method(:+);p [m==n,m.eql?(n),m.hash==n.hash,m==m,m==m.dup,m==m.clone,m.unbind==n.unbind,m.unbind.hash==n.unbind.hash,m.receiver.equal?(a)]',
+    '[true, true, true, true, true, true, true, true, true]\n',
+  ],
+  [
+    'a=Float::INFINITY;b=a;m=a.method(:to_s);n=b.method(:to_s);p [m==n,m.eql?(n),m.hash==n.hash,m==m,m==m.dup,m==m.clone,m.unbind==n.unbind,m.unbind.hash==n.unbind.hash,m.receiver.equal?(a)]',
+    '[true, true, true, true, true, true, true, true, true]\n',
+  ],
+  [
+    'a=Float::INFINITY;b=a;m=a.method(:abs);n=b.method(:abs);p [m==n,m.eql?(n),m.hash==n.hash,m==m,m==m.dup,m==m.clone,m.unbind==n.unbind,m.unbind.hash==n.unbind.hash,m.receiver.equal?(a)]',
+    '[true, true, true, true, true, true, true, true, true]\n',
+  ],
+  [
+    'a=Float::INFINITY;b=a;m=a.method(:+);n=b.method(:+);p [m==n,m.eql?(n),m.hash==n.hash,m==m,m==m.dup,m==m.clone,m.unbind==n.unbind,m.unbind.hash==n.unbind.hash,m.receiver.equal?(a)]',
+    '[true, true, true, true, true, true, true, true, true]\n',
+  ],
+  [
+    'a=-(2**62)-1;m=a.method(:+);p [m==m,m.eql?(m),m==m.dup,m==m.clone,m.equal?(m.dup),m.receiver==a,m.call(1),m.unbind==Integer.instance_method(:+),m.unbind.hash==Integer.instance_method(:+).hash,m==a.method(:to_s),m==nil,m==Object.new,m==(a+1).method(:+)]',
+    '[true, true, true, true, false, true, -4611686018427387904, true, true, false, false, false, false]\n',
+  ],
+  [
+    'a=-(2**62)-1;m=a.method(:to_s);h={}.compare_by_identity;h[m]=1;p h[m],h[m.dup],h.keys[0].equal?(m),m.call,m.unbind.bind(a).call',
+    '1\nnil\ntrue\n"-4611686018427387905"\n"-4611686018427387905"\n',
+  ],
+  [
+    'a=2**62;m=a.method(:+);p [m==m,m.eql?(m),m==m.dup,m==m.clone,m.equal?(m.dup),m.receiver==a,m.call(1),m.unbind==Integer.instance_method(:+),m.unbind.hash==Integer.instance_method(:+).hash,m==a.method(:to_s),m==nil,m==Object.new,m==(a+1).method(:+)]',
+    '[true, true, true, true, false, true, 4611686018427387905, true, true, false, false, false, false]\n',
+  ],
+  [
+    'a=2**62;m=a.method(:to_s);h={}.compare_by_identity;h[m]=1;p h[m],h[m.dup],h.keys[0].equal?(m),m.call,m.unbind.bind(a).call',
+    '1\nnil\ntrue\n"4611686018427387904"\n"4611686018427387904"\n',
+  ],
+  [
+    'a=2**63;m=a.method(:+);p [m==m,m.eql?(m),m==m.dup,m==m.clone,m.equal?(m.dup),m.receiver==a,m.call(1),m.unbind==Integer.instance_method(:+),m.unbind.hash==Integer.instance_method(:+).hash,m==a.method(:to_s),m==nil,m==Object.new,m==(a+1).method(:+)]',
+    '[true, true, true, true, false, true, 9223372036854775809, true, true, false, false, false, false]\n',
+  ],
+  [
+    'a=2**63;m=a.method(:to_s);h={}.compare_by_identity;h[m]=1;p h[m],h[m.dup],h.keys[0].equal?(m),m.call,m.unbind.bind(a).call',
+    '1\nnil\ntrue\n"9223372036854775808"\n"9223372036854775808"\n',
+  ],
+  [
+    'a=10**20;m=a.method(:+);p [m==m,m.eql?(m),m==m.dup,m==m.clone,m.equal?(m.dup),m.receiver==a,m.call(1),m.unbind==Integer.instance_method(:+),m.unbind.hash==Integer.instance_method(:+).hash,m==a.method(:to_s),m==nil,m==Object.new,m==(a+1).method(:+)]',
+    '[true, true, true, true, false, true, 100000000000000000001, true, true, false, false, false, false]\n',
+  ],
+  [
+    'a=10**20;m=a.method(:to_s);h={}.compare_by_identity;h[m]=1;p h[m],h[m.dup],h.keys[0].equal?(m),m.call,m.unbind.bind(a).call',
+    '1\nnil\ntrue\n"100000000000000000000"\n"100000000000000000000"\n',
+  ],
+  [
+    'a=-(10**20);m=a.method(:+);p [m==m,m.eql?(m),m==m.dup,m==m.clone,m.equal?(m.dup),m.receiver==a,m.call(1),m.unbind==Integer.instance_method(:+),m.unbind.hash==Integer.instance_method(:+).hash,m==a.method(:to_s),m==nil,m==Object.new,m==(a+1).method(:+)]',
+    '[true, true, true, true, false, true, -99999999999999999999, true, true, false, false, false, false]\n',
+  ],
+  [
+    'a=-(10**20);m=a.method(:to_s);h={}.compare_by_identity;h[m]=1;p h[m],h[m.dup],h.keys[0].equal?(m),m.call,m.unbind.bind(a).call',
+    '1\nnil\ntrue\n"-100000000000000000000"\n"-100000000000000000000"\n',
+  ],
+  [
+    'a=-(2**62)-1;b=-(2**62)-1;m=a.method(:+);n=b.method(:+);begin;p m===n;rescue=>e;p e.class,e.message;end;p m===2,m.to_proc.call(2)',
+    'TypeError\n"Method can\'t be coerced into Integer"\n-4611686018427387903\n-4611686018427387903\n',
+  ],
+  [
+    'a=-(2**62)-1;b=a;m=a.method(:+);n=b.method(:+);begin;p m===n;rescue=>e;p e.class,e.message;end;p m===2,m.to_proc.call(2)',
+    'TypeError\n"Method can\'t be coerced into Integer"\n-4611686018427387903\n-4611686018427387903\n',
+  ],
+  [
+    'a=2**62;b=2**62;m=a.method(:+);n=b.method(:+);begin;p m===n;rescue=>e;p e.class,e.message;end;p m===2,m.to_proc.call(2)',
+    'TypeError\n"Method can\'t be coerced into Integer"\n4611686018427387906\n4611686018427387906\n',
+  ],
+  [
+    'a=2**62;b=a;m=a.method(:+);n=b.method(:+);begin;p m===n;rescue=>e;p e.class,e.message;end;p m===2,m.to_proc.call(2)',
+    'TypeError\n"Method can\'t be coerced into Integer"\n4611686018427387906\n4611686018427387906\n',
+  ],
+  [
+    'a=2**63;b=2**63;m=a.method(:+);n=b.method(:+);begin;p m===n;rescue=>e;p e.class,e.message;end;p m===2,m.to_proc.call(2)',
+    'TypeError\n"Method can\'t be coerced into Integer"\n9223372036854775810\n9223372036854775810\n',
+  ],
+  [
+    'a=2**63;b=a;m=a.method(:+);n=b.method(:+);begin;p m===n;rescue=>e;p e.class,e.message;end;p m===2,m.to_proc.call(2)',
+    'TypeError\n"Method can\'t be coerced into Integer"\n9223372036854775810\n9223372036854775810\n',
+  ],
+  [
+    'a=10**20;b=10**20;m=a.method(:+);n=b.method(:+);begin;p m===n;rescue=>e;p e.class,e.message;end;p m===2,m.to_proc.call(2)',
+    'TypeError\n"Method can\'t be coerced into Integer"\n100000000000000000002\n100000000000000000002\n',
+  ],
+  [
+    'a=10**20;b=a;m=a.method(:+);n=b.method(:+);begin;p m===n;rescue=>e;p e.class,e.message;end;p m===2,m.to_proc.call(2)',
+    'TypeError\n"Method can\'t be coerced into Integer"\n100000000000000000002\n100000000000000000002\n',
+  ],
+  [
+    'a=-(10**20);b=-(10**20);m=a.method(:+);n=b.method(:+);begin;p m===n;rescue=>e;p e.class,e.message;end;p m===2,m.to_proc.call(2)',
+    'TypeError\n"Method can\'t be coerced into Integer"\n-99999999999999999998\n-99999999999999999998\n',
+  ],
+  [
+    'a=-(10**20);b=a;m=a.method(:+);n=b.method(:+);begin;p m===n;rescue=>e;p e.class,e.message;end;p m===2,m.to_proc.call(2)',
+    'TypeError\n"Method can\'t be coerced into Integer"\n-99999999999999999998\n-99999999999999999998\n',
+  ],
+] as const;
+
+test.each(nativeMethodReceiverIdentityCases)(
+  'Method identity keeps immediate receivers, known copies, calls and unbound definitions native: %s',
+  (source, stdout) => {
+    expect(run(source)).toMatchObject({ kind: 'executed', stdout, uncaughtException: undefined });
+  }
+);
+
+const unavailableMethodReceiverIdentityCases = [
+  'a=-(2**62)-1;b=-(2**62)-1;m=a.method(:+);n=b.method(:+);puts :before;p m==n;puts :after',
+  'a=-(2**62)-1;b=a;m=a.method(:+);n=b.method(:+);puts :before;p m==n;puts :after',
+  'a=-(2**62)-1;b=-(2**62)-1;m=a.method(:+);n=b.method(:+);puts :before;p m.eql?(n);puts :after',
+  'a=-(2**62)-1;b=a;m=a.method(:+);n=b.method(:+);puts :before;p m.eql?(n);puts :after',
+  'a=-(2**62)-1;b=-(2**62)-1;m=a.method(:+);n=b.method(:+);puts :before;p m.hash;puts :after',
+  'a=-(2**62)-1;b=a;m=a.method(:+);n=b.method(:+);puts :before;p m.hash;puts :after',
+  'a=-(2**62)-1;b=-(2**62)-1;m=a.method(:+);n=b.method(:+);puts :before;p [m,n].uniq.size;puts :after',
+  'a=-(2**62)-1;b=a;m=a.method(:+);n=b.method(:+);puts :before;p [m,n].uniq.size;puts :after',
+  'a=-(2**62)-1;b=-(2**62)-1;m=a.method(:+);n=b.method(:+);puts :before;p ({m=>1,n=>2}).size;puts :after',
+  'a=-(2**62)-1;b=a;m=a.method(:+);n=b.method(:+);puts :before;p ({m=>1,n=>2}).size;puts :after',
+  'a=2**62;b=2**62;m=a.method(:+);n=b.method(:+);puts :before;p m==n;puts :after',
+  'a=2**62;b=a;m=a.method(:+);n=b.method(:+);puts :before;p m==n;puts :after',
+  'a=2**62;b=2**62;m=a.method(:+);n=b.method(:+);puts :before;p m.eql?(n);puts :after',
+  'a=2**62;b=a;m=a.method(:+);n=b.method(:+);puts :before;p m.eql?(n);puts :after',
+  'a=2**62;b=2**62;m=a.method(:+);n=b.method(:+);puts :before;p m.hash;puts :after',
+  'a=2**62;b=a;m=a.method(:+);n=b.method(:+);puts :before;p m.hash;puts :after',
+  'a=2**62;b=2**62;m=a.method(:+);n=b.method(:+);puts :before;p [m,n].uniq.size;puts :after',
+  'a=2**62;b=a;m=a.method(:+);n=b.method(:+);puts :before;p [m,n].uniq.size;puts :after',
+  'a=2**62;b=2**62;m=a.method(:+);n=b.method(:+);puts :before;p ({m=>1,n=>2}).size;puts :after',
+  'a=2**62;b=a;m=a.method(:+);n=b.method(:+);puts :before;p ({m=>1,n=>2}).size;puts :after',
+  'a=2**63;b=2**63;m=a.method(:+);n=b.method(:+);puts :before;p m==n;puts :after',
+  'a=2**63;b=a;m=a.method(:+);n=b.method(:+);puts :before;p m==n;puts :after',
+  'a=2**63;b=2**63;m=a.method(:+);n=b.method(:+);puts :before;p m.eql?(n);puts :after',
+  'a=2**63;b=a;m=a.method(:+);n=b.method(:+);puts :before;p m.eql?(n);puts :after',
+  'a=2**63;b=2**63;m=a.method(:+);n=b.method(:+);puts :before;p m.hash;puts :after',
+  'a=2**63;b=a;m=a.method(:+);n=b.method(:+);puts :before;p m.hash;puts :after',
+  'a=2**63;b=2**63;m=a.method(:+);n=b.method(:+);puts :before;p [m,n].uniq.size;puts :after',
+  'a=2**63;b=a;m=a.method(:+);n=b.method(:+);puts :before;p [m,n].uniq.size;puts :after',
+  'a=2**63;b=2**63;m=a.method(:+);n=b.method(:+);puts :before;p ({m=>1,n=>2}).size;puts :after',
+  'a=2**63;b=a;m=a.method(:+);n=b.method(:+);puts :before;p ({m=>1,n=>2}).size;puts :after',
+  'a=10**20;b=10**20;m=a.method(:+);n=b.method(:+);puts :before;p m==n;puts :after',
+  'a=10**20;b=a;m=a.method(:+);n=b.method(:+);puts :before;p m==n;puts :after',
+  'a=10**20;b=10**20;m=a.method(:+);n=b.method(:+);puts :before;p m.eql?(n);puts :after',
+  'a=10**20;b=a;m=a.method(:+);n=b.method(:+);puts :before;p m.eql?(n);puts :after',
+  'a=10**20;b=10**20;m=a.method(:+);n=b.method(:+);puts :before;p m.hash;puts :after',
+  'a=10**20;b=a;m=a.method(:+);n=b.method(:+);puts :before;p m.hash;puts :after',
+  'a=10**20;b=10**20;m=a.method(:+);n=b.method(:+);puts :before;p [m,n].uniq.size;puts :after',
+  'a=10**20;b=a;m=a.method(:+);n=b.method(:+);puts :before;p [m,n].uniq.size;puts :after',
+  'a=10**20;b=10**20;m=a.method(:+);n=b.method(:+);puts :before;p ({m=>1,n=>2}).size;puts :after',
+  'a=10**20;b=a;m=a.method(:+);n=b.method(:+);puts :before;p ({m=>1,n=>2}).size;puts :after',
+  'a=-(10**20);b=-(10**20);m=a.method(:+);n=b.method(:+);puts :before;p m==n;puts :after',
+  'a=-(10**20);b=a;m=a.method(:+);n=b.method(:+);puts :before;p m==n;puts :after',
+  'a=-(10**20);b=-(10**20);m=a.method(:+);n=b.method(:+);puts :before;p m.eql?(n);puts :after',
+  'a=-(10**20);b=a;m=a.method(:+);n=b.method(:+);puts :before;p m.eql?(n);puts :after',
+  'a=-(10**20);b=-(10**20);m=a.method(:+);n=b.method(:+);puts :before;p m.hash;puts :after',
+  'a=-(10**20);b=a;m=a.method(:+);n=b.method(:+);puts :before;p m.hash;puts :after',
+  'a=-(10**20);b=-(10**20);m=a.method(:+);n=b.method(:+);puts :before;p [m,n].uniq.size;puts :after',
+  'a=-(10**20);b=a;m=a.method(:+);n=b.method(:+);puts :before;p [m,n].uniq.size;puts :after',
+  'a=-(10**20);b=-(10**20);m=a.method(:+);n=b.method(:+);puts :before;p ({m=>1,n=>2}).size;puts :after',
+  'a=-(10**20);b=a;m=a.method(:+);n=b.method(:+);puts :before;p ({m=>1,n=>2}).size;puts :after',
+] as const;
+
+test.each(unavailableMethodReceiverIdentityCases)(
+  'Method comparisons and hashes reject unavailable heap Integer identity: %s',
+  (source) => {
+    expect(run(source)).toMatchObject({
+      kind: 'executed',
+      stdout: 'before\n',
+      uncaughtException: '大きな Integer のオブジェクト同一性は、この採点環境では使えません。',
+    });
+  }
+);

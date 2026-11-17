@@ -12,7 +12,7 @@ import {
   RSymbol,
   type Value,
 } from './objects';
-import { rt } from './runtime';
+import { rt, UnsupportedFeatureError } from './runtime';
 import { codePointCharacters } from './unicodeText';
 
 export function str(s: string): RString {
@@ -211,6 +211,11 @@ export function range(begin: Value, end: Value, exclusive: boolean): RRange {
 
 export function truthy(value: Value): boolean {
   return value !== false && value !== NIL;
+}
+
+export function requireObjectIdentity(value: Value): void {
+  if (typeof value === 'bigint' && (value < -(1n << 62n) || value >= 1n << 62n))
+    throw new UnsupportedFeatureError('大きな Integer のオブジェクト同一性');
 }
 
 export function sameIdentity(left: Value, right: Value): boolean {
