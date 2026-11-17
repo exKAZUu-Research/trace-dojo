@@ -1,6 +1,6 @@
 import { panic } from './arith';
 import { asBigFloat, BigFloat, type FloatBits, floatOf, FORMATS } from './floats';
-import { errorUnionOffsets, fieldOffsets, optionalNicheBits, sizeOf, unionOffsets } from './layout';
+import { bitSizeOf, errorUnionOffsets, fieldOffsets, optionalNicheBits, sizeOf, unionOffsets } from './layout';
 import { copyForStorage, undefinedValue } from './semaBase';
 import { type Type, typeId } from './types';
 import {
@@ -26,12 +26,14 @@ interface FieldLocation {
   constant?: { value: Value };
 }
 
-const memories = new WeakMap<Value[], BufferMemory>();
-const referenceIds = new WeakMap<object, bigint>();
-const references = new WeakValueMap<string, object>();
-let nextReferenceId = 1n;
-const errorReferenceIds = new WeakMap<object, bigint>();
-let nextErrorReferenceId = 1n;
+export class BufferMemorySpace {
+  readonly memories = new WeakMap<Value[], BufferMemory>();
+  readonly referenceIds = new WeakMap<object, bigint>();
+  readonly references = new WeakValueMap<string, object>();
+  nextReferenceId = 1n;
+  readonly errorReferenceIds = new WeakMap<object, bigint>();
+  nextErrorReferenceId = 1n;
+}
 
 // code-gauge-allow functionParameterCount 7 -- Binds typed storage, its byte region, work budget, and initialized prefix together.
 export function bindBufferMemory(
@@ -40,18 +42,20 @@ export function bindBufferMemory(
   count: number,
   buffer: Slice,
   offset: number,
-  spend: () => void,
+  execution: { readonly bufferMemory: BufferMemorySpace; spend: (cost?: number) => void },
   initialized = count
 ): void {
+  const spend = (): void => execution.spend();
+  const space = execution.bufferMemory;
   if (!('slots' in memory) || !Array.isArray(memory.slots)) return;
   const destination = memory as Slots;
   const initial = destination.slots.slice(0, initialized).map(copyForStorage);
   const location = storageLocation(buffer.target.slots, buffer.start);
   const bytes = location.storage as Value[];
-  let backing = memories.get(bytes);
+  let backing = space.memories.get(bytes);
   if (!backing) {
-    backing = new BufferMemory(bytes, spend);
-    memories.set(bytes, backing);
+    backing = new BufferMemory(bytes, spend, space);
+    space.memories.set(bytes, backing);
   }
   const start = location.index + offset;
   for (let index = 0; index < sizeOf(type) * count; index++) {
@@ -70,7 +74,8 @@ class BufferMemory {
 
   constructor(
     private readonly bytes: Value[],
-    private readonly spend: () => void
+    private readonly spend: () => void,
+    private readonly space: BufferMemorySpace
   ) {}
 
   slots(fields: readonly FieldLocation[]): Value[] {
@@ -94,8 +99,8 @@ class BufferMemory {
     return slots;
   }
 
-  // code-gauge-allow functionNcss 38 -- Decodes each scalar representation and transparent wrapper from shared bytes.
-  // code-gauge-allow functionCognitiveComplexity 21 -- Decodes each scalar representation and transparent wrapper from shared bytes.
+  // code-gauge-allow functionNcss 40 -- Decodes each scalar representation and transparent wrapper from shared bytes.
+  // code-gauge-allow functionCognitiveComplexity 22 -- Decodes each scalar representation and transparent wrapper from shared bytes.
   private read(type: Type, offset: number, packed?: number): Value {
     if (type.kind === 'array' || type.kind === 'struct' || type.kind === 'union')
       return this.readAggregate(type, offset);
@@ -111,7 +116,9 @@ class BufferMemory {
         return decodeFloat(this.readBits(offset, type.bits), type.bits);
       }
       case 'enum': {
-        return BigInt.asUintN(type.tagType?.bits ?? 0, this.readBits(offset, packed ?? sizeOf(type) * 8));
+        const bits = type.tagType?.bits ?? 0;
+        const value = this.readBits(offset, packed ?? sizeOf(type) * 8);
+        return type.tagType?.signed ? BigInt.asIntN(bits, value) : BigInt.asUintN(bits, value);
       }
       case 'pointer': {
         const pointer = this.reference(offset, type);
@@ -167,7 +174,7 @@ class BufferMemory {
           (type.fields ?? []).map((field, index) => ({
             type: field.type,
             offset: offset + offsets[index],
-            packed: type.layout === 'packed' ? packedBits(field.type) : undefined,
+            packed: type.layout === 'packed' ? bitSizeOf(field.type) : undefined,
             constant: field.comptimeValue,
           }))
         )
@@ -286,7 +293,7 @@ class BufferMemory {
             field.type,
             offset + offsets[index],
             (value as ZStruct).slots[index],
-            type.layout === 'packed' ? packedBits(field.type) : undefined
+            type.layout === 'packed' ? bitSizeOf(field.type) : undefined
           );
         }
         return;
@@ -338,7 +345,7 @@ class BufferMemory {
   private reference(offset: number, type: Type, bits = 64): Value {
     const id = this.readBits(offset, bits);
     const key = referenceKey(id, type, bits);
-    const value = this.referenceHolds.get(key) ?? references.get(key);
+    const value = this.referenceHolds.get(key) ?? this.space.references.get(key);
     if (value) this.referenceHolds.set(key, value);
     return (value as Value) ?? undefinedValue(type);
   }
@@ -350,20 +357,20 @@ class BufferMemory {
     }
     let id: bigint;
     if (bits === 16) {
-      const existing = errorReferenceIds.get(value);
-      id = existing ?? 1n + (nextErrorReferenceId++ % 65_535n);
-      errorReferenceIds.set(value, id);
+      const existing = this.space.errorReferenceIds.get(value);
+      id = existing ?? 1n + (this.space.nextErrorReferenceId++ % 65_535n);
+      this.space.errorReferenceIds.set(value, id);
     } else {
       const location = value instanceof Pointer ? value.storageLocation() : { storage: value, index: 0 };
-      let base = referenceIds.get(location.storage);
+      let base = this.space.referenceIds.get(location.storage);
       if (base === undefined) {
-        base = nextReferenceId++;
-        referenceIds.set(location.storage, base);
+        base = this.space.nextReferenceId++;
+        this.space.referenceIds.set(location.storage, base);
       }
       id = (base << 40n) + BigInt(location.index * 8);
     }
     const key = referenceKey(id, type, bits);
-    references.set(key, value);
+    this.space.references.set(key, value);
     this.referenceHolds.set(key, value);
     this.writeBits(offset, bits, id);
   }
@@ -383,13 +390,6 @@ function referenceKey(id: bigint, type: Type, bits: number): string {
 
 function propertyIndex(property: string | symbol): number | undefined {
   return typeof property === 'string' && /^(0|[1-9]\d*)$/.test(property) ? Number(property) : undefined;
-}
-
-function packedBits(type: Type): number {
-  if (type.kind === 'int') return type.bits;
-  if (type.kind === 'bool') return 1;
-  if (type.kind === 'enum') return type.tagType?.bits ?? 0;
-  return sizeOf(type) * 8;
 }
 
 // code-gauge-allow functionCognitiveComplexity 20 -- Encodes normal, subnormal, infinite, and NaN values across the supported binary formats.

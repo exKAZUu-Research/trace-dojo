@@ -3,6 +3,7 @@ import { type ProgramInput, ProgramIO } from '../interpreter/programIo';
 import { StepTracker } from '../interpreter/stepTracker';
 import type { TracedFrame } from '../interpreter/traceRecorder';
 import { TurtleWorld } from '../interpreter/turtleWorld';
+import { BufferMemorySpace } from './bufferMemory';
 import { rejectRuntimeEffect } from './comptimeMemory';
 import type { FunctionInstance } from './functions';
 import { createUtf8Decoder } from './utf8';
@@ -69,6 +70,7 @@ export interface Deferred {
 }
 
 export class Runtime {
+  readonly bufferMemory = new BufferMemorySpace();
   readonly budget: ExecutionBudget;
   readonly io: ProgramIO;
   readonly world = new TurtleWorld();

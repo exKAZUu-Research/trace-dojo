@@ -139,9 +139,12 @@ export function optionalNicheBits(child: Type): number | undefined {
   return child.kind === 'pointer' ? 64 : child.kind === 'error_set' ? 16 : undefined;
 }
 
-function bitSizeOf(type: Type): number {
+export function bitSizeOf(type: Type): number {
   if (type.kind === 'int') return type.bits;
   if (type.kind === 'bool') return 1;
+  if (type.kind === 'enum') return type.tagType?.bits ?? 0;
+  if (type.kind === 'struct' && type.layout === 'packed')
+    return (type.fields ?? []).reduce((sum, field) => sum + bitSizeOf(field.type), 0);
   return sizeOf(type) * 8;
 }
 

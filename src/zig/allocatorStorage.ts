@@ -88,7 +88,7 @@ export function bindAllocatorBytes(
       count,
       reservation.region.buffer,
       reservation.region.offset,
-      () => frame.runtime.spend(),
+      frame.runtime,
       initialized
     );
   }

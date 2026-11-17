@@ -187,9 +187,8 @@ function grow(
   let metadata = Array.from<number>({ length: capacity }).fill(0);
   if (reserved.region) {
     const { buffer, offset } = reserved.region;
-    const spend = (): void => frame.runtime.spend();
-    bindBufferMemory(keys, keyType, capacity, buffer, offset + layout.keys, spend, 0);
-    bindBufferMemory(values, valueType, capacity, buffer, offset + layout.values, spend, 0);
+    bindBufferMemory(keys, keyType, capacity, buffer, offset + layout.keys, frame.runtime, 0);
+    bindBufferMemory(values, valueType, capacity, buffer, offset + layout.values, frame.runtime, 0);
     metadata = byteMetadata(buffer, offset + 24, capacity);
     metadata.fill(0);
     for (let index = 0; index < 4; index++) buffer.set(offset + 16 + index, BigInt((capacity >>> (index * 8)) & 255));

@@ -3899,3 +3899,60 @@ test('mathematical comparisons preserve mixed integer values and floating peer c
     uncaughtException: undefined,
   });
 });
+
+test.each([
+  ['enum(i8){minus=-1,plus=1}', 'E', '.minus', 'p.*', '.minus true'],
+  ['enum(i16){minus=-257,plus=1}', 'struct{value:E}', '.{.value=.minus}', 'p.value', '.minus true'],
+])('fixed-buffer enum tags retain their signed backing values: %s', (definition, type, value, access, expected) => {
+  const source = `const std=@import("std");const E=${definition};pub fn main()!void{var bytes:[64]u8=undefined;var f=std.heap.FixedBufferAllocator.init(&bytes);const p=try f.allocator().create(${type});p.*=${value};std.debug.print("{} {}",.{${access},${access}==E.minus});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: expected,
+    uncaughtException: undefined,
+  });
+});
+
+test.each([
+  ['enum(u2){a,b,c,d}', 'packed struct{mode:E,count:u6}', '.{.mode=.b,.count=5}', 'p.mode', '1 .b 5 21'],
+  [
+    'enum(u2){a,b,c,d}',
+    'packed struct{inner:packed struct{a:u3},count:u5}',
+    '.{.inner=.{.a=1},.count=5}',
+    'p.inner.a',
+    '1 1 5 41',
+  ],
+])('packed fields use exact recursive bit offsets: %s %s', (definition, type, value, access, expected) => {
+  const source = `const std=@import("std");const E=${definition};const S=${type};pub fn main()!void{var bytes:[1]u8=undefined;var f=std.heap.FixedBufferAllocator.init(&bytes);const p=try f.allocator().create(S);p.*=${value};std.debug.print("{} {} {} {}",.{f.end_index,${access},p.count,bytes[0]});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: expected,
+    uncaughtException: undefined,
+  });
+});
+
+test.each(['u8', 'struct{value:u8}'])('serialized buffer references cannot address another execution: %s', (type) => {
+  const initial = type === 'u8' ? '73' : '.{.value=73}';
+  const access = type === 'u8' ? 'p.*.*' : 'p.*.value';
+  const victim = `const std=@import("std");const T=${type};pub fn main()!void{var secret:T=${initial};_=&secret;var bytes:[8]u8=undefined;var f=std.heap.FixedBufferAllocator.init(&bytes);const p=try f.allocator().create(*T);p.*=&secret;}`;
+  const attacker = `const std=@import("std");const T=${type};pub fn main()!void{var bytes:[8]u8=undefined;var f=std.heap.FixedBufferAllocator.init(&bytes);const p=try f.allocator().create(*T);@memset(&bytes,0);bytes[5]=1;std.debug.print("{}",.{${access}});}`;
+  expect(executeProgram('zig', victim)).toMatchObject({ kind: 'executed', uncaughtException: undefined });
+  expect(executeProgram('zig', attacker)).toMatchObject({
+    kind: 'executed',
+    stderr: '',
+    uncaughtException: 'Segmentation fault',
+  });
+  expect(executeProgram('zig', attacker)).toMatchObject({
+    kind: 'executed',
+    stderr: '',
+    uncaughtException: 'Segmentation fault',
+  });
+});
+
+test('serialized references can cross distinct fixed buffers within one execution', () => {
+  const source = `const std=@import("std");pub fn main()!void{var n:u8=73;var first:[8]u8=undefined;var second:[8]u8=undefined;var a=std.heap.FixedBufferAllocator.init(&first);var b=std.heap.FixedBufferAllocator.init(&second);const p=try a.allocator().create(*u8);const q=try b.allocator().create(*u8);p.*=&n;@memcpy(&second,&first);q.*.*+=1;std.debug.print("{} {}",.{n,p.*.*});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: '74 74',
+    uncaughtException: undefined,
+  });
+});
