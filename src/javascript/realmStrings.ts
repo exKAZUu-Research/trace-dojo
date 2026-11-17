@@ -80,13 +80,19 @@ export function defineStringBuiltins(builder: RealmBuilder): void {
 function defineLocaleAndLegacy(method: StringMethod): void {
   // Node.js formats for its default locale, en-US, when no locale is given.
   method('toLocaleUpperCase', 0, ({ runtime, args }, text) =>
-    throwingHostErrors(runtime, () =>
-      text.toLocaleUpperCase((args[0] === undefined ? 'en-US' : hostLocales(runtime, args[0])) as string)
+    built(
+      runtime,
+      throwingHostErrors(runtime, () =>
+        text.toLocaleUpperCase((args[0] === undefined ? 'en-US' : hostLocales(runtime, args[0])) as string)
+      )
     )
   );
   method('toLocaleLowerCase', 0, ({ runtime, args }, text) =>
-    throwingHostErrors(runtime, () =>
-      text.toLocaleLowerCase((args[0] === undefined ? 'en-US' : hostLocales(runtime, args[0])) as string)
+    built(
+      runtime,
+      throwingHostErrors(runtime, () =>
+        text.toLocaleLowerCase((args[0] === undefined ? 'en-US' : hostLocales(runtime, args[0])) as string)
+      )
     )
   );
   method('isWellFormed', 0, (_, text) => text.isWellFormed());
@@ -187,8 +193,9 @@ function defineExtractions(method: StringMethod): void {
   method('trim', 0, (_, text) => text.trim());
   method('trimStart', 0, (_, text) => text.trimStart());
   method('trimEnd', 0, (_, text) => text.trimEnd());
-  method('toUpperCase', 0, (_, text) => text.toUpperCase());
-  method('toLowerCase', 0, (_, text) => text.toLowerCase());
+  // A case mapping can lengthen a string, as `ß` becomes `SS`.
+  method('toUpperCase', 0, ({ runtime }, text) => built(runtime, text.toUpperCase()));
+  method('toLowerCase', 0, ({ runtime }, text) => built(runtime, text.toLowerCase()));
   method('normalize', 0, ({ runtime, args }, text) => {
     const form = args[0] === undefined ? 'NFC' : runtime.toString(args[0]);
     if (!['NFC', 'NFD', 'NFKC', 'NFKD'].includes(form)) {
@@ -301,4 +308,10 @@ function expandReplacement(replacement: string, matched: string, position: numbe
     if (symbol === '`') return text.slice(0, position);
     return text.slice(position + matched.length);
   });
+}
+
+/** Charges for a string a host method built, which may be longer than its input. */
+function built(runtime: Runtime, text: string): string {
+  runtime.buildString(text.length);
+  return text;
 }

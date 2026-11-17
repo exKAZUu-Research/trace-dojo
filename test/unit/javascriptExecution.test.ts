@@ -368,6 +368,11 @@ test.each([
     "'x'.repeat(2 ** 28);",
     { kind: 'executed', uncaughtException: 'RangeError: Invalid string length' },
   ],
+  [
+    'a case conversion lengthening a string past the limit',
+    "'ß'.repeat(600000).toLocaleUpperCase();",
+    { kind: 'executed', uncaughtException: 'RangeError: Invalid string length' },
+  ],
   ['many objects', 'const a = [];\nwhile (true) a.push({ x: 1 });', { kind: 'limitExceeded' }],
   [
     'concatenating an array with itself many times',
