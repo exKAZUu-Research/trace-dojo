@@ -40,6 +40,7 @@ interface ArenaNode extends Record<string, unknown> {
 const allocations = new WeakMap<object, Map<number, Allocation>>();
 const NODE_SIZE = 24;
 
+// code-gauge-allow functionCognitiveComplexity 23 -- Keeps zero-size frees, in-place remaps and allocator-specific reservations at one allocation boundary.
 export function reserveAllocatorBytes(
   frame: Frame,
   state: AllocatorState | undefined,
@@ -52,10 +53,16 @@ export function reserveAllocatorBytes(
   const owner = state?.owner?.load();
   const prior = previous ? allocationOf(previous) : undefined;
   if (length === 0) {
+    if (prior?.region) {
+      frame.runtime.spend(prior.region.length);
+      for (let index = 0; index < prior.region.length; index++)
+        prior.region.buffer.set(prior.region.offset + index, 0xaan);
+    }
     if (previous) freeAllocatorMemory(state, previous);
     return { complete: () => {} };
   }
   if (owner instanceof ZStruct && state?.name === 'fixed') {
+    if (prior?.live && previous && resizeAllocatorBytes(state, previous, length)) return reservation(prior);
     const buffer = owner.slots[1] as Slice;
     const used = Number(owner.slots[0] as bigint);
     const start =
@@ -263,15 +270,20 @@ function arenaReservation(state: AllocatorState, handle: NativeHandle, start: nu
   return reservation({ state, start, end: start + length, region, arenaNode: handle, live: true });
 }
 
-// code-gauge-allow functionCognitiveComplexity 21 -- Applies the distinct in-place resize rules of each allocator.
+// code-gauge-allow functionCognitiveComplexity 27 -- Applies the distinct in-place resize rules of each allocator.
+// code-gauge-allow functionNcss 33 -- Keeps allocation record updates after the allocator-specific resize decisions.
 function resizeAllocatorBytes(state: AllocatorState | undefined, memory: object, size: number): boolean {
   const record = allocationOf(memory);
   if (!record?.live) return false;
   const owner = state?.owner?.load();
   if (owner instanceof ZStruct && state?.name === 'fixed') {
     const buffer = owner.slots[1] as Slice;
-    if (record.end !== Number(owner.slots[0] as bigint) || record.start + size > buffer.length) return false;
-    owner.slots[0] = BigInt(record.start + size);
+    if (record.end !== Number(owner.slots[0] as bigint)) {
+      if (size > record.end - record.start) return false;
+    } else {
+      if (record.start + size > buffer.length) return false;
+      owner.slots[0] = BigInt(record.start + size);
+    }
   } else if (owner instanceof ZStruct && state?.name === 'arena') {
     const first = arenaHeader(owner).slots[0];
     if (!(first instanceof NativeHandle) || first !== record.arenaNode) return size <= record.end - record.start;

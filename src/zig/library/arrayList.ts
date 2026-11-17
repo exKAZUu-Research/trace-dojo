@@ -18,7 +18,18 @@ import {
   USIZE,
   VOID,
 } from '../types';
-import { NativeHandle, NULL, optionalSome, Pointer, Slice, storeInto, type Value, ZArray, ZStruct } from '../values';
+import {
+  ErrorValue,
+  NativeHandle,
+  NULL,
+  optionalSome,
+  Pointer,
+  Slice,
+  storeInto,
+  type Value,
+  ZArray,
+  ZStruct,
+} from '../values';
 import { zeroSlice } from '../zeroSizedMemory';
 import { orderedRemover, sliceMutator } from './arrayListAlgorithms';
 import { constSlice } from './common';
@@ -151,14 +162,16 @@ function ensureTotalCapacity(frame: Frame, list: List, capacity: number | bigint
   return reallocate(frame, list, sizeOf(child) === 0 ? capacity : growCapacity(Number(capacity), child), child);
 }
 
-function setLength(list: List, length: number | bigint): void {
+function setLength(list: List, length: number | bigint, poison = true): void {
   if (BigInt(length) > MAX_CAPACITY || BigInt(length) < 0n) panic(PANIC.overflow);
   const size = Number(length);
   if (sizeOf(list.child) === 0) list.items = zeroSlice(list.items, BigInt(length), list.child);
   else {
-    spendTransfers(list, Math.max(0, list.items.length - size));
-    for (let index = size; index < list.items.length; index++)
-      list.items.target.slots[list.items.start + index] = undefinedValue(list.child);
+    if (poison) {
+      spendTransfers(list, Math.max(0, list.items.length - size));
+      for (let index = size; index < list.items.length; index++)
+        list.items.target.slots[list.items.start + index] = undefinedValue(list.child);
+    }
     list.items = new Slice(list.items.target, list.items.start, size);
   }
   list.struct.slots[0] = list.items;
@@ -334,10 +347,10 @@ function defineMembers(type: StructType, child: Type): void {
       return;
     }),
     append: method('append', { args: [child], result: allocating(VOID), allocator: true }, (list, [item], frame) => {
-      if (!ensureTotalCapacity(frame, list, list.items.lengthValue + 1n, child)) return ERROR_OUT_OF_MEMORY;
+      const pointer = addOne(frame, list, child);
+      if (pointer instanceof ErrorValue) return pointer;
       spendTransfers(list, 1, 2);
-      storeInto(list.items.target, list.items.start + list.items.length, item);
-      setLength(list, list.items.lengthValue + 1n);
+      storeInto(pointer.target, pointer.index, item);
       return;
     }),
     appendAssumeCapacity: method('appendAssumeCapacity', { args: [child], result: VOID }, (list, [item]) => {
@@ -374,11 +387,12 @@ function defineMembers(type: StructType, child: Type): void {
         setLength(list, list.items.lengthValue - 1n);
         return undefinedValue(child);
       }
-      spendTransfers(list, list.items.lengthValue, 3);
-      const values = list.items.values().map(copyForStorage);
-      const [removed] = values.splice(position, 1);
-      for (const [at, value] of values.entries()) storeInto(list.items.target, list.items.start + at, value);
-      setLength(list, values.length);
+      spendTransfers(list, 1);
+      const removed = copyForStorage(list.items.get(position));
+      spendTransfers(list, list.items.lengthValue - (index as bigint) - 1n, 2);
+      for (let at = position; at + 1 < list.items.length; at++)
+        storeInto(list.items.target, list.items.start + at, list.items.get(at + 1));
+      setLength(list, list.items.lengthValue - 1n);
       return removed;
     }),
     swapRemove: method('swapRemove', { args: [USIZE], result: child }, (list, [index]) => {
@@ -444,8 +458,7 @@ function defineMembers(type: StructType, child: Type): void {
       (list, [length], frame) => {
         const size = length as bigint;
         if (size > list.items.lengthValue) panic(PANIC.unreachable);
-        setLength(list, size);
-        // The memory shrinks to the items, in place where the allocator can.
+        setLength(list, size, false);
         if (sizeOf(child) !== 0) reallocate(frame, list, size, child);
         return;
       }
@@ -503,11 +516,7 @@ function defineMembers(type: StructType, child: Type): void {
     addOne: method(
       'addOne',
       { args: [], result: allocating(pointerTo(child, false)), allocator: true },
-      (list, _, frame) => {
-        if (!ensureTotalCapacity(frame, list, list.items.lengthValue + 1n, child)) return ERROR_OUT_OF_MEMORY;
-        setLength(list, list.items.lengthValue + 1n);
-        return new Pointer(list.items.target, list.items.start + Number(list.items.lengthValue - 1n));
-      }
+      (list, _, frame) => addOne(frame, list, child)
     ),
     toOwnedSlice: method('toOwnedSlice', { args: [], result: allocating(items), allocator: true }, (list, _, frame) => {
       // The memory shrinks to the items, in place where the allocator can.
@@ -632,3 +641,11 @@ export function arrayListFactory(): () => Member {
 }
 
 export { constSlice };
+
+function addOne(frame: Frame, list: List, child: Type): Pointer | ErrorValue {
+  const length = list.items.lengthValue + 1n;
+  if (length > MAX_CAPACITY) panic(PANIC.overflow);
+  if (!ensureTotalCapacity(frame, list, length, child)) return ERROR_OUT_OF_MEMORY;
+  setLength(list, length);
+  return new Pointer(list.items.target, list.items.start + Number(length - 1n));
+}

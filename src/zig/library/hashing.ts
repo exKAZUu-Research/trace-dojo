@@ -8,6 +8,7 @@ import {
   type FnValue,
   NULL,
   Pointer,
+  type Slice,
   Some,
   type Value,
   type ZArray,
@@ -100,8 +101,8 @@ export function autoHashBytes(
   return bytes;
 }
 
-// code-gauge-allow functionNcss 55 -- Serializes each key representation while charging work before materialization.
-// code-gauge-allow functionCognitiveComplexity 26 -- Serializes each key representation while charging work before materialization.
+// code-gauge-allow functionNcss 60 -- Serializes each key representation while charging work before materialization.
+// code-gauge-allow functionCognitiveComplexity 29 -- Serializes each key representation while charging work before materialization.
 function appendHashBytes(
   bytes: number[],
   value: Value,
@@ -161,6 +162,12 @@ function appendHashBytes(
     }
     case 'pointer':
     case 'fn': {
+      if (type.kind === 'pointer' && type.size === 'slice') {
+        const slice = value as Slice;
+        appendInteger(bytes, hashAddress(new Pointer(slice.target, slice.start), identityOf), 8, spend);
+        appendInteger(bytes, slice.lengthValue, 8, spend);
+        return;
+      }
       appendInteger(bytes, hashAddress(value, identityOf), 8, spend);
       return;
     }

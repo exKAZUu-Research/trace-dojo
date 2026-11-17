@@ -7544,3 +7544,107 @@ test.each(['u8', 'u16'])('optional %s payload aliases share writes independently
     uncaughtException: undefined,
   });
 });
+
+test.each(['splitScalar', 'tokenizeScalar'])('public %s iterator indices retain slice bounds checks', (factory) => {
+  for (const method of ['rest', 'next', 'peek']) {
+    const source = `const std=@import("std");pub fn main()void{var i=std.mem.${factory}(u8,"abc",44);i.index=4;std.debug.print("{any}",.{i.${method}()});}`;
+    expect(executeProgram('zig', source)).toMatchObject({
+      kind: 'executed',
+      stderr: '',
+      uncaughtException: 'panic: start index 4 is larger than end index 3',
+    });
+  }
+});
+
+test.each(['allocatedSlice', 'unusedCapacitySlice'])(
+  'replacement allocation keeps exact %s lengths and checked overflow',
+  (view) => {
+    const setup = `const std=@import("std");pub fn main(init:std.process.Init)!void{var a:std.ArrayList(void)=.empty;try a.append(init.gpa,{});`;
+    const valid = `${setup}const s=try std.mem.replaceOwned(void,init.gpa,&[_]void{{}},&[_]void{{}},a.${view}());std.debug.print("{}",.{s.len});}`;
+    expect(executeProgram('zig', valid)).toMatchObject({
+      kind: 'executed',
+      stderr: view === 'allocatedSlice' ? '18446744073709551615' : '18446744073709551614',
+      uncaughtException: undefined,
+    });
+    for (const method of ['replacementSize', 'replaceOwned']) {
+      const call =
+        method === 'replaceOwned' ? 'try std.mem.replaceOwned(void,init.gpa,' : 'std.mem.replacementSize(void,';
+      const overflow = `${setup}_=${call}&[_]void{{},{}},&[_]void{{}},a.${view}());}`;
+      expect(executeProgram('zig', overflow)).toMatchObject({
+        kind: 'executed',
+        uncaughtException: 'panic: integer overflow',
+      });
+    }
+  }
+);
+
+test.each(['append(init.gpa,{})', 'addOne(init.gpa)'])('single item list %s panics on length overflow', (call) => {
+  const source = `const std=@import("std");pub fn main(init:std.process.Init)!void{var a:std.ArrayList(void)=.empty;try a.append(init.gpa,{});var b=std.ArrayList(void).fromOwnedSlice(a.allocatedSlice());_=b.${call} catch {std.debug.print("caught",.{});return;};}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: '',
+    uncaughtException: 'panic: integer overflow',
+  });
+});
+
+test.each([0, 1])('shrinkAndFree to %s follows allocator resize and free byte writes', (length) => {
+  const source = `const std=@import("std");pub fn main()void{var buf:[130]u8=undefined;var f=std.heap.FixedBufferAllocator.init(&buf);const g=f.allocator();var l:std.ArrayList(u8)=.empty;l.append(g,1) catch unreachable;l.append(g,42) catch unreachable;_=g.alloc(u8,1) catch unreachable;const end=f.end_index;l.shrinkAndFree(g,${length});std.debug.print("{} {} {}",.{buf[1],l.items.len,f.end_index==end});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: `${length === 0 ? 170 : 42} ${length} true`,
+    uncaughtException: undefined,
+  });
+});
+
+test.each([1, 2])('orderedRemove copies only the affected suffix at distance %s from the end', (distance) => {
+  const source = `const std=@import("std");pub fn main()void{var a:[200000]u8=@splat(7);var l=std.ArrayList(u8).fromOwnedSlice(&a);for(0..3)|_|{_=l.orderedRemove(l.items.len-${distance});}std.debug.print("{} {}",.{l.items.len,l.getLast()});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: '199997 7',
+    uncaughtException: undefined,
+  });
+});
+
+test.each(['AutoHashMap(u8,u8)', 'StringHashMap(u8)'])('clearing %s retains independently addressed values', (map) => {
+  const key = map.startsWith('Auto') ? '1' : '"x"';
+  const source = `const std=@import("std");pub fn main(init:std.process.Init)!void{var m=std.${map}.init(init.gpa);defer m.deinit();try m.put(${key},42);const p=m.getPtr(${key}).?;m.clearRetainingCapacity();std.debug.print("{} {}",.{p.*,m.count()});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: '42 0',
+    uncaughtException: undefined,
+  });
+});
+
+test.each([false, true])('cleared map roots preserve independent pointers: %s', (retain) => {
+  const source = `const std=@import("std");pub fn main(init:std.process.Init)!void{var m=std.AutoHashMap(u8,Turtle).init(init.gpa);defer m.deinit();try m.put(1,Turtle.init(0,1));${retain ? 'const p=m.getPtr(1).?;' : ''}m.clearRetainingCapacity();const t=Turtle.init(0,0);std.debug.print("{}",.{t.canMoveForward()});${retain ? '_=p.*;' : ''}}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: retain ? 'false' : 'true',
+    uncaughtException: undefined,
+  });
+});
+
+test.each(['[0]f32', '[0][]u8', '[2][0]f32'])('empty %s map keys do not hash an unused element type', (type) => {
+  const key = type === '[2][0]f32' ? '.{.{},.{}}' : '.{}';
+  const source = `const std=@import("std");pub fn main(init:std.process.Init)!void{var m=std.AutoHashMap(${type},u8).init(init.gpa);defer m.deinit();try m.put(${key},7);std.debug.print("{any}",.{m.get(${key})});}`;
+  expect(executeProgram('zig', source)).toMatchObject({ kind: 'executed', stderr: '7', uncaughtException: undefined });
+});
+
+test.each(['[1][]const u8', '?[]const u8'])('wrapped %s map keys use shallow slice identity', (type) => {
+  const key = type.startsWith('[1]') ? '.{a[0..]}' : 'a[0..]';
+  const other = type.startsWith('[1]') ? '.{b[0..]}' : 'b[0..]';
+  const source = `const std=@import("std");pub fn main(init:std.process.Init)!void{var a=[_]u8{120};var b=[_]u8{120};var m=std.AutoHashMap(${type},u8).init(init.gpa);defer m.deinit();try m.put(${key},7);std.debug.print("{any} {any}",.{m.get(${key}),m.get(${other})});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: '7 null',
+    uncaughtException: undefined,
+  });
+});
+
+test.each(['powi(u65535,x,40000) catch 0', 'pow(u65535,x,40000)'])(
+  'wide integer %s charges multiplication widths',
+  (call) => {
+    const source = `const std=@import("std");pub fn main()void{var x:u65535=2;_=&x;for(0..300)|_|{_=std.math.${call};}}`;
+    expect(executeProgram('zig', source)).toMatchObject({ kind: 'limitExceeded', limit: 'operations' });
+  }
+);

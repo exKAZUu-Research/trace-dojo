@@ -1,5 +1,5 @@
 // code-gauge-allow-file fileNcss 464 -- Keeps hash-map state, storage layout, and public method registration together.
-import { allocationSlots, transferCost, valueSlots } from '../allocation';
+import { allocationSlots, transferCost } from '../allocation';
 import { reserveAllocatorBytes } from '../allocatorStorage';
 // code-gauge-allow-file duplicateLines 19 -- Library types repeat the same shape of method on purpose, each over its own state.
 import { panic } from '../arith';
@@ -599,12 +599,8 @@ function defineMembers(types: MapTypes, keyType: Type, valueType: Type, kind: Ke
       'clearRetainingCapacity',
       { args: [], result: VOID, mutable: true },
       (state, _args, frame) => {
-        frame.runtime.spend(state.capacity * (1 + valueSlots(keyType) + valueSlots(valueType)));
+        frame.runtime.spend(state.capacity);
         state.metadata.fill(0);
-        for (let index = 0; index < state.capacity; index++) {
-          state.keys.slots[index] = undefinedValue(keyType);
-          state.values.slots[index] = undefinedValue(valueType);
-        }
         state.size = 0;
         state.available = Math.floor((state.capacity * MAX_LOAD) / 100);
         return;
@@ -727,12 +723,7 @@ function nextMember(
 
 function emptyMapValue(allocator?: Value): ZStruct {
   const state = emptyState();
-  const slots: Value[] = [
-    0,
-    0,
-    0,
-    new NativeHandle('hashMapAllocation', { metadata: state.metadata, keys: state.keys, values: state.values }),
-  ];
+  const slots: Value[] = [0, 0, 0, mapAllocation({ metadata: state.metadata, keys: state.keys, values: state.values })];
   if (allocator !== undefined) slots.push(allocator);
   return new ZStruct(slots);
 }
@@ -757,7 +748,7 @@ function readMapState(value: Value): MapState {
       enumerable: true,
       get: () => (header.slots[3] as NativeHandle).state[name],
       set: (value: unknown) => {
-        header.slots[3] = new NativeHandle('hashMapAllocation', {
+        header.slots[3] = mapAllocation({
           ...(header.slots[3] as NativeHandle).state,
           [name]: value,
         });
@@ -765,6 +756,18 @@ function readMapState(value: Value): MapState {
     });
   }
   return state;
+}
+
+function mapAllocation(state: Record<string, unknown>): NativeHandle {
+  return new NativeHandle('hashMapAllocation', state, function* (spend) {
+    const metadata = state.metadata as number[];
+    for (let index = 0; index < metadata.length; index++) {
+      spend();
+      if ((metadata[index] & 0x80) === 0) continue;
+      yield (state.keys as ZArray).get(index);
+      yield (state.values as ZArray).get(index);
+    }
+  });
 }
 
 function allocating(type: Type): Type {
@@ -784,8 +787,8 @@ function mapFactory(name: string, kind: KeyKind, managed: boolean): () => Member
   });
 }
 
-// code-gauge-allow functionNcss 34 -- Checks the supported key representations recursively before a hashing operation.
-function validateAutoKey(sema: SemaApi, type: Type, span: Span): void {
+// code-gauge-allow functionNcss 37 -- Checks the supported key representations recursively before a hashing operation.
+function validateAutoKey(sema: SemaApi, type: Type, span: Span, rejectSlices = true): void {
   if (hasPhysicalHashLayout(type, (cost) => sema.spendCompilation(cost))) return;
   switch (type.kind) {
     case 'void':
@@ -797,25 +800,29 @@ function validateAutoKey(sema: SemaApi, type: Type, span: Span): void {
       return;
     }
     case 'pointer': {
-      if (type.size === 'slice') sema.error(span, 'スライスをキーにするときは、std.StringHashMap を使ってください。');
+      if (rejectSlices && type.size === 'slice')
+        sema.error(span, 'スライスをキーにするときは、std.StringHashMap を使ってください。');
       return;
     }
-    case 'optional':
     case 'array': {
-      validateAutoKey(sema, type.child, span);
+      if (type.length !== 0n) validateAutoKey(sema, type.child, span, false);
+      return;
+    }
+    case 'optional': {
+      validateAutoKey(sema, type.child, span, false);
       return;
     }
     case 'error_union': {
-      validateAutoKey(sema, type.payload, span);
+      validateAutoKey(sema, type.payload, span, false);
       return;
     }
     case 'struct': {
-      for (const field of type.fields ?? []) validateAutoKey(sema, field.type, span);
+      for (const field of type.fields ?? []) validateAutoKey(sema, field.type, span, rejectSlices);
       return;
     }
     case 'union': {
       if (!type.tagType) sema.error(span, 'タグのない共用体は、自動ハッシュのキーにできません。');
-      for (const field of type.fields ?? []) validateAutoKey(sema, field.type, span);
+      for (const field of type.fields ?? []) validateAutoKey(sema, field.type, span, rejectSlices);
       return;
     }
     default: {

@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 672 -- Groups the related standard library operations that share this module.
+// code-gauge-allow-file fileNcss 674 -- Groups the related standard library operations that share this module.
 import { transferCost } from '../allocation';
 import { indexOutOfBounds, PANIC, panic } from '../arith';
 import type { Expression, Span } from '../ast';
@@ -47,7 +47,7 @@ import {
   orderValue,
   storeSliceValue,
   storeSliceValues,
-  subSlice,
+  subSlice as uncheckedSubSlice,
   tupleOf,
 } from './common';
 import { ALLOCATOR, allocatorState, ERROR_OUT_OF_MEMORY, reserveNativeAllocation } from './heap';
@@ -668,7 +668,7 @@ const MEMBERS: Record<string, () => Member> = {
       const source = sequence(x, spend),
         pattern = sequence(n, spend);
       const count = replacementCount(source, pattern, equality(frame));
-      return source.length + count * ((r as Slice).lengthValue - pattern.length);
+      return replacementLength(source.length, pattern.length, (r as Slice).lengthValue, count);
     });
   }),
   // code-gauge-allow functionNcss 50 -- Implements sequential replacement, overlap and capacity checks together.
@@ -963,9 +963,9 @@ function replacementPlan(
 ): AllocationPlan {
   const positions: bigint[] = [];
   const count = replacementCount(input, needle, equal, (position) => positions.push(position));
-  const length = input.length + count * (replacement.length - needle.length);
+  const length = replacementLength(input.length, needle.length, replacement.length, count);
   return {
-    length: Number(length),
+    length,
     build: () => {
       const values: Value[] = [];
       let cursor = 0n,
@@ -1170,3 +1170,17 @@ export function memNamespace(): StructType {
 
 export { TYPE };
 export type { Expression };
+
+function subSlice(slice: Slice, start: number | bigint, length: number | bigint): Slice {
+  const first = BigInt(start),
+    end = first + BigInt(length);
+  if (first > end) panic(`start index ${first} is larger than end index ${end}`);
+  if (end > slice.lengthValue) indexOutOfBounds(end, slice.lengthValue);
+  return uncheckedSubSlice(slice, start, length);
+}
+
+function replacementLength(input: bigint, needle: bigint, replacement: bigint, count: bigint): bigint {
+  const length = input + count * (replacement - needle);
+  if (length < 0n || length > (1n << 64n) - 1n) panic(PANIC.overflow);
+  return length;
+}

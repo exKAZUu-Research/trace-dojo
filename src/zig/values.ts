@@ -347,8 +347,13 @@ export class FnValue {
 export class NativeHandle {
   constructor(
     readonly kind: string,
-    readonly state: NativeState
+    readonly state: NativeState,
+    private readonly logicalReferences?: (spend: () => void) => Iterable<unknown>
   ) {}
+
+  references(spend: () => void): Iterable<unknown> {
+    return this.logicalReferences ? this.logicalReferences(spend) : Object.values(this.state);
+  }
 }
 
 export function hasUndefinedHeader(value: Value): boolean {

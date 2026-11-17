@@ -203,7 +203,7 @@ export class TurtleReachability {
     else if (item instanceof Some) push(item.value);
     else if (item instanceof NativeHandle) {
       if (item.state.turtle) turtles.add(item.state.turtle);
-      for (const value of Object.values(item.state)) push(value);
+      for (const value of item.references(() => this.spend())) push(value);
     } else if (Array.isArray(item)) {
       for (const value of item) push(value);
     } else if ('slots' in item && Array.isArray((item as Slots).slots)) {

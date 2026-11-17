@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 575 -- Groups the related standard library operations that share this module.
+// code-gauge-allow-file fileNcss 578 -- Groups the related standard library operations that share this module.
 import {
   checked,
   divCeil,
@@ -467,7 +467,8 @@ const POW_ERRORS = errorSetOf(['Overflow', 'Underflow']);
 
 /** `std.math.powi`, transcribed: the power, or the name of the error it returns. */
 // code-gauge-allow functionCognitiveComplexity 23 -- Transcribes the corresponding function of Zig's standard library or compiler step by step.
-function powi(x: bigint, y: bigint, type: IntType): bigint | 'Overflow' | 'Underflow' {
+// code-gauge-allow functionNcss 33 -- Keeps checked, metered exponentiation and its numeric edge cases together.
+function powi(x: bigint, y: bigint, type: IntType, spend: (cost: number) => void): bigint | 'Overflow' | 'Underflow' {
   const oneOverflows = maxInt(type) < 1n;
   const yEven = !oneOverflows && (y & 1n) === 0n;
   if (x === 1n || y === 0n || (x === -1n && yEven)) return oneOverflows ? 'Overflow' : 1n;
@@ -480,14 +481,17 @@ function powi(x: bigint, y: bigint, type: IntType): bigint | 'Overflow' | 'Under
   let accumulator = 1n;
   while (exponent > 1n) {
     if ((exponent & 1n) === 1n) {
+      spendIntegerOperation(accumulator, base, true, spend);
       accumulator *= base;
       if (!fitsInt(accumulator, type)) return 'Overflow';
     }
     exponent >>= 1n;
+    spendIntegerOperation(base, base, true, spend);
     base *= base;
     if (!fitsInt(base, type)) return 'Overflow';
   }
   if (exponent === 1n) {
+    spendIntegerOperation(accumulator, base, true, spend);
     accumulator *= base;
     if (!fitsInt(accumulator, type)) return 'Overflow';
   }
@@ -668,8 +672,8 @@ const MEMBERS: Record<string, () => Member> = {
     const x = sema.coerce(sema.compile(xArg, type), type, xArg);
     const y = sema.coerce(sema.compile(yArg, type), type, yArg);
     if (type.kind === 'int') {
-      return computed(type, [x, y], call.span, ([a, b]) => {
-        const result = powi(a as bigint, b as bigint, type);
+      return computed(type, [x, y], call.span, ([a, b], frame) => {
+        const result = powi(a as bigint, b as bigint, type, nativeBudget(sema, frame));
         if (typeof result === 'string') panic(`attempt to unwrap error: ${result}`);
         return result;
       });
@@ -684,8 +688,8 @@ const MEMBERS: Record<string, () => Member> = {
     if (type.kind !== 'int') return sema.error(call.span, 'std.math.powi は整数の型にだけ使えます。');
     const x = sema.coerce(sema.compile(xArg, type), type, xArg);
     const y = sema.coerce(sema.compile(yArg, type), type, yArg);
-    return computed(errorUnionOf(POW_ERRORS, type), [x, y], call.span, ([a, b]) => {
-      const result = powi(a as bigint, b as bigint, type);
+    return computed(errorUnionOf(POW_ERRORS, type), [x, y], call.span, ([a, b], frame) => {
+      const result = powi(a as bigint, b as bigint, type, nativeBudget(sema, frame));
       return typeof result === 'string' ? ErrorValue.of(result) : result;
     });
   }),
