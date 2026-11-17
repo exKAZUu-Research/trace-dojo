@@ -121,3 +121,48 @@ main=do
   expect(result.traceItems.filter(({ vars }) => vars.i === 1)).toHaveLength(4);
   expect(result.traceItems.filter(({ vars }) => vars.i === 1.1)).toHaveLength(4);
 });
+
+test.each([
+  ['Fractional', 'Float', '0.1', '0.1'],
+  ['Num', 'Int', '0', '1'],
+])('partial evidence cannot erase %s scalar types in either constraint order', (numeric, type, seed, increment) => {
+  const traces = [`(${numeric} a,Eq(Box a))`, `(Eq(Box a),${numeric} a)`].map((context) => {
+    const source = `import Control.Monad
+data Box a=Box a
+instance Eq(Box a) where _==_=True
+loop::${context}=>a->IO ()
+loop n=do
+ forM_ [n+${increment},n+${increment}] $ \\i->do
+  print(0::Int)
+main=loop(${seed}::${type})`;
+    const result = traceProgram('haskell', source, source);
+    const control = source.replace(`${context}=>a`, type);
+    expect(result.stdout).toBe('0\n0\n');
+    expect(result.traceItems).toEqual(traceProgram('haskell', control, control).traceItems);
+    return result.traceItems;
+  });
+  expect(traces[0]).toEqual(traces[1]);
+});
+
+test.each(['(LeftType(a,b),RightType(a,b))', '(RightType(a,b),LeftType(a,b))'])(
+  'partial structural evidence refines each component across inherited helper scopes: %s',
+  (context) => {
+    const source = `import Control.Monad
+class LeftType a
+instance LeftType(Float,b)
+class RightType a
+instance RightType(a,Int)
+loop::${context}=>(a,b)->IO ()
+loop n=do
+ let run xs=forM_ xs $ \\i->do {print(0::Int)}
+ run [fst n,fst n]
+ run [snd n,snd n]
+main=loop(0.1::Float,1::Int)`;
+    const result = traceProgram('haskell', source, source);
+    const control = source.replace(`${context}=>(a,b)`, '(Float,Int)');
+    expect(result.stdout).toBe('0\n0\n0\n0\n');
+    expect(result.traceItems).toEqual(traceProgram('haskell', control, control).traceItems);
+    expect(result.traceItems.filter(({ vars }) => vars.i === 0.1)).toHaveLength(4);
+    expect(result.traceItems.filter(({ vars }) => vars.i === 1)).toHaveLength(4);
+  }
+);

@@ -78,7 +78,7 @@ export function slotDisplayType(slot: Slot, fallback: Type = UNKNOWN_TYPE): Type
 export function slotTypeHint(slot: Slot, fallback: TypeHint = UNKNOWN_TYPE): TypeHint {
   const actual = slot instanceof TypedSlot ? slot.type : slot instanceof Thunk ? thunkTypeHint(slot) : undefined;
   if (!actual || actual === fallback) return fallback;
-  return { tag: 'refinement', template: fallback, actual };
+  return refineHint(fallback, actual);
 }
 
 export function thunkTypeHint(thunk: Thunk): TypeHintRef {
@@ -191,12 +191,13 @@ function scopedTypeChildren(template: Type, scope: DisplayTypeScope): TypeHint[]
   const type = prune(template);
   if (type.tag === 'tap') return [scopedTypeHint(type.fn, scope), scopedTypeHint(type.arg, scope)];
   if (type.tag !== 'tvar' && type.tag !== 'tgen') return [];
+  let result: TypeHint | undefined;
   for (let current: DisplayTypeScope | undefined = scope; current; current = current.parent) {
     chargeTypeWork();
     const actual = displayTypeBindings(current).get(type);
-    if (actual) return [actual];
+    if (actual) result = refineHint(result, actual);
   }
-  return [];
+  return result ? [result] : [];
 }
 
 function displayTypeBindings(scope: DisplayTypeScope): ReadonlyMap<Type, TypeHint> {
@@ -205,11 +206,18 @@ function displayTypeBindings(scope: DisplayTypeScope): ReadonlyMap<Type, TypeHin
   for (const { pattern, actual } of scope.constraints) {
     for (const variable of walkGraph(pattern, prune, typeChildren)) {
       if (variable.tag === 'tvar' || variable.tag === 'tgen')
-        bindings.set(variable, { tag: 'matchedType', pattern, variable, parent: actual });
+        bindings.set(
+          variable,
+          refineHint(bindings.get(variable), { tag: 'matchedType', pattern, variable, parent: actual })
+        );
     }
   }
   scope.bindings = bindings;
   return bindings;
+}
+
+function refineHint(template: TypeHint | undefined, actual: TypeHint): TypeHint {
+  return template ? { tag: 'refinement', template, actual } : actual;
 }
 
 function isConcreteType(type: Type): boolean {
