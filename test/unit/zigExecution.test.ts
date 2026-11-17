@@ -3552,3 +3552,36 @@ test('math domains retain explicit float widths, comptime hypot, and numeric pre
     uncaughtException: undefined,
   });
 });
+
+test.each([
+  ['unbounded value', '(if(get()) |_| 3 else |_| unreachable)<<1', 6],
+  ['unbounded amount', '1<<(if(get()) |_| 2 else |_| unreachable)', 4],
+  ['union payload', '(if(get()) |_| U{.x=3} else |_| unreachable).x', 3],
+  ['constant pointer', '(if(get()) |_| &value else |_| unreachable).*', 3],
+  ['readonly slice', '(if(get()) |_| @as([]const u8,&[_]u8{3}) else |_| unreachable)[0]', 3],
+  ['slice view', '((if(get()) |_| [_]u8{3,4} else |_| unreachable)[0..1])[0]', 3],
+  ['concatenation', '((if(get()) |_| [_]u8{3} else |_| unreachable) ++ [_]u8{4})[0]', 3],
+  ['signed division', '(if(get()) |_| @as(i32,6) else |_| unreachable) / 2', 3],
+  ['temporary address', '(&(if(get()) |_| @as(u8,3) else |_| unreachable)).*', 3],
+])('effectful facts survive %s without running effects at compilation', (_name, expression, length) => {
+  const source = `const std=@import("std");const value:u8=3;const U=union(enum){x:u8,y:void};fn get()error{}!u8{std.debug.print("call|",.{});return 1;}pub fn main()void{const n=${expression};const a:[n]u8=@splat(7);std.debug.print("{}",.{a.len});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: `call|${length}`,
+    uncaughtException: undefined,
+  });
+});
+
+test.each([
+  '(if(get()) |_| @as(*const u8,&value) else |_| unreachable).*',
+  '(if(get()) |_| @as([]const u8,&values) else |_| unreachable)[0]',
+])('readonly views of mutable backing do not acquire load facts: %s', (expression) => {
+  const source = `const std=@import("std");var value:u8=3;var values=[_]u8{3};fn get()error{}!u8{std.debug.print("call|",.{});value=9;values[0]=9;return 1;}pub fn main()void{const n=${expression};std.debug.print("{}",.{n});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: 'call|9',
+    uncaughtException: undefined,
+  });
+  const requiringFact = source.replace('std.debug.print("{}",.{n});', 'const a:[n]u8=@splat(7);_=a;');
+  expect(executeProgram('zig', requiringFact)).toMatchObject({ kind: 'compileError' });
+});

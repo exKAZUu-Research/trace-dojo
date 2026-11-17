@@ -86,6 +86,7 @@ import {
   wrapInt,
 } from './types';
 import {
+  compileTimeReadable,
   EnumLiteral,
   ErrorValue,
   FnValue,
@@ -409,7 +410,8 @@ export abstract class ExpressionCompiler extends SemaBase {
   }
 
   private sliceLengthValue(value: TExpr): bigint | undefined {
-    if (value.known && value.value instanceof Slice) return value.value.lengthValue;
+    const fact = staticResultOf(value);
+    if (fact?.value instanceof Slice) return fact.value.lengthValue;
     const length = knownLengthOf(value);
     return length === undefined ? undefined : BigInt(length);
   }
@@ -446,7 +448,7 @@ export abstract class ExpressionCompiler extends SemaBase {
 
   private unionField(base: TExpr, type: Extract<Type, { kind: 'union' }>, name: string, span: Span): TExpr {
     const fields = this.unionFields(type);
-    const index = fields.findIndex((field) => field.name === name);
+    const index = this.fieldIndexes(fields).get(name) ?? -1;
     if (index === -1) return this.error(span, `${typeName(type)} 型には、フィールド「${name}」がありません。`);
     const field = fields[index];
     const check = (value: Value): ZUnion => {
@@ -467,13 +469,12 @@ export abstract class ExpressionCompiler extends SemaBase {
       const parent = this.addressOf(base).value as Pointer;
       return knownAt(field.type, new Pointer(parent.load() as ZUnion, 0), span);
     }
-    const evaluate = base.eval;
     const place = base.place;
     const fieldPlace: Place | undefined = place && {
       isConst: place.isConst,
       locate: (frame) => new Pointer(check(place.locate(frame).load()), 0),
     };
-    return runtime(field.type, (frame) => check(evaluate(frame)).slots[0], span, fieldPlace);
+    return { ...this.derived(base, field.type, (value) => check(value).slots[0]), span, place: fieldPlace };
   }
 
   // Pointers --------------------------------------------------------------------------------------------------------
@@ -490,10 +491,10 @@ export abstract class ExpressionCompiler extends SemaBase {
       locate: (frame) => evaluate(frame) as Pointer,
       compileTimePointer: pointer.known && pointer.value instanceof Pointer ? pointer.value : undefined,
     };
-    if (pointer.known && pointer.value instanceof Pointer && type.isConst && pointer.value.target instanceof Constant) {
-      return { ...known(type.child, pointer.value.load(), span), place };
-    }
-    return runtime(type.child, (frame) => (evaluate(frame) as Pointer).load(), span, place);
+    const fact = staticResultOf(pointer);
+    return type.isConst && isConstantData(fact?.value)
+      ? { ...this.derived(pointer, type.child, (value) => (value as Pointer).load()), span, place }
+      : runtime(type.child, (frame) => (evaluate(frame) as Pointer).load(), span, place);
   }
 
   private dereference(expression: ExpressionOf<'deref'>): TExpr {
@@ -516,6 +517,13 @@ export abstract class ExpressionCompiler extends SemaBase {
     if (expression.known)
       return known(pointerTo(expression.type, true), this.constantPointer(expression.type, expression.value), span);
     if (place) return runtime(pointerTo(expression.type, place.isConst), (frame) => place.locate(frame), span);
+    const result = staticResultOf(expression);
+    if (result)
+      return this.fixedResult(
+        expression,
+        pointerTo(expression.type, true),
+        this.constantPointer(expression.type, result.value)
+      );
     const evaluate = expression.eval;
     return runtime(pointerTo(expression.type, true), (frame) => new Pointer(new Constant(evaluate(frame)), 0), span);
   }
@@ -678,7 +686,7 @@ export abstract class ExpressionCompiler extends SemaBase {
     // Slicing an array slices it where it lives, as through a pointer to it.
     let base = operand;
     if (type.kind === 'array') {
-      if (!operand.place && !operand.known)
+      if (!operand.place && !staticResultOf(operand))
         this.error(expression, 'この配列はスライスできません（変数に入れてください）。');
       base = this.addressOf(operand);
       type = base.type;
@@ -732,59 +740,43 @@ export abstract class ExpressionCompiler extends SemaBase {
       resultLength === undefined
         ? sliceOf(child, isConst, sentinel)
         : pointerTo(arrayOf(resultLength, child, sentinel), isConst);
-    const evaluateBase = base.eval;
-    const evaluateStart = start.eval;
-    const evaluateEnd = end?.eval;
-    const compute = (frame: Frame): { target: Slots; from: number; to: number; length: bigint } => {
-      const value = evaluateBase(frame);
-      return withHeldValues(frame, [value], () => {
-        let target: Slots;
-        let offset: number;
-        let length: bigint;
-        if (fromArray) {
-          const array = (value as Pointer).load() as ZArray;
-          target = array;
-          offset = array.offset;
-          length = BigInt(staticLen as number);
-        } else {
-          const slice = value as Slice;
-          target = slice.target;
-          offset = slice.start;
-          length = slice.lengthValue;
-        }
-        const fromValue = evaluateStart(frame) as bigint;
-        const toValue = evaluateEnd ? (evaluateEnd(frame) as bigint) : length;
-        if (toValue > length + (sourceSentinel === undefined ? 0n : 1n)) indexOutOfBounds(toValue, length);
-        if (fromValue > toValue) panic(`start index ${fromValue} is larger than end index ${toValue}`);
-        const from = Number(fromValue),
-          to = Number(toValue);
-        if (sentinel !== undefined && !scalarValuesEqual(target.slots[offset + to], sentinel)) {
-          panic(`sentinel mismatch: expected ${String(sentinel)}, found ${String(target.slots[offset + to])}`);
-        }
-        return { target, from: offset + from, to: offset + to, length: toValue - fromValue };
-      });
+    const operands = [base, start, ...(end ? [end] : [])];
+    const render = ([value, first, last]: Value[]): Value => {
+      let target: Slots;
+      let offset: number;
+      let length: bigint;
+      if (fromArray) {
+        const array = (value as Pointer).load() as ZArray;
+        target = array;
+        offset = array.offset;
+        length = BigInt(staticLen as number);
+      } else {
+        const slice = value as Slice;
+        target = slice.target;
+        offset = slice.start;
+        length = slice.lengthValue;
+      }
+      const fromValue = first as bigint;
+      const toValue = end ? (last as bigint) : length;
+      if (toValue > length + (sourceSentinel === undefined ? 0n : 1n)) indexOutOfBounds(toValue, length);
+      if (fromValue > toValue) panic(`start index ${fromValue} is larger than end index ${toValue}`);
+      const from = offset + Number(fromValue),
+        to = offset + Number(toValue);
+      if (sentinel !== undefined && !scalarValuesEqual(target.slots[to], sentinel))
+        panic(`sentinel mismatch: expected ${String(sentinel)}, found ${String(target.slots[to])}`);
+      return resultLength === undefined
+        ? new Slice(target, from, toValue - fromValue)
+        : new Pointer(new Constant(new ZArray(target.slots, from, to - from, sentinel !== undefined)), 0);
     };
-    if (resultLength !== undefined) {
-      return {
-        ...runtime(
-          resultType,
-          (frame) => {
-            const { target, from, to } = compute(frame);
-            return new Pointer(new Constant(new ZArray(target.slots, from, to - from, sentinel !== undefined)), 0);
-          },
-          expression
-        ),
-        knownLength: base.known || base.knownLength !== undefined ? resultLength : undefined,
-      };
-    }
-    return runtime(
-      resultType,
-      (frame) => {
-        const { target, from, length } = compute(frame);
-        return new Slice(target, from, length);
-      },
-      expression
-    );
+    const evaluators = operands.map((operand) => operand.eval);
+    return {
+      ...runtime(resultType, (frame) => render(evaluateHeld(frame, evaluators)), expression),
+      staticResult:
+        sentinel === undefined || isConstantData(staticResultOf(base)?.value)
+          ? this.constantResult(operands, render, expression)
+          : undefined,
+      knownLength: base.known || base.knownLength !== undefined ? resultLength : undefined,
+    };
   }
 
   private sentinelValue(expression: Expression, child: Type): Value {
@@ -1056,7 +1048,7 @@ export abstract class ExpressionCompiler extends SemaBase {
   }
 
   // code-gauge-allow functionCognitiveComplexity 20 -- Keeps numeric peer-type checks, budget checks, and evaluation together.
-  // code-gauge-allow functionNcss 37 -- Keeps numeric operand coercion and evaluation together.
+  // code-gauge-allow functionNcss 39 -- Keeps numeric operand coercion and evaluation together.
   private arithmetic(expression: ExpressionOf<'binary'>, resultType: Type | undefined): TExpr {
     const { operator } = expression;
     // Zig gives the operands of arithmetic no result type, so `@floatFromInt(x) / 2` is an error.
@@ -1068,8 +1060,21 @@ export abstract class ExpressionCompiler extends SemaBase {
       this.error(expression, `bool の値には ${operator} ではなく and・or を使います。`);
     }
     const kinds = new Set([left.type.kind, right.type.kind]);
-    if (operator === '/' && kinds.has('comptime_int') && kinds.has('comptime_float') && !isZero(right.value)) {
-      this.checkMixedDivision(left, right, expression);
+    const initialLeft = staticResultOf(left),
+      initialRight = staticResultOf(right);
+    if (
+      operator === '/' &&
+      kinds.has('comptime_int') &&
+      kinds.has('comptime_float') &&
+      initialLeft &&
+      initialRight &&
+      !isZero(initialRight.value)
+    ) {
+      this.checkMixedDivision(
+        known(left.type, initialLeft.value, left.span),
+        known(right.type, initialRight.value, right.span),
+        expression
+      );
     }
     const type = this.peerType([left, right], expression);
     if (!isArithmeticType(type)) {
@@ -1078,9 +1083,11 @@ export abstract class ExpressionCompiler extends SemaBase {
     left = this.coerce(left, type, expression.left);
     right = this.coerce(right, type, expression.right);
     this.checkDivision(operator, type, left, right, expression);
-    if (type.kind === 'comptime_int' && left.known && right.known) {
-      const aBits = (left.value as bigint).toString(2).length;
-      const bBits = (right.value as bigint).toString(2).length;
+    const leftResult = staticResultOf(left),
+      rightResult = staticResultOf(right);
+    if (type.kind === 'comptime_int' && leftResult && rightResult) {
+      const aBits = (leftResult.value as bigint).toString(2).length;
+      const bBits = (rightResult.value as bigint).toString(2).length;
       const resultBits = operator === '*' ? aBits + bBits : Math.max(aBits, bBits) + 1;
       if (resultBits > LIMITS.maxSlots) throw new ExecutionLimitError('storage');
       this.compilationBudget.spend(Math.ceil(resultBits / 64));
@@ -1146,7 +1153,9 @@ export abstract class ExpressionCompiler extends SemaBase {
    */
   private checkDivision(operator: BinaryOperator, type: Type, left: TExpr, right: TExpr, span: Span): void {
     if (operator !== '/' && operator !== '%') return;
-    const bothKnown = left.known && right.known;
+    const a = staticResultOf(left),
+      b = staticResultOf(right);
+    const bothKnown = Boolean(a && b);
     if (operator === '/' && type.kind === 'int' && type.signed && !bothKnown) {
       this.error(
         span,
@@ -1154,7 +1163,7 @@ export abstract class ExpressionCompiler extends SemaBase {
       );
     }
     const mayBeNegative = (type.kind === 'int' && type.signed) || type.kind !== 'int';
-    if (operator === '%' && mayBeNegative && !(bothKnown && sign(left.value) >= 0 && sign(right.value) > 0)) {
+    if (operator === '%' && mayBeNegative && !(bothKnown && sign(a?.value) >= 0 && sign(b?.value) > 0)) {
       this.error(
         span,
         `符号付きの整数や浮動小数点数の余りには、@rem か @mod を使ってください（${typeName(type)} 型です）。`
@@ -1237,6 +1246,7 @@ export abstract class ExpressionCompiler extends SemaBase {
     }
   }
 
+  // code-gauge-allow functionCognitiveComplexity 17 -- Keeps unbounded and fixed-width shift contracts together.
   private shift(expression: ExpressionOf<'binary'>, resultType: Type | undefined): TExpr {
     const left = this.compile(expression.left, resultType);
     const type = left.type;
@@ -1244,22 +1254,27 @@ export abstract class ExpressionCompiler extends SemaBase {
       return this.error(expression, `シフトは整数の型にだけ使えます（${typeName(type)} 型です）。`);
     }
     if (type.kind !== 'int') {
-      const right = this.compile(expression.right);
-      const amount = this.knownValue(
-        this.coerce(right, COMPTIME_INT, expression.right),
-        'comptime_int のシフトの量'
-      ) as bigint;
-      const value = this.knownValue(left, 'comptime_int の値') as bigint;
-      if (amount < 0n) this.error(expression.right, 'シフトの量が負の数です。');
-      if (
-        expression.operator !== '>>' &&
-        value !== 0n &&
-        amount + BigInt(value.toString(2).length) > BigInt(LIMITS.maxSlots)
-      )
-        throw new ExecutionLimitError('storage');
-      const result = expression.operator === '>>' ? value >> amount : value << amount;
-      return known(type, result, expression);
+      const right = this.comptimeOperand(this.coerce(this.compile(expression.right), COMPTIME_INT, expression.right));
+      const source = this.comptimeOperand(left);
+      return this.combine(
+        [source, right],
+        type,
+        ([a, b]) => {
+          const value = a as bigint,
+            amount = b as bigint;
+          if (amount < 0n) this.error(expression.right, 'シフトの量が負の数です。');
+          if (
+            expression.operator !== '>>' &&
+            value !== 0n &&
+            amount + BigInt(value.toString(2).length) > BigInt(LIMITS.maxSlots)
+          )
+            throw new ExecutionLimitError('storage');
+          return expression.operator === '>>' ? value >> amount : value << amount;
+        },
+        expression
+      );
     }
+
     const int = type;
     const amountType = log2IntType(int);
     const right = this.coerce(this.compile(expression.right, amountType), amountType, expression.right);
@@ -1274,11 +1289,15 @@ export abstract class ExpressionCompiler extends SemaBase {
   }
 
   protected checkKnownShift(amount: TExpr, type: IntType, span: Span): void {
-    if (amount.known && (amount.value as bigint) >= BigInt(type.bits))
-      this.error(span, `シフトの量 ${amount.value as bigint} は、${typeName(type)} 型のビット数以上です。`);
+    if (staticResultOf(amount) && (staticResultOf(amount)?.value as bigint) >= BigInt(type.bits))
+      this.error(
+        span,
+        `シフトの量 ${staticResultOf(amount)?.value as bigint} は、${typeName(type)} 型のビット数以上です。`
+      );
   }
 
   /** `a ++ b`: concatenates arrays whose lengths are known at compile time. */
+  // code-gauge-allow functionCognitiveComplexity 17 -- Keeps element typing, immutable backing, and value snapshots together.
   private concatenate(expression: ExpressionOf<'binary'>): TExpr {
     const left = this.compile(expression.left);
     const right = this.compile(expression.right);
@@ -1305,18 +1324,27 @@ export abstract class ExpressionCompiler extends SemaBase {
       );
       return a.viaPointer ? new Pointer(new Constant(array), 0) : array;
     };
-    if (left.known && right.known) return known(resultType, build(a.read(left.value), b.read(right.value)), expression);
+    const readable =
+      (!a.viaPointer || isConstantData(staticResultOf(left)?.value)) &&
+      (!b.viaPointer || isConstantData(staticResultOf(right)?.value));
+    if (left.known && right.known && readable)
+      return known(resultType, build(a.read(left.value), b.read(right.value)), expression);
     const evaluateLeft = (frame: Frame): Value => copyForFrame(frame, left.eval(frame), left.type);
     const evaluateRight = (frame: Frame): Value => copyForFrame(frame, right.eval(frame), right.type);
-    return runtime(
-      resultType,
-      (frame) => {
-        frame.runtime.reserveStorage(valueSlots(arrayType));
-        const values = evaluateHeld(frame, [evaluateLeft, evaluateRight]);
-        return build(a.read(values[0]), b.read(values[1]));
-      },
-      expression
-    );
+    return {
+      ...runtime(
+        resultType,
+        (frame) => {
+          frame.runtime.reserveStorage(valueSlots(arrayType));
+          const values = evaluateHeld(frame, [evaluateLeft, evaluateRight]);
+          return build(a.read(values[0]), b.read(values[1]));
+        },
+        expression
+      ),
+      staticResult: readable
+        ? this.constantResult([left, right], ([x, y]) => build(a.read(x), b.read(y)), expression)
+        : undefined,
+    };
   }
 
   /** `a ** n`: repeats an array a number of times known at compile time. */
@@ -1642,7 +1670,7 @@ function constantKey(value: Value, spend: () => void): string {
     const location = value.storageLocation();
     return `pointer ${objectId(location.storage)} ${location.index}`;
   }
-  if (value instanceof Slice) return `slice ${objectId(value.target.slots)} ${value.start} ${value.length}`;
+  if (value instanceof Slice) return `slice ${objectId(value.target.slots)} ${value.start} ${value.lengthValue}`;
   if (value instanceof FnValue) return `fn ${objectId(value.fn)}`;
   return valueKey(value);
 }
@@ -1691,7 +1719,7 @@ function isConstIndexable(type: Type, place: Place | undefined): boolean {
 }
 
 function isConstantData(value: Value): boolean {
-  return value instanceof Pointer && value.target instanceof Constant;
+  return (value instanceof Pointer || value instanceof Slice) && compileTimeReadable(value);
 }
 
 function elementSlots(value: Value, type: Type): { slots: Value[]; start: number } {

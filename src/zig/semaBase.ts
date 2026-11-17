@@ -984,7 +984,10 @@ export abstract class SemaBase implements SemaApi {
     return runtime(field.type, (frame) => (evaluate(frame) as ZStruct).slots[index], span);
   }
 
-  /** An expression computed from others, known when they all are. */
+  protected comptimeOperand(operand: TExpr): TExpr {
+    return staticResultOf(operand) ? operand : known(operand.type, this.knownValue(operand, '値'), operand.span);
+  }
+
   protected combine(operands: readonly TExpr[], type: Type, compute: (values: Value[]) => Value, span: Span): TExpr {
     const result = this.constantResult(operands, compute, span);
     if (operands.every((operand) => operand.known)) return known(type, result?.value, span);

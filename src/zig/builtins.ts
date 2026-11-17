@@ -45,7 +45,6 @@ import {
   knownLengthOf,
   newArray,
   runtime,
-  staticResultOf,
   type TExpr,
 } from './semaBase';
 import {
@@ -553,10 +552,6 @@ export abstract class BuiltinCompiler extends ExpressionCompiler {
           : target.kind === 'enum';
     if (!accepted) this.error(expression, `${expression.name} の結果の型として ${typeName(target)} 型は使えません。`);
     return target as CastTargets[K];
-  }
-
-  private comptimeOperand(operand: TExpr): TExpr {
-    return staticResultOf(operand) ? operand : known(operand.type, this.knownValue(operand, '値'), operand.span);
   }
 
   private intCastBuiltin(arg: Expression, target: CastTargets['int'], span: Span): TExpr {
