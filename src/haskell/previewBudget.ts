@@ -3,6 +3,7 @@ import { type Thunk, type Value } from './values';
 
 interface PreviewFamily {
   activeScopes: number;
+  activeWorkScopes: number;
   operations: number;
   milliseconds: number;
   timeLimit: number;
@@ -10,6 +11,7 @@ interface PreviewFamily {
 }
 
 interface PreviewUsage {
+  epoch: number;
   family: PreviewFamily;
   operations: number;
   share: number;
@@ -27,9 +29,11 @@ export interface PreviewView {
 interface PreviewScope {
   statement: object | undefined;
   families: Set<PreviewFamily>;
+  workFamilies: Set<PreviewFamily>;
 }
 
 interface PreviewCost {
+  epoch: number;
   usage: PreviewUsage;
   operations: number;
 }
@@ -72,7 +76,7 @@ export class PreviewBudget {
   private readonly aborted = new WeakMap<Thunk, WeakSet<PreviewUsage>>();
   private milliseconds = 0;
   private active: PreviewTransaction | undefined;
-  private operations = 0;
+  private activeOperations = 0;
   private readonly scopes = new Map<object, PreviewScope>();
   private activeFamilies = 0;
   private readonly familyTimeLimit = LIMITS.maxMilliseconds / 2;
@@ -90,9 +94,26 @@ export class PreviewBudget {
     const scope = this.scopes.get(frame);
     if (!scope) return;
     this.scopes.delete(frame);
+    for (const family of scope.workFamilies) {
+      family.activeWorkScopes--;
+      if (family.activeWorkScopes === 0) this.activeFamilies--;
+    }
     for (const family of scope.families) {
       family.activeScopes--;
-      if (family.activeScopes === 0) this.activeFamilies--;
+      if (family.activeScopes === 0) this.retire(family);
+    }
+  }
+
+  private retire(family: PreviewFamily): void {
+    this.activeOperations -= family.operations;
+    family.operations = 0;
+    family.milliseconds = 0;
+    for (const usage of family.views.values()) {
+      usage.epoch++;
+      usage.operations = 0;
+      usage.milliseconds = 0;
+      usage.share = 1;
+      usage.timeLimit = family.timeLimit;
     }
   }
 
@@ -103,12 +124,12 @@ export class PreviewBudget {
       const { usage } = active;
       usage.operations += operations;
       usage.family.operations += operations;
-      this.operations += operations;
+      this.activeOperations += operations;
       const debt = active.frames.at(-1)?.debt;
       if (debt) {
         const previous = debt.costs.at(-1);
-        if (previous?.usage === usage) previous.operations += operations;
-        else debt.costs.push({ usage, operations });
+        if (previous?.usage === usage && previous.epoch === usage.epoch) previous.operations += operations;
+        else debt.costs.push({ epoch: usage.epoch, usage, operations });
         debt.executionOperations += executionOperations;
         debt.allocations += allocations;
       }
@@ -122,9 +143,9 @@ export class PreviewBudget {
     if (!active) throw new Error('Preview evaluation requires a display view');
     if (this.aborted.get(slot)?.has(active.usage)) throw new DisplayAbort();
     const family = active.usage.family;
-    if (!active.scope.families.has(family)) {
-      active.scope.families.add(family);
-      if (family.activeScopes++ === 0) this.activeFamilies++;
+    if (!active.scope.workFamilies.has(family)) {
+      active.scope.workFamilies.add(family);
+      if (family.activeWorkScopes++ === 0) this.activeFamilies++;
     }
     if (this.remainingOperations(active.usage) <= 0) throw new DisplayAbort();
     const savedForcing = active.forcing;
@@ -149,6 +170,11 @@ export class PreviewBudget {
   run<T>(view: PreviewView, work: () => T): T {
     if (this.active) return work();
     const usage = this.usageFor(view.owner, view.key, view.share);
+    const scope = this.scopeFor(view.frame);
+    if (!scope.families.has(usage.family)) {
+      scope.families.add(usage.family);
+      usage.family.activeScopes++;
+    }
     const remainingTime = Math.min(
       LIMITS.maxMilliseconds - this.milliseconds,
       usage.timeLimit - usage.milliseconds,
@@ -157,7 +183,7 @@ export class PreviewBudget {
     if (remainingTime <= 0) throw new DisplayAbort();
     const started = performance.now();
     this.active = {
-      scope: this.scopeFor(view.frame),
+      scope,
       usage,
       deadline: started + remainingTime,
       forcing: false,
@@ -234,7 +260,8 @@ export class PreviewBudget {
     return { operations: executionOperations, allocations };
   }
 
-  private refund({ usage, operations }: PreviewCost): void {
+  private refund({ epoch, usage, operations }: PreviewCost): void {
+    if (epoch !== usage.epoch) return;
     if (operations > 0) {
       const milliseconds = (usage.milliseconds * operations) / usage.operations;
       usage.milliseconds -= milliseconds;
@@ -242,13 +269,13 @@ export class PreviewBudget {
     }
     usage.operations -= operations;
     usage.family.operations -= operations;
-    this.operations -= operations;
+    this.activeOperations -= operations;
   }
 
   private scopeFor(frame: object): PreviewScope {
     let scope = this.scopes.get(frame);
     if (!scope) {
-      scope = { statement: undefined, families: new Set() };
+      scope = { statement: undefined, families: new Set(), workFamilies: new Set() };
       this.scopes.set(frame, scope);
     }
     return scope;
@@ -259,6 +286,7 @@ export class PreviewBudget {
     if (!family) {
       family = {
         activeScopes: 0,
+        activeWorkScopes: 0,
         operations: 0,
         milliseconds: 0,
         timeLimit: this.familyTimeLimit,
@@ -269,7 +297,7 @@ export class PreviewBudget {
     let usage = family.views.get(view);
     const timeLimit = family.timeLimit * share;
     if (!usage) {
-      usage = { family, operations: 0, share, milliseconds: 0, timeLimit };
+      usage = { epoch: 0, family, operations: 0, share, milliseconds: 0, timeLimit };
       family.views.set(view, usage);
     } else {
       usage.share = Math.min(usage.share, share);
@@ -296,7 +324,7 @@ export class PreviewBudget {
   private remainingOperations(usage: PreviewUsage): number {
     const limit = LIMITS.maxOperations / Math.max(2, this.activeFamilies);
     return Math.min(
-      LIMITS.maxOperations - this.operations,
+      LIMITS.maxOperations - this.activeOperations,
       limit * usage.share - usage.operations,
       limit - usage.family.operations
     );

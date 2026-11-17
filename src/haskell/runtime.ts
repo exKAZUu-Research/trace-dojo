@@ -16,6 +16,7 @@ import { Dict, type Env, type Slot, Thunk, type Value } from './values';
 export { DisplayAbort } from './previewBudget';
 
 const ALLOCATION_OVERHEAD = 8;
+const ALLOCATION_LIMIT = LIMITS.maxSlots * ALLOCATION_OVERHEAD;
 
 /** A call shown in a trace: a named function (or the program's `main`) running `IO` statements. */
 export class TraceFrame implements TracedFrame {
@@ -57,6 +58,7 @@ export class Runtime implements TracedRuntime<TraceFrame> {
   private readonly globals = new Map<GlobalDef, Slot>();
   private readonly dictCache = new Map<InstanceInfo, Dict>();
   private allocated = 0;
+  private previewAllocated = 0;
   private gcMilliseconds = 0;
   private readonly previews = new PreviewBudget();
 
@@ -85,7 +87,7 @@ export class Runtime implements TracedRuntime<TraceFrame> {
   }
 
   beginPreviewStatement(owner: object, frame: TraceFrame): void {
-    this.previews.beginStatement(owner, frame);
+    if (this.steps.recorder) this.previews.beginStatement(owner, frame);
   }
 
   endPreviewStatement(owner: object, frame: TraceFrame): void {
@@ -104,6 +106,7 @@ export class Runtime implements TracedRuntime<TraceFrame> {
     const cost = this.previews.consume(slot, this.displayRemaining === undefined);
     if (cost) {
       this.budget.spend(cost.operations);
+      this.previewAllocated -= cost.allocations;
       this.recordAllocation(cost.allocations);
     }
   }
@@ -122,7 +125,9 @@ export class Runtime implements TracedRuntime<TraceFrame> {
 
   allocate(count: number): void {
     if (this.displayRemaining !== undefined) {
+      if (this.previewAllocated + count > ALLOCATION_LIMIT) throw new DisplayAbort();
       this.spendDisplay(count, Math.max(0, count - ALLOCATION_OVERHEAD), count);
+      this.previewAllocated += count;
       return;
     }
     // Calls and thunk entries cover fixed-size bookkeeping; charging it again rejects ordinary library work.
@@ -132,7 +137,7 @@ export class Runtime implements TracedRuntime<TraceFrame> {
 
   private recordAllocation(count: number): void {
     this.allocated += count;
-    if (this.allocated > LIMITS.maxSlots * ALLOCATION_OVERHEAD) throw new ExecutionLimitError('operations');
+    if (this.allocated > ALLOCATION_LIMIT) throw new ExecutionLimitError('operations');
   }
 
   private spendDisplay(cost: number, executionCost: number, allocations = 0): void {

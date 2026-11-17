@@ -1105,6 +1105,62 @@ ${helpers}`;
   }
 });
 
+test.each([
+  [100, 1000, true],
+  [1000, 200, true],
+  [100, 1000, false],
+])(
+  'completed expensive cohorts release preview allowance: %i iterations, %i elements, distinct=%s',
+  (iterations, size, distinct) => {
+    const names = distinct ? ['burn0', 'burn1'] : ['burn', 'burn'];
+    const helpers = [...new Set(names)]
+      .map(
+        (name) => `${name}=forM_ [1..${iterations}::Int] $ \\j -> do
+ let a=reverse [1..${size}::Int]
+ print j`
+      )
+      .join('\n');
+    const source = `import Control.Monad
+main=do
+ ${names[0]}
+ ${names[1]}
+ forM_ [1..300::Int] $ \\i -> do
+  let n=sum [1..10::Int]+i
+  print i
+${helpers}`;
+    const execution = executeProgram('haskell', source);
+    expect(execution.kind).toBe('executed');
+    if (execution.kind !== 'executed') return;
+    const recording = traceProgram('haskell', source, source);
+    expect(recording.uncaughtException).toBeUndefined();
+    expect(recording.stdout).toBe(execution.stdout);
+    const assignments = recording.traceItems.filter((item) => item.line === 6);
+    expect(assignments).toHaveLength(300);
+    for (const [index, item] of assignments.entries()) expect(item.vars.n).toBe(index + 56);
+  }
+);
+
+test.each([10, 100])('returned previewed values retain execution costs across retired cohorts: sum 1..%i', (count) => {
+  const source = `import Control.Monad
+build i=do
+ let n=sum [1..${count}::Int]+i
+ return n
+main=forM_ [1..1000::Int] $ \\i -> do
+ n<-build i
+ print n`;
+  const execution = executeProgram('haskell', source);
+  if (count === 100) {
+    expect(execution).toMatchObject({ kind: 'limitExceeded', limit: 'operations' });
+    expect(() => traceProgram('haskell', source, source)).toThrowError(ExecutionLimitError);
+    return;
+  }
+  expect(execution.kind).toBe('executed');
+  if (execution.kind !== 'executed') return;
+  const recording = traceProgram('haskell', source, source);
+  expect(recording.uncaughtException).toBeUndefined();
+  expect(recording.stdout).toBe(execution.stdout);
+});
+
 test.each([20, 30, 77])('demanded scalar previews preserve every loop assignment: sum 1..%i', (count) => {
   const source = `import Control.Monad
 main=forM_ [1..1000::Int] $ \\i -> do
