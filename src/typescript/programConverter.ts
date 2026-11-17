@@ -66,6 +66,6 @@ export class TypeScriptProgramConverter extends ProgramConverter {
   }
 
   override convert(root: Node): Program {
-    return { ...super.convert(root), rejectsFunctionText: true };
+    return { ...super.convert(root), rejectsFunctionText: true, allowsOnlyStringRawTag: true };
   }
 }

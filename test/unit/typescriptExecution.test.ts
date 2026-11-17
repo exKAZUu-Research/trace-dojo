@@ -76,6 +76,11 @@ test.each([
   ],
   ['satisfies', 'const a = 1 satisfies number;', 'satisfies 演算子は、この採点環境では使えません。'],
   [
+    'a String.raw replaced by the program',
+    'String.raw = (...a: any[]) => 42 as any;\nconsole.log(String.raw`x`);',
+    'タグ付きテンプレートは、この採点環境では使えません。',
+  ],
+  [
     'a tag spelled String.raw that names a parameter',
     'const raw = (...a: unknown[]) => 1;\nfunction f(String: { raw: typeof raw }) { return String.raw`x`; }',
     'タグ付きテンプレートは、この採点環境では使えません。',

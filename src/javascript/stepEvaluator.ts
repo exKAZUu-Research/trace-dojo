@@ -348,6 +348,7 @@ export abstract class StepEvaluator extends ExpressionEvaluator {
     if (expression.optional && (fn === undefined || fn === null)) return SHORT_CIRCUIT;
     const args = yield* this.holdingSteps([fn, thisValue], () => this.argumentSteps(expression.args));
     if (!isCallable(fn)) return runtime.throwError('TypeError', `${expression.calleeText} is not a function`);
+    if (expression.isTaggedTemplate) runtime.checkTag(fn);
     return this.holdWhile([fn, thisValue, ...args], () => runtime.call(fn, thisValue, args, expression.row));
   }
 }

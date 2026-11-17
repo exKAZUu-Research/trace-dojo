@@ -53,6 +53,8 @@ export interface Realm {
    * step through directly; an iterator whose methods the program replaced is stepped through its methods instead.
    */
   hostIteratorMethods: Set<JsFunction>;
+  /** The builtin `String.raw`, which a program may replace. */
+  stringRaw?: JsFunction;
   /** The symbols `Symbol.for` registered in this run, by key, which end with the run. */
   symbolRegistry: Map<string, symbol>;
   /** `%GeneratorPrototype%`, with the methods every generator object has. */

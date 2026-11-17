@@ -13,6 +13,8 @@ export interface Program {
    * source a compiler printed rather than as written.
    */
   rejectsFunctionText?: boolean;
+  /** Whether a tagged template may only call the builtin `String.raw`, as for TypeScript, whose other tags come later. */
+  allowsOnlyStringRawTag?: boolean;
 }
 
 /** The names a function body or block declares, which its scope creates before running its statements. */
@@ -214,6 +216,8 @@ export type Expression = Span & {
         args: Argument[];
         optional: boolean;
         calleeText: string;
+        /** Whether it calls the tag of a tagged template. */
+        isTaggedTemplate?: boolean;
       }
     | { kind: 'new'; callee: Expression; args: Argument[]; calleeText: string }
     | { kind: 'assign'; operator: string; target: Pattern; value: Expression }

@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 464 -- One evaluator of every expression kind, whose cases share its references and calls.
+// code-gauge-allow-file fileNcss 465 -- One evaluator of every expression kind, whose cases share its references and calls.
 import { LIMITS } from '../interpreter/limits';
 import type { Argument, ClassNode, Expression, MemberExpression, ObjectMember } from './ast';
 import { EvaluatorBase, nameFunction, type Reference, referenceBase, SHORT_CIRCUIT } from './evaluatorBase';
@@ -48,7 +48,6 @@ export abstract class ExpressionEvaluator extends EvaluatorBase {
   }
 
   // code-gauge-allow functionNcss 60 -- One case per expression kind, each delegating where it grows.
-  // code-gauge-allow duplicateLines 19 -- A switch over expression kinds, which the Java compiler's resembles by coincidence.
   private evaluateKind(expression: Expression): ChainValue {
     const { runtime } = this;
     switch (expression.kind) {
@@ -323,6 +322,7 @@ export abstract class ExpressionEvaluator extends EvaluatorBase {
       // The arguments are evaluated before the callee is checked, as in JavaScript.
       const args = this.evaluateArguments(expression.args);
       if (!isCallable(fn)) return runtime.throwError('TypeError', `${expression.calleeText} is not a function`);
+      if (expression.isTaggedTemplate) runtime.checkTag(fn);
       appendAll(temporaries, args);
       return runtime.call(fn, thisValue, args, expression.row);
     } finally {
