@@ -12,6 +12,7 @@ import {
   type Property,
   regularOf,
   stringType,
+  symbolType,
   type Type,
   undefinedType,
   unionOf,
@@ -373,12 +374,9 @@ export class MemberChecker {
   private computedIndexedType(access: IndexAccess, objectType: Type, index: Type, indexType: Type): Type {
     const isNumeric = this.c.relations.isAssignable(index, numberType);
     const isStringy = this.c.relations.isAssignable(index, stringType);
-    if (
-      !isNumeric &&
-      !isStringy &&
-      !this.c.relations.isAssignable(index, this.c.globalType('Symbol')) &&
-      !isIntrinsic(index, 'symbol')
-    ) {
+    // A key may mix kinds, as `0 | "a"`, so long as each member is a string, a number, or a symbol.
+    const keyTypes = unionOf([stringType, numberType, symbolType, this.c.globalType('Symbol')]);
+    if (!this.c.relations.isAssignable(index, keyTypes)) {
       this.c.error(access.indexNode, `型 '${this.c.print(index)}' はインデックスに使えません。`);
       return errorType;
     }
