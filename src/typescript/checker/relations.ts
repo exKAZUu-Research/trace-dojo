@@ -80,7 +80,7 @@ export class Relations {
     if (s.kind === 'typeParameter') {
       return (t.kind === 'typeParameter' && s.id === t.id) || this.constraintRelated(s, t, relation);
     }
-    if (t.kind === 'typeParameter') return false;
+    if (t.kind === 'typeParameter') return relation === 'comparable' && this.constraintAdmits(s, t);
     if (s.kind === 'indexedAccess' || s.kind === 'keyof' || s.kind === 'conditional') {
       if (t.kind === s.kind && this.sameGeneric(s, t)) return true;
       const constraint = this.c.baseConstraint(s);
@@ -179,10 +179,20 @@ export class Relations {
     return s.kind === 'object' && this.objectRelated(s, t, relation);
   }
 
+  /**
+   * Whether a type parameter is related to a type through its constraint; one without a constraint is comparable to
+   * any type but another type parameter, as TypeScript lets `x as T` and `v === "x"` stand in generic code.
+   */
   private constraintRelated(source: TypeParameter, target: Type, relation: Relation): boolean {
     const constraint = this.c.constraintOf(source);
-    if (!constraint) return this.isEmptyObjectType(target) && false;
+    if (!constraint) return relation === 'comparable' && target.kind !== 'typeParameter';
     return this.isRelated(constraint, target, relation);
+  }
+
+  /** Whether a type is comparable to a type parameter, which it is unless the parameter's constraint excludes it. */
+  private constraintAdmits(source: Type, target: TypeParameter): boolean {
+    const constraint = this.c.constraintOf(target);
+    return constraint ? this.isRelated(source, constraint, 'comparable') : true;
   }
 
   private sameGeneric(a: Type, b: Type): boolean {
