@@ -1,0 +1,12 @@
+class ReturnInTry { x; constructor() { try { return; } finally { this.x = 1; } } }
+const n: number = new ReturnInTry().x;
+class ReturnInCatch { x; constructor(b: boolean) { try { if (b) throw new Error(); } catch { return; } finally { this.x = "s"; } } }
+const s: string = new ReturnInCatch(true).x;
+class BreakSkipsFinally { x; constructor() { for (;;) { try { break; } finally { this.x = 2; } } } }
+const a: number = new BreakSkipsFinally().x;
+class ContinueSkipsFinally { x; constructor() { for (let i = 0; i < 1; i++) { try { continue; } finally { this.x = 2; } } } }
+class ReturnBeforeAssignment { x; constructor(q: boolean) { try { if (q) return; this.x = "s"; } finally { } } }
+const d: string = new ReturnBeforeAssignment(true).x;
+class BreakThenReturn { x; constructor(q: boolean) { for (;;) { try { if (q) break; } finally { this.x = 2; } return; } } }
+const e: number = new BreakThenReturn(true).x;
+console.log(n, s, a, d, e);

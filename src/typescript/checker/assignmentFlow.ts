@@ -1,10 +1,10 @@
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
-import { named, skipParentheses } from './syntax';
+import { isImmediatelyInvoked, named, skipParentheses } from './syntax';
 import { type Type, undefinedType } from './types';
 
-/** What `this.<name>` may hold at a point of the constructor: assigned types, or what a loop's iteration began with. */
-type Value = Type | LoopEntry;
+/** What a tracked target may hold at a point: what its assignments gave it, or what a loop's iteration began with. */
+type Value = object;
 /** The values at a point, or undefined where no path reaches it. */
 type Values = Value[] | undefined;
 
@@ -34,26 +34,47 @@ const nestedFunctionTypes = new Set([
  * initializer takes its type: TypeScript follows the constructor's control flow from `undefined` to each of its exits.
  */
 export function typesAtConstructorExit(body: TreeNode, name: string, assignedType: (value: TreeNode) => Type): Type[] {
-  const flow = new ConstructorFieldFlow(name, assignedType);
+  const flow = new AssignmentFlow((left) => isThisField(left, name), assignedType);
   const end = flow.statement(body, [undefinedType]);
-  return merge([end, ...flow.returns])?.filter((value): value is Type => !isLoopEntry(value)) ?? [];
+  return (merge([end, ...flow.returns]) ?? []).filter((value) => !isLoopEntry(value)) as Type[];
 }
 
-/** Follows the assignments to one field of `this` through a constructor's statements and expressions. */
-class ConstructorFieldFlow {
-  readonly returns: Values[] = [];
-  private readonly targets: JumpTarget[] = [];
+const UNASSIGNED = { kind: 'unassigned' };
+const ASSIGNED = { kind: 'assigned' };
+
+/**
+ * Whether an assignment of the targets may not have run on some path from the start of `body` to `read`, as
+ * TypeScript reports a property a program adds to a function before one of its assignments runs.
+ */
+export function mayBeUnassignedAt(body: TreeNode, targets: Set<number>, read: TreeNode): boolean {
+  const flow = new AssignmentFlow(
+    (left) => targets.has(left.id),
+    () => ASSIGNED,
+    read
+  );
+  flow.statement(body, [UNASSIGNED]);
+  return flow.atRead?.includes(UNASSIGNED) ?? false;
+}
+
+/** Follows the assignments to a target through a body's statements and expressions, as TypeScript's flow does. */
+class AssignmentFlow {
+  returns: Values[] = [];
+  /** The values that reach the read being asked about. */
+  atRead: Values;
+  private targets: JumpTarget[] = [];
   /** The values assigned inside each enclosing `try` block, any of which its `catch` clause may start with. */
   private readonly tryAssignments: Value[][] = [];
 
   constructor(
-    private readonly name: string,
-    private readonly assignedType: (value: TreeNode) => Type
+    private readonly isTarget: (left: TreeNode) => boolean,
+    private readonly assignedValue: (right: TreeNode) => Value,
+    private readonly read?: TreeNode
   ) {}
 
   statement(node: TreeNode, values: Values): Values {
     if (!values) return undefined;
     switch (node.type) {
+      case 'program':
       case 'statement_block': {
         return this.statements(named(node), values);
       }
@@ -152,6 +173,7 @@ class ConstructorFieldFlow {
       current && merge(current.map((value) => (value === entry ? iterationStart : [value])));
     for (let index = returnCount; index < this.returns.length; index++)
       this.returns[index] = replaceEntry(this.returns[index]);
+    this.atRead = replaceEntry(this.atRead);
     const endless = condition ? constantCondition(condition) === true : !isForIn;
     return merge([endless ? undefined : replaceEntry(tested), ...target.breaks.map(replaceEntry)]);
   }
@@ -200,6 +222,20 @@ class ConstructorFieldFlow {
   }
 
   private tryStatement(node: TreeNode, values: Values): Values {
+    const finalizer = node.childForFieldName('finalizer');
+    const finalBody = finalizer && (finalizer.childForFieldName('body') ?? named(finalizer)[0]);
+    const returnCount = this.returns.length;
+    const completed = this.tryAndCatch(node, values);
+    if (!finalBody) return completed;
+    // A return leaving the `try` or `catch` runs the `finally` block on its way out; TypeScript's flow lets a `break`
+    // or `continue` skip it.
+    const end = this.returns.length;
+    for (let index = returnCount; index < end; index++)
+      this.returns[index] = this.statement(finalBody, this.returns[index]);
+    return this.statement(finalBody, completed);
+  }
+
+  private tryAndCatch(node: TreeNode, values: Values): Values {
     const assigned: Value[] = [];
     this.tryAssignments.push(assigned);
     let afterTry: Values;
@@ -213,10 +249,7 @@ class ConstructorFieldFlow {
     const afterHandler = handlerBody
       ? this.statement(handlerBody, merge([values, afterTry, assigned.length > 0 ? assigned : undefined]))
       : undefined;
-    const finalizer = node.childForFieldName('finalizer');
-    const finalBody = finalizer && (finalizer.childForFieldName('body') ?? named(finalizer)[0]);
-    const completed = merge([afterTry, afterHandler]);
-    return finalBody ? this.statement(finalBody, completed) : completed;
+    return merge([afterTry, afterHandler]);
   }
 
   private expressions(nodes: TreeNode[], values: Values): Values {
@@ -226,15 +259,18 @@ class ConstructorFieldFlow {
   }
 
   private expression(node: TreeNode, values: Values): Values {
-    if (!values || nestedFunctionTypes.has(node.type)) return values;
+    if (!values) return values;
+    if (node.id === this.read?.id) this.atRead = merge([this.atRead, values]);
+    if (nestedFunctionTypes.has(node.type)) return isImmediatelyInvoked(node) ? this.invoked(node, values) : values;
     switch (node.type) {
       case 'assignment_expression': {
         const right = node.childForFieldName('right');
         const after = right ? this.expression(right, values) : values;
-        if (!right || !after || !this.isField(node.childForFieldName('left'))) return after;
-        const type = this.assignedType(right);
-        for (const assigned of this.tryAssignments) assigned.push(type);
-        return [type];
+        const left = node.childForFieldName('left');
+        if (!right || !after || !left || !this.isTarget(left)) return after;
+        const value = this.assignedValue(right);
+        for (const assigned of this.tryAssignments) assigned.push(value);
+        return [value];
       }
       case 'ternary_expression': {
         const [whenTrue, whenFalse] = this.branch(node.childForFieldName('condition') as TreeNode, values);
@@ -255,14 +291,28 @@ class ConstructorFieldFlow {
     }
   }
 
-  private isField(left: TreeNode | null): boolean {
-    const target = left && skipParentheses(left);
-    return (
-      target?.type === 'member_expression' &&
-      target.childForFieldName('object')?.type === 'this' &&
-      target.childForFieldName('property')?.text === this.name
-    );
+  /** The values after a function called where it is written, which runs its body before the call completes. */
+  private invoked(node: TreeNode, values: Value[]): Values {
+    const { returns, targets } = this;
+    this.returns = [];
+    this.targets = [];
+    try {
+      const end = this.statement(node.childForFieldName('body') as TreeNode, values);
+      return merge([end, ...this.returns]);
+    } finally {
+      this.returns = returns;
+      this.targets = targets;
+    }
   }
+}
+
+function isThisField(left: TreeNode, name: string): boolean {
+  const target = skipParentheses(left);
+  return (
+    target.type === 'member_expression' &&
+    target.childForFieldName('object')?.type === 'this' &&
+    target.childForFieldName('property')?.text === name
+  );
 }
 
 /** The values any of the paths may hold, where at least one of them is reachable. */
@@ -286,5 +336,5 @@ function constantCondition(condition: TreeNode): boolean | undefined {
 }
 
 function isLoopEntry(value: Value): value is LoopEntry {
-  return 'kind' in value && value.kind === 'loopEntry';
+  return 'kind' in value && (value as { kind: unknown }).kind === 'loopEntry';
 }

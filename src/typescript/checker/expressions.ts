@@ -5,12 +5,13 @@ import { unsupportedMessage } from '../unsupported';
 import { Calls } from './calls';
 import type { Checker } from './checker';
 import { arrayTargets, Elaboration, targetElementType } from './elaboration';
-import { Expandos, isImmediatelyInvoked, laterRunningTypes } from './expandos';
+import { Expandos, laterRunningTypes } from './expandos';
 import { ExpressionTypeCache } from './expressionTypeCache';
 import type { FlowEntry } from './flow';
 import type { Sym } from './scopes';
 import {
   hasToken,
+  isImmediatelyInvoked,
   isNumericName,
   named,
   numberValue,

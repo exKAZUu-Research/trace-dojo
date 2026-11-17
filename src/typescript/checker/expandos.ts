@@ -1,8 +1,9 @@
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
+import { mayBeUnassignedAt } from './assignmentFlow';
 import type { Checker } from './checker';
 import type { Sym } from './scopes';
-import { named, stringValue } from './syntax';
+import { isImmediatelyInvoked, named, stringValue } from './syntax';
 import { anonymousObject, anyType, emptyStructure, type Property, type Signature, type Type, unionOf } from './types';
 
 /** Functions and blocks whose bodies run when called, after the declarations that precede the call. */
@@ -117,10 +118,15 @@ export class Expandos {
     const key = this.c.flow.referenceKey(node);
     if (!key || key !== this.c.flow.referenceKey(assignments[0].childForFieldName('left') as TreeNode)) return;
     if (controlFlowContainer(node).id !== controlFlowContainer(assignments[0]).id) return;
-    const statements = new Set(assignments.map((assignment) => (assignment.parent as TreeNode).id));
-    if (assignedBefore(node, statements, controlFlowContainer(node))) return;
+    const targets = new Set(assignments.map((assignment) => (assignment.childForFieldName('left') as TreeNode).id));
+    if (!mayBeUnassignedAt(flowBody(controlFlowContainer(node)), targets, node)) return;
     this.c.error(propertyNode, `プロパティ '${property.name}' は、代入される前に使われています。`);
   }
+}
+
+/** The part of a control flow container that runs: a function's body, a field's initializer, or the program. */
+function flowBody(container: TreeNode): TreeNode {
+  return container.childForFieldName('body') ?? container.childForFieldName('value') ?? container;
 }
 
 /**
@@ -136,106 +142,6 @@ function controlFlowContainer(node: TreeNode): TreeNode {
   )
     current = current.parent;
   return current;
-}
-
-/**
- * Whether one of the assignment statements has run on every path to a node: a statement before it in a block that
- * holds it, within its control flow container, definitely runs one.
- */
-function assignedBefore(node: TreeNode, statements: Set<number>, container: TreeNode): boolean {
-  for (let current = node; current.parent && current.id !== container.id; current = current.parent) {
-    const { parent } = current;
-    if (parent.type !== 'statement_block' && parent.type !== 'program') continue;
-    for (const sibling of named(parent)) {
-      if (sibling.startIndex >= current.startIndex) break;
-      if (definitelyRuns(sibling, statements)) return true;
-    }
-  }
-  return false;
-}
-
-/** Whether running a statement runs one of the assignment statements on every path that completes it. */
-function definitelyRuns(statement: TreeNode, statements: Set<number>): boolean {
-  if (statements.has(statement.id)) return true;
-  const runs = (child: TreeNode | null): boolean => child !== null && definitelyRuns(child, statements);
-  // A branch that never completes, as one that throws, leaves the paths of the others.
-  const covers = (child: TreeNode | null): boolean => child !== null && (runs(child) || neverCompletes(child));
-  switch (statement.type) {
-    case 'statement_block':
-    case 'else_clause': {
-      return named(statement).some((child) => definitelyRuns(child, statements));
-    }
-    case 'if_statement': {
-      const consequence = statement.childForFieldName('consequence');
-      const alternative = statement.childForFieldName('alternative');
-      return covers(consequence) && covers(alternative) && (runs(consequence) || runs(alternative));
-    }
-    case 'do_statement': {
-      return runs(statement.childForFieldName('body'));
-    }
-    case 'switch_statement': {
-      return switchRuns(statement, statements);
-    }
-    case 'try_statement': {
-      const handler = statement.childForFieldName('handler');
-      const finalizer = statement.childForFieldName('finalizer');
-      const body = runs(statement.childForFieldName('body'));
-      return (
-        (body && (handler === null || runs(handler.childForFieldName('body')))) ||
-        (finalizer !== null && runs(finalizer.childForFieldName('body')))
-      );
-    }
-    default: {
-      return false;
-    }
-  }
-}
-
-/**
- * Whether a switch with a `default` runs an assignment whichever clause it enters: each clause, falling through to the
- * next until a `break`, runs one before leaving or never completes.
- */
-function switchRuns(statement: TreeNode, statements: Set<number>): boolean {
-  const clauses = named(statement.childForFieldName('body') ?? statement);
-  if (!clauses.some((clause) => clause.type === 'switch_default')) return false;
-  return clauses.every((_, start) => {
-    for (const clause of clauses.slice(start)) {
-      for (const child of named(clause).filter((node) => node.id !== clause.childForFieldName('value')?.id)) {
-        if (definitelyRuns(child, statements) || neverCompletes(child)) return true;
-        if (child.type === 'break_statement') return false;
-      }
-    }
-    return false;
-  });
-}
-
-/** Whether a statement always leaves by throwing or returning, so no code after it runs on its path. */
-function neverCompletes(statement: TreeNode): boolean {
-  switch (statement.type) {
-    case 'throw_statement':
-    case 'return_statement': {
-      return true;
-    }
-    case 'statement_block':
-    case 'else_clause': {
-      return named(statement).some(neverCompletes);
-    }
-    case 'if_statement': {
-      const consequence = statement.childForFieldName('consequence');
-      const alternative = statement.childForFieldName('alternative');
-      return consequence !== null && alternative !== null && neverCompletes(consequence) && neverCompletes(alternative);
-    }
-    default: {
-      return false;
-    }
-  }
-}
-
-export function isImmediatelyInvoked(node: TreeNode): boolean {
-  let expression = node;
-  while (expression.parent?.type === 'parenthesized_expression') expression = expression.parent;
-  const parent = expression.parent;
-  return parent?.type === 'call_expression' && parent.childForFieldName('function')?.id === expression.id;
 }
 
 /** Whether a `const` declares a function TypeScript lets a program add properties to. */

@@ -176,3 +176,10 @@ export function chainObject(node: TreeNode): TreeNode | undefined {
     }
   }
 }
+
+export function isImmediatelyInvoked(node: TreeNode): boolean {
+  let expression = node;
+  while (expression.parent?.type === 'parenthesized_expression') expression = expression.parent;
+  const parent = expression.parent;
+  return parent?.type === 'call_expression' && parent.childForFieldName('function')?.id === expression.id;
+}
