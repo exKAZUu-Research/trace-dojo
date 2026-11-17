@@ -493,8 +493,7 @@ export class Checker {
       tuple: { elements: flat, readonly },
       resolve: () => {
         if (structure) return structure;
-        const element = unionOf(flat.map((member) => (member.rest ? this.restElementType(member.type) : member.type)));
-        const base = this.arrayType(element, readonly).resolve();
+        const base = this.arrayType(this.elementTypeOf(tuple), readonly).resolve();
         const properties = new Map(base.properties);
         for (const [index, member] of flat.entries()) {
           if (member.rest) break;
@@ -650,8 +649,21 @@ export class Checker {
       properties,
       callSignatures: structures.flatMap((structure) => structure.callSignatures),
       constructSignatures: structures.flatMap((structure) => structure.constructSignatures),
-      stringIndex: structures.find((structure) => structure.stringIndex)?.stringIndex,
-      numberIndex: structures.find((structure) => structure.numberIndex)?.numberIndex,
+      stringIndex: this.intersectedIndex(structures.map((structure) => structure.stringIndex)),
+      numberIndex: this.intersectedIndex(structures.map((structure) => structure.numberIndex)),
+    };
+  }
+
+  /** The index signature an intersection has, of the intersection of its members' value types. */
+  private intersectedIndex(indexes: (IndexInfo | undefined)[]): IndexInfo | undefined {
+    const present = indexes.filter((index) => index !== undefined);
+    if (present.length <= 1) return present[0];
+    return {
+      type: intersectionOf(
+        present.map((index) => index.type),
+        this.budget
+      ),
+      readonly: present.every((index) => index.readonly),
     };
   }
 
@@ -699,8 +711,9 @@ export class Checker {
         if (!properties.has(name)) properties.set(name, property);
       stringIndex ??= baseStructure.stringIndex;
       numberIndex ??= baseStructure.numberIndex;
-      if (callSignatures.length === 0) callSignatures.push(...baseStructure.callSignatures);
-      if (constructSignatures.length === 0) constructSignatures.push(...baseStructure.constructSignatures);
+      // An interface has the signatures of every base after its own, as TypeScript appends them.
+      callSignatures.push(...baseStructure.callSignatures);
+      constructSignatures.push(...baseStructure.constructSignatures);
     }
     return { properties, callSignatures, constructSignatures, stringIndex, numberIndex };
   }
