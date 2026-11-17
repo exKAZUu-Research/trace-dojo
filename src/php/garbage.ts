@@ -138,7 +138,14 @@ function heldDirectly(runtime: Runtime, objects: PhpObject[]): boolean {
     for (const value of frame.temporaries) held.add(value);
     if (frame.thisObj) held.add(frame.thisObj);
   }
-  return objects.every((object) => held.has(object));
+  return objects.every(
+    (object) =>
+      held.has(object) ||
+      object.arrayHolders.some(({ array, key }) => {
+        const holder = array.deref();
+        return holder !== undefined && held.has(holder) && holder.get(key) === object;
+      })
+  );
 }
 
 function mayHoldObject(value: unknown): boolean {
@@ -219,7 +226,9 @@ export function mark(runtime: Runtime): Set<PhpObject> {
     const list = [...items];
     for (let index = list.length - 1; index >= 0; index--) pending.push(list[index]);
   };
+  let visits = 0;
   while (pending.length > 0) {
+    if (++visits % 8 === 0) runtime.spend();
     const item = pending.pop();
     if (item instanceof Ref) {
       pending.push(item.v);
@@ -477,7 +486,7 @@ export function arrayIsShared(runtime: Runtime, target: PhpArray): boolean {
   pending.push(...runtime.held);
   let visits = 0;
   while (pending.length > 0) {
-    if (++visits % 64 === 0) runtime.spend();
+    if (++visits % 8 === 0) runtime.spend();
     const value = pending.pop();
     if (value === target) {
       if (++count > 1) return true;

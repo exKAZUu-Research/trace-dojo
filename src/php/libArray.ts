@@ -66,12 +66,27 @@ function keyValue(key: Key): Value {
   return key;
 }
 
-function rebuild(entries: [Key, Value | Ref][], renumber: boolean): PhpArray {
-  const array = new PhpArray();
+function rebuild(entries: [Key, Value | Ref][], renumber: boolean, target?: PhpArray): PhpArray {
+  const array = target ?? new PhpArray();
+  if (target) {
+    const map = new Map<Key, Value | Ref>();
+    let position = 0n;
+    let nextFree = INT_MIN;
+    let work = 0;
+    for (const [key, slot] of entries) {
+      const newKey = renumber && typeof key === 'bigint' ? position++ : key;
+      map.set(newKey, slot);
+      if (typeof newKey === 'bigint' && newKey >= nextFree) nextFree = newKey + 1n;
+      if (++work % 64 === 0) rt().spend();
+    }
+    array.replaceTable(map, nextFree);
+    return array;
+  }
   for (const [key, slot] of entries) {
+    if (slot instanceof Ref) slot.rc++;
     if (renumber && typeof key === 'bigint') array.append(slot);
     else if (slot instanceof Ref) array.setSlot(key, slot);
-    else array.set(key, slot);
+    else array.set(key, share(slot));
   }
   return array;
 }
@@ -137,9 +152,7 @@ defineFunction('array_shift(array &$array): mixed', (ctx) => {
   if (first.done) return null;
   const value = array.get(first.value) as Value;
   array.delete(first.value);
-  const rebuilt = rebuild([...array.map], true);
-  array.map = rebuilt.map;
-  array.nextFree = rebuilt.nextFree;
+  rebuild([...array.map], true, array);
   array.pointer = null;
   return value;
 });
@@ -150,9 +163,7 @@ defineFunction('array_unshift(array &$array, mixed ...$values): int', (ctx) => {
     ...ctx.args.slice(1).map((value): [Key, Value] => [0n, share(value)]),
     ...array.map,
   ];
-  const rebuilt = rebuild(entries, true);
-  array.map = rebuilt.map;
-  array.nextFree = rebuilt.nextFree;
+  rebuild(entries, true, array);
   array.pointer = null;
   return BigInt(array.size);
 });
@@ -204,7 +215,10 @@ defineFunction('array_values(array $array): array', ({ args }) => {
   const array = arr(args[0]);
   // PHP returns a list as it is, sharing it with its internal pointer.
   if (array.isList()) return share(array);
-  return PhpArray.list(array.values().map((value) => share(value)));
+  return rebuild(
+    [...array.map.values()].map((slot): [Key, Value | Ref] => [0n, slot]),
+    true
+  );
 });
 defineFunction('array_is_list(array $array): bool', ({ args }) => arr(args[0]).isList());
 defineFunction('in_array(mixed $needle, array $haystack, bool $strict = false): bool', ({ args }) => {
@@ -231,9 +245,11 @@ defineFunction('array_merge(array ...$arrays): array', ({ args }) => {
   for (const [index, value] of args.entries()) {
     if (!(value instanceof PhpArray))
       throwError('TypeError', `array_merge(): Argument #${index + 1} must be of type array, ${valueName(value)} given`);
-    for (const [key, item] of value.entries()) {
-      if (typeof key === 'bigint') result.append(share(item));
-      else result.set(key, share(item));
+    for (const [key, slot] of value.map) {
+      const item = slot instanceof Ref && slot.isRef ? slot : share(slot instanceof Ref ? slot.v : slot);
+      if (item instanceof Ref) item.rc++;
+      if (typeof key === 'bigint') result.append(item);
+      else result.setSlot(key, item);
     }
   }
   return result;
@@ -525,9 +541,14 @@ defineFunction(
   ({ args }) => {
     const frame = rt().frame;
     const result = new PhpArray();
+    const active = new Set<PhpArray>();
     const visit = (value: Value): void => {
+      rt().spend();
       if (value instanceof PhpArray) {
+        if (active.has(value)) throwError('Error', 'Recursion detected');
+        active.add(value);
         for (const item of value.values()) visit(item);
+        active.delete(value);
         return;
       }
       const name = toStr(value);
@@ -742,9 +763,7 @@ defineFunction(
           ? replacementValue.values().map((value): [Key, Value] => [0n, share(value)])
           : [[0n, replacementValue]];
     const removed = rebuild(entries.slice(start, end), true);
-    const rebuilt = rebuild([...entries.slice(0, start), ...replacement, ...entries.slice(end)], true);
-    array.map = rebuilt.map;
-    array.nextFree = rebuilt.nextFree;
+    rebuild([...entries.slice(0, start), ...replacement, ...entries.slice(end)], true, array);
     array.pointer = null;
     return removed;
   }
@@ -756,9 +775,18 @@ defineFunction('array_unique(array $array, int $flags = SORT_STRING): array', ({
   const flags = (args[1] as bigint | undefined) ?? 2n;
   const result = new PhpArray();
   const kept: Value[] = [];
+  const strings = new Set<string>();
   for (const [key, value] of arr(args[0]).entries()) {
     rt().spend();
-    const duplicate = kept.some((other) => sortComparator(flags)(other, value) === 0);
+    const text = flags === 2n ? toStr(value) : undefined;
+    const duplicate =
+      text !== undefined
+        ? strings.has(text)
+        : kept.some((other) => {
+            rt().spend();
+            return sortComparator(flags)(other, value) === 0;
+          });
+    if (text !== undefined) strings.add(text);
     if (duplicate) continue;
     kept.push(value);
     result.set(key, share(value));
@@ -977,12 +1005,11 @@ defineFunction('shuffle(array &$array): true', (ctx) => {
     const index = Number(mt.range(0n, BigInt(left)));
     if (index !== left) [values[left], values[index]] = [values[index], values[left]];
   }
-  const rebuilt = rebuild(
+  rebuild(
     values.map((value): [Key, Value | Ref] => [0n, value]),
-    true
+    true,
+    array
   );
-  array.map = rebuilt.map;
-  array.nextFree = rebuilt.nextFree;
   array.pointer = null;
   return true;
 });
@@ -1061,16 +1088,11 @@ function sortArray(
   } finally {
     rt().held.pop();
   }
-  if (renumber) {
-    const sorted = new PhpArray();
-    for (const { entry } of entries) sorted.append(entry[1]);
-    array.map = sorted.map;
-    array.nextFree = sorted.nextFree;
-  } else
-    array.map = rebuild(
-      entries.map(({ entry }) => entry),
-      false
-    ).map;
+  rebuild(
+    entries.map(({ entry }): [Key, Value | Ref] => [renumber ? 0n : entry[0], entry[1]]),
+    renumber,
+    array
+  );
   array.pointer = null;
   return true;
 }
@@ -1151,7 +1173,8 @@ defineFunction('array_multisort(&~$array, &~...$rest): bool', (ctx) => {
   for (const [index, column] of columns.entries()) {
     column.ref.v = rebuild(
       order.map((position) => rows[index][position]),
-      true
+      true,
+      column.ref.v as PhpArray
     );
   }
   return true;

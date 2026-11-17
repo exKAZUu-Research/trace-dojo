@@ -131,7 +131,7 @@ defineAlias('is_double', 'is_float');
 defineFunction('is_string(mixed $value): bool', ({ args }) => typeof args[0] === 'string');
 defineFunction('is_bool(mixed $value): bool', ({ args }) => typeof args[0] === 'boolean');
 defineFunction('is_array(mixed $value): bool', ({ args }) => args[0] instanceof PhpArray);
-defineFunction('is_object(mixed $value): bool', ({ args }) => args[0] instanceof PhpObject);
+defineFunction('is_object(mixed $value): bool', ({ args }) => args[0] instanceof PhpObject && !isStream(args[0]));
 defineFunction('is_null(mixed $value): bool', ({ args }) => args[0] === null);
 defineFunction('is_numeric(mixed $value): bool', ({ args }) => {
   const [value] = args;
@@ -156,10 +156,31 @@ defineFunction('is_countable(mixed $value): bool', ({ args }) => {
   const countable = rt().classes.get('countable');
   return value instanceof PhpObject && countable !== undefined && value.cls.isSubclassOf(countable);
 });
-defineFunction('is_callable(mixed $value, bool $syntax_only = false, &$callable_name = null): bool', ({ args }) =>
-  isCallable(args[0])
+defineFunction(
+  'is_callable(mixed $value, bool $syntax_only = false, &$callable_name = null): bool',
+  ({ args, refs }) => {
+    const value = args[0];
+    let name = 'Array';
+    let syntax = false;
+    if (typeof value === 'string') {
+      name = value;
+      syntax = true;
+    } else if (value instanceof PhpObject && value.cls.name !== '(stream)') {
+      name = value.cls.name + '::__invoke';
+      syntax = isCallable(value);
+    } else if (value instanceof PhpArray && value.size === 2) {
+      const owner = value.get(0n);
+      const method = value.get(1n);
+      if ((typeof owner === 'string' || owner instanceof PhpObject) && typeof method === 'string') {
+        name = (typeof owner === 'string' ? owner : owner.cls.name) + '::' + method;
+        syntax = true;
+      }
+    } else name = toStr(value);
+    if (refs[2]) refs[2].v = name;
+    return args[1] === true ? syntax : isCallable(value);
+  }
 );
-defineFunction('is_resource(mixed $value): bool', () => false);
+defineFunction('is_resource(mixed $value): bool', ({ args }) => isStream(args[0]));
 defineFunction('intval(mixed $value, int $base = 10): int', ({ args }) => {
   const [value, base = 10n] = args;
   if (typeof value === 'string' && base !== 10n) return parseIntBase(value, Number(base));
@@ -608,6 +629,8 @@ defineFunction('error_reporting(?int $error_level = null): int', ({ args }) => {
 defineFunction(
   'error_log(string $message, int $message_type = 0, ?string $destination = null, ?string $additional_headers = null): bool',
   ({ args }) => {
+    if (args[1] !== undefined && args[1] !== 0n && args[1] !== 4n)
+      throw new UnsupportedFeatureError('error_log のファイル・メール出力');
     rt().echoError(`${args[0] as string}\n`);
     return true;
   }

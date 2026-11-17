@@ -1,6 +1,6 @@
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 // oxlint-disable unicorn/prefer-code-point -- PHP strings hold bytes as code units 0–255, which charCodeAt and fromCharCode read and write as they are.
-import { lower } from './bytes';
+import { bytesToString, lower } from './bytes';
 import { visibleProps } from './classes';
 import { formatFloat, normalizeKeyString } from './conversions';
 import { throwError, warn } from './errors';
@@ -50,7 +50,7 @@ defineFunction('base64_decode(string $string, bool $strict = false): string|fals
   if (strict && (count % 4 === 1 || (padding > 0 && (padding > 2 || (count + padding) % 4 !== 0)))) return false;
   // The bits a group of fewer than four characters leaves in its last byte are not part of the output.
   if (count % 4 !== 0) bytes.pop();
-  return String.fromCharCode(...bytes.map((byte) => byte & 0xff));
+  return bytesToString(Uint8Array.from(bytes, (byte) => byte & 0xff));
 });
 
 // URL encoding -------------------------------------------------------------------------------------------------------

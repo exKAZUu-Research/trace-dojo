@@ -194,3 +194,31 @@ test('array arguments released after calls do not force repeated copies', () => 
   );
   expect(execution).toMatchObject({ kind: 'executed', stdout: '3000' });
 });
+
+test.each(['<?php echo "${i[]}";', '<?php echo <<<E\n${a[]}\nE;'])(
+  'reports empty interpolation offsets as compile errors: %s',
+  (source) => {
+    expect(run(source).kind).toBe('compileError');
+  }
+);
+
+test('queue reindexing and string deduplication do not allocate copies of existing storage', () => {
+  expect(
+    run('<?php $q=range(1,3000);$n=0;while($q){array_shift($q);$n++;} echo $n," ",count(array_unique(range(1,15000)));')
+  ).toMatchObject({ kind: 'executed', stdout: '3000 15000' });
+});
+
+test.each(['getBytes(1000000000)', 'getBytesFromString("ab",1000000000)'])(
+  'bounds random byte output before generating: %s',
+  (method) => {
+    const execution = run(`<?php $r=new Random\\Randomizer(new Random\\Engine\\Mt19937(1)); $r->${method};`);
+    expect(execution.kind === 'executed' && execution.stdout).toMatch(/^\nFatal error: Allowed memory size/);
+  }
+);
+
+test('decodes a base64 payload within the string budget without host argument spreading', () => {
+  expect(run('<?php echo strlen(base64_decode(str_repeat("YWFh",240000)));')).toMatchObject({
+    kind: 'executed',
+    stdout: '720000',
+  });
+});

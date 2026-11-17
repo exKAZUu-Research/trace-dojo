@@ -872,14 +872,31 @@ export function propRef(object: PhpObject, name: string, scope: PhpClass | undef
   return ref;
 }
 
+export function attachPropertyReference(ref: Ref, decl: PropDecl, object?: PhpObject): void {
+  const value = coerceProperty(decl, ref.v, object);
+  ref.assign(value);
+  if (!Object.is(ref.v, value)) {
+    const source = ref.typedBy?.[0]?.decl;
+    if (source)
+      throwError(
+        'TypeError',
+        `Reference with value of type ${valueName(ref.v)} held by property ${source.cls.name}::$${source.name} of type ${describeType(source.type as TypeDecl, source.cls)} is not compatible with property ${decl.cls.name}::$${decl.name} of type ${describeType(decl.type as TypeDecl, decl.cls)}`
+      );
+  }
+  ref.typedBy ??= [];
+  ref.typedBy.push({ decl, object });
+}
+
 setReferenceTypeCheck((ref, value) => {
-  ref.typedBy = ref.typedBy?.filter(({ decl, object }) => object.props.get(decl.key) === ref);
+  ref.typedBy = ref.typedBy?.filter(({ decl, object }) =>
+    object ? object.props.get(decl.key) === ref : decl.cls.findStatic(decl.name)?.ref === ref
+  );
   let coerced = value;
   for (const { decl, object } of ref.typedBy ?? []) {
     coerced = coerceProperty(decl, coerced, object, 'reference held by property');
   }
   for (const { decl, object } of ref.typedBy ?? []) {
-    if (coerceProperty(decl, coerced, object, 'reference held by property') !== coerced) {
+    if (!Object.is(coerceProperty(decl, coerced, object, 'reference held by property'), coerced)) {
       throwError(
         'TypeError',
         `Cannot assign ${valueName(value)} to reference held by property ${decl.cls.name}::$${decl.name} of type ${describeType(decl.type as TypeDecl, decl.cls)}`
@@ -993,7 +1010,12 @@ export function staticPropRef(cls: PhpClass, name: string, scope: PhpClass | und
   if (!canAccessProp(found.decl, scope)) {
     throwError('Error', `Cannot access ${found.decl.visibility} property ${cls.name}::$${name}`);
   }
-  return resolveStatic(found.ref);
+  const ref = resolveStatic(found.ref);
+  if (found.decl.type && !ref.typedBy?.some((constraint) => constraint.decl === found.decl)) {
+    ref.typedBy ??= [];
+    ref.typedBy.push({ decl: found.decl });
+  }
+  return ref;
 }
 
 export function readStaticProp(cls: PhpClass, name: string, scope: PhpClass | undefined): Value {

@@ -559,13 +559,19 @@ function bindParams(
       const rest = new PhpArray();
       for (let at = index; at < positional.length; at++) {
         const arg = positional[at];
-        if (param.byRef) rest.append(bindRef(arg));
-        else rest.append(checkParam(arg.v, param, at, name, strict, frame, callRow));
+        if (param.byRef) {
+          const ref = bindRef(arg);
+          ref.v = checkParam(ref.v, param, at, name, strict, frame, callRow);
+          rest.append(ref);
+        } else rest.append(checkParam(arg.v, param, at, name, strict, frame, callRow));
       }
       for (const arg of args) {
         if (arg.name !== undefined && !params.some((other) => other.name === arg.name && !other.variadic)) {
-          if (param.byRef) rest.setSlot(arg.name, bindRef(arg));
-          else rest.set(arg.name, checkParam(arg.v, param, index, name, strict, frame, callRow));
+          if (param.byRef) {
+            const ref = bindRef(arg);
+            ref.v = checkParam(ref.v, param, index, name, strict, frame, callRow);
+            rest.setSlot(arg.name, ref);
+          } else rest.set(arg.name, checkParam(arg.v, param, index, name, strict, frame, callRow));
         }
       }
       frame.vars.set(param.name, new Ref(rest));

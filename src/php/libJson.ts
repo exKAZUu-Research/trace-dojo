@@ -1,6 +1,6 @@
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 // oxlint-disable unicorn/prefer-code-point -- PHP strings hold bytes as code units 0–255, which charCodeAt and fromCharCode read and write as they are.
-import { codePointBytes, utf8Length } from './bytes';
+import { codePointBytes, enc, utf8Length } from './bytes';
 import { callMethod } from './callables';
 import { canAccessProp, createObject, declForKey, propNameOf } from './classes';
 import * as conversionsModule from './conversions';
@@ -318,7 +318,13 @@ defineFunction('json_validate(string $json, int $depth = 512, int $flags = 0): b
     if (args[0] === '') throw new JsonError(4);
     rt().lastJsonError = 0;
     if (depth <= 0) throwError('ValueError', 'json_validate(): Argument #2 ($depth) must be greater than 0');
-    new JsonParser(args[0] as string, true, depth, 0n).parseDocument();
+    const flags = (args[2] as bigint | undefined) ?? 0n;
+    if ((flags & ~1_048_576n) !== 0n)
+      throwError(
+        'ValueError',
+        'json_validate(): Argument #3 ($flags) must be a valid flag (allowed flags: JSON_INVALID_UTF8_IGNORE)'
+      );
+    new JsonParser(args[0] as string, true, depth, flags).parseDocument();
     return true;
   } catch (error) {
     if (!(error instanceof JsonError)) throw error;
@@ -446,7 +452,14 @@ class JsonParser {
       if (code < 0x20) throw new JsonError(3);
       if (code >= 0x80) {
         const length = utf8Length(this.text, this.index - 1);
-        if (length === 1) throw new JsonError(5);
+        if (length === 1) {
+          if ((this.flags & 1_048_576n) !== 0n) continue;
+          if ((this.flags & 2_097_152n) !== 0n) {
+            result += enc('�');
+            continue;
+          }
+          throw new JsonError(5);
+        }
         result += this.text.slice(this.index - 1, this.index - 1 + length);
         this.index += length - 1;
         continue;

@@ -16,14 +16,23 @@ export class Ref {
   rc = 1;
   isRef = false;
   /** The typed property this reference was taken from, whose type every write through the reference must keep. */
-  typedBy?: { decl: PropDecl; object: PhpObject }[];
+  typedBy?: { decl: PropDecl; object?: PhpObject }[];
 
-  constructor(public v: Value = null) {}
+  private value: Value;
+  constructor(value: Value = null) {
+    this.value = value;
+  }
+  get v(): Value {
+    return this.value;
+  }
+  set v(value: Value) {
+    this.value = this.typedBy ? referenceTypeCheck(this, value) : value;
+  }
 
   /** Writes a value, converting or rejecting it for the type of the property the reference was taken from. */
   assign(value: Value): void {
     const old = this.v;
-    this.v = this.typedBy ? referenceTypeCheck(this, value) : value;
+    this.v = value;
     dropped(old);
   }
 }
@@ -147,7 +156,16 @@ export class PhpArray {
       if (this.pointer === undefined) this.pointer = key;
     }
     this.invalidate();
+    if (slot instanceof PhpObject) slot.arrayHolders.push({ array: new WeakRef(this), key });
     this.map.set(key, slot);
+  }
+
+  replaceTable(map: Map<Key, Value | Ref>, nextFree: bigint): void {
+    allocationHandler(Math.max(0, map.size - this.map.size), map.size);
+    this.map = map;
+    this.nextFree = nextFree;
+    this.composite = [...map.values()].some((value) => value !== null && typeof value === 'object');
+    this.invalidate();
   }
 
   trackCachedParent(parent: PhpArray): void {
@@ -445,6 +463,7 @@ function* lineage(start: PhpClass): Generator<PhpClass> {
 }
 
 export class PhpObject {
+  readonly arrayHolders: { array: WeakRef<PhpArray>; key: Key }[] = [];
   props = new Map<string, Slot>();
   internal?: unknown;
   turtle?: TurtleState;

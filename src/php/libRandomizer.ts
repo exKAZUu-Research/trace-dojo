@@ -6,6 +6,7 @@ import { deprecated, throwError } from './errors';
 import { defineClass, type NativeMethod } from './native';
 import { toStr } from './operators';
 import { MersenneTwister } from './random';
+import { rt } from './runtime';
 import { UnsupportedFeatureError } from './unsupported';
 import { type Key, PhpArray, type PhpClass, PhpObject, type Value } from './values';
 
@@ -394,6 +395,8 @@ const randomizerMethods: NativeMethod[] = [
 
 /** Transcribes Randomizer::getBytes, which copies whole 64-bit outputs while they fit. */
 function randomBytes(algo: Algo, length: number): string {
+  rt().ensureStringFits(length);
+  rt().spend(Math.ceil(length / 8));
   let text = '';
   let carried: Generated | undefined;
   while (text.length + 8 <= length) {
@@ -414,6 +417,8 @@ function randomBytes(algo: Algo, length: number): string {
 
 /** Transcribes Randomizer::getBytesFromString, which masks each output byte for a short source. */
 function bytesFromString(algo: Algo, source: string, length: number): string {
+  rt().ensureStringFits(length);
+  rt().spend(Math.ceil(length / 8));
   const maxOffset = source.length - 1;
   let text = '';
   if (maxOffset > 0xff) {

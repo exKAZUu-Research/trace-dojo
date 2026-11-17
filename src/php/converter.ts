@@ -643,7 +643,12 @@ export class Converter extends DeclarationConverter {
         }
         if (inner.type === 'name') return { k: 'var', name: enc(inner.text), row };
         if (interpolating && indexedName) {
-          return { k: 'idx', base: { k: 'var', name: enc(parts[0].text), row }, index: this.expr(parts[1]), row };
+          return {
+            k: 'idx',
+            base: { k: 'var', name: enc(parts[0].text), row },
+            index: parts[1] ? this.expr(parts[1]) : undefined,
+            row,
+          };
         }
         return { k: 'varvar', name: this.expr(inner), row };
       }

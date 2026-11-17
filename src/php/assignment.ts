@@ -170,6 +170,7 @@ function arrayAccessPlace(object: PhpObject, key: Value | undefined): Place {
         : undefined,
     nested: () => {
       if (
+        key !== undefined &&
         object.internal !== undefined &&
         nativeArrayStorage(object.internal) &&
         object.cls.findMethod('offsetget')?.fn.kind === 'native'
@@ -300,9 +301,7 @@ export function bindRef(target: Expr, ref: Ref): void {
     const decl = classesModule.lookupProp(object.cls, name, rt().frame.scope);
     propRef(object, name, rt().frame.scope);
     if (decl?.type) {
-      ref.assign(classesModule.coerceProperty(decl, ref.v, object));
-      ref.typedBy ??= [];
-      ref.typedBy.push({ decl, object });
+      classesModule.attachPropertyReference(ref, decl, object);
     }
     ref.isRef = true;
     ref.rc++;
@@ -315,7 +314,9 @@ export function bindRef(target: Expr, ref: Ref): void {
     const found = cls.findStatic(name);
     if (!found) throwError('Error', `Access to undeclared static property ${cls.name}::$${name}`);
     ref.isRef = true;
-    found.ref.v = ref.v;
+    if (found.decl.type) {
+      classesModule.attachPropertyReference(ref, found.decl);
+    }
     for (let current: PhpClass | undefined = cls; current; current = current.parent) {
       const own = current.staticProps.get(name);
       if (own) {
