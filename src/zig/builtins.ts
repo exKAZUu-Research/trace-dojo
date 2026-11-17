@@ -33,13 +33,14 @@ import {
   roundNumber,
   roundTo,
   signBit,
-  toNumber,
   truncateToBigInt,
 } from './floats';
 import { sizeOf } from './layout';
 import { importStd } from './library/std';
 import { MemoryFault } from './memoryFault';
 import { isIntegerType } from './operands';
+import { referenceUnary } from './referenceMath';
+import type { UnaryOperation } from './referenceMathOperations';
 import type { Frame } from './runtime';
 import {
   copyForStorage,
@@ -229,6 +230,17 @@ interface CastTargets {
   float: FloatType | { readonly kind: 'comptime_float' };
   enum: EnumType;
 }
+
+const MATH_OPERATIONS: Record<string, UnaryOperation> = {
+  '@sin': 'sin',
+  '@cos': 'cos',
+  '@tan': 'tan',
+  '@exp': 'exp',
+  '@exp2': 'exp2',
+  '@log': 'log',
+  '@log2': 'log2',
+  '@log10': 'log10',
+};
 
 export abstract class BuiltinCompiler extends ExpressionCompiler {
   private readonly nameSlices = new Map<string, Slice>();
@@ -767,10 +779,7 @@ export abstract class BuiltinCompiler extends ExpressionCompiler {
       if (name === '@sqrt') return floatSqrt(x, bits);
       if (name === '@floor' || name === '@ceil' || name === '@round' || name === '@trunc')
         return roundFloat(name, x, bits);
-      // Transcendental functions are computed in double precision, which matches f32 and f64.
-      const double = typeof x === 'number' ? x : toNumber(x);
-      const result = MATH_FUNCTIONS[name](double);
-      return bits <= 64 ? roundNumber(result, bits as 16 | 32 | 64) : roundTo(asBigFloat(result), bits);
+      return referenceUnary(MATH_OPERATIONS[name], bits, x);
     };
     return this.derived(operand, type, apply);
   }
@@ -1067,17 +1076,6 @@ function elementAccessor(type: Type):
   }
   return undefined;
 }
-
-const MATH_FUNCTIONS: Record<string, (x: number) => number> = {
-  '@sin': Math.sin,
-  '@cos': Math.cos,
-  '@tan': Math.tan,
-  '@exp': Math.exp,
-  '@exp2': (x) => 2 ** x,
-  '@log': Math.log,
-  '@log2': Math.log2,
-  '@log10': Math.log10,
-};
 
 // code-gauge-allow functionCognitiveComplexity 16 -- Handles native and exact rounding with the same four rounding modes.
 export function roundFloat(name: string, value: AnyFloat, bits: FloatBits): AnyFloat {

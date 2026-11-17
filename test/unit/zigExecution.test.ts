@@ -7458,3 +7458,30 @@ test.each(['struct{t:type}', 'union(enum){t:type}'])(
     expect(executeProgram('zig', local)).toMatchObject({ kind: 'executed', uncaughtException: undefined });
   }
 );
+
+test('narrow math preserves Zig finite rounding in printed results', () => {
+  const source = `const std=@import("std");pub fn main()void{var x:f64=0.7;var y:f64=0.3;var z:f64=10;_=&x;_=&y;_=&z;std.debug.print("{d} {d} {d} {d}",.{std.math.tanh(y),std.math.tanh(x),std.math.cbrt(x),std.math.atan(z)});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: '0.29131261245159085 0.6043677771171634 0.8879040017426006 1.4711276743037347',
+    uncaughtException: undefined,
+  });
+});
+
+test.each(['f80', 'f128'])('extended %s math retains finite values beyond the f64 exponent range', (type) => {
+  const source = `const std=@import("std");pub fn main()void{var big:${type}=1e500;var tiny:${type}=1e-500;_=&big;_=&tiny;std.debug.print("{} {} {} {} {} {} {}",.{std.math.hypot(big,@as(${type},0))==big,std.math.hypot(tiny,@as(${type},0))==tiny,std.math.atan(tiny)==tiny,std.math.asin(tiny)==tiny,std.math.hypot(@as(${type},3),@as(${type},4))==5,std.math.isFinite(@exp(@as(${type},1000))),std.math.isFinite(@log(big))});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: 'true true true true true true true',
+    uncaughtException: undefined,
+  });
+});
+
+test('f32 math and builtins keep reference rounding instead of rounding a host double result', () => {
+  const source = `const std=@import("std");pub fn main()void{var x:f32=0.3;var y:f32=-1;_=&x;_=&y;std.debug.print("{d} {d} {d}",.{std.math.exp(x),@exp(x),std.math.acos(y)});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: '1.3498588 1.3498588 3.1415925',
+    uncaughtException: undefined,
+  });
+});
