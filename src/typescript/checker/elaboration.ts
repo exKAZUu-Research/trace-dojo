@@ -108,7 +108,8 @@ function memberKey(member: TreeNode): TreeNode | undefined {
 /** The arrays and tuples among a target's members. */
 export function arrayTargets(c: Checker, target: Type): ObjectType[] {
   return (target.kind === 'union' ? target.types : [target]).filter(
-    (member): member is ObjectType => member.kind === 'object' && c.isArrayOrTuple(member)
+    (member): member is ObjectType =>
+      member.kind === 'object' && (c.isArrayOrTuple(member) || c.structureOf(member).numberIndex !== undefined)
   );
 }
 
@@ -119,7 +120,9 @@ export function targetElementType(c: Checker, targets: ObjectType[], index: numb
       const elements = member.tuple?.elements;
       return elements?.[index] && !elements[index].rest
         ? c.relations.tupleElementTargetType(elements[index])
-        : c.elementTypeOf(member);
+        : c.isArrayOrTuple(member)
+          ? c.elementTypeOf(member)
+          : (c.structureOf(member).numberIndex?.type ?? c.elementTypeOf(member));
     })
   );
 }

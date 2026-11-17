@@ -571,8 +571,9 @@ export class TypeNodes {
       resolve: () => {
         if (structure) return structure;
         structure = emptyStructure();
+        // TypeScript merges the overloads of later declarations before those of earlier ones.
         const own = this.membersStructure(
-          symbol.typeDeclarations.flatMap((declaration) => {
+          symbol.typeDeclarations.toReversed().flatMap((declaration) => {
             const body = declaration.childForFieldName('body');
             return body ? named(body) : [];
           })

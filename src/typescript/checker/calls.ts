@@ -456,10 +456,7 @@ export class Calls {
     return { signature: last, returnType: this.c.silently(() => instantiate(last)).returnType() };
   }
 
-  /**
-   * Where TypeScript reports that no overload fits: where the overloads fail alike, judged by the one of up to three
-   * that fails with the most errors or else by the last, and at the call when they fail at different places.
-   */
+  /** Where TypeScript 7 reports that no overload fits: at the first error of the last overload that could fit. */
   private overloadErrorLocation(
     node: TreeNode,
     callee: TreeNode,
@@ -468,16 +465,10 @@ export class Calls {
     instantiate: (candidate: Signature) => Signature
   ): { row: number; index: number } | undefined {
     if (this.c.silent > 0) return undefined;
-    const failures = (candidates.length > 3 ? candidates.slice(-1) : candidates).map((candidate) => {
-      const start = this.c.diagnostics.length;
-      this.reportSignature(node, callee, candidate, args, instantiate);
-      return this.c.diagnostics.splice(start);
-    });
-    let errors = failures[0];
-    for (const failure of failures) if (failure.length > errors.length) errors = failure;
-    const [first] = errors;
-    if (!first || errors.some((error) => error.index !== first.index)) return undefined;
-    return { row: first.row, index: first.index };
+    const start = this.c.diagnostics.length;
+    this.reportSignature(node, callee, candidates.at(-1) as Signature, args, instantiate);
+    const [first] = this.c.diagnostics.splice(start);
+    return first && { row: first.row, index: first.index };
   }
 
   /** Reports why the only signature that could fit does not accept the arguments. */
@@ -574,6 +565,10 @@ export class Calls {
   }
 
   private reportArgument(arg: TreeNode, argType: Type, parameterType: Type): void {
+    // TypeScript reports an object literal's excess property before any other mismatch.
+    const before = this.c.diagnostics.length;
+    this.c.expressions.checkExcessProperties(arg, argType, parameterType);
+    if (this.c.diagnostics.length > before) return;
     if (this.c.expressions.elaboration.report(arg, argType, parameterType)) return;
     this.c.error(
       arg,
