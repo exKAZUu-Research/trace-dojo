@@ -4,7 +4,7 @@ import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 import { unsupportedMessage } from '../unsupported';
 import { CallArity } from './callArity';
 import type { Checker, Mapper } from './checker';
-import { type Inference, InferencePriority, type InferenceRun, newInferenceRun } from './inference';
+import { InferencePriority, type InferenceRun, newInferenceRun } from './inference';
 import { named, skipParentheses, stringValue } from './syntax';
 import {
   anyType,
@@ -16,6 +16,7 @@ import {
   numberType,
   type Parameter,
   type Signature,
+  type TupleElement,
   type Type,
   type TypeParameter,
   undefinedType,
@@ -530,6 +531,10 @@ export class Calls {
   /** The parameter type an argument at `index` is passed to. */
   parameterTypeAt(signature: Signature, index: number): Type | undefined {
     const { parameters } = signature;
+    const final = parameters.at(-1);
+    // A rest of a tuple type takes each argument at its position in the tuple.
+    if (final?.rest && final.type.kind === 'object' && final.type.tuple && index >= parameters.length - 1)
+      return tupleTypeAt(this.c, final.type.tuple.elements, index - (parameters.length - 1));
     if (index < parameters.length) {
       const parameter = parameters[index];
       if (parameter.rest) return this.c.restElementType(parameter.type);
@@ -682,7 +687,8 @@ export class Calls {
     const restIndex = this.genericRestIndex(signature);
     if (restIndex === undefined || args.slice(restIndex).some((arg) => arg.type === 'spread_element')) return;
     const restType = (signature.parameters.at(-1) as Parameter).type;
-    (run.inferences.get(restType.id) as Inference).impliedArity = args.length - restIndex;
+    const inference = run.inferences.get(restType.id);
+    if (inference) inference.impliedArity = args.length - restIndex;
   }
 
   private argumentTuple(args: TreeNode[]): Type {
@@ -698,11 +704,15 @@ export class Calls {
   /** Where a rest parameter typed by one of the signature's own type parameters starts, as in `...args: T`. */
   private genericRestIndex(signature: Signature): number | undefined {
     const last = signature.parameters.at(-1);
-    if (!last?.rest || last.type.kind !== 'typeParameter') return undefined;
-    const { id } = last.type;
-    return signature.typeParameters.some((parameter) => parameter.id === id)
-      ? signature.parameters.length - 1
-      : undefined;
+    if (!last?.rest) return undefined;
+    // `...args: T`, or a tuple with a variadic element of one, as `...args: [...T, number]`.
+    const generic =
+      last.type.kind === 'typeParameter'
+        ? signature.typeParameters.some((parameter) => parameter.id === last.type.id)
+        : last.type.kind === 'object' &&
+          last.type.objectKind === 'tuple' &&
+          signature.typeParameters.some((parameter) => this.c.inference.mentions(last.type, parameter));
+    return generic ? signature.parameters.length - 1 : undefined;
   }
 
   private inferFromSpread(run: InferenceRun, signature: Signature, arg: TreeNode, index: number): void {
@@ -770,4 +780,14 @@ function receiverObject(callee: TreeNode): TreeNode | undefined {
   const expression = skipParentheses(callee);
   if (expression.type !== 'member_expression' && expression.type !== 'subscript_expression') return undefined;
   return expression.childForFieldName('object') ?? undefined;
+}
+
+/** The type the argument at an offset into a rest parameter of a tuple type takes, counting its trailing elements from the end. */
+function tupleTypeAt(c: Checker, elements: TupleElement[], offset: number): Type | undefined {
+  const restIndex = elements.findIndex((element) => element.rest);
+  if (restIndex === -1 || offset < restIndex) {
+    const element = elements[offset];
+    return element && (element.optional ? unionOf([element.type, undefinedType]) : element.type);
+  }
+  return c.restElementType(elements[restIndex].type);
 }

@@ -133,6 +133,8 @@ export class Signatures {
     const last = parameters.at(-1);
     if (!last?.rest || last.type.kind !== 'object' || last.type.objectKind !== 'tuple') return parameters;
     const elements = last.type.tuple?.elements ?? [];
+    // A tuple with elements after a rest one, as `[...T, number]`, stays one rest parameter, as TypeScript keeps it.
+    if (elements.slice(0, -1).some((element) => element.rest)) return parameters;
     return [
       ...parameters.slice(0, -1),
       ...elements.map((element, index) => ({
