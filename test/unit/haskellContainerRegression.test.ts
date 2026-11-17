@@ -613,3 +613,52 @@ main=print(C.toList(C.${builder}[${input}]))`;
     uncaughtException: demand === 'discarded' ? undefined : 'Prelude.undefined',
   });
 });
+
+test.each([
+  ['S.cartesianProduct (S.empty::S.Set Int) (error "right"::S.Set Int)', 'right'],
+  ['S.cartesianProduct (error "left"::S.Set Int) (error "right"::S.Set Int)', 'left'],
+  ['S.cartesianProduct (error "left"::S.Set Int) (S.empty::S.Set Int)', 'left'],
+  ['S.cartesianProduct (S.empty::S.Set Int) (S.fromList[error "key"::Int])', 'key'],
+  ['S.isSubsetOf (error "left"::S.Set Int) (error "right")', 'right'],
+  ['S.isProperSubsetOf (error "left"::S.Set Int) (error "right")', 'right'],
+  ['S.symmetricDifference (error "left"::S.Set Int) (error "right")', 'left'],
+])('set operations preserve input demand before producing results: %s', (expression, uncaughtException) => {
+  const source = `import qualified Data.Set as S\nmain=print((${expression}) \`seq\` (1::Int))`;
+  expect(executeProgram('haskell', source)).toMatchObject({ kind: 'executed', stdout: '', uncaughtException });
+});
+
+test.each([
+  ['cartesianProduct', '[0..4]', '[0..4]', '(2,4)'],
+  ['cartesianProduct', '[0..4]', '[0,1]', '(2,1)'],
+  ['cartesianProduct', '[0..4]', '[0]', '(3,0)'],
+  ['cartesianProduct', '[0]', '[0..4]', '(0,3)'],
+  ['cartesianProduct', '[0,1]', '[0,1]', '(1,0)'],
+  ['symmetricDifference', '[0..4]', '[3..6]', '2'],
+  ['symmetricDifference', '[0,1,2,3,4,7]', '[3..6]', '5'],
+  ['symmetricDifference', '[4,2,0,3,1]', '[6,4,3,5]', '2'],
+  ['symmetricDifference', '[]', '[2,1,3]', '2'],
+  ['symmetricDifference', '[2,1,3]', '[]', '2'],
+  ['symmetricDifference', '[0,2,4]', '[1,3,5]', '2'],
+])('%s preserves tree-shaped callback demand for %s and %s', (operation, left, right, uncaughtException) => {
+  const source = `import qualified Data.Set as S
+import qualified Data.Map.Strict as M
+main=print(M.size(M.fromSet (\\k->error(show k)::Int)(S.${operation}(S.fromList(${left}::[Int]))(S.fromList(${right}::[Int])))))`;
+  expect(executeProgram('haskell', source)).toMatchObject({ kind: 'executed', stdout: '', uncaughtException });
+});
+
+test('set tree products and merges retain ordered values and lazy element fields', () => {
+  const source = `import qualified Data.Set as S
+data K=K Int Int deriving(Eq,Ord)
+main=do
+ print(S.toList(S.cartesianProduct(S.fromList[2,1::Int])(S.fromList[4,3::Int])))
+ print(S.toList(S.cartesianProduct(S.empty::S.Set Int)(S.singleton(1::Int))))
+ print(S.toList(S.symmetricDifference(S.fromList[3,1,2::Int])(S.fromList[2,4])))
+ print(S.isSubsetOf(S.empty::S.Set Int)(S.singleton 1),S.isProperSubsetOf(S.singleton(1::Int))(S.singleton 1),S.isProperSubsetOf(S.empty::S.Set Int)(S.singleton 1))
+ let keys=S.fromDistinctAscList[K 1 undefined,K 2 undefined]
+ print(S.size(S.cartesianProduct keys keys))`;
+  expect(executeProgram('haskell', source)).toMatchObject({
+    kind: 'executed',
+    stdout: '[(1,3),(1,4),(2,3),(2,4)]\n[]\n[1,3,4]\n(True,False,True)\n4\n',
+    uncaughtException: undefined,
+  });
+});

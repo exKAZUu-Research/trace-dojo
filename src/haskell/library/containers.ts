@@ -226,10 +226,10 @@ difference a (SBin _ x l r) = case split x a of
 m1 \\ m2 = difference m1 m2
 
 isSubsetOf :: Ord a => Set a -> Set a -> Bool
-isSubsetOf a b = size a <= size b && subsetOf a b
+isSubsetOf a b = b ${BT}seq${BT} (size a <= size b && subsetOf a b)
 
 isProperSubsetOf :: Ord a => Set a -> Set a -> Bool
-isProperSubsetOf a b = size a < size b && subsetOf a b
+isProperSubsetOf a b = b ${BT}seq${BT} (size a < size b && subsetOf a b)
 
 subsetOf :: Ord a => Set a -> Set a -> Bool
 subsetOf STip _ = True
@@ -445,7 +445,14 @@ powerSet s = fromDistinctAscList (B.map fromDistinctAscList (subsets (toAscList 
         subsets (x:xs) = let rest = subsets xs in [] : (B.map (x:) rest ++ B.tail rest)
 
 cartesianProduct :: Set a -> Set b -> Set (a,b)
-cartesianProduct a b = fromDistinctAscList [(x,y) | x <- toAscList a, y <- toAscList b]
+cartesianProduct a b = a ${BT}seq${BT} case b of
+  STip -> STip
+  SBin 1 y _ _ -> mapMonotonic (\x -> (x,y)) a
+  _ -> products a
+  where
+    products STip = STip
+    products (SBin 1 x _ _) = mapMonotonic (\y -> (x,y)) b
+    products (SBin _ x l r) = link2 (products l) (link2 (mapMonotonic (\y -> (x,y)) b) (products r))
 
 mapMonotonic :: (a -> b) -> Set a -> Set b
 mapMonotonic _ STip = STip
@@ -455,7 +462,12 @@ mapMonotonic f (SBin count x l r) =
   in right ${BT}seq${BT} left ${BT}seq${BT} SBin count (f x) left right
 
 symmetricDifference :: Ord a => Set a -> Set a -> Set a
-symmetricDifference a b = union (difference a b) (difference b a)
+symmetricDifference STip b = b
+symmetricDifference a STip = a
+symmetricDifference (SBin _ x l r) b = case splitMember x b of
+  (bl,found,br) -> let left = symmetricDifference l bl
+                       right = symmetricDifference r br
+                   in right ${BT}seq${BT} left ${BT}seq${BT} if found then link2 left right else link x left right
 
 fold :: (a -> b -> b) -> b -> Set a -> b
 fold = foldr

@@ -75,7 +75,7 @@ export function typecheckModule(module: RModule, options: TypecheckOptions): Typ
   const checker = new Checker(options.env, options.builtins);
   inferKinds(checker, module);
   for (const decl of module.dataDecls) defineConstructors(checker, decl);
-  for (const decl of module.classes) defineClassMethods(checker, decl);
+  for (const decl of module.classes) defineClassMethods(decl);
   const instanceDecls = module.instances.map((decl) => declareInstance(checker, decl, module.name));
   const derived = deriveInstances(checker, module, options);
   const instances: CheckedInstance[] = [];
@@ -255,15 +255,11 @@ function defineConstructors(checker: Checker, decl: RDataDecl): void {
   }
 }
 
-function defineClassMethods(checker: Checker, decl: RClassDecl): void {
-  void checker;
+function defineClassMethods(decl: RClassDecl): void {
   decl.entity.supers = decl.supers.map((sup) => sup.cls);
-  for (const [index, sup] of decl.supers.entries()) {
+  for (const sup of decl.supers) {
     if (reachesSuperclass(sup.cls, decl.entity)) {
       throw compileError(decl.span, `クラス ${decl.entity.name} のスーパークラスが循環しています。`);
-    }
-    if (decl.supers.findIndex((other) => other.cls === sup.cls) !== index) {
-      throw compileError(sup.span, `スーパークラス ${sup.cls.name} が重複しています。`);
     }
   }
 }

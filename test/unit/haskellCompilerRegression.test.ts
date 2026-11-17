@@ -1055,3 +1055,28 @@ main=print((1 <+ 2 <#>) 4,(<#> 1 <+ 2) 4)`;
     uncaughtException: undefined,
   });
 });
+
+test.each([
+  ['class (Eq a,Eq a)=>C a\ninstance C Int\nmain=print(1::Int)', '1\n'],
+  [
+    'class (Eq a,Eq a)=>C a where\n c::a->a->Bool\n c=(==)\ninstance C Int\nmain=print(c(1::Int)1,c(1::Int)2)',
+    '(True,False)\n',
+  ],
+  [
+    'class Eq a=>P a\nclass (P a,Eq a,P a)=>C a\ninstance P Int\ninstance C Int\nf::C a=>a->a->Bool\nf=(==)\nmain=print(f(1::Int)1,f(1::Int)2)',
+    '(True,False)\n',
+  ],
+])('redundant superclass predicates retain valid class evidence: %s', (source, stdout) => {
+  expect(executeProgram('haskell', source)).toMatchObject({
+    kind: 'executed',
+    stdout,
+    uncaughtException: undefined,
+  });
+});
+
+test('redundant superclass predicates still reject superclass cycles', () => {
+  expect(executeProgram('haskell', 'class(C a,C a)=>C a\nmain=print(1::Int)')).toMatchObject({
+    kind: 'compileError',
+    diagnostics: [expect.objectContaining({ message: expect.stringContaining('循環しています') })],
+  });
+});
