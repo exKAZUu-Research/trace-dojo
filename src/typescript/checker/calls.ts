@@ -13,6 +13,7 @@ import {
   intersectionOf,
   isAnyLike,
   isIntrinsic,
+  numberType,
   type Parameter,
   type Signature,
   type Type,
@@ -53,8 +54,16 @@ export class Calls {
     const optional = node.childForFieldName('optional_chain') !== null;
     if (this.isEvolvingPush(callee)) {
       const object = callee.childForFieldName('object') as TreeNode;
-      for (const arg of args) this.c.assignments.evolve(object, this.c.expressions.check(arg));
-      return this.c.globalType('Number').resolve() && anyType;
+      for (const arg of args) {
+        // A spread adds the elements of what it spreads.
+        const element =
+          arg.type === 'spread_element'
+            ? this.c.patterns.iteratedType(arg, this.c.expressions.check(named(arg)[0]))
+            : this.c.expressions.check(arg);
+        this.c.assignments.evolve(object, element);
+      }
+      // `push` and `unshift` return the new length.
+      return numberType;
     }
     const chained = this.c.members.chainedCalleeType(callee);
     const checkedCallee = chained ?? this.c.expressions.check(callee, this.immediateCallContext(callee, args));
