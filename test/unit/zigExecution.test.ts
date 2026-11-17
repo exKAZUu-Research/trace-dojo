@@ -5957,6 +5957,7 @@ test.each([
   'union{a:u8,b:u8}',
   'packed union{a:u8,b:u8}',
   '[:1]const u8',
+  '[:0]u8',
   '[:0]const u16',
   '*u8',
   'error{Bad}!u8',
@@ -5982,4 +5983,33 @@ test('union assignment preserves existing field aliases and pointer payload copi
     stderr: '8 8 4',
     uncaughtException: undefined,
   });
+});
+
+test.each([
+  'int(u65528)',
+  'uintAtMost(u32760,std.math.maxInt(u32760))',
+  'uintLessThan(u32760,std.math.maxInt(u32760))',
+])('random generation bounds wide integer work through %s', (method) => {
+  const source = `const std=@import("std");pub fn main()void{var p=std.Random.DefaultPrng.init(1);for(0..200)|_|{_=p.random().${method};}}`;
+  expect(executeProgram('zig', source)).toMatchObject({ kind: 'limitExceeded', limit: 'operations' });
+});
+
+test.each(['tuple', 'sentinel'])('constant enum names reuse an indexed lookup in %s types', (kind) => {
+  const fields = Array.from({ length: 30_000 }, (_, index) => `f${index}`).join(',');
+  const value = kind === 'tuple' ? 'const t=.{E.f29999};const T=@TypeOf(t);' : 'const T=[0:E.f29999]E;';
+  const source = `const std=@import("std");const E=enum{${fields}};pub fn main()void{${value}for(0..5000)|_|{_=std.fmt.count("{}",.{T});}std.debug.print("ok",.{});}`;
+  expect(executeProgram('zig', source)).toMatchObject({ kind: 'executed', stderr: 'ok', uncaughtException: undefined });
+});
+
+test.each([
+  'int(u65535)',
+  'uintAtMost(u65528,std.math.maxInt(u65528))',
+  'uintLessThan(u65528,std.math.maxInt(u65528))',
+])('random helpers reject overflowing intermediate integer types: %s', (method) => {
+  expect(
+    executeProgram(
+      'zig',
+      `const std=@import("std");pub fn main()void{var p=std.Random.DefaultPrng.init(1);_=p.random().${method};}`
+    )
+  ).toMatchObject({ kind: 'compileError' });
 });

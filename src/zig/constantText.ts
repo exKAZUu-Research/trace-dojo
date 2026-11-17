@@ -1,4 +1,6 @@
+import { enumLookup } from './enumLookup';
 import { type AnyFloat, shortestDecimal } from './floats';
+import { spendMemory } from './memoryAccounting';
 import type { Type } from './types';
 import { decodeIdentifierBytes } from './utf8';
 import {
@@ -43,7 +45,7 @@ export function constantText(value: Value, type: Type, nameOf: (type: Type) => s
       return constantText(value, type.payload, nameOf);
     }
     case 'enum': {
-      return `.${type.fields?.find((field) => field.value === value)?.name ?? String(value as bigint)}`;
+      return `.${enumLookup(type.fields ?? [], spendMemory).byValue.get(value as bigint)?.name ?? String(value as bigint)}`;
     }
     case 'array': {
       return arrayText(value as ZArray, type.child, nameOf);

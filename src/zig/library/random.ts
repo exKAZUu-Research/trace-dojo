@@ -1,5 +1,4 @@
 import { PANIC, panic } from '../arith';
-/** `std.Random` with `DefaultPrng` (Xoshiro256), transcribed so that seeded sequences match Zig's. */
 import type { Span } from '../ast';
 import type { Frame } from '../runtime';
 import { copyForStorage, known, runtime, type SemaApi, type TExpr } from '../semaBase';
@@ -26,6 +25,7 @@ import { nativeTransferCost, storeSliceValue } from './common';
 import { addMembers, compileArgs, expectArgs, fnMember, type Member, nativeStruct } from './native';
 
 interface RandomSource {
+  spend: (cost: number) => void;
   next: () => bigint;
 }
 
@@ -60,6 +60,7 @@ function next(state: ZArray): bigint {
 
 /** `Xoshiro256.fill`: little-endian bytes of `next()`, a fresh one for a partial last word. */
 function fill(state: RandomSource, count: number): number[] {
+  state.spend(count);
   const bytes: number[] = [];
   while (bytes.length < count) {
     let n = state.next();
@@ -76,8 +77,12 @@ function fill(state: RandomSource, count: number): number[] {
 function randomInt(state: RandomSource, type: IntType): bigint {
   const bytes = Math.ceil(type.bits / 8);
   const raw = fill(state, bytes);
-  let value = 0n;
-  for (let index = raw.length - 1; index >= 0; index--) value = (value << 8n) | BigInt(raw[index]);
+  state.spend(bytes * 4);
+  const hexadecimal = raw
+    .toReversed()
+    .map((byte) => byte.toString(16).padStart(2, '0'))
+    .join('');
+  const value = bytes === 0 ? 0n : BigInt(`0x${hexadecimal}`);
   return wrapInt(BigInt.asUintN(type.bits, value), type);
 }
 
@@ -248,6 +253,7 @@ function randomState(sema: SemaApi, receiver: TExpr | undefined, span: Span): (f
 
 function randomSource(frame: Frame, state: ZArray): RandomSource {
   return {
+    spend: (cost) => frame.runtime.spend(cost),
     next: () => {
       frame.runtime.spend();
       return next(state);
@@ -302,6 +308,8 @@ function intMethod(
     const type = sema.compileType(typeArg);
     if (type.kind !== 'int')
       return sema.error(typeArg, `${name} には整数の型を渡してください（${typeName(type)} です）。`);
+    const maximumBits = name === 'int' ? 65_528 : 32_767;
+    if (type.bits > maximumBits) return sema.error(typeArg, `${name} の補助整数型のビット数が u16 に入りません。`);
     if (name.startsWith('uint') && type.signed)
       return sema.error(typeArg, `${name} には符号なし整数の型を渡してください。`);
     const args = compileArgs(
@@ -353,7 +361,7 @@ addMembers(RANDOM, {
       (frame) => {
         const generator = state(frame);
         const slice = evaluate(frame) as Slice;
-        frame.runtime.spend(1 + Math.floor(slice.length / 8) + slice.length * 2);
+        frame.runtime.spend(1 + slice.length);
         for (const [index, byte] of fill(generator, slice.length).entries()) slice.set(index, BigInt(byte));
         return;
       },
