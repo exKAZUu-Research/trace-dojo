@@ -152,6 +152,8 @@ export class StatementChecker {
         const type = this.c.typeNodes.typeFromNode(current);
         if (type.kind === 'object') this.checkIndexConformance(type.resolve(), current);
       }
+      // A tuple checks its elements where it is written, as in a branch of a conditional type no use instantiates.
+      if (current.type === 'tuple_type') this.c.typeNodes.typeFromNode(current);
       for (const child of named(current)) visit(child);
     };
     visit(node);

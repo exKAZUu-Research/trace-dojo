@@ -178,6 +178,28 @@ export class TypeNodes {
     return this.c.typeOperators.indexedAccess(objectType, indexType, index);
   }
 
+  /**
+   * Whether a rest's type parameter is an array where the rest is written: in the true branch of a conditional type that
+   * checks it against an array type, as TypeScript's substitution types narrow it.
+   */
+  private narrowedToArray(node: TreeNode, type: Type): boolean {
+    if (type.kind !== 'typeParameter') return false;
+    let child = node;
+    for (let current = node.parent; current; current = current.parent) {
+      const extendsNode = current.childForFieldName('right');
+      if (
+        current.type === 'conditional_type' &&
+        current.childForFieldName('left')?.text === type.name &&
+        current.childForFieldName('consequence')?.id === child.id &&
+        extendsNode &&
+        this.validTupleRestType(this.typeFromNode(extendsNode))
+      )
+        return true;
+      child = current;
+    }
+    return false;
+  }
+
   /** Whether a type node is in the true branch of a conditional type that checks `name`, which constrains it more. */
   private narrowedByConditional(node: TreeNode, name: string): boolean {
     let child = node;
@@ -231,7 +253,7 @@ export class TypeNodes {
       const type = this.tupleElement(element);
       const concreteRest = type.rest && this.hasConcreteRest(type.type);
       if (concreteRest && restSeen) this.c.error(element, 'タプル型に複数の残余要素は書けません。');
-      if (type.rest && !this.validTupleRestType(type.type))
+      if (type.rest && !this.validTupleRestType(type.type) && !this.narrowedToArray(element, type.type))
         this.c.error(element, '残余要素の型は配列型にしてください。');
       if (type.optional && restSeen) this.c.error(element, '残余要素の後に省略可能な要素は書けません。');
       if (!type.optional && !type.rest && optionalSeen)
