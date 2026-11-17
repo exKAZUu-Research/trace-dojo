@@ -10,6 +10,7 @@ import {
   anyType,
   bigintType,
   errorType,
+  isAnyLike,
   isIntrinsic,
   isPropertyKeyLiteral,
   literalType,
@@ -366,7 +367,7 @@ export class AssignmentChecker {
     if (!compound)
       return unionOf(
         (objectType.kind === 'union' ? objectType.types : [objectType]).map((member) =>
-          this.namedWriteType(member, propertyNode.text, expression)
+          this.namedWriteType(member, propertyNode.text)
         )
       );
 
@@ -401,7 +402,7 @@ export class AssignmentChecker {
     if (indexType.kind === 'literal')
       return unionOf(
         (objectType.kind === 'union' ? objectType.types : [objectType]).map((member) =>
-          this.namedWriteType(member, String(indexType.value), expression)
+          this.namedWriteType(member, String(indexType.value))
         )
       );
 
@@ -415,9 +416,10 @@ export class AssignmentChecker {
     );
   }
 
-  private namedWriteType(type: Type, name: string, node: TreeNode): Type {
+  private namedWriteType(type: Type, name: string): Type {
     const property = this.c.propertyOf(type, name);
-    if (!property) return this.c.members.indexedType(node, node, node, type, literalType(name));
+    // The access, checked before, has reported a property that neither exists nor falls under an index signature.
+    if (!property) return isAnyLike(type) ? type : (this.c.members.indexSignatureType(type, name) ?? errorType);
     const value = (property.writeType ?? property.type)();
     return property.optional ? unionOf([value, undefinedType]) : value;
   }
