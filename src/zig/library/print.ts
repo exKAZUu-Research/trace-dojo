@@ -55,7 +55,7 @@ export interface CompiledPrint {
 const templates = new WeakMap<SemaApi, WeakMap<object, Map<string, FormatTemplate>>>();
 
 // code-gauge-allow functionCognitiveComplexity 22 -- Checks the complete format against its argument types.
-// code-gauge-allow functionNcss 41 -- Keeps format checking and the resulting formatter together.
+// code-gauge-allow functionNcss 42 -- Keeps format checking and the resulting formatter together.
 export function compilePrint(sema: SemaApi, formatArg: Expression, argsArg: Expression, span: Span): CompiledPrint {
   const format = sema.coerce(sema.compile(formatArg, CONST_U8_SLICE), CONST_U8_SLICE, formatArg);
   if (!format.known || !compileTimeReadable(format.value))

@@ -1,5 +1,5 @@
 import { checkOutputSize } from './allocation';
-// code-gauge-allow-file fileNcss 731 -- The file holds one layer of the compiler, whose parts share its private state.
+// code-gauge-allow-file fileNcss 739 -- The file holds one layer of the compiler, whose parts share its private state.
 /**
  * Zig's formatted printing (`std.Io.Writer.print` and `printValue`), transcribed so that output matches byte for byte.
  * Formatting works on bytes, as Zig's strings are bytes.
@@ -69,6 +69,7 @@ export interface FormatTemplate {
   readonly text: string;
 }
 
+// code-gauge-allow functionNcss 36 -- Binds placeholder selectors and options against one call’s arguments.
 export function parseFormat(
   template: FormatTemplate,
   argNames: readonly string[],
@@ -122,6 +123,8 @@ export function parseFormat(
   return segments;
 }
 
+// code-gauge-allow functionCognitiveComplexity 22 -- Scans escaped braces and placeholders while preserving literal write boundaries.
+// code-gauge-allow functionNcss 36 -- Keeps the format lexer and its literal accumulation together.
 export function parseFormatTemplate(format: readonly number[], spend: (cost?: number) => void): FormatTemplate {
   const segments: TemplateSegment[] = [];
   let literal: number[] = [];
