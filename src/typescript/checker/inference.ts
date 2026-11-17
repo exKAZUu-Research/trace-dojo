@@ -1,10 +1,12 @@
 import type { Checker, Mapper } from './checker';
+import { isNumericName } from './syntax';
 import {
   anyType,
   errorType,
   intersectionOf,
   isAnyLike,
   isIntrinsic,
+  isSymbolName,
   literalType,
   type ObjectType,
   regularOf,
@@ -51,6 +53,17 @@ export interface InferenceRun {
 }
 
 type Recurse = (source: Type, target: Type, covariant?: boolean, priority?: number) => void;
+
+type IndexKey = 'stringIndex' | 'numberIndex' | 'symbolIndex';
+
+const indexKeys: IndexKey[] = ['stringIndex', 'numberIndex', 'symbolIndex'];
+
+/** The source index signatures whose keys an index signature of each key covers. */
+const applicableIndexKeys: Record<IndexKey, IndexKey[]> = {
+  stringIndex: ['stringIndex', 'numberIndex'],
+  numberIndex: ['numberIndex'],
+  symbolIndex: ['symbolIndex'],
+};
 
 /** Infers type arguments from the types that are matched against the types their parameters appear in. */
 export class TypeInference {
@@ -392,24 +405,33 @@ export class TypeInference {
     this.inferFromIndexSignatures(source, sourceStructure, targetStructure, recurse);
   }
 
+  /** Infers to each index signature of the target as TypeScript's `inferFromIndexTypes` does. */
   private inferFromIndexSignatures(
     source: Type,
     sourceStructure: Structure,
     targetStructure: Structure,
     recurse: Recurse
   ): void {
-    if (targetStructure.stringIndex) {
+    const inferable = hasInferableIndex(source, sourceStructure);
+    for (const key of indexKeys) {
+      const targetIndex = targetStructure[key];
+      if (!targetIndex) continue;
+      const types = inferable ? this.typesUnderIndex(sourceStructure, key) : [];
+      if (types.length > 0) recurse(unionOf(types), targetIndex.type);
       const sourceIndex =
-        sourceStructure.stringIndex?.type ??
-        (source.kind === 'object' && source.isLiteral
-          ? unionOf([...sourceStructure.properties.values()].map((property) => property.type()))
-          : undefined);
-      if (sourceIndex) recurse(sourceIndex, targetStructure.stringIndex.type);
+        key === 'numberIndex' ? (sourceStructure.numberIndex ?? sourceStructure.stringIndex) : sourceStructure[key];
+      if (sourceIndex) recurse(sourceIndex.type, targetIndex.type);
     }
-    if (targetStructure.numberIndex) {
-      const sourceIndex = sourceStructure.numberIndex?.type ?? sourceStructure.stringIndex?.type;
-      if (sourceIndex) recurse(sourceIndex, targetStructure.numberIndex.type);
-    }
+  }
+
+  /** The types of the properties and index signatures of an object literal or type literal that an index of `key` covers. */
+  private typesUnderIndex(structure: Structure, key: IndexKey): Type[] {
+    return [
+      ...[...structure.properties.values()]
+        .filter((property) => keyFitsIndex(property.name, key))
+        .map((property) => (property.optional ? this.c.relations.removeUndefined(property.type()) : property.type())),
+      ...applicableIndexKeys[key].flatMap((sourceKey) => structure[sourceKey]?.type ?? []),
+    ];
   }
 
   private inferFromSignatures(generic: Signature, target: Signature, recurse: Recurse): void {
@@ -601,4 +623,24 @@ function instantiatesSameType(source: Type, target: Type): boolean {
   if (source.kind !== 'object' || target.kind !== 'object') return false;
   if (source.objectKind === 'reference' && target.objectKind === 'reference') return source.target === target.target;
   return source.origin !== undefined && source.origin === target.origin;
+}
+
+/**
+ * Whether inferring to an index signature may read `type`'s properties, as TypeScript's
+ * `isObjectTypeWithInferableIndex` allows for an object literal or type literal but not a class or interface.
+ */
+function hasInferableIndex(type: Type, structure: Structure): boolean {
+  return (
+    type.kind === 'object' &&
+    type.objectKind === 'anonymous' &&
+    !type.classInfo &&
+    structure.callSignatures.length === 0 &&
+    structure.constructSignatures.length === 0
+  );
+}
+
+/** Whether a property named `name` has a key that an index signature of `key` covers. */
+function keyFitsIndex(name: string, key: IndexKey): boolean {
+  if (isSymbolName(name)) return key === 'symbolIndex';
+  return key === 'stringIndex' || (key === 'numberIndex' && isNumericName(name));
 }
