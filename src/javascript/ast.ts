@@ -65,7 +65,7 @@ export type Statement = Span &
         target: Pattern;
         iterable: Expression;
         /** How V8 names the iterable in the error a value without an iterator throws. */
-        iterableSource: IterationSource;
+        iterableSource?: IterationSource;
         body: Statement;
         /** Recorded after each binding of the target. */
         stepRow?: number;

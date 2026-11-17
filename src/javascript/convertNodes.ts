@@ -1,5 +1,6 @@
 import { CompileError } from '../interpreter/diagnostics';
 import type { Expression, IterationSource, PropertyName } from './ast';
+import { printedOperation } from './operatorPrinter';
 
 /**
  * The parts of a tree-sitter node that converting reads, which a view of another grammar's tree can also provide.
@@ -98,12 +99,6 @@ function printedCallee(node: Node): string | undefined {
     case 'super': {
       return node.text;
     }
-    case 'number': {
-      return String(Number(node.text.replaceAll('_', '')));
-    }
-    case 'string': {
-      return `"${node.text.slice(1, -1)}"`;
-    }
     case 'parenthesized_expression': {
       return printedCallee(namedChildren(node)[0]);
     }
@@ -131,7 +126,7 @@ function printedCallee(node: Node): string | undefined {
     }
     case 'subscript_expression': {
       const object = printedCallee(field(node, 'object'));
-      const index = field(node, 'index');
+      const index = unwrapParentheses(field(node, 'index'));
       if (object === undefined) return undefined;
       const dot = node.childForFieldName('optional_chain') ? '?.' : '';
       const plain =
@@ -141,7 +136,7 @@ function printedCallee(node: Node): string | undefined {
       return `${object}${dot}[${printedCallee(index) ?? '(intermediate value)'}]`;
     }
     default: {
-      return undefined;
+      return printedOperation(node, printedCallee);
     }
   }
 }

@@ -32,8 +32,10 @@ import {
   rowOf,
   unsupported,
   unsupportedFeatures,
+  unwrapParentheses,
 } from './convertNodes';
 import { ExpressionConverter, nameDestructuring, patternSuspends } from './expressionConverter';
+import { chain } from './operatorPrinter';
 import { isConstantExpression } from './stepRules';
 
 export type StatementConverter = (node: Node) => Statement;
@@ -284,7 +286,7 @@ export class ProgramConverter extends ExpressionConverter {
         declarationKind,
         target,
         iterable: this.expression(field(header, 'right')),
-        iterableSource: iterationSource(field(header, 'right')),
+        iterableSource: forOfIterationSource(field(header, 'right')),
         body: this.inBreakable(true, () => this.substatement(field(node, 'body'))),
         scope,
         stepRow: this.stepRowOf(node),
@@ -623,4 +625,33 @@ function namedParameter(param: Pattern): Pattern {
     });
   }
   return param;
+}
+
+/**
+ * How V8 names the iterable of a `for...of` loop, which it names by its value instead when it is a conditional, an
+ * object literal, a logical `&&` or `||` after a name, a `!` of an operation or a property, or a chain of more than two
+ * operands of one operator or of commas.
+ */
+function forOfIterationSource(node: Node): IterationSource | undefined {
+  const operand = unwrapParentheses(node);
+  const operator = operand.type === 'binary_expression' ? field(operand, 'operator').text : undefined;
+  const isLogical = operator === '&&' || operator === '||';
+  const isNegation = operand.type === 'unary_expression' && field(operand, 'operator').text === '!';
+  if (
+    operand.type === 'ternary_expression' ||
+    operand.type === 'object' ||
+    (isLogical && !LITERAL_TYPES.has(unwrapParentheses(field(operand, 'left')).type)) ||
+    (isNegation && NEGATED_BY_VALUE.has(unwrapParentheses(field(operand, 'argument')).type)) ||
+    (operator !== undefined && !isLogical && chain(operand, operator).length > 2) ||
+    (operand.type === 'sequence_expression' && namedChildren(operand).flatMap(sequenceParts).length > 2)
+  )
+    return undefined;
+  return iterationSource(node);
+}
+
+const LITERAL_TYPES = new Set(['number', 'string', 'true', 'false', 'null']);
+const NEGATED_BY_VALUE = new Set(['binary_expression', 'member_expression', 'subscript_expression']);
+
+function sequenceParts(node: Node): Node[] {
+  return node.type === 'sequence_expression' ? namedChildren(node).flatMap(sequenceParts) : [node];
 }

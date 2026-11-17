@@ -1527,6 +1527,22 @@ for (const [n, f] of cases) { try { console.log(n, f()); } catch (e) { console.l
 }`,
   ],
   [
+    'operator expressions named in error messages and numeric separators in fractions',
+    `const a = 1, b = 2, o = { x: 1 }; let c = 1, i = 0; const fns = [() => 1];
+function main() {
+  for (const run of [() => fns[i + 1](), () => fns[(i * 2) % 2 + 1](), () => fns[-i - 1](), () => fns[i++ + 1](), () => fns[a ? 1 : 2](),
+    () => (1 + 2 * 3)(), () => ('s' + 't' + a)(), () => (a != b)(), () => (!!a)(), () => (typeof a === 'x')(), () => (a, b, c)(),
+    () => (o.x = 1)(), () => (c += 1)(), () => (\`x\${a}\${b}\`)(), () => (a + 1 + 2)(), () => ((a + b) + c)(), () => (a && b || c)(),
+    () => ((-a) ** 2)(), () => (~1 + a)(), () => fns[(\`plain\`)](),
+    () => { for (const x of (a + b)); }, () => { for (const x of (a + b + c)); }, () => { for (const x of (a && b)); },
+    () => { for (const x of (a ? b : c)); }, () => { for (const x of !(a + b)); }, () => { for (const x of !a); }, () => [...(a ? b : c)]]) {
+    try { run(); } catch (e) { console.log(e.message); }
+  }
+}
+main();
+for (const n of [1234.123456789, -1234.5678, 0.0001234, 1e21, -0.12345, 1.123, 1234n]) console.dir({ n }, { numericSeparator: true });`,
+  ],
+  [
     'definitions restating or changing a read-only array length',
     `for (const descriptor of [{writable:false},{value:1},{value:'1'},{value:2},{value:0},{writable:true},{enumerable:true},{},{value:-1}]) {
   const a = [1]; Object.defineProperty(a, 'length', { writable: false });
