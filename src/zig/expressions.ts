@@ -1082,7 +1082,8 @@ export abstract class ExpressionCompiler extends SemaBase {
         this.error(expression, `${typeName(optional.type)} 型は optional ではないので、null と比べられません。`);
       }
       const isEqual = operator === '==';
-      return this.derived(optional, BOOL, (value) => (value === NULL) === isEqual);
+      const index = right.type.kind === 'null' ? 0 : 1;
+      return this.combine([left, right], BOOL, (values) => (values[index] === NULL) === isEqual, expression);
     }
     const ordered = operator !== '==' && operator !== '!=';
     const errorUnion = [left, right].find((operand) => operand.type.kind === 'error_union');

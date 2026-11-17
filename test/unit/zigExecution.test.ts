@@ -6261,3 +6261,101 @@ test('pointer map keys retain identity through extern union views', () => {
     uncaughtException: undefined,
   });
 });
+
+test.each([
+  ['if(@as(?u8,1))|*p|std.debug.print("{}",.{p.*});', '1'],
+  ['if(f())|*p|std.debug.print("{}",.{p.*})else|_|{}', '1'],
+  ['switch(@as(u8,1)){1=>|*p|std.debug.print("{}",.{p.*}),else=>{}}', '1'],
+  ['while(@as(?u8,1))|*p|{std.debug.print("{}",.{p.*});break;}', '1'],
+  ['while(f())|*p|{std.debug.print("{}",.{p.*});break;}else|_|{}', '1'],
+])('temporary captures have scoped constant locations: %s', (body, output) => {
+  const source = `const std=@import("std");fn f()error{Bad}!u8{return 1;}pub fn main()void{${body}}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: output,
+    uncaughtException: undefined,
+  });
+});
+
+test.each(['if(@as(?u8,1))|*p|{p.*=2;}', 'switch(@as(u8,1)){1=>|*p|p.*=2,else=>{}}'])(
+  'temporary captures reject mutation: %s',
+  (body) => {
+    expect(executeProgram('zig', `pub fn main()void{${body}}`)).toMatchObject({ kind: 'compileError' });
+  }
+);
+
+test('null comparisons preserve both operand effects in source order', () => {
+  const source = `const std=@import("std");fn get()?u8{std.debug.print("g",.{});return null;}pub fn main()void{std.debug.print("{}|",.{get()==blk:{std.debug.print("n",.{});break:blk null;}});std.debug.print("{}|",.{blk:{std.debug.print("n",.{});break:blk null;}!=get()});std.debug.print("{}",.{blk:{std.debug.print("a",.{});break:blk null;}==blk:{std.debug.print("b",.{});break:blk null;}});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: 'gntrue|ngfalse|abtrue',
+    uncaughtException: undefined,
+  });
+});
+
+test.each(['.{.a=4,.b=(x catch unreachable).a}', '(.{.a=4,.b=(x catch unreachable).a})'])(
+  'error union literals publish live result storage: %s',
+  (literal) => {
+    const source = `const std=@import("std");const S=struct{a:u8,b:u8};pub fn main()void{var x:error{Bad}!S=error.Bad;x=${literal};const s=x catch unreachable;std.debug.print("{} {}",.{s.a,s.b});}`;
+    expect(executeProgram('zig', source)).toMatchObject({
+      kind: 'executed',
+      stderr: '4 4',
+      uncaughtException: undefined,
+    });
+  }
+);
+
+test('parenthesized nested array result locations publish each element', () => {
+  const source = `const std=@import("std");pub fn main()void{var a=[_]u8{1,2};a=(.{4,a[0]});std.debug.print("{} {}",.{a[0],a[1]});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: '4 4',
+    uncaughtException: undefined,
+  });
+});
+
+test.each([
+  'while(@as(?u8,null))|_|:(_=true+1){_=true+1;}',
+  'while(@as(error{Bad}!u8,error.Bad))|_|:(_=true+1){_=true+1;}else|_|{}',
+  'for([0]u8{})|_|{_=true+1;}',
+  'for(0..0)|_|{_=true+1;}',
+])('known terminating loops skip unreachable semantic analysis: %s', (loop) => {
+  expect(
+    executeProgram('zig', `const std=@import("std");pub fn main()void{${loop}std.debug.print("ok",.{});}`)
+  ).toMatchObject({ kind: 'executed', stderr: 'ok', uncaughtException: undefined });
+});
+
+test('comptime float fused multiplication preserves wide exact values', () => {
+  const source = `const std=@import("std");pub fn main()void{std.debug.print("{d} {d} {d}",.{@mulAdd(comptime_float,1.5,2,3),@mulAdd(comptime_float,-1.5,2,3),@mulAdd(comptime_float,0x1p100,1,1)-0x1p100});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: '6 0 1',
+    uncaughtException: undefined,
+  });
+});
+
+test.each([0xd8_00, 0x30_42])('utf8Encode checks capacity before encoding %s', (codepoint) => {
+  const source = `const std=@import("std");pub fn main()void{var b:[1]u8=undefined;_=std.unicode.utf8Encode(${codepoint},&b)catch{};}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    uncaughtException: 'panic: reached unreachable code',
+  });
+});
+
+test.each(['union', 'packed union', 'extern union'])('tag formatting rejects untagged %s', (kind) => {
+  expect(
+    executeProgram(
+      'zig',
+      `const std=@import("std");const U=${kind}{a:u8,b:u8};pub fn main()void{const u=U{.b=7};std.debug.print("{t}",.{u});}`
+    )
+  ).toMatchObject({ kind: 'compileError' });
+});
+
+test.each(['packed', 'extern'])('explicit %s union formatting reads every shared field', (layout) => {
+  const source = `const std=@import("std");const U=${layout} union{a:u8,b:u8};pub fn main()void{const u=U{.b=7};std.debug.print("{any}",.{u});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: '.{ .a = 7, .b = 7 }',
+    uncaughtException: undefined,
+  });
+});

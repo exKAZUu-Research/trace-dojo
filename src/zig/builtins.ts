@@ -387,9 +387,10 @@ export abstract class BuiltinCompiler extends ExpressionCompiler {
       }
       case '@mulAdd': {
         const type = this.compileType(args[0]);
-        if (type.kind !== 'float') this.error(args[0], '@mulAdd は浮動小数点数の型にだけ使えます。');
+        if (type.kind !== 'float' && type.kind !== 'comptime_float')
+          this.error(args[0], '@mulAdd は浮動小数点数の型にだけ使えます。');
         const [a, b, c] = args.slice(1).map((arg) => this.coerce(this.compile(arg, type), type, arg));
-        const bits = (type as FloatType).bits;
+        const bits = type.kind === 'float' ? type.bits : 128;
         return this.combine(
           [a, b, c],
           type,

@@ -263,12 +263,8 @@ const UNICODE: Record<string, () => Member> = {
   utf8CodepointSequenceLength: fnMember('std.unicode.utf8CodepointSequenceLength', (sema, call) => {
     const [c] = compileArgs(sema, expectArgs(sema, call, 1, 'utf8CodepointSequenceLength'), [U21]);
     return computed(errorUnionOf(errorSetOf(['CodepointTooLarge']), U3), [c], call.span, ([value]) => {
-      const n = value as bigint;
-      if (n < 0x80n) return 1n;
-      if (n < 0x8_00n) return 2n;
-      if (n < 0x1_00_00n) return 3n;
-      if (n < 0x11_00_00n) return 4n;
-      return ErrorValue.of('CodepointTooLarge');
+      const length = utf8SequenceLength(Number(value as bigint));
+      return length instanceof ErrorValue ? length : BigInt(length);
     });
   }),
   utf8Encode: fnMember('std.unicode.utf8Encode', (sema, call) => {
@@ -278,11 +274,12 @@ const UNICODE: Record<string, () => Member> = {
     const errors = errorSetOf(['Utf8CannotEncodeSurrogateHalf', 'CodepointTooLarge']);
     return computed(errorUnionOf(errors, U3), [c, out], call.span, ([value, target]) => {
       const n = Number(value as bigint);
-      if (n >= 0xd8_00 && n <= 0xdf_ff) return ErrorValue.of('Utf8CannotEncodeSurrogateHalf');
-      if (n > 0x10_ff_ff) return ErrorValue.of('CodepointTooLarge');
-      const bytes = [...new TextEncoder().encode(String.fromCodePoint(n))];
+      const length = utf8SequenceLength(n);
+      if (length instanceof ErrorValue) return length;
       const slice = target as Slice;
-      if (bytes.length > slice.length) indexOutOfBounds(bytes.length - 1, slice.length);
+      if (BigInt(length) > slice.lengthValue) panic(PANIC.unreachable);
+      if (n >= 0xd8_00 && n <= 0xdf_ff) return ErrorValue.of('Utf8CannotEncodeSurrogateHalf');
+      const bytes = [...new TextEncoder().encode(String.fromCodePoint(n))];
       for (const [index, byte] of bytes.entries()) slice.set(index, BigInt(byte));
       return BigInt(bytes.length);
     });
@@ -327,6 +324,14 @@ const UNICODE: Record<string, () => Member> = {
     );
   }),
 };
+
+function utf8SequenceLength(codepoint: number): number | ErrorValue {
+  if (codepoint < 0x80) return 1;
+  if (codepoint < 0x8_00) return 2;
+  if (codepoint < 0x1_00_00) return 3;
+  if (codepoint < 0x11_00_00) return 4;
+  return ErrorValue.of('CodepointTooLarge');
+}
 
 // std.meta and std.enums ------------------------------------------------------------------------------------------------
 

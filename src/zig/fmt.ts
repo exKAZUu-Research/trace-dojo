@@ -1,10 +1,11 @@
 import { checkOutputSize } from './allocation';
-// code-gauge-allow-file fileNcss 757 -- The file holds one layer of the compiler, whose parts share its private state.
+// code-gauge-allow-file fileNcss 762 -- The file holds one layer of the compiler, whose parts share its private state.
 /**
  * Zig's formatted printing (`std.Io.Writer.print` and `printValue`), transcribed so that output matches byte for byte.
  * Formatting works on bytes, as Zig's strings are bytes.
  */
 import { PANIC, panic } from './arith';
+import { physicalUnion } from './bufferMemory';
 import {
   type AnyFloat,
   asBigFloat,
@@ -311,7 +312,9 @@ export function checkFormat(spec: string, type: Type, info: TypeInfo, hasOptions
         return invalid();
       }
       case 't': {
-        if (kind === 'error_set' || kind === 'enum' || kind === 'enum_literal' || kind === 'union') return;
+        if (kind === 'union') info.unionFields(type);
+        if (kind === 'error_set' || kind === 'enum' || kind === 'enum_literal' || (kind === 'union' && type.tagType))
+          return;
         return invalid();
       }
       default: {
@@ -541,9 +544,12 @@ export function printValue(
         appendBytes(out, utf8('.{ ... }'));
         return;
       }
-      const union = value as ZUnion;
-      appendBytes(out, utf8(`.{ .${fields[union.tag].name} = `));
-      printValue(out, ANY, options, union.slots[0], fields[union.tag].type, info, depth - 1);
+      const union = physicalUnion(type, value as ZUnion);
+      appendBytes(out, utf8('.{'));
+      for (const [index, field] of fields.entries()) {
+        appendBytes(out, utf8(`${index === 0 ? ' ' : ', '}.${field.name} = `));
+        printValue(out, ANY, options, union.fieldView!(index).slots[0], field.type, info, depth - 1);
+      }
       appendBytes(out, utf8(' }'));
       return;
     }

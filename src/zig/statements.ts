@@ -680,8 +680,9 @@ export abstract class StatementCompiler extends CallCompiler {
   }
 
   /** The code that writes an anonymous literal into the value at `holder.slots[index]`, or undefined for other values. */
-  // code-gauge-allow functionCognitiveComplexity 28 -- Keeps the analysis and the generated code of one construct together, as Zig's Sema does.
+  // code-gauge-allow functionCognitiveComplexity 29 -- Keeps the analysis and the generated code of one construct together, as Zig's Sema does.
   private resultLocationStore(value: Expression, type: Type): ResultStore | undefined {
+    value = unwrapParens(value);
     if (
       value.kind === 'structInit' &&
       !value.type &&
@@ -713,7 +714,22 @@ export abstract class StatementCompiler extends CallCompiler {
       return this.unionStore(value, type);
     }
     if (type.kind === 'optional') return this.optionalStore(value, type);
+    if (type.kind === 'error_union') return this.errorUnionStore(value, type);
     return undefined;
+  }
+
+  private errorUnionStore(value: Expression, type: Extract<Type, { kind: 'error_union' }>): ResultStore | undefined {
+    const inner = this.resultLocationStore(value, type.payload);
+    if (!inner) return undefined;
+    return (frame, holder, index) => {
+      if (holder.slots[index] instanceof ErrorValue) {
+        const slots = valueSlots(type.payload);
+        frame.runtime.reserveStorage(slots);
+        frame.runtime.spend(slots);
+        storeInto(holder, index, undefinedValue(type.payload));
+      }
+      inner(frame, holder, index);
+    };
   }
 
   private optionalStore(value: Expression, type: Extract<Type, { kind: 'optional' }>): ResultStore | undefined {
@@ -908,7 +924,7 @@ export abstract class StatementCompiler extends CallCompiler {
 
   /** A block as a statement or an expression; a labeled block's value is what `break :label value` gives. */
   // code-gauge-allow functionNcss 42 -- Keeps the analysis and the generated code of one construct together, as Zig's Sema does.
-  // code-gauge-allow functionCognitiveComplexity 28 -- Keeps the analysis and the generated code of one construct together, as Zig's Sema does.
+  // code-gauge-allow functionCognitiveComplexity 29 -- Keeps the analysis and the generated code of one construct together, as Zig's Sema does.
   private blockStatement(
     expression: ExpressionOf<'block'>,
     resultType: Type | undefined,
@@ -1141,7 +1157,7 @@ export abstract class StatementCompiler extends CallCompiler {
     );
   }
 
-  // code-gauge-allow functionCognitiveComplexity 22 -- Keeps known capture facts and their lexical runtime initialization together.
+  // code-gauge-allow functionCognitiveComplexity 23 -- Keeps known capture facts and their lexical runtime initialization together.
   private selectedBranch(
     expression: Expression | undefined,
     capture: ReturnType<StatementCompiler['captureBinding']>,
@@ -1155,7 +1171,7 @@ export abstract class StatementCompiler extends CallCompiler {
       return { stmt: this.valueStmt(value), value };
     }
     const conditionResult = staticResultOf(condition);
-    if (capture && conditionResult) {
+    if (capture && conditionResult && (!capture.byPointer || capture.locate)) {
       const address = capture.locate ? this.addressOf(condition) : undefined;
       if (!address || address.known) {
         capture.binding = {
@@ -1297,6 +1313,7 @@ export abstract class StatementCompiler extends CallCompiler {
   ):
     | {
         binding: LocalBinding;
+        byPointer?: boolean;
         locate?: (frame: Frame) => Pointer;
         bind: (frame: Frame, value: Value, pointer?: Pointer) => void;
       }
@@ -1304,15 +1321,19 @@ export abstract class StatementCompiler extends CallCompiler {
     if (!capture || isDiscardName(capture)) return undefined;
     if (capture.byPointer) {
       const place = operand?.place;
-      if (!place) return this.error(capture, '|*x| で受け取るには、変数などの場所が要ります。');
-      const pointerType = pointerTo(type, place.isConst);
+      const pointerType = pointerTo(type, place?.isConst ?? true);
       const binding = this.newLocal(capture.name, pointerType, true);
-      const locate = place.locate;
+      const locate = place?.locate;
       return {
         binding,
+        byPointer: true,
         locate,
-        bind: (frame, _value, pointer) => {
-          const target = pointer as Pointer;
+        bind: (frame, value, pointer) => {
+          if (!pointer) {
+            frame.slots[binding.slot] = new Pointer(new Cell(copyForFrame(frame, value, type)), 0);
+            return;
+          }
+          const target = pointer;
           frame.slots[binding.slot] = operand?.type.kind === 'optional' ? this.optionalPayloadPointer(target) : target;
         },
       };
@@ -1428,7 +1449,14 @@ export abstract class StatementCompiler extends CallCompiler {
     let continueExec: Exec | undefined;
     try {
       ({ body, continueExec } = this.withCapture(binding, () => {
-        const neverRuns = kind === 'bool' && staticResultOf(condition)?.value === false;
+        const fact = staticResultOf(condition);
+        const neverRuns =
+          fact !== undefined &&
+          (kind === 'bool'
+            ? fact.value === false
+            : kind === 'optional'
+              ? fact.value === NULL
+              : fact.value instanceof ErrorValue);
         const continuation =
           !neverRuns && expression.continueExpression
             ? this.withoutSteps(() => this.statementExpression(expression.continueExpression as Expression, expression))
@@ -1597,7 +1625,9 @@ export abstract class StatementCompiler extends CallCompiler {
     fn.targets.push(target);
     let body: Stmt;
     try {
-      body = this.withScope({ locals, parent: this.scope }, () => this.loopBody(expression.body));
+      body = lengths.includes(0n)
+        ? { exec: () => {}, noreturn: false }
+        : this.withScope({ locals, parent: this.scope }, () => this.loopBody(expression.body));
     } finally {
       fn.targets.pop();
     }
@@ -2207,7 +2237,6 @@ export abstract class StatementCompiler extends CallCompiler {
       const capture = each.capture;
       if (capture && !isDiscardName(capture)) {
         if (capture.byPointer) {
-          if (!union && !operand.place) this.error(capture, '|*x| で受け取るには、値の場所が要ります。');
           const binding = this.newLocal(capture.name, pointerTo(captureType, operand.place?.isConst ?? true), true);
           locals.set(capture.name, binding);
           bind = (frame, value, pointer) => {
