@@ -464,53 +464,34 @@ export class Relations {
     return true;
   }
 
+  /**
+   * Whether a tuple is related to another as TypeScript relates them: each source element is compared with the
+   * target element at the same position from the start, or from the end, or else with the target's rest element.
+   */
   private tupleRelated(source: ObjectType, target: ObjectType, relation: Relation): boolean {
     const sourceElements = source.tuple?.elements ?? [];
     const targetElements = target.tuple?.elements ?? [];
     if (source.tuple?.readonly && !target.tuple?.readonly) return false;
-    if (sourceElements.every((element) => !element.rest)) return this.fixedTupleRelated(source, target, relation);
     const targetRest = targetElements.findIndex((element) => element.rest);
-    if (targetRest === -1) return false;
-    const fixedTarget = targetElements.slice(0, targetRest);
-    const required = fixedTarget.filter((element) => !element.optional).length;
-    const sourceRest = sourceElements.findIndex((element) => element.rest);
-    const sourceFixed = sourceElements.slice(0, sourceRest);
-    if (sourceFixed.filter((element) => !element.optional).length < required) return false;
-    for (const [index, element] of sourceFixed.entries()) {
-      const targetElement = index < fixedTarget.length ? fixedTarget[index] : targetElements[targetRest];
-      if (!this.tupleElementRelated(element, targetElement, relation)) return false;
-    }
-    const restType = this.c.restElementType(sourceElements[sourceRest].type);
-    const targetType = this.c.restElementType(targetElements[targetRest].type);
-    return this.isRelated(restType, targetType, relation);
-  }
-
-  private fixedTupleRelated(source: ObjectType, target: ObjectType, relation: Relation): boolean {
-    const sourceElements = source.tuple?.elements ?? [];
-    const targetElements = target.tuple?.elements ?? [];
-    const restIndex = targetElements.findIndex((element) => element.rest);
-    const required = targetElements.filter((element) => !element.optional && !element.rest).length;
-    if (sourceElements.filter((element) => !element.optional).length < required) return false;
-    if (restIndex === -1 && sourceElements.length > targetElements.length) return false;
-    const tailCount = restIndex === -1 ? 0 : targetElements.length - restIndex - 1;
-    const tailStart = sourceElements.length - tailCount;
-    for (const [index, element] of sourceElements.entries()) {
+    const sourceHasRest = sourceElements.some((element) => element.rest);
+    if (!sourceHasRest && sourceElements.length < targetElements.filter(isRequired).length) return false;
+    if (targetRest === -1 && (sourceHasRest || targetElements.length < sourceElements.length)) return false;
+    const startCount = targetRest === -1 ? targetElements.length : targetRest;
+    const endCount = targetRest === -1 ? 0 : targetElements.length - targetRest - 1;
+    return sourceElements.every((element, index) => {
+      const fromEnd = sourceElements.length - 1 - index;
       const targetIndex =
-        restIndex === -1 || index < restIndex
-          ? index
-          : index >= tailStart
-            ? targetElements.length - sourceElements.length + index
-            : restIndex;
+        index < startCount ? index : fromEnd < endCount ? targetElements.length - 1 - fromEnd : targetRest;
       const expected = targetElements[targetIndex];
-      if (!this.tupleElementRelated(element, expected, relation)) return false;
-    }
-    return true;
-  }
-
-  private tupleElementRelated(source: TupleElement, target: TupleElement | undefined, relation: Relation): boolean {
-    if (!target || (source.optional && !target.optional && !target.rest)) return false;
-    const targetType = target.rest ? this.c.restElementType(target.type) : target.type;
-    return this.isRelated(source.type, targetType, relation);
+      if ((element.rest && !expected.rest) || (isRequired(expected) && !isRequired(element))) return false;
+      const sourceType = element.rest
+        ? this.c.restElementType(element.type)
+        : element.optional && !expected.optional
+          ? unionOf([element.type, undefinedType])
+          : element.type;
+      const targetType = expected.rest ? this.c.restElementType(expected.type) : expected.type;
+      return this.isRelated(sourceType, targetType, relation);
+    });
   }
 
   private signaturesRelated(sources: Signature[], targets: Signature[], relation: Relation): boolean {
@@ -671,4 +652,8 @@ function templatePlaceholderTexts(value: string, texts: readonly string[]): stri
   }
   parts.push(body.slice(position));
   return parts;
+}
+
+function isRequired(element: TupleElement): boolean {
+  return !element.optional && !element.rest;
 }

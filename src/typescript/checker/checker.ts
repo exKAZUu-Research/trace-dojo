@@ -49,6 +49,7 @@ import {
   type TupleElement,
   type Type,
   type TypeParameter,
+  undefinedType,
   unionOf,
   unknownType,
 } from './types';
@@ -214,7 +215,14 @@ export class Checker {
 
   /** The element type of an array, a read-only array, or a tuple. */
   elementTypeOf(type: ObjectType): Type {
-    if (type.objectKind === 'tuple') return unionOf((type.tuple?.elements ?? []).map((element) => element.type));
+    if (type.objectKind === 'tuple') {
+      return unionOf(
+        (type.tuple?.elements ?? []).map((element) => {
+          if (element.rest) return this.restElementType(element.type);
+          return element.optional ? unionOf([element.type, undefinedType]) : element.type;
+        })
+      );
+    }
     return type.typeArguments?.[0] ?? anyType;
   }
 
