@@ -1,0 +1,13 @@
+function groupBy<T, K extends string>(xs: T[], f: (x: T) => K): Record<string, T[]> {
+  const r: Record<string, T[]> = {};
+  for (const x of xs) (r[f(x)] ??= []).push(x);
+  return r;
+}
+function add<K extends string>(k: K, r: Record<string, number[]>): void { (r[k] ??= []).push(1); }
+function add2<K extends string>(k: K, r: Record<string, number[]>): void { const a = (r[k] ??= []); a.push(1); }
+console.log(groupBy([1, 2, 3], (x) => (x % 2 ? "odd" : "even")));
+const counts: Record<string, number[]> = {};
+add("a", counts);
+add2("a", counts);
+add2("b", counts);
+console.log(counts);

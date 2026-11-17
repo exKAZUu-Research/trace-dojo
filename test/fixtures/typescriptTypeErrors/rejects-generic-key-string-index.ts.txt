@@ -1,0 +1,18 @@
+function f1<K extends string>(x: Record<string, number[]>[K]) { const s: string = x; }
+function f2<K extends number>(k: K, r: Record<string, boolean>) { const s: string = r[k]; }
+function f3<K extends string>(k: K, r: { [k: string]: number; a: number }) { const s: string = r[k]; }
+function f4<K extends string>(k: K, r: { [k: string]: number; [n: number]: 1 }) { const s: string = r[k]; }
+function f6<K extends "a" | "b">(k: K, r: Record<string, Date>) { const s: string = r[k]; }
+function f8<K extends string>(k: K, r: Record<string, number> | Record<string, string>) { const s: boolean = r[k]; }
+function add<K extends string>(k: K, r: Record<string, number[]>): void {
+  const a: string = (r[k] ??= []);
+  const b: string = r[k];
+  const c: string = (r[k] ||= []);
+  const d: string = (r[k] &&= []);
+  const e: string = (r[k] = []);
+  const s: string = k;
+  const f: string = (r[s] ??= []);
+}
+function add2<T extends Record<string, number[]>, K extends keyof T>(k: K, r: T): void {
+  const a: string = (r[k] ??= []);
+}
