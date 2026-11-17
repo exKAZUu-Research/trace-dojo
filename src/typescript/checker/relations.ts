@@ -394,7 +394,7 @@ export class Relations {
     const byElements = this.elementsRelated(source, target, relation);
     if (byElements !== undefined) return byElements;
     const sourceStructure = this.c.structureOf(source);
-    const targetStructure = target.resolve();
+    const targetStructure = this.c.structureOf(target);
     const { stringIndex, numberIndex, symbolIndex } = targetStructure;
     return (
       this.propertiesRelated(source, sourceStructure, targetStructure, relation) &&
