@@ -1,7 +1,7 @@
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import type { Checker } from './checker';
-import type { Sym } from './scopes';
+import type { Scope, Sym } from './scopes';
 import { hasToken, named, patternIdentifiers } from './syntax';
 import {
   anyType,
@@ -21,6 +21,8 @@ const accessorDeclarationTypes = new Set(['method_definition', 'method_signature
 /** Resolves the signatures and type parameters that function-like and generic declarations declare. */
 export class Signatures {
   private readonly signatureCache = new Map<number, Signature>();
+  /** The constraint nodes being resolved, by node. */
+  private readonly resolvingConstraints = new Set<number>();
 
   constructor(private readonly c: Checker) {}
 
@@ -101,6 +103,7 @@ export class Signatures {
     const pattern = parameterNode.childForFieldName('pattern') ?? parameterNode;
     const annotation = this.c.typeNodes.annotationType(parameterNode.childForFieldName('type'));
     const rest = pattern.type === 'rest_pattern';
+    if (rest && annotation) this.checkRestParameterType(parameterNode, pattern, annotation);
     const contextualParameter = contextual ? this.contextualParameterType(contextual, index, rest) : undefined;
     const value = parameterNode.childForFieldName('value');
     const type =
@@ -118,6 +121,13 @@ export class Signatures {
       optional: parameterNode.type === 'optional_parameter' || value !== null,
       rest,
     };
+  }
+
+  /** Reports a rest parameter bound to a name whose annotated type is not an array; a binding pattern reports its own error. */
+  private checkRestParameterType(parameterNode: TreeNode, pattern: TreeNode, type: Type): void {
+    if (named(pattern)[0]?.type !== 'identifier') return;
+    if (!this.c.relations.isAssignable(type, this.c.globalType('ReadonlyArray', [anyType])))
+      this.c.errorWhileResolving(parameterNode, '残余引数の型は配列型にしてください。');
   }
 
   private predicateOf(node: TreeNode, returnNode: TreeNode, parameters: Parameter[]): Signature['predicate'] {
@@ -307,10 +317,52 @@ export class Signatures {
     };
   }
 
-  /** A type parameter's constraint, where TypeScript reads `extends any` as `extends unknown`. */
+  /**
+   * Checks every type parameter `scopes` declare, as TypeScript's `checkTypeParameter` does whether or not a use
+   * instantiates it: its constraint and default resolve, and its default satisfies its constraint.
+   */
+  checkTypeParameterDeclarations(scopes: Scope[]): void {
+    for (const scope of scopes) {
+      for (const symbol of scope.types.values()) {
+        const declaration = symbol.typeDeclarations[0];
+        if (symbol.typeKind === 'typeParameter' && declaration?.type === 'type_parameter')
+          this.checkTypeParameterDeclaration(declaration, this.typeParameterOfSymbol(symbol));
+      }
+    }
+  }
+
+  private checkTypeParameterDeclaration(declaration: TreeNode, parameter: TypeParameter): void {
+    const constraintNode = declaration.childForFieldName('constraint');
+    if (constraintNode) this.c.typeNodes.typeFromNode(named(constraintNode)[0]);
+    const defaultNode = declaration.childForFieldName('value');
+    if (!defaultNode) return;
+    const defaultTypeNode = named(defaultNode)[0];
+    const defaultType = this.c.typeNodes.typeFromNode(defaultTypeNode);
+    const constraint = parameter.constraint?.();
+    if (!constraint) return;
+    // Only the parameter itself stands for its default; the constraint may still refer to the other parameters.
+    const instantiated = this.c.instantiate(constraint, new Map([[parameter.id, defaultType]]));
+    if (!this.c.relations.isAssignable(defaultType, instantiated))
+      this.c.error(
+        defaultTypeNode,
+        `型 '${this.c.print(this.c.widenLiteralForMessage(defaultType, instantiated))}' は制約 '${this.c.print(instantiated)}' を満たしていません。`
+      );
+  }
+
+  /**
+   * A type parameter's constraint, where TypeScript reads `extends any` as `extends unknown`. A constraint that refers
+   * to its own type, as `T extends Tree<any>` in `Tree`, reads as `unknown` while it resolves, for the constraints of the
+   * type arguments it passes are checked as it resolves.
+   */
   private declaredConstraint(constraintNode: TreeNode): Type {
-    const constraint = this.c.typeNodes.typeFromNode(named(constraintNode)[0]);
-    return constraint === anyType ? unknownType : constraint;
+    if (this.resolvingConstraints.has(constraintNode.id)) return unknownType;
+    this.resolvingConstraints.add(constraintNode.id);
+    try {
+      const constraint = this.c.typeNodes.typeFromNode(named(constraintNode)[0]);
+      return constraint === anyType ? unknownType : constraint;
+    } finally {
+      this.resolvingConstraints.delete(constraintNode.id);
+    }
   }
 
   typeParametersOfSymbol(symbol: Sym): TypeParameter[] {

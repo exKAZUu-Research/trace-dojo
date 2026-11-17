@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 502 -- Holds shared type construction, bounded instantiation, structure lookup, and type constraints used by all checker components.
+// code-gauge-allow-file fileNcss 503 -- Holds shared type construction, bounded instantiation, structure lookup, and type constraints used by all checker components.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import type { SourceDiagnostic } from '../../interpreter/diagnostics';
@@ -129,6 +129,7 @@ export class Checker {
 
   check(): SourceDiagnostic[] {
     checkDuplicateDeclarations(this, this.binder.allScopes);
+    this.signatures.checkTypeParameterDeclarations(this.binder.allScopes);
     this.statements.checkProgram(this.root);
     const seen = new Set<string>();
     return this.diagnostics
