@@ -555,6 +555,7 @@ export class ClassChecker {
               ? String(key.value)
               : undefined;
           },
+          (operator, type) => skippedType(this.c, operator, type),
           () => this.c.budget.spend()
         )
       : [];
@@ -972,3 +973,10 @@ export class ClassChecker {
 }
 
 export { anonymousObject };
+
+/** The part of a field's type for which `&&=`, `||=`, or `??=` skips assigning it, or undefined for none. */
+function skippedType(c: Checker, operator: string, type: Type): Type | undefined {
+  const skipped =
+    operator === '??=' ? c.relations.removeNullish(type) : c.flow.narrowByTruthiness(type, operator === '||=');
+  return isIntrinsic(skipped, 'never') ? undefined : skipped;
+}

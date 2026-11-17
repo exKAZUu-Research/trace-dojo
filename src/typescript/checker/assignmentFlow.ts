@@ -38,12 +38,20 @@ export function typesAtConstructorExit(
   name: string,
   assignedType: (value: TreeNode) => Type,
   keyName: (index: TreeNode) => string | undefined,
+  skippedBy: (operator: string, type: Type) => Type | undefined,
   spend: () => void
 ): Type[] {
-  const flow = new AssignmentFlow((left) => isThisField(left, name, keyName), assignedType, spend);
+  const flow = new AssignmentFlow(
+    (left) => isThisField(left, name, keyName),
+    assignedType,
+    (operator, value) => skippedBy(operator, value as Type),
+    spend
+  );
   const end = flow.statement(body, [undefinedType]);
   return (merge([end, ...flow.returns]) ?? []).filter((value) => !isLoopEntry(value)) as Type[];
 }
+
+const LOGICAL_ASSIGNMENTS = new Set(['&&=', '||=', '??=']);
 
 const UNASSIGNED = { kind: 'unassigned' };
 const ASSIGNED = { kind: 'assigned' };
@@ -53,9 +61,11 @@ const ASSIGNED = { kind: 'assigned' };
  * TypeScript reports a property a program adds to a function before one of its assignments runs.
  */
 export function mayBeUnassignedAt(body: TreeNode, targets: Set<number>, read: TreeNode, spend: () => void): boolean {
+  // A property not assigned yet is `undefined`, which every logical assignment but `&&=` assigns.
   const flow = new AssignmentFlow(
     (left) => targets.has(left.id),
     () => ASSIGNED,
+    (operator, value) => (value === UNASSIGNED && operator !== '&&=' ? undefined : value),
     spend,
     read
   );
@@ -75,6 +85,8 @@ class AssignmentFlow {
   constructor(
     private readonly isTarget: (left: TreeNode) => boolean,
     private readonly assignedValue: (right: TreeNode) => Value,
+    /** The part of a value for which a logical assignment's operator skips the assignment, or undefined for none. */
+    private readonly skippedBy: (operator: string, value: Value) => Value | undefined,
     /** Charges the checker's budget for each statement followed, which bounds the paths through nested blocks. */
     private readonly spend: () => void,
     private readonly read?: TreeNode
@@ -275,6 +287,9 @@ class AssignmentFlow {
       case 'assignment_expression': {
         return this.assignment(node, values);
       }
+      case 'augmented_assignment_expression': {
+        return this.logicalAssignment(node, values);
+      }
       case 'ternary_expression': {
         const [whenTrue, whenFalse] = this.branch(node.childForFieldName('condition') as TreeNode, values);
         return merge([
@@ -302,6 +317,21 @@ class AssignmentFlow {
     const value = this.assignedValue(right);
     for (const assigned of this.tryAssignments) assigned.push(value);
     return [value];
+  }
+
+  /**
+   * The values after `&&=`, `||=`, or `??=` to a target: those the operator skips the assignment for, and the assigned
+   * one where it runs. Other compound assignments read the target first, so they leave it as it was.
+   */
+  private logicalAssignment(node: TreeNode, values: Value[]): Values {
+    const operator = node.childForFieldName('operator')?.text ?? '';
+    const right = node.childForFieldName('right');
+    const left = node.childForFieldName('left');
+    if (!right || !left || !LOGICAL_ASSIGNMENTS.has(operator) || !this.isTarget(left))
+      return this.expressions(named(node), values);
+    const skipped = values.flatMap((value) => this.skippedBy(operator, value) ?? []);
+    const assigned = this.assignment(node, values);
+    return merge([skipped.length > 0 ? skipped : undefined, assigned]);
   }
 
   /** The values after a function called where it is written, which runs its body before the call completes. */

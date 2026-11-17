@@ -1,0 +1,14 @@
+class A { value; constructor() { this.value ??= 1; } }
+const a: number = new A().value;
+class B { value; constructor() { this.value ||= "s"; } }
+const b: string = new B().value;
+class C { value; constructor(n: number | null) { this.value = n; this.value ??= 0; } }
+const c: number = new C(null).value;
+class D { value; constructor() { this.value = 0; this.value ||= 5; } }
+const d: number = new D().value;
+class E { value; constructor() { this.value = "x"; this.value &&= 3; } }
+const e: string = new E().value;
+console.log(a, b, c, d);
+const f = () => 1;
+f.tag ??= "t";
+console.log(f.tag);
