@@ -64,3 +64,41 @@ main=print(C.foldMapWithKey (\\k _->M k)(C.singleton(1::Int)()))`;
     });
   }
 );
+
+test.each(['Data.Map', 'Data.Map.Strict'])('%s Foldable queries preserve tree demand', (module) => {
+  for (const method of ['maximum', 'minimum']) {
+    const source = `import qualified ${module} as M
+main=print(${method}(M.empty::M.Map Int Int))`;
+    expect(executeProgram('haskell', source)).toMatchObject({
+      kind: 'executed',
+      stdout: '',
+      uncaughtException: `Data.Foldable.${method} (for Data.Map): empty map`,
+    });
+  }
+  const source = `import qualified ${module} as M
+import qualified Data.Map as L
+main=do
+ print(elem 2(L.fromList[(1,undefined),(2,2),(3,3)]::M.Map Int Int))
+ print(elem (undefined::Int)(M.empty::M.Map Int Int))`;
+  expect(executeProgram('haskell', source)).toMatchObject({
+    kind: 'executed',
+    stdout: 'True\n',
+    uncaughtException: 'Prelude.undefined',
+  });
+});
+
+test.each(['maximum', 'minimum'])('%s on Map uses its strict root-first traversal', (method) => {
+  const source = `import qualified Data.Map as M
+data N=N String deriving Show
+instance Eq N where _==_=False
+instance Ord N where
+ compare _ _=EQ
+ max(N x)(N y)=N("("++x++","++y++")")
+ min(N x)(N y)=N("("++x++","++y++")")
+main=print(${method}(M.fromList[(1,N "left"),(2,N "root"),(3,N "right")]::M.Map Int N))`;
+  expect(executeProgram('haskell', source)).toMatchObject({
+    kind: 'executed',
+    stdout: 'N "((root,left),right)"\n',
+    uncaughtException: undefined,
+  });
+});

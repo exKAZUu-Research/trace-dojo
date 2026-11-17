@@ -71,6 +71,7 @@ export interface ValueEntity {
   fixity?: Fixity;
   /** What to name when rejecting a use of a library value this environment does not support. */
   unsupported?: string;
+  unsupportedField?: boolean;
 }
 
 export interface Fixity {

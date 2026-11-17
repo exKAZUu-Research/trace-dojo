@@ -11,8 +11,10 @@ import type { Builtins } from './infer';
 import { LIBRARY_SOURCES, PUBLIC_MODULES, UNSUPPORTED_MODULES, UNSUPPORTED_VALUES } from './library';
 import {
   KNOWN_LIBRARY_CLASS_METHODS,
+  KNOWN_LIBRARY_FIELDS,
   KNOWN_LIBRARY_TYPE_CHILDREN,
   KNOWN_LIBRARY_TYPES,
+  KNOWN_LIBRARY_VALUE_REEXPORTS,
   KNOWN_LIBRARY_VALUES,
 } from './library/knownValues';
 import { type CompiledModuleInfo, emptyExports, type ExportTable, type TypeLike } from './modules';
@@ -185,7 +187,7 @@ class LibraryCompiler {
     }
   }
 
-  // code-gauge-allow functionCognitiveComplexity 19 -- The export pass combines explicit selections, implemented identities and unsupported API entries.
+  // code-gauge-allow functionCognitiveComplexity 21 -- The export pass combines explicit selections, implemented identities and unsupported API entries.
   publicModules(): Map<string, CompiledModuleInfo> {
     const modules = new Map<string, CompiledModuleInfo>();
     for (const [name, spec] of Object.entries(PUBLIC_MODULES)) {
@@ -196,13 +198,22 @@ class LibraryCompiler {
       for (const [typeName, children] of spec.types) exportType(exports, source, typeName, children, name);
       for (const value of KNOWN_LIBRARY_VALUES[name] ?? []) {
         if (!exports.values.has(value)) {
-          exports.values.set(value, {
-            id: nextId(),
-            name: value,
-            module: name,
-            sort: 'var',
-            unsupported: `ライブラリ関数（${name}.${value}）`,
-          });
+          const reexport = Object.entries(KNOWN_LIBRARY_VALUE_REEXPORTS[name] ?? {}).find(([, names]) =>
+            names.includes(value)
+          );
+          const shared = reexport && modules.get(reexport[0])?.exports.values.get(value);
+          assert.ok(!reexport || shared, `Missing library re-export ${reexport?.[0]}.${value}`);
+          exports.values.set(
+            value,
+            shared ?? {
+              id: nextId(),
+              name: value,
+              module: name,
+              sort: 'var',
+              unsupportedField: KNOWN_LIBRARY_FIELDS[name]?.includes(value),
+              unsupported: `ライブラリ関数（${name}.${value}）`,
+            }
+          );
         }
       }
       for (const type of KNOWN_LIBRARY_TYPES[name] ?? []) {

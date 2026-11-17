@@ -1108,7 +1108,19 @@ instance Foldable (Map k) where
   toList = elems
   null = null
   length = size
-  elem x m = B.elem x (elems m)
+  elem = go
+    where go x Tip = x ${BT}seq${BT} False
+          go x (Bin _ _ v l r) = x == v || go x l || go x r
+  maximum = start
+    where start Tip = error "Data.Foldable.maximum (for Data.Map): empty map"
+          start (Bin _ _ v l r) = go (go v l) r
+          go m Tip = m ${BT}seq${BT} m
+          go m (Bin _ _ v l r) = go (go (max m v) l) r
+  minimum = start
+    where start Tip = error "Data.Foldable.minimum (for Data.Map): empty map"
+          start (Bin _ _ v l r) = go (go v l) r
+          go m Tip = m ${BT}seq${BT} m
+          go m (Bin _ _ v l r) = go (go (min m v) l) r
   sum = foldl' (+) 0
   product = foldl' (*) 1
 

@@ -1278,11 +1278,13 @@ class Renamer {
       name.qualifier
         ? (this.scope.qualifiedValues.get(name.qualifier)?.get(name.name) ?? [])
         : this.scope.values.get(name.name)
-    ).filter((entity) => entity.sort === 'field');
+    ).filter((entity) => entity.sort === 'field' || entity.unsupportedField);
     if (candidates.length === 0) {
       throw compileError(name.span, `フィールド ${describeName(name)} がスコープにありません。`);
     }
-    return this.pickOne(candidates, name, 'value').field as FieldInfo;
+    const picked = this.pickOne(candidates, name, 'value');
+    if (picked.unsupported) throw unsupportedError(name.span, picked.unsupported);
+    return picked.field as FieldInfo;
   }
 
   private lookupType(name: QName): TypeLike {

@@ -5,7 +5,7 @@ import { TraceRecorder, type TraceVariables } from '../interpreter/traceRecorder
 import type { DisplayNode, TraceItemVariable } from '../problems/trace';
 import { CHAR_TYPE, CONS_CON, FLOAT_TYPE, NIL_CON, UNIT_CON } from './builtinTypes';
 import { compileProgram } from './compile';
-import { constructorFieldType, slotDisplayType, UNKNOWN_TYPE } from './displayTypes';
+import { constructorFieldType, scalarConstructorKind, slotDisplayType, UNKNOWN_TYPE } from './displayTypes';
 import { floatToDigits } from './primitives';
 import { runProgram } from './run';
 import { DisplayAbort, Runtime, type TraceFrame } from './runtime';
@@ -210,7 +210,7 @@ function scalarOf(runtime: Runtime, value: Value, type: Type, depth: number): Sc
   if (typeof value === 'string') return value;
   if (!(value instanceof ConValue)) return NOT_SCALAR;
   if (containerKind(value)) return NOT_SCALAR;
-  if (value.con.type.module === 'Base' && value.con.type.name === 'Ratio') {
+  if (scalarConstructorKind(value.con) === 'ratio') {
     const numerator = forceForDisplay(runtime, value.fields[0]);
     const denominator = forceForDisplay(runtime, value.fields[1]);
     return typeof numerator === 'bigint' && typeof denominator === 'bigint'
@@ -230,8 +230,7 @@ function scalarOf(runtime: Runtime, value: Value, type: Type, depth: number): Sc
     }
     return scalars as Scalar;
   }
-  // An enumeration's constructor shows as its name.
-  if (value.fields.length === 0 && value.con.type.module !== 'Base') return value.con.name;
+  if (scalarConstructorKind(value.con) === 'enum') return value.con.name;
   return NOT_SCALAR;
 }
 
@@ -277,7 +276,7 @@ class DisplayNodes {
     if (!(value instanceof ConValue) || isHidden(value, type)) return undefined;
     const container = containerKind(value);
     if (container) return this.containerNodeOf(value, type, depth, container);
-    if (value.con.type.module === 'Base' && value.con.type.name === 'Ratio') {
+    if (scalarConstructorKind(value.con) === 'ratio') {
       const scalar = scalarOf(this.runtime, value, type, depth);
       return typeof scalar === 'string' ? { kind: 'value', value: scalar } : undefined;
     }

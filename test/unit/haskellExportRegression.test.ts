@@ -98,3 +98,58 @@ test.each([
     uncaughtException: undefined,
   });
 });
+
+test.each(['compose', 'disjoint', 'isProperSubmapOf', 'filterKeys', 'splitRoot'])(
+  'unsupported Map re-exports preserve the identity of %s',
+  (name) => {
+    const single = executeProgram('haskell', `import Data.Map\nx=${name}\nmain=print(1::Int)`);
+    const combined = executeProgram(
+      'haskell',
+      `import Data.Map\nimport Data.Map.Strict\nx=${name}\nmain=print(1::Int)`
+    );
+    expect(single.kind).toBe('compileError');
+    if (single.kind !== 'compileError') throw new Error('Expected an unsupported API diagnostic');
+    expect(combined).toMatchObject({
+      kind: 'compileError',
+      diagnostics: [{ message: single.diagnostics[0].message }],
+    });
+    expect(single.diagnostics[0].message).toContain('この採点環境では使えません');
+  }
+);
+
+test.each([
+  ['import Data.Map\nimport Data.Map.Strict', 'fromAscListWith'],
+  ['import Data.Map\nimport Data.Map.Strict', 'differenceWithKey'],
+  ['import Data.Map\nimport Data.Set', 'splitRoot'],
+])('distinct unsupported exports remain ambiguous: %s / %s', (imports, name) => {
+  const source = `${imports}\nx=${name}\nmain=print(1::Int)`;
+  expect(executeProgram('haskell', source)).toMatchObject({
+    kind: 'compileError',
+    diagnostics: [{ message: expect.stringContaining('どれを指すか') }],
+  });
+});
+
+test.each([
+  ['import Text.Printf', 'fmtChar', "'x'"],
+  ['import qualified Text.Printf as P', 'P.fpRest', '""'],
+  ['import System.IO', 'inputNL', 'undefined'],
+])('visible unsupported record fields retain their diagnostic: %s / %s', (imports, field, value) => {
+  const source = `${imports}\nx=undefined {${field}=${value}}\nmain=print(1::Int)`;
+  expect(executeProgram('haskell', source)).toMatchObject({
+    kind: 'compileError',
+    diagnostics: [{ message: expect.stringContaining('この採点環境では使えません') }],
+  });
+});
+
+test.each([
+  ['import Text.Printf hiding(fmtChar)', 'fmtChar'],
+  ['import qualified Text.Printf as P', 'fmtChar'],
+  ['import Text.Printf', 'printf'],
+  ['import Text.Printf', 'notAField'],
+])('hidden or non-field exports are not record fields: %s / %s', (imports, field) => {
+  const source = `${imports}\nx=undefined {${field}=undefined}\nmain=print(1::Int)`;
+  expect(executeProgram('haskell', source)).toMatchObject({
+    kind: 'compileError',
+    diagnostics: [{ message: expect.stringContaining('スコープにありません') }],
+  });
+});

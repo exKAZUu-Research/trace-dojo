@@ -320,3 +320,52 @@ main=loop 1000(0.1::Float)`;
   expect(result.traceItems).toHaveLength(2001);
   expect(result.traceItems.filter(({ vars }) => vars.i === 0.1)).toHaveLength(2000);
 });
+
+test.each([
+  ['data C=Red|Blue', '[Red,Red]', 'Red'],
+  ['import Data.Ratio', '[1%2,1%2]', '1 % 2'],
+  ['data C=Red|Box Int', '[Red,Red]', 'Red'],
+])('displayed scalar loop bindings retain their iteration steps: %s', (declaration, values, value) => {
+  const source = `import Control.Monad
+${declaration}
+main=forM_ ${values} $ \\x->do
+ print(1::Int)`;
+  const result = traceProgram('haskell', source, source);
+  expect(result.stdout).toBe('1\n1\n');
+  expect(result.traceItems.map(({ line }) => line)).toEqual([0, 3, 4, 3, 4]);
+  expect(result.traceItems.slice(1).map(({ vars }) => vars.x)).toEqual([value, value, value, value]);
+});
+
+test('mixed constructors keep field-bearing values as reference-only bindings', () => {
+  const source = `import Control.Monad
+data C=Red|Box Int
+main=forM_ [Box 1,Box 1,Red,Box 2] $ \\x->do
+ print(1::Int)`;
+  const result = traceProgram('haskell', source, source);
+  expect(result.stdout).toBe('1\n1\n1\n1\n');
+  expect(result.traceItems.map(({ line }) => line)).toEqual([0, 4, 4, 3, 4, 3, 4]);
+  expect(result.traceItems[3]?.vars.x).toBe('Red');
+  expect(result.traceItems.at(-1)?.referenceVars.x).toMatchObject({ kind: 'object' });
+});
+
+test('mixed constructor inspection preserves unused failing loop arguments', () => {
+  const source = `import Control.Monad
+data C=Red|Box Int
+main=forM_ [error "unused"::C] $ \\x->do
+ print(1::Int)`;
+  const result = traceProgram('haskell', source, source);
+  expect(result.stdout).toBe('1\n');
+  expect(result.traceItems.map(({ line }) => line)).toEqual([0, 4]);
+});
+
+test('mixed constructor display limits preserve later program evaluation', () => {
+  const source = `import Control.Monad
+data C=Red|Box Int deriving Show
+slow n=if n==0 then Box 1 else slow(n-1)
+main=forM_ [slow(5000::Int)] $ \\x->do
+ print x`;
+  const result = traceProgram('haskell', source, source);
+  expect(result.stdout).toBe('Box 1\n');
+  expect(result.uncaughtException).toBeUndefined();
+  expect(result.traceItems.at(-1)?.referenceVars.x).toMatchObject({ kind: 'object' });
+});

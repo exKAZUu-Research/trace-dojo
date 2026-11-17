@@ -1283,3 +1283,46 @@ export const KNOWN_LIBRARY_TYPE_CHILDREN: Record<string, readonly string[]> = {
   Xor: ['Xor', 'getXor'],
   ZipList: ['ZipList', 'getZipList'],
 };
+
+export const KNOWN_LIBRARY_VALUE_REEXPORTS: Record<string, Record<string, readonly string[]>> = {
+  'System.IO': {
+    Prelude: ['appendFile', 'getChar', 'getContents', 'getLine', 'interact', 'readFile', 'readLn', 'writeFile'],
+  },
+  'Data.Map.Strict': {
+    'Data.Map': [
+      'argSet',
+      'compose',
+      'deleteAt',
+      'disjoint',
+      'dropWhileAntitone',
+      'filterKeys',
+      'isProperSubmapOf',
+      'isProperSubmapOfBy',
+      'isSubmapOfBy',
+      'spanAntitone',
+      'splitRoot',
+      'symmetricDifference',
+      'takeWhileAntitone',
+      'valid',
+    ],
+  },
+};
+
+export const KNOWN_LIBRARY_FIELDS: Record<string, readonly string[]> = {
+  'Text.Printf': [
+    'fmtWidth',
+    'fmtPrecision',
+    'fmtAdjust',
+    'fmtSign',
+    'fmtAlternate',
+    'fmtModifiers',
+    'fmtChar',
+    'fpModifiers',
+    'fpChar',
+    'fpRest',
+  ],
+  'System.IO': ['inputNL', 'outputNL'],
+  'Control.Applicative': ['getConst', 'getZipList', 'unwrapArrow', 'unwrapMonad'],
+  'Data.Bits': ['getAnd', 'getIff', 'getIor', 'getXor'],
+  'Data.Set': ['getIntersection'],
+};
