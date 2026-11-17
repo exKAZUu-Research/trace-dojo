@@ -115,8 +115,12 @@ export class FunctionChecker {
         enumerable: true,
       });
     }
+    const type = functionType(typed);
+    const ownName = node.childForFieldName('name');
+    const self = ownName ? this.c.ownScope(node)?.lookupValue(ownName.text) : undefined;
+    if (self?.valueDeclaration?.id === node.id) self.valueType = type;
     if (!this.c.silent) this.c.functions.deferFunctionBody(node, signature, contextualReturn);
-    return functionType(typed);
+    return type;
   }
 
   /**
@@ -281,6 +285,7 @@ export class FunctionChecker {
     const outer = this.c.flow.current;
     this.c.flow.current = this.c.classes.initialFlow(node);
     this.c.statements.declareHoistedVariables(this.c.ownScope(node));
+    this.narrowDefaultedParameters(node);
     try {
       if (!body) return anyType;
       this.checkBody(body, context);
@@ -305,6 +310,23 @@ export class FunctionChecker {
       this.c.flow.current = outer;
       this.contexts.pop();
       this.capturedTypes.pop();
+    }
+  }
+
+  /** A parameter named by an identifier starts without `undefined` when its default value cannot be `undefined`. */
+  private narrowDefaultedParameters(node: TreeNode): void {
+    const parametersNode = node.childForFieldName('parameters');
+    const scope = this.c.ownScope(node);
+    if (!parametersNode || !scope) return;
+    for (const parameterNode of named(parametersNode)) {
+      const pattern = parameterNode.childForFieldName('pattern');
+      const value = parameterNode.childForFieldName('value');
+      const symbol = pattern?.type === 'identifier' ? scope.values.get(pattern.text) : undefined;
+      if (!value || !symbol) continue;
+      const declared = this.c.expressions.valueTypeOf(symbol);
+      if (!mayBeUndefined(declared)) continue;
+      if (mayBeUndefined(this.c.silently(() => this.c.expressions.check(value, declared)))) continue;
+      this.c.flow.set(`s${symbol.id}`, { type: this.c.relations.removeUndefined(declared), assigned: true });
     }
   }
 
@@ -520,7 +542,7 @@ export class FunctionChecker {
     if (!value) return;
     const pattern = parameter.childForFieldName('pattern') ?? parameter;
     const valueType = this.c.expressions.check(value, annotation ?? this.c.patterns.impliedType(pattern));
-    if (annotation) this.c.expressions.checkAssignable(pattern, valueType, annotation);
+    if (annotation) this.c.expressions.checkAssignable(pattern, valueType, annotation, value);
   }
 
   /** Reports a required parameter after one marked `?`, which callers could not omit. */
@@ -569,5 +591,11 @@ export class FunctionChecker {
 function isBooleanLike(type: Type): boolean {
   return (type.kind === 'union' ? type.types : [type]).every(
     (member) => member.kind === 'literal' && typeof member.value === 'boolean'
+  );
+}
+
+function mayBeUndefined(type: Type): boolean {
+  return (type.kind === 'union' ? type.types : [type]).some(
+    (member) => isIntrinsic(member, 'undefined') || isIntrinsic(member, 'void')
   );
 }

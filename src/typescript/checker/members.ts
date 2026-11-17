@@ -199,6 +199,7 @@ export class MemberChecker {
   ): void {
     this.c.classes.checkPropertyAccessibility(node, propertyNode, objectNode, objectType, property);
     this.c.classes.checkInitializedBefore(node, objectNode, property);
+    this.c.expressions.expandos.checkAssignedBefore(node, propertyNode, property);
     this.checkPropertyAvailability(propertyNode, objectType, name, property);
   }
 

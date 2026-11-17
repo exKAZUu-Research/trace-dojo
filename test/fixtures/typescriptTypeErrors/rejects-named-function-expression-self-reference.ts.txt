@@ -1,0 +1,4 @@
+const fact = function f(n: number) { return n <= 1 ? 1 : n * f(n - 1); };
+const h: (n: number) => number = function k(n) { return n > 0 ? k(n - 1) : n; };
+const s = function q(x: string) { q(1); };
+console.log(fact, h, s);

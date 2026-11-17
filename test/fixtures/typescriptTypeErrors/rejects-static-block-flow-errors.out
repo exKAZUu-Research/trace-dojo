@@ -1,0 +1,4 @@
+(7,13): error TS18048: 'y' is possibly 'undefined'.
+(10,23): error TS18048: 'x' is possibly 'undefined'.
+(12,27): error TS18048: 'w' is possibly 'undefined'.
+(13,59): error TS18048: 'w' is possibly 'undefined'.

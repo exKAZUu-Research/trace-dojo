@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 497 -- Holds the types of classes with `this`, `super`, and accessibility, which all read the class information.
+// code-gauge-allow-file fileNcss 498 -- Holds the types of classes with `this`, `super`, and accessibility, which all read the class information.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import type { Checker } from './checker';
@@ -543,7 +543,7 @@ export class ClassChecker {
 
   thisTypeOfExpression(node: TreeNode): Type {
     const owner = this.thisOwner(node);
-    if (!owner) return undefinedType;
+    if (!owner) return this.globalThisType(node);
     const thisParameter = this.thisParameterType(owner);
     if (thisParameter) return thisParameter;
     const parent = owner.parent;
@@ -571,6 +571,16 @@ export class ClassChecker {
       return anyType;
     }
     return anyType;
+  }
+
+  /** The type of `this` outside any function or class, which an arrow function must not capture. */
+  private globalThisType(node: TreeNode): Type {
+    for (let current = node.parent; current; current = current.parent) {
+      if (current.type !== 'arrow_function') continue;
+      this.c.error(node, "アロー関数が、グローバルの 'this' の値を取り込んでいます。");
+      break;
+    }
+    return undefinedType;
   }
 
   private thisParameterType(owner: TreeNode): Type | undefined {

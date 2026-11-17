@@ -48,7 +48,7 @@ export class AssignmentChecker {
     }
     const targetType = this.targetType(left, false);
     const valueType = this.c.expressions.check(right, targetType === errorType ? undefined : targetType);
-    if (targetType !== errorType) this.c.expressions.checkAssignable(leftExpression, valueType, targetType);
+    if (targetType !== errorType) this.c.expressions.checkAssignable(leftExpression, valueType, targetType, right);
     this.assignReference(leftExpression, targetType, valueType);
     return valueType;
   }

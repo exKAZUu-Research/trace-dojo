@@ -4,14 +4,14 @@ import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 import { unsupportedMessage } from '../unsupported';
 import { Calls } from './calls';
 import type { Checker } from './checker';
+import { arrayTargets, Elaboration, targetElementType } from './elaboration';
+import { Expandos, laterRunningTypes } from './expandos';
 import { ExpressionTypeCache } from './expressionTypeCache';
 import type { FlowEntry } from './flow';
 import type { Sym } from './scopes';
 import { hasToken, isNumericName, named, numberValue, patternIdentifiers, stringValue } from './syntax';
 import {
-  anonymousObject,
   anyType,
-  emptyStructure,
   errorType,
   freshLiteralType,
   isAnyLike,
@@ -30,6 +30,8 @@ import {
 /** Checks expressions, computing their types and narrowing the references their conditions test. */
 export class ExpressionChecker {
   readonly calls: Calls;
+  readonly expandos: Expandos;
+  readonly elaboration: Elaboration;
   private readonly silentTypes: ExpressionTypeCache;
   /** Types of variables computed from their declarations, by symbol. */
   private readonly variableTypes = new Map<number, Type>();
@@ -74,6 +76,8 @@ export class ExpressionChecker {
 
   constructor(private readonly c: Checker) {
     this.calls = new Calls(c);
+    this.expandos = new Expandos(c);
+    this.elaboration = new Elaboration(c);
     this.silentTypes = new ExpressionTypeCache(c);
   }
 
@@ -492,12 +496,19 @@ export class ExpressionChecker {
         return this.c.typeNodes.annotationType(declaration.childForFieldName('type')) ?? anyType;
       }
       default: {
-        return this.c.silently(() => this.c.statements.declaredVariableType(symbol, declaration));
+        return this.declaredVariableValueType(symbol, declaration);
       }
     }
   }
 
+  private declaredVariableValueType(symbol: Sym, declaration: TreeNode): Type {
+    const type = this.c.silently(() => this.c.statements.declaredVariableType(symbol, declaration));
+    return symbol.valueKind === 'const' ? this.expandos.constType(declaration, symbol, type) : type;
+  }
+
   private functionSymbolType(symbol: Sym): Type {
+    const expression = symbol.valueDeclaration;
+    if (expression?.type === 'function_expression') return this.c.silently(() => this.check(expression));
     const signatures = symbol.valueDeclarations.filter((node) => node.type === 'function_signature');
     const implementation = symbol.valueDeclarations.find((node) => node.type === 'function_declaration');
     const ownSignatures = signatures.filter((signature) => !this.c.isLibrary(signature));
@@ -509,45 +520,12 @@ export class ExpressionChecker {
           ? [implementation, ...librarySignatures]
           : librarySignatures;
     const callSignatures = declared.map((node) => this.c.signatures.signatureOf(node));
-    const expandos = implementation ? this.expandoAssignments(implementation, symbol.name) : [];
-    if (expandos.length === 0) return this.c.overloadedFunction(callSignatures);
-    return anonymousObject(
-      () => {
-        const structure = { ...emptyStructure(), callSignatures };
-        for (const [name, value] of expandos) {
-          structure.properties.set(
-            name,
-            this.c.literals.literalProperty(
-              name,
-              this.c.silently(() => this.c.widen(this.check(value))),
-              false,
-              value
-            )
-          );
-        }
-        return structure;
-      },
-      { isFunction: false }
+    return this.expandos.withExpandos(
+      callSignatures,
+      this.c.overloadedFunction(callSignatures),
+      implementation?.parent,
+      symbol
     );
-  }
-
-  /** The properties a program adds to a function it declares, as `f.description = "..."` in the same block. */
-  private expandoAssignments(declaration: TreeNode, name: string): [string, TreeNode][] {
-    const block = declaration.parent;
-    if (!block) return [];
-    const assignments: [string, TreeNode][] = [];
-    for (const statement of named(block)) {
-      if (statement.type !== 'expression_statement') continue;
-      const expression = named(statement)[0];
-      if (expression?.type !== 'assignment_expression') continue;
-      const left = expression.childForFieldName('left');
-      const right = expression.childForFieldName('right');
-      if (left?.type !== 'member_expression' || !right) continue;
-      if (left.childForFieldName('object')?.text !== name) continue;
-      const property = left.childForFieldName('property');
-      if (property?.type === 'property_identifier') assignments.push([property.text, right]);
-    }
-    return assignments;
   }
 
   // this ---------------------------------------------------------------------------------------------------------
@@ -570,7 +548,12 @@ export class ExpressionChecker {
 
   // Assignability errors -----------------------------------------------------------------------------------------
 
-  reportNotAssignable(node: TreeNode, source: Type, target: Type): void {
+  /**
+   * Reports that a source is not assignable to a target: at the members of the object literals, array literals, and
+   * arrow functions that `expression` (or else `node`) spells which do not fit, as TypeScript elaborates, or at `node`.
+   */
+  reportNotAssignable(node: TreeNode, source: Type, target: Type, expression?: TreeNode): void {
+    if (this.elaboration.report(expression ?? node, source, target)) return;
     this.c.error(
       node,
       `型 '${this.c.print(this.c.widenLiteralForMessage(source, target))}' を型 '${this.c.print(target)}' に代入することはできません。${this.elaborate(source, target)}`
@@ -637,8 +620,7 @@ export class ExpressionChecker {
           const value = declaration.childForFieldName('value');
           const valueType = property.type();
           const targetType = this.c.literals.contextualPropertyType(target, name);
-          if (value && targetType && valueType.kind === 'object' && valueType.fresh)
-            this.checkExcessProperties(value, valueType, targetType);
+          if (value && targetType) this.checkExcessProperties(value, valueType, targetType);
         }
         continue;
       }
@@ -651,22 +633,37 @@ export class ExpressionChecker {
     }
   }
 
+  /**
+   * Reports the excess properties of the object literals in a type assertion's array literals: TypeScript makes the
+   * asserted object literal and those in its properties regular, but not the elements of its array literals.
+   */
+  checkAssertedArrayLiterals(node: TreeNode, source: Type, target: Type): void {
+    if (source.kind === 'union') {
+      for (const member of source.types) this.checkAssertedArrayLiterals(node, member, target);
+      return;
+    }
+    if (source.kind !== 'object') return;
+    if (this.c.isArrayOrTuple(source)) {
+      this.checkExcessElements(node, source, target);
+      return;
+    }
+    if (!source.fresh) return;
+    for (const [name, property] of source.resolve().properties) {
+      const value = property.declaration?.type === 'pair' ? property.declaration.childForFieldName('value') : undefined;
+      const targetType = this.c.literals.contextualPropertyType(target, name);
+      if (value && targetType) this.checkAssertedArrayLiterals(value, property.type(), targetType);
+    }
+  }
+
   /** Checks the object literals among an array's or a tuple's elements against the target's elements. */
   private checkExcessElements(node: TreeNode, source: ObjectType, target: Type): void {
-    const targets = (target.kind === 'union' ? target.types : [target]).filter(
-      (member): member is ObjectType => member.kind === 'object' && this.c.isArrayOrTuple(member)
-    );
+    const targets = arrayTargets(this.c, target);
     if (targets.length === 0) return;
     const sourceElements = source.tuple?.elements;
     const elementCount = sourceElements?.length ?? 1;
     for (let index = 0; index < elementCount; index++) {
       const element = sourceElements ? sourceElements[index].type : this.c.elementTypeOf(source);
-      const targetElements = targets.map((member) => {
-        const elements = member.tuple?.elements;
-        if (!elements) return this.c.elementTypeOf(member);
-        return elements[index] && !elements[index].rest ? elements[index].type : this.c.elementTypeOf(member);
-      });
-      this.checkExcessProperties(node, element, unionOf(targetElements));
+      this.checkExcessProperties(node, element, targetElementType(this.c, targets, index));
     }
   }
 
@@ -694,23 +691,15 @@ export class ExpressionChecker {
   }
 
   /** Checks that `type` can be assigned to `target`, reporting at `node`. */
-  checkAssignable(node: TreeNode, type: Type, target: Type): boolean {
+  checkAssignable(node: TreeNode, type: Type, target: Type, expression?: TreeNode): boolean {
     if (!this.c.relations.isAssignable(type, target)) {
-      this.reportNotAssignable(node, type, target);
+      this.reportNotAssignable(node, type, target, expression);
       return false;
     }
     this.checkExcessProperties(node, type, target);
     return true;
   }
 }
-
-/** Functions and blocks whose bodies run when called, after the declarations that precede the call. */
-const laterRunningTypes = new Set([
-  'function_declaration',
-  'function_expression',
-  'arrow_function',
-  'method_definition',
-]);
 
 /** Node.js names that need its type definitions, which the reference `tsc` does not have. */
 function nodeGlobalHint(name: string): string {

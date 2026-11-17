@@ -1,0 +1,10 @@
+function f(x: number | undefined = 5) { return x.toFixed(); }
+function g(x: number | null = 5) { return x.toFixed(); }
+function h(x: number | undefined = 5) { x = undefined; return x.toFixed(); }
+function k(x: number | undefined = undefined) { return x.toFixed(); }
+function p(c: boolean, x: number | undefined = 5) { if (c) x = undefined; return x.toFixed(); }
+function q({ a }: { a: number | undefined } = { a: 1 }) { return a.toFixed(); }
+function r(x?: number | undefined) { return x.toFixed(); }
+function s(c: boolean, x: number | undefined = c ? 1 : undefined) { return x.toFixed(); }
+function u(x: number | undefined = 5) { while (x) { x = undefined; } return x.toFixed(); }
+console.log(f, g, h, k, p, q, r, s, u);

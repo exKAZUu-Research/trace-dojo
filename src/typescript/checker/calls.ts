@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 431 -- Resolves calls as TypeScript does: callees, overloads, inference, and the effects of calls on the flow.
+// code-gauge-allow-file fileNcss 433 -- Resolves calls as TypeScript does: callees, overloads, inference, and the effects of calls on the flow.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import { unsupportedMessage } from '../unsupported';
@@ -546,6 +546,7 @@ export class Calls {
   }
 
   private reportArgument(arg: TreeNode, argType: Type, parameterType: Type): void {
+    if (this.c.expressions.elaboration.report(arg, argType, parameterType)) return;
     this.c.error(
       arg,
       `型 '${this.c.print(this.c.widenLiteralForMessage(argType, parameterType))}' の引数を型 '${this.c.print(parameterType)}' のパラメーターに渡すことはできません。`

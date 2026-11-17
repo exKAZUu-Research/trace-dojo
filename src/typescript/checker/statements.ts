@@ -265,7 +265,7 @@ export class StatementChecker {
     const key = `s${symbol.id}`;
     const valueType = this.c.expressions.check(value, annotation);
     if (annotation) {
-      this.c.expressions.checkAssignable(nameNode, valueType, annotation);
+      this.c.expressions.checkAssignable(nameNode, valueType, annotation, value);
       this.c.expressions.setVariableType(symbol, annotation);
       this.c.flow.set(key, { type: this.c.flow.assignmentReduced(annotation, regularOf(valueType)), assigned: true });
       return;
@@ -279,7 +279,13 @@ export class StatementChecker {
     const isConst = kind === 'const';
     const declared = this.c.literals.widenDeclared(valueType, isConst);
     const widened =
-      isIntrinsic(declared, 'null') || isIntrinsic(declared, 'undefined') ? (isConst ? declared : anyType) : declared;
+      isIntrinsic(declared, 'null') || isIntrinsic(declared, 'undefined')
+        ? isConst
+          ? declared
+          : anyType
+        : isConst
+          ? this.c.expressions.expandos.constType(declarator, symbol, declared)
+          : declared;
     this.c.expressions.setVariableType(symbol, widened);
     this.c.flow.set(key, { type: isConst ? widened : widened === anyType ? declared : widened, assigned: true });
   }

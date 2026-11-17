@@ -4,16 +4,7 @@ import type { Checker } from './checker';
 import { checkDuplicateMembers } from './declarations';
 import { FlowState, propertyReferenceKey, type State } from './flow';
 import { hasToken, named } from './syntax';
-import {
-  anyType,
-  type ClassInfo,
-  errorType,
-  isAnyLike,
-  isIntrinsic,
-  type Type,
-  undefinedType,
-  voidType,
-} from './types';
+import { anyType, type ClassInfo, errorType, isAnyLike, isIntrinsic, type Type, undefinedType } from './types';
 
 /** Checks class declarations: their members, constructors, and the types they implement and extend. */
 export class ClassDeclarationChecker {
@@ -107,11 +98,10 @@ export class ClassDeclarationChecker {
         break;
       }
       case 'class_static_block': {
-        this.c.functions.checkFunctionLike(
-          member,
-          { typeParameters: [], parameters: [], returnType: () => voidType },
-          undefined
-        );
+        // A static block runs as the class is defined, so the flow there continues into it and out of it.
+        const body = member.childForFieldName('body');
+        this.c.statements.declareHoistedVariables(this.c.ownScope(member));
+        if (body) this.c.statements.checkBlockStatements(named(body));
         break;
       }
       default: {
@@ -140,7 +130,7 @@ export class ClassDeclarationChecker {
           try {
             const type = this.c.expressions.check(value, annotation);
             if (annotation)
-              this.c.expressions.checkAssignable(member.childForFieldName('name') ?? value, type, annotation);
+              this.c.expressions.checkAssignable(member.childForFieldName('name') ?? value, type, annotation, value);
           } finally {
             this.c.functions.capturedTypes.pop();
             this.c.functions.contexts.pop();
@@ -324,7 +314,7 @@ export class ClassDeclarationChecker {
       return undefined;
     const typeNode = member.childForFieldName('type');
     const nameNode = member.childForFieldName('name');
-    if (!typeNode || !nameNode || nameNode.type === 'computed_property_name') return undefined;
+    if (!typeNode || !nameNode) return undefined;
     const type = this.c.typeNodes.annotationType(typeNode) ?? anyType;
     if (isAnyLike(type) || isIntrinsic(type, 'unknown') || this.c.relations.isAssignable(undefinedType, type))
       return undefined;

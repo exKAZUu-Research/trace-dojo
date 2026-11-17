@@ -506,6 +506,15 @@ export class OperatorChecker {
     const target = this.c.typeNodes.typeFromNode(typeNode);
     const source = this.c.expressions.check(expression, target);
     const widened = this.c.widen(source);
+    if (!this.c.relations.isRelated(target, widened, 'comparable')) {
+      const reported = this.c.diagnostics.length;
+      this.c.expressions.checkAssertedArrayLiterals(expression, source, target);
+      if (this.c.diagnostics.length > reported) {
+        // TypeScript stops comparing at the first excess property.
+        this.c.diagnostics.splice(reported + 1);
+        return target;
+      }
+    }
     if (
       !this.c.relations.isComparable(widened, target) &&
       !this.c.relations.isAssignable(target, widened) &&
