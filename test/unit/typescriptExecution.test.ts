@@ -98,9 +98,12 @@ console.log('' + add);
 console.log('%s', A);
 let s = 'x';
 s += add;
-console.log(add, add.name, '%d', typeof A);`;
+console.log(add, add.name, '%d', typeof A);
+console.assert(false, '%s', add);
+console.warn('%d %s', 1, add);
+console.dirxml('%s', add);`;
   expect(diagnosticsOf(source)).toEqual(
-    [3, 4, 5, 6, 7, 9].map((row) => `${row}: 関数やクラスの文字列への変換は、この採点環境では使えません。`)
+    [3, 4, 5, 6, 7, 9, 11, 12, 13].map((row) => `${row}: 関数やクラスの文字列への変換は、この採点環境では使えません。`)
   );
 });
 

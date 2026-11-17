@@ -234,14 +234,17 @@ export class Binder {
     this.bindChildren(node, ownerScope);
   }
 
+  // code-gauge-allow functionCognitiveComplexity 16 -- Binds ambient variables with their declaration kind and initialized resolution mode, functions with parameter scopes, and other ambient forms recursively.
   private bindAmbient(node: TreeNode, scope: Scope): void {
     for (const child of named(node)) {
       switch (child.type) {
         case 'variable_declaration':
         case 'lexical_declaration': {
+          const kind =
+            child.type === 'variable_declaration' ? 'var' : (child.childForFieldName('kind')?.text as 'let' | 'const');
           for (const declarator of named(child)) {
             const name = declarator.childForFieldName('name');
-            if (name) scope.declareValue(name.text, 'declared', declarator, name);
+            if (name) scope.declareAmbientValue(name.text, kind, declarator, name);
           }
           break;
         }

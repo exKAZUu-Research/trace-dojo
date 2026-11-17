@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 518 -- Follows the flow of control through each kind of statement.
+// code-gauge-allow-file fileNcss 520 -- Follows the flow of control through each kind of statement.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import type { Checker } from './checker';
@@ -307,6 +307,7 @@ export class StatementChecker {
       : (annotation ?? anyType);
     if (annotation && value) this.c.expressions.checkAssignable(pattern, valueType, annotation);
     const sourceType = annotation ?? this.c.literals.widenDeclared(valueType, false);
+    if (isConst) this.c.patterns.correlatedSources.set(pattern.id, sourceType);
     this.c.patterns.bindPattern(pattern, sourceType, (identifier, type) => {
       const symbol = this.c.scopeOf(identifier).lookupValue(identifier.text);
       if (!symbol) return;

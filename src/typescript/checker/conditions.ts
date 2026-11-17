@@ -1,8 +1,8 @@
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import type { Checker } from './checker';
-import { type FlowState, type State } from './flow';
-import { named, numberValue, propertyNameText, skipParentheses, stringValue } from './syntax';
+import type { State } from './flow';
+import { named, numberValue, patternIdentifiers, propertyNameText, skipParentheses, stringValue } from './syntax';
 import {
   anyType,
   booleanType,
@@ -374,15 +374,16 @@ export class ConditionChecker {
     whenFalse: State
   ): void {
     const expression = skipParentheses(reference);
+    const source = this.destructuredFrom(expression);
     const { object, name } =
       expression.type === 'member_expression'
         ? {
             object: expression.childForFieldName('object') as TreeNode,
             name: expression.childForFieldName('property')?.text ?? '',
           }
-        : (this.destructuredFrom(expression) ?? {});
-    if (!object || name === undefined) return;
-    const objectType = this.c.expressions.checkReferenceSilently(object);
+        : (source ?? {});
+    if (name === undefined || (!object && !source?.type)) return;
+    const objectType = source?.type ?? this.c.expressions.checkReferenceSilently(object!);
     const nonNull = this.c.relations.removeNullish(objectType);
     if (!this.c.flow.isDiscriminant(nonNull, name) && !this.c.relations.isNullable(objectType)) return;
     const apply = (state: State, assumeTrue: boolean): void => {
@@ -390,40 +391,58 @@ export class ConditionChecker {
       const outer = this.c.flow.current;
       this.c.flow.current = state;
       try {
-        this.c.flow.narrowReference(object, (type) =>
-          this.c.flow.narrowByDiscriminant(type, name, (propertyType) => narrow(propertyType, assumeTrue))
+        const narrowed = this.c.flow.narrowByDiscriminant(nonNull, name, (propertyType) =>
+          narrow(propertyType, assumeTrue)
         );
+        if (object && (!source || this.narrowsOnlyConstantReferences(object)))
+          this.c.flow.narrowReference(object, (type) =>
+            this.c.flow.narrowByDiscriminant(type, name, (propertyType) => narrow(propertyType, assumeTrue))
+          );
+        this.narrowDestructuredSiblings(expression, narrowed);
       } finally {
         this.c.flow.current = outer;
       }
     };
     apply(whenTrue, true);
     apply(whenFalse, false);
-    // The states were narrowed in place, so the reference's own entry stays as narrowed.
-    void (whenTrue as FlowState | undefined);
   }
 
-  /**
-   * For a constant destructured as `const { kind } = shape` from a constant or a parameter never reassigned, the object
-   * and the property it was taken from, which narrowing the constant narrows too.
-   */
-  private destructuredFrom(identifier: TreeNode): { object: TreeNode; name: string } | undefined {
-    if (identifier.type !== 'identifier') return undefined;
+  private narrowDestructuredSiblings(reference: TreeNode, objectType: Type): void {
+    if (reference.type !== 'identifier') return;
+    const symbol = this.c.scopeOf(reference).lookupValue(reference.text);
+    const declaration = symbol?.valueDeclaration;
+    const pattern = declaration?.childForFieldName(symbol?.valueKind === 'parameter' ? 'pattern' : 'name');
+    if (pattern?.type !== 'object_pattern') return;
+    for (const identifier of patternIdentifiers(pattern)) {
+      const source = this.destructuredFrom(identifier);
+      if (!source) continue;
+      const propertyType = this.c.silently(() =>
+        this.c.patterns.destructuredProperty(identifier, objectType, source.name)
+      );
+      this.c.flow.narrowReference(identifier, (type) => this.c.flow.narrowByEquality(type, propertyType, true, false));
+    }
+  }
+
+  private destructuredFrom(identifier: TreeNode): { object?: TreeNode; name: string; type: Type } | undefined {
+    if (!['identifier', 'shorthand_property_identifier_pattern'].includes(identifier.type)) return undefined;
     const symbol = this.c.scopeOf(identifier).lookupValue(identifier.text);
     const declarator = symbol?.valueDeclaration;
     const pattern = symbol?.valueEntries[0]?.name;
-    if (symbol?.valueKind !== 'const' || declarator?.type !== 'variable_declarator' || !pattern) return undefined;
+    if (!symbol || !declarator || !pattern || !['const', 'parameter'].includes(symbol.valueKind ?? ''))
+      return undefined;
     const pair = pattern.parent?.type === 'pair_pattern' ? pattern.parent : undefined;
     const container = pair?.parent ?? pattern.parent;
-    if (container?.id !== declarator.childForFieldName('name')?.id || container?.type !== 'object_pattern') {
+    const field = symbol.valueKind === 'parameter' ? 'pattern' : 'name';
+    if (container?.id !== declarator.childForFieldName(field)?.id || container?.type !== 'object_pattern') {
       return undefined;
     }
-    const object = declarator.childForFieldName('value');
-    if (object?.type !== 'identifier' || !this.narrowsOnlyConstantReferences(object)) return undefined;
-    if (pattern.type === 'shorthand_property_identifier_pattern') return { object, name: pattern.text };
+    const object = declarator.childForFieldName('value') ?? undefined;
+    const type = this.c.patterns.correlatedSources.get(container.id);
+    if (!type) return undefined;
+    if (pattern.type === 'shorthand_property_identifier_pattern') return { object, name: pattern.text, type };
     const key = pair?.childForFieldName('key');
     const name = key ? propertyNameText(key) : undefined;
-    if (name !== undefined) return { object, name };
+    if (name !== undefined) return { object, name, type };
     return undefined;
   }
 

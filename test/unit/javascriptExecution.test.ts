@@ -1485,6 +1485,87 @@ class Result extends Array { constructor(...args) { super(...args); constructed+
 try { Result.from({ [Symbol.iterator]: 1 }); } catch (e) { console.log(e.name, constructed); }`,
   ],
   [
+    'console.table validating properties before formatting primitive and function data',
+    `function f() {} class Foo {}
+for (const data of [undefined,null,1,'%s',f]) {
+  for (const properties of [null,1,'x',{},f,Symbol('x'),new Foo(),Object.create(null)]) {
+    try {console.table(data,properties);} catch(e) {console.log(e.name,e.message,e.code);}
+  }
+}
+console.table(f); console.table('%s',[]);
+const columns=[]; Object.defineProperty(columns,'0',{get(){throw 'not read';}});
+console.table('data',columns);`,
+  ],
+  [
+    'failed length truncation preserving requested writability',
+    `for (const accessor of [false, true]) {
+  const a = [0, 1, 2, 3];
+  Object.defineProperty(a, '1', accessor ? {get() {return 1;}, configurable:false} : {value:1, configurable:false});
+  try {Object.defineProperty(a, 'length', {value:0, writable:false});} catch(e) {console.log(e.message);}
+  console.log(a.length, Object.getOwnPropertyDescriptor(a, 'length').writable, Object.hasOwn(a, '2'));
+  try {a.push(4);} catch(e) {console.log(e.message);}
+  console.log(a.length);
+}
+for (const length of [-1, 1.5, NaN, 2 ** 32]) {
+  const a = [1, 2];
+  try {Object.defineProperty(a, 'length', {value:length, writable:false});} catch(e) {console.log(e.name);}
+  console.log(a.length, Object.getOwnPropertyDescriptor(a, 'length').writable);
+}
+for (const length of [0, 2, 4]) {
+  const a = [1, 2]; Object.defineProperty(a, 'length', {value:length, writable:false});
+  console.log(a.length, Object.getOwnPropertyDescriptor(a, 'length').writable);
+}`,
+  ],
+  [
+    'inspection of values thrown by indexed and named getters',
+    `for (const value of ['boom', 17, null, undefined, {a:1}, {message:'m'}]) {
+  for (const object of [[0], {}]) {
+    Object.defineProperty(object, '0', {get() {throw value;}, enumerable:true});
+    console.dir(object, {getters:true});
+  }
+}`,
+  ],
+  [
+    'call spread errors determined by argument position in normal and suspended calls',
+    `const o = {n:5, z:null, u:undefined, a:{b:1}, s:'ab'};
+const f = (...args) => args; class C {constructor(...args) {this.args=args;}}
+for (const value of [o.n, o.z, o.u, o.a]) {
+  for (const run of [() => f(...value, 1), () => f(1,...value,2), () => f(...value,...o.s),
+    () => new C(...value,1), () => Math.max(...value,1), () => f(1,...value)]) {
+    try {run();} catch(e) {console.log(e.message);}
+  }
+  function* beforeYield() {f(...value, yield 1);}
+  try {beforeYield().next();} catch(e) {console.log(e.message);}
+  function* afterYield() {f(yield 1, ...value);}
+  const iterator = afterYield(); iterator.next();
+  try {iterator.next(1);} catch(e) {console.log(e.message);}
+}
+console.log(f(...o.s,1),f(1,...o.s));`,
+  ],
+  [
+    'array species lookup and default constructors across result-producing methods',
+    `class B extends Array {}
+class A extends Array {static get [Symbol.species]() {console.log('species',this===A); return B;}}
+for (const method of ['map','filter','flatMap','flat','slice','splice','concat']) {
+  const a = new A(1,2);
+  const args = method==='map'||method==='flatMap' ? [x=>x] : method==='filter' ? [()=>true] : method==='splice' ? [0,1] : [];
+  console.log(method,a[method](...args));
+}
+for (const species of [undefined,null,1,()=>{}]) {
+  const a = [1,2]; a.constructor = {[Symbol.species]:species};
+  try {const result=a.map(x=>x); console.log(result,result.constructor===Array);} catch(e) {console.log(e.message);}
+}
+for (const constructor of [undefined,1,null,{},function Custom(){}]) {
+  const a = [1,2]; a.constructor=constructor;
+  try {console.log(a.filter(()=>true));} catch(e) {console.log(e.message);}
+}
+class Result {constructor(length) {console.log('construct',length); this.length=50;} set 0(value) {console.log('setter');}}
+const source=[1,2]; source.constructor={[Symbol.species]:Result};
+console.log(source.map(x=>x),source.filter(()=>true));
+console.log(Array.prototype.map.call({0:1,length:1,get constructor(){throw 'not read';}},x=>x));
+const modern=new A(2,1); console.log(modern.toReversed(),modern.toSorted(),modern.toSpliced(0,1),modern.with(0,3));`,
+  ],
+  [
     'constructed array results creating own elements and setting their final length',
     `class C { constructor() { this.length = 100; } set 0(value) { console.log('setter', value); } }
 for (const source of [[7, 8], {0: 9, length: 1}]) {

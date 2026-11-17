@@ -86,6 +86,7 @@ export class ClassDeclarationChecker {
     return found;
   }
 
+  // code-gauge-allow functionNcss 32 -- Checks the distinct execution and declaration rules for fields, signatures, method bodies, and static blocks together.
   private checkMember(classNode: TreeNode, member: TreeNode, info: ClassInfo, ctor: TreeNode | undefined): void {
     this.checkMemberDeclaration(member, info);
     const isStatic = hasToken(member, 'static');
@@ -117,6 +118,10 @@ export class ClassDeclarationChecker {
           );
           void valueType;
         }
+        break;
+      }
+      case 'method_signature': {
+        this.c.functions.checkOverloadImplementation(member);
         break;
       }
       case 'method_definition': {

@@ -2,13 +2,14 @@ import { ArrayOps } from './arrayOps';
 import { inspectValue, OutputBudget, stringWidth } from './inspect';
 import { type CollectionEntry, CollectionIterator } from './realmCollections';
 import type { Runtime } from './runtime';
-import { isObject, JsArray, JsObject, type Value } from './values';
+import { isObject, JsArray, JsFunction, JsObject, JsThrow, type Value } from './values';
 
 /** The text `console.table` prints for its arguments, or undefined when it prints them as `console.log` does. */
-// code-gauge-allow functionNcss 32 -- Keeps row collection and its shared formatting budget together.
-// code-gauge-allow functionCognitiveComplexity 19 -- Ports Node.js's console.table, so the two stay comparable.
+// code-gauge-allow functionNcss 34 -- Keeps argument validation, row collection, and the shared formatting budget in table evaluation order.
+// code-gauge-allow functionCognitiveComplexity 20 -- Preserves Node's validation order, collection dispatch, primitive rows, selected properties, and final layout.
 export function formatTable(runtime: Runtime, data: Value, properties: Value): string | undefined {
-  if (!(data instanceof JsObject)) return undefined;
+  if (properties !== undefined && !(properties instanceof JsArray)) invalidProperties(runtime, properties);
+  if (!(data instanceof JsObject) || data instanceof JsFunction) return undefined;
   const budget = new OutputBudget();
   const selection = properties instanceof JsArray ? new ArrayOps(runtime, properties) : undefined;
   const selected = selection
@@ -46,6 +47,35 @@ export function formatTable(runtime: Runtime, data: Value, properties: Value): s
     body.push(values);
   }
   return renderTable(runtime, head, body);
+}
+
+function invalidProperties(runtime: Runtime, value: Value): never {
+  const received = receivedArgument(runtime, value);
+  const error = runtime.newError(
+    'TypeError',
+    `The "properties" argument must be an instance of Array. Received ${received}`
+  );
+  runtime.createDataProperty(error, 'code', 'ERR_INVALID_ARG_TYPE');
+  throw new JsThrow(error);
+}
+
+function receivedArgument(runtime: Runtime, value: Value): string {
+  if (value === null) return 'null';
+  if (value instanceof JsFunction) return `function ${functionName(runtime, value)}`;
+  if (value instanceof JsObject) {
+    for (let prototype = value.proto; prototype; prototype = prototype.proto) {
+      const constructor = prototype.properties.get('constructor');
+      if (constructor && 'value' in constructor && constructor.value instanceof JsFunction)
+        return `an instance of ${functionName(runtime, constructor.value)}`;
+    }
+    return inspectValue(runtime, value);
+  }
+  return `type ${typeof value} (${inspectValue(runtime, value)})`;
+}
+
+function functionName(runtime: Runtime, fn: JsFunction): string {
+  const name = runtime.get(fn, 'name');
+  return typeof name === 'string' ? name : '';
 }
 
 /**

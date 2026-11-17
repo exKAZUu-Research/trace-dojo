@@ -431,8 +431,7 @@ function gotText(ctx: Context, object: JsObject, property: AccessorProperty, rec
     return `[${label}: ${formatIndented(ctx, value, recurseTimes)}]`;
   } catch (error) {
     if (!(error instanceof JsThrow)) throw error;
-    const message = isObject(error.value) ? ctx.runtime.get(error.value, 'message') : error.value;
-    return `[${label}: <Inspection threw (${ctx.runtime.toString(message)})>]`;
+    return `[${label}: <Inspection threw (${formatIndented(ctx, error.value, recurseTimes)})>]`;
   }
 }
 

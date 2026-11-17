@@ -18,6 +18,7 @@ import {
 
 /** Gives the names a binding pattern declares the types of what it destructures. */
 export class BindingPatterns {
+  readonly correlatedSources = new Map<number, Type>();
   constructor(private readonly c: Checker) {}
 
   /** The type a binding pattern gives the name `name` when it destructures a value of `type`. */

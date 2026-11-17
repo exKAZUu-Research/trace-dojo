@@ -1,6 +1,6 @@
 import { loadParser } from '../../interpreter/treeSitter';
 import { TURTLE_METHOD_NAMES } from '../../interpreter/turtleWorld';
-import { BROWSER_ONLY_GLOBALS, BROWSER_TYPES, SHARED_HOST_GLOBALS } from './domGlobals';
+import { BROWSER_ONLY_GLOBALS, BROWSER_TYPES, DOM_TYPE_ALIASES, SHARED_HOST_GLOBALS } from './domGlobals';
 import { ECMASCRIPT_LIBRARY } from './ecmascriptLibrary';
 import { Scope, type Sym } from './scopes';
 
@@ -76,14 +76,16 @@ declare var Reflect: any;
 
 /**
  * The rest of the DOM library, whose values the reference `tsc` accepts but Node.js lacks (so they fail when the program
- * runs) or this interpreter lacks; their types are `any`, as only `tsc` accepting them matters here.
+ * runs) or this interpreter lacks. Declaration kinds and type names preserve script-global redeclaration checks;
+ * the DOM's structural types remain opaque.
  */
 const BROWSER_LIBRARY = [
   ...omittedLibraryGlobals.map((name) => `declare var ${name}: any; type ${name} = any;`),
-  ...BROWSER_ONLY_GLOBALS.map((name) => `declare var ${name}: ${name === 'name' ? 'void' : 'any'};`),
-  ...SHARED_HOST_GLOBALS.map((name) => `declare var ${name}: any;`),
+  ...Object.entries({ ...BROWSER_ONLY_GLOBALS, ...SHARED_HOST_GLOBALS }).map(([name, [kind, type]]) =>
+    kind === 'function' ? `declare function ${name}(...args: any[]): any;` : `declare ${kind} ${name}: ${type};`
+  ),
   ...BROWSER_TYPES.map((entry) => {
-    if (typeof entry === 'string') return `type ${entry} = any;`;
+    if (typeof entry === 'string') return `type ${entry} = ${DOM_TYPE_ALIASES[entry] ?? 'any'};`;
     const [name, count] = entry;
     return `type ${name}<${Array.from({ length: count }, (_, index) => `T${index} = any`).join(', ')}> = any;`;
   }),
@@ -133,7 +135,7 @@ export function markUnsupported(scope: Scope): void {
   for (const [name, feature] of [
     ...Object.entries(unsupportedValues),
     ...omittedLibraryGlobals.map((name) => [name, name]),
-    ...SHARED_HOST_GLOBALS.map((name) => [name, name]),
+    ...Object.keys(SHARED_HOST_GLOBALS).map((name) => [name, name]),
   ]) {
     const symbol: Sym | undefined = scope.values.get(name);
     if (symbol) symbol.unsupported = feature;

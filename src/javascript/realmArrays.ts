@@ -5,7 +5,16 @@ import { defineArrayCopies } from './realmArrayCopies';
 import { defineArrayIterations } from './realmArrayIterations';
 import { WELL_KNOWN_SYMBOLS } from './realmIterators';
 import type { Runtime } from './runtime';
-import { isCallable, JsArray, JsFunction, type JsObject, JsThrow, type NativeCall, type Value } from './values';
+import {
+  isCallable,
+  isObject,
+  JsArray,
+  JsFunction,
+  type JsObject,
+  JsThrow,
+  type NativeCall,
+  type Value,
+} from './values';
 
 /**
  * Defines Array and Array.prototype. Each method follows its algorithm in the ECMAScript specification step by step,
@@ -20,6 +29,7 @@ export function defineArrayBuiltins(builder: RealmBuilder): void {
     array.proto = runtime.prototypeFor(newTarget, arrayPrototype);
     return array;
   });
+  builder.getter(arrayConstructor, WELL_KNOWN_SYMBOLS.species, ({ thisValue }) => thisValue);
   builder.method(arrayConstructor, 'isArray', 1, ({ args }) => args[0] instanceof JsArray);
   builder.method(arrayConstructor, 'of', 0, ({ runtime, thisValue, args }) =>
     buildWith(runtime, thisValue, args.length, (result) => {
@@ -55,24 +65,21 @@ export function buildArray(runtime: Runtime, build: (ops: ArrayOps) => void): Js
   return array;
 }
 
-/**
- * The spec's ArraySpeciesCreate: a new array, or for an instance of a subclass of Array an instance of that subclass
- * made with `length`, which the builder's steps fill.
- */
+/** The spec's ArraySpeciesCreate, whose result the builder fills at its algorithm-owned indices. */
 export function buildSpeciesArray(
   runtime: Runtime,
   original: JsObject,
   length: number,
   build: (ops: ArrayOps) => void
 ): JsObject {
-  const constructor = original instanceof JsArray ? runtime.get(original, 'constructor') : undefined;
-  const arrayConstructor = runtime.get(runtime.realm.arrayPrototype, 'constructor');
-  if (!(constructor instanceof JsFunction) || constructor === arrayConstructor)
+  let constructor = original instanceof JsArray ? runtime.get(original, 'constructor') : undefined;
+  if (isObject(constructor)) constructor = runtime.get(constructor, WELL_KNOWN_SYMBOLS.species) ?? undefined;
+  if (constructor === undefined)
     return buildArray(runtime, (result) => {
       result.setLength(length);
       build(result);
     });
-  if (!constructor.isConstructor)
+  if (!(constructor instanceof JsFunction) || !constructor.isConstructor)
     runtime.throwError('TypeError', 'object.constructor[Symbol.species] is not a constructor');
   const result = runtime.construct(constructor, [length]);
   runtime.hold(result, () => build(new ArrayOps(runtime, result)));

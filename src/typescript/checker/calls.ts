@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 422 -- Resolves calls as TypeScript does: callees, overloads, inference, and the effects of calls on the flow.
+// code-gauge-allow-file fileNcss 431 -- Resolves calls as TypeScript does: callees, overloads, inference, and the effects of calls on the flow.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import type { Checker, Mapper } from './checker';
@@ -295,16 +295,33 @@ export class Calls {
       this.c.expressions.checkFunctionText(args[0], typeOf(args[0]));
       return;
     }
-    const object = callee.type === 'member_expression' ? callee.childForFieldName('object') : undefined;
-    const format = args[0];
-    if (object?.text !== 'console' || format?.type !== 'string') return;
+    const formatted = this.consoleFormatArguments(callee, args);
+    const format = formatted[0];
+    if (format?.type !== 'string') return;
     let index = 1;
     for (const placeholder of stringValue(format).matchAll(/%([%sdifjoOc])/g)) {
       const kind = placeholder[1];
       if (kind === '%') continue;
-      const arg = args[index++];
+      const arg = formatted[index++];
       if (kind === 's' && arg) this.c.expressions.checkFunctionText(arg, typeOf(arg));
     }
+  }
+
+  private consoleFormatArguments(callee: TreeNode, args: TreeNode[]): TreeNode[] {
+    const object = callee.type === 'member_expression' ? callee.childForFieldName('object') : undefined;
+    const method = callee.childForFieldName('property')?.text;
+    const methods = ['log', 'info', 'debug', 'warn', 'error', 'dirxml', 'group', 'groupCollapsed', 'trace', 'assert'];
+    const offset = method === 'assert' ? 1 : 0;
+    const consoleSymbol = object ? this.c.scopeOf(object).lookupValue(object.text) : undefined;
+    if (
+      object?.text !== 'console' ||
+      !consoleSymbol?.valueDeclaration ||
+      !this.c.isLibrary(consoleSymbol.valueDeclaration) ||
+      !method ||
+      !methods.includes(method)
+    )
+      return [];
+    return args.slice(offset);
   }
 
   /** Whether a call ends the flow, calling through a name a function declared to return `never`. */

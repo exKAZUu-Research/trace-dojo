@@ -1,7 +1,7 @@
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import type { Checker } from './checker';
-import { named, numberValue, skipParentheses } from './syntax';
+import { isNumericName, named, numberValue, skipParentheses } from './syntax';
 import {
   anyType,
   bigintType,
@@ -15,6 +15,7 @@ import {
   mapType,
   neverType,
   numberType,
+  type Property,
   regularOf,
   stringType,
   type Type,
@@ -102,20 +103,39 @@ export class OperatorChecker {
         : indexType?.kind === 'literal'
           ? String(indexType.value)
           : undefined;
-    if (!name || isAnyLike(objectType)) return;
-    const property = this.c.propertyOf(objectType, name);
-    if (property?.readonly) {
+    if (isAnyLike(objectType)) return;
+    const members = objectType.kind === 'union' ? objectType.types : [objectType];
+    if (members.some((member) => this.readonlyDeleteTarget(member, name, indexType))) {
       this.c.error(argument, 'delete 演算子のオペランドは、読み取り専用のプロパティにはできません。');
       return;
     }
+    const properties = members
+      .map((member) => (name === undefined ? undefined : this.c.propertyOf(member, name)))
+      .filter((property): property is Property => property !== undefined);
+    const type = unionOf(properties.map((property) => property.type()));
     if (
-      property &&
-      !property.optional &&
-      !isAnyLike(property.type()) &&
-      !isIntrinsic(property.type(), 'unknown') &&
-      !this.c.relations.isNullable(property.type())
+      properties.length > 0 &&
+      properties.every((property) => !property.optional) &&
+      !isAnyLike(type) &&
+      !isIntrinsic(type, 'unknown') &&
+      !this.c.relations.isNullable(type)
     )
       this.c.error(argument, 'delete 演算子のオペランドは、省略できるプロパティでなければいけません。');
+  }
+
+  private readonlyDeleteTarget(objectType: Type, name: string | undefined, indexType: Type | undefined): boolean {
+    const property = name === undefined ? undefined : this.c.propertyOf(objectType, name);
+    if (property) return property.readonly === true;
+    const structure = this.c.structureOf(objectType);
+    const keys = indexType?.kind === 'union' ? indexType.types : [indexType];
+    return keys.some((key) => {
+      const numeric =
+        key &&
+        (this.c.relations.isAssignable(key, numberType) ||
+          (key.kind === 'literal' && typeof key.value === 'string' && isNumericName(key.value)));
+      const signature = numeric ? (structure.numberIndex ?? structure.stringIndex) : structure.stringIndex;
+      return signature?.readonly === true;
+    });
   }
 
   isNumberLike(type: Type): boolean {
@@ -302,7 +322,7 @@ export class OperatorChecker {
 
   private checkEqualitySyntax(node: TreeNode, operator: string, left: TreeNode, right: TreeNode): void {
     const operands = [left, right].map(withoutTypeAssertions);
-    const literal = operands.some((operand) => operand.type === 'array' || operand.type === 'object');
+    const literal = [left, right].some((operand) => operand.type === 'array' || operand.type === 'object');
     const nan = operands.some((operand) => {
       if (operand.type === 'identifier' && operand.text === 'NaN')
         return (

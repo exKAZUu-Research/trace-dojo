@@ -1,0 +1,15 @@
+class OverloadedClass {
+  value: string;
+  constructor(value: string);
+  constructor(value: number);
+  constructor(value: string | number) { this.value = String(value); }
+  method(value: string): string;
+  method(value: number): string;
+  method(value: string | number) { return this.value + value; }
+  "quotedMethod"(value: number): number;
+  quotedMethod(value: number) { return value + 2; }
+  static method(value: number): number;
+  static method(value: number) { return value + 1; }
+}
+abstract class AbstractSignature { abstract method(value: string): string; }
+console.log(new OverloadedClass(1).method("x"), new OverloadedClass("a").method(2), OverloadedClass.method(3), new OverloadedClass(1).quotedMethod(4));

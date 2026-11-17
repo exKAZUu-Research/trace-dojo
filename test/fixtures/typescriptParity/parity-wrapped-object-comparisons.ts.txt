@@ -1,0 +1,4 @@
+const comparisonArray: number[] = [];
+console.log(comparisonArray === ([] as number[]), ([]) === comparisonArray, comparisonArray === <number[]>[], comparisonArray === [1]!);
+const comparisonObject = {a: 1};
+console.log(comparisonObject == ({a: 1}), comparisonObject !== ({a:1} as {a:number}));

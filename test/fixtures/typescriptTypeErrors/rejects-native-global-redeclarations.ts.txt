@@ -1,0 +1,16 @@
+var name = "a";
+var status = 1;
+var top = 2;
+var event = 1;
+function name() { return 1; }
+function status() { return 1; }
+var closed = 1;
+var opener = 1;
+var document: any;
+var top: any;
+var event: string;
+var HTMLDivElement: any;
+var scalar: number;
+var scalar: any;
+var untouched: number;
+var untouched;

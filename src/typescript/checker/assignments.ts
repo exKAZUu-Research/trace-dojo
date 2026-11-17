@@ -7,7 +7,6 @@ import {
   anyType,
   bigintType,
   errorType,
-  intersectionOf,
   isAnyLike,
   isIntrinsic,
   numberType,
@@ -309,13 +308,12 @@ export class AssignmentChecker {
       if (entry) return entry.type;
     }
     if (!compound && properties.length > 0)
-      return intersectionOf(
+      return unionOf(
         properties.map((member) =>
           member.optional
             ? unionOf([(member.writeType ?? member.type)(), undefinedType])
             : (member.writeType ?? member.type)()
-        ),
-        this.c.budget
+        )
       );
     return type;
   }
@@ -346,11 +344,7 @@ export class AssignmentChecker {
       const properties = (objectType.kind === 'union' ? objectType.types : [objectType])
         .map((member) => this.c.propertyOf(member, String(indexType.value)))
         .filter((property): property is Property => property !== undefined);
-      if (properties.length > 0)
-        return intersectionOf(
-          properties.map((property) => (property.writeType ?? property.type)()),
-          this.c.budget
-        );
+      if (properties.length > 0) return unionOf(properties.map((property) => (property.writeType ?? property.type)()));
     }
     return readType;
   }

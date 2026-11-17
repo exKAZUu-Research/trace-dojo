@@ -1,0 +1,4 @@
+let globalMaybe: string | undefined = "a";
+const captureGlobal = () => globalMaybe.length;
+var globalVarMaybe: string | undefined = "b";
+const captureVarGlobal = function () { return globalVarMaybe.length; };

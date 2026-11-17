@@ -3,7 +3,7 @@ import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 import type { Checker } from './checker';
 import { FlowState, type State } from './flow';
 import type { Sym } from './scopes';
-import { hasToken, named } from './syntax';
+import { hasToken, named, patternIdentifiers, propertyNameText } from './syntax';
 import {
   anyType,
   filterType,
@@ -195,19 +195,24 @@ export class FunctionChecker {
       const pattern = parameterNode.childForFieldName('pattern') ?? parameterNode;
       const type = this.sourceParameterType(parameterNode, pattern, signature, index);
       if (!type) continue;
+      if (
+        pattern.type === 'object_pattern' &&
+        patternIdentifiers(pattern).every((identifier) => !scope.values.get(identifier.text)?.isReassigned)
+      )
+        this.c.patterns.correlatedSources.set(pattern.id, type);
       if (pattern.type === 'identifier') {
         const symbol = scope.values.get(pattern.text);
         if (symbol) this.parameterTypes.set(symbol.id, type);
-      } else if (pattern.type === 'rest_pattern') {
-        const target = named(pattern)[0];
-        const symbol = target ? scope.values.get(target.text) : undefined;
-        if (symbol) this.parameterTypes.set(symbol.id, type);
       } else {
         this.c.silently(() =>
-          this.c.patterns.bindPattern(pattern, type, (identifier, identifierType) => {
-            const symbol = scope.values.get(identifier.text);
-            if (symbol) this.parameterTypes.set(symbol.id, identifierType);
-          })
+          this.c.patterns.bindPattern(
+            pattern.type === 'rest_pattern' ? named(pattern)[0] : pattern,
+            type,
+            (identifier, identifierType) => {
+              const symbol = scope.values.get(identifier.text);
+              if (symbol) this.parameterTypes.set(symbol.id, identifierType);
+            }
+          )
         );
       }
     }
@@ -344,7 +349,6 @@ export class FunctionChecker {
     };
   }
 
-  /** The narrowed types of the variables visible now, which a function created here sees if nothing reassigns them. */
   private capture(): Map<string, Type> {
     const outer = this.capturedTypes.at(-1);
     const captured = outer ? new Map(outer) : new Map<string, Type>();
@@ -389,13 +393,22 @@ export class FunctionChecker {
     if (this.c.isLibrary(node)) return;
     const siblings = node.parent ? named(node.parent) : [];
     const index = siblings.findIndex((sibling) => sibling.id === node.id);
-    const name = node.childForFieldName('name')?.text;
+    const nameNode = node.childForFieldName('name');
+    const name = nameNode ? propertyNameText(nameNode) : undefined;
     const next = siblings[index + 1];
+    const nextName = next?.childForFieldName('name');
     if (
-      next?.childForFieldName('name')?.text === name &&
-      ['function_signature', 'function_declaration'].includes(next.type)
-    )
+      nextName &&
+      propertyNameText(nextName) === name &&
+      ['function_signature', 'function_declaration', 'method_signature', 'method_definition'].includes(next.type)
+    ) {
+      if (hasToken(next, 'static') !== hasToken(node, 'static'))
+        this.c.error(
+          next.childForFieldName('name') ?? next,
+          'オーバーロードの static 修飾子は一致しなければいけません。'
+        );
       return;
+    }
     this.c.error(node.childForFieldName('name') ?? node, '関数の実装がないか、宣言の直後にありません。');
   }
 

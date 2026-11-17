@@ -204,9 +204,11 @@ export abstract class ExpressionEvaluator extends EvaluatorBase {
   }
 
   /** Evaluates elements in order, holding the values so far for garbage collection; an elision leaves a hole. */
-  // code-gauge-allow duplicateLines 25 -- Mirrors the generator version in stepEvaluator.ts, kept apart so that code without yield or await runs without generator frames.
-  private evaluateElements(args: (Argument | undefined)[], callSpread = false): Element[] {
+  // code-gauge-allow duplicateLines 28 -- Mirrors the generator version in stepEvaluator.ts, kept apart so that code without yield or await runs without generator frames.
+  private evaluateElements(args: (Argument | undefined)[], callArguments = false): Element[] {
     const { runtime } = this;
+    const callSpread =
+      callArguments && args.every((argument, index) => argument?.kind !== 'spread' || index === args.length - 1);
     const values: Element[] = [];
     const { temporaries } = runtime.frame;
     const held = temporaries.length;
@@ -215,7 +217,8 @@ export abstract class ExpressionEvaluator extends EvaluatorBase {
         if (argument === undefined) {
           values.push(HOLE);
         } else if (argument.kind === 'spread') {
-          const spread = runtime.iterate(this.evaluate(argument.argument), argument.source, callSpread);
+          const source = callArguments && !callSpread ? undefined : argument.source;
+          const spread = runtime.iterate(this.evaluate(argument.argument), source, callSpread);
           runtime.allocate(spread.length);
           appendAll(values, spread);
           appendAll(temporaries, spread);
@@ -645,6 +648,7 @@ export function bitLength(value: bigint): number {
   return (value < 0n ? -value : value).toString(2).length;
 }
 
+// code-gauge-allow duplicateLines 18 -- Numeric operators overlap other interpreters, while each language keeps its own coercion, division, and exception rules.
 function numberArithmetic(operator: string, left: number, right: number): number {
   switch (operator) {
     case '+': {

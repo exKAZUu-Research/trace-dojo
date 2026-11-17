@@ -328,7 +328,11 @@ export class ExpressionChecker {
       closure !== undefined && symbol.assignmentOffsets.some((offset) => offset > closure.startIndex);
     // A function declaration can be called before anything narrows, as it is hoisted.
     const hoisted = closure?.type === 'function_declaration' || closure?.type === 'generator_function_declaration';
-    if (!evolving && !hoisted && (symbol.valueKind === 'const' || !assignedLater)) {
+    if (
+      !evolving &&
+      !hoisted &&
+      (symbol.valueKind === 'const' || (symbol.scope !== this.c.binder.moduleScope && !assignedLater))
+    ) {
       const captured = this.c.functions.capturedTypes.at(-1)?.get(`s${symbol.id}`);
       if (captured) return captured;
     }

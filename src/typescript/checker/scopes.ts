@@ -74,6 +74,11 @@ export class Scope {
     return (this.kind === 'block' || this.kind === 'class') && this.parent ? this.parent.functionScope : this;
   }
 
+  declareAmbientValue(name: string, kind: 'var' | 'let' | 'const', declaration: TreeNode, nameNode: TreeNode): void {
+    const symbol = this.declareValue(name, 'declared', declaration, nameNode);
+    symbol.valueEntries.at(-1)!.kind = kind;
+  }
+
   declareValue(name: string, kind: ValueKind, declaration: TreeNode, nameNode: TreeNode = declaration): Sym {
     let symbol = this.values.get(name);
     if (!symbol) {

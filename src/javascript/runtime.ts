@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 694 -- One runtime of the JavaScript interpreter, whose state its builtins and evaluator share.
+// code-gauge-allow-file fileNcss 696 -- One runtime of the JavaScript interpreter, whose state its builtins and evaluator share.
 import { CompileError } from '../interpreter/diagnostics';
 import { ExecutionBudget, LIMITS } from '../interpreter/limits';
 import { type ProgramInput, ProgramIO } from '../interpreter/programIo';
@@ -358,7 +358,7 @@ export class Runtime {
   }
 
   /** The spec's ArraySetLength, which stops shrinking at the last non-configurable element. */
-  setLength(array: JsArray, value: Value, strict = true): void {
+  setLength(array: JsArray, value: Value, strict = true, writable = true): void {
     const length = this.toNumber(value);
     if (!Number.isInteger(length) || length < 0 || length >= 2 ** 32)
       this.throwError('RangeError', 'Invalid array length');
@@ -370,17 +370,20 @@ export class Runtime {
     }
     if (length >= elements.length) {
       this.grow(array, length);
+      array.isLengthWritable &&= writable;
       return;
     }
     this.scan(elements.length - length);
     for (let index = elements.length - 1; index >= length; index--) {
       if (!this.deleteProperty(array, String(index), false)) {
         elements.length = index + 1;
+        array.isLengthWritable &&= writable;
         this.refuse(strict, `Cannot delete property '${index}' of [object Array]`);
         return;
       }
     }
     elements.length = length;
+    array.isLengthWritable &&= writable;
   }
 
   private grow(array: JsArray, length: number): void {
@@ -413,8 +416,7 @@ export class Runtime {
     }
     if (object instanceof JsArray && key === 'length') {
       if (isAccessor(property)) this.throwError('TypeError', `Cannot redefine property: length`);
-      this.set(object, key, property.value);
-      object.isLengthWritable &&= property.writable;
+      this.setLength(object, property.value, true, property.writable);
       return;
     }
     const current = object.properties.get(key);

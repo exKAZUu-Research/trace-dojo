@@ -1,0 +1,15 @@
+(1,5): error TS2300: Duplicate identifier 'name'.
+(2,5): error TS2300: Duplicate identifier 'status'.
+(3,5): error TS2403: Subsequent variable declarations must have the same type.  Variable 'top' must be of type 'Window | null', but here has type 'number'.
+(4,5): error TS2403: Subsequent variable declarations must have the same type.  Variable 'event' must be of type 'Event | undefined', but here has type 'number'.
+(5,10): error TS2300: Duplicate identifier 'name'.
+(5,10): error TS2451: Cannot redeclare block-scoped variable 'name'.
+(6,10): error TS2300: Duplicate identifier 'status'.
+(7,5): error TS2403: Subsequent variable declarations must have the same type.  Variable 'closed' must be of type 'boolean', but here has type 'number'.
+(8,5): error TS2403: Subsequent variable declarations must have the same type.  Variable 'opener' must be of type 'any', but here has type 'number'.
+(9,5): error TS2403: Subsequent variable declarations must have the same type.  Variable 'document' must be of type 'Document', but here has type 'any'.
+(10,5): error TS2403: Subsequent variable declarations must have the same type.  Variable 'top' must be of type 'Window | null', but here has type 'any'.
+(11,5): error TS2403: Subsequent variable declarations must have the same type.  Variable 'event' must be of type 'Event | undefined', but here has type 'string'.
+(12,5): error TS2403: Subsequent variable declarations must have the same type.  Variable 'HTMLDivElement' must be of type '{ new (): HTMLDivElement; prototype: HTMLDivElement; }', but here has type 'any'.
+(14,5): error TS2403: Subsequent variable declarations must have the same type.  Variable 'scalar' must be of type 'number', but here has type 'any'.
+(16,5): error TS2403: Subsequent variable declarations must have the same type.  Variable 'untouched' must be of type 'number', but here has type 'any'.

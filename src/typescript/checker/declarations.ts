@@ -1,9 +1,10 @@
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import type { Checker } from './checker';
+import { nativeGlobalRedeclaration } from './nativeGlobalIdentity';
 import type { Scope, Sym } from './scopes';
 import { hasToken, named, propertyNameText } from './syntax';
-import { type Type, undefinedType, unionOf } from './types';
+import { isIntrinsic, type Type, undefinedType, unionOf } from './types';
 
 /** Reports the declarations TypeScript rejects for declaring a name twice, at every declaration it involves. */
 export function checkDuplicateDeclarations(c: Checker, scopes: Scope[]): void {
@@ -62,7 +63,11 @@ function checkVarRedeclarations(c: Checker, symbol: Sym): void {
   );
   const [first] = types;
   for (const [index, type] of types.entries()) {
-    if (index === 0 || c.relations.identical(type, first)) continue;
+    if (index === 0) continue;
+    const native = nativeGlobalRedeclaration(c, symbol, symbol.valueDeclarations[index]);
+    const identical =
+      isIntrinsic(type, 'any') !== isIntrinsic(first, 'any') ? false : c.relations.identical(type, first);
+    if (native ?? identical) continue;
     c.error(
       symbol.valueEntries[index].name,
       `後の変数の宣言は、同じ型でなければいけません。変数 ${symbol.name} の型は '${c.print(first)}' ですが、ここでは '${c.print(type)}' です。`

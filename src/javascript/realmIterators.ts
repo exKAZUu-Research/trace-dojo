@@ -14,6 +14,7 @@ export const WELL_KNOWN_SYMBOLS = {
   dispose: Symbol('Symbol.dispose'),
   asyncDispose: Symbol('Symbol.asyncDispose'),
   toPrimitive: Symbol('Symbol.toPrimitive'),
+  species: Symbol('Symbol.species'),
 } as const;
 
 /** Defines Symbol and the iterators of arrays and strings, which `%IteratorPrototype%` makes iterable themselves. */
