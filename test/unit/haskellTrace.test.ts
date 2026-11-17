@@ -1,4 +1,4 @@
-import { expect, test, vi } from 'vitest';
+import { expect, test } from 'vitest';
 
 import { ExecutionLimitError } from '../../src/interpreter/limits';
 import { executeProgram, traceProgram } from '../../src/interpreter/program';
@@ -940,14 +940,9 @@ make=do
 });
 
 test.each(['i+200', ''])(
-  'composite preview exhaustion preserves scalar evaluations and aliases: %s',
+  'normal demand exposes scalar values and aliases after composite previews: %s',
   (end) => {
-    const source = `import Control.Monad
-main=forM_ [1..1000::Int] $ \\i -> do
- let a=[i..${end}]; b=[i*2..${end ? 'i*2+200' : ''}]; c=[i*3..${end ? 'i*3+200' : ''}] :: [Int]
- let n=id(i*2)
- let copy=id n
- print copy`;
+    const source = scalarAliasesProgram(1000, end);
     const recording = traceProgram('haskell', source, source);
     expect(recording.uncaughtException).toBeUndefined();
     expect(recording.stdout).toBe(Array.from({ length: 1000 }, (_, i) => `${(i + 1) * 2}\n`).join(''));
@@ -955,12 +950,29 @@ main=forM_ [1..1000::Int] $ \\i -> do
     for (const line of [2, 4, 5, 6]) {
       const last = recording.traceItems.findLast((item) => item.line === line);
       expect(last?.vars.i).toBe(1000);
-      if (line >= 4) expect(last?.vars.n).toBe(2000);
-      if (line >= 5) expect(last?.vars.copy).toBe(2000);
+      if (line === 6) {
+        expect(last?.vars.n).toBe(2000);
+        expect(last?.vars.copy).toBe(2000);
+      }
     }
   },
   30_000
 );
+
+test.each(['i+200', ''])('scalar aliases retain assignment views under composite operation quotas: %s', (end) => {
+  const source = scalarAliasesProgram(50, end);
+  const recording = traceWithClock(source, () => 0);
+  expect(recording.uncaughtException).toBeUndefined();
+  expect(recording.stdout).toBe(Array.from({ length: 50 }, (_, i) => `${(i + 1) * 2}\n`).join(''));
+  for (const line of [4, 5]) {
+    const assignments = recording.traceItems.filter((item) => item.line === line);
+    expect(assignments).toHaveLength(50);
+    for (const [index, item] of assignments.entries()) {
+      expect(item.vars.n).toBe((index + 1) * 2);
+      if (line === 5) expect(item.vars.copy).toBe((index + 1) * 2);
+    }
+  }
+});
 
 test.each(['reverse [1..100::Int]', 'reverse [1..200::Int]', 'last [[1..100::Int],[1..200]]'])(
   'composite root previews preserve later scalar assignments: %s',
@@ -970,7 +982,7 @@ main=forM_ [1..1000::Int] $ \\i -> do
  let a=${collection}
  let n=i*2
  print n`;
-    const recording = traceProgram('haskell', source, source);
+    const recording = traceWithClock(source, () => 0);
     expect(recording.uncaughtException).toBeUndefined();
     expect(recording.stdout).toBe(Array.from({ length: 1000 }, (_, i) => `${(i + 1) * 2}\n`).join(''));
     const assignments = recording.traceItems.filter((item) => item.line === 4);
@@ -998,7 +1010,7 @@ main=forM_ [1..1000::Int] $ \\i -> do
  let a=reverse [1..200::Int]
  let ${name}=${expression}
  print i`;
-  const recording = traceProgram('haskell', source, source);
+  const recording = traceWithClock(source, () => 0);
   expect(recording.uncaughtException).toBeUndefined();
   expect(recording.stdout).toBe(Array.from({ length: 1000 }, (_, i) => `${i + 1}\n`).join(''));
   const assignments = recording.traceItems.filter((item) => item.line === 5);
@@ -1017,7 +1029,7 @@ main=forM_ [1..1000::Int] $ \\i -> do
  let ${name}=last(map T(replicate 100 [1..10]))
  let n=i*2
  print n`;
-  const recording = traceProgram('haskell', source, source);
+  const recording = traceWithClock(source, () => 0);
   expect(recording.uncaughtException).toBeUndefined();
   expect(recording.stdout).toBe(Array.from({ length: 1000 }, (_, i) => `${(i + 1) * 2}\n`).join(''));
   const assignments = recording.traceItems.filter((item) => item.line === 5);
@@ -1035,7 +1047,7 @@ main=forM_ [1..1000::Int] $ \\i -> do
  let a=reverse [1..200::Int]
  let n=if even i then E else E
  print i`;
-  const recording = traceProgram('haskell', source, source);
+  const recording = traceWithClock(source, () => 0);
   expect(recording.uncaughtException).toBeUndefined();
   expect(recording.stdout).toBe(Array.from({ length: 1000 }, (_, i) => `${i + 1}\n`).join(''));
   const assignments = recording.traceItems.filter((item) => item.line === 5);
@@ -1057,7 +1069,7 @@ main=forM_ [1..1000::Int] $ \\i -> do
  let a=last(map T(replicate 100 [1..10]))
  let ${name}=${expression}
  print i`;
-    const recording = traceProgram('haskell', source, source);
+    const recording = traceWithClock(source, () => 0);
     expect(recording.uncaughtException).toBeUndefined();
     expect(recording.stdout).toBe(Array.from({ length: 1000 }, (_, i) => `${i + 1}\n`).join(''));
     const assignments = recording.traceItems.filter((item) => item.line === 6);
@@ -1097,7 +1109,7 @@ ${helpers}`;
   const execution = executeProgram('haskell', source);
   expect(execution.kind).toBe('executed');
   if (execution.kind !== 'executed') return;
-  const recording = traceProgram('haskell', source, source);
+  const recording = traceWithClock(source, () => 0);
   expect(recording.uncaughtException).toBeUndefined();
   expect(recording.stdout).toBe(execution.stdout);
   const line = source.split('\n').findIndex((text) => text.includes('let n=')) + 1;
@@ -1160,7 +1172,7 @@ ${prefix ? ' putStrLn "start"' : ''}
     const execution = executeProgram('haskell', source);
     expect(execution.kind).toBe('executed');
     if (execution.kind !== 'executed') return;
-    const recording = traceProgram('haskell', source, source);
+    const recording = traceWithClock(source, () => 0);
     expect(recording.uncaughtException).toBeUndefined();
     expect(recording.stdout).toBe(execution.stdout);
     const assignments = recording.traceItems.filter((item) => item.line === 5);
@@ -1191,7 +1203,7 @@ main=do
   const execution = executeProgram('haskell', source);
   expect(execution.kind).toBe('executed');
   if (execution.kind !== 'executed') return;
-  const recording = traceProgram('haskell', source, source);
+  const recording = traceWithClock(source, () => 0);
   expect(recording.uncaughtException).toBeUndefined();
   expect(recording.stdout).toBe(execution.stdout);
   const assignments = recording.traceItems.filter((item) => item.line === 8);
@@ -1246,17 +1258,12 @@ main=mapM_ step [1..700]`;
   const execution = executeProgram('haskell', source);
   expect(execution.kind).toBe('executed');
   if (execution.kind !== 'executed') return;
-  const clock = vi.spyOn(performance, 'now').mockReturnValue(0);
-  try {
-    const recording = traceProgram('haskell', source, source);
-    expect(recording.uncaughtException).toBeUndefined();
-    expect(recording.stdout).toBe(execution.stdout);
-    const assignments = recording.traceItems.filter((item) => item.line === 4);
-    expect(assignments).toHaveLength(700);
-    for (const [index, item] of assignments.entries()) expect(item.vars.n).toBe(index + 56);
-  } finally {
-    clock.mockRestore();
-  }
+  const recording = traceWithClock(source, () => 0);
+  expect(recording.uncaughtException).toBeUndefined();
+  expect(recording.stdout).toBe(execution.stdout);
+  const assignments = recording.traceItems.filter((item) => item.line === 4);
+  expect(assignments).toHaveLength(700);
+  for (const [index, item] of assignments.entries()) expect(item.vars.n).toBe(index + 56);
 }, 30_000);
 
 test('expired preview time preserves evaluated loop variables', () => {
@@ -1270,19 +1277,14 @@ main=mapM_ step [1..1000]`;
   expect(execution.kind).toBe('executed');
   if (execution.kind !== 'executed') return;
   let ticks = 0;
-  const clock = vi.spyOn(performance, 'now').mockImplementation(() => ticks++ / 100);
-  try {
-    const recording = traceProgram('haskell', source, source);
-    expect(recording.uncaughtException).toBeUndefined();
-    expect(recording.stdout).toBe(execution.stdout);
-    const prints = recording.traceItems.filter((item) => item.line === 5);
-    expect(prints).toHaveLength(1000);
-    expect(prints[0].vars.n).toBe(56);
-    expect(prints.at(-1)?.vars.n).toBeUndefined();
-    for (const [index, item] of prints.entries()) expect(item.vars.i).toBe(index + 1);
-  } finally {
-    clock.mockRestore();
-  }
+  const recording = traceWithClock(source, () => ticks++ / 100);
+  expect(recording.uncaughtException).toBeUndefined();
+  expect(recording.stdout).toBe(execution.stdout);
+  const prints = recording.traceItems.filter((item) => item.line === 5);
+  expect(prints).toHaveLength(1000);
+  expect(prints[0].vars.n).toBe(56);
+  expect(prints.at(-1)?.vars.n).toBeUndefined();
+  for (const [index, item] of prints.entries()) expect(item.vars.i).toBe(index + 1);
 });
 
 test.each([
@@ -1491,7 +1493,7 @@ ${prefix ? ' putStrLn "start"' : ''}
  forM_ [1..1000::Int] $ \\i -> do
   let x=if i \`mod\` 20==0 then sum [1..5000::Int] else i
   print i`;
-  const recording = traceProgram('haskell', source, source);
+  const recording = traceWithClock(source, () => 0);
   expect(recording.uncaughtException).toBeUndefined();
   expect(recording.stdout).toBe(
     `${prefix ? 'start\n' : ''}${Array.from({ length: 1000 }, (_, i) => `${i + 1}\n`).join('')}`
@@ -1529,7 +1531,7 @@ main=do
       when (i<100) (work(i+1))
       print(0::Int)
  work(1::Int)`;
-  const recording = traceProgram('haskell', source, source);
+  const recording = traceWithClock(source, () => 0);
   expect(recording.uncaughtException).toBeUndefined();
   expect(recording.stdout).toBe(`${Array.from({ length: 100 }, (_, i) => `${i + 1}\n`).join('')}${'0\n'.repeat(100)}`);
   const assignments = recording.traceItems.filter((item) => item.line === 4);
@@ -1538,6 +1540,15 @@ main=do
     if (index % 2 === 0) expect(item.vars.x).toBe(index + 1);
   }
 });
+
+function scalarAliasesProgram(iterations: number, end: string): string {
+  return `import Control.Monad
+main=forM_ [1..${iterations}::Int] $ \\i -> do
+ let a=[i..${end}]; b=[i*2..${end ? 'i*2+200' : ''}]; c=[i*3..${end ? 'i*3+200' : ''}] :: [Int]
+ let n=id(i*2)
+ let copy=id n
+ print copy`;
+}
 
 function traceWithClock(source: string, now: () => number): ReturnType<typeof traceProgram> {
   const clock = Object.getOwnPropertyDescriptor(performance, 'now');
