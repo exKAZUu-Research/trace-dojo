@@ -13,7 +13,6 @@ import type {
   Span,
 } from './ast';
 import { markRuntimeStorage } from './comptimeMemory';
-import { copiedValueSlots } from './copyAccounting';
 import { enumLookup } from './enumLookup';
 import {
   type AnyFloat,
@@ -285,10 +284,16 @@ export abstract class SemaBase implements SemaApi {
 
   private copyForCompilation(value: Value, type: Type, span: Span): Value {
     this.resolveStorage(type, span);
-    const slots = copiedValueSlots(type, value, () => this.spendCompilation());
-    this.storage.reserveSlots(slots);
-    this.spendCompilation(sizeOf(type) === 0 ? 0 : 1 + slots);
-    return copyForStorage(value);
+    this.spendCompilation(sizeOf(type) === 0 ? 0 : 1);
+    return copyStoredValue(
+      value,
+      (slots) => {
+        this.storage.reserveSlots(slots);
+        this.spendCompilation(slots);
+      },
+      type,
+      () => this.spendCompilation()
+    );
   }
 
   protected materializeUnion(type: UnionType, index: number, payload: TExpr, span: Span): TExpr {
@@ -1158,7 +1163,7 @@ export abstract class SemaBase implements SemaApi {
         type,
         (frame) => {
           const values = evaluateHeld(frame, evaluators);
-          return result ? copyForStorage(result.value) : compute(values, frame);
+          return result ? copyFrameStorage(frame, result.value, type) : compute(values, frame);
         },
         span
       ),
@@ -1259,6 +1264,7 @@ export abstract class SemaBase implements SemaApi {
         type,
         (frame) => {
           const value = evaluate(frame);
+          if (result) return copyFrameStorage(frame, result.value, type);
           if (allocates) frame.runtime.reserveStorage(valueSlots(type));
           return convert(value, frame);
         },
@@ -1575,30 +1581,74 @@ export function valueEvaluators(args: readonly TExpr[], copy = true): (Eval & { 
 }
 
 export function copyForFrame(frame: Frame, value: Value, type: Type): Value {
-  const slots = copiedValueSlots(type, value, () => frame.runtime.spend());
-  frame.runtime.reserveStorage(slots);
-  frame.runtime.spend(sizeOf(type) === 0 ? 0 : 1 + slots);
-  const singleton = type.kind === 'array' ? singleValueOf(type, () => frame.runtime.spend()) : undefined;
-  return copyForStorage(singleton ? singleton.value : value);
+  frame.runtime.spend(sizeOf(type) === 0 ? 0 : 1);
+  return copyFrameStorage(frame, value, type);
+}
+
+function copyFrameStorage(frame: Frame, value: Value, type: Type): Value {
+  return copyStoredValue(
+    value,
+    (slots) => {
+      frame.runtime.reserveStorage(slots);
+      frame.runtime.spend(slots);
+    },
+    type,
+    () => frame.runtime.spend()
+  );
 }
 
 /** A value about to be stored, whose aggregates must not be shared with the value it came from. */
 export function copyForStorage(value: Value): Value {
-  if (value instanceof ZArray)
-    return (
-      copyZeroArray(value, copyForStorage) ??
-      new ZArray(
-        value.values(value.hasSentinel).map((slot) => copyForStorage(slot)),
-        0,
-        value.lengthValue,
-        value.hasSentinel
-      )
+  return copyStoredValue(value);
+}
+
+// code-gauge-allow functionCognitiveComplexity 25 -- Dispatches concrete value shapes while retaining type proofs and charging each mutable clone before allocation.
+function copyStoredValue(
+  value: Value,
+  reserve?: (slots: number) => void,
+  type?: Type,
+  spend: () => void = () => {}
+): Value {
+  if (type?.kind === 'error_union') type = type.payload;
+  if (type && (value instanceof ZArray || value instanceof ZStruct || value instanceof ZUnion)) {
+    const singleton = singleValueOf(type, spend);
+    if (singleton) return singleton.value;
+  }
+  const copy = (child: Value, type?: Type): Value => copyStoredValue(child, reserve, type, spend);
+  if (value instanceof ZArray) {
+    const child = type?.kind === 'array' ? type.child : undefined;
+    const virtual = copyZeroArray(value, (value) => copy(value, child));
+    if (virtual) return virtual;
+    const length = value.length + (value.hasSentinel ? 1 : 0);
+    reserve?.(length);
+    return new ZArray(
+      Array.from({ length }, (_, index) => copy(value.get(index), child)),
+      0,
+      value.lengthValue,
+      value.hasSentinel
     );
-  if (value instanceof ZStruct) return new ZStruct(value.slots.map((slot) => copyForStorage(slot)));
-  if (value instanceof ZUnion) return value.copyBacking?.() ?? new ZUnion(value.tag, copyForStorage(value.slots[0]));
-  if (value instanceof Some) return new Some(copyForStorage(value.value));
-  if (value instanceof NativeHandle && typeof value.state.fresh === 'function')
+  }
+  if (value instanceof ZStruct) {
+    reserve?.(value.slots.length);
+    return new ZStruct(
+      value.slots.map((value, index) => copy(value, type?.kind === 'struct' ? type.fields?.[index]?.type : undefined))
+    );
+  }
+  if (value instanceof ZUnion) {
+    reserve?.(1);
+    return (
+      value.copyBacking?.() ??
+      new ZUnion(value.tag, copy(value.slots[0], type?.kind === 'union' ? type.fields?.[value.tag]?.type : undefined))
+    );
+  }
+  if (value instanceof Some) {
+    reserve?.(1);
+    return new Some(copy(value.value, type?.kind === 'optional' ? type.child : undefined));
+  }
+  if (value instanceof NativeHandle && typeof value.state.fresh === 'function') {
+    reserve?.(1);
     return (value.state.fresh as () => Value)();
+  }
   return value;
 }
 

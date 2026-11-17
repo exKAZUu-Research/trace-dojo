@@ -259,7 +259,7 @@ const MEMBERS: Record<string, () => Member> = {
         try {
           const writer = discardingWriter();
           print(frame, writer);
-          return BigInt(discardedBytes(writer));
+          return discardedBytes(writer);
         } catch (error) {
           if (error instanceof PrintWriteError) panic(PANIC.unreachable);
           throw error;

@@ -7644,7 +7644,7 @@ test.each(['[1][]const u8', '?[]const u8'])('wrapped %s map keys use shallow sli
 test.each(['powi(u65535,x,40000) catch 0', 'pow(u65535,x,40000)'])(
   'wide integer %s charges multiplication widths',
   (call) => {
-    const source = `const std=@import("std");pub fn main()void{var x:u65535=2;_=&x;for(0..300)|_|{_=std.math.${call};}}`;
+    const source = `const std=@import("std");pub fn main()void{var x:u65535=2;_=&x;for(0..1200)|_|{_=std.math.${call};}}`;
     expect(executeProgram('zig', source)).toMatchObject({ kind: 'limitExceeded', limit: 'operations' });
   }
 );
@@ -8146,5 +8146,97 @@ test('temporary loop roots retain the operand type rather than the captured elem
     kind: 'executed',
     stderr: 'false',
     uncaughtException: undefined,
+  });
+});
+
+test.each(['@abs(if(get()) |_| x else |_| unreachable)', '-(if(get()) |_| x else |_| unreachable)'])(
+  'proven unary arithmetic reuses scalar results after operand effects: %s',
+  (operation) => {
+    const source = `const std=@import("std");fn get()error{}!void{std.debug.print("g",.{});}pub fn main()void{const x:i65535=-(1<<32766);for(0..2500)|_|{_=${operation};}std.debug.print("ok",.{});}`;
+    expect(executeProgram('zig', source)).toMatchObject({
+      kind: 'executed',
+      stderr: 'g'.repeat(2500) + 'ok',
+      uncaughtException: undefined,
+    });
+  }
+);
+
+test.each(['struct{t:type,a:[10000]u8}', 'struct{t:type,a:struct{b:[10000]u8}}'])(
+  'folded generic %s copies share the materialization budget',
+  (type) => {
+    const initial = type.includes('b:') ? '.{.t=u8,.a=.{.b=@splat(1)}}' : '.{.t=u8,.a=@splat(1)}';
+    const source = `const std=@import("std");const D=${type};fn f(x:anytype)@TypeOf(x){return x;}fn get()error{}!void{std.debug.print("g",.{});}pub fn main()void{const d:D=${initial};for(0..1000)|_|{_=f((if(get()) |_| &d else |_| unreachable).*);}std.debug.print("ok",.{});}`;
+    expect(executeProgram('zig', source)).toMatchObject({ kind: 'limitExceeded' });
+  }
+);
+
+test('folded splat results keep independent aggregate storage', () => {
+  const source = `const std=@import("std");fn get()error{}!void{std.debug.print("g",.{});}pub fn main()void{for(0..3)|_|{var a:[2]u8=@splat(if(get()) |_| @as(u8,7) else |_| unreachable);std.debug.print("{}{}",.{a[0],a[1]});a[0]=99;}}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: 'g77g77g77',
+    uncaughtException: undefined,
+  });
+});
+
+test.each(['x', 'X'])('counted {%s} preserves individual hexadecimal digit writes', (format) => {
+  const source = `const std=@import("std");const P=struct{pub fn format(_:P,w:*std.Io.Writer)std.Io.Writer.Error!void{std.debug.print("{}|",.{w.buffered().len});}};pub fn main()void{const a:[70]u8=@splat(97);std.debug.print("{}",.{std.fmt.count("{${format}}{f}",.{&a,P{}})});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: '10|140',
+    uncaughtException: undefined,
+  });
+});
+
+test.each([
+  ['18446744073709551615', 'x'],
+  ['18446744073709551614', 'xy'],
+])('counted writes reject exact end overflow at %s with %s', (end, text) => {
+  const source = `const std=@import("std");const P=struct{pub fn format(_:P,w:*std.Io.Writer)std.Io.Writer.Error!void{w.end=${end};}};pub fn main()void{std.debug.print("{}",.{std.fmt.count("{f}{s}",.{P{},"${text}"})});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    uncaughtException: 'panic: integer overflow',
+  });
+});
+
+test.each(['s', 'b64'])('empty counted {%s} writes preserve exact public writer ends', (format) => {
+  const source = `const std=@import("std");const P=struct{pub fn format(_:P,w:*std.Io.Writer)std.Io.Writer.Error!void{w.end=18446744073709551615;try w.writeAll("");}};const Q=struct{pub fn format(_:Q,w:*std.Io.Writer)std.Io.Writer.Error!void{std.debug.print("{}|",.{w.end});}};pub fn main()void{std.debug.print("{}",.{std.fmt.count("{f}{${format}}{f}",.{P{},"",Q{}})});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: '18446744073709551615|18446744073709551615',
+    uncaughtException: undefined,
+  });
+});
+
+test.each([
+  ['', 28, 96],
+  ['abc', 32, 99],
+] as const)('base64 counting preserves quartet writes after prefix %s', (prefix, length, count) => {
+  const source = `const std=@import("std");const P=struct{pub fn format(_:P,w:*std.Io.Writer)std.Io.Writer.Error!void{std.debug.print("{s}|{}|",.{w.buffered(),w.end});}};pub fn main()void{const a:[70]u8=@splat(97);std.debug.print("{}",.{std.fmt.count("${prefix}{b64}{f}",.{&a,P{}})});}`;
+  const encoded = Buffer.alloc(70, 97).toString('base64');
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: `${encoded.slice(-length)}|${length}|${count}`,
+    uncaughtException: undefined,
+  });
+});
+
+test.each([
+  ['18446744073709551613', 'xy'],
+  ['18446744073709551614', 'x'],
+])('counted writes preserve the exact usize maximum from %s', (end, text) => {
+  const source = `const std=@import("std");const P=struct{pub fn format(_:P,w:*std.Io.Writer)std.Io.Writer.Error!void{w.end=${end};}};pub fn main()void{std.debug.print("{}",.{std.fmt.count("{f}{s}",.{P{},"${text}"})});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: '18446744073709551615',
+    uncaughtException: undefined,
+  });
+});
+
+test('counted totals reject overflow between discarded bytes and a modified public end', () => {
+  const source = `const std=@import("std");const P=struct{pub fn format(_:P,w:*std.Io.Writer)std.Io.Writer.Error!void{w.end=18446744073709551613;}};const Q=struct{pub fn format(_:Q,w:*std.Io.Writer)std.Io.Writer.Error!void{w.end=1;}};pub fn main()void{_=std.fmt.count("{f}{s}{f}",.{P{},"xy",Q{}});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    uncaughtException: 'panic: integer overflow',
   });
 });

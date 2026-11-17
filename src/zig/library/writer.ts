@@ -45,10 +45,30 @@ export class CountingFormatOutput implements FormatOutput {
   }
 
   writeView(length: number, get: (index: number) => number): void {
-    this.frame.runtime.spend(length);
+    if (length === 0) return;
     const state = this.destination;
-    const prefix = state.end + length <= state.capacity ? Array.from({ length }, (_, index) => get(index)) : [];
+    const end = writerEndAfter(state, BigInt(length));
+    this.frame.runtime.spend(length);
+    const prefix = end <= state.capacity ? Array.from({ length }, (_, index) => get(index)) : [];
     discardWritten(state, length, prefix);
+    this.length += length;
+  }
+
+  writeChunks(length: number, get: (index: number) => number, chunkSize: number): void {
+    if (length === 0) return;
+    const state = this.destination;
+    const initialEnd = writerEnd(state);
+    writerEndAfter(state, BigInt(Math.min(length, chunkSize)));
+    if (initialEnd + BigInt(length) <= BigInt(state.capacity)) return this.writeView(length, get);
+    this.frame.runtime.spend(length);
+    const firstFit = Math.max(0, Math.floor((state.capacity - Number(initialEnd)) / chunkSize));
+    const remaining = length - (firstFit + 1) * chunkSize;
+    const cycle = Math.floor(state.capacity / chunkSize) + 1;
+    const finalLength = ((remaining / chunkSize) % cycle) * chunkSize;
+    addDiscarded(state, initialEnd + BigInt(length - finalLength));
+    for (let index = 0; index < finalLength; index++)
+      state.buffer.set(index, BigInt(get(length - finalLength + index)));
+    state.end = finalLength;
     this.length += length;
   }
 
@@ -69,9 +89,9 @@ export function discardingWriter(): WriterState {
     end: 0,
     capacity: 64,
     growth: new NativeHandle('discardingWriter', {
-      count: 0,
+      count: 0n,
       drain: (frame: Frame, state: WriterState, bytes: readonly number[]) => {
-        frame.runtime.spend(state.end + bytes.length);
+        frame.runtime.spend(bytes.length);
         discardWritten(state, bytes.length, bytes);
       },
     }),
@@ -82,27 +102,38 @@ export function isDiscardingWriter(state: WriterState): boolean {
   return state.growth?.kind === 'discardingWriter';
 }
 
-export function discardedBytes(state: WriterState): number {
-  return ((state.growth as NativeHandle).state.count as number) + state.end;
+export function discardedBytes(state: WriterState): bigint {
+  const result = ((state.growth as NativeHandle).state.count as bigint) + writerEnd(state);
+  if (result > (1n << 64n) - 1n) panic(PANIC.overflow);
+  return result;
 }
 
-export function discardRepeated(frame: Frame, state: WriterState, bytes: readonly number[], count: number): void {
-  const length = bytes.length * count;
-  frame.runtime.spend(length + (length + state.end > state.capacity ? state.end : 0));
-  const prefix =
-    length + state.end <= state.capacity ? Array.from({ length }, (_, index) => bytes[index % bytes.length]) : [];
+export function discardRepeated(frame: Frame, state: WriterState, bytes: readonly number[], count: bigint): void {
+  const requested = BigInt(bytes.length) * count;
+  if (requested === 0n) return;
+  const end = writerEndAfter(state, requested);
+  const length = Number(requested);
+  frame.runtime.spend(length);
+  const prefix = end <= state.capacity ? Array.from({ length }, (_, index) => bytes[index % bytes.length]) : [];
   discardWritten(state, length, prefix);
 }
 
 function discardWritten(state: WriterState, length: number, prefix: readonly number[]): void {
-  if (state.end + length > state.capacity) {
-    const data = (state.growth as NativeHandle).state;
-    data.count = (data.count as number) + state.end + length;
+  const end = writerEndAfter(state, BigInt(length));
+  if (end > state.capacity) {
+    addDiscarded(state, writerEnd(state) + BigInt(length));
     state.end = 0;
     return;
   }
   for (let index = 0; index < length; index++) state.buffer.set(state.end + index, BigInt(prefix[index]));
-  state.end += length;
+  state.end = end;
+}
+
+function addDiscarded(state: WriterState, length: bigint): void {
+  const data = (state.growth as NativeHandle).state;
+  const count = (data.count as bigint) + length;
+  if (count > (1n << 64n) - 1n) panic(PANIC.overflow);
+  data.count = count;
 }
 
 const headers = new WeakMap<WriterState, ZStruct>();
@@ -217,9 +248,8 @@ export function writeTo(frame: Frame, state: WriterState, bytes: readonly number
 
 export function flushWriter(frame: Frame, state: WriterState): void {
   if (isDiscardingWriter(state)) {
-    frame.runtime.spend(state.end);
-    const data = (state.growth as NativeHandle).state;
-    data.count = (data.count as number) + state.end;
+    frame.runtime.spend();
+    addDiscarded(state, writerEnd(state));
     state.end = 0;
     return;
   }

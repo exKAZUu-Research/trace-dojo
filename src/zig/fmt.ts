@@ -1,5 +1,5 @@
 import { checkOutputSize } from './allocation';
-// code-gauge-allow-file fileNcss 798 -- The file holds one layer of the compiler, whose parts share its private state.
+// code-gauge-allow-file fileNcss 804 -- The file holds one layer of the compiler, whose parts share its private state.
 /**
  * Zig's formatted printing (`std.Io.Writer.print` and `printValue`), transcribed so that output matches byte for byte.
  * Formatting works on bytes, as Zig's strings are bytes.
@@ -70,6 +70,7 @@ export interface FormatOutput {
   push: (...bytes: number[]) => number;
   checkSize?: (length: number) => void;
   writeView?: (length: number, get: (index: number) => number) => void;
+  writeChunks?: (length: number, get: (index: number) => number, chunkSize: number) => void;
   repeat?: (byte: number, count: number) => void;
 }
 
@@ -471,7 +472,7 @@ export function printValue(
         forbidOptions(options);
         const bytes = stringBytes(value);
         checkFormatSize(out, out.length + bytes.length * 2);
-        for (const byte of bytes) appendBytes(out, hexDigits(byte, upper));
+        for (const byte of bytes) for (const digit of hexDigits(byte, upper)) out.push(digit);
         return;
       }
       case 's': {
@@ -681,7 +682,7 @@ const SPECIAL_SPECIFIERS = new Map<
         forbidOptions(options);
         const bytes = base64Bytes(stringBytes(value));
         checkFormatSize(out, out.length + bytes.length);
-        appendBuffer(out, bytes);
+        appendBuffer(out, bytes, 4);
       },
     },
   ],
@@ -690,7 +691,8 @@ const SPECIAL_SPECIFIERS = new Map<
 /** `std.zig.stringEscape`: escapes quotes, backslashes, control characters, and invalid or special UTF-8. */
 function appendEscapedString(out: FormatOutput, bytes: ByteView): void {
   const hex = (byte: number): void => {
-    appendBytes(out, utf8(`\\x${byte.toString(16).padStart(2, '0')}`));
+    appendBytes(out, utf8(String.raw`\x`));
+    alignBuffer(out, utf8(byte.toString(16)), { fill: 0x30, alignment: 'right', width: 2 });
   };
   let index = 0;
   while (index < bytes.length) {
@@ -701,10 +703,8 @@ function appendEscapedString(out: FormatOutput, bytes: ByteView): void {
     else if (byte < 0x80) out.push(byte);
     else {
       const { length, escape, sequence } = utf8Sequence(bytes, index, byte);
-      for (const each of sequence) {
-        if (escape) hex(each);
-        else out.push(each);
-      }
+      if (escape) for (const each of sequence) hex(each);
+      else appendBytes(out, sequence);
       index += length;
       continue;
     }
@@ -1091,9 +1091,10 @@ function hexFloatDigits(big: BigFloat, bits: FloatBits, upper: boolean, precisio
   return `0x${hex[0]}${point}${fraction}p${exponent}`;
 }
 
-function appendBuffer(out: FormatOutput, bytes: readonly number[] | ByteView): void {
+function appendBuffer(out: FormatOutput, bytes: readonly number[] | ByteView, chunkSize?: number): void {
   const get = 'get' in bytes ? bytes.get : (index: number): number => bytes[index];
-  if (out.writeView) out.writeView(bytes.length, get);
+  if (chunkSize && out.writeChunks) out.writeChunks(bytes.length, get, chunkSize);
+  else if (out.writeView) out.writeView(bytes.length, get);
   else for (let index = 0; index < bytes.length; index++) out.push(get(index));
 }
 

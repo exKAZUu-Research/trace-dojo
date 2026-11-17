@@ -513,7 +513,7 @@ function writeRepeated(frame: Parameters<TExpr['eval']>[0], state: WriterState, 
   const end = writerEndAfter(state, requested);
   const length = Number(requested);
   if (isDiscardingWriter(state)) {
-    discardRepeated(frame, state, data, Number(count));
+    discardRepeated(frame, state, data, count);
     return;
   }
   if (state.fd === undefined && !state.growth && end > state.capacity) {
