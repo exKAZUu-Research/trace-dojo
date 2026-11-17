@@ -32,6 +32,8 @@ import {
 /** Resolves the type operators: `keyof`, indexed access, conditional, mapped, and template literal types. */
 export class TypeOperators {
   private readonly mappedParameters = new Map<number, TypeParameter>();
+  /** The keys of a mapped type that a name type maps to each name, by the structure being built. */
+  private readonly mappedKeys = new WeakMap<Structure, Map<string, Type[]>>();
   private readonly inferParameters = new Map<number, Map<string, TypeParameter>>();
 
   constructor(private readonly c: Checker) {}
@@ -234,7 +236,13 @@ export class TypeOperators {
   private addMappedMember(structure: Structure, info: MappedInfo, mapper: Mapper, nameMember: Type): void {
     if (nameMember.kind === 'literal' && typeof nameMember.value !== 'boolean') {
       const name = String(nameMember.value);
-      structure.properties.set(name, this.mappedProperty(info, mapper.get(info.typeParameter.id) as Type, name));
+      const key = mapper.get(info.typeParameter.id) as Type;
+      // Keys that a name type maps to one name share it, as TypeScript maps the union of those keys.
+      const keys = [...(structure.properties.get(name) ? (this.mappedKeys.get(structure)?.get(name) ?? []) : []), key];
+      let names = this.mappedKeys.get(structure);
+      if (!names) this.mappedKeys.set(structure, (names = new Map()));
+      names.set(name, keys);
+      structure.properties.set(name, this.mappedProperty(info, unionOf(keys), name));
       return;
     }
     const indexInfo = (): IndexInfo => ({
@@ -247,7 +255,10 @@ export class TypeOperators {
   }
 
   private mappedProperty(info: MappedInfo, key: Type, name: string): Property {
-    const sourceProperty = info.source ? this.c.propertyOf(info.source, name) : undefined;
+    // A renamed property takes the modifiers of the one property its key names in the source.
+    const sourceName = key.kind === 'literal' && typeof key.value !== 'boolean' ? String(key.value) : undefined;
+    const sourceProperty =
+      info.source && sourceName !== undefined ? this.c.propertyOf(info.source, sourceName) : undefined;
     let type: Type | undefined;
     return {
       name,
@@ -286,7 +297,7 @@ export class TypeOperators {
     // keyof lists the public members only.
     for (const [name, property] of structure.properties) {
       if (name.startsWith('__@') || name.startsWith('#') || property.visibility !== 'public') continue;
-      keys.push(literalType(name));
+      keys.push(isNumericKey(property) ? literalType(Number(name)) : literalType(name));
     }
     return unionOf(keys);
   }
@@ -517,4 +528,12 @@ function appendEach(prefixes: string[], members: Type[], suffix: string): string
         prefix + (member.kind === 'literal' ? String(member.value) : (member as { name: string }).name) + suffix
     )
   );
+}
+
+/** Whether a property is declared with a number as its name, as `0: T` or `[1]: T`, which `keyof` gives as a number. */
+function isNumericKey(property: Property): boolean {
+  const declaration = property.declaration;
+  let name = declaration?.childForFieldName('name') ?? declaration?.childForFieldName('key');
+  if (name?.type === 'computed_property_name') name = named(name)[0];
+  return name?.type === 'number';
 }

@@ -1,0 +1,2 @@
+(9,4): error TS2540: Cannot assign to 'pre_y' because it is a read-only property.
+(12,4): error TS2540: Cannot assign to 'y' because it is a read-only property.
