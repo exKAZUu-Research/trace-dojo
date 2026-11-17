@@ -7781,3 +7781,53 @@ test.each([
     uncaughtException: "panic: access of union field 'b' while field 'a' is active",
   });
 });
+
+test.each([
+  'x*x',
+  'x+x',
+  'x-x',
+  'x*%x',
+  'x*|x',
+  'x&x',
+  'x|x',
+  'x^x',
+  'x/@as(u65535,1)',
+  'x%x',
+  'x<<@as(u16,32768)',
+  'x>>@as(u16,0)',
+  'x<<|@as(u32,4294967295)',
+  '~x',
+  '-%x',
+  'x==x',
+  'x>x',
+])('wide integer operator %s charges its actual widths', (operation) => {
+  const source = `const std=@import("std");pub fn main()void{var x:u65535=std.math.maxInt(u32767);_=&x;for(0..5000)|_|{_=${operation};}std.debug.print("ok",.{});}`;
+  expect(executeProgram('zig', source)).toMatchObject({ kind: 'limitExceeded', limit: 'operations' });
+});
+
+test.each(['x+=0;', 'x*%=1;', 'x<<=0;'])('wide integer compound assignment %s charges work', (operation) => {
+  const source = `const std=@import("std");pub fn main()void{var x:u65535=std.math.maxInt(u32767);for(0..5000)|_|{${operation}}std.debug.print("ok",.{});}`;
+  expect(executeProgram('zig', source)).toMatchObject({ kind: 'limitExceeded', limit: 'operations' });
+});
+
+test.each(['f80', 'f128'])('extended %s comparisons handle distant exponents without exponent-sized work', (type) => {
+  const source = `const std=@import("std");pub fn main()void{var x:${type}=0x1p16000;var y:${type}=0x1p-16000;var z:${type}=0x1.8p16000;var n:${type}=-0x1p16000;_=&x;_=&y;_=&z;_=&n;for(0..50000)|_|{_=x>y;}std.debug.print("{} {} {} {} {} {} {}",.{x>y,x!=y,z>x,n < -y,n<0,@as(${type},-0.0)==0,@as(${type},0.0)>n});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: 'true true true true true true true',
+    uncaughtException: undefined,
+  });
+});
+
+test.each(['{d:.18446744073709551616}', '{d:18446744073709551616}', '{18446744073709551616d}'])(
+  'numeric format options reject usize overflow: %s',
+  (format) => {
+    const source = `const std=@import("std");pub fn main()void{std.debug.print("${format}",.{@as(u8,7)});}`;
+    expect(executeProgram('zig', source)).toMatchObject({ kind: 'compileError' });
+  }
+);
+
+test('integer precision accepts the maximum usize and ignores it as Zig does', () => {
+  const source = `const std=@import("std");pub fn main()void{std.debug.print("{d:.18446744073709551615}",.{@as(u8,7)});}`;
+  expect(executeProgram('zig', source)).toMatchObject({ kind: 'executed', stderr: '7', uncaughtException: undefined });
+});

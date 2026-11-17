@@ -305,7 +305,7 @@ export function minMaxFloat(a: AnyFloat, b: AnyFloat, isMax: boolean, comptime =
 }
 
 /** Compares two floats: -1, 0, or 1, or undefined when either is NaN. */
-// code-gauge-allow functionCognitiveComplexity 24 -- Transcribes the corresponding function of Zig's standard library or compiler step by step.
+// code-gauge-allow functionCognitiveComplexity 24 -- Compares IEEE special values before bounded finite significands.
 export function compareFloats(a: AnyFloat, b: AnyFloat): -1 | 0 | 1 | undefined {
   if (typeof a === 'number' && typeof b === 'number') {
     if (Number.isNaN(a) || Number.isNaN(b)) return undefined;
@@ -319,11 +319,24 @@ export function compareFloats(a: AnyFloat, b: AnyFloat): -1 | 0 | 1 | undefined 
     const ys = infinityRank(y);
     return xs < ys ? -1 : xs > ys ? 1 : 0;
   }
-  const rx = toRational(x);
-  const ry = toRational(y);
-  const left = (rx.sign ? -rx.num : rx.num) * ry.den;
-  const right = (ry.sign ? -ry.num : ry.num) * rx.den;
-  return left < right ? -1 : left > right ? 1 : 0;
+  return compareFinite(x, y);
+}
+
+// code-gauge-allow functionCognitiveComplexity 16 -- Keeps zero, signs, leading exponents and bounded significands in one comparison.
+function compareFinite(x: BigFloat, y: BigFloat): -1 | 0 | 1 {
+  if (x.isZero && y.isZero) return 0;
+  if (x.isZero) return y.sign ? 1 : -1;
+  if (y.isZero) return x.sign ? -1 : 1;
+  if (x.sign !== y.sign) return x.sign ? -1 : 1;
+  const xBits = bitLength(x.mantissa),
+    yBits = bitLength(y.mantissa);
+  const xLeading = xBits + x.exponent,
+    yLeading = yBits + y.exponent;
+  if (xLeading !== yLeading) return x.sign === xLeading < yLeading ? 1 : -1;
+  const left = x.mantissa << BigInt(Math.max(0, yBits - xBits));
+  const right = y.mantissa << BigInt(Math.max(0, xBits - yBits));
+  if (left === right) return 0;
+  return x.sign === left < right ? 1 : -1;
 }
 
 function infinityRank(value: BigFloat): number {

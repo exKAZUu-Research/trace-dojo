@@ -35,7 +35,7 @@ import {
   signBit,
   truncateToBigInt,
 } from './floats';
-import { spendIntegerOperation } from './integerWork';
+import { spendIntegerShift } from './integerWork';
 import { sizeOf } from './layout';
 import { importStd } from './library/std';
 import { MemoryFault } from './memoryFault';
@@ -808,8 +808,8 @@ export abstract class BuiltinCompiler extends ExpressionCompiler {
       const spend = (cost: number): void => (frame ? frame.runtime.spend(cost) : this.spendCompilation(cost));
       if (name === '@shlWithOverflow') {
         checkShiftAmount(y, type);
-        spend(Math.ceil((x.toString(2).length + Number(y)) / 64));
-      } else spendIntegerOperation(x, y, name === '@mulWithOverflow', spend);
+        spendIntegerShift(x, y, true, spend);
+      } else this.integerWork(x, y, name === '@mulWithOverflow', frame);
       const exact =
         name === '@addWithOverflow'
           ? x + y

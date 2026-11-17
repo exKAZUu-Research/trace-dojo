@@ -1,4 +1,3 @@
-import { ExecutionLimitError, LIMITS } from '../interpreter/limits';
 import { valueSlots } from './allocation';
 import {
   checked,
@@ -29,8 +28,9 @@ import {
   negate,
   parseFloatLiteral,
 } from './floats';
-import { spendIntegerOperation } from './integerWork';
+import { spendIntegerOperation, spendIntegerShift } from './integerWork';
 import { optionalNicheBits, sizeOf } from './layout';
+import { spendMemory } from './memoryAccounting';
 import { callableNative } from './nativeAdapter';
 import { asFloat, comparisonTest, isArithmeticType, isIntegerType, isZero, sign } from './operands';
 import { type Frame, Jump, withHeldValues } from './runtime';
@@ -941,8 +941,7 @@ export abstract class ExpressionCompiler extends SemaBase {
 
   // Operators -------------------------------------------------------------------------------------------------------
 
-  // code-gauge-allow functionNcss 31 -- Keeps each numeric unary operation with its type checks and evaluation.
-  // code-gauge-allow functionCognitiveComplexity 22 -- Keeps each numeric unary operation with its type checks and evaluation.
+  // code-gauge-allow functionCognitiveComplexity 23 -- Keeps each numeric unary operation with its type checks and evaluation.
   private unary(expression: ExpressionOf<'unary'>, resultType: Type | undefined): TExpr {
     if (expression.operator === '&') return this.addressOperand(expression, resultType);
     const operand = this.compile(expression.operand, expression.operator === '!' ? BOOL : resultType);
@@ -955,26 +954,33 @@ export abstract class ExpressionCompiler extends SemaBase {
       case '~': {
         if (type.kind !== 'int')
           return this.error(expression, `~ は、整数の型にだけ使えます（${typeName(type)} 型です）。`);
-        return this.derived(operand, type, (v) => wrapInt(~(v as bigint), type));
+        return this.integerUnary(operand, (value) => wrapInt(~value, type));
       }
       case '-': {
-        if (type.kind === 'comptime_int') return this.derived(operand, type, (v) => -(v as bigint));
+        if (type.kind === 'comptime_int') return this.integerUnary(operand, (value) => -value);
         if (type.kind === 'int') {
           if (!type.signed) this.error(expression, `符号なしの整数 ${typeName(type)} には、- を付けられません。`);
-          if (operand.known)
-            return known(type, this.checkedKnown(-(operand.value as bigint), type, expression), expression);
-          return this.derived(operand, type, (v) => checked(-(v as bigint), type));
+          return this.integerUnary(operand, (value) =>
+            operand.known ? this.checkedKnown(-value, type, expression) : checked(-value, type)
+          );
         }
         if (type.kind === 'float' || type.kind === 'comptime_float')
           return this.derived(operand, type, (v) => negate(v as AnyFloat));
         return this.error(expression, `- は、数の型にだけ使えます（${typeName(type)} 型です）。`);
       }
       case '-%': {
-        if (type.kind === 'int') return this.derived(operand, type, (v) => wrapInt(-(v as bigint), type));
-        if (type.kind === 'comptime_int') return this.derived(operand, type, (v) => -(v as bigint));
+        if (type.kind === 'int') return this.integerUnary(operand, (value) => wrapInt(-value, type));
+        if (type.kind === 'comptime_int') return this.integerUnary(operand, (value) => -value);
         return this.error(expression, `-% は、整数の型にだけ使えます（${typeName(type)} 型です）。`);
       }
     }
+  }
+
+  private integerUnary(operand: TExpr, compute: (value: bigint) => bigint): TExpr {
+    return this.derived(operand, operand.type, (value, frame) => {
+      this.integerWork(value as bigint, 0n, false, frame);
+      return compute(value as bigint);
+    });
   }
 
   private addressOperand(expression: ExpressionOf<'unary'>, resultType: Type | undefined): TExpr {
@@ -1174,7 +1180,10 @@ export abstract class ExpressionCompiler extends SemaBase {
       case 'comptime_int':
       case 'enum': {
         if (type.kind === 'enum' && ordered) this.error(span, `enum の値は、大小を比べられません。`);
-        return (a, b) => ((a as bigint) < (b as bigint) ? -1 : (a as bigint) > (b as bigint) ? 1 : 0);
+        return (a, b) => {
+          spendIntegerOperation(a as bigint, b as bigint, false, spendMemory);
+          return (a as bigint) < (b as bigint) ? -1 : (a as bigint) > (b as bigint) ? 1 : 0;
+        };
       }
       case 'float':
       case 'comptime_float': {
@@ -1261,14 +1270,12 @@ export abstract class ExpressionCompiler extends SemaBase {
     left = this.coerce(left, type, expression.left);
     right = this.coerce(right, type, expression.right);
     this.checkDivision(operator, type, left, right, expression);
-    const leftResult = staticResultOf(left),
-      rightResult = staticResultOf(right);
-    if (type.kind === 'comptime_int' && leftResult && rightResult) {
-      spendIntegerOperation(leftResult.value as bigint, rightResult.value as bigint, operator === '*', (cost) =>
-        this.spendCompilation(cost)
-      );
-    }
-    const operation = this.operation(operator, type, expression);
+    const compute = this.operation(operator, type, expression);
+    const operation = (a: Value, b: Value, frame?: Frame): Value => {
+      if (type.kind === 'int' || type.kind === 'comptime_int')
+        this.integerWork(a as bigint, b as bigint, operator.startsWith('*'), frame);
+      return compute(a, b);
+    };
     // A float of a fixed type divided by zero gives an infinity or NaN, as at run time.
     const dividesByZero =
       (operator === '/' || operator === '%') &&
@@ -1287,7 +1294,7 @@ export abstract class ExpressionCompiler extends SemaBase {
         type,
         (frame) => {
           const [a, b] = evaluateHeld(frame, [evaluateLeft, evaluateRight]);
-          return operation(a, b);
+          return operation(a, b, frame);
         },
         expression
       ),
@@ -1422,7 +1429,7 @@ export abstract class ExpressionCompiler extends SemaBase {
     }
   }
 
-  // code-gauge-allow functionCognitiveComplexity 18 -- Keeps unbounded and fixed-width shift contracts together.
+  // code-gauge-allow functionCognitiveComplexity 19 -- Keeps unbounded and fixed-width shift contracts together.
   private shift(expression: ExpressionOf<'binary'>, resultType: Type | undefined): TExpr {
     const left = this.compile(expression.left, resultType);
     const type = left.type;
@@ -1439,12 +1446,7 @@ export abstract class ExpressionCompiler extends SemaBase {
           const value = a as bigint,
             amount = b as bigint;
           if (amount < 0n) this.error(expression.right, 'シフトの量が負の数です。');
-          if (
-            expression.operator !== '>>' &&
-            value !== 0n &&
-            amount + BigInt(value.toString(2).length) > BigInt(LIMITS.maxSlots)
-          )
-            throw new ExecutionLimitError('storage');
+          spendIntegerShift(value, amount, expression.operator !== '>>', (cost) => this.spendCompilation(cost));
           return expression.operator === '>>' ? value >> amount : value << amount;
         },
         expression
@@ -1464,7 +1466,24 @@ export abstract class ExpressionCompiler extends SemaBase {
         : expression.operator === '>>'
           ? (a: Value, b: Value): Value => shiftRight(a as bigint, b as bigint, int)
           : (a: Value, b: Value): Value => shiftLeftSaturating(a as bigint, b as bigint, int);
-    return this.combine([left, right], type, ([a, b]) => operation(a, b), expression);
+    return this.combine(
+      [left, right],
+      type,
+      ([a, b], frame) => {
+        const amount = (b as bigint) > BigInt(int.bits) ? BigInt(int.bits) : (b as bigint);
+        spendIntegerShift(a as bigint, amount, expression.operator !== '>>', (cost) =>
+          frame ? frame.runtime.spend(cost) : this.spendCompilation(cost)
+        );
+        return operation(a, b);
+      },
+      expression
+    );
+  }
+
+  protected integerWork(left: bigint, right: bigint, multiply: boolean, frame?: Frame): void {
+    spendIntegerOperation(left, right, multiply, (cost) =>
+      frame ? frame.runtime.spend(cost) : this.spendCompilation(cost)
+    );
   }
 
   private unsignedShiftCount(expression: Expression): TExpr {

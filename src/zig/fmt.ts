@@ -1,5 +1,5 @@
 import { checkOutputSize } from './allocation';
-// code-gauge-allow-file fileNcss 762 -- The file holds one layer of the compiler, whose parts share its private state.
+// code-gauge-allow-file fileNcss 764 -- The file holds one layer of the compiler, whose parts share its private state.
 /**
  * Zig's formatted printing (`std.Io.Writer.print` and `printValue`), transcribed so that output matches byte for byte.
  * Formatting works on bytes, as Zig's strings are bytes.
@@ -206,12 +206,13 @@ function parsePlaceholder(bytes: readonly number[]): {
       i++;
       return { kind: 'named', name };
     }
-    let value: number | undefined;
+    let value: bigint | undefined;
     while (peek(0) !== undefined && (peek(0) as number) >= 0x30 && (peek(0) as number) <= 0x39) {
-      value = (value ?? 0) * 10 + ((peek(0) as number) - 0x30);
+      value = (value ?? 0n) * 10n + BigInt((peek(0) as number) - 0x30);
+      if (value > (1n << 64n) - 1n) throw new FormatError('format option overflows usize');
       i++;
     }
-    return value === undefined ? { kind: 'none' } : { kind: 'number', value };
+    return value === undefined ? { kind: 'none' } : { kind: 'number', value: Number(value) };
   };
   const arg = parseSpecifier();
   const specStart = i;
