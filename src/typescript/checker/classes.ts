@@ -509,6 +509,10 @@ export class ClassChecker {
           body,
           nameNode.text,
           (right) => this.c.widen(this.c.silently(() => this.c.expressions.check(right))),
+          (index) => {
+            const key = this.c.silently(() => this.c.expressions.check(index));
+            return key.kind === 'literal' && typeof key.value === 'string' ? key.value : undefined;
+          },
           () => this.c.budget.spend()
         )
       : [];

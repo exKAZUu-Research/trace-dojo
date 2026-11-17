@@ -37,9 +37,10 @@ export function typesAtConstructorExit(
   body: TreeNode,
   name: string,
   assignedType: (value: TreeNode) => Type,
+  keyName: (index: TreeNode) => string | undefined,
   spend: () => void
 ): Type[] {
-  const flow = new AssignmentFlow((left) => isThisField(left, name), assignedType, spend);
+  const flow = new AssignmentFlow((left) => isThisField(left, name, keyName), assignedType, spend);
   const end = flow.statement(body, [undefinedType]);
   return (merge([end, ...flow.returns]) ?? []).filter((value) => !isLoopEntry(value)) as Type[];
 }
@@ -318,13 +319,13 @@ class AssignmentFlow {
   }
 }
 
-function isThisField(left: TreeNode, name: string): boolean {
+/** Whether an assignment target is `this.<name>`, or `this[key]` with a key of that constant name. */
+function isThisField(left: TreeNode, name: string, keyName: (index: TreeNode) => string | undefined): boolean {
   const target = skipParentheses(left);
-  return (
-    target.type === 'member_expression' &&
-    target.childForFieldName('object')?.type === 'this' &&
-    target.childForFieldName('property')?.text === name
-  );
+  if (target.childForFieldName('object')?.type !== 'this') return false;
+  if (target.type === 'member_expression') return target.childForFieldName('property')?.text === name;
+  const index = target.type === 'subscript_expression' ? target.childForFieldName('index') : undefined;
+  return !!index && keyName(index) === name;
 }
 
 /** The values any of the paths may hold, where at least one of them is reachable. */
