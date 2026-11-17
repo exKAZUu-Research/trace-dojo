@@ -817,7 +817,7 @@ export class Codegen {
       const plans = expr.pats.map((pat, index) => this.planPattern(pat, slots[index], true));
       let body: Core;
       if (ioResult) {
-        const storesAnswer = expr.pats.every((pat) => patternStoresAnswer(pat));
+        const storesAnswer = expr.pats.some((pat) => patternStoresAnswer(pat));
         body = this.ioBlock(expr.body, { row: expr.span.row, storesAnswer });
       } else {
         body = this.compileExpr(expr.body);
@@ -1431,11 +1431,7 @@ function patternLocals(pat: RPat): LocalVar[] {
 
 /** Whether a lambda's parameter holds a value learners answer: a number, a character, a string, or a Boolean. */
 function patternStoresAnswer(pat: RPat): boolean {
-  if (pat.k === 'wild') return true;
-  if (pat.k !== 'var' && pat.k !== 'as') return true;
-  const type = pat.local.type;
-  if (!type) return false;
-  return isScalarType(type);
+  return patternLocals(pat).some((local) => local.type !== undefined && isScalarType(local.type));
 }
 
 export function isScalarType(type: Type): boolean {

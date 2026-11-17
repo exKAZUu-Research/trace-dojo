@@ -547,3 +547,105 @@ test('shared visibility scopes preserve shadowing order and restore enclosing bi
   expect(Object.keys(recording.finalVars)).toEqual(['x', 'y']);
   expect(recording.traceItems.find((item) => item.line === 6)?.vars).toEqual({ x: 'z', y: 2 });
 });
+
+test.each([
+  ['(Just t)', '[Just t1,Just t2]'],
+  ['m@(Just t)', '[Just t1,Just t2]'],
+  ['(Just (Just t))', '[Just(Just t1),Just(Just t2)]'],
+  ['(t,_)', '[(t1,()),(t2,())]'],
+  ['pair@(t,_)', '[(t1,()),(t2,())]'],
+])('reference-only loop pattern %s omits unchanged binding steps', (pattern, values) => {
+  const source = `import Control.Monad
+main=do
+ t1<-newTurtleAt 1 1
+ t2<-newTurtleAt 3 3
+ let ts=${values}
+ forM_ ts $ \\${pattern}->do
+  forward t`;
+  const recording = traceProgram('haskell', source, source);
+  expect(recording.uncaughtException).toBeUndefined();
+  expect(
+    recording.traceItems.map(({ line, vars, turtles }) => ({
+      line,
+      vars,
+      positions: turtles.map(({ x, y }) => [x, y]),
+    }))
+  ).toEqual([
+    { line: 0, vars: {}, positions: [] },
+    { line: 3, vars: {}, positions: [[1, 1]] },
+    {
+      line: 4,
+      vars: {},
+      positions: [
+        [1, 1],
+        [3, 3],
+      ],
+    },
+    {
+      line: 5,
+      vars: {},
+      positions: [
+        [1, 1],
+        [3, 3],
+      ],
+    },
+    {
+      line: 7,
+      vars: {},
+      positions: [
+        [1, 2],
+        [3, 3],
+      ],
+    },
+    {
+      line: 7,
+      vars: {},
+      positions: [
+        [1, 2],
+        [3, 4],
+      ],
+    },
+  ]);
+});
+
+test.each([
+  ['n', '[1,1::Int]'],
+  ['(Just n)', '[Just(1::Int),Just 1]'],
+  ['m@(Just n)', '[Just(1::Int),Just 1]'],
+  ['pair@((),n)', '[((),1::Int),((),1)]'],
+])('scalar loop pattern %s retains each repeated binding step', (pattern, values) => {
+  const source = `import Control.Monad
+main=forM_ ${values} $ \\${pattern}->do
+ print n`;
+  const recording = traceProgram('haskell', source, source);
+  expect(recording).toMatchObject({ stdout: '1\n1\n', uncaughtException: undefined });
+  expect(recording.traceItems.map(({ line, vars }) => ({ line, vars }))).toEqual([
+    { line: 0, vars: {} },
+    { line: 2, vars: { n: 1 } },
+    { line: 3, vars: { n: 1 } },
+    { line: 2, vars: { n: 1 } },
+    { line: 3, vars: { n: 1 } },
+  ]);
+});
+
+test('a scalar inside a mixed loop pattern retains its binding steps', () => {
+  const source = `import Control.Monad
+main=do
+ t1<-newTurtleAt 1 1
+ t2<-newTurtleAt 3 3
+ let ts=[(t1,1::Int),(t2,1)]
+ forM_ ts $ \\pair@(t,n)->do
+  forward t`;
+  const recording = traceProgram('haskell', source, source);
+  expect(recording.uncaughtException).toBeUndefined();
+  expect(recording.traceItems.map(({ line, vars }) => ({ line, vars }))).toEqual([
+    { line: 0, vars: {} },
+    { line: 3, vars: {} },
+    { line: 4, vars: {} },
+    { line: 5, vars: {} },
+    { line: 6, vars: { n: 1 } },
+    { line: 7, vars: { n: 1 } },
+    { line: 6, vars: { n: 1 } },
+    { line: 7, vars: { n: 1 } },
+  ]);
+});

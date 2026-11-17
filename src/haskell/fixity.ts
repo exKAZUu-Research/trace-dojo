@@ -22,7 +22,7 @@ export function sectionOperand(
   if (resolved.kind !== 'binop' && resolved.kind !== 'neg') return resolved;
   const inner = resolved.kind === 'binop' ? fixityOf(resolved.op) : NEGATE_FIXITY;
   const outer = fixityOf(op);
-  if (inner.prec > outer.prec || (inner.prec === outer.prec && inner.assoc === assoc && outer.assoc === assoc)) {
+  if (inner.prec > outer.prec || (inner.prec === outer.prec && inner.assoc === assoc)) {
     return resolved;
   }
   const innerName = resolved.kind === 'binop' ? resolved.op.name : '-';

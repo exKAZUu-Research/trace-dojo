@@ -976,10 +976,10 @@ test.each([' ', '\t', '\n', '\v', '\f', '\r', ' \t\r\n\v\f '])('ASCII source str
   });
 });
 
-test('contextual dictionaries stop at execution limits within a bounded Node heap', { timeout: 30_000 }, () => {
+test('bulk allocations stop at execution limits within a bounded Node heap', { timeout: 30_000 }, () => {
   const bundle = execFileSync(
     'bun',
-    ['build', 'test/helpers/haskellDictionaryMemory.ts', '--target=node', '--packages=external'],
+    ['build', 'test/helpers/haskellAllocationMemory.ts', '--target=node', '--packages=external'],
     { encoding: 'utf8', timeout: 30_000, maxBuffer: 16 * 1024 * 1024 }
   );
   const output = execFileSync('node', ['--max-old-space-size=512', '--input-type=module'], {
@@ -996,6 +996,62 @@ test('contextual dictionaries stop at execution limits within a bounded Node hea
       })
     )
     .parse(JSON.parse(output));
-  expect(results).toHaveLength(5);
+  expect(results).toHaveLength(19);
   for (const result of results) expect(result.finite.stdout, result.name).toBe('1\n');
+});
+
+test.each(['infix', 'infixl', 'infixr'])(
+  'equal-precedence sections accept %s operators with side-associative operands',
+  (associativity) => {
+    const source = `${associativity} 5 <#>
+infixl 5 <+
+infixr 5 +>
+a <#> b=a*10+b
+a <+ b=a+b
+a +> b=a+b
+main=print((1 <+ 2 <#>) 4,(<#> 1 +> 2) 4)`;
+    expect(executeProgram('haskell', source)).toMatchObject({
+      kind: 'executed',
+      stdout: '(34,43)\n',
+      uncaughtException: undefined,
+    });
+  }
+);
+
+test.each([
+  'main=print((1 <$ [2,3] ==) [1,1::Int])',
+  'main=print((Just 1 <* Just 2 ==) (Just (1::Int)))',
+  'main=print(((1 <$ [2,3]) ==) [1,1::Int])',
+  'main=print((== (Just 1 <* Just 2)) (Just (1::Int)))',
+])('sections accept non-associative library operators and parenthesized operands: %s', (source) => {
+  expect(executeProgram('haskell', source)).toMatchObject({
+    kind: 'executed',
+    stdout: 'True\n',
+    uncaughtException: undefined,
+  });
+});
+
+test.each([
+  ['infixr 5', '(1 <+ 2 <#>) 4'],
+  ['infixl 5', '(<#> 1 <+ 2) 4'],
+  ['infix 5', '(1 <+ 2 <#>) 4'],
+  ['infix 5', '(<#> 1 <+ 2) 4'],
+  ['infixl 4', '(1 <+ 2 <#>) 4'],
+  ['infixr 4', '(<#> 1 <+ 2) 4'],
+])('sections reject an operand with fixity %s on the wrong side: %s', (fixity, section) => {
+  const source = `infix 5 <#>\n${fixity} <+\na <#> b=a*10+b\na <+ b=a+b\nmain=print(${section})`;
+  expect(executeProgram('haskell', source)).toMatchObject({ kind: 'compileError' });
+});
+
+test('sections accept a tighter operand regardless of its associativity', () => {
+  const source = `infix 5 <#>
+infix 6 <+
+a <#> b=a*10+b
+a <+ b=a+b
+main=print((1 <+ 2 <#>) 4,(<#> 1 <+ 2) 4)`;
+  expect(executeProgram('haskell', source)).toMatchObject({
+    kind: 'executed',
+    stdout: '(34,43)\n',
+    uncaughtException: undefined,
+  });
 });

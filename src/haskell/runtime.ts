@@ -11,6 +11,8 @@ import { Machine } from './machine';
 import { withTypeWorkBudget } from './typeWorkBudget';
 import { Dict, type Env, type Slot, Thunk } from './values';
 
+const ALLOCATION_OVERHEAD = 8;
+
 /** Stops evaluating a value for a trace's display, which leaves the value as it was. */
 export class DisplayAbort extends Error {
   constructor() {
@@ -90,14 +92,15 @@ export class Runtime implements TracedRuntime<TraceFrame> {
     return this.displayRemaining === undefined ? new ExecutionLimitError('operations') : new DisplayAbort();
   }
 
-  /** Counts slots a run allocates, bounding its memory. */
   allocate(count: number): void {
     if (this.displayRemaining !== undefined) {
       this.spend(count);
       return;
     }
+    // Calls and thunk entries cover fixed-size bookkeeping; charging it again rejects ordinary library work.
+    if (count > ALLOCATION_OVERHEAD) this.spend(count - ALLOCATION_OVERHEAD);
     this.allocated += count;
-    if (this.allocated > LIMITS.maxSlots * 8) throw new ExecutionLimitError('operations');
+    if (this.allocated > LIMITS.maxSlots * ALLOCATION_OVERHEAD) throw new ExecutionLimitError('operations');
   }
 
   global(def: GlobalDef): Slot {
@@ -161,7 +164,6 @@ function createDict(runtime: Runtime, instance: InstanceInfo, args: Slot[]): Dic
   const builders = dictBuilders.get(instance);
   if (!builders) throw new Error(`The instance ${instance.cls.name} has no code`);
   const slots = 1 + args.length + builders.methods.length + builders.supers.length + builders.superclassSlots;
-  runtime.spend(slots);
   runtime.allocate(slots);
   const methods: Slot[] = [];
   const supers: Slot[] = [];

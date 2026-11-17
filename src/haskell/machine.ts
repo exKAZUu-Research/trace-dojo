@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 401 -- Machine states and frames share one evaluator stack.
+// code-gauge-allow-file fileNcss 406 -- Machine states and frames share one evaluator stack.
 import { CONS_CON, NIL_CON } from './builtinTypes';
 import type { CaseCore, Core } from './core';
 import type { TypeHint } from './displayTypeHints';
@@ -228,7 +228,7 @@ export class Machine {
   }
 
   /** Evaluates one node of code: a value returns, and other nodes push what they continue with. */
-  // code-gauge-allow functionNcss 47 -- One short case per kind of code node.
+  // code-gauge-allow functionNcss 49 -- One short case per kind of code node.
   private stepEval(state: RunState): void {
     const { code, env } = state;
     switch (code.k) {
@@ -250,6 +250,7 @@ export class Machine {
         return;
       }
       case 'app': {
+        this.runtime.allocate(code.args.length);
         this.stack.push({ k: 'apply', args: code.args.map((arg) => this.makeSlot(arg, env)) });
         state.code = code.fn;
         return;
@@ -283,6 +284,7 @@ export class Machine {
         return;
       }
       case 'dict': {
+        this.runtime.allocate(code.args.length);
         state.returnValue(
           this.runtime.makeDict(
             code.instance,
@@ -354,6 +356,7 @@ export class Machine {
   private stepApply(state: RunState): void {
     let { fn, args } = state;
     if (fn instanceof Partial) {
+      this.runtime.allocate(fn.args.length + args.length);
       state.applyTo(fn.fn, [...fn.args, ...args]);
       return;
     }
@@ -366,10 +369,12 @@ export class Machine {
       return;
     }
     if (args.length > arity) {
+      this.runtime.allocate(args.length);
       this.stack.push({ k: 'apply', args: args.slice(arity) });
       args = args.slice(0, arity);
     }
     if (fn instanceof PrimFn) {
+      this.runtime.allocate(args.length);
       this.stack.push({ k: 'prim', prim: fn.prim, args: [...args], position: 0 });
       state.mode = 'primNext';
       return;
