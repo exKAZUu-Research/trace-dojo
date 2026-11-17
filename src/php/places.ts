@@ -1,8 +1,9 @@
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import { deprecated, throwError, warn } from './errors';
 import { type Frame, rt } from './runtime';
-import { coerce, NO_MATCH, typeToString } from './types';
+import { describeType } from './types';
 import { dropped, type Key, PhpArray, PhpObject, type PropDecl, Ref, type Value } from './values';
+import { isSubtype } from './variance';
 
 /** A location a program writes to: a variable, an element, a property, or a static property. */
 export interface Place {
@@ -195,13 +196,13 @@ export function writableContainer(place: Place, value = place.get('nested')): Ph
 }
 
 function initializeArray(place: Place): PhpArray {
-  const array = new PhpArray();
   const decl = place.declaration?.();
-  if (decl?.type && coerce(array, decl.type, { strict: true, internal: false, scope: decl.cls }) === NO_MATCH)
+  if (decl?.type && !isSubtype({ k: 'named', name: 'array' }, undefined, decl.type, decl.cls))
     throwError(
       'TypeError',
-      `Cannot auto-initialize an array inside property ${decl.cls.name}::$${decl.name} of type ${typeToString(decl.type)}`
+      `Cannot auto-initialize an array inside property ${decl.cls.name}::$${decl.name} of type ${describeType(decl.type, decl.cls)}`
     );
+  const array = new PhpArray();
   place.set(array);
   return array;
 }

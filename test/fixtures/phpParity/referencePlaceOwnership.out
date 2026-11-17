@@ -70,3 +70,4 @@ array(1) {
     int(1)
   }
 }
+Cannot auto-initialize an array inside property ArrayInitializationScope::$x of type ArrayInitializationScope

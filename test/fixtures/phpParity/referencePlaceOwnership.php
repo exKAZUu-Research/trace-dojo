@@ -28,3 +28,5 @@ try{StaticBase::$i[]=1;}catch(Throwable $e){echo $e->getMessage(),"\n";}
 StaticChild::$a[]=1;var_dump(StaticBase::$a);
 function valueArray(){return [1];}
 $alias=&valueArray();$nested=[&$alias];unset($alias);var_dump($nested);
+class ArrayInitializationScope {public static self $x;}
+try{ArrayInitializationScope::$x[]=1;}catch(Throwable $e){echo $e->getMessage(),"\n";}
