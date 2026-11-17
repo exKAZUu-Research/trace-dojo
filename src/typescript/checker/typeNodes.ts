@@ -1,7 +1,7 @@
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import { unsupportedMessage } from '../unsupported';
-import type { Checker, Mapper } from './checker';
+import type { Checker, Mapper, UnionAlias } from './checker';
 import { IndexedAccessKeys } from './indexedAccessKeys';
 import type { Sym } from './scopes';
 import { nameSuggestionHint } from './spelling';
@@ -36,6 +36,7 @@ import {
   type TypeParameter,
   undefinedType,
   unionOf,
+  type UnionType,
   unknownType,
   voidType,
 } from './types';
@@ -161,8 +162,12 @@ export class TypeNodes {
 
   private functionTypeFromNode(node: TreeNode): Type {
     const signature = this.c.signatures.signatureOf(node);
-    if (node.type === 'function_type') return functionType(signature);
-    return anonymousObject(() => ({ ...emptyStructure(), constructSignatures: [signature] }), { isFunction: true });
+    const nonGeneric = isOutsideGenericDeclarations(node);
+    if (node.type === 'function_type') return { ...functionType(signature), nonGeneric };
+    return anonymousObject(() => ({ ...emptyStructure(), constructSignatures: [signature] }), {
+      isFunction: true,
+      nonGeneric,
+    });
   }
 
   private lookupType(node: TreeNode): Type {
@@ -381,7 +386,10 @@ export class TypeNodes {
     const filled = this.c.fillTypeArguments(parameters, typeArguments);
     this.checkTypeArgumentConstraints(node, parameters, filled);
     if (symbol.typeKind === 'alias') {
+      // Inside its own declaration, an alias applied to its own type parameters is the alias being resolved.
+      if (filled.every((argument, index) => argument === parameters[index])) return declared;
       const mapper: Mapper = new Map(parameters.map((parameter, index) => [parameter.id, filled[index]]));
+      if (symbol.pendingUnion === declared) return this.c.deferredAliasUnion(unionAlias(symbol), mapper);
       const instantiated = this.c.instantiate(declared, mapper);
       return instantiated;
     }
@@ -431,7 +439,10 @@ export class TypeNodes {
         member.type === 'index_signature' && member.namedChildren.some((child) => child?.type === 'mapped_type_clause')
     );
     if (mappedSignature) return this.c.typeOperators.mappedTypeFromNode(mappedSignature);
-    return anonymousObject(() => this.membersStructure(members), { isLiteral: false });
+    return anonymousObject(() => this.membersStructure(members), {
+      isLiteral: false,
+      nonGeneric: isOutsideGenericDeclarations(node),
+    });
   }
 
   /** The members of an interface body or an object type literal. */
@@ -576,19 +587,7 @@ export class TypeNodes {
           this.c.error(symbol.typeDeclarations[0], `型エイリアス ${symbol.name} が自分自身を参照しています。`);
           return errorType;
         }
-        symbol.resolving = true;
-        const value = symbol.typeDeclarations[0].childForFieldName('value');
-        if (value?.type === 'union_type') symbol.pendingUnion = { kind: 'union', id: newTypeId(), types: [] };
-        let type = value ? this.typeFromNode(value) : anyType;
-        symbol.resolving = false;
-        if (symbol.pendingUnion) {
-          symbol.pendingUnion.types = type.kind === 'union' ? type.types : [type];
-          symbol.pendingUnion = undefined;
-        }
-        if (type.kind === 'object' && type.objectKind === 'anonymous' && !type.aliasName) {
-          type = { ...type, aliasName: symbol.name, aliasArguments: this.c.signatures.typeParametersOfSymbol(symbol) };
-        }
-        symbol.declaredType ??= type;
+        symbol.declaredType ??= this.aliasType(symbol);
         break;
       }
       default: {
@@ -596,6 +595,23 @@ export class TypeNodes {
       }
     }
     return symbol.declaredType;
+  }
+
+  private aliasType(symbol: Sym): Type {
+    symbol.resolving = true;
+    const value = symbol.typeDeclarations[0].childForFieldName('value');
+    const pending: UnionType | undefined =
+      value?.type === 'union_type' ? { kind: 'union', id: newTypeId(), types: [] } : undefined;
+    if (pending) this.c.registerAliasUnion(pending, unionAlias(symbol));
+    symbol.pendingUnion = pending;
+    let type = value ? this.typeFromNode(value) : anyType;
+    symbol.resolving = false;
+    symbol.pendingUnion = undefined;
+    if (pending) pending.types = type.kind === 'union' ? type.types : [type];
+    if (type.kind === 'object' && type.objectKind === 'anonymous' && !type.aliasName) {
+      type = { ...type, aliasName: symbol.name, aliasArguments: this.c.signatures.typeParametersOfSymbol(symbol) };
+    }
+    return type;
   }
 
   private interfaceType(symbol: Sym): ObjectType {
@@ -648,4 +664,27 @@ function unwrapUnaryTuples(check: TreeNode, extendsNode: TreeNode): [TreeNode, T
   )
     return [check, extendsNode];
   return unwrapUnaryTuples(named(check)[0], named(extendsNode)[0]);
+}
+
+/** Declarations whose type parameters, `this` type, or `infer` types may occur in the type nodes they enclose. */
+const typeParameterScopes = new Set([
+  'class_declaration',
+  'abstract_class_declaration',
+  'class',
+  'interface_declaration',
+  'conditional_type',
+  'index_signature',
+  'mapped_type_clause',
+]);
+
+/** Whether a type node lies outside every declaration that brings type parameters into scope. */
+function isOutsideGenericDeclarations(node: TreeNode): boolean {
+  for (let current = node.parent; current; current = current.parent) {
+    if (typeParameterScopes.has(current.type) || current.childForFieldName('type_parameters')) return false;
+  }
+  return true;
+}
+
+function unionAlias(symbol: Sym): UnionAlias {
+  return { id: symbol.id, type: () => symbol.declaredType };
 }

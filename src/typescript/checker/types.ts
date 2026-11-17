@@ -59,6 +59,8 @@ export interface UnionType {
   kind: 'union';
   id: number;
   types: Type[];
+  /** Whether its members are instantiated when first read, as for an alias that holds an instantiation of itself. */
+  deferred?: boolean;
 }
 
 export interface IntersectionType {
@@ -169,6 +171,8 @@ export interface ObjectType {
   origin?: ObjectType;
   /** For an instantiated anonymous type, the type arguments of `origin`'s type parameters and of outer ones. */
   mapper?: Map<number, Type>;
+  /** Whether it was written outside every declaration of type parameters, so that no type parameter occurs in it. */
+  nonGeneric?: boolean;
 }
 
 export interface TupleElement {

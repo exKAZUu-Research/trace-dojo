@@ -52,10 +52,18 @@ import {
   type TypeParameter,
   undefinedType,
   unionOf,
+  type UnionType,
   unknownType,
 } from './types';
+import { couldContainTypeVariables } from './typeVariables';
 
 export type Mapper = Map<number, Type>;
+
+/** A union alias, whose type is undefined while it resolves. */
+export interface UnionAlias {
+  id: number;
+  type: () => Type | undefined;
+}
 
 interface Diagnostic extends SourceDiagnostic {
   index: number;
@@ -89,6 +97,9 @@ export class Checker {
   readonly inference = new TypeInference(this);
   private readonly referenceCache = new Map<string, ObjectType>();
   private readonly instantiationCache = new Map<string, Type>();
+  /** The unions that stand for a union alias, with the mapper that instantiates the alias's type into them. */
+  private readonly aliasUnions = new Map<UnionType, { alias: UnionAlias; mapper: Mapper }>();
+  private readonly deferredAliasUnionCache = new Map<string, UnionType>();
   /** The members of class instance types with `this` standing for the instance type, by type. */
   private readonly thisStructures = new Map<number, Structure>();
 
@@ -281,7 +292,7 @@ export class Checker {
   private instantiationDepth = 0;
 
   instantiate(type: Type, mapper: Mapper): Type {
-    if (mapper.size === 0) return type;
+    if (mapper.size === 0 || !couldContainTypeVariables(type)) return type;
     this.budget.spend();
     if (this.instantiationDepth >= LIMITS.maxCallDepth) throw new ExecutionLimitError('operations');
     this.instantiationDepth++;
@@ -298,10 +309,7 @@ export class Checker {
         return mapper.get(type.id) ?? type;
       }
       case 'union': {
-        return unionOf(
-          type.types.map((member) => this.instantiate(member, mapper)),
-          true
-        );
+        return this.instantiateUnion(type, mapper);
       }
       case 'intersection': {
         return intersectionOf(
@@ -337,6 +345,49 @@ export class Checker {
         return type;
       }
     }
+  }
+
+  private instantiateUnion(type: UnionType, mapper: Mapper): Type {
+    const alias = this.aliasUnions.get(type);
+    if (alias) return this.deferredAliasUnion(alias.alias, this.composeMappers(alias.mapper, mapper));
+    return unionOf(
+      type.types.map((member) => this.instantiate(member, mapper)),
+      true
+    );
+  }
+
+  /**
+   * The union a union alias instantiated by `mapper` is, whose members are instantiated when first read, as TypeScript
+   * defers type references: `type Nested<T> = T | Nested<T>[]` holds itself, and `type G<T> = T | G<T[]>[]` holds ever
+   * deeper instantiations of itself.
+   */
+  deferredAliasUnion(alias: UnionAlias, mapper: Mapper): UnionType {
+    const key = `${alias.id}[${this.mapperKey(mapper)}]`;
+    const cached = this.deferredAliasUnionCache.get(key);
+    if (cached) return cached;
+    let types: Type[] | undefined;
+    const instantiate = (): Type[] | undefined => {
+      const declared = alias.type();
+      if (!declared) return undefined;
+      const instantiated = this.instantiate(declared, mapper);
+      return instantiated.kind === 'union' ? instantiated.types : [instantiated];
+    };
+    const union: UnionType = {
+      kind: 'union',
+      id: newTypeId(),
+      deferred: true,
+      get types() {
+        return (types ??= instantiate()) ?? [];
+      },
+    };
+    this.aliasUnions.set(union, { alias, mapper });
+    this.deferredAliasUnionCache.set(key, union);
+    return union;
+  }
+
+  /** Lets a union that stands for an alias inside the alias's own declaration instantiate as the alias does. */
+  registerAliasUnion(union: UnionType, alias: UnionAlias): void {
+    this.aliasUnions.set(union, { alias, mapper: new Map() });
   }
 
   private mapperKey(mapper: Mapper): string {

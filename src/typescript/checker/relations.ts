@@ -86,8 +86,10 @@ export class Relations {
     this.sourceStack.push(source);
     this.targetStack.push(target);
     try {
-      if (!(saved & EXPANDING_SOURCE) && isDeeplyNested(source, this.sourceStack)) this.expanding |= EXPANDING_SOURCE;
-      if (!(saved & EXPANDING_TARGET) && isDeeplyNested(target, this.targetStack)) this.expanding |= EXPANDING_TARGET;
+      if (!(saved & EXPANDING_SOURCE) && this.isDeeplyNested(source, this.sourceStack))
+        this.expanding |= EXPANDING_SOURCE;
+      if (!(saved & EXPANDING_TARGET) && this.isDeeplyNested(target, this.targetStack))
+        this.expanding |= EXPANDING_TARGET;
       // Both sides keep expanding the same recursive types, so TypeScript assumes the relation holds.
       return (
         this.expanding === (EXPANDING_SOURCE | EXPANDING_TARGET) ||
@@ -98,6 +100,33 @@ export class Relations {
       this.targetStack.pop();
       this.expanding = saved;
     }
+  }
+
+  /** Whether a stack ending in `type` has expanded its recursive type too often, as TypeScript's `isDeeplyNestedType` decides. */
+  private isDeeplyNested(type: Type, stack: Type[]): boolean {
+    if (stack.length < MAX_RECURSION_IDENTITY_COUNT) return false;
+    if (type.kind === 'intersection') return type.types.some((member) => this.isDeeplyNested(member, stack));
+    const identity = this.recursionIdentity(type);
+    let count = 0;
+    let lastId = 0;
+    for (const member of stack) {
+      if (!this.hasRecursionIdentity(member, identity)) continue;
+      // Only a type created later than the previous match, as by an expanding instantiation, counts.
+      if (member.id >= lastId && ++count >= MAX_RECURSION_IDENTITY_COUNT) return true;
+      lastId = member.id;
+    }
+    return false;
+  }
+
+  private hasRecursionIdentity(type: Type, identity: unknown): boolean {
+    return type.kind === 'intersection'
+      ? type.types.some((member) => this.hasRecursionIdentity(member, identity))
+      : this.recursionIdentity(type) === identity;
+  }
+
+  /** An array literal is its own identity, so that nested literals such as `[[1]]` never count as a recursive type. */
+  private recursionIdentity(type: Type): unknown {
+    return this.c.literals.isArrayLiteral(type) ? type : recursionIdentity(type);
   }
 
   // code-gauge-allow functionCognitiveComplexity 24 -- Follows TypeScript's order of checks for each kind of type.
@@ -813,28 +842,6 @@ function hasInferableIndex(source: Type, structure: Structure): boolean {
   if (source.kind === 'intersection') return true;
   if (source.kind !== 'object') return false;
   return (source.objectKind !== 'interface' && source.objectKind !== 'reference') || !!source.isLiteral;
-}
-
-/** Whether a stack ending in `type` has expanded its recursive type too often, as TypeScript's `isDeeplyNestedType` decides. */
-function isDeeplyNested(type: Type, stack: Type[]): boolean {
-  if (stack.length < MAX_RECURSION_IDENTITY_COUNT) return false;
-  if (type.kind === 'intersection') return type.types.some((member) => isDeeplyNested(member, stack));
-  const identity = recursionIdentity(type);
-  let count = 0;
-  let lastId = 0;
-  for (const member of stack) {
-    if (!hasRecursionIdentity(member, identity)) continue;
-    // Only a type created later than the previous match, as by an expanding instantiation, counts.
-    if (member.id >= lastId && ++count >= MAX_RECURSION_IDENTITY_COUNT) return true;
-    lastId = member.id;
-  }
-  return false;
-}
-
-function hasRecursionIdentity(type: Type, identity: unknown): boolean {
-  return type.kind === 'intersection'
-    ? type.types.some((member) => hasRecursionIdentity(member, identity))
-    : recursionIdentity(type) === identity;
 }
 
 /** What instantiations of the same declared type share, as TypeScript's `getRecursionIdentity` returns. */

@@ -80,6 +80,8 @@ export class LiteralChecker {
   private readonly arrayLiterals = new Set<number>();
   /** The node of each object literal type, whose members alone TypeScript checks for excess properties. */
   private readonly objectLiteralNodes = new Map<number, TreeNode>();
+  /** The types being widened, which a recursive type such as `type Json = number | Json[]` meets again inside itself. */
+  private readonly widening = new Set<Type>();
 
   constructor(private readonly c: Checker) {}
 
@@ -821,8 +823,19 @@ export class LiteralChecker {
   }
 
   /** The type a variable declared with this initializer type gets. */
-  // code-gauge-allow functionCognitiveComplexity 30 -- Widens each type form and clears array-literal inference provenance when storing a declaration.
   widenDeclared(type: Type, isConst: boolean): Type {
+    // Only types written in the program recur, and they hold no fresh literal to widen.
+    if (this.widening.has(type)) return type;
+    this.widening.add(type);
+    try {
+      return this.widenDeclaredOnce(type, isConst);
+    } finally {
+      this.widening.delete(type);
+    }
+  }
+
+  // code-gauge-allow functionCognitiveComplexity 30 -- Widens each type form and clears array-literal inference provenance when storing a declaration.
+  private widenDeclaredOnce(type: Type, isConst: boolean): Type {
     // A constant keeps a fresh literal type, which widens again where a mutable location takes its value.
     // Only a fresh literal widens, which `as const` and annotations make regular.
     if (type.kind === 'literal') return isConst || !type.fresh ? type : this.c.widenLiteral(type);

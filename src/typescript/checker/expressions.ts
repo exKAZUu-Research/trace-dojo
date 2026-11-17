@@ -52,6 +52,8 @@ export class ExpressionChecker {
   private readonly uniqueSymbols: UniqueSymbols;
   /** Types of variables computed from their declarations, by symbol. */
   private readonly variableTypes = new Map<number, Type>();
+  /** The arrays whose elements are being checked for excess properties, which a recursive type holds again. */
+  private readonly excessElementSources = new Set<Type>();
 
   /** The type of each kind of expression; the others check their children and are `any`. */
   private readonly checkers = new Map<string, (node: TreeNode, contextual?: Type) => Type>([
@@ -722,12 +724,17 @@ export class ExpressionChecker {
   /** Checks the object literals among an array's or a tuple's elements against the target's elements. */
   private checkExcessElements(node: TreeNode, source: ObjectType, target: Type): void {
     const targets = arrayTargets(this.c, target);
-    if (targets.length === 0) return;
-    const sourceElements = source.tuple?.elements;
-    const elementCount = sourceElements?.length ?? 1;
-    for (let index = 0; index < elementCount; index++) {
-      const element = sourceElements ? sourceElements[index].type : this.c.elementTypeOf(source);
-      this.checkExcessProperties(node, element, targetElementType(this.c, targets, index));
+    if (targets.length === 0 || this.excessElementSources.has(source)) return;
+    this.excessElementSources.add(source);
+    try {
+      const sourceElements = source.tuple?.elements;
+      const elementCount = sourceElements?.length ?? 1;
+      for (let index = 0; index < elementCount; index++) {
+        const element = sourceElements ? sourceElements[index].type : this.c.elementTypeOf(source);
+        this.checkExcessProperties(node, element, targetElementType(this.c, targets, index));
+      }
+    } finally {
+      this.excessElementSources.delete(source);
     }
   }
 

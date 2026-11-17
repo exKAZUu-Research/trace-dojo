@@ -1,0 +1,30 @@
+type Json = string | number | Json[];
+function f(v: Json) { return [v]; }
+console.log(f(1));
+function count(v: Json[]): number { return v.map((x) => 1).length; }
+console.log(count([1, [2]]));
+function depth(v: Json): number { return Array.isArray(v) ? 1 + Math.max(0, ...v.map(depth)) : 0; }
+console.log(depth([1, [2, [3]]]));
+function size(v: Json[]) { return v.reduce((s: number, x) => s + 1, 0); }
+console.log(size([1, 2]));
+type L = L[] | number;
+function g(v: L[]) { return v.map((x) => x); }
+console.log(g([1, [2]]));
+const ls: L[] = [1, [2, [3]]];
+console.log(ls.concat([4]));
+type Value = string | number | boolean | null | Value[] | { [k: string]: Value };
+function h(v: { [k: string]: Value }) { return Object.values(v); }
+console.log(h({ a: 1 }));
+function k(v: Value) { if (v && typeof v === "object") return Object.values(v); return []; }
+console.log(k([1, 2]));
+function walk(v: Value): number {
+  if (Array.isArray(v)) return 1 + Math.max(0, ...v.map(walk));
+  if (v !== null && typeof v === "object") return 1 + Math.max(0, ...Object.values(v).map(walk));
+  return 0;
+}
+console.log(walk({ a: [1, { b: [2, 3] }], c: "x" }));
+const data: Value = { a: [1, 2, { b: null }], c: true };
+const copy: Value[] = [data, [data]];
+console.log(JSON.stringify(copy), copy.filter((x) => typeof x === "number"));
+const deep: Value = [[[[[[[[[[1]]]]]]]]]];
+console.log(JSON.stringify(deep));
