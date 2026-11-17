@@ -170,7 +170,6 @@ export interface NativeCall {
   readonly resultType?: Type;
 }
 
-/** The compiler's services that native functions use. */
 export interface LibraryFunctionOptions {
   args?: readonly TExpr[];
   namespaceName?: string;
