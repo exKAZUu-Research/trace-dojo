@@ -3,7 +3,7 @@ import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 import type { Checker } from './checker';
 import type { Sym } from './scopes';
 import { named, stringValue } from './syntax';
-import { anonymousObject, emptyStructure, type Property, type Signature, type Type, unionOf } from './types';
+import { anonymousObject, anyType, emptyStructure, type Property, type Signature, type Type, unionOf } from './types';
 
 /** Functions and blocks whose bodies run when called, after the declarations that precede the call. */
 export const laterRunningTypes = new Set([
@@ -17,6 +17,7 @@ export const laterRunningTypes = new Set([
 export class Expandos {
   /** The statements that add a property to a function, by the first of them, which the property names as its declaration. */
   private readonly assignmentsByFirst = new Map<number, TreeNode[]>();
+  private readonly typesBySymbol = new Map<number, Type>();
 
   constructor(private readonly c: Checker) {}
 
@@ -29,30 +30,58 @@ export class Expandos {
 
   /** A function's type with the properties a program adds to it, as `f.description = "..."` in its block. */
   withExpandos(callSignatures: Signature[], type: Type, block: TreeNode | null | undefined, symbol: Sym): Type {
+    const cached = this.typesBySymbol.get(symbol.id);
+    if (cached) return cached;
     const expandos = new Map<string, TreeNode[]>();
     if (block) this.collectAssignments(block, symbol, expandos);
-    if (expandos.size === 0) return type;
-    return anonymousObject(
-      () => {
-        const structure = { ...emptyStructure(), callSignatures };
-        for (const [property, assignments] of expandos) {
-          this.assignmentsByFirst.set(assignments[0].id, assignments);
-          const valueType = this.c.silently(() =>
-            unionOf(
-              assignments.map((assignment) =>
-                this.c.widen(this.c.expressions.check(assignment.childForFieldName('right') as TreeNode))
-              )
-            )
+    const result =
+      expandos.size === 0
+        ? type
+        : anonymousObject(
+            () => {
+              const structure = { ...emptyStructure(), callSignatures };
+              for (const [property, assignments] of expandos) {
+                this.assignmentsByFirst.set(assignments[0].id, assignments);
+                structure.properties.set(property, {
+                  ...this.c.literals.literalProperty(property, anyType, false, assignments[0]),
+                  type: this.propertyType(property, assignments),
+                });
+              }
+              return structure;
+            },
+            { isFunction: false }
           );
-          structure.properties.set(
-            property,
-            this.c.literals.literalProperty(property, valueType, false, assignments[0])
-          );
-        }
-        return structure;
-      },
-      { isFunction: false }
-    );
+    this.typesBySymbol.set(symbol.id, result);
+    return result;
+  }
+
+  /**
+   * The type of an added property, the union of the values assigned to it, resolved when first read; a property read
+   * in its own assignments is `any`, as TypeScript reports.
+   */
+  private propertyType(property: string, assignments: TreeNode[]): () => Type {
+    let resolved: Type | undefined;
+    let resolving = false;
+    return () => {
+      if (resolved) return resolved;
+      if (resolving) {
+        const left = assignments[0].childForFieldName('left') ?? assignments[0];
+        this.c.errorWhileResolving(left, `${property} の型が、自分自身を参照しているため暗黙に any になります。`);
+        resolved = anyType;
+        return resolved;
+      }
+      resolving = true;
+      const type = this.c.silently(() =>
+        unionOf(
+          assignments.map((assignment) =>
+            this.c.widen(this.c.expressions.check(assignment.childForFieldName('right') as TreeNode))
+          )
+        )
+      );
+      resolving = false;
+      resolved ??= type;
+      return resolved;
+    };
   }
 
   /** Collects the assignment statements of a block, outside its nested functions, that add properties to a function. */

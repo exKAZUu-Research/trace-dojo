@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 418 -- Holds shared type construction, bounded instantiation, structure lookup, and type constraints used by all checker components.
+// code-gauge-allow-file fileNcss 424 -- Holds shared type construction, bounded instantiation, structure lookup, and type constraints used by all checker components.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import type { SourceDiagnostic } from '../../interpreter/diagnostics';
@@ -130,6 +130,17 @@ export class Checker {
   error(node: TreeNode, message: string): void {
     if (this.silent > 0 || this.isLibrary(node)) return;
     this.diagnostics.push({ row: node.startPosition.row, index: node.startIndex, message });
+  }
+
+  /** Reports an error found while resolving a type on demand, which no check that triggered it may hide. */
+  errorWhileResolving(node: TreeNode, message: string): void {
+    const { silent } = this;
+    this.silent = 0;
+    try {
+      this.error(node, message);
+    } finally {
+      this.silent = silent;
+    }
   }
 
   silently<T>(run: () => T): T {
