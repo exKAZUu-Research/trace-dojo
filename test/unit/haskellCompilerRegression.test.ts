@@ -1179,3 +1179,20 @@ test.each([
 ])('local operator fixities preserve association in %s', (_name, source, stdout) => {
   expect(executeProgram('haskell', source)).toMatchObject({ kind: 'executed', stdout, uncaughtException: undefined });
 });
+
+test.each(['g::a->Int', 'infixl 4 `f`'])('class default clauses retain declaration separators: %s', (separator) => {
+  const source = `class C a where
+ f::a->Bool->Int
+ f _ True=1
+ ${separator}
+ f _ False=2
+instance C Int
+main=print(f(1::Int)False)`;
+  expect(executeProgram('haskell', source).kind).toBe('compileError');
+  const adjacent = source.replace(` ${separator}\n`, '');
+  expect(executeProgram('haskell', adjacent)).toMatchObject({
+    kind: 'executed',
+    stdout: '2\n',
+    uncaughtException: undefined,
+  });
+});

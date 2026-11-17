@@ -50,6 +50,7 @@ function compileLibrary(): Library {
   const compiler = new LibraryCompiler();
   for (const { name, source } of LIBRARY_SOURCES) compiler.compileModule(name, source);
   compiler.markPrintfResults();
+  compiler.markTraceTypes();
   for (const [name, what] of Object.entries(UNSUPPORTED_VALUES)) compiler.baseValue(name).unsupported = what;
   return {
     modules: compiler.publicModules(),
@@ -174,6 +175,21 @@ class LibraryCompiler {
           instance.equalities = [[0, tcon(UNIT_TYPE)]];
         }
       }
+    }
+  }
+
+  markTraceTypes(): void {
+    const types: [string, string, NonNullable<TypeEntity['traceKind']>][] = [
+      ['Base', 'Bool', 'bool'],
+      ['Base', 'Ratio', 'ratio'],
+      ['Base', 'Maybe', 'maybe'],
+      ['Data.Map.Internal', 'Map', 'map'],
+      ['Data.Set.Internal', 'Set', 'set'],
+    ];
+    for (const [module, name, kind] of types) {
+      const type = this.internal.get(module)?.types.get(name)?.entity;
+      assert.ok(type?.kind === 'type', `Missing library trace type ${module}.${name}`);
+      type.entity.traceKind = kind;
     }
   }
 

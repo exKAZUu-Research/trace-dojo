@@ -44,6 +44,8 @@ interface PreviewTransaction {
   deadline: number;
   forcing: boolean;
   frames: PreviewFrame[];
+  debts: Set<PreviewDebt>;
+  recycle: boolean;
 }
 
 interface PreviewDebt {
@@ -51,6 +53,7 @@ interface PreviewDebt {
   executionOperations: number;
   allocations: number;
   consumed: boolean;
+  quotaReleased: boolean;
   dependencies: PreviewDebt[];
 }
 
@@ -61,6 +64,7 @@ interface PreviewFrame {
   executionOperations: number;
   allocations: number;
   dependenciesLength: number;
+  quotaReleased: boolean;
 }
 
 export class DisplayAbort extends Error {
@@ -127,6 +131,7 @@ export class PreviewBudget {
       this.activeOperations += operations;
       const debt = active.frames.at(-1)?.debt;
       if (debt) {
+        debt.quotaReleased = false;
         const previous = debt.costs.at(-1);
         if (previous?.usage === usage && previous.epoch === usage.epoch) previous.operations += operations;
         else debt.costs.push({ epoch: usage.epoch, usage, operations });
@@ -135,7 +140,7 @@ export class PreviewBudget {
       }
       if (this.remainingOperations(usage) < 0) throw new DisplayAbort();
     }
-    if (performance.now() > active.deadline) throw new DisplayAbort();
+    if (active.forcing && performance.now() > active.deadline) throw new DisplayAbort();
   }
 
   force(slot: Thunk, work: () => Value): Value {
@@ -147,7 +152,7 @@ export class PreviewBudget {
       active.scope.workFamilies.add(family);
       if (family.activeWorkScopes++ === 0) this.activeFamilies++;
     }
-    if (this.remainingOperations(active.usage) <= 0) throw new DisplayAbort();
+    if (this.remainingOperations(active.usage) <= 0 || performance.now() > active.deadline) throw new DisplayAbort();
     const savedForcing = active.forcing;
     active.forcing = true;
     try {
@@ -180,22 +185,29 @@ export class PreviewBudget {
       usage.timeLimit - usage.milliseconds,
       usage.family.timeLimit - usage.family.milliseconds
     );
-    if (remainingTime <= 0) throw new DisplayAbort();
     const started = performance.now();
-    this.active = {
+    const active: PreviewTransaction = {
       scope,
       usage,
-      deadline: started + remainingTime,
+      deadline: started + Math.max(0, remainingTime),
       forcing: false,
       frames: [],
+      debts: new Set(),
+      recycle: false,
     };
+    this.active = active;
     try {
       return work();
     } finally {
-      const elapsed = performance.now() - started;
+      const finished = performance.now();
+      const elapsed = finished - started;
       this.milliseconds += elapsed;
       usage.milliseconds += elapsed;
       usage.family.milliseconds += elapsed;
+      if (active.recycle) {
+        for (const debt of active.debts) this.releaseQuota(debt);
+        this.milliseconds += performance.now() - finished;
+      }
       this.active = undefined;
     }
   }
@@ -204,6 +216,7 @@ export class PreviewBudget {
     const active = this.active;
     if (!active?.forcing) return;
     const debt = this.debtFor(thunk);
+    active.debts.add(debt);
     active.frames.push({
       thunk,
       debt,
@@ -211,6 +224,7 @@ export class PreviewBudget {
       executionOperations: debt.executionOperations,
       allocations: debt.allocations,
       dependenciesLength: debt.dependencies.length,
+      quotaReleased: debt.quotaReleased,
     });
   }
 
@@ -226,6 +240,7 @@ export class PreviewBudget {
     debt.executionOperations = frame.executionOperations;
     debt.allocations = frame.allocations;
     debt.dependencies.length = frame.dependenciesLength;
+    debt.quotaReleased = frame.quotaReleased;
   }
 
   consume(slot: Thunk, demanded: boolean): { operations: number; allocations: number } | undefined {
@@ -234,12 +249,40 @@ export class PreviewBudget {
       if (!active?.forcing) return;
       const debt = slot.state === 'pending' ? this.debtFor(slot) : this.debts.get(slot);
       const parent = active.frames.at(-1)?.debt;
-      if (debt && !debt.consumed && parent && parent !== debt) parent.dependencies.push(debt);
+      if (debt && !debt.consumed) {
+        active.debts.add(debt);
+        if (parent && parent !== debt) {
+          parent.dependencies.push(debt);
+          parent.quotaReleased = false;
+        }
+      }
       return;
     }
     const debt = this.debts.get(slot);
     if (!debt || debt.consumed) return;
     return this.settleDebt(debt);
+  }
+
+  track(slot: Thunk): void {
+    const debt = this.debts.get(slot);
+    if (debt && !debt.consumed) this.active?.debts.add(debt);
+  }
+
+  completeScalar(): void {
+    if (!this.active) throw new Error('Preview evaluation requires a display view');
+    this.active.recycle = true;
+  }
+
+  private releaseQuota(debt: PreviewDebt): void {
+    const pending = [debt];
+    while (pending.length > 0) {
+      const current = pending.pop() as PreviewDebt;
+      if (current.consumed || current.quotaReleased) continue;
+      current.quotaReleased = true;
+      for (const cost of current.costs) this.refund(cost);
+      current.costs = [];
+      for (const dependency of current.dependencies) pending.push(dependency);
+    }
   }
 
   private settleDebt(debt: PreviewDebt): { operations: number; allocations: number } {
@@ -314,6 +357,7 @@ export class PreviewBudget {
         executionOperations: 0,
         allocations: 0,
         consumed: false,
+        quotaReleased: false,
         dependencies: [],
       };
       this.debts.set(slot, debt);

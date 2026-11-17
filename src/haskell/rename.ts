@@ -642,7 +642,7 @@ class Renamer {
         methods.push({ entity: method, sig });
       }
     }
-    const raw = groupBindings(decl.decls.filter((member) => member.kind === 'funClause' || member.kind === 'patBind'));
+    const raw = groupBindings(decl.decls);
     const defaults: RBinding[] = [];
     for (const binding of raw) {
       if (binding.kind !== 'fun') throw compileError(binding.span, 'クラスの中では、パターンで束縛できません。');

@@ -50,6 +50,7 @@ export function traceHaskellProgram(program: string, trace: TraceOptions, input?
 type VariableDisplay = Pick<TraceVariables, 'vars'> & Partial<Pick<TraceVariables, 'referenceVars'>>;
 
 interface VariableEntry {
+  slot: Slot;
   value: Value;
   type: Type;
   owner: object;
@@ -100,20 +101,27 @@ function addSlotVariable(
   return displayAttempt(runtime, () => {
     const entry = runtime.withPreviewBudget({ ...context, key: 'root', share: 1 }, () => {
       const value = forceForDisplay(runtime, slot);
-      return value === undefined ? undefined : { value, type: slotDisplayType(slot, type), ...context };
+      return value === undefined ? undefined : { slot, value, type: slotDisplayType(slot, type), ...context };
     });
     if (!entry) return;
     const fields = entry.value instanceof ConValue ? entry.value.con.fieldNames : undefined;
     const share = name === 'this' && fields ? 1 / 3 : 1;
     try {
-      runtime.withPreviewBudget({ ...context, key: 'value', share }, () =>
-        addVariable(runtime, variables, name, entry.value, entry.type)
-      );
+      runtime.withPreviewBudget({ ...context, key: 'value', share }, () => {
+        addVariable(runtime, variables, name, entry.value, entry.type);
+        completeScalarVariable(runtime, variables, name, slot);
+      });
     } catch (error) {
       if (!(error instanceof DisplayAbort)) throw error;
     }
     return entry;
   });
+}
+
+function completeScalarVariable(runtime: Runtime, variables: VariableDisplay, name: string, slot: Slot): void {
+  if (Object.hasOwn(variables.vars, name) && typeof variables.vars[name] !== 'object') {
+    runtime.completeScalarPreview(slot);
+  }
 }
 
 function addSelfFields(runtime: Runtime, variables: VariableDisplay, entry: VariableEntry | undefined): void {
@@ -130,16 +138,22 @@ function addSelfFields(runtime: Runtime, variables: VariableDisplay, entry: Vari
           share: 1 / (3 * Math.max(self.con.type.fields.size, self.fields.length)),
         },
         () => {
-          const fieldType = slotDisplayType(field, constructorFieldType(self.con, entry.type, index));
-          const forced = forceForDisplay(runtime, field);
-          return forced === undefined
-            ? NOT_SCALAR
-            : scalarForDisplay(runtime, forced, slotDisplayType(field, fieldType));
+          const fieldType = constructorFieldType(self.con, entry.type, index);
+          return scalarSlotForDisplay(runtime, field, fieldType, entry.slot);
         }
       )
     );
     if (scalar !== undefined && scalar !== NOT_SCALAR) variables.vars[`this.${self.con.fieldNames[index]}`] = scalar;
   }
+}
+
+function scalarSlotForDisplay(runtime: Runtime, slot: Slot, type: Type, owner: Slot): Scalar | typeof NOT_SCALAR {
+  const fieldType = slotDisplayType(slot, type);
+  const forced = forceForDisplay(runtime, slot);
+  if (forced === undefined) return NOT_SCALAR;
+  const scalar = scalarForDisplay(runtime, forced, slotDisplayType(slot, fieldType));
+  if (scalar !== NOT_SCALAR && typeof scalar !== 'object') runtime.completeScalarPreview(slot, owner);
+  return scalar;
 }
 
 /** The limit of the work that showing one variable may do, which a variable bound to a long computation exceeds. */
@@ -157,6 +171,7 @@ function displayAttempt<T>(runtime: Runtime, work: () => T): T | undefined {
 /** Evaluates a value for display, leaving it unevaluated when that fails or takes too long. */
 function forceForDisplay(runtime: Runtime, slot: Slot): Value | undefined {
   slot = untypedSlot(slot);
+  if (slot instanceof Thunk) runtime.trackPreview(slot);
   const ready = peek(slot);
   if (ready !== undefined) return ready;
   return runtime.withDisplayBudget(DISPLAY_OPERATIONS, () => {
@@ -280,14 +295,14 @@ function scalarOf(runtime: Runtime, value: Value, type: Type, depth: number): Sc
   if (typeof value === 'string') return value;
   if (!(value instanceof ConValue)) return NOT_SCALAR;
   if (containerKind(value)) return NOT_SCALAR;
-  if (value.con.type.module === 'Base' && value.con.type.name === 'Ratio') {
+  if (value.con.type.traceKind === 'ratio') {
     const numerator = forceForDisplay(runtime, value.fields[0]);
     const denominator = forceForDisplay(runtime, value.fields[1]);
     return typeof numerator === 'bigint' && typeof denominator === 'bigint'
       ? `${numerator} % ${denominator}`
       : NOT_SCALAR;
   }
-  if (value.con.type.name === 'Bool' && value.con.type.module === 'Base') return value.con.tag === 1;
+  if (value.con.type.traceKind === 'bool') return value.con.tag === 1;
   if (value.con === CONS_CON || value.con === NIL_CON) {
     const items = listItems(runtime, value, type);
     if (!items) return NOT_SCALAR;
@@ -300,8 +315,7 @@ function scalarOf(runtime: Runtime, value: Value, type: Type, depth: number): Sc
     }
     return scalars as Scalar;
   }
-  if (value.con === UNIT_CON || (value.con.type.module === 'Base' && value.con.type.name === 'Maybe'))
-    return NOT_SCALAR;
+  if (value.con === UNIT_CON || value.con.type.traceKind === 'maybe') return NOT_SCALAR;
   if (value.fields.length === 0 && !value.con.isLibraryPrivate) return value.con.name;
   return NOT_SCALAR;
 }
@@ -310,8 +324,8 @@ function scalarOf(runtime: Runtime, value: Value, type: Type, depth: number): Sc
 const NULL_NODE: DisplayNode = { kind: 'value', value: null };
 
 function containerKind(value: ConValue): 'map' | 'set' | undefined {
-  if (value.con.type.module === 'Data.Map.Internal') return 'map';
-  if (value.con.type.module === 'Data.Set.Internal') return 'set';
+  if (value.con.type.traceKind === 'map') return 'map';
+  if (value.con.type.traceKind === 'set') return 'set';
   return undefined;
 }
 
@@ -348,14 +362,14 @@ class DisplayNodes {
     if (!(value instanceof ConValue) || isHidden(value, type)) return undefined;
     const container = containerKind(value);
     if (container) return this.containerNodeOf(value, type, depth, container);
-    if (value.con.type.module === 'Base' && value.con.type.name === 'Ratio') {
+    if (value.con.type.traceKind === 'ratio') {
       const scalar = scalarOf(this.runtime, value, type, depth);
       return typeof scalar === 'string' ? { kind: 'value', value: scalar } : undefined;
     }
     const con = value.con;
-    if (con.type.name === 'Bool' && con.type.module === 'Base') return { kind: 'value', value: con.tag === 1 };
+    if (con.type.traceKind === 'bool') return { kind: 'value', value: con.tag === 1 };
     if (con === CONS_CON || con === NIL_CON) return this.listNodeOf(value, type, depth);
-    if (con.type.name === 'Maybe' && con.type.module === 'Base') {
+    if (con.type.traceKind === 'maybe') {
       // A Maybe shows as what it holds, or as null, as a Java reference does.
       if (con.name === 'Nothing') return NULL_NODE;
       const inner = forceForDisplay(this.runtime, value.fields[0]);

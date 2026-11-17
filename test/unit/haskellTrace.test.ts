@@ -1,4 +1,4 @@
-import { expect, test } from 'vitest';
+import { expect, test, vi } from 'vitest';
 
 import { ExecutionLimitError } from '../../src/interpreter/limits';
 import { executeProgram, traceProgram } from '../../src/interpreter/program';
@@ -1139,6 +1139,106 @@ ${helpers}`;
     for (const [index, item] of assignments.entries()) expect(item.vars.n).toBe(index + 56);
   }
 );
+
+test.each([
+  [1000, 50, true],
+  [3000, 10, false],
+])(
+  'unused scalar loop answers retain preview allowance: %i iterations, sum 1..%i, prefix=%s',
+  (iterations, size, prefix) => {
+    const source = `import Control.Monad
+main=do
+${prefix ? ' putStrLn "start"' : ''}
+ forM_ [1..${iterations}::Int] $ \\i -> do
+  let total=sum [1..${size}::Int]+i
+  print i`;
+    const execution = executeProgram('haskell', source);
+    expect(execution.kind).toBe('executed');
+    if (execution.kind !== 'executed') return;
+    const recording = traceProgram('haskell', source, source);
+    expect(recording.uncaughtException).toBeUndefined();
+    expect(recording.stdout).toBe(execution.stdout);
+    const assignments = recording.traceItems.filter((item) => item.line === 5);
+    expect(assignments).toHaveLength(iterations);
+    for (const [index, item] of assignments.entries()) {
+      expect(item.vars.total).toBe((size * (size + 1)) / 2 + index + 1);
+    }
+  }
+);
+
+test('aborted previews leave later cheap loop answers available', () => {
+  const source = `step :: Int -> IO ()
+step i = do
+ let a=sum [1..100000::Int]+i
+ let n=sum [1..10::Int]+i
+ print i
+main=mapM_ step [1..700]`;
+  const execution = executeProgram('haskell', source);
+  expect(execution.kind).toBe('executed');
+  if (execution.kind !== 'executed') return;
+  const clock = vi.spyOn(performance, 'now').mockReturnValue(0);
+  try {
+    const recording = traceProgram('haskell', source, source);
+    expect(recording.uncaughtException).toBeUndefined();
+    expect(recording.stdout).toBe(execution.stdout);
+    const assignments = recording.traceItems.filter((item) => item.line === 4);
+    expect(assignments).toHaveLength(700);
+    for (const [index, item] of assignments.entries()) expect(item.vars.n).toBe(index + 56);
+  } finally {
+    clock.mockRestore();
+  }
+}, 30_000);
+
+test('expired preview time preserves evaluated loop variables', () => {
+  const source = `step :: Int -> IO ()
+step i = do
+ let a=sum [1..100000::Int]+i
+ let n=sum [1..10::Int]+i
+ print i
+main=mapM_ step [1..1000]`;
+  const execution = executeProgram('haskell', source);
+  expect(execution.kind).toBe('executed');
+  if (execution.kind !== 'executed') return;
+  let ticks = 0;
+  const clock = vi.spyOn(performance, 'now').mockImplementation(() => ticks++ / 1000);
+  try {
+    const recording = traceProgram('haskell', source, source);
+    expect(recording.uncaughtException).toBeUndefined();
+    expect(recording.stdout).toBe(execution.stdout);
+    const prints = recording.traceItems.filter((item) => item.line === 5);
+    expect(prints).toHaveLength(1000);
+    expect(prints[0].vars.n).toBe(56);
+    expect(prints.at(-1)?.vars.n).toBeUndefined();
+    for (const [index, item] of prints.entries()) expect(item.vars.i).toBe(index + 1);
+  } finally {
+    clock.mockRestore();
+  }
+});
+
+test.each([
+  ['Base', 'Bool', 'Red|Green|Blue', 'Blue'],
+  ['Base', 'Maybe', 'Red|Green|Blue', 'Blue'],
+  ['Base', 'Ratio', 'Red|Green|Blue', 'Blue'],
+  ['Data.Map.Internal', 'Map', 'Red|Green|Blue', 'Blue'],
+  ['Data.Set.Internal', 'Set', 'Red|Green|Blue', 'Blue'],
+])('user-defined %s.%s retains its constructor identity', (module, type, constructors, value) => {
+  const source = `module ${module} where
+import Prelude hiding (${type}(..))
+data ${type}=${constructors} deriving Show
+main=do
+ let color=${value}
+ let colors=[${value}]
+ print color`;
+  const recording = traceProgram('haskell', source, source);
+  expect(recording.uncaughtException).toBeUndefined();
+  expect(recording.stdout).toBe(`${value}\n`);
+  expect(recording.finalVars.color).toBe(value);
+  expect(recording.finalVars.colors).toEqual([value]);
+  expect(recording.traceItems.at(-1)?.referenceVars?.colors).toMatchObject({
+    kind: 'array',
+    entries: { 0: { kind: 'value', value } },
+  });
+});
 
 test.each([10, 100])('returned previewed values retain execution costs across retired cohorts: sum 1..%i', (count) => {
   const source = `import Control.Monad

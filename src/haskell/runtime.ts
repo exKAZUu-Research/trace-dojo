@@ -11,7 +11,7 @@ import { Machine } from './machine';
 import { DisplayAbort, PreviewBudget, type PreviewView } from './previewBudget';
 import type { Type } from './types';
 import { withTypeWorkBudget } from './typeWorkBudget';
-import { Dict, type Env, type Slot, Thunk, type Value } from './values';
+import { Dict, type Env, type Slot, Thunk, untypedSlot, type Value } from './values';
 
 export { DisplayAbort } from './previewBudget';
 
@@ -58,7 +58,6 @@ export class Runtime implements TracedRuntime<TraceFrame> {
   private readonly globals = new Map<GlobalDef, Slot>();
   private readonly dictCache = new Map<InstanceInfo, Dict>();
   private allocated = 0;
-  private previewAllocated = 0;
   private gcMilliseconds = 0;
   private readonly previews = new PreviewBudget();
 
@@ -102,11 +101,22 @@ export class Runtime implements TracedRuntime<TraceFrame> {
     return this.previews.force(slot, () => this.machine.force(slot));
   }
 
+  trackPreview(slot: Thunk): void {
+    this.previews.track(slot);
+  }
+
+  completeScalarPreview(...slots: Slot[]): void {
+    for (let slot of slots) {
+      slot = untypedSlot(slot);
+      if (slot instanceof Thunk) this.previews.track(slot);
+    }
+    this.previews.completeScalar();
+  }
+
   consumePreview(slot: Thunk): void {
     const cost = this.previews.consume(slot, this.displayRemaining === undefined);
     if (cost) {
       this.budget.spend(cost.operations);
-      this.previewAllocated -= cost.allocations;
       this.recordAllocation(cost.allocations);
     }
   }
@@ -125,9 +135,7 @@ export class Runtime implements TracedRuntime<TraceFrame> {
 
   allocate(count: number): void {
     if (this.displayRemaining !== undefined) {
-      if (this.previewAllocated + count > ALLOCATION_LIMIT) throw new DisplayAbort();
       this.spendDisplay(count, Math.max(0, count - ALLOCATION_OVERHEAD), count);
-      this.previewAllocated += count;
       return;
     }
     // Calls and thunk entries cover fixed-size bookkeeping; charging it again rejects ordinary library work.

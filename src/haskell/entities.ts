@@ -25,6 +25,7 @@ export interface TypeEntity {
   span?: Span;
   /** How the type prints when it is special syntax: lists, tuples, unit, and functions. */
   special?: 'list' | 'tuple' | 'unit' | 'function';
+  traceKind?: 'bool' | 'ratio' | 'maybe' | 'map' | 'set';
 }
 
 export interface ConInfo {
