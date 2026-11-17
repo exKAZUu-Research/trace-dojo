@@ -1,20 +1,10 @@
 import { transferCost } from '../allocation';
 import { indexOutOfBounds, PANIC, panic } from '../arith';
-import type { Span } from '../ast';
 import { enumLookup } from '../enumLookup';
 import { sizeOf } from '../layout';
 import { isIntegerType } from '../operands';
 import { type Frame, withHeldValues } from '../runtime';
-import {
-  copyForFrame,
-  copyForStorage,
-  FnRef,
-  known,
-  runtime,
-  type SemaApi,
-  type TExpr,
-  undefinedValue,
-} from '../semaBase';
+import { copyForFrame, copyForStorage, FnRef, known, undefinedValue } from '../semaBase';
 import {
   BOOL,
   CONST_U8_SLICE,
@@ -23,6 +13,7 @@ import {
   fitsInt,
   intType,
   optionalOf,
+  pointerTo,
   sliceOf,
   type StructType,
   TYPE,
@@ -49,17 +40,7 @@ import {
 } from '../values';
 import { WeakValueMap } from '../weakValueMap';
 import { zeroAllocation } from '../zeroSizedMemory';
-import {
-  computed,
-  constSlice,
-  mutableSlice,
-  nativeBudget,
-  newSlice,
-  ORDER,
-  ORDER_GT,
-  ORDER_LT,
-  storeSliceValue,
-} from './common';
+import { computed, constSlice, nativeBudget, newSlice, ORDER, ORDER_GT, ORDER_LT, storeSliceValue } from './common';
 import {
   ALLOCATOR,
   ALLOCATOR_ERROR,
@@ -74,6 +55,7 @@ import {
   callbackFunction,
   checkCallback,
   compileArgs,
+  concreteFnMember,
   expectArgs,
   fnMember,
   type Member,
@@ -174,17 +156,6 @@ const UTF8_VIEW: StructType = nativeStruct('unicode.Utf8View', {}, [
   { name: 'bytes', type: CONST_U8_SLICE, hasDefault: false },
 ]);
 
-function iteratorState(sema: SemaApi, receiver: TExpr | undefined, span: Span): (frame: Frame) => ZStruct {
-  if (!receiver) return sema.error(span, 'Utf8Iterator に対して呼び出してください。');
-  let pointer = receiver;
-  if (receiver.type === UTF8_ITERATOR) pointer = sema.addressOf(receiver);
-  if (pointer.type.kind !== 'pointer' || pointer.type.child !== UTF8_ITERATOR || pointer.type.isConst) {
-    return sema.error(span, 'Utf8Iterator は var で宣言してください。');
-  }
-  const evaluate = pointer.eval;
-  return (frame) => (evaluate(frame) as Pointer).load() as ZStruct;
-}
-
 /** The next code point's bytes, advancing the iterator. */
 function nextSlice(state: ZStruct): Slice | undefined {
   const bytes = state.slots[0] as Slice;
@@ -196,83 +167,77 @@ function nextSlice(state: ZStruct): Slice | undefined {
 }
 
 addMembers(UTF8_ITERATOR, {
-  nextCodepointSlice: fnMember('Utf8Iterator.nextCodepointSlice', (sema, call) => {
-    expectArgs(sema, call, 0, 'nextCodepointSlice');
-    const state = iteratorState(sema, call.receiver, call.span);
-    return runtime(optionalOf(CONST_U8_SLICE), (frame) => nextSlice(state(frame)) ?? NULL, call.span);
-  }),
-  nextCodepoint: fnMember('Utf8Iterator.nextCodepoint', (sema, call) => {
-    expectArgs(sema, call, 0, 'nextCodepoint');
-    const state = iteratorState(sema, call.receiver, call.span);
-    return runtime(
-      optionalOf(U21),
-      (frame) => {
-        const slice = nextSlice(state(frame));
-        if (!slice) return NULL;
-        const value = decode(byteNumbers(slice, nativeBudget(sema, frame)));
-        if (typeof value === 'string') panic(PANIC.unreachable);
-        return BigInt(value);
-      },
-      call.span
-    );
-  }),
+  nextCodepointSlice: concreteFnMember(
+    'Utf8Iterator.nextCodepointSlice',
+    [pointerTo(UTF8_ITERATOR, false)],
+    optionalOf(CONST_U8_SLICE),
+    ([pointer]) => nextSlice((pointer as Pointer).load() as ZStruct) ?? NULL
+  ),
+  nextCodepoint: concreteFnMember(
+    'Utf8Iterator.nextCodepoint',
+    [pointerTo(UTF8_ITERATOR, false)],
+    optionalOf(U21),
+    ([pointer], frame) => {
+      const slice = nextSlice((pointer as Pointer).load() as ZStruct);
+      if (!slice) return NULL;
+      const value = decode(byteNumbers(slice, (cost) => frame.runtime.spend(cost)));
+      if (typeof value === 'string') panic(PANIC.unreachable);
+      return BigInt(value);
+    }
+  ),
 });
 
 addMembers(UTF8_VIEW, {
-  init: fnMember('Utf8View.init', (sema, call) => {
-    const [text] = compileArgs(sema, expectArgs(sema, call, 1, 'Utf8View.init'), [CONST_U8_SLICE]);
-    return computed(errorUnionOf(errorSetOf(['InvalidUtf8']), UTF8_VIEW), [text], call.span, ([value], frame) =>
-      typeof codepoints(value, nativeBudget(sema, frame)) === 'string'
+  init: concreteFnMember(
+    'Utf8View.init',
+    [CONST_U8_SLICE],
+    errorUnionOf(errorSetOf(['InvalidUtf8']), UTF8_VIEW),
+    ([value], frame) =>
+      typeof codepoints(value, (cost) => frame.runtime.spend(cost)) === 'string'
         ? ErrorValue.of('InvalidUtf8')
         : new ZStruct([value])
-    );
-  }),
-  initUnchecked: fnMember('Utf8View.initUnchecked', (sema, call) => {
-    const [text] = compileArgs(sema, expectArgs(sema, call, 1, 'Utf8View.initUnchecked'), [CONST_U8_SLICE]);
-    return computed(UTF8_VIEW, [text], call.span, ([value]) => new ZStruct([value]));
-  }),
-  iterator: fnMember('Utf8View.iterator', (sema, call) => {
-    expectArgs(sema, call, 0, 'iterator');
-    const receiver = call.receiver;
-    if (!receiver) return sema.error(call.span, 'Utf8View に対して呼び出してください。');
-    const evaluate = receiver.eval;
-    const viaPointer = receiver.type.kind === 'pointer';
-    return runtime(
-      UTF8_ITERATOR,
-      (frame) => {
-        const value = evaluate(frame);
-        const view = (viaPointer ? (value as Pointer).load() : value) as ZStruct;
-        return new ZStruct([view.slots[0], 0n]);
-      },
-      call.span
-    );
-  }),
+  ),
+  initUnchecked: concreteFnMember(
+    'Utf8View.initUnchecked',
+    [CONST_U8_SLICE],
+    UTF8_VIEW,
+    ([value]) => new ZStruct([value])
+  ),
+  iterator: concreteFnMember(
+    'Utf8View.iterator',
+    [UTF8_VIEW],
+    UTF8_ITERATOR,
+    ([value]) => new ZStruct([(value as ZStruct).slots[0], 0n])
+  ),
 });
 
 const UNICODE: Record<string, () => Member> = {
   Utf8View: () => ({ type: TYPE, value: UTF8_VIEW }),
   Utf8Iterator: () => ({ type: TYPE, value: UTF8_ITERATOR }),
   replacement_character: () => ({ type: U21, value: 0xff_fdn }),
-  utf8ByteSequenceLength: fnMember('std.unicode.utf8ByteSequenceLength', (sema, call) => {
-    const [first] = compileArgs(sema, expectArgs(sema, call, 1, 'utf8ByteSequenceLength'), [U8]);
-    return computed(errorUnionOf(errorSetOf(['Utf8InvalidStartByte']), U3), [first], call.span, ([value]) => {
+  utf8ByteSequenceLength: concreteFnMember(
+    'std.unicode.utf8ByteSequenceLength',
+    [U8],
+    errorUnionOf(errorSetOf(['Utf8InvalidStartByte']), U3),
+    ([value]) => {
       const length = sequenceLength(Number(value as bigint));
       return length === undefined ? ErrorValue.of('Utf8InvalidStartByte') : BigInt(length);
-    });
-  }),
-  utf8CodepointSequenceLength: fnMember('std.unicode.utf8CodepointSequenceLength', (sema, call) => {
-    const [c] = compileArgs(sema, expectArgs(sema, call, 1, 'utf8CodepointSequenceLength'), [U21]);
-    return computed(errorUnionOf(errorSetOf(['CodepointTooLarge']), U3), [c], call.span, ([value]) => {
+    }
+  ),
+  utf8CodepointSequenceLength: concreteFnMember(
+    'std.unicode.utf8CodepointSequenceLength',
+    [U21],
+    errorUnionOf(errorSetOf(['CodepointTooLarge']), U3),
+    ([value]) => {
       const length = utf8SequenceLength(Number(value as bigint));
       return length instanceof ErrorValue ? length : BigInt(length);
-    });
-  }),
-  utf8Encode: fnMember('std.unicode.utf8Encode', (sema, call) => {
-    const [cArg, outArg] = expectArgs(sema, call, 2, 'utf8Encode');
-    const [c] = compileArgs(sema, [cArg], [U21]);
-    const out = mutableSlice(sema, outArg, U8);
-    const errors = errorSetOf(['Utf8CannotEncodeSurrogateHalf', 'CodepointTooLarge']);
-    return computed(errorUnionOf(errors, U3), [c, out], call.span, ([value, target]) => {
+    }
+  ),
+  utf8Encode: concreteFnMember(
+    'std.unicode.utf8Encode',
+    [U21, sliceOf(U8, false)],
+    errorUnionOf(errorSetOf(['Utf8CannotEncodeSurrogateHalf', 'CodepointTooLarge']), U3),
+    ([value, target]) => {
       const n = Number(value as bigint);
       const length = utf8SequenceLength(n);
       if (length instanceof ErrorValue) return length;
@@ -282,47 +247,36 @@ const UNICODE: Record<string, () => Member> = {
       const bytes = [...new TextEncoder().encode(String.fromCodePoint(n))];
       for (const [index, byte] of bytes.entries()) slice.set(index, BigInt(byte));
       return BigInt(bytes.length);
-    });
-  }),
-  utf8Decode: fnMember('std.unicode.utf8Decode', (sema, call) => {
-    const [bytesArg] = expectArgs(sema, call, 1, 'utf8Decode');
-    const bytes = constSlice(sema, bytesArg, U8);
-    const errors = errorSetOf(UTF8_DECODE_ERRORS);
-    return computed(errorUnionOf(errors, U21), [bytes], call.span, ([value], frame) => {
-      const result = decode(byteNumbers(value, nativeBudget(sema, frame)));
+    }
+  ),
+  utf8Decode: concreteFnMember(
+    'std.unicode.utf8Decode',
+    [CONST_U8_SLICE],
+    errorUnionOf(errorSetOf(UTF8_DECODE_ERRORS), U21),
+    ([value], frame) => {
+      const result = decode(byteNumbers(value, (cost) => frame.runtime.spend(cost)));
       return typeof result === 'string' ? ErrorValue.of(result) : BigInt(result);
-    });
+    }
+  ),
+  utf8ValidCodepoint: concreteFnMember('std.unicode.utf8ValidCodepoint', [U21], BOOL, ([value]) => {
+    const codepoint = value as bigint;
+    return codepoint <= 0x10_ff_ffn && !(codepoint >= 0xd8_00n && codepoint <= 0xdf_ffn);
   }),
-  utf8ValidCodepoint: fnMember('std.unicode.utf8ValidCodepoint', (sema, call) => {
-    const [arg] = compileArgs(sema, expectArgs(sema, call, 1, 'utf8ValidCodepoint'), [intType(false, 21)]);
-    return computed(BOOL, [arg], call.span, ([value]) => {
-      const codePoint = value as bigint;
-      return codePoint <= 0x10_ff_ffn && !(codePoint >= 0xd8_00n && codePoint <= 0xdf_ffn);
-    });
-  }),
-  utf8CountCodepoints: fnMember('std.unicode.utf8CountCodepoints', (sema, call) => {
-    const [textArg] = expectArgs(sema, call, 1, 'utf8CountCodepoints');
-    const text = constSlice(sema, textArg, U8);
-    return computed(
-      errorUnionOf(errorSetOf(['Utf8InvalidStartByte', 'TruncatedInput', ...UTF8_DECODE_ERRORS]), USIZE),
-      [text],
-      call.span,
-      ([value], frame) => {
-        const points = codepoints(value, nativeBudget(sema, frame));
-        return typeof points === 'string' ? ErrorValue.of(points) : BigInt(points);
-      }
-    );
-  }),
-  utf8ValidateSlice: fnMember('std.unicode.utf8ValidateSlice', (sema, call) => {
-    const [textArg] = expectArgs(sema, call, 1, 'utf8ValidateSlice');
-    const text = constSlice(sema, textArg, U8);
-    return computed(
-      BOOL,
-      [text],
-      call.span,
-      ([value], frame) => typeof codepoints(value, nativeBudget(sema, frame)) !== 'string'
-    );
-  }),
+  utf8CountCodepoints: concreteFnMember(
+    'std.unicode.utf8CountCodepoints',
+    [CONST_U8_SLICE],
+    errorUnionOf(errorSetOf(['Utf8InvalidStartByte', 'TruncatedInput', ...UTF8_DECODE_ERRORS]), USIZE),
+    ([value], frame) => {
+      const result = codepoints(value, (cost) => frame.runtime.spend(cost));
+      return typeof result === 'string' ? ErrorValue.of(result) : BigInt(result);
+    }
+  ),
+  utf8ValidateSlice: concreteFnMember(
+    'std.unicode.utf8ValidateSlice',
+    [CONST_U8_SLICE],
+    BOOL,
+    ([value], frame) => typeof codepoints(value, (cost) => frame.runtime.spend(cost)) !== 'string'
+  ),
 };
 
 function utf8SequenceLength(codepoint: number): number | ErrorValue {

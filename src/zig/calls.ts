@@ -123,21 +123,25 @@ export abstract class CallCompiler extends BuiltinCompiler {
     const fnType =
       type.kind === 'fn' ? type : type.kind === 'pointer' && type.child.kind === 'fn' ? type.child : undefined;
     if (!fnType) return this.error(expression, `${typeName(type)} 型の値は、呼び出せません。`);
-    return this.callPointer(callee, fnType, expression);
+    return this.callPointer(callee, fnType, expression, receiver);
   }
 
-  private callPointer(callee: TExpr, fnType: FnType, expression: ExpressionOf<'call'>): TExpr {
+  private callPointer(callee: TExpr, fnType: FnType, expression: ExpressionOf<'call'>, receiver?: TExpr): TExpr {
     this.checkMemoryOperand(callee, expression);
     this.analyzeFunction(callee, expression);
-    if (expression.args.length !== fnType.params.length) {
+    const argumentsOfCall = receiver ? [receiver, ...expression.args] : expression.args;
+    if (argumentsOfCall.length !== fnType.params.length) {
       this.error(
         expression,
-        `引数の数が合いません（${fnType.params.length} 個が必要ですが、${expression.args.length} 個です）。`
+        `引数の数が合いません（${fnType.params.length} 個が必要ですが、${argumentsOfCall.length} 個です）。`
       );
     }
-    const args = expression.args.map((arg, index) =>
-      this.coerce(this.compile(arg, fnType.params[index]), fnType.params[index], arg)
-    );
+    const args = argumentsOfCall.map((arg, index) => {
+      const compiled = isTExpr(arg) ? arg : this.compile(arg, fnType.params[index]);
+      return index === 0 && receiver
+        ? this.bindReceiver(compiled, fnType.params[index], expression)
+        : this.coerce(compiled, fnType.params[index], isTExpr(arg) ? arg.span : arg);
+    });
     const evaluateCallee = callee.eval;
     const evaluators = args.map((arg) => (frame: Frame) => copyForFrame(frame, arg.eval(frame), arg.type));
     const row = expression.row;

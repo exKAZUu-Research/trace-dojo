@@ -26,6 +26,7 @@ import { ALLOCATOR, allocatorMembers, ARENA_ALLOCATOR, arenaValue, heapNamespace
 import {
   addMembers,
   compileArgs,
+  concreteFnMember,
   expectArgs,
   fnMember,
   handle,
@@ -164,12 +165,9 @@ const DEBUG = nativeStruct('std.debug', {
       call.span
     );
   }),
-  assert: fnMember('std.debug.assert', (sema, call) => {
-    const [ok] = compileArgs(sema, expectArgs(sema, call, 1, 'std.debug.assert'), [BOOL]);
-    return nativeCall(VOID, [ok], call.span, ([value]) => {
-      if (value !== true) panic('reached unreachable code');
-      return;
-    });
+  assert: concreteFnMember('std.debug.assert', [BOOL], VOID, ([value]) => {
+    if (value !== true) panic('reached unreachable code');
+    return;
   }),
   panic: fnMember('std.debug.panic', (sema, call) => {
     const [format, args] = expectArgs(sema, call, 2, 'std.debug.panic');

@@ -29,7 +29,7 @@ import {
   truncateToBigInt,
 } from './floats';
 import { FunctionInstance } from './functions';
-import { hasResolvedLayout, resolveTypeLayout } from './layout';
+import { bitSizeOf, hasResolvedLayout, resolveTypeLayout } from './layout';
 import { MemoryFault, UNDEFINED_MEMORY } from './memoryFault';
 import { type Frame, ZigPanic } from './runtime';
 import { singleValueOf } from './singleValue';
@@ -264,6 +264,8 @@ export abstract class SemaBase implements SemaApi {
     this.compilationBudget.spend(cost);
   }
 
+  private readonly functionReferences = new WeakMap<Decl, FnRef>();
+
   resolveStorage(type: Type, span: Span): void {
     this.resolveLayout(type, span, new Set());
   }
@@ -401,7 +403,12 @@ export abstract class SemaBase implements SemaApi {
   resolveDecl(decl: Decl, span: Span): TExpr {
     switch (decl.kind) {
       case 'fn': {
-        return known(this.declarationType(decl, span), new FnRef(decl) as unknown as Value, span);
+        let ref = this.functionReferences.get(decl);
+        if (!ref) {
+          ref = new FnRef(decl);
+          this.functionReferences.set(decl, ref);
+        }
+        return known(this.declarationType(decl, span), ref, span);
       }
       case 'native': {
         const { type, value, unavailable } = decl.resolve();
@@ -543,6 +550,7 @@ export abstract class SemaBase implements SemaApi {
   }
 
   /** Resolves the fields of the structs and unions a value of `type` holds in place, which its undefined value needs. */
+  // code-gauge-allow functionCognitiveComplexity 16 -- Resolves the by-value type graph before validating and caching layouts.
   private resolveLayout(type: Type, span: Span, seen: Set<Type>): void {
     if (seen.has(type) || hasResolvedLayout(type)) return;
     this.spendCompilation();
@@ -556,14 +564,32 @@ export abstract class SemaBase implements SemaApi {
         this.resolveLayout(field.type, span, seen);
       }
     } else if (type.kind === 'union') {
-      for (const field of this.unionFields(type)) {
+      const fields = this.unionFields(type);
+      for (const field of fields) {
         this.spendCompilation();
         this.resolveLayout(field.type, span, seen);
       }
+      if (type.layout === 'packed') this.checkPackedUnion(fields, span);
     }
     if (this.resolvingFields === 0 && this.resolvingUnionFields === 0) {
       resolveTypeLayout(type, () => this.spendCompilation());
       resolveTypeSlots(type, () => this.spendCompilation());
+    }
+  }
+
+  private checkPackedUnion(fields: readonly { type: Type }[], span: Span): void {
+    let width: number | undefined;
+    for (const field of fields) {
+      this.spendCompilation();
+      if (
+        !['int', 'float', 'bool', 'void', 'enum', 'struct', 'union'].includes(field.type.kind) ||
+        ((field.type.kind === 'struct' || field.type.kind === 'union') && field.type.layout !== 'packed')
+      )
+        this.error(span, `${typeName(field.type)} 型は、packed union のフィールドにできません。`);
+      const bits = bitSizeOf(field.type);
+      if (width !== undefined && width !== bits)
+        this.error(span, 'packed union のフィールドのビット数をそろえてください。');
+      width = bits;
     }
   }
 

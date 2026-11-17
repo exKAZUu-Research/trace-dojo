@@ -82,6 +82,31 @@ export function storageLocation(storage: object, index: number): { storage: obje
   return storageLocations.get(original)?.(index) ?? { storage: original, index };
 }
 
+const pointerLocations = new WeakMap<object, (index: number) => { storage: object; index: number }>();
+const interiorLocations = new WeakMap<object, Map<number, object>>();
+
+export function registerPointerLocation(
+  storage: object,
+  locate: (index: number) => { storage: object; index: number }
+): void {
+  pointerLocations.set(storage, locate);
+}
+
+function pointerLocation(location: { storage: object; index: number }): { storage: object; index: number } {
+  if (Number.isInteger(location.index * 8)) return location;
+  let interiors = interiorLocations.get(location.storage);
+  if (!interiors) {
+    interiors = new Map();
+    interiorLocations.set(location.storage, interiors);
+  }
+  let storage = interiors.get(location.index);
+  if (!storage) {
+    storage = {};
+    interiors.set(location.index, storage);
+  }
+  return { storage, index: 0 };
+}
+
 const immutableStorage = new WeakSet<object>();
 
 export function markConstantStorage(storage: Slots): void {
@@ -232,6 +257,8 @@ export class Pointer {
 
   storageLocation(): { storage: object; index: number } {
     const slots = this.target.slots;
+    const projected = pointerLocations.get(slots)?.(this.index);
+    if (projected) return pointerLocation(projected);
     const location = storageLocation(slots, this.index);
     if (storageLocations.has(slots) || location.storage === UNDEFINED_MEMORY.slots) return location;
     const value = (storageAliases.get(slots) ?? slots)[this.index];

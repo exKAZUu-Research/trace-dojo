@@ -6544,3 +6544,108 @@ test.each([false, true])('readonly pointer peers combine optional children: %s',
     uncaughtException: undefined,
   });
 });
+
+test('meta equality compares function declarations and aliases by identity', () => {
+  const source = `const std=@import("std");const S=struct{fn f()void{}fn g()void{}};pub fn main()void{const f=S.f;const a=.{S.f};const b=.{f};std.debug.print("{} {} {} {}",.{std.meta.eql(S.f,S.f),std.meta.eql(f,S.f),std.meta.eql(a,b),std.meta.eql(S.f,S.g)});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: 'true true true false',
+    uncaughtException: undefined,
+  });
+});
+
+test.each(['a:u3,b:u4', 'a:u8,b:u16', 'a:*u8,b:usize'])(
+  'packed unions reject invalid field representations: %s',
+  (fields) => {
+    const source = `const U=packed union{${fields}};pub fn main()void{var x:U=undefined;_=&x;}`;
+    expect(executeProgram('zig', source)).toMatchObject({ kind: 'compileError' });
+  }
+);
+
+test.each([
+  [
+    'const U=extern union{p:*u8,q:*i8};var n:u8=255;const x=U{.p=&n};std.debug.print("{}|",.{x.q.*});x.q.*=-2;std.debug.print("{}",.{n});',
+    '-1|254',
+  ],
+  [
+    'const U=extern union{p:*[2]u8,q:*u8};var a=[_]u8{7,8};const x=U{.p=&a};x.q.*=9;std.debug.print("{} {} {}",.{x.q.*,a[0],x.q==&a[0]});',
+    '9 9 true',
+  ],
+  [
+    'const S=extern struct{a:u8,b:u8};const U=extern union{p:*S,q:*u8};var s=S{.a=7,.b=8};const x=U{.p=&s};x.q.*=9;std.debug.print("{} {}",.{s.a,x.q==&s.a});',
+    '9 true',
+  ],
+  [
+    'const U=extern union{p:*[2]u8,q:*[1]i16};var a=[_]u8{255,255};const x=U{.p=&a};std.debug.print("{}|",.{x.q.*[0]});x.q.*[0]=-2;std.debug.print("{} {}",.{a[0],a[1]});',
+    '-1|254 255',
+  ],
+])('pointer union views share typed live storage: %s', (body, output) => {
+  expect(executeProgram('zig', `const std=@import("std");pub fn main()void{${body}}`)).toMatchObject({
+    kind: 'executed',
+    stderr: output,
+    uncaughtException: undefined,
+  });
+});
+
+test('byte-backed pointer union views preserve signed reads and mutations', () => {
+  const source = `const std=@import("std");const U=extern union{p:*u8,q:*i8};pub fn main()!void{var bytes:[64]u8=undefined;var f=std.heap.FixedBufferAllocator.init(&bytes);const p=try f.allocator().create(u8);p.*=255;const u=U{.p=p};std.debug.print("{}|",.{u.q.*});u.q.*=-2;std.debug.print("{}",.{p.*});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: '-1|254',
+    uncaughtException: undefined,
+  });
+});
+
+test('zero-bit packed union fields retain native layout', () => {
+  expect(
+    executeProgram(
+      'zig',
+      `const std=@import("std");const U=packed union{a:void,b:u0};pub fn main()void{const u=U{.a={}};std.debug.print("{}",.{u.b});}`
+    )
+  ).toMatchObject({ kind: 'executed', stderr: '0', uncaughtException: undefined });
+});
+
+test('allocator-backed writer public fields use native byte offsets', () => {
+  const source = `const std=@import("std");pub fn main()!void{var raw:[64]u8=undefined;var f=std.heap.FixedBufferAllocator.init(&raw);var b:[8]u8=undefined;const p=try f.allocator().create(std.Io.Writer);p.*=std.Io.Writer.fixed(&b);p.end=3;std.debug.print("{} {}|",.{p.end,raw[24]});raw[24]=2;try p.writeAll("x");std.debug.print("{} {} {}",.{p.end,raw[24],b[2]});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: '3 3|3 3 120',
+    uncaughtException: undefined,
+  });
+});
+
+test('arrays of byte-backed writers keep independent headers and shared buffers', () => {
+  const source = `const std=@import("std");pub fn main()!void{var raw:[96]u8=undefined;var f=std.heap.FixedBufferAllocator.init(&raw);var a:[4]u8=undefined;var b:[4]u8=undefined;const p=try f.allocator().alloc(std.Io.Writer,2);p[0]=std.Io.Writer.fixed(&a);p[1]=std.Io.Writer.fixed(&b);try p[0].writeAll("a");try p[1].writeAll("bc");raw[56]=1;try p[1].writeAll("x");std.debug.print("{} {} {} {} {s}",.{p[0].end,p[1].end,raw[24],raw[56],b[0..2]});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: '1 2 1 2 bx',
+    uncaughtException: undefined,
+  });
+});
+
+test('concrete ASCII functions are callable through stored function pointers', () => {
+  const source = `const std=@import("std");fn apply(f:*const fn(u8)u8,x:u8)u8{return f(x);}pub fn main()void{const digit:*const fn(u8)bool=std.ascii.isDigit;var mapper:*const fn(u8)u8=std.ascii.toUpper;_=&mapper;const equal:*const fn([]const u8,[]const u8)bool=std.ascii.eqlIgnoreCase;std.debug.print("{} {} {} {}",.{digit('1'),mapper('a'),apply(std.ascii.toLower,'B'),equal("Ab","aB")});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: 'true 65 98 true',
+    uncaughtException: undefined,
+  });
+});
+
+test('concrete native function pointers retain exact signatures', () => {
+  expect(
+    executeProgram(
+      'zig',
+      `const std=@import("std");pub fn main()void{const f:*const fn(u7)bool=std.ascii.isDigit;_=f;}`
+    )
+  ).toMatchObject({ kind: 'compileError' });
+});
+
+test('concrete Unicode and assertion functions retain qualified function types', () => {
+  const source = `const std=@import("std");pub fn main()!void{const valid:*const fn(u21)bool=std.unicode.utf8ValidCodepoint;const check:*const fn([]const u8)bool=std.unicode.utf8ValidateSlice;const assert:*const fn(bool)void=std.debug.assert;assert(valid(0x3042));const init:*const fn([]const u8)error{InvalidUtf8}!std.unicode.Utf8View=std.unicode.Utf8View.init;const view=try init("a");const make:*const fn(std.unicode.Utf8View)std.unicode.Utf8Iterator=std.unicode.Utf8View.iterator;var it=make(view);const next:*const fn(*std.unicode.Utf8Iterator)?u21=std.unicode.Utf8Iterator.nextCodepoint;std.debug.print("{} {}",.{check("a"),next(&it).?});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: 'true 97',
+    uncaughtException: undefined,
+  });
+});

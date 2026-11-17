@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 779 -- The file holds one layer of the compiler, whose parts share its private state.
+// code-gauge-allow-file fileNcss 783 -- The file holds one layer of the compiler, whose parts share its private state.
 import type { Node } from '@willbooster/web-tree-sitter';
 
 import { CompileError } from '../interpreter/diagnostics';
@@ -720,6 +720,12 @@ const COMPARISONS = new Set(['==', '!=', '<', '>', '<=', '>=']);
  */
 function intoPrefixType(object: Expression, build: (inner: Expression) => Expression): Expression {
   switch (object.kind) {
+    case 'fnType': {
+      return { ...object, returnType: intoPrefixType(object.returnType, build) };
+    }
+    case 'errorUnionType': {
+      return { ...object, payload: intoPrefixType(object.payload, build) };
+    }
     case 'optionalType':
     case 'pointerType':
     case 'sliceType':

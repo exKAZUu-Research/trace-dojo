@@ -22,7 +22,7 @@ import {
   typeName,
   VOID as VOID_TYPE,
 } from '../types';
-import { NativeHandle, type NativeState, type Pointer, type Value, type ZStruct } from '../values';
+import { FnValue, NativeHandle, type NativeState, type Pointer, type Value, type ZStruct } from '../values';
 import { PUBLIC_STD_MEMBERS } from './publicMembers';
 
 /** A declaration's type and value, which a native namespace resolves on first use. */
@@ -98,6 +98,20 @@ export function fnMember(name: string, compileCall: (sema: SemaApi, call: Native
     type: NATIVE_FN_TYPE,
     value: new NativeFn(name, compileCall) as unknown as Value,
   });
+}
+
+export function concreteFnMember(
+  name: string,
+  params: readonly Type[],
+  returnType: Type,
+  run: (args: Value[], frame: Frame) => Value
+): () => Member {
+  const instance = nativeFunction(name, params, returnType, (args, frame) => {
+    frame.runtime.spend(args.length);
+    return withHeldValues(frame, args, () => run(args, frame));
+  });
+  const value = new FnValue(instance);
+  return () => ({ type: fnType(params, returnType), value });
 }
 
 export function constMember(type: Type, value: Value): () => Member {
@@ -215,7 +229,7 @@ export function nativeStateCall<S extends NativeState>(
 /** A native function as a function value, for library functions that return functions such as `std.sort.asc`. */
 export function nativeFunction(
   name: string,
-  params: Type[],
+  params: readonly Type[],
   returnType: Type,
   run: (args: Value[], frame: Frame) => Value,
   analyze?: (sema: SemaApi, span: Span) => void

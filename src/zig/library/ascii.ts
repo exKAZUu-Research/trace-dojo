@@ -1,23 +1,10 @@
 import { PANIC, panic } from '../arith';
 import { Constant } from '../expressions';
-import { arrayOf, BOOL, pointerTo, sliceOf, type StructType, type Type, U8 } from '../types';
+import { arrayOf, BOOL, CONST_U8_SLICE, pointerTo, sliceOf, type StructType, type Type, U8 } from '../types';
 import { markConstantStorage, Pointer, Slice, type Value, ZArray } from '../values';
-import {
-  allocating,
-  allocatorArg,
-  computed,
-  constSlice,
-  elements,
-  mutableSlice,
-  nativeBudget,
-  newSlice,
-  OPTIONAL_USIZE,
-  optionalIndex,
-  ORDER,
-  orderValue,
-} from './common';
-import { allocatorState, ERROR_OUT_OF_MEMORY, reserveNativeAllocation } from './heap';
-import { compileArgs, expectArgs, fnMember, type Member, nativeCall, nativeStruct } from './native';
+import { allocating, elements, newSlice, OPTIONAL_USIZE, optionalIndex, ORDER, orderValue } from './common';
+import { ALLOCATOR, allocatorState, ERROR_OUT_OF_MEMORY, reserveNativeAllocation } from './heap';
+import { concreteFnMember, type Member, nativeStruct } from './native';
 
 const isAlpha = (c: number): boolean => (c >= 0x41 && c <= 0x5a) || (c >= 0x61 && c <= 0x7a);
 const isDigit = (c: number): boolean => c >= 0x30 && c <= 0x39;
@@ -31,17 +18,11 @@ const toUpper = (c: number): number => (isLower(c) ? c - 0x20 : c);
 const toLower = (c: number): number => (isUpper(c) ? c + 0x20 : c);
 
 function predicate(name: string, test: (c: number) => boolean): () => Member {
-  return fnMember(name, (sema, call) => {
-    const [c] = compileArgs(sema, expectArgs(sema, call, 1, name), [U8]);
-    return computed(BOOL, [c], call.span, ([value]) => test(Number(value as bigint)));
-  });
+  return concreteFnMember(name, [U8], BOOL, ([value]) => test(Number(value as bigint)));
 }
 
 function mapper(name: string, map: (c: number) => number): () => Member {
-  return fnMember(name, (sema, call) => {
-    const [c] = compileArgs(sema, expectArgs(sema, call, 1, name), [U8]);
-    return computed(U8, [c], call.span, ([value]) => BigInt(map(Number(value as bigint))));
-  });
+  return concreteFnMember(name, [U8], U8, ([value]) => BigInt(map(Number(value as bigint))));
 }
 
 function bytes(value: Value): number[] {
@@ -61,38 +42,32 @@ function caseFold(a: number[], b: number[], spend: () => void, start = 0, end = 
 
 /** `upperString(output, ascii_string)`, which writes into output and returns the written part. */
 function stringMapper(name: string, map: (c: number) => number): () => Member {
-  return fnMember(name, (sema, call) => {
-    const [outArg, inArg] = expectArgs(sema, call, 2, name);
-    const output = mutableSlice(sema, outArg, U8);
-    const input = constSlice(sema, inArg, U8);
-    return computed(sliceOf(U8, false), [output, input], call.span, ([out, value], frame) => {
-      const source = value as Slice;
-      const target = out as Slice;
-      if (target.length < source.length) panic(PANIC.unreachable);
-      const spend = nativeBudget(sema, frame);
-      for (let index = 0; index < source.length; index++) {
-        spend();
-        target.set(index, BigInt(map(Number(source.get(index)))));
-      }
-      return new Slice(target.target, target.start, source.length);
-    });
+  return concreteFnMember(name, [sliceOf(U8, false), CONST_U8_SLICE], sliceOf(U8, false), ([out, value], frame) => {
+    const source = value as Slice;
+    const target = out as Slice;
+    if (target.length < source.length) panic(PANIC.unreachable);
+    for (let index = 0; index < source.length; index++) {
+      frame.runtime.spend();
+      target.set(index, BigInt(map(Number(source.get(index)))));
+    }
+    return new Slice(target.target, target.start, source.length);
   });
 }
 
 function allocMapper(name: string, map: (c: number) => number): () => Member {
-  return fnMember(name, (sema, call) => {
-    const [allocatorArgument, inArg] = expectArgs(sema, call, 2, name);
-    const allocator = allocatorArg(sema, allocatorArgument);
-    const input = constSlice(sema, inArg, U8);
-    return nativeCall(allocating(sliceOf(U8, false)), [allocator, input], call.span, ([allocator, input], frame) => {
+  return concreteFnMember(
+    name,
+    [ALLOCATOR, CONST_U8_SLICE],
+    allocating(sliceOf(U8, false)),
+    ([allocator, input], frame) => {
       const complete = reserveNativeAllocation(frame, allocatorState(allocator), (input as Slice).length, U8);
       if (!complete) return ERROR_OUT_OF_MEMORY;
       frame.runtime.spend((input as Slice).length);
       const result = newSlice(bytes(input).map((byte) => BigInt(map(byte))));
       complete(result.target);
       return result;
-    });
-  });
+    }
+  );
 }
 
 function comparer(
@@ -100,17 +75,10 @@ function comparer(
   compute: (a: number[], b: number[], spend: (cost?: number) => void) => Value,
   resultType: Type = BOOL
 ): () => Member {
-  return fnMember(name, (sema, call) => {
-    const [aArg, bArg] = expectArgs(sema, call, 2, name);
-    const a = constSlice(sema, aArg, U8);
-    const b = constSlice(sema, bArg, U8);
-    return computed(resultType, [a, b], call.span, ([x, y], frame) => {
-      const spend = nativeBudget(sema, frame);
-      spend((x as Slice).length + (y as Slice).length);
-      const left = bytes(x);
-      const right = bytes(y);
-      return compute(left, right, spend);
-    });
+  return concreteFnMember(name, [CONST_U8_SLICE, CONST_U8_SLICE], resultType, ([x, y], frame) => {
+    const spend = (cost?: number): void => frame.runtime.spend(cost);
+    spend((x as Slice).length + (y as Slice).length);
+    return compute(bytes(x), bytes(y), spend);
   });
 }
 

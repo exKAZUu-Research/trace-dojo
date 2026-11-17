@@ -1,9 +1,10 @@
-// code-gauge-allow-file fileNcss 445 -- Keeps typed byte views and their overlapping storage operations together.
+// code-gauge-allow-file fileNcss 493 -- Keeps typed byte views and their overlapping storage operations together.
 import { panic } from './arith';
 import { enumLookup } from './enumLookup';
 import { asBigFloat, BigFloat, type FloatBits, floatOf, FORMATS } from './floats';
 import { bitSizeOf, errorUnionOffsets, fieldOffsets, optionalNicheBits, sizeOf, unionOffsets } from './layout';
 import { memorySpace, reserveMemory, spendMemory } from './memoryAccounting';
+import { rememberPointerType, viewPointer } from './pointerViews';
 import { copyForStorage, undefinedValue } from './semaBase';
 import { singleValueOf } from './singleValue';
 import { type Type, typeId } from './types';
@@ -12,6 +13,7 @@ import {
   FnValue,
   NULL,
   Pointer,
+  registerPointerLocation,
   registerStorageLocation,
   Slice,
   type Slots,
@@ -146,7 +148,8 @@ export function bindBufferMemory(
   for (const [index, value] of initial.entries()) destination.slots[index] = value;
 }
 
-class BufferMemory {
+export class BufferMemory {
+  private accessDepth = 0;
   private readonly views = new Map<string, Value>();
   private readonly referenceHolds = new Map<string, object>();
   private readonly referenceOffsets = new Map<number, StoredReference>();
@@ -155,8 +158,33 @@ class BufferMemory {
     private readonly bytes: Value[],
     private readonly spend: () => void,
     private readonly space: BufferMemorySpace,
-    private readonly addressOf?: (value: object) => bigint
-  ) {}
+    private readonly addressOf?: (value: object) => bigint,
+    private readonly synchronization?: { pull: () => void; push: () => void },
+    private readonly pointerLocation?: (offset: number) => { storage: object; index: number }
+  ) {
+    space.memories.set(bytes, this);
+  }
+
+  read(type: Type, offset: number, packed?: number): Value {
+    return this.access(false, () => this.readValue(type, offset, packed));
+  }
+
+  write(type: Type, offset: number, value: Value, packed?: number): void {
+    this.access(true, () => this.writeValue(type, offset, value, packed));
+  }
+
+  private access<T>(write: boolean, run: () => T): T {
+    if (!this.synchronization || this.accessDepth !== 0) return run();
+    this.accessDepth++;
+    try {
+      this.synchronization.pull();
+      const result = run();
+      if (write) this.synchronization.push();
+      return result;
+    } finally {
+      this.accessDepth--;
+    }
+  }
 
   slots(fields: readonly FieldLocation[]): Value[] {
     const slots = new Proxy(Array.from<Value>({ length: fields.length }).fill(undefined), {
@@ -170,18 +198,20 @@ class BufferMemory {
         const index = propertyIndex(property);
         if (index === undefined) return Reflect.set(target, property, value, receiver);
         const field = fields[index];
-        if (!field) panic('index out of bounds');
+        if (!field) return Reflect.set(target, property, value, receiver);
         this.write(field.type, field.offset, value, field.packed);
         return true;
       },
     });
     registerStorageLocation(slots, (index) => ({ storage: this.bytes, index: (fields[index]?.offset ?? 0) / 8 }));
+    if (this.pointerLocation)
+      registerPointerLocation(slots, (index) => this.pointerLocation!(fields[index]?.offset ?? 0));
     return slots;
   }
 
   // code-gauge-allow functionNcss 40 -- Decodes each scalar representation and transparent wrapper from shared bytes.
   // code-gauge-allow functionCognitiveComplexity 22 -- Decodes each scalar representation and transparent wrapper from shared bytes.
-  read(type: Type, offset: number, packed?: number): Value {
+  private readValue(type: Type, offset: number, packed?: number): Value {
     if (type.kind === 'array' || type.kind === 'struct' || type.kind === 'union')
       return this.readAggregate(type, offset);
     switch (type.kind) {
@@ -231,6 +261,7 @@ class BufferMemory {
 
   private readAggregate(type: Extract<Type, { kind: 'array' | 'struct' | 'union' }>, offset: number): Value {
     const key = `${typeId(type)} ${offset}`;
+    if (type.kind === 'struct' && type.native?.kind === 'writer') return this.writerView(type, offset);
     if (type.kind === 'struct' && (type.native?.storageSlots !== undefined || type.native?.kind === 'allocator'))
       return this.reference(offset, type);
     const cached = this.views.get(key);
@@ -255,6 +286,38 @@ class BufferMemory {
     }
     this.views.set(key, value);
     return value;
+  }
+
+  private writerView(type: Extract<Type, { kind: 'struct' }>, offset: number): ZStruct {
+    const key = `${typeId(type)} ${offset}`;
+    const cached = this.views.get(key);
+    if (cached) return cached as ZStruct;
+    const fields = type.fields!;
+    const slots = this.slots([
+      { type: fields[0].type, offset: offset + 64 },
+      { type: fields[1].type, offset: offset + 192 },
+    ]);
+    for (let index = 2; index < 5; index++) {
+      Object.defineProperty(slots, index, {
+        enumerable: true,
+        configurable: true,
+        get: () => (this.reference(offset, type) as ZStruct).slots[index],
+        set: (value: Value) => {
+          (this.reference(offset, type) as ZStruct).slots[index] = value;
+        },
+      });
+    }
+    const header = new ZStruct(slots);
+    this.views.set(key, header);
+    return header;
+  }
+
+  private writeWriter(type: Extract<Type, { kind: 'struct' }>, offset: number, header: ZStruct): void {
+    spendMemory(5);
+    const snapshot = new ZStruct([...header.slots]);
+    this.writeReference(offset, snapshot, type);
+    this.write(type.fields![0].type, offset + 64, snapshot.slots[0]);
+    this.write(type.fields![1].type, offset + 192, snapshot.slots[1]);
   }
 
   private unionView(type: Extract<Type, { kind: 'union' }>, offset: number): ZUnion {
@@ -349,12 +412,14 @@ class BufferMemory {
       },
     });
     registerStorageLocation(slots, (index) => ({ storage: this.bytes, index: offset / 8 + index * stride }), true);
+    if (this.pointerLocation)
+      registerPointerLocation(slots, (index) => this.pointerLocation!(offset + index * stride * 8));
     return new ZArray(slots, 0, length, hasSentinel);
   }
 
   // code-gauge-allow functionNcss 45 -- Encodes each scalar representation and transparent wrapper into shared bytes.
   // code-gauge-allow functionCognitiveComplexity 23 -- Encodes each scalar representation and transparent wrapper into shared bytes.
-  write(type: Type, offset: number, value: Value, packed?: number): void {
+  private writeValue(type: Type, offset: number, value: Value, packed?: number): void {
     if (type.kind === 'array' || type.kind === 'struct' || type.kind === 'union') {
       this.writeAggregate(type, offset, value);
       return;
@@ -410,8 +475,8 @@ class BufferMemory {
     }
   }
 
-  // code-gauge-allow functionCognitiveComplexity 21 -- Writes aggregate contents using their physical layout without replacing interior views.
-  // code-gauge-allow functionNcss 33 -- Encodes aggregate layouts without invalidating interior aliases.
+  // code-gauge-allow functionCognitiveComplexity 23 -- Writes aggregate contents using their physical layout without replacing interior views.
+  // code-gauge-allow functionNcss 34 -- Encodes aggregate layouts without invalidating interior aliases.
   private writeAggregate(
     type: Extract<Type, { kind: 'array' | 'struct' | 'union' }>,
     offset: number,
@@ -428,6 +493,10 @@ class BufferMemory {
         return;
       }
       case 'struct': {
+        if (type.native?.kind === 'writer') {
+          this.writeWriter(type, offset, value as ZStruct);
+          return;
+        }
         if (type.native?.storageSlots !== undefined || type.native?.kind === 'allocator') {
           this.writeReference(offset, value, type);
           return;
@@ -516,7 +585,7 @@ class BufferMemory {
 
   private reference(offset: number, type: Type, bits = 64): Value {
     const id = this.readBits(offset, bits);
-    const key = referenceKey(id, type, bits);
+    const key = referenceKey(id, bits);
     const stored = this.referenceOffsets.get(offset);
     const value =
       (stored?.key === key ? stored.value : undefined) ??
@@ -526,7 +595,9 @@ class BufferMemory {
       this.referenceHolds.set(key, value);
       this.referenceOffsets.set(offset, { key, value, id, bits });
     }
-    return (value as Value) ?? undefinedValue(type);
+    return value instanceof Pointer && type.kind === 'pointer'
+      ? viewPointer(value, type.child, this.space)
+      : ((value as Value) ?? undefinedValue(type));
   }
 
   private writeReference(offset: number, value: Value, type: Type, bits = 64): void {
@@ -550,7 +621,8 @@ class BufferMemory {
           : { storage: value instanceof FnValue ? value.fn : value, index: 0 };
       id = (this.space.identityOf(location.storage) << 32n) + BigInt(location.index * 8);
     }
-    const key = referenceKey(id, type, bits);
+    if (value instanceof Pointer && type.kind === 'pointer') rememberPointerType(value, type.child);
+    const key = referenceKey(id, bits);
     this.space.references.set(key, value);
     this.referenceHolds.set(key, value);
     this.referenceOffsets.set(offset, { key, value, id, bits });
@@ -564,8 +636,8 @@ class BufferMemory {
   }
 }
 
-function referenceKey(id: bigint, type: Type, bits: number): string {
-  const projection = bits === 16 ? 'error' : typeId(type.kind === 'pointer' ? type.child : type);
+function referenceKey(id: bigint, bits: number): string {
+  const projection = bits === 16 ? 'error' : 'address';
   return `${id} ${projection}`;
 }
 
