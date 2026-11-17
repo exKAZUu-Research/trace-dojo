@@ -160,6 +160,8 @@ export interface ObjectType {
   thisType?: TypeParameter;
   /** For an instantiated anonymous type, the declared one, which every instantiation shares as its recursion identity. */
   origin?: ObjectType;
+  /** For an instantiated anonymous type, the type arguments of `origin`'s type parameters and of outer ones. */
+  mapper?: Map<number, Type>;
 }
 
 export interface TupleElement {

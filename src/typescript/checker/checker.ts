@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 427 -- Holds shared type construction, bounded instantiation, structure lookup, and type constraints used by all checker components.
+// code-gauge-allow-file fileNcss 432 -- Holds shared type construction, bounded instantiation, structure lookup, and type constraints used by all checker components.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import type { SourceDiagnostic } from '../../interpreter/diagnostics';
@@ -396,9 +396,17 @@ export class Checker {
       aliasName: type.aliasName,
       aliasArguments: type.aliasArguments?.map((argument) => this.instantiate(argument, mapper)),
       origin: type.origin ?? type,
+      mapper: type.mapper ? this.composeMappers(type.mapper, mapper) : mapper,
     });
     this.instantiationCache.set(key, instantiated);
     return instantiated;
+  }
+
+  /** The mapper that applies `first`, then `second`. */
+  private composeMappers(first: Mapper, second: Mapper): Mapper {
+    const composed: Mapper = new Map(second);
+    for (const [id, type] of first) composed.set(id, this.instantiate(type, second));
+    return composed;
   }
 
   instantiateStructure(structure: Structure, mapper: Mapper): Structure {

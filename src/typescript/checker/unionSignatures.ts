@@ -38,6 +38,41 @@ export class UnionSignatures {
     return this.combineMembers(lists, overloaded[0] ?? 0);
   }
 
+  /**
+   * The call signatures of a union of the same method of different arrays, as TypeScript resolves a call through it when
+   * the union has no call signatures: the method of an array of the union of their element types, read-only when any
+   * of them is from `ReadonlyArray`. None when a member is not a method of `Array` or `ReadonlyArray` or they differ.
+   */
+  arrayMethodSignatures(members: Type[]): Signature[] {
+    let name: string | undefined;
+    const elements: Type[] = [];
+    let readonly = false;
+    for (const member of members) {
+      const method = this.arrayMethodOf(member);
+      if (!method || (name !== undefined && method.name !== name)) return [];
+      name = method.name;
+      elements.push(method.element);
+      readonly ||= method.readonly;
+    }
+    if (name === undefined) return [];
+    const property = this.c.propertyOf(this.c.arrayType(unionOf(elements), readonly), name);
+    return property ? this.c.signaturesOf(property.type(), 'call') : [];
+  }
+
+  /** The method of `Array` or `ReadonlyArray` that `type` instantiates, with its element type. */
+  private arrayMethodOf(type: Type): { name: string; element: Type; readonly: boolean } | undefined {
+    if (type.kind !== 'object') return undefined;
+    const declaration = this.c.signaturesOf(type, 'call')[0]?.declaration;
+    if (declaration?.type !== 'method_signature' || !this.c.isLibrary(declaration)) return undefined;
+    const name = declaration.childForFieldName('name')?.text;
+    const owner = declaration.parent?.parent;
+    const interfaceName = owner?.type === 'interface_declaration' ? owner.childForFieldName('name')?.text : undefined;
+    if (!name || (interfaceName !== 'Array' && interfaceName !== 'ReadonlyArray')) return undefined;
+    const elementParameter = (this.c.globalType(interfaceName).typeParameters as TypeParameter[])[0];
+    const element = type.mapper?.get(elementParameter.id);
+    return element && { name, element, readonly: interfaceName === 'ReadonlyArray' };
+  }
+
   /** The signatures that every member list has one matching, each once. */
   private sharedSignatures(lists: Signature[][]): Signature[] {
     const result: Signature[] = [];
@@ -131,7 +166,7 @@ export class UnionSignatures {
     return {
       ...signature,
       thisType: thisTypes.length > 0 ? intersectionOf(thisTypes, this.c.budget) : undefined,
-      returnType: () => unionOf(matching.map((member) => member.returnType())),
+      returnType: () => this.c.literals.subtypeReduced(matching.map((member) => member.returnType())),
       predicate: predicates.every((predicate) => predicate && predicate.index === predicateIndex)
         ? { index: predicateIndex as number, type: unionOf(predicates.map((predicate) => predicate?.type as Type)) }
         : undefined,
@@ -196,7 +231,7 @@ export class UnionSignatures {
       typeParameters: left.typeParameters.length > 0 ? left.typeParameters : right.typeParameters,
       parameters,
       thisType: thisTypes.length > 0 ? intersectionOf(thisTypes, this.c.budget) : undefined,
-      returnType: () => unionOf([left.returnType(), right.returnType()]),
+      returnType: () => this.c.literals.subtypeReduced([left.returnType(), right.returnType()]),
     };
   }
 

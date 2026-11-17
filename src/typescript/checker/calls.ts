@@ -202,7 +202,8 @@ export class Calls {
 
   private callSignatures(type: Type): Signature[] {
     if (type.kind !== 'union') return this.c.signaturesOf(type, 'call');
-    return this.unionSignatures.of(type.types.map((member) => this.c.signaturesOf(member, 'call')));
+    const signatures = this.unionSignatures.of(type.types.map((member) => this.c.signaturesOf(member, 'call')));
+    return signatures.length > 0 ? signatures : this.unionSignatures.arrayMethodSignatures(type.types);
   }
 
   private explicitTypeArguments(node: TreeNode): Type[] | undefined {
