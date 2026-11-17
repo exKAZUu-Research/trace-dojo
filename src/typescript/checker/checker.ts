@@ -830,7 +830,7 @@ export class Checker {
     const constructSignatures = [...own.constructSignatures];
     const patternIndexLists = [own.patternIndexes];
     for (const base of bases) {
-      if (base.kind !== 'object' && base.kind !== 'intersection') continue;
+      if (base.kind !== 'object' && base.kind !== 'intersection' && base.kind !== 'typeParameter') continue;
       const baseStructure = this.structureOf(base);
       patternIndexLists.push(baseStructure.patternIndexes);
       for (const [name, property] of baseStructure.properties)
