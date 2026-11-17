@@ -14,6 +14,11 @@ import { Dict, type Env, type Slot, Thunk } from './values';
 
 const ALLOCATION_OVERHEAD = 8;
 
+interface PreviewBudget {
+  operations: number;
+  milliseconds: number;
+}
+
 /** Stops evaluating a value for a trace's display, which leaves the value as it was. */
 export class DisplayAbort extends Error {
   constructor() {
@@ -64,10 +69,12 @@ export class Runtime implements TracedRuntime<TraceFrame> {
   private readonly dictCache = new Map<InstanceInfo, Dict>();
   private allocated = 0;
   private gcMilliseconds = 0;
-  private displayOperations = LIMITS.maxOperations;
-  private displayMilliseconds = 0;
+  private readonly previewBudgets: Record<'scalar' | 'composite', PreviewBudget> = {
+    scalar: { operations: LIMITS.maxOperations / 2, milliseconds: 0 },
+    composite: { operations: LIMITS.maxOperations / 2, milliseconds: 0 },
+  };
   private displayDeadline = 0;
-  private previewing = false;
+  private previewing: PreviewBudget | undefined;
 
   constructor(input?: ProgramInput) {
     this.io = new ProgramIO(this.budget, input);
@@ -79,8 +86,8 @@ export class Runtime implements TracedRuntime<TraceFrame> {
       this.displayRemaining -= cost;
       if (this.displayRemaining < 0) throw new DisplayAbort();
       if (this.previewing) {
-        this.displayOperations -= cost;
-        if (this.displayOperations < 0 || performance.now() > this.displayDeadline) throw new DisplayAbort();
+        this.previewing.operations -= cost;
+        if (this.previewing.operations < 0 || performance.now() > this.displayDeadline) throw new DisplayAbort();
       }
     } else this.budget.spend(cost);
   }
@@ -98,17 +105,18 @@ export class Runtime implements TracedRuntime<TraceFrame> {
     }
   }
 
-  withPreviewBudget<T>(run: () => T): T {
+  withPreviewBudget<T>(run: () => T, kind: 'scalar' | 'composite' = 'composite'): T {
     if (this.previewing) return run();
-    if (this.displayOperations <= 0 || this.displayMilliseconds >= LIMITS.maxMilliseconds) throw new DisplayAbort();
+    const budget = this.previewBudgets[kind];
+    if (budget.operations <= 0 || budget.milliseconds >= LIMITS.maxMilliseconds / 2) throw new DisplayAbort();
     const started = performance.now();
-    this.displayDeadline = started + LIMITS.maxMilliseconds - this.displayMilliseconds;
-    this.previewing = true;
+    this.displayDeadline = started + LIMITS.maxMilliseconds / 2 - budget.milliseconds;
+    this.previewing = budget;
     try {
       return run();
     } finally {
-      this.displayMilliseconds += performance.now() - started;
-      this.previewing = false;
+      budget.milliseconds += performance.now() - started;
+      this.previewing = undefined;
     }
   }
 

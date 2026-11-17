@@ -10,6 +10,7 @@ import { floatToDigits } from './primitives';
 import { runProgram } from './run';
 import { DisplayAbort, Runtime, type TraceFrame } from './runtime';
 import { prune, splitApp, type Type } from './types';
+import { chargeTypeWork } from './typeWorkBudget';
 import {
   ConValue,
   Dict,
@@ -125,7 +126,7 @@ function forceForDisplay(runtime: Runtime, slot: Slot): Value | undefined {
   if (slot instanceof Thunk && slot.state !== 'done' && runtime.displayAborted.has(slot)) return;
   return runtime.withDisplayBudget(DISPLAY_OPERATIONS, () => {
     try {
-      return runtime.withPreviewBudget(() => runtime.machine.force(slot));
+      return runtime.withPreviewBudget(() => runtime.machine.force(slot), 'scalar');
     } catch (error) {
       if (error instanceof DisplayAbort && slot instanceof Thunk) runtime.displayAborted.add(slot);
       if (error instanceof HaskellException || error instanceof DisplayAbort) return;
@@ -193,7 +194,13 @@ function isStringType(type: Type, value: Value): boolean {
 
 function peek(slot: Slot): Value | undefined {
   slot = untypedSlot(slot);
-  return slot instanceof Object && 'state' in slot ? (slot.state === 'done' ? slot.value : undefined) : (slot as Value);
+  while (slot instanceof Thunk) {
+    chargeTypeWork();
+    if (slot.state === 'done') return slot.value;
+    if (!slot.target) return;
+    slot = slot.target;
+  }
+  return slot;
 }
 
 const MAX_ELEMENTS = 1000;

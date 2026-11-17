@@ -938,3 +938,22 @@ make=do
   expect(wildcard.uncaughtException).toBeUndefined();
   expect(wildcard.traceItems).toEqual(bare.traceItems);
 });
+
+test.each(['i+200', ''])('composite preview exhaustion preserves scalar evaluations and aliases: %s', (end) => {
+  const source = `import Control.Monad
+main=forM_ [1..1000::Int] $ \\i -> do
+ let a=[i..${end}]; b=[i*2..${end ? 'i*2+200' : ''}]; c=[i*3..${end ? 'i*3+200' : ''}] :: [Int]
+ let n=id(i*2)
+ let copy=id n
+ print copy`;
+  const recording = traceProgram('haskell', source, source);
+  expect(recording.uncaughtException).toBeUndefined();
+  expect(recording.stdout).toBe(Array.from({ length: 1000 }, (_, i) => `${(i + 1) * 2}\n`).join(''));
+  expect(recording.traceItems).toHaveLength(5001);
+  for (const line of [2, 4, 5, 6]) {
+    const last = recording.traceItems.findLast((item) => item.line === line);
+    expect(last?.vars.i).toBe(1000);
+    if (line >= 4) expect(last?.vars.n).toBe(2000);
+    if (line >= 5) expect(last?.vars.copy).toBe(2000);
+  }
+});
