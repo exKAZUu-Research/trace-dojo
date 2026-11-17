@@ -201,7 +201,7 @@ export abstract class CallCompiler extends BuiltinCompiler {
         ref.decl,
         index,
         args.map((each) => each.type),
-        args.map((arg) => (this.requiresComptime(arg.type, arg.span) ? arg : undefined))
+        args.map((arg) => this.comptimeArgument(arg))
       );
       declaredTypes.push(declared);
       const compiled = isTExpr(arg) ? arg : this.compile(arg, declared);
@@ -210,16 +210,16 @@ export abstract class CallCompiler extends BuiltinCompiler {
       else args.push(compiled);
     }
     const argTypes = args.map((arg) => arg.type);
-    const instance = this.instantiate(ref, argTypes, expression, args);
     void resultType;
     for (const [index, arg] of args.entries()) {
-      if (declaredTypes[index] === undefined && this.requiresComptime(arg.type, arg.span) && !arg.known) {
+      if (declaredTypes[index] === undefined && this.requiresComptime(arg.type, arg.span) && !staticResultOf(arg)) {
         this.error(
           params[index],
           'anytype のコンパイルのときだけの引数は、コンパイルのときに値が決まっていなければなりません。'
         );
       }
     }
+    const instance = this.instantiate(ref, argTypes, expression, args);
     const evaluators = args.map((arg) => (frame: Frame) => copyForFrame(frame, arg.eval(frame), arg.type));
     const row = expression.row;
     const call = runtime(
@@ -352,7 +352,7 @@ export abstract class CallCompiler extends BuiltinCompiler {
     const { decl } = ref;
     const syntax = decl.syntax;
     const paramTypes: Type[] = [];
-    const comptimeArgs = args.map((arg) => (this.requiresComptime(arg.type, arg.span) && arg.known ? arg : undefined));
+    const comptimeArgs = args.map((arg) => this.comptimeArgument(arg));
     for (const [index, param] of syntax.params.entries()) {
       const type = param.type ? this.parameterType(decl, index, paramTypes, comptimeArgs) : argTypes[index];
       if (!type)
@@ -408,6 +408,12 @@ export abstract class CallCompiler extends BuiltinCompiler {
     if (this.resolvingFields > 0) this.pendingBodies.push(compile);
     else compile();
     return instance;
+  }
+
+  private comptimeArgument(argument: TExpr): TExpr | undefined {
+    if (!this.requiresComptime(argument.type, argument.span)) return undefined;
+    const fact = staticResultOf(argument);
+    return fact ? known(argument.type, fact.value, argument.span) : undefined;
   }
 
   private readonly pendingBodies: (() => void)[] = [];

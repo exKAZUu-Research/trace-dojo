@@ -15,7 +15,7 @@ import {
   rem,
 } from './arith';
 import type { Expression, ExpressionOf, Span } from './ast';
-// code-gauge-allow-file fileNcss 694 -- The file holds one layer of the compiler, whose parts share its private state.
+// code-gauge-allow-file fileNcss 699 -- The file holds one layer of the compiler, whose parts share its private state.
 import { enumLookup } from './enumLookup';
 import { ExpressionCompiler, log2IntType } from './expressions';
 import {
@@ -35,6 +35,7 @@ import {
   signBit,
   truncateToBigInt,
 } from './floats';
+import { spendIntegerOperation } from './integerWork';
 import { sizeOf } from './layout';
 import { importStd } from './library/std';
 import { MemoryFault } from './memoryFault';
@@ -784,7 +785,7 @@ export abstract class BuiltinCompiler extends ExpressionCompiler {
     return this.derived(operand, type, apply);
   }
 
-  // code-gauge-allow functionCognitiveComplexity 19 -- Keeps the analysis and the generated code of one construct together, as Zig's Sema does.
+  // code-gauge-allow functionCognitiveComplexity 23 -- Keeps checked overflow arithmetic and phase-specific work accounting together.
   private overflowBuiltin(name: string, expression: ExpressionOf<'builtinCall'>): TExpr {
     const [leftSyntax, rightSyntax] = expression.args;
     let left = this.compile(leftSyntax);
@@ -801,10 +802,14 @@ export abstract class BuiltinCompiler extends ExpressionCompiler {
       { name: '0', type, hasDefault: false },
       { name: '1', type: bit, hasDefault: false },
     ]);
-    const compute = (a: Value, b: Value): Value => {
+    const compute = (a: Value, b: Value, frame?: Frame): Value => {
       const x = a as bigint;
       const y = b as bigint;
-      if (name === '@shlWithOverflow') checkShiftAmount(y, type);
+      const spend = (cost: number): void => (frame ? frame.runtime.spend(cost) : this.spendCompilation(cost));
+      if (name === '@shlWithOverflow') {
+        checkShiftAmount(y, type);
+        spend(Math.ceil((x.toString(2).length + Number(y)) / 64));
+      } else spendIntegerOperation(x, y, name === '@mulWithOverflow', spend);
       const exact =
         name === '@addWithOverflow'
           ? x + y
@@ -816,7 +821,7 @@ export abstract class BuiltinCompiler extends ExpressionCompiler {
       const wrapped = wrapInt(exact, type);
       return new ZStruct([wrapped, wrapped === exact ? 0n : 1n]);
     };
-    return this.combine([left, right], tuple, ([a, b]) => compute(a, b), expression);
+    return this.combine([left, right], tuple, ([a, b], frame) => compute(a, b, frame), expression);
   }
 
   private exactShift(name: string, expression: ExpressionOf<'builtinCall'>, resultType: Type | undefined): TExpr {

@@ -7695,3 +7695,25 @@ test.each(['a:void,b:u8', 'a:void,b:void'])(
     expect(executeProgram('zig', runtime)).toMatchObject({ kind: 'compileError' });
   }
 );
+
+test.each([
+  ['@mulWithOverflow(x,x)', 1200],
+  ['@addWithOverflow(x,x)', 5000],
+  ['@subWithOverflow(x,x)', 5000],
+  ['@shlWithOverflow(x,@as(u16,32768))', 1500],
+])('overflow builtin %s charges size-dependent integer work', (operation, count) => {
+  const source = `const std=@import("std");pub fn main()void{var x:u65535=std.math.maxInt(u32767);_=&x;for(0..${count})|_|{_=${operation};}std.debug.print("ok",.{});}`;
+  expect(executeProgram('zig', source)).toMatchObject({ kind: 'limitExceeded', limit: 'operations' });
+});
+
+test.each(['struct{t:type}', 'union(enum){t:type}'])(
+  'effectful %s descriptor arguments specialize without replaying effects',
+  (type) => {
+    const source = `const std=@import("std");const D=${type};fn f(o:anytype)u8{return if(o==null) 1 else (if(o.?.t==u16) 16 else 8);}pub fn main()void{const a:?D=null;const b:?D=.{.t=u16};const x=f((blk:{std.debug.print("g",.{});break :blk &a;}).*);const y=f((blk:{std.debug.print("g",.{});break :blk &b;}).*);std.debug.print("{} {}",.{x,y});}`;
+    expect(executeProgram('zig', source)).toMatchObject({
+      kind: 'executed',
+      stderr: 'gg1 16',
+      uncaughtException: undefined,
+    });
+  }
+);
