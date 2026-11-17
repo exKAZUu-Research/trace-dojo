@@ -1,0 +1,9 @@
+type Identified = { id: number };
+type User = Identified & { name: string };
+type Product = Identified & { price: number };
+type Id<T extends User | Product> = T["id"];
+type Label<T extends (Identified & { x: number }) | (Identified & { y: number }) | (Identified & { z: number })> =
+  T["id"];
+const id: Id<User> = 1;
+const label: Label<Identified & { x: number }> = 2;
+console.log(id, label);

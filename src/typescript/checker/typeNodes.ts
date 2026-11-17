@@ -163,7 +163,7 @@ export class TypeNodes {
     const [object, index] = named(node);
     const objectType = this.typeFromNode(object);
     const indexType = this.typeFromNode(index);
-    if (objectType.kind === 'typeParameter' && indexType.kind === 'literal') {
+    if (objectType.kind === 'typeParameter') {
       // A type parameter can be indexed only by the keys of its constraint, which conditional types narrow; `T extends any`
       // is as unconstrained as `T`.
       const constraint = this.c.constraintOf(objectType);
@@ -171,11 +171,11 @@ export class TypeNodes {
         constraint && !isIntrinsic(constraint, 'any') ? constraint : unknownType,
         ...this.conditionalExtendsTypes(node, objectType),
       ];
-      const key = indexType.value;
-      if (
-        (typeof key !== 'string' && typeof key !== 'number') ||
-        !constraints.some((constraint) => this.hasKey(constraint, key))
-      ) {
+      const keys = indexType.kind === 'union' ? indexType.types : [indexType];
+      const isMissing = (key: Type): boolean =>
+        (key.kind === 'literal' || isIntrinsic(key, 'string') || isIntrinsic(key, 'number')) &&
+        !constraints.some((constraint) => this.hasKey(constraint, key));
+      if (keys.some(isMissing)) {
         this.c.error(index, `型 '${this.c.print(indexType)}' は型 '${objectType.name}' のインデックスに使えません。`);
         return errorType;
       }
@@ -183,25 +183,36 @@ export class TypeNodes {
     return this.c.typeOperators.indexedAccess(objectType, indexType, index);
   }
 
-  /** Whether `keyof type` contains `key`, or `key` is numeric and `type` has a number index signature. */
-  // code-gauge-allow functionCognitiveComplexity 17 -- Follows TypeScript's keys of each kind of type a constraint can be.
-  private hasKey(type: Type, key: string | number, seen = new Set<number>()): boolean {
+  /**
+   * Whether `key`, a literal or the `string` or `number` type, is assignable to `keyof type`. Visited types are tracked
+   * per path, so a member shared by sibling alternatives keeps its answer.
+   */
+  private hasKey(type: Type, key: Type, path = new Set<number>()): boolean {
     if (isAnyLike(type) || isIntrinsic(type, 'never')) return true;
-    if (seen.has(type.id)) return false;
-    seen.add(type.id);
-    if (type.kind === 'union') return type.types.every((member) => this.hasKey(member, key, seen));
-    if (type.kind === 'intersection') return type.types.some((member) => this.hasKey(member, key, seen));
+    if (path.has(type.id)) return false;
+    path.add(type.id);
+    const result = this.hasKeyOnPath(type, key, path);
+    path.delete(type.id);
+    return result;
+  }
+
+  private hasKeyOnPath(type: Type, key: Type, path: Set<number>): boolean {
+    if (type.kind === 'union') return type.types.every((member) => this.hasKey(member, key, path));
+    if (type.kind === 'intersection') return type.types.some((member) => this.hasKey(member, key, path));
     if (type.kind !== 'object') {
       if (type.kind === 'intrinsic' && ['unknown', 'null', 'undefined', 'void', 'object'].includes(type.name))
         return false;
       const constraint = this.c.relations.isGeneric(type) ? this.c.baseConstraint(type) : this.c.apparentType(type);
-      return constraint !== type && this.hasKey(constraint, key, seen);
+      return constraint !== type && this.hasKey(constraint, key, path);
     }
     const structure = this.c.structureOf(type);
     if (structure.stringIndex) return true;
-    if (structure.numberIndex && (typeof key === 'number' || isNumericName(key))) return true;
-    const property = structure.properties.get(String(key));
-    return property !== undefined && (typeof key === 'number') === this.c.typeOperators.isNumericKey(property);
+    if (key.kind !== 'literal') return isIntrinsic(key, 'number') && structure.numberIndex !== undefined;
+    const name = key.value;
+    if (typeof name !== 'string' && typeof name !== 'number') return false;
+    if (structure.numberIndex && (typeof name === 'number' || isNumericName(name))) return true;
+    const property = structure.properties.get(String(name));
+    return property !== undefined && (typeof name === 'number') === this.c.typeOperators.isNumericKey(property);
   }
 
   /**
