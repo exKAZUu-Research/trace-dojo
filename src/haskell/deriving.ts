@@ -117,10 +117,6 @@ class Builder {
     return { k: 'lit', lit: { kind: 'int', value: BigInt(value) }, span: this.span };
   }
 
-  list(elems: RExpr[]): RExpr {
-    return { k: 'list', elems, span: this.span };
-  }
-
   lambda(local: LocalVar, body: RExpr): RExpr {
     return { k: 'lambda', pats: [this.pvar(local)], body, span: this.span };
   }
@@ -356,8 +352,7 @@ function tokensOfName(name: string): string[] {
 }
 
 function deriveEnum(builder: Builder, decl: RDataDecl): RBinding[] {
-  const cons = decl.entity.cons;
-  const all = builder.list(cons.map((con) => builder.con(con)));
+  const witness = builder.con(decl.entity.cons[0]);
   const typeName = builder.str(decl.entity.name);
   const x = builder.newVar('x');
   const y = builder.newVar('y');
@@ -366,13 +361,20 @@ function deriveEnum(builder: Builder, decl: RDataDecl): RBinding[] {
   return [
     builder.method('fromEnum', [builder.clause([builder.pvar(x)], tagOf(x))]),
     builder.method('toEnum', [
-      builder.clause([builder.pvar(n)], builder.call('derivedToEnum', typeName, all, builder.local(n))),
+      builder.clause([builder.pvar(n)], builder.call('derivedToEnum', typeName, witness, builder.local(n))),
     ]),
-    builder.method('succ', [builder.clause([builder.pvar(x)], builder.call('derivedSucc', typeName, all, tagOf(x)))]),
-    builder.method('pred', [builder.clause([builder.pvar(x)], builder.call('derivedPred', typeName, all, tagOf(x)))]),
-    builder.method('enumFrom', [builder.clause([builder.pvar(x)], builder.call('derivedEnumFrom', all, tagOf(x)))]),
+    builder.method('succ', [
+      builder.clause([builder.pvar(x)], builder.call('derivedSucc', typeName, witness, tagOf(x))),
+    ]),
+    builder.method('pred', [
+      builder.clause([builder.pvar(x)], builder.call('derivedPred', typeName, witness, tagOf(x))),
+    ]),
+    builder.method('enumFrom', [builder.clause([builder.pvar(x)], builder.call('derivedEnumFrom', witness, tagOf(x)))]),
     builder.method('enumFromThen', [
-      builder.clause([builder.pvar(x), builder.pvar(y)], builder.call('derivedEnumFromThen', all, tagOf(x), tagOf(y))),
+      builder.clause(
+        [builder.pvar(x), builder.pvar(y)],
+        builder.call('derivedEnumFromThen', witness, tagOf(x), tagOf(y))
+      ),
     ]),
   ];
 }

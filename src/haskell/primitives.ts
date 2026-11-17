@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 517 -- The primitive table lists every built-in operation the Haskell library calls.
+// code-gauge-allow-file fileNcss 519 -- The primitive table lists every built-in operation the Haskell library calls.
 import { TURTLE_METHOD_NAMES } from '../interpreter/turtleWorld';
 import { CONS_CON, tupleCon, UNIT_CON } from './builtinTypes';
 import type { ConInfo } from './entities';
@@ -710,6 +710,8 @@ define('errorEmptyList', 1, [], ([name], runtime) => {
   throw haskellError(`Prelude.${forceString(name, runtime)}: empty list`);
 });
 strict('primConTag', 1, ([a]) => BigInt((a as ConValue).con.tag));
+strict('primConCount', 1, ([a]) => BigInt((a as ConValue).con.type.cons.length));
+strict('primConAt', 2, ([a, n]) => nullary((a as ConValue).con.type.cons[Number(n as bigint)]));
 
 // ---------------------------------------------------------------------------------------------------------------
 // IO

@@ -97,6 +97,12 @@ undefined = error "Prelude.undefined"
 primConTag :: a -> Int
 primConTag = primitive "primConTag"
 
+primConCount :: a -> Int
+primConCount = primitive "primConCount"
+
+primConAt :: a -> Int -> a
+primConAt = primitive "primConAt"
+
 errorEmptyList :: [Char] -> a
 errorEmptyList = primitive "errorEmptyList"
 
@@ -757,28 +763,28 @@ boundedEnumFromThen :: (Enum a, Bounded a) => a -> a -> [a]
 boundedEnumFromThen n1 n2 = if fromEnum n2 >= fromEnum n1 then enumFromThenTo n1 n2 maxBound
                             else enumFromThenTo n1 n2 minBound
 
-derivedToEnum :: [Char] -> [a] -> Int -> a
-derivedToEnum name cons n =
-  if n >= 0 && n < length cons then cons !! n
-  else errorWithoutStackTrace ("Enum.toEnum{" ++ name ++ "}: tag (" ++ show n ++ ") is outside of enumeration's range (0," ++ show (length cons - 1) ++ ")")
+derivedToEnum :: [Char] -> a -> Int -> a
+derivedToEnum name witness n =
+  if n >= 0 && n < primConCount witness then primConAt witness n
+  else errorWithoutStackTrace ("Enum.toEnum{" ++ name ++ "}: tag (" ++ show n ++ ") is outside of enumeration's range (0," ++ show (primConCount witness - 1) ++ ")")
 
-derivedSucc :: [Char] -> [a] -> Int -> a
-derivedSucc name cons n =
-  if n + 1 >= length cons then errorWithoutStackTrace ("Enum.succ{" ++ name ++ "}: tried to take ${BT}succ' of last tag in enumeration")
-  else cons !! (n + 1)
+derivedSucc :: [Char] -> a -> Int -> a
+derivedSucc name witness n =
+  if n + 1 >= primConCount witness then errorWithoutStackTrace ("Enum.succ{" ++ name ++ "}: tried to take ${BT}succ' of last tag in enumeration")
+  else primConAt witness (n + 1)
 
-derivedPred :: [Char] -> [a] -> Int -> a
-derivedPred name cons n =
+derivedPred :: [Char] -> a -> Int -> a
+derivedPred name witness n =
   if n == 0 then errorWithoutStackTrace ("Enum.pred{" ++ name ++ "}: tried to take ${BT}pred' of first tag in enumeration")
-  else cons !! (n - 1)
+  else primConAt witness (n - 1)
 
-derivedEnumFrom :: [a] -> Int -> [a]
-derivedEnumFrom cons n = drop n cons
+derivedEnumFrom :: a -> Int -> [a]
+derivedEnumFrom witness n = n ${BT}seq${BT} map (primConAt witness) (enumFromTo n (primConCount witness - 1))
 
-derivedEnumFromThen :: [a] -> Int -> Int -> [a]
-derivedEnumFromThen cons a b =
-  let limit = if b >= a then length cons - 1 else 0
-  in map (cons !!) (enumFromThenTo a b limit)
+derivedEnumFromThen :: a -> Int -> Int -> [a]
+derivedEnumFromThen witness a b =
+  a ${BT}seq${BT} b ${BT}seq${BT} let limit = if b >= a then primConCount witness - 1 else 0
+  in map (primConAt witness) (enumFromThenTo a b limit)
 
 instance Enum Bool where
   succ False = True
