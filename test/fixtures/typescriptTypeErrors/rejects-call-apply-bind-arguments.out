@@ -1,0 +1,11 @@
+(2,26): error TS2345: Argument of type 'string' is not assignable to parameter of type 'number'.
+(3,28): error TS2322: Type 'string' is not assignable to type 'number'.
+(4,26): error TS2345: Argument of type 'string' is not assignable to parameter of type 'number'.
+(6,15): error TS2554: Expected 3 arguments, but got 2.
+(7,32): error TS2554: Expected 3 arguments, but got 4.
+(11,37): error TS2345: Argument of type 'number' is not assignable to parameter of type 'string'.
+(12,29): error TS2345: Argument of type 'string' is not assignable to parameter of type 'number'.
+(13,27): error TS2345: Argument of type '[number]' is not assignable to parameter of type '[x: number, y: number]'.
+  Source has 1 element(s) but target requires 2.
+(15,22): error TS2322: Type 'string' is not assignable to type 'number'.
+(17,26): error TS2345: Argument of type 'string' is not assignable to parameter of type 'number'.

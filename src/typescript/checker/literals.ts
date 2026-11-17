@@ -74,7 +74,7 @@ export class LiteralChecker {
       const type = this.c.expressions.check(element, context);
       return { type: isConstContext ? type : this.widenForMutableLocation(type, context), spread: false };
     });
-    if (tupleContext || isConstContext) {
+    if (tupleContext || isConstContext || isSpreadIntoCall(node)) {
       const tupleElements = types.flatMap(({ type, spread }, index) => {
         if (!spread) return [{ type: isConstContext ? regularOf(type) : type, optional: false, rest: false }];
         if (type.kind === 'object' && type.objectKind === 'tuple') return type.tuple?.elements ?? [];
@@ -626,4 +626,11 @@ export class LiteralChecker {
 
 function isObjectLiteral(type: Type): type is ObjectType {
   return type.kind === 'object' && type.objectKind === 'anonymous' && !!type.isLiteral && !type.isFunction;
+}
+
+/** Whether an array literal is spread into a call's arguments, as in `f(...[1, 2])`, where it is typed as a tuple. */
+function isSpreadIntoCall(node: TreeNode): boolean {
+  let parent = node.parent;
+  while (parent?.type === 'parenthesized_expression') parent = parent.parent;
+  return parent?.type === 'spread_element' && parent.parent?.type === 'arguments';
 }

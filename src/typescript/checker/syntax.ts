@@ -89,7 +89,8 @@ export function propertyNameText(node: TreeNode): string | undefined {
       const inner = named(node)[0];
       if (inner?.type === 'string') return stringValue(inner);
       if (inner?.type === 'number') return String(Number(inner.text.replaceAll('_', '')));
-      if (inner?.type === 'member_expression' && inner.text === 'Symbol.iterator') return '__@iterator';
+      if (inner?.type === 'member_expression' && inner.childForFieldName('object')?.text === 'Symbol')
+        return `__@${inner.childForFieldName('property')?.text}`;
       return undefined;
     }
     default: {

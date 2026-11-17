@@ -639,18 +639,26 @@ export class Checker {
     };
   }
 
-  /** A property of a type, including those `Object` and `Function` give every object and function. */
+  /**
+   * A property of a type, including those `Object` gives every object and those `CallableFunction` or
+   * `NewableFunction` give every function or class, as under `strictBindCallApply`.
+   */
   propertyOf(type: Type, name: string): Property | undefined {
     const structure = this.structureOf(type);
     const own = structure.properties.get(name);
     if (own) return own;
     const apparent = this.apparentType(type);
     if (apparent.kind !== 'object' && apparent.kind !== 'intersection') return undefined;
-    if (structure.callSignatures.length > 0 || structure.constructSignatures.length > 0) {
-      const functionProperty = this.globalType('Function').resolve().properties.get(name);
-      if (functionProperty) return functionProperty;
-    }
-    return this.globalType('Object').resolve().properties.get(name);
+    const functionInterface =
+      structure.callSignatures.length > 0
+        ? 'CallableFunction'
+        : structure.constructSignatures.length > 0
+          ? 'NewableFunction'
+          : undefined;
+    const functionProperty = functionInterface
+      ? this.globalType(functionInterface).resolve().properties.get(name)
+      : undefined;
+    return functionProperty ?? this.globalType('Object').resolve().properties.get(name);
   }
 
   signaturesOf(type: Type, kind: 'call' | 'construct'): Signature[] {

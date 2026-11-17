@@ -172,9 +172,11 @@ export class Printer {
 
   /** The members a property prints as: one per signature of a method. */
   private printProperty(property: Property): string[] {
-    const name = /^[$A-Z_a-z\u0080-￿][\w$\u0080-￿]*$/.test(property.name)
-      ? property.name
-      : JSON.stringify(property.name);
+    const name = property.name.startsWith('__@')
+      ? `[Symbol.${property.name.slice(3)}]`
+      : /^[$A-Z_a-z\u0080-￿][\w$\u0080-￿]*$/.test(property.name)
+        ? property.name
+        : JSON.stringify(property.name);
     const optional = property.optional ? '?' : '';
     const propertyType = property.type();
     if (property.isMethod && propertyType.kind === 'object') {

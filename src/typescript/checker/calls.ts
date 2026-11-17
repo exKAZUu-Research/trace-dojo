@@ -2,8 +2,9 @@
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import { unsupportedMessage } from '../unsupported';
+import { CallArity } from './callArity';
 import type { Checker, Mapper } from './checker';
-import { type InferenceRun, newInferenceRun } from './inference';
+import { type Inference, InferencePriority, type InferenceRun, newInferenceRun } from './inference';
 import { named, skipParentheses, stringValue } from './syntax';
 import {
   anyType,
@@ -34,7 +35,11 @@ export class Calls {
   /** The signature each call resolved to, for the type predicates that narrow its arguments. */
   private readonly resolved = new Map<number, Signature>();
 
-  constructor(private readonly c: Checker) {}
+  private readonly arity: CallArity;
+
+  constructor(private readonly c: Checker) {
+    this.arity = new CallArity(c);
+  }
 
   // code-gauge-allow functionCognitiveComplexity 20 -- Follows TypeScript's checks of a call's callee in order, each with its own error.
   // code-gauge-allow functionNcss 39 -- Follows TypeScript's checks of a call's callee in order, each with its own error.
@@ -363,9 +368,7 @@ export class Calls {
 
   // Resolution ---------------------------------------------------------------------------------------------------
 
-  // code-gauge-allow functionCognitiveComplexity 30 -- Tries each overload as TypeScript does.
   // code-gauge-allow functionParameterCount 7 -- Tries each overload as TypeScript does, then reports the failure as it does.
-  // code-gauge-allow functionNcss 41 -- Tries each overload as TypeScript does, then reports the failure as it does.
   private resolve(
     node: TreeNode,
     callee: TreeNode,
@@ -388,13 +391,17 @@ export class Calls {
       this.c.error(node, `型引数は ${counts.join(' か ')} 個必要ですが、${typeArguments.length} 個渡されています。`);
       return undefined;
     }
+    const instantiate = (candidate: Signature): Signature =>
+      this.instantiateFor(candidate, args, typeArguments, contextual, receiver);
     for (const candidate of candidates) {
-      if (!this.arityMatches(candidate, args)) continue;
-      const instantiated = this.c.silently(() =>
-        this.instantiateFor(candidate, args, typeArguments, contextual, receiver)
-      );
-      if (this.c.silently(() => this.argumentsMatch(instantiated, args))) {
-        const final = this.instantiateFor(candidate, args, typeArguments, contextual, receiver);
+      if (!this.arity.arityMatches(candidate, args)) continue;
+      const instantiated = this.c.silently(() => instantiate(candidate));
+      // An instantiated rest parameter, as `...args: A` with `A = [number]`, may fix the arity.
+      if (
+        this.arity.arityMatches(instantiated, args) &&
+        this.c.silently(() => this.argumentsMatch(instantiated, args))
+      ) {
+        const final = instantiate(candidate);
         this.checkArguments(final, args, true);
         if (typeArguments)
           this.c.typeNodes.checkTypeArgumentConstraints(
@@ -405,28 +412,30 @@ export class Calls {
         return { signature: final, returnType: final.returnType() };
       }
     }
-    // No overload accepts the arguments: report as TypeScript does, for the only signature or for the call.
-    if (candidates.length === 1) {
-      const candidate = candidates[0];
-      if (!this.arityMatches(candidate, args)) {
-        this.reportArity(node, callee, candidate, args);
-        for (const arg of args) this.c.expressions.check(arg);
-        return {
-          signature: candidate,
-          returnType: this.c
-            .silently(() => this.instantiateFor(candidate, args, typeArguments, contextual, receiver))
-            .returnType(),
-        };
-      }
-      const instantiated = this.instantiateFor(candidate, args, typeArguments, contextual, receiver);
-      this.checkArguments(instantiated, args, true);
-      return { signature: instantiated, returnType: instantiated.returnType() };
-    }
-    const byArity = candidates.filter((candidate) => this.arityMatches(candidate, args));
+    return this.reportUnresolved(node, callee, candidates, args, instantiate);
+  }
+
+  /** Reports that no overload accepts the arguments as TypeScript does, for the only fitting signature or the call. */
+  private reportUnresolved(
+    node: TreeNode,
+    callee: TreeNode,
+    candidates: Signature[],
+    args: TreeNode[],
+    instantiate: (candidate: Signature) => Signature
+  ): Resolution {
+    const byArity = candidates.filter((candidate) => this.arity.arityMatches(candidate, args));
+    if (candidates.length === 1 || byArity.length === 1)
+      return this.reportSignature(
+        node,
+        callee,
+        candidates.length === 1 ? candidates[0] : byArity[0],
+        args,
+        instantiate
+      );
+    for (const arg of args) this.c.expressions.check(arg);
     if (byArity.length === 0) {
-      const minimum = Math.min(...candidates.map((candidate) => this.minimumArguments(candidate)));
-      const maximum = Math.max(...candidates.map((candidate) => this.maximumArguments(candidate)));
-      for (const arg of args) this.c.expressions.check(arg);
+      const minimum = Math.min(...candidates.map((candidate) => this.arity.minimumArguments(candidate)));
+      const maximum = Math.max(...candidates.map((candidate) => this.arity.maximumArguments(candidate)));
       this.c.error(
         args.length > maximum ? args[maximum] : node,
         maximum === Number.POSITIVE_INFINITY || minimum === maximum
@@ -435,92 +444,37 @@ export class Calls {
       );
       return { signature: candidates[0], returnType: candidates[0].returnType() };
     }
-    for (const arg of args) this.c.expressions.check(arg);
     this.c.error(
       callee.type === 'member_expression' ? (callee.childForFieldName('property') ?? node) : node,
       'この呼び出しに合うオーバーロードがありません。'
     );
     const last = byArity.at(-1) as Signature;
+    return { signature: last, returnType: this.c.silently(() => instantiate(last)).returnType() };
+  }
+
+  /** Reports why the only signature that could fit does not accept the arguments. */
+  private reportSignature(
+    node: TreeNode,
+    callee: TreeNode,
+    candidate: Signature,
+    args: TreeNode[],
+    instantiate: (candidate: Signature) => Signature
+  ): Resolution {
+    const instantiated = this.arity.arityMatches(candidate, args) ? instantiate(candidate) : undefined;
+    if (instantiated && this.arity.arityMatches(instantiated, args)) {
+      this.checkArguments(instantiated, args, true);
+      return { signature: instantiated, returnType: instantiated.returnType() };
+    }
+    this.arity.reportArity(node, callee, instantiated ?? candidate, args);
+    for (const arg of args) this.c.expressions.check(arg);
     return {
-      signature: last,
-      returnType: this.c
-        .silently(() => this.instantiateFor(last, args, typeArguments, contextual, receiver))
-        .returnType(),
+      signature: instantiated ?? candidate,
+      returnType: (instantiated ?? this.c.silently(() => instantiate(candidate))).returnType(),
     };
   }
 
   private fillTypeArguments(signature: Signature, typeArguments: Type[]): Type[] {
     return this.c.fillTypeArguments(signature.typeParameters, typeArguments);
-  }
-
-  private minimumArguments(signature: Signature): number {
-    let minimum = 0;
-    for (const [index, parameter] of signature.parameters.entries()) {
-      if (!parameter.optional && !parameter.rest && !this.acceptsUndefinedOnly(parameter.type)) minimum = index + 1;
-    }
-    return minimum;
-  }
-
-  /** Whether a trailing parameter's type is `void`, which lets callers omit it. */
-  private acceptsUndefinedOnly(type: Type): boolean {
-    return isIntrinsic(type, 'void');
-  }
-
-  private maximumArguments(signature: Signature): number {
-    return signature.parameters.some((parameter) => parameter.rest)
-      ? Number.POSITIVE_INFINITY
-      : signature.parameters.length;
-  }
-
-  private spreadLength(arg: TreeNode): number | undefined {
-    if (arg.type !== 'spread_element') return 1;
-    const type = this.c.silently(() => this.c.expressions.check(named(arg)[0]));
-    if (
-      type.kind === 'object' &&
-      type.objectKind === 'tuple' &&
-      !(type.tuple?.elements ?? []).some((element) => element.rest || element.optional)
-    )
-      return type.tuple?.elements.length;
-    return undefined;
-  }
-
-  private arityMatches(signature: Signature, args: TreeNode[]): boolean {
-    let count = 0;
-    let open = false;
-    for (const arg of args) {
-      const length = this.spreadLength(arg);
-      if (length === undefined) {
-        const restIndex = signature.parameters.findIndex((parameter) => parameter.rest);
-        if (restIndex === -1 || count < restIndex) return false;
-        open = true;
-      } else count += length;
-    }
-    if (open)
-      return this.maximumArguments(signature) === Number.POSITIVE_INFINITY && count <= this.maximumArguments(signature);
-    return count >= this.minimumArguments(signature) && count <= this.maximumArguments(signature);
-  }
-
-  private reportArity(node: TreeNode, callee: TreeNode, signature: Signature, args: TreeNode[]): void {
-    const minimum = this.minimumArguments(signature);
-    const maximum = this.maximumArguments(signature);
-    const spread = args.find((arg) => arg.type === 'spread_element' && this.spreadLength(arg) === undefined);
-    if (spread && !this.arityMatches(signature, args)) {
-      this.c.error(spread, 'スプレッド構文の引数は、タプル型であるか、残余引数に渡されなければいけません。');
-      return;
-    }
-    const message =
-      maximum === Number.POSITIVE_INFINITY
-        ? `引数は少なくとも ${minimum} 個必要ですが、${args.length} 個渡されています。`
-        : minimum === maximum
-          ? `引数は ${minimum} 個必要ですが、${args.length} 個渡されています。`
-          : `引数は ${minimum} 個から ${maximum} 個必要ですが、${args.length} 個渡されています。`;
-    const at =
-      args.length > maximum
-        ? args[maximum]
-        : callee.type === 'member_expression'
-          ? (callee.childForFieldName('property') ?? node)
-          : node;
-    this.c.error(at, message);
   }
 
   /** The parameter type an argument at `index` is passed to. */
@@ -575,15 +529,14 @@ export class Calls {
     const spreadType = this.c.expressions.check(named(arg)[0]);
     if (spreadType.kind === 'object' && spreadType.objectKind === 'tuple') {
       const elements = spreadType.tuple?.elements ?? [];
-      let fits = true;
-      for (const [offset, element] of elements.entries()) {
+      const misfit = elements.findIndex((element, offset) => {
         const parameterType = this.parameterTypeAt(signature, index + offset);
-        if (parameterType && !this.c.relations.isAssignable(element.type, parameterType)) {
-          if (report) this.c.expressions.reportNotAssignable(arg, element.type, parameterType);
-          fits = false;
-        }
-      }
-      return { count: elements.length, fits };
+        return parameterType && !this.c.relations.isAssignable(element.type, parameterType);
+      });
+      // TypeScript reports the first element that does not fit.
+      if (report && misfit !== -1)
+        this.reportArgument(arg, elements[misfit].type, this.parameterTypeAt(signature, index + misfit) as Type);
+      return { count: elements.length, fits: misfit === -1 };
     }
     const element = this.c.patterns.iteratedType(arg, spreadType);
     const parameterType = this.parameterTypeAt(signature, index);
@@ -619,21 +572,20 @@ export class Calls {
     }
     const parameters = signature.typeParameters;
     const run = newInferenceRun(parameters);
+    const restIndex = this.genericRestIndex(signature);
+    this.recordImpliedArity(run, signature, args);
     // A `this` parameter infers from the object the method is called on.
     if (receiver && signature.thisType) this.c.inference.inferTypes(run, receiver, signature.thisType, true);
     // Context-insensitive arguments infer first; functions without parameter annotations then see what they inferred.
     const sensitive = args.map((arg) => this.isContextSensitive(arg));
     // `...args: T` infers `T` as the tuple of the arguments it takes.
-    const restIndex = this.genericRestIndex(signature);
-    if (restIndex !== undefined) {
-      const elements = args.slice(restIndex).map((arg) => ({
-        type: this.c.widenLiteral(this.c.silently(() => this.c.expressions.check(arg))),
-        optional: false,
-        rest: false,
-      }));
-      const restType = (signature.parameters.at(-1) as Parameter).type;
-      this.c.inference.inferTypes(run, this.c.tupleType(elements), restType, true);
-    }
+    if (restIndex !== undefined)
+      this.c.inference.inferTypes(
+        run,
+        this.argumentTuple(args.slice(restIndex)),
+        (signature.parameters.at(-1) as Parameter).type,
+        true
+      );
     for (const [index, arg] of args.entries()) {
       if (restIndex !== undefined && index >= restIndex) continue;
       if (arg.type === 'spread_element') this.inferFromSpread(run, signature, arg, index);
@@ -641,7 +593,12 @@ export class Calls {
         this.inferFromArgument(run, signature, arg, index, this.c.inference.partialMapper(parameters, run.inferences));
     }
     if (contextual)
-      this.c.inference.inferTypes({ ...run, lowPriority: true }, contextual, signature.returnType(), false);
+      this.c.inference.inferTypes(
+        { ...run, priority: InferencePriority.ReturnType },
+        contextual,
+        signature.returnType(),
+        false
+      );
     for (const [index, arg] of args.entries()) {
       if (!sensitive[index]) continue;
       // A callback's parameters fix what they mention, while its return type keeps the rest to infer from it.
@@ -662,6 +619,24 @@ export class Calls {
     return { ...this.c.instantiateSignature(signature, mapper), typeParameters: [] };
   }
 
+  /** Records how many arguments `...args: A` takes, which splits what `A` infers from `[...A, ...B]`. */
+  private recordImpliedArity(run: InferenceRun, signature: Signature, args: TreeNode[]): void {
+    const restIndex = this.genericRestIndex(signature);
+    if (restIndex === undefined || args.slice(restIndex).some((arg) => arg.type === 'spread_element')) return;
+    const restType = (signature.parameters.at(-1) as Parameter).type;
+    (run.inferences.get(restType.id) as Inference).impliedArity = args.length - restIndex;
+  }
+
+  private argumentTuple(args: TreeNode[]): Type {
+    return this.c.tupleType(
+      args.map((arg) => ({
+        type: this.c.widenLiteral(this.c.silently(() => this.c.expressions.check(arg))),
+        optional: false,
+        rest: false,
+      }))
+    );
+  }
+
   /** Where a rest parameter typed by one of the signature's own type parameters starts, as in `...args: T`. */
   private genericRestIndex(signature: Signature): number | undefined {
     const last = signature.parameters.at(-1);
@@ -674,9 +649,15 @@ export class Calls {
 
   private inferFromSpread(run: InferenceRun, signature: Signature, arg: TreeNode, index: number): void {
     const spreadType = this.c.silently(() => this.c.expressions.check(named(arg)[0]));
-    const element = this.c.silently(() => this.c.patterns.iteratedType(undefined, spreadType));
-    const parameterType = this.parameterTypeAt(signature, index);
-    if (parameterType) this.c.inference.inferTypes(run, element, parameterType, true);
+    const tuple = spreadType.kind === 'object' ? spreadType.tuple : undefined;
+    const elements =
+      tuple && !tuple.elements.some((element) => element.rest || element.optional)
+        ? tuple.elements.map((element) => element.type)
+        : [this.c.silently(() => this.c.patterns.iteratedType(undefined, spreadType))];
+    for (const [offset, element] of elements.entries()) {
+      const parameterType = this.parameterTypeAt(signature, index + offset);
+      if (parameterType) this.c.inference.inferTypes(run, element, parameterType, true);
+    }
   }
 
   private inferFromArgument(

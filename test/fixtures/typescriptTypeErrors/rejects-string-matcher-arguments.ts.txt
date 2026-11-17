@@ -1,0 +1,9 @@
+const parts = "a,b".split(1);
+console.log("abc123".match(123));
+console.log("abc".replace(1, "x"));
+console.log("abc".search(true));
+console.log("a".split({}));
+console.log("a,b".split(",", 1), "abc".match(/b/), "abc".replace("b", "x"), "abc".search("c"), "abc".replace(/b/g, (s) => s + s));
+console.log([..."abab".matchAll(/a/g)].length, "abab".replaceAll("a", "c"));
+console.log("a".match(null));
+console.log(parts);

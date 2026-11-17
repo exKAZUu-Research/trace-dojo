@@ -10,6 +10,7 @@ import {
   type Signature,
   type Structure,
   type TemplateLiteralType,
+  type TupleElement,
   type Type,
   type TypeParameter,
   unionOf,
@@ -18,24 +19,37 @@ import {
   voidType,
 } from './types';
 
-interface Inference {
+/**
+ * How indirectly a step infers, as TypeScript's `InferencePriority` flags: a candidate replaces those of a greater
+ * priority and is ignored next to those of a smaller one.
+ */
+export const InferencePriority = {
+  Direct: 0,
+  /** Through a homomorphic mapped type, as `T` in `Partial<T>`. */
+  HomomorphicMappedType: 8,
+  /** From the type the call's result is expected to have. */
+  ReturnType: 128,
+} as const;
+
+export interface Inference {
   candidates: Type[];
   contravariant: Type[];
+  /** The priority of the candidates so far. */
+  priority: number;
   /** Whether a candidate came from a position where the parameter is the whole type, not part of one. */
   topLevel: boolean;
-  /** Whether the candidates so far came only from the contextual return type, which any argument's candidate replaces. */
-  fromContext?: boolean;
+  /** How many arguments a rest parameter typed by this parameter takes, as `A` in `...args: A` does. */
+  impliedArity?: number;
 }
 
 /** The inferences for the type parameters of one call or comparison, which each inference step adds to. */
 export interface InferenceRun {
   inferences: Map<number, Inference>;
   parameters: TypeParameter[];
-  /** Whether a step only fills type parameters that nothing has inferred yet, as the contextual return type does. */
-  lowPriority: boolean;
+  priority: number;
 }
 
-type Recurse = (source: Type, target: Type, covariant?: boolean) => void;
+type Recurse = (source: Type, target: Type, covariant?: boolean, priority?: number) => void;
 
 /** Infers type arguments from the types that are matched against the types their parameters appear in. */
 export class TypeInference {
@@ -54,7 +68,8 @@ export class TypeInference {
     for (const parameter of parameters) {
       const inference = inferences.get(parameter.id);
       if (inference && (inference.candidates.length > 0 || inference.contravariant.length > 0)) {
-        mapper.set(parameter.id, this.inferredType(parameter, inference, false));
+        // A parameter fixed for a callback's parameters takes its widened type, as `0` gives `number`.
+        mapper.set(parameter.id, this.inferredType(parameter, inference, fixes(parameter)));
       } else if (fixes(parameter)) {
         mapper.set(parameter.id, parameter.constraint?.() ?? unknownType);
       }
@@ -99,7 +114,14 @@ export class TypeInference {
     const candidates = inference.candidates.map((candidate) =>
       shouldWiden ? this.c.widenLiteral(candidate) : regularOf(candidate)
     );
-    return this.commonSupertype(candidates);
+    const covariantType = this.commonSupertype(candidates);
+    // A covariant inference that fits none of the contravariant ones loses to them, as `A` in `f.call(null, ...args)`.
+    if (
+      inference.contravariant.length > 0 &&
+      !inference.contravariant.some((candidate) => this.c.relations.isAssignable(covariantType, candidate))
+    )
+      return inference.contravariant[0];
+    return covariantType;
   }
 
   private commonSupertype(candidates: Type[]): Type {
@@ -143,7 +165,8 @@ export class TypeInference {
   // code-gauge-allow functionCognitiveComplexity 19 -- Infers through each target form, including literal strings matched against template placeholders.
   inferTypes(run: InferenceRun, source: Type, target: Type, covariant: boolean, depth = 0): void {
     if (depth > 8) return;
-    const recurse: Recurse = (s, t, isCovariant = covariant) => this.inferTypes(run, s, t, isCovariant, depth + 1);
+    const recurse: Recurse = (s, t, isCovariant = covariant, priority = run.priority) =>
+      this.inferTypes({ ...run, priority }, s, t, isCovariant, depth + 1);
     if (target.kind === 'typeParameter') {
       this.inferToParameter(run, source, target, covariant, depth === 0);
       return;
@@ -169,7 +192,7 @@ export class TypeInference {
     }
     if (target.kind === 'templateLiteral' && source.kind === 'literal' && typeof source.value === 'string')
       this.inferTemplateLiteral(source.value, target, recurse);
-    if (target.kind === 'object') this.inferToObject(source, target, recurse);
+    if (target.kind === 'object') this.inferToObject(run, source, target, recurse);
   }
 
   private inferTemplateLiteral(value: string, target: TemplateLiteralType, recurse: Recurse): void {
@@ -197,16 +220,13 @@ export class TypeInference {
   ): void {
     const inference = run.inferences.get(target.id);
     if (!inference || source === errorType || isIntrinsic(source, 'never')) return;
-    if (run.lowPriority && inference.candidates.length > 0) return;
+    if (inference.candidates.length > 0 && run.priority > inference.priority) return;
     if (!covariant) {
       inference.contravariant.push(source);
       return;
     }
-    if (run.lowPriority) inference.fromContext = true;
-    else if (inference.fromContext) {
-      inference.candidates.length = 0;
-      inference.fromContext = false;
-    }
+    if (inference.candidates.length > 0 && run.priority < inference.priority) inference.candidates.length = 0;
+    inference.priority = run.priority;
     if (!inference.candidates.some((candidate) => candidate.id === source.id)) inference.candidates.push(source);
     if (topLevel) inference.topLevel = true;
   }
@@ -226,7 +246,7 @@ export class TypeInference {
   }
 
   // code-gauge-allow functionCognitiveComplexity 21 -- Follows TypeScript's order of inference for each kind of object target.
-  private inferToObject(source: Type, target: ObjectType, recurse: Recurse): void {
+  private inferToObject(run: InferenceRun, source: Type, target: ObjectType, recurse: Recurse): void {
     // An iterable or array-like target infers its element from what iterating the source gives, as a string's characters.
     if (
       target.objectKind === 'reference' &&
@@ -246,16 +266,16 @@ export class TypeInference {
     }
     if (target.objectKind === 'mapped' && target.mapped) {
       const { constraint, template } = target.mapped;
-      if (constraint.kind === 'keyof' && template.kind === 'indexedAccess') recurse(source, constraint.type);
+      if (constraint.kind === 'keyof' && template.kind === 'indexedAccess')
+        recurse(source, constraint.type, undefined, InferencePriority.HomomorphicMappedType);
       return;
     }
-    if (source.kind === 'object' && this.inferFromElements(source, target, recurse)) return;
+    if (source.kind === 'object' && this.inferFromElements(run, source, target, recurse)) return;
     this.inferFromMembers(source, target, recurse);
   }
 
   /** Infers from the type arguments or elements of related references, arrays, and tuples; whether it applied. */
-  // code-gauge-allow functionCognitiveComplexity 16 -- One case per kind of type whose elements inference matches.
-  private inferFromElements(source: ObjectType, target: ObjectType, recurse: Recurse): boolean {
+  private inferFromElements(run: InferenceRun, source: ObjectType, target: ObjectType, recurse: Recurse): boolean {
     if (source.objectKind === 'reference' && target.objectKind === 'reference' && source.target === target.target) {
       const sourceArguments = source.typeArguments ?? [];
       for (const [index, argument] of (target.typeArguments ?? []).entries()) {
@@ -268,14 +288,42 @@ export class TypeInference {
       return true;
     }
     if (source.objectKind !== 'tuple' || target.objectKind !== 'tuple') return false;
-    const sourceElements = source.tuple?.elements ?? [];
-    for (const [index, element] of (target.tuple?.elements ?? []).entries()) {
+    this.inferFromTupleElements(run, source.tuple?.elements ?? [], target.tuple?.elements ?? [], recurse);
+    return true;
+  }
+
+  private inferFromTupleElements(
+    run: InferenceRun,
+    sourceElements: TupleElement[],
+    targetElements: TupleElement[],
+    recurse: Recurse
+  ): void {
+    for (const [index, element] of targetElements.entries()) {
+      if (this.inferFromVariadicPair(run, sourceElements.slice(index), element, targetElements[index + 1], recurse))
+        break;
       if (element.rest) {
         recurse(this.c.tupleType(sourceElements.slice(index)), element.type);
         break;
       }
       if (sourceElements[index]) recurse(sourceElements[index].type, element.type);
     }
+  }
+
+  /** Infers `[...A, ...B]` by splitting the source where the arguments passed to `...args: A` end; whether it applied. */
+  private inferFromVariadicPair(
+    run: InferenceRun,
+    sourceElements: TupleElement[],
+    element: TupleElement,
+    next: TupleElement | undefined,
+    recurse: Recurse
+  ): boolean {
+    if (!element.rest || !next?.rest || element.type.kind !== 'typeParameter') return false;
+    const arity = run.inferences.get(element.type.id)?.impliedArity;
+    if (arity === undefined) return false;
+    // A source rest element, as in `(...values: number[])`, takes any count on both sides of the split.
+    const open = sourceElements.slice(0, arity).some((sourceElement) => sourceElement.rest);
+    recurse(this.c.tupleType(open ? sourceElements : sourceElements.slice(0, arity)), element.type);
+    recurse(this.c.tupleType(open ? sourceElements : sourceElements.slice(arity)), next.type);
     return true;
   }
 
@@ -330,6 +378,7 @@ export class TypeInference {
             new Map(generic.typeParameters.map((parameter) => [parameter.id, parameter.constraint?.() ?? unknownType]))
           )
         : generic;
+    if (source.thisType && target.thisType) recurse(source.thisType, target.thisType, false);
     const restIndex = target.parameters.findIndex((parameter) => parameter.rest);
     const count = Math.min(source.parameters.length, restIndex === -1 ? target.parameters.length : restIndex);
     for (let index = 0; index < count; index++) {
@@ -344,7 +393,14 @@ export class TypeInference {
             ? { type: parameter.type, optional: false, rest: true, name: parameter.name }
             : { type: parameter.type, optional: parameter.optional, rest: false, name: parameter.name }
         );
-      recurse(this.c.tupleType(rest), target.parameters[restIndex].type, false);
+      const targetRest = target.parameters.slice(restIndex);
+      recurse(
+        this.c.tupleType(rest),
+        targetRest.length === 1
+          ? targetRest[0].type
+          : this.c.tupleType(targetRest.map(({ type, optional, rest }) => ({ type, optional, rest }))),
+        false
+      );
     }
     const targetReturn = target.returnType();
     if (!isIntrinsic(targetReturn, 'void')) recurse(source.returnType(), targetReturn, true);
@@ -431,10 +487,13 @@ export class TypeInference {
 export function newInferenceRun(parameters: TypeParameter[]): InferenceRun {
   return {
     inferences: new Map(
-      parameters.map((parameter) => [parameter.id, { candidates: [], contravariant: [], topLevel: false }])
+      parameters.map((parameter) => [
+        parameter.id,
+        { candidates: [], contravariant: [], priority: InferencePriority.Direct, topLevel: false },
+      ])
     ),
     parameters,
-    lowPriority: false,
+    priority: InferencePriority.Direct,
   };
 }
 
