@@ -2,8 +2,9 @@ import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import { unsupportedMessage } from '../unsupported';
 import type { Checker, Mapper } from './checker';
+import { IndexedAccessKeys } from './indexedAccessKeys';
 import type { Sym } from './scopes';
-import { hasToken, isNumericName, named, numberValue, propertyNameText, stringValue } from './syntax';
+import { hasToken, named, numberValue, propertyNameText, stringValue } from './syntax';
 import {
   anonymousObject,
   anyType,
@@ -17,7 +18,6 @@ import {
   intersectionOf,
   isAnyLike,
   isIntrinsic,
-  type LiteralType,
   literalType,
   neverType,
   newTypeId,
@@ -95,7 +95,11 @@ export class TypeNodes {
     ['type_annotation', (node) => this.annotationType(node) ?? anyType],
   ]);
 
-  constructor(private readonly c: Checker) {}
+  private readonly indexedAccessKeys: IndexedAccessKeys;
+
+  constructor(private readonly c: Checker) {
+    this.indexedAccessKeys = new IndexedAccessKeys(c);
+  }
 
   /** How many array, tuple, and type argument nodes enclose the type node being resolved. */
   private deferredDepth = 0;
@@ -164,128 +168,16 @@ export class TypeNodes {
     const [object, index] = named(node);
     const objectType = this.typeFromNode(object);
     const indexType = this.typeFromNode(index);
-    if (objectType.kind === 'typeParameter') {
-      // A type parameter can be indexed only by the keys of its constraint, which conditional types narrow; `T extends any`
-      // is as unconstrained as `T`.
-      const constraint = this.c.constraintOf(objectType);
-      const constraints = [
-        constraint && !isIntrinsic(constraint, 'any') ? constraint : unknownType,
-        ...this.conditionalExtendsTypes(node, objectType),
-      ];
-      if (this.isInvalidKey(node, objectType, constraints, indexType, new Set())) {
-        this.c.error(index, `型 '${this.c.print(indexType)}' は型 '${objectType.name}' のインデックスに使えません。`);
-        return errorType;
-      }
+    if (
+      objectType.kind === 'typeParameter' &&
+      this.indexedAccessKeys.isInvalid(objectType, indexType, (parameter) =>
+        this.conditionalExtendsTypes(node, parameter)
+      )
+    ) {
+      this.c.error(index, `型 '${this.c.print(indexType)}' は型 '${objectType.name}' のインデックスに使えません。`);
+      return errorType;
     }
     return this.c.typeOperators.indexedAccess(objectType, indexType, index);
-  }
-
-  /**
-   * Whether `key` may name a key that none of `constraints`, the types `object` stands for, has. A type parameter key is
-   * valid when one of its constraints is, and `keyof X` is valid when `object` stands for a subtype of `X`.
-   */
-  private isInvalidKey(
-    node: TreeNode,
-    object: TypeParameter,
-    constraints: Type[],
-    key: Type,
-    visited: Set<number>
-  ): boolean {
-    const next = (member: Type): boolean => this.isInvalidKey(node, object, constraints, member, visited);
-    const isMissing = (): boolean => !constraints.some((constraint) => this.hasKey(constraint, key));
-    switch (key.kind) {
-      case 'union': {
-        return key.types.some(next);
-      }
-      case 'intersection': {
-        return key.types.every(next);
-      }
-      case 'literal': {
-        return isMissing();
-      }
-      case 'intrinsic': {
-        return key.name === 'unknown' || (['string', 'number', 'symbol'].includes(key.name) && isMissing());
-      }
-      case 'object': {
-        return true;
-      }
-      case 'keyof': {
-        return (
-          key.type.id !== object.id &&
-          !constraints.some((constraint) => this.c.relations.isAssignable(constraint, key.type))
-        );
-      }
-      case 'typeParameter': {
-        if (visited.has(key.id)) return false;
-        visited.add(key.id);
-        const constraint = this.c.constraintOf(key);
-        return [
-          constraint && !isIntrinsic(constraint, 'any') ? constraint : unknownType,
-          ...this.conditionalExtendsTypes(node, key),
-        ].every(next);
-      }
-      default: {
-        return false;
-      }
-    }
-  }
-
-  /**
-   * Whether `key`, a literal or the `string` or `number` type, is assignable to `keyof type`. Visited types are tracked
-   * per path, so a member shared by sibling alternatives keeps its answer, which one lookup remembers for every path.
-   */
-  private hasKey(type: Type, key: Type, path = new Set<number>(), answers = new Map<number, boolean>()): boolean {
-    if (isAnyLike(type) || isIntrinsic(type, 'never')) return true;
-    const known = answers.get(type.id);
-    if (known !== undefined) return known;
-    if (path.has(type.id)) return false;
-    this.c.budget.spend();
-    path.add(type.id);
-    try {
-      const result = this.hasKeyOnPath(type, key, path, answers);
-      answers.set(type.id, result);
-      return result;
-    } finally {
-      path.delete(type.id);
-    }
-  }
-
-  private hasKeyOnPath(type: Type, key: Type, path: Set<number>, answers: Map<number, boolean>): boolean {
-    const next = (member: Type): boolean => this.hasKey(member, key, path, answers);
-    if (type.kind === 'union') return type.types.every(next);
-    if (type.kind === 'intersection') return type.types.some(next);
-    if (type.kind !== 'object') {
-      if (type.kind === 'intrinsic' && ['unknown', 'null', 'undefined', 'void', 'object'].includes(type.name))
-        return false;
-      const constraint = this.c.relations.isGeneric(type) ? this.c.baseConstraint(type) : this.c.apparentType(type);
-      return constraint !== type && next(constraint);
-    }
-    return this.structureHasKey(type, key);
-  }
-
-  private structureHasKey(type: Type, key: Type): boolean {
-    const structure = this.c.structureOf(type);
-    const name = key.kind === 'literal' ? key.value : undefined;
-    if (isIntrinsic(key, 'symbol') || typeof name === 'symbol')
-      return structure.symbolIndex !== undefined || (key.kind === 'literal' && this.propertyHasKey(structure, key));
-    if (structure.stringIndex) return true;
-    if (key.kind !== 'literal') return isIntrinsic(key, 'number') && structure.numberIndex !== undefined;
-    if (typeof name !== 'string' && typeof name !== 'number') return false;
-    if (structure.numberIndex && (typeof name === 'number' || isNumericName(name))) return true;
-    return this.propertyHasKey(structure, key);
-  }
-
-  /**
-   * Whether a property is named by a literal key: by its name type when a mapped type gives it one, which may hold
-   * keys of both kinds, as `0 | "0"`, else by whether its name is written as a number.
-   */
-  private propertyHasKey(structure: Structure, key: LiteralType): boolean {
-    const property = structure.properties.get(String(key.value));
-    if (!property?.nameType)
-      return property !== undefined && (typeof key.value === 'number') === this.c.typeOperators.isNumericKey(property);
-    return (property.nameType.kind === 'union' ? property.nameType.types : [property.nameType]).some(
-      (member) => member.kind === 'literal' && member.value === key.value
-    );
   }
 
   /**
