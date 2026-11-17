@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 808 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 815 -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 // oxlint-disable unicorn/prefer-code-point -- PHP strings hold bytes as code units 0–255, which charCodeAt and fromCharCode read and write as they are.
 import { lower } from './bytes';
@@ -8,7 +8,7 @@ import { compareBytes, compareNumbers, debugType, floatFitsInt, normalizeKeyStri
 import { deprecated, throwError, warn } from './errors';
 import { cast } from './interp';
 import { naturalCompare } from './libString';
-import { defineAlias, defineConstant, defineFunction } from './native';
+import { defineAlias, defineConstant, defineFunction, markInlined } from './native';
 import { arithmetic, compare, looseEquals, strictEquals, toFloat, toKey, toStr } from './operators';
 import { ElementPlace, share, VarPlace } from './places';
 import { rt } from './runtime';
@@ -87,6 +87,8 @@ defineFunction('count(Countable|array $value, int $mode = COUNT_NORMAL): int', (
   throwError('TypeError', `count(): Argument #1 ($value) must be of type Countable|array, ${valueName(value)} given`);
 });
 defineAlias('sizeof', 'count');
+markInlined('count');
+markInlined('sizeof');
 
 function countRecursive(array: PhpArray): number {
   let count = array.size;
@@ -150,6 +152,7 @@ defineFunction('array_key_exists($key, array $array): bool', ({ args }) => {
     );
   return array.has(arrayKeyOf(key));
 });
+markInlined('array_key_exists');
 defineAlias('key_exists', 'array_key_exists');
 
 function arrayKeyOf(key: Value): Key {
@@ -181,13 +184,12 @@ defineFunction('array_keys(array $array, mixed $filter_value = UNKNOWN, bool $st
   }
   return keys;
 });
-defineFunction('array_values(array $array): array', ({ args }) =>
-  PhpArray.list(
-    arr(args[0])
-      .values()
-      .map((value) => share(value))
-  )
-);
+defineFunction('array_values(array $array): array', ({ args }) => {
+  const array = arr(args[0]);
+  // PHP returns a list as it is, sharing it with its internal pointer.
+  if (array.isList()) return share(array);
+  return PhpArray.list(array.values().map((value) => share(value)));
+});
 defineFunction('array_is_list(array $array): bool', ({ args }) => arr(args[0]).isList());
 defineFunction('in_array(mixed $needle, array $haystack, bool $strict = false): bool', ({ args }) => {
   const [needle, haystack, strict] = args;
@@ -697,9 +699,10 @@ function accumulate(name: string, op: string, word: string, total: Value, value:
     warn(`${name}(): ${word} is not supported on type ${debugType(value)}`);
     return total;
   }
+  // A string that holds no number counts as 0, after the same warning.
   if (typeof value === 'string' && conversionsModule.numericPrefix(value) === undefined) {
-    warn(`A non-numeric value encountered`);
-    return total;
+    warn(`${name}(): ${word} is not supported on type string`);
+    return arithmetic(op, total, 0n);
   }
   return arithmetic(op, total, value === null || typeof value === 'boolean' ? (value ? 1n : 0n) : value);
 }

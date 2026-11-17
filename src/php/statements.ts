@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 483 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 518 -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import { ExecutionLimitError } from '../interpreter/limits';
 import { assignTo, bindRef, destructure, placeOf, unsetTarget } from './assignment';
@@ -6,7 +6,7 @@ import type { Expr, FunctionDecl, Program, Stmt } from './ast';
 import { nestedBodies } from './astAnalysis';
 import { lower } from './bytes';
 import { callMethod } from './callables';
-import { invoke, setBodyRunner, setDefaultEvaluator } from './calls';
+import { asInternal, invoke, setBodyRunner, setDefaultEvaluator } from './calls';
 import {
   canDeclareEarly,
   declareClass,
@@ -373,7 +373,6 @@ function staticDeclaration(statement: Extract<Stmt, { k: 'static' }>, frame: Fra
   }
 }
 
-// code-gauge-allow functionNcss 48 -- One case per statement kind, as PHP runs each kind differently.
 function tryStatement(statement: Extract<Stmt, { k: 'try' }>, seek?: string): Completion {
   const runtime = rt();
   let completion: Completion;
@@ -419,11 +418,46 @@ function tryStatement(statement: Extract<Stmt, { k: 'try' }>, seek?: string): Co
     const frame = runtime.frame;
     if (completion?.t === 'return') frame.temporaries.push(completion.v);
     if (pending instanceof PhpThrow) frame.temporaries.push(pending.object);
-    const finalCompletion = execList(statement.fin, inFinally ? seek : undefined);
+    let finalCompletion: Completion;
+    try {
+      finalCompletion = execList(statement.fin, inFinally ? seek : undefined);
+    } catch (error) {
+      // An exception thrown while another one unwinds takes that one as its previous one.
+      if (error instanceof PhpThrow && pending instanceof PhpThrow) setPrevious(error.object, pending.object);
+      throw error;
+    }
     if (finalCompletion) return finalCompletion;
     if (failed) throw pending;
   }
   return completion;
+}
+
+/** Appends `previous` to the end of the chain of previous exceptions of `exception`, as zend_exception_set_previous does. */
+function setPrevious(exception: PhpObject, previous: PhpObject): void {
+  if (exception === previous) return;
+  for (let current = exception; ;) {
+    for (let ancestor = previousOf(previous); ancestor instanceof PhpObject; ancestor = previousOf(ancestor)) {
+      if (ancestor === current) return;
+    }
+    const next = previousOf(current);
+    if (!(next instanceof PhpObject)) {
+      current.props.set(previousKey(current), previous);
+      return;
+    }
+    current = next;
+  }
+}
+
+function previousOf(exception: PhpObject): Value {
+  const slot = exception.props.get(previousKey(exception));
+  return slot instanceof Ref ? slot.v : ((slot as Value | undefined) ?? null);
+}
+
+/** The key of the private `previous` property, which Exception or Error declares. */
+function previousKey(exception: PhpObject): string {
+  let base = exception.cls;
+  while (base.parent) base = base.parent;
+  return `\0${base.name}\0previous`;
 }
 
 function catches(object: PhpObject, name: string): boolean {
@@ -432,7 +466,6 @@ function catches(object: PhpObject, name: string): boolean {
 }
 
 // code-gauge-allow functionCognitiveComplexity 27 -- One case per statement kind, as PHP runs each kind differently.
-// code-gauge-allow functionNcss 43 -- One case per statement kind, as PHP runs each kind differently.
 function foreachStatement(statement: Extract<Stmt, { k: 'foreach' }>): Completion {
   const runtime = rt();
   const frame = runtime.frame;
@@ -448,18 +481,7 @@ function foreachStatement(statement: Extract<Stmt, { k: 'foreach' }>): Completio
       warn(`foreach() argument must be of type array|object, ${valueName(container)} given`);
       return undefined;
     }
-    const array = writableContainer(place) as PhpArray;
-    for (const key of array.map.keys()) {
-      runtime.spend();
-      if (!array.map.has(key)) continue;
-      const ref = new ElementPlace(array, key).ref();
-      bindForeachRef(statement.value, ref);
-      if (statement.key) assignTo(statement.key, key);
-      runtime.steps.stepBinding(statement.row, true);
-      const result = loopBody(statement.body);
-      if (result !== 'next') return result;
-    }
-    return undefined;
+    return foreachArrayByRef(statement, writableContainer(place) as PhpArray);
   }
   const subject = ev(statement.subject);
   if (subject instanceof PhpObject) return foreachObject(statement, subject);
@@ -474,6 +496,21 @@ function foreachStatement(statement: Extract<Stmt, { k: 'foreach' }>): Completio
     const value = slot instanceof Ref ? slot.v : slot;
     const completion = foreachIteration(statement, key, value);
     if (completion !== 'next') return completion;
+  }
+  return undefined;
+}
+
+function foreachArrayByRef(statement: Extract<Stmt, { k: 'foreach' }>, array: PhpArray): Completion {
+  const runtime = rt();
+  for (const key of array.map.keys()) {
+    runtime.spend();
+    if (!array.map.has(key)) continue;
+    const ref = new ElementPlace(array, key).ref();
+    bindForeachRef(statement.value, ref);
+    if (statement.key) assignTo(statement.key, key);
+    runtime.steps.stepBinding(statement.row, true);
+    const result = loopBody(statement.body);
+    if (result !== 'next') return result;
   }
   return undefined;
 }
@@ -502,11 +539,16 @@ function bindForeachRef(target: Expr, ref: Ref): void {
   else bindRef(target, ref);
 }
 
-// code-gauge-allow functionCognitiveComplexity 23 -- One case per statement kind, as PHP runs each kind differently.
-// code-gauge-allow functionNcss 34 -- One case per statement kind, as PHP runs each kind differently.
+// code-gauge-allow functionCognitiveComplexity 27 -- One case per statement kind, as PHP runs each kind differently.
+// code-gauge-allow functionNcss 42 -- One case per statement kind, as PHP runs each kind differently.
 function foreachObject(statement: Extract<Stmt, { k: 'foreach' }>, object: PhpObject): Completion {
   const runtime = rt();
   const iterator = iteratorOf(object);
+  // PHP's own array iterators let foreach change their elements by reference.
+  const storage = iterator?.internal as { writable?: () => PhpArray } | undefined;
+  if (iterator && statement.byRef && typeof storage?.writable === 'function') {
+    return foreachArrayByRef(statement, storage.writable());
+  }
   if (iterator) {
     runtime.frame.temporaries.push(iterator);
     callMethod(iterator, 'rewind', []);
@@ -522,7 +564,12 @@ function foreachObject(statement: Extract<Stmt, { k: 'foreach' }>, object: PhpOb
     return undefined;
   }
   const scope = runtime.frame.scope;
-  for (const [name] of visibleProps(object, scope)) {
+  // PHP walks the property table as it is, so a property the loop adds is visited too.
+  const visited = new Set<string>();
+  for (;;) {
+    const name = visibleProps(object, scope).find(([candidate]) => !visited.has(candidate))?.[0];
+    if (name === undefined) break;
+    visited.add(name);
     runtime.spend();
     if (statement.byRef) {
       const ref = propRef(object, name, scope);
@@ -577,20 +624,19 @@ setBodyRunner(runBody);
 setDestructor((object) => {
   const destructor = object.cls.findMethod('__destruct');
   if (!destructor) return;
-  invoke(
-    { fn: destructor.fn, thisObj: object, scope: destructor.scope, staticClass: object.cls, method: destructor },
-    [],
-    undefined
+  // Traces show a destructor as called by the engine, not from the line that released its object.
+  asInternal(() =>
+    invoke(
+      { fn: destructor.fn, thisObj: object, scope: destructor.scope, staticClass: object.cls, method: destructor },
+      [],
+      undefined
+    )
   );
 });
 setObjectConversions(
   (object) => {
     const method = object.cls.findMethod('__tostring');
-    if (!method)
-      throwError(
-        'Error',
-        `Object of class ${object.cls.isAnonymous ? 'class@anonymous' : object.cls.name} could not be converted to string`
-      );
+    if (!method) throwError('Error', `Object of class ${object.cls.name} could not be converted to string`);
     const result = invoke(
       { fn: method.fn, thisObj: object, scope: method.scope, staticClass: object.cls, method },
       [],

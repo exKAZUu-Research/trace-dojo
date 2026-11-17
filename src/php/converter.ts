@@ -186,7 +186,7 @@ export class Converter extends DeclarationConverter {
       case 'class_declaration':
       case 'interface_declaration':
       case 'trait_declaration': {
-        return [{ k: 'class', decl: this.classDecl(node), row }];
+        return [{ k: 'class', decl: this.classDecl(node, false, topLevel), row }];
       }
       case 'enum_declaration': {
         this.unsupported(node, '列挙型（enum）');

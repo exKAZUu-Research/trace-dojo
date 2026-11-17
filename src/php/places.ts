@@ -1,7 +1,7 @@
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import { deprecated, throwError, warn } from './errors';
 import type { Frame } from './runtime';
-import { type Key, PhpArray, PhpObject, Ref, type Value } from './values';
+import { type Key, PhpArray, PhpObject, type PropDecl, Ref, type Value } from './values';
 
 /** A location a program writes to: a variable, an element, a property, or a static property. */
 export interface Place {
@@ -11,6 +11,13 @@ export interface Place {
   /** The location as a reference, which `=&`, by-reference arguments, and `global` share. */
   ref(): Ref;
   unset(): void;
+  /** The declaration of the property the place is, whose type limits what the place holds. */
+  declaration?(): PropDecl | undefined;
+  /**
+   * The place a nested write (`$place[] = 1`) changes: the place itself, or another one for a property that `__get`
+   * provides or an element that `offsetGet` provides. Throws where the place may not change that way.
+   */
+  nested?(): Place;
 }
 
 /** Marks an array as held by more than one holder, so that the next write copies it. */
@@ -31,7 +38,7 @@ export class VarPlace implements Place {
 
   set(value: Value): void {
     const ref = this.frame.vars.get(this.name);
-    if (ref) ref.v = value;
+    if (ref) ref.assign(value);
     else this.frame.vars.set(this.name, new Ref(value));
   }
 
@@ -70,7 +77,7 @@ export class RefPlace implements Place {
   }
 
   set(value: Value): void {
-    this.target.v = value;
+    this.target.assign(value);
   }
 
   ref(): Ref {

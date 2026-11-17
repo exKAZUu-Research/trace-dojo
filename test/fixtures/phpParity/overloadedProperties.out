@@ -1,0 +1,32 @@
+get(arr)
+
+Notice: Indirect modification of overloaded property M::$arr has no effect in /main.php on line 4
+get(arr)
+
+Notice: Indirect modification of overloaded property M::$arr has no effect in /main.php on line 5
+get(arr)
+array(0) {
+}
+array(2) {
+  [0]=>
+  int(1)
+  [1]=>
+  int(2)
+}
+get k
+
+Notice: Indirect modification of overloaded element of AA has no effect in /main.php on line 10
+set k
+get k
+
+Notice: Indirect modification of overloaded element of AA has no effect in /main.php on line 10
+isset(m)
+get(m)
+bool(true)
+isset(m)
+get(m)
+
+Fatal error: Uncaught Error: Cannot use object of type I2 as array in /main.php:13
+Stack trace:
+#0 {main}
+  thrown in /main.php on line 13

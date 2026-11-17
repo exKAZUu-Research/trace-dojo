@@ -2,7 +2,7 @@
 import { callMethod, callValue } from './callables';
 import { type CallRecord, callStack } from './calls';
 import { createObject, findClass } from './classes';
-import { formatFloatRepr } from './conversions';
+import { formatFloat } from './conversions';
 import { setErrorFactories } from './errors';
 import { type ClassDefinition, defineClass, type NativeMethod } from './native';
 import { toStr } from './operators';
@@ -42,7 +42,9 @@ function traceArray(records: CallRecord[]): PhpArray {
       frame.set('class', record.className);
       frame.set('type', record.type ?? '::');
     }
-    frame.set('args', PhpArray.list(record.args));
+    const args = PhpArray.list(record.args);
+    for (const [name, value] of record.named ?? []) args.set(name, value);
+    frame.set('args', args);
     trace.append(frame);
   }
   return trace;
@@ -53,7 +55,8 @@ export function traceText(records: CallRecord[]): string {
   const lines = records.map((record, index) => {
     const where = record.row === undefined ? '[internal function]' : `${SCRIPT_PATH}(${record.row + 1})`;
     const name = record.className ? `${record.className}${record.type}${record.name}` : record.name;
-    return `#${index} ${where}: ${name}(${record.args.map((arg) => traceArg(arg)).join(', ')})`;
+    const named = (record.named ?? []).map(([key, arg]) => `${key}: ${traceArg(arg)}`);
+    return `#${index} ${where}: ${name}(${[...record.args.map((arg) => traceArg(arg)), ...named].join(', ')})`;
   });
   lines.push(`#${records.length} {main}`);
   return lines.join('\n');
@@ -76,9 +79,8 @@ function traceArrayText(trace: Value): string {
     const args = frame.get('args');
     const argsText =
       args instanceof PhpArray
-        ? args
-            .values()
-            .map((arg) => traceArg(arg))
+        ? [...args.entries()]
+            .map(([key, arg]) => (typeof key === 'string' ? `${key}: ${traceArg(arg)}` : traceArg(arg)))
             .join(', ')
         : '';
     lines.push(`#${index++} ${where}: ${name}(${argsText})`);
@@ -97,14 +99,34 @@ function traceArg(value: Value): string {
       return value.toString();
     }
     case 'number': {
-      return formatFloatRepr(value);
+      const text = formatFloat(value, 14);
+      return Number.isFinite(value) && !/[.E]/.test(text) ? `${text}.0` : text;
     }
     case 'string': {
-      return value.length > 15 ? `'${value.slice(0, 15)}...'` : `'${value}'`;
+      const shown = escapeTraceString(value.slice(0, 15));
+      return value.length > 15 ? `'${shown}...'` : `'${shown}'`;
     }
   }
   if (value instanceof PhpArray) return 'Array';
   return `Object(${(value as PhpObject).cls.name})`;
+}
+
+const TRACE_ESCAPES: Record<string, string> = {
+  '\n': 'n',
+  '\r': 'r',
+  '\t': 't',
+  '\f': 'f',
+  '\v': 'v',
+  '\\': '\\',
+  '\u001B': 'e',
+};
+
+/** Escapes the bytes of a string argument in a stack trace as PHP's smart_str_append_escaped does. */
+function escapeTraceString(text: string): string {
+  return text.replaceAll(/[\0-\u001F\\\u007F-\u00FF]/g, (char) => {
+    const escape = TRACE_ESCAPES[char];
+    return `\\${escape ?? `x${(char.codePointAt(0) as number).toString(16).toUpperCase().padStart(2, '0')}`}`;
+  });
 }
 
 /** The text of a throwable as `__toString` gives it, which an uncaught exception prints. */
@@ -123,13 +145,20 @@ function defaultThrowableText(object: PhpObject): string {
     current = current.props.get(privateKey(current, 'previous')) as Value;
   }
   for (const item of chain.toReversed()) {
-    const message = toStr(item.props.get('message') as Value);
+    const message = describedMessage(item);
     const header = message === '' ? item.cls.name : `${item.cls.name}: ${message}`;
     const line = item.props.get('line');
     const text = `${header} in ${toStr(item.props.get('file') as Value)}:${toStr(line as Value)}\nStack trace:\n${traceArrayText(item.props.get(privateKey(item, 'trace')) as Value)}`;
     parts.push(text);
   }
   return parts.join('\n\nNext ');
+}
+
+/** The message as `__toString` writes it, which names where PHP declared the function an argument error is about. */
+function describedMessage(object: PhpObject): string {
+  const message = toStr(slotValue(object, 'message'));
+  const exact = object.cls.name === 'TypeError' || object.cls.name === 'ArgumentCountError';
+  return exact && message.includes(', called in ') ? `${message} and defined` : message;
 }
 
 function createThrowable(className: string, message: string, code = 0n): PhpObject {

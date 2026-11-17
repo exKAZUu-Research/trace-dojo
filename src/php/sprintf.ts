@@ -1,218 +1,300 @@
 // oxlint-disable unicorn/prefer-code-point -- PHP strings hold bytes as code units 0–255, which charCodeAt and fromCharCode read and write as they are.
-import { notice, throwError } from './errors';
+import { callStack } from './calls';
+import { floatFitsInt, formatFloatRepr, numericPrefix } from './conversions';
+import { fatal, notice, throwError, warn } from './errors';
 import { toFloat, toInt, toStr } from './operators';
 import { exponentialText, fixedDigits, generalText } from './strings';
 import type { Value } from './values';
 
 const MAX_FLOAT_PRECISION = 53;
+const INT_LIMIT = 2_147_483_647;
+const NEXT_ARG = -1;
+const FLOAT_SPECIFIERS = new Set('eEfFgGhH');
+const RADIXES: Record<string, number | undefined> = { o: 8, x: 16, X: 16, b: 2 };
 
-/** Formats like PHP's `sprintf`, whose `%e` writes the shortest exponent and whose `%f` rounds half to even. */
+interface Parser {
+  format: string;
+  index: number;
+  args: Value[];
+  currentArg: number;
+  maxMissingArg: number;
+}
+
+interface Spec {
+  argIndex: number;
+  alignLeft: boolean;
+  padding: string;
+  alwaysSign: boolean;
+  width: number;
+  precision: number;
+  /** Whether the format gave a precision, even an empty one, which the float conversions use instead of 6. */
+  hasPrecision: boolean;
+  /** Whether the format gave precision digits, which cut strings and integer conversions. */
+  cutsText: boolean;
+}
+
+/**
+ * Formats like PHP's `php_formatted_print`, whose `%e` writes the shortest exponent and whose `%f` rounds half to even.
+ * A conversion whose argument is missing is skipped, and the error naming the largest missing argument is thrown at the
+ * end, after the errors of the later conversions.
+ */
 export function formatPrintf(format: string, args: Value[], fromArray = false): string {
+  const name = callStack.at(-1)?.name ?? 'sprintf';
+  const parser: Parser = { format, index: 0, args, currentArg: 0, maxMissingArg: -1 };
   let result = '';
-  let index = 0;
-  let currentArg = 0;
-  const readNumber = (): number => {
-    let digits = '';
-    while (index < format.length && /\d/.test(format[index])) digits += format[index++];
-    const value = Number(digits);
-    if (value > 2_147_483_646) throwError('ValueError', 'Width must be greater than zero and less than 2147483647');
-    return value;
-  };
-  while (index < format.length) {
-    const char = format[index];
-    if (char !== '%') {
-      result += char;
-      index++;
-      continue;
+  while (parser.index < format.length) {
+    const percent = format.indexOf('%', parser.index);
+    if (percent === -1) {
+      result += format.slice(parser.index);
+      break;
     }
-    if (format[index + 1] === '%') {
+    result += format.slice(parser.index, percent);
+    parser.index = percent + 1;
+    if (format[parser.index] === '%') {
       result += '%';
-      index += 2;
+      parser.index++;
       continue;
     }
-    index++;
-    let alignLeft = false;
-    let padding = ' ';
-    let alwaysSign = false;
-    let width = 0;
-    let precision = 0;
-    let hasPrecision = false;
-    let argIndex: number;
-    if (!/[A-Za-z]/.test(format[index] ?? '')) {
-      let lookahead = index;
-      while (/\d/.test(format[lookahead] ?? '')) lookahead++;
-      if (format[lookahead] === '$') {
-        const number = readNumber();
-        if (number <= 0)
-          throwError('ValueError', 'Argument number specifier must be greater than zero and less than 2147483647');
-        argIndex = number - 1;
-        index++;
-      } else argIndex = currentArg++;
-      for (; ; index++) {
-        const modifier = format[index];
-        if (modifier === ' ' || modifier === '0') padding = modifier;
-        else if (modifier === '-') alignLeft = true;
-        else if (modifier === '+') alwaysSign = true;
-        else if (modifier === "'") {
-          if (index + 1 < format.length) padding = format[++index];
-          else throwError('ValueError', 'Missing padding character');
-        } else break;
-      }
-      if (format[index] === '*') {
-        index++;
-        const widthArg = args[currentArg++];
-        if (widthArg === undefined)
-          throwError('ArgumentCountError', `${args.length + 1} arguments are required, ${args.length + 1} given`);
-        if (typeof widthArg !== 'bigint') throwError('ValueError', 'Width must be an integer');
-        width = Number(widthArg);
-        if (format[index] !== '.' && argIndex === currentArg - 2) argIndex = currentArg++;
-      } else if (/\d/.test(format[index] ?? '')) width = readNumber();
-      if (format[index] === '.') {
-        index++;
-        if (format[index] === '*') {
-          index++;
-          const precisionArg = args[currentArg++];
-          if (typeof precisionArg !== 'bigint') throwError('ValueError', 'Precision must be an integer');
-          precision = Number(precisionArg);
-          hasPrecision = true;
-        } else if (/\d/.test(format[index] ?? '')) {
-          precision = readNumber();
-          hasPrecision = true;
-        } else {
-          precision = 0;
-          hasPrecision = true;
-        }
-      }
-    } else argIndex = currentArg++;
-    if (format[index] === 'l') index++;
-    const specifier = format[index];
-    if (specifier === undefined) throwError('ValueError', 'Missing format specifier at end of string');
-    if (specifier !== '%' && argIndex >= args.length) {
-      if (fromArray)
-        throwError('ValueError', `The arguments array must contain ${argIndex + 1} items, ${args.length} given`);
-      throwError('ArgumentCountError', `${argIndex + 2} arguments are required, ${args.length + 1} given`);
-    }
-    const arg = args[argIndex];
-    switch (specifier) {
-      case 's': {
-        const text = toStr(arg);
-        result += pad(hasPrecision ? text.slice(0, precision) : text, width, padding, alignLeft, false, alwaysSign);
-        break;
-      }
-      case 'd': {
-        const value = toInt(arg);
-        const text = value < 0n ? `-${-value}` : alwaysSign ? `+${value}` : `${value}`;
-        result += pad(text, width, alignLeft && padding === '0' ? ' ' : padding, alignLeft, value < 0n, alwaysSign);
-        break;
-      }
-      case 'u': {
-        const value = BigInt.asUintN(64, toInt(arg));
-        result += pad(value.toString(), width, alignLeft && padding === '0' ? ' ' : padding, alignLeft, false, false);
-        break;
-      }
-      case 'e':
-      case 'E':
-      case 'f':
-      case 'F':
-      case 'g':
-      case 'G':
-      case 'h':
-      case 'H': {
-        result += formatFloatSpec(
-          toFloat(arg),
-          specifier,
-          width,
-          padding,
-          alignLeft,
-          hasPrecision ? precision : undefined,
-          alwaysSign
-        );
-        break;
-      }
-      case 'c': {
-        result += String.fromCharCode(Number(BigInt.asUintN(8, toInt(arg))));
-        break;
-      }
-      case 'o':
-      case 'x':
-      case 'X':
-      case 'b': {
-        const value = BigInt.asUintN(64, toInt(arg));
-        const radix = specifier === 'o' ? 8 : specifier === 'b' ? 2 : 16;
-        let text = value.toString(radix);
-        if (specifier === 'X') text = text.toUpperCase();
-        result += pad(text, width, padding, alignLeft, false, false);
-        break;
-      }
-      case '%': {
-        result += '%';
-        break;
-      }
-      default: {
-        throwError('ValueError', `Unknown format specifier "${specifier}"`);
-      }
-    }
-    index++;
+    const spec = parseSpec(parser);
+    if (!spec) continue;
+    result += convert(spec, format[parser.index], args[spec.argIndex], result.length, name);
+    parser.index++;
+  }
+  if (parser.maxMissingArg >= 0) {
+    if (fromArray)
+      throwError(
+        'ValueError',
+        `The arguments array must contain ${parser.maxMissingArg + 1} items, ${args.length} given`
+      );
+    const extra = name === 'fprintf' ? 2 : 1;
+    throwError(
+      'ArgumentCountError',
+      `${parser.maxMissingArg + extra + 1} arguments are required, ${args.length + extra} given`
+    );
   }
   return result;
 }
 
-function pad(
-  text: string,
-  width: number,
-  padding: string,
-  alignLeft: boolean,
-  negative: boolean,
-  alwaysSign: boolean
-): string {
-  const count = Math.max(width - text.length, 0);
-  if (count === 0) return text;
-  if (alignLeft) return text + padding.repeat(count);
-  if ((negative || alwaysSign) && padding === '0' && /^[+-]/.test(text))
-    return text[0] + '0'.repeat(count) + text.slice(1);
-  return padding.repeat(count) + text;
+/** Reads a conversion up to its specifier, or returns undefined when an argument it needs is missing. */
+function parseSpec(parser: Parser): Spec | undefined {
+  const spec: Spec = {
+    argIndex: NEXT_ARG,
+    alignLeft: false,
+    padding: ' ',
+    alwaysSign: false,
+    width: 0,
+    precision: 0,
+    hasPrecision: false,
+    cutsText: false,
+  };
+  if (!/[A-Za-z]/.test(parser.format[parser.index] ?? '')) {
+    spec.argIndex = readArgIndex(parser);
+    readModifiers(parser, spec);
+    if (!readWidth(parser, spec) || !readPrecision(parser, spec)) return undefined;
+  }
+  if (parser.format[parser.index] === 'l') parser.index++;
+  if (spec.argIndex === NEXT_ARG) spec.argIndex = parser.currentArg++;
+  if (!hasArg(parser, spec.argIndex)) return undefined;
+  if (spec.cutsText && spec.precision === -1 && !/[gGhH]/.test(parser.format[parser.index] ?? ''))
+    throwError('ValueError', 'Precision -1 is only supported for %g, %G, %h and %H');
+  return spec;
 }
 
-// code-gauge-allow functionCognitiveComplexity 19 -- Transcribes PHP's algorithm for this function step by step, whose branches mirror PHP's.
-// code-gauge-allow functionParameterCount 7 -- Transcribes PHP's algorithm for this function step by step, whose branches mirror PHP's.
-function formatFloatSpec(
-  value: number,
-  specifier: string,
-  width: number,
-  padding: string,
-  alignLeft: boolean,
-  requested: number | undefined,
-  alwaysSign: boolean
-): string {
-  let precision = requested ?? 6;
-  if (precision > MAX_FLOAT_PRECISION) {
-    notice(`Requested precision of ${precision} digits was truncated to PHP maximum of ${MAX_FLOAT_PRECISION} digits`);
-    precision = MAX_FLOAT_PRECISION;
+/** Reads an `n$` argument number, or returns NEXT_ARG when there is none. */
+function readArgIndex(parser: Parser): number {
+  let lookahead = parser.index;
+  while (/\d/.test(parser.format[lookahead] ?? '')) lookahead++;
+  if (parser.format[lookahead] !== '$') return NEXT_ARG;
+  const number = readNumber(parser);
+  if (number <= 0)
+    throwError('ValueError', `Argument number specifier must be greater than zero and less than ${INT_LIMIT}`);
+  parser.index++;
+  return number - 1;
+}
+
+/** Reads a decimal number as `php_sprintf_getnumber` does, returning -1 for one out of the int range. */
+function readNumber(parser: Parser): number {
+  let digits = '';
+  while (/\d/.test(parser.format[parser.index] ?? '')) digits += parser.format[parser.index++];
+  const value = Number(digits);
+  return value >= INT_LIMIT ? -1 : value;
+}
+
+function readModifiers(parser: Parser, spec: Spec): void {
+  for (; ; parser.index++) {
+    const modifier = parser.format[parser.index];
+    if (modifier === ' ' || modifier === '0') spec.padding = modifier;
+    else if (modifier === '-') spec.alignLeft = true;
+    else if (modifier === '+') spec.alwaysSign = true;
+    else if (modifier === "'") {
+      if (parser.index + 1 >= parser.format.length) throwError('ValueError', 'Missing padding character');
+      spec.padding = parser.format[++parser.index];
+    } else return;
   }
-  if (Number.isNaN(value)) return pad('NaN', width, padding, alignLeft, false, alwaysSign);
-  if (!Number.isFinite(value)) {
-    const text = value < 0 ? '-Inf' : alwaysSign ? '+Inf' : 'Inf';
-    return pad(text, width, padding, alignLeft, value < 0, alwaysSign);
+}
+
+function readWidth(parser: Parser, spec: Spec): boolean {
+  if (parser.format[parser.index] === '*') {
+    parser.index++;
+    const width = readStarArg(parser, 'Width', 0);
+    if (width === undefined) return false;
+    spec.width = width;
+  } else if (/\d/.test(parser.format[parser.index] ?? '')) {
+    spec.width = readNumber(parser);
+    if (spec.width < 0) throwError('ValueError', `Width must be between 0 and ${INT_LIMIT}`);
   }
-  const negative = value < 0 || Object.is(value, -0);
-  let body: string;
+  return true;
+}
+
+function readPrecision(parser: Parser, spec: Spec): boolean {
+  if (parser.format[parser.index] !== '.') return true;
+  parser.index++;
+  spec.hasPrecision = true;
+  if (parser.format[parser.index] === '*') {
+    parser.index++;
+    const precision = readStarArg(parser, 'Precision', -1);
+    if (precision === undefined) return false;
+    spec.precision = precision;
+    spec.cutsText = true;
+  } else if (/\d/.test(parser.format[parser.index] ?? '')) {
+    spec.precision = readNumber(parser);
+    if (spec.precision < 0) throwError('ValueError', `Precision must be between 0 and ${INT_LIMIT}`);
+    spec.cutsText = true;
+  }
+  return true;
+}
+
+/** Reads the argument a `*` width or precision takes, or returns undefined when it is missing. */
+function readStarArg(parser: Parser, what: 'Width' | 'Precision', min: number): number | undefined {
+  let argIndex = readArgIndex(parser);
+  if (argIndex === NEXT_ARG) argIndex = parser.currentArg++;
+  if (!hasArg(parser, argIndex)) return undefined;
+  const value = parser.args[argIndex];
+  if (typeof value !== 'bigint') throwError('ValueError', `${what} must be an integer`);
+  if (value < BigInt(min) || value > BigInt(INT_LIMIT))
+    throwError('ValueError', `${what} must be between ${min} and ${INT_LIMIT}`);
+  return Number(value);
+}
+
+function hasArg(parser: Parser, argIndex: number): boolean {
+  if (argIndex < parser.args.length) return true;
+  parser.maxMissingArg = Math.max(parser.maxMissingArg, argIndex);
+  return false;
+}
+
+function convert(spec: Spec, specifier: string | undefined, arg: Value, position: number, name: string): string {
   switch (specifier) {
-    case 'e':
-    case 'E': {
-      body = exponentialText(value, precision, specifier === 'E');
-      break;
+    case 's': {
+      return fitField(toStr(arg), spec, position, { maxLength: spec.cutsText ? spec.precision : undefined });
     }
-    case 'f':
-    case 'F': {
-      body = fixedDigits(value, precision);
-      break;
+    case 'd': {
+      const value = intArg(arg);
+      const text = value < 0n ? `${value}` : spec.alwaysSign ? `+${value}` : `${value}`;
+      return fitField(text, integerSpec(spec), position, { negative: value < 0n, alwaysSign: spec.alwaysSign });
     }
-    default: {
-      body = generalText(Math.abs(value), precision === 0 ? 1 : precision, specifier === 'G' || specifier === 'H');
+    case 'u': {
+      return fitField(BigInt.asUintN(64, intArg(arg)).toString(), integerSpec(spec), position);
+    }
+    case 'c': {
+      return String.fromCharCode(Number(BigInt.asUintN(8, intArg(arg))));
+    }
+    case '%': {
+      return '%';
+    }
+    case undefined: {
+      return throwError('ValueError', 'Missing format specifier at end of string');
     }
   }
-  const isNegative =
-    negative && (specifier === 'g' || specifier === 'G' || specifier === 'h' || specifier === 'H' ? value < 0 : true);
-  const text = isNegative ? `-${body}` : alwaysSign ? `+${body}` : body;
-  return pad(text, width, padding, alignLeft, isNegative, alwaysSign);
+  if (FLOAT_SPECIFIERS.has(specifier)) return formatFloatSpec(toFloat(arg), specifier, spec, position, name);
+  const radix = RADIXES[specifier];
+  if (radix === undefined) throwError('ValueError', `Unknown format specifier "${specifier}"`);
+  const text = BigInt.asUintN(64, intArg(arg)).toString(radix);
+  // PHP cuts these to no digits at all when the format gives precision digits.
+  return fitField(specifier === 'X' ? text.toUpperCase() : text, spec, position, {
+    maxLength: spec.cutsText ? 0 : undefined,
+  });
+}
+
+/** The spec an integer conversion pads with, which never pads zeros on the right. */
+function integerSpec(spec: Spec): Spec {
+  return spec.alignLeft && spec.padding === '0' ? { ...spec, padding: ' ' } : spec;
+}
+
+/** Converts an argument to an int as `zval_get_long` does, which warns about a float out of the int range. */
+function intArg(value: Value): bigint {
+  if (typeof value === 'number') {
+    if (floatFitsInt(value)) return BigInt(Math.trunc(value));
+    warn(`The float ${formatFloatRepr(value)} is not representable as an int, cast occurred`);
+    return Number.isFinite(value) ? BigInt.asIntN(64, BigInt(Math.trunc(value))) : 0n;
+  }
+  if (typeof value === 'string') {
+    const number = numericPrefix(value)?.value;
+    if (typeof number === 'number' && !floatFitsInt(number))
+      return number > 0 ? 9_223_372_036_854_775_807n : -9_223_372_036_854_775_808n;
+  }
+  return toInt(value);
+}
+
+interface FieldOptions {
+  /** The bytes of the text to keep at most. */
+  maxLength?: number;
+  negative?: boolean;
+  alwaysSign?: boolean;
+}
+
+/**
+ * Pads a converted value as `php_sprintf_appendstring` does. With zero padding, a sign replaces the first byte of the
+ * text and the padding follows it, whatever that byte is.
+ */
+function fitField(text: string, spec: Spec, position: number, options: FieldOptions = {}): string {
+  const { maxLength, negative = false, alwaysSign = false } = options;
+  let length = Math.min(maxLength ?? text.length, text.length);
+  const count = Math.max(spec.width - length, 0);
+  const fieldWidth = Math.max(spec.width, length);
+  if (fieldWidth > INT_LIMIT - position - 1) fatal(`Field width ${fieldWidth} is too long`);
+  if (spec.alignLeft) return text.slice(0, length) + spec.padding.repeat(count);
+  let body = text;
+  let sign = '';
+  if ((negative || alwaysSign) && spec.padding === '0') {
+    sign = negative ? '-' : '+';
+    body = body.slice(1);
+    length--;
+  }
+  return sign + spec.padding.repeat(count) + body.slice(0, Math.max(length, 0));
+}
+
+/** Formats a float as `php_sprintf_appenddouble` does, which ignores the width of INF and NaN. */
+function formatFloatSpec(value: number, specifier: string, spec: Spec, position: number, name: string): string {
+  const precision = floatPrecision(spec, name);
+  const { alwaysSign } = spec;
+  if (!Number.isFinite(value)) {
+    const text = Number.isNaN(value) ? 'NaN' : value < 0 ? '-INF' : 'INF';
+    return fitField(text, { ...spec, width: text.length }, position, { negative: value < 0, alwaysSign });
+  }
+  const general = /[gGhH]/.test(specifier);
+  const negative = value < 0 || (general && Object.is(value, -0));
+  const body = floatDigits(Math.abs(value), specifier, precision);
+  const text = negative ? `-${body}` : alwaysSign ? `+${body}` : body;
+  return fitField(text, spec, position, { negative, alwaysSign });
+}
+
+function floatPrecision(spec: Spec, name: string): number {
+  if (!spec.hasPrecision) return 6;
+  if (spec.precision <= MAX_FLOAT_PRECISION) return spec.precision;
+  notice(
+    `${name}(): Requested precision of ${spec.precision} digits was truncated to PHP maximum of ${MAX_FLOAT_PRECISION} digits`
+  );
+  return MAX_FLOAT_PRECISION;
+}
+
+function floatDigits(value: number, specifier: string, precision: number): string {
+  if (specifier === 'e' || specifier === 'E') return exponentialText(value, precision, specifier === 'E');
+  if (specifier === 'f' || specifier === 'F') return fixedDigits(value, precision);
+  return generalBody(value, precision, specifier === 'G' || specifier === 'H');
+}
+
+/** Formats `%g` digits, where precision -1 asks `zend_gcvt` for the shortest digits that read back. */
+function generalBody(value: number, precision: number, upper: boolean): string {
+  if (precision === -1) return formatFloatRepr(value, upper ? 'E' : 'e');
+  return generalText(value, precision === 0 ? 1 : precision, upper);
 }

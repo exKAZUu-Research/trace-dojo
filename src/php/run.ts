@@ -5,7 +5,7 @@ import type { ProgramExecution, ProgramRun } from '../interpreter/program';
 import type { ProgramInput } from '../interpreter/programIo';
 import { bootstrap } from './bootstrap';
 import { callValue } from './callables';
-import { type CallRecord, HostStackExhaustion, invoke, resetCallStack } from './calls';
+import { asInternal, type CallRecord, HostStackExhaustion, invoke, resetCallStack } from './calls';
 import { throwableText, traceText } from './exceptions';
 import { holderCounts } from './garbage';
 import { type ParsedProgram, parsePhp } from './parse';
@@ -85,7 +85,8 @@ function report(runtime: Runtime, error: unknown): string | undefined {
       const handler = runtime.exceptionHandler;
       runtime.exceptionHandler = null;
       try {
-        callValue(handler, [{ v: error.object }], undefined);
+        // PHP calls the handler after the program's code has unwound, from no line of it.
+        asInternal(() => callValue(handler, [{ v: error.object }], undefined));
         return undefined;
       } catch (error_) {
         return report(runtime, error_);

@@ -1,0 +1,17 @@
+#0 /main.php(2): {closure:/main.php:3}()
+#0 /main.php(2): {closure:/main.php:4}()
+#0 /main.php(2): {closure:/main.php:5}()
+#0 /main.php(2): {closure:/main.php:6}()
+#0 /main.php(7): in_array(1, 5)
+#0 /main.php(8): chr(Array)
+#0 /main.php(9): ord(Array)
+#0 /main.php(10): intval(Array, Array)
+
+Warning: Array to string conversion in /main.php on line 11
+#0 /main.php(2): {closure:/main.php:12}()
+#0 /main.php(13): gettype()
+#0 /main.php(14): boolval()
+#0 /main.php(15): sprintf('%d')
+#0 /main.php(16): array_slice(1, 1)
+#0 /main.php(17): defined(Array)
+#0 /main.php(19): str_repeat(Array, 1)

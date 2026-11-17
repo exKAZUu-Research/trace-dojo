@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 439 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 481 -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import type { Expr, ListItem } from './ast';
 import { callMethod } from './callables';
@@ -21,13 +21,14 @@ import {
 } from './places';
 import { rt } from './runtime';
 import { incrementString } from './strings';
-import { type Key, PhpArray, type PhpClass, PhpObject, type PropDecl, Ref, type Value } from './values';
+import { typeToString } from './types';
+import { type Key, PhpArray, type PhpClass, PhpObject, type PropDecl, Ref, type TypeDecl, type Value } from './values';
 
 // Assignment ---------------------------------------------------------------------------------------------------------
 
 /** The location a writable expression names, evaluating its keys and creating containers as PHP's writes do. */
-// code-gauge-allow functionCognitiveComplexity 30 -- Handles each kind of writable expression, whose write rules PHP defines separately.
 // code-gauge-allow functionNcss 50 -- Handles each kind of writable expression, whose write rules PHP defines separately.
+// code-gauge-allow functionCognitiveComplexity 30 -- Transcribes PHP's algorithm for this function step by step, whose branches mirror PHP's.
 export function placeOf(e: Expr): Place {
   const runtime = rt();
   const frame = runtime.frame;
@@ -52,13 +53,13 @@ export function placeOf(e: Expr): Place {
       const parent = placeOf(e.base);
       const key = e.index === undefined ? undefined : ev(e.index);
       runtime.row = e.row;
-      const container = writableContainer(parent);
+      const container = writableContainer(parent.nested?.() ?? parent);
       if (container instanceof PhpArray) return new ElementPlace(container, key === undefined ? undefined : toKey(key));
       if (container instanceof PhpObject) return arrayAccessPlace(container, key);
       return stringOffsetPlace(parent, container, key);
     }
     case 'prop': {
-      const object = ev(e.obj);
+      const object = writtenObject(e.obj);
       const name = memberName(e.name);
       runtime.row = e.row;
       if (!(object instanceof PhpObject)) {
@@ -93,6 +94,10 @@ class StaticPlace extends RefPlace {
     super(target);
   }
 
+  declaration(): PropDecl | undefined {
+    return this.decl;
+  }
+
   override set(value: Value): void {
     if (this.decl?.type) {
       const { coerceProperty } = classesModule;
@@ -101,6 +106,11 @@ class StaticPlace extends RefPlace {
     }
     this.target.v = value;
   }
+}
+
+/** The object of a property write, which PHP fetches without warning about an undefined variable. */
+function writtenObject(e: Expr): Value {
+  return e.k === 'var' ? evQuiet(e) : ev(e);
 }
 
 function propPlace(object: PhpObject, name: string): Place {
@@ -116,6 +126,14 @@ function propPlace(object: PhpObject, name: string): Place {
     set: (value) => writeProp(object, name, value, scope),
     ref: () => propRef(object, name, scope),
     unset: () => unsetProp(object, name, scope),
+    declaration: () => classesModule.lookupProp(object.cls, name, scope),
+    nested() {
+      if (!issetPropExists(object, name, scope) && object.cls.findMethod('__get')) {
+        return new RefPlace(propRef(object, name, scope));
+      }
+      classesModule.checkIndirectModification(object, name, scope);
+      return this;
+    },
   };
 }
 
@@ -128,6 +146,18 @@ function issetPropExists(object: PhpObject, name: string, scope: PhpClass | unde
 function arrayAccessPlace(object: PhpObject, key: Value | undefined): Place {
   if (!isArrayAccess(object)) throwError('Error', `Cannot use object of type ${object.cls.name} as array`);
   return {
+    nested: () => {
+      const runtime = rt();
+      runtime.lastReturnRef = undefined;
+      const value = callMethod(object, 'offsetGet', [key ?? null]);
+      const returned = runtime.lastReturnRef as Ref | undefined;
+      runtime.lastReturnRef = undefined;
+      if (returned) return new RefPlace(returned);
+      if (!(value instanceof PhpObject)) {
+        notice(`Indirect modification of overloaded element of ${object.cls.name} has no effect`);
+      }
+      return new RefPlace(new Ref(value));
+    },
     get: () => callMethod(object, 'offsetGet', [key ?? null]),
     set: (value) => {
       callMethod(object, 'offsetSet', [key ?? null, value]);
@@ -186,9 +216,12 @@ export function assignExpression(target: Expr, valueExpr: Expr): Value {
     const value = share(ev(valueExpr));
     const frame = runtime.frame;
     const ref = frame.vars.get(target.name);
-    if (ref) ref.v = value;
-    else frame.vars.set(target.name, new Ref(value));
-    return value;
+    if (!ref) {
+      frame.vars.set(target.name, new Ref(value));
+      return value;
+    }
+    ref.assign(value);
+    return ref.v;
   }
   const place = placeOf(target);
   const value = ev(valueExpr);
@@ -362,18 +395,15 @@ export function applyOperator(op: string, left: Value, right: Value): Value {
   throw new Error(`Unknown operator ${op}`);
 }
 
-// code-gauge-allow functionCognitiveComplexity 30 -- Handles each kind of writable expression, whose write rules PHP defines separately.
-// code-gauge-allow functionNcss 39 -- Handles each kind of writable expression, whose write rules PHP defines separately.
+// code-gauge-allow functionCognitiveComplexity 24 -- Transcribes PHP's algorithm for this function step by step, whose branches mirror PHP's.
+// code-gauge-allow functionNcss 37 -- Transcribes PHP's algorithm for this function step by step, whose branches mirror PHP's.
 export function incDec(e: Extract<Expr, { k: 'incdec' }>): Value {
   const runtime = rt();
   const place = placeOf(e.target);
   runtime.row = e.row;
   let old = place.get();
   if (old === undefined) {
-    if (e.target.k === 'var' || e.target.k === 'varvar') warn(`Undefined variable $${(place as VarPlace).name}`);
-    else if (place instanceof ElementPlace && place.key !== undefined) {
-      warn(`Undefined array key ${typeof place.key === 'bigint' ? place.key : `"${place.key}"`}`);
-    }
+    warnUndefinedTarget(e.target, place);
     old = null;
   }
   let updated: Value;
@@ -397,8 +427,31 @@ export function incDec(e: Extract<Expr, { k: 'incdec' }>): Value {
   } else {
     throwError('TypeError', `Cannot ${e.inc ? 'increment' : 'decrement'} ${(old as PhpObject).cls.name}`);
   }
+  if (typeof old === 'bigint' && typeof updated === 'number') checkIntOverflow(place, e.inc);
   place.set(updated);
   return e.prefix ? updated : old;
+}
+
+function warnUndefinedTarget(target: Expr, place: Place): void {
+  if (target.k === 'var' || target.k === 'varvar') warn(`Undefined variable $${(place as VarPlace).name}`);
+  else if (place instanceof ElementPlace && place.key !== undefined) {
+    warn(`Undefined array key ${typeof place.key === 'bigint' ? place.key : `"${place.key}"`}`);
+  }
+}
+
+/** Throws PHP's TypeError when `++` or `--` takes a property typed int past the range of ints. */
+function checkIntOverflow(place: Place, inc: boolean): void {
+  const decl = place.declaration?.();
+  if (!decl?.type || acceptsFloat(decl.type)) return;
+  throwError(
+    'TypeError',
+    `Cannot ${inc ? 'increment' : 'decrement'} property ${decl.cls.name}::$${decl.name} of type ${typeToString(decl.type)} past its ${inc ? 'maximal' : 'minimal'} value`
+  );
+}
+
+function acceptsFloat(type: TypeDecl): boolean {
+  if (type.k === 'named') return type.name === 'float' || type.name === 'mixed';
+  return type.k === 'union' && type.types.some((part) => acceptsFloat(part));
 }
 
 function incDecString(text: string, inc: boolean): Value {
@@ -447,7 +500,7 @@ export function unsetTarget(target: Expr): void {
       return;
     }
     case 'prop': {
-      const object = ev(target.obj);
+      const object = evQuiet(target.obj);
       if (!(object instanceof PhpObject)) return;
       unsetProp(object, memberName(target.name), runtime.frame.scope);
       return;
@@ -469,7 +522,10 @@ function unsetContainer(e: Expr): PhpArray | PhpObject | string | undefined {
       new VarPlace(rt().globalFrame, name).unset();
       return undefined;
     }
-    if (!isset(e) && !(e.k === 'prop')) return undefined;
+    if (!isset(e) && !(e.k === 'prop')) {
+      warnUndefinedBase(e);
+      return undefined;
+    }
     const place = placeOf(e);
     const value = place.get();
     if (value instanceof PhpArray) return writableContainer(place) as PhpArray;
@@ -478,6 +534,14 @@ function unsetContainer(e: Expr): PhpArray | PhpObject | string | undefined {
   }
   const value = ev(e);
   return value instanceof PhpArray || value instanceof PhpObject ? value : undefined;
+}
+
+/** Warns about the undefined variable an unset of an element starts from, as PHP's fetch for unset does. */
+function warnUndefinedBase(e: Expr): void {
+  let base = e;
+  while (base.k === 'idx') base = base.base;
+  if (base.k !== 'var' || base.name === 'this' || base.name === 'GLOBALS') return;
+  if (!rt().frame.vars.has(base.name)) warn(`Undefined variable $${base.name}`);
 }
 
 // code-gauge-allow functionNcss 48 -- Handles each kind of writable expression, whose write rules PHP defines separately.
@@ -496,19 +560,7 @@ export function isset(e: Expr): boolean {
     }
     case 'idx': {
       if (e.index === undefined) throwError('Error', 'Cannot use [] for reading');
-      if (
-        !isset(e.base) &&
-        !(
-          e.base.k === 'call' ||
-          e.base.k === 'mcall' ||
-          e.base.k === 'scall' ||
-          e.base.k === 'array' ||
-          e.base.k === 'lit' ||
-          e.base.k === 'const' ||
-          e.base.k === 'cconst'
-        )
-      )
-        return false;
+      // PHP fetches the containers of an isset quietly, once, asking `__isset` before `__get`.
       const base = evQuiet(e.base);
       const index = ev(e.index);
       if (base instanceof PhpArray) return (base.get(toKey(index)) ?? null) !== null;
@@ -517,16 +569,14 @@ export function isset(e: Expr): boolean {
         const position = stringOffset(base, index, true);
         return position !== undefined && position >= 0;
       }
-      if (base instanceof PhpObject && isArrayAccess(base)) return toBool(callMethod(base, 'offsetExists', [index]));
+      if (base instanceof PhpObject) {
+        if (!isArrayAccess(base)) throwError('Error', `Cannot use object of type ${base.cls.name} as array`);
+        return toBool(callMethod(base, 'offsetExists', [index]));
+      }
       return false;
     }
     case 'prop': {
-      const object =
-        e.obj.k === 'var' || e.obj.k === 'idx' || e.obj.k === 'prop'
-          ? isset(e.obj)
-            ? evQuiet(e.obj)
-            : null
-          : ev(e.obj);
+      const object = evQuiet(e.obj);
       if (!(object instanceof PhpObject)) return false;
       return issetProp(object, memberName(e.name), runtime.frame.scope);
     }

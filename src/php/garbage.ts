@@ -14,33 +14,37 @@ export function setDestructor(run: (object: PhpObject) => void): void {
 
 /**
  * Frees the objects nothing reachable refers to, as PHP's reference counting does: an object in a cycle of garbage
- * stays until the end, since PHP's counting cannot free it either. Destructors run owners first.
+ * stays until the end, since PHP's counting cannot free it either, unless `cycles` asks to free those too, as
+ * `gc_collect_cycles` does. Returns the number of objects and arrays of objects freed.
  */
-// code-gauge-allow functionCognitiveComplexity 19 -- Visits every kind of runtime value that can hold references.
-// code-gauge-allow functionNcss 34 -- Visits every kind of runtime value that can hold references.
-export function collectGarbage(runtime: Runtime): void {
-  if (runtime.objects.size === 0) return;
+// code-gauge-allow functionCognitiveComplexity 20 -- Visits every kind of runtime value that can hold references.
+// code-gauge-allow functionNcss 38 -- Visits every kind of runtime value that can hold references.
+export function collectGarbage(runtime: Runtime, cycles = false): number {
+  if (runtime.objects.size === 0) return 0;
   runtime.spend();
+  const previousOrder = runtime.reachOrder;
   const reached = mark(runtime);
   const garbage: PhpObject[] = [];
   for (const object of runtime.objects.values()) if (!reached.has(object)) garbage.push(object);
   if (garbage.length === 0) {
     retainTurtles(runtime, reached);
-    return;
+    return 0;
   }
-  const freed = freeable(garbage);
+  const freed = cycles ? garbage : freeable(garbage);
   if (freed.length === 0) {
     retainTurtles(runtime, reached);
-    return;
+    return 0;
   }
+  const { owners, handles } = releaseOrder(freed, previousOrder);
+  const collected = freed.length + heldArrayCount(freed);
   const destructible = freed.filter((object) => !object.destructed && object.cls.findMethod('__destruct'));
   if (destructible.length === 0 || runtime.shuttingDown) {
-    for (const object of freed) runtime.freeObject(object);
+    for (const object of handles) runtime.freeObject(object);
     retainTurtles(runtime, mark(runtime));
-    return;
+    return collected;
   }
   // A destructor may store its object somewhere reachable again, so each object is freed only if it stays garbage.
-  for (const object of ownersFirst(freed)) {
+  for (const object of owners) {
     if (object.destructed) continue;
     if (object.cls.findMethod('__destruct')) {
       object.destructed = true;
@@ -49,8 +53,24 @@ export function collectGarbage(runtime: Runtime): void {
     }
   }
   const after = mark(runtime);
-  for (const object of freed) if (!after.has(object)) runtime.freeObject(object);
+  for (const object of handles) if (!after.has(object)) runtime.freeObject(object);
   retainTurtles(runtime, after);
+  return collected;
+}
+
+/** The arrays that hold objects or arrays inside the freed objects, which `gc_collect_cycles` counts as well. */
+function heldArrayCount(freed: PhpObject[]): number {
+  const arrays = new Set<PhpArray>();
+  const pending: unknown[] = freed.flatMap((object) => [...object.props.values()]);
+  while (pending.length > 0) {
+    const item = pending.pop();
+    if (item instanceof Ref) pending.push(item.v);
+    else if (item instanceof PhpArray && item.composite && !arrays.has(item)) {
+      arrays.add(item);
+      pending.push(...item.map.values());
+    }
+  }
+  return arrays.size;
 }
 
 /** Collects garbage before an allocation when that is cheap, so that a new object reuses a freed handle. */
@@ -65,23 +85,30 @@ function retainTurtles(runtime: Runtime, reached: Set<PhpObject>): void {
   runtime.world.retain((turtle) => turtles.has(turtle));
 }
 
-/** The objects reachable from the program's variables and the values its running code holds. */
-// code-gauge-allow functionNcss 50 -- Visits every kind of runtime value that can hold references.
+/**
+ * The objects reachable from the program's variables and the values its running code holds. Records the order in which
+ * it reaches them, holders' contents in order, in `runtime.reachOrder`.
+ */
 export function mark(runtime: Runtime): Set<PhpObject> {
   const reached = new Set<PhpObject>();
   const visitedArrays = new Set<PhpArray>();
-  const pending: unknown[] = [];
-  for (const frame of runtime.frames) pushFrame(frame, pending);
-  for (const fn of runtime.functions.values()) if (fn.kind === 'user') pending.push(...fn.statics.values());
+  const roots: unknown[] = [];
+  for (const frame of runtime.frames) pushFrame(frame, roots);
+  for (const fn of runtime.functions.values()) if (fn.kind === 'user') roots.push(...fn.statics.values());
   for (const cls of runtime.classes.values()) {
-    for (const { ref } of cls.staticProps.values()) pending.push(ref);
-    for (const constant of cls.consts.values()) if (constant.value !== undefined) pending.push(constant.value);
-    for (const method of cls.methods.values())
-      if (method.fn.kind === 'user') pending.push(...method.fn.statics.values());
+    for (const { ref } of cls.staticProps.values()) roots.push(ref);
+    for (const constant of cls.consts.values()) if (constant.value !== undefined) roots.push(constant.value);
+    for (const method of cls.methods.values()) if (method.fn.kind === 'user') roots.push(...method.fn.statics.values());
   }
-  for (const value of runtime.constants.values()) pending.push(value);
-  pending.push(...runtime.held, runtime.exceptionHandler);
-  for (const { handler } of runtime.errorHandlers) pending.push(handler);
+  for (const value of runtime.constants.values()) roots.push(value);
+  roots.push(...runtime.held, runtime.exceptionHandler);
+  for (const { handler } of runtime.errorHandlers) roots.push(handler);
+  // A stack visits the first of the items pushed together first when they are pushed in reverse.
+  const pending = roots.toReversed();
+  const pushInOrder = (items: Iterable<unknown>): void => {
+    const list = [...items];
+    for (let index = list.length - 1; index >= 0; index--) pending.push(list[index]);
+  };
   while (pending.length > 0) {
     const item = pending.pop();
     if (item instanceof Ref) {
@@ -89,17 +116,20 @@ export function mark(runtime: Runtime): Set<PhpObject> {
     } else if (item instanceof PhpArray) {
       if (!item.composite || visitedArrays.has(item)) continue;
       visitedArrays.add(item);
-      for (const slot of item.map.values()) if (slot !== null && typeof slot === 'object') pending.push(slot);
+      pushInOrder([...item.map.values()].filter((slot) => slot !== null && typeof slot === 'object'));
     } else if (item instanceof PhpObject) {
       if (reached.has(item)) continue;
       reached.add(item);
-      pushObject(item, pending);
+      const children: unknown[] = [];
+      pushObject(item, children);
+      pushInOrder(children);
     } else if (item instanceof Map) {
-      for (const value of item.values()) pending.push(value);
+      pushInOrder(item.values());
     } else if (Array.isArray(item)) {
-      for (const value of item) pending.push(value);
+      pushInOrder(item);
     }
   }
+  runtime.reachOrder = new Map([...reached].map((object, index) => [object, index]));
   return reached;
 }
 
@@ -198,8 +228,16 @@ function freeable(garbage: PhpObject[]): PhpObject[] {
   return garbage.filter((object) => !kept.has(object));
 }
 
-/** Orders freed objects so that an object comes before those it refers to, as releasing it releases them. */
-function ownersFirst(freed: PhpObject[]): PhpObject[] {
+/**
+ * The order in which PHP releases freed objects: a holder releases what it holds in order (an array its elements, a
+ * function its variables), so the objects nothing else freed refers to go in the order the program held them, as the
+ * last reachability pass saw it. Destructors run owners first; handles return to the free list owners last, after
+ * releasing an object has released what it held.
+ */
+function releaseOrder(
+  freed: PhpObject[],
+  previousOrder: Map<PhpObject, number>
+): { owners: PhpObject[]; handles: PhpObject[] } {
   const set = new Set(freed);
   const referenced = new Set<PhpObject>();
   const edges = new Map<PhpObject, PhpObject[]>();
@@ -208,18 +246,23 @@ function ownersFirst(freed: PhpObject[]): PhpObject[] {
     edges.set(object, targets);
     for (const target of targets) referenced.add(target);
   }
-  const ordered: PhpObject[] = [];
+  const owners: PhpObject[] = [];
+  const handles: PhpObject[] = [];
   const visited = new Set<PhpObject>();
   const visit = (object: PhpObject): void => {
     if (visited.has(object)) return;
     visited.add(object);
-    ordered.push(object);
+    owners.push(object);
     for (const target of edges.get(object) as PhpObject[]) visit(target);
+    handles.push(object);
   };
-  const roots = freed.filter((object) => !referenced.has(object)).toSorted((a, b) => a.id - b.id);
+  const position = (object: PhpObject): number => previousOrder.get(object) ?? Number.MAX_SAFE_INTEGER;
+  const roots = freed
+    .filter((object) => !referenced.has(object))
+    .toSorted((a, b) => position(a) - position(b) || a.id - b.id);
   for (const root of roots) visit(root);
   for (const object of freed) visit(object);
-  return ordered;
+  return { owners, handles };
 }
 
 /** The objects an object refers to directly or through arrays it holds, in property order. */

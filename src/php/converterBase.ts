@@ -46,6 +46,8 @@ export interface FunctionContext {
   gotos: { label: string; row: number }[];
   className?: string;
   isMethod: boolean;
+  /** The function's name in the names of the closures it defines, such as `A::m()`; undefined at the top level. */
+  displayName?: string;
 }
 
 /** The state a conversion shares: the namespace and imports, the enclosing function and loops, and errors. */
@@ -60,7 +62,8 @@ export abstract class ConverterBase {
   protected fn: FunctionContext = { isGenerator: false, labels: new Set(), gotos: [], isMethod: false };
   protected strictTypes = false;
   protected declaredFunctions = new Map<string, number>();
-  protected anonymousClasses = 0;
+  /** The classes declared at run time so far (anonymous ones and those inside blocks), which number anonymous classes. */
+  protected runtimeClasses = 0;
   protected currentClass?: string;
   /** Whether the statement to convert follows `<?=`, which echoes it. */
   protected pendingEcho = false;

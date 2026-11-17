@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 655 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 661 -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import { ExecutionLimitError, LIMITS } from '../interpreter/limits';
 import {
@@ -112,6 +112,14 @@ export function evChain(e: Expr): Chain {
     }
     case 'idx': {
       if (e.index === undefined) throwError('Error', 'Cannot use [] for reading');
+      if (e.base.k === 'var' && e.base.name === 'GLOBALS') {
+        const name = toStr(ev(e.index));
+        runtime.row = e.row;
+        const ref = runtime.globalFrame.vars.get(name);
+        if (ref) return ref.v;
+        warn(`Undefined global variable $${name}`);
+        return null;
+      }
       const base = evChain(e.base);
       if (base === SHORT) return SHORT;
       const index = ev(e.index);
@@ -575,24 +583,29 @@ function readConstant(name: string, fallback: string | undefined): Value {
   throwError('Error', `Undefined constant "${name}"`);
 }
 
-// code-gauge-allow functionCognitiveComplexity 19 -- One case per expression kind, as PHP evaluates each kind differently.
+// code-gauge-allow functionCognitiveComplexity 23 -- One case per expression kind, as PHP evaluates each kind differently.
 function magicConstant(name: Extract<Expr, { k: 'magic' }>['name']): Value {
   const frame = rt().frame;
   const decl = frame.decl;
   switch (name) {
     case '__CLASS__': {
-      if (frame.closure) return (frame.closure.internal as ClosureData).scope?.name ?? '';
-      return frame.scope?.name ?? '';
+      if (frame.closure) return (frame.closure.internal as ClosureData).scope?.fullName ?? '';
+      return frame.scope?.fullName ?? '';
     }
     case '__FUNCTION__': {
       if (!decl) return '';
-      if (decl.isClosure) return `{closure:/main.php:${decl.row + 1}}`;
+      if (decl.isClosure) return decl.name;
       return frame.method ? frame.method.name : decl.name;
     }
     case '__METHOD__': {
       if (!decl) return '';
-      if (decl.isClosure) return `{closure:/main.php:${decl.row + 1}}`;
-      if (frame.method) return `${frame.method.scope.name}::${frame.method.name}`;
+      if (decl.isClosure) return decl.name;
+      // The class or trait that declares the method, as PHP fixes it at compile time.
+      if (frame.method) {
+        const scope = frame.method.scope;
+        const owner = decl.className === undefined || decl.className === scope.name ? scope.fullName : decl.className;
+        return `${owner}::${frame.method.name}`;
+      }
       return decl.name;
     }
     case '__TRAIT__': {
@@ -639,9 +652,9 @@ function classConstantOf(e: Extract<Expr, { k: 'cconst' }>): Value {
     if (e.cls.k === 'expr') {
       const value = ev(e.cls.e);
       if (!(value instanceof PhpObject)) throwError('TypeError', `Cannot use "::class" on ${debugType(value)}`);
-      return value.cls.name;
+      return value.cls.fullName;
     }
-    return resolveClassRef(e.cls).name;
+    return resolveClassRef(e.cls).fullName;
   }
   const cls = resolveClassRef(e.cls);
   runtime.row = e.row;
@@ -665,7 +678,9 @@ function cloneExpression(e: Extract<Expr, { k: 'clone' }>): Value {
   const withValue = e.with ? ev(e.with) : undefined;
   runtime.row = e.row;
   if (withValue === undefined) {
-    if (!(value instanceof PhpObject)) throwError('Error', '__clone method called on non-object');
+    if (!(value instanceof PhpObject)) {
+      throwError('TypeError', `clone(): Argument #1 ($object) must be of type object, ${valueName(value)} given`);
+    }
     return cloneObject(value);
   }
   // `clone($object, $with)` is a call of PHP 8.5's clone function, which stack traces show.
@@ -689,7 +704,7 @@ export function cloneObject(original: PhpObject, withValue?: Value): PhpObject {
   if (cloneMethod && !canCall(cloneMethod, scope)) {
     throwError(
       'Error',
-      `Call to ${cloneMethod.visibility} ${original.cls.name}::__clone() from ${scope ? `scope ${scope.name}` : 'global scope'}`
+      `Call to ${cloneMethod.visibility} method ${original.cls.name}::__clone() from ${scope ? `scope ${scope.name}` : 'global scope'}`
     );
   }
   const copy = runtime.newObject(original.cls);
@@ -740,7 +755,6 @@ function cloneInternal(original: PhpObject): unknown {
 
 // Operators ----------------------------------------------------------------------------------------------------------
 
-// code-gauge-allow functionNcss 38 -- One case per expression kind, as PHP evaluates each kind differently.
 function binary(e: Extract<Expr, { k: 'bin' }>): Value {
   const runtime = rt();
   switch (e.op) {
@@ -759,11 +773,17 @@ function binary(e: Extract<Expr, { k: 'bin' }>): Value {
       return evQuiet(e.l) ?? ev(e.r);
     }
   }
+  const mark = runtime.frame.temporaries.length;
   const left = ev(e.l);
   runtime.frame.temporaries.push(left);
   const right = ev(e.r);
   runtime.row = e.row;
-  switch (e.op) {
+  // PHP frees the operands as soon as the operator has used them.
+  return keepResult(mark, operate(e.op, left, right)) as Value;
+}
+
+function operate(op: string, left: Value, right: Value): Value {
+  switch (op) {
     case '==': {
       return looseEquals(left, right);
     }
@@ -792,7 +812,7 @@ function binary(e: Extract<Expr, { k: 'bin' }>): Value {
       return BigInt(compare(left, right));
     }
     default: {
-      return applyOperator(e.op, left, right);
+      return applyOperator(op, left, right);
     }
   }
 }
@@ -801,11 +821,12 @@ function compareForOrder(left: Value, right: Value): number {
   return compare(left, right);
 }
 
-// code-gauge-allow functionNcss 31 -- One case per expression kind, as PHP evaluates each kind differently.
+// code-gauge-allow functionCognitiveComplexity 17 -- One case per expression kind, as PHP evaluates each kind differently.
+// code-gauge-allow functionNcss 33 -- One case per expression kind, as PHP evaluates each kind differently.
 export function cast(type: string, value: Value): Value {
   switch (type) {
     case 'int': {
-      return castToInt(value);
+      return toInt(value);
     }
     case 'float': {
       return toFloat(value);
@@ -820,6 +841,7 @@ export function cast(type: string, value: Value): Value {
       if (value instanceof PhpArray) return value;
       if (value === null) return new PhpArray();
       if (value instanceof PhpObject) return objectToArrayCast(value);
+      if (Number.isNaN(value)) warn('unexpected NAN value was coerced to array');
       return PhpArray.list([value]);
     }
     case 'object': {
@@ -834,20 +856,6 @@ export function cast(type: string, value: Value): Value {
       throwError('Error', `Unknown cast ${type}`);
     }
   }
-}
-
-function castToInt(value: Value): Value {
-  if (typeof value === 'number') {
-    if (Number.isFinite(value) && !conversionsModule.floatFitsInt(value)) {
-      warn(`The float ${conversionsModule.formatFloat(value, 17)} is not representable as an int, cast occurred`);
-      return BigInt.asIntN(64, BigInt(Math.trunc(value)));
-    }
-    if (Number.isNaN(value) || !Number.isFinite(value)) {
-      warn(`The float ${conversionsModule.formatFloat(value)} is not representable as an int, cast occurred`);
-      return 0n;
-    }
-  }
-  return toInt(value);
 }
 
 function objectToArrayCast(object: PhpObject): PhpArray {

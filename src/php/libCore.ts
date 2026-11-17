@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 496 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 500 -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import { lower } from './bytes';
 import { callCallback, callTargetOf, callValue } from './callables';
@@ -28,8 +28,9 @@ import {
   throwError,
   warn,
 } from './errors';
+import { collectGarbage } from './garbage';
 import { cast, iterate } from './interp';
-import { defineAlias, defineConstant, defineFunction } from './native';
+import { defineAlias, defineConstant, defineFunction, markInlined } from './native';
 import { toFloat, toInt, toStr } from './operators';
 import { printR, varDump, varExport } from './output';
 import { PhpThrow, rt } from './runtime';
@@ -312,13 +313,13 @@ function currentArgs(): Value[] {
   return values;
 }
 
-defineFunction('call_user_func(callable $callback, mixed ...$args): mixed', ({ args, named }) => {
+defineFunction('call_user_func(callable $callback, mixed ...$args): mixed', ({ args, named, row }) => {
   const [callback, ...rest] = args;
   const argValues = rest.map((v) => ({ v }));
   for (const [name, v] of named ?? []) argValues.push({ v, name } as { v: Value; name: string });
-  return callValue(callback, argValues, undefined);
+  return callValue(callback, argValues, row);
 });
-defineFunction('call_user_func_array(callable $callback, array $args): mixed', ({ args }) => {
+defineFunction('call_user_func_array(callable $callback, array $args): mixed', ({ args, row }) => {
   const array = args[1] as PhpArray;
   const argValues: { v: Value; name?: string }[] = [];
   for (const [key, v] of array.entries()) {
@@ -329,8 +330,10 @@ defineFunction('call_user_func_array(callable $callback, array $args): mixed', (
       argValues.push({ v });
     }
   }
-  return callValue(args[0], argValues, undefined);
+  return callValue(args[0], argValues, row);
 });
+markInlined('call_user_func');
+markInlined('call_user_func_array');
 
 export function isCallable(value: Value): boolean {
   try {
@@ -389,8 +392,9 @@ defineFunction('get_class(object $object): string', ({ args }) => {
     return scope.name;
   }
   const object = args[0] as PhpObject;
-  return object.cls.isAnonymous ? 'class@anonymous' : object.cls.name;
+  return object.cls.fullName;
 });
+markInlined('get_class');
 defineFunction('get_parent_class(object|string $object_or_class): string|false', ({ args }) => {
   const cls = args.length === 0 ? rt().frame.scope : classOf(args[0]);
   return cls?.parent?.name ?? false;
@@ -585,7 +589,7 @@ defineFunction('phpversion(?string $extension = null): string|false', ({ args })
 defineFunction('php_sapi_name(): string|false', () => 'cli');
 defineFunction('sleep(int $seconds): int', () => 0n);
 defineFunction('usleep(int $microseconds): void', () => null);
-defineFunction('gc_collect_cycles(): int', () => 0n);
+defineFunction('gc_collect_cycles(): int', () => BigInt(collectGarbage(rt(), true)));
 defineFunction('gc_enable(): void', () => null);
 defineFunction('gc_disable(): void', () => null);
 defineFunction('debug_print_backtrace(int $options = 0, int $limit = 0): void', () => {

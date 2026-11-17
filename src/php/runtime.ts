@@ -172,6 +172,9 @@ export class Runtime {
     return object;
   }
 
+  /** The order in which the last reachability pass reached each object, which decides the order of releasing them. */
+  reachOrder = new Map<PhpObject, number>();
+
   freeObject(object: PhpObject): void {
     if (this.objects.get(object.id) !== object) return;
     this.objects.delete(object.id);

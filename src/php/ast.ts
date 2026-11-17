@@ -187,7 +187,10 @@ export interface MethodDeclAst {
 }
 
 export interface ClassDecl {
+  /** The name messages show; for an anonymous class, `class@anonymous` or the name of what it extends or implements. */
   name: string;
+  /** The name `get_class` and `::class` give an anonymous class, which holds a NUL byte, the file, and the line. */
+  fullName?: string;
   kind: 'class' | 'interface' | 'trait';
   parent?: string;
   interfaces: string[];

@@ -1,0 +1,54 @@
+float(1.2089258196146292E+24)
+string(25) "1208925819614629446642046"
+string(81) "100000000000000000000000000000000000000000000000000000000000000000000000000000000"
+string(16) "5gv2rma270w8w404"
+int(9223372036854775807)
+string(19) "9223372036854775807"
+string(63) "111111111111111111111111111111111111111111111111111111111111111"
+string(13) "1y2p0ij32e8e7"
+float(9.223372036854776E+18)
+string(19) "9223372036854776028"
+string(64) "1000000000000000000000000000000000000000000000000000000000000000"
+string(13) "1y2p0ij32e808"
+int(26)
+string(2) "26"
+string(5) "11010"
+string(1) "q"
+int(255)
+string(3) "255"
+string(8) "11111111"
+string(2) "73"
+int(0)
+string(1) "0"
+string(1) "0"
+string(1) "0"
+
+Deprecated: Invalid characters passed for attempted conversion, these have been ignored in /main.php on line 3
+
+Deprecated: Invalid characters passed for attempted conversion, these have been ignored in /main.php on line 3
+
+Deprecated: Invalid characters passed for attempted conversion, these have been ignored in /main.php on line 3
+
+Deprecated: Invalid characters passed for attempted conversion, these have been ignored in /main.php on line 3
+int(1)
+string(1) "1"
+string(1) "1"
+string(1) "1"
+int(123136)
+string(6) "123136"
+string(17) "11110000100000000"
+string(4) "2n0g"
+float(1.8446744073709552E+19)
+string(20) "18446744073709552046"
+string(65) "10000000000000000000000000000000000000000000000000000000000000000"
+string(13) "3w5e11264sg0g"
+float(1.1805916207174113E+21)
+int(511)
+float(3.777893186295716E+22)
+int(5)
+
+Fatal error: Uncaught ValueError: An infinite value cannot be converted to base 10 in /main.php:6
+Stack trace:
+#0 /main.php(6): base_convert('zzzzzzzzzzzzzzz...', 36, 10)
+#1 {main}
+  thrown in /main.php on line 6

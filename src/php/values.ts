@@ -15,8 +15,22 @@ export class Ref {
   /** How many variables, elements, and properties hold this slot, once it is a reference. */
   rc = 1;
   isRef = false;
+  /** The typed property this reference was taken from, whose type every write through the reference must keep. */
+  typedBy?: { decl: PropDecl; object: PhpObject };
 
   constructor(public v: Value = null) {}
+
+  /** Writes a value, converting or rejecting it for the type of the property the reference was taken from. */
+  assign(value: Value): void {
+    this.v = this.typedBy ? referenceTypeCheck(this, value) : value;
+  }
+}
+
+/** Converts a value written through a reference to a typed property, which the interpreter provides. */
+let referenceTypeCheck: (ref: Ref, value: Value) => Value = (_ref, value) => value;
+
+export function setReferenceTypeCheck(check: (ref: Ref, value: Value) => Value): void {
+  referenceTypeCheck = check;
 }
 
 /** The marker of a typed property that has no value yet. */
@@ -64,9 +78,9 @@ export class PhpArray {
   set(key: Key, value: Value): void {
     const slot = this.map.get(key);
     if (slot instanceof Ref) {
-      slot.v = value;
+      slot.assign(value);
     } else {
-      this.map.set(key, value);
+      this.insert(key, value);
       if (typeof key === 'bigint' && key >= this.nextFree) this.nextFree = key + 1n;
     }
     if (value !== null && typeof value === 'object') this.composite = true;
@@ -75,7 +89,7 @@ export class PhpArray {
   setSlot(key: Key, slot: Value | Ref): void {
     const old = this.map.get(key);
     if (old instanceof Ref && old !== slot) old.rc--;
-    this.map.set(key, slot);
+    this.insert(key, slot);
     if (typeof key === 'bigint' && key >= this.nextFree) this.nextFree = key + 1n;
     if (slot !== null && typeof slot === 'object') this.composite = true;
   }
@@ -89,17 +103,27 @@ export class PhpArray {
   append(value: Value | Ref): boolean {
     if (this.nextFree > INT_MAX) return false;
     const key = this.appendKey;
-    this.map.set(key, value);
+    this.insert(key, value);
     this.nextFree = key + 1n;
     if (value !== null && typeof value === 'object') this.composite = true;
     return true;
   }
 
+  /**
+   * Sets a slot. PHP's pointer is a position in the table, so a pointer past the end points at an element added
+   * there.
+   */
+  private insert(key: Key, slot: Value | Ref): void {
+    if (this.pointer === undefined && !this.map.has(key)) this.pointer = key;
+    this.map.set(key, slot);
+  }
+
   delete(key: Key): void {
     const old = this.map.get(key);
     if (old instanceof Ref) old.rc--;
-    this.map.delete(key);
+    // PHP moves a pointer at the deleted element on to the next one.
     if (this.pointer === key) this.pointer = this.keyAfter(key);
+    this.map.delete(key);
   }
 
   keys(): Key[] {
@@ -208,6 +232,8 @@ export interface NativeContext {
   calledClass?: PhpClass;
   /** Named arguments that a variadic parameter collected. */
   named?: Map<string, Value>;
+  /** The row of the call when code called the function directly, for a function whose call PHP compiles away. */
+  row?: number;
 }
 
 export interface NativeFunction {
@@ -218,6 +244,11 @@ export interface NativeFunction {
   impl: (ctx: NativeContext) => Value;
   /** Whether the function reads its caller's variables (compact, extract, func_get_args). */
   needsCaller?: boolean;
+  /**
+   * Whether PHP compiles a direct call of the function into an instruction of its own (strlen, count, call_user_func),
+   * so that stack traces show no frame for it and what it calls shows the caller's line.
+   */
+  inlined?: boolean;
 }
 
 export interface UserFunction {
@@ -293,6 +324,11 @@ export class PhpClass {
   privateProps = new Map<string, PropDecl>();
   methods = new Map<string, Method>();
   decl?: ClassDecl;
+
+  /** The name `get_class` and `::class` give, which differs from the name messages show for an anonymous class. */
+  get fullName(): string {
+    return this.decl?.fullName ?? this.name;
+  }
   isUser = false;
   isAnonymous = false;
   /** Native construction of the internal state a builtin class keeps. */

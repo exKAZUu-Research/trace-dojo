@@ -1,4 +1,4 @@
-import { floatFitsInt, formatFloat, numericPrefix } from './conversions';
+import { floatFitsInt, numericPrefix, toBool } from './conversions';
 import { deprecated } from './errors';
 import { formatFloatForMessage, toStr } from './operators';
 import { rt } from './runtime';
@@ -154,17 +154,16 @@ function coerceScalar(value: Value, type: TypeDecl): Value | typeof NO_MATCH {
   if (typeof value === 'number') {
     if (wantsInt) {
       if (!Number.isFinite(value) || !floatFitsInt(value)) {
-        if (wantsString) return formatFloat(value);
+        if (wantsString) return toStr(value);
         return NO_MATCH;
       }
       if (!Number.isInteger(value)) {
-        if (wantsString) return formatFloat(value);
         deprecated(`Implicit conversion from float ${formatFloatForMessage(value)} to int loses precision`);
       }
       return BigInt(Math.trunc(value));
     }
-    if (wantsString) return formatFloat(value);
-    if (wantsBool) return value !== 0;
+    if (wantsString) return toStr(value);
+    if (wantsBool) return toBool(value);
     return NO_MATCH;
   }
   if (typeof value === 'boolean') {
@@ -250,17 +249,18 @@ export function isTraversable(object: PhpObject): boolean {
 }
 
 /** Resolves `self` and `static` in a type for messages, as PHP prints the class names. */
-export function describeType(type: TypeDecl, scope?: PhpClass): string {
-  return typeToString(resolveSelf(type, scope));
+export function describeType(type: TypeDecl, scope?: PhpClass, staticClass?: PhpClass): string {
+  return typeToString(resolveSelf(type, scope, staticClass));
 }
 
-/** Writes `self` and `parent` in a type as the class names they stand for, as PHP's messages do. */
-function resolveSelf(type: TypeDecl, scope: PhpClass | undefined): TypeDecl {
-  if (!scope) return type;
+/** Writes `self`, `parent`, and `static` in a type as the class names they stand for, as PHP's messages do. */
+function resolveSelf(type: TypeDecl, scope: PhpClass | undefined, staticClass: PhpClass | undefined): TypeDecl {
   if (type.k === 'named') {
+    if (type.name === 'static' && staticClass) return { ...type, name: staticClass.name };
+    if (!scope) return type;
     if (type.name === 'self') return { ...type, name: scope.name };
     if (type.name === 'parent' && scope.parent) return { ...type, name: scope.parent.name };
     return type;
   }
-  return { ...type, types: type.types.map((part) => resolveSelf(part, scope)) };
+  return { ...type, types: type.types.map((part) => resolveSelf(part, scope, staticClass)) };
 }

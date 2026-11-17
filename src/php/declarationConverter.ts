@@ -4,7 +4,31 @@ import type { Node } from '@willbooster/web-tree-sitter';
 import type { ClassDecl, Expr, FunctionDecl, MethodDeclAst, ParamDecl, PropertyDeclAst, Stmt, TraitRule } from './ast';
 import { lower } from './bytes';
 import { BUILTIN_TYPES, ConverterBase } from './converterBase';
+import { SCRIPT_PATH } from './runtime';
+import { typeToString } from './types';
 import type { TypeDecl, Visibility } from './values';
+
+/**
+ * What PHP requires of each magic method: the number of parameters, whether it is static, whether it must be public,
+ * and the return type it may declare ('' for none). An undefined field is not checked.
+ */
+const MAGIC_METHODS: Record<string, { args?: number; isStatic?: boolean; isPublic?: boolean; returnType?: string }> = {
+  __construct: { isStatic: false, returnType: '' },
+  __destruct: { args: 0, isStatic: false, returnType: '' },
+  __clone: { args: 0, isStatic: false, returnType: 'void' },
+  __get: { args: 1, isStatic: false, isPublic: true },
+  __set: { args: 2, isStatic: false, isPublic: true, returnType: 'void' },
+  __isset: { args: 1, isStatic: false, isPublic: true, returnType: 'bool' },
+  __unset: { args: 1, isStatic: false, isPublic: true, returnType: 'void' },
+  __call: { args: 2, isStatic: false, isPublic: true },
+  __callstatic: { args: 2, isStatic: true, isPublic: true },
+  __tostring: { args: 0, isStatic: false, isPublic: true, returnType: 'string' },
+  __debuginfo: { args: 0, isStatic: false, isPublic: true, returnType: '?array' },
+  __invoke: { isStatic: false, isPublic: true },
+  __serialize: { args: 0, isStatic: false, isPublic: true, returnType: 'array' },
+  __unserialize: { args: 1, isStatic: false, isPublic: true, returnType: 'void' },
+  __set_state: { args: 1, isStatic: true, isPublic: true, returnType: 'object' },
+};
 
 /** Converts the declarations of functions, parameters, types, and classes. */
 export abstract class DeclarationConverter extends ConverterBase {
@@ -12,8 +36,12 @@ export abstract class DeclarationConverter extends ConverterBase {
     const attributes = node.childForFieldName('attributes');
     if (attributes) this.unsupported(attributes, '属性（#[...]）');
     const nameNode = node.childForFieldName('name');
-    const rawName = nameNode ? this.nameText(nameNode) : '{closure}';
-    const name = isClosure || className !== undefined ? rawName : this.qualify(rawName);
+    const rawName = nameNode ? this.nameText(nameNode) : '';
+    const name = isClosure
+      ? `{closure:${this.fn.displayName ?? SCRIPT_PATH}:${node.startPosition.row + 1}}`
+      : className === undefined
+        ? this.qualify(rawName)
+        : rawName;
     const returnTypeNode = node.childForFieldName('return_type');
     const returnType = returnTypeNode ? this.typeDecl(returnTypeNode) : undefined;
     const body = node.childForFieldName('body');
@@ -29,6 +57,7 @@ export abstract class DeclarationConverter extends ConverterBase {
       gotos: [],
       className: className ?? outerFn.className,
       isMethod: className !== undefined,
+      displayName: isClosure ? name : `${className === undefined ? '' : `${className}::`}${name}()`,
     };
     this.loop = { depth: 0 };
     try {
@@ -200,17 +229,15 @@ export abstract class DeclarationConverter extends ConverterBase {
 
   // Classes -----------------------------------------------------------------------------------------------------------
 
-  classDecl(node: Node, anonymous = false): ClassDecl {
+  classDecl(node: Node, anonymous = false, topLevel = true): ClassDecl {
     const attributes = node.childForFieldName('attributes');
     if (attributes) this.unsupported(attributes, '属性（#[...]）');
     const kind: ClassDecl['kind'] =
       node.type === 'interface_declaration' ? 'interface' : node.type === 'trait_declaration' ? 'trait' : 'class';
     const nameNode = node.childForFieldName('name');
-    let name: string;
-    if (anonymous) {
-      this.anonymousClasses++;
-      name = `class@anonymous`;
-    } else {
+    let name = '';
+    const runtimeIndex = anonymous || !topLevel ? this.runtimeClasses++ : 0;
+    if (!anonymous) {
       const raw = this.nameText(nameNode as Node);
       const word = lower(raw);
       if (BUILTIN_TYPES.has(word) || ['self', 'parent', 'static'].includes(word)) {
@@ -237,8 +264,14 @@ export abstract class DeclarationConverter extends ConverterBase {
     let parent: string | undefined;
     if (kind === 'interface') interfaces = baseNames;
     else if (baseNames.length > 0) parent = baseNames[0];
+    let fullName: string | undefined;
+    if (anonymous) {
+      name = `${parent ?? interfaces[0] ?? 'class'}@anonymous`;
+      fullName = `${name}\0${SCRIPT_PATH}:${node.startPosition.row + 1}$${runtimeIndex.toString(16)}`;
+    }
     const decl: ClassDecl = {
       name,
+      fullName,
       kind,
       parent,
       interfaces,
@@ -573,6 +606,7 @@ export abstract class DeclarationConverter extends ConverterBase {
         `abstract のメソッドは private にできません（Abstract function ${decl.name}::${fn.name}() cannot be declared private）。`
       );
     }
+    this.checkMagicMethod(member, decl.name, fn, modifiers);
     fn.isStatic = modifiers.isStatic;
     return {
       fn,
@@ -581,6 +615,39 @@ export abstract class DeclarationConverter extends ConverterBase {
       isAbstract,
       isFinal: modifiers.isFinal,
     };
+  }
+
+  /** Checks the declaration of a magic method as PHP's zend_check_magic_method_implementation does, in its order. */
+  // code-gauge-allow functionCognitiveComplexity 17 -- Checks PHP's rules for each magic method in PHP's order, which decides the error shown.
+  private checkMagicMethod(
+    member: Node,
+    className: string,
+    fn: FunctionDecl,
+    modifiers: { visibility?: Visibility; isStatic: boolean }
+  ): void {
+    const rule = MAGIC_METHODS[lower(fn.name)];
+    if (!rule) return;
+    const where = `${className}::${fn.name}()`;
+    const fail = (english: string): void =>
+      this.error(member, `マジックメソッド ${where} の宣言が PHP の決まりに合いません（${english}）。`);
+    if (rule.args === 0 && fn.params.length > 0) fail(`Method ${where} cannot take arguments`);
+    else if (rule.args !== undefined && fn.params.length !== rule.args) {
+      fail(`Method ${where} must take exactly ${rule.args} argument${rule.args === 1 ? '' : 's'}`);
+    }
+    if (rule.isStatic === false && modifiers.isStatic) fail(`Method ${where} cannot be static`);
+    if (rule.isStatic === true && !modifiers.isStatic) fail(`Method ${where} must be static`);
+    if (rule.isPublic && modifiers.visibility !== undefined && modifiers.visibility !== 'public') {
+      this.notices.push({
+        level: 'Warning',
+        message: `The magic method ${where} must have public visibility`,
+        row: member.startPosition.row,
+      });
+    }
+    if (fn.returnType === undefined || rule.returnType === undefined) return;
+    if (rule.returnType === '') fail(`Method ${where} cannot declare a return type`);
+    else if (typeToString(fn.returnType) !== rule.returnType) {
+      fail(`${className}::${fn.name}(): Return type must be ${rule.returnType} when declared`);
+    }
   }
 
   protected traitUse(member: Node): ClassDecl['traits'][number] {

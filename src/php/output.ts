@@ -2,8 +2,9 @@
 import { callMethod } from './callables';
 import { declForKey, propNameOf } from './classes';
 import { formatFloat, formatFloatRepr } from './conversions';
+import { warn } from './errors';
 import { toStr } from './operators';
-import { typeToString } from './types';
+import { describeType } from './types';
 import { type ClosureData, isClosure, PhpArray, PhpObject, Ref, type Slot, UNINIT, type Value } from './values';
 
 /** The properties an object shows to `var_dump` and `print_r`: `__debugInfo`'s array, or its property table. */
@@ -49,7 +50,7 @@ function closureDebug(object: PhpObject): [string, Value, string][] {
   const fn = data.fn;
   if (fn.kind === 'user' && fn.decl.isClosure) {
     entries.push(
-      ['name', `{closure:/main.php:${fn.decl.row + 1}}`, '"name"'],
+      ['name', fn.decl.name, '"name"'],
       ['file', '/main.php', '"file"'],
       ['line', BigInt(fn.decl.row + 1), '"line"']
     );
@@ -95,7 +96,7 @@ function printRValue(value: Value, indent: number, active: Set<object>): string 
   }
   if (value instanceof PhpObject && value.cls.name === '(stream)') return `Resource id #${value.id}`;
   if (value instanceof PhpObject) {
-    const header = `${value.cls.isAnonymous ? 'class@anonymous' : value.cls.name} Object\n`;
+    const header = `${value.cls.name} Object\n`;
     if (active.has(value)) return `${header} *RECURSION*`;
     active.add(value);
     try {
@@ -174,12 +175,12 @@ function dumpValue(value: Value, level: number, active: Set<object>, slot?: Slot
   try {
     const entries = debugEntries(object);
     const count = entries.filter(([, slot]) => slot !== UNINIT).length;
-    let text = `${pad}object(${object.cls.isAnonymous ? 'class@anonymous' : object.cls.name})#${object.id} (${count}) {\n`;
+    let text = `${pad}object(${object.cls.name})#${object.id} (${count}) {\n`;
     for (const [key, slot, label] of entries) {
       text += `${' '.repeat(level + 1)}[${typeof key === 'bigint' ? key : label}]=>\n`;
       if (slot === UNINIT) {
         const decl = declForKey(object.cls, typeof key === 'string' ? keyFor(key, label) : String(key));
-        text += `${' '.repeat(level + 1)}uninitialized(${decl?.type ? typeToString(decl.type) : 'mixed'})\n`;
+        text += `${' '.repeat(level + 1)}uninitialized(${decl?.type ? describeType(decl.type, decl.cls) : 'mixed'})\n`;
       } else text += dumpValue(slotValue(slot), level + 2, active, slot);
     }
     return `${text}${indent}}\n`;
@@ -225,9 +226,7 @@ function exportValue(value: Value, level: number, active: Set<object>): string {
   const lead = level > 1 ? `\n${' '.repeat(level - 1)}` : '';
   const close = level > 1 ? ' '.repeat(level - 1) : '';
   if (value instanceof PhpArray) {
-    if (active.has(value)) {
-      return 'NULL';
-    }
+    if (active.has(value)) return circularExport();
     active.add(value);
     try {
       let text = `${lead}array (\n`;
@@ -241,7 +240,7 @@ function exportValue(value: Value, level: number, active: Set<object>): string {
     }
   }
   const object = value as PhpObject;
-  if (active.has(object)) return 'NULL';
+  if (active.has(object)) return circularExport();
   active.add(object);
   try {
     const isStd = object.cls.name === 'stdClass';
@@ -255,4 +254,9 @@ function exportValue(value: Value, level: number, active: Set<object>): string {
   } finally {
     active.delete(object);
   }
+}
+
+function circularExport(): string {
+  warn('var_export does not handle circular references');
+  return 'NULL';
 }

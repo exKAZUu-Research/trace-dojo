@@ -9,7 +9,7 @@ import { codePointBytes, dec, enc, lower, upper, utf8Chars, utf8Length } from '.
 import { compareBytes } from './conversions';
 import { deprecated, throwError, warn } from './errors';
 import { HTML401_ENTITIES } from './htmlEntities';
-import { defineAlias, defineConstant, defineFunction } from './native';
+import { defineAlias, defineConstant, defineFunction, markInlined } from './native';
 import { toStr } from './operators';
 import { rt } from './runtime';
 import { incrementString } from './strings';
@@ -39,6 +39,7 @@ function checkLength(text: string): string {
 }
 
 defineFunction('strlen(string $string): int', ({ args }) => BigInt(s(args[0]).length));
+markInlined('strlen');
 defineFunction('str_repeat(string $string, int $times): string', ({ args }) => {
   const times = n(args[1]);
   if (times < 0) throwError('ValueError', 'str_repeat(): Argument #2 ($times) must be greater than or equal to 0');

@@ -1,0 +1,16 @@
+
+Warning: unexpected NAN value was coerced to string in /main.php on line 2
+string(3) "NAN"
+
+Warning: unexpected NAN value was coerced to string in /main.php on line 4
+string(3) "NAN"
+
+Warning: unexpected NAN value was coerced to string in /main.php on line 5
+NAN
+string(3) "INF"
+
+Warning: unexpected NAN value was coerced to string in /main.php on line 7
+string(3) "NAN"
+
+Warning: unexpected NAN value was coerced to bool in /main.php on line 8
+bool(true)

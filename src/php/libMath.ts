@@ -1,7 +1,7 @@
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import { randomInt } from 'node:crypto';
 
-import { formatFloat, valueName } from './conversions';
+import { floatFitsInt, valueName } from './conversions';
 import { deprecated, throwError } from './errors';
 import { defineAlias, defineConstant, defineFunction } from './native';
 import { arithmetic, compare } from './operators';
@@ -54,7 +54,12 @@ defineFunction(
   ({ args }) => {
     const value = num(args[0]);
     const places = Number(args[1] ?? 0n);
-    const modes: Record<string, RoundMode> = { '1': 'halfUp', '2': 'halfDown', '3': 'halfEven', '4': 'halfOdd' };
+    const modes: Record<string, RoundMode> = {
+      '1': 'halfUp',
+      '2': 'halfDown',
+      '3': 'halfEven',
+      '4': 'halfOdd',
+    };
     const mode = modes[String(args[2] ?? 1n)];
     if (!mode) throwError('ValueError', 'round(): Argument #3 ($mode) must be a valid rounding mode (RoundingMode::*)');
     if (typeof value === 'bigint') {
@@ -80,21 +85,32 @@ defineFunction('fdiv(float $num1, float $num2): float', ({ args }) => (args[0] a
 defineFunction('max(mixed $value, mixed ...$values): mixed', ({ args }) => extreme('max', args, 1));
 defineFunction('min(mixed $value, mixed ...$values): mixed', ({ args }) => extreme('min', args, -1));
 
+/**
+ * Picks the smallest (`direction` -1) or largest (1) value as PHP does, which keeps a different one of two equal values
+ * depending on the form of the call: an array keeps the first, two arguments go through the compiled two-argument
+ * version, which keeps the second for `min` and the first for `max`, and more arguments keep the first.
+ */
 function extreme(name: string, args: Value[], direction: number): Value {
-  let values: Value[];
-  if (args.length === 1) {
-    const [array] = args;
-    if (!(array instanceof PhpArray)) {
-      throwError('TypeError', `${name}(): Argument #1 ($value) must be of type array, ${valueName(array)} given`);
-    }
-    if (array.size === 0) throwError('ValueError', `${name}(): Argument #1 ($value) must contain at least one element`);
-    values = array.values();
-  } else values = args;
-  let best = values[0];
-  for (const value of values.slice(1)) {
-    const result = compare(value, best);
-    if (direction > 0 ? result > 0 : result < 0) best = value;
+  if (args.length === 2) {
+    const result = compare(args[0], args[1]);
+    return (direction > 0 ? result >= 0 : result < 0) ? args[0] : args[1];
   }
+  if (args.length > 2) {
+    let best = args[0];
+    for (const value of args.slice(1)) if (compare(value, best) * direction > 0) best = value;
+    return best;
+  }
+  return extremeOfArray(name, args[0], direction);
+}
+
+function extremeOfArray(name: string, array: Value, direction: number): Value {
+  if (!(array instanceof PhpArray)) {
+    throwError('TypeError', `${name}(): Argument #1 ($value) must be of type array, ${valueName(array)} given`);
+  }
+  if (array.size === 0) throwError('ValueError', `${name}(): Argument #1 ($value) must contain at least one element`);
+  const [first, ...rest] = array.values();
+  let best = first;
+  for (const value of rest) if (compare(best, value) * direction < 0) best = value;
   return best;
 }
 
@@ -114,7 +130,6 @@ for (const name of [
   'atanh',
   'exp',
   'log10',
-  'log2',
   'expm1',
   'log1p',
 ] as const) {
@@ -147,69 +162,101 @@ defineFunction('dechex(int $num): string', ({ args }) => toBase(args[0] as bigin
 defineFunction('decbin(int $num): string', ({ args }) => toBase(args[0] as bigint, 2));
 defineFunction('decoct(int $num): string', ({ args }) => toBase(args[0] as bigint, 8));
 
-// code-gauge-allow functionCognitiveComplexity 19 -- Transcribes PHP's algorithm for this function step by step, whose branches mirror PHP's.
-function fromBase(text: string, radix: number): Value {
-  let value = 0n;
-  let float = 0;
-  let isFloat = false;
-  let invalid = false;
+/** Parses digits as `_php_math_basetozval` does, which continues in a float once the value would overflow an int. */
+function fromBase(text: string, radix: number): bigint | number {
+  let body = text.replaceAll(/^[ \t\n\v\f\r]+|[ \t\n\v\f\r]+$/g, '');
+  const prefix = { 16: /^0[xX]/, 8: /^0[oO]/, 2: /^0[bB]/ }[radix];
+  if (prefix) body = body.replace(prefix, '');
+  const digits = body.split('').map((char) => (/[\dA-Za-z]/.test(char) ? Number.parseInt(char, 36) : radix));
+  if (digits.some((digit) => digit >= radix))
+    deprecated('Invalid characters passed for attempted conversion, these have been ignored');
   const big = BigInt(radix);
-  const prefix = radix === 16 ? /^0[xX]/ : radix === 8 ? /^0[oO]/ : radix === 2 ? /^0[bB]/ : undefined;
-  const body = prefix ? text.replace(prefix, '') : text;
-  for (const char of body) {
-    const digit = Number.parseInt(char, 36);
-    if (Number.isNaN(digit) || digit >= radix) {
-      invalid = true;
-      continue;
-    }
-    if (isFloat) float = float * radix + digit;
-    else {
+  const cutoff = 9_223_372_036_854_775_807n / big;
+  const cutlim = 9_223_372_036_854_775_807n % big;
+  let value = 0n;
+  let float: number | undefined;
+  for (const digit of digits) {
+    if (digit >= radix) continue;
+    if (float === undefined && (value < cutoff || (value === cutoff && BigInt(digit) <= cutlim)))
       value = value * big + BigInt(digit);
-      if (value > 9_223_372_036_854_775_807n) {
-        isFloat = true;
-        float = Number(value);
-      }
-    }
+    else float = (float ?? Number(value)) * radix + digit;
   }
-  if (invalid) deprecated('Invalid characters passed for attempted conversion, these have been ignored');
-  return isFloat ? float : value;
+  return float ?? value;
+}
+
+/** Writes a float's digits as `_php_math_zvaltobase` does, dividing without flooring between the digits. */
+function floatToBase(value: number, radix: number): string {
+  let rest = Math.floor(value);
+  if (!Number.isFinite(rest)) throwError('ValueError', `An infinite value cannot be converted to base ${radix}`);
+  let text = '';
+  do {
+    text = Math.trunc(rest % radix).toString(36) + text;
+    rest /= radix;
+  } while (Math.abs(rest) >= 1);
+  return text;
 }
 
 defineFunction('hexdec(string $hex_string): int|float', ({ args }) => fromBase(args[0] as string, 16));
 defineFunction('bindec(string $binary_string): int|float', ({ args }) => fromBase(args[0] as string, 2));
 defineFunction('octdec(string $octal_string): int|float', ({ args }) => fromBase(args[0] as string, 8));
-defineFunction('base_convert(string $num, int $frombase, int $tobase): string', ({ args }) => {
+defineFunction('base_convert(string $num, int $from_base, int $to_base): string', ({ args }) => {
   const [text, from, to] = args as [string, bigint, bigint];
   if (from < 2n || from > 36n)
     throwError('ValueError', 'base_convert(): Argument #2 ($from_base) must be between 2 and 36 (inclusive)');
   if (to < 2n || to > 36n)
     throwError('ValueError', 'base_convert(): Argument #3 ($to_base) must be between 2 and 36 (inclusive)');
-  const value = fromBase(text.toLowerCase(), Number(from));
-  if (typeof value === 'number') return Math.trunc(value).toString(Number(to));
-  return (value as bigint).toString(Number(to));
+  const value = fromBase(text, Number(from));
+  return typeof value === 'number' ? floatToBase(value, Number(to)) : toBase(value, Number(to));
 });
 
 // Formatting ---------------------------------------------------------------------------------------------------------
 
 defineFunction(
-  'number_format(float $num, int $decimals = 0, ?string $decimal_separator = ".", ?string $thousands_separator = ","): string',
+  'number_format(int|float $num, int $decimals = 0, ?string $decimal_separator = ".", ?string $thousands_separator = ","): string',
   ({ args }) => {
-    const [value, decimalsArg = 0n, point = '.', separator = ','] = args as [
-      number,
+    const [value, decimals = 0n, point, separator] = args as [
+      bigint | number,
       bigint?,
       (string | null)?,
       (string | null)?,
     ];
-    const decimals = Math.max(Number(decimalsArg), 0);
-    const rounded = phpRound(value, Number(decimalsArg));
-    if (!Number.isFinite(rounded)) return formatFloat(rounded);
-    const text = fixedDigits(Math.abs(rounded), decimals);
-    const [integer, fraction] = text.split('.');
-    const grouped = integer.replaceAll(/\B(?=(\d{3})+(?!\d))/g, separator ?? '');
-    const negative = rounded < 0 && /[1-9]/.test(text);
-    return `${negative ? '-' : ''}${grouped}${fraction !== undefined ? `${point ?? ''}${fraction}` : ''}`;
+    const format = { decimals, point: point ?? '.', separator: separator ?? ',' };
+    // Floats from 2^52 on have no fraction, so PHP formats them as ints.
+    if (typeof value === 'bigint' || (Math.abs(value) >= 2 ** 52 && floatFitsInt(value)))
+      return formatIntNumber(BigInt(value), format);
+    return formatFloatNumber(value, format);
   }
 );
+
+interface NumberFormat {
+  decimals: bigint;
+  point: string;
+  separator: string;
+}
+
+function formatIntNumber(value: bigint, { decimals, point, separator }: NumberFormat): string {
+  let magnitude = value < 0n ? -value : value;
+  if (decimals < 0n) {
+    const power = decimals < -19n ? 0n : 10n ** -decimals;
+    magnitude = power === 0n ? 0n : ((magnitude + power / 2n) / power) * power;
+  }
+  const fraction = decimals > 0n ? `${point}${'0'.repeat(Number(decimals))}` : '';
+  return `${value < 0n && magnitude !== 0n ? '-' : ''}${groupThousands(magnitude.toString(), separator)}${fraction}`;
+}
+
+function formatFloatNumber(value: number, { decimals, point, separator }: NumberFormat): string {
+  const places = Number(decimals);
+  const rounded = phpRound(Math.abs(value), places);
+  if (Number.isNaN(rounded)) return 'nan';
+  if (!Number.isFinite(rounded)) return 'inf';
+  const [integer, fraction] = fixedDigits(rounded, Math.max(places, 0)).split('.');
+  const sign = value < 0 && rounded !== 0 ? '-' : '';
+  return `${sign}${groupThousands(integer, separator)}${fraction === undefined ? '' : `${point}${fraction}`}`;
+}
+
+function groupThousands(digits: string, separator: string): string {
+  return digits.replaceAll(/\B(?=(\d{3})+(?!\d))/g, separator);
+}
 
 // Random numbers -----------------------------------------------------------------------------------------------------
 

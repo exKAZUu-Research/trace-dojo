@@ -1,0 +1,29 @@
+
+Warning: array_sum(): Addition is not supported on type string in /main.php on line 2
+
+Warning: A non-numeric value encountered in /main.php on line 2
+
+Warning: array_sum(): Addition is not supported on type array in /main.php on line 2
+int(6)
+
+Warning: array_product(): Multiplication is not supported on type string in /main.php on line 3
+int(0)
+
+Warning: Undefined variable $u1 in /main.php on line 4
+
+Warning: Undefined variable $u3 in /main.php on line 6
+Attempt to assign property "prop" on null
+dflt
+
+Warning: Undefined global variable $nn2 in /main.php on line 9
+Value of type null is not callable
+Value of type int is not callable
+First array member is not a valid class name or object
+array_map(): Argument #1 ($callback) must be a valid callback or null, function "nope" not found or invalid function name
+array_filter(): Argument #2 ($callback) must be a valid callback or null, function "nope" not found or invalid function name
+usort(): Argument #1 ($array) must be of type array, null given
+array_walk(): Argument #1 ($array) must be of type array, null given
+TypeError: clone(): Argument #1 ($object) must be of type object, int given
+Call to private method PC::__clone() from global scope
+array_merge(): Argument #2 must be of type array, int given
+array_map(): Argument #3 must be of type array, int given

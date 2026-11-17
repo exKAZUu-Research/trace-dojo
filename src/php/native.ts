@@ -23,6 +23,13 @@ export function defineFunction(signature: string, impl: (ctx: NativeContext) => 
   functions.push({ kind: 'native', name, params, returnType, impl, needsCaller });
 }
 
+/** Marks a native function whose direct calls PHP compiles away, as {@link NativeFunction.inlined} says. */
+export function markInlined(name: string): void {
+  const fn = functions.find((candidate) => candidate.name === name);
+  if (!fn) throw new Error(`Unknown function ${name}`);
+  fn.inlined = true;
+}
+
 export function defineAlias(alias: string, target: string): void {
   const fn = functions.find((candidate) => candidate.name === target);
   if (!fn) throw new Error(`Unknown alias target ${target}`);

@@ -137,63 +137,60 @@ export type RoundMode =
   | 'ceiling'
   | 'floor';
 
-/** Rounds a float to `places` decimals as PHP 8.4's `round` does. */
+/** Rounds a float to `places` decimals as PHP 8.5's `_php_math_round` does. */
 export function phpRound(value: number, places: number, mode: RoundMode = 'halfUp'): number {
   if (!Number.isFinite(value) || value === 0) return value;
+  if (places === 0 && value === Math.trunc(value)) return value;
   const clamped = Math.max(places, -2_147_483_647);
   const exponent = intPow10(Math.abs(clamped));
   const scaled = clamped > 0 ? value * exponent : value / exponent;
   let integral = value >= 0 ? Math.floor(scaled) : Math.ceil(scaled);
-  if ((clamped > 0 ? integral / exponent : integral * exponent) === value) return value;
+  // The scaled value may fall just short of an integer through a floating-point error, which PHP corrects.
+  const next = value >= 0 ? integral + 1 : integral - 1;
+  if ((clamped > 0 ? next / exponent : next * exponent) === value) integral = next;
+  if (Math.abs(integral) >= 1e16) return value;
   integral = roundHelper(integral, value, exponent, clamped, mode);
-  let result: number;
-  if (Math.abs(clamped) < 23) result = clamped > 0 ? integral / exponent : integral * exponent;
-  else {
-    result = Number(`${integral.toFixed(6)}e${-clamped}`);
-    if (!Number.isFinite(result)) return value;
-  }
-  return result;
+  if (Math.abs(clamped) < 23) return clamped > 0 ? integral / exponent : integral * exponent;
+  const result = Number(`${integral.toFixed(6)}e${-clamped}`);
+  return Number.isFinite(result) ? result : value;
 }
 
-// code-gauge-allow functionCognitiveComplexity 28 -- Transcribes PHP's algorithm for this function step by step, whose branches mirror PHP's.
-// code-gauge-allow functionNcss 31 -- Transcribes PHP's algorithm for this function step by step, whose branches mirror PHP's.
+// code-gauge-allow functionCognitiveComplexity 22 -- Transcribes PHP's php_round_helper, one case per rounding mode.
 function roundHelper(integral: number, value: number, exponent: number, places: number, mode: RoundMode): number {
   const valueAbs = Math.abs(value);
-  const edge = (): number =>
-    places > 0
-      ? Math.abs((integral + Math.sign(integral || value) * 0.5) / exponent)
-      : Math.abs((integral + Math.sign(integral || value) * 0.5) * exponent);
-  const away = (): number => integral + Math.sign(integral || value);
+  const scale = (x: number): number => Math.abs(places > 0 ? x / exponent : x * exponent);
+  const halfway = (): number => scale(integral + copySign(0.5, integral));
+  const away = integral + copySign(1, integral);
   switch (mode) {
     case 'halfUp': {
-      return valueAbs >= edge() ? away() : integral;
+      return valueAbs >= halfway() ? away : integral;
     }
     case 'halfDown': {
-      return valueAbs > edge() ? away() : integral;
+      return valueAbs > halfway() ? away : integral;
     }
-    case 'halfEven': {
-      const edgeValue = edge();
-      if (valueAbs > edgeValue) return away();
-      if (valueAbs === edgeValue) return Math.abs(integral % 2) === 1 ? away() : integral;
-      return integral;
-    }
+    case 'halfEven':
     case 'halfOdd': {
-      const edgeValue = edge();
-      if (valueAbs > edgeValue) return away();
-      if (valueAbs === edgeValue) return Math.abs(integral % 2) === 0 ? away() : integral;
-      return integral;
+      const edge = halfway();
+      if (valueAbs > edge) return away;
+      const even = integral % 2 === 0;
+      return valueAbs === edge && even === (mode === 'halfOdd') ? away : integral;
     }
-    case 'awayFromZero': {
-      return away();
+    case 'ceiling': {
+      return value > 0 && valueAbs > scale(integral) ? integral + 1 : integral;
+    }
+    case 'floor': {
+      return value < 0 && valueAbs > scale(integral) ? integral - 1 : integral;
     }
     case 'towardsZero': {
       return integral;
     }
-    case 'ceiling': {
-      return value > 0 ? away() : integral;
-    }
-    case 'floor': {
-      return value < 0 ? away() : integral;
+    case 'awayFromZero': {
+      return valueAbs > scale(integral) ? away : integral;
     }
   }
+}
+
+/** `magnitude` with the sign of `sign`, as C's copysign, which reads the sign of -0 too. */
+function copySign(magnitude: number, sign: number): number {
+  return sign < 0 || Object.is(sign, -0) ? -Math.abs(magnitude) : Math.abs(magnitude);
 }

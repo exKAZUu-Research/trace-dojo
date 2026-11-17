@@ -1,3 +1,4 @@
+// code-gauge-allow-file fileNcss 413 -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/prefer-code-point -- PHP strings hold bytes as code units 0–255, which charCodeAt and fromCharCode read and write as they are.
 import { ExecutionLimitError, LIMITS } from '../interpreter/limits';
 import {
@@ -6,6 +7,7 @@ import {
   debugType,
   floatFitsInt,
   formatFloat,
+  formatFloatRepr,
   intOrFloat,
   normalizeKeyString,
   numericPrefix,
@@ -13,8 +15,8 @@ import {
   toBool,
   valueName,
 } from './conversions';
-import { deprecated, throwError, warn } from './errors';
-import { INT_MIN, type Key, PhpArray, PhpObject, type Value } from './values';
+import { deprecated, notice, throwError, warn } from './errors';
+import { INT_MAX, INT_MIN, type Key, PhpArray, PhpObject, type Value } from './values';
 
 /** Converts an object to a string through `__toString`, which the interpreter provides. */
 let objectToString: (object: PhpObject) => string = () => '';
@@ -70,7 +72,7 @@ export function toInt(value: Value): bigint {
     case 'string': {
       const prefix = numericPrefix(value);
       if (!prefix) return 0n;
-      return typeof prefix.value === 'bigint' ? prefix.value : floatToIntCast(prefix.value);
+      return typeof prefix.value === 'bigint' ? prefix.value : floatToIntCap(prefix.value);
     }
   }
   if (value instanceof PhpArray) return value.size > 0 ? 1n : 0n;
@@ -78,10 +80,21 @@ export function toInt(value: Value): bigint {
   return 1n;
 }
 
-/** Converts a float to an int as `(int)` does: out-of-range and non-finite values become 0 in PHP 8 on 64 bits. */
+/**
+ * Converts a float to an int as PHP 8.5 does: a value out of range wraps around 64 bits, and NaN and the infinities
+ * become 0, both with a warning.
+ */
 export function floatToIntCast(value: number): bigint {
+  if (floatFitsInt(value)) return BigInt(Math.trunc(value));
+  warn(`The float ${formatFloatForMessage(value)} is not representable as an int, cast occurred`);
+  return Number.isFinite(value) ? BigInt.asIntN(64, BigInt(value)) : 0n;
+}
+
+/** Converts the float a numeric string holds to an int, which PHP clamps to the range of ints, as strtol does. */
+function floatToIntCap(value: number): bigint {
   if (!Number.isFinite(value)) return 0n;
-  if (!floatFitsInt(value)) return 0n;
+  if (value >= 9.223372036854776e18) return INT_MAX;
+  if (value < -9.223372036854776e18) return INT_MIN;
   return BigInt(Math.trunc(value));
 }
 
@@ -123,16 +136,25 @@ function arithmeticOperand(value: Value, op: string, left: Value, right: Value):
   return unsupportedOperands(op, left, right);
 }
 
+/** `%`, which reads its operands as ints, as the bitwise operators do. */
+function modulo(left: Value, right: Value): bigint {
+  const x = intOperand(left, '%', left, right);
+  const y = intOperand(right, '%', left, right);
+  if (y === 0n) throwError('DivisionByZeroError', 'Modulo by zero');
+  if (y === -1n) return 0n;
+  return x % y;
+}
+
 export function unsupportedOperands(op: string, left: Value, right: Value): never {
   throwError('TypeError', `Unsupported operand types: ${debugType(left)} ${op} ${debugType(right)}`);
 }
 
-// code-gauge-allow functionCognitiveComplexity 30 -- Transcribes PHP's algorithm for this function step by step, whose branches mirror PHP's.
-// code-gauge-allow functionNcss 35 -- Transcribes PHP's algorithm for this function step by step, whose branches mirror PHP's.
+// code-gauge-allow functionCognitiveComplexity 27 -- Transcribes PHP's algorithm for this function step by step, whose branches mirror PHP's.
 export function arithmetic(op: string, left: Value, right: Value): Value {
   if (op === '+' && left instanceof PhpArray && right instanceof PhpArray) return arrayUnion(left, right);
   if (left instanceof PhpArray || right instanceof PhpArray) unsupportedOperands(op, left, right);
   if (left instanceof PhpObject || right instanceof PhpObject) unsupportedOperands(op, left, right);
+  if (op === '%') return modulo(left, right);
   const a = arithmeticOperand(left, op, left, right);
   const b = arithmeticOperand(right, op, left, right);
   switch (op) {
@@ -152,13 +174,6 @@ export function arithmetic(op: string, left: Value, right: Value): Value {
         return Number(a) / Number(b);
       }
       return Number(a) / Number(b);
-    }
-    case '%': {
-      const x = toIntForOperator(a);
-      const y = toIntForOperator(b);
-      if (y === 0n) throwError('DivisionByZeroError', 'Modulo by zero');
-      if (y === -1n) return 0n;
-      return x % y;
     }
     case '**': {
       return power(a, b);
@@ -182,12 +197,16 @@ function power(a: bigint | number, b: bigint | number): bigint | number {
   return Math.pow(Number(a), Number(b));
 }
 
-/** Converts an operand of `%`, `<<`, and the bitwise operators to an int, as PHP does with a precision warning. */
+/**
+ * Converts a float used where PHP needs an int (an operand of `%` or a bitwise operator, an array key), warning as
+ * PHP does about a value out of range and deprecating one with a fraction.
+ */
 export function toIntForOperator(value: bigint | number): bigint {
   if (typeof value === 'bigint') return value;
-  if (!Number.isFinite(value) || !floatFitsInt(value)) {
-    // PHP 8.5 deprecates implicitly converting out-of-range floats.
-    return 0n;
+  if (!floatFitsInt(value)) {
+    const result = floatToIntCast(value);
+    if (Number.isNaN(value)) deprecated('Implicit conversion from float NAN to int loses precision');
+    return result;
   }
   if (!Number.isInteger(value)) {
     deprecated(`Implicit conversion from float ${formatFloatForMessage(value)} to int loses precision`);
@@ -195,8 +214,15 @@ export function toIntForOperator(value: bigint | number): bigint {
   return BigInt(Math.trunc(value));
 }
 
+/** Converts a numeric string holding a float where PHP needs an int, deprecating a value an int cannot hold. */
+function floatStringToInt(text: string, value: number): bigint {
+  const result = floatToIntCap(value);
+  if (Number(result) !== value) deprecated(`Implicit conversion from float-string "${text}" to int loses precision`);
+  return result;
+}
+
 export function formatFloatForMessage(value: number): string {
-  return formatFloat(value, 17).replace(/^(-?\d+)$/, '$1');
+  return formatFloatRepr(value);
 }
 
 function arrayUnion(left: PhpArray, right: PhpArray): PhpArray {
@@ -214,7 +240,8 @@ export function concat(left: Value, right: Value): string {
   return a + b;
 }
 
-function bitwiseOperand(value: Value, op: string, left: Value, right: Value): bigint {
+/** Converts an operand of `%` or a bitwise operator to an int, as PHP's zendi_try_get_long does. */
+function intOperand(value: Value, op: string, left: Value, right: Value): bigint {
   if (typeof value === 'bigint') return value;
   if (typeof value === 'number') return toIntForOperator(value);
   if (value === null) return 0n;
@@ -223,7 +250,7 @@ function bitwiseOperand(value: Value, op: string, left: Value, right: Value): bi
     const prefix = numericPrefix(value);
     if (!prefix) unsupportedOperands(op, left, right);
     if (!prefix.whole) warn('A non-numeric value encountered');
-    return typeof prefix.value === 'bigint' ? prefix.value : toIntForOperator(prefix.value);
+    return typeof prefix.value === 'bigint' ? prefix.value : floatStringToInt(value, prefix.value);
   }
   return unsupportedOperands(op, left, right);
 }
@@ -241,8 +268,8 @@ export function bitwise(op: string, left: Value, right: Value): Value {
   ) {
     unsupportedOperands(op, left, right);
   }
-  const a = bitwiseOperand(left, op, left, right);
-  const b = bitwiseOperand(right, op, left, right);
+  const a = intOperand(left, op, left, right);
+  const b = intOperand(right, op, left, right);
   switch (op) {
     case '&': {
       return a & b;
@@ -335,12 +362,12 @@ export function compare(a: Value, b: Value): number {
   }
   if (typeof a === 'string' && (typeof b === 'bigint' || typeof b === 'number')) return compareStringNumber(a, b);
   if (typeof b === 'string' && (typeof a === 'bigint' || typeof a === 'number')) return -compareStringNumber(b, a);
-  if (a instanceof PhpArray && b instanceof PhpArray) return compareArrays(a, b);
-  if (a instanceof PhpArray) return 1;
-  if (b instanceof PhpArray) return -1;
   if (a instanceof PhpObject && b instanceof PhpObject) return compareObjects(a, b);
   if (a instanceof PhpObject) return compareObjectScalar(a, b);
   if (b instanceof PhpObject) return -compareObjectScalar(b, a);
+  if (a instanceof PhpArray && b instanceof PhpArray) return compareArrays(a, b);
+  if (a instanceof PhpArray) return 1;
+  if (b instanceof PhpArray) return -1;
   return 1;
 }
 
@@ -351,13 +378,15 @@ function compareStringNumber(text: string, number: bigint | number): number {
   return Math.sign(compareBytes(text, numberText));
 }
 
+/**
+ * Compares an object with a value of another type as PHP's zend_std_compare_objects does: the object is converted to
+ * the value's type, and an object that cannot be converted is greater.
+ */
 function compareObjectScalar(object: PhpObject, other: Value): number {
-  if (typeof other === 'string' && object.cls.findMethod('__tostring')) {
-    return Math.sign(compareBytes(objectToString(object), other));
-  }
+  if (typeof other === 'string' && object.cls.findMethod('__tostring')) return compare(objectToString(object), other);
   if (typeof other === 'bigint' || typeof other === 'number') {
     const kind = typeof other === 'bigint' ? 'int' : 'float';
-    warn(`Object of class ${object.cls.name} could not be converted to ${kind}`);
+    notice(`Object of class ${object.cls.name} could not be converted to ${kind}`);
     return compareNumbers(1n, other);
   }
   return 1;
@@ -383,6 +412,9 @@ function compareObjects(a: PhpObject, b: PhpObject): number {
   try {
     const left = objectProps(a);
     const right = new Map(objectProps(b));
+    // Objects with dynamic properties compare as their property tables, the one with more properties being greater.
+    if (left.length !== right.size && (hasDynamicProps(a) || hasDynamicProps(b)))
+      return left.length > right.size ? 1 : -1;
     for (const [name, value] of left) {
       if (!right.has(name)) return 1;
       const result = compare(value, right.get(name) as Value);
@@ -392,6 +424,10 @@ function compareObjects(a: PhpObject, b: PhpObject): number {
   } finally {
     comparing.delete(a);
   }
+}
+
+function hasDynamicProps(object: PhpObject): boolean {
+  return [...object.props.keys()].some((key) => !key.startsWith('\0') && !object.cls.propByName.has(key));
 }
 
 // code-gauge-allow functionCognitiveComplexity 25 -- Transcribes PHP's algorithm for this function step by step, whose branches mirror PHP's.
@@ -409,14 +445,25 @@ export function looseEquals(a: Value, b: Value): boolean {
     if (a.cls !== b.cls) return false;
     return compareObjects(a, b) === 0;
   }
-  if (typeof a === 'string' && typeof b === 'string') {
-    if (a === b) return true;
-    const x = numericValue(a);
-    if (x === undefined) return false;
-    const y = numericValue(b);
-    return y !== undefined && compareNumbers(x, y) === 0;
-  }
+  if (typeof a === 'string' && typeof b === 'string') return looseStringEquals(a, b);
   return compare(a, b) === 0;
+}
+
+/** `==` on two strings: numeric strings compare as numbers, others as text. */
+function looseStringEquals(a: string, b: string): boolean {
+  if (a === b) return true;
+  const x = numericValue(a);
+  if (x === undefined) return false;
+  const y = numericValue(b);
+  if (y === undefined) return false;
+  // Numbers too large for their type compare as text, since converting both lost what tells them apart.
+  if (typeof x === 'number' && x === y && (!Number.isFinite(x) || (isIntegerText(a) && isIntegerText(b)))) return false;
+  return compareNumbers(x, y) === 0;
+}
+
+/** Whether a numeric string is written as an integer, which a float holds only when the integer overflows. */
+function isIntegerText(text: string): boolean {
+  return /^[ \t\n\r\v\f]*[+-]?\d+[ \t\n\r\v\f]*$/.test(text);
 }
 
 export function strictEquals(a: Value, b: Value): boolean {
@@ -446,16 +493,7 @@ export function toKey(value: Value): Key {
     return '';
   }
   if (typeof value === 'boolean') return value ? 1n : 0n;
-  if (typeof value === 'number') {
-    if (!Number.isFinite(value) || !floatFitsInt(value)) {
-      deprecated(`Implicit conversion from float ${formatFloat(value, 17)} to int loses precision`);
-      return 0n;
-    }
-    if (!Number.isInteger(value)) {
-      deprecated(`Implicit conversion from float ${formatFloatForMessage(value)} to int loses precision`);
-    }
-    return BigInt(Math.trunc(value));
-  }
+  if (typeof value === 'number') return toIntForOperator(value);
   if (value instanceof PhpArray) throwError('TypeError', 'Illegal offset type');
   throwError('TypeError', `Cannot access offset of type ${debugType(value)} on array`);
 }

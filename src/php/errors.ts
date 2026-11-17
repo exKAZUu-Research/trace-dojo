@@ -63,10 +63,12 @@ export function emitError(level: bigint, message: string, row = rt().row): void 
     break;
   }
   if (runtime.silence > 0 && level !== E_USER_ERROR) return;
-  if ((runtime.errorReporting & level) === 0n) return;
+  const reported = (runtime.errorReporting & level) !== 0n;
+  // A fatal error ends the program even when it is not reported, and PHP 8.5 prints its stack trace.
+  if (level === E_USER_ERROR) throw new FatalError(reported ? message : '', row);
+  if (!reported) return;
   const name = LEVEL_NAMES.get(level) ?? 'Warning';
   runtime.echo(`\n${name}: ${message} in ${SCRIPT_PATH} on line ${row + 1}\n`);
-  if (level === E_USER_ERROR) throw new FatalError('', row);
 }
 
 export function warn(message: string): void {

@@ -1,3 +1,4 @@
+import { warn } from './errors';
 import { INT_MAX, INT_MIN, type Key, PhpArray, type PhpObject, type Value } from './values';
 
 /** Formats a float as PHP's `echo` does, with 14 significant digits (`precision=14`). */
@@ -60,16 +61,6 @@ export function floatFitsInt(value: number): boolean {
   return Number.isFinite(value) && value >= -9.223372036854776e18 && value < 9.223372036854776e18;
 }
 
-/** Converts a float to an int as PHP does since 8.1: out of range or non-finite values become 0 on 64-bit... */
-export function floatToInt(value: number): bigint {
-  if (!Number.isFinite(value)) return 0n;
-  if (!floatFitsInt(value)) {
-    // PHP 8 on 64-bit platforms wraps out-of-range floats modulo 2^64 (zend_dval_to_lval_cap is not used).
-    return 0n;
-  }
-  return BigInt(Math.trunc(value));
-}
-
 /** The result of an integer operation, or the float PHP produces when it overflows. */
 export function intOrFloat(value: bigint): bigint | number {
   if (value > INT_MAX || value < INT_MIN) return Number(value);
@@ -124,6 +115,7 @@ export function normalizeKeyString(text: string): Key {
 }
 
 /** Converts to bool as PHP does. */
+// code-gauge-allow duplicateLines 17 -- Mirrors toStr, as PHP converts each type to bool and to string by separate rules.
 export function toBool(value: Value): boolean {
   if (value === null) return false;
   switch (typeof value) {
@@ -134,6 +126,7 @@ export function toBool(value: Value): boolean {
       return value !== 0n;
     }
     case 'number': {
+      if (Number.isNaN(value)) warn('unexpected NAN value was coerced to bool');
       return value !== 0;
     }
     case 'string': {
@@ -172,7 +165,7 @@ export function debugType(value: Value): string {
   if (value instanceof PhpArray) return 'array';
   const object = value as PhpObject;
   if (object.cls.name === '(stream)') return 'resource (stream)';
-  return object.cls.isAnonymous ? anonymousDebugName(object) : object.cls.name;
+  return object.cls.name;
 }
 
 /**
@@ -181,13 +174,6 @@ export function debugType(value: Value): string {
  */
 export function valueName(value: Value): string {
   return typeof value === 'boolean' ? String(value) : debugType(value);
-}
-
-function anonymousDebugName(object: PhpObject): string {
-  const parent = object.cls.parent;
-  if (parent) return `${parent.name}@anonymous`;
-  const iface = object.cls.ownInterfaces[0];
-  return iface ? `${iface.name}@anonymous` : 'class@anonymous';
 }
 
 /** Compares two strings as PHP's `strcmp` does, by bytes. */

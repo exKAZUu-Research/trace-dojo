@@ -46,6 +46,8 @@ export interface CallRecord {
   className?: string;
   type?: '->' | '::';
   args: Value[];
+  /** The arguments a variadic parameter collected by name, which traces show as `name: value`. */
+  named?: [string, Value][];
   /** The row of the call in its caller, or undefined when native code made the call. */
   row: number | undefined;
 }
@@ -76,22 +78,28 @@ setCallCapture(() => callStack.toReversed());
 /** Whether native code is running a callback, which stack traces show as `[internal function]`. */
 let nativeDepth = 0;
 
+/** Runs `work` as the engine's own code, whose calls traces show as `[internal function]`. */
+export function asInternal<T>(work: () => T): T {
+  nativeDepth++;
+  try {
+    return work();
+  } finally {
+    nativeDepth--;
+  }
+}
+
 export function resetCallStack(): void {
   hostStackExhaustion = new HostStackExhaustion();
   callStack.length = 0;
   nativeDepth = 0;
 }
 
-/** The display name of a function in messages: `f`, `A::m`, or `{closure:/main.php:3}`. */
+/** The display name of a function in messages: `f`, `A::m`, or `{closure:A::m():3}`. */
 export function functionDisplayName(target: CallTarget): string {
   const { fn, method } = target;
   if (method) return `${method.scope.name}::${method.name}`;
-  if (fn.kind === 'user' && fn.decl.isClosure) return closureName(fn.decl);
+  if (fn.kind === 'user' && fn.decl.isClosure) return fn.decl.name;
   return fn.name;
-}
-
-export function closureName(decl: FunctionDecl): string {
-  return `{closure:${SCRIPT_PATH}:${decl.row + 1}}`;
 }
 
 function recordFor(target: CallTarget, args: Value[], row: number | undefined): CallRecord {
@@ -109,7 +117,7 @@ function recordFor(target: CallTarget, args: Value[], row: number | undefined): 
     const closureData = target.closure?.internal as ClosureData | undefined;
     const scope = closureData?.scope;
     return {
-      name: closureName(fn.decl),
+      name: fn.decl.name,
       className: scope?.name,
       type: scope ? (closureData?.thisObj ? '->' : '::') : undefined,
       args,
@@ -132,11 +140,18 @@ export function invoke(target: CallTarget, args: ArgValue[], callRow: number | u
 function invokeNative(target: CallTarget, fn: NativeFunction, args: ArgValue[], row: number | undefined): Value {
   const runtime = rt();
   const name = functionDisplayName(target);
-  const { values, refs, named } = bindNative(fn, args, name);
-  callStack.push(recordFor(target, values, nativeDepth > 0 && row === undefined ? undefined : row));
+  if (fn.inlined && row !== undefined) {
+    const { values, refs, named } = bindNative(fn, args, name, callerIsStrict());
+    return fn.impl({ args: values, refs, thisObj: target.thisObj, calledClass: target.staticClass, named, row });
+  }
+  const strict = callerIsStrict();
+  // The frame exists while PHP checks the arguments, so a TypeError about them shows the call in its trace.
+  const passed = args.filter((arg) => arg.name === undefined).map((arg) => arg.ref?.v ?? arg.v);
+  callStack.push(recordFor(target, passed, nativeDepth > 0 && row === undefined ? undefined : row));
   nativeDepth++;
   const savedRow = runtime.row;
   try {
+    const { values, refs, named } = bindNative(fn, args, name, strict);
     return fn.impl({ args: values, refs, thisObj: target.thisObj, calledClass: target.staticClass, named });
   } finally {
     nativeDepth--;
@@ -146,11 +161,11 @@ function invokeNative(target: CallTarget, fn: NativeFunction, args: ArgValue[], 
 }
 
 /** Matches arguments to a native function's parameters, coercing them to the declared types. */
-// code-gauge-allow functionNcss 52 -- Binds arguments to parameters as PHP's call protocol does, in its order of checks.
 function bindNative(
   fn: NativeFunction,
   args: ArgValue[],
-  name: string
+  name: string,
+  strict: boolean
 ): { values: Value[]; refs: (Ref | undefined)[]; named?: Map<string, Value> } {
   const params = fn.params;
   const values: Value[] = [];
@@ -180,7 +195,6 @@ function bindNative(
   if (!variadic && positional.length > fixed) {
     throwError('ArgumentCountError', argumentCountMessage(name, required, fixed, positional.length));
   }
-  const strict = callerIsStrict();
   for (let index = 0; index < params.length; index++) {
     const param = params[index];
     if (param.variadic) {
@@ -201,7 +215,10 @@ function bindNative(
       continue;
     }
     if (param.byRef) {
-      values.push(arg.ref ? arg.ref.v : arg.v);
+      const value = arg.ref ? arg.ref.v : arg.v;
+      // PHP checks the type of a by-reference argument without converting the variable.
+      coerceArg(param, index, value, true, name);
+      values.push(value);
       refs.push(arg.ref);
     } else {
       values.push(coerceArg(param, index, arg.v, strict, name));
@@ -225,18 +242,35 @@ function coerceArg(param: Param, index: number, value: Value, strict: boolean, n
       `${name}(): Passing null to parameter #${index + 1} ($${param.name}) of type ${typeToString(param.type as TypeDecl)} is deprecated`,
   });
   if (coerced === NO_MATCH) {
-    if (param.type.k === 'named' && param.type.name === 'callable') {
+    // PHP names no parameter for an argument a variadic parameter collects.
+    const label = param.variadic ? '' : ` ($${param.name})`;
+    const parts = param.type.k === 'union' ? param.type.types : [param.type];
+    if (parts.some((part) => part.k === 'named' && part.name === 'callable')) {
+      const orNull = typeAllowsNull(param.type) ? ' or null' : '';
       throwError(
         'TypeError',
-        `${name}(): Argument #${index + 1} ($${param.name}) must be a valid callback, ${callableProblem(value)}`
+        `${name}(): Argument #${index + 1}${label} must be a valid callback${orNull}, ${callableProblem(value)}`
       );
     }
     throwError(
       'TypeError',
-      `${name}(): Argument #${index + 1} ($${param.name}) must be of type ${typeToString(param.type)}, ${valueName(value)} given`
+      `${name}(): Argument #${index + 1}${label} must be of type ${nativeTypeText(param.type)}, ${valueName(value)} given`
     );
   }
   return coerced;
+}
+
+function typeAllowsNull(type: TypeDecl): boolean {
+  if (type.k === 'named') return type.nullable === true || type.name === 'null' || type.name === 'mixed';
+  return type.k === 'union' && type.types.some((part) => typeAllowsNull(part));
+}
+
+/** A native parameter's type as PHP's argument parsing names it, in the order the signature declares. */
+function nativeTypeText(type: TypeDecl): string {
+  if (type.k !== 'union') return typeToString(type);
+  const text = type.types.map((part) => typeToString(part)).join('|');
+  // Argument parsing that accepts an array or an object (Z_PARAM_ARRAY_OR_OBJECT) asks for an array in its message.
+  return text === 'array|object' ? 'array' : text;
 }
 
 /** Explains why a value is not a valid callback, which the library provides. */
@@ -263,8 +297,7 @@ function callerIsStrict(): boolean {
 
 // User functions -----------------------------------------------------------------------------------------------------
 
-// code-gauge-allow functionCognitiveComplexity 18 -- Binds arguments to parameters as PHP's call protocol does, in its order of checks.
-// code-gauge-allow functionNcss 60 -- Binds arguments to parameters as PHP's call protocol does, in its order of checks.
+// code-gauge-allow functionNcss 57 -- Transcribes PHP's algorithm for this function step by step, whose branches mirror PHP's.
 function invokeUser(target: CallTarget, fn: UserFunction, args: ArgValue[], row: number | undefined): Value {
   const runtime = rt();
   const { decl } = fn;
@@ -288,14 +321,7 @@ function invokeUser(target: CallTarget, fn: UserFunction, args: ArgValue[], row:
     target.closure
   );
   const closure = target.closure?.internal as ClosureData | undefined;
-  if (closure) {
-    for (const [varName, ref] of closure.bound) {
-      if (ref.isRef) {
-        ref.rc++;
-        frame.vars.set(varName, ref);
-      } else frame.vars.set(varName, new Ref(share(ref.v)));
-    }
-  }
+  if (closure) bindClosureVars(frame, closure);
   const strict = runtime.strictTypes && nativeDepth === 0;
   const positional = args.filter((arg) => arg.name === undefined);
   const params = fn.params;
@@ -303,7 +329,7 @@ function invokeUser(target: CallTarget, fn: UserFunction, args: ArgValue[], row:
   const record = recordFor(
     target,
     positional.map((arg) => arg.ref?.v ?? arg.v),
-    row
+    row ?? implicitCallRow()
   );
   frame.args = positional.map((arg) => arg.ref?.v ?? arg.v);
   const savedRow = runtime.row;
@@ -316,6 +342,7 @@ function invokeUser(target: CallTarget, fn: UserFunction, args: ArgValue[], row:
   try {
     runtime.row = decl.row;
     bindParams(frame, fn, args, positional, name, strict, row);
+    if (args.length > positional.length) tracedNamedArgs(record, params, frame, args, positional.length);
     let result: Value;
     try {
       result = runBody(decl, frame);
@@ -348,6 +375,48 @@ function invokeUser(target: CallTarget, fn: UserFunction, args: ArgValue[], row:
     collectGarbage(runtime);
   }
   return returned;
+}
+
+/**
+ * Records the arguments of a call with named arguments as PHP's traces show them: the parameters up to the last one
+ * passed, defaults included, then what a variadic parameter collected by name.
+ */
+function tracedNamedArgs(
+  record: CallRecord,
+  params: Param[],
+  frame: Frame,
+  args: ArgValue[],
+  positional: number
+): void {
+  let count = positional;
+  const named: [string, Value][] = [];
+  for (const arg of args) {
+    if (arg.name === undefined) continue;
+    const index = params.findIndex((param) => param.name === arg.name && !param.variadic);
+    if (index === -1) named.push([arg.name, arg.v]);
+    else count = Math.max(count, index + 1);
+  }
+  record.args = [
+    ...record.args,
+    ...params.slice(positional, count).map((param) => frame.vars.get(param.name)?.v ?? null),
+  ];
+  record.named = named;
+}
+
+/** Gives a closure's frame the variables the closure captured: shared references, or copies of values. */
+function bindClosureVars(frame: Frame, closure: ClosureData): void {
+  for (const [varName, ref] of closure.bound) {
+    if (ref.isRef) {
+      ref.rc++;
+      frame.vars.set(varName, ref);
+    } else frame.vars.set(varName, new Ref(share(ref.v)));
+  }
+}
+
+/** The row a call the engine makes for the program's code (a magic method, a conversion) shows: that code's. */
+function implicitCallRow(): number | undefined {
+  const runtime = rt();
+  return nativeDepth === 0 && !runtime.shuttingDown ? runtime.row : undefined;
 }
 
 function checkNamedArgs(params: Param[], args: ArgValue[], positionalCount: number): void {
@@ -472,8 +541,7 @@ function checkReturn(value: Value, type: TypeDecl, name: string, frame: Frame): 
     staticClass: frame.staticClass,
   });
   if (coerced !== NO_MATCH) return share(coerced);
-  const display =
-    type.k === 'named' && type.name === 'static' && frame.staticClass ? 'static' : describeType(type, frame.scope);
+  const display = describeType(type, frame.scope, frame.staticClass);
   throwError('TypeError', `${name}(): Return value must be of type ${display}, ${valueName(value)} returned`);
 }
 

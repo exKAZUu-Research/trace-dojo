@@ -1,10 +1,10 @@
-// code-gauge-allow-file fileNcss 571 -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import { dec, enc } from './bytes';
 import { callCallback } from './callables';
 import { throwError, warn } from './errors';
 import { defineConstant, defineFunction } from './native';
 import { toStr } from './operators';
+import { type Compiled, PatternError, translate } from './pcrePattern';
 import { rt } from './runtime';
 import { UnsupportedFeatureError } from './unsupported';
 import { PhpArray, type Ref, type Value } from './values';
@@ -28,14 +28,6 @@ const PREG_CONSTANTS: [string, bigint][] = [
 ];
 for (const [name, value] of PREG_CONSTANTS) defineConstant(name, value);
 
-/** A compiled pattern: the JavaScript regex and whether it matches UTF-8 text by characters (`u`). */
-interface Compiled {
-  regex: RegExp;
-  utf8: boolean;
-  names: (string | undefined)[];
-  groupCount: number;
-}
-
 const cache = new Map<string, Compiled | string>();
 
 /** Compiles a PCRE pattern with delimiters, warning and returning undefined as PHP does for a bad pattern. */
@@ -58,393 +50,6 @@ function compile(name: string, pattern: string): Compiled | undefined {
   return compiled;
 }
 
-class PatternError extends Error {}
-
-const BRACKETS: Record<string, string> = { '(': ')', '{': '}', '[': ']', '<': '>' };
-
-function translate(pattern: string): Compiled {
-  const trimmed = pattern.replace(/^[ \t\n\r\v\f]+/, '');
-  if (trimmed === '') throw new PatternError('Empty regular expression');
-  const delimiter = trimmed[0];
-  if (/[\dA-Za-z\\]/.test(delimiter)) throw new PatternError('Delimiter must not be alphanumeric, backslash, or NUL');
-  const closing = BRACKETS[delimiter] ?? delimiter;
-  let end = -1;
-  let depth = 0;
-  for (let index = 1; index < trimmed.length; index++) {
-    const char = trimmed[index];
-    if (char === '\\') {
-      index++;
-      continue;
-    }
-    if (closing !== delimiter && char === delimiter) depth++;
-    else if (char === closing) {
-      if (depth === 0) {
-        end = index;
-        break;
-      }
-      depth--;
-    }
-  }
-  if (end === -1) {
-    throw new PatternError(
-      closing === delimiter
-        ? `No ending delimiter '${delimiter}' found`
-        : `No ending matching delimiter '${closing}' found`
-    );
-  }
-  const body = trimmed.slice(1, end);
-  const modifiers = trimmed.slice(end + 1);
-  let flags = 'g';
-  let extended = false;
-  let ungreedy = false;
-  let dollarEndOnly = false;
-  let anchored = false;
-  let utf8 = false;
-  for (const modifier of modifiers) {
-    switch (modifier) {
-      case 'i':
-      case 'm':
-      case 's': {
-        if (!flags.includes(modifier)) flags += modifier;
-        break;
-      }
-      case 'x': {
-        extended = true;
-        break;
-      }
-      case 'u': {
-        utf8 = true;
-        break;
-      }
-      case 'U': {
-        ungreedy = true;
-        break;
-      }
-      case 'D': {
-        dollarEndOnly = true;
-        break;
-      }
-      case 'A': {
-        anchored = true;
-        break;
-      }
-      case 'S':
-      case 'X':
-      case 'J':
-      case '\n':
-      case '\r':
-      case ' ': {
-        break;
-      }
-      default: {
-        throw new PatternError(`Unknown modifier '${modifier}'`);
-      }
-    }
-  }
-  if (utf8) flags += 'u';
-  let source = utf8 ? dec(body) : body;
-  const leadingFlags = /^\(\?([imsxU]+)\)/.exec(source);
-  if (leadingFlags) {
-    for (const flag of leadingFlags[1]) {
-      if (flag === 'x') extended = true;
-      else if (flag === 'U') ungreedy = true;
-      else if (!flags.includes(flag)) flags += flag;
-    }
-    source = source.slice(leadingFlags[0].length);
-  }
-  const names: (string | undefined)[] = [undefined];
-  const options = { extended, ungreedy, dollarEndOnly, multiline: flags.includes('m'), names, unicode: utf8 };
-  const converted = convertSyntax(source, options);
-  if (options.unicode && !flags.includes('u')) flags += 'u';
-  const regex = new RegExp(anchored ? `^(?:${converted})` : converted, flags);
-  return { regex, utf8, names, groupCount: names.length - 1 };
-}
-
-interface SyntaxOptions {
-  extended: boolean;
-  ungreedy: boolean;
-  dollarEndOnly: boolean;
-  multiline: boolean;
-  names: (string | undefined)[];
-  /** Whether the pattern needs JavaScript's `u` flag, which `\p` requires even without PHP's `u` modifier. */
-  unicode: boolean;
-}
-
-const POSIX_CLASSES: Record<string, string> = {
-  alpha: 'A-Za-z',
-  digit: '0-9',
-  alnum: 'A-Za-z0-9',
-  upper: 'A-Z',
-  lower: 'a-z',
-  space: String.raw` \t\n\r\v\f`,
-  blank: String.raw` \t`,
-  punct: '!-\\/:-@\\[-`{-~',
-  xdigit: '0-9A-Fa-f',
-  word: String.raw`\w`,
-  cntrl: String.raw`\x00-\x1f\x7f`,
-  print: ' -~',
-  graph: '!-~',
-};
-
-function unsupported(what: string): never {
-  throw new UnsupportedFeatureError(`正規表現の${what}`);
-}
-
-/** Rewrites PCRE syntax that JavaScript spells differently, rejecting what JavaScript cannot express. */
-function convertSyntax(source: string, options: SyntaxOptions): string {
-  let result = '';
-  let index = 0;
-  let inClass = false;
-  while (index < source.length) {
-    const char = source[index];
-    if (char === '\\') {
-      const next = source[index + 1] ?? '';
-      index += 2;
-      const braced = bracedEscape(next, source, index, options);
-      if (braced) {
-        result += braced.text;
-        index = braced.index;
-        continue;
-      }
-      if (inClass) {
-        result += next === 'h' ? String.raw` \t` : `\\${next}`;
-        continue;
-      }
-      switch (next) {
-        case 'A': {
-          result += String.raw`(?<![\s\S])`;
-          break;
-        }
-        case 'z': {
-          result += String.raw`(?![\s\S])`;
-          break;
-        }
-        case 'Z': {
-          result += String.raw`(?=\n?(?![\s\S]))`;
-          break;
-        }
-        case 'h': {
-          result += String.raw`[ \t]`;
-          break;
-        }
-        case 'R': {
-          result += String.raw`(?:\r\n|\n|\r)`;
-          break;
-        }
-        case 'G':
-        case 'K': {
-          unsupported(`\\${next}`);
-          break;
-        }
-        case 'g': {
-          const reference = /^\{?(-?\d+|\w+)\}?/.exec(source.slice(index));
-          if (!reference) unsupported(String.raw`\g`);
-          index += (reference as RegExpExecArray)[0].length;
-          const target = (reference as RegExpExecArray)[1];
-          result += /^\d+$/.test(target) ? `\\${target}` : `\\k<${target}>`;
-          break;
-        }
-        default: {
-          result += `\\${next}`;
-        }
-      }
-      continue;
-    }
-    if (inClass) {
-      if (char === '[' && source[index + 1] === ':') {
-        const match = /^\[:(\^?)(\w+):\]/.exec(source.slice(index));
-        if (match && POSIX_CLASSES[match[2]] !== undefined) {
-          if (match[1]) unsupported('否定の POSIX 文字クラス');
-          result += POSIX_CLASSES[match[2]];
-          index += match[0].length;
-          continue;
-        }
-      }
-      if (char === ']') inClass = false;
-      result += char === '[' ? String.raw`\[` : char;
-      index++;
-      continue;
-    }
-    if (options.extended) {
-      if (/\s/.test(char)) {
-        index++;
-        continue;
-      }
-      if (char === '#') {
-        while (index < source.length && source[index] !== '\n') index++;
-        continue;
-      }
-    }
-    switch (char) {
-      case '[': {
-        inClass = true;
-        result += '[';
-        index++;
-        if (source[index] === '^') {
-          result += '^';
-          index++;
-        }
-        if (source[index] === ']') {
-          result += String.raw`\]`;
-          index++;
-        }
-        continue;
-      }
-      case '$': {
-        result += options.multiline
-          ? '$'
-          : options.dollarEndOnly
-            ? String.raw`(?![\s\S])`
-            : String.raw`(?=\n?(?![\s\S]))`;
-        index++;
-        continue;
-      }
-      case '(': {
-        if (source[index + 1] === '?') {
-          const rest = source.slice(index + 2);
-          const named = /^(?:P?<([A-Za-z_]\w*)>|'([A-Za-z_]\w*)')/.exec(rest);
-          if (named) {
-            options.names.push(named[1] ?? named[2]);
-            result += `(?<${named[1] ?? named[2]}>`;
-            index += 2 + named[0].length;
-            continue;
-          }
-          const backReference = /^P=(\w+)\)/.exec(rest);
-          if (backReference) {
-            result += `\\k<${backReference[1]}>`;
-            index += 2 + backReference[0].length;
-            continue;
-          }
-          if (/^[:=!]|^<[=!]/.test(rest)) {
-            const length = rest.startsWith('<') ? 3 : 2;
-            result += source.slice(index, index + 1 + length);
-            index += 1 + length;
-            continue;
-          }
-          if (rest.startsWith('#')) {
-            const close = source.indexOf(')', index);
-            index = close === -1 ? source.length : close + 1;
-            continue;
-          }
-          if (rest.startsWith('>')) unsupported('アトミックグループ');
-          if (/^[R\d+-]/.test(rest) || rest.startsWith('&') || rest.startsWith('P>')) unsupported('再帰');
-          if (rest.startsWith('(')) unsupported('条件分岐');
-          if (rest.startsWith('|')) unsupported('グループ番号のリセット');
-          unsupported('途中のフラグの指定');
-        }
-        options.names.push(undefined);
-        result += '(';
-        index++;
-        continue;
-      }
-      case '{': {
-        const quantifier = /^\{\d+(,\d*)?\}/.exec(source.slice(index));
-        if (!quantifier) {
-          result += String.raw`\{`;
-          index++;
-          continue;
-        }
-        result += quantifier[0];
-        index += quantifier[0].length;
-        index = quantifierSuffix(source, index, options, (text) => (result += text), unsupported);
-        continue;
-      }
-      case '}': {
-        result += String.raw`\}`;
-        index++;
-        continue;
-      }
-      case '*':
-      case '+':
-      case '?': {
-        result += char;
-        index = quantifierSuffix(source, index + 1, options, (text) => (result += text), unsupported);
-        continue;
-      }
-      default: {
-        result += char;
-        index++;
-      }
-    }
-  }
-  return result;
-}
-
-/**
- * The general categories that JavaScript's `\p` accepts by the same names as PCRE. Other names are scripts, which PCRE
- * matches by their script extensions (`\p{Han}` matches `、`).
- */
-const GENERAL_CATEGORIES = new Set(
-  'C Cc Cf Cn Co Cs L Ll Lm Lo Lt Lu M Mc Me Mn N Nd Nl No P Pc Pd Pe Pf Pi Po Ps S Sc Sk Sm So Z Zl Zp Zs'.split(' ')
-);
-
-/**
- * Converts the escapes whose PCRE spelling JavaScript reads differently: Unicode properties (`\p{Han}`, `\pL`),
- * code points (`\x{3042}`), and named references (`\k{name}`, `\k'name'`). Returns undefined for other escapes.
- */
-function bracedEscape(
-  letter: string,
-  source: string,
-  index: number,
-  options: SyntaxOptions
-): { text: string; index: number } | undefined {
-  const rest = source.slice(index);
-  if (letter === 'p' || letter === 'P') {
-    const property = /^(?:\{(\^?)([\w&]+)\}|(\w))/.exec(rest);
-    if (!property) return undefined;
-    const name = property[2] ?? property[3];
-    const negated = (letter === 'P') !== (property[1] === '^');
-    options.unicode = true;
-    return { text: unicodeProperty(name, negated), index: index + property[0].length };
-  }
-  if (letter === 'x') {
-    const code = /^\{([\dA-Fa-f]+)\}/.exec(rest);
-    if (!code) return undefined;
-    const value = Number.parseInt(code[1], 16);
-    const text = options.unicode ? `\\u{${code[1]}}` : `\\x${value.toString(16).padStart(2, '0')}`;
-    return { text, index: index + code[0].length };
-  }
-  if (letter === 'k') {
-    const name = /^(?:\{(\w+)\}|'(\w+)')/.exec(rest);
-    if (!name) return undefined;
-    return { text: `\\k<${name[1] ?? name[2]}>`, index: index + name[0].length };
-  }
-  return undefined;
-}
-
-function unicodeProperty(name: string, negated: boolean): string {
-  const letter = negated ? 'P' : 'p';
-  switch (name) {
-    case 'Any': {
-      return negated ? String.raw`[^\s\S]` : String.raw`[\s\S]`;
-    }
-    case 'L&': {
-      return `\\${letter}{LC}`;
-    }
-    case 'Xan': {
-      return negated ? String.raw`[^\p{L}\p{N}]` : String.raw`[\p{L}\p{N}]`;
-    }
-    case 'Xwd': {
-      return negated ? String.raw`[^\p{L}\p{N}_]` : String.raw`[\p{L}\p{N}_]`;
-    }
-  }
-  return GENERAL_CATEGORIES.has(name) ? `\\${letter}{${name}}` : `\\${letter}{Script_Extensions=${name}}`;
-}
-
-/** Handles the lazy (`?`) and possessive (`+`) suffixes after a quantifier, returning the index after them. */
-function quantifierSuffix(
-  source: string,
-  index: number,
-  options: SyntaxOptions,
-  emit: (text: string) => void,
-  unsupported: (what: string) => never
-): number {
-  if (source[index] === '+') unsupported('強欲な量指定子');
-  const lazy = source[index] === '?';
-  if (lazy !== options.ungreedy) emit('?');
-  return lazy ? index + 1 : index;
-}
-
 // Matching -------------------------------------------------------------------------------------------------------------
 
 interface Match {
@@ -454,37 +59,49 @@ interface Match {
   texts: (string | undefined)[];
 }
 
-/** The matches of a compiled pattern in a subject, from `offset` on, as PCRE finds them. */
+/**
+ * The matches of a compiled pattern in a subject, from byte `offset` on (counted from the end if negative), as PCRE
+ * finds them. Sets the PCRE error and yields nothing for a bad subject or offset.
+ */
 function* matchesOf(compiled: Compiled, subject: string, offset = 0): Generator<Match> {
+  const start = offset < 0 ? Math.max(subject.length + offset, 0) : offset;
   const text = compiled.utf8 ? dec(subject) : subject;
-  if (compiled.utf8 && enc(text) !== subject) {
-    rt().lastPregError = 4;
-    return;
-  }
+  rt().lastPregError = subjectError(compiled, subject, text, start);
+  if (rt().lastPregError !== 0) return;
   const byteOffset = compiled.utf8 ? byteIndexer(text) : (index: number): number => index;
-  let position = compiled.utf8 ? charIndexOf(text, offset) : offset;
+  let position = compiled.utf8 ? charIndexOf(text, start) : start;
   const { regex } = compiled;
   while (position <= text.length) {
     rt().spend();
     regex.lastIndex = position;
     const result = regex.exec(text);
     if (!result) return;
-    const starts: number[] = [];
-    const ends: number[] = [];
-    const texts: (string | undefined)[] = [];
-    const indices = groupIndices(result);
-    for (const [start, end] of indices) {
-      starts.push(start === -1 ? -1 : byteOffset(start));
-      ends.push(end === -1 ? -1 : byteOffset(end));
-    }
-    for (const value of result) texts.push(value === undefined ? undefined : compiled.utf8 ? enc(value) : value);
-    yield { starts, ends, texts };
+    yield toMatch(result, byteOffset, compiled.utf8);
     const matchEnd = result.index + result[0].length;
     position =
       result[0].length === 0
         ? matchEnd + (compiled.utf8 && (text.codePointAt(matchEnd) ?? 0) > 0xff_ff ? 2 : 1)
         : matchEnd;
   }
+}
+
+/** The PCRE error that matching from byte `start` gives before matching anything, 0 for none. */
+function subjectError(compiled: Compiled, subject: string, text: string, start: number): number {
+  if (start > subject.length) return 1;
+  if (!compiled.utf8) return 0;
+  if (enc(text) !== subject) return 4;
+  return ((subject.codePointAt(start) ?? 0) & 0xc0) === 0x80 ? 5 : 0;
+}
+
+function toMatch(result: RegExpExecArray, byteOffset: (index: number) => number, utf8: boolean): Match {
+  const starts: number[] = [];
+  const ends: number[] = [];
+  for (const [start, end] of groupIndices(result)) {
+    starts.push(start === -1 ? -1 : byteOffset(start));
+    ends.push(end === -1 ? -1 : byteOffset(end));
+  }
+  const texts = [...result].map((value) => (value === undefined || !utf8 ? value : enc(value)));
+  return { starts, ends, texts };
 }
 
 /** The start and end of the whole match and each group, found by matching each group's text where it can be. */
@@ -562,21 +179,18 @@ defineFunction(
   ({ args, refs }) => {
     const compiled = compile('preg_match', args[0] as string);
     if (!compiled) return false;
-    rt().lastPregError = 0;
     const flags = (args[3] as bigint | undefined) ?? 0n;
+    if ((flags & 0xffn) !== 0n)
+      throwError('ValueError', 'preg_match(): Argument #4 ($flags) must be a PREG_* constant');
+    rt().lastPregError = 0;
     const offset = Number((args[4] as bigint | undefined) ?? 0n);
-    const subject = args[1] as string;
-    const start = offset < 0 ? Math.max(subject.length + offset, 0) : offset;
-    const first = matchesOf(withIndices(compiled), subject, start).next();
+    const first = matchesOf(withIndices(compiled), args[1] as string, offset).next();
     if (refs[2]) {
       refs[2].v = first.done
         ? new PhpArray()
         : matchArray(compiled, first.value, (flags & 256n) !== 0n, (flags & 512n) !== 0n, true);
     }
-    if (rt().lastPregError === 4) {
-      if (refs[2]) refs[2].v = new PhpArray();
-      return false;
-    }
+    if (rt().lastPregError !== 0) return false;
     return first.done ? 0n : 1n;
   }
 );
@@ -585,8 +199,11 @@ defineFunction(
   ({ args, refs }) => {
     const compiled = compile('preg_match_all', args[0] as string);
     if (!compiled) return false;
-    rt().lastPregError = 0;
     let flags = (args[3] as bigint | undefined) ?? 0n;
+    if ((flags & 0xffn) > 2n) {
+      throwError('ValueError', 'preg_match_all(): Argument #4 ($flags) must be a PREG_* constant');
+    }
+    rt().lastPregError = 0;
     if ((flags & 3n) === 0n) flags |= 1n;
     const offsetCapture = (flags & 256n) !== 0n;
     const unmatchedAsNull = (flags & 512n) !== 0n;
@@ -594,37 +211,45 @@ defineFunction(
       ...matchesOf(withIndices(compiled), args[1] as string, Number((args[4] as bigint | undefined) ?? 0n)),
     ];
     if (refs[2]) {
-      const result = new PhpArray();
+      let result = new PhpArray();
       if ((flags & 2n) !== 0n) {
         for (const match of matches) result.append(matchArray(compiled, match, offsetCapture, unmatchedAsNull, true));
-      } else {
-        for (let group = 0; group <= compiled.groupCount; group++) {
-          const column = new PhpArray();
-          for (const match of matches) {
-            const text = match.texts[group];
-            const value: Value = text ?? (unmatchedAsNull ? null : '');
-            column.append(offsetCapture ? PhpArray.list([value, BigInt(match.starts[group])]) : value);
-          }
-          const name = compiled.names[group];
-          if (name !== undefined) result.set(name, column);
-          result.set(BigInt(group), name !== undefined ? column.copy() : column);
-        }
+      } else if (rt().lastPregError !== 1) {
+        // An offset past the end fails before PHP fills in the empty groups.
+        result = patternOrder(compiled, matches, offsetCapture, unmatchedAsNull);
       }
       refs[2].v = result;
     }
-    return BigInt(matches.length);
+    return rt().lastPregError === 0 ? BigInt(matches.length) : false;
   }
 );
 
-/** Expands `$1`, `\1`, and `${1}` in a replacement. */
+/** Builds `preg_match_all`'s matches by group (`PREG_PATTERN_ORDER`), with named groups before their numbers. */
+function patternOrder(
+  compiled: Compiled,
+  matches: Match[],
+  offsetCapture: boolean,
+  unmatchedAsNull: boolean
+): PhpArray {
+  const result = new PhpArray();
+  for (let group = 0; group <= compiled.groupCount; group++) {
+    const column = new PhpArray();
+    for (const match of matches) {
+      const value: Value = match.texts[group] ?? (unmatchedAsNull ? null : '');
+      column.append(offsetCapture ? PhpArray.list([value, BigInt(match.starts[group])]) : value);
+    }
+    const name = compiled.names[group];
+    if (name !== undefined) result.set(name, column);
+    result.set(BigInt(group), name === undefined ? column : column.copy());
+  }
+  return result;
+}
+
+/** Expands `$1`, `\1`, and `${1}` in a replacement, where a backslash before `\` or `$` makes it literal. */
 function expandReplacement(replacement: string, match: Match): string {
   return replacement.replaceAll(
-    /\\\\|\\(\d{1,2})|\$(\d{1,2})|\$\{(\d{1,2})\}/g,
-    (token, a?: string, b?: string, c?: string) => {
-      if (token === String.raw`\\`) return '\\';
-      const group = Number(a ?? b ?? c);
-      return match.texts[group] ?? '';
-    }
+    /\\([\\$])|\\(\d{1,2})|\$(\d{1,2})|\$\{(\d{1,2})\}/g,
+    (_token, escaped?: string, a?: string, b?: string, c?: string) => escaped ?? match.texts[Number(a ?? b ?? c)] ?? ''
   );
 }
 

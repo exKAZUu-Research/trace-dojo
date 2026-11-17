@@ -1,28 +1,32 @@
-// code-gauge-allow-file fileNcss 670 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 706 -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import type { ClassDecl, Expr, FunctionDecl, MethodDeclAst, PropertyDeclAst } from './ast';
 import { lower } from './bytes';
 import { type ArgValue, invoke } from './calls';
 import { debugType, toBool, valueName } from './conversions';
-import { deprecated, throwError, warn } from './errors';
+import { deprecated, notice, throwError, warn } from './errors';
 import { share } from './places';
-import { FatalError, rt } from './runtime';
+import { FatalError, rt, SCRIPT_PATH } from './runtime';
 import { coerce, describeType, NO_MATCH, typeToString } from './types';
 import {
   type Callable,
   type ClassConst,
   type Method,
+  type Param,
   PhpArray,
   PhpClass,
   PhpObject,
   type PropDecl,
   Ref,
+  setReferenceTypeCheck,
   type Slot,
+  type TypeDecl,
   UNINIT,
   type UserFunction,
   type Value,
   type Visibility,
 } from './values';
+import { isSubtype } from './variance';
 
 /** Evaluates a constant expression of a class in that class's scope, which the interpreter provides. */
 let evaluateInClass: (e: Expr, cls: PhpClass) => Value = () => null;
@@ -57,13 +61,9 @@ export function declareClass(decl: ClassDecl, row: number): PhpClass {
   const key = lower(decl.name);
   if (!decl.isAnonymous && runtime.classes.has(key)) {
     const existing = runtime.classes.get(key) as PhpClass;
-    const kind = decl.kind === 'interface' ? 'interface' : decl.kind === 'trait' ? 'trait' : 'class';
-    throw new FatalError(
-      existing.isUser
-        ? `Cannot declare ${kind} ${decl.name}, because the name is already in use`
-        : `Cannot declare ${kind} ${decl.name}, because the name is already in use`,
-      row
-    );
+    const kind = existing.kind === 'interface' ? 'interface' : existing.kind === 'trait' ? 'trait' : 'class';
+    const previously = existing.decl ? ` (previously declared in ${SCRIPT_PATH}:${existing.decl.row + 1})` : '';
+    throw new FatalError(`Cannot redeclare ${kind} ${existing.name}${previously}`, row);
   }
   const cls = new PhpClass(decl.name, decl.kind);
   cls.decl = decl;
@@ -157,6 +157,13 @@ function addConst(cls: PhpClass, ast: ClassDecl['consts'][number]): void {
   if (inherited?.isFinal && inherited.cls !== cls) {
     throw new FatalError(
       `${cls.name}::${ast.name} cannot override final constant ${inherited.cls.name}::${ast.name}`,
+      ast.row
+    );
+  }
+  if (inherited && inherited.cls !== cls && visibilityRank(ast.visibility) < visibilityRank(inherited.visibility)) {
+    const weaker = inherited.visibility === 'protected' ? ' or weaker' : '';
+    throw new FatalError(
+      `Access level to ${cls.name}::${ast.name} must be ${inherited.visibility} (as in class ${inherited.cls.name})${weaker}`,
       ast.row
     );
   }
@@ -389,7 +396,7 @@ function checkInheritance(cls: PhpClass, row: number): void {
     const names = missing.slice(0, 3).map((method) => `${method.cls.name}::${method.name}`);
     const count = missing.length;
     throw new FatalError(
-      `${cls.isAnonymous ? 'Class' : 'Class'} ${cls.isAnonymous ? 'class@anonymous' : cls.name} contains ${count} abstract method${count === 1 ? '' : 's'} and must therefore be declared abstract or implement the remaining method${count === 1 ? '' : 's'} (${names.join(', ')}${count > 3 ? ', ...' : ''})`,
+      `Class ${cls.name} contains ${count} abstract method${count === 1 ? '' : 's'} and must therefore be declared abstract or implement the remaining method${count === 1 ? '' : 's'} (${names.join(', ')}${count > 3 ? ', ...' : ''})`,
       row
     );
   }
@@ -418,7 +425,7 @@ function checkOverride(cls: PhpClass, method: Method, parent: Method): void {
     );
   }
   if (lower(method.name) === '__construct' && !parent.isAbstract && parent.cls.kind !== 'interface') return;
-  if (!signatureCompatible(method.fn, parent.fn)) {
+  if (!signatureCompatible(method, parent)) {
     throw new FatalError(
       `Declaration of ${signatureText(method)} must be compatible with ${signatureText(parent)}`,
       row
@@ -426,24 +433,36 @@ function checkOverride(cls: PhpClass, method: Method, parent: Method): void {
   }
 }
 
-// code-gauge-allow functionCognitiveComplexity 17 -- Follows PHP's class linking and property access rules in their order of checks.
-function signatureCompatible(child: Callable, parent: Callable): boolean {
-  const childParams = child.params;
-  const parentParams = parent.params;
+/**
+ * Whether a method may override another as PHP's inheritance check allows: it accepts every call the parent accepts
+ * (parameters as many, as optional, and as wide in type) and returns only what the parent may return.
+ */
+function signatureCompatible(child: Method, parent: Method): boolean {
+  const childParams = child.fn.params;
+  const parentParams = parent.fn.params;
   const childRequired = childParams.filter((param) => !param.optional && !param.variadic).length;
   if (childRequired > parentParams.filter((param) => !param.variadic).length) return false;
   for (const [index, param] of parentParams.entries()) {
     const own = childParams[index] ?? (childParams.at(-1)?.variadic ? childParams.at(-1) : undefined);
-    if (!own) return false;
-    if (param.byRef !== own.byRef) return false;
-    if (own.type && !param.type && !(own.type.k === 'named' && own.type.name === 'mixed')) return false;
+    if (!own || !paramCompatible(own, child.cls, param, parent.cls)) return false;
   }
-  const parentReturn = parent.kind === 'user' ? parent.decl.returnType : parent.returnType;
-  const childReturn = child.kind === 'user' ? child.decl.returnType : child.returnType;
-  if (parentReturn && !childReturn && parent.kind === 'user') {
-    return false;
-  }
-  return true;
+  const parentReturn = returnTypeOf(parent.fn);
+  const childReturn = returnTypeOf(child.fn);
+  if (!parentReturn) return true;
+  if (!childReturn) return parent.fn.kind !== 'user';
+  return isSubtype(childReturn, child.cls, parentReturn, parent.cls);
+}
+
+function paramCompatible(own: Param, ownClass: PhpClass, param: Param, parentClass: PhpClass): boolean {
+  if (param.byRef !== own.byRef) return false;
+  if (param.optional && !own.optional && !own.variadic) return false;
+  if (!own.type) return true;
+  if (!param.type) return own.type.k === 'named' && own.type.name === 'mixed';
+  return isSubtype(param.type, parentClass, own.type, ownClass);
+}
+
+function returnTypeOf(fn: Callable): TypeDecl | undefined {
+  return fn.kind === 'user' ? fn.decl.returnType : fn.returnType;
 }
 
 // code-gauge-allow functionCognitiveComplexity 17 -- Follows PHP's class linking and property access rules in their order of checks.
@@ -696,7 +715,7 @@ export function writeProp(object: PhpObject, name: string, value: Value, scope: 
       if (outsideScope && (scope === undefined || !scope.isSubclassOf(decl.cls))) {
         throwError(
           'Error',
-          `Cannot initialize readonly property ${object.cls.name}::$${name} from ${scope ? `scope ${scope.name}` : 'global scope'}`
+          `Cannot modify ${readonlySetVisibility(decl)}(set) readonly property ${object.cls.name}::$${name} from ${scopeText(scope)}`
         );
       }
       if (object.cloning) {
@@ -736,9 +755,7 @@ export function writeProp(object: PhpObject, name: string, value: Value, scope: 
 export function createDynamicProp(object: PhpObject, name: string): void {
   if (object.cls.isReadonly) throwError('Error', `Cannot create dynamic property ${object.cls.name}::$${name}`);
   if (object.cls.name !== 'stdClass' && !allowsDynamicProps(object.cls)) {
-    deprecated(
-      `Creation of dynamic property ${object.cls.isAnonymous ? 'class@anonymous' : object.cls.name}::$${name} is deprecated`
-    );
+    deprecated(`Creation of dynamic property ${object.cls.name}::$${name} is deprecated`);
   }
 }
 
@@ -749,7 +766,8 @@ function allowsDynamicProps(cls: PhpClass): boolean {
   return false;
 }
 
-export function coerceProperty(decl: PropDecl, value: Value, object?: PhpObject): Value {
+/** Converts a value written to a typed property, or through a reference to one (`holder`), for its type. */
+export function coerceProperty(decl: PropDecl, value: Value, object?: PhpObject, holder = 'property'): Value {
   const type = decl.type;
   if (!type) return value;
   const coerced = coerce(value, type, {
@@ -761,33 +779,60 @@ export function coerceProperty(decl: PropDecl, value: Value, object?: PhpObject)
   if (coerced === NO_MATCH) {
     throwError(
       'TypeError',
-      `Cannot assign ${valueName(value)} to property ${(object?.cls ?? decl.cls).name}::$${decl.name} of type ${describeType(type, decl.cls)}`
+      `Cannot assign ${valueName(value)} to ${holder} ${(object?.cls ?? decl.cls).name}::$${decl.name} of type ${describeType(type, decl.cls)}`
     );
   }
   return coerced;
 }
 
+/**
+ * Throws PHP's error for changing a property through a reference or a nested write (`$o->list[] = 1`), which readonly
+ * and asymmetric visibility forbid where a plain write would be forbidden.
+ */
+export function checkIndirectModification(object: PhpObject, name: string, scope: PhpClass | undefined): void {
+  const decl = lookupProp(object.cls, name, scope);
+  if (!decl || decl.isStatic) return;
+  if (decl.isReadonly) {
+    const slot = object.props.get(decl.key);
+    if (slot !== UNINIT && slot !== undefined)
+      throwError('Error', `Cannot indirectly modify readonly property ${object.cls.name}::$${name}`);
+  } else if (!canWriteProp(decl, scope)) {
+    throwError(
+      'Error',
+      `Cannot indirectly modify ${decl.setVisibility ?? decl.visibility}(set) property ${object.cls.name}::$${name} from ${scopeText(scope)}`
+    );
+  }
+}
+
+/** The visibility of writing a readonly property, which is protected unless declared narrower, as since PHP 8.4. */
+function readonlySetVisibility(decl: PropDecl): Visibility {
+  return decl.setVisibility ?? (decl.visibility === 'public' ? 'protected' : decl.visibility);
+}
+
 /** The reference a property holds, creating it, for `=&`, by-reference arguments, and nested writes. */
-// code-gauge-allow functionCognitiveComplexity 19 -- Follows PHP's class linking and property access rules in their order of checks.
+// code-gauge-allow functionCognitiveComplexity 20 -- Follows PHP's class linking and property access rules in their order of checks.
+// code-gauge-allow functionNcss 31 -- Follows PHP's class linking and property access rules in their order of checks.
 export function propRef(object: PhpObject, name: string, scope: PhpClass | undefined): Ref {
   const decl = lookupProp(object.cls, name, scope);
   const key = decl && !decl.isStatic ? decl.key : name;
   if (decl && !decl.isStatic && !canAccessProp(decl, scope)) {
     throwError('Error', `Cannot access ${decl.visibility} property ${object.cls.name}::$${name}`);
   }
-  if (decl?.isReadonly) {
-    const slot = object.props.get(key);
-    if (slot !== UNINIT && slot !== undefined)
-      throwError('Error', `Cannot modify readonly property ${object.cls.name}::$${name}`);
-  }
+  checkIndirectModification(object, name, scope);
   let slot = object.props.get(key);
   if (slot instanceof Ref) return slot;
   if (slot === undefined && !decl) {
     const magic = object.cls.findMethod('__get');
     if (magic && !object.guards?.has(`get:${name}`)) {
+      const runtime = rt();
+      runtime.lastReturnRef = undefined;
       const value = guarded(object, `get:${name}`, () => callMagic(object, magic, [name]));
+      const returned = runtime.lastReturnRef;
+      runtime.lastReturnRef = undefined;
+      // A change goes through only to what `&__get` returns by reference; any other value is a temporary copy.
+      if (returned) return returned;
       if (!(value instanceof PhpObject)) {
-        warn(`Indirect modification of overloaded property ${object.cls.name}::$${name} has no effect`);
+        notice(`Indirect modification of overloaded property ${object.cls.name}::$${name} has no effect`);
       }
       return new Ref(value);
     }
@@ -796,9 +841,15 @@ export function propRef(object: PhpObject, name: string, scope: PhpClass | undef
   if (slot === UNINIT || slot === undefined) slot = null;
   const ref = new Ref(slot);
   ref.isRef = true;
+  if (decl?.type && !decl.isStatic) ref.typedBy = { decl, object };
   object.props.set(key, ref);
   return ref;
 }
+
+setReferenceTypeCheck((ref, value) => {
+  const { decl, object } = ref.typedBy as NonNullable<Ref['typedBy']>;
+  return coerceProperty(decl, value, object, 'reference held by property');
+});
 
 // code-gauge-allow functionCognitiveComplexity 18 -- Follows PHP's class linking and property access rules in their order of checks.
 export function unsetProp(object: PhpObject, name: string, scope: PhpClass | undefined): void {

@@ -2,9 +2,9 @@
 import { placeOf } from './assignment';
 import type { Arg, Expr } from './ast';
 import { lower } from './bytes';
-import { type ArgValue, type CallTarget, closureFunction, invoke, paramIsByRef } from './calls';
+import { type ArgValue, type CallTarget, closureFunction, functionDisplayName, invoke, paramIsByRef } from './calls';
 import { canCall, lookupMethod, requireClass } from './classes';
-import { valueName } from './conversions';
+import { debugType, valueName } from './conversions';
 import { notice, throwError, warn } from './errors';
 import { type Chain, ev, evChain, iterate, resolveClassRef, SHORT } from './interp';
 import { toStr } from './operators';
@@ -176,10 +176,7 @@ export function methodCallExpression(e: Extract<Expr, { k: 'mcall' }>): Chain {
       `Call to ${method.visibility} method ${object.cls.name}::${method.name}() from ${scope ? `scope ${scope.name}` : 'global scope'}`
     );
   }
-  throwError(
-    'Error',
-    `Call to undefined method ${object.cls.isAnonymous ? 'class@anonymous' : object.cls.name}::${methodName}()`
-  );
+  throwError('Error', `Call to undefined method ${object.cls.name}::${methodName}()`);
 }
 
 function argsArray(args: ArgValue[]): PhpArray {
@@ -319,7 +316,6 @@ export function closureTarget(closure: PhpObject): CallTarget {
  * The function a callable value names: a closure, an invokable object, a function name, `"Class::method"`, or
  * `[$objectOrClass, "method"]`.
  */
-// code-gauge-allow functionNcss 38 -- Resolves each form of call and callable by PHP's lookup rules, in PHP's order of checks.
 export function callTargetOf(value: Value, forCall: boolean): CallTarget {
   const runtime = rt();
   const scope = runtime.frame.scope;
@@ -365,8 +361,11 @@ export function callTargetOf(value: Value, forCall: boolean): CallTarget {
     }
     if (typeof method === 'string' && typeof target === 'string') return staticCallable(target, method, scope);
   }
-  if (value instanceof PhpArray) throwError('Error', 'Array callback must have exactly two elements');
-  throwError('Error', 'Value not callable');
+  if (value instanceof PhpArray) {
+    if (value.size !== 2) throwError('Error', 'Array callback must have exactly two elements');
+    throwError('Error', 'First array member is not a valid class name or object');
+  }
+  throwError('Error', `Value of type ${debugType(value)} is not callable`);
 }
 
 function magicTarget(object: PhpObject, magic: Method, name: string): CallTarget {
@@ -413,6 +412,10 @@ export function callValue(callable: Value, args: ArgValue[], row: number | undef
   const bound = args.map((arg, index) => {
     if (arg.ref) return arg;
     if (paramIsByRef(target.fn, index, arg.name) && target.fn.kind === 'user') {
+      const param = arg.name ?? target.fn.params[Math.min(index, target.fn.params.length - 1)].name;
+      warn(
+        `${functionDisplayName(target)}(): Argument #${index + 1} ($${param}) must be passed by reference, value given`
+      );
       return { ...arg, ref: new Ref(arg.v) };
     }
     return arg;
