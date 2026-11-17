@@ -2,10 +2,11 @@
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import type { Checker } from './checker';
+import { typesAtConstructorExit } from './constructorFieldFlow';
 import { FlowState, type State } from './flow';
 import { isUsedBeforeInitialization } from './initializationOrder';
 import type { Sym } from './scopes';
-import { hasToken, named } from './syntax';
+import { hasToken, isWithin, named } from './syntax';
 import {
   anonymousObject,
   anyType,
@@ -182,10 +183,7 @@ export class ClassChecker {
     if (!staticType || isAnyLike(staticType)) return staticType && anyType;
     const signatures = this.c.signaturesOf(staticType, 'construct');
     if (signatures.length === 0) return undefined;
-    const argumentsNode = clause.childForFieldName('type_arguments');
-    const typeArguments = argumentsNode
-      ? named(argumentsNode).map((argument) => this.c.typeNodes.typeFromNode(argument))
-      : [];
+    const typeArguments = this.baseTypeArguments(node);
     const returned = signatures[0].returnType();
     if (returned.kind === 'object' && returned.objectKind === 'reference' && returned.target) {
       return this.c.reference(
@@ -235,16 +233,39 @@ export class ClassChecker {
         isAbstract: info.isAbstract,
       }));
     }
-    const baseStatic = this.baseStaticType(node);
-    if (baseStatic && !isAnyLike(baseStatic)) {
-      return this.c.signaturesOf(baseStatic, 'construct').map((signature) => ({
+    const inherited = this.baseConstructSignatures(node);
+    if (inherited) {
+      return inherited.map((signature) => ({
         ...signature,
-        typeParameters: [...typeParameters, ...signature.typeParameters],
+        typeParameters,
         returnType: () => returnType,
         isAbstract: info.isAbstract,
       }));
     }
     return [{ typeParameters, parameters: [], returnType: () => returnType, isAbstract: info.isAbstract }];
+  }
+
+  /**
+   * The base's construct signatures that take as many type arguments as the `extends` clause passes, instantiated with
+   * them: a class without a constructor inherits these, and `super(...)` calls them.
+   */
+  baseConstructSignatures(node: TreeNode): Signature[] | undefined {
+    const baseStatic = this.baseStaticType(node);
+    if (!baseStatic || isAnyLike(baseStatic)) return undefined;
+    const typeArguments = this.baseTypeArguments(node);
+    return this.c.signaturesOf(baseStatic, 'construct').flatMap((signature) => {
+      const parameters = signature.typeParameters;
+      const required = parameters.filter((parameter) => !parameter.default).length;
+      if (typeArguments.length < required || typeArguments.length > parameters.length) return [];
+      const filled = this.c.fillTypeArguments(parameters, typeArguments);
+      const mapper = new Map(parameters.map((parameter, index) => [parameter.id, filled[index]]));
+      return [this.c.instantiateSignature({ ...signature, typeParameters: [] }, mapper)];
+    });
+  }
+
+  baseTypeArguments(node: TreeNode): Type[] {
+    const argumentsNode = this.extendsClause(node)?.childForFieldName('type_arguments');
+    return argumentsNode ? named(argumentsNode).map((argument) => this.c.typeNodes.typeFromNode(argument)) : [];
   }
 
   membersOf(node: TreeNode, info: ClassInfo, isStatic: boolean): Structure {
@@ -447,44 +468,18 @@ export class ClassChecker {
       );
       return this.c.literals.widenDeclared(valueType, hasToken(member, 'readonly'));
     }
-    const assigned = this.constructorAssignments(member, nameNode.text);
-    if (assigned.length > 0) return unionOf(assigned);
+    const classNode = member.parent?.parent;
+    const body =
+      classNode && !hasToken(member, 'static') ? this.constructorNode(classNode)?.childForFieldName('body') : undefined;
+    const types = body
+      ? typesAtConstructorExit(body, nameNode.text, (right) =>
+          this.c.widen(this.c.silently(() => this.c.expressions.check(right)))
+        )
+      : [];
+    // A field the constructor leaves `undefined` or `null` on every path has no type to infer.
+    if (!isIntrinsic(this.c.relations.removeNullish(unionOf(types)), 'never')) return unionOf(types);
     if (!this.c.isLibrary(member)) this.c.error(nameNode, `メンバー ${nameNode.text} の型が暗黙に any になります。`);
     return anyType;
-  }
-
-  /** The widened types the constructor assigns to `this.name`, from which a field without a type takes its type. */
-  // code-gauge-allow functionCognitiveComplexity 16 -- Walks the constructor for assignments to the field outside nested functions.
-  private constructorAssignments(member: TreeNode, name: string): Type[] {
-    const classNode = member.parent?.parent;
-    const ctor = classNode ? this.constructorNode(classNode) : undefined;
-    if (!ctor || hasToken(member, 'static')) return [];
-    const types: Type[] = [];
-    const body = ctor.childForFieldName('body');
-    let definite = false;
-    const visit = (node: TreeNode): void => {
-      if (
-        ['function_declaration', 'function_expression', 'class', 'method_definition'].includes(node.type) &&
-        node.id !== ctor.id
-      )
-        return;
-      const left = node.type === 'assignment_expression' ? node.childForFieldName('left') : undefined;
-      const right = node.childForFieldName('right');
-      if (
-        left?.type === 'member_expression' &&
-        left.childForFieldName('object')?.type === 'this' &&
-        left.childForFieldName('property')?.text === name &&
-        right
-      ) {
-        types.push(this.c.widen(this.c.silently(() => this.c.expressions.check(right))));
-        // An assignment statement directly in the constructor's body always runs.
-        definite ||= node.parent?.type === 'expression_statement' && node.parent.parent?.id === body?.id;
-      }
-      for (const child of named(node)) visit(child);
-    };
-    visit(ctor);
-    if (types.length > 0 && !definite) types.push(undefinedType);
-    return types;
   }
 
   private accessorType(getter: TreeNode | undefined, setter: TreeNode | undefined): Type {
@@ -698,28 +693,14 @@ export class ClassChecker {
       this.c.error(node, "'super' の呼び出しは、派生クラスのコンストラクタの中でしか書けません。");
       return voidType;
     }
-    if (isAnyLike(baseStatic)) {
-      for (const arg of args) this.c.expressions.check(arg);
-      if (this.c.flow.current) this.c.flow.current.superCalled = true;
-      return voidType;
-    }
-    const signatures = this.c
-      .signaturesOf(baseStatic, 'construct')
-      .map((signature) => ({ ...signature, isAbstract: false }));
-    const clause = classNode ? this.extendsClause(classNode) : undefined;
-    const argumentsNode = clause?.childForFieldName('type_arguments');
-    const typeArguments = argumentsNode
-      ? named(argumentsNode).map((argument) => this.c.typeNodes.typeFromNode(argument))
-      : undefined;
-    const instantiated = typeArguments
-      ? signatures.map((signature) =>
-          this.c.instantiateSignature(
-            { ...signature, typeParameters: [] },
-            new Map(signature.typeParameters.map((parameter, index) => [parameter.id, typeArguments[index] ?? anyType]))
-          )
-        )
-      : signatures;
-    this.c.expressions.calls.resolveWith(node, node.childForFieldName('function') as TreeNode, instantiated, args);
+    const signatures = (this.baseConstructSignatures(classNode as TreeNode) ?? []).map((signature) => ({
+      ...signature,
+      isAbstract: false,
+    }));
+    // An `any` base takes any arguments, and the `extends` clause reports type arguments no base signature takes.
+    if (signatures.length > 0)
+      this.c.expressions.calls.resolveWith(node, node.childForFieldName('function') as TreeNode, signatures, args);
+    else for (const arg of args) this.c.expressions.check(arg);
     if (this.c.flow.current) this.c.flow.current.superCalled = true;
     return voidType;
   }
@@ -796,19 +777,31 @@ export class ClassChecker {
     return false;
   }
 
-  /** Reports `new` of a class whose constructor is private or protected, outside the class (or its subclasses). */
+  /**
+   * Reports `new` of a class whose constructor, its own or the one it inherits, is private or protected, outside the
+   * class declaring that constructor (or, for a protected one, the classes derived from it).
+   */
   checkConstructorAccessibility(node: TreeNode, type: Type): void {
-    const info = type.kind === 'object' && type.isClassStatic ? type.classInfo : undefined;
-    const ctor = info && this.constructorNode(info.declaration);
-    const modifier = ctor?.namedChildren.find((child) => child?.type === 'accessibility_modifier')?.text;
-    if (!info || (modifier !== 'private' && modifier !== 'protected')) return;
+    const ctor = this.restrictedConstructor(type);
+    if (!ctor || isWithin(node, ctor.classNode)) return;
+    const declaring = this.classInfoOfNode(ctor.classNode);
     const enclosing = this.enclosingClass(node);
-    const enclosingInfo = enclosing ? this.classInfoOfNode(enclosing) : undefined;
-    if (enclosingInfo?.declaration.id === info.declaration.id) return;
+    if (ctor.visibility === 'protected' && enclosing && this.derivesFrom(this.classInfoOfNode(enclosing), declaring))
+      return;
     this.c.error(
       node,
-      `クラス '${info.name}' のコンストラクタは ${modifier} なので、クラスの宣言の中でしか使えません。`
+      `クラス '${declaring.name}' のコンストラクタは ${ctor.visibility} なので、クラスの宣言の中でしか使えません。`
     );
+  }
+
+  /** The private or protected constructor of the first construct signature of `type`, with the class declaring it. */
+  restrictedConstructor(type: Type): { classNode: TreeNode; visibility: 'private' | 'protected' } | undefined {
+    const declaration = this.c.signaturesOf(type, 'construct')[0]?.declaration;
+    const classNode = declaration?.parent?.parent;
+    if (declaration?.childForFieldName('name')?.text !== 'constructor' || !classNode || !classTypes.has(classNode.type))
+      return undefined;
+    const visibility = this.visibilityOf(declaration);
+    return visibility === 'public' ? undefined : { classNode, visibility };
   }
 
   /** Whether assigning to a property is an error: it is read-only, outside its class's constructor. */

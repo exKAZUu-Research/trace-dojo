@@ -1,0 +1,8 @@
+interface Named { name?: string }
+class Strict implements Named { name: string | number = 1; }
+class Optional implements Named { name?: number; }
+interface Labeled { label: string }
+class MaybeLabeled implements Labeled { label?: string; }
+class ParameterLabeled implements Labeled { constructor(public label: number) {} }
+interface Both { name?: string; size: number }
+class Incomplete implements Both { name: string | undefined = ""; }

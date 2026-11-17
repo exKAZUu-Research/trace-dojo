@@ -5,7 +5,7 @@ import type { Checker } from './checker';
 import { checkTypeMemberDuplicates } from './declarations';
 import { FlowState, type State } from './flow';
 import type { Scope, Sym } from './scopes';
-import { hasToken, isNumericName, named, skipParentheses } from './syntax';
+import { hasToken, isNumericName, isWithin, named, skipParentheses } from './syntax';
 import {
   anyType,
   errorType,
@@ -781,12 +781,6 @@ export class StatementChecker {
     context.returnStates.push(this.c.flow.current?.clone());
     this.c.flow.current = undefined;
   }
-}
-
-function isWithin(node: TreeNode, ancestor: TreeNode): boolean {
-  for (let current: TreeNode | null = node; current; current = current.parent)
-    if (current.id === ancestor.id) return true;
-  return false;
 }
 
 /** The index signature for `string` or `number` keys that a type's body declares. */

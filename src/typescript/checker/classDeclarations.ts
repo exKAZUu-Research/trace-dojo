@@ -3,8 +3,18 @@ import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 import type { Checker } from './checker';
 import { checkDuplicateMembers } from './declarations';
 import { FlowState, propertyReferenceKey, type State } from './flow';
-import { hasToken, named } from './syntax';
-import { anyType, type ClassInfo, errorType, isAnyLike, isIntrinsic, type Type, undefinedType } from './types';
+import { hasToken, isWithin, named } from './syntax';
+import {
+  anyType,
+  type ClassInfo,
+  errorType,
+  isAnyLike,
+  isIntrinsic,
+  type Property,
+  type Type,
+  undefinedType,
+  unionOf,
+} from './types';
 
 /** Checks class declarations: their members, constructors, and the types they implement and extend. */
 export class ClassDeclarationChecker {
@@ -18,7 +28,7 @@ export class ClassDeclarationChecker {
     const info = this.c.classes.classInfoOfNode(node);
     const clause = this.c.classes.extendsClause(node);
     const baseValue = clause?.childForFieldName('value');
-    if (baseValue) this.checkBaseValue(baseValue);
+    if (baseValue) this.checkBaseValue(node, baseValue);
     const body = node.childForFieldName('body');
     const members = body ? named(body) : [];
     if (body) checkDuplicateMembers(this.c, body);
@@ -49,10 +59,49 @@ export class ClassDeclarationChecker {
     }
   }
 
-  private checkBaseValue(baseValue: TreeNode): void {
+  private checkBaseValue(node: TreeNode, baseValue: TreeNode): void {
     const baseType = this.c.expressions.check(baseValue);
-    if (!isAnyLike(baseType) && baseType !== errorType && this.c.signaturesOf(baseType, 'construct').length === 0) {
+    if (isAnyLike(baseType) || baseType === errorType) return;
+    if (this.c.signaturesOf(baseType, 'construct').length === 0) {
       this.c.error(baseValue, `型 '${this.c.print(baseType)}' はコンストラクタの型ではありません。`);
+      return;
+    }
+    this.checkBaseTypeArguments(node, baseValue, baseType);
+    const restricted = this.c.classes.restrictedConstructor(baseType);
+    const baseInfo = baseType.kind === 'object' ? baseType.classInfo : undefined;
+    // A class may extend a class with a private constructor only inside the class it extends.
+    if (restricted?.visibility === 'private' && baseInfo && !isWithin(baseValue, baseInfo.declaration)) {
+      this.c.error(
+        baseValue,
+        `クラス '${baseInfo.name}' は継承できません。クラスのコンストラクタが private になっています。`
+      );
+    }
+  }
+
+  /** Reports type arguments in the `extends` clause that no construct signature of the base takes. */
+  private checkBaseTypeArguments(node: TreeNode, baseValue: TreeNode, baseType: Type): void {
+    const typeArguments = this.c.classes.baseTypeArguments(node);
+    const baseInfo = baseType.kind === 'object' ? baseType.classInfo : undefined;
+    if (!baseInfo) {
+      if (this.c.classes.baseConstructSignatures(node)?.length === 0)
+        this.c.error(baseValue, '基底のコンストラクタには、指定した数の型引数をとるものがありません。');
+      return;
+    }
+    const parameters = baseInfo.instanceType.typeParameters ?? [];
+    const required = parameters.filter((parameter) => !parameter.default).length;
+    if (parameters.length === 0) {
+      if (typeArguments.length > 0) this.c.error(baseValue, `型 ${baseInfo.name} は型引数をとりません。`);
+    } else if (typeArguments.length < required || typeArguments.length > parameters.length) {
+      this.c.error(
+        baseValue,
+        required === parameters.length
+          ? `ジェネリック型 ${baseInfo.name} には型引数が ${required} 個必要です。`
+          : `ジェネリック型 ${baseInfo.name} には型引数が ${required} 個から ${parameters.length} 個必要です。`
+      );
+    } else {
+      const argumentsNode = this.c.classes.extendsClause(node)?.childForFieldName('type_arguments') ?? baseValue;
+      const filled = this.c.fillTypeArguments(parameters, typeArguments);
+      this.c.typeNodes.checkTypeArgumentConstraints(argumentsNode, parameters, filled);
     }
   }
 
@@ -155,9 +204,9 @@ export class ClassDeclarationChecker {
     if (!clause) return;
     for (const typeNode of named(clause)) {
       const target = this.c.typeNodes.typeFromNode(typeNode);
-      if (target === errorType || isAnyLike(target)) continue;
-      if (this.reportIncompatibleMembers(info, target)) continue;
-      if (!this.c.relations.isAssignable(info.instanceType, target)) {
+      if (target === errorType || isAnyLike(target) || this.c.relations.isAssignable(info.instanceType, target))
+        continue;
+      if (!this.reportIncompatibleMembers(info, target)) {
         const missing =
           target.kind === 'object'
             ? [...target.resolve().properties.values()].filter(
@@ -176,15 +225,17 @@ export class ClassDeclarationChecker {
     }
   }
 
-  /** Reports, at each member, the members a class declares with types its interface does not allow. */
+  /**
+   * Reports, at each member, the members a class declares in its body with types its interface does not allow, where
+   * an optional member's type includes `undefined`.
+   */
   private reportIncompatibleMembers(info: ClassInfo, target: Type): boolean {
     if (target.kind !== 'object') return false;
     let reported = false;
     for (const property of target.resolve().properties.values()) {
       const own = this.c.propertyOf(info.instanceType, property.name);
-      if (!own || own.declaringClass !== info) continue;
-      const targetType = property.optional ? this.c.relations.removeUndefined(property.type()) : property.type();
-      if (this.c.relations.isAssignable(own.type(), targetType)) continue;
+      if (!own || own.declaringClass !== info || own.declaration?.parent?.type !== 'class_body') continue;
+      if (this.c.relations.isAssignable(readType(own), readType(property))) continue;
       this.c.error(
         own.declaration?.childForFieldName('name') ?? own.declaration ?? info.declaration,
         `型 '${info.name}' のプロパティ '${property.name}' は、基底の型 '${this.c.print(target)}' の同じプロパティに代入できません。`
@@ -320,6 +371,10 @@ export class ClassDeclarationChecker {
       return undefined;
     return nameNode;
   }
+}
+
+function readType(property: Property): Type {
+  return property.optional ? unionOf([property.type(), undefinedType]) : property.type();
 }
 
 /** How narrowly each visibility exposes a member, which a derived class may not narrow further. */

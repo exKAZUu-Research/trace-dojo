@@ -9,6 +9,12 @@ export function hasToken(node: TreeNode, token: string): boolean {
   return node.children.some((child) => child !== null && !child.isNamed && child.type === token);
 }
 
+export function isWithin(node: TreeNode, ancestor: TreeNode): boolean {
+  for (let current: TreeNode | null = node; current; current = current.parent)
+    if (current.id === ancestor.id) return true;
+  return false;
+}
+
 export function childOfType(node: TreeNode, type: string): TreeNode | undefined {
   return node.namedChildren.find((child): child is TreeNode => child?.type === type);
 }

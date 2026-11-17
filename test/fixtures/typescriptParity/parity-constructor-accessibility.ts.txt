@@ -1,0 +1,42 @@
+class Registry {
+  private constructor(public size: number) {}
+
+  static create(): Registry {
+    return new Registry(1);
+  }
+
+  static nested(): Registry {
+    class Local extends Registry {}
+    return new Local(2);
+  }
+}
+
+class Shape {
+  protected constructor(public name: string) {}
+
+  static square(): Shape {
+    return new Square();
+  }
+}
+
+class Square extends Shape {
+  constructor() {
+    super("square");
+  }
+
+  static base(): Shape {
+    return new Shape("base");
+  }
+}
+
+class Circle extends Shape {}
+
+class Ellipse extends Shape {
+  static circle(): Shape {
+    return new Circle("circle");
+  }
+}
+
+console.log(Registry.create().size, Registry.nested().size);
+console.log(Shape.square().name, Square.base().name, Ellipse.circle().name, new Square().name);
+console.log(Registry.nested() instanceof Registry, Ellipse.circle() instanceof Circle);
