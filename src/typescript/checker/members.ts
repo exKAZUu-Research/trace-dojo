@@ -146,7 +146,8 @@ export class MemberChecker {
     const propertyType = this.propertyAccess(node, objectNode, propertyNode, objectType, name);
     if (key) {
       const entry = this.c.flow.entry(key);
-      if (entry && !this.c.expressions.isAssignmentTarget(node)) return entry.type;
+      if (entry && !this.c.expressions.isAssignmentTarget(node))
+        return flowReferenceType(this.c, node, entry.type, propertyType);
     }
     return propertyType;
   }
@@ -396,7 +397,10 @@ export class MemberChecker {
       : this.checkNonNullable(objectNode, continued ?? checked);
     const key = this.c.flow.referenceKey(node);
     const entry = key ? this.c.flow.entry(key) : undefined;
-    if (entry && !this.c.expressions.isAssignmentTarget(node)) return entry.type;
+    if (entry && !this.c.expressions.isAssignmentTarget(node))
+      return flowReferenceType(this.c, node, entry.type, () =>
+        this.indexedType(node, objectNode, indexNode, objectType, indexType)
+      );
     const result = this.indexedType(node, objectNode, indexNode, objectType, indexType);
     // As for a property, `?.` adds `undefined` only where it can short-circuit.
     const shortCircuits = (optional && this.c.relations.isNullable(continued ?? checked)) || continued;
@@ -547,4 +551,18 @@ function chainEnd(node: TreeNode): TreeNode {
   let current = node;
   while (current.parent && chainObject(current.parent)?.id === current.id) current = current.parent;
   return current;
+}
+
+/**
+ * The type the flow gives a reference, except that `x!` where the flow leaves `x` only `null` or `undefined` takes the
+ * declared type, as TypeScript gives it, as after a callback assigned it.
+ */
+function flowReferenceType(c: Checker, node: TreeNode, flowType: Type, declared: Type | (() => Type)): Type {
+  if (
+    node.parent?.type !== 'non_null_expression' ||
+    isIntrinsic(flowType, 'never') ||
+    !isIntrinsic(c.relations.removeNullish(flowType), 'never')
+  )
+    return flowType;
+  return typeof declared === 'function' ? declared() : declared;
 }
