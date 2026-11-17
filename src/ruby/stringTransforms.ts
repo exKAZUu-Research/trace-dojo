@@ -84,10 +84,11 @@ export function successorBytes(source: Uint8Array, binary = false, usAscii = fal
     !source.some((byte) => (byte >= 48 && byte <= 57) || (byte >= 65 && byte <= 90) || (byte >= 97 && byte <= 122))
   )
     return incrementBinaryBytes(source);
-  const parts: { bytes: Uint8Array; point: number | undefined }[] = stringCharacters(
+  const parts: { bytes: Uint8Array; point: number | undefined; valid: boolean }[] = stringCharacters(
     stringFromBytes(source, binary, usAscii)
   ).map((character) => ({
     bytes: stringBytes(character),
+    valid: binary || !character.rawBytes,
     point:
       (character.rawBytes && !binary) || (binary && (character.s.codePointAt(0) as number) >= 128)
         ? undefined
@@ -97,6 +98,7 @@ export function successorBytes(source: Uint8Array, binary = false, usAscii = fal
     part.point !== undefined && characterClass(part.point) !== undefined;
   let index = parts.findLastIndex(candidate);
   if (index < 0) {
+    let carryPosition = 0;
     for (let position = parts.length - 1; position >= 0; position--) {
       const part = parts[position];
       if (part.point === undefined) continue;
@@ -112,15 +114,18 @@ export function successorBytes(source: Uint8Array, binary = false, usAscii = fal
                 : undefined;
       if (wrapped !== undefined) {
         part.bytes = stringBytes(str(String.fromCodePoint(wrapped)));
+        carryPosition = position;
         continue;
       }
       part.bytes = stringBytes(str(String.fromCodePoint(part.point + 1)));
       return Uint8Array.from(parts.flatMap((item) => [...item.bytes]));
     }
-    return Uint8Array.from([1, ...parts.flatMap((part) => [...part.bytes])]);
+    parts.splice(carryPosition, 0, { bytes: Uint8Array.of(1), point: 1, valid: true });
+    return Uint8Array.from(parts.flatMap((part) => [...part.bytes]));
   }
   let carry: Uint8Array = Uint8Array.of(1);
   for (;;) {
+    rt().spend();
     const part = parts[index];
     const kind = characterClass(part.point as number);
     if (part.bytes.length > 1) {
@@ -145,8 +150,13 @@ export function successorBytes(source: Uint8Array, binary = false, usAscii = fal
       carry = Uint8Array.of(byte === 57 ? 49 : byte === 90 ? 65 : 97);
       part.bytes = Uint8Array.of(byte === 57 ? 48 : byte === 90 ? 65 : 97);
     }
-    const previous = parts.slice(0, index).findLastIndex(candidate);
-    const separated = previous !== -1 && previous < index - 1;
+    let previous = index - 1;
+    let separated = false;
+    while (previous >= 0 && !candidate(parts[previous])) {
+      rt().spend();
+      separated ||= parts[previous].valid;
+      previous--;
+    }
     if (
       previous === -1 ||
       (separated &&
@@ -154,7 +164,7 @@ export function successorBytes(source: Uint8Array, binary = false, usAscii = fal
         parts[previous].bytes.length === 1 &&
         characterClass(parts[previous].point as number) !== kind)
     ) {
-      parts.splice(index, 0, { bytes: carry, point: undefined });
+      parts.splice(index, 0, { bytes: carry, point: undefined, valid: true });
       break;
     }
     index = previous;
