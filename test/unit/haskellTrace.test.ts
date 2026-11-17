@@ -876,3 +876,65 @@ main=forM_ [1..1000::Int] $ \\i -> do
     c: { kind: 'value', value: '…' },
   });
 });
+
+test('helper turtle results record named binding steps', () => {
+  const source = `main :: IO ()
+main = do
+  a <- make
+  print (1::Int)
+make :: IO Turtle
+make = do
+  t <- newTurtleAt 2 2
+  forward t
+  return t`;
+  const recording = traceProgram('haskell', source, source);
+  expect(recording.stdout).toBe('1\n');
+  expect(recording.uncaughtException).toBeUndefined();
+  expect(recording.traceItems.some(({ line, callLines }) => line === 3 && callLines.length === 0)).toBe(true);
+});
+
+test.each(['newTurtle', 'newTurtleAt 2 2', 'newTurtleWithColor 2 2 "Y"'])(
+  'direct turtle creation retains its declaration step policy: %s',
+  (creation) => {
+    const source = `main=do\n t<-${creation}\n forward t`;
+    const recording = traceProgram('haskell', source, source);
+    expect(recording.uncaughtException).toBeUndefined();
+    expect(recording.traceItems.map(({ line }) => line)).toEqual([0, 2, 3]);
+  }
+);
+
+test('record factories and shadowed creation names retain their binding steps', () => {
+  const source = `data Person=Person Int
+make :: IO Person
+make=do
+ print (1::Int)
+ return (Person 2)
+newTurtle :: IO Person
+newTurtle=make
+main=do
+ p<-make
+ q<-newTurtle
+ print (3::Int)`;
+  const recording = traceProgram('haskell', source, source);
+  expect(recording.stdout).toBe('1\n1\n3\n');
+  expect(recording.uncaughtException).toBeUndefined();
+  expect(recording.traceItems.filter(({ callLines }) => callLines.length === 0).map(({ line }) => line)).toEqual([
+    0, 9, 10, 11,
+  ]);
+});
+
+test('wildcard IO bindings retain bare-call step behavior', () => {
+  const source = `main=do
+ _<-make
+ print(1::Int)
+make=do
+ t<-newTurtle
+ forward t
+ return t`;
+  const wildcard = traceProgram('haskell', source, source);
+  const bareSource = source.replace('_<-make', 'make');
+  const bare = traceProgram('haskell', bareSource, bareSource);
+  expect(wildcard.stdout).toBe('1\n');
+  expect(wildcard.uncaughtException).toBeUndefined();
+  expect(wildcard.traceItems).toEqual(bare.traceItems);
+});

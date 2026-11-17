@@ -1,6 +1,6 @@
 import { OrderedMap } from 'immutable';
 
-// code-gauge-allow-file fileNcss 953 -- The Core generator covers every construct of the language in one pass over shared state.
+// code-gauge-allow-file fileNcss 961 -- The Core generator covers every construct of the language in one pass over shared state.
 import { ExecutionLimitError, LIMITS } from '../interpreter/limits';
 import {
   CONS_CON,
@@ -1111,8 +1111,10 @@ export class Codegen {
             };
             matcher = this.matchPlan(plan, { k: 'con', con: UNIT_CON, args: [] }, fail);
           }
-          const onlyCalls = isCall(stmt.expr);
-          const answerNames = patternLocals(stmt.pat).map((local) => local.name);
+          const onlyCalls =
+            patternLocals(stmt.pat).length === 0
+              ? isCall(stmt.expr)
+              : isTurtleCreation(stmt.expr, this.options.support);
           stmts.push({
             kind: 'bind',
             row,
@@ -1120,7 +1122,6 @@ export class Codegen {
             slot,
             matcher,
             onlyCalls,
-            answerNames,
             visible: this.snapshotVisible(),
           });
           break;
@@ -1444,6 +1445,17 @@ function stripDollar(expr: RExpr, support: CodegenSupport): RExpr {
 function isCall(expr: RExpr): boolean {
   const inner = stripParens(expr);
   return inner.k === 'app' || inner.k === 'var';
+}
+
+function isTurtleCreation(expr: RExpr, support: CodegenSupport): boolean {
+  let head = stripDollar(expr, support);
+  while (head.k === 'app') {
+    chargeTypeWork();
+    head = stripDollar(head.fn, support);
+  }
+  if (head.k !== 'var' || head.ref.kind !== 'global') return false;
+  const entity = head.ref.entity;
+  return ['newTurtle', 'newTurtleAt', 'newTurtleWithColor'].some((name) => support.value(name) === entity);
 }
 
 const LOOP_FUNCTIONS = [

@@ -149,13 +149,7 @@ function completeStatement(machine: Machine, frame: DoFrame): void {
   const stmt = frame.code.stmts[frame.index];
   if ((stmt.kind === 'exp' || stmt.kind === 'let') && stmt.noStep) return;
   if (frame.tailCalled || frame.silent) return;
-  machine.runtime.steps.completeStatement(
-    stmt.row,
-    stmt.kind !== 'let' &&
-      stmt.onlyCalls &&
-      (stmt.kind !== 'bind' || !storesAnswer(machine.runtime, frame.env, stmt.visible, stmt.answerNames)),
-    frame.mark
-  );
+  machine.runtime.steps.completeStatement(stmt.row, stmt.kind !== 'let' && stmt.onlyCalls, frame.mark);
 }
 
 function afterStatement(machine: Machine, state: RunState, frame: DoFrame): void {

@@ -79,12 +79,7 @@ export type IOStmt =
       slot: number;
       /** Code that matches the result against the pattern and binds its variables, if it is not a variable. */
       matcher?: Core;
-      /**
-       * Whether a call produced the result, so its steps can show the declaration when the instantiated
-       * bindings store only references.
-       */
       onlyCalls: boolean;
-      answerNames: string[];
       visible: VisibleScope;
     }
   | {
