@@ -763,9 +763,10 @@ export abstract class ExpressionCompiler extends SemaBase {
       resultLength === undefined
         ? sliceOf(child, isConst, sentinel)
         : pointerTo(arrayOf(resultLength, child, sentinel), isConst);
-    if (!(type.kind === 'pointer' && type.child.kind === 'array' && resultLength === 0n))
+    if (!(type.kind === 'pointer' && type.size === 'one' && type.child.kind === 'array' && resultLength === 0n))
       this.checkMemoryOperand(operand, expression);
-    const arrayType = type.kind === 'pointer' && type.child.kind === 'array' ? type.child : undefined;
+    const arrayType =
+      type.kind === 'pointer' && type.size === 'one' && type.child.kind === 'array' ? type.child : undefined;
     const operands = [base, start, ...(end ? [end] : [])];
     const render = ([value, first, last]: Value[]): Value => {
       let target: Slots;

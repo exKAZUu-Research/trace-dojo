@@ -1,7 +1,6 @@
-import { valueSlots } from '../allocation';
+import { transferCost } from '../allocation';
 import type { Expression, Span } from '../ast';
 import { BigFloat, compareFloats } from '../floats';
-import { sizeOf } from '../layout';
 import { type Frame, withHeldValues, ZigPanic } from '../runtime';
 import { copyForStorage, evaluateHeld, known, runtime, type SemaApi, type TExpr, valueEvaluators } from '../semaBase';
 import {
@@ -26,7 +25,7 @@ export function nativeBudget(sema: SemaApi, frame?: Frame): (cost?: number) => v
 
 export function nativeTransferCost(sema: SemaApi, type: Type, span: Span): number {
   sema.resolveStorage(type, span);
-  return sizeOf(type) === 0 ? 0 : 1 + valueSlots(type);
+  return transferCost(type);
 }
 
 export type Eval = TExpr['eval'];

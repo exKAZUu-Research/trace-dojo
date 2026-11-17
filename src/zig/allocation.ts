@@ -1,4 +1,5 @@
 import { ExecutionLimitError, LIMITS } from '../interpreter/limits';
+import { sizeOf } from './layout';
 import type { Type } from './types';
 
 export class CompilationStorage {
@@ -50,6 +51,10 @@ export function valueSlots(type: Type): number {
   }
   if (!Number.isSafeInteger(count) || count > LIMITS.maxSlots) throw new ExecutionLimitError('storage');
   return count;
+}
+
+export function transferCost(type: Type): number {
+  return sizeOf(type) === 0 ? 0 : 1 + valueSlots(type);
 }
 
 export function allocationSlots(count: number, child: Type): number {

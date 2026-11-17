@@ -4561,3 +4561,96 @@ test('memory equality uses nested optional payload semantics', () => {
     uncaughtException: undefined,
   });
 });
+
+test.each(['void', 'struct{}', '[0]u64'])(
+  'allocator zero-sized slices retain virtual exact lengths and typed reads: %s',
+  (type) => {
+    const source = `const std=@import("std");const T=${type};pub fn main(init:std.process.Init)!void{const a=try init.gpa.alloc(T,18446744073709551615);const b=try init.gpa.dupe(T,a);const c=try init.gpa.create(T);const d=try init.gpa.create(T);a[18446744073709551614]=undefined;std.debug.print("{} {} {} {}",.{a.len,b.len,a[0..0]==b[0..0],c==d});init.gpa.free(a);init.gpa.free(b);init.gpa.destroy(c);init.gpa.destroy(d);}`;
+    expect(executeProgram('zig', source)).toMatchObject({
+      kind: 'executed',
+      stderr: '18446744073709551615 18446744073709551615 true true',
+      uncaughtException: undefined,
+    });
+  }
+);
+
+test.each(['void', '[0]u8'])('allocator realloc rejects nonempty zero-bit slices as Zig does: %s', (type) => {
+  const source = `const std=@import("std");pub fn main(init:std.process.Init)!void{const a=try init.gpa.alloc(${type},1);_=try init.gpa.realloc(a,1000000000);}`;
+  expect(executeProgram('zig', source)).toMatchObject({ kind: 'compileError' });
+});
+
+test('allocator realloc from a fixed empty zero-bit array allocates a virtual slice', () => {
+  const source = `const std=@import("std");pub fn main(init:std.process.Init)!void{var a:[0]void=.{};const b=try init.gpa.realloc(&a,18446744073709551615);std.debug.print("{}",.{b.len});init.gpa.free(b);}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: '18446744073709551615',
+    uncaughtException: undefined,
+  });
+});
+
+test('allocator fixed-array views retain allocation identity through resize and free', () => {
+  const source = `const std=@import("std");pub fn main()!void{var buffer:[8]u8=undefined;var fba=std.heap.FixedBufferAllocator.init(&buffer);const gpa=fba.allocator();const a=try gpa.alloc(u8,2);a[0]=7;a[1]=9;const b=try gpa.realloc(a[0..2],3);std.debug.print("{} {} {}|",.{b.len,b[0],b[1]});gpa.free(b[0..3]);const c=try gpa.alloc(u8,8);std.debug.print("{}",.{c.len});gpa.free(c);}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: '3 7 9|8',
+    uncaughtException: undefined,
+  });
+});
+
+test.each(['appendSlice', 'appendNTimes', 'orderedRemove', 'replaceRange', 'shrinkRetainingCapacity'])(
+  'ArrayList transfers and shrinking consume the work budget: %s',
+  (method) => {
+    const initialization = ['orderedRemove', 'replaceRange', 'shrinkRetainingCapacity'].includes(method)
+      ? 'fromOwnedSlice'
+      : 'initBuffer';
+    const body =
+      method === 'appendSlice'
+        ? 'try list.appendSlice(init.gpa,&input);list.clearRetainingCapacity();'
+        : method === 'appendNTimes'
+          ? 'try list.appendNTimes(init.gpa,1,300000);list.clearRetainingCapacity();'
+          : method === 'orderedRemove'
+            ? '_=list.orderedRemove(0);'
+            : method === 'replaceRange'
+              ? 'try list.replaceRange(init.gpa,0,300000,&input);'
+              : 'list.shrinkRetainingCapacity(0);list.expandToCapacity();';
+    const source = `const std=@import("std");pub fn main(init:std.process.Init)!void{${['orderedRemove', 'shrinkRetainingCapacity'].includes(method) ? '_=init;' : ''}var buffer:[300000]u8=undefined;var list=std.ArrayList(u8).${initialization}(&buffer);${['appendSlice', 'replaceRange'].includes(method) ? 'const input:[300000]u8=@splat(1);' : ''}for(0..4)|_|{${body}}}`;
+    expect(executeProgram('zig', source)).toMatchObject({ kind: 'limitExceeded', limit: 'operations' });
+  }
+);
+
+test('ArrayList transfers account for nested aggregate storage', () => {
+  const source = `const std=@import("std");pub fn main()void{var buffer:[3][100000]u8=undefined;var list=std.ArrayList([100000]u8).initBuffer(&buffer);const item:[100000]u8=@splat(1);for(0..4)|_|{list.appendAssumeCapacity(item);list.clearRetainingCapacity();}}`;
+  expect(executeProgram('zig', source)).toMatchObject({ kind: 'limitExceeded', limit: 'operations' });
+});
+
+test('slices of array elements retain their header and shared backing storage', () => {
+  const source = `const std=@import("std");pub fn main()void{var data=[_][2]u8{.{1,2},.{3,4}};const slice:[][2]u8=&data;const selected=slice[1..2];selected[0][0]=7;std.debug.print("{} {any}",.{selected.len,data[1]});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: '1 { 7, 4 }',
+    uncaughtException: undefined,
+  });
+});
+
+test('allocator fixed sentinel views absorb their sentinel when resizing', () => {
+  const source = `const std=@import("std");pub fn main()!void{var buffer:[8]u8=undefined;var fba=std.heap.FixedBufferAllocator.init(&buffer);const gpa=fba.allocator();const a=try gpa.alloc(u8,3);a[0]=7;a[1]=9;a[2]=0;const b=try gpa.realloc(a[0..2:0],4);std.debug.print("{} {} {} {}|",.{b.len,b[0],b[1],b[2]});gpa.free(b);const c=try gpa.alloc(u8,8);std.debug.print("{}",.{c.len});gpa.free(c);}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: '4 7 9 0|8',
+    uncaughtException: undefined,
+  });
+});
+
+test('allocator empty array views use metadata without dereferencing their pointer', () => {
+  const source = `const std=@import("std");pub fn main()!void{var buffer:[5]u8=undefined;var fba=std.heap.FixedBufferAllocator.init(&buffer);const gpa=fba.allocator();const p:*[0]u8=undefined;const a=try gpa.realloc(p,3);gpa.free(p);std.debug.print("{}",.{a.len});gpa.free(a);}`;
+  expect(executeProgram('zig', source)).toMatchObject({ kind: 'executed', stderr: '3', uncaughtException: undefined });
+});
+
+test('allocator empty sentinel views allocate independently without copying the sentinel', () => {
+  const source = `const std=@import("std");pub fn main()!void{var buffer:[6]u8=undefined;var fba=std.heap.FixedBufferAllocator.init(&buffer);const gpa=fba.allocator();const a=try gpa.alloc(u8,1);a[0]=0;const b=try gpa.realloc(a[0..0:0],2);std.debug.print("{} {} {}|",.{b.len,b[0],a[0]});gpa.free(b);gpa.free(a);const c=try gpa.alloc(u8,6);std.debug.print("{}",.{c.len});gpa.free(c);}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: '2 170 0|6',
+    uncaughtException: undefined,
+  });
+});
