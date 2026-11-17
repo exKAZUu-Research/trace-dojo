@@ -49,20 +49,19 @@ function chopInvalidBytes(self: RString, bytes: Uint8Array): RString {
 }
 
 // code-gauge-allow functionCognitiveComplexity 24 -- Native paragraph, newline, length and encoding stages share ordered suffix boundaries.
-export function chompBytes(self: RString, separator: RString | RNil): RString {
+export function chompByteLength(self: RString, separator: RString | RNil): number {
   const bytes = stringBytes(self);
-  const result = (value: Uint8Array): RString => stringFromBytes(value, self.binary, self.usAscii);
-  if (!(separator instanceof RString) || bytes.length === 0) return result(bytes);
+  if (!(separator instanceof RString) || bytes.length === 0) return bytes.length;
   const suffix = stringBytes(separator);
   if (suffix.length === 0) {
     let end = bytes.length;
     while (end > 0 && bytes[end - 1] === 10) end -= end > 1 && bytes[end - 2] === 13 ? 2 : 1;
-    return result(bytes.slice(0, end));
+    return end;
   }
-  if (suffix.length > bytes.length) return result(bytes);
+  if (suffix.length > bytes.length) return bytes.length;
   if (suffix.length === 1 && suffix[0] === 10) {
-    if (bytes.at(-1) === 13) return result(bytes.slice(0, -1));
-    if (bytes.at(-1) === 10) return result(bytes.slice(0, bytes.at(-2) === 13 ? -2 : -1));
+    if (bytes.at(-1) === 13) return bytes.length - 1;
+    if (bytes.at(-1) === 10) return bytes.length - (bytes.at(-2) === 13 ? 2 : 1);
   }
   if (
     stringEncodingName(self) !== stringEncodingName(separator) &&
@@ -73,9 +72,9 @@ export function chompBytes(self: RString, separator: RString | RNil): RString {
       rt().c['Encoding::CompatibilityError'],
       `incompatible character encodings: ${stringEncodingName(self)} and ${stringEncodingName(separator)}`
     );
-  if (!validStringEncoding(separator)) return result(bytes);
+  if (!validStringEncoding(separator)) return bytes.length;
   const matches = suffix.every((byte, index) => byte === bytes[bytes.length - suffix.length + index]);
-  return result(bytes.slice(0, matches ? bytes.length - suffix.length : bytes.length));
+  return matches ? bytes.length - suffix.length : bytes.length;
 }
 
 export function successorBytes(source: Uint8Array, binary = false, usAscii = false): Uint8Array {

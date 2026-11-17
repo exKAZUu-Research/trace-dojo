@@ -50,7 +50,7 @@ import {
 import { RegexpCursor } from './regexpCursor';
 import { regexpByteIndex, regexpByteUnit } from './regexpPositions';
 import { rt, UnsupportedFeatureError, whileHeld } from './runtime';
-import { chompBytes, successorBytes, transformEncodedBytes } from './stringTransforms';
+import { chompByteLength, successorBytes, transformEncodedBytes } from './stringTransforms';
 import { codePointCharacters, isAsciiText } from './unicodeText';
 import {
   arr,
@@ -1550,22 +1550,26 @@ function chop(text: string): string {
   return chars.slice(0, -1).join('');
 }
 
-function* chompString(self: RString, args: Value[]): Gen<RString> {
-  const separator = args.length > 0 ? args[0] : (rt().globals.get('$/') ?? NIL);
-  return chompBytes(self, separator === NIL ? NIL : yield* stringArgValue(separator));
-}
-
-def('String', 'chomp', [0, 1], chompString);
+def('String', 'chomp', [0, 1], function* (self: RString, args) {
+  const separator = yield* chompSeparator(args);
+  const length = chompByteLength(self, separator);
+  return stringFromBytes(stringBytes(self).slice(0, length), self.binary, self.usAscii);
+});
 def('String', 'chomp!', [0, 1], function* (self: RString, args) {
   modify(self);
-  const before = stringBytes(self);
-  if (before.length === 0) return NIL;
-  const result = yield* chompString(self, args);
-  const after = stringBytes(result);
-  if (after.length === before.length) return NIL;
-  setBytes(self, after);
+  if (stringBytes(self).length === 0) return NIL;
+  const separator = yield* chompSeparator(args);
+  const bytes = stringBytes(self);
+  const length = chompByteLength(self, separator);
+  if (length === bytes.length) return NIL;
+  setBytes(self, bytes.slice(0, length));
   return self;
 });
+
+function* chompSeparator(args: Value[]): Gen<RString | typeof NIL> {
+  const value = args.length > 0 ? args[0] : (rt().globals.get('$/') ?? NIL);
+  return value === NIL ? NIL : yield* stringArgValue(value);
+}
 
 const TRANSFORMS: [string, (text: string) => string][] = [
   ['upcase', (text) => text.toUpperCase()],

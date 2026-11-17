@@ -37778,3 +37778,801 @@ test.each(nativeFrozenEncodedTransformCases)(
     expect(run(source)).toMatchObject({ kind: 'executed', stdout, uncaughtException: undefined });
   }
 );
+
+const nativeChompConversionStateCases = [
+  [
+    String.raw`class Sep;def to_str;$calls+=1;$s.replace(String.new("abc\n",encoding:"UTF-8"));"\n";end;end;[:chomp,:chomp!].each{|m|$s="old";$calls=0;begin;r=$s.send(m,Sep.new);p [m,r&.equal?($s),r&.bytes,$s.bytes,$s.encoding,$s.frozen?,$calls];rescue=>e;p [m,e.class,e.message,$s.bytes,$s.encoding,$s.frozen?,$calls];end}`,
+    '[:chomp, false, [97, 98, 99], [97, 98, 99, 10], #<Encoding:UTF-8>, false, 1]\n[:chomp!, true, [97, 98, 99], [97, 98, 99], #<Encoding:UTF-8>, false, 1]\n',
+  ],
+  [
+    String.raw`class Sep;def to_str;$calls+=1;$s.replace(String.new("abc\n",encoding:"UTF-8"));$s.freeze;"\n";end;end;[:chomp,:chomp!].each{|m|$s="old";$calls=0;begin;r=$s.send(m,Sep.new);p [m,r&.equal?($s),r&.bytes,$s.bytes,$s.encoding,$s.frozen?,$calls];rescue=>e;p [m,e.class,e.message,$s.bytes,$s.encoding,$s.frozen?,$calls];end}`,
+    '[:chomp, false, [97, 98, 99], [97, 98, 99, 10], #<Encoding:UTF-8>, true, 1]\n[:chomp!, FrozenError, "can\'t modify frozen String: \\"abc\\\\n\\"", [97, 98, 99, 10], #<Encoding:UTF-8>, true, 1]\n',
+  ],
+  [
+    String.raw`class Sep;def to_str;$calls+=1;$s.replace(String.new("abc\n",encoding:"US-ASCII"));"\n";end;end;[:chomp,:chomp!].each{|m|$s="old";$calls=0;begin;r=$s.send(m,Sep.new);p [m,r&.equal?($s),r&.bytes,$s.bytes,$s.encoding,$s.frozen?,$calls];rescue=>e;p [m,e.class,e.message,$s.bytes,$s.encoding,$s.frozen?,$calls];end}`,
+    '[:chomp, false, [97, 98, 99], [97, 98, 99, 10], #<Encoding:US-ASCII>, false, 1]\n[:chomp!, true, [97, 98, 99], [97, 98, 99], #<Encoding:US-ASCII>, false, 1]\n',
+  ],
+  [
+    String.raw`class Sep;def to_str;$calls+=1;$s.replace(String.new("abc\n",encoding:"US-ASCII"));$s.freeze;"\n";end;end;[:chomp,:chomp!].each{|m|$s="old";$calls=0;begin;r=$s.send(m,Sep.new);p [m,r&.equal?($s),r&.bytes,$s.bytes,$s.encoding,$s.frozen?,$calls];rescue=>e;p [m,e.class,e.message,$s.bytes,$s.encoding,$s.frozen?,$calls];end}`,
+    '[:chomp, false, [97, 98, 99], [97, 98, 99, 10], #<Encoding:US-ASCII>, true, 1]\n[:chomp!, FrozenError, "can\'t modify frozen String: \\"abc\\\\n\\"", [97, 98, 99, 10], #<Encoding:US-ASCII>, true, 1]\n',
+  ],
+  [
+    String.raw`class Sep;def to_str;$calls+=1;$s.replace(String.new("abc\n",encoding:"ASCII-8BIT"));"\n";end;end;[:chomp,:chomp!].each{|m|$s="old";$calls=0;begin;r=$s.send(m,Sep.new);p [m,r&.equal?($s),r&.bytes,$s.bytes,$s.encoding,$s.frozen?,$calls];rescue=>e;p [m,e.class,e.message,$s.bytes,$s.encoding,$s.frozen?,$calls];end}`,
+    '[:chomp, false, [97, 98, 99], [97, 98, 99, 10], #<Encoding:BINARY (ASCII-8BIT)>, false, 1]\n[:chomp!, true, [97, 98, 99], [97, 98, 99], #<Encoding:BINARY (ASCII-8BIT)>, false, 1]\n',
+  ],
+  [
+    String.raw`class Sep;def to_str;$calls+=1;$s.replace(String.new("abc\n",encoding:"ASCII-8BIT"));$s.freeze;"\n";end;end;[:chomp,:chomp!].each{|m|$s="old";$calls=0;begin;r=$s.send(m,Sep.new);p [m,r&.equal?($s),r&.bytes,$s.bytes,$s.encoding,$s.frozen?,$calls];rescue=>e;p [m,e.class,e.message,$s.bytes,$s.encoding,$s.frozen?,$calls];end}`,
+    '[:chomp, false, [97, 98, 99], [97, 98, 99, 10], #<Encoding:BINARY (ASCII-8BIT)>, true, 1]\n[:chomp!, FrozenError, "can\'t modify frozen String: \\"abc\\\\n\\"", [97, 98, 99, 10], #<Encoding:BINARY (ASCII-8BIT)>, true, 1]\n',
+  ],
+  [
+    String.raw`class Sep;def to_str;$calls+=1;$s.replace(String.new("abc\n",encoding:"UTF-8"));"z";end;end;[:chomp,:chomp!].each{|m|$s="old";$calls=0;begin;r=$s.send(m,Sep.new);p [m,r&.equal?($s),r&.bytes,$s.bytes,$s.encoding,$s.frozen?,$calls];rescue=>e;p [m,e.class,e.message,$s.bytes,$s.encoding,$s.frozen?,$calls];end}`,
+    '[:chomp, false, [97, 98, 99, 10], [97, 98, 99, 10], #<Encoding:UTF-8>, false, 1]\n[:chomp!, nil, nil, [97, 98, 99, 10], #<Encoding:UTF-8>, false, 1]\n',
+  ],
+  [
+    String.raw`class Sep;def to_str;$calls+=1;$s.replace(String.new("abc\n",encoding:"UTF-8"));$s.freeze;"z";end;end;[:chomp,:chomp!].each{|m|$s="old";$calls=0;begin;r=$s.send(m,Sep.new);p [m,r&.equal?($s),r&.bytes,$s.bytes,$s.encoding,$s.frozen?,$calls];rescue=>e;p [m,e.class,e.message,$s.bytes,$s.encoding,$s.frozen?,$calls];end}`,
+    '[:chomp, false, [97, 98, 99, 10], [97, 98, 99, 10], #<Encoding:UTF-8>, true, 1]\n[:chomp!, nil, nil, [97, 98, 99, 10], #<Encoding:UTF-8>, true, 1]\n',
+  ],
+  [
+    String.raw`class Sep;def to_str;$calls+=1;$s.replace(String.new("abc\n",encoding:"US-ASCII"));"z";end;end;[:chomp,:chomp!].each{|m|$s="old";$calls=0;begin;r=$s.send(m,Sep.new);p [m,r&.equal?($s),r&.bytes,$s.bytes,$s.encoding,$s.frozen?,$calls];rescue=>e;p [m,e.class,e.message,$s.bytes,$s.encoding,$s.frozen?,$calls];end}`,
+    '[:chomp, false, [97, 98, 99, 10], [97, 98, 99, 10], #<Encoding:US-ASCII>, false, 1]\n[:chomp!, nil, nil, [97, 98, 99, 10], #<Encoding:US-ASCII>, false, 1]\n',
+  ],
+  [
+    String.raw`class Sep;def to_str;$calls+=1;$s.replace(String.new("abc\n",encoding:"US-ASCII"));$s.freeze;"z";end;end;[:chomp,:chomp!].each{|m|$s="old";$calls=0;begin;r=$s.send(m,Sep.new);p [m,r&.equal?($s),r&.bytes,$s.bytes,$s.encoding,$s.frozen?,$calls];rescue=>e;p [m,e.class,e.message,$s.bytes,$s.encoding,$s.frozen?,$calls];end}`,
+    '[:chomp, false, [97, 98, 99, 10], [97, 98, 99, 10], #<Encoding:US-ASCII>, true, 1]\n[:chomp!, nil, nil, [97, 98, 99, 10], #<Encoding:US-ASCII>, true, 1]\n',
+  ],
+  [
+    String.raw`class Sep;def to_str;$calls+=1;$s.replace(String.new("abc\n",encoding:"ASCII-8BIT"));"z";end;end;[:chomp,:chomp!].each{|m|$s="old";$calls=0;begin;r=$s.send(m,Sep.new);p [m,r&.equal?($s),r&.bytes,$s.bytes,$s.encoding,$s.frozen?,$calls];rescue=>e;p [m,e.class,e.message,$s.bytes,$s.encoding,$s.frozen?,$calls];end}`,
+    '[:chomp, false, [97, 98, 99, 10], [97, 98, 99, 10], #<Encoding:BINARY (ASCII-8BIT)>, false, 1]\n[:chomp!, nil, nil, [97, 98, 99, 10], #<Encoding:BINARY (ASCII-8BIT)>, false, 1]\n',
+  ],
+  [
+    String.raw`class Sep;def to_str;$calls+=1;$s.replace(String.new("abc\n",encoding:"ASCII-8BIT"));$s.freeze;"z";end;end;[:chomp,:chomp!].each{|m|$s="old";$calls=0;begin;r=$s.send(m,Sep.new);p [m,r&.equal?($s),r&.bytes,$s.bytes,$s.encoding,$s.frozen?,$calls];rescue=>e;p [m,e.class,e.message,$s.bytes,$s.encoding,$s.frozen?,$calls];end}`,
+    '[:chomp, false, [97, 98, 99, 10], [97, 98, 99, 10], #<Encoding:BINARY (ASCII-8BIT)>, true, 1]\n[:chomp!, nil, nil, [97, 98, 99, 10], #<Encoding:BINARY (ASCII-8BIT)>, true, 1]\n',
+  ],
+  [
+    String.raw`class Sep;def to_str;$calls+=1;$s.replace(String.new("long",encoding:"UTF-8"));"\n";end;end;[:chomp,:chomp!].each{|m|$s="old";$calls=0;begin;r=$s.send(m,Sep.new);p [m,r&.equal?($s),r&.bytes,$s.bytes,$s.encoding,$s.frozen?,$calls];rescue=>e;p [m,e.class,e.message,$s.bytes,$s.encoding,$s.frozen?,$calls];end}`,
+    '[:chomp, false, [108, 111, 110, 103], [108, 111, 110, 103], #<Encoding:UTF-8>, false, 1]\n[:chomp!, nil, nil, [108, 111, 110, 103], #<Encoding:UTF-8>, false, 1]\n',
+  ],
+  [
+    String.raw`class Sep;def to_str;$calls+=1;$s.replace(String.new("long",encoding:"UTF-8"));$s.freeze;"\n";end;end;[:chomp,:chomp!].each{|m|$s="old";$calls=0;begin;r=$s.send(m,Sep.new);p [m,r&.equal?($s),r&.bytes,$s.bytes,$s.encoding,$s.frozen?,$calls];rescue=>e;p [m,e.class,e.message,$s.bytes,$s.encoding,$s.frozen?,$calls];end}`,
+    '[:chomp, false, [108, 111, 110, 103], [108, 111, 110, 103], #<Encoding:UTF-8>, true, 1]\n[:chomp!, nil, nil, [108, 111, 110, 103], #<Encoding:UTF-8>, true, 1]\n',
+  ],
+  [
+    String.raw`class Sep;def to_str;$calls+=1;$s.replace(String.new("long",encoding:"US-ASCII"));"\n";end;end;[:chomp,:chomp!].each{|m|$s="old";$calls=0;begin;r=$s.send(m,Sep.new);p [m,r&.equal?($s),r&.bytes,$s.bytes,$s.encoding,$s.frozen?,$calls];rescue=>e;p [m,e.class,e.message,$s.bytes,$s.encoding,$s.frozen?,$calls];end}`,
+    '[:chomp, false, [108, 111, 110, 103], [108, 111, 110, 103], #<Encoding:US-ASCII>, false, 1]\n[:chomp!, nil, nil, [108, 111, 110, 103], #<Encoding:US-ASCII>, false, 1]\n',
+  ],
+  [
+    String.raw`class Sep;def to_str;$calls+=1;$s.replace(String.new("long",encoding:"US-ASCII"));$s.freeze;"\n";end;end;[:chomp,:chomp!].each{|m|$s="old";$calls=0;begin;r=$s.send(m,Sep.new);p [m,r&.equal?($s),r&.bytes,$s.bytes,$s.encoding,$s.frozen?,$calls];rescue=>e;p [m,e.class,e.message,$s.bytes,$s.encoding,$s.frozen?,$calls];end}`,
+    '[:chomp, false, [108, 111, 110, 103], [108, 111, 110, 103], #<Encoding:US-ASCII>, true, 1]\n[:chomp!, nil, nil, [108, 111, 110, 103], #<Encoding:US-ASCII>, true, 1]\n',
+  ],
+  [
+    String.raw`class Sep;def to_str;$calls+=1;$s.replace(String.new("long",encoding:"ASCII-8BIT"));"\n";end;end;[:chomp,:chomp!].each{|m|$s="old";$calls=0;begin;r=$s.send(m,Sep.new);p [m,r&.equal?($s),r&.bytes,$s.bytes,$s.encoding,$s.frozen?,$calls];rescue=>e;p [m,e.class,e.message,$s.bytes,$s.encoding,$s.frozen?,$calls];end}`,
+    '[:chomp, false, [108, 111, 110, 103], [108, 111, 110, 103], #<Encoding:BINARY (ASCII-8BIT)>, false, 1]\n[:chomp!, nil, nil, [108, 111, 110, 103], #<Encoding:BINARY (ASCII-8BIT)>, false, 1]\n',
+  ],
+  [
+    String.raw`class Sep;def to_str;$calls+=1;$s.replace(String.new("long",encoding:"ASCII-8BIT"));$s.freeze;"\n";end;end;[:chomp,:chomp!].each{|m|$s="old";$calls=0;begin;r=$s.send(m,Sep.new);p [m,r&.equal?($s),r&.bytes,$s.bytes,$s.encoding,$s.frozen?,$calls];rescue=>e;p [m,e.class,e.message,$s.bytes,$s.encoding,$s.frozen?,$calls];end}`,
+    '[:chomp, false, [108, 111, 110, 103], [108, 111, 110, 103], #<Encoding:BINARY (ASCII-8BIT)>, true, 1]\n[:chomp!, nil, nil, [108, 111, 110, 103], #<Encoding:BINARY (ASCII-8BIT)>, true, 1]\n',
+  ],
+  [
+    'class Sep;def to_str;$calls+=1;$s.replace(String.new("long",encoding:"UTF-8"));"z";end;end;[:chomp,:chomp!].each{|m|$s="old";$calls=0;begin;r=$s.send(m,Sep.new);p [m,r&.equal?($s),r&.bytes,$s.bytes,$s.encoding,$s.frozen?,$calls];rescue=>e;p [m,e.class,e.message,$s.bytes,$s.encoding,$s.frozen?,$calls];end}',
+    '[:chomp, false, [108, 111, 110, 103], [108, 111, 110, 103], #<Encoding:UTF-8>, false, 1]\n[:chomp!, nil, nil, [108, 111, 110, 103], #<Encoding:UTF-8>, false, 1]\n',
+  ],
+  [
+    'class Sep;def to_str;$calls+=1;$s.replace(String.new("long",encoding:"UTF-8"));$s.freeze;"z";end;end;[:chomp,:chomp!].each{|m|$s="old";$calls=0;begin;r=$s.send(m,Sep.new);p [m,r&.equal?($s),r&.bytes,$s.bytes,$s.encoding,$s.frozen?,$calls];rescue=>e;p [m,e.class,e.message,$s.bytes,$s.encoding,$s.frozen?,$calls];end}',
+    '[:chomp, false, [108, 111, 110, 103], [108, 111, 110, 103], #<Encoding:UTF-8>, true, 1]\n[:chomp!, nil, nil, [108, 111, 110, 103], #<Encoding:UTF-8>, true, 1]\n',
+  ],
+  [
+    'class Sep;def to_str;$calls+=1;$s.replace(String.new("long",encoding:"US-ASCII"));"z";end;end;[:chomp,:chomp!].each{|m|$s="old";$calls=0;begin;r=$s.send(m,Sep.new);p [m,r&.equal?($s),r&.bytes,$s.bytes,$s.encoding,$s.frozen?,$calls];rescue=>e;p [m,e.class,e.message,$s.bytes,$s.encoding,$s.frozen?,$calls];end}',
+    '[:chomp, false, [108, 111, 110, 103], [108, 111, 110, 103], #<Encoding:US-ASCII>, false, 1]\n[:chomp!, nil, nil, [108, 111, 110, 103], #<Encoding:US-ASCII>, false, 1]\n',
+  ],
+  [
+    'class Sep;def to_str;$calls+=1;$s.replace(String.new("long",encoding:"US-ASCII"));$s.freeze;"z";end;end;[:chomp,:chomp!].each{|m|$s="old";$calls=0;begin;r=$s.send(m,Sep.new);p [m,r&.equal?($s),r&.bytes,$s.bytes,$s.encoding,$s.frozen?,$calls];rescue=>e;p [m,e.class,e.message,$s.bytes,$s.encoding,$s.frozen?,$calls];end}',
+    '[:chomp, false, [108, 111, 110, 103], [108, 111, 110, 103], #<Encoding:US-ASCII>, true, 1]\n[:chomp!, nil, nil, [108, 111, 110, 103], #<Encoding:US-ASCII>, true, 1]\n',
+  ],
+  [
+    'class Sep;def to_str;$calls+=1;$s.replace(String.new("long",encoding:"ASCII-8BIT"));"z";end;end;[:chomp,:chomp!].each{|m|$s="old";$calls=0;begin;r=$s.send(m,Sep.new);p [m,r&.equal?($s),r&.bytes,$s.bytes,$s.encoding,$s.frozen?,$calls];rescue=>e;p [m,e.class,e.message,$s.bytes,$s.encoding,$s.frozen?,$calls];end}',
+    '[:chomp, false, [108, 111, 110, 103], [108, 111, 110, 103], #<Encoding:BINARY (ASCII-8BIT)>, false, 1]\n[:chomp!, nil, nil, [108, 111, 110, 103], #<Encoding:BINARY (ASCII-8BIT)>, false, 1]\n',
+  ],
+  [
+    'class Sep;def to_str;$calls+=1;$s.replace(String.new("long",encoding:"ASCII-8BIT"));$s.freeze;"z";end;end;[:chomp,:chomp!].each{|m|$s="old";$calls=0;begin;r=$s.send(m,Sep.new);p [m,r&.equal?($s),r&.bytes,$s.bytes,$s.encoding,$s.frozen?,$calls];rescue=>e;p [m,e.class,e.message,$s.bytes,$s.encoding,$s.frozen?,$calls];end}',
+    '[:chomp, false, [108, 111, 110, 103], [108, 111, 110, 103], #<Encoding:BINARY (ASCII-8BIT)>, true, 1]\n[:chomp!, nil, nil, [108, 111, 110, 103], #<Encoding:BINARY (ASCII-8BIT)>, true, 1]\n',
+  ],
+  [
+    String.raw`class Sep;def to_str;$calls+=1;$s.replace(String.new("",encoding:"UTF-8"));"\n";end;end;[:chomp,:chomp!].each{|m|$s="old";$calls=0;begin;r=$s.send(m,Sep.new);p [m,r&.equal?($s),r&.bytes,$s.bytes,$s.encoding,$s.frozen?,$calls];rescue=>e;p [m,e.class,e.message,$s.bytes,$s.encoding,$s.frozen?,$calls];end}`,
+    '[:chomp, false, [], [], #<Encoding:UTF-8>, false, 1]\n[:chomp!, nil, nil, [], #<Encoding:UTF-8>, false, 1]\n',
+  ],
+  [
+    String.raw`class Sep;def to_str;$calls+=1;$s.replace(String.new("",encoding:"UTF-8"));$s.freeze;"\n";end;end;[:chomp,:chomp!].each{|m|$s="old";$calls=0;begin;r=$s.send(m,Sep.new);p [m,r&.equal?($s),r&.bytes,$s.bytes,$s.encoding,$s.frozen?,$calls];rescue=>e;p [m,e.class,e.message,$s.bytes,$s.encoding,$s.frozen?,$calls];end}`,
+    '[:chomp, false, [], [], #<Encoding:UTF-8>, true, 1]\n[:chomp!, nil, nil, [], #<Encoding:UTF-8>, true, 1]\n',
+  ],
+  [
+    String.raw`class Sep;def to_str;$calls+=1;$s.replace(String.new("",encoding:"US-ASCII"));"\n";end;end;[:chomp,:chomp!].each{|m|$s="old";$calls=0;begin;r=$s.send(m,Sep.new);p [m,r&.equal?($s),r&.bytes,$s.bytes,$s.encoding,$s.frozen?,$calls];rescue=>e;p [m,e.class,e.message,$s.bytes,$s.encoding,$s.frozen?,$calls];end}`,
+    '[:chomp, false, [], [], #<Encoding:US-ASCII>, false, 1]\n[:chomp!, nil, nil, [], #<Encoding:US-ASCII>, false, 1]\n',
+  ],
+  [
+    String.raw`class Sep;def to_str;$calls+=1;$s.replace(String.new("",encoding:"US-ASCII"));$s.freeze;"\n";end;end;[:chomp,:chomp!].each{|m|$s="old";$calls=0;begin;r=$s.send(m,Sep.new);p [m,r&.equal?($s),r&.bytes,$s.bytes,$s.encoding,$s.frozen?,$calls];rescue=>e;p [m,e.class,e.message,$s.bytes,$s.encoding,$s.frozen?,$calls];end}`,
+    '[:chomp, false, [], [], #<Encoding:US-ASCII>, true, 1]\n[:chomp!, nil, nil, [], #<Encoding:US-ASCII>, true, 1]\n',
+  ],
+  [
+    String.raw`class Sep;def to_str;$calls+=1;$s.replace(String.new("",encoding:"ASCII-8BIT"));"\n";end;end;[:chomp,:chomp!].each{|m|$s="old";$calls=0;begin;r=$s.send(m,Sep.new);p [m,r&.equal?($s),r&.bytes,$s.bytes,$s.encoding,$s.frozen?,$calls];rescue=>e;p [m,e.class,e.message,$s.bytes,$s.encoding,$s.frozen?,$calls];end}`,
+    '[:chomp, false, [], [], #<Encoding:BINARY (ASCII-8BIT)>, false, 1]\n[:chomp!, nil, nil, [], #<Encoding:BINARY (ASCII-8BIT)>, false, 1]\n',
+  ],
+  [
+    String.raw`class Sep;def to_str;$calls+=1;$s.replace(String.new("",encoding:"ASCII-8BIT"));$s.freeze;"\n";end;end;[:chomp,:chomp!].each{|m|$s="old";$calls=0;begin;r=$s.send(m,Sep.new);p [m,r&.equal?($s),r&.bytes,$s.bytes,$s.encoding,$s.frozen?,$calls];rescue=>e;p [m,e.class,e.message,$s.bytes,$s.encoding,$s.frozen?,$calls];end}`,
+    '[:chomp, false, [], [], #<Encoding:BINARY (ASCII-8BIT)>, true, 1]\n[:chomp!, nil, nil, [], #<Encoding:BINARY (ASCII-8BIT)>, true, 1]\n',
+  ],
+  [
+    'class Sep;def to_str;$calls+=1;$s.replace(String.new("",encoding:"UTF-8"));"z";end;end;[:chomp,:chomp!].each{|m|$s="old";$calls=0;begin;r=$s.send(m,Sep.new);p [m,r&.equal?($s),r&.bytes,$s.bytes,$s.encoding,$s.frozen?,$calls];rescue=>e;p [m,e.class,e.message,$s.bytes,$s.encoding,$s.frozen?,$calls];end}',
+    '[:chomp, false, [], [], #<Encoding:UTF-8>, false, 1]\n[:chomp!, nil, nil, [], #<Encoding:UTF-8>, false, 1]\n',
+  ],
+  [
+    'class Sep;def to_str;$calls+=1;$s.replace(String.new("",encoding:"UTF-8"));$s.freeze;"z";end;end;[:chomp,:chomp!].each{|m|$s="old";$calls=0;begin;r=$s.send(m,Sep.new);p [m,r&.equal?($s),r&.bytes,$s.bytes,$s.encoding,$s.frozen?,$calls];rescue=>e;p [m,e.class,e.message,$s.bytes,$s.encoding,$s.frozen?,$calls];end}',
+    '[:chomp, false, [], [], #<Encoding:UTF-8>, true, 1]\n[:chomp!, nil, nil, [], #<Encoding:UTF-8>, true, 1]\n',
+  ],
+  [
+    'class Sep;def to_str;$calls+=1;$s.replace(String.new("",encoding:"US-ASCII"));"z";end;end;[:chomp,:chomp!].each{|m|$s="old";$calls=0;begin;r=$s.send(m,Sep.new);p [m,r&.equal?($s),r&.bytes,$s.bytes,$s.encoding,$s.frozen?,$calls];rescue=>e;p [m,e.class,e.message,$s.bytes,$s.encoding,$s.frozen?,$calls];end}',
+    '[:chomp, false, [], [], #<Encoding:US-ASCII>, false, 1]\n[:chomp!, nil, nil, [], #<Encoding:US-ASCII>, false, 1]\n',
+  ],
+  [
+    'class Sep;def to_str;$calls+=1;$s.replace(String.new("",encoding:"US-ASCII"));$s.freeze;"z";end;end;[:chomp,:chomp!].each{|m|$s="old";$calls=0;begin;r=$s.send(m,Sep.new);p [m,r&.equal?($s),r&.bytes,$s.bytes,$s.encoding,$s.frozen?,$calls];rescue=>e;p [m,e.class,e.message,$s.bytes,$s.encoding,$s.frozen?,$calls];end}',
+    '[:chomp, false, [], [], #<Encoding:US-ASCII>, true, 1]\n[:chomp!, nil, nil, [], #<Encoding:US-ASCII>, true, 1]\n',
+  ],
+  [
+    'class Sep;def to_str;$calls+=1;$s.replace(String.new("",encoding:"ASCII-8BIT"));"z";end;end;[:chomp,:chomp!].each{|m|$s="old";$calls=0;begin;r=$s.send(m,Sep.new);p [m,r&.equal?($s),r&.bytes,$s.bytes,$s.encoding,$s.frozen?,$calls];rescue=>e;p [m,e.class,e.message,$s.bytes,$s.encoding,$s.frozen?,$calls];end}',
+    '[:chomp, false, [], [], #<Encoding:BINARY (ASCII-8BIT)>, false, 1]\n[:chomp!, nil, nil, [], #<Encoding:BINARY (ASCII-8BIT)>, false, 1]\n',
+  ],
+  [
+    'class Sep;def to_str;$calls+=1;$s.replace(String.new("",encoding:"ASCII-8BIT"));$s.freeze;"z";end;end;[:chomp,:chomp!].each{|m|$s="old";$calls=0;begin;r=$s.send(m,Sep.new);p [m,r&.equal?($s),r&.bytes,$s.bytes,$s.encoding,$s.frozen?,$calls];rescue=>e;p [m,e.class,e.message,$s.bytes,$s.encoding,$s.frozen?,$calls];end}',
+    '[:chomp, false, [], [], #<Encoding:BINARY (ASCII-8BIT)>, true, 1]\n[:chomp!, nil, nil, [], #<Encoding:BINARY (ASCII-8BIT)>, true, 1]\n',
+  ],
+  [
+    String.raw`class Sep;def to_str;$calls+=1;$s.replace(String.new("é\n",encoding:"UTF-8"));"\n";end;end;[:chomp,:chomp!].each{|m|$s="old";$calls=0;begin;r=$s.send(m,Sep.new);p [m,r&.equal?($s),r&.bytes,$s.bytes,$s.encoding,$s.frozen?,$calls];rescue=>e;p [m,e.class,e.message,$s.bytes,$s.encoding,$s.frozen?,$calls];end}`,
+    '[:chomp, false, [195, 169], [195, 169, 10], #<Encoding:UTF-8>, false, 1]\n[:chomp!, true, [195, 169], [195, 169], #<Encoding:UTF-8>, false, 1]\n',
+  ],
+  [
+    String.raw`class Sep;def to_str;$calls+=1;$s.replace(String.new("é\n",encoding:"UTF-8"));$s.freeze;"\n";end;end;[:chomp,:chomp!].each{|m|$s="old";$calls=0;begin;r=$s.send(m,Sep.new);p [m,r&.equal?($s),r&.bytes,$s.bytes,$s.encoding,$s.frozen?,$calls];rescue=>e;p [m,e.class,e.message,$s.bytes,$s.encoding,$s.frozen?,$calls];end}`,
+    '[:chomp, false, [195, 169], [195, 169, 10], #<Encoding:UTF-8>, true, 1]\n[:chomp!, FrozenError, "can\'t modify frozen String: \\"é\\\\n\\"", [195, 169, 10], #<Encoding:UTF-8>, true, 1]\n',
+  ],
+  [
+    String.raw`class Sep;def to_str;$calls+=1;$s.replace(String.new("é\n",encoding:"US-ASCII"));"\n";end;end;[:chomp,:chomp!].each{|m|$s="old";$calls=0;begin;r=$s.send(m,Sep.new);p [m,r&.equal?($s),r&.bytes,$s.bytes,$s.encoding,$s.frozen?,$calls];rescue=>e;p [m,e.class,e.message,$s.bytes,$s.encoding,$s.frozen?,$calls];end}`,
+    '[:chomp, false, [195, 169], [195, 169, 10], #<Encoding:US-ASCII>, false, 1]\n[:chomp!, true, [195, 169], [195, 169], #<Encoding:US-ASCII>, false, 1]\n',
+  ],
+  [
+    String.raw`class Sep;def to_str;$calls+=1;$s.replace(String.new("é\n",encoding:"US-ASCII"));$s.freeze;"\n";end;end;[:chomp,:chomp!].each{|m|$s="old";$calls=0;begin;r=$s.send(m,Sep.new);p [m,r&.equal?($s),r&.bytes,$s.bytes,$s.encoding,$s.frozen?,$calls];rescue=>e;p [m,e.class,e.message,$s.bytes,$s.encoding,$s.frozen?,$calls];end}`,
+    '[:chomp, false, [195, 169], [195, 169, 10], #<Encoding:US-ASCII>, true, 1]\n[:chomp!, FrozenError, "can\'t modify frozen String: \\"\\\\xC3\\\\xA9\\\\n\\"", [195, 169, 10], #<Encoding:US-ASCII>, true, 1]\n',
+  ],
+  [
+    String.raw`class Sep;def to_str;$calls+=1;$s.replace(String.new("é\n",encoding:"ASCII-8BIT"));"\n";end;end;[:chomp,:chomp!].each{|m|$s="old";$calls=0;begin;r=$s.send(m,Sep.new);p [m,r&.equal?($s),r&.bytes,$s.bytes,$s.encoding,$s.frozen?,$calls];rescue=>e;p [m,e.class,e.message,$s.bytes,$s.encoding,$s.frozen?,$calls];end}`,
+    '[:chomp, false, [195, 169], [195, 169, 10], #<Encoding:BINARY (ASCII-8BIT)>, false, 1]\n[:chomp!, true, [195, 169], [195, 169], #<Encoding:BINARY (ASCII-8BIT)>, false, 1]\n',
+  ],
+  [
+    String.raw`class Sep;def to_str;$calls+=1;$s.replace(String.new("é\n",encoding:"ASCII-8BIT"));$s.freeze;"\n";end;end;[:chomp,:chomp!].each{|m|$s="old";$calls=0;begin;r=$s.send(m,Sep.new);p [m,r&.equal?($s),r&.bytes,$s.bytes,$s.encoding,$s.frozen?,$calls];rescue=>e;p [m,e.class,e.message,$s.bytes,$s.encoding,$s.frozen?,$calls];end}`,
+    '[:chomp, false, [195, 169], [195, 169, 10], #<Encoding:BINARY (ASCII-8BIT)>, true, 1]\n[:chomp!, FrozenError, "can\'t modify frozen String: \\"\\\\xC3\\\\xA9\\\\n\\"", [195, 169, 10], #<Encoding:BINARY (ASCII-8BIT)>, true, 1]\n',
+  ],
+  [
+    String.raw`class Sep;def to_str;$calls+=1;$s.replace(String.new("é\n",encoding:"UTF-8"));"z";end;end;[:chomp,:chomp!].each{|m|$s="old";$calls=0;begin;r=$s.send(m,Sep.new);p [m,r&.equal?($s),r&.bytes,$s.bytes,$s.encoding,$s.frozen?,$calls];rescue=>e;p [m,e.class,e.message,$s.bytes,$s.encoding,$s.frozen?,$calls];end}`,
+    '[:chomp, false, [195, 169, 10], [195, 169, 10], #<Encoding:UTF-8>, false, 1]\n[:chomp!, nil, nil, [195, 169, 10], #<Encoding:UTF-8>, false, 1]\n',
+  ],
+  [
+    String.raw`class Sep;def to_str;$calls+=1;$s.replace(String.new("é\n",encoding:"UTF-8"));$s.freeze;"z";end;end;[:chomp,:chomp!].each{|m|$s="old";$calls=0;begin;r=$s.send(m,Sep.new);p [m,r&.equal?($s),r&.bytes,$s.bytes,$s.encoding,$s.frozen?,$calls];rescue=>e;p [m,e.class,e.message,$s.bytes,$s.encoding,$s.frozen?,$calls];end}`,
+    '[:chomp, false, [195, 169, 10], [195, 169, 10], #<Encoding:UTF-8>, true, 1]\n[:chomp!, nil, nil, [195, 169, 10], #<Encoding:UTF-8>, true, 1]\n',
+  ],
+  [
+    String.raw`class Sep;def to_str;$calls+=1;$s.replace(String.new("é\n",encoding:"US-ASCII"));"z";end;end;[:chomp,:chomp!].each{|m|$s="old";$calls=0;begin;r=$s.send(m,Sep.new);p [m,r&.equal?($s),r&.bytes,$s.bytes,$s.encoding,$s.frozen?,$calls];rescue=>e;p [m,e.class,e.message,$s.bytes,$s.encoding,$s.frozen?,$calls];end}`,
+    '[:chomp, false, [195, 169, 10], [195, 169, 10], #<Encoding:US-ASCII>, false, 1]\n[:chomp!, nil, nil, [195, 169, 10], #<Encoding:US-ASCII>, false, 1]\n',
+  ],
+  [
+    String.raw`class Sep;def to_str;$calls+=1;$s.replace(String.new("é\n",encoding:"US-ASCII"));$s.freeze;"z";end;end;[:chomp,:chomp!].each{|m|$s="old";$calls=0;begin;r=$s.send(m,Sep.new);p [m,r&.equal?($s),r&.bytes,$s.bytes,$s.encoding,$s.frozen?,$calls];rescue=>e;p [m,e.class,e.message,$s.bytes,$s.encoding,$s.frozen?,$calls];end}`,
+    '[:chomp, false, [195, 169, 10], [195, 169, 10], #<Encoding:US-ASCII>, true, 1]\n[:chomp!, nil, nil, [195, 169, 10], #<Encoding:US-ASCII>, true, 1]\n',
+  ],
+  [
+    String.raw`class Sep;def to_str;$calls+=1;$s.replace(String.new("é\n",encoding:"ASCII-8BIT"));"z";end;end;[:chomp,:chomp!].each{|m|$s="old";$calls=0;begin;r=$s.send(m,Sep.new);p [m,r&.equal?($s),r&.bytes,$s.bytes,$s.encoding,$s.frozen?,$calls];rescue=>e;p [m,e.class,e.message,$s.bytes,$s.encoding,$s.frozen?,$calls];end}`,
+    '[:chomp, false, [195, 169, 10], [195, 169, 10], #<Encoding:BINARY (ASCII-8BIT)>, false, 1]\n[:chomp!, nil, nil, [195, 169, 10], #<Encoding:BINARY (ASCII-8BIT)>, false, 1]\n',
+  ],
+  [
+    String.raw`class Sep;def to_str;$calls+=1;$s.replace(String.new("é\n",encoding:"ASCII-8BIT"));$s.freeze;"z";end;end;[:chomp,:chomp!].each{|m|$s="old";$calls=0;begin;r=$s.send(m,Sep.new);p [m,r&.equal?($s),r&.bytes,$s.bytes,$s.encoding,$s.frozen?,$calls];rescue=>e;p [m,e.class,e.message,$s.bytes,$s.encoding,$s.frozen?,$calls];end}`,
+    '[:chomp, false, [195, 169, 10], [195, 169, 10], #<Encoding:BINARY (ASCII-8BIT)>, true, 1]\n[:chomp!, nil, nil, [195, 169, 10], #<Encoding:BINARY (ASCII-8BIT)>, true, 1]\n',
+  ],
+  [
+    String.raw`class Sep;def to_str;$calls+=1;$s.replace(String.new("abc\n",encoding:"UTF-8"));"\n";end;end;[:chomp,:chomp!].each{|m|$s="x";$calls=0;begin;r=$s.send(m,Sep.new);p [m,r&.equal?($s),r&.bytes,$s.bytes,$s.encoding,$s.frozen?,$calls];rescue=>e;p [m,e.class,e.message,$s.bytes,$s.encoding,$s.frozen?,$calls];end}`,
+    '[:chomp, false, [97, 98, 99], [97, 98, 99, 10], #<Encoding:UTF-8>, false, 1]\n[:chomp!, true, [97, 98, 99], [97, 98, 99], #<Encoding:UTF-8>, false, 1]\n',
+  ],
+  [
+    String.raw`class Sep;def to_str;$calls+=1;$s.replace(String.new("abc\n",encoding:"UTF-8"));$s.freeze;"\n";end;end;[:chomp,:chomp!].each{|m|$s="x";$calls=0;begin;r=$s.send(m,Sep.new);p [m,r&.equal?($s),r&.bytes,$s.bytes,$s.encoding,$s.frozen?,$calls];rescue=>e;p [m,e.class,e.message,$s.bytes,$s.encoding,$s.frozen?,$calls];end}`,
+    '[:chomp, false, [97, 98, 99], [97, 98, 99, 10], #<Encoding:UTF-8>, true, 1]\n[:chomp!, FrozenError, "can\'t modify frozen String: \\"abc\\\\n\\"", [97, 98, 99, 10], #<Encoding:UTF-8>, true, 1]\n',
+  ],
+  [
+    String.raw`class Sep;def to_str;$calls+=1;$s.replace(String.new("abc\n",encoding:"US-ASCII"));"\n";end;end;[:chomp,:chomp!].each{|m|$s="x";$calls=0;begin;r=$s.send(m,Sep.new);p [m,r&.equal?($s),r&.bytes,$s.bytes,$s.encoding,$s.frozen?,$calls];rescue=>e;p [m,e.class,e.message,$s.bytes,$s.encoding,$s.frozen?,$calls];end}`,
+    '[:chomp, false, [97, 98, 99], [97, 98, 99, 10], #<Encoding:US-ASCII>, false, 1]\n[:chomp!, true, [97, 98, 99], [97, 98, 99], #<Encoding:US-ASCII>, false, 1]\n',
+  ],
+  [
+    String.raw`class Sep;def to_str;$calls+=1;$s.replace(String.new("abc\n",encoding:"US-ASCII"));$s.freeze;"\n";end;end;[:chomp,:chomp!].each{|m|$s="x";$calls=0;begin;r=$s.send(m,Sep.new);p [m,r&.equal?($s),r&.bytes,$s.bytes,$s.encoding,$s.frozen?,$calls];rescue=>e;p [m,e.class,e.message,$s.bytes,$s.encoding,$s.frozen?,$calls];end}`,
+    '[:chomp, false, [97, 98, 99], [97, 98, 99, 10], #<Encoding:US-ASCII>, true, 1]\n[:chomp!, FrozenError, "can\'t modify frozen String: \\"abc\\\\n\\"", [97, 98, 99, 10], #<Encoding:US-ASCII>, true, 1]\n',
+  ],
+  [
+    String.raw`class Sep;def to_str;$calls+=1;$s.replace(String.new("abc\n",encoding:"ASCII-8BIT"));"\n";end;end;[:chomp,:chomp!].each{|m|$s="x";$calls=0;begin;r=$s.send(m,Sep.new);p [m,r&.equal?($s),r&.bytes,$s.bytes,$s.encoding,$s.frozen?,$calls];rescue=>e;p [m,e.class,e.message,$s.bytes,$s.encoding,$s.frozen?,$calls];end}`,
+    '[:chomp, false, [97, 98, 99], [97, 98, 99, 10], #<Encoding:BINARY (ASCII-8BIT)>, false, 1]\n[:chomp!, true, [97, 98, 99], [97, 98, 99], #<Encoding:BINARY (ASCII-8BIT)>, false, 1]\n',
+  ],
+  [
+    String.raw`class Sep;def to_str;$calls+=1;$s.replace(String.new("abc\n",encoding:"ASCII-8BIT"));$s.freeze;"\n";end;end;[:chomp,:chomp!].each{|m|$s="x";$calls=0;begin;r=$s.send(m,Sep.new);p [m,r&.equal?($s),r&.bytes,$s.bytes,$s.encoding,$s.frozen?,$calls];rescue=>e;p [m,e.class,e.message,$s.bytes,$s.encoding,$s.frozen?,$calls];end}`,
+    '[:chomp, false, [97, 98, 99], [97, 98, 99, 10], #<Encoding:BINARY (ASCII-8BIT)>, true, 1]\n[:chomp!, FrozenError, "can\'t modify frozen String: \\"abc\\\\n\\"", [97, 98, 99, 10], #<Encoding:BINARY (ASCII-8BIT)>, true, 1]\n',
+  ],
+  [
+    String.raw`class Sep;def to_str;$calls+=1;$s.replace(String.new("abc\n",encoding:"UTF-8"));"z";end;end;[:chomp,:chomp!].each{|m|$s="x";$calls=0;begin;r=$s.send(m,Sep.new);p [m,r&.equal?($s),r&.bytes,$s.bytes,$s.encoding,$s.frozen?,$calls];rescue=>e;p [m,e.class,e.message,$s.bytes,$s.encoding,$s.frozen?,$calls];end}`,
+    '[:chomp, false, [97, 98, 99, 10], [97, 98, 99, 10], #<Encoding:UTF-8>, false, 1]\n[:chomp!, nil, nil, [97, 98, 99, 10], #<Encoding:UTF-8>, false, 1]\n',
+  ],
+  [
+    String.raw`class Sep;def to_str;$calls+=1;$s.replace(String.new("abc\n",encoding:"UTF-8"));$s.freeze;"z";end;end;[:chomp,:chomp!].each{|m|$s="x";$calls=0;begin;r=$s.send(m,Sep.new);p [m,r&.equal?($s),r&.bytes,$s.bytes,$s.encoding,$s.frozen?,$calls];rescue=>e;p [m,e.class,e.message,$s.bytes,$s.encoding,$s.frozen?,$calls];end}`,
+    '[:chomp, false, [97, 98, 99, 10], [97, 98, 99, 10], #<Encoding:UTF-8>, true, 1]\n[:chomp!, nil, nil, [97, 98, 99, 10], #<Encoding:UTF-8>, true, 1]\n',
+  ],
+  [
+    String.raw`class Sep;def to_str;$calls+=1;$s.replace(String.new("abc\n",encoding:"US-ASCII"));"z";end;end;[:chomp,:chomp!].each{|m|$s="x";$calls=0;begin;r=$s.send(m,Sep.new);p [m,r&.equal?($s),r&.bytes,$s.bytes,$s.encoding,$s.frozen?,$calls];rescue=>e;p [m,e.class,e.message,$s.bytes,$s.encoding,$s.frozen?,$calls];end}`,
+    '[:chomp, false, [97, 98, 99, 10], [97, 98, 99, 10], #<Encoding:US-ASCII>, false, 1]\n[:chomp!, nil, nil, [97, 98, 99, 10], #<Encoding:US-ASCII>, false, 1]\n',
+  ],
+  [
+    String.raw`class Sep;def to_str;$calls+=1;$s.replace(String.new("abc\n",encoding:"US-ASCII"));$s.freeze;"z";end;end;[:chomp,:chomp!].each{|m|$s="x";$calls=0;begin;r=$s.send(m,Sep.new);p [m,r&.equal?($s),r&.bytes,$s.bytes,$s.encoding,$s.frozen?,$calls];rescue=>e;p [m,e.class,e.message,$s.bytes,$s.encoding,$s.frozen?,$calls];end}`,
+    '[:chomp, false, [97, 98, 99, 10], [97, 98, 99, 10], #<Encoding:US-ASCII>, true, 1]\n[:chomp!, nil, nil, [97, 98, 99, 10], #<Encoding:US-ASCII>, true, 1]\n',
+  ],
+  [
+    String.raw`class Sep;def to_str;$calls+=1;$s.replace(String.new("abc\n",encoding:"ASCII-8BIT"));"z";end;end;[:chomp,:chomp!].each{|m|$s="x";$calls=0;begin;r=$s.send(m,Sep.new);p [m,r&.equal?($s),r&.bytes,$s.bytes,$s.encoding,$s.frozen?,$calls];rescue=>e;p [m,e.class,e.message,$s.bytes,$s.encoding,$s.frozen?,$calls];end}`,
+    '[:chomp, false, [97, 98, 99, 10], [97, 98, 99, 10], #<Encoding:BINARY (ASCII-8BIT)>, false, 1]\n[:chomp!, nil, nil, [97, 98, 99, 10], #<Encoding:BINARY (ASCII-8BIT)>, false, 1]\n',
+  ],
+  [
+    String.raw`class Sep;def to_str;$calls+=1;$s.replace(String.new("abc\n",encoding:"ASCII-8BIT"));$s.freeze;"z";end;end;[:chomp,:chomp!].each{|m|$s="x";$calls=0;begin;r=$s.send(m,Sep.new);p [m,r&.equal?($s),r&.bytes,$s.bytes,$s.encoding,$s.frozen?,$calls];rescue=>e;p [m,e.class,e.message,$s.bytes,$s.encoding,$s.frozen?,$calls];end}`,
+    '[:chomp, false, [97, 98, 99, 10], [97, 98, 99, 10], #<Encoding:BINARY (ASCII-8BIT)>, true, 1]\n[:chomp!, nil, nil, [97, 98, 99, 10], #<Encoding:BINARY (ASCII-8BIT)>, true, 1]\n',
+  ],
+  [
+    String.raw`class Sep;def to_str;$calls+=1;$s.replace(String.new("long",encoding:"UTF-8"));"\n";end;end;[:chomp,:chomp!].each{|m|$s="x";$calls=0;begin;r=$s.send(m,Sep.new);p [m,r&.equal?($s),r&.bytes,$s.bytes,$s.encoding,$s.frozen?,$calls];rescue=>e;p [m,e.class,e.message,$s.bytes,$s.encoding,$s.frozen?,$calls];end}`,
+    '[:chomp, false, [108, 111, 110, 103], [108, 111, 110, 103], #<Encoding:UTF-8>, false, 1]\n[:chomp!, nil, nil, [108, 111, 110, 103], #<Encoding:UTF-8>, false, 1]\n',
+  ],
+  [
+    String.raw`class Sep;def to_str;$calls+=1;$s.replace(String.new("long",encoding:"UTF-8"));$s.freeze;"\n";end;end;[:chomp,:chomp!].each{|m|$s="x";$calls=0;begin;r=$s.send(m,Sep.new);p [m,r&.equal?($s),r&.bytes,$s.bytes,$s.encoding,$s.frozen?,$calls];rescue=>e;p [m,e.class,e.message,$s.bytes,$s.encoding,$s.frozen?,$calls];end}`,
+    '[:chomp, false, [108, 111, 110, 103], [108, 111, 110, 103], #<Encoding:UTF-8>, true, 1]\n[:chomp!, nil, nil, [108, 111, 110, 103], #<Encoding:UTF-8>, true, 1]\n',
+  ],
+  [
+    String.raw`class Sep;def to_str;$calls+=1;$s.replace(String.new("long",encoding:"US-ASCII"));"\n";end;end;[:chomp,:chomp!].each{|m|$s="x";$calls=0;begin;r=$s.send(m,Sep.new);p [m,r&.equal?($s),r&.bytes,$s.bytes,$s.encoding,$s.frozen?,$calls];rescue=>e;p [m,e.class,e.message,$s.bytes,$s.encoding,$s.frozen?,$calls];end}`,
+    '[:chomp, false, [108, 111, 110, 103], [108, 111, 110, 103], #<Encoding:US-ASCII>, false, 1]\n[:chomp!, nil, nil, [108, 111, 110, 103], #<Encoding:US-ASCII>, false, 1]\n',
+  ],
+  [
+    String.raw`class Sep;def to_str;$calls+=1;$s.replace(String.new("long",encoding:"US-ASCII"));$s.freeze;"\n";end;end;[:chomp,:chomp!].each{|m|$s="x";$calls=0;begin;r=$s.send(m,Sep.new);p [m,r&.equal?($s),r&.bytes,$s.bytes,$s.encoding,$s.frozen?,$calls];rescue=>e;p [m,e.class,e.message,$s.bytes,$s.encoding,$s.frozen?,$calls];end}`,
+    '[:chomp, false, [108, 111, 110, 103], [108, 111, 110, 103], #<Encoding:US-ASCII>, true, 1]\n[:chomp!, nil, nil, [108, 111, 110, 103], #<Encoding:US-ASCII>, true, 1]\n',
+  ],
+  [
+    String.raw`class Sep;def to_str;$calls+=1;$s.replace(String.new("long",encoding:"ASCII-8BIT"));"\n";end;end;[:chomp,:chomp!].each{|m|$s="x";$calls=0;begin;r=$s.send(m,Sep.new);p [m,r&.equal?($s),r&.bytes,$s.bytes,$s.encoding,$s.frozen?,$calls];rescue=>e;p [m,e.class,e.message,$s.bytes,$s.encoding,$s.frozen?,$calls];end}`,
+    '[:chomp, false, [108, 111, 110, 103], [108, 111, 110, 103], #<Encoding:BINARY (ASCII-8BIT)>, false, 1]\n[:chomp!, nil, nil, [108, 111, 110, 103], #<Encoding:BINARY (ASCII-8BIT)>, false, 1]\n',
+  ],
+  [
+    String.raw`class Sep;def to_str;$calls+=1;$s.replace(String.new("long",encoding:"ASCII-8BIT"));$s.freeze;"\n";end;end;[:chomp,:chomp!].each{|m|$s="x";$calls=0;begin;r=$s.send(m,Sep.new);p [m,r&.equal?($s),r&.bytes,$s.bytes,$s.encoding,$s.frozen?,$calls];rescue=>e;p [m,e.class,e.message,$s.bytes,$s.encoding,$s.frozen?,$calls];end}`,
+    '[:chomp, false, [108, 111, 110, 103], [108, 111, 110, 103], #<Encoding:BINARY (ASCII-8BIT)>, true, 1]\n[:chomp!, nil, nil, [108, 111, 110, 103], #<Encoding:BINARY (ASCII-8BIT)>, true, 1]\n',
+  ],
+  [
+    'class Sep;def to_str;$calls+=1;$s.replace(String.new("long",encoding:"UTF-8"));"z";end;end;[:chomp,:chomp!].each{|m|$s="x";$calls=0;begin;r=$s.send(m,Sep.new);p [m,r&.equal?($s),r&.bytes,$s.bytes,$s.encoding,$s.frozen?,$calls];rescue=>e;p [m,e.class,e.message,$s.bytes,$s.encoding,$s.frozen?,$calls];end}',
+    '[:chomp, false, [108, 111, 110, 103], [108, 111, 110, 103], #<Encoding:UTF-8>, false, 1]\n[:chomp!, nil, nil, [108, 111, 110, 103], #<Encoding:UTF-8>, false, 1]\n',
+  ],
+  [
+    'class Sep;def to_str;$calls+=1;$s.replace(String.new("long",encoding:"UTF-8"));$s.freeze;"z";end;end;[:chomp,:chomp!].each{|m|$s="x";$calls=0;begin;r=$s.send(m,Sep.new);p [m,r&.equal?($s),r&.bytes,$s.bytes,$s.encoding,$s.frozen?,$calls];rescue=>e;p [m,e.class,e.message,$s.bytes,$s.encoding,$s.frozen?,$calls];end}',
+    '[:chomp, false, [108, 111, 110, 103], [108, 111, 110, 103], #<Encoding:UTF-8>, true, 1]\n[:chomp!, nil, nil, [108, 111, 110, 103], #<Encoding:UTF-8>, true, 1]\n',
+  ],
+  [
+    'class Sep;def to_str;$calls+=1;$s.replace(String.new("long",encoding:"US-ASCII"));"z";end;end;[:chomp,:chomp!].each{|m|$s="x";$calls=0;begin;r=$s.send(m,Sep.new);p [m,r&.equal?($s),r&.bytes,$s.bytes,$s.encoding,$s.frozen?,$calls];rescue=>e;p [m,e.class,e.message,$s.bytes,$s.encoding,$s.frozen?,$calls];end}',
+    '[:chomp, false, [108, 111, 110, 103], [108, 111, 110, 103], #<Encoding:US-ASCII>, false, 1]\n[:chomp!, nil, nil, [108, 111, 110, 103], #<Encoding:US-ASCII>, false, 1]\n',
+  ],
+  [
+    'class Sep;def to_str;$calls+=1;$s.replace(String.new("long",encoding:"US-ASCII"));$s.freeze;"z";end;end;[:chomp,:chomp!].each{|m|$s="x";$calls=0;begin;r=$s.send(m,Sep.new);p [m,r&.equal?($s),r&.bytes,$s.bytes,$s.encoding,$s.frozen?,$calls];rescue=>e;p [m,e.class,e.message,$s.bytes,$s.encoding,$s.frozen?,$calls];end}',
+    '[:chomp, false, [108, 111, 110, 103], [108, 111, 110, 103], #<Encoding:US-ASCII>, true, 1]\n[:chomp!, nil, nil, [108, 111, 110, 103], #<Encoding:US-ASCII>, true, 1]\n',
+  ],
+  [
+    'class Sep;def to_str;$calls+=1;$s.replace(String.new("long",encoding:"ASCII-8BIT"));"z";end;end;[:chomp,:chomp!].each{|m|$s="x";$calls=0;begin;r=$s.send(m,Sep.new);p [m,r&.equal?($s),r&.bytes,$s.bytes,$s.encoding,$s.frozen?,$calls];rescue=>e;p [m,e.class,e.message,$s.bytes,$s.encoding,$s.frozen?,$calls];end}',
+    '[:chomp, false, [108, 111, 110, 103], [108, 111, 110, 103], #<Encoding:BINARY (ASCII-8BIT)>, false, 1]\n[:chomp!, nil, nil, [108, 111, 110, 103], #<Encoding:BINARY (ASCII-8BIT)>, false, 1]\n',
+  ],
+  [
+    'class Sep;def to_str;$calls+=1;$s.replace(String.new("long",encoding:"ASCII-8BIT"));$s.freeze;"z";end;end;[:chomp,:chomp!].each{|m|$s="x";$calls=0;begin;r=$s.send(m,Sep.new);p [m,r&.equal?($s),r&.bytes,$s.bytes,$s.encoding,$s.frozen?,$calls];rescue=>e;p [m,e.class,e.message,$s.bytes,$s.encoding,$s.frozen?,$calls];end}',
+    '[:chomp, false, [108, 111, 110, 103], [108, 111, 110, 103], #<Encoding:BINARY (ASCII-8BIT)>, true, 1]\n[:chomp!, nil, nil, [108, 111, 110, 103], #<Encoding:BINARY (ASCII-8BIT)>, true, 1]\n',
+  ],
+  [
+    String.raw`class Sep;def to_str;$calls+=1;$s.replace(String.new("",encoding:"UTF-8"));"\n";end;end;[:chomp,:chomp!].each{|m|$s="x";$calls=0;begin;r=$s.send(m,Sep.new);p [m,r&.equal?($s),r&.bytes,$s.bytes,$s.encoding,$s.frozen?,$calls];rescue=>e;p [m,e.class,e.message,$s.bytes,$s.encoding,$s.frozen?,$calls];end}`,
+    '[:chomp, false, [], [], #<Encoding:UTF-8>, false, 1]\n[:chomp!, nil, nil, [], #<Encoding:UTF-8>, false, 1]\n',
+  ],
+  [
+    String.raw`class Sep;def to_str;$calls+=1;$s.replace(String.new("",encoding:"UTF-8"));$s.freeze;"\n";end;end;[:chomp,:chomp!].each{|m|$s="x";$calls=0;begin;r=$s.send(m,Sep.new);p [m,r&.equal?($s),r&.bytes,$s.bytes,$s.encoding,$s.frozen?,$calls];rescue=>e;p [m,e.class,e.message,$s.bytes,$s.encoding,$s.frozen?,$calls];end}`,
+    '[:chomp, false, [], [], #<Encoding:UTF-8>, true, 1]\n[:chomp!, nil, nil, [], #<Encoding:UTF-8>, true, 1]\n',
+  ],
+  [
+    String.raw`class Sep;def to_str;$calls+=1;$s.replace(String.new("",encoding:"US-ASCII"));"\n";end;end;[:chomp,:chomp!].each{|m|$s="x";$calls=0;begin;r=$s.send(m,Sep.new);p [m,r&.equal?($s),r&.bytes,$s.bytes,$s.encoding,$s.frozen?,$calls];rescue=>e;p [m,e.class,e.message,$s.bytes,$s.encoding,$s.frozen?,$calls];end}`,
+    '[:chomp, false, [], [], #<Encoding:US-ASCII>, false, 1]\n[:chomp!, nil, nil, [], #<Encoding:US-ASCII>, false, 1]\n',
+  ],
+  [
+    String.raw`class Sep;def to_str;$calls+=1;$s.replace(String.new("",encoding:"US-ASCII"));$s.freeze;"\n";end;end;[:chomp,:chomp!].each{|m|$s="x";$calls=0;begin;r=$s.send(m,Sep.new);p [m,r&.equal?($s),r&.bytes,$s.bytes,$s.encoding,$s.frozen?,$calls];rescue=>e;p [m,e.class,e.message,$s.bytes,$s.encoding,$s.frozen?,$calls];end}`,
+    '[:chomp, false, [], [], #<Encoding:US-ASCII>, true, 1]\n[:chomp!, nil, nil, [], #<Encoding:US-ASCII>, true, 1]\n',
+  ],
+  [
+    String.raw`class Sep;def to_str;$calls+=1;$s.replace(String.new("",encoding:"ASCII-8BIT"));"\n";end;end;[:chomp,:chomp!].each{|m|$s="x";$calls=0;begin;r=$s.send(m,Sep.new);p [m,r&.equal?($s),r&.bytes,$s.bytes,$s.encoding,$s.frozen?,$calls];rescue=>e;p [m,e.class,e.message,$s.bytes,$s.encoding,$s.frozen?,$calls];end}`,
+    '[:chomp, false, [], [], #<Encoding:BINARY (ASCII-8BIT)>, false, 1]\n[:chomp!, nil, nil, [], #<Encoding:BINARY (ASCII-8BIT)>, false, 1]\n',
+  ],
+  [
+    String.raw`class Sep;def to_str;$calls+=1;$s.replace(String.new("",encoding:"ASCII-8BIT"));$s.freeze;"\n";end;end;[:chomp,:chomp!].each{|m|$s="x";$calls=0;begin;r=$s.send(m,Sep.new);p [m,r&.equal?($s),r&.bytes,$s.bytes,$s.encoding,$s.frozen?,$calls];rescue=>e;p [m,e.class,e.message,$s.bytes,$s.encoding,$s.frozen?,$calls];end}`,
+    '[:chomp, false, [], [], #<Encoding:BINARY (ASCII-8BIT)>, true, 1]\n[:chomp!, nil, nil, [], #<Encoding:BINARY (ASCII-8BIT)>, true, 1]\n',
+  ],
+  [
+    'class Sep;def to_str;$calls+=1;$s.replace(String.new("",encoding:"UTF-8"));"z";end;end;[:chomp,:chomp!].each{|m|$s="x";$calls=0;begin;r=$s.send(m,Sep.new);p [m,r&.equal?($s),r&.bytes,$s.bytes,$s.encoding,$s.frozen?,$calls];rescue=>e;p [m,e.class,e.message,$s.bytes,$s.encoding,$s.frozen?,$calls];end}',
+    '[:chomp, false, [], [], #<Encoding:UTF-8>, false, 1]\n[:chomp!, nil, nil, [], #<Encoding:UTF-8>, false, 1]\n',
+  ],
+  [
+    'class Sep;def to_str;$calls+=1;$s.replace(String.new("",encoding:"UTF-8"));$s.freeze;"z";end;end;[:chomp,:chomp!].each{|m|$s="x";$calls=0;begin;r=$s.send(m,Sep.new);p [m,r&.equal?($s),r&.bytes,$s.bytes,$s.encoding,$s.frozen?,$calls];rescue=>e;p [m,e.class,e.message,$s.bytes,$s.encoding,$s.frozen?,$calls];end}',
+    '[:chomp, false, [], [], #<Encoding:UTF-8>, true, 1]\n[:chomp!, nil, nil, [], #<Encoding:UTF-8>, true, 1]\n',
+  ],
+  [
+    'class Sep;def to_str;$calls+=1;$s.replace(String.new("",encoding:"US-ASCII"));"z";end;end;[:chomp,:chomp!].each{|m|$s="x";$calls=0;begin;r=$s.send(m,Sep.new);p [m,r&.equal?($s),r&.bytes,$s.bytes,$s.encoding,$s.frozen?,$calls];rescue=>e;p [m,e.class,e.message,$s.bytes,$s.encoding,$s.frozen?,$calls];end}',
+    '[:chomp, false, [], [], #<Encoding:US-ASCII>, false, 1]\n[:chomp!, nil, nil, [], #<Encoding:US-ASCII>, false, 1]\n',
+  ],
+  [
+    'class Sep;def to_str;$calls+=1;$s.replace(String.new("",encoding:"US-ASCII"));$s.freeze;"z";end;end;[:chomp,:chomp!].each{|m|$s="x";$calls=0;begin;r=$s.send(m,Sep.new);p [m,r&.equal?($s),r&.bytes,$s.bytes,$s.encoding,$s.frozen?,$calls];rescue=>e;p [m,e.class,e.message,$s.bytes,$s.encoding,$s.frozen?,$calls];end}',
+    '[:chomp, false, [], [], #<Encoding:US-ASCII>, true, 1]\n[:chomp!, nil, nil, [], #<Encoding:US-ASCII>, true, 1]\n',
+  ],
+  [
+    'class Sep;def to_str;$calls+=1;$s.replace(String.new("",encoding:"ASCII-8BIT"));"z";end;end;[:chomp,:chomp!].each{|m|$s="x";$calls=0;begin;r=$s.send(m,Sep.new);p [m,r&.equal?($s),r&.bytes,$s.bytes,$s.encoding,$s.frozen?,$calls];rescue=>e;p [m,e.class,e.message,$s.bytes,$s.encoding,$s.frozen?,$calls];end}',
+    '[:chomp, false, [], [], #<Encoding:BINARY (ASCII-8BIT)>, false, 1]\n[:chomp!, nil, nil, [], #<Encoding:BINARY (ASCII-8BIT)>, false, 1]\n',
+  ],
+  [
+    'class Sep;def to_str;$calls+=1;$s.replace(String.new("",encoding:"ASCII-8BIT"));$s.freeze;"z";end;end;[:chomp,:chomp!].each{|m|$s="x";$calls=0;begin;r=$s.send(m,Sep.new);p [m,r&.equal?($s),r&.bytes,$s.bytes,$s.encoding,$s.frozen?,$calls];rescue=>e;p [m,e.class,e.message,$s.bytes,$s.encoding,$s.frozen?,$calls];end}',
+    '[:chomp, false, [], [], #<Encoding:BINARY (ASCII-8BIT)>, true, 1]\n[:chomp!, nil, nil, [], #<Encoding:BINARY (ASCII-8BIT)>, true, 1]\n',
+  ],
+  [
+    String.raw`class Sep;def to_str;$calls+=1;$s.replace(String.new("é\n",encoding:"UTF-8"));"\n";end;end;[:chomp,:chomp!].each{|m|$s="x";$calls=0;begin;r=$s.send(m,Sep.new);p [m,r&.equal?($s),r&.bytes,$s.bytes,$s.encoding,$s.frozen?,$calls];rescue=>e;p [m,e.class,e.message,$s.bytes,$s.encoding,$s.frozen?,$calls];end}`,
+    '[:chomp, false, [195, 169], [195, 169, 10], #<Encoding:UTF-8>, false, 1]\n[:chomp!, true, [195, 169], [195, 169], #<Encoding:UTF-8>, false, 1]\n',
+  ],
+  [
+    String.raw`class Sep;def to_str;$calls+=1;$s.replace(String.new("é\n",encoding:"UTF-8"));$s.freeze;"\n";end;end;[:chomp,:chomp!].each{|m|$s="x";$calls=0;begin;r=$s.send(m,Sep.new);p [m,r&.equal?($s),r&.bytes,$s.bytes,$s.encoding,$s.frozen?,$calls];rescue=>e;p [m,e.class,e.message,$s.bytes,$s.encoding,$s.frozen?,$calls];end}`,
+    '[:chomp, false, [195, 169], [195, 169, 10], #<Encoding:UTF-8>, true, 1]\n[:chomp!, FrozenError, "can\'t modify frozen String: \\"é\\\\n\\"", [195, 169, 10], #<Encoding:UTF-8>, true, 1]\n',
+  ],
+  [
+    String.raw`class Sep;def to_str;$calls+=1;$s.replace(String.new("é\n",encoding:"US-ASCII"));"\n";end;end;[:chomp,:chomp!].each{|m|$s="x";$calls=0;begin;r=$s.send(m,Sep.new);p [m,r&.equal?($s),r&.bytes,$s.bytes,$s.encoding,$s.frozen?,$calls];rescue=>e;p [m,e.class,e.message,$s.bytes,$s.encoding,$s.frozen?,$calls];end}`,
+    '[:chomp, false, [195, 169], [195, 169, 10], #<Encoding:US-ASCII>, false, 1]\n[:chomp!, true, [195, 169], [195, 169], #<Encoding:US-ASCII>, false, 1]\n',
+  ],
+  [
+    String.raw`class Sep;def to_str;$calls+=1;$s.replace(String.new("é\n",encoding:"US-ASCII"));$s.freeze;"\n";end;end;[:chomp,:chomp!].each{|m|$s="x";$calls=0;begin;r=$s.send(m,Sep.new);p [m,r&.equal?($s),r&.bytes,$s.bytes,$s.encoding,$s.frozen?,$calls];rescue=>e;p [m,e.class,e.message,$s.bytes,$s.encoding,$s.frozen?,$calls];end}`,
+    '[:chomp, false, [195, 169], [195, 169, 10], #<Encoding:US-ASCII>, true, 1]\n[:chomp!, FrozenError, "can\'t modify frozen String: \\"\\\\xC3\\\\xA9\\\\n\\"", [195, 169, 10], #<Encoding:US-ASCII>, true, 1]\n',
+  ],
+  [
+    String.raw`class Sep;def to_str;$calls+=1;$s.replace(String.new("é\n",encoding:"ASCII-8BIT"));"\n";end;end;[:chomp,:chomp!].each{|m|$s="x";$calls=0;begin;r=$s.send(m,Sep.new);p [m,r&.equal?($s),r&.bytes,$s.bytes,$s.encoding,$s.frozen?,$calls];rescue=>e;p [m,e.class,e.message,$s.bytes,$s.encoding,$s.frozen?,$calls];end}`,
+    '[:chomp, false, [195, 169], [195, 169, 10], #<Encoding:BINARY (ASCII-8BIT)>, false, 1]\n[:chomp!, true, [195, 169], [195, 169], #<Encoding:BINARY (ASCII-8BIT)>, false, 1]\n',
+  ],
+  [
+    String.raw`class Sep;def to_str;$calls+=1;$s.replace(String.new("é\n",encoding:"ASCII-8BIT"));$s.freeze;"\n";end;end;[:chomp,:chomp!].each{|m|$s="x";$calls=0;begin;r=$s.send(m,Sep.new);p [m,r&.equal?($s),r&.bytes,$s.bytes,$s.encoding,$s.frozen?,$calls];rescue=>e;p [m,e.class,e.message,$s.bytes,$s.encoding,$s.frozen?,$calls];end}`,
+    '[:chomp, false, [195, 169], [195, 169, 10], #<Encoding:BINARY (ASCII-8BIT)>, true, 1]\n[:chomp!, FrozenError, "can\'t modify frozen String: \\"\\\\xC3\\\\xA9\\\\n\\"", [195, 169, 10], #<Encoding:BINARY (ASCII-8BIT)>, true, 1]\n',
+  ],
+  [
+    String.raw`class Sep;def to_str;$calls+=1;$s.replace(String.new("é\n",encoding:"UTF-8"));"z";end;end;[:chomp,:chomp!].each{|m|$s="x";$calls=0;begin;r=$s.send(m,Sep.new);p [m,r&.equal?($s),r&.bytes,$s.bytes,$s.encoding,$s.frozen?,$calls];rescue=>e;p [m,e.class,e.message,$s.bytes,$s.encoding,$s.frozen?,$calls];end}`,
+    '[:chomp, false, [195, 169, 10], [195, 169, 10], #<Encoding:UTF-8>, false, 1]\n[:chomp!, nil, nil, [195, 169, 10], #<Encoding:UTF-8>, false, 1]\n',
+  ],
+  [
+    String.raw`class Sep;def to_str;$calls+=1;$s.replace(String.new("é\n",encoding:"UTF-8"));$s.freeze;"z";end;end;[:chomp,:chomp!].each{|m|$s="x";$calls=0;begin;r=$s.send(m,Sep.new);p [m,r&.equal?($s),r&.bytes,$s.bytes,$s.encoding,$s.frozen?,$calls];rescue=>e;p [m,e.class,e.message,$s.bytes,$s.encoding,$s.frozen?,$calls];end}`,
+    '[:chomp, false, [195, 169, 10], [195, 169, 10], #<Encoding:UTF-8>, true, 1]\n[:chomp!, nil, nil, [195, 169, 10], #<Encoding:UTF-8>, true, 1]\n',
+  ],
+  [
+    String.raw`class Sep;def to_str;$calls+=1;$s.replace(String.new("é\n",encoding:"US-ASCII"));"z";end;end;[:chomp,:chomp!].each{|m|$s="x";$calls=0;begin;r=$s.send(m,Sep.new);p [m,r&.equal?($s),r&.bytes,$s.bytes,$s.encoding,$s.frozen?,$calls];rescue=>e;p [m,e.class,e.message,$s.bytes,$s.encoding,$s.frozen?,$calls];end}`,
+    '[:chomp, false, [195, 169, 10], [195, 169, 10], #<Encoding:US-ASCII>, false, 1]\n[:chomp!, nil, nil, [195, 169, 10], #<Encoding:US-ASCII>, false, 1]\n',
+  ],
+  [
+    String.raw`class Sep;def to_str;$calls+=1;$s.replace(String.new("é\n",encoding:"US-ASCII"));$s.freeze;"z";end;end;[:chomp,:chomp!].each{|m|$s="x";$calls=0;begin;r=$s.send(m,Sep.new);p [m,r&.equal?($s),r&.bytes,$s.bytes,$s.encoding,$s.frozen?,$calls];rescue=>e;p [m,e.class,e.message,$s.bytes,$s.encoding,$s.frozen?,$calls];end}`,
+    '[:chomp, false, [195, 169, 10], [195, 169, 10], #<Encoding:US-ASCII>, true, 1]\n[:chomp!, nil, nil, [195, 169, 10], #<Encoding:US-ASCII>, true, 1]\n',
+  ],
+  [
+    String.raw`class Sep;def to_str;$calls+=1;$s.replace(String.new("é\n",encoding:"ASCII-8BIT"));"z";end;end;[:chomp,:chomp!].each{|m|$s="x";$calls=0;begin;r=$s.send(m,Sep.new);p [m,r&.equal?($s),r&.bytes,$s.bytes,$s.encoding,$s.frozen?,$calls];rescue=>e;p [m,e.class,e.message,$s.bytes,$s.encoding,$s.frozen?,$calls];end}`,
+    '[:chomp, false, [195, 169, 10], [195, 169, 10], #<Encoding:BINARY (ASCII-8BIT)>, false, 1]\n[:chomp!, nil, nil, [195, 169, 10], #<Encoding:BINARY (ASCII-8BIT)>, false, 1]\n',
+  ],
+  [
+    String.raw`class Sep;def to_str;$calls+=1;$s.replace(String.new("é\n",encoding:"ASCII-8BIT"));$s.freeze;"z";end;end;[:chomp,:chomp!].each{|m|$s="x";$calls=0;begin;r=$s.send(m,Sep.new);p [m,r&.equal?($s),r&.bytes,$s.bytes,$s.encoding,$s.frozen?,$calls];rescue=>e;p [m,e.class,e.message,$s.bytes,$s.encoding,$s.frozen?,$calls];end}`,
+    '[:chomp, false, [195, 169, 10], [195, 169, 10], #<Encoding:BINARY (ASCII-8BIT)>, true, 1]\n[:chomp!, nil, nil, [195, 169, 10], #<Encoding:BINARY (ASCII-8BIT)>, true, 1]\n',
+  ],
+  [
+    String.raw`class Sep;def to_str;$calls+=1;$s.replace(String.new("abc\n",encoding:"UTF-8"));"\n";end;end;[:chomp,:chomp!].each{|m|$s="abc";$calls=0;begin;r=$s.send(m,Sep.new);p [m,r&.equal?($s),r&.bytes,$s.bytes,$s.encoding,$s.frozen?,$calls];rescue=>e;p [m,e.class,e.message,$s.bytes,$s.encoding,$s.frozen?,$calls];end}`,
+    '[:chomp, false, [97, 98, 99], [97, 98, 99, 10], #<Encoding:UTF-8>, false, 1]\n[:chomp!, true, [97, 98, 99], [97, 98, 99], #<Encoding:UTF-8>, false, 1]\n',
+  ],
+  [
+    String.raw`class Sep;def to_str;$calls+=1;$s.replace(String.new("abc\n",encoding:"UTF-8"));$s.freeze;"\n";end;end;[:chomp,:chomp!].each{|m|$s="abc";$calls=0;begin;r=$s.send(m,Sep.new);p [m,r&.equal?($s),r&.bytes,$s.bytes,$s.encoding,$s.frozen?,$calls];rescue=>e;p [m,e.class,e.message,$s.bytes,$s.encoding,$s.frozen?,$calls];end}`,
+    '[:chomp, false, [97, 98, 99], [97, 98, 99, 10], #<Encoding:UTF-8>, true, 1]\n[:chomp!, FrozenError, "can\'t modify frozen String: \\"abc\\\\n\\"", [97, 98, 99, 10], #<Encoding:UTF-8>, true, 1]\n',
+  ],
+  [
+    String.raw`class Sep;def to_str;$calls+=1;$s.replace(String.new("abc\n",encoding:"US-ASCII"));"\n";end;end;[:chomp,:chomp!].each{|m|$s="abc";$calls=0;begin;r=$s.send(m,Sep.new);p [m,r&.equal?($s),r&.bytes,$s.bytes,$s.encoding,$s.frozen?,$calls];rescue=>e;p [m,e.class,e.message,$s.bytes,$s.encoding,$s.frozen?,$calls];end}`,
+    '[:chomp, false, [97, 98, 99], [97, 98, 99, 10], #<Encoding:US-ASCII>, false, 1]\n[:chomp!, true, [97, 98, 99], [97, 98, 99], #<Encoding:US-ASCII>, false, 1]\n',
+  ],
+  [
+    String.raw`class Sep;def to_str;$calls+=1;$s.replace(String.new("abc\n",encoding:"US-ASCII"));$s.freeze;"\n";end;end;[:chomp,:chomp!].each{|m|$s="abc";$calls=0;begin;r=$s.send(m,Sep.new);p [m,r&.equal?($s),r&.bytes,$s.bytes,$s.encoding,$s.frozen?,$calls];rescue=>e;p [m,e.class,e.message,$s.bytes,$s.encoding,$s.frozen?,$calls];end}`,
+    '[:chomp, false, [97, 98, 99], [97, 98, 99, 10], #<Encoding:US-ASCII>, true, 1]\n[:chomp!, FrozenError, "can\'t modify frozen String: \\"abc\\\\n\\"", [97, 98, 99, 10], #<Encoding:US-ASCII>, true, 1]\n',
+  ],
+  [
+    String.raw`class Sep;def to_str;$calls+=1;$s.replace(String.new("abc\n",encoding:"ASCII-8BIT"));"\n";end;end;[:chomp,:chomp!].each{|m|$s="abc";$calls=0;begin;r=$s.send(m,Sep.new);p [m,r&.equal?($s),r&.bytes,$s.bytes,$s.encoding,$s.frozen?,$calls];rescue=>e;p [m,e.class,e.message,$s.bytes,$s.encoding,$s.frozen?,$calls];end}`,
+    '[:chomp, false, [97, 98, 99], [97, 98, 99, 10], #<Encoding:BINARY (ASCII-8BIT)>, false, 1]\n[:chomp!, true, [97, 98, 99], [97, 98, 99], #<Encoding:BINARY (ASCII-8BIT)>, false, 1]\n',
+  ],
+  [
+    String.raw`class Sep;def to_str;$calls+=1;$s.replace(String.new("abc\n",encoding:"ASCII-8BIT"));$s.freeze;"\n";end;end;[:chomp,:chomp!].each{|m|$s="abc";$calls=0;begin;r=$s.send(m,Sep.new);p [m,r&.equal?($s),r&.bytes,$s.bytes,$s.encoding,$s.frozen?,$calls];rescue=>e;p [m,e.class,e.message,$s.bytes,$s.encoding,$s.frozen?,$calls];end}`,
+    '[:chomp, false, [97, 98, 99], [97, 98, 99, 10], #<Encoding:BINARY (ASCII-8BIT)>, true, 1]\n[:chomp!, FrozenError, "can\'t modify frozen String: \\"abc\\\\n\\"", [97, 98, 99, 10], #<Encoding:BINARY (ASCII-8BIT)>, true, 1]\n',
+  ],
+  [
+    String.raw`class Sep;def to_str;$calls+=1;$s.replace(String.new("abc\n",encoding:"UTF-8"));"z";end;end;[:chomp,:chomp!].each{|m|$s="abc";$calls=0;begin;r=$s.send(m,Sep.new);p [m,r&.equal?($s),r&.bytes,$s.bytes,$s.encoding,$s.frozen?,$calls];rescue=>e;p [m,e.class,e.message,$s.bytes,$s.encoding,$s.frozen?,$calls];end}`,
+    '[:chomp, false, [97, 98, 99, 10], [97, 98, 99, 10], #<Encoding:UTF-8>, false, 1]\n[:chomp!, nil, nil, [97, 98, 99, 10], #<Encoding:UTF-8>, false, 1]\n',
+  ],
+  [
+    String.raw`class Sep;def to_str;$calls+=1;$s.replace(String.new("abc\n",encoding:"UTF-8"));$s.freeze;"z";end;end;[:chomp,:chomp!].each{|m|$s="abc";$calls=0;begin;r=$s.send(m,Sep.new);p [m,r&.equal?($s),r&.bytes,$s.bytes,$s.encoding,$s.frozen?,$calls];rescue=>e;p [m,e.class,e.message,$s.bytes,$s.encoding,$s.frozen?,$calls];end}`,
+    '[:chomp, false, [97, 98, 99, 10], [97, 98, 99, 10], #<Encoding:UTF-8>, true, 1]\n[:chomp!, nil, nil, [97, 98, 99, 10], #<Encoding:UTF-8>, true, 1]\n',
+  ],
+  [
+    String.raw`class Sep;def to_str;$calls+=1;$s.replace(String.new("abc\n",encoding:"US-ASCII"));"z";end;end;[:chomp,:chomp!].each{|m|$s="abc";$calls=0;begin;r=$s.send(m,Sep.new);p [m,r&.equal?($s),r&.bytes,$s.bytes,$s.encoding,$s.frozen?,$calls];rescue=>e;p [m,e.class,e.message,$s.bytes,$s.encoding,$s.frozen?,$calls];end}`,
+    '[:chomp, false, [97, 98, 99, 10], [97, 98, 99, 10], #<Encoding:US-ASCII>, false, 1]\n[:chomp!, nil, nil, [97, 98, 99, 10], #<Encoding:US-ASCII>, false, 1]\n',
+  ],
+  [
+    String.raw`class Sep;def to_str;$calls+=1;$s.replace(String.new("abc\n",encoding:"US-ASCII"));$s.freeze;"z";end;end;[:chomp,:chomp!].each{|m|$s="abc";$calls=0;begin;r=$s.send(m,Sep.new);p [m,r&.equal?($s),r&.bytes,$s.bytes,$s.encoding,$s.frozen?,$calls];rescue=>e;p [m,e.class,e.message,$s.bytes,$s.encoding,$s.frozen?,$calls];end}`,
+    '[:chomp, false, [97, 98, 99, 10], [97, 98, 99, 10], #<Encoding:US-ASCII>, true, 1]\n[:chomp!, nil, nil, [97, 98, 99, 10], #<Encoding:US-ASCII>, true, 1]\n',
+  ],
+  [
+    String.raw`class Sep;def to_str;$calls+=1;$s.replace(String.new("abc\n",encoding:"ASCII-8BIT"));"z";end;end;[:chomp,:chomp!].each{|m|$s="abc";$calls=0;begin;r=$s.send(m,Sep.new);p [m,r&.equal?($s),r&.bytes,$s.bytes,$s.encoding,$s.frozen?,$calls];rescue=>e;p [m,e.class,e.message,$s.bytes,$s.encoding,$s.frozen?,$calls];end}`,
+    '[:chomp, false, [97, 98, 99, 10], [97, 98, 99, 10], #<Encoding:BINARY (ASCII-8BIT)>, false, 1]\n[:chomp!, nil, nil, [97, 98, 99, 10], #<Encoding:BINARY (ASCII-8BIT)>, false, 1]\n',
+  ],
+  [
+    String.raw`class Sep;def to_str;$calls+=1;$s.replace(String.new("abc\n",encoding:"ASCII-8BIT"));$s.freeze;"z";end;end;[:chomp,:chomp!].each{|m|$s="abc";$calls=0;begin;r=$s.send(m,Sep.new);p [m,r&.equal?($s),r&.bytes,$s.bytes,$s.encoding,$s.frozen?,$calls];rescue=>e;p [m,e.class,e.message,$s.bytes,$s.encoding,$s.frozen?,$calls];end}`,
+    '[:chomp, false, [97, 98, 99, 10], [97, 98, 99, 10], #<Encoding:BINARY (ASCII-8BIT)>, true, 1]\n[:chomp!, nil, nil, [97, 98, 99, 10], #<Encoding:BINARY (ASCII-8BIT)>, true, 1]\n',
+  ],
+  [
+    String.raw`class Sep;def to_str;$calls+=1;$s.replace(String.new("long",encoding:"UTF-8"));"\n";end;end;[:chomp,:chomp!].each{|m|$s="abc";$calls=0;begin;r=$s.send(m,Sep.new);p [m,r&.equal?($s),r&.bytes,$s.bytes,$s.encoding,$s.frozen?,$calls];rescue=>e;p [m,e.class,e.message,$s.bytes,$s.encoding,$s.frozen?,$calls];end}`,
+    '[:chomp, false, [108, 111, 110, 103], [108, 111, 110, 103], #<Encoding:UTF-8>, false, 1]\n[:chomp!, nil, nil, [108, 111, 110, 103], #<Encoding:UTF-8>, false, 1]\n',
+  ],
+  [
+    String.raw`class Sep;def to_str;$calls+=1;$s.replace(String.new("long",encoding:"UTF-8"));$s.freeze;"\n";end;end;[:chomp,:chomp!].each{|m|$s="abc";$calls=0;begin;r=$s.send(m,Sep.new);p [m,r&.equal?($s),r&.bytes,$s.bytes,$s.encoding,$s.frozen?,$calls];rescue=>e;p [m,e.class,e.message,$s.bytes,$s.encoding,$s.frozen?,$calls];end}`,
+    '[:chomp, false, [108, 111, 110, 103], [108, 111, 110, 103], #<Encoding:UTF-8>, true, 1]\n[:chomp!, nil, nil, [108, 111, 110, 103], #<Encoding:UTF-8>, true, 1]\n',
+  ],
+  [
+    String.raw`class Sep;def to_str;$calls+=1;$s.replace(String.new("long",encoding:"US-ASCII"));"\n";end;end;[:chomp,:chomp!].each{|m|$s="abc";$calls=0;begin;r=$s.send(m,Sep.new);p [m,r&.equal?($s),r&.bytes,$s.bytes,$s.encoding,$s.frozen?,$calls];rescue=>e;p [m,e.class,e.message,$s.bytes,$s.encoding,$s.frozen?,$calls];end}`,
+    '[:chomp, false, [108, 111, 110, 103], [108, 111, 110, 103], #<Encoding:US-ASCII>, false, 1]\n[:chomp!, nil, nil, [108, 111, 110, 103], #<Encoding:US-ASCII>, false, 1]\n',
+  ],
+  [
+    String.raw`class Sep;def to_str;$calls+=1;$s.replace(String.new("long",encoding:"US-ASCII"));$s.freeze;"\n";end;end;[:chomp,:chomp!].each{|m|$s="abc";$calls=0;begin;r=$s.send(m,Sep.new);p [m,r&.equal?($s),r&.bytes,$s.bytes,$s.encoding,$s.frozen?,$calls];rescue=>e;p [m,e.class,e.message,$s.bytes,$s.encoding,$s.frozen?,$calls];end}`,
+    '[:chomp, false, [108, 111, 110, 103], [108, 111, 110, 103], #<Encoding:US-ASCII>, true, 1]\n[:chomp!, nil, nil, [108, 111, 110, 103], #<Encoding:US-ASCII>, true, 1]\n',
+  ],
+  [
+    String.raw`class Sep;def to_str;$calls+=1;$s.replace(String.new("long",encoding:"ASCII-8BIT"));"\n";end;end;[:chomp,:chomp!].each{|m|$s="abc";$calls=0;begin;r=$s.send(m,Sep.new);p [m,r&.equal?($s),r&.bytes,$s.bytes,$s.encoding,$s.frozen?,$calls];rescue=>e;p [m,e.class,e.message,$s.bytes,$s.encoding,$s.frozen?,$calls];end}`,
+    '[:chomp, false, [108, 111, 110, 103], [108, 111, 110, 103], #<Encoding:BINARY (ASCII-8BIT)>, false, 1]\n[:chomp!, nil, nil, [108, 111, 110, 103], #<Encoding:BINARY (ASCII-8BIT)>, false, 1]\n',
+  ],
+  [
+    String.raw`class Sep;def to_str;$calls+=1;$s.replace(String.new("long",encoding:"ASCII-8BIT"));$s.freeze;"\n";end;end;[:chomp,:chomp!].each{|m|$s="abc";$calls=0;begin;r=$s.send(m,Sep.new);p [m,r&.equal?($s),r&.bytes,$s.bytes,$s.encoding,$s.frozen?,$calls];rescue=>e;p [m,e.class,e.message,$s.bytes,$s.encoding,$s.frozen?,$calls];end}`,
+    '[:chomp, false, [108, 111, 110, 103], [108, 111, 110, 103], #<Encoding:BINARY (ASCII-8BIT)>, true, 1]\n[:chomp!, nil, nil, [108, 111, 110, 103], #<Encoding:BINARY (ASCII-8BIT)>, true, 1]\n',
+  ],
+  [
+    'class Sep;def to_str;$calls+=1;$s.replace(String.new("long",encoding:"UTF-8"));"z";end;end;[:chomp,:chomp!].each{|m|$s="abc";$calls=0;begin;r=$s.send(m,Sep.new);p [m,r&.equal?($s),r&.bytes,$s.bytes,$s.encoding,$s.frozen?,$calls];rescue=>e;p [m,e.class,e.message,$s.bytes,$s.encoding,$s.frozen?,$calls];end}',
+    '[:chomp, false, [108, 111, 110, 103], [108, 111, 110, 103], #<Encoding:UTF-8>, false, 1]\n[:chomp!, nil, nil, [108, 111, 110, 103], #<Encoding:UTF-8>, false, 1]\n',
+  ],
+  [
+    'class Sep;def to_str;$calls+=1;$s.replace(String.new("long",encoding:"UTF-8"));$s.freeze;"z";end;end;[:chomp,:chomp!].each{|m|$s="abc";$calls=0;begin;r=$s.send(m,Sep.new);p [m,r&.equal?($s),r&.bytes,$s.bytes,$s.encoding,$s.frozen?,$calls];rescue=>e;p [m,e.class,e.message,$s.bytes,$s.encoding,$s.frozen?,$calls];end}',
+    '[:chomp, false, [108, 111, 110, 103], [108, 111, 110, 103], #<Encoding:UTF-8>, true, 1]\n[:chomp!, nil, nil, [108, 111, 110, 103], #<Encoding:UTF-8>, true, 1]\n',
+  ],
+  [
+    'class Sep;def to_str;$calls+=1;$s.replace(String.new("long",encoding:"US-ASCII"));"z";end;end;[:chomp,:chomp!].each{|m|$s="abc";$calls=0;begin;r=$s.send(m,Sep.new);p [m,r&.equal?($s),r&.bytes,$s.bytes,$s.encoding,$s.frozen?,$calls];rescue=>e;p [m,e.class,e.message,$s.bytes,$s.encoding,$s.frozen?,$calls];end}',
+    '[:chomp, false, [108, 111, 110, 103], [108, 111, 110, 103], #<Encoding:US-ASCII>, false, 1]\n[:chomp!, nil, nil, [108, 111, 110, 103], #<Encoding:US-ASCII>, false, 1]\n',
+  ],
+  [
+    'class Sep;def to_str;$calls+=1;$s.replace(String.new("long",encoding:"US-ASCII"));$s.freeze;"z";end;end;[:chomp,:chomp!].each{|m|$s="abc";$calls=0;begin;r=$s.send(m,Sep.new);p [m,r&.equal?($s),r&.bytes,$s.bytes,$s.encoding,$s.frozen?,$calls];rescue=>e;p [m,e.class,e.message,$s.bytes,$s.encoding,$s.frozen?,$calls];end}',
+    '[:chomp, false, [108, 111, 110, 103], [108, 111, 110, 103], #<Encoding:US-ASCII>, true, 1]\n[:chomp!, nil, nil, [108, 111, 110, 103], #<Encoding:US-ASCII>, true, 1]\n',
+  ],
+  [
+    'class Sep;def to_str;$calls+=1;$s.replace(String.new("long",encoding:"ASCII-8BIT"));"z";end;end;[:chomp,:chomp!].each{|m|$s="abc";$calls=0;begin;r=$s.send(m,Sep.new);p [m,r&.equal?($s),r&.bytes,$s.bytes,$s.encoding,$s.frozen?,$calls];rescue=>e;p [m,e.class,e.message,$s.bytes,$s.encoding,$s.frozen?,$calls];end}',
+    '[:chomp, false, [108, 111, 110, 103], [108, 111, 110, 103], #<Encoding:BINARY (ASCII-8BIT)>, false, 1]\n[:chomp!, nil, nil, [108, 111, 110, 103], #<Encoding:BINARY (ASCII-8BIT)>, false, 1]\n',
+  ],
+  [
+    'class Sep;def to_str;$calls+=1;$s.replace(String.new("long",encoding:"ASCII-8BIT"));$s.freeze;"z";end;end;[:chomp,:chomp!].each{|m|$s="abc";$calls=0;begin;r=$s.send(m,Sep.new);p [m,r&.equal?($s),r&.bytes,$s.bytes,$s.encoding,$s.frozen?,$calls];rescue=>e;p [m,e.class,e.message,$s.bytes,$s.encoding,$s.frozen?,$calls];end}',
+    '[:chomp, false, [108, 111, 110, 103], [108, 111, 110, 103], #<Encoding:BINARY (ASCII-8BIT)>, true, 1]\n[:chomp!, nil, nil, [108, 111, 110, 103], #<Encoding:BINARY (ASCII-8BIT)>, true, 1]\n',
+  ],
+  [
+    String.raw`class Sep;def to_str;$calls+=1;$s.replace(String.new("",encoding:"UTF-8"));"\n";end;end;[:chomp,:chomp!].each{|m|$s="abc";$calls=0;begin;r=$s.send(m,Sep.new);p [m,r&.equal?($s),r&.bytes,$s.bytes,$s.encoding,$s.frozen?,$calls];rescue=>e;p [m,e.class,e.message,$s.bytes,$s.encoding,$s.frozen?,$calls];end}`,
+    '[:chomp, false, [], [], #<Encoding:UTF-8>, false, 1]\n[:chomp!, nil, nil, [], #<Encoding:UTF-8>, false, 1]\n',
+  ],
+  [
+    String.raw`class Sep;def to_str;$calls+=1;$s.replace(String.new("",encoding:"UTF-8"));$s.freeze;"\n";end;end;[:chomp,:chomp!].each{|m|$s="abc";$calls=0;begin;r=$s.send(m,Sep.new);p [m,r&.equal?($s),r&.bytes,$s.bytes,$s.encoding,$s.frozen?,$calls];rescue=>e;p [m,e.class,e.message,$s.bytes,$s.encoding,$s.frozen?,$calls];end}`,
+    '[:chomp, false, [], [], #<Encoding:UTF-8>, true, 1]\n[:chomp!, nil, nil, [], #<Encoding:UTF-8>, true, 1]\n',
+  ],
+  [
+    String.raw`class Sep;def to_str;$calls+=1;$s.replace(String.new("",encoding:"US-ASCII"));"\n";end;end;[:chomp,:chomp!].each{|m|$s="abc";$calls=0;begin;r=$s.send(m,Sep.new);p [m,r&.equal?($s),r&.bytes,$s.bytes,$s.encoding,$s.frozen?,$calls];rescue=>e;p [m,e.class,e.message,$s.bytes,$s.encoding,$s.frozen?,$calls];end}`,
+    '[:chomp, false, [], [], #<Encoding:US-ASCII>, false, 1]\n[:chomp!, nil, nil, [], #<Encoding:US-ASCII>, false, 1]\n',
+  ],
+  [
+    String.raw`class Sep;def to_str;$calls+=1;$s.replace(String.new("",encoding:"US-ASCII"));$s.freeze;"\n";end;end;[:chomp,:chomp!].each{|m|$s="abc";$calls=0;begin;r=$s.send(m,Sep.new);p [m,r&.equal?($s),r&.bytes,$s.bytes,$s.encoding,$s.frozen?,$calls];rescue=>e;p [m,e.class,e.message,$s.bytes,$s.encoding,$s.frozen?,$calls];end}`,
+    '[:chomp, false, [], [], #<Encoding:US-ASCII>, true, 1]\n[:chomp!, nil, nil, [], #<Encoding:US-ASCII>, true, 1]\n',
+  ],
+  [
+    String.raw`class Sep;def to_str;$calls+=1;$s.replace(String.new("",encoding:"ASCII-8BIT"));"\n";end;end;[:chomp,:chomp!].each{|m|$s="abc";$calls=0;begin;r=$s.send(m,Sep.new);p [m,r&.equal?($s),r&.bytes,$s.bytes,$s.encoding,$s.frozen?,$calls];rescue=>e;p [m,e.class,e.message,$s.bytes,$s.encoding,$s.frozen?,$calls];end}`,
+    '[:chomp, false, [], [], #<Encoding:BINARY (ASCII-8BIT)>, false, 1]\n[:chomp!, nil, nil, [], #<Encoding:BINARY (ASCII-8BIT)>, false, 1]\n',
+  ],
+  [
+    String.raw`class Sep;def to_str;$calls+=1;$s.replace(String.new("",encoding:"ASCII-8BIT"));$s.freeze;"\n";end;end;[:chomp,:chomp!].each{|m|$s="abc";$calls=0;begin;r=$s.send(m,Sep.new);p [m,r&.equal?($s),r&.bytes,$s.bytes,$s.encoding,$s.frozen?,$calls];rescue=>e;p [m,e.class,e.message,$s.bytes,$s.encoding,$s.frozen?,$calls];end}`,
+    '[:chomp, false, [], [], #<Encoding:BINARY (ASCII-8BIT)>, true, 1]\n[:chomp!, nil, nil, [], #<Encoding:BINARY (ASCII-8BIT)>, true, 1]\n',
+  ],
+  [
+    'class Sep;def to_str;$calls+=1;$s.replace(String.new("",encoding:"UTF-8"));"z";end;end;[:chomp,:chomp!].each{|m|$s="abc";$calls=0;begin;r=$s.send(m,Sep.new);p [m,r&.equal?($s),r&.bytes,$s.bytes,$s.encoding,$s.frozen?,$calls];rescue=>e;p [m,e.class,e.message,$s.bytes,$s.encoding,$s.frozen?,$calls];end}',
+    '[:chomp, false, [], [], #<Encoding:UTF-8>, false, 1]\n[:chomp!, nil, nil, [], #<Encoding:UTF-8>, false, 1]\n',
+  ],
+  [
+    'class Sep;def to_str;$calls+=1;$s.replace(String.new("",encoding:"UTF-8"));$s.freeze;"z";end;end;[:chomp,:chomp!].each{|m|$s="abc";$calls=0;begin;r=$s.send(m,Sep.new);p [m,r&.equal?($s),r&.bytes,$s.bytes,$s.encoding,$s.frozen?,$calls];rescue=>e;p [m,e.class,e.message,$s.bytes,$s.encoding,$s.frozen?,$calls];end}',
+    '[:chomp, false, [], [], #<Encoding:UTF-8>, true, 1]\n[:chomp!, nil, nil, [], #<Encoding:UTF-8>, true, 1]\n',
+  ],
+  [
+    'class Sep;def to_str;$calls+=1;$s.replace(String.new("",encoding:"US-ASCII"));"z";end;end;[:chomp,:chomp!].each{|m|$s="abc";$calls=0;begin;r=$s.send(m,Sep.new);p [m,r&.equal?($s),r&.bytes,$s.bytes,$s.encoding,$s.frozen?,$calls];rescue=>e;p [m,e.class,e.message,$s.bytes,$s.encoding,$s.frozen?,$calls];end}',
+    '[:chomp, false, [], [], #<Encoding:US-ASCII>, false, 1]\n[:chomp!, nil, nil, [], #<Encoding:US-ASCII>, false, 1]\n',
+  ],
+  [
+    'class Sep;def to_str;$calls+=1;$s.replace(String.new("",encoding:"US-ASCII"));$s.freeze;"z";end;end;[:chomp,:chomp!].each{|m|$s="abc";$calls=0;begin;r=$s.send(m,Sep.new);p [m,r&.equal?($s),r&.bytes,$s.bytes,$s.encoding,$s.frozen?,$calls];rescue=>e;p [m,e.class,e.message,$s.bytes,$s.encoding,$s.frozen?,$calls];end}',
+    '[:chomp, false, [], [], #<Encoding:US-ASCII>, true, 1]\n[:chomp!, nil, nil, [], #<Encoding:US-ASCII>, true, 1]\n',
+  ],
+  [
+    'class Sep;def to_str;$calls+=1;$s.replace(String.new("",encoding:"ASCII-8BIT"));"z";end;end;[:chomp,:chomp!].each{|m|$s="abc";$calls=0;begin;r=$s.send(m,Sep.new);p [m,r&.equal?($s),r&.bytes,$s.bytes,$s.encoding,$s.frozen?,$calls];rescue=>e;p [m,e.class,e.message,$s.bytes,$s.encoding,$s.frozen?,$calls];end}',
+    '[:chomp, false, [], [], #<Encoding:BINARY (ASCII-8BIT)>, false, 1]\n[:chomp!, nil, nil, [], #<Encoding:BINARY (ASCII-8BIT)>, false, 1]\n',
+  ],
+  [
+    'class Sep;def to_str;$calls+=1;$s.replace(String.new("",encoding:"ASCII-8BIT"));$s.freeze;"z";end;end;[:chomp,:chomp!].each{|m|$s="abc";$calls=0;begin;r=$s.send(m,Sep.new);p [m,r&.equal?($s),r&.bytes,$s.bytes,$s.encoding,$s.frozen?,$calls];rescue=>e;p [m,e.class,e.message,$s.bytes,$s.encoding,$s.frozen?,$calls];end}',
+    '[:chomp, false, [], [], #<Encoding:BINARY (ASCII-8BIT)>, true, 1]\n[:chomp!, nil, nil, [], #<Encoding:BINARY (ASCII-8BIT)>, true, 1]\n',
+  ],
+  [
+    String.raw`class Sep;def to_str;$calls+=1;$s.replace(String.new("é\n",encoding:"UTF-8"));"\n";end;end;[:chomp,:chomp!].each{|m|$s="abc";$calls=0;begin;r=$s.send(m,Sep.new);p [m,r&.equal?($s),r&.bytes,$s.bytes,$s.encoding,$s.frozen?,$calls];rescue=>e;p [m,e.class,e.message,$s.bytes,$s.encoding,$s.frozen?,$calls];end}`,
+    '[:chomp, false, [195, 169], [195, 169, 10], #<Encoding:UTF-8>, false, 1]\n[:chomp!, true, [195, 169], [195, 169], #<Encoding:UTF-8>, false, 1]\n',
+  ],
+  [
+    String.raw`class Sep;def to_str;$calls+=1;$s.replace(String.new("é\n",encoding:"UTF-8"));$s.freeze;"\n";end;end;[:chomp,:chomp!].each{|m|$s="abc";$calls=0;begin;r=$s.send(m,Sep.new);p [m,r&.equal?($s),r&.bytes,$s.bytes,$s.encoding,$s.frozen?,$calls];rescue=>e;p [m,e.class,e.message,$s.bytes,$s.encoding,$s.frozen?,$calls];end}`,
+    '[:chomp, false, [195, 169], [195, 169, 10], #<Encoding:UTF-8>, true, 1]\n[:chomp!, FrozenError, "can\'t modify frozen String: \\"é\\\\n\\"", [195, 169, 10], #<Encoding:UTF-8>, true, 1]\n',
+  ],
+  [
+    String.raw`class Sep;def to_str;$calls+=1;$s.replace(String.new("é\n",encoding:"US-ASCII"));"\n";end;end;[:chomp,:chomp!].each{|m|$s="abc";$calls=0;begin;r=$s.send(m,Sep.new);p [m,r&.equal?($s),r&.bytes,$s.bytes,$s.encoding,$s.frozen?,$calls];rescue=>e;p [m,e.class,e.message,$s.bytes,$s.encoding,$s.frozen?,$calls];end}`,
+    '[:chomp, false, [195, 169], [195, 169, 10], #<Encoding:US-ASCII>, false, 1]\n[:chomp!, true, [195, 169], [195, 169], #<Encoding:US-ASCII>, false, 1]\n',
+  ],
+  [
+    String.raw`class Sep;def to_str;$calls+=1;$s.replace(String.new("é\n",encoding:"US-ASCII"));$s.freeze;"\n";end;end;[:chomp,:chomp!].each{|m|$s="abc";$calls=0;begin;r=$s.send(m,Sep.new);p [m,r&.equal?($s),r&.bytes,$s.bytes,$s.encoding,$s.frozen?,$calls];rescue=>e;p [m,e.class,e.message,$s.bytes,$s.encoding,$s.frozen?,$calls];end}`,
+    '[:chomp, false, [195, 169], [195, 169, 10], #<Encoding:US-ASCII>, true, 1]\n[:chomp!, FrozenError, "can\'t modify frozen String: \\"\\\\xC3\\\\xA9\\\\n\\"", [195, 169, 10], #<Encoding:US-ASCII>, true, 1]\n',
+  ],
+  [
+    String.raw`class Sep;def to_str;$calls+=1;$s.replace(String.new("é\n",encoding:"ASCII-8BIT"));"\n";end;end;[:chomp,:chomp!].each{|m|$s="abc";$calls=0;begin;r=$s.send(m,Sep.new);p [m,r&.equal?($s),r&.bytes,$s.bytes,$s.encoding,$s.frozen?,$calls];rescue=>e;p [m,e.class,e.message,$s.bytes,$s.encoding,$s.frozen?,$calls];end}`,
+    '[:chomp, false, [195, 169], [195, 169, 10], #<Encoding:BINARY (ASCII-8BIT)>, false, 1]\n[:chomp!, true, [195, 169], [195, 169], #<Encoding:BINARY (ASCII-8BIT)>, false, 1]\n',
+  ],
+  [
+    String.raw`class Sep;def to_str;$calls+=1;$s.replace(String.new("é\n",encoding:"ASCII-8BIT"));$s.freeze;"\n";end;end;[:chomp,:chomp!].each{|m|$s="abc";$calls=0;begin;r=$s.send(m,Sep.new);p [m,r&.equal?($s),r&.bytes,$s.bytes,$s.encoding,$s.frozen?,$calls];rescue=>e;p [m,e.class,e.message,$s.bytes,$s.encoding,$s.frozen?,$calls];end}`,
+    '[:chomp, false, [195, 169], [195, 169, 10], #<Encoding:BINARY (ASCII-8BIT)>, true, 1]\n[:chomp!, FrozenError, "can\'t modify frozen String: \\"\\\\xC3\\\\xA9\\\\n\\"", [195, 169, 10], #<Encoding:BINARY (ASCII-8BIT)>, true, 1]\n',
+  ],
+  [
+    String.raw`class Sep;def to_str;$calls+=1;$s.replace(String.new("é\n",encoding:"UTF-8"));"z";end;end;[:chomp,:chomp!].each{|m|$s="abc";$calls=0;begin;r=$s.send(m,Sep.new);p [m,r&.equal?($s),r&.bytes,$s.bytes,$s.encoding,$s.frozen?,$calls];rescue=>e;p [m,e.class,e.message,$s.bytes,$s.encoding,$s.frozen?,$calls];end}`,
+    '[:chomp, false, [195, 169, 10], [195, 169, 10], #<Encoding:UTF-8>, false, 1]\n[:chomp!, nil, nil, [195, 169, 10], #<Encoding:UTF-8>, false, 1]\n',
+  ],
+  [
+    String.raw`class Sep;def to_str;$calls+=1;$s.replace(String.new("é\n",encoding:"UTF-8"));$s.freeze;"z";end;end;[:chomp,:chomp!].each{|m|$s="abc";$calls=0;begin;r=$s.send(m,Sep.new);p [m,r&.equal?($s),r&.bytes,$s.bytes,$s.encoding,$s.frozen?,$calls];rescue=>e;p [m,e.class,e.message,$s.bytes,$s.encoding,$s.frozen?,$calls];end}`,
+    '[:chomp, false, [195, 169, 10], [195, 169, 10], #<Encoding:UTF-8>, true, 1]\n[:chomp!, nil, nil, [195, 169, 10], #<Encoding:UTF-8>, true, 1]\n',
+  ],
+  [
+    String.raw`class Sep;def to_str;$calls+=1;$s.replace(String.new("é\n",encoding:"US-ASCII"));"z";end;end;[:chomp,:chomp!].each{|m|$s="abc";$calls=0;begin;r=$s.send(m,Sep.new);p [m,r&.equal?($s),r&.bytes,$s.bytes,$s.encoding,$s.frozen?,$calls];rescue=>e;p [m,e.class,e.message,$s.bytes,$s.encoding,$s.frozen?,$calls];end}`,
+    '[:chomp, false, [195, 169, 10], [195, 169, 10], #<Encoding:US-ASCII>, false, 1]\n[:chomp!, nil, nil, [195, 169, 10], #<Encoding:US-ASCII>, false, 1]\n',
+  ],
+  [
+    String.raw`class Sep;def to_str;$calls+=1;$s.replace(String.new("é\n",encoding:"US-ASCII"));$s.freeze;"z";end;end;[:chomp,:chomp!].each{|m|$s="abc";$calls=0;begin;r=$s.send(m,Sep.new);p [m,r&.equal?($s),r&.bytes,$s.bytes,$s.encoding,$s.frozen?,$calls];rescue=>e;p [m,e.class,e.message,$s.bytes,$s.encoding,$s.frozen?,$calls];end}`,
+    '[:chomp, false, [195, 169, 10], [195, 169, 10], #<Encoding:US-ASCII>, true, 1]\n[:chomp!, nil, nil, [195, 169, 10], #<Encoding:US-ASCII>, true, 1]\n',
+  ],
+  [
+    String.raw`class Sep;def to_str;$calls+=1;$s.replace(String.new("é\n",encoding:"ASCII-8BIT"));"z";end;end;[:chomp,:chomp!].each{|m|$s="abc";$calls=0;begin;r=$s.send(m,Sep.new);p [m,r&.equal?($s),r&.bytes,$s.bytes,$s.encoding,$s.frozen?,$calls];rescue=>e;p [m,e.class,e.message,$s.bytes,$s.encoding,$s.frozen?,$calls];end}`,
+    '[:chomp, false, [195, 169, 10], [195, 169, 10], #<Encoding:BINARY (ASCII-8BIT)>, false, 1]\n[:chomp!, nil, nil, [195, 169, 10], #<Encoding:BINARY (ASCII-8BIT)>, false, 1]\n',
+  ],
+  [
+    String.raw`class Sep;def to_str;$calls+=1;$s.replace(String.new("é\n",encoding:"ASCII-8BIT"));$s.freeze;"z";end;end;[:chomp,:chomp!].each{|m|$s="abc";$calls=0;begin;r=$s.send(m,Sep.new);p [m,r&.equal?($s),r&.bytes,$s.bytes,$s.encoding,$s.frozen?,$calls];rescue=>e;p [m,e.class,e.message,$s.bytes,$s.encoding,$s.frozen?,$calls];end}`,
+    '[:chomp, false, [195, 169, 10], [195, 169, 10], #<Encoding:BINARY (ASCII-8BIT)>, true, 1]\n[:chomp!, nil, nil, [195, 169, 10], #<Encoding:BINARY (ASCII-8BIT)>, true, 1]\n',
+  ],
+  [
+    String.raw`class Sep;def to_str;$calls+=1;$s.replace(String.new("abc\n",encoding:"UTF-8"));"\n";end;end;[:chomp,:chomp!].each{|m|$s="";$calls=0;begin;r=$s.send(m,Sep.new);p [m,r&.equal?($s),r&.bytes,$s.bytes,$s.encoding,$s.frozen?,$calls];rescue=>e;p [m,e.class,e.message,$s.bytes,$s.encoding,$s.frozen?,$calls];end}`,
+    '[:chomp, false, [97, 98, 99], [97, 98, 99, 10], #<Encoding:UTF-8>, false, 1]\n[:chomp!, nil, nil, [], #<Encoding:UTF-8>, false, 0]\n',
+  ],
+  [
+    String.raw`class Sep;def to_str;$calls+=1;$s.replace(String.new("abc\n",encoding:"UTF-8"));$s.freeze;"\n";end;end;[:chomp,:chomp!].each{|m|$s="";$calls=0;begin;r=$s.send(m,Sep.new);p [m,r&.equal?($s),r&.bytes,$s.bytes,$s.encoding,$s.frozen?,$calls];rescue=>e;p [m,e.class,e.message,$s.bytes,$s.encoding,$s.frozen?,$calls];end}`,
+    '[:chomp, false, [97, 98, 99], [97, 98, 99, 10], #<Encoding:UTF-8>, true, 1]\n[:chomp!, nil, nil, [], #<Encoding:UTF-8>, false, 0]\n',
+  ],
+  [
+    String.raw`class Sep;def to_str;$calls+=1;$s.replace(String.new("abc\n",encoding:"US-ASCII"));"\n";end;end;[:chomp,:chomp!].each{|m|$s="";$calls=0;begin;r=$s.send(m,Sep.new);p [m,r&.equal?($s),r&.bytes,$s.bytes,$s.encoding,$s.frozen?,$calls];rescue=>e;p [m,e.class,e.message,$s.bytes,$s.encoding,$s.frozen?,$calls];end}`,
+    '[:chomp, false, [97, 98, 99], [97, 98, 99, 10], #<Encoding:US-ASCII>, false, 1]\n[:chomp!, nil, nil, [], #<Encoding:UTF-8>, false, 0]\n',
+  ],
+  [
+    String.raw`class Sep;def to_str;$calls+=1;$s.replace(String.new("abc\n",encoding:"US-ASCII"));$s.freeze;"\n";end;end;[:chomp,:chomp!].each{|m|$s="";$calls=0;begin;r=$s.send(m,Sep.new);p [m,r&.equal?($s),r&.bytes,$s.bytes,$s.encoding,$s.frozen?,$calls];rescue=>e;p [m,e.class,e.message,$s.bytes,$s.encoding,$s.frozen?,$calls];end}`,
+    '[:chomp, false, [97, 98, 99], [97, 98, 99, 10], #<Encoding:US-ASCII>, true, 1]\n[:chomp!, nil, nil, [], #<Encoding:UTF-8>, false, 0]\n',
+  ],
+  [
+    String.raw`class Sep;def to_str;$calls+=1;$s.replace(String.new("abc\n",encoding:"ASCII-8BIT"));"\n";end;end;[:chomp,:chomp!].each{|m|$s="";$calls=0;begin;r=$s.send(m,Sep.new);p [m,r&.equal?($s),r&.bytes,$s.bytes,$s.encoding,$s.frozen?,$calls];rescue=>e;p [m,e.class,e.message,$s.bytes,$s.encoding,$s.frozen?,$calls];end}`,
+    '[:chomp, false, [97, 98, 99], [97, 98, 99, 10], #<Encoding:BINARY (ASCII-8BIT)>, false, 1]\n[:chomp!, nil, nil, [], #<Encoding:UTF-8>, false, 0]\n',
+  ],
+  [
+    String.raw`class Sep;def to_str;$calls+=1;$s.replace(String.new("abc\n",encoding:"ASCII-8BIT"));$s.freeze;"\n";end;end;[:chomp,:chomp!].each{|m|$s="";$calls=0;begin;r=$s.send(m,Sep.new);p [m,r&.equal?($s),r&.bytes,$s.bytes,$s.encoding,$s.frozen?,$calls];rescue=>e;p [m,e.class,e.message,$s.bytes,$s.encoding,$s.frozen?,$calls];end}`,
+    '[:chomp, false, [97, 98, 99], [97, 98, 99, 10], #<Encoding:BINARY (ASCII-8BIT)>, true, 1]\n[:chomp!, nil, nil, [], #<Encoding:UTF-8>, false, 0]\n',
+  ],
+  [
+    String.raw`class Sep;def to_str;$calls+=1;$s.replace(String.new("abc\n",encoding:"UTF-8"));"z";end;end;[:chomp,:chomp!].each{|m|$s="";$calls=0;begin;r=$s.send(m,Sep.new);p [m,r&.equal?($s),r&.bytes,$s.bytes,$s.encoding,$s.frozen?,$calls];rescue=>e;p [m,e.class,e.message,$s.bytes,$s.encoding,$s.frozen?,$calls];end}`,
+    '[:chomp, false, [97, 98, 99, 10], [97, 98, 99, 10], #<Encoding:UTF-8>, false, 1]\n[:chomp!, nil, nil, [], #<Encoding:UTF-8>, false, 0]\n',
+  ],
+  [
+    String.raw`class Sep;def to_str;$calls+=1;$s.replace(String.new("abc\n",encoding:"UTF-8"));$s.freeze;"z";end;end;[:chomp,:chomp!].each{|m|$s="";$calls=0;begin;r=$s.send(m,Sep.new);p [m,r&.equal?($s),r&.bytes,$s.bytes,$s.encoding,$s.frozen?,$calls];rescue=>e;p [m,e.class,e.message,$s.bytes,$s.encoding,$s.frozen?,$calls];end}`,
+    '[:chomp, false, [97, 98, 99, 10], [97, 98, 99, 10], #<Encoding:UTF-8>, true, 1]\n[:chomp!, nil, nil, [], #<Encoding:UTF-8>, false, 0]\n',
+  ],
+  [
+    String.raw`class Sep;def to_str;$calls+=1;$s.replace(String.new("abc\n",encoding:"US-ASCII"));"z";end;end;[:chomp,:chomp!].each{|m|$s="";$calls=0;begin;r=$s.send(m,Sep.new);p [m,r&.equal?($s),r&.bytes,$s.bytes,$s.encoding,$s.frozen?,$calls];rescue=>e;p [m,e.class,e.message,$s.bytes,$s.encoding,$s.frozen?,$calls];end}`,
+    '[:chomp, false, [97, 98, 99, 10], [97, 98, 99, 10], #<Encoding:US-ASCII>, false, 1]\n[:chomp!, nil, nil, [], #<Encoding:UTF-8>, false, 0]\n',
+  ],
+  [
+    String.raw`class Sep;def to_str;$calls+=1;$s.replace(String.new("abc\n",encoding:"US-ASCII"));$s.freeze;"z";end;end;[:chomp,:chomp!].each{|m|$s="";$calls=0;begin;r=$s.send(m,Sep.new);p [m,r&.equal?($s),r&.bytes,$s.bytes,$s.encoding,$s.frozen?,$calls];rescue=>e;p [m,e.class,e.message,$s.bytes,$s.encoding,$s.frozen?,$calls];end}`,
+    '[:chomp, false, [97, 98, 99, 10], [97, 98, 99, 10], #<Encoding:US-ASCII>, true, 1]\n[:chomp!, nil, nil, [], #<Encoding:UTF-8>, false, 0]\n',
+  ],
+  [
+    String.raw`class Sep;def to_str;$calls+=1;$s.replace(String.new("abc\n",encoding:"ASCII-8BIT"));"z";end;end;[:chomp,:chomp!].each{|m|$s="";$calls=0;begin;r=$s.send(m,Sep.new);p [m,r&.equal?($s),r&.bytes,$s.bytes,$s.encoding,$s.frozen?,$calls];rescue=>e;p [m,e.class,e.message,$s.bytes,$s.encoding,$s.frozen?,$calls];end}`,
+    '[:chomp, false, [97, 98, 99, 10], [97, 98, 99, 10], #<Encoding:BINARY (ASCII-8BIT)>, false, 1]\n[:chomp!, nil, nil, [], #<Encoding:UTF-8>, false, 0]\n',
+  ],
+  [
+    String.raw`class Sep;def to_str;$calls+=1;$s.replace(String.new("abc\n",encoding:"ASCII-8BIT"));$s.freeze;"z";end;end;[:chomp,:chomp!].each{|m|$s="";$calls=0;begin;r=$s.send(m,Sep.new);p [m,r&.equal?($s),r&.bytes,$s.bytes,$s.encoding,$s.frozen?,$calls];rescue=>e;p [m,e.class,e.message,$s.bytes,$s.encoding,$s.frozen?,$calls];end}`,
+    '[:chomp, false, [97, 98, 99, 10], [97, 98, 99, 10], #<Encoding:BINARY (ASCII-8BIT)>, true, 1]\n[:chomp!, nil, nil, [], #<Encoding:UTF-8>, false, 0]\n',
+  ],
+  [
+    String.raw`class Sep;def to_str;$calls+=1;$s.replace(String.new("long",encoding:"UTF-8"));"\n";end;end;[:chomp,:chomp!].each{|m|$s="";$calls=0;begin;r=$s.send(m,Sep.new);p [m,r&.equal?($s),r&.bytes,$s.bytes,$s.encoding,$s.frozen?,$calls];rescue=>e;p [m,e.class,e.message,$s.bytes,$s.encoding,$s.frozen?,$calls];end}`,
+    '[:chomp, false, [108, 111, 110, 103], [108, 111, 110, 103], #<Encoding:UTF-8>, false, 1]\n[:chomp!, nil, nil, [], #<Encoding:UTF-8>, false, 0]\n',
+  ],
+  [
+    String.raw`class Sep;def to_str;$calls+=1;$s.replace(String.new("long",encoding:"UTF-8"));$s.freeze;"\n";end;end;[:chomp,:chomp!].each{|m|$s="";$calls=0;begin;r=$s.send(m,Sep.new);p [m,r&.equal?($s),r&.bytes,$s.bytes,$s.encoding,$s.frozen?,$calls];rescue=>e;p [m,e.class,e.message,$s.bytes,$s.encoding,$s.frozen?,$calls];end}`,
+    '[:chomp, false, [108, 111, 110, 103], [108, 111, 110, 103], #<Encoding:UTF-8>, true, 1]\n[:chomp!, nil, nil, [], #<Encoding:UTF-8>, false, 0]\n',
+  ],
+  [
+    String.raw`class Sep;def to_str;$calls+=1;$s.replace(String.new("long",encoding:"US-ASCII"));"\n";end;end;[:chomp,:chomp!].each{|m|$s="";$calls=0;begin;r=$s.send(m,Sep.new);p [m,r&.equal?($s),r&.bytes,$s.bytes,$s.encoding,$s.frozen?,$calls];rescue=>e;p [m,e.class,e.message,$s.bytes,$s.encoding,$s.frozen?,$calls];end}`,
+    '[:chomp, false, [108, 111, 110, 103], [108, 111, 110, 103], #<Encoding:US-ASCII>, false, 1]\n[:chomp!, nil, nil, [], #<Encoding:UTF-8>, false, 0]\n',
+  ],
+  [
+    String.raw`class Sep;def to_str;$calls+=1;$s.replace(String.new("long",encoding:"US-ASCII"));$s.freeze;"\n";end;end;[:chomp,:chomp!].each{|m|$s="";$calls=0;begin;r=$s.send(m,Sep.new);p [m,r&.equal?($s),r&.bytes,$s.bytes,$s.encoding,$s.frozen?,$calls];rescue=>e;p [m,e.class,e.message,$s.bytes,$s.encoding,$s.frozen?,$calls];end}`,
+    '[:chomp, false, [108, 111, 110, 103], [108, 111, 110, 103], #<Encoding:US-ASCII>, true, 1]\n[:chomp!, nil, nil, [], #<Encoding:UTF-8>, false, 0]\n',
+  ],
+  [
+    String.raw`class Sep;def to_str;$calls+=1;$s.replace(String.new("long",encoding:"ASCII-8BIT"));"\n";end;end;[:chomp,:chomp!].each{|m|$s="";$calls=0;begin;r=$s.send(m,Sep.new);p [m,r&.equal?($s),r&.bytes,$s.bytes,$s.encoding,$s.frozen?,$calls];rescue=>e;p [m,e.class,e.message,$s.bytes,$s.encoding,$s.frozen?,$calls];end}`,
+    '[:chomp, false, [108, 111, 110, 103], [108, 111, 110, 103], #<Encoding:BINARY (ASCII-8BIT)>, false, 1]\n[:chomp!, nil, nil, [], #<Encoding:UTF-8>, false, 0]\n',
+  ],
+  [
+    String.raw`class Sep;def to_str;$calls+=1;$s.replace(String.new("long",encoding:"ASCII-8BIT"));$s.freeze;"\n";end;end;[:chomp,:chomp!].each{|m|$s="";$calls=0;begin;r=$s.send(m,Sep.new);p [m,r&.equal?($s),r&.bytes,$s.bytes,$s.encoding,$s.frozen?,$calls];rescue=>e;p [m,e.class,e.message,$s.bytes,$s.encoding,$s.frozen?,$calls];end}`,
+    '[:chomp, false, [108, 111, 110, 103], [108, 111, 110, 103], #<Encoding:BINARY (ASCII-8BIT)>, true, 1]\n[:chomp!, nil, nil, [], #<Encoding:UTF-8>, false, 0]\n',
+  ],
+  [
+    'class Sep;def to_str;$calls+=1;$s.replace(String.new("long",encoding:"UTF-8"));"z";end;end;[:chomp,:chomp!].each{|m|$s="";$calls=0;begin;r=$s.send(m,Sep.new);p [m,r&.equal?($s),r&.bytes,$s.bytes,$s.encoding,$s.frozen?,$calls];rescue=>e;p [m,e.class,e.message,$s.bytes,$s.encoding,$s.frozen?,$calls];end}',
+    '[:chomp, false, [108, 111, 110, 103], [108, 111, 110, 103], #<Encoding:UTF-8>, false, 1]\n[:chomp!, nil, nil, [], #<Encoding:UTF-8>, false, 0]\n',
+  ],
+  [
+    'class Sep;def to_str;$calls+=1;$s.replace(String.new("long",encoding:"UTF-8"));$s.freeze;"z";end;end;[:chomp,:chomp!].each{|m|$s="";$calls=0;begin;r=$s.send(m,Sep.new);p [m,r&.equal?($s),r&.bytes,$s.bytes,$s.encoding,$s.frozen?,$calls];rescue=>e;p [m,e.class,e.message,$s.bytes,$s.encoding,$s.frozen?,$calls];end}',
+    '[:chomp, false, [108, 111, 110, 103], [108, 111, 110, 103], #<Encoding:UTF-8>, true, 1]\n[:chomp!, nil, nil, [], #<Encoding:UTF-8>, false, 0]\n',
+  ],
+  [
+    'class Sep;def to_str;$calls+=1;$s.replace(String.new("long",encoding:"US-ASCII"));"z";end;end;[:chomp,:chomp!].each{|m|$s="";$calls=0;begin;r=$s.send(m,Sep.new);p [m,r&.equal?($s),r&.bytes,$s.bytes,$s.encoding,$s.frozen?,$calls];rescue=>e;p [m,e.class,e.message,$s.bytes,$s.encoding,$s.frozen?,$calls];end}',
+    '[:chomp, false, [108, 111, 110, 103], [108, 111, 110, 103], #<Encoding:US-ASCII>, false, 1]\n[:chomp!, nil, nil, [], #<Encoding:UTF-8>, false, 0]\n',
+  ],
+  [
+    'class Sep;def to_str;$calls+=1;$s.replace(String.new("long",encoding:"US-ASCII"));$s.freeze;"z";end;end;[:chomp,:chomp!].each{|m|$s="";$calls=0;begin;r=$s.send(m,Sep.new);p [m,r&.equal?($s),r&.bytes,$s.bytes,$s.encoding,$s.frozen?,$calls];rescue=>e;p [m,e.class,e.message,$s.bytes,$s.encoding,$s.frozen?,$calls];end}',
+    '[:chomp, false, [108, 111, 110, 103], [108, 111, 110, 103], #<Encoding:US-ASCII>, true, 1]\n[:chomp!, nil, nil, [], #<Encoding:UTF-8>, false, 0]\n',
+  ],
+  [
+    'class Sep;def to_str;$calls+=1;$s.replace(String.new("long",encoding:"ASCII-8BIT"));"z";end;end;[:chomp,:chomp!].each{|m|$s="";$calls=0;begin;r=$s.send(m,Sep.new);p [m,r&.equal?($s),r&.bytes,$s.bytes,$s.encoding,$s.frozen?,$calls];rescue=>e;p [m,e.class,e.message,$s.bytes,$s.encoding,$s.frozen?,$calls];end}',
+    '[:chomp, false, [108, 111, 110, 103], [108, 111, 110, 103], #<Encoding:BINARY (ASCII-8BIT)>, false, 1]\n[:chomp!, nil, nil, [], #<Encoding:UTF-8>, false, 0]\n',
+  ],
+  [
+    'class Sep;def to_str;$calls+=1;$s.replace(String.new("long",encoding:"ASCII-8BIT"));$s.freeze;"z";end;end;[:chomp,:chomp!].each{|m|$s="";$calls=0;begin;r=$s.send(m,Sep.new);p [m,r&.equal?($s),r&.bytes,$s.bytes,$s.encoding,$s.frozen?,$calls];rescue=>e;p [m,e.class,e.message,$s.bytes,$s.encoding,$s.frozen?,$calls];end}',
+    '[:chomp, false, [108, 111, 110, 103], [108, 111, 110, 103], #<Encoding:BINARY (ASCII-8BIT)>, true, 1]\n[:chomp!, nil, nil, [], #<Encoding:UTF-8>, false, 0]\n',
+  ],
+  [
+    String.raw`class Sep;def to_str;$calls+=1;$s.replace(String.new("",encoding:"UTF-8"));"\n";end;end;[:chomp,:chomp!].each{|m|$s="";$calls=0;begin;r=$s.send(m,Sep.new);p [m,r&.equal?($s),r&.bytes,$s.bytes,$s.encoding,$s.frozen?,$calls];rescue=>e;p [m,e.class,e.message,$s.bytes,$s.encoding,$s.frozen?,$calls];end}`,
+    '[:chomp, false, [], [], #<Encoding:UTF-8>, false, 1]\n[:chomp!, nil, nil, [], #<Encoding:UTF-8>, false, 0]\n',
+  ],
+  [
+    String.raw`class Sep;def to_str;$calls+=1;$s.replace(String.new("",encoding:"UTF-8"));$s.freeze;"\n";end;end;[:chomp,:chomp!].each{|m|$s="";$calls=0;begin;r=$s.send(m,Sep.new);p [m,r&.equal?($s),r&.bytes,$s.bytes,$s.encoding,$s.frozen?,$calls];rescue=>e;p [m,e.class,e.message,$s.bytes,$s.encoding,$s.frozen?,$calls];end}`,
+    '[:chomp, false, [], [], #<Encoding:UTF-8>, true, 1]\n[:chomp!, nil, nil, [], #<Encoding:UTF-8>, false, 0]\n',
+  ],
+  [
+    String.raw`class Sep;def to_str;$calls+=1;$s.replace(String.new("",encoding:"US-ASCII"));"\n";end;end;[:chomp,:chomp!].each{|m|$s="";$calls=0;begin;r=$s.send(m,Sep.new);p [m,r&.equal?($s),r&.bytes,$s.bytes,$s.encoding,$s.frozen?,$calls];rescue=>e;p [m,e.class,e.message,$s.bytes,$s.encoding,$s.frozen?,$calls];end}`,
+    '[:chomp, false, [], [], #<Encoding:US-ASCII>, false, 1]\n[:chomp!, nil, nil, [], #<Encoding:UTF-8>, false, 0]\n',
+  ],
+  [
+    String.raw`class Sep;def to_str;$calls+=1;$s.replace(String.new("",encoding:"US-ASCII"));$s.freeze;"\n";end;end;[:chomp,:chomp!].each{|m|$s="";$calls=0;begin;r=$s.send(m,Sep.new);p [m,r&.equal?($s),r&.bytes,$s.bytes,$s.encoding,$s.frozen?,$calls];rescue=>e;p [m,e.class,e.message,$s.bytes,$s.encoding,$s.frozen?,$calls];end}`,
+    '[:chomp, false, [], [], #<Encoding:US-ASCII>, true, 1]\n[:chomp!, nil, nil, [], #<Encoding:UTF-8>, false, 0]\n',
+  ],
+  [
+    String.raw`class Sep;def to_str;$calls+=1;$s.replace(String.new("",encoding:"ASCII-8BIT"));"\n";end;end;[:chomp,:chomp!].each{|m|$s="";$calls=0;begin;r=$s.send(m,Sep.new);p [m,r&.equal?($s),r&.bytes,$s.bytes,$s.encoding,$s.frozen?,$calls];rescue=>e;p [m,e.class,e.message,$s.bytes,$s.encoding,$s.frozen?,$calls];end}`,
+    '[:chomp, false, [], [], #<Encoding:BINARY (ASCII-8BIT)>, false, 1]\n[:chomp!, nil, nil, [], #<Encoding:UTF-8>, false, 0]\n',
+  ],
+  [
+    String.raw`class Sep;def to_str;$calls+=1;$s.replace(String.new("",encoding:"ASCII-8BIT"));$s.freeze;"\n";end;end;[:chomp,:chomp!].each{|m|$s="";$calls=0;begin;r=$s.send(m,Sep.new);p [m,r&.equal?($s),r&.bytes,$s.bytes,$s.encoding,$s.frozen?,$calls];rescue=>e;p [m,e.class,e.message,$s.bytes,$s.encoding,$s.frozen?,$calls];end}`,
+    '[:chomp, false, [], [], #<Encoding:BINARY (ASCII-8BIT)>, true, 1]\n[:chomp!, nil, nil, [], #<Encoding:UTF-8>, false, 0]\n',
+  ],
+  [
+    'class Sep;def to_str;$calls+=1;$s.replace(String.new("",encoding:"UTF-8"));"z";end;end;[:chomp,:chomp!].each{|m|$s="";$calls=0;begin;r=$s.send(m,Sep.new);p [m,r&.equal?($s),r&.bytes,$s.bytes,$s.encoding,$s.frozen?,$calls];rescue=>e;p [m,e.class,e.message,$s.bytes,$s.encoding,$s.frozen?,$calls];end}',
+    '[:chomp, false, [], [], #<Encoding:UTF-8>, false, 1]\n[:chomp!, nil, nil, [], #<Encoding:UTF-8>, false, 0]\n',
+  ],
+  [
+    'class Sep;def to_str;$calls+=1;$s.replace(String.new("",encoding:"UTF-8"));$s.freeze;"z";end;end;[:chomp,:chomp!].each{|m|$s="";$calls=0;begin;r=$s.send(m,Sep.new);p [m,r&.equal?($s),r&.bytes,$s.bytes,$s.encoding,$s.frozen?,$calls];rescue=>e;p [m,e.class,e.message,$s.bytes,$s.encoding,$s.frozen?,$calls];end}',
+    '[:chomp, false, [], [], #<Encoding:UTF-8>, true, 1]\n[:chomp!, nil, nil, [], #<Encoding:UTF-8>, false, 0]\n',
+  ],
+  [
+    'class Sep;def to_str;$calls+=1;$s.replace(String.new("",encoding:"US-ASCII"));"z";end;end;[:chomp,:chomp!].each{|m|$s="";$calls=0;begin;r=$s.send(m,Sep.new);p [m,r&.equal?($s),r&.bytes,$s.bytes,$s.encoding,$s.frozen?,$calls];rescue=>e;p [m,e.class,e.message,$s.bytes,$s.encoding,$s.frozen?,$calls];end}',
+    '[:chomp, false, [], [], #<Encoding:US-ASCII>, false, 1]\n[:chomp!, nil, nil, [], #<Encoding:UTF-8>, false, 0]\n',
+  ],
+  [
+    'class Sep;def to_str;$calls+=1;$s.replace(String.new("",encoding:"US-ASCII"));$s.freeze;"z";end;end;[:chomp,:chomp!].each{|m|$s="";$calls=0;begin;r=$s.send(m,Sep.new);p [m,r&.equal?($s),r&.bytes,$s.bytes,$s.encoding,$s.frozen?,$calls];rescue=>e;p [m,e.class,e.message,$s.bytes,$s.encoding,$s.frozen?,$calls];end}',
+    '[:chomp, false, [], [], #<Encoding:US-ASCII>, true, 1]\n[:chomp!, nil, nil, [], #<Encoding:UTF-8>, false, 0]\n',
+  ],
+  [
+    'class Sep;def to_str;$calls+=1;$s.replace(String.new("",encoding:"ASCII-8BIT"));"z";end;end;[:chomp,:chomp!].each{|m|$s="";$calls=0;begin;r=$s.send(m,Sep.new);p [m,r&.equal?($s),r&.bytes,$s.bytes,$s.encoding,$s.frozen?,$calls];rescue=>e;p [m,e.class,e.message,$s.bytes,$s.encoding,$s.frozen?,$calls];end}',
+    '[:chomp, false, [], [], #<Encoding:BINARY (ASCII-8BIT)>, false, 1]\n[:chomp!, nil, nil, [], #<Encoding:UTF-8>, false, 0]\n',
+  ],
+  [
+    'class Sep;def to_str;$calls+=1;$s.replace(String.new("",encoding:"ASCII-8BIT"));$s.freeze;"z";end;end;[:chomp,:chomp!].each{|m|$s="";$calls=0;begin;r=$s.send(m,Sep.new);p [m,r&.equal?($s),r&.bytes,$s.bytes,$s.encoding,$s.frozen?,$calls];rescue=>e;p [m,e.class,e.message,$s.bytes,$s.encoding,$s.frozen?,$calls];end}',
+    '[:chomp, false, [], [], #<Encoding:BINARY (ASCII-8BIT)>, true, 1]\n[:chomp!, nil, nil, [], #<Encoding:UTF-8>, false, 0]\n',
+  ],
+  [
+    String.raw`class Sep;def to_str;$calls+=1;$s.replace(String.new("é\n",encoding:"UTF-8"));"\n";end;end;[:chomp,:chomp!].each{|m|$s="";$calls=0;begin;r=$s.send(m,Sep.new);p [m,r&.equal?($s),r&.bytes,$s.bytes,$s.encoding,$s.frozen?,$calls];rescue=>e;p [m,e.class,e.message,$s.bytes,$s.encoding,$s.frozen?,$calls];end}`,
+    '[:chomp, false, [195, 169], [195, 169, 10], #<Encoding:UTF-8>, false, 1]\n[:chomp!, nil, nil, [], #<Encoding:UTF-8>, false, 0]\n',
+  ],
+  [
+    String.raw`class Sep;def to_str;$calls+=1;$s.replace(String.new("é\n",encoding:"UTF-8"));$s.freeze;"\n";end;end;[:chomp,:chomp!].each{|m|$s="";$calls=0;begin;r=$s.send(m,Sep.new);p [m,r&.equal?($s),r&.bytes,$s.bytes,$s.encoding,$s.frozen?,$calls];rescue=>e;p [m,e.class,e.message,$s.bytes,$s.encoding,$s.frozen?,$calls];end}`,
+    '[:chomp, false, [195, 169], [195, 169, 10], #<Encoding:UTF-8>, true, 1]\n[:chomp!, nil, nil, [], #<Encoding:UTF-8>, false, 0]\n',
+  ],
+  [
+    String.raw`class Sep;def to_str;$calls+=1;$s.replace(String.new("é\n",encoding:"US-ASCII"));"\n";end;end;[:chomp,:chomp!].each{|m|$s="";$calls=0;begin;r=$s.send(m,Sep.new);p [m,r&.equal?($s),r&.bytes,$s.bytes,$s.encoding,$s.frozen?,$calls];rescue=>e;p [m,e.class,e.message,$s.bytes,$s.encoding,$s.frozen?,$calls];end}`,
+    '[:chomp, false, [195, 169], [195, 169, 10], #<Encoding:US-ASCII>, false, 1]\n[:chomp!, nil, nil, [], #<Encoding:UTF-8>, false, 0]\n',
+  ],
+  [
+    String.raw`class Sep;def to_str;$calls+=1;$s.replace(String.new("é\n",encoding:"US-ASCII"));$s.freeze;"\n";end;end;[:chomp,:chomp!].each{|m|$s="";$calls=0;begin;r=$s.send(m,Sep.new);p [m,r&.equal?($s),r&.bytes,$s.bytes,$s.encoding,$s.frozen?,$calls];rescue=>e;p [m,e.class,e.message,$s.bytes,$s.encoding,$s.frozen?,$calls];end}`,
+    '[:chomp, false, [195, 169], [195, 169, 10], #<Encoding:US-ASCII>, true, 1]\n[:chomp!, nil, nil, [], #<Encoding:UTF-8>, false, 0]\n',
+  ],
+  [
+    String.raw`class Sep;def to_str;$calls+=1;$s.replace(String.new("é\n",encoding:"ASCII-8BIT"));"\n";end;end;[:chomp,:chomp!].each{|m|$s="";$calls=0;begin;r=$s.send(m,Sep.new);p [m,r&.equal?($s),r&.bytes,$s.bytes,$s.encoding,$s.frozen?,$calls];rescue=>e;p [m,e.class,e.message,$s.bytes,$s.encoding,$s.frozen?,$calls];end}`,
+    '[:chomp, false, [195, 169], [195, 169, 10], #<Encoding:BINARY (ASCII-8BIT)>, false, 1]\n[:chomp!, nil, nil, [], #<Encoding:UTF-8>, false, 0]\n',
+  ],
+  [
+    String.raw`class Sep;def to_str;$calls+=1;$s.replace(String.new("é\n",encoding:"ASCII-8BIT"));$s.freeze;"\n";end;end;[:chomp,:chomp!].each{|m|$s="";$calls=0;begin;r=$s.send(m,Sep.new);p [m,r&.equal?($s),r&.bytes,$s.bytes,$s.encoding,$s.frozen?,$calls];rescue=>e;p [m,e.class,e.message,$s.bytes,$s.encoding,$s.frozen?,$calls];end}`,
+    '[:chomp, false, [195, 169], [195, 169, 10], #<Encoding:BINARY (ASCII-8BIT)>, true, 1]\n[:chomp!, nil, nil, [], #<Encoding:UTF-8>, false, 0]\n',
+  ],
+  [
+    String.raw`class Sep;def to_str;$calls+=1;$s.replace(String.new("é\n",encoding:"UTF-8"));"z";end;end;[:chomp,:chomp!].each{|m|$s="";$calls=0;begin;r=$s.send(m,Sep.new);p [m,r&.equal?($s),r&.bytes,$s.bytes,$s.encoding,$s.frozen?,$calls];rescue=>e;p [m,e.class,e.message,$s.bytes,$s.encoding,$s.frozen?,$calls];end}`,
+    '[:chomp, false, [195, 169, 10], [195, 169, 10], #<Encoding:UTF-8>, false, 1]\n[:chomp!, nil, nil, [], #<Encoding:UTF-8>, false, 0]\n',
+  ],
+  [
+    String.raw`class Sep;def to_str;$calls+=1;$s.replace(String.new("é\n",encoding:"UTF-8"));$s.freeze;"z";end;end;[:chomp,:chomp!].each{|m|$s="";$calls=0;begin;r=$s.send(m,Sep.new);p [m,r&.equal?($s),r&.bytes,$s.bytes,$s.encoding,$s.frozen?,$calls];rescue=>e;p [m,e.class,e.message,$s.bytes,$s.encoding,$s.frozen?,$calls];end}`,
+    '[:chomp, false, [195, 169, 10], [195, 169, 10], #<Encoding:UTF-8>, true, 1]\n[:chomp!, nil, nil, [], #<Encoding:UTF-8>, false, 0]\n',
+  ],
+  [
+    String.raw`class Sep;def to_str;$calls+=1;$s.replace(String.new("é\n",encoding:"US-ASCII"));"z";end;end;[:chomp,:chomp!].each{|m|$s="";$calls=0;begin;r=$s.send(m,Sep.new);p [m,r&.equal?($s),r&.bytes,$s.bytes,$s.encoding,$s.frozen?,$calls];rescue=>e;p [m,e.class,e.message,$s.bytes,$s.encoding,$s.frozen?,$calls];end}`,
+    '[:chomp, false, [195, 169, 10], [195, 169, 10], #<Encoding:US-ASCII>, false, 1]\n[:chomp!, nil, nil, [], #<Encoding:UTF-8>, false, 0]\n',
+  ],
+  [
+    String.raw`class Sep;def to_str;$calls+=1;$s.replace(String.new("é\n",encoding:"US-ASCII"));$s.freeze;"z";end;end;[:chomp,:chomp!].each{|m|$s="";$calls=0;begin;r=$s.send(m,Sep.new);p [m,r&.equal?($s),r&.bytes,$s.bytes,$s.encoding,$s.frozen?,$calls];rescue=>e;p [m,e.class,e.message,$s.bytes,$s.encoding,$s.frozen?,$calls];end}`,
+    '[:chomp, false, [195, 169, 10], [195, 169, 10], #<Encoding:US-ASCII>, true, 1]\n[:chomp!, nil, nil, [], #<Encoding:UTF-8>, false, 0]\n',
+  ],
+  [
+    String.raw`class Sep;def to_str;$calls+=1;$s.replace(String.new("é\n",encoding:"ASCII-8BIT"));"z";end;end;[:chomp,:chomp!].each{|m|$s="";$calls=0;begin;r=$s.send(m,Sep.new);p [m,r&.equal?($s),r&.bytes,$s.bytes,$s.encoding,$s.frozen?,$calls];rescue=>e;p [m,e.class,e.message,$s.bytes,$s.encoding,$s.frozen?,$calls];end}`,
+    '[:chomp, false, [195, 169, 10], [195, 169, 10], #<Encoding:BINARY (ASCII-8BIT)>, false, 1]\n[:chomp!, nil, nil, [], #<Encoding:UTF-8>, false, 0]\n',
+  ],
+  [
+    String.raw`class Sep;def to_str;$calls+=1;$s.replace(String.new("é\n",encoding:"ASCII-8BIT"));$s.freeze;"z";end;end;[:chomp,:chomp!].each{|m|$s="";$calls=0;begin;r=$s.send(m,Sep.new);p [m,r&.equal?($s),r&.bytes,$s.bytes,$s.encoding,$s.frozen?,$calls];rescue=>e;p [m,e.class,e.message,$s.bytes,$s.encoding,$s.frozen?,$calls];end}`,
+    '[:chomp, false, [195, 169, 10], [195, 169, 10], #<Encoding:BINARY (ASCII-8BIT)>, true, 1]\n[:chomp!, nil, nil, [], #<Encoding:UTF-8>, false, 0]\n',
+  ],
+  [
+    String.raw`class Sep;def to_str;$calls+=1;$s.chomp!("\n");"\n";end;end;[:chomp,:chomp!].each{|m|$s="old\n";$calls=0;begin;r=$s.send(m,Sep.new);p [m,r&.bytes,$s.bytes,$calls];rescue=>e;p [m,e.class,e.message,$s.bytes,$calls];end}`,
+    '[:chomp, [111, 108, 100], [111, 108, 100], 1]\n[:chomp!, nil, [111, 108, 100], 1]\n',
+  ],
+  [
+    String.raw`class Sep;def to_str;$calls+=1;$s.replace("abc\n");$s.chomp!("\n");"\n";end;end;[:chomp,:chomp!].each{|m|$s="old\n";$calls=0;begin;r=$s.send(m,Sep.new);p [m,r&.bytes,$s.bytes,$calls];rescue=>e;p [m,e.class,e.message,$s.bytes,$calls];end}`,
+    '[:chomp, [97, 98, 99], [97, 98, 99], 1]\n[:chomp!, nil, [97, 98, 99], 1]\n',
+  ],
+  [
+    String.raw`class Sep;def to_str;$calls+=1;$s.replace("long");raise "bad";end;end;[:chomp,:chomp!].each{|m|$s="old\n";$calls=0;begin;r=$s.send(m,Sep.new);p [m,r&.bytes,$s.bytes,$calls];rescue=>e;p [m,e.class,e.message,$s.bytes,$calls];end}`,
+    '[:chomp, RuntimeError, "bad", [108, 111, 110, 103], 1]\n[:chomp!, RuntimeError, "bad", [108, 111, 110, 103], 1]\n',
+  ],
+  [
+    String.raw`class Sep;def to_str;$calls+=1;$s.replace("abc\n");nil;end;end;[:chomp,:chomp!].each{|m|$s="old\n";$calls=0;begin;r=$s.send(m,Sep.new);p [m,r&.bytes,$s.bytes,$calls];rescue=>e;p [m,e.class,e.message,$s.bytes,$calls];end}`,
+    '[:chomp, TypeError, "can\'t convert Sep to String (Sep#to_str gives NilClass)", [97, 98, 99, 10], 1]\n[:chomp!, TypeError, "can\'t convert Sep to String (Sep#to_str gives NilClass)", [97, 98, 99, 10], 1]\n',
+  ],
+  [
+    String.raw`class Sep;def to_str;$calls+=1;$s.replace("abc\n");1;end;end;[:chomp,:chomp!].each{|m|$s="old\n";$calls=0;begin;r=$s.send(m,Sep.new);p [m,r&.bytes,$s.bytes,$calls];rescue=>e;p [m,e.class,e.message,$s.bytes,$calls];end}`,
+    '[:chomp, TypeError, "can\'t convert Sep to String (Sep#to_str gives Integer)", [97, 98, 99, 10], 1]\n[:chomp!, TypeError, "can\'t convert Sep to String (Sep#to_str gives Integer)", [97, 98, 99, 10], 1]\n',
+  ],
+] as const;
+
+test.each(nativeChompConversionStateCases)(
+  'Chomp reads live receiver state after separator conversion: %s',
+  (source, stdout) => {
+    expect(run(source)).toMatchObject({ kind: 'executed', stdout, uncaughtException: undefined });
+  }
+);
