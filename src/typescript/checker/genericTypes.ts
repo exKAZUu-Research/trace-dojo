@@ -1,4 +1,5 @@
-import type { Type, TypeParameter } from './types';
+import type { Checker, Mapper } from './checker';
+import { anyType, isAnyLike, isIntrinsic, newTypeId, type Type, type TypeParameter } from './types';
 
 /**
  * Whether a conditional type with this check or extends type waits for its type arguments, as TypeScript's
@@ -33,6 +34,31 @@ export function isGenericObjectOrIndexType(type: Type, except: readonly TypePara
   }
 }
 
+/**
+ * The branch a conditional type whose check type is not generic takes, as TypeScript decides it: the false one when no
+ * type arguments could make the check type extend the extends type, the true one when every type argument would, and
+ * neither, so that the type is deferred, otherwise.
+ */
+export function conditionalBranch(
+  c: Checker,
+  checkType: Type,
+  extendsType: Type
+): 'true' | 'false' | 'both' | undefined {
+  // Every type extends `any` and `unknown`, `any` included; it extends any other type ambiguously.
+  if (isAnyLike(extendsType) || isIntrinsic(extendsType, 'unknown')) return 'true';
+  if (isAnyLike(checkType)) return 'both';
+  const parameters = [...typeParametersIn(checkType), ...typeParametersIn(extendsType)];
+  if (parameters.length === 0) return c.relations.isAssignable(checkType, extendsType) ? 'true' : 'false';
+  const isAssignableWith = (map: (parameter: TypeParameter) => Type): boolean => {
+    const mapper: Mapper = new Map(parameters.map((parameter) => [parameter.id, map(parameter)]));
+    return c.relations.isAssignable(c.instantiate(checkType, mapper), c.instantiate(extendsType, mapper));
+  };
+  if (!isAssignableWith(() => anyType)) return 'false';
+  // A type parameter without its constraint, so that `T[] extends string[]` with `T extends string` is deferred.
+  if (isAssignableWith((parameter) => ({ ...parameter, id: newTypeId(), constraint: undefined }))) return 'true';
+  return undefined;
+}
+
 /** The type parameters, other than those in `except`, that occur in a type's members, type arguments, and elements. */
 export function typeParametersIn(type: Type, except: readonly TypeParameter[] = []): TypeParameter[] {
   const found = new Map<number, TypeParameter>();
@@ -48,9 +74,13 @@ export function typeParametersIn(type: Type, except: readonly TypeParameter[] = 
   return [...found.values()];
 }
 
-function childTypes(type: Type): readonly Type[] {
+/** The types a type holds as members, type arguments, and elements. */
+export function childTypes(type: Type): readonly Type[] {
   switch (type.kind) {
-    case 'union':
+    case 'union': {
+      // Reading the members of a deferred union instantiates them, as ever deeper ones for `type G<T> = T | G<T[]>[]`.
+      return type.aliasMapper ? [...type.aliasMapper.values()] : type.types;
+    }
     case 'intersection':
     case 'templateLiteral': {
       return type.types;

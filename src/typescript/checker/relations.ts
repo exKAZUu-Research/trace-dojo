@@ -1,7 +1,7 @@
-// code-gauge-allow-file fileNcss 562 -- Decides assignability and comparability for every kind of type, as TypeScript's checker does in one place.
+// code-gauge-allow-file fileNcss 570 -- Decides assignability and comparability for every kind of type, as TypeScript's checker does in one place.
 import type { Checker } from './checker';
 import { isUnit } from './flow';
-import { isGenericObjectOrIndexType } from './genericTypes';
+import { childTypes, isGenericObjectOrIndexType } from './genericTypes';
 import { isNumericName } from './syntax';
 import {
   anonymousObject,
@@ -127,7 +127,7 @@ export class Relations {
 
   /** An array literal is its own identity, so that nested literals such as `[[1]]` never count as a recursive type. */
   private recursionIdentity(type: Type): unknown {
-    return this.c.literals.isArrayLiteral(type) ? type : recursionIdentity(type);
+    return this.c.literals.isArrayOrTupleLiteral(type) ? type : recursionIdentity(type);
   }
 
   // code-gauge-allow functionCognitiveComplexity 24 -- Follows TypeScript's order of checks for each kind of type.
@@ -146,10 +146,7 @@ export class Relations {
       if (s.types.some((member) => this.isRelated(member, t, relation))) return true;
       return t.kind === 'object' && this.objectRelated(s, t, relation);
     }
-    if (s.kind === 'typeParameter') {
-      if ((t.kind === 'typeParameter' && s.id === t.id) || this.constraintRelated(s, t, relation)) return true;
-      return t.kind === 'indexedAccess' && this.relatedToIndexedAccess(s, t, relation);
-    }
+    if (s.kind === 'typeParameter') return this.typeParameterRelated(s, t, relation);
     if (s.kind === 'indexedAccess' || s.kind === 'keyof' || s.kind === 'conditional') {
       if (this.genericSourceRelated(s, t, relation)) return true;
       if (t.kind !== 'typeParameter') return false;
@@ -158,6 +155,11 @@ export class Relations {
     if (t.kind === 'indexedAccess') return this.relatedToIndexedAccess(s, t, relation);
     if (t.kind === 'keyof' || t.kind === 'conditional') return false;
     return this.relatedToConcrete(s, t, relation);
+  }
+
+  private typeParameterRelated(s: TypeParameter, t: Type, relation: Relation): boolean {
+    if ((t.kind === 'typeParameter' && s.id === t.id) || this.constraintRelated(s, t, relation)) return true;
+    return t.kind === 'indexedAccess' && this.relatedToIndexedAccess(s, t, relation);
   }
 
   /**
@@ -582,7 +584,6 @@ export class Relations {
     return this.isRelated(sourceType, targetType, relation);
   }
 
-  // code-gauge-allow functionCognitiveComplexity 18 -- Follows TypeScript's rules for which members satisfy an index signature.
   private indexRelated(
     structure: Structure,
     source: Type,
@@ -725,44 +726,9 @@ export class Relations {
   private containsTypeParameter(type: Type, except: TypeParameter[], seen: Set<number>): boolean {
     if (seen.has(type.id)) return false;
     seen.add(type.id);
-    switch (type.kind) {
-      case 'typeParameter': {
-        return !except.some((parameter) => parameter.id === type.id);
-      }
-      case 'union':
-      case 'intersection': {
-        return type.types.some((member) => this.containsTypeParameter(member, except, seen));
-      }
-      case 'object': {
-        if (type.objectKind === 'mapped') return true;
-        if (type.objectKind === 'reference')
-          return (type.typeArguments ?? []).some((argument) => this.containsTypeParameter(argument, except, seen));
-        if (type.objectKind === 'tuple')
-          return (type.tuple?.elements ?? []).some((element) => this.containsTypeParameter(element.type, except, seen));
-        return false;
-      }
-      case 'indexedAccess': {
-        return (
-          this.containsTypeParameter(type.objectType, except, seen) ||
-          this.containsTypeParameter(type.indexType, except, seen)
-        );
-      }
-      case 'keyof': {
-        return this.containsTypeParameter(type.type, except, seen);
-      }
-      case 'conditional': {
-        return true;
-      }
-      case 'templateLiteral': {
-        return type.types.some((member) => this.containsTypeParameter(member, except, seen));
-      }
-      case 'stringMapping': {
-        return this.containsTypeParameter(type.type, except, seen);
-      }
-      default: {
-        return false;
-      }
-    }
+    if (type.kind === 'typeParameter') return !except.some((parameter) => parameter.id === type.id);
+    if (type.kind === 'conditional' || (type.kind === 'object' && type.objectKind === 'mapped')) return true;
+    return childTypes(type).some((child) => this.containsTypeParameter(child, except, seen));
   }
 
   removeUndefined(type: Type): Type {

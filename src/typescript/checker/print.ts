@@ -3,6 +3,7 @@ import {
   booleanType,
   falseType,
   type LiteralValue,
+  type MappedInfo,
   type ObjectType,
   type Property,
   type Signature,
@@ -13,6 +14,10 @@ import {
   unionOf,
   uniqueSymbolName,
 } from './types';
+
+function modifierPrefix(modifier: '+' | '-'): string {
+  return modifier === '-' ? '-' : '';
+}
 
 function isNullish(member: Type): boolean {
   return member.kind === 'intrinsic' && (member.name === 'null' || member.name === 'undefined');
@@ -133,18 +138,21 @@ export class Printer {
         return `${type.tuple?.readonly ? 'readonly ' : ''}[${elements.join(', ')}]`;
       }
       case 'mapped': {
-        const info = type.mapped;
-        if (!info) return '{}';
-        const readonly = info.readonlyModifier ? `${info.readonlyModifier === '-' ? '-' : ''}readonly ` : '';
-        const optional = info.optionalModifier ? `${info.optionalModifier === '-' ? '-' : ''}?` : '';
-        const as = info.nameType ? ` as ${this.print(info.nameType)}` : '';
-        const template = info.optionalModifier === '+' ? unionOf([info.template, undefinedType]) : info.template;
-        return `{ ${readonly}[${info.typeParameter.name} in ${this.print(info.constraint)}${as}]${optional}: ${this.print(template)}; }`;
+        return type.mapped ? this.printMapped(type.mapped) : '{}';
       }
       default: {
         return this.printAnonymous(type);
       }
     }
+  }
+
+  private printMapped(info: MappedInfo): string {
+    const readonly = info.readonlyModifier ? `${modifierPrefix(info.readonlyModifier)}readonly ` : '';
+    const optional = info.optionalModifier ? `${modifierPrefix(info.optionalModifier)}?` : '';
+    const as = info.nameType ? ` as ${this.print(info.nameType)}` : '';
+    // TypeScript prints the template of a mapped type that adds `?` with the `undefined` it reads as.
+    const template = info.optionalModifier === '+' ? unionOf([info.template, undefinedType]) : info.template;
+    return `{ ${readonly}[${info.typeParameter.name} in ${this.print(info.constraint)}${as}]${optional}: ${this.print(template)}; }`;
   }
 
   private printAnonymous(type: ObjectType): string {

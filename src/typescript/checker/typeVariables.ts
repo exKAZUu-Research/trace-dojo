@@ -1,3 +1,4 @@
+import { childTypes } from './genericTypes';
 import type { Type } from './types';
 
 const results = new WeakMap<Type, boolean>();
@@ -31,37 +32,31 @@ function visit(type: Type, search: Search): boolean {
   if (cached !== undefined) return cached;
   if (search.visited.has(type)) return false;
   search.visited.add(type);
-  const some = (types: readonly Type[]): boolean => types.some((member) => visit(member, search));
+  const own = ownTypeVariables(type, search);
+  return own ?? childTypes(type).some((child) => visit(child, search));
+}
+
+/** Whether a type may hold a type parameter regardless of the types it holds, if that decides it. */
+function ownTypeVariables(type: Type, search: Search): boolean | undefined {
   switch (type.kind) {
-    case 'intrinsic':
-    case 'literal': {
-      return false;
+    case 'typeParameter':
+    case 'conditional': {
+      return true;
     }
     case 'union':
     case 'intersection': {
-      // A deferred union is not read, since reading its members instantiates them.
-      if (type.kind === 'union' && type.deferred) return true;
-      if (type.types.length === 0) search.incomplete = true;
-      return type.types.length === 0 || some(type.types);
+      if (type.kind === 'union' && type.aliasMapper) return undefined;
+      if (type.types.length > 0) return undefined;
+      search.incomplete = true;
+      return true;
     }
     case 'object': {
-      if (type.objectKind === 'reference') return some(type.typeArguments ?? []);
-      if (type.objectKind === 'tuple') return some((type.tuple?.elements ?? []).map((element) => element.type));
       if (type.objectKind === 'interface') return (type.typeParameters?.length ?? 0) > 0;
-      return !type.nonGeneric;
-    }
-    case 'indexedAccess': {
-      return some([type.objectType, type.indexType]);
-    }
-    case 'keyof':
-    case 'stringMapping': {
-      return visit(type.type, search);
-    }
-    case 'templateLiteral': {
-      return some(type.types);
+      if (type.objectKind === 'anonymous') return !type.nonGeneric;
+      return type.objectKind === 'mapped' || undefined;
     }
     default: {
-      return true;
+      return undefined;
     }
   }
 }

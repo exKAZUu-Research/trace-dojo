@@ -1,7 +1,7 @@
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import type { Checker, Mapper } from './checker';
-import { isGenericObjectOrIndexType, typeParametersIn } from './genericTypes';
+import { conditionalBranch, isGenericObjectOrIndexType } from './genericTypes';
 import { printedPropertyName } from './print';
 import { isNumericName, named, templateFragmentText } from './syntax';
 import {
@@ -411,8 +411,6 @@ export class TypeOperators {
     return composed;
   }
 
-  // code-gauge-allow functionCognitiveComplexity 17 -- Resolves distribution, deferred branches, infer parameters, and failed template-literal inference as one conditional-type operation.
-  // code-gauge-allow functionNcss 31 -- Keeps conditional inference and lazy branch substitution together.
   resolveConditional(type: ConditionalType, outer: Mapper): Type {
     // An instantiated copy resolves from its declaration, so that it still distributes over its check type parameter.
     if (type.root && type.mapper) return this.resolveConditional(type.root, this.compose(type.mapper, outer));
@@ -437,35 +435,39 @@ export class TypeOperators {
     const deferred = { type, outer, mapper, checkType, extendsType, inferTypeParameters };
     if (isGenericObjectOrIndexType(checkType) || isGenericObjectOrIndexType(extendsType, inferTypeParameters))
       return this.deferredConditional(deferred);
-    const inferred = new Map(mapper);
-    if (inferTypeParameters.length > 0) {
-      const inferences = this.c.inference.inferFromTypes(inferTypeParameters, checkType, extendsType);
-      if (
-        extendsType.kind === 'templateLiteral' &&
-        checkType.kind === 'literal' &&
-        inferTypeParameters.some((parameter) => !inferences.has(parameter.id))
-      )
-        return this.c.instantiate(type.falseType, outer);
-      for (const parameter of inferTypeParameters) {
-        inferred.set(parameter.id, inferences.get(parameter.id) ?? parameter.constraint?.() ?? unknownType);
-      }
-    }
-    const trueType = (): Type => this.c.instantiate(this.c.instantiate(type.trueType, mapper), inferred);
+    const inferred = this.inferredMapper(mapper, inferTypeParameters, checkType, extendsType);
     const falseType = (): Type => this.c.instantiate(type.falseType, outer);
-    switch (this.branchOf(checkType, this.c.instantiate(extendsType, inferred))) {
-      case 'true': {
-        return trueType();
-      }
-      case 'false': {
-        return falseType();
-      }
-      case 'both': {
-        return unionOf([trueType(), falseType()]);
-      }
-      default: {
-        return this.deferredConditional(deferred);
-      }
+    if (!inferred) return falseType();
+    const trueType = (): Type => this.c.instantiate(this.c.instantiate(type.trueType, mapper), inferred);
+    const branch = conditionalBranch(this.c, checkType, this.c.instantiate(extendsType, inferred));
+    if (branch === undefined) return this.deferredConditional(deferred);
+    if (branch === 'false') return falseType();
+    return branch === 'true' ? trueType() : unionOf([trueType(), falseType()]);
+  }
+
+  /**
+   * The mapper that also gives the `infer` type parameters what the check type infers for them, or undefined when a
+   * literal fails to match a template literal, which takes the false branch.
+   */
+  private inferredMapper(
+    mapper: Mapper,
+    inferTypeParameters: TypeParameter[],
+    checkType: Type,
+    extendsType: Type
+  ): Mapper | undefined {
+    const inferred = new Map(mapper);
+    if (inferTypeParameters.length === 0) return inferred;
+    const inferences = this.c.inference.inferFromTypes(inferTypeParameters, checkType, extendsType);
+    if (
+      extendsType.kind === 'templateLiteral' &&
+      checkType.kind === 'literal' &&
+      inferTypeParameters.some((parameter) => !inferences.has(parameter.id))
+    )
+      return undefined;
+    for (const parameter of inferTypeParameters) {
+      inferred.set(parameter.id, inferences.get(parameter.id) ?? parameter.constraint?.() ?? unknownType);
     }
+    return inferred;
   }
 
   private deferredConditional({
@@ -503,30 +505,6 @@ export class TypeOperators {
       root: type,
       mapper: outer,
     };
-  }
-
-  /**
-   * The branch a conditional type whose check type is not generic takes, as TypeScript decides it: the false one when
-   * no type arguments could make the check type extend the extends type, the true one when every type argument would,
-   * and neither, so that the type is deferred, otherwise.
-   */
-  private branchOf(checkType: Type, extendsType: Type): 'true' | 'false' | 'both' | undefined {
-    // Every type extends `any` and `unknown`, `any` included; it extends any other type ambiguously.
-    if (isAnyLike(extendsType) || isIntrinsic(extendsType, 'unknown')) return 'true';
-    if (isAnyLike(checkType)) return 'both';
-    const parameters = [...typeParametersIn(checkType), ...typeParametersIn(extendsType)];
-    if (parameters.length === 0) return this.c.relations.isAssignable(checkType, extendsType) ? 'true' : 'false';
-    const isAssignableWith = (map: (parameter: TypeParameter) => Type): boolean => {
-      const mapper: Mapper = new Map(parameters.map((parameter) => [parameter.id, map(parameter)]));
-      return this.c.relations.isAssignable(
-        this.c.instantiate(checkType, mapper),
-        this.c.instantiate(extendsType, mapper)
-      );
-    };
-    if (!isAssignableWith(() => anyType)) return 'false';
-    // A type parameter without its constraint, so that `T[] extends string[]` with `T extends string` is deferred.
-    if (isAssignableWith((parameter) => ({ ...parameter, id: newTypeId(), constraint: undefined }))) return 'true';
-    return undefined;
   }
 
   templateLiteralFromNode(node: TreeNode): Type {

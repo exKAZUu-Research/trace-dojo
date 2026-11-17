@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 508 -- Types array and object literals with their spreads, members, and widening, which share one literal state.
+// code-gauge-allow-file fileNcss 509 -- Types array and object literals with their spreads, members, and widening, which share one literal state.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import type { Checker } from './checker';
@@ -78,10 +78,9 @@ interface ObjectLiteral {
 /** Checks array and object literals and widens the types of their values. */
 export class LiteralChecker {
   private readonly arrayLiterals = new Set<number>();
+  private readonly tupleLiterals = new Set<number>();
   /** The node of each object literal type, whose members alone TypeScript checks for excess properties. */
   private readonly objectLiteralNodes = new Map<number, TreeNode>();
-  /** The types being widened, which a recursive type such as `type Json = number | Json[]` meets again inside itself. */
-  private readonly widening = new Set<Type>();
 
   constructor(private readonly c: Checker) {}
 
@@ -143,11 +142,18 @@ export class LiteralChecker {
         },
       ];
     });
-    return this.c.tupleType(tupleElements, isConstContext);
+    const tuple = { ...this.c.tupleType(tupleElements, isConstContext), id: newTypeId() };
+    this.tupleLiterals.add(tuple.id);
+    return tuple;
   }
 
   isArrayLiteral(type: Type): boolean {
     return this.arrayLiterals.has(type.id);
+  }
+
+  /** Whether an array or a tuple is the type of an array literal, the only kind whose elements may be fresh. */
+  isArrayOrTupleLiteral(type: Type): boolean {
+    return this.arrayLiterals.has(type.id) || this.tupleLiterals.has(type.id);
   }
 
   /** Whether a property of an object literal type is written in the literal, rather than copied by a spread. */
@@ -823,19 +829,8 @@ export class LiteralChecker {
   }
 
   /** The type a variable declared with this initializer type gets. */
-  widenDeclared(type: Type, isConst: boolean): Type {
-    // Only types written in the program recur, and they hold no fresh literal to widen.
-    if (this.widening.has(type)) return type;
-    this.widening.add(type);
-    try {
-      return this.widenDeclaredOnce(type, isConst);
-    } finally {
-      this.widening.delete(type);
-    }
-  }
-
   // code-gauge-allow functionCognitiveComplexity 30 -- Widens each type form and clears array-literal inference provenance when storing a declaration.
-  private widenDeclaredOnce(type: Type, isConst: boolean): Type {
+  widenDeclared(type: Type, isConst: boolean): Type {
     // A constant keeps a fresh literal type, which widens again where a mutable location takes its value.
     // Only a fresh literal widens, which `as const` and annotations make regular.
     if (type.kind === 'literal') return isConst || !type.fresh ? type : this.c.widenLiteral(type);
@@ -846,11 +841,8 @@ export class LiteralChecker {
         : widened;
     }
     if (type.kind === 'object') {
-      if (this.c.isArrayType(type)) {
-        const element = this.c.elementTypeOf(type);
-        const widened = this.widenDeclared(element, false);
-        return widened === element && !this.isArrayLiteral(type) ? type : this.c.arrayType(widened);
-      }
+      // Only an array literal holds fresh literals; another array, as one of a recursive alias, is left as it is.
+      if (this.isArrayLiteral(type)) return this.c.arrayType(this.widenDeclared(this.c.elementTypeOf(type), false));
       if (type.objectKind === 'anonymous' && type.isLiteral && !type.isFunction) {
         const source = type.regular ?? type;
         return anonymousObject(

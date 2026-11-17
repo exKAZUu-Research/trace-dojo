@@ -385,15 +385,16 @@ export class TypeNodes {
     }
     const filled = this.c.fillTypeArguments(parameters, typeArguments);
     this.checkTypeArgumentConstraints(node, parameters, filled);
-    if (symbol.typeKind === 'alias') {
-      // Inside its own declaration, an alias applied to its own type parameters is the alias being resolved.
-      if (filled.every((argument, index) => argument === parameters[index])) return declared;
-      const mapper: Mapper = new Map(parameters.map((parameter, index) => [parameter.id, filled[index]]));
-      if (symbol.pendingUnion === declared) return this.c.deferredAliasUnion(unionAlias(symbol), mapper);
-      const instantiated = this.c.instantiate(declared, mapper);
-      return instantiated;
-    }
+    if (symbol.typeKind === 'alias') return this.aliasReference(symbol, declared, parameters, filled);
     return this.c.reference(declared as ObjectType, filled);
+  }
+
+  private aliasReference(symbol: Sym, declared: Type, parameters: TypeParameter[], typeArguments: Type[]): Type {
+    // Inside its own declaration, an alias applied to its own type parameters is the alias being resolved.
+    if (typeArguments.every((argument, index) => argument === parameters[index])) return declared;
+    const mapper: Mapper = new Map(parameters.map((parameter, index) => [parameter.id, typeArguments[index]]));
+    if (symbol.pendingUnion === declared) return this.c.deferredAliasUnion(unionAlias(symbol), mapper);
+    return this.c.instantiate(declared, mapper);
   }
 
   private qualifiedType(node: TreeNode): Type {
@@ -563,8 +564,6 @@ export class TypeNodes {
   }
 
   /** The type a type name stands for: an interface, a class's instance type, an alias, or a type parameter. */
-  // code-gauge-allow functionNcss 35 -- One case per kind of type declaration, with recursive aliases.
-  // code-gauge-allow functionCognitiveComplexity 20 -- One case per kind of type declaration, with recursive aliases.
   declaredTypeOf(symbol: Sym): Type {
     if (symbol.declaredType) return symbol.declaredType;
     switch (symbol.typeKind) {

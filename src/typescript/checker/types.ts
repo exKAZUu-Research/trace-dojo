@@ -59,8 +59,11 @@ export interface UnionType {
   kind: 'union';
   id: number;
   types: Type[];
-  /** Whether its members are instantiated when first read, as for an alias that holds an instantiation of itself. */
-  deferred?: boolean;
+  /**
+   * For a union whose members are instantiated when first read, as for an alias that holds an instantiation of itself,
+   * the type arguments the alias's type parameters get.
+   */
+  aliasMapper?: Map<number, Type>;
 }
 
 export interface IntersectionType {
