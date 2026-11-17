@@ -162,7 +162,7 @@ export function markReachable(
     seen.add(value);
     checkTime();
     if (value instanceof TurtleValue) reached.add(value.turtle);
-    else pushReferences(value, push);
+    else pushReferences(runtime, value, push);
   }
   return reached;
 }
@@ -211,12 +211,13 @@ function pushStackFrame(frame: Frame, scannedEnvs: Set<Env>, push: Push): void {
   }
 }
 
-// code-gauge-allow functionCognitiveComplexity 22 -- One branch per kind of runtime value.
-// code-gauge-allow functionNcss 40 -- One branch per kind of runtime value.
-function pushReferences(value: object, push: Push): void {
+// code-gauge-allow functionCognitiveComplexity 24 -- One branch per kind of runtime value.
+// code-gauge-allow functionNcss 42 -- One branch per kind of runtime value.
+function pushReferences(runtime: Runtime, value: object, push: Push): void {
   if (value instanceof ConValue) {
     for (const field of value.fields) push(field);
   } else if (value instanceof Thunk) {
+    for (const root of runtime.previewRoots(value) ?? []) push(root);
     if (value.state === 'done') push(value.value);
     else if (value.code) pushRefs(freeVarsOf(value.code), value.env, push);
     else push(value.target);
@@ -243,4 +244,13 @@ function pushReferences(value: object, push: Push): void {
 function pushPreparedActions(block: PreparedBlock | undefined, push: Push, start = 0): void {
   if (!block) return;
   for (const [index, action] of block.actions) if (index >= start) push(action);
+}
+
+export function thunkReferences(thunk: Thunk): readonly Slot[] | undefined {
+  if (!thunk.code || !thunk.env) return thunk.target === undefined ? undefined : [thunk.target];
+  const roots: Slot[] = [];
+  pushRefs(freeVarsOf(thunk.code), thunk.env, (slot) => {
+    if (slot !== undefined) roots.push(slot);
+  });
+  return roots.length > 0 ? roots : undefined;
 }

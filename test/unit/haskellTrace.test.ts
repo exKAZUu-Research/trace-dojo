@@ -196,7 +196,7 @@ walk t i =
   ]);
 });
 
-test('a list element that a new list replaces releases its turtle at that step', () => {
+test('a lazy replacement list releases its old turtle when the replacement is demanded', () => {
   const program = `main :: IO ()
 main = do
   ts <- mapM (\\x -> newTurtleAt x 0) [0, 1]
@@ -206,7 +206,7 @@ main = do
   const { traceItems } = traceProgram('haskell', program, program);
   expect(traceItems.slice(-3).map(({ line, turtles }) => ({ line, count: turtles.length }))).toEqual([
     { line: 3, count: 2 },
-    { line: 4, count: 1 },
+    { line: 4, count: 2 },
     { line: 5, count: 1 },
   ]);
 });

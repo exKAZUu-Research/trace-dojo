@@ -1,5 +1,5 @@
 import { LIMITS } from '../interpreter/limits';
-import { type Thunk, type Value } from './values';
+import { type Slot, type Thunk, type Value } from './values';
 
 export const DISPLAY_OPERATIONS = 20_000;
 
@@ -58,6 +58,7 @@ interface PreviewTransaction {
 }
 
 interface PreviewDebt {
+  roots: readonly Slot[] | undefined;
   costs: PreviewCost[];
   executionOperations: number;
   allocations: number;
@@ -67,6 +68,7 @@ interface PreviewDebt {
 }
 
 interface PreviewFrame {
+  roots: readonly Slot[] | undefined;
   thunk: Thunk;
   debt: PreviewDebt;
   costs: PreviewCost[] | undefined;
@@ -94,6 +96,10 @@ export class PreviewBudget {
   private readonly frameFamilies = new Map<object, Set<PreviewFamily>>();
   private activeFamilies = 0;
   private readonly familyTimeLimit = LIMITS.maxMilliseconds / 2;
+
+  get forcing(): boolean {
+    return this.active?.forcing ?? false;
+  }
 
   endFrame(frame: object): void {
     const scopes = this.scopes.get(frame);
@@ -247,7 +253,7 @@ export class PreviewBudget {
     }
   }
 
-  enter(thunk: Thunk): void {
+  enter(thunk: Thunk, captureRoots?: () => readonly Slot[] | undefined): void {
     const active = this.active;
     if (!active?.forcing) return;
     const debt = this.debtFor(thunk);
@@ -255,12 +261,14 @@ export class PreviewBudget {
     active.frames.push({
       thunk,
       debt,
+      roots: debt.roots,
       costs: debt.costs.length > 0 ? debt.costs.map((cost) => ({ ...cost })) : undefined,
       executionOperations: debt.executionOperations,
       allocations: debt.allocations,
       dependenciesLength: debt.dependencies.length,
       quotaReleased: debt.quotaReleased,
     });
+    debt.roots ??= captureRoots?.();
   }
 
   leave(thunk: Thunk, aborted: boolean): void {
@@ -276,6 +284,7 @@ export class PreviewBudget {
     debt.allocations = frame.allocations;
     debt.dependencies.length = frame.dependenciesLength;
     debt.quotaReleased = frame.quotaReleased;
+    debt.roots = frame.roots;
   }
 
   consume(slot: Thunk, demanded: boolean): { operations: number; allocations: number } | undefined {
@@ -298,9 +307,15 @@ export class PreviewBudget {
     return this.settleDebt(debt);
   }
 
-  track(slot: Thunk): void {
+  track(slot: Thunk): boolean {
     const debt = this.debts.get(slot);
-    if (debt && !debt.consumed) this.active?.debts.add(debt);
+    if (!debt || debt.consumed || debt.quotaReleased) return false;
+    this.active?.debts.add(debt);
+    return true;
+  }
+
+  rootsFor(slot: Thunk): readonly Slot[] | undefined {
+    return this.debts.get(slot)?.roots;
   }
 
   completeView(): void {
@@ -338,6 +353,7 @@ export class PreviewBudget {
       for (const dependency of current.dependencies) pending.push(dependency);
       current.costs = [];
       current.dependencies = [];
+      current.roots = undefined;
     }
     return { operations: executionOperations, allocations };
   }
@@ -410,6 +426,7 @@ export class PreviewBudget {
     let debt = this.debts.get(slot);
     if (!debt || debt.consumed) {
       debt = {
+        roots: undefined,
         costs: [],
         executionOperations: 0,
         allocations: 0,

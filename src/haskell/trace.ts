@@ -1,3 +1,4 @@
+// code-gauge-allow-file fileNcss 433 -- Scalar answers and reference nodes share bounded display traversal and caches.
 import type { ProgramRecording } from '../interpreter/program';
 import type { ProgramInput } from '../interpreter/programIo';
 import type { TraceOptions } from '../interpreter/traceAnnotations';
@@ -35,10 +36,6 @@ export function traceHaskellProgram(program: string, trace: TraceOptions, input?
     variablesOf: (frame) => variablesOf(runtime, frame),
   });
   runtime.steps.recorder = recorder;
-  // Evaluating what a step shows may replace a variable's thunk by a value that no longer reaches a turtle.
-  runtime.beforeCollect = () => {
-    for (const frame of runtime.frames) variablesOf(runtime, frame);
-  };
   let finalVars: TraceItemVariable = Object.create(null);
   // A model program may end with an uncaught exception to show how one stops the program.
   const run = runProgram(runtime, compiled, (frame) => {
@@ -260,6 +257,7 @@ interface ListItem {
 }
 
 interface ListView {
+  pending: boolean;
   spine: Slot[];
   items: ListItem[];
   primitive: boolean;
@@ -268,9 +266,11 @@ interface ListView {
 }
 
 const listViews = new WeakMap<ConValue, WeakMap<Type, ListView>>();
+const oversizedLists = new WeakSet<ConValue>();
 
 /** The elements of a list, forcing it as far as display allows. */
 function listItems(runtime: Runtime, value: ConValue, type: Type): ListItem[] | undefined {
+  if (oversizedLists.has(value)) return undefined;
   const cached = listViews.get(value)?.get(type);
   if (cached) return reuseListItems(runtime, cached);
   const items: ListItem[] = [];
@@ -278,7 +278,10 @@ function listItems(runtime: Runtime, value: ConValue, type: Type): ListItem[] | 
   let current: Value | undefined = value;
   while (current instanceof ConValue && current.con === CONS_CON) {
     runtime.spend();
-    if (items.length >= MAX_ELEMENTS) return undefined;
+    if (items.length >= MAX_ELEMENTS) {
+      oversizedLists.add(value);
+      return undefined;
+    }
     const head = forceForDisplay(runtime, current.fields[0]);
     if (head === undefined) return undefined;
     items.push({
@@ -297,6 +300,7 @@ function listItems(runtime: Runtime, value: ConValue, type: Type): ListItem[] | 
       listViews.set(value, views);
     }
     views.set(type, {
+      pending: true,
       spine,
       items,
       primitive: items.every((item) => typeof item.value !== 'object'),
@@ -308,8 +312,12 @@ function listItems(runtime: Runtime, value: ConValue, type: Type): ListItem[] | 
 }
 
 function reuseListItems(runtime: Runtime, view: ListView): ListItem[] {
-  for (const slot of view.spine) runtime.trackPreview(slot);
-  for (const item of view.items) runtime.trackPreview(item.slot);
+  if (view.pending) {
+    let pending = false;
+    for (const slot of view.spine) pending = runtime.trackPreview(slot) || pending;
+    for (const item of view.items) pending = runtime.trackPreview(item.slot) || pending;
+    view.pending = pending;
+  }
   return view.items;
 }
 
@@ -338,13 +346,7 @@ function scalarOf(runtime: Runtime, value: Value, type: Type, depth: number): Sc
   if (typeof value === 'string') return value;
   if (!(value instanceof ConValue)) return NOT_SCALAR;
   if (containerKind(value)) return NOT_SCALAR;
-  if (value.con.type.traceKind === 'ratio') {
-    const numerator = forceForDisplay(runtime, value.fields[0]);
-    const denominator = forceForDisplay(runtime, value.fields[1]);
-    return typeof numerator === 'bigint' && typeof denominator === 'bigint'
-      ? `${numerator} % ${denominator}`
-      : NOT_SCALAR;
-  }
+  if (value.con.type.traceKind === 'ratio') return ratioScalarOf(runtime, value);
   if (value.con.type.traceKind === 'bool') return value.con.tag === 1;
   if (value.con === CONS_CON || value.con === NIL_CON) return listScalarOf(runtime, value, type, depth);
   if (value.con === UNIT_CON || value.con.type.traceKind === 'maybe') return NOT_SCALAR;
@@ -352,7 +354,41 @@ function scalarOf(runtime: Runtime, value: Value, type: Type, depth: number): Sc
   return NOT_SCALAR;
 }
 
+const ratioScalars = new WeakMap<ConValue, string>();
+
+function ratioScalarOf(runtime: Runtime, value: ConValue): Scalar | typeof NOT_SCALAR {
+  for (const field of value.fields) runtime.trackPreview(field);
+  const cached = ratioScalars.get(value);
+  if (cached !== undefined) return cached;
+  return runtime.withRenderBudget('answer', () => {
+    const numerator = forceForDisplay(runtime, value.fields[0]);
+    const denominator = forceForDisplay(runtime, value.fields[1]);
+    if (typeof numerator !== 'bigint' || typeof denominator !== 'bigint') return NOT_SCALAR;
+    const scalar = `${numerator} % ${denominator}`;
+    runtime.spend(scalar.length);
+    ratioScalars.set(value, scalar);
+    return scalar;
+  });
+}
+
 function listScalarOf(runtime: Runtime, value: ConValue, type: Type, depth: number): Scalar | typeof NOT_SCALAR {
+  if (oversizedLists.has(value)) return NOT_SCALAR;
+  const cached = listViews.get(value)?.get(type);
+  if (cached?.scalar !== undefined && depth < MAX_DISPLAY_DEPTH) {
+    reuseListItems(runtime, cached);
+    return cached.scalar;
+  }
+  return runtime.withRenderBudget(isStringType(type, value) ? 'answer' : 'reference', () =>
+    uncachedListScalarOf(runtime, value, type, depth)
+  );
+}
+
+function uncachedListScalarOf(
+  runtime: Runtime,
+  value: ConValue,
+  type: Type,
+  depth: number
+): Scalar | typeof NOT_SCALAR {
   const items = listItems(runtime, value, type);
   if (!items) return NOT_SCALAR;
   const view = listViews.get(value)?.get(type);
@@ -387,7 +423,25 @@ class DisplayNodes {
 
   build(value: Value, type: Type, depth: number): DisplayNode | undefined {
     this.runtime.spend();
-    if (!(value instanceof ConValue)) return this.nodeOf(value, type, depth);
+    if (!(value instanceof ConValue)) {
+      this.runtime.allocateDisplay();
+      return this.nodeOf(value, type, depth);
+    }
+    if (oversizedLists.has(value)) return this.truncated();
+    const cached = listViews.get(value)?.get(type);
+    if (cached?.node && depth < MAX_DISPLAY_DEPTH) {
+      reuseListItems(this.runtime, cached);
+      return cached.node;
+    }
+    if (value.fields.length === 0) {
+      this.runtime.allocateDisplay();
+      return this.nodeOf(value, type, depth);
+    }
+    return this.runtime.withRenderBudget('reference', () => this.buildStructured(value, type, depth));
+  }
+
+  private buildStructured(value: ConValue, type: Type, depth: number): DisplayNode | undefined {
+    this.runtime.allocateDisplay();
     if (this.ancestors.has(value)) return this.truncated();
     this.ancestors.add(value);
     try {

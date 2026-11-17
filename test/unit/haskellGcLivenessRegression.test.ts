@@ -1,9 +1,10 @@
+import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 
 import { expect, test } from 'vitest';
 import { z } from 'zod';
 
-import { traceProgram } from '../../src/interpreter/program';
+import { executeProgram, traceProgram } from '../../src/interpreter/program';
 
 test('nested turtle traces retain shared liveness within a bounded Node heap', { timeout: 30_000 }, () => {
   const bundle = execFileSync(
@@ -57,4 +58,82 @@ test('nested shadows preserve pending turtles at distinct lexical depths', () =>
     { x: 2, y: 2, color: '#', dir: 'N' },
   ]);
   expect(result.finalTurtles).toEqual([{ x: 1, y: 1, color: '#', dir: 'E' }]);
+});
+
+test.each([
+  ['length ts', 'count', 'count'],
+  ['sum(map(const(1::Int))ts)', 'count', 'count'],
+  ['(length ts, ())', 'fst count', 'fst count'],
+  ['Just(length ts)', 'maybe 0 id count', 'maybe 0 id count'],
+])('displaying %s preserves pending turtle references until normal demand', (expression, demand, result) => {
+  const source = `main=do
+ ts<-mapM (\\x->newTurtleAt x 1) [0]
+ let count=${expression}
+ let ts=[]::[Turtle]
+ r<-newTurtle
+ clear<-canMoveForward r
+ print clear
+ print(${demand})
+ clearAfter<-canMoveForward r
+ print clearAfter
+ print(${result})`;
+  const executed = executeProgram('haskell', source);
+  expect(executed).toMatchObject({ kind: 'executed', stdout: 'False\n1\nTrue\n1\n', uncaughtException: undefined });
+  assert.equal(executed.kind, 'executed');
+  const traced = traceProgram('haskell', source, source);
+  expect(traced.stdout).toBe(executed.stdout);
+  expect(traced.uncaughtException).toBeUndefined();
+});
+
+test('settling a shared child releases its original turtle roots through an undemanded parent', () => {
+  const source = `main=do
+ ts<-mapM (\\x->newTurtleAt x 1) [0]
+ let child=length ts
+ let parent=child+1
+ let ts=[]::[Turtle]
+ r<-newTurtle
+ clear<-canMoveForward r
+ print clear
+ print child
+ clearAfter<-canMoveForward r
+ print clearAfter
+ print parent`;
+  const executed = executeProgram('haskell', source);
+  expect(executed).toMatchObject({ kind: 'executed', stdout: 'False\n1\nTrue\n2\n', uncaughtException: undefined });
+  assert.equal(executed.kind, 'executed');
+  expect(traceProgram('haskell', source, source).stdout).toBe(executed.stdout);
+});
+
+test('returned lazy values keep their original roots across trace frame retirement', () => {
+  const source = `make=do
+ ts<-mapM (\\x->newTurtleAt x 1) [0]
+ pure(length ts)
+main=do
+ count<-make
+ r<-newTurtle
+ clear<-canMoveForward r
+ print clear
+ print count
+ clearAfter<-canMoveForward r
+ print clearAfter`;
+  const executed = executeProgram('haskell', source);
+  expect(executed).toMatchObject({ kind: 'executed', stdout: 'False\n1\nTrue\n', uncaughtException: undefined });
+  assert.equal(executed.kind, 'executed');
+  expect(traceProgram('haskell', source, source).stdout).toBe(executed.stdout);
+});
+
+test('a displayed lazy drop preserves the original list until execution demands its tail', () => {
+  const source = `main=do
+ ts<-mapM (\\x->newTurtleAt x 1) [0,1]
+ ts<-pure(drop 1 ts)
+ r<-newTurtle
+ clear<-canMoveForward r
+ print clear
+ mapM_ turnRight ts
+ clearAfter<-canMoveForward r
+ print clearAfter`;
+  const executed = executeProgram('haskell', source);
+  expect(executed).toMatchObject({ kind: 'executed', stdout: 'False\nTrue\n', uncaughtException: undefined });
+  assert.equal(executed.kind, 'executed');
+  expect(traceProgram('haskell', source, source).stdout).toBe(executed.stdout);
 });

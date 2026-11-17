@@ -5,7 +5,7 @@ import type { TracedFrame, TracedRuntime } from '../interpreter/traceRecorder';
 import { TurtleWorld } from '../interpreter/turtleWorld';
 import type { FunctionInfo, GlobalDef } from './core';
 import type { InstanceInfo } from './entities';
-import { markReachable } from './gc';
+import { markReachable, thunkReferences } from './gc';
 import type { DoFrame, TraceContext } from './ioBlocks';
 import { Machine } from './machine';
 import { DisplayAbort, PreviewBudget, type PreviewView } from './previewBudget';
@@ -75,6 +75,28 @@ export class Runtime implements TracedRuntime<TraceFrame> {
   }
 
   private displayRemaining: number | undefined;
+  private renderDeadline: number | undefined;
+  private readonly renderMilliseconds = { answer: 0, reference: 0 };
+  private displayAllocated = 0;
+  private renderExcludedMilliseconds = 0;
+
+  withRenderBudget<T>(kind: 'answer' | 'reference', run: () => T): T {
+    if (this.renderDeadline !== undefined) return run();
+    const started = performance.now();
+    const excluded = this.renderExcludedMilliseconds;
+    this.renderDeadline = started + LIMITS.maxMilliseconds - this.renderMilliseconds[kind];
+    const allocated = this.displayAllocated;
+    try {
+      if (started >= this.renderDeadline) throw new DisplayAbort();
+      return run();
+    } catch (error) {
+      this.displayAllocated = allocated;
+      throw error;
+    } finally {
+      this.renderMilliseconds[kind] += performance.now() - started - (this.renderExcludedMilliseconds - excluded);
+      this.renderDeadline = undefined;
+    }
+  }
 
   /** Runs evaluation for a trace's display, which stops with `DisplayAbort` after `operations`. */
   withDisplayBudget<T>(operations: number, run: () => T): T {
@@ -110,12 +132,25 @@ export class Runtime implements TracedRuntime<TraceFrame> {
   }
 
   forcePreview(slot: Thunk): Value {
-    return this.previews.force(slot, () => this.machine.force(slot));
+    const started = this.renderDeadline === undefined ? undefined : performance.now();
+    try {
+      return this.previews.force(slot, () => this.machine.force(slot));
+    } finally {
+      if (started !== undefined) {
+        const elapsed = performance.now() - started;
+        this.renderDeadline! += elapsed;
+        this.renderExcludedMilliseconds += elapsed;
+      }
+    }
   }
 
-  trackPreview(slot: Slot): void {
+  trackPreview(slot: Slot): boolean {
     slot = untypedSlot(slot);
-    if (slot instanceof Thunk) this.previews.track(slot);
+    return slot instanceof Thunk && this.previews.track(slot);
+  }
+
+  previewRoots(slot: Thunk): readonly Slot[] | undefined {
+    return this.previews.rootsFor(slot);
   }
 
   completePreview(...slots: Slot[]): void {
@@ -136,7 +171,7 @@ export class Runtime implements TracedRuntime<TraceFrame> {
   }
 
   beginPreview(slot: Thunk): void {
-    this.previews.enter(slot);
+    this.previews.enter(slot, this.world.hasTurtles ? () => thunkReferences(slot) : undefined);
   }
 
   endPreview(slot: Thunk, aborted = false): void {
@@ -162,7 +197,14 @@ export class Runtime implements TracedRuntime<TraceFrame> {
     if (this.allocated > ALLOCATION_LIMIT) throw new ExecutionLimitError('operations');
   }
 
+  allocateDisplay(): void {
+    if (this.displayAllocated + ALLOCATION_OVERHEAD > LIMITS.maxSlots) throw new DisplayAbort();
+    this.displayAllocated += ALLOCATION_OVERHEAD;
+  }
+
   private spendDisplay(cost: number, executionCost: number, allocations = 0): void {
+    if (this.renderDeadline !== undefined && !this.previews.forcing && performance.now() >= this.renderDeadline)
+      throw new DisplayAbort();
     this.displayRemaining = (this.displayRemaining as number) - cost;
     if (this.displayRemaining < 0) throw new DisplayAbort();
     this.previews.spend(cost, executionCost, allocations);
@@ -201,11 +243,7 @@ export class Runtime implements TracedRuntime<TraceFrame> {
     if (returned && frame.isAtomic) this.steps.completeAtomicCall();
   }
 
-  /** Runs before each collection; a trace evaluates the variables it shows, which may drop references to turtles. */
-  beforeCollect: (() => void) | undefined;
-
   collectGarbage(temporaryRoots: readonly Slot[] = []): void {
-    this.beforeCollect?.();
     if (!this.world.hasTurtles) return;
     this.budget.excludingTime(() => {
       const started = performance.now();
