@@ -4837,3 +4837,27 @@ test('effectful static negative saturating counts remain compile errors', () => 
   const source = `const std=@import("std");fn get()error{}!u8{std.debug.print("c",.{});return 1;}pub fn main()void{var x:u8=1;_=&x;_=x<<|(if(get()) |_| @as(i8,-1) else |_| unreachable);}`;
   expect(executeProgram('zig', source)).toMatchObject({ kind: 'compileError' });
 });
+
+test('zero-bit constant captures share outer and inner pointer identity', () => {
+  const source = `const std=@import("std");fn outer(n:u0)void{const x=n;const S=struct{fn get()*const u0{return &x;}};std.debug.print("{}",.{S.get()==&x});}pub fn main()void{outer(0);}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: 'true',
+    uncaughtException: undefined,
+  });
+});
+
+test('zero-bit mutable locals remain unavailable across namespaces', () => {
+  const source = `const std=@import("std");pub fn main()void{var x:u0=0;const S=struct{fn get()*u0{return &x;}};const p=S.get();p.*=0;std.debug.print("{}",.{p==&x});}`;
+  expect(executeProgram('zig', source)).toMatchObject({ kind: 'compileError' });
+});
+
+test('zero-bit type facts retain argument evaluation effects', () => {
+  const source = `const std=@import("std");fn make()u0{std.debug.print("c",.{});return 0;}fn outer(n:u0)u0{const x=n;const S=struct{fn get()u0{return x;}};return S.get();}pub fn main()void{std.debug.print("{}",.{outer(make())});}`;
+  expect(executeProgram('zig', source)).toMatchObject({ kind: 'executed', stderr: 'c0', uncaughtException: undefined });
+});
+
+test('zero-bit mutable value captures retain the namespace barrier', () => {
+  const source = `const std=@import("std");pub fn main()void{var x:u0=0;_=&x;const S=struct{fn get()u0{return x;}};std.debug.print("{}",.{S.get()});}`;
+  expect(executeProgram('zig', source)).toMatchObject({ kind: 'compileError' });
+});

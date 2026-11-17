@@ -286,12 +286,17 @@ export abstract class ExpressionCompiler extends SemaBase {
   }
 
   protected localReference(binding: LocalBinding, span: Span): TExpr {
+    const fact = binding.known
+      ? { value: binding.value }
+      : binding.isConst
+        ? singleValueOf(binding.type, () => this.spendCompilation())
+        : undefined;
     let crossedNamespace = false;
     for (let scope: Scope | undefined = this.scope; scope; scope = scope.parent) {
       if (scope.locals?.get(binding.name) === binding) {
         if (crossedNamespace) {
-          const fact = binding.known ? { value: binding.value } : singleValueOf(this, binding.type, span);
-          if (!fact) return this.error(span, `「${binding.name}」は、内側の関数や型から参照できません。`);
+          if (!binding.isConst || !fact)
+            return this.error(span, `「${binding.name}」は、内側の関数や型から参照できません。`);
           return known(binding.type, fact.value, span);
         }
         break;
@@ -300,7 +305,7 @@ export abstract class ExpressionCompiler extends SemaBase {
     }
     const { slot } = binding;
     const place: Place = { isConst: binding.isConst, locate: (frame) => new Pointer(frame, slot) };
-    if (binding.known) return { ...known(binding.type, binding.value, span), place, local: binding };
+    if (fact) return { ...known(binding.type, fact.value, span), place, local: binding };
     return {
       ...runtime(binding.type, (frame) => frame.slots[slot], span, place),
       knownLength: binding.knownLength,

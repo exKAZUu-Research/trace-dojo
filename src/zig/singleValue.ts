@@ -1,6 +1,3 @@
-import type { Span } from './ast';
-import { sizeOf } from './layout';
-import type { SemaApi } from './semaBase';
 import type { Type } from './types';
 import { registerStorageLocation, type Value, ZArray, ZStruct, ZUnion } from './values';
 
@@ -8,61 +5,67 @@ interface Fact {
   value: Value;
 }
 
-export function singleValueOf(sema: SemaApi, type: Type, span: Span): Fact | undefined {
-  sema.resolveStorage(type, span);
-  if (sizeOf(type) !== 0) return undefined;
-  return zeroValueOf(sema, type, span);
+export function singleValueOf(type: Type, spend: () => void): Fact | undefined {
+  return valueOf(type, spend, new Set());
 }
 
-// code-gauge-allow functionCognitiveComplexity 28 -- Dispatches the canonical construction for each zero-bit runtime type.
-// code-gauge-allow functionNcss 38 -- Keeps the zero-bit type cases together.
-function zeroValueOf(sema: SemaApi, type: Type, span: Span): Fact | undefined {
-  sema.spendCompilation();
-  switch (type.kind) {
-    case 'void': {
-      return { value: undefined };
-    }
-    case 'int': {
-      return type.bits === 0 ? { value: 0n } : undefined;
-    }
-    case 'array': {
-      if (type.length === 0n)
-        return {
-          value: new ZArray(type.sentinel === undefined ? [] : [type.sentinel], 0, 0, type.sentinel !== undefined),
-        };
-      const child = singleValueOf(sema, type.child, span);
-      if (!child) return undefined;
-      const backing: Value[] = [];
-      const slots = new Proxy<Value[]>(backing, {
-        get: (target, key, receiver) =>
-          typeof key === 'string' && /^\d+$/.test(key) ? child.value : Reflect.get(target, key, receiver),
-        set: () => true,
-      });
-      registerStorageLocation(slots, () => ({ storage: backing, index: 0 }), true);
-      return { value: new ZArray(slots, 0, type.length, type.sentinel !== undefined) };
-    }
-    case 'struct': {
-      if (type.native || type.namespace.internal) return undefined;
-      const values: Value[] = [];
-      for (const field of sema.structFields(type, span)) {
-        const child = field.comptimeValue ?? singleValueOf(sema, field.type, span);
-        if (!child) return undefined;
-        values.push(child.value);
+// code-gauge-allow functionCognitiveComplexity 28 -- Keeps guarded metadata-only singleton construction together.
+// code-gauge-allow functionNcss 37 -- Dispatches the supported zero-bit value representations.
+function valueOf(type: Type, spend: () => void, seen: Set<Type>): Fact | undefined {
+  if (seen.has(type)) return undefined;
+  spend();
+  seen.add(type);
+  try {
+    switch (type.kind) {
+      case 'void': {
+        return { value: undefined };
       }
-      return { value: new ZStruct(values) };
+      case 'int': {
+        return type.bits === 0 ? { value: 0n } : undefined;
+      }
+      case 'array': {
+        if (type.length === 0n)
+          return {
+            value: new ZArray(type.sentinel === undefined ? [] : [type.sentinel], 0, 0, type.sentinel !== undefined),
+          };
+        const child = valueOf(type.child, spend, seen);
+        return child ? { value: constantArray(type, child.value) } : undefined;
+      }
+      case 'struct': {
+        if (type.native || type.namespace.internal || !type.fields) return undefined;
+        const values: Value[] = [];
+        for (const field of type.fields) {
+          spend();
+          const child = field.comptimeValue ?? valueOf(field.type, spend, seen);
+          if (!child) return undefined;
+          values.push(child.value);
+        }
+        return { value: new ZStruct(values) };
+      }
+      case 'enum': {
+        return type.tagType?.bits === 0 && type.fields?.length === 1 ? { value: type.fields[0].value } : undefined;
+      }
+      case 'union': {
+        if (type.fields?.length !== 1 || (type.tagType && !valueOf(type.tagType, spend, seen))) return undefined;
+        const child = valueOf(type.fields[0].type, spend, seen);
+        return child ? { value: new ZUnion(0, child.value) } : undefined;
+      }
+      default: {
+        return undefined;
+      }
     }
-    case 'enum': {
-      const fields = sema.enumFields(type);
-      return fields.length === 1 ? { value: fields[0].value } : undefined;
-    }
-    case 'union': {
-      const fields = sema.unionFields(type);
-      if (fields.length !== 1) return undefined;
-      const child = singleValueOf(sema, fields[0].type, span);
-      return child ? { value: new ZUnion(0, child.value) } : undefined;
-    }
-    default: {
-      return undefined;
-    }
+  } finally {
+    seen.delete(type);
   }
+}
+
+function constantArray(type: Extract<Type, { kind: 'array' }>, value: Value): ZArray {
+  const backing: Value[] = [];
+  const slots = new Proxy<Value[]>(backing, {
+    get: (target, key, receiver) =>
+      typeof key === 'string' && /^\d+$/.test(key) ? value : Reflect.get(target, key, receiver),
+    set: () => true,
+  });
+  registerStorageLocation(slots, () => ({ storage: backing, index: 0 }), true);
+  return new ZArray(slots, 0, type.length, type.sentinel !== undefined);
 }
