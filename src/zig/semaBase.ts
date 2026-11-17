@@ -29,6 +29,7 @@ import {
   truncateToBigInt,
 } from './floats';
 import { FunctionInstance } from './functions';
+import { hasResolvedLayout, resolveTypeLayout } from './layout';
 import { MemoryFault, UNDEFINED_MEMORY } from './memoryFault';
 import { type Frame, ZigPanic } from './runtime';
 import { singleValueOf } from './singleValue';
@@ -236,6 +237,7 @@ export abstract class SemaBase implements SemaApi {
   private readonly indexedFields = new WeakMap<readonly { name: string }[], ReadonlyMap<string, number>>();
   /** How many structs' fields are being resolved, during which function bodies wait to compile. */
   protected resolvingFields = 0;
+  private resolvingUnionFields = 0;
 
   constructor(
     readonly root: Namespace,
@@ -530,16 +532,25 @@ export abstract class SemaBase implements SemaApi {
 
   /** Resolves the fields of the structs and unions a value of `type` holds in place, which its undefined value needs. */
   private resolveLayout(type: Type, span: Span, seen: Set<Type>): void {
-    if (seen.has(type)) return;
+    if (seen.has(type) || hasResolvedLayout(type)) return;
+    this.spendCompilation();
     seen.add(type);
     if (type.kind === 'array' || type.kind === 'optional') this.resolveLayout(type.child, span, seen);
     else if (type.kind === 'error_union') this.resolveLayout(type.payload, span, seen);
     else if (type.kind === 'enum') this.enumFields(type);
     else if (type.kind === 'struct') {
-      for (const field of this.structFields(type, span)) this.resolveLayout(field.type, span, seen);
+      for (const field of this.structFields(type, span)) {
+        this.spendCompilation();
+        this.resolveLayout(field.type, span, seen);
+      }
     } else if (type.kind === 'union') {
-      for (const field of this.unionFields(type)) this.resolveLayout(field.type, span, seen);
+      for (const field of this.unionFields(type)) {
+        this.spendCompilation();
+        this.resolveLayout(field.type, span, seen);
+      }
     }
+    if (this.resolvingFields === 0 && this.resolvingUnionFields === 0)
+      resolveTypeLayout(type, () => this.spendCompilation());
   }
 
   /** Whether a value of `type` contains a `target` in place, not behind a pointer, which would have no size. */
@@ -612,6 +623,7 @@ export abstract class SemaBase implements SemaApi {
     if (type.fields) return type.fields;
     const syntax = type.namespace.syntax;
     if (!syntax) return [];
+    this.resolvingUnionFields++;
     this.inContainerScope(type.namespace, () => {
       const fields = syntax.fields.map((field) => {
         this.spendCompilation();
@@ -657,6 +669,7 @@ export abstract class SemaBase implements SemaApi {
         type.tagType = tagType;
       }
     });
+    this.resolvingUnionFields--;
     return type.fields ?? [];
   }
 

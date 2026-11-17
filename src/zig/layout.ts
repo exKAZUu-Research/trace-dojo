@@ -11,7 +11,10 @@ export function alignOf(type: Type): number {
 }
 
 export function fieldOffsets(type: StructType): number[] {
-  const query = new LayoutQuery();
+  return resolvedFields.get(type) ?? calculateFieldOffsets(type, new LayoutQuery());
+}
+
+function calculateFieldOffsets(type: StructType, query: LayoutQuery): number[] {
   const fields = type.fields ?? [];
   const offsets = fields.map(() => 0);
   const ordered = fields
@@ -38,7 +41,10 @@ export function fieldOffsets(type: StructType): number[] {
 }
 
 export function unionOffsets(type: UnionType): { payload: number; tag: number } {
-  const query = new LayoutQuery();
+  return resolvedUnions.get(type) ?? calculateUnionOffsets(type, new LayoutQuery());
+}
+
+function calculateUnionOffsets(type: UnionType, query: LayoutQuery): { payload: number; tag: number } {
   const { size: payloadSize, align: payloadAlign } = unionPayload(type, query);
   const tag = query.layout(type.tagType ?? intType(false, 8));
   return tag.align >= payloadAlign
@@ -70,19 +76,44 @@ function intLayout(bits: number): Layout {
 }
 
 const leafLayouts = new WeakMap<Type, Layout>();
+const resolvedLayouts = new WeakMap<Type, Layout>();
+const resolvedBits = new WeakMap<Type, number>();
+const resolvedFields = new WeakMap<StructType, number[]>();
+const resolvedUnions = new WeakMap<UnionType, { payload: number; tag: number }>();
+
+export function hasResolvedLayout(type: Type): boolean {
+  return resolvedLayouts.has(type);
+}
+
+export function resolveTypeLayout(type: Type, spend: () => void): void {
+  const query = new LayoutQuery(spend);
+  const layout = query.layout(type);
+  const bits = query.bits(type);
+  const fields = type.kind === 'struct' ? calculateFieldOffsets(type, query) : undefined;
+  const union = type.kind === 'union' ? calculateUnionOffsets(type, query) : undefined;
+  resolvedLayouts.set(type, layout);
+  resolvedBits.set(type, bits);
+  if (fields && type.kind === 'struct') resolvedFields.set(type, fields);
+  if (union && type.kind === 'union') resolvedUnions.set(type, union);
+}
 
 class LayoutQuery {
   private readonly layouts = new Map<Type, Layout>();
   private readonly bitSizes = new Map<Type, number>();
   private readonly active = new Set<Type>();
-  private readonly budget = new ExecutionBudget();
+  constructor(
+    private readonly spendWork = (() => {
+      const budget = new ExecutionBudget();
+      return (): void => budget.spend();
+    })()
+  ) {}
 
   spend(): void {
-    this.budget.spend();
+    this.spendWork();
   }
 
   layout(type: Type): Layout {
-    const cached = this.layouts.get(type) ?? leafLayouts.get(type);
+    const cached = this.layouts.get(type) ?? resolvedLayouts.get(type) ?? leafLayouts.get(type);
     if (cached) return cached;
     this.enter(type);
     try {
@@ -97,7 +128,7 @@ class LayoutQuery {
   }
 
   bits(type: Type): number {
-    const cached = this.bitSizes.get(type);
+    const cached = this.bitSizes.get(type) ?? resolvedBits.get(type);
     if (cached !== undefined) return cached;
     let result: number;
     if (type.kind === 'struct' && type.layout === 'packed') {
@@ -127,7 +158,7 @@ class LayoutQuery {
 }
 
 function layoutOf(type: Type): Layout {
-  return leafLayouts.get(type) ?? new LayoutQuery().layout(type);
+  return resolvedLayouts.get(type) ?? leafLayouts.get(type) ?? new LayoutQuery().layout(type);
 }
 
 // code-gauge-allow functionNcss 59 -- One case per kind of syntax node, type, or format specifier, as Zig defines them.
@@ -224,7 +255,7 @@ export function optionalNicheBits(child: Type): number | undefined {
 }
 
 export function bitSizeOf(type: Type): number {
-  return new LayoutQuery().bits(type);
+  return resolvedBits.get(type) ?? new LayoutQuery().bits(type);
 }
 
 function unionPayload(type: UnionType, query: LayoutQuery): Layout {

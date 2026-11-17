@@ -5594,3 +5594,9 @@ test.each(['f80', 'f128'])('fused %s exponent alignment charges arithmetic work'
   const source = `pub fn main()void{var x:${type}=0x1p16000;var y:${type}=0x1p-16000;_=&x;_=&y;for(0..5000)|_|{_=@mulAdd(${type},x,1,y);}}`;
   expect(executeProgram('zig', source)).toMatchObject({ kind: 'limitExceeded', limit: 'operations' });
 });
+
+test('resolved collection layouts are reused across repeated runtime metadata queries', () => {
+  const fields = Array.from({ length: 30_000 }, (_, i) => `f${i}:u8`).join(',');
+  const source = `const std=@import("std");const S=struct{${fields}};pub fn main()void{const l:std.ArrayList(S)=.empty;var total:usize=0;for(0..200)|_|{total+=l.allocatedSlice().len;}std.debug.print("{}",.{total});}`;
+  expect(executeProgram('zig', source)).toMatchObject({ kind: 'executed', stderr: '0', uncaughtException: undefined });
+});
