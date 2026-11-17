@@ -586,15 +586,27 @@ function v8Headline(runtime: Runtime, error: JsObject): string {
  * `MyError: missing`.
  */
 function improveErrorName(text: string, name: string, constructor: string | undefined, tag = ''): string {
+  if (constructor === undefined) return nullPrototypeErrorName(text, name, tag);
   const looksNormal =
-    constructor === undefined ||
-    (name.endsWith('Error') && text.startsWith(name) && (text.length === name.length || text[name.length] === ':'));
-  const base = constructor ?? 'Error';
-  const prototype = tag !== '' && tag !== base ? `${base} [${tag}]` : base;
+    name.endsWith('Error') && text.startsWith(name) && (text.length === name.length || text[name.length] === ':');
+  const prototype = tag !== '' && tag !== constructor ? `${constructor} [${tag}]` : constructor;
   if (!looksNormal || name === prototype) return text;
   return prototype.includes(name)
     ? `${prototype}${text.slice(name.length)}`
     : `${prototype} [${name}]${text.slice(name.length)}`;
+}
+
+/**
+ * Node.js's improveStack for an error without a prototype: the name its stack starts with, as `TypeError`, becomes
+ * `[TypeError: null prototype]`, which leads the text when the stack names none.
+ */
+function nullPrototypeErrorName(text: string, name: string, tag: string): string {
+  const start = /^([A-Z][a-z_ A-Z0-9[\]()-]+)(?::|\n\s+at)/.exec(text) ?? /^([a-z_A-Z0-9-]*Error)$/.exec(text);
+  const fallback = start?.[1] ?? '';
+  const prototype = `[${fallback || 'Error'}: null prototype]${tag === '' ? '' : ` [${tag}]`}`;
+  if (name === prototype) return text;
+  if (!prototype.includes(name)) return `${prototype} [${name}]${text.slice(fallback.length)}`;
+  return fallback === '' ? `${prototype}: ${text}` : `${prototype}${text.slice(fallback.length)}`;
 }
 
 function showsGetter(ctx: Context, property: AccessorProperty): boolean {

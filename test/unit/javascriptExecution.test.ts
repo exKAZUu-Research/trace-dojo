@@ -188,6 +188,11 @@ test.each([
   ['a thrown bigint, converted to a string', 'throw 5n;', '5'],
   ['a thrown negative zero, converted to a string', 'throw -0;', '0'],
   ['a thrown symbol, which cannot be converted to a string', "throw Symbol('s');", ''],
+  [
+    'a thrown error without a prototype',
+    "throw Object.setPrototypeOf(new Error('x'), null);",
+    '[Error: null prototype]: x',
+  ],
   ['a custom error', "class Oops extends Error {}\nthrow new Oops('bad');", 'Oops [Error]: bad'],
   ['infinite recursion', 'function f() { return f(); }\nf();', 'RangeError: Maximum call stack size exceeded'],
   ['constructing a generator', 'function* f() {}\nnew f();', 'TypeError: f is not a constructor'],
@@ -2297,6 +2302,22 @@ Error [Tagged]: ok
     const source = `let n = 0; const e = new Error(); Object.defineProperty(e, Symbol.toStringTag, { get() { if (n++ === 0) throw 7; return "Tag"; } }); Object.defineProperty(e, "message", { get() { throw 1; } });
 try { console.log(e); } catch (x) { console.log("caught", x); } console.log(n);`;
     expect(executeProgram('javascript', source)).toMatchObject({ kind: 'executed', stdout: '[object Tag]\n2\n' });
+  });
+
+  test('errors without a prototype print as Node.js improves their stacks', () => {
+    // Node.js prints each error's stack trace after its first line, which the interpreter leaves out.
+    const source = `const a = Object.setPrototypeOf(new Error("x"), null); console.log(a);
+const b = Object.setPrototypeOf(new TypeError("y"), null); console.log(b);
+const c = new Error("z"); c.name = "Custom"; Object.setPrototypeOf(c, null); console.log(c);
+const d = new Error(""); Object.setPrototypeOf(d, null); console.log(d);`;
+    expect(executeProgram('javascript', source)).toMatchObject({
+      kind: 'executed',
+      stdout: `[Error: null prototype]: x
+[Error: null prototype]: y
+[Custom: null prototype]: z
+[Error: null prototype]
+`,
+    });
   });
 
   test('a timer pending through a busy wait fires after its delay, not the wait plus its delay', () => {
