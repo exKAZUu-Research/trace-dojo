@@ -1,37 +1,49 @@
 import { CHAR_TYPE, DOUBLE_TYPE, FLOAT_TYPE, FUNCTION_TYPE, INT_TYPE, INTEGER_TYPE, WORD_TYPE } from './builtinTypes';
-import type { Core } from './core';
-import { type TypeHint, type TypeHintRef, UNKNOWN_TYPE } from './displayTypeHints';
+import { type DisplayTypeScope, type TypeHint, type TypeHintRef, UNKNOWN_TYPE } from './displayTypeHints';
 import type { ConInfo } from './entities';
 import type { Runtime } from './runtime';
-import { mapGraph, mapGraphPairs } from './typeGraph';
+import { mapGraph, mapGraphPairs, walkGraph, walkGraphPairs } from './typeGraph';
 import { instantiateType, matchType, prune, splitApp, tap, tcon, type Type, typeChildren } from './types';
-import { type Dict, Env, type Slot, Thunk, TypedSlot, untypedSlot } from './values';
+import { chargeTypeWork } from './typeWorkBudget';
+import { type Dict, type Env, type Slot, Thunk, TypedSlot, untypedSlot } from './values';
 
 export { UNKNOWN_TYPE } from './displayTypeHints';
 
 const concreteTypes = new WeakSet<Type>();
 const dictionaryTypes = new WeakMap<Dict, TypeHint>();
 
-export function applicationDisplayHint(code: Core, env: Env | undefined, runtime: Runtime): TypeHint | undefined {
-  if (!runtime.steps.recorder) return code.displayType;
-  if (code.k === 'frame' && code.size === 0) return { tag: 'frameType', code, env, runtime };
-  let fn = code;
-  let argumentsCount = 0;
-  while (fn.k === 'app') {
-    argumentsCount += fn.args.length;
-    fn = fn.fn;
+const scopedTypes = new WeakMap<DisplayTypeScope, WeakMap<Type, TypeHint>>();
+
+export function contextualDisplayHint(type: Type | undefined, env: Env | undefined): TypeHint | undefined {
+  return type ? scopedTypeHint(type, env?.displayScope) : undefined;
+}
+
+function scopedTypeHint(type: Type, scope: DisplayTypeScope | undefined): TypeHint {
+  const template = prune(type);
+  if (!scope || template.tag === 'tcon' || concreteTypes.has(template)) return template;
+  let cache = scopedTypes.get(scope);
+  if (!cache) {
+    cache = new WeakMap();
+    scopedTypes.set(scope, cache);
   }
-  const parent: TypeHint | undefined =
-    fn.k === 'method'
-      ? { tag: 'deferredMethodType', dict: runtime.machine.makeSlot(fn.dict, env), index: fn.index, runtime }
-      : fn.k === 'local'
-        ? slotTypeHint(env!.at(fn.depth).slots[fn.index] as Slot, fn.displayType)
-        : fn.k === 'global'
-          ? slotTypeHint(runtime.global(fn.global), fn.displayType)
-          : fn.displayType;
-  if (!parent || argumentsCount === 0) return code.displayType;
-  const actual: TypeHint = { tag: 'applicationType', parent, arguments: argumentsCount };
-  return code.displayType ? { tag: 'refinement', template: code.displayType, actual } : actual;
+  let hint = cache.get(template);
+  if (!hint) {
+    hint = { tag: 'scopedType', template, scope };
+    cache.set(template, hint);
+  }
+  return hint;
+}
+
+export function bindDisplayTypes(env: Env, patterns: readonly Type[], args: readonly Slot[], runtime: Runtime): void {
+  if (!runtime.steps.recorder) return;
+  if (patterns.length > 0)
+    env.displayScope = {
+      parent: env.displayScope,
+      constraints: patterns.map((pattern, index) => ({
+        pattern,
+        actual: { tag: 'dictionaryArgumentType', slot: args[index], runtime },
+      })),
+    };
 }
 
 export function methodTypeHint(dict: Dict, index: number, runtime: Runtime): TypeHint {
@@ -90,20 +102,20 @@ function resolveHint(hint: TypeHint): Type {
         case 'refinement': {
           return mapped.length === 1 ? mapped[0] : refineType(mapped[0], mapped[1]);
         }
-        case 'frameType':
-        case 'deferredMethodType': {
+        case 'dictionaryArgumentType': {
           return mapped[0];
+        }
+        case 'scopedType': {
+          return mappedScopedType(node.template, mapped);
+        }
+        case 'matchedType': {
+          return matchedParameterType(node.pattern, mapped[0], node.variable);
         }
         case 'dictionaryType': {
           return dictionaryDisplayType(node.dict, mapped);
         }
         case 'methodType': {
-          let type = instantiateType(
-            node.template,
-            Array.from({ length: node.parameters }, (_, index) => (index === 0 ? mapped[0] : UNKNOWN_TYPE))
-          );
-          for (let index = 0; index < node.dictionaries; index++) type = tap(tcon(FUNCTION_TYPE), UNKNOWN_TYPE, type);
-          return type;
+          return instantiatedMethodType(node, mapped[0]);
         }
         case 'applicationType': {
           return applicationResultType(mapped[0], node.arguments);
@@ -117,6 +129,25 @@ function resolveHint(hint: TypeHint): Type {
       }
     }
   );
+}
+
+function mappedScopedType(template: Type, mapped: Type[]): Type {
+  const type = prune(template);
+  return type.tag === 'tap' ? { tag: 'tap', fn: mapped[0], arg: mapped[1] } : (mapped[0] ?? type);
+}
+
+function matchedParameterType(pattern: Type, actual: Type, variable: Type): Type {
+  for (const [left, right] of walkGraphPairs(pattern, actual, prune, typeChildren)) if (left === variable) return right;
+  return UNKNOWN_TYPE;
+}
+
+function instantiatedMethodType(node: Extract<TypeHint, { tag: 'methodType' }>, instance: Type): Type {
+  let type = instantiateType(
+    node.template,
+    Array.from({ length: node.parameters }, (_, index) => (index === 0 ? instance : UNKNOWN_TYPE))
+  );
+  for (let index = 0; index < node.dictionaries; index++) type = tap(tcon(FUNCTION_TYPE), UNKNOWN_TYPE, type);
+  return type;
 }
 
 function dictionaryDisplayType(dict: Dict, argumentsTypes: Type[]): Type {
@@ -139,17 +170,12 @@ function applicationResultType(type: Type, argumentsCount: number): Type {
 }
 
 function hintChildren(hint: TypeHint): TypeHint[] {
-  if (hint.tag === 'frameType') {
-    return [
-      (hint.resolved ??= applicationDisplayHint(hint.code.body, new Env(0, hint.env), hint.runtime) ?? UNKNOWN_TYPE),
-    ];
-  }
+  if (hint.tag === 'scopedType') return (hint.children ??= scopedTypeChildren(hint.template, hint.scope));
+  if (hint.tag === 'matchedType') return [hint.parent];
+  if (hint.tag === 'dictionaryArgumentType')
+    return [(hint.resolved ??= dictionaryTypeHint(hint.runtime.machine.force(hint.slot) as Dict, hint.runtime))];
   if (hint.tag === 'hint') return [hint.value];
   if (hint.tag === 'fieldType' || hint.tag === 'methodType' || hint.tag === 'applicationType') return [hint.parent];
-  if (hint.tag === 'deferredMethodType')
-    return [
-      (hint.resolved ??= methodTypeHint(hint.runtime.machine.force(hint.dict) as Dict, hint.index, hint.runtime)),
-    ];
   if (hint.tag === 'dictionaryType') {
     return (hint.arguments ??= hint.dict.args.map((slot) =>
       dictionaryTypeHint(hint.runtime.machine.force(slot) as Dict, hint.runtime)
@@ -159,6 +185,31 @@ function hintChildren(hint: TypeHint): TypeHint[] {
   const template = hint.template;
   const known = template.tag === 'tgen' || template.tag === 'tvar' || template.tag === 'tcon' || template.tag === 'tap';
   return known && isConcreteType(template) ? [template] : [template, hint.actual];
+}
+
+function scopedTypeChildren(template: Type, scope: DisplayTypeScope): TypeHint[] {
+  const type = prune(template);
+  if (type.tag === 'tap') return [scopedTypeHint(type.fn, scope), scopedTypeHint(type.arg, scope)];
+  if (type.tag !== 'tvar' && type.tag !== 'tgen') return [];
+  for (let current: DisplayTypeScope | undefined = scope; current; current = current.parent) {
+    chargeTypeWork();
+    const actual = displayTypeBindings(current).get(type);
+    if (actual) return [actual];
+  }
+  return [];
+}
+
+function displayTypeBindings(scope: DisplayTypeScope): ReadonlyMap<Type, TypeHint> {
+  if (scope.bindings) return scope.bindings;
+  const bindings = new Map<Type, TypeHint>();
+  for (const { pattern, actual } of scope.constraints) {
+    for (const variable of walkGraph(pattern, prune, typeChildren)) {
+      if (variable.tag === 'tvar' || variable.tag === 'tgen')
+        bindings.set(variable, { tag: 'matchedType', pattern, variable, parent: actual });
+    }
+  }
+  scope.bindings = bindings;
+  return bindings;
 }
 
 function isConcreteType(type: Type): boolean {

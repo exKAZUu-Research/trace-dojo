@@ -1,6 +1,6 @@
 import type { TurtleState } from '../interpreter/turtleWorld';
 import type { Core, FunctionInfo, IODoCore, LamCore } from './core';
-import type { TypeHint, TypeHintRef } from './displayTypeHints';
+import type { DisplayTypeScope, TypeHint, TypeHintRef } from './displayTypeHints';
 import type { ConInfo, InstanceInfo } from './entities';
 import type { RunNext, TailCall } from './machine';
 import type { Primitive } from './primitives';
@@ -26,6 +26,7 @@ export function untypedSlot(slot: Slot): Value | Thunk {
 }
 
 export class Env {
+  displayScope: DisplayTypeScope | undefined;
   readonly slots: (Slot | undefined)[];
 
   constructor(
@@ -35,6 +36,7 @@ export class Env {
     readonly info?: FunctionInfo
   ) {
     this.slots = Array.from<Slot | undefined>({ length: size });
+    this.displayScope = parent?.displayScope;
   }
 
   at(depth: number): Env {

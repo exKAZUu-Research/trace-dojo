@@ -344,7 +344,14 @@ export class Codegen {
       const argSlots = Array.from({ length: arity }, () => frame.alloc());
       const visible = isTop ? OrderedMap<string, VisibleBinding>() : this.visible;
       const body = this.withVisible(visible, () => this.compileClauseBody(binding, argSlots, name));
-      return { k: 'lam', arity: dictParams.length + arity, size: frame.size, body, info } as Core;
+      return {
+        k: 'lam',
+        arity: dictParams.length + arity,
+        size: frame.size,
+        body,
+        info,
+        displayConstraints: this.options.traceTypes ? dictParams.map((param) => param.pred.type) : undefined,
+      } as Core;
     });
   }
 

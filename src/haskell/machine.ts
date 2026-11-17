@@ -1,10 +1,11 @@
-// code-gauge-allow-file fileNcss 440 -- Machine states and frames share one evaluator stack.
+// code-gauge-allow-file fileNcss 441 -- Machine states and frames share one evaluator stack.
 import { CONS_CON, NIL_CON } from './builtinTypes';
 import type { CaseCore, Core, IODoCore } from './core';
 import type { TypeHint } from './displayTypeHints';
 import {
-  applicationDisplayHint,
+  bindDisplayTypes,
   constructorFieldHint,
+  contextualDisplayHint,
   methodTypeHint,
   slotTypeHint,
   thunkTypeHint,
@@ -132,7 +133,10 @@ export class Machine {
   }
 
   makeSlot(code: Core, env: Env | undefined): Slot {
-    return typedSlot(this.makeUntypedSlot(code, env), applicationDisplayHint(code, env, this.runtime));
+    return typedSlot(
+      this.makeUntypedSlot(code, env),
+      this.runtime.steps.recorder ? contextualDisplayHint(code.displayType, env) : code.displayType
+    );
   }
 
   private makeUntypedSlot(code: Core, env: Env | undefined): Slot {
@@ -177,7 +181,10 @@ export class Machine {
     if (code.k === 'lit' || code.k === 'lam' || code.k === 'global' || code.k === 'prim' || code.k === 'iodo') {
       return this.makeSlot(code, env);
     }
-    return typedSlot(new Thunk(code, env), applicationDisplayHint(code, env, this.runtime));
+    return typedSlot(
+      new Thunk(code, env),
+      this.runtime.steps.recorder ? contextualDisplayHint(code.displayType, env) : code.displayType
+    );
   }
 
   private run(start: RunStart): Slot {
@@ -404,6 +411,7 @@ export class Machine {
     markTailSelfCall(this, fn.lam.info);
     const frameEnv = new Env(fn.lam.size, fn.env, fn.lam.info);
     for (let index = 0; index < arity; index++) frameEnv.slots[index] = args[index];
+    bindDisplayTypes(frameEnv, fn.lam.displayConstraints ?? [], args, this.runtime);
     state.evaluate(fn.lam.body, frameEnv);
   }
 
