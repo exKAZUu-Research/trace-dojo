@@ -1,8 +1,9 @@
-// code-gauge-allow-file fileNcss 580 -- Groups the related standard library operations that share this module.
+// code-gauge-allow-file fileNcss 611 -- Groups the related standard library operations that share this module.
 import { indexOutOfBounds, PANIC, panic } from '../arith';
 import type { Expression, Span } from '../ast';
 import { type AnyFloat, compareFloats, floatFromBigInt, minMaxFloat } from '../floats';
 import { sizeOf } from '../layout';
+import { isArithmeticType } from '../operands';
 import type { Frame } from '../runtime';
 import { copyForStorage, known, newArray, runtime, type SemaApi, type TExpr, undefinedValue } from '../semaBase';
 import {
@@ -34,6 +35,7 @@ import {
   generic,
   mutableSlice,
   nativeBudget,
+  nativeTransferCost,
   newSlice,
   OPTIONAL_USIZE,
   optionalIndex,
@@ -488,15 +490,17 @@ const MEMBERS: Record<string, () => Member> = {
   lessThan: () => sliceOrder('std.mem.lessThan', true),
   order: () => sliceOrder('std.mem.order', false),
   max: generic('std.mem.max', 2, (sema, call, type, [sliceArg]) => {
+    checkOrdering(sema, type, call.span);
     const slice = constSlice(sema, sliceArg, type);
     return computed(type, [slice], call.span, ([value], frame) =>
-      extreme(elements(value), 1, type, nativeBudget(sema, frame))
+      extreme(value as Slice, 1, type, nativeBudget(sema, frame))
     );
   }),
   min: generic('std.mem.min', 2, (sema, call, type, [sliceArg]) => {
+    checkOrdering(sema, type, call.span);
     const slice = constSlice(sema, sliceArg, type);
     return computed(type, [slice], call.span, ([value], frame) =>
-      extreme(elements(value), -1, type, nativeBudget(sema, frame))
+      extreme(value as Slice, -1, type, nativeBudget(sema, frame))
     );
   }),
   indexOfMax: extremeIndex('std.mem.indexOfMax', 1),
@@ -504,10 +508,10 @@ const MEMBERS: Record<string, () => Member> = {
   indexOfMin: extremeIndex('std.mem.indexOfMin', -1),
   findMin: extremeIndex('std.mem.findMin', -1),
   minMax: generic('std.mem.minMax', 2, (sema, call, type, [sliceArg]) => {
+    checkOrdering(sema, type, call.span);
     const slice = constSlice(sema, sliceArg, type);
     return computed(tupleOf(sema, [type, type]), [slice], call.span, ([value], frame) => {
-      const items = elements(value);
-      if (items.length === 0) panic(PANIC.unreachable);
+      const items = value as Slice;
       return new ZStruct([
         extreme(items, -1, type, nativeBudget(sema, frame)),
         extreme(items, 1, type, nativeBudget(sema, frame)),
@@ -550,30 +554,35 @@ const MEMBERS: Record<string, () => Member> = {
   rotate: generic('std.mem.rotate', 3, (sema, call, type, [itemsArg, amountArg]) => {
     const items = mutableSlice(sema, itemsArg, type);
     const amount = sema.coerce(sema.compile(amountArg, USIZE), USIZE, amountArg);
+    const cost = nativeTransferCost(sema, type, call.span);
     return nativeCall(VOID, [items, amount], call.span, ([value, amount], frame) => {
       const slice = value as Slice;
+      if ((amount as bigint) > slice.lengthValue)
+        panic(`end index ${amount as bigint} out of bounds for slice of length ${slice.lengthValue}`);
+      if (cost === 0) return;
       const shift = Number(amount as bigint);
-      // `items[0..amount]` panics as Zig's slicing does when the amount is past the end.
-      if (shift > slice.length) panic(`end index ${shift} out of bounds for slice of length ${slice.length}`);
-      const values = slice.values();
-      frame.runtime.spend(values.length);
+      const values = slice.values((length) => frame.runtime.spend(length * (cost * 2 + 1)));
       storeSliceValues(slice, [...values.slice(shift), ...values.slice(0, shift)]);
       return;
     });
   }),
   reverse: generic('std.mem.reverse', 2, (sema, call, type, [itemsArg]) => {
     const items = mutableSlice(sema, itemsArg, type);
+    const cost = nativeTransferCost(sema, type, call.span);
     return nativeCall(VOID, [items], call.span, ([value], frame) => {
+      if (cost === 0) return;
       const slice = value as Slice;
-      const values = slice.values().toReversed();
-      frame.runtime.spend(values.length);
+      const values = slice.values((length) => frame.runtime.spend(length * (cost * 2 + 1))).toReversed();
       storeSliceValues(slice, values);
       return;
     });
   }),
   swap: generic('std.mem.swap', 3, (sema, call, type, [aArg, bArg]) => {
     const [a, b] = compileArgs(sema, [aArg, bArg], [pointerTo(type, false), pointerTo(type, false)]);
-    return nativeCall(VOID, [a, b], call.span, ([a, b]) => {
+    const cost = nativeTransferCost(sema, type, call.span);
+    return nativeCall(VOID, [a, b], call.span, ([a, b], frame) => {
+      if (cost === 0) return;
+      frame.runtime.spend(cost * 4);
       const x = a as Pointer;
       const y = b as Pointer;
       const temporary = copyForStorage(x.load());
@@ -607,13 +616,13 @@ const MEMBERS: Record<string, () => Member> = {
       return BigInt(source.length + count * (replace.length - pattern.length));
     });
   }),
-  // code-gauge-allow functionNcss 34 -- Implements sequential replacement, overlap and capacity checks together.
-  // code-gauge-allow functionCognitiveComplexity 29 -- Implements sequential replacement, overlap and capacity checks together.
+  // code-gauge-allow functionNcss 40 -- Implements sequential replacement, overlap and capacity checks together.
   replace: generic('std.mem.replace', 5, (sema, call, type, [inputArg, needleArg, replacementArg, outputArg]) => {
     const [input, needle, replacement] = [inputArg, needleArg, replacementArg].map((arg) =>
       constSlice(sema, arg, type)
     );
     const output = mutableSlice(sema, outputArg, type);
+    const cost = nativeTransferCost(sema, type, call.span);
     return computed(USIZE, [input, needle, replacement, output], call.span, ([x, n, r, out], frame) => {
       const source = x as Slice,
         pattern = n as Slice,
@@ -647,14 +656,21 @@ const MEMBERS: Record<string, () => Member> = {
             )
           )
             panic(PANIC.memcpyAlias);
-          spend(1 + Math.floor(replace.length / 16));
-          storeSliceValues(subSlice(target, written, replace.length), replace.values());
+          if (cost !== 0) {
+            const values = replace.values((length) => spend(length * (cost * 2 + 1)));
+            storeSliceValues(subSlice(target, written, replace.lengthValue), values);
+          }
           written += replace.length;
           index += pattern.length;
           count++;
         } else {
           if (written >= target.length) indexOutOfBounds(written, target.length);
-          storeSliceValue(target, written++, source.get(index++));
+          if (cost !== 0) {
+            spend(cost * 2);
+            storeSliceValue(target, written, source.get(index));
+          }
+          written++;
+          index++;
         }
       }
       return BigInt(count);
@@ -732,18 +748,23 @@ function cutMember(name: string, suffix: boolean): () => Member {
     return computed(optionalOf(sliceOf(type, true)), [source, needle], call.span, ([value, pattern], frame) => {
       const input = value as Slice;
       const target = pattern as Slice;
-      if (target.length > input.length) return NULL;
-      const offset = suffix ? input.length - target.length : 0;
+      if (target.lengthValue > input.lengthValue) return NULL;
+      const offset = suffix ? input.lengthValue - target.lengthValue : 0n;
       const equal = comparisonBudget(sema, frame);
-      for (let index = 0; index < target.length; index++)
-        if (!equal(input.get(offset + index), target.get(index))) return NULL;
-      return new Slice(input.target, input.start + (suffix ? 0 : target.length), input.length - target.length);
+      for (let index = 0n; index < target.lengthValue; index++)
+        if (!equal(input.get(Number(offset + index)), target.get(Number(index)))) return NULL;
+      return new Slice(
+        input.target,
+        input.start + (suffix ? 0 : Number(target.lengthValue)),
+        input.lengthValue - target.lengthValue
+      );
     });
   });
 }
 
 function sliceOrder(name: string, lessThan: boolean): Member {
   return generic(name, 3, (sema, call, type, [leftArg, rightArg]) => {
+    checkOrdering(sema, type, call.span);
     const left = constSlice(sema, leftArg, type);
     const right = constSlice(sema, rightArg, type);
     return computed(lessThan ? BOOL : ORDER, [left, right], call.span, ([a, b], frame) => {
@@ -756,7 +777,8 @@ function sliceOrder(name: string, lessThan: boolean): Member {
 function lexicographic(first: Slice, second: Slice, type: Type, spend: () => void): number {
   const location = storageLocation(first.target.slots, first.start);
   const other = storageLocation(second.target.slots, second.start);
-  if (location.storage === other.storage && location.index === other.index) return first.length - second.length;
+  if (location.storage === other.storage && location.index === other.index)
+    return compareScalars(first.lengthValue, second.lengthValue);
   const length = Math.min(first.length, second.length);
   for (let index = 0; index < length; index++) {
     spend();
@@ -769,14 +791,19 @@ function lexicographic(first: Slice, second: Slice, type: Type, spend: () => voi
     if (order === undefined) panic(PANIC.unreachable);
     if (order !== 0) return order;
   }
-  return first.length - second.length;
+  return compareScalars(first.lengthValue, second.lengthValue);
 }
 
-function extreme(values: Value[], direction: number, type: Type, spend: () => void): Value {
-  if (values.length === 0) panic(PANIC.unreachable);
-  let best = values[0];
-  for (const value of values.slice(1)) {
+function checkOrdering(sema: SemaApi, type: Type, span: Span): void {
+  if (!isArithmeticType(type)) sema.error(span, `${typeName(type)} 型の要素は、大小を比べられません。`);
+}
+
+function extreme(values: Slice, direction: number, type: Type, spend: () => void): Value {
+  if (values.lengthValue === 0n) panic(PANIC.unreachable);
+  let best = values.get(0);
+  for (let index = 1n; index < values.lengthValue; index++) {
     spend();
+    const value = values.get(Number(index));
     if (type.kind === 'float' || type.kind === 'comptime_float')
       best = minMaxFloat(best as AnyFloat, value as AnyFloat, direction > 0);
     else if (compareScalars(value, best) * direction > 0) best = value;
@@ -786,36 +813,43 @@ function extreme(values: Value[], direction: number, type: Type, spend: () => vo
 
 function extremeIndex(name: string, direction: number): () => Member {
   return generic(name, 2, (sema, call, type, [sliceArg]) => {
+    checkOrdering(sema, type, call.span);
     const slice = constSlice(sema, sliceArg, type);
-    return computed(USIZE, [slice], call.span, ([value]) => {
-      const values = elements(value);
-      if (values.length === 0) panic(PANIC.unreachable);
-      let best = 0;
-      for (let index = 1; index < values.length; index++)
-        if (compareScalars(values[index], values[best]) * direction > 0) best = index;
-      return BigInt(best);
+    return computed(USIZE, [slice], call.span, ([value], frame) => {
+      const values = value as Slice;
+      if (values.lengthValue === 0n) panic(PANIC.unreachable);
+      const spend = nativeBudget(sema, frame);
+      let best = 0n;
+      for (let index = 1n; index < values.lengthValue; index++) {
+        spend();
+        if (compareScalars(values.get(Number(index)), values.get(Number(best))) * direction > 0) best = index;
+      }
+      return best;
     });
   });
 }
 
+// code-gauge-allow functionCognitiveComplexity 17 -- Keeps directional transfer and exact bounds checks together.
 function copier(name: string): () => Member {
   return generic(name, 3, (sema, call, type, [destinationArg, sourceArg]) => {
     const destination = mutableSlice(sema, destinationArg, type);
     const source = constSlice(sema, sourceArg, type);
-    return computed(VOID, [destination, source], call.span, ([out, input]) => {
-      const values = elements(input);
+    const cost = nativeTransferCost(sema, type, call.span);
+    const backwards = name.endsWith('Backwards');
+    return computed(VOID, [destination, source], call.span, ([out, input], frame) => {
+      const values = input as Slice;
       const target = out as Slice;
-      // `copyForwards` loops over `dest[0..source.len]`, and `copyBackwards` asserts the length.
-      if (values.length > target.length) {
+      if (values.lengthValue > target.lengthValue) {
         panic(
-          name.endsWith('Forwards')
-            ? `index out of bounds: index ${values.length}, len ${target.length}`
-            : PANIC.unreachable
+          !backwards ? `index out of bounds: index ${values.lengthValue}, len ${target.lengthValue}` : PANIC.unreachable
         );
       }
-      for (let position = 0; position < values.length; position++) {
-        const index = name.endsWith('Backwards') ? values.length - position - 1 : position;
-        storeSliceValue(target, index, values[index]);
+      if (cost === 0) return;
+      const spend = nativeBudget(sema, frame);
+      for (let position = 0n; position < values.lengthValue; position++) {
+        spend(cost * 2);
+        const index = backwards ? values.lengthValue - position - 1n : position;
+        storeSliceValue(target, Number(index), values.get(Number(index)));
       }
       return;
     });
@@ -939,6 +973,7 @@ export function zeroValue(type: Type, fieldsOf: (type: StructType) => readonly S
 /** `findMinMax(T, slice)`: the indexes of the first minimum and the first maximum. */
 function minMaxIndexes(name: string): Member {
   return generic(name, 2, (sema, call, type, [sliceArg]) => {
+    checkOrdering(sema, type, call.span);
     const slice = constSlice(sema, sliceArg, type);
     return computed(tupleOf(sema, [USIZE, USIZE]), [slice], call.span, ([value], frame) => {
       const items = value as Slice;

@@ -1,5 +1,7 @@
+import { valueSlots } from '../allocation';
 import type { Expression, Span } from '../ast';
 import { BigFloat, compareFloats } from '../floats';
+import { sizeOf } from '../layout';
 import { type Frame, withHeldValues, ZigPanic } from '../runtime';
 import { copyForStorage, evaluateHeld, known, runtime, type SemaApi, type TExpr, valueEvaluators } from '../semaBase';
 import {
@@ -20,6 +22,11 @@ import { compileArgs, expectArgs, fnMember, type Member } from './native';
 
 export function nativeBudget(sema: SemaApi, frame?: Frame): (cost?: number) => void {
   return frame ? (cost = 1) => frame.runtime.spend(cost) : (cost = 1) => sema.spendCompilation(cost);
+}
+
+export function nativeTransferCost(sema: SemaApi, type: Type, span: Span): number {
+  sema.resolveStorage(type, span);
+  return sizeOf(type) === 0 ? 0 : 1 + valueSlots(type);
 }
 
 export type Eval = TExpr['eval'];
@@ -70,8 +77,8 @@ export function storeSliceValues(slice: Slice, values: readonly Value[]): void {
 }
 
 /** Part of a slice, sharing its elements. */
-export function subSlice(slice: Slice, start: number, length: number): Slice {
-  return new Slice(slice.target, slice.start + start, length);
+export function subSlice(slice: Slice, start: number | bigint, length: number | bigint): Slice {
+  return new Slice(slice.target, slice.start + Number(start), length);
 }
 
 /** Compiles an argument as a slice of constant elements of a type. */

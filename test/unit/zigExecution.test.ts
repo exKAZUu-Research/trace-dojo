@@ -4259,3 +4259,76 @@ test.each([
     uncaughtException: undefined,
   });
 });
+
+test.each(['cutPrefix', 'cutSuffix'])('memory cuts retain exact zero-sized view lengths: %s', (method) => {
+  const source = `const std=@import("std");pub fn main(init:std.process.Init)!void{var a:std.ArrayList(void)=.empty;try a.append(init.gpa,{});const x=std.mem.${method}(void,a.allocatedSlice(),&[_]void{}).?;const y=std.mem.${method}(void,a.unusedCapacitySlice(),&[_]void{{},{}}).?;std.debug.print("{} {}",.{x.len,y.len});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: '18446744073709551615 18446744073709551612',
+    uncaughtException: undefined,
+  });
+});
+
+test.each(['findMin', 'findMax', 'indexOfMin', 'indexOfMax', 'min', 'max', 'minMax'])(
+  'memory extrema share the operation budget: %s',
+  (method) => {
+    const source = `const std=@import("std");pub fn main()void{const a:[300000]u8=@splat(7);for(0..4)|_|{_=std.mem.${method}(u8,&a);}}`;
+    expect(executeProgram('zig', source)).toMatchObject({ kind: 'limitExceeded', limit: 'operations' });
+  }
+);
+
+test.each(['findMin', 'findMax', 'findMinMax', 'indexOfMin', 'indexOfMax', 'indexOfMinMax', 'min', 'max', 'minMax'])(
+  'memory extrema reject unsupported element ordering: %s',
+  (method) => {
+    expect(
+      executeProgram(
+        'zig',
+        `const std=@import("std");pub fn main()void{const a=[_]bool{true,false};_=std.mem.${method}(bool,&a);}`
+      )
+    ).toMatchObject({ kind: 'compileError' });
+  }
+);
+
+test.each(['copyForwards', 'copyBackwards'])('memory copies charge reads and stores: %s', (method) => {
+  const source = `const std=@import("std");pub fn main()void{const a:[300000]u8=@splat(7);var b:[300000]u8=undefined;for(0..4)|_|{std.mem.${method}(u8,&b,&a);}}`;
+  expect(executeProgram('zig', source)).toMatchObject({ kind: 'limitExceeded', limit: 'operations' });
+});
+
+test('memory copies preserve directional live overlap', () => {
+  const source = `const std=@import("std");pub fn main()void{var a=[_]u8{1,2,3,4};var b=a;std.mem.copyForwards(u8,a[1..],a[0..3]);std.mem.copyBackwards(u8,b[0..3],b[1..]);std.debug.print("{any} {any}",.{a,b});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: '{ 1, 1, 1, 1 } { 4, 4, 4, 4 }',
+    uncaughtException: undefined,
+  });
+});
+
+test('zero-sized memory permutations and copies stay virtual after their checks', () => {
+  const source = `const std=@import("std");pub fn main(init:std.process.Init)!void{var a:std.ArrayList(void)=.empty;try a.append(init.gpa,{});const all=a.allocatedSlice();const tail=a.unusedCapacitySlice();std.mem.reverse(void,all);std.mem.rotate(void,all,18446744073709551615);std.mem.copyForwards(void,all,tail);std.mem.copyBackwards(void,all,tail);std.debug.print("{} {}",.{all.len,tail.len});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: '18446744073709551615 18446744073709551614',
+    uncaughtException: undefined,
+  });
+});
+
+test('zero-sized rotation validates its bound before eliding data work', () => {
+  const source = `const std=@import("std");pub fn main()void{std.mem.rotate(void,&[_]void{},1);}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    uncaughtException: 'panic: end index 1 out of bounds for slice of length 0',
+  });
+});
+
+test.each([
+  ['[300000]u8', '@splat(1)', '@splat(2)'],
+  ['struct{values:[150000]u8}', '.{.values=@splat(1)}', '.{.values=@splat(2)}'],
+])('memory swaps charge nested aggregate transfers: %s', (type, first, second) => {
+  const source = `const std=@import("std");const T=${type};pub fn main()void{var a:T=${first};var b:T=${second};for(0..4)|_|std.mem.swap(T,&a,&b);}`;
+  expect(executeProgram('zig', source)).toMatchObject({ kind: 'limitExceeded', limit: 'operations' });
+});
+
+test('memory replacement charges each transferred replacement element', () => {
+  const source = `const std=@import("std");pub fn main()void{const a:[300000]u8=@splat(97);var b:[300000]u8=undefined;for(0..4)|_|{_=std.mem.replace(u8,"x","x",&a,&b);}}`;
+  expect(executeProgram('zig', source)).toMatchObject({ kind: 'limitExceeded', limit: 'operations' });
+});
