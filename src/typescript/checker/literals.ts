@@ -626,7 +626,7 @@ export class LiteralChecker {
     const combine = (key: keyof Indexes): IndexInfo | undefined => {
       const [leftIndex, rightIndex] = [left[key], right[key]];
       return leftIndex && rightIndex
-        ? { type: unionOf([leftIndex.type, rightIndex.type]), readonly: false }
+        ? { type: unionOf([leftIndex.type, rightIndex.type]), readonly: leftIndex.readonly || rightIndex.readonly }
         : undefined;
     };
     return {
