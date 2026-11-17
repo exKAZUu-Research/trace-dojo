@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 518 -- One port of Node.js's util.inspect, whose formatters share its context.
+// code-gauge-allow-file fileNcss 548 -- One port of Node.js's util.inspect, whose formatters share its context.
 import { eastAsianWidthType } from 'get-east-asian-width';
 
 import { ExecutionLimitError, LIMITS } from '../interpreter/limits';
@@ -252,16 +252,13 @@ function formatRaw(ctx: Context, value: JsObject, recurseTimes: number): string 
     value instanceof JsArray ? formatArray(ctx, value, recurseTimes) : formatCollection(ctx, value, recurseTimes);
   if (value.promise) output.push(promiseEntry(ctx, value.promise, recurseTimes));
   if (showsLength) output.push(`[length]: ${formatNumber((value as JsArray).elements.length)}`);
-  const properties = keys.map((key) => formatProperty(ctx, value, recurseTimes, key));
-  for (const [owner, key] of inherited) properties.push(formatProperty(ctx, owner, recurseTimes, key));
-  // `sorted` orders the properties as text, after an array's elements, and a collection's entries with them.
-  if (ctx.sorted && value.collection) {
-    output.push(...properties);
-    output.sort();
-  } else {
-    if (ctx.sorted) properties.sort();
-    output.push(...properties);
-  }
+  appendProperties(
+    ctx,
+    value,
+    output,
+    [...keys.map((key): [JsObject, Key] => [value, key]), ...inherited],
+    recurseTimes
+  );
   runtime.scan(output.length);
   const reference = ctx.circular.get(value);
   let { base } = frame;
@@ -274,6 +271,27 @@ function formatRaw(ctx: Context, value: JsObject, recurseTimes: number): string 
   }
   ctx.seen.delete(value);
   return reduceToSingleString(ctx, output, base, braces, recurseTimes, value);
+}
+
+/**
+ * Adds an object's properties after its elements or entries, its own and then the inherited ones `showHidden` lists;
+ * `sorted` orders them as text, and a collection's entries with them.
+ */
+function appendProperties(
+  ctx: Context,
+  value: JsObject,
+  output: string[],
+  keys: [JsObject, Key][],
+  recurseTimes: number
+): void {
+  const properties = keys.map(([owner, key]) => formatProperty(ctx, owner, recurseTimes, key));
+  if (ctx.sorted && value.collection) {
+    output.push(...properties);
+    output.sort();
+    return;
+  }
+  if (ctx.sorted) properties.sort();
+  output.push(...properties);
 }
 
 /**
