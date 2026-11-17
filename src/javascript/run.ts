@@ -76,10 +76,12 @@ function describeUncaught(runtime: Runtime, error: unknown): string {
   if (isHostStackOverflow(error)) return 'RangeError: Maximum call stack size exceeded';
   if (!(error instanceof JsThrow)) throw error;
   try {
-    // Node.js prints a thrown string as it is, an error by its stack, and any other value as `console.log` shows it.
+    // Node.js prints a thrown primitive converted to a string, nothing for a symbol, which cannot be, an error by its
+    // stack, and any other object as `console.log` shows it.
     const { value } = error;
-    if (typeof value === 'string') return value;
-    return value instanceof JsObject && value.isError ? errorHeadline(runtime, value) : inspect(runtime, value);
+    if (typeof value === 'symbol') return '';
+    if (!(value instanceof JsObject)) return runtime.toString(value);
+    return value.isError ? errorHeadline(runtime, value) : inspect(runtime, value);
   } catch (formattingError) {
     // A value too deep to inspect leaves only a generic description.
     if (formattingError instanceof JsThrow || isHostStackOverflow(formattingError)) return 'Error';
