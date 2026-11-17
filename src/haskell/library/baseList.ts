@@ -1,8 +1,7 @@
+import { FOLDABLE } from './foldable';
 import { BT } from './source';
 
-/** Lists, the functor-to-monad classes, `Semigroup`, `Monoid`, `Foldable`, and `Traversable`. */
 export const BASE_LIST = String.raw`
--- Functor, Applicative, Monad
 
 class Functor f where
   fmap :: (a -> b) -> f a -> f b
@@ -231,7 +230,6 @@ instance Applicative ((->) r) where
 instance Monad ((->) r) where
   f >>= k = \r -> k (f r) r
 
--- Semigroup and Monoid
 
 class Semigroup a where
   (<>) :: a -> a -> a
@@ -284,7 +282,6 @@ instance Semigroup (Either a b) where
   Left _ <> b = b
   a <> _ = a
 
--- Lists
 
 concatMapList :: (a -> [b]) -> [a] -> [b]
 concatMapList _ [] = []
@@ -524,107 +521,8 @@ unwords [] = ""
 unwords [w] = w
 unwords (w:ws) = w ++ ' ' : unwords ws
 
--- Foldable and Traversable
 
-data FoldEndo a = FoldEndo !(a -> a)
-
-runFoldEndo :: FoldEndo a -> a -> a
-runFoldEndo (FoldEndo f) = f
-
-instance Semigroup (FoldEndo a) where
-  FoldEndo f <> FoldEndo g = FoldEndo (f . g)
-
-instance Monoid (FoldEndo a) where
-  mempty = FoldEndo id
-
-class Foldable t where
-  fold :: Monoid m => t m -> m
-  foldMap' :: Monoid m => (a -> m) -> t a -> m
-  foldMap :: Monoid m => (a -> m) -> t a -> m
-  foldr :: (a -> b -> b) -> b -> t a -> b
-  foldl :: (b -> a -> b) -> b -> t a -> b
-  foldr' :: (a -> b -> b) -> b -> t a -> b
-  foldl' :: (b -> a -> b) -> b -> t a -> b
-  foldr1 :: (a -> a -> a) -> t a -> a
-  foldl1 :: (a -> a -> a) -> t a -> a
-  toList :: t a -> [a]
-  null :: t a -> Bool
-  length :: t a -> Int
-  elem :: Eq a => a -> t a -> Bool
-  maximum :: Ord a => t a -> a
-  minimum :: Ord a => t a -> a
-  sum :: Num a => t a -> a
-  product :: Num a => t a -> a
-  fold = foldMap id
-  foldMap' f = foldl' (\acc x -> acc <> f x) mempty
-  foldMap f = foldr (\x acc -> f x <> acc) mempty
-  foldr f z t = runFoldEndo (foldMap (\x -> FoldEndo (f x)) t) z
-  foldl f z t = listFoldl f z (toList t)
-  foldr' f z t = foldl (\k x acc -> acc ${BT}seq${BT} k (f x acc)) id t z
-  foldl' f z t = listFoldl' f z (toList t)
-  foldr1 f t = case toList t of
-    [] -> errorWithoutStackTrace "foldr1: empty structure"
-    xs -> listFoldr1 f xs
-  foldl1 f t = case toList t of
-    [] -> errorWithoutStackTrace "foldl1: empty structure"
-    xs -> listFoldl1 f xs
-  toList t = foldr (:) [] t
-  null t = foldr (\_ _ -> False) True t
-  length t = listLength (toList t)
-  elem x t = listElem x (toList t)
-  maximum t = case toList t of
-    [] -> errorWithoutStackTrace "maximum: empty structure"
-    xs -> listMaximum xs
-  minimum t = case toList t of
-    [] -> errorWithoutStackTrace "minimum: empty structure"
-    xs -> listMinimum xs
-  sum t = listSum (toList t)
-  product t = listProduct (toList t)
-
-instance Foldable [] where
-  foldMap f = listFoldr (\x acc -> f x <> acc) mempty
-  foldr = listFoldr
-  foldr' = listFoldr'
-  foldl = listFoldl
-  foldl' = listFoldl'
-  foldr1 = listFoldr1
-  foldl1 = listFoldl1
-  toList xs = xs
-  null [] = True
-  null _ = False
-  length = listLength
-  elem = listElem
-  maximum = listMaximum
-  minimum = listMinimum
-  sum = listSum
-  product = listProduct
-
-instance Foldable Maybe where
-  foldMap f Nothing = mempty
-  foldMap f (Just x) = f x
-  foldr _ z Nothing = z
-  foldr f z (Just x) = f x z
-  toList Nothing = []
-  toList (Just x) = [x]
-
-instance Foldable (Either a) where
-  foldMap _ (Left _) = mempty
-  foldMap f (Right y) = f y
-  foldr _ z (Left _) = z
-  foldr f z (Right y) = f y z
-  toList (Left _) = []
-  toList (Right y) = [y]
-  length (Left _) = 0
-  length (Right _) = 1
-  null (Left _) = True
-  null (Right _) = False
-
-instance Foldable ((,) a) where
-  foldMap f (_, y) = f y
-  foldr f z (_, y) = f y z
-  toList (_, y) = [y]
-  length _ = 1
-  null _ = False
+${FOLDABLE}
 
 class (Functor t, Foldable t) => Traversable t where
   traverse :: Applicative f => (a -> f b) -> t a -> f (t b)
@@ -658,24 +556,22 @@ concatMap :: Foldable t => (a -> [b]) -> t a -> [b]
 concatMap f xs = foldr (\x b -> f x ++ b) [] xs
 
 and :: Foldable t => t Bool -> Bool
-and = foldr (&&) True
+and = runFoldAll . foldMap FoldAll
 
 or :: Foldable t => t Bool -> Bool
-or = foldr (||) False
+or = runFoldAny . foldMap FoldAny
 
 any :: Foldable t => (a -> Bool) -> t a -> Bool
-any p = foldr (\x acc -> p x || acc) False
+any p = runFoldAny . foldMap (\x -> FoldAny (p x))
 
 all :: Foldable t => (a -> Bool) -> t a -> Bool
-all p = foldr (\x acc -> p x && acc) True
+all p = runFoldAll . foldMap (\x -> FoldAll (p x))
 
 notElem :: (Foldable t, Eq a) => a -> t a -> Bool
 notElem x = not . elem x
 
 find :: Foldable t => (a -> Bool) -> t a -> Maybe a
-find p t = listFind (toList t)
-  where listFind [] = Nothing
-        listFind (x:xs) = if p x then Just x else listFind xs
+find p = runFoldFirst . foldMap (\x -> FoldFirst (if p x then Just x else Nothing))
 
 maximumBy :: Foldable t => (a -> a -> Ordering) -> t a -> a
 maximumBy cmp = fromMaybe (errorWithoutStackTrace "maximumBy: empty structure") . foldl' choose Nothing
@@ -701,7 +597,6 @@ foldlM :: (Foldable t, Monad m) => (b -> a -> m b) -> b -> t a -> m b
 foldlM f z0 xs = foldr c return xs z0
   where c x k z = f z x >>= k
 
--- Maybe and Either helpers
 
 fromMaybe :: a -> Maybe a -> a
 fromMaybe d x = case x of

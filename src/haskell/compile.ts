@@ -136,7 +136,21 @@ class LibraryCompiler {
     });
     if (name === 'Base') {
       this.base = renamed;
-      for (const name of ['Down', 'Accum', 'AccumR', 'FoldEndo', 'TraversalIdentity'])
+      for (const name of [
+        'Down',
+        'Accum',
+        'AccumR',
+        'FoldEndo',
+        'FoldDual',
+        'FoldSum',
+        'FoldProduct',
+        'FoldMax',
+        'FoldMin',
+        'FoldAny',
+        'FoldAll',
+        'FoldFirst',
+        'TraversalIdentity',
+      ])
         this.baseType(name).cons[0].isNewtype = true;
       setPrimitiveTypes(this.baseType('Bool').cons, this.baseType('Ordering').cons);
     }
