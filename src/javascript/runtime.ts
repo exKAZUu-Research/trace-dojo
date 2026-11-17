@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 697 -- One runtime of the JavaScript interpreter, whose state its builtins and evaluator share.
+// code-gauge-allow-file fileNcss 702 -- One runtime of the JavaScript interpreter, whose state its builtins and evaluator share.
 import { CompileError } from '../interpreter/diagnostics';
 import { ExecutionBudget, LIMITS } from '../interpreter/limits';
 import { type ProgramInput, ProgramIO } from '../interpreter/programIo';
@@ -82,6 +82,7 @@ export class Runtime {
   currentRow: number | undefined;
   /** Set from the program: whether turning a function into text ends it as unavailable. */
   rejectsFunctionText = false;
+  allowsOnlyStringRawTag = false;
   readonly steps = new StepTracker();
   readonly evaluator: Evaluator;
   private allocatedSlots = 0;
@@ -291,6 +292,14 @@ export class Runtime {
     return behavior.node.source;
   }
 
+  /** Ends a program that may call only `String.raw` as a tag when a tagged template calls another function. */
+  checkTag(fn: Value): void {
+    if (!this.allowsOnlyStringRawTag || fn === this.realm.stringRaw) return;
+    throw new CompileError([
+      { row: this.currentRow ?? 0, message: 'タグ付きテンプレートは、この採点環境では使えません。' },
+    ]);
+  }
+
   /** V8 names refused-write receivers by their source, class, or tag. */
   receiverText(target: JsObject): string {
     if (target instanceof JsArray) return '[object Array]';
@@ -387,9 +396,9 @@ export class Runtime {
 
   /** The length a value gives an array, which must be an integer an array can hold. */
   toArrayLength(value: Value): number {
-    const length = this.toNumber(value);
-    if (!Number.isInteger(length) || length < 0 || length >= 2 ** 32)
-      this.throwError('RangeError', 'Invalid array length');
+    // The spec's ArraySetLength converts the value twice, as ToUint32 and as ToNumber, which must agree.
+    const length = this.toNumber(value) >>> 0;
+    if (length !== this.toNumber(value)) this.throwError('RangeError', 'Invalid array length');
     return length;
   }
 

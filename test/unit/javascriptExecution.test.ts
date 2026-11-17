@@ -1515,6 +1515,18 @@ const iterator=afterYield();iterator.next();try{iterator.next(1);}catch(e){conso
 for (const [n, f] of cases) { try { console.log(n, f()); } catch (e) { console.log(n, e.name, e.message); } }`,
   ],
   [
+    'array lengths converted twice, as ToUint32 and as ToNumber',
+    `for (const [name, run] of [
+  ['define ro', (v) => { const a = [1]; Object.defineProperty(a, 'length', { writable: false }); Object.defineProperty(a, 'length', { value: v }); return a.length; }],
+  ['define', (v) => { const a = [1]; Object.defineProperty(a, 'length', { value: v }); return a.length; }],
+  ['assign', (v) => { const a = [1]; a.length = v; return a.length; }],
+]) {
+  for (const make of [() => { let n = 0; return { valueOf() { return ++n; } }; }, () => ({ valueOf() { console.log('called'); return 1; } }), () => -0, () => 1.5, () => '2', () => 2 ** 32, () => NaN]) {
+    try { console.log(name, run(make())); } catch (e) { console.log(name, e.name, e.message); }
+  }
+}`,
+  ],
+  [
     'definitions restating or changing a read-only array length',
     `for (const descriptor of [{writable:false},{value:1},{value:'1'},{value:2},{value:0},{writable:true},{enumerable:true},{},{value:-1}]) {
   const a = [1]; Object.defineProperty(a, 'length', { writable: false });
