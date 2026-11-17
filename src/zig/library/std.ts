@@ -43,8 +43,11 @@ import {
   discardRepeated,
   flushWriter,
   isDiscardingWriter,
+  writeByteTo,
   WRITER,
   writerBytes,
+  writerEndAfter,
+  writerRemaining,
   type WriterState,
   writerState,
   writerValue,
@@ -280,15 +283,16 @@ function addWriterMembers(): void {
     writeAll: fnMember('Writer.writeAll', (sema, call) => {
       const writer = writerOf(sema, call);
       const [bytes] = compileArgs(sema, expectArgs(sema, call, 1, 'writeAll'), [CONST_U8_SLICE]);
-      return nativeStateCall(errorUnionOf(WRITE_ERROR, VOID), [bytes], call.span, writer, (state, [value], frame) =>
-        writeTo(frame, state, writerBytes(frame, value))
-      );
+      return nativeStateCall(errorUnionOf(WRITE_ERROR, VOID), [bytes], call.span, writer, (state, [value], frame) => {
+        const data = writerBytes(frame, value);
+        return data.length === 0 ? undefined : writeTo(frame, state, data);
+      });
     }),
     writeByte: fnMember('Writer.writeByte', (sema, call) => {
       const writer = writerOf(sema, call);
       const [byte] = compileArgs(sema, expectArgs(sema, call, 1, 'writeByte'), [U8]);
       return nativeStateCall(errorUnionOf(WRITE_ERROR, VOID), [byte], call.span, writer, (state, [value], frame) =>
-        writeTo(frame, state, [Number(value as bigint)])
+        writeByteTo(frame, state, Number(value as bigint))
       );
     }),
     splatByteAll: fnMember('Writer.splatByteAll', (sema, call) => {
@@ -299,7 +303,8 @@ function addWriterMembers(): void {
         [byte, count],
         call.span,
         writer,
-        (state, [byte, count], frame) => writeRepeated(frame, state, [Number(byte as bigint)], Number(count as bigint))
+        (state, [byte, count], frame) =>
+          (count as bigint) === 0n ? undefined : writeRepeated(frame, state, [Number(byte as bigint)], count as bigint)
       );
     }),
     write: fnMember('Writer.write', (sema, call) => {
@@ -314,7 +319,7 @@ function addWriterMembers(): void {
       const writer = writerOf(sema, call);
       const args = compileArgs(sema, expectArgs(sema, call, 2, 'splatBytesAll'), [CONST_U8_SLICE, USIZE]);
       return nativeStateCall(errorUnionOf(WRITE_ERROR, VOID), args, call.span, writer, (state, [bytes, count], frame) =>
-        writeRepeated(frame, state, writerBytes(frame, bytes), Number(count as bigint))
+        writeRepeated(frame, state, writerBytes(frame, bytes), count as bigint)
       );
     }),
     printUnicodeCodepoint: fnMember('Writer.printUnicodeCodepoint', (sema, call) => {
@@ -416,15 +421,16 @@ function writerOf(
   };
 }
 
-function writeRepeated(frame: Parameters<TExpr['eval']>[0], state: WriterState, data: number[], count: number): Value {
-  const length = data.length * count;
-  const end = state.end + length;
+function writeRepeated(frame: Parameters<TExpr['eval']>[0], state: WriterState, data: number[], count: bigint): Value {
+  const requested = BigInt(data.length) * count;
+  const end = writerEndAfter(state, requested);
+  const length = Number(requested);
   if (isDiscardingWriter(state)) {
-    discardRepeated(frame, state, data, count);
+    discardRepeated(frame, state, data, Number(count));
     return;
   }
   if (state.fd === undefined && !state.growth && end > state.capacity) {
-    const available = Math.max(0, state.capacity - state.end);
+    const available = writerRemaining(state);
     frame.runtime.spend(available);
     writeTo(
       frame,

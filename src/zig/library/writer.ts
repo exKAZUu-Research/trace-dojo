@@ -1,6 +1,6 @@
 import { LIMITS } from '../../interpreter/limits';
 import { checkOutputSize } from '../allocation';
-import { indexOutOfBounds } from '../arith';
+import { indexOutOfBounds, PANIC, panic } from '../arith';
 import { byteValues } from '../builtins';
 import type { FormatOutput } from '../fmt';
 import type { Frame } from '../runtime';
@@ -151,10 +151,15 @@ function bindWriterState(state: WriterState, header: ZStruct): void {
 }
 
 export function bufferedSlice(state: WriterState): Slice {
-  const end = (headers.get(state)?.slots[1] as bigint | undefined) ?? BigInt(state.end);
+  const end = writerEnd(state);
   const buffer = state.buffer;
   if (end > buffer.lengthValue) indexOutOfBounds(end, buffer.lengthValue);
   return new Slice(buffer.target, buffer.start, end);
+}
+
+export function writeByteTo(frame: Frame, state: WriterState, byte: number): Value {
+  if (writerEnd(state) > state.buffer.lengthValue) panic(PANIC.overflow);
+  return writeTo(frame, state, [byte]);
 }
 
 export function bufferedBytes(frame: Frame, state: WriterState): number[] {
@@ -172,7 +177,7 @@ export function bufferingWriter(): WriterState {
 // code-gauge-allow functionNcss 31 -- Keeps growth, drain, and buffered writes in their observable order.
 export function writeTo(frame: Frame, state: WriterState, bytes: readonly number[]): Value {
   frame.runtime.spend();
-  const end = state.end + bytes.length;
+  const end = writerEndAfter(state, BigInt(bytes.length));
   if (end > state.capacity && state.growth) {
     const drain = state.growth.state.drain as
       | ((frame: Frame, writer: WriterState, bytes: readonly number[]) => Value)
@@ -183,7 +188,7 @@ export function writeTo(frame: Frame, state: WriterState, bytes: readonly number
   }
   if (end > state.capacity) {
     if (state.fd === undefined) {
-      const available = Math.max(0, state.capacity - state.end);
+      const available = writerRemaining(state);
       frame.runtime.spend(available);
       for (let index = 0; index < available; index++) state.buffer.set(state.end + index, BigInt(bytes[index]));
       state.end += available;
@@ -214,4 +219,21 @@ export function flushWriter(frame: Frame, state: WriterState): void {
   if (state.fd === undefined) return;
   frame.runtime.writeOutput(state.fd, bufferedBytes(frame, state));
   state.end = 0;
+}
+
+export function writerEndAfter(state: WriterState, length: bigint): number {
+  const end = writerEnd(state) + length;
+  if (end > (1n << 64n) - 1n) panic(PANIC.overflow);
+  return Number(end);
+}
+
+export function writerRemaining(state: WriterState): number {
+  const end = writerEnd(state);
+  const length = state.buffer.lengthValue;
+  if (end > length) panic(`start index ${end} is larger than end index ${length}`);
+  return Number(length - end);
+}
+
+function writerEnd(state: WriterState): bigint {
+  return (headers.get(state)?.slots[1] as bigint | undefined) ?? BigInt(state.end);
 }

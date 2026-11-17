@@ -6047,3 +6047,35 @@ test.each([
     uncaughtException: `panic: index out of bounds: index ${end}, len ${length}`,
   });
 });
+
+test.each([
+  'try w.writeAll("a");',
+  '_=try w.write("a");',
+  '_=try w.write("");',
+  'try w.splatByteAll(97,2);',
+  'try w.splatBytesAll("ab",2);',
+  'try w.splatBytesAll("",0);',
+])('fixed writer drains validate the current buffer start: %s', (operation) => {
+  const source = `const std=@import("std");pub fn main()!void{var b:[8]u8=undefined;var w=std.Io.Writer.fixed(&b);w.end=9;${operation}}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    uncaughtException: 'panic: start index 9 is larger than end index 8',
+  });
+});
+
+test.each([
+  'w.end=9;try w.writeByte(97);',
+  'w.end=18446744073709551615;try w.writeAll("a");',
+  'try w.splatBytesAll("ab",18446744073709551615);',
+])('writer arithmetic preserves usize overflow checks: %s', (operation) => {
+  const source = `const std=@import("std");pub fn main()!void{var b:[8]u8=undefined;var w=std.Io.Writer.fixed(&b);${operation}}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    uncaughtException: 'panic: integer overflow',
+  });
+});
+
+test('empty writeAll and byte splats skip invalid buffer metadata without touching bytes', () => {
+  const source = `const std=@import("std");pub fn main()!void{var b:[8]u8=undefined;var w=std.Io.Writer.fixed(&b);w.end=9;try w.writeAll("");try w.splatByteAll(97,0);try w.flush();std.debug.print("ok",.{});}`;
+  expect(executeProgram('zig', source)).toMatchObject({ kind: 'executed', stderr: 'ok', uncaughtException: undefined });
+});
