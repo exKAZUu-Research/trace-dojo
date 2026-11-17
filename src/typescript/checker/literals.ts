@@ -726,7 +726,13 @@ export class LiteralChecker {
       if (member.kind !== 'object' && member.kind !== 'intersection') continue;
       for (const [name, property] of this.c.structureOf(member).properties) {
         if (property.isMethod && member.kind === 'object' && member.classInfo) continue;
-        result.set(name, { ...property, readonly });
+        // As tsc does, a spread that keeps a property's readonly-ness keeps the property, with an accessor pair's write
+        // type; otherwise it copies the value into a data property.
+        const keeps = readonly === (property.readonly || property.getterOnly === true);
+        result.set(
+          name,
+          keeps ? { ...property, readonly } : { ...property, readonly, getterOnly: false, writeType: undefined }
+        );
       }
     }
     return result;
