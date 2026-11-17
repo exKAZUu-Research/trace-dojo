@@ -41,28 +41,41 @@ function defineMappings(builder: RealmBuilder): void {
     });
     return;
   });
-  iterationMethod(builder, 'map', (ops, callback, { runtime }) =>
-    buildSpeciesArray(runtime, ops.array, ops.length, (result) => {
-      result.setLength(ops.length);
-      forEachPresent(ops, (value, index) => result.set(index, callback(value, index)));
-    })
-  );
-  iterationMethod(builder, 'filter', (ops, callback, { runtime }) =>
-    buildSpeciesArray(runtime, ops.array, 0, (result) =>
-      forEachPresent(ops, (value, index) => {
-        if (toBoolean(callback(value, index))) result.set(result.length, value);
-      })
-    )
-  );
-  iterationMethod(builder, 'flatMap', (ops, callback, { runtime }) =>
-    buildSpeciesArray(runtime, ops.array, 0, (result) =>
-      forEachPresent(ops, (value, index) => {
-        const mapped = callback(value, index);
-        if (mapped instanceof JsArray) flattenInto(runtime, result, new ArrayOps(runtime, mapped), 0);
-        else result.set(result.length, mapped);
-      })
-    )
-  );
+  iterationMethod(builder, 'map', (ops, callback, { runtime }) => {
+    const length = ops.length;
+    return buildSpeciesArray(runtime, ops.array, length, (result) => {
+      forEachPresent(ops, (value, index) => result.create(index, callback(value, index)), length);
+    });
+  });
+  iterationMethod(builder, 'filter', (ops, callback, { runtime }) => {
+    const length = ops.length;
+    return buildSpeciesArray(runtime, ops.array, 0, (result) => {
+      let next = 0;
+      forEachPresent(
+        ops,
+        (value, index) => {
+          if (toBoolean(callback(value, index))) result.create(next++, value);
+        },
+        length
+      );
+    });
+  });
+  iterationMethod(builder, 'flatMap', (ops, callback, { runtime }) => {
+    const length = ops.length;
+    return buildSpeciesArray(runtime, ops.array, 0, (result) => {
+      let next = 0;
+      forEachPresent(
+        ops,
+        (value, index) => {
+          const mapped = callback(value, index);
+          if (mapped instanceof JsArray)
+            next = flattenInto(runtime, result, new ArrayOps(runtime, mapped), 0, { start: next });
+          else result.create(next++, mapped);
+        },
+        length
+      );
+    });
+  });
 }
 
 // code-gauge-allow functionCognitiveComplexity 20 -- Transcribes the specification's algorithm step by step, whose branches mirror its steps.
@@ -134,8 +147,7 @@ function reduce(
  * Visits the elements present at their visit among the indices below the length when the iteration started, until
  * `visit` returns true.
  */
-function forEachPresent(ops: ArrayOps, visit: (value: Value, index: number) => unknown): void {
-  const { length } = ops;
+function forEachPresent(ops: ArrayOps, visit: (value: Value, index: number) => unknown, length = ops.length): void {
   for (let index = 0; index < length; index++) {
     if (ops.has(index) && visit(ops.get(index), index) === true) return;
   }

@@ -1,7 +1,8 @@
+// code-gauge-allow-file fileNcss 402 -- Holds shared type construction, bounded instantiation, structure lookup, and type constraints used by all checker components.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import type { SourceDiagnostic } from '../../interpreter/diagnostics';
-import { ExecutionBudget } from '../../interpreter/limits';
+import { ExecutionBudget, ExecutionLimitError, LIMITS } from '../../interpreter/limits';
 import { AssignmentChecker } from './assignments';
 import { Binder } from './binder';
 import { ClassDeclarationChecker } from './classDeclarations';
@@ -98,7 +99,7 @@ export class Checker {
     startTypeCaches();
     this.libraryBinder = new Binder(libraryTree.rootNode, libraryScope());
     markUnsupported(this.libraryBinder.moduleScope);
-    this.binder = new Binder(root, this.libraryBinder.moduleScope);
+    this.binder = new Binder(root, this.libraryBinder.globalScope, this.libraryBinder.moduleScope);
     for (const identifier of this.binder.assignedIdentifiers) {
       const symbol = this.binder.scopeOf(identifier).lookupValue(identifier.text);
       if (symbol) {
@@ -234,9 +235,21 @@ export class Checker {
     });
   }
 
+  private instantiationDepth = 0;
+
   instantiate(type: Type, mapper: Mapper): Type {
     if (mapper.size === 0) return type;
     this.budget.spend();
+    if (this.instantiationDepth >= LIMITS.maxCallDepth) throw new ExecutionLimitError('operations');
+    this.instantiationDepth++;
+    try {
+      return this.instantiateType(type, mapper);
+    } finally {
+      this.instantiationDepth--;
+    }
+  }
+
+  private instantiateType(type: Type, mapper: Mapper): Type {
     switch (type.kind) {
       case 'typeParameter': {
         return mapper.get(type.id) ?? type;
@@ -304,12 +317,17 @@ export class Checker {
       }
       case 'mapped': {
         const mapped = type.mapped as MappedInfo;
+        const getTemplate = (): Type => this.instantiate(mapped.template, mapper);
         return this.typeOperators.mappedType({
-          ...mapped,
+          typeParameter: mapped.typeParameter,
+          readonlyModifier: mapped.readonlyModifier,
+          optionalModifier: mapped.optionalModifier,
           constraint: this.instantiate(mapped.constraint, mapper),
           nameType: mapped.nameType && this.instantiate(mapped.nameType, mapper),
           source: mapped.source && this.instantiate(mapped.source, mapper),
-          template: this.instantiate(mapped.template, mapper),
+          get template() {
+            return getTemplate();
+          },
         });
       }
       case 'interface': {
@@ -345,8 +363,12 @@ export class Checker {
     const properties = new Map<string, Property>();
     for (const [name, property] of structure.properties) {
       let type: Type | undefined;
+      let writeType: Type | undefined;
       properties.set(name, {
         ...property,
+        writeType:
+          property.writeType &&
+          (() => (writeType ??= this.instantiate(property.writeType?.() ?? property.type(), mapper))),
         type: () => {
           type ??= this.instantiate(property.type(), mapper);
           return type;

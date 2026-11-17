@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 495 -- Holds the types of classes with `this`, `super`, and accessibility, which all read the class information.
+// code-gauge-allow-file fileNcss 497 -- Holds the types of classes with `this`, `super`, and accessibility, which all read the class information.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import type { Checker } from './checker';
@@ -357,6 +357,7 @@ export class ClassChecker {
     return {
       name,
       type: () => this.accessorType(getter, setter),
+      writeType: setter ? () => this.c.signatures.signatureOf(setter).parameters[0]?.type ?? anyType : undefined,
       optional: false,
       readonly: !setter,
       getterOnly: !setter,
@@ -502,6 +503,11 @@ export class ClassChecker {
 
   registerObjectThis(method: TreeNode, object: ObjectType): void {
     this.objectThisByMethod.set(method.id, object);
+  }
+
+  thisContextId(node: TreeNode): number {
+    const owner = this.thisOwner(node);
+    return (owner ? this.objectThisByMethod.get(owner.id)?.id : undefined) ?? this.thisStack.at(-1)?.id ?? 0;
   }
 
   /** The node that decides what `this` is at `node`: a class member, a function, or the program. */

@@ -167,28 +167,15 @@ export class MemberChecker {
   }
 
   /** The type of `object.name`, reporting a missing or inaccessible property. */
-  // code-gauge-allow functionNcss 32 -- Follows TypeScript's lookup of a property on each kind of object type.
-  // code-gauge-allow functionCognitiveComplexity 20 -- Follows TypeScript's lookup of a property on each kind of object type.
   propertyAccess(node: TreeNode, objectNode: TreeNode, propertyNode: TreeNode, objectType: Type, name: string): Type {
     if (isAnyLike(objectType)) return objectType;
     if (propertyNode.type === 'private_property_identifier')
       return this.c.classes.privateNameAccess(node, propertyNode, objectType);
     if (objectType.kind === 'union') {
-      const types: Type[] = [];
-      for (const member of objectType.types) {
-        const property = this.c.propertyOf(member, name);
-        if (!property) {
-          const index = this.indexSignatureFor(member, name);
-          if (index) {
-            types.push(index);
-            continue;
-          }
-          this.reportMissingProperty(propertyNode, name, objectType);
-          return errorType;
-        }
-        types.push(property.optional ? unionOf([property.type(), undefinedType]) : property.type());
-      }
-      return unionOf(types, true);
+      return unionOf(
+        objectType.types.map((member) => this.propertyAccess(node, objectNode, propertyNode, member, name)),
+        true
+      );
     }
     const property = this.c.propertyOf(objectType, name);
     if (!property) {
@@ -197,12 +184,27 @@ export class MemberChecker {
       this.reportMissingProperty(propertyNode, name, objectType);
       return errorType;
     }
-    this.c.classes.checkPropertyAccessibility(node, propertyNode, objectNode, objectType, property);
-    this.c.classes.checkInitializedBefore(node, objectNode, property);
-    const unsupported = this.unsupportedMember(objectType, name) ?? this.unsupportedLibraryMember(property);
-    if (unsupported) this.c.error(propertyNode, unsupportedMessage(unsupported));
+    this.checkPropertyUse(node, objectNode, propertyNode, objectType, name, property);
     const type = property.type();
     return property.optional ? unionOf([type, undefinedType]) : type;
+  }
+
+  checkPropertyUse(
+    node: TreeNode,
+    objectNode: TreeNode,
+    propertyNode: TreeNode,
+    objectType: Type,
+    name: string,
+    property: Property
+  ): void {
+    this.c.classes.checkPropertyAccessibility(node, propertyNode, objectNode, objectType, property);
+    this.c.classes.checkInitializedBefore(node, objectNode, property);
+    this.checkPropertyAvailability(propertyNode, objectType, name, property);
+  }
+
+  checkPropertyAvailability(propertyNode: TreeNode, objectType: Type, name: string, property: Property): void {
+    const unsupported = this.unsupportedMember(objectType, name) ?? this.unsupportedLibraryMember(property);
+    if (unsupported) this.c.error(propertyNode, unsupportedMessage(unsupported));
   }
 
   /** A library member of every error or regular expression that this interpreter does not provide. */
@@ -338,6 +340,7 @@ export class MemberChecker {
     if (objectType.kind === 'union') return this.indexedTypeOfMembers(access, objectType, indexType);
     const property = this.c.propertyOf(objectType, name);
     if (!property) return undefined;
+    this.checkPropertyAvailability(access.indexNode, objectType, name, property);
     // `o["secret"]` reads a private or protected member, which TypeScript leaves as a way around its access checks.
     return property.optional ? unionOf([property.type(), undefinedType]) : property.type();
   }

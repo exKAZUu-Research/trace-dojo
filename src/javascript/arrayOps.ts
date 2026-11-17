@@ -41,6 +41,10 @@ export class ArrayOps {
     else this.runtime.set(this.array, String(index), value);
   }
 
+  create(index: number, value: Value): void {
+    this.runtime.createDataProperty(this.array, String(index), value);
+  }
+
   delete(index: number): void {
     this.runtime.deleteProperty(this.array, String(index));
   }

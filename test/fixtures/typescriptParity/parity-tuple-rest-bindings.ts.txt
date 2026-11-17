@@ -8,3 +8,14 @@ function empty(...args: []) { return args.length; }
 console.log(sum(2, 3), describe("a", 2, "b"), empty());
 const contextual: (...args: [number, string]) => string = (...args) => args[0] + args[1].toUpperCase();
 console.log(contextual(4, "c"));
+type Concat<T extends unknown[], U extends unknown[]> = [...T, ...U];
+type AfterConcrete<T extends unknown[]> = [...number[], ...T];
+type BeforeConcrete<T extends unknown[]> = [...T, ...number[]];
+type FixedSpreads = [...[number], ...[string]];
+type OptionalAfterGeneric<T extends unknown[]> = [...T, string?];
+const concatenated: Concat<[number], [string, boolean]> = [1, "two", true];
+const afterConcrete: AfterConcrete<[string]> = [1, 2, "three"];
+const beforeConcrete: BeforeConcrete<[string]> = ["one", 2, 3];
+const fixedSpreads: FixedSpreads = [4, "five"];
+const optionalAfterGeneric: OptionalAfterGeneric<[number]> = [6, "seven"];
+console.log(concatenated, afterConcrete, beforeConcrete, fixedSpreads, optionalAfterGeneric);

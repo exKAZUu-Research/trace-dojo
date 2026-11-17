@@ -60,6 +60,7 @@ export class JsObject {
   regexp?: RegExp;
   /** Set on a builtin iterator, such as a generator, which loops and spreads step through and close early. */
   hostIterator?: HostIterator;
+  hostIteratorKind?: JsObject;
   /** Set on a generator object. */
   generator?: GeneratorState;
   /** Set on an async generator object. */

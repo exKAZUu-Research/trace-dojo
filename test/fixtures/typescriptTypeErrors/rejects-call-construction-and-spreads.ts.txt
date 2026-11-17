@@ -1,0 +1,7 @@
+class NeedsNew { constructor(public n: number) {} }
+const constructed = NeedsNew(1);
+function fixedThenRest(first: number, ...rest: number[]) { return first; }
+const unknownLength: number[] = [];
+fixedThenRest(...unknownLength);
+class FixedRest { constructor(public first: number, ...rest: number[]) {} }
+new FixedRest(...unknownLength);

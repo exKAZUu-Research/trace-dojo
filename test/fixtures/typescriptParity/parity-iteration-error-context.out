@@ -8,3 +8,6 @@ missing(...) is not iterable (cannot read property undefined)
 undefined is not iterable (cannot read property Symbol(Symbol.iterator))
 object null is not iterable (cannot read property Symbol(Symbol.iterator))
 undefined is not iterable (cannot read property Symbol(Symbol.iterator))
+object is not iterable (cannot read property Symbol(Symbol.iterator))
+object is not iterable (cannot read property Symbol(Symbol.iterator))
+Spread syntax requires ...iterable[Symbol.iterator] to be a function

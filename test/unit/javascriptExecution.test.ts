@@ -1485,6 +1485,39 @@ class Result extends Array { constructor(...args) { super(...args); constructed+
 try { Result.from({ [Symbol.iterator]: 1 }); } catch (e) { console.log(e.name, constructed); }`,
   ],
   [
+    'constructed array results creating own elements and setting their final length',
+    `class C { constructor() { this.length = 100; } set 0(value) { console.log('setter', value); } }
+for (const source of [[7, 8], {0: 9, length: 1}]) {
+  const result = Array.from.call(C, source);
+  console.log(result.length, Object.hasOwn(result, '0'), result[0], result[1]);
+}
+console.log(Array.of.call(C, 4, 5));
+class Protected { constructor() { Object.defineProperty(this, '0', {value: 1}); } }
+try { Array.from.call(Protected, [2]); } catch(e) { console.log(e.message); }
+class Seeded extends Array { constructor(...args) { super(...args); if (args[0] === 0) this.push(99, 98, 97); } }
+const seeded = new Seeded(1, 2);
+console.log(seeded.filter(() => true), seeded.flatMap(x => [x, x + 10]));
+console.log(new Seeded([1], [2]).flat());
+let active = false;
+let input;
+class Changing extends Array { constructor(...args) { super(...args); if (active) input.push(3); } }
+for (const method of ['map', 'filter', 'flatMap', 'flat']) {
+  active = false;
+  input = new Changing(1, 2);
+  active = true;
+  const args = method === 'flat' ? [] : [method === 'filter' ? () => true : x => x];
+  console.log(method, input[method](...args));
+}`,
+  ],
+  [
+    'saved iterator next methods surviving prototype changes',
+    `for (const iterator of [[1, 2].values(), 'ab'[Symbol.iterator](), new Map([['a', 1]]).values()]) {
+  const next = iterator.next;
+  Object.setPrototypeOf(iterator, null);
+  console.log(next.call(iterator), next.call(iterator));
+}`,
+  ],
+  [
     'failing disposers after null await using resources',
     `async function f() { try { { await using a = null; await using b = { async [Symbol.asyncDispose]() { console.log('dispose'); throw 'err'; } }; } } catch (e) { console.log('caught', e); } }
 async function g() { try { { await using a = null; await using b = { [Symbol.dispose]() { console.log('sdispose'); throw 'serr'; } }; } } catch (e) { console.log('caught', e); } }

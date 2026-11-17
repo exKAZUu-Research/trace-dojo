@@ -66,6 +66,7 @@ export interface IntersectionType {
 export interface Property {
   name: string;
   type: () => Type;
+  writeType?: () => Type;
   optional: boolean;
   readonly: boolean;
   isMethod: boolean;

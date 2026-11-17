@@ -1,7 +1,7 @@
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import type { Checker } from './checker';
-import { named, skipParentheses } from './syntax';
+import { named, propertyNameText, skipParentheses } from './syntax';
 import {
   anonymousObject,
   bigintType,
@@ -125,8 +125,7 @@ export class Flow {
 
   /** The property an element access always reads: a literal key, or a constant holding a literal. */
   private constantIndexName(index: TreeNode): string | undefined {
-    if (index.type === 'string') return named(index)[0]?.text ?? '';
-    if (index.type === 'number') return index.text;
+    if (index.type === 'string' || index.type === 'number') return propertyNameText(index);
     if (index.type !== 'identifier') return undefined;
     const symbol = this.c.scopeOf(index).lookupValue(index.text);
     if (symbol?.valueKind !== 'const') return undefined;
@@ -135,6 +134,7 @@ export class Flow {
   }
 
   /** The key of a reference that narrowing applies to: a variable, `this`, or a property path of one. */
+  // code-gauge-allow functionCognitiveComplexity 16 -- Builds distinct lexical, this, dotted, and literal-index references while preserving opaque property segments.
   referenceKey(node: TreeNode): string | undefined {
     const expression = skipParentheses(node);
     switch (expression.type) {
@@ -155,14 +155,14 @@ export class Flow {
         const property = expression.childForFieldName('property');
         if (!object || !property) return undefined;
         const base = this.referenceKey(object);
-        return base ? `${base}.${property.text}` : undefined;
+        return base ? propertyReferenceKey(base, property.text) : undefined;
       }
       case 'subscript_expression': {
         const object = expression.childForFieldName('object');
         const index = expression.childForFieldName('index');
         const name = index ? this.constantIndexName(index) : undefined;
         const base = object && name !== undefined ? this.referenceKey(object) : undefined;
-        return base ? `${base}.${name}` : undefined;
+        return base && name !== undefined ? propertyReferenceKey(base, name) : undefined;
       }
       default: {
         return undefined;
@@ -468,3 +468,7 @@ function sameUnit(a: Type, b: Type): boolean {
 }
 
 export { trueType };
+
+export function propertyReferenceKey(base: string, name: string): string {
+  return `${base}.${name.replaceAll('%', '%25').replaceAll('.', '%2E')}`;
+}

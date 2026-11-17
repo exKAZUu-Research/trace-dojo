@@ -4,10 +4,12 @@ import {
   errorType,
   isAnyLike,
   isIntrinsic,
+  literalType,
   type ObjectType,
   regularOf,
   type Signature,
   type Structure,
+  type TemplateLiteralType,
   type Type,
   type TypeParameter,
   unionOf,
@@ -39,7 +41,6 @@ type Recurse = (source: Type, target: Type, covariant?: boolean) => void;
 export class TypeInference {
   constructor(private readonly c: Checker) {}
 
-  /** The inferences so far as a mapper; with `fixing`, a parameter without one becomes its constraint or `unknown`. */
   /**
    * The type arguments inferred so far, with each parameter `fixes` selects fixed to its constraint or `unknown` when
    * nothing was inferred for it; the others stay type parameters.
@@ -69,7 +70,7 @@ export class TypeInference {
         parameter.id,
         inference.candidates.length > 0 || inference.contravariant.length > 0
           ? this.inferredType(parameter, inference, !this.isTopLevelInReturn(signature, parameter))
-          : (parameter.default?.() ?? parameter.constraint?.() ?? unknownType)
+          : this.c.instantiate(parameter.default?.() ?? parameter.constraint?.() ?? unknownType, mapper)
       );
     }
     // A constraint may mention the parameters themselves, as `T extends Comparable<T>` does, so it sees them all.
@@ -139,7 +140,7 @@ export class TypeInference {
   }
 
   /** Collects the types `source` gives the type parameters that `target` mentions. */
-  // code-gauge-allow functionCognitiveComplexity 17 -- Follows TypeScript's order of inference for each kind of target.
+  // code-gauge-allow functionCognitiveComplexity 19 -- Infers through each target form, including literal strings matched against template placeholders.
   inferTypes(run: InferenceRun, source: Type, target: Type, covariant: boolean, depth = 0): void {
     if (depth > 8) return;
     const recurse: Recurse = (s, t, isCovariant = covariant) => this.inferTypes(run, s, t, isCovariant, depth + 1);
@@ -166,7 +167,25 @@ export class TypeInference {
       for (const member of source.types) recurse(member, target);
       return;
     }
+    if (target.kind === 'templateLiteral' && source.kind === 'literal' && typeof source.value === 'string')
+      this.inferTemplateLiteral(source.value, target, recurse);
     if (target.kind === 'object') this.inferToObject(source, target, recurse);
+  }
+
+  private inferTemplateLiteral(value: string, target: TemplateLiteralType, recurse: Recurse): void {
+    this.c.budget.spend(value.length * target.types.length);
+    const captures = templateCaptures(value, target.texts);
+    if (!captures) return;
+    const { types } = target;
+    for (const [index, type] of types.entries()) {
+      const constraint = type.kind === 'typeParameter' ? type.constraint?.() : type;
+      const text = captures[index];
+      const candidate =
+        constraint && isIntrinsic(constraint, 'number') && text.trim() !== '' && Number.isFinite(Number(text))
+          ? literalType(Number(text))
+          : literalType(text);
+      recurse(candidate, type);
+    }
   }
 
   private inferToParameter(
@@ -417,4 +436,19 @@ export function newInferenceRun(parameters: TypeParameter[]): InferenceRun {
     parameters,
     lowPriority: false,
   };
+}
+
+function templateCaptures(value: string, texts: string[]): string[] | undefined {
+  if (!value.startsWith(texts[0])) return undefined;
+  let position = texts[0].length;
+  const captures: string[] = [];
+  for (let index = 0; index < texts.length - 1; index++) {
+    const delimiter = texts[index + 1];
+    const last = index === texts.length - 2;
+    const end = last ? value.length - delimiter.length : delimiter ? value.indexOf(delimiter, position) : position + 1;
+    if (end < position || end > value.length || !value.startsWith(delimiter, end)) return undefined;
+    captures.push(value.slice(position, end));
+    position = end + delimiter.length;
+  }
+  return position === value.length ? captures : undefined;
 }

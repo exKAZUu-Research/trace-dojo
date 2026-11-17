@@ -1,0 +1,4 @@
+let mutableNumber = 1;
+const invalidVariable = mutableNumber as const;
+const invalidExpression = (1 + 2) as const;
+const nullAssertion = null as const;

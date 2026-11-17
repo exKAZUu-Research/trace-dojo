@@ -23,7 +23,7 @@ export function defineArrayBuiltins(builder: RealmBuilder): void {
   builder.method(arrayConstructor, 'isArray', 1, ({ args }) => args[0] instanceof JsArray);
   builder.method(arrayConstructor, 'of', 0, ({ runtime, thisValue, args }) =>
     buildWith(runtime, thisValue, args.length, (result) => {
-      for (const [index, value] of args.entries()) result.set(index, value);
+      for (const [index, value] of args.entries()) result.create(index, value);
       result.setLength(args.length);
     })
   );
@@ -67,7 +67,11 @@ export function buildSpeciesArray(
 ): JsObject {
   const constructor = original instanceof JsArray ? runtime.get(original, 'constructor') : undefined;
   const arrayConstructor = runtime.get(runtime.realm.arrayPrototype, 'constructor');
-  if (!(constructor instanceof JsFunction) || constructor === arrayConstructor) return buildArray(runtime, build);
+  if (!(constructor instanceof JsFunction) || constructor === arrayConstructor)
+    return buildArray(runtime, (result) => {
+      result.setLength(length);
+      build(result);
+    });
   if (!constructor.isConstructor)
     runtime.throwError('TypeError', 'object.constructor[Symbol.species] is not a constructor');
   const result = runtime.construct(constructor, [length]);
@@ -108,13 +112,14 @@ function arrayFrom({ runtime, thisValue, args, callRow }: NativeCall): JsObject 
   const length = iterable ? undefined : toLength(runtime, runtime.get(runtime.toObject(source), 'length'));
   return buildWith(runtime, thisValue, length, (result) => {
     const add = (value: Value, index: number): void =>
-      result.set(index, mapper ? runtime.call(mapper, thisArg, [value, index], callRow) : value);
+      result.create(index, mapper ? runtime.call(mapper, thisArg, [value, index], callRow) : value);
     if (method !== undefined && method !== null) {
       // Each value is read just before its mapper runs, as JavaScript's iteration does.
       const iterator = runtime.iterator(source, method);
       try {
-        for (let index = 0, value = iterator.next(); value !== DONE; index++, value = iterator.next())
-          add(value, index);
+        let index = 0;
+        for (let value = iterator.next(); value !== DONE; value = iterator.next()) add(value, index++);
+        result.setLength(index);
       } catch (error) {
         // A mapper that throws closes the iterator; a failed `next()` has already ended it.
         if (error instanceof JsThrow) iterator.close('throw');
@@ -124,6 +129,7 @@ function arrayFrom({ runtime, thisValue, args, callRow }: NativeCall): JsObject 
     }
     const object = runtime.toObject(source);
     for (let index = 0; index < (length ?? 0); index++) add(runtime.get(object, String(index)), index);
+    result.setLength(length ?? 0);
   });
 }
 
@@ -206,7 +212,7 @@ function splice({ runtime, args }: NativeCall, ops: ArrayOps): JsObject {
   runtime.scan(length + items.length);
   const removed = buildSpeciesArray(runtime, ops.array, deleteCount, (result) => {
     for (let index = 0; index < deleteCount; index++) {
-      if (ops.has(start + index)) result.set(index, ops.get(start + index));
+      if (ops.has(start + index)) result.create(index, ops.get(start + index));
     }
     result.setLength(deleteCount);
   });
@@ -302,7 +308,7 @@ function defineCopies(builder: RealmBuilder): void {
     const end = relativeIndex(runtime, args[1], length, length);
     runtime.scan(end - start);
     return buildSpeciesArray(runtime, ops.array, Math.max(end - start, 0), (result) => {
-      for (let index = start; index < end; index++) if (ops.has(index)) result.set(index - start, ops.get(index));
+      for (let index = start; index < end; index++) if (ops.has(index)) result.create(index - start, ops.get(index));
       result.setLength(Math.max(end - start, 0));
     });
   });
@@ -311,36 +317,46 @@ function defineCopies(builder: RealmBuilder): void {
       let next = 0;
       for (const item of [ops.array, ...args]) {
         if (!(item instanceof JsArray)) {
-          result.set(next++, item);
+          result.create(next++, item);
           continue;
         }
         const source = new ArrayOps(runtime, item);
         const { length } = source;
         runtime.scan(length);
-        for (let index = 0; index < length; index++, next++) if (source.has(index)) result.set(next, source.get(index));
+        for (let index = 0; index < length; index++, next++)
+          if (source.has(index)) result.create(next, source.get(index));
       }
       result.setLength(next);
     })
   );
   arrayMethod(builder, 'flat', 0, ({ runtime, args }, ops) => {
+    const length = ops.length;
     const depth = args[0] === undefined ? 1 : Math.max(toInteger(runtime, args[0]), 0);
     return buildSpeciesArray(runtime, ops.array, 0, (result) =>
-      flattenInto(runtime, result, ops, Math.min(depth, 100))
+      flattenInto(runtime, result, ops, Math.min(depth, 100), { length })
     );
   });
 }
 
 /** The spec's FlattenIntoArray without a mapper: appends the present elements, flattening nested arrays. */
-export function flattenInto(runtime: Runtime, target: ArrayOps, source: ArrayOps, depth: number): void {
-  const { length } = source;
+export function flattenInto(
+  runtime: Runtime,
+  target: ArrayOps,
+  source: ArrayOps,
+  depth: number,
+  options: { start?: number; length?: number } = {}
+): number {
+  const length = options.length ?? source.length;
+  let next = options.start ?? 0;
   runtime.scan(length);
   for (let index = 0; index < length; index++) {
     if (!source.has(index)) continue;
     const element = source.get(index);
     if (depth > 0 && element instanceof JsArray)
-      flattenInto(runtime, target, new ArrayOps(runtime, element), depth - 1);
-    else target.set(target.length, element);
+      next = flattenInto(runtime, target, new ArrayOps(runtime, element), depth - 1, { start: next });
+    else target.create(next++, element);
   }
+  return next;
 }
 
 function defineSearches(builder: RealmBuilder): void {

@@ -1,8 +1,9 @@
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
+import { unsupportedMessage } from '../unsupported';
 import type { Checker, Mapper } from './checker';
 import type { Sym } from './scopes';
-import { named, numberValue, propertyNameText, stringValue } from './syntax';
+import { hasToken, named, numberValue, propertyNameText, stringValue } from './syntax';
 import {
   anonymousObject,
   anyType,
@@ -14,6 +15,7 @@ import {
   functionType,
   type IndexInfo,
   intersectionOf,
+  isAnyLike,
   isIntrinsic,
   literalType,
   neverType,
@@ -58,8 +60,9 @@ export class TypeNodes {
   private readonly typeNodeCache = new Map<number, Type>();
   /** The type each kind of type syntax denotes; the others are `any`. */
   private readonly typeSyntaxes = new Map<string, (node: TreeNode) => Type>([
-    ['predefined_type', (node) => predefinedTypes[node.text] ?? (node.text === 'unique symbol' ? symbolType : anyType)],
+    ['predefined_type', (node) => predefinedTypes[node.text] ?? anyType],
     ['type_identifier', (node) => this.typeReference(node, node, [])],
+    ['nested_type_identifier', (node) => this.qualifiedType(node)],
     ['identifier', (node) => this.typeReference(node, node, [])],
     ['generic_type', (node) => this.genericType(node)],
     ['parenthesized_type', (node) => this.typeFromNode(named(node)[0])],
@@ -75,7 +78,7 @@ export class TypeNodes {
     ],
     ['array_type', (node) => this.c.arrayType(this.typeFromNode(named(node)[0]))],
     ['readonly_type', (node) => this.readonlyType(node)],
-    ['tuple_type', (node) => this.c.tupleType(named(node).map((element) => this.tupleElement(element)))],
+    ['tuple_type', (node) => this.tupleTypeFromNode(node)],
     ['function_type', (node) => this.functionTypeFromNode(node)],
     ['constructor_type', (node) => this.functionTypeFromNode(node)],
     ['object_type', (node) => this.objectTypeLiteral(node)],
@@ -133,11 +136,16 @@ export class TypeNodes {
     const name = node.childForFieldName('name') as TreeNode;
     const argumentsNode = node.childForFieldName('type_arguments');
     const typeArguments = argumentsNode ? named(argumentsNode).map((argument) => this.typeFromNode(argument)) : [];
-    return this.typeReference(node, name, typeArguments);
+    return name.type === 'nested_type_identifier'
+      ? this.qualifiedType(name)
+      : this.typeReference(node, name, typeArguments);
   }
 
   private readonlyType(node: TreeNode): Type {
-    const inner = this.typeFromNode(named(node)[0]);
+    const operand = named(node)[0];
+    if (!['array_type', 'tuple_type'].includes(operand.type))
+      this.c.error(node, 'readonly 型修飾子は、配列型かタプル型のリテラルにのみ使えます。');
+    const inner = this.typeFromNode(operand);
     if (this.c.isArrayType(inner)) return this.c.arrayType(this.c.elementTypeOf(inner as ObjectType), true);
     if (inner.kind === 'object' && inner.objectKind === 'tuple')
       return this.c.tupleType(inner.tuple?.elements ?? [], true);
@@ -215,6 +223,55 @@ export class TypeNodes {
     }
   }
 
+  private tupleTypeFromNode(node: TreeNode): Type {
+    let optionalSeen = false;
+    let restSeen = false;
+    const elements = named(node).map((element) => {
+      const type = this.tupleElement(element);
+      const concreteRest = type.rest && this.hasConcreteRest(type.type);
+      if (concreteRest && restSeen) this.c.error(element, 'タプル型に複数の残余要素は書けません。');
+      if (type.rest && !this.validTupleRestType(type.type))
+        this.c.error(element, '残余要素の型は配列型にしてください。');
+      if (type.optional && restSeen) this.c.error(element, '残余要素の後に省略可能な要素は書けません。');
+      if (!type.optional && !type.rest && optionalSeen)
+        this.c.error(element, '省略可能な要素の後に必須の要素は書けません。');
+      optionalSeen ||= type.optional;
+      restSeen ||= concreteRest;
+      return type;
+    });
+    return this.c.tupleType(elements);
+  }
+
+  private validTupleRestType(type: Type, seen = new Set<number>()): boolean {
+    if (isAnyLike(type) || isIntrinsic(type, 'never')) return true;
+    if (seen.has(type.id)) return false;
+    seen.add(type.id);
+    try {
+      if (type.kind === 'typeParameter') {
+        const constraint = this.c.constraintOf(type);
+        return constraint !== undefined && this.validTupleRestType(constraint, seen);
+      }
+      if (type.kind === 'union') return type.types.every((member) => this.validTupleRestType(member, seen));
+      if (type.kind === 'intersection') return type.types.some((member) => this.validTupleRestType(member, seen));
+      return (
+        type.kind === 'object' &&
+        (this.c.isArrayOrTuple(type) ||
+          this.c.relations.isAssignable(type, this.c.globalType('ReadonlyArray', [anyType])))
+      );
+    } finally {
+      seen.delete(type.id);
+    }
+  }
+
+  private hasConcreteRest(type: Type): boolean {
+    if (type.kind === 'union' || type.kind === 'intersection')
+      return type.types.some((member) => this.hasConcreteRest(member));
+    if (type.kind !== 'object') return false;
+    if (type.objectKind === 'tuple')
+      return (type.tuple?.elements ?? []).some((element) => element.rest && this.hasConcreteRest(element.type));
+    return this.validTupleRestType(type);
+  }
+
   private tupleElement(node: TreeNode): TupleElement {
     switch (node.type) {
       case 'optional_type': {
@@ -241,8 +298,8 @@ export class TypeNodes {
   }
 
   /** The type a name refers to in a type position, applied to type arguments. */
-  // code-gauge-allow functionNcss 31 -- Resolves a type name and checks its type arguments as TypeScript does.
-  // code-gauge-allow functionCognitiveComplexity 19 -- Resolves a type name and checks its type arguments as TypeScript does.
+  // code-gauge-allow functionNcss 34 -- Resolves type names, rejects unavailable library types, and checks their type arguments.
+  // code-gauge-allow functionCognitiveComplexity 20 -- Resolves type names, rejects unavailable library types, and checks their type arguments.
   private typeReference(node: TreeNode, nameNode: TreeNode, typeArguments: Type[]): Type {
     const name = nameNode.text;
     const local = this.c.typeOperators.mappedOrInferParameter(nameNode, name);
@@ -264,6 +321,10 @@ export class TypeNodes {
           ? `${name} は値であり、型としては使えません。型を表すには typeof ${name} と書いてください。`
           : `型 ${name} が見つかりません。`
       );
+      return errorType;
+    }
+    if (symbol.unsupported) {
+      this.c.error(node, unsupportedMessage(symbol.unsupported));
       return errorType;
     }
     const declared = this.declaredTypeOf(symbol);
@@ -293,6 +354,19 @@ export class TypeNodes {
       return instantiated;
     }
     return this.c.reference(declared as ObjectType, filled);
+  }
+
+  private qualifiedType(node: TreeNode): Type {
+    if (this.c.isLibrary(node)) return anyType;
+    let root = node;
+    while (root.childForFieldName('module') ?? root.childForFieldName('object'))
+      root = (root.childForFieldName('module') ?? root.childForFieldName('object')) as TreeNode;
+    const symbol = this.c.scopeOf(root).lookupType(root.text) ?? this.c.scopeOf(root).lookupValue(root.text);
+    this.c.error(
+      node,
+      symbol?.unsupported ? unsupportedMessage(symbol.unsupported) : `名前空間 ${root.text} が見つかりません。`
+    );
+    return errorType;
   }
 
   checkTypeArgumentConstraints(node: TreeNode, parameters: TypeParameter[], typeArguments: Type[]): void {
@@ -329,8 +403,8 @@ export class TypeNodes {
   }
 
   /** The members of an interface body or an object type literal. */
-  // code-gauge-allow functionNcss 42 -- One case per kind of interface member.
-  // code-gauge-allow functionCognitiveComplexity 20 -- One case per kind of interface member.
+  // code-gauge-allow functionNcss 45 -- Handles interface properties, accessor signatures, methods, calls, constructors, and index signatures.
+  // code-gauge-allow functionCognitiveComplexity 24 -- Handles interface properties, accessor signatures, methods, calls, constructors, and index signatures.
   membersStructure(members: TreeNode[]): Structure {
     const structure = emptyStructure();
     const methods = new Map<string, Signature[]>();
@@ -356,6 +430,10 @@ export class TypeNodes {
           const nameNode = member.childForFieldName('name') as TreeNode;
           const name = propertyNameText(nameNode);
           if (name === undefined) break;
+          if (hasToken(member, 'get') || hasToken(member, 'set')) {
+            this.addAccessorSignature(structure, member, name);
+            break;
+          }
           const signatures = methods.get(name) ?? [];
           signatures.push({ ...this.c.signatures.signatureOf(member), isMethod: true });
           methods.set(name, signatures);
@@ -402,6 +480,24 @@ export class TypeNodes {
   private implicitAnyMember(member: TreeNode, nameNode: TreeNode): Type {
     if (!this.c.isLibrary(member)) this.c.error(nameNode, `メンバー ${nameNode.text} の型が暗黙に any になります。`);
     return anyType;
+  }
+
+  private addAccessorSignature(structure: Structure, member: TreeNode, name: string): void {
+    const getter = hasToken(member, 'get');
+    const signature = this.c.signatures.signatureOf(member);
+    const type = getter ? signature.returnType : () => signature.parameters[0]?.type ?? anyType;
+    const previous = structure.properties.get(name);
+    structure.properties.set(name, {
+      name,
+      type: getter ? type : (previous?.type ?? type),
+      writeType: getter ? previous?.writeType : type,
+      optional: false,
+      readonly: getter && !previous?.writeType,
+      getterOnly: getter && !previous?.writeType,
+      isMethod: false,
+      visibility: 'public',
+      declaration: member,
+    });
   }
 
   /** The type a type name stands for: an interface, a class's instance type, an alias, or a type parameter. */

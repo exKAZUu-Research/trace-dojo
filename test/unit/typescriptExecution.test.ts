@@ -126,11 +126,11 @@ test('a type error is reported in Japanese on its row and stops the program befo
   expect(
     diagnosticsOf(`console.log("never printed");
 let count: number = "3";
-const name: string | undefined = undefined;
-console.log(name.length);`)
+const maybeText: string | undefined = undefined;
+console.log(maybeText.length);`)
   ).toEqual([
     "2: 型 'string' を型 'number' に代入することはできません。",
-    "4: 'name' は 'undefined' の可能性があります。",
+    "4: 'maybeText' は 'undefined' の可能性があります。",
   ]);
 });
 
@@ -183,4 +183,74 @@ const tagged = { get [Symbol.toStringTag]() { return 'tagged'; } };`;
   if (execution.kind !== 'compileError') throw new Error(`not rejected: ${JSON.stringify(execution)}`);
   expect(execution.diagnostics.map(({ row }) => row)).toEqual([0, 1, 2, 3]);
   expect(execution.diagnostics.every(({ message }) => message.includes('この採点環境では使えません'))).toBe(true);
+});
+
+test('unsupported library members are rejected through destructuring, brackets, and unions', () => {
+  const sources = [
+    'const {stack} = new Error("bad"); console.log(stack);',
+    'const {random} = Math; console.log(random());',
+    'console["time"]("start");',
+    'function show(error: Error | TypeError) { const {stack} = error; console.log(stack); }',
+  ];
+  for (const source of sources) {
+    const execution = executeProgram('typescript', source);
+    if (execution.kind !== 'compileError') throw new Error(`not rejected: ${JSON.stringify(execution)}`);
+    expect(execution.diagnostics.some(({ message }) => message.includes('この採点環境では使えません'))).toBe(true);
+  }
+});
+
+test('recursive type instantiation stops before the host stack is exhausted', () => {
+  for (const argument of ['T', 'T[]']) {
+    const source = `type Loop<T> = T extends any ? Loop<${argument}> : never; const value: Loop<number> = 1;`;
+    expect(executeProgram('typescript', source)).toEqual({ kind: 'limitExceeded', limit: 'operations' });
+  }
+});
+
+test('template literal type products spend their budget before allocating combinations', () => {
+  const declarations = Array.from(
+    { length: 12 },
+    (_, group) => `type Part${group} = ${Array.from({ length: 100 }, (_, index) => group * 100 + index).join(' | ')};`
+  ).join('\n');
+  const source = `${declarations}\ntype Part = ${Array.from({ length: 12 }, (_, index) => `Part${index}`).join(' | ')};\ntype Product = \`\${Part}\${Part}\`;`;
+  expect(executeProgram('typescript', source)).toEqual({ kind: 'limitExceeded', limit: 'operations' });
+});
+
+test('legacy HTML builders enforce string limits before escaping and wrapping', () => {
+  for (const source of [
+    'console.log("x".repeat(1000000).bold().length);',
+    'let text = "x"; for (let i = 0; i < 16; i++) text = text.link(text); console.log(text.length);',
+  ]) {
+    expect(executeProgram('typescript', source)).toMatchObject({
+      kind: 'executed',
+      stdout: '',
+      uncaughtException: 'RangeError: Invalid string length',
+    });
+  }
+});
+
+test('unsupported type syntax and omitted host globals stop execution before effects', () => {
+  for (const source of [
+    'console.log("never"); const value: unique symbol = Symbol();',
+    'console.log("never"); const value: unique  symbol = Symbol();',
+    'console.log("never"); const value: unique /* type */ symbol = Symbol();',
+    'console.log("never"); const make = Uint8Array; make(3);',
+    'console.log("never"); let values: Uint8Array;',
+    'console.log("never"); type Constructor = typeof Uint8Array;',
+    'console.log("never"); type Formatter = Intl.NumberFormat;',
+    'console.log("never"); type Instance = WebAssembly.Instance;',
+  ]) {
+    const execution = executeProgram('typescript', source);
+    expect(execution).toMatchObject({
+      kind: 'compileError',
+      diagnostics: [{ message: expect.stringContaining('この採点環境では使えません。') }],
+    });
+  }
+});
+
+test('RegExp match state starts fresh for each execution', () => {
+  executeProgram('typescript', '/(a)/.test("a");');
+  expect(executeProgram('typescript', 'console.log(RegExp.$1 === "", RegExp.input === "");')).toMatchObject({
+    kind: 'executed',
+    stdout: 'true true\n',
+  });
 });

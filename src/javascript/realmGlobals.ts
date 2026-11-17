@@ -27,6 +27,7 @@ export function defineGlobalBuiltins(builder: RealmBuilder): void {
   builder.global('NaN', Number.NaN, false);
   builder.global('Infinity', Number.POSITIVE_INFINITY, false);
   builder.global('globalThis', undefined, false);
+  defineUriFunctions(builder);
   defineObject(builder);
   defineFunction(builder);
   defineErrors(builder);
@@ -35,6 +36,26 @@ export function defineGlobalBuiltins(builder: RealmBuilder): void {
   defineMath(builder);
   defineConsole(builder);
   defineTurtle(builder);
+}
+
+function defineUriFunctions(builder: RealmBuilder): void {
+  for (const [name, encode] of Object.entries({ encodeURI, encodeURIComponent, decodeURI, decodeURIComponent })) {
+    builder.global(
+      name,
+      builder.function(name, 1, ({ runtime, args }) => {
+        const text = runtime.toString(args[0]);
+        runtime.scan(text.length);
+        try {
+          const result = encode(text);
+          runtime.buildString(result.length);
+          return result;
+        } catch (error) {
+          if (error instanceof URIError) return runtime.throwError('URIError', 'URI malformed');
+          throw error;
+        }
+      })
+    );
+  }
 }
 
 function defineObject(builder: RealmBuilder): void {
@@ -190,6 +211,8 @@ function defineFunction(builder: RealmBuilder): void {
 
 const errorNames: ErrorName[] = [
   'Error',
+  'EvalError',
+  'URIError',
   'TypeError',
   'RangeError',
   'ReferenceError',
@@ -521,7 +544,6 @@ function defineConsole(builder: RealmBuilder): void {
   for (const property of console.properties.values()) property.enumerable = true;
 }
 
-/** The console methods that print as `console.log` does in a form of their own: tables, traces, and clearing. */
 /** `console.dir`, which prints its value with the `util.inspect` options it is given. */
 // code-gauge-allow functionCognitiveComplexity 18 -- Reads each util.inspect option console.dir takes.
 function defineConsoleDir(

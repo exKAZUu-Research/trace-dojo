@@ -2,8 +2,8 @@ import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import type { Checker } from './checker';
 import { checkDuplicateMembers } from './declarations';
-import { FlowState, type State } from './flow';
-import { hasToken, named } from './syntax';
+import { FlowState, propertyReferenceKey, type State } from './flow';
+import { hasToken, named, propertyNameText } from './syntax';
 import {
   anyType,
   type ClassInfo,
@@ -287,7 +287,7 @@ export class ClassDeclarationChecker {
     for (const member of named(body)) {
       const nameNode = this.uninitializedFieldName(member);
       if (!nameNode) continue;
-      const key = `this${ownerId}.${nameNode.text}`;
+      const key = propertyReferenceKey(`this${ownerId}`, propertyNameText(nameNode) ?? nameNode.text);
       const assigned = ctor !== undefined && states.every((state) => state.assignedFields.has(key));
       if (!assigned) {
         this.c.error(

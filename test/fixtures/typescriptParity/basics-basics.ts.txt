@@ -1,9 +1,9 @@
 let count: number = 3;
-const name = "turtle";
-let ok: boolean = count > 2 && name.length === 6;
+const label = "turtle";
+let ok: boolean = count > 2 && label.length === 6;
 let big: bigint = 10n ** 20n;
 const sym = Symbol("id");
-console.log(count, name, ok, big, typeof sym, sym.toString(), sym.description);
+console.log(count, label, ok, big, typeof sym, sym.toString(), sym.description);
 count += 2;
 count -= 1;
 count *= 3;

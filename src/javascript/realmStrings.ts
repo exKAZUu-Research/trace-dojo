@@ -98,11 +98,27 @@ function defineLocaleAndLegacy(method: StringMethod): void {
     return text.slice(start, start + Math.max(0, Math.min(length, text.length - start)));
   });
   for (const [name, tag, attribute] of htmlMethods) {
-    method(name, attribute ? 1 : 0, ({ runtime, args }, text) => {
-      const value = attribute ? ` ${attribute}="${runtime.toString(args[0]).replaceAll('"', '&quot;')}"` : '';
-      return `<${tag}${value}>${text}</${tag}>`;
-    });
+    method(name, attribute ? 1 : 0, ({ runtime, args }, text) =>
+      buildLegacyHtml(runtime, text, tag, attribute, args[0])
+    );
   }
+}
+
+function buildLegacyHtml(
+  runtime: Runtime,
+  text: string,
+  tag: string,
+  attribute: string | undefined,
+  argument: Value
+): string {
+  const input = attribute ? runtime.toString(argument) : '';
+  runtime.scan(input.length);
+  let quotes = 0;
+  for (const character of input) if (character === '"') quotes++;
+  const attributeLength = attribute ? attribute.length + 4 + input.length + quotes * 5 : 0;
+  runtime.buildString(text.length + tag.length * 2 + 5 + attributeLength);
+  const value = attribute ? ` ${attribute}="${input.replaceAll('"', '&quot;')}"` : '';
+  return `<${tag}${value}>${text}</${tag}>`;
 }
 
 /** The legacy HTML methods, by name: the element each wraps the string in, and the attribute its argument sets. */

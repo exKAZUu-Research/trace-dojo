@@ -1,0 +1,13 @@
+a%20b%26%C3%A9 あ http://x/a%20b  
+URIError URI malformed true
+      
+a b ab b xabz x z
+a b ab b xabz x z
+4  4 4 c3d4 c3d 
+5  5 5 p5q p q
+7  7 7 x6y7 x6y 
+8 8
+9 9
+9  9 9 x8y9 x8y 
+2  2 2 a1b2 a1b 
+override 2 2 a1b 

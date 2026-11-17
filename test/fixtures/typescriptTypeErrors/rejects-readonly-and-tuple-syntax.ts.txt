@@ -1,0 +1,8 @@
+type ReadonlyString = readonly string;
+type ReadonlyGeneric = readonly Array<number>;
+type RequiredAfterOptional = [number?, string];
+type MultipleRest = [...number[], ...string[]];
+type OptionalAfterRest = [...number[], string?];
+type MultipleConcreteWithGeneric<T extends unknown[], U extends unknown[]> = [...T, ...number[], ...U, ...string[]];
+type NestedConcreteRest = [...[number, ...string[]], ...boolean[]];
+type UnconstrainedRest<T> = [...T];

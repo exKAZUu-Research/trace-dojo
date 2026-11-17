@@ -53,9 +53,10 @@ export class Binder {
 
   constructor(
     root: TreeNode,
-    readonly globalScope: Scope
+    readonly globalScope: Scope,
+    rootScope?: Scope
   ) {
-    this.moduleScope = new Scope('module', globalScope, root);
+    this.moduleScope = rootScope ?? new Scope('module', globalScope, root);
     this.scopes.set(root.id, this.moduleScope);
     this.bindChildren(root, this.moduleScope);
   }

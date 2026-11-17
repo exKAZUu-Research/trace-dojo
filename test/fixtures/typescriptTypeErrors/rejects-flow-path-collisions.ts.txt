@@ -1,0 +1,12 @@
+function dottedKey(value: {"b.c": string | number; b: {c: string | number}}) {
+  if (typeof value["b.c"] === "string") console.log(value.b.c.toUpperCase());
+}
+function nestedDottedKey(value: {"b.c": {d: string | number}; b: {c: {d: string | number}}}) {
+  if (typeof value["b.c"].d === "string") console.log(value.b.c.d.toUpperCase());
+}
+function percentEncodedKey(value: {"b.c": string | number; "b%2Ec": string | number}) {
+  if (typeof value["b.c"] === "string") console.log(value["b%2Ec"].toUpperCase());
+}
+function escapedDottedKey(value: {"b.c": string | number; b: {c: string | number}}) {
+  if (typeof value["b\u002ec"] === "string") console.log(value.b.c.toUpperCase());
+}

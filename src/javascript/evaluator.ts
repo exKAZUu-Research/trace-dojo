@@ -1,9 +1,10 @@
 import { createArgumentsObject, mapArguments } from './argumentsObject';
-// code-gauge-allow-file fileNcss 486 -- One executor of every statement kind and of functions and classes, which share its scopes.
+// code-gauge-allow-file fileNcss 488 -- One executor of every statement kind and of functions and classes, which share its scopes.
 import type {
   Block,
   ClassMember,
   ClassNode,
+  Expression,
   FunctionNode,
   Program,
   ScopeDeclarations,
@@ -531,8 +532,8 @@ export class Evaluator extends SuspendableStatementEvaluator {
 
   // Classes -----------------------------------------------------------------------------------------------------------
 
-  // code-gauge-allow functionCognitiveComplexity 18 -- Transcribes the specification's ClassDefinitionEvaluation step by step, whose branches mirror its steps.
-  evaluateClass(cls: ClassNode): JsFunction {
+  // code-gauge-allow functionCognitiveComplexity 19 -- Transcribes the specification's ClassDefinitionEvaluation step by step, whose branches mirror its steps.
+  evaluateClass(cls: ClassNode, inferredName?: Key): JsFunction {
     const { runtime } = this;
     const { prototypeParent, constructorParent } = this.classParents(cls);
     const classScope = new Scope(runtime.frame.scope);
@@ -560,6 +561,7 @@ export class Evaluator extends SuspendableStatementEvaluator {
     const fn = new JsFunction(constructorParent, behavior);
     runtime.allocate(3);
     defineFunctionProperties(fn, cls.name, cls.ctor ? expectedArgumentCount(cls.ctor) : 0);
+    if (inferredName !== undefined) nameFunction(runtime, fn, inferredName);
     fn.properties.set('prototype', {
       value: prototype,
       writable: false,
@@ -611,6 +613,7 @@ export class Evaluator extends SuspendableStatementEvaluator {
    * Defines the methods and accessors and collects the instance fields, returning what initializes the class itself:
    * its static fields and static blocks in source order.
    */
+  // code-gauge-allow functionCognitiveComplexity 19 -- Keeps method definitions and deferred field/static-block initialization in class source order.
   private defineMembers(
     cls: ClassNode,
     fn: JsFunction,
@@ -631,8 +634,7 @@ export class Evaluator extends SuspendableStatementEvaluator {
       if (member.kind === 'field') {
         const { value } = member;
         const initialize = value
-          ? (thisValue: JsObject): Value =>
-              this.inScope(this.methodScope(classScope, thisValue, target), () => this.evaluate(value))
+          ? this.fieldInitializer(value, classScope, target, member.key.kind === 'private' ? member.key.name : key)
           : undefined;
         const field: ClassField = {
           key,
@@ -648,6 +650,22 @@ export class Evaluator extends SuspendableStatementEvaluator {
       this.defineMethod(member, key, target, classScope, instanceFields);
     }
     return staticInitializers;
+  }
+
+  private fieldInitializer(
+    value: Expression,
+    classScope: Scope,
+    target: JsObject,
+    name: Key
+  ): (thisValue: JsObject) => Value {
+    return (thisValue) =>
+      this.inScope(this.methodScope(classScope, thisValue, target), () => {
+        const initialized =
+          value.kind === 'classExpression' ? this.evaluateClass(value.cls, name) : this.evaluate(value);
+        if (value.kind === 'functionExpression' && initialized instanceof JsFunction)
+          nameFunction(this.runtime, initialized, name);
+        return initialized;
+      });
   }
 
   private runStaticBlock(block: Extract<ClassMember, { kind: 'staticBlock' }>, scope: Scope): void {

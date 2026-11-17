@@ -29,6 +29,8 @@ const V8_MEMBER_ORDER: Record<string, string> = {
   Error: 'length,name,prototype,captureStackTrace,prepareStackTrace,isError,stackTraceLimit',
   Symbol:
     'length,name,prototype,for,keyFor,asyncIterator,hasInstance,isConcatSpreadable,iterator,match,matchAll,replace,search,species,split,toPrimitive,toStringTag,unscopables,dispose,asyncDispose',
+  RegExp:
+    "length,name,prototype,input,$_,lastMatch,$&,lastParen,$+,leftContext,$`,rightContext,$',$1,$2,$3,$4,$5,$6,$7,$8,$9,escape",
   'RegExp.prototype':
     'constructor,exec,dotAll,flags,global,hasIndices,ignoreCase,multiline,source,sticky,unicode,unicodeSets,compile,toString,test',
   console:

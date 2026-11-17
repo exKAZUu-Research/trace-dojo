@@ -22,6 +22,8 @@ import { JsArray, JsFunction, JsObject, type Key, type NativeFunction, Scope, ty
 
 export type ErrorName =
   | 'Error'
+  | 'EvalError'
+  | 'URIError'
   | 'TypeError'
   | 'RangeError'
   | 'ReferenceError'
@@ -100,6 +102,8 @@ export class RealmBuilder {
         TypeError: new JsObject(errorPrototype),
         RangeError: new JsObject(errorPrototype),
         ReferenceError: new JsObject(errorPrototype),
+        EvalError: new JsObject(errorPrototype),
+        URIError: new JsObject(errorPrototype),
         SyntaxError: new JsObject(errorPrototype),
         AggregateError: new JsObject(errorPrototype),
         SuppressedError: new JsObject(errorPrototype),

@@ -1,5 +1,5 @@
 type Greeting = `hello ${string}`;
-const name = "bob";
-const g: Greeting = `hello ${name}`;
-const h: Greeting = `bye ${name}`;
+const label = "bob";
+const g: Greeting = `hello ${label}`;
+const h: Greeting = `bye ${label}`;
 console.log(g, h);

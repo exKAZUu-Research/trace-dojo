@@ -172,6 +172,7 @@ export class LiteralChecker {
     return fresh;
   }
 
+  // code-gauge-allow functionCognitiveComplexity 19 -- Builds the complete receiver shape from named members, accessor pairs, and spreads before checking their bodies.
   private declareObjectMember(literal: ObjectLiteral, member: TreeNode): void {
     if (member.type === 'spread_element') {
       this.c.flow.from(this.c.flow.current, () =>
@@ -192,14 +193,21 @@ export class LiteralChecker {
     const value = member.type === 'method_definition' ? member : member.childForFieldName('value');
     if (value && ['method_definition', 'function_expression'].includes(value.type))
       this.c.classes.registerObjectThis(value, literal.receiver);
+    const getter = member.type === 'method_definition' && hasToken(member, 'get');
+    const setter = member.type === 'method_definition' && hasToken(member, 'set');
+    const previous = literal.declarations.get(name);
     let resolved: Type | undefined;
+    const resolveType = (): Type => {
+      resolved ??= this.c.silently(() => this.declaredMemberType(literal, member, name, value));
+      return resolved;
+    };
     literal.declarations.set(name, {
       ...this.literalProperty(name, anyType, literal.isConstContext, member),
       isMethod: member.type === 'method_definition' && !hasToken(member, 'get') && !hasToken(member, 'set'),
-      type: () => {
-        resolved ??= this.c.silently(() => this.declaredMemberType(literal, member, name, value));
-        return resolved;
-      },
+      type: setter ? (previous?.type ?? resolveType) : resolveType,
+      writeType: setter ? resolveType : previous?.writeType,
+      readonly: getter ? !previous?.writeType : false,
+      getterOnly: getter ? !previous?.writeType : false,
     });
   }
 
@@ -211,7 +219,10 @@ export class LiteralChecker {
       () => this.c.functions.functionExpression(member, this.memberContext(literal, name)),
       member
     );
-    return hasToken(member, 'get') ? (this.c.signaturesOf(method, 'call')[0]?.returnType() ?? anyType) : method;
+    const signature = this.c.signaturesOf(method, 'call')[0];
+    if (hasToken(member, 'get')) return signature?.returnType() ?? anyType;
+    if (hasToken(member, 'set')) return signature?.parameters[0]?.type ?? anyType;
+    return method;
   }
 
   private objectMember(literal: ObjectLiteral, member: TreeNode): void {
@@ -312,14 +323,26 @@ export class LiteralChecker {
     const accessorType = isGetter ? (signature?.returnType() ?? anyType) : (signature?.parameters[0]?.type ?? anyType);
     properties.set(name, {
       ...this.literalProperty(name, existing && !isGetter ? existing.type() : accessorType, false, member),
+      writeType: isGetter ? existing?.writeType : () => accessorType,
       readonly: isGetter && !existing,
       getterOnly: isGetter && !existing,
     });
-    if (existing && hasToken(member, 'set')) properties.set(name, { ...existing, readonly: false, getterOnly: false });
+    if (existing && hasToken(member, 'set'))
+      properties.set(name, { ...existing, writeType: () => accessorType, readonly: false, getterOnly: false });
   }
 
   private spreadMember(literal: ObjectLiteral, member: TreeNode): void {
-    const spread = this.c.expressions.check(named(member)[0]);
+    const operand = named(member)[0];
+    const spread = this.c.expressions.check(operand);
+    const objectPart = this.c.relations.removeNullish(spread);
+    const members = objectPart.kind === 'union' ? objectPart.types : [objectPart];
+    if (
+      !members.every(
+        (type) =>
+          isAnyLike(type) || type.kind === 'object' || type.kind === 'intersection' || type.kind === 'typeParameter'
+      )
+    )
+      this.c.error(operand, 'スプレッド構文は、オブジェクト型にのみ使えます。');
     if (spread.kind === 'typeParameter') {
       literal.genericSpreads.push(spread);
       return;

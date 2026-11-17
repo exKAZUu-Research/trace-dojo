@@ -1,0 +1,5 @@
+function absentImplementation(value: string): string;
+console.log("hello");
+function separatedImplementation(value: number): number;
+console.log("separated");
+function separatedImplementation(value: number): number { return value; }

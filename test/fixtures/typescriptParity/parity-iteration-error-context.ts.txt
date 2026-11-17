@@ -12,3 +12,8 @@ try { Math.max(...missing()); } catch (e: any) { console.log(e.message); }
 try { take(u); } catch (e: any) { console.log(e.message); }
 try { Array.from(n); } catch (e: any) { console.log(e.message); }
 try { let value: number; [value] = u; } catch (e: any) { console.log(e.message); }
+
+const objectSource: any = { value: {}, number: 5, getValue() { return {}; } };
+try { const [value] = objectSource.value; } catch (e: any) { console.log(e.message); }
+try { const [value] = objectSource.getValue(); } catch (e: any) { console.log(e.message); }
+try { Math.max(...objectSource.value); } catch (e: any) { console.log(e.message); }

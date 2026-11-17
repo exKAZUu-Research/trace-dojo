@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 686 -- One runtime of the JavaScript interpreter, whose state its builtins and evaluator share.
+// code-gauge-allow-file fileNcss 694 -- One runtime of the JavaScript interpreter, whose state its builtins and evaluator share.
 import { CompileError } from '../interpreter/diagnostics';
 import { ExecutionBudget, LIMITS } from '../interpreter/limits';
 import { type ProgramInput, ProgramIO } from '../interpreter/programIo';
@@ -69,6 +69,7 @@ const readOnlyLengthMessage = "Cannot assign to read only property 'length' of o
 export class Runtime {
   readonly world = new TurtleWorld();
   readonly budget = new ExecutionBudget();
+  readonly regExpStatics = new Map<string, string>();
   readonly io: ProgramIO;
   readonly frames: Frame[] = [];
   readonly eventLoop = new EventLoop(this);
@@ -229,12 +230,12 @@ export class Runtime {
       else
         this.refuse(
           strict,
-          `Cannot set property ${String(key)} of ${this.receiverText(target)} which has only a getter`
+          () => `Cannot set property ${String(key)} of ${this.receiverText(target)} which has only a getter`
         );
       return;
     }
     if (property && !property.writable) {
-      this.refuse(strict, this.readOnlyMessage(key, target));
+      this.refuse(strict, () => this.readOnlyMessage(key, target));
       return;
     }
     this.writeOwnData(target, key, value, strict);
@@ -260,7 +261,7 @@ export class Runtime {
       this.refuse(strict, `Cannot redefine property: ${String(key)}`);
     } else if (own) {
       if (own.writable) own.value = value;
-      else this.refuse(strict, this.readOnlyMessage(key, target));
+      else this.refuse(strict, () => this.readOnlyMessage(key, target));
     } else if (target.extensible) {
       this.allocate(1);
       target.properties.set(key, { value, writable: true, enumerable: true, configurable: true });
@@ -305,8 +306,8 @@ export class Runtime {
   }
 
   /** Throws the TypeError of a refused assignment or deletion in strict mode code, which other code ignores. */
-  private refuse(strict: boolean, message: string): void {
-    if (strict) this.throwError('TypeError', message);
+  private refuse(strict: boolean, message: string | (() => string)): void {
+    if (strict) this.throwError('TypeError', typeof message === 'string' ? message : message());
   }
 
   /** Sets an element or the length of an array, returning false for any other property. */
@@ -439,6 +440,10 @@ export class Runtime {
   }
 
   createDataProperty(object: JsObject, key: Key, value: Value): void {
+    const current = this.getOwnProperty(object, key);
+    if (current && !current.configurable) this.throwError('TypeError', `Cannot redefine property: ${String(key)}`);
+    if (!current && !object.extensible)
+      this.throwError('TypeError', `Cannot define property ${String(key)}, object is not extensible`);
     this.defineProperty(object, key, {
       value,
       writable: true,
@@ -467,7 +472,7 @@ export class Runtime {
     }
     const property = this.getOwnProperty(target, key);
     if (property && !property.configurable) {
-      this.refuse(strict, `Cannot delete property '${String(key)}' of ${this.receiverText(target)}`);
+      this.refuse(strict, () => `Cannot delete property '${String(key)}' of ${this.receiverText(target)}`);
       return false;
     }
     target.properties.delete(key);
@@ -937,8 +942,11 @@ export class Runtime {
   /** The TypeError of iterating a value without an iterator, naming it by its source where syntax iterates it. */
   private notIterableMessage(value: Value, source: IterationSource | undefined, callSpread: boolean): string {
     if (source) {
-      if (callSpread && (value === undefined || value === null))
-        return `${source.text} is not iterable (cannot read property ${String(value)})`;
+      if (callSpread) {
+        if (value === undefined || value === null)
+          return `${source.text} is not iterable (cannot read property ${String(value)})`;
+        return 'Spread syntax requires ...iterable[Symbol.iterator] to be a function';
+      }
       if (!callSpread && source.callee) return `${source.callee} is not a function or its return value is not iterable`;
       return `${source.text} is not iterable`;
     }

@@ -265,6 +265,7 @@ export class FunctionChecker {
    */
   checkFunctionBody(node: TreeNode, signature: Signature, contextualReturn: Type | undefined, isolated: boolean): Type {
     void isolated;
+    if (this.reentersBody(node)) return anyType;
     const body = node.childForFieldName('body');
     const context = this.newContext(node, contextualReturn);
     const { declaredReturn } = context;
@@ -299,6 +300,15 @@ export class FunctionChecker {
       this.contexts.pop();
       this.capturedTypes.pop();
     }
+  }
+
+  private reentersBody(node: TreeNode): boolean {
+    const activeIndex = this.contexts.findIndex((context) => context.node.id === node.id);
+    if (activeIndex === -1) return false;
+    const recursive = this.contexts.slice(activeIndex);
+    if (recursive.some((context) => context.inReturn))
+      for (const context of recursive) this.circular.add(context.node.id);
+    return true;
   }
 
   private checkBody(body: TreeNode, context: FunctionContext): void {
@@ -373,6 +383,20 @@ export class FunctionChecker {
     const signature = this.c.signatures.signatureOf(node);
     this.checkFunctionLike(node, signature, undefined);
     if (symbol) this.checkOverloads(symbol, node, signature);
+  }
+
+  checkOverloadImplementation(node: TreeNode): void {
+    if (this.c.isLibrary(node)) return;
+    const siblings = node.parent ? named(node.parent) : [];
+    const index = siblings.findIndex((sibling) => sibling.id === node.id);
+    const name = node.childForFieldName('name')?.text;
+    const next = siblings[index + 1];
+    if (
+      next?.childForFieldName('name')?.text === name &&
+      ['function_signature', 'function_declaration'].includes(next.type)
+    )
+      return;
+    this.c.error(node.childForFieldName('name') ?? node, '関数の実装がないか、宣言の直後にありません。');
   }
 
   private checkOverloads(symbol: Sym, implementation: TreeNode, signature: Signature): void {

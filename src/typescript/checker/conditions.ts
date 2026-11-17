@@ -2,7 +2,7 @@ import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import type { Checker } from './checker';
 import { type FlowState, type State } from './flow';
-import { named, skipParentheses, stringValue } from './syntax';
+import { named, numberValue, propertyNameText, skipParentheses, stringValue } from './syntax';
 import {
   anyType,
   booleanType,
@@ -208,7 +208,8 @@ export class ConditionChecker {
     if (alwaysTruthyTypes.has(expression.type)) return 'always';
     switch (expression.type) {
       case 'number': {
-        return expression.text === '0' || expression.text === '1' ? 'sometimes' : 'always';
+        const value = numberValue(expression.text);
+        return value === 0 || value === 1 ? 'sometimes' : 'always';
       }
       case 'null':
       case 'undefined': {
@@ -412,12 +413,17 @@ export class ConditionChecker {
     const declarator = symbol?.valueDeclaration;
     const pattern = symbol?.valueEntries[0]?.name;
     if (symbol?.valueKind !== 'const' || declarator?.type !== 'variable_declarator' || !pattern) return undefined;
-    if (pattern.parent?.id !== declarator.childForFieldName('name')?.id || pattern.parent?.type !== 'object_pattern') {
+    const pair = pattern.parent?.type === 'pair_pattern' ? pattern.parent : undefined;
+    const container = pair?.parent ?? pattern.parent;
+    if (container?.id !== declarator.childForFieldName('name')?.id || container?.type !== 'object_pattern') {
       return undefined;
     }
     const object = declarator.childForFieldName('value');
     if (object?.type !== 'identifier' || !this.narrowsOnlyConstantReferences(object)) return undefined;
     if (pattern.type === 'shorthand_property_identifier_pattern') return { object, name: pattern.text };
+    const key = pair?.childForFieldName('key');
+    const name = key ? propertyNameText(key) : undefined;
+    if (name !== undefined) return { object, name };
     return undefined;
   }
 

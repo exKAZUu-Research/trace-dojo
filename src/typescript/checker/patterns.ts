@@ -126,6 +126,7 @@ export class BindingPatterns {
     );
   }
 
+  // code-gauge-allow functionCognitiveComplexity 18 -- Validates each union member, defaulted missing properties, index signatures, and property availability when destructuring.
   destructuredProperty(node: TreeNode, type: Type, name: string, hasDefault = false): Type {
     if (isAnyLike(type)) return anyType;
     if (type.kind === 'union') {
@@ -133,7 +134,13 @@ export class BindingPatterns {
       const types = type.types.map((member) =>
         this.c.silently(() => this.destructuredProperty(node, member, name, hasDefault))
       );
-      if (!types.includes(errorType)) return unionOf(types);
+      if (!types.includes(errorType)) {
+        for (const member of type.types) {
+          const property = this.c.propertyOf(member, name);
+          if (property) this.c.members.checkPropertyUse(node, node, node, member, name, property);
+        }
+        return unionOf(types);
+      }
     }
     const property = this.c.propertyOf(type, name);
     if (!property) {
@@ -143,6 +150,7 @@ export class BindingPatterns {
       this.c.error(node, `プロパティ '${name}' は型 '${this.c.print(type)}' にありません。`);
       return errorType;
     }
+    this.c.members.checkPropertyUse(node, node, node, type, name, property);
     const propertyType = property.type();
     return property.optional && !hasDefault ? unionOf([propertyType, undefinedType]) : propertyType;
   }

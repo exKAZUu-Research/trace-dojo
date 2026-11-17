@@ -1,0 +1,1 @@
+const recursiveObject = { factorial(n: number) { return n <= 1 ? 1 : n * this.factorial(n - 1); } };

@@ -30,7 +30,6 @@ const unsupportedNodes: Record<string, string> = {
   instantiation_expression: '型引数だけを指定した関数の参照',
   asserts: 'asserts による型の表明',
   asserts_annotation: 'asserts による型の表明',
-  unique_type: 'unique symbol',
   non_nullable_type: 'JSDoc の型の書き方',
   existential_type: 'JSDoc の型の書き方',
   flow_maybe_type: 'JSDoc の型の書き方',
@@ -67,6 +66,7 @@ export function rejectUnsupportedSyntax(root: TreeNode): void {
 /** A feature that a node of a supported type spells with a keyword or a form this interpreter does not run. */
 function unsupportedForm(node: TreeNode): string | undefined {
   const tokens = new Set(node.children.filter((child) => child !== null && !child.isNamed).map((child) => child?.type));
+  if (node.type === 'predefined_type' && tokens.has('unique symbol')) return 'unique symbol';
   if (functionTypes.has(node.type) && tokens.has('async')) return 'async 関数';
   if (node.type === 'method_definition' && tokens.has('*')) return 'ジェネレータ関数';
   if (node.type === 'for_in_statement' && tokens.has('await')) return 'for await';

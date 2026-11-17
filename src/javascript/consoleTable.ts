@@ -1,18 +1,19 @@
+import { ArrayOps } from './arrayOps';
 import { inspectValue, OutputBudget, stringWidth } from './inspect';
 import { type CollectionEntry, CollectionIterator } from './realmCollections';
 import type { Runtime } from './runtime';
 import { isObject, JsArray, JsObject, type Value } from './values';
 
 /** The text `console.table` prints for its arguments, or undefined when it prints them as `console.log` does. */
-// code-gauge-allow functionNcss 31 -- Keeps row collection and its shared formatting budget together.
+// code-gauge-allow functionNcss 32 -- Keeps row collection and its shared formatting budget together.
 // code-gauge-allow functionCognitiveComplexity 19 -- Ports Node.js's console.table, so the two stay comparable.
 export function formatTable(runtime: Runtime, data: Value, properties: Value): string | undefined {
   if (!(data instanceof JsObject)) return undefined;
   const budget = new OutputBudget();
-  const selected =
-    properties instanceof JsArray
-      ? properties.elements.map((element) => runtime.toString(element as Value))
-      : undefined;
+  const selection = properties instanceof JsArray ? new ArrayOps(runtime, properties) : undefined;
+  const selected = selection
+    ? Array.from({ length: selection.length }, (_, index) => runtime.toString(selection.get(index)))
+    : undefined;
   const collectionTable = formatCollectionTable(runtime, data, budget);
   if (collectionTable !== undefined) return collectionTable;
   const columns = new Map<string, string[]>();

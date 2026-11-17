@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 419 -- Resolves calls as TypeScript does: callees, overloads, inference, and the effects of calls on the flow.
+// code-gauge-allow-file fileNcss 422 -- Resolves calls as TypeScript does: callees, overloads, inference, and the effects of calls on the flow.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import type { Checker, Mapper } from './checker';
@@ -144,7 +144,11 @@ export class Calls {
   /** The result of calling a type without call signatures, reporting the call unless the type is `Function`. */
   private uncallableType(callee: TreeNode, calleeType: Type): Type {
     // A value of type `Function` may be called with anything, returning `any`.
-    if (calleeType.kind === 'object' && this.c.relations.isAssignable(calleeType, this.c.globalType('Function')))
+    if (
+      this.c.signaturesOf(calleeType, 'construct').length === 0 &&
+      calleeType.kind === 'object' &&
+      this.c.relations.isAssignable(calleeType, this.c.globalType('Function'))
+    )
       return anyType;
     if (this.c.signaturesOf(calleeType, 'construct').length > 0) {
       this.c.error(callee, `型 '${this.c.print(calleeType)}' の値は呼び出せません。new を付けるつもりでしたか？`);
@@ -421,9 +425,7 @@ export class Calls {
   }
 
   private fillTypeArguments(signature: Signature, typeArguments: Type[]): Type[] {
-    return signature.typeParameters.map(
-      (parameter, index) => typeArguments[index] ?? parameter.default?.() ?? unknownType
-    );
+    return this.c.fillTypeArguments(signature.typeParameters, typeArguments);
   }
 
   private minimumArguments(signature: Signature): number {
@@ -462,8 +464,11 @@ export class Calls {
     let open = false;
     for (const arg of args) {
       const length = this.spreadLength(arg);
-      if (length === undefined) open = true;
-      else count += length;
+      if (length === undefined) {
+        const restIndex = signature.parameters.findIndex((parameter) => parameter.rest);
+        if (restIndex === -1 || count < restIndex) return false;
+        open = true;
+      } else count += length;
     }
     if (open)
       return this.maximumArguments(signature) === Number.POSITIVE_INFINITY && count <= this.maximumArguments(signature);
@@ -474,7 +479,7 @@ export class Calls {
     const minimum = this.minimumArguments(signature);
     const maximum = this.maximumArguments(signature);
     const spread = args.find((arg) => arg.type === 'spread_element' && this.spreadLength(arg) === undefined);
-    if (spread && maximum !== Number.POSITIVE_INFINITY) {
+    if (spread && !this.arityMatches(signature, args)) {
       this.c.error(spread, 'スプレッド構文の引数は、タプル型であるか、残余引数に渡されなければいけません。');
       return;
     }

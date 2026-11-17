@@ -8,8 +8,10 @@ import { type Type, undefinedType, unionOf } from './types';
 /** Reports the declarations TypeScript rejects for declaring a name twice, at every declaration it involves. */
 export function checkDuplicateDeclarations(c: Checker, scopes: Scope[]): void {
   for (const scope of scopes) {
-    for (const symbol of scope.values.values()) checkValueDuplicates(c, symbol);
+    for (const symbol of scope.values.values())
+      if (symbol.valueEntries.some((entry) => !c.isLibrary(entry.name))) checkValueDuplicates(c, symbol);
     for (const symbol of scope.types.values()) {
+      if (!symbol.typeEntries.some((entry) => !c.isLibrary(entry.name))) continue;
       checkTypeDuplicates(c, symbol);
       checkReservedTypeName(c, symbol);
     }
@@ -202,6 +204,7 @@ function checkMergedProperty(c: Checker, member: TreeNode, seen: Map<string, Tre
 export function checkDuplicateMembers(c: Checker, body: TreeNode): void {
   const groups = new Map<string, TreeNode[]>();
   for (const member of named(body)) {
+    addParameterPropertyDuplicates(member, groups);
     const key = duplicateKeyOf(member);
     if (key === undefined) continue;
     const group = groups.get(key) ?? [];
@@ -216,6 +219,20 @@ export function checkDuplicateMembers(c: Checker, body: TreeNode): void {
       members.some((member) => hasToken(member, 'get')) &&
       members.some((member) => hasToken(member, 'set'));
     if (!accessorPair) reportDuplicateMembers(c, key, members);
+  }
+}
+
+function addParameterPropertyDuplicates(member: TreeNode, groups: Map<string, TreeNode[]>): void {
+  if (member.childForFieldName('name')?.text !== 'constructor') return;
+  const parameters = member.childForFieldName('parameters');
+  for (const parameter of parameters ? named(parameters) : []) {
+    if (!hasToken(parameter, 'readonly') && !named(parameter).some((part) => part.type === 'accessibility_modifier'))
+      continue;
+    const pattern = parameter.childForFieldName('pattern');
+    if (!pattern || pattern.type !== 'identifier') continue;
+    const group = groups.get(pattern.text) ?? [];
+    group.push(parameter);
+    groups.set(pattern.text, group);
   }
 }
 
@@ -234,7 +251,7 @@ function reportDuplicateMembers(c: Checker, key: string, members: TreeNode[]): v
   const name = key.replace(/^static /, '');
   const isConstructor = name === 'constructor' && !key.startsWith('static ');
   for (const member of members) {
-    const nameNode = member.childForFieldName('name') ?? member;
+    const nameNode = member.childForFieldName('name') ?? member.childForFieldName('pattern') ?? member;
     if (isConstructor) c.error(nameNode, 'コンストラクタの実装は1つしか書けません。');
     else if (members.every((other) => other.type === 'method_definition'))
       c.error(nameNode, `メソッド ${name} の実装が重複しています。`);

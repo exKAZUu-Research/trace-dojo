@@ -1,0 +1,21 @@
+console.log(encodeURIComponent("a b&é"), decodeURIComponent("%E3%81%82"), encodeURI("http://x/a b"), decodeURI("%20"));
+try { decodeURIComponent("%zz"); } catch (e: any) { console.log(e.name, e.message, e instanceof URIError); }
+const show = () => console.log(RegExp.$1, RegExp.$2, RegExp.lastMatch, RegExp.lastParen, RegExp.input, RegExp.leftContext, RegExp.rightContext);
+/(?:)/.test("");
+show();
+/(a)(b)?/.test("xabz");
+show();
+/q/.test("nothing");
+show();
+"c3d4".match(/(\d)/g);
+show();
+"p5q".search(/(\d)/);
+show();
+"x6y7".replace(/(\d)/g, "!");
+show();
+for (const match of "x8y9".matchAll(/(\d)/g)) console.log(match[0], RegExp.$1);
+show();
+"a1b2".split(/(\d)/);
+show();
+RegExp.input = "override";
+console.log(RegExp.$_, RegExp["$&"], RegExp["$+"], RegExp["$`"], RegExp["$'"]);

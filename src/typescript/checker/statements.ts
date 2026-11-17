@@ -4,7 +4,7 @@ import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 import type { Checker } from './checker';
 import { FlowState, type State } from './flow';
 import type { Scope, Sym } from './scopes';
-import { arrayPatternElements, hasToken, isNumericName, named, patternIdentifiers, skipParentheses } from './syntax';
+import { arrayPatternElements, hasToken, isNumericName, named, skipParentheses } from './syntax';
 import {
   anyType,
   errorType,
@@ -50,6 +50,7 @@ export class StatementChecker {
     ['throw_statement', (node) => this.throwStatement(node)],
     ['break_statement', () => this.breakStatement()],
     ['continue_statement', () => this.continueStatement()],
+    ['function_signature', (node) => this.c.functions.checkOverloadImplementation(node)],
     ['function_declaration', (node) => this.c.functions.functionDeclaration(node)],
     ['class_declaration', (node) => this.c.classDeclarations.checkClass(node)],
     ['abstract_class_declaration', (node) => this.c.classDeclarations.checkClass(node)],
@@ -131,9 +132,14 @@ export class StatementChecker {
   }
 
   /** Resolves every type written in a node, so that unknown names report errors. */
+  // code-gauge-allow functionCognitiveComplexity 17 -- Walks type references and object types while keeping qualified namespace references intact for availability checks.
   private resolveTypesIn(node: TreeNode | null): void {
     if (!node) return;
     const visit = (current: TreeNode): void => {
+      if (current.type === 'nested_type_identifier') {
+        this.c.typeNodes.typeFromNode(current);
+        return;
+      }
       if (current.type === 'type_identifier' || current.type === 'generic_type') {
         const parent = current.parent;
         if (
@@ -172,7 +178,7 @@ export class StatementChecker {
   }
 
   /** Reports a property of an interface that does not fit the same property of an interface it extends. */
-  // code-gauge-allow functionCognitiveComplexity 17 -- Follows TypeScript's check of each member an interface redeclares from each base.
+  // code-gauge-allow functionCognitiveComplexity 19 -- Checks both optionality and value-type compatibility for each interface member redeclared from a base.
   private checkInterfaceBases(node: TreeNode, structure: Structure): void {
     const body = node.childForFieldName('body');
     const clause = named(node).find((child) => child.type === 'extends_type_clause');
@@ -184,7 +190,12 @@ export class StatementChecker {
         const declaration = property.declaration;
         if (!declaration || declaration.parent?.id !== body.id) continue;
         const baseProperty = this.c.propertyOf(base, property.name);
-        if (!baseProperty || this.c.relations.isAssignable(property.type(), baseProperty.type())) continue;
+        if (
+          !baseProperty ||
+          ((!property.optional || baseProperty.optional) &&
+            this.c.relations.isAssignable(property.type(), baseProperty.type()))
+        )
+          continue;
         this.c.error(
           node.childForFieldName('name') ?? node,
           `インターフェース '${node.childForFieldName('name')?.text}' は、'${this.c.print(base)}' を正しく継承していません。プロパティ '${property.name}' の型が合いません。`
@@ -549,7 +560,6 @@ export class StatementChecker {
     const object = regularOf(rightType);
     if (
       !isAnyLike(object) &&
-      !isIntrinsic(object, 'unknown') &&
       (object.kind === 'literal' || (object.kind === 'intrinsic' && object.name !== 'object'))
     ) {
       this.c.error(
@@ -572,15 +582,13 @@ export class StatementChecker {
 
   /** Assigns the existing variables a loop's head without a declaration names. */
   private assignLoopVariables(left: TreeNode, elementType: Type): void {
-    for (const identifier of patternIdentifiers(left)) {
-      const symbol = this.c.scopeOf(identifier).lookupValue(identifier.text);
-      if (symbol) this.c.flow.set(`s${symbol.id}`, { type: this.c.expressions.valueTypeOf(symbol), assigned: true });
+    if (left.type === 'array_pattern' || left.type === 'object_pattern') {
+      this.c.assignments.destructuringAssignment(left, elementType);
+      return;
     }
-    if (left.type !== 'identifier') return;
-    const symbol = this.c.scopeOf(left).lookupValue(left.text);
-    const declared = symbol ? this.c.expressions.valueTypeOf(symbol) : errorType;
-    if (declared !== errorType && !this.c.relations.isAssignable(elementType, declared))
-      this.c.expressions.reportNotAssignable(left, elementType, declared);
+    const declared = this.c.assignments.targetType(left, false);
+    if (declared !== errorType) this.c.expressions.checkAssignable(left, elementType, declared);
+    this.c.assignments.assignReference(left, declared, elementType);
   }
 
   // code-gauge-allow functionNcss 47 -- Follows the flow through the cases, fall-through, and an exhaustive end in one pass.

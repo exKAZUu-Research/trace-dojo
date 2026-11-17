@@ -4,12 +4,15 @@ import type { Checker } from './checker';
 import type { Sym } from './scopes';
 import { arrayPatternElements, named, propertyNameText, skipParentheses } from './syntax';
 import {
+  anyType,
   bigintType,
   errorType,
+  intersectionOf,
   isAnyLike,
   isIntrinsic,
   numberType,
   type ObjectType,
+  type Property,
   regularOf,
   type Type,
   undefinedType,
@@ -73,13 +76,34 @@ export class AssignmentChecker {
     const key = this.c.flow.referenceKey(target);
     if (!key) return;
     this.c.flow.invalidate(key);
-    if (/^this\d+\.[^.]+$/.test(key)) this.c.flow.current?.assignedFields.add(key);
+    if (/^this\d+\.[^.]*$/.test(key)) this.c.flow.current?.assignedFields.add(key);
     if (declared === errorType) return;
+    const accessor = this.assignedAccessorType(target);
+    if (accessor) {
+      this.c.flow.set(key, { type: accessor, assigned: true });
+      return;
+    }
     const entry = this.c.flow.entry(key);
     const symbol = target.type === 'identifier' ? this.c.scopeOf(target).lookupValue(target.text) : undefined;
     const isAuto = symbol !== undefined && this.isAutoTyped(symbol);
     const type = isAuto ? this.c.widen(assigned) : this.c.flow.assignmentReduced(declared, regularOf(assigned));
     this.c.flow.set(key, { type, assigned: true, evolving: entry?.evolving });
+  }
+
+  private assignedAccessorType(target: TreeNode): Type | undefined {
+    if (target.type !== 'member_expression' && target.type !== 'subscript_expression') return undefined;
+    const object = target.childForFieldName('object') as TreeNode;
+    const index = target.childForFieldName('index');
+    const indexed = index ? this.c.silently(() => this.c.expressions.check(index)) : undefined;
+    const name =
+      target.childForFieldName('property')?.text ?? (indexed?.kind === 'literal' ? String(indexed.value) : undefined);
+    if (name === undefined) return undefined;
+    const objectType = this.c.silently(() => this.c.expressions.check(object));
+    const properties = (objectType.kind === 'union' ? objectType.types : [objectType]).map((member) =>
+      this.c.propertyOf(member, name)
+    );
+    if (!properties.some((property) => property?.writeType)) return undefined;
+    return unionOf(properties.map((property) => property?.type() ?? anyType));
   }
 
   /** Whether a variable has no annotation nor initializer, so that its type follows what is assigned to it. */
@@ -94,7 +118,7 @@ export class AssignmentChecker {
 
   // code-gauge-allow functionNcss 44 -- One case per kind of destructuring target, in array and object patterns alike.
   // code-gauge-allow functionCognitiveComplexity 24 -- One case per kind of destructuring target, in array and object patterns alike.
-  private destructuringAssignment(pattern: TreeNode, type: Type): void {
+  destructuringAssignment(pattern: TreeNode, type: Type): void {
     const assign = (target: TreeNode, valueType: Type): void => {
       if (['assignment_expression', 'assignment_pattern', 'object_assignment_pattern'].includes(target.type)) {
         const left = target.childForFieldName('left') as TreeNode;
@@ -209,7 +233,7 @@ export class AssignmentChecker {
   }
 
   /** The declared type of an assignment target, reporting a constant or a read-only property. */
-  private targetType(target: TreeNode, compound: boolean): Type {
+  targetType(target: TreeNode, compound: boolean): Type {
     const expression = skipParentheses(target);
     switch (expression.type) {
       case 'identifier':
@@ -255,6 +279,7 @@ export class AssignmentChecker {
     return this.c.expressions.valueTypeOf(symbol);
   }
 
+  // code-gauge-allow functionCognitiveComplexity 18 -- Applies union writability, optional properties, getter read types, and setter write types at one assignment boundary.
   private propertyTargetType(expression: TreeNode, compound: boolean): Type {
     const objectNode = expression.childForFieldName('object') as TreeNode;
     const propertyNode = expression.childForFieldName('property') as TreeNode;
@@ -263,17 +288,15 @@ export class AssignmentChecker {
       return errorType;
     }
     const objectType = this.c.members.checkNonNullable(objectNode, this.c.expressions.check(objectNode));
-    const property =
-      isAnyLike(objectType) || objectType.kind === 'union'
-        ? undefined
-        : this.c.propertyOf(objectType, propertyNode.text);
-    if (property && this.c.classes.isReadonlyFor(property, expression, objectNode)) {
-      this.c.error(propertyNode, `${propertyNode.text} は読み取り専用のプロパティなので、代入できません。`);
-      return errorType;
-    }
-    if (property?.getterOnly) {
-      this.c.error(propertyNode, `${propertyNode.text} はゲッターだけのプロパティなので、代入できません。`);
-      return errorType;
+    const properties = (objectType.kind === 'union' ? objectType.types : [objectType])
+      .map((member) => this.c.propertyOf(member, propertyNode.text))
+      .filter((property): property is Property => property !== undefined);
+    const property = properties[0];
+    for (const member of properties) {
+      if (this.c.classes.isReadonlyFor(member, expression, objectNode) || member.getterOnly) {
+        this.c.error(propertyNode, `${propertyNode.text} は読み取り専用のプロパティなので、代入できません。`);
+        return errorType;
+      }
     }
     // `r.a = 2` writes through a string index signature when `a` is not declared.
     if (!property && !isAnyLike(objectType) && this.c.structureOf(objectType).stringIndex?.readonly) {
@@ -285,7 +308,16 @@ export class AssignmentChecker {
       const entry = key ? this.c.flow.entry(key) : undefined;
       if (entry) return entry.type;
     }
-    return property?.optional && !compound ? unionOf([property.type(), undefinedType]) : type;
+    if (!compound && properties.length > 0)
+      return intersectionOf(
+        properties.map((member) =>
+          member.optional
+            ? unionOf([(member.writeType ?? member.type)(), undefinedType])
+            : (member.writeType ?? member.type)()
+        ),
+        this.c.budget
+      );
+    return type;
   }
 
   private elementTargetType(expression: TreeNode): Type {
@@ -295,14 +327,32 @@ export class AssignmentChecker {
     const indexType = this.c.expressions.check(indexNode);
     if (this.isReadonlyArrayLike(objectType)) return this.reportReadonlyIndex(expression, objectType);
     if (indexType.kind === 'literal' && typeof indexType.value === 'string') {
-      const property = this.c.propertyOf(objectType, indexType.value);
-      if (property && this.c.classes.isReadonlyFor(property, expression, objectNode)) {
+      const properties = (objectType.kind === 'union' ? objectType.types : [objectType]).map((member) =>
+        this.c.propertyOf(member, indexType.value as string)
+      );
+      if (
+        properties.some(
+          (property) =>
+            property && (this.c.classes.isReadonlyFor(property, expression, objectNode) || property.getterOnly)
+        )
+      ) {
         this.c.error(indexNode, `${indexType.value} は読み取り専用のプロパティなので、代入できません。`);
         return errorType;
       }
     }
     if (this.hasReadonlyIndexSignature(objectType, indexType)) return this.reportReadonlyIndex(expression, objectType);
-    return this.c.members.indexedType(expression, objectNode, indexNode, objectType, indexType);
+    const readType = this.c.members.indexedType(expression, objectNode, indexNode, objectType, indexType);
+    if (indexType.kind === 'literal') {
+      const properties = (objectType.kind === 'union' ? objectType.types : [objectType])
+        .map((member) => this.c.propertyOf(member, String(indexType.value)))
+        .filter((property): property is Property => property !== undefined);
+      if (properties.length > 0)
+        return intersectionOf(
+          properties.map((property) => (property.writeType ?? property.type)()),
+          this.c.budget
+        );
+    }
+    return readType;
   }
 
   private isReadonlyArrayLike(type: Type): boolean {

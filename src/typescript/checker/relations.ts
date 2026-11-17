@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 426 -- Decides assignability and comparability for every kind of type, as TypeScript's checker does in one place.
+// code-gauge-allow-file fileNcss 440 -- Decides assignability and comparability for every kind of type, as TypeScript's checker does in one place.
 import type { Checker } from './checker';
 import { isUnit } from './flow';
 import { isNumericName } from './syntax';
@@ -14,6 +14,7 @@ import {
   regularOf,
   type Signature,
   type Structure,
+  type TupleElement,
   type Type,
   type TypeParameter,
   undefinedType,
@@ -477,33 +478,53 @@ export class Relations {
     return true;
   }
 
-  // code-gauge-allow functionNcss 31 -- Compares fixed, optional, and rest elements as TypeScript does.
-  // code-gauge-allow functionCognitiveComplexity 24 -- Compares fixed, optional, and rest elements as TypeScript does.
   private tupleRelated(source: ObjectType, target: ObjectType, relation: Relation): boolean {
     const sourceElements = source.tuple?.elements ?? [];
     const targetElements = target.tuple?.elements ?? [];
     if (source.tuple?.readonly && !target.tuple?.readonly) return false;
+    if (sourceElements.every((element) => !element.rest)) return this.fixedTupleRelated(source, target, relation);
     const targetRest = targetElements.findIndex((element) => element.rest);
-    const fixedTarget = targetRest === -1 ? targetElements : targetElements.slice(0, targetRest);
+    if (targetRest === -1) return false;
+    const fixedTarget = targetElements.slice(0, targetRest);
     const required = fixedTarget.filter((element) => !element.optional).length;
     const sourceRest = sourceElements.findIndex((element) => element.rest);
-    if (sourceRest !== -1 && targetRest === -1) return false;
-    const sourceFixed = sourceRest === -1 ? sourceElements : sourceElements.slice(0, sourceRest);
+    const sourceFixed = sourceElements.slice(0, sourceRest);
     if (sourceFixed.filter((element) => !element.optional).length < required) return false;
-    if (targetRest === -1 && sourceFixed.length > targetElements.length) return false;
     for (const [index, element] of sourceFixed.entries()) {
       const targetElement = index < fixedTarget.length ? fixedTarget[index] : targetElements[targetRest];
-      if (!targetElement) return false;
-      const targetType = targetElement.rest ? this.c.restElementType(targetElement.type) : targetElement.type;
-      if (element.optional && !targetElement.optional && !targetElement.rest) return false;
-      if (!this.isRelated(element.type, targetType, relation)) return false;
+      if (!this.tupleElementRelated(element, targetElement, relation)) return false;
     }
-    if (sourceRest !== -1) {
-      const restType = this.c.restElementType(sourceElements[sourceRest].type);
-      const targetType = this.c.restElementType(targetElements[targetRest].type);
-      if (!this.isRelated(restType, targetType, relation)) return false;
+    const restType = this.c.restElementType(sourceElements[sourceRest].type);
+    const targetType = this.c.restElementType(targetElements[targetRest].type);
+    return this.isRelated(restType, targetType, relation);
+  }
+
+  private fixedTupleRelated(source: ObjectType, target: ObjectType, relation: Relation): boolean {
+    const sourceElements = source.tuple?.elements ?? [];
+    const targetElements = target.tuple?.elements ?? [];
+    const restIndex = targetElements.findIndex((element) => element.rest);
+    const required = targetElements.filter((element) => !element.optional && !element.rest).length;
+    if (sourceElements.filter((element) => !element.optional).length < required) return false;
+    if (restIndex === -1 && sourceElements.length > targetElements.length) return false;
+    const tailCount = restIndex === -1 ? 0 : targetElements.length - restIndex - 1;
+    const tailStart = sourceElements.length - tailCount;
+    for (const [index, element] of sourceElements.entries()) {
+      const targetIndex =
+        restIndex === -1 || index < restIndex
+          ? index
+          : index >= tailStart
+            ? targetElements.length - sourceElements.length + index
+            : restIndex;
+      const expected = targetElements[targetIndex];
+      if (!this.tupleElementRelated(element, expected, relation)) return false;
     }
     return true;
+  }
+
+  private tupleElementRelated(source: TupleElement, target: TupleElement | undefined, relation: Relation): boolean {
+    if (!target || (source.optional && !target.optional && !target.rest)) return false;
+    const targetType = target.rest ? this.c.restElementType(target.type) : target.type;
+    return this.isRelated(source.type, targetType, relation);
   }
 
   private signaturesRelated(sources: Signature[], targets: Signature[], relation: Relation): boolean {

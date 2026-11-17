@@ -205,6 +205,7 @@ export class ProgramConverter extends ExpressionConverter {
   }
 
   protected arrayDestructuringSource(node: Node): IterationSource | undefined {
+    if (node.type === 'call_expression' && field(node, 'function').type !== 'identifier') return undefined;
     return ['identifier', 'call_expression', 'number', 'null', 'undefined', 'true', 'false', 'object'].includes(
       node.type
     )

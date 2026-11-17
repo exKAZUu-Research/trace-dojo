@@ -1,0 +1,2 @@
+(1,10): error TS2391: Function implementation is missing or not immediately following the declaration.
+(3,10): error TS2391: Function implementation is missing or not immediately following the declaration.

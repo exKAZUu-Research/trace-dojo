@@ -28,12 +28,12 @@ class Temperature {
 }
 const t = Temperature.fromFahrenheit(212);
 console.log(String(t), `${t}`, t.isFreezing(), t + "!");
-interface Plugin {
+interface ExercisePlugin {
   name: string;
   init?(): void;
   priority?: number;
 }
-const plugins: Plugin[] = [{ name: "a", init() { console.log("init a"); } }, { name: "b", priority: 2 }];
+const plugins: ExercisePlugin[] = [{ name: "a", init() { console.log("init a"); } }, { name: "b", priority: 2 }];
 for (const p of plugins) {
   p.init?.();
   console.log(p.name, p.priority ?? 0);

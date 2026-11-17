@@ -1,0 +1,9 @@
+type DeepPartial<T> = { [K in keyof T]?: DeepPartial<T[K]> };
+type Flatten<T> = T extends (infer U)[] ? Flatten<U> : T;
+type TupleOf<N extends number, A extends unknown[] = []> = A["length"] extends N ? A : TupleOf<N, [...A, unknown]>;
+type Reverse<S extends string> = S extends `${infer H}${infer R}` ? `${Reverse<R>}${H}` : "";
+const partial: DeepPartial<{a: {b: number}}> = {a: {}};
+const flattened: Flatten<number[][][]> = 3;
+const tuple: TupleOf<3> = [1, "two", true];
+const reversed: Reverse<"abc"> = "cba";
+console.log(partial, flattened, tuple, reversed);

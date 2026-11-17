@@ -8,6 +8,7 @@ import {
   booleanType,
   errorType,
   freshLiteralType,
+  intersectionOf,
   isAnyLike,
   isIntrinsic,
   literalType,
@@ -19,6 +20,7 @@ import {
   type Type,
   undefinedType,
   unionOf,
+  unknownType,
 } from './types';
 
 const typeofResult = unionOf(
@@ -92,7 +94,14 @@ export class OperatorChecker {
     }
     const objectNode = expression.childForFieldName('object') as TreeNode;
     const objectType = this.c.silently(() => this.c.expressions.check(objectNode));
-    const name = expression.type === 'member_expression' ? expression.childForFieldName('property')?.text : undefined;
+    const index = expression.type === 'subscript_expression' ? expression.childForFieldName('index') : undefined;
+    const indexType = index ? this.c.silently(() => this.c.expressions.check(index)) : undefined;
+    const name =
+      expression.type === 'member_expression'
+        ? expression.childForFieldName('property')?.text
+        : indexType?.kind === 'literal'
+          ? String(indexType.value)
+          : undefined;
     if (!name || isAnyLike(objectType)) return;
     const property = this.c.propertyOf(objectType, name);
     if (property?.readonly) {
@@ -164,6 +173,7 @@ export class OperatorChecker {
       case '!==':
       case '==':
       case '!=': {
+        this.checkEqualitySyntax(node, operator, left, right);
         this.checkComparisonOverlap(node, operator, leftType, rightType);
         return booleanType;
       }
@@ -290,15 +300,27 @@ export class OperatorChecker {
     );
   }
 
+  private checkEqualitySyntax(node: TreeNode, operator: string, left: TreeNode, right: TreeNode): void {
+    const operands = [left, right].map(withoutTypeAssertions);
+    const literal = operands.some((operand) => operand.type === 'array' || operand.type === 'object');
+    const nan = operands.some((operand) => {
+      if (operand.type === 'identifier' && operand.text === 'NaN')
+        return (
+          this.c.scopeOf(operand).lookupValue('NaN')?.valueDeclaration !== undefined &&
+          this.c.isLibrary(this.c.scopeOf(operand).lookupValue('NaN')!.valueDeclaration!)
+        );
+      return false;
+    });
+    if (literal || nan)
+      this.c.error(node, `この条件は常に '${operator === '!=' || operator === '!==' ? 'true' : 'false'}' になります。`);
+  }
+
   private checkComparisonOverlap(node: TreeNode, operator: string, leftType: Type, rightType: Type): void {
     const l = regularOf(leftType);
     const r = regularOf(rightType);
     if (isAnyLike(l) || isAnyLike(r)) return;
-    const loose = operator === '==' || operator === '!=';
     if (isNullishIntrinsic(l) || isNullishIntrinsic(r)) return;
     if (this.c.relations.isComparable(this.comparableForm(l), this.comparableForm(r))) return;
-    if (loose && (this.isNumberLike(l) || this.isStringLike(l)) && (this.isNumberLike(r) || this.isStringLike(r)))
-      return;
     this.c.error(
       node,
       `この比較は意図したものではないようです。型 '${this.c.print(l)}' と型 '${this.c.print(r)}' には重なりがありません。`
@@ -322,7 +344,7 @@ export class OperatorChecker {
       if (nullishness === 'always') this.c.error(left, 'この式は常に null か undefined です。');
       const leftType = this.c.expressions.check(left, contextual);
       const rightType = this.c.expressions.check(right, contextual);
-      return this.c.literals.subtypeReduced([this.c.relations.removeNullish(leftType), rightType]);
+      return this.coalescingType(leftType, rightType);
     }
     const { whenTrue, whenFalse, type: leftType } = this.c.conditions.condition(left);
     const rightState = operator === '&&' ? whenTrue : whenFalse;
@@ -334,6 +356,45 @@ export class OperatorChecker {
     void node;
     if (operator === '&&') return unionOf([this.c.flow.narrowByTruthiness(leftType, false), rightType], true);
     return this.c.literals.subtypeReduced([this.c.flow.narrowByTruthiness(leftType, true), rightType]);
+  }
+
+  private coalescingType(left: Type, right: Type): Type {
+    const constraint = this.nullishConstraint(left);
+    if (!this.c.relations.isNullable(constraint) && !isAnyLike(constraint) && !isIntrinsic(constraint, 'unknown'))
+      return left;
+    const nonNullish = mapType(left, (member): Type => {
+      if (member.kind !== 'typeParameter') return this.c.relations.removeNullish(member);
+      const bound = this.nullishConstraint(member);
+      return isAnyLike(bound) ? member : intersectionOf([member, this.c.relations.removeNullish(bound)], this.c.budget);
+    });
+    return this.c.literals.subtypeReduced([nonNullish, right]);
+  }
+
+  private nullishConstraint(type: Type, seen = new Set<number>()): Type {
+    this.c.budget.spend();
+    if (seen.has(type.id)) return unknownType;
+    seen.add(type.id);
+    try {
+      if (type.kind === 'typeParameter') {
+        const constraint = this.c.constraintOf(type);
+        return constraint ? this.nullishConstraint(constraint, seen) : unknownType;
+      }
+      if (type.kind === 'union') return unionOf(type.types.map((member) => this.nullishConstraint(member, seen)));
+      if (type.kind === 'conditional')
+        return unionOf([this.nullishConstraint(type.trueType, seen), this.nullishConstraint(type.falseType, seen)]);
+      if (type.kind === 'indexedAccess') {
+        const constraint = this.c.baseConstraint(type);
+        return constraint.kind === 'indexedAccess' ? unknownType : this.nullishConstraint(constraint, seen);
+      }
+      if (type.kind === 'intersection')
+        return intersectionOf(
+          type.types.map((member) => this.nullishConstraint(member, seen)),
+          this.c.budget
+        );
+      return type;
+    } finally {
+      seen.delete(type.id);
+    }
   }
 
   private instanceofExpression(left: TreeNode, right: TreeNode): Type {
@@ -419,7 +480,16 @@ export class OperatorChecker {
     const expression = node.type === 'type_assertion' ? (named(node).at(-1) as TreeNode) : named(node)[0];
     const typeNode = node.type === 'type_assertion' ? named(named(node)[0])[0] : named(node)[1];
     if (!typeNode || node.children.some((child) => child?.type === 'const') || typeNode.text === 'const') {
-      // `as const` gives literals that never widen.
+      const operand = skipParentheses(expression);
+      const signedLiteral =
+        operand.type === 'unary_expression' &&
+        ['+', '-'].includes(operand.childForFieldName('operator')?.text ?? '') &&
+        named(operand)[0]?.type === 'number';
+      if (
+        !['string', 'number', 'true', 'false', 'object', 'array', 'template_string'].includes(operand.type) &&
+        !signedLiteral
+      )
+        this.c.error(node, 'const アサーションは、リテラル式にのみ使えます。');
       return regularOf(this.c.expressions.check(expression));
     }
     const target = this.c.typeNodes.typeFromNode(typeNode);
@@ -498,4 +568,13 @@ function syntacticNullishness(node: TreeNode): 'always' | 'never' | 'sometimes' 
       return 'never';
     }
   }
+}
+
+function withoutTypeAssertions(node: TreeNode): TreeNode {
+  let current = skipParentheses(node);
+  while (['as_expression', 'type_assertion', 'non_null_expression'].includes(current.type))
+    current = skipParentheses(
+      current.type === 'type_assertion' ? (named(current).at(-1) as TreeNode) : named(current)[0]
+    );
+  return current;
 }

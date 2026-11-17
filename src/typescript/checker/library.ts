@@ -4,6 +4,27 @@ import { BROWSER_ONLY_GLOBALS, BROWSER_TYPES, SHARED_HOST_GLOBALS } from './domG
 import { ECMASCRIPT_LIBRARY } from './ecmascriptLibrary';
 import { Scope, type Sym } from './scopes';
 
+const omittedLibraryGlobals = [
+  'Intl',
+  'Int8Array',
+  'Uint8Array',
+  'Uint8ClampedArray',
+  'Int16Array',
+  'Uint16Array',
+  'Int32Array',
+  'Uint32Array',
+  'Float16Array',
+  'Float32Array',
+  'Float64Array',
+  'BigInt64Array',
+  'BigUint64Array',
+  'ArrayBuffer',
+  'SharedArrayBuffer',
+  'DataView',
+  'Atomics',
+  'WebAssembly',
+];
+
 const turtleMethods = Object.entries(TURTLE_METHOD_NAMES)
   .flatMap(([kind, names]) =>
     names.map((name) => `  ${name}(): ${kind === 'canMoveForward' || kind === 'isFrontPainted' ? 'boolean' : 'void'};`)
@@ -58,6 +79,7 @@ declare var Reflect: any;
  * runs) or this interpreter lacks; their types are `any`, as only `tsc` accepting them matters here.
  */
 const BROWSER_LIBRARY = [
+  ...omittedLibraryGlobals.map((name) => `declare var ${name}: any; type ${name} = any;`),
   ...BROWSER_ONLY_GLOBALS.map((name) => `declare var ${name}: ${name === 'name' ? 'void' : 'any'};`),
   ...SHARED_HOST_GLOBALS.map((name) => `declare var ${name}: any;`),
   ...BROWSER_TYPES.map((entry) => {
@@ -110,9 +132,14 @@ const unsupportedValues: Record<string, string> = {
 export function markUnsupported(scope: Scope): void {
   for (const [name, feature] of [
     ...Object.entries(unsupportedValues),
+    ...omittedLibraryGlobals.map((name) => [name, name]),
     ...SHARED_HOST_GLOBALS.map((name) => [name, name]),
   ]) {
     const symbol: Sym | undefined = scope.values.get(name);
     if (symbol) symbol.unsupported = feature;
+    if (omittedLibraryGlobals.includes(name)) {
+      const type = scope.types.get(name);
+      if (type) type.unsupported = feature;
+    }
   }
 }

@@ -1,8 +1,10 @@
+// code-gauge-allow-file fileNcss 413 -- Resolves expressions, lexical references, closure captures, and contextual assignment diagnostics; memoization is separate.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import { unsupportedMessage } from '../unsupported';
 import { Calls } from './calls';
 import type { Checker } from './checker';
+import { ExpressionTypeCache } from './expressionTypeCache';
 import type { FlowEntry } from './flow';
 import type { Sym } from './scopes';
 import { hasToken, isNumericName, named, numberValue, patternIdentifiers, stringValue } from './syntax';
@@ -28,6 +30,7 @@ import {
 /** Checks expressions, computing their types and narrowing the references their conditions test. */
 export class ExpressionChecker {
   readonly calls: Calls;
+  private readonly silentTypes: ExpressionTypeCache;
   /** Types of variables computed from their declarations, by symbol. */
   private readonly variableTypes = new Map<number, Type>();
 
@@ -71,19 +74,24 @@ export class ExpressionChecker {
 
   constructor(private readonly c: Checker) {
     this.calls = new Calls(c);
+    this.silentTypes = new ExpressionTypeCache(c);
   }
 
   // Entry points -------------------------------------------------------------------------------------------------
 
   check(node: TreeNode, contextual?: Type): Type {
     this.c.budget.spend();
+    if (this.c.silent === 0) return this.compute(node, contextual);
+    return this.silentTypes.check(node, contextual, () => this.compute(node, contextual));
+  }
+
+  private compute(node: TreeNode, contextual?: Type): Type {
     const checkKind = this.checkers.get(node.type);
     if (checkKind) return checkKind(node, contextual);
     for (const child of named(node)) this.check(child);
     return anyType;
   }
 
-  /** Whether a type is a symbol (not `any`), which converting to a string implicitly throws for. */
   /**
    * Reports a function or a class turned into text: Node.js shows the source tsx's esbuild printed for it, which this
    * interpreter does not reproduce.
@@ -184,14 +192,17 @@ export class ExpressionChecker {
 
   /** The type of a `typeof x` type query. */
   typeOfQuery(node: TreeNode): Type {
-    return this.c.silently(() => {
-      if (node.type === 'identifier') {
-        const symbol = this.c.scopeOf(node).lookupValue(node.text);
-        if (!symbol) return anyType;
-        return this.valueTypeOf(symbol);
-      }
-      return this.check(node);
-    });
+    if (node.type === 'identifier') {
+      const symbol = this.c.scopeOf(node).lookupValue(node.text);
+      if (!symbol) return this.reportUnknownValue(node, node.text);
+      return this.reportUnavailableValue(node, symbol) ? errorType : this.valueTypeOf(symbol);
+    }
+    if (node.type === 'member_expression') {
+      const object = node.childForFieldName('object') as TreeNode;
+      const property = node.childForFieldName('property') as TreeNode;
+      return this.c.members.propertyAccess(node, object, property, this.typeOfQuery(object), property.text);
+    }
+    return this.check(node);
   }
 
   // Identifiers --------------------------------------------------------------------------------------------------
@@ -204,10 +215,7 @@ export class ExpressionChecker {
       if (name === 'arguments' && this.hasArguments(node)) return this.c.globalType('IArguments');
       return this.reportUnknownValue(node, name);
     }
-    if (symbol.unsupported) {
-      this.c.error(node, unsupportedMessage(symbol.unsupported));
-      return errorType;
-    }
+    if (this.reportUnavailableValue(node, symbol)) return errorType;
     this.checkUsedBeforeDeclaration(node, symbol);
     const declared = this.valueTypeOf(symbol);
     const key = `s${symbol.id}`;
@@ -216,6 +224,12 @@ export class ExpressionChecker {
     // A nested function narrows a variable of an enclosing one from the type it sees, never checking its assignment.
     if (this.isOuterVariable(node, symbol)) return entry?.type ?? this.closureVariableType(node, symbol, declared);
     return entry ? this.flowVariableType(node, symbol, entry, declared) : declared;
+  }
+
+  private reportUnavailableValue(node: TreeNode, symbol: Sym): boolean {
+    if (!symbol.unsupported) return false;
+    this.c.error(node, unsupportedMessage(symbol.unsupported));
+    return true;
   }
 
   /** Whether `arguments` names the arguments of an enclosing function, which an arrow function shares. */
@@ -308,7 +322,6 @@ export class ExpressionChecker {
     return true;
   }
 
-  /** The type a nested function sees for a variable of an enclosing one: narrowed if nothing reassigns it. */
   /**
    * The type a nested function sees for a variable of an enclosing one: narrowed as when the function was created if
    * nothing assigns the variable after that, as TypeScript 5.4 keeps it.
@@ -362,7 +375,13 @@ export class ExpressionChecker {
 
   // code-gauge-allow functionCognitiveComplexity 22 -- Follows TypeScript's rules for uses before a declaration, which depend on when the use runs.
   checkUsedBeforeDeclaration(node: TreeNode, symbol: Sym): void {
-    if (symbol.valueKind !== 'let' && symbol.valueKind !== 'const' && symbol.valueKind !== 'class') return;
+    if (
+      symbol.valueKind !== 'let' &&
+      symbol.valueKind !== 'const' &&
+      symbol.valueKind !== 'class' &&
+      symbol.valueKind !== 'parameter'
+    )
+      return;
     const declaration = symbol.valueDeclaration;
     if (!declaration || this.c.isLibrary(declaration)) return;
     if (node.startIndex >= declaration.startIndex) {
@@ -665,7 +684,6 @@ const laterRunningTypes = new Set([
   'function_expression',
   'arrow_function',
   'method_definition',
-  'class_static_block',
 ]);
 
 /** Node.js names that need its type definitions, which the reference `tsc` does not have. */

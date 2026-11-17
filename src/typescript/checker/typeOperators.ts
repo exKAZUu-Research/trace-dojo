@@ -113,7 +113,11 @@ export class TypeOperators {
       kind: 'typeParameter',
       id: newTypeId(),
       name: name.text,
-      constraint: constraintNode ? () => this.c.typeNodes.typeFromNode(constraintNode) : undefined,
+      constraint: constraintNode
+        ? () => this.c.typeNodes.typeFromNode(constraintNode)
+        : node.parent?.type === 'template_type'
+          ? () => stringType
+          : undefined,
     });
   }
 
@@ -162,12 +166,15 @@ export class TypeOperators {
       const outer = constraint.constraint?.();
       if (outer?.kind === 'keyof') source = outer.type;
     }
+    const checker = this.c;
     return this.mappedType({
       typeParameter: parameter,
       source,
       constraint,
       nameType: aliasNode ? this.c.typeNodes.typeFromNode(aliasNode) : undefined,
-      template: this.c.typeNodes.annotationType(typeNode) ?? anyType,
+      get template() {
+        return checker.typeNodes.annotationType(typeNode) ?? anyType;
+      },
       readonlyModifier,
       optionalModifier,
     });
@@ -327,13 +334,18 @@ export class TypeOperators {
     const trueNode = node.childForFieldName('consequence') as TreeNode;
     const falseNode = node.childForFieldName('alternative') as TreeNode;
     const checkType = this.c.typeNodes.typeFromNode(check);
+    const checker = this.c;
     const conditional: ConditionalType = {
       kind: 'conditional',
       id: newTypeId(),
       checkType,
       extendsType: this.c.typeNodes.typeFromNode(extendsNode),
-      trueType: this.c.typeNodes.typeFromNode(trueNode),
-      falseType: this.c.typeNodes.typeFromNode(falseNode),
+      get trueType() {
+        return checker.typeNodes.typeFromNode(trueNode);
+      },
+      get falseType() {
+        return checker.typeNodes.typeFromNode(falseNode);
+      },
       inferTypeParameters: [...this.inferParametersOf(node).values()],
       distributive: checkType.kind === 'typeParameter',
     };
@@ -348,8 +360,8 @@ export class TypeOperators {
     return composed;
   }
 
-  // code-gauge-allow functionCognitiveComplexity 16 -- Follows TypeScript's getConditionalType: deferral, distribution, and each branch.
-  // code-gauge-allow functionNcss 33 -- Keeps conditional inference and lazy branch substitution together.
+  // code-gauge-allow functionCognitiveComplexity 19 -- Resolves distribution, deferred branches, infer parameters, and failed template-literal inference as one conditional-type operation.
+  // code-gauge-allow functionNcss 35 -- Keeps conditional inference and lazy branch substitution together.
   resolveConditional(type: ConditionalType, outer: Mapper): Type {
     // An instantiated copy resolves from its declaration, so that it still distributes over its check type parameter.
     if (type.root && type.mapper) return this.resolveConditional(type.root, this.compose(type.mapper, outer));
@@ -375,7 +387,10 @@ export class TypeOperators {
       if (outer.size === 0) return type;
       const checker = this.c;
       return {
-        ...type,
+        kind: 'conditional',
+        distributive: type.distributive,
+        aliasName: type.aliasName,
+        aliasArguments: type.aliasArguments,
         id: newTypeId(),
         checkType,
         extendsType,
@@ -393,6 +408,12 @@ export class TypeOperators {
     const inferred = new Map(mapper);
     if (inferTypeParameters.length > 0) {
       const inferences = this.c.inference.inferFromTypes(inferTypeParameters, checkType, extendsType);
+      if (
+        extendsType.kind === 'templateLiteral' &&
+        checkType.kind === 'literal' &&
+        inferTypeParameters.some((parameter) => !inferences.has(parameter.id))
+      )
+        return this.c.instantiate(type.falseType, outer);
       for (const parameter of inferTypeParameters) {
         inferred.set(parameter.id, inferences.get(parameter.id) ?? parameter.constraint?.() ?? unknownType);
       }
@@ -442,9 +463,10 @@ export class TypeOperators {
         isLiteral = false;
         break;
       }
+      const count = combinations.length * members.length;
+      this.c.budget.spend(count);
+      if (count > 10_000) return stringType;
       combinations = appendEach(combinations, members, texts[index + 1]);
-      this.c.budget.spend(combinations.length);
-      if (combinations.length > 10_000) return stringType;
     }
     if (isLiteral) return unionOf(combinations.map((text) => literalType(text)));
     if (types.length === 1 && isIntrinsic(types[0], 'string') && texts.every((text) => text === '')) return stringType;

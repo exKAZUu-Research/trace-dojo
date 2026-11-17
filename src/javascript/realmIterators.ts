@@ -62,7 +62,7 @@ export function defineHostIteratorPrototype(builder: RealmBuilder, tag: string):
   const next = builder.method(prototype, 'next', 0, ({ runtime, thisValue }) => {
     // Each kind of iterator steps only its own kind, as V8 checks.
     const iterator =
-      thisValue instanceof JsObject && thisValue.proto === prototype ? thisValue.hostIterator : undefined;
+      thisValue instanceof JsObject && thisValue.hostIteratorKind === prototype ? thisValue.hostIterator : undefined;
     if (!iterator) {
       return runtime.throwError(
         'TypeError',
@@ -80,6 +80,7 @@ export function defineHostIteratorPrototype(builder: RealmBuilder, tag: string):
 export function newHostIterator(runtime: Runtime, prototype: JsObject, iteration: HostIterator): JsObject {
   const iterator = runtime.newObject(prototype);
   iterator.hostIterator = iteration;
+  iterator.hostIteratorKind = prototype;
   return iterator;
 }
 
