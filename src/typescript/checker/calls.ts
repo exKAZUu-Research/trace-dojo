@@ -560,6 +560,8 @@ export class Calls {
     report: boolean,
     at: TreeNode | undefined
   ): boolean {
+    // The tuple is built silently, so the arguments' own errors are reported here.
+    if (report) for (const arg of args) this.c.expressions.check(arg.type === 'spread_element' ? named(arg)[0] : arg);
     const tuple = this.argumentTuple(args, false);
     if (this.c.relations.isAssignable(tuple, restType)) return true;
     if (report && at)
