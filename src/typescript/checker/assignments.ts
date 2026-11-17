@@ -1,6 +1,7 @@
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import type { Checker } from './checker';
+import type { State } from './flow';
 import { defaultedTarget } from './patterns';
 import type { Sym } from './scopes';
 import { arrayPatternElements, named, skipParentheses } from './syntax';
@@ -207,9 +208,9 @@ export class AssignmentChecker {
     const targetType = this.targetType(left, true);
     if (operator === '&&=' || operator === '||=' || operator === '??=') {
       // The right operand runs only on some paths, so its effects join the path that skips it.
-      const skipped = this.c.flow.current;
+      const { skipped, evaluating } = this.logicalAssignmentPaths(left, operator);
       let valueType: Type = neverType;
-      const evaluated = this.c.flow.from(skipped, () => {
+      const evaluated = this.c.flow.from(evaluating, () => {
         valueType = this.c.expressions.check(right, targetType);
       });
       this.c.flow.current = this.c.flow.merge([skipped, evaluated]);
@@ -238,6 +239,18 @@ export class AssignmentChecker {
       this.c.expressions.checkAssignable(skipParentheses(left), resultType, declared);
     this.assignReference(skipParentheses(left), declared, resultType);
     return resultType;
+  }
+
+  /** The flow states where a logical assignment keeps its target and where it evaluates the right operand. */
+  private logicalAssignmentPaths(left: TreeNode, operator: string): { skipped: State; evaluating: State } {
+    if (operator === '??=') {
+      const { whenTrue, whenFalse } = this.c.conditions.presence(left);
+      return { skipped: whenTrue, evaluating: whenFalse };
+    }
+    const { whenTrue, whenFalse } = this.c.conditions.truthiness(skipParentheses(left));
+    return operator === '&&='
+      ? { skipped: whenFalse, evaluating: whenTrue }
+      : { skipped: whenTrue, evaluating: whenFalse };
   }
 
   private declaredTargetType(left: TreeNode): Type {

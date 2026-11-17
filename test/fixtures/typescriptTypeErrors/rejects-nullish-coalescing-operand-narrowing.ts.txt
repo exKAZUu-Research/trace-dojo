@@ -1,0 +1,19 @@
+function onlyNumber(x: number) {
+  return x;
+}
+
+function nullish(x: number | null | undefined) {
+  return x ?? onlyNumber(x);
+}
+function chainBase(o: { b: string } | undefined) {
+  return o?.b ?? o.b;
+}
+function afterward(x: number | null) {
+  const y = x ?? 0;
+  return onlyNumber(x);
+}
+function assignedOnRight(x: string | undefined) {
+  let z: number;
+  const r = x ?? (z = 1);
+  return z;
+}

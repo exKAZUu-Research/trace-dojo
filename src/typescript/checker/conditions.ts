@@ -19,6 +19,7 @@ import {
   isAnyLike,
   isIntrinsic,
   neverType,
+  nullType,
   regularOf,
   type Type,
   undefinedType,
@@ -384,7 +385,14 @@ export class ConditionChecker {
     return prototype ? prototype.type() : anyType;
   }
 
-  private truthiness(expression: TreeNode): { whenTrue: State; whenFalse: State } {
+  /** The states where a reference is neither `null` nor `undefined` and where it is, as `??` and `??=` test it. */
+  presence(reference: TreeNode): { whenTrue: State; whenFalse: State } {
+    return this.narrowed(skipParentheses(reference), (current, assumeTrue) =>
+      this.c.flow.narrowByEquality(current, nullType, !assumeTrue, true)
+    );
+  }
+
+  truthiness(expression: TreeNode): { whenTrue: State; whenFalse: State } {
     const { whenTrue, whenFalse } = this.narrowed(expression, (current, assumeTrue) =>
       this.c.flow.narrowByTruthiness(current, assumeTrue)
     );

@@ -371,9 +371,9 @@ export class OperatorChecker {
       if (nullishness === 'always') this.c.error(left, 'この式は常に null か undefined です。');
       const leftType = this.c.expressions.check(left, contextual);
       // The right operand runs only when the left one is nullish, so its effects join the path that skips it.
-      const skipped = this.c.flow.current;
+      const { whenTrue: skipped, whenFalse: nullish } = this.c.conditions.presence(left);
       let rightType: Type = neverType;
-      const after = this.c.flow.from(skipped, () => {
+      const after = this.c.flow.from(nullish, () => {
         rightType = this.c.expressions.check(right, contextual);
       });
       this.c.flow.current = this.c.flow.merge([skipped, after]);
