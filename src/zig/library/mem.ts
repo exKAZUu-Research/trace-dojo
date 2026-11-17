@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 674 -- Groups the related standard library operations that share this module.
+// code-gauge-allow-file fileNcss 679 -- Groups the related standard library operations that share this module.
 import { transferCost } from '../allocation';
 import { indexOutOfBounds, PANIC, panic } from '../arith';
 import type { Expression, Span } from '../ast';
@@ -513,6 +513,7 @@ const MEMBERS: Record<string, () => Member> = {
   ),
   count: sliceSearch('std.mem.count', 'slice', USIZE, (h, needle, equal) => {
     if (needle.length === 0n) panic(PANIC.unreachable);
+    if (needle.length === 1n) return countScalar(h, needle, equal);
     let found = 0n;
     for (
       let index = findSequence(h, needle, 0n, equal);
@@ -522,9 +523,7 @@ const MEMBERS: Record<string, () => Member> = {
       found++;
     return found;
   }),
-  countScalar: sliceSearch('std.mem.countScalar', 'scalar', USIZE, (h, v, equal) =>
-    h.count((x) => equal(x, v.get(0n)))
-  ),
+  countScalar: sliceSearch('std.mem.countScalar', 'scalar', USIZE, countScalar),
   containsAtLeast: generic('std.mem.containsAtLeast', 4, (sema, call, type, [h, countArg, n]) => {
     const haystack = constSlice(sema, h, type);
     const [count] = compileArgs(sema, [countArg], [USIZE]);
@@ -840,6 +839,11 @@ function cutMember(name: string, suffix: boolean): () => Member {
       );
     });
   });
+}
+
+function countScalar(haystack: Sequence, needle: Sequence, equal: typeof equalValues): bigint {
+  const value = needle.get(0n);
+  return haystack.count((item) => equal(item, value));
 }
 
 function sliceOrder(name: string, lessThan: boolean): Member {

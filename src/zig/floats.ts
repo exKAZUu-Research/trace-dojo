@@ -1,3 +1,4 @@
+// code-gauge-allow-file fileNcss 402 -- Keeps IEEE arithmetic, conversions, and rounding with their shared representation.
 import { spendIntegerOperation, spendIntegerShift, spendIntegerWidth } from './integerWork';
 import { spendMemory } from './memoryAccounting';
 
@@ -181,7 +182,9 @@ export function roundNumber(value: number, bits: 16 | 32 | 64): number {
 /** The float nearest to an integer. */
 export function floatFromBigInt(value: bigint, bits: FloatBits): AnyFloat {
   const sign = value < 0n;
-  const rounded = roundRational(sign, sign ? -value : value, 1n, FORMATS[bits]);
+  const magnitude = sign ? -value : value;
+  spendIntegerWidth(bitLength(magnitude), spendMemory);
+  const rounded = roundRational(sign, magnitude, 1n, FORMATS[bits]);
   return floatOf(rounded, bits);
 }
 
@@ -189,9 +192,11 @@ export function floatFromBigInt(value: bigint, bits: FloatBits): AnyFloat {
 export function truncateToBigInt(value: AnyFloat): bigint {
   const big = asBigFloat(value);
   if (big.kind !== 'finite') throw new Error('not finite');
-  const { num, den } = toRational(big);
-  const quotient = num / den;
-  return big.sign ? -quotient : quotient;
+  const { mantissa, exponent, sign } = big;
+  const distance = BigInt(Math.abs(exponent));
+  spendIntegerShift(mantissa, distance, exponent >= 0, spendMemory);
+  const integer = exponent >= 0 ? mantissa << distance : mantissa >> distance;
+  return sign ? -integer : integer;
 }
 
 /** Whether a float holds an integer. */

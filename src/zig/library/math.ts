@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 580 -- Groups the related standard library operations that share this module.
+// code-gauge-allow-file fileNcss 586 -- Groups the related standard library operations that share this module.
 import {
   checked,
   divCeil,
@@ -36,7 +36,8 @@ import {
   signBit,
   truncateToBigInt,
 } from '../floats';
-import { spendIntegerOperation } from '../integerWork';
+import { spendIntegerOperation, spendIntegerShift } from '../integerWork';
+import { spendMemory } from '../memoryAccounting';
 import { isArithmeticType, isIntegerType } from '../operands';
 import { referenceBinary, referenceUnary } from '../referenceMath';
 import type { BinaryOperation, UnaryOperation } from '../referenceMathOperations';
@@ -281,8 +282,9 @@ function shift(name: string, left: boolean): () => Member {
 
 /** Shifts a value by a distance, dropping the bits shifted out; a signed value shifted right keeps its sign. */
 function shiftedBy(value: bigint, distance: bigint, toLeft: boolean, type: IntType): bigint {
-  if (!toLeft) return distance >= BigInt(type.bits) ? (value < 0n ? -1n : 0n) : value >> distance;
-  if (distance >= BigInt(type.bits)) return 0n;
+  if (distance >= BigInt(type.bits)) return !toLeft && value < 0n ? -1n : 0n;
+  spendIntegerShift(value, distance, toLeft, spendMemory);
+  if (!toLeft) return value >> distance;
   const shifted = value << distance;
   return type.signed ? BigInt.asIntN(type.bits, shifted) : BigInt.asUintN(type.bits, shifted);
 }
@@ -310,7 +312,10 @@ function rotate(name: string, left: boolean): () => Member {
       const r = (((n as bigint) % bits) + bits) % bits;
       const k = left ? r : (bits - r) % bits;
       const v = value as bigint;
-      return BigInt.asUintN(type.bits, (v << k) | (v >> (bits - k)));
+      const high = shiftedBy(v, k, true, type);
+      const low = shiftedBy(v, bits - k, false, type);
+      spendIntegerOperation(high, low, 'read', spendMemory);
+      return high | low;
     });
   });
 }
@@ -956,6 +961,7 @@ const MEMBERS: Record<string, () => Member> = {
     return computed(BOOL, [value], call.span, ([x]) => {
       const n = x as bigint;
       if (n <= 0n) panic(PANIC.unreachable);
+      spendIntegerOperation(n, 1n, 'read', spendMemory);
       return (n & (n - 1n)) === 0n;
     });
   }),

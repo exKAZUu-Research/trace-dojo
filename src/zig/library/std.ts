@@ -142,7 +142,6 @@ function lazyMember(name: string): () => Member {
 // std.debug -----------------------------------------------------------------------------------------------------------
 
 const DEBUG = nativeStruct('std.debug', {
-  // code-gauge-allow duplicateLines 15 -- Debug print and panic share format setup, with different buffers and failure handling.
   print: fnMember('std.debug.print', (sema, call) => {
     const [format, args] = expectArgs(sema, call, 2, 'std.debug.print');
     const print = compilePrint(sema, format, args, call.span);
@@ -152,6 +151,7 @@ const DEBUG = nativeStruct('std.debug', {
         frame.runtime.spend();
         const state: WriterState = {
           fd: 2,
+          flushAfterFormat: true,
           buffer: new Slice(new ZArray(Array.from({ length: 64 }, () => 0n)), 0, 64),
           end: 0,
           capacity: 64,

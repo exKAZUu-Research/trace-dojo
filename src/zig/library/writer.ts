@@ -38,6 +38,7 @@ export interface WriterState extends Record<string, unknown> {
   end: number;
   capacity: number;
   growth?: NativeHandle;
+  flushAfterFormat?: boolean;
 }
 
 export class WriterWriteError extends Error {
@@ -104,7 +105,7 @@ export class WriterFormatOutput implements FormatOutput {
   }
 
   checkSize(length: number): void {
-    if (!isDiscardingWriter(this.destination)) return checkOutputSize(length);
+    if (this.destination.flushAfterFormat) return checkOutputSize(length);
     const extra = Math.max(0, length - this.length);
     this.frame.runtime.spend(extra > LIMITS.maxOperations - this.frame.runtime.budget.spent ? extra : 0);
   }
@@ -265,12 +266,13 @@ export function writeTo(frame: Frame, state: WriterState, bytes: WriteBytes): Va
       state.end += available;
       return ErrorValue.of('WriteFailed');
     }
+    checkOutputSize(end);
     frame.runtime.spend(state.end + bytes.length);
     frame.runtime.writeOutput(state.fd, [...bufferedBytes(frame, state), ...materializeBytes(frame, bytes)]);
     state.end = 0;
     return undefined;
   }
-  if (!Number.isFinite(state.capacity)) checkOutputSize(end);
+  if (!Number.isFinite(state.capacity)) frame.runtime.reserveStorage(bytes.length);
   frame.runtime.spend(bytes.length);
   for (let index = 0; index < bytes.length; index++) state.buffer.set(state.end + index, BigInt(get(index)));
   state.end = end;
@@ -293,6 +295,7 @@ export function flushWriter(frame: Frame, state: WriterState): void {
     return;
   }
   if (state.fd === undefined) return;
+  checkOutputSize(state.end);
   frame.runtime.writeOutput(state.fd, bufferedBytes(frame, state));
   state.end = 0;
 }

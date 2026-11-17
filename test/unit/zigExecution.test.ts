@@ -8357,3 +8357,56 @@ test('writer header references skip byte-only backing during turtle queries', ()
     uncaughtException: undefined,
   });
 });
+
+test.each([
+  'std.math.shl(u65535,x,1)',
+  'std.math.shl(u65535,x,-1)',
+  'std.math.shr(u65535,x,1)',
+  'std.math.shr(u65535,x,-1)',
+  'std.math.rotl(u65535,x,1)',
+  'std.math.rotr(u65535,x,1)',
+  'std.math.isPowerOfTwo(x)',
+  'std.math.order(x,y)',
+  'std.math.compare(x,.lt,y)',
+  'std.math.clamp(x,x,y)',
+  'std.mem.order(u65535,a[0..1],a[1..2])',
+  'std.mem.findMax(u65535,&a)',
+])('wide integer library operation %s charges operand work', (operation) => {
+  const storage = operation.startsWith('std.mem.') ? 'const a=[_]u65535{x,y};' : '';
+  const source = `const std=@import("std");pub fn main()void{var x:u65535=1<<65534;var y:u65535=x+1;_=&x;_=&y;${storage}for(0..2000)|_|{_=${operation};}}`;
+  expect(executeProgram('zig', source)).toMatchObject({ kind: 'limitExceeded', limit: 'operations' });
+});
+
+test('count reads the value of a one-element needle once', () => {
+  const source =
+    'const std=@import("std");pub fn main()void{const a:[200000]u8=@splat(97);std.debug.print("{}",.{std.mem.count(u8,&a,"a")});}';
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: '200000',
+    uncaughtException: undefined,
+  });
+});
+
+test.each([
+  ['u16001=1<<16000', '@as(f128,@floatFromInt(x))'],
+  ['u16001=1<<16000', 'std.math.lossyCast(f128,x)'],
+  ['f128=0x1p16000', '@as(u16001,@intFromFloat(x))'],
+  ['f128=0x1p16000', 'std.math.lossyCast(u16001,x)'],
+])('conversion from %s via %s charges wide numeric work', (initialization, operation) => {
+  const source = `const std=@import("std");pub fn main()void{var x:${initialization};_=&x;for(0..5000)|_|{_=${operation};}}`;
+  expect(executeProgram('zig', source)).toMatchObject({ kind: 'limitExceeded', limit: 'operations' });
+});
+
+test.each(['fixed', 'allocated'])('formatting keeps %s writer bytes separate from stream output', (writer) => {
+  const format = writer === 'fixed' ? '{s:410000}' : `${'a'.repeat(409_997)}{s}`;
+  const body =
+    writer === 'fixed'
+      ? `var b:[410000]u8=undefined;var w=std.Io.Writer.fixed(&b);try w.print("${format}",.{"a"});const data=w.buffered();`
+      : `const data=try std.fmt.allocPrint(std.heap.page_allocator,"${format}",.{"aaa"});`;
+  const source = `const std=@import("std");pub fn main()!void{${body}std.debug.print("{} {c}",.{data.len,data[data.len-1]});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: '410000 a',
+    uncaughtException: undefined,
+  });
+});
