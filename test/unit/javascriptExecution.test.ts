@@ -1587,6 +1587,15 @@ console.dir([3, 1, 2], { sorted: true });
 const s = new Set([2, 1]); s.z = 1; s.a = 2; console.dir(s, { sorted: true });`,
   ],
   [
+    'console.table columns in the order an object lists its keys',
+    `console.table([{ a: 1 }, { 0: 2 }]);
+console.table({ x: { y: 1 }, z: [1, 2] });
+console.table([{ b: 1, 10: 2, 2: 3, a: 4 }]);
+console.table([{ a: 1, 1: 2 }], ["a", "1"]);
+console.table([[1], [2]]);
+console.table([{ a: 1 }, 5]);`,
+  ],
+  [
     'console.table of Set and Map iterators',
     `const s = new Set([1, 2, 3]);
 console.table(s.entries());

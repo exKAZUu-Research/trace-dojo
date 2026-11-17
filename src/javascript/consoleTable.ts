@@ -2,7 +2,7 @@ import { ArrayOps } from './arrayOps';
 import { inspectValue, OutputBudget, stringWidth } from './inspect';
 import { type CollectionEntry, CollectionIterator } from './realmCollections';
 import type { Runtime } from './runtime';
-import { isObject, JsArray, JsFunction, JsObject, JsThrow, type Value } from './values';
+import { arrayIndexOf, isObject, JsArray, JsFunction, JsObject, JsThrow, type Value } from './values';
 
 /** The text `console.table` prints for its arguments, or undefined when it prints them as `console.log` does. */
 // code-gauge-allow functionNcss 34 -- Keeps argument validation, row collection, and the shared formatting budget in table evaluation order.
@@ -40,8 +40,10 @@ export function formatTable(runtime: Runtime, data: Value, properties: Value): s
           : '';
     }
   }
-  const head = ['(index)', ...columns.keys()];
-  const body = [rowKeys, ...columns.values()];
+  // Node.js collects the columns as an object's keys, which put integer-like keys first, in ascending order.
+  const ordered = [...columns.keys()].toSorted(byObjectKeyOrder);
+  const head = ['(index)', ...ordered];
+  const body = [rowKeys, ...ordered.map((key) => columns.get(key) as string[])];
   if (hasPrimitives) {
     head.push('Values');
     body.push(values);
@@ -154,4 +156,12 @@ function renderTable(runtime: Runtime, head: string[], columns: string[][]): str
     ...rows.map((row) => renderRow(row)),
     `└${divider.join('┴')}┘`,
   ].join('\n');
+}
+
+/** Orders keys as an object lists them: integer-like ones first, in ascending order, then the rest as they came. */
+function byObjectKeyOrder(a: string, b: string): number {
+  const left = arrayIndexOf(a);
+  const right = arrayIndexOf(b);
+  if (left === undefined || right === undefined) return left === undefined ? (right === undefined ? 0 : 1) : -1;
+  return left - right;
 }
