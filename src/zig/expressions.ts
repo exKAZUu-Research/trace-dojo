@@ -1319,9 +1319,30 @@ export abstract class ExpressionCompiler extends SemaBase {
   }
 
   /** `a ++ b`: concatenates arrays whose lengths are known at compile time. */
+  // code-gauge-allow functionNcss 39 -- Keeps tuple/array coercion with the corresponding concatenation representation.
+  // code-gauge-allow functionCognitiveComplexity 22 -- Keeps tuple/array coercion with the corresponding concatenation representation.
   private concatenate(expression: ExpressionOf<'binary'>): TExpr {
-    const left = this.compile(expression.left);
-    const right = this.compile(expression.right);
+    let left = this.compile(expression.left);
+    let right = this.compile(expression.right);
+    const leftTuple = left.type.kind === 'struct' && left.type.isTuple ? left.type : undefined;
+    const rightTuple = right.type.kind === 'struct' && right.type.isTuple ? right.type : undefined;
+    if (leftTuple && rightTuple) {
+      const fields = [...this.structFields(leftTuple, expression), ...this.structFields(rightTuple, expression)].map(
+        (field, index) => ({ ...field, name: String(index) })
+      );
+      const type = this.tupleType(fields);
+      const a = this.arrayOperand(left, expression.left);
+      const b = this.arrayOperand(right, expression.right);
+      return this.aggregate(type, [left, right], expression, ([x, y]) => new ZStruct([...a.read(x), ...b.read(y)]));
+    }
+    if (leftTuple) {
+      const child = this.arrayOperand(right, expression.right).child;
+      left = this.coerce(left, arrayOf(this.structFields(leftTuple, expression).length, child), expression.left);
+    }
+    if (rightTuple) {
+      const child = this.arrayOperand(left, expression.left).child;
+      right = this.coerce(right, arrayOf(this.structFields(rightTuple, expression).length, child), expression.right);
+    }
     const a = this.arrayOperand(left, expression.left);
     const b = this.arrayOperand(right, expression.right);
     if (a.child !== b.child) {
@@ -1496,7 +1517,7 @@ export abstract class ExpressionCompiler extends SemaBase {
   }
 
   private anonymousStructType(fields: StructField[]): StructType {
-    return this.structuralStruct(fields, false);
+    return this.structuralStruct(fields, fields.length === 0);
   }
 
   tupleType(fields: StructField[]): StructType {

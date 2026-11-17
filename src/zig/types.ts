@@ -499,8 +499,8 @@ export function indexableChild(type: Type): Type | undefined {
 // Names ---------------------------------------------------------------------------------------------------------------
 
 /** The type's name as Zig's `@typeName` writes it. */
-// code-gauge-allow functionNcss 45 -- One case per kind of syntax node, type, or format specifier, as Zig defines them.
-// code-gauge-allow functionCognitiveComplexity 22 -- One case per kind of syntax node, type, or format specifier, as Zig defines them.
+// code-gauge-allow functionNcss 47 -- One case per kind of syntax node, type, or format specifier, as Zig defines them.
+// code-gauge-allow functionCognitiveComplexity 25 -- One case per kind of syntax node, type, or format specifier, as Zig defines them.
 export function typeName(type: Type): string {
   switch (type.kind) {
     case 'int': {
@@ -536,6 +536,7 @@ export function typeName(type: Type): string {
     }
     case 'struct': {
       if (type.isTuple) {
+        if (type.fields?.length === 0) return '@TypeOf(.{})';
         const fields = (type.fields ?? []).map((field) =>
           field.comptimeValue === undefined
             ? typeName(field.type)

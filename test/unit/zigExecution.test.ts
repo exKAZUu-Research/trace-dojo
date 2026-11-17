@@ -4030,3 +4030,36 @@ test('generic function signatures preserve anytype dependencies and fixed types'
     uncaughtException: undefined,
   });
 });
+
+test('tuple concatenation preserves heterogeneous fields, constants and operand effects', () => {
+  const source = `const std=@import("std");fn make(n:u8)struct{u8,bool}{std.debug.print("{}",.{n});return .{n,true};}pub fn main()void{const x=.{@as(u8,1),true} ++ .{@as(u8,2),false};const b:bool=x[1];std.debug.print("{} {}|",.{b,@TypeOf(x)});const y=make(3) ++ make(4);std.debug.print("|{} {} {} {}",.{y[0],y[1],y[2],y[3]});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr:
+      'true struct { comptime u8 = 1, comptime bool = true, comptime u8 = 2, comptime bool = false }|34|3 true 4 true',
+    uncaughtException: undefined,
+  });
+});
+
+test.each([
+  ['.{1} ++ [_]u8{2}', '[2]u8 { 1, 2 }'],
+  ['[_]u8{1} ++ .{2}', '[2]u8 { 1, 2 }'],
+  ['.{} ++ [_]u8{2}', '[1]u8 { 2 }'],
+  ['[_]u8{1} ++ .{}', '[1]u8 { 1 }'],
+])('tuple and array concatenation coerces each element: %s', (expression, expected) => {
+  expect(
+    executeProgram(
+      'zig',
+      `const std=@import("std");pub fn main()void{const x=${expression};std.debug.print("{} {any}",.{@TypeOf(x),x});}`
+    )
+  ).toMatchObject({ kind: 'executed', stderr: expected, uncaughtException: undefined });
+});
+
+test.each(['.{@as(u8,1),true} ++ [_]u8{2}', '[_]u8{1} ++ .{true}'])(
+  'tuple and array concatenation rejects an incompatible field: %s',
+  (expression) => {
+    expect(executeProgram('zig', `pub fn main()void{const x=${expression};_=x;}`)).toMatchObject({
+      kind: 'compileError',
+    });
+  }
+);
