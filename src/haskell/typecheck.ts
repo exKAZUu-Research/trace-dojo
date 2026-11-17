@@ -553,9 +553,7 @@ function inferDerivedContext(checker: Checker, decl: RDataDecl, cls: ClassEntity
   while (work.length > 0) {
     const pred = work.pop() as Pred;
     const type = zonk(pred.type);
-    const { head } = splitApp(type);
-    if (head.tag === 'tvar') {
-      // GHC infers constraints on the type's variables, such as `Show a` or `Show (b a)`.
+    if (inferableDerivedType(type)) {
       const generic = quantifyType(type, params);
       const key = `${pred.cls.id}:${printer.show(generic)}`;
       if (!keys.has(key)) {
@@ -576,6 +574,19 @@ function inferDerivedContext(checker: Checker, decl: RDataDecl, cls: ClassEntity
     }
   }
   return context.toSorted((a, b) => printer.showPred(a).localeCompare(printer.showPred(b)));
+}
+
+function inferableDerivedType(type: Type): boolean {
+  const variables = new Set<Type>();
+  const pending = [type];
+  while (pending.length > 0) {
+    chargeTypeWork();
+    const node = pending.pop() as Type;
+    if (node.tag === 'tap') pending.push(node.fn, node.arg);
+    else if (node.tag === 'tvar' && !variables.has(node)) variables.add(node);
+    else return false;
+  }
+  return true;
 }
 
 function sameContext(a: Pred[], b: Pred[]): boolean {

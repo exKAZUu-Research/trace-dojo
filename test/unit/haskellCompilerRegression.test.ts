@@ -1221,3 +1221,60 @@ main=print(read "Blue"==Blue,Red<Blue,fromEnum Blue,[minBound..maxBound]::[T])`;
     uncaughtException: undefined,
   });
 });
+
+test.each([
+  ...['Eq', 'Show', 'Read', 'Bounded'].map((cls) => `data T f=T(f Int) deriving ${cls}`),
+  'data T f=T(f(T f)) deriving Eq',
+  'data T f a=T(f(f a)) deriving Show',
+  'data T f a=T(f a a) deriving Eq',
+  'data T f g a=T(f(g a)a) deriving Eq',
+])('stock deriving rejects a context containing constructors or repeated variables: %s', (declaration) => {
+  expect(executeProgram('haskell', `${declaration}\nmain=print(1::Int)`).kind).toBe('compileError');
+});
+
+test.each([
+  ['data T f a=T(f a)', 'T(Just(1::Int))::T Maybe Int', 'T (Just 1)'],
+  ['data T f a b=T(f a b)', 'T(Left(1::Int))::T Either Int Bool', 'T (Left 1)'],
+  ['data T f g a=T(f(g a))', 'T(Just[1::Int])::T Maybe [] Int', 'T (Just [1])'],
+  ['data T f a=T(Maybe(f a))', 'T(Just[1::Int])::T [] Int', 'T (Just [1])'],
+  ['data T a=T(Maybe Int) a', 'T(Just 1)True::T Bool', 'T (Just 1) True'],
+])(
+  'stock deriving solves concrete instances and infers distinct-variable contexts: %s',
+  (declaration, value, shown) => {
+    const source = `${declaration} deriving(Eq,Ord,Show,Read)
+main=do
+ let x=${value}
+ print x
+ print(x==read(show x),compare x(read(show x)))`;
+    expect(executeProgram('haskell', source)).toMatchObject({
+      kind: 'executed',
+      stdout: `${shown}\n(True,EQ)\n`,
+      uncaughtException: undefined,
+    });
+  }
+);
+
+test('stock deriving propagates constraints through mutually recursive datatypes', () => {
+  const source = `data A a=A(B a) deriving(Eq,Ord,Show,Read)
+data B a=B a (Maybe(A a)) deriving(Eq,Ord,Show,Read)
+main=do
+ let x=A(B(1::Int)Nothing)
+ print x
+ print(x==read(show x),compare x(read(show x)))`;
+  expect(executeProgram('haskell', source)).toMatchObject({
+    kind: 'executed',
+    stdout: 'A (B 1 Nothing)\n(True,EQ)\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('stock Bounded deriving retains valid higher-kinded constraints', () => {
+  const source = `data F a=F a deriving(Show,Bounded)
+data T f a=T(f a) deriving(Show,Bounded)
+main=print(minBound::T F Bool,maxBound::T F Bool)`;
+  expect(executeProgram('haskell', source)).toMatchObject({
+    kind: 'executed',
+    stdout: '(T (F False),T (F True))\n',
+    uncaughtException: undefined,
+  });
+});
