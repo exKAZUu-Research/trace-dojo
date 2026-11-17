@@ -1,7 +1,15 @@
-// code-gauge-allow-file fileNcss 564 -- Reflection and encoded constant lookup share representation and state; splitting registration by size would scatter that concern.
+// code-gauge-allow-file fileNcss 581 -- Reflection and encoded constant lookup share representation and state; splitting registration by size would scatter that concern.
 import type { Params } from './ast';
 import { prependHierarchy } from './classHierarchy';
-import { addressOf, className, inspect, inspectValue, tryImplicitConversion } from './conversions';
+import {
+  addressOf,
+  className,
+  inspect,
+  inspectValue,
+  isPrintable,
+  toSValue,
+  tryImplicitConversion,
+} from './conversions';
 import { def, findCoreMethod, isCoreMethod, sdef, sundef } from './define';
 import { joinEncodedStrings } from './encodedStringJoin';
 import { argumentError, frozenError, nameError, rubyError, typeError, undefinedMethodError } from './errors';
@@ -27,7 +35,7 @@ import {
   setClassVariable,
 } from './interp';
 import { procArity } from './libObject';
-import { identifierKeyString, inspectStringEncoding, symbolFromString, symbolString } from './libString';
+import { inspectStringEncoding, symbolFromString, symbolString } from './libString';
 import { nativeOwners } from './nativeOwners';
 import { type NativeSignature, nativeSignatures } from './nativeSignatures';
 import {
@@ -359,34 +367,72 @@ function methodParameterSignature(params: Params): string {
 }
 
 function* methodOwnerPrefix(definingOwner: RClass, recv: Value, unbound: boolean): Gen<RString> {
+  if (unbound) return joinEncodedStrings([yield* methodObjectLabel(definingOwner), methodDescriptionText('#')]);
   if (!definingOwner.isSingleton) {
-    const owner = methodClassLabel(definingOwner);
-    const receiver = unbound
-      ? owner
-      : methodClassLabel(
-          recv instanceof RClass && (!recv.isModule || recv.singletonExposed) ? classOf(recv) : realClassOf(recv)
-        );
+    const receiverClass =
+      recv instanceof RClass && (!recv.isModule || recv.singletonExposed) ? classOf(recv) : realClassOf(recv);
+    const receiver = yield* methodObjectLabel(receiverClass);
     return joinEncodedStrings([
       receiver,
-      ...(receiver.s === owner.s ? [] : [methodDescriptionText('('), owner, methodDescriptionText(')')]),
+      ...(receiverClass === definingOwner
+        ? []
+        : [
+            methodDescriptionText('('),
+            methodInspectionLabel(yield* toSValue(definingOwner), 'quoted'),
+            methodDescriptionText(')'),
+          ]),
       methodDescriptionText('#'),
     ]);
   }
   const attached = definingOwner.attached as Value;
-  const name = attached instanceof RClass ? methodClassLabel(attached) : yield* inspectValue(attached);
-  if (unbound) return joinEncodedStrings([methodDescriptionText('#<Class:'), name, methodDescriptionText('>#')]);
-  const receiver = recv instanceof RClass ? methodClassLabel(recv) : yield* inspectValue(recv);
-  return joinEncodedStrings([
-    receiver,
-    ...(recv === attached ? [] : [methodDescriptionText('('), name, methodDescriptionText(')')]),
-    methodDescriptionText('.'),
-  ]);
+  if (recv === attached) return joinEncodedStrings([yield* methodObjectLabel(attached), methodDescriptionText('.')]);
+  const receiver = yield* methodObjectLabel(recv);
+  const owner = yield* methodObjectLabel(attached);
+  return joinEncodedStrings([receiver, methodDescriptionText('('), owner, methodDescriptionText(').')]);
 }
 
-function methodClassLabel(cls: RClass): RString {
-  const name = identifierKeyString(className(cls));
-  if (!name.binary) return name;
-  return methodDescriptionText(inspectStringEncoding(name).slice(1, -1));
+function* methodObjectLabel(value: Value): Gen<RString> {
+  return methodInspectionLabel(yield* inspectValue(value));
+}
+
+function methodInspectionLabel(value: RString, mode: 'inspect' | 'quoted' = 'inspect'): RString {
+  const byteEncoding = value.binary || value.usAscii;
+  const codes = byteEncoding ? [...stringBytes(value)] : Array.from(value.s, (char) => char.codePointAt(0)!);
+  if (
+    !(byteEncoding && codes.some((code) => code >= 128)) &&
+    !(mode === 'quoted' && codes.some((code) => !isPrintable(code)))
+  )
+    return value;
+  const controls: Record<number, string> = {
+    0: String.raw`\0`,
+    7: String.raw`\a`,
+    8: String.raw`\b`,
+    9: String.raw`\t`,
+    10: String.raw`\n`,
+    11: String.raw`\v`,
+    12: String.raw`\f`,
+    13: String.raw`\r`,
+    27: String.raw`\e`,
+    127: String.raw`\c?`,
+  };
+  const parts: string[] = [];
+  let length = 0;
+  for (const code of codes) {
+    const part = controls[code] ?? methodEscapedCharacter(code, byteEncoding);
+    length += part.length;
+    rt().checkStringLength(length);
+    if (parts.length % 256 === 0) rt().spend();
+    parts.push(part);
+  }
+  return methodDescriptionText(parts.join(''));
+}
+
+function methodEscapedCharacter(code: number, byteEncoding: boolean): string {
+  if (code >= 32 && code < 127) return String.fromCodePoint(code);
+  if (byteEncoding || (code >= 0xdc_80 && code <= 0xdc_ff))
+    return `\\x${(code & 255).toString(16).toUpperCase().padStart(2, '0')}`;
+  const hex = code.toString(16).toUpperCase();
+  return code < 0x1_00_00 ? `\\u${hex.padStart(4, '0')}` : `\\u{${hex}}`;
 }
 
 function methodDescriptionText(text: string): RString {
