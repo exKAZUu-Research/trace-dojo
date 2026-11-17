@@ -43,12 +43,22 @@ export class CallArity {
     return undefined;
   }
 
+  /** How many elements a spread tuple with a rest element passes before its rest, as `[number, ...string[]]`. */
+  private leadingLength(arg: TreeNode): number {
+    const type = this.c.silently(() => this.c.expressions.check(named(arg)[0]));
+    const elements = type.kind === 'object' && type.objectKind === 'tuple' ? (type.tuple?.elements ?? []) : [];
+    const restIndex = elements.findIndex((element) => element.rest);
+    return restIndex === -1 ? 0 : restIndex;
+  }
+
   arityMatches(signature: Signature, args: TreeNode[]): boolean {
     let count = 0;
     let open = false;
     for (const arg of args) {
       const length = this.spreadLength(arg);
       if (length === undefined) {
+        // A tuple with a rest element passes its leading elements, then as many more as the rest holds.
+        count += this.leadingLength(arg);
         const restIndex = signature.parameters.findIndex((parameter) => parameter.rest);
         if (restIndex === -1 || count < restIndex) return false;
         open = true;
