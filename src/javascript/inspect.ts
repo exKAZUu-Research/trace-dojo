@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 466 -- One port of Node.js's util.inspect, whose formatters share its context.
+// code-gauge-allow-file fileNcss 483 -- One port of Node.js's util.inspect, whose formatters share its context.
 import { eastAsianWidthType } from 'get-east-asian-width';
 
 import { ExecutionLimitError, LIMITS } from '../interpreter/limits';
@@ -379,17 +379,19 @@ function enumerableKeys(runtime: Runtime, object: JsObject, showHidden: boolean)
  */
 function functionBase(runtime: Runtime, fn: JsFunction, constructor: string | undefined): string {
   const name = runtime.functionName(fn);
-  if (fn.behavior.kind !== 'class') {
-    const node = fn.behavior.kind === 'user' ? fn.behavior.node : undefined;
-    const kind = `${node?.isAsync ? 'Async' : ''}${node?.isGenerator ? 'Generator' : ''}Function`;
-    const prototype = constructor === undefined ? ' (null prototype)' : '';
-    const base = name ? `[${kind}${prototype}: ${name}]` : `[${kind}${prototype} (anonymous)]`;
-    return constructor === undefined || constructor === kind || constructor === 'Function'
-      ? base
-      : `${base} ${constructor}`;
-  }
+  if (fn.behavior.kind !== 'class') return plainFunctionBase(fn, name, constructor);
   const superName = fn.proto instanceof JsFunction ? runtime.functionName(fn.proto) : '';
   return `[class ${name || '(anonymous)'}${superName ? ` extends ${superName}` : ''}]`;
+}
+
+function plainFunctionBase(fn: JsFunction, name: string, constructor: string | undefined): string {
+  const node = fn.behavior.kind === 'user' ? fn.behavior.node : undefined;
+  const kind = `${node?.isAsync ? 'Async' : ''}${node?.isGenerator ? 'Generator' : ''}Function`;
+  const prototype = constructor === undefined ? ' (null prototype)' : '';
+  const base = name ? `[${kind}${prototype}: ${name}]` : `[${kind}${prototype} (anonymous)]`;
+  return constructor === undefined || constructor === kind || constructor === 'Function'
+    ? base
+    : `${base} ${constructor}`;
 }
 
 /**
