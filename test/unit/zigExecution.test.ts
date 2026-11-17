@@ -6034,3 +6034,16 @@ test('overlapping union copies retain pointer roots whose bytes remain unchanged
     uncaughtException: undefined,
   });
 });
+
+test.each([
+  ['w.end=9;', '9', '8'],
+  ['try w.writeAll("abc");w.buffer=w.buffer[0..1];', '3', '1'],
+  ['w.end=18446744073709551615;', '18446744073709551615', '8'],
+])('buffered validates the live writer end: %s', (mutate, end, length) => {
+  const source = `const std=@import("std");pub fn main()!void{var b:[8]u8=undefined;var w=std.Io.Writer.fixed(&b);${mutate}std.debug.print("{}",.{w.buffered().len});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: '',
+    uncaughtException: `panic: index out of bounds: index ${end}, len ${length}`,
+  });
+});

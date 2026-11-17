@@ -39,6 +39,7 @@ import {
 import { compilePrint, printInto, PrintWriteError } from './print';
 import {
   bufferedBytes,
+  bufferedSlice,
   discardRepeated,
   flushWriter,
   isDiscardingWriter,
@@ -358,14 +359,7 @@ function addWriterMembers(): void {
     buffered: fnMember('Writer.buffered', (sema, call) => {
       expectArgs(sema, call, 0, 'Writer.buffered');
       const writer = writerOf(sema, call, false);
-      return runtime(
-        sliceOf(U8, false),
-        (frame) => {
-          const state = writer(frame);
-          return new Slice(state.buffer.target, state.buffer.start, state.end);
-        },
-        call.span
-      );
+      return runtime(sliceOf(U8, false), (frame) => bufferedSlice(writer(frame)), call.span);
     }),
   });
 }

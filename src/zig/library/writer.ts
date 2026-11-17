@@ -1,5 +1,6 @@
 import { LIMITS } from '../../interpreter/limits';
 import { checkOutputSize } from '../allocation';
+import { indexOutOfBounds } from '../arith';
 import { byteValues } from '../builtins';
 import type { FormatOutput } from '../fmt';
 import type { Frame } from '../runtime';
@@ -149,8 +150,15 @@ function bindWriterState(state: WriterState, header: ZStruct): void {
   }
 }
 
+export function bufferedSlice(state: WriterState): Slice {
+  const end = (headers.get(state)?.slots[1] as bigint | undefined) ?? BigInt(state.end);
+  const buffer = state.buffer;
+  if (end > buffer.lengthValue) indexOutOfBounds(end, buffer.lengthValue);
+  return new Slice(buffer.target, buffer.start, end);
+}
+
 export function bufferedBytes(frame: Frame, state: WriterState): number[] {
-  return writerBytes(frame, new Slice(state.buffer.target, state.buffer.start, state.end));
+  return writerBytes(frame, bufferedSlice(state));
 }
 
 export function writerBytes(frame: Frame, value: Value): number[] {
@@ -161,6 +169,7 @@ export function bufferingWriter(): WriterState {
   return { fd: undefined, buffer: new Slice(new ZArray([]), 0, 0), end: 0, capacity: Infinity };
 }
 
+// code-gauge-allow functionNcss 31 -- Keeps growth, drain, and buffered writes in their observable order.
 export function writeTo(frame: Frame, state: WriterState, bytes: readonly number[]): Value {
   frame.runtime.spend();
   const end = state.end + bytes.length;
@@ -189,6 +198,8 @@ export function writeTo(frame: Frame, state: WriterState, bytes: readonly number
   frame.runtime.spend(bytes.length);
   for (const [index, byte] of bytes.entries()) state.buffer.set(state.end + index, BigInt(byte));
   state.end = end;
+  if (!Number.isFinite(state.capacity))
+    state.buffer = new Slice(state.buffer.target, state.buffer.start, Math.max(state.buffer.length, end));
   return undefined;
 }
 
