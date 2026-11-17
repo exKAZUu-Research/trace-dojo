@@ -3,7 +3,6 @@ import type { RealmBuilder } from './realm';
 import { groupBy } from './realmCollections';
 import type { Runtime } from './runtime';
 import {
-  HOLE,
   isAccessor,
   isCallable,
   isObject,
@@ -188,8 +187,8 @@ function defineIntegrity(method: ObjectMethod): void {
     for (const property of object.properties.values()) property.configurable = false;
     return object;
   });
-  method('isSealed', 1, (_, args) => isLocked(args[0], false));
-  method('isFrozen', 1, (_, args) => isLocked(args[0], true));
+  method('isSealed', 1, (runtime, args) => isLocked(runtime, args[0], false));
+  method('isFrozen', 1, (runtime, args) => isLocked(runtime, args[0], true));
   method('setPrototypeOf', 2, setPrototypeOf);
 }
 
@@ -247,16 +246,18 @@ function holdingTemporaries(runtime: Runtime, run: () => void): void {
 }
 
 /** Whether an object is sealed, or frozen when `frozen` is set, as `Object.isSealed` and `Object.isFrozen` test. */
-function isLocked(value: Value, frozen: boolean): boolean {
+/** Whether no own property of a non-extensible object is configurable, nor, when `frozen`, a writable data property. */
+function isLocked(runtime: Runtime, value: Value, frozen: boolean): boolean {
   if (!isObject(value)) return true;
   if (value.extensible) return false;
-  if (value instanceof JsArray && !(frozen ? value.frozen : value.sealed) && value.elements.some((e) => e !== HOLE))
-    return false;
-  for (const property of value.properties.values()) {
-    if (property.configurable) return false;
-    if (frozen && !isAccessor(property) && property.writable) return false;
-  }
-  return true;
+  // An array's elements have descriptors of their own, which its stored properties do not hold; V8 skips its length,
+  // so an array with a writable length can still be frozen.
+  const keys = new Set<Key>([...runtime.ownKeys(value), ...value.properties.keys()]);
+  return [...keys].every((key) => {
+    const property = runtime.getOwnProperty(value, key);
+    if (!property) return true;
+    return !property.configurable && !(frozen && !isAccessor(property) && property.writable);
+  });
 }
 
 /** The fields a property descriptor object gives, any of which may be absent. */

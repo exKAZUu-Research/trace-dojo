@@ -1553,6 +1553,32 @@ function main() {
 main();`,
   ],
   [
+    'integrity of arrays whose elements have their own descriptors',
+    `function main() {
+  const a = [0]; Object.defineProperty(a, "0", { get: () => 42, configurable: false }); Object.preventExtensions(a); Object.defineProperty(a, "length", { writable: false });
+  console.log(Object.isFrozen(a), Object.isSealed(a));
+  const b = [1]; Object.defineProperty(b, "0", { configurable: false, writable: false }); Object.preventExtensions(b); Object.defineProperty(b, "length", { writable: false });
+  console.log(Object.isFrozen(b), Object.isSealed(b));
+  const c = [1, 2]; Object.seal(c); console.log(Object.isFrozen(c), Object.isSealed(c));
+  const d = [1, 2]; Object.freeze(d); console.log(Object.isFrozen(d), Object.isSealed(d));
+  const e = []; Object.preventExtensions(e); console.log(Object.isFrozen(e), Object.isSealed(e));
+  const f = [1]; Object.preventExtensions(f); console.log(Object.isFrozen(f), Object.isSealed(f));
+  const g = [, 1]; Object.seal(g); console.log(Object.isFrozen(g), Object.isSealed(g));
+  const h = [1]; Object.defineProperty(h, "0", { configurable: false }); Object.preventExtensions(h); console.log(Object.isFrozen(h), Object.isSealed(h));
+  const o = { p: 1 }; Object.seal(o); console.log(Object.isFrozen(o), Object.isSealed(o), Object.isFrozen(Object.freeze({ q: 1 })), Object.isFrozen(1));
+  const s = { [Symbol.iterator]: 1 }; Object.preventExtensions(s); console.log(Object.isSealed(s));
+}
+main();
+function more() {
+  const x = [1]; Object.defineProperty(x, "0", { writable: false, configurable: false }); Object.preventExtensions(x); console.log(Object.isFrozen(x));
+  const y = [1]; Object.defineProperty(y, "0", { get() { return 1; }, configurable: false }); Object.preventExtensions(y); console.log(Object.isFrozen(y), Object.isSealed(y));
+  const z = [, 1]; Object.defineProperty(z, "1", { writable: false, configurable: false }); Object.preventExtensions(z); console.log(Object.isFrozen(z));
+  const e2 = [1]; e2.length = 0; Object.preventExtensions(e2); console.log(Object.isFrozen(e2));
+  const e4 = []; e4.p = 1; Object.preventExtensions(e4); console.log(Object.isFrozen(e4));
+}
+more();`,
+  ],
+  [
     'Function.prototype as a callable function and functions printed with their constructors',
     `console.log(typeof Function.prototype, JSON.stringify(Function.prototype.name), Function.prototype.length, Function.prototype());
 console.log(Function.prototype, [Function.prototype], Object.getPrototypeOf(() => 1) === Function.prototype);
