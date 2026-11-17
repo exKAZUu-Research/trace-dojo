@@ -5,7 +5,10 @@ import type { TraceOptions } from '../interpreter/traceAnnotations';
 import { TraceRecorder, type TraceVariables } from '../interpreter/traceRecorder';
 import { NOT_SCALAR, type Scalar, scalarItems } from '../interpreter/traceScalars';
 import type { DisplayNode, TraceItemVariable } from '../problems/trace';
-import { formatFloat, strInspect, symInspect } from './conversions';
+import { formatFloat, quotedSymbolName, strInspect, symInspect } from './conversions';
+import { regexpValueDisplayOf } from './libRegexp';
+import { structEntriesOf } from './libStruct';
+import { timeDisplayOf } from './libTime';
 import {
   type HashEntry,
   NIL,
@@ -46,14 +49,13 @@ export function traceRubyProgram(program: string, trace: TraceOptions, input?: P
  * then, when `withContext`, the instance variables of `self` (as Java's `this.x`), the class variables of the
  * program's classes (as Java's static fields), and the global variables.
  */
-// code-gauge-allow functionCognitiveComplexity 16 -- Trace collection follows Ruby scope and object kinds while matching the shared trace format.
 function variablesOf(runtime: Runtime, frame: Frame, withContext: boolean): TraceVariables {
   const variables: TraceVariables = { vars: {}, referenceVars: {} };
   for (const [name, value] of visibleLocals(frame)) addVariable(variables, name, value);
   if (!withContext) return variables;
   const { self } = frame;
   if (self instanceof RBasic && !(self instanceof RClass) && self.ivars) {
-    for (const [name, value] of self.ivars) if (!name.startsWith('@__')) addVariable(variables, name, value);
+    for (const [name, value] of self.ivars) addVariable(variables, name, value);
   }
   if (self instanceof RClass && self.isUserDefined && self.ivars) {
     for (const [name, value] of self.ivars) addVariable(variables, `${self.name}.${name}`, value);
@@ -72,7 +74,10 @@ function visibleLocals(frame: Frame): [string, Value][] {
   const scopes: Scope[] = [];
   for (let scope: Scope | undefined = frame.scope; scope; scope = scope.parent) scopes.unshift(scope);
   const values = new Map<string, Value>();
-  for (const scope of scopes) for (const [name, value] of scope.vars) values.set(name, value);
+  for (const scope of scopes) {
+    // Anonymous parameters (`*`, `**`, `&`, `...`) are kept under names that are not identifiers.
+    for (const [name, value] of scope.vars) if (/^[^*&.]/.test(name)) values.set(name, value);
+  }
   return [...values];
 }
 
@@ -115,6 +120,7 @@ function addVariable(variables: TraceVariables, name: string, value: Value): voi
     });
 }
 
+// code-gauge-allow functionNcss 31 -- The ordered cases for runtime value graph serialization share state; splitting them solely for the metric would hide their sequencing.
 function scalarOf(value: Value, seen: Set<object>, budget: { remaining: number }): Scalar | typeof NOT_SCALAR {
   if (budget.remaining-- <= 0) throw new ExecutionLimitError('trace');
   rt().spend();
@@ -131,7 +137,7 @@ function scalarOf(value: Value, seen: Set<object>, budget: { remaining: number }
   if (value === NIL) return null;
   if (value instanceof RFloat) return value.value;
   if (value instanceof RString) return value.s;
-  if (value instanceof RSymbol) return symInspect(value.name);
+  if (value instanceof RSymbol) return symInspect(value);
   if (!(value instanceof RArray) || seen.has(value)) return NOT_SCALAR;
   if (seen.size >= 256) throw new ExecutionLimitError('trace');
   return scalarItems<object, Value>(value, value.items, seen, (item) => scalarOf(item, seen, budget));
@@ -146,8 +152,8 @@ function traceIntOf(value: bigint): number | bigint {
 const NULL_NODE: DisplayNode = { kind: 'value', value: null };
 
 /** The node showing a value as learners see it, or `undefined` for a value the trace hides. */
-// code-gauge-allow functionCognitiveComplexity 17 -- One case per kind of Ruby value the trace shows.
-// code-gauge-allow functionNcss 32 -- One case per kind of Ruby value the trace shows.
+// code-gauge-allow functionCognitiveComplexity 30 -- The ordered cases for runtime value graph serialization share state; splitting them solely for the metric would hide their sequencing.
+// code-gauge-allow functionNcss 51 -- The ordered cases for runtime value graph serialization share state; splitting them solely for the metric would hide their sequencing.
 function displayNodeOf(value: Value, seen: Set<object>, budget: { remaining: number }): DisplayNode | undefined {
   if (budget.remaining-- <= 0) return { kind: 'value', value: '…' };
   rt().spend();
@@ -156,7 +162,7 @@ function displayNodeOf(value: Value, seen: Set<object>, budget: { remaining: num
   if (value === NIL) return NULL_NODE;
   if (value instanceof RFloat) return { kind: 'value', value: value.value };
   if (value instanceof RString) return { kind: 'value', value: value.s };
-  if (value instanceof RSymbol) return { kind: 'value', value: symInspect(value.name) };
+  if (value instanceof RSymbol) return { kind: 'value', value: symInspect(value) };
   if (!isVariableValue(value) || seen.has(value)) return undefined;
   if (seen.size >= 256) return { kind: 'value', value: '…' };
   if (value instanceof RRange) return { kind: 'value', value: rangeText(value) };
@@ -167,7 +173,28 @@ function displayNodeOf(value: Value, seen: Set<object>, budget: { remaining: num
       entries: { x: { kind: 'value', value: value.turtle.x }, y: { kind: 'value', value: value.turtle.y } },
     };
   }
-  if (value instanceof RObject && value.data !== undefined) return undefined;
+  if (value instanceof RObject && value.data !== undefined) {
+    if (value.cls === rt().c.Rational) {
+      const { numerator, denominator } = value.data as { numerator: bigint; denominator: bigint };
+      return { kind: 'value', value: `(${numerator}/${denominator})` };
+    }
+    const nativeText = timeDisplayOf(value) ?? regexpValueDisplayOf(value);
+    if (nativeText !== undefined) return { kind: 'value', value: nativeText };
+    const members = structEntriesOf(value);
+    if (!members) return undefined;
+    seen.add(value);
+    try {
+      const entries: Record<string, DisplayNode> = Object.create(null);
+      for (const [name, member] of members) {
+        entries[name] = displayNodeOf(member, seen, budget) ?? NULL_NODE;
+        if (budget.remaining <= 0) break;
+      }
+      if (budget.remaining > 0) addInstanceEntries(entries, value, seen, budget);
+      return { kind: 'object', entries };
+    } finally {
+      seen.delete(value);
+    }
+  }
   seen.add(value);
   try {
     return containerNodeOf(value as RBasic, seen, budget);
@@ -188,57 +215,40 @@ function rangeText(value: RRange): string {
 function containerNodeOf(value: RBasic, seen: Set<object>, budget: { remaining: number }): DisplayNode {
   const entries: Record<string, DisplayNode> = {};
   if (value instanceof RArray) {
-    addArrayEntries(entries, value, seen, budget);
+    for (const [index, item] of value.items.entries()) {
+      entries[index] = displayNodeOf(item, seen, budget) ?? NULL_NODE;
+      if (budget.remaining <= 0) {
+        if (index + 1 < value.items.length) markTruncated(entries, String(index + 1));
+        break;
+      }
+    }
     return { kind: 'array', entries };
   }
-  if (value instanceof RHash) addHashEntries(entries, value, seen, budget);
-  else addInstanceEntries(entries, value, seen, budget);
-  return { kind: 'object', entries };
-}
-
-function addArrayEntries(
-  entries: Record<string, DisplayNode>,
-  value: RArray,
-  seen: Set<object>,
-  budget: { remaining: number }
-): void {
-  for (const [index, item] of value.items.entries()) {
-    entries[index] = displayNodeOf(item, seen, budget) ?? NULL_NODE;
-    if (budget.remaining <= 0) {
-      if (index + 1 < value.items.length) markTruncated(entries, String(index + 1));
-      break;
+  if (value instanceof RHash) {
+    const ordered: HashEntry[] = [];
+    for (const entry of value.map.values()) {
+      if (ordered.length >= Math.max(1, budget.remaining)) break;
+      ordered.push(entry);
     }
-  }
-}
-
-function addHashEntries(
-  entries: Record<string, DisplayNode>,
-  value: RHash,
-  seen: Set<object>,
-  budget: { remaining: number }
-): void {
-  const ordered: HashEntry[] = [];
-  for (const entry of value.map.values()) {
-    if (ordered.length >= Math.max(1, budget.remaining)) break;
-    ordered.push(entry);
-  }
-  const labels = keyLabels(ordered.map((entry) => entry.key));
-  for (const [index, entry] of ordered.entries()) {
-    Object.defineProperty(entries, labels[index], {
-      value: displayNodeOf(entry.value, seen, budget) ?? NULL_NODE,
-      enumerable: true,
-      configurable: true,
-      writable: true,
-    });
-    if (budget.remaining <= 0) {
-      if (index + 1 < value.map.size) {
-        let marker = '…';
-        while (Object.hasOwn(entries, marker)) marker += '…';
-        markTruncated(entries, marker);
+    const labels = keyLabels(ordered.map((entry) => entry.key));
+    for (const [index, entry] of ordered.entries()) {
+      Object.defineProperty(entries, labels[index], {
+        value: displayNodeOf(entry.value, seen, budget) ?? NULL_NODE,
+        enumerable: true,
+        configurable: true,
+        writable: true,
+      });
+      if (budget.remaining <= 0) {
+        if (index + 1 < value.map.size) {
+          let marker = '…';
+          while (Object.hasOwn(entries, marker)) marker += '…';
+          markTruncated(entries, marker);
+        }
+        break;
       }
-      break;
     }
-  }
+  } else addInstanceEntries(entries, value, seen, budget);
+  return { kind: 'object', entries };
 }
 
 function addInstanceEntries(
@@ -248,7 +258,7 @@ function addInstanceEntries(
   budget: { remaining: number }
 ): void {
   for (const [key, item] of value.ivars ?? []) {
-    if (key.startsWith('@__') || !isVariableValue(item)) continue;
+    if (!isVariableValue(item)) continue;
     const node = displayNodeOf(item, seen, budget);
     if (node) entries[key] = node;
     if (budget.remaining <= 0) break;
@@ -284,12 +294,13 @@ function keyLabels(keys: Value[]): string[] {
 }
 
 /** A hash key as text, quoting strings and marking symbols when `quoted`, without running the program's methods. */
-// code-gauge-allow functionCognitiveComplexity 24 -- One case per kind of Ruby hash key the trace labels as Ruby prints it.
-// code-gauge-allow functionNcss 32 -- One case per kind of Ruby hash key the trace labels as Ruby prints it.
+// code-gauge-allow functionCognitiveComplexity 28 -- The ordered cases for runtime value graph serialization share state; splitting them solely for the metric would hide their sequencing.
+// code-gauge-allow functionNcss 32 -- The ordered cases for runtime value graph serialization share state; splitting them solely for the metric would hide their sequencing.
 function keyText(key: Value, quoted: boolean, seen = new Set<RArray>(), memo = new WeakMap<RArray, string>()): string {
   rt().spend();
   if (key instanceof RString) return boundedKeyText(quoted ? strInspect(key.s) : key.s);
-  if (key instanceof RSymbol) return quoted ? symInspect(key.name) : key.name;
+  if (key instanceof RSymbol)
+    return quoted ? symInspect(key) : key.binary || key.usAscii ? quotedSymbolName(key) : key.name;
   if (typeof key === 'boolean' || typeof key === 'bigint') return String(key);
   if (typeof key === 'number' || key instanceof RFloat) return formatFloat(Number(key));
   if (key === NIL) return 'nil';

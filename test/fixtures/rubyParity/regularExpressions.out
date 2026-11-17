@@ -1,0 +1,70 @@
+6
+nil
+true
+nil
+#<MatchData "2024, ruby" 1:"2024" 2:"ruby">
+"2024"
+"ruby"
+"2024, ruby"
+"Hello World "
+" 3.4"
+12
+"2024"
+"2024"
+["year"]
+["2024"]
+{"year" => "2024"}
+12
+16
+["2024", "2024"]
+"Hello World "
+["2024", "3", "4"]
+[["2", "0"], ["2", "4"]]
+["a1", "b22", "c333"]
+["aaa", ""]
+"Hell0 W0rld 2024, ruby 3.4"
+"World Hello 2024, ruby 3.4"
+"Hello World 4048, ruby 6.8"
+"Hll0 W0rld 2024, rby 3.4"
+["2024", "01", "15"]
+["a", "b", "c", "d"]
+["a", "b", "c"]
+["a", "b", "c"]
+["a", "-", "b", "_", "c"]
+["", "a", "b"]
+0
+6
+2
+0
+true
+nil
+"2024"
+"2024"
+12
+25
+true
+"b"
+"a-b"
+:mixed
+"(\\d+)-(\\d+)"
+"/(\\d+)-(\\d+)/"
+"(?-mix:(\\d+)-(\\d+))"
+"20"
+2
+true
+"1\\.5\\*2"
+/a|b\.c/
+"phone: 090***5678"
+"_camel_case"
+"snakeCase"
+["あ", "い", "う"]
+"tel03"
+"ab   |"
+""
+"aBab"
+[3, 5, 5, 3]
+true
+["a", "b"]
+#<MatchData "foo@bar" 1:"foo" 2:"bar">
+" y"
+"foo"

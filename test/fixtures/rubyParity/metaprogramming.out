@@ -1,0 +1,70 @@
+"hello![1, 2]"
+true
+false
+"undefined method 'other' for an instance of Ghost"
+3
+"AB"
+[1, 3]
+42
+"private method 'hide' called for an instance of Secret"
+0
+10
+2
+6
+true
+3
+[:@alpha]
+false
+"wrong number of arguments (given 0, expected 1..2)"
+10
+15
+"HI!"
+"WOOF"
+[Loud, Dog, Object]
+8
+[10, 20]
+1
+:+
+Integer
+5
+"WOOF"
+true
+UnboundMethod
+Dog
+3.141592653589793
+true
+1
+true
+"hi from obj"
+2
+6
+"String"
+#<ArgumentError: wrong number of arguments (given 1, expected 0)>
+1
+[:@a, :@b]
+true
+true
+true
+Reflected
+0
+"assignment"
+"assignment"
+"assignment"
+[[:opt, :a], [:opt, :b], [:rest, :c], [:opt, :d], [:keyreq, :e], [:key, :f], [:keyrest, :g], [:block, :h]]
+[[:req, :a], [:opt, :b], [:rest, :c], [:req, :d], [:keyreq, :e], [:key, :f], [:keyrest, :g], [:block, :h]]
+[[:opt], [:opt, :z]]
+[]
+[]
+[[:rest, :*]]
+[[:opt, :a]]
+[[:opt, :_1], [:opt, :_2]]
+[[:opt]]
+[[:req]]
+[[:req, :a], [:opt, :b], [:rest, :rest], [:req, :c], [:keyreq, :k], [:key, :j], [:keyrest, :opts], [:block, :blk]]
+[[:rest, :*], [:keyrest, :**], [:block, :&]]
+[[:rest, :*], [:keyrest, :**], [:block, :&]]
+[[:rest]]
+[[:req, :a]]
+[1, 2]
+{a: 1}
+[2]
