@@ -1169,3 +1169,13 @@ test('long IO let prefixes preserve shadowing without recursive compilation', ()
     uncaughtException: undefined,
   });
 });
+
+test.each([
+  ['let expression', 'main=print(let infixr 5 <+>; x<+>y=x*10+y in (1::Int)<+>2<+>3)', '33\n'],
+  ['layout do let', 'main=do\n let infixr 5 <+>\n     x<+>y=x*10+y\n print((1::Int)<+>2<+>3)', '33\n'],
+  ['explicit do let', 'main=do {let {infixr 5 <+>; x<+>y=x*10+y}; print((1::Int)<+>2<+>3)}', '33\n'],
+  ['comprehension let', 'main=print[(1::Int)<+>2<+>3 | let infixr 5 <+>; x<+>y=x*10+y]', '[33]\n'],
+  ['where', 'main=print((1::Int)<+>2<+>3)\n where\n  infixr 5 <+>\n  x<+>y=x*10+y', '33\n'],
+])('local operator fixities preserve association in %s', (_name, source, stdout) => {
+  expect(executeProgram('haskell', source)).toMatchObject({ kind: 'executed', stdout, uncaughtException: undefined });
+});
