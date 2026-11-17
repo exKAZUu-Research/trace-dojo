@@ -18,6 +18,7 @@ import {
   stringType,
   type Structure,
   type Type,
+  type TypeParameter,
   undefinedType,
 } from './types';
 
@@ -194,38 +195,56 @@ export class StatementChecker {
       const isFirst =
         symbol.typeDeclarations.find((declaration) => declaration.type === 'interface_declaration')?.id === node.id;
       if (!isFirst || checkInheritedPropertiesAreIdentical(this.c, symbol, node.childForFieldName('name') ?? node))
-        this.checkInterfaceBases(node, structure);
+        this.checkInterfaceBases(node, symbol, structure);
     }
     for (const child of named(node)) if (child.type === 'extends_type_clause') this.resolveTypesIn(child);
     this.resolveTypesIn(node.childForFieldName('body'));
   }
 
-  /** Reports a property of an interface that does not fit the same property of an interface it extends. */
-  // code-gauge-allow functionCognitiveComplexity 19 -- Checks both optionality and value-type compatibility for each interface member redeclared from a base.
-  private checkInterfaceBases(node: TreeNode, structure: Structure): void {
+  /** Reports an interface that does not fit a type it extends, as TypeScript checks it is assignable to each base. */
+  private checkInterfaceBases(node: TreeNode, symbol: Sym, structure: Structure): void {
     const body = node.childForFieldName('body');
     const clause = named(node).find((child) => child.type === 'extends_type_clause');
     if (!body || !clause) return;
     for (const baseNode of named(clause)) {
       const base = this.c.typeNodes.typeFromNode(baseNode);
-      if (isAnyLike(base) || (base.kind !== 'object' && base.kind !== 'intersection')) continue;
-      for (const property of structure.properties.values()) {
-        const declaration = property.declaration;
-        if (!declaration || declaration.parent?.id !== body.id) continue;
-        const baseProperty = this.c.propertyOf(base, property.name);
-        if (
-          !baseProperty ||
-          ((!property.optional || baseProperty.optional) &&
-            this.c.relations.isAssignable(property.type(), baseProperty.type()))
-        )
-          continue;
-        this.c.error(
-          node.childForFieldName('name') ?? node,
-          `インターフェース '${node.childForFieldName('name')?.text}' は、'${this.c.print(base)}' を正しく継承していません。プロパティ '${property.name}' の型が合いません。`
-        );
-        return;
-      }
+      const mismatch =
+        base.kind === 'typeParameter'
+          ? this.typeParameterBaseMismatch(symbol, base)
+          : this.propertyBaseMismatch(body, structure, base);
+      if (mismatch === undefined) continue;
+      const name = node.childForFieldName('name');
+      this.c.error(
+        name ?? node,
+        `インターフェース '${name?.text}' は、'${this.c.print(base)}' を正しく継承していません。${mismatch}`
+      );
+      return;
     }
+  }
+
+  /**
+   * Why an interface does not fit a type parameter it extends, or `undefined` when it does: fitting the parameter's
+   * constraint is not enough, since the parameter may stand for a subtype.
+   */
+  private typeParameterBaseMismatch(symbol: Sym, base: TypeParameter): string | undefined {
+    if (!this.c.typeNodes.interfaceBases.baseTypesOf(symbol).includes(base)) return undefined;
+    return this.c.relations.isAssignable(this.c.typeNodes.declaredTypeOf(symbol), base) ? undefined : '';
+  }
+
+  /** Why a property an interface body declares does not fit the same property of a base, or `undefined` if none. */
+  private propertyBaseMismatch(body: TreeNode, structure: Structure, base: Type): string | undefined {
+    if (isAnyLike(base) || (base.kind !== 'object' && base.kind !== 'intersection')) return undefined;
+    for (const property of structure.properties.values()) {
+      if (property.declaration?.parent?.id !== body.id) continue;
+      const baseProperty = this.c.propertyOf(base, property.name);
+      if (
+        baseProperty &&
+        ((property.optional && !baseProperty.optional) ||
+          !this.c.relations.isAssignable(property.type(), baseProperty.type()))
+      )
+        return `プロパティ '${property.name}' の型が合いません。`;
+    }
+    return undefined;
   }
 
   // Declarations -------------------------------------------------------------------------------------------------
