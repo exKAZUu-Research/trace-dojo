@@ -15,6 +15,7 @@ import {
   mapType,
   neverType,
   numberType,
+  primitiveOfLiteral,
   type Property,
   regularOf,
   stringType,
@@ -248,11 +249,7 @@ export class OperatorChecker {
 
   /** A type with its literals, fresh or not, replaced by their primitives. */
   private baseOfLiterals(type: Type): Type {
-    return mapType(type, (member) => {
-      if (member.kind !== 'literal') return member;
-      if (typeof member.value === 'boolean') return booleanType;
-      return typeof member.value === 'string' ? stringType : typeof member.value === 'number' ? numberType : bigintType;
-    });
+    return mapType(type, (member) => (member.kind === 'literal' ? primitiveOfLiteral(member) : member));
   }
 
   private plus(node: TreeNode, left: TreeNode, right: TreeNode, leftType: Type, rightType: Type): Type {

@@ -41,10 +41,14 @@ export interface IntrinsicType {
   name: IntrinsicName;
 }
 
+export type LiteralValue = string | number | bigint | boolean | symbol;
+type LiteralKind = 'string' | 'number' | 'bigint' | 'boolean' | 'symbol';
+
 export interface LiteralType {
   kind: 'literal';
   id: number;
-  value: string | number | bigint | boolean;
+  /** A JS symbol for a unique symbol type, whose `String` names the property it keys. */
+  value: LiteralValue;
   /** Whether an expression produced it, which lets a mutable location widen it to its primitive. */
   fresh: boolean;
   /** The other of the fresh and regular types of the same value. */
@@ -265,7 +269,7 @@ export const errorType: IntrinsicType = { kind: 'intrinsic', id: newTypeId(), na
 let literalTypes = new Map<string, LiteralType>();
 
 /** The regular (non-widening) literal type of a value. */
-export function literalType(value: string | number | bigint | boolean): LiteralType {
+export function literalType(value: LiteralValue): LiteralType {
   const key = `${typeof value}:${typeof value === 'number' && Object.is(value, -0) ? '0' : String(value)}`;
   let type = literalTypes.get(key);
   if (!type) {
@@ -278,13 +282,44 @@ export function literalType(value: string | number | bigint | boolean): LiteralT
   return type;
 }
 
-export function freshLiteralType(value: string | number | bigint | boolean): LiteralType {
+export function freshLiteralType(value: LiteralValue): LiteralType {
   return literalType(value).counterpart;
 }
 
 export const trueType = literalType(true);
 export const falseType = literalType(false);
 export const booleanType: UnionType = { kind: 'union', id: newTypeId(), types: [falseType, trueType] };
+
+/**
+ * A unique symbol type, `typeof name`, which a `const` that `Symbol()` initializes has. As a fresh literal, it widens
+ * to `symbol` in a mutable location.
+ */
+export function uniqueSymbolType(name: string): LiteralType {
+  return freshLiteralType(Symbol(`${name}@${newTypeId()}`));
+}
+
+/** The name of the declaration of the unique symbol a property name stands for, if it stands for one. */
+export function uniqueSymbolName(propertyName: string): string | undefined {
+  return /^Symbol\((.*)@\d+\)$/.exec(propertyName)?.[1];
+}
+
+/** Whether a type is a literal that names a property: a string, a number, or a unique symbol. */
+export function isPropertyKeyLiteral(type: Type): type is LiteralType & { value: string | number | symbol } {
+  return type.kind === 'literal' && ['string', 'number', 'symbol'].includes(typeof type.value);
+}
+
+const literalPrimitives: Record<LiteralKind, Type> = {
+  boolean: booleanType,
+  string: stringType,
+  number: numberType,
+  bigint: bigintType,
+  symbol: symbolType,
+};
+
+/** The primitive type of a literal's value. */
+export function primitiveOfLiteral(type: LiteralType): Type {
+  return literalPrimitives[typeof type.value as LiteralKind];
+}
 
 export function isIntrinsic(type: Type, name: IntrinsicName): boolean {
   return type.kind === 'intrinsic' && type.name === name;

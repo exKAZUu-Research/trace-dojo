@@ -3,12 +3,14 @@ import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 import { unsupportedMessage } from '../unsupported';
 import type { Checker } from './checker';
 import type { State } from './flow';
+import { printedPropertyName } from './print';
 import { chainObject, isNumericName, isOptionalChain, skipParentheses } from './syntax';
 import {
   anyType,
   errorType,
   isAnyLike,
   isIntrinsic,
+  isPropertyKeyLiteral,
   numberType,
   type Property,
   regularOf,
@@ -411,7 +413,7 @@ export class MemberChecker {
     ) {
       return this.c.typeOperators.indexedAccess(objectType, index);
     }
-    if (index.kind === 'literal' && (typeof index.value === 'string' || typeof index.value === 'number')) {
+    if (isPropertyKeyLiteral(index)) {
       const type = this.literalIndexedType(access, objectType, index.value, indexType);
       if (type) return type;
     }
@@ -428,7 +430,7 @@ export class MemberChecker {
   private literalIndexedType(
     access: IndexAccess,
     objectType: Type,
-    value: string | number,
+    value: string | number | symbol,
     indexType: Type
   ): Type | undefined {
     const name = String(value);
@@ -444,7 +446,8 @@ export class MemberChecker {
     }
     if (objectType.kind === 'union') return this.indexedTypeOfMembers(access, objectType, indexType);
     const property = this.c.propertyOf(objectType, name);
-    if (!property) return this.indexSignatureType(objectType, name);
+    // A unique symbol matches no string or number index signature.
+    if (!property) return typeof value === 'symbol' ? undefined : this.indexSignatureType(objectType, name);
     this.checkPropertyAvailability(access.indexNode, objectType, name, property);
     this.c.expressions.expandos.checkAssignedBefore(access.node, access.indexNode, property);
     // `o["secret"]` reads a private or protected member, which TypeScript leaves as a way around its access checks.
@@ -470,7 +473,7 @@ export class MemberChecker {
     if (objectType.kind === 'indexedAccess') return this.c.typeOperators.indexedAccess(objectType, index);
     const missing =
       index.kind === 'literal'
-        ? `プロパティ '${String(index.value)}' は型 '${this.c.print(objectType)}' にありません。`
+        ? `プロパティ '${printedPropertyName(String(index.value))}' は型 '${this.c.print(objectType)}' にありません。`
         : '';
     this.c.error(
       access.node,

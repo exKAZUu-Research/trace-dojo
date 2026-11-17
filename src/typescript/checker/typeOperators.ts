@@ -1,6 +1,7 @@
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import type { Checker, Mapper } from './checker';
+import { printedPropertyName } from './print';
 import { isNumericName, named, templateFragmentText } from './syntax';
 import {
   anonymousObject,
@@ -12,6 +13,7 @@ import {
   intersectionOf,
   isAnyLike,
   isIntrinsic,
+  isPropertyKeyLiteral,
   literalType,
   type MappedInfo,
   neverType,
@@ -351,9 +353,7 @@ export class TypeOperators {
     if (index.kind === 'union') return unionOf(index.types.map((member) => this.indexedAccess(object, member, node)));
     if (isAnyLike(object)) return anyType;
     if (object.kind === 'union') return unionOf(object.types.map((member) => this.indexedAccess(member, index, node)));
-    if (index.kind === 'literal' && (typeof index.value === 'string' || typeof index.value === 'number')) {
-      return this.propertyAccess(object, index.value, node);
-    }
+    if (isPropertyKeyLiteral(index)) return this.propertyAccess(object, index.value, node);
     const structure = this.c.structureOf(object);
     if (isIntrinsic(index, 'number') || (index.kind === 'literal' && typeof index.value === 'number')) {
       if (structure.numberIndex) return structure.numberIndex.type;
@@ -365,15 +365,16 @@ export class TypeOperators {
     return errorType;
   }
 
-  private propertyAccess(object: Type, key: string | number, node: TreeNode | undefined): Type {
+  private propertyAccess(object: Type, key: string | number | symbol, node: TreeNode | undefined): Type {
     const name = String(key);
     const property = this.c.propertyOf(object, name);
     if (property) return property.optional ? unionOf([property.type(), undefinedType]) : property.type();
     const structure = this.c.structureOf(object);
     const numeric = typeof key === 'number' || isNumericName(name);
     if (numeric && structure.numberIndex) return structure.numberIndex.type;
-    if (structure.stringIndex) return structure.stringIndex.type;
-    if (node) this.c.error(node, `プロパティ '${name}' は型 '${this.c.print(object)}' にありません。`);
+    if (typeof key !== 'symbol' && structure.stringIndex) return structure.stringIndex.type;
+    if (node)
+      this.c.error(node, `プロパティ '${printedPropertyName(name)}' は型 '${this.c.print(object)}' にありません。`);
     return errorType;
   }
 

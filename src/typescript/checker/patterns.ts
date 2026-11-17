@@ -9,6 +9,7 @@ import {
   errorType,
   isAnyLike,
   isIntrinsic,
+  isPropertyKeyLiteral,
   literalType,
   regularOf,
   simpleProperty,
@@ -265,7 +266,7 @@ export class BindingPatterns {
     const members = constraint.kind === 'union' ? constraint.types : [constraint];
     const names: string[] = [];
     for (const member of members) {
-      if (member.kind !== 'literal' || !['string', 'number'].includes(typeof member.value)) return { node, type };
+      if (!isPropertyKeyLiteral(member)) return { node, type };
       names.push(String(member.value));
     }
     return { node, type, names };

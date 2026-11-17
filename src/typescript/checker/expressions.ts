@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 436 -- Resolves expressions, lexical references, closure captures, and contextual assignment diagnostics; memoization is separate.
+// code-gauge-allow-file fileNcss 446 -- Resolves expressions, lexical references, closure captures, and contextual assignment diagnostics; memoization is separate.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import { unsupportedMessage } from '../unsupported';
@@ -8,6 +8,7 @@ import { arrayTargets, Elaboration, targetElementType } from './elaboration';
 import { Expandos, laterRunningTypes } from './expandos';
 import { ExpressionTypeCache } from './expressionTypeCache';
 import type { FlowEntry } from './flow';
+import { printedPropertyName } from './print';
 import type { Sym } from './scopes';
 import {
   arrayLiteralLength,
@@ -38,6 +39,7 @@ import {
   unionOf,
   unknownType,
 } from './types';
+import { UniqueSymbols } from './uniqueSymbols';
 
 /** Checks expressions, computing their types and narrowing the references their conditions test. */
 export class ExpressionChecker {
@@ -45,6 +47,7 @@ export class ExpressionChecker {
   readonly expandos: Expandos;
   readonly elaboration: Elaboration;
   private readonly silentTypes: ExpressionTypeCache;
+  private readonly uniqueSymbols: UniqueSymbols;
   /** Types of variables computed from their declarations, by symbol. */
   private readonly variableTypes = new Map<number, Type>();
 
@@ -68,7 +71,11 @@ export class ExpressionChecker {
     ['class', (node) => this.c.classes.classExpression(node)],
     ['member_expression', (node) => this.c.members.chainLink(node, () => this.c.members.memberAccess(node))],
     ['subscript_expression', (node) => this.c.members.chainLink(node, () => this.c.members.elementAccess(node))],
-    ['call_expression', (node, contextual) => this.c.members.chainLink(node, () => this.calls.call(node, contextual))],
+    [
+      'call_expression',
+      (node, contextual) =>
+        this.c.members.chainLink(node, () => this.uniqueSymbols.typeOfCall(node, this.calls.call(node, contextual))),
+    ],
     ['new_expression', (node, contextual) => this.calls.newExpression(node, contextual)],
     ['assignment_expression', (node) => this.c.assignments.assignment(node)],
     ['augmented_assignment_expression', (node) => this.c.assignments.compoundAssignment(node)],
@@ -91,6 +98,7 @@ export class ExpressionChecker {
     this.expandos = new Expandos(c);
     this.elaboration = new Elaboration(c);
     this.silentTypes = new ExpressionTypeCache(c);
+    this.uniqueSymbols = new UniqueSymbols(c);
   }
 
   // Entry points -------------------------------------------------------------------------------------------------
@@ -603,11 +611,11 @@ export class ExpressionChecker {
         !sourceStructure.properties.has(property.name) &&
         !this.c.propertyOf(source, property.name)
     );
-    if (missing.length === 1) return `プロパティ '${missing[0].name}' がありません。`;
+    if (missing.length === 1) return `プロパティ '${printedPropertyName(missing[0].name)}' がありません。`;
     if (missing.length > 1)
       return `プロパティ ${missing
         .slice(0, 4)
-        .map((property) => `'${property.name}'`)
+        .map((property) => `'${printedPropertyName(property.name)}'`)
         .join(', ')} がありません。`;
     return '';
   }

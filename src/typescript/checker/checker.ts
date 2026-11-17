@@ -29,7 +29,6 @@ import { TypeOperators } from './typeOperators';
 import {
   anonymousObject,
   anyType,
-  bigintType,
   booleanType,
   emptyStructure,
   type IndexInfo,
@@ -39,6 +38,7 @@ import {
   newTypeId,
   numberType,
   type ObjectType,
+  primitiveOfLiteral,
   type Property,
   regularOf,
   type Signature,
@@ -571,10 +571,9 @@ export class Checker {
         }
       }
       case 'literal': {
-        if (typeof type.value === 'string') return this.globalType('String');
-        if (typeof type.value === 'number') return this.globalType('Number');
-        if (typeof type.value === 'bigint') return this.globalType('BigInt');
-        return this.globalType('Boolean');
+        return typeof type.value === 'boolean'
+          ? this.globalType('Boolean')
+          : this.apparentType(primitiveOfLiteral(type));
       }
       case 'templateLiteral':
       case 'stringMapping': {
@@ -728,10 +727,7 @@ export class Checker {
 
   /** The type a literal has once a mutable location widens it. */
   widenLiteral(type: Type): Type {
-    if (type.kind === 'literal' && type.fresh) {
-      if (typeof type.value === 'boolean') return booleanType;
-      return typeof type.value === 'string' ? stringType : typeof type.value === 'number' ? numberType : bigintType;
-    }
+    if (type.kind === 'literal' && type.fresh) return primitiveOfLiteral(type);
     if (type.kind === 'union' && type.types.some((member) => member.kind === 'literal' && member.fresh)) {
       return unionOf(type.types.map((member) => this.widenLiteral(member)));
     }

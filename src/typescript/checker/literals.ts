@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 465 -- Types array and object literals with their spreads, members, and widening, which share one literal state.
+// code-gauge-allow-file fileNcss 468 -- Types array and object literals with their spreads, members, and widening, which share one literal state.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import type { Checker } from './checker';
@@ -12,6 +12,7 @@ import {
   intersectionOf,
   isAnyLike,
   isIntrinsic,
+  isPropertyKeyLiteral,
   mapType,
   neverType,
   newTypeId,
@@ -342,7 +343,7 @@ export class LiteralChecker {
 
   private computedMember(literal: ObjectLiteral, member: TreeNode, key: TreeNode, value: TreeNode): void {
     const keyType = this.c.expressions.check(named(key)[0] ?? key);
-    if (keyType.kind === 'literal' && (typeof keyType.value === 'string' || typeof keyType.value === 'number')) {
+    if (isPropertyKeyLiteral(keyType)) {
       // A key of one literal names a property, whose value is typed as a written property's is.
       this.namedMember(literal, member, String(keyType.value), value);
       return;
@@ -468,9 +469,7 @@ export class LiteralChecker {
     if (nameNode.type !== 'computed_property_name') return written;
     const keyType = this.c.expressions.check(named(nameNode)[0]);
     if (written !== undefined) return written;
-    return keyType.kind === 'literal' && ['string', 'number'].includes(typeof keyType.value)
-      ? String(keyType.value)
-      : undefined;
+    return isPropertyKeyLiteral(keyType) ? String(keyType.value) : undefined;
   }
 
   private accessorMember(literal: ObjectLiteral, member: TreeNode, name: string, methodType: Type): void {
@@ -726,13 +725,7 @@ export class LiteralChecker {
       if (member.kind !== 'object' && member.kind !== 'intersection') continue;
       for (const [name, property] of this.c.structureOf(member).properties) {
         if (property.isMethod && member.kind === 'object' && member.classInfo) continue;
-        // As tsc does, a spread that keeps a property's readonly-ness keeps the property, with an accessor pair's write
-        // type; otherwise it copies the value into a data property.
-        const keeps = readonly === (property.readonly || property.getterOnly === true);
-        result.set(
-          name,
-          keeps ? { ...property, readonly } : { ...property, readonly, getterOnly: false, writeType: undefined }
-        );
+        result.set(name, spreadCopy(property, readonly));
       }
     }
     return result;
@@ -851,4 +844,13 @@ function arrayElements(node: TreeNode): (TreeNode | undefined)[] {
   const positioned = arrayPatternElements(node);
   for (const { element, index } of positioned) elements[index] = element;
   return elements;
+}
+
+/**
+ * The property a spread gives an object: as tsc does, the property itself, with an accessor pair's write type, when the
+ * spread keeps its readonly-ness, and otherwise a data property holding its value.
+ */
+function spreadCopy(property: Property, readonly: boolean): Property {
+  const keeps = readonly === (property.readonly || property.getterOnly === true);
+  return keeps ? { ...property, readonly } : { ...property, readonly, getterOnly: false, writeType: undefined };
 }

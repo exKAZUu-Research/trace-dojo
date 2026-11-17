@@ -3,6 +3,7 @@ import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 import type { Checker } from './checker';
 import type { State } from './flow';
 import { defaultedTarget } from './patterns';
+import { printedPropertyName } from './print';
 import type { Sym } from './scopes';
 import { arrayPatternElements, named, skipParentheses } from './syntax';
 import {
@@ -10,6 +11,7 @@ import {
   bigintType,
   errorType,
   isIntrinsic,
+  isPropertyKeyLiteral,
   literalType,
   neverType,
   numberType,
@@ -377,7 +379,7 @@ export class AssignmentChecker {
     const objectType = this.c.members.checkNonNullable(objectNode, this.c.expressions.check(objectNode));
     const indexType = this.c.expressions.check(indexNode);
     if (this.isReadonlyArrayLike(objectType)) return this.reportReadonlyIndex(expression, objectType);
-    if (indexType.kind === 'literal' && ['string', 'number'].includes(typeof indexType.value)) {
+    if (isPropertyKeyLiteral(indexType)) {
       const properties = (objectType.kind === 'union' ? objectType.types : [objectType]).map((member) =>
         this.c.propertyOf(member, String(indexType.value))
       );
@@ -387,7 +389,10 @@ export class AssignmentChecker {
             property && (this.c.classes.isReadonlyFor(property, expression, objectNode) || property.getterOnly)
         )
       ) {
-        this.c.error(indexNode, `${indexType.value} は読み取り専用のプロパティなので、代入できません。`);
+        this.c.error(
+          indexNode,
+          `${printedPropertyName(String(indexType.value))} は読み取り専用のプロパティなので、代入できません。`
+        );
         return errorType;
       }
     }

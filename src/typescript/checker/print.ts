@@ -2,12 +2,14 @@ import type { Checker } from './checker';
 import {
   booleanType,
   falseType,
+  type LiteralValue,
   type ObjectType,
   type Property,
   type Signature,
   type Structure,
   trueType,
   type Type,
+  uniqueSymbolName,
 } from './types';
 
 function isNullish(member: Type): boolean {
@@ -38,9 +40,7 @@ export class Printer {
         return type.name;
       }
       case 'literal': {
-        if (typeof type.value === 'string') return JSON.stringify(type.value);
-        if (typeof type.value === 'bigint') return `${type.value}n`;
-        return String(type.value);
+        return printLiteral(type.value);
       }
       case 'union': {
         if (type === booleanType) return 'boolean';
@@ -172,11 +172,7 @@ export class Printer {
 
   /** The members a property prints as: one per signature of a method. */
   private printProperty(property: Property): string[] {
-    const name = property.name.startsWith('__@')
-      ? `[Symbol.${property.name.slice(3)}]`
-      : /^[$A-Z_a-z\u0080-￿][\w$\u0080-￿]*$/.test(property.name)
-        ? property.name
-        : JSON.stringify(property.name);
+    const name = printedPropertyName(property.name);
     const optional = property.optional ? '?' : '';
     const propertyType = property.type();
     if (property.isMethod && propertyType.kind === 'object') {
@@ -225,4 +221,19 @@ function truncatedUnion(printed: string[]): string {
   }
   const omitted = printed.length - 1 - kept.length;
   return [...kept, `... ${omitted} more ...`, printed.at(-1) as string].join(' | ');
+}
+
+function printLiteral(value: LiteralValue): string {
+  if (typeof value === 'string') return JSON.stringify(value);
+  if (typeof value === 'bigint') return `${value}n`;
+  if (typeof value === 'symbol') return `typeof ${uniqueSymbolName(String(value))}`;
+  return String(value);
+}
+
+/** How a type prints a property name: an identifier as is, a symbol in brackets, and others quoted. */
+export function printedPropertyName(name: string): string {
+  if (name.startsWith('__@')) return `[Symbol.${name.slice(3)}]`;
+  const symbolName = uniqueSymbolName(name);
+  if (symbolName !== undefined) return `[${symbolName}]`;
+  return /^[$A-Z_a-z\u0080-￿][\w$\u0080-￿]*$/.test(name) ? name : JSON.stringify(name);
 }
