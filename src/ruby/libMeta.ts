@@ -1,8 +1,9 @@
 // code-gauge-allow-file fileNcss 564 -- Reflection and encoded constant lookup share representation and state; splitting registration by size would scatter that concern.
 import type { Params } from './ast';
 import { prependHierarchy } from './classHierarchy';
-import { addressOf, className, inspect, stringEncodingName, tryImplicitConversion } from './conversions';
+import { addressOf, className, inspect, tryImplicitConversion } from './conversions';
 import { def, findCoreMethod, isCoreMethod, sdef, sundef } from './define';
+import { joinEncodedStrings } from './encodedStringJoin';
 import { argumentError, frozenError, nameError, rubyError, typeError, undefinedMethodError } from './errors';
 import { validateKeywords } from './exceptionOption';
 import { digest, hashGet } from './hashes';
@@ -53,7 +54,6 @@ import {
   singletonDefinitionClass,
   str,
   stringBytes,
-  stringFromBytes,
   sym,
   truthy,
 } from './values';
@@ -324,7 +324,7 @@ function* methodDescription(self: RObject): Gen<RString> {
       : Array.from({ length: methodArity(method) }, () => '_').join(', ');
   const row = definition?.row ?? method.row;
   const kind = unbound ? 'UnboundMethod' : 'Method';
-  return joinMethodDescription([
+  return joinEncodedStrings([
     str(`#<${kind}: ${owner}`),
     symbolString(sym(name)),
     ...(name === method.name ? [] : [str('('), symbolString(sym(method.name)), str(')')]),
@@ -353,31 +353,6 @@ function methodParameterSignature(params: Params): string {
   if (params.noKeywords) signature.push('**nil');
   if (params.block !== undefined) signature.push(params.block === '&' ? '...' : `&${params.block}`);
   return signature.join(', ');
-}
-
-function joinMethodDescription(parts: RString[]): RString {
-  const chunks = parts.map(stringBytes);
-  const length = chunks.reduce((sum, bytes) => sum + bytes.length, 0);
-  rt().checkStringLength(length);
-  let selected = parts[0];
-  let ascii = true;
-  for (const [index, part] of parts.entries()) {
-    const rightAscii = chunks[index].every((byte) => byte < 128);
-    if (!ascii && !rightAscii && stringEncodingName(selected) !== stringEncodingName(part))
-      throw rubyError(
-        rt().c['Encoding::CompatibilityError'],
-        `incompatible character encodings: ${stringEncodingName(selected)} and ${stringEncodingName(part)}`
-      );
-    if (ascii && !rightAscii) selected = part;
-    ascii &&= rightAscii;
-  }
-  const bytes = new Uint8Array(length);
-  let offset = 0;
-  for (const chunk of chunks) {
-    bytes.set(chunk, offset);
-    offset += chunk.length;
-  }
-  return stringFromBytes(bytes, selected.binary, selected.usAscii);
 }
 
 function* methodOwnerPrefix(definingOwner: RClass, recv: Value, unbound: boolean): Gen<string> {

@@ -10,13 +10,13 @@ import {
   combinedStringEncoding,
   inspect,
   rEquals,
-  strInspect,
   toIndex,
   toStrValue,
   toSValue,
   tryImplicitConversion,
 } from './conversions';
 import { coreMethod, def, extend, sdef, sundef } from './define';
+import { checkStringEncodingCompatibility, joinEncodedStrings } from './encodedStringJoin';
 import { argumentError, frozenError, indexError, rubyError, typeError } from './errors';
 import { validateKeywords } from './exceptionOption';
 import { digest, hashDefault, hashGet, hashSet, stringKeyEquals, stringKeyHash } from './hashes';
@@ -1715,11 +1715,11 @@ function expand(replacement: RString, state: MatchState, limit: number): RString
     appendLiteral(bytePosition, replacementBytes.length);
   }
   flushLiteral();
-  return concatRegexpPieces(parts, limit);
+  return joinEncodedStrings(parts, limit);
 }
 
-// code-gauge-allow functionCognitiveComplexity 25 -- Substitution separates callback, Hash and replacement-string values while preserving each operation's match-state rules.
-// code-gauge-allow functionNcss 49 -- Substitution shares one byte cursor and output builder across the four Ruby operations.
+// code-gauge-allow functionCognitiveComplexity 28 -- Substitution separates callback, Hash and replacement-string values while preserving each operation's match-state rules.
+// code-gauge-allow functionNcss 53 -- Substitution shares one byte cursor and output builder across the four Ruby operations.
 function* substituteRegexp(
   self: RString,
   regexp: RObject,
@@ -1759,6 +1759,17 @@ function* substituteRegexp(
       piece = yield* toSValue(yield* callBlock(block as RProc, [cursor.slice(from, to)]));
     }
     if (mode !== 'sub') cursor.refresh();
+    if (!global) {
+      const bytes = stringBytes(cursor.snapshot);
+      const retainedAscii =
+        bytes.subarray(0, from).every((byte) => byte < 0x80) && bytes.subarray(to).every((byte) => byte < 0x80);
+      checkStringEncodingCompatibility(
+        cursor.snapshot,
+        retainedAscii,
+        piece,
+        stringBytes(piece).every((byte) => byte < 0x80)
+      );
+    }
     if (position < from) append(cursor.slice(position, from));
     append(piece);
     position = to;
@@ -1770,7 +1781,7 @@ function* substituteRegexp(
   if (global) setLastMatch(lastSearch === undefined ? undefined : cursor.match(lastSearch));
   else if ((!block && !(replacement instanceof RHash)) || !last) setLastMatch(last);
   append(cursor.slice(position));
-  return { value: concatRegexpPieces(chunks, LIMITS.maxStringLength), matched: last !== undefined };
+  return { value: joinEncodedStrings(chunks, LIMITS.maxStringLength), matched: last !== undefined };
 }
 
 function* regexpReplacement(value: Value | undefined): Gen<RHash | RString | undefined> {
@@ -1782,27 +1793,6 @@ function* regexpReplacement(value: Value | undefined): Gen<RHash | RString | und
       `can't convert ${realClassOf(value).name} to Hash (${realClassOf(value).name}#to_hash gives ${realClassOf(hash).name})`
     );
   return hash;
-}
-
-function concatRegexpPieces(parts: RString[], limit: number): RString {
-  const buffers = parts.map(stringBytes);
-  const length = buffers.reduce((sum, bytes) => sum + bytes.length, 0);
-  if (length > limit) throw new ExecutionLimitError('storage');
-  let binary = parts[0]?.binary ?? false;
-  let ascii = true;
-  for (const [index, part] of parts.entries()) {
-    if (index > 0) binary = combinedStringEncoding(binary, ascii, part);
-    ascii &&= buffers[index].every((byte) => byte < 0x80);
-  }
-  const bytes = new Uint8Array(length);
-  let offset = 0;
-  for (const buffer of buffers) {
-    bytes.set(buffer, offset);
-    offset += buffer.length;
-  }
-  const result = stringFromBytes(bytes, binary);
-  result.usAscii = !binary && (parts[0]?.usAscii ?? false) && ascii;
-  return result;
 }
 
 function wrapFirst(
@@ -1828,7 +1818,7 @@ for (const [name, global, bang] of [
   ['gsub!', true, true],
 ] as const) {
   wrapFirst(name, function* (self, args, block) {
-    if (bang && self.frozen) throw frozenError(self, strInspect(self.s));
+    if (bang && self.frozen) throw frozenError(self, inspectStringEncoding(self));
     if (args.length === 1 && !block) {
       if (global) return makeEnumerator(self, name, args);
       throw argumentError('wrong number of arguments (given 1, expected 2)');
@@ -1998,7 +1988,7 @@ wrapFirst(['[]', 'slice'], function* (self, args) {
   return groupText(state, 0);
 });
 wrapFirst('slice!', function* (self, args) {
-  if (self.frozen) throw frozenError(self, strInspect(self.s));
+  if (self.frozen) throw frozenError(self, inspectStringEncoding(self));
   const state = execAt(args[0] as RObject, self.s, 0, self);
   setLastMatch(state);
   if (!state) return NIL;
@@ -2007,7 +1997,7 @@ wrapFirst('slice!', function* (self, args) {
   if (!range) return NIL;
   const [from, to] = range;
   const removed = sliceStringEncoding(self, from, to);
-  const remainder = concatRegexpPieces(
+  const remainder = joinEncodedStrings(
     [sliceStringEncoding(self, 0, from), sliceStringEncoding(self, to)],
     LIMITS.maxStringLength
   );
@@ -2042,9 +2032,15 @@ wrapFirst('[]=', function* (self, args) {
   const range = state.groups[group];
   if (!range) throw indexError(`regexp group ${group} not matched`);
   const replacement = yield* toStrValue(args.at(-1) as Value);
-  if (self.frozen) throw frozenError(self, strInspect(self.s));
+  checkStringEncodingCompatibility(
+    self,
+    stringBytes(self).every((byte) => byte < 0x80),
+    replacement,
+    stringBytes(replacement).every((byte) => byte < 0x80)
+  );
+  if (self.frozen) throw frozenError(self, inspectStringEncoding(self));
   const [from, to] = range;
-  const result = concatRegexpPieces(
+  const result = joinEncodedStrings(
     [sliceStringEncoding(self, 0, from), replacement, sliceStringEncoding(self, to)],
     LIMITS.maxStringLength
   );
