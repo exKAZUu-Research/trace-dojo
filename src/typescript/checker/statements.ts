@@ -179,7 +179,7 @@ export class StatementChecker {
       checkOverloadOptionality(this.c, node);
       checkDuplicateIndexSignatures(this.c, named(node));
       const type = this.c.typeNodes.typeFromNode(node);
-      if (type.kind === 'object') checkIndexConformance(this.c, type.resolve(), node);
+      if (type.kind === 'object') checkIndexConformance(this.c, type.resolve(), { bodies: [node] });
     }
     if (eagerTypeSyntaxes.has(node.type)) this.c.typeNodes.typeFromNode(node);
     if (node.type === 'infer_type') this.c.typeNodes.checkInferPlacement(node);
@@ -200,22 +200,28 @@ export class StatementChecker {
       const structure = type.resolve();
       for (const property of structure.properties.values()) property.type();
       for (const signature of structure.callSignatures) signature.returnType();
-      checkIndexConformance(this.c, structure, node.childForFieldName('body') ?? node);
       const interfaces = symbol.typeDeclarations.filter((declaration) => declaration.type === 'interface_declaration');
       const isFirst = interfaces[0]?.id === node.id;
-      if (isFirst)
-        checkDuplicateIndexSignatures(
-          this.c,
-          interfaces.flatMap((declaration) => {
-            const declarationBody = declaration.childForFieldName('body');
-            return declarationBody ? named(declarationBody) : [];
-          })
-        );
+      if (isFirst) this.checkIndexSignatures(symbol, interfaces, structure);
       if (!isFirst || checkInheritedPropertiesAreIdentical(this.c, symbol, node.childForFieldName('name') ?? node))
         this.checkInterfaceBases(node, symbol, structure);
     }
     for (const child of named(node)) if (child.type === 'extends_type_clause') this.resolveTypesIn(child);
     this.resolveTypesIn(node.childForFieldName('body'));
+  }
+
+  /** Checks the index signatures of merged interface declarations together, as TypeScript does at the first one. */
+  private checkIndexSignatures(symbol: Sym, interfaces: TreeNode[], structure: Structure): void {
+    const bodies = interfaces.flatMap((declaration) => declaration.childForFieldName('body') ?? []);
+    checkDuplicateIndexSignatures(
+      this.c,
+      bodies.flatMap((body) => named(body))
+    );
+    checkIndexConformance(this.c, structure, {
+      bodies,
+      name: interfaces[0].childForFieldName('name') ?? interfaces[0],
+      bases: this.c.typeNodes.interfaceBases.baseTypesOf(symbol),
+    });
   }
 
   /** Reports an interface that does not fit a type it extends, as TypeScript checks it is assignable to each base. */

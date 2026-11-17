@@ -14,44 +14,80 @@ import {
   unionOf,
 } from './types';
 
+/** The declarations of a type whose index signatures are checked: its bodies and, for an interface, its name and bases. */
+export interface IndexOwner {
+  bodies: TreeNode[];
+  name?: TreeNode;
+  bases?: Type[];
+}
+
 /**
  * Reports properties that an index signature of the same type does not allow, and an index signature that does not fit
- * another applying to its keys, as a number index must fit the string index. A property inherited from elsewhere is
- * reported at the index signature of `owner`, the body declaring the type.
+ * another applying to its keys, as a number index must fit the string index. As TypeScript's `checkIndexConstraints`
+ * does, a conflict is reported at a member `owner` declares, or else at an interface's name when no single base carries
+ * both members, as a base that does reports the conflict itself.
  */
-export function checkIndexConformance(c: Checker, structure: Structure, owner?: TreeNode): void {
+export function checkIndexConformance(c: Checker, structure: Structure, owner?: IndexOwner): void {
   const indexes = keyedIndexes(structure);
   for (const property of structure.properties.values()) checkPropertyConformance(c, property, indexes, owner);
   if (!owner) return;
   for (const index of indexes) checkIndexFitsOthers(c, index, indexes, owner);
 }
 
-function checkPropertyConformance(c: Checker, property: Property, indexes: KeyedIndexInfo[], owner?: TreeNode): void {
-  const nameNode = property.declaration?.childForFieldName('name');
-  if (!nameNode || !property.declaration || c.isLibrary(property.declaration) || isSymbolName(property.name)) return;
+function checkPropertyConformance(c: Checker, property: Property, indexes: KeyedIndexInfo[], owner?: IndexOwner): void {
+  const { declaration } = property;
+  const nameNode = declaration?.childForFieldName('name');
+  if (!nameNode || !declaration || c.isLibrary(declaration) || isSymbolName(property.name)) return;
   const type = property.optional ? unionOf([property.type(), undefinedType]) : property.type();
-  const inherited = owner !== undefined && !isWithin(property.declaration, owner);
+  const local = !owner || owner.bodies.some((body) => isWithin(declaration, body));
   for (const index of indexes) {
     if (!isPropertyKeyOf(c, property, index.keyType) || c.relations.isAssignable(type, index.type)) continue;
+    const node =
+      local || !owner
+        ? nameNode
+        : (indexSignatureNode(c, owner, index.keyType) ??
+          inheritedConflictNode(
+            c,
+            owner,
+            (base) => base.properties.has(property.name) && hasIndexFor(base, index.keyType)
+          ));
+    if (!node) continue;
     c.error(
-      (inherited && owner && indexSignatureNode(c, owner, index.keyType)) || nameNode,
+      node,
       `型 '${c.print(type)}' のプロパティ '${property.name}' は、'${c.print(index.keyType)}' のインデックスの型 '${c.print(index.type)}' に代入できません。`
     );
   }
 }
 
-/** Reports an index signature `owner` declares whose value type does not fit another applying to its keys. */
-function checkIndexFitsOthers(c: Checker, index: KeyedIndexInfo, indexes: KeyedIndexInfo[], owner: TreeNode): void {
-  const node = indexSignatureNode(c, owner, index.keyType);
-  if (!node) return;
+/** Reports an index signature whose value type does not fit another applying to its keys. */
+function checkIndexFitsOthers(c: Checker, index: KeyedIndexInfo, indexes: KeyedIndexInfo[], owner: IndexOwner): void {
   for (const other of indexes) {
     if (other === index || !isIndexKeyOf(c, index.keyType, other.keyType)) continue;
     if (c.relations.isAssignable(index.type, other.type)) continue;
+    const node =
+      indexSignatureNode(c, owner, index.keyType) ??
+      indexSignatureNode(c, owner, other.keyType) ??
+      inheritedConflictNode(c, owner, (base) => hasIndexFor(base, index.keyType) && hasIndexFor(base, other.keyType));
+    if (!node) continue;
     c.error(
       node,
       `'${c.print(index.keyType)}' のインデックスの型 '${c.print(index.type)}' は、'${c.print(other.keyType)}' のインデックスの型 '${c.print(other.type)}' に代入できません。`
     );
   }
+}
+
+/** The name of an interface whose two conflicting inherited members no single base carries together. */
+function inheritedConflictNode(
+  c: Checker,
+  owner: IndexOwner,
+  carriesBoth: (base: Structure) => boolean
+): TreeNode | undefined {
+  if (!owner.name || owner.bases?.some((base) => carriesBoth(c.structureOf(base)))) return undefined;
+  return owner.name;
+}
+
+function hasIndexFor(structure: Structure, keyType: Type): boolean {
+  return keyedIndexes(structure).some((index) => isSameKeyType(index.keyType, keyType));
 }
 
 /** Reports each of the index signatures among `members` that declare the same key type, at every one of them. */
@@ -79,13 +115,15 @@ function declaredKeyType(c: Checker, member: TreeNode): Type {
   return indexType ? c.silently(() => c.typeNodes.typeFromNode(indexType)) : stringType;
 }
 
-/** The index signature `body` declares for a key type. */
-function indexSignatureNode(c: Checker, body: TreeNode, keyType: Type): TreeNode | undefined {
-  return named(body).find((member) => {
-    if (member.type !== 'index_signature') return false;
-    const declared = declaredKeyType(c, member);
-    return (declared.kind === 'union' ? declared.types : [declared]).some(
-      (key) => key === keyType || isSamePattern(c, key, keyType)
-    );
-  });
+/** The index signature the bodies of `owner` declare for a key type. */
+function indexSignatureNode(c: Checker, owner: IndexOwner, keyType: Type): TreeNode | undefined {
+  return owner.bodies
+    .flatMap((body) => named(body))
+    .find((member) => {
+      if (member.type !== 'index_signature') return false;
+      const declared = declaredKeyType(c, member);
+      return (declared.kind === 'union' ? declared.types : [declared]).some(
+        (key) => key === keyType || isSamePattern(c, key, keyType)
+      );
+    });
 }
