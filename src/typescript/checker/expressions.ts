@@ -303,6 +303,14 @@ export class ExpressionChecker {
       if (unassignedAuto) return errorType;
     }
     if (entry.constraint && this.isConstraintPosition(node)) return entry.constraint;
+    // As TypeScript does, `x!` where the flow leaves `x` only `null` or `undefined` takes the declared type, as after a
+    // callback assigned it.
+    if (
+      node.parent?.type === 'non_null_expression' &&
+      !isIntrinsic(entry.type, 'never') &&
+      isIntrinsic(this.c.relations.removeNullish(entry.type), 'never')
+    )
+      return declared;
     if (!entry.evolving || this.isEvolvingUse(node)) return entry.type;
     // An array nothing has added to in this flow has no type here.
     if (this.isNeverEvolved(entry.type)) return this.reportUndeterminedType(node, symbol);

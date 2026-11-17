@@ -1,0 +1,8 @@
+let found: string | null = null;
+["a", "b"].forEach((a) => { if (a === "b") found = a; });
+console.log(found!.length);
+let a: string | number | null = null;
+const t: 1 = a!;
+let u: number | undefined;
+[1].forEach(() => { u = 2; });
+console.log(u! + 1);
