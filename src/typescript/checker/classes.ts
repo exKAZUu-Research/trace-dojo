@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 576 -- Holds the types of classes with `this`, `super`, and accessibility, which all read the class information.
+// code-gauge-allow-file fileNcss 580 -- Holds the types of classes with `this`, `super`, and accessibility, which all read the class information.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import { typesAtConstructorExit } from './assignmentFlow';
@@ -38,6 +38,12 @@ import {
 
 /** The kinds of global declarations that become properties of `globalThis`, unlike `let`, `const`, and classes. */
 const globalThisValueKinds = new Set<ValueKind>(['var', 'function', 'declared']);
+
+/** A private or protected constructor, with the class declaring it. */
+interface RestrictedConstructor {
+  classNode: TreeNode;
+  visibility: 'private' | 'protected';
+}
 
 interface MethodEntry {
   signatures: Signature[];
@@ -912,8 +918,8 @@ export class ClassChecker {
    * Reports `new` of a class whose constructor, its own or the one it inherits, is private or protected, outside the
    * class declaring that constructor (or, for a protected one, the classes derived from it).
    */
-  checkConstructorAccessibility(node: TreeNode, type: Type): void {
-    const ctor = this.restrictedConstructor(type);
+  checkConstructorAccessibility(node: TreeNode, signature: Signature): void {
+    const ctor = this.restrictedDeclaration(signature.declaration);
     if (!ctor || isWithin(node, ctor.classNode)) return;
     const declaring = this.classInfoOfNode(ctor.classNode);
     const enclosing = this.enclosingClass(node);
@@ -925,9 +931,12 @@ export class ClassChecker {
     );
   }
 
-  /** The private or protected constructor of the first construct signature of `type`, with the class declaring it. */
-  restrictedConstructor(type: Type): { classNode: TreeNode; visibility: 'private' | 'protected' } | undefined {
-    const declaration = this.c.signaturesOf(type, 'construct')[0]?.declaration;
+  /** The private or protected constructor of the first construct signature of `type`. */
+  restrictedConstructor(type: Type): RestrictedConstructor | undefined {
+    return this.restrictedDeclaration(this.c.signaturesOf(type, 'construct')[0]?.declaration);
+  }
+
+  private restrictedDeclaration(declaration: TreeNode | undefined): RestrictedConstructor | undefined {
     const classNode = declaration?.parent?.parent;
     if (!isConstructorName(declaration?.childForFieldName('name')) || !classNode || !classTypes.has(classNode.type))
       return undefined;

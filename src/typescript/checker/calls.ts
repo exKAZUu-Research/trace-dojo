@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 490 -- Resolves calls as TypeScript does: callees, overloads, inference, and the effects of calls on the flow.
+// code-gauge-allow-file fileNcss 500 -- Resolves calls as TypeScript does: callees, overloads, inference, and the effects of calls on the flow.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import { unsupportedMessage } from '../unsupported';
@@ -153,13 +153,14 @@ export class Calls {
   /** The result of calling a type without call signatures, reporting the call unless the type is `Function`. */
   private uncallableType(callee: TreeNode, calleeType: Type): Type {
     // A value of type `Function` may be called with anything, returning `any`.
+    const constructible = this.constructSignatures(calleeType).length > 0;
     if (
-      this.c.signaturesOf(calleeType, 'construct').length === 0 &&
+      !constructible &&
       calleeType.kind === 'object' &&
       this.c.relations.isAssignable(calleeType, this.c.globalType('Function'))
     )
       return anyType;
-    if (this.c.signaturesOf(calleeType, 'construct').length > 0) {
+    if (constructible) {
       this.c.error(callee, `型 '${this.c.print(calleeType)}' の値は呼び出せません。new を付けるつもりでしたか？`);
     } else {
       this.c.error(
@@ -209,6 +210,19 @@ export class Calls {
     return signatures.length > 0 ? signatures : this.unionSignatures.arrayMethodSignatures(type.types);
   }
 
+  /** The construct signatures of `type`, which for a union combine its members' as its call signatures do. */
+  private constructSignatures(type: Type): Signature[] {
+    if (type.kind !== 'union') return this.c.signaturesOf(type, 'construct');
+    return this.unionSignatures.of(type.types.map((member) => this.c.signaturesOf(member, 'construct')));
+  }
+
+  /** Whether `type` constructs an abstract class: all its construct signatures are abstract, or it is the class itself. */
+  private isAbstractClass(type: Type): boolean {
+    const signatures = this.c.signaturesOf(type, 'construct');
+    if (signatures.length > 0 && signatures.every((signature) => signature.isAbstract)) return true;
+    return type.kind === 'object' && type.classInfo?.isAbstract === true && type.isClassStatic === true;
+  }
+
   private explicitTypeArguments(node: TreeNode): Type[] | undefined {
     const argumentsNode = node.childForFieldName('type_arguments');
     return argumentsNode ? named(argumentsNode).map((argument) => this.c.typeNodes.typeFromNode(argument)) : undefined;
@@ -223,7 +237,7 @@ export class Calls {
       for (const arg of args) this.c.expressions.check(arg);
       return calleeType === errorType ? errorType : anyType;
     }
-    const signatures = this.c.signaturesOf(calleeType, 'construct');
+    const signatures = this.constructSignatures(calleeType);
     if (signatures.length === 0) {
       for (const arg of args) this.c.expressions.check(arg);
       this.c.error(
@@ -232,13 +246,10 @@ export class Calls {
       );
       return errorType;
     }
-    if (
-      signatures.every((signature) => signature.isAbstract) ||
-      (calleeType.kind === 'object' && calleeType.classInfo?.isAbstract && calleeType.isClassStatic)
-    ) {
+    // A union's constructors combine its members', of which any being abstract makes all abstract.
+    if ((calleeType.kind === 'union' ? calleeType.types : [calleeType]).some((member) => this.isAbstractClass(member)))
       this.c.error(node, '抽象クラスのインスタンスは作れません。');
-    }
-    this.c.classes.checkConstructorAccessibility(node, calleeType);
+    this.c.classes.checkConstructorAccessibility(node, signatures[0]);
     const resolution = this.resolve(node, callee, signatures, args, this.explicitTypeArguments(node), contextual);
     return resolution?.returnType ?? errorType;
   }
