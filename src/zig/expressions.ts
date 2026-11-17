@@ -78,6 +78,7 @@ import {
   optionalOf,
   pointerTo,
   primitiveType,
+  sameSentinel,
   sliceOf,
   type StructField,
   type StructType,
@@ -101,7 +102,6 @@ import {
   NULL,
   Pointer,
   registerStorageLocation,
-  scalarValueKey,
   scalarValuesEqual,
   Slice,
   type Slots,
@@ -810,7 +810,8 @@ export abstract class ExpressionCompiler extends SemaBase {
         ? sliceOf(child, isConst, sentinel)
         : pointerTo(arrayOf(resultLength, child, sentinel), isConst);
     if (type.size === 'slice') this.checkMemoryHeader(operand, expression);
-    if (resultLength !== 0n || sentinel !== undefined) this.checkMemoryOperand(operand, expression);
+    if (resultLength !== undefined && (resultLength !== 0n || sentinel !== undefined))
+      this.checkMemoryOperand(operand, expression);
     const arrayType =
       type.kind === 'pointer' && type.size === 'one' && type.child.kind === 'array' ? type.child : undefined;
     const operands = [base, start, ...(end ? [end] : [])];
@@ -1435,7 +1436,7 @@ export abstract class ExpressionCompiler extends SemaBase {
     const sentinel =
       a.sentinel === undefined
         ? b.sentinel
-        : b.sentinel === undefined || scalarValueKey(a.sentinel) === scalarValueKey(b.sentinel)
+        : b.sentinel === undefined || sameSentinel(a.sentinel, b.sentinel)
           ? a.sentinel
           : undefined;
     const length = a.length + b.length;

@@ -52,6 +52,7 @@ import {
   NULL_TYPE,
   optionalOf,
   pointerTo,
+  sameSentinel,
   sliceOf,
   type StructField,
   type StructType,
@@ -76,7 +77,6 @@ import {
   NativeHandle,
   NULL,
   Pointer,
-  scalarValuesEqual,
   Slice,
   type Slots,
   Some,
@@ -909,14 +909,14 @@ export abstract class SemaBase implements SemaApi {
     if (from.isConst && !to.isConst && !empty) return undefined;
     if (from.size === to.size) {
       if (!inMemoryCoercible(from.child, to.child)) return undefined;
-      if (to.sentinel !== undefined && !scalarValuesEqual(from.sentinel, to.sentinel)) return undefined;
+      if (to.sentinel !== undefined && !sameSentinel(from.sentinel, to.sentinel)) return undefined;
       return { ...expression, type: to };
     }
     // `*[N]T` to `[]T`
     if (from.size === 'one' && to.size === 'slice' && from.child.kind === 'array') {
       const array = from.child;
       if (!inMemoryCoercible(array.child, to.child)) return undefined;
-      if (to.sentinel !== undefined && !scalarValuesEqual(array.sentinel, to.sentinel)) return undefined;
+      if (to.sentinel !== undefined && !sameSentinel(array.sentinel, to.sentinel)) return undefined;
       const { length } = array;
       return {
         ...this.derived(expression, to, (value) => {
@@ -965,7 +965,7 @@ export abstract class SemaBase implements SemaApi {
     const from = expression.type;
     if (from.kind === 'array') {
       if (from.length !== to.length || !inMemoryCoercible(from.child, to.child)) return undefined;
-      if (to.sentinel !== undefined && !scalarValuesEqual(from.sentinel, to.sentinel)) return undefined;
+      if (to.sentinel !== undefined && !sameSentinel(from.sentinel, to.sentinel)) return undefined;
       return { ...expression, type: to };
     }
     if (from.kind === 'struct' && from.isTuple) {
@@ -1284,7 +1284,7 @@ export function inMemoryCoercible(from: Type, to: Type): boolean {
   if (from === to) return true;
   if (from.kind === 'pointer' && to.kind === 'pointer') {
     if (from.size !== to.size || (from.isConst && !to.isConst)) return false;
-    if (to.sentinel !== undefined && !scalarValuesEqual(from.sentinel, to.sentinel)) return false;
+    if (to.sentinel !== undefined && !sameSentinel(from.sentinel, to.sentinel)) return false;
     return inMemoryCoercible(from.child, to.child);
   }
   if (from.kind === 'optional' && to.kind === 'optional') return inMemoryCoercible(from.child, to.child);
@@ -1296,7 +1296,7 @@ export function inMemoryCoercible(from: Type, to: Type): boolean {
     return (
       from.length === to.length &&
       inMemoryCoercible(from.child, to.child) &&
-      (to.sentinel === undefined || scalarValuesEqual(from.sentinel, to.sentinel))
+      (to.sentinel === undefined || sameSentinel(from.sentinel, to.sentinel))
     );
   }
   if (from.kind === 'int' && to.kind === 'int') return from.bits === to.bits && from.signed === to.signed;
@@ -1334,7 +1334,7 @@ function peerPointers(a: Extract<Type, { kind: 'pointer' }>, b: Extract<Type, { 
         ? left.child
         : undefined;
     if (!child) return undefined;
-    const sentinel = scalarValuesEqual(left.sentinel, right.sentinel) ? left.sentinel : undefined;
+    const sentinel = sameSentinel(left.sentinel, right.sentinel) ? left.sentinel : undefined;
     return left.length === right.length
       ? pointerTo(arrayOf(left.length, child, sentinel), isConst)
       : sliceOf(child, isConst);

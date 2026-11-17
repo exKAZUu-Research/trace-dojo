@@ -5405,3 +5405,46 @@ test('nested optional array and union result locations retain destination pointe
     uncaughtException: undefined,
   });
 });
+
+test.each(['f64', 'f128'])('opposite signed-zero %s sentinel peers retain only their common bound', (type) => {
+  for (const reverse of [false, true]) {
+    const a = reverse ? '-0.0' : '0.0',
+      b = reverse ? '0.0' : '-0.0';
+    const source = `const std=@import("std");pub fn main()void{const a=[1:${a}]${type}{1};const b=[1:${b}]${type}{2};var flag=false;_=&flag;const p=if(flag)&a else &b;std.debug.print("{} {}",.{p.len,@TypeOf(p)==*const[1]${type}});}`;
+    expect(executeProgram('zig', source)).toMatchObject({
+      kind: 'executed',
+      stderr: '1 true',
+      uncaughtException: undefined,
+    });
+    expect(executeProgram('zig', source.replace('p.len', 'p[1]'))).toMatchObject({ kind: 'compileError' });
+    const coercion = `pub fn main()void{const a=[1:${a}]${type}{1};const p:[:${b}]const ${type}=&a;_=p;}`;
+    expect(executeProgram('zig', coercion)).toMatchObject({ kind: 'compileError' });
+  }
+});
+
+test.each(['f64', 'f128'])('equivalent same-sign %s sentinels retain their type guarantee', (type) => {
+  const source = `const std=@import("std");pub fn main()void{const a=[1:-0.0]${type}{1};const b=[1:-0x0p0]${type}{2};var flag=false;_=&flag;const p=if(flag)&a else &b;const s:[:-0.0]const ${type}=p;std.debug.print("{d}",.{s[1]});}`;
+  expect(executeProgram('zig', source)).toMatchObject({ kind: 'executed', stderr: '-0', uncaughtException: undefined });
+});
+
+test.each(['u8', 'void', 'u0'])('runtime %s view extents do not imply a nonempty compile-time read', (type) => {
+  for (const view of ['s[i..i]', 's[0..i]'])
+    for (const index of [0, 1]) {
+      const source = `const std=@import("std");pub fn main()void{const p:*[2]${type}=undefined;const s:[]${type}=p;var i:usize=${index};_=&i;const q=${view};std.debug.print("{}",.{q.len});}`;
+      expect(executeProgram('zig', source)).toMatchObject({
+        kind: 'executed',
+        stderr: view === 's[i..i]' ? '0' : String(index),
+        uncaughtException: undefined,
+      });
+    }
+  const bounds = `pub fn main()void{const p:*[2]${type}=undefined;const s:[]${type}=p;var i:usize=3;_=&i;_=s[0..i];}`;
+  expect(executeProgram('zig', bounds)).toMatchObject({
+    kind: 'executed',
+    uncaughtException: 'panic: index out of bounds: index 3, len 2',
+  });
+});
+
+test('runtime zero-bit sentinel views validate bounds without a compile-time data read', () => {
+  const source = `const std=@import("std");pub fn main()void{const p:*[2]u0=undefined;const s:[]u0=p;var i:usize=0;_=&i;std.debug.print("{}",.{s[0..i:0].len});}`;
+  expect(executeProgram('zig', source)).toMatchObject({ kind: 'executed', stderr: '0', uncaughtException: undefined });
+});

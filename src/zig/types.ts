@@ -340,6 +340,10 @@ function intern<T extends Type>(key: string, create: () => T): T {
   return type;
 }
 
+export function sameSentinel(left: Value, right: Value): boolean {
+  return sentinelKey(left) === sentinelKey(right);
+}
+
 function sentinelKey(sentinel: Value | undefined): string {
   return sentinel === undefined ? '' : `:${scalarValueKey(sentinel)}`;
 }
