@@ -1,6 +1,12 @@
 import { loadParser } from '../../interpreter/treeSitter';
 import { TURTLE_METHOD_NAMES } from '../../interpreter/turtleWorld';
-import { BROWSER_ONLY_GLOBALS, BROWSER_TYPES, DOM_TYPE_ALIASES, SHARED_HOST_GLOBALS } from './domGlobals';
+import {
+  BROWSER_ONLY_GLOBALS,
+  BROWSER_TYPES,
+  DOM_FUNCTION_CONSTRAINTS,
+  DOM_TYPE_ALIASES,
+  SHARED_HOST_GLOBALS,
+} from './domGlobals';
 import { ECMASCRIPT_LIBRARY } from './ecmascriptLibrary';
 import { Scope, type Sym } from './scopes';
 
@@ -82,7 +88,13 @@ declare var Reflect: any;
 const BROWSER_LIBRARY = [
   ...omittedLibraryGlobals.map((name) => `declare var ${name}: any; type ${name} = any;`),
   ...Object.entries({ ...BROWSER_ONLY_GLOBALS, ...SHARED_HOST_GLOBALS }).map(([name, [kind, type]]) =>
-    kind === 'function' ? `declare function ${name}(...args: any[]): any;` : `declare ${kind} ${name}: ${type};`
+    kind === 'function'
+      ? type
+          .split('\n')
+          .filter(Boolean)
+          .map((signature) => `declare ${signature}`)
+          .join('\n')
+      : `declare ${kind} ${name}: ${type};`
   ),
   ...BROWSER_TYPES.map((entry) => {
     if (typeof entry === 'string') return `type ${entry} = ${DOM_TYPE_ALIASES[entry] ?? 'any'};`;
@@ -97,6 +109,12 @@ const parser = await loadParser('@willbooster/tree-sitter-typescript/tree-sitter
 export const libraryTree = (() => {
   const tree = parser.parse(`${ECMASCRIPT_LIBRARY}\n${HOST_LIBRARY}\n${BROWSER_LIBRARY}`);
   if (!tree) throw new Error('The parser returned no tree for the library');
+  return tree;
+})();
+
+export const nativeOverloadTree = (() => {
+  const tree = parser.parse(Object.values(DOM_FUNCTION_CONSTRAINTS).join('\n'));
+  if (!tree) throw new Error('The parser returned no tree for native overload constraints');
   return tree;
 })();
 

@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 413 -- Resolves expressions, lexical references, closure captures, and contextual assignment diagnostics; memoization is separate.
+// code-gauge-allow-file fileNcss 430 -- Resolves expressions, lexical references, closure captures, and contextual assignment diagnostics; memoization is separate.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import { unsupportedMessage } from '../unsupported';
@@ -381,18 +381,14 @@ export class ExpressionChecker {
       return;
     const declaration = symbol.valueDeclaration;
     if (!declaration || this.c.isLibrary(declaration)) return;
-    if (node.startIndex >= declaration.startIndex) {
-      // Inside its own initializer, a variable is still uninitialized.
-      if (symbol.valueKind === 'class' || node.startIndex >= declaration.endIndex) return;
-      const value = declaration.childForFieldName('value');
-      if (!value || node.startIndex < value.startIndex) return;
-    }
+    if (!this.beforeBindingInitialized(node, symbol, declaration)) return;
     // A use inside a function that runs later is fine.
     for (let current: TreeNode | null = node.parent; current; current = current.parent) {
       if (current.id === declaration.id) break;
       if (
         laterRunningTypes.has(current.type) &&
-        !(current.startIndex <= declaration.startIndex && declaration.endIndex <= current.endIndex)
+        !(current.startIndex <= declaration.startIndex && declaration.endIndex <= current.endIndex) &&
+        !this.immediatelyInvoked(current)
       ) {
         return;
       }
@@ -400,6 +396,28 @@ export class ExpressionChecker {
     }
     const kind = symbol.valueKind === 'class' ? 'クラス' : '変数';
     this.c.error(node, `${kind} ${symbol.name} は宣言より前で使われています。`);
+  }
+
+  private beforeBindingInitialized(node: TreeNode, symbol: Sym, declaration: TreeNode): boolean {
+    const name = symbol.valueEntries[0]?.name ?? declaration;
+    if (node.startIndex < name.startIndex) return true;
+    if (symbol.valueKind === 'class' || node.startIndex >= declaration.endIndex) return false;
+    const value = declaration.childForFieldName('value');
+    if (value && value.startIndex <= node.startIndex && node.endIndex <= value.endIndex) return true;
+    for (let current = name.parent; current && current.id !== declaration.id; current = current.parent) {
+      if (current.type !== 'assignment_pattern' && current.type !== 'object_assignment_pattern') continue;
+      const initializer = current.childForFieldName('right');
+      if (initializer && initializer.startIndex <= node.startIndex && node.endIndex <= initializer.endIndex)
+        return true;
+    }
+    return false;
+  }
+
+  private immediatelyInvoked(node: TreeNode): boolean {
+    let expression = node;
+    while (expression.parent?.type === 'parenthesized_expression') expression = expression.parent;
+    const parent = expression.parent;
+    return parent?.type === 'call_expression' && parent.childForFieldName('function')?.id === expression.id;
   }
 
   /** The type of a value a symbol declares. */
@@ -440,36 +458,13 @@ export class ExpressionChecker {
   }
 
   // code-gauge-allow functionCognitiveComplexity 30 -- One case per kind of declaration.
-  // code-gauge-allow functionNcss 42 -- One case per kind of declaration.
+  // code-gauge-allow functionNcss 31 -- Keeps declaration-kind dispatch together; function overload resolution has its own helper.
   private computeValueType(symbol: Sym): Type {
     const declaration = symbol.valueDeclaration;
     if (!declaration) return anyType;
     switch (symbol.valueKind) {
       case 'function': {
-        const signatures = symbol.valueDeclarations.filter((node) => node.type === 'function_signature');
-        const implementation = symbol.valueDeclarations.find((node) => node.type === 'function_declaration');
-        const declared = signatures.length > 0 ? signatures : implementation ? [implementation] : [];
-        const callSignatures = declared.map((node) => this.c.signatures.signatureOf(node));
-        const expandos = implementation ? this.expandoAssignments(implementation, symbol.name) : [];
-        if (expandos.length === 0) return this.c.overloadedFunction(callSignatures);
-        return anonymousObject(
-          () => {
-            const structure = { ...emptyStructure(), callSignatures };
-            for (const [name, value] of expandos) {
-              structure.properties.set(
-                name,
-                this.c.literals.literalProperty(
-                  name,
-                  this.c.silently(() => this.c.widen(this.check(value))),
-                  false,
-                  value
-                )
-              );
-            }
-            return structure;
-          },
-          { isFunction: false }
-        );
+        return this.functionSymbolType(symbol);
       }
       case 'class': {
         return this.c.classes.classInfoOf(symbol).staticType;
@@ -500,6 +495,40 @@ export class ExpressionChecker {
         return this.c.silently(() => this.c.statements.declaredVariableType(symbol, declaration));
       }
     }
+  }
+
+  private functionSymbolType(symbol: Sym): Type {
+    const signatures = symbol.valueDeclarations.filter((node) => node.type === 'function_signature');
+    const implementation = symbol.valueDeclarations.find((node) => node.type === 'function_declaration');
+    const ownSignatures = signatures.filter((signature) => !this.c.isLibrary(signature));
+    const librarySignatures = signatures.filter((signature) => this.c.isLibrary(signature));
+    const declared =
+      ownSignatures.length > 0
+        ? [...ownSignatures, ...librarySignatures]
+        : implementation
+          ? [implementation, ...librarySignatures]
+          : librarySignatures;
+    const callSignatures = declared.map((node) => this.c.signatures.signatureOf(node));
+    const expandos = implementation ? this.expandoAssignments(implementation, symbol.name) : [];
+    if (expandos.length === 0) return this.c.overloadedFunction(callSignatures);
+    return anonymousObject(
+      () => {
+        const structure = { ...emptyStructure(), callSignatures };
+        for (const [name, value] of expandos) {
+          structure.properties.set(
+            name,
+            this.c.literals.literalProperty(
+              name,
+              this.c.silently(() => this.c.widen(this.check(value))),
+              false,
+              value
+            )
+          );
+        }
+        return structure;
+      },
+      { isFunction: false }
+    );
   }
 
   /** The properties a program adds to a function it declares, as `f.description = "..."` in the same block. */

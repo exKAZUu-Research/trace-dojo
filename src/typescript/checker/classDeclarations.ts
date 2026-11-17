@@ -3,7 +3,7 @@ import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 import type { Checker } from './checker';
 import { checkDuplicateMembers } from './declarations';
 import { FlowState, propertyReferenceKey, type State } from './flow';
-import { hasToken, named, propertyNameText } from './syntax';
+import { hasToken, named } from './syntax';
 import {
   anyType,
   type ClassInfo,
@@ -86,38 +86,12 @@ export class ClassDeclarationChecker {
     return found;
   }
 
-  // code-gauge-allow functionNcss 32 -- Checks the distinct execution and declaration rules for fields, signatures, method bodies, and static blocks together.
   private checkMember(classNode: TreeNode, member: TreeNode, info: ClassInfo, ctor: TreeNode | undefined): void {
     this.checkMemberDeclaration(member, info);
     const isStatic = hasToken(member, 'static');
     switch (member.type) {
       case 'field_definition': {
-        const value = member.childForFieldName('value');
-        const annotation = this.c.typeNodes.annotationType(member.childForFieldName('type'));
-        if (value) {
-          const valueType = this.c.classes.withThis(isStatic ? info.staticType : info.instanceType, () =>
-            this.c.flow.from(this.c.flow.current, () => {
-              this.c.functions.contexts.push({
-                node: member,
-                returnTypes: [],
-                endReachable: false,
-                keepsLiterals: false,
-                isConstructor: false,
-                hasReturnWithValue: false,
-                hasReturn: false,
-                returnStates: [],
-              });
-              try {
-                const type = this.c.expressions.check(value, annotation);
-                if (annotation)
-                  this.c.expressions.checkAssignable(member.childForFieldName('name') ?? value, type, annotation);
-              } finally {
-                this.c.functions.contexts.pop();
-              }
-            })
-          );
-          void valueType;
-        }
+        this.checkFieldInitializer(member, info, isStatic);
         break;
       }
       case 'method_signature': {
@@ -143,6 +117,37 @@ export class ClassDeclarationChecker {
       default: {
         break;
       }
+    }
+  }
+
+  private checkFieldInitializer(member: TreeNode, info: ClassInfo, isStatic: boolean): void {
+    const value = member.childForFieldName('value');
+    const annotation = this.c.typeNodes.annotationType(member.childForFieldName('type'));
+    if (value) {
+      const valueType = this.c.classes.withThis(isStatic ? info.staticType : info.instanceType, () =>
+        this.c.flow.from(new FlowState(), () => {
+          this.c.functions.contexts.push({
+            node: member,
+            returnTypes: [],
+            endReachable: false,
+            keepsLiterals: false,
+            isConstructor: false,
+            hasReturnWithValue: false,
+            hasReturn: false,
+            returnStates: [],
+          });
+          this.c.functions.capturedTypes.push(new Map());
+          try {
+            const type = this.c.expressions.check(value, annotation);
+            if (annotation)
+              this.c.expressions.checkAssignable(member.childForFieldName('name') ?? value, type, annotation);
+          } finally {
+            this.c.functions.capturedTypes.pop();
+            this.c.functions.contexts.pop();
+          }
+        })
+      );
+      void valueType;
     }
   }
 
@@ -294,7 +299,8 @@ export class ClassDeclarationChecker {
     for (const member of named(body)) {
       const nameNode = this.uninitializedFieldName(member);
       if (!nameNode) continue;
-      const key = propertyReferenceKey(`this${ownerId}`, propertyNameText(nameNode) ?? nameNode.text);
+      const names = this.c.silently(() => this.c.patterns.propertyNames(nameNode));
+      const key = propertyReferenceKey(`this${ownerId}`, names?.length === 1 ? names[0] : nameNode.text);
       const assigned = ctor !== undefined && states.every((state) => state.assignedFields.has(key));
       if (!assigned) {
         this.c.error(

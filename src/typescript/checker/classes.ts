@@ -4,7 +4,7 @@ import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 import type { Checker } from './checker';
 import { FlowState, type State } from './flow';
 import type { Sym } from './scopes';
-import { hasToken, named, propertyNameText } from './syntax';
+import { hasToken, named } from './syntax';
 import {
   anonymousObject,
   anyType,
@@ -265,7 +265,8 @@ export class ClassChecker {
 
   private addMember(members: ClassMembers, member: TreeNode): void {
     const nameNode = member.childForFieldName('name');
-    const name = nameNode ? propertyNameText(nameNode) : undefined;
+    const names = nameNode ? this.c.silently(() => this.c.patterns.capturePropertyNames(nameNode)) : undefined;
+    const name = names?.length === 1 ? names[0] : undefined;
     switch (member.type) {
       case 'field_definition': {
         if (name !== undefined && nameNode)

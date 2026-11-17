@@ -2,13 +2,13 @@ import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import type { Checker } from './checker';
 import type { Sym } from './scopes';
-import { arrayPatternElements, named, propertyNameText, skipParentheses } from './syntax';
+import { arrayPatternElements, named, skipParentheses } from './syntax';
 import {
   anyType,
   bigintType,
   errorType,
-  isAnyLike,
   isIntrinsic,
+  literalType,
   numberType,
   type ObjectType,
   type Property,
@@ -115,8 +115,6 @@ export class AssignmentChecker {
     );
   }
 
-  // code-gauge-allow functionNcss 44 -- One case per kind of destructuring target, in array and object patterns alike.
-  // code-gauge-allow functionCognitiveComplexity 24 -- One case per kind of destructuring target, in array and object patterns alike.
   destructuringAssignment(pattern: TreeNode, type: Type): void {
     const assign = (target: TreeNode, valueType: Type): void => {
       if (['assignment_expression', 'assignment_pattern', 'object_assignment_pattern'].includes(target.type)) {
@@ -146,15 +144,26 @@ export class AssignmentChecker {
       }
       return;
     }
+    this.destructuringObjectAssignment(pattern, type, assign);
+  }
+
+  private destructuringObjectAssignment(
+    pattern: TreeNode,
+    type: Type,
+    assign: (target: TreeNode, type: Type) => void
+  ): void {
+    const used: string[] = [];
     for (const element of named(pattern)) {
       switch (element.type) {
         case 'shorthand_property_identifier':
         case 'shorthand_property_identifier_pattern': {
+          used.push(element.text);
           assign(element, this.c.patterns.destructuredProperty(element, type, element.text));
           break;
         }
         case 'object_assignment_pattern': {
           const left = element.childForFieldName('left') as TreeNode;
+          used.push(left.text);
           assign(element, this.c.patterns.destructuredProperty(left, type, left.text, true));
           break;
         }
@@ -162,9 +171,15 @@ export class AssignmentChecker {
         case 'pair_pattern': {
           const key = element.childForFieldName('key') as TreeNode;
           const value = element.childForFieldName('value') as TreeNode;
-          const name = propertyNameText(key) ?? '';
           const hasDefault = ['assignment_expression', 'assignment_pattern'].includes(value.type);
-          assign(value, this.c.patterns.destructuredProperty(key, type, name, hasDefault));
+          const selected = this.c.patterns.destructuredKey(key, type, hasDefault);
+          used.push(...(selected.names ?? []));
+          assign(value, selected.type);
+          break;
+        }
+        case 'spread_element':
+        case 'rest_pattern': {
+          assign(named(element)[0], this.c.patterns.restObject(type, used));
           break;
         }
         default: {
@@ -290,31 +305,27 @@ export class AssignmentChecker {
     const properties = (objectType.kind === 'union' ? objectType.types : [objectType])
       .map((member) => this.c.propertyOf(member, propertyNode.text))
       .filter((property): property is Property => property !== undefined);
-    const property = properties[0];
     for (const member of properties) {
       if (this.c.classes.isReadonlyFor(member, expression, objectNode) || member.getterOnly) {
         this.c.error(propertyNode, `${propertyNode.text} は読み取り専用のプロパティなので、代入できません。`);
         return errorType;
       }
     }
-    // `r.a = 2` writes through a string index signature when `a` is not declared.
-    if (!property && !isAnyLike(objectType) && this.c.structureOf(objectType).stringIndex?.readonly) {
+    if (this.c.members.isReadonlyIndex(objectType, literalType(propertyNode.text)))
       return this.reportReadonlyIndex(expression, objectType);
-    }
     const type = this.c.members.propertyAccess(expression, objectNode, propertyNode, objectType, propertyNode.text);
     if (compound) {
       const key = this.c.flow.referenceKey(expression);
       const entry = key ? this.c.flow.entry(key) : undefined;
       if (entry) return entry.type;
     }
-    if (!compound && properties.length > 0)
+    if (!compound)
       return unionOf(
-        properties.map((member) =>
-          member.optional
-            ? unionOf([(member.writeType ?? member.type)(), undefinedType])
-            : (member.writeType ?? member.type)()
+        (objectType.kind === 'union' ? objectType.types : [objectType]).map((member) =>
+          this.namedWriteType(member, propertyNode.text, expression)
         )
       );
+
     return type;
   }
 
@@ -324,9 +335,9 @@ export class AssignmentChecker {
     const objectType = this.c.members.checkNonNullable(objectNode, this.c.expressions.check(objectNode));
     const indexType = this.c.expressions.check(indexNode);
     if (this.isReadonlyArrayLike(objectType)) return this.reportReadonlyIndex(expression, objectType);
-    if (indexType.kind === 'literal' && typeof indexType.value === 'string') {
+    if (indexType.kind === 'literal' && ['string', 'number'].includes(typeof indexType.value)) {
       const properties = (objectType.kind === 'union' ? objectType.types : [objectType]).map((member) =>
-        this.c.propertyOf(member, indexType.value as string)
+        this.c.propertyOf(member, String(indexType.value))
       );
       if (
         properties.some(
@@ -338,14 +349,15 @@ export class AssignmentChecker {
         return errorType;
       }
     }
-    if (this.hasReadonlyIndexSignature(objectType, indexType)) return this.reportReadonlyIndex(expression, objectType);
+    if (this.c.members.isReadonlyIndex(objectType, indexType)) return this.reportReadonlyIndex(expression, objectType);
     const readType = this.c.members.indexedType(expression, objectNode, indexNode, objectType, indexType);
-    if (indexType.kind === 'literal') {
-      const properties = (objectType.kind === 'union' ? objectType.types : [objectType])
-        .map((member) => this.c.propertyOf(member, String(indexType.value)))
-        .filter((property): property is Property => property !== undefined);
-      if (properties.length > 0) return unionOf(properties.map((property) => (property.writeType ?? property.type)()));
-    }
+    if (indexType.kind === 'literal')
+      return unionOf(
+        (objectType.kind === 'union' ? objectType.types : [objectType]).map((member) =>
+          this.namedWriteType(member, String(indexType.value), expression)
+        )
+      );
+
     return readType;
   }
 
@@ -356,15 +368,11 @@ export class AssignmentChecker {
     );
   }
 
-  /** Whether the index signature an element assignment writes through is read-only. */
-  private hasReadonlyIndexSignature(objectType: Type, indexType: Type): boolean {
-    if (isAnyLike(objectType)) return false;
-    const structure = this.c.structureOf(objectType);
-    const isNumeric = (): boolean => this.c.relations.isAssignable(indexType, numberType);
-    return (
-      (structure.stringIndex?.readonly === true && !isNumeric()) ||
-      (structure.numberIndex?.readonly === true && isNumeric())
-    );
+  private namedWriteType(type: Type, name: string, node: TreeNode): Type {
+    const property = this.c.propertyOf(type, name);
+    if (!property) return this.c.members.indexedType(node, node, node, type, literalType(name));
+    const value = (property.writeType ?? property.type)();
+    return property.optional ? unionOf([value, undefinedType]) : value;
   }
 
   private reportReadonlyIndex(expression: TreeNode, objectType: Type): Type {

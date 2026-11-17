@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 402 -- Holds shared type construction, bounded instantiation, structure lookup, and type constraints used by all checker components.
+// code-gauge-allow-file fileNcss 417 -- Holds shared type construction, bounded instantiation, structure lookup, and type constraints used by all checker components.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import type { SourceDiagnostic } from '../../interpreter/diagnostics';
@@ -13,7 +13,7 @@ import { ExpressionChecker } from './expressions';
 import { Flow } from './flow';
 import { FunctionChecker } from './functions';
 import { TypeInference } from './inference';
-import { libraryScope, libraryTree, markUnsupported } from './library';
+import { libraryScope, libraryTree, markUnsupported, nativeOverloadTree } from './library';
 import { LiteralChecker } from './literals';
 import { MemberChecker } from './members';
 import { OperatorChecker } from './operators';
@@ -66,6 +66,7 @@ export class Checker {
   silent = 0;
   readonly binder: Binder;
   readonly libraryBinder: Binder;
+  readonly nativeOverloadBinder: Binder;
   readonly relations = new Relations(this);
   readonly printer = new Printer(this);
   readonly expressions = new ExpressionChecker(this);
@@ -99,6 +100,7 @@ export class Checker {
     startTypeCaches();
     this.libraryBinder = new Binder(libraryTree.rootNode, libraryScope());
     markUnsupported(this.libraryBinder.moduleScope);
+    this.nativeOverloadBinder = new Binder(nativeOverloadTree.rootNode, this.libraryBinder.moduleScope);
     this.binder = new Binder(root, this.libraryBinder.globalScope, this.libraryBinder.moduleScope);
     for (const identifier of this.binder.assignedIdentifiers) {
       const symbol = this.binder.scopeOf(identifier).lookupValue(identifier.text);
@@ -139,15 +141,35 @@ export class Checker {
   }
 
   scopeOf(node: TreeNode): Scope {
+    if (node.tree === nativeOverloadTree) return this.nativeOverloadBinder.scopeOf(node);
     return node.tree === libraryTree ? this.libraryBinder.scopeOf(node) : this.binder.scopeOf(node);
   }
 
   ownScope(node: TreeNode): Scope | undefined {
+    if (node.tree === nativeOverloadTree) return this.nativeOverloadBinder.ownScope(node);
     return node.tree === libraryTree ? this.libraryBinder.ownScope(node) : this.binder.ownScope(node);
   }
 
   isLibrary(node: TreeNode): boolean {
-    return node.tree === libraryTree;
+    return node.tree === libraryTree || node.tree === nativeOverloadTree;
+  }
+
+  nativeOverload(node: TreeNode): TreeNode {
+    if (node.tree !== libraryTree) return node;
+    const name = node.childForFieldName('name')?.text;
+    if (!name) return node;
+    const originals =
+      this.libraryBinder.moduleScope
+        .lookupValue(name)
+        ?.valueDeclarations.filter(
+          (declaration) => declaration.tree === libraryTree && declaration.type === 'function_signature'
+        ) ?? [];
+    const index = originals.findIndex((declaration) => declaration.id === node.id);
+    return (
+      this.nativeOverloadBinder.moduleScope.values
+        .get(name)
+        ?.valueDeclarations.filter((declaration) => declaration.type === 'function_signature')[index] ?? node
+    );
   }
 
   print(type: Type): string {

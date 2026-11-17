@@ -11,6 +11,7 @@ import {
   isAnyLike,
   isIntrinsic,
   neverType,
+  nullType,
   type Signature,
   type Type,
   undefinedType,
@@ -393,51 +394,78 @@ export class FunctionChecker {
     if (this.c.isLibrary(node)) return;
     const siblings = node.parent ? named(node.parent) : [];
     const index = siblings.findIndex((sibling) => sibling.id === node.id);
-    const nameNode = node.childForFieldName('name');
-    const name = nameNode ? propertyNameText(nameNode) : undefined;
     const next = siblings[index + 1];
     const nextName = next?.childForFieldName('name');
     if (
-      nextName &&
-      propertyNameText(nextName) === name &&
+      next &&
       ['function_signature', 'function_declaration', 'method_signature', 'method_definition'].includes(next.type)
     ) {
-      if (hasToken(next, 'static') !== hasToken(node, 'static'))
-        this.c.error(
-          next.childForFieldName('name') ?? next,
-          'オーバーロードの static 修飾子は一致しなければいけません。'
-        );
-      return;
+      if (this.matchingOverloadNames(node, next)) {
+        if (hasToken(next, 'static') !== hasToken(node, 'static'))
+          this.c.error(nextName ?? next, 'オーバーロードの static 修飾子は一致しなければいけません。');
+        return;
+      }
+      if (node.type === 'method_signature' && next.type === 'method_definition') {
+        this.c.error(nextName ?? next, 'オーバーロードの名前は、実装の名前と一致しなければいけません。');
+        return;
+      }
     }
     this.c.error(node.childForFieldName('name') ?? node, '関数の実装がないか、宣言の直後にありません。');
+  }
+
+  private matchingOverloadNames(node: TreeNode, next: TreeNode): boolean {
+    const name = node.childForFieldName('name');
+    const nextName = next.childForFieldName('name');
+    if (!name || !nextName) return false;
+    const names = this.c.silently(() => this.c.patterns.propertyNames(name));
+    const nextNames = this.c.silently(() => this.c.patterns.propertyNames(nextName));
+    const lateBound = name.type === 'computed_property_name' && propertyNameText(name) === undefined;
+    const nextLateBound = nextName.type === 'computed_property_name' && propertyNameText(nextName) === undefined;
+    return names?.length === 1 && nextNames?.length === 1 && names[0] === nextNames[0] && (!lateBound || nextLateBound);
   }
 
   private checkOverloads(symbol: Sym, implementation: TreeNode, signature: Signature): void {
     const overloads = symbol.valueDeclarations.filter((declaration) => declaration.type === 'function_signature');
     for (const overload of overloads) {
-      const overloadSignature = this.c.signatures.signatureOf(overload);
+      const overloadSignature = this.c.signatures.signatureOf(this.c.nativeOverload(overload));
       const compatible =
         overloadSignature.parameters.length >=
           signature.parameters.filter((parameter) => !parameter.optional && !parameter.rest).length &&
-        overloadSignature.parameters.every((parameter, index) => {
-          const implementationType = this.c.expressions.calls.parameterTypeAt(signature, index);
-          return (
-            !implementationType ||
-            this.c.relations.isAssignable(parameter.type, implementationType) ||
-            this.c.relations.isAssignable(implementationType, parameter.type)
-          );
-        }) &&
+        overloadSignature.parameters.every((parameter, index) =>
+          this.overloadParameterCompatible(parameter, signature, index)
+        ) &&
         this.returnsCompatibly(overloadSignature.returnType(), signature.returnType());
       if (!compatible) {
         this.c.error(
-          overload.childForFieldName('name') ?? overload,
+          this.c.isLibrary(overload)
+            ? (implementation.childForFieldName('name') ?? implementation)
+            : (overload.childForFieldName('name') ?? overload),
           'このオーバーロードのシグネチャは、実装のシグネチャと合いません。'
         );
         // TypeScript reports only the first overload that does not fit.
         return;
       }
     }
-    void implementation;
+  }
+
+  private overloadParameterCompatible(
+    parameter: Signature['parameters'][number],
+    implementation: Signature,
+    index: number
+  ): boolean {
+    const target = this.c.expressions.calls.parameterTypeAt(implementation, index);
+    if (!target) return true;
+    const source = parameter.optional ? unionOf([parameter.type, undefinedType]) : parameter.type;
+    if (!isAnyLike(source)) {
+      for (const nullish of [undefinedType, nullType]) {
+        if (nullish === undefinedType && implementation.parameters[index]?.optional) continue;
+        if (this.c.relations.isAssignable(nullish, source) && !this.c.relations.isAssignable(nullish, target))
+          return false;
+      }
+    }
+    return (
+      this.c.relations.isAssignable(parameter.type, target) || this.c.relations.isAssignable(target, parameter.type)
+    );
   }
 
   /** Whether an overload's return type and its implementation's are related either way, or the overload returns `void`. */
@@ -459,20 +487,39 @@ export class FunctionChecker {
     if (this.c.silent > 0) return;
     const parameters = node.childForFieldName('parameters');
     this.checkParameterOrder(parameters ? named(parameters) : []);
-    for (const parameter of parameters ? named(parameters) : []) {
-      const value = parameter.childForFieldName('value');
-      const annotation = this.c.typeNodes.annotationType(parameter.childForFieldName('type'));
-      if (value) {
-        const type = this.c.flow.from(new FlowState(), () => {
-          const valueType = this.c.expressions.check(value, annotation);
-          if (annotation)
-            this.c.expressions.checkAssignable(parameter.childForFieldName('pattern') ?? value, valueType, annotation);
-        });
-        void type;
-      }
-    }
+    this.checkParameterInitializers(parameters ? named(parameters) : [], signature);
     if (!node.childForFieldName('body')) return;
     this.checkFunctionBody(node, signature, contextualReturn, false);
+  }
+
+  private checkParameterInitializers(parameters: TreeNode[], signature: Signature): void {
+    this.c.flow.from(new FlowState(), () => {
+      const sourceParameters = parameters.filter(
+        (parameter) => (parameter.childForFieldName('pattern') ?? parameter).type !== 'this'
+      );
+      for (const [index, parameter] of sourceParameters.entries()) {
+        this.checkParameterDefault(parameter);
+        const pattern = parameter.childForFieldName('pattern') ?? parameter;
+        const type = this.sourceParameterType(parameter, pattern, signature, index) ?? anyType;
+        this.c.patterns.bindPattern(
+          pattern.type === 'rest_pattern' ? named(pattern)[0] : pattern,
+          type,
+          (identifier, bound) => {
+            const symbol = this.c.scopeOf(identifier).lookupValue(identifier.text);
+            if (symbol) this.c.flow.set(`s${symbol.id}`, { type: bound, assigned: true });
+          }
+        );
+      }
+    });
+  }
+
+  private checkParameterDefault(parameter: TreeNode): void {
+    const value = parameter.childForFieldName('value');
+    const annotation = this.c.typeNodes.annotationType(parameter.childForFieldName('type'));
+    if (!value) return;
+    const valueType = this.c.expressions.check(value, annotation);
+    if (annotation)
+      this.c.expressions.checkAssignable(parameter.childForFieldName('pattern') ?? value, valueType, annotation);
   }
 
   /** Reports a required parameter after one marked `?`, which callers could not omit. */

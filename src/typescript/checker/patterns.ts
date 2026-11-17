@@ -9,6 +9,7 @@ import {
   errorType,
   isAnyLike,
   isIntrinsic,
+  literalType,
   regularOf,
   stringType,
   type Type,
@@ -19,6 +20,7 @@ import {
 /** Gives the names a binding pattern declares the types of what it destructures. */
 export class BindingPatterns {
   readonly correlatedSources = new Map<number, Type>();
+  private readonly selectedKeys = new Map<number, string[] | undefined>();
   constructor(private readonly c: Checker) {}
 
   /** The type a binding pattern gives the name `name` when it destructures a value of `type`. */
@@ -44,6 +46,8 @@ export class BindingPatterns {
         const right = pattern.childForFieldName('right') as TreeNode;
         const defaultType = this.c.expressions.check(right, type);
         const withoutUndefined = this.c.relations.removeUndefined(type);
+        if (!isIntrinsic(withoutUndefined, 'never'))
+          this.c.expressions.checkAssignable(right, defaultType, withoutUndefined);
         this.bindPattern(left, this.c.widen(unionOf([withoutUndefined, regularOf(defaultType)])), bind);
         return;
       }
@@ -78,8 +82,11 @@ export class BindingPatterns {
           break;
         }
         case 'pair_pattern': {
-          const name = this.bindPairPattern(element, type, bind);
-          if (name !== undefined) used.push(name);
+          const key = element.childForFieldName('key') as TreeNode;
+          const value = element.childForFieldName('value') as TreeNode;
+          const selected = this.destructuredKey(key, type, value.type === 'assignment_pattern');
+          this.bindPattern(value, selected.type, bind);
+          used.push(...(selected.names ?? []));
           break;
         }
         case 'rest_pattern': {
@@ -94,30 +101,58 @@ export class BindingPatterns {
     }
   }
 
-  /** Binds the value of a `key: value` pattern, returning the property name it takes unless the key is computed. */
-  private bindPairPattern(
-    element: TreeNode,
-    type: Type,
-    bind: (identifier: TreeNode, type: Type) => void
-  ): string | undefined {
-    const key = element.childForFieldName('key') as TreeNode;
-    const value = element.childForFieldName('value') as TreeNode;
-    const name = propertyNameText(key);
-    if (name === undefined) {
-      this.c.expressions.check(named(key)[0] ?? key);
-      this.bindPattern(value, anyType, bind);
-      return undefined;
-    }
-    const optional = value.type === 'assignment_pattern';
-    this.bindPattern(value, this.destructuredProperty(key, type, name, optional), bind);
-    return name;
+  destructuredKey(key: TreeNode, objectType: Type, hasDefault = false): { type: Type; names?: string[] } {
+    const selection = this.patternKey(key);
+    this.selectedKeys.set(key.id, selection.names);
+    const type = selection.names
+      ? unionOf(selection.names.map((name) => this.destructuredProperty(key, objectType, name, hasDefault)))
+      : this.c.members.indexedType(key, key, selection.node, objectType, selection.type);
+    return { type, names: selection.names };
   }
 
-  private restObject(type: Type, omitted: string[]): Type {
+  propertyNames(key: TreeNode): string[] | undefined {
+    return this.selectedKeys.has(key.id) ? this.selectedKeys.get(key.id) : this.capturePropertyNames(key);
+  }
+
+  capturePropertyNames(key: TreeNode): string[] | undefined {
+    let names: string[] | undefined;
+    this.c.flow.from(this.c.flow.current, () => {
+      names = this.patternKey(key).names;
+    });
+    this.selectedKeys.set(key.id, names);
+    return names;
+  }
+
+  private patternKey(key: TreeNode): { node: TreeNode; type: Type; names?: string[] } {
+    if (key.type !== 'computed_property_name') {
+      const name = propertyNameText(key);
+      return {
+        node: key,
+        type: name === undefined ? anyType : literalType(name),
+        names: name === undefined ? undefined : [name],
+      };
+    }
+    const node = named(key)[0];
+    const type = this.c.expressions.check(node);
+    const constraint = this.c.baseConstraint(type);
+    const members = constraint.kind === 'union' ? constraint.types : [constraint];
+    const names: string[] = [];
+    for (const member of members) {
+      if (member.kind !== 'literal' || !['string', 'number'].includes(typeof member.value)) return { node, type };
+      names.push(String(member.value));
+    }
+    return { node, type, names };
+  }
+
+  restObject(type: Type, omitted: string[]): Type {
+    if (type.kind === 'union') return unionOf(type.types.map((member) => this.restObject(member, omitted)));
     return anonymousObject(
       () => {
         const structure = emptyStructure();
-        for (const [name, property] of this.c.structureOf(type).properties) {
+        const source = this.c.structureOf(type);
+        structure.stringIndex = source.stringIndex;
+        structure.numberIndex = source.numberIndex;
+        for (const [name, property] of source.properties) {
           if (!omitted.includes(name) && !(property.isMethod && property.declaringClass))
             structure.properties.set(name, property);
         }
@@ -145,8 +180,8 @@ export class BindingPatterns {
     }
     const property = this.c.propertyOf(type, name);
     if (!property) {
-      const structure = this.c.structureOf(type);
-      if (structure.stringIndex) return structure.stringIndex.type;
+      const indexType = this.c.members.indexSignatureType(type, name);
+      if (indexType) return indexType;
       if (hasDefault) return undefinedType;
       this.c.error(node, `プロパティ '${name}' は型 '${this.c.print(type)}' にありません。`);
       return errorType;

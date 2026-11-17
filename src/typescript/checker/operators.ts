@@ -1,7 +1,7 @@
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import type { Checker } from './checker';
-import { isNumericName, named, numberValue, skipParentheses } from './syntax';
+import { named, numberValue, skipParentheses } from './syntax';
 import {
   anyType,
   bigintType,
@@ -126,16 +126,7 @@ export class OperatorChecker {
   private readonlyDeleteTarget(objectType: Type, name: string | undefined, indexType: Type | undefined): boolean {
     const property = name === undefined ? undefined : this.c.propertyOf(objectType, name);
     if (property) return property.readonly === true;
-    const structure = this.c.structureOf(objectType);
-    const keys = indexType?.kind === 'union' ? indexType.types : [indexType];
-    return keys.some((key) => {
-      const numeric =
-        key &&
-        (this.c.relations.isAssignable(key, numberType) ||
-          (key.kind === 'literal' && typeof key.value === 'string' && isNumericName(key.value)));
-      const signature = numeric ? (structure.numberIndex ?? structure.stringIndex) : structure.stringIndex;
-      return signature?.readonly === true;
-    });
+    return this.c.members.isReadonlyIndex(objectType, indexType ?? literalType(name ?? ''));
   }
 
   isNumberLike(type: Type): boolean {
@@ -321,7 +312,7 @@ export class OperatorChecker {
   }
 
   private checkEqualitySyntax(node: TreeNode, operator: string, left: TreeNode, right: TreeNode): void {
-    const operands = [left, right].map(withoutTypeAssertions);
+    const operands = [left, right].map(skipParentheses);
     const literal = [left, right].some((operand) => operand.type === 'array' || operand.type === 'object');
     const nan = operands.some((operand) => {
       if (operand.type === 'identifier' && operand.text === 'NaN')
@@ -588,13 +579,4 @@ function syntacticNullishness(node: TreeNode): 'always' | 'never' | 'sometimes' 
       return 'never';
     }
   }
-}
-
-function withoutTypeAssertions(node: TreeNode): TreeNode {
-  let current = skipParentheses(node);
-  while (['as_expression', 'type_assertion', 'non_null_expression'].includes(current.type))
-    current = skipParentheses(
-      current.type === 'type_assertion' ? (named(current).at(-1) as TreeNode) : named(current)[0]
-    );
-  return current;
 }

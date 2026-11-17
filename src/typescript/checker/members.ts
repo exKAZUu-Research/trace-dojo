@@ -179,7 +179,7 @@ export class MemberChecker {
     }
     const property = this.c.propertyOf(objectType, name);
     if (!property) {
-      const index = this.indexSignatureFor(objectType, name);
+      const index = this.indexSignatureType(objectType, name);
       if (index) return index;
       this.reportMissingProperty(propertyNode, name, objectType);
       return errorType;
@@ -233,10 +233,10 @@ export class MemberChecker {
     return undefined;
   }
 
-  private indexSignatureFor(type: Type, name: string): Type | undefined {
+  indexSignatureType(type: Type, name: string): Type | undefined {
     const structure = this.c.structureOf(type);
-    if (structure.stringIndex) return structure.stringIndex.type;
     if (isNumericName(name) && structure.numberIndex) return structure.numberIndex.type;
+    if (structure.stringIndex) return structure.stringIndex.type;
     return undefined;
   }
 
@@ -296,6 +296,19 @@ export class MemberChecker {
     return optional || continued ? this.chainResult(node, result) : result;
   }
 
+  isReadonlyIndex(objectType: Type, indexType: Type): boolean {
+    if (isAnyLike(objectType)) return false;
+    if (objectType.kind === 'union') return objectType.types.some((member) => this.isReadonlyIndex(member, indexType));
+    if (indexType.kind === 'union') return indexType.types.some((member) => this.isReadonlyIndex(objectType, member));
+    if (indexType.kind === 'literal' && this.c.propertyOf(objectType, String(indexType.value))) return false;
+    const structure = this.c.structureOf(objectType);
+    const numeric =
+      this.c.relations.isAssignable(indexType, numberType) ||
+      (indexType.kind === 'literal' && typeof indexType.value === 'string' && isNumericName(indexType.value));
+    const signature = numeric ? (structure.numberIndex ?? structure.stringIndex) : structure.stringIndex;
+    return signature?.readonly === true;
+  }
+
   indexedType(node: TreeNode, objectNode: TreeNode, indexNode: TreeNode, objectType: Type, indexType: Type): Type {
     return this.indexedTypeAt({ node, objectNode, indexNode }, objectType, indexType);
   }
@@ -339,7 +352,7 @@ export class MemberChecker {
     }
     if (objectType.kind === 'union') return this.indexedTypeOfMembers(access, objectType, indexType);
     const property = this.c.propertyOf(objectType, name);
-    if (!property) return undefined;
+    if (!property) return this.indexSignatureType(objectType, name);
     this.checkPropertyAvailability(access.indexNode, objectType, name, property);
     // `o["secret"]` reads a private or protected member, which TypeScript leaves as a way around its access checks.
     return property.optional ? unionOf([property.type(), undefinedType]) : property.type();

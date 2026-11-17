@@ -9,3 +9,6 @@ writeAccessor(new StringWrite());
 function deleteOptionalUnion(value:{x:number}|{x?:number}) { delete value.x; console.log(value.x); }
 function deleteWritableOwn(value:{readonly [key:string]:number|undefined;x?:number}) { delete value.x; console.log(value.x); }
 deleteOptionalUnion({x:1}); deleteWritableOwn({x:2});
+function indexedUnionWrite(value:{x:number}|{[key:string]:string}) { value.x="indexed"; console.log(value.x); }
+function writableOwnOverridesIndex(value:{readonly [key:string]:number;x:number}) { value.x=4; value["x"]=5; console.log(value.x); }
+indexedUnionWrite({x:1}); writableOwnOverridesIndex({x:2});

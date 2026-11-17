@@ -137,6 +137,24 @@ console.log(maybeText.length);`)
   ]);
 });
 
+test('incompatible native overload implementations stop execution at the learner declaration', () => {
+  for (const implementation of [
+    'function print(value: string) {}',
+    'function open(value: number) { return value; }',
+    'function focus(value: number) {}',
+    'function scroll(value: string) {}',
+    'function confirm(value: string) { return true; }',
+    'function getSelection() { return 1; }',
+    'function getSelection() { return {}; }',
+    'function getSelection() {}',
+  ]) {
+    expect(executeProgram('typescript', `console.log("never");\n${implementation}`)).toMatchObject({
+      kind: 'compileError',
+      diagnostics: expect.arrayContaining([{ row: 1, message: expect.stringContaining('オーバーロード') }]),
+    });
+  }
+});
+
 test.each([
   ['an infinite loop', 'while (true) {}', { kind: 'limitExceeded', limit: 'operations' }],
   ['endless output', "for (;;) console.log('x'.repeat(1000));", { kind: 'limitExceeded', limit: 'output' }],
@@ -192,6 +210,12 @@ test('unsupported library members are rejected through destructuring, brackets, 
   const sources = [
     'const {stack} = new Error("bad"); console.log(stack);',
     'const {random} = Math; console.log(random());',
+    'const key = "random"; const {[key]: random} = Math;',
+    'const key = "stack"; const {[key]: stack} = new Error("bad");',
+    'const key = "random" as "random" | "abs"; const {[key]: selected} = Math;',
+    'function select<K extends "random">(key: K) { const {[key]: selected} = Math; }',
+    'const key = "random"; let selected: () => number; ({[key]: selected} = Math);',
+    'const key = "stack"; let selected: string | undefined; ({[key]: selected = "none"} = new Error("bad"));',
     'console["time"]("start");',
     'function show(error: Error | TypeError) { const {stack} = error; console.log(stack); }',
   ];

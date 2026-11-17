@@ -215,7 +215,7 @@ export function checkDuplicateMembers(c: Checker, body: TreeNode): void {
   const groups = new Map<string, TreeNode[]>();
   for (const member of named(body)) {
     addParameterPropertyDuplicates(member, groups);
-    const key = duplicateKeyOf(member);
+    const key = duplicateKeyOf(c, member);
     if (key === undefined) continue;
     const group = groups.get(key) ?? [];
     group.push(member);
@@ -247,10 +247,11 @@ function addParameterPropertyDuplicates(member: TreeNode, groups: Map<string, Tr
 }
 
 /** The key under which a class member conflicts with others, or `undefined` if it cannot conflict. */
-function duplicateKeyOf(member: TreeNode): string | undefined {
+function duplicateKeyOf(c: Checker, member: TreeNode): string | undefined {
   if (!['field_definition', 'method_definition'].includes(member.type)) return undefined;
   const nameNode = member.childForFieldName('name');
-  const name = nameNode ? propertyNameText(nameNode) : undefined;
+  const names = nameNode ? c.patterns.propertyNames(nameNode) : undefined;
+  const name = names?.length === 1 ? names[0] : undefined;
   if (!nameNode || name === undefined) return undefined;
   // A method without a body is an overload signature, and a getter pairs with a setter.
   if (member.type === 'method_definition' && !member.childForFieldName('body')) return undefined;

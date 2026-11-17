@@ -1,8 +1,7 @@
 export type DomGlobalDeclaration = readonly ['var' | 'const' | 'function', string];
 
-// The global values of TypeScript 7.0.2's `lib.dom.d.ts` beyond ECMAScript, which the reference `tsc` declares.
+// Declarations from TypeScript 7.0.2's lib.dom.d.ts; structural DOM interfaces remain opaque.
 
-/** DOM globals that Node.js lacks, which type-check and then fail with a ReferenceError when the program runs. */
 export const BROWSER_ONLY_GLOBALS: Record<string, DomGlobalDeclaration> = {
   AbstractRange: ['var', 'typeof AbstractRange'],
   AnalyserNode: ['var', 'typeof AnalyserNode'],
@@ -651,30 +650,39 @@ export const BROWSER_ONLY_GLOBALS: Record<string, DomGlobalDeclaration> = {
   XPathExpression: ['var', 'typeof XPathExpression'],
   XPathResult: ['var', 'typeof XPathResult'],
   XSLTProcessor: ['var', 'typeof XSLTProcessor'],
-  addEventListener: ['function', ''],
-  blur: ['function', ''],
+  addEventListener: [
+    'function',
+    'function addEventListener<K extends keyof WindowEventMap>(type: K, listener: (this: Window, ev: WindowEventMap[K]) => any, options?: boolean | AddEventListenerOptions): void;\nfunction addEventListener(type: string, listener: EventListenerOrEventListenerObject, options?: boolean | AddEventListenerOptions): void;\n',
+  ],
+  blur: ['function', 'function blur(): void;\n'],
   caches: ['var', 'CacheStorage'],
-  cancelAnimationFrame: ['function', ''],
-  cancelIdleCallback: ['function', ''],
-  captureEvents: ['function', ''],
+  cancelAnimationFrame: ['function', 'function cancelAnimationFrame(handle: number): void;\n'],
+  cancelIdleCallback: ['function', 'function cancelIdleCallback(handle: number): void;\n'],
+  captureEvents: ['function', 'function captureEvents(): void;\n'],
   clientInformation: ['var', 'Navigator'],
-  close: ['function', ''],
+  close: ['function', 'function close(): void;\n'],
   closed: ['var', 'boolean'],
-  confirm: ['function', ''],
+  confirm: ['function', 'function confirm(message?: string): boolean;\n'],
   cookieStore: ['var', 'CookieStore'],
-  createImageBitmap: ['function', ''],
+  createImageBitmap: [
+    'function',
+    'function createImageBitmap(image: ImageBitmapSource, options?: ImageBitmapOptions): Promise<ImageBitmap>;\nfunction createImageBitmap(image: ImageBitmapSource, sx: number, sy: number, sw: number, sh: number, options?: ImageBitmapOptions): Promise<ImageBitmap>;\n',
+  ],
   crossOriginIsolated: ['var', 'boolean'],
   customElements: ['var', 'CustomElementRegistry'],
   devicePixelRatio: ['var', 'number'],
-  dispatchEvent: ['function', ''],
+  dispatchEvent: ['function', 'function dispatchEvent(event: Event): boolean;\n'],
   document: ['var', 'Document'],
   event: ['var', 'Event | undefined'],
   external: ['var', 'External'],
-  focus: ['function', ''],
+  focus: ['function', 'function focus(): void;\n'],
   frameElement: ['var', 'Element | null'],
   frames: ['var', 'WindowProxy'],
-  getComputedStyle: ['function', ''],
-  getSelection: ['function', ''],
+  getComputedStyle: [
+    'function',
+    'function getComputedStyle(elt: Element, pseudoElt?: string | null): CSSStyleDeclaration;\n',
+  ],
+  getSelection: ['function', 'function getSelection(): Selection | null;\n'],
   history: ['var', 'History'],
   indexedDB: ['var', 'IDBFactory'],
   innerHeight: ['var', 'number'],
@@ -683,10 +691,10 @@ export const BROWSER_ONLY_GLOBALS: Record<string, DomGlobalDeclaration> = {
   length: ['var', 'number'],
   location: ['var', 'Location'],
   locationbar: ['var', 'BarProp'],
-  matchMedia: ['function', ''],
+  matchMedia: ['function', 'function matchMedia(query: string): MediaQueryList;\n'],
   menubar: ['var', 'BarProp'],
-  moveBy: ['function', ''],
-  moveTo: ['function', ''],
+  moveBy: ['function', 'function moveBy(x: number, y: number): void;\n'],
+  moveTo: ['function', 'function moveTo(x: number, y: number): void;\n'],
   name: ['const', 'void'],
   navigation: ['var', 'Navigation'],
   onabort: ['var', '((this: Window, ev: UIEvent) => any) | null'],
@@ -814,7 +822,7 @@ export const BROWSER_ONLY_GLOBALS: Record<string, DomGlobalDeclaration> = {
   onwebkitanimationstart: ['var', '((this: Window, ev: Event) => any) | null'],
   onwebkittransitionend: ['var', '((this: Window, ev: Event) => any) | null'],
   onwheel: ['var', '((this: Window, ev: WheelEvent) => any) | null'],
-  open: ['function', ''],
+  open: ['function', 'function open(url?: string | URL, target?: string, features?: string): WindowProxy | null;\n'],
   opener: ['var', 'any'],
   orientation: ['var', 'number'],
   origin: ['var', 'string'],
@@ -825,24 +833,42 @@ export const BROWSER_ONLY_GLOBALS: Record<string, DomGlobalDeclaration> = {
   pageYOffset: ['var', 'number'],
   parent: ['var', 'WindowProxy'],
   personalbar: ['var', 'BarProp'],
-  postMessage: ['function', ''],
-  print: ['function', ''],
-  releaseEvents: ['function', ''],
-  removeEventListener: ['function', ''],
-  reportError: ['function', ''],
-  requestAnimationFrame: ['function', ''],
-  requestIdleCallback: ['function', ''],
-  resizeBy: ['function', ''],
-  resizeTo: ['function', ''],
+  postMessage: [
+    'function',
+    'function postMessage(message: any, targetOrigin: string, transfer?: Transferable[]): void;\nfunction postMessage(message: any, options?: WindowPostMessageOptions): void;\n',
+  ],
+  print: ['function', 'function print(): void;\n'],
+  releaseEvents: ['function', 'function releaseEvents(): void;\n'],
+  removeEventListener: [
+    'function',
+    'function removeEventListener<K extends keyof WindowEventMap>(type: K, listener: (this: Window, ev: WindowEventMap[K]) => any, options?: boolean | EventListenerOptions): void;\nfunction removeEventListener(type: string, listener: EventListenerOrEventListenerObject, options?: boolean | EventListenerOptions): void;\n',
+  ],
+  reportError: ['function', 'function reportError(e: any): void;\n'],
+  requestAnimationFrame: ['function', 'function requestAnimationFrame(callback: FrameRequestCallback): number;\n'],
+  requestIdleCallback: [
+    'function',
+    'function requestIdleCallback(callback: IdleRequestCallback, options?: IdleRequestOptions): number;\n',
+  ],
+  resizeBy: ['function', 'function resizeBy(x: number, y: number): void;\n'],
+  resizeTo: ['function', 'function resizeTo(width: number, height: number): void;\n'],
   scheduler: ['var', 'Scheduler'],
   screen: ['var', 'Screen'],
   screenLeft: ['var', 'number'],
   screenTop: ['var', 'number'],
   screenX: ['var', 'number'],
   screenY: ['var', 'number'],
-  scroll: ['function', ''],
-  scrollBy: ['function', ''],
-  scrollTo: ['function', ''],
+  scroll: [
+    'function',
+    'function scroll(options?: ScrollToOptions): void;\nfunction scroll(x: number, y: number): void;\n',
+  ],
+  scrollBy: [
+    'function',
+    'function scrollBy(options?: ScrollToOptions): void;\nfunction scrollBy(x: number, y: number): void;\n',
+  ],
+  scrollTo: [
+    'function',
+    'function scrollTo(options?: ScrollToOptions): void;\nfunction scrollTo(x: number, y: number): void;\n',
+  ],
   scrollX: ['var', 'number'],
   scrollY: ['var', 'number'],
   scrollbars: ['var', 'BarProp'],
@@ -850,8 +876,8 @@ export const BROWSER_ONLY_GLOBALS: Record<string, DomGlobalDeclaration> = {
   speechSynthesis: ['var', 'SpeechSynthesis'],
   status: ['var', 'string'],
   statusbar: ['var', 'BarProp'],
-  stop: ['function', ''],
-  toString: ['function', ''],
+  stop: ['function', 'function stop(): void;\n'],
+  toString: ['function', 'function toString(): string;\n'],
   toolbar: ['var', 'BarProp'],
   top: ['var', 'WindowProxy | null'],
   visualViewport: ['var', 'VisualViewport | null'],
@@ -859,7 +885,6 @@ export const BROWSER_ONLY_GLOBALS: Record<string, DomGlobalDeclaration> = {
   window: ['var', 'Window & typeof globalThis'],
 } as const;
 
-/** DOM globals that Node.js also has, which this interpreter does not provide. */
 export const SHARED_HOST_GLOBALS: Record<string, DomGlobalDeclaration> = {
   AbortController: ['var', 'typeof AbortController'],
   AbortSignal: ['var', 'typeof AbortSignal'],
@@ -914,8 +939,8 @@ export const SHARED_HOST_GLOBALS: Record<string, DomGlobalDeclaration> = {
   WritableStream: ['var', 'typeof WritableStream'],
   WritableStreamDefaultController: ['var', 'typeof WritableStreamDefaultController'],
   WritableStreamDefaultWriter: ['var', 'typeof WritableStreamDefaultWriter'],
-  atob: ['function', ''],
-  btoa: ['function', ''],
+  atob: ['function', 'function atob(data: string): string;\n'],
+  btoa: ['function', 'function btoa(data: string): string;\n'],
   crypto: ['var', 'Crypto'],
   localStorage: ['var', 'Storage'],
   navigator: ['var', 'Navigator'],
@@ -923,7 +948,6 @@ export const SHARED_HOST_GLOBALS: Record<string, DomGlobalDeclaration> = {
   sessionStorage: ['var', 'Storage'],
 } as const;
 
-/** DOM type names, each with how many type parameters it takes, which the reference `tsc` knows from the DOM library. */
 export const BROWSER_TYPES: (string | [string, number])[] = [
   'ANGLE_instanced_arrays',
   'ARIAMixin',
@@ -3103,3 +3127,50 @@ export const DOM_TYPE_ALIASES: Record<string, string> = {
   WriteCommandType: '"seek" | "truncate" | "write"',
   XMLHttpRequestResponseType: '"" | "arraybuffer" | "blob" | "document" | "json" | "text"',
 };
+
+export const DOM_FUNCTION_CONSTRAINTS: Record<string, string> = {
+  blur: 'declare function blur(): void;\n',
+  cancelIdleCallback: 'declare function cancelIdleCallback(handle: number): void;\n',
+  captureEvents: 'declare function captureEvents(): void;\n',
+  close: 'declare function close(): void;\n',
+  confirm: 'declare function confirm(message?: string): boolean;\n',
+  focus: 'declare function focus(): void;\n',
+  getComputedStyle:
+    'declare function getComputedStyle(elt: { readonly "__native": "Element"; [key: string]: any }, pseudoElt?: string | null): { readonly "__native": "CSSStyleDeclaration"; [key: string]: any };\n',
+  getSelection: 'declare function getSelection(): { readonly "__native": "Selection"; [key: string]: any } | null;\n',
+  matchMedia:
+    'declare function matchMedia(query: string): { readonly "__native": "MediaQueryList"; [key: string]: any };\n',
+  moveBy: 'declare function moveBy(x: number, y: number): void;\n',
+  moveTo: 'declare function moveTo(x: number, y: number): void;\n',
+  open: 'declare function open(url?: string | { readonly "__native": "URL"; [key: string]: any }, target?: string, features?: string): { readonly "__native": "Window"; [key: string]: any } | null;\n',
+  postMessage:
+    'declare function postMessage(message: any, targetOrigin: string, transfer?: { readonly "__native": "OffscreenCanvas"; [key: string]: any } | { readonly "__native": "ImageBitmap"; [key: string]: any } | { readonly "__native": "MessagePort"; [key: string]: any } | { readonly "__native": "MediaSourceHandle"; [key: string]: any } | { readonly "__native": "ReadableStream"; [key: string]: any } | { readonly "__native": "WritableStream"; [key: string]: any } | { readonly "__native": "TransformStream"; [key: string]: any } | { readonly "__native": "AudioData"; [key: string]: any } | { readonly "__native": "VideoFrame"; [key: string]: any } | { readonly "__native": "RTCDataChannel"; [key: string]: any } | ArrayBuffer[]): void;\ndeclare function postMessage(message: any, options?: { readonly "__native": "WindowPostMessageOptions"; [key: string]: any }): void;\n',
+  print: 'declare function print(): void;\n',
+  releaseEvents: 'declare function releaseEvents(): void;\n',
+  requestIdleCallback:
+    'declare function requestIdleCallback(callback: { (deadline: { readonly "__native": "IdleDeadline"; [key: string]: any }): void [key: string]: any }, options?: { readonly "__native": "IdleRequestOptions"; [key: string]: any }): number;\n',
+  resizeBy: 'declare function resizeBy(x: number, y: number): void;\n',
+  resizeTo: 'declare function resizeTo(width: number, height: number): void;\n',
+  scroll:
+    'declare function scroll(options?: { readonly "__native": "ScrollToOptions"; [key: string]: any }): void;\ndeclare function scroll(x: number, y: number): void;\n',
+  scrollBy:
+    'declare function scrollBy(options?: { readonly "__native": "ScrollToOptions"; [key: string]: any }): void;\ndeclare function scrollBy(x: number, y: number): void;\n',
+  scrollTo:
+    'declare function scrollTo(options?: { readonly "__native": "ScrollToOptions"; [key: string]: any }): void;\ndeclare function scrollTo(x: number, y: number): void;\n',
+  stop: 'declare function stop(): void;\n',
+  toString: 'declare function toString(): string;\n',
+  dispatchEvent:
+    'declare function dispatchEvent(event: { readonly "__native": "Event"; [key: string]: any }): boolean;\n',
+  cancelAnimationFrame: 'declare function cancelAnimationFrame(handle: number): void;\n',
+  requestAnimationFrame:
+    'declare function requestAnimationFrame(callback: { (time: number): void [key: string]: any }): number;\n',
+  atob: 'declare function atob(data: string): string;\n',
+  btoa: 'declare function btoa(data: string): string;\n',
+  createImageBitmap:
+    'declare function createImageBitmap(image: { readonly "__native": "HTMLImageElement"; [key: string]: any } | { readonly "__native": "SVGImageElement"; [key: string]: any } | { readonly "__native": "HTMLVideoElement"; [key: string]: any } | { readonly "__native": "HTMLCanvasElement"; [key: string]: any } | { readonly "__native": "ImageBitmap"; [key: string]: any } | { readonly "__native": "OffscreenCanvas"; [key: string]: any } | { readonly "__native": "VideoFrame"; [key: string]: any } | { readonly "__native": "Blob"; [key: string]: any } | { readonly "__native": "ImageData"; [key: string]: any }, options?: { readonly "__native": "ImageBitmapOptions"; [key: string]: any }): Promise<{ readonly "__native": "ImageBitmap"; [key: string]: any }>;\ndeclare function createImageBitmap(image: { readonly "__native": "HTMLImageElement"; [key: string]: any } | { readonly "__native": "SVGImageElement"; [key: string]: any } | { readonly "__native": "HTMLVideoElement"; [key: string]: any } | { readonly "__native": "HTMLCanvasElement"; [key: string]: any } | { readonly "__native": "ImageBitmap"; [key: string]: any } | { readonly "__native": "OffscreenCanvas"; [key: string]: any } | { readonly "__native": "VideoFrame"; [key: string]: any } | { readonly "__native": "Blob"; [key: string]: any } | { readonly "__native": "ImageData"; [key: string]: any }, sx: number, sy: number, sw: number, sh: number, options?: { readonly "__native": "ImageBitmapOptions"; [key: string]: any }): Promise<{ readonly "__native": "ImageBitmap"; [key: string]: any }>;\n',
+  reportError: 'declare function reportError(e: any): void;\n',
+  addEventListener:
+    'declare function addEventListener<K extends (string | number | symbol)>(type: K, listener: (this: { readonly "__native": "Window"; [key: string]: any }, ev: any) => any, options?: boolean | { readonly "__native": "AddEventListenerOptions"; [key: string]: any }): void;\ndeclare function addEventListener(type: string, listener: { (evt: { readonly "__native": "Event"; [key: string]: any }): void [key: string]: any } | { readonly "__native": "EventListenerObject"; [key: string]: any }, options?: boolean | { readonly "__native": "AddEventListenerOptions"; [key: string]: any }): void;\n',
+  removeEventListener:
+    'declare function removeEventListener<K extends (string | number | symbol)>(type: K, listener: (this: { readonly "__native": "Window"; [key: string]: any }, ev: any) => any, options?: boolean | { readonly "__native": "EventListenerOptions"; [key: string]: any }): void;\ndeclare function removeEventListener(type: string, listener: { (evt: { readonly "__native": "Event"; [key: string]: any }): void [key: string]: any } | { readonly "__native": "EventListenerObject"; [key: string]: any }, options?: boolean | { readonly "__native": "EventListenerOptions"; [key: string]: any }): void;\n',
+} as const;

@@ -2,7 +2,7 @@ import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import type { Checker } from './checker';
 import type { State } from './flow';
-import { named, numberValue, patternIdentifiers, propertyNameText, skipParentheses, stringValue } from './syntax';
+import { named, numberValue, patternIdentifiers, skipParentheses, stringValue } from './syntax';
 import {
   anyType,
   booleanType,
@@ -441,8 +441,8 @@ export class ConditionChecker {
     if (!type) return undefined;
     if (pattern.type === 'shorthand_property_identifier_pattern') return { object, name: pattern.text, type };
     const key = pair?.childForFieldName('key');
-    const name = key ? propertyNameText(key) : undefined;
-    if (name !== undefined) return { object, name, type };
+    const names = key ? this.c.silently(() => this.c.patterns.propertyNames(key)) : undefined;
+    if (names?.length === 1) return { object, name: names[0], type };
     return undefined;
   }
 
