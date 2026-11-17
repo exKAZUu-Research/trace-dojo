@@ -6,7 +6,7 @@ import type { Checker } from './checker';
 import { FlowState, type State } from './flow';
 import { isUsedBeforeInitialization } from './initializationOrder';
 import type { Sym } from './scopes';
-import { hasToken, isClassConstructor, isWithin, named } from './syntax';
+import { hasToken, isClassConstructor, isImmediatelyInvoked, isWithin, named } from './syntax';
 import {
   anonymousObject,
   anyType,
@@ -853,13 +853,11 @@ export class ClassChecker {
     if (objectNode.type !== 'this' || !property.declaringClass) return true;
     const owner = this.thisOwner(expression);
     if (!owner) return true;
-    // An arrow function may run after construction, so it cannot assign a read-only property.
+    // An arrow function that is not immediately invoked may run after construction.
     for (let current = expression.parent; current && current.id !== owner.id; current = current.parent) {
-      if (current.type === 'arrow_function') return true;
+      if (current.type === 'arrow_function' && !isImmediatelyInvoked(current)) return true;
     }
-    const isConstructor = isClassConstructor(owner);
-    const isInitializer = owner.type === 'field_definition';
-    if (!isConstructor && !isInitializer) return true;
+    if (!isClassConstructor(owner)) return true;
     const classNode = owner.parent?.parent;
     return classNode?.id !== property.declaringClass.declaration.id;
   }
