@@ -92,7 +92,10 @@ export class Checker {
     this.binder = new Binder(root, this.libraryBinder.moduleScope);
     for (const identifier of this.binder.assignedIdentifiers) {
       const symbol = this.binder.scopeOf(identifier).lookupValue(identifier.text);
-      if (symbol) symbol.isReassigned = true;
+      if (symbol) {
+        symbol.isReassigned = true;
+        symbol.assignmentOffsets.push(identifier.startIndex);
+      }
     }
   }
 

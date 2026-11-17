@@ -211,6 +211,9 @@ export interface ConditionalType {
   inferTypeParameters: TypeParameter[];
   /** Whether it distributes over a union its check type, a naked type parameter, receives. */
   distributive: boolean;
+  /** For a conditional type instantiated while still generic, the declared one and the type arguments it got. */
+  root?: ConditionalType;
+  mapper?: Map<number, Type>;
   aliasName?: string;
   aliasArguments?: Type[];
 }

@@ -25,6 +25,10 @@ export class Sym {
   classInfo?: ClassInfo;
   /** Whether the program assigns the variable anywhere but its declaration. */
   isReassigned = false;
+  /** Where the program assigns the variable, by source offset, which decides whether a closure keeps its narrowing. */
+  readonly assignmentOffsets: number[] = [];
+  /** Whether a nested function uses this variable, whose type then cannot always be followed. */
+  usedInClosure = false;
   /** Whether resolving its type is in progress, to detect a type that depends on itself. */
   resolving = false;
   /** The feature name when using this library value is not supported yet. */

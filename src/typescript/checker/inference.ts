@@ -174,18 +174,28 @@ export class TypeInference {
     const naked = target.types.filter((member) => member.kind === 'typeParameter' && run.inferences.has(member.id));
     const others = target.types.filter((member) => !naked.includes(member));
     const sourceMembers = source.kind === 'union' ? source.types : [source];
+    const inferable = (other: Type): boolean => run.parameters.some((parameter) => this.mentions(other, parameter));
     const remaining = sourceMembers.filter(
-      (member) =>
-        !others.some((other) => !this.c.relations.isGeneric(other) && this.c.relations.isAssignable(member, other))
+      (member) => !others.some((other) => !inferable(other) && this.c.relations.isAssignable(member, other))
     );
     for (const other of others) {
-      if (this.c.relations.isGeneric(other)) for (const member of sourceMembers) recurse(member, other);
+      if (inferable(other)) for (const member of sourceMembers) recurse(member, other);
     }
     if (naked.length === 1 && remaining.length > 0) recurse(unionOf(remaining, true), naked[0]);
   }
 
-  // code-gauge-allow functionCognitiveComplexity 16 -- Follows TypeScript's order of inference for each kind of object target.
+  // code-gauge-allow functionCognitiveComplexity 21 -- Follows TypeScript's order of inference for each kind of object target.
   private inferToObject(source: Type, target: ObjectType, recurse: Recurse): void {
+    // An iterable or array-like target infers its element from what iterating the source gives, as a string's characters.
+    if (
+      target.objectKind === 'reference' &&
+      ['Iterable', 'ArrayLike', 'IterableIterator'].includes(target.target?.name ?? '') &&
+      !(source.kind === 'object' && source.objectKind === 'reference' && source.target === target.target)
+    ) {
+      const element = this.c.silently(() => this.c.patterns.iteratedType(undefined, source));
+      if (element !== errorType) recurse(element, target.typeArguments?.[0] ?? unknownType);
+      return;
+    }
     if (source.kind !== 'object' && source.kind !== 'intersection') {
       if (source.kind === 'literal' || source.kind === 'intrinsic') {
         const apparent = this.c.apparentType(source);
@@ -270,7 +280,15 @@ export class TypeInference {
     }
   }
 
-  private inferFromSignatures(source: Signature, target: Signature, recurse: Recurse): void {
+  private inferFromSignatures(generic: Signature, target: Signature, recurse: Recurse): void {
+    // A generic source infers with its own type parameters as their constraints, or `unknown`.
+    const source =
+      generic.typeParameters.length > 0
+        ? this.c.instantiateSignature(
+            { ...generic, typeParameters: [] },
+            new Map(generic.typeParameters.map((parameter) => [parameter.id, parameter.constraint?.() ?? unknownType]))
+          )
+        : generic;
     const count = Math.min(source.parameters.length, target.parameters.length);
     for (let index = 0; index < count; index++) {
       recurse(source.parameters[index].type, target.parameters[index].type, false);
@@ -287,13 +305,41 @@ export class TypeInference {
     );
   }
 
-  private mentions(type: Type, parameter: TypeParameter): boolean {
-    if (type.kind === 'typeParameter') return type.id === parameter.id;
-    if (type.kind === 'union' || type.kind === 'intersection')
-      return type.types.some((member) => this.mentions(member, parameter));
-    if (type.kind === 'object' && type.objectKind === 'reference')
-      return (type.typeArguments ?? []).some((argument) => this.mentions(argument, parameter));
-    return false;
+  /** Whether a type mentions a type parameter, looking into the members of object types a few levels deep. */
+  private mentions(type: Type, parameter: TypeParameter, depth = 0): boolean {
+    if (depth > 3) return false;
+    const next = (member: Type): boolean => this.mentions(member, parameter, depth + 1);
+    switch (type.kind) {
+      case 'typeParameter': {
+        return type.id === parameter.id;
+      }
+      case 'union':
+      case 'intersection': {
+        return type.types.some(next);
+      }
+      case 'object': {
+        if (type.objectKind === 'reference') return (type.typeArguments ?? []).some(next);
+        if (type.objectKind === 'tuple') return (type.tuple?.elements ?? []).some((element) => next(element.type));
+        if (type.objectKind !== 'anonymous') return false;
+        const structure = type.resolve();
+        return (
+          [...structure.properties.values()].some((property) => next(property.type())) ||
+          [structure.stringIndex, structure.numberIndex].some((index) => index !== undefined && next(index.type)) ||
+          [...structure.callSignatures, ...structure.constructSignatures].some(
+            (signature) => signature.parameters.some((member) => next(member.type)) || next(signature.returnType())
+          )
+        );
+      }
+      case 'indexedAccess': {
+        return next(type.objectType) || next(type.indexType);
+      }
+      case 'keyof': {
+        return next(type.type);
+      }
+      default: {
+        return false;
+      }
+    }
   }
 
   /** Infers the type parameters of `types` from `source` matched against `target`, as `infer U` does. */

@@ -1,9 +1,9 @@
-// code-gauge-allow-file fileNcss 424 -- Follows the flow of control through each kind of statement.
+// code-gauge-allow-file fileNcss 438 -- Follows the flow of control through each kind of statement.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import type { Checker } from './checker';
 import { FlowState, type State } from './flow';
-import type { Sym } from './scopes';
+import type { Scope, Sym } from './scopes';
 import { hasToken, named, patternIdentifiers, skipParentheses } from './syntax';
 import {
   anyType,
@@ -59,7 +59,20 @@ export class StatementChecker {
 
   checkProgram(root: TreeNode): void {
     this.c.flow.current = new FlowState();
+    this.declareHoistedVariables(this.c.binder.moduleScope);
     this.checkBlockStatements(named(root));
+  }
+
+  /** Starts each `var` of a scope unassigned, as its hoisted binding holds `undefined` until its declaration runs. */
+  declareHoistedVariables(scope: Scope | undefined): void {
+    for (const symbol of scope?.values.values() ?? []) {
+      if (
+        symbol.valueKind !== 'var' ||
+        symbol.valueDeclarations.some((declaration) => declaration.type !== 'variable_declarator')
+      )
+        continue;
+      this.c.flow.set(`s${symbol.id}`, { type: this.c.expressions.valueTypeOf(symbol), assigned: false });
+    }
   }
 
   checkBlockStatements(statements: TreeNode[]): void {
@@ -471,6 +484,7 @@ export class StatementChecker {
       this.c.expressions.reportNotAssignable(left, elementType, declared);
   }
 
+  // code-gauge-allow functionNcss 36 -- Follows the flow through the cases, fall-through, and an exhaustive end in one pass.
   private switchStatement(node: TreeNode): void {
     const value = node.childForFieldName('value') as TreeNode;
     const discriminant = skipParentheses(value);
@@ -505,7 +519,15 @@ export class StatementChecker {
     } finally {
       this.jumpTargets.pop();
     }
-    const noMatch = hasDefault ? undefined : this.c.conditions.narrowSwitchCase(discriminant, entry, caseTypes, false);
+    let noMatch = hasDefault ? undefined : this.c.conditions.narrowSwitchCase(discriminant, entry, caseTypes, false);
+    // Cases that cover every value of the discriminant leave no path past the switch, as `default` would.
+    if (noMatch && this.c.flow.referenceKey(discriminant)) {
+      let remaining: Type = neverType;
+      this.c.flow.from(noMatch, () => {
+        remaining = this.c.expressions.checkReferenceSilently(discriminant);
+      });
+      if (isIntrinsic(remaining, 'never')) noMatch = undefined;
+    }
     this.c.flow.current = this.c.flow.merge([fallthrough!, ...target.breaks, noMatch]);
   }
 
@@ -529,7 +551,8 @@ export class StatementChecker {
     const body = node.childForFieldName('body') as TreeNode;
     const handler = node.childForFieldName('handler');
     const finalizer = node.childForFieldName('finalizer');
-    const entry = this.c.flow.current;
+    // The try block changes the current state in place, while the catch block starts from what held before it.
+    const entry = this.c.flow.current?.clone();
     this.checkBlockStatements(named(body));
     const tryEnd = this.c.flow.current;
     let catchEnd: State;
@@ -578,7 +601,9 @@ export class StatementChecker {
     context.hasReturn = true;
     if (expression) {
       const declared = context.declaredReturn;
+      context.inReturn = true;
       const type = this.c.expressions.check(expression, declared ?? context.contextualReturn);
+      context.inReturn = false;
       if (declared && !context.isConstructor) this.c.expressions.checkReturnValue(expression, type, declared);
       context.returnTypes.push(type);
       context.hasReturnWithValue = true;

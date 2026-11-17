@@ -30,11 +30,12 @@ export class Calls {
 
   constructor(private readonly c: Checker) {}
 
-  // code-gauge-allow functionCognitiveComplexity 19 -- Follows TypeScript's checks of a call's callee in order, each with its own error.
-  // code-gauge-allow functionNcss 36 -- Follows TypeScript's checks of a call's callee in order, each with its own error.
+  // code-gauge-allow functionCognitiveComplexity 20 -- Follows TypeScript's checks of a call's callee in order, each with its own error.
+  // code-gauge-allow functionNcss 38 -- Follows TypeScript's checks of a call's callee in order, each with its own error.
   call(node: TreeNode, contextual?: Type): Type {
     const callee = node.childForFieldName('function') as TreeNode;
     const argumentsNode = node.childForFieldName('arguments');
+    if (argumentsNode?.type === 'template_string') return this.taggedTemplate(callee, argumentsNode);
     const args = argumentsNode ? named(argumentsNode) : [];
     if (callee.type === 'super') return this.c.classes.superCall(node, args);
     if (callee.type === 'import') return this.checkArgumentsOnly(args, anyType);
@@ -139,23 +140,28 @@ export class Calls {
     const perMember = type.types.map((member) => this.c.signaturesOf(member, 'call'));
     if (perMember.some((signatures) => signatures.length === 0)) return [];
     if (perMember.every((signatures) => signatures.length === 1)) {
-      const [first, ...rest] = perMember.map((signatures) => signatures[0]);
+      const all = perMember.map((signatures) => signatures[0]);
       if (
-        rest.every(
+        all.every(
           (signature) =>
-            signature.parameters.length === first.parameters.length &&
-            signature.typeParameters.length === 0 &&
-            first.typeParameters.length === 0
+            signature.typeParameters.length === 0 && !signature.parameters.some((parameter) => parameter.rest)
         )
       ) {
+        // A union of functions takes the longest parameter list, each parameter the type every member accepts.
+        let longest = all[0];
+        for (const signature of all) if (signature.parameters.length > longest.parameters.length) longest = signature;
         return [
           {
             typeParameters: [],
-            parameters: first.parameters.map((parameter, index) => ({
-              ...parameter,
-              type: this.intersectParameters([first, ...rest].map((signature) => signature.parameters[index].type)),
-            })),
-            returnType: () => unionOf([first, ...rest].map((signature) => signature.returnType())),
+            parameters: longest.parameters.map((parameter, index) => {
+              const members = all.filter((signature) => index < signature.parameters.length);
+              return {
+                ...parameter,
+                optional: members.every((signature) => signature.parameters[index].optional),
+                type: this.intersectParameters(members.map((signature) => signature.parameters[index].type)),
+              };
+            }),
+            returnType: () => unionOf(all.map((signature) => signature.returnType())),
           },
         ];
       }
@@ -217,6 +223,15 @@ export class Calls {
       callee,
       `'this' の型 '${this.c.print(context)}' は、このメソッドの 'this' の型 '${this.c.print(thisType)}' に代入できません。`
     );
+  }
+
+  /** A tagged template, `String.raw\`...\``, which calls the tag with the template's strings and substitutions. */
+  private taggedTemplate(callee: TreeNode, template: TreeNode): Type {
+    const calleeType = this.c.expressions.check(callee);
+    for (const part of named(template)) {
+      if (part.type === 'template_substitution') this.c.expressions.check(named(part)[0]);
+    }
+    return this.c.signaturesOf(calleeType, 'call')[0]?.returnType() ?? anyType;
   }
 
   /** Resolves a call to one of `signatures`, as `super(...)` does with its base class's constructors. */

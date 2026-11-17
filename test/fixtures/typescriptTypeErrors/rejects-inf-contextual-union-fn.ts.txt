@@ -1,0 +1,3 @@
+type F = ((a: string) => void) | ((a: string, b: number) => void);
+const f: F = (a) => console.log(a.length);
+f("x", 1);

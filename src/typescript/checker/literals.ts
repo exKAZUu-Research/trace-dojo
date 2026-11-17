@@ -224,8 +224,10 @@ export class LiteralChecker {
     const isGetter = hasToken(member, 'get');
     const isSetter = hasToken(member, 'set');
     this.checkDuplicateKey(literal, nameNode, isGetter ? `get ${name}` : isSetter ? `set ${name}` : name);
-    const methodType = this.c.classes.withObjectThis(literal.object, () =>
-      this.c.functions.functionExpression(member, this.memberContext(literal, name))
+    const methodType = this.c.classes.withObjectThis(
+      literal.object,
+      () => this.c.functions.functionExpression(member, this.memberContext(literal, name)),
+      member
     );
     if (isGetter || isSetter) {
       this.accessorMember(literal, member, name, methodType);
@@ -259,7 +261,8 @@ export class LiteralChecker {
 
   /** A literal's type in an array element or a property, widened unless the contextual type expects literals. */
   widenForMutableLocation(type: Type, contextual: Type | undefined): Type {
-    if (contextual && this.expectsLiteral(contextual, type)) return type;
+    // A nested object literal stays fresh, so that its own properties are checked against the target too.
+    if (type.kind === 'object' || (contextual && this.expectsLiteral(contextual, type))) return type;
     return this.c.widenLiteral(type);
   }
 
@@ -360,7 +363,7 @@ export class LiteralChecker {
     if (type.kind === 'union') {
       const widened = isConst ? regularOf(type) : this.c.widenLiteral(type);
       return widened.kind === 'union'
-        ? unionOf(widened.types.map((member) => this.widenDeclared(member, false)))
+        ? unionOf(widened.types.map((member) => this.widenDeclared(member, isConst)))
         : widened;
     }
     if (type.kind === 'object') {

@@ -1,0 +1,2 @@
+interface P { a: { b: number } }
+const p: P = { a: { b: 1, c: 2 } };

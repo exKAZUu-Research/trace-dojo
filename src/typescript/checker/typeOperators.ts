@@ -267,8 +267,9 @@ export class TypeOperators {
     const keys: Type[] = [];
     if (structure.stringIndex) keys.push(stringType, numberType);
     else if (structure.numberIndex) keys.push(numberType);
-    for (const name of structure.properties.keys()) {
-      if (name.startsWith('__@') || name.startsWith('#')) continue;
+    // keyof lists the public members only.
+    for (const [name, property] of structure.properties) {
+      if (name.startsWith('__@') || name.startsWith('#') || property.visibility !== 'public') continue;
       keys.push(literalType(name));
     }
     return unionOf(keys);
@@ -334,7 +335,18 @@ export class TypeOperators {
     return this.resolveConditional(conditional, new Map());
   }
 
+  /** The mapper that applies `first` and then `second`. */
+  private compose(first: Mapper, second: Mapper): Mapper {
+    const composed: Mapper = new Map();
+    for (const [id, type] of first) composed.set(id, this.c.instantiate(type, second));
+    for (const [id, type] of second) if (!composed.has(id)) composed.set(id, type);
+    return composed;
+  }
+
+  // code-gauge-allow functionCognitiveComplexity 16 -- Follows TypeScript's getConditionalType: deferral, distribution, and each branch.
   resolveConditional(type: ConditionalType, outer: Mapper): Type {
+    // An instantiated copy resolves from its declaration, so that it still distributes over its check type parameter.
+    if (type.root && type.mapper) return this.resolveConditional(type.root, this.compose(type.mapper, outer));
     const checkType = this.c.instantiate(type.checkType, outer);
     if (type.distributive && checkType.kind === 'union') {
       return unionOf(
@@ -363,7 +375,8 @@ export class TypeOperators {
         trueType: this.c.instantiate(type.trueType, mapper),
         falseType: this.c.instantiate(type.falseType, outer),
         inferTypeParameters,
-        distributive: type.distributive && checkType.kind === 'typeParameter',
+        root: type,
+        mapper: outer,
       };
     }
     const inferred = new Map(mapper);

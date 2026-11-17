@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 440 -- Holds the types of classes with `this`, `super`, and accessibility, which all read the class information.
+// code-gauge-allow-file fileNcss 481 -- Holds the types of classes with `this`, `super`, and accessibility, which all read the class information.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import type { Checker } from './checker';
@@ -416,8 +416,38 @@ export class ClassChecker {
       );
       return this.c.literals.widenDeclared(valueType, hasToken(member, 'readonly'));
     }
+    const assigned = this.constructorAssignments(member, nameNode.text);
+    if (assigned.length > 0) return unionOf(assigned);
     if (!this.c.isLibrary(member)) this.c.error(nameNode, `メンバー ${nameNode.text} の型が暗黙に any になります。`);
     return anyType;
+  }
+
+  /** The widened types the constructor assigns to `this.name`, from which a field without a type takes its type. */
+  private constructorAssignments(member: TreeNode, name: string): Type[] {
+    const classNode = member.parent?.parent;
+    const ctor = classNode ? this.constructorNode(classNode) : undefined;
+    if (!ctor || hasToken(member, 'static')) return [];
+    const types: Type[] = [];
+    const visit = (node: TreeNode): void => {
+      if (
+        ['function_declaration', 'function_expression', 'class', 'method_definition'].includes(node.type) &&
+        node.id !== ctor.id
+      )
+        return;
+      const left = node.type === 'assignment_expression' ? node.childForFieldName('left') : undefined;
+      const right = node.childForFieldName('right');
+      if (
+        left?.type === 'member_expression' &&
+        left.childForFieldName('object')?.type === 'this' &&
+        left.childForFieldName('property')?.text === name &&
+        right
+      ) {
+        types.push(this.c.widen(this.c.silently(() => this.c.expressions.check(right))));
+      }
+      for (const child of named(node)) visit(child);
+    };
+    visit(ctor);
+    return types;
   }
 
   private accessorType(getter: TreeNode | undefined, setter: TreeNode | undefined): Type {
@@ -451,7 +481,11 @@ export class ClassChecker {
     }
   }
 
-  withObjectThis<T>(object: ObjectType, run: () => T): T {
+  /** The object literals whose methods' `this` is the literal, by method, for return types inferred later. */
+  private readonly objectThisByMethod = new Map<number, ObjectType>();
+
+  withObjectThis<T>(object: ObjectType, run: () => T, method?: TreeNode): T {
+    if (method) this.objectThisByMethod.set(method.id, object);
     this.objectThis.push(object);
     try {
       return run();
@@ -497,7 +531,7 @@ export class ClassChecker {
     if (thisParameter) return thisParameter;
     const parent = owner.parent;
     if (owner.type === 'method_definition' && parent?.type === 'object') {
-      return this.objectThis.at(-1) ?? anyType;
+      return this.objectThisByMethod.get(owner.id) ?? this.objectThis.at(-1) ?? anyType;
     }
     if (
       (owner.type === 'method_definition' ||
@@ -588,6 +622,10 @@ export class ClassChecker {
     const owner = this.thisOwner(node);
     const isStatic = owner !== undefined && hasToken(owner, 'static');
     const target = isStatic ? (this.baseStaticType(classNode) ?? anyType) : base;
+    const property = this.c.propertyOf(target, propertyNode.text);
+    if (property?.isAbstract && property.isMethod) {
+      this.c.error(propertyNode, `抽象メソッド '${propertyNode.text}' は、'super' からは使えません。`);
+    }
     return this.c.members.propertyAccess(
       node,
       node.childForFieldName('object') as TreeNode,
@@ -595,6 +633,30 @@ export class ClassChecker {
       target,
       propertyNode.text
     );
+  }
+
+  /** Reports, in a field initializer, a field of the same class that is initialized after it. */
+  checkInitializedBefore(node: TreeNode, objectNode: TreeNode, property: Property): void {
+    if (objectNode.type !== 'this' || !property.declaringClass || !property.declaration) return;
+    const owner = this.thisOwner(node);
+    if (owner?.type !== 'public_field_definition' || hasToken(owner, 'static')) return;
+    if (owner.parent?.parent?.id !== property.declaringClass.declaration.id) return;
+    // A function in the initializer runs later, when it is called.
+    for (let current = node.parent; current && current.id !== owner.id; current = current.parent) {
+      if (current.type === 'arrow_function') return;
+    }
+    const declaration = property.declaration;
+    // A field initializes in declaration order, a field without an initializer only in the constructor, after them.
+    const later =
+      declaration.type === 'public_field_definition'
+        ? declaration.startIndex > owner.startIndex ||
+          (!declaration.childForFieldName('value') && !hasToken(declaration, '!') && !hasToken(declaration, '?'))
+        : declaration.type === 'required_parameter' || declaration.type === 'optional_parameter';
+    if (later)
+      this.c.error(
+        node.childForFieldName('property') ?? node,
+        `プロパティ '${property.name}' は、初期化される前に使われています。`
+      );
   }
 
   superCall(node: TreeNode, args: TreeNode[]): Type {

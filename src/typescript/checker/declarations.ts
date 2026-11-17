@@ -8,7 +8,10 @@ import { hasToken, named, propertyNameText } from './syntax';
 export function checkDuplicateDeclarations(c: Checker, scopes: Scope[]): void {
   for (const scope of scopes) {
     for (const symbol of scope.values.values()) checkValueDuplicates(c, symbol);
-    for (const symbol of scope.types.values()) checkTypeDuplicates(c, symbol);
+    for (const symbol of scope.types.values()) {
+      checkTypeDuplicates(c, symbol);
+      checkReservedTypeName(c, symbol);
+    }
   }
 }
 
@@ -56,6 +59,35 @@ function checkVarRedeclarations(c: Checker, symbol: Sym): void {
       symbol.valueEntries[index].name,
       `後の変数の宣言は、同じ型でなければいけません。変数 ${symbol.name} の型は '${c.print(first)}' ですが、ここでは '${c.print(type)}' です。`
     );
+  }
+}
+
+const reservedTypeNames = new Set([
+  'any',
+  'unknown',
+  'never',
+  'void',
+  'undefined',
+  'null',
+  'string',
+  'number',
+  'bigint',
+  'boolean',
+  'symbol',
+  'object',
+]);
+const declarationKindNames: Record<string, string> = {
+  alias: '型の別名',
+  interface: 'インターフェース',
+  class: 'クラス',
+};
+
+/** Reports a type, interface, or class named as a predefined type, such as `type number = string`. */
+function checkReservedTypeName(c: Checker, symbol: Sym): void {
+  if (!reservedTypeNames.has(symbol.name)) return;
+  for (const entry of symbol.typeEntries) {
+    const kind = declarationKindNames[entry.kind];
+    if (kind) c.error(entry.name, `${kind}の名前に '${symbol.name}' は使えません。`);
   }
 }
 

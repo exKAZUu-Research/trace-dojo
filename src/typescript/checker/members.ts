@@ -140,7 +140,7 @@ export class MemberChecker {
   }
 
   /** The type of `object.name`, reporting a missing or inaccessible property. */
-  // code-gauge-allow functionNcss 31 -- Follows TypeScript's lookup of a property on each kind of object type.
+  // code-gauge-allow functionNcss 32 -- Follows TypeScript's lookup of a property on each kind of object type.
   // code-gauge-allow functionCognitiveComplexity 20 -- Follows TypeScript's lookup of a property on each kind of object type.
   propertyAccess(node: TreeNode, objectNode: TreeNode, propertyNode: TreeNode, objectType: Type, name: string): Type {
     if (isAnyLike(objectType)) return objectType;
@@ -171,6 +171,7 @@ export class MemberChecker {
       return errorType;
     }
     this.c.classes.checkPropertyAccessibility(node, propertyNode, objectNode, objectType, property);
+    this.c.classes.checkInitializedBefore(node, objectNode, property);
     const unsupported = this.unsupportedMember(objectType, name) ?? this.unsupportedLibraryMember(property);
     if (unsupported) this.c.error(propertyNode, unsupportedMessage(unsupported));
     const type = property.type();

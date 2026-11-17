@@ -33,12 +33,16 @@ export interface FunctionContext {
   /** The flow states at its `return` statements. */
   returnStates: State[];
   contextualReturn?: Type;
+  /** Whether an expression the function returns is being checked, where its own return type cannot be used. */
+  inReturn?: boolean;
 }
 
 /** Checks function expressions and bodies, inferring the types they return. */
 export class FunctionChecker {
   /** The functions whose bodies are being checked, innermost last. */
   readonly contexts: FunctionContext[] = [];
+  /** The functions without a return type annotation that their own return expressions use. */
+  private readonly circular = new Set<number>();
   /** The narrowed types of variables when each function being checked was created. */
   readonly capturedTypes: Map<string, Type>[] = [];
   /** Parameter types of functions checked with a contextual signature, by symbol. */
@@ -141,11 +145,8 @@ export class FunctionChecker {
     const cached = this.inferredReturns.get(node.id);
     if (cached) return cached;
     if (this.inferring.has(node.id)) {
-      const name = node.childForFieldName('name');
-      this.c.error(
-        name ?? node,
-        `${name?.text ?? 'この関数'} は、戻り値の式で自分自身を参照しているため、戻り値の型が暗黙に any になります。`
-      );
+      // Only a use in what the function returns makes its type circular; the error shows once the body is checked.
+      if (this.contexts.some((context) => context.node.id === node.id && context.inReturn)) this.circular.add(node.id);
       return anyType;
     }
     this.inferring.add(node.id);
@@ -174,10 +175,18 @@ export class FunctionChecker {
     this.capturedTypes.push(this.capture());
     const outer = this.c.flow.current;
     this.c.flow.current = this.c.classes.initialFlow(node);
+    this.c.statements.declareHoistedVariables(this.c.ownScope(node));
     try {
       if (!body) return anyType;
       this.checkBody(body, context);
       if (declaredReturn) this.checkMissingReturn(node, context, declaredReturn);
+      if (this.circular.has(node.id) && this.c.silent === 0) {
+        const name = node.childForFieldName('name');
+        this.c.error(
+          name ?? node,
+          `${name?.text ?? 'この関数'} は、戻り値の式で自分自身を参照しているため、戻り値の型が暗黙に any になります。戻り値の型を書いてください。`
+        );
+      }
       if (context.isConstructor && node.parent?.parent) {
         this.c.classDeclarations.checkPropertyInitialization(
           node.parent.parent,
@@ -201,7 +210,9 @@ export class FunctionChecker {
       return;
     }
     const { declaredReturn } = context;
+    context.inReturn = true;
     const expressionType = this.c.expressions.check(body, declaredReturn ?? context.contextualReturn);
+    context.inReturn = false;
     if (declaredReturn) this.c.expressions.checkReturnValue(body, expressionType, declaredReturn);
     context.returnTypes.push(expressionType);
     context.endReachable = false;

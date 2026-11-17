@@ -1,5 +1,6 @@
 import { loadParser } from '../../interpreter/treeSitter';
 import { TURTLE_METHOD_NAMES } from '../../interpreter/turtleWorld';
+import { BROWSER_ONLY_GLOBALS, BROWSER_TYPES, SHARED_HOST_GLOBALS } from './domGlobals';
 import { ECMASCRIPT_LIBRARY } from './ecmascriptLibrary';
 import { Scope, type Sym } from './scopes';
 
@@ -52,11 +53,25 @@ declare var Proxy: any;
 declare var Reflect: any;
 `;
 
+/**
+ * The rest of the DOM library, whose values the reference `tsc` accepts but Node.js lacks (so they fail when the program
+ * runs) or this interpreter lacks; their types are `any`, as only `tsc` accepting them matters here.
+ */
+const BROWSER_LIBRARY = [
+  ...BROWSER_ONLY_GLOBALS.map((name) => `declare var ${name}: ${name === 'name' ? 'void' : 'any'};`),
+  ...SHARED_HOST_GLOBALS.map((name) => `declare var ${name}: any;`),
+  ...BROWSER_TYPES.map((entry) => {
+    if (typeof entry === 'string') return `type ${entry} = any;`;
+    const [name, count] = entry;
+    return `type ${name}<${Array.from({ length: count }, (_, index) => `T${index} = any`).join(', ')}> = any;`;
+  }),
+].join('\n');
+
 const parser = await loadParser('@willbooster/tree-sitter-typescript/tree-sitter-typescript.wasm');
 
 /** The library's declarations, parsed once; its tree lives as long as the process. */
 export const libraryTree = (() => {
-  const tree = parser.parse(`${ECMASCRIPT_LIBRARY}\n${HOST_LIBRARY}`);
+  const tree = parser.parse(`${ECMASCRIPT_LIBRARY}\n${HOST_LIBRARY}\n${BROWSER_LIBRARY}`);
   if (!tree) throw new Error('The parser returned no tree for the library');
   return tree;
 })();
@@ -93,7 +108,10 @@ const unsupportedValues: Record<string, string> = {
 };
 
 export function markUnsupported(scope: Scope): void {
-  for (const [name, feature] of Object.entries(unsupportedValues)) {
+  for (const [name, feature] of [
+    ...Object.entries(unsupportedValues),
+    ...SHARED_HOST_GLOBALS.map((name) => [name, name]),
+  ]) {
     const symbol: Sym | undefined = scope.values.get(name);
     if (symbol) symbol.unsupported = feature;
   }

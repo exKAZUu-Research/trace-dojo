@@ -42,9 +42,7 @@ export class OperatorChecker {
         return booleanType;
       }
       case 'typeof': {
-        this.c.silently(() => this.c.expressions.check(argument));
-        if (argument.type !== 'identifier' || this.c.scopeOf(argument).lookupValue(argument.text))
-          this.c.expressions.check(argument);
+        this.c.expressions.check(argument);
         return typeofResult;
       }
       case 'void': {
@@ -199,6 +197,15 @@ export class OperatorChecker {
   }
 
   private plus(node: TreeNode, left: TreeNode, right: TreeNode, leftType: Type, rightType: Type): Type {
+    for (const [operand, type] of [
+      [left, leftType],
+      [right, rightType],
+    ] as const) {
+      if (this.c.expressions.isSymbolLike(type)) {
+        this.c.error(operand, "演算子 '+' は 'symbol' 型には使えません。");
+        return errorType;
+      }
+    }
     if (this.isStringLike(leftType) || this.isStringLike(rightType)) {
       return stringType;
     }
@@ -297,6 +304,13 @@ export class OperatorChecker {
 
   private logical(node: TreeNode, operator: string, left: TreeNode, right: TreeNode, contextual?: Type): Type {
     if (operator === '??') {
+      const nullishness = syntacticNullishness(left);
+      if (nullishness === 'never')
+        this.c.error(
+          left,
+          '左のオペランドが null や undefined になることはないので、?? の右のオペランドは使われません。'
+        );
+      if (nullishness === 'always') this.c.error(left, 'この式は常に null か undefined です。');
       const leftType = this.c.expressions.check(left, contextual);
       const rightType = this.c.expressions.check(right, contextual);
       return this.c.literals.subtypeReduced([this.c.relations.removeNullish(leftType), rightType]);
@@ -416,4 +430,61 @@ export class OperatorChecker {
 
 function isNullishIntrinsic(type: Type): boolean {
   return isIntrinsic(type, 'null') || isIntrinsic(type, 'undefined');
+}
+
+/** Whether an expression can be `null` or `undefined` by its syntax alone, as TypeScript decides for `??`. */
+// code-gauge-allow functionNcss 34 -- One case per kind of expression TypeScript's getSyntacticNullishnessSemantics tells apart.
+function syntacticNullishness(node: TreeNode): 'always' | 'never' | 'sometimes' {
+  let expression = node;
+  while (
+    [
+      'parenthesized_expression',
+      'as_expression',
+      'satisfies_expression',
+      'non_null_expression',
+      'type_assertion',
+    ].includes(expression.type)
+  ) {
+    expression = (expression.type === 'type_assertion' ? named(expression).at(-1) : named(expression)[0]) as TreeNode;
+  }
+  switch (expression.type) {
+    case 'call_expression':
+    case 'subscript_expression':
+    case 'member_expression':
+    case 'new_expression':
+    case 'meta_property':
+    case 'await_expression':
+    case 'yield_expression':
+    case 'this': {
+      return 'sometimes';
+    }
+    case 'binary_expression': {
+      const operator = expression.childForFieldName('operator')?.text ?? '';
+      return ['??', '||', '&&'].includes(operator) ? 'sometimes' : 'never';
+    }
+    case 'assignment_expression':
+    case 'augmented_assignment_expression': {
+      const operator =
+        expression.type === 'assignment_expression' ? '=' : (expression.childForFieldName('operator')?.text ?? '');
+      return ['=', '??=', '||=', '&&='].includes(operator) ? 'sometimes' : 'never';
+    }
+    case 'sequence_expression': {
+      return syntacticNullishness(named(expression).at(-1) as TreeNode);
+    }
+    case 'ternary_expression': {
+      const a = syntacticNullishness(expression.childForFieldName('consequence') as TreeNode);
+      const b = syntacticNullishness(expression.childForFieldName('alternative') as TreeNode);
+      return a === b ? a : 'sometimes';
+    }
+    case 'null':
+    case 'undefined': {
+      return 'always';
+    }
+    case 'identifier': {
+      return expression.text === 'undefined' ? 'always' : 'sometimes';
+    }
+    default: {
+      return 'never';
+    }
+  }
 }

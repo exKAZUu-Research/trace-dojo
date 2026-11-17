@@ -3,10 +3,13 @@ import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 import type { Checker } from './checker';
 import { named, skipParentheses } from './syntax';
 import {
+  anonymousObject,
   bigintType,
   booleanType,
+  emptyStructure,
   falseType,
   filterType,
+  intersectionOf,
   isAnyLike,
   isIntrinsic,
   literalType,
@@ -16,6 +19,7 @@ import {
   nullType,
   numberType,
   type ObjectType,
+  simpleProperty,
   stringType,
   symbolType,
   trueType,
@@ -324,6 +328,21 @@ export class Flow {
   /** The part of a type that `"name" in value` keeps. */
   narrowByIn(type: Type, name: string, assumeTrue: boolean): Type {
     if (isAnyLike(type)) return type;
+    // A type that does not declare the property gains it as `unknown`, as `object` becomes `object & Record<"a", unknown>`.
+    if (
+      assumeTrue &&
+      type.kind !== 'union' &&
+      !this.c.propertyOf(type, name) &&
+      !this.c.structureOf(type).stringIndex
+    ) {
+      return intersectionOf([
+        type,
+        anonymousObject(() => ({
+          ...emptyStructure(),
+          properties: new Map([[name, simpleProperty(name, unknownType)]]),
+        })),
+      ]);
+    }
     return filterType(type, (member) => {
       if (member.kind !== 'object' && member.kind !== 'intersection') return assumeTrue;
       const property = this.c.propertyOf(member, name);
@@ -415,4 +434,4 @@ function sameUnit(a: Type, b: Type): boolean {
   return a === b;
 }
 
-export { trueType, unknownType };
+export { trueType };

@@ -118,7 +118,9 @@ export class ClassDeclarationChecker {
       case 'method_definition': {
         const signature = this.c.signatures.signatureOf(member);
         this.c.functions.checkFunctionLike(member, signature, undefined);
-        if (member.id === ctor?.id) void classNode;
+        const returnType = member.childForFieldName('return_type');
+        if (member.id === ctor?.id && returnType)
+          this.c.error(returnType, 'コンストラクタには戻り値の型を書けません。');
         break;
       }
       case 'class_static_block': {

@@ -3,6 +3,7 @@ import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 import { unsupportedMessage } from '../unsupported';
 import { Calls } from './calls';
 import type { Checker } from './checker';
+import type { FlowEntry } from './flow';
 import type { Sym } from './scopes';
 import { hasToken, named, numberValue, patternIdentifiers, stringValue } from './syntax';
 import {
@@ -15,6 +16,7 @@ import {
   isIntrinsic,
   nullType,
   stringType,
+  symbolType,
   type Type,
   undefinedType,
   unknownType,
@@ -77,9 +79,22 @@ export class ExpressionChecker {
     return anyType;
   }
 
+  /** Whether a type is a symbol (not `any`), which converting to a string implicitly throws for. */
+  isSymbolLike(type: Type): boolean {
+    return !isAnyLike(type) && !isIntrinsic(type, 'never') && this.c.relations.isAssignable(type, symbolType);
+  }
+
   private templateString(node: TreeNode, contextual: Type | undefined): Type {
     for (const child of named(node)) {
-      if (child.type === 'template_substitution') this.check(named(child)[0]);
+      if (child.type !== 'template_substitution') continue;
+      const expression = named(child)[0];
+      const type = this.check(expression);
+      if (this.isSymbolLike(type)) {
+        this.c.error(
+          expression,
+          "symbol を文字列に暗黙に変換すると、実行時にエラーになります。'String(...)' で囲んでください。"
+        );
+      }
     }
     return contextual &&
       this.c.literals.hasLiteralConstituent(contextual, 'string') &&
@@ -148,11 +163,14 @@ export class ExpressionChecker {
 
   // Identifiers --------------------------------------------------------------------------------------------------
 
-  // code-gauge-allow functionCognitiveComplexity 17 -- Follows TypeScript's checks of a variable reference: existence, initialization, and narrowing.
   identifier(node: TreeNode): Type {
     const name = node.text;
     const symbol = this.c.scopeOf(node).lookupValue(name);
-    if (!symbol) return name === 'undefined' ? undefinedType : this.reportUnknownValue(node, name);
+    if (!symbol) {
+      if (name === 'undefined') return undefinedType;
+      if (name === 'arguments' && this.hasArguments(node)) return this.c.globalType('IArguments');
+      return this.reportUnknownValue(node, name);
+    }
     if (symbol.unsupported) {
       this.c.error(node, unsupportedMessage(symbol.unsupported));
       return errorType;
@@ -163,22 +181,35 @@ export class ExpressionChecker {
     this.c.flow.declaredTypes.set(key, declared);
     const entry = this.c.flow.entry(key);
     // A nested function narrows a variable of an enclosing one from the type it sees, never checking its assignment.
-    if (this.isOuterVariable(node, symbol)) return entry?.type ?? this.outerVariableType(symbol, declared);
-    if (entry) {
-      const unassignedAuto =
-        !entry.assigned && this.c.assignments.isAutoTyped(symbol) && isIntrinsic(entry.type, 'undefined');
-      if (
-        !entry.assigned &&
-        (unassignedAuto || this.needsDefiniteAssignment(symbol, declared)) &&
-        !this.isAssignmentTarget(node)
-      ) {
-        this.c.error(node, `変数 ${name} は値を代入する前に使われています。`);
-        if (unassignedAuto) return errorType;
-      }
-      if (entry.evolving && !this.isEvolvingUse(node)) return this.finishEvolving(entry.type);
-      return entry.type;
+    if (this.isOuterVariable(node, symbol)) return entry?.type ?? this.closureVariableType(node, symbol, declared);
+    return entry ? this.flowVariableType(node, symbol, entry, declared) : declared;
+  }
+
+  /** Whether `arguments` names the arguments of an enclosing function, which an arrow function shares. */
+  private hasArguments(node: TreeNode): boolean {
+    for (let current = node.parent; current; current = current.parent) {
+      if (['function_declaration', 'function_expression', 'method_definition'].includes(current.type)) return true;
+      if (current.type === 'class_body' || current.type === 'public_field_definition') return false;
     }
-    return declared;
+    return false;
+  }
+
+  /** The type of a variable of the running function where its flow is followed, checking it was assigned first. */
+  private flowVariableType(node: TreeNode, symbol: Sym, entry: FlowEntry, declared: Type): Type {
+    const unassignedAuto =
+      !entry.assigned && this.c.assignments.isAutoTyped(symbol) && isIntrinsic(entry.type, 'undefined');
+    if (
+      !entry.assigned &&
+      (unassignedAuto || this.needsDefiniteAssignment(symbol, declared)) &&
+      !this.isAssignmentTarget(node)
+    ) {
+      this.c.error(node, `変数 ${symbol.name} は値を代入する前に使われています。`);
+      if (unassignedAuto) return errorType;
+    }
+    if (!entry.evolving || this.isEvolvingUse(node)) return entry.type;
+    // An array a nested function pushes to has no type here when nothing pushed to it in this flow.
+    if (symbol.usedInClosure && this.isNeverEvolved(entry.type)) return this.reportUndeterminedType(node, symbol);
+    return this.finishEvolving(entry.type);
   }
 
   private reportUnknownValue(node: TreeNode, name: string): Type {
@@ -236,12 +267,53 @@ export class ExpressionChecker {
   }
 
   /** The type a nested function sees for a variable of an enclosing one: narrowed if nothing reassigns it. */
-  private outerVariableType(symbol: Sym, declared: Type): Type {
-    if (symbol.valueKind === 'const' || !symbol.isReassigned) {
+  /**
+   * The type a nested function sees for a variable of an enclosing one: narrowed as when the function was created if
+   * nothing assigns the variable after that, as TypeScript 5.4 keeps it.
+   */
+  private closureVariableType(node: TreeNode, symbol: Sym, declared: Type): Type {
+    const closure = this.c.functions.contexts.at(-1)?.node;
+    const evolving = this.isEvolvingArrayDeclaration(symbol);
+    if (evolving || this.c.assignments.isAutoTyped(symbol)) symbol.usedInClosure = true;
+    if (evolving && this.isEvolvingUse(node)) return declared;
+    const assignedLater =
+      closure !== undefined && symbol.assignmentOffsets.some((offset) => offset > closure.startIndex);
+    if (!evolving && (symbol.valueKind === 'const' || !assignedLater)) {
       const captured = this.c.functions.capturedTypes.at(-1)?.get(`s${symbol.id}`);
       if (captured) return captured;
     }
+    if (evolving || this.c.assignments.isAutoTyped(symbol)) return this.reportUndeterminedType(node, symbol);
     return declared;
+  }
+
+  /** Whether a variable is declared as `[]` without a type, whose type the pushes to it decide. */
+  private isEvolvingArrayDeclaration(symbol: Sym): boolean {
+    const declaration = symbol.valueDeclaration;
+    const value = declaration?.type === 'variable_declarator' ? declaration.childForFieldName('value') : undefined;
+    return (
+      declaration?.type === 'variable_declarator' &&
+      !declaration.childForFieldName('type') &&
+      value?.type === 'array' &&
+      named(value).length === 0
+    );
+  }
+
+  private isNeverEvolved(type: Type): boolean {
+    return type.kind === 'object' && this.c.isArrayType(type) && isIntrinsic(this.c.elementTypeOf(type), 'never');
+  }
+
+  /** Reports a variable whose type follows its assignments where they cannot be followed, at the use and the declaration. */
+  private reportUndeterminedType(node: TreeNode, symbol: Sym): Type {
+    const typeName = this.isEvolvingArrayDeclaration(symbol) ? 'any[]' : 'any';
+    const declaration = symbol.valueDeclaration?.childForFieldName('name');
+    if (declaration) {
+      this.c.error(
+        declaration,
+        `変数 ${symbol.name} は、型を決められない場所があるため、型が暗黙に ${typeName} になります。`
+      );
+    }
+    this.c.error(node, `変数 ${symbol.name} の型が暗黙に ${typeName} になります。`);
+    return typeName === 'any' ? anyType : this.c.arrayType(anyType);
   }
 
   // code-gauge-allow functionCognitiveComplexity 22 -- Follows TypeScript's rules for uses before a declaration, which depend on when the use runs.
