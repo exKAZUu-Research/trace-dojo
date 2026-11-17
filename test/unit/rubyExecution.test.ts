@@ -51080,3 +51080,1261 @@ test.each(nativeMethodOwnerCallbackCases)(
     expect(run(source)).toMatchObject({ kind: 'executed', stdout, uncaughtException: undefined });
   }
 );
+
+const nativeMethodOwnerPrintabilityCases = [
+  [
+    String.raw`class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("\u0000",encoding:"UTF-8")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?`,
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 48, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    String.raw`class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("\u0000",encoding:"US-ASCII")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?`,
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 48, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    String.raw`class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("\u0000",encoding:"ASCII-8BIT")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?`,
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 48, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    String.raw`class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("é\u0000",encoding:"UTF-8")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?`,
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 117, 48, 48, 69, 57, 92, 48, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    String.raw`class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("é\u0000",encoding:"US-ASCII")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?`,
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 120, 67, 51, 92, 120, 65, 57, 92, 48, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    String.raw`class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("é\u0000",encoding:"ASCII-8BIT")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?`,
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 120, 67, 51, 92, 120, 65, 57, 92, 48, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    String.raw`class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("\t",encoding:"UTF-8")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?`,
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 116, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    String.raw`class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("\t",encoding:"US-ASCII")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?`,
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 116, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    String.raw`class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("\t",encoding:"ASCII-8BIT")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?`,
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 116, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    String.raw`class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("é\t",encoding:"UTF-8")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?`,
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 117, 48, 48, 69, 57, 92, 116, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    String.raw`class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("é\t",encoding:"US-ASCII")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?`,
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 120, 67, 51, 92, 120, 65, 57, 92, 116, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    String.raw`class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("é\t",encoding:"ASCII-8BIT")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?`,
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 120, 67, 51, 92, 120, 65, 57, 92, 116, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    String.raw`class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("\n",encoding:"UTF-8")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?`,
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 110, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    String.raw`class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("\n",encoding:"US-ASCII")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?`,
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 110, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    String.raw`class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("\n",encoding:"ASCII-8BIT")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?`,
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 110, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    String.raw`class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("é\n",encoding:"UTF-8")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?`,
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 117, 48, 48, 69, 57, 92, 110, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    String.raw`class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("é\n",encoding:"US-ASCII")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?`,
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 120, 67, 51, 92, 120, 65, 57, 92, 110, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    String.raw`class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("é\n",encoding:"ASCII-8BIT")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?`,
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 120, 67, 51, 92, 120, 65, 57, 92, 110, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    String.raw`class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("\u001f",encoding:"UTF-8")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?`,
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 117, 48, 48, 49, 70, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    String.raw`class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("\u001f",encoding:"US-ASCII")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?`,
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 120, 49, 70, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    String.raw`class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("\u001f",encoding:"ASCII-8BIT")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?`,
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 120, 49, 70, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    String.raw`class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("é\u001f",encoding:"UTF-8")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?`,
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 117, 48, 48, 69, 57, 92, 117, 48, 48, 49, 70, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    String.raw`class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("é\u001f",encoding:"US-ASCII")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?`,
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 120, 67, 51, 92, 120, 65, 57, 92, 120, 49, 70, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    String.raw`class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("é\u001f",encoding:"ASCII-8BIT")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?`,
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 120, 67, 51, 92, 120, 65, 57, 92, 120, 49, 70, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new(" ",encoding:"UTF-8")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 32, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new(" ",encoding:"US-ASCII")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 32, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new(" ",encoding:"ASCII-8BIT")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 32, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("é ",encoding:"UTF-8")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 195, 169, 32, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:UTF-8>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("é ",encoding:"US-ASCII")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 120, 67, 51, 92, 120, 65, 57, 32, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("é ",encoding:"ASCII-8BIT")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 120, 67, 51, 92, 120, 65, 57, 32, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("!",encoding:"UTF-8")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 33, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("!",encoding:"US-ASCII")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 33, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("!",encoding:"ASCII-8BIT")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 33, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("é!",encoding:"UTF-8")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 195, 169, 33, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:UTF-8>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("é!",encoding:"US-ASCII")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 120, 67, 51, 92, 120, 65, 57, 33, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("é!",encoding:"ASCII-8BIT")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 120, 67, 51, 92, 120, 65, 57, 33, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("~",encoding:"UTF-8")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 126, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("~",encoding:"US-ASCII")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 126, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("~",encoding:"ASCII-8BIT")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 126, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("é~",encoding:"UTF-8")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 195, 169, 126, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:UTF-8>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("é~",encoding:"US-ASCII")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 120, 67, 51, 92, 120, 65, 57, 126, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("é~",encoding:"ASCII-8BIT")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 120, 67, 51, 92, 120, 65, 57, 126, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("",encoding:"UTF-8")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 99, 63, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("",encoding:"US-ASCII")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 99, 63, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("",encoding:"ASCII-8BIT")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 99, 63, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("é",encoding:"UTF-8")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 117, 48, 48, 69, 57, 92, 99, 63, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("é",encoding:"US-ASCII")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 120, 67, 51, 92, 120, 65, 57, 92, 99, 63, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("é",encoding:"ASCII-8BIT")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 120, 67, 51, 92, 120, 65, 57, 92, 99, 63, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("",encoding:"UTF-8")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 117, 48, 48, 56, 48, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("",encoding:"US-ASCII")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 120, 67, 50, 92, 120, 56, 48, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("",encoding:"ASCII-8BIT")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 120, 67, 50, 92, 120, 56, 48, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("é",encoding:"UTF-8")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 117, 48, 48, 69, 57, 92, 117, 48, 48, 56, 48, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("é",encoding:"US-ASCII")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 120, 67, 51, 92, 120, 65, 57, 92, 120, 67, 50, 92, 120, 56, 48, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("é",encoding:"ASCII-8BIT")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 120, 67, 51, 92, 120, 65, 57, 92, 120, 67, 50, 92, 120, 56, 48, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("",encoding:"UTF-8")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 117, 48, 48, 56, 49, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("",encoding:"US-ASCII")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 120, 67, 50, 92, 120, 56, 49, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("",encoding:"ASCII-8BIT")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 120, 67, 50, 92, 120, 56, 49, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("é",encoding:"UTF-8")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 117, 48, 48, 69, 57, 92, 117, 48, 48, 56, 49, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("é",encoding:"US-ASCII")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 120, 67, 51, 92, 120, 65, 57, 92, 120, 67, 50, 92, 120, 56, 49, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("é",encoding:"ASCII-8BIT")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 120, 67, 51, 92, 120, 65, 57, 92, 120, 67, 50, 92, 120, 56, 49, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("",encoding:"UTF-8")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 117, 48, 48, 56, 50, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("",encoding:"US-ASCII")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 120, 67, 50, 92, 120, 56, 50, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("",encoding:"ASCII-8BIT")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 120, 67, 50, 92, 120, 56, 50, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("é",encoding:"UTF-8")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 117, 48, 48, 69, 57, 92, 117, 48, 48, 56, 50, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("é",encoding:"US-ASCII")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 120, 67, 51, 92, 120, 65, 57, 92, 120, 67, 50, 92, 120, 56, 50, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("é",encoding:"ASCII-8BIT")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 120, 67, 51, 92, 120, 65, 57, 92, 120, 67, 50, 92, 120, 56, 50, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("",encoding:"UTF-8")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 117, 48, 48, 56, 51, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("",encoding:"US-ASCII")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 120, 67, 50, 92, 120, 56, 51, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("",encoding:"ASCII-8BIT")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 120, 67, 50, 92, 120, 56, 51, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("é",encoding:"UTF-8")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 117, 48, 48, 69, 57, 92, 117, 48, 48, 56, 51, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("é",encoding:"US-ASCII")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 120, 67, 51, 92, 120, 65, 57, 92, 120, 67, 50, 92, 120, 56, 51, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("é",encoding:"ASCII-8BIT")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 120, 67, 51, 92, 120, 65, 57, 92, 120, 67, 50, 92, 120, 56, 51, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("",encoding:"UTF-8")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 117, 48, 48, 56, 52, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("",encoding:"US-ASCII")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 120, 67, 50, 92, 120, 56, 52, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("",encoding:"ASCII-8BIT")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 120, 67, 50, 92, 120, 56, 52, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("é",encoding:"UTF-8")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 117, 48, 48, 69, 57, 92, 117, 48, 48, 56, 52, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("é",encoding:"US-ASCII")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 120, 67, 51, 92, 120, 65, 57, 92, 120, 67, 50, 92, 120, 56, 52, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("é",encoding:"ASCII-8BIT")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 120, 67, 51, 92, 120, 65, 57, 92, 120, 67, 50, 92, 120, 56, 52, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("",encoding:"UTF-8")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 194, 133, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:UTF-8>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("",encoding:"US-ASCII")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 120, 67, 50, 92, 120, 56, 53, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("",encoding:"ASCII-8BIT")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 120, 67, 50, 92, 120, 56, 53, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("é",encoding:"UTF-8")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 195, 169, 194, 133, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:UTF-8>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("é",encoding:"US-ASCII")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 120, 67, 51, 92, 120, 65, 57, 92, 120, 67, 50, 92, 120, 56, 53, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("é",encoding:"ASCII-8BIT")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 120, 67, 51, 92, 120, 65, 57, 92, 120, 67, 50, 92, 120, 56, 53, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("",encoding:"UTF-8")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 117, 48, 48, 56, 54, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("",encoding:"US-ASCII")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 120, 67, 50, 92, 120, 56, 54, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("",encoding:"ASCII-8BIT")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 120, 67, 50, 92, 120, 56, 54, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("é",encoding:"UTF-8")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 117, 48, 48, 69, 57, 92, 117, 48, 48, 56, 54, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("é",encoding:"US-ASCII")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 120, 67, 51, 92, 120, 65, 57, 92, 120, 67, 50, 92, 120, 56, 54, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("é",encoding:"ASCII-8BIT")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 120, 67, 51, 92, 120, 65, 57, 92, 120, 67, 50, 92, 120, 56, 54, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("",encoding:"UTF-8")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 117, 48, 48, 56, 55, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("",encoding:"US-ASCII")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 120, 67, 50, 92, 120, 56, 55, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("",encoding:"ASCII-8BIT")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 120, 67, 50, 92, 120, 56, 55, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("é",encoding:"UTF-8")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 117, 48, 48, 69, 57, 92, 117, 48, 48, 56, 55, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("é",encoding:"US-ASCII")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 120, 67, 51, 92, 120, 65, 57, 92, 120, 67, 50, 92, 120, 56, 55, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("é",encoding:"ASCII-8BIT")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 120, 67, 51, 92, 120, 65, 57, 92, 120, 67, 50, 92, 120, 56, 55, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("",encoding:"UTF-8")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 117, 48, 48, 56, 56, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("",encoding:"US-ASCII")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 120, 67, 50, 92, 120, 56, 56, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("",encoding:"ASCII-8BIT")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 120, 67, 50, 92, 120, 56, 56, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("é",encoding:"UTF-8")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 117, 48, 48, 69, 57, 92, 117, 48, 48, 56, 56, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("é",encoding:"US-ASCII")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 120, 67, 51, 92, 120, 65, 57, 92, 120, 67, 50, 92, 120, 56, 56, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("é",encoding:"ASCII-8BIT")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 120, 67, 51, 92, 120, 65, 57, 92, 120, 67, 50, 92, 120, 56, 56, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("",encoding:"UTF-8")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 117, 48, 48, 56, 57, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("",encoding:"US-ASCII")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 120, 67, 50, 92, 120, 56, 57, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("",encoding:"ASCII-8BIT")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 120, 67, 50, 92, 120, 56, 57, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("é",encoding:"UTF-8")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 117, 48, 48, 69, 57, 92, 117, 48, 48, 56, 57, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("é",encoding:"US-ASCII")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 120, 67, 51, 92, 120, 65, 57, 92, 120, 67, 50, 92, 120, 56, 57, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("é",encoding:"ASCII-8BIT")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 120, 67, 51, 92, 120, 65, 57, 92, 120, 67, 50, 92, 120, 56, 57, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("",encoding:"UTF-8")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 117, 48, 48, 56, 65, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("",encoding:"US-ASCII")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 120, 67, 50, 92, 120, 56, 65, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("",encoding:"ASCII-8BIT")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 120, 67, 50, 92, 120, 56, 65, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("é",encoding:"UTF-8")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 117, 48, 48, 69, 57, 92, 117, 48, 48, 56, 65, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("é",encoding:"US-ASCII")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 120, 67, 51, 92, 120, 65, 57, 92, 120, 67, 50, 92, 120, 56, 65, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("é",encoding:"ASCII-8BIT")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 120, 67, 51, 92, 120, 65, 57, 92, 120, 67, 50, 92, 120, 56, 65, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("",encoding:"UTF-8")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 117, 48, 48, 56, 66, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("",encoding:"US-ASCII")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 120, 67, 50, 92, 120, 56, 66, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("",encoding:"ASCII-8BIT")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 120, 67, 50, 92, 120, 56, 66, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("é",encoding:"UTF-8")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 117, 48, 48, 69, 57, 92, 117, 48, 48, 56, 66, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("é",encoding:"US-ASCII")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 120, 67, 51, 92, 120, 65, 57, 92, 120, 67, 50, 92, 120, 56, 66, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("é",encoding:"ASCII-8BIT")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 120, 67, 51, 92, 120, 65, 57, 92, 120, 67, 50, 92, 120, 56, 66, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("",encoding:"UTF-8")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 117, 48, 48, 56, 67, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("",encoding:"US-ASCII")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 120, 67, 50, 92, 120, 56, 67, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("",encoding:"ASCII-8BIT")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 120, 67, 50, 92, 120, 56, 67, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("é",encoding:"UTF-8")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 117, 48, 48, 69, 57, 92, 117, 48, 48, 56, 67, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("é",encoding:"US-ASCII")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 120, 67, 51, 92, 120, 65, 57, 92, 120, 67, 50, 92, 120, 56, 67, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("é",encoding:"ASCII-8BIT")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 120, 67, 51, 92, 120, 65, 57, 92, 120, 67, 50, 92, 120, 56, 67, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("",encoding:"UTF-8")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 117, 48, 48, 56, 68, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("",encoding:"US-ASCII")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 120, 67, 50, 92, 120, 56, 68, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("",encoding:"ASCII-8BIT")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 120, 67, 50, 92, 120, 56, 68, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("é",encoding:"UTF-8")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 117, 48, 48, 69, 57, 92, 117, 48, 48, 56, 68, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("é",encoding:"US-ASCII")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 120, 67, 51, 92, 120, 65, 57, 92, 120, 67, 50, 92, 120, 56, 68, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("é",encoding:"ASCII-8BIT")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 120, 67, 51, 92, 120, 65, 57, 92, 120, 67, 50, 92, 120, 56, 68, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("",encoding:"UTF-8")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 117, 48, 48, 56, 69, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("",encoding:"US-ASCII")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 120, 67, 50, 92, 120, 56, 69, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("",encoding:"ASCII-8BIT")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 120, 67, 50, 92, 120, 56, 69, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("é",encoding:"UTF-8")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 117, 48, 48, 69, 57, 92, 117, 48, 48, 56, 69, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("é",encoding:"US-ASCII")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 120, 67, 51, 92, 120, 65, 57, 92, 120, 67, 50, 92, 120, 56, 69, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("é",encoding:"ASCII-8BIT")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 120, 67, 51, 92, 120, 65, 57, 92, 120, 67, 50, 92, 120, 56, 69, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("",encoding:"UTF-8")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 117, 48, 48, 56, 70, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("",encoding:"US-ASCII")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 120, 67, 50, 92, 120, 56, 70, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("",encoding:"ASCII-8BIT")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 120, 67, 50, 92, 120, 56, 70, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("é",encoding:"UTF-8")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 117, 48, 48, 69, 57, 92, 117, 48, 48, 56, 70, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("é",encoding:"US-ASCII")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 120, 67, 51, 92, 120, 65, 57, 92, 120, 67, 50, 92, 120, 56, 70, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("é",encoding:"ASCII-8BIT")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 120, 67, 51, 92, 120, 65, 57, 92, 120, 67, 50, 92, 120, 56, 70, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("",encoding:"UTF-8")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 117, 48, 48, 57, 48, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("",encoding:"US-ASCII")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 120, 67, 50, 92, 120, 57, 48, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("",encoding:"ASCII-8BIT")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 120, 67, 50, 92, 120, 57, 48, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("é",encoding:"UTF-8")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 117, 48, 48, 69, 57, 92, 117, 48, 48, 57, 48, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("é",encoding:"US-ASCII")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 120, 67, 51, 92, 120, 65, 57, 92, 120, 67, 50, 92, 120, 57, 48, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("é",encoding:"ASCII-8BIT")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 120, 67, 51, 92, 120, 65, 57, 92, 120, 67, 50, 92, 120, 57, 48, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("",encoding:"UTF-8")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 117, 48, 48, 57, 49, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("",encoding:"US-ASCII")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 120, 67, 50, 92, 120, 57, 49, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("",encoding:"ASCII-8BIT")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 120, 67, 50, 92, 120, 57, 49, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("é",encoding:"UTF-8")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 117, 48, 48, 69, 57, 92, 117, 48, 48, 57, 49, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("é",encoding:"US-ASCII")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 120, 67, 51, 92, 120, 65, 57, 92, 120, 67, 50, 92, 120, 57, 49, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("é",encoding:"ASCII-8BIT")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 120, 67, 51, 92, 120, 65, 57, 92, 120, 67, 50, 92, 120, 57, 49, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("",encoding:"UTF-8")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 117, 48, 48, 57, 50, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("",encoding:"US-ASCII")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 120, 67, 50, 92, 120, 57, 50, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("",encoding:"ASCII-8BIT")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 120, 67, 50, 92, 120, 57, 50, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("é",encoding:"UTF-8")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 117, 48, 48, 69, 57, 92, 117, 48, 48, 57, 50, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("é",encoding:"US-ASCII")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 120, 67, 51, 92, 120, 65, 57, 92, 120, 67, 50, 92, 120, 57, 50, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("é",encoding:"ASCII-8BIT")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 120, 67, 51, 92, 120, 65, 57, 92, 120, 67, 50, 92, 120, 57, 50, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("",encoding:"UTF-8")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 117, 48, 48, 57, 51, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("",encoding:"US-ASCII")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 120, 67, 50, 92, 120, 57, 51, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("",encoding:"ASCII-8BIT")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 120, 67, 50, 92, 120, 57, 51, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("é",encoding:"UTF-8")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 117, 48, 48, 69, 57, 92, 117, 48, 48, 57, 51, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("é",encoding:"US-ASCII")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 120, 67, 51, 92, 120, 65, 57, 92, 120, 67, 50, 92, 120, 57, 51, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("é",encoding:"ASCII-8BIT")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 120, 67, 51, 92, 120, 65, 57, 92, 120, 67, 50, 92, 120, 57, 51, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("",encoding:"UTF-8")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 117, 48, 48, 57, 52, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("",encoding:"US-ASCII")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 120, 67, 50, 92, 120, 57, 52, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("",encoding:"ASCII-8BIT")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 120, 67, 50, 92, 120, 57, 52, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("é",encoding:"UTF-8")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 117, 48, 48, 69, 57, 92, 117, 48, 48, 57, 52, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("é",encoding:"US-ASCII")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 120, 67, 51, 92, 120, 65, 57, 92, 120, 67, 50, 92, 120, 57, 52, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("é",encoding:"ASCII-8BIT")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 120, 67, 51, 92, 120, 65, 57, 92, 120, 67, 50, 92, 120, 57, 52, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("",encoding:"UTF-8")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 117, 48, 48, 57, 53, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("",encoding:"US-ASCII")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 120, 67, 50, 92, 120, 57, 53, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("",encoding:"ASCII-8BIT")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 120, 67, 50, 92, 120, 57, 53, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("é",encoding:"UTF-8")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 117, 48, 48, 69, 57, 92, 117, 48, 48, 57, 53, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("é",encoding:"US-ASCII")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 120, 67, 51, 92, 120, 65, 57, 92, 120, 67, 50, 92, 120, 57, 53, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("é",encoding:"ASCII-8BIT")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 120, 67, 51, 92, 120, 65, 57, 92, 120, 67, 50, 92, 120, 57, 53, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("",encoding:"UTF-8")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 117, 48, 48, 57, 54, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("",encoding:"US-ASCII")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 120, 67, 50, 92, 120, 57, 54, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("",encoding:"ASCII-8BIT")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 120, 67, 50, 92, 120, 57, 54, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("é",encoding:"UTF-8")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 117, 48, 48, 69, 57, 92, 117, 48, 48, 57, 54, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("é",encoding:"US-ASCII")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 120, 67, 51, 92, 120, 65, 57, 92, 120, 67, 50, 92, 120, 57, 54, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("é",encoding:"ASCII-8BIT")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 120, 67, 51, 92, 120, 65, 57, 92, 120, 67, 50, 92, 120, 57, 54, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("",encoding:"UTF-8")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 117, 48, 48, 57, 55, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("",encoding:"US-ASCII")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 120, 67, 50, 92, 120, 57, 55, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("",encoding:"ASCII-8BIT")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 120, 67, 50, 92, 120, 57, 55, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("é",encoding:"UTF-8")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 117, 48, 48, 69, 57, 92, 117, 48, 48, 57, 55, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("é",encoding:"US-ASCII")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 120, 67, 51, 92, 120, 65, 57, 92, 120, 67, 50, 92, 120, 57, 55, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("é",encoding:"ASCII-8BIT")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 120, 67, 51, 92, 120, 65, 57, 92, 120, 67, 50, 92, 120, 57, 55, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("",encoding:"UTF-8")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 117, 48, 48, 57, 56, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("",encoding:"US-ASCII")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 120, 67, 50, 92, 120, 57, 56, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("",encoding:"ASCII-8BIT")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 120, 67, 50, 92, 120, 57, 56, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("é",encoding:"UTF-8")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 117, 48, 48, 69, 57, 92, 117, 48, 48, 57, 56, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("é",encoding:"US-ASCII")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 120, 67, 51, 92, 120, 65, 57, 92, 120, 67, 50, 92, 120, 57, 56, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("é",encoding:"ASCII-8BIT")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 120, 67, 51, 92, 120, 65, 57, 92, 120, 67, 50, 92, 120, 57, 56, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("",encoding:"UTF-8")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 117, 48, 48, 57, 57, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("",encoding:"US-ASCII")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 120, 67, 50, 92, 120, 57, 57, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("",encoding:"ASCII-8BIT")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 120, 67, 50, 92, 120, 57, 57, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("é",encoding:"UTF-8")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 117, 48, 48, 69, 57, 92, 117, 48, 48, 57, 57, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("é",encoding:"US-ASCII")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 120, 67, 51, 92, 120, 65, 57, 92, 120, 67, 50, 92, 120, 57, 57, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("é",encoding:"ASCII-8BIT")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 120, 67, 51, 92, 120, 65, 57, 92, 120, 67, 50, 92, 120, 57, 57, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("",encoding:"UTF-8")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 117, 48, 48, 57, 65, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("",encoding:"US-ASCII")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 120, 67, 50, 92, 120, 57, 65, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("",encoding:"ASCII-8BIT")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 120, 67, 50, 92, 120, 57, 65, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("é",encoding:"UTF-8")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 117, 48, 48, 69, 57, 92, 117, 48, 48, 57, 65, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("é",encoding:"US-ASCII")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 120, 67, 51, 92, 120, 65, 57, 92, 120, 67, 50, 92, 120, 57, 65, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("é",encoding:"ASCII-8BIT")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 120, 67, 51, 92, 120, 65, 57, 92, 120, 67, 50, 92, 120, 57, 65, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("",encoding:"UTF-8")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 117, 48, 48, 57, 66, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("",encoding:"US-ASCII")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 120, 67, 50, 92, 120, 57, 66, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("",encoding:"ASCII-8BIT")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 120, 67, 50, 92, 120, 57, 66, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("é",encoding:"UTF-8")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 117, 48, 48, 69, 57, 92, 117, 48, 48, 57, 66, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("é",encoding:"US-ASCII")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 120, 67, 51, 92, 120, 65, 57, 92, 120, 67, 50, 92, 120, 57, 66, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("é",encoding:"ASCII-8BIT")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 120, 67, 51, 92, 120, 65, 57, 92, 120, 67, 50, 92, 120, 57, 66, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("",encoding:"UTF-8")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 117, 48, 48, 57, 67, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("",encoding:"US-ASCII")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 120, 67, 50, 92, 120, 57, 67, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("",encoding:"ASCII-8BIT")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 120, 67, 50, 92, 120, 57, 67, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("é",encoding:"UTF-8")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 117, 48, 48, 69, 57, 92, 117, 48, 48, 57, 67, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("é",encoding:"US-ASCII")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 120, 67, 51, 92, 120, 65, 57, 92, 120, 67, 50, 92, 120, 57, 67, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("é",encoding:"ASCII-8BIT")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 120, 67, 51, 92, 120, 65, 57, 92, 120, 67, 50, 92, 120, 57, 67, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("",encoding:"UTF-8")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 117, 48, 48, 57, 68, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("",encoding:"US-ASCII")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 120, 67, 50, 92, 120, 57, 68, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("",encoding:"ASCII-8BIT")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 120, 67, 50, 92, 120, 57, 68, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("é",encoding:"UTF-8")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 117, 48, 48, 69, 57, 92, 117, 48, 48, 57, 68, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("é",encoding:"US-ASCII")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 120, 67, 51, 92, 120, 65, 57, 92, 120, 67, 50, 92, 120, 57, 68, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("é",encoding:"ASCII-8BIT")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 120, 67, 51, 92, 120, 65, 57, 92, 120, 67, 50, 92, 120, 57, 68, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("",encoding:"UTF-8")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 117, 48, 48, 57, 69, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("",encoding:"US-ASCII")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 120, 67, 50, 92, 120, 57, 69, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("",encoding:"ASCII-8BIT")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 120, 67, 50, 92, 120, 57, 69, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("é",encoding:"UTF-8")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 117, 48, 48, 69, 57, 92, 117, 48, 48, 57, 69, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("é",encoding:"US-ASCII")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 120, 67, 51, 92, 120, 65, 57, 92, 120, 67, 50, 92, 120, 57, 69, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("é",encoding:"ASCII-8BIT")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 120, 67, 51, 92, 120, 65, 57, 92, 120, 67, 50, 92, 120, 57, 69, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("",encoding:"UTF-8")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 117, 48, 48, 57, 70, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("",encoding:"US-ASCII")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 120, 67, 50, 92, 120, 57, 70, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("",encoding:"ASCII-8BIT")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 120, 67, 50, 92, 120, 57, 70, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("é",encoding:"UTF-8")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 117, 48, 48, 69, 57, 92, 117, 48, 48, 57, 70, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("é",encoding:"US-ASCII")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 120, 67, 51, 92, 120, 65, 57, 92, 120, 67, 50, 92, 120, 57, 70, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("é",encoding:"ASCII-8BIT")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 120, 67, 51, 92, 120, 65, 57, 92, 120, 67, 50, 92, 120, 57, 70, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new(" ",encoding:"UTF-8")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 194, 160, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:UTF-8>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new(" ",encoding:"US-ASCII")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 120, 67, 50, 92, 120, 65, 48, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new(" ",encoding:"ASCII-8BIT")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 120, 67, 50, 92, 120, 65, 48, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("é ",encoding:"UTF-8")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 195, 169, 194, 160, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:UTF-8>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("é ",encoding:"US-ASCII")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 120, 67, 51, 92, 120, 65, 57, 92, 120, 67, 50, 92, 120, 65, 48, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("é ",encoding:"ASCII-8BIT")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 120, 67, 51, 92, 120, 65, 57, 92, 120, 67, 50, 92, 120, 65, 48, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("­",encoding:"UTF-8")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 194, 173, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:UTF-8>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("­",encoding:"US-ASCII")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 120, 67, 50, 92, 120, 65, 68, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("­",encoding:"ASCII-8BIT")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 120, 67, 50, 92, 120, 65, 68, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("é­",encoding:"UTF-8")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 195, 169, 194, 173, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:UTF-8>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("é­",encoding:"US-ASCII")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 120, 67, 51, 92, 120, 65, 57, 92, 120, 67, 50, 92, 120, 65, 68, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("é­",encoding:"ASCII-8BIT")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 120, 67, 51, 92, 120, 65, 57, 92, 120, 67, 50, 92, 120, 65, 68, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("ÿ",encoding:"UTF-8")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 195, 191, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:UTF-8>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("ÿ",encoding:"US-ASCII")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 120, 67, 51, 92, 120, 66, 70, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("ÿ",encoding:"ASCII-8BIT")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 120, 67, 51, 92, 120, 66, 70, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("éÿ",encoding:"UTF-8")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 195, 169, 195, 191, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:UTF-8>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("éÿ",encoding:"US-ASCII")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 120, 67, 51, 92, 120, 65, 57, 92, 120, 67, 51, 92, 120, 66, 70, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("éÿ",encoding:"ASCII-8BIT")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 120, 67, 51, 92, 120, 65, 57, 92, 120, 67, 51, 92, 120, 66, 70, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("Ā",encoding:"UTF-8")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 196, 128, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:UTF-8>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("Ā",encoding:"US-ASCII")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 120, 67, 52, 92, 120, 56, 48, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("Ā",encoding:"ASCII-8BIT")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 120, 67, 52, 92, 120, 56, 48, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("éĀ",encoding:"UTF-8")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 195, 169, 196, 128, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:UTF-8>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("éĀ",encoding:"US-ASCII")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 120, 67, 51, 92, 120, 65, 57, 92, 120, 67, 52, 92, 120, 56, 48, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("éĀ",encoding:"ASCII-8BIT")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 120, 67, 51, 92, 120, 65, 57, 92, 120, 67, 52, 92, 120, 56, 48, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("​",encoding:"UTF-8")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 226, 128, 139, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:UTF-8>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("​",encoding:"US-ASCII")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 120, 69, 50, 92, 120, 56, 48, 92, 120, 56, 66, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("​",encoding:"ASCII-8BIT")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 120, 69, 50, 92, 120, 56, 48, 92, 120, 56, 66, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("é​",encoding:"UTF-8")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 195, 169, 226, 128, 139, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:UTF-8>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("é​",encoding:"US-ASCII")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 120, 67, 51, 92, 120, 65, 57, 92, 120, 69, 50, 92, 120, 56, 48, 92, 120, 56, 66, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("é​",encoding:"ASCII-8BIT")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 120, 67, 51, 92, 120, 65, 57, 92, 120, 69, 50, 92, 120, 56, 48, 92, 120, 56, 66, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new(" ",encoding:"UTF-8")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 117, 50, 48, 50, 56, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new(" ",encoding:"US-ASCII")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 120, 69, 50, 92, 120, 56, 48, 92, 120, 65, 56, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new(" ",encoding:"ASCII-8BIT")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 120, 69, 50, 92, 120, 56, 48, 92, 120, 65, 56, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("é ",encoding:"UTF-8")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 117, 48, 48, 69, 57, 92, 117, 50, 48, 50, 56, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("é ",encoding:"US-ASCII")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 120, 67, 51, 92, 120, 65, 57, 92, 120, 69, 50, 92, 120, 56, 48, 92, 120, 65, 56, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("é ",encoding:"ASCII-8BIT")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 120, 67, 51, 92, 120, 65, 57, 92, 120, 69, 50, 92, 120, 56, 48, 92, 120, 65, 56, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new(" ",encoding:"UTF-8")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 117, 50, 48, 50, 57, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new(" ",encoding:"US-ASCII")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 120, 69, 50, 92, 120, 56, 48, 92, 120, 65, 57, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new(" ",encoding:"ASCII-8BIT")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 120, 69, 50, 92, 120, 56, 48, 92, 120, 65, 57, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("é ",encoding:"UTF-8")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 117, 48, 48, 69, 57, 92, 117, 50, 48, 50, 57, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("é ",encoding:"US-ASCII")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 120, 67, 51, 92, 120, 65, 57, 92, 120, 69, 50, 92, 120, 56, 48, 92, 120, 65, 57, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("é ",encoding:"ASCII-8BIT")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 120, 67, 51, 92, 120, 65, 57, 92, 120, 69, 50, 92, 120, 56, 48, 92, 120, 65, 57, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("",encoding:"UTF-8")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 238, 128, 128, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:UTF-8>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("",encoding:"US-ASCII")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 120, 69, 69, 92, 120, 56, 48, 92, 120, 56, 48, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("",encoding:"ASCII-8BIT")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 120, 69, 69, 92, 120, 56, 48, 92, 120, 56, 48, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("é",encoding:"UTF-8")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 195, 169, 238, 128, 128, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:UTF-8>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("é",encoding:"US-ASCII")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 120, 67, 51, 92, 120, 65, 57, 92, 120, 69, 69, 92, 120, 56, 48, 92, 120, 56, 48, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("é",encoding:"ASCII-8BIT")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 120, 67, 51, 92, 120, 65, 57, 92, 120, 69, 69, 92, 120, 56, 48, 92, 120, 56, 48, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("﷐",encoding:"UTF-8")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 117, 70, 68, 68, 48, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("﷐",encoding:"US-ASCII")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 120, 69, 70, 92, 120, 66, 55, 92, 120, 57, 48, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("﷐",encoding:"ASCII-8BIT")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 120, 69, 70, 92, 120, 66, 55, 92, 120, 57, 48, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("é﷐",encoding:"UTF-8")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 117, 48, 48, 69, 57, 92, 117, 70, 68, 68, 48, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("é﷐",encoding:"US-ASCII")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 120, 67, 51, 92, 120, 65, 57, 92, 120, 69, 70, 92, 120, 66, 55, 92, 120, 57, 48, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("é﷐",encoding:"ASCII-8BIT")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 120, 67, 51, 92, 120, 65, 57, 92, 120, 69, 70, 92, 120, 66, 55, 92, 120, 57, 48, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("𐀀",encoding:"UTF-8")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 240, 144, 128, 128, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:UTF-8>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("𐀀",encoding:"US-ASCII")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 120, 70, 48, 92, 120, 57, 48, 92, 120, 56, 48, 92, 120, 56, 48, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("𐀀",encoding:"ASCII-8BIT")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 120, 70, 48, 92, 120, 57, 48, 92, 120, 56, 48, 92, 120, 56, 48, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("é𐀀",encoding:"UTF-8")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 195, 169, 240, 144, 128, 128, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:UTF-8>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("é𐀀",encoding:"US-ASCII")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 120, 67, 51, 92, 120, 65, 57, 92, 120, 70, 48, 92, 120, 57, 48, 92, 120, 56, 48, 92, 120, 56, 48, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("é𐀀",encoding:"ASCII-8BIT")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 120, 67, 51, 92, 120, 65, 57, 92, 120, 70, 48, 92, 120, 57, 48, 92, 120, 56, 48, 92, 120, 56, 48, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("😀",encoding:"UTF-8")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 240, 159, 152, 128, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:UTF-8>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("😀",encoding:"US-ASCII")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 120, 70, 48, 92, 120, 57, 70, 92, 120, 57, 56, 92, 120, 56, 48, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("😀",encoding:"ASCII-8BIT")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 120, 70, 48, 92, 120, 57, 70, 92, 120, 57, 56, 92, 120, 56, 48, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("é😀",encoding:"UTF-8")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 195, 169, 240, 159, 152, 128, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:UTF-8>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("é😀",encoding:"US-ASCII")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 120, 67, 51, 92, 120, 65, 57, 92, 120, 70, 48, 92, 120, 57, 70, 92, 120, 57, 56, 92, 120, 56, 48, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("é😀",encoding:"ASCII-8BIT")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 120, 67, 51, 92, 120, 65, 57, 92, 120, 70, 48, 92, 120, 57, 70, 92, 120, 57, 56, 92, 120, 56, 48, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("􏿿",encoding:"UTF-8")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 117, 123, 49, 48, 70, 70, 70, 70, 125, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("􏿿",encoding:"US-ASCII")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 120, 70, 52, 92, 120, 56, 70, 92, 120, 66, 70, 92, 120, 66, 70, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("􏿿",encoding:"ASCII-8BIT")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 120, 70, 52, 92, 120, 56, 70, 92, 120, 66, 70, 92, 120, 66, 70, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("é􏿿",encoding:"UTF-8")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 117, 48, 48, 69, 57, 92, 117, 123, 49, 48, 70, 70, 70, 70, 125, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("é􏿿",encoding:"US-ASCII")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 120, 67, 51, 92, 120, 65, 57, 92, 120, 70, 52, 92, 120, 56, 70, 92, 120, 66, 70, 92, 120, 66, 70, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+  [
+    'class A;def x;1;end;end;class B<A;end;A.define_singleton_method(:to_s){String.new("é􏿿",encoding:"ASCII-8BIT")};s=B.new.method(:x).inspect;p s.bytes,s.encoding,s.valid_encoding?',
+    '[35, 60, 77, 101, 116, 104, 111, 100, 58, 32, 66, 40, 92, 120, 67, 51, 92, 120, 65, 57, 92, 120, 70, 52, 92, 120, 56, 70, 92, 120, 66, 70, 92, 120, 66, 70, 41, 35, 120, 40, 41, 32, 109, 97, 105, 110, 46, 114, 98, 58, 49, 62]\n#<Encoding:BINARY (ASCII-8BIT)>\ntrue\n',
+  ],
+] as const;
+
+test.each(nativeMethodOwnerPrintabilityCases)(
+  'Inherited Method owner labels use native encoding printability across charsets: %s',
+  (source, stdout) => {
+    expect(run(source)).toMatchObject({ kind: 'executed', stdout, uncaughtException: undefined });
+  }
+);

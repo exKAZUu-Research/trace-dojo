@@ -1,15 +1,7 @@
-// code-gauge-allow-file fileNcss 581 -- Reflection and encoded constant lookup share representation and state; splitting registration by size would scatter that concern.
+// code-gauge-allow-file fileNcss 582 -- Reflection and encoded constant lookup share representation and state; splitting registration by size would scatter that concern.
 import type { Params } from './ast';
 import { prependHierarchy } from './classHierarchy';
-import {
-  addressOf,
-  className,
-  inspect,
-  inspectValue,
-  isPrintable,
-  toSValue,
-  tryImplicitConversion,
-} from './conversions';
+import { addressOf, className, inspect, inspectValue, toSValue, tryImplicitConversion } from './conversions';
 import { def, findCoreMethod, isCoreMethod, sdef, sundef } from './define';
 import { joinEncodedStrings } from './encodedStringJoin';
 import { argumentError, frozenError, nameError, rubyError, typeError, undefinedMethodError } from './errors';
@@ -53,6 +45,7 @@ import {
   type Visibility,
 } from './objects';
 import { rt, UnsupportedFeatureError } from './runtime';
+import { isEncodingPrintable } from './unicodeText';
 import {
   arr,
   classOf,
@@ -400,7 +393,7 @@ function methodInspectionLabel(value: RString, mode: 'inspect' | 'quoted' = 'ins
   const codes = byteEncoding ? [...stringBytes(value)] : Array.from(value.s, (char) => char.codePointAt(0)!);
   if (
     !(byteEncoding && codes.some((code) => code >= 128)) &&
-    !(mode === 'quoted' && codes.some((code) => !isPrintable(code)))
+    !(mode === 'quoted' && codes.some((code) => !isEncodingPrintable(code)))
   )
     return value;
   const controls: Record<number, string> = {

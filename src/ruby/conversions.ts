@@ -595,7 +595,7 @@ export function strInspect(text: string, controlEscape: 'unicode' | 'hex' = 'uni
   return `${result}"`;
 }
 
-export function isPrintable(code: number): boolean {
+function isPrintable(code: number): boolean {
   if (code < 0x20 || code === 0x7f) return false;
   if (code >= 0x80 && code < 0xa0) return false;
   if (code >= 0xd8_00 && code <= 0xdf_ff) return false;
