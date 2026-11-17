@@ -438,6 +438,51 @@ main=print(foldr' (\_ _->1::Int) (error "seed") (error "structure"::Maybe Int))`
   });
 });
 
+test.each([
+  'shift(B a)n=B(shift a n)\n rotate(B a)n=B(rotate a n)',
+  'shiftL(B a)n=B(shiftL a n)\n shiftR(B a)n=B(shiftR a n)\n rotateL(B a)n=B(rotateL a n)\n rotateR(B a)n=B(rotateR a n)',
+])('Bits and FiniteBits inherit supported default methods: %s', (methods) => {
+  const source = bitsWrapperSource(
+    methods,
+    `main=do
+  print(setBit(B 0)2,clearBit(B 7)1,complementBit(B 0)1,zeroBits::B)
+  print(shiftL(B 3)2,shiftR(B 12)2,unsafeShiftL(B 1)3,unsafeShiftR(B 8)2,rotateR(B 8)2)
+  print(bitSize(undefined::B),countLeadingZeros(B 8),countTrailingZeros(B 8),countLeadingZeros(B 0),countTrailingZeros(B 0))
+  print(shift(B 3)0,rotate(B 4)0,shift(B 8)(-2),rotate(B 8)(-2))`
+  );
+  expect(executeProgram('haskell', source)).toMatchObject({
+    kind: 'executed',
+    stdout: '(B 4,B 5,B 2,B 0)\n(B 12,B 3,B 8,B 2,B 2)\n(64,60,3,64,64)\n(B 3,B 4,B 2,B 2)\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('default zero-count shifts and rotations leave directional methods unevaluated', () => {
+  const methods =
+    'shiftL _ _=error "left"\n shiftR _ _=error "right"\n rotateL _ _=error "left"\n rotateR _ _=error "right"';
+  expect(executeProgram('haskell', bitsWrapperSource(methods, 'main=print(shift(B 3)0,rotate(B 4)0)'))).toMatchObject({
+    kind: 'executed',
+    stdout: '(B 3,B 4)\n',
+    uncaughtException: undefined,
+  });
+});
+
+const bitsWrapperSource = (methods: string, main: string): string => `import Data.Bits
+data B=B Int deriving(Eq,Show)
+instance Bits B where
+ B a .&. B b=B(a .&. b)
+ B a .|. B b=B(a .|. b)
+ xor(B a)(B b)=B(xor a b)
+ complement(B a)=B(complement a)
+ bit n=B(bit n)
+ testBit(B a)n=testBit a n
+ popCount(B a)=popCount a
+ bitSizeMaybe _=Just 64
+ isSigned _=True
+ ${methods}
+instance FiniteBits B where finiteBitSize _=64
+${main}`;
+
 test('Integer bit queries avoid index-sized masks and retain sign extension', () => {
   const source =
     'import Data.Bits\nmain=do\n  print(length[i|i<-[1..200::Int],testBit(1::Integer)(1000000+i)])\n  print(testBit(-1::Integer)100000000,testBit(1::Integer)(maxBound::Int),testBit(-2::Integer)(maxBound::Int),testBit(1::Integer)(-1))\n  print([testBit(-3::Integer)i|i<-[0..4]])';

@@ -580,13 +580,25 @@ class Eq a => Bits a where
   bitSizeMaybe :: a -> Maybe Int
   isSigned :: a -> Bool
   unsafeShiftL, unsafeShiftR :: a -> Int -> a
+  zeroBits = clearBit (bit 0) 0
+  setBit x i = x .|. bit i
+  clearBit x i = x .&. complement (bit i)
+  complementBit x i = x ${BT}xor${BT} bit i
+  bitSize x = fromMaybe (error "bitSize is undefined") (bitSizeMaybe x)
+  shiftL = shift
+  shiftR x n = shift x (negate n)
   rotateL = rotate
   rotateR x n = rotate x (negate n)
   unsafeShiftL = shiftL
   unsafeShiftR = shiftR
-  shift x n = if n >= 0 then shiftL x n else if negate n < 0 then x else shiftR x (negate n)
+  shift x n = if n < 0 then shiftR x (negate n) else if n > 0 then shiftL x n else x
+  rotate x n = if n < 0 then rotateR x (negate n) else if n > 0 then rotateL x n else x
+
+builtinShift :: Bits a => a -> Int -> a
+builtinShift x n = if n >= 0 then shiftL x n else if negate n < 0 then x else shiftR x (negate n)
 
 instance Bits Int where
+  shift x n = x ${BT}seq${BT} builtinShift x n
   rotate = primitive "intRotate"
   bitSize _ = 64
   bitSizeMaybe _ = Just 64
@@ -606,6 +618,7 @@ instance Bits Int where
   zeroBits = 0
 
 instance Bits Integer where
+  shift = builtinShift
   rotate = shift
   bitSize _ = errorWithoutStackTrace "Data.Bits.bitSize(Integer)"
   bitSizeMaybe _ = Nothing
@@ -625,6 +638,7 @@ instance Bits Integer where
   zeroBits = 0
 
 instance Bits Word where
+  shift x n = x ${BT}seq${BT} builtinShift x n
   rotate = primitive "wordRotate"
   bitSize _ = 64
   bitSizeMaybe _ = Just 64
@@ -644,6 +658,7 @@ instance Bits Word where
   zeroBits = 0
 
 instance Bits Bool where
+  shift x n = if n == 0 then x else False
   rotate x _ = x
   bitSize _ = 1
   bitSizeMaybe _ = Just 1
@@ -652,8 +667,8 @@ instance Bits Bool where
   (.|.) = (||)
   xor a b = a /= b
   complement = not
-  shiftL x n = if n == 0 then x else False
-  shiftR x n = if n == 0 then x else False
+  shiftL = shift
+  shiftR = shift
   testBit x i = i == 0 && x
   setBit x i = if i == 0 then True else x
   clearBit x i = if i == 0 then False else x
@@ -665,6 +680,12 @@ instance Bits Bool where
 class Bits a => FiniteBits a where
   finiteBitSize :: a -> Int
   countLeadingZeros, countTrailingZeros :: a -> Int
+  countLeadingZeros x = (w-1) - go (w-1)
+    where w = finiteBitSize x
+          go i = if i < 0 then i else if testBit x i then i else go (i-1)
+  countTrailingZeros x = go 0
+    where w = finiteBitSize x
+          go i = if i >= w then i else if testBit x i then i else go (i+1)
 
 instance FiniteBits Int where
   finiteBitSize _ = 64
