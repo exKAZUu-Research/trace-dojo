@@ -71,8 +71,10 @@ export class Frame {
   row = 0;
   /** The reference a function returning by reference returns. */
   returnRef?: Ref;
+  /** The value a `return` statement is returning, which the statements it leaves must not free. */
+  returning: Value = null;
 
-  // code-gauge-allow functionParameterCount 8 -- Transcribes PHP's algorithm for this function step by step, whose branches mirror PHP's.
+  // code-gauge-allow functionParameterCount 8 -- A frame takes the parts of a call that stay fixed while it runs.
   constructor(
     readonly fn: Callable | undefined,
     readonly callRow: number | undefined,

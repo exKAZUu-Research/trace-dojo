@@ -175,6 +175,14 @@ export function debugType(value: Value): string {
   return object.cls.isAnonymous ? anonymousDebugName(object) : object.cls.name;
 }
 
+/**
+ * The name of a value in messages about the value rather than its type ("true given", "on false"), which PHP's
+ * zend_zval_value_name writes as `debugType` does except for the booleans.
+ */
+export function valueName(value: Value): string {
+  return typeof value === 'boolean' ? String(value) : debugType(value);
+}
+
 function anonymousDebugName(object: PhpObject): string {
   const parent = object.cls.parent;
   if (parent) return `${parent.name}@anonymous`;
@@ -193,20 +201,11 @@ export function sign(value: number | bigint): number {
   return value < 0 ? -1 : value > 0 ? 1 : 0;
 }
 
-/** Compares two numbers of either kind exactly, as PHP compares an int with a float. */
-// code-gauge-allow functionCognitiveComplexity 26 -- Transcribes PHP's algorithm for this function step by step, whose branches mirror PHP's.
+/** Compares two numbers as PHP does: two ints exactly, an int with a float as two floats; NaN is never less. */
 export function compareNumbers(a: bigint | number, b: bigint | number): number {
   if (typeof a === 'bigint' && typeof b === 'bigint') return a < b ? -1 : a > b ? 1 : 0;
   const x = Number(a);
   const y = Number(b);
   if (Number.isNaN(x) || Number.isNaN(y)) return 1;
-  if (typeof a === 'bigint' && Number.isFinite(y) && Number.isInteger(y)) {
-    const big = BigInt(y);
-    return a < big ? -1 : a > big ? 1 : 0;
-  }
-  if (typeof b === 'bigint' && Number.isFinite(x) && Number.isInteger(x)) {
-    const big = BigInt(x);
-    return big < b ? -1 : big > b ? 1 : 0;
-  }
   return x < y ? -1 : x > y ? 1 : 0;
 }

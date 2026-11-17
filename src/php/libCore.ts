@@ -6,7 +6,7 @@ import { callStack, setCallableExplainer } from './calls';
 import * as classesModule from './classes';
 import { findClass, lookupMethod, visibleProps } from './classes';
 import * as conversionsModule from './conversions';
-import { debugType, getType, isNumericString, normalizeKeyString } from './conversions';
+import { debugType, getType, isNumericString, normalizeKeyString, valueName } from './conversions';
 import {
   E_ALL,
   E_COMPILE_ERROR,
@@ -623,7 +623,7 @@ for (const [name, id] of streams) {
 
 function writeStream(stream: Value, text: string, name: string): Value {
   if (!isStream(stream))
-    throwError('TypeError', `${name}(): Argument #1 ($stream) must be of type resource, ${debugType(stream)} given`);
+    throwError('TypeError', `${name}(): Argument #1 ($stream) must be of type resource, ${valueName(stream)} given`);
   if (stream.internal === 'STDOUT') rt().echo(text);
   else if (stream.internal === 'STDERR') rt().echoError(text);
   else throw new UnsupportedFeatureError('標準入力への書き込み');

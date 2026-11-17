@@ -96,7 +96,7 @@ export class ElementPlace implements Place {
 
   set(value: Value): void {
     if (this.key === undefined) {
-      const key = this.array.nextFree;
+      const key = this.array.appendKey;
       if (!this.array.append(value)) {
         throwError('Error', 'Cannot add element to the array as the next element is already occupied');
       }
@@ -110,7 +110,7 @@ export class ElementPlace implements Place {
     if (this.key === undefined) {
       const ref = new Ref(null);
       ref.isRef = true;
-      const key = this.array.nextFree;
+      const key = this.array.appendKey;
       if (!this.array.append(ref)) {
         throwError('Error', 'Cannot add element to the array as the next element is already occupied');
       }
@@ -175,12 +175,7 @@ export function writableContainer(place: Place): PhpArray | PhpObject | string {
     return array;
   }
   if (value instanceof PhpObject) return value;
-  if (typeof value === 'string') {
-    if (value === '') {
-      throwError('Error', '[] operator not supported for strings');
-    }
-    return value;
-  }
+  if (typeof value === 'string') return value;
   throwError('Error', 'Cannot use a scalar value as an array');
 }
 

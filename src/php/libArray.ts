@@ -1,10 +1,10 @@
-// code-gauge-allow-file fileNcss 748 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 808 -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 // oxlint-disable unicorn/prefer-code-point -- PHP strings hold bytes as code units 0–255, which charCodeAt and fromCharCode read and write as they are.
 import { lower } from './bytes';
 import { callCallback, callCallbackRefs, callMethod } from './callables';
 import * as conversionsModule from './conversions';
-import { compareBytes, compareNumbers, debugType, normalizeKeyString } from './conversions';
+import { compareBytes, compareNumbers, debugType, floatFitsInt, normalizeKeyString, valueName } from './conversions';
 import { deprecated, throwError, warn } from './errors';
 import { cast } from './interp';
 import { naturalCompare } from './libString';
@@ -12,7 +12,8 @@ import { defineAlias, defineConstant, defineFunction } from './native';
 import { arithmetic, compare, looseEquals, strictEquals, toFloat, toKey, toStr } from './operators';
 import { ElementPlace, share, VarPlace } from './places';
 import { rt } from './runtime';
-import { type Key, type NativeContext, PhpArray, PhpObject, Ref, type Value } from './values';
+import { INT_MIN, type Key, type NativeContext, PhpArray, PhpObject, Ref, type Value } from './values';
+import { zendSort } from './zendSort';
 
 defineConstant('SORT_REGULAR', 0n);
 defineConstant('SORT_NUMERIC', 1n);
@@ -53,7 +54,7 @@ function checkArrayRef(ctx: NativeContext, index: number, name: string, paramete
   if (!(value instanceof PhpArray)) {
     throwError(
       'TypeError',
-      `${name}(): Argument #${index + 1} ($${parameter}) must be of type array, ${debugType(value)} given`
+      `${name}(): Argument #${index + 1} ($${parameter}) must be of type array, ${valueName(value)} given`
     );
   }
 }
@@ -83,7 +84,7 @@ defineFunction('count(Countable|array $value, int $mode = COUNT_NORMAL): int', (
       return callMethod(value, 'count', []);
     }
   }
-  throwError('TypeError', `count(): Argument #1 ($value) must be of type Countable|array, ${debugType(value)} given`);
+  throwError('TypeError', `count(): Argument #1 ($value) must be of type Countable|array, ${valueName(value)} given`);
 });
 defineAlias('sizeof', 'count');
 
@@ -109,8 +110,7 @@ defineFunction('array_pop(array &$array): mixed', (ctx) => {
   if (last === undefined) return null;
   const value = array.get(last) as Value;
   array.delete(last);
-  array.nextFree = 0n;
-  for (const key of array.map.keys()) if (typeof key === 'bigint' && key >= array.nextFree) array.nextFree = key + 1n;
+  if (last === array.nextFree - 1n) array.nextFree = last;
   array.pointer = null;
   return value;
 });
@@ -146,7 +146,7 @@ defineFunction('array_key_exists($key, array $array): bool', ({ args }) => {
   if (!(array instanceof PhpArray))
     throwError(
       'TypeError',
-      `array_key_exists(): Argument #2 ($array) must be of type array, ${debugType(array)} given`
+      `array_key_exists(): Argument #2 ($array) must be of type array, ${valueName(array)} given`
     );
   return array.has(arrayKeyOf(key));
 });
@@ -212,7 +212,7 @@ defineFunction('array_merge(array ...$arrays): array', ({ args }) => {
   const result = new PhpArray();
   for (const [index, value] of args.entries()) {
     if (!(value instanceof PhpArray))
-      throwError('TypeError', `array_merge(): Argument #${index + 1} must be of type array, ${debugType(value)} given`);
+      throwError('TypeError', `array_merge(): Argument #${index + 1} must be of type array, ${valueName(value)} given`);
     for (const [key, item] of value.entries()) {
       if (typeof key === 'bigint') result.append(share(item));
       else result.set(key, share(item));
@@ -317,60 +317,166 @@ defineFunction('array_pad(array $array, int $length, mixed $value): array', ({ a
   const entries: [Key, Value | Ref][] = length > 0 ? [...array.map, ...padding] : [...padding, ...array.map];
   return rebuild(entries, true);
 });
-defineFunction('range($start, $end, int|float $step = 1): array', ({ args }) => range(args[0], args[1], args[2] ?? 1n));
+defineFunction('range(string|int|float $start, string|int|float $end, int|float $step = 1): array', ({ args }) =>
+  range(args[0] as RangeInput, args[1] as RangeInput, (args[2] ?? 1n) as bigint | number)
+);
 
-function isRangeChar(value: Value): boolean {
-  return typeof value === 'string' && value.length > 0 && numericOf(value) === undefined;
+type RangeInput = string | bigint | number;
+
+/** How `range` reads an input, ordered as PHP orders them: a one-digit string may be a number or a character. */
+const enum RangeKind {
+  Int,
+  Float,
+  Character,
+  Digit,
 }
 
-function rangeNumber(value: Value): bigint | number {
-  if (typeof value === 'bigint' || typeof value === 'number') return value;
-  if (typeof value === 'string') {
-    if (value === '') return 0n;
-    const numeric = numericOf(value);
-    if (numeric === undefined) return 0n;
-    return numeric;
-  }
-  if (value === null || typeof value === 'boolean') return value ? 1n : 0n;
-  throwError('TypeError', `range(): Argument #1 ($start) must be of type string|int|float, ${debugType(value)} given`);
+interface RangeValue {
+  kind: RangeKind;
+  int: bigint;
+  float: number;
 }
 
-// code-gauge-allow functionNcss 42 -- Transcribes PHP's algorithm for this function step by step, whose branches mirror PHP's.
-function range(startValue: Value, endValue: Value, stepValue: Value): PhpArray {
-  let step = typeof stepValue === 'number' ? stepValue : Number(stepValue);
-  const stepIsFloat = typeof stepValue === 'number' && !Number.isInteger(stepValue);
-  if (step === 0) throwError('ValueError', 'range(): Argument #3 ($step) cannot be 0');
-  if (isRangeChar(startValue) && isRangeChar(endValue) && !stepIsFloat) {
-    const from = (startValue as string).charCodeAt(0);
-    const to = (endValue as string).charCodeAt(0);
-    step = Math.abs(step);
-    const result = new PhpArray();
-    if (from <= to) for (let code = from; code <= to; code += step) result.append(String.fromCharCode(code));
-    else for (let code = from; code >= to; code -= step) result.append(String.fromCharCode(code));
-    return result;
+const RANGE_ARGUMENTS = ['', '$start', '$end', '$step'];
+
+/** Builds the array of `range`, following PHP's checks and its choice between ints, floats, and characters. */
+function range(startInput: RangeInput, endInput: RangeInput, stepInput: bigint | number): PhpArray {
+  const step = rangeStep(stepInput);
+  const start = rangeValue(startInput, 1);
+  const end = rangeValue(endInput, 2);
+  const hasCharacter = start.kind >= RangeKind.Character || end.kind >= RangeKind.Character;
+  if (hasCharacter && charactersAllowed(start, end, step.isFloat)) {
+    return characterRange(
+      (startInput as string).charCodeAt(0),
+      (endInput as string).charCodeAt(0),
+      Number(step.int),
+      step.isNegative
+    );
   }
-  const start = rangeNumber(startValue);
-  const end = rangeNumber(endValue);
+  if (start.kind === RangeKind.Float || end.kind === RangeKind.Float || step.isFloat)
+    return numberRange(start.float, end.float, step.float, step.isNegative, (value) => value);
+  return numberRange(start.int, end.int, step.int, step.isNegative, BigInt);
+}
+
+/** The size of a step of `range`, which PHP makes positive and reads as an int when a float holds an integer. */
+function rangeStep(input: bigint | number): { int: bigint; float: number; isFloat: boolean; isNegative: boolean } {
+  if (typeof input === 'number') {
+    const value = finiteRangeNumber(input, 3);
+    const float = Math.abs(value);
+    const int = floatFitsInt(float) ? BigInt(Math.trunc(float)) : 0n;
+    if (float === 0) rangeError(3, 'cannot be 0');
+    return { int, float, isFloat: Number(int) !== float, isNegative: value < 0 };
+  }
+  if (input === INT_MIN) rangeError(3, `must be greater than ${INT_MIN}`);
+  if (input === 0n) rangeError(3, 'cannot be 0');
+  const int = input < 0n ? -input : input;
+  return { int, float: Number(int), isFloat: false, isNegative: input < 0n };
+}
+
+/**
+ * Whether `range` builds characters when a bound is a string, turning the bounds into ints otherwise with PHP's
+ * warnings: both bounds must be single bytes and the step an int.
+ */
+function charactersAllowed(start: RangeValue, end: RangeValue, stepIsFloat: boolean): boolean {
+  if (start.kind < RangeKind.Character) {
+    if (end.kind !== RangeKind.Digit)
+      warn(
+        'range(): Argument #1 ($start) must be a single byte string if argument #2 ($end) is a single byte string, argument #2 ($end) converted to 0'
+      );
+    end.kind = RangeKind.Int;
+    return false;
+  }
+  if (end.kind < RangeKind.Character) {
+    if (start.kind !== RangeKind.Digit)
+      warn(
+        'range(): Argument #2 ($end) must be a single byte string if argument #1 ($start) is a single byte string, argument #1 ($start) converted to 0'
+      );
+    start.kind = RangeKind.Int;
+    return false;
+  }
+  if (!stepIsFloat) return true;
+  if (start.kind === RangeKind.Character || end.kind === RangeKind.Character)
+    warn(
+      'range(): Argument #3 ($step) must be of type int when generating an array of characters, inputs converted to 0'
+    );
+  start.kind = RangeKind.Int;
+  end.kind = RangeKind.Int;
+  return false;
+}
+
+function rangeValue(input: RangeInput, position: number): RangeValue {
+  if (typeof input === 'bigint') return { kind: RangeKind.Int, int: input, float: Number(input) };
+  if (typeof input === 'number') return { kind: RangeKind.Float, int: 0n, float: finiteRangeNumber(input, position) };
+  if (input === '') {
+    warn(`range(): Argument #${position} (${RANGE_ARGUMENTS[position]}) must not be empty, casted to 0`);
+    return { kind: RangeKind.Int, int: 0n, float: 0 };
+  }
+  const numeric = numericOf(input);
+  if (typeof numeric === 'number')
+    return { kind: RangeKind.Float, int: 0n, float: finiteRangeNumber(numeric, position) };
+  if (numeric !== undefined)
+    return { kind: input.length === 1 ? RangeKind.Digit : RangeKind.Int, int: numeric, float: Number(numeric) };
+  if (input.length !== 1)
+    warn(
+      `range(): Argument #${position} (${RANGE_ARGUMENTS[position]}) must be a single byte, subsequent bytes are ignored`
+    );
+  return { kind: RangeKind.Character, int: 0n, float: 0 };
+}
+
+function finiteRangeNumber(value: number, position: number): number {
+  if (Number.isFinite(value)) return value;
+  rangeError(position, `must be a finite number, ${Number.isNaN(value) ? 'NAN' : 'INF'} provided`);
+}
+
+function rangeError(position: number, message: string): never {
+  throwError('ValueError', `range(): Argument #${position} (${RANGE_ARGUMENTS[position]}) ${message}`);
+}
+
+function characterRange(low: number, high: number, step: number, stepIsNegative: boolean): PhpArray {
   const result = new PhpArray();
-  if (typeof start === 'bigint' && typeof end === 'bigint' && !stepIsFloat && typeof stepValue !== 'number') {
-    const big = BigInt(Math.abs(step));
-    const count = (start > end ? start - end : end - start) / big;
-    if (count >= 1_000_000n)
-      throwError('ValueError', 'The supplied range exceeds the maximum array size by too many elements');
-    rt().spend(Number(count) / 16);
-    if (start <= end) for (let value = start; value <= end; value += big) result.append(value);
-    else for (let value = start; value >= end; value -= big) result.append(value);
+  if (low > high) {
+    if (low - high < step) rangeBoundaryError();
+    for (; low >= high; low -= step) result.append(String.fromCharCode(low));
+  } else if (high > low) {
+    if (stepIsNegative) rangeError(3, 'must be greater than 0 for increasing ranges');
+    if (high - low < step) rangeBoundaryError();
+    for (; low <= high; low += step) result.append(String.fromCharCode(low));
+  } else result.append(String.fromCharCode(low));
+  return result;
+}
+
+/** The ints or floats from `start` to `end`, which PHP computes as `start ± i * step` to avoid accumulating errors. */
+function numberRange<T extends bigint | number>(
+  start: T,
+  end: T,
+  step: T,
+  stepIsNegative: boolean,
+  fromIndex: (index: number) => T
+): PhpArray {
+  const result = new PhpArray();
+  if (start === end) {
+    result.append(start);
     return result;
   }
-  const from = Number(start);
-  const to = Number(end);
-  const magnitude = Math.abs(step);
-  const count = Math.floor(Math.abs(to - from) / magnitude);
-  if (count >= 1_000_000)
-    throwError('ValueError', 'The supplied range exceeds the maximum array size by too many elements');
-  for (let index = 0; index <= count; index++)
-    result.append(from <= to ? from + index * magnitude : from - index * magnitude);
+  if (end > start && stepIsNegative) rangeError(3, 'must be greater than 0 for increasing ranges');
+  const span = (end > start ? (end as number) - (start as number) : (start as number) - (end as number)) as T;
+  if (span < step) rangeBoundaryError();
+  const size =
+    typeof span === 'bigint'
+      ? Number((span as bigint) / (step as bigint)) + 1
+      : Math.round(span / (step as number) + 1);
+  rt().spend(size / 16);
+  for (let index = 0; index < size; index++) {
+    const offset = (fromIndex(index) as number) * (step as number);
+    const value = (end > start ? (start as number) + offset : (start as number) - offset) as T;
+    if (typeof value === 'number' && (end > start ? value > (end as number) : value < (end as number))) break;
+    result.append(value);
+  }
   return result;
+}
+
+function rangeBoundaryError(): never {
+  rangeError(3, 'must be less than the range spanned by argument #1 ($start) and argument #2 ($end)');
 }
 
 function numericOf(text: string): bigint | number | undefined {
@@ -428,7 +534,7 @@ defineFunction(
 defineFunction('array_map(?callable $callback, array $array, array ...$arrays): array', ({ args }) => {
   const [callback, first, ...rest] = args;
   if (!(first instanceof PhpArray))
-    throwError('TypeError', `array_map(): Argument #2 ($array) must be of type array, ${debugType(first)} given`);
+    throwError('TypeError', `array_map(): Argument #2 ($array) must be of type array, ${valueName(first)} given`);
   if (rest.length === 0) {
     if (callback === null) return first;
     const result = new PhpArray();
@@ -442,7 +548,7 @@ defineFunction('array_map(?callable $callback, array $array, array ...$arrays): 
   }
   for (const [index, value] of rest.entries()) {
     if (!(value instanceof PhpArray)) {
-      throwError('TypeError', `array_map(): Argument #${index + 3} must be of type array, ${debugType(value)} given`);
+      throwError('TypeError', `array_map(): Argument #${index + 3} must be of type array, ${valueName(value)} given`);
     }
   }
   const lists = [first, ...rest].map((value) => (value as PhpArray).values());
@@ -660,7 +766,7 @@ function setOperation(name: string, args: Value[], keep: boolean, same: SetCompa
     if (!(value instanceof PhpArray)) {
       throwError(
         'TypeError',
-        `${name}(): Argument #${index + 1}${index === 0 ? ' ($array)' : ''} must be of type array, ${debugType(value)} given`
+        `${name}(): Argument #${index + 1}${index === 0 ? ' ($array)' : ''} must be of type array, ${valueName(value)} given`
       );
     }
   }
@@ -814,7 +920,6 @@ function sortComparator(flags: bigint): (a: Value, b: Value) => number {
 }
 
 /** Calls a user comparison as PHP's sorts do, accepting a bool result with a deprecation. */
-// code-gauge-allow functionCognitiveComplexity 21 -- Transcribes PHP's algorithm for this function step by step, whose branches mirror PHP's.
 function userComparator(name: string, callback: Value): (a: Value, b: Value) => number {
   let warned = false;
   return (a, b) => {
@@ -826,13 +931,16 @@ function userComparator(name: string, callback: Value): (a: Value, b: Value) => 
         );
         warned = true;
       }
-      if (result) return 1;
-      return conversionsModule.toBool(callCallback(callback, [b, a])) ? -1 : 0;
+      if (!result) return -comparisonSign(callCallback(callback, [b, a]));
     }
-    const value =
-      typeof result === 'bigint' ? Number(result) : typeof result === 'number' ? result : Number(cast('int', result));
-    return value < 0 ? -1 : value > 0 ? 1 : 0;
+    return comparisonSign(result);
   };
+}
+
+/** The sign of a comparison callback's result, which PHP reads as an int: 0.5 counts as equal. */
+function comparisonSign(result: Value): number {
+  const value = typeof result === 'number' ? Math.trunc(result) : Number(cast('int', result));
+  return value < 0 ? -1 : value > 0 ? 1 : 0;
 }
 
 function sortArray(
@@ -843,19 +951,28 @@ function sortArray(
 ): true {
   checkArrayRef(ctx, 0, name, 'array');
   const array = writableArray(ctx, 0);
-  const entries = [...array.map];
+  if (array.size <= 1 && !(renumber && array.size > 0)) return true;
+  const entries = [...array.map].map((entry, position) => ({ entry, position }));
   rt().held.push(array);
   try {
-    entries.sort((a, b) => {
+    // PHP's sorts are stable: equal entries keep their order.
+    zendSort(entries, (a, b) => {
       rt().spend();
-      return compareEntries(a, b);
+      return compareEntries(a.entry, b.entry) || a.position - b.position;
     });
   } finally {
     rt().held.pop();
   }
-  const rebuilt = rebuild(entries, renumber);
-  array.map = rebuilt.map;
-  array.nextFree = renumber ? rebuilt.nextFree : array.nextFree;
+  if (renumber) {
+    const sorted = new PhpArray();
+    for (const { entry } of entries) sorted.append(entry[1]);
+    array.map = sorted.map;
+    array.nextFree = sorted.nextFree;
+  } else
+    array.map = rebuild(
+      entries.map(({ entry }) => entry),
+      false
+    ).map;
   array.pointer = null;
   return true;
 }
@@ -878,7 +995,7 @@ for (const [name, byKey, reverse, renumber] of [
       (a, b) => {
         const x = byKey ? keyValue(a[0]) : valueOf(a[1]);
         const y = byKey ? keyValue(b[0]) : valueOf(b[1]);
-        return reverse ? comparator(y, x) : comparator(x, y);
+        return reverse ? -comparator(x, y) : comparator(x, y);
       },
       renumber
     );
@@ -925,13 +1042,13 @@ defineFunction('array_multisort(&~$array, &~...$rest): bool', (ctx) => {
   }
   const rows = columns.map((column) => [...(column.ref.v as PhpArray).map]);
   const order = Array.from({ length: size }, (_, index) => index);
-  order.sort((a, b) => {
+  zendSort(order, (a, b) => {
     for (const [index, column] of columns.entries()) {
       const comparator = sortComparator(column.flags);
       const result = comparator(valueOf(rows[index][a][1]), valueOf(rows[index][b][1])) * column.order;
       if (result !== 0) return result;
     }
-    return 0;
+    return a - b;
   });
   for (const [index, column] of columns.entries()) {
     column.ref.v = rebuild(
@@ -946,7 +1063,7 @@ defineFunction('array_multisort(&~$array, &~...$rest): bool', (ctx) => {
 
 function pointerArray(value: Value, name: string): PhpArray {
   if (value instanceof PhpArray) return value;
-  throwError('TypeError', `${name}(): Argument #1 ($array) must be of type array, ${debugType(value)} given`);
+  throwError('TypeError', `${name}(): Argument #1 ($array) must be of type array, ${valueName(value)} given`);
 }
 
 defineFunction('current(array|object $array): mixed', ({ args }) => {

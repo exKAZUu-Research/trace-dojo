@@ -133,10 +133,12 @@ export function varDump(value: Value): string {
   return dumpValue(value, 1, new Set());
 }
 
-// code-gauge-allow functionCognitiveComplexity 26 -- Transcribes PHP's algorithm for this function step by step, whose branches mirror PHP's.
-// code-gauge-allow functionNcss 42 -- Transcribes PHP's algorithm for this function step by step, whose branches mirror PHP's.
-function dumpValue(value: Value, level: number, active: Set<object>): string {
-  const pad = level > 1 ? ' '.repeat(level - 1) : '';
+// code-gauge-allow functionCognitiveComplexity 28 -- Transcribes PHP's algorithm for this function step by step, whose branches mirror PHP's.
+// code-gauge-allow functionNcss 43 -- Transcribes PHP's algorithm for this function step by step, whose branches mirror PHP's.
+function dumpValue(value: Value, level: number, active: Set<object>, slot?: Slot): string {
+  const indent = level > 1 ? ' '.repeat(level - 1) : '';
+  // PHP marks a value that a reference shares with another holder.
+  const pad = slot instanceof Ref && slot.rc > 1 ? `${indent}&` : indent;
   if (value === null) return `${pad}NULL\n`;
   switch (typeof value) {
     case 'boolean': {
@@ -153,21 +155,21 @@ function dumpValue(value: Value, level: number, active: Set<object>): string {
     }
   }
   if (value instanceof PhpArray) {
-    if (active.has(value)) return `${pad}*RECURSION*\n`;
+    if (active.has(value)) return `${indent}*RECURSION*\n`;
     active.add(value);
     try {
       let text = `${pad}array(${value.size}) {\n`;
-      for (const [key, item] of value.entries()) {
-        text += `${' '.repeat(level + 1)}[${typeof key === 'bigint' ? key : `"${key}"`}]=>\n${dumpValue(item, level + 2, active)}`;
+      for (const [key, item] of value.map) {
+        text += `${' '.repeat(level + 1)}[${typeof key === 'bigint' ? key : `"${key}"`}]=>\n${dumpValue(slotValue(item), level + 2, active, item)}`;
       }
-      return `${text}${pad}}\n`;
+      return `${text}${indent}}\n`;
     } finally {
       active.delete(value);
     }
   }
   const object = value as PhpObject;
   if (object.cls.name === '(stream)') return `${pad}resource(${object.id}) of type (stream)\n`;
-  if (active.has(object)) return `${pad}*RECURSION*\n`;
+  if (active.has(object)) return `${indent}*RECURSION*\n`;
   active.add(object);
   try {
     const entries = debugEntries(object);
@@ -178,9 +180,9 @@ function dumpValue(value: Value, level: number, active: Set<object>): string {
       if (slot === UNINIT) {
         const decl = declForKey(object.cls, typeof key === 'string' ? keyFor(key, label) : String(key));
         text += `${' '.repeat(level + 1)}uninitialized(${decl?.type ? typeToString(decl.type) : 'mixed'})\n`;
-      } else text += dumpValue(slotValue(slot), level + 2, active);
+      } else text += dumpValue(slotValue(slot), level + 2, active, slot);
     }
-    return `${text}${pad}}\n`;
+    return `${text}${indent}}\n`;
   } finally {
     active.delete(object);
   }

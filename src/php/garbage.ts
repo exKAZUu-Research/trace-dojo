@@ -105,7 +105,7 @@ export function mark(runtime: Runtime): Set<PhpObject> {
 
 function pushFrame(frame: Frame, pending: unknown[]): void {
   for (const ref of frame.vars.values()) pending.push(ref);
-  pending.push(...frame.temporaries, ...frame.args);
+  pending.push(...frame.temporaries, ...frame.args, frame.returning);
   if (frame.thisObj) pending.push(frame.thisObj);
   if (frame.closure) pending.push(frame.closure);
 }

@@ -1,4 +1,4 @@
-import { debugType, floatFitsInt, formatFloat, numericPrefix } from './conversions';
+import { floatFitsInt, formatFloat, numericPrefix } from './conversions';
 import { deprecated } from './errors';
 import { formatFloatForMessage, toStr } from './operators';
 import { rt } from './runtime';
@@ -263,8 +263,4 @@ function resolveSelf(type: TypeDecl, scope: PhpClass | undefined): TypeDecl {
     return type;
   }
   return { ...type, types: type.types.map((part) => resolveSelf(part, scope)) };
-}
-
-export function givenType(value: Value): string {
-  return debugType(value);
 }

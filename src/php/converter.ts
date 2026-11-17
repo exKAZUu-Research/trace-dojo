@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 860 -- One converter of the statements and expressions, which share the converter state.
+// code-gauge-allow-file fileNcss 861 -- One converter of the statements and expressions, which share the converter state.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import type { Node } from '@willbooster/web-tree-sitter';
 
@@ -719,7 +719,9 @@ export class Converter extends DeclarationConverter {
         const body = node.childForFieldName('body');
         const alternative = this.expr(node.childForFieldName('alternative') as Node);
         const conditionNode = node.childForFieldName('condition') as Node;
-        if (conditionNode.type === 'conditional_expression' && !conditionNode.text.startsWith('(')) {
+        // PHP allows a chain of short ternaries (`a ?: b ?: c`) without parentheses, but no other nesting.
+        const shortChain = !body && !conditionNode.childForFieldName('body');
+        if (conditionNode.type === 'conditional_expression' && !shortChain) {
           this.error(
             node,
             '括弧のない三項演算子の入れ子は使えません（Unparenthesized `a ? b : c ? d : e` is not supported）。'

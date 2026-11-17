@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 482 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 483 -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import { ExecutionLimitError } from '../interpreter/limits';
 import { assignTo, bindRef, destructure, placeOf, unsetTarget } from './assignment';
@@ -17,7 +17,7 @@ import {
   visibleProps,
   writeProp,
 } from './classes';
-import { debugType, toBool } from './conversions';
+import { toBool, valueName } from './conversions';
 import { E_DEPRECATED, E_WARNING, emitError, throwError, warn } from './errors';
 import { collectBeforeAllocation, collectGarbage, setDestructor } from './garbage';
 import { ev, evReturn } from './interp';
@@ -198,6 +198,7 @@ function execStmt(statement: Stmt, seek?: string): Completion {
       }
       case 'return': {
         const value = statement.e ? evReturn(statement.e) : null;
+        frame.returning = value;
         return { t: 'return', v: value };
       }
       case 'block': {
@@ -441,10 +442,10 @@ function foreachStatement(statement: Extract<Stmt, { k: 'foreach' }>): Completio
     if (container instanceof PhpObject) return foreachObject(statement, container);
     if (!(container instanceof PhpArray)) {
       if (container === undefined || container === null) {
-        warn(`foreach() argument must be of type array|object, ${debugType(container ?? null)} given`);
+        warn(`foreach() argument must be of type array|object, ${valueName(container ?? null)} given`);
         return undefined;
       }
-      warn(`foreach() argument must be of type array|object, ${debugType(container)} given`);
+      warn(`foreach() argument must be of type array|object, ${valueName(container)} given`);
       return undefined;
     }
     const array = writableContainer(place) as PhpArray;
@@ -463,7 +464,7 @@ function foreachStatement(statement: Extract<Stmt, { k: 'foreach' }>): Completio
   const subject = ev(statement.subject);
   if (subject instanceof PhpObject) return foreachObject(statement, subject);
   if (!(subject instanceof PhpArray)) {
-    warn(`foreach() argument must be of type array|object, ${debugType(subject)} given`);
+    warn(`foreach() argument must be of type array|object, ${valueName(subject)} given`);
     return undefined;
   }
   subject.shared = true;
@@ -598,7 +599,7 @@ setObjectConversions(
     if (typeof result !== 'string')
       throwError(
         'Error',
-        `${object.cls.name}::__toString(): Return value must be of type string, ${debugType(result)} returned`
+        `${object.cls.name}::__toString(): Return value must be of type string, ${valueName(result)} returned`
       );
     return result;
   },

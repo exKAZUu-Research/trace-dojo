@@ -29,7 +29,8 @@ export const INT_MIN = -9_223_372_036_854_775_808n;
 /** An ordered map, which arrays share until one of their holders writes to it (copy on write). */
 export class PhpArray {
   map: Map<Key, Value | Ref>;
-  nextFree = 0n;
+  /** One more than the largest integer key so far, or INT_MIN before any, as PHP's nNextFreeElement. */
+  nextFree = INT_MIN;
   /** Whether more than one holder may see this array, so that a write must copy it first. */
   shared = false;
   /** Whether an element may hold an object, an array, or a reference, which garbage collection must visit. */
@@ -79,10 +80,15 @@ export class PhpArray {
     if (slot !== null && typeof slot === 'object') this.composite = true;
   }
 
+  /** The key that `$array[] = ...` uses: the next integer after the largest one, or 0 when there is none. */
+  get appendKey(): bigint {
+    return this.nextFree === INT_MIN ? 0n : this.nextFree;
+  }
+
   /** Appends a value, returning false when the next key would pass the largest integer. */
   append(value: Value | Ref): boolean {
     if (this.nextFree > INT_MAX) return false;
-    const key = this.nextFree;
+    const key = this.appendKey;
     this.map.set(key, value);
     this.nextFree = key + 1n;
     if (value !== null && typeof value === 'object') this.composite = true;

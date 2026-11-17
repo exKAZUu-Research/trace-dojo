@@ -2,11 +2,12 @@
 import { LIMITS } from '../interpreter/limits';
 import type { FunctionDecl } from './ast';
 import { lower } from './bytes';
+import { valueName } from './conversions';
 import { throwError } from './errors';
 import { collectGarbage } from './garbage';
 import { share } from './places';
 import { FatalError, Frame, rt, SCRIPT_PATH, setCallCapture } from './runtime';
-import { coerce, describeType, givenType, NO_MATCH, typeToString } from './types';
+import { coerce, describeType, NO_MATCH, typeToString } from './types';
 import {
   type Callable,
   type ClosureData,
@@ -232,7 +233,7 @@ function coerceArg(param: Param, index: number, value: Value, strict: boolean, n
     }
     throwError(
       'TypeError',
-      `${name}(): Argument #${index + 1} ($${param.name}) must be of type ${typeToString(param.type)}, ${givenType(value)} given`
+      `${name}(): Argument #${index + 1} ($${param.name}) must be of type ${typeToString(param.type)}, ${valueName(value)} given`
     );
   }
   return coerced;
@@ -455,7 +456,7 @@ function checkParam(
   const label = param.variadic ? '' : ` ($${param.name})`;
   throwError(
     'TypeError',
-    `${name}(): Argument #${index + 1}${label} must be of type ${typeText}, ${givenType(value)} given${where}`
+    `${name}(): Argument #${index + 1}${label} must be of type ${typeText}, ${valueName(value)} given${where}`
   );
 }
 
@@ -473,7 +474,7 @@ function checkReturn(value: Value, type: TypeDecl, name: string, frame: Frame): 
   if (coerced !== NO_MATCH) return share(coerced);
   const display =
     type.k === 'named' && type.name === 'static' && frame.staticClass ? 'static' : describeType(type, frame.scope);
-  throwError('TypeError', `${name}(): Return value must be of type ${display}, ${givenType(value)} returned`);
+  throwError('TypeError', `${name}(): Return value must be of type ${display}, ${valueName(value)} returned`);
 }
 
 /** Whether a user function's parameter `index` takes a reference. */

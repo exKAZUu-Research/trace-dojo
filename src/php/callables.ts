@@ -4,7 +4,7 @@ import type { Arg, Expr } from './ast';
 import { lower } from './bytes';
 import { type ArgValue, type CallTarget, closureFunction, invoke, paramIsByRef } from './calls';
 import { canCall, lookupMethod, requireClass } from './classes';
-import { debugType } from './conversions';
+import { valueName } from './conversions';
 import { notice, throwError, warn } from './errors';
 import { type Chain, ev, evChain, iterate, resolveClassRef, SHORT } from './interp';
 import { toStr } from './operators';
@@ -137,7 +137,7 @@ export function methodCallExpression(e: Extract<Expr, { k: 'mcall' }>): Chain {
   }
   runtime.row = e.row;
   if (!(object instanceof PhpObject)) {
-    throwError('Error', `Call to a member function ${methodName}() on ${debugType(object)}`);
+    throwError('Error', `Call to a member function ${methodName}() on ${valueName(object)}`);
   }
   runtime.frame.temporaries.push(object);
   const scope = runtime.frame.scope;

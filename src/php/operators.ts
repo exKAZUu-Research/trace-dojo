@@ -11,6 +11,7 @@ import {
   numericPrefix,
   numericValue,
   toBool,
+  valueName,
 } from './conversions';
 import { deprecated, throwError, warn } from './errors';
 import { INT_MIN, type Key, PhpArray, PhpObject, type Value } from './values';
@@ -289,7 +290,7 @@ export function bitwiseNot(value: Value): Value {
     for (let index = 0; index < value.length; index++) result += String.fromCharCode(~value.charCodeAt(index) & 0xff);
     return result;
   }
-  throwError('TypeError', `Cannot perform bitwise not on ${debugType(value)}`);
+  throwError('TypeError', `Cannot perform bitwise not on ${valueName(value)}`);
 }
 
 export function negate(value: Value): Value {

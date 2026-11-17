@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 526 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 571 -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import { dec, enc } from './bytes';
 import { callCallback } from './callables';
@@ -153,8 +153,10 @@ function translate(pattern: string): Compiled {
     source = source.slice(leadingFlags[0].length);
   }
   const names: (string | undefined)[] = [undefined];
-  const converted = convertSyntax(source, { extended, ungreedy, dollarEndOnly, multiline: flags.includes('m'), names });
-  const regex = new RegExp(anchored ? `^(?:${converted})` : converted, flags.includes('y') ? flags : flags);
+  const options = { extended, ungreedy, dollarEndOnly, multiline: flags.includes('m'), names, unicode: utf8 };
+  const converted = convertSyntax(source, options);
+  if (options.unicode && !flags.includes('u')) flags += 'u';
+  const regex = new RegExp(anchored ? `^(?:${converted})` : converted, flags);
   return { regex, utf8, names, groupCount: names.length - 1 };
 }
 
@@ -164,6 +166,8 @@ interface SyntaxOptions {
   dollarEndOnly: boolean;
   multiline: boolean;
   names: (string | undefined)[];
+  /** Whether the pattern needs JavaScript's `u` flag, which `\p` requires even without PHP's `u` modifier. */
+  unicode: boolean;
 }
 
 const POSIX_CLASSES: Record<string, string> = {
@@ -196,6 +200,12 @@ function convertSyntax(source: string, options: SyntaxOptions): string {
     if (char === '\\') {
       const next = source[index + 1] ?? '';
       index += 2;
+      const braced = bracedEscape(next, source, index, options);
+      if (braced) {
+        result += braced.text;
+        index = braced.index;
+        continue;
+      }
       if (inClass) {
         result += next === 'h' ? String.raw` \t` : `\\${next}`;
         continue;
@@ -358,6 +368,67 @@ function convertSyntax(source: string, options: SyntaxOptions): string {
     }
   }
   return result;
+}
+
+/**
+ * The general categories that JavaScript's `\p` accepts by the same names as PCRE. Other names are scripts, which PCRE
+ * matches by their script extensions (`\p{Han}` matches `、`).
+ */
+const GENERAL_CATEGORIES = new Set(
+  'C Cc Cf Cn Co Cs L Ll Lm Lo Lt Lu M Mc Me Mn N Nd Nl No P Pc Pd Pe Pf Pi Po Ps S Sc Sk Sm So Z Zl Zp Zs'.split(' ')
+);
+
+/**
+ * Converts the escapes whose PCRE spelling JavaScript reads differently: Unicode properties (`\p{Han}`, `\pL`),
+ * code points (`\x{3042}`), and named references (`\k{name}`, `\k'name'`). Returns undefined for other escapes.
+ */
+function bracedEscape(
+  letter: string,
+  source: string,
+  index: number,
+  options: SyntaxOptions
+): { text: string; index: number } | undefined {
+  const rest = source.slice(index);
+  if (letter === 'p' || letter === 'P') {
+    const property = /^(?:\{(\^?)([\w&]+)\}|(\w))/.exec(rest);
+    if (!property) return undefined;
+    const name = property[2] ?? property[3];
+    const negated = (letter === 'P') !== (property[1] === '^');
+    options.unicode = true;
+    return { text: unicodeProperty(name, negated), index: index + property[0].length };
+  }
+  if (letter === 'x') {
+    const code = /^\{([\dA-Fa-f]+)\}/.exec(rest);
+    if (!code) return undefined;
+    const value = Number.parseInt(code[1], 16);
+    const text = options.unicode ? `\\u{${code[1]}}` : `\\x${value.toString(16).padStart(2, '0')}`;
+    return { text, index: index + code[0].length };
+  }
+  if (letter === 'k') {
+    const name = /^(?:\{(\w+)\}|'(\w+)')/.exec(rest);
+    if (!name) return undefined;
+    return { text: `\\k<${name[1] ?? name[2]}>`, index: index + name[0].length };
+  }
+  return undefined;
+}
+
+function unicodeProperty(name: string, negated: boolean): string {
+  const letter = negated ? 'P' : 'p';
+  switch (name) {
+    case 'Any': {
+      return negated ? String.raw`[^\s\S]` : String.raw`[\s\S]`;
+    }
+    case 'L&': {
+      return `\\${letter}{LC}`;
+    }
+    case 'Xan': {
+      return negated ? String.raw`[^\p{L}\p{N}]` : String.raw`[\p{L}\p{N}]`;
+    }
+    case 'Xwd': {
+      return negated ? String.raw`[^\p{L}\p{N}_]` : String.raw`[\p{L}\p{N}_]`;
+    }
+  }
+  return GENERAL_CATEGORIES.has(name) ? `\\${letter}{${name}}` : `\\${letter}{Script_Extensions=${name}}`;
 }
 
 /** Handles the lazy (`?`) and possessive (`+`) suffixes after a quantifier, returning the index after them. */

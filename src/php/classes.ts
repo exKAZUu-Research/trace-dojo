@@ -3,7 +3,7 @@
 import type { ClassDecl, Expr, FunctionDecl, MethodDeclAst, PropertyDeclAst } from './ast';
 import { lower } from './bytes';
 import { type ArgValue, invoke } from './calls';
-import { debugType, toBool } from './conversions';
+import { debugType, toBool, valueName } from './conversions';
 import { deprecated, throwError, warn } from './errors';
 import { share } from './places';
 import { FatalError, rt } from './runtime';
@@ -761,7 +761,7 @@ export function coerceProperty(decl: PropDecl, value: Value, object?: PhpObject)
   if (coerced === NO_MATCH) {
     throwError(
       'TypeError',
-      `Cannot assign ${debugType(value)} to property ${(object?.cls ?? decl.cls).name}::$${decl.name} of type ${describeType(type, decl.cls)}`
+      `Cannot assign ${valueName(value)} to property ${(object?.cls ?? decl.cls).name}::$${decl.name} of type ${describeType(type, decl.cls)}`
     );
   }
   return coerced;

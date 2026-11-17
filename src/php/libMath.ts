@@ -1,7 +1,7 @@
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import { randomInt } from 'node:crypto';
 
-import { debugType, formatFloat } from './conversions';
+import { formatFloat, valueName } from './conversions';
 import { deprecated, throwError } from './errors';
 import { defineAlias, defineConstant, defineFunction } from './native';
 import { arithmetic, compare } from './operators';
@@ -85,7 +85,7 @@ function extreme(name: string, args: Value[], direction: number): Value {
   if (args.length === 1) {
     const [array] = args;
     if (!(array instanceof PhpArray)) {
-      throwError('TypeError', `${name}(): Argument #1 ($value) must be of type array, ${debugType(array)} given`);
+      throwError('TypeError', `${name}(): Argument #1 ($value) must be of type array, ${valueName(array)} given`);
     }
     if (array.size === 0) throwError('ValueError', `${name}(): Argument #1 ($value) must contain at least one element`);
     values = array.values();

@@ -5,7 +5,7 @@ import { callMethod } from './callables';
 import { findClass, issetProp, propRef, readProp, staticPropRef, unsetProp, writeProp } from './classes';
 import * as classesModule from './classes';
 import * as conversionsModule from './conversions';
-import { debugType, toBool } from './conversions';
+import { debugType, toBool, valueName } from './conversions';
 import { deprecated, notice, throwError, warn } from './errors';
 import { ev, evQuiet, isArrayAccess, memberName, readIndex, resolveClassRef, stringOffset } from './interp';
 import { arithmetic, bitwise, concat, toInt, toKey, toStr } from './operators';
@@ -63,7 +63,7 @@ export function placeOf(e: Expr): Place {
       runtime.row = e.row;
       if (!(object instanceof PhpObject)) {
         if (object === null) throwError('Error', `Attempt to assign property "${name}" on null`);
-        throwError('Error', `Attempt to assign property "${name}" on ${debugType(object)}`);
+        throwError('Error', `Attempt to assign property "${name}" on ${valueName(object)}`);
       }
       return propPlace(object, name);
     }

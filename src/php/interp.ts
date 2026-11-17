@@ -41,7 +41,7 @@ import {
 } from './classes';
 import * as classesModule from './classes';
 import * as conversionsModule from './conversions';
-import { debugType, toBool } from './conversions';
+import { debugType, toBool, valueName } from './conversions';
 import { deprecated, notice, throwError, warn } from './errors';
 import {
   bitwiseNot,
@@ -125,7 +125,7 @@ export function evChain(e: Expr): Chain {
       const name = memberName(e.name);
       runtime.row = e.row;
       if (!(object instanceof PhpObject)) {
-        warn(`Attempt to read property "${name}" on ${debugType(object)}`);
+        warn(`Attempt to read property "${name}" on ${valueName(object)}`);
         return null;
       }
       return readProp(object, name, runtime.frame.scope);
@@ -299,7 +299,7 @@ export function evChain(e: Expr): Chain {
         deprecated(`Implicit conversion from float ${value} to int loses precision`);
         throw new ExitSignal(Math.trunc(value));
       }
-      throwError('TypeError', `exit(): Argument #1 ($status) must be of type string|int, ${debugType(value)} given`);
+      throwError('TypeError', `exit(): Argument #1 ($status) must be of type string|int, ${valueName(value)} given`);
     }
     case 'pipe': {
       const value = ev(e.l);
@@ -412,7 +412,7 @@ export function readIndex(base: Value, index: Value, quiet: boolean): Value {
     }
     throwError('Error', `Cannot use object of type ${base.cls.name} as array`);
   }
-  if (!quiet) warn(`Trying to access array offset on ${debugType(base)}`);
+  if (!quiet) warn(`Trying to access array offset on ${valueName(base)}`);
   return null;
 }
 
@@ -421,6 +421,7 @@ export function isArrayAccess(object: PhpObject): boolean {
   return arrayAccess !== undefined && object.cls.isSubclassOf(arrayAccess);
 }
 
+/** The position an index selects in a string: -1 when it is out of range, undefined when `quiet` and the index is not an integer. */
 // code-gauge-allow functionCognitiveComplexity 28 -- One case per expression kind, as PHP evaluates each kind differently.
 // code-gauge-allow functionNcss 32 -- One case per expression kind, as PHP evaluates each kind differently.
 export function stringOffset(text: string, index: Value, quiet: boolean): number | undefined {
@@ -445,7 +446,7 @@ export function stringOffset(text: string, index: Value, quiet: boolean): number
     offset = index ? 1n : 0n;
   } else throwError('TypeError', `Cannot access offset of type ${debugType(index)} on string`);
   const position = offset < 0n ? BigInt(text.length) + offset : offset;
-  if (position < 0n || position >= BigInt(text.length)) return -1 - Number(offset < 0n ? offset : offset);
+  if (position < 0n || position >= BigInt(text.length)) return -1;
   return Number(position);
 }
 
@@ -626,7 +627,7 @@ export function resolveClassRef(ref: ClassRef): PhpClass {
       const value = ev(ref.e);
       if (value instanceof PhpObject) return value.cls;
       if (typeof value === 'string') return requireClass(value);
-      throwError('Error', 'Cannot use value of type ' + debugType(value) + ' as class name');
+      throwError('Error', 'Class name must be a valid object or a string');
     }
   }
 }
@@ -671,7 +672,7 @@ function cloneExpression(e: Extract<Expr, { k: 'clone' }>): Value {
   callStack.push({ name: 'clone', args: [value, withValue], row: e.row });
   try {
     if (!(value instanceof PhpObject)) {
-      throwError('TypeError', `clone(): Argument #1 ($object) must be of type object, ${debugType(value)} given`);
+      throwError('TypeError', `clone(): Argument #1 ($object) must be of type object, ${valueName(value)} given`);
     }
     return cloneObject(value, withValue);
   } finally {
@@ -715,7 +716,7 @@ export function cloneObject(original: PhpObject, withValue?: Value): PhpObject {
       if (!(withValue instanceof PhpArray)) {
         throwError(
           'TypeError',
-          `clone(): Argument #2 ($withProperties) must be of type array, ${debugType(withValue)} given`
+          `clone(): Argument #2 ($withProperties) must be of type array, ${valueName(withValue)} given`
         );
       }
       for (const [key, item] of withValue.entries()) {

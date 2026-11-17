@@ -1,7 +1,7 @@
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import { callCallback, callMethod } from './callables';
 import { createObject } from './classes';
-import { debugType } from './conversions';
+import { debugType, valueName } from './conversions';
 import { deprecated, throwError, warn } from './errors';
 import { iterate } from './interp';
 import { defineClass, type NativeMethod } from './native';
@@ -59,7 +59,7 @@ function arrayInput(value: Value | undefined, name: string): PhpArray {
   }
   throwError(
     'TypeError',
-    `${name}::__construct(): Argument #1 ($array) must be of type array, ${debugType(value)} given`
+    `${name}::__construct(): Argument #1 ($array) must be of type array, ${valueName(value)} given`
   );
 }
 
@@ -710,7 +710,7 @@ function storageKey(value: Value): PhpObject {
   if (!(value instanceof PhpObject))
     throwError(
       'TypeError',
-      `SplObjectStorage::offsetExists(): Argument #1 ($object) must be of type object, ${debugType(value)} given`
+      `SplObjectStorage::offsetExists(): Argument #1 ($object) must be of type object, ${valueName(value)} given`
     );
   return value;
 }
