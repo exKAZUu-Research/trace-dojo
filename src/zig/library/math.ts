@@ -125,14 +125,25 @@ function logarithm(name: string, base: bigint, compute: (x: number) => number): 
     if (base === 10n && type.kind === 'int' && type.signed) {
       return sema.error(call.span, `${name} は符号付き整数には使えません（${typeName(type)} 型です）。`);
     }
-    return computed(type, [value], call.span, ([x], frame) => {
-      const n = x as bigint;
-      if (n <= 0n) panic(PANIC.unreachable);
-      const binaryLength = n.toString(2).length;
-      nativeBudget(sema, frame)(binaryLength);
-      return BigInt((base === 2n ? binaryLength : n.toString(10).length) - 1);
-    });
+    return computed(type, [value], call.span, ([x], frame) =>
+      integerLogarithm(base, x as bigint, nativeBudget(sema, frame))
+    );
   });
+}
+
+function integerLogarithm(base: bigint, value: bigint, spend: (cost: number) => void): bigint {
+  if (base <= 1n || value <= 0n) panic(PANIC.unreachable);
+  const bits = value.toString(2).length;
+  spend(bits);
+  if (base === 2n) return BigInt(bits - 1);
+  if (base === 10n) return BigInt(value.toString().length - 1);
+  let result = 0n;
+  while (value >= base) {
+    spendIntegerOperation(value, base, false, spend);
+    value /= base;
+    result++;
+  }
+  return result;
 }
 
 /** The integer part of a float, or a bound past the type for an infinity, for `lossyCast`'s clamping. */
@@ -636,18 +647,9 @@ const MEMBERS: Record<string, () => Member> = {
     if (type.kind === 'int' || type.kind === 'comptime_int') {
       if (type.kind === 'int' && type.signed)
         sema.error(call.span, '整数の対数には、符号なし整数の型を渡してください。');
-      return computed(type, [base, x], call.span, ([b, v], frame) => {
-        if ((b as bigint) <= 1n || (v as bigint) <= 0n) panic(PANIC.unreachable);
-        let result = 0n;
-        let value = v as bigint;
-        while (value >= (b as bigint)) {
-          if (frame) frame.runtime.spend();
-          else sema.spendCompilation();
-          value /= b as bigint;
-          result++;
-        }
-        return result;
-      });
+      return computed(type, [base, x], call.span, ([b, v], frame) =>
+        integerLogarithm(b as bigint, v as bigint, nativeBudget(sema, frame))
+      );
     }
     return computed(type, [base, x], call.span, ([b, v]) => {
       const baseValue = toDouble(b as AnyFloat);

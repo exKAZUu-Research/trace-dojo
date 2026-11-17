@@ -6110,3 +6110,32 @@ test.each([
     uncaughtException: undefined,
   });
 });
+
+test('integer logarithms meter wide runtime divisions', () => {
+  const source = `const std=@import("std");pub fn main()void{var value: u4096=std.math.maxInt(u4096);_=&value;for(0..200)|_|{_=std.math.log(u4096,3,value);}}`;
+  expect(executeProgram('zig', source)).toMatchObject({ kind: 'limitExceeded', limit: 'operations' });
+});
+
+test('wide base-two logarithms use bounded digit work', () => {
+  const calls = Array.from(
+    { length: 6 },
+    () => 'std.debug.print("{} ",.{std.math.log(comptime_int,2,1<<100000)});'
+  ).join('');
+  expect(executeProgram('zig', `const std=@import("std");pub fn main()void{${calls}}`)).toMatchObject({
+    kind: 'executed',
+    stderr: '100000 '.repeat(6),
+    uncaughtException: undefined,
+  });
+});
+
+test.each(['<', '>', '<=', '>='])('enum literals reject ordering with %s', (operator) => {
+  expect(
+    executeProgram('zig', `const std=@import("std");pub fn main()void{std.debug.print("{}",.{.a ${operator} .b});}`)
+  ).toMatchObject({ kind: 'compileError' });
+});
+
+test('enum literals retain equality and inequality', () => {
+  expect(
+    executeProgram('zig', `const std=@import("std");pub fn main()void{std.debug.print("{} {}",.{.a==.a,.a!=.b});}`)
+  ).toMatchObject({ kind: 'executed', stderr: 'true true', uncaughtException: undefined });
+});

@@ -1133,6 +1133,7 @@ export abstract class ExpressionCompiler extends SemaBase {
         return (a, b) => (a === b ? 0 : 1);
       }
       case 'enum_literal': {
+        if (ordered) this.error(span, 'enum リテラルは、大小を比べられません。');
         return (a, b) => (a === b ? 0 : 1);
       }
       case 'pointer': {
