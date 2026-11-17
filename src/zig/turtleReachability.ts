@@ -44,7 +44,7 @@ export class TurtleReachability {
     for (const frame of frames) {
       const types = this.typesOf(frame.fn);
       for (const [index, value] of frame.slots.entries()) push(value, types.get(index));
-      for (const value of frame.temporaries) push(value);
+      for (const { value, type } of frame.temporaries) push(value, type);
     }
     const reached = new WeakMap<object, Set<Type | undefined>>();
     const turtles = new Set<unknown>();

@@ -153,7 +153,7 @@ function truncateOrInfinite(value: AnyFloat, type: IntType): bigint {
 
 /** `ang * rad_per_deg` and `ang * deg_per_rad`, with the decimal constants of Zig's `std.math`. */
 function angleConversion(name: string, constant: string): () => Member {
-  const factor128 = parseFloatLiteral(constant, 128);
+  const factor128 = parseFloatLiteral(constant, 128, () => {});
   return fnMember(name, (sema, call) => {
     const [arg] = expectArgs(sema, call, 1, name);
     const value = floatArg(sema, arg, 'angle');
@@ -528,7 +528,7 @@ function absoluteFloat(value: AnyFloat): AnyFloat {
   return signBit(value) ? negate(value) : value;
 }
 
-const EULER = parseFloatLiteral('2.71828182845904523536028747135266249775724709369995', 128);
+const EULER = parseFloatLiteral('2.71828182845904523536028747135266249775724709369995', 128, () => {});
 
 const MEMBERS: Record<string, () => Member> = {
   pi: () => ({

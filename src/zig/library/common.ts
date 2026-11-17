@@ -150,7 +150,12 @@ export function computed(
       (frame) => {
         frame.runtime.spend(1 + Math.floor(args.length));
         const values = evaluateHeld(frame, evaluators);
-        return withHeldValues(frame, values, () => (result ? result.value : compute(values, frame)));
+        return withHeldValues(
+          frame,
+          values,
+          () => (result ? result.value : compute(values, frame)),
+          args.map((arg) => arg.type)
+        );
       },
       span
     ),

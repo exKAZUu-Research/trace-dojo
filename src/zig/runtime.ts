@@ -41,7 +41,7 @@ export class Jump {
 export class Frame implements Slots, TracedFrame {
   slots: Value[];
   /** Values that are reachable while the frame computes them, such as a for loop's operands. */
-  readonly temporaries: Value[] = [];
+  readonly temporaries: { value: Value; type?: Type }[] = [];
   /** The deferred statements of the scopes entered, innermost last. */
   readonly defers: Deferred[] = [];
 
@@ -147,9 +147,9 @@ export class StackOverflow extends Error {
   }
 }
 
-export function withHeldValues<T>(frame: Frame, values: readonly Value[], run: () => T): T {
+export function withHeldValues<T>(frame: Frame, values: readonly Value[], run: () => T, types?: readonly Type[]): T {
   const mark = frame.temporaries.length;
-  for (const value of values) frame.temporaries.push(value);
+  for (const [index, value] of values.entries()) frame.temporaries.push({ value, type: types?.[index] });
   try {
     return run();
   } finally {

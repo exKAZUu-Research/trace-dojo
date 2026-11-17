@@ -8067,3 +8067,84 @@ test('reusing a proven overflow result keeps aggregate evaluations independent',
     uncaughtException: undefined,
   });
 });
+
+test.each(['allocUpperString', 'allocLowerString'])(
+  'allocating ASCII %s meters source reads and destination stores',
+  (method) => {
+    const source = `const std=@import("std");pub fn main(init:std.process.Init)!void{const a:[150000]u8=@splat(97);for(0..4)|_|{const b=try std.ascii.${method}(init.gpa,&a);init.gpa.free(b);}std.debug.print("ok",.{});}`;
+    expect(executeProgram('zig', source)).toMatchObject({ kind: 'limitExceeded', limit: 'operations' });
+  }
+);
+
+test.each(['parseInt', 'parseUnsigned'])('wide %s arithmetic shares the digit work budget', (method) => {
+  const text = '9'.repeat(10_000);
+  const source = `const std=@import("std");pub fn main()void{for(0..10)|_|{_=std.fmt.${method}(u65535,"${text}",10) catch 0;}}`;
+  expect(executeProgram('zig', source)).toMatchObject({ kind: 'limitExceeded', limit: 'operations' });
+});
+
+test.each([
+  'uintLessThan',
+  'uintLessThanBiased',
+  'uintAtMost',
+  'uintAtMostBiased',
+  'intRangeLessThan',
+  'intRangeLessThanBiased',
+  'intRangeAtMost',
+  'intRangeAtMostBiased',
+])('wide random %s arithmetic shares the generator budget', (method) => {
+  const signed = method.startsWith('int');
+  const type = signed ? 'i32760' : 'u32760';
+  const source = `const std=@import("std");pub fn main()void{var p=std.Random.DefaultPrng.init(1);var x:${type}=1<<32000;_=&x;for(0..46)|_|{_=p.random().${method}(${type},${signed ? '0,' : ''}x);}}`;
+  expect(executeProgram('zig', source)).toMatchObject({ kind: 'limitExceeded', limit: 'operations' });
+});
+
+test.each(['hexadecimal', 'decimal'])(
+  'float parsing bounds compensating %s significands before allocation',
+  (radix) => {
+    const text = radix === 'hexadecimal' ? `0x1${'1'.repeat(300_000)}p-1200000` : `${'1'.repeat(330_000)}e-329999`;
+    for (const expression of [`std.fmt.parseFloat(f128,"${text}") catch 0`, `@as(f128,${text})`]) {
+      const source = `const std=@import("std");pub fn main()void{const x=${expression};std.debug.print("{d}",.{x});}`;
+      expect(executeProgram('zig', source)).toMatchObject({ kind: 'limitExceeded', limit: 'storage' });
+    }
+  }
+);
+
+test('bounded compensated hexadecimal parsing retains exact f128 rounding', () => {
+  const text = `0x1${'1'.repeat(240_000)}p-960000`;
+  const source = `const std=@import("std");pub fn main()void{const x=std.fmt.parseFloat(f128,"${text}") catch 0;std.debug.print("{}",.{x==@as(f128,0x1.1111111111111111111111111111p0)});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: 'true',
+    uncaughtException: undefined,
+  });
+});
+
+test.each([
+  ['[100000]u8', '@splat(1)'],
+  ['struct{a:[100000]u8}', '.{.a=@splat(1)}'],
+])('turtle queries skip reference-free temporary %s roots', (type, value) => {
+  const source = `const std=@import("std");fn probe()u8{const t=Turtle.init();for(0..20)|_|{_=t.canMoveForward();}return 0;}fn f(_: ${type},n:u8)void{std.debug.print("{}",.{n});}pub fn main()void{f(${value},probe());}`;
+  expect(executeProgram('zig', source)).toMatchObject({ kind: 'executed', stderr: '0', uncaughtException: undefined });
+});
+
+test.each(['[1]Turtle', 'struct{t:Turtle}'])(
+  'typed temporary %s roots retain turtles during later arguments',
+  (type) => {
+    const value = type.startsWith('[') ? '.{Turtle.init(0,1)}' : '.{.t=Turtle.init(0,1)}';
+    const source = `const std=@import("std");fn probe()u8{const t=Turtle.init(0,0);std.debug.print("{}",.{t.canMoveForward()});return 0;}fn f(_: ${type},_:u8)void{}pub fn main()void{f(${value},probe());}`;
+    expect(executeProgram('zig', source)).toMatchObject({
+      kind: 'executed',
+      stderr: 'false',
+      uncaughtException: undefined,
+    });
+  }
+);
+
+test('temporary loop roots retain the operand type rather than the captured element type', () => {
+  const source = `const std=@import("std");fn make(a:std.mem.Allocator)!*Turtle{const p=try a.create(Turtle);p.*=Turtle.init(0,1);return p;}pub fn main(init:std.process.Init)!void{for([_]*Turtle{try make(init.gpa)})|_|{const t=Turtle.init(0,0);std.debug.print("{}",.{t.canMoveForward()});}}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: 'false',
+    uncaughtException: undefined,
+  });
+});

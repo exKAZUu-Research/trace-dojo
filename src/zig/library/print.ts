@@ -110,12 +110,17 @@ export function compilePrint(sema: SemaApi, formatArg: Expression, argsArg: Expr
       args,
       write: (suppliedDestination) => {
         const destination = suppliedDestination ?? bufferingWriter();
-        return withHeldValues(frame, [args], () => {
-          appendSegments(frame, destination, segments, fields, args, info, (arg, value) =>
-            (formatMethods.get(arg) as FormatMethod)(frame, value, destination)
-          );
-          return suppliedDestination ? [] : bufferedBytes(frame, destination);
-        });
+        return withHeldValues(
+          frame,
+          [args],
+          () => {
+            appendSegments(frame, destination, segments, fields, args, info, (arg, value) =>
+              (formatMethods.get(arg) as FormatMethod)(frame, value, destination)
+            );
+            return suppliedDestination ? [] : bufferedBytes(frame, destination);
+          },
+          [type]
+        );
       },
     };
   };

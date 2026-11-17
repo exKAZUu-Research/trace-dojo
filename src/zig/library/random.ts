@@ -1,6 +1,6 @@
 import { PANIC, panic } from '../arith';
 import type { Span } from '../ast';
-import { spendIntegerOperation } from '../integerWork';
+import { spendIntegerOperation, spendIntegerShift, spendIntegerWidth } from '../integerWork';
 import type { Frame } from '../runtime';
 import { copyForStorage, known, runtime, type SemaApi, type TExpr } from '../semaBase';
 import {
@@ -91,35 +91,49 @@ function randomInt(state: RandomSource, type: IntType): bigint {
 
 /** `Random.uintLessThan(T, less_than)`, Lemire's method as Zig adapts it. */
 function uintLessThan(state: RandomSource, type: IntType, lessThan: bigint): bigint {
-  if (lessThan <= 0n) panic(PANIC.unreachable);
+  if (!rangeLessThan(state, 0n, lessThan)) panic(PANIC.unreachable);
   const bits = BigInt(type.bits);
-  const mask = (1n << bits) - 1n;
+  spendIntegerWidth(type.bits, state.spend);
+  const mask = maxInt(type);
   let x = randomInt(state, type);
-  let m = x * lessThan;
+  let m = rangeProduct(state, x, lessThan);
+  spendIntegerOperation(m, mask, 'read', state.spend);
   let low = m & mask;
-  if (low < lessThan) {
+  if (rangeLessThan(state, low, lessThan)) {
+    spendIntegerOperation(lessThan, mask, 'read', state.spend);
     let t = -lessThan & mask;
-    if (t >= lessThan) {
+    if (!rangeLessThan(state, t, lessThan)) {
+      spendIntegerOperation(t, lessThan, 'add', state.spend);
       t -= lessThan;
-      if (t >= lessThan) t %= lessThan;
+      if (!rangeLessThan(state, t, lessThan)) {
+        spendIntegerOperation(t, lessThan, 'read', state.spend);
+        t %= lessThan;
+      }
     }
-    while (low < t) {
+    while (rangeLessThan(state, low, t)) {
       x = randomInt(state, type);
-      m = x * lessThan;
+      m = rangeProduct(state, x, lessThan);
+      spendIntegerOperation(m, mask, 'read', state.spend);
       low = m & mask;
     }
   }
+  spendIntegerShift(m, bits, false, state.spend);
   return m >> bits;
 }
 
 /** `uintLessThanBiased`: `limitRangeBiased`, the high half of the product, without rejecting any value. */
 function uintLessThanBiased(state: RandomSource, type: IntType, lessThan: bigint): bigint {
-  if (lessThan <= 0n) panic(PANIC.unreachable);
-  return (randomInt(state, type) * lessThan) >> BigInt(type.bits);
+  if (!rangeLessThan(state, 0n, lessThan)) panic(PANIC.unreachable);
+  const product = rangeProduct(state, randomInt(state, type), lessThan);
+  spendIntegerShift(product, BigInt(type.bits), false, state.spend);
+  return product >> BigInt(type.bits);
 }
 
 function uintAtMost(state: RandomSource, type: IntType, atMost: bigint, biased = false): bigint {
+  spendIntegerWidth(type.bits, state.spend);
+  spendIntegerOperation(atMost, 0n, 'read', state.spend);
   if (atMost === maxInt(type)) return randomInt(state, type);
+  spendIntegerOperation(atMost, 1n, 'add', state.spend);
   return (biased ? uintLessThanBiased : uintLessThan)(state, type, atMost + 1n);
 }
 
@@ -132,14 +146,18 @@ function intRange(
   inclusive: boolean,
   biased = false
 ): bigint {
-  if (inclusive ? atLeast > upper : atLeast >= upper) panic(PANIC.unreachable);
+  if (inclusive ? rangeLessThan(state, upper, atLeast) : !rangeLessThan(state, atLeast, upper))
+    panic(PANIC.unreachable);
   const unsigned = intType(false, type.bits);
+  spendIntegerWidth(type.bits * 3, state.spend);
   const lo = BigInt.asUintN(type.bits, atLeast);
   const hi = BigInt.asUintN(type.bits, upper);
+  spendIntegerOperation(hi, lo, 'add', state.spend);
   const span = BigInt.asUintN(type.bits, hi - lo);
   const offset = inclusive
     ? uintAtMost(state, unsigned, span, biased)
     : (biased ? uintLessThanBiased : uintLessThan)(state, unsigned, span);
+  spendIntegerOperation(lo, offset, 'add', state.spend);
   return wrapInt(lo + offset, type);
 }
 
@@ -166,6 +184,16 @@ function weightedIntIndex(state: RandomSource, type: IntType, proportions: bigin
     if (point < accumulator) return BigInt(index);
   }
   return panic(PANIC.unreachable);
+}
+
+function rangeProduct(state: RandomSource, left: bigint, right: bigint): bigint {
+  spendIntegerOperation(left, right, 'multiply', state.spend);
+  return left * right;
+}
+
+function rangeLessThan(state: RandomSource, left: bigint, right: bigint): boolean {
+  spendIntegerOperation(left, right, 'read', state.spend);
+  return left < right;
 }
 
 /** `weightedIndex` with float proportions: `@min(r.float(T) * sum, sum - floatEps(T))`, as Zig computes in `T`. */

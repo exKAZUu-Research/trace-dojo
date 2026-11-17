@@ -117,7 +117,7 @@ export function concreteFnMember(
 ): () => Member {
   const instance = nativeFunction(name, params, returnType, (args, frame) => {
     frame.runtime.spend(args.length);
-    return withHeldValues(frame, args, () => run(args, frame));
+    return withHeldValues(frame, args, () => run(args, frame), params);
   });
   const value = new FnValue(instance);
   return () => ({ type: fnType(params, returnType), value });
@@ -198,7 +198,12 @@ export function nativeCall(
     (frame) => {
       frame.runtime.spend();
       const values = evaluateHeld(frame, evaluators);
-      return withHeldValues(frame, values, () => compute(values, frame));
+      return withHeldValues(
+        frame,
+        values,
+        () => compute(values, frame),
+        args.map((arg) => arg.type)
+      );
     },
     span
   );
@@ -223,7 +228,12 @@ export function nativeStateCall<S extends NativeState>(
       const state = receiver(frame);
       return withHeldValues(frame, [new NativeHandle('methodReceiver', state)], () => {
         const values = evaluateHeld(frame, evaluators);
-        return withHeldValues(frame, values, () => compute(state, values, frame));
+        return withHeldValues(
+          frame,
+          values,
+          () => compute(state, values, frame),
+          args.map((arg) => arg.type)
+        );
       });
     },
     span

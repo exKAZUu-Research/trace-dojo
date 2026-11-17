@@ -1,14 +1,16 @@
 import { PANIC, panic } from '../arith';
 import { BigFloat, parseFloatLiteral, toNumber } from '../floats';
+import { spendIntegerOperation, spendIntegerWidth } from '../integerWork';
 import { runtime } from '../semaBase';
 import {
   CONST_U8_SLICE,
   errorSetOf,
   errorUnionOf,
-  fitsInt,
   fnType,
   type IntType,
   intType,
+  maxInt,
+  minInt,
   sliceOf,
   type StructType,
   type Type,
@@ -49,7 +51,7 @@ function charToDigit(c: number, base: number): number | undefined {
 }
 
 /** `std.fmt.parseInt`, transcribed: the sign, a base prefix when the base is 0, digits with `_` between them. */
-function parseInt(bytes: Slice, base: number, type: IntType, spend: () => void, unsigned = false): Value {
+function parseInt(bytes: Slice, base: number, type: IntType, spend: (cost?: number) => void, unsigned = false): Value {
   const read = (index: number): number => {
     spend();
     return Number(bytes.get(index) as bigint);
@@ -77,6 +79,17 @@ function parseInt(bytes: Slice, base: number, type: IntType, spend: () => void, 
   }
   if (read(start) === 0x5f || read(bytes.length - 1) === 0x5f) return INVALID_CHARACTER;
   const accumulate = intType(type.signed, Math.max(8, type.bits));
+  spendIntegerWidth(accumulate.bits * (type.signed ? 4 : 2), spend);
+  const minimum = minInt(accumulate),
+    maximum = maxInt(accumulate);
+  const targetMinimum = minInt(type),
+    targetMaximum = maxInt(type);
+  const fits = (value: bigint, min = minimum, max = maximum): boolean => {
+    spendIntegerOperation(value, min, 'read', spend);
+    spendIntegerOperation(value, max, 'read', spend);
+    return value >= min && value <= max;
+  };
+  const radixValue = BigInt(radix);
   let value = 0n;
   for (let index = start; index < bytes.length; index++) {
     const c = read(index);
@@ -84,17 +97,19 @@ function parseInt(bytes: Slice, base: number, type: IntType, spend: () => void, 
     const digit = charToDigit(c, radix);
     if (digit === undefined) return INVALID_CHARACTER;
     if (value !== 0n) {
-      value *= BigInt(radix);
-      if (!fitsInt(value, accumulate)) return OVERFLOW;
+      spendIntegerOperation(value, radixValue, 'multiply', spend);
+      value *= radixValue;
+      if (!fits(value)) return OVERFLOW;
     } else if (negative) {
       value = -BigInt(digit);
-      if (!fitsInt(value, accumulate)) return OVERFLOW;
+      if (!fits(value)) return OVERFLOW;
       continue;
     }
+    spendIntegerOperation(value, BigInt(digit), 'add', spend);
     value = negative ? value - BigInt(digit) : value + BigInt(digit);
-    if (!fitsInt(value, accumulate)) return OVERFLOW;
+    if (!fits(value)) return OVERFLOW;
   }
-  return fitsInt(value, type) ? value : OVERFLOW;
+  return fits(value, targetMinimum, targetMaximum) ? value : OVERFLOW;
 }
 
 /** `std.fmt.parseFloat`: decimal or hexadecimal digits with `_`, `inf`, or `nan`, rounded to the type. */

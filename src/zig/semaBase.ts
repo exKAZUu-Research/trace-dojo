@@ -1045,7 +1045,7 @@ export abstract class SemaBase implements SemaApi {
           const previous = held.get(frame);
           const mark = frame.temporaries.length;
           held.set(frame, source);
-          frame.temporaries.push(source);
+          frame.temporaries.push({ value: source, type: expression.type });
           try {
             return result.eval(frame);
           } finally {
@@ -1152,7 +1152,7 @@ export abstract class SemaBase implements SemaApi {
     result = this.constantResult(operands, compute, span)
   ): TExpr {
     if (operands.every((operand) => operand.known)) return known(type, result?.value, span);
-    const evaluators = operands.map((operand) => operand.eval);
+    const evaluators = valueEvaluators(operands, false);
     return {
       ...runtime(
         type,
@@ -1203,7 +1203,7 @@ export abstract class SemaBase implements SemaApi {
     if (elements.every((element) => element.known)) {
       return known(type, build(elements.map((element) => copyForStorage(element.value))), span);
     }
-    const evaluators = elements.map((element) => element.eval);
+    const evaluators = valueEvaluators(elements, false);
     return {
       ...runtime(
         type,
@@ -1549,7 +1549,7 @@ export function knownLengthOf(expression: TExpr): bigint | undefined {
 
 export function evaluateHeld(
   frame: Frame,
-  evaluators: readonly Eval[],
+  evaluators: readonly (Eval & { valueType?: Type })[],
   convert: (value: Value) => Value = (value) => value
 ): Value[] {
   const mark = frame.temporaries.length;
@@ -1558,7 +1558,7 @@ export function evaluateHeld(
     for (const evaluate of evaluators) {
       const value = convert(evaluate(frame));
       values.push(value);
-      frame.temporaries.push(value);
+      frame.temporaries.push({ value, type: evaluate.valueType });
     }
   } finally {
     frame.temporaries.length = mark;
@@ -1566,8 +1566,12 @@ export function evaluateHeld(
   return values;
 }
 
-export function valueEvaluators(args: readonly TExpr[]): TExpr['eval'][] {
-  return args.map((arg) => (frame) => copyForFrame(frame, arg.eval(frame), arg.type));
+export function valueEvaluators(args: readonly TExpr[], copy = true): (Eval & { valueType: Type })[] {
+  return args.map((arg) =>
+    Object.assign((frame: Frame) => (copy ? copyForFrame(frame, arg.eval(frame), arg.type) : arg.eval(frame)), {
+      valueType: arg.type,
+    })
+  );
 }
 
 export function copyForFrame(frame: Frame, value: Value, type: Type): Value {

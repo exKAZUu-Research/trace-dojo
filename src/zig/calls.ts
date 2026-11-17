@@ -21,6 +21,7 @@ import {
   type Scope,
   staticResultOf,
   type TExpr,
+  valueEvaluators,
 } from './semaBase';
 import {
   ANYTYPE,
@@ -164,7 +165,7 @@ export abstract class CallCompiler extends BuiltinCompiler {
         : this.coerce(compiled, fnType.params[index], isTExpr(arg) ? arg.span : arg);
     });
     const evaluateCallee = callee.eval;
-    const evaluators = args.map((arg) => (frame: Frame) => copyForFrame(frame, arg.eval(frame), arg.type));
+    const evaluators = valueEvaluators(args);
     const row = expression.row;
     return runtime(
       fnType.returnType,
@@ -220,7 +221,7 @@ export abstract class CallCompiler extends BuiltinCompiler {
       }
     }
     const instance = this.instantiate(ref, argTypes, expression, args);
-    const evaluators = args.map((arg) => (frame: Frame) => copyForFrame(frame, arg.eval(frame), arg.type));
+    const evaluators = valueEvaluators(args);
     const row = expression.row;
     const call = runtime(
       instance.returnType,

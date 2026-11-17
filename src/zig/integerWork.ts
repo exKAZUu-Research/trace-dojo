@@ -2,6 +2,11 @@ import { ExecutionLimitError, LIMITS } from '../interpreter/limits';
 
 export type IntegerWork = 'read' | 'add' | 'multiply';
 
+export function spendIntegerWidth(width: number, spend: (cost: number) => void): void {
+  if (!Number.isSafeInteger(width) || width > LIMITS.maxSlots) throw new ExecutionLimitError('storage');
+  spend(Math.ceil(width / 64));
+}
+
 export function integerOperationWork(operator: string): IntegerWork {
   if (operator.startsWith('*') || operator === '@mulWithOverflow') return 'multiply';
   if (

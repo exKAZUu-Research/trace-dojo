@@ -2,7 +2,7 @@ import { PANIC, panic } from '../arith';
 import { Constant } from '../expressions';
 import { arrayOf, BOOL, CONST_U8_SLICE, pointerTo, sliceOf, type StructType, type Type, U8 } from '../types';
 import { markConstantStorage, Pointer, Slice, type Value, ZArray } from '../values';
-import { allocating, elements, newSlice, OPTIONAL_USIZE, optionalIndex, ORDER, orderValue } from './common';
+import { allocating, OPTIONAL_USIZE, optionalIndex, ORDER, orderValue } from './common';
 import { ALLOCATOR, allocatorState, ERROR_OUT_OF_MEMORY, reserveNativeAllocation } from './heap';
 import { concreteFnMember, type Member, nativeStruct } from './native';
 import { findSequence } from './sequenceSearch';
@@ -26,10 +26,6 @@ function mapper(name: string, map: (c: number) => number): () => Member {
   return concreteFnMember(name, [U8], U8, ([value]) => BigInt(map(Number(value as bigint))));
 }
 
-function bytes(value: Value): number[] {
-  return elements(value).map((byte) => Number(byte as bigint));
-}
-
 function caseFold(a: Slice, b: Slice, spend: () => void, start = 0n, end = a.lengthValue): number {
   const length = end - start < b.lengthValue ? end - start : b.lengthValue;
   for (let index = 0n; index < length; index++) {
@@ -48,7 +44,7 @@ function stringMapper(name: string, map: (c: number) => number): () => Member {
     const target = out as Slice;
     if (target.length < source.length) panic(PANIC.unreachable);
     for (let index = 0; index < source.length; index++) {
-      frame.runtime.spend();
+      frame.runtime.spend(2);
       target.set(index, BigInt(map(Number(source.get(index)))));
     }
     return new Slice(target.target, target.start, source.length);
@@ -63,8 +59,12 @@ function allocMapper(name: string, map: (c: number) => number): () => Member {
     ([allocator, input], frame) => {
       const complete = reserveNativeAllocation(frame, allocatorState(allocator), (input as Slice).length, U8);
       if (!complete) return ERROR_OUT_OF_MEMORY;
-      frame.runtime.spend((input as Slice).length);
-      const result = newSlice(bytes(input).map((byte) => BigInt(map(byte))));
+      const source = input as Slice;
+      frame.runtime.spend(source.length * 2);
+      const storage = new ZArray(
+        Array.from({ length: source.length }, (_, index) => BigInt(map(Number(source.get(index)))))
+      );
+      const result = new Slice(storage, 0, source.length);
       complete(result.target);
       return result;
     }

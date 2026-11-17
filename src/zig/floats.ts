@@ -1,4 +1,4 @@
-import { spendIntegerOperation, spendIntegerShift } from './integerWork';
+import { spendIntegerOperation, spendIntegerShift, spendIntegerWidth } from './integerWork';
 import { spendMemory } from './memoryAccounting';
 
 /**
@@ -404,9 +404,9 @@ export function integerSqrt(value: bigint, spend: (cost: number) => void = spend
 // Literals ------------------------------------------------------------------------------------------------------------
 
 /** Parses a Zig float literal (decimal or hexadecimal, with `_` separators) to the nearest float of a format. */
-// code-gauge-allow functionNcss 35 -- Keeps decimal and hexadecimal literal conversion together.
+// code-gauge-allow functionNcss 43 -- Keeps decimal and hexadecimal literal conversion and allocation planning together.
 // code-gauge-allow functionCognitiveComplexity 19 -- Checks both literal radices before allocating their exact values.
-export function parseFloatLiteral(text: string, bits: FloatBits): BigFloat {
+export function parseFloatLiteral(text: string, bits: FloatBits, spend = spendMemory): BigFloat {
   const clean = text.replaceAll('_', '');
   const format = FORMATS[bits];
   if (/^0x/i.test(clean)) {
@@ -414,11 +414,15 @@ export function parseFloatLiteral(text: string, bits: FloatBits): BigFloat {
     if (!match) return new BigFloat(false, 'nan', 0n, 0);
     const whole = match[1] ?? '';
     const fraction = match[2] ?? '';
-    const digits = BigInt(`0x${whole}${fraction}` === '0x' ? '0' : `0x${whole}${fraction}`);
+    const significant = `${whole}${fraction}`.replace(/^0+/, '');
     const binaryExponent = Number(match[3] ?? '0') - 4 * fraction.length;
-    if (digits === 0n) return BigFloat.zero();
+    if (!significant) return BigFloat.zero();
+    const width = (significant.length - 1) * 4 + Math.floor(Math.log2(Number.parseInt(significant[0], 16))) + 1;
     if (binaryExponent > format.maxExponent + format.precision) return new BigFloat(false, 'inf', 0n, 0);
-    if (binaryExponent + digits.toString(2).length < format.minExponent - format.precision) return BigFloat.zero();
+    if (binaryExponent + width < format.minExponent - format.precision) return BigFloat.zero();
+    spendIntegerWidth(width + Math.max(0, binaryExponent), spend);
+    spendIntegerWidth(1 + Math.max(0, -binaryExponent), spend);
+    const digits = BigInt(`0x${significant}`);
     return binaryExponent >= 0
       ? roundRational(false, digits << BigInt(binaryExponent), 1n, format)
       : roundRational(false, digits, 1n << BigInt(-binaryExponent), format);
@@ -434,6 +438,10 @@ export function parseFloatLiteral(text: string, bits: FloatBits): BigFloat {
   const magnitude = significant.length + decimalExponent;
   if (magnitude > 10_000) return new BigFloat(false, 'inf', 0n, 0);
   if (magnitude < -10_000) return BigFloat.zero();
+  const width = Math.ceil(significant.length * Math.log2(10));
+  const powerWidth = Math.ceil(Math.abs(decimalExponent) * Math.log2(10));
+  spendIntegerWidth(width + (decimalExponent >= 0 ? powerWidth : 0), spend);
+  spendIntegerWidth(decimalExponent >= 0 ? 1 : powerWidth + 1, spend);
   const digits = BigInt(significant);
   return decimalExponent >= 0
     ? roundRational(false, digits * 10n ** BigInt(decimalExponent), 1n, format)

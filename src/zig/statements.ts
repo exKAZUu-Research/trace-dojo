@@ -1575,6 +1575,7 @@ export abstract class StatementCompiler extends CallCompiler {
       broken: false,
     };
     interface Operand {
+      rootType?: Type;
       lengthOf?: (frame: Frame, value: Value) => bigint;
       element: (value: Value, index: number, frame: Frame) => Value;
       evaluate: (frame: Frame) => Value;
@@ -1652,9 +1653,11 @@ export abstract class StatementCompiler extends CallCompiler {
     const loop = (frame: Frame): Jump | { value: Value } | undefined => {
       const values = evaluateHeld(
         frame,
-        operands.map((operand) => operand.evaluate)
+        operands.map((operand) =>
+          Object.assign((frame: Frame) => operand.evaluate(frame), { valueType: operand.rootType })
+        )
       );
-      for (const value of values) frame.temporaries.push(value);
+      for (const [index, value] of values.entries()) frame.temporaries.push({ value, type: operands[index].rootType });
       try {
         let count: bigint | undefined;
         for (const [index, operand] of operands.entries()) {
@@ -1721,6 +1724,7 @@ export abstract class StatementCompiler extends CallCompiler {
     capture: Capture | undefined,
     span: Span
   ): {
+    rootType: Type;
     lengthOf?: (frame: Frame, value: Value) => bigint;
     element: (value: Value, index: number, frame: Frame) => Value;
     evaluate: (frame: Frame) => Value;
@@ -1787,6 +1791,7 @@ export abstract class StatementCompiler extends CallCompiler {
           }
         : undefined;
     return {
+      rootType: type,
       type: elementType,
       elementFact,
       loadType: readsElement || (byPointer && type.kind === 'pointer' && type.size === 'one') ? child : undefined,
