@@ -181,19 +181,17 @@ export class ClassChecker {
     if (!clause || !value) return undefined;
     const staticType = this.baseStaticType(node);
     if (!staticType || isAnyLike(staticType)) return staticType && anyType;
-    const signatures = this.c.signaturesOf(staticType, 'construct');
-    if (signatures.length === 0) return undefined;
-    const typeArguments = this.baseTypeArguments(node);
-    const returned = signatures[0].returnType();
-    if (returned.kind === 'object' && returned.objectKind === 'reference' && returned.target) {
-      return this.c.reference(
-        returned.target,
-        typeArguments.length > 0 ? typeArguments : (returned.target.typeParameters ?? []).map(() => anyType)
-      );
-    }
-    if (returned.kind === 'object' && returned.typeParameters && typeArguments.length > 0)
-      return this.c.reference(returned, typeArguments);
-    return returned;
+    const instantiated = this.baseConstructSignatures(node)?.[0];
+    if (instantiated) return instantiated.returnType();
+    // The `extends` clause reports type arguments no base signature takes, and the base's members then read as `any`.
+    const returned = this.c.signaturesOf(staticType, 'construct')[0]?.returnType();
+    const target = returned?.kind === 'object' && returned.objectKind === 'reference' ? returned.target : returned;
+    return target?.kind === 'object' && target.typeParameters
+      ? this.c.reference(
+          target,
+          target.typeParameters.map(() => anyType)
+        )
+      : returned;
   }
 
   baseClassInfo(info: ClassInfo): ClassInfo | undefined {
