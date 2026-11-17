@@ -3,14 +3,18 @@ import { type Thunk, type Value } from './values';
 
 interface PreviewFamily {
   operations: number;
-  limit: number;
+  operationLimit: number;
+  milliseconds: number;
+  timeLimit: number;
   views: Map<string, PreviewUsage>;
 }
 
 interface PreviewUsage {
   family: PreviewFamily;
   operations: number;
-  limit: number;
+  operationLimit: number;
+  milliseconds: number;
+  timeLimit: number;
 }
 
 interface PreviewCost {
@@ -56,9 +60,12 @@ export class PreviewBudget {
   private milliseconds = 0;
   private active: PreviewTransaction | undefined;
   private readonly familyLimit: number;
+  private readonly familyTimeLimit: number;
 
   constructor(bindings: number) {
-    this.familyLimit = LIMITS.maxOperations / Math.max(1, bindings);
+    const count = Math.max(1, bindings);
+    this.familyLimit = LIMITS.maxOperations / count;
+    this.familyTimeLimit = LIMITS.maxMilliseconds / 2;
   }
 
   spend(operations: number, executionOperations: number, allocations: number): void {
@@ -107,11 +114,16 @@ export class PreviewBudget {
 
   run<T>(owner: object, view: string, share: number, work: () => T): T {
     if (this.active) return work();
-    const remainingTime = LIMITS.maxMilliseconds - this.milliseconds;
+    const usage = this.usageFor(owner, view, share);
+    const remainingTime = Math.min(
+      LIMITS.maxMilliseconds - this.milliseconds,
+      usage.timeLimit - usage.milliseconds,
+      usage.family.timeLimit - usage.family.milliseconds
+    );
     if (remainingTime <= 0) throw new DisplayAbort();
     const started = performance.now();
     this.active = {
-      usage: this.usageFor(owner, view, share),
+      usage,
       deadline: started + remainingTime,
       forcing: false,
       frames: [],
@@ -119,7 +131,10 @@ export class PreviewBudget {
     try {
       return work();
     } finally {
-      this.milliseconds += performance.now() - started;
+      const elapsed = performance.now() - started;
+      this.milliseconds += elapsed;
+      usage.milliseconds += elapsed;
+      usage.family.milliseconds += elapsed;
       this.active = undefined;
     }
   }
@@ -190,15 +205,25 @@ export class PreviewBudget {
   private usageFor(owner: object, view: string, share: number): PreviewUsage {
     let family = this.families.get(owner);
     if (!family) {
-      family = { operations: 0, limit: this.familyLimit, views: new Map() };
+      family = {
+        operations: 0,
+        operationLimit: this.familyLimit,
+        milliseconds: 0,
+        timeLimit: this.familyTimeLimit,
+        views: new Map(),
+      };
       this.families.set(owner, family);
     }
     let usage = family.views.get(view);
-    const limit = family.limit * share;
+    const operationLimit = family.operationLimit * share;
+    const timeLimit = family.timeLimit * share;
     if (!usage) {
-      usage = { family, operations: 0, limit };
+      usage = { family, operations: 0, operationLimit, milliseconds: 0, timeLimit };
       family.views.set(view, usage);
-    } else usage.limit = Math.min(usage.limit, limit);
+    } else {
+      usage.operationLimit = Math.min(usage.operationLimit, operationLimit);
+      usage.timeLimit = Math.min(usage.timeLimit, timeLimit);
+    }
     return usage;
   }
 
@@ -218,6 +243,6 @@ export class PreviewBudget {
   }
 
   private remainingOperations(usage: PreviewUsage): number {
-    return Math.min(usage.limit - usage.operations, usage.family.limit - usage.family.operations);
+    return Math.min(usage.operationLimit - usage.operations, usage.family.operationLimit - usage.family.operations);
   }
 }
