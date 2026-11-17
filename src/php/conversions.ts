@@ -26,7 +26,7 @@ export function formatFloatRepr(value: number, exponentChar = 'E', zeroFraction 
 function decimalDigits(value: number, precision: number): [string, number] {
   const { digits, exponent } = significantDigits(value, precision);
   const original = exactDecimal(value).digits.replace(/^0+/, '');
-  const tie = /^50*$/.test(original.slice(precision));
+  const tie = /^50*$/.test(original.slice(precision)) && digits === original.slice(0, precision);
   return [tie ? digits : digits.replace(/0+$/, '') || '0', exponent];
 }
 

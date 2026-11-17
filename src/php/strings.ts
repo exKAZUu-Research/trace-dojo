@@ -110,7 +110,7 @@ export function generalText(value: number, precision: number, upper: boolean): s
   if (value === 0) return '0';
   const { digits: raw, exponent } = significantDigits(value, count);
   const original = exactDecimal(value).digits.replace(/^0+/, '');
-  const tie = /^50*$/.test(original.slice(count));
+  const tie = /^50*$/.test(original.slice(count)) && raw === original.slice(0, count);
   const digits = tie ? raw : raw.replace(/0+$/, '') || '0';
   const decpt = exponent + 1;
   if (decpt < -3 || decpt > count) {

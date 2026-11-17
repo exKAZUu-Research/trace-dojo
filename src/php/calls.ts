@@ -5,7 +5,6 @@ import type { FunctionDecl } from './ast';
 import { lower } from './bytes';
 import { valueName } from './conversions';
 import { throwError } from './errors';
-import { collectGarbage } from './garbage';
 import { share } from './places';
 import { FatalError, Frame, memoryExhaustedMessage, rt, type Runtime, SCRIPT_PATH, setCallCapture } from './runtime';
 import { coerce, describeType, NO_MATCH, typeToString } from './types';
@@ -212,6 +211,7 @@ function runNative(runtime: Runtime, fn: NativeFunction, context: NativeContext)
 }
 
 /** Matches arguments to a native function's parameters, coercing them to the declared types. */
+// code-gauge-allow functionNcss 58 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 function bindNative(
   fn: NativeFunction,
   args: ArgValue[],
@@ -444,8 +444,13 @@ function invokeUser(target: CallTarget, fn: UserFunction, args: ArgValue[], row:
 function releaseFrame(runtime: Runtime, caller: Frame, frame: Frame, returned: Value, fromNative: boolean): void {
   const holder = fromNative ? runtime.nativeHeld.at(-1) : undefined;
   if (returned instanceof PhpObject || returned instanceof PhpArray) (holder ?? caller.temporaries).push(returned);
-  runtime.release([...[...frame.vars.values()].map((ref) => ref.v), frame.thisObj, frame.closure]);
-  if (runtime.destructibles > 0) collectGarbage(runtime);
+  runtime.release([
+    ...[...frame.vars.values()].map((ref) => ref.v),
+    ...frame.args,
+    ...frame.temporaries,
+    frame.thisObj,
+    frame.closure,
+  ]);
 }
 
 /**

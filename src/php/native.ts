@@ -6,8 +6,9 @@ import {
   type Method,
   type NativeContext,
   type NativeFunction,
+  PhpArray,
   PhpClass,
-  type PhpObject,
+  PhpObject,
   type PropDecl,
   type Value,
   type Visibility,
@@ -78,7 +79,10 @@ export function defineClass(definition: ClassDefinition): void {
 export function installNatives(): void {
   const runtime = rt();
   for (const fn of functions) runtime.functions.set(lower(fn.name), fn);
-  for (const [name, value] of constants) runtime.constants.set(name, value);
+  for (const [name, value] of constants) {
+    runtime.constants.set(name, value);
+    if (value instanceof PhpArray || value instanceof PhpObject) runtime.rootConstants.add(value);
+  }
   for (const definition of classDefinitions) runtime.classes.set(lower(definition.name), buildClass(definition));
 }
 

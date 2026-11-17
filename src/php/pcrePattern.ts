@@ -1,5 +1,7 @@
-// code-gauge-allow-file fileNcss 683 -- Holds the cases of one concern of the interpreter, which share their helpers.
-import { dec, enc } from './bytes';
+// oxlint-disable unicorn/prefer-code-point -- PHP pattern strings contain bytes; UTF-8 validation reads each byte separately.
+// code-gauge-allow-file fileNcss 734 -- Holds the cases of one concern of the interpreter, which share their helpers.
+import { dec, enc, utf8Length } from './bytes';
+import { rt } from './runtime';
 import { UnsupportedFeatureError } from './unsupported';
 
 /**
@@ -16,6 +18,7 @@ export interface Compiled {
   groupCount: number;
   /** The capture names of the `\K` points, the last passed of which starts the reported match. */
   keeps: string[];
+  referenced: Set<number>;
 }
 
 export class PatternError extends Error {}
@@ -68,6 +71,7 @@ export function translate(pattern: string): Compiled {
     duplicateNames: false,
   };
   for (const modifier of modifiers) applyModifier(options, modifier);
+  if (options.utf8) validatePatternUtf8(body);
   let source = options.utf8 ? dec(body) : body;
   const leadingFlags = /^\(\?([imsxU]+)\)/.exec(source);
   if (leadingFlags) {
@@ -86,6 +90,7 @@ export function translate(pattern: string): Compiled {
     names: converter.names,
     groupCount: converter.names.length - 1,
     keeps: converter.keeps,
+    referenced: layout.referenced,
   };
 }
 
@@ -167,6 +172,7 @@ interface Layout {
    * PCRE fails a reference to a group that did not, where JavaScript matches the empty string.
    */
   marked: Set<number>;
+  referenced: Set<number>;
 }
 
 const INLINE_OPTIONS = new Map<string, PatternOption>([
@@ -289,11 +295,20 @@ class PatternConverter {
       const group = typeof target === 'number' ? target : this.names.indexOf(target);
       if (!this.repeated.has(group)) marked.add(group);
     }
-    return { names: this.names, marked };
+    return {
+      names: this.names,
+      marked,
+      referenced: new Set(
+        this.references.map(({ target }) => (typeof target === 'number' ? target : this.names.indexOf(target)))
+      ),
+    };
   }
 
   convert(): string {
-    while (this.index < this.source.length) this.item();
+    while (this.index < this.source.length) {
+      rt().spend();
+      this.item();
+    }
     if (this.frames.length > 1) this.fail('missing closing parenthesis', this.source.length);
     this.result += ')'.repeat(this.frames[0].modifiers.length);
     for (const { target, at } of this.references) {
@@ -428,11 +443,14 @@ class PatternConverter {
 
   /** Notes the groups in the item that a quantifier repeats, whose captures JavaScript forgets at each repetition. */
   private repeatItem(): void {
-    const groups = [...this.groupStarts.entries()].filter(([, start]) => start >= this.itemStart);
-    if (groups.length > 1 || groups.some(([, start]) => start > this.itemStart))
+    const first = startIndex(this.groupStarts, this.itemStart);
+    if (
+      this.groupStarts.length - first > 1 ||
+      (first < this.groupStarts.length && this.groupStarts[first] > this.itemStart)
+    )
       unsupported('入れ子のキャプチャを含む繰り返し');
-    for (const [group] of groups) this.repeated.add(group);
-    if (this.keepStarts.some((start) => start >= this.itemStart)) unsupported(String.raw`繰り返される \K`);
+    if (first < this.groupStarts.length) this.repeated.add(first);
+    if ((this.keepStarts.at(-1) ?? -1) >= this.itemStart) unsupported(String.raw`繰り返される \K`);
   }
 
   /** Repeats the last item atomically, as a lookahead does, which JavaScript does not backtrack into. */
@@ -440,7 +458,10 @@ class PatternConverter {
     const name = `$a${this.hiddenGroups++}`;
     const open = `(?:(?=(?<${name}>`;
     for (const starts of [this.groupStarts, this.keepStarts]) {
-      for (const [index, start] of starts.entries()) if (start >= this.itemStart) starts[index] = start + open.length;
+      for (let index = startIndex(starts, this.itemStart); index < starts.length; index++) {
+        rt().spend();
+        starts[index] += open.length;
+      }
     }
     const before = this.result.slice(0, this.itemStart);
     this.result = `${before}${open}${this.result.slice(this.itemStart)}${quantifier}))\\k<${name}>)`;
@@ -983,4 +1004,46 @@ function unicodeProperty(name: string, negated: boolean): CharacterSet | undefin
     }
   }
   return undefined;
+}
+
+function startIndex(starts: number[], minimum: number): number {
+  let left = 0,
+    right = starts.length;
+  while (left < right) {
+    const mid = (left + right) >>> 1;
+    if (starts[mid] < minimum) left = mid + 1;
+    else right = mid;
+  }
+  return left;
+}
+
+// code-gauge-allow functionNcss 36 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+function validatePatternUtf8(body: string): void {
+  for (let index = 0; index < body.length;) {
+    rt().spend();
+    const byte = body.charCodeAt(index);
+    const length = utf8Length(body, index);
+    if (byte >= 128 && length === 1) {
+      let message: string;
+      const wanted = byte >= 0xfc ? 6 : byte >= 0xf8 ? 5 : byte >= 0xf0 ? 4 : byte >= 0xe0 ? 3 : 2;
+      if (byte >= 0xfe) message = 'illegal byte (0xfe or 0xff)';
+      else if (byte < 0xc0) message = 'isolated byte with 0x80 bit set';
+      else if (index + wanted > body.length) {
+        const missing = index + wanted - body.length;
+        message = `${missing} byte${missing === 1 ? '' : 's'} missing at end`;
+      } else {
+        let invalid = 1;
+        while (invalid < wanted && (body.charCodeAt(index + invalid) & 0xc0) === 0x80) invalid++;
+        if (invalid < wanted) message = `byte ${invalid + 1} top bits not 0x80`;
+        else if (wanted > 4) message = `${wanted}-byte character is not allowed (RFC 3629)`;
+        else if (byte >= 0xf5 || (byte === 0xf4 && body.charCodeAt(index + 1) >= 0x90))
+          message = 'code points greater than 0x10ffff are not defined';
+        else if (byte === 0xed && body.charCodeAt(index + 1) >= 0xa0)
+          message = 'code points 0xd800-0xdfff are not defined';
+        else message = `overlong ${wanted}-byte sequence`;
+      }
+      throw new PatternError(`Compilation failed: UTF-8 error: ${message} at offset ${index}`);
+    }
+    index += length;
+  }
 }

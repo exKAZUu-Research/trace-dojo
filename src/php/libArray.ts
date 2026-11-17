@@ -935,7 +935,8 @@ function setOperation(name: string, args: Value[], keep: boolean, same: SetCompa
     rt().spend();
     const matches = (other: PhpArray): boolean =>
       other.has(entry[0]) && same(entry, [entry[0], other.get(entry[0]) as Value]);
-    if (keep ? others.every(matches) : !others.some(matches)) result.set(entry[0], share(entry[1]));
+    if (keep ? others.every(matches) : !others.some(matches))
+      result.setSlot(entry[0], copyValueSlot(first.map.get(entry[0]) as Value | Ref));
   }
   return result;
 }
@@ -972,7 +973,8 @@ function diffByString(first: PhpArray, others: Value[]): PhpArray {
   const exclude = new Set<string>();
   for (const other of others) for (const value of (other as PhpArray).values()) exclude.add(toStr(value));
   const result = new PhpArray();
-  for (const [key, value] of first.entries()) if (!exclude.has(toStr(value))) result.set(key, share(value));
+  for (const [key, value] of first.entries())
+    if (!exclude.has(toStr(value))) result.setSlot(key, copyValueSlot(first.map.get(key) as Value | Ref));
   return result;
 }
 

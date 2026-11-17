@@ -454,7 +454,6 @@ class JsonParser {
       if (code >= 0x80) {
         const length = utf8Length(this.text, this.index - 1);
         if (length === 1) {
-          if ((this.flags & 1_048_576n) !== 0n) continue;
           if ((this.flags & 2_097_152n) !== 0n) {
             result += enc('�');
             continue;

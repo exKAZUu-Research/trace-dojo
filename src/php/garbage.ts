@@ -243,8 +243,8 @@ export function mark(runtime: Runtime): Set<PhpObject> {
   const visitedArrays = new Set<PhpArray>();
   const roots: unknown[] = [];
   for (const frame of runtime.frames) pushFrame(frame, roots);
-  for (const fn of runtime.functions.values()) if (fn.kind === 'user') appendValues(roots, [...fn.statics.values()]);
-  for (const cls of runtime.classes.values()) {
+  for (const fn of runtime.userFunctions) appendValues(roots, fn.statics.values());
+  for (const cls of runtime.userClasses) {
     for (const { ref } of cls.staticProps.values()) roots.push(ref);
     for (const constant of cls.consts.values()) if (constant.value !== undefined) roots.push(constant.value);
     for (const method of cls.methods.values())
@@ -546,19 +546,18 @@ export function arrayIsShared(runtime: Runtime, target: PhpArray): boolean {
   return false;
 }
 
-// code-gauge-allow functionCognitiveComplexity 16 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 function ownershipRoots(runtime: Runtime): Set<unknown> {
   const roots: unknown[] = [];
   for (const frame of runtime.frames) pushFrame(frame, roots);
-  for (const fn of runtime.functions.values()) if (fn.kind === 'user') appendValues(roots, [...fn.statics.values()]);
-  for (const cls of runtime.classes.values()) {
+  for (const fn of runtime.userFunctions) appendValues(roots, fn.statics.values());
+  for (const cls of runtime.userClasses) {
     for (const { ref } of cls.staticProps.values()) roots.push(ref);
     for (const constant of cls.consts.values()) roots.push(constant.value);
     for (const method of cls.methods.values())
       if (method.fn.kind === 'user') appendValues(roots, [...method.fn.statics.values()]);
   }
   roots.push(
-    ...runtime.constants.values(),
+    ...runtime.rootConstants,
     ...runtime.held,
     runtime.thrown,
     runtime.exceptionHandler,
@@ -566,7 +565,9 @@ function ownershipRoots(runtime: Runtime): Set<unknown> {
   );
   for (const held of runtime.nativeHeld) appendValues(roots, [...held]);
   for (const { handler } of runtime.errorHandlers) roots.push(handler);
-  return new Set(roots);
+  return new Set(
+    roots.filter((value) => value instanceof Ref || value instanceof PhpArray || value instanceof PhpObject)
+  );
 }
 
 // code-gauge-allow functionNcss 31 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.

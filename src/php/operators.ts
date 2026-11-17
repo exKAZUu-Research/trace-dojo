@@ -345,9 +345,103 @@ function compareStrings(a: string, b: string): number {
   return Math.sign(compareBytes(a, b));
 }
 
+type ComparisonMode = 'order' | 'loose' | 'strict';
+type ComparisonPair = [Value, Value, ComparisonMode];
+interface ComparisonFrame {
+  owner: PhpArray | PhpObject;
+  pairs: Generator<ComparisonPair, number>;
+}
+
 /** The result of PHP's `<=>`, where 1 also stands for values PHP cannot order. */
-// code-gauge-allow functionNcss 34 -- Transcribes PHP's algorithm for this function step by step, whose branches mirror PHP's.
 export function compare(a: Value, b: Value): number {
+  return walkComparison(a, b, 'order');
+}
+
+export function looseEquals(a: Value, b: Value): boolean {
+  return walkComparison(a, b, 'loose') === 0;
+}
+
+export function strictEquals(a: Value, b: Value): boolean {
+  return walkComparison(a, b, 'strict') === 0;
+}
+
+// code-gauge-allow functionCognitiveComplexity 23 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+function walkComparison(a: Value, b: Value, mode: ComparisonMode): number {
+  const stack: ComparisonFrame[] = [];
+  const active = new Set<PhpArray | PhpObject>();
+  let pair: ComparisonPair | undefined = [a, b, mode];
+  for (;;) {
+    if (pair) {
+      rt().spend();
+      const result = comparisonStep(...pair);
+      if (typeof result === 'number') {
+        if (result !== 0) return result;
+      } else {
+        if (active.has(result.owner)) throwError('Error', 'Nesting level too deep - recursive dependency?');
+        active.add(result.owner);
+        stack.push(result);
+      }
+    }
+    const frame = stack.at(-1);
+    if (!frame) return 0;
+    const step = frame.pairs.next();
+    if (step.done) {
+      active.delete(frame.owner);
+      stack.pop();
+      if (step.value !== 0) return step.value;
+      pair = undefined;
+    } else pair = step.value;
+  }
+}
+
+// code-gauge-allow functionCognitiveComplexity 20 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+function comparisonStep(a: Value, b: Value, mode: ComparisonMode): number | ComparisonFrame {
+  if (a === b) return typeof a === 'number' && Number.isNaN(a) ? 1 : 0;
+  if (a instanceof PhpArray && b instanceof PhpArray) {
+    if (a.size !== b.size) return a.size < b.size ? -1 : 1;
+    return { owner: a, pairs: arrayComparisonPairs(a, b, mode) };
+  }
+  if (mode === 'strict') return 1;
+  if (a instanceof PhpObject && b instanceof PhpObject) {
+    if (a.cls !== b.cls) return 1;
+    return { owner: a, pairs: objectComparisonPairs(a, b) };
+  }
+  if (mode === 'loose' && typeof a === 'string' && typeof b === 'string') return looseStringEquals(a, b) ? 0 : 1;
+  return compareScalar(a, b);
+}
+
+function* arrayComparisonPairs(a: PhpArray, b: PhpArray, mode: ComparisonMode): Generator<ComparisonPair, number> {
+  const right = mode === 'strict' ? b.entries() : undefined;
+  for (const [key, value] of a.entries()) {
+    if (right) {
+      const item = right.next();
+      if (item.done || item.value[0] !== key) return 1;
+      yield [value, item.value[1], mode];
+    } else {
+      if (!b.has(key)) return 1;
+      yield [value, b.get(key) as Value, mode];
+    }
+  }
+  return 0;
+}
+
+function* objectComparisonPairs(a: PhpObject, b: PhpObject): Generator<ComparisonPair, number> {
+  const left = objectProps(a);
+  const right = new Map(objectProps(b));
+  if (left.length !== right.size && (hasDynamicProps(a) || hasDynamicProps(b)))
+    return left.length > right.size ? 1 : -1;
+  for (const [name, value] of left) {
+    if (!right.has(name)) return 1;
+    yield [value, right.get(name) as Value, 'order'];
+  }
+  return 0;
+}
+
+function hasDynamicProps(object: PhpObject): boolean {
+  return [...object.props.keys()].some((key) => !key.startsWith('\0') && !object.cls.propByName.has(key));
+}
+
+function compareScalar(a: Value, b: Value): number {
   if ((typeof a === 'bigint' || typeof a === 'number') && (typeof b === 'bigint' || typeof b === 'number')) {
     return compareNumbers(a, b);
   }
@@ -363,10 +457,8 @@ export function compare(a: Value, b: Value): number {
   }
   if (typeof a === 'string' && (typeof b === 'bigint' || typeof b === 'number')) return compareStringNumber(a, b);
   if (typeof b === 'string' && (typeof a === 'bigint' || typeof a === 'number')) return -compareStringNumber(b, a);
-  if (a instanceof PhpObject && b instanceof PhpObject) return compareObjects(a, b);
   if (a instanceof PhpObject) return compareObjectScalar(a, b);
   if (b instanceof PhpObject) return -compareObjectScalar(b, a);
-  if (a instanceof PhpArray && b instanceof PhpArray) return compareArrays(a, b);
   if (a instanceof PhpArray) return 1;
   if (b instanceof PhpArray) return -1;
   return 1;
@@ -393,77 +485,6 @@ function compareObjectScalar(object: PhpObject, other: Value): number {
   return 1;
 }
 
-function compareArrays(a: PhpArray, b: PhpArray): number {
-  // PHP's zend_hash_compare returns at once for one table, which arrays sharing it until a write are.
-  if (a === b) return 0;
-  if (a.size !== b.size) return a.size < b.size ? -1 : 1;
-  return guardComparison(a, () => {
-    for (const [key, value] of a.entries()) {
-      rt().spend();
-      if (!b.has(key)) return 1;
-      const result = compare(value, b.get(key) as Value);
-      if (result !== 0) return result;
-    }
-    return 0;
-  });
-}
-
-const comparing = new Set<PhpObject | PhpArray>();
-let comparisonDepth = 0;
-
-function compareObjects(a: PhpObject, b: PhpObject): number {
-  if (a === b) return 0;
-  if (a.cls !== b.cls) return 1;
-  if (comparing.has(a)) throwError('Error', 'Nesting level too deep - recursive dependency?');
-  if (comparisonDepth >= 512) throwError('Error', 'Maximum call stack size reached during comparison');
-  comparisonDepth++;
-  comparing.add(a);
-  try {
-    const left = objectProps(a);
-    const right = new Map(objectProps(b));
-    // Objects with dynamic properties compare as their property tables, the one with more properties being greater.
-    if (left.length !== right.size && (hasDynamicProps(a) || hasDynamicProps(b)))
-      return left.length > right.size ? 1 : -1;
-    for (const [name, value] of left) {
-      rt().spend();
-      if (!right.has(name)) return 1;
-      const result = compare(value, right.get(name) as Value);
-      if (result !== 0) return result;
-    }
-    return 0;
-  } finally {
-    comparing.delete(a);
-    comparisonDepth--;
-  }
-}
-
-function hasDynamicProps(object: PhpObject): boolean {
-  return [...object.props.keys()].some((key) => !key.startsWith('\0') && !object.cls.propByName.has(key));
-}
-
-// code-gauge-allow functionCognitiveComplexity 25 -- Transcribes PHP's algorithm for this function step by step, whose branches mirror PHP's.
-export function looseEquals(a: Value, b: Value): boolean {
-  if (a instanceof PhpArray && b instanceof PhpArray) {
-    if (a === b) return true;
-    if (a.size !== b.size) return false;
-    return guardComparison(a, () => {
-      for (const [key, value] of a.entries()) {
-        rt().spend();
-        if (!b.has(key)) return false;
-        if (!looseEquals(value, b.get(key) as Value)) return false;
-      }
-      return true;
-    });
-  }
-  if (a instanceof PhpObject && b instanceof PhpObject) {
-    if (a === b) return true;
-    if (a.cls !== b.cls) return false;
-    return compareObjects(a, b) === 0;
-  }
-  if (typeof a === 'string' && typeof b === 'string') return looseStringEquals(a, b);
-  return compare(a, b) === 0;
-}
-
 /** `==` on two strings: numeric strings compare as numbers, others as text. */
 function looseStringEquals(a: string, b: string): boolean {
   if (a === b) return true;
@@ -479,26 +500,6 @@ function looseStringEquals(a: string, b: string): boolean {
 /** Whether a numeric string is written as an integer, which a float holds only when the integer overflows. */
 function isIntegerText(text: string): boolean {
   return /^[ \t\n\r\v\f]*[+-]?\d+[ \t\n\r\v\f]*$/.test(text);
-}
-
-// code-gauge-allow functionCognitiveComplexity 16 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
-export function strictEquals(a: Value, b: Value): boolean {
-  if (a === b) return typeof a !== 'number' || !Number.isNaN(a);
-  if (typeof a === 'number' && typeof b === 'number') return a === b;
-  if (a instanceof PhpArray && b instanceof PhpArray) {
-    if (a.size !== b.size) return false;
-    return guardComparison(a, () => {
-      const right = [...b.entries()];
-      let index = 0;
-      for (const [key, value] of a.entries()) {
-        rt().spend();
-        const [otherKey, otherValue] = right[index++];
-        if (key !== otherKey || !strictEquals(value, otherValue)) return false;
-      }
-      return true;
-    });
-  }
-  return false;
 }
 
 // Keys -----------------------------------------------------------------------------------------------------------------
@@ -519,17 +520,4 @@ export function toKey(value: Value, use: KeyUse = 'access'): Key {
   const type = debugType(value);
   if (use === 'isset') throwError('TypeError', `Cannot access offset of type ${type} in isset or empty`);
   throwError('TypeError', `Cannot ${use === 'unset' ? 'unset' : 'access'} offset of type ${type} on array`);
-}
-
-function guardComparison<T>(value: PhpArray, compare: () => T): T {
-  if (comparing.has(value)) throwError('Error', 'Nesting level too deep - recursive dependency?');
-  if (comparisonDepth >= 512) throwError('Error', 'Maximum call stack size reached during comparison');
-  comparisonDepth++;
-  comparing.add(value);
-  try {
-    return compare();
-  } finally {
-    comparing.delete(value);
-    comparisonDepth--;
-  }
 }

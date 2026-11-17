@@ -75,7 +75,8 @@ interface Match {
  * finds them: after an empty match, PCRE looks for a non-empty one at the same place before moving on. Sets the PCRE
  * error and yields nothing for a bad subject or offset.
  */
-// code-gauge-allow functionCognitiveComplexity 16 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+// code-gauge-allow functionCognitiveComplexity 24 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+// code-gauge-allow functionNcss 32 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 function* matchesOf(compiled: Compiled, subject: string, offset = 0, status?: { error: number }): Generator<Match> {
   const prepared = prepareSubject(compiled, subject, offset);
   if (!prepared) {
@@ -89,7 +90,13 @@ function* matchesOf(compiled: Compiled, subject: string, offset = 0, status?: { 
     rt().spend();
     const regex = retry ? compiled.retry : compiled.regex;
     regex.lastIndex = position;
-    const result = regex.exec(text) as (RegExpExecArray & { indices: RegExpIndicesArray }) | null;
+    let result: (RegExpExecArray & { indices: RegExpIndicesArray }) | null;
+    try {
+      result = regex.exec(text) as typeof result;
+    } catch (error) {
+      if (error instanceof SyntaxError) throw new UnsupportedFeatureError('ホストエンジンの制限を超える正規表現');
+      throw error;
+    }
     // The host's engine cannot be interrupted and may backtrack for seconds before giving up.
     rt().budget.checkClock();
     if (!result) {
@@ -98,6 +105,8 @@ function* matchesOf(compiled: Compiled, subject: string, offset = 0, status?: { 
       position += compiled.utf8 && (text.codePointAt(position) ?? 0) > 0xff_ff ? 2 : 1;
       continue;
     }
+    if (text === '' && [...compiled.referenced].some((group) => result.groups?.[groupName(group)] === undefined))
+      throw new UnsupportedFeatureError('空文字列に対する未参加キャプチャへの後方参照');
     const [matchStart, matchEnd] = matchBounds(compiled, result);
     yield toMatch(compiled, result, [matchStart, matchEnd], byteOffset);
     position = matchEnd;
@@ -304,6 +313,7 @@ function replaceCompiled(
   count: { value: number },
   replace: (match: Match) => string
 ): string | undefined {
+  if (limit === 0) return subject;
   const status = { error: 0 };
   let result = '';
   let last = 0;

@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 523 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 527 -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import type { Expr, ListItem } from './ast';
 import { callMethod } from './callables';
@@ -310,8 +310,7 @@ export function assignTo(target: Expr, value: Value): void {
   placeOf(target).set(share(value));
 }
 
-// code-gauge-allow functionCognitiveComplexity 29 -- Handles each kind of writable expression, whose write rules PHP defines separately.
-// code-gauge-allow functionNcss 48 -- Handles each kind of writable expression, whose write rules PHP defines separately.
+// code-gauge-allow functionNcss 52 -- Handles each kind of writable expression, whose write rules PHP defines separately.
 export function bindRef(target: Expr, ref: Ref): void {
   if (target.k === 'var') {
     if (target.name === 'this') throwError('Error', 'Cannot re-assign $this');
@@ -325,11 +324,23 @@ export function bindRef(target: Expr, ref: Ref): void {
   if (target.k === 'idx') {
     const parent = placeOf(target.base);
     const key = target.index === undefined ? undefined : toKey(ev(target.index));
-    const container = writableContainer(parent);
+    let container = writableContainer(parent);
+    if (
+      container instanceof PhpObject &&
+      key !== undefined &&
+      nativeArrayStorage(container.internal) &&
+      container.cls.findMethod('offsetget')?.fn.kind === 'native'
+    )
+      container = container.internal.writable();
     if (container instanceof PhpObject) {
       arrayAccessPlace(container, key).nested?.();
       throwError('Error', 'Cannot assign by reference to an array dimension of an object');
     }
+    if (typeof container === 'string')
+      throwError(
+        'Error',
+        key === undefined ? '[] operator not supported for strings' : 'Cannot create references to/from string offsets'
+      );
     if (!(container instanceof PhpArray)) throwError('Error', 'Cannot create references to elements of this value');
     ref.isRef = true;
     ref.rc++;
@@ -589,7 +600,7 @@ export function unsetTarget(target: Expr): void {
 /** The container an unset of an element writes into, or undefined when it does not exist. */
 function unsetContainer(e: Expr): PhpArray | PhpObject | string | undefined {
   const place = unsetPlace(e);
-  const value = place?.get();
+  const value = e.k === 'prop' && place?.getForIsset ? place.getForIsset() : place?.get();
   if (value === undefined && e.k !== 'idx') warnUndefinedBase(e);
   if (value instanceof PhpArray) return writableContainer(place as Place, value) as PhpArray;
   if (value instanceof PhpObject || typeof value === 'string') return value;

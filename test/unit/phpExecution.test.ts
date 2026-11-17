@@ -299,10 +299,10 @@ test.each([
   expect(run(source).kind).toBe('compileError');
 });
 
-test('bounded comparisons of deeply nested arrays report a PHP error', () => {
+test('deeply nested arrays compare without a host stack limit', () => {
   const source =
     '<?php $a=1;$b=1;for($i=0;$i<1000;$i++){$a=[$a];$b=[$b];}try{var_dump($a===$b);}catch(Error $e){echo "caught";}';
-  expect(run(source)).toMatchObject({ kind: 'executed', stdout: 'caught' });
+  expect(run(source)).toMatchObject({ kind: 'executed', stdout: 'bool(true)\n' });
 });
 
 test('releasing a large object-containing array does not exhaust the host argument stack', () => {
@@ -345,4 +345,96 @@ test('charges cloned linked-list nodes before allocating their storage', () => {
     '<?php $s=new SplDoublyLinkedList;for($i=0;$i<10000;$i++)$s->push(1);$copies=[];for($i=0;$i<100;$i++)$copies[]=clone $s;echo "never";'
   );
   expect(result.kind === 'executed' && result.stdout).toMatch(/^\nFatal error: Allowed memory size/);
+});
+
+test.each([
+  '<?php class A{public $x=foo();}',
+  '<?php class A{public $x=$b;}',
+  '<?php class A{public $x=new B;}',
+  '<?php function f($x=foo()){}',
+  '<?php function f($x=$b){}',
+  '<?php class A{public void $x;}',
+  '<?php class A{public callable $x;}',
+  '<?php class A{public never $x;}',
+  '<?php function f(bool|false $x){}',
+  '<?php function f(object|stdClass $x){}',
+  '<?php function f(?int|string $x){}',
+  '<?php interface I{final function f();}',
+  '<?php interface I{abstract function f();}',
+  '<?php class A{public public $x;}',
+  '<?php class A{public private $x;}',
+  '<?php class A{static static $x;}',
+  '<?php class A{final final function f(){}}',
+  '<?php class A{private final const X=1;}',
+  '<?php abstract class A{abstract final function f();}',
+  '<?php $f=function()use($GLOBALS){};',
+  '<?php unset($a?->b);',
+  '<?php $x=&$a?->b;',
+  '<?php $a=[];echo "$a[ 4]";',
+  '<?php class A{public $v{set($v=5){}get=>1;}}',
+])('rejects invalid declarations and writes before execution: %s', (source) => {
+  expect(run(source).kind).toBe('compileError');
+});
+
+test.each([String.raw`/(a)?\1/`, String.raw`/(?<x>a)?\k<x>/`])(
+  'rejects empty-subject backreferences whose participation cannot be represented: %s',
+  (pattern) => {
+    expect(run(`<?php preg_match('${pattern}', '', $m);`)).toMatchObject({
+      kind: 'executed',
+      uncaughtException: expect.stringContaining('この採点環境では使えません。'),
+    });
+  }
+);
+
+test('retains participating empty captures', () => {
+  expect(run(String.raw`<?php var_dump(preg_match('/(a|)\1/','',$m),$m);`)).toMatchObject({
+    kind: 'executed',
+    stdout: 'int(1)\narray(2) {\n  [0]=>\n  string(0) ""\n  [1]=>\n  string(0) ""\n}\n',
+  });
+});
+
+test('object allocation and destructor bookkeeping stay within learner budgets', () => {
+  vi.restoreAllMocks();
+  expect(run('<?php class P{public $x=1;}$s=0;for($i=0;$i<30000;$i++){$q=new P;$s+=$q->x;}echo $s;')).toMatchObject({
+    kind: 'executed',
+    stdout: '30000',
+  });
+  expect(run('<?php class N{function __destruct(){}}for($i=0;$i<4000;$i++)$k[]=new N;echo "done";')).toMatchObject({
+    kind: 'executed',
+    stdout: 'done',
+  });
+});
+
+test.each(['==', '===', '<=>'])('compares deeply nested arrays iteratively: %s', (operator) => {
+  expect(run(`<?php $a=1;$b=1;for($i=0;$i<5000;$i++){$a=[$a];$b=[$b];}var_dump($a ${operator} $b);`)).toMatchObject({
+    kind: 'executed',
+    stdout: operator === '<=>' ? 'int(0)\n' : 'bool(true)\n',
+  });
+});
+
+test('compares long linked object structures without a fixed recursion cutoff', () => {
+  expect(
+    run(
+      '<?php class N {public $next;function __construct(public $v){}} function build(){ $h=null;for($i=0;$i<1000;$i++){ $n=new N($i);$n->next=$h;$h=$n;}return $h;} $a=build();$b=build();var_dump($a==$b);'
+    )
+  ).toMatchObject({ kind: 'executed', stdout: 'bool(true)\n' });
+});
+
+test.each(['(a)+', '(b){2}'])('regex translation scales with repeated items: %s', (item) => {
+  vi.restoreAllMocks();
+  expect(run(`<?php @preg_match('/'.str_repeat('${item}',20000).'/', '');echo 'done';`)).toMatchObject({
+    kind: 'executed',
+    uncaughtException: expect.stringContaining('この採点環境では使えません。'),
+  });
+});
+
+test.each(['true', '2.0'])('exit validates strict scalar arguments before terminating: %s', (value) => {
+  const result = run(
+    `<?php declare(strict_types=1);try {exit(${value});}catch(Throwable $e){echo $e->getMessage();}echo ':continued';`
+  );
+  expect(result.kind === 'executed' && result.stdout).toMatch(/^exit\(\): Argument #1 .*:continued$/);
+});
+
+test('weak exit accepts an integral float without precision-loss diagnostics', () => {
+  expect(run('<?php echo "before";exit(2.0);echo "after";')).toMatchObject({ kind: 'executed', stdout: 'before' });
 });

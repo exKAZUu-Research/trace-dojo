@@ -12,6 +12,7 @@ export function setCallableCheck(check: (value: Value) => boolean): void {
 }
 
 /** Formats a type as PHP's messages do. */
+// code-gauge-allow functionCognitiveComplexity 21 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 export function typeToString(type: TypeDecl): string {
   if (type.k === 'named') {
     if (type.name === 'iterable') return `Traversable|array${type.nullable ? '|null' : ''}`;
@@ -30,7 +31,11 @@ export function typeToString(type: TypeDecl): string {
   ) {
     return `?${typeToString(others[0])}`;
   }
-  const parts = type.types.map((part) => (part.k === 'inter' ? `(${typeToString(part)})` : typeToString(part)));
+  const parts = type.types.flatMap((part) =>
+    part.k === 'named' && part.name === 'iterable'
+      ? ['Traversable', 'array', ...(part.nullable ? ['null'] : [])]
+      : [part.k === 'inter' ? `(${typeToString(part)})` : typeToString(part)]
+  );
   // PHP lists class types first, then the builtin types in a fixed order, with null last.
   return sortUnion(parts).join('|');
 }

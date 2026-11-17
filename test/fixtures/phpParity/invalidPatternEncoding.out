@@ -1,0 +1,55 @@
+
+Warning: preg_match(): Compilation failed: UTF-8 error: illegal byte (0xfe or 0xff) at offset 0 in /main.php on line 2
+bool(false)
+NULL
+int(1)
+
+Warning: preg_match(): Compilation failed: UTF-8 error: 1 byte missing at end at offset 0 in /main.php on line 2
+bool(false)
+NULL
+int(1)
+
+Warning: preg_match(): Compilation failed: UTF-8 error: 1 byte missing at end at offset 0 in /main.php on line 2
+bool(false)
+NULL
+int(1)
+
+Warning: preg_match(): Compilation failed: UTF-8 error: isolated byte with 0x80 bit set at offset 0 in /main.php on line 2
+bool(false)
+NULL
+int(1)
+
+Warning: preg_match(): Compilation failed: UTF-8 error: byte 2 top bits not 0x80 at offset 0 in /main.php on line 2
+bool(false)
+NULL
+int(1)
+
+Warning: preg_match(): Compilation failed: UTF-8 error: overlong 2-byte sequence at offset 0 in /main.php on line 2
+bool(false)
+NULL
+int(1)
+
+Warning: preg_match(): Compilation failed: UTF-8 error: code points 0xd800-0xdfff are not defined at offset 0 in /main.php on line 2
+bool(false)
+NULL
+int(1)
+
+Warning: preg_match(): Compilation failed: UTF-8 error: code points greater than 0x10ffff are not defined at offset 0 in /main.php on line 2
+bool(false)
+NULL
+int(1)
+
+Warning: preg_match(): Compilation failed: UTF-8 error: 5-byte character is not allowed (RFC 3629) at offset 0 in /main.php on line 2
+bool(false)
+NULL
+int(1)
+
+Warning: preg_match(): Compilation failed: UTF-8 error: 6-byte character is not allowed (RFC 3629) at offset 0 in /main.php on line 2
+bool(false)
+NULL
+int(1)
+
+Warning: preg_match(): Compilation failed: UTF-8 error: overlong 4-byte sequence at offset 0 in /main.php on line 2
+bool(false)
+NULL
+int(1)

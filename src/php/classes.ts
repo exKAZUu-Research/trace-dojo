@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 793 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 794 -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import type { ClassDecl, Expr, FunctionDecl, MethodDeclAst, PropertyDeclAst } from './ast';
 import builtinNames from './builtinNames.json';
@@ -385,13 +385,16 @@ function copyFunction(fn: Callable): Callable {
   return { ...fn, statics: new Map() };
 }
 
+// code-gauge-allow functionNcss 31 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 function checkInheritance(cls: PhpClass, row: number): void {
-  for (const method of cls.methods.values()) {
-    const parentMethod = cls.parent?.findMethod(method.lname);
-    if (parentMethod && parentMethod.visibility !== 'private') checkOverride(cls, method, parentMethod);
-    for (const iface of cls.interfaces) {
-      const ifaceMethod = iface.methods.get(method.lname);
-      if (ifaceMethod && ifaceMethod !== method) checkOverride(cls, method, ifaceMethod);
+  for (const parentMethod of cls.parent?.methods.values() ?? []) {
+    const method = cls.methods.get(parentMethod.lname);
+    if (method && parentMethod.visibility !== 'private') checkOverride(cls, method, parentMethod);
+  }
+  for (const iface of cls.interfaces) {
+    for (const ifaceMethod of iface.methods.values()) {
+      const method = cls.methods.get(ifaceMethod.lname);
+      if (method && ifaceMethod !== method) checkOverride(cls, method, ifaceMethod);
     }
   }
   if (cls.kind !== 'class' || cls.isAbstract) return;
@@ -706,9 +709,7 @@ export function readProp(object: PhpObject, name: string, scope: PhpClass | unde
       if (magic && slot === undefined && !object.guards?.has(`get:${name}`)) {
         return guarded(object, `get:${name}`, () => callMagic(object, magic, [name]));
       }
-      if (decl.type && slot !== undefined) {
-        throwError('Error', `Typed property ${decl.cls.name}::$${name} must not be accessed before initialization`);
-      }
+      if (quiet) return null;
       if (decl.type) {
         throwError('Error', `Typed property ${decl.cls.name}::$${name} must not be accessed before initialization`);
       }
@@ -776,7 +777,7 @@ export function writeProp(object: PhpObject, name: string, value: Value, scope: 
       const visibility = decl.setVisibility ?? decl.visibility;
       throwError(
         'Error',
-        `Cannot modify ${visibility}(set) property ${object.cls.name}::$${name} from ${scopeText(scope)}`
+        `Cannot modify ${visibility}(set) property ${decl.cls.name}::$${name} from ${scopeText(scope)}`
       );
     }
     const coerced = decl.type ? coerceProperty(decl, value, object) : value;
@@ -853,7 +854,7 @@ export function checkIndirectModification(object: PhpObject, name: string, scope
   } else if (!canWriteProp(decl, scope)) {
     throwError(
       'Error',
-      `Cannot indirectly modify ${decl.setVisibility ?? decl.visibility}(set) property ${object.cls.name}::$${name} from ${scopeText(scope)}`
+      `Cannot indirectly modify ${decl.setVisibility ?? decl.visibility}(set) property ${decl.cls.name}::$${name} from ${scopeText(scope)}`
     );
   }
 }

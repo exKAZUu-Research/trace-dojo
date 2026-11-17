@@ -20,6 +20,7 @@ import {
   setAllocationHandler,
   setDropHandler,
   setInternalHandler,
+  type UserFunction,
   type Value,
 } from './values';
 
@@ -113,6 +114,8 @@ export class Runtime {
   readonly steps = new StepTracker();
   readonly frames: Frame[] = [];
   readonly globalFrame: Frame;
+  readonly userFunctions: UserFunction[] = [];
+  readonly rootConstants = new Set<Value>();
   readonly functions = new Map<string, Callable>();
   readonly classes = new Map<string, PhpClass>();
   /** Constants by name, whose namespace prefix is lowercased. */
@@ -139,7 +142,6 @@ export class Runtime {
   readonly held: Value[] = [];
   program?: Program;
   notices: CompileNotice[] = [];
-  /** The function a closure literal compiles to, created once so that its static variables persist. */
   /** The reference the last call to a function returning by reference returned, for `$x = &f()`. */
   lastReturnRef: Ref | undefined;
   /** The number of user calls running, bounded by the call depth limit. */

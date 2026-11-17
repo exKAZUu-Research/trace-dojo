@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 905 -- One converter of the statements and expressions, which share the converter state.
+// code-gauge-allow-file fileNcss 910 -- One converter of the statements and expressions, which share the converter state.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import type { Node } from '@willbooster/web-tree-sitter';
 
@@ -176,7 +176,9 @@ export class Converter extends DeclarationConverter {
         return [{ k: 'static', vars, row }];
       }
       case 'unset_statement': {
-        const targets = node.namedChildren.filter((child) => child.type !== 'comment').map((child) => this.expr(child));
+        const targets = node.namedChildren
+          .filter((child) => child.type !== 'comment')
+          .map((child) => this.writable(child));
         for (const target of targets) {
           if (target.k === 'var' && target.name === 'this') this.error(node, '$this は unset できません。');
         }
@@ -210,7 +212,7 @@ export class Converter extends DeclarationConverter {
           .filter((child) => child.type === 'const_element')
           .map((child) => {
             const [nameNode, valueNode] = child.namedChildren.filter((part) => part.type !== 'comment');
-            return { name: this.qualify(this.nameText(nameNode)), value: this.constantExpr(valueNode) };
+            return { name: this.qualify(this.nameText(nameNode)), value: this.constantExpr(valueNode, true) };
           });
         return [{ k: 'const', items, row }];
       }
@@ -761,6 +763,7 @@ export class Converter extends DeclarationConverter {
         const target = this.writable(node.childForFieldName('left') as Node);
         const sourceNode = node.childForFieldName('right') as Node;
         const source = this.expr(sourceNode);
+        if (!['call', 'mcall', 'scall', 'new'].includes(source.k)) this.writable(sourceNode);
         if (source.k === 'new')
           this.error(node, 'new の結果は参照で代入できません（Cannot assign reference to non referenceable value）。');
         return { k: 'assignRef', target, source, row };
@@ -1069,7 +1072,7 @@ export class Converter extends DeclarationConverter {
         const byRef = child.type === 'by_ref';
         const variable = byRef ? child.namedChildren[0] : child;
         const name = this.variableName(variable);
-        if (name === 'this') this.error(child, '$this は use に書けません（Cannot use $this as lexical variable）。');
+        if (name === 'this' || name === 'GLOBALS') this.error(child, `Cannot use $${name} as lexical variable`);
         return { name, byRef };
       });
     const fn = this.functionDecl(node, true);
@@ -1299,6 +1302,8 @@ export class Converter extends DeclarationConverter {
     if (node.type === 'subscript_expression') {
       const [baseNode, indexNode] = node.namedChildren.filter((child) => child.type !== 'comment');
       const row = node.startPosition.row;
+      const subscript = this.source.slice(baseNode.endIndex, node.endIndex);
+      if (/\s/.test(subscript)) this.error(node, 'Invalid whitespace in simple string interpolation');
       if (indexNode?.type === 'name') {
         return { k: 'idx', base: this.expr(baseNode), index: { k: 'lit', v: enc(indexNode.text), row }, row };
       }

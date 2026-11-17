@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 527 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 531 -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import { ExecutionLimitError } from '../interpreter/limits';
 import { assignTo, bindRef, destructure, placeOf, unsetTarget } from './assignment';
@@ -24,7 +24,17 @@ import { ev, evQuiet, evReturn } from './interp';
 import { looseEquals, setObjectConversions, toStr } from './operators';
 import { ElementPlace, RefPlace, share, ValuePlace, VarPlace, writableContainer } from './places';
 import { ExitSignal, FatalError, Frame, PhpThrow, rt, type Runtime } from './runtime';
-import { type Callable, type Key, PhpArray, PhpClass, PhpObject, Ref, UNINIT, type Value } from './values';
+import {
+  type Callable,
+  type Key,
+  PhpArray,
+  PhpClass,
+  PhpObject,
+  Ref,
+  UNINIT,
+  type UserFunction,
+  type Value,
+} from './values';
 
 type Completion =
   | undefined
@@ -79,7 +89,9 @@ function declareFunction(decl: FunctionDecl): void {
       decl.row
     );
   }
-  runtime.functions.set(key, { kind: 'user', name: decl.name, decl, params: decl.params, statics: new Map() });
+  const fn: UserFunction = { kind: 'user', name: decl.name, decl, params: decl.params, statics: new Map() };
+  runtime.functions.set(key, fn);
+  runtime.userFunctions.push(fn);
 }
 
 function throwFatal(message: string, row: number): never {
@@ -235,7 +247,7 @@ function execStmt(statement: Stmt, seek?: string): Completion {
         return undefined;
       }
       case 'const': {
-        for (const item of statement.items) defineConstant(item.name, ev(item.value), true);
+        for (const item of statement.items) defineConstant(item.name, ev(item.value));
         return undefined;
       }
       case 'goto': {
@@ -273,17 +285,15 @@ function seekInto(statement: Stmt, label: string): Completion {
   }
 }
 
-export function defineConstant(name: string, value: Value, fromConst: boolean): boolean {
+export function defineConstant(name: string, value: Value): boolean {
   const runtime = rt();
   const key = constantKey(name);
   if (runtime.constants.has(key) || ['true', 'false', 'null'].includes(lower(name))) {
     warn(`Constant ${name} already defined, this will be an error in PHP 9`);
     return false;
   }
-  if (value instanceof PhpObject && !fromConst) {
-    // define() accepts objects since PHP 8.1.
-  }
   runtime.constants.set(key, share(value));
+  if (value instanceof PhpArray || value instanceof PhpObject) runtime.rootConstants.add(value);
   return true;
 }
 
