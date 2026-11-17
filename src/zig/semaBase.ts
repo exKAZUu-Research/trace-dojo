@@ -197,6 +197,7 @@ export interface SemaApi {
   peerType(expressions: readonly TExpr[], span: Span): Type;
   callFunction(fn: FunctionInstance, args: Value[], frame: Frame): Value;
   instantiate(ref: FnRef, argTypes: readonly Type[], span: Span): FunctionInstance;
+  functionSignature(value: TExpr, span: Span): FnType;
   functionOf(
     value: TExpr,
     span: Span
@@ -289,6 +290,7 @@ export abstract class SemaBase implements SemaApi {
   abstract callFunction(fn: FunctionInstance, args: Value[], frame: Frame): Value;
   protected abstract declarationType(decl: Extract<Decl, { kind: 'fn' }>, span: Span): FnType;
   abstract instantiate(ref: FnRef, argTypes: readonly Type[], span: Span): FunctionInstance;
+  abstract functionSignature(value: TExpr, span: Span): FnType;
   abstract functionOf(
     value: TExpr,
     span: Span
@@ -583,6 +585,7 @@ export abstract class SemaBase implements SemaApi {
       this.spendCompilation();
       if (
         !['int', 'float', 'bool', 'void', 'enum', 'struct', 'union'].includes(field.type.kind) ||
+        (field.type.kind === 'enum' && field.type.namespace.syntax?.argument === undefined) ||
         ((field.type.kind === 'struct' || field.type.kind === 'union') && field.type.layout !== 'packed')
       )
         this.error(span, `${typeName(field.type)} 型は、packed union のフィールドにできません。`);

@@ -58,6 +58,13 @@ fn addManyAtAssumeCapacity(self: *std.ArrayList(T), index: usize, count: usize) 
     @memset(result, undefined);
     return result;
 }
+fn appendSliceAssumeCapacity(self: *std.ArrayList(T), items: []const T) void {
+    const old_len = self.items.len;
+    const new_len = old_len + items.len;
+    std.debug.assert(new_len <= self.capacity);
+    self.items.len = new_len;
+    @memcpy(self.items[old_len..][0..items.len], items);
+}
 fn insertSliceAssumeCapacity(self: *std.ArrayList(T), index: usize, items: []const T) void {
     const dst = addManyAtAssumeCapacity(self, index, items.len);
     @memcpy(dst, items);
@@ -88,10 +95,15 @@ export function sliceMutator(
   sema: SemaApi,
   child: Type,
   list: StructType,
-  name: 'insertSlice' | 'replaceRange',
+  name: 'appendSlice' | 'insertSlice' | 'replaceRange',
   span: Span
 ): FunctionInstance {
   file ??= parseZig(SOURCE);
-  const params = [pointerTo(list, false), USIZE, ...(name === 'replaceRange' ? [USIZE] : []), sliceOf(child, true)];
+  const params = [
+    pointerTo(list, false),
+    ...(name === 'appendSlice' ? [] : [USIZE]),
+    ...(name === 'replaceRange' ? [USIZE] : []),
+    sliceOf(child, true),
+  ];
   return sema.libraryFunction(file, child, `${name}AssumeCapacity`, params, span, { namespaceName: 'std.array_list' });
 }

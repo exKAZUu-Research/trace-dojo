@@ -1901,15 +1901,18 @@ test('memory searches, cuts and delimiter iterators meter unsuccessful compariso
     'std.mem.cut(u8,input(),pattern)',
     'std.mem.cutLast(u8,input(),pattern)',
   ]) {
-    const source = `const std=@import("std");const pattern="${pattern}";fn input()[]const u8{return "${text}";}pub fn main()void{_=${operation};}`;
+    const source = `const std=@import("std");const pattern="${pattern}";fn input()[]const u8{return "${text}";}pub fn main()void{for(0..100)|_|{_=${operation};}}`;
     expect(executeProgram('zig', source)).toMatchObject({ kind: 'limitExceeded', limit: 'operations' });
   }
   for (const method of ['splitSequence', 'tokenizeSequence']) {
-    const source = `const std=@import("std");pub fn main()void{var it=std.mem.${method}(u8,"${text}","${pattern}");_=it.next();}`;
+    const source = `const std=@import("std");pub fn main()void{for(0..100)|_|{var it=std.mem.${method}(u8,"${text}","${pattern}");_=it.next();}}`;
     expect(executeProgram('zig', source)).toMatchObject({ kind: 'limitExceeded', limit: 'operations' });
   }
   expect(
-    executeProgram('zig', `const std=@import("std");pub fn main()void{_=std.mem.indexOf(u8,"${text}","${pattern}");}`)
+    executeProgram(
+      'zig',
+      `const std=@import("std");pub fn main()void{for(0..100)|_|{_=std.mem.indexOf(u8,"${text}","${pattern}");}}`
+    )
   ).toMatchObject({ kind: 'limitExceeded', limit: 'operations' });
 });
 
@@ -6731,3 +6734,116 @@ test.each([
     });
   }
 );
+
+test.each([
+  'var m=std.AutoHashMap(u8,P).init(init.gpa);defer m.deinit();try m.put(1,.{.x=1});const p=&m.get(1).?;m.getPtr(1).?.x=9;std.debug.print("{} {}",.{p.x,m.get(1).?.x});',
+  'var a:std.ArrayList(P)=.empty;defer a.deinit(init.gpa);try a.append(init.gpa,.{.x=1});const p=&a.getLast();a.items[0].x=9;std.debug.print("{} {}",.{p.x,a.items[0].x});',
+  'var a:std.ArrayList(P)=.empty;defer a.deinit(init.gpa);try a.append(init.gpa,.{.x=1});const p=&a.getLastOrNull().?;a.items[0].x=9;std.debug.print("{} {}",.{p.x,a.items[0].x});',
+])('native aggregate return values have independent storage: %s', (body) => {
+  const source = `const std=@import("std");const P=struct{x:u8};pub fn main(init:std.process.Init)!void{${body}}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: '1 9',
+    uncaughtException: undefined,
+  });
+});
+
+test.each(['const s:[:0]u8=&a;_=s[0..n:0];', '_=a[0..n:0];'])(
+  'sentinel slice panics report the accessible source extent: %s',
+  (body) => {
+    const source = `pub fn main()void{var a=[1:0]u8{7};var n:usize=2;_=&n;${body}}`;
+    expect(executeProgram('zig', source)).toMatchObject({
+      kind: 'executed',
+      uncaughtException: expect.stringContaining('index 3, len 2'),
+    });
+  }
+);
+
+test.each(['enum{a,b}', 'enum{a,b,c}'])('packed union fields require explicitly backed enums: %s', (enumType) => {
+  const bits = enumType.includes('c') ? 2 : 1;
+  const source = `const E=${enumType};const U=packed union{a:E,b:u${bits}};pub fn main()void{const u=U{.a=.b};_=u.b;}`;
+  expect(executeProgram('zig', source)).toMatchObject({ kind: 'compileError' });
+  expect(executeProgram('zig', source.replace('enum{', `enum(u${bits}){`))).toMatchObject({
+    kind: 'executed',
+    uncaughtException: undefined,
+  });
+});
+
+test.each([
+  '0..(z:{std.debug.print("g",.{});break :z @as(usize,0);})',
+  '(z:{std.debug.print("g",.{});break :z @as(usize,1);})..1',
+])('empty effectful range facts preserve endpoints and skip dead bodies: %s', (range) => {
+  const source = `const std=@import("std");pub fn main()void{for(${range})|_|{const n:u8=true;_=n;}else{std.debug.print("e",.{});}}`;
+  expect(executeProgram('zig', source)).toMatchObject({ kind: 'executed', stderr: 'ge', uncaughtException: undefined });
+});
+
+test.each([
+  'const v:error{Other}!u8=try z:{std.debug.print("g",.{});break :z @as(error{Bad}!u8,1);};std.debug.print("{!}",.{v});',
+  'const S=struct{fn f()error{Other}!u8{return try z:{std.debug.print("g",.{});break :z @as(error{Bad}!u8,1);};}};std.debug.print("{}",.{try S.f()});',
+])('try operands retain their own error union in typed result locations: %s', (body) => {
+  expect(executeProgram('zig', `const std=@import("std");pub fn main()!void{${body}}`)).toMatchObject({
+    kind: 'executed',
+    stderr: 'g1',
+    uncaughtException: undefined,
+  });
+});
+
+test.each(['.init()', '(.init())', 'z:{break :z .init();}'])(
+  'try declaration literal context follows the direct call: %s',
+  (operand) => {
+    const source = `const S=struct{x:u8,fn init()!@This(){return .{.x=1};}};pub fn main()!void{const v:S=try ${operand};_=v;}`;
+    expect(executeProgram('zig', source)).toMatchObject(
+      operand === '.init()' ? { kind: 'executed', uncaughtException: undefined } : { kind: 'compileError' }
+    );
+  }
+);
+
+test.each(['try q.push(init.gpa,.{.k=1,.v=2});', 'try q.pushSlice(init.gpa,&.{.{.k=1,.v=2}});'])(
+  'priority queue snapshots parents before comparator effects: %s',
+  (push) => {
+    const source = `const std=@import("std");const P=struct{k:u8,v:u8};const Context=struct{items:[]P};fn cmp(c:*Context,a:P,b:P)std.math.Order{c.items[0].v=9;return std.math.order(a.k,b.k);}pub fn main(init:std.process.Init)!void{var c=Context{.items=&.{}};var q=std.PriorityQueue(P,*Context,cmp).initContext(&c);defer q.deinit(init.gpa);try q.push(init.gpa,.{.k=2,.v=1});c.items=q.items;${push}std.debug.print("{} {}",.{q.items[0].v,q.items[1].v});}`;
+    expect(executeProgram('zig', source)).toMatchObject({
+      kind: 'executed',
+      stderr: '2 1',
+      uncaughtException: undefined,
+    });
+  }
+);
+
+test.each([false, true])('priority queue callback bodies can resolve their established queue type: %s', (helper) => {
+  const update = 'qp.?.items[0].v=9;';
+  const source = `const std=@import("std");const P=struct{k:u8,v:u8};const Q=std.PriorityQueue(P,void,cmp);var qp:?*Q=null;${helper ? `fn update()void{${update}}` : ''}fn cmp(_:void,a:P,b:P)std.math.Order{${helper ? 'update();' : update}return std.math.order(a.k,b.k);}pub fn main(init:std.process.Init)!void{var q:Q=.empty;defer q.deinit(init.gpa);qp=&q;try q.push(init.gpa,.{.k=2,.v=1});try q.push(init.gpa,.{.k=1,.v=2});std.debug.print("{} {}",.{q.items[0].v,q.items[1].v});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: '2 1',
+    uncaughtException: undefined,
+  });
+});
+
+test('priority queues analyze comparator bodies only when comparison operations are used', () => {
+  const source = `const std=@import("std");fn cmp(_:void,_:u8,_:u8)std.math.Order{const invalid:u8=true;_=invalid;return .eq;}pub fn main(init:std.process.Init)void{var q:std.PriorityQueue(u8,void,cmp)=.empty;defer q.deinit(init.gpa);std.debug.print("{}",.{q.count()});}`;
+  expect(executeProgram('zig', source)).toMatchObject({ kind: 'executed', stderr: '0', uncaughtException: undefined });
+  expect(executeProgram('zig', source.replace('_:u8,_:u8', '_:bool,_:u8'))).toMatchObject({ kind: 'compileError' });
+});
+
+test.each(['indexOf', 'find', 'findPos'])(
+  'std.mem.%s searches repetitive sequences within the operation budget',
+  (name) => {
+    const args = name === 'findPos' ? 'u8,&text,0,&pattern' : 'u8,&text,&pattern';
+    const source = `const std=@import("std");pub fn main()void{var text:[10000]u8=@splat('a');_=&text;var pattern:[100]u8=@splat('a');pattern[99]='b';std.debug.print("{any}|",.{std.mem.${name}(${args})});text[9999]='b';std.debug.print("{any}",.{std.mem.${name}(${args})});}`;
+    expect(executeProgram('zig', source)).toMatchObject({
+      kind: 'executed',
+      stderr: 'null|9900',
+      uncaughtException: undefined,
+    });
+  }
+);
+
+test.each(['1..3', '2..4', '0..2', '2..2'])('list appendSlice checks actual copy overlap after growth: %s', (range) => {
+  const source = `const std=@import("std");pub fn main(init:std.process.Init)!void{var b=[_]u8{1,2,3,4,5,6};var l=std.ArrayList(u8).initBuffer(&b);try l.append(init.gpa,1);try l.append(init.gpa,2);try l.appendSlice(init.gpa,b[${range}]);std.debug.print("{any}",.{l.items});}`;
+  expect(executeProgram('zig', source)).toMatchObject(
+    range === '1..3' || range === '2..4'
+      ? { kind: 'executed', uncaughtException: 'panic: @memcpy arguments alias' }
+      : { kind: 'executed', stderr: range === '0..2' ? '{ 1, 2, 1, 2 }' : '{ 1, 2 }', uncaughtException: undefined }
+  );
+});

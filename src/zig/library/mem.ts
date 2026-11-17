@@ -61,6 +61,7 @@ import {
   structReceiver,
   typeMember,
 } from './native';
+import { findSequence } from './sequenceSearch';
 import { sorter } from './sort';
 
 interface AllocationPlan {
@@ -126,27 +127,13 @@ function sequence(value: Value, spend: () => void, scalar = false): Sequence {
   });
 }
 
-function findSequence(
-  haystack: Sequence,
-  needle: Sequence,
-  from: bigint,
-  equal: typeof equalValues
-): bigint | undefined {
-  if (needle.length === 0n) return from;
-  outer: for (let index = from; index + needle.length <= haystack.length; index++) {
-    for (let offset = 0n; offset < needle.length; offset++) {
-      if (!equal(haystack.get(index + offset), needle.get(offset))) continue outer;
-    }
-    return index;
-  }
-  return undefined;
+function findSequenceLast(haystack: Sequence, needle: Sequence, equal: typeof equalValues): bigint | undefined {
+  const found = findSequence(reversedSequence(haystack), reversedSequence(needle), 0n, equal);
+  return found === undefined ? undefined : haystack.length - needle.length - found;
 }
 
-function findSequenceLast(haystack: Sequence, needle: Sequence, equal: typeof equalValues): bigint | undefined {
-  for (let index = haystack.length - needle.length; index >= 0n; index--) {
-    if (needle.every((value, offset) => equal(haystack.get(index + offset), value))) return index;
-  }
-  return undefined;
+function reversedSequence(items: Sequence): Sequence {
+  return new Sequence(items.length, (index) => items.get(items.length - index - 1n));
 }
 
 function startsWith(haystack: Sequence, needle: Sequence, equal: typeof equalValues, at = 0n): boolean {

@@ -200,10 +200,15 @@ function defineMembers(type: StructType, child: Type): void {
         }
       );
     });
-  const mutateSlice = (name: 'insertSlice' | 'replaceRange'): (() => Member) =>
+  const mutateSlice = (name: 'appendSlice' | 'insertSlice' | 'replaceRange'): (() => Member) =>
     fnMember(`ArrayList.${name}`, (sema, call) => {
       sema.resolveStorage(child, call.span);
-      const params = [ALLOCATOR, USIZE, ...(name === 'replaceRange' ? [USIZE] : []), constItems];
+      const params = [
+        ALLOCATOR,
+        ...(name === 'appendSlice' ? [] : [USIZE]),
+        ...(name === 'replaceRange' ? [USIZE] : []),
+        constItems,
+      ];
       const args = compileArgs(sema, expectArgs(sema, call, params.length, name), params);
       const list = receiverOf(sema, call.receiver, type, call.span, true);
       const fn = sliceMutator(sema, child, type, name, call.span);
@@ -223,8 +228,8 @@ function defineMembers(type: StructType, child: Type): void {
         }
       );
     });
-  const insertValues = (frame: Frame, list: List, at: bigint, input: Value[] | Slice): Value => {
-    const count = input instanceof Slice ? input.lengthValue : BigInt(input.length);
+  const insertValues = (frame: Frame, list: List, at: bigint, input: Value[]): Value => {
+    const count = BigInt(input.length);
     const length = list.items.lengthValue + count;
     if (!ensureTotalCapacity(frame, list, length, child)) return ERROR_OUT_OF_MEMORY;
     if (at > list.items.lengthValue) panic(`start index ${at} is larger than end index ${list.items.lengthValue}`);
@@ -234,9 +239,8 @@ function defineMembers(type: StructType, child: Type): void {
     }
     const index = Number(at);
     spendTransfers(list, list.items.lengthValue + count, 3);
-    const values = input instanceof Slice ? input.values() : input;
     const current = list.items.values().map(copyForStorage);
-    const inserted = values.map(copyForStorage);
+    const inserted = input.map(copyForStorage);
     const combined = [...current.slice(0, index), ...inserted, ...current.slice(index)];
     for (const [position, value] of combined.entries())
       storeInto(list.items.target, list.items.start + position, value);
@@ -302,11 +306,7 @@ function defineMembers(type: StructType, child: Type): void {
       setLength(list, list.items.lengthValue + 1n);
       return;
     }),
-    appendSlice: method(
-      'appendSlice',
-      { args: [constItems], result: allocating(VOID), allocator: true },
-      (list, [slice], frame) => insertValues(frame, list, list.items.lengthValue, slice as Slice)
-    ),
+    appendSlice: mutateSlice('appendSlice'),
     appendNTimes: method(
       'appendNTimes',
       { args: [child, USIZE], result: allocating(VOID), allocator: true },

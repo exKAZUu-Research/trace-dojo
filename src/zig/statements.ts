@@ -29,7 +29,6 @@ import {
   COMPTIME_INT,
   type EnumType,
   type ErrorSetType,
-  errorUnionOf,
   fitsInt,
   type IntType,
   isComptimeOnly,
@@ -1597,6 +1596,8 @@ export abstract class StatementCompiler extends CallCompiler {
           : undefined;
         const evaluateStart = start.eval;
         const evaluateEnd = end?.eval;
+        const startFact = staticResultOf(start);
+        const endFact = end && staticResultOf(end);
         return {
           type: USIZE,
           evaluate: (frame) => [evaluateStart(frame), evaluateEnd?.(frame)] as unknown as Value,
@@ -1609,7 +1610,7 @@ export abstract class StatementCompiler extends CallCompiler {
               }
             : undefined,
           element: (value, position) => (value as unknown as [bigint, bigint])[0] + BigInt(position),
-          staticLength: start.known && end?.known ? (end.value as bigint) - (start.value as bigint) : undefined,
+          staticLength: startFact && endFact ? (endFact.value as bigint) - (startFact.value as bigint) : undefined,
         };
       }
       const compiled = this.compile(operand.value);
@@ -2436,7 +2437,7 @@ export abstract class StatementCompiler extends CallCompiler {
     const fn = this.currentFn(expression);
     const operand = this.compile(
       expression.operand,
-      resultType ? errorUnionOf({ kind: 'error_set', names: undefined }, resultType) : undefined
+      expression.operand.kind === 'call' && expression.operand.callee.kind === 'enumLiteral' ? resultType : undefined
     );
     const type = operand.type;
     if (type.kind !== 'error_union') {

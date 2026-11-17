@@ -1,10 +1,11 @@
 import { transferCost } from '../allocation';
 import { indexOutOfBounds, PANIC, panic } from '../arith';
+import type { Span } from '../ast';
 import { enumLookup } from '../enumLookup';
 import { sizeOf } from '../layout';
 import { isIntegerType } from '../operands';
 import { type Frame, withHeldValues } from '../runtime';
-import { copyForFrame, copyForStorage, FnRef, known, undefinedValue } from '../semaBase';
+import { copyForFrame, copyForStorage, FnRef, known, type SemaApi, type TExpr, undefinedValue } from '../semaBase';
 import {
   BOOL,
   CONST_U8_SLICE,
@@ -356,14 +357,10 @@ const ENUMS: Record<string, () => Member> = {
 
 // std.PriorityQueue -----------------------------------------------------------------------------------------------------
 
+type QueueCompare = ReturnType<SemaApi['functionOf']>;
 const queueTypes = new WeakValueMap<string, StructType>();
 
-function priorityQueueType(
-  element: Type,
-  context: Type,
-  compare: { call: (frame: Frame, args: Value[]) => Value },
-  key: string
-): StructType {
+function priorityQueueType(element: Type, context: Type, compareExpression: TExpr, key: string): StructType {
   const existing = queueTypes.get(key);
   if (existing) return existing;
   const type = nativeStruct(`priority_queue.PriorityQueue(${typeName(element)})`, {}, [
@@ -376,22 +373,20 @@ function priorityQueueType(
     frame.runtime.spend(2 * transferCost(element));
     storeSliceValue(items, index, value);
   };
-  const order = (frame: Frame, queue: ZStruct, a: Value, b: Value): bigint =>
-    compare.call(frame, [queue.slots[2], a, b]) as bigint;
-  const siftUp = (frame: Frame, queue: ZStruct, start: number): void => {
+  const siftUp = (frame: Frame, queue: ZStruct, start: number, compare: QueueCompare): void => {
     const items = queue.slots[0] as Slice;
     const child = copyForFrame(frame, items.get(start), element);
     let index = start;
     while (index > 0) {
       const parentIndex = (index - 1) >> 1;
-      const parent = items.get(parentIndex);
-      if (order(frame, queue, child, parent) !== ORDER_LT) break;
+      const parent = copyForFrame(frame, items.get(parentIndex), element);
+      if (queueOrder(frame, queue, child, parent, compare) !== ORDER_LT) break;
       store(frame, items, index, parent);
       index = parentIndex;
     }
     store(frame, items, index, child);
   };
-  const siftDown = (frame: Frame, queue: ZStruct, target: number): void => {
+  const siftDown = (frame: Frame, queue: ZStruct, target: number, compare: QueueCompare): void => {
     const items = queue.slots[0] as Slice;
     const saved = copyForFrame(frame, items.get(target), element);
     let index = target;
@@ -399,8 +394,9 @@ function priorityQueueType(
       let lesser = index * 2 + 1;
       if (lesser >= items.length) break;
       const next = lesser + 1;
-      if (next < items.length && order(frame, queue, items.get(next), items.get(lesser)) === ORDER_LT) lesser = next;
-      if (order(frame, queue, saved, items.get(lesser)) === ORDER_LT) break;
+      if (next < items.length && queueOrder(frame, queue, items.get(next), items.get(lesser), compare) === ORDER_LT)
+        lesser = next;
+      if (queueOrder(frame, queue, saved, items.get(lesser), compare) === ORDER_LT) break;
       store(frame, items, index, items.get(lesser));
       index = lesser;
     }
@@ -435,15 +431,17 @@ function priorityQueueType(
     queue.slots[1] = BigInt(capacity);
     return true;
   };
-  const method = (
+  const method = <State = undefined>(
     name: string,
     args: Type[],
     result: Type,
     allocator: boolean,
-    run: (frame: Frame, queue: ZStruct, values: Value[], allocator: AllocatorState | undefined) => Value
+    run: (frame: Frame, queue: ZStruct, values: Value[], allocator: AllocatorState | undefined, state: State) => Value,
+    prepare?: (sema: SemaApi, span: Span) => State
   ): (() => Member) =>
     fnMember(`PriorityQueue.${name}`, (sema, call) => {
       sema.resolveStorage(element, call.span);
+      const prepared = prepare?.(sema, call.span) as State;
       const expected = allocator ? [ALLOCATOR, ...args] : args;
       const compiled = compileArgs(sema, expectArgs(sema, call, expected.length, name), expected);
       const queue = structReceiver(sema, call, type, !['peek', 'count', 'capacity'].includes(name));
@@ -453,14 +451,35 @@ function priorityQueueType(
         call.span,
         (frame) => ({ receiver: queue(frame) }),
         (state, values, frame) =>
-          run(frame, state.receiver, values.slice(allocator ? 1 : 0), allocator ? allocatorState(values[0]) : undefined)
+          run(
+            frame,
+            state.receiver,
+            values.slice(allocator ? 1 : 0),
+            allocator ? allocatorState(values[0]) : undefined,
+            prepared
+          )
       );
     });
+  const comparingMethod = (
+    name: string,
+    args: Type[],
+    result: Type,
+    allocator: boolean,
+    run: (
+      frame: Frame,
+      queue: ZStruct,
+      values: Value[],
+      allocator: AllocatorState | undefined,
+      compare: QueueCompare
+    ) => Value
+  ): (() => Member) =>
+    method(name, args, result, allocator, run, (sema, span) => callbackFunction(sema, compareExpression, span));
   const push = (
     frame: Frame,
     queue: ZStruct,
     values: Value[] | Slice,
-    allocator: AllocatorState | undefined
+    allocator: AllocatorState | undefined,
+    compare: QueueCompare
   ): Value => {
     const items = queue.slots[0] as Slice;
     if (!reserve(frame, queue, items.length + values.length, allocator)) return ERROR_OUT_OF_MEMORY;
@@ -470,11 +489,11 @@ function priorityQueueType(
       const grown = new Slice(current.target, current.start, current.length + 1);
       store(frame, grown, current.length, value);
       queue.slots[0] = grown;
-      siftUp(frame, queue, grown.length - 1);
+      siftUp(frame, queue, grown.length - 1, compare);
     }
     return undefined;
   };
-  const popIndex = (frame: Frame, queue: ZStruct, index: number): Value => {
+  const popIndex = (frame: Frame, queue: ZStruct, index: number, compare: QueueCompare): Value => {
     const items = queue.slots[0] as Slice;
     if (index >= items.length) indexOutOfBounds(index, items.length);
     const last = copyForFrame(frame, items.get(items.length - 1), element);
@@ -485,11 +504,11 @@ function priorityQueueType(
     return withHeldValues(frame, [item, last], () => {
       if (index === shrunk.length) return item;
       if (index === 0) {
-        siftDown(frame, queue, index);
+        siftDown(frame, queue, index, compare);
       } else {
         const parent = shrunk.get((index - 1) >> 1);
-        if (order(frame, queue, last, parent) === ORDER_GT) siftDown(frame, queue, index);
-        else siftUp(frame, queue, index);
+        if (queueOrder(frame, queue, last, parent, compare) === ORDER_GT) siftDown(frame, queue, index, compare);
+        else siftUp(frame, queue, index, compare);
       }
       return item;
     });
@@ -506,25 +525,29 @@ function priorityQueueType(
       queue.slots[1] = 0n;
       return;
     }),
-    push: method('push', [element], errorUnionOf(ALLOCATOR_ERROR, VOID), true, (frame, queue, [value], allocator) =>
-      push(frame, queue, [value], allocator)
+    push: comparingMethod(
+      'push',
+      [element],
+      errorUnionOf(ALLOCATOR_ERROR, VOID),
+      true,
+      (frame, queue, [value], allocator, compare) => push(frame, queue, [value], allocator, compare)
     ),
-    pushSlice: method(
+    pushSlice: comparingMethod(
       'pushSlice',
       [sliceOf(element, true)],
       errorUnionOf(ALLOCATOR_ERROR, VOID),
       true,
-      (frame, queue, [values], allocator) => push(frame, queue, values as Slice, allocator)
+      (frame, queue, [values], allocator, compare) => push(frame, queue, values as Slice, allocator, compare)
     ),
     peek: method('peek', [], optionalOf(element), false, (frame, queue) => {
       const items = queue.slots[0] as Slice;
       return items.length > 0 ? optionalSome(copyForFrame(frame, items.get(0), element), element) : NULL;
     }),
-    pop: method('pop', [], optionalOf(element), false, (frame, queue) =>
-      (queue.slots[0] as Slice).length > 0 ? optionalSome(popIndex(frame, queue, 0), element) : NULL
+    pop: comparingMethod('pop', [], optionalOf(element), false, (frame, queue, _values, _allocator, compare) =>
+      (queue.slots[0] as Slice).length > 0 ? optionalSome(popIndex(frame, queue, 0, compare), element) : NULL
     ),
-    popIndex: method('popIndex', [USIZE], element, false, (frame, queue, [index]) =>
-      popIndex(frame, queue, Number(index as bigint))
+    popIndex: comparingMethod('popIndex', [USIZE], element, false, (frame, queue, [index], _allocator, compare) =>
+      popIndex(frame, queue, Number(index as bigint), compare)
     ),
     count: method('count', [], USIZE, false, (_, queue) => BigInt((queue.slots[0] as Slice).length)),
     capacity: method('capacity', [], USIZE, false, (_, queue) => queue.slots[1]),
@@ -537,6 +560,9 @@ function priorityQueueType(
   return type;
 }
 
+const queueOrder = (frame: Frame, queue: ZStruct, a: Value, b: Value, compare: QueueCompare): bigint =>
+  compare.call(frame, [queue.slots[2], a, b]) as bigint;
+
 let queueKeys = 0;
 const compareKeys = new WeakMap<object, number>();
 
@@ -545,7 +571,9 @@ export const PRIORITY_QUEUE = fnMember('std.PriorityQueue', (sema, call) => {
   const element = sema.compileType(elementArg);
   const context = sema.compileType(contextArg);
   const compareExpression = sema.compile(compareArg);
-  const compare = callbackFunction(sema, compareExpression, compareArg);
+  if (compareExpression.type.kind !== 'fn' || !compareExpression.known)
+    return sema.error(compareArg, 'コールバックにはコンパイル時に決まる関数の値を渡してください。');
+  const compare = sema.functionSignature(compareExpression, compareArg);
   checkCallback(sema, 'std.PriorityQueue', compare, [context, element, element], ORDER, compareArg);
   // The same function, named twice, gives the same queue type.
   const named = compareExpression.value as unknown;
@@ -559,7 +587,7 @@ export const PRIORITY_QUEUE = fnMember('std.PriorityQueue', (sema, call) => {
   }
   return known(
     TYPE,
-    priorityQueueType(element, context, compare, `${typeId(element)} ${typeId(context)} ${id}`),
+    priorityQueueType(element, context, compareExpression, `${typeId(element)} ${typeId(context)} ${id}`),
     call.span
   );
 });

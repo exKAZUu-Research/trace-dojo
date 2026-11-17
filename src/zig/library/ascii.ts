@@ -5,6 +5,7 @@ import { markConstantStorage, Pointer, Slice, type Value, ZArray } from '../valu
 import { allocating, elements, newSlice, OPTIONAL_USIZE, optionalIndex, ORDER, orderValue } from './common';
 import { ALLOCATOR, allocatorState, ERROR_OUT_OF_MEMORY, reserveNativeAllocation } from './heap';
 import { concreteFnMember, type Member, nativeStruct } from './native';
+import { findSequence } from './sequenceSearch';
 
 const isAlpha = (c: number): boolean => (c >= 0x41 && c <= 0x5a) || (c >= 0x61 && c <= 0x7a);
 const isDigit = (c: number): boolean => c >= 0x30 && c <= 0x39;
@@ -83,26 +84,17 @@ function comparer(
 }
 
 function findIgnoreCase(text: number[], pattern: number[], spend: () => void): number {
-  if (pattern.length === 0) return 0;
-  const prefix = new Uint32Array(pattern.length);
-  let matched = 0;
-  for (let index = 1; index < pattern.length;) {
+  const found = findSequence(foldedSequence(text), foldedSequence(pattern), 0n, (a, b) => {
     spend();
-    if (toLower(pattern[index]) === toLower(pattern[matched])) prefix[index++] = ++matched;
-    else if (matched > 0) matched = prefix[matched - 1];
-    else index++;
-  }
-  matched = 0;
-  for (let index = 0; index < text.length;) {
-    spend();
-    if (toLower(text[index]) === toLower(pattern[matched])) {
-      index++;
-      if (++matched === pattern.length) return index - matched;
-    } else if (matched > 0) matched = prefix[matched - 1];
-    else index++;
-  }
-  return -1;
+    return a === b;
+  });
+  return found === undefined ? -1 : Number(found);
 }
+
+const foldedSequence = (values: number[]): { length: bigint; get: (index: bigint) => number } => ({
+  length: BigInt(values.length),
+  get: (index) => toLower(values[Number(index)]),
+});
 
 const MEMBERS: Record<string, () => Member> = {
   isAlphabetic: predicate('std.ascii.isAlphabetic', isAlpha),

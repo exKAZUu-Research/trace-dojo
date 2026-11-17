@@ -748,10 +748,9 @@ export abstract class ExpressionCompiler extends SemaBase {
   private elementAccess(type: Type): (value: Value, index: bigint) => { slots: Slots; position: number } {
     if (type.kind === 'array') {
       const limit = type.length + (type.sentinel === undefined ? 0n : 1n);
-      const length = type.length;
       return (value, index) => {
         const array = value as ZArray;
-        if (index >= limit) indexOutOfBounds(index, length);
+        if (index >= limit) indexOutOfBounds(index, limit);
         return { slots: array, position: array.offset + Number(index) };
       };
     }
@@ -760,7 +759,7 @@ export abstract class ExpressionCompiler extends SemaBase {
       const limit = array.length + (array.sentinel === undefined ? 0n : 1n);
       return (value, index) => {
         const target = arrayPointerView(value as Pointer, array);
-        if (index >= limit) indexOutOfBounds(index, array.length);
+        if (index >= limit) indexOutOfBounds(index, limit);
         return { slots: target, position: target.offset + Number(index) };
       };
     }
@@ -768,7 +767,7 @@ export abstract class ExpressionCompiler extends SemaBase {
     return (value, index) => {
       const slice = value as Slice;
       const limit = slice.lengthValue + (sentinel === undefined ? 0n : 1n);
-      if (index >= limit) indexOutOfBounds(index, slice.lengthValue);
+      if (index >= limit) indexOutOfBounds(index, limit);
       return { slots: slice.target, position: slice.start + Number(index) };
     };
   }
@@ -860,7 +859,7 @@ export abstract class ExpressionCompiler extends SemaBase {
       }
       const fromValue = first as bigint;
       const toValue = end ? (last as bigint) : length;
-      if (toValue + extra > limitOf(length)) indexOutOfBounds(toValue + extra, length);
+      if (toValue + extra > limitOf(length)) indexOutOfBounds(toValue + extra, limitOf(length));
       if (fromValue > toValue) panic(`start index ${fromValue} is larger than end index ${toValue}`);
       const from = offset + Number(fromValue),
         to = offset + Number(toValue);

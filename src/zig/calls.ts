@@ -109,12 +109,14 @@ export abstract class CallCompiler extends BuiltinCompiler {
   ): TExpr {
     const value = callee.value as unknown;
     if (callee.known && value instanceof NativeFn) {
-      return value.compileCall(this, {
+      const result = value.compileCall(this, {
         span: expression,
         args: expression.args,
         receiver,
         resultType,
       });
+      if (result.known) return result;
+      return { ...result, eval: (frame) => copyForFrame(frame, result.eval(frame), result.type) };
     }
     if (callee.known && value instanceof FnRef) {
       return this.callDeclaration(value, receiver, expression, resultType);
@@ -418,6 +420,15 @@ export abstract class CallCompiler extends BuiltinCompiler {
     return id;
   }
 
+  functionSignature(value: TExpr, span: Span): FnType {
+    const ref = value.value as unknown;
+    if (value.known && ref instanceof FnRef) return this.declarationType(ref.decl, span);
+    const type = value.type;
+    if (type.kind === 'fn') return type;
+    if (type.kind === 'pointer' && type.child.kind === 'fn') return type.child;
+    return this.error(span, `関数が必要ですが、${typeName(type)} 型の値です。`);
+  }
+
   /** The function a value calls, for library functions that take a function, such as `std.mem.sort`'s comparator. */
   functionOf(
     value: TExpr,
@@ -492,7 +503,7 @@ export abstract class CallCompiler extends BuiltinCompiler {
   ): Value {
     const { runtime: rt } = caller;
     rt.spend();
-    if (fn.native) return fn.native(args, caller);
+    if (fn.native) return copyForFrame(caller, fn.native(args, caller), fn.returnType);
     if (!fn.body) return panic('関数がまだ準備できていません。');
     const frame = new Frame(rt, fn, fn.internal ? undefined : callRow, fn.slotCount);
     for (const [index, slot] of fn.paramSlots.entries())
