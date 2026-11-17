@@ -201,7 +201,8 @@ export class MemberChecker {
     if (isAnyLike(type)) return type;
     const members = type.kind === 'union' ? type.types : [type];
     const hasNull = members.some((member) => isIntrinsic(member, 'null'));
-    const hasUndefined = members.some((member) => isIntrinsic(member, 'undefined') || isIntrinsic(member, 'void'));
+    const hasUndefined = members.some((member) => isIntrinsic(member, 'undefined'));
+    // TypeScript reports a member of `void` as missing on the type, which the member's own check does.
     if (!hasNull && !hasUndefined) return type;
     const rest = this.c.relations.removeNullish(type);
     const literal = skipParentheses(node).type;
