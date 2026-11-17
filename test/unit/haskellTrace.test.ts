@@ -958,7 +958,7 @@ main=forM_ [1..1000::Int] $ \\i -> do
   }
 });
 
-test.each([20, 30])('demanded scalar previews preserve every loop assignment: sum 1..%i', (count) => {
+test.each([20, 30, 77])('demanded scalar previews preserve every loop assignment: sum 1..%i', (count) => {
   const source = `import Control.Monad
 main=forM_ [1..1000::Int] $ \\i -> do
  let n=sum [1..${count}::Int]+i

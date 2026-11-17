@@ -2,11 +2,11 @@ import assert from 'node:assert/strict';
 
 import { CompileError } from '../interpreter/diagnostics';
 import { TURTLE_METHOD_NAMES } from '../interpreter/turtleWorld';
-import { PRIMITIVE_TYPES, TURTLE_TYPE, UNIT_TYPE } from './builtinTypes';
+import { DOUBLE_TYPE, INT_TYPE, INTEGER_TYPE, IO_TYPE, PRIMITIVE_TYPES, TURTLE_TYPE, UNIT_TYPE } from './builtinTypes';
 import { ClassEnv } from './classEnv';
 import { Codegen, type CodegenSupport } from './codegen';
 import type { GlobalDef } from './core';
-import { type ClassEntity, type ConInfo, nextId, type TypeEntity, type ValueEntity } from './entities';
+import { type ClassEntity, nextId, type TypeEntity, type ValueEntity } from './entities';
 import type { Builtins } from './infer';
 import { LIBRARY_SOURCES, PUBLIC_MODULES, UNSUPPORTED_MODULES, UNSUPPORTED_VALUES } from './library';
 import {
@@ -38,12 +38,6 @@ interface Library {
 }
 
 let library: Library | undefined;
-
-/** Compiles the library on first use; its modules are the same for every run. */
-export function getLibrary(): Library {
-  library ??= compileLibrary();
-  return library;
-}
 
 function primitiveExports(): ExportTable {
   const table = emptyExports();
@@ -358,16 +352,16 @@ function makeBuiltins(type: (name: string) => TypeEntity, cls: (name: string) =>
       return type('Bool');
     },
     get int() {
-      return PRIMITIVE_TYPES[0];
+      return INT_TYPE;
     },
     get integer() {
-      return PRIMITIVE_TYPES[1];
+      return INTEGER_TYPE;
     },
     get double() {
-      return PRIMITIVE_TYPES[2];
+      return DOUBLE_TYPE;
     },
     get io() {
-      return PRIMITIVE_TYPES[5];
+      return IO_TYPE;
     },
     get eq() {
       return cls('Eq');
@@ -412,7 +406,7 @@ export interface CompiledProgram {
 
 /** Compiles a program, throwing a `CompileError` for the errors GHC reports before running and for unsupported code. */
 export function compileProgram(source: string, atomicRows?: ReadonlySet<number>, traceTypes = false): CompiledProgram {
-  const lib = getLibrary();
+  const lib = (library ??= compileLibrary());
   return withCompilationBudget(() => {
     const parsed = parseHaskell(source);
     const renamed = renameModule(parsed, {
@@ -453,5 +447,3 @@ function assertPublicExports(name: string, exports: ExportTable): void {
     assert.ok(!values || values.includes(value), `${name} does not export ${value}`);
   for (const type of exports.types.keys()) assert.ok(!types || types.includes(type), `${name} does not export ${type}`);
 }
-
-export type { ConInfo };

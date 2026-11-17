@@ -79,7 +79,7 @@ export class Runtime implements TracedRuntime<TraceFrame> {
     if (this.displayRemaining !== undefined) return run();
     this.displayRemaining = operations;
     try {
-      return this.budget.excludingTime(() => withTypeWorkBudget(() => this.spend(), run));
+      return this.budget.excludingTime(() => withTypeWorkBudget(() => this.spendDisplay(1, 0), run));
     } finally {
       this.displayRemaining = undefined;
     }
