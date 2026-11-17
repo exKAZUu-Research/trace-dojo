@@ -534,19 +534,34 @@ export class TypeOperators {
     return this.templateLiteral(texts, types, node);
   }
 
-  templateLiteral(texts: string[], types: Type[], node?: TreeNode): Type {
-    if (types.some((type) => this.c.relations.isGeneric(type)))
-      return { kind: 'templateLiteral', id: newTypeId(), texts, types };
+  templateLiteral(spelledTexts: string[], spelledTypes: Type[], node?: TreeNode): Type {
+    const { texts, types } = splicedSpans(spelledTexts, spelledTypes);
     // Each union expands into one literal per member, up to the size TypeScript represents.
     const size = types.reduce((product, type) => product * (type.kind === 'union' ? type.types.length : 1), 1);
     if (size >= 100_000) {
       if (node) this.c.error(node, 'この式の型は、表せないほど複雑な共用体型になります。');
       return errorType;
     }
+    if (types.some((type) => isIntrinsic(type, 'never'))) return neverType;
     const combinations = this.literalCombinations(texts, types);
     if (combinations === 'never') return neverType;
     if (combinations) return unionOf(combinations.map((text) => literalType(text)));
-    if (types.length === 1 && isIntrinsic(types[0], 'string') && texts.every((text) => text === '')) return stringType;
+    const union = types.find((type) => type.kind === 'union');
+    if (union?.kind === 'union')
+      return unionOf(
+        union.types.map((member) =>
+          this.templateLiteral(
+            texts,
+            types.map((type) => (type === union ? member : type))
+          )
+        )
+      );
+    if (types.some((type) => this.c.relations.isGeneric(type)))
+      return { kind: 'templateLiteral', id: newTypeId(), texts, types };
+    if (texts.every((text) => text === '')) {
+      if (types.every((type) => isIntrinsic(type, 'string'))) return stringType;
+      if (types.length === 1 && isPatternKey(types[0])) return types[0];
+    }
     return { kind: 'templateLiteral', id: newTypeId(), texts, types };
   }
 
@@ -624,6 +639,33 @@ function appendEach(prefixes: string[], members: Type[], suffix: string): string
         prefix + (member.kind === 'literal' ? String(member.value) : (member as { name: string }).name) + suffix
     )
   );
+}
+
+/**
+ * The texts and placeholders of a template literal type with each placeholder that is a template literal type or spells
+ * one text spliced into the texts, as TypeScript's `getTemplateLiteralType` adds its spans.
+ */
+function splicedSpans(texts: string[], types: Type[]): { texts: string[]; types: Type[] } {
+  const spliced = { texts: [] as string[], types: [] as Type[] };
+  let text = texts[0];
+  const addSpans = (spanTexts: string[], spanTypes: Type[]): void => {
+    for (const [index, type] of spanTypes.entries()) {
+      if (type.kind === 'templateLiteral') {
+        text += type.texts[0];
+        addSpans(type.texts, type.types);
+      } else if (isSpelledLiteral(type)) {
+        text += appendEach([''], [type], '')[0];
+      } else {
+        spliced.texts.push(text);
+        spliced.types.push(type);
+        text = '';
+      }
+      text += spanTexts[index + 1];
+    }
+  };
+  addSpans(texts, types);
+  spliced.texts.push(text);
+  return spliced;
 }
 
 /** Whether a template placeholder spells one text, as a literal, `null`, or `undefined` does. */

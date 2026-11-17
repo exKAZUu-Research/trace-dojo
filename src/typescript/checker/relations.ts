@@ -328,6 +328,8 @@ export class Relations {
         if (s.kind === 'literal' && typeof s.value === 'string') return this.matchesTemplate(s.value, t);
         if (s.kind === 'templateLiteral' && t.kind === 'templateLiteral')
           return this.sameGeneric(s, t) || this.templateMatchesTemplate(s, t, relation);
+        if (s.kind === 'stringMapping' && t.kind === 'stringMapping' && s.mapping === t.mapping)
+          return this.isRelated(s.type, t.type, relation);
         return relation === 'comparable' && isIntrinsic(s, 'string');
       }
       case 'object': {
