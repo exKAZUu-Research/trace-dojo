@@ -537,15 +537,7 @@ export class Relations {
   ): boolean {
     const sourceIndex = applicableIndex(structure, keyKind);
     if (sourceIndex) return this.isRelated(sourceIndex.type, target, relation);
-    // An object literal's or a type literal's properties satisfy an index signature; a class's or interface's do not.
-    if (
-      source.kind === 'object' &&
-      (source.objectKind === 'interface' || source.objectKind === 'reference') &&
-      !source.isLiteral
-    ) {
-      if (source.classInfo) return false;
-      return false;
-    }
+    if (!hasInferableIndex(source, structure)) return false;
     for (const [name, property] of structure.properties) {
       if (!isNameOfKind(name, keyKind)) continue;
       if (property.isMethod && source.kind === 'object' && source.objectKind !== 'anonymous') continue;
@@ -810,6 +802,17 @@ function hasSignatures(structure: Structure): boolean {
 
 function isLeaf(type: Type): boolean {
   return type.kind === 'intrinsic' || type.kind === 'literal';
+}
+
+/**
+ * Whether the properties of a type satisfy an index signature, as TypeScript's `isObjectTypeWithInferableIndex`
+ * decides: an object literal's and a type literal's do; a primitive's, a callable's, a class's, and an interface's do not.
+ */
+function hasInferableIndex(source: Type, structure: Structure): boolean {
+  if (structure.callSignatures.length > 0 || structure.constructSignatures.length > 0) return false;
+  if (source.kind === 'intersection') return true;
+  if (source.kind !== 'object') return false;
+  return (source.objectKind !== 'interface' && source.objectKind !== 'reference') || !!source.isLiteral;
 }
 
 /** Whether a stack ending in `type` has expanded its recursive type too often, as TypeScript's `isDeeplyNestedType` decides. */

@@ -1,0 +1,10 @@
+(1,7): error TS2322: Type 'string' is not assignable to type '{ [k: string]: any; }'.
+(3,7): error TS2322: Type 'number' is not assignable to type '{ [k: string]: unknown; }'.
+(4,7): error TS2322: Type 'boolean' is not assignable to type 'Record<string, unknown>'.
+(6,7): error TS2322: Type '() => number' is not assignable to type 'Record<string, unknown>'.
+  Index signature for type 'string' is missing in type '() => number'.
+(8,7): error TS2322: Type '() => number' is not assignable to type 'Record<string, unknown>'.
+  Index signature for type 'string' is missing in type '() => number'.
+(11,7): error TS2322: Type 'F' is not assignable to type 'Record<string, unknown>'.
+  Index signature for type 'string' is missing in type 'F'.
+(14,16): error TS2322: Type 'string' is not assignable to type 'number | O'.
