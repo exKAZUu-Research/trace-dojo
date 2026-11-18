@@ -1476,6 +1476,18 @@ test.each([
   }
 );
 
+test.each([
+  'var value:E=undefined;const e=&value;',
+  'var buf:[16]u8=undefined;var f=std.heap.FixedBufferAllocator.init(&buf);const e=try f.allocator().create(E);',
+])('scalar error-union captures alias their ABI payload byte (%s)', (storage) => {
+  const source = `const std=@import("std");const E=error{Oops}!u8;const U=extern union{a:*E,b:*[4]u8};pub fn main()!void{${storage}e.*=7;const u=U{.a=e};if(e.*)|*p|{std.debug.print("{} {} {}|",.{p==&u.b[2],p.*,u.b[2]});p.*=9;std.debug.print("{}|",.{u.b[2]});u.b[2]=11;std.debug.print("{}",.{p.*});}else |_|{unreachable;}}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: 'true 7 7|9|11',
+    uncaughtException: undefined,
+  });
+});
+
 test('writer result types use the canonical usize and mutable byte slice', () => {
   const source = `const std=@import("std");fn less(n:usize,a:u8,b:u8)bool{return n>0 and a<b;}
 pub fn main()!void{var b:[2]u8=undefined;var w=std.Io.Writer.fixed(&b);const n=try w.write("x");var a=[_]u8{2,1};std.sort.heap(u8,&a,n,less);std.debug.print("{} {} {}",.{a[0],a[1],@TypeOf(w.buffered())==[]u8});}`;
@@ -6525,6 +6537,35 @@ test.each([
   expect(
     executeProgram('zig', `const std=@import("std");pub fn main()void{${loop}std.debug.print("ok",.{});}`)
   ).toMatchObject({ kind: 'executed', stderr: 'ok', uncaughtException: undefined });
+});
+
+test.each([
+  ['const o:?u8=1;while(o)|x|return x;', '1'],
+  ['const o:??u8=@as(?u8,1);while(o)|x|return x.? else return @as(u8,true);', '1'],
+  ['while(true)return 2 else return @as(u8,true);', '2'],
+  ['const o:?u8=null;while(o)|x|return x else return 3;', '3'],
+  ['var o:?u8=1;while(o)|_|{o=null;}else return 4;', '4'],
+])('while checks function fallthrough using reachable exits: %s', (body, expected) => {
+  const source = `const std=@import("std");fn f()u8{${body}}pub fn main()void{std.debug.print("{}",.{f()});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: expected,
+    uncaughtException: undefined,
+  });
+});
+
+test('reachable break from a statically present optional loop still needs a return', () => {
+  const source = `fn f()u8{const o:?u8=1;while(o)|x|{_=x;break;}}pub fn main()void{_=f();}`;
+  expect(executeProgram('zig', source)).toMatchObject({ kind: 'compileError' });
+});
+
+test('while specializes reachable branches for each generic argument type', () => {
+  const source = `const std=@import("std");fn size(x:anytype)usize{while(@TypeOf(x)==u8){return x;}else{return x.len;}}pub fn main()void{std.debug.print("{} {}",.{size(@as(u8,7)),size("abc")});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: '7 3',
+    uncaughtException: undefined,
+  });
 });
 
 test('comptime float fused multiplication preserves wide exact values', () => {

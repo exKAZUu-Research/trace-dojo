@@ -773,13 +773,11 @@ export abstract class ExpressionCompiler extends SemaBase {
     type: Extract<Type, { kind: 'error_union' }>,
     span: Span
   ): (parent: Pointer) => Pointer {
-    return this.fieldPointer(
-      type,
-      type.payload,
-      span,
-      () => errorUnionOffsets(type.payload).payload,
-      (pointer) => pointer
-    );
+    if (this.requiresComptime(type, span)) return (parent) => parent;
+    const { payload } = type;
+    const offset = errorUnionOffsets(payload).payload;
+    if (sizeOf(payload) === 0) return (parent) => this.zeroPointerAt(parent.fieldLocation(offset), payload);
+    return (parent) => parent.atPayloadOffset(offset);
   }
 
   // Indexing and slicing ----------------------------------------------------------------------------------------------

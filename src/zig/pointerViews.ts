@@ -47,7 +47,7 @@ export function viewPointer(pointer: Pointer, type: Type, space: BufferMemorySpa
   if (prior) return prior;
   const backing = space.typedViews.get(pointer.target.slots);
   const memory = backing?.memory ?? space.memories.get(location.storage as Value[]);
-  const offset = backing ? backing.offset(pointer.index) : location.index * 8;
+  const offset = backing ? backing.offset(pointer.index) + (pointer.offsetInSlot ?? 0) * 8 : location.index * 8;
   let result: Pointer;
   if (memory) result = new Pointer(memory.arrayView(type, capacity(memory.byteLength - offset / 8, type), offset), 0);
   else {
@@ -310,6 +310,7 @@ function sourceLocation(pointer: Pointer, type: Type, offset: number): { storage
     for (const region of intersectingFields(type, offset, offset + 1))
       return sourceLocation(new Pointer(pointer.load() as ZStruct, region.index), region.type, offset - region.offset);
   }
+  if (type.kind === 'error_union') return pointer.fieldLocation(offset / 8);
   const location = pointer.storageLocation();
   return { storage: location.storage, index: location.index + offset / (8 * Math.max(1, sizeOf(type))) };
 }

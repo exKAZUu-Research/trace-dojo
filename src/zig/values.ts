@@ -241,7 +241,8 @@ export class Pointer {
   constructor(
     readonly target: Slots,
     readonly index: number,
-    private readonly aggregateOrigin?: { storage: object; index: number }
+    private readonly aggregateOrigin?: { storage: object; index: number },
+    readonly offsetInSlot?: number
   ) {}
 
   load(): Value {
@@ -271,6 +272,7 @@ export class Pointer {
   }
 
   storageLocation(): { storage: object; index: number } {
+    if (this.offsetInSlot !== undefined && this.aggregateOrigin) return pointerLocation(this.aggregateOrigin);
     const slots = this.target.slots;
     const projected = pointerLocations.get(slots)?.(this.index);
     if (projected) return pointerLocation(projected);
@@ -295,6 +297,10 @@ export class Pointer {
 
   withFieldLocation(parent: Pointer, offset: number): Pointer {
     return new Pointer(this.target, this.index, parent.fieldLocation(offset));
+  }
+
+  atPayloadOffset(offset: number): Pointer {
+    return new Pointer(this.target, this.index, this.fieldLocation(offset), (this.offsetInSlot ?? 0) + offset);
   }
 
   private aggregateLocation(): { storage: object; index: number } {

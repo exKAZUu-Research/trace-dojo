@@ -1404,6 +1404,7 @@ export abstract class StatementCompiler extends CallCompiler {
       broken: false,
     };
     const condition = this.compile(expression.condition);
+    const fact = staticResultOf(condition);
     const kind = conditionKind(condition.type, expression.capture !== undefined);
     const infallible = errorUnionCannotFail(condition);
     const row = this.stepRow(expression);
@@ -1420,6 +1421,7 @@ export abstract class StatementCompiler extends CallCompiler {
       test = (frame) => evaluate(frame) as boolean;
     } else if (kind === 'optional' && condition.type.kind === 'optional') {
       this.checkMemoryHeader(condition, expression.condition);
+      infinite = fact !== undefined && fact.value !== NULL;
       binding = this.captureBinding(expression.capture, condition.type.child, condition);
       const evaluate = condition.eval;
       const bind = binding?.bind;
@@ -1461,7 +1463,6 @@ export abstract class StatementCompiler extends CallCompiler {
     let continueExec: Exec | undefined;
     try {
       ({ body, continueExec } = this.withCapture(binding, () => {
-        const fact = staticResultOf(condition);
         const neverRuns =
           fact !== undefined &&
           (kind === 'bool'
@@ -1481,7 +1482,7 @@ export abstract class StatementCompiler extends CallCompiler {
       fn.targets.pop();
     }
     const otherwise =
-      expression.otherwise && !infallible
+      expression.otherwise && !infinite
         ? this.withCapture(errorBinding, () =>
             this.branch(expression.otherwise as Expression, undefined, target.resultType, asStatement)
           )
@@ -1521,7 +1522,7 @@ export abstract class StatementCompiler extends CallCompiler {
         const result = loop(frame);
         return result instanceof Jump ? result : undefined;
       },
-      noreturn: infinite && !target.broken,
+      noreturn: !target.broken && (infinite || otherwise?.stmt?.noreturn === true),
     };
     return {
       stmt,
