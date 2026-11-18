@@ -4498,6 +4498,19 @@ test('large named format tables share the compilation budget', () => {
   ).toMatchObject({ kind: 'limitExceeded', limit: 'operations' });
 });
 
+test.each([
+  ['{B:.52}', `1.536${'0'.repeat(49)}kB`, undefined],
+  ['{Bi:.51}', `1.5${'0'.repeat(50)}KiB`, undefined],
+  ['{B:.53}', '', 'panic: index out of bounds: index 57, len 56'],
+  ['{Bi:.52}', '', 'panic: index out of bounds: index 57, len 56'],
+  ['{B:.55}', '', 'panic: attempt to unwrap error: BufferTooSmall'],
+  ['{Bi:.400}', '', 'panic: attempt to unwrap error: BufferTooSmall'],
+  ['{Bi:.18446744073709551613}', '', 'panic: attempt to unwrap error: BufferTooSmall'],
+])('byte-size format %s preserves the reference rendering and suffix bounds', (format, stderr, uncaughtException) => {
+  const source = `const std=@import("std");pub fn main()void{std.debug.print("${format}",.{@as(usize,1536)});}`;
+  expect(executeProgram('zig', source)).toMatchObject({ kind: 'executed', stderr, uncaughtException });
+});
+
 test('known widths retain value coercion while byte-size parameters enforce typed ranges', () => {
   expect(
     executeProgram('zig', 'const std=@import("std");pub fn main()void{std.debug.print("{d:[1]}",.{3,@as(u128,3)});}')

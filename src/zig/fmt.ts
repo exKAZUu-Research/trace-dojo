@@ -1,10 +1,10 @@
 import { checkOutputSize } from './allocation';
-// code-gauge-allow-file fileNcss 817 -- Keeps format parsing and rendering with their shared specifiers.
+// code-gauge-allow-file fileNcss 821 -- Keeps format parsing and rendering with their shared specifiers.
 /**
  * Zig's formatted printing (`std.Io.Writer.print` and `printValue`), transcribed so that output matches byte for byte.
  * Formatting works on bytes, as Zig's strings are bytes.
  */
-import { checked, PANIC, panic } from './arith';
+import { checked, indexOutOfBounds, PANIC, panic } from './arith';
 import { physicalUnion } from './bufferMemory';
 import {
   type AnyFloat,
@@ -752,11 +752,14 @@ function printByteSize(out: FormatOutput, value: bigint, binary: boolean, option
   // `std.math.log2(1000)` is 9, the integer part.
   const magnitude = Math.min(Math.floor(log2 / (binary ? 10 : 9)), 8);
   const base = binary ? 1024 : 1000;
+  const bufferSize = 53 + 3;
   const text =
     magnitude === 0
       ? value.toString()
-      : formatDecimal(shortestDecimal(Number(value) / base ** magnitude, 64), options.precision);
+      : formatDecimal(shortestDecimal(Number(value) / base ** magnitude, 64), options.precision, bufferSize);
+  if (text === undefined) return panic('attempt to unwrap error: BufferTooSmall');
   const suffix = magnitude === 0 ? 'B' : `${(binary ? ' KMGTPEZY' : ' kMGTPEZY')[magnitude]}${binary ? 'iB' : 'B'}`;
+  if (text.length + suffix.length > bufferSize) indexOutOfBounds(text.length + suffix.length, bufferSize);
   alignBuffer(out, utf8(text + suffix), options);
 }
 
@@ -912,8 +915,10 @@ export function printFloat(
 ): void {
   const decimal = shortestDecimal(value, bits);
   const text =
-    mode === 'scientific' ? formatScientific(decimal, options.precision) : formatDecimal(decimal, options.precision);
-  alignBuffer(out, utf8(text), options);
+    mode === 'scientific'
+      ? formatScientific(decimal, options.precision)
+      : formatDecimal(decimal, options.precision, FLOAT_BUFFER_SIZE);
+  alignBuffer(out, utf8(text ?? '(float)'), options);
 }
 
 function decimalLength(value: bigint): number {
@@ -971,10 +976,10 @@ function special(decimal: Decimal): string {
 }
 
 /** `std.fmt.float.formatScientific`. */
-function formatScientific(input: Decimal, requested: bigint | undefined): string {
+function formatScientific(input: Decimal, requested: bigint | undefined): string | undefined {
   if (input.special) return special(input);
   const decimal = requested === undefined ? input : roundDecimal(input, 'scientific', requested);
-  if (requested !== undefined && checked(8n + requested, USIZE) > FLOAT_BUFFER_SIZE) return TOO_LONG;
+  if (requested !== undefined && checked(8n + requested, USIZE) > FLOAT_BUFFER_SIZE) return undefined;
   const precision = requested === undefined ? undefined : Number(requested);
   const digits = decimal.mantissa.toString();
   const olength = digits.length;
@@ -995,12 +1000,11 @@ function formatScientific(input: Decimal, requested: bigint | undefined): string
  * `(float)` for text that does not fit, as longer floats and large precisions can.
  */
 const FLOAT_BUFFER_SIZE = 347;
-const TOO_LONG = '(float)';
 
 /** `std.fmt.float.formatDecimal`. */
 // code-gauge-allow functionCognitiveComplexity 24 -- Keeps checked sizing and the three decimal point positions together.
 // code-gauge-allow functionNcss 32 -- Keeps checked sizing and the three decimal point positions together.
-function formatDecimal(input: Decimal, requested: bigint | undefined): string {
+function formatDecimal(input: Decimal, requested: bigint | undefined, bufferSize: number): string | undefined {
   if (input.special) return special(input);
   const decimal = requested === undefined ? input : roundDecimal(input, 'decimal', requested);
   const digits = decimal.mantissa.toString();
@@ -1011,7 +1015,7 @@ function formatDecimal(input: Decimal, requested: bigint | undefined): string {
     2n + (decimal.exponent >= 0 ? prefix + requestedBytes : requestedBytes > prefix ? requestedBytes : prefix),
     USIZE
   );
-  if (needed > FLOAT_BUFFER_SIZE) return TOO_LONG;
+  if (needed > bufferSize) return undefined;
   const precision = requested === undefined ? undefined : Number(requested);
   let text = decimal.sign ? '-' : '';
   const pointOffset = decimal.exponent + olength;
