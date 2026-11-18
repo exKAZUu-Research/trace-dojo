@@ -313,14 +313,10 @@ export function checkTypeMemberDuplicates(c: Checker, body: TreeNode): void {
  * the implementation, or from the first declaration when there is none.
  */
 export function checkOverloadOptionality(c: Checker, body: TreeNode): void {
+  reportOptionalAccessors(c, body);
   const byKey = new Map<string, TreeNode[]>();
   for (const member of named(body)) {
-    if (!overloadableMethodTypes.has(member.type)) continue;
-    if (hasToken(member, 'get') || hasToken(member, 'set')) {
-      // TypeScript's grammar has no optional accessor, which it reports as a syntax error at the name.
-      if (hasToken(member, '?')) c.error(memberNameNode(member), 'アクセサーに ? は付けられません。');
-      continue;
-    }
+    if (!overloadableMethodTypes.has(member.type) || isAccessor(member)) continue;
     const name = memberName(c, member);
     if (name === undefined) continue;
     const key = `${hasToken(member, 'static') ? 'static ' : ''}${name}`;
@@ -336,6 +332,18 @@ export function checkOverloadOptionality(c: Checker, body: TreeNode): void {
         );
     }
   }
+}
+
+/** Reports a `?` on an accessor, for which TypeScript's grammar has no place, as a syntax error at the name. */
+function reportOptionalAccessors(c: Checker, body: TreeNode): void {
+  for (const member of named(body)) {
+    if (overloadableMethodTypes.has(member.type) && isAccessor(member) && hasToken(member, '?'))
+      c.error(memberNameNode(member), 'アクセサーに ? は付けられません。');
+  }
+}
+
+function isAccessor(member: TreeNode): boolean {
+  return hasToken(member, 'get') || hasToken(member, 'set');
 }
 
 function isAllowedRedeclaration(members: TreeNode[]): boolean {
