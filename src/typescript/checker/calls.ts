@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 500 -- Resolves calls as TypeScript does: callees, overloads, inference, and the effects of calls on the flow.
+// code-gauge-allow-file fileNcss 505 -- Resolves calls as TypeScript does: callees, overloads, inference, and the effects of calls on the flow.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import { unsupportedMessage } from '../unsupported';
@@ -205,15 +205,23 @@ export class Calls {
   }
 
   private callSignatures(type: Type): Signature[] {
-    if (type.kind !== 'union') return this.c.signaturesOf(type, 'call');
-    const signatures = this.unionSignatures.of(type.types.map((member) => this.c.signaturesOf(member, 'call')));
-    return signatures.length > 0 ? signatures : this.unionSignatures.arrayMethodSignatures(type.types);
+    const members = this.apparentUnionMembers(type);
+    if (!members) return this.c.signaturesOf(type, 'call');
+    const signatures = this.unionSignatures.of(members.map((member) => this.c.signaturesOf(member, 'call')));
+    return signatures.length > 0 ? signatures : this.unionSignatures.arrayMethodSignatures(members);
   }
 
   /** The construct signatures of `type`, which for a union combine its members' as its call signatures do. */
   private constructSignatures(type: Type): Signature[] {
-    if (type.kind !== 'union') return this.c.signaturesOf(type, 'construct');
-    return this.unionSignatures.of(type.types.map((member) => this.c.signaturesOf(member, 'construct')));
+    const members = this.apparentUnionMembers(type);
+    if (!members) return this.c.signaturesOf(type, 'construct');
+    return this.unionSignatures.of(members.map((member) => this.c.signaturesOf(member, 'construct')));
+  }
+
+  /** The members of a union, or of the union a generic type's apparent type is, as `T extends A | B` has. */
+  private apparentUnionMembers(type: Type): Type[] | undefined {
+    const apparent = type.kind === 'union' ? type : this.c.apparentType(type);
+    return apparent.kind === 'union' ? apparent.types : undefined;
   }
 
   /** Whether `type` constructs an abstract class: all its construct signatures are abstract, or it is the class itself. */

@@ -357,10 +357,12 @@ export class MemberChecker {
       );
       return;
     }
-    const suggestion = this.suggestProperty(type, name);
+    // TypeScript names the union a generic type's apparent type is, as `string | number` for `T extends string | number`.
+    const shown = apparent.kind === 'union' ? apparent : type;
+    const suggestion = this.suggestProperty(shown, name);
     this.c.error(
       node,
-      `プロパティ '${name}' は型 '${this.c.print(type)}' にありません。${suggestion ? `'${suggestion}' のことですか？` : ''}`
+      `プロパティ '${name}' は型 '${this.c.print(shown)}' にありません。${suggestion ? `'${suggestion}' のことですか？` : ''}`
     );
   }
 
