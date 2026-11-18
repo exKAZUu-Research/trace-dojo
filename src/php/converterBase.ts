@@ -34,6 +34,12 @@ export const BUILTIN_TYPES = new Set([
 ]);
 export const MAGIC_RUNTIME = new Set(['__CLASS__', '__FUNCTION__', '__METHOD__', '__TRAIT__']);
 
+export function explicitlyQualifiedName(raw: string): string | undefined {
+  if (raw.startsWith('\\')) return raw.slice(1);
+  if (lower(raw).startsWith('namespace\\')) return raw.slice('namespace\\'.length);
+  return undefined;
+}
+
 export function isReservedClassName(name: string): boolean {
   const word = lower(name);
   return BUILTIN_TYPES.has(word) || word === 'self' || word === 'parent' || word === 'static';
@@ -137,6 +143,14 @@ export abstract class ConverterBase {
     return raw;
   }
 
+  protected namedClass(node: Node, expected = ''): string {
+    const raw = this.declaredIdentifier(node, expected);
+    const explicit = explicitlyQualifiedName(raw);
+    if (explicit && ['self', 'static', 'parent'].includes(lower(explicit)))
+      this.error(node, `'${raw}' is an invalid class name`);
+    return this.resolveClassName(raw);
+  }
+
   protected classRef(node: Node, deferScope = false): ClassRef {
     const isName = node.type === 'name' || node.type === 'qualified_name' || node.type === 'relative_name';
     if (node.type !== 'relative_scope' && !isName) return { k: 'expr', e: this.expr(node) };
@@ -146,8 +160,8 @@ export abstract class ConverterBase {
       if (!deferScope) this.checkClassScope(node, word);
       return { k: word };
     }
-    const name = this.declaredIdentifier(node, node.parent?.type === 'object_creation_expression' ? '"class"' : '');
-    return { k: 'named', name: this.resolveClassName(name) };
+    const name = this.namedClass(node, node.parent?.type === 'object_creation_expression' ? '"class"' : '');
+    return { k: 'named', name };
   }
 
   /**

@@ -223,7 +223,7 @@ const recursiveMethods: NativeMethod[] = [
       const state = stateOf(thisObj);
       state.levels = [{ object: iterator, iterator: innerIteratorOf(iterator), step: Step.Start }];
       state.mode = Number(args[1] ?? 0n);
-      state.flags = Number(args[2] ?? 0n);
+      state.flags = Number(((args[2] as bigint | undefined) ?? 0n) & BigInt(CATCH_GET_CHILD));
       state.maxDepth = -1;
       state.inIteration = false;
       return null;

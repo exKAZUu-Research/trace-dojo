@@ -21,6 +21,8 @@ const MISSING_TOKEN_NAMES: Record<string, string> = {
   heredoc_end: 'ヒアドキュメントの終わりの印',
 };
 
+const newClassKeywordOperators = new Set(['instanceof', 'and', 'or', 'xor']);
+
 export interface ParsedProgram {
   program: Program;
   notices: CompileNotice[];
@@ -71,6 +73,8 @@ function convertPhp(root: Node, text: string, atomicRows: Set<number>, ignoredPr
 }
 
 function locatePhpErrors(root: Node, diagnostics: SourceDiagnostic[]): SourceDiagnostic[] {
+  const creationError = newKeywordError(root, diagnostics.length > 0);
+  if (creationError) return [creationError];
   if (diagnostics.length === 0) return diagnostics;
   for (const error of root.descendantsOfType('ERROR')) {
     if (diagnostics[0].row !== error.startPosition.row) continue;
@@ -98,6 +102,75 @@ function locatePhpErrors(root: Node, diagnostics: SourceDiagnostic[]): SourceDia
       return [{ row: token.startPosition.row, message: 'syntax error, unexpected token ",", expecting "}"' }];
   }
   return diagnostics;
+}
+
+function newKeywordError(root: Node, recovering: boolean): SourceDiagnostic | undefined {
+  for (const expression of root.descendantsOfType('object_creation_expression')) {
+    const diagnostic = creationClassDiagnostic(expression);
+    if (diagnostic) return diagnostic;
+  }
+  if (!recovering) return undefined;
+  for (const error of root.descendantsOfType('ERROR')) {
+    const diagnostic = recoveredNewName(error);
+    if (diagnostic) return diagnostic;
+  }
+  return undefined;
+}
+
+function creationClassDiagnostic(expression: Node): SourceDiagnostic | undefined {
+  const name = expression.namedChildren.find((child) => child.type !== 'comment');
+  if (name?.type !== 'name') return undefined;
+  const parent = expression.parent;
+  const binary =
+    parent?.type === 'binary_expression' && parent.childForFieldName('left')?.id === expression.id ? parent : undefined;
+  if (name.text.toLowerCase() === 'enum') {
+    const operator = binary?.childForFieldName('operator');
+    const hasArgs = expression.namedChildren.some((child) => child.type === 'arguments');
+    if (!operator || !newClassKeywordOperators.has(operator.type) || hasArgs) return undefined;
+  }
+  const argument = binary ? binary.parent : parent;
+  return unexpectedNewName(name, argument?.type === 'argument' && argument.startIndex === expression.startIndex);
+}
+
+function recoveredNewName(error: Node): SourceDiagnostic | undefined {
+  const parts = error.children.filter((child) => child.type !== 'comment');
+  if (
+    error.parent?.type === 'object_creation_expression' &&
+    parts[0]?.type === 'readonly_modifier' &&
+    parts[1]?.text.toLowerCase() === 'instanceof'
+  )
+    return {
+      row: parts[1].startPosition.row,
+      message: 'syntax error, unexpected token "instanceof", expecting "class"',
+    };
+  for (const [index, child] of parts.entries()) {
+    if (child.text.toLowerCase() !== 'new') continue;
+    const name = parts[index + 1];
+    const operatorNode = parts[index + 2];
+    const operator = operatorNode?.text.toLowerCase();
+    if (!name || !operator || !newClassKeywordOperators.has(operator)) continue;
+    if (name.text.toLowerCase() === 'readonly' && operator === 'instanceof')
+      return {
+        row: operatorNode.startPosition.row,
+        message: 'syntax error, unexpected token "instanceof", expecting "class"',
+      };
+    const previous = parts[index - 1]?.type;
+    const diagnostic = unexpectedNewName(name, previous === '(' || previous === ',');
+    if (diagnostic) return diagnostic;
+  }
+  return undefined;
+}
+
+function unexpectedNewName(name: Node, startsArgument: boolean): SourceDiagnostic | undefined {
+  const word = name.text.toLowerCase();
+  if (word === 'static' || word === 'class' || word === 'readonly') return undefined;
+  const token = word === 'enum' ? word : reservedIdentifierToken(word);
+  if (!token) return undefined;
+  const expected = startsArgument ? ':' : 'class';
+  return {
+    row: name.startPosition.row,
+    message: `syntax error, unexpected token "${token}", expecting "${expected}"`,
+  };
 }
 
 function reservedClassSyntax(error: Node): SourceDiagnostic | undefined {

@@ -34,3 +34,24 @@ show(fn()=>assert(false && function(){
 show(fn()=>assert(false && function(){
     readonly class Box {public int $x; public function __construct(public int $y){}}
 }));
+show(fn()=>assert(false && function(){interface InvalidBody { public function f() {} }}));
+show(fn()=>assert(false && function(){abstract class InvalidAbstract { abstract function f() {} }}));
+show(fn()=>assert(false && function(){class MissingBody { function f(); }}));
+show(fn()=>assert(false && function(){interface InvalidConstant { private const X = 1; }}));
+show(fn()=>assert(false && function(){class PrivateFinalConstant { final private const X = 1; }}));
+show(fn()=>assert(false && function(){class RepeatedProperty { public $x; public $x; }}));
+show(fn()=>assert(false && function(){class OuterClass { function make() { class InnerClass {} interface InnerInterface {} trait InnerTrait {} } }}));
+show(fn()=>assert(false && function(){
+    class GetterReferences {
+        public int $a{ &get { return $this->a; } }
+        public int $b{ &get => $this->b; }
+        public int $c{ final &get { return $this->c; } }
+    }
+}));
+show(fn()=>assert(false && function(){
+    class DnfTypes {
+        public (Countable&Iterator)|null $input;
+        public (A&B)|(C&D) $other;
+        function describe((Countable&Iterator)|null $source): (Countable&Iterator)|null { return $source; }
+    }
+}));

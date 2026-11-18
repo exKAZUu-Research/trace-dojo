@@ -1,0 +1,80 @@
+warning:Undefined variable $u
+int(1)
+ErrorException:Undefined variable $u / 
+warning:Undefined variable $u
+string(1) "x"
+ErrorException:Undefined variable $u / 
+warning:Undefined variable $w
+int(1)
+ErrorException:Undefined variable $w / 
+warning:Undefined variable $w
+string(7) "missing"
+ErrorException:Undefined variable $w / 
+warning:Undefined variable $u
+string(7) "missing"
+DivisionByZeroError:Division by zero / Undefined variable $u
+warning:Undefined array key "k"
+array(0) {
+}
+ErrorException:Undefined array key "k" / 
+warning:Undefined property: stdClass::$p
+object(stdClass)#3 (1) {
+  ["p"]=>
+  int(1)
+}
+ErrorException:Undefined property: stdClass::$p / 
+warning:Undefined variable $v
+int(0)
+ErrorException:Undefined variable $v / 
+warning:Undefined variable $v
+ErrorException:Undefined variable $v / 
+DivisionByZeroError:Division by zero / 
+TypeError:Unsupported operand types: int - array / 
+Error:Cannot modify private(set) property TestVisibility::$value from global scope / 
+Error:Indirect modification of H::$b is not allowed / 
+Error:Indirect modification of H::$c is not allowed / 
+array(0) {
+}
+
+Warning: Undefined array key "missing" in /main.php on line 35
+
+Warning: Undefined variable $rightHand in /main.php on line 35
+
+Warning: Undefined array key "missing" in /main.php on line 37
+
+Warning: Undefined variable $rightHand in /main.php on line 37
+
+Warning: Undefined array key "outer" in /main.php on line 39
+
+Warning: Undefined array key "inner" in /main.php on line 39
+
+Warning: Undefined variable $rightHand in /main.php on line 39
+
+Warning: Undefined variable $key in /main.php on line 40
+
+Deprecated: Using null as an array offset is deprecated, use an empty string instead in /main.php on line 40
+
+Warning: Undefined array key "" in /main.php on line 40
+
+Warning: Undefined variable $rightHand in /main.php on line 40
+
+Warning: Undefined variable $value in /main.php on line 42
+
+Warning: Undefined variable $name in /main.php on line 42
+
+Warning: Undefined variable $value in /main.php on line 43
+
+Warning: Undefined variable $key in /main.php on line 43
+Error:Attempt to assign property "" on null / 
+
+Warning: Undefined variable $value in /main.php on line 44
+
+Warning: Undefined variable $key in /main.php on line 44
+Error:Attempt to assign property "" on int / 
+
+Warning: Undefined variable $value in /main.php on line 45
+
+Warning: Array to string conversion in /main.php on line 45
+
+Warning: Undefined variable $value in /main.php on line 46
+Error:Object of class stdClass could not be converted to string / 

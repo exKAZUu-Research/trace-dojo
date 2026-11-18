@@ -18,7 +18,7 @@ import { formatFloat, isNumericString, NAN_BOOL_WARNING, NAN_STRING_WARNING } fr
 import { type CompileNotice, isReservedClassName, MAGIC_RUNTIME } from './converterBase';
 import { DeclarationConverter } from './declarationConverter';
 import { exportExpr, UnexportableSyntax } from './export';
-import { decodeLiteral, parseIntegerLiteral } from './literals';
+import { decodeLiteral, decodeSingleQuoted, parseIntegerLiteral } from './literals';
 
 export type { CompileNotice } from './converterBase';
 
@@ -524,7 +524,7 @@ export class Converter extends DeclarationConverter {
             const raw = this.nameText(name);
             if (['self', 'static', 'parent'].includes(lower(raw)))
               this.error(type, 'Bad class name in the catch statement');
-            return this.resolveClassName(this.declaredIdentifier(name, ''));
+            return this.namedClass(name);
           });
         const nameNode = child.childForFieldName('name');
         const varName = nameNode ? this.variableName(nameNode) : undefined;
@@ -1648,7 +1648,7 @@ export class Converter extends DeclarationConverter {
     const text = node.text;
     // The grammar keeps escapes in the content; only \\ and \' are escapes in single quotes.
     const raw = text.startsWith("'") || /^[bB]'/.test(text) ? text.slice(text.indexOf("'") + 1, -1) : content;
-    return enc(raw.replaceAll(/\\([\\'])/g, '$1'));
+    return decodeSingleQuoted(raw);
   }
 
   private nowdoc(node: Node): string {
@@ -1715,21 +1715,22 @@ export class Converter extends DeclarationConverter {
             () => row + this.source.slice(node.startIndex, rawStart).split('\n').length - 1
           )
         : raw;
+      const escapeRow = (offset: number): number => {
+        const before = this.source.slice(node.startIndex, rawStart) + text.slice(0, offset);
+        return row + before.split('\n').length - 1;
+      };
       parts.push(
         decodeLiteral(
           text,
           !isHeredoc,
-          (escape) => {
+          (escape, offset) => {
             this.notices.push({
               level: 'Warning',
               message: `Octal escape sequence overflow ${escape} is greater than \\377`,
-              row: container.startPosition.row,
+              row: escapeRow(offset),
             });
           },
-          (message, offset) => {
-            const before = this.source.slice(node.startIndex, rawStart) + text.slice(0, offset);
-            this.error(row + before.split('\n').length - 1, message);
-          }
+          (message, offset) => this.error(escapeRow(offset), message)
         )
       );
       raw = '';

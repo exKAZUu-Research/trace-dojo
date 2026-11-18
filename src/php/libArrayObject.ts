@@ -26,6 +26,7 @@ const ARRAY_AS_PROPS = 2;
 const CHILD_ARRAYS_ONLY = 4;
 /** The flags PHP keeps for itself, which the flag arguments and getFlags leave out. */
 const INTERNAL_FLAGS = 0xff_ff_00_00;
+const PUBLIC_FLAGS = ~INTERNAL_FLAGS;
 
 /** The storage of an ArrayObject or ArrayIterator: its own array, or the ArrayObject whose storage it uses. */
 export class ArrayStorage {
@@ -234,7 +235,7 @@ function setStorage(object: PhpObject, value: Value, method: string, flags: numb
     );
     if (other === object) throw new UnsupportedFeatureError('通常のオブジェクトを配列ストレージにする操作');
     if (other.internal instanceof ArrayStorage) {
-      if (justArray) newFlags = storageOf(other).flags & ~INTERNAL_FLAGS;
+      if (justArray) newFlags = storageOf(other).flags & PUBLIC_FLAGS;
       storage = new ArrayStorage(name, new PhpArray(), other);
     } else {
       throw new UnsupportedFeatureError('通常のオブジェクトを配列ストレージにする操作');
@@ -269,7 +270,7 @@ function arrayMethods(name: string): NativeMethod[] {
       impl: ({ thisObj, args }) => {
         if (args.length === 0) return null;
         if (args.length > 2) storageOf(thisObj).iteratorClass = iteratorClassName(args[2], '__construct', 3);
-        const flags = Number(args[1] ?? 0n) & ~INTERNAL_FLAGS;
+        const flags = Number(((args[1] as bigint | undefined) ?? 0n) & BigInt(PUBLIC_FLAGS));
         setStorage(thisObj, args[0], '__construct', flags, args.length === 1);
         return null;
       },
@@ -314,12 +315,14 @@ function arrayMethods(name: string): NativeMethod[] {
     },
     { signature: 'getArrayCopy(): array', impl: ({ thisObj }) => arrayCopy(thisObj) },
     { signature: 'count(): int', impl: ({ thisObj }) => BigInt(storageOf(thisObj).array.size) },
-    { signature: 'getFlags(): int', impl: ({ thisObj }) => BigInt(storageOf(thisObj).flags & ~INTERNAL_FLAGS) },
+    { signature: 'getFlags(): int', impl: ({ thisObj }) => BigInt(storageOf(thisObj).flags & PUBLIC_FLAGS) },
     {
       signature: 'setFlags(int $flags): void',
       impl: ({ thisObj, args }) => {
         const storage = storageOf(thisObj);
-        storage.flags = checkFlags((storage.flags & INTERNAL_FLAGS) | (Number(args[0]) & ~INTERNAL_FLAGS));
+        storage.flags = checkFlags(
+          (storage.flags & INTERNAL_FLAGS) | Number((args[0] as bigint) & BigInt(PUBLIC_FLAGS))
+        );
         return null;
       },
     },
@@ -408,11 +411,13 @@ const iteratorMethods: NativeMethod[] = [
     signature: 'seek(int $offset): void',
     impl: ({ thisObj, args }) => {
       const storage = storageOf(thisObj);
-      const offset = Number(args[0]);
-      if (offset < 0) throwError('OutOfBoundsException', `Seek position ${offset} is out of range`);
+      const offset = args[0] as bigint;
+      if (offset < 0n) throwError('OutOfBoundsException', `Seek position ${offset} is out of range`);
+      const length = storage.array.size;
+      const steps = offset < BigInt(length) ? Number(offset) : length;
       const cursor = storage.cursor();
       cursor.rewind();
-      for (let index = 0; index < offset && cursor.key !== undefined; index++) {
+      for (let index = 0; index < steps && cursor.key !== undefined; index++) {
         rt().spend();
         cursor.next();
       }

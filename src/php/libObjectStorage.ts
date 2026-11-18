@@ -272,10 +272,10 @@ defineClass({
       signature: 'seek(int $offset): void',
       impl: ({ thisObj, args }) => {
         const storage = storageOf(thisObj);
-        const offset = Number(args[0]);
-        if (offset < 0 || offset >= storage.entries.size)
+        const offset = args[0] as bigint;
+        if (offset < 0n || offset >= BigInt(storage.entries.size))
           throwError('OutOfBoundsException', `Seek position ${offset} is out of range`);
-        storage.seek(offset);
+        storage.seek(Number(offset));
         return null;
       },
     },

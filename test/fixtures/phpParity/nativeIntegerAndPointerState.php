@@ -35,3 +35,23 @@ $object->removeSecond();
 var_dump(key($object), current($object));
 $object->addSecond();
 var_dump(key($object), prev($object), bin2hex(key($object)));
+
+foreach ([9007199254740993, 9007199254740995, PHP_INT_MAX] as $mode) {
+    $list = new SplDoublyLinkedList;
+    $list->push('a');
+    $list->push('b');
+    var_dump($list->setIteratorMode($mode));
+    foreach ($list as $item) echo $item;
+    echo ':', count($list), "\n";
+}
+$stack = new SplStack;
+$queue = new SplQueue;
+foreach ([$stack, $queue] as $list) {
+    foreach ([9007199254740993, 9007199254740995] as $mode) {
+        try {
+            var_dump($list->setIteratorMode($mode));
+        } catch (RuntimeException $error) {
+            echo $error->getMessage(), "\n";
+        }
+    }
+}

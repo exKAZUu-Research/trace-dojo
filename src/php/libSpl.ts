@@ -176,7 +176,7 @@ const listMethods: NativeMethod[] = [
     signature: 'setIteratorMode(int $mode): int',
     impl: ({ thisObj, args }) => {
       const list = listOf(thisObj);
-      const mode = Number(args[0]);
+      const mode = Number((args[0] as bigint) & BigInt(IT_MODE_LIFO | IT_MODE_DELETE));
       if (list.flags & IT_FIX && (list.flags & IT_MODE_LIFO) !== (mode & IT_MODE_LIFO))
         throwError('RuntimeException', "Iterators' LIFO/FIFO modes for SplStack/SplQueue objects are frozen");
       list.flags = (mode & (IT_MODE_LIFO | IT_MODE_DELETE)) | (list.flags & IT_FIX);
@@ -541,7 +541,7 @@ defineClass({
       {
         signature: 'setExtractFlags(int $flags): int',
         impl: ({ thisObj, args }) => {
-          const flags = Number(args[0]) & EXTR_BOTH;
+          const flags = Number((args[0] as bigint) & BigInt(EXTR_BOTH));
           if (flags === 0) throwError('RuntimeException', 'Must specify at least one extract flag');
           heapOf(thisObj).flags = flags;
           return BigInt(flags);

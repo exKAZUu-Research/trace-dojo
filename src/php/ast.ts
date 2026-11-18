@@ -192,6 +192,7 @@ export interface MethodDeclAst {
   isStatic: boolean;
   isAbstract: boolean;
   isFinal: boolean;
+  syntaxHasBody?: boolean;
 }
 
 export interface PropertyHookSyntax {
@@ -199,6 +200,7 @@ export interface PropertyHookSyntax {
   body?: Stmt[];
   expression?: Expr;
   isFinal: boolean;
+  byRefReturn: boolean;
 }
 
 export type ClassMemberSyntax =

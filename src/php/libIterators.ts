@@ -169,7 +169,7 @@ export class DualState {
   /** The iterator over the ArrayIterator that holds an AppendIterator's iterators. */
   appended: InnerIterator | undefined;
   callback: Value = null;
-  regex = { pattern: '', mode: 0, flags: 0, pregFlags: 0 };
+  regex = { pattern: '', mode: 0, flags: 0n, pregFlags: 0n };
 
   constructor(private readonly owner: PhpObject) {}
 
@@ -537,9 +537,9 @@ defineClass({
       signature: '__construct(Iterator $iterator, int $flags = 1)',
       impl: ({ thisObj, args }) => {
         const state = constructDual(thisObj, 'CachingIterator');
-        const flags = Number(args[1] ?? BigInt(CIT_CALL_TOSTRING));
+        const flags = Number(((args[1] as bigint | undefined) ?? BigInt(CIT_CALL_TOSTRING)) & BigInt(CIT_PUBLIC));
         checkCachingFlags(flags, 'CachingIterator::__construct(): Argument #2 ($flags)');
-        state.cachingFlags |= flags & CIT_PUBLIC;
+        state.cachingFlags |= flags;
         return finishConstruct(state, args[0] as PhpObject);
       },
     },
@@ -576,14 +576,14 @@ defineClass({
       signature: 'setFlags(int $flags): void',
       impl: ({ thisObj, args }) => {
         const state = dualOf(thisObj);
-        const flags = Number(args[0]);
+        const flags = Number((args[0] as bigint) & BigInt(CIT_PUBLIC));
         checkCachingFlags(flags, 'CachingIterator::setFlags(): Argument #1 ($flags)');
         if (state.cachingFlags & CIT_CALL_TOSTRING && !(flags & CIT_CALL_TOSTRING))
           throwError('InvalidArgumentException', 'Unsetting flag CALL_TO_STRING is not possible');
         if (state.cachingFlags & CIT_TOSTRING_USE_INNER && !(flags & CIT_TOSTRING_USE_INNER))
           throwError('InvalidArgumentException', 'Unsetting flag TOSTRING_USE_INNER is not possible');
         if (flags & CIT_FULL_CACHE && !(state.cachingFlags & CIT_FULL_CACHE)) state.cache = new PhpArray();
-        state.cachingFlags = (state.cachingFlags & ~CIT_PUBLIC) | (flags & CIT_PUBLIC);
+        state.cachingFlags = (state.cachingFlags & ~CIT_PUBLIC) | flags;
         return null;
       },
     },

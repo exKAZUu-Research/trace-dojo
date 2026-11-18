@@ -653,10 +653,10 @@ defineFunction('gc_disable(): void', () => {
   return null;
 });
 defineFunction('debug_print_backtrace(int $options = 0, int $limit = 0): void', ({ args }) => {
-  const options = Number(args[0] ?? 0n);
+  const omitArgs = (((args[0] as bigint | undefined) ?? 0n) & 2n) !== 0n;
   const limit = backtraceLimit(args[1] as bigint | undefined);
   const records = callStack.toReversed().slice(1, limit + 1);
-  rt().echo(records.map((record, index) => traceLine(record, index, (options & 2) !== 0) + '\n').join(''));
+  rt().echo(records.map((record, index) => traceLine(record, index, omitArgs) + '\n').join(''));
   return null;
 });
 

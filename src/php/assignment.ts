@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 688 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 735 -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import type { Expr, ListItem } from './ast';
 import { foreachSubjectWritable, hasReferenceItem } from './astAnalysis';
@@ -7,8 +7,17 @@ import { propRef, readProp, staticPropRef, unsetProp, writeProp } from './classe
 import * as classesModule from './classes';
 import * as conversionsModule from './conversions';
 import { debugType, numericPrefix, toBool, valueName } from './conversions';
-import { deprecated, notice, throwError, warn, withPendingException } from './errors';
-import { ev, isArrayAccess, memberName, prepareOperand, readIndex, resolveClassRef, stringOffset } from './interp';
+import { deprecated, notice, throwError, warn, withCleanupExceptions, withPendingException } from './errors';
+import {
+  ev,
+  isArrayAccess,
+  isCompiledVariable,
+  memberName,
+  prepareOperand,
+  readIndex,
+  resolveClassRef,
+  stringOffset,
+} from './interp';
 import { arithmetic, bitwise, concat, toInt, toKey, toStr } from './operators';
 import {
   type CompoundRead,
@@ -21,6 +30,7 @@ import {
   RefPlace,
   share,
   SKIP_COMPOUND,
+  type UpdateWarning,
   ValuePlace,
   VarPlace,
   writableContainer,
@@ -124,14 +134,12 @@ function dimensionPlace(e: Extract<Expr, { k: 'idx' }>, mode: PlaceMode): Place 
   });
 }
 
-// code-gauge-allow functionCognitiveComplexity 17 -- Keeps the ordered PHP cases together because each branch shares the same dispatch state.
+// code-gauge-allow functionCognitiveComplexity 19 -- Keeps the ordered PHP cases together because each branch shares the same dispatch state.
 function instancePropertyPlace(e: Extract<Expr, { k: 'prop' }>, mode: PlaceMode, through: boolean): Place {
   const parent = placeOf(e.obj, mode, true);
   const property = e.name;
   const readName = typeof property === 'string' ? () => property : prepareOperand(property);
-  const resolve = (writeMode: WriteMode): Place => {
-    const name = toStr(readName());
-    const object = propertyReceiver(e.obj, parent, writeMode);
+  const locate = (name: string, object: Value, writeMode: WriteMode): Place => {
     rt().row = e.row;
     if (!(object instanceof PhpObject)) {
       const action = through ? 'modify' : writeMode === 'incdec' ? 'increment/decrement' : 'assign';
@@ -141,13 +149,23 @@ function instancePropertyPlace(e: Extract<Expr, { k: 'prop' }>, mode: PlaceMode,
     }
     return propPlace(object, name);
   };
+  const resolve = (writeMode: WriteMode): Place =>
+    locate(toStr(readName()), propertyReceiver(e.obj, parent, writeMode), writeMode);
   if (mode !== 'deferred') return resolve(mode);
-  return deferredPlace(resolve, () => {
+  const place = deferredPlace(resolve, () => {
     const object = readForIsset(parent);
     const name = toStr(readName());
     rt().row = e.row;
     return object instanceof PhpObject ? readProp(object, name, rt().frame.scope, 'coalesce') : undefined;
   });
+  if (typeof property !== 'string' && !through) {
+    place.assign = (readValue) => {
+      const object = propertyReceiver(e.obj, parent, 'write');
+      const value = readValue();
+      return locate(toStr(readName()), object, 'write').set(value);
+    };
+  }
+  return place;
 }
 
 function invalidWriteTarget(error: () => never): Place {
@@ -201,7 +219,7 @@ function deferredPlace(resolve: (mode: WriteMode) => Place, read: () => Value | 
   const writable = (mode: WriteMode = 'write'): Place => (target ??= resolve(mode));
   return {
     get: (operation) => (operation === 'assignOp' ? writable('update').get(operation) : read()),
-    fetchCompound: () => readCompound(writable('update')),
+    fetchCompound: (warning) => readCompound(writable('update'), warning),
     getForIsset: read,
     nested: (mode) => {
       const place = writable(mode === 'update' ? 'update' : 'write');
@@ -316,8 +334,8 @@ function propPlace(object: PhpObject, name: string): Place {
       if (operation) lookup(true);
       return readPropertyPlace(object, name, scope, operation);
     },
-    fetchCompound() {
-      return fetchCompoundProperty(this, object, name, scope, lookup(true));
+    fetchCompound(warning) {
+      return fetchCompoundProperty(this, object, name, scope, lookup(true), warning);
     },
     set: (value, operation) => writeProp(object, name, value, scope, { fetched: reportedStaticAccess, operation }),
     ref: () => propRef(object, name, scope),
@@ -348,16 +366,18 @@ function fetchCompoundProperty(
   object: PhpObject,
   name: string,
   scope: PhpClass | undefined,
-  decl: PropDecl | undefined
+  decl: PropDecl | undefined,
+  warning: UpdateWarning
 ): CompoundRead {
   const ordinary =
     decl &&
     !decl.isReadonly &&
     !decl.hooks &&
     classesModule.canAccessProp(decl, scope) &&
+    classesModule.canWriteProp(decl, scope) &&
     !object.unsetProperties?.has(decl.key);
   const value = readPropertyPlace(object, name, scope, 'assignOp');
-  if (value === undefined) place.warnUndefined?.();
+  if (value === undefined) warning(() => place.warnUndefined?.());
   return {
     value: value ?? null,
     declaration: ordinary ? decl : undefined,
@@ -745,21 +765,62 @@ export function compoundAssign(e: Extract<Expr, { k: 'assignOp' }>): Value {
     return place.set(share(value));
   }
   const place = placeOf(e.target, 'deferred');
-  const value = ev(e.value);
-  runtime.row = e.row;
-  const fetched = readCompound(place);
-  if (fetched === SKIP_COMPOUND) return null;
+  const read = prepareOperand(e.value);
+  return withUpdateWarnings((warning) => {
+    const afterFetch = e.target.k === 'idx' && isCompiledVariable(e.value);
+    const value = afterFetch ? null : readUpdateValue(e, read, warning);
+    runtime.row = e.row;
+    const fetched = readCompound(place, warning);
+    if (fetched === SKIP_COMPOUND) return null;
+    return storeCompoundResult(e.op, place, fetched, afterFetch ? read(e.row) : value);
+  });
+}
+
+function readUpdateValue(
+  e: Extract<Expr, { k: 'assignOp' }>,
+  read: (row?: number) => Value,
+  warning: UpdateWarning
+): Value {
+  if (!isCompiledVariable(e.value) || (e.target.k !== 'var' && e.target.k !== 'prop')) return read();
+  let value: Value = null;
+  warning(() => {
+    value = read(e.row);
+  });
+  return value;
+}
+
+function storeCompoundResult(op: string, place: Place, fetched: CompoundRead, value: Value): Value {
   const current = fetched.value;
   let result: Value;
   try {
-    result = applyOperator(e.op, current, value);
+    result = applyOperator(op, current, value);
   } catch (error) {
-    if (error instanceof PhpThrow && !(e.op === '.' && typeof current === 'string')) {
+    if (error instanceof PhpThrow && !(op === '.' && typeof current === 'string')) {
       finishFailedCompound(place, fetched, error);
     }
     throw error;
   }
   return place.set(share(result), 'assignOp');
+}
+
+function withUpdateWarnings(update: (warning: UpdateWarning) => Value): Value {
+  let result: Value = null;
+  withCleanupExceptions(rt(), (capture) => {
+    let pending = false;
+    result = update((emit) => {
+      if (pending) return false;
+      try {
+        emit();
+        return true;
+      } catch (error) {
+        if (!(error instanceof PhpThrow)) throw error;
+        capture(error);
+        pending = true;
+        return false;
+      }
+    });
+  });
+  return result;
 }
 
 // code-gauge-allow functionCognitiveComplexity 17 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
@@ -812,42 +873,56 @@ export function applyOperator(op: string, left: Value, right: Value): Value {
   throw new Error(`Unknown operator ${op}`);
 }
 
-// code-gauge-allow functionCognitiveComplexity 24 -- Transcribes PHP's algorithm for this function step by step, whose branches mirror PHP's.
-// code-gauge-allow functionNcss 38 -- Transcribes PHP's algorithm for this function step by step, whose branches mirror PHP's.
 export function incDec(e: Extract<Expr, { k: 'incdec' }>): Value {
+  return withUpdateWarnings((warning) => incrementPlace(e, warning));
+}
+
+function incrementPlace(e: Extract<Expr, { k: 'incdec' }>, warning: UpdateWarning): Value {
   const runtime = rt();
   const target = placeOf(e.target, 'incdec');
   const place = target.incrementTarget?.() ?? target;
   runtime.row = e.row;
   let old = place.get('incdec');
   if (old === undefined) {
-    place.warnUndefined?.();
+    if (place instanceof VarPlace && e.target.k !== 'idx') place.fetchCompound(warning);
+    else if (e.target.k === 'prop') warning(() => place.warnUndefined?.());
+    else place.warnUndefined?.();
     old = null;
   }
+  const updated = incrementedValue(old, e.inc, warning);
+  if (updated === undefined) return old;
+  if (typeof old === 'bigint' && typeof updated === 'number') checkIntOverflow(place, e.inc);
+  const stored = place.set(updated);
+  return e.prefix ? stored : old;
+}
+
+// code-gauge-allow functionCognitiveComplexity 23 -- Keeps the ordered PHP cases together because each branch shares the same dispatch state.
+function incrementedValue(old: Value, increment: boolean, warning: UpdateWarning): Value | undefined {
   let updated: Value;
-  if (typeof old === 'bigint') updated = e.inc ? arithmetic('+', old, 1n) : arithmetic('-', old, 1n);
-  else if (typeof old === 'number') updated = e.inc ? old + 1 : old - 1;
+  if (typeof old === 'bigint') updated = increment ? arithmetic('+', old, 1n) : arithmetic('-', old, 1n);
+  else if (typeof old === 'number') updated = increment ? old + 1 : old - 1;
   else if (old === null) {
-    if (e.inc) updated = 1n;
+    if (increment) updated = 1n;
     else {
-      warn('Decrement on type null has no effect, this will change in the next major version of PHP');
+      if (
+        !warning(() => warn('Decrement on type null has no effect, this will change in the next major version of PHP'))
+      )
+        return undefined;
       updated = null;
     }
   } else if (typeof old === 'boolean') {
     warn(
-      `${e.inc ? 'Increment' : 'Decrement'} on type bool has no effect, this will change in the next major version of PHP`
+      `${increment ? 'Increment' : 'Decrement'} on type bool has no effect, this will change in the next major version of PHP`
     );
     updated = old;
   } else if (typeof old === 'string') {
-    updated = incDecString(old, e.inc);
+    updated = incDecString(old, increment);
   } else if (old instanceof PhpArray) {
-    throwError('TypeError', `Cannot ${e.inc ? 'increment' : 'decrement'} array`);
+    throwError('TypeError', `Cannot ${increment ? 'increment' : 'decrement'} array`);
   } else {
-    throwError('TypeError', `Cannot ${e.inc ? 'increment' : 'decrement'} ${(old as PhpObject).cls.name}`);
+    throwError('TypeError', `Cannot ${increment ? 'increment' : 'decrement'} ${(old as PhpObject).cls.name}`);
   }
-  if (typeof old === 'bigint' && typeof updated === 'number') checkIntOverflow(place, e.inc);
-  const stored = place.set(updated);
-  return e.prefix ? stored : old;
+  return updated;
 }
 
 /** Throws PHP's TypeError when `++` or `--` takes a property typed int past the range of ints. */

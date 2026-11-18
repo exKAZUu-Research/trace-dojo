@@ -1,5 +1,5 @@
 // oxlint-disable unicorn/prefer-code-point -- PHP pattern strings contain bytes; UTF-8 validation reads each byte separately.
-// code-gauge-allow-file fileNcss 971 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 982 -- Holds the cases of one concern of the interpreter, which share their helpers.
 import propertyAliases from 'unicode-property-value-aliases-ecmascript';
 
 import { dec, enc, utf8Length } from './bytes';
@@ -264,9 +264,14 @@ const SIMPLE_ESCAPES = new Map([
 const DIGITS_MISSING = String.raw`digits missing after \x or in \x{} or \o{} or \N{U+}`;
 const UNSUPPORTED_CASE_ESCAPE = String.raw`PCRE2 does not support \F, \L, \l, \N{name}, \U, or \u`;
 
-function bracedQuantifier(text: string): RegExpExecArray | undefined {
+function bracedQuantifier(text: string): { length: number; min: number; max: number | undefined } | undefined {
   const match = /^\{[ \t]*(\d*)[ \t]*(?:(,)[ \t]*(\d*)[ \t]*)?\}/.exec(text);
-  return match && (match[1] !== '' || match[3]) ? match : undefined;
+  if (!match || (match[1] === '' && !match[3])) return undefined;
+  return {
+    length: match[0].length,
+    min: Number(match[1]),
+    max: match[2] && match[3] === '' ? undefined : Number(match[3] ?? match[1]),
+  };
 }
 
 function unsupported(what: string): never {
@@ -524,19 +529,27 @@ class PatternConverter {
       this.emit(String.raw`\{`, true);
       return;
     }
-    const close = this.index + match[0].length - 1;
-    const min = Number(match[1]);
-    const max = match[2] && match[3] === '' ? undefined : Number(match[3] ?? match[1]);
-    if (min > 0xff_ff || (max ?? 0) > 0xff_ff) this.fail('number too big in {} quantifier', close);
-    if (max !== undefined && max < min) this.fail('numbers out of order in {} quantifier', close);
+    const { min, max } = match;
+    const close = this.index + match.length - 1;
+    this.checkQuantifierRange(min, max, close);
     this.quantifier(max === min ? `{${min}}` : `{${min},${max ?? ''}}`, close + 1, max === undefined || max > 1);
+  }
+
+  private checkQuantifierRange(min: number, max: number | undefined, at: number): void {
+    if (min > 0xff_ff || (max ?? 0) > 0xff_ff) this.fail('number too big in {} quantifier', at);
+    if (max !== undefined && max < min) this.fail('numbers out of order in {} quantifier', at);
   }
 
   private escape(): void {
     const letter = this.escapeLetter();
-    if (letter === 'N' && (this.source[this.index] !== '{' || bracedQuantifier(this.source.slice(this.index)))) {
-      this.emit(String.raw`[^\n]`, true);
-      return;
+    if (letter === 'N') {
+      const braces = this.source[this.index] === '{';
+      const repeat = braces ? bracedQuantifier(this.source.slice(this.index)) : undefined;
+      if (repeat) this.checkQuantifierRange(repeat.min, repeat.max, this.index);
+      if (!braces || repeat) {
+        this.emit(String.raw`[^\n]`, true);
+        return;
+      }
     }
     const set = this.setEscape(letter);
     if (set) {
@@ -822,6 +835,8 @@ class PatternConverter {
     this.subroutine(group, this.index);
   }
 
+  // code-gauge-allow functionNcss 33 -- Keeps the ordered PHP cases together because each branch shares the same dispatch state.
+  // code-gauge-allow functionCognitiveComplexity 17 -- Keeps the ordered PHP cases together because each branch shares the same dispatch state.
   private parenthesizedSubroutine(rest: string): void {
     this.index += 2;
     if (rest.startsWith('&') || rest.startsWith('P>')) {
@@ -839,7 +854,11 @@ class PatternConverter {
       return;
     }
     const digits = this.readMatch(/^[+-]?\d+/)?.[0];
-    if (!digits) this.fail('digit expected after (?+', this.index + 1);
+    if (!digits) {
+      const next = this.index + 1;
+      if (next >= this.source.length) this.fail('missing closing parenthesis', next);
+      this.fail('digit expected after (?+', next + 1);
+    }
     const number = Number(digits);
     const relative = /^[+-]/.test(digits);
     if (Math.abs(number) > 65_535) this.fail('subpattern number is too big', this.index);
@@ -1009,7 +1028,7 @@ class PatternConverter {
       this.fail('subpattern name is too long (maximum 128 code units)', this.index);
     if (terminator === '}') this.readMatch(/^[ \t]*/);
     if (this.source[this.index] !== terminator) {
-      if (parenthesized && this.index >= this.source.length) this.fail('missing closing parenthesis', this.index);
+      if (parenthesized) this.fail('missing closing parenthesis', this.index);
       this.fail('syntax error in subpattern name (missing terminator?)', this.index);
     }
     this.index++;

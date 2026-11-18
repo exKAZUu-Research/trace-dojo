@@ -7,6 +7,7 @@ import { isSubtype } from './variance';
 
 export type PlaceOperation = 'assignOp' | 'incdec' | 'nested' | 'receiver';
 export type NestMode = 'write' | 'update' | 'unset';
+export type UpdateWarning = (emit: () => void) => boolean;
 
 export const SKIP_COMPOUND = Symbol('compound target changed during fetch');
 
@@ -20,7 +21,7 @@ export interface CompoundRead {
 export interface Place {
   /** The value, or undefined when the location does not exist. */
   get(update?: PlaceOperation): Value | undefined;
-  fetchCompound?(): CompoundRead | typeof SKIP_COMPOUND;
+  fetchCompound?(warning: UpdateWarning): CompoundRead | typeof SKIP_COMPOUND;
   set(value: Value, operation?: 'assignOp'): Value;
   assign?(value: () => Value): Value;
   /** The location as a reference, which `=&`, by-reference arguments, and `global` share. */
@@ -41,8 +42,8 @@ export interface Place {
   getForIsset?(): Value | undefined;
 }
 
-export function readCompound(place: Place): CompoundRead | typeof SKIP_COMPOUND {
-  if (place.fetchCompound) return place.fetchCompound();
+export function readCompound(place: Place, warning: UpdateWarning): CompoundRead | typeof SKIP_COMPOUND {
+  if (place.fetchCompound) return place.fetchCompound(warning);
   const value = place.get('assignOp');
   if (value === undefined) place.warnUndefined?.();
   return { value: value ?? null, declaration: place.declaration?.(), sources: place.typeSources?.() };
@@ -69,10 +70,11 @@ export class VarPlace implements Place {
     warn(`Undefined ${this.global ? 'global ' : ''}variable $${this.name}`);
   }
 
-  fetchCompound(): CompoundRead {
+  fetchCompound(warning: UpdateWarning): CompoundRead {
     const current = this.get();
     if (current !== undefined) return { value: current, sources: this.typeSources() };
-    this.warnUndefined();
+    if (this.global) this.warnUndefined();
+    else warning(() => this.warnUndefined());
     this.set(null);
     return { value: null };
   }

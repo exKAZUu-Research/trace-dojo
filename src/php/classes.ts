@@ -813,22 +813,31 @@ function signatureText(method: Method): string {
   return `${fn.kind === 'user' && fn.decl.byRefReturn ? '& ' : ''}${method.scope.name}::${method.name}(${params})${returnType ? `: ${describeType(returnType, method.scope)}` : ''}`;
 }
 
-// code-gauge-allow functionCognitiveComplexity 19 -- Keeps the ordered PHP cases together because each branch shares the same dispatch state.
+// code-gauge-allow functionCognitiveComplexity 28 -- Keeps the ordered PHP cases together because each branch shares the same dispatch state.
 function defaultText(expression: Expr, method: Method): string {
+  const declaringName = method.fn.kind === 'user' ? method.fn.decl.className : undefined;
+  const traitDeclaration =
+    method.scope.kind === 'trait' || (declaringName && findClass(declaringName)?.kind === 'trait');
   const context = {
     preserveNamedConstants: true,
     className: (ref: Extract<Expr, { k: 'cconst' }>['cls']): string | undefined => {
-      if (ref.k === 'self' && method.scope.kind !== 'trait') return method.scope.fullName;
+      if (traitDeclaration) return undefined;
+      if (ref.k === 'self') return method.scope.fullName;
       return ref.k === 'parent' ? method.scope.parent?.fullName : undefined;
     },
   };
   const e = selectConstantBranch(expression, context);
-  const value = e.k === 'magic' ? methodMagicDefault(e.name, method) : foldedConstant(e, context);
+  const value =
+    e.k === 'magic' && !(traitDeclaration && e.name === '__CLASS__')
+      ? methodMagicDefault(e.name, method)
+      : foldedConstant(e, context);
   if (value instanceof Map) return value.size === 0 ? '[]' : '[...]';
   if (typeof value === 'string') return `'${value.slice(0, 10)}${value.length > 10 ? '...' : ''}'`;
   if (typeof value === 'number') return formatFloat(value);
   if (value !== undefined) return String(value);
   if (e.k === 'const') return e.name.name;
+  if (e.k === 'cconst' && e.className && traitDeclaration && (e.cls.k === 'self' || e.cls.k === 'parent'))
+    return '<expression>';
   if (e.k === 'cconst' && e.cls.k !== 'expr' && typeof e.name === 'string')
     return `${e.cls.k === 'named' ? e.cls.name : e.cls.k}::${e.name}`;
   return '<expression>';
@@ -968,7 +977,7 @@ export function canAccessProp(decl: PropDecl, scope: PhpClass | undefined): bool
   return scope.isSubclassOf(rootPropDeclarer(decl)) || rootPropDeclarer(decl).isSubclassOf(scope);
 }
 
-function canWriteProp(decl: PropDecl, scope: PhpClass | undefined): boolean {
+export function canWriteProp(decl: PropDecl, scope: PhpClass | undefined): boolean {
   const visibility = effectiveSetVisibility(decl);
   if (visibility === 'public') return true;
   if (!scope) return false;
@@ -1037,7 +1046,8 @@ export function readProp(
       if (mode === 'coalesce' || mode === 'empty') return null;
       throwError('Error', `Cannot access ${decl.visibility} property ${object.cls.name}::$${name}`);
     }
-    if (decl.hooks?.get && !object.guards?.has(`hook:${name}`)) {
+    const inHook = isBackingAccess(object, decl, 'read');
+    if (decl.hooks?.get && !inHook) {
       const get = decl.hooks.get;
       const target = { fn: get, thisObj: object, scope: decl.cls, staticClass: object.cls };
       return guarded(object, `hook:${name}`, () =>
@@ -1144,7 +1154,8 @@ export function writeProp(
         throwError('Error', `Cannot modify readonly property ${decl.cls.name}::$${name}`);
       object.readonlyInit.add(decl.key);
     }
-    if (decl.hooks?.set && !object.guards?.has(`hook:${name}`)) {
+    const inHook = isBackingAccess(object, decl, 'write');
+    if (decl.hooks?.set && !inHook) {
       guarded(object, `hook:${name}`, () =>
         invoke(
           { fn: decl.hooks?.set as Callable, thisObj: object, scope: decl.cls, staticClass: object.cls },
@@ -1222,7 +1233,7 @@ export function coerceProperty(decl: PropDecl, value: Value, object?: PhpObject,
  * Throws PHP's error for changing a property through a reference or a nested write (`$o->list[] = 1`), which readonly
  * and asymmetric visibility forbid where a plain write would be forbidden.
  */
-// code-gauge-allow functionCognitiveComplexity 19 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+// code-gauge-allow functionCognitiveComplexity 21 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 export function checkIndirectModification(
   object: PhpObject,
   name: string,
@@ -1234,6 +1245,8 @@ export function checkIndirectModification(
   if (!decl || decl.isStatic) return;
   if (!canAccessProp(decl, scope))
     throwError('Error', `Cannot access ${decl.visibility} property ${object.cls.name}::$${name}`);
+  if (mode === 'unset' && decl.hooks && !decl.hooks.get)
+    throwError('Error', `Indirect modification of ${decl.cls.name}::$${name} is not allowed`);
   if (decl.isReadonly) {
     const slot = object.props.get(decl.key);
     const value = slot instanceof Ref ? slot.v : slot;
@@ -1339,6 +1352,16 @@ export function requireVirtualPropertyHook(object: PhpObject, decl: PropDecl, ho
   if (decl.isVirtual && decl.hooks && !decl.hooks[hook]) {
     throwError('Error', `Property ${object.cls.name}::$${decl.name} is ${hook === 'get' ? 'write' : 'read'}-only`);
   }
+}
+
+function isBackingAccess(object: PhpObject, decl: PropDecl, operation: 'read' | 'write'): boolean {
+  if (!decl.hooks || !object.guards?.has(`hook:${decl.name}`)) return false;
+  if (decl.isVirtual)
+    throwError(
+      'Error',
+      `Must not ${operation} ${operation === 'read' ? 'from' : 'to'} virtual property ${decl.cls.name}::$${decl.name}`
+    );
+  return true;
 }
 
 export function hookedPropertyReference(

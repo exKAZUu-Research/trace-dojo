@@ -9,8 +9,8 @@ import { rt } from './runtime';
 import { UnsupportedFeatureError } from './unsupported';
 import { type NativeFunction, PhpArray, type PhpObject, Ref, type Value } from './values';
 
-const USE_KEY = 1;
-const INVERT_MATCH = 2;
+const USE_KEY = 1n;
+const INVERT_MATCH = 2n;
 const MODE_MATCH = 0;
 const MODE_GET_MATCH = 1;
 const MODE_ALL_MATCHES = 2;
@@ -24,8 +24,8 @@ defineClass({
   name: 'RegexIterator',
   parent: 'FilterIterator',
   consts: {
-    USE_KEY: BigInt(USE_KEY),
-    INVERT_MATCH: BigInt(INVERT_MATCH),
+    USE_KEY,
+    INVERT_MATCH,
     MATCH: BigInt(MODE_MATCH),
     GET_MATCH: BigInt(MODE_GET_MATCH),
     ALL_MATCHES: BigInt(MODE_ALL_MATCHES),
@@ -43,7 +43,9 @@ defineClass({
         if (mode < MODE_MATCH || mode > MODE_REPLACE)
           throwError('ValueError', `RegexIterator::__construct(): Argument #3 ($mode) ${MODE_MESSAGE}`);
         checkPattern(pattern);
-        state.regex = { pattern, mode, flags: Number(args[3] ?? 0n), pregFlags: Number(args[4] ?? 0n) };
+        const flags = (args[3] as bigint | undefined) ?? 0n;
+        const pregFlags = (args[4] as bigint | undefined) ?? 0n;
+        state.regex = { pattern, mode, flags, pregFlags };
         state.constructed = true;
         state.setInner(args[0] as PhpObject);
         return null;
@@ -61,16 +63,16 @@ defineClass({
         return null;
       },
     },
-    { signature: 'getFlags(): int', impl: ({ thisObj }) => BigInt(dualOf(thisObj).regex.flags) },
+    { signature: 'getFlags(): int', impl: ({ thisObj }) => dualOf(thisObj).regex.flags },
     {
       signature: 'setFlags(int $flags): void',
-      impl: ({ thisObj, args }) => ((dualOf(thisObj).regex.flags = Number(args[0])), null),
+      impl: ({ thisObj, args }) => ((dualOf(thisObj).regex.flags = args[0] as bigint), null),
     },
     { signature: 'getRegex(): string', impl: ({ thisObj }) => dualOf(thisObj).regex.pattern },
-    { signature: 'getPregFlags(): int', impl: ({ thisObj }) => BigInt(dualOf(thisObj).regex.pregFlags) },
+    { signature: 'getPregFlags(): int', impl: ({ thisObj }) => dualOf(thisObj).regex.pregFlags },
     {
       signature: 'setPregFlags(int $pregFlags): void',
-      impl: ({ thisObj, args }) => ((dualOf(thisObj).regex.pregFlags = Number(args[0])), null),
+      impl: ({ thisObj, args }) => ((dualOf(thisObj).regex.pregFlags = args[0] as bigint), null),
     },
   ],
 });
@@ -108,12 +110,12 @@ function match(object: PhpObject, state: DualState, subject: string): boolean {
     case MODE_ALL_MATCHES: {
       const matches = new Ref(null);
       const name = mode === MODE_ALL_MATCHES ? 'preg_match_all' : 'preg_match';
-      const count = preg(name, [pattern, subject, null, BigInt(pregFlags)], matches);
+      const count = preg(name, [pattern, subject, null, pregFlags], matches);
       state.data = { v: matches.v };
       return typeof count === 'bigint' && count > 0n;
     }
     case MODE_SPLIT: {
-      const parts = preg('preg_split', [pattern, subject, -1n, BigInt(pregFlags)]);
+      const parts = preg('preg_split', [pattern, subject, -1n, pregFlags]);
       state.data = { v: parts };
       return parts instanceof PhpArray && parts.size > 1;
     }

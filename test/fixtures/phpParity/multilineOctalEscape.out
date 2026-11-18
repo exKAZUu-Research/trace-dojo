@@ -1,0 +1,10 @@
+
+Warning: Octal escape sequence overflow \400 is greater than \377 in /main.php on line 3
+
+Warning: Octal escape sequence overflow \777 is greater than \377 in /main.php on line 4
+
+Warning: Octal escape sequence overflow \401 is greater than \377 in /main.php on line 8
+
+Warning: Octal escape sequence overflow \775 is greater than \377 in /main.php on line 9
+20
+20

@@ -24,3 +24,13 @@ int(3)
 string(5) "third"
 int(4)
 string(18) "002a007365636f6e64"
+int(1)
+ab:0
+int(3)
+ba:0
+int(3)
+ba:0
+Iterators' LIFO/FIFO modes for SplStack/SplQueue objects are frozen
+int(7)
+int(5)
+Iterators' LIFO/FIFO modes for SplStack/SplQueue objects are frozen

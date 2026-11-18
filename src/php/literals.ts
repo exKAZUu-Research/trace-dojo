@@ -1,6 +1,10 @@
 // oxlint-disable unicorn/prefer-code-point -- PHP strings hold bytes as code units 0–255, which charCodeAt and fromCharCode read and write as they are.
 import { codePointBytes, enc } from './bytes';
 
+export function decodeSingleQuoted(raw: string): string {
+  return enc(raw.replaceAll(/\\([\\'])/g, '$1'));
+}
+
 export function parseIntegerLiteral(text: string): bigint | number {
   const clean = text.replaceAll('_', '');
   let value: bigint;
@@ -77,7 +81,7 @@ function decodeEscape(
 export function decodeLiteral(
   raw: string,
   doubleQuoted: boolean,
-  onOverflow?: (escape: string) => void,
+  onOverflow?: (escape: string, offset: number) => void,
   invalidUnicode?: (message: string, offset: number) => void
 ): string {
   let result = '';
@@ -85,7 +89,12 @@ export function decodeLiteral(
   for (const match of raw.matchAll(/\\(?:u\{(?:[0-9A-Fa-f]+\})?|x[0-9A-Fa-f]{1,2}|[0-7]{1,3}|[ntrvef\\$"])/g)) {
     result +=
       enc(raw.slice(last, match.index)) +
-      decodeEscape(match[0], doubleQuoted, onOverflow, (message) => invalidUnicode?.(message, match.index));
+      decodeEscape(
+        match[0],
+        doubleQuoted,
+        (escape) => onOverflow?.(escape, match.index),
+        (message) => invalidUnicode?.(message, match.index)
+      );
     last = match.index + match[0].length;
   }
   return result + enc(raw.slice(last));

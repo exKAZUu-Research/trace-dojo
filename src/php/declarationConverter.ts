@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 781 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 806 -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import type { Node } from '@willbooster/web-tree-sitter';
 
@@ -14,11 +14,12 @@ import type {
   TraitRule,
 } from './ast';
 import { hasNullsafeReceiver } from './astAnalysis';
-import { lower } from './bytes';
+import { enc, lower } from './bytes';
 import { parseTypeText } from './calls';
 import { CompileClassConstants } from './compileClassConstants';
 import { type Constant, constantTypeName, foldedConstant, foldedDefaultType } from './constantDefaults';
-import { BUILTIN_TYPES, ConverterBase, isReservedClassName } from './converterBase';
+import { BUILTIN_TYPES, ConverterBase, explicitlyQualifiedName, isReservedClassName } from './converterBase';
+import { decodeLiteral, decodeSingleQuoted } from './literals';
 import { SCRIPT_PATH } from './runtime';
 import { describeType, typeToString } from './types';
 import { type TypeDecl, type Visibility, visibilityRank } from './values';
@@ -575,19 +576,23 @@ export abstract class DeclarationConverter extends ConverterBase {
     const word = lower(raw);
     if (BUILTIN_TYPES.has(word)) return { k: 'named', name: word };
     if (word === 'self' || word === 'static' || word === 'parent') return { k: 'named', name: word };
+    const explicit = explicitlyQualifiedName(word);
+    if (explicit && (BUILTIN_TYPES.has(explicit) || explicit === 'static'))
+      this.error(node, `Type declaration '${explicit}' must be unqualified`);
     const typeNode = node.parent?.type === 'named_type' ? node.parent : node;
     const parent = typeNode.parent;
     const root = parent?.type === 'property_declaration' || parent?.type.endsWith('_parameter');
     const expected = root && (parameter || parent?.type === 'property_declaration') ? 'variable' : '';
-    return { k: 'named', name: this.resolveClassName(this.declaredIdentifier(node, expected)) };
+    return { k: 'named', name: this.namedClass(node, expected) };
   }
 
   // Classes -----------------------------------------------------------------------------------------------------------
 
-  // code-gauge-allow functionNcss 43 -- Keeps the ordered PHP cases together because each branch shares the same dispatch state.
-  // code-gauge-allow functionCognitiveComplexity 24 -- Keeps the ordered PHP cases together because each branch shares the same dispatch state.
+  // code-gauge-allow functionNcss 44 -- Keeps the ordered PHP cases together because each branch shares the same dispatch state.
+  // code-gauge-allow functionCognitiveComplexity 26 -- Keeps the ordered PHP cases together because each branch shares the same dispatch state.
   classDecl(node: Node, anonymous = false, topLevel = true): ClassDecl {
-    if (!anonymous && this.currentClass !== undefined) this.error(node, 'Class declarations may not be nested');
+    if (!this.preserveSyntax && !anonymous && this.currentClass !== undefined)
+      this.error(node, 'Class declarations may not be nested');
     const attributes = node.childForFieldName('attributes');
     if (attributes) this.unsupported(attributes, '属性（#[...]）');
     const kind: ClassDecl['kind'] =
@@ -607,15 +612,13 @@ export abstract class DeclarationConverter extends ConverterBase {
     const modifiers = node.children;
     const base = node.namedChildren.find((child) => child.type === 'base_clause');
     const baseNames = base
-      ? base.namedChildren
-          .filter((child) => child.type !== 'comment')
-          .map((child) => this.resolveClassName(this.declaredIdentifier(child, '')))
+      ? base.namedChildren.filter((child) => child.type !== 'comment').map((child) => this.namedClass(child))
       : [];
     const implementsClause = node.namedChildren.find((child) => child.type === 'class_interface_clause');
     let interfaces = implementsClause
       ? implementsClause.namedChildren
           .filter((child) => child.type !== 'comment')
-          .map((child) => this.resolveClassName(this.declaredIdentifier(child, '')))
+          .map((child) => this.namedClass(child))
       : [];
     let parent: string | undefined;
     if (kind === 'interface') interfaces = baseNames;
@@ -647,14 +650,17 @@ export abstract class DeclarationConverter extends ConverterBase {
       endRow: node.endPosition.row,
       isAnonymous: anonymous,
     };
-    if (decl.isAbstract && decl.isFinal) this.error(node, 'Cannot use the final modifier on an abstract class');
+    if (!this.preserveSyntax && decl.isAbstract && decl.isFinal)
+      this.error(node, 'Cannot use the final modifier on an abstract class');
     this.withClassContext(decl, () => {
       const body = node.childForFieldName('body') as Node;
       const memberNames = new Set<string>();
       for (const member of body.namedChildren) this.classMember(member, decl, memberNames);
     });
-    this.addPromotedProperties(decl);
-    if (!anonymous && (!topLevel || !this.compileClasses.bind(decl))) this.runtimeDefinitionKeys++;
+    if (!this.preserveSyntax) {
+      this.addPromotedProperties(decl);
+      if (!anonymous && (!topLevel || !this.compileClasses.bind(decl))) this.runtimeDefinitionKeys++;
+    }
     return decl;
   }
 
@@ -720,7 +726,7 @@ export abstract class DeclarationConverter extends ConverterBase {
       case 'method_declaration': {
         const method = this.methodDecl(member, decl);
         const key = lower(method.fn.name);
-        if (methodNames.has(key))
+        if (!this.preserveSyntax && methodNames.has(key))
           this.error(
             member,
             `メソッド ${decl.name}::${method.fn.name}() は、すでに宣言されています（Cannot redeclare ${decl.name}::${method.fn.name}()）。`
@@ -781,10 +787,11 @@ export abstract class DeclarationConverter extends ConverterBase {
     isVar: boolean;
   } {
     const children = member.children;
-    this.checkMemberModifiers(
-      member,
-      children.filter((child) => child.type.endsWith('_modifier'))
-    );
+    if (!this.preserveSyntax)
+      this.checkMemberModifiers(
+        member,
+        children.filter((child) => child.type.endsWith('_modifier'))
+      );
     const visibilityNodes = children.filter((child) => child.type === 'visibility_modifier');
     // `public private(set)` names the read visibility and the write visibility separately.
     const setNode = visibilityNodes.find((child) => this.setVisibilityOf(child) !== undefined);
@@ -829,7 +836,7 @@ export abstract class DeclarationConverter extends ConverterBase {
       this.error(member, 'Cannot use the final modifier on an abstract class member');
   }
 
-  // code-gauge-allow functionCognitiveComplexity 21 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+  // code-gauge-allow functionCognitiveComplexity 25 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
   protected classConsts(member: Node, decl: ClassDecl, kind: ClassDecl['kind']): void {
     const attributes = member.childForFieldName('attributes');
     if (attributes) this.unsupported(attributes, '属性（#[...]）');
@@ -838,23 +845,23 @@ export abstract class DeclarationConverter extends ConverterBase {
     for (const element of member.namedChildren.filter((child) => child.type === 'const_element')) {
       const [nameNode, valueNode] = element.namedChildren.filter((part) => part.type !== 'comment');
       const name = this.nameText(nameNode);
-      if (modifiers.isFinal && modifiers.visibility === 'private')
+      if (!this.preserveSyntax && modifiers.isFinal && modifiers.visibility === 'private')
         this.error(
           element,
           `Private constant ${decl.name}::${name} cannot be final as it is not visible to other classes`
         );
-      if (lower(name) === 'class')
+      if (!this.preserveSyntax && lower(name) === 'class')
         this.error(
           element,
           "class という名前の定数は宣言できません（A class constant must not be called 'class'; it is reserved for class name fetching）。"
         );
-      if (decl.consts.some((constant) => constant.name === name)) {
+      if (!this.preserveSyntax && decl.consts.some((constant) => constant.name === name)) {
         this.error(
           element,
           `定数 ${decl.name}::${name} は、すでに宣言されています（Cannot redefine class constant ${decl.name}::${name}）。`
         );
       }
-      if (kind === 'interface' && modifiers.visibility && modifiers.visibility !== 'public') {
+      if (!this.preserveSyntax && kind === 'interface' && modifiers.visibility && modifiers.visibility !== 'public') {
         this.error(element, 'インターフェースの定数は public にしてください。');
       }
       const constantType = typeNode ? this.typeDecl(typeNode) : undefined;
@@ -867,6 +874,7 @@ export abstract class DeclarationConverter extends ConverterBase {
         row: element.startPosition.row,
         type: constantType,
       });
+      if (this.preserveSyntax) continue;
       const folded = this.compileClasses.add(decl, name, constantValue, constantType);
       if (folded !== undefined && constantType && !defaultFits(constantType, folded)) {
         const actual = folded === 'true' || folded === 'false' ? 'bool' : folded;
@@ -925,7 +933,7 @@ export abstract class DeclarationConverter extends ConverterBase {
     if (hookList && isReadonly) this.error(hookList, 'Hooked properties cannot be readonly');
     for (const element of member.namedChildren.filter((child) => child.type === 'property_element')) {
       const name = this.variableName(element.childForFieldName('name') as Node);
-      if (decl.props.some((prop) => prop.name === name)) {
+      if (!this.preserveSyntax && decl.props.some((prop) => prop.name === name)) {
         this.error(
           element,
           `プロパティ ${decl.name}::$${name} は、すでに宣言されています（Cannot redeclare ${decl.name}::$${name}）。`
@@ -1122,6 +1130,7 @@ export abstract class DeclarationConverter extends ConverterBase {
           body: body?.type === 'compound_statement' ? statements : undefined,
           expression: syntaxExpression,
           isFinal: hook.children.some((child) => child.type === 'final_modifier'),
+          byRefReturn,
         });
       } finally {
         this.fn = outerFn;
@@ -1134,12 +1143,22 @@ export abstract class DeclarationConverter extends ConverterBase {
       this.error(list, `Cannot specify default value for virtual hooked property ${className}::$${prop.name}`);
   }
 
-  // code-gauge-allow functionCognitiveComplexity 22 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+  // code-gauge-allow functionCognitiveComplexity 24 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
   protected methodDecl(member: Node, decl: ClassDecl): MethodDeclAst {
     const modifiers = this.memberModifiers(member);
-    if (modifiers.isReadonly) this.error(member, 'Cannot use the readonly modifier on a method');
+    if (!this.preserveSyntax && modifiers.isReadonly)
+      this.error(member, 'Cannot use the readonly modifier on a method');
     const fn = this.functionDecl(member, false, decl.name);
     const body = member.childForFieldName('body');
+    if (this.preserveSyntax)
+      return {
+        fn,
+        visibility: modifiers.visibility ?? 'public',
+        isStatic: modifiers.isStatic,
+        isAbstract: modifiers.isAbstract,
+        isFinal: modifiers.isFinal,
+        syntaxHasBody: Boolean(body),
+      };
     if (decl.kind === 'interface' && (modifiers.isFinal || modifiers.isAbstract))
       this.error(member, 'Interface methods cannot have final or abstract modifiers');
     if (decl.kind === 'interface' && modifiers.visibility && modifiers.visibility !== 'public')
@@ -1176,8 +1195,7 @@ export abstract class DeclarationConverter extends ConverterBase {
       );
     }
     this.checkMagicMethod(member, decl.name, fn, modifiers);
-    if (!this.preserveSyntax && lower(fn.name) === '__tostring' && !fn.returnType)
-      fn.returnType = { k: 'named', name: 'string' };
+    if (lower(fn.name) === '__tostring' && !fn.returnType) fn.returnType = { k: 'named', name: 'string' };
     if (modifiers.isFinal && modifiers.visibility === 'private' && lower(fn.name) !== '__construct')
       this.notices.push({
         level: 'Warning',
@@ -1237,7 +1255,7 @@ export abstract class DeclarationConverter extends ConverterBase {
   protected traitUse(member: Node): ClassDecl['traits'][number] {
     const names = member.namedChildren
       .filter((child) => child.type === 'name' || child.type === 'qualified_name' || child.type === 'relative_name')
-      .map((child) => this.resolveClassName(this.declaredIdentifier(child, '')));
+      .map((child) => this.namedClass(child));
     const rules: TraitRule[] = [];
     const list = member.namedChildren.find((child) => child.type === 'use_list');
     for (const clause of list?.namedChildren ?? []) {
@@ -1246,9 +1264,9 @@ export abstract class DeclarationConverter extends ConverterBase {
         const [traitNode, methodNode] = target.namedChildren;
         rules.push({
           k: 'insteadof',
-          trait: this.resolveClassName(this.declaredIdentifier(traitNode, '')),
+          trait: this.namedClass(traitNode),
           method: this.nameText(methodNode),
-          instead: instead.map((child) => this.resolveClassName(this.declaredIdentifier(child, ''))),
+          instead: instead.map((child) => this.namedClass(child)),
         });
       } else if (clause.type === 'use_as_clause') {
         const parts = clause.namedChildren.filter((child) => child.type !== 'comment');
@@ -1256,7 +1274,7 @@ export abstract class DeclarationConverter extends ConverterBase {
         let trait: string | undefined;
         let method: string;
         if (target.type === 'class_constant_access_expression') {
-          trait = this.resolveClassName(this.declaredIdentifier(target.namedChildren[0], ''));
+          trait = this.namedClass(target.namedChildren[0]);
           method = this.nameText(target.namedChildren[1]);
         } else method = this.nameText(target);
         const visibilityNode = rest.find((child) => child.type === 'visibility_modifier');
@@ -1284,21 +1302,42 @@ function typeAllowsNull(type: TypeDecl): boolean {
   return false;
 }
 
-/** Whether a hook body refers to the property it belongs to through `$this->name`. */
+const PROPERTY_REFERENCE_BOUNDARIES = new Set([
+  'anonymous_class',
+  'anonymous_function',
+  'arrow_function',
+  'class_declaration',
+  'enum_declaration',
+  'function_definition',
+  'interface_declaration',
+  'method_declaration',
+  'trait_declaration',
+]);
+
 function referencesProperty(node: Node, name: string): boolean {
+  if (PROPERTY_REFERENCE_BOUNDARIES.has(node.type)) return false;
   if (node.type === 'member_access_expression' || node.type === 'nullsafe_member_access_expression') {
-    const object = node.childForFieldName('object');
-    const member = node.childForFieldName('name');
-    if (
-      object?.type === 'variable_name' &&
-      object.text === '$this' &&
-      member?.type === 'name' &&
-      member.text === name
-    ) {
-      return true;
-    }
+    const object = withoutParentheses(node.childForFieldName('object'));
+    const member = withoutParentheses(node.childForFieldName('name'));
+    if (object?.type === 'variable_name' && object.text === '$this' && memberNameLiteral(member) === name) return true;
   }
   return node.namedChildren.some((child) => referencesProperty(child, name));
+}
+
+function withoutParentheses(node: Node | null | undefined): Node | undefined {
+  while (node?.type === 'parenthesized_expression') node = node.namedChildren.find((child) => child.type !== 'comment');
+  return node ?? undefined;
+}
+
+function memberNameLiteral(node: Node | undefined): string | undefined {
+  if (node?.type === 'name') return enc(node.text);
+  if (node?.type === 'string') return decodeSingleQuoted(node.text.slice(node.text.indexOf("'") + 1, -1));
+  if (
+    node?.type === 'encapsed_string' &&
+    node.namedChildren.every((child) => child.type === 'string_content' || child.type === 'escape_sequence')
+  )
+    return decodeLiteral(node.text.slice(node.text.indexOf('"') + 1, -1), true);
+  return undefined;
 }
 
 /** Whether a literal of a scalar type may be the default value of a parameter of `type`; an int may stand for a float. */

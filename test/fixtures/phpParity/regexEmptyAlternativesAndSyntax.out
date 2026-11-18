@@ -159,4 +159,25 @@ bool(false)
 
 Warning: preg_match(): Compilation failed: length of lookbehind assertion is not limited at offset 0 in /main.php on line 30
 bool(false)
+
+Warning: preg_match(): Compilation failed: numbers out of order in {} quantifier at offset 2 in /main.php on line 33
+bool(false)
+
+Warning: preg_match(): Compilation failed: number too big in {} quantifier at offset 2 in /main.php on line 33
+bool(false)
+
+Warning: preg_match(): Compilation failed: digit expected after (?+ at offset 4 in /main.php on line 33
+bool(false)
+
+Warning: preg_match(): Compilation failed: digit expected after (?+ at offset 4 in /main.php on line 33
+bool(false)
+
+Warning: preg_match(): Compilation failed: missing closing parenthesis at offset 3 in /main.php on line 33
+bool(false)
+
+Warning: preg_match(): Compilation failed: missing closing parenthesis at offset 5 in /main.php on line 33
+bool(false)
+
+Warning: preg_match(): Compilation failed: missing closing parenthesis at offset 4 in /main.php on line 33
+bool(false)
 continued

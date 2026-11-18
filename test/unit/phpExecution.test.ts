@@ -13,6 +13,51 @@ afterEach(() => {
 const run = (program: string): ReturnType<typeof executeProgram> => executeProgram('php', program);
 
 test.each([
+  [String.raw`try {} catch (\self $error) {}`, String.raw`'\self' is an invalid class name`],
+  [String.raw`try {} catch (A|\static $error) {}`, String.raw`'\static' is an invalid class name`],
+  [String.raw`new \self;`, String.raw`'\self' is an invalid class name`],
+  [String.raw`\SELF::VALUE;`, String.raw`'\SELF' is an invalid class name`],
+  [String.raw`\self::call();`, String.raw`'\self' is an invalid class name`],
+  [String.raw`\parent::$value;`, String.raw`'\parent' is an invalid class name`],
+  [String.raw`class A extends \self {}`, String.raw`'\self' is an invalid class name`],
+  [String.raw`class A implements \parent {}`, String.raw`'\parent' is an invalid class name`],
+  [String.raw`class A { use \self; }`, String.raw`'\self' is an invalid class name`],
+  [String.raw`$object instanceof namespace\self;`, String.raw`'namespace\self' is an invalid class name`],
+  [String.raw`function f(\Int $value) {}`, "Type declaration 'int' must be unqualified"],
+  [String.raw`namespace A; function f(namespace\int $value) {}`, "Type declaration 'int' must be unqualified"],
+])('rejects qualified relative class and builtin type names in %s', (statement, message) => {
+  expect(run(`<?php\n${statement}`)).toMatchObject({ kind: 'compileError', diagnostics: [{ row: 1, message }] });
+});
+
+test.each([
+  ['var_dump(new enum instanceof stdClass);', 'enum', ':'],
+  ['var_dump(new match instanceof stdClass);', 'match', ':'],
+  ['var_dump(new clone instanceof stdClass);', 'clone', ':'],
+  ['var_dump(new list instanceof stdClass);', 'list', ':'],
+  ['var_dump(new unset instanceof stdClass);', 'unset', ':'],
+  ['var_dump(new eval instanceof stdClass);', 'eval', ':'],
+  ['var_dump(new enum and true);', 'enum', ':'],
+  ['var_dump(new match());', 'match', ':'],
+  ['var_dump(new readonly instanceof stdClass);', 'instanceof', 'class'],
+  ['$object = new enum instanceof stdClass;', 'enum', 'class'],
+  ['function make() { return new enum instanceof stdClass; }', 'enum', 'class'],
+])('rejects keywords as class names in %s', (statement, token, expected) => {
+  expect(run(`<?php\n${statement}`)).toMatchObject({
+    kind: 'compileError',
+    diagnostics: [{ row: 1, message: `syntax error, unexpected token "${token}", expecting "${expected}"` }],
+  });
+});
+
+test('retains contextual enum class references beside operators', () => {
+  expect(
+    run('<?php class enum{} var_dump(new enum() instanceof enum, new stdClass instanceof enum, new enum && true);')
+  ).toMatchObject({
+    kind: 'executed',
+    stdout: 'bool(true)\nbool(false)\nbool(true)\n',
+  });
+});
+
+test.each([
   ['a syntax error', '<?php\necho "a"\necho "b";'],
   ['an unclosed block', '<?php\nif (true) {\n  echo 1;'],
   ['a break outside a loop', '<?php\necho "x";\nbreak;'],

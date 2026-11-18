@@ -49,7 +49,7 @@ function layoutDigits(
   return `${sign}${digits.slice(0, decpt)}.${digits.slice(decpt)}`;
 }
 
-/** Whether a number is a whole float in the integer range, which converts to an int without loss. */
+/** Whether a finite float is in PHP's signed integer range before truncation. */
 export function floatFitsInt(value: number): boolean {
   return Number.isFinite(value) && value >= -9.223372036854776e18 && value < 9.223372036854776e18;
 }

@@ -84,3 +84,91 @@ assert(false && function () {
     }
 
 })
+assert(false && function () {
+    interface InvalidBody {
+        public function f() {
+        }
+
+    }
+
+})
+assert(false && function () {
+    abstract class InvalidAbstract {
+        public abstract function f() {
+        }
+
+    }
+
+})
+assert(false && function () {
+    class MissingBody {
+        public function f();
+
+    }
+
+})
+assert(false && function () {
+    interface InvalidConstant {
+        private const X = 1;
+    }
+
+})
+assert(false && function () {
+    class PrivateFinalConstant {
+        private const X = 1;
+    }
+
+})
+assert(false && function () {
+    class RepeatedProperty {
+        public $x;
+        public $x;
+    }
+
+})
+assert(false && function () {
+    class OuterClass {
+        public function make() {
+            class InnerClass {
+            }
+
+            interface InnerInterface {
+            }
+
+            trait InnerTrait {
+            }
+
+        }
+
+    }
+
+})
+assert(false && function () {
+    class GetterReferences {
+        public int $a {
+            private(set) get {
+                return $this->a;
+            }
+        }
+        public int $b {
+            private(set) get => $this->b;
+        }
+        public int $c {
+            private(set) final get {
+                return $this->c;
+            }
+        }
+    }
+
+})
+assert(false && function () {
+    class DnfTypes {
+        public Countable&Iterator|null $input;
+        public A&B|C&D $other;
+        public function describe(Countable&Iterator|null $source): Countable&Iterator|null {
+            return $source;
+        }
+
+    }
+
+})

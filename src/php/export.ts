@@ -12,6 +12,7 @@ import type {
 } from './ast';
 import { formatFloatRepr } from './conversions';
 import { typeToString } from './types';
+import type { TypeDecl } from './values';
 
 export class UnexportableSyntax extends Error {}
 
@@ -277,11 +278,15 @@ function exportParameters(fn: FunctionDecl, depth: number): string {
 }
 
 function exportReturnType(fn: FunctionDecl): string {
-  return fn.returnType ? `: ${typeToString(fn.returnType)}` : '';
+  return fn.returnType ? `: ${exportType(fn.returnType)}` : '';
+}
+
+function exportType(type: TypeDecl): string {
+  return type.k === 'named' ? typeToString(type) : type.types.map(exportType).join(type.k === 'union' ? '|' : '&');
 }
 
 function exportParameter(param: ParamDecl, depth: number): string {
-  const type = param.type ? `${typeToString(param.type)} ` : '';
+  const type = param.type ? `${exportType(param.type)} ` : '';
   const reference = param.byRef ? '&' : '';
   const variadic = param.variadic ? '...' : '';
   const fallback = param.defaultExpr ? ` = ${exportExpr(param.defaultExpr, 0, depth)}` : '';
@@ -456,7 +461,7 @@ function exportClassMember(member: ClassMemberSyntax, kind: ClassDecl['kind'], d
   switch (member.k) {
     case 'const': {
       const { visibility, type } = member.items[0];
-      const typeText = type ? `${typeToString(type)} ` : '';
+      const typeText = type ? `${exportType(type)} ` : '';
       const items = member.items.map(({ name, value }) => `${name} = ${exportExpr(value, 0, depth)}`);
       return `${visibility} const ${typeText}${items.join(', ')};`;
     }
@@ -467,7 +472,7 @@ function exportClassMember(member: ClassMemberSyntax, kind: ClassDecl['kind'], d
       const { fn, visibility, isStatic, isFinal, isAbstract } = member.method;
       const modifiers = `${visibility} ${isStatic ? 'static ' : ''}${isAbstract && kind !== 'interface' ? 'abstract ' : ''}${isFinal ? 'final ' : ''}`;
       const reference = fn.byRefReturn ? '&' : '';
-      const body = isAbstract ? ';' : ` ${exportBlock(fn.body, depth)}`;
+      const body = member.method.syntaxHasBody ? ` ${exportBlock(fn.body, depth)}` : ';';
       return `${modifiers}function ${reference}${fn.name}(${exportParameters(fn, depth)})${exportReturnType(fn)}${body}\n`;
     }
     case 'use': {
@@ -483,7 +488,7 @@ function exportPropertyDeclaration(member: Extract<ClassMemberSyntax, { k: 'prop
   const { visibility, setVisibility, isStatic, type, hooks } = member.items[0];
   const setter = setVisibility ? `${setVisibility}(set) ` : '';
   const modifiers = `${visibility} ${setter}${isStatic ? 'static ' : ''}${member.explicitReadonly ? 'readonly ' : ''}`;
-  const typeText = type ? `${typeToString(type)} ` : '';
+  const typeText = type ? `${exportType(type)} ` : '';
   const items = member.items.map(({ name, defaultExpr }) =>
     defaultExpr ? `$${name} = ${exportExpr(defaultExpr, 0, depth + 1)}` : `$${name}`
   );
@@ -492,8 +497,8 @@ function exportPropertyDeclaration(member: Extract<ClassMemberSyntax, { k: 'prop
 }
 
 function exportPropertyHooks(hooks: PropertyHookSyntax[], depth: number): string {
-  const lines = hooks.map(({ name, body, expression, isFinal }) => {
-    const prefix = `${indent(depth + 1)}${isFinal ? 'final ' : ''}${name}`;
+  const lines = hooks.map(({ name, body, expression, isFinal, byRefReturn }) => {
+    const prefix = `${indent(depth + 1)}${byRefReturn ? 'private(set) ' : ''}${isFinal ? 'final ' : ''}${name}`;
     if (expression) return `${prefix} => ${exportExpr(expression, 0, depth + 1)};\n`;
     return body ? `${prefix} ${exportBlock(body, depth + 1)}\n` : `${prefix};\n`;
   });

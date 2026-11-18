@@ -653,19 +653,18 @@ function invokeUser(
 
 function completeUserReturn(decl: FunctionDecl, frame: Frame, value: Value, name: string): Value {
   const runtime = rt();
-  if (decl.byRefReturn && !(frame.returning instanceof Ref)) {
-    runtime.row = frame.returnRow ?? decl.endRow;
-    notice('Only variable references should be returned by reference');
-    const ref = Ref.temporary(value);
-    ref.isRef = true;
-    frame.returning = ref;
-  }
-  if (!decl.returnType) return decl.byRefReturn ? value : share(value);
   runtime.row = frame.returnRow ?? decl.endRow;
-  const result = checkReturn(value, decl.returnType, name, frame);
-  if (!(frame.returning instanceof Ref)) return result;
-  frame.returning.assign(result);
-  return frame.returning.v;
+  const result = decl.returnType ? checkReturn(value, decl.returnType, name, frame) : value;
+  if (!decl.byRefReturn) return decl.returnType ? result : share(result);
+  if (frame.returning instanceof Ref) {
+    if (decl.returnType) frame.returning.assign(result);
+    return frame.returning.v;
+  }
+  notice('Only variable references should be returned by reference');
+  const ref = Ref.temporary(result);
+  ref.isRef = true;
+  frame.returning = ref;
+  return result;
 }
 
 // code-gauge-allow functionCognitiveComplexity 26 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
