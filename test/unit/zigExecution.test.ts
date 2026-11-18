@@ -9341,6 +9341,18 @@ test.each(['allocUpperString', 'allocLowerString'])(
   }
 );
 
+test.each([
+  'eqlIgnoreCase',
+  'startsWithIgnoreCase',
+  'endsWithIgnoreCase',
+  'lessThanIgnoreCase',
+  'orderIgnoreCase',
+  'findIgnoreCase',
+])('ASCII %s meters reads from both inputs as well as comparisons', (method) => {
+  const source = `const std=@import("std");pub fn main()void{var a:[100000]u8=@splat(97);var b:[100000]u8=@splat(65);_=&a;_=&b;for(0..3)|_|{_=std.ascii.${method}(&a,&b);}}`;
+  expect(executeProgram('zig', source)).toMatchObject({ kind: 'limitExceeded', limit: 'operations' });
+});
+
 test.each(['parseInt', 'parseUnsigned'])('wide %s arithmetic shares the digit work budget', (method) => {
   const text = '9'.repeat(10_000);
   const source = `const std=@import("std");pub fn main()void{for(0..10)|_|{_=std.fmt.${method}(u65535,"${text}",10) catch 0;}}`;
