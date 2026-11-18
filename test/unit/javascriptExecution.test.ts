@@ -1572,6 +1572,38 @@ function main() {
 main();`,
   ],
   [
+    'callees with escaped names in errors',
+    `const o = {};
+for (const f of [() => o.a(), () => o.b(), () => o.\\u{63}(), () => o?.d(), () => o.e.f()]) {
+  try { f(); } catch (e) { console.log(e.message); }
+}`,
+  ],
+  [
+    'console.table selections converted at each use',
+    `const s = Symbol("x");
+console.table([{ a: 1, [s]: 2 }], [s, "a"]);
+console.table([{ a: 1 }], [{ [Symbol.toPrimitive]() { return s; } }, "a"]);
+console.table([{ a: 1, b: 2 }], [1, "b"]);
+console.table([{ a: 1 }], ["a", "a"]);
+console.table([{ a: 1 }, 5, { a: 3 }], [{ toString() { console.log("conv"); return "a"; } }]);
+try { console.table([{ a: 1 }], [{ toString() { throw new Error("boom"); } }]); } catch (e) { console.log("caught", e.message); }
+console.table([{ b: 1, 2: 3, a: 4 }], ["b", "a", "2"]);
+console.table({ r: { a: 1 } }, ["a", undefined]);`,
+  ],
+  [
+    'string conversions stop at the first failure',
+    `try { String.fromCodePoint(-1, { valueOf() { console.log("side effect"); return 0; } }); } catch (e) { console.log(e.message); }
+try { String.fromCodePoint(65, 1.5, { valueOf() { throw new Error("later"); } }); } catch (e) { console.log(e.message); }
+try { String.fromCodePoint(NaN); } catch (e) { console.log(e.message); }
+try { String.fromCodePoint(-0, 0x10ffff + 1); } catch (e) { console.log(e.message); }
+try { String.fromCodePoint(Infinity); } catch (e) { console.log(e.message); }
+console.log(String.fromCodePoint(65, { valueOf() { return 66; } }));
+console.log("abc".padStart(2, { toString() { console.log("side effect"); return "x"; } }));
+console.log("abc".padEnd(3, { toString() { console.log("side effect"); return "x"; } }));
+console.log("abc".padEnd(5, { toString() { console.log("converted"); return "xy"; } }));
+console.log("abc".padStart(-1, Symbol()));`,
+  ],
+  [
     'parameter defaults do not see body declarations',
     `function lazy(read = () => helper()) { function helper() { return "inner"; } try { return read(); } catch (e) { return e.constructor.name; } }
 console.log(lazy());
