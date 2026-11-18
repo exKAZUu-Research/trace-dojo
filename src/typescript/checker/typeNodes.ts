@@ -384,7 +384,10 @@ export class TypeNodes {
   private typeReference(node: TreeNode, nameNode: TreeNode, typeArguments: Type[]): Type {
     const name = nameNode.text;
     const local = this.c.typeOperators.mappedOrInferParameter(nameNode, name);
-    if (local) return local;
+    if (local) {
+      if (typeArguments.length > 0) this.c.error(node, `型 ${name} は型引数をとりません。`);
+      return local;
+    }
     if (
       stringMappings.has(name) &&
       typeArguments.length === 1 &&
