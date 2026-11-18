@@ -11,6 +11,7 @@ import {
   resetArena,
 } from '../allocatorStorage';
 import type { Expression } from '../ast';
+import { constantText } from '../constantText';
 import { alignOf, sizeOf } from '../layout';
 import {
   copyForStorage,
@@ -34,6 +35,7 @@ import {
   type StructType,
   TYPE,
   type Type,
+  typeName,
   U8,
   type UnionType,
   USIZE,
@@ -195,7 +197,7 @@ function allocateSlice(
     request.replace ? request.source?.target : undefined
   );
   if (!complete) return OUT_OF_MEMORY;
-  if (sizeOf(child) === 0) return zeroAllocation(frame.runtime, request.length, child);
+  if (request.length === 0n || sizeOf(child) === 0) return zeroAllocation(frame.runtime, request.length, child);
   const length = Number(request.length);
   const initialized = request.source ? Math.min(request.source.length, length) : 0;
   frame.runtime.spend((length + initialized) * transferCost(child));
@@ -392,18 +394,19 @@ function debugAllocator(sema: SemaApi, call: NativeCall): TExpr {
   const key = settings.join(',');
   let type = types.get(key);
   if (!type) {
-    type = debugAllocatorType(settings[1] === true, Number(pageSize));
+    const name = `heap.debug_allocator.DebugAllocator(${constantText(value, DEBUG_CONFIG, typeName)})`;
+    type = debugAllocatorType(name, settings[1] === true, Number(pageSize));
     types.set(key, type);
   }
   return known(TYPE, type, call.span);
 }
 
-function debugAllocatorType(limited: boolean, pageSize: number): StructType {
+function debugAllocatorType(name: string, limited: boolean, pageSize: number): StructType {
   const counter = limited ? USIZE : VOID;
   const initialTotal = limited ? 0n : undefined;
   const initialLimit = limited ? maxInt(USIZE) : undefined;
   const type: StructType = allocatorInstanceType(
-    'heap.DebugAllocator',
+    name,
     'debug',
     [
       { name: 'live', type: USIZE, defaultValue: 0n },

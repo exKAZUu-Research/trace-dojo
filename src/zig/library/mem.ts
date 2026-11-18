@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 682 -- Groups the related standard library operations that share this module.
+// code-gauge-allow-file fileNcss 684 -- Groups the related standard library operations that share this module.
 import { transferCost } from '../allocation';
 import { indexOutOfBounds, PANIC, panic } from '../arith';
 import type { Expression, Span } from '../ast';
@@ -77,7 +77,7 @@ import { findSequence, type SearchSequence, sequenceMatches } from './sequenceSe
 import { sorter } from './sort';
 
 interface AllocationPlan {
-  length: number | bigint;
+  length: bigint;
   build: () => Value[];
 }
 
@@ -999,8 +999,14 @@ function replacementPlan(
   };
 }
 
-// code-gauge-allow functionCognitiveComplexity 18 -- Plans exact lengths before traversing only stored data.
-function joiningPlan(parts: Slice, separator: Slice | undefined, spend: () => void, zero = false): AllocationPlan {
+// code-gauge-allow functionCognitiveComplexity 19 -- Plans exact lengths before traversing only stored data.
+function joiningPlan(
+  parts: Slice,
+  separator: Slice | undefined,
+  spend: () => void,
+  zero = false
+): AllocationPlan | Slice {
+  if (parts.lengthValue === 0n) return newSlice([]);
   const slices: Slice[] = [];
   let length = BigInt(separator?.length ?? 0) * BigInt(Math.max(0, parts.length - 1));
   for (let index = 0; index < parts.length; index++) {
@@ -1028,17 +1034,19 @@ function allocatingCall(
   type: Type,
   args: readonly TExpr[],
   span: Span,
-  plan: (values: Value[], frame: Frame) => AllocationPlan
+  plan: (values: Value[], frame: Frame) => AllocationPlan | Slice
 ): TExpr {
   return nativeCall(allocating(type), args, span, (values, frame) => {
     const allocation = plan(values.slice(1), frame);
+    if (allocation instanceof Slice) return allocation;
     const child = type.kind === 'pointer' ? type.child : type;
     const complete = reserveNativeAllocation(frame, allocatorState(values[0]), allocation.length, child);
     if (!complete) return ERROR_OUT_OF_MEMORY;
     if (sizeOf(child) !== 0) frame.runtime.spend(Number(allocation.length) * (transferCost(child) + 1));
+    const { length } = allocation;
     const result =
-      sizeOf(child) === 0
-        ? zeroAllocation(frame.runtime, BigInt(allocation.length), child)
+      length === 0n || sizeOf(child) === 0
+        ? zeroAllocation(frame.runtime, length, child)
         : newSlice(allocation.build());
     complete(result.target);
     return result;

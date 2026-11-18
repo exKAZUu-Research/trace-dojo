@@ -17,7 +17,7 @@ export function zeroAllocation(runtime: object, length: bigint, child: Type): Sl
     source = new Slice(new ZArray([]), 0, 0);
     byAlignment.set(alignment, source);
   }
-  return zeroSlice(source, length, child);
+  return length === 0n ? source : zeroSlice(source, length, child);
 }
 
 export function zeroSlice(source: Slice, length: bigint, child: Type): Slice {

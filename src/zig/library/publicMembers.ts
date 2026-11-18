@@ -772,7 +772,7 @@ export const PUBLIC_STD_MEMBERS: Record<string, readonly string[]> = {
     'Iterator',
     'iterator',
   ],
-  'heap.DebugAllocator': [
+  'heap.debug_allocator.DebugAllocator': [
     'init',
     'Error',
     'allocator',

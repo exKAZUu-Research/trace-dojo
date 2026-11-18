@@ -3364,11 +3364,31 @@ test('zero-sized allocator replacements and empty allocations do not leak debug 
   });
 });
 
+test('empty allocations share their aligned location across allocator operations', () => {
+  const source = `const std=@import("std");const P=extern union{words:*[0]u16,bytes:*[0]u8};pub fn main(init:std.process.Init)!void{const g=init.gpa;const a=try g.alloc(u16,0);const b=try std.heap.page_allocator.dupe(u16,&.{});const c=try g.alloc(u16,4);const d=try g.realloc(c,0);const e=try g.alloc(u8,0);const f=try std.mem.concat(g,u16,&.{&.{}});const z=try std.mem.concat(g,u16,&.{});const alias=P{.words=a[0..0]};std.debug.print("{} {} {} {} {}",.{a[0..0]==b[0..0],std.meta.eql(a,d),a[0..0]==f[0..0],alias.bytes==e[0..0],a[0..0]==z[0..0]});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: 'true true true false false',
+    uncaughtException: undefined,
+  });
+});
+
 test('configured debug allocators preserve the byte limit across failed growth, successful resizing, and free', () => {
   const source = `const std=@import("std");pub fn main()!void{const config:std.heap.DebugAllocatorConfig=.{.enable_memory_limit=true};var d=std.heap.DebugAllocator(config).init;d.requested_memory_limit=6;const a=d.allocator();const old=try a.alloc(u8,4);old[0]=42;const rejected=a.realloc(old,6) catch {std.debug.print("{} {}|",.{d.total_requested_bytes,old[0]});a.free(old);const p=try a.alloc(u8,5);const q=try a.realloc(p,6);std.debug.print("{} {}|",.{d.total_requested_bytes,q.len});a.free(q);std.debug.print("{} {t}",.{d.total_requested_bytes,d.deinit()});return;};a.free(rejected);}`;
   expect(executeProgram('zig', source)).toMatchObject({
     kind: 'executed',
     stderr: '4 42|6 6|0 ok',
+    uncaughtException: undefined,
+  });
+});
+
+test('debug allocator type names display the resolved configuration', () => {
+  const source = `const std=@import("std");pub fn main()void{const A=std.heap.DebugAllocator(.{});const B=std.heap.DebugAllocator(.{.enable_memory_limit=true});std.debug.print("{}|{}|{}",.{A,@TypeOf(B.init),A==B});}`;
+  const standard =
+    'heap.debug_allocator.DebugAllocator(.{ .stack_trace_frames = 6, .enable_memory_limit = false, .safety = true, .thread_safe = true, .never_unmap = false, .retain_metadata = false, .verbose_log = false, .backing_allocator_zeroes = true, .resize_stack_traces = false, .canary = 10534666094765928719, .page_size = 131072 })';
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: `${standard}|${standard.replace('.enable_memory_limit = false', '.enable_memory_limit = true')}|false`,
     uncaughtException: undefined,
   });
 });
