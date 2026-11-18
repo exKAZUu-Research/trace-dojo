@@ -72,23 +72,35 @@ export class Signatures {
   }
 
   /**
-   * Reports a required parameter after one marked `?`, which callers could not omit, a default value where no
-   * implementation could evaluate it, a misplaced parameter property, and a misplaced `this` parameter. All are grammar
-   * errors that hold however the signature is resolved.
+   * Reports a required parameter after one marked `?`, which callers could not omit, a parameter marked `?` that also
+   * has a default value, a default value where no implementation could evaluate it, a misplaced parameter property, and
+   * a misplaced `this` parameter. All are grammar errors that hold however the signature is resolved.
    */
   private checkParameterGrammar(node: TreeNode): void {
     const hasBody = node.childForFieldName('body') !== null;
     let optional = false;
+    let listError = false;
     for (const [index, parameterNode] of parameterNodes(node).entries()) {
       if (isParameterProperty(parameterNode)) this.checkParameterPropertyGrammar(node, parameterNode);
       if (isThisParameter(parameterNode)) this.checkThisParameterGrammar(node, parameterNode, index);
       const hasDefault = parameterNode.childForFieldName('value') !== null;
       if (hasDefault && !hasBody)
         this.c.errorWhileResolving(parameterNode, '引数の既定値は、関数やコンストラクタの実装にしか書けません。');
+      listError ||= this.checkParameterListGrammar(parameterNode, hasDefault, optional);
       if (parameterNode.type === 'optional_parameter') optional = true;
-      else if (optional && patternOf(parameterNode).type !== 'rest_pattern' && !hasDefault)
-        this.c.errorWhileResolving(parameterNode, '省略できる引数の後に、省略できない引数は書けません。');
     }
+  }
+
+  /** Reports a parameter's error in the list's grammar, of which tsc reports only the first; true if it reports one. */
+  private checkParameterListGrammar(parameterNode: TreeNode, hasDefault: boolean, afterOptional: boolean): boolean {
+    let message: string | undefined;
+    if (parameterNode.type === 'optional_parameter') {
+      if (hasDefault) message = '既定値のある引数には ? を付けられません。';
+    } else if (afterOptional && patternOf(parameterNode).type !== 'rest_pattern' && !hasDefault) {
+      message = '省略できる引数の後に、省略できない引数は書けません。';
+    }
+    if (message) this.c.errorWhileResolving(parameterNode, message);
+    return message !== undefined;
   }
 
   /** Reports a `this` parameter after another parameter, or of a function that has no `this` of its own to type. */
