@@ -74,12 +74,13 @@ function isLexical(entry: Sym['valueEntries'][number]): boolean {
 
 /**
  * A `var` declared again, or redeclaring a parameter, must have the same type each time; a parameter without an
- * annotation, which a contextual signature may type, is not compared.
+ * annotation, which a contextual signature may type, or one a pattern binds, whose annotation types the whole pattern,
+ * is not compared.
  */
 function checkVarRedeclarations(c: Checker, symbol: Sym): void {
   const types = symbol.valueDeclarations.map((declaration) =>
     symbol.valueKind === 'parameter' && declaration === symbol.valueDeclaration
-      ? c.typeNodes.annotationType(declaration.childForFieldName('type'))
+      ? declaredParameterType(c, declaration)
       : c.silently(() => c.statements.declaredVariableType(symbol, declaration))
   );
   const [first] = types;
@@ -96,6 +97,11 @@ function checkVarRedeclarations(c: Checker, symbol: Sym): void {
       `後の変数の宣言は、同じ型でなければいけません。変数 ${symbol.name} の型は '${c.print(first)}' ですが、ここでは '${c.print(type)}' です。`
     );
   }
+}
+
+function declaredParameterType(c: Checker, parameter: TreeNode): Type | undefined {
+  if (parameter.childForFieldName('pattern')?.type !== 'identifier') return undefined;
+  return c.typeNodes.annotationType(parameter.childForFieldName('type'));
 }
 
 const reservedTypeNames = new Set([
