@@ -579,19 +579,19 @@ export class FunctionChecker {
     else this.c.patterns.checkInitializer(pattern, value, valueType, implied);
   }
 
-  /** Reports a function that may end without returning a value its declared return type requires. */
+  /**
+   * Reports a function that may end without returning a value its declared return type requires, as TypeScript's
+   * `checkAllCodePathsInNonVoidFunctionReturnOrThrow`: only a type with `void`, or `any` or `undefined` itself, lets a
+   * body have no `return`, while a type `undefined` is assignable to lets some paths end without one.
+   */
   checkMissingReturn(node: TreeNode, context: FunctionContext, declared: Type): void {
     if (!context.endReachable || context.isConstructor) return;
     if (hasToken(node, 'set') || node.childForFieldName('body')?.type !== 'statement_block') return;
     const members = declared.kind === 'union' ? declared.types : [declared];
     if (
-      members.some(
-        (member) =>
-          isAnyLike(member) ||
-          isIntrinsic(member, 'void') ||
-          isIntrinsic(member, 'unknown') ||
-          isIntrinsic(member, 'undefined')
-      )
+      isAnyLike(declared) ||
+      isIntrinsic(declared, 'undefined') ||
+      members.some((member) => isIntrinsic(member, 'void'))
     )
       return;
     const returnNode = node.childForFieldName('return_type') ?? node;
@@ -606,6 +606,7 @@ export class FunctionChecker {
       );
       return;
     }
+    if (this.c.relations.isAssignable(undefinedType, declared)) return;
     this.c.error(returnNode, "関数の最後に return 文がなく、戻り値の型に 'undefined' が含まれていません。");
   }
 }
