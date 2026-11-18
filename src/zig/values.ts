@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 452 -- Keeps logical slots, pointer identity, and retained payload storage with their shared assignment rules.
+// code-gauge-allow-file fileNcss 454 -- Keeps logical slots, pointer identity, and retained payload storage with their shared assignment rules.
 import { ExecutionLimitError, LIMITS } from '../interpreter/limits';
 import type { TurtleState } from '../interpreter/turtleWorld';
 import { BigFloat, compareFloats } from './floats';
@@ -702,6 +702,10 @@ class ErrorPayloadSlots implements Slots {
   assign(value: Value): Value {
     this.retainCurrent();
     storeSnapshotInto(this.cell, 0, value);
+    return this.presentValue();
+  }
+
+  presentValue(): Value {
     return this.cell.slots[0];
   }
 }

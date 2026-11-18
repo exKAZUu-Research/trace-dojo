@@ -167,8 +167,17 @@ export class TurtleReachability {
   }
 
   private unionChildren(union: ZUnion, push: Push, type?: Extract<Type, { kind: 'union' }>): void {
-    const retainedType = union.retainedPayloads?.type;
-    if (retainedType && this.mayContainTurtles(retainedType)) physicalUnion(retainedType, union);
+    const retained = union.retainedPayloads;
+    if (retained) {
+      type ??= retained.type;
+      for (const tag of retained.values.keys()) {
+        this.spend();
+        if (this.mayContainTurtles(retained.type.fields![tag].type)) {
+          physicalUnion(retained.type, union);
+          break;
+        }
+      }
+    }
     if (union.backingReferences) {
       for (const reference of union.backingReferences()) push(reference);
       return;

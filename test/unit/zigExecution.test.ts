@@ -1,6 +1,6 @@
 import { spawnSync } from 'node:child_process';
 
-import { expect, test } from 'vitest';
+import { describe, expect, test } from 'vitest';
 
 import { executeProgram } from '../../src/interpreter/program';
 
@@ -1701,6 +1701,19 @@ test.each([
 });
 
 test.each([
+  ['1000001', '.a=1', '_=init;'],
+  ['2000001', '.a=1', '_=init;'],
+  ['2000001', '.t=p', 'const p=try init.gpa.create(Turtle);p.*=Turtle.init(0,1);'],
+])('union history leaves a %s-byte inactive field sparse when storing %s', (length, initial, setup) => {
+  const source = `const std=@import("std");const U=extern union{a:u8,b:u64,t:*Turtle,unused:[${length}]u8};fn make(init:std.process.Init)!U{${setup}return .{${initial}};}pub fn main(init:std.process.Init)!void{var u=try make(init);u=.{.b=0};const t=Turtle.init(0,0);std.debug.print("{}",.{t.canMoveForward()});_=&u;}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: 'true',
+    uncaughtException: undefined,
+  });
+});
+
+test.each([
   ['?S', '.{.x=1,.y=2}', '.?'],
   ['??S', '@as(?S,.{.x=1,.y=2})', '.?.?'],
 ])('reinitializing a null %s reuses retained payload fields', (optional, initial, unwrap) => {
@@ -1709,6 +1722,42 @@ test.each([
     kind: 'executed',
     stderr: '7 8 7 8',
     uncaughtException: undefined,
+  });
+});
+
+const retainedOptionalCases = [
+  ['struct{x:u8,y:u8}', '?S', '.?', '.x', '.y', '.{.x=1,.y=2}', '.{.x=p.y,.y=p.x}'],
+  ['struct{x:u8,y:u8}', '??S', '.?.?', '.x', '.y', '.{.x=1,.y=2}', '.{.x=p.y,.y=p.x}'],
+  ['[2]u8', '?S', '.?', '[0]', '[1]', '.{1,2}', '.{p[1],p[0]}'],
+  ['[2]u8', '??S', '.?.?', '[0]', '[1]', '.{1,2}', '.{p[1],p[0]}'],
+] as const;
+
+describe.each([
+  'var local:O=undefined;const o=&local;',
+  'var buf:[16]u8=undefined;var f=std.heap.FixedBufferAllocator.init(&buf);const o=try f.allocator().create(O);',
+])('tagged result locations with %s', (storage) => {
+  test.each(retainedOptionalCases)(
+    'initializers for %s in %s read the previous bytes through retained pointers',
+    (shape, optional, unwrap, left, right, initial, literal) => {
+      const source = `const std=@import("std");const S=${shape};const O=${optional};pub fn main()!void{${storage}o.*=${initial};const p=&o.*${unwrap};o.*=null;p${left}=3;p${right}=4;o.*=${literal};std.debug.print("{} {} {} {}",.{p${left},p${right},o.*${unwrap}${left},o.*${unwrap}${right}});}`;
+      expect(executeProgram('zig', source)).toMatchObject({
+        kind: 'executed',
+        stderr: '4 4 4 4',
+        uncaughtException: undefined,
+      });
+    }
+  );
+  test.each([
+    ['S', ''],
+    ['?S', '.?'],
+    ['??S', '.?.?'],
+  ])('error-union activation preserves the retained %s payload', (payload, unwrap) => {
+    const source = `const std=@import("std");const S=struct{x:u8,y:u8};const O=error{Oops}!${payload};pub fn main()!void{${storage}o.*=.{.x=1,.y=2};if(o.*)|*q|{const p=&q.*${unwrap};o.*=error.Oops;p.x=3;p.y=4;o.*=.{.x=p.y,.y=p.x};const now=(try o.*)${unwrap};std.debug.print("{} {} {} {}",.{p.x,p.y,now.x,now.y});}else |_|unreachable;}`;
+    expect(executeProgram('zig', source)).toMatchObject({
+      kind: 'executed',
+      stderr: '4 4 4 4',
+      uncaughtException: undefined,
+    });
   });
 });
 

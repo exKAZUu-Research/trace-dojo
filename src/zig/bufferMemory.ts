@@ -104,7 +104,7 @@ export function zeroPhysicalValue(type: Extract<Type, { kind: 'struct' | 'union'
 
 export function physicalUnion(type: Extract<Type, { kind: 'union' }>, value: ZUnion): ZUnion {
   if (value.fieldView) return value;
-  const bytes = unionBytes(type, 0xaan);
+  const bytes = sparseBytes(sizeOf(type));
   const memory = new BufferMemory(bytes, spendMemory, memorySpace());
   memory.write(type, 0, value);
   const backing = memory.read(type, 0) as ZUnion;
@@ -183,6 +183,11 @@ export class BufferMemory {
 
   get byteLength(): number {
     return this.bytes.length;
+  }
+
+  activatePayload(type: Extract<Type, { kind: 'optional' | 'error_union' }>, offset: number): void {
+    if (type.kind === 'optional') this.writeBits(offset + sizeOf(type.child) * 8, 8, 1n);
+    else this.writeBits(offset + errorUnionOffsets(type.payload).error * 8, 16, 0n);
   }
 
   private access<T>(write: boolean, offset: number, bits: number, run: () => T): T {
@@ -377,6 +382,7 @@ export class BufferMemory {
       },
     });
     registerStorageLocation(union.slots, () => ({ storage: this.bytes, index: offset / 8 + layout.payload }));
+    this.space.typedViews.set(union.slots, { memory: this, offset: () => payload().offset });
     union.fieldView = (index) => ({
       slots: this.slots([unionFieldLocation(type, index, offset + layout.payload * 8)]),
     });
@@ -394,7 +400,7 @@ export class BufferMemory {
     }
     union.backingReferences = () => this.sparseReferences(offset, 0, bits).map((reference) => reference.value as Value);
     union.copyBacking = () => {
-      const memory = new BufferMemory(unionBytes(type, 0n), spendMemory, this.space);
+      const memory = new BufferMemory(sparseBytes(sizeOf(type)), spendMemory, this.space);
       this.copyRegion(memory, offset, 0, bits);
       const copy = memory.read(type, 0) as ZUnion;
       copy.tag = union.tag;
@@ -738,14 +744,6 @@ export class BufferMemory {
 function unionFieldLocation(type: Extract<Type, { kind: 'union' }>, index: number, offset: number): FieldLocation {
   const field = type.fields![index].type;
   return { type: field, offset, packed: type.layout === 'packed' ? bitSizeOf(field) : undefined };
-}
-
-function unionBytes(type: Extract<Type, { kind: 'union' }>, fill: bigint): Value[] {
-  const length = sizeOf(type);
-  if (type.layout === 'auto') return sparseBytes(length);
-  reserveMemory(length);
-  spendMemory(length);
-  return Array.from<Value>({ length }).fill(fill);
 }
 
 function referenceKey(id: bigint, bits: number): string {

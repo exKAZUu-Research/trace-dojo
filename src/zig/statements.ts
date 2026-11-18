@@ -8,6 +8,7 @@ import { CallCompiler, type FunctionCompilation } from './calls';
 import { enumLookup } from './enumLookup';
 import type { FunctionInstance } from './functions';
 import { hasValueDependentWrites, sizeOf } from './layout';
+import { memorySpace } from './memoryAccounting';
 import { type Frame, Jump, withHeldValues } from './runtime';
 import {
   copyForFrame,
@@ -730,15 +731,13 @@ export abstract class StatementCompiler extends CallCompiler {
   private errorUnionStore(value: Expression, type: Extract<Type, { kind: 'error_union' }>): ResultStore | undefined {
     const inner = this.resultLocationStore(value, type.payload);
     if (!inner) return undefined;
+    const project = this.errorUnionPayloadPointer(type, value);
     return (frame, holder, index) => {
       const current = holder.slots[index];
-      if (current === undefined || current instanceof ErrorValue) {
-        const slots = valueSlots(type.payload);
-        frame.runtime.reserveStorage(slots);
-        frame.runtime.spend(slots);
-        storeInto(holder, index, undefinedValue(type.payload));
-      }
-      inner(frame, holder, index);
+      if (current === undefined || current instanceof ErrorValue)
+        this.activateResultPayload(frame, holder, index, type);
+      const payload = project(new Pointer(holder, index));
+      inner(frame, payload.target, payload.index);
     };
   }
 
@@ -746,16 +745,35 @@ export abstract class StatementCompiler extends CallCompiler {
     const inner = this.resultLocationStore(value, type.child);
     if (!inner) return undefined;
     return (frame, holder, index) => {
-      if (holder.slots[index] === NULL) {
-        const nested = type.child.kind === 'optional';
-        const slots = nested ? 0 : valueSlots(type.child);
-        frame.runtime.reserveStorage(slots);
-        frame.runtime.spend(slots);
-        storeInto(holder, index, optionalSome(nested ? NULL : undefinedValue(type.child), type.child));
-      }
+      if (holder.slots[index] === NULL) this.activateResultPayload(frame, holder, index, type);
       const payload = this.optionalPayloadPointer(new Pointer(holder, index), type.child);
       inner(frame, payload.target, payload.index);
     };
+  }
+
+  private activateResultPayload(
+    frame: Frame,
+    holder: Slots,
+    index: number,
+    type: Extract<Type, { kind: 'optional' | 'error_union' }>
+  ): void {
+    const backing = memorySpace().typedViews.get(holder.slots);
+    if (backing) {
+      backing.memory.activatePayload(type, backing.offset(index));
+      return;
+    }
+    const retained =
+      type.kind === 'optional' ? Pointer.optionalProjection(holder, index) : Pointer.errorProjection(holder, index);
+    if (retained) {
+      holder.slots[index] = retained.presentValue();
+      return;
+    }
+    const child = type.kind === 'optional' ? type.child : type.payload;
+    const slots = child.kind === 'optional' ? 0 : valueSlots(child);
+    frame.runtime.reserveStorage(slots);
+    frame.runtime.spend(slots);
+    const fresh = child.kind === 'optional' ? NULL : undefinedValue(child);
+    holder.slots[index] = type.kind === 'optional' ? optionalSome(fresh, child) : fresh;
   }
 
   private fieldStores(value: ExpressionOf<'structInit'>, type: Extract<Type, { kind: 'struct' }>): ResultStore {

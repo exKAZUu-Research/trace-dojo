@@ -783,8 +783,12 @@ export abstract class ExpressionCompiler extends SemaBase {
     const { payload } = type;
     const offset = errorUnionOffsets(payload).payload;
     if (sizeOf(payload) === 0) return (parent) => this.zeroPointerAt(parent.fieldLocation(offset), payload);
-    return (parent) =>
-      this.taggedPayloadPointer(parent, payload, offset, (pointer) => pointer.projectErrorPayload(offset));
+    return (parent) => {
+      const projection = this.taggedPayloadPointer(parent, payload, offset, (pointer) =>
+        pointer.projectErrorPayload(offset)
+      );
+      return hasAggregateStorage(payload) ? projection.withFieldLocation(parent, offset) : projection;
+    };
   }
 
   private taggedPayloadPointer(
