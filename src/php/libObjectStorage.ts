@@ -83,7 +83,9 @@ class ObjectStorage {
     this.nativeValues.delete(entry.object);
     this.nativeValues.delete(entry.info);
     this.slots[this.slots.indexOf(entry)] = undefined;
-    rt().release([entry.object, entry.info]);
+    const runtime = rt();
+    runtime.release([entry.object, entry.info]);
+    runtime.flushReleases(true);
     return true;
   }
 

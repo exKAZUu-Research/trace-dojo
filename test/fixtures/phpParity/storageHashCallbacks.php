@@ -92,3 +92,27 @@ foreach ([new SplObjectStorage, new InheritsHash, new InheritsUnset, new HashCal
         unset($dimension[$one], $dimension[$two]);
     }
 }
+
+class CursorAtRelease {
+    function __construct(private $storage, private $fail) {}
+    function __destruct() {
+        echo 'during:', count($this->storage), ':', $this->storage->key(), ':', $this->storage->getInfo(), "\n";
+        if ($this->fail) throw new RuntimeException('release');
+    }
+}
+foreach ([SplObjectStorage::class, InheritsUnset::class, HashCallbacks::class] as $type) {
+    foreach ([1, 3] as $remove) {
+        foreach ([false, true] as $fail) {
+            $storage = new $type();
+            $objects = [];
+            foreach ([1, 2, 3] as $id) {
+                $objects[$id] = (object)['id' => $id];
+                $storage[$objects[$id]] = $id === $remove ? new CursorAtRelease($storage, $fail) : $id;
+            }
+            $storage->next();
+            try { unset($storage[$objects[$remove]]); }
+            catch (RuntimeException $error) { echo 'caught:', $error->getMessage(), "\n"; }
+            echo 'after:', count($storage), ':', $storage->key(), ':', $storage->getInfo(), "\n";
+        }
+    }
+}

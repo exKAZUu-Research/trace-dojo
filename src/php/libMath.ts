@@ -4,7 +4,7 @@ import { randomBytes } from 'node:crypto';
 import { floatFitsInt, valueName } from './conversions';
 import { deprecated, throwError } from './errors';
 import { cPow } from './floatPow';
-import { defineAlias, defineConstant, defineFunction, markInlined } from './native';
+import { defineAlias, defineConstant, defineFunction } from './native';
 import { arithmetic, compare } from './operators';
 import { rt } from './runtime';
 import { fixedDigits, phpRound, type RoundMode } from './strings';
@@ -99,9 +99,6 @@ defineFunction('max(mixed $value, mixed ...$values): mixed', ({ args, row }) =>
 defineFunction('min(mixed $value, mixed ...$values): mixed', ({ args, row }) =>
   extreme('min', args, -1, row !== undefined)
 );
-
-markInlined('max');
-markInlined('min');
 
 function extreme(name: string, args: Value[], direction: number, compiled: boolean): Value {
   if (args.length === 1) return extremeOfArray(name, args[0], direction);
