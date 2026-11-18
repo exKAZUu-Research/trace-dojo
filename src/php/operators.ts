@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 442 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 443 -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/prefer-code-point -- PHP strings hold bytes as code units 0–255, which charCodeAt and fromCharCode read and write as they are.
 import {
   compareBytes,
@@ -186,14 +186,29 @@ export function arithmetic(op: string, left: Value, right: Value): Value {
   throw new Error(`Unknown arithmetic operator ${op}`);
 }
 
-// code-gauge-allow functionCognitiveComplexity 17 -- Transcribes PHP's algorithm for this function step by step, whose branches mirror PHP's.
 function power(a: bigint | number, b: bigint | number): bigint | number {
   if (typeof a === 'bigint' && typeof b === 'bigint' && b >= 0n) {
     if (a === 0n || a === 1n || b === 0n) return b === 0n ? 1n : a;
     if (a === -1n) return b % 2n === 0n ? 1n : -1n;
-    // The result overflows once the exponent passes 63 for any base other than 0 and ±1.
-    if (b > 64n) return cPow(Number(a), Number(b));
-    return intOrFloat(a ** b);
+    let result = 1n;
+    let factor = a;
+    let exponent = b;
+    while (exponent > 0n) {
+      if (exponent % 2n !== 0n) {
+        exponent--;
+        const product = result * factor;
+        if (product < INT_MIN || product > INT_MAX)
+          return Number(result) * Number(factor) * cPow(Number(factor), Number(exponent));
+        result = product;
+      } else {
+        exponent /= 2n;
+        const square = factor * factor;
+        if (square < INT_MIN || square > INT_MAX)
+          return Number(result) * cPow(Number(factor) * Number(factor), Number(exponent));
+        factor = square;
+      }
+    }
+    return result;
   }
   if (Number(a) === 0 && Number(b) < 0) {
     deprecated('Power of base 0 and negative exponent is deprecated');
@@ -444,6 +459,7 @@ function hasDynamicProps(object: PhpObject): boolean {
   return [...object.props.keys()].some((key) => !key.startsWith('\0') && !object.cls.propByName.has(key));
 }
 
+// code-gauge-allow functionNcss 32 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 export function compareScalar(a: Value, b: Value): number {
   if ((typeof a === 'bigint' || typeof a === 'number') && (typeof b === 'bigint' || typeof b === 'number')) {
     return compareNumbers(a, b);
@@ -458,6 +474,15 @@ export function compareScalar(a: Value, b: Value): number {
     const y = toBool(b);
     return x === y ? 0 : x ? 1 : -1;
   }
+  if (
+    (typeof a === 'number' &&
+      Number.isNaN(a) &&
+      (typeof b === 'string' || typeof b === 'bigint' || typeof b === 'number')) ||
+    (typeof b === 'number' &&
+      Number.isNaN(b) &&
+      (typeof a === 'string' || typeof a === 'bigint' || typeof a === 'number'))
+  )
+    return 1;
   if (typeof a === 'string' && (typeof b === 'bigint' || typeof b === 'number')) return compareStringNumber(a, b);
   if (typeof b === 'string' && (typeof a === 'bigint' || typeof a === 'number')) return -compareStringNumber(b, a);
   if (a instanceof PhpObject) return compareObjectScalar(a, b);

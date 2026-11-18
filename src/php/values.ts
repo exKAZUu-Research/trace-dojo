@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 944 -- Keeps one PHP runtime concern and its shared helpers in one module.
+// code-gauge-allow-file fileNcss 993 -- Keeps one PHP runtime concern and its shared helpers in one module.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import type { TurtleState } from '../interpreter/turtleWorld';
 import { ArrayTable } from './arrayTable';
@@ -1067,7 +1067,7 @@ export function setInternalHandler(handler: typeof internalHandler): void {
 }
 
 function trackOwner(value: unknown, parent: Owner, key?: Key): void {
-  invalidateOwner(parent);
+  rewireOwnership(parent, key, value);
   if (!(value instanceof Ref || value instanceof PhpArray || value instanceof PhpObject)) return;
   let parents = owners.get(value);
   if (!parents) {
@@ -1097,10 +1097,6 @@ export function arrayHolderCount(value: PhpArray): number {
     if (count > 1) return count;
   }
   return count;
-}
-
-export function hasValueOwner(value: object): boolean {
-  return !valueOwners(value).next().done;
 }
 
 export function* valueOwners(value: object): Generator<Owner> {
@@ -1154,6 +1150,34 @@ class PropertyMap extends Map<string, Slot> {
 
 const reachProofs = new WeakMap<object, object>();
 const proofChildren = new WeakMap<object, Set<object>>();
+const proofParents = new WeakMap<object, object>();
+let ownershipWorkHandler: (cost: number) => void = () => {};
+
+export function setOwnershipWorkHandler(handler: typeof ownershipWorkHandler): void {
+  ownershipWorkHandler = handler;
+}
+
+function rewireOwnership(owner: Owner, key: Key | undefined, value: unknown): void {
+  const root = reachProofs.get(owner);
+  if (root && value !== owner && (value instanceof Ref || value instanceof PhpArray || value instanceof PhpObject))
+    rememberOwnership([owner, value], root);
+  const children = proofChildren.get(owner);
+  for (const child of children ?? []) {
+    if (child === value || retainsChild(owner, key, child)) continue;
+    invalidateOwner(child);
+  }
+}
+
+function retainsChild(owner: Owner, replacedKey: Key | undefined, child: object): boolean {
+  if (owner instanceof Ref) return false;
+  if (owner instanceof PhpObject && nativeOwners.get(child)?.has(owner)) return true;
+  for (const key of owners.get(child)?.get(owner) ?? []) {
+    if (key === replacedKey) continue;
+    const actual = owner instanceof PhpArray ? owner.map.get(key as Key) : owner.props.get(key as string);
+    if (actual === child) return true;
+  }
+  return false;
+}
 
 function invalidateOwner(owner: object): void {
   const pending = [owner];
@@ -1163,9 +1187,12 @@ function invalidateOwner(owner: object): void {
     if (visited.has(value)) continue;
     visited.add(value);
     reachProofs.delete(value);
+    const parent = proofParents.get(value);
+    if (parent) proofChildren.get(parent)?.delete(value);
+    proofParents.delete(value);
     const children = proofChildren.get(value);
     if (children) {
-      for (const child of children) pending.push(child);
+      for (const child of children) if (proofParents.get(child) === value) pending.push(child);
       proofChildren.delete(value);
     }
   }
@@ -1176,12 +1203,22 @@ export function ownershipProof(value: object, isRoot: (value: object) => boolean
   return root !== undefined && isRoot(root) ? root : undefined;
 }
 
+// code-gauge-allow functionCognitiveComplexity 19 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 export function rememberOwnership(path: object[], root: object): void {
   for (let index = 0; index < path.length; index++) {
     const value = path[index];
     reachProofs.set(value, root);
+    if (value === root) {
+      const parent = proofParents.get(value);
+      if (parent) proofChildren.get(parent)?.delete(value);
+      proofParents.delete(value);
+    }
     const child = path[index + 1];
-    if (child) {
+    if (child && child !== value) {
+      if (proofChildren.get(child)?.size && wouldProofCycle(value, child)) return;
+      const previous = proofParents.get(child);
+      if (previous) proofChildren.get(previous)?.delete(child);
+      proofParents.set(child, value);
       let children = proofChildren.get(value);
       if (!children) {
         children = new Set();
@@ -1190,6 +1227,19 @@ export function rememberOwnership(path: object[], root: object): void {
       children.add(child);
     }
   }
+}
+
+function wouldProofCycle(owner: object, child: object): boolean {
+  let work = 0;
+  for (let parent: object | undefined = owner; parent; parent = proofParents.get(parent)) {
+    if ((++work & 63) === 0) ownershipWorkHandler(8);
+    if (parent === child) {
+      ownershipWorkHandler(Math.ceil((work & 63) / 8));
+      return true;
+    }
+  }
+  ownershipWorkHandler(Math.ceil((work & 63) / 8));
+  return false;
 }
 
 export function copyValueSlot(slot: Value | Ref): Value | Ref {

@@ -194,7 +194,8 @@ function binaryConstant(op: string, left: Constant, right: Folded): Folded {
 }
 
 function comparisonConstant(op: string, left: Constant, right: Constant): Folded {
-  const order = compareConstant(left, right, op === '===' || op === '!==');
+  const reverse = op === '>' || op === '>=';
+  const order = compareConstant(reverse ? right : left, reverse ? left : right, op === '===' || op === '!==');
   if (order === UNKNOWN) return UNKNOWN;
   const results: Record<string, boolean> = {
     '===': order === 0,
@@ -204,8 +205,8 @@ function comparisonConstant(op: string, left: Constant, right: Constant): Folded
     '<>': order !== 0,
     '<': order < 0,
     '<=': order <= 0,
-    '>': order > 0,
-    '>=': order >= 0,
+    '>': order < 0,
+    '>=': order <= 0,
   };
   return results[op] ?? BigInt(order);
 }

@@ -357,7 +357,6 @@ defineFunction(
 );
 defineFunction(
   'substr_replace(array|string $string, array|string $replace, array|int $offset, array|int|null $length = null): string|array',
-  // code-gauge-allow functionCognitiveComplexity 30 -- Transcribes PHP's algorithm for this function step by step, whose branches mirror PHP's.
   ({ args }) => {
     const [text, replace, offset, length] = args;
     if (!(text instanceof PhpArray)) {
@@ -378,7 +377,7 @@ defineFunction(
     const one = (subject: string, index: number): string => {
       const replacement = toStr(replacements ? (replacements[index] ?? '') : replace);
       let start = Number(toInt(offsets ? (offsets[index] ?? null) : offset));
-      const lengthValue = lengths ? (lengths[index] ?? null) : length;
+      const lengthValue = lengths ? (index < lengths.length ? toInt(lengths[index]) : undefined) : length;
       if (start < 0) start = Math.max(subject.length + start, 0);
       if (start > subject.length) start = subject.length;
       let end = lengthValue === null || lengthValue === undefined ? subject.length : Number(toInt(lengthValue));

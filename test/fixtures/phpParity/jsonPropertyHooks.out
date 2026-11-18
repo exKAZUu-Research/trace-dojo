@@ -1,0 +1,6 @@
+virtual;backed;uninitialized;{"first":1,"virtual":2,"backed":4,"uninitialized":5,"last":6}
+
+Fatal error: Uncaught Error: Cannot unset hooked property Hooks::$backed in /main.php:15
+Stack trace:
+#0 {main}
+  thrown in /main.php on line 15

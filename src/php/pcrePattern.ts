@@ -1,5 +1,5 @@
 // oxlint-disable unicorn/prefer-code-point -- PHP pattern strings contain bytes; UTF-8 validation reads each byte separately.
-// code-gauge-allow-file fileNcss 758 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 760 -- Holds the cases of one concern of the interpreter, which share their helpers.
 import propertyAliases from 'unicode-property-value-aliases-ecmascript';
 
 import { dec, enc, utf8Length } from './bytes';
@@ -788,7 +788,8 @@ class PatternConverter {
     }
     if (rest.startsWith('#')) {
       const close = this.source.indexOf(')', this.index);
-      this.index = close === -1 ? this.source.length : close + 1;
+      if (close === -1) this.fail('missing ) after (?# comment', this.source.length);
+      this.index = close + 1;
       return;
     }
     unsupportedGroup(rest);

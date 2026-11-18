@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 786 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 799 -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import {
   applyOperator,
@@ -141,7 +141,18 @@ export function ev(e: Expr): Value {
 }
 
 /** The expressions that consume their operands, which PHP frees right after the expression. */
-const RELEASING_OPERANDS = new Set<Expr['k']>(['instanceof', 'unary', 'cast', 'cond', 'empty', 'prop', 'idx']);
+const RELEASING_OPERANDS = new Set<Expr['k']>(['instanceof', 'unary', 'cast', 'cond', 'empty', 'isset', 'prop', 'idx']);
+
+export function evBool(e: Expr): boolean {
+  const runtime = rt();
+  const frame = runtime.frame;
+  const mark = frame.temporaries.length;
+  const value = ev(e);
+  const result = toBool(value);
+  frame.temporaries.push(value);
+  runtime.dropTemporaries(frame, mark);
+  return result;
+}
 
 export function evChain(e: Expr): Chain {
   const runtime = rt();
@@ -278,9 +289,9 @@ export function evChain(e: Expr): Chain {
       return incDec(e);
     }
     case 'cond': {
+      if (e.consequent !== undefined) return evBool(e.test) ? ev(e.consequent) : ev(e.alternate);
       const test = ev(e.test);
-      if (e.consequent === undefined) return toBool(test) ? test : ev(e.alternate);
-      return toBool(test) ? ev(e.consequent) : ev(e.alternate);
+      return toBool(test) ? test : ev(e.alternate);
     }
     case 'cast': {
       return cast(e.type, ev(e.e));
@@ -930,14 +941,18 @@ function binary(e: Extract<Expr, { k: 'bin' }>): Value {
   switch (e.op) {
     case '&&':
     case 'and': {
-      return toBool(ev(e.l)) && toBool(ev(e.r));
+      return evBool(e.l) && evBool(e.r);
     }
     case '||':
     case 'or': {
-      return toBool(ev(e.l)) || toBool(ev(e.r));
+      return evBool(e.l) || evBool(e.r);
     }
     case 'xor': {
-      return toBool(ev(e.l)) !== toBool(ev(e.r));
+      const mark = runtime.frame.temporaries.length;
+      const left = ev(e.l);
+      runtime.frame.temporaries.push(left);
+      const right = ev(e.r);
+      return keepResult(mark, toBool(left) !== toBool(right)) as Value;
     }
     case '??': {
       return evQuiet(e.l, 'coalesce') ?? ev(e.r);

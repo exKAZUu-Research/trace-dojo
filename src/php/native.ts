@@ -74,6 +74,7 @@ export function constantDeprecation(name: string): string | undefined {
 
 export interface NativeMethod {
   signature: string;
+  acceptsNamed?: boolean;
   impl: (ctx: NativeContext & { thisObj: PhpObject }) => Value;
   isStatic?: boolean;
   isFinal?: boolean;
@@ -165,6 +166,7 @@ function buildClass(definition: ClassDefinition): PhpClass {
       name,
       params,
       returnType,
+      acceptsNamed: nativeMethod.acceptsNamed,
       impl: nativeMethod.impl as (ctx: NativeContext) => Value,
     };
     const method: Method = {

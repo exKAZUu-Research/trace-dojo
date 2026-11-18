@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 483 -- Keeps one PHP runtime concern and its shared helpers in one module.
+// code-gauge-allow-file fileNcss 485 -- Keeps one PHP runtime concern and its shared helpers in one module.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import { placeOf } from './assignment';
 import type { Arg, Expr } from './ast';
@@ -114,7 +114,7 @@ export function evalArgs(args: Arg[], fn: Callable | undefined, name: string | u
         }
         if (e.k === 'call' || e.k === 'mcall' || e.k === 'scall' || e.k === 'new' || e.k === 'newAnon') {
           notice('Only variables should be passed by reference');
-          add({ v: value, ref: new Ref(value), name: arg.name });
+          add({ v: value, ref: Ref.temporary(value), name: arg.name });
           continue;
         }
         const label = name ?? fn?.name ?? '';
@@ -615,6 +615,10 @@ export function callValue(
   mode: 'direct' | 'callback' = 'callback'
 ): Value {
   const target = callTargetOf(callable, mode);
+  return invokeCallbackTarget(target, args, row);
+}
+
+export function invokeCallbackTarget(target: CallTarget, args: ArgValue[], row: number | undefined): Value {
   return invoke(target, bindCallbackArguments(target, args), row);
 }
 

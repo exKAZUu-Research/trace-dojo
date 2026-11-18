@@ -19,7 +19,7 @@ import {
 import { toBool, valueName } from './conversions';
 import { E_DEPRECATED, E_WARNING, emitError, setPrevious, throwError, warn } from './errors';
 import { collectBeforeAllocation, setDestructor } from './garbage';
-import { ev, evQuiet, evReturn } from './interp';
+import { ev, evBool, evQuiet, evReturn } from './interp';
 import { looseEquals, setObjectConversions, toStr } from './operators';
 import { ElementPlace, RefPlace, share, ValuePlace, VarPlace, writableContainer } from './places';
 import { FatalError, Frame, PhpThrow, rt, type Runtime } from './runtime';
@@ -163,7 +163,10 @@ function execStmt(statement: Stmt, seek?: string): Completion {
       }
       case 'echo': {
         const mark = runtime.steps.statementMark();
-        for (const arg of statement.args) runtime.echo(toStr(ev(arg)));
+        for (const arg of statement.args) {
+          runtime.echo(toStr(ev(arg)));
+          runtime.dropTemporaries(frame, held);
+        }
         runtime.steps.completeStatement(statement.row, true, mark);
         return undefined;
       }
@@ -172,14 +175,14 @@ function execStmt(statement: Stmt, seek?: string): Completion {
         return undefined;
       }
       case 'if': {
-        if (toBool(ev(statement.cond))) return execList(statement.consequent);
+        if (evBool(statement.cond)) return execList(statement.consequent);
         return statement.alternate ? execList(statement.alternate) : undefined;
       }
       case 'while': {
         for (;;) {
           runtime.dropTemporaries(frame, held);
           runtime.row = statement.row;
-          if (!toBool(ev(statement.cond))) return undefined;
+          if (!evBool(statement.cond)) return undefined;
           const result = loopBody(statement.body);
           if (result !== 'next') return result;
           runtime.spend();
@@ -191,7 +194,7 @@ function execStmt(statement: Stmt, seek?: string): Completion {
           const result = loopBody(statement.body);
           if (result !== 'next') return result;
           runtime.row = statement.row;
-          if (!toBool(ev(statement.cond))) return undefined;
+          if (!evBool(statement.cond)) return undefined;
           runtime.spend();
         }
       }
@@ -314,7 +317,7 @@ function loopBody(body: Stmt[]): 'next' | Completion {
   return completion;
 }
 
-// code-gauge-allow functionCognitiveComplexity 18 -- One case per statement kind, as PHP runs each kind differently.
+// code-gauge-allow functionCognitiveComplexity 19 -- One case per statement kind, as PHP runs each kind differently.
 function forStatement(statement: Extract<Stmt, { k: 'for' }>, held: number): Completion {
   const runtime = rt();
   const frame = runtime.frame;
@@ -327,8 +330,11 @@ function forStatement(statement: Extract<Stmt, { k: 'for' }>, held: number): Com
     runtime.row = statement.row;
     let proceed = true;
     for (const [index, e] of statement.cond.entries()) {
-      const value = ev(e);
-      if (index === statement.cond.length - 1) proceed = toBool(value);
+      if (index === statement.cond.length - 1) proceed = evBool(e);
+      else {
+        ev(e);
+        runtime.dropTemporaries(frame, held);
+      }
     }
     if (!proceed) return undefined;
     const result = loopBody(statement.body);

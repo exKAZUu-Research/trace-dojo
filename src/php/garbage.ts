@@ -5,7 +5,6 @@ import { type Frame, PhpThrow, type Runtime } from './runtime';
 import {
   arrayHolderCount,
   type ClosureData,
-  hasValueOwner,
   isClosure,
   observeOwnership,
   type OwnershipChange,
@@ -163,6 +162,7 @@ export function releaseDropped(runtime: Runtime, dropped: unknown[]): void {
 }
 
 // code-gauge-allow functionNcss 53 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+// code-gauge-allow functionCognitiveComplexity 29 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 function releaseDroppedNow(runtime: Runtime, dropped: unknown[]): void {
   if (runtime.shuttingDown || runtime.exhausted) return;
   dropped = dropped.filter(
@@ -174,9 +174,8 @@ function releaseDroppedNow(runtime: Runtime, dropped: unknown[]): void {
   dropped = dropped.filter(
     (value) =>
       (value instanceof PhpObject && activeReleaseObjects.has(value)) ||
-      (!(value instanceof PhpObject && hasValueOwner(value)) &&
-        (!(value instanceof Ref || value instanceof PhpArray || value instanceof PhpObject) ||
-          !ownedReachable(value, roots, runtime, unreachable)))
+      !(value instanceof Ref || value instanceof PhpArray || value instanceof PhpObject) ||
+      !ownedReachable(value, roots, runtime, unreachable)
   );
   if (dropped.length === 0) return;
   const cycleCount = runtime.arrayCycles.size;

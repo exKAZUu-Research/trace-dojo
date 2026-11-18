@@ -1222,3 +1222,22 @@ test('releases objects holding shared arrays with time to spare', () => {
     )
   ).toMatchObject({ kind: 'executed', stdout: '10000' });
 });
+
+test.each(
+  ['(-1)**0.5', '1e999-1e999'].flatMap((nan) => [
+    `(${nan})=="NAN"`,
+    `"NAN"==(${nan})`,
+    `(${nan})<"x"`,
+    `"x">(${nan})`,
+    `(${nan})>""`,
+    `""<(${nan})`,
+    `(${nan})<="NAN"`,
+    `"NAN">=(${nan})`,
+  ])
+)('folds unordered NaN comparisons in defaults: %s', (value) => {
+  expect(run(`<?php function f(false $x=${value}){var_dump($x);}f();`)).toMatchObject({
+    kind: 'executed',
+    stdout: 'bool(false)\n',
+  });
+  expect(run(`<?php echo 'never';function f(true $x=${value}){}`).kind).toBe('compileError');
+});

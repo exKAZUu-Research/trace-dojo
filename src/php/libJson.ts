@@ -1,9 +1,9 @@
-// code-gauge-allow-file fileNcss 408 -- Keeps one PHP runtime concern and its shared helpers in one module.
+// code-gauge-allow-file fileNcss 419 -- Keeps one PHP runtime concern and its shared helpers in one module.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 // oxlint-disable unicorn/prefer-code-point -- PHP strings hold bytes as code units 0–255, which charCodeAt and fromCharCode read and write as they are.
 import { codePointBytes, enc, utf8Length } from './bytes';
 import { callMethod } from './callables';
-import { canAccessProp, createObject, declForKey, propNameOf } from './classes';
+import { canAccessProp, createObject, declForKey, propNameOf, readProp } from './classes';
 import * as conversionsModule from './conversions';
 import { formatFloatRepr } from './conversions';
 import { newThrowable, throwError } from './errors';
@@ -178,7 +178,7 @@ class JsonEncoder {
     return wrap(this.objectMembers(object, level), '{', '}', this.flags, level);
   }
 
-  // code-gauge-allow functionCognitiveComplexity 22 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+  // code-gauge-allow functionCognitiveComplexity 24 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
   private *objectMembers(object: PhpObject, level: number): Generator<string> {
     const table = (object.internal as { properties?: () => PhpArray } | undefined)?.properties?.();
     if (table) {
@@ -188,7 +188,12 @@ class JsonEncoder {
       }
       return;
     }
-    const keys = [...object.props.keys()];
+    const keys = [
+      ...new Set([
+        ...[...object.cls.propByName.values()].filter((decl) => !decl.isStatic).map((decl) => decl.key),
+        ...object.props.keys(),
+      ]),
+    ];
     const dynamic = new PhpArray();
     for (const [key, slot] of object.props)
       if (!declForKey(object.cls, key) && slot !== UNINIT) dynamic.setSlot(key, copyValueSlot(slot));
@@ -198,6 +203,10 @@ class JsonEncoder {
       for (const key of keys) {
         const decl = declForKey(object.cls, key);
         if (decl && !canAccessProp(decl, undefined)) continue;
+        if (decl?.hooks?.get) {
+          yield this.member(decl.name, readProp(object, decl.name, undefined), level);
+          continue;
+        }
         const slot = decl ? object.props.get(key) : dynamic.map.get(key);
         if (slot === UNINIT || slot === undefined) continue;
         yield this.member(propNameOf(key), slot instanceof Ref ? slot.v : slot, level);
@@ -432,7 +441,8 @@ class JsonParser {
     throw new JsonError(4);
   }
 
-  // code-gauge-allow functionNcss 40 -- Transcribes PHP's algorithm for this function step by step, whose branches mirror PHP's.
+  // code-gauge-allow functionNcss 44 -- Transcribes PHP's algorithm for this function step by step, whose branches mirror PHP's.
+  // code-gauge-allow functionCognitiveComplexity 16 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
   private object(depth: number): Value {
     this.index++;
     const array = new PhpArray();
@@ -447,6 +457,7 @@ class JsonParser {
         }
       };
       this.skipSpace();
+      if (this.text[this.index] === ']') throw new JsonError(2);
       if (this.text[this.index] === '}') {
         this.index++;
         createIfNeeded();
@@ -472,6 +483,7 @@ class JsonParser {
         this.skipSpace();
         const next = this.text[this.index++];
         if (next === '}') break;
+        if (next === ']') throw new JsonError(2);
         if (next !== ',') throw new JsonError(4);
       }
       return object ?? array;
@@ -486,6 +498,7 @@ class JsonParser {
     this.containers.push(array);
     try {
       this.skipSpace();
+      if (this.text[this.index] === '}') throw new JsonError(2);
       if (this.text[this.index] === ']') {
         this.index++;
         return array;
@@ -496,6 +509,7 @@ class JsonParser {
         this.skipSpace();
         const next = this.text[this.index++];
         if (next === ']') break;
+        if (next === '}') throw new JsonError(2);
         if (next !== ',') throw new JsonError(4);
       }
       return array;

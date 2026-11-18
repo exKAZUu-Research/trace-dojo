@@ -1,7 +1,7 @@
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import { TURTLE_METHOD_NAMES, type TurtleState } from '../interpreter/turtleWorld';
-import { callTargetOf, closureFromCallable, closureTarget } from './callables';
-import { copyClosureData, invoke } from './calls';
+import { callTargetOf, closureFromCallable, closureTarget, invokeCallbackTarget } from './callables';
+import { type ArgValue, copyClosureData, invoke } from './calls';
 import { requireClass } from './classes';
 import { debugType } from './conversions';
 import { throwError, warn } from './errors';
@@ -150,14 +150,17 @@ defineClass({
     },
     {
       signature: 'call(object $newThis, mixed ...$args): mixed',
-      impl: ({ thisObj, args }) => {
+      acceptsNamed: true,
+      impl: ({ thisObj, args, named }) => {
         const [newThis, ...rest] = args;
         const binding = closureBinding(thisObj, newThis, newThis);
         if (!binding) return null;
         const target = closureTarget(thisObj);
-        return invoke(
+        const forwarded: ArgValue[] = rest.map((v) => ({ v }));
+        for (const [name, v] of named ?? []) forwarded.push({ name, v });
+        return invokeCallbackTarget(
           { ...target, thisObj: binding.thisObj, scope: binding.scope, staticClass: binding.calledClass },
-          rest.map((v) => ({ v })),
+          forwarded,
           undefined
         );
       },

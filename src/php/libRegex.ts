@@ -509,7 +509,7 @@ defineFunction('preg_grep(string $pattern, array $array, int $flags = 0): array|
   const compiled = compile('preg_grep', args[0] as string);
   if (!compiled) return false;
   rt().lastPregError = 0;
-  const invert = ((args[2] as bigint | undefined) ?? 0n) === 1n;
+  const invert = (((args[2] as bigint | undefined) ?? 0n) & 1n) !== 0n;
   const result = new PhpArray();
   for (const [key, value] of (args[1] as PhpArray).entries()) {
     const status = { error: 0 };

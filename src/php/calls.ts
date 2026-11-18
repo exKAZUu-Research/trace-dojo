@@ -123,7 +123,7 @@ export function resetCallStack(): void {
 export function functionDisplayName(target: CallTarget): string {
   const { fn, method } = target;
   if (method) return `${method.scope.name}::${method.name}`;
-  if (fn.kind === 'user' && fn.decl.isClosure) return fn.decl.name;
+  if (fn.kind === 'user' && fn.decl.isClosure) return `${target.scope ? `${target.scope.name}::` : ''}${fn.decl.name}`;
   return fn.name;
 }
 

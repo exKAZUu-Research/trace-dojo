@@ -1239,8 +1239,8 @@ function checkReferenceValue(ref: Ref, value: Value): Value {
   return coerced;
 }
 
-// code-gauge-allow functionCognitiveComplexity 27 -- Follows PHP's class linking and property access rules in their order of checks.
-// code-gauge-allow functionNcss 35 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+// code-gauge-allow functionCognitiveComplexity 29 -- Follows PHP's class linking and property access rules in their order of checks.
+// code-gauge-allow functionNcss 37 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 export function unsetProp(object: PhpObject, name: string, scope: PhpClass | undefined): void {
   if (object.isResource) return;
   const decl = lookupProp(object.cls, name, scope);
@@ -1253,6 +1253,7 @@ export function unsetProp(object: PhpObject, name: string, scope: PhpClass | und
       }
       throwError('Error', `Cannot access ${decl.visibility} property ${object.cls.name}::$${name}`);
     }
+    if (decl.hooks) throwError('Error', `Cannot unset hooked property ${decl.cls.name}::$${name}`);
     if (object.unsetProperties?.has(decl.key)) {
       const magic = object.cls.findMethod('__unset');
       if (magic && !object.guards?.has(`unset:${name}`)) {
