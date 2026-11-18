@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 739 -- The type checker keeps its inference rules beside the substitution state they share.
+// code-gauge-allow-file fileNcss 746 -- The type checker keeps its inference rules beside the substitution state they share.
 import { LIMITS } from '../interpreter/limits';
 import { CHAR_TYPE, FUNCTION_TYPE, LIST_TYPE, tupleCon } from './builtinTypes';
 import { type ClassEnv, entailByGivens, hasConstructorHead, isSubclassOf, predsEqual } from './classEnv';
@@ -51,7 +51,6 @@ import {
   zonk,
 } from './types';
 
-/** The library's types and classes that the language's syntax refers to. */
 export interface Builtins {
   bool: TypeEntity;
   int: TypeEntity;
@@ -64,7 +63,7 @@ export interface Builtins {
   enum: ClassEntity;
   monad: ClassEntity;
   monadFail: ClassEntity;
-  /** The classes whose constraints defaulting may solve. */
+
   standardClasses: ReadonlySet<ClassEntity>;
   derivableClasses: ReadonlySet<ClassEntity>;
   numericClasses: ReadonlySet<ClassEntity>;
@@ -89,22 +88,19 @@ export function typeError(span: Span, message: string): never {
   throw compileError(span, message);
 }
 
-/** Infers and checks types, recording the class evidence that code generation passes as dictionaries. */
 export class Checker {
   private readonly recursion = new RecursionBudget();
   level = 0;
   wanted: EvidenceHole[] = [];
-  /** The types of globals whose binding group is being inferred, before they have schemes. */
+
   readonly globalMono = new Map<ValueEntity, Type>();
   private reductionsRemaining = LIMITS.maxOperations;
+  private scopedTypes: ReadonlyMap<string, Type> = new Map();
 
   constructor(
     readonly env: ClassEnv,
     readonly builtins: Builtins
   ) {}
-
-  // -------------------------------------------------------------------------------------------------------------
-  // Unification
 
   unify(actual: Type, expected: Type, span: Span, context?: string): void {
     const failure = unifyTypes(actual, expected, (variable, type) => this.bindVar(variable, type));
@@ -143,9 +139,6 @@ export class Checker {
   freshVar(kind: Kind = STAR, name?: string): TVar {
     return freshTypeVar(kind, this.level, name);
   }
-
-  // -------------------------------------------------------------------------------------------------------------
-  // Schemes and evidence
 
   instantiate(scheme: Scheme, span: Span, origin: string): { type: Type; evidence: Evidence[] } {
     const args = scheme.kinds.map((kind, index) => this.freshVar(kind, scheme.names?.[index]));
@@ -215,7 +208,6 @@ export class Checker {
     typeError(hole.span, `${printer.showPred(hole.pred)} のインスタンスがありません（${hole.origin}）。`);
   }
 
-  /** Turns retained constraints into dictionary parameters, dropping those that superclasses of others give. */
   makeDictParams(holes: EvidenceHole[]): DictParam[] {
     const distinct: Pred[] = [];
     for (const hole of holes) if (!distinct.some((pred) => predsEqual(pred, hole.pred))) distinct.push(hole.pred);
@@ -239,7 +231,6 @@ export class Checker {
     return params;
   }
 
-  /** Solves the constraints left at the top of a module, defaulting ambiguous numeric types as Haskell does. */
   solveTop(): void {
     for (let round = 0; round < 100; round++) {
       const { retained } = this.simplify(this.wanted, -1);
@@ -301,20 +292,26 @@ export class Checker {
     );
   }
 
-  // -------------------------------------------------------------------------------------------------------------
-  // Signatures
+  withScopedTypes<T>(types: ReadonlyMap<string, Type>, run: () => T): T {
+    const outer = this.scopedTypes;
+    this.scopedTypes = new Map([...outer, ...types]);
+    try {
+      return run();
+    } finally {
+      this.scopedTypes = outer;
+    }
+  }
 
-  /** Converts a signature into a scheme, quantifying its type variables in order of appearance. */
-  sigToScheme(sig: RSigType, fixed?: { name: string; type: Type }): Scheme {
+  sigToScheme(sig: RSigType): Scheme {
     const names = typeVarNames([sig.type, ...sig.context.map((constraint) => constraint.type)]).filter(
-      (name) => name !== fixed?.name
+      (name) => !this.scopedTypes.has(name)
     );
     const kinds: Kind[] = names.map(() => freshKindVar());
-    const vars = new Map<string, Type>(names.map((name, index) => [name, { tag: 'tgen', index }]));
-    const varKinds = new Map<string, Kind>(names.map((name, index) => [name, kinds[index]]));
-    if (fixed) {
-      vars.set(fixed.name, fixed.type);
-      varKinds.set(fixed.name, kindOfType(fixed.type));
+    const vars = new Map<string, Type>(this.scopedTypes);
+    const varKinds = new Map<string, Kind>([...this.scopedTypes].map(([name, type]) => [name, kindOfType(type)]));
+    for (const [index, name] of names.entries()) {
+      vars.set(name, { tag: 'tgen', index });
+      varKinds.set(name, kinds[index]);
     }
     const type = this.convertType(sig.type, vars, varKinds, STAR);
     const preds = sig.context.map((constraint) => ({
@@ -326,7 +323,6 @@ export class Checker {
     return scheme;
   }
 
-  /** Converts a written type, checking its kinds and expanding synonyms. */
   convertType(type: RType, vars: ReadonlyMap<string, Type>, varKinds: ReadonlyMap<string, Kind>, expected: Kind): Type {
     const { type: result, kind } = this.convertTypeKind(type, vars, varKinds);
     if (!unifyKinds(kind, expected)) {
@@ -361,7 +357,6 @@ export class Checker {
     }
   }
 
-  /** Converts a type constructor applied to arguments, expanding a synonym at its head. */
   private convertAppliedType(
     type: RType,
     vars: ReadonlyMap<string, Type>,
@@ -425,9 +420,6 @@ export class Checker {
     }
     return { type: result, kind };
   }
-
-  // -------------------------------------------------------------------------------------------------------------
-  // Expressions
 
   typeOfRef(ref: VarRef, span: Span, name: string, expr: Extract<RExpr, { k: 'var' }>): Type {
     if (ref.kind === 'local') {
@@ -567,7 +559,6 @@ export class Checker {
     return result;
   }
 
-  /** `(op e)`, which is `\x -> op x e`. */
   private inferRightSection(expr: Extract<RExpr, { k: 'rsection' }>): Type {
     const opType = this.inferExpr(expr.op);
     const a = this.freshVar();
@@ -704,9 +695,6 @@ export class Checker {
     }
   }
 
-  // -------------------------------------------------------------------------------------------------------------
-  // Patterns
-
   // code-gauge-allow functionNcss 43 -- Iterative pattern typing preserves binder order and literal dictionaries in one dispatch.
   inferPat(pattern: RPat, expected: Type): void {
     const pending = [{ pat: pattern, type: expected }];
@@ -764,9 +752,6 @@ export class Checker {
     }
   }
 
-  // -------------------------------------------------------------------------------------------------------------
-  // Bindings
-
   checkRhs(rhs: RRhs, expected: Type): void {
     this.inferBindGroup(rhs.where, false);
     if (rhs.body.k === 'plain') {
@@ -782,7 +767,6 @@ export class Checker {
     }
   }
 
-  /** Infers a binding's body against its type: each clause's patterns and right-hand side. */
   private inferBindingBody(binding: RBinding, type: Type): void {
     if (binding.k === 'pat') {
       this.inferPat(binding.pat, type);
@@ -822,7 +806,6 @@ export class Checker {
     }
   }
 
-  /** Infers an implicitly typed binding group and generalizes it. */
   private inferImplicit(bindings: RBinding[]): void {
     const outer = this.level;
     this.level++;
@@ -844,7 +827,6 @@ export class Checker {
     this.wanted.push(...deferred);
   }
 
-  /** Gives each binding of a group a monomorphic type, which its own and its group's uses see while inferring. */
   private assignMonoTypes(bindings: RBinding[]): Map<RBinding, Type> {
     const monoTypes = new Map<RBinding, Type>();
     for (const binding of bindings) {
@@ -870,11 +852,6 @@ export class Checker {
     return monoTypes;
   }
 
-  /**
-   * The constraints a group generalizes over. The monomorphism restriction (a pattern binding or one without
-   * arguments) and an ambiguous variable (one the types do not mention) defer theirs to the enclosing binding, which
-   * may default them.
-   */
   // code-gauge-allow functionCognitiveComplexity 19 -- The monomorphism restriction and defaulting decide together which predicates stay.
   private keepGeneralizable(
     bindings: RBinding[],
@@ -962,13 +939,9 @@ export class Checker {
     return scheme;
   }
 
-  /**
-   * Checks code against a scheme with rigid type variables, solving its constraints from the scheme's context, and
-   * returns the dictionaries the code takes.
-   */
   checkAgainstScheme(
     scheme: Scheme,
-    check: (type: Type) => void,
+    check: (type: Type, skolems: readonly Type[]) => void,
     extraGivens: { pred: Pred; evidence: Evidence }[] = []
   ): DictParam[] {
     const outer = this.level;
@@ -984,7 +957,7 @@ export class Checker {
     ];
     const saved = this.wanted;
     this.wanted = [];
-    check(type);
+    check(type, skolems);
     this.level = outer;
     const inner = this.wanted;
     this.wanted = saved;
@@ -997,7 +970,6 @@ export class Checker {
       }
       const vars = [...typeVarsOf(hole.pred.type)];
       if (vars.every((variable) => !variable.skolem)) {
-        // An ambiguous constraint, which defaulting at the top may solve.
         for (const variable of vars) if (variable.level > outer) variable.level = outer;
         deferred.push(hole);
         continue;
@@ -1055,7 +1027,6 @@ export function conScheme(con: ConInfo): Scheme {
   return { kinds, preds: [], type };
 }
 
-/** Whether matching a pattern may fail, which makes a `do` binding need `MonadFail`. */
 export function isFailable(pat: RPat): boolean {
   switch (pat.k) {
     case 'var':
@@ -1074,7 +1045,6 @@ export function isFailable(pat: RPat): boolean {
   }
 }
 
-/** The type variables the written types mention, in order of appearance. */
 export function typeVarNames(types: readonly RType[]): string[] {
   const names: string[] = [];
   const collect = (type: RType): void => {

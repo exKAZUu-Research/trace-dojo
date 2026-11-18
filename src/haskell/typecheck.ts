@@ -46,17 +46,16 @@ import {
 } from './types';
 import { chargeTypeWork } from './typeWorkBudget';
 
-/** An instance whose methods a module defines, with the bindings that implement them. */
 export interface CheckedInstance {
   info: InstanceInfo;
-  /** Each method's implementation binding, whose binder is the implementation's entity. */
+
   bindings: RBinding[];
   sourceDefined: boolean;
 }
 
 export interface TypecheckResult {
   instances: CheckedInstance[];
-  /** The default method implementations of the module's classes. */
+
   defaults: RBinding[];
   main?: { entity: ValueEntity; evidence: Evidence[] };
 }
@@ -64,13 +63,12 @@ export interface TypecheckResult {
 export interface TypecheckOptions {
   env: ClassEnv;
   builtins: Builtins;
-  /** Whether the module is the program, whose `main` must be an `IO` action. */
+
   isProgram: boolean;
-  /** Entities that derived instances refer to, such as `showParen`. */
+
   derivingSupport: (name: string) => ValueEntity;
 }
 
-/** Checks a renamed module's declarations and bindings, filling in kinds, schemes, instances, and evidence. */
 export function typecheckModule(module: RModule, options: TypecheckOptions): TypecheckResult {
   const checker = new Checker(options.env, options.builtins);
   inferKinds(checker, module);
@@ -90,9 +88,6 @@ export function typecheckModule(module: RModule, options: TypecheckOptions): Typ
   checker.solveTop();
   return { instances, defaults, main };
 }
-
-// ---------------------------------------------------------------------------------------------------------------
-// Kinds
 
 // code-gauge-allow functionCognitiveComplexity 22 -- Kind inference covers data types, synonyms, and classes in one dependency-ordered pass.
 // code-gauge-allow functionNcss 43 -- Kind inference covers data types, synonyms, and classes in one dependency-ordered pass.
@@ -150,7 +145,6 @@ function inferKinds(checker: Checker, module: RModule): void {
   }
 }
 
-/** The kind of a type constructor taking parameters of the given kinds to `result`. */
 function arrowKind(params: readonly Kind[], result: Kind): Kind {
   let kind = result;
   for (const param of params.toReversed()) kind = kindArrow(param, kind);
@@ -231,9 +225,6 @@ function methodScheme(checker: Checker, decl: RClassDecl, sig: RClassDecl['metho
   return scheme;
 }
 
-// ---------------------------------------------------------------------------------------------------------------
-// Data types and classes
-
 function defineConstructors(checker: Checker, decl: RDataDecl): void {
   void checker;
   for (const field of decl.entity.fields.values()) {
@@ -277,11 +268,9 @@ function reachesSuperclass(cls: ClassEntity, target: ClassEntity): boolean {
   return false;
 }
 
-// ---------------------------------------------------------------------------------------------------------------
-// Instances
-
 interface DeclaredInstance {
   info: InstanceInfo;
+  typeNames: string[];
   bindings: RBinding[];
   span: Span;
 }
@@ -302,7 +291,7 @@ function declareInstance(checker: Checker, decl: RInstanceDecl, moduleName: stri
   const info = makeInstance(decl.cls, kinds.map(defaultKind), head, context, moduleName, decl.span);
   validateInstanceTermination(info, decl.span);
   registerInstance(checker, info, decl.span);
-  return { info, bindings: decl.bindings, span: decl.span };
+  return { info, typeNames: names, bindings: decl.bindings, span: decl.span };
 }
 
 function validateInstanceTermination(info: InstanceInfo, span: Span): void {
@@ -367,7 +356,6 @@ function registerInstance(checker: Checker, info: InstanceInfo, span: Span): voi
   checker.env.add(info);
 }
 
-/** Finds each superclass's evidence at the instance's type, from the instance's context and other instances. */
 function checkInstanceSupers(checker: Checker, info: InstanceInfo, span: Span): void {
   const skolems = info.kinds.map((kind, index) => freshSkolem(kind, checker.level + 1, `t${index}`));
   const head = instantiateType(info.head, skolems);
@@ -393,8 +381,6 @@ function checkInstanceSupers(checker: Checker, info: InstanceInfo, span: Span): 
     );
     return evidence as Evidence;
   });
-  // The superclass evidence refers to the context's dictionaries as parameters, so it must not depend on defaulting.
-  info.supers = info.supers.map((evidence) => evidence);
 }
 
 function checkInstanceMethods(checker: Checker, declared: DeclaredInstance): Omit<CheckedInstance, 'sourceDefined'> {
@@ -415,7 +401,9 @@ function checkInstanceMethods(checker: Checker, declared: DeclaredInstance): Omi
       span: binding.span,
     };
     info.methods[index] = implementation;
-    const skolems = info.kinds.map((kind, position) => freshSkolem(kind, checker.level + 1, `t${position}`));
+    const skolems = info.kinds.map((kind, position) =>
+      freshSkolem(kind, checker.level + 1, declared.typeNames[position])
+    );
     const head = instantiateType(info.head, skolems);
     const contextParams = info.context.map((pred) =>
       newDictParam({ cls: pred.cls, type: instantiateType(pred.type, skolems) })
@@ -428,7 +416,10 @@ function checkInstanceMethods(checker: Checker, declared: DeclaredInstance): Omi
       type: shiftGens(methodScheme.type, head),
     };
     const givens = contextParams.map((param) => ({ pred: param.pred, evidence: { kind: 'param', param } as Evidence }));
-    const ownParams = checker.checkAgainstScheme(rest, (type) => checkClauses(checker, binding, type), givens);
+    const scoped = new Map(declared.typeNames.map((name, position) => [name, skolems[position]]));
+    const ownParams = checker.withScopedTypes(scoped, () =>
+      checker.checkAgainstScheme(rest, (type) => checkClauses(checker, binding, type), givens)
+    );
     const implementationBinding: RBinding = {
       ...binding,
       binder: { kind: 'global', entity: implementation },
@@ -439,7 +430,6 @@ function checkInstanceMethods(checker: Checker, declared: DeclaredInstance): Omi
   return { info, bindings };
 }
 
-/** Replaces `TGen 0` (the class variable) by a type and shifts the other indices down by one. */
 function shiftGens(type: Type, replacement: Type): Type {
   return mapType(type, (node) =>
     node.tag === 'tgen' ? (node.index === 0 ? replacement : { tag: 'tgen', index: node.index - 1 }) : node
@@ -475,7 +465,9 @@ function checkDefaults(checker: Checker, decl: RClassDecl): RBinding[] {
       span: binding.span,
     };
     decl.entity.defaults[index] = implementation;
-    const params = checker.checkAgainstScheme(method.scheme as Scheme, (type) => checkClauses(checker, binding, type));
+    const params = checker.checkAgainstScheme(method.scheme as Scheme, (type, skolems) =>
+      checker.withScopedTypes(new Map([[decl.param, skolems[0]]]), () => checkClauses(checker, binding, type))
+    );
     const implementationBinding: RBinding = {
       ...binding,
       binder: { kind: 'global', entity: implementation },
@@ -485,9 +477,6 @@ function checkDefaults(checker: Checker, decl: RClassDecl): RBinding[] {
   }
   return result;
 }
-
-// ---------------------------------------------------------------------------------------------------------------
-// Deriving
 
 // code-gauge-allow functionCognitiveComplexity 19 -- Each branch checks one condition GHC places on a derivable class.
 function deriveInstances(checker: Checker, module: RModule, options: TypecheckOptions): DeclaredInstance[] {
@@ -522,6 +511,7 @@ function deriveInstances(checker: Checker, module: RModule, options: TypecheckOp
   }
   return pending.map((item) => ({
     info: item.info,
+    typeNames: item.decl.params,
     bindings: deriveInstance(item.decl, item.cls, options.derivingSupport),
     span: item.span,
   }));
@@ -593,9 +583,6 @@ function sameContext(a: Pred[], b: Pred[]): boolean {
   const printer = new TypePrinter();
   return a.length === b.length && a.every((pred, index) => printer.showPred(pred) === printer.showPred(b[index]));
 }
-
-// ---------------------------------------------------------------------------------------------------------------
-// main
 
 function checkMain(
   checker: Checker,
