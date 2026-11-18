@@ -149,6 +149,10 @@ function layoutOf(ctx: NativeContext, type: Type): { size: number; align: number
   }
 }
 
+export function sizeOf(ctx: NativeContext, type: Type): number {
+  return layoutOf(ctx, type).size;
+}
+
 function scalar(size: number): { size: number; align: number } {
   return { size, align: size || 1 };
 }

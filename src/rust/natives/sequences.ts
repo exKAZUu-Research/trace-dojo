@@ -1,4 +1,3 @@
-// code-gauge-allow-file fileNcss 416 -- One native per method of the standard library.
 import { sliceRange } from '../compiler';
 import { normalize } from '../infer';
 import { cloneValue, compareValues, copyValue, valuesEqual } from '../ops';
@@ -19,6 +18,7 @@ import {
   type Value,
 } from '../values';
 import { arrayIter, heapPop, heapPush, ownedIter, sliceIter } from './iterators';
+import { dedupBy, intoSortedVec, lessByKey, lessByOrd, sortByCachedKey, sortSlice } from './sorting';
 import {
   call,
   define,
@@ -53,35 +53,6 @@ function cmpWith(ctx: NativeContext, f: Value): (a: Value, b: Value) => number {
     ctx.runtime.spend();
     return (deref(call(ctx, f, [a, b])) as { variant: number }).variant - 1;
   };
-}
-
-/** Rust's stable sort (`sort`, `sort_by`), as a stable merge sort; unstable sorts give equal elements in any order. */
-function stableSort(ctx: NativeContext, slice: Value, compare: (a: Value, b: Value) => number): void {
-  const items = sliceItems(slice);
-  ctx.runtime.nativeRoots.push(items);
-  try {
-    const sorted = mergeSort(items, compare);
-    for (const [index, item] of sorted.entries()) sliceSet(slice, index, item);
-  } finally {
-    ctx.runtime.nativeRoots.pop();
-  }
-}
-
-function mergeSort(items: Value[], compare: (a: Value, b: Value) => number): Value[] {
-  if (items.length <= 1) return items;
-  const middle = items.length >> 1;
-  const left = mergeSort(items.slice(0, middle), compare);
-  const right = mergeSort(items.slice(middle), compare);
-  const result: Value[] = [];
-  let i = 0;
-  let j = 0;
-  while (i < left.length && j < right.length) {
-    if (compare(right[j], left[i]) < 0) result.push(right[j++]);
-    else result.push(left[i++]);
-  }
-  while (i < left.length) result.push(left[i++]);
-  while (j < right.length) result.push(right[j++]);
-  return result;
 }
 
 /** `get` with a range: the part of the slice it covers, or `None` when it reaches outside. */
@@ -165,41 +136,33 @@ const sliceNatives: Record<string, (args: Value[], ctx: NativeContext) => Value>
     return offset >= 0 && suffix.every((item, index) => valuesEqual(elemType(ctx), item, items[offset + index]));
   },
   sort: ([self], ctx) => {
-    stableSort(ctx, deref(self), (a, b) => compareValues(elemType(ctx), a, b) ?? 0);
+    sortSlice(ctx, deref(self), true, lessByOrd(elemType(ctx)));
     return UNIT_VALUE;
   },
   sort_unstable: ([self], ctx) => {
-    stableSort(ctx, deref(self), (a, b) => compareValues(elemType(ctx), a, b) ?? 0);
+    sortSlice(ctx, deref(self), false, lessByOrd(elemType(ctx)));
     return UNIT_VALUE;
   },
   sort_by: ([self, f], ctx) => {
-    stableSort(ctx, deref(self), cmpWith(ctx, f));
+    const compare = cmpWith(ctx, f);
+    sortSlice(ctx, deref(self), true, (a, b) => compare(a, b) < 0);
     return UNIT_VALUE;
   },
   sort_unstable_by: ([self, f], ctx) => {
-    stableSort(ctx, deref(self), cmpWith(ctx, f));
+    const compare = cmpWith(ctx, f);
+    sortSlice(ctx, deref(self), false, (a, b) => compare(a, b) < 0);
     return UNIT_VALUE;
   },
   sort_by_key: ([self, f], ctx) => {
-    const keyType = ctx.typeArgs[1];
-    stableSort(ctx, deref(self), (a, b) => compareValues(keyType, call(ctx, f, [a]), call(ctx, f, [b])) ?? 0);
+    sortSlice(ctx, deref(self), true, lessByKey(ctx, f));
     return UNIT_VALUE;
   },
   sort_unstable_by_key: ([self, f], ctx) => {
-    const keyType = ctx.typeArgs[1];
-    stableSort(ctx, deref(self), (a, b) => compareValues(keyType, call(ctx, f, [a]), call(ctx, f, [b])) ?? 0);
+    sortSlice(ctx, deref(self), false, lessByKey(ctx, f));
     return UNIT_VALUE;
   },
   sort_by_cached_key: ([self, f], ctx) => {
-    const keyType = ctx.typeArgs[1];
-    const slice = deref(self);
-    const items = sliceItems(slice);
-    const keyed = items.map((item) => ({ item, key: call(ctx, f, [item]) }));
-    const sorted = mergeSort(
-      keyed as unknown as Value[],
-      (a, b) => compareValues(keyType, (a as unknown as { key: Value }).key, (b as unknown as { key: Value }).key) ?? 0
-    );
-    for (const [index, entry] of sorted.entries()) sliceSet(slice, index, (entry as unknown as { item: Value }).item);
+    sortByCachedKey(ctx, deref(self), f);
     return UNIT_VALUE;
   },
   is_sorted: ([self], ctx) => {
@@ -494,34 +457,15 @@ const vecNatives: Record<string, (args: Value[], ctx: NativeContext) => Value> =
     items.push(...kept);
     return UNIT_VALUE;
   },
-  dedup: ([self], ctx) => {
-    const items = vec(self);
-    const kept = items.filter((item, index) => index === 0 || !valuesEqual(elemType(ctx), items[index - 1], item));
-    items.length = 0;
-    items.push(...kept);
-    return UNIT_VALUE;
-  },
-  dedup_by: ([self, f], ctx) => {
-    // Keeps an element unless `same_bucket(it, the last element kept)` says it repeats that one.
-    const items = vec(self);
-    const kept: Value[] = [];
-    for (let index = 0; index < items.length; index++) {
-      const repeats =
-        kept.length > 0 && call(ctx, f, [new ElementPlace(items, index), new ElementPlace(kept, kept.length - 1)]);
-      if (!repeats) kept.push(items[index]);
-    }
-    items.length = 0;
-    items.push(...kept);
-    return UNIT_VALUE;
-  },
+  dedup: ([self], ctx) => dedupBy(vec(self), (current, kept) => valuesEqual(elemType(ctx), current.get(), kept.get())),
+  dedup_by: ([self, f], ctx) => dedupBy(vec(self), (current, kept) => call(ctx, f, [current, kept]) as boolean),
   dedup_by_key: ([self, f], ctx) => {
-    const items = vec(self);
+    // `dedup_by(|a, b| key(a) == key(b))`: both keys at each comparison.
     const keyType = ctx.typeArgs[1];
-    const keys = items.map((_, index) => call(ctx, f, [new ElementPlace(items, index)]));
-    const kept = items.filter((_, index) => index === 0 || !valuesEqual(keyType, keys[index - 1], keys[index]));
-    items.length = 0;
-    items.push(...kept);
-    return UNIT_VALUE;
+    return dedupBy(vec(self), (current, kept) => {
+      const key = call(ctx, f, [current]);
+      return valuesEqual(keyType, key, call(ctx, f, [kept]));
+    });
   },
   resize: ([self, newLen, value], ctx) => {
     const items = vec(self);
@@ -634,7 +578,7 @@ const heapNatives: Record<string, (args: Value[], ctx: NativeContext) => Value> 
   into_vec: ([self]) => vec(self),
   into_sorted_vec: ([self], ctx) => {
     const items = [...vec(self)];
-    return mergeSort(items, (a, b) => compareValues(elemType(ctx), a, b) ?? 0);
+    return intoSortedVec(items, (a, b) => compareValues(elemType(ctx), a, b) ?? 0);
   },
   extend: ([self, iter], ctx) => {
     const items = vec(self);

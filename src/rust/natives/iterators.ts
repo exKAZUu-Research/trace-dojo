@@ -439,8 +439,10 @@ define({
       },
       remaining: () => lengthOf(src),
     })),
-  'IterImpl<_, _>::zip': ([self, other], ctx) => zipped(iterOf(self), iterOf(other), ctx),
-  'std::iter::zip': ([a, b], ctx) => zipped(iterOf(a), iterOf(b), ctx),
+  'IterImpl<_, _>::zip': ([self, other], ctx) =>
+    zipped(iterOf(self), iterOf(other), isTrustedRandomAccess(ctx.typeArgs[1], ctx.typeArgs[3])),
+  'std::iter::zip': ([a, b], ctx) =>
+    zipped(iterOf(a), iterOf(b), isTrustedRandomAccess(ctx.typeArgs[2], ctx.typeArgs[3])),
   'IterImpl<_, _>::chain': ([self, other]) =>
     adapter(
       iterOf(self),
@@ -626,16 +628,17 @@ function peekSource(self: Value): IterValue {
 
 /**
  * Zips two iterators. From the back, it first drops the longer one's extra elements from its back, as `Zip`'s
- * `next_back` does.
+ * `next_back` does. When both are `TrustedRandomAccess`, `next` stops at the shorter one's end without taking from the
+ * longer one, as `Zip`'s specialization for them reads by index.
  */
-// code-gauge-allow functionCognitiveComplexity 16 -- Follows `Zip`'s `next` and `next_back`.
-function zipped(first: IterValue, second: IterValue, ctx: NativeContext): IterValue {
-  void ctx;
+// code-gauge-allow functionCognitiveComplexity 20 -- Follows `Zip`'s `next` and `next_back`.
+function zipped(first: IterValue, second: IterValue, trusted: boolean): IterValue {
   return adapter(
     first,
     { second },
     (src, state) => ({
       next: () => {
+        if (trusted && Math.min(lengthOf(src), lengthOf(state.second)) === 0) return DONE;
         const a = nextOf(src);
         if (a === DONE) return DONE;
         const b = nextOf(state.second);
@@ -654,6 +657,48 @@ function zipped(first: IterValue, second: IterValue, ctx: NativeContext): IterVa
     }),
     (state, cloneItem) => ({ second: forkIter(state.second, cloneItem) })
   );
+}
+
+/** The shapes of the iterators that are `TrustedRandomAccess` themselves. */
+const RANDOM_ACCESS_SHAPES = new Set([
+  'SliceIterShape',
+  'SliceIterMutShape',
+  'WindowsShape',
+  'ChunksShape',
+  'RChunksShape',
+  'ChunksExactShape',
+  'BytesShape',
+  'VecDequeIterShape',
+  'VecDequeIterMutShape',
+  'CaseMappingShape',
+]);
+
+/** The adapters that are `TrustedRandomAccess` when what they adapt is. */
+const RANDOM_ACCESS_ADAPTERS = new Set([
+  'MapShape',
+  'EnumerateShape',
+  'CopiedShape',
+  'ClonedShape',
+  'SkipShape',
+  'FuseShape',
+  'ZipShape',
+]);
+
+/** Whether iterators of these shapes are all `TrustedRandomAccess`, as std implements it. */
+function isTrustedRandomAccess(...shapes: Type[]): boolean {
+  return shapes.every((shape) => {
+    const t = normalize(shallow(shape));
+    if (t.kind !== 'adt') return false;
+    const { name } = t.def;
+    if (RANDOM_ACCESS_SHAPES.has(name)) return true;
+    // `Range` of every integer type but the 128-bit ones.
+    if (name === 'RangeShape') {
+      const idx = normalize(shallow(t.args[0]));
+      return idx.kind === 'int' && !idx.name.endsWith('128');
+    }
+    if (!RANDOM_ACCESS_ADAPTERS.has(name)) return false;
+    return isTrustedRandomAccess(...(name === 'ZipShape' ? t.args : [t.args[0]]));
+  });
 }
 
 /** Calls `f` on the elements in order until it returns a value, which it returns; undefined at the end. */
@@ -828,33 +873,42 @@ function successors(ctx: NativeContext, start: EnumValue, f: Value): IterValue {
   return iter;
 }
 
+/**
+ * `max_by` and `min_by`: `compare(the best so far, the next)` for each next element, as `cmp::max_by` and
+ * `cmp::min_by` call it; `max` keeps the next on `Equal` and `min` keeps the best so far.
+ */
 function extreme(ctx: NativeContext, iter: IterValue, compare: (a: Value, b: Value) => number, sign: 1 | -1): Value {
-  let best: Next = DONE;
+  const first = nextOf(iter);
+  if (first === DONE) return none(ctx);
+  let best = first;
   for (;;) {
     ctx.runtime.spend();
     const item = nextOf(iter);
-    if (item === DONE) break;
-    // `max` keeps the last of equal elements and `min` the first, as Rust's do.
-    if (best === DONE || (sign === 1 ? compare(item, best) >= 0 : compare(item, best) < 0)) best = item;
+    if (item === DONE) return some(ctx, best);
+    if (!keepsBest(compare(best, item), sign)) best = item;
   }
-  return option(ctx, best === DONE ? undefined : best, best !== DONE);
 }
 
+/** `max_by_key` and `min_by_key`: each key once, in order, compared as `extreme` compares the elements. */
 function extremeByKey(ctx: NativeContext, iter: IterValue, f: Value, keyType: Type, sign: 1 | -1): Value {
-  let best: Next = DONE;
-  let bestKey: Value;
+  const first = nextOf(iter);
+  if (first === DONE) return none(ctx);
+  let best = first;
+  let bestKey = call(ctx, f, [first]);
   for (;;) {
     ctx.runtime.spend();
     const item = nextOf(iter);
-    if (item === DONE) break;
+    if (item === DONE) return some(ctx, best);
     const key = call(ctx, f, [item]);
-    const order = best === DONE ? 0 : (compareValues(keyType, key, bestKey) ?? 0);
-    if (best === DONE || (sign === 1 ? order >= 0 : order < 0)) {
+    if (!keepsBest(compareValues(keyType, bestKey, key) ?? 0, sign)) {
       best = item;
       bestKey = key;
     }
   }
-  return option(ctx, best === DONE ? undefined : best, best !== DONE);
+}
+
+function keepsBest(order: number, sign: 1 | -1): boolean {
+  return sign === 1 ? order > 0 : order <= 0;
 }
 
 function sumOrProduct(ctx: NativeContext, iter: IterValue, type: Type, op: '+' | '*'): Value {

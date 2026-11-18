@@ -469,6 +469,31 @@ fn main() {
   });
 });
 
+test('sorts, max_by, dedup_by_key, and zip call closures in the order and number std does', () => {
+  const program = `fn main() {
+    let mut v: Vec<i32> = (0..40).map(|i| (i * 37) % 41).collect();
+    let mut count = 0;
+    v.sort_by(|a, b| { count += 1; a.cmp(b) });
+    let mut w: Vec<(i32, i32)> = (0..30).map(|i| ((i * 7) % 3, i)).collect();
+    w.sort_unstable_by_key(|p| p.0);
+    println!("{} {:?}", count, w.iter().map(|p| p.1).collect::<Vec<_>>());
+    let mut small = vec![3, 1, 2];
+    small.sort_by(|a, b| { print!("{}{} ", a, b); a.cmp(b) });
+    let m = [3, 1, 2].iter().max_by(|a, b| { print!("{}{} ", a, b); a.cmp(b) });
+    let mut d = vec![1, 1, 2, 3, 3];
+    d.dedup_by_key(|x| { print!("k{} ", x); *x / 2 });
+    let z: Vec<(i32, i32)> = [1, 2, 3].iter().map(|x| { print!("a{} ", x); *x }).zip([10].iter().copied()).collect();
+    println!("{:?} {:?} {:?}", m, d, z);
+}`;
+  expect(executeProgram('rust', program)).toMatchObject({
+    kind: 'executed',
+    stdout:
+      '233 [0, 6, 9, 3, 12, 15, 21, 24, 18, 27, 4, 7, 1, 10, 13, 19, 22, 16, 25, 28, 5, 2, 8, 11, 14, 20, 17, 23, 26, 29]\n' +
+      '13 23 21 31 32 k1 k1 k2 k1 k3 k2 k3 k2 a1 Some(3) [1, 2] [(1, 10)]\n',
+    uncaughtException: undefined,
+  });
+});
+
 test.each([
   ['range patterns (stage C)', '    match 3 { 1..=5 => {}, _ => {} }'],
   ['threads (stage D)', '    std::thread::spawn(|| {});'],
