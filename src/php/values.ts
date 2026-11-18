@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 900 -- Keeps one PHP runtime concern and its shared helpers in one module.
+// code-gauge-allow-file fileNcss 944 -- Keeps one PHP runtime concern and its shared helpers in one module.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import type { TurtleState } from '../interpreter/turtleWorld';
 import { ArrayTable } from './arrayTable';
@@ -228,7 +228,6 @@ export class PhpArray {
       if (this.pointer === undefined) this.pointer = key;
     }
     this.invalidate();
-    if (slot instanceof PhpObject) slot.arrayHolders.push({ array: new WeakRef(this), key });
     this.trackSlot(key, slot);
     this.map.set(key, slot);
     this.order?.insert(key);
@@ -295,7 +294,7 @@ export class PhpArray {
     if (!result) return;
     const { slot } = result;
     if (slot instanceof Ref) slot.rc--;
-    this.order?.shiftList(this.map.keys());
+    this.order?.shiftList();
     this.nextFree = BigInt(this.size);
     this.pointer = null;
     this.invalidate();
@@ -310,7 +309,7 @@ export class PhpArray {
     allocationHandler(values.length, this.size);
     for (let index = 0; index < values.length; index++) this.trackSlot(BigInt(index), values[index]);
     if (values.some((value) => value !== null && typeof value === 'object')) this.composite = true;
-    this.order?.prependList(this.map.keys(), values.length);
+    this.order?.prependList(values.length);
     this.nextFree = BigInt(this.size);
     this.pointer = null;
     this.invalidate();
@@ -393,11 +392,11 @@ export class PhpArray {
   }
 
   keyAfter(key: Key): Key | undefined {
-    return this.ordered().entries.get(key)?.next?.key;
+    return this.ordered().get(key)?.next?.key;
   }
 
   keyBefore(key: Key): Key | undefined {
-    return this.ordered().entries.get(key)?.previous?.key;
+    return this.ordered().get(key)?.previous?.key;
   }
 
   private ordered(): ArrayOrder {
@@ -642,17 +641,42 @@ export class PhpClass {
   }
 }
 
-interface ArrayEntry {
-  key: Key;
-  index: number;
+class ArrayEntry {
+  rawKey!: Key;
+  private rawIndex!: number;
   previous?: ArrayEntry;
   next?: ArrayEntry;
+
+  constructor(
+    private readonly order: ArrayOrder,
+    key: Key,
+    index: number
+  ) {
+    this.key = key;
+    this.index = index;
+  }
+
+  get key(): Key {
+    return typeof this.rawKey === 'bigint' ? this.rawKey - this.order.keyOffset : this.rawKey;
+  }
+  set key(key: Key) {
+    this.rawKey = typeof key === 'bigint' ? key + this.order.keyOffset : key;
+  }
+  get index(): number {
+    return this.rawIndex - this.order.indexOffset;
+  }
+  set index(index: number) {
+    this.rawIndex = index + this.order.indexOffset;
+  }
 }
 
 class ArrayOrder {
-  readonly entries = new Map<Key, ArrayEntry>();
+  private readonly entries = new Map<Key, ArrayEntry>();
   first: ArrayEntry | undefined;
   last: ArrayEntry | undefined;
+  keyOffset = 0n;
+  indexOffset = 0;
+  private listLayout = false;
   private nextIndex = 0;
   private capacity = 8;
   private packed: boolean | undefined;
@@ -663,6 +687,10 @@ class ArrayOrder {
     for (const key of keys) this.insert(key);
   }
 
+  get(key: Key): ArrayEntry | undefined {
+    return this.entries.get(typeof key === 'bigint' ? key + this.keyOffset : key);
+  }
+
   cursor(): ArrayCursor {
     const cursor = new ArrayCursor(this);
     this.cursors.add(new WeakRef(cursor));
@@ -671,19 +699,21 @@ class ArrayOrder {
 
   copy(): ArrayOrder {
     const copy = new ArrayOrder([], this.capacity);
-    for (const entry of this.entries.values()) copy.appendEntry(entry.key, entry.index);
+    for (const entry of this.orderedEntries()) copy.appendEntry(entry.key, entry.index);
     copy.nextIndex = this.nextIndex;
     copy.packed = this.packed;
+    copy.listLayout = this.listLayout;
     if (copy.entries.size === 0) {
       copy.capacity = 8;
       copy.packed = undefined;
+      copy.listLayout = false;
     } else if (!copy.packed) copy.compact();
     return copy;
   }
 
-  // code-gauge-allow functionCognitiveComplexity 21 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+  // code-gauge-allow functionCognitiveComplexity 22 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
   insert(key: Key): void {
-    if (this.entries.has(key)) return;
+    if (this.get(key)) return;
     const numeric = typeof key === 'bigint' && key >= 0n && key < BigInt(Number.MAX_SAFE_INTEGER);
     const position = numeric ? Number(key) : -1;
     this.packed ??= numeric && position < this.capacity;
@@ -698,6 +728,7 @@ class ArrayOrder {
       if (this.nextIndex > this.entries.size + (this.entries.size >> 5)) this.compact();
       else this.capacity *= 2;
     }
+    if (key !== BigInt(this.entries.size)) this.listLayout = false;
     const index = this.packed ? position : this.nextIndex;
     this.nextIndex = index + 1;
     const entry = this.appendEntry(key, index);
@@ -705,7 +736,7 @@ class ArrayOrder {
   }
 
   unpack(): void {
-    if (this.packed) this.replace(this.entries.keys(), false);
+    if (this.packed) this.replace(this.keys(), false);
   }
 
   private toMixed(): void {
@@ -716,54 +747,68 @@ class ArrayOrder {
 
   private compact(): void {
     let index = 0;
-    for (const entry of this.entries.values()) entry.index = index++;
+    for (const entry of this.orderedEntries()) entry.index = index++;
     this.nextIndex = index;
+    for (const cursor of this.liveCursors()) cursor.refreshPosition();
   }
 
   private appendEntry(key: Key, index: number): ArrayEntry {
-    const entry: ArrayEntry = { key, index, previous: this.last };
+    const entry = new ArrayEntry(this, key, index);
+    entry.previous = this.last;
     if (this.last) this.last.next = entry;
     else this.first = entry;
     this.last = entry;
-    this.entries.set(key, entry);
+    this.entries.set(entry.rawKey, entry);
     return entry;
   }
 
-  shiftList(keys: Iterable<Key>): void {
+  shiftList(): void {
+    this.normalizeList();
     if (this.first) this.delete(this.first.key);
-    this.reindex(keys, 0, this.packed === true);
+    this.keyOffset++;
+    this.indexOffset++;
+    this.nextIndex = this.entries.size;
+    this.listLayout = true;
   }
 
-  prependList(keys: Iterable<Key>, count: number): void {
-    this.capacity = 8;
-    this.reindex(keys, count, true);
-  }
-
-  private reindex(keys: Iterable<Key>, prefix: number, packed: boolean): void {
-    const previous = [...this.entries.values()];
-    this.entries.clear();
-    this.first = undefined;
-    this.last = undefined;
-    let index = 0;
-    for (const key of keys) {
-      const entry: ArrayEntry = index < prefix ? { key, index } : previous[index - prefix];
-      entry.key = key;
-      entry.index = index++;
-      entry.previous = this.last;
-      entry.next = undefined;
-      if (this.last) this.last.next = entry;
-      else this.first = entry;
-      this.last = entry;
-      this.entries.set(key, entry);
+  prependList(count: number): void {
+    this.normalizeList();
+    this.keyOffset -= BigInt(count);
+    this.indexOffset -= count;
+    for (let index = count - 1; index >= 0; index--) {
+      const entry = new ArrayEntry(this, BigInt(index), index);
+      entry.next = this.first;
+      if (this.first) this.first.previous = entry;
+      else this.last = entry;
+      this.first = entry;
+      this.entries.set(entry.rawKey, entry);
     }
-    this.nextIndex = index;
-    this.packed = packed;
-    while (this.capacity < index) this.capacity *= 2;
+    this.nextIndex = this.entries.size;
+    this.capacity = 8;
+    while (this.capacity < this.nextIndex) this.capacity *= 2;
+    this.packed = true;
+  }
+
+  private normalizeList(): void {
+    if (this.listLayout) return;
+    const previous = [...this.orderedEntries()];
+    this.entries.clear();
+    this.keyOffset = 0n;
+    this.indexOffset = 0;
+    for (const [index, entry] of previous.entries()) {
+      entry.key = BigInt(index);
+      entry.index = index;
+      this.entries.set(entry.rawKey, entry);
+    }
+    this.nextIndex = previous.length;
+    for (const cursor of this.liveCursors()) cursor.refreshPosition();
+    this.listLayout = true;
   }
 
   delete(key: Key): void {
-    const entry = this.entries.get(key);
+    const entry = this.get(key);
     if (!entry) return;
+    if (entry !== this.last) this.listLayout = false;
     for (const cursor of this.liveCursors()) cursor.deleteEntry(entry);
     if (entry.previous) entry.previous.next = entry.next;
     else this.first = entry.next;
@@ -772,7 +817,7 @@ class ArrayOrder {
       this.last = entry.previous;
       this.nextIndex = (this.last?.index ?? -1) + 1;
     }
-    this.entries.delete(key);
+    this.entries.delete(entry.rawKey);
   }
 
   replace(keys: Iterable<Key>, packed: boolean): void {
@@ -781,12 +826,23 @@ class ArrayOrder {
     this.entries.clear();
     this.first = undefined;
     this.last = undefined;
+    this.keyOffset = 0n;
+    this.indexOffset = 0;
     for (const key of orderedKeys) this.appendEntry(key, this.entries.size);
     this.nextIndex = this.entries.size;
     while (this.capacity < this.nextIndex) this.capacity *= 2;
-    this.packed = packed && [...this.entries.keys()].every((key, index) => key === BigInt(index));
-    const entries = [...this.entries.values()];
+    this.listLayout = orderedKeys.every((key, index) => key === BigInt(index));
+    this.packed = packed && this.listLayout;
+    const entries = [...this.orderedEntries()];
     for (const { cursor, index } of cursors) cursor.entry = index === undefined ? undefined : entries[index];
+  }
+
+  private *keys(): Generator<Key> {
+    for (const entry of this.orderedEntries()) yield entry.key;
+  }
+
+  private *orderedEntries(): Generator<ArrayEntry> {
+    for (let entry = this.first; entry; entry = entry.next) yield entry;
   }
 
   private *liveCursors(): Generator<ArrayCursor> {
@@ -800,13 +856,16 @@ class ArrayOrder {
 
 export class ArrayCursor {
   private current: ArrayEntry | undefined;
-  private position: number | undefined;
+  private rawPosition: number | undefined;
   get entry(): ArrayEntry | undefined {
     return this.current;
   }
   set entry(value: ArrayEntry | undefined) {
     this.current = value;
-    this.position = value?.index;
+    this.refreshPosition();
+  }
+  refreshPosition(): void {
+    this.rawPosition = this.current ? this.current.index + this.order.indexOffset : undefined;
   }
   deleteEntry(entry: ArrayEntry): void {
     if (this.current === entry) this.current = entry.next;
@@ -818,7 +877,7 @@ export class ArrayCursor {
     return this.current?.key;
   }
   get index(): number | undefined {
-    return this.position;
+    return this.rawPosition === undefined ? undefined : Math.max(0, this.rawPosition - this.order.indexOffset);
   }
   rewind(): void {
     this.entry = this.order.first;
@@ -838,7 +897,6 @@ export class PhpObject {
     return this.cls.name === '(stream)';
   }
 
-  readonly arrayHolders: { array: WeakRef<PhpArray>; key: Key }[] = [];
   props = new PropertyMap(this);
   unsetProperties?: Set<string>;
   private internalValue?: unknown;
@@ -1041,14 +1099,17 @@ export function arrayHolderCount(value: PhpArray): number {
   return count;
 }
 
-export function valueOwners(value: object): Owner[] {
+export function hasValueOwner(value: object): boolean {
+  return !valueOwners(value).next().done;
+}
+
+export function* valueOwners(value: object): Generator<Owner> {
+  yield* nativeOwners.get(value) ?? [];
   const parents = owners.get(value);
-  const result: Owner[] = [...(nativeOwners.get(value) ?? [])];
   for (const [parent, keys] of parents ?? []) {
-    if (directHolderCount(parent, value, keys)) result.push(parent);
+    if (directHolderCount(parent, value, keys)) yield parent;
     else parents?.delete(parent);
   }
-  return result;
 }
 
 function directHolderCount(parent: Owner, value: object, keys: Set<Key | undefined>): number {

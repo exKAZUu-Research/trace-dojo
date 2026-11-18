@@ -1,0 +1,1 @@
+<?php foreach(['shift','prepend'] as $op)foreach(['sort','ksort'] as $sort){$a=['d','c','b','a'];$n=0;foreach($a as $k=>&$v){echo $k,':',$v,';';if($n++===0){if($op==='shift')array_shift($a);else array_unshift($a,'x');$sort($a);}if($n>=4)break;}unset($v);var_dump($a);}

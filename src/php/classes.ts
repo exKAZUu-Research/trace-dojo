@@ -833,7 +833,7 @@ export function canAccessProp(decl: PropDecl, scope: PhpClass | undefined): bool
 }
 
 function canWriteProp(decl: PropDecl, scope: PhpClass | undefined): boolean {
-  const visibility = decl.setVisibility ?? decl.visibility;
+  const visibility = effectiveSetVisibility(decl);
   if (visibility === 'public') return true;
   if (!scope) return false;
   if (visibility === 'private') return scope === decl.cls;
@@ -950,6 +950,7 @@ function readOverloadedProp(object: PhpObject, name: string, coalesce: boolean, 
   return result;
 }
 
+// code-gauge-allow functionNcss 56 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 export function writeProp(object: PhpObject, name: string, value: Value, scope: PhpClass | undefined): Value {
   if (object.isResource) throwError('Error', `Attempt to assign property "${name}" on resource`);
   rt().spend();
@@ -972,28 +973,19 @@ export function writeProp(object: PhpObject, name: string, value: Value, scope: 
     }
     if (decl.isReadonly) {
       const current = object.props.get(decl.key);
-      const initialized = current !== UNINIT && current !== undefined;
-      if (initialized && !object.cloning)
+      if (current !== UNINIT && current !== undefined && !object.cloning)
         throwError('Error', `Cannot modify readonly property ${decl.cls.name}::$${name}`);
-      const outsideScope = !canWriteProp(decl, scope) || (scope !== decl.cls && !object.cloning);
-      if (outsideScope && (scope === undefined || !scope.isSubclassOf(decl.cls))) {
-        throwError(
-          'Error',
-          `Cannot modify ${effectiveSetVisibility(decl)}(set) readonly property ${decl.cls.name}::$${name} from ${scopeText(scope)}`
-        );
-      }
-      if (object.cloning) {
-        object.readonlyInit ??= new Set();
-        if (object.readonlyInit.has(decl.key))
-          throwError('Error', `Cannot modify readonly property ${decl.cls.name}::$${name}`);
-        object.readonlyInit.add(decl.key);
-      }
-    } else if (!canWriteProp(decl, scope)) {
-      const visibility = decl.setVisibility ?? decl.visibility;
+    }
+    if (!canWriteProp(decl, scope))
       throwError(
         'Error',
-        `Cannot modify ${visibility}(set) property ${decl.cls.name}::$${name} from ${scopeText(scope)}`
+        `Cannot modify ${setterAccessLabel(decl)} property ${decl.cls.name}::$${name} from ${scopeText(scope)}`
       );
+    if (decl.isReadonly && object.cloning) {
+      object.readonlyInit ??= new Set();
+      if (object.readonlyInit.has(decl.key))
+        throwError('Error', `Cannot modify readonly property ${decl.cls.name}::$${name}`);
+      object.readonlyInit.add(decl.key);
     }
     if (decl.hooks?.set && !object.guards?.has(`hook:${name}`)) {
       guarded(object, `hook:${name}`, () =>
@@ -1105,6 +1097,11 @@ function effectiveSetVisibility(property: Pick<PropDecl, 'visibility' | 'setVisi
     property.setVisibility ??
     (property.isReadonly && property.visibility === 'public' ? 'protected' : property.visibility)
   );
+}
+
+function setterAccessLabel(property: PropDecl): string {
+  const visibility = effectiveSetVisibility(property);
+  return `${visibility}(set)${property.isReadonly && visibility !== 'private' ? ' readonly' : ''}`;
 }
 
 /** The reference a property holds, creating it, for `=&`, by-reference arguments, and nested writes. */
@@ -1242,7 +1239,7 @@ function checkReferenceValue(ref: Ref, value: Value): Value {
   return coerced;
 }
 
-// code-gauge-allow functionCognitiveComplexity 26 -- Follows PHP's class linking and property access rules in their order of checks.
+// code-gauge-allow functionCognitiveComplexity 27 -- Follows PHP's class linking and property access rules in their order of checks.
 // code-gauge-allow functionNcss 35 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 export function unsetProp(object: PhpObject, name: string, scope: PhpClass | undefined): void {
   if (object.isResource) return;
@@ -1263,13 +1260,14 @@ export function unsetProp(object: PhpObject, name: string, scope: PhpClass | und
         return;
       }
     }
-    if (decl.isReadonly) throwError('Error', `Cannot unset readonly property ${decl.cls.name}::$${name}`);
+    const slot = object.props.get(decl.key);
+    if (decl.isReadonly && slot !== UNINIT && slot !== undefined)
+      throwError('Error', `Cannot unset readonly property ${decl.cls.name}::$${name}`);
     if (!canWriteProp(decl, scope))
       throwError(
         'Error',
-        `Cannot unset ${decl.setVisibility ?? decl.visibility}(set) property ${decl.cls.name}::$${name} from ${scopeText(scope)}`
+        `Cannot unset ${setterAccessLabel(decl)} property ${decl.cls.name}::$${name} from ${scopeText(scope)}`
       );
-    const slot = object.props.get(decl.key);
     if (slot instanceof Ref) slot.rc--;
     object.props.set(decl.key, UNINIT);
     (object.unsetProperties ??= new Set()).add(decl.key);

@@ -1,4 +1,4 @@
-import { FatalError, PhpThrow, rt, SCRIPT_PATH } from './runtime';
+import { FatalError, PhpThrow, rt, type Runtime, SCRIPT_PATH } from './runtime';
 import { PhpObject, Ref, type Value } from './values';
 
 let formatThrowable: (object: PhpObject) => string;
@@ -161,6 +161,21 @@ export function setPrevious(exception: PhpObject, previous: PhpObject): void {
       return;
     }
     current = next;
+  }
+}
+
+export function withPendingException(runtime: Runtime, pending: PhpThrow | undefined, cleanup: () => void): void {
+  let failure: unknown = pending;
+  if (pending) runtime.held.push(pending.object);
+  try {
+    cleanup();
+  } catch (error) {
+    failure = error;
+    if (error instanceof PhpThrow && pending) setPrevious(error.object, pending.object);
+    throw error;
+  } finally {
+    if (pending) runtime.held.pop();
+    if (failure instanceof PhpThrow) runtime.thrown = failure.object;
   }
 }
 

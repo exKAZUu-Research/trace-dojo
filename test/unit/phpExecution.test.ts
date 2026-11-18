@@ -1081,8 +1081,8 @@ test('mutates arrays held by many objects within the operation limit', () => {
 });
 
 test.each([false, true])('drains linked queues within the operation limit (doubly linked: %s)', (doublyLinked) => {
-  const source = `<?php class N{public $next=null;public $prev=null;function __construct(public $v){}}class Q{public $head=null;public $tail=null;public $n=0;function push($v){$x=new N($v);if(!$this->tail){$this->head=$this->tail=$x;}else{${doublyLinked ? '$x->prev=$this->tail;' : ''}$this->tail->next=$x;$this->tail=$x;}$this->n++;}function shift(){$h=$this->head;$this->head=$h->next;if(!$this->head)$this->tail=null;${doublyLinked ? 'else $this->head->prev=null;' : ''}$this->n--;return $h->v;}}$q=new Q;for($i=0;$i<1000;$i++)$q->push($i);$sum=0;while($q->n>0)$sum+=$q->shift();echo $sum;`;
-  expect(run(source)).toMatchObject({ kind: 'executed', stdout: '499500' });
+  const source = `<?php class N{public $next=null;public $prev=null;function __construct(public $v){}}class Q{public $head=null;public $tail=null;public $n=0;function push($v){$x=new N($v);if(!$this->tail){$this->head=$this->tail=$x;}else{${doublyLinked ? '$x->prev=$this->tail;' : ''}$this->tail->next=$x;$this->tail=$x;}$this->n++;}function shift(){$h=$this->head;$this->head=$h->next;if(!$this->head)$this->tail=null;${doublyLinked ? 'else $this->head->prev=null;' : ''}$this->n--;return $h->v;}}$q=new Q;for($i=0;$i<4000;$i++)$q->push($i);$sum=0;while($q->n>0)$sum+=$q->shift();echo $sum;`;
+  expect(run(source)).toMatchObject({ kind: 'executed', stdout: '7998000' });
 });
 
 test('completes packed splice and keyed queues with time to spare', () => {
@@ -1139,4 +1139,11 @@ test.each([
   const result = run(`<?php echo 'never';function f(true $x=${value}){}echo 'never';`);
   expect(result.kind).toBe('compileError');
   expect(JSON.stringify(result)).toContain('Cannot use bool as default value');
+});
+
+test('drains indexed queues and packed deques with time to spare', () => {
+  vi.restoreAllMocks();
+  const source =
+    '<?php $a=range(1,6000);next($a);$s=0;while($a)$s+=array_shift($a);echo $s,"|";$a=range(1,8000);unset($a[3]);$s=0;while($a)$s+=array_shift($a);echo $s,"|";$a=range(1,6000);$s=0;while($a){$s+=array_pop($a);if($a)$s+=array_shift($a);}echo $s;';
+  expect(run(source)).toMatchObject({ kind: 'executed', stdout: '18003000|32003996|18003000' });
 });

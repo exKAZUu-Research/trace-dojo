@@ -100,6 +100,10 @@ export class ArrayTable extends Map<Key, Slot> {
   }
 
   override delete(key: Key): boolean {
+    if (this.packed && this.packed.length > 0 && key === BigInt(this.packed.length - 1)) {
+      this.count(this.packed.pop() as Slot, -1);
+      return true;
+    }
     this.materialize();
     const removed = super.delete(key);
     if (removed && typeof key === 'bigint') this.integerKeys--;

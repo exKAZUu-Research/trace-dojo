@@ -420,13 +420,13 @@ export function evQuiet(e: Expr, mode: 'isset' | 'coalesce' = 'isset'): Value {
     }
     case 'idx': {
       if (e.index === undefined) throwError('Error', 'Cannot use [] for reading');
-      const base = evQuiet(e.base, mode);
+      const base = evQuiet(e.base, 'coalesce');
       const index = ev(e.index);
       if (base === null) return null;
       return readIndex(base, index, true);
     }
     case 'prop': {
-      const object = evQuiet(e.obj, mode);
+      const object = evQuiet(e.obj, 'coalesce');
       if (!(object instanceof PhpObject)) return null;
       const name = memberName(e.name);
       const scope = runtime.frame.scope;

@@ -4,7 +4,7 @@ import { LIMITS } from '../interpreter/limits';
 import type { FunctionDecl } from './ast';
 import { lower } from './bytes';
 import { valueName } from './conversions';
-import { setPrevious, throwError } from './errors';
+import { throwError, withPendingException } from './errors';
 import { share } from './places';
 import {
   FatalError,
@@ -530,18 +530,7 @@ function releaseFrame(
 }
 
 function releaseCallValues(runtime: Runtime, values: unknown[], pending?: PhpThrow): void {
-  let failure: unknown = pending;
-  if (pending) runtime.held.push(pending.object);
-  try {
-    runtime.release(values);
-  } catch (error) {
-    failure = error;
-    if (error instanceof PhpThrow && pending) setPrevious(error.object, pending.object);
-    throw error;
-  } finally {
-    if (pending) runtime.held.pop();
-    if (failure instanceof PhpThrow) runtime.thrown = failure.object;
-  }
+  withPendingException(runtime, pending, () => runtime.release(values));
 }
 
 /**

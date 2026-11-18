@@ -778,8 +778,7 @@ export function isset(e: Expr): boolean {
     }
     case 'idx': {
       if (e.index === undefined) throwError('Error', 'Cannot use [] for reading');
-      // PHP fetches the containers of an isset quietly, once, asking `__isset` before `__get`.
-      const base = evQuiet(e.base);
+      const base = evQuiet(e.base, 'coalesce');
       const index = ev(e.index);
       if (base instanceof PhpArray) return (base.get(toKey(index, 'isset')) ?? null) !== null;
       if (typeof base === 'string') {
@@ -793,7 +792,7 @@ export function isset(e: Expr): boolean {
       return false;
     }
     case 'prop': {
-      const object = evQuiet(e.obj);
+      const object = evQuiet(e.obj, 'coalesce');
       if (!(object instanceof PhpObject)) return false;
       return issetProp(object, memberName(e.name), runtime.frame.scope);
     }
