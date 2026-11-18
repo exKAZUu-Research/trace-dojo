@@ -1,6 +1,7 @@
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import type { Checker } from './checker';
+import { isUnchangedVariable } from './constantReferences';
 import { applicableIndex } from './indexInfos';
 import { nonNullableType, withoutNullishUnit } from './nullishConstraints';
 import { named, propertyNameText, skipParentheses } from './syntax';
@@ -196,7 +197,6 @@ export class Flow {
   }
 
   /** The key of a reference that narrowing applies to: a variable, `this`, or a property path of one. */
-  // code-gauge-allow functionCognitiveComplexity 16 -- Builds distinct lexical, this, dotted, and literal-index references while preserving opaque property segments.
   referenceKey(node: TreeNode): string | undefined {
     const expression = skipParentheses(node);
     switch (expression.type) {
@@ -222,14 +222,26 @@ export class Flow {
       case 'subscript_expression': {
         const object = expression.childForFieldName('object');
         const index = expression.childForFieldName('index');
-        const name = index ? this.constantIndexName(index) : undefined;
-        const base = object && name !== undefined ? this.referenceKey(object) : undefined;
-        return base && name !== undefined ? propertyReferenceKey(base, name) : undefined;
+        const base = object && index ? this.referenceKey(object) : undefined;
+        return base && index ? this.elementReferenceKey(base, index) : undefined;
       }
       default: {
         return undefined;
       }
     }
+  }
+
+  /**
+   * The key of an element access: a property's for a literal key, or else one by the variable keying it, which
+   * TypeScript's `isMatchingReference` lets narrow while the variable cannot change. `%` sets it apart from a property
+   * name, which `propertyReferenceKey` escapes it in.
+   */
+  private elementReferenceKey(base: string, index: TreeNode): string | undefined {
+    const name = this.constantIndexName(index);
+    if (name !== undefined) return propertyReferenceKey(base, name);
+    if (index.type !== 'identifier' || !isUnchangedVariable(this.c, index)) return undefined;
+    const indexKey = this.referenceKey(index);
+    return indexKey ? `${base}.%${indexKey}` : undefined;
   }
 
   /** Narrows the reference `node` to `narrow` of its current type. */

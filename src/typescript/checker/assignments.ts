@@ -304,7 +304,7 @@ export class AssignmentChecker {
         return this.propertyTargetType(expression, compound);
       }
       case 'subscript_expression': {
-        return this.elementTargetType(expression);
+        return this.elementTargetType(expression, compound);
       }
       case 'non_null_expression': {
         return this.targetType(named(expression)[0], compound);
@@ -342,7 +342,6 @@ export class AssignmentChecker {
     return this.c.expressions.valueTypeOf(symbol);
   }
 
-  // code-gauge-allow functionCognitiveComplexity 18 -- Applies union writability, optional properties, getter read types, and setter write types at one assignment boundary.
   private propertyTargetType(expression: TreeNode, compound: boolean): Type {
     const objectNode = expression.childForFieldName('object') as TreeNode;
     const propertyNode = expression.childForFieldName('property') as TreeNode;
@@ -371,43 +370,24 @@ export class AssignmentChecker {
       return errorType;
     }
     const type = this.c.members.propertyAccess(expression, objectNode, propertyNode, objectType, propertyNode.text);
-    if (compound) {
-      const key = this.c.flow.referenceKey(expression);
-      const entry = key ? this.c.flow.entry(key) : undefined;
-      if (entry) return entry.type;
-    }
-    if (!compound)
-      return unionOf(
-        (objectType.kind === 'union' ? objectType.types : [objectType]).map((member) =>
-          this.namedWriteType(member, key)
-        )
-      );
-
-    return type;
+    if (compound) return this.narrowedType(expression) ?? type;
+    return unionOf(
+      (objectType.kind === 'union' ? objectType.types : [objectType]).map((member) => this.namedWriteType(member, key))
+    );
   }
 
-  private elementTargetType(expression: TreeNode): Type {
+  private elementTargetType(expression: TreeNode, compound: boolean): Type {
     const objectNode = expression.childForFieldName('object') as TreeNode;
     const indexNode = expression.childForFieldName('index') as TreeNode;
     const objectType = this.c.members.checkNonNullable(objectNode, this.c.expressions.check(objectNode));
     const indexType = this.c.expressions.check(indexNode);
     if (this.isReadonlyArrayLike(objectType)) return this.reportReadonlyIndex(expression, objectType);
-    if (isPropertyKeyLiteral(indexType)) {
-      const properties = (objectType.kind === 'union' ? objectType.types : [objectType]).map((member) =>
-        this.c.propertyOf(member, String(indexType.value))
+    if (isPropertyKeyLiteral(indexType) && this.isReadonlyProperty(expression, objectType, String(indexType.value))) {
+      this.c.error(
+        indexNode,
+        `${printedPropertyName(String(indexType.value))} は読み取り専用のプロパティなので、代入できません。`
       );
-      if (
-        properties.some(
-          (property) =>
-            property && (this.c.classes.isReadonlyFor(property, expression, objectNode) || property.getterOnly)
-        )
-      ) {
-        this.c.error(
-          indexNode,
-          `${printedPropertyName(String(indexType.value))} は読み取り専用のプロパティなので、代入できません。`
-        );
-        return errorType;
-      }
+      return errorType;
     }
     if (this.c.members.isReadonlyIndex(objectType, indexType)) return this.reportReadonlyIndex(expression, objectType);
     if (this.c.members.isGenericIndexWrite(objectType, regularOf(indexType))) {
@@ -420,6 +400,8 @@ export class AssignmentChecker {
     const readType = this.c.members.indexedType(expression, objectNode, indexNode, objectType, indexType);
     if (readType !== errorType && this.c.members.isReadonlyMappedWrite(objectType, indexType))
       return this.reportReadonlyIndex(expression, objectType);
+    const narrowed = compound ? this.narrowedType(expression) : undefined;
+    if (narrowed) return narrowed;
     if (indexType.kind === 'literal')
       return unionOf(
         (objectType.kind === 'union' ? objectType.types : [objectType]).map((member) =>
@@ -428,6 +410,24 @@ export class AssignmentChecker {
       );
 
     return readType;
+  }
+
+  /** Whether `expression`, an element access by a literal key, names a property that it cannot write. */
+  private isReadonlyProperty(expression: TreeNode, objectType: Type, name: string): boolean {
+    const objectNode = expression.childForFieldName('object') as TreeNode;
+    return (objectType.kind === 'union' ? objectType.types : [objectType]).some((member) => {
+      const property = this.c.propertyOf(member, name);
+      return (
+        property !== undefined &&
+        (this.c.classes.isReadonlyFor(property, expression, objectNode) || property.getterOnly)
+      );
+    });
+  }
+
+  /** The type a compound assignment reads from a reference that the flow has narrowed. */
+  private narrowedType(reference: TreeNode): Type | undefined {
+    const key = this.c.flow.referenceKey(reference);
+    return key ? this.c.flow.entry(key)?.type : undefined;
   }
 
   private isReadonlyArrayLike(type: Type): boolean {

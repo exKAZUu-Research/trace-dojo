@@ -38,7 +38,16 @@ export function isConstantReference(c: Checker, node: TreeNode): boolean {
 /** Whether a variable is a constant, a parameter or local `let` never reassigned, or a function expression's name. */
 function isConstantVariable(c: Checker, identifier: TreeNode): boolean {
   const symbol = c.scopeOf(identifier).lookupValue(identifier.text);
-  const declaration = symbol?.valueDeclaration;
+  if (symbol?.valueEntries[0]?.kind === 'function') return symbol.valueDeclaration?.type === 'function_expression';
+  return isUnchangedVariable(c, identifier);
+}
+
+/**
+ * Whether a variable is a constant, or a parameter or local `let` never reassigned, which TypeScript's
+ * `isMatchingReference` requires of a variable keying an element access that narrows.
+ */
+export function isUnchangedVariable(c: Checker, identifier: TreeNode): boolean {
+  const symbol = c.scopeOf(identifier).lookupValue(identifier.text);
   switch (symbol?.valueEntries[0]?.kind) {
     case 'const': {
       return true;
@@ -49,10 +58,7 @@ function isConstantVariable(c: Checker, identifier: TreeNode): boolean {
     }
     case 'let': {
       // A program without imports or exports is a script, whose top-level variables are global.
-      return !symbol.isReassigned && declaration?.parent?.parent?.type !== 'program';
-    }
-    case 'function': {
-      return declaration?.type === 'function_expression';
+      return !symbol.isReassigned && symbol.valueDeclaration?.parent?.parent?.type !== 'program';
     }
     default: {
       return false;
