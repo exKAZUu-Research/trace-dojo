@@ -226,6 +226,7 @@ defineFunction(
   ({ args, refs }) => {
     const compiled = compile('preg_match', args[0] as string);
     if (!compiled) return false;
+    if (refs[2]) refs[2].v = new PhpArray();
     const flags = (args[3] as bigint | undefined) ?? 0n;
     if ((flags & 0xffn) !== 0n)
       throwError('ValueError', 'preg_match(): Argument #4 ($flags) must be a PREG_* constant');
@@ -246,6 +247,7 @@ defineFunction(
   ({ args, refs }) => {
     const compiled = compile('preg_match_all', args[0] as string);
     if (!compiled) return false;
+    if (refs[2]) refs[2].v = new PhpArray();
     let flags = (args[3] as bigint | undefined) ?? 0n;
     if ((flags & 0xffn) > 2n) {
       throwError('ValueError', 'preg_match_all(): Argument #4 ($flags) must be a PREG_* constant');

@@ -4,6 +4,7 @@ import type { Node } from '@willbooster/web-tree-sitter';
 import type { Arg, ArrayItem, CatchClause, Expr, ListItem, MatchArm, Program, Stmt, SwitchCase } from './ast';
 import { collectMainVars, collectVariables, hasReferenceItem, onlyCalls, validateReads } from './astAnalysis';
 import { enc, lower } from './bytes';
+import { formatFloat } from './conversions';
 import { MAGIC_RUNTIME } from './converterBase';
 import { DeclarationConverter } from './declarationConverter';
 import { exportExpr } from './export';
@@ -834,7 +835,16 @@ export class Converter extends DeclarationConverter {
       }
       case 'class_constant_access_expression': {
         const [scope, nameNode] = node.namedChildren.filter((child) => child.type !== 'comment');
-        return { k: 'cconst', cls: this.classRef(scope), name: this.nameText(nameNode), row };
+        const cls = this.classRef(scope);
+        const name = this.nameText(nameNode);
+        const literal = lower(name) === 'class' && cls.k === 'expr' ? parserClassName(cls.e) : undefined;
+        if (literal === undefined) return { k: 'cconst', cls, name, row };
+        const word = lower(literal);
+        if (word === 'self' || word === 'parent' || word === 'static') {
+          this.checkClassScope(scope, word);
+          return { k: 'cconst', cls: { k: word }, name, row };
+        }
+        return { k: 'lit', v: literal.startsWith('\\') ? literal.slice(1) : literal, row };
       }
       case 'function_call_expression': {
         return this.functionCall(node);
@@ -1482,4 +1492,23 @@ function encodingLiteral(node: Node, value: Expr): boolean {
     encodingLiteral(node.childForFieldName('left') as Node, value.l) &&
     encodingLiteral(node.childForFieldName('right') as Node, value.r)
   );
+}
+
+function parserClassName(expression: Expr): string | undefined {
+  const literal = parserScalar(expression);
+  return typeof literal === 'string' ? literal : undefined;
+}
+
+function parserScalar(expression: Expr): string | bigint | number | undefined {
+  if (expression.k === 'lit')
+    return typeof expression.v === 'string' || typeof expression.v === 'bigint' || typeof expression.v === 'number'
+      ? expression.v
+      : undefined;
+  if (expression.k === 'interp' && expression.parts.every((part) => typeof part === 'string'))
+    return expression.parts.join('');
+  if (expression.k !== 'bin' || expression.op !== '.') return undefined;
+  const left = parserScalar(expression.l);
+  const right = parserScalar(expression.r);
+  if (left === undefined || right === undefined) return undefined;
+  return `${typeof left === 'number' ? formatFloat(left) : left}${typeof right === 'number' ? formatFloat(right) : right}`;
 }

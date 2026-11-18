@@ -1,6 +1,6 @@
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import { callMethod, callValue } from './callables';
-import { type CallRecord, callStack } from './calls';
+import { callArguments, type CallRecord, callStack } from './calls';
 import { createObject, findClass } from './classes';
 import { formatFloat } from './conversions';
 import { setErrorFactories, setThrowableFormatter } from './errors';
@@ -42,7 +42,7 @@ function traceArray(records: CallRecord[]): PhpArray {
       frame.set('class', record.className);
       frame.set('type', record.type ?? '::');
     }
-    const args = PhpArray.list(record.args);
+    const args = PhpArray.list(callArguments(record));
     for (const [name, value] of record.named ?? []) args.set(name, value);
     frame.set('args', args);
     trace.append(frame);
@@ -56,7 +56,7 @@ export function traceText(records: CallRecord[]): string {
     const where = record.row === undefined ? '[internal function]' : `${SCRIPT_PATH}(${record.row + 1})`;
     const name = record.className ? `${record.className}${record.type}${record.name}` : record.name;
     const named = (record.named ?? []).map(([key, arg]) => `${key}: ${traceArg(arg)}`);
-    return `#${index} ${where}: ${name}(${[...record.args.map((arg) => traceArg(arg)), ...named].join(', ')})`;
+    return `#${index} ${where}: ${name}(${[...callArguments(record).map((arg) => traceArg(arg)), ...named].join(', ')})`;
   });
   lines.push(`#${records.length} {main}`);
   return lines.join('\n');

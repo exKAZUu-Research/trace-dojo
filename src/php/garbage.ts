@@ -23,9 +23,9 @@ const GC_THRESHOLD_STEP = 10_000;
 const GC_THRESHOLD_TRIGGER = 100;
 
 /** Runs the destructor of an object, which the interpreter provides. */
-let destruct: (object: PhpObject) => void = () => {};
+let destruct: (object: PhpObject, row?: number) => void = () => {};
 
-export function setDestructor(run: (object: PhpObject) => void): void {
+export function setDestructor(run: (object: PhpObject, row?: number) => void): void {
   destruct = run;
 }
 
@@ -187,7 +187,7 @@ function releaseDroppedNow(runtime: Runtime, dropped: unknown[]): void {
   const freed = new Set<PhpObject>();
   if (garbage.length > 0) {
     runtime.spend();
-    for (const object of freeable(garbage)) freed.add(object);
+    for (const object of freeable(garbage, detached)) freed.add(object);
     for (const object of garbage) if (!freed.has(object)) runtime.objectCycles.add(object);
   }
   if (freed.size === 0 && activeReleaseObjects.size === 0) {
@@ -331,7 +331,7 @@ class Release {
       const changes: OwnershipChange[] = [];
       const stopObserving = observeOwnership((change) => changes.push(change));
       try {
-        destruct(object);
+        destruct(object, this.runtime.row);
       } catch (error) {
         if (!(error instanceof PhpThrow)) throw error;
         onFailure(error);
@@ -637,8 +637,8 @@ function pushObject(object: PhpObject, pending: unknown[]): void {
  * The garbage objects that reference counting frees: all but those a cycle of garbage keeps, which are the objects on
  * a cycle and those reachable from one.
  */
-function freeable(garbage: PhpObject[]): PhpObject[] {
-  const { edges, cyclic } = cyclicObjects(garbage);
+function freeable(garbage: PhpObject[], include?: (value: Ref | PhpArray) => boolean): PhpObject[] {
+  const { edges, cyclic } = cyclicObjects(garbage, include);
   const kept = new Set<PhpObject>();
   const pending = [...cyclic];
   while (pending.length > 0) {
@@ -651,13 +651,16 @@ function freeable(garbage: PhpObject[]): PhpObject[] {
 }
 
 // code-gauge-allow functionNcss 55 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
-function cyclicObjects(garbage: PhpObject[]): { edges: Map<PhpObject, PhpObject[]>; cyclic: Set<PhpObject> } {
+function cyclicObjects(
+  garbage: PhpObject[],
+  include?: (value: Ref | PhpArray) => boolean
+): { edges: Map<PhpObject, PhpObject[]>; cyclic: Set<PhpObject> } {
   const set = new Set(garbage);
   const edges = new Map<PhpObject, PhpObject[]>();
   for (const object of garbage)
     edges.set(
       object,
-      referencedObjects(object).filter((target) => set.has(target))
+      referencedObjects(object, include).filter((target) => set.has(target))
     );
   // Tarjan's strongly connected components finds the objects on cycles.
   let index = 0;
@@ -779,7 +782,10 @@ function releaseOrder(
 }
 
 /** The objects an object refers to directly or through arrays it holds, in property order. */
-export function referencedObjects(object: PhpObject): PhpObject[] {
+export function referencedObjects(
+  object: PhpObject,
+  include: (value: Ref | PhpArray) => boolean = () => true
+): PhpObject[] {
   const found: PhpObject[] = [];
   const pending: unknown[] = [];
   pushObject(object, pending);
@@ -787,10 +793,11 @@ export function referencedObjects(object: PhpObject): PhpObject[] {
   const seenArrays = new Set<PhpArray>();
   while (pending.length > 0) {
     const item = pending.pop();
-    if (item instanceof Ref) pending.push(item.v);
-    else if (item instanceof PhpObject) found.push(item);
+    if (item instanceof Ref) {
+      if (include(item)) pending.push(item.v);
+    } else if (item instanceof PhpObject) found.push(item);
     else if (item instanceof PhpArray) {
-      if (seenArrays.has(item)) continue;
+      if (seenArrays.has(item) || !include(item)) continue;
       seenArrays.add(item);
       appendReversed(pending, item.map.values());
     } else if (item instanceof Map) appendReversed(pending, item.values());

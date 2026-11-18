@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 785 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 786 -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import {
   applyOperator,
@@ -1065,7 +1065,10 @@ function matchCaseText(value: Value): string {
     return `'${escaped}${value.length > 15 ? '...' : ''}'`;
   }
   if (typeof value === 'bigint') return value.toString();
-  if (typeof value === 'number') return conversionsModule.formatFloatRepr(value);
+  if (typeof value === 'number') {
+    const text = conversionsModule.formatFloat(value);
+    return Number.isFinite(value) && !/[.E]/.test(text) ? `${text}.0` : text;
+  }
   if (typeof value === 'boolean') return value ? 'true' : 'false';
   if (value === null) return 'NULL';
   return `of type ${debugType(value)}`;

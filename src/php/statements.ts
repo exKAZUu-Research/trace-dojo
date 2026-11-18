@@ -210,7 +210,7 @@ function execStmt(statement: Stmt, seek?: string): Completion {
       }
       case 'return': {
         const value = statement.e ? evReturn(statement.e) : null;
-        frame.returning = value;
+        frame.returning = share(value);
         return { t: 'return', v: value };
       }
       case 'block': {
@@ -400,7 +400,7 @@ function tryStatement(statement: Extract<Stmt, { k: 'try' }>, seek?: string): Co
   }
   if (statement.fin) {
     const frame = runtime.frame;
-    if (completion?.t === 'return') frame.temporaries.push(completion.v);
+    if (completion?.t === 'return') frame.temporaries.push(share(completion.v));
     if (pending instanceof PhpThrow) frame.temporaries.push(pending.object);
     let finalCompletion: Completion;
     try {
@@ -615,17 +615,17 @@ function runBody(decl: FunctionDecl, frame: Frame): Value {
 }
 
 setBodyRunner(runBody);
-setDestructor((object) => {
+setDestructor((object, row) => {
   const destructor = object.cls.findMethod('__destruct');
   if (!destructor) return;
-  // Traces show a destructor as called by the engine, not from the line that released its object.
-  asInternal(() =>
+  const run = (): Value =>
     invoke(
       { fn: destructor.fn, thisObj: object, scope: destructor.scope, staticClass: object.cls, method: destructor },
       [],
-      undefined
-    )
-  );
+      row
+    );
+  if (row === undefined) asInternal(run);
+  else run();
 });
 setObjectConversions(
   (object) => {

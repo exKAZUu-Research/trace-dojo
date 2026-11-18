@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 551 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 558 -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import { LIMITS } from '../interpreter/limits';
 import type { FunctionDecl } from './ast';
@@ -61,6 +61,7 @@ export interface CallRecord {
   className?: string;
   type?: '->' | '::';
   args: Value[];
+  argumentRefs?: (Ref | undefined)[];
   /** The arguments a variadic parameter collected by name, which traces show as `name: value`. */
   named?: [string, Value][];
   /** The row of the call in its caller, or undefined when native code made the call. */
@@ -88,7 +89,16 @@ let hostStackExhaustion = new HostStackExhaustion();
 
 /** The calls running, innermost last, for stack traces. */
 export const callStack: CallRecord[] = [];
-setCallCapture(() => callStack.toReversed());
+setCallCapture(() =>
+  callStack.toReversed().map((record) => ({ ...record, args: callArguments(record), argumentRefs: undefined }))
+);
+
+export function callArguments(record: CallRecord): Value[] {
+  return record.args.map((value, index) => {
+    const ref = record.argumentRefs?.[index];
+    return ref ? ref.v : value;
+  });
+}
 
 /** Whether native code is running a callback, which stack traces show as `[internal function]`. */
 let nativeDepth = 0;
@@ -158,7 +168,7 @@ interface NativeHolders {
   argumentCount: number;
 }
 
-// code-gauge-allow functionNcss 51 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+// code-gauge-allow functionNcss 55 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 function invokeNative(target: CallTarget, fn: NativeFunction, args: ArgValue[], row: number | undefined): Value {
   const runtime = rt();
   runtime.spend();
@@ -166,6 +176,7 @@ function invokeNative(target: CallTarget, fn: NativeFunction, args: ArgValue[], 
   const name = functionDisplayName(target);
   const inline = target.inline && row !== undefined;
   const strict = callerIsStrict();
+  let record: CallRecord | undefined;
   if (!inline) {
     const passed = positionalArguments(args).map((arg) => arg.ref?.v ?? arg.v);
     for (const arg of args) {
@@ -173,7 +184,8 @@ function invokeNative(target: CallTarget, fn: NativeFunction, args: ArgValue[], 
       const index = fn.params.findIndex((param) => param.name === arg.name && !param.variadic);
       if (index !== -1) passed[index] = arg.ref?.v ?? arg.v;
     }
-    callStack.push(recordFor(target, passed, nativeDepth > 0 && row === undefined ? undefined : row));
+    record = recordFor(target, passed, nativeDepth > 0 && row === undefined ? undefined : row);
+    callStack.push(record);
     nativeDepth++;
   }
   runtime.nativeCalls++;
@@ -191,6 +203,7 @@ function invokeNative(target: CallTarget, fn: NativeFunction, args: ArgValue[], 
   let failure: unknown;
   try {
     const { values, refs, named } = bindNative(fn, args, name, strict);
+    if (record) record.argumentRefs = refs;
     result = runNative(runtime, fn, {
       args: values,
       refs,
@@ -660,7 +673,7 @@ export function setDefaultEvaluator(run: (decl: FunctionDecl, index: number, fra
   evaluateDefault = run;
 }
 
-// code-gauge-allow functionNcss 48 -- Binds arguments to parameters as PHP's call protocol does, in its order of checks.
+// code-gauge-allow functionNcss 49 -- Binds arguments to parameters as PHP's call protocol does, in its order of checks.
 // code-gauge-allow functionParameterCount 7 -- Binds arguments to parameters as PHP's call protocol does, in its order of checks.
 function bindParams(
   frame: Frame,
@@ -701,17 +714,18 @@ function bindParams(
     if (arg === undefined) {
       if (!param.optional) {
         const anyNamed = args.some((candidate) => candidate.name !== undefined);
-        if (anyNamed) {
+        const passed = callStack.at(-1)?.args.length ?? positional.length;
+        if (anyNamed && passed >= required) {
           const record = callStack.at(-1);
           if (record) record.args = record.args.slice(0, params.length);
           throwError('ArgumentCountError', `${name}(): Argument #${index + 1} ($${param.name}) not passed`);
         }
-        const hasOptional = params.some((other) => other.optional && !other.variadic) || params.at(-1)?.variadic;
+        const hasOptional = params.some((other) => other.optional && !other.variadic);
         const where = callRow === undefined ? '' : ` in ${SCRIPT_PATH} on line ${callRow + 1}`;
         const expectation = hasOptional ? 'at least' : 'exactly';
         throwError(
           'ArgumentCountError',
-          `Too few arguments to function ${name}(), ${positional.length} passed${where} and ${expectation} ${required} expected`
+          `Too few arguments to function ${name}(), ${passed} passed${where} and ${expectation} ${required} expected`
         );
       }
       const value = evaluateDefault(fn.decl, index, frame);

@@ -916,7 +916,7 @@ test.each([
   'const X=1;use const PHP_EOL as X;',
   'use const PHP_EOL as X;const X=1;',
 ])('rejects invalid symbol declarations and finally transfers before output: %s', (source) => {
-  expect(run(`<?php echo 'never';${source}`).kind).toBe('compileError');
+  expect(run(`<?php echo 'never';${source};`).kind).toBe('compileError');
 });
 
 test.each([
@@ -925,7 +925,7 @@ test.each([
   'class A{public int|string $x=null;}',
   'class A{public iterable $x=null;}',
 ])('reports a non-nullable property default before output: %s', (source) => {
-  expect(run(`<?php echo 'never';${source}`)).toMatchObject({
+  expect(run(`<?php echo 'never';${source};`)).toMatchObject({
     kind: 'compileError',
     diagnostics: [{ message: expect.stringContaining('may not be null. Use the nullable type') }],
   });
@@ -975,7 +975,7 @@ test.each([
   'switch(1): ?>\n    <?php case 1:echo 1;endswitch;',
   'switch(1){ ?>x<?php case 1:echo 1;}',
 ])('rejects invalid known array defaults and switch prefixes before output: %s', (source) => {
-  expect(run(`<?php echo 'never';${source}`).kind).toBe('compileError');
+  expect(run(`<?php echo 'never';${source};`).kind).toBe('compileError');
 });
 
 test.each([
@@ -1200,3 +1200,25 @@ test.each([6, 14].flatMap((flags) => ['a', '0', '1', ' '].map((text) => [flags, 
     });
   }
 );
+
+test.each([
+  'class A { protected(set) private int $p; }',
+  'class A { public(set) protected int $p; }',
+  'class A { public(set) protected readonly int $p; }',
+  'class A { protected(set) private static int $p; }',
+  'class A { function __construct(public(set) private readonly int $p) {} }',
+  'new class { protected(set) private int $p; }',
+])('rejects setters wider than property reads: %s', (source) => {
+  const result = run(`<?php echo 'never';${source};`);
+  expect(result.kind).toBe('compileError');
+  expect(JSON.stringify(result)).toContain('must not be weaker than set visibility');
+});
+
+test('releases objects holding shared arrays with time to spare', () => {
+  vi.restoreAllMocks();
+  expect(
+    run(
+      '<?php class N{function __construct(public $meta){}}$meta=range(1,30000);$sum=0;for($i=0;$i<2000;$i++){$x=new N($meta);$sum+=$x->meta[4];}echo $sum;'
+    )
+  ).toMatchObject({ kind: 'executed', stdout: '10000' });
+});

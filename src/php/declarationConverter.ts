@@ -19,7 +19,7 @@ import { foldedDefaultType } from './constantDefaults';
 import { BUILTIN_TYPES, ConverterBase } from './converterBase';
 import { SCRIPT_PATH } from './runtime';
 import { describeType, typeToString } from './types';
-import type { TypeDecl, Visibility } from './values';
+import { type TypeDecl, type Visibility, visibilityRank } from './values';
 import { isSubtype } from './variance';
 
 const MAGIC_METHODS: Record<
@@ -672,9 +672,11 @@ export abstract class DeclarationConverter extends ConverterBase {
   private checkPropertyType(
     node: Node | number,
     className: string,
-    property: Pick<PropertyDeclAst, 'name' | 'type' | 'isReadonly' | 'isStatic' | 'setVisibility'>
+    property: Pick<PropertyDeclAst, 'name' | 'type' | 'isReadonly' | 'isStatic' | 'visibility' | 'setVisibility'>
   ): void {
-    const { name, type, isReadonly, isStatic, setVisibility } = property;
+    const { name, type, isReadonly, isStatic, visibility, setVisibility } = property;
+    if (setVisibility && visibilityRank(visibility) < visibilityRank(setVisibility))
+      this.error(node, `Visibility of property ${className}::$${name} must not be weaker than set visibility`);
     if (
       type &&
       (type.k === 'named'
@@ -719,7 +721,13 @@ export abstract class DeclarationConverter extends ConverterBase {
           `プロパティ ${decl.name}::$${name} は、すでに宣言されています（Cannot redeclare ${decl.name}::$${name}）。`
         );
       }
-      this.checkPropertyType(element, decl.name, { ...modifiers, name, type, isReadonly });
+      this.checkPropertyType(element, decl.name, {
+        ...modifiers,
+        visibility: modifiers.visibility ?? 'public',
+        name,
+        type,
+        isReadonly,
+      });
       const defaultNode = element.childForFieldName('default_value');
       if (defaultNode && isReadonly) {
         this.error(
