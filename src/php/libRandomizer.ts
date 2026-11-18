@@ -1,5 +1,6 @@
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import { callMethod } from './callables';
+import { classConstant } from './classConstants';
 import { findClass } from './classes';
 import { valueName } from './conversions';
 import { deprecated, throwError } from './errors';
@@ -246,19 +247,26 @@ function nextAfter(value: number, direction: number): number {
   return view.getFloat64(0);
 }
 
-/** Transcribes php_random_gammasection_closed_open, which picks one of the evenly spaced floats in [min, max). */
-function gammaClosedOpen(algo: Algo, min: number, max: number): number {
-  const gamma =
-    Math.abs(min) > Math.abs(max) ? nextAfter(min, Number.MAX_VALUE) - min : max - nextAfter(max, -Number.MAX_VALUE);
-  const high = ceilInt(min, max, gamma);
-  if (max <= min || high < 1n) return Number.NaN;
-  const k = 1n + rangeBits(algo, high - 1n, 64);
-  if (Math.abs(min) <= Math.abs(max)) {
-    if (k === high) return min;
-    return 4 * (max * 0.25 - Number(k >> 2n) * gamma) - Number(k & 3n) * gamma;
-  }
-  const below = k - 1n;
-  return 4 * (min * 0.25 + Number(below >> 2n) * gamma) + Number(below & 3n) * gamma;
+const INTERVAL_BOUNDARIES = ['ClosedOpen', 'ClosedClosed', 'OpenClosed', 'OpenOpen'] as const;
+
+function gammaSection(algo: Algo, min: number, max: number, boundary: string): number {
+  const fromMaximum = Math.abs(min) <= Math.abs(max);
+  const gamma = fromMaximum ? max - nextAfter(max, -Number.MAX_VALUE) : nextAfter(min, Number.MAX_VALUE) - min;
+  const extent = min === max ? 0n : ceilInt(min, max, gamma);
+  const minClosed = boundary.startsWith('Closed');
+  const maxClosed = boundary.endsWith('Closed');
+  const first = (fromMaximum ? maxClosed : minClosed) ? 0n : 1n;
+  const last = (fromMaximum ? minClosed : maxClosed) ? extent : extent - 1n;
+  if (last < first)
+    throwError(
+      'ValueError',
+      'The given interval is empty, there are no floats between argument #1 ($min) and argument #2 ($max)'
+    );
+  const offset = first + rangeBits(algo, last - first, 64);
+  if (offset === extent) return fromMaximum ? min : max;
+  const signedGamma = fromMaximum ? -gamma : gamma;
+  const anchor = fromMaximum ? max : min;
+  return 4 * (anchor * 0.25 + Number(offset >> 2n) * signedGamma) + Number(offset & 3n) * signedGamma;
 }
 
 function ceilInt(a: number, b: number, gamma: number): bigint {
@@ -313,17 +321,21 @@ const randomizerMethods: NativeMethod[] = [
   {
     signature: String.raw`getFloat(float $min, float $max, Random\IntervalBoundary $boundary = Random\IntervalBoundary::ClosedOpen): float`,
     impl: ({ thisObj, args }) => {
-      const [min, max] = args as [number, number];
+      const [min, max, bounds] = args as [number, number, PhpObject | undefined];
+      const boundary = (bounds?.props.get('name') as string | undefined) ?? 'ClosedOpen';
       if (!Number.isFinite(min))
         throwError('ValueError', String.raw`Random\Randomizer::getFloat(): Argument #1 ($min) must be finite`);
       if (!Number.isFinite(max))
         throwError('ValueError', String.raw`Random\Randomizer::getFloat(): Argument #2 ($max) must be finite`);
-      if (max <= min)
+      const closed = boundary === 'ClosedClosed';
+      if (max < min || (max === min && !closed)) {
+        const relation = closed ? 'greater than or equal to' : 'greater than';
         throwError(
           'ValueError',
-          String.raw`Random\Randomizer::getFloat(): Argument #2 ($max) must be greater than argument #1 ($min)`
+          `${String.raw`Random\Randomizer::getFloat()`}: Argument #2 ($max) must be ${relation} argument #1 ($min)`
         );
-      return gammaClosedOpen(algoOf(thisObj), min, max);
+      }
+      return gammaSection(algoOf(thisObj), min, max, boundary);
     },
   },
   {
@@ -665,6 +677,32 @@ defineClass({
   createInternal: () => {
     throw new UnsupportedFeatureError(String.raw`乱数の種を指定できない Random\Engine\Secure`);
   },
+});
+
+defineClass({
+  name: 'UnitEnum',
+  kind: 'interface',
+  methods: [{ signature: 'cases(): array', isStatic: true, impl: () => new PhpArray() }],
+});
+
+defineClass({
+  name: String.raw`Random\IntervalBoundary`,
+  kind: 'enum',
+  isFinal: true,
+  isCloneable: false,
+  interfaces: ['UnitEnum'],
+  props: [{ name: 'name', visibility: 'public', type: 'string', isReadonly: true }],
+  enumCases: INTERVAL_BOUNDARIES,
+  methods: [
+    {
+      signature: 'cases(): array',
+      isStatic: true,
+      impl: ({ calledClass }) => {
+        const cls = calledClass as PhpClass;
+        return PhpArray.list(INTERVAL_BOUNDARIES.map((name) => classConstant(cls, name, cls)));
+      },
+    },
+  ],
 });
 
 defineClass({

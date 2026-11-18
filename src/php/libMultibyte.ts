@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 836 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 875 -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 // oxlint-disable unicorn/text-encoding-identifier-case -- mbstring names its encodings in this case.
 // oxlint-disable typescript/no-misused-spread -- PHP splits strings into bytes or code points, never into grapheme clusters.
@@ -10,6 +10,7 @@ import { eastAsianWidth } from 'get-east-asian-width';
 import { codePointBytes, dec, enc, lower } from './bytes';
 import { deprecated, throwError, warn } from './errors';
 import { padUnits } from './libString';
+import { encodingNames } from './multibyteEncodingNames';
 import { defineConstant, defineFunction } from './native';
 import { toStr } from './operators';
 import { rt } from './runtime';
@@ -39,16 +40,9 @@ const chars = (value: Value): string[] => {
   return parts;
 };
 
-// Names accepted by mbstring, including encodings rejected by codecFor.
-const ENCODINGS = new Set(
-  lower(
-    'Shift_JIS x-uuencode HZ-GB-2312 BIG5 BASE64 UUENCODE HTML-ENTITIES HTML Quoted-Printable qprint 7bit 8bit binary UCS-4 ISO-10646-UCS-4 UCS4 UCS-4BE byte4be UCS-4LE byte4le UCS-2 ISO-10646-UCS-2 UCS2 UNICODE UCS-2BE byte2be UCS-2LE byte2le UTF-32 utf32 UTF-32BE UTF-32LE UTF-16 utf16 UTF-16BE UTF-16LE UTF-8 utf8 UTF-7 utf7 UTF7-IMAP mUTF-7 ASCII ANSI_X3.4-1968 iso-ir-6 ANSI_X3.4-1986 ISO_646.irv:1991 US-ASCII ISO646-US us IBM367 IBM-367 cp367 csASCII EUC-JP EUC EUC_JP eucJP x-euc-jp SJIS x-sjis SHIFT-JIS eucJP-win eucJP-open eucJP-ms EUC-JP-2004 EUC_JP-2004 SJIS-Mobile#DOCOMO SJIS-DOCOMO shift_jis-imode x-sjis-emoji-docomo SJIS-Mobile#KDDI SJIS-KDDI shift_jis-kddi x-sjis-emoji-kddi SJIS-Mobile#SOFTBANK SJIS-SOFTBANK shift_jis-softbank x-sjis-emoji-softbank SJIS-mac MacJapanese x-Mac-Japanese SJIS-2004 SJIS2004 Shift_JIS-2004 UTF-8-Mobile#DOCOMO UTF-8-DOCOMO UTF8-DOCOMO UTF-8-Mobile#KDDI-A UTF-8-Mobile#KDDI-B UTF-8-Mobile#KDDI UTF-8-KDDI UTF8-KDDI UTF-8-Mobile#SOFTBANK UTF-8-SOFTBANK UTF8-SOFTBANK CP932 MS932 Windows-31J MS_Kanji SJIS-win SJIS-ms SJIS-open CP51932 JIS ISO-2022-JP ISO-2022-JP-MS ISO2022JPMS GB18030 gb-18030 gb-18030-2000 GB18030-2022 Windows-1252 cp1252 Windows-1254 CP1254 CP-1254 ISO-8859-1 ISO8859-1 latin1 ISO-8859-2 ISO8859-2 latin2 ISO-8859-3 ISO8859-3 latin3 ISO-8859-4 ISO8859-4 latin4 ISO-8859-5 ISO8859-5 cyrillic ISO-8859-6 ISO8859-6 arabic ISO-8859-7 ISO8859-7 greek ISO-8859-8 ISO8859-8 hebrew ISO-8859-9 ISO8859-9 latin5 ISO-8859-10 ISO8859-10 latin6 ISO-8859-13 ISO8859-13 ISO-8859-14 ISO8859-14 latin8 ISO-8859-15 ISO8859-15 ISO-8859-16 ISO8859-16 EUC-CN CN-GB EUC_CN eucCN x-euc-cn gb2312 CP936 CP-936 GBK HZ EUC-TW EUC_TW eucTW x-euc-tw BIG-5 CN-BIG5 BIG-FIVE BIGFIVE CP950 EUC-KR EUC_KR eucKR x-euc-kr UHC CP949 ISO-2022-KR Windows-1251 CP1251 CP-1251 CP866 CP-866 IBM866 IBM-866 KOI8-R KOI8R KOI8-U KOI8U ArmSCII-8 ArmSCII8 CP850 CP-850 IBM850 IBM-850 ISO-2022-JP-2004 ISO-2022-JP-MOBILE#KDDI ISO-2022-JP-KDDI CP50220 cp50220raw cp50220-raw JIS-ms CP50221 CP50222'
-  ).split(' ')
-);
-
 function checkEncoding(name: string, args: Value[], position: number, parameter = 'encoding'): void {
   const encoding = args[position - 1];
-  if (typeof encoding === 'string' && !ENCODINGS.has(lower(encoding))) {
+  if (typeof encoding === 'string' && !encodingNames.has(lower(encoding))) {
     throwError(
       'ValueError',
       `${name}(): Argument #${position} ($${parameter}) must be a valid encoding, "${encoding}" given`
@@ -815,10 +809,11 @@ defineFunction(
     const to = codecFor(s(args[1]), 'mb_convert_encoding');
     const from =
       args[2] === undefined || args[2] === null
-        ? [codecFor(rt().mbEncoding, 'mb_convert_encoding')]
+        ? [rt().mbEncoding]
         : encodingList(args[2], 'mb_convert_encoding', 3, 'from_encoding', false);
     const convert = (text: string): string => {
-      const source = from.length === 1 ? from[0] : (guessEncoding(text, from, false) as Codec);
+      const name = from.length === 1 ? from[0] : guessEncoding(text, from.map(encodingReader), false)?.name;
+      const source = codecFor(name ?? from[0], 'mb_convert_encoding');
       return encodeCodes(source.decode(text), to, substitution());
     };
     const input = args[0];
@@ -853,15 +848,15 @@ const NON_ENCODINGS = new Set(
   lower('BASE64 UUENCODE x-uuencode HTML-ENTITIES HTML Quoted-Printable qprint 7bit 8bit binary').split(' ')
 );
 
-/** The codecs of a list of encoding names, as php_mb_parse_encoding_list and php_mb_parse_encoding_array read it. */
-// code-gauge-allow functionCognitiveComplexity 22 -- Transcribes PHP's algorithm for this function step by step, whose branches mirror PHP's.
+/** Resolves encoding lists before selecting a reader or a conversion codec. */
+// code-gauge-allow functionCognitiveComplexity 24 -- Transcribes PHP's algorithm for this function step by step, whose branches mirror PHP's.
 function encodingList(
   value: Value,
   functionName: string,
   position: number,
   parameter: string,
   removesNonEncodings: boolean
-): Codec[] {
+): string[] {
   const isArray = value instanceof PhpArray;
   const parts =
     !isArray && s(value) !== ''
@@ -871,37 +866,41 @@ function encodingList(
       : [];
   const input = isArray ? value.iterValues() : parts;
   const inputSize = isArray ? value.size : parts.length;
-  const codecs: Codec[] = [];
+  const names: string[] = [];
   let includedAuto = false;
   for (const item of input) {
     rt().spend();
     const name = isArray ? toStr(item) : s(item).replaceAll(/^[ \t]+|[ \t]+$/g, '');
     if (lower(name) === 'auto') {
-      if (!includedAuto) codecs.push(...DETECT_ORDER);
+      if (!includedAuto) names.push(...DETECT_ORDER);
       includedAuto = true;
     } else if (name === '' && !isArray) {
       // mbstring's lookup by name and length finds ASCII for an empty name in a comma-separated list.
-      codecs.push(CODECS.get('ascii') as Codec);
+      names.push('ASCII');
     } else if (NON_ENCODINGS.has(lower(name)) && (removesNonEncodings || inputSize > 1)) continue;
-    else if (ENCODINGS.has(lower(name))) codecs.push(codecFor(name, functionName));
     else {
+      const canonical = encodingNames.get(lower(name));
+      if (canonical) {
+        names.push(canonical);
+        continue;
+      }
       throwError(
         'ValueError',
         `${functionName}(): Argument #${position} ($${parameter}) contains invalid encoding "${name}"`
       );
     }
   }
-  if (inputSize === 0 || (codecs.length === 0 && !removesNonEncodings)) {
+  if (inputSize === 0 || (names.length === 0 && !removesNonEncodings)) {
     throwError(
       'ValueError',
       `${functionName}(): Argument #${position} ($${parameter}) must specify at least one encoding`
     );
   }
-  return codecs;
+  return names;
 }
 
 /** The default order of `mb_detect_encoding`, which `auto` also names, for mbstring's neutral language. */
-const DETECT_ORDER = [CODECS.get('ascii') as Codec, UTF8];
+const DETECT_ORDER = ['ASCII', 'UTF-8'];
 
 defineFunction(
   'mb_detect_encoding(string $string, array|string|null $encodings = null, bool $strict = false): string|false',
@@ -913,20 +912,59 @@ defineFunction(
         : encodingList(args[1], 'mb_detect_encoding', 2, 'encodings', true);
     if (candidates.length === 0) return false;
     const strict = args[2] === true;
-    if (candidates.length === 1 && candidates[0] === UTF8 && !decodeUtf8(text).includes(BAD)) return 'UTF-8';
-    return guessEncoding(text, candidates, strict)?.name ?? false;
+    if (!strict && candidates.length === 1) return candidates[0];
+    if (candidates.length === 1 && candidates[0] === 'UTF-8' && !decodeUtf8(text).includes(BAD)) return 'UTF-8';
+    return guessEncoding(text, candidates.map(encodingReader), strict)?.name ?? false;
   }
 );
+
+type EncodingReader = Pick<Codec, 'name' | 'decode'>;
+const detectionReaders = new Map<string, EncodingReader>();
+
+function encodingReader(name: string): EncodingReader {
+  const codec = CODECS.get(lower(name));
+  if (codec) return codec;
+  let reader = detectionReaders.get(name);
+  if (!reader) {
+    const decoder = legacyTextDecoder(name);
+    reader = { name, decode: decoder ? (text) => decodeLegacy(text, decoder) : CODECS.get('ascii')!.decode };
+    detectionReaders.set(name, reader);
+  }
+  return reader;
+}
+
+function legacyTextDecoder(name: string): TextDecoder | undefined {
+  let label = name;
+  if (/^(?:SJIS|CP932)/.test(name)) label = 'shift_jis';
+  else if (/^(?:EUC-JP|eucJP|CP51932)/.test(name)) label = 'euc-jp';
+  else if (/^(?:ISO-2022-JP|JIS|CP5022)/.test(name)) label = 'iso-2022-jp';
+  else if (name === 'BIG-5' || name === 'CP950') label = 'big5';
+  else if (name === 'EUC-CN' || name === 'CP936') label = 'gbk';
+  else if (name === 'UHC') label = 'euc-kr';
+  else if (name === 'GB18030-2022') label = 'gb18030';
+  try {
+    return new TextDecoder(label, { ignoreBOM: true });
+  } catch {
+    return undefined;
+  }
+}
+
+function decodeLegacy(text: string, decoder: TextDecoder): number[] {
+  rt().spend(Math.ceil(text.length / 64));
+  return Array.from(decoder.decode(Buffer.from(text, 'latin1')), (char) =>
+    char === '\uFFFD' ? BAD : (char.codePointAt(0) as number)
+  );
+}
 
 /**
  * Picks the encoding that reads a string with the fewest demerits as mb_guess_encoding_for_strings does: invalid input
  * costs 1000 (or rules a candidate out when strict), and a rare code point costs more than a common one.
  */
 // code-gauge-allow functionCognitiveComplexity 17 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
-function guessEncoding(text: string, candidates: Codec[], strict: boolean): Codec | undefined {
+function guessEncoding(text: string, candidates: EncodingReader[], strict: boolean): EncodingReader | undefined {
   if (candidates.length === 1) return strict && candidates[0].decode(text).includes(BAD) ? undefined : candidates[0];
   if (text === '') return candidates[0];
-  let best: { codec: Codec; demerits: number } | undefined;
+  let best: { codec: EncodingReader; demerits: number } | undefined;
   for (const [index, codec] of candidates.entries()) {
     rt().spend();
     const codes = codec.decode(withoutBom(text, codec));
@@ -943,7 +981,7 @@ function guessEncoding(text: string, candidates: Codec[], strict: boolean): Code
   return best?.codec;
 }
 
-function withoutBom(text: string, codec: Codec): string {
+function withoutBom(text: string, codec: EncodingReader): string {
   const bom = { 'UTF-8': 'ï»¿', 'UTF-16BE': 'þÿ', 'UTF-16LE': 'ÿþ' }[codec.name];
   return bom !== undefined && text.startsWith(bom) ? text.slice(bom.length) : text;
 }

@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 426 -- Keeps one PHP runtime concern and its shared helpers in one module.
+// code-gauge-allow-file fileNcss 429 -- Keeps one PHP runtime concern and its shared helpers in one module.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 // oxlint-disable unicorn/prefer-code-point -- PHP strings hold bytes as code units 0–255, which charCodeAt and fromCharCode read and write as they are.
 import { codePointBytes, enc, utf8Length } from './bytes';
@@ -105,8 +105,8 @@ class JsonEncoder {
     private readonly maxDepth: number
   ) {}
 
-  // code-gauge-allow functionNcss 34 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
-  // code-gauge-allow functionCognitiveComplexity 18 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+  // code-gauge-allow functionNcss 37 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+  // code-gauge-allow functionCognitiveComplexity 21 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
   encode(value: Value, level: number): string {
     rt().spend();
     if (value === null) return 'null';
@@ -130,7 +130,10 @@ class JsonEncoder {
         return this.encodeString(value, this.flags);
       }
     }
-    if (value instanceof PhpObject && value.isResource) return this.fail(8);
+    if (value instanceof PhpObject) {
+      if (value.isResource) return this.fail(8);
+      if (value.cls.kind === 'enum') return this.fail(11);
+    }
     const serializable = rt().classes.get('jsonserializable') as PhpClass;
     if (value instanceof PhpArray || !value.cls.isSubclassOf(serializable)) return this.encodeContainer(value, level);
     if (this.active.has(value)) return this.fail(6);

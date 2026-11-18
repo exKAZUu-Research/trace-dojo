@@ -1,0 +1,13 @@
+string(4) "SJIS"
+string(4) "SJIS"
+string(5) "ASCII"
+string(6) "EUC-JP"
+string(4) "SJIS"
+string(6) "EUC-JP"
+string(5) "BIG-5"
+bool(false)
+string(4) "SJIS"
+string(5) "UTF-8"
+string(11) "ISO-2022-KR"
+bool(false)
+mb_detect_encoding(): Argument #2 ($encodings) contains invalid encoding "bogus"

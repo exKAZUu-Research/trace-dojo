@@ -266,7 +266,7 @@ function printRValue(value: Value, indent: number, state: Inspection): string {
   }
   if (value instanceof PhpObject && value.cls.name === '(stream)') return `Resource id #${value.id}`;
   if (value instanceof PhpObject) {
-    const header = `${value.cls.name} Object\n`;
+    const header = `${value.cls.name} ${value.cls.kind === 'enum' ? 'Enum' : 'Object'}\n`;
     if (state.active.has(value)) return `${header} *RECURSION*`;
     state.active.add(value);
     try {
@@ -315,8 +315,8 @@ export function varDump(values: Value[]): void {
   });
 }
 
-// code-gauge-allow functionNcss 32 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
-// code-gauge-allow functionCognitiveComplexity 17 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+// code-gauge-allow functionNcss 35 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+// code-gauge-allow functionCognitiveComplexity 20 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 function dumpValue(value: Value, level: number, state: Inspection, write: (text: string) => void, slot?: Slot): void {
   const indent = level > 1 ? ' '.repeat(level - 1) : '';
   const reference = slot instanceof Ref && slot.rc > 1 ? '&' : '';
@@ -336,7 +336,10 @@ function dumpValue(value: Value, level: number, state: Inspection, write: (text:
       return write(`${pad}string(${value.length}) "${value}"\n`);
     }
   }
-  if (value instanceof PhpObject && value.isResource) return write(`${pad}resource(${value.id}) of type (stream)\n`);
+  if (value instanceof PhpObject) {
+    if (value.isResource) return write(`${pad}resource(${value.id}) of type (stream)\n`);
+    if (value.cls.kind === 'enum') return write(`${pad}enum(${enumCaseName(value)})\n`);
+  }
   if (state.active.has(value)) return write(`${indent}*RECURSION*\n`);
   state.active.add(value);
   try {
@@ -375,6 +378,10 @@ function dumpObject(
   }
 }
 
+function enumCaseName(object: PhpObject): string {
+  return `${object.cls.name}::${object.props.get('name') as string}`;
+}
+
 function keyFor(name: string, label: string): string {
   const match = /^"(.*)":"(.*)":private$/s.exec(label);
   if (match) return `\0${match[2]}\0${name}`;
@@ -396,8 +403,8 @@ function quoteExport(text: string): string {
   return `'${text.replaceAll(/['\\]/g, String.raw`\$&`).replaceAll('\0', `' . "\\0" . '`)}'`;
 }
 
-// code-gauge-allow functionCognitiveComplexity 26 -- Transcribes PHP's algorithm for this function step by step, whose branches mirror PHP's.
-// code-gauge-allow functionNcss 39 -- Transcribes PHP's algorithm for this function step by step, whose branches mirror PHP's.
+// code-gauge-allow functionCognitiveComplexity 27 -- Transcribes PHP's algorithm for this function step by step, whose branches mirror PHP's.
+// code-gauge-allow functionNcss 41 -- Transcribes PHP's algorithm for this function step by step, whose branches mirror PHP's.
 function exportValue(value: Value, level: number, state: Inspection): string {
   if (value === null || (value instanceof PhpObject && value.isResource)) return 'NULL';
   switch (typeof value) {
@@ -431,6 +438,7 @@ function exportValue(value: Value, level: number, state: Inspection): string {
     }
   }
   const object = value as PhpObject;
+  if (object.cls.kind === 'enum') return `\\${enumCaseName(object)}`;
   if (state.active.has(object)) return circularExport();
   state.active.add(object);
   try {

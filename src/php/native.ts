@@ -133,6 +133,7 @@ export interface ClassDefinition {
   isCloneable?: boolean;
   props?: { name: string; visibility: Visibility; defaultValue?: () => Value; type?: string; isReadonly?: boolean }[];
   consts?: Record<string, Value>;
+  enumCases?: readonly string[];
   methods?: NativeMethod[];
   createInternal?: (object: PhpObject) => unknown;
   compare?: NativeObjectComparison;
@@ -161,7 +162,7 @@ export function installNatives(): void {
 }
 
 // code-gauge-allow functionCognitiveComplexity 25 -- Transcribes PHP's algorithm for this function step by step, whose branches mirror PHP's.
-// code-gauge-allow functionNcss 45 -- Transcribes PHP's algorithm for this function step by step, whose branches mirror PHP's.
+// code-gauge-allow functionNcss 46 -- Transcribes PHP's algorithm for this function step by step, whose branches mirror PHP's.
 function buildClass(definition: ClassDefinition): PhpClass {
   const runtime = rt();
   const cls = new PhpClass(definition.name, definition.kind ?? 'class');
@@ -208,6 +209,7 @@ function buildClass(definition: ClassDefinition): PhpClass {
   for (const [name, value] of Object.entries(definition.consts ?? {})) {
     cls.consts.set(name, { name, cls, visibility: 'public', isFinal: false, value });
   }
+  registerNativeEnumCases(cls, definition.enumCases);
   for (const nativeMethod of definition.methods ?? []) {
     const { name: rawName, params, returnType } = parseSignature(nativeMethod.signature);
     const name = enc(rawName);
@@ -233,4 +235,22 @@ function buildClass(definition: ClassDefinition): PhpClass {
     cls.methods.set(method.lname, method);
   }
   return cls;
+}
+
+function registerNativeEnumCases(cls: PhpClass, cases: readonly string[] | undefined): void {
+  for (const name of cases ?? []) {
+    cls.consts.set(name, {
+      name,
+      cls,
+      visibility: 'public',
+      isFinal: false,
+      evaluate: () => {
+        const runtime = rt();
+        const value = runtime.newObject(cls);
+        value.props.set('name', name);
+        runtime.rootConstants.add(value);
+        return value;
+      },
+    });
+  }
 }

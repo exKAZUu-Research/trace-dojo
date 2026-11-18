@@ -489,7 +489,7 @@ function memberQueryClass(target: Value, operation: 'method_exists' | 'property_
 
 defineFunction('class_exists(string $class, bool $autoload = true): bool', ({ args }) => {
   const cls = findClass(args[0] as string);
-  return cls !== undefined && cls.kind === 'class';
+  return cls?.kind === 'class' || cls?.kind === 'enum';
 });
 defineFunction(
   'interface_exists(string $interface, bool $autoload = true): bool',
