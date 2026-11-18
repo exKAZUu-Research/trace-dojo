@@ -1167,6 +1167,36 @@ test('rejects references in the fixed arity signatures of magic methods', () => 
     expect(result.diagnostics[0]?.message).toContain('Method C::__get() cannot take arguments by reference');
 });
 
+test.each([
+  ['$object?->method(...);', 'Cannot combine nullsafe operator with Closure creation'],
+  ['$object?->property->method(...);', 'Cannot combine nullsafe operator with Closure creation'],
+  ['function &result($object) { return $object?->property; }', 'Cannot take reference of a nullsafe chain'],
+  ['$result = fn&($object) => $object?->property;', 'Cannot take reference of a nullsafe chain'],
+  ['$array[] ??= 1;', 'Cannot use [] for reading'],
+  ['$array[]->property ??= 1;', 'Cannot use [] for reading'],
+  ['$array[][0] ??= 1;', 'Cannot use [] for reading'],
+  ['class C extends A, B {}', 'unexpected token ","'],
+])('validates write and declaration syntax: %s', (source, message) => {
+  const result = run(`<?php echo 'never'; ${source}`);
+  expect(result.kind).toBe('compileError');
+  if (result.kind === 'compileError') expect(result.diagnostics[0]?.message).toContain(message);
+});
+
+test.each([
+  ['echo $a[];', 'Cannot use [] for reading'],
+  ['unset($a[]);', 'Cannot use [] for unsetting'],
+  ['function readIt() { echo $a[]; }', 'Cannot use [] for reading'],
+])('reports earlier invalid array syntax before a later early-binding error: %s', (source, message) => {
+  const result = run(
+    `<?php\n${source}\nclass P { function method(callable $x) {} } class C extends P { function method(Closure $x) {} }`
+  );
+  expect(result.kind).toBe('compileError');
+  if (result.kind === 'compileError') {
+    expect(result.diagnostics[0]?.row).toBe(1);
+    expect(result.diagnostics[0]?.message).toContain(message);
+  }
+});
+
 test('mutates arrays held by many objects within the operation limit', () => {
   const source =
     '<?php class Student{public array $scores=[];}$students=[];for($i=0;$i<2000;$i++)$students[]=new Student;foreach($students as $s){$s->scores[]=1;$s->scores[]=2;}$sum=0;foreach($students as $s)$sum+=array_sum($s->scores);echo $sum;';

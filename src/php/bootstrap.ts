@@ -1,14 +1,14 @@
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import { TURTLE_METHOD_NAMES, type TurtleState } from '../interpreter/turtleWorld';
-import { callTargetOf, closureFromCallable, closureTarget, invokeCallbackTarget } from './callables';
+import { closureFromValue, closureTarget, invokeCallbackTarget } from './callables';
 import { type ArgValue, copyClosureData, invoke } from './calls';
-import { requireClass } from './classes';
+import { findClass } from './classes';
 import { debugType } from './conversions';
 import { throwError, warn } from './errors';
 import { collectGarbage } from './garbage';
 import { defineClass, installNatives, type NativeMethod } from './native';
 import { rt } from './runtime';
-import { type ClosureData, PhpObject, type Value } from './values';
+import { type ClosureData, type PhpClass, PhpObject, type Value } from './values';
 
 /** Installs the builtin functions, constants, and classes into a new run. */
 export function bootstrap(): void {
@@ -75,19 +75,14 @@ defineClass({
 });
 
 // code-gauge-allow functionCognitiveComplexity 30 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
-// code-gauge-allow functionNcss 36 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 function closureBinding(
   closure: PhpObject,
   newThis: Value,
   newScope: Value | undefined
 ): Pick<ClosureData, 'thisObj' | 'scope' | 'calledClass'> | undefined {
   const data = closure.internal as ClosureData;
-  let scope = data.scope;
-  if (newScope !== undefined && newScope !== 'static') {
-    if (newScope instanceof PhpObject) scope = newScope.cls;
-    else if (newScope === null) scope = undefined;
-    else scope = requireClass(newScope as string);
-  }
+  let scope = requestedClosureScope(newScope, data.scope);
+  if (scope === false) return undefined;
   if (newThis !== null && !(newThis instanceof PhpObject)) return undefined;
   if (
     newThis instanceof PhpObject &&
@@ -125,6 +120,17 @@ function closureBinding(
     scope,
     calledClass: newThis instanceof PhpObject ? newThis.cls : scope,
   };
+}
+
+function requestedClosureScope(value: Value | undefined, current: PhpClass | undefined): PhpClass | undefined | false {
+  if (value === undefined || value === 'static') return current;
+  if (value === null) return undefined;
+  if (value instanceof PhpObject) return value.cls;
+  const name = value as string;
+  const scope = findClass(name);
+  if (scope) return scope;
+  warn(`Class "${name}" not found`);
+  return false;
 }
 
 function bindClosure(closure: PhpObject, newThis: Value, newScope: Value | undefined): Value {
@@ -167,13 +173,9 @@ defineClass({
       },
     },
     {
-      signature: 'fromCallable(callable $callback): Closure',
+      signature: 'fromCallable(mixed $callback): Closure',
       isStatic: true,
-      impl: ({ args }) => {
-        const callable = args[0];
-        if (callable instanceof PhpObject && callable.cls.name === 'Closure') return callable;
-        return closureFromCallable(callTargetOf(callable, 'callback'));
-      },
+      impl: ({ args }) => closureFromValue(args[0]),
     },
     {
       signature: '__invoke(mixed ...$args): mixed',

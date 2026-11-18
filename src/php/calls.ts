@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 673 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 675 -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import { LIMITS } from '../interpreter/limits';
 import type { FunctionDecl } from './ast';
@@ -54,6 +54,7 @@ export interface CallTarget {
   method?: Method;
   closure?: PhpObject;
   magic?: MagicCall;
+  directOverload?: boolean;
   inline?: boolean;
 }
 
@@ -261,7 +262,14 @@ function invokeNative(
   let failed = false;
   let failure: unknown;
   try {
-    const { values, refs, named } = bindNative(fn, args, name, strict, record);
+    const { values, refs, named } = bindNative(
+      fn,
+      args,
+      name,
+      strict,
+      Boolean(inline || target.directOverload),
+      record
+    );
     for (let index = 0; index < values.length; index++) {
       if (values[index] === undefined && fn.params[index]?.byRef)
         refs[index] = Ref.temporary(nativeDefault(fn.params[index].nativeDefault));
@@ -279,6 +287,7 @@ function invokeNative(
       thisObj: target.thisObj,
       calledClass: target.staticClass,
       named,
+      directOverload: target.directOverload,
       row: inline ? row : undefined,
       discardResult: Boolean(inline && discardResult),
     });
@@ -373,10 +382,11 @@ function bindNative(
   args: ArgValue[],
   name: string,
   strict: boolean,
+  directOverload: boolean,
   record?: CallRecord
 ): { values: Value[]; refs: (Ref | undefined)[]; named?: Map<string, Value> } {
   const positional = positionalArguments(args);
-  const params = nativeOverloadParams(fn, args, positional.length, record === undefined);
+  const params = nativeOverloadParams(fn, args, positional.length, directOverload);
   const values: Value[] = [];
   const refs: (Ref | undefined)[] = [];
   if (record) record.argumentRefs = refs;
@@ -456,9 +466,9 @@ function bindNative(
   return { values, refs, named };
 }
 
-function nativeOverloadParams(fn: NativeFunction, args: ArgValue[], positional: number, inlined: boolean): Param[] {
+function nativeOverloadParams(fn: NativeFunction, args: ArgValue[], positional: number, direct: boolean): Param[] {
   const short = fn.shortParams;
-  if (!short || positional > short.length || (fn.shortParamsInlineOnly && !inlined)) return fn.params;
+  if (!short || positional > short.length || (fn.shortParamsDirectOnly && !direct)) return fn.params;
   const extraNames = new Set(fn.params.slice(short.length).map((param) => param.name));
   return args.some((arg) => arg.name !== undefined && extraNames.has(arg.name)) ? fn.params : short;
 }
@@ -604,6 +614,7 @@ function invokeUser(
       throw error;
     }
     if (decl.returnType) {
+      runtime.row = frame.returnRow ?? runtime.row;
       result = checkReturn(result, decl.returnType, name, frame);
       if (decl.byRefReturn && frame.returnRef) {
         frame.returnRef.assign(result);

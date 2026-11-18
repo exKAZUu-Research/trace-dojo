@@ -37,7 +37,7 @@ export function defineOverloadedFunction(
   shortSignature: string,
   signature: string,
   impl: (ctx: NativeContext) => Value,
-  options: { nullTypes?: Record<number, string>; shortParamsInlineOnly?: boolean } = {}
+  options: { nullTypes?: Record<number, string>; shortParamsDirectOnly?: boolean } = {}
 ): void {
   const { name, params, returnType } = parseSignature(signature);
   if (options.nullTypes) for (const [index, param] of params.entries()) param.nativeNullType = options.nullTypes[index];
@@ -47,7 +47,7 @@ export function defineOverloadedFunction(
     name,
     params,
     shortParams,
-    shortParamsInlineOnly: options.shortParamsInlineOnly,
+    shortParamsDirectOnly: options.shortParamsDirectOnly,
     returnType,
     impl,
   });

@@ -213,7 +213,7 @@ function execStmt(statement: Stmt, seek?: string): Completion {
       case 'return': {
         const value = statement.e ? evReturn(statement.e) : null;
         frame.returning = share(value);
-        frame.returnRow = statement.row;
+        frame.returnRow = statement.e?.row ?? statement.row;
         return { t: 'return', v: value };
       }
       case 'block': {

@@ -1,8 +1,16 @@
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import type { Node } from '@willbooster/web-tree-sitter';
 
+import { CompileError } from '../interpreter/diagnostics';
 import type { Arg, ArrayItem, CatchClause, Expr, ListItem, MatchArm, Program, Stmt, SwitchCase } from './ast';
-import { collectMainVars, collectVariables, hasReferenceItem, onlyCalls, validateReads } from './astAnalysis';
+import {
+  collectMainVars,
+  collectVariables,
+  hasNullsafeReceiver,
+  hasReferenceItem,
+  invalidRead,
+  onlyCalls,
+} from './astAnalysis';
 import { oneArgumentBuiltinOpcodes, usesSimpleSprintf } from './builtinCompiler';
 import { enc, lower } from './bytes';
 import { type Constant, constantTruth, constantTypeName } from './constantDefaults';
@@ -24,19 +32,7 @@ const CALL_EXPRESSIONS = new Set([
   'scoped_call_expression',
   'exit_expression',
 ]);
-const VARIABLE_OPCODE_RESULTS = new Set<Expr['k']>([
-  'varvar',
-  'idx',
-  'prop',
-  'sprop',
-  'call',
-  'mcall',
-  'scall',
-  'new',
-  'newAnon',
-  'assign',
-  'assignRef',
-]);
+const VARIABLE_OPCODE_RESULTS = new Set<Expr['k']>(['call', 'mcall', 'scall', 'new', 'newAnon', 'assignRef']);
 
 export class Converter extends DeclarationConverter {
   private declaredSymbols = new Map<string, Map<string, string>>();
@@ -53,6 +49,21 @@ export class Converter extends DeclarationConverter {
 
   convertProgram(root: Node): Program {
     this.checkNamespaces(root);
+    try {
+      this.compileTopLevel(root);
+    } catch (error) {
+      if (error instanceof CompileError) this.checkReadContexts();
+      throw error;
+    }
+    this.checkReadContexts();
+    this.checkGotos(this.fn, this.body);
+    return {
+      ...this.compiledPrefix(),
+      mainVars: [...collectMainVars(this.body)],
+    };
+  }
+
+  private compileTopLevel(root: Node): void {
     for (const child of root.namedChildren) {
       if (child.type === 'text') {
         const text = this.source.slice(Math.max(this.ignoredPrefix, child.startIndex), child.endIndex);
@@ -61,12 +72,13 @@ export class Converter extends DeclarationConverter {
         this.body.push(...this.statement(child, true));
       }
     }
-    this.checkGotos(this.fn, this.body);
-    validateReads(this.body);
-    return {
-      ...this.compiledPrefix(),
-      mainVars: [...collectMainVars(this.body)],
-    };
+  }
+
+  private checkReadContexts(): void {
+    const failure = invalidRead(this.body);
+    if (!failure) return;
+    this.body.length = failure.index;
+    throw failure.error;
   }
 
   compiledPrefix(): Program {
@@ -477,7 +489,9 @@ export class Converter extends DeclarationConverter {
         '戻り値の型を宣言した関数は、値を返してください（A function with return type must return a value）。'
       );
     }
-    return { k: 'return', e: argument ? this.expr(argument) : undefined, row };
+    const expression = argument ? this.expr(argument) : undefined;
+    if (argument && expression) this.checkReferenceReturn(argument, expression);
+    return { k: 'return', e: expression, row };
   }
 
   // code-gauge-allow functionCognitiveComplexity 18 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
@@ -749,6 +763,8 @@ export class Converter extends DeclarationConverter {
   }
 
   private checkWriteBase(base: Expr, node: Node): void {
+    if (base.k === 'mcall' && hasNullsafeReceiver(base))
+      this.error(node, "Can't use nullsafe operator in write context");
     if (base.k === 'idx' || base.k === 'prop') {
       this.checkWritable(base, node);
       return;
@@ -880,29 +896,38 @@ export class Converter extends DeclarationConverter {
             node,
             '文字列の添字に {} は使えません（Array and string offset access syntax with curly braces is no longer supported）。'
           );
-        return { k: 'idx', base: this.expr(baseNode), index: indexNode ? this.expr(indexNode) : undefined, row };
+        return {
+          k: 'idx',
+          base: this.expr(baseNode),
+          index: indexNode ? this.expr(indexNode) : undefined,
+          row: indexNode?.startPosition.row ?? row,
+        };
       }
       case 'member_access_expression':
       case 'nullsafe_member_access_expression': {
         const obj = this.expr(node.childForFieldName('object') as Node);
+        const name = node.childForFieldName('name') as Node;
         return {
           k: 'prop',
           obj,
-          name: this.memberName(node.childForFieldName('name') as Node),
+          name: this.memberName(name),
           nullsafe: node.type.startsWith('nullsafe'),
-          row,
+          row: name.startPosition.row,
         };
       }
       case 'member_call_expression':
       case 'nullsafe_member_call_expression': {
         const obj = this.expr(node.childForFieldName('object') as Node);
         const { args, fcc } = this.args(node.childForFieldName('arguments') as Node);
+        const nullsafe = node.type.startsWith('nullsafe');
+        if (fcc && (nullsafe || hasNullsafeReceiver(obj)))
+          this.error(node, 'Cannot combine nullsafe operator with Closure creation');
         return {
           k: 'mcall',
           obj,
           name: this.memberName(node.childForFieldName('name') as Node),
           args,
-          nullsafe: node.type.startsWith('nullsafe'),
+          nullsafe,
           fcc,
           row: (node.childForFieldName('name') as Node).startPosition.row,
         };
@@ -914,13 +939,13 @@ export class Converter extends DeclarationConverter {
           nameNode.type === 'variable_name'
             ? this.variableName(nameNode)
             : this.expr(nameNode.type === 'dynamic_variable_name' ? nameNode.namedChildren[0] : nameNode);
-        return { k: 'sprop', cls, name, row };
+        return { k: 'sprop', cls, name, row: nameNode.startPosition.row };
       }
       case 'scoped_call_expression': {
         const cls = this.classRef(node.childForFieldName('scope') as Node);
         const nameNode = node.childForFieldName('name') as Node;
         const { args, fcc } = this.args(node.childForFieldName('arguments') as Node);
-        return { k: 'scall', cls, name: this.memberName(nameNode), args, fcc, row };
+        return { k: 'scall', cls, name: this.memberName(nameNode), args, fcc, row: nameNode.startPosition.row };
       }
       case 'class_constant_access_expression': {
         const [scope, nameNode] = node.namedChildren.filter((child) => child.type !== 'comment');
@@ -1041,20 +1066,12 @@ export class Converter extends DeclarationConverter {
         };
       }
       case 'cast_expression': {
-        const type = lower((node.childForFieldName('type') as Node).text.replaceAll(/[\s()]/g, ''));
+        const { type } = castType(node);
         if (type === 'unset')
           this.error(node, '(unset) のキャストは使えません（The (unset) cast is no longer supported）。');
         if (type === 'real')
           this.error(node, '(real) のキャストは使えません（The (real) cast has been removed, use (float) instead）。');
-        const normalized = { integer: 'int', double: 'float', boolean: 'bool', binary: 'string' }[type] ?? type;
-        if (normalized !== type) {
-          this.notices.push({
-            level: 'Deprecated',
-            message: `Non-canonical cast (${type}) is deprecated, use the (${normalized}) cast instead`,
-            row,
-          });
-        }
-        return { k: 'cast', type: normalized, e: this.expr(node.childForFieldName('value') as Node), row };
+        return { k: 'cast', type, e: this.expr(node.childForFieldName('value') as Node), row };
       }
       case 'error_suppression_expression': {
         return { k: 'silence', e: this.expr(node.namedChildren[0]), row };
@@ -1336,7 +1353,7 @@ export class Converter extends DeclarationConverter {
   private operandRank(operand: Expr): number {
     // Zend specializes commutative opcodes in descending CV, VAR, TMP, CONST order.
     if (operand.k === 'var' && operand.name !== 'this' && operand.name !== 'GLOBALS') return 3;
-    if (VARIABLE_OPCODE_RESULTS.has(operand.k) || operand.k === 'var') return 2;
+    if (VARIABLE_OPCODE_RESULTS.has(operand.k)) return 2;
     return this.compiledValue(operand) === undefined ? 1 : 0;
   }
 
@@ -1419,8 +1436,7 @@ export class Converter extends DeclarationConverter {
 
   private compileArrayItems(node: Node): ArrayItem[] {
     if (this.initializerContext) return this.arrayItems(node);
-    const first = node.namedChildren.find((child) => child.type === 'array_element_initializer');
-    this.initializerContext = { kind: 'array', row: (first ?? node).startPosition.row };
+    this.initializerContext = { kind: 'array', row: arrayFoldRow(node) };
     try {
       return this.arrayItems(node);
     } finally {
@@ -1726,6 +1742,28 @@ function directiveLiteral(node: Node, value: Expr): boolean {
     directiveLiteral(node.childForFieldName('left') as Node, value.l) &&
     directiveLiteral(node.childForFieldName('right') as Node, value.r)
   );
+}
+
+export function castType(node: Node): { spelling: string; type: string } {
+  const spelling = lower(node.childForFieldName('type')?.text.replaceAll(/[\s()]/g, '') ?? '');
+  const type = { integer: 'int', double: 'float', boolean: 'bool', binary: 'string' }[spelling] ?? spelling;
+  return { spelling, type };
+}
+
+function arrayFoldRow(node: Node): number {
+  let value = node;
+  for (;;) {
+    if (value.type === 'array_creation_expression') {
+      const first = value.namedChildren.find((child) => child.type === 'array_element_initializer');
+      const inner = first?.namedChildren.findLast((child) => child.type !== 'comment');
+      if (!inner) return value.startPosition.row;
+      value = inner;
+    } else if (['variadic_unpacking', 'parenthesized_expression', 'by_ref'].includes(value.type)) {
+      const inner = value.namedChildren.find((child) => child.type !== 'comment');
+      if (!inner) return value.startPosition.row;
+      value = inner;
+    } else return value.startPosition.row;
+  }
 }
 
 function parserScalar(expression: Expr): string | bigint | number | undefined {

@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 729 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 737 -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import type { Node } from '@willbooster/web-tree-sitter';
 
@@ -13,6 +13,7 @@ import type {
   Stmt,
   TraitRule,
 } from './ast';
+import { hasNullsafeReceiver } from './astAnalysis';
 import { lower } from './bytes';
 import { parseTypeText } from './calls';
 import { CompileClassConstants } from './compileClassConstants';
@@ -66,7 +67,7 @@ export abstract class DeclarationConverter extends ConverterBase {
     });
   }
 
-  // code-gauge-allow functionNcss 40 -- Converts every part of a function declaration and checks it as PHP does at compile time.
+  // code-gauge-allow functionNcss 41 -- Converts every part of a function declaration and checks it as PHP does at compile time.
   // code-gauge-allow functionCognitiveComplexity 19 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
   protected functionDecl(node: Node, isClosure: boolean, className?: string): FunctionDecl {
     const attributes = node.childForFieldName('attributes');
@@ -89,6 +90,7 @@ export abstract class DeclarationConverter extends ConverterBase {
     if (outerInitializer?.kind !== 'deferred') this.initializerContext = undefined;
     this.fn = {
       isGenerator: false,
+      byRefReturn,
       labels: new Set(),
       gotos: [],
       className: className ?? outerFn.className,
@@ -116,6 +118,7 @@ export abstract class DeclarationConverter extends ConverterBase {
       let arrowBody: Expr | undefined;
       if (node.type === 'arrow_function') {
         arrowBody = this.expr(body as Node);
+        this.checkReferenceReturn(body as Node, arrowBody);
       } else if (body) {
         statements = this.block(body);
       }
@@ -141,6 +144,11 @@ export abstract class DeclarationConverter extends ConverterBase {
       this.initializerContext = outerInitializer;
       this.loop = outerLoop;
     }
+  }
+
+  protected checkReferenceReturn(node: Node, expression: Expr): void {
+    if (this.fn.byRefReturn && (expression.k === 'prop' || expression.k === 'idx') && hasNullsafeReceiver(expression))
+      this.error(node, 'Cannot take reference of a nullsafe chain');
   }
 
   // code-gauge-allow functionNcss 58 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
@@ -582,7 +590,10 @@ export abstract class DeclarationConverter extends ConverterBase {
       : [];
     let parent: string | undefined;
     if (kind === 'interface') interfaces = baseNames;
-    else if (baseNames.length > 0) parent = baseNames[0];
+    else {
+      if (baseNames.length > 1) this.error(base ?? node, 'syntax error, unexpected token ",", expecting "{"');
+      parent = baseNames[0];
+    }
     let fullName: string | undefined;
     if (anonymous) {
       name = `${parent ?? interfaces[0] ?? 'class'}@anonymous`;
@@ -924,6 +935,7 @@ export abstract class DeclarationConverter extends ConverterBase {
         });
       this.fn = {
         isGenerator: false,
+        byRefReturn,
         labels: new Set(),
         gotos: [],
         className,
@@ -977,6 +989,7 @@ export abstract class DeclarationConverter extends ConverterBase {
         if (body?.type === 'compound_statement') statements = this.block(body);
         else if (body) {
           arrowBody = this.expr(body);
+          if (kind === 'get') this.checkReferenceReturn(body, arrowBody);
           if (kind === 'set') {
             // A short set hook assigns its expression to the property.
             referencesBacking = true;

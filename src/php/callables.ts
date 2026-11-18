@@ -1,7 +1,8 @@
-// code-gauge-allow-file fileNcss 556 -- Keeps one PHP runtime concern and its shared helpers in one module.
+// code-gauge-allow-file fileNcss 568 -- Keeps one PHP runtime concern and its shared helpers in one module.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import { placeOf } from './assignment';
 import type { Arg, Expr } from './ast';
+import { hasNullsafeReceiver } from './astAnalysis';
 import { usesSimpleSprintf } from './builtinCompiler';
 import builtinNames from './builtinNames.json';
 import { lower } from './bytes';
@@ -112,7 +113,10 @@ export function evalArgs(args: Arg[], fn: Callable | undefined, name: string | u
       const byRef = fn ? paramIsByRef(fn, position, arg.name) : false;
       if (byRef) {
         const e = arg.e;
-        if (['varvar', 'idx', 'prop', 'sprop'].includes(e.k) || (e.k === 'var' && e.name !== 'GLOBALS')) {
+        if (
+          (['varvar', 'idx', 'prop', 'sprop'].includes(e.k) || (e.k === 'var' && e.name !== 'GLOBALS')) &&
+          !hasNullsafeReceiver(e)
+        ) {
           const ref = placeOf(e, 'write', true).ref();
           add({ v: ref.v, ref, name: arg.name });
           continue;
@@ -189,7 +193,9 @@ export function callExpression(e: Extract<Expr, { k: 'call' }>, discardResult = 
     if (e.fcc) return closureFromCallable({ fn });
     const args = evalArgs(e.args, fn, fn.name);
     runtime.row = e.row;
-    const result = invoke({ fn, inline: inlineCall(fn, e.args) }, args, e.row, discardResult);
+    const specialized = specializedCall(fn, e.args);
+    const directOverload = specialized && fn.kind === 'native' && fn.shortParamsDirectOnly;
+    const result = invoke({ fn, inline: specialized && !directOverload, directOverload }, args, e.row, discardResult);
     runtime.frame.temporaries.push(result);
     return result;
   }
@@ -199,7 +205,9 @@ export function callExpression(e: Extract<Expr, { k: 'call' }>, discardResult = 
   if (e.fcc) return closureFromCallable(target);
   const args = evalArgs(e.args, target.fn, functionNameFor(target));
   runtime.row = e.row;
-  const result = invoke(target, args, e.row, discardResult);
+  const result = target.magic
+    ? invokeMagic(target.magic, args, e.row, discardResult)
+    : invoke(target, args, e.row, discardResult);
   runtime.frame.temporaries.push(result);
   return result;
 }
@@ -261,7 +269,7 @@ export function methodCallExpression(e: Extract<Expr, { k: 'mcall' }>, discardRe
     if (method.isAbstract) throwError('Error', `Cannot call abstract method ${method.scope.name}::${method.name}()`);
     throwError(
       'Error',
-      `Call to ${method.visibility} method ${object.cls.name}::${method.name}() from ${scope ? `scope ${scope.name}` : 'global scope'}`
+      `Call to ${method.visibility} method ${method.scope.name}::${method.name}() from ${scope ? `scope ${scope.name}` : 'global scope'}`
     );
   }
   throwError('Error', `Call to undefined method ${object.cls.name}::${methodName}()`);
@@ -292,36 +300,37 @@ function magicClosure(receiver: PhpObject | undefined, calledClass: PhpClass, me
 }
 
 function magicClosureTarget({ method: magic, name, receiver, calledClass }: MagicCall): CallTarget {
-  const fn = magicForwarder(magic, name, receiver, calledClass, true);
+  const fn = magicForwarder({ method: magic, name, receiver, calledClass });
   const method: Method = { ...magic, fn, name, lname: lower(name), isStatic: !receiver };
   return { fn, method, thisObj: receiver, scope: method.scope, staticClass: calledClass };
 }
 
-function magicForwarder(
-  magic: Method,
-  name: string,
-  object: PhpObject | undefined,
-  cls: PhpClass,
-  keepsArguments = false
-): Callable {
+function magicForwarder(magic: MagicCall): Callable {
   return {
     kind: 'native',
-    name,
+    name: magic.name,
     acceptsNamed: true,
     params: [{ name: 'arguments', byRef: false, variadic: true, optional: true }],
     impl: ({ args, named }) => {
-      const values = rt().nativeHeld.at(-1)!;
-      const count = args.length + (named?.size ?? 0);
-      const nativeTransfer = keepsArguments ? undefined : { values, count };
-      const argumentsToPack: ArgValue[] = args.map((v) => ({ v, nativeTransfer }));
+      const argumentsToPack: ArgValue[] = args.map((v) => ({ v }));
       for (const [key, v] of named ?? []) argumentsToPack.push({ v, name: key });
-      return invoke(
-        { fn: magic.fn, thisObj: object, scope: magic.scope, staticClass: cls, method: magic },
-        [{ v: name }, packMagicArguments(argumentsToPack)],
-        undefined
-      );
+      return invokeMagic(magic, argumentsToPack, undefined);
     },
   };
+}
+
+function invokeMagic(
+  { method, name, receiver, calledClass }: MagicCall,
+  args: ArgValue[],
+  row: number | undefined,
+  discardResult = false
+): Value {
+  return invoke(
+    { fn: method.fn, thisObj: receiver, scope: method.scope, staticClass: calledClass, method },
+    [{ v: name }, packMagicArguments(args)],
+    row,
+    discardResult
+  );
 }
 
 // code-gauge-allow functionCognitiveComplexity 30 -- Resolves each form of call and callable by PHP's lookup rules, in PHP's order of checks.
@@ -384,7 +393,7 @@ export function staticCallExpression(e: Extract<Expr, { k: 'scall' }>, discardRe
   if (method) {
     throwError(
       'Error',
-      `Call to ${method.visibility} method ${cls.name}::${method.name}() from ${scope ? `scope ${scope.name}` : 'global scope'}`
+      `Call to ${method.visibility} method ${method.scope.name}::${method.name}() from ${scope ? `scope ${scope.name}` : 'global scope'}`
     );
   }
   throwError('Error', `Call to undefined method ${cls.name}::${methodName}()`);
@@ -570,7 +579,7 @@ function arrayObjectCallable(
   if (magic) return magic;
   if (found)
     throw new CallableFailure(
-      `Call to ${found.visibility} method ${target.cls.name}::${found.name}() from ${scope ? `scope ${scope.name}` : 'global scope'}`,
+      `Call to ${found.visibility} method ${found.scope.name}::${found.name}() from ${scope ? `scope ${scope.name}` : 'global scope'}`,
       `cannot access ${found.visibility} method ${target.cls.name}::${found.name}()`
     );
   throw new CallableFailure(
@@ -632,7 +641,7 @@ function qualifiedObjectMethod(
 
 function magicTarget(receiver: PhpObject | undefined, calledClass: PhpClass, method: Method, name: string): CallTarget {
   return {
-    fn: magicForwarder(method, name, receiver, calledClass),
+    fn: method.fn,
     thisObj: receiver,
     staticClass: calledClass,
     magic: { method, name, receiver, calledClass },
@@ -675,7 +684,7 @@ function staticCallable(
         `class ${cls.name} does not have a method "${methodName}"`
       );
     throw new CallableFailure(
-      `Call to ${method.visibility} method ${cls.name}::${method.name}() from ${scope ? `scope ${scope.name}` : 'global scope'}`,
+      `Call to ${method.visibility} method ${method.scope.name}::${method.name}() from ${scope ? `scope ${scope.name}` : 'global scope'}`,
       `cannot access ${method.visibility} method ${cls.name}::${method.name}()`
     );
   }
@@ -719,6 +728,7 @@ export function invokeCallbackTarget(
   row: number | undefined,
   discardResult = false
 ): Value {
+  if (target.magic) return invokeMagic(target.magic, args, row, discardResult);
   warnCallbackReferenceArguments(target, args);
   return invoke(target, args, row, discardResult);
 }
@@ -777,6 +787,17 @@ function warnCallbackReferenceArguments(target: CallTarget, args: ArgValue[]): v
 
 export function closureFromCallable(target: CallTarget): PhpObject {
   return target.magic ? makeCallableClosure(magicClosureTarget(target.magic), true) : makeCallableClosure(target);
+}
+
+export function closureFromValue(value: Value): PhpObject {
+  if (value instanceof PhpObject && isClosure(value)) return value;
+  try {
+    return closureFromCallable(resolveCallable(value, 'callback', true));
+  } catch (error) {
+    if (error instanceof CallableFailure)
+      throwError('TypeError', `Failed to create closure from callable: ${error.problem}`);
+    throw error;
+  }
 }
 
 function makeCallableClosure(target: CallTarget, omitParameters = false): PhpObject {
@@ -852,7 +873,7 @@ function newClosure(fn: UserFunction, bound: Map<string, Ref>, isStatic: boolean
 
 // code-gauge-allow functionCognitiveComplexity 17 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 // code-gauge-allow functionCognitiveComplexity 17 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
-function inlineCall(fn: Callable, args: Arg[]): boolean {
+function specializedCall(fn: Callable, args: Arg[]): boolean {
   if (fn.kind !== 'native' || args.some((arg) => arg.spread || arg.name !== undefined)) return false;
   const name = lower(fn.name);
   if (['strval', 'floatval', 'doubleval', 'boolval'].includes(name)) return args.length === 1;

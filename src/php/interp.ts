@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 816 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 817 -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import {
   applyOperator,
@@ -225,6 +225,7 @@ export function evChain(e: Expr, discardResult = false): Chain {
     case 'sprop': {
       const cls = resolveClassRef(e.cls);
       const name = typeof e.name === 'string' ? e.name : toStr(ev(e.name));
+      runtime.row = e.row;
       return readStaticProp(cls, name, runtime.frame.scope);
     }
     case 'cconst': {
@@ -955,7 +956,7 @@ function binary(e: Extract<Expr, { k: 'bin' }>): Value {
   const readRight = prepareOperand(e.r);
   const left = readLeft();
   const right = readRight();
-  runtime.row = e.op === 'xor' ? e.r.row : e.row;
+  runtime.row = e.r.row;
   // PHP frees the operands as soon as the operator has used them.
   const result = e.swapOperands ? operate(e.op, right, left) : operate(e.op, left, right);
   return keepResult(mark, result) as Value;

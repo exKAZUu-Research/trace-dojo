@@ -7,7 +7,7 @@ import {
 } from '../interpreter/traceAnnotations';
 import { commentTokens, loadParser, parseSource } from '../interpreter/treeSitter';
 import type { Program } from './ast';
-import { type CompileNotice, Converter } from './converter';
+import { castType, type CompileNotice, Converter } from './converter';
 
 const parser = await loadParser('@willbooster/tree-sitter-php/tree-sitter-php.wasm');
 
@@ -21,6 +21,7 @@ const MISSING_TOKEN_NAMES: Record<string, string> = {
 export interface ParsedProgram {
   program: Program;
   notices: CompileNotice[];
+  parseNotices: CompileNotice[];
   conversionError?: CompileError;
 }
 
@@ -34,6 +35,18 @@ export function parsePhp(source: string, trace?: TraceOptions): ParsedProgram {
   const ignoredPrefix = shebangEnd(source);
   const text = hideShebang(source, ignoredPrefix);
   return parseSource(parser, text, MISSING_TOKEN_NAMES, (root) => {
+    const parseNotices = root.descendantsOfType('cast_expression').flatMap((node): CompileNotice[] => {
+      const { spelling, type } = castType(node);
+      return spelling === type
+        ? []
+        : [
+            {
+              level: 'Deprecated',
+              message: `Non-canonical cast (${spelling}) is deprecated, use the (${type}) cast instead`,
+              row: node.startPosition.row,
+            },
+          ];
+    });
     const converter = new Converter(text, atomicRows, ignoredPrefix);
     let program: Program;
     try {
@@ -41,12 +54,12 @@ export function parsePhp(source: string, trace?: TraceOptions): ParsedProgram {
     } catch (error) {
       if (!(error instanceof CompileError)) throw error;
       program = converter.compiledPrefix();
-      return { program, notices: converter.notices, conversionError: error };
+      return { program, notices: converter.notices, parseNotices, conversionError: error };
     }
     for (const row of atomicRows) {
       if (!converter.claimedAtomicRows.has(row)) throw new CompileError([{ row, message: misplacedAtomicMessage }]);
     }
-    return { program, notices: converter.notices };
+    return { program, notices: converter.notices, parseNotices };
   });
 }
 

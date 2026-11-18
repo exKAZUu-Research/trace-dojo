@@ -6,7 +6,7 @@ import type { ProgramInput } from '../interpreter/programIo';
 import { bootstrap } from './bootstrap';
 import { callValue } from './callables';
 import { asInternal, type CallRecord, HostStackExhaustion, invoke, resetCallStack } from './calls';
-import { throwableLocation } from './errors';
+import { E_DEPRECATED, emitError, throwableLocation } from './errors';
 import { throwableText, traceText } from './exceptions';
 import { holderCounts } from './garbage';
 import { type ParsedProgram, parsePhp } from './parse';
@@ -41,7 +41,10 @@ export function runProgram(runtime: Runtime, parsed: ParsedProgram, onEnd?: (fra
     runtime.notices = parsed.notices;
     let uncaughtException: string | undefined;
     try {
-      uncaughtException = guard(runtime, () => runStatements(parsed.program, parsed.conversionError));
+      uncaughtException = guard(runtime, () => {
+        for (const notice of parsed.parseNotices) emitError(E_DEPRECATED, notice.message, notice.row);
+        runStatements(parsed.program, parsed.conversionError);
+      });
       onEnd?.(runtime.globalFrame);
       uncaughtException = shutdown(runtime) ?? uncaughtException;
     } finally {

@@ -48,6 +48,7 @@ export interface LoopContext {
 
 export interface FunctionContext {
   returnType?: TypeDecl;
+  byRefReturn?: boolean;
   isGenerator: boolean;
   labels: Set<string>;
   gotos: { label: string; row: number; offset: number }[];

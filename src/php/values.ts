@@ -496,6 +496,7 @@ export type TypeDecl =
   | { k: 'inter'; types: TypeDecl[] };
 
 export interface NativeContext {
+  directOverload?: boolean;
   discardResult?: boolean;
   args: Value[];
   /** The references passed for by-reference parameters, by position. */
@@ -514,7 +515,7 @@ export interface NativeFunction {
   name: string;
   params: Param[];
   shortParams?: Param[];
-  shortParamsInlineOnly?: boolean;
+  shortParamsDirectOnly?: boolean;
   returnType?: TypeDecl;
   impl: (ctx: NativeContext) => Value;
   /** Whether the function reads its caller's variables (compact, extract, func_get_args). */

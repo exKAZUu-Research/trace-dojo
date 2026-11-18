@@ -187,8 +187,6 @@ export function unsupportedOperands(op: string, left: Value, right: Value): neve
 // code-gauge-allow functionCognitiveComplexity 27 -- Transcribes PHP's algorithm for this function step by step, whose branches mirror PHP's.
 export function arithmetic(op: string, left: Value, right: Value): Value {
   if (op === '+' && left instanceof PhpArray && right instanceof PhpArray) return arrayUnion(left, right);
-  if (left instanceof PhpArray || right instanceof PhpArray) unsupportedOperands(op, left, right);
-  if (left instanceof PhpObject || right instanceof PhpObject) unsupportedOperands(op, left, right);
   if (op === '%') return modulo(left, right);
   const a = arithmeticOperand(left, op, left, right);
   const b = arithmeticOperand(right, op, left, right);
@@ -305,18 +303,9 @@ function intOperand(value: Value, op: string, left: Value, right: Value): bigint
   return unsupportedOperands(op, left, right);
 }
 
-// code-gauge-allow functionCognitiveComplexity 17 -- Transcribes PHP's algorithm for this function step by step, whose branches mirror PHP's.
 export function bitwise(op: string, left: Value, right: Value): Value {
   if ((op === '&' || op === '|' || op === '^') && typeof left === 'string' && typeof right === 'string') {
     return bytewise(op, left, right);
-  }
-  if (
-    left instanceof PhpArray ||
-    right instanceof PhpArray ||
-    left instanceof PhpObject ||
-    right instanceof PhpObject
-  ) {
-    unsupportedOperands(op, left, right);
   }
   const a = intOperand(left, op, left, right);
   const b = intOperand(right, op, left, right);

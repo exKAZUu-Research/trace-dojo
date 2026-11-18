@@ -856,6 +856,7 @@ export function createObject(cls: PhpClass): PhpObject {
 }
 
 export function checkInstantiable(cls: PhpClass): void {
+  if (cls.name === 'Closure') throwError('Error', 'Instantiation of class Closure is not allowed');
   if (cls.kind === 'interface') throwError('Error', `Cannot instantiate interface ${cls.name}`);
   if (cls.kind === 'trait') throwError('Error', `Cannot instantiate trait ${cls.name}`);
   if (cls.kind === 'enum') throwError('Error', `Cannot instantiate enum ${cls.name}`);
@@ -1152,7 +1153,8 @@ export function writeProp(
 }
 
 export function createDynamicProp(object: PhpObject, name: string): void {
-  if (object.cls.isReadonly) throwError('Error', `Cannot create dynamic property ${object.cls.name}::$${name}`);
+  if (object.cls.isReadonly || object.cls.name === 'Closure')
+    throwError('Error', `Cannot create dynamic property ${object.cls.name}::$${name}`);
   if (object.cls.name !== 'stdClass' && !allowsDynamicProps(object.cls)) {
     deprecated(`Creation of dynamic property ${object.cls.name}::$${name} is deprecated`);
   }
@@ -1160,7 +1162,7 @@ export function createDynamicProp(object: PhpObject, name: string): void {
 
 function allowsDynamicProps(cls: PhpClass): boolean {
   for (let current: PhpClass | undefined = cls; current; current = current.parent) {
-    if (current.name === 'stdClass' || current.name === 'Closure') return true;
+    if (current.name === 'stdClass') return true;
   }
   return false;
 }

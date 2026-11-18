@@ -164,14 +164,13 @@ defineOverloadedFunction(
   'implode(mixed $separator): string',
   'implode(array|string $separator, mixed $array = null): string',
   implode,
-  { shortParamsInlineOnly: true }
+  { shortParamsDirectOnly: true }
 );
 
-function implode({ args, row }: NativeContext): string {
+function implode({ args, directOverload }: NativeContext): string {
   let [separator, array] = args;
-  const name = row === undefined ? (callStack.at(-1)?.name ?? 'implode') : 'implode';
-  const inlinePair = row !== undefined && args.length === 2;
-  if (inlinePair && separator instanceof PhpArray)
+  const name = callStack.at(-1)?.name ?? 'implode';
+  if (directOverload && args.length === 2 && separator instanceof PhpArray)
     throwError('TypeError', `${name}(): Argument #1 ($separator) must be of type string, array given`);
   if (array !== undefined && array !== null && !(array instanceof PhpArray))
     throwError('TypeError', `${name}(): Argument #2 ($array) must be of type ?array, ${valueName(array)} given`);

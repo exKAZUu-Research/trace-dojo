@@ -136,8 +136,16 @@ export function collectMainVars(body: Stmt[]): Set<string> {
  * Rejects `$a[]` where a value is read, which PHP reports before running: it only appends in writes such as
  * assignments, references, foreach targets, and arguments a function may take by reference.
  */
-export function validateReads(body: Stmt[]): void {
-  new ReadValidator(body).visit(body, false);
+export function invalidRead(body: Stmt[]): { index: number; error: CompileError } | undefined {
+  const validator = new ReadValidator(body);
+  for (const [index, statement] of body.entries()) {
+    try {
+      validator.visit(statement, false);
+    } catch (error) {
+      if (!(error instanceof CompileError)) throw error;
+      return { index, error };
+    }
+  }
 }
 
 class ReadValidator {
@@ -176,7 +184,7 @@ class ReadValidator {
       }
       case 'assign':
       case 'assignOp': {
-        this.visit(node.target, true);
+        this.visit(node.target, node.op !== '??');
         this.visit(node.value, false);
         return;
       }
@@ -294,6 +302,17 @@ function checkUnsetOffsets(target: Expr): void {
       }
       target = target.base;
     }
+  }
+}
+
+export function hasNullsafeReceiver(expression: Expr): boolean {
+  let current = expression;
+  for (;;) {
+    if (current.k === 'idx') current = current.base;
+    else if (current.k === 'prop' || current.k === 'mcall') {
+      if (current.nullsafe) return true;
+      current = current.obj;
+    } else return false;
   }
 }
 

@@ -1,0 +1,35 @@
+Error: Call to private method Origin::hidden() from scope Derived
+Error: Call to private method Origin::hidden() from global scope
+Error: Call to protected method Origin::protectedMethod() from global scope
+Error: Call to private method Origin::secret() from global scope
+TypeError: Failed to create closure from callable: function "missing" not found or invalid function name
+TypeError: Failed to create closure from callable: cannot access private method Derived::hidden()
+Error: Instantiation of class Closure is not allowed
+
+Warning: Class "MissingScope" not found in /main.php on line 17
+NULL
+Cannot create dynamic property Closure::$property
+
+Warning: Undefined property: Closure::$property in /main.php on line 19
+NULL
+bool(false)
+#0 /main.php(33): CallsMissing->__call('missing', Array)
+#1 /main.php(35): {closure:/main.php:33}()
+#2 {main}
+#0 /main.php(33): CallsMissing::__callStatic('missing', Array)
+#1 /main.php(35): {closure:/main.php:33}()
+#2 {main}
+#0 /main.php(33): CallsMissing->__call('missing', Array)
+#1 /main.php(35): {closure:/main.php:33}()
+#2 {main}
+#0 /main.php(34): CallsMissing::__callStatic('missing', Array)
+#1 /main.php(35): {closure:/main.php:34}()
+#2 {main}
+#0 [internal function]: CallsMissing->__call('missing', Array)
+#1 /main.php(34): array_map(Array, Array)
+#2 /main.php(35): {closure:/main.php:34}()
+#3 {main}
+#0 [internal function]: CallsMissing->__call('missing', Array)
+#1 /main.php(34): CallsMissing->missing(6)
+#2 /main.php(35): {closure:/main.php:34}()
+#3 {main}

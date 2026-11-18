@@ -1,0 +1,4 @@
+referenceArgument(): Argument #1 ($value) could not be passed by reference
+called
+int(2)
+referenceArgument(): Argument #1 ($value) could not be passed by reference
