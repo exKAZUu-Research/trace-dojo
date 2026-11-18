@@ -1,5 +1,6 @@
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import { callMethod, consumeInvokedResult } from './callables';
+import { implicitCallRow } from './calls';
 import { toBool } from './conversions';
 import { throwError, withCleanupExceptions } from './errors';
 import { InnerIterator, innerIteratorOf } from './libIterators';
@@ -80,6 +81,10 @@ class RecursiveState {
       throwError('Error', 'The object is in an invalid state as the parent constructor was not called');
   }
 
+  prepareEngineIteration(): void {
+    if (this.levels.length === 0) throwError('Error', 'Object is not initialized');
+  }
+
   get depth(): number {
     return this.levels.length - 1;
   }
@@ -119,10 +124,10 @@ function validAt(object: PhpObject, state: RecursiveState): boolean {
 }
 
 /** Transcribes spl_recursive_it_rewind_ex. */
-function rewind(object: PhpObject, state: RecursiveState): void {
+function rewind(object: PhpObject, state: RecursiveState, fromNative: boolean): void {
   state.checkConstructed();
   while (state.levels.length > 1) {
-    releaseLevel(object, state, 'rewind');
+    releaseLevel(object, state, 'rewind', fromNative);
     callMethod(object, 'endChildren', []);
   }
   const root = state.levels[0];
@@ -130,11 +135,11 @@ function rewind(object: PhpObject, state: RecursiveState): void {
   root.iterator.rewind();
   if (!state.inIteration) hook(object, 'beginIteration');
   state.inIteration = true;
-  moveForward(object, state);
+  moveForward(object, state, fromNative);
 }
 
 /** Transcribes spl_recursive_it_move_forward_ex, which walks to the next element the mode reports. */
-function moveForward(object: PhpObject, state: RecursiveState): void {
+function moveForward(object: PhpObject, state: RecursiveState, fromNative: boolean): void {
   for (;;) {
     const outcome = advanceLevel(object, state, state.top);
     if (outcome === 'reported') return;
@@ -142,12 +147,12 @@ function moveForward(object: PhpObject, state: RecursiveState): void {
       if (state.levels.length === 1) return;
       const exhausted = state.top;
       catching(state, () => hook(object, 'endChildren'));
-      if (state.levels.at(-1) === exhausted) releaseLevel(object, state, 'advance');
+      if (state.levels.at(-1) === exhausted) releaseLevel(object, state, 'advance', fromNative);
     }
   }
 }
 
-function releaseLevel(object: PhpObject, state: RecursiveState, mode: RetirementMode): void {
+function releaseLevel(object: PhpObject, state: RecursiveState, mode: RetirementMode, fromNative = true): void {
   const level = state.top;
   if (level.retiring || mode === 'rewind') state.levels.pop();
   if (level.retiring) return;
@@ -157,7 +162,7 @@ function releaseLevel(object: PhpObject, state: RecursiveState, mode: Retirement
   const values = [level.iterator.handle, level.object];
   try {
     runtime.release(mode === 'advance' ? values.toReversed() : values, true);
-    runtime.flushReleases(true);
+    runtime.flushReleases(fromNative);
   } finally {
     const index = state.levels.indexOf(level);
     if (index !== -1) state.levels.splice(index, 1);
@@ -293,11 +298,23 @@ const recursiveMethods: NativeMethod[] = [
       return null;
     },
   },
-  { signature: 'rewind(): void', impl: ({ thisObj }) => (rewind(thisObj, stateOf(thisObj)), null) },
+  {
+    signature: 'rewind(): void',
+    impl: ({ thisObj, row }) => (
+      rewind(thisObj, stateOf(thisObj), row === undefined || implicitCallRow() === undefined),
+      null
+    ),
+  },
   { signature: 'valid(): bool', impl: ({ thisObj }) => validAt(thisObj, stateOf(thisObj)) },
   { signature: 'key(): mixed', impl: ({ thisObj }) => stateOf(thisObj).top.iterator.key() },
   { signature: 'current(): mixed', impl: ({ thisObj }) => stateOf(thisObj).top.iterator.current() },
-  { signature: 'next(): void', impl: ({ thisObj }) => (moveForward(thisObj, stateOf(thisObj)), null) },
+  {
+    signature: 'next(): void',
+    impl: ({ thisObj, row }) => (
+      moveForward(thisObj, stateOf(thisObj), row === undefined || implicitCallRow() === undefined),
+      null
+    ),
+  },
   { signature: 'getDepth(): int', impl: ({ thisObj }) => BigInt(Math.max(stateOf(thisObj).depth, 0)) },
   {
     signature: 'getSubIterator(?int $level = null): ?RecursiveIterator',

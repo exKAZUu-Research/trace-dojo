@@ -7,3 +7,7 @@ exit;exit;throw;cleanup;0;NULL
 done
 exit;throw;cleanup;0
 exit;throw;cleanup;0
+body;1;removed;
+exit;throw;removed;cleanup;0;
+body;1;removed;
+exit;throw;removed;cleanup;0;

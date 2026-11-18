@@ -530,14 +530,26 @@ export function callMethod(
   name: string,
   args: Value[],
   row?: number,
-  options?: { inline?: boolean; omittedOffset?: boolean; lookupClass?: PhpClass }
+  options?: {
+    inline?: boolean;
+    omittedOffset?: boolean;
+    lookupClass?: PhpClass;
+    captureReturn?: (value: Value) => void;
+  }
 ): Value {
   const method = (options?.lookupClass ?? object.cls).findMethod(lower(name));
   if (!method) {
     const magic = object.cls.findMethod('__call');
     if (magic) {
       return invoke(
-        { fn: magic.fn, thisObj: object, scope: magic.scope, staticClass: object.cls, method: magic },
+        {
+          fn: magic.fn,
+          thisObj: object,
+          scope: magic.scope,
+          staticClass: object.cls,
+          method: magic,
+          captureReturn: options?.captureReturn,
+        },
         [{ v: name }, { v: PhpArray.list(args) }],
         row
       );
@@ -551,6 +563,7 @@ export function callMethod(
       scope: method.scope,
       staticClass: object.cls,
       method,
+      captureReturn: options?.captureReturn,
       inline:
         row !== undefined &&
         method.fn.kind === 'native' &&

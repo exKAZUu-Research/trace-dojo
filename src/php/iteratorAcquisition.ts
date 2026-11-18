@@ -8,6 +8,28 @@ interface AcquiredIterator {
   handle: PhpObject;
 }
 
+const iteratorMethods = ['rewind', 'valid', 'current', 'key', 'next'] as const;
+type IteratorMethod = (typeof iteratorMethods)[number];
+const nativeRecursiveClasses = new WeakMap<PhpClass, boolean>();
+
+export function callIteratorMethod(iterator: PhpObject, method: IteratorMethod): Value {
+  return usesNativeRecursiveIterator(iterator.cls)
+    ? callMethod(iterator, method, [], rt().row, { inline: true })
+    : callMethod(iterator, method, []);
+}
+
+function usesNativeRecursiveIterator(cls: PhpClass): boolean {
+  let direct = nativeRecursiveClasses.get(cls);
+  if (direct === undefined) {
+    direct = iteratorMethods.every((name) => {
+      const method = cls.findMethod(name);
+      return method?.fn.kind === 'native' && method.scope.lname === 'recursiveiteratoriterator';
+    });
+    nativeRecursiveClasses.set(cls, direct);
+  }
+  return direct;
+}
+
 // code-gauge-allow functionCognitiveComplexity 16 -- Acquires nested iterators while keeping returned objects alive until the engine owns the last one.
 export function acquireIterator(object: PhpObject, byRef = false): AcquiredIterator | undefined {
   const runtime = rt();
@@ -57,11 +79,13 @@ function acquireDirectIterator(object: PhpObject, byRef: boolean): AcquiredItera
     | {
         writable?: () => PhpArray;
         fixedIterator?: (owner: PhpObject) => PhpObject;
+        prepareEngineIteration?: () => void;
       }
     | undefined;
   if (object.cls.isSubclassOf(iteratorClass)) {
     if (byRef && typeof internal?.writable !== 'function')
       throwError('Error', 'An iterator cannot be used with foreach by reference');
+    if (usesNativeRecursiveIterator(object.cls)) internal?.prepareEngineIteration?.();
     const handle = newEngineIterator(object);
     return { iterator: object, handle };
   }

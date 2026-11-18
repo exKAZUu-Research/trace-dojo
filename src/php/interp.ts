@@ -46,7 +46,7 @@ import * as classesModule from './classes';
 import { debugType, getType, numericPrefix, toBool, valueName } from './conversions';
 import * as conversionsModule from './conversions';
 import { deprecated, throwError, type UpdateWarning, warn, withOperandWarnings, withPendingException } from './errors';
-import { acquireIterator } from './iteratorAcquisition';
+import { acquireIterator, callIteratorMethod } from './iteratorAcquisition';
 import { constantDeprecation } from './native';
 import { compiledOperandRow, constantAstRow } from './opcodeRows';
 import {
@@ -806,24 +806,24 @@ function* iterateObject(
   const runtime = rt();
   let failure: PhpThrow | undefined;
   try {
-    callMethod(iterator, 'rewind', []);
-    while (toBool(callMethod(iterator, 'valid', []))) {
+    callIteratorMethod(iterator, 'rewind');
+    while (toBool(callIteratorMethod(iterator, 'valid'))) {
       runtime.spend();
       const frame = runtime.frame;
       const mark = frame.temporaries.length;
       try {
         if (slots) runtime.lastReturnRef = undefined;
-        const current = fetch === 'none' ? null : callMethod(iterator, 'current', []);
+        const current = fetch === 'none' ? null : callIteratorMethod(iterator, 'current');
         const reference = slots && fetch !== 'none' ? runtime.lastReturnRef : undefined;
         if (slots) runtime.lastReturnRef = undefined;
         const slot = slots ? (reference ?? nativeIteratorSlot(iterator) ?? current) : current;
         if (slots && slot instanceof Ref) runtime.holdTemporaryReference(slot);
-        const key = fetch === 'both' ? callMethod(iterator, 'key', []) : null;
+        const key = fetch === 'both' ? callIteratorMethod(iterator, 'key') : null;
         yield [key, slot];
       } finally {
         if (slots) runtime.dropTemporaries(frame, mark);
       }
-      callMethod(iterator, 'next', []);
+      callIteratorMethod(iterator, 'next');
     }
   } catch (error) {
     if (error instanceof PhpThrow) failure = error;

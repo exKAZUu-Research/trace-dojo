@@ -5,7 +5,6 @@ import { assignTo, bindRef, destructure, foreachSubjectPlace, unsetTarget } from
 import type { Expr, FunctionDecl, Program, Stmt } from './ast';
 import { foreachReferences, nestedBodies } from './astAnalysis';
 import { lower } from './bytes';
-import { callMethod } from './callables';
 import { asInternal, invoke, setBodyRunner, setDefaultEvaluator } from './calls';
 import {
   bindPropertyReference,
@@ -23,7 +22,7 @@ import { toBool, valueName } from './conversions';
 import { E_DEPRECATED, E_WARNING, emitError, setPrevious, throwError, warn, withPendingException } from './errors';
 import { collectBeforeAllocation, setDestructor } from './garbage';
 import { consumeExpression, ev, evBool, evOpcodeOperand, evQuiet, evReturn, prepareOperand } from './interp';
-import { acquireIterator } from './iteratorAcquisition';
+import { acquireIterator, callIteratorMethod } from './iteratorAcquisition';
 import { builtinLiteralKey } from './native';
 import { compiledOperandRow } from './opcodeRows';
 import { looseEquals, setObjectToString, toStr } from './operators';
@@ -654,18 +653,18 @@ function foreachObject(
         const result = foreachArrayByRef(statement, storage.writable(), storage);
         return result === FOREACH_REPLACED ? undefined : result;
       }
-      callMethod(iterator, 'rewind', []);
-      let valid = toBool(callMethod(iterator, 'valid', []));
+      callIteratorMethod(iterator, 'rewind');
+      let valid = toBool(callIteratorMethod(iterator, 'valid'));
       releaseSubject?.();
       while (valid) {
         runtime.spend();
-        const value = callMethod(iterator, 'current', []);
-        const key = statement.key ? callMethod(iterator, 'key', []) : null;
+        const value = callIteratorMethod(iterator, 'current');
+        const key = statement.key ? callIteratorMethod(iterator, 'key') : null;
         const completion = foreachIteration(statement, key, value);
         if (completion !== 'next') return completion;
         runtime.row = statement.subjectEndRow;
-        callMethod(iterator, 'next', []);
-        valid = toBool(callMethod(iterator, 'valid', []));
+        callIteratorMethod(iterator, 'next');
+        valid = toBool(callIteratorMethod(iterator, 'valid'));
       }
     } catch (error) {
       if (error instanceof PhpThrow) failure = error;

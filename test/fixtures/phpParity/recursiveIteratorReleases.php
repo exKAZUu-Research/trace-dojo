@@ -74,3 +74,28 @@ class ReportsClearedChild extends RecursiveArrayIterator {
 $observed = new RecursiveIteratorIterator(new ReportsClearedChild([[1], 2]));
 foreach ($observed as $value) echo "value:$value;";
 echo "end;\n";
+
+class ReportsIteratorFrames extends RecursiveArrayIterator {
+    function __construct($items, private bool $child = false) { parent::__construct($items); }
+    function getChildren(): ?RecursiveArrayIterator { return new self($this->current(), true); }
+    function __destruct() {
+        if (!$this->child) return;
+        foreach (debug_backtrace(DEBUG_BACKTRACE_IGNORE_ARGS) as $frame)
+            echo ($frame['class'] ?? ''), ($frame['type'] ?? ''), $frame['function'], ':', $frame['line'] ?? 'internal', ';';
+        echo "\n";
+    }
+}
+class OverridesIteratorCurrent extends RecursiveIteratorIterator {
+    function current(): mixed { return parent::current(); }
+}
+foreach ([RecursiveIteratorIterator::class, ChildHooks::class, OverridesIteratorCurrent::class] as $class) {
+    $iterator = new $class(new ReportsIteratorFrames([[1], 2]));
+    foreach ($iterator as $value) {}
+}
+iterator_to_array(new RecursiveIteratorIterator(new ReportsIteratorFrames([[1], 2])));
+class UninitializedRecursiveIterator extends RecursiveIteratorIterator {
+    function __construct() {}
+}
+try {
+    foreach (new UninitializedRecursiveIterator() as $value) {}
+} catch (Error $error) { echo $error->getMessage(), "\n"; }

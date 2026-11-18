@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 945 -- Keeps PHP value storage and the ownership helpers it uses together.
+// code-gauge-allow-file fileNcss 946 -- Keeps PHP value storage and the ownership helpers it uses together.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import type { TurtleState } from '../interpreter/turtleWorld';
 import { type ArrayCursor, ArrayOrder, type ArrayRebuild } from './arrayOrder';
@@ -383,7 +383,7 @@ export class PhpArray {
     const count = this.size;
     let nextFree = 0n;
     let rehash = packed;
-    const positions = !packed && this.hasDenseSlots() ? new Map<Key, number>() : undefined;
+    const keepPositions = !packed && this.hasDenseSlots();
     const renumbered = new Map<Key, Key>();
     for (const [key, slot] of this.map.physicalEntries()) {
       if (typeof key !== 'bigint' || slot === UNDEFINED_RESULT) continue;
@@ -391,7 +391,7 @@ export class PhpArray {
       renumbered.set(key, nextFree++);
     }
     if (rehash) {
-      this.rehashShift(renumbered, nextFree, count, packed, positions);
+      this.rehashShift(renumbered, nextFree, count, packed, keepPositions);
     }
     this.nextFree = nextFree;
     this.pointer = null;
@@ -403,17 +403,18 @@ export class PhpArray {
     nextFree: bigint,
     count: number,
     packed: boolean,
-    positions: Map<Key, number> | undefined
+    keepPositions: boolean
   ): void {
     const entries = new Map<Key, Value | Ref>();
+    const positions = new Map<Key, number>();
     for (const [key, slot] of this.map.physicalEntries()) {
-      if (slot === UNDEFINED_RESULT && (!positions || (typeof key === 'bigint' && key >= 0n && key < nextFree)))
+      if (slot === UNDEFINED_RESULT && (!keepPositions || (typeof key === 'bigint' && key >= 0n && key < nextFree)))
         continue;
       const renamed = renumbered.get(key) ?? key;
       entries.set(renamed, slot);
-      positions?.set(renamed, this.slotPosition(key));
+      positions.set(renamed, this.slotPosition(key));
     }
-    this.replaceTable(entries, packed, positions ? { positions } : 'shift');
+    this.replaceTable(entries, packed, { positions, keepPositions, packed });
     this.map.removedUndefinedSlots = count - entries.size;
   }
 

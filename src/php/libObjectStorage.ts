@@ -63,8 +63,11 @@ class ObjectStorage {
   }
 
   attach(object: PhpObject, info: Value): void {
+    this.withHash(object, (hash) => this.attachEntry(hash, object, info));
+  }
+
+  private attachEntry(hash: string | PhpObject, object: PhpObject, info: Value): void {
     info = share(info);
-    const hash = this.hash(object);
     const entry = this.entries.get(hash);
     if (entry) {
       const old = entry.info;
@@ -112,7 +115,10 @@ class ObjectStorage {
   }
 
   detach(object: PhpObject, cleanup?: BulkCleanup): boolean {
-    const hash = this.hash(object);
+    return this.withHash(object, (hash) => this.detachEntry(hash, cleanup));
+  }
+
+  private detachEntry(hash: string | PhpObject, cleanup?: BulkCleanup): boolean {
     const entry = this.entries.get(hash);
     if (!entry) return false;
     this.entries.delete(hash);
@@ -145,10 +151,20 @@ class ObjectStorage {
   }
 
   has(object: PhpObject): boolean {
-    return this.entries.has(this.hash(object));
+    return this.checkMembership(object, (present) => present);
   }
-  get(object: PhpObject): Value | undefined {
-    return this.entries.get(this.hash(object))?.info;
+
+  private checkMembership<T>(object: PhpObject, consume: (present: boolean, pending?: CleanupException) => T): T {
+    return this.withHash(object, (hash, pending) => consume(this.entries.has(hash), pending));
+  }
+
+  get(object: PhpObject): Value {
+    return this.withHash(object, (hash, pending) => {
+      const entry = this.entries.get(hash);
+      if (!entry && pending instanceof ExitSignal) return null;
+      if (!entry) throwError('UnexpectedValueException', 'Object not found');
+      return entry.info;
+    });
   }
   currentInfo(): Value {
     return this.slots[this.validPosition()]?.info ?? null;
@@ -164,15 +180,35 @@ class ObjectStorage {
     }
   }
 
-  private hash(object: PhpObject): string | PhpObject {
-    if (!this.hashKeys) return object;
-    const hash = callMethod(this.holder, 'getHash', [object]);
-    if (typeof hash !== 'string')
-      throwError(
-        'TypeError',
-        `${this.holder.cls.name}::getHash(): Return value must be of type string, ${valueName(hash)} returned`
+  private withHash<T>(object: PhpObject, consume: (hash: string | PhpObject, pending?: CleanupException) => T): T {
+    if (!this.hashKeys) return consume(object);
+    const runtime = rt();
+    let returned: Value | undefined;
+    let hash: Value;
+    let pending: CleanupException | undefined;
+    try {
+      hash = runtime.withNativeReleaseMode('bulk-removal', () =>
+        callMethod(this.holder, 'getHash', [object], undefined, {
+          captureReturn: (value) => {
+            returned = value;
+          },
+        })
       );
-    return hash;
+    } catch (error) {
+      if (returned === undefined || !(error instanceof PhpThrow || error instanceof ExitSignal)) throw error;
+      hash = returned;
+      pending = error;
+    }
+    const result = withPendingException(runtime, pending instanceof PhpThrow ? pending : undefined, () => {
+      if (typeof hash !== 'string')
+        throwError(
+          'TypeError',
+          `${this.holder.cls.name}::getHash(): Return value must be of type string, ${valueName(hash)} returned`
+        );
+      return consume(hash, pending);
+    });
+    if (pending) throw pending;
+    return result;
   }
 
   removeAll(other: ObjectStorage): bigint {
@@ -186,7 +222,7 @@ class ObjectStorage {
     });
   }
 
-  // code-gauge-allow functionCognitiveComplexity 16 -- Pins a key through its callback, detach and pending-exception cleanup.
+  // code-gauge-allow functionCognitiveComplexity 19 -- Pins a key through membership, detach and pending-exception cleanup.
   removeAllExcept(other: ObjectStorage): bigint {
     return this.bulkRemove(this.hashKeys || other.hashKeys, (cleanup) => {
       for (let slot = 0; slot < this.slots.length; slot++) {
@@ -199,7 +235,9 @@ class ObjectStorage {
         runtime.held.push(object);
         let pending: PhpThrow | undefined;
         try {
-          if (!other.has(object)) this.detach(object, cleanup);
+          other.checkMembership(object, (present, pending) => {
+            if (!present && !(pending && this.hashKeys)) this.detach(object, cleanup);
+          });
         } catch (error) {
           if (error instanceof PhpThrow) pending = error;
           throw error;
@@ -385,13 +423,7 @@ defineClass({
     },
     {
       signature: 'offsetGet($object): mixed',
-      impl: ({ thisObj, args }) => {
-        const storage = storageOf(thisObj);
-        const key = storageKey(args[0], 'offsetGet');
-        const info = storage.get(key);
-        if (info === undefined) throwError('UnexpectedValueException', 'Object not found');
-        return info;
-      },
+      impl: ({ thisObj, args }) => storageOf(thisObj).get(storageKey(args[0], 'offsetGet')),
     },
     {
       signature: 'offsetSet($object, mixed $info = null): void',

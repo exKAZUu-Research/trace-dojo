@@ -196,11 +196,11 @@ export function setPrevious(exception: PhpObject, previous: PhpObject): void {
   }
 }
 
-export function withPendingException(runtime: Runtime, pending: PhpThrow | undefined, cleanup: () => void): void {
+export function withPendingException<T>(runtime: Runtime, pending: PhpThrow | undefined, cleanup: () => T): T {
   let failure: unknown = pending;
   if (pending) runtime.held.push(pending.object);
   try {
-    cleanup();
+    return cleanup();
   } catch (error) {
     failure = error;
     if (error instanceof PhpThrow && pending) setPrevious(error.object, pending.object);

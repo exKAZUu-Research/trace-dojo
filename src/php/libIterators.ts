@@ -3,7 +3,7 @@ import { callCallback, callMethod, consumeInvokedResult } from './callables';
 import { createObject, findClass } from './classes';
 import { toBool } from './conversions';
 import { throwError, warn } from './errors';
-import { acquireIterator, EngineIteratorOwner, newEngineIterator } from './iteratorAcquisition';
+import { acquireIterator, callIteratorMethod, EngineIteratorOwner, newEngineIterator } from './iteratorAcquisition';
 import { arrayIteratorOver } from './libArrayObject';
 import { defineClass, type NativeMethod } from './native';
 import { toKey, toStr } from './operators';
@@ -31,17 +31,17 @@ export class InnerIterator extends EngineIteratorOwner {
 
   rewind(): void {
     this.invalidate();
-    callMethod(this.object, 'rewind', []);
+    callIteratorMethod(this.object, 'rewind');
   }
 
   valid(): boolean {
-    return toBool(callMethod(this.object, 'valid', []));
+    return toBool(callIteratorMethod(this.object, 'valid'));
   }
 
   current(): Value {
     if (this.cached) return this.cached.v;
     return consumeInvokedResult(
-      () => callMethod(this.object, 'current', []),
+      () => callIteratorMethod(this.object, 'current'),
       (value) => {
         this.cached = { v: value };
         nativeOwnershipChanged(this.handle);
@@ -51,12 +51,12 @@ export class InnerIterator extends EngineIteratorOwner {
   }
 
   key(): Value {
-    return callMethod(this.object, 'key', []);
+    return callIteratorMethod(this.object, 'key');
   }
 
   next(): void {
     this.invalidate();
-    callMethod(this.object, 'next', []);
+    callIteratorMethod(this.object, 'next');
   }
 
   invalidate(): void {

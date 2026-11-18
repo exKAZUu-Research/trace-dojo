@@ -29,3 +29,8 @@ Warning: Undefined variable $missing in /main.php on line 63
 
 Warning: Undefined variable $replaced in /main.php on line 66
 fallback;new;value:2;end;
+ReportsIteratorFrames->__destruct:93;
+hook:1;ReportsIteratorFrames->__destruct:93;
+ReportsIteratorFrames->__destruct:internal;RecursiveIteratorIterator->next:93;
+ReportsIteratorFrames->__destruct:internal;iterator_to_array:95;
+Object is not initialized

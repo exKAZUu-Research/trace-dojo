@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 733 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 736 -- Keeps call binding, completion and frame cleanup together.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import { LIMITS } from '../interpreter/limits';
 import type { FunctionDecl } from './ast';
@@ -62,6 +62,8 @@ export interface CallTarget {
   directOverload?: boolean;
   inline?: boolean;
   frameless?: boolean;
+  /** Observes a validated return before its frame cleanup can throw. */
+  captureReturn?: (value: Value) => void;
 }
 
 export interface MagicCall {
@@ -309,6 +311,7 @@ function invokeNative(
       row: inline || target.frameless ? row : undefined,
       discardResult: Boolean(inline && discardResult),
     });
+    target.captureReturn?.(result);
   } catch (error) {
     failed = true;
     failure = error;
@@ -633,7 +636,10 @@ function invokeUser(
       frame.returning = undefined;
       runtime.row = frame.returnRow ?? runtime.row;
       runtime.release([returning, result]);
-    } else returned = result;
+    } else {
+      returned = result;
+      target.captureReturn?.(result);
+    }
   } catch (error) {
     failure = error;
     failed = true;
@@ -824,7 +830,7 @@ function bindClosureVars(frame: Frame, closure: ClosureData): void {
 }
 
 /** The row a call the engine makes for the program's code (a magic method, a conversion) shows: that code's. */
-function implicitCallRow(): number | undefined {
+export function implicitCallRow(): number | undefined {
   const runtime = rt();
   return nativeDepth === 0 && !runtime.shuttingDown ? runtime.instructionRow : undefined;
 }
