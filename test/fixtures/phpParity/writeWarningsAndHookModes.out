@@ -145,3 +145,22 @@ object(stdClass)#4 (1) {
   ["next"]=>
   int(2)
 }
+object(stdClass)#7 (1) {
+  ["new"]=>
+  int(3)
+}
+Error:Cannot assign by reference to overloaded object / 
+Error:Cannot indirectly modify private(set) property RestrictedSlots::$array from global scope / 
+Error:Cannot indirectly modify private(set) property RestrictedSlots::$array from global scope / 
+Error:Cannot indirectly modify protected(set) property RestrictedSlots::$empty from global scope / 
+array(2) {
+  ["kept"]=>
+  int(1)
+  [0]=>
+  int(8)
+}
+Error:Cannot create reference to property SetterSlots::$items / 
+getter
+Error:Cannot assign by reference to overloaded object / 
+getter
+int(1)

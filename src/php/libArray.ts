@@ -1218,10 +1218,17 @@ defineFunction('array_all(array $array, callable $callback): bool', ({ args }) =
 defineFunction('array_rand(array $array, int $num = 1): int|string|array', ({ args }) => {
   const array = arr(args[0]);
   const count = Number(args[1] ?? 1n);
-  const keys = [...array.map.keys()];
-  if (keys.length === 0) throwError('ValueError', 'array_rand(): Argument #1 ($array) must not be empty');
-  const mt = rt().mt;
-  if (count === 1) return keys[Number(mt.range(0n, BigInt(keys.length - 1)))];
+  if (array.size === 0) throwError('ValueError', 'array_rand(): Argument #1 ($array) must not be empty');
+  const runtime = rt();
+  const mt = runtime.mt;
+  if (count === 1) {
+    runtime.spend(Math.ceil(array.size / 64));
+    return array.sampleKey((max) => {
+      runtime.spend();
+      return Number(mt.range(0n, BigInt(max)));
+    });
+  }
+  const keys = array.keys();
   if (count <= 0 || count > keys.length) {
     throwError(
       'ValueError',

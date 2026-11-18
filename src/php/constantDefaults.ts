@@ -1,4 +1,5 @@
 // oxlint-disable unicorn/no-null -- PHP null is represented by JavaScript null.
+import { ExecutionBudget, LIMITS } from '../interpreter/limits';
 import type { ClassRef, Expr } from './ast';
 import { boolValue, floatFitsInt, formatFloat, normalizeKeyString, numericPrefix } from './conversions';
 import { compileConstant } from './native';
@@ -10,12 +11,16 @@ export type Constant = Scalar | Map<Key, Constant>;
 const UNKNOWN = Symbol('unevaluated default');
 type Folded = Constant | typeof UNKNOWN;
 export type ClassConstantLookup = (cls: ClassRef, name: string) => Constant | undefined;
+type FoldBudget = Pick<ExecutionBudget, 'spend'>;
 interface FoldContext {
+  budget?: FoldBudget;
   compiler?: boolean;
   preserveNamedConstants?: boolean;
   classConstant?: ClassConstantLookup;
   className?: (cls: ClassRef) => string | undefined;
 }
+
+type BoundedFoldContext = FoldContext & { budget: FoldBudget };
 
 export function foldedDefaultType(expression: Expr, context: FoldContext = {}): string | undefined {
   const value = foldedConstant(expression, context);
@@ -31,27 +36,33 @@ export function constantTypeName(value: Constant): string {
 }
 
 export function foldedConstant(expression: Expr, context: FoldContext): Constant | undefined {
-  const value = fold(expression, context);
+  const value = fold(expression, boundedContext(context));
   return value === UNKNOWN ? undefined : value;
 }
 
 // code-gauge-allow functionCognitiveComplexity 18 -- Keeps the ordered PHP cases together because each branch shares the same dispatch state.
 export function selectConstantBranch(expression: Expr, context: FoldContext): Expr {
+  const bounded = boundedContext(context);
   let current = expression;
   while (true) {
     if (current.k === 'cond') {
-      const condition = foldBool(fold(current.test, context));
+      const condition = foldBool(fold(current.test, bounded));
       if (condition === UNKNOWN) return current;
       current = condition ? (current.consequent ?? current.test) : current.alternate;
     } else if (current.k === 'bin' && current.op === '??') {
-      const value = fold(current.l, context);
+      const value = fold(current.l, bounded);
       if (value === UNKNOWN) return current;
       current = value === null ? current.r : current.l;
     } else return current;
   }
 }
 
-function fold(expression: Expr, context: FoldContext): Folded {
+function boundedContext(context: FoldContext): BoundedFoldContext {
+  return { ...context, budget: context.budget ?? new ExecutionBudget() };
+}
+
+function fold(expression: Expr, context: BoundedFoldContext): Folded {
+  context.budget.spend();
   switch (expression.k) {
     case 'lit': {
       return expression.v;
@@ -62,14 +73,7 @@ function fold(expression: Expr, context: FoldContext): Folded {
       return value === undefined || value instanceof PhpArray || value instanceof PhpObject ? UNKNOWN : value;
     }
     case 'interp': {
-      if (context.compiler) return UNKNOWN;
-      let result = '';
-      for (const part of expression.parts) {
-        const value = typeof part === 'string' ? part : fold(part, context);
-        if (value === UNKNOWN || value instanceof Map) return UNKNOWN;
-        result += scalarString(value);
-      }
-      return result;
+      return interpolatedConstant(expression.parts, context);
     }
     case 'cconst': {
       if (expression.className) {
@@ -115,7 +119,7 @@ function fold(expression: Expr, context: FoldContext): Folded {
         const conjunction = expression.op === '&&' || expression.op === 'and';
         return condition === conjunction ? foldBool(fold(expression.r, context)) : condition;
       }
-      return binaryConstant(expression.op, left, fold(expression.r, context));
+      return binaryConstant(expression.op, left, fold(expression.r, context), context.budget);
     }
     case 'cond': {
       if (context.compiler) return UNKNOWN;
@@ -136,9 +140,23 @@ function fold(expression: Expr, context: FoldContext): Folded {
   }
 }
 
-// code-gauge-allow functionNcss 35 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+function interpolatedConstant(parts: (string | Expr)[], context: BoundedFoldContext): Folded {
+  if (context.compiler) return UNKNOWN;
+  let result = '';
+  for (const part of parts) {
+    const value = typeof part === 'string' ? part : fold(part, context);
+    if (value === UNKNOWN || value instanceof Map) return UNKNOWN;
+    const text = scalarString(value);
+    if (result.length + text.length > LIMITS.maxStringLength) return UNKNOWN;
+    context.budget.spend(1 + Math.ceil(text.length / 64));
+    result += text;
+  }
+  return result;
+}
+
+// code-gauge-allow functionNcss 36 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 // code-gauge-allow functionCognitiveComplexity 30 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
-function arrayConstant(expression: Extract<Expr, { k: 'array' }>, context: FoldContext): Folded {
+function arrayConstant(expression: Extract<Expr, { k: 'array' }>, context: BoundedFoldContext): Folded {
   const result = new Map<Key, Constant>();
   let next = INT_MIN;
   const append = (value: Constant): boolean => {
@@ -152,6 +170,7 @@ function arrayConstant(expression: Extract<Expr, { k: 'array' }>, context: FoldC
     if (value === UNKNOWN || item.byRef) return UNKNOWN;
     if (item.spread) {
       if (!(value instanceof Map)) return UNKNOWN;
+      context.budget.spend(value.size);
       for (const [key, slot] of value) {
         if (typeof key === 'string') result.set(key, slot);
         else if (!append(slot)) return UNKNOWN;
@@ -206,7 +225,8 @@ function unaryConstant(op: string, value: Folded): Folded {
   return typeof result === 'bigint' && (result < INT_MIN || result > INT_MAX) ? Number(result) : result;
 }
 
-function binaryConstant(op: string, left: Constant, right: Folded): Folded {
+// code-gauge-allow functionNcss 37 -- Keeps the ordered PHP cases together because each branch shares the same dispatch state.
+function binaryConstant(op: string, left: Constant, right: Folded, budget: FoldBudget): Folded {
   if (right === UNKNOWN) return UNKNOWN;
   if (op === 'xor') {
     const a = foldBool(left),
@@ -214,14 +234,15 @@ function binaryConstant(op: string, left: Constant, right: Folded): Folded {
     return a === UNKNOWN || b === UNKNOWN ? UNKNOWN : a !== b;
   }
   if (['===', '!==', '==', '!=', '<>', '<', '<=', '>', '>=', '<=>'].includes(op))
-    return comparisonConstant(op, left, right);
+    return comparisonConstant(op, left, right, budget);
   if (left instanceof Map || right instanceof Map) {
     if (op !== '+' || !(left instanceof Map) || !(right instanceof Map)) return UNKNOWN;
+    budget.spend(left.size + right.size);
     const result = new Map(left);
     for (const [key, value] of right) if (!result.has(key)) result.set(key, value);
     return result;
   }
-  if (op === '.') return scalarString(left) + scalarString(right);
+  if (op === '.') return concatenateConstant(left, right, budget);
   const a = numericConstant(left),
     b = numericConstant(right);
   if (['&', '|', '^'].includes(op) && typeof left === 'string' && typeof right === 'string')
@@ -246,10 +267,18 @@ function binaryConstant(op: string, left: Constant, right: Folded): Folded {
   return arithmetic(op, a, b) as Scalar;
 }
 
-function comparisonConstant(op: string, left: Constant, right: Constant): Folded {
+function concatenateConstant(left: Scalar, right: Scalar, budget: FoldBudget): Folded {
+  const a = scalarString(left);
+  const b = scalarString(right);
+  const length = a.length + b.length;
+  if (length > LIMITS.maxStringLength) return UNKNOWN;
+  budget.spend(1 + Math.ceil(length / 64));
+  return a + b;
+}
+
+function comparisonConstant(op: string, left: Constant, right: Constant, budget: FoldBudget): Folded {
   const reverse = op === '>' || op === '>=';
-  const order = compareConstant(reverse ? right : left, reverse ? left : right, op === '===' || op === '!==');
-  if (order === UNKNOWN) return UNKNOWN;
+  const order = compareConstant(reverse ? right : left, reverse ? left : right, op === '===' || op === '!==', budget);
   const results: Record<string, boolean> = {
     '===': order === 0,
     '==': order === 0,
@@ -264,18 +293,62 @@ function comparisonConstant(op: string, left: Constant, right: Constant): Folded
   return results[op] ?? BigInt(order);
 }
 
-// code-gauge-allow functionCognitiveComplexity 28 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
-function compareConstant(left: Constant, right: Constant, strict: boolean): number | typeof UNKNOWN {
-  if (left instanceof Map && right instanceof Map) {
-    if (left.size !== right.size) return Math.sign(left.size - right.size);
-    const other = right.keys();
-    for (const [key, value] of left) {
-      if ((strict && key !== other.next().value) || !right.has(key)) return 1;
-      const order = compareConstant(value, right.get(key) as Constant, strict);
+type ConstantArray = Map<Key, Constant>;
+interface ConstantComparison {
+  left: ConstantArray;
+  right: ConstantArray;
+  entries: MapIterator<[Key, Constant]>;
+  keys: MapIterator<Key>;
+}
+
+// code-gauge-allow functionCognitiveComplexity 17 -- Keeps the ordered PHP cases together because each branch shares the same dispatch state.
+function compareConstant(left: Constant, right: Constant, strict: boolean, budget: FoldBudget): number {
+  const complete = new WeakMap<ConstantArray, WeakSet<ConstantArray>>();
+  const stack: ConstantComparison[] = [];
+  let pair: [Constant, Constant] | undefined = [left, right];
+  for (;;) {
+    if (pair) {
+      budget.spend();
+      const order = compareConstantPair(pair, strict, complete, stack, budget);
       if (order !== 0) return order;
     }
+    const frame = stack.at(-1);
+    if (!frame) return 0;
+    const next = frame.entries.next();
+    if (next.done) {
+      let equal = complete.get(frame.left);
+      if (!equal) {
+        equal = new WeakSet();
+        complete.set(frame.left, equal);
+      }
+      equal.add(frame.right);
+      stack.pop();
+      pair = undefined;
+      continue;
+    }
+    const [key, value] = next.value;
+    if ((strict && key !== frame.keys.next().value) || !frame.right.has(key)) return 1;
+    pair = [value, frame.right.get(key) as Constant];
+  }
+}
+
+// code-gauge-allow functionCognitiveComplexity 20 -- Keeps the ordered PHP cases together because each branch shares the same dispatch state.
+function compareConstantPair(
+  pair: [Constant, Constant],
+  strict: boolean,
+  complete: WeakMap<ConstantArray, WeakSet<ConstantArray>>,
+  stack: ConstantComparison[],
+  budget: FoldBudget
+): number {
+  const [left, right] = pair;
+  if (left instanceof Map && right instanceof Map) {
+    if (left === right || complete.get(left)?.has(right)) return 0;
+    if (left.size !== right.size) return Math.sign(left.size - right.size);
+    stack.push({ left, right, entries: left.entries(), keys: right.keys() });
     return 0;
   }
+  const stringBytes = (typeof left === 'string' ? left.length : 0) + (typeof right === 'string' ? right.length : 0);
+  if (stringBytes > 0) budget.spend(Math.ceil(stringBytes / 64));
   if (strict) return typeof left === typeof right && left === right ? 0 : 1;
   if (
     (left === null || right === null || typeof left === 'boolean' || typeof right === 'boolean') &&

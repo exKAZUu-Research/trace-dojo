@@ -71,7 +71,8 @@ show(fn()=>assert(false && function(){
         public ?ItErAbLe $nullable;
         public NULL|INT $count;
         function f(ArRaY $items, CaLlAbLe $cb, SELF $self, PARENT $parent, INT $count): MIXED {
-            return [\self::Class, namespace\self::class, SeLf::CLASS, \WrittenTypes::class];
+            return [\self::Class, namespace\self::class, SeLf::CLASS, \WrittenTypes::class,
+                    StAtIc::CLASS, namespace\SeLf::f(), new namespace\SeLf, new StAtIc];
         }
         function make(): StAtIc {}
     }

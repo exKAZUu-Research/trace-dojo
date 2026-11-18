@@ -341,7 +341,7 @@ export class Runtime {
       }
     }
     this.freeHandles.push(object.id);
-    if (object.turtle) object.turtle.isAlive = false;
+    if (object.turtle) this.world.remove(object.turtle);
   }
 
   /** Writes bytes to standard output, decoding complete UTF-8 sequences as they arrive. */

@@ -192,7 +192,7 @@ assert(false && function () {
         public ?ItErAbLe $nullable;
         public NULL|INT $count;
         public function f(array $items, callable $cb, SELF $self, PARENT $parent, INT $count): MIXED {
-            return [\self::class, namespace\self::class, SeLf::class, \WrittenTypes::class];
+            return [\self::class, namespace\self::class, SeLf::class, \WrittenTypes::class, static::class, namespace\SeLf::f(), new namespace\SeLf(), new static()];
         }
 
         public function make(): static {

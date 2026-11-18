@@ -2,6 +2,7 @@
 import type { Node } from '@willbooster/web-tree-sitter';
 
 import { CompileError } from '../interpreter/diagnostics';
+import { ExecutionBudget } from '../interpreter/limits';
 import type { ClassRef, Expr, ResolvedName, Stmt } from './ast';
 import { nestedBodies } from './astAnalysis';
 import { enc, lower } from './bytes';
@@ -40,6 +41,13 @@ export function explicitlyQualifiedName(raw: string): string | undefined {
   return undefined;
 }
 
+export function relativeClassName(raw: string, allowAbsolute = false): 'self' | 'parent' | 'static' | undefined {
+  const name = lower(raw);
+  const word =
+    name.startsWith('namespace\\') || (allowAbsolute && name.startsWith('\\')) ? explicitlyQualifiedName(name) : name;
+  return word === 'self' || word === 'parent' || word === 'static' ? word : undefined;
+}
+
 export function isReservedClassName(name: string): boolean {
   const word = lower(name);
   return BUILTIN_TYPES.has(word) || word === 'self' || word === 'parent' || word === 'static';
@@ -69,6 +77,7 @@ export interface FunctionContext {
 
 /** The state a conversion shares: the namespace and imports, the enclosing function and loops, and errors. */
 export abstract class ConverterBase {
+  protected abstract readonly preserveSyntax: boolean;
   readonly claimedAtomicRows = new Set<number>();
   readonly notices: CompileNotice[] = [];
   protected namespace = '';
@@ -85,8 +94,13 @@ export abstract class ConverterBase {
 
   constructor(
     protected readonly source: string,
-    protected readonly atomicRows: ReadonlySet<number>
+    protected readonly atomicRows: ReadonlySet<number>,
+    private compilationBudget?: ExecutionBudget
   ) {}
+
+  protected get compileBudget(): ExecutionBudget {
+    return (this.compilationBudget ??= new ExecutionBudget());
+  }
 
   protected error(node: Node | number, message: string): never {
     throw new CompileError([{ row: typeof node === 'number' ? node : node.startPosition.row, message }]);
@@ -143,11 +157,14 @@ export abstract class ConverterBase {
     return raw;
   }
 
-  protected namedClass(node: Node, expected = ''): string {
+  protected namedClass(node: Node, expected = '', declaration?: 'class' | 'interface' | 'trait'): string {
     const raw = this.declaredIdentifier(node, expected);
-    const explicit = explicitlyQualifiedName(raw);
-    if (explicit && ['self', 'static', 'parent'].includes(lower(explicit)))
-      this.error(node, `'${raw}' is an invalid class name`);
+    const relative = relativeClassName(raw);
+    if (relative && declaration && !this.preserveSyntax) {
+      const spelling = explicitlyQualifiedName(raw) ?? raw;
+      this.error(node, `Cannot use "${spelling}" as ${declaration} name, as it is reserved`);
+    }
+    if (raw.startsWith('\\') && relativeClassName(raw, true)) this.error(node, `'${raw}' is an invalid class name`);
     return this.resolveClassName(raw);
   }
 
@@ -155,8 +172,9 @@ export abstract class ConverterBase {
     const isName = node.type === 'name' || node.type === 'qualified_name' || node.type === 'relative_name';
     if (node.type !== 'relative_scope' && !isName) return { k: 'expr', e: this.expr(node) };
     const raw = this.nameText(node);
-    const word = lower(className ? (explicitlyQualifiedName(raw) ?? raw) : raw);
-    if (word === 'self' || word === 'parent' || word === 'static') {
+    const word = relativeClassName(raw, className);
+    if (word) {
+      if (this.preserveSyntax) return { k: 'named', name: lower(raw) === 'static' ? 'static' : raw };
       if (!deferScope) this.checkClassScope(node, word);
       return { k: word };
     }

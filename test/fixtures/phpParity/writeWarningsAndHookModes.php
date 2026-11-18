@@ -81,3 +81,33 @@ $temp =& $s->obj;
 $temp='local';
 handle(function()use($s){ $other = new stdClass; $s->obj =& $other; });
 var_dump($s->items, $s->obj);
+
+class RestrictedSlots {
+    public private(set) object $object;
+    public private(set) array $array = ['kept'=>1];
+    public private(set) object $uninitialized;
+    public protected(set) ?object $empty = null;
+    function __construct() { $this->object=(object)['old'=>1]; }
+}
+$r = new RestrictedSlots;
+$r->object->new = 2;
+unset($r->object->old, $r->uninitialized->missing);
+$ref =& $r->object;
+$ref = new stdClass;
+foreach ($r->object as &$value) $value++;
+unset($value);
+var_dump($r->object);
+handle(function()use($r) { $replacement = new stdClass; $r->object =& $replacement; });
+handle(function()use($r) { $r->array[] = 2; });
+handle(function()use($r) { unset($r->array['kept']); });
+handle(function()use($r) { unset($r->empty->missing); });
+foreach ($r as $key => &$value) if ($key === 'array') $value[] = 8;
+unset($value);
+var_dump($r->array);
+handle(function()use($s) { foreach ($s as &$value) {} });
+class ReadHookBinding {
+    public int $value=1 { &get { echo "getter\n"; return $this->value; } }
+}
+$readHook = new ReadHookBinding;
+handle(function()use($readHook) { $ref=2; $readHook->value =& $ref; });
+var_dump($readHook->value);

@@ -201,4 +201,58 @@ bool(false)
 
 Warning: preg_match(): Compilation failed: number too big in {} quantifier at offset 10 in /main.php on line 36
 bool(false)
+
+Warning: preg_match(): Compilation failed: reference to non-existent subpattern at offset 2 in /main.php on line 41
+bool(false)
+
+Warning: preg_match(): Compilation failed: reference to non-existent subpattern at offset 2 in /main.php on line 41
+bool(false)
+
+Warning: preg_match(): Compilation failed: reference to non-existent subpattern at offset 2 in /main.php on line 41
+bool(false)
+
+Warning: preg_match(): Compilation failed: reference to non-existent subpattern at offset 5 in /main.php on line 41
+bool(false)
+
+Warning: preg_match(): Compilation failed: reference to non-existent subpattern at offset 2 in /main.php on line 41
+bool(false)
+
+Warning: preg_match(): Compilation failed: reference to non-existent subpattern at offset 5 in /main.php on line 41
+bool(false)
+
+Warning: preg_match(): Compilation failed: syntax error in subpattern number (missing terminator?) at offset 8 in /main.php on line 41
+bool(false)
+
+Warning: preg_match(): Compilation failed: syntax error in subpattern number (missing terminator?) at offset 5 in /main.php on line 41
+bool(false)
+
+Warning: preg_match(): Compilation failed: syntax error in subpattern number (missing terminator?) at offset 4 in /main.php on line 41
+bool(false)
+
+Warning: preg_match(): Compilation failed: syntax error in subpattern number (missing terminator?) at offset 4 in /main.php on line 41
+bool(false)
+
+Warning: preg_match(): Compilation failed: subpattern number is too big at offset 2 in /main.php on line 41
+bool(false)
+
+Warning: preg_match(): Compilation failed: expected capture group number or name at offset 5 in /main.php on line 41
+bool(false)
+
+Warning: preg_match(): Compilation failed: expected capture group number or name at offset 5 in /main.php on line 41
+bool(false)
+
+Warning: preg_match(): Compilation failed: expected capture group number or name at offset 8 in /main.php on line 41
+bool(false)
+
+Warning: preg_match(): Compilation failed: missing closing parenthesis at offset 7 in /main.php on line 41
+bool(false)
+
+Warning: preg_match(): Compilation failed: missing closing parenthesis at offset 4 in /main.php on line 41
+bool(false)
+
+Warning: preg_match(): Compilation failed: missing closing parenthesis at offset 4 in /main.php on line 41
+bool(false)
+
+Warning: preg_match(): Compilation failed: unrecognized character after (? or (?- at offset 4 in /main.php on line 41
+bool(false)
 continued

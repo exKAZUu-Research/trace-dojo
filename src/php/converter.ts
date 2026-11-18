@@ -2,7 +2,8 @@
 import type { Node } from '@willbooster/web-tree-sitter';
 
 import { CompileError } from '../interpreter/diagnostics';
-import type { Arg, ArrayItem, CatchClause, ClassRef, Expr, ListItem, MatchArm, Program, Stmt, SwitchCase } from './ast';
+import type { ExecutionBudget } from '../interpreter/limits';
+import type { Arg, ArrayItem, CatchClause, Expr, ListItem, MatchArm, Program, Stmt, SwitchCase } from './ast';
 import {
   collectMainVars,
   collectVariables,
@@ -15,7 +16,13 @@ import { oneArgumentBuiltinOpcodes, simpleSprintfFormat } from './builtinCompile
 import { enc, lower } from './bytes';
 import { type Constant, constantTruth, constantTypeName, foldedConstant } from './constantDefaults';
 import { formatFloat, isNumericString, NAN_BOOL_WARNING, NAN_STRING_WARNING } from './conversions';
-import { type CompileNotice, isReservedClassName, MAGIC_RUNTIME } from './converterBase';
+import {
+  type CompileNotice,
+  isReservedClassName,
+  MAGIC_RUNTIME,
+  relativeClassName,
+  SUPERGLOBALS,
+} from './converterBase';
 import { DeclarationConverter } from './declarationConverter';
 import { exportExpr, UnexportableSyntax } from './export';
 import { decodeLiteral, decodeSingleQuoted, parseIntegerLiteral } from './literals';
@@ -43,9 +50,10 @@ export class Converter extends DeclarationConverter {
     source: string,
     atomicRows: ReadonlySet<number>,
     private readonly ignoredPrefix: number,
-    protected override readonly preserveSyntax = false
+    protected override readonly preserveSyntax = false,
+    budget?: ExecutionBudget
   ) {
-    super(source, atomicRows);
+    super(source, atomicRows, budget);
   }
 
   convertProgram(root: Node): Program {
@@ -522,8 +530,7 @@ export class Converter extends DeclarationConverter {
           .map((type) => {
             const name = type.type === 'named_type' ? type.namedChildren[0] : type;
             const raw = this.nameText(name);
-            if (['self', 'static', 'parent'].includes(lower(raw)))
-              this.error(type, 'Bad class name in the catch statement');
+            if (relativeClassName(raw)) this.error(type, 'Bad class name in the catch statement');
             return this.namedClass(name);
           });
         const nameNode = child.childForFieldName('name');
@@ -903,7 +910,13 @@ export class Converter extends DeclarationConverter {
             row,
           };
         }
-        return { k: 'varvar', name: this.expr(inner), row };
+        const name = this.expr(inner);
+        const constant = interpolating ? undefined : this.compiledValue(name);
+        if (typeof constant !== 'string') return { k: 'varvar', name, row };
+        if (this.preserveSyntax) return { k: 'varvar', name: { k: 'lit', v: constant, row }, row };
+        return constant === 'GLOBALS' || SUPERGLOBALS.has(constant)
+          ? { k: 'varvar', name, row }
+          : { k: 'var', name: constant, row };
       }
       case 'name':
       case 'qualified_name':
@@ -1180,23 +1193,20 @@ export class Converter extends DeclarationConverter {
     return { k: 'const', name: this.resolveConstName(raw), row };
   }
 
-  // code-gauge-allow functionCognitiveComplexity 21 -- Keeps the ordered PHP cases together because each branch shares the same dispatch state.
+  // code-gauge-allow functionCognitiveComplexity 23 -- Keeps the ordered PHP cases together because each branch shares the same dispatch state.
   private classConstantExpression(node: Node, row: number): Expr {
     const [scope, nameNode] = node.namedChildren.filter((child) => child.type !== 'comment');
     const nameExpression = node.childForFieldName('name_expression');
     if (this.preserveSyntax) {
       const name = nameExpression ? this.expr(nameExpression) : this.nameText(nameNode);
       const className = typeof name === 'string' && lower(name) === 'class';
-      const cls: ClassRef =
-        className && ['name', 'qualified_name', 'relative_name', 'relative_scope'].includes(scope.type)
-          ? { k: 'named', name: this.nameText(scope) }
-          : this.classRef(scope);
+      const cls = this.classRef(scope, false, className);
       return { k: 'cconst', cls, name: className ? 'class' : name, row };
     }
     if (nameExpression) return this.bracedClassConstant(scope, nameExpression);
     const name = this.nameText(nameNode);
-    const className = lower(name) === 'class' ? true : undefined;
-    const cls = this.classRef(scope, !className && this.constantInitializer, className);
+    const className = lower(name) === 'class' ? (this.constantInitializer ? 'initializer' : true) : undefined;
+    const cls = this.classRef(scope, !className && this.constantInitializer, Boolean(className));
     if (!className || cls.k !== 'expr') return { k: 'cconst', cls, name, className, row: nameNode.startPosition.row };
     const literal = parserScalar(cls.e);
     if (literal === undefined) {
@@ -1220,7 +1230,7 @@ export class Converter extends DeclarationConverter {
       if (typeof literal === 'string') cls = { k: 'named', name: literal };
     }
     const name = this.expr(nameExpression);
-    const literal = this.compiledValue(name) ?? foldedConstant(name, {});
+    const literal = this.compiledValue(name) ?? foldedConstant(name, { budget: this.compileBudget });
     return { k: 'cconst', cls, name: typeof literal === 'string' ? literal : name, row: name.row };
   }
 
@@ -1288,7 +1298,7 @@ export class Converter extends DeclarationConverter {
 
   private renderAssertionExpression(node: Node): string {
     // Use separate converter state so skipped operands cannot add notices or declarations to the program.
-    const syntax = new Converter(this.source, new Set(), this.ignoredPrefix, true);
+    const syntax = new Converter(this.source, new Set(), this.ignoredPrefix, true, this.compileBudget);
     try {
       return exportExpr(syntax.expr(node));
     } catch (error) {

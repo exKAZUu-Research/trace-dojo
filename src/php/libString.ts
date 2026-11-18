@@ -1,4 +1,3 @@
-// code-gauge-allow-file fileNcss 1000 -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 // oxlint-disable typescript/no-misused-spread -- PHP splits strings into bytes or code points, never into grapheme clusters.
 // oxlint-disable unicorn/prefer-code-point -- PHP strings hold bytes as code units 0–255, which charCodeAt and fromCharCode read and write as they are.
@@ -936,6 +935,11 @@ defineFunction(
     const separator = args[2] === undefined ? '\r\n' : s(args[2]);
     if (length < 1) throwError('ValueError', 'chunk_split(): Argument #2 ($length) must be greater than 0');
     if (text === '') return separator;
+    if (separator === '') return text;
+    const count = Math.ceil(text.length / length);
+    const size = text.length + count * separator.length;
+    rt().ensureStringFits(size);
+    rt().spend(count + Math.ceil(size / 64));
     let result = '';
     for (let index = 0; index < text.length; index += length) result += text.slice(index, index + length) + separator;
     return result;

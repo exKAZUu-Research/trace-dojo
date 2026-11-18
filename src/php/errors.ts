@@ -131,7 +131,7 @@ export function clearLastError(): void {
 }
 
 /** Reports a non-fatal error as PHP's CLI does: through a user handler, or printed to standard output. */
-export function emitError(level: bigint, message: string, row = rt().row): void {
+export function emitError(level: bigint, message: string, row = rt().row, skipMatchingHandler = false): void {
   const runtime = rt();
   runtime.constantEvaluationEpoch++;
   const current = runtime.errorHandlers.at(-1);
@@ -140,7 +140,9 @@ export function emitError(level: bigint, message: string, row = rt().row): void 
     current.handler !== null &&
     !runtime.activeErrorHandlers.has(current.handler) &&
     (current.mask & level) !== 0n &&
-    (runtime.nativeStringConversionPending || callUserHandler(current.handler, level, message, row))
+    (skipMatchingHandler ||
+      runtime.nativeStringConversionPending ||
+      callUserHandler(current.handler, level, message, row))
   )
     return;
   lastErrors.set(runtime, { level, message, row });
@@ -153,8 +155,8 @@ export function emitError(level: bigint, message: string, row = rt().row): void 
   runtime.echo(`\n${name}: ${message} in ${SCRIPT_PATH} on line ${row + 1}\n`);
 }
 
-export function warn(message: string): void {
-  emitError(E_WARNING, message);
+export function warn(message: string, pending = false): void {
+  emitError(E_WARNING, message, rt().row, pending);
 }
 
 export function notice(message: string): void {
@@ -228,6 +230,35 @@ export function withCleanupExceptions(runtime: Runtime, cleanup: (capture: (erro
   } finally {
     runtime.held.length = heldMark;
   }
+}
+
+export type UpdateWarning = (emit: () => void, whilePending?: () => void) => boolean;
+
+export function withOperandWarnings(
+  update: (warning: UpdateWarning, pending: () => PhpThrow | undefined) => Value
+): Value {
+  // oxlint-disable-next-line unicorn/no-null -- PHP operators can return a null zval.
+  let result: Value = null;
+  withCleanupExceptions(rt(), (capture) => {
+    let pending: PhpThrow | undefined;
+    const warning: UpdateWarning = (emit, whilePending) => {
+      if (pending) {
+        whilePending?.();
+        return false;
+      }
+      try {
+        emit();
+        return true;
+      } catch (error) {
+        if (!(error instanceof PhpThrow)) throw error;
+        capture(error);
+        pending = error;
+        return false;
+      }
+    };
+    result = update(warning, () => pending);
+  });
+  return result;
 }
 
 function previousOf(exception: PhpObject): PhpObject | undefined {

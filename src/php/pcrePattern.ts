@@ -1,5 +1,5 @@
 // oxlint-disable unicorn/prefer-code-point -- PHP pattern strings contain bytes; UTF-8 validation reads each byte separately.
-// code-gauge-allow-file fileNcss 984 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 999 -- Holds the cases of one concern of the interpreter, which share their helpers.
 import propertyAliases from 'unicode-property-value-aliases-ecmascript';
 
 import { dec, enc, utf8Length } from './bytes';
@@ -786,62 +786,55 @@ class PatternConverter {
     return value;
   }
 
-  // code-gauge-allow functionCognitiveComplexity 17 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
   private gReference(): void {
-    const start = this.index;
-    const opener = this.source[start];
-    if (opener === '<' || opener === "'") {
-      this.angleSubroutine(opener === '<' ? '>' : "'");
+    const opener = this.source[this.index];
+    if (opener === '<' || opener === "'" || opener === '{') {
+      this.delimitedGReference(opener);
       return;
     }
-    const braced = opener === '{';
-    const match = this.readMatch(braced ? /^\{[ \t]*([+-]?\d+)[ \t]*\}/ : /^([+-]?\d+)/);
-    if (!match) {
-      if (braced) {
-        this.index++;
-        const { name, start: nameStart } = this.readGroupName('}');
-        this.reference(name, nameStart);
-        return;
-      }
+    const digits = this.readMatch(/^[+-]?\d+/)?.[0];
+    if (!digits)
       this.fail(
         String.raw`\g is not followed by a braced, angle-bracketed, or quoted name/number or by a plain number`,
         this.index
       );
-    }
-    const target = match[1];
-    const number = Number(target);
-    const relative = /^[+-]/.test(target);
-    const at = braced && relative && number <= 0 ? start : this.index;
-    if (Math.abs(number) > 65_535) this.fail('subpattern number is too big', this.index + (braced ? -1 : 0));
-    if (relative && number === 0) this.fail('a relative value of zero is not allowed', at);
-    const group = relative ? this.names.length - Number(number > 0) + number : number;
-    if (group <= 0) this.fail('reference to non-existent subpattern', at);
+    const group = this.groupNumber(digits, this.index);
+    if (group === 0) this.fail('reference to non-existent subpattern', this.index);
     this.reference(group, this.index);
   }
 
-  private angleSubroutine(terminator: string): void {
-    this.index++;
-    const start = this.index - 1;
+  private delimitedGReference(opener: '{' | '<' | "'"): void {
+    const start = this.index++;
+    const terminator = opener === '{' ? '}' : opener === '<' ? '>' : "'";
+    if (opener === '{') this.readMatch(/^[ \t]*/);
     const digits = this.readMatch(/^[+-]?\d+/)?.[0];
     if (!digits) {
       const { name, start: nameStart } = this.readGroupName(terminator);
-      this.subroutine(name, nameStart);
+      if (opener === '{') this.reference(name, nameStart);
+      else this.subroutine(name, nameStart);
       return;
     }
-    const number = Number(digits);
-    const relative = /^[+-]/.test(digits);
-    if (Math.abs(number) > 65_535) this.fail('subpattern number is too big', start);
-    if (relative && number === 0) this.fail('a relative value of zero is not allowed', start);
+    const group = this.groupNumber(digits, start);
+    if (opener === '{') this.readMatch(/^[ \t]*/);
     if (this.source[this.index] !== terminator)
       this.fail('syntax error in subpattern number (missing terminator?)', this.index);
     this.index++;
-    const group = relative ? this.names.length - Number(number > 0) + number : number;
-    if (relative && group <= 0) this.fail('reference to non-existent subpattern', start);
-    this.subroutine(group, this.index);
+    if (opener === '{') {
+      if (group === 0) this.fail('reference to non-existent subpattern', this.index);
+      this.reference(group, this.index);
+    } else this.subroutine(group, this.index);
   }
 
-  // code-gauge-allow functionNcss 33 -- Keeps the ordered PHP cases together because each branch shares the same dispatch state.
-  // code-gauge-allow functionCognitiveComplexity 17 -- Keeps the ordered PHP cases together because each branch shares the same dispatch state.
+  private groupNumber(digits: string, at: number): number {
+    const number = Number(digits);
+    if (Math.abs(number) > 65_535) this.fail('subpattern number is too big', at);
+    if (digits[0] !== '+' && digits[0] !== '-') return number;
+    if (number === 0) this.fail('a relative value of zero is not allowed', at);
+    const group = this.names.length - Number(number > 0) + number;
+    if (group <= 0) this.fail('reference to non-existent subpattern', at);
+    return group;
+  }
+
   private parenthesizedSubroutine(rest: string): void {
     this.index += 2;
     if (rest.startsWith('&') || rest.startsWith('P>')) {
@@ -864,15 +857,27 @@ class PatternConverter {
       if (next >= this.source.length) this.fail('missing closing parenthesis', next);
       this.fail('digit expected after (?+', next + 1);
     }
-    const number = Number(digits);
-    const relative = /^[+-]/.test(digits);
-    if (Math.abs(number) > 65_535) this.fail('subpattern number is too big', this.index);
-    if (relative && number === 0) this.fail('a relative value of zero is not allowed', this.index);
-    const group = relative ? this.names.length - Number(number > 0) + number : number;
-    if (relative && group <= 0) this.fail('reference to non-existent subpattern', this.index);
+    const group = this.groupNumber(digits, this.index);
+    if (this.source[this.index] === '(') this.readSubroutineCaptures();
     if (this.source[this.index] !== ')') this.fail('missing closing parenthesis', this.index);
     this.index++;
     this.subroutine(group, this.index - 1);
+  }
+
+  private readSubroutineCaptures(): void {
+    do {
+      this.index++;
+      const start = this.index;
+      const opener = this.source[this.index];
+      const digits = this.readMatch(/^[+-]?\d+/)?.[0];
+      if (digits) this.groupNumber(digits, this.index);
+      else if (opener === '<' || opener === "'") {
+        this.index++;
+        this.readGroupName(opener === '<' ? '>' : "'");
+      } else this.fail('expected capture group number or name', start);
+    } while (this.source[this.index] === ',');
+    if (this.source[this.index] !== ')') this.fail('missing closing parenthesis', this.index);
+    this.index++;
   }
 
   private subroutine(target: string | number, at: number): void {
@@ -1015,7 +1020,9 @@ class PatternConverter {
 
   private setInlineOption(options: PatternOptions, letter: string, unsetting: boolean): void {
     if (letter === 'a' || letter === 'r') {
-      unsupported('途中のフラグの指定');
+      if (letter === 'a' && /^[DSWTP]$/.test(this.source[this.index] ?? '')) this.index++;
+      this.unavailable ??= '途中のフラグの指定';
+      return;
     }
     const option = INLINE_OPTIONS.get(letter);
     if (option === undefined) this.fail('unrecognized character after (? or (?-', this.index);

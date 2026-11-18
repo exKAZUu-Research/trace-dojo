@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 886 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 905 -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import {
   applyOperator,
@@ -44,7 +44,7 @@ import {
 import * as classesModule from './classes';
 import { debugType, getType, numericPrefix, toBool, valueName } from './conversions';
 import * as conversionsModule from './conversions';
-import { deprecated, throwError, warn } from './errors';
+import { deprecated, throwError, type UpdateWarning, warn, withOperandWarnings } from './errors';
 import { constantDeprecation } from './native';
 import {
   bitwiseNot,
@@ -905,7 +905,7 @@ function classOfValue(value: Value): PhpClass {
 function classConstantOf(e: Extract<Expr, { k: 'cconst' }>): Value {
   const runtime = rt();
   runtime.row = e.row;
-  if (e.className) return resolveClassName(e.cls);
+  if (e.className) return resolveClassName(e.cls, e.className === 'initializer');
   const receiver = e.cls.k === 'expr' ? resolveClassRef(e.cls) : undefined;
   const name = typeof e.name === 'string' ? e.name : ev(e.name);
   runtime.row = e.row;
@@ -921,7 +921,7 @@ function classConstantOf(e: Extract<Expr, { k: 'cconst' }>): Value {
   return classConstant(cls, name, runtime.frame.scope, displayName, trackEvaluation);
 }
 
-function resolveClassName(ref: ClassRef): string {
+function resolveClassName(ref: ClassRef, initializer: boolean): string {
   if (ref.k === 'named') return ref.name;
   if (ref.k === 'expr') {
     const value = ev(ref.e);
@@ -929,7 +929,11 @@ function resolveClassName(ref: ClassRef): string {
       throwError('TypeError', `Cannot use "::class" on ${valueName(value)}`);
     return value.cls.fullName;
   }
-  requireClassScope(rt().frame.scope, ref.k, 'className');
+  const frame = rt().frame;
+  if (!frame.scope && initializer) throwError('Error', 'Cannot use "self" when no class scope is active');
+  const scope = requireClassScope(frame.scope, ref.k, 'className');
+  if (ref.k === 'parent' && !scope.parent)
+    throwError('Error', 'Cannot use "parent" when current class scope has no parent');
   return resolveClassRef(ref).fullName;
 }
 
@@ -1046,12 +1050,35 @@ function binary(e: Extract<Expr, { k: 'bin' }>): Value {
   const mark = runtime.frame.temporaries.length;
   const readLeft = prepareOperand(e.l);
   const readRight = prepareOperand(e.r);
-  const left = readLeft(e.r.row);
-  const right = readRight(e.r.row);
-  runtime.row = e.r.row;
-  // PHP frees the operands as soon as the operator has used them.
-  const result = e.swapOperands ? operate(e.op, right, left) : operate(e.op, left, right);
-  return keepResult(mark, result) as Value;
+  const run = (left: Value, right: Value, pending?: PhpThrow): Value => {
+    runtime.row = e.r.row;
+    const result = e.swapOperands ? operate(e.op, right, left, pending) : operate(e.op, left, right, pending);
+    return keepResult(mark, result) as Value;
+  };
+  if (!missingCompiledOperand(e.l) && !missingCompiledOperand(e.r)) return run(readLeft(e.r.row), readRight(e.r.row));
+  return withOperandWarnings((warning, pending) => {
+    const left = readOperandWithWarning(e.l, readLeft, warning, e.r.row);
+    const right = readOperandWithWarning(e.r, readRight, warning, e.r.row);
+    return run(left, right, pending());
+  });
+}
+
+export function missingCompiledOperand(e: Expr): boolean {
+  return e.k === 'var' && isCompiledVariable(e) && !rt().frame.vars.has(e.name);
+}
+
+export function readOperandWithWarning(
+  e: Expr,
+  read: (row?: number) => Value,
+  warning: UpdateWarning,
+  row: number
+): Value {
+  if (!missingCompiledOperand(e)) return read(row);
+  let value: Value = null;
+  warning(() => {
+    value = read(row);
+  });
+  return value;
 }
 
 export function isCompiledVariable(e: Expr): boolean {
@@ -1076,7 +1103,7 @@ function holdOperand(e: Expr): Value {
   return value;
 }
 
-function operate(op: string, left: Value, right: Value): Value {
+function operate(op: string, left: Value, right: Value, pending?: PhpThrow): Value {
   switch (op) {
     case 'xor': {
       return toBool(left) !== toBool(right);
@@ -1109,7 +1136,7 @@ function operate(op: string, left: Value, right: Value): Value {
       return BigInt(compare(left, right));
     }
     default: {
-      return applyOperator(op, left, right);
+      return applyOperator(op, left, right, pending);
     }
   }
 }

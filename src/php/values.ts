@@ -376,6 +376,10 @@ export class PhpArray {
     dropped(old);
   }
 
+  sampleKey(draw: (max: number) => number): Key {
+    return this.ordered().sampleKey(draw);
+  }
+
   keys(): Key[] {
     return [...this.map.keys()];
   }
@@ -726,6 +730,29 @@ class ArrayOrder {
 
   hasDensePackedStorage(): boolean {
     return Boolean(this.packed && this.nextIndex === this.entries.size);
+  }
+
+  // code-gauge-allow functionCognitiveComplexity 21 -- Keeps the ordered PHP cases together because each branch shares the same dispatch state.
+  sampleKey(draw: (max: number) => number): Key {
+    if (this.entries.size === this.nextIndex || this.entries.size < this.nextIndex - (this.nextIndex >> 1)) {
+      let index = draw(this.entries.size - 1);
+      for (const entry of this.orderedEntries()) {
+        if (index-- === 0) return entry.key;
+      }
+    } else if (this.packed) {
+      for (;;) {
+        const key = BigInt(draw(this.nextIndex - 1));
+        if (this.get(key)) return key;
+      }
+    } else {
+      const buckets: (Key | undefined)[] = [];
+      for (const entry of this.orderedEntries()) buckets[entry.index] = entry.key;
+      for (;;) {
+        const key = buckets[draw(this.nextIndex - 1)];
+        if (key !== undefined) return key;
+      }
+    }
+    throw new Error('Invalid array sampling index');
   }
 
   cursor(): ArrayCursor {

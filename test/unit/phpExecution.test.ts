@@ -22,7 +22,20 @@ test.each([
   [String.raw`class A extends \self {}`, String.raw`'\self' is an invalid class name`],
   [String.raw`class A implements \parent {}`, String.raw`'\parent' is an invalid class name`],
   [String.raw`class A { use \self; }`, String.raw`'\self' is an invalid class name`],
-  [String.raw`$object instanceof namespace\self;`, String.raw`'namespace\self' is an invalid class name`],
+  [String.raw`try {} catch (namespace\self $error) {}`, 'Bad class name in the catch statement'],
+  [String.raw`class A extends namespace\Self {}`, 'Cannot use "Self" as class name, as it is reserved'],
+  [String.raw`class A implements namespace\parent {}`, 'Cannot use "parent" as interface name, as it is reserved'],
+  [String.raw`class A { use namespace\self; }`, 'Cannot use "self" as trait name, as it is reserved'],
+  [String.raw`function f(): namespace\static {}`, "Type declaration 'static' must be unqualified"],
+  [String.raw`function f(A\int $value) {}`, String.raw`Cannot use "A\int" as a type name as it is reserved`],
+  [
+    String.raw`namespace N; class T { public ?App\Mixed $value; }`,
+    String.raw`Cannot use "N\App\Mixed" as a type name as it is reserved`,
+  ],
+  [
+    String.raw`use A\int as I; function f(I $value) {}`,
+    String.raw`Cannot use "A\int" as a type name as it is reserved`,
+  ],
   [String.raw`function f(\Int $value) {}`, "Type declaration 'int' must be unqualified"],
   [String.raw`namespace A; function f(namespace\int $value) {}`, "Type declaration 'int' must be unqualified"],
   [String.raw`function f(\ArRaY $value) {}`, 'Cannot use "ArRaY" as a type name as it is reserved'],
@@ -33,6 +46,16 @@ test.each([
 ])('rejects qualified relative class and builtin type names in %s', (statement, message) => {
   expect(run(`<?php\n${statement}`)).toMatchObject({ kind: 'compileError', diagnostics: [{ row: 1, message }] });
 });
+
+test.each(['self', 'parent', String.raw`\self`, String.raw`namespace\parent`])(
+  'reports the global initializer diagnostic for %s::class',
+  (scope) => {
+    expect(run(`<?php\nconst NAME = ${scope}::class;`)).toMatchObject({
+      kind: 'executed',
+      stdout: expect.stringContaining('Cannot use "self" when no class scope is active'),
+    });
+  }
+);
 
 test.each([
   ['var_dump(new enum instanceof stdClass);', 'enum', ':'],
@@ -57,6 +80,20 @@ test.each([
     kind: 'compileError',
     diagnostics: [{ row: 1, message: `syntax error, unexpected token "${token}", expecting "${expected}"` }],
   });
+});
+
+test.each([
+  ['new );', 1, "Unmatched ')'"],
+  ['$x = new ); $y = 1;', 1, "Unmatched ')'"],
+  ['$x = new ];', 1, "Unmatched ']'"],
+  ['$x = new , ;', 1, 'syntax error, unexpected token ",", expecting "class"'],
+  ['var_dump(new ,);', 1, 'syntax error, unexpected token ",", expecting ":"'],
+  ['var_dump((new ));', 1, 'syntax error, unexpected token ")", expecting "class"'],
+  ['return [1, new ];', 1, 'syntax error, unexpected token "]", expecting "class"'],
+  ['var_dump(new\n]);', 2, "Unclosed '(' on line 2 does not match ']'"],
+  ['new /* keep the token row */\n);', 2, "Unmatched ')'"],
+])('reports the PHP delimiter diagnostic in %s', (statement, row, message) => {
+  expect(run(`<?php\n${statement}`)).toMatchObject({ kind: 'compileError', diagnostics: [{ row, message }] });
 });
 
 test('retains contextual enum class references beside operators', () => {
@@ -1832,4 +1869,23 @@ test.each([
     kind: 'compileError',
     diagnostics: [{ message: expect.stringContaining(message) }],
   });
+});
+
+test('bounds chunk_split before building an oversized result', () => {
+  const execution = run('<?php echo chunk_split(str_repeat("a", 1000), 1, str_repeat("b", 1000));');
+  expect(execution.kind === 'executed' && execution.stdout).toMatch(/^\nFatal error: Allowed memory size/);
+});
+
+test('folds comparisons of shared class constant arrays within the compiler budget', () => {
+  const declarations = ['const A0 = [1], B0 = [1];'];
+  for (let level = 1; level <= 22; level++) {
+    const previous = level - 1;
+    declarations.push(
+      `const A${level} = [self::A${previous}, self::A${previous}];`,
+      `const B${level} = [self::B${previous}, self::B${previous}];`
+    );
+  }
+  const source = `<?php class SharedArrays { ${declarations.join(' ')} }
+  var_dump((SharedArrays::A22 === SharedArrays::B22) && true);`;
+  expect(run(source)).toMatchObject({ kind: 'executed', stdout: 'bool(true)\n' });
 });

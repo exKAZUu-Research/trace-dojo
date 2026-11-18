@@ -819,6 +819,7 @@ function defaultText(expression: Expr, method: Method): string {
   const traitDeclaration =
     method.scope.kind === 'trait' || (declaringName && findClass(declaringName)?.kind === 'trait');
   const context = {
+    budget: rt(),
     preserveNamedConstants: true,
     className: (ref: Extract<Expr, { k: 'cconst' }>['cls']): string | undefined => {
       if (traitDeclaration) return undefined;
@@ -1190,16 +1191,18 @@ export function writeProp(
     guarded(object, `set:${name}`, () => callMagic(object, magic, [name, value]));
     return value;
   }
-  createDynamicProp(object, name);
-  object.props.set(name, share(value));
+  createDynamicProp(object, name, share(value));
   return value;
 }
 
-export function createDynamicProp(object: PhpObject, name: string, deprecate = deprecated): void {
+export function createDynamicProp(object: PhpObject, name: string, value: Slot = null, deprecate = deprecated): void {
   if (object.cls.isReadonly || object.cls.name === 'Closure')
     throwError('Error', `Cannot create dynamic property ${object.cls.name}::$${name}`);
-  if (object.cls.name !== 'stdClass' && !allowsDynamicProps(object.cls)) {
-    deprecate(`Creation of dynamic property ${object.cls.name}::$${name} is deprecated`);
+  try {
+    if (object.cls.name !== 'stdClass' && !allowsDynamicProps(object.cls))
+      deprecate(`Creation of dynamic property ${object.cls.name}::$${name} is deprecated`);
+  } finally {
+    if (!object.props.has(name)) object.props.set(name, value);
   }
 }
 
@@ -1229,7 +1232,7 @@ export function coerceProperty(decl: PropDecl, value: Value, object?: PhpObject,
   return coerced;
 }
 
-/** Checks indirect writes and returns the object to mutate when a set-only hook exposes only its value. */
+/** Checks indirect writes and returns an object value that can be mutated without exposing its property slot. */
 // code-gauge-allow functionCognitiveComplexity 24 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 export function checkIndirectModification(
   object: PhpObject,
@@ -1247,22 +1250,19 @@ export function checkIndirectModification(
     if (value instanceof PhpObject && !value.isResource) return value;
     throwError('Error', `Indirect modification of ${decl.cls.name}::$${name} is not allowed`);
   }
-  if (decl.isReadonly) {
-    const slot = object.props.get(decl.key);
-    const value = slot instanceof Ref ? slot.v : slot;
-    if (value === UNINIT || value === undefined) {
-      if (mode === 'unset') return;
-      if (mode === 'update') readProp(object, name, scope);
-    }
-    if (value instanceof PhpObject) return;
-    throwError('Error', `Cannot indirectly modify readonly property ${decl.cls.name}::$${name}`);
-  } else if (!canWriteProp(decl, scope)) {
-    throwError(
-      'Error',
-      `Cannot indirectly modify ${decl.setVisibility ?? decl.visibility}(set) property ${decl.cls.name}::$${name} from ${scopeText(scope)}`
-    );
+  if (!decl.isReadonly && canWriteProp(decl, scope)) return;
+  const slot = object.props.get(decl.key);
+  const value = slot instanceof Ref ? slot.v : slot;
+  if (value instanceof PhpObject && !value.isResource) return value;
+  if (value === UNINIT || value === undefined) {
+    if (mode === 'unset') return;
+    if (decl.isReadonly && mode === 'update') readProp(object, name, scope);
   }
-  return undefined;
+  if (decl.isReadonly) throwError('Error', `Cannot indirectly modify readonly property ${decl.cls.name}::$${name}`);
+  throwError(
+    'Error',
+    `Cannot indirectly modify ${setterAccessLabel(decl)} property ${decl.cls.name}::$${name} from ${scopeText(scope)}`
+  );
 }
 
 function effectiveSetVisibility(property: Pick<PropDecl, 'visibility' | 'setVisibility' | 'isReadonly'>): Visibility {
@@ -1313,18 +1313,18 @@ export function propRef(
     throwError('Error', `Cannot access ${decl.visibility} property ${object.cls.name}::$${name}`);
   }
   const getter = decl?.hooks?.get;
-  if (decl && getter && !object.guards?.has(`hook:${name}`)) {
-    if (mode === 'foreach' && !(getter.kind === 'user' && getter.decl.byRefReturn))
+  if (mode === 'foreach') {
+    if (decl?.isReadonly)
+      throwError('Error', `Cannot acquire reference to readonly property ${decl.cls.name}::$${name}`);
+    if (decl?.hooks && !(getter?.kind === 'user' && getter.decl.byRefReturn))
       throwError('Error', `Cannot create reference to property ${object.cls.name}::$${name}`);
-    return hookedPropertyReference(object, decl, scope);
+  }
+  if (decl && getter && !object.guards?.has(`hook:${name}`)) return hookedPropertyReference(object, decl, scope);
+  if (mode === 'alias') {
+    const indirect = checkIndirectModification(object, name, scope);
+    if (indirect) return Ref.temporary(indirect);
   }
   let slot = object.props.get(key);
-  const value = slot instanceof Ref ? slot.v : slot;
-  if (mode === 'foreach' && decl?.isReadonly)
-    throwError('Error', `Cannot acquire reference to readonly property ${decl.cls.name}::$${name}`);
-  if (decl?.isReadonly && value instanceof PhpObject) return Ref.temporary(value);
-  const indirect = checkIndirectModification(object, name, scope);
-  if (indirect) return Ref.temporary(indirect);
   if (slot instanceof Ref) return slot;
   if (object.unsetProperties?.has(key)) {
     const overloaded = overloadedPropertyReference(object, name);
@@ -1399,37 +1399,40 @@ function overloadedPropertyReference(object: PhpObject, name: string): Ref | und
 }
 
 // code-gauge-allow functionCognitiveComplexity 26 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
-// code-gauge-allow functionNcss 37 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+// code-gauge-allow functionNcss 41 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 export function bindPropertyReference(object: PhpObject, name: string, ref: Ref, scope: PhpClass | undefined): void {
   if (object.isResource) throwError('Error', `Attempt to modify property "${name}" on resource`);
   const property = lookupProp(object.cls, name, scope);
   checkStaticInstanceAccess(object, name, scope, property, 'get');
   const decl = property?.isStatic ? undefined : property;
-  if ((!decl || !canAccessProp(decl, scope)) && object.cls.findMethod('__get')) {
-    rt().lastReturnRef = undefined;
-    const value = readProp(object, name, scope, 'quiet');
-    if (!(value instanceof PhpObject) && !rt().lastReturnRef)
-      notice(`Indirect modification of overloaded property ${object.cls.name}::$${name} has no effect`);
-    rt().lastReturnRef = undefined;
+  const accessible = decl && canAccessProp(decl, scope);
+  const magic = !accessible && object.cls.findMethod('__get');
+  const hooked = decl?.hooks?.get && accessible && !isBackingAccess(object, decl, 'write');
+  if (magic || hooked) {
+    const runtime = rt();
+    runtime.lastReturnRef = undefined;
+    try {
+      const value = readProp(object, name, scope, 'quiet');
+      if (magic && !(value instanceof PhpObject) && !runtime.lastReturnRef)
+        notice(`Indirect modification of overloaded property ${object.cls.name}::$${name} has no effect`);
+    } finally {
+      runtime.lastReturnRef = undefined;
+    }
     throwError('Error', 'Cannot assign by reference to overloaded object');
   }
   if (decl) {
-    if (!canAccessProp(decl, scope))
-      throwError('Error', `Cannot access ${decl.visibility} property ${object.cls.name}::$${name}`);
-    if (decl.isReadonly) {
-      const slot = object.props.get(decl.key);
-      const value = slot instanceof Ref ? slot.v : slot;
-      throwError(
-        'Error',
-        value instanceof PhpObject
-          ? 'Cannot assign by reference to overloaded object'
-          : `Cannot indirectly modify readonly property ${decl.cls.name}::$${name}`
-      );
-    }
     if (checkIndirectModification(object, name, scope))
       throwError('Error', 'Cannot assign by reference to overloaded object');
     if (decl.type) attachPropertyReference(ref, decl, object);
-  } else if (!object.props.has(name)) createDynamicProp(object, name);
+  } else if (!object.props.has(name)) {
+    ref.isRef = true;
+    try {
+      createDynamicProp(object, name, ref);
+    } finally {
+      if (object.props.get(name) === ref) ref.rc++;
+    }
+    return;
+  }
   const key = decl?.key ?? name;
   const old = object.props.get(key);
   if (old === ref) return;

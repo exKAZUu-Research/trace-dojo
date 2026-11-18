@@ -6,3 +6,19 @@ string(11) "Scope\Child"
 string(10) "Scope\Base"
 string(10) "Scope\Base"
 Cannot use "self" in the global scope
+object(Scope\Child)#4 (1) {
+  ["label"]=>
+  string(10) "Scope\Base"
+}
+object(Scope\Base)#5 (1) {
+  ["label"]=>
+  string(10) "Scope\Base"
+}
+object(Scope\Child)#6 (1) {
+  ["label"]=>
+  string(10) "Scope\Base"
+}
+bool(true)
+bool(true)
+int(9)
+Cannot use "parent" when current class scope has no parent

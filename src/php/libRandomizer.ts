@@ -445,12 +445,20 @@ function bytesFromString(algo: Algo, source: string, length: number): string {
   return text;
 }
 
-/** Transcribes php_array_pick_keys for an array without holes. */
+/** Selects keys in the same order as php_array_pick_keys. */
 function pickKeys(algo: Algo, array: PhpArray, wanted: number): PhpArray {
-  const keys = array.keys();
-  if (keys.length === 0)
+  if (array.size === 0)
     throwError('ValueError', String.raw`Random\Randomizer::pickArrayKeys(): Argument #1 ($array) must not be empty`);
-  if (wanted === 1) return PhpArray.list([keys[Number(range(algo, 0n, BigInt(keys.length - 1)))]]);
+  if (wanted === 1) {
+    const runtime = rt();
+    runtime.spend(Math.ceil(array.size / 64));
+    const key = array.sampleKey((max) => {
+      runtime.spend();
+      return Number(range(algo, 0n, BigInt(max)));
+    });
+    return PhpArray.list([key]);
+  }
+  const keys = array.keys();
   if (wanted <= 0 || wanted > keys.length)
     throwError(
       'ValueError',

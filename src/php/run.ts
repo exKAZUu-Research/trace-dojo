@@ -40,19 +40,21 @@ export function runProgram(runtime: Runtime, parsed: ParsedProgram, onEnd?: (fra
     runtime.program = parsed.program;
     runtime.notices = parsed.notices;
     let uncaughtException: string | undefined;
+    let finalTurtles: ProgramRun['finalTurtles'];
     try {
       uncaughtException = guard(runtime, () => {
         for (const notice of parsed.parseNotices) emitError(E_DEPRECATED, notice.message, notice.row);
         runStatements(parsed.program, parsed.conversionError);
       });
       onEnd?.(runtime.globalFrame);
+      finalTurtles = runtime.world.turtleTraces();
       uncaughtException = shutdown(runtime) ?? uncaughtException;
     } finally {
       runtime.flush();
     }
     return {
       finalBoard: runtime.world.boardText(),
-      finalTurtles: runtime.world.turtleTraces(),
+      finalTurtles,
       uncaughtException,
       ...runtime.io.output(),
     };

@@ -22,6 +22,12 @@ const MISSING_TOKEN_NAMES: Record<string, string> = {
 };
 
 const newClassKeywordOperators = new Set(['instanceof', 'and', 'or', 'xor']);
+const OPEN_DELIMITERS = new Set(['(', '[', '{']);
+const CLOSING_DELIMITERS = new Map([
+  [')', '('],
+  [']', '['],
+  ['}', '{'],
+]);
 
 export interface ParsedProgram {
   program: Program;
@@ -106,20 +112,24 @@ function locatePhpErrors(root: Node, diagnostics: SourceDiagnostic[]): SourceDia
 
 function newKeywordError(root: Node, recovering: boolean): SourceDiagnostic | undefined {
   for (const expression of root.descendantsOfType('object_creation_expression')) {
-    const diagnostic = creationClassDiagnostic(expression);
+    const diagnostic = creationClassDiagnostic(root, expression);
     if (diagnostic) return diagnostic;
   }
   if (!recovering) return undefined;
   for (const error of root.descendantsOfType('ERROR')) {
-    const diagnostic = recoveredNewName(error);
+    const diagnostic = recoveredNewName(root, error);
     if (diagnostic) return diagnostic;
   }
   return undefined;
 }
 
-function creationClassDiagnostic(expression: Node): SourceDiagnostic | undefined {
+function creationClassDiagnostic(root: Node, expression: Node): SourceDiagnostic | undefined {
   const name = expression.namedChildren.find((child) => child.type !== 'comment');
   if (name?.type !== 'name') return undefined;
+  if (name.isMissing) {
+    const keyword = expression.children.find((child) => child.type === 'new');
+    return keyword && emptyNewClassDiagnostic(root, keyword, startsNewArgument(expression));
+  }
   const parent = expression.parent;
   const binary =
     parent?.type === 'binary_expression' && parent.childForFieldName('left')?.id === expression.id ? parent : undefined;
@@ -143,11 +153,14 @@ function startsNewArgument(expression: Node): boolean {
 }
 
 function followsArgumentSeparator(parts: Node[], index: number, knownArguments: boolean): boolean {
-  const previous = parts[index - 1];
-  if (previous?.type === ',') return true;
-  if (previous?.type !== '(') return false;
+  const previous = parts[index - 1]?.type;
+  if (previous !== '(' && previous !== ',') return false;
   if (knownArguments) return true;
-  const callee = parts[index - 2];
+  const delimiters: Node[] = [];
+  for (const part of parts.slice(0, index)) trackDelimiter(delimiters, part);
+  const open = delimiters.at(-1);
+  if (open?.type !== '(') return false;
+  const callee = parts[parts.indexOf(open) - 1];
   return (
     callee !== undefined &&
     (callee.type !== 'name' || reservedIdentifierToken(callee.text) === undefined) &&
@@ -162,7 +175,7 @@ function nextSignificantSibling(node: Node): Node | undefined {
 }
 
 // code-gauge-allow functionCognitiveComplexity 23 -- Keeps the ordered PHP cases together because each branch shares the same dispatch state.
-function recoveredNewName(error: Node): SourceDiagnostic | undefined {
+function recoveredNewName(root: Node, error: Node): SourceDiagnostic | undefined {
   const parts = error.children.filter((child) => child.type !== 'comment');
   if (
     error.parent?.type === 'object_creation_expression' &&
@@ -175,26 +188,65 @@ function recoveredNewName(error: Node): SourceDiagnostic | undefined {
     };
   for (const [index, child] of parts.entries()) {
     if (child.text.toLowerCase() !== 'new') continue;
-    const name = parts[index + 1] ?? nextSignificantSibling(error);
-    if (!name) continue;
+    const startsArgument =
+      index === 0 && parts.length === 1 ? startsNewArgument(error) : followsArgumentSeparator(parts, index, false);
+    const name = parts[index + 1];
     const operatorNode = parts[index + 2];
     const operator = operatorNode?.text.toLowerCase();
-    if (name.text.toLowerCase() === 'readonly' && operator === 'instanceof')
+    if (name?.text.toLowerCase() === 'readonly' && operator === 'instanceof')
       return {
         row: operatorNode.startPosition.row,
         message: 'syntax error, unexpected token "instanceof", expecting "class"',
       };
-    const loneKeyword = index === 0 && parts.length === 1;
-    const startsArgument = loneKeyword ? startsNewArgument(error) : followsArgumentSeparator(parts, index, false);
-    if (name.type === ')') {
-      const expected = startsArgument ? ':' : 'class';
-      return { row: name.startPosition.row, message: `syntax error, unexpected token ")", expecting "${expected}"` };
+    if (!name || !operator || !newClassKeywordOperators.has(operator)) {
+      const diagnostic = emptyNewClassDiagnostic(root, child, startsArgument);
+      if (diagnostic) return diagnostic;
+      continue;
     }
-    if (!operator || !newClassKeywordOperators.has(operator)) continue;
     const diagnostic = unexpectedNewName(name, startsArgument);
     if (diagnostic) return diagnostic;
   }
   return undefined;
+}
+
+function emptyNewClassDiagnostic(root: Node, keyword: Node, startsArgument: boolean): SourceDiagnostic | undefined {
+  const suffix = root.text.slice(keyword.endIndex - root.startIndex);
+  const token = /^(?:[ \t\r\n\v\f]|\/\*[\s\S]*?\*\/|(?:\/\/|#(?!\[))(?:[^?\r\n]|\?(?!>))*)*([)\]},;])/.exec(suffix);
+  if (!token) return undefined;
+  const symbol = token[1];
+  const offset = keyword.endIndex + token[0].length - 1;
+  const row = keyword.endPosition.row + (token[0].match(/\r\n?|\n/g)?.length ?? 0);
+  const opening = CLOSING_DELIMITERS.get(symbol);
+  if (opening) {
+    const open = unclosedDelimiterAt(root, offset);
+    if (!open) return { row, message: `Unmatched '${symbol}'` };
+    if (open.type !== opening) {
+      const line = open.startPosition.row === row ? '' : ` on line ${open.startPosition.row + 1}`;
+      return { row, message: `Unclosed '${open.type}'${line} does not match '${symbol}'` };
+    }
+  }
+  const expected = startsArgument ? ':' : 'class';
+  return { row, message: `syntax error, unexpected token "${symbol}", expecting "${expected}"` };
+}
+
+function unclosedDelimiterAt(root: Node, offset: number): Node | undefined {
+  const delimiters: Node[] = [];
+  const pending = [root];
+  for (let node = pending.pop(); node && node.startIndex < offset; node = pending.pop()) {
+    if (node.childCount === 0) {
+      trackDelimiter(delimiters, node);
+    } else {
+      const children = node.children;
+      for (let index = children.length - 1; index >= 0; index--) pending.push(children[index]);
+    }
+  }
+  return delimiters.at(-1);
+}
+
+function trackDelimiter(delimiters: Node[], token: Node): void {
+  if (token.isMissing) return;
+  if (OPEN_DELIMITERS.has(token.type)) delimiters.push(token);
+  else if (delimiters.length > 0 && CLOSING_DELIMITERS.get(token.type) === delimiters.at(-1)?.type) delimiters.pop();
 }
 
 function unexpectedNewName(name: Node, startsArgument: boolean): SourceDiagnostic | undefined {

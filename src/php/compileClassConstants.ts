@@ -1,3 +1,4 @@
+import type { ExecutionBudget } from '../interpreter/limits';
 import type { ClassDecl, ClassRef, Expr } from './ast';
 import { canBindClass } from './astAnalysis';
 import { lower } from './bytes';
@@ -9,12 +10,15 @@ export class CompileClassConstants {
   private readonly bound = new Map<string, ClassDecl>();
   private readonly values = new WeakMap<ClassDecl, Map<string, Constant>>();
 
+  constructor(private readonly budget: () => ExecutionBudget) {}
+
   lookup(scope: ClassDecl | undefined, closure = false): ClassConstantLookup {
     return (cls, name) => this.get(cls, name, scope, closure);
   }
 
   add(decl: ClassDecl, name: string, expression: Expr, type: TypeDecl | undefined): string | undefined {
     const value = foldedConstant(expression, {
+      budget: this.budget(),
       classConstant: this.lookup(decl),
       className: (cls) => this.className(cls, decl),
     });
@@ -57,6 +61,7 @@ export class CompileClassConstants {
     while (key) {
       const decl = this.bound.get(key);
       if (!decl) return this.nativeConstant(key, name);
+      this.budget().spend(1 + Math.ceil(decl.consts.length / 64));
       if (decl.consts.some((constant) => constant.name === name)) return this.own(decl, name, scope);
       key = decl.parent && lower(decl.parent);
     }
@@ -64,6 +69,7 @@ export class CompileClassConstants {
 
   private own(decl: ClassDecl, name: string, scope: ClassDecl | undefined): Constant | undefined {
     if (decl.kind === 'trait') return;
+    this.budget().spend(1 + Math.ceil(decl.consts.length / 64));
     const constant = decl.consts.find((item) => item.name === name);
     if (!constant) return;
     if (constant.visibility !== 'public' && decl !== scope) {

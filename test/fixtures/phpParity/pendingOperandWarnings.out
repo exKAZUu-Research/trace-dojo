@@ -1,0 +1,109 @@
+Undefined variable $u
+DivisionByZeroError: Division by zero (Undefined variable $u)
+Undefined variable $u
+DivisionByZeroError: Modulo by zero (Undefined variable $u)
+Undefined variable $u
+DivisionByZeroError: Division by zero (Undefined variable $u)
+Undefined variable $u
+DivisionByZeroError: Modulo by zero (Undefined variable $u)
+Undefined variable $u
+ArithmeticError: Bit shift by negative number (Undefined variable $u)
+Undefined variable $u
+DivisionByZeroError: Division by zero (Undefined variable $u)
+Undefined variable $u
+ErrorException: Undefined variable $u ()
+Undefined variable $u
+ErrorException: Undefined variable $u ()
+Undefined variable $u
+NULL
+ErrorException: Undefined variable $u ()
+Undefined variable $u
+NULL
+ErrorException: Undefined variable $u ()
+Undefined variable $u
+NULL
+ErrorException: Undefined variable $u ()
+Undefined variable $u
+NULL
+ErrorException: Undefined variable $u ()
+Undefined variable $u
+NULL
+ErrorException: Undefined variable $u ()
+Undefined variable $u
+NULL
+ErrorException: Undefined variable $u ()
+Undefined variable $lit
+int(1)
+ErrorException: Undefined variable $lit ()
+Undefined variable $ab
+int(1)
+ErrorException: Undefined variable $ab ()
+Undefined variable $cd
+string(1) "x"
+ErrorException: Undefined variable $cd ()
+Undefined variable $u
+NULL
+ErrorException: Undefined variable $u ()
+Creation of dynamic property DynamicObject::$ordinary is deprecated
+ErrorException: Creation of dynamic property DynamicObject::$ordinary is deprecated ()
+Creation of dynamic property DynamicObject::$coalescing is deprecated
+ErrorException: Creation of dynamic property DynamicObject::$coalescing is deprecated ()
+Creation of dynamic property DynamicObject::$append is deprecated
+ErrorException: Creation of dynamic property DynamicObject::$append is deprecated ()
+Creation of dynamic property DynamicObject::$nested is deprecated
+ErrorException: Creation of dynamic property DynamicObject::$nested is deprecated ()
+Creation of dynamic property DynamicObject::$member is deprecated
+ErrorException: Creation of dynamic property DynamicObject::$member is deprecated ()
+Creation of dynamic property DynamicObject::$alias is deprecated
+ErrorException: Creation of dynamic property DynamicObject::$alias is deprecated ()
+Creation of dynamic property DynamicObject::$bound is deprecated
+ErrorException: Creation of dynamic property DynamicObject::$bound is deprecated ()
+Creation of dynamic property DynamicObject::$iteration is deprecated
+ErrorException: Creation of dynamic property DynamicObject::$iteration is deprecated ()
+object(DynamicObject)#15 (8) {
+  ["ordinary"]=>
+  int(1)
+  ["coalescing"]=>
+  int(2)
+  ["append"]=>
+  NULL
+  ["nested"]=>
+  NULL
+  ["member"]=>
+  NULL
+  ["alias"]=>
+  NULL
+  ["bound"]=>
+  int(3)
+  ["iteration"]=>
+  NULL
+}
+Creation of dynamic property DynamicObject::$onlyDeprecation is deprecated
+
+Warning: Undefined property: DynamicObject::$onlyDeprecation in /main.php on line 50
+ErrorException: Creation of dynamic property DynamicObject::$onlyDeprecation is deprecated ()
+int(3)
+
+Warning: Undefined variable $key in /main.php on line 65
+
+Warning: Undefined variable $rhs in /main.php on line 65
+get:NULL
+set:2
+
+Warning: Undefined variable $other in /main.php on line 66
+get:'y'
+set:2
+get:'z'
+set:11
+
+Warning: Undefined variable $stillMissing in /main.php on line 70
+get:'q'
+set:2
+
+Warning: Undefined variable $missingNative in /main.php on line 72
+int(2)
+Undefined variable $unknown
+Error: Cannot use object of type OperatorTarget as array (Undefined variable $unknown)
+Undefined variable $unknown
+ErrorException: Undefined variable $unknown ()
+int(2)

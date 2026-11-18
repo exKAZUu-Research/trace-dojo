@@ -7,14 +7,24 @@ import { propRef, readProp, staticPropRef, unsetProp, writeProp } from './classe
 import * as classesModule from './classes';
 import * as conversionsModule from './conversions';
 import { debugType, numericPrefix, toBool, valueName } from './conversions';
-import { deprecated, notice, throwError, warn, withCleanupExceptions, withPendingException } from './errors';
+import {
+  deprecated,
+  notice,
+  throwError,
+  type UpdateWarning,
+  warn,
+  withOperandWarnings,
+  withPendingException,
+} from './errors';
 import {
   ev,
   isArrayAccess,
   isCompiledVariable,
   memberName,
+  missingCompiledOperand,
   prepareOperand,
   readIndex,
+  readOperandWithWarning,
   resolveClassRef,
   stringOffset,
 } from './interp';
@@ -30,7 +40,6 @@ import {
   RefPlace,
   share,
   SKIP_COMPOUND,
-  type UpdateWarning,
   ValuePlace,
   VarPlace,
   writableContainer,
@@ -160,7 +169,7 @@ function instancePropertyPlace(e: Extract<Expr, { k: 'prop' }>, mode: PlaceMode,
   });
   if (typeof property !== 'string' && !through) {
     place.readCompoundName = (warning) => {
-      const name = readUpdateOperand(property, readName, warning, e.row);
+      const name = readOperandWithWarning(property, readName, warning, e.row);
       readName = () => name;
     };
     place.assign = (readValue) => {
@@ -223,7 +232,7 @@ function deferredPlace(resolve: (mode: WriteMode) => Place, read: () => Value | 
   const writable = (mode: WriteMode = 'write'): Place => (target ??= resolve(mode));
   return {
     get: (operation) => (operation === 'assignOp' ? writable('update').get(operation) : read()),
-    fetchCompound: (warning) => readCompound(writable('update'), warning),
+    fetchCompound: (warning, beforeOffsetGet) => readCompound(writable('update'), warning, beforeOffsetGet),
     getForIsset: read,
     nested: (mode) => {
       const place = writable(mode === 'update' ? 'update' : 'write');
@@ -323,6 +332,7 @@ class StaticPlace implements Place {
   }
 }
 
+// code-gauge-allow functionNcss 32 -- Keeps the ordered PHP cases together because each branch shares the same dispatch state.
 function propPlace(object: PhpObject, name: string): Place {
   const scope = rt().frame.scope;
   let reportedStaticAccess = false;
@@ -359,9 +369,13 @@ function propPlace(object: PhpObject, name: string): Place {
     ) => {
       if (object.cls.findMethod('__get')) return;
       const decl = lookup(false);
-      if (!decl) classesModule.createDynamicProp(object, name, (message) => warning(() => deprecated(message)));
-      object.props.set(decl?.key ?? name, null);
-      warning(() => warn(`Undefined property: ${object.cls.name}::$${name}`));
+      if (decl) object.props.set(decl.key, null);
+      else classesModule.createDynamicProp(object, name, null, (message) => warning(() => deprecated(message)));
+      const message = `Undefined property: ${object.cls.name}::$${name}`;
+      warning(
+        () => warn(message),
+        () => warn(message, true)
+      );
     },
     nested(mode = 'write') {
       return nestedPropertyPlace(object, name, scope, mode, lookup(true), reportedStaticAccess) ?? this;
@@ -410,10 +424,9 @@ function nestedPropertyPlace(
   const indirect = classesModule.checkIndirectModification(object, name, scope, mode);
   if (indirect) return new RefPlace(Ref.temporary(indirect));
   const key = decl?.key ?? name;
-  if (mode === 'unset' && !decl?.type && (!object.props.has(key) || object.unsetProperties?.has(key))) {
-    if (!decl) classesModule.createDynamicProp(object, name);
+  if (!decl && !object.props.has(key)) classesModule.createDynamicProp(object, name);
+  else if (mode === 'unset' && decl && !decl.type && (!object.props.has(key) || object.unsetProperties?.has(key)))
     object.props.set(key, null);
-  }
   return undefined;
 }
 
@@ -479,6 +492,7 @@ function arrayAccessPlace(object: PhpObject, key: Value | undefined, readAssignm
     const error = (): never => throwError('Error', `Cannot use object of type ${object.cls.name} as array`);
     return readAssignmentValue ? invalidWriteTarget(error) : error();
   }
+  const read = (): Value => callMethod(object, 'offsetGet', [key ?? null], rt().row);
   return {
     getForIsset: () =>
       toBool(callMethod(object, 'offsetExists', [key ?? null], rt().row))
@@ -486,7 +500,15 @@ function arrayAccessPlace(object: PhpObject, key: Value | undefined, readAssignm
         : undefined,
     nested: (mode) => arrayAccessNestedPlace(object, key, mode === 'unset'),
     incrementTarget: () => arrayAccessNestedPlace(object, key),
-    get: () => callMethod(object, 'offsetGet', [key ?? null], rt().row),
+    get: read,
+    fetchCompound: (_warning, beforeOffsetGet) => {
+      const pending = beforeOffsetGet?.();
+      if (pending) {
+        if (object.cls.findMethod('offsetget')?.fn.kind === 'native') throw pending;
+        throwError('Error', `Cannot use object of type ${object.cls.name} as array`);
+      }
+      return { value: read() };
+    },
     set: (value) => {
       callMethod(object, 'offsetSet', [key ?? null, value], rt().row);
       return value;
@@ -763,6 +785,7 @@ function destructuredReference(value: Value, key: Key, writable: boolean): Ref {
   return Ref.temporary(null);
 }
 
+// code-gauge-allow functionCognitiveComplexity 17 -- Keeps the ordered PHP cases together because each branch shares the same dispatch state.
 export function compoundAssign(e: Extract<Expr, { k: 'assignOp' }>): Value {
   const runtime = rt();
   if (e.op === '??') {
@@ -775,14 +798,20 @@ export function compoundAssign(e: Extract<Expr, { k: 'assignOp' }>): Value {
   }
   const place = placeOf(e.target, 'deferred');
   const read = prepareOperand(e.value);
-  return withUpdateWarnings((warning, warningPending) => {
+  return withOperandWarnings((warning, warningPending) => {
     place.readCompoundName?.(warning);
-    const afterFetch = e.target.k === 'idx' && isCompiledVariable(e.value);
-    const value = afterFetch ? null : readUpdateValue(e, read, warning);
+    let readAfterFetch = e.target.k === 'idx' && isCompiledVariable(e.value);
+    let value = readAfterFetch ? null : readUpdateValue(e, read, warning);
     runtime.row = e.row;
-    const fetched = readCompound(place, warning);
+    const fetched = readCompound(place, warning, () => {
+      if (readAfterFetch && missingCompiledOperand(e.value)) {
+        value = readOperandWithWarning(e.value, read, warning, e.row);
+        readAfterFetch = false;
+      }
+      return warningPending();
+    });
     if (fetched === SKIP_COMPOUND) return null;
-    return storeCompoundResult(e.op, place, fetched, afterFetch ? read(e.row) : value, warningPending());
+    return storeCompoundResult(e.op, place, fetched, readAfterFetch ? read(e.row) : value, warningPending());
   });
 }
 
@@ -792,17 +821,7 @@ function readUpdateValue(
   warning: UpdateWarning
 ): Value {
   if (e.target.k !== 'var' && e.target.k !== 'prop') return read();
-  return readUpdateOperand(e.value, read, warning, e.row);
-}
-
-function readUpdateOperand(e: Expr, read: (row?: number) => Value, warning: UpdateWarning, row: number): Value {
-  if (e.k !== 'var' || !isCompiledVariable(e)) return read();
-  if (rt().frame.vars.has(e.name)) return read(row);
-  let value: Value = null;
-  warning(() => {
-    value = read(row);
-  });
-  return value;
+  return readOperandWithWarning(e.value, read, warning, e.row);
 }
 
 function storeCompoundResult(
@@ -824,31 +843,6 @@ function storeCompoundResult(
     throw error;
   }
   return place.set(share(result), 'assignOp');
-}
-
-function withUpdateWarnings(
-  update: (warning: UpdateWarning, warningPending: () => PhpThrow | undefined) => Value
-): Value {
-  let result: Value = null;
-  withCleanupExceptions(rt(), (capture) => {
-    let pending: PhpThrow | undefined;
-    result = update(
-      (emit) => {
-        if (pending) return false;
-        try {
-          emit();
-          return true;
-        } catch (error) {
-          if (!(error instanceof PhpThrow)) throw error;
-          capture(error);
-          pending = error;
-          return false;
-        }
-      },
-      () => pending
-    );
-  });
-  return result;
 }
 
 // code-gauge-allow functionCognitiveComplexity 17 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
@@ -888,7 +882,7 @@ export function applyOperator(op: string, left: Value, right: Value, pending?: P
       return arithmetic(op, left, right, pending);
     }
     case '.': {
-      return concat(left, right);
+      return concat(left, right, pending);
     }
     case '&':
     case '|':
@@ -902,7 +896,7 @@ export function applyOperator(op: string, left: Value, right: Value, pending?: P
 }
 
 export function incDec(e: Extract<Expr, { k: 'incdec' }>): Value {
-  return withUpdateWarnings((warning) => incrementPlace(e, warning));
+  return withOperandWarnings((warning) => incrementPlace(e, warning));
 }
 
 function incrementPlace(e: Extract<Expr, { k: 'incdec' }>, warning: UpdateWarning): Value {

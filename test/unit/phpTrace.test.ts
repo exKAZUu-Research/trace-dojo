@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 
-import { traceProgram } from '../../src/interpreter/program';
+import { executeProgram, traceProgram } from '../../src/interpreter/program';
 import type { TraceItem } from '../../src/problems/trace';
 
 // The interpreter's clock stands still in these tests, so that the program, not the load of the host, decides each one.
@@ -194,4 +194,29 @@ test.each([
 ])('trace snapshots leave deferred static initializers untouched: %s', (body, stdout) => {
   const source = `<?php\n${body}`;
   expect(traceProgram('php', source, source)).toMatchObject({ stdout, uncaughtException: undefined });
+});
+
+test.each(['$t = null;', 'unset($t);'])(
+  'removes the last released turtle from steps and the final board state: %s',
+  (release) => {
+    const program = `<?php
+$t = new Turtle();
+${release}
+echo "released";`;
+    expect(phpTrace(program).at(-1)?.turtles).toEqual([]);
+    expect(executeProgram('php', program)).toMatchObject({
+      kind: 'executed',
+      finalBoard: expect.stringMatching(/^#/),
+      finalTurtles: [],
+    });
+  }
+);
+
+test('retains a reachable turtle at the end of execution when PHP runs object destructors during shutdown', () => {
+  expect(
+    executeProgram(
+      'php',
+      '<?php class C { function __destruct() { echo "closed"; } } $object = new C; $t = new Turtle();'
+    )
+  ).toMatchObject({ kind: 'executed', stdout: 'closed', finalTurtles: [{ x: 0, y: 0, color: '#', dir: 'N' }] });
 });

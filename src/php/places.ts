@@ -1,13 +1,12 @@
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
-import { deprecated, throwError, warn } from './errors';
-import { type Frame, rt } from './runtime';
+import { deprecated, throwError, type UpdateWarning, warn } from './errors';
+import { type Frame, type PhpThrow, rt } from './runtime';
 import { describePropertyType } from './types';
 import { dropped, type Key, PhpArray, PhpObject, type PropDecl, Ref, type Value } from './values';
 import { isSubtype } from './variance';
 
 export type PlaceOperation = 'assignOp' | 'incdec' | 'nested' | 'receiver';
 export type NestMode = 'write' | 'update' | 'unset';
-export type UpdateWarning = (emit: () => void) => boolean;
 
 export const SKIP_COMPOUND = Symbol('compound target changed during fetch');
 
@@ -22,7 +21,10 @@ export interface Place {
   /** The value, or undefined when the location does not exist. */
   get(update?: PlaceOperation): Value | undefined;
   readCompoundName?(warning: UpdateWarning): void;
-  fetchCompound?(warning: UpdateWarning): CompoundRead | typeof SKIP_COMPOUND;
+  fetchCompound?(
+    warning: UpdateWarning,
+    beforeOffsetGet?: () => PhpThrow | undefined
+  ): CompoundRead | typeof SKIP_COMPOUND;
   set(value: Value, operation?: 'assignOp'): Value;
   assign?(value: () => Value): Value;
   /** The location as a reference, which `=&`, by-reference arguments, and `global` share. */
@@ -43,8 +45,12 @@ export interface Place {
   getForIsset?(): Value | undefined;
 }
 
-export function readCompound(place: Place, warning: UpdateWarning): CompoundRead | typeof SKIP_COMPOUND {
-  if (place.fetchCompound) return place.fetchCompound(warning);
+export function readCompound(
+  place: Place,
+  warning: UpdateWarning,
+  beforeOffsetGet?: () => PhpThrow | undefined
+): CompoundRead | typeof SKIP_COMPOUND {
+  if (place.fetchCompound) return place.fetchCompound(warning, beforeOffsetGet);
   const value = place.get('assignOp');
   if (value === undefined) place.warnUndefined?.();
   return { value: value ?? null, declaration: place.declaration?.(), sources: place.typeSources?.() };

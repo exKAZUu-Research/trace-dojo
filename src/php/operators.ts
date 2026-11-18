@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 514 -- PHP operators share coercion and comparison helpers.
+// code-gauge-allow-file fileNcss 525 -- PHP operators share coercion and comparison helpers.
 // oxlint-disable unicorn/prefer-code-point -- PHP strings hold bytes as code units 0–255, which charCodeAt and fromCharCode read and write as they are.
 import {
   boolValue,
@@ -184,7 +184,7 @@ function arithmeticOperand(value: Value, op: string, left: Value, right: Value, 
   if (typeof value === 'string') {
     const prefix = numericPrefix(value);
     if (!prefix) unsupportedOperands(op, left, right, pending);
-    if (!prefix.whole) warn('A non-numeric value encountered');
+    if (!prefix.whole) operatorDiagnostic(pending, warn, 'A non-numeric value encountered');
     return prefix.value;
   }
   return unsupportedOperands(op, left, right, pending);
@@ -202,6 +202,11 @@ function modulo(left: Value, right: Value, pending?: PhpThrow): bigint {
 function unsupportedOperands(op: string, left: Value, right: Value, pending?: PhpThrow): never {
   if (pending) throw pending;
   throwError('TypeError', `Unsupported operand types: ${debugType(left)} ${op} ${debugType(right)}`);
+}
+
+function operatorDiagnostic(pending: PhpThrow | undefined, report: (message: string) => void, message: string): void {
+  if (pending) throw pending;
+  report(message);
 }
 
 // code-gauge-allow functionCognitiveComplexity 27 -- Transcribes PHP's algorithm for this function step by step, whose branches mirror PHP's.
@@ -229,13 +234,13 @@ export function arithmetic(op: string, left: Value, right: Value, pending?: PhpT
       return Number(a) / Number(b);
     }
     case '**': {
-      return power(a, b);
+      return power(a, b, pending);
     }
   }
   throw new Error(`Unknown arithmetic operator ${op}`);
 }
 
-function power(a: bigint | number, b: bigint | number): bigint | number {
+function power(a: bigint | number, b: bigint | number, pending?: PhpThrow): bigint | number {
   if (typeof a === 'bigint' && typeof b === 'bigint' && b >= 0n) {
     if (a === 0n || a === 1n || b === 0n) return b === 0n ? 1n : a;
     if (a === -1n) return b % 2n === 0n ? 1n : -1n;
@@ -260,7 +265,7 @@ function power(a: bigint | number, b: bigint | number): bigint | number {
     return result;
   }
   if (Number(a) === 0 && Number(b) < 0) {
-    deprecated('Power of base 0 and negative exponent is deprecated');
+    operatorDiagnostic(pending, deprecated, 'Power of base 0 and negative exponent is deprecated');
   }
   return cPow(Number(a), Number(b));
 }
@@ -269,23 +274,29 @@ function power(a: bigint | number, b: bigint | number): bigint | number {
  * Converts a float used where PHP needs an int (an operand of `%` or a bitwise operator, an array key), warning as
  * PHP does about a value out of range and deprecating one with a fraction.
  */
-export function toIntForOperator(value: bigint | number): bigint {
+export function toIntForOperator(value: bigint | number, pending?: PhpThrow): bigint {
   if (typeof value === 'bigint') return value;
   if (!floatFitsInt(value)) {
     const result = floatToIntCast(value);
-    if (Number.isNaN(value)) deprecated('Implicit conversion from float NAN to int loses precision');
+    if (Number.isNaN(value))
+      operatorDiagnostic(pending, deprecated, 'Implicit conversion from float NAN to int loses precision');
     return result;
   }
   if (!Number.isInteger(value)) {
-    deprecated(`Implicit conversion from float ${formatFloatForMessage(value)} to int loses precision`);
+    operatorDiagnostic(
+      pending,
+      deprecated,
+      `Implicit conversion from float ${formatFloatForMessage(value)} to int loses precision`
+    );
   }
   return BigInt(Math.trunc(value));
 }
 
 /** Converts a numeric string holding a float where PHP needs an int, deprecating a value an int cannot hold. */
-function floatStringToInt(text: string, value: number): bigint {
+function floatStringToInt(text: string, value: number, pending?: PhpThrow): bigint {
   const result = floatToIntCap(value);
-  if (Number(result) !== value) deprecated(`Implicit conversion from float-string "${text}" to int loses precision`);
+  if (Number(result) !== value)
+    operatorDiagnostic(pending, deprecated, `Implicit conversion from float-string "${text}" to int loses precision`);
   return result;
 }
 
@@ -301,24 +312,32 @@ function arrayUnion(left: PhpArray, right: PhpArray): PhpArray {
   return result;
 }
 
-export function concat(left: Value, right: Value): string {
-  const a = toStr(left);
-  const b = toStr(right);
+export function concat(left: Value, right: Value, pending?: PhpThrow): string {
+  const a = concatenateOperand(left, pending);
+  const b = concatenateOperand(right, pending);
   rt().ensureStringFits(a.length + b.length);
   return a + b;
+}
+
+function concatenateOperand(value: Value, pending?: PhpThrow): string {
+  if (!pending) return toStr(value);
+  if (value instanceof PhpObject && !value.isResource) throw pending;
+  return stringify(value, () => {
+    throw pending;
+  });
 }
 
 /** Converts an operand of `%` or a bitwise operator to an int, as PHP's zendi_try_get_long does. */
 function intOperand(value: Value, op: string, left: Value, right: Value, pending?: PhpThrow): bigint {
   if (typeof value === 'bigint') return value;
-  if (typeof value === 'number') return toIntForOperator(value);
+  if (typeof value === 'number') return toIntForOperator(value, pending);
   if (value === null) return 0n;
   if (typeof value === 'boolean') return value ? 1n : 0n;
   if (typeof value === 'string') {
     const prefix = numericPrefix(value);
     if (!prefix) unsupportedOperands(op, left, right, pending);
-    if (!prefix.whole) warn('A non-numeric value encountered');
-    return typeof prefix.value === 'bigint' ? prefix.value : floatStringToInt(value, prefix.value);
+    if (!prefix.whole) operatorDiagnostic(pending, warn, 'A non-numeric value encountered');
+    return typeof prefix.value === 'bigint' ? prefix.value : floatStringToInt(value, prefix.value, pending);
   }
   return unsupportedOperands(op, left, right, pending);
 }

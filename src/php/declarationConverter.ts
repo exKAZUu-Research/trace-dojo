@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 813 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 815 -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import type { Node } from '@willbooster/web-tree-sitter';
 
@@ -18,7 +18,13 @@ import { enc, lower } from './bytes';
 import { parseTypeText } from './calls';
 import { CompileClassConstants } from './compileClassConstants';
 import { type Constant, constantTypeName, foldedConstant, foldedDefaultType } from './constantDefaults';
-import { BUILTIN_TYPES, ConverterBase, explicitlyQualifiedName, isReservedClassName } from './converterBase';
+import {
+  BUILTIN_TYPES,
+  ConverterBase,
+  explicitlyQualifiedName,
+  isReservedClassName,
+  relativeClassName,
+} from './converterBase';
 import { decodeLiteral, decodeSingleQuoted } from './literals';
 import { SCRIPT_PATH } from './runtime';
 import { describeType, typeToString } from './types';
@@ -48,8 +54,7 @@ const MAGIC_METHODS: Record<
 
 /** Converts the declarations of functions, parameters, types, and classes. */
 export abstract class DeclarationConverter extends ConverterBase {
-  protected abstract readonly preserveSyntax: boolean;
-  private readonly compileClasses = new CompileClassConstants();
+  private readonly compileClasses = new CompileClassConstants(() => this.compileBudget);
   private runtimeDefinitionKeys = 0;
   private activeClass?: ClassDecl;
   protected initializerContext?: { kind: 'eager' | 'deferred' | 'static' | 'array'; row: number };
@@ -66,6 +71,7 @@ export abstract class DeclarationConverter extends ConverterBase {
   protected compiledValue(expression: Expr): Constant | undefined {
     return foldedConstant(expression, {
       compiler: true,
+      budget: this.compileBudget,
       classConstant: this.compileClasses.lookup(this.activeClass, this.fn.isClosure),
       className: (cls) => this.compileClasses.className(cls, this.activeClass, this.fn.isClosure),
     });
@@ -537,7 +543,7 @@ export abstract class DeclarationConverter extends ConverterBase {
 
   // code-gauge-allow functionCognitiveComplexity 16 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
   private checkDefaultType(node: Node, name: string, type: TypeDecl, value: Expr, property?: ClassDecl): void {
-    const literalType = foldedDefaultType(value);
+    const literalType = foldedDefaultType(value, { budget: this.compileBudget });
     if (literalType === 'null' && !property) return;
     if (literalType === undefined || defaultFits(type, literalType)) return;
     const display = describeType(
@@ -575,23 +581,26 @@ export abstract class DeclarationConverter extends ConverterBase {
   protected typeName(node: Node, parameter: boolean): TypeDecl {
     const raw = this.nameText(node);
     const word = lower(raw);
-    if (BUILTIN_TYPES.has(word) || word === 'self' || word === 'static' || word === 'parent')
-      return this.builtinType(raw);
-    const last = word.slice(word.lastIndexOf('\\') + 1);
-    if (last === 'array' || last === 'callable')
-      this.error(node, `Cannot use "${this.resolveClassName(raw)}" as a type name as it is reserved`);
+    if (BUILTIN_TYPES.has(word)) return this.builtinType(raw);
     const explicit = explicitlyQualifiedName(word);
-    if (explicit && (BUILTIN_TYPES.has(explicit) || explicit === 'static'))
+    if (
+      explicit &&
+      ((BUILTIN_TYPES.has(explicit) && explicit !== 'array' && explicit !== 'callable') || explicit === 'static')
+    )
       this.error(node, `Type declaration '${explicit}' must be unqualified`);
+    const relative = relativeClassName(raw);
+    if (relative) return this.builtinType(raw, relative);
     const typeNode = node.parent?.type === 'named_type' ? node.parent : node;
     const parent = typeNode.parent;
     const root = parent?.type === 'property_declaration' || parent?.type.endsWith('_parameter');
     const expected = root && (parameter || parent?.type === 'property_declaration') ? 'variable' : '';
-    return { k: 'named', name: this.namedClass(node, expected) };
+    const name = this.namedClass(node, expected);
+    const last = name.slice(name.lastIndexOf('\\') + 1);
+    if (isReservedClassName(last)) this.error(node, `Cannot use "${name}" as a type name as it is reserved`);
+    return { k: 'named', name };
   }
 
-  private builtinType(raw: string): TypeDecl {
-    const name = lower(raw);
+  private builtinType(raw: string, name = lower(raw)): TypeDecl {
     const keyword = name === 'array' || name === 'callable' || name === 'static';
     return { k: 'named', name, syntaxName: this.preserveSyntax && !keyword ? raw : undefined };
   }
@@ -622,13 +631,13 @@ export abstract class DeclarationConverter extends ConverterBase {
     const modifiers = node.children;
     const base = node.namedChildren.find((child) => child.type === 'base_clause');
     const baseNames = base
-      ? base.namedChildren.filter((child) => child.type !== 'comment').map((child) => this.namedClass(child))
+      ? base.namedChildren.filter((child) => child.type !== 'comment').map((child) => this.namedClass(child, '', kind))
       : [];
     const implementsClause = node.namedChildren.find((child) => child.type === 'class_interface_clause');
     let interfaces = implementsClause
       ? implementsClause.namedChildren
           .filter((child) => child.type !== 'comment')
-          .map((child) => this.namedClass(child))
+          .map((child) => this.namedClass(child, '', 'interface'))
       : [];
     let parent: string | undefined;
     if (kind === 'interface') interfaces = baseNames;
@@ -1265,7 +1274,7 @@ export abstract class DeclarationConverter extends ConverterBase {
   protected traitUse(member: Node): ClassDecl['traits'][number] {
     const names = member.namedChildren
       .filter((child) => child.type === 'name' || child.type === 'qualified_name' || child.type === 'relative_name')
-      .map((child) => this.namedClass(child));
+      .map((child) => this.namedClass(child, '', 'trait'));
     const rules: TraitRule[] = [];
     const list = member.namedChildren.find((child) => child.type === 'use_list');
     for (const clause of list?.namedChildren ?? []) {
@@ -1274,9 +1283,9 @@ export abstract class DeclarationConverter extends ConverterBase {
         const [traitNode, methodNode] = target.namedChildren;
         rules.push({
           k: 'insteadof',
-          trait: this.namedClass(traitNode),
+          trait: this.namedClass(traitNode, '', 'trait'),
           method: this.nameText(methodNode),
-          instead: instead.map((child) => this.namedClass(child)),
+          instead: instead.map((child) => this.namedClass(child, '', 'trait')),
         });
       } else if (clause.type === 'use_as_clause') {
         const parts = clause.namedChildren.filter((child) => child.type !== 'comment');
@@ -1284,7 +1293,7 @@ export abstract class DeclarationConverter extends ConverterBase {
         let trait: string | undefined;
         let method: string;
         if (target.type === 'class_constant_access_expression') {
-          trait = this.namedClass(target.namedChildren[0]);
+          trait = this.namedClass(target.namedChildren[0], '', 'trait');
           method = this.nameText(target.namedChildren[1]);
         } else method = this.nameText(target);
         const visibilityNode = rest.find((child) => child.type === 'visibility_modifier');
