@@ -1522,6 +1522,27 @@ test.each(['u7', 'u8', 'u16'])('byte-backed nested optional pointers retain live
   });
 });
 
+test.each([
+  'var value:U=undefined;const u=&value;',
+  'var buf:[16]u8=undefined;var f=std.heap.FixedBufferAllocator.init(&buf);const u=try f.allocator().create(U);',
+])('tagged union pointers keep their field type after a tag change (%s)', (storage) => {
+  const source = `const std=@import("std");const U=union(enum){a:u8,b:u16};pub fn main()!void{${storage}u.*=.{.a=7};const p=&u.a;switch(u.*){.a=>|*q|{const same=p==q;u.*=.{.b=0x1234};std.debug.print("{} {} {}|",.{same,p.*,u.b});q.*=9;std.debug.print("{} {} {t}",.{p.*,u.b,u.*});},.b=>unreachable}}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: 'true 52 4660|9 4617 b',
+    uncaughtException: undefined,
+  });
+});
+
+test('retained tagged union aggregate fields update their portion of a new payload', () => {
+  const source = `const std=@import("std");const A=struct{x:u8,y:u8};const U=union(enum){a:A,b:u16};pub fn main()void{var u=U{.a=.{.x=7,.y=8}};const p=&u.a.y;const other=U{.b=0x1234};u=other;std.debug.print("{}|",.{p.*});p.*=9;std.debug.print("{} {t}",.{u.b,u});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: '18|2356 b',
+    uncaughtException: undefined,
+  });
+});
+
 test('writer result types use the canonical usize and mutable byte slice', () => {
   const source = `const std=@import("std");fn less(n:usize,a:u8,b:u8)bool{return n>0 and a<b;}
 pub fn main()!void{var b:[2]u8=undefined;var w=std.Io.Writer.fixed(&b);const n=try w.write("x");var a=[_]u8{2,1};std.sort.heap(u8,&a,n,less);std.debug.print("{} {} {}",.{a[0],a[1],@TypeOf(w.buffered())==[]u8});}`;

@@ -110,6 +110,12 @@ export function physicalUnion(type: Extract<Type, { kind: 'union' }>, value: ZUn
   const memory = new BufferMemory(bytes, spendMemory, memorySpace());
   memory.write(type, 0, value);
   const backing = memory.read(type, 0) as ZUnion;
+  Object.defineProperty(value, 'tag', {
+    get: () => backing.tag,
+    set: (tag: number) => {
+      backing.tag = tag;
+    },
+  });
   value.slots = backing.slots;
   value.fieldView = backing.fieldView;
   value.copyBacking = backing.copyBacking;
@@ -359,7 +365,11 @@ export class BufferMemory {
       },
     });
     registerStorageLocation(union.slots, () => ({ storage: this.bytes, index: offset / 8 + layout.payload }));
-    if (type.layout !== 'auto') this.attachUnionBacking(union, type, offset);
+    union.fieldView = (index) => ({
+      slots: this.slots([unionFieldLocation(type, index, offset + layout.payload * 8)]),
+    });
+    if (type.layout === 'auto') union.writeBacking = (value) => this.write(type, offset, value);
+    else this.attachUnionBacking(union, type, offset);
     return union;
   }
 
@@ -378,7 +388,6 @@ export class BufferMemory {
       }
       return values;
     };
-    union.fieldView = (index) => ({ slots: this.slots([unionFieldLocation(type, index, offset)]) });
     union.copyBacking = () => {
       const length = sizeOf(type);
       reserveMemory(length);

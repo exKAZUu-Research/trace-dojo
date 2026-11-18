@@ -549,14 +549,17 @@ export abstract class ExpressionCompiler extends SemaBase {
     span: Span,
     check?: (value: Value) => ZUnion
   ): (parent: Pointer, value?: Value) => Pointer {
+    const fixed = !this.requiresComptime(type, span) && sizeOf(child) !== 0 && (type.fields?.length ?? 0) > 1;
     return this.fieldPointer(
       type,
       child,
       span,
       () => unionOffsets(type).payload,
       (parent, value) => {
-        const union = value ?? parent.load();
-        return new Pointer(check ? check(union) : (union as ZUnion), 0);
+        const source = value ?? parent.load();
+        const union = check ? check(source) : (source as ZUnion);
+        const slots = fixed ? physicalUnion(type, union).fieldView!(union.tag) : union;
+        return new Pointer(slots, 0);
       }
     );
   }
