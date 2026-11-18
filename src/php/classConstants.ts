@@ -6,7 +6,7 @@ import { strictEquals } from './operators';
 import { share } from './places';
 import { FatalError, PhpThrow } from './runtime';
 import { coerce, describeType, NO_MATCH, typeToString } from './types';
-import { type ClassConst, type PhpClass, type Value, visibilityRank } from './values';
+import { type ClassConst, PhpArray, type PhpClass, type Value, visibilityRank } from './values';
 import { isSubtype } from './variance';
 
 /** Evaluates a constant expression of a class in that class's scope, which the interpreter provides. */
@@ -157,6 +157,7 @@ export function classConstant(cls: PhpClass, name: string, scope: PhpClass | und
         value = coerced;
       }
       constant.value = value;
+      if (value instanceof PhpArray) value.persistentHolder = true;
     } finally {
       constant.evaluating = false;
     }

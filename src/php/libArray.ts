@@ -78,21 +78,23 @@ function checkArrayRef(ctx: NativeContext, index: number, name: string, paramete
   }
 }
 
-// code-gauge-allow functionCognitiveComplexity 20 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+// code-gauge-allow functionCognitiveComplexity 24 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 function rebuild(entries: [Key, Value | Ref][], renumber: boolean, target?: PhpArray): PhpArray {
   const array = target ?? new PhpArray();
   if (target) {
-    const map = new Map<Key, Value | Ref>();
     let position = 0n;
     let nextFree = INT_MIN;
-    let work = 0;
-    for (const [key, slot] of entries) {
-      const newKey = renumber && typeof key === 'bigint' ? position++ : key;
-      map.set(newKey, slot);
-      if (typeof newKey === 'bigint' && newKey >= nextFree) nextFree = newKey + 1n;
-      if (++work % 64 === 0) rt().spend();
+    function* renamed(): Generator<[Key, Value | Ref]> {
+      let work = 0;
+      for (const [key, slot] of entries) {
+        const newKey = renumber && typeof key === 'bigint' ? position++ : key;
+        if (typeof newKey === 'bigint' && newKey >= nextFree) nextFree = newKey + 1n;
+        if (++work % 64 === 0) rt().spend();
+        yield [newKey, slot];
+      }
     }
-    array.replaceTable(map, nextFree, renumber);
+    array.replaceTable(renamed(), INT_MIN, renumber);
+    array.nextFree = nextFree;
     return array;
   }
   for (const [key, source] of entries) {
@@ -173,7 +175,7 @@ defineFunction('array_pop(array &$array): mixed', (ctx) => {
 defineFunction('array_shift(array &$array): mixed', (ctx) => {
   checkArrayRef(ctx, 0, 'array_shift', 'array');
   const array = writableArray(ctx, 0);
-  const shifted = array.shiftList();
+  const shifted = array.shiftList() ?? array.shiftStringKey();
   if (shifted) return shifted.value;
   const first = array.map.keys().next();
   if (first.done) return null;
@@ -840,9 +842,8 @@ defineFunction(
   'array_splice(array &$array, int $offset, ?int $length = null, mixed $replacement = []): array',
   (ctx) => {
     const array = writableArray(ctx, 0);
-    const entries = [...array.map];
     const { start, end } = sliceBounds(
-      entries.length,
+      array.size,
       Number(ctx.args[1]),
       ctx.args[2] === undefined || ctx.args[2] === null ? undefined : Number(ctx.args[2])
     );
@@ -854,8 +855,17 @@ defineFunction(
             0n,
             value,
           ]);
+    const inserted = replacement.map(([, slot]) => copyValueSlot(slot));
+    const packedRemoved = array.spliceList(start, end - start, inserted);
+    if (packedRemoved) return packedRemoved;
+    const entries = [...array.map];
     const removed = rebuild(entries.slice(start, end), true);
-    rebuild([...entries.slice(0, start), ...replacement, ...entries.slice(end)], true, array);
+    for (const [, slot] of entries.slice(start, end)) if (slot instanceof Ref) slot.rc--;
+    rebuild(
+      [...entries.slice(0, start), ...inserted.map((slot): [Key, Value | Ref] => [0n, slot]), ...entries.slice(end)],
+      true,
+      array
+    );
     array.pointer = null;
     return removed;
   }

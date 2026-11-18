@@ -74,8 +74,8 @@ defineClass({
   methods: [{ signature: 'jsonSerialize(): mixed', impl: () => null, isAbstract: true }],
 });
 
-// code-gauge-allow functionCognitiveComplexity 29 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
-// code-gauge-allow functionNcss 35 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+// code-gauge-allow functionCognitiveComplexity 30 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+// code-gauge-allow functionNcss 36 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 function bindClosure(closure: PhpObject, newThis: Value, newScope: Value | undefined): Value {
   const data = closure.internal as ClosureData;
   let scope = data.scope;
@@ -93,13 +93,15 @@ function bindClosure(closure: PhpObject, newThis: Value, newScope: Value | undef
     warn('Cannot bind an instance to a static closure, this will be an error in PHP 9');
     return null;
   }
-  if (data.method && !data.method.isStatic && newThis === null) {
+  const anonymous = data.fn.kind === 'user' && data.fn.decl.isClosure;
+  const methodScope = !anonymous ? data.scope : undefined;
+  if (methodScope && !data.isStatic && newThis === null) {
     warn('Cannot unbind $this of method, this will be an error in PHP 9');
     return null;
   }
-  if (data.method && newThis instanceof PhpObject && !newThis.cls.isSubclassOf(data.method.scope)) {
+  if (methodScope && newThis instanceof PhpObject && !newThis.cls.isSubclassOf(methodScope)) {
     warn(
-      `Cannot bind method ${data.method.scope.name}::${data.method.name}() to object of class ${newThis.cls.name}, this will be an error in PHP 9`
+      `Cannot bind method ${methodScope.name}::${data.fn.name}() to object of class ${newThis.cls.name}, this will be an error in PHP 9`
     );
     return null;
   }
@@ -107,10 +109,9 @@ function bindClosure(closure: PhpObject, newThis: Value, newScope: Value | undef
     warn(`Cannot bind closure to scope of internal class ${scope.name}, this will be an error in PHP 9`);
     return null;
   }
-  const anonymous = data.fn.kind === 'user' && data.fn.decl.isClosure;
   if (!anonymous && scope !== data.scope) {
     warn(
-      `Cannot rebind scope of closure created from ${data.method ? 'method' : 'function'}, this will be an error in PHP 9`
+      `Cannot rebind scope of closure created from ${methodScope ? 'method' : 'function'}, this will be an error in PHP 9`
     );
     return null;
   }

@@ -129,10 +129,7 @@ export function callExpression(e: Extract<Expr, { k: 'call' }>): Value {
         throw new UnsupportedFeatureError(`PHP の組み込み関数（${name.fallback ?? name.name}）`);
       throwError('Error', `Call to undefined function ${name.name}()`);
     }
-    if (e.fcc)
-      return closureFromCallable({
-        fn: fn.kind === 'native' && fn.name === 'die' ? (runtime.functions.get('exit') as Callable) : fn,
-      });
+    if (e.fcc) return closureFromCallable({ fn });
     const args = evalArgs(e.args, fn, fn.name);
     runtime.row = e.row;
     const result = invoke({ fn, inline: inlineCall(fn, e.args) }, args, e.row);
@@ -594,7 +591,7 @@ export function closureFromCallable(target: CallTarget): PhpObject {
     thisObj: target.thisObj,
     scope: target.scope,
     calledClass: target.staticClass,
-    isStatic: !target.thisObj,
+    isStatic: target.method?.isStatic ?? target.fn.kind === 'native',
     method: target.method,
   };
   object.internal = data;

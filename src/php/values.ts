@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 794 -- Keeps one PHP runtime concern and its shared helpers in one module.
+// code-gauge-allow-file fileNcss 900 -- Keeps one PHP runtime concern and its shared helpers in one module.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import type { TurtleState } from '../interpreter/turtleWorld';
 import { ArrayTable } from './arrayTable';
@@ -126,6 +126,7 @@ export const INT_MIN = -9_223_372_036_854_775_808n;
 export class PhpArray {
   mutationVersion = 0;
   private order: ArrayOrder | undefined;
+  private orderPacked?: boolean;
   private readonly parents = new Set<WeakRef<PhpArray>>();
   private readonly knownParents = new WeakSet<PhpArray>();
   map: ArrayTable;
@@ -142,7 +143,7 @@ export class PhpArray {
 
   constructor(
     map?: Map<Key, Value | Ref>,
-    private readonly capacityHint = map?.size ?? 8
+    private capacityHint = map?.size ?? 8
   ) {
     this.map = this.table(map);
     for (const [key, slot] of this.map) this.trackSlot(key, slot);
@@ -233,20 +234,60 @@ export class PhpArray {
     this.order?.insert(key);
   }
 
-  replaceTable(map: Map<Key, Value | Ref>, nextFree: bigint, packed = false): void {
-    allocationHandler(Math.max(0, map.size - this.map.size), map.size);
-    this.map = this.table(map);
-    this.ordered().replace(map.keys(), packed);
-    for (const [key, slot] of map) this.trackSlot(key, slot);
+  replaceTable(entries: Iterable<readonly [Key, Value | Ref]>, nextFree: bigint, packed = false): void {
+    const previousSize = this.map.size;
+    this.capacityHint = Math.max(this.capacityHint, previousSize);
+    this.map = this.table(entries);
+    allocationHandler(Math.max(0, this.size - previousSize), this.size);
+    this.order?.replace(this.map.keys(), packed);
+    this.orderPacked = packed;
+    this.composite = false;
+    for (const [key, slot] of this.map) {
+      this.trackSlot(key, slot);
+      if (slot !== null && typeof slot === 'object') this.composite = true;
+    }
     this.nextFree = nextFree;
-    this.composite = [...map.values()].some((value) => value !== null && typeof value === 'object');
     this.invalidate();
   }
 
-  private table(map?: Map<Key, Value | Ref>): ArrayTable {
-    return new ArrayTable(map, () => {
+  private table(entries?: Iterable<readonly [Key, Value | Ref]>): ArrayTable {
+    return new ArrayTable(entries, () => {
       for (const [key, slot] of this.map) this.trackSlot(key, slot);
     });
+  }
+
+  spliceList(start: number, count: number, replacement: (Value | Ref)[]): PhpArray | undefined {
+    const removed = this.map.spliceList(start, count, replacement);
+    if (!removed) return;
+    const result = PhpArray.copySlots(removed);
+    allocationHandler(Math.max(0, replacement.length - count), this.size);
+    for (const slot of removed) if (slot instanceof Ref) slot.rc--;
+    for (let index = 0; index < replacement.length; index++) this.trackSlot(BigInt(start + index), replacement[index]);
+    if (replacement.some((slot) => slot !== null && typeof slot === 'object')) this.composite = true;
+    this.order?.replace(this.map.keys(), true);
+    this.orderPacked = true;
+    this.nextFree = BigInt(this.size);
+    this.pointer = null;
+    this.invalidate();
+    for (const slot of removed) dropped(slot);
+    return result;
+  }
+
+  shiftStringKey(): { value: Value } | undefined {
+    if (this.map.hasIntegerKeys() || this.size === 0) return;
+    const key = this.map.keys().next().value as string;
+    const slot = this.map.get(key) as Value | Ref;
+    this.map.delete(key);
+    this.order?.replace(this.map.keys(), false);
+    this.orderPacked = false;
+    this.nextFree = 0n;
+    this.pointer = null;
+    this.invalidate();
+    if (slot instanceof Ref) slot.rc--;
+    dropped(slot);
+    const value = deref(slot);
+    if (value instanceof PhpArray) value.shared = true;
+    return { value };
   }
 
   shiftList(): { value: Value } | undefined {
@@ -360,7 +401,10 @@ export class PhpArray {
   }
 
   private ordered(): ArrayOrder {
-    this.order ??= new ArrayOrder(this.map.keys(), this.capacityHint);
+    if (!this.order) {
+      this.order = new ArrayOrder(this.map.keys(), this.capacityHint);
+      if (this.orderPacked === false) this.order.unpack();
+    }
     return this.order;
   }
 
@@ -803,6 +847,7 @@ export class PhpObject {
   }
   set internal(value: unknown) {
     this.nativeValues?.detach();
+    clearNativeOwnership(this);
     this.internalValue = value;
     this.nativeValues?.attach(this);
     internalHandler(this);
@@ -854,6 +899,10 @@ const nativeOwners = new WeakMap<object, Set<PhpObject>>();
 export class NativeValueIndex {
   private readonly counts = new Map<PhpArray | PhpObject, number>();
   private owner: PhpObject | undefined;
+
+  count(value: PhpArray | PhpObject): number {
+    return this.counts.get(value) ?? 0;
+  }
 
   attach(owner: PhpObject): void {
     this.detach();
@@ -918,9 +967,33 @@ export function observeOwnership(observer: (change: OwnershipChange) => void): (
   };
 }
 
+const genericNativeArrays = new WeakMap<PhpObject, Map<PhpArray, number>>();
+
+export function clearNativeOwnership(owner: PhpObject): void {
+  for (const value of genericNativeArrays.get(owner)?.keys() ?? []) nativeOwners.get(value)?.delete(owner);
+  genericNativeArrays.delete(owner);
+}
+
 export function nativeOwnershipChanged(owner: PhpObject): void {
+  refreshNativeArrays(owner);
   invalidateOwner(owner);
   for (const observer of ownershipObservers) observer({ kind: 'native', owner });
+}
+
+function refreshNativeArrays(owner: PhpObject): void {
+  clearNativeOwnership(owner);
+  if (owner.nativeValues || isClosure(owner)) return;
+  const internal = owner.internal as { held?: () => unknown[] } | undefined;
+  if (!internal?.held) return;
+  const counts = new Map<PhpArray, number>();
+  for (const value of internal.held()) {
+    if (!(value instanceof PhpArray)) continue;
+    counts.set(value, (counts.get(value) ?? 0) + 1);
+    let holders = nativeOwners.get(value);
+    if (!holders) nativeOwners.set(value, (holders = new Set()));
+    holders.add(owner);
+  }
+  genericNativeArrays.set(owner, counts);
 }
 
 export function ownershipEdgeExists(change: Extract<OwnershipChange, { kind: 'edge' }>): boolean {
@@ -952,23 +1025,44 @@ function trackOwner(value: unknown, parent: Owner, key?: Key): void {
   for (const observer of ownershipObservers) observer({ kind: 'edge', value, owner: parent, key });
 }
 
+export function arrayHolderCount(value: PhpArray): number {
+  let count = value.persistentHolder ? 1 : 0;
+  for (const parent of nativeOwners.get(value) ?? []) {
+    count += parent.nativeValues?.count(value) ?? genericNativeArrays.get(parent)?.get(value) ?? 0;
+    if (count > 1) return count;
+  }
+  const parents = owners.get(value);
+  for (const [parent, keys] of parents ?? []) {
+    const held = directHolderCount(parent, value, keys);
+    if (!held) parents?.delete(parent);
+    count += held;
+    if (count > 1) return count;
+  }
+  return count;
+}
+
 export function valueOwners(value: object): Owner[] {
   const parents = owners.get(value);
   const result: Owner[] = [...(nativeOwners.get(value) ?? [])];
-  if (!parents) return result;
-  for (const [parent, keys] of parents) {
-    const holds =
-      parent instanceof Ref
-        ? parent.v === value
-        : [...keys].some((key) =>
-            parent instanceof PhpArray
-              ? parent.map.hasValue(value, key as Key)
-              : parent.props.get(key as string) === value
-          );
-    if (holds) result.push(parent);
-    else parents.delete(parent);
+  for (const [parent, keys] of parents ?? []) {
+    if (directHolderCount(parent, value, keys)) result.push(parent);
+    else parents?.delete(parent);
   }
   return result;
+}
+
+function directHolderCount(parent: Owner, value: object, keys: Set<Key | undefined>): number {
+  if (parent instanceof Ref) return parent.rc > 0 && parent.v === value ? 1 : 0;
+  const packed = parent instanceof PhpArray ? parent.map.packedValueCount(value) : undefined;
+  if (packed !== undefined) return packed;
+  let count = 0;
+  for (const key of keys) {
+    const actual = parent instanceof PhpArray ? parent.map.get(key as Key) : parent.props.get(key as string);
+    if (actual === value) {
+      if (++count > 1) return count;
+    } else keys.delete(key);
+  }
+  return count;
 }
 
 class PropertyMap extends Map<string, Slot> {

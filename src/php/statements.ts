@@ -293,6 +293,7 @@ export function defineConstant(name: string, value: Value): boolean {
   }
   runtime.constants.set(key, share(value));
   if (value instanceof PhpArray || value instanceof PhpObject) runtime.rootConstants.add(value);
+  if (value instanceof PhpArray) value.persistentHolder = true;
   return true;
 }
 
@@ -635,12 +636,7 @@ setObjectConversions(
       [],
       undefined
     );
-    if (typeof result !== 'string')
-      throwError(
-        'Error',
-        `${object.cls.name}::__toString(): Return value must be of type string, ${valueName(result)} returned`
-      );
-    return result;
+    return result as string;
   },
   (object) =>
     [...object.props]

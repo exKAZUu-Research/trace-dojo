@@ -1,0 +1,1 @@
+<?php trait T{public static $x=1;public static int $y=2;public static ?self $z=null;}trait U{use T;}class A{use U;}class B{use T;public static int $y=2;}var_dump(A::$x,A::$y,A::$z,B::$y);A::$x=4;var_dump(A::$x,B::$x);

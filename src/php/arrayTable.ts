@@ -4,6 +4,7 @@ type Slot = Value | Ref;
 
 export class ArrayTable extends Map<Key, Slot> {
   private packed?: Slot[];
+  private integerKeys = 0;
   private readonly holders = new Map<object, number>();
 
   constructor(
@@ -11,7 +12,26 @@ export class ArrayTable extends Map<Key, Slot> {
     private readonly onMaterialize?: () => void
   ) {
     super();
-    if (entries) for (const [key, slot] of entries) super.set(key, slot);
+    if (entries)
+      for (const [key, slot] of entries) {
+        if (typeof key === 'bigint' && !super.has(key)) this.integerKeys++;
+        super.set(key, slot);
+      }
+  }
+
+  hasIntegerKeys(): boolean {
+    return this.packed ? this.packed.length > 0 : this.integerKeys > 0;
+  }
+
+  spliceList(start: number, count: number, replacement: Slot[]): Slot[] | undefined {
+    if (!this.pack()) return;
+    const values = this.packed as Slot[];
+    const removed = values.splice(start, count);
+    for (let index = 0; index < replacement.length; index += 4096)
+      values.splice(start + index, 0, ...replacement.slice(index, index + 4096));
+    for (const slot of removed) this.count(slot, -1);
+    for (const slot of replacement) this.count(slot, 1);
+    return removed;
   }
 
   shiftList(): { slot: Slot } | undefined {
@@ -45,6 +65,10 @@ export class ArrayTable extends Map<Key, Slot> {
     else this.holders.delete(value);
   }
 
+  packedValueCount(value: object): number | undefined {
+    return this.packed ? (this.holders.get(value) ?? 0) : undefined;
+  }
+
   hasValue(value: object, key: Key): boolean {
     return this.packed ? this.holders.has(value) : super.get(key) === value;
   }
@@ -71,17 +95,21 @@ export class ArrayTable extends Map<Key, Slot> {
       return this;
     }
     this.materialize();
+    if (!super.has(key) && typeof key === 'bigint') this.integerKeys++;
     return super.set(key, value);
   }
 
   override delete(key: Key): boolean {
     this.materialize();
-    return super.delete(key);
+    const removed = super.delete(key);
+    if (removed && typeof key === 'bigint') this.integerKeys--;
+    return removed;
   }
 
   override clear(): void {
     this.packed = undefined;
     this.holders.clear();
+    this.integerKeys = 0;
     super.clear();
   }
 
@@ -92,6 +120,7 @@ export class ArrayTable extends Map<Key, Slot> {
     this.holders.clear();
     super.clear();
     for (let index = 0; index < values.length; index++) super.set(BigInt(index), values[index]);
+    this.integerKeys = values.length;
     this.onMaterialize?.();
   }
 

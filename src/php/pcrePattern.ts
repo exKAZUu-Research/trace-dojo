@@ -1,5 +1,7 @@
 // oxlint-disable unicorn/prefer-code-point -- PHP pattern strings contain bytes; UTF-8 validation reads each byte separately.
-// code-gauge-allow-file fileNcss 746 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 758 -- Holds the cases of one concern of the interpreter, which share their helpers.
+import propertyAliases from 'unicode-property-value-aliases-ecmascript';
+
 import { dec, enc, utf8Length } from './bytes';
 import { analyzeRegex } from './regexAnalysis';
 import { rt } from './runtime';
@@ -529,7 +531,7 @@ class PatternConverter {
   }
 
   private property(letter: string): CharacterSet {
-    const match = /^(?:\{(\^?)([\w&=]+)\}|(\w))/.exec(this.source.slice(this.index));
+    const match = /^(?:\{(\^?)([\w&= \t-\r-]+)\}|(\w))/.exec(this.source.slice(this.index));
     if (!match) {
       const end = this.source[this.index] === '{' ? this.source.length : this.index + 1;
       this.fail(String.raw`malformed \P or \p sequence`, Math.min(end, this.source.length));
@@ -980,42 +982,51 @@ function participated(group: number): string {
   return String.raw`(?=(?=${after}*(?!${after}))|(?=${before}*(?!${before}))|(?<![\s\S])(?![\s\S]))`;
 }
 
-/**
- * The general categories that JavaScript's `\p` accepts by the same names as PCRE. Other names are scripts, which PCRE
- * matches by their script extensions (`\p{Han}` matches `、`).
- */
-const GENERAL_CATEGORIES = new Set(
-  'C Cc Cf Cn Co Cs L Ll Lm Lo Lt Lu M Mc Me Mn N Nd Nl No P Pc Pd Pe Pf Pi Po Ps S Sc Sk Sm So Z Zl Zp Zs'.split(' ')
+const SCRIPT_ALIASES = looseAliases('Script');
+const CATEGORY_ALIASES = new Map(
+  'C Cc Cf Cn Co Cs L Ll Lm Lo Lt Lu M Mc Me Mn N Nd Nl No P Pc Pd Pe Pf Pi Po Ps S Sc Sk Sm So Z Zl Zp Zs'
+    .split(' ')
+    .map((name) => [name.toLowerCase(), name])
 );
 
-/** The class of a PCRE property name, or undefined for a name that JavaScript does not know either. */
+function looseAliases(property: string): Map<string, string> {
+  const result = new Map<string, string>();
+  for (const [alias, canonical] of propertyAliases.get(property) ?? []) {
+    result.set(propertyKey(alias), canonical);
+    result.set(propertyKey(canonical), canonical);
+  }
+  return result;
+}
+
+function propertyKey(name: string): string {
+  return name.replaceAll(/[-_ \t-\r]/g, '').toLowerCase();
+}
+
 function unicodeProperty(name: string, negated: boolean): CharacterSet | undefined {
+  name = propertyKey(name);
   const special = new Map([
-    ['Any', String.raw`\s\S`],
-    ['L&', String.raw`\p{LC}`],
-    ['Xan', String.raw`\p{L}\p{N}`],
-    ['Xwd', UCP_SETS.get('w') as string],
-    ['Xsp', UCP_SETS.get('s') as string],
-    ['Xps', UCP_SETS.get('s') as string],
+    ['any', String.raw`\s\S`],
+    ['l&', String.raw`\p{LC}`],
+    ['xan', String.raw`\p{L}\p{N}`],
+    ['xwd', UCP_SETS.get('w') as string],
+    ['xsp', UCP_SETS.get('s') as string],
+    ['xps', UCP_SETS.get('s') as string],
   ]).get(name);
   if (special !== undefined) return { content: special, negated };
-  // PCRE matches property names loosely (`\p{han}`); JavaScript wants them capitalized.
-  const explicit = /^(sc|script|scx|script_extensions)=(.+)$/i.exec(name);
-  const script = explicit?.[1].toLowerCase();
-  if (explicit) name = explicit[2];
+  const explicit = /^(sc|script|scx|scriptextensions)=(.+)$/.exec(name);
+  const script = explicit?.[1];
+  const value = explicit?.[2] ?? name;
+  const category = !explicit ? CATEGORY_ALIASES.get(value) : undefined;
+  const canonical = category ?? SCRIPT_ALIASES.get(value);
+  if (!canonical) return;
   const property = script === 'sc' || script === 'script' ? 'Script' : 'Script_Extensions';
-  const capitalized = name[0].toUpperCase() + name.slice(1).toLowerCase();
-  for (const candidate of new Set([name, capitalized])) {
-    const content =
-      !explicit && GENERAL_CATEGORIES.has(candidate) ? `\\p{${candidate}}` : `\\p{${property}=${candidate}}`;
-    try {
-      new RegExp(`[${content}]`, 'u');
-      return { content, negated };
-    } catch {
-      // Tries the next spelling.
-    }
+  const content = category ? `\\p{${canonical}}` : `\\p{${property}=${canonical}}`;
+  try {
+    new RegExp(`[${content}]`, 'u');
+    return { content, negated };
+  } catch {
+    return undefined;
   }
-  return undefined;
 }
 
 function startIndex(starts: number[], minimum: number): number {

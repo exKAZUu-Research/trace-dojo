@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 636 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 648 -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import type { Node } from '@willbooster/web-tree-sitter';
 
@@ -904,7 +904,7 @@ export abstract class DeclarationConverter extends ConverterBase {
       this.error(list, `Cannot specify default value for virtual hooked property ${className}::$${prop.name}`);
   }
 
-  // code-gauge-allow functionCognitiveComplexity 17 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+  // code-gauge-allow functionCognitiveComplexity 21 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
   protected methodDecl(member: Node, decl: ClassDecl): MethodDeclAst {
     const modifiers = this.memberModifiers(member);
     const fn = this.functionDecl(member, false, decl.name);
@@ -945,6 +945,13 @@ export abstract class DeclarationConverter extends ConverterBase {
       );
     }
     this.checkMagicMethod(member, decl.name, fn, modifiers);
+    if (lower(fn.name) === '__tostring' && !fn.returnType) fn.returnType = { k: 'named', name: 'string' };
+    if (modifiers.isFinal && modifiers.visibility === 'private' && lower(fn.name) !== '__construct')
+      this.notices.push({
+        level: 'Warning',
+        message: 'Private methods cannot be final as they are never overridden by other classes',
+        row: member.startPosition.row,
+      });
     fn.isStatic = modifiers.isStatic;
     return {
       fn,
@@ -1081,14 +1088,24 @@ function knownScalarDefault(value: Expr): Expr | undefined {
   if (value.k === 'lit') return value;
   if (value.k !== 'unary') return;
   if (value.op === '!' && value.e.k === 'array') {
-    if (value.e.items.length === 0) return { k: 'lit', v: true, row: value.row };
-    if (value.e.items.some((item) => !item.spread)) return { k: 'lit', v: false, row: value.row };
-    return;
+    const truth = knownArrayTruth(value.e);
+    return truth === undefined ? undefined : { k: 'lit', v: !truth, row: value.row };
   }
   const operand = knownScalarDefault(value.e);
   if (operand?.k !== 'lit') return;
   const result = unaryDefaultValue(value.op, operand.v);
   return result === undefined ? undefined : { k: 'lit', v: result, row: value.row };
+}
+
+function knownArrayTruth(value: Extract<Expr, { k: 'array' }>): boolean | undefined {
+  let known = true;
+  for (const item of value.items) {
+    if (!item.spread) return true;
+    const truth = item.value.k === 'array' ? knownArrayTruth(item.value) : undefined;
+    if (truth) return true;
+    if (truth === undefined) known = false;
+  }
+  return known ? false : undefined;
 }
 
 // code-gauge-allow functionCognitiveComplexity 22 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.

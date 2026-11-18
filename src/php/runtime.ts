@@ -9,10 +9,12 @@ import { dec } from './bytes';
 import type { CompileNotice } from './converter';
 import { arrayIsShared, collectGarbage, GC_THRESHOLD_DEFAULT, releaseDropped } from './garbage';
 import { GcRoots } from './gcRoots';
+import { ObjectHeap } from './objectHeap';
 import { setArraySharingCheck } from './places';
 import { MersenneTwister } from './random';
 import {
   type Callable,
+  clearNativeOwnership,
   type Method,
   type PhpArray,
   type PhpClass,
@@ -128,7 +130,7 @@ export class Runtime {
   readonly classes = new Map<string, PhpClass>();
   /** Constants by name, whose namespace prefix is lowercased. */
   readonly constants = new Map<string, Value>();
-  readonly objects = new Map<number, PhpObject>();
+  readonly objects = new ObjectHeap();
   readonly turtleObjects = new Set<PhpObject>();
   readonly arrayCycles = new Set<PhpArray>();
   readonly objectCycles = new Set<PhpObject>();
@@ -286,6 +288,7 @@ export class Runtime {
     this.turtleObjects.delete(object);
     this.internalObjects.delete(object);
     object.nativeValues?.detach();
+    clearNativeOwnership(object);
     for (const slot of object.props.values())
       if (slot instanceof Ref) {
         slot.rc--;

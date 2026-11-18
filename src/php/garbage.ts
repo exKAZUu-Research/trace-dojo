@@ -3,6 +3,7 @@ import { ExecutionLimitError } from '../interpreter/limits';
 import type { TurtleState } from '../interpreter/turtleWorld';
 import type { Frame, Runtime } from './runtime';
 import {
+  arrayHolderCount,
   type ClosureData,
   isClosure,
   observeOwnership,
@@ -178,7 +179,7 @@ function releaseDroppedNow(runtime: Runtime, dropped: unknown[]): void {
   );
   if (dropped.length === 0) return;
   const cycleCount = runtime.arrayCycles.size;
-  const arrayStorage = bufferArrayCycles(runtime, dropped, roots);
+  const arrayStorage = bufferArrayCycles(runtime, dropped, roots, unreachable);
   if (runtime.arrayCycles.size !== cycleCount) unreachable.clear();
   const within = objectsWithin(dropped);
   const freed = new Set<PhpObject>();
@@ -484,8 +485,13 @@ function retireArrays(runtime: Runtime, arrays: Iterable<PhpArray>): void {
   if (released.length > 0) runtime.release(released);
 }
 
-function bufferArrayCycles(runtime: Runtime, values: unknown[], roots: Set<unknown>): Set<PhpArray> {
-  const graph = new DetachedArrays(runtime, roots);
+function bufferArrayCycles(
+  runtime: Runtime,
+  values: unknown[],
+  roots: Set<unknown>,
+  unreachable: Set<object>
+): Set<PhpArray> {
+  const graph = new DetachedArrays(runtime, roots, unreachable);
   graph.run(values);
   return graph.arrays;
 }
@@ -497,7 +503,8 @@ class DetachedArrays {
   private readonly frames: { node: object; children: Iterator<unknown> }[] = [];
   constructor(
     private readonly runtime: Runtime,
-    private readonly roots: Set<unknown>
+    private readonly roots: Set<unknown>,
+    private readonly unreachable: Set<object>
   ) {}
   run(values: unknown[]): void {
     for (const value of values) {
@@ -513,8 +520,8 @@ class DetachedArrays {
       }
     }
   }
-  // code-gauge-allow functionNcss 33 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
-  // code-gauge-allow functionCognitiveComplexity 21 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+  // code-gauge-allow functionNcss 35 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+  // code-gauge-allow functionCognitiveComplexity 22 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
   private enter(node: unknown): void {
     if (!(node instanceof Ref || node instanceof PhpArray || node instanceof PhpObject)) return;
     if (node instanceof PhpObject && activeReleaseObjects.has(node)) return;
@@ -529,6 +536,7 @@ class DetachedArrays {
       return;
     }
     if (this.visited.has(node)) return;
+    if (ownedReachable(node, this.roots, this.runtime, this.unreachable, releaseSequence)) return;
     if (node instanceof PhpArray) this.arrays.add(node);
     this.visited.add(node);
     this.active.set(node, this.frames.length);
@@ -859,36 +867,16 @@ function objectFree(array: PhpArray, runtime: Runtime): boolean {
   return true;
 }
 
-// code-gauge-allow functionNcss 46 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+// code-gauge-allow functionCognitiveComplexity 22 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 export function arrayIsShared(runtime: Runtime, target: PhpArray): boolean {
-  let count = target.persistentHolder ? 1 : 0;
-  const visited = new Set<unknown>();
-  const pending: unknown[] = [];
+  let count = arrayHolderCount(target);
+  if (count > 1) return true;
   for (const frame of runtime.frames) {
-    for (const ref of frame.vars.values()) pending.push(ref);
-    appendValues(pending, [...frame.temporaries, frame.returning, frame.thisObj, frame.closure]);
+    for (const value of frame.temporaries) if (value === target && ++count > 1) return true;
+    if (frame.returning === target && ++count > 1) return true;
   }
-  for (const cls of runtime.classes.values()) for (const { ref } of cls.staticProps.values()) pending.push(ref);
-  for (const fn of runtime.functions.values()) if (fn.kind === 'user') appendValues(pending, [...fn.statics.values()]);
-  for (const value of runtime.constants.values()) pending.push(value);
-  appendValues(pending, [...runtime.held, ...runtime.nativeHeld]);
-  let visits = 0;
-  while (pending.length > 0) {
-    if (++visits % 8 === 0) runtime.spend();
-    const value = pending.pop();
-    if (value === target) {
-      if (++count > 1) return true;
-      continue;
-    }
-    if (visited.has(value)) continue;
-    visited.add(value);
-    if (value instanceof Ref) pending.push(value.v);
-    else if (value instanceof PhpArray && value.composite) {
-      for (const slot of value.map.values()) if (slot !== null && typeof slot === 'object') pending.push(slot);
-    } else if (value instanceof PhpObject) pushObject(value, pending);
-    else if (Array.isArray(value)) appendValues(pending, [...value]);
-    else if (value instanceof Map) appendValues(pending, [...value.values()]);
-  }
+  for (const value of runtime.held) if (value === target && ++count > 1) return true;
+  for (const values of runtime.nativeHeld) for (const value of values) if (value === target && ++count > 1) return true;
   return false;
 }
 

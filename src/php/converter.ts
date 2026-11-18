@@ -1,4 +1,3 @@
-// code-gauge-allow-file fileNcss 996 -- One converter of the statements and expressions, which share the converter state.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import type { Node } from '@willbooster/web-tree-sitter';
 
@@ -495,11 +494,11 @@ export class Converter extends DeclarationConverter {
     return { k: 'try', body, catches, fin, row };
   }
 
-  // code-gauge-allow functionCognitiveComplexity 16 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+  // code-gauge-allow functionCognitiveComplexity 24 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
   private declareStatement(node: Node, topLevel: boolean): Stmt[] {
     for (const directive of node.namedChildren.filter((child) => child.type === 'declare_directive')) {
-      const key = lower(directive.child(0)?.text ?? '');
-      const valueNode = directive.namedChildren.find((child) => child.type !== 'comment') as Node;
+      const key = lower((directive.childForFieldName('name') as Node).text);
+      const valueNode = directive.childForFieldName('value') as Node;
       if (key === 'strict_types') {
         if (
           !topLevel ||
@@ -521,7 +520,22 @@ export class Converter extends DeclarationConverter {
           );
         }
         this.strictTypes = valueNode.text === '1';
-      } else if (key !== 'ticks' && key !== 'encoding') {
+      } else if (key === 'encoding') {
+        if (!encodingLiteral(this.expr(valueNode))) this.error(valueNode, 'Encoding must be a literal');
+        if (
+          !topLevel ||
+          node.parent?.namedChildren.some(
+            (child) =>
+              child.endIndex <= node.startIndex && !['php_tag', 'comment', 'declare_statement'].includes(child.type)
+          )
+        )
+          this.error(node, 'Encoding declaration pragma must be the very first statement in the script');
+        this.notices.push({
+          level: 'Warning',
+          message: 'declare(encoding=...) ignored because Zend multibyte feature is turned off by settings',
+          row: node.startPosition.row,
+        });
+      } else if (key !== 'ticks') {
         this.error(node, `declare の指定「${directive.text}」は使えません。`);
       }
     }
@@ -1010,7 +1024,7 @@ export class Converter extends DeclarationConverter {
     return { k: 'const', name: this.resolveConstName(raw), row };
   }
 
-  // code-gauge-allow functionNcss 35 -- One case per grammar node kind, each converted where PHP gives it its own meaning.
+  // code-gauge-allow functionNcss 36 -- One case per grammar node kind, each converted where PHP gives it its own meaning.
   private functionCall(node: Node): Expr {
     const row = node.startPosition.row;
     const fnNode = node.childForFieldName('function') as Node;
@@ -1040,6 +1054,7 @@ export class Converter extends DeclarationConverter {
       if (word === 'die' || word === 'exit') {
         const { args, fcc } = this.args(argumentsNode);
         if (!fcc) return { k: 'exit', e: args[0]?.e, row };
+        return { k: 'call', fn: { name: 'exit' }, args, fcc, row };
       }
       if (word === '__halt_compiler') this.unsupported(node, '__halt_compiler');
     }
@@ -1450,4 +1465,10 @@ export class Converter extends DeclarationConverter {
       })
       .join('\n');
   }
+}
+
+function encodingLiteral(value: Expr): boolean {
+  if (value.k === 'lit')
+    return typeof value.v === 'string' || typeof value.v === 'bigint' || typeof value.v === 'number';
+  return value.k === 'bin' && value.op === '.' && encodingLiteral(value.l) && encodingLiteral(value.r);
 }

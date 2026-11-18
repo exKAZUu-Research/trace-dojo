@@ -33,7 +33,7 @@
         "@willbooster/tree-sitter-go": "13.0.0",
         "@willbooster/tree-sitter-java": "35.0.0",
         "@willbooster/tree-sitter-javascript": "26.0.0",
-        "@willbooster/tree-sitter-php": "11.0.0",
+        "@willbooster/tree-sitter-php": "12.0.0",
         "@willbooster/tree-sitter-python": "21.0.0",
         "@willbooster/tree-sitter-ruby": "20.0.0",
         "@willbooster/wb": "23.3.4",
@@ -69,6 +69,7 @@
         "supertokens-auth-react": "0.51.3",
         "supertokens-node": "24.1.0",
         "supertokens-web-js": "0.16.0",
+        "unicode-property-value-aliases-ecmascript": "3.0.0",
         "use-context-selector": "2.0.0",
         "use-immer": "0.11.0",
         "usehooks-ts": "3.1.1",
@@ -753,7 +754,7 @@
 
     "@willbooster/tree-sitter-javascript": ["@willbooster/tree-sitter-javascript@26.0.0", "", { "peerDependencies": { "@willbooster/web-tree-sitter": "^23.0.0" }, "optionalPeers": ["@willbooster/web-tree-sitter"] }, "sha512-GhGnCSkd4PVJPK1GbrDfUwmygkK0R5cr3VQdMt6aKcY+mU3Q8PNPmGFlus5rw7W6e9G3l0/mKTw3L+lLhog8Lg=="],
 
-    "@willbooster/tree-sitter-php": ["@willbooster/tree-sitter-php@11.0.0", "", { "peerDependencies": { "@willbooster/web-tree-sitter": "^23.0.0" }, "optionalPeers": ["@willbooster/web-tree-sitter"] }, "sha512-1wtdVlMYlIru4aDBkpT7M263X2Tngd6Boqo0SCuN7z9qtx+IViMOW8HPdNkKv3cGFFb9Y1eHiYMKd7mMNGEJVg=="],
+    "@willbooster/tree-sitter-php": ["@willbooster/tree-sitter-php@12.0.0", "", { "peerDependencies": { "@willbooster/web-tree-sitter": "^23.0.0" }, "optionalPeers": ["@willbooster/web-tree-sitter"] }, "sha512-kymwXmaDDZvMW86KMoKF+eyVNbGLR3m3jK9QNWfLXQSac1kGiTH2dO1Cc22dla5J+pvEc5uOiMBDMmy+8sXp0w=="],
 
     "@willbooster/tree-sitter-python": ["@willbooster/tree-sitter-python@21.0.0", "", { "peerDependencies": { "@willbooster/web-tree-sitter": "^23.0.0" }, "optionalPeers": ["@willbooster/web-tree-sitter"] }, "sha512-vhH4lmZDWaq+P3hadli2abh0jQ+VqY7g3lApNlbEdM3s0QuT3jFn9Y57lQOfF3YpGNYULKLL4zmn08Vc2Bz+6g=="],
 
@@ -1966,6 +1967,8 @@
     "undici-types": ["undici-types@8.9.0", "", {}, "sha512-KTDyRTYX8sWmKXAikPHHSyc63CRPETMctyjKFupcC6OBLXT3xsN0e9aF7m+mIXutFWpUXuedtowG7iLOzp0kQg=="],
 
     "unicode-emoji-modifier-base": ["unicode-emoji-modifier-base@1.0.0", "", {}, "sha512-yLSH4py7oFH3oG/9K+XWrz1pSi3dfUrWEnInbxMfArOfc1+33BlGPQtLsOYwvdMy11AwUBetYuaRxSPqgkq+8g=="],
+
+    "unicode-property-value-aliases-ecmascript": ["unicode-property-value-aliases-ecmascript@3.0.0", "", {}, "sha512-Tdow2YHdEfrAj76ilIXhM+VCrt3fIGpGjk9obBo4SijOo8+eHFWpN5tUW1mbOmD60fs/ysuLLWcgbjgSMLPapg=="],
 
     "unicorn-magic": ["unicorn-magic@0.4.1", "", {}, "sha512-lzlXPoVB0Uy/FvTaUgX39RbixYiSKoc3JSoSf01+0c2B6FR3qdYIPN7Qjo/AV7n6sqLCk0509cT3LRj1oSZ1+A=="],
 

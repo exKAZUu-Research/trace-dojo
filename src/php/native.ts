@@ -106,6 +106,7 @@ export function installNatives(): void {
     const value = typeof definition === 'function' ? definition() : definition;
     runtime.constants.set(name, value);
     if (value instanceof PhpArray || value instanceof PhpObject) runtime.rootConstants.add(value);
+    if (value instanceof PhpArray) value.persistentHolder = true;
   }
   for (const definition of classDefinitions) runtime.classes.set(lower(definition.name), buildClass(definition));
 }

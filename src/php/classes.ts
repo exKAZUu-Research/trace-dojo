@@ -400,7 +400,7 @@ function applyTraits(cls: PhpClass, decl: ClassDecl): void {
 }
 
 function applyTraitProperties(cls: PhpClass, trait: PhpClass, origins: Map<string, string>, row: number): void {
-  for (const source of trait.props) {
+  for (const source of trait.propByName.values()) {
     const prop = source.declarationAst;
     if (!prop) continue;
     const declarationScope = source.declarationScope ?? trait;
@@ -545,6 +545,7 @@ function missingPropertyHooks(cls: PhpClass, ancestors: PhpClass[], row: number)
           row
         );
       }
+      if (cls.kind === 'interface') checkInterfaceHooks(contract, property, row);
       if (!propertyTypeCompatible(contract, property, property.cls))
         propertyTypeError(contract, cls, property.name, row);
     }
@@ -555,6 +556,32 @@ function missingPropertyHooks(cls: PhpClass, ancestors: PhpClass[], row: number)
     }
   }
   return [...missing];
+}
+
+// code-gauge-allow functionCognitiveComplexity 22 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+function checkInterfaceHooks(parent: PropDecl, child: PropDecl, row: number): void {
+  for (const kind of ['get', 'set'] as const) {
+    const inherited = parent.hooks?.[kind];
+    const own = child.hooks?.[kind];
+    if (!inherited || !own) continue;
+    const parentType = kind === 'set' ? (inherited.params[0]?.type ?? parent.type) : parent.type;
+    const childType = kind === 'set' ? (own.params[0]?.type ?? child.type) : child.type;
+    const mixed: TypeDecl = { k: 'named', name: 'mixed' };
+    const compatible =
+      kind === 'get'
+        ? isSubtype(childType ?? mixed, child.cls, parentType ?? mixed, parent.cls)
+        : isSubtype(parentType ?? mixed, parent.cls, childType ?? mixed, child.cls);
+    if (compatible) continue;
+    const signature = (prop: PropDecl, fn: Callable, type: TypeDecl | undefined): string => {
+      const prefix = `${prop.cls.name}::$${prop.name}::${kind}`;
+      if (kind === 'get') return `${prefix}()${type ? `: ${typeToString(type)}` : ''}`;
+      return `${prefix}(${type ? `${typeToString(type)} ` : ''}$${fn.params[0]?.name ?? 'value'}): void`;
+    };
+    throw new FatalError(
+      `Declaration of ${signature(child, own, childType)} must be compatible with ${signature(parent, inherited, parentType)}`,
+      row
+    );
+  }
 }
 
 function implementsPropertyHook(property: PropDecl | undefined, kind: 'get' | 'set'): boolean {

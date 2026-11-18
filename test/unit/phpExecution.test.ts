@@ -1024,8 +1024,7 @@ test.each([
   expect(run(`<?php ${source}`)).toMatchObject({ kind: 'executed', stdout });
 });
 
-test('keeps unrelated object churn bounded after buffered cyclic containers', () => {
-  vi.restoreAllMocks();
+test('completes object churn with buffered cyclic containers within the operation limit', () => {
   const source = `<?php gc_disable();class Node{public $prev;public $next;public $data;function __construct($v){$this->data=['v'=>$v,'tag'=>new stdClass];}}function build($n){$head=new Node(0);$cur=$head;for($i=1;$i<$n;$i++){$x=new Node($i);$x->prev=$cur;$cur->next=$x;$cur=$x;}$s=0;for($c=$head;$c;$c=$c->next)$s+=$c->data['v'];return $s;}$t=0;for($k=0;$k<120;$k++)$t+=build(100);echo $t,":",gc_enabled()?1:0,":";$sum=0;for($i=0;$i<20000;$i++){$p=new stdClass;$p->v=$i;$sum+=$p->v;}echo $sum;`;
   expect(run(source)).toMatchObject({ kind: 'executed', stdout: '594000:0:199990000' });
 });
@@ -1055,4 +1054,40 @@ test.each([
   const result = run(`<?php ${source}`);
   expect(result.kind).toBe('compileError');
   expect(JSON.stringify(result)).toContain(message);
+});
+
+test.each([
+  ["echo 'before';declare(encoding='UTF-8');", 'Encoding declaration pragma must be the very first statement'],
+  [";declare(encoding='UTF-8');", 'Encoding declaration pragma must be the very first statement'],
+  ["if(true){declare(encoding='UTF-8');}", 'Encoding declaration pragma must be the very first statement'],
+  ['declare(encoding=true);', 'Encoding must be a literal'],
+  ['declare(encoding=1+2);', 'Encoding must be a literal'],
+])('checks compile-time declaration diagnostics: %s', (source, message) => {
+  const result = run(`<?php ${source}`);
+  expect(result.kind).toBe('compileError');
+  expect(JSON.stringify(result)).toContain(message);
+});
+
+test.each(['![...[]]', '![...[...[]]]', '![...[1]]'])('validates resolved spread-array default truth: %s', (value) => {
+  const result = run(`<?php class A{public int $x=${value};}echo 'never';`);
+  expect(result.kind).toBe('compileError');
+  expect(JSON.stringify(result)).toMatch(/Cannot use (?:true|false) as default value/);
+});
+
+test('mutates arrays held by many objects within the operation limit', () => {
+  const source =
+    '<?php class Student{public array $scores=[];}$students=[];for($i=0;$i<2000;$i++)$students[]=new Student;foreach($students as $s){$s->scores[]=1;$s->scores[]=2;}$sum=0;foreach($students as $s)$sum+=array_sum($s->scores);echo $sum;';
+  expect(run(source)).toMatchObject({ kind: 'executed', stdout: '6000' });
+});
+
+test.each([false, true])('drains linked queues within the operation limit (doubly linked: %s)', (doublyLinked) => {
+  const source = `<?php class N{public $next=null;public $prev=null;function __construct(public $v){}}class Q{public $head=null;public $tail=null;public $n=0;function push($v){$x=new N($v);if(!$this->tail){$this->head=$this->tail=$x;}else{${doublyLinked ? '$x->prev=$this->tail;' : ''}$this->tail->next=$x;$this->tail=$x;}$this->n++;}function shift(){$h=$this->head;$this->head=$h->next;if(!$this->head)$this->tail=null;${doublyLinked ? 'else $this->head->prev=null;' : ''}$this->n--;return $h->v;}}$q=new Q;for($i=0;$i<1000;$i++)$q->push($i);$sum=0;while($q->n>0)$sum+=$q->shift();echo $sum;`;
+  expect(run(source)).toMatchObject({ kind: 'executed', stdout: '499500' });
+});
+
+test('completes packed splice and keyed queues with time to spare', () => {
+  vi.restoreAllMocks();
+  const source =
+    '<?php $people=range(1,4000);$i=0;while(count($people)>1){$i=($i+2)%count($people);array_splice($people,$i,1);}echo $people[0],"|";$tasks=[];for($i=0;$i<5000;$i++)$tasks["task$i"]=$i%7;$sum=0;while($tasks)$sum+=array_shift($tasks);echo $sum;';
+  expect(run(source)).toMatchObject({ kind: 'executed', stdout: '3910|14995' });
 });
