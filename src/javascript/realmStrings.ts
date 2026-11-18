@@ -29,12 +29,15 @@ export function defineStringBuiltins(builder: RealmBuilder): void {
   });
   builder.method(stringConstructor, 'fromCodePoint', 1, ({ runtime, args }) => {
     runtime.buildString(args.length * 2);
-    const codePoints = args.map((value) => runtime.toNumber(value));
-    const invalid = codePoints.find(
-      (codePoint) => !Number.isInteger(codePoint) || codePoint < 0 || codePoint > 0x10_ff_ff
-    );
-    if (invalid !== undefined) runtime.throwError('RangeError', `Invalid code point ${invalid}`);
-    return codePoints.map((codePoint) => String.fromCodePoint(codePoint)).join('');
+    // Each argument is checked before the next one converts, as a later conversion may have effects.
+    return args
+      .map((value) => {
+        const codePoint = runtime.toNumber(value);
+        if (!Number.isInteger(codePoint) || codePoint < 0 || codePoint > 0x10_ff_ff)
+          runtime.throwError('RangeError', `Invalid code point ${runtime.toString(codePoint)}`);
+        return String.fromCodePoint(codePoint);
+      })
+      .join('');
   });
   builder.realm.stringRaw = builder.method(stringConstructor, 'raw', 1, ({ runtime, args }) => {
     const raw = runtime.toObject(runtime.get(runtime.toObject(args[0]), 'raw'));
@@ -257,6 +260,8 @@ function defineBuilders(method: StringMethod): void {
   ] as const) {
     method(name, 1, ({ runtime, args }, text) => {
       const length = integerArgument(runtime, args[0], 0);
+      // The filler is not converted when the text is already long enough.
+      if (length <= text.length) return text;
       const filler = args[1] === undefined ? ' ' : runtime.toString(args[1]);
       runtime.buildString(Math.max(length, text.length));
       return atStart ? text.padStart(length, filler) : text.padEnd(length, filler);
