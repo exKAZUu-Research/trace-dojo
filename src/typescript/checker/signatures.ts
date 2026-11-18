@@ -292,13 +292,7 @@ export class Signatures {
       if (accessorDeclarationTypes.has(node.type) && (hasToken(node, 'get') || hasToken(node, 'set'))) {
         this.checkImplicitAccessorType(node);
       } else if (node.parent?.type !== 'class_body' || !isConstructorName(name)) {
-        const subject =
-          node.type === 'call_signature'
-            ? '呼び出しシグネチャ'
-            : node.type === 'construct_signature'
-              ? 'コンストラクトシグネチャ'
-              : (name?.text ?? '');
-        this.c.error(name ?? node, `${subject} の戻り値の型が暗黙に any になります。`);
+        this.c.error(name ?? node, `${signatureSubject(node)} の戻り値の型が暗黙に any になります。`);
       }
     }
   }
@@ -584,6 +578,12 @@ function isDeclaredTypeName(node: TreeNode): boolean {
 }
 
 /** The parameter declarations of a function-like node, a `this` parameter included. */
+function signatureSubject(node: TreeNode): string {
+  if (node.type === 'call_signature') return '呼び出しシグネチャ';
+  if (node.type === 'construct_signature') return 'コンストラクトシグネチャ';
+  return node.childForFieldName('name')?.text ?? '';
+}
+
 function returnTypeNode(node: TreeNode): TreeNode | undefined {
   return (
     node.childForFieldName('return_type') ??
