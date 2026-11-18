@@ -27,3 +27,20 @@ TypeError: clone(): Argument #1 ($object) must be of type object, int given
 Call to private method PC::__clone() from global scope
 array_merge(): Argument #2 must be of type array, int given
 array_map(): Argument #3 must be of type array, int given
+method
+static method
+shared
+property;plain name
+bool(true)
+string(7) "changed"
+bool(false)
+43:Method name must be a string
+Method name must be a string
+bool(false)
+bool(true)
+int(1)
+bool(false)
+string(7) "default"
+
+Warning: Undefined variable $unboundName in /main.php on line 52
+bool(false)

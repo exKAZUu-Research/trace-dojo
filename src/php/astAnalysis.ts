@@ -200,8 +200,7 @@ class ReadValidator {
       }
       case 'assign':
       case 'assignOp': {
-        this.visit(node.target, node.op !== '??');
-        this.visit(node.value, false);
+        this.assignment(node as unknown as Extract<Expr, { k: 'assign' | 'assignOp' }>);
         return;
       }
       case 'assignRef': {
@@ -265,7 +264,14 @@ class ReadValidator {
       }
     }
   }
-  // code-gauge-allow functionCognitiveComplexity 16 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+
+  private assignment(node: Extract<Expr, { k: 'assign' | 'assignOp' }>): void {
+    this.visit(node.target, node.k === 'assign' || node.op !== '??');
+    const target = node.target;
+    this.visit(node.value, node.k === 'assign' && target.k === 'list' && hasReferenceItem(target));
+  }
+
+  // code-gauge-allow functionCognitiveComplexity 19 -- Keeps positional and named reference argument validation in evaluation order.
   private arguments(expression: Expr, args: Arg[]): void {
     const params = this.parametersOf(expression);
     let positional = 0;
@@ -280,6 +286,7 @@ class ReadValidator {
           unpacked ||
           param?.byRef === true ||
           (arg.name !== undefined && (!param || param.variadic)));
+      if (writing && param?.byRef && !unpacked) checkReferenceArgumentReceiver(arg.e);
       this.visit(arg.e, writing);
       if (arg.spread) unpacked = true;
       else if (!arg.name) positional++;
@@ -311,6 +318,26 @@ class ReadValidator {
   }
 }
 
+function checkReferenceArgumentReceiver(expression: Expr): void {
+  if (hasNullsafeReceiver(expression)) return;
+  const root = writableFetchRoot(expression);
+  if (root === expression) return;
+  if (root.k === 'clone')
+    throw new CompileError([{ row: root.row, message: 'Cannot use result of built-in function in write context' }]);
+  if (!isWritableFetchBase(root))
+    throw new CompileError([{ row: root.row, message: 'Cannot use temporary expression in write context' }]);
+}
+
+function writableFetchRoot(expression: Expr): Expr {
+  while (expression.k === 'idx' || expression.k === 'prop')
+    expression = expression.k === 'idx' ? expression.base : expression.obj;
+  return expression;
+}
+
+export function isWritableFetchBase(expression: Expr): boolean {
+  return ['var', 'varvar', 'sprop', 'call', 'mcall', 'scall', 'pipe', 'clone'].includes(expression.k);
+}
+
 function checkUnsetOffsets(target: Expr): void {
   while (target.k === 'idx' || target.k === 'prop') {
     if (target.k === 'prop') target = target.obj;
@@ -340,10 +367,9 @@ export function hasNullsafeReceiver(expression: Expr): boolean {
 
 export function foreachSubjectWritable(expression: Expr): boolean {
   if (hasNullsafeReceiver(expression)) return false;
-  let base = expression;
-  while (base.k === 'idx' || base.k === 'prop') base = base.k === 'idx' ? base.base : base.obj;
+  const base = writableFetchRoot(expression);
   if (base === expression && (base.k === 'call' || base.k === 'mcall' || base.k === 'scall')) return false;
-  return ['var', 'varvar', 'sprop', 'call', 'mcall', 'scall'].includes(base.k);
+  return base === expression ? ['var', 'varvar', 'sprop'].includes(base.k) : isWritableFetchBase(base);
 }
 
 export function foreachReferences(target: Expr, byRef: boolean): boolean {

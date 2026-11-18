@@ -410,6 +410,8 @@ array(3) {
 2=a;0=b;
 0=1;2=3;x=4;
 0=0;1=1;3=3;4=4;
+2=a;8=b;
+Cannot add element to the array as the next element is already occupied
 array(1) {
   ["u"]=>
   int(5)
@@ -456,7 +458,7 @@ array(2) {
   int(2)
 }
 keys:1=2
-UndefinedArrayChild::{closure:UndefinedArrayChild::__destruct():78}(): Argument #2 ($b) not passed
+UndefinedArrayChild::{closure:UndefinedArrayChild::__destruct():95}(): Argument #2 ($b) not passed
 array(1) {
   ["y"]=>
   int(5)

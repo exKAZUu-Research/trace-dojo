@@ -11,3 +11,4 @@ body;1;removed;
 exit;throw;removed;cleanup;0;
 body;1;removed;
 exit;throw;removed;cleanup;0;
+exit;throw;OverwrittenInfo->__destruct:internal;SplObjectStorage->offsetSet:79;cleanup

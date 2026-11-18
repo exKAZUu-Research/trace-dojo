@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 661 -- Keeps one PHP runtime concern and its shared helpers in one module.
+// code-gauge-allow-file fileNcss 662 -- Keeps one PHP runtime concern and its shared helpers in one module.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import { placeOf } from './assignment';
 import type { Arg, Expr, ResolvedName } from './ast';
@@ -32,6 +32,7 @@ import {
   resolveStaticClass,
   SHORT,
 } from './interp';
+import { compiledOperandRow } from './opcodeRows';
 import { ElementPlace, share, VarPlace, writableContainer } from './places';
 import { type Frame, PhpThrow, rt } from './runtime';
 import { renderSimpleSprintf } from './sprintf';
@@ -307,8 +308,8 @@ export function methodCallExpression(e: Extract<Expr, { k: 'mcall' }>, discardRe
   const earlyObject = !deferred || e.nullsafe ? evChain(e.obj) : undefined;
   if (earlyObject === SHORT || (e.nullsafe && earlyObject === null)) return SHORT;
   if (!deferred && earlyObject instanceof PhpObject) runtime.frame.temporaries.push(earlyObject);
-  const readName = typeof member === 'string' ? undefined : prepareOperand(member);
-  const methodName = readName ? dynamicMethodName(readName()) : (member as string);
+  const methodName =
+    typeof member === 'string' ? member : dynamicMethodName(prepareOperand(member)(), compiledOperandRow(member));
   const object = deferred ? prepareOperand(e.obj)(e.row) : (earlyObject ?? null);
   runtime.row = e.row;
   if (!(object instanceof PhpObject) || object.isResource) {
@@ -355,8 +356,11 @@ export function methodCallExpression(e: Extract<Expr, { k: 'mcall' }>, discardRe
   throwError('Error', `Call to undefined method ${object.cls.name}::${methodName}()`);
 }
 
-function dynamicMethodName(value: Value): string {
-  if (typeof value !== 'string') throwError('Error', 'Method name must be a string');
+function dynamicMethodName(value: Value, row: number): string {
+  if (typeof value !== 'string') {
+    rt().row = row;
+    throwError('Error', 'Method name must be a string');
+  }
   return value;
 }
 
@@ -421,7 +425,7 @@ export function staticCallExpression(e: Extract<Expr, { k: 'scall' }>, discardRe
   runtime.row = e.row;
   const cls = resolveStaticClass(e.cls);
   if (cls === SHORT) return SHORT;
-  const methodName = typeof e.name === 'string' ? e.name : dynamicMethodName(ev(e.name));
+  const methodName = typeof e.name === 'string' ? e.name : dynamicMethodName(ev(e.name), compiledOperandRow(e.name));
   runtime.row = e.row;
   const scope = frame.scope;
   const constructor = typeof e.name === 'string' && lower(methodName) === '__construct';

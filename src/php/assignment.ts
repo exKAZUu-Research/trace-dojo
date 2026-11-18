@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 912 -- Holds assignment and offset access modes with their shared helpers.
+// code-gauge-allow-file fileNcss 922 -- Holds assignment and offset access modes with their shared helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import type { Expr, ListItem } from './ast';
 import { foreachSubjectWritable, hasReferenceItem } from './astAnalysis';
@@ -29,9 +29,10 @@ import {
   readOperandWithWarning,
   resolveClassRef,
   stringOffset,
+  stringOffsetIndex,
 } from './interp';
 import { compiledOperandRow, dimensionWriteRow } from './opcodeRows';
-import { arithmetic, bitwise, concat, toInt, toKey, toStr } from './operators';
+import { arithmetic, bitwise, concat, toKey, toStr } from './operators';
 import {
   type BeforeOffsetGet,
   type CompoundRead,
@@ -48,7 +49,7 @@ import {
   VarPlace,
   writableContainer,
 } from './places';
-import { PhpThrow, rt } from './runtime';
+import { FatalError, PhpThrow, rt } from './runtime';
 import { incrementString } from './strings';
 import { coerce, describePropertyType, matches, NO_MATCH, typeToString } from './types';
 import {
@@ -107,7 +108,9 @@ export function placeOf(e: Expr, mode: PlaceMode = 'write', through = false): Pl
     }
     case 'call':
     case 'mcall':
-    case 'scall': {
+    case 'scall':
+    case 'pipe':
+    case 'clone': {
       runtime.lastReturnRef = undefined;
       const value = ev(e);
       const returned = runtime.lastReturnRef;
@@ -153,7 +156,7 @@ function dimensionPlace(e: Extract<Expr, { k: 'idx' }>, mode: PlaceMode, through
         beforeOffsetGet();
         invalidObjectDimension(container, 'same');
       }
-      return arrayAccessPlace(container, key, writeMode === 'write', keyWarning !== undefined);
+      return arrayAccessPlace(container, key, writeMode === 'write', keyWarning !== undefined, fetch.unbound);
     }
     if (keyWarning) throw keyWarning;
     if (container instanceof PhpArray)
@@ -187,7 +190,7 @@ function readDimensionKey(
 }
 
 // code-gauge-allow functionCognitiveComplexity 21 -- Shares receiver resolution across the read and write phases.
-// code-gauge-allow functionNcss 33 -- Retains the same receiver and name across deferred property operations.
+// code-gauge-allow functionNcss 36 -- Retains the same receiver and name across deferred property operations.
 function instancePropertyPlace(e: Extract<Expr, { k: 'prop' }>, mode: PlaceMode, through: boolean): Place {
   const parent = placeOf(e.obj, mode, true);
   const property = e.name;
@@ -210,9 +213,11 @@ function instancePropertyPlace(e: Extract<Expr, { k: 'prop' }>, mode: PlaceMode,
   if (mode !== 'deferred' && mode !== 'coalesce') return resolve(mode);
   const place = deferredPlace(resolve, () => {
     const object = readForIsset(parent);
-    const name = toStr(readName());
+    const key = readName();
+    if (!(object instanceof PhpObject)) return;
+    const name = toStr(key);
     rt().row = e.row;
-    return object instanceof PhpObject ? readProp(object, name, rt().frame.scope, 'coalesce') : undefined;
+    return readProp(object, name, rt().frame.scope, 'coalesce');
   });
   if (typeof property !== 'string' && !through) {
     place.readCompoundName = (warning) => {
@@ -554,21 +559,23 @@ function arrayAccessPlace(
   object: PhpObject,
   key: Value | undefined,
   readAssignmentValue = false,
-  hasKeyWarning = false
+  hasKeyWarning = false,
+  unboundReceiver = false
 ): Place {
   if (!isArrayAccess(object)) {
     const error = (): never => invalidObjectDimension(object);
     return readAssignmentValue ? invalidWriteTarget(error) : error();
   }
   let refPlace: Place | undefined;
+  const nested = (mode?: NestMode): Place => arrayAccessNestedPlace(object, key, mode, unboundReceiver);
   return {
     get unbound() {
       return refPlace?.unbound;
     },
     getForIsset: () =>
       toBool(callMethod(object, 'offsetExists', [key ?? null], rt().row)) ? readOffset(object, key) : undefined,
-    nested: (mode) => arrayAccessNestedPlace(object, key, mode),
-    incrementTarget: () => arrayAccessNestedPlace(object, key, 'update'),
+    nested,
+    incrementTarget: () => nested('update'),
     get: () => readOffset(object, key),
     fetchCompound: (warning, beforeOffsetGet) =>
       fetchCompoundDimension(object, key, warning, beforeOffsetGet?.(), hasKeyWarning),
@@ -576,7 +583,7 @@ function arrayAccessPlace(
       if (!rt().pendingAssignmentWarning || writesOffsetWithException(object, key)) writeOffset(object, key, value);
       return value;
     },
-    ref: () => (refPlace ??= arrayAccessNestedPlace(object, key)).ref(),
+    ref: () => (refPlace ??= nested()).ref(),
     unset: () => {
       const storage = object.internal as { unsetOffset?: (value: Value) => void } | undefined;
       if (storage?.unsetOffset && object.cls.findMethod('offsetunset')?.fn.kind === 'native')
@@ -666,14 +673,19 @@ function fetchObjectDimension(
   }
 }
 
-function arrayAccessNestedPlace(object: PhpObject, key: Value | undefined, mode: NestMode = 'write'): Place {
+function arrayAccessNestedPlace(
+  object: PhpObject,
+  key: Value | undefined,
+  mode: NestMode = 'write',
+  unboundReceiver = false
+): Place {
   const storage = object.internal;
   if (nativeArrayStorage(storage) && object.cls.findMethod('offsetget')?.fn.kind === 'native') {
     if (key === undefined) {
       notice(`Indirect modification of overloaded element of ${object.cls.name} has no effect`);
       return new RefPlace(Ref.temporary(null));
     }
-    return nativeArrayNestedPlace(object, storage, key, mode);
+    return nativeArrayNestedPlace(object, storage, key, mode, unboundReceiver && !hasStoredObject(rt(), object));
   }
   const runtime = rt();
   runtime.lastReturnRef = undefined;
@@ -686,7 +698,13 @@ function arrayAccessNestedPlace(object: PhpObject, key: Value | undefined, mode:
   return new RefPlace(Ref.temporary(value));
 }
 
-function nativeArrayNestedPlace(object: PhpObject, storage: NativeArrayStorage, key: Value, mode: NestMode): Place {
+function nativeArrayNestedPlace(
+  object: PhpObject,
+  storage: NativeArrayStorage,
+  key: Value,
+  mode: NestMode,
+  unbound: boolean
+): Place {
   if (mode === 'unset') {
     if (key instanceof PhpArray || key instanceof PhpObject)
       notice(`Indirect modification of overloaded element of ${object.cls.name} has no effect`);
@@ -698,7 +716,7 @@ function nativeArrayNestedPlace(object: PhpObject, storage: NativeArrayStorage, 
   let place!: ElementPlace;
   withOperandWarnings((warning) => {
     const index = toKey(key, 'access', object.cls.name, warning);
-    place = new ElementPlace(storage.writable(), index);
+    place = new ElementPlace(storage.writable(), index, unbound);
     if (place.get() === undefined) {
       if (mode === 'update') warning(() => place.warnUndefined());
       if (place.get() === undefined) place.set(null);
@@ -709,16 +727,17 @@ function nativeArrayNestedPlace(object: PhpObject, storage: NativeArrayStorage, 
 }
 
 // code-gauge-allow functionCognitiveComplexity 28 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
-// code-gauge-allow functionNcss 31 -- Keeps each string offset operation with its shared receiver, index and diagnostic row.
+// code-gauge-allow functionNcss 32 -- Keeps each string offset operation with its shared receiver, index and diagnostic row.
 function stringOffsetPlace(parent: Place, text: string, key: Value | undefined, row: number): Place {
   const assign = (value: () => Value): Value => {
     if (key === undefined) throwError('Error', '[] operator not supported for strings');
-    const position = stringOffset(text, key) as number;
-    const offset = position < 0 ? Number(toInt(key)) : position;
-    if (offset < 0) {
-      warn(`Illegal string offset ${offset}`);
+    const index = stringOffsetIndex(key)!;
+    const position = index < 0n ? BigInt(text.length) + index : index;
+    if (position < 0n) {
+      warn(`Illegal string offset ${index}`);
       return null;
     }
+    const offset = Number(position);
     let character = toStr(value());
     if (character === '') throwError('Error', 'Cannot assign an empty string to a string offset');
     if (character.length > 1) {
@@ -753,7 +772,7 @@ function stringOffsetPlace(parent: Place, text: string, key: Value | undefined, 
     assign,
     ref: () => {
       rt().row = row;
-      return rejectStringReference(text, key);
+      return rejectStringReference(key);
     },
     unset: () => {
       throwError('Error', 'Cannot unset string offsets');
@@ -761,9 +780,9 @@ function stringOffsetPlace(parent: Place, text: string, key: Value | undefined, 
   };
 }
 
-function rejectStringReference(text: string, key: Value | undefined): never {
+function rejectStringReference(key: Value | undefined): never {
   if (key === undefined) throwError('Error', '[] operator not supported for strings');
-  stringOffset(text, key, 'reference');
+  stringOffsetIndex(key);
   throwError('Error', 'Cannot create references to/from string offsets');
 }
 
@@ -865,7 +884,7 @@ function bindDimensionRef(target: Extract<Expr, { k: 'idx' }>, ref: Ref): void {
   const parent = nestedPlace(placeOf(target.base, 'write', true), 'write');
   const rawKey = target.index === undefined ? undefined : ev(target.index);
   let container = writableContainer(parent);
-  if (typeof container === 'string') return rejectStringReference(container, rawKey);
+  if (typeof container === 'string') return rejectStringReference(rawKey);
   const key = rawKey === undefined ? undefined : toKey(rawKey);
   if (
     container instanceof PhpObject &&
@@ -915,11 +934,13 @@ export function destructureAssignment(target: Extract<Expr, { k: 'list' }>, expr
   if (foreachSubjectWritable(expression)) {
     const place = placeOf(expression, 'write', true);
     const slot = place.ref();
-    return destructure(target, slot.v, place.unbound || slot.rc === 0 ? 'temporary' : new RefPlace(slot), row);
+    const temporary = slot.rc === 0 || (slot.rc === 1 && place.unbound);
+    return destructure(target, slot.v, temporary ? 'temporary' : new RefPlace(slot), row);
   }
-  const call = expression.k === 'call' || expression.k === 'mcall' || expression.k === 'scall';
+  const call = ['call', 'mcall', 'scall', 'pipe', 'clone'].includes(expression.k);
   runtime.lastReturnRef = undefined;
   const value = ev(expression);
+  if (expression.k === 'clone') throw new FatalError('Invalid opcode 140/2/0.', row);
   const returned = call ? runtime.lastReturnRef : undefined;
   runtime.lastReturnRef = undefined;
   return destructure(target, value, returned ? new RefPlace(returned) : call ? 'temporary' : undefined, row);
@@ -1009,7 +1030,7 @@ function listElementReference(value: Value, key: Value, source: RefPlace | 'temp
   }
   if (value instanceof PhpArray) return new ElementPlace(value, toKey(key)).ref();
   if (value instanceof PhpObject) return arrayAccessPlace(value, key).ref();
-  if (typeof value === 'string') return rejectStringReference(value, key);
+  if (typeof value === 'string') return rejectStringReference(key);
   if (source && value !== null) throwError('Error', 'Cannot use a scalar value as an array');
   if (value !== null) warn(`Cannot use ${debugType(value)} as array`);
   return Ref.temporary(null);

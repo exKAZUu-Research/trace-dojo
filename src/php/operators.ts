@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 535 -- PHP operators share coercion and comparison helpers.
+// code-gauge-allow-file fileNcss 537 -- PHP operators share coercion and comparison helpers.
 // oxlint-disable unicorn/prefer-code-point -- PHP strings hold bytes as code units 0–255, which charCodeAt and fromCharCode read and write as they are.
 import { platformBinary } from '../interpreter/platformMath';
 import {
@@ -146,7 +146,11 @@ export function floatToIntCast(value: number, pending?: PhpThrow, warning?: Upda
     `The float ${formatFloatForMessage(value)} is not representable as an int, cast occurred`,
     warning
   );
-  return Number.isFinite(value) ? BigInt.asIntN(64, BigInt(value)) : 0n;
+  return silentFloatToInt(value);
+}
+
+export function silentFloatToInt(value: number): bigint {
+  return Number.isFinite(value) ? BigInt.asIntN(64, BigInt(Math.trunc(value))) : 0n;
 }
 
 /** Converts the float a numeric string holds to an int, which PHP clamps to the range of ints, as strtol does. */

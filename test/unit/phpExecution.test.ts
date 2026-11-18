@@ -1525,6 +1525,12 @@ test.each([
   ['$array[] ??= 1;', 'Cannot use [] for reading'],
   ['$array[]->property ??= 1;', 'Cannot use [] for reading'],
   ['$array[][0] ??= 1;', 'Cannot use [] for reading'],
+  ['[$value] = $array[];', 'Cannot use [] for reading'],
+  ['$object->{1 + 1}();', 'Method name must be a string'],
+  ['stdClass::{[]}();', 'Method name must be a string'],
+  ['[&$value] = [[1]][0];', 'Cannot use temporary expression in write context'],
+  ['class C { public $p = [1]; } [&$value] = (new C())->p;', 'Cannot use temporary expression in write context'],
+  ['function f(&$arg) {} f((new stdClass())->p);', 'Cannot use temporary expression in write context'],
   ['class C extends A, B {}', 'unexpected token ","'],
 ])('validates write and declaration syntax: %s', (source, message) => {
   const result = run(`<?php echo 'never'; ${source}`);

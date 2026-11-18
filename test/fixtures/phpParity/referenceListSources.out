@@ -107,3 +107,40 @@ array(1) {
   [0]=>
   int(1)
 }
+
+Notice: Attempting to set reference to non referenceable value in /main.php on line 94
+int(2)
+
+Notice: Attempting to set reference to non referenceable value in /main.php on line 96
+
+Warning: Cannot use int as array in /main.php on line 96
+NULL
+
+Notice: Attempting to set reference to non referenceable value in /main.php on line 98
+int(4)
+array(2) {
+  [0]=>
+  array(1) {
+    [0]=>
+    &int(5)
+  }
+  ["nested"]=>
+  array(1) {
+    [0]=>
+    array(1) {
+      [0]=>
+      array(1) {
+        [0]=>
+        &int(6)
+      }
+    }
+  }
+}
+
+Notice: Indirect modification of overloaded element of ArrayObject has no effect in /main.php on line 107
+
+Notice: Attempting to set reference to non referenceable value in /main.php on line 107
+NULL
+
+Warning: Undefined variable $missingClone in /main.php on line 109
+clone(): Argument #1 ($object) must be of type object, null given

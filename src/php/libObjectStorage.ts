@@ -8,7 +8,7 @@ import { defineClass, type NativeMethod } from './native';
 import { strictEquals, toKey } from './operators';
 import { share } from './places';
 import { ExitSignal, PhpThrow, rt } from './runtime';
-import { dropped, type Key, type NativeFunction, NativeValueIndex, PhpArray, PhpObject, type Value } from './values';
+import { type Key, type NativeFunction, NativeValueIndex, PhpArray, PhpObject, type Value } from './values';
 
 interface StorageEntry {
   object: PhpObject;
@@ -74,7 +74,7 @@ class ObjectStorage {
       entry.info = info;
       this.nativeValues.add(info);
       this.nativeValues.delete(old);
-      dropped(old);
+      this.releaseRemoved([old]);
     } else {
       rt().allocate(1);
       const slot = this.insertionBucket(hash);
@@ -176,7 +176,7 @@ class ObjectStorage {
       entry.info = share(value);
       this.nativeValues.add(value);
       this.nativeValues.delete(old);
-      dropped(old);
+      this.releaseRemoved([old]);
     }
   }
 

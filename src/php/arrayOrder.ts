@@ -138,7 +138,7 @@ export class ArrayOrder {
     return cursor;
   }
 
-  // code-gauge-allow functionCognitiveComplexity 16 -- Copies array layout and its active cursors using the same surviving buckets.
+  // code-gauge-allow functionCognitiveComplexity 17 -- Copies array layout and its active cursors using the same surviving buckets.
   copy(preservePositions: boolean, keys?: ReadonlyMap<Key, unknown>): ArrayOrder {
     const copy = new ArrayOrder([], this.capacity);
     for (const entry of this.orderedEntries())
@@ -156,8 +156,8 @@ export class ArrayOrder {
       let entry = cursor.entry;
       while (entry && keys && !keys.has(entry.key)) entry = entry.next;
       const cloned = copy.cursor(entry?.key, cursor.family);
-      if (entry === undefined) cloned.setPosition(undefined, copy.nextIndex);
-      else if (copy.packed) cloned.setPosition(cloned.entry, cursor.index);
+      if (entry === undefined) cloned.setPosition(undefined, cursor.index);
+      else if (copy.packed || preservePositions) cloned.setPosition(cloned.entry, cursor.index);
       copy.cursorCopies.set(cursor.family, cloned);
     }
     return copy;
@@ -312,7 +312,7 @@ export class ArrayOrder {
       if (position === undefined) continue;
       const next = previous.findIndex((index) => (packed ? index === position : index >= position));
       if (next !== -1) state.index = next;
-      else if (!packed) state.index = previous.length;
+      else if (!packed && position === this.nextIndex) state.index = previous.length;
     }
   }
 

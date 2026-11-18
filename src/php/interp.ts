@@ -43,7 +43,7 @@ import {
   writeProp,
 } from './classes';
 import * as classesModule from './classes';
-import { debugType, getType, numericPrefix, toBool, valueName } from './conversions';
+import { debugType, floatFitsInt, getType, numericPrefix, toBool, valueName } from './conversions';
 import * as conversionsModule from './conversions';
 import { deprecated, throwError, type UpdateWarning, warn, withOperandWarnings, withPendingException } from './errors';
 import { acquireIterator, callIteratorMethod } from './iteratorAcquisition';
@@ -53,12 +53,14 @@ import {
   arithmetic,
   bitwiseNot,
   compare,
+  floatToIntCast,
+  formatFloatForMessage,
   looseEquals,
   negate,
+  silentFloatToInt,
   strictEquals,
   toFloat,
   toInt,
-  toIntForOperator,
   toKey,
   toStr,
   unaryPlus,
@@ -433,7 +435,7 @@ function prepareRead(e: Expr, mode: ReadMode): ReadPlan {
       if (cls === SHORT) return SHORT;
       const name = readMemberOperand(e.name);
       return () => {
-        const key = name();
+        const key = toStr(name());
         runtime.row = e.row;
         const value = readStaticProp(cls, key, runtime.frame.scope, mode !== 'read');
         return mode === 'isset' ? value !== null : value;
@@ -494,7 +496,7 @@ function globalOffsetRead(key: Value, row: number, mode: ReadMode): Value {
   return null;
 }
 
-// code-gauge-allow functionCognitiveComplexity 26 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+// code-gauge-allow functionCognitiveComplexity 16 -- Retains the nullsafe receiver across operand preparation and fetch.
 function preparePropertyRead(e: Extract<Expr, { k: 'prop' }>, mode: ReadMode): ReadPlan {
   let receiver =
     mode === 'read' && !e.nullsafe && isCompiledVariable(e.obj)
@@ -512,23 +514,25 @@ function preparePropertyRead(e: Extract<Expr, { k: 'prop' }>, mode: ReadMode): R
   const name = readMemberOperand(e.name);
   return () => {
     const object = receiver(e.row);
-    if (object === SHORT) return SHORT;
-    const key = name();
-    const runtime = rt();
-    runtime.row = e.row;
-    if (!(object instanceof PhpObject)) {
-      if (mode === 'read') warn(`Attempt to read property "${key}" on ${valueName(object)}`);
-      return mode === 'isset' ? false : null;
-    }
-    if (mode === 'isset') return issetProp(object, key, runtime.frame.scope);
-    return readProp(object, key, runtime.frame.scope, mode);
+    return object === SHORT ? SHORT : readPropertyOperand(object, name(), e.row, mode);
   };
 }
 
-function readMemberOperand(name: string | Expr): () => string {
-  if (typeof name === 'string') return () => name;
-  const read = prepareOperand(name);
-  return () => toStr(read());
+function readPropertyOperand(object: Value, name: Value, row: number, mode: ReadMode): Value {
+  if (mode !== 'read' && !(object instanceof PhpObject)) return mode === 'isset' ? false : null;
+  const key = toStr(name);
+  const runtime = rt();
+  runtime.row = row;
+  if (!(object instanceof PhpObject)) {
+    warn(`Attempt to read property "${key}" on ${valueName(object)}`);
+    return null;
+  }
+  if (mode === 'isset') return issetProp(object, key, runtime.frame.scope);
+  return readProp(object, key, runtime.frame.scope, mode);
+}
+
+function readMemberOperand(name: string | Expr): () => Value {
+  return typeof name === 'string' ? () => name : prepareOperand(name);
 }
 
 function readVar(name: string, row: number): Value {
@@ -574,23 +578,32 @@ export function isArrayAccess(object: PhpObject): boolean {
   return arrayAccess !== undefined && object.cls.isSubclassOf(arrayAccess);
 }
 
-// code-gauge-allow functionCognitiveComplexity 22 -- Keeps PHP's offset checks and mode-specific warnings in evaluation order.
-// code-gauge-allow functionNcss 31 -- Keeps the offset conversion and position calculation together.
-export function stringOffset(text: string, index: Value, mode: OffsetRead | 'reference' = 'read'): number | undefined {
+export function stringOffset(text: string, index: Value, mode: OffsetRead = 'read'): number | undefined {
+  const offset = stringOffsetIndex(index, mode);
+  return offset === undefined ? undefined : stringOffsetPosition(text, offset);
+}
+
+// code-gauge-allow functionCognitiveComplexity 18 -- Keeps type and mode decisions with their ordered offset diagnostics.
+export function stringOffsetIndex(index: Value, mode: OffsetRead = 'read'): bigint | undefined {
   const quiet = mode === 'isset' || mode === 'coalesce';
-  let offset: bigint | undefined;
-  if (typeof index === 'bigint') offset = index;
-  else if (typeof index === 'string') offset = parseStringOffset(index, mode === 'isset', quiet);
-  else if (typeof index === 'number') {
+  if (typeof index === 'bigint') return index;
+  if (typeof index === 'string') return parseStringOffset(index, mode === 'isset', quiet);
+  if (typeof index === 'number') {
     if (!quiet) warn('String offset cast occurred');
-    if (mode === 'reference') return undefined;
-    offset = mode === 'isset' ? toIntForOperator(index) : toInt(index);
-  } else if (typeof index === 'boolean' || index === null) {
+    if (mode !== 'isset') return silentFloatToInt(index);
+    const offset = floatToIntCast(index);
+    if (!floatFitsInt(index) || !Number.isInteger(index))
+      deprecated(`Implicit conversion from float ${formatFloatForMessage(index)} to int loses precision`);
+    return offset;
+  }
+  if (typeof index === 'boolean' || index === null) {
     if (!quiet) warn('String offset cast occurred');
-    offset = index ? 1n : 0n;
-  } else if (mode === 'isset') return undefined;
-  else throwError('TypeError', `Cannot access offset of type ${debugType(index)} on string`);
-  if (offset === undefined) return undefined;
+    return index ? 1n : 0n;
+  }
+  if (mode !== 'isset') throwError('TypeError', `Cannot access offset of type ${debugType(index)} on string`);
+}
+
+function stringOffsetPosition(text: string, offset: bigint): number {
   const position = offset < 0n ? BigInt(text.length) + offset : offset;
   if (position < 0n || position >= BigInt(text.length)) return -1;
   return Number(position);
@@ -611,11 +624,12 @@ function parseStringOffset(index: string, isset: boolean, quiet: boolean): bigin
 }
 
 function readStringOffset(text: string, index: Value, mode: OffsetRead): Value {
-  const position = stringOffset(text, index, mode);
-  if (position === undefined) return null;
+  const offset = stringOffsetIndex(index, mode);
+  if (offset === undefined) return null;
+  const position = stringOffsetPosition(text, offset);
   if (position < 0) {
     if (mode !== 'read') return null;
-    warn(`Uninitialized string offset ${toInt(index)}`);
+    warn(`Uninitialized string offset ${offset}`);
     return '';
   }
   return text[position];

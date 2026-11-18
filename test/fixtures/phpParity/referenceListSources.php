@@ -88,3 +88,23 @@ set_error_handler(function () { throw new Exception('unexpected deprecation'); }
 ++$falseReference[0];
 restore_error_handler();
 var_dump($falseAlias);
+
+function arrayObjectList($value) { return new ArrayObject([$value]); }
+function nestedListObject() { return (object) ['entries' => new ArrayIterator([[4]])]; }
+[&$value] = arrayObjectList([2])[0];
+var_dump($value);
+[&$value] = arrayObjectList(3)[0];
+var_dump($value);
+[&$value] = nestedListObject()->entries[0];
+var_dump($value);
+$appended = [];
+[&$value] = $appended[];
+$value = 5;
+[[&$nestedValue]] = $appended['nested'][];
+$nestedValue = 6;
+var_dump($appended);
+$offsets = new ArrayObject();
+[&$value] = $offsets[];
+var_dump($value);
+try { [&$value] = clone $missingClone; }
+catch (TypeError $error) { echo $error->getMessage(), "\n"; }

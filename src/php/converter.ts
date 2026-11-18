@@ -10,6 +10,7 @@ import {
   hasNullsafeReceiver,
   hasReferenceItem,
   invalidRead,
+  isWritableFetchBase,
   onlyCalls,
 } from './astAnalysis';
 import { oneArgumentBuiltinOpcodes, simpleSprintfFormat } from './builtinCompiler';
@@ -813,7 +814,7 @@ export class Converter extends DeclarationConverter {
     }
     if (base.k === 'clone' || (base.k === 'call' && this.builtinWriteResult(base)))
       this.error(node, 'Cannot use result of built-in function in write context');
-    if (['var', 'varvar', 'sprop', 'call', 'mcall', 'scall'].includes(base.k)) return;
+    if (isWritableFetchBase(base)) return;
     this.error(node, 'この式には代入できません（Cannot use temporary expression in write context）。');
   }
 
@@ -974,6 +975,8 @@ export class Converter extends DeclarationConverter {
       case 'member_call_expression':
       case 'nullsafe_member_call_expression': {
         const obj = this.expr(node.childForFieldName('object') as Node);
+        const nameNode = node.childForFieldName('name') as Node;
+        const name = this.methodName(nameNode);
         const { args, fcc } = this.args(node.childForFieldName('arguments') as Node);
         const nullsafe = node.type.startsWith('nullsafe');
         if (fcc && (nullsafe || hasNullsafeReceiver(obj)))
@@ -981,11 +984,11 @@ export class Converter extends DeclarationConverter {
         return {
           k: 'mcall',
           obj,
-          name: this.memberName(node.childForFieldName('name') as Node),
+          name,
           args,
           nullsafe,
           fcc,
-          row: (node.childForFieldName('name') as Node).startPosition.row,
+          row: nameNode.startPosition.row,
         };
       }
       case 'scoped_property_access_expression': {
@@ -1000,8 +1003,9 @@ export class Converter extends DeclarationConverter {
       case 'scoped_call_expression': {
         const cls = this.classRef(node.childForFieldName('scope') as Node);
         const nameNode = node.childForFieldName('name') as Node;
+        const name = this.methodName(nameNode);
         const { args, fcc } = this.args(node.childForFieldName('arguments') as Node);
-        return { k: 'scall', cls, name: this.memberName(nameNode), args, fcc, row: nameNode.startPosition.row };
+        return { k: 'scall', cls, name, args, fcc, row: nameNode.startPosition.row };
       }
       case 'class_constant_access_expression': {
         return this.classConstantExpression(node, row);
@@ -1025,15 +1029,13 @@ export class Converter extends DeclarationConverter {
           this.error(node, '$this には代入できません（Cannot use $this as array）。');
         }
         const value = this.expr(right);
-        if (
-          target.k === 'list' &&
-          hasReferenceItem(target) &&
-          !['var', 'varvar', 'idx', 'prop', 'sprop', 'call', 'mcall', 'scall'].includes(value.k)
-        ) {
-          this.error(
-            node,
-            '参照で分割代入できるのは変数だけです（Cannot assign reference to non referenceable value）。'
-          );
+        if (target.k === 'list' && hasReferenceItem(target)) {
+          if (value.k === 'idx' || value.k === 'prop') this.checkWritable(value, right, true);
+          else if (!isWritableFetchBase(value))
+            this.error(
+              node,
+              '参照で分割代入できるのは変数だけです（Cannot assign reference to non referenceable value）。'
+            );
         }
         return { k: 'assign', target, value, row };
       }
@@ -1185,9 +1187,22 @@ export class Converter extends DeclarationConverter {
     }
   }
 
+  private methodName(node: Node): string | Expr {
+    const name = this.memberName(node);
+    if (typeof name !== 'string') {
+      const literal = this.compiledValue(name, name.k === 'array');
+      if (literal !== undefined && typeof literal !== 'string') {
+        const row = name.k === 'array' ? arrayFoldRow(unparenthesizedNode(node)) : compiledOperandRow(name);
+        this.error(row, 'Method name must be a string');
+      }
+    }
+    return name;
+  }
+
   private memberName(node: Node): string | Expr {
-    if (node.type === 'name') return this.nameText(node);
-    if (node.type === 'variable_name') return this.expr(node);
+    let preceding = node.previousSibling;
+    while (preceding?.type === 'comment') preceding = preceding.previousSibling;
+    if (node.type === 'name' && preceding?.type !== '{') return this.nameText(node);
     return this.expr(node);
   }
 

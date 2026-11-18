@@ -65,3 +65,16 @@ foreach (['removeAll', 'removeAllExcept'] as $operation) {
         echo "\n";
     }
 }
+
+class OverwrittenInfo {
+    function __destruct() {
+        foreach (debug_backtrace(DEBUG_BACKTRACE_IGNORE_ARGS) as $call)
+            echo ($call['class'] ?? ''), ($call['type'] ?? ''), $call['function'], ':', $call['line'] ?? 'internal', ';';
+    }
+}
+$storage = new HashCleanupStorage();
+$key = new stdClass();
+$storage[$key] = new OverwrittenInfo();
+$storage->mode = 'cleanup';
+try { $storage->offsetSet($key, 'new'); }
+catch (Throwable $error) { echo $error->getMessage(), "\n"; }

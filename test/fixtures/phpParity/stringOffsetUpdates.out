@@ -35,3 +35,96 @@ Error: Cannot increment/decrement string offsets
 Error: Cannot use assign-op operators with string offsets
 Error: Cannot increment/decrement string offsets
 abc
+
+Warning: String offset cast occurred in /main.php on line 12
+
+Warning: The float NAN is not representable as an int, cast occurred in /main.php on line 12
+
+Deprecated: Implicit conversion from float NAN to int loses precision in /main.php on line 12
+
+Warning: The float NAN is not representable as an int, cast occurred in /main.php on line 12
+
+Deprecated: Implicit conversion from float NAN to int loses precision in /main.php on line 12
+string(1) "a"
+string(1) "a"
+bool(true)
+bool(false)
+
+Warning: String offset cast occurred in /main.php on line 12
+
+Warning: The float INF is not representable as an int, cast occurred in /main.php on line 12
+
+Deprecated: Implicit conversion from float INF to int loses precision in /main.php on line 12
+
+Warning: The float INF is not representable as an int, cast occurred in /main.php on line 12
+
+Deprecated: Implicit conversion from float INF to int loses precision in /main.php on line 12
+string(1) "a"
+string(1) "a"
+bool(true)
+bool(false)
+
+Warning: String offset cast occurred in /main.php on line 12
+
+Warning: The float -INF is not representable as an int, cast occurred in /main.php on line 12
+
+Deprecated: Implicit conversion from float -INF to int loses precision in /main.php on line 12
+
+Warning: The float -INF is not representable as an int, cast occurred in /main.php on line 12
+
+Deprecated: Implicit conversion from float -INF to int loses precision in /main.php on line 12
+string(1) "a"
+string(1) "a"
+bool(true)
+bool(false)
+
+Warning: String offset cast occurred in /main.php on line 12
+
+Warning: Uninitialized string offset 5076964154930102272 in /main.php on line 12
+
+Warning: The float 1.0E+30 is not representable as an int, cast occurred in /main.php on line 12
+
+Deprecated: Implicit conversion from float 1.0E+30 to int loses precision in /main.php on line 12
+
+Warning: The float 1.0E+30 is not representable as an int, cast occurred in /main.php on line 12
+
+Deprecated: Implicit conversion from float 1.0E+30 to int loses precision in /main.php on line 12
+string(0) ""
+string(7) "default"
+bool(false)
+bool(true)
+
+Warning: String offset cast occurred in /main.php on line 12
+
+Warning: Uninitialized string offset -5076964154930102272 in /main.php on line 12
+
+Warning: The float -1.0E+30 is not representable as an int, cast occurred in /main.php on line 12
+
+Deprecated: Implicit conversion from float -1.0E+30 to int loses precision in /main.php on line 12
+
+Warning: The float -1.0E+30 is not representable as an int, cast occurred in /main.php on line 12
+
+Deprecated: Implicit conversion from float -1.0E+30 to int loses precision in /main.php on line 12
+string(0) ""
+string(7) "default"
+bool(false)
+bool(true)
+
+Warning: String offset cast occurred in /main.php on line 12
+
+Deprecated: Implicit conversion from float 1.5 to int loses precision in /main.php on line 12
+
+Deprecated: Implicit conversion from float 1.5 to int loses precision in /main.php on line 12
+string(1) "b"
+string(1) "b"
+bool(true)
+bool(false)
+
+Warning: String offset cast occurred in /main.php on line 14
+
+Warning: String offset cast occurred in /main.php on line 15
+
+Warning: String offset cast occurred in /main.php on line 16
+
+Warning: Illegal string offset -5076964154930102272 in /main.php on line 16
+Ybc
