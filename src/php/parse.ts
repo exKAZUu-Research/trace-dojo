@@ -253,8 +253,6 @@ function newClassNameToken(text: string): { symbol?: string; description: string
   const keyword = reservedIdentifierToken(word);
   if (keyword && keyword !== 'static' && keyword !== 'class' && keyword !== 'readonly')
     return { description: `token "${keyword}"` };
-  if (/^__(?:class|dir|file|function|line|method|namespace|property|trait)__$/.test(word.toLowerCase()))
-    return { description: `token "${word.toUpperCase()}"` };
   return undefined;
 }
 

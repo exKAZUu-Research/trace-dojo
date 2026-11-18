@@ -303,5 +303,6 @@ const BARE_KEYWORDS = new Set(
 export function reservedIdentifierToken(name: string): string | undefined {
   const word = lower(name);
   if (word === 'die') return 'exit';
-  return BARE_KEYWORDS.has(word) ? word : undefined;
+  if (!BARE_KEYWORDS.has(word)) return undefined;
+  return word.startsWith('__') && word.endsWith('__') ? word.toUpperCase() : word;
 }

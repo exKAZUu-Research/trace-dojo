@@ -1184,7 +1184,7 @@ export class Converter extends DeclarationConverter {
     if (magic === '__FILE__') return { k: 'lit', v: '/main.php', row };
     if (magic === '__DIR__') return { k: 'lit', v: '/', row };
     if (magic === '__PROPERTY__')
-      return { k: 'lit', v: this.fn.propertyName ?? this.initializerContext?.propertyName ?? '', row };
+      return { k: 'lit', v: this.initializerContext?.propertyName ?? this.fn.propertyName ?? '', row };
     if (magic === '__NAMESPACE__') return { k: 'lit', v: this.namespace, row };
     if (MAGIC_RUNTIME.has(magic)) return { k: 'magic', name: magic as Extract<Expr, { k: 'magic' }>['name'], row };
     if (magic === '__COMPILER_HALT_OFFSET__') this.unsupported(node, '__halt_compiler');

@@ -112,6 +112,9 @@ test.each([
   ['$x = new 1.5;', 'floating-point number "1.5"', 'class'],
   ['$x = new 0x10;', 'integer "0x10"', 'class'],
   ['$x = new "$variable";', 'double-quote mark', 'class'],
+  ['$x = new __Line__;', 'token "__LINE__"', 'class'],
+  ['var_dump(new __fIle__);', 'token "__FILE__"', ':'],
+  ['var_dump(new __property__);', 'token "__PROPERTY__"', ':'],
   ['new', 'end of file', 'class'],
 ])('reports the first unexpected token in %s', (statement, token, expected) => {
   expect(run(`<?php\n${statement}`)).toMatchObject({

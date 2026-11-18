@@ -32,3 +32,29 @@ $fromTrait = $a->createClosure();
 $fromGlobal = fn()=>__class__;
 var_dump(\Closure::bind($ordinary, null, Beta::class)(), $ordinary->call(new Beta),
          $fromTrait->call(new Beta), \Closure::bind($fromGlobal, null, Beta::class)());
+
+class NestedPropertyContext {
+    public $getter {
+        get {
+            static $local = __PROPERTY__;
+            return new class(__PROPERTY__, $local) {
+                const OUTER = __PROPERTY__;
+                public $inside = [__PROPERTY__], $sameLine = __property__;
+                function __construct(public $argument, public $staticLocal) {}
+                function names($default=__PROPERTY__) { return [__PROPERTY__, $default]; }
+            };
+        }
+    }
+    public $backing;
+    public $setter {
+        set {
+            $this->backing = new class { public $nested=__property__; };
+            echo __PROPERTY__,"\n";
+        }
+    }
+}
+$context = new NestedPropertyContext;
+$inner = $context->getter;
+var_dump($inner->argument, $inner->staticLocal, $inner::OUTER, $inner->inside, $inner->sameLine, $inner->names());
+$context->setter=3;
+var_dump($context->backing->nested);
