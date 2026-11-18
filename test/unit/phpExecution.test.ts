@@ -18,11 +18,69 @@ test.each([
   ['a break outside a loop', '<?php\necho "x";\nbreak;'],
   ['a function declared twice', '<?php\nfunction f() {}\nfunction f() {}'],
   ['a value returned from a void function', '<?php\nfunction g(): void { return 1; }'],
+  ['a void arrow returning null', '<?php\n$fn = fn(): void => null;'],
+  ['a reference to a nullsafe static property', '<?php\n$a = null; $x = &$a?->obj::$property;'],
+  ['writing to a nullsafe static property', '<?php\n$a = null; $a?->obj::$property = 1;'],
+  ['returning a nullsafe static property by reference', '<?php\nfunction &f($a) { return $a?->obj::$property; }'],
+  [
+    'self in a named function declared by a method',
+    '<?php\nclass T { function f(){ function g(){ return self::C; } } }',
+  ],
   ['reading with []', '<?php\n$a = [];\necho $a[];'],
   ['a goto into a loop', '<?php\ngoto x;\nwhile (true) { x: echo 1; }'],
   ['partial application, which PHP 8.5 does not have', '<?php\nfunction f($a, $b) {}\n$g = f(?, 1);'],
 ])('rejects %s before running, as PHP does', (_name, program) => {
   expect(run(program).kind).toBe('compileError');
+});
+
+test.each([
+  ['class Empty {}', 'unexpected token "empty", expecting identifier'],
+  ['function Isset() {}', 'unexpected token "isset", expecting "("'],
+  ['trait Die {}', 'unexpected token "exit", expecting identifier'],
+  ['class T extends Exit {}', 'unexpected token "exit"'],
+  ['new ISSET;', 'unexpected token "isset", expecting "class"'],
+  ['class T { var function f() {} }', 'unexpected token "function", expecting variable'],
+  ['class T { var const C = 1; }', 'unexpected token "const", expecting variable'],
+  ['class T { public private $p; }', 'Multiple access type modifiers are not allowed'],
+  ['class T { static static function f() {} }', 'Multiple static modifiers are not allowed'],
+])('reports the PHP diagnostic for %s', (source, message) => {
+  expect(run(`<?php\n${source}`)).toMatchObject({
+    kind: 'compileError',
+    diagnostics: [{ row: 1, message: expect.stringContaining(message) }],
+  });
+});
+
+test.each([
+  ['<<<TAG', ' bad', 'Invalid body indentation level'],
+  ["<<<'TAG'", ' bad', 'Invalid body indentation level'],
+  ['<<<TAG', '\tbad', 'Invalid indentation - tabs and spaces cannot be mixed'],
+])('reports the offending body row for %s with %s', (marker, line, message) => {
+  const source = `<?php\necho ${marker}\n  good\n${line}\n  TAG;`;
+  expect(run(source)).toMatchObject({
+    kind: 'compileError',
+    diagnostics: [{ row: 3, message: expect.stringContaining(message) }],
+  });
+});
+
+test.each([
+  ['\n <?php echo 1;', '\n 1'],
+  ['  text <?php echo 1;', '  text 1'],
+  [' \t<?= 1;', ' \t1'],
+  [' \t\n', ' \t\n'],
+  ['#!/usr/bin/env php\n\n <?php echo 1;', '\n 1'],
+])('prints leading inline text from %j', (program, stdout) => {
+  expect(run(program)).toMatchObject({ kind: 'executed', stdout });
+});
+
+test('counts decoded PHP output against the shared limit', () => {
+  expect(run('<?php print str_repeat("あ",40000);')).toMatchObject({
+    kind: 'executed',
+    stdout: 'あ'.repeat(40_000),
+  });
+  expect(run('<?php echo str_repeat("あ",60000); echo str_repeat("あ",40001);')).toEqual({
+    kind: 'limitExceeded',
+    limit: 'output',
+  });
 });
 
 test.each([

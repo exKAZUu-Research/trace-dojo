@@ -407,6 +407,7 @@ defineFunction('get_called_class(): string', () => {
   if (!cls) throwError('Error', 'get_called_class() must be called from within a class');
   return cls.fullName;
 });
+markInlined('get_called_class');
 defineFunction('get_object_vars(object $object): array', ({ args }) => {
   const object = args[0] as PhpObject;
   const scope = rt().frame.scope;

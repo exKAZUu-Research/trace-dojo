@@ -128,10 +128,19 @@ export abstract class ConverterBase {
     return enc(node.text.replaceAll(/\s+/g, ''));
   }
 
+  protected declaredIdentifier(node: Node, expected = 'identifier'): string {
+    const raw = this.nameText(node);
+    const token = reservedIdentifierToken(raw);
+    if (token) {
+      this.error(node, `syntax error, unexpected token "${token}"${expected ? `, expecting ${expected}` : ''}`);
+    }
+    return raw;
+  }
+
   protected classRef(node: Node, deferScope = false): ClassRef {
     const isName = node.type === 'name' || node.type === 'qualified_name' || node.type === 'relative_name';
     if (node.type !== 'relative_scope' && !isName) return { k: 'expr', e: this.expr(node) };
-    const raw = this.nameText(node);
+    const raw = this.declaredIdentifier(node, node.parent?.type === 'object_creation_expression' ? '"class"' : '');
     const word = lower(raw);
     if (word === 'self' || word === 'parent' || word === 'static') {
       if (!deferScope) this.checkClassScope(node, word);
@@ -239,4 +248,10 @@ export abstract class ConverterBase {
   }
 
   abstract expr(node: Node): Expr;
+}
+
+export function reservedIdentifierToken(name: string): string | undefined {
+  const word = lower(name);
+  if (word === 'die') return 'exit';
+  return ['empty', 'isset', 'exit'].includes(word) ? word : undefined;
 }

@@ -187,7 +187,7 @@ function registerVariable(target: PhpArray, rawName: string, value: string): voi
       const close = inner.indexOf(']');
       if (close === -1) {
         // Without a closing bracket, the rest is part of a plain name, whose '[' becomes '_' too.
-        if (key === base) {
+        if (level === 1) {
           base = `${base}_${rest.slice(1).replaceAll(/[ .[]/g, '_')}`;
           key = base;
         }

@@ -10,6 +10,7 @@ import {
 import { commentTokens, loadParser, parseSource } from '../interpreter/treeSitter';
 import type { Program } from './ast';
 import { castType, type CompileNotice, Converter } from './converter';
+import { reservedIdentifierToken } from './converterBase';
 
 const parser = await loadParser('@willbooster/tree-sitter-php/tree-sitter-php.wasm');
 
@@ -37,7 +38,7 @@ export function parsePhp(source: string, trace?: TraceOptions): ParsedProgram {
   const ignoredPrefix = shebangEnd(source);
   const text = hideShebang(source, ignoredPrefix);
   return parseSource(parser, text, MISSING_TOKEN_NAMES, (root) => convertPhp(root, text, atomicRows, ignoredPrefix), {
-    locateErrors: locateMatchErrors,
+    locateErrors: locatePhpErrors,
   });
 }
 
@@ -69,10 +70,12 @@ function convertPhp(root: Node, text: string, atomicRows: Set<number>, ignoredPr
   return { program, notices: converter.notices, parseNotices };
 }
 
-function locateMatchErrors(root: Node, diagnostics: SourceDiagnostic[]): SourceDiagnostic[] {
+function locatePhpErrors(root: Node, diagnostics: SourceDiagnostic[]): SourceDiagnostic[] {
   if (diagnostics.length === 0) return diagnostics;
   for (const error of root.descendantsOfType('ERROR')) {
     if (diagnostics[0].row !== error.startPosition.row) continue;
+    const classDiagnostic = reservedClassSyntax(error);
+    if (classDiagnostic) return [classDiagnostic];
     const next = error.nextNamedSibling;
     if (
       error.parent?.type === 'match_block' &&
@@ -95,6 +98,18 @@ function locateMatchErrors(root: Node, diagnostics: SourceDiagnostic[]): SourceD
       return [{ row: token.startPosition.row, message: 'syntax error, unexpected token ",", expecting "}"' }];
   }
   return diagnostics;
+}
+
+function reservedClassSyntax(error: Node): SourceDiagnostic | undefined {
+  const children = error.namedChildren.filter((node) => node.type !== 'comment');
+  const [context, name] = children;
+  if (!context || !name || name.type !== 'name') return;
+  const word = context.text.toLowerCase();
+  if (!['new', 'extends', 'implements'].includes(word)) return;
+  const token = reservedIdentifierToken(name.text);
+  if (!token) return;
+  const expected = word === 'new' ? ', expecting "class"' : '';
+  return { row: name.startPosition.row, message: `syntax error, unexpected token "${token}"${expected}` };
 }
 
 /** Matches the annotation a line comment ends with, which may follow an ordinary remark. */

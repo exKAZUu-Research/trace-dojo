@@ -3,13 +3,21 @@ import { floatFitsInt, numericPrefix, toBool } from './conversions';
 import { deprecated } from './errors';
 import { formatFloatForMessage, toStr } from './operators';
 import { rt } from './runtime';
-import { PhpArray, type PhpClass, PhpObject, type PropDecl, type TypeDecl, type Value } from './values';
+import { type Param, PhpArray, type PhpClass, PhpObject, type PropDecl, type TypeDecl, type Value } from './values';
 
 /** Checks whether a value is callable, which the interpreter provides. */
 let isCallableValue: (value: Value) => boolean = () => false;
 
 export function setCallableCheck(check: (value: Value) => boolean): void {
   isCallableValue = check;
+}
+
+export function parameterType(param: Param): TypeDecl | undefined {
+  const type = param.type;
+  if (!type || !param.implicitNullable) return type;
+  if (type.k === 'named') return { ...type, nullable: true };
+  const members = type.k === 'union' ? type.types : [type];
+  return { k: 'union', types: [...members, { k: 'named', name: 'null' }] };
 }
 
 /** Formats a type as PHP's messages do. */

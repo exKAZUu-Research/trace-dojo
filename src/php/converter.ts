@@ -15,7 +15,7 @@ import { oneArgumentBuiltinOpcodes, usesSimpleSprintf } from './builtinCompiler'
 import { enc, lower } from './bytes';
 import { type Constant, constantTruth, constantTypeName, foldedConstant } from './constantDefaults';
 import { formatFloat, isNumericString, NAN_BOOL_WARNING, NAN_STRING_WARNING } from './conversions';
-import { isReservedClassName, MAGIC_RUNTIME } from './converterBase';
+import { type CompileNotice, isReservedClassName, MAGIC_RUNTIME } from './converterBase';
 import { DeclarationConverter } from './declarationConverter';
 import { exportExpr } from './export';
 import { decodeLiteral, parseIntegerLiteral } from './literals';
@@ -65,11 +65,13 @@ export class Converter extends DeclarationConverter {
   }
 
   private compileTopLevel(root: Node): void {
+    const firstTag = root.namedChildren.find((child) => child.type === 'php_tag');
+    const text = this.source.slice(this.ignoredPrefix, firstTag?.startIndex ?? this.source.length);
+    if (text !== '') {
+      this.body.push({ k: 'inline', text: enc(text), row: this.ignoredPrefix === 0 ? 0 : 1 });
+    }
     for (const child of root.namedChildren) {
-      if (child.type === 'text') {
-        const text = this.source.slice(Math.max(this.ignoredPrefix, child.startIndex), child.endIndex);
-        if (text !== '') this.body.push({ k: 'inline', text: enc(text), row: child.startPosition.row });
-      } else if (!['php_tag', 'php_end_tag', 'comment'].includes(child.type)) {
+      if (!['text', 'php_tag', 'php_end_tag', 'comment'].includes(child.type)) {
         this.body.push(...this.statement(child, true));
       }
     }
@@ -221,7 +223,7 @@ export class Converter extends DeclarationConverter {
         return [{ k: 'unset', targets, row }];
       }
       case 'function_definition': {
-        const name = this.nameText(node.childForFieldName('name') as Node);
+        const name = this.declaredIdentifier(node.childForFieldName('name') as Node, '"("');
         if (this.namespace === '' && lower(name) === '__autoload')
           this.error(node, '__autoload() is no longer supported, use spl_autoload_register() instead');
         this.declareSymbol(node, 'function', name);
@@ -477,9 +479,7 @@ export class Converter extends DeclarationConverter {
     const row = node.startPosition.row;
     const type = this.fn.returnType;
     if (type?.k === 'named' && !type.nullable) {
-      if (type.name === 'void' && argument) {
-        this.error(node, 'void の関数は値を返せません（A void function must not return a value）。');
-      }
+      if (argument) this.checkVoidReturn(argument);
       if (type.name === 'never') {
         this.error(node, 'never の関数は return できません（A never-returning function must not return）。');
       }
@@ -543,6 +543,7 @@ export class Converter extends DeclarationConverter {
       if (key === 'strict_types') {
         if (
           !topLevel ||
+          (node.parent?.type === 'program' && this.hasLeadingText(node.parent)) ||
           node.parent?.namedChildren.some(
             (child) =>
               child.endIndex <= node.startIndex &&
@@ -566,6 +567,7 @@ export class Converter extends DeclarationConverter {
       } else if (key === 'encoding') {
         if (
           !topLevel ||
+          (node.parent?.type === 'program' && this.hasLeadingText(node.parent)) ||
           node.parent?.namedChildren.some(
             (child) =>
               child.endIndex <= node.startIndex &&
@@ -596,7 +598,7 @@ export class Converter extends DeclarationConverter {
     const namespaces = statements.filter((child) => child.type === 'namespace_definition');
     if (namespaces.length === 0) return;
     const first = statements.indexOf(namespaces[0]);
-    if (statements.slice(0, first).some((child) => child.type !== 'declare_statement'))
+    if (this.hasLeadingText(root) || statements.slice(0, first).some((child) => child.type !== 'declare_statement'))
       this.error(
         namespaces[0],
         'Namespace declaration statement has to be the very first statement or after any declare call in the script'
@@ -606,6 +608,11 @@ export class Converter extends DeclarationConverter {
       this.error(namespaces[0], 'Cannot mix bracketed namespace declarations with unbracketed namespace declarations');
     if (bracketed && statements.slice(first).some((child) => child.type !== 'namespace_definition'))
       this.error(namespaces[0], 'No code may exist outside of namespace {}');
+  }
+
+  private hasLeadingText(root: Node): boolean {
+    const firstTag = root.namedChildren.find((child) => child.type === 'php_tag');
+    return firstTag !== undefined && firstTag.startIndex > this.ignoredPrefix;
   }
 
   private namespaceTrivia(node: Node): boolean {
@@ -722,6 +729,12 @@ export class Converter extends DeclarationConverter {
   }
 
   private checkWritable(e: Expr, node: Node, acquireReference = false): void {
+    if (hasNullsafeReceiver(e)) {
+      this.error(
+        node,
+        acquireReference ? 'Cannot take reference of a nullsafe chain' : "Can't use nullsafe operator in write context"
+      );
+    }
     switch (e.k) {
       case 'var': {
         if (e.name === 'this') this.error(node, '$this には代入できません（Cannot re-assign $this）。');
@@ -742,7 +755,6 @@ export class Converter extends DeclarationConverter {
         return;
       }
       case 'prop': {
-        if (e.nullsafe) this.error(node, "Can't use nullsafe operator in write context");
         this.checkWriteBase(e.obj, node);
         return;
       }
@@ -764,8 +776,6 @@ export class Converter extends DeclarationConverter {
   }
 
   private checkWriteBase(base: Expr, node: Node): void {
-    if (base.k === 'mcall' && hasNullsafeReceiver(base))
-      this.error(node, "Can't use nullsafe operator in write context");
     if (base.k === 'idx' || base.k === 'prop') {
       this.checkWritable(base, node);
       return;
@@ -1527,15 +1537,7 @@ export class Converter extends DeclarationConverter {
         items.push({ value: this.expr(parts[0].namedChildren[0]), byRef: false, spread: true });
         continue;
       }
-      let key: Expr | undefined;
-      let valueNode = parts[0];
-      if (parts.length === 2) {
-        key = this.expr(parts[0]);
-        valueNode = parts[1];
-      }
-      if (valueNode.type === 'by_ref') {
-        items.push({ key, value: this.writable(valueNode.namedChildren[0]), byRef: true, spread: false });
-      } else items.push({ key, value: this.expr(valueNode), byRef: false, spread: false });
+      items.push(this.arrayItem(parts));
     }
     // A trailing comma is allowed; an empty element between commas is not.
     let expectingElement = true;
@@ -1546,6 +1548,25 @@ export class Converter extends DeclarationConverter {
       } else if (child.type === 'array_element_initializer') expectingElement = false;
     }
     return items;
+  }
+
+  private arrayItem(parts: Node[]): ArrayItem {
+    const start = this.notices.length;
+    const key = parts.length === 2 ? this.expr(parts[0]) : undefined;
+    const keyNotices = this.notices.length;
+    const valueNode = parts.at(-1)!;
+    const byRef = valueNode.type === 'by_ref';
+    const value = byRef ? this.writable(valueNode.namedChildren[0]) : this.expr(valueNode);
+    if (keyNotices > start) this.orderArrayFoldNotices(start, keyNotices);
+    return { key, value, byRef, spread: false };
+  }
+
+  private orderArrayFoldNotices(start: number, keyEnd: number): void {
+    const keyNotices = this.notices.slice(start, keyEnd);
+    const folded = keyNotices.filter(isArrayFoldNotice);
+    if (folded.length === 0) return;
+    this.notices.splice(start, keyEnd - start, ...keyNotices.filter((notice) => !isArrayFoldNotice(notice)));
+    this.notices.push(...folded);
   }
 
   // code-gauge-allow functionCognitiveComplexity 29 -- One case per grammar node kind, each converted where PHP gives it its own meaning.
@@ -1619,46 +1640,28 @@ export class Converter extends DeclarationConverter {
     const end = node.childForFieldName('end_tag') as Node;
     const indent = end.startPosition.column;
     this.checkMultilineIndent(node, end);
-    let raw = body ? this.source.slice(body.startIndex, body.endIndex) : '';
-    raw = raw.replace(/^\r?\n/, '').replace(/\r?\n$/, '');
-    return enc(this.removeIndent(raw, indent, end));
+    const raw = (body?.text ?? '').replace(/^\r?\n/, '').replace(/\r?\n$/, '');
+    return enc(this.dedent(raw, indent, true, () => node.startPosition.row + 1));
   }
 
   private checkMultilineIndent(node: Node, end: Node): void {
     const start = this.source.indexOf('\n', node.startIndex) + 1;
     const limit = this.source.lastIndexOf('\n', end.startIndex - 1) + 1;
-    this.checkIndentKinds(this.source.slice(start, limit), end);
+    this.checkIndentKinds(this.source.slice(start, limit), end, node.startPosition.row + 1);
   }
 
-  private checkIndentKinds(raw: string, end: Node): void {
+  private checkIndentKinds(raw: string, end: Node, firstRow: number): void {
     const lineStart = this.source.lastIndexOf('\n', end.startIndex - 1) + 1;
     const closing = this.source.slice(lineStart, end.startIndex);
     if (/ /.test(closing) && /\t/.test(closing))
-      this.error(end, 'Invalid indentation - tabs and spaces cannot be mixed');
+      this.error(firstRow, 'Invalid indentation - tabs and spaces cannot be mixed');
     const kind = closing[0];
     if (!kind) return;
-    for (const line of raw.split('\n')) {
+    for (const [index, line] of raw.split('\n').entries()) {
       const leading = /^[ \t]*/.exec(line)?.[0] ?? '';
       if (leading.slice(0, closing.length).includes(kind === ' ' ? '\t' : ' '))
-        this.error(end, 'Invalid indentation - tabs and spaces cannot be mixed');
+        this.error(firstRow + index, 'Invalid indentation - tabs and spaces cannot be mixed');
     }
-  }
-
-  private removeIndent(raw: string, indent: number, end: Node): string {
-    if (indent === 0) return raw;
-    const lines = raw.split('\n');
-    return lines
-      .map((line) => {
-        const leading = /^[ \t]*/.exec(line)?.[0] ?? '';
-        if (leading.length < indent && line.trim() !== '') {
-          this.error(
-            end,
-            `ヒアドキュメントの行の字下げが、終わりの印より浅くなっています（Invalid body indentation level (expecting an indentation level of at least ${indent})）。`
-          );
-        }
-        return line.slice(Math.min(indent, leading.length));
-      })
-      .join('\n');
   }
 
   /**
@@ -1688,7 +1691,14 @@ export class Converter extends DeclarationConverter {
     let rawAtLineStart = isHeredoc;
     const flush = (): void => {
       if (raw === '') return;
-      const text = isHeredoc && indent > 0 ? this.dedent(raw, indent, rawAtLineStart, end as Node) : raw;
+      const text = isHeredoc
+        ? this.dedent(
+            raw,
+            indent,
+            rawAtLineStart,
+            () => row + this.source.slice(node.startIndex, rawStart).split('\n').length - 1
+          )
+        : raw;
       parts.push(
         decodeLiteral(
           text,
@@ -1760,15 +1770,16 @@ export class Converter extends DeclarationConverter {
     return this.expr(node);
   }
 
-  private dedent(raw: string, indent: number, atLineStart: boolean, end: Node): string {
+  private dedent(raw: string, indent: number, atLineStart: boolean, firstRow: () => number): string {
+    if (indent === 0) return raw;
     const lines = raw.split('\n');
     return lines
       .map((line, index) => {
         if (index === 0 && !atLineStart) return line;
         const leading = /^[ \t]*/.exec(line)?.[0] ?? '';
-        if (leading.length < indent && line.trim() !== '' && !(index === lines.length - 1 && line === leading)) {
+        if (leading.length < indent && line.trim() !== '') {
           this.error(
-            end,
+            firstRow() + index,
             `ヒアドキュメントの行の字下げが、終わりの印より浅くなっています（Invalid body indentation level (expecting an indentation level of at least ${indent})）。`
           );
         }
@@ -1776,6 +1787,10 @@ export class Converter extends DeclarationConverter {
       })
       .join('\n');
   }
+}
+
+function isArrayFoldNotice({ message }: CompileNotice): boolean {
+  return message === NAN_STRING_WARNING || message === NAN_BOOL_WARNING;
 }
 
 function chainedComparison(operator: Node, left: Node, right: Node): Node | undefined {

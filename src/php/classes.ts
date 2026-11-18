@@ -2,7 +2,13 @@
 import type { ClassDecl, Expr, FunctionDecl, MethodDeclAst, PropertyDeclAst, TraitRule } from './ast';
 import { canBindClass, declaresStringConversion } from './astAnalysis';
 import builtinNames from './builtinNames.json';
-import { addConst, applyTraitConstants, evaluateInClass, linkInterfaceConstants } from './classConstants';
+import {
+  addConst,
+  applyTraitConstants,
+  evaluateInClass,
+  initializeClassConstants,
+  linkInterfaceConstants,
+} from './classConstants';
 export { canAccessConstant, classConstant, setClassEvaluator } from './classConstants';
 import { lower } from './bytes';
 import { type ArgValue, asInternal, invoke } from './calls';
@@ -13,7 +19,7 @@ import { strictEquals } from './operators';
 import { share } from './places';
 import { FatalError, rt, SCRIPT_PATH } from './runtime';
 import tentativeReturnMethods from './tentativeReturnMethods.json';
-import { coerce, describePropertyType, describeType, NO_MATCH } from './types';
+import { coerce, describePropertyType, describeType, NO_MATCH, parameterType } from './types';
 import { UnsupportedFeatureError } from './unsupported';
 import { unsupportedClasses } from './unsupportedCatalog';
 import {
@@ -119,10 +125,7 @@ export function declareClass(decl: ClassDecl, row: number): PhpClass {
     for (const name of use.names) {
       const trait = findClass(name);
       if (!trait) throwError('Error', `Trait "${name}" not found`);
-      if (trait.kind !== 'trait') {
-        runtime.row = use.row;
-        throwError('Error', `${decl.name} cannot use ${trait.name} - it is not a trait`);
-      }
+      if (trait.kind !== 'trait') throwError('Error', `${decl.name} cannot use ${trait.name} - it is not a trait`);
       cls.traits.push(trait);
     }
   }
@@ -191,7 +194,7 @@ function addProperty(cls: PhpClass, ast: PropertyDeclAst, declarationScope = cls
   const inherited = cls.propByName.get(ast.name);
   if (inherited && inherited.cls !== cls && inherited.isFinal)
     throw new FatalError(`Cannot override final property ${inherited.cls.name}::$${ast.name}`, ast.row);
-  if (ast.isFinal && ast.visibility === 'private')
+  if (ast.isFinal && ast.visibility === 'private' && !ast.promoted)
     throw new FatalError('Property cannot be both final and private', ast.row);
   if (inherited && inherited.cls !== cls && inherited.visibility !== 'private') {
     if (inherited.isStatic !== ast.isStatic) {
@@ -493,6 +496,11 @@ function traitAliasSource(cls: PhpClass, rule: Extract<TraitRule, { k: 'as' }>, 
 function usedTrait(cls: PhpClass, name: string, row: number): PhpClass {
   const trait = findClass(name);
   if (!trait) throw new FatalError(`Could not find trait ${name}`, row);
+  if (trait.kind !== 'trait')
+    throw new FatalError(
+      `Class ${trait.name} is not a trait, Only traits may be used in 'as' and 'insteadof' statements`,
+      row
+    );
   if (!cls.traits.includes(trait))
     throw new FatalError(`Required Trait ${trait.name} wasn't added to ${cls.name}`, row);
   return trait;
@@ -771,9 +779,11 @@ function signatureCompatible(child: Method, parent: Method, skipReturn = false):
 function paramCompatible(own: Param, ownClass: PhpClass, param: Param, parentClass: PhpClass): boolean {
   if (param.byRef !== own.byRef) return false;
   if (param.optional && !own.optional && !own.variadic) return false;
-  if (!own.type) return true;
-  if (!param.type) return own.type.k === 'named' && own.type.name === 'mixed';
-  return isSubtype(param.type, parentClass, own.type, ownClass);
+  const ownType = parameterType(own);
+  if (!ownType) return true;
+  const paramType = parameterType(param);
+  if (!paramType) return ownType.k === 'named' && ownType.name === 'mixed';
+  return isSubtype(paramType, parentClass, ownType, ownClass);
 }
 
 function returnTypeOf(fn: Callable): TypeDecl | undefined {
@@ -786,7 +796,8 @@ function signatureText(method: Method): string {
   const params = fn.params
     .map((param) => {
       let text = '';
-      if (param.type) text += `${describeType(param.type, method.scope)} `;
+      const type = parameterType(param);
+      if (type) text += `${describeType(type, method.scope)} `;
       if (param.byRef) text += '&';
       if (param.variadic) text += '...';
       text += `$${param.name}`;
@@ -803,7 +814,8 @@ function signatureText(method: Method): string {
 }
 
 function defaultText(e: Expr, method: Method): string {
-  const value = e.k === 'magic' ? methodMagicDefault(e.name, method) : foldedConstant(e, {});
+  const value =
+    e.k === 'magic' ? methodMagicDefault(e.name, method) : foldedConstant(e, { preserveNamedConstants: true });
   if (value instanceof Map) return value.size === 0 ? '[]' : '[...]';
   if (typeof value === 'string') return `'${value.slice(0, 10)}${value.length > 10 ? '...' : ''}'`;
   if (typeof value === 'number') return formatFloat(value);
@@ -837,6 +849,7 @@ function methodMagicDefault(name: Extract<Expr, { k: 'magic' }>['name'], method:
 /** Creates an object of a class with its properties' initial values, without calling the constructor. */
 export function createObject(cls: PhpClass): PhpObject {
   const runtime = rt();
+  initializeClassDefaults(cls);
   const object = runtime.newObject(cls);
   for (const decl of cls.props) {
     if (decl.isVirtual && decl.hooks) continue;
@@ -849,15 +862,27 @@ export function createObject(cls: PhpClass): PhpObject {
   return object;
 }
 
-export function checkInstantiable(cls: PhpClass): void {
-  if (cls.name === 'Closure') throwError('Error', 'Instantiation of class Closure is not allowed');
+function checkInstantiable(cls: PhpClass): void {
+  if (cls.name === 'Closure') rejectClosureInstantiation(cls);
   if (cls.kind === 'interface') throwError('Error', `Cannot instantiate interface ${cls.name}`);
   if (cls.kind === 'trait') throwError('Error', `Cannot instantiate trait ${cls.name}`);
   if (cls.kind === 'enum') throwError('Error', `Cannot instantiate enum ${cls.name}`);
   if (cls.isAbstract) throwError('Error', `Cannot instantiate abstract class ${cls.name}`);
 }
 
-/** Creates an object and runs its constructor, as `new` does. */
+function rejectClosureInstantiation(cls: PhpClass): never {
+  const runtime = rt();
+  const temporaries = runtime.frame.temporaries;
+  const index = temporaries.length;
+  const object = runtime.newObject(cls);
+  try {
+    throwError('Error', 'Instantiation of class Closure is not allowed');
+  } finally {
+    temporaries.splice(index, 1);
+    runtime.freeObject(object);
+  }
+}
+
 /**
  * Creates an object and runs its constructor. PHP creates the object before it evaluates the arguments (`args`), and
  * evaluates them even for a class without a constructor.
@@ -1591,9 +1616,28 @@ export function staticPropRef(cls: PhpClass, name: string, scope: PhpClass | und
     deprecated(
       `Accessing static trait property ${cls.name}::$${name} is deprecated, it should only be accessed on a class using the trait`
     );
+  initializeClassDefaults(cls);
   const ref = resolveStatic(found.ref);
   if (found.decl.type) ref.addTypeOwner(found.decl);
   return ref;
+}
+
+const initializedClasses = new WeakSet<PhpClass>();
+
+function initializeClassDefaults(cls: PhpClass): void {
+  const pending: PhpClass[] = [];
+  for (let current: PhpClass | undefined = cls; current && !initializedClasses.has(current); current = current.parent) {
+    pending.push(current);
+  }
+  while (pending.length > 0) {
+    const current = pending.pop()!;
+    initializeClassConstants(current);
+    for (const prop of current.props) {
+      if (prop.cls === current) prop.defaultValue?.();
+    }
+    for (const { ref } of current.staticProps.values()) resolveStatic(ref);
+    initializedClasses.add(current);
+  }
 }
 
 export function bindStaticPropertyReference(cls: PhpClass, name: string, scope: PhpClass | undefined, ref: Ref): void {

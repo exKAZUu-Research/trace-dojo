@@ -69,9 +69,14 @@ export abstract class DeclarationConverter extends ConverterBase {
     });
   }
 
-  // code-gauge-allow functionNcss 41 -- Converts every part of a function declaration and checks it as PHP does at compile time.
-  // code-gauge-allow functionCognitiveComplexity 19 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
   protected functionDecl(node: Node, isClosure: boolean, className?: string): FunctionDecl {
+    if (isClosure || className !== undefined || this.currentClass === undefined) {
+      return this.convertFunction(node, isClosure, className);
+    }
+    return this.withClassContext(undefined, () => this.convertFunction(node, false));
+  }
+
+  private convertFunction(node: Node, isClosure: boolean, className?: string): FunctionDecl {
     const attributes = node.childForFieldName('attributes');
     if (attributes) this.unsupported(attributes, '属性（#[...]）');
     const nameNode = node.childForFieldName('name');
@@ -87,6 +92,7 @@ export abstract class DeclarationConverter extends ConverterBase {
       node.childForFieldName('reference_modifier') !== null ||
       node.children.some((child) => child.type === 'reference_modifier');
     const outerFn = this.fn;
+    const lexicalClass = className ?? (isClosure ? outerFn.className : undefined);
     const outerLoop = this.loop;
     const outerInitializer = this.initializerContext;
     if (outerInitializer?.kind !== 'deferred') this.initializerContext = undefined;
@@ -95,7 +101,7 @@ export abstract class DeclarationConverter extends ConverterBase {
       byRefReturn,
       labels: new Set(),
       gotos: [],
-      className: className ?? outerFn.className,
+      className: lexicalClass,
       isMethod: className !== undefined,
       isFunction: true,
       isClosure,
@@ -109,7 +115,7 @@ export abstract class DeclarationConverter extends ConverterBase {
       if (byRefReturn && returnType?.k === 'named' && returnType.name === 'void')
         this.notices.push({
           level: 'Deprecated',
-          message: `${this.fn.displayName}: Returning by reference from a void function is deprecated`,
+          message: `${this.fn.displayName}${isClosure ? '()' : ''}: Returning by reference from a void function is deprecated`,
           row: node.startPosition.row,
         });
       const params = this.params(node.childForFieldName('parameters') as Node, name, className);
@@ -119,6 +125,7 @@ export abstract class DeclarationConverter extends ConverterBase {
       let statements: Stmt[] = [];
       let arrowBody: Expr | undefined;
       if (node.type === 'arrow_function') {
+        this.checkVoidReturn(body as Node);
         arrowBody = this.expr(body as Node);
         this.checkReferenceReturn(body as Node, arrowBody);
       } else if (body) {
@@ -138,7 +145,7 @@ export abstract class DeclarationConverter extends ConverterBase {
         usesThis: false,
         hasGoto: this.fn.gotos.length > 0,
         namespace: this.namespace,
-        className: className ?? outerFn.className,
+        className: lexicalClass,
         isClosure,
       };
     } finally {
@@ -148,8 +155,18 @@ export abstract class DeclarationConverter extends ConverterBase {
     }
   }
 
+  protected checkVoidReturn(node: Node): void {
+    const type = this.fn.returnType;
+    if (type?.k !== 'named' || type.name !== 'void') return;
+    const isNull = lower(node.text.trim()) === 'null';
+    const message = isNull
+      ? 'A void function must not return a value (did you mean "return;" instead of "return null;"?)'
+      : 'A void function must not return a value';
+    this.error(node, message);
+  }
+
   protected checkReferenceReturn(node: Node, expression: Expr): void {
-    if (this.fn.byRefReturn && (expression.k === 'prop' || expression.k === 'idx') && hasNullsafeReceiver(expression))
+    if (this.fn.byRefReturn && ['prop', 'idx', 'sprop'].includes(expression.k) && hasNullsafeReceiver(expression))
       this.error(node, 'Cannot take reference of a nullsafe chain');
   }
 
@@ -239,6 +256,7 @@ export abstract class DeclarationConverter extends ConverterBase {
       visibility: modifiers.visibility ?? 'public',
       isReadonly: modifiers.isReadonly,
       setVisibility: modifiers.setVisibility,
+      isFinal: modifiers.isFinal,
     };
   }
 
@@ -568,7 +586,7 @@ export abstract class DeclarationConverter extends ConverterBase {
     const nameNode = node.childForFieldName('name');
     let name = '';
     if (!anonymous) {
-      const raw = this.nameText(nameNode as Node);
+      const raw = this.declaredIdentifier(nameNode as Node);
       if (isReservedClassName(raw)) {
         this.error(
           node,
@@ -582,13 +600,13 @@ export abstract class DeclarationConverter extends ConverterBase {
     const baseNames = base
       ? base.namedChildren
           .filter((child) => child.type !== 'comment')
-          .map((child) => this.resolveClassName(this.nameText(child)))
+          .map((child) => this.resolveClassName(this.declaredIdentifier(child, '')))
       : [];
     const implementsClause = node.namedChildren.find((child) => child.type === 'class_interface_clause');
     let interfaces = implementsClause
       ? implementsClause.namedChildren
           .filter((child) => child.type !== 'comment')
-          .map((child) => this.resolveClassName(this.nameText(child)))
+          .map((child) => this.resolveClassName(this.declaredIdentifier(child, '')))
       : [];
     let parent: string | undefined;
     if (kind === 'interface') interfaces = baseNames;
@@ -620,15 +638,7 @@ export abstract class DeclarationConverter extends ConverterBase {
       isAnonymous: anonymous,
     };
     if (decl.isAbstract && decl.isFinal) this.error(node, 'Cannot use the final modifier on an abstract class');
-    const outerClass = this.currentClass;
-    const outerKind = this.currentClassKind;
-    const outerHasParent = this.currentClassHasParent;
-    const outerDecl = this.activeClass;
-    this.activeClass = decl;
-    this.currentClass = name;
-    this.currentClassKind = kind;
-    this.currentClassHasParent = parent !== undefined;
-    try {
+    this.withClassContext(decl, () => {
       const body = node.childForFieldName('body') as Node;
       const memberNames = new Set<string>();
       for (const member of body.namedChildren) {
@@ -671,12 +681,7 @@ export abstract class DeclarationConverter extends ConverterBase {
           }
         }
       }
-    } finally {
-      this.activeClass = outerDecl;
-      this.currentClass = outerClass;
-      this.currentClassKind = outerKind;
-      this.currentClassHasParent = outerHasParent;
-    }
+    });
     // Promoted constructor parameters declare properties.
     const constructor = decl.methods.find((method) => lower(method.fn.name) === '__construct');
     if (constructor) {
@@ -710,12 +715,30 @@ export abstract class DeclarationConverter extends ConverterBase {
           defaultExpr: undefined,
           row: param.row,
           isAbstract: false,
-          isFinal: false,
+          isFinal: param.promote.isFinal,
+          promoted: true,
         });
       }
     }
     if (!anonymous && (!topLevel || !this.compileClasses.bind(decl))) this.runtimeDefinitionKeys++;
     return decl;
+  }
+
+  private withClassContext<T>(decl: ClassDecl | undefined, convert: () => T): T {
+    const outer = this.activeClass;
+    this.setClassContext(decl);
+    try {
+      return convert();
+    } finally {
+      this.setClassContext(outer);
+    }
+  }
+
+  private setClassContext(decl: ClassDecl | undefined): void {
+    this.activeClass = decl;
+    this.currentClass = decl?.name;
+    this.currentClassKind = decl?.kind;
+    this.currentClassHasParent = decl?.parent !== undefined;
   }
 
   // code-gauge-allow functionCognitiveComplexity 16 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
@@ -729,23 +752,10 @@ export abstract class DeclarationConverter extends ConverterBase {
     isVar: boolean;
   } {
     const children = member.children;
-    const modifiers = children.filter((child) => child.type.endsWith('_modifier'));
-    const varModifier = modifiers.find((child) => child.type === 'var_modifier');
-    if (varModifier && modifiers.length > 1) {
-      const unexpected = modifiers[0] === varModifier ? modifiers[1] : varModifier;
-      this.error(unexpected, `syntax error, unexpected token "${lower(unexpected.text)}", expecting variable`);
-    }
-    const modifierKinds = modifiers.map((child) =>
-      child.type === 'visibility_modifier'
-        ? this.setVisibilityOf(child)
-          ? 'set_visibility'
-          : 'visibility'
-        : child.type
+    this.checkMemberModifiers(
+      member,
+      children.filter((child) => child.type.endsWith('_modifier'))
     );
-    if (new Set(modifierKinds).size !== modifierKinds.length)
-      this.error(member, 'Multiple access or duplicate modifiers are not allowed');
-    if (modifierKinds.includes('abstract_modifier') && modifierKinds.includes('final_modifier'))
-      this.error(member, 'Cannot use the final modifier on an abstract class member');
     const visibilityNodes = children.filter((child) => child.type === 'visibility_modifier');
     // `public private(set)` names the read visibility and the write visibility separately.
     const setNode = visibilityNodes.find((child) => this.setVisibilityOf(child) !== undefined);
@@ -759,6 +769,28 @@ export abstract class DeclarationConverter extends ConverterBase {
       isReadonly: children.some((child) => child.type === 'readonly_modifier'),
       isVar: children.some((child) => child.type === 'var_modifier'),
     };
+  }
+
+  private checkMemberModifiers(member: Node, modifiers: Node[]): void {
+    const varModifier = modifiers.find((node) => node.type === 'var_modifier');
+    if (varModifier) {
+      const following =
+        modifiers[1] ?? member.children.find((node) => node.type === 'function' || node.type === 'const');
+      if (following)
+        this.error(following, `syntax error, unexpected token "${lower(following.text)}", expecting variable`);
+    }
+    const kinds = new Set<string>();
+    for (const modifier of modifiers) {
+      const visibility = modifier.type === 'visibility_modifier';
+      const kind = visibility && this.setVisibilityOf(modifier) ? 'set_visibility' : modifier.type;
+      if (kinds.has(kind)) {
+        const label = visibility ? 'access type' : modifier.type.replace(/_modifier$/, '');
+        this.error(member, `Multiple ${label} modifiers are not allowed`);
+      }
+      kinds.add(kind);
+    }
+    if (kinds.has('abstract_modifier') && kinds.has('final_modifier'))
+      this.error(member, 'Cannot use the final modifier on an abstract class member');
   }
 
   // code-gauge-allow functionCognitiveComplexity 21 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.

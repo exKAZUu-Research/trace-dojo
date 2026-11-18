@@ -1,0 +1,4 @@
+
+Fatal error: Declaration of Incorrect::process(string $value, $a = PHP_INT_MAX, $b = PHP_EOL, $c = <expression>, $d = <expression>) must be compatible with Contract::process(int $value) in /main.php on line 4
+Stack trace:
+#0 {main}

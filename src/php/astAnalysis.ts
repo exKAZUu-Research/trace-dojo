@@ -315,6 +315,8 @@ export function hasNullsafeReceiver(expression: Expr): boolean {
     else if (current.k === 'prop' || current.k === 'mcall') {
       if (current.nullsafe) return true;
       current = current.obj;
+    } else if ((current.k === 'sprop' || current.k === 'scall') && current.cls.k === 'expr') {
+      current = current.cls.e;
     } else return false;
   }
 }

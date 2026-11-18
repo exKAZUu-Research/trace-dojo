@@ -4,7 +4,7 @@ import { LIMITS } from '../interpreter/limits';
 import type { FunctionDecl } from './ast';
 import { lower } from './bytes';
 import { valueName } from './conversions';
-import { throwError, withPendingException } from './errors';
+import { notice, throwError, withPendingException } from './errors';
 import { decodeLiteral } from './literals';
 import { share } from './places';
 import {
@@ -17,7 +17,7 @@ import {
   SCRIPT_PATH,
   setCallCapture,
 } from './runtime';
-import { coerce, describeType, matches, NO_MATCH, typeToString } from './types';
+import { coerce, describeType, matches, NO_MATCH, parameterType, typeToString } from './types';
 import {
   type Callable,
   type ClosureData,
@@ -613,14 +613,7 @@ function invokeUser(
       }
       throw error;
     }
-    if (decl.returnType) {
-      runtime.row = frame.returnRow ?? runtime.row;
-      result = checkReturn(result, decl.returnType, name, frame);
-      if (frame.returning instanceof Ref) {
-        frame.returning.assign(result);
-        result = frame.returning.v;
-      }
-    } else if (decl.byRefReturn === false) result = share(result);
+    result = completeUserReturn(decl, frame, result, name);
     if (discardResult) {
       const returning = frame.returning;
       frame.returning = undefined;
@@ -654,6 +647,20 @@ function invokeUser(
   }
   runtime.lastReturnRef = !discardResult && frame.returning instanceof Ref ? frame.returning : undefined;
   return returned;
+}
+
+function completeUserReturn(decl: FunctionDecl, frame: Frame, value: Value, name: string): Value {
+  const runtime = rt();
+  if (decl.byRefReturn && !(frame.returning instanceof Ref)) {
+    runtime.row = frame.returnRow ?? decl.endRow;
+    notice('Only variable references should be returned by reference');
+  }
+  if (!decl.returnType) return decl.byRefReturn ? value : share(value);
+  runtime.row = frame.returnRow ?? runtime.row;
+  const result = checkReturn(value, decl.returnType, name, frame);
+  if (!(frame.returning instanceof Ref)) return result;
+  frame.returning.assign(result);
+  return frame.returning.v;
 }
 
 // code-gauge-allow functionCognitiveComplexity 26 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
@@ -931,13 +938,12 @@ function checkParam(
   frame: Frame,
   callRow: number | undefined
 ): Value {
-  const type = param.type;
+  const type = parameterType(param);
   if (!type) return value;
-  if (value === null && param.implicitNullable) return value;
   const coerced = coerce(value, type, { strict, internal: false, scope: frame.scope, staticClass: frame.staticClass });
   if (coerced !== NO_MATCH) return coerced;
   const where = callRow === undefined ? '' : `, called in ${SCRIPT_PATH} on line ${callRow + 1}`;
-  const typeText = param.implicitNullable && type.k === 'named' ? `?${type.name}` : describeType(type, frame.scope);
+  const typeText = describeType(type, frame.scope);
   const label = param.variadic ? '' : ` ($${param.name})`;
   throwError(
     'TypeError',

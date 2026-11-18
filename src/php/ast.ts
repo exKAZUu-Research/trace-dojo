@@ -158,7 +158,7 @@ export interface FunctionDecl {
 
 export interface ParamDecl extends Param {
   defaultExpr?: Expr;
-  promote?: { visibility: Visibility; isReadonly: boolean; setVisibility?: Visibility };
+  promote?: { visibility: Visibility; isReadonly: boolean; isFinal: boolean; setVisibility?: Visibility };
   row: number;
 }
 
@@ -168,6 +168,7 @@ export interface PropertyDeclAst {
   setVisibility?: Visibility;
   isStatic: boolean;
   isReadonly: boolean;
+  promoted?: boolean;
   type?: TypeDecl;
   defaultExpr?: Expr;
   hooks?: { get?: FunctionDecl; set?: FunctionDecl; setParam?: string; abstractGet?: boolean; abstractSet?: boolean };

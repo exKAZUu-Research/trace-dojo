@@ -133,28 +133,27 @@ markInlined('count');
 markInlined('sizeof');
 
 function countRecursive(array: PhpArray): number {
-  const active = new Set<PhpArray>();
-  const pending = [{ array, leave: false }];
-  let count = 0;
+  const active = new Set([array]);
+  const pending = [{ array, values: array.iterValues() }];
+  let count = array.size;
   while (pending.length > 0) {
-    const item = pending.pop() as { array: PhpArray; leave: boolean };
-    if (item.leave) {
+    const item = pending.at(-1)!;
+    const next = item.values.next();
+    if (next.done) {
       active.delete(item.array);
+      pending.pop();
       continue;
     }
-    if (active.has(item.array)) {
+    rt().spend();
+    const value = next.value;
+    if (!(value instanceof PhpArray)) continue;
+    if (active.has(value)) {
       warn('count(): Recursion detected');
       continue;
     }
-    active.add(item.array);
-    count += item.array.size;
-    pending.push({ array: item.array, leave: true });
-    const values = item.array.values();
-    for (let index = values.length - 1; index >= 0; index--) {
-      rt().spend();
-      const value = values[index];
-      if (value instanceof PhpArray) pending.push({ array: value, leave: false });
-    }
+    active.add(value);
+    count += value.size;
+    pending.push({ array: value, values: value.iterValues() });
   }
   return count;
 }

@@ -19,7 +19,16 @@ import {
 import { canCall, classScopeMessage, lookupMethod, requireClass } from './classes';
 import { debugType, valueName } from './conversions';
 import { deprecated, notice, probe, ProbeFailure, throwError, warn, withPendingException } from './errors';
-import { type Chain, ev, evChain, isCompiledVariable, iterate, prepareOperand, resolveClassRef, SHORT } from './interp';
+import {
+  type Chain,
+  ev,
+  evChain,
+  isCompiledVariable,
+  iterate,
+  prepareOperand,
+  resolveStaticClass,
+  SHORT,
+} from './interp';
 import { ElementPlace, share, VarPlace, writableContainer } from './places';
 import { type Frame, PhpThrow, rt } from './runtime';
 import { UnsupportedFeatureError } from './unsupported';
@@ -202,6 +211,7 @@ export function callExpression(e: Extract<Expr, { k: 'call' }>, discardResult = 
     return result;
   }
   const callee = ev(e.fn);
+  if (callee instanceof PhpObject || callee instanceof PhpArray) runtime.frame.temporaries.push(callee);
   runtime.row = e.row;
   const target = callTargetOf(callee, 'direct');
   if (e.fcc) return closureFromCallable(target);
@@ -347,29 +357,19 @@ function invokeMagic(
 
 // code-gauge-allow functionCognitiveComplexity 30 -- Resolves each form of call and callable by PHP's lookup rules, in PHP's order of checks.
 // code-gauge-allow functionNcss 48 -- Resolves each form of call and callable by PHP's lookup rules, in PHP's order of checks.
-export function staticCallExpression(e: Extract<Expr, { k: 'scall' }>, discardResult = false): Value {
+export function staticCallExpression(e: Extract<Expr, { k: 'scall' }>, discardResult = false): Chain {
   const runtime = rt();
   const frame = runtime.frame;
   runtime.row = e.row;
-  const cls = resolveClassRef(e.cls);
+  const cls = resolveStaticClass(e.cls);
+  if (cls === SHORT) return SHORT;
   const methodName = typeof e.name === 'string' ? e.name : dynamicMethodName(ev(e.name));
   runtime.row = e.row;
   const scope = frame.scope;
   const method = lookupMethod(cls, lower(methodName), scope);
-  const forwarding = e.cls.k === 'parent' || e.cls.k === 'self' || e.cls.k === 'static';
   const thisObj = frame.thisObj && frame.thisObj.cls.isSubclassOf(cls) ? frame.thisObj : undefined;
   if (method && canCall(method, scope)) {
-    if (method.isAbstract) throwError('Error', `Cannot call abstract method ${method.scope.name}::${method.name}()`);
-    let target: CallTarget;
-    if (method.isStatic) {
-      reportStaticTraitCall(cls, method.name);
-      const staticClass = forwarding && frame.staticClass ? frame.staticClass : cls;
-      target = { fn: method.fn, scope: method.scope, staticClass, method };
-    } else if (thisObj) {
-      target = { fn: method.fn, thisObj, scope: method.scope, staticClass: thisObj.cls, method };
-    } else {
-      throwError('Error', `Non-static method ${method.scope.name}::${method.name}() cannot be called statically`);
-    }
+    const target = staticInvocationTarget(e.cls.k, cls, method, thisObj, frame.staticClass);
     if (e.fcc) return closureFromCallable(target);
     const args = evalArgs(e.args, method.fn, `${method.scope.name}::${method.name}`);
     runtime.row = e.row;
@@ -409,6 +409,23 @@ export function staticCallExpression(e: Extract<Expr, { k: 'scall' }>, discardRe
     );
   }
   throwError('Error', `Call to undefined method ${cls.name}::${methodName}()`);
+}
+
+function staticInvocationTarget(
+  kind: Extract<Expr, { k: 'scall' }>['cls']['k'],
+  cls: PhpClass,
+  method: Method,
+  thisObj: PhpObject | undefined,
+  calledClass: PhpClass | undefined
+): CallTarget {
+  if (method.isAbstract) throwError('Error', `Cannot call abstract method ${method.scope.name}::${method.name}()`);
+  if (method.isStatic) {
+    reportStaticTraitCall(cls, method.name);
+    const forwarding = kind === 'parent' || kind === 'self' || kind === 'static';
+    return { fn: method.fn, scope: method.scope, staticClass: forwarding && calledClass ? calledClass : cls, method };
+  }
+  if (thisObj) return { fn: method.fn, thisObj, scope: method.scope, staticClass: thisObj.cls, method };
+  throwError('Error', `Non-static method ${method.scope.name}::${method.name}() cannot be called statically`);
 }
 
 function reportStaticTraitCall(cls: PhpClass, name: string): void {
@@ -545,25 +562,28 @@ function arrayCallable(
   mode: 'direct' | 'callback',
   emitScopeWarning: boolean
 ): CallTarget {
-  if (value.size === 2) {
-    const target = value.get(0n);
-    const method = value.get(1n);
-    if (typeof method === 'string' && target instanceof PhpObject)
-      return arrayObjectCallable(target, method, scope, mode, emitScopeWarning);
-    if (typeof method === 'string' && typeof target === 'string')
-      return staticCallable(target, method, scope, mode, emitScopeWarning);
-  }
   if (value.size !== 2)
     throw new CallableFailure(
       'Array callback must have exactly two elements',
       'array callback must have exactly two members'
     );
-  throw new CallableFailure(
-    'First array member is not a valid class name or object',
-    typeof value.get(1n) === 'string'
-      ? 'first array member is not a valid class name or object'
-      : 'second array member is not a valid method'
-  );
+  if (!value.has(0n) || !value.has(1n))
+    throw new CallableFailure(
+      'Array callback has to contain indices 0 and 1',
+      'array callback has to contain indices 0 and 1'
+    );
+  const target = value.get(0n);
+  if (typeof target !== 'string' && (!(target instanceof PhpObject) || target.isResource))
+    throw new CallableFailure(
+      'First array member is not a valid class name or object',
+      'first array member is not a valid class name or object'
+    );
+  const method = value.get(1n);
+  if (typeof method !== 'string')
+    throw new CallableFailure('Second array member is not a valid method', 'second array member is not a valid method');
+  return typeof target === 'string'
+    ? staticCallable(target, method, scope, mode, emitScopeWarning)
+    : arrayObjectCallable(target, method, scope, mode, emitScopeWarning);
 }
 
 function arrayObjectCallable(
@@ -686,23 +706,19 @@ function staticCallable(
       word === 'self' ? frame.scope : word === 'parent' ? frame.scope.parent : (frame.staticClass ?? frame.scope)
     ) as PhpClass;
   } else cls = callableClass(className);
+  const thisObj = frame.thisObj && frame.thisObj.cls.isSubclassOf(cls) ? frame.thisObj : undefined;
   const method = lookupMethod(cls, lower(methodName), scope);
   if (!method || !canCall(method, scope)) {
     const magic = cls.findMethod('__callstatic');
     if (magic) return magicTarget(undefined, cls, magic, methodName);
-    throw inaccessibleStaticMethod(cls, methodName, method, scope);
+    throw inaccessibleStaticMethod(cls, methodName, method, scope, mode === 'callback' && !thisObj);
   }
   if (method.isAbstract) {
     const description = `abstract method ${method.scope.name}::${method.name}()`;
     throw new CallableFailure(`Cannot call ${description}`, `cannot call ${description}`);
   }
   if (!method.isStatic) {
-    const thisObj = frame.thisObj && frame.thisObj.cls.isSubclassOf(cls) ? frame.thisObj : undefined;
-    if (!thisObj)
-      throw new CallableFailure(
-        `Non-static method ${method.scope.name}::${method.name}() cannot be called statically`,
-        `non-static method ${method.scope.name}::${method.name}() cannot be called statically`
-      );
+    if (!thisObj) throw nonStaticCallable(method);
     return { fn: method.fn, thisObj, scope: method.scope, staticClass: thisObj.cls, method };
   }
   return { fn: method.fn, scope: method.scope, staticClass: cls, method };
@@ -712,17 +728,24 @@ function inaccessibleStaticMethod(
   cls: PhpClass,
   methodName: string,
   method: Method | undefined,
-  scope: PhpClass | undefined
+  scope: PhpClass | undefined,
+  checkStatic: boolean
 ): CallableFailure {
   if (!method)
     return new CallableFailure(
       `Call to undefined method ${cls.name}::${methodName}()`,
       `class ${cls.name} does not have a method "${methodName}"`
     );
+  if (checkStatic && !method.isStatic) return nonStaticCallable(method);
   return new CallableFailure(
     `Call to ${method.visibility} method ${method.scope.name}::${method.name}() from ${scope ? `scope ${scope.name}` : 'global scope'}`,
     `cannot access ${method.visibility} method ${cls.name}::${method.name}()`
   );
+}
+
+function nonStaticCallable(method: Method): CallableFailure {
+  const suffix = `method ${method.scope.name}::${method.name}() cannot be called statically`;
+  return new CallableFailure(`Non-static ${suffix}`, `non-static ${suffix}`);
 }
 
 function callableClass(name: string): PhpClass {
@@ -910,6 +933,7 @@ function specializedCall(fn: Callable, args: Arg[]): boolean {
   if (!fn.inlined) return false;
   if (name === 'array_key_exists') return args.length === 2;
   if (name === 'get_class') return args.length <= 1;
+  if (name === 'get_called_class') return args.length === 0;
   if (name === 'call_user_func') return args.length > 0;
   if (name === 'call_user_func_array') return args.length === 2;
   return args.length === 1;

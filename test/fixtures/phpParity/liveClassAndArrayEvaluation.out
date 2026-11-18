@@ -1,0 +1,32 @@
+
+Warning: unexpected NAN value was coerced to bool in /main.php on line 15
+
+Warning: unexpected NAN value was coerced to string in /main.php on line 15
+
+Warning: unexpected NAN value was coerced to string in /main.php on line 15
+
+Warning: unexpected NAN value was coerced to bool in /main.php on line 15
+NULL
+NULL
+NULL
+NULL
+bool(false)
+string(7) "default"
+string(5) "ready"
+int(5)
+Error: Only arrays and Traversables can be unpacked, int given
+Error: Only arrays and Traversables can be unpacked, string given
+Error: Only arrays and Traversables can be unpacked, null given
+TypeError: Only arrays and Traversables can be unpacked, stdClass given
+array(1) {
+  ["NANkey"]=>
+  bool(true)
+}
+array(1) {
+  [1]=>
+  string(8) "NANvalue"
+}
+int(4)
+{"a":{"a":"v"}}
+{"a":{"a":"v"}}
+{"a_b":"v"}

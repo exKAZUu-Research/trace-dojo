@@ -12,6 +12,7 @@ type Folded = Constant | typeof UNKNOWN;
 export type ClassConstantLookup = (cls: ClassRef, name: string) => Constant | undefined;
 interface FoldContext {
   compiler?: boolean;
+  preserveNamedConstants?: boolean;
   classConstant?: ClassConstantLookup;
   className?: (cls: ClassRef) => string | undefined;
 }
@@ -40,6 +41,7 @@ function fold(expression: Expr, context: FoldContext): Folded {
       return expression.v;
     }
     case 'const': {
+      if (context.preserveNamedConstants) return UNKNOWN;
       const value = compileConstant(expression.name.name);
       return value === undefined || value instanceof PhpArray || value instanceof PhpObject ? UNKNOWN : value;
     }

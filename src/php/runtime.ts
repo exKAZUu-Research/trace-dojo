@@ -1,6 +1,6 @@
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 // oxlint-disable unicorn/prefer-code-point -- PHP strings hold bytes as code units 0–255, which charCodeAt and fromCharCode read and write as they are.
-import { ExecutionBudget, ExecutionLimitError, LIMITS } from '../interpreter/limits';
+import { ExecutionBudget, LIMITS } from '../interpreter/limits';
 import { type ProgramInput, ProgramIO } from '../interpreter/programIo';
 import { StepTracker } from '../interpreter/stepTracker';
 import { TurtleWorld } from '../interpreter/turtleWorld';
@@ -344,7 +344,6 @@ export class Runtime {
   /** Writes bytes to standard output, decoding complete UTF-8 sequences as they arrive. */
   echo(bytes: string): void {
     if (bytes.length === 0) return;
-    if (bytes.length > LIMITS.maxOutputLength) throw new ExecutionLimitError('output');
     this.spend(Math.ceil(bytes.length / 64));
     const text = this.pendingOutput + bytes;
     const cut = completePrefix(text);

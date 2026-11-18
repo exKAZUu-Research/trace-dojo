@@ -12,6 +12,7 @@ import {
   placeOf,
 } from './assignment';
 import type { Arg, ClassDecl, ClassRef, Expr } from './ast';
+import { hasNullsafeReceiver } from './astAnalysis';
 import builtinNames from './builtinNames.json';
 import { lower } from './bytes';
 import {
@@ -27,7 +28,6 @@ import {
 import { type ArgValue, copyClosureData, invoke } from './calls';
 import {
   canCall,
-  checkInstantiable,
   classConstant,
   createObject,
   declareClass,
@@ -44,7 +44,7 @@ import {
 import * as classesModule from './classes';
 import { debugType, getType, numericPrefix, toBool, valueName } from './conversions';
 import * as conversionsModule from './conversions';
-import { deprecated, notice, throwError, warn } from './errors';
+import { deprecated, throwError, warn } from './errors';
 import { constantDeprecation } from './native';
 import {
   bitwiseNot,
@@ -102,7 +102,6 @@ export function evReturn(e: Expr): Value | Ref {
     ref.isRef = true;
     return ref;
   }
-  notice('Only variable references should be returned by reference');
   return value;
 }
 
@@ -222,7 +221,6 @@ export function evChain(e: Expr, discardResult = false): Chain {
       return keepingResult(() => {
         runtime.row = e.row;
         const cls = resolveClassRef(e.cls);
-        checkInstantiable(cls);
         return instantiate(cls, () => constructorArgs(cls, e.args, e.row), e.row, runtime.frame.scope);
       });
     }
@@ -414,7 +412,10 @@ function prepareRead(e: Expr, mode: ReadMode): ReadPlan {
       return preparePropertyRead(e, mode);
     }
     case 'sprop': {
-      const cls = resolveClassRef(e.cls);
+      const cls = resolveStaticClass(e.cls, (expression) =>
+        mode !== 'read' && hasNullsafeReceiver(expression) ? evaluateRead(expression, 'coalesce') : evChain(expression)
+      );
+      if (cls === SHORT) return SHORT;
       const name = readMemberOperand(e.name);
       return () => {
         const key = name();
@@ -424,7 +425,7 @@ function prepareRead(e: Expr, mode: ReadMode): ReadPlan {
       };
     }
     default: {
-      const value = e.k === 'mcall' ? evChain(e) : ev(e);
+      const value = e.k === 'mcall' || e.k === 'scall' ? evChain(e) : ev(e);
       if (value === SHORT) return SHORT;
       if (value instanceof PhpArray || value instanceof PhpObject) runtime.frame.temporaries.push(value);
       return () => (mode === 'isset' ? value !== null : value);
@@ -724,7 +725,10 @@ function spreadInto(array: PhpArray, value: Value): void {
     }
     return;
   }
-  throwError('TypeError', `Only arrays and Traversables can be unpacked, ${valueName(value)} given`);
+  throwError(
+    value instanceof PhpObject && !value.isResource ? 'TypeError' : 'Error',
+    `Only arrays and Traversables can be unpacked, ${valueName(value)} given`
+  );
 }
 
 function appendSpreadValue(array: PhpArray, value: Value | Ref): void {
@@ -864,19 +868,31 @@ export function resolveClassRef(ref: ClassRef): PhpClass {
     }
     case 'parent': {
       requireClassScope(frame.scope, 'parent');
-      if (!frame.scope?.parent) throwError('Error', 'Cannot use "parent" when current class scope has no parent');
+      if (!frame.scope?.parent) throwError('Error', 'Cannot access "parent" when current class scope has no parent');
       return frame.scope.parent;
     }
     case 'static': {
       return requireClassScope(frame.staticClass, 'static');
     }
     case 'expr': {
-      const value = ev(ref.e);
-      if (value instanceof PhpObject && !value.isResource) return value.cls;
-      if (typeof value === 'string') return requireClass(value);
-      throwError('Error', 'Class name must be a valid object or a string');
+      return classOfValue(ev(ref.e));
     }
   }
+}
+
+export function resolveStaticClass(
+  ref: ClassRef,
+  evaluate: (expression: Expr) => Chain = evChain
+): PhpClass | typeof SHORT {
+  if (ref.k !== 'expr') return resolveClassRef(ref);
+  const value = evaluate(ref.e);
+  return value === SHORT ? SHORT : classOfValue(value);
+}
+
+function classOfValue(value: Value): PhpClass {
+  if (value instanceof PhpObject && !value.isResource) return value.cls;
+  if (typeof value === 'string') return requireClass(value);
+  throwError('Error', 'Class name must be a valid object or a string');
 }
 
 function classConstantOf(e: Extract<Expr, { k: 'cconst' }>): Value {

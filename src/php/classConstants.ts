@@ -151,6 +151,17 @@ export function classConstant(
   if (!canAccessConstant(constant, scope))
     throwError('Error', `Cannot access ${constant.visibility} constant ${displayName}::${name}`);
   if (cls.kind === 'trait') throwError('Error', `Cannot access trait constant ${displayName}::${name} directly`);
+  return share(resolveConstant(constant, displayName, trackEvaluation));
+}
+
+export function initializeClassConstants(cls: PhpClass): void {
+  for (const constant of cls.consts.values()) {
+    if (constant.value === undefined) resolveConstant(constant, constant.cls.name, true);
+  }
+}
+
+function resolveConstant(constant: ClassConst, displayName: string, trackEvaluation: boolean): Value {
+  const { name } = constant;
   if (constant.value === undefined) {
     if (constant.evaluating) throwError('Error', `Cannot declare self-referencing constant ${displayName}::${name}`);
     if (trackEvaluation) constant.evaluating = true;
@@ -172,7 +183,7 @@ export function classConstant(
       if (trackEvaluation) constant.evaluating = false;
     }
   }
-  return share(constant.value as Value);
+  return constant.value;
 }
 
 export function canAccessConstant(constant: ClassConst, scope: PhpClass | undefined): boolean {
