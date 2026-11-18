@@ -331,8 +331,11 @@ export abstract class ExpressionCompiler extends SemaBase {
   }
 
   protected requireKnownDeclarationLiteral(value: TExpr, span: Span): TExpr {
-    if (!value.known) return this.error(span, '宣言リテラルはコンパイルのときに値が決まっていなければなりません。');
-    return value;
+    if (value.known) return value;
+    this.resolveStorage(value.type, span);
+    const singleton = singleValueOf(value.type, () => this.spendCompilation());
+    if (singleton) return known(value.type, singleton.value, span);
+    return this.error(span, '宣言リテラルはコンパイルのときに値が決まっていなければなりません。');
   }
 
   findDecl(type: Type, name: string): Decl | undefined {

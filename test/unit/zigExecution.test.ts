@@ -1384,6 +1384,14 @@ test('qualified access can select a runtime namespace variable', () => {
   expect(executeProgram('zig', source)).toMatchObject({ kind: 'executed', stderr: 'b', uncaughtException: undefined });
 });
 
+test.each([
+  ['enum{a,var zero:@This()=.a;}', '{t}', 'a'],
+  ['struct{var zero:@This()=.{};}', '{any}', '.{ }'],
+])('declaration literals use the only value of %s', (type, format, stderr) => {
+  const source = `const std=@import("std");const T=${type};pub fn main()void{const x:T=.zero;std.debug.print("${format}",.{x});}`;
+  expect(executeProgram('zig', source)).toMatchObject({ kind: 'executed', stderr, uncaughtException: undefined });
+});
+
 test('writer result types use the canonical usize and mutable byte slice', () => {
   const source = `const std=@import("std");fn less(n:usize,a:u8,b:u8)bool{return n>0 and a<b;}
 pub fn main()!void{var b:[2]u8=undefined;var w=std.Io.Writer.fixed(&b);const n=try w.write("x");var a=[_]u8{2,1};std.sort.heap(u8,&a,n,less);std.debug.print("{} {} {}",.{a[0],a[1],@TypeOf(w.buffered())==[]u8});}`;
