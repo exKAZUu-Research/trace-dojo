@@ -9,6 +9,7 @@ import {
   formatFloat,
   formatFloatRepr,
   intOrFloat,
+  NAN_STRING_WARNING,
   normalizeKeyString,
   numericPrefix,
   numericValue,
@@ -45,7 +46,7 @@ export function toStr(value: Value): string {
     }
     case 'number': {
       rt().constantEvaluationEpoch++;
-      if (Number.isNaN(value)) warn('unexpected NAN value was coerced to string');
+      if (Number.isNaN(value)) warn(NAN_STRING_WARNING);
       return formatFloat(value);
     }
   }

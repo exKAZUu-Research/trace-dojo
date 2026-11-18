@@ -6,7 +6,7 @@ import { collectMainVars, collectVariables, hasReferenceItem, onlyCalls, validat
 import { oneArgumentBuiltinOpcodes, usesSimpleSprintf } from './builtinCompiler';
 import { enc, lower } from './bytes';
 import { type Constant, constantTruth } from './constantDefaults';
-import { formatFloat, isNumericString, NAN_BOOL_WARNING } from './conversions';
+import { formatFloat, isNumericString, NAN_BOOL_WARNING, NAN_STRING_WARNING } from './conversions';
 import { MAGIC_RUNTIME } from './converterBase';
 import { DeclarationConverter } from './declarationConverter';
 import { exportExpr } from './export';
@@ -1148,6 +1148,10 @@ export class Converter extends DeclarationConverter {
     return { k: 'new', cls: this.classRef(classNode), args, row };
   }
 
+  // code-gauge-allow functionNcss 34 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+  // code-gauge-allow functionCognitiveComplexity 29 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+  // code-gauge-allow functionNcss 34 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+  // code-gauge-allow functionCognitiveComplexity 29 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
   private binary(node: Node): Expr {
     const row = node.startPosition.row;
     const operator = (node.childForFieldName('operator') as Node).type;
@@ -1167,23 +1171,42 @@ export class Converter extends DeclarationConverter {
       return this.shortCircuit(op, l, rightNode, row);
     }
     const r = this.expr(rightNode);
+    if (!this.inConstantExpression && op === 'xor') {
+      const left = this.compiledValue(l);
+      const right = this.compiledValue(r);
+      if (left !== undefined && right !== undefined) {
+        const v = this.compileTruth(left, r.row) !== this.compileTruth(right, r.row);
+        return { k: 'lit', v, row };
+      }
+    }
     if (operator === '|>') {
       if (rightNode.type === 'arrow_function')
         this.error(rightNode, 'Arrow functions on the right hand side of |> must be parenthesized');
       return { k: 'pipe', l, r, row };
     }
-    return { k: 'bin', op: op === '<>' ? '!=' : op, l, r, row };
+    const expression: Expr = { k: 'bin', op: op === '<>' ? '!=' : op, l, r, row };
+    if (!this.inConstantExpression && op === '.') {
+      const value = this.compiledValue(expression);
+      if (typeof value === 'string') {
+        for (const operand of [l, r]) {
+          if (Number.isNaN(this.compiledValue(operand)))
+            this.notices.push({ level: 'Warning', message: NAN_STRING_WARNING, row: r.row });
+        }
+        expression.foldedString = value;
+      }
+    }
+    return expression;
   }
 
   private shortCircuit(op: string, l: Expr, right: Node, row: number): Expr {
     const value = this.compiledValue(l);
     if (value === undefined) return { k: 'bin', op, l, r: this.expr(right), row };
     const isAnd = op === '&&' || op === 'and';
-    const condition = this.compileTruth(value, row);
-    if (condition !== isAnd) return { k: 'lit', v: this.compileTruth(value, row), row };
+    const condition = this.compileTruth(value, l.row);
+    if (condition !== isAnd) return { k: 'lit', v: this.compileTruth(value, l.row), row };
     const r = this.expr(right);
     const result = this.compiledValue(r);
-    if (result !== undefined) return { k: 'lit', v: this.compileTruth(result, row), row };
+    if (result !== undefined) return { k: 'lit', v: this.compileTruth(result, r.row), row };
     return { k: 'bin', op, l: { k: 'lit', v: condition, row: l.row }, r, row };
   }
 

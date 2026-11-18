@@ -104,16 +104,46 @@ markInlined('max');
 markInlined('min');
 
 function extreme(name: string, args: Value[], direction: number, compiled: boolean): Value {
+  if (args.length === 1) return extremeOfArray(name, args[0], direction);
+  const [first, second] = args;
   if (compiled && args.length === 2) {
-    const result = compare(args[0], args[1]);
-    return (direction > 0 ? result >= 0 : result < 0) ? args[0] : args[1];
+    if (isNumber(first) && isNumber(second) && bothFastNumbers(first, second))
+      return (direction > 0 ? first >= second : first < second) ? first : second;
+    const comparison = compare(first, second);
+    return (direction > 0 ? comparison >= 0 : comparison < 0) ? first : second;
   }
-  if (args.length > 1) {
-    let best = args[0];
-    for (const value of args.slice(1)) if (compare(value, best) * direction > 0) best = value;
-    return best;
+  let best = first;
+  let numeric = isNumber(first);
+  let doubles = typeof first === 'number';
+  for (const value of args.slice(1)) {
+    if (
+      numeric &&
+      isNumber(best) &&
+      isNumber(value) &&
+      bothFastNumbers(best, value) &&
+      !(doubles && typeof value === 'bigint' && !exactDouble(value))
+    ) {
+      doubles ||= typeof value === 'number';
+      if (direction > 0 ? value > best : value < best) best = value;
+    } else {
+      numeric = false;
+      if (compare(value, best) * direction > 0) best = value;
+    }
   }
-  return extremeOfArray(name, args[0], direction);
+  return best;
+}
+
+function isNumber(value: Value): value is bigint | number {
+  return typeof value === 'bigint' || typeof value === 'number';
+}
+
+function bothFastNumbers(left: bigint | number, right: bigint | number): boolean {
+  if (typeof left === typeof right) return true;
+  return exactDouble(typeof left === 'bigint' ? left : (right as bigint));
+}
+
+function exactDouble(value: bigint): boolean {
+  return BigInt(Number(value)) === value;
 }
 
 function extremeOfArray(name: string, array: Value, direction: number): Value {

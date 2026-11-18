@@ -143,12 +143,14 @@ export function declareClass(decl: ClassDecl, row: number): PhpClass {
 function checkBuiltinInterfaces(cls: PhpClass, row: number): void {
   if (cls.kind !== 'class') return;
   const implementsInterface = (name: string): boolean => cls.interfaces.some((iface) => lower(iface.name) === name);
-  if (
-    !cls.isAbstract &&
-    implementsInterface('traversable') &&
-    !implementsInterface('iterator') &&
-    !implementsInterface('iteratoraggregate')
-  )
+  const iterator = implementsInterface('iterator');
+  const aggregate = implementsInterface('iteratoraggregate');
+  if (iterator && aggregate)
+    throw new FatalError(
+      `Class ${cls.name} cannot implement both Iterator and IteratorAggregate at the same time`,
+      row
+    );
+  if (!cls.isAbstract && implementsInterface('traversable') && !iterator && !aggregate)
     throw new FatalError(
       `Class ${cls.name} must implement interface Traversable as part of either Iterator or IteratorAggregate`,
       -1

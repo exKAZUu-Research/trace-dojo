@@ -108,6 +108,7 @@ export function normalizeKeyString(text: string): Key {
 }
 
 export const NAN_BOOL_WARNING = 'unexpected NAN value was coerced to bool';
+export const NAN_STRING_WARNING = 'unexpected NAN value was coerced to string';
 
 /** Converts to bool as PHP does. */
 export function toBool(value: Value): boolean {

@@ -1,6 +1,6 @@
 // oxlint-disable unicorn/no-null -- PHP null is represented by JavaScript null.
 import type { ClassRef, Expr } from './ast';
-import { boolValue, floatFitsInt, normalizeKeyString, numericPrefix } from './conversions';
+import { boolValue, floatFitsInt, formatFloat, normalizeKeyString, numericPrefix } from './conversions';
 import { compileConstant } from './native';
 import { arithmetic, bitwise, compareScalar, toFloat, toInt } from './operators';
 import { INT_MAX, INT_MIN, type Key, PhpArray, PhpObject } from './values';
@@ -48,9 +48,7 @@ function fold(expression: Expr, context: FoldContext): Folded {
       for (const part of expression.parts) {
         const value = typeof part === 'string' ? part : fold(part, context);
         if (value === UNKNOWN || value instanceof Map) return UNKNOWN;
-        const text = scalarString(value);
-        if (text === UNKNOWN) return UNKNOWN;
-        result += text;
+        result += scalarString(value);
       }
       return result;
     }
@@ -184,7 +182,6 @@ function unaryConstant(op: string, value: Folded): Folded {
   return typeof result === 'bigint' && (result < INT_MIN || result > INT_MAX) ? Number(result) : result;
 }
 
-// code-gauge-allow functionNcss 32 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 function binaryConstant(op: string, left: Constant, right: Folded): Folded {
   if (right === UNKNOWN) return UNKNOWN;
   if (op === 'xor') {
@@ -200,11 +197,7 @@ function binaryConstant(op: string, left: Constant, right: Folded): Folded {
     for (const [key, value] of right) if (!result.has(key)) result.set(key, value);
     return result;
   }
-  if (op === '.') {
-    const a = scalarString(left),
-      b = scalarString(right);
-    return a === UNKNOWN || b === UNKNOWN ? UNKNOWN : a + b;
-  }
+  if (op === '.') return scalarString(left) + scalarString(right);
   const a = numericConstant(left),
     b = numericConstant(right);
   if (['&', '|', '^'].includes(op) && typeof left === 'string' && typeof right === 'string')
@@ -270,14 +263,15 @@ function compareConstant(left: Constant, right: Constant, strict: boolean): numb
   return compareScalar(left, right);
 }
 
-// code-gauge-allow functionCognitiveComplexity 26 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+// code-gauge-allow functionCognitiveComplexity 28 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 function castConstant(type: string, value: Folded): Folded {
+  // code-gauge-allow functionCognitiveComplexity 28 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
   if (value === UNKNOWN) return UNKNOWN;
   if (type === 'array') return value instanceof Map ? value : value === null ? new Map() : new Map([[0n, value]]);
   if (type === 'bool') return foldBool(value);
   if (value instanceof Map)
     return type === 'int' ? (value.size > 0 ? 1n : 0n) : type === 'float' ? (value.size > 0 ? 1 : 0) : UNKNOWN;
-  if (type === 'string') return scalarString(value);
+  if (type === 'string') return typeof value === 'number' ? UNKNOWN : scalarString(value);
   if (type === 'float') return toFloat(value);
   if (type === 'int' && (typeof value !== 'number' || floatFitsInt(value))) return toInt(value);
   return UNKNOWN;
@@ -303,8 +297,8 @@ export function constantTruth(value: Constant): boolean {
   return value instanceof Map ? value.size > 0 : boolValue(value);
 }
 
-function scalarString(value: Scalar): string | typeof UNKNOWN {
+function scalarString(value: Scalar): string {
   if (typeof value === 'string' || typeof value === 'bigint') return String(value);
-  if (value === null || typeof value === 'boolean') return value ? '1' : '';
-  return UNKNOWN;
+  if (typeof value === 'number') return formatFloat(value);
+  return value ? '1' : '';
 }

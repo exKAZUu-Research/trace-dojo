@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 653 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 656 -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import type { Node } from '@willbooster/web-tree-sitter';
 
@@ -217,49 +217,50 @@ export abstract class DeclarationConverter extends ConverterBase {
     return lower(node.text.split('(')[0].trim()) as Visibility;
   }
 
-  // code-gauge-allow functionCognitiveComplexity 24 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
   protected typeDecl(node: Node): TypeDecl {
     const type = this.parseTypeDecl(node);
-    if (type.k === 'named' && type.nullable && ['mixed', 'void', 'never', 'null'].includes(type.name))
-      this.error(node, `Type ${type.name} cannot be nullable`);
-    if (type.k !== 'named') {
-      const names = type.types.map((part) => (part.k === 'named' ? lower(part.name) : typeToString(part)));
-      if (new Set(names).size !== names.length) this.error(node, 'Duplicate type is redundant');
-      if (type.k === 'union' && names.includes('true') && names.includes('false'))
-        this.error(node, 'Type contains both true and false, bool must be used instead');
-      if (
-        type.k === 'union' &&
-        (names.some((name) => ['mixed', 'void', 'never'].includes(name)) ||
-          (names.includes('iterable') && (names.includes('array') || names.includes('traversable'))) ||
-          (names.includes('bool') && (names.includes('false') || names.includes('true'))) ||
-          (names.includes('object') && names.some((name) => !BUILTIN_TYPES.has(name))) ||
-          type.types.some((part) => part.k === 'named' && part.nullable))
-      )
-        this.error(node, 'Invalid or redundant union type');
-      if (
-        type.k === 'inter' &&
-        names.some((name) =>
-          [
-            'int',
-            'float',
-            'string',
-            'bool',
-            'array',
-            'object',
-            'callable',
-            'iterable',
-            'mixed',
-            'void',
-            'never',
-            'null',
-            'false',
-            'true',
-          ].includes(name)
-        )
-      )
-        this.error(node, 'Intersection types must be class types');
-    }
+    if (type.k === 'named') {
+      if (type.nullable && ['mixed', 'void', 'never', 'null'].includes(type.name))
+        this.error(node, `Type ${type.name} cannot be nullable`);
+    } else if (type.k === 'inter') this.checkIntersection(node, type.types);
+    else this.checkUnion(node, type);
     return type;
+  }
+
+  private checkIntersection(node: Node, members: TypeDecl[]): void {
+    const seen = new Set<string>();
+    for (const member of members) {
+      const name = typeToString(member);
+      const key = lower(name);
+      if (member.k !== 'named' || BUILTIN_TYPES.has(lower(member.name)) || ['self', 'parent', 'static'].includes(key))
+        this.error(node, `Type ${name} cannot be part of an intersection type`);
+      if (seen.has(key)) this.error(node, `Duplicate type ${name} is redundant`);
+      seen.add(key);
+    }
+  }
+
+  private checkUnion(node: Node, type: Extract<TypeDecl, { k: 'union' }>): void {
+    const seen = new Set<string>();
+    for (const member of type.types) {
+      if (member.k === 'named' && member.nullable) this.error(node, 'Invalid or redundant union type');
+      const name = member.k === 'named' ? lower(member.name) : lower(typeToString(member));
+      if (name === 'mixed') this.error(node, 'Type mixed can only be used as a standalone type');
+      const components =
+        name === 'iterable' ? ['array', 'Traversable'] : name === 'bool' ? ['false', 'true'] : [typeToString(member)];
+      const duplicates = components.filter((part) => seen.has(lower(part)));
+      if (duplicates.length > 0)
+        this.error(
+          node,
+          `Duplicate type ${duplicates.length > 1 && name === 'bool' ? 'bool' : duplicates[0]} is redundant`
+        );
+      if ((name === 'true' && seen.has('false')) || (name === 'false' && seen.has('true')))
+        this.error(node, 'Type contains both true and false, bool must be used instead');
+      for (const part of components) seen.add(lower(part));
+    }
+    if (seen.has('void')) this.error(node, 'Void can only be used as a standalone type');
+    if (seen.has('never')) this.error(node, 'never can only be used as a standalone type');
+    if (seen.has('object') && type.types.some((part) => part.k !== 'named' || !BUILTIN_TYPES.has(lower(part.name))))
+      this.error(node, `Type ${typeToString(type)} contains both object and a class type, which is redundant`);
   }
 
   private parseTypeDecl(node: Node): TypeDecl {

@@ -280,7 +280,7 @@ export function evChain(e: Expr, discardResult = false): Chain {
       return compoundAssign(e);
     }
     case 'bin': {
-      return binary(e);
+      return e.foldedString ?? binary(e);
     }
     case 'unary': {
       const value = ev(e.e);

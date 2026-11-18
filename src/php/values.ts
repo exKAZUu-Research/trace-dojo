@@ -3,6 +3,7 @@ import type { TurtleState } from '../interpreter/turtleWorld';
 import { ArrayTable } from './arrayTable';
 import type { ClassDecl, Expr, FunctionDecl, PropertyDeclAst } from './ast';
 import { lower } from './bytes';
+import { OwnerLinks } from './ownerLinks';
 
 /**
  * A PHP value. Strings are byte strings: each UTF-16 code unit holds one byte (0–255), so that lengths and offsets
@@ -1077,7 +1078,7 @@ export function ownershipEdgeExists(change: Extract<OwnershipChange, { kind: 'ed
   if (owner instanceof Ref) return owner.rc > 0 && owner.v === value;
   return owner instanceof PhpArray ? owner.map.hasValue(value, key as Key) : owner.props.get(key as string) === value;
 }
-const owners = new WeakMap<object, Map<Owner, Set<Key | undefined>>>();
+const owners = new WeakMap<object, OwnerLinks<Owner, Key | undefined>>();
 let internalHandler: (object: PhpObject) => void = () => {};
 
 export function setInternalHandler(handler: typeof internalHandler): void {
@@ -1089,15 +1090,10 @@ function trackOwner(value: unknown, parent: Owner, key?: Key): void {
   if (!(value instanceof Ref || value instanceof PhpArray || value instanceof PhpObject)) return;
   let parents = owners.get(value);
   if (!parents) {
-    parents = new Map();
+    parents = new OwnerLinks();
     owners.set(value, parents);
   }
-  let keys = parents.get(parent);
-  if (!keys) {
-    keys = new Set();
-    parents.set(parent, keys);
-  }
-  keys.add(key);
+  parents.add(parent, key);
   for (const observer of ownershipObservers) observer({ kind: 'edge', value, owner: parent, key });
 }
 

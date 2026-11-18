@@ -1453,3 +1453,60 @@ test.each([
   vi.restoreAllMocks();
   expect(run(`<?php ${source}`)).toMatchObject({ kind: 'executed', stdout });
 });
+
+test('advances linked object and array heads while their nodes share an otherwise unheld object', () => {
+  vi.restoreAllMocks();
+  const result = run(`<?php
+    class Link { public $next; public $shared; }
+    function makeList($count, $array) {
+      $shared = new stdClass;
+      $head = null;
+      for ($index = 0; $index < $count; $index++) {
+        if ($array) $head = ['shared' => $shared, 'next' => $head];
+        else {
+          $node = new Link;
+          $node->next = $head;
+          $node->shared = $shared;
+          $head = $node;
+        }
+      }
+      return $head;
+    }
+    foreach ([false, true] as $array) {
+      $head = makeList(2500, $array);
+      $count = 0;
+      while ($head) {
+        $head = $array ? $head['next'] : $head->next;
+        ++$count;
+      }
+      echo $count, "\\n";
+    }`);
+  expect(result).toMatchObject({ kind: 'executed', stdout: '2500\n2500\n' });
+});
+
+test.each([
+  ['int&C&float', 'Type int cannot be part of an intersection type'],
+  ['iterable&array', 'Type Traversable|array cannot be part of an intersection type'],
+  ['void|int', 'Void can only be used as a standalone type'],
+  ['bool|false', 'Duplicate type false is redundant'],
+  ['iterable|Traversable', 'Duplicate type Traversable is redundant'],
+  ['object|C', 'Type C|object contains both object and a class type, which is redundant'],
+  ['int|INT', 'Duplicate type int is redundant'],
+])('reports the offending PHP type in %s', (type, diagnostic) => {
+  expect(run(`<?php class Q { function m(${type} $value) {} } echo 'unexpected';`)).toMatchObject({
+    kind: 'compileError',
+    diagnostics: [{ row: 0, message: diagnostic }],
+  });
+});
+
+test.each(['(NAN xor true)::class', '(("x".(1.5+1))||missing())::class'])(
+  'rejects folded class receivers %s',
+  (expression) => {
+    expect(
+      run(`<?php echo 'never'; try { var_dump(${expression}); } catch (Throwable $e) { echo 'caught'; }`)
+    ).toMatchObject({
+      kind: 'compileError',
+      diagnostics: [{ row: 0, message: expect.stringContaining('Cannot use "::class"') }],
+    });
+  }
+);
