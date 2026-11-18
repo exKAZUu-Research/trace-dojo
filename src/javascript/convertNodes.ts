@@ -94,7 +94,9 @@ export function isOptionalChain(node: Node): boolean {
 // code-gauge-allow functionCognitiveComplexity 16 -- One case per kind of expression V8's CallPrinter names.
 function printedCallee(node: Node): string | undefined {
   switch (node.type) {
-    case 'identifier':
+    case 'identifier': {
+      return nameOf(node);
+    }
     case 'this':
     case 'super': {
       return node.text;
@@ -127,7 +129,7 @@ function printedCallee(node: Node): string | undefined {
     case 'member_expression': {
       const object = printedCallee(field(node, 'object'));
       const dot = node.childForFieldName('optional_chain') ? '?.' : '.';
-      return object === undefined ? undefined : `${object}${dot}${field(node, 'property').text}`;
+      return object === undefined ? undefined : `${object}${dot}${nameOf(field(node, 'property'))}`;
     }
     case 'subscript_expression': {
       const object = printedCallee(field(node, 'object'));
