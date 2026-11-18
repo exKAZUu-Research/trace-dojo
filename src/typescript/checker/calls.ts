@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 506 -- Resolves calls as TypeScript does: callees, overloads, inference, and the effects of calls on the flow.
+// code-gauge-allow-file fileNcss 517 -- Resolves calls as TypeScript does: callees, overloads, inference, and the effects of calls on the flow.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import { unsupportedMessage } from '../unsupported';
@@ -157,6 +157,7 @@ export class Calls {
     if (
       !constructible &&
       !isIntrinsic(this.c.baseConstraint(calleeType), 'never') &&
+      !this.hasIncompatibleCallUnion(calleeType) &&
       this.c.relations.isAssignable(calleeType, this.c.globalType('Function'))
     )
       return anyType;
@@ -169,6 +170,21 @@ export class Calls {
       );
     }
     return errorType;
+  }
+
+  private hasIncompatibleCallUnion(type: Type, seen = new Set<number>()): boolean {
+    if (seen.has(type.id)) return false;
+    seen.add(type.id);
+    const apparent = this.c.apparentType(type);
+    if (apparent.kind === 'intersection')
+      return apparent.types.some((member) => this.hasIncompatibleCallUnion(member, seen));
+    if (apparent.kind !== 'union') return false;
+    const lists = apparent.types.map((member) => this.c.signaturesOf(member, 'call'));
+    return (
+      lists.every((signatures) => signatures.length > 0) &&
+      this.unionSignatures.of(lists).length === 0 &&
+      this.unionSignatures.arrayMethodSignatures(apparent.types).length === 0
+    );
   }
 
   /** The object a method is called on, which its `this` parameter infers from. */

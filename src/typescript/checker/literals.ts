@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 577 -- Types array and object literals with their spreads, members, and widening, which share one literal state.
+// code-gauge-allow-file fileNcss 579 -- Types array and object literals with their spreads, members, and widening, which share one literal state.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import type { Checker } from './checker';
@@ -102,9 +102,11 @@ export class LiteralChecker {
         const spread = this.c.expressions.check(named(element)[0]);
         return { type: spread, spread: true };
       }
-      const context = contextual ? this.arrayElementContext(contextual, index, elements.length) : undefined;
+      const contexts = contextual ? this.arrayElementContexts(contextual, index, elements.length) : [];
+      const context = contexts.length > 0 ? unionOf(contexts) : undefined;
       const type = this.c.expressions.check(element, context);
-      return { type: isConstContext ? type : this.widenForMutableLocation(type, context), spread: false };
+      const literalContext = contexts.find((candidate) => this.expectsLiteral(candidate, type)) ?? context;
+      return { type: isConstContext ? type : this.widenForMutableLocation(type, literalContext), spread: false };
     });
     if (isConstContext || this.isInTupleContext(node, contextual)) {
       return this.tupleOfElements(node, elements, types, isConstContext);
@@ -189,16 +191,14 @@ export class LiteralChecker {
     );
   }
 
-  private arrayElementContext(contextual: Type, index: number, length: number): Type | undefined {
-    if (contextual.kind === 'union') {
-      const contexts = contextual.types
-        .map((member) => this.arrayElementContext(member, index, length))
-        .filter((type) => type !== undefined);
-      return contexts.length > 0 ? unionOf(contexts) : undefined;
-    }
-    return contextual.kind === 'object' && contextual.objectKind === 'tuple'
-      ? this.tupleElementContext(contextual, index, length)
-      : this.elementContext(contextual);
+  private arrayElementContexts(contextual: Type, index: number, length: number): Type[] {
+    if (contextual.kind === 'union')
+      return contextual.types.flatMap((member) => this.arrayElementContexts(member, index, length));
+    const context =
+      contextual.kind === 'object' && contextual.objectKind === 'tuple'
+        ? this.tupleElementContext(contextual, index, length)
+        : this.elementContext(contextual);
+    return context === undefined ? [] : [context];
   }
 
   private tupleElementContext(tuple: ObjectType, index: number, length: number): Type | undefined {

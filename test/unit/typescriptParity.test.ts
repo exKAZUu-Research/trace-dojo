@@ -21,8 +21,8 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-// Each `.out` file holds what Node.js 26.13.0 printed for its program, which TypeScript 7.0.2 (`tsc --strict`)
-// accepted, followed by the first line of the exception that ended it, if one did.
+// Each `.out` holds reference Node.js output for a program accepted by TypeScript 7.0.2 (`tsc --strict`),
+// followed by the first line of the exception that ended it, if one did.
 test.each(programsIn(PARITY_DIR))('%s prints what Node.js prints', (name) => {
   const expected = read(PARITY_DIR, name.replace(/\.ts\.txt$/, '.out'));
   const execution = executeProgram('typescript', read(PARITY_DIR, name));

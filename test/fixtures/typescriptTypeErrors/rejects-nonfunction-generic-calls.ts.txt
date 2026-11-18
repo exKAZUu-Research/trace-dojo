@@ -6,3 +6,5 @@ function shapedTypeof(value:{x:number}){if(typeof value==='function')return valu
 class ShapedTypeof {x=1;}
 function classTypeof(value:ShapedTypeof){if(typeof value==='function')return value();}
 function arrayTypeof(value:number[]){if(typeof value==='function')return value();}
+type IncompatibleFunctionUnion=(<T extends string>(value:T)=>T)|(<T extends number>(value:T)=>T);
+function constrainedFunctionIntersection<T extends IncompatibleFunctionUnion>(value:T&Function){return value('x');}

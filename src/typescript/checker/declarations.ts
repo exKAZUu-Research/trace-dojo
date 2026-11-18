@@ -257,13 +257,10 @@ const overloadableMethodTypes = new Set(['method_signature', 'method_definition'
 
 /** Reports class members declared twice: fields, method implementations, constructors, and index signatures. */
 export function checkDuplicateMembers(c: Checker, body: TreeNode): void {
-  if (body.type === 'class_body') {
-    for (const isStatic of [false, true])
-      checkDuplicateIndexSignatures(
-        c,
-        named(body).filter((member) => hasToken(member, 'static') === isStatic)
-      );
-  } else checkDuplicateIndexSignatures(c, named(body));
+  checkDuplicateIndexSignatures(
+    c,
+    named(body).filter((member) => !hasToken(member, 'static'))
+  );
   const groups = new Map<string, TreeNode[]>();
   for (const member of named(body)) {
     addParameterPropertyDuplicates(member, groups);

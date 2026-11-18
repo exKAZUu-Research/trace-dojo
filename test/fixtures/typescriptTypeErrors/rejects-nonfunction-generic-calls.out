@@ -11,3 +11,5 @@
   Type 'never' has no call signatures.
 (8,74): error TS2349: This expression is not callable.
   Type 'never' has no call signatures.
+(10,104): error TS2349: This expression is not callable.
+  Each member of the union type 'IncompatibleFunctionUnion & Function' has signatures, but none of those signatures are compatible with each other.

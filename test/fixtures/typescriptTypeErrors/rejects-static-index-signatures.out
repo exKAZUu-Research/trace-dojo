@@ -1,0 +1,5 @@
+(1,63): error TS2411: Property 'bad' of type 'string' is not assignable to 'string' index type 'number'.
+(2,53): error TS2413: 'number' index type 'string' is not assignable to 'string' index type 'number'.
+(5,30): error TS2411: Property 'inherited' of type 'string' is not assignable to 'string' index type 'number'.
+(7,1): error TS2542: Index signature in type 'typeof ReadonlyIndex' only permits reading.
+(8,41): error TS2526: A 'this' type is available only in a non-static member of a class or interface.
