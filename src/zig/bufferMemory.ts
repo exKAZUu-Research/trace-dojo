@@ -140,7 +140,7 @@ export function packedValuesEqual(type: Extract<Type, { kind: 'struct' | 'union'
   new BufferMemory(right, spendMemory, memorySpace()).write(type, 0, b);
   const bits = bitSizeOf(type);
   for (let at = 0; at < bits; at += 8) {
-    spendMemory();
+    spendMemory(3);
     const mask = (1n << BigInt(Math.min(8, bits - at))) - 1n;
     if (((left[at / 8] as bigint) & mask) !== ((right[at / 8] as bigint) & mask)) return false;
   }

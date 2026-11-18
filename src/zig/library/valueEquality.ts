@@ -54,7 +54,7 @@ export function validateEquality(sema: SemaApi, type: Type, span: Span, seen = n
 }
 
 // code-gauge-allow functionCognitiveComplexity 30 -- Dispatches each value representation through the same typed comparison budget.
-export function valuesEqual(type: Type | undefined, a: Value, b: Value, spend: () => void): boolean {
+export function valuesEqual(type: Type | undefined, a: Value, b: Value, spend: (cost?: number) => void): boolean {
   spend();
   if ((type?.kind === 'struct' || type?.kind === 'union') && singleValueOf(type, spend)) return true;
   if ((type?.kind === 'struct' || type?.kind === 'union') && type.layout === 'packed')
@@ -80,30 +80,39 @@ export function valuesEqual(type: Type | undefined, a: Value, b: Value, spend: (
   return scalarValuesEqual(a, b);
 }
 
-function unionsEqual(type: Type | undefined, a: ZUnion, b: ZUnion, spend: () => void): boolean {
+function unionsEqual(type: Type | undefined, a: ZUnion, b: ZUnion, spend: (cost?: number) => void): boolean {
   const tags = type?.kind === 'union' ? type.tagType?.fields : undefined;
+  spend(2);
   if (tags ? unionTagValue(a, tags) !== unionTagValue(b, tags) : a.tag !== b.tag) return false;
+  spend();
   const index = activeUnionIndex(a, 'switch on corrupt value');
+  spend(2);
   return valuesEqual(type?.kind === 'union' ? type.fields?.[index]?.type : undefined, a.slots[0], b.slots[0], spend);
 }
 
-function arraysEqual(child: Type | undefined, a: ZArray, b: ZArray, spend: () => void): boolean {
+function arraysEqual(child: Type | undefined, a: ZArray, b: ZArray, spend: (cost?: number) => void): boolean {
   if (a.lengthValue !== b.lengthValue) return false;
   if (a.lengthValue === 0n) return true;
   const left = zeroArrayElement(a);
   const right = zeroArrayElement(b);
-  if (left || right) return valuesEqual(child, left ? left.value : a.get(0), right ? right.value : b.get(0), spend);
-  for (let index = 0; BigInt(index) < a.lengthValue; index++)
+  if (left || right) {
+    if (!left || !right) spend();
+    return valuesEqual(child, left ? left.value : a.get(0), right ? right.value : b.get(0), spend);
+  }
+  for (let index = 0; BigInt(index) < a.lengthValue; index++) {
+    spend(2);
     if (!valuesEqual(child, a.get(index), b.get(index), spend)) return false;
+  }
   return true;
 }
 
-function structsEqual(type: Type | undefined, a: ZStruct, b: ZStruct, spend: () => void): boolean {
+function structsEqual(type: Type | undefined, a: ZStruct, b: ZStruct, spend: (cost?: number) => void): boolean {
   if (a.slots.length !== b.slots.length) return false;
   const fields = type?.kind === 'struct' ? type.fields : undefined;
   for (let index = 0; index < a.slots.length; index++) {
     const field = fields?.[index];
     const constant = field?.comptimeValue;
+    if (!constant) spend(2);
     if (
       !valuesEqual(
         field?.type,

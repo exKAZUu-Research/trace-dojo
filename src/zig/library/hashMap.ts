@@ -1,6 +1,6 @@
-// code-gauge-allow-file fileNcss 467 -- Keeps hash-map state, storage layout, and public method registration together.
+// code-gauge-allow-file fileNcss 471 -- Keeps hash-map state, storage layout, and public method registration together.
 import { allocationSlots, transferCost } from '../allocation';
-import { reserveAllocatorBytes } from '../allocatorStorage';
+import { type ByteRegion, reserveAllocatorBytes } from '../allocatorStorage';
 // code-gauge-allow-file duplicateLines 19 -- Library types repeat the same shape of method on purpose, each over its own state.
 import { panic } from '../arith';
 import type { Expression, Span } from '../ast';
@@ -31,7 +31,7 @@ import {
   optionalSome,
   Pointer,
   registerNativeReferences,
-  type Slice,
+  Slice,
   type Slots,
   storeInto,
   type Value,
@@ -78,20 +78,32 @@ interface MapState extends Record<string, unknown> {
 class MapMetadata {
   readonly occupied = new Set<number>();
 
-  constructor(private readonly bytes: number[]) {}
+  constructor(
+    private readonly bytes: Uint8Array | Slice,
+    private readonly offset = 0,
+    private readonly length = bytes.length
+  ) {}
 
   get(index: number): number {
-    return this.bytes[index];
+    const { bytes, offset } = this;
+    return bytes instanceof Slice ? Number(bytes.get(offset + index)) : bytes[index];
   }
 
   set(index: number, value: number): void {
-    this.bytes[index] = value;
+    const { bytes, offset } = this;
+    if (bytes instanceof Slice) bytes.set(offset + index, BigInt(value));
+    else bytes[index] = value;
     if ((value & 0x80) === 0) this.occupied.delete(index);
     else this.occupied.add(index);
   }
 
   clear(): void {
-    this.bytes.fill(0);
+    const { bytes, offset, length } = this;
+    if (bytes instanceof Slice) {
+      for (let index = 0; index < length; index++) bytes.set(offset + index, 0n);
+    } else {
+      bytes.fill(0);
+    }
     this.occupied.clear();
   }
 }
@@ -114,7 +126,7 @@ function keysEqual(frame: Frame, a: Value, b: Value, type: Type, kind: KeyKind):
     frame.runtime.spend();
     return stringKeysEqual(frame, a as Slice, b as Slice);
   }
-  return valuesEqual(type, a, b, () => frame.runtime.spend());
+  return valuesEqual(type, a, b, (cost) => frame.runtime.spend(cost));
 }
 
 function stringKeysEqual(frame: Frame, x: Slice, y: Slice): boolean {
@@ -148,7 +160,7 @@ function capacityForSize(size: number): number {
 function emptyState(): MapState {
   return {
     capacity: 0,
-    metadata: new MapMetadata([]),
+    metadata: new MapMetadata(new Uint8Array(0)),
     keys: new ZArray([]),
     values: new ZArray([]),
     size: 0,
@@ -203,7 +215,6 @@ function putNoClobber(
 }
 
 /** Grows the table to a new capacity, reinserting the used entries in slot order. */
-// code-gauge-allow functionNcss 41 -- Reserves backing bytes before rebuilding the table in reference slot order.
 function grow(
   frame: Frame,
   state: MapState,
@@ -222,21 +233,10 @@ function grow(
   const old = { ...state, metadata: state.metadata, keys: state.keys, values: state.values };
   const memory = {};
   reserved.complete(memory);
-  frame.runtime.spend(capacity * (transferCost(keyType) + transferCost(valueType)));
-  const keys = new ZArray(Array.from({ length: capacity }, () => undefinedValue(keyType)));
-  const values = new ZArray(Array.from({ length: capacity }, () => undefinedValue(valueType)));
-  let metadata = Array.from<number>({ length: capacity }).fill(0);
-  if (reserved.region) {
-    const { buffer, offset } = reserved.region;
-    bindBufferMemory(keys, keyType, capacity, buffer, offset + layout.keys, frame.runtime, 0);
-    bindBufferMemory(values, valueType, capacity, buffer, offset + layout.values, frame.runtime, 0);
-    metadata = byteMetadata(buffer, offset + 24, capacity);
-    metadata.fill(0);
-    for (let index = 0; index < 4; index++) buffer.set(offset + 16 + index, BigInt((capacity >>> (index * 8)) & 255));
-  }
+  const { metadata, keys, values } = initializeMapStorage(frame, reserved.region, capacity, layout, keyType, valueType);
   state.capacity = capacity;
   state.memory = memory;
-  state.metadata = new MapMetadata(metadata);
+  state.metadata = metadata;
   state.keys = keys;
   state.values = values;
   state.available = Math.floor((capacity * MAX_LOAD) / 100);
@@ -265,21 +265,32 @@ function mapAllocationLayout(
   return { size, alignment, keys, values };
 }
 
-function byteMetadata(buffer: Slice, offset: number, capacity: number): number[] {
-  return new Proxy(Array.from<number>({ length: capacity }).fill(0), {
-    get: (target, property, receiver) => {
-      if (typeof property === 'string' && /^(0|[1-9]\d*)$/.test(property) && Number(property) < capacity)
-        return Number(buffer.get(offset + Number(property)) as bigint);
-      return Reflect.get(target, property, receiver);
-    },
-    set: (target, property, value: number, receiver) => {
-      if (typeof property === 'string' && /^(0|[1-9]\d*)$/.test(property) && Number(property) < capacity) {
-        buffer.set(offset + Number(property), BigInt(value));
-        return true;
-      }
-      return Reflect.set(target, property, value, receiver);
-    },
-  });
+function initializeMapStorage(
+  frame: Frame,
+  region: ByteRegion | undefined,
+  capacity: number,
+  layout: ReturnType<typeof mapAllocationLayout>,
+  keyType: Type,
+  valueType: Type
+): Pick<MapState, 'metadata' | 'keys' | 'values'> {
+  if (!region) {
+    frame.runtime.spend(capacity * (1 + transferCost(keyType) + transferCost(valueType)));
+    return {
+      metadata: new MapMetadata(new Uint8Array(capacity)),
+      keys: new ZArray(Array.from({ length: capacity }, () => undefinedValue(keyType))),
+      values: new ZArray(Array.from({ length: capacity }, () => undefinedValue(valueType))),
+    };
+  }
+  const { buffer, offset } = region;
+  frame.runtime.spend(capacity + 4);
+  const metadata = new MapMetadata(buffer, offset + 24, capacity);
+  metadata.clear();
+  for (let index = 0; index < 4; index++) buffer.set(offset + 16 + index, BigInt((capacity >>> (index * 8)) & 255));
+  const keys = new ZArray([], 0, capacity);
+  const values = new ZArray([], 0, capacity);
+  bindBufferMemory(keys, keyType, capacity, buffer, offset + layout.keys, frame.runtime, 0);
+  bindBufferMemory(values, valueType, capacity, buffer, offset + layout.values, frame.runtime, 0);
+  return { metadata, keys, values };
 }
 
 function load(state: MapState): number {

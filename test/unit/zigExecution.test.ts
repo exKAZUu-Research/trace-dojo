@@ -6899,6 +6899,21 @@ test('map key comparisons preserve independently backed strings and nested aggre
   });
 });
 
+test('aggregate std.meta.eql charges reads for both independently backed operands', () => {
+  const source = `const std=@import("std");pub fn main()void{var a:[60000]u8=@splat(97);var b:[60000]u8=@splat(97);_=&a;_=&b;for(0..3)|_|{_=std.meta.eql(a,b);}}`;
+  expect(executeProgram('zig', source)).toMatchObject({ kind: 'limitExceeded', limit: 'operations' });
+});
+
+test.each(['AutoHashMap(usize,u8)', 'StringHashMap(u8)'])('growing %s charges metadata initialization', (type) => {
+  const source = `const std=@import("std");pub fn main(init:std.process.Init)!void{for(0..610000)|_|{}var m=std.${type}.init(init.gpa);defer m.deinit();try m.ensureTotalCapacity(100000);}`;
+  expect(executeProgram('zig', source)).toMatchObject({ kind: 'limitExceeded', limit: 'operations' });
+});
+
+test('fixed-buffer maps initialize and clear metadata in the supplied buffer', () => {
+  const source = `const std=@import("std");pub fn main()!void{var raw:[512]u8=@splat(255);var f=std.heap.FixedBufferAllocator.init(&raw);var m=std.AutoHashMap(u8,u8).init(f.allocator());defer m.deinit();try m.ensureTotalCapacity(20);const metadata=raw[24..24+m.capacity()];const initial=std.mem.allEqual(u8,metadata,0);try m.put(1,42);const value=m.get(1).?;const occupied=!std.mem.allEqual(u8,metadata,0);m.clearRetainingCapacity();const cleared=std.mem.allEqual(u8,metadata,0);std.debug.print("{} {} {} {}",.{initial,value,occupied,cleared});}`;
+  expect(executeProgram('zig', source)).toMatchObject({ kind: 'executed', stderr: 'true 42 true true' });
+});
+
 test.each(['fixed', 'file'])('custom formatting shares %s writer aliases and pointer identity', (kind) => {
   const initialize =
     kind === 'fixed'
