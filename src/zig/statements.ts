@@ -2307,10 +2307,11 @@ export abstract class StatementCompiler extends CallCompiler {
         if (capture.byPointer) {
           const binding = this.newLocal(capture.name, pointerTo(captureType, operand.place?.isConst ?? true), true);
           locals.set(capture.name, binding);
+          const payloadPointer =
+            capturePayload && union ? this.unionPayloadPointer(union, captureType, each) : undefined;
           bind = (frame, value, pointer) => {
-            frame.slots[binding.slot] = capturePayload
-              ? new Pointer(value as ZUnion, 0)
-              : (pointer ?? new Pointer(new Cell(value), 0));
+            const source = pointer ?? new Pointer(new Cell(value), 0);
+            frame.slots[binding.slot] = payloadPointer ? payloadPointer(source, value) : source;
           };
         } else {
           const binding = this.newLocal(capture.name, captureType, true);

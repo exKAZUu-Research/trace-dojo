@@ -1442,6 +1442,22 @@ test('zero-sized fields retain array offsets through indexing, views and capture
   });
 });
 
+test.each([
+  ['var value:O=undefined;const s=&value;', 'union(enum(u64)){only:void=7}', ''],
+  ['var values:[2]O=undefined;const s=&values[1];', 'union(enum(u64)){only:void=7}', ''],
+  ['var values:[2]O=undefined;const s=&values[1];', 'union(enum){only:void,other:u8}', ',.other=>unreachable'],
+])(
+  'switch pointer captures match ordinary zero-sized union payload addresses (%s %s)',
+  (storage, union, extraProng) => {
+    const source = `const std=@import("std");const U=${union};const O=struct{prefix:u8,u:U};fn get(n:*usize,o:*O)*O{n.*+=1;return o;}pub fn main()void{${storage}s.prefix=7;s.u=.{.only={}};var n:usize=0;const direct=&get(&n,s).u.only;switch(get(&n,s).u){.only=>|*payload|{std.debug.print("{} {} {}",.{payload==direct,n,s.prefix});}${extraProng}}}`;
+    expect(executeProgram('zig', source)).toMatchObject({
+      kind: 'executed',
+      stderr: 'true 2 7',
+      uncaughtException: undefined,
+    });
+  }
+);
+
 test('writer result types use the canonical usize and mutable byte slice', () => {
   const source = `const std=@import("std");fn less(n:usize,a:u8,b:u8)bool{return n>0 and a<b;}
 pub fn main()!void{var b:[2]u8=undefined;var w=std.Io.Writer.fixed(&b);const n=try w.write("x");var a=[_]u8{2,1};std.sort.heap(u8,&a,n,less);std.debug.print("{} {} {}",.{a[0],a[1],@TypeOf(w.buffered())==[]u8});}`;

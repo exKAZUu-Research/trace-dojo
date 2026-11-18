@@ -477,8 +477,9 @@ export abstract class ExpressionCompiler extends SemaBase {
     }
     if (field.comptimeValue !== undefined) return this.fixedResult(base, field.type, field.comptimeValue.value, span);
     const project = this.fieldPointer(
-      base,
+      type,
       field.type,
+      span,
       () => fieldOffsets(type)[index] / 8,
       (parent) => new Pointer(parent.load() as ZStruct, index)
     );
@@ -500,8 +501,9 @@ export abstract class ExpressionCompiler extends SemaBase {
     if (type.layout !== 'auto') {
       const view = (value: Value): Slots => physicalUnion(type, value as ZUnion).fieldView!(index);
       const project = this.fieldPointer(
-        base,
+        type,
         field.type,
+        span,
         () => 0,
         (parent) => new Pointer(view(parent.load()), 0)
       );
@@ -520,12 +522,7 @@ export abstract class ExpressionCompiler extends SemaBase {
       }
       return union;
     };
-    const project = this.fieldPointer(
-      base,
-      field.type,
-      () => unionOffsets(type).payload,
-      (parent) => new Pointer(check(parent.load()), 0)
-    );
+    const project = this.unionPayloadPointer(type, field.type, span, check);
     if (base.known) {
       const union = base.value as ZUnion;
       if (union.tag !== index) {
@@ -546,20 +543,39 @@ export abstract class ExpressionCompiler extends SemaBase {
     };
   }
 
-  private fieldPointer(
-    base: TExpr,
+  protected unionPayloadPointer(
+    type: Extract<Type, { kind: 'union' }>,
     child: Type,
+    span: Span,
+    check?: (value: Value) => ZUnion
+  ): (parent: Pointer, value?: Value) => Pointer {
+    return this.fieldPointer(
+      type,
+      child,
+      span,
+      () => unionOffsets(type).payload,
+      (parent, value) => {
+        const union = value ?? parent.load();
+        return new Pointer(check ? check(union) : (union as ZUnion), 0);
+      }
+    );
+  }
+
+  private fieldPointer(
+    base: Type,
+    child: Type,
+    span: Span,
     offsetOf: () => number,
-    project: (parent: Pointer) => Pointer
-  ): (parent: Pointer) => Pointer {
-    const comptime = this.requiresComptime(base.type, base.span);
+    project: (parent: Pointer, value?: Value) => Pointer
+  ): (parent: Pointer, value?: Value) => Pointer {
+    const comptime = this.requiresComptime(base, span);
     if (comptime) return project;
     const zero = sizeOf(child) === 0;
     if (!zero && !hasAggregateStorage(child)) return project;
     const offset = offsetOf();
-    if (sizeOf(base.type) === 0) return (parent) => this.zeroPointerAt(parent.fieldLocation(offset), child);
-    return (parent) => {
-      const target = project(parent);
+    if (sizeOf(base) === 0) return (parent) => this.zeroPointerAt(parent.fieldLocation(offset), child);
+    return (parent, value) => {
+      const target = project(parent, value);
       return zero ? this.zeroPointerAt(parent.fieldLocation(offset), child) : target.withFieldLocation(parent, offset);
     };
   }
