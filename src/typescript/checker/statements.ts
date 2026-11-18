@@ -23,6 +23,7 @@ import {
   type Structure,
   type Type,
   undefinedType,
+  unknownType,
 } from './types';
 import { unionStructure } from './unionMembers';
 
@@ -848,7 +849,7 @@ export class StatementChecker {
       );
     }
     if (parameter && parameter.type !== 'identifier') {
-      this.c.patterns.bindPattern(parameter, annotation ?? anyType, (identifier, type) => {
+      this.c.patterns.bindPattern(parameter, annotation ?? unknownType, (identifier, type) => {
         const symbol = this.c.scopeOf(identifier).lookupValue(identifier.text);
         if (symbol) this.c.expressions.setVariableType(symbol, type);
       });
