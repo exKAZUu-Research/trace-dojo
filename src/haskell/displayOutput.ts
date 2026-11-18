@@ -7,12 +7,12 @@ import { mapGraph } from './typeGraph';
 type OutputNode = DisplayNode | TraceScalar | TraceArray;
 type OutputBranch = Extract<DisplayNode, { kind: 'object' | 'array' }> | TraceArray;
 const expandedSizes = new WeakMap<OutputBranch, number>();
-const truncated: DisplayNode = { kind: 'value', value: '…' };
+export const TRUNCATED_DISPLAY: DisplayNode = { kind: 'value', value: '…' };
 
 export function boundDisplayOutput(runtime: Runtime, variables: TraceVariables): TraceVariables {
   return {
     vars: boundRoots(runtime, variables.vars, 'answer'),
-    referenceVars: boundRoots(runtime, variables.referenceVars, 'reference', truncated),
+    referenceVars: boundRoots(runtime, variables.referenceVars, 'reference', TRUNCATED_DISPLAY),
   };
 }
 

@@ -11,6 +11,7 @@ import { boundDisplayOutput } from './displayOutput';
 import { constructorFieldType, isConcreteType, slotDisplayType, UNKNOWN_TYPE } from './displayTypes';
 import { DISPLAY_OPERATIONS } from './previewBudget';
 import { floatToDigits } from './primitives';
+import { RecordingOutput } from './recordingOutput';
 import { runProgram } from './run';
 import { DisplayAbort, type PreviewContext, Runtime, type TraceFrame } from './runtime';
 import { prune, splitApp, type Type } from './types';
@@ -33,15 +34,17 @@ export function traceHaskellProgram(program: string, trace: TraceOptions, input?
   const compiled = compileProgram(program, new Set(trace.atomicAnnotations.keys()), true);
   const runtime = new Runtime(input);
   runtime.displaysAnswer = (name, slot, type, context) => slotDisplaysAnswer(runtime, name, slot, type, context);
+  const output = new RecordingOutput(runtime);
   const recorder = new TraceRecorder(runtime, {
     isAtomic: (frame) => frame.isAtomic,
     variablesOf: (frame) => variablesOf(runtime, frame),
+    recordItem: (item) => output.record(item),
   });
   runtime.steps.recorder = recorder;
   let finalVars: TraceItemVariable = Object.create(null);
   // A model program may end with an uncaught exception to show how one stops the program.
   const run = runProgram(runtime, compiled, (frame) => {
-    if (frame) finalVars = variablesOf(runtime, frame).vars;
+    if (frame) finalVars = output.bound({ vars: variablesOf(runtime, frame).vars, referenceVars: {} }).vars;
   });
   return { traceItems: recorder.traceItems, finalVars, ...run };
 }

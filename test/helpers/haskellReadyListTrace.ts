@@ -21,6 +21,7 @@ loop i xs ys zs
     stdout: result.stdout,
     steps: result.traceItems.length,
     answers: result.traceItems.filter((item) => Object.hasOwn(item.vars, 'k')).length,
+    first: result.traceItems.find((item) => item.referenceVars.xs?.kind === 'array')?.referenceVars.xs?.kind,
     last: result.traceItems.at(-1)?.referenceVars?.xs?.kind,
     exception: result.uncaughtException,
   };
@@ -43,6 +44,7 @@ summaries.push({
   stdout: pairResult.stdout,
   steps: pairResult.traceItems.length,
   answers: pairResult.traceItems.filter((item) => Object.hasOwn(item.vars, 'k')).length,
+  first: pairResult.traceItems.find((item) => item.referenceVars.xs?.kind === 'array')?.referenceVars.xs?.kind,
   last: pairResult.traceItems.at(-1)?.referenceVars?.xs?.kind,
   exception: pairResult.uncaughtException,
 });

@@ -22,6 +22,7 @@ test('repeated ready lists stay bounded on both sides of the display element lim
         stdout: z.string(),
         steps: z.number(),
         answers: z.number(),
+        first: z.string().optional(),
         last: z.string().optional(),
         exception: z.unknown().optional(),
       })
@@ -39,6 +40,7 @@ test('repeated ready lists stay bounded on both sides of the display element lim
     expect(summary.exception).toBeUndefined();
     expect(summary.answers).toBe(6000);
     expect(summary.steps).toBe(isPairs ? 6004 : 6006);
-    expect(summary.last).toBe(length <= 1000 ? 'array' : 'value');
+    expect(summary.first).toBe(length <= 1000 ? 'array' : undefined);
+    expect(summary.last).not.toBe('array');
   }
 });

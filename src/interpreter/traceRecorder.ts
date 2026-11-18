@@ -24,6 +24,7 @@ export interface TracedFrame {
 export interface FrameReader<F extends TracedFrame> {
   isAtomic(frame: F): boolean;
   variablesOf(frame: F): TraceVariables;
+  recordItem?(item: TraceItem): TraceItem;
 }
 
 /** Collects the trace items of a model program, starting with its state before it runs. */
@@ -47,13 +48,14 @@ export class TraceRecorder<F extends TracedFrame> implements StepRecorder {
     if (frames.some((frame) => this.frames.isAtomic(frame))) return false;
     if (this.traceItems.length >= MAX_TRACE_ITEMS) throw new ExecutionLimitError('trace');
     this.runtime.collectGarbage();
-    this.traceItems.push({
+    const item: TraceItem = {
       line: row + 1,
       callLines: frames.slice(1).flatMap(({ callRow }) => (callRow === undefined ? [] : [callRow + 1])),
       ...this.frames.variablesOf(frames.at(-1) as F),
       turtles: world.turtleTraces(),
       board: world.boardText(),
-    });
+    };
+    this.traceItems.push(this.frames.recordItem?.(item) ?? item);
     for (const frame of frames) this.varsAtLastStep.set(frame, this.frames.variablesOf(frame).vars);
     return true;
   }
