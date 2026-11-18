@@ -47,6 +47,21 @@ const accepted = [
     'class Tofu t where tofu::j a->t a j\ndata Frank a b=Frank{frankField::b a}\ninstance Tofu Frank where tofu=Frank\nmain=print(frankField(tofu(Just(1::Int))))',
     'Just 1\n',
   ],
+  [
+    'aliasParameter',
+    'type Id a=a\nclass Show(Id a)=>D a where d::a->String\ninstance D Int where d=show\nmain=putStrLn(d(1::Int))',
+    '1\n',
+  ],
+  [
+    'forwardAliasParameter',
+    'class Show(Id a)=>D a where d::a->String\ntype Id a=a\ninstance D Int where d=show\nmain=putStrLn(d(1::Int))',
+    '1\n',
+  ],
+  [
+    'nestedAliasParameter',
+    'type Id a=a\nclass Show(Id(Id a))=>D a where d::a->String\ninstance D Int where d=show\nmain=putStrLn(d(1::Int))',
+    '1\n',
+  ],
 ] as const;
 
 test.each(accepted)('monomorphic kind inference remains supported: %s', (_name, source, stdout) => {
@@ -135,6 +150,9 @@ const kindMisuses = [
   ['variableArgumentKind', 'f::m a=>m->a\nf=undefined\nmain=putStrLn "ok"'],
   ['crossContextKinds', 'data P a=P\ng::(c a,Show c)=>P c->a->Int\ng _ _=1\nmain=print 1'],
   ['bareVariableKind', 'f::a=>a\nf=undefined\nmain=putStrLn "ok"'],
+  ['wrongShowKind', 'class Show Maybe=>D a where d::a->String\nmain=putStrLn "ok"'],
+  ['wrongFunctorKind', 'class Functor Int=>D a where d::a->String\nmain=putStrLn "ok"'],
+  ['mixedWrongKind', 'class(Show[a],Eq Maybe)=>D a where d::a->String\nmain=putStrLn "ok"'],
 ] as const;
 
 test.each(kindMisuses)('invalid type and class uses keep ordinary diagnostics: %s', (_name, source) => {
@@ -145,3 +163,31 @@ test.each(kindMisuses)('invalid type and class uses keep ordinary diagnostics: %
     expect(result.diagnostics[0]?.message).not.toContain('使えません');
   }
 });
+
+const unsupportedSuperclasses = [
+  [
+    'listSuperclass',
+    'class Show [a]=>D a where d::a->String\ninstance D Int where d x=show [x]\nmain=putStrLn(d(1::Int))',
+  ],
+  ['concreteSuperclass', 'class Show Int=>D a where d::a->String\ninstance D Bool where d=show\nmain=putStrLn(d True)'],
+  [
+    'maybeSuperclass',
+    'class Eq(Maybe a)=>D a where d::a->Bool\ninstance D Int where d x=Just x==Just x\nmain=print(d(1::Int))',
+  ],
+  [
+    'higherSuperclass',
+    'class Show(f Int)=>D f where d::f Int->String\ninstance D Maybe where d=show\nmain=putStrLn(d(Just(1::Int)))',
+  ],
+] as const;
+
+test.each(unsupportedSuperclasses)(
+  'well-kinded superclass contexts have an environment diagnostic: %s',
+  (_name, source) => {
+    const result = executeProgram('haskell', source);
+    expect(result.kind).toBe('compileError');
+    if (result.kind === 'compileError') {
+      expect(result.diagnostics[0]?.message).toContain('スーパークラス');
+      expect(result.diagnostics[0]?.message).toContain('は、この採点環境では使えません。');
+    }
+  }
+);

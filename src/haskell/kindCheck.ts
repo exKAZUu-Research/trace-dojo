@@ -106,11 +106,7 @@ function inferTypeDeclaration(checker: Checker, entry: Exclude<KindDeclaration, 
 }
 
 function inferClass(checker: Checker, decl: RClassDecl): void {
-  checker.convertConstraints(
-    decl.supers,
-    new Map([[decl.param, { tag: 'tgen', index: 0 }]]),
-    new Map([[decl.param, decl.entity.tyvarKind]])
-  );
+  checker.checkSuperclassTypes(decl.supers, decl.param, decl.entity.tyvarKind);
   for (const method of decl.methods) method.entity.scheme = methodScheme(checker, decl, method.sig);
 }
 

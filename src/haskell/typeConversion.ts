@@ -13,6 +13,7 @@ import {
   kindArrow,
   parameterKinds,
   type Pred,
+  prune,
   pruneKind,
   showKind,
   STAR,
@@ -24,7 +25,7 @@ import {
 
 export class TypeConversion {
   private kindInstances: { kind: Kind; expected: Kind; span: Span }[] = [];
-  private constraintSpan: Span | undefined;
+  private unsupportedFeature: { span: Span; feature: string } | undefined;
 
   predicates(
     context: readonly RConstraint[],
@@ -41,16 +42,28 @@ export class TypeConversion {
         });
       else {
         this.convert(constraint, vars, varKinds, CONSTRAINT);
-        this.constraintSpan ??= constraint.span;
+        this.markUnsupported(constraint.span);
       }
     }
     return predicates;
   }
 
+  superclasses(context: readonly RConstraint[], parameter: string, kind: Kind): void {
+    const vars = new Map<string, Type>([[parameter, { tag: 'tgen', index: 0 }]]);
+    const kinds = new Map([[parameter, kind]]);
+    for (const constraint of context) {
+      for (const pred of this.predicates([constraint], vars, kinds)) {
+        const type = prune(pred.type);
+        if (type.tag !== 'tgen' || type.index !== 0)
+          this.markUnsupported(constraint.span, '型変数以外のスーパークラス制約');
+      }
+    }
+  }
+
   derivingClass(type: RType): ClassEntity | undefined {
     if (type.k === 'class') return type.entity;
     this.convert(type, new Map(), new Map(), kindArrow(freshKindVar(), CONSTRAINT));
-    this.constraintSpan ??= type.span;
+    this.markUnsupported(type.span);
     return;
   }
 
@@ -72,8 +85,8 @@ export class TypeConversion {
       }
     }
     this.kindInstances = [];
-    if (!specialize && this.constraintSpan)
-      throw unsupportedError(this.constraintSpan, '制約を型として扱う機能（ConstraintKinds）');
+    if (!specialize && this.unsupportedFeature)
+      throw unsupportedError(this.unsupportedFeature.span, this.unsupportedFeature.feature);
   }
 
   private convertTypeKind(
@@ -89,7 +102,7 @@ export class TypeConversion {
       }
       case 'class': {
         const kind = kindArrow(this.classKind(type.entity, type.span), CONSTRAINT);
-        this.constraintSpan ??= type.span;
+        this.markUnsupported(type.span);
         return { type: freshTypeVar(kind, 0), kind };
       }
       case 'tuple': {
@@ -118,7 +131,7 @@ export class TypeConversion {
       if (!unifyKinds(part.kind, kind))
         throw compileError(type.elems[index].span, 'タプルの型の種類（カインド）が合いません。');
     if (kind === CONSTRAINT) {
-      this.constraintSpan ??= type.span;
+      this.markUnsupported(type.span);
       return { type: freshTypeVar(kind, 0), kind };
     }
     let result: Type = tcon(tupleType(parts.length));
@@ -199,5 +212,9 @@ export class TypeConversion {
     const instance = instantiateKind(owner, kind);
     if (instance.variables.length > 0) this.kindInstances.push({ kind: instance.kind, expected: kind, span });
     return instance.kind;
+  }
+
+  private markUnsupported(span: Span, feature = '制約を型として扱う機能（ConstraintKinds）'): void {
+    this.unsupportedFeature ??= { span, feature };
   }
 }

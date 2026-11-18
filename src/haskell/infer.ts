@@ -334,6 +334,10 @@ export class Checker {
     return this.typeConversion.predicates(context, vars, varKinds);
   }
 
+  checkSuperclassTypes(context: readonly RConstraint[], parameter: string, kind: Kind): void {
+    this.typeConversion.superclasses(context, parameter, kind);
+  }
+
   derivingClass(type: RType): ClassEntity | undefined {
     return this.typeConversion.derivingClass(type);
   }

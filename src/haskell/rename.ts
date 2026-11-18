@@ -32,7 +32,6 @@ import type {
   RType,
   VarRef,
 } from './rast';
-import { directClassConstraint } from './rast';
 import { RecursionBudget } from './recursionBudget';
 import type {
   Alt,
@@ -596,19 +595,12 @@ class Renamer {
   }
 
   // code-gauge-allow functionCognitiveComplexity 22 -- Class declarations combine signatures, defaults, and fixities.
-  // code-gauge-allow functionNcss 38 -- Class declarations combine signatures, defaults, and fixities.
+  // code-gauge-allow functionNcss 37 -- Class declarations combine signatures, defaults, and fixities.
   private renameClass(decl: Extract<Decl, { kind: 'class' }>): void {
     const like = this.ownTypes.get(decl.name.name) as { kind: 'class'; entity: ClassEntity };
     const entity = like.entity;
     const param = decl.param.name;
-    const supers = decl.context.map((constraint) => {
-      const renamed = this.renameType(constraint, new Set([param]));
-      const direct = directClassConstraint(renamed);
-      if (direct && (direct.type.k !== 'var' || direct.type.name !== param)) {
-        throw compileError(constraint.span, 'スーパークラスの制約には、クラスの型変数だけを書いてください。');
-      }
-      return renamed;
-    });
+    const supers = decl.context.map((constraint) => this.renameType(constraint, new Set([param])));
     const methods: RClassDecl['methods'] = [];
     for (const member of decl.decls) {
       if (member.kind !== 'sig') continue;
