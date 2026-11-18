@@ -476,7 +476,13 @@ export class MemberChecker {
     )
       return neverType;
     if (isGenericKey(index))
-      return this.checkedGenericIndex(access, objectType, this.c.typeOperators.indexedAccess(objectType, index));
+      return this.checkedGenericIndex(
+        access,
+        objectType,
+        this.c.typeOperators.indexedAccess(objectType, index, access.node)
+      );
+    if (objectType.kind === 'object' && objectType.objectKind === 'mapped' && !objectType.mapped?.nameType)
+      return this.c.typeOperators.indexedAccess(objectType, index, access.node);
     // A key that is not generic reads the object a type parameter stands for through its constraint.
     if (objectType.kind === 'typeParameter')
       return this.indexedTypeAt(access, this.c.apparentType(objectType), indexType);

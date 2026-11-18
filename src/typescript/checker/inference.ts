@@ -99,14 +99,7 @@ export class TypeInference {
             : this.c.instantiate(parameter.default?.() ?? parameter.constraint?.() ?? unknownType, mapper))
       );
     }
-    // A constraint may mention the parameters themselves, as `T extends Comparable<T>` does, so it sees them all.
-    for (const parameter of parameters) {
-      const constraint = parameter.constraint?.();
-      if (!constraint) continue;
-      const instantiated = this.c.instantiate(constraint, mapper);
-      if (!this.c.relations.isAssignable(mapper.get(parameter.id) as Type, instantiated))
-        mapper.set(parameter.id, instantiated);
-    }
+    this.constrainInferences(parameters, mapper);
     return mapper;
   }
 
@@ -522,7 +515,7 @@ export class TypeInference {
   }
 
   /** Infers the type parameters of `types` from `source` matched against `target`, as `infer U` does. */
-  inferFromTypes(parameters: TypeParameter[], source: Type, target: Type): Map<number, Type> {
+  inferFromTypes(parameters: TypeParameter[], source: Type, target: Type, outer?: Mapper): Map<number, Type> {
     const run = newInferenceRun(parameters);
     this.inferTypes(run, source, target, true);
     const result = new Map<number, Type>();
@@ -533,6 +526,7 @@ export class TypeInference {
       else if (inference.contravariant.length > 0)
         result.set(parameter.id, intersectionOf(inference.contravariant, this.c.budget));
     }
+    this.constrainInferences(parameters, result, outer);
     return result;
   }
 
@@ -552,15 +546,18 @@ export class TypeInference {
         inference.candidates.length > 0 ? unionOf(inference.candidates) : (parameter.constraint?.() ?? unknownType)
       );
     }
-    // An inference that breaks its constraint gives way to it, as in TypeScript's `getInferredType`.
-    for (const parameter of source.typeParameters) {
-      const constraint = parameter.constraint?.();
-      if (!constraint) continue;
-      const instantiated = this.c.instantiate(constraint, mapper);
-      if (!this.c.relations.isAssignable(mapper.get(parameter.id) as Type, instantiated))
-        mapper.set(parameter.id, instantiated);
-    }
+    this.constrainInferences(source.typeParameters, mapper);
     return { ...this.c.instantiateSignature(source, mapper), typeParameters: [] };
+  }
+
+  private constrainInferences(parameters: TypeParameter[], mapper: Mapper, outer?: Mapper): void {
+    for (const parameter of parameters) {
+      const inferred = mapper.get(parameter.id);
+      const constraint = parameter.constraint?.();
+      if (!inferred || !constraint) continue;
+      const instantiated = this.c.instantiate(outer ? this.c.instantiate(constraint, outer) : constraint, mapper);
+      if (!this.c.relations.isAssignable(inferred, instantiated)) mapper.set(parameter.id, instantiated);
+    }
   }
 }
 

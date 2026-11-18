@@ -13,18 +13,14 @@ const consoleTimers = new Set<Key | undefined>(['time', 'timeEnd', 'timeLog', 't
  * Defines reflected method properties whose calls remain unavailable, and checks unavailable reads the type checker
  * cannot resolve, such as those through `any`.
  */
-// code-gauge-allow functionCognitiveComplexity 16 -- Matches each receiver and omitted member, including own error stacks after prototype changes.
 export function unavailableMemberCheck(realm: Realm): UnavailableMemberCheck {
   const math = realm.globals.lookup('Math')?.value;
   const console = realm.globals.lookup('console')?.value;
   defineUnavailableMethods(realm, math, console);
   return (value, key) => {
-    if (value === math && key === 'random') return 'Math.random';
-    if (value === console && consoleTimers.has(key)) return `console.${String(key)}`;
     // Node.js gives every error its own stack, whatever its prototype becomes.
     if ((key === 'stack' || key === undefined) && value instanceof JsObject && value.isError) return 'Error の stack';
     if (key === 'stack' && inherits(value, realm.errorPrototypes.Error)) return 'Error の stack';
-    if (key === 'compile' && inherits(value, realm.regExpPrototype)) return 'RegExp の compile';
     return;
   };
 }

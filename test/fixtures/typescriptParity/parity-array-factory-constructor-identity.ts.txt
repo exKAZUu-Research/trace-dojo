@@ -1,0 +1,12 @@
+function Factory(this:any,length?:number){this.foo=7;this.initialLength=length===undefined?"none":length;}
+Array.prototype.constructor=Factory as any;
+const iterable:any=(Array.from as any).call(Factory,[1,2]);
+const arrayLike:any=(Array.from as any).call(Factory,{0:"x",1:"y",length:2});
+const of:any=(Array.of as any).call(Factory,3,4);
+for(const value of [iterable,arrayLike,of])console.log(value instanceof (Factory as any),value.foo,value.initialLength,value.length,value[0],value[1]);
+let reads=0;
+Object.defineProperty(Array.prototype,"constructor",{get(){reads++;throw new Error("unexpected constructor read");},configurable:true});
+const ordinary=Array.from([5,6]);
+const ordinaryOf=Array.of(7,8);
+const custom:any=(Array.of as any).call(Factory,9,10);
+console.log(ordinary[0],ordinary[1],ordinaryOf[0],ordinaryOf[1],custom.foo,custom.length,reads);

@@ -1,5 +1,6 @@
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
+import { erasedStatementTypes } from '../erasedSyntax';
 import type { Checker } from './checker';
 import type { Scope, Sym } from './scopes';
 import {
@@ -102,7 +103,7 @@ export class Signatures {
   private checkStrictParameterList(node: TreeNode): void {
     const body = node.childForFieldName('body');
     if (body?.type !== 'statement_block') return;
-    const directive = this.strictDirective(body);
+    const directive = this.strictDirective(body) ?? this.strictDirective(body, true);
     if (!directive) return;
     const invalid = parameterNodes(node).filter(
       (parameter) =>
@@ -118,8 +119,9 @@ export class Signatures {
     this.c.errorWhileResolving(directive, "単純でない引数リストを持つ関数では、'use strict' 指令は使えません。");
   }
 
-  private strictDirective(body: TreeNode): TreeNode | undefined {
+  private strictDirective(body: TreeNode, eraseTypes = false): TreeNode | undefined {
     for (const statement of named(body)) {
+      if (eraseTypes && erasedStatementTypes.has(statement.type)) continue;
       const expression = statement.type === 'expression_statement' ? named(statement)[0] : undefined;
       if (expression?.type !== 'string') return undefined;
       if (expression.text === '"use strict"' || expression.text === "'use strict'") return expression;

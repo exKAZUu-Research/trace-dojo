@@ -1,0 +1,9 @@
+function removedGenericKey<T extends object,K extends keyof T>(o:T,k:K){const {[k]:_,...r}=o;return r[k];}
+function removedUnionKey<T extends {a:number,b:number},K extends 'a'|'b'>(o:T,k:K){const {[k]:_,...r}=o;return r[k];}
+function removedKeyof<T extends object>(o:T,k:keyof T){const {[k]:_,...r}=o;return r[k];}
+function cannotRestore<T extends object,K extends keyof T>(o:T,k:K):T{const {[k]:_,...r}=o;return r;}
+function uncertainRetained<T extends {a:number,b:number},K extends keyof T>(o:T,k:K){const {[k]:_,...r}=o;return r.a;}
+function constrainedRetained<T extends {a:number,b:number},K extends 'b'>(o:T,k:K){const {[k]:_,...r}=o;return r.a;}
+function removedNumber<T extends {1:number}>(o:T){const {1:_,...r}=o;return r[1];}
+function removedConcreteUnion(k:'a'|'b'){const {[k]:_,...r}={a:1,b:2,c:3};return r.a;}
+type RemovedIndexedType<T extends object,K extends keyof T>=Omit<T,K>[K];

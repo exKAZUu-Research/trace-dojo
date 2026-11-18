@@ -381,3 +381,23 @@ test('reflected unavailable methods still reject invocation and error stacks rej
     });
   }
 });
+
+test.each([
+  'function f(x=1){type T=number;"use strict";return x;}console.log(f());',
+  'const f=(...x:number[])=>{interface I{}"use strict";return x.length;};console.log(f(1));',
+  'const o={f({x}:{x:number}){type T=number;"use strict";return x;}};console.log(o.f({x:2}));',
+  'class C{constructor(public x=1){interface I{}"use strict";}}console.log(new C().x);',
+])('non-simple parameters reject a strict directive exposed by erasure: %s', (source) => {
+  expect(diagnosticsOf(source).join('\n')).toContain("'use strict'");
+});
+
+test.each([
+  'function f(x=1){;type T=number;"use strict";return x;}console.log(f());',
+  'function f(x:number){type T=number;"use strict";return x;}console.log(f(1));',
+])('type erasure preserves valid directive boundaries: %s', (source) => {
+  expect(executeProgram('typescript', source)).toMatchObject({
+    kind: 'executed',
+    stdout: '1\n',
+    uncaughtException: undefined,
+  });
+});

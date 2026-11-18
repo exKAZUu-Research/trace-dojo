@@ -175,33 +175,7 @@ function defineFunction(builder: RealmBuilder): void {
     if (!isCallable(thisValue)) throwNotApplicable(runtime, thisValue);
     return runtime.call(thisValue, args[0], listFromArrayLike(runtime, args[1]), callRow);
   });
-  builder.method(functionPrototype, 'bind', 1, ({ runtime, thisValue, args }) => {
-    const target = thisValue;
-    if (!isCallable(target)) return runtime.throwError('TypeError', 'Bind must be called on a function');
-    const boundThis = args[0];
-    const boundArgs = args.slice(1);
-    runtime.allocate(boundArgs.length + 1);
-    // The bound function takes what the target takes beyond the bound arguments.
-    const targetLength = runtime.get(target, 'length');
-    const length =
-      typeof targetLength === 'number' ? Math.max(0, toInteger(runtime, targetLength) - boundArgs.length) : 0;
-    const bound = runtime.newNativeFunction(
-      `bound ${runtime.functionName(target)}`,
-      length,
-      (call) =>
-        call.newTarget
-          ? runtime.construct(
-              target,
-              [...boundArgs, ...call.args],
-              call.newTarget === bound ? target : call.newTarget,
-              call.callRow
-            )
-          : runtime.call(target, boundThis, [...boundArgs, ...call.args], call.callRow),
-      target.isConstructor
-    );
-    bound.captured = [target, boundThis, ...boundArgs];
-    return bound;
-  });
+  builder.method(functionPrototype, 'bind', 1, bindFunction);
   builder.constant(
     functionPrototype,
     WELL_KNOWN_SYMBOLS.hasInstance,
@@ -214,6 +188,33 @@ function defineFunction(builder: RealmBuilder): void {
       return runtime.throwError('TypeError', 'Function.prototype.toString requires a function');
     return runtime.functionSource(thisValue);
   });
+}
+
+function bindFunction({ runtime, thisValue, args }: NativeCall): JsFunction {
+  const target = thisValue;
+  if (!isCallable(target)) return runtime.throwError('TypeError', 'Bind must be called on a function');
+  const boundThis = args[0];
+  const boundArgs = args.slice(1);
+  runtime.allocate(boundArgs.length + 1);
+  const targetLength = runtime.getOwnProperty(target, 'length') ? runtime.get(target, 'length') : undefined;
+  const length =
+    typeof targetLength === 'number' ? Math.max(0, toInteger(runtime, targetLength) - boundArgs.length) : 0;
+  const bound = runtime.newNativeFunction(
+    `bound ${runtime.functionName(target)}`,
+    length,
+    (call) =>
+      call.newTarget
+        ? runtime.construct(
+            target,
+            [...boundArgs, ...call.args],
+            call.newTarget === bound ? target : call.newTarget,
+            call.callRow
+          )
+        : runtime.call(target, boundThis, [...boundArgs, ...call.args], call.callRow),
+    target.isConstructor
+  );
+  bound.captured = [target, boundThis, ...boundArgs];
+  return bound;
 }
 
 function throwNotApplicable(runtime: Runtime, receiver: Value): never {

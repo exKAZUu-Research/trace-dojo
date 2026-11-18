@@ -4,7 +4,7 @@ import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import type { Checker } from './checker';
 import { isDefinitelyFalsy, isSpreadableProperty } from './literals';
-import { arrayPatternElements, named, propertyNameText } from './syntax';
+import { arrayPatternElements, named, numberValue, propertyNameText } from './syntax';
 import {
   anonymousObject,
   anyType,
@@ -201,17 +201,17 @@ export class BindingPatterns {
     annotated: boolean
   ): void {
     if (isEmptyPattern(pattern)) this.checkEmptyObjectSource(pattern, type);
-    const used: string[] = [];
+    const used: Type[] = [];
     for (const element of named(pattern)) {
       switch (element.type) {
         case 'shorthand_property_identifier_pattern': {
-          used.push(element.text);
+          used.push(literalType(element.text));
           bind(element, this.destructuredProperty(element, type, element.text));
           break;
         }
         case 'object_assignment_pattern': {
           const left = element.childForFieldName('left') as TreeNode;
-          used.push(left.text);
+          used.push(literalType(left.text));
           const propertyType = this.destructuredProperty(left, type, left.text);
           this.bindPattern(element, propertyType, bind, annotated);
           break;
@@ -221,7 +221,7 @@ export class BindingPatterns {
           const value = element.childForFieldName('value') as TreeNode;
           const selected = this.destructuredKey(key, type);
           this.bindPattern(value, selected.type, bind, annotated);
-          used.push(...(selected.names ?? []));
+          used.push(selected.keyType);
           break;
         }
         case 'rest_pattern': {
@@ -236,13 +236,14 @@ export class BindingPatterns {
     }
   }
 
-  destructuredKey(key: TreeNode, objectType: Type): { type: Type; names?: string[] } {
+  destructuredKey(key: TreeNode, objectType: Type): { type: Type; keyType: Type; names?: string[] } {
     const selection = this.patternKey(key);
     this.selectedKeys.set(key.id, selection.names);
-    const type = selection.names
-      ? unionOf(selection.names.map((name) => this.destructuredProperty(key, objectType, name)))
-      : this.c.members.indexedType(key, key, selection.node, objectType, selection.type);
-    return { type, names: selection.names };
+    const type =
+      selection.names && !this.c.relations.isGeneric(selection.type)
+        ? unionOf(selection.names.map((name) => this.destructuredProperty(key, objectType, name)))
+        : this.c.members.indexedType(key, key, selection.node, objectType, selection.type);
+    return { type, keyType: selection.type, names: selection.names };
   }
 
   propertyNames(key: TreeNode): string[] | undefined {
@@ -263,7 +264,7 @@ export class BindingPatterns {
       const name = propertyNameText(key);
       return {
         node: key,
-        type: name === undefined ? anyType : literalType(name),
+        type: name === undefined ? anyType : literalType(key.type === 'number' ? numberValue(key.text) : name),
         names: name === undefined ? undefined : [name],
       };
     }
@@ -289,7 +290,7 @@ export class BindingPatterns {
   }
 
   /** The type of a declaration's object rest element, which TypeScript makes only from a value that may be an object. */
-  private declaredRestObject(target: TreeNode, type: Type, omitted: string[]): Type {
+  private declaredRestObject(target: TreeNode, type: Type, omitted: Type[]): Type {
     if (!this.isValidSpreadType(type)) {
       this.c.error(target, '残余要素の型は、オブジェクト型からしか作れません。');
       return errorType;
@@ -320,10 +321,11 @@ export class BindingPatterns {
     );
   }
 
-  restObject(type: Type, omitted: string[]): Type {
+  restObject(type: Type, omitted: Type[]): Type {
     const object = this.c.relations.removeNullish(type);
     if (object.kind === 'union') return unionOf(object.types.map((member) => this.restObject(member, omitted)));
-    if (this.c.relations.isGeneric(object)) return this.genericRestObject(object, omitted);
+    if (this.c.relations.isGeneric(object) || omitted.some((key) => this.c.relations.isGeneric(key)))
+      return this.genericRestObject(object, omitted);
     return anonymousObject(
       () => {
         const structure = emptyStructure();
@@ -334,7 +336,10 @@ export class BindingPatterns {
         structure.patternIndexes = source.patternIndexes;
         // As a spread does, a rest copies each value into a plain, writable property.
         for (const [name, property] of source.properties) {
-          if (!omitted.includes(name) && isSpreadableProperty(property))
+          const selected = omitted.some((key) =>
+            this.c.relations.isAssignable(this.c.typeOperators.propertyKeyType(property), key)
+          );
+          if (!selected && isSpreadableProperty(property))
             structure.properties.set(name, { ...property, readonly: false, getterOnly: false, writeType: undefined });
         }
         return structure;
@@ -343,11 +348,11 @@ export class BindingPatterns {
     );
   }
 
-  private genericRestObject(source: Type, omitted: string[]): Type {
+  private genericRestObject(source: Type, omitted: Type[]): Type {
     const unspreadable = [...this.c.structureOf(source).properties.values()]
       .filter((property) => !isSpreadableProperty(property))
-      .map((property) => property.name);
-    const excluded = unionOf([...omitted, ...unspreadable].map((name) => literalType(name)));
+      .map((property) => this.c.typeOperators.propertyKeyType(property));
+    const excluded = unionOf([...omitted, ...unspreadable]);
     if (isIntrinsic(excluded, 'never')) return source;
     const omit = this.c.libraryBinder.moduleScope.lookupType('Omit');
     assert.ok(omit);

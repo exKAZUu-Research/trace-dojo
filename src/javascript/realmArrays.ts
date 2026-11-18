@@ -114,8 +114,7 @@ function buildWith(
   length: number | undefined,
   build: (ops: ArrayOps) => void
 ): JsObject {
-  const arrayConstructor = runtime.get(runtime.realm.arrayPrototype, 'constructor');
-  if (!(constructor instanceof JsFunction) || !constructor.isConstructor || constructor === arrayConstructor) {
+  if (!(constructor instanceof JsFunction) || !constructor.isConstructor) {
     return buildArray(runtime, build);
   }
   const result = runtime.construct(constructor, length === undefined ? [] : [length]);

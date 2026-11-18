@@ -187,18 +187,18 @@ export class AssignmentChecker {
   ): void {
     // Unlike a declaration's pattern, an assignment's empty object pattern accepts `void`, as TypeScript does.
     if (isEmptyPattern(pattern)) this.c.members.checkNonNullable(pattern, type);
-    const used: string[] = [];
+    const used: Type[] = [];
     for (const element of named(pattern)) {
       switch (element.type) {
         case 'shorthand_property_identifier':
         case 'shorthand_property_identifier_pattern': {
-          used.push(element.text);
+          used.push(literalType(element.text));
           assign(element, this.c.patterns.destructuredProperty(element, type, element.text));
           break;
         }
         case 'object_assignment_pattern': {
           const left = element.childForFieldName('left') as TreeNode;
-          used.push(left.text);
+          used.push(literalType(left.text));
           assign(element, this.c.patterns.destructuredProperty(left, type, left.text));
           break;
         }
@@ -207,7 +207,7 @@ export class AssignmentChecker {
           const key = element.childForFieldName('key') as TreeNode;
           const value = element.childForFieldName('value') as TreeNode;
           const selected = this.c.patterns.destructuredKey(key, type);
-          used.push(...(selected.names ?? []));
+          used.push(selected.keyType);
           assign(value, selected.type);
           break;
         }

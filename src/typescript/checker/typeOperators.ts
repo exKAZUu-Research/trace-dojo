@@ -1,7 +1,9 @@
+// code-gauge-allow-file fileNcss 420 -- Resolves related type operators sharing generic parameters and type construction.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import type { Checker, Mapper } from './checker';
 import { conditionalBranch, isGenericObjectOrIndexType, mappedOptionality } from './genericTypes';
+import { IndexedAccessKeys } from './indexedAccessKeys';
 import { applicableIndex, isPatternKey } from './indexInfos';
 import { applyModifier, mappedArrayOrTuple, type WithMappedSource } from './mappedArrays';
 import { printedPropertyName } from './print';
@@ -27,6 +29,7 @@ import {
   newTypeId,
   nullType,
   numberType,
+  type ObjectType,
   type Property,
   stringType,
   type Structure,
@@ -51,12 +54,15 @@ const stringMappingParameter: TypeParameter = {
 
 /** Resolves the type operators: `keyof`, indexed access, conditional, mapped, and template literal types. */
 export class TypeOperators {
+  private readonly indexedAccessKeys: IndexedAccessKeys;
   private readonly mappedParameters = new Map<number, TypeParameter>();
   /** The keys and name types of a mapped type that a name type maps to each name, by the structure being built. */
   private readonly mappedKeys = new WeakMap<Structure, Map<string, { keys: Type[]; nameTypes: Type[] }>>();
   private readonly inferParameters = new Map<number, Map<string, TypeParameter>>();
 
-  constructor(private readonly c: Checker) {}
+  constructor(private readonly c: Checker) {
+    this.indexedAccessKeys = new IndexedAccessKeys(c);
+  }
 
   /** The type parameter of a mapped type or an `infer` that `name` refers to at `node`, if any. */
   mappedOrInferParameter(node: TreeNode, name: string): TypeParameter | undefined {
@@ -236,6 +242,10 @@ export class TypeOperators {
    * that `info` instantiates, with another type for its source.
    */
   mappedType(info: MappedInfo, withSource?: WithMappedSource): Type {
+    const { source } = info;
+    if (withSource && source?.kind === 'union') return unionOf(source.types.map(withSource));
+    if (withSource && source && (source.kind === 'intrinsic' || source.kind === 'literal') && !isAnyLike(source))
+      return source;
     if (this.c.relations.isGeneric(info.constraint)) {
       return {
         kind: 'object',
@@ -245,7 +255,6 @@ export class TypeOperators {
         resolve: () => emptyStructure(),
       };
     }
-    const { source } = info;
     if (source && source.kind === 'object' && this.c.isArrayOrTuple(source) && !info.nameType) {
       return mappedArrayOrTuple(this.c, info, source, withSource);
     }
@@ -383,7 +392,11 @@ export class TypeOperators {
   indexedAccess(object: Type, index: Type, node?: TreeNode): Type {
     // A mapped type indexed by its own keys, `{ [P in K]: X }[K]`, is its template for those keys.
     if (object.kind === 'object' && object.objectKind === 'mapped' && object.mapped && !object.mapped.nameType) {
-      return this.substituteIndexedMapped(object.mapped, index);
+      if (this.isMappedKey(index, object.mapped.constraint)) return this.substituteIndexedMapped(object.mapped, index);
+      if (node) {
+        this.c.error(node, `型 '${this.c.print(index)}' は型 '${this.c.print(object)}' のインデックスに使えません。`);
+        return errorType;
+      }
     }
     if (this.c.relations.isGeneric(object) || this.c.relations.isGeneric(index)) {
       return (
@@ -405,6 +418,31 @@ export class TypeOperators {
     if (node)
       this.c.error(node, `型 '${this.c.print(index)}' は型 '${this.c.print(object)}' のインデックスに使えません。`);
     return errorType;
+  }
+
+  mappedPropertyOf(object: ObjectType, name: string): Property | undefined {
+    const info = object.objectKind === 'mapped' ? object.mapped : undefined;
+    if (!info || info.nameType || !info.source) return undefined;
+    const property = this.c.propertyOf(info.source, name);
+    if (!property) return undefined;
+    const key = this.propertyKeyType(property);
+    return this.isMappedKey(key, info.constraint) ? this.mappedProperty(info, [key], name, key) : undefined;
+  }
+
+  private isMappedKey(index: Type, keys: Type): boolean {
+    if (this.c.relations.isAssignable(index, keys)) return true;
+    if (index.kind === 'union') return index.types.every((member) => this.isMappedKey(member, keys));
+    if (keys.kind === 'union') return keys.types.some((member) => this.isMappedKey(index, member));
+    if (keys.kind === 'keyof' && keys.type.kind === 'typeParameter')
+      return !this.indexedAccessKeys.isInvalid(keys.type, index, () => []);
+    return (
+      keys.kind === 'conditional' &&
+      !this.c.relations.isGeneric(keys.extendsType) &&
+      isIntrinsic(keys.trueType, 'never') &&
+      this.c.relations.identical(keys.checkType, keys.falseType) &&
+      conditionalBranch(this.c, index, keys.extendsType) === 'false' &&
+      this.isMappedKey(index, keys.checkType)
+    );
   }
 
   /**
@@ -521,7 +559,7 @@ export class TypeOperators {
   ): Mapper | undefined {
     const inferred = new Map(mapper);
     if (inferTypeParameters.length === 0) return inferred;
-    const inferences = this.c.inference.inferFromTypes(inferTypeParameters, checkType, extendsType);
+    const inferences = this.c.inference.inferFromTypes(inferTypeParameters, checkType, extendsType, mapper);
     if (
       extendsType.kind === 'templateLiteral' &&
       checkType.kind === 'literal' &&

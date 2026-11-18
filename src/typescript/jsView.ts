@@ -5,6 +5,7 @@ import { isConstructorDefinition } from '../javascript/programConverter';
 import { Binder } from './checker/binder';
 import { Scope } from './checker/scopes';
 import { isParameterProperty } from './checker/syntax';
+import { erasedStatementTypes } from './erasedSyntax';
 
 /**
  * The type of a synthesized statement that copies a constructor's parameter properties to `this`, which the
@@ -64,8 +65,6 @@ const typeOnlyNodes = new Set([
 ]);
 /** Expressions that only state a type of the expression they wrap. */
 const assertionTypes = new Set(['as_expression', 'satisfies_expression', 'non_null_expression', 'type_assertion']);
-/** Declarations without any effect at run time. */
-const typeDeclarations = new Set(['interface_declaration', 'type_alias_declaration', 'function_signature']);
 /** Class members without any effect at run time. */
 const typeMembers = new Set(['method_signature', 'abstract_method_signature', 'index_signature']);
 /** Modifier tokens of members, parameters, and declarators that running a program ignores. */
@@ -125,7 +124,7 @@ function view(node: TreeNode, binder: Binder): ViewNode {
         : generic(node, node.type, binder);
     }
     default: {
-      return typeDeclarations.has(node.type) ? leaf(node, 'empty_statement') : generic(node, node.type, binder);
+      return erasedStatementTypes.has(node.type) ? leaf(node, 'empty_statement') : generic(node, node.type, binder);
     }
   }
 }
@@ -162,7 +161,7 @@ function generic(node: TreeNode, type: string, binder: Binder): ViewNode {
 
 /** Whether a child is TypeScript-only syntax, which the JavaScript view leaves out. */
 function isErased(node: TreeNode, type: string, child: TreeNode, fieldName: string | undefined): boolean {
-  if ((type === 'program' || type === 'statement_block') && typeDeclarations.has(child.type)) return true;
+  if ((type === 'program' || type === 'statement_block') && erasedStatementTypes.has(child.type)) return true;
   if (fieldName && typeFields.has(fieldName)) return true;
   if (typeOnlyNodes.has(child.type)) return true;
   if (!child.isNamed && modifiedTypes.has(node.type) && memberModifiers.has(child.type)) return true;

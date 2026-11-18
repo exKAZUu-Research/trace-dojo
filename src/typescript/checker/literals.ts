@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 579 -- Types array and object literals with their spreads, members, and widening, which share one literal state.
+// code-gauge-allow-file fileNcss 580 -- Types array and object literals with their spreads, members, and widening, which share one literal state.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import type { Checker } from './checker';
@@ -800,8 +800,11 @@ export class LiteralChecker {
       const property = this.discriminantProperty(member);
       if (!property || !this.c.flow.isDiscriminant(contextual, property.name)) continue;
       const { name, value, isShorthand } = property;
+      const propertyContext = this.c.propertyOf(contextual, name)?.type();
       const valueType = regularOf(
-        this.c.silently(() => (isShorthand ? this.c.expressions.identifier(value) : this.c.expressions.check(value)))
+        this.c.silently(() =>
+          isShorthand ? this.c.expressions.identifier(value) : this.c.expressions.check(value, propertyContext)
+        )
       );
       const valueTypes = valueType.kind === 'union' ? valueType.types : [valueType];
       const selected = members.filter((candidate) => {

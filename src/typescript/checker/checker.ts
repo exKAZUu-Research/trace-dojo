@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 532 -- Holds shared type construction, bounded instantiation, structure lookup, and type constraints used by all checker components.
+// code-gauge-allow-file fileNcss 538 -- Holds shared type construction, bounded instantiation, structure lookup, and type constraints used by all checker components.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import type { SourceDiagnostic } from '../../interpreter/diagnostics';
@@ -480,18 +480,25 @@ export class Checker {
 
   private instantiateMapped(type: ObjectType, mapper: Mapper): Type {
     const mapped = type.mapped as MappedInfo;
-    const getTemplate = (): Type => this.instantiate(mapped.template, mapper);
+    const constraint = this.instantiate(mapped.constraint, mapper);
+    const typeParameter: TypeParameter = {
+      ...mapped.typeParameter,
+      id: newTypeId(),
+      constraint: () => constraint,
+    };
+    const localMapper = new Map<number, Type>([...mapper, [mapped.typeParameter.id, typeParameter]]);
+    const getTemplate = (): Type => this.instantiate(mapped.template, localMapper);
     const sourceVariable = mapped.source?.kind === 'typeParameter' ? mapped.source : undefined;
     const withSource =
       sourceVariable &&
       ((source: Type): Type => this.instantiate(type, new Map([...mapper, [sourceVariable.id, source]])));
     const instantiated = this.typeOperators.mappedType(
       {
-        typeParameter: mapped.typeParameter,
+        typeParameter,
         readonlyModifier: mapped.readonlyModifier,
         optionalModifier: mapped.optionalModifier,
-        constraint: this.instantiate(mapped.constraint, mapper),
-        nameType: mapped.nameType && this.instantiate(mapped.nameType, mapper),
+        constraint,
+        nameType: mapped.nameType && this.instantiate(mapped.nameType, localMapper),
         source: mapped.source && this.instantiate(mapped.source, mapper),
         get template() {
           return getTemplate();
@@ -837,6 +844,8 @@ export class Checker {
    * `NewableFunction` give every function or class, as under `strictBindCallApply`.
    */
   propertyOf(type: Type, name: string): Property | undefined {
+    const mapped = type.kind === 'object' ? this.typeOperators.mappedPropertyOf(type, name) : undefined;
+    if (mapped) return mapped;
     const structure = this.structureOf(type);
     const own = structure.properties.get(name);
     if (own) return own;

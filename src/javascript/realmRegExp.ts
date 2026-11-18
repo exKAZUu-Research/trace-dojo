@@ -174,8 +174,11 @@ function withHostRegExp<T>(runtime: Runtime, object: RegExpObject, run: (regexp:
 
 function exec(runtime: Runtime, object: RegExpObject, text: string): JsObject | null {
   runtime.scan(text.length);
-  const match = withHostRegExp(runtime, object, (regexp) => regexp.exec(text));
-  if (match) recordHostMatch(runtime);
+  const match = withHostRegExp(runtime, object, (regexp) => {
+    const result = regexp.exec(text);
+    if (result) recordHostMatch(runtime);
+    return result;
+  });
   // oxlint-disable-next-line unicorn/no-null -- exec returns null when nothing matches, as in JavaScript.
   return match ? matchArray(runtime, match) : null;
 }
@@ -224,7 +227,6 @@ function groupsObject(runtime: Runtime, groups: Record<string, Value> | undefine
 
 // String methods --------------------------------------------------------------------------------------------------
 
-// code-gauge-allow functionNcss 31 -- Lists the String methods that take a regular expression, each a small closure of its own.
 function defineStringMethods(builder: RealmBuilder): void {
   const { stringPrototype } = builder.realm;
   const method = (name: string, run: (call: NativeCall, text: string) => Value): void => {
@@ -238,14 +240,7 @@ function defineStringMethods(builder: RealmBuilder): void {
       return run(call, text);
     });
   };
-  method('match', ({ runtime, args }, text) => {
-    const object = regExpArgument(runtime, args[0], '');
-    if (!object.regexp.global) return exec(runtime, object, text);
-    const matches = withHostRegExp(runtime, object, (regexp) => text.match(regexp));
-    if (matches) recordHostMatch(runtime);
-    // oxlint-disable-next-line unicorn/no-null -- match returns null when nothing matches, as in JavaScript.
-    return matches ? runtime.newArray([...matches]) : null;
-  });
+  method('match', ({ runtime, args }, text) => matchWithRegExp(runtime, regExpArgument(runtime, args[0], ''), text));
   method('search', ({ runtime, args }, text) => {
     const object = regExpArgument(runtime, args[0], '');
     const index = text.search(new RegExp(object.regexp.source, object.regexp.flags));
@@ -261,6 +256,18 @@ function defineStringMethods(builder: RealmBuilder): void {
     const object = regExpArgument(runtime, pattern, 'g');
     return matchAllIterator(runtime, object, text, regExpStringIteratorPrototype);
   });
+}
+
+function matchWithRegExp(runtime: Runtime, object: RegExpObject, text: string): JsObject | null {
+  if (!object.regexp.global) return exec(runtime, object, text);
+  runtime.set(object, 'lastIndex', 0);
+  const matches = withHostRegExp(runtime, object, (regexp) => {
+    const result = text.match(regexp);
+    if (result) recordHostMatch(runtime);
+    return result;
+  });
+  // oxlint-disable-next-line unicorn/no-null -- match returns null when nothing matches, as in JavaScript.
+  return matches ? runtime.newArray([...matches]) : null;
 }
 
 function matchAllIterator(runtime: Runtime, object: RegExpObject, text: string, prototype: JsObject): JsObject {
@@ -299,8 +306,8 @@ export function replaceWithRegExp(
   }
   const template = isCallable(replacement) ? undefined : runtime.toString(replacement);
   runtime.scan(text.length);
+  if (object.regexp.global) runtime.set(object, 'lastIndex', 0);
   const matches = withHostRegExp(runtime, object, (regexp) => matchesToReplace(runtime, regexp, text));
-  if (matches.length > 0) recordHostMatch(runtime);
   let result = '';
   let position = 0;
   for (const match of matches) {
@@ -331,12 +338,14 @@ export function replaceWithRegExp(
 function matchesToReplace(runtime: Runtime, regexp: RegExp, text: string): RegExpExecArray[] {
   if (!regexp.global) {
     const match = regexp.exec(text);
+    if (match) recordHostMatch(runtime);
     return match ? [match] : [];
   }
   regexp.lastIndex = 0;
   // The host's matchAll steps over empty matches as JavaScript's replace does, and leaves lastIndex at 0.
   const matches: RegExpExecArray[] = [];
   for (const match of text.matchAll(regexp)) {
+    recordHostMatch(runtime);
     // Charged as the match arrays JavaScript keeps until the replacements run, captures included.
     runtime.allocate(match.length + 1);
     matches.push(match);
