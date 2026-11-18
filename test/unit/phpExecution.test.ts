@@ -375,6 +375,17 @@ test.each([
   expect(run(source).kind).toBe('compileError');
 });
 
+test.each([
+  ['$GLOBALS = [];', '$GLOBALS can only be modified using the $GLOBALS[$name] = $value syntax'],
+  ['unset($GLOBALS);', '$GLOBALS can only be modified using the $GLOBALS[$name] = $value syntax'],
+  ['[$GLOBALS] = [1];', '$GLOBALS can only be modified using the $GLOBALS[$name] = $value syntax'],
+  ['$value =& $GLOBALS;', 'Cannot acquire reference to $GLOBALS'],
+  ["$GLOBALS[]['name'] = 1;", 'Cannot append to $GLOBALS'],
+  ['function f($GLOBALS) {}', 'Cannot re-assign auto-global variable GLOBALS'],
+])('rejects forbidden use of the whole global table before execution: %s', (source, message) => {
+  expect(run(`<?php echo 'before'; ${source}`)).toMatchObject({ kind: 'compileError', diagnostics: [{ message }] });
+});
+
 test.each([String.raw`/(a)?\1/`, String.raw`/(?<x>a)?\k<x>/`])(
   'rejects empty-subject backreferences whose participation cannot be represented: %s',
   (pattern) => {

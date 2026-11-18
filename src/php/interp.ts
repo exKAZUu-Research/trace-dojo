@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 809 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 814 -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import {
   applyOperator,
@@ -34,7 +34,6 @@ import {
   declareClass,
   findClass,
   instantiate,
-  issetProp,
   readProp,
   readStaticProp,
   requireClass,
@@ -184,7 +183,7 @@ export function evChain(e: Expr, discardResult = false): Chain {
       return text;
     }
     case 'var': {
-      return readVar(e.name, e.row);
+      return e.name === 'GLOBALS' ? globalsArray() : readVar(e.name, e.row);
     }
     case 'varvar': {
       return readVar(toStr(ev(e.name)), e.row);
@@ -202,17 +201,20 @@ export function evChain(e: Expr, discardResult = false): Chain {
         warn(`Undefined global variable $${name}`);
         return null;
       }
-      const base = evChain(e.base);
-      if (base === SHORT) return SHORT;
+      const earlyBase = isCompiledVariable(e.base) ? undefined : evChain(e.base);
+      if (earlyBase === SHORT) return SHORT;
       const index = ev(e.index);
+      const base = earlyBase === undefined ? evChain(e.base) : earlyBase;
+      if (base === SHORT) return SHORT;
       runtime.row = e.row;
       return readIndex(base, index);
     }
     case 'prop': {
-      const object = evChain(e.obj);
-      if (object === SHORT) return SHORT;
-      if (e.nullsafe && object === null) return SHORT;
+      const earlyObject = e.nullsafe || !isCompiledVariable(e.obj) ? evChain(e.obj) : undefined;
+      if (earlyObject === SHORT || (e.nullsafe && earlyObject === null)) return SHORT;
       const name = memberName(e.name);
+      const object = earlyObject === undefined ? evChain(e.obj) : earlyObject;
+      if (object === SHORT) return SHORT;
       runtime.row = e.row;
       if (!(object instanceof PhpObject)) {
         warn(`Attempt to read property "${name}" on ${valueName(object)}`);
@@ -434,11 +436,7 @@ export function evQuiet(e: Expr, mode: 'isset' | 'coalesce' = 'isset'): Value {
       if (!(object instanceof PhpObject)) return null;
       const name = memberName(e.name);
       const scope = runtime.frame.scope;
-      if (mode === 'coalesce') return readProp(object, name, scope, 'coalesce');
-      const decl = classesModule.lookupProp(object.cls, name, scope);
-      if (!(decl?.hooks?.get && classesModule.canAccessProp(decl, scope)) && !issetProp(object, name, scope))
-        return null;
-      return readProp(object, name, scope, 'quiet');
+      return readProp(object, name, scope, mode === 'coalesce' ? 'coalesce' : 'empty');
     }
     case 'sprop': {
       const cls = resolveClassRef(e.cls);
@@ -461,7 +459,6 @@ function readVar(name: string, row: number): Value {
   }
   const ref = frame.vars.get(name);
   if (ref) return ref.v;
-  if (name === 'GLOBALS') return globalsArray();
   runtime.row = row;
   warn(`Undefined variable $${name}`);
   return null;
@@ -948,28 +945,41 @@ function binary(e: Extract<Expr, { k: 'bin' }>): Value {
     case 'or': {
       return evBool(e.l) || evBool(e.r);
     }
-    case 'xor': {
-      const mark = runtime.frame.temporaries.length;
-      const left = ev(e.l);
-      runtime.frame.temporaries.push(left);
-      const right = ev(e.r);
-      return keepResult(mark, toBool(left) !== toBool(right)) as Value;
-    }
     case '??': {
       return evQuiet(e.l, 'coalesce') ?? ev(e.r);
     }
   }
   const mark = runtime.frame.temporaries.length;
-  const left = ev(e.l);
-  runtime.frame.temporaries.push(left);
-  const right = ev(e.r);
-  runtime.row = e.row;
+  const readLeft = prepareOperand(e.l);
+  const readRight = prepareOperand(e.r);
+  const left = readLeft();
+  const right = readRight();
+  runtime.row = e.op === 'xor' ? e.r.row : e.row;
   // PHP frees the operands as soon as the operator has used them.
   return keepResult(mark, operate(e.op, left, right)) as Value;
 }
 
+export function isCompiledVariable(e: Expr): boolean {
+  return e.k === 'var' && e.name !== 'this' && e.name !== 'GLOBALS';
+}
+
+export function prepareOperand(e: Expr): () => Value {
+  if (isCompiledVariable(e)) return () => holdOperand(e);
+  const value = holdOperand(e);
+  return () => value;
+}
+
+function holdOperand(e: Expr): Value {
+  const value = ev(e);
+  rt().frame.temporaries.push(value);
+  return value;
+}
+
 function operate(op: string, left: Value, right: Value): Value {
   switch (op) {
+    case 'xor': {
+      return toBool(left) !== toBool(right);
+    }
     case '==': {
       return looseEquals(left, right);
     }

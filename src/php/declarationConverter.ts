@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 656 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 658 -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import type { Node } from '@willbooster/web-tree-sitter';
 
@@ -127,7 +127,7 @@ export abstract class DeclarationConverter extends ConverterBase {
     }
   }
 
-  // code-gauge-allow functionNcss 57 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+  // code-gauge-allow functionNcss 58 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
   protected params(node: Node, functionName: string, className?: string): ParamDecl[] {
     const params: ParamDecl[] = [];
     const seen = new Set<string>();
@@ -138,6 +138,7 @@ export abstract class DeclarationConverter extends ConverterBase {
       const nameNode = child.childForFieldName('name') as Node;
       const name = this.variableName(nameNode);
       if (name === 'this') this.error(child, '$this は引数の名前に使えません（Cannot use $this as parameter）。');
+      if (name === 'GLOBALS') this.error(child, 'Cannot re-assign auto-global variable GLOBALS');
       if (seen.has(name))
         this.error(child, `引数の名前 $${name} が重なっています（Redefinition of parameter $${name}）。`);
       seen.add(name);

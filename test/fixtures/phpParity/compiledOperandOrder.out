@@ -1,0 +1,13 @@
+int(3)
+bool(false)
+int(1)
+string(2) "bb"
+int(10)
+int(7)
+int(20)
+string(3) "new"
+
+Fatal error: Uncaught Error: Cannot use a scalar value as an array in /main.php:20
+Stack trace:
+#0 {main}
+  thrown in /main.php on line 20

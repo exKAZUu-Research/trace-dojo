@@ -56,7 +56,10 @@ export function evalArgs(args: Arg[], fn: Callable | undefined, name: string | u
     const first = values.length;
     try {
       if (arg.spread) {
-        const source = fn?.params.some((param) => param.byRef) && arg.e.k === 'var' ? placeOf(arg.e) : undefined;
+        const source =
+          fn?.params.some((param) => param.byRef) && arg.e.k === 'var' && arg.e.name !== 'GLOBALS'
+            ? placeOf(arg.e)
+            : undefined;
         let value = source ? source.get() : ev(arg.e);
         if (value instanceof PhpArray) frame.temporaries.push(value);
         if (value instanceof PhpArray && source) value = writableContainer(source);
@@ -109,8 +112,8 @@ export function evalArgs(args: Arg[], fn: Callable | undefined, name: string | u
       const byRef = fn ? paramIsByRef(fn, position, arg.name) : false;
       if (byRef) {
         const e = arg.e;
-        if (['var', 'varvar', 'idx', 'prop', 'sprop'].includes(e.k)) {
-          const ref = placeOf(e).ref();
+        if (['varvar', 'idx', 'prop', 'sprop'].includes(e.k) || (e.k === 'var' && e.name !== 'GLOBALS')) {
+          const ref = placeOf(e, 'write', true).ref();
           add({ v: ref.v, ref, name: arg.name });
           continue;
         }

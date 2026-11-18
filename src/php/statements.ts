@@ -469,7 +469,10 @@ function foreachStatement(statement: Extract<Stmt, { k: 'foreach' }>): Completio
       ? (runtime.lastReturnRef as Ref | undefined)
       : undefined;
     runtime.lastReturnRef = undefined;
-    const place = resolved instanceof ValuePlace ? new RefPlace(returned ?? new Ref(resolved.value)) : resolved;
+    const place =
+      resolved instanceof ValuePlace
+        ? new RefPlace(returned ?? new Ref(resolved.value))
+        : (resolved.nested?.() ?? resolved);
     const container = place.get();
     if (container instanceof PhpObject) return foreachObject(statement, container);
     if (!(container instanceof PhpArray)) {

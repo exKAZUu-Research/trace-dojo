@@ -607,13 +607,23 @@ export class Converter extends DeclarationConverter {
     return e;
   }
 
-  private checkWritable(e: Expr, node: Node): void {
+  private checkWritable(e: Expr, node: Node, acquireReference = false): void {
     switch (e.k) {
       case 'var': {
         if (e.name === 'this') this.error(node, '$this には代入できません（Cannot re-assign $this）。');
+        if (e.name === 'GLOBALS') {
+          this.error(
+            node,
+            acquireReference
+              ? 'Cannot acquire reference to $GLOBALS'
+              : '$GLOBALS can only be modified using the $GLOBALS[$name] = $value syntax'
+          );
+        }
         return;
       }
       case 'idx': {
+        if (e.base.k === 'var' && e.base.name === 'GLOBALS' && e.index === undefined)
+          this.error(node, 'Cannot append to $GLOBALS');
         this.checkWriteBase(e.base, node);
         return;
       }
@@ -862,7 +872,7 @@ export class Converter extends DeclarationConverter {
         const target = this.writable(node.childForFieldName('left') as Node);
         const sourceNode = node.childForFieldName('right') as Node;
         const source = this.expr(sourceNode);
-        if (!['call', 'mcall', 'scall', 'new'].includes(source.k)) this.writable(sourceNode);
+        if (!['call', 'mcall', 'scall', 'new'].includes(source.k)) this.checkWritable(source, sourceNode, true);
         if (source.k === 'new')
           this.error(node, 'new の結果は参照で代入できません（Cannot assign reference to non referenceable value）。');
         return { k: 'assignRef', target, source, row };
