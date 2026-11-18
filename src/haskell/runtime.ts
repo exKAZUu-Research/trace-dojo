@@ -17,6 +17,7 @@ export { DisplayAbort } from './previewBudget';
 
 const ALLOCATION_OVERHEAD = 8;
 const ALLOCATION_LIMIT = LIMITS.maxSlots * ALLOCATION_OVERHEAD;
+export const MAX_DISPLAY_NODES = Math.floor(LIMITS.maxSlots / ALLOCATION_OVERHEAD);
 
 /** A call shown in a trace: a named function (or the program's `main`) running `IO` statements. */
 export class TraceFrame implements TracedFrame {

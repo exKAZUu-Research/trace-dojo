@@ -7,6 +7,7 @@ import type { DisplayNode, TraceItemVariable } from '../problems/trace';
 import { CHAR_TYPE, CONS_CON, FLOAT_TYPE, NIL_CON, UNIT_CON } from './builtinTypes';
 import { compileProgram } from './compile';
 import { type CachedDisplay, displayCacheFor } from './displayCache';
+import { boundDisplayOutput } from './displayOutput';
 import { constructorFieldType, isConcreteType, slotDisplayType, UNKNOWN_TYPE } from './displayTypes';
 import { DISPLAY_OPERATIONS } from './previewBudget';
 import { floatToDigits } from './primitives';
@@ -78,7 +79,7 @@ function variablesOf(runtime: Runtime, frame: TraceFrame): TraceVariables {
     if (visible.name === 'this') self = entry;
   }
   addSelfFields(runtime, variables, self);
-  return variables;
+  return { ...variables, referenceVars: boundDisplayOutput(runtime, variables.referenceVars) };
 }
 
 function addSlotVariable(
