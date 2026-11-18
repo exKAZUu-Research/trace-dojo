@@ -1480,10 +1480,35 @@ test.each([
   'var value:E=undefined;const e=&value;',
   'var buf:[16]u8=undefined;var f=std.heap.FixedBufferAllocator.init(&buf);const e=try f.allocator().create(E);',
 ])('scalar error-union captures alias their ABI payload byte (%s)', (storage) => {
-  const source = `const std=@import("std");const E=error{Oops}!u8;const U=extern union{a:*E,b:*[4]u8};pub fn main()!void{${storage}e.*=7;const u=U{.a=e};if(e.*)|*p|{std.debug.print("{} {} {}|",.{p==&u.b[2],p.*,u.b[2]});p.*=9;std.debug.print("{}|",.{u.b[2]});u.b[2]=11;std.debug.print("{}",.{p.*});}else |_|{unreachable;}}`;
+  const source = `const std=@import("std");const E=error{Oops}!u8;const U=extern union{a:*E,b:*[4]u8};pub fn main()!void{${storage}e.*=7;const u=U{.a=e};if(e.*)|*p|{std.debug.print("{} {} {}|",.{p==&u.b[2],p.*,u.b[2]});p.*=9;std.debug.print("{}|",.{u.b[2]});u.b[2]=11;std.debug.print("{}|",.{p.*});e.*=error.Oops;p.*=12;std.debug.print("{}|",.{u.b[2]});u.b[2]=13;const failed=if(e.*)|_| false else |_| true;std.debug.print("{} {}|",.{failed,p.*});e.*=14;std.debug.print("{}",.{p.*});}else |_|{unreachable;}}`;
   expect(executeProgram('zig', source)).toMatchObject({
     kind: 'executed',
-    stderr: 'true 7 7|9|11',
+    stderr: 'true 7 7|9|11|12|true 13|14',
+    uncaughtException: undefined,
+  });
+});
+
+test.each([
+  'var value:E=undefined;const e=&value;',
+  'var buf:[16]u8=undefined;var f=std.heap.FixedBufferAllocator.init(&buf);const e=try f.allocator().create(E);',
+])('retained aggregate error payload fields remain writable when the tag changes (%s)', (storage) => {
+  const source = `const std=@import("std");const P=struct{x:u8,z:void};const E=error{Oops}!P;pub fn main()!void{${storage}e.*=.{.x=7,.z={}};if (e.*)|*p|{const x=&p.x;e.*=error.Oops;p.x=9;const failed=if(e.*)|_| false else |_| true;std.debug.print("{} {} {}|",.{failed,p.x,x.*});e.*=.{.x=11,.z={}};std.debug.print("{} {}",.{p.x,x.*});}else |_|{unreachable;}}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: 'true 9 9|11 11',
+    uncaughtException: undefined,
+  });
+});
+
+test.each([
+  ['struct{x:u8,y:u8,z:void}', '.{.x=7,.y=8,.z={}}', 'p.x', '[4]u8', '2'],
+  ['[2]u8', '.{7,8}', 'p[0]', '[4]u8', '2'],
+  ['struct{x:u16,z:void}', '.{.x=7,.z={}}', 'p.x', '[2]u16', '0'],
+])('error-union payload subfields share byte-view pointer identity for %s', (payload, value, field, view, index) => {
+  const source = `const std=@import("std");const E=error{Oops}!${payload};const U=extern union{a:*E,b:*${view}};pub fn main()void{var value:E=undefined;const e=&value;e.*=${value};const u=U{.a=e};if(e.*)|*p|{const alias=&u.b[${index}];std.debug.print("{} {} {}|",.{&${field}==alias,${field},alias.*});e.*=error.Oops;${field}=9;std.debug.print("{} {}",.{&${field}==alias,alias.*});}else |_|{unreachable;}}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: 'true 7 7|true 9',
     uncaughtException: undefined,
   });
 });

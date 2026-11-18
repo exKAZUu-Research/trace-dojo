@@ -730,7 +730,8 @@ export abstract class StatementCompiler extends CallCompiler {
     const inner = this.resultLocationStore(value, type.payload);
     if (!inner) return undefined;
     return (frame, holder, index) => {
-      if (holder.slots[index] instanceof ErrorValue) {
+      const current = holder.slots[index];
+      if (current === undefined || current instanceof ErrorValue) {
         const slots = valueSlots(type.payload);
         frame.runtime.reserveStorage(slots);
         frame.runtime.spend(slots);

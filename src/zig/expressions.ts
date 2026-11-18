@@ -30,7 +30,7 @@ import {
 } from './floats';
 import { integerOperationWork, type IntegerWork, spendIntegerOperation, spendIntegerShift } from './integerWork';
 import { errorUnionOffsets, fieldOffsets, optionalNicheBits, sizeOf, unionOffsets } from './layout';
-import { spendMemory } from './memoryAccounting';
+import { memorySpace, spendMemory } from './memoryAccounting';
 import { callableNative } from './nativeAdapter';
 import { asFloat, comparisonTest, isArithmeticType, isIntegerType, isZero, sign } from './operands';
 import { type Frame, Jump, withHeldValues } from './runtime';
@@ -777,7 +777,12 @@ export abstract class ExpressionCompiler extends SemaBase {
     const { payload } = type;
     const offset = errorUnionOffsets(payload).payload;
     if (sizeOf(payload) === 0) return (parent) => this.zeroPointerAt(parent.fieldLocation(offset), payload);
-    return (parent) => parent.atPayloadOffset(offset);
+    return (parent) => {
+      const backing = memorySpace().typedViews.get(parent.target.slots);
+      return backing
+        ? new Pointer(backing.memory.arrayView(payload, 1n, backing.offset(parent.index) + offset * 8), 0)
+        : parent.projectErrorPayload(offset);
+    };
   }
 
   // Indexing and slicing ----------------------------------------------------------------------------------------------

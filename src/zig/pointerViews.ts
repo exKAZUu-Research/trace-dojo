@@ -1,15 +1,17 @@
 import { BufferMemory, type BufferMemorySpace, physicalUnion } from './bufferMemory';
 import { BigFloat } from './floats';
-import { bitSizeOf, fieldOffsets, optionalNicheBits, sizeOf } from './layout';
+import { bitSizeOf, errorUnionOffsets, fieldOffsets, optionalNicheBits, sizeOf } from './layout';
 import { reserveMemory, spendMemory } from './memoryAccounting';
 import { arrayOf, type StructType, type Type, typeId } from './types';
 import {
   Cell,
   ErrorValue,
   FnValue,
+  hasAggregateStorage,
   NULL,
   Pointer,
   registerStorageLocation,
+  type Slots,
   storeInto,
   type Value,
   ZArray,
@@ -47,7 +49,7 @@ export function viewPointer(pointer: Pointer, type: Type, space: BufferMemorySpa
   if (prior) return prior;
   const backing = space.typedViews.get(pointer.target.slots);
   const memory = backing?.memory ?? space.memories.get(location.storage as Value[]);
-  const offset = backing ? backing.offset(pointer.index) + (pointer.offsetInSlot ?? 0) * 8 : location.index * 8;
+  const offset = backing ? backing.offset(pointer.index) : location.index * 8;
   let result: Pointer;
   if (memory) result = new Pointer(memory.arrayView(type, capacity(memory.byteLength - offset / 8, type), offset), 0);
   else {
@@ -136,7 +138,6 @@ interface PointerStorage {
   cache: Map<number, { value: Value }>;
 }
 
-// code-gauge-allow functionCognitiveComplexity 18 -- Keeps optional payload and tag synchronization at the same byte-view boundary.
 function synchronizeRegion(
   memory: BufferMemory,
   storage: PointerStorage,
@@ -146,20 +147,17 @@ function synchronizeRegion(
 ): void {
   const { source, type, cache } = storage;
   visitRegion(source, type, { start: offset, end: offset + bits, offset: 0 }, (pointer, child, start, packed) => {
-    const payload =
-      child.kind === 'optional' && !optionalNicheBits(child.child)
-        ? Pointer.optionalProjection(pointer.target, pointer.index)
-        : undefined;
+    const payload = retainedPayload(pointer, child);
     if (write) {
-      storeInto(pointer.target, pointer.index, memory.read(child, start, packed));
-      if (payload && child.kind === 'optional' && pointer.load() === NULL)
-        storeInto(payload, 0, memory.read(child.child, start));
+      const value = memory.read(child, start, packed);
+      storeInto(pointer.target, pointer.index, value);
+      if (payload?.inactive(value)) storeInto(payload.storage, 0, memory.read(payload.type, start + payload.offset));
       cache.delete(start);
       return;
     }
     const value = pointer.load();
     if (!payload && cache.has(start) && Object.is(cache.get(start)!.value, value)) return;
-    if (payload && child.kind === 'optional' && value === NULL) memory.write(child.child, start, payload.slots[0]);
+    if (payload?.inactive(value)) memory.write(payload.type, start + payload.offset, payload.storage.slots[0]);
     memory.write(child, start, value, packed);
     if (
       typeof value !== 'object' ||
@@ -171,6 +169,24 @@ function synchronizeRegion(
     )
       cache.set(start, { value });
   });
+}
+
+function retainedPayload(
+  pointer: Pointer,
+  type: Type
+): { storage: Slots; type: Type; offset: number; inactive: (value: Value) => boolean } | undefined {
+  if (type.kind === 'optional' && !optionalNicheBits(type.child)) {
+    const storage = Pointer.optionalProjection(pointer.target, pointer.index);
+    if (storage) return { storage, type: type.child, offset: 0, inactive: (value) => value === NULL };
+  }
+  if (type.kind === 'error_union') {
+    const storage = Pointer.errorProjection(pointer.target, pointer.index);
+    if (storage) {
+      const offset = errorUnionOffsets(type.payload).payload * 8;
+      return { storage, type: type.payload, offset, inactive: (value) => value instanceof ErrorValue };
+    }
+  }
+  return undefined;
 }
 
 type RegionVisitor = (pointer: Pointer, type: Type, offset: number, packed: number | undefined) => void;
@@ -304,15 +320,37 @@ function sourceLocation(pointer: Pointer, type: Type, offset: number): { storage
     const array = pointer.load() as ZArray;
     const stride = sizeOf(type.child) * 8;
     const index = Math.floor(offset / stride);
-    return sourceLocation(new Pointer(array, array.offset + index), type.child, offset - index * stride);
+    const element = new Pointer(array, array.offset + index);
+    const source = hasAggregateStorage(type.child) ? element.withFieldLocation(pointer, (index * stride) / 8) : element;
+    return sourceLocation(source, type.child, offset - index * stride);
   }
   if (type.kind === 'struct' && type.layout !== 'packed') {
-    for (const region of intersectingFields(type, offset, offset + 1))
-      return sourceLocation(new Pointer(pointer.load() as ZStruct, region.index), region.type, offset - region.offset);
+    for (const region of intersectingFields(type, offset, offset + 1)) {
+      const field = new Pointer(pointer.load() as ZStruct, region.index);
+      const source = hasAggregateStorage(region.type) ? field.withFieldLocation(pointer, region.offset / 8) : field;
+      return sourceLocation(source, region.type, offset - region.offset);
+    }
   }
-  if (type.kind === 'error_union') return pointer.fieldLocation(offset / 8);
+  if (type.kind === 'error_union') return errorSourceLocation(pointer, type, offset);
   const location = pointer.storageLocation();
   return { storage: location.storage, index: location.index + offset / (8 * Math.max(1, sizeOf(type))) };
+}
+
+function errorSourceLocation(
+  pointer: Pointer,
+  type: Extract<Type, { kind: 'error_union' }>,
+  offset: number
+): { storage: object; index: number } {
+  const payloadOffset = errorUnionOffsets(type.payload).payload;
+  const within = offset - payloadOffset * 8;
+  if (
+    within >= 0 &&
+    within < sizeOf(type.payload) * 8 &&
+    (Pointer.errorProjection(pointer.target, pointer.index) || !(pointer.load() instanceof ErrorValue))
+  ) {
+    return sourceLocation(pointer.projectErrorPayload(payloadOffset), type.payload, within);
+  }
+  return pointer.fieldLocation(offset / 8);
 }
 
 function capacity(bytes: number, type: Type): bigint {

@@ -1,3 +1,4 @@
+// code-gauge-allow-file fileNcss 423 -- Keeps logical slots, pointer identity, and retained payload storage with their shared assignment rules.
 import { ExecutionLimitError, LIMITS } from '../interpreter/limits';
 import type { TurtleState } from '../interpreter/turtleWorld';
 import { BigFloat, compareFloats } from './floats';
@@ -241,8 +242,7 @@ export class Pointer {
   constructor(
     readonly target: Slots,
     readonly index: number,
-    private readonly aggregateOrigin?: { storage: object; index: number },
-    readonly offsetInSlot?: number
+    private readonly aggregateOrigin?: { storage: object; index: number }
   ) {}
 
   load(): Value {
@@ -251,15 +251,23 @@ export class Pointer {
 
   project(kind: 'length' | 'optional'): Pointer {
     const location = kind === 'optional' ? storageLocation(this.target.slots, this.index) : this.storageLocation();
-    let projections = Pointer.projections.get(location.storage);
-    if (!projections) {
-      projections = new Map();
-      Pointer.projections.set(location.storage, projections);
-    }
+    const projections = Pointer.projectionMap(location.storage);
     const key = `${location.index} ${kind}`;
     let storage = projections.get(key);
     if (!storage) {
       storage = kind === 'length' ? new SliceLength(this) : new OptionalSlots(this);
+      projections.set(key, storage);
+    }
+    return new Pointer(storage, 0);
+  }
+
+  projectErrorPayload(offset: number): Pointer {
+    const location = this.slotLocation();
+    const projections = Pointer.projectionMap(location.storage);
+    const key = `${location.index} error`;
+    let storage = projections.get(key);
+    if (!storage) {
+      storage = new ErrorPayloadSlots(this, offset);
       projections.set(key, storage);
     }
     return new Pointer(storage, 0);
@@ -271,8 +279,22 @@ export class Pointer {
     return projection instanceof OptionalSlots ? projection : undefined;
   }
 
+  static errorProjection(target: Slots, index: number): ErrorPayloadSlots | undefined {
+    const location = storageLocation(target.slots, index);
+    const projection = Pointer.projections.get(location.storage)?.get(`${location.index} error`);
+    return projection instanceof ErrorPayloadSlots ? projection : undefined;
+  }
+
+  private static projectionMap(owner: object): Map<string, Slots> {
+    let projections = Pointer.projections.get(owner);
+    if (!projections) {
+      projections = new Map();
+      Pointer.projections.set(owner, projections);
+    }
+    return projections;
+  }
+
   storageLocation(): { storage: object; index: number } {
-    if (this.offsetInSlot !== undefined && this.aggregateOrigin) return pointerLocation(this.aggregateOrigin);
     const slots = this.target.slots;
     const projected = pointerLocations.get(slots)?.(this.index);
     if (projected) return pointerLocation(projected);
@@ -297,10 +319,6 @@ export class Pointer {
 
   withFieldLocation(parent: Pointer, offset: number): Pointer {
     return new Pointer(this.target, this.index, parent.fieldLocation(offset));
-  }
-
-  atPayloadOffset(offset: number): Pointer {
-    return new Pointer(this.target, this.index, this.fieldLocation(offset), (this.offsetInSlot ?? 0) + offset);
   }
 
   private aggregateLocation(): { storage: object; index: number } {
@@ -500,14 +518,9 @@ export function storeInto(target: Slots, index: number, value: Value): void {
   storeSnapshotInto(target, index, copyValue(value));
 }
 
-// code-gauge-allow functionCognitiveComplexity 21 -- Preserves aggregate and optional payload locations when storing copied values.
-// code-gauge-allow functionNcss 33 -- Keeps the storage identity rules together for each value representation.
+// code-gauge-allow functionCognitiveComplexity 21 -- Preserves existing aggregate locations when storing copied values.
 function storeSnapshotInto(target: Slots, index: number, value: Value): void {
-  const payload = Pointer.optionalProjection(target, index);
-  if (payload && value !== NULL) {
-    payload.assign(optionalPayload(value));
-    value = payload.presentValue();
-  }
+  value = valueWithRetainedPayload(target, index, value);
   if (storageLocations.has(target.slots)) {
     target.slots[index] = value;
     return;
@@ -545,6 +558,18 @@ function storeSnapshotInto(target: Slots, index: number, value: Value): void {
     return;
   }
   target.slots[index] = value;
+}
+
+function valueWithRetainedPayload(target: Slots, index: number, value: Value): Value {
+  const error = Pointer.errorProjection(target, index);
+  if (error) {
+    if (value instanceof ErrorValue) error.retainCurrent();
+    else return error.assign(value);
+  }
+  const optional = Pointer.optionalProjection(target, index);
+  if (!optional || value === NULL) return value;
+  optional.assign(optionalPayload(value));
+  return optional.presentValue();
 }
 
 class SliceLength implements Slots {
@@ -590,6 +615,44 @@ class OptionalSlots implements Slots {
 
   presentValue(): Value {
     return this.wrapped ? new Some(this.cell.slots[0]) : this.cell.slots[0];
+  }
+}
+
+class ErrorPayloadSlots implements Slots {
+  private readonly cell: Cell;
+  readonly slots: Value[];
+
+  constructor(
+    private readonly pointer: Pointer,
+    offset: number
+  ) {
+    this.cell = new Cell(pointer.load());
+    this.slots = new Proxy(this.cell.slots, {
+      get: (target, key, receiver) => {
+        if (key === '0') this.retainCurrent();
+        return Reflect.get(target, key, receiver);
+      },
+      set: (_, key, value: Value) => {
+        if (key === '0') {
+          this.cell.slots[0] = value;
+          if (!(this.pointer.load() instanceof ErrorValue)) this.pointer.target.slots[this.pointer.index] = value;
+        }
+        return true;
+      },
+    });
+    aliasStorage(this.slots, this.cell.slots);
+    registerPointerLocation(this.slots, () => this.pointer.fieldLocation(offset));
+  }
+
+  retainCurrent(): void {
+    const value = this.pointer.load();
+    if (!(value instanceof ErrorValue)) this.cell.slots[0] = value;
+  }
+
+  assign(value: Value): Value {
+    this.retainCurrent();
+    storeSnapshotInto(this.cell, 0, value);
+    return this.cell.slots[0];
   }
 }
 
