@@ -1412,6 +1412,27 @@ test.each([0, 1])('zero-sized union projections preserve the source address at i
   });
 });
 
+test.each([
+  ['var value:S=initial;const s=&value;', '9'],
+  ['var values=[_]S{initial,.{.prefix=4,.u=.{.only={}},.v=.{.only={}},.suffix=10}};const s=&values[1];', '10'],
+])('zero-sized siblings in a nonempty struct share their physical offset (%s)', (storage, suffix) => {
+  const source = `const std=@import("std");const U=union(enum(u64)){only:void=7};const S=struct{prefix:u8,u:U,v:U,suffix:u16};fn get(n:*usize,s:*S)*S{n.*+=1;return s;}pub fn main()void{const initial=S{.prefix=3,.u=.{.only={}},.v=.{.only={}},.suffix=9};${storage}var n:usize=0;const p=&get(&n,s).u.only;const q=&get(&n,s).v.only;const r=&get(&n,s).u.only;get(&n,s).prefix=7;std.debug.print("{} {} {} {} {}",.{n,p==q,p==r,s.prefix,s.suffix});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: `4 true true 7 ${suffix}`,
+    uncaughtException: undefined,
+  });
+});
+
+test('nested zero-sized fields retain offsets through nonempty aggregate fields', () => {
+  const source = `const std=@import("std");const U=union(enum(u64)){only:void=7};const Inner=struct{n:u8,u:U};const Outer=struct{inner:Inner,u:U};fn get(s:*Outer)*Outer{return s;}pub fn main()void{var s:Outer=undefined;s.inner.n=7;const a=&get(&s).inner.u.only;const b=&get(&s).u.only;std.debug.print("{} {}",.{a==b,s.inner.n});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: 'true 7',
+    uncaughtException: undefined,
+  });
+});
+
 test('writer result types use the canonical usize and mutable byte slice', () => {
   const source = `const std=@import("std");fn less(n:usize,a:u8,b:u8)bool{return n>0 and a<b;}
 pub fn main()!void{var b:[2]u8=undefined;var w=std.Io.Writer.fixed(&b);const n=try w.write("x");var a=[_]u8{2,1};std.sort.heap(u8,&a,n,less);std.debug.print("{} {} {}",.{a[0],a[1],@TypeOf(w.buffered())==[]u8});}`;

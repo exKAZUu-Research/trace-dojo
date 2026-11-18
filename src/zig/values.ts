@@ -87,6 +87,7 @@ export function storageLocation(storage: object, index: number): { storage: obje
 
 const pointerLocations = new WeakMap<object, (index: number) => { storage: object; index: number }>();
 const interiorLocations = new WeakMap<object, Map<number, object>>();
+const aggregateLocations = new WeakMap<object, WeakValueMap<number, object>>();
 
 export function registerPointerLocation(
   storage: object,
@@ -235,7 +236,8 @@ export class Pointer {
   private static readonly projections = new WeakMap<object, Map<string, Slots>>();
   constructor(
     readonly target: Slots,
-    readonly index: number
+    readonly index: number,
+    private readonly aggregateOrigin?: { storage: object; index: number }
   ) {}
 
   load(): Value {
@@ -280,6 +282,28 @@ export class Pointer {
 
   slotLocation(): { storage: object; index: number } {
     return storageLocation(this.target.slots, this.index);
+  }
+
+  fieldLocation(offset: number): { storage: object; index: number } {
+    const origin = this.aggregateOrigin ?? this.aggregateLocation();
+    return { storage: origin.storage, index: origin.index + offset };
+  }
+
+  private aggregateLocation(): { storage: object; index: number } {
+    const slots = this.target.slots;
+    if (storageLocations.has(slots) || pointerLocations.has(slots)) return this.storageLocation();
+    const location = this.slotLocation();
+    let fields = aggregateLocations.get(location.storage);
+    if (!fields) {
+      fields = new WeakValueMap();
+      aggregateLocations.set(location.storage, fields);
+    }
+    let storage = fields.get(location.index);
+    if (!storage) {
+      storage = {};
+      fields.set(location.index, storage);
+    }
+    return { storage, index: 0 };
   }
 
   equals(other: Pointer): boolean {

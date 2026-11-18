@@ -29,7 +29,7 @@ import {
   parseFloatLiteral,
 } from './floats';
 import { integerOperationWork, type IntegerWork, spendIntegerOperation, spendIntegerShift } from './integerWork';
-import { optionalNicheBits, sizeOf } from './layout';
+import { fieldOffsets, optionalNicheBits, sizeOf, unionOffsets } from './layout';
 import { spendMemory } from './memoryAccounting';
 import { callableNative } from './nativeAdapter';
 import { asFloat, comparisonTest, isArithmeticType, isIntegerType, isZero, sign } from './operands';
@@ -475,7 +475,12 @@ export abstract class ExpressionCompiler extends SemaBase {
       return this.error(span, `${typeName(type)} 型には、フィールド「${name}」がありません。`);
     }
     if (field.comptimeValue !== undefined) return this.fixedResult(base, field.type, field.comptimeValue.value, span);
-    const project = this.fieldPointer(base, field.type, (parent) => new Pointer(parent.load() as ZStruct, index));
+    const project = this.fieldPointer(
+      base,
+      field.type,
+      () => fieldOffsets(type)[index] / 8,
+      (parent) => new Pointer(parent.load() as ZStruct, index)
+    );
     const parent = this.knownAddress(base);
     if (parent) return knownAt(field.type, project(parent), span);
     const fieldPlace = this.projectedPlace(base, field.type, project);
@@ -493,7 +498,12 @@ export abstract class ExpressionCompiler extends SemaBase {
     const field = fields[index];
     if (type.layout !== 'auto') {
       const view = (value: Value): Slots => physicalUnion(type, value as ZUnion).fieldView!(index);
-      const project = this.fieldPointer(base, field.type, (parent) => new Pointer(view(parent.load()), 0));
+      const project = this.fieldPointer(
+        base,
+        field.type,
+        () => 0,
+        (parent) => new Pointer(view(parent.load()), 0)
+      );
       const parent = this.knownAddress(base);
       if (parent) return knownAt(field.type, project(parent), span);
       return {
@@ -509,7 +519,12 @@ export abstract class ExpressionCompiler extends SemaBase {
       }
       return union;
     };
-    const project = this.fieldPointer(base, field.type, (parent) => new Pointer(check(parent.load()), 0));
+    const project = this.fieldPointer(
+      base,
+      field.type,
+      () => unionOffsets(type).payload,
+      (parent) => new Pointer(check(parent.load()), 0)
+    );
     if (base.known) {
       const union = base.value as ZUnion;
       if (union.tag !== index) {
@@ -530,11 +545,24 @@ export abstract class ExpressionCompiler extends SemaBase {
     };
   }
 
-  private fieldPointer(base: TExpr, child: Type, project: (parent: Pointer) => Pointer): (parent: Pointer) => Pointer {
+  private fieldPointer(
+    base: TExpr,
+    child: Type,
+    offsetOf: () => number,
+    project: (parent: Pointer) => Pointer
+  ): (parent: Pointer) => Pointer {
     const comptime = this.requiresComptime(base.type, base.span);
-    if (comptime || sizeOf(child) !== 0) return project;
-    if (sizeOf(base.type) === 0) return (parent) => this.zeroPointerAt(parent.slotLocation(), child);
-    return (parent) => this.zeroPointerAt(project(parent).slotLocation(), child);
+    if (comptime) return project;
+    const zero = sizeOf(child) === 0;
+    const aggregate = child.kind === 'struct' || child.kind === 'union';
+    if (!zero && !aggregate) return project;
+    const offset = offsetOf();
+    if (sizeOf(base.type) === 0) return (parent) => this.zeroPointerAt(parent.fieldLocation(offset), child);
+    return (parent) => {
+      const target = project(parent);
+      const origin = parent.fieldLocation(offset);
+      return zero ? this.zeroPointerAt(origin, child) : new Pointer(target.target, target.index, origin);
+    };
   }
 
   private projectedPlace(base: TExpr, child: Type, project: (parent: Pointer) => Pointer): Place | undefined {
