@@ -1,5 +1,5 @@
 import { enc, lower } from './bytes';
-import { parseSignature } from './calls';
+import { parseSignature, parseTypeText } from './calls';
 import { rt } from './runtime';
 import {
   type ClassKind,
@@ -123,7 +123,7 @@ export interface ClassDefinition {
   isAbstract?: boolean;
   isFinal?: boolean;
   isCloneable?: boolean;
-  props?: { name: string; visibility: Visibility; defaultValue: () => Value; typed?: boolean; isReadonly?: boolean }[];
+  props?: { name: string; visibility: Visibility; defaultValue?: () => Value; type?: string; isReadonly?: boolean }[];
   consts?: Record<string, Value>;
   methods?: NativeMethod[];
   createInternal?: (object: PhpObject) => unknown;
@@ -152,7 +152,7 @@ export function installNatives(): void {
   for (const definition of classDefinitions) runtime.classes.set(lower(definition.name), buildClass(definition));
 }
 
-// code-gauge-allow functionCognitiveComplexity 24 -- Transcribes PHP's algorithm for this function step by step, whose branches mirror PHP's.
+// code-gauge-allow functionCognitiveComplexity 25 -- Transcribes PHP's algorithm for this function step by step, whose branches mirror PHP's.
 // code-gauge-allow functionNcss 45 -- Transcribes PHP's algorithm for this function step by step, whose branches mirror PHP's.
 function buildClass(definition: ClassDefinition): PhpClass {
   const runtime = rt();
@@ -187,9 +187,9 @@ function buildClass(definition: ClassDefinition): PhpClass {
       isStatic: false,
       isReadonly: prop.isReadonly ?? false,
       isFinal: false,
-      hasDefault: true,
+      hasDefault: prop.defaultValue !== undefined || prop.type === undefined,
       defaultValue: prop.defaultValue,
-      type: prop.typed ? { k: 'named', name: 'mixed' } : undefined,
+      type: prop.type ? parseTypeText(prop.type) : undefined,
     };
     const index = cls.props.findIndex((existing) => existing.name === prop.name);
     if (index === -1) cls.props.push(decl);

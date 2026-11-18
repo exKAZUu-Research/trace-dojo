@@ -18,6 +18,7 @@ export function isObjectCreation(e: Expr): boolean {
 }
 
 /** The variables an arrow function's body reads, which it captures by value from where it is defined. */
+// code-gauge-allow functionNcss 31 -- Keeps the ordered PHP cases together because each branch shares the same dispatch state.
 export function collectVariables(e: Expr, params: Set<string>, found = new Set<string>()): Set<string> {
   const visit = (value: unknown): void => {
     if (!value || typeof value !== 'object') return;
@@ -25,7 +26,7 @@ export function collectVariables(e: Expr, params: Set<string>, found = new Set<s
       for (const item of value) visit(item);
       return;
     }
-    const node = value as { k?: string; name?: unknown; fn?: FunctionDecl; uses?: { name: string }[] };
+    const node = value as { k?: string; name?: unknown; fn?: FunctionDecl; uses?: { name: string }[]; args?: Arg[] };
     if (node.k === 'var' && typeof node.name === 'string') {
       if (!params.has(node.name) && node.name !== 'this') found.add(node.name);
       return;
@@ -36,6 +37,10 @@ export function collectVariables(e: Expr, params: Set<string>, found = new Set<s
     }
     if (node.k === 'arrow' && node.fn) {
       for (const name of node.fn.captures ?? []) if (!params.has(name)) found.add(name);
+      return;
+    }
+    if (node.k === 'newAnon') {
+      visit(node.args);
       return;
     }
     for (const [key, child] of Object.entries(node)) if (key !== 'row') visit(child);

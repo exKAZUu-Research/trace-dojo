@@ -233,15 +233,15 @@ function slotValue(object: PhpObject, key: string): Value {
   return slot;
 }
 
-function throwableProps(): NonNullable<ClassDefinition['props']> {
+function throwableProps(base: string): NonNullable<ClassDefinition['props']> {
   return [
     { name: 'message', visibility: 'protected', defaultValue: () => '' },
-    { name: 'string', visibility: 'private', defaultValue: () => '' },
+    { name: 'string', visibility: 'private', type: 'string', defaultValue: () => '' },
     { name: 'code', visibility: 'protected', defaultValue: () => 0n },
-    { name: 'file', visibility: 'protected', defaultValue: () => '' },
-    { name: 'line', visibility: 'protected', defaultValue: () => 0n },
-    { name: 'trace', visibility: 'private', defaultValue: () => new PhpArray() },
-    { name: 'previous', visibility: 'private', defaultValue: () => null },
+    { name: 'file', visibility: 'protected', type: 'string', defaultValue: () => '' },
+    { name: 'line', visibility: 'protected', type: 'int', defaultValue: base === 'Exception' ? () => 0n : undefined },
+    { name: 'trace', visibility: 'private', type: 'array', defaultValue: () => new PhpArray() },
+    { name: 'previous', visibility: 'private', type: '?Throwable', defaultValue: () => null },
   ];
 }
 
@@ -264,7 +264,7 @@ for (const base of ['Exception', 'Error']) {
   defineClass({
     name: base,
     interfaces: ['Stringable', 'Throwable'],
-    props: throwableProps(),
+    props: throwableProps(base),
     methods: throwableMethods(base),
     createInternal: initThrowable,
   });
@@ -273,7 +273,7 @@ for (const base of ['Exception', 'Error']) {
 defineClass({
   name: 'ErrorException',
   parent: 'Exception',
-  props: [{ name: 'severity', visibility: 'protected', defaultValue: () => 1n }],
+  props: [{ name: 'severity', visibility: 'protected', type: 'int', defaultValue: () => 1n }],
   methods: [
     {
       signature:

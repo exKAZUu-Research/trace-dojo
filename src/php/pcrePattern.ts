@@ -1,5 +1,4 @@
 // oxlint-disable unicorn/prefer-code-point -- PHP pattern strings contain bytes; UTF-8 validation reads each byte separately.
-// code-gauge-allow-file fileNcss 999 -- Holds the cases of one concern of the interpreter, which share their helpers.
 import propertyAliases from 'unicode-property-value-aliases-ecmascript';
 
 import { dec, enc, utf8Length } from './bytes';
@@ -835,6 +834,8 @@ class PatternConverter {
     return group;
   }
 
+  // code-gauge-allow functionNcss 31 -- Keeps the ordered PHP cases together because each branch shares the same dispatch state.
+  // code-gauge-allow functionCognitiveComplexity 17 -- Keeps the ordered PHP cases together because each branch shares the same dispatch state.
   private parenthesizedSubroutine(rest: string): void {
     this.index += 2;
     if (rest.startsWith('&') || rest.startsWith('P>')) {
@@ -845,8 +846,14 @@ class PatternConverter {
     }
     if (rest.startsWith('R')) {
       this.index++;
-      if (this.source[this.index] !== ')')
-        this.fail('(?R (recursive pattern call) must be followed by a closing parenthesis', this.index);
+      const captureList = this.source[this.index] === '(';
+      if (captureList) this.readSubroutineCaptures();
+      if (this.source[this.index] !== ')') {
+        const message = captureList
+          ? 'missing closing parenthesis'
+          : '(?R (recursive pattern call) must be followed by a closing parenthesis';
+        this.fail(message, this.index);
+      }
       this.index++;
       this.subroutine(0, this.index);
       return;
@@ -870,13 +877,17 @@ class PatternConverter {
       const start = this.index;
       const opener = this.source[this.index];
       const digits = this.readMatch(/^[+-]?\d+/)?.[0];
-      if (digits) this.groupNumber(digits, this.index);
-      else if (opener === '<' || opener === "'") {
+      if (digits) {
+        const group = this.groupNumber(digits, this.index);
+        if (group === 0) this.fail('reference to non-existent subpattern', this.index);
+        this.references.push({ target: group, at: start });
+      } else if (opener === '<' || opener === "'") {
         this.index++;
-        this.readGroupName(opener === '<' ? '>' : "'");
+        const { name } = this.readGroupName(opener === '<' ? '>' : "'");
+        this.references.push({ target: name, at: start });
       } else this.fail('expected capture group number or name', start);
     } while (this.source[this.index] === ',');
-    if (this.source[this.index] !== ')') this.fail('missing closing parenthesis', this.index);
+    if (this.source[this.index] !== ')') this.fail('missing closing parenthesis for condition', this.index);
     this.index++;
   }
 
@@ -1039,6 +1050,7 @@ class PatternConverter {
     if ((this.options.utf8 ? enc(name).length : name.length) > 128)
       this.fail('subpattern name is too long (maximum 128 code units)', this.index);
     if (terminator === '}') this.readMatch(/^[ \t]*/);
+    if (parenthesized && this.source[this.index] === '(') this.readSubroutineCaptures();
     if (this.source[this.index] !== terminator) {
       if (parenthesized) this.fail('missing closing parenthesis', this.index);
       this.fail('syntax error in subpattern name (missing terminator?)', this.index);

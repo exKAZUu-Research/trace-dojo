@@ -73,6 +73,7 @@ export interface FunctionContext {
   isClosure?: boolean;
   /** The function's name in the names of the closures it defines, such as `A::m()`; undefined at the top level. */
   displayName?: string;
+  propertyName?: string;
 }
 
 /** The state a conversion shares: the namespace and imports, the enclosing function and loops, and errors. */
@@ -168,13 +169,15 @@ export abstract class ConverterBase {
     return this.resolveClassName(raw);
   }
 
-  protected classRef(node: Node, deferScope = false, className = false): ClassRef {
+  protected classRef(node: Node, deferScope = false, use: 'name' | 'constant' | 'reference' = 'reference'): ClassRef {
     const isName = node.type === 'name' || node.type === 'qualified_name' || node.type === 'relative_name';
     if (node.type !== 'relative_scope' && !isName) return { k: 'expr', e: this.expr(node) };
     const raw = this.nameText(node);
-    const word = relativeClassName(raw, className);
+    const word = relativeClassName(raw, use === 'name');
     if (word) {
       if (this.preserveSyntax) return { k: 'named', name: lower(raw) === 'static' ? 'static' : raw };
+      if (use === 'constant' && lower(raw).startsWith('namespace\\'))
+        this.error(node, `'${raw}' is an invalid class name`);
       if (!deferScope) this.checkClassScope(node, word);
       return { k: word };
     }
@@ -206,11 +209,15 @@ export abstract class ConverterBase {
   protected variableName(node: Node): string {
     if (node.type === 'variable_name') {
       const name = enc(node.namedChildren[0]?.text ?? node.text.replace(/^\$/, ''));
-      if (SUPERGLOBALS.has(name)) this.unsupported(node, `スーパーグローバル変数 $${name}`);
-      if (name === 'argv' || name === 'argc') this.unsupported(node, `コマンドライン引数 $${name}`);
+      this.checkVariableAvailability(node, name);
       return name;
     }
     this.error(node, '書き方に誤りがあります。');
+  }
+
+  protected checkVariableAvailability(node: Node, name: string): void {
+    if (SUPERGLOBALS.has(name)) this.unsupported(node, `スーパーグローバル変数 $${name}`);
+    if (name === 'argv' || name === 'argc') this.unsupported(node, `コマンドライン引数 $${name}`);
   }
 
   // code-gauge-allow functionNcss 35 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.

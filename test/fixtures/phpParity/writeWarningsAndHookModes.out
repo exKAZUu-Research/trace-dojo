@@ -164,3 +164,26 @@ getter
 Error:Cannot assign by reference to overloaded object / 
 getter
 int(1)
+getter object
+getter object
+getter object
+getter object
+getter array
+Error:Indirect modification of RestrictedGetter::$sequence is not allowed / 
+getter array
+Error:Indirect modification of RestrictedGetter::$sequence is not allowed / 
+getter ref
+getter ref
+object(stdClass)#9 (1) {
+  ["added"]=>
+  int(3)
+}
+int(5)
+array(3) {
+  [0]=>
+  int(1)
+  [1]=>
+  int(6)
+  [2]=>
+  int(7)
+}

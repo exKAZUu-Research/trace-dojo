@@ -287,10 +287,14 @@ defineClass({
     {
       signature: 'offsetGet($object): mixed',
       impl: ({ thisObj, args }) => {
+        const compound = rt().takeReadWriteDimension(thisObj);
         const storage = storageOf(thisObj);
         const key = storageKey(args[0], 'offsetGet');
         const info = storage.get(key);
-        if (info === undefined) throwError('UnexpectedValueException', 'Object not found');
+        if (info === undefined) {
+          if (compound) compound.missing = true;
+          throwError('UnexpectedValueException', 'Object not found');
+        }
         return info;
       },
     },

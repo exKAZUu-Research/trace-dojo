@@ -7,6 +7,7 @@ import { TurtleWorld } from '../interpreter/turtleWorld';
 import type { Expr, FunctionDecl, Program } from './ast';
 import { dec } from './bytes';
 import type { CompileNotice } from './converter';
+import type { UpdateWarning } from './errors';
 import { arrayIsShared, collectGarbage, GC_THRESHOLD_DEFAULT, releaseDropped } from './garbage';
 import { GcRoots } from './gcRoots';
 import { ObjectHeap } from './objectHeap';
@@ -180,6 +181,9 @@ export class Runtime {
   /** The number of user calls running, bounded by the call depth limit. */
   depth = 0;
   shuttingDown = false;
+  releasingGlobalsAtShutdown = false;
+  assignmentWarning?: { frame: Frame; exception: PhpThrow };
+  readWriteDimension?: { object: PhpObject; warning: UpdateWarning; pending?: PhpThrow; missing: boolean };
   exhausted = false;
   private pendingOutput = '';
   /** The classes a program declared, in declaration order, whose static properties the trace shows. */
@@ -192,6 +196,17 @@ export class Runtime {
     this.io = new ProgramIO(this.budget, input);
     this.globalFrame = new Frame(undefined, undefined, false);
     this.frames.push(this.globalFrame);
+  }
+
+  takeReadWriteDimension(object: PhpObject): Runtime['readWriteDimension'] {
+    const fetch = this.readWriteDimension;
+    if (fetch?.object !== object) return undefined;
+    this.readWriteDimension = undefined;
+    return fetch;
+  }
+
+  get pendingAssignmentWarning(): PhpThrow | undefined {
+    return this.assignmentWarning?.frame === this.frame ? this.assignmentWarning.exception : undefined;
   }
 
   get frame(): Frame {
@@ -341,7 +356,7 @@ export class Runtime {
       }
     }
     this.freeHandles.push(object.id);
-    if (object.turtle) this.world.remove(object.turtle);
+    if (object.turtle) this.world.remove(object.turtle, this.releasingGlobalsAtShutdown);
   }
 
   /** Writes bytes to standard output, decoding complete UTF-8 sequences as they arrive. */

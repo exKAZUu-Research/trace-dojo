@@ -32,7 +32,7 @@ defineClass({
     SPLIT: BigInt(MODE_SPLIT),
     REPLACE: BigInt(MODE_REPLACE),
   },
-  props: [{ name: 'replacement', visibility: 'public', defaultValue: () => null, typed: true }],
+  props: [{ name: 'replacement', visibility: 'public', defaultValue: () => null, type: '?string' }],
   methods: [
     {
       signature: '__construct(Iterator $iterator, string $pattern, int $mode = 0, int $flags = 0, int $pregFlags = 0)',

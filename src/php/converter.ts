@@ -16,13 +16,7 @@ import { oneArgumentBuiltinOpcodes, simpleSprintfFormat } from './builtinCompile
 import { enc, lower } from './bytes';
 import { type Constant, constantTruth, constantTypeName, foldedConstant } from './constantDefaults';
 import { formatFloat, isNumericString, NAN_BOOL_WARNING, NAN_STRING_WARNING } from './conversions';
-import {
-  type CompileNotice,
-  isReservedClassName,
-  MAGIC_RUNTIME,
-  relativeClassName,
-  SUPERGLOBALS,
-} from './converterBase';
+import { type CompileNotice, isReservedClassName, MAGIC_RUNTIME, relativeClassName } from './converterBase';
 import { DeclarationConverter } from './declarationConverter';
 import { exportExpr, UnexportableSyntax } from './export';
 import { decodeLiteral, decodeSingleQuoted, parseIntegerLiteral } from './literals';
@@ -911,12 +905,13 @@ export class Converter extends DeclarationConverter {
           };
         }
         const name = this.expr(inner);
-        const constant = interpolating ? undefined : this.compiledValue(name);
+        const constant = interpolating
+          ? undefined
+          : foldedConstant(name, { compiler: true, preserveNamedConstants: true, budget: this.compileBudget });
         if (typeof constant !== 'string') return { k: 'varvar', name, row };
         if (this.preserveSyntax) return { k: 'varvar', name: { k: 'lit', v: constant, row }, row };
-        return constant === 'GLOBALS' || SUPERGLOBALS.has(constant)
-          ? { k: 'varvar', name, row }
-          : { k: 'var', name: constant, row };
+        this.checkVariableAvailability(node, constant);
+        return { k: 'var', name: constant, row };
       }
       case 'name':
       case 'qualified_name':
@@ -1184,12 +1179,15 @@ export class Converter extends DeclarationConverter {
     if (word === 'true' || word === 'false') return { k: 'lit', v: word === 'true', row };
     if (word === 'null') return { k: 'lit', v: null, row };
     if (this.preserveSyntax) return { k: 'const', name: { name: raw }, row };
-    if (raw === '__LINE__') return { k: 'lit', v: BigInt(row + 1), row };
-    if (raw === '__FILE__') return { k: 'lit', v: '/main.php', row };
-    if (raw === '__DIR__') return { k: 'lit', v: '/', row };
-    if (raw === '__NAMESPACE__') return { k: 'lit', v: this.namespace, row };
-    if (MAGIC_RUNTIME.has(raw)) return { k: 'magic', name: raw as Extract<Expr, { k: 'magic' }>['name'], row };
-    if (raw === '__COMPILER_HALT_OFFSET__') this.unsupported(node, '__halt_compiler');
+    const magic = raw.toUpperCase();
+    if (magic === '__LINE__') return { k: 'lit', v: BigInt(row + 1), row };
+    if (magic === '__FILE__') return { k: 'lit', v: '/main.php', row };
+    if (magic === '__DIR__') return { k: 'lit', v: '/', row };
+    if (magic === '__PROPERTY__')
+      return { k: 'lit', v: this.fn.propertyName ?? this.initializerContext?.propertyName ?? '', row };
+    if (magic === '__NAMESPACE__') return { k: 'lit', v: this.namespace, row };
+    if (MAGIC_RUNTIME.has(magic)) return { k: 'magic', name: magic as Extract<Expr, { k: 'magic' }>['name'], row };
+    if (magic === '__COMPILER_HALT_OFFSET__') this.unsupported(node, '__halt_compiler');
     return { k: 'const', name: this.resolveConstName(raw), row };
   }
 
@@ -1200,13 +1198,13 @@ export class Converter extends DeclarationConverter {
     if (this.preserveSyntax) {
       const name = nameExpression ? this.expr(nameExpression) : this.nameText(nameNode);
       const className = typeof name === 'string' && lower(name) === 'class';
-      const cls = this.classRef(scope, false, className);
+      const cls = this.classRef(scope, false, className ? 'name' : 'constant');
       return { k: 'cconst', cls, name: className ? 'class' : name, row };
     }
     if (nameExpression) return this.bracedClassConstant(scope, nameExpression);
     const name = this.nameText(nameNode);
     const className = lower(name) === 'class' ? (this.constantInitializer ? 'initializer' : true) : undefined;
-    const cls = this.classRef(scope, !className && this.constantInitializer, Boolean(className));
+    const cls = this.classRef(scope, !className && this.constantInitializer, className ? 'name' : 'constant');
     if (!className || cls.k !== 'expr') return { k: 'cconst', cls, name, className, row: nameNode.startPosition.row };
     const literal = parserScalar(cls.e);
     if (literal === undefined) {
@@ -1224,7 +1222,7 @@ export class Converter extends DeclarationConverter {
   }
 
   private bracedClassConstant(scope: Node, nameExpression: Node): Expr {
-    let cls = this.classRef(scope, this.constantInitializer);
+    let cls = this.classRef(scope, this.constantInitializer, 'constant');
     if (cls.k === 'expr') {
       const literal = parserScalar(cls.e);
       if (typeof literal === 'string') cls = { k: 'named', name: literal };

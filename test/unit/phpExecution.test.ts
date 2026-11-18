@@ -96,6 +96,30 @@ test.each([
   expect(run(`<?php\n${statement}`)).toMatchObject({ kind: 'compileError', diagnostics: [{ row, message }] });
 });
 
+test.each([
+  ['$x = new {;', 'token "{"', 'class'],
+  ['var_dump(new {);', 'token "{"', ':'],
+  ['$x = new & 1;', 'token "&"', 'class'],
+  ['$x = new && 1;', 'token "&&"', 'class'],
+  ['$x = new ->;', 'token "->"', 'class'],
+  ['var_dump(new /* skipped */ ->);', 'token "->"', ':'],
+  ['$x = new ::;', 'token "::"', 'class'],
+  ['$x = new = 1;', 'token "="', 'class'],
+  ['$x = new . 1;', 'token "."', 'class'],
+  ['$x = new ++;', 'token "++"', 'class'],
+  ['$x = new "a";', 'double-quoted string "a"', 'class'],
+  ["$x = new 'abc';", 'single-quoted string "abc"', 'class'],
+  ['$x = new 1.5;', 'floating-point number "1.5"', 'class'],
+  ['$x = new 0x10;', 'integer "0x10"', 'class'],
+  ['$x = new "$variable";', 'double-quote mark', 'class'],
+  ['new', 'end of file', 'class'],
+])('reports the first unexpected token in %s', (statement, token, expected) => {
+  expect(run(`<?php\n${statement}`)).toMatchObject({
+    kind: 'compileError',
+    diagnostics: [{ row: 1, message: `syntax error, unexpected ${token}, expecting "${expected}"` }],
+  });
+});
+
 test('retains contextual enum class references beside operators', () => {
   expect(
     run('<?php class enum{} var_dump(new enum() instanceof enum, new stdClass instanceof enum, new enum && true);')
@@ -1889,3 +1913,47 @@ test('folds comparisons of shared class constant arrays within the compiler budg
   var_dump((SharedArrays::A22 === SharedArrays::B22) && true);`;
   expect(run(source)).toMatchObject({ kind: 'executed', stdout: 'bool(true)\n' });
 });
+
+test.each(['get', 'set'])('rejects overriding a final property %s hook through another subclass', (hook) => {
+  const body = hook === 'get' ? 'get => 1;' : 'set => $value;';
+  const program = `<?php
+class ParentHook { public int $value { final ${body} } }
+class MiddleHook extends ParentHook {}
+class ChildHook extends MiddleHook { public int $value { ${body} } }
+echo 'unreachable';`;
+  expect(run(program)).toMatchObject({
+    kind: 'executed',
+    stdout: expect.stringContaining(`Cannot override final property hook ParentHook::$value::${hook}()`),
+  });
+});
+
+test.each([String.raw`namespace\self::K`, String.raw`namespace\parent::K`, String.raw`namespace\static::{'K'}`])(
+  'rejects the relative namespace spelling for ordinary class constant fetches in %s',
+  (expression) => {
+    const name = expression.split('::', 1)[0];
+    expect(run(`<?php\nclass C { const K=1; function fetch() { return ${expression}; } }`)).toMatchObject({
+      kind: 'compileError',
+      diagnostics: [{ row: 1, message: `'${name}' is an invalid class name` }],
+    });
+  }
+);
+
+test.each([
+  ['$GLOBALS = 1;', '${"GLO" . "BALS"} = 1;'],
+  ['$ref =& $GLOBALS;', '$ref =& ${"GLOBALS"};'],
+  ['unset($GLOBALS);', 'unset(${"GLOBALS"});'],
+])('applies the ordinary globals write rules to a constant variable name: %s', (plain, literal) => {
+  const expected = run(`<?php ${plain}`);
+  expect(expected.kind).toBe('compileError');
+  expect(run(`<?php ${literal}`)).toEqual(expected);
+});
+
+test.each(['(?<n>x)(?&n(1))', '(?<n>x)(?P>n(<n>))', '(x)(?R(1))'])(
+  'parses a valid capture list before reporting that recursive PCRE patterns are unavailable: %s',
+  (pattern) => {
+    expect(run(`<?php preg_match('~${pattern}~', 'x');`)).toMatchObject({
+      kind: 'executed',
+      uncaughtException: expect.stringContaining('再帰'),
+    });
+  }
+);

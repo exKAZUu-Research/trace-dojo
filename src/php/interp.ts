@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 905 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 909 -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import {
   applyOperator,
@@ -245,6 +245,10 @@ export function evChain(e: Expr, discardResult = false): Chain {
       return e.foldedString ?? binary(e);
     }
     case 'unary': {
+      if (e.op === '~' && missingCompiledOperand(e.e)) {
+        const read = prepareOperand(e.e);
+        return withOperandWarnings((warning) => bitwiseNot(readOperandWithWarning(e.e, read, warning, e.row)));
+      }
       const value = ev(e.e);
       runtime.row = e.row;
       switch (e.op) {
@@ -830,28 +834,28 @@ export function deprecatedConstant(name: string, value: Value): Value {
   return value;
 }
 
-// code-gauge-allow functionCognitiveComplexity 23 -- One case per expression kind, as PHP evaluates each kind differently.
+// code-gauge-allow functionCognitiveComplexity 26 -- One case per expression kind, as PHP evaluates each kind differently.
 function magicConstant(name: Extract<Expr, { k: 'magic' }>['name']): Value {
   const frame = rt().frame;
   const decl = frame.decl;
   switch (name) {
     case '__CLASS__': {
-      if (frame.closure) return (frame.closure.internal as ClosureData).scope?.fullName ?? '';
-      return frame.scope?.fullName ?? '';
+      if (!decl?.isClosure || !frame.closure) return frame.scope?.fullName ?? '';
+      if (decl.className === undefined) return '';
+      if (findClass(decl.className)?.kind === 'trait') return frame.scope?.fullName ?? '';
+      return (frame.closure.internal as ClosureData).lexicalScope?.fullName ?? decl.className;
     }
     case '__FUNCTION__': {
-      if (!decl) return '';
-      if (decl.isClosure) return decl.name;
-      return frame.method ? frame.method.name : decl.name;
+      return decl?.name ?? '';
     }
     case '__METHOD__': {
       if (!decl) return '';
       if (decl.isClosure) return decl.name;
       // The class or trait that declares the method, as PHP fixes it at compile time.
-      if (frame.method) {
-        const scope = frame.method.scope;
-        const owner = decl.className === undefined || decl.className === scope.name ? scope.fullName : decl.className;
-        return `${owner}::${frame.method.name}`;
+      if (frame.method || decl.isPropertyHook) {
+        const scope = frame.method?.scope ?? frame.scope;
+        const owner = decl.className === undefined || decl.className === scope?.name ? scope?.fullName : decl.className;
+        if (owner) return `${owner}::${decl.name}`;
       }
       return decl.name;
     }

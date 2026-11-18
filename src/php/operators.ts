@@ -137,9 +137,13 @@ export function toInt(value: Value): bigint {
  * Converts a float to an int as PHP 8.5 does: a value out of range wraps around 64 bits, and NaN and the infinities
  * become 0, both with a warning.
  */
-export function floatToIntCast(value: number): bigint {
+export function floatToIntCast(value: number, pending?: PhpThrow): bigint {
   if (floatFitsInt(value)) return BigInt(Math.trunc(value));
-  warn(`The float ${formatFloatForMessage(value)} is not representable as an int, cast occurred`);
+  operatorDiagnostic(
+    pending,
+    warn,
+    `The float ${formatFloatForMessage(value)} is not representable as an int, cast occurred`
+  );
   return Number.isFinite(value) ? BigInt.asIntN(64, BigInt(value)) : 0n;
 }
 
@@ -277,7 +281,7 @@ function power(a: bigint | number, b: bigint | number, pending?: PhpThrow): bigi
 export function toIntForOperator(value: bigint | number, pending?: PhpThrow): bigint {
   if (typeof value === 'bigint') return value;
   if (!floatFitsInt(value)) {
-    const result = floatToIntCast(value);
+    const result = floatToIntCast(value, pending);
     if (Number.isNaN(value))
       operatorDiagnostic(pending, deprecated, 'Implicit conversion from float NAN to int loses precision');
     return result;

@@ -220,3 +220,15 @@ test('retains a reachable turtle at the end of execution when PHP runs object de
     )
   ).toMatchObject({ kind: 'executed', stdout: 'closed', finalTurtles: [{ x: 0, y: 0, color: '#', dir: 'N' }] });
 });
+
+test('uses the last turtle state after shutdown destructors move or release it', () => {
+  const moving = `<?php
+class WalkOnQuit { function __destruct() { global $t; $t->forward(); $t->turnRight(); } }
+$t = new Turtle();
+$walk = new WalkOnQuit();`;
+  const moved = [{ x: 0, y: 1, color: '#', dir: 'E' }];
+  expect(phpTrace(moving).at(-1)?.turtles).toEqual(moved);
+  expect(executeProgram('php', moving)).toMatchObject({ kind: 'executed', finalTurtles: moved });
+  const releasing = moving.replace('$t->forward(); $t->turnRight();', '$t = null;');
+  expect(executeProgram('php', releasing)).toMatchObject({ kind: 'executed', finalTurtles: [] });
+});

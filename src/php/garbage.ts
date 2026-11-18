@@ -611,7 +611,7 @@ function retainTurtles(runtime: Runtime, reached: Set<PhpObject>): void {
   if (!runtime.world.hasTurtles) return;
   const turtles = new Set<TurtleState>();
   for (const object of reached) if (object.turtle) turtles.add(object.turtle);
-  runtime.world.retain((turtle) => turtles.has(turtle));
+  runtime.world.retain((turtle) => turtles.has(turtle), runtime.releasingGlobalsAtShutdown);
 }
 
 /**

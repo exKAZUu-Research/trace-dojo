@@ -111,3 +111,31 @@ class ReadHookBinding {
 $readHook = new ReadHookBinding;
 handle(function()use($readHook) { $ref=2; $readHook->value =& $ref; });
 var_dump($readHook->value);
+
+class RestrictedGetter {
+    public $backing;
+    public private(set) object $object { get { echo "getter object\n"; return $this->backing; } set {} }
+    public private(set) object $indexed { get => $this->storage; set {} }
+    public private(set) array $sequence { get { echo "getter array\n"; return [1]; } set {} }
+    public private(set) array $reference { &get { echo "getter ref\n"; return $this->slots; } set {} }
+    public array $slots = [1];
+    public ArrayObject $storage;
+    function __construct() {
+        $this->backing=(object)['old'=>1];
+        $this->storage=new ArrayObject(['a'=>1]);
+    }
+}
+$getter=new RestrictedGetter;
+$getter->object->added=2;
+unset($getter->object->old);
+$temp =& $getter->object;
+$temp='new alias value';
+foreach ($getter->object as &$value) $value++;
+unset($value);
+$getter->indexed['a']=5;
+handle(function()use($getter){$getter->sequence[]=4;});
+handle(function()use($getter){$ref=&$getter->sequence;});
+$getter->reference[]=6;
+$ref =& $getter->reference;
+$ref[]=7;
+var_dump($getter->backing,$getter->storage['a'],$getter->slots);

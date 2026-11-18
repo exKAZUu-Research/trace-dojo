@@ -75,3 +75,76 @@ set_error_handler(function($level,$message) { echo $message,"\n"; throw new Erro
 reportOperation(function()use($target) { $target['warn'] += $unknown; });
 reportOperation(function()use($native) { $native['k'] += $unknown; });
 var_dump($native['k']);
+
+reportOperation(function(){
+    try { $x=$unread; } finally { var_dump(array_key_exists('x', get_defined_vars()), $x); }
+});
+reportOperation(function(){
+    $array=['x'=>4];
+    try { $array['x']=$unread; } finally { var_dump($array); }
+});
+reportOperation(function(){
+    $array=[];
+    try { $array[]=$unread; } finally { var_dump($array); }
+});
+class StoredOperand {
+    public int $strict=4;
+    public ?int $nullable=3;
+    public static $global=1;
+    public int $hook { set { echo "unexpected hook\n"; } }
+}
+$ordinary=new stdClass;
+$typed = new StoredOperand;
+reportOperation(fn()=>$ordinary->value=$unread);
+reportOperation(fn()=>$typed->strict=$unread);
+reportOperation(fn()=>$typed->nullable=$unread);
+reportOperation(fn()=>$typed->extra=$unread);
+reportOperation(fn()=>$typed->hook=$unread);
+reportOperation(fn()=>StoredOperand::$global=$unread);
+var_dump($ordinary->value,$typed->strict,$typed->nullable,$typed->extra,StoredOperand::$global);
+class LiteralName { const KEY = 'dynamicName'; }
+reportOperation(function() {
+    try { ${LiteralName::KEY} += 1; } finally { var_dump(array_key_exists('dynamicName', get_defined_vars())); }
+});
+reportOperation(fn()=>~$unread);
+reportOperation(function() { $u %= NAN; });
+reportOperation(function() { $u |= INF; });
+reportOperation(function() { $u <<= 1e30; });
+
+$collection = new ArrayObject;
+reportOperation(fn()=>$collection['number']+=1);
+reportOperation(fn()=>$collection['text'].='x');
+reportOperation(fn()=>$collection['undefined']+=$unknown);
+reportOperation(fn()=>$collection['division']/=0);
+reportOperation(fn()=>$collection['inc']++);
+var_dump($collection->getArrayCopy());
+$iterator = new ArrayIterator;
+reportOperation(fn()=>$iterator['number']+=2);
+var_dump($iterator->getArrayCopy());
+$plain=[];
+reportOperation(function()use(&$plain){$plain['missing'] += 1;});
+var_dump($plain);
+
+restore_error_handler();
+$ordinary=new stdClass;
+reportOperation(fn()=>$ordinary[0] += $unknown);
+reportOperation(fn()=>$ordinary['a']['b'] .= $unknown);
+$failure = new SplObjectStorage;
+$key = new stdClass;
+reportOperation(fn()=>$failure[$key] += 1);
+reportOperation(fn()=>$failure->offsetGet($key));
+$failure[$key]=3;
+$failure[$key]+=2;
+var_dump($failure[$key]);
+$fixed=new SplFixedArray(2);
+reportOperation(fn()=>$fixed[9] += 1);
+reportOperation(fn()=>$fixed->offsetGet(9));
+$queue=new SplQueue;
+$queue->push(1);
+reportOperation(fn()=>$queue[5] += 1);
+reportOperation(fn()=>$queue->offsetGet(5));
+
+$x=42;
+echo ${"GLOBALS"}["x"],"\n";
+${"GLOBALS"}["globalAdded"]=8;
+echo $globalAdded,"\n";

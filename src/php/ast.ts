@@ -174,7 +174,10 @@ export interface PropertyDeclAst {
   hooks?: {
     get?: FunctionDecl;
     set?: FunctionDecl;
-    setParam?: string;
+    getBacking?: boolean;
+    setBacking?: boolean;
+    finalGet?: boolean;
+    finalSet?: boolean;
     abstractGet?: boolean;
     abstractSet?: boolean;
     syntax?: PropertyHookSyntax[];

@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 559 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 561 -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import { lower, untilNul } from './bytes';
 import { callValue, checkCallable, explainCallable } from './callables';
@@ -40,7 +40,7 @@ import { formatPrintf } from './sprintf';
 import { constantKey, defineConstant as defineUserConstant } from './statements';
 import { setCallableCheck } from './types';
 import { UnsupportedFeatureError } from './unsupported';
-import { copyValueSlot, PhpArray, PhpClass, PhpObject, Ref, type Value } from './values';
+import { copyValueSlot, PhpArray, PhpClass, PhpObject, Ref, UNINIT, type Value } from './values';
 
 // Constants ------------------------------------------------------------------------------------------------------------
 
@@ -200,7 +200,7 @@ defineFunction('settype(mixed &$var, string $type): bool', ({ args, refs }) => {
     object: 'object',
     null: 'null',
   };
-  const target = map[type];
+  const target = Object.hasOwn(map, type) ? map[type] : undefined;
   if (!target) throwError('ValueError', 'settype(): Argument #2 ($type) must be a valid type');
   if (ref) ref.v = target === 'null' ? null : cast(target, ref.v);
   return true;
@@ -438,18 +438,37 @@ defineFunction('get_class_methods(object|string $object_or_class): array', ({ ar
   }
   return PhpArray.list(names);
 });
-defineFunction('method_exists(object|string $object_or_class, string $method): bool', ({ args }) => {
-  const cls = classOf(args[0]);
-  return cls?.findMethod(lower(args[1] as string)) !== undefined;
+defineFunction('method_exists(mixed $object_or_class, string $method): bool', ({ args }) => {
+  const target = args[0];
+  const cls = memberQueryClass(target, 'method_exists');
+  const method = cls?.findMethod(lower(args[1] as string));
+  return (
+    method !== undefined && (target instanceof PhpObject || method.visibility !== 'private' || method.scope === cls)
+  );
 });
-defineFunction('property_exists(object|string $object_or_class, string $property): bool', ({ args }) => {
+defineFunction('property_exists(mixed $object_or_class, string $property): bool', ({ args }) => {
   const target = args[0];
   const name = args[1] as string;
-  const cls = classOf(target);
+  const cls = memberQueryClass(target, 'property_exists');
   if (!cls) return false;
-  if (cls.propByName.has(name) || cls.findStatic(name)) return true;
-  return target instanceof PhpObject && target.props.has(name);
+  const declaration = cls.propByName.get(name) ?? cls.findStatic(name)?.decl;
+  if (declaration && (declaration.visibility !== 'private' || declaration.cls === cls)) return true;
+  if (!(target instanceof PhpObject)) return false;
+  const scoped = classesModule.lookupProp(cls, name, rt().frame.scope);
+  if (!scoped || scoped.isStatic) return target.props.has(name);
+  const slot = target.props.get(scoped.key);
+  return scoped.isVirtual === true || (slot !== undefined && slot !== UNINIT);
 });
+
+function memberQueryClass(target: Value, operation: 'method_exists' | 'property_exists'): PhpClass | undefined {
+  if (typeof target === 'string') return findClass(target);
+  if (target instanceof PhpObject && !target.isResource) return target.cls;
+  throwError(
+    'TypeError',
+    `${operation}(): Argument #1 ($object_or_class) must be of type object|string, ${valueName(target)} given`
+  );
+}
+
 defineFunction('class_exists(string $class, bool $autoload = true): bool', ({ args }) => {
   const cls = findClass(args[0] as string);
   return cls !== undefined && cls.kind === 'class';

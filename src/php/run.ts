@@ -40,21 +40,20 @@ export function runProgram(runtime: Runtime, parsed: ParsedProgram, onEnd?: (fra
     runtime.program = parsed.program;
     runtime.notices = parsed.notices;
     let uncaughtException: string | undefined;
-    let finalTurtles: ProgramRun['finalTurtles'];
     try {
       uncaughtException = guard(runtime, () => {
         for (const notice of parsed.parseNotices) emitError(E_DEPRECATED, notice.message, notice.row);
         runStatements(parsed.program, parsed.conversionError);
       });
       onEnd?.(runtime.globalFrame);
-      finalTurtles = runtime.world.turtleTraces();
+      runtime.world.recordFinalTurtles();
       uncaughtException = shutdown(runtime) ?? uncaughtException;
     } finally {
       runtime.flush();
     }
     return {
       finalBoard: runtime.world.boardText(),
-      finalTurtles,
+      finalTurtles: runtime.world.turtleTraces(true),
       uncaughtException,
       ...runtime.io.output(),
     };
@@ -139,7 +138,12 @@ function shutdown(runtime: Runtime): string | undefined {
   if (runtime.shuttingDown || runtime.exhausted) return undefined;
   return guard(runtime, () => {
     runtime.frames.length = 1;
-    destroyGlobals(runtime);
+    runtime.releasingGlobalsAtShutdown = true;
+    try {
+      destroyGlobals(runtime);
+    } finally {
+      runtime.releasingGlobalsAtShutdown = false;
+    }
     const remaining = [...runtime.objects.values()].toSorted((a, b) => a.id - b.id);
     for (const object of remaining) {
       if (object.destructed) continue;

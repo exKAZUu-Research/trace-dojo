@@ -194,7 +194,10 @@ const listMethods: NativeMethod[] = [
   {
     signature: 'offsetGet(int $index): mixed',
     impl: ({ thisObj, args }) => {
+      const compound = rt().takeReadWriteDimension(thisObj);
       const list = listOf(thisObj);
+      const index = Number(args[0]);
+      if (compound && (index < 0 || index >= list.nodes.length)) compound.missing = true;
       return list.nodeAt(checkListIndex(list, args[0], 'offsetGet')).v;
     },
   },
@@ -606,10 +609,12 @@ class FixedStorage {
 const fixedOf = (object: PhpObject): FixedStorage => object.internal as FixedStorage;
 
 /** Transcribes spl_offset_convert_to_ulong, whose negative results fall out of range. */
-function fixedIndex(object: PhpObject, index: Value): number {
+function fixedIndex(object: PhpObject, index: Value, onInvalid?: () => void): number {
   const position = fixedOffset(index);
-  if (position < 0 || position >= fixedOf(object).items.length)
+  if (position < 0 || position >= fixedOf(object).items.length) {
+    onInvalid?.();
     throwError('OutOfBoundsException', 'Index invalid or out of range');
+  }
   return position;
 }
 
@@ -657,7 +662,14 @@ defineClass({
       },
       {
         signature: 'offsetGet($index): mixed',
-        impl: ({ thisObj, args }) => fixedOf(thisObj).items[fixedIndex(thisObj, args[0])],
+        impl: ({ thisObj, args }) => {
+          const compound = rt().takeReadWriteDimension(thisObj);
+          return fixedOf(thisObj).items[
+            fixedIndex(thisObj, args[0], () => {
+              if (compound) compound.missing = true;
+            })
+          ];
+        },
       },
       {
         signature: 'offsetSet($index, mixed $value): void',

@@ -921,6 +921,7 @@ function newClosure(fn: UserFunction, bound: Map<string, Ref>, isStatic: boolean
     bound,
     thisObj: isStatic ? undefined : frame.thisObj,
     scope: frame.scope,
+    lexicalScope: frame.scope,
     calledClass: frame.staticClass,
     isStatic,
   } satisfies ClosureData;

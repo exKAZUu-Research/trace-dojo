@@ -1,0 +1,15 @@
+int(3)
+string(9) "MagicDemo"
+bool(true)
+bool(true)
+string(0) ""
+original:MagicDemo\SourceTrait::original:MagicDemo\Alpha:MagicDemo\SourceTrait
+originalStatic:MagicDemo\SourceTrait::originalStatic
+string(5) "named"
+string(41) "MagicDemo\Alpha::$nameInfo::get:nameInfo:"
+string(94) "MagicDemo\SourceTrait::$traitProperty::get:traitProperty:MagicDemo\Alpha:MagicDemo\SourceTrait"
+MagicDemo\Alpha::$number::set:number
+string(15) "MagicDemo\Alpha"
+string(15) "MagicDemo\Alpha"
+string(14) "MagicDemo\Beta"
+string(0) ""

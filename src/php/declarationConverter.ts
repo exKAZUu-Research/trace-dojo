@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 815 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 816 -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import type { Node } from '@willbooster/web-tree-sitter';
 
@@ -57,7 +57,11 @@ export abstract class DeclarationConverter extends ConverterBase {
   private readonly compileClasses = new CompileClassConstants(() => this.compileBudget);
   private runtimeDefinitionKeys = 0;
   private activeClass?: ClassDecl;
-  protected initializerContext?: { kind: 'eager' | 'deferred' | 'static' | 'array'; row: number };
+  protected initializerContext?: {
+    kind: 'eager' | 'deferred' | 'static' | 'array';
+    row: number;
+    propertyName?: string;
+  };
 
   protected get constantInitializer(): boolean {
     return this.initializerContext?.kind === 'eager' || this.initializerContext?.kind === 'deferred';
@@ -428,15 +432,20 @@ export abstract class DeclarationConverter extends ConverterBase {
     }
   }
 
-  protected constantExpr(node: Node, allowNew = false, context: 'eager' | 'deferred' = 'eager'): Expr {
-    const expression = this.initializerExpr(node, context);
+  protected constantExpr(
+    node: Node,
+    allowNew = false,
+    context: 'eager' | 'deferred' = 'eager',
+    propertyName?: string
+  ): Expr {
+    const expression = this.initializerExpr(node, context, propertyName);
     this.checkConstantExpr(expression, allowNew);
     return expression;
   }
 
-  protected initializerExpr(node: Node, kind: 'eager' | 'deferred' | 'static'): Expr {
+  protected initializerExpr(node: Node, kind: 'eager' | 'deferred' | 'static', propertyName?: string): Expr {
     const outer = this.initializerContext;
-    this.initializerContext = { kind, row: node.startPosition.row };
+    this.initializerContext = { kind, row: node.startPosition.row, propertyName };
     try {
       return this.expr(node);
     } finally {
@@ -972,7 +981,7 @@ export abstract class DeclarationConverter extends ConverterBase {
           `readonly のプロパティには初期値を書けません（Readonly property ${decl.name}::$${name} cannot have default value）。`
         );
       }
-      const defaultExpr = defaultNode ? this.constantExpr(defaultNode, false) : undefined;
+      const defaultExpr = defaultNode ? this.constantExpr(defaultNode, false, 'eager', name) : undefined;
       if (type && defaultExpr) this.checkDefaultType(element, name, type, defaultExpr, decl);
       const prop: PropertyDeclAst = {
         name,
@@ -1013,7 +1022,6 @@ export abstract class DeclarationConverter extends ConverterBase {
         this.error(hook, `set hook of property ${className}::$${prop.name} must accept exactly one parameters`);
     }
     const hooks: NonNullable<PropertyDeclAst['hooks']> = { syntax: this.preserveSyntax ? [] : undefined };
-    let referencesBacking = false;
     for (const hook of declarations) {
       const attributes = hook.childForFieldName('attributes');
       if (attributes) this.unsupported(attributes, '属性（#[...]）');
@@ -1035,6 +1043,7 @@ export abstract class DeclarationConverter extends ConverterBase {
         labels: new Set(),
         gotos: [],
         className,
+        propertyName: prop.name,
         isMethod: true,
         returnType: kind === 'set' ? { k: 'named', name: 'void' } : prop.type,
       };
@@ -1090,7 +1099,6 @@ export abstract class DeclarationConverter extends ConverterBase {
           if (kind === 'get') this.checkReferenceReturn(body, arrowBody);
           if (kind === 'set') {
             // A short set hook assigns its expression to the property.
-            referencesBacking = true;
             statements = [
               {
                 k: 'expr',
@@ -1113,7 +1121,10 @@ export abstract class DeclarationConverter extends ConverterBase {
             arrowBody = undefined;
           }
         }
-        if (body && referencesProperty(body, prop.name)) referencesBacking = true;
+        const usesBacking =
+          body !== null &&
+          ((kind === 'set' && body.type !== 'compound_statement') || referencesProperty(body, prop.name));
+        const final = hook.children.some((child) => child.type === 'final_modifier');
         this.checkGotos(this.fn, statements);
         const fn: FunctionDecl = {
           name: `$${prop.name}::${kind}`,
@@ -1135,10 +1146,13 @@ export abstract class DeclarationConverter extends ConverterBase {
         if (kind === 'get') {
           hooks.get = fn;
           hooks.abstractGet = !body;
+          hooks.getBacking = usesBacking;
+          hooks.finalGet = final;
         } else if (kind === 'set') {
           hooks.set = fn;
           hooks.abstractSet = !body;
-          hooks.setParam = params[0]?.name;
+          hooks.setBacking = usesBacking;
+          hooks.finalSet = final;
         } else
           this.error(
             hook,
@@ -1148,7 +1162,7 @@ export abstract class DeclarationConverter extends ConverterBase {
           name: kind,
           body: body?.type === 'compound_statement' ? statements : undefined,
           expression: syntaxExpression,
-          isFinal: hook.children.some((child) => child.type === 'final_modifier'),
+          isFinal: final,
           byRefReturn,
         });
       } finally {
@@ -1157,8 +1171,8 @@ export abstract class DeclarationConverter extends ConverterBase {
       }
     }
     prop.hooks = hooks;
-    prop.isVirtual = !referencesBacking;
-    if (prop.isVirtual && prop.defaultExpr)
+    prop.isVirtual = !hooks.getBacking && !hooks.setBacking;
+    if (prop.isVirtual && prop.defaultExpr && !this.currentClassHasParent)
       this.error(list, `Cannot specify default value for virtual hooked property ${className}::$${prop.name}`);
   }
 

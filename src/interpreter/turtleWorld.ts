@@ -39,6 +39,7 @@ const validColors = new Set(Object.keys(charToColor));
 export class TurtleWorld {
   readonly board: string[][] = Array.from({ length: ROWS }, () => Array.from({ length: COLUMNS }, () => EMPTY_COLOR));
   private turtles: TurtleState[] = [];
+  private finalTurtles?: Set<TurtleState>;
 
   /** Places a new turtle facing north and paints its cell; `color` is undefined for the default color. */
   create(x: number, y: number, color: string | undefined): TurtleState | { error: string } {
@@ -49,6 +50,7 @@ export class TurtleWorld {
     if (error) return { error };
     this.board[y][x] = colorText;
     this.turtles.push(turtle);
+    this.finalTurtles?.add(turtle);
     return turtle;
   }
 
@@ -79,14 +81,19 @@ export class TurtleWorld {
     return isOnBoard(x, y) && this.board[y][x] !== EMPTY_COLOR;
   }
 
-  remove(turtle: TurtleState): void {
+  remove(turtle: TurtleState, retainForFinalTrace = false): void {
     turtle.isAlive = false;
     this.turtles = this.turtles.filter((other) => other !== turtle);
+    if (!retainForFinalTrace) this.finalTurtles?.delete(turtle);
   }
 
   /** Removes the turtles a program can no longer reach. */
-  retain(reached: (turtle: TurtleState) => boolean): void {
-    for (const turtle of this.turtles) if (!reached(turtle)) turtle.isAlive = false;
+  retain(reached: (turtle: TurtleState) => boolean, retainForFinalTrace = false): void {
+    for (const turtle of this.turtles) {
+      if (reached(turtle)) continue;
+      turtle.isAlive = false;
+      if (!retainForFinalTrace) this.finalTurtles?.delete(turtle);
+    }
     this.turtles = this.turtles.filter((turtle) => turtle.isAlive);
   }
 
@@ -98,8 +105,14 @@ export class TurtleWorld {
     return this.board.map((row) => row.join('')).join('\n');
   }
 
-  turtleTraces(): TurtleTrace[] {
-    return this.turtles.map(({ color, dir, x, y }) => ({ x, y, color, dir }));
+  /** Retains state identities while language shutdown releases the objects that own them. */
+  recordFinalTurtles(): void {
+    this.finalTurtles = new Set(this.turtles);
+  }
+
+  turtleTraces(final = false): TurtleTrace[] {
+    const turtles = final && this.finalTurtles ? this.finalTurtles : this.turtles;
+    return Array.from(turtles, ({ color, dir, x, y }) => ({ x, y, color, dir }));
   }
 }
 

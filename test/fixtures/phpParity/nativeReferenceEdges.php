@@ -19,3 +19,8 @@ class Getter {public $values=[1,2];function &__get($name){echo 'get ';return $th
 $g=new Getter;unset($g->x[0]);var_dump($g->values);
 class Destroy {function __destruct(){echo 'destroy ';}}
 $x=new Destroy;echo settype($x,'bool'),'after',"\n";
+foreach (['constructor','__proto__','toString','INTEGER'] as $type) {
+    $value='42';
+    try { settype($value,$type); } catch (ValueError $error) { echo $error->getMessage(),"\n"; }
+    var_dump($value);
+}

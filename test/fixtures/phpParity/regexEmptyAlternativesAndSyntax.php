@@ -40,4 +40,7 @@ foreach (['\g<-1', '\g<-1a>', "\\g'-1a'", '(a)\g<-2', '\g{-1a}', '(a)\g{-2',
           '(?+1(a)', '(?+2(a)', '(a)(?-1(a)', '(?+1(1)', '(?-a', '(?aD', '(?aX)'] as $source) {
     var_dump(preg_match('~' . $source . '~', 'ab'));
 }
+foreach (['(?R(a)', '(?R(', '(?R(1)', '(?R(1))', '(?&n(a)', '(?P>n(a)', '(?<n>x)(?&n(a)', '(?<n>x)(?P>n(2))'] as $source) {
+    var_dump(preg_match('~' . $source . '~', 'ab'));
+}
 echo "continued\n";

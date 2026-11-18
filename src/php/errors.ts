@@ -56,9 +56,11 @@ export function setErrorFactories(
 }
 
 /** Throws a PHP exception of a builtin class, such as `TypeError`. */
-export function throwError(className: string, message: string): never {
+export function throwError(className: string, message: string, previous?: PhpObject): never {
   if (probes > 0) throw new ProbeFailure();
-  throw new PhpThrow(createThrowable(className, message));
+  const object = createThrowable(className, message);
+  if (previous) setPrevious(object, previous);
+  throw new PhpThrow(object);
 }
 
 /** How many checks are running that only ask whether code would throw, such as `is_callable`. */
@@ -141,6 +143,7 @@ export function emitError(level: bigint, message: string, row = rt().row, skipMa
     !runtime.activeErrorHandlers.has(current.handler) &&
     (current.mask & level) !== 0n &&
     (skipMatchingHandler ||
+      runtime.pendingAssignmentWarning ||
       runtime.nativeStringConversionPending ||
       callUserHandler(current.handler, level, message, row))
   )
@@ -230,6 +233,12 @@ export function withCleanupExceptions(runtime: Runtime, cleanup: (capture: (erro
   } finally {
     runtime.held.length = heldMark;
   }
+}
+
+export function invalidObjectDimension(object: PhpObject, previous?: PhpThrow | 'same'): never {
+  if (probes > 0) throw new ProbeFailure();
+  const message = `Cannot use object of type ${object.cls.name} as array`;
+  throwError('Error', message, previous === 'same' ? createThrowable('Error', message) : previous?.object);
 }
 
 export type UpdateWarning = (emit: () => void, whilePending?: () => void) => boolean;

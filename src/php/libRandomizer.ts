@@ -671,6 +671,6 @@ defineClass({
   name: String.raw`Random\Randomizer`,
   isFinal: true,
   isCloneable: false,
-  props: [{ name: 'engine', visibility: 'public', defaultValue: () => null, typed: true, isReadonly: true }],
+  props: [{ name: 'engine', visibility: 'public', type: String.raw`Random\Engine`, isReadonly: true }],
   methods: randomizerMethods,
 });

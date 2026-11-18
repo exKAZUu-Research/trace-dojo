@@ -9,6 +9,7 @@ import {
 } from '../interpreter/traceAnnotations';
 import { commentTokens, loadParser, parseSource } from '../interpreter/treeSitter';
 import type { Program } from './ast';
+import { dec, enc } from './bytes';
 import { castType, type CompileNotice, Converter } from './converter';
 import { reservedIdentifierToken } from './converterBase';
 
@@ -28,6 +29,12 @@ const CLOSING_DELIMITERS = new Map([
   [']', '['],
   ['}', '{'],
 ]);
+
+const PHP_TRIVIA = /^(?:[ \t\r\n\v\f]|\/\*[\s\S]*?\*\/|(?:\/\/|#(?!\[))(?:[^?\r\n]|\?(?!>))*)*/;
+const PHP_PUNCTUATOR =
+  /^(?:\?->|\?\?=|===|!==|<=>|\.\.\.|<<=|>>=|\*\*=|->|::|=>|\?\?|==|!=|<>|<=|>=|<<|>>|\*\*|\+\+|--|\|\||&&|\|>|[+\-*/%.&|^]=|#\[|[)\][{},;=<>+\-*/%.&|^!?~:@\u0060])/;
+const PHP_NUMBER =
+  /^(?:0[xX][\dA-Fa-f](?:_?[\dA-Fa-f])*|0[bB][01](?:_?[01])*|0[oO][0-7](?:_?[0-7])*|(?:(?:\d(?:_?\d)*)?\.\d(?:_?\d)*|\d(?:_?\d)*\.?)(?:[eE][+-]?\d(?:_?\d)*)?)/;
 
 export interface ParsedProgram {
   program: Program;
@@ -211,12 +218,13 @@ function recoveredNewName(root: Node, error: Node): SourceDiagnostic | undefined
 
 function emptyNewClassDiagnostic(root: Node, keyword: Node, startsArgument: boolean): SourceDiagnostic | undefined {
   const suffix = root.text.slice(keyword.endIndex - root.startIndex);
-  const token = /^(?:[ \t\r\n\v\f]|\/\*[\s\S]*?\*\/|(?:\/\/|#(?!\[))(?:[^?\r\n]|\?(?!>))*)*([)\]},;])/.exec(suffix);
+  const trivia = PHP_TRIVIA.exec(suffix)?.[0] ?? '';
+  const offset = keyword.endIndex + trivia.length;
+  const row = keyword.endPosition.row + (trivia.match(/\r\n?|\n/g)?.length ?? 0);
+  const token = newClassNameToken(suffix.slice(trivia.length));
   if (!token) return undefined;
-  const symbol = token[1];
-  const offset = keyword.endIndex + token[0].length - 1;
-  const row = keyword.endPosition.row + (token[0].match(/\r\n?|\n/g)?.length ?? 0);
-  const opening = CLOSING_DELIMITERS.get(symbol);
+  const { symbol, description } = token;
+  const opening = symbol && CLOSING_DELIMITERS.get(symbol);
   if (opening) {
     const open = unclosedDelimiterAt(root, offset);
     if (!open) return { row, message: `Unmatched '${symbol}'` };
@@ -226,7 +234,45 @@ function emptyNewClassDiagnostic(root: Node, keyword: Node, startsArgument: bool
     }
   }
   const expected = startsArgument ? ':' : 'class';
-  return { row, message: `syntax error, unexpected token "${symbol}", expecting "${expected}"` };
+  return { row, message: `syntax error, unexpected ${description}, expecting "${expected}"` };
+}
+
+function newClassNameToken(text: string): { symbol?: string; description: string } | undefined {
+  if (text === '') return { description: 'end of file' };
+  const quote = text[0];
+  if (quote === '"' || quote === "'") return { description: unexpectedQuotedToken(text, quote) };
+  const number = PHP_NUMBER.exec(text)?.[0];
+  if (number) {
+    const kind = /^0[xXbBoO]/.test(number) || !/[.eE]/.test(number) ? 'integer' : 'floating-point number';
+    return { description: unexpectedTextToken(kind, number) };
+  }
+  const symbol = PHP_PUNCTUATOR.exec(text)?.[0];
+  if (symbol) return { symbol, description: `token "${symbol}"` };
+  const word = /^[\p{L}_][\p{L}\p{N}_]*/u.exec(text)?.[0];
+  if (!word || text[word.length] === '\\') return undefined;
+  const keyword = reservedIdentifierToken(word);
+  if (keyword && keyword !== 'static' && keyword !== 'class' && keyword !== 'readonly')
+    return { description: `token "${keyword}"` };
+  if (/^__(?:class|dir|file|function|line|method|namespace|property|trait)__$/.test(word.toLowerCase()))
+    return { description: `token "${word.toUpperCase()}"` };
+  return undefined;
+}
+
+function unexpectedQuotedToken(text: string, quote: string): string {
+  const match = (quote === '"' ? /^"(?:\\[\s\S]|[^"\\])*"/ : /^'(?:\\[\s\S]|[^'\\])*'/).exec(text)?.[0];
+  if (!match) return quote === '"' ? 'double-quote mark' : 'end of file';
+  const contents = match.slice(1, -1);
+  if (quote === '"') {
+    const tokens = contents.matchAll(/\\[\s\S]|\$[A-Za-z_{\u0080-\uFFFF]|\{\$/g);
+    for (const [token] of tokens) if (!token.startsWith('\\')) return 'double-quote mark';
+  }
+  return unexpectedTextToken(quote === '"' ? 'double-quoted string' : 'single-quoted string', contents);
+}
+
+function unexpectedTextToken(kind: string, raw: string): string {
+  const bytes = enc(raw.split('\n', 1)[0]);
+  const spelling = bytes.length > 33 ? `${dec(bytes.slice(0, 30))}...` : dec(bytes);
+  return `${kind} "${spelling}"`;
 }
 
 function unclosedDelimiterAt(root: Node, offset: number): Node | undefined {

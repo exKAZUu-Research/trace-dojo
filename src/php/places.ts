@@ -7,6 +7,7 @@ import { isSubtype } from './variance';
 
 export type PlaceOperation = 'assignOp' | 'incdec' | 'nested' | 'receiver';
 export type NestMode = 'write' | 'update' | 'unset';
+export type BeforeOffsetGet = () => PhpThrow | undefined;
 
 export const SKIP_COMPOUND = Symbol('compound target changed during fetch');
 
@@ -21,10 +22,7 @@ export interface Place {
   /** The value, or undefined when the location does not exist. */
   get(update?: PlaceOperation): Value | undefined;
   readCompoundName?(warning: UpdateWarning): void;
-  fetchCompound?(
-    warning: UpdateWarning,
-    beforeOffsetGet?: () => PhpThrow | undefined
-  ): CompoundRead | typeof SKIP_COMPOUND;
+  fetchCompound?(warning: UpdateWarning, beforeOffsetGet?: BeforeOffsetGet): CompoundRead | typeof SKIP_COMPOUND;
   set(value: Value, operation?: 'assignOp'): Value;
   assign?(value: () => Value): Value;
   /** The location as a reference, which `=&`, by-reference arguments, and `global` share. */
@@ -48,7 +46,7 @@ export interface Place {
 export function readCompound(
   place: Place,
   warning: UpdateWarning,
-  beforeOffsetGet?: () => PhpThrow | undefined
+  beforeOffsetGet?: BeforeOffsetGet
 ): CompoundRead | typeof SKIP_COMPOUND {
   if (place.fetchCompound) return place.fetchCompound(warning, beforeOffsetGet);
   const value = place.get('assignOp');
@@ -158,7 +156,8 @@ export class ElementPlace implements Place {
   constructor(
     readonly array: PhpArray,
     /** The key, or undefined to append. */
-    public key: Key | undefined
+    public key: Key | undefined,
+    readonly preserveMissingOnIncrement = false
   ) {}
 
   get(): Value | undefined {

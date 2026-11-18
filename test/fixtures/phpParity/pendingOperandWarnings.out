@@ -107,3 +107,90 @@ Error: Cannot use object of type OperatorTarget as array (Undefined variable $un
 Undefined variable $unknown
 ErrorException: Undefined variable $unknown ()
 int(2)
+Undefined variable $unread
+bool(true)
+NULL
+ErrorException: Undefined variable $unread ()
+Undefined variable $unread
+array(1) {
+  ["x"]=>
+  NULL
+}
+ErrorException: Undefined variable $unread ()
+Undefined variable $unread
+array(1) {
+  [0]=>
+  NULL
+}
+ErrorException: Undefined variable $unread ()
+Undefined variable $unread
+ErrorException: Undefined variable $unread ()
+Undefined variable $unread
+ErrorException: Undefined variable $unread ()
+Undefined variable $unread
+ErrorException: Undefined variable $unread ()
+Undefined variable $unread
+ErrorException: Undefined variable $unread ()
+Undefined variable $unread
+ErrorException: Undefined variable $unread ()
+Undefined variable $unread
+ErrorException: Undefined variable $unread ()
+NULL
+int(4)
+NULL
+NULL
+NULL
+Undefined variable $dynamicName
+bool(false)
+ErrorException: Undefined variable $dynamicName ()
+Undefined variable $unread
+TypeError: Cannot perform bitwise not on null (Undefined variable $unread)
+Undefined variable $u
+ErrorException: Undefined variable $u ()
+Undefined variable $u
+ErrorException: Undefined variable $u ()
+Undefined variable $u
+ErrorException: Undefined variable $u ()
+Undefined array key "number"
+ErrorException: Undefined array key "number" ()
+Undefined array key "text"
+ErrorException: Undefined array key "text" ()
+Undefined variable $unknown
+ErrorException: Undefined variable $unknown ()
+Undefined array key "division"
+DivisionByZeroError: Division by zero (Undefined array key "division")
+Undefined array key "inc"
+ErrorException: Undefined array key "inc" ()
+array(4) {
+  ["number"]=>
+  int(1)
+  ["text"]=>
+  string(1) "x"
+  ["undefined"]=>
+  int(0)
+  ["inc"]=>
+  NULL
+}
+Undefined array key "number"
+ErrorException: Undefined array key "number" ()
+array(1) {
+  ["number"]=>
+  int(2)
+}
+Undefined array key "missing"
+ErrorException: Undefined array key "missing" ()
+array(0) {
+}
+
+Warning: Undefined variable $unknown in /main.php on line 130
+Error: Cannot use object of type stdClass as array (Cannot use object of type stdClass as array)
+Error: Cannot use object of type stdClass as array ()
+Error: Cannot use object of type SplObjectStorage as array (Object not found)
+UnexpectedValueException: Object not found ()
+int(5)
+Error: Cannot use object of type SplFixedArray as array (Index invalid or out of range)
+OutOfBoundsException: Index invalid or out of range ()
+Error: Cannot use object of type SplQueue as array (SplDoublyLinkedList::offsetGet(): Argument #1 ($index) is out of range)
+OutOfRangeException: SplDoublyLinkedList::offsetGet(): Argument #1 ($index) is out of range ()
+42
+8

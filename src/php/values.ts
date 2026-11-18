@@ -571,7 +571,18 @@ export interface PropDecl {
   /** The initial value's expression, or undefined for none (null if untyped, uninitialized if typed). */
   hasDefault: boolean;
   defaultValue?: () => Value;
-  hooks?: { get?: Callable; set?: Callable; setParam?: string; abstractGet?: boolean; abstractSet?: boolean };
+  hooks?: {
+    get?: Callable;
+    set?: Callable;
+    getScope?: PhpClass;
+    setScope?: PhpClass;
+    getBacking?: boolean;
+    setBacking?: boolean;
+    finalGet?: boolean;
+    finalSet?: boolean;
+    abstractGet?: boolean;
+    abstractSet?: boolean;
+  };
   /** Whether a hooked property has storage of its own. */
   isVirtual?: boolean;
 }
@@ -1003,6 +1014,7 @@ export interface ClosureData {
   bound: Map<string, Ref>;
   thisObj?: PhpObject;
   scope?: PhpClass;
+  lexicalScope?: PhpClass;
   calledClass?: PhpClass;
   isStatic: boolean;
   /** The method a first-class callable or `Closure::fromCallable` names, for its trace name. */

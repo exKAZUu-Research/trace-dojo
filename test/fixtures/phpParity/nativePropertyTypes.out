@@ -1,0 +1,10 @@
+string(10) "lesson.php"
+int(12)
+NULL
+Cannot assign array to property LocatedException::$file of type string
+Cannot assign string to property LocatedException::$line of type int
+Cannot assign array to property LocatedError::$line of type int
+Cannot assign string to property LevelException::$severity of type int
+int(1)
+string(3) "123"
+Cannot assign array to property RegexIterator::$replacement of type ?string

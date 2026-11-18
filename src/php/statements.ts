@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 555 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 560 -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import type { CompileError } from '../interpreter/diagnostics';
 import { assignTo, bindRef, destructure, foreachSubjectPlace, unsetTarget } from './assignment';
@@ -638,8 +638,15 @@ setDestructor((object, row) => {
       [],
       row
     );
-  if (row === undefined) asInternal(run);
-  else run();
+  const runtime = rt();
+  const releasingGlobals = runtime.releasingGlobalsAtShutdown;
+  runtime.releasingGlobalsAtShutdown = false;
+  try {
+    if (row === undefined) asInternal(run);
+    else run();
+  } finally {
+    runtime.releasingGlobalsAtShutdown = releasingGlobals;
+  }
 });
 setObjectToString((object) => {
   const method = object.cls.findMethod('__tostring');

@@ -258,21 +258,8 @@ function addProperty(cls: PhpClass, ast: PropertyDeclAst, declarationScope = cls
       return share(cached.value);
     };
   }
-  if (ast.hooks) {
-    const setterType = ast.hooks.set?.params[0]?.type;
-    if (ast.type && setterType && !isSubtype(ast.type, cls, setterType, cls))
-      throw new FatalError(
-        `Type of parameter $${ast.hooks.set?.params[0]?.name} of hook ${cls.name}::$${ast.name}::set must be compatible with property type`,
-        ast.row
-      );
-    decl.hooks = {
-      get: ast.hooks.get ? hookFunction(ast.hooks.get) : undefined,
-      set: ast.hooks.set ? hookFunction(ast.hooks.set) : undefined,
-      setParam: ast.hooks.setParam,
-      abstractGet: ast.hooks.abstractGet,
-      abstractSet: ast.hooks.abstractSet,
-    };
-  }
+  const parent = inherited?.cls !== cls && inherited?.visibility !== 'private' ? inherited : undefined;
+  linkPropertyHooks(decl, ast, parent);
   if (ast.isStatic) {
     const ref: LazyRef = new Ref(null);
     const initialize = (): Value =>
@@ -289,6 +276,48 @@ function addProperty(cls: PhpClass, ast: PropertyDeclAst, declarationScope = cls
   else cls.props.push(decl);
   cls.propByName.set(ast.name, decl);
   if (decl.visibility === 'private') cls.privateProps.set(ast.name, decl);
+}
+
+// code-gauge-allow functionCognitiveComplexity 25 -- Keeps the ordered PHP cases together because each branch shares the same dispatch state.
+function linkPropertyHooks(decl: PropDecl, ast: PropertyDeclAst, parent: PropDecl | undefined): void {
+  const own = ast.hooks;
+  const inherited = parent?.hooks;
+  if (!own && !inherited) return;
+  if (own?.get && inherited?.finalGet)
+    throw new FatalError(
+      `Cannot override final property hook ${(inherited.getScope ?? parent?.cls)?.name}::$${ast.name}::get()`,
+      ast.row
+    );
+  if (own?.set && inherited?.finalSet)
+    throw new FatalError(
+      `Cannot override final property hook ${(inherited.setScope ?? parent?.cls)?.name}::$${ast.name}::set()`,
+      ast.row
+    );
+  const cls = decl.cls;
+  const parameter = own?.set?.params[0];
+  if (ast.type && parameter?.type && !isSubtype(ast.type, cls, parameter.type, cls))
+    throw new FatalError(
+      `Type of parameter $${parameter.name} of hook ${cls.name}::$${ast.name}::set must be compatible with property type`,
+      ast.row
+    );
+  const get = own?.get ? hookFunction(own.get) : inherited?.abstractGet ? undefined : inherited?.get;
+  const set = own?.set ? hookFunction(own.set) : inherited?.abstractSet ? undefined : inherited?.set;
+  if (!get && !set) return;
+  decl.hooks = {
+    get,
+    set,
+    getScope: own?.get ? cls : (inherited?.getScope ?? parent?.cls),
+    setScope: own?.set ? cls : (inherited?.setScope ?? parent?.cls),
+    getBacking: own?.get ? own.getBacking : inherited?.getBacking,
+    setBacking: own?.set ? own.setBacking : inherited?.setBacking,
+    finalGet: own?.get ? own.finalGet : inherited?.finalGet,
+    finalSet: own?.set ? own.finalSet : inherited?.finalSet,
+    abstractGet: own?.abstractGet,
+    abstractSet: own?.abstractSet,
+  };
+  decl.isVirtual = ast.isVirtual && !decl.hooks.getBacking && !decl.hooks.setBacking;
+  if (decl.isVirtual && ast.defaultExpr)
+    throw new FatalError(`Cannot specify default value for virtual hooked property ${cls.name}::$${ast.name}`, ast.row);
 }
 
 function propertyTypeCompatible(
@@ -1050,7 +1079,7 @@ export function readProp(
     const inHook = isBackingAccess(object, decl, 'read');
     if (decl.hooks?.get && !inHook) {
       const get = decl.hooks.get;
-      const target = { fn: get, thisObj: object, scope: decl.cls, staticClass: object.cls };
+      const target = { fn: get, thisObj: object, scope: decl.hooks.getScope ?? decl.cls, staticClass: object.cls };
       return guarded(object, `hook:${name}`, () =>
         mode === 'native' ? asInternal(() => invoke(target, [], undefined)) : invoke(target, [], rt().row)
       );
@@ -1120,25 +1149,17 @@ export function writeProp(
   options: { fetched?: boolean; operation?: 'assignOp' } = {}
 ): Value {
   if (object.isResource) throwError('Error', `Attempt to assign property "${name}" on resource`);
-  rt().spend();
+  const runtime = rt();
+  const pending = runtime.pendingAssignmentWarning;
+  runtime.spend();
   const decl = lookupProp(object.cls, name, scope);
   checkStaticInstanceAccess(object, name, scope, decl, 'set', !options.fetched);
   if (decl && !decl.isStatic) {
     if (!canAccessProp(decl, scope)) {
-      const magic = object.cls.findMethod('__set');
-      if (magic && !object.guards?.has(`set:${name}`)) {
-        guarded(object, `set:${name}`, () => callMagic(object, magic, [name, value]));
-        return value;
-      }
+      if (writeOverloadedProperty(object, name, value)) return value;
       throwError('Error', `Cannot access ${decl.visibility} property ${object.cls.name}::$${name}`);
     }
-    if (object.unsetProperties?.has(decl.key)) {
-      const magic = object.cls.findMethod('__set');
-      if (magic && !object.guards?.has(`set:${name}`)) {
-        guarded(object, `set:${name}`, () => callMagic(object, magic, [name, value]));
-        return value;
-      }
-    }
+    if (object.unsetProperties?.has(decl.key) && writeOverloadedProperty(object, name, value)) return value;
     if (decl.isReadonly) {
       const current = object.props.get(decl.key);
       if (current !== UNINIT && current !== undefined && !object.cloning)
@@ -1157,9 +1178,15 @@ export function writeProp(
     }
     const inHook = isBackingAccess(object, decl, 'write');
     if (decl.hooks?.set && !inHook) {
+      if (pending) throw pending;
       guarded(object, `hook:${name}`, () =>
         invoke(
-          { fn: decl.hooks?.set as Callable, thisObj: object, scope: decl.cls, staticClass: object.cls },
+          {
+            fn: decl.hooks?.set as Callable,
+            thisObj: object,
+            scope: decl.hooks?.setScope ?? decl.cls,
+            staticClass: object.cls,
+          },
           [{ v: value }],
           rt().row
         )
@@ -1186,13 +1213,18 @@ export function writeProp(
     }
     return slot instanceof Ref ? slot.v : value;
   }
-  const magic = object.cls.findMethod('__set');
-  if (magic && !object.guards?.has(`set:${name}`)) {
-    guarded(object, `set:${name}`, () => callMagic(object, magic, [name, value]));
-    return value;
-  }
+  if (writeOverloadedProperty(object, name, value)) return value;
   createDynamicProp(object, name, share(value));
   return value;
+}
+
+function writeOverloadedProperty(object: PhpObject, name: string, value: Value): boolean {
+  const magic = object.cls.findMethod('__set');
+  if (!magic || object.guards?.has(`set:${name}`)) return false;
+  const pending = rt().pendingAssignmentWarning;
+  if (pending) throw pending;
+  guarded(object, `set:${name}`, () => callMagic(object, magic, [name, value]));
+  return true;
 }
 
 export function createDynamicProp(object: PhpObject, name: string, value: Slot = null, deprecate = deprecated): void {
@@ -1224,6 +1256,8 @@ export function coerceProperty(decl: PropDecl, value: Value, object?: PhpObject,
     staticClass: object?.cls,
   });
   if (coerced === NO_MATCH) {
+    const pending = rt().pendingAssignmentWarning;
+    if (pending) throw pending;
     throwError(
       'TypeError',
       `Cannot assign ${valueName(value)} to ${holder} ${(object?.cls ?? decl.cls).name}::$${decl.name} of type ${describePropertyType(decl)}`
@@ -1366,22 +1400,17 @@ function isBackingAccess(object: PhpObject, decl: PropDecl, operation: 'read' | 
   return true;
 }
 
-export function hookedPropertyReference(
-  object: PhpObject,
-  decl: PropDecl,
-  scope: PhpClass | undefined,
-  mode: 'write' | 'update' | 'unset' = 'write',
-  allowObject = false
-): Ref {
-  checkIndirectModification(object, decl.name, scope, mode);
+export function hookedPropertyReference(object: PhpObject, decl: PropDecl, scope: PhpClass | undefined): Ref {
   const runtime = rt();
   runtime.lastReturnRef = undefined;
-  const value = readProp(object, decl.name, scope, 'quiet');
-  const returned = runtime.lastReturnRef;
-  runtime.lastReturnRef = undefined;
-  if (returned) return returned;
-  if (allowObject && value instanceof PhpObject) return Ref.temporary(value);
-  throwError('Error', `Indirect modification of ${decl.cls.name}::$${decl.name} is not allowed`);
+  try {
+    const value = readProp(object, decl.name, scope, 'quiet');
+    if (runtime.lastReturnRef) return runtime.lastReturnRef;
+    if (value instanceof PhpObject && !value.isResource) return Ref.temporary(value);
+    throwError('Error', `Indirect modification of ${object.cls.name}::$${decl.name} is not allowed`);
+  } finally {
+    runtime.lastReturnRef = undefined;
+  }
 }
 
 function overloadedPropertyReference(object: PhpObject, name: string): Ref | undefined {

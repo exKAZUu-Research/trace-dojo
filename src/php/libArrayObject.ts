@@ -260,6 +260,8 @@ function checkFlags(flags: number): number {
   return flags;
 }
 
+// code-gauge-allow functionNcss 33 -- Keeps the ordered PHP cases together because each branch shares the same dispatch state.
+// code-gauge-allow functionCognitiveComplexity 20 -- Keeps the ordered PHP cases together because each branch shares the same dispatch state.
 function arrayMethods(name: string): NativeMethod[] {
   return [
     {
@@ -282,12 +284,16 @@ function arrayMethods(name: string): NativeMethod[] {
     {
       signature: 'offsetGet(mixed $key): mixed',
       impl: ({ thisObj, args }) => {
+        const fetch = rt().takeReadWriteDimension(thisObj);
         const key = toKey(args[0], 'access', thisObj.cls.name);
         const value = storageOf(thisObj).array.get(key);
         if (value === undefined) {
-          warn(`Undefined array key ${typeof key === 'bigint' ? key : `"${key}"`}`);
+          const report = (): void => warn(`Undefined array key ${typeof key === 'bigint' ? key : `"${key}"`}`);
+          if (fetch) fetch.warning(report);
+          else report();
           return null;
         }
+        if (fetch?.pending) throw fetch.pending;
         return value;
       },
     },
