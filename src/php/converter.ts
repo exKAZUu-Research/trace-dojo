@@ -14,6 +14,23 @@ import { decodeLiteral, parseIntegerLiteral } from './literals';
 
 export type { CompileNotice } from './converterBase';
 
+const EQUALITY_OPERATORS = new Set(['==', '!=', '===', '!==', '<>', '<=>']);
+const ORDER_OPERATORS = new Set(['<', '<=', '>', '>=']);
+const COMMUTATIVE_OPCODES = new Set(['*', '&', '|', '^']);
+const VARIABLE_OPCODE_RESULTS = new Set<Expr['k']>([
+  'varvar',
+  'idx',
+  'prop',
+  'sprop',
+  'call',
+  'mcall',
+  'scall',
+  'new',
+  'newAnon',
+  'assign',
+  'assignRef',
+]);
+
 export class Converter extends DeclarationConverter {
   private declaredSymbols = new Map<string, Map<string, string>>();
   private readonly staticNames = new WeakMap<object, Set<string>>();
@@ -136,7 +153,7 @@ export class Converter extends DeclarationConverter {
           .map((child) => {
             const nameNode = child.childForFieldName('name') as Node;
             const value = child.childForFieldName('value');
-            return { name: this.variableName(nameNode), init: value ? this.expr(value) : undefined };
+            return { name: this.variableName(nameNode), init: value ? this.initializerExpr(value) : undefined };
           });
         let names = this.staticNames.get(this.fn);
         if (!names) {
@@ -538,7 +555,7 @@ export class Converter extends DeclarationConverter {
     return statements;
   }
 
-  // code-gauge-allow functionCognitiveComplexity 22 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+  // code-gauge-allow functionCognitiveComplexity 25 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
   private useDeclaration(node: Node): void {
     const kindNode = node.childForFieldName('type');
     const kind = kindNode ? lower(kindNode.text) : 'class';
@@ -556,6 +573,13 @@ export class Converter extends DeclarationConverter {
       const raw = this.nameText(target).replace(/^\\/, '');
       const full = prefix ? `${prefix}\\${raw}` : raw;
       const aliasNode = clause.childForFieldName('alias');
+      if (this.namespace === '' && !aliasNode && !full.includes('\\')) {
+        this.notices.push({
+          level: 'Warning',
+          message: `The use statement with non-compound name '${full}' has no effect`,
+          row: clause.startPosition.row,
+        });
+      }
       const alias = aliasNode ? this.nameText(aliasNode) : (full.split('\\').at(-1) as string);
       const imports = this.importsFor(effective);
       const key = effective === 'const' ? alias : lower(alias);
@@ -942,10 +966,7 @@ export class Converter extends DeclarationConverter {
           this.error(node, '(unset) のキャストは使えません（The (unset) cast is no longer supported）。');
         if (type === 'real')
           this.error(node, '(real) のキャストは使えません（The (real) cast has been removed, use (float) instead）。');
-        if (type === 'binary') {
-          return { k: 'cast', type: 'string', e: this.expr(node.childForFieldName('value') as Node), row };
-        }
-        const normalized = { integer: 'int', double: 'float', boolean: 'bool' }[type] ?? type;
+        const normalized = { integer: 'int', double: 'float', boolean: 'bool', binary: 'string' }[type] ?? type;
         if (normalized !== type) {
           this.notices.push({
             level: 'Deprecated',
@@ -1026,6 +1047,7 @@ export class Converter extends DeclarationConverter {
     const row = node.startPosition.row;
     const raw = this.nameText(node);
     const word = lower(raw);
+    if (node.type === 'name' && word === 'default') this.error(node, 'syntax error, unexpected token "default"');
     if (word === 'true' || word === 'false') return { k: 'lit', v: word === 'true', row };
     if (word === 'null') return { k: 'lit', v: null, row };
     if (raw === '__LINE__') return { k: 'lit', v: BigInt(row + 1), row };
@@ -1057,8 +1079,11 @@ export class Converter extends DeclarationConverter {
         }
         if (items.length === 0) this.error(node, 'isset() には式を書いてください。');
         for (const item of items) {
-          if (!['var', 'varvar', 'idx', 'prop', 'sprop', 'cconst'].includes(item.k)) {
-            this.error(node, 'isset() には変数を書いてください（Cannot use isset() on the result of an expression）。');
+          if (!['var', 'varvar', 'idx', 'prop', 'sprop'].includes(item.k)) {
+            this.error(
+              node,
+              'Cannot use isset() on the result of an expression (you can use "null !== expression" instead)'
+            );
           }
         }
         return { k: 'isset', items, row };
@@ -1158,30 +1183,40 @@ export class Converter extends DeclarationConverter {
     return { k: 'new', cls: this.classRef(classNode), args, row };
   }
 
-  // code-gauge-allow functionNcss 34 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
-  // code-gauge-allow functionCognitiveComplexity 29 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
-  // code-gauge-allow functionNcss 34 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
-  // code-gauge-allow functionCognitiveComplexity 29 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
   private binary(node: Node): Expr {
     const row = node.startPosition.row;
-    const operator = (node.childForFieldName('operator') as Node).type;
+    const token = node.childForFieldName('operator') as Node;
+    const op = lower(token.type);
     const leftNode = node.childForFieldName('left') as Node;
     const rightNode = node.childForFieldName('right') as Node;
+    const invalid = chainedComparison(token, leftNode, rightNode);
+    if (invalid) this.error(invalid, `syntax error, unexpected token "${invalid.text}"`);
     const l = this.expr(leftNode);
-    if (lower(operator) === 'instanceof') {
-      if (this.compiledType(l) !== undefined) return { k: 'lit', v: false, row };
-      const cls =
-        rightNode.type === 'name' || rightNode.type === 'qualified_name' || rightNode.type === 'relative_name'
-          ? this.classRef(rightNode)
-          : { k: 'expr' as const, e: this.expr(rightNode) };
-      return { k: 'instanceof', e: l, cls, row };
-    }
-    const op = lower(operator);
-    if (!this.inConstantExpression && (op === '&&' || op === 'and' || op === '||' || op === 'or')) {
+    if (op === 'instanceof') return this.instanceOf(l, rightNode, row);
+    if (op === '&&' || op === 'and' || op === '||' || op === 'or') {
       return this.shortCircuit(op, l, rightNode, row);
     }
     const r = this.expr(rightNode);
-    if (!this.inConstantExpression && op === 'xor') {
+    if (op === '|>') {
+      if (rightNode.type === 'arrow_function')
+        this.error(rightNode, 'Arrow functions on the right hand side of |> must be parenthesized');
+      return { k: 'pipe', l, r, row };
+    }
+    const expression = { k: 'bin' as const, op: op === '<>' ? '!=' : op, l, r, row };
+    return this.initializerContext?.kind === 'deferred' ? expression : this.compileBinary(expression);
+  }
+
+  private instanceOf(l: Expr, right: Node, row: number): Expr {
+    if (this.compiledType(l) !== undefined) return { k: 'lit', v: false, row };
+    const cls = ['name', 'qualified_name', 'relative_name'].includes(right.type)
+      ? this.classRef(right)
+      : { k: 'expr' as const, e: this.expr(right) };
+    return { k: 'instanceof', e: l, cls, row };
+  }
+
+  private compileBinary(expression: Extract<Expr, { k: 'bin' }>): Expr {
+    const { l, r, op, row } = expression;
+    if (op === 'xor') {
       const left = this.compiledValue(l);
       const right = this.compiledValue(r);
       if (left !== undefined && right !== undefined) {
@@ -1189,40 +1224,52 @@ export class Converter extends DeclarationConverter {
         return { k: 'lit', v, row };
       }
     }
-    if (operator === '|>') {
-      if (rightNode.type === 'arrow_function')
-        this.error(rightNode, 'Arrow functions on the right hand side of |> must be parenthesized');
-      return { k: 'pipe', l, r, row };
-    }
-    const expression: Expr = { k: 'bin', op: op === '<>' ? '!=' : op, l, r, row };
-    if (!this.inConstantExpression && op === '.') {
-      const value = this.compiledValue(expression);
-      if (typeof value === 'string') {
-        for (const operand of [l, r]) {
-          if (Number.isNaN(this.compiledValue(operand)))
-            this.notices.push({ level: 'Warning', message: NAN_STRING_WARNING, row: r.row });
-        }
-        expression.foldedString = value;
-      }
+    if (op === '.') expression.foldedString = this.compileConcatenation(expression);
+    if (COMMUTATIVE_OPCODES.has(op)) {
+      const rightRank = this.operandRank(r);
+      if (rightRank > 0 && this.operandRank(l) < rightRank) expression.swapOperands = true;
     }
     return expression;
   }
 
+  private compileConcatenation(expression: Extract<Expr, { k: 'bin' }>): string | undefined {
+    const value = this.compiledValue(expression);
+    if (typeof value !== 'string') return;
+    const row = this.initializerContext?.row ?? expression.r.row;
+    for (const operand of [expression.l, expression.r]) {
+      if (Number.isNaN(this.compiledValue(operand)))
+        this.notices.push({ level: 'Warning', message: NAN_STRING_WARNING, row });
+    }
+    return value;
+  }
+
+  private operandRank(operand: Expr): number {
+    // Zend specializes commutative opcodes in descending CV, VAR, TMP, CONST order.
+    if (operand.k === 'var' && operand.name !== 'this' && operand.name !== 'GLOBALS') return 3;
+    if (VARIABLE_OPCODE_RESULTS.has(operand.k) || operand.k === 'var') return 2;
+    return this.compiledValue(operand) === undefined ? 1 : 0;
+  }
+
   private shortCircuit(op: string, l: Expr, right: Node, row: number): Expr {
     const value = this.compiledValue(l);
-    if (value === undefined) return { k: 'bin', op, l, r: this.expr(right), row };
+    const deferred = this.initializerContext?.kind === 'deferred';
+    if (value === undefined || (deferred && Number.isNaN(value))) return { k: 'bin', op, l, r: this.expr(right), row };
     const isAnd = op === '&&' || op === 'and';
     const condition = this.compileTruth(value, l.row);
-    if (condition !== isAnd) return { k: 'lit', v: this.compileTruth(value, l.row), row };
+    if (condition !== isAnd) {
+      const v = this.initializerContext === undefined ? this.compileTruth(value, l.row) : condition;
+      return { k: 'lit', v, row };
+    }
     const r = this.expr(right);
     const result = this.compiledValue(r);
-    if (result !== undefined) return { k: 'lit', v: this.compileTruth(result, r.row), row };
+    if (result !== undefined && (!deferred || !Number.isNaN(result)))
+      return { k: 'lit', v: this.compileTruth(result, r.row), row };
     return { k: 'bin', op, l: { k: 'lit', v: condition, row: l.row }, r, row };
   }
 
   private compileTruth(value: Constant, row: number): boolean {
     if (typeof value === 'number' && Number.isNaN(value))
-      this.notices.push({ level: 'Warning', message: NAN_BOOL_WARNING, row });
+      this.notices.push({ level: 'Warning', message: NAN_BOOL_WARNING, row: this.initializerContext?.row ?? row });
     return constantTruth(value);
   }
 
@@ -1257,6 +1304,9 @@ export class Converter extends DeclarationConverter {
     const row = node.startPosition.row;
     const subject = this.condition(node);
     const block = node.childForFieldName('body') as Node;
+    const comma = block.children.find((child) => child.type === ',');
+    if (comma && block.namedChildren.every((child) => child.type === 'comment'))
+      this.error(comma, 'syntax error, unexpected token ","');
     const arms: MatchArm[] = [];
     let defaults = 0;
     for (const arm of block.namedChildren) {
@@ -1425,7 +1475,6 @@ export class Converter extends DeclarationConverter {
    * Converts a double-quoted string or heredoc, reading its literal text from the source between the interpolated
    * expressions, since the grammar leaves line breaks out of its content nodes.
    */
-  // code-gauge-allow functionNcss 60 -- One case per grammar node kind, each converted where PHP gives it its own meaning.
   private interpolated(node: Node): Expr {
     const row = node.startPosition.row;
     const isHeredoc = node.type === 'heredoc';
@@ -1436,8 +1485,8 @@ export class Converter extends DeclarationConverter {
     if (end) this.checkMultilineIndent(node, end);
     if (!container) return { k: 'lit', v: '', row };
     const children = container.children;
-    let cursor = isHeredoc ? container.startIndex : (children[0]?.endIndex ?? container.startIndex);
-    let limit = isHeredoc ? container.endIndex : (children.at(-1)?.startIndex ?? container.endIndex);
+    let cursor = isHeredoc ? container.startIndex : this.source.indexOf('"', node.startIndex) + 1;
+    let limit = isHeredoc ? container.endIndex : node.endIndex - 1;
     if (isHeredoc) {
       // The body runs from the line after the opening marker to the line break before the closing one.
       if (this.source.startsWith('\r\n', cursor)) cursor += 2;
@@ -1445,17 +1494,26 @@ export class Converter extends DeclarationConverter {
       if (this.source[limit - 1] === '\n') limit -= this.source[limit - 2] === '\r' ? 2 : 1;
     }
     let raw = '';
+    let rawStart = cursor;
     let rawAtLineStart = isHeredoc;
     const flush = (): void => {
       if (raw === '') return;
       const text = isHeredoc && indent > 0 ? this.dedent(raw, indent, rawAtLineStart, end as Node) : raw;
       parts.push(
-        decodeLiteral(text, !isHeredoc, (escape) =>
-          this.notices.push({
-            level: 'Warning',
-            message: `Octal escape sequence overflow ${escape} is greater than \\377`,
-            row: container.startPosition.row,
-          })
+        decodeLiteral(
+          text,
+          !isHeredoc,
+          (escape) => {
+            this.notices.push({
+              level: 'Warning',
+              message: `Octal escape sequence overflow ${escape} is greater than \\377`,
+              row: container.startPosition.row,
+            });
+          },
+          (message, offset) => {
+            const before = this.source.slice(node.startIndex, rawStart) + text.slice(0, offset);
+            this.error(row + before.split('\n').length - 1, message);
+          }
         )
       );
       raw = '';
@@ -1483,6 +1541,7 @@ export class Converter extends DeclarationConverter {
       parts.push(part);
       braced = false;
       cursor = child.endIndex;
+      rawStart = cursor;
       rawAtLineStart = false;
     }
     raw += this.source.slice(cursor, limit);
@@ -1527,6 +1586,15 @@ export class Converter extends DeclarationConverter {
       })
       .join('\n');
   }
+}
+
+function chainedComparison(operator: Node, left: Node, right: Node): Node | undefined {
+  const group = EQUALITY_OPERATORS.has(operator.type) ? EQUALITY_OPERATORS : ORDER_OPERATORS;
+  if (!group.has(operator.type)) return;
+  const leftOperator = left.type === 'binary_expression' ? left.childForFieldName('operator') : undefined;
+  if (leftOperator && group.has(leftOperator.type)) return operator;
+  const rightOperator = right.type === 'binary_expression' ? right.childForFieldName('operator') : undefined;
+  if (rightOperator && group.has(rightOperator.type)) return rightOperator;
 }
 
 function encodingLiteral(node: Node, value: Expr): boolean {

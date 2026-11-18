@@ -29,3 +29,9 @@ foreach ([null, E_NOTICE, E_WARNING] as $mask) {
 try { strtr('x', ['' => new stdClass]); }
 catch (Throwable $error) { echo $error->getMessage(), "\n"; }
 strtr('x', ['' => '']);
+function callTranslator(): void {
+    $translate = 'strtr';
+    check(fn() => $translate('a', ['' => new ThrowOnString]));
+    check(fn() => call_user_func('strtr', 'a', ['' => new ThrowOnString]));
+}
+callTranslator();

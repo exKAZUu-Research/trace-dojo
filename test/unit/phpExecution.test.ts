@@ -1521,3 +1521,24 @@ test.each(['(NAN xor true)::class', '(("x".(1.5+1))||missing())::class'])(
     });
   }
 );
+
+test.each([
+  ['const F = static function () { var_dump((NAN || true)::class); };', 'Cannot use "::class" on true'],
+  ['class A { const F = static function () { var_dump((NAN || true)::class); }; }', 'Cannot use "::class" on true'],
+  ['class A { const VALUE = 1; } isset(A::VALUE);', 'Cannot use isset() on the result of an expression'],
+  ['var_dump(1 < 2 < 3);', 'unexpected token "<"'],
+  ['var_dump(1 <=> 2 == 3);', 'unexpected token "=="'],
+  ['var_dump(match(1) { 1, default => 3 });', 'syntax error'],
+  ['var_dump(match(1) { , });', 'syntax error'],
+  [String.raw`echo "\u{}";`, 'Invalid UTF-8 codepoint escape sequence'],
+  [String.raw`echo b"\u{g}";`, 'Invalid UTF-8 codepoint escape sequence'],
+  [String.raw`echo "\u{110000}";`, 'Invalid UTF-8 codepoint escape sequence: Codepoint too large'],
+  ['class A { function f(): self&A {} }', 'Duplicate type A is redundant'],
+  ['class B {} class A extends B { function f(): parent|B {} }', 'Duplicate type B is redundant'],
+  ['class A { function f(): parent&B {} }', 'Cannot use "parent" when current class scope has no parent'],
+])('rejects invalid PHP expression or type syntax: %s', (source, message) => {
+  expect(run(`<?php echo 'never'; ${source}`)).toMatchObject({
+    kind: 'compileError',
+    diagnostics: [{ message: expect.stringContaining(message) }],
+  });
+});

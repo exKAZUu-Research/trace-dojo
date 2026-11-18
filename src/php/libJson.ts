@@ -520,7 +520,7 @@ class JsonParser {
     this.index++;
     let result = '';
     for (;;) {
-      if (this.index >= this.text.length) throw new JsonError(4);
+      if (this.index >= this.text.length) throw new JsonError(3);
       const char = this.text[this.index++];
       if (char === '"') return result;
       const chunk = this.stringCharacter(char);

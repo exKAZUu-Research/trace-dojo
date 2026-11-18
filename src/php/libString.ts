@@ -551,14 +551,14 @@ defineFunction('strrchr(string $haystack, string $needle, bool $before_needle = 
 defineOverloadedFunction(
   'strtr(string $string, array $from): string',
   'strtr(string $string, string $from, string $to): string',
-  ({ args }) => translate(args),
+  ({ args, row }) => translate(args, row !== undefined),
   { 1: 'array|string', 2: '?string' }
 );
 
-function translate(args: Value[]): string {
+function translate(args: Value[], inlined: boolean): string {
   const text = s(args[0]);
   const from = args[1];
-  if (from instanceof PhpArray) return translatePairs(text, from);
+  if (from instanceof PhpArray) return translatePairs(text, from, inlined);
   const source = s(from);
   const target = s(args[2]);
   const length = Math.min(source.length, target.length);
@@ -567,9 +567,9 @@ function translate(args: Value[]): string {
   return [...text].map((char) => map.get(char) ?? char).join('');
 }
 
-function translatePairs(text: string, replacements: PhpArray): string {
+function translatePairs(text: string, replacements: PhpArray, inlined: boolean): string {
   if (text === '' || replacements.size === 0) return text;
-  if (replacements.size === 1) return translateSinglePair(text, replacements);
+  if (replacements.size === 1) return translateSinglePair(text, replacements, inlined);
   if (replacements.map.has('')) warn('strtr(): Ignoring replacement of empty string');
   const pairs: (readonly [string, Value | Ref])[] = [];
   for (const [key, value] of replacements.map) {
@@ -594,14 +594,14 @@ function translatePairs(text: string, replacements: PhpArray): string {
   return result;
 }
 
-function translateSinglePair(text: string, replacements: PhpArray): string {
+function translateSinglePair(text: string, replacements: PhpArray, inlined: boolean): string {
   const [key, slot] = replacements.map.entries().next().value!;
   const value = slot instanceof Ref ? slot.v : slot;
   if (key === '') {
     withStringConversionErrors((convert) => {
       convert(value);
-      const pending = rt().nativeStringConversionPending;
-      const caller = pending ? callStack.at(-2) : undefined;
+      const pending = rt().nativeStringConversionPending && inlined;
+      const caller = pending ? callStack.at(-1) : undefined;
       const name = caller?.name ?? (pending ? 'main' : 'strtr');
       const scope = caller?.className ? `${caller.className}::` : '';
       warn(`${scope}${name}(): Ignoring replacement of empty string`);

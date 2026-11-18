@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 549 -- Keeps one PHP runtime concern and its shared helpers in one module.
+// code-gauge-allow-file fileNcss 551 -- Keeps one PHP runtime concern and its shared helpers in one module.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import { placeOf } from './assignment';
 import type { Arg, Expr } from './ast';
@@ -840,6 +840,8 @@ function newClosure(fn: UserFunction, bound: Map<string, Ref>, isStatic: boolean
 
 // Function bodies ----------------------------------------------------------------------------------------------------
 
+// code-gauge-allow functionCognitiveComplexity 17 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+// code-gauge-allow functionCognitiveComplexity 17 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 function inlineCall(fn: Callable, args: Arg[]): boolean {
   if (fn.kind !== 'native' || args.some((arg) => arg.spread || arg.name !== undefined)) return false;
   const name = lower(fn.name);
@@ -847,6 +849,7 @@ function inlineCall(fn: Callable, args: Arg[]): boolean {
   if (name === 'intval') return args.length === 1;
   if (name === 'min' || name === 'max') return args.length === 2;
   if (name === 'implode') return args.length === 1 || args.length === 2;
+  if (name === 'strtr') return args.length === 2 || args.length === 3;
   if (name === 'sprintf') return usesSimpleSprintf(args);
   if (!fn.inlined) return false;
   if (name === 'array_key_exists') return args.length === 2;

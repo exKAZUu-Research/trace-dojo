@@ -44,7 +44,12 @@ const SIMPLE_ESCAPES: Record<string, string> = {
 };
 
 /** Decodes one escape sequence of a double-quoted string or heredoc, as bytes. */
-function decodeEscape(text: string, doubleQuoted: boolean, onOverflow?: (escape: string) => void): string {
+function decodeEscape(
+  text: string,
+  doubleQuoted: boolean,
+  onOverflow?: (escape: string) => void,
+  invalidUnicode?: (message: string) => void
+): string {
   const body = text.slice(1);
   if (body === '"') return doubleQuoted ? '"' : String.raw`\"`;
   if (body in SIMPLE_ESCAPES) return SIMPLE_ESCAPES[body];
@@ -54,8 +59,14 @@ function decodeEscape(text: string, doubleQuoted: boolean, onOverflow?: (escape:
     return String.fromCharCode(code & 0xff);
   }
   if (/^x[0-9A-Fa-f]{1,2}$/.test(body)) return String.fromCharCode(Number.parseInt(body.slice(1), 16));
-  const unicode = /^u\{([0-9A-Fa-f]+)\}$/.exec(body);
-  if (unicode) return codePointBytes(Number.parseInt(unicode[1], 16));
+  if (body.startsWith('u{')) {
+    if (!body.endsWith('}')) invalidUnicode?.('Invalid UTF-8 codepoint escape sequence');
+    else {
+      const value = Number.parseInt(body.slice(2, -1), 16);
+      if (value <= 0x10_ff_ff) return codePointBytes(value);
+      invalidUnicode?.('Invalid UTF-8 codepoint escape sequence: Codepoint too large');
+    }
+  }
   return enc(text);
 }
 
@@ -63,11 +74,18 @@ function decodeEscape(text: string, doubleQuoted: boolean, onOverflow?: (escape:
  * Decodes the escapes of a literal part of a double-quoted string or heredoc into bytes, reporting octal escapes past
  * a byte, which PHP warns about.
  */
-export function decodeLiteral(raw: string, doubleQuoted: boolean, onOverflow?: (escape: string) => void): string {
+export function decodeLiteral(
+  raw: string,
+  doubleQuoted: boolean,
+  onOverflow?: (escape: string) => void,
+  invalidUnicode?: (message: string, offset: number) => void
+): string {
   let result = '';
   let last = 0;
-  for (const match of raw.matchAll(/\\(u\{[0-9A-Fa-f]+\}|x[0-9A-Fa-f]{1,2}|[0-7]{1,3}|[ntrvef\\$"])/g)) {
-    result += enc(raw.slice(last, match.index)) + decodeEscape(match[0], doubleQuoted, onOverflow);
+  for (const match of raw.matchAll(/\\(?:u\{(?:[0-9A-Fa-f]+\})?|x[0-9A-Fa-f]{1,2}|[0-7]{1,3}|[ntrvef\\$"])/g)) {
+    result +=
+      enc(raw.slice(last, match.index)) +
+      decodeEscape(match[0], doubleQuoted, onOverflow, (message) => invalidUnicode?.(message, match.index));
     last = match.index + match[0].length;
   }
   return result + enc(raw.slice(last));

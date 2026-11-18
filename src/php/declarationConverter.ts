@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 658 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 681 -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import type { Node } from '@willbooster/web-tree-sitter';
 
@@ -48,7 +48,7 @@ const MAGIC_METHODS: Record<
 export abstract class DeclarationConverter extends ConverterBase {
   private readonly compileClasses = new CompileClassConstants();
   private activeClass?: ClassDecl;
-  protected inConstantExpression = false;
+  protected initializerContext?: { kind: 'eager' | 'deferred'; row: number };
 
   protected compiledType(expression: Expr): string | undefined {
     const value = this.compiledValue(expression);
@@ -62,7 +62,7 @@ export abstract class DeclarationConverter extends ConverterBase {
     });
   }
 
-  // code-gauge-allow functionNcss 31 -- Converts every part of a function declaration and checks it as PHP does at compile time.
+  // code-gauge-allow functionNcss 36 -- Converts every part of a function declaration and checks it as PHP does at compile time.
   protected functionDecl(node: Node, isClosure: boolean, className?: string): FunctionDecl {
     const attributes = node.childForFieldName('attributes');
     if (attributes) this.unsupported(attributes, '属性（#[...]）');
@@ -74,15 +74,15 @@ export abstract class DeclarationConverter extends ConverterBase {
         ? this.qualify(rawName)
         : rawName;
     const returnTypeNode = node.childForFieldName('return_type');
-    const returnType = returnTypeNode ? this.typeDecl(returnTypeNode) : undefined;
     const body = node.childForFieldName('body');
     const byRefReturn =
       node.childForFieldName('reference_modifier') !== null ||
       node.children.some((child) => child.type === 'reference_modifier');
     const outerFn = this.fn;
     const outerLoop = this.loop;
+    const outerInitializer = this.initializerContext;
+    if (outerInitializer?.kind === 'eager') this.initializerContext = undefined;
     this.fn = {
-      returnType,
       isGenerator: false,
       labels: new Set(),
       gotos: [],
@@ -94,6 +94,8 @@ export abstract class DeclarationConverter extends ConverterBase {
     };
     this.loop = { depth: 0, switches: [] };
     try {
+      const returnType = returnTypeNode ? this.typeDecl(returnTypeNode) : undefined;
+      this.fn.returnType = returnType;
       if (returnTypeNode && returnType) this.checkTypeScope(returnTypeNode, returnType);
       const params = this.params(node.childForFieldName('parameters') as Node, name, className);
       const isAtomic = this.claimAtomic(node, body);
@@ -123,6 +125,7 @@ export abstract class DeclarationConverter extends ConverterBase {
       };
     } finally {
       this.fn = outerFn;
+      this.initializerContext = outerInitializer;
       this.loop = outerLoop;
     }
   }
@@ -148,7 +151,7 @@ export abstract class DeclarationConverter extends ConverterBase {
         this.error(child, 'void and never cannot be parameter types');
       if (typeNode && type) this.checkTypeScope(typeNode, type, true);
       const defaultNode = child.childForFieldName('default_value');
-      const defaultExpr = defaultNode ? this.constantExpr(defaultNode, true) : undefined;
+      const defaultExpr = defaultNode ? this.constantExpr(defaultNode, true, 'deferred') : undefined;
       const byRef = child.childForFieldName('reference_modifier') !== null;
       const variadic = child.type === 'variadic_parameter';
       if (params.at(-1)?.variadic) {
@@ -231,7 +234,7 @@ export abstract class DeclarationConverter extends ConverterBase {
   private checkIntersection(node: Node, members: TypeDecl[]): void {
     const seen = new Set<string>();
     for (const member of members) {
-      const name = typeToString(member);
+      const name = this.typeMemberName(member, node);
       const key = lower(name);
       if (member.k !== 'named' || BUILTIN_TYPES.has(lower(member.name)) || ['self', 'parent', 'static'].includes(key))
         this.error(node, `Type ${name} cannot be part of an intersection type`);
@@ -240,14 +243,15 @@ export abstract class DeclarationConverter extends ConverterBase {
     }
   }
 
+  // code-gauge-allow functionCognitiveComplexity 26 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+  // code-gauge-allow functionCognitiveComplexity 26 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
   private checkUnion(node: Node, type: Extract<TypeDecl, { k: 'union' }>): void {
     const seen = new Set<string>();
     for (const member of type.types) {
       if (member.k === 'named' && member.nullable) this.error(node, 'Invalid or redundant union type');
       const name = member.k === 'named' ? lower(member.name) : lower(typeToString(member));
       if (name === 'mixed') this.error(node, 'Type mixed can only be used as a standalone type');
-      const components =
-        name === 'iterable' ? ['array', 'Traversable'] : name === 'bool' ? ['false', 'true'] : [typeToString(member)];
+      const components = this.unionTypeComponents(member, name, node);
       const duplicates = components.filter((part) => seen.has(lower(part)));
       if (duplicates.length > 0)
         this.error(
@@ -262,6 +266,35 @@ export abstract class DeclarationConverter extends ConverterBase {
     if (seen.has('never')) this.error(node, 'never can only be used as a standalone type');
     if (seen.has('object') && type.types.some((part) => part.k !== 'named' || !BUILTIN_TYPES.has(lower(part.name))))
       this.error(node, `Type ${typeToString(type)} contains both object and a class type, which is redundant`);
+  }
+
+  private unionTypeComponents(member: TypeDecl, name: string, node: Node): string[] {
+    switch (name) {
+      case 'iterable': {
+        return ['array', 'Traversable'];
+      }
+      case 'bool': {
+        return ['false', 'true'];
+      }
+      default: {
+        return [this.typeMemberName(member, node)];
+      }
+    }
+  }
+
+  private typeMemberName(member: TypeDecl, node: Node): string {
+    if (
+      member.k === 'named' &&
+      (member.name === 'self' || member.name === 'parent') &&
+      !this.fn.isClosure &&
+      this.activeClass?.kind !== 'trait'
+    ) {
+      this.checkClassScope(node, member.name);
+      const scope = this.activeClass;
+      const resolved = member.name === 'self' ? scope?.name : scope?.parent;
+      if (resolved) return resolved;
+    }
+    return typeToString(member);
   }
 
   private parseTypeDecl(node: Node): TypeDecl {
@@ -306,15 +339,19 @@ export abstract class DeclarationConverter extends ConverterBase {
     }
   }
 
-  protected constantExpr(node: Node, allowNew = false): Expr {
-    const outer = this.inConstantExpression;
-    this.inConstantExpression = true;
+  protected constantExpr(node: Node, allowNew = false, context: 'eager' | 'deferred' = 'eager'): Expr {
+    const expression = this.initializerExpr(node, context);
+    this.checkConstantExpr(expression, allowNew);
+    return expression;
+  }
+
+  protected initializerExpr(node: Node, kind: 'eager' | 'deferred' = 'eager'): Expr {
+    const outer = this.initializerContext;
+    this.initializerContext = { kind, row: node.startPosition.row };
     try {
-      const expression = this.expr(node);
-      this.checkConstantExpr(expression, allowNew);
-      return expression;
+      return this.expr(node);
     } finally {
-      this.inConstantExpression = outer;
+      this.initializerContext = outer;
     }
   }
 

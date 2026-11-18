@@ -67,3 +67,11 @@ Warning: main(): Ignoring replacement of empty string in /main.php on line 29
 Object of class stdClass could not be converted to string
 
 Warning: strtr(): Ignoring replacement of empty string in /main.php on line 31
+
+Warning: strtr(): Ignoring replacement of empty string in /main.php on line 34
+caught: string conversion
+strtr(): Ignoring replacement of empty string
+
+Warning: strtr(): Ignoring replacement of empty string in /main.php on line 35
+caught: string conversion
+strtr(): Ignoring replacement of empty string

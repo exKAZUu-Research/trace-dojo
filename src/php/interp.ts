@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 814 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 815 -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import {
   applyOperator,
@@ -956,7 +956,8 @@ function binary(e: Extract<Expr, { k: 'bin' }>): Value {
   const right = readRight();
   runtime.row = e.op === 'xor' ? e.r.row : e.row;
   // PHP frees the operands as soon as the operator has used them.
-  return keepResult(mark, operate(e.op, left, right)) as Value;
+  const result = e.swapOperands ? operate(e.op, right, left) : operate(e.op, left, right);
+  return keepResult(mark, result) as Value;
 }
 
 export function isCompiledVariable(e: Expr): boolean {
