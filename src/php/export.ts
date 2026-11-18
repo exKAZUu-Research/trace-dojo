@@ -1,4 +1,15 @@
-import type { Arg, ClassRef, Expr, FunctionDecl, ParamDecl, Stmt } from './ast';
+import type {
+  Arg,
+  ClassDecl,
+  ClassMemberSyntax,
+  ClassRef,
+  Expr,
+  FunctionDecl,
+  ParamDecl,
+  PropertyHookSyntax,
+  Stmt,
+  TraitRule,
+} from './ast';
 import { formatFloatRepr } from './conversions';
 import { typeToString } from './types';
 
@@ -56,7 +67,7 @@ type OperatorExpression = Extract<
 >;
 
 /** Writes an expression back as PHP code, as the message of a failed `assert` shows it. */
-// code-gauge-allow functionNcss 58 -- Keeps the ordered PHP cases together because each branch shares the same dispatch state.
+// code-gauge-allow functionNcss 59 -- Keeps the ordered PHP cases together because each branch shares the same dispatch state.
 export function exportExpr(e: Expr, priority = 0, depth = 0): string {
   const render = (expression: Expr, precedence = 0): string => exportExpr(expression, precedence, depth);
   const wrap = (own: number, text: string): string => (priority > own ? `(${text})` : text);
@@ -115,8 +126,9 @@ export function exportExpr(e: Expr, priority = 0, depth = 0): string {
     case 'list': {
       return exportArray(e, depth);
     }
-    case 'new': {
-      return `new ${exportClass(e.cls, depth)}(${exportArgs(e.args, depth)})`;
+    case 'new':
+    case 'newAnon': {
+      return exportNew(e, depth);
     }
     case 'isset': {
       return `isset(${e.items.map((item) => render(item)).join(', ')})`;
@@ -134,6 +146,13 @@ export function exportExpr(e: Expr, priority = 0, depth = 0): string {
       throw new UnexportableSyntax();
     }
   }
+}
+
+function exportNew(expression: Extract<Expr, { k: 'new' | 'newAnon' }>, depth: number): string {
+  const args = exportArgs(expression.args, depth);
+  if (expression.k === 'new') return `new ${exportClass(expression.cls, depth)}(${args})`;
+  const header = expression.args.length > 0 ? `class(${args})` : 'class';
+  return `new ${exportClassDeclaration(expression.decl, header, depth)}`;
 }
 
 // code-gauge-allow functionCognitiveComplexity 21 -- Keeps the ordered PHP cases together because each branch shares the same dispatch state.
@@ -266,7 +285,11 @@ function exportParameter(param: ParamDecl, depth: number): string {
   const reference = param.byRef ? '&' : '';
   const variadic = param.variadic ? '...' : '';
   const fallback = param.defaultExpr ? ` = ${exportExpr(param.defaultExpr, 0, depth)}` : '';
-  return `${type}${reference}${variadic}$${param.name}${fallback}`;
+  const promote = param.promote;
+  const modifiers = promote
+    ? `${promote.visibility} ${promote.setVisibility ? `${promote.setVisibility}(set) ` : ''}${promote.isFinal ? 'final ' : ''}`
+    : '';
+  return `${modifiers}${type}${reference}${variadic}$${param.name}${fallback}`;
 }
 
 function exportBlock(statements: Stmt[], depth: number): string {
@@ -286,8 +309,8 @@ function exportStatements(statements: Stmt[], depth: number): string {
   return text;
 }
 
-// code-gauge-allow functionNcss 52 -- Keeps the ordered PHP cases together because each branch shares the same dispatch state.
-// code-gauge-allow functionCognitiveComplexity 19 -- Keeps the ordered PHP cases together because each branch shares the same dispatch state.
+// code-gauge-allow functionNcss 56 -- Keeps the ordered PHP cases together because each branch shares the same dispatch state.
+// code-gauge-allow functionCognitiveComplexity 25 -- Keeps the ordered PHP cases together because each branch shares the same dispatch state.
 function exportStatement(statement: Stmt, depth: number): string {
   const render = (expr: Expr): string => exportExpr(expr, 0, depth);
   const separate = (lines: string[]): string => lines.join(`\n${indent(depth)}`);
@@ -354,6 +377,11 @@ function exportStatement(statement: Stmt, depth: number): string {
       const reference = decl.byRefReturn ? '&' : '';
       return `function ${reference}${decl.name}(${exportParameters(decl, depth)})${exportReturnType(decl)} ${exportBlock(decl.body, depth)}\n`;
     }
+    case 'class': {
+      const decl = statement.decl;
+      const modifiers = `${decl.isAbstract ? 'abstract ' : ''}${decl.isFinal ? 'final ' : ''}${decl.isReadonly ? 'readonly ' : ''}`;
+      return `${exportClassDeclaration(decl, `${modifiers}${decl.kind} ${decl.name}`, depth)}\n`;
+    }
     case 'const': {
       return `const ${statement.items.map(({ name, value }) => `${name} = ${render(value)}`).join(', ')};`;
     }
@@ -412,6 +440,72 @@ function exportArgs(args: Arg[], depth: number): string {
   return args
     .map((arg) => `${arg.name ? `${arg.name}: ` : ''}${arg.spread ? '...' : ''}${exportExpr(arg.e, 0, depth)}`)
     .join(', ');
+}
+
+function exportClassDeclaration(decl: ClassDecl, header: string, depth: number): string {
+  const parent = decl.parent ? ` extends ${decl.parent}` : '';
+  const interfaces = decl.interfaces.length > 0 ? ` implements ${decl.interfaces.join(', ')}` : '';
+  const members = decl.syntaxMembers;
+  if (!members) throw new UnexportableSyntax();
+  const body = members.map((member) => `${indent(depth + 1)}${exportClassMember(member, decl.kind, depth + 1)}\n`);
+  return `${header}${parent}${interfaces} {\n${body.join('')}${indent(depth)}}`;
+}
+
+// code-gauge-allow functionCognitiveComplexity 16 -- Keeps the ordered PHP cases together because each branch shares the same dispatch state.
+function exportClassMember(member: ClassMemberSyntax, kind: ClassDecl['kind'], depth: number): string {
+  switch (member.k) {
+    case 'const': {
+      const { visibility, type } = member.items[0];
+      const typeText = type ? `${typeToString(type)} ` : '';
+      const items = member.items.map(({ name, value }) => `${name} = ${exportExpr(value, 0, depth)}`);
+      return `${visibility} const ${typeText}${items.join(', ')};`;
+    }
+    case 'property': {
+      return exportPropertyDeclaration(member, depth);
+    }
+    case 'method': {
+      const { fn, visibility, isStatic, isFinal, isAbstract } = member.method;
+      const modifiers = `${visibility} ${isStatic ? 'static ' : ''}${isAbstract && kind !== 'interface' ? 'abstract ' : ''}${isFinal ? 'final ' : ''}`;
+      const reference = fn.byRefReturn ? '&' : '';
+      const body = isAbstract ? ';' : ` ${exportBlock(fn.body, depth)}`;
+      return `${modifiers}function ${reference}${fn.name}(${exportParameters(fn, depth)})${exportReturnType(fn)}${body}\n`;
+    }
+    case 'use': {
+      const header = `use ${member.trait.names.join(', ')}`;
+      if (!member.hasBlock) return `${header};`;
+      const rules = member.trait.rules.map((rule) => `${indent(depth + 1)}${exportTraitRule(rule)};\n`);
+      return `${header} {\n${rules.join('')}${indent(depth)}}`;
+    }
+  }
+}
+
+function exportPropertyDeclaration(member: Extract<ClassMemberSyntax, { k: 'property' }>, depth: number): string {
+  const { visibility, setVisibility, isStatic, type, hooks } = member.items[0];
+  const setter = setVisibility ? `${setVisibility}(set) ` : '';
+  const modifiers = `${visibility} ${setter}${isStatic ? 'static ' : ''}${member.explicitReadonly ? 'readonly ' : ''}`;
+  const typeText = type ? `${typeToString(type)} ` : '';
+  const items = member.items.map(({ name, defaultExpr }) =>
+    defaultExpr ? `$${name} = ${exportExpr(defaultExpr, 0, depth + 1)}` : `$${name}`
+  );
+  const suffix = hooks?.syntax ? exportPropertyHooks(hooks.syntax, depth) : ';';
+  return `${modifiers}${typeText}${items.join(', ')}${suffix}`;
+}
+
+function exportPropertyHooks(hooks: PropertyHookSyntax[], depth: number): string {
+  const lines = hooks.map(({ name, body, expression, isFinal }) => {
+    const prefix = `${indent(depth + 1)}${isFinal ? 'final ' : ''}${name}`;
+    if (expression) return `${prefix} => ${exportExpr(expression, 0, depth + 1)};\n`;
+    return body ? `${prefix} ${exportBlock(body, depth + 1)}\n` : `${prefix};\n`;
+  });
+  return ` {\n${lines.join('')}${indent(depth)}}`;
+}
+
+function exportTraitRule(rule: TraitRule): string {
+  const method = rule.trait ? `${rule.trait}::${rule.method}` : rule.method;
+  if (rule.k === 'insteadof') return `${method} insteadof ${rule.instead.join(', ')}`;
+  const visibility = rule.visibility ? ` ${rule.visibility}` : '';
+  const alias = rule.alias ? ` ${rule.alias}` : '';
+  return `${method} as${visibility}${alias}`;
 }
 
 function exportClass(cls: ClassRef, depth: number): string {

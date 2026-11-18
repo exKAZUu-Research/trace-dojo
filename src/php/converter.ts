@@ -43,7 +43,7 @@ export class Converter extends DeclarationConverter {
     source: string,
     atomicRows: ReadonlySet<number>,
     private readonly ignoredPrefix: number,
-    private readonly preserveSyntax = false
+    protected override readonly preserveSyntax = false
   ) {
     super(source, atomicRows);
   }

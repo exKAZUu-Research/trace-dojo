@@ -47,3 +47,11 @@ try {
 } catch (Throwable $error) {
     echo $error->getMessage(), ' / ', $error->getPrevious()?->getMessage(), "\n";
 }
+
+$inner = (object)['hook' => new SnapshotMutator('inner'), 'lost' => new DropOnInspect];
+$outer = (object)['inner' => $inner, 'hook' => new SnapshotMutator('outer'), 'lost' => new DropOnInspect];
+try {
+    var_dump($outer);
+} catch (Throwable $error) {
+    echo "caught:", $error->getMessage(), "\n";
+}

@@ -62,3 +62,25 @@ drop;  }
   }
 drop;}
 dtor / dtor
+object(stdClass)#14 (3) {
+  ["inner"]=>
+  object(stdClass)#11 (2) {
+    ["hook"]=>
+    object(SnapshotMutator)#3 (0) {
+    }
+    ["lost"]=>
+    object(DropOnInspect)#8 (1) {
+      ["value"]=>
+      string(4) "live"
+    }
+drop;  }
+  ["hook"]=>
+  
+Warning: Uncaught Exception: dtor in /main.php:6
+Stack trace:
+#0 [internal function]: DropOnInspect->__destruct()
+#1 /main.php(54): var_dump(Object(stdClass))
+#2 {main}
+  thrown in /main.php on line 6
+
+Fatal error: __debuginfo() must return an array in /main.php on line 54

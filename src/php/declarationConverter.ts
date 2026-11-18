@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 765 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 781 -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import type { Node } from '@willbooster/web-tree-sitter';
 
@@ -47,6 +47,7 @@ const MAGIC_METHODS: Record<
 
 /** Converts the declarations of functions, parameters, types, and classes. */
 export abstract class DeclarationConverter extends ConverterBase {
+  protected abstract readonly preserveSyntax: boolean;
   private readonly compileClasses = new CompileClassConstants();
   private runtimeDefinitionKeys = 0;
   private activeClass?: ClassDecl;
@@ -583,6 +584,8 @@ export abstract class DeclarationConverter extends ConverterBase {
 
   // Classes -----------------------------------------------------------------------------------------------------------
 
+  // code-gauge-allow functionNcss 43 -- Keeps the ordered PHP cases together because each branch shares the same dispatch state.
+  // code-gauge-allow functionCognitiveComplexity 24 -- Keeps the ordered PHP cases together because each branch shares the same dispatch state.
   classDecl(node: Node, anonymous = false, topLevel = true): ClassDecl {
     if (!anonymous && this.currentClass !== undefined) this.error(node, 'Class declarations may not be nested');
     const attributes = node.childForFieldName('attributes');
@@ -639,6 +642,7 @@ export abstract class DeclarationConverter extends ConverterBase {
       props: [],
       methods: [],
       traits: [],
+      syntaxMembers: this.preserveSyntax ? [] : undefined,
       row: node.startPosition.row,
       endRow: node.endPosition.row,
       isAnonymous: anonymous,
@@ -647,48 +651,14 @@ export abstract class DeclarationConverter extends ConverterBase {
     this.withClassContext(decl, () => {
       const body = node.childForFieldName('body') as Node;
       const memberNames = new Set<string>();
-      for (const member of body.namedChildren) {
-        switch (member.type) {
-          case 'const_declaration': {
-            this.classConsts(member, decl, kind);
-            break;
-          }
-          case 'property_declaration': {
-            this.properties(member, decl, kind);
-            break;
-          }
-          case 'method_declaration': {
-            const method = this.methodDecl(member, decl);
-            const key = lower(method.fn.name);
-            if (memberNames.has(key)) {
-              this.error(
-                member,
-                `メソッド ${name}::${method.fn.name}() は、すでに宣言されています（Cannot redeclare ${name}::${method.fn.name}()）。`
-              );
-            }
-            memberNames.add(key);
-            decl.methods.push(method);
-            break;
-          }
-          case 'use_declaration': {
-            if (kind === 'interface') this.error(member, 'インターフェースではトレイトを使えません。');
-            decl.traits.push(this.traitUse(member));
-            break;
-          }
-          case 'comment': {
-            break;
-          }
-          case 'enum_case': {
-            this.unsupported(member, '列挙型（enum）');
-            break;
-          }
-          default: {
-            this.error(member, '書き方に誤りがあります。');
-          }
-        }
-      }
+      for (const member of body.namedChildren) this.classMember(member, decl, memberNames);
     });
-    // Promoted constructor parameters declare properties.
+    this.addPromotedProperties(decl);
+    if (!anonymous && (!topLevel || !this.compileClasses.bind(decl))) this.runtimeDefinitionKeys++;
+    return decl;
+  }
+
+  private addPromotedProperties(decl: ClassDecl): void {
     const constructor = decl.methods.find((method) => lower(method.fn.name) === '__construct');
     if (constructor) {
       for (const param of constructor.fn.params) {
@@ -696,7 +666,7 @@ export abstract class DeclarationConverter extends ConverterBase {
         if (decl.props.some((prop) => prop.name === param.name)) {
           this.error(
             param.row,
-            `プロパティ ${name}::$${param.name} は、すでに宣言されています（Cannot redeclare ${name}::$${param.name}）。`
+            `プロパティ ${decl.name}::$${param.name} は、すでに宣言されています（Cannot redeclare ${decl.name}::$${param.name}）。`
           );
         }
         if (param.variadic)
@@ -726,8 +696,62 @@ export abstract class DeclarationConverter extends ConverterBase {
         });
       }
     }
-    if (!anonymous && (!topLevel || !this.compileClasses.bind(decl))) this.runtimeDefinitionKeys++;
-    return decl;
+  }
+
+  // code-gauge-allow functionNcss 35 -- Keeps the ordered PHP cases together because each branch shares the same dispatch state.
+  private classMember(member: Node, decl: ClassDecl, methodNames: Set<string>): void {
+    switch (member.type) {
+      case 'const_declaration': {
+        const start = decl.consts.length;
+        this.classConsts(member, decl, decl.kind);
+        decl.syntaxMembers?.push({ k: 'const', items: decl.consts.slice(start) });
+        return;
+      }
+      case 'property_declaration': {
+        const start = decl.props.length;
+        this.properties(member, decl, decl.kind);
+        decl.syntaxMembers?.push({
+          k: 'property',
+          items: decl.props.slice(start),
+          explicitReadonly: member.children.some((child) => child.type === 'readonly_modifier'),
+        });
+        return;
+      }
+      case 'method_declaration': {
+        const method = this.methodDecl(member, decl);
+        const key = lower(method.fn.name);
+        if (methodNames.has(key))
+          this.error(
+            member,
+            `メソッド ${decl.name}::${method.fn.name}() は、すでに宣言されています（Cannot redeclare ${decl.name}::${method.fn.name}()）。`
+          );
+        methodNames.add(key);
+        decl.methods.push(method);
+        decl.syntaxMembers?.push({ k: 'method', method });
+        return;
+      }
+      case 'use_declaration': {
+        if (decl.kind === 'interface') this.error(member, 'インターフェースではトレイトを使えません。');
+        const trait = this.traitUse(member);
+        decl.traits.push(trait);
+        decl.syntaxMembers?.push({
+          k: 'use',
+          trait,
+          hasBlock: member.namedChildren.some((child) => child.type === 'use_list'),
+        });
+        return;
+      }
+      case 'comment': {
+        return;
+      }
+      case 'enum_case': {
+        this.unsupported(member, '列挙型（enum）');
+        return;
+      }
+      default: {
+        this.error(member, '書き方に誤りがあります。');
+      }
+    }
   }
 
   private withClassContext<T>(decl: ClassDecl | undefined, convert: () => T): T {
@@ -961,7 +985,7 @@ export abstract class DeclarationConverter extends ConverterBase {
       )
         this.error(hook, `set hook of property ${className}::$${prop.name} must accept exactly one parameters`);
     }
-    const hooks: NonNullable<PropertyDeclAst['hooks']> = {};
+    const hooks: NonNullable<PropertyDeclAst['hooks']> = { syntax: this.preserveSyntax ? [] : undefined };
     let referencesBacking = false;
     for (const hook of declarations) {
       const attributes = hook.childForFieldName('attributes');
@@ -1031,9 +1055,11 @@ export abstract class DeclarationConverter extends ConverterBase {
         }
         let statements: Stmt[] = [];
         let arrowBody: Expr | undefined;
+        let syntaxExpression: Expr | undefined;
         if (body?.type === 'compound_statement') statements = this.block(body);
         else if (body) {
           arrowBody = this.expr(body);
+          if (this.preserveSyntax) syntaxExpression = arrowBody;
           if (kind === 'get') this.checkReferenceReturn(body, arrowBody);
           if (kind === 'set') {
             // A short set hook assigns its expression to the property.
@@ -1091,6 +1117,12 @@ export abstract class DeclarationConverter extends ConverterBase {
             hook,
             `プロパティフック「${kind}」はありません（Unknown hook "${kind}" for property ${className}::$${prop.name}）。`
           );
+        hooks.syntax?.push({
+          name: kind,
+          body: body?.type === 'compound_statement' ? statements : undefined,
+          expression: syntaxExpression,
+          isFinal: hook.children.some((child) => child.type === 'final_modifier'),
+        });
       } finally {
         this.fn = outerFn;
         this.loop = outerLoop;
@@ -1144,7 +1176,8 @@ export abstract class DeclarationConverter extends ConverterBase {
       );
     }
     this.checkMagicMethod(member, decl.name, fn, modifiers);
-    if (lower(fn.name) === '__tostring' && !fn.returnType) fn.returnType = { k: 'named', name: 'string' };
+    if (!this.preserveSyntax && lower(fn.name) === '__tostring' && !fn.returnType)
+      fn.returnType = { k: 'named', name: 'string' };
     if (modifiers.isFinal && modifiers.visibility === 'private' && lower(fn.name) !== '__construct')
       this.notices.push({
         level: 'Warning',

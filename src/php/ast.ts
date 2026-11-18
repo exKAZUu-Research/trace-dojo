@@ -171,7 +171,14 @@ export interface PropertyDeclAst {
   promoted?: boolean;
   type?: TypeDecl;
   defaultExpr?: Expr;
-  hooks?: { get?: FunctionDecl; set?: FunctionDecl; setParam?: string; abstractGet?: boolean; abstractSet?: boolean };
+  hooks?: {
+    get?: FunctionDecl;
+    set?: FunctionDecl;
+    setParam?: string;
+    abstractGet?: boolean;
+    abstractSet?: boolean;
+    syntax?: PropertyHookSyntax[];
+  };
   /** Whether the hooks never read or write the property itself, so it has no storage. */
   isVirtual?: boolean;
   row: number;
@@ -186,6 +193,19 @@ export interface MethodDeclAst {
   isAbstract: boolean;
   isFinal: boolean;
 }
+
+export interface PropertyHookSyntax {
+  name: 'get' | 'set';
+  body?: Stmt[];
+  expression?: Expr;
+  isFinal: boolean;
+}
+
+export type ClassMemberSyntax =
+  | { k: 'const'; items: ClassDecl['consts'] }
+  | { k: 'property'; items: PropertyDeclAst[]; explicitReadonly: boolean }
+  | { k: 'method'; method: MethodDeclAst }
+  | { k: 'use'; trait: ClassDecl['traits'][number]; hasBlock: boolean };
 
 export interface ClassDecl {
   /** The name messages show; for an anonymous class, `class@anonymous` or the name of what it extends or implements. */
@@ -202,6 +222,7 @@ export interface ClassDecl {
   props: PropertyDeclAst[];
   methods: MethodDeclAst[];
   traits: { names: string[]; rules: TraitRule[]; row: number }[];
+  syntaxMembers?: ClassMemberSyntax[];
   row: number;
   endRow: number;
   isAnonymous: boolean;

@@ -143,9 +143,9 @@ function collectGarbageNow(runtime: Runtime, cycles: boolean): number {
  * handle returns to the free list. Objects on a cycle stay, as reference counting cannot free them.
  */
 // code-gauge-allow functionNcss 48 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
-export function releaseDropped(runtime: Runtime, dropped: unknown[]): void {
+export function releaseDropped(runtime: Runtime, dropped: unknown[], fromNative: boolean): void {
   if (runtime.shuttingDown || runtime.exhausted) return;
-  releaseDroppedNow(runtime, dropped);
+  releaseDroppedNow(runtime, dropped, fromNative);
   const candidates = [...runtime.pendingGcRoots];
   runtime.pendingGcRoots.clear();
   if (runtime.collectingCycles) return;
@@ -184,7 +184,7 @@ export function releaseDropped(runtime: Runtime, dropped: unknown[]): void {
 
 // code-gauge-allow functionNcss 53 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 // code-gauge-allow functionCognitiveComplexity 30 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
-function releaseDroppedNow(runtime: Runtime, dropped: unknown[]): void {
+function releaseDroppedNow(runtime: Runtime, dropped: unknown[], fromNative: boolean): void {
   if (runtime.shuttingDown || runtime.exhausted) return;
   dropped = dropped.filter(
     (value) =>
@@ -218,7 +218,7 @@ function releaseDroppedNow(runtime: Runtime, dropped: unknown[]): void {
     retireArrays(runtime, arrayStorage);
     return;
   }
-  const release = new Release(runtime, freed, roots);
+  const release = new Release(runtime, freed, roots, fromNative);
   const active = [...freed];
   for (const object of active) activeReleaseObjects.set(object, release);
   releasing++;
@@ -263,7 +263,8 @@ class Release {
   constructor(
     private readonly runtime: Runtime,
     private readonly freed: Set<PhpObject>,
-    private roots: Set<unknown>
+    private roots: Set<unknown>,
+    private readonly fromNative: boolean
   ) {}
 
   values(values: unknown[]): void {
@@ -366,6 +367,7 @@ class Release {
     }
   }
 
+  // code-gauge-allow functionCognitiveComplexity 17 -- Keeps the ordered PHP cases together because each branch shares the same dispatch state.
   private prepare(object: PhpObject, onFailure: (error: PhpThrow) => void): ReleaseFinish | undefined {
     if (!this.freed.has(object) || this.visited.has(object) || this.runtime.objects.get(object.id) !== object)
       return undefined;
@@ -378,7 +380,7 @@ class Release {
       const changes: OwnershipChange[] = [];
       const stopObserving = observeOwnership((change) => changes.push(change));
       try {
-        destruct(object, this.runtime.row);
+        destruct(object, this.fromNative ? undefined : this.runtime.row);
       } catch (error) {
         if (!(error instanceof PhpThrow)) throw error;
         onFailure(error);

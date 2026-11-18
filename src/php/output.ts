@@ -459,9 +459,10 @@ function* exportedProps(object: PhpObject, state: Inspection): Generator<[string
     return;
   }
   yield* storage?.exportEntries?.() ?? [];
-  yield* propertyEntries(object, objectPropertyKeys(object), state, (key, decl) =>
-    nativePropertySlot(object, key, decl)
-  );
+  yield* propertyEntries(object, objectPropertyKeys(object), state, (key, decl) => {
+    if (state.pending && decl.hooks?.get) throw state.pending;
+    return nativePropertySlot(object, key, decl);
+  });
 }
 
 function* propertyEntries(
@@ -490,7 +491,7 @@ function* propertyEntries(
 
 function flushInspectionReleases(state: Inspection): void {
   try {
-    rt().flushReleases();
+    rt().flushReleases(true);
   } catch (error) {
     if (!(error instanceof PhpThrow)) throw error;
     state.capture(error);

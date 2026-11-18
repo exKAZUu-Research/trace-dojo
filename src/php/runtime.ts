@@ -61,7 +61,10 @@ export class FatalError {
     readonly exhausted = false,
     readonly withTrace = true
   ) {
-    if (exhausted && current) current.exhausted = true;
+    if (current) {
+      current.shuttingDown = true;
+      if (exhausted) current.exhausted = true;
+    }
   }
 }
 
@@ -267,10 +270,10 @@ export class Runtime {
 
   durableReleaseVersion = 0;
 
-  flushReleases(): void {
+  flushReleases(fromNative = false): void {
     if (this.pendingReleases.length === 0) return;
     const released = this.pendingReleases.splice(0);
-    releaseDropped(this, released);
+    releaseDropped(this, released, fromNative);
   }
 
   discardNativeResult(value: Value, start: number, temporaryStart = Infinity): void {
