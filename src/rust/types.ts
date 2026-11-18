@@ -1,4 +1,4 @@
-import type { FnItem } from './ast';
+import type { FnItem, Span } from './ast';
 
 export type IntName = 'i8' | 'i16' | 'i32' | 'i64' | 'i128' | 'isize' | 'u8' | 'u16' | 'u32' | 'u64' | 'u128' | 'usize';
 export type FloatName = 'f32' | 'f64';
@@ -56,6 +56,7 @@ export interface FieldDef {
   name: string;
   type: Type;
   isPublic: boolean;
+  span: Span;
 }
 
 export interface VariantDef {
@@ -111,6 +112,8 @@ export interface AdtDef {
   /** A struct's single variant, or an enum's variants. */
   variants: VariantDef[];
   derives: Set<string>;
+  /** Where the type is declared, whose name rustc reports for errors about its derives. */
+  span: Span;
   builtin?: BuiltinAdt;
   /** The module the type is declared in, whose items may read its private fields. */
   module?: unknown;

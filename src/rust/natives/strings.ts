@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 408 -- One native per method of the standard library.
+// code-gauge-allow-file fileNcss 415 -- One native per method of the standard library.
 import { normalize } from '../infer';
 import { strSliceBytes } from '../interpreter';
 import { shallow, type Type } from '../types';
@@ -49,7 +49,7 @@ function charIndex(text: string, offset: number): number {
 }
 
 /** A matcher of the patterns `str` methods take: a char, a string, chars, or a closure over chars. */
-// code-gauge-allow functionCognitiveComplexity 22 -- One native per method of the standard library.
+// code-gauge-allow functionCognitiveComplexity 23 -- One native per method of the standard library.
 function patternMatcher(
   ctx: NativeContext,
   pattern: Value
@@ -84,10 +84,18 @@ function patternMatcher(
     };
   }
   const needle = p as string;
+  if (needle === '') return matchEmpty;
   return (text, from) => {
     const index = text.indexOf(needle, from);
     return index === -1 ? undefined : { index, length: needle.length };
   };
+}
+
+/** The empty pattern matches at every char boundary up to the end, where `indexOf` would match forever. */
+function matchEmpty(text: string, from: number): { index: number; length: number } | undefined {
+  if (from > text.length) return;
+  const insidePair = from > 0 && from < text.length && /[\uDC00-\uDFFF]/.test(text[from]);
+  return { index: insidePair ? from + 1 : from, length: 0 };
 }
 
 function splitBy(ctx: NativeContext, text: string, pattern: Value, limit = Number.POSITIVE_INFINITY): string[] {
@@ -578,8 +586,8 @@ const charNatives: Record<string, (args: Value[], ctx: NativeContext) => Value> 
   },
   eq_ignore_ascii_case: ([a, b]) =>
     char(a).replace(/[A-Z]/, (x) => x.toLowerCase()) === char(b).replace(/[A-Z]/, (x) => x.toLowerCase()),
-  to_uppercase: ([c]) => caseIter(char(c).toUpperCase()),
-  to_lowercase: ([c]) => caseIter(char(c).toLowerCase()),
+  to_uppercase: ([c]) => caseIter('ToUppercase', char(c).toUpperCase()),
+  to_lowercase: ([c]) => caseIter('ToLowercase', char(c).toLowerCase()),
   to_digit: ([c, radix], ctx) => {
     const digit = digitOf(ctx, char(c), Number(radix as bigint));
     return option(ctx, digit === undefined ? undefined : BigInt(digit), digit !== undefined);
@@ -610,10 +618,10 @@ function fromDigit(ctx: NativeContext, num: Value, radix: Value): Value {
   return some(ctx, digit.toString(36));
 }
 
-/** `char::to_uppercase`'s iterator, which also displays as the text it yields. */
-function caseIter(text: string): Value {
+/** `char::to_uppercase`'s iterator, named as std's type, which also displays as the text it yields. */
+function caseIter(name: 'ToUppercase' | 'ToLowercase', text: string): Value {
   const iter = arrayIter([...text]);
-  (iter as unknown as { text: string }).text = text;
+  Object.assign(iter, { name, text });
   return iter;
 }
 

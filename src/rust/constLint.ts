@@ -59,6 +59,7 @@ export class ConstLint {
           if (ast.value?.kind === 'int' && intTypeOf(res.def.type)) return ast.value.value;
           return ast.value ? this.constValue(ast.value) : undefined;
         }
+        if (res?.kind === 'builtinConst') return integerConst(res.name);
         return undefined;
       }
       case 'unary': {
@@ -221,3 +222,27 @@ function intTypeOf(type: Type | undefined): IntName | undefined {
 function bits(name: IntName): number {
   return name === 'isize' || name === 'usize' ? 64 : Number(name.slice(1));
 }
+
+/** The value of an integer type's associated constant (`i32::MAX`), which rustc's lints know. */
+function integerConst(name: string): bigint | undefined {
+  const [type, constant] = name.split('::') as [IntName, string];
+  if (!INT_NAMES.has(type)) return undefined;
+  if (constant === 'MAX') return intMax(type);
+  if (constant === 'MIN') return intMin(type);
+  return undefined;
+}
+
+const INT_NAMES = new Set<string>([
+  'i8',
+  'i16',
+  'i32',
+  'i64',
+  'i128',
+  'isize',
+  'u8',
+  'u16',
+  'u32',
+  'u64',
+  'u128',
+  'usize',
+]);

@@ -436,7 +436,10 @@ const natives: Record<string, (args: Value[], ctx: NativeContext) => Value> = {
   'TryFrom::try_from': ([value], ctx) => tryConvert(ctx, value, ctx.typeArgs[0]),
   'TryInto::try_into': ([value], ctx) => tryConvert(ctx, value, ctx.typeArgs[1]),
 };
-for (const [name, native] of Object.entries(integer)) natives[`Integer::${name}`] = native;
+for (const [name, native] of Object.entries(integer)) {
+  natives[`Integer::${name}`] = native;
+  natives[`SignedInteger::${name}`] = native;
+}
 for (const [name, native] of Object.entries(floating)) natives[`Float::${name}`] = native;
 define(natives);
 

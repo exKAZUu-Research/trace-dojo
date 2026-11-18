@@ -40,11 +40,16 @@ import {
   CHAR,
   F32,
   F64,
+  type FloatName,
   type FnDef,
   freshVar,
   hasParams,
   hasVars,
+  intMax,
+  intMin,
+  type IntName,
   intType,
+  isSigned,
   isUnit,
   NEVER,
   newClosureType,
@@ -106,6 +111,10 @@ export class Checker {
   private readonly varBounds = new Map<unknown, TraitRef[]>();
   private body!: BodyContext;
   private deferredChecks: (() => void)[] = [];
+  /** The number literals of the body, which rustc's `overflowing_literals` lint checks against their types. */
+  private literals: Extract<Expr, { kind: 'int' | 'float' }>[] = [];
+  /** The integer literals that `-` negates, whose range reaches one further below zero. */
+  private readonly negatedLiterals = new Set<Expr>();
 
   constructor(
     readonly program: Program,
@@ -115,9 +124,31 @@ export class Checker {
   }
 
   checkProgram(): void {
+    this.checkDerivedFields();
     for (const fn of this.program.pendingFns.splice(0)) this.checkFn(fn);
     while (this.nestedFns.length > 0) this.checkFn(this.nestedFns.shift()!);
     this.checkConstsAndMain();
+  }
+
+  /** A derived trait needs every field's type to implement it, as the impl that `#[derive]` writes uses each field. */
+  private checkDerivedFields(): void {
+    for (const def of this.program.adts) {
+      if ((def.module as Module | undefined)?.isStd) continue;
+      for (const name of def.derives) this.checkDerivedTrait(def, name);
+    }
+  }
+
+  private checkDerivedTrait(def: AdtDef, name: string): void {
+    const trait = this.program.builtinTraits.get(name);
+    if (!trait) return;
+    for (const field of def.variants.flatMap((variant) => variant.fields)) {
+      // A derive bounds the type parameters by the trait, so fields of parameter types meet it.
+      if (hasParams(field.type) || this.solver.implements(field.type, { trait, args: [] }) !== 'no') continue;
+      compileError(
+        name === 'Copy' ? def.span : field.span,
+        `${typeToString(field.type)} が ${name} を実装していないので、フィールド ${field.name} を持つ ${def.name} に #[derive(${name})] を付けられません。`
+      );
+    }
   }
 
   private checkConstsAndMain(): void {
@@ -261,7 +292,20 @@ export class Checker {
     this.solveObligations(false);
     for (const check of this.deferredChecks.splice(0)) check();
     this.solveObligations(true);
+    this.checkLiteralRanges();
     void span;
+  }
+
+  /** Rejects number literals out of their types' ranges, as rustc's deny-by-default `overflowing_literals` lint does. */
+  private checkLiteralRanges(): void {
+    for (const literal of this.literals.splice(0)) {
+      const type = normalize(shallow(resolve(literal.ty!, true)));
+      if (literal.kind === 'float' && type.kind === 'float') checkFloatLiteral(literal, type.name);
+      if (literal.kind === 'int' && type.kind === 'int') {
+        checkIntLiteral(literal, type.name, this.negatedLiterals.has(literal));
+      }
+    }
+    this.negatedLiterals.clear();
   }
 
   // code-gauge-allow functionCognitiveComplexity 17 -- Follows the type checking rules of rustc case by case.
@@ -306,6 +350,15 @@ export class Checker {
       Ord: `${type} は Ord ではありません（f64 などの小数は sort や max に使えません）。`,
     };
     compileError(obligation.span, hints[name] ?? `${type} にトレイト ${trait} が実装されていません。`);
+  }
+
+  /**
+   * A type with what the pending obligations settle about it, as rustc solves them before it needs to know a type
+   * (`let v: Vec<_> = it.collect(); v[0].len()`).
+   */
+  private settled(type: Type): Type {
+    if (this.obligations.length > 0 && hasVars(resolve(type))) this.solveObligations(false);
+    return type;
   }
 
   private require(type: Type, ref: TraitRef, span: Span): void {
@@ -636,6 +689,7 @@ export class Checker {
   private exprInner(expr: Expr, expected: Type | undefined): Type {
     switch (expr.kind) {
       case 'int': {
+        this.literals.push(expr);
         if (expr.suffix) return intType(expr.suffix as never);
         const type = freshVar('int');
         if (expected) {
@@ -645,6 +699,7 @@ export class Checker {
         return type;
       }
       case 'float': {
+        this.literals.push(expr);
         if (expr.suffix) return expr.suffix === 'f32' ? F32 : F64;
         const type = freshVar('float');
         if (expected) {
@@ -1466,7 +1521,7 @@ export class Checker {
   }
 
   private methodCall(expr: Extract<Expr, { kind: 'methodCall' }>, expected: Type | undefined): Type {
-    const receiverType = this.expr(expr.receiver, undefined);
+    const receiverType = this.settled(this.expr(expr.receiver, undefined));
     const resolvedReceiver = normalize(shallow(receiverType));
     let stripped = resolvedReceiver;
     while (stripped.kind === 'ref') stripped = normalize(shallow(stripped.target));
@@ -1669,15 +1724,16 @@ export class Checker {
   // -------------------------------------------------------------------------------------------------------------------
   // Operators
 
-  // code-gauge-allow functionCognitiveComplexity 19 -- Follows the type checking rules of rustc case by case.
+  // code-gauge-allow functionCognitiveComplexity 21 -- Follows the type checking rules of rustc case by case.
   private unary(expr: Extract<Expr, { kind: 'unary' }>, expected: Type | undefined): Type {
     if (expr.op === '*') {
-      const type = normalize(shallow(this.expr(expr.operand, undefined)));
+      const type = normalize(shallow(this.settled(this.expr(expr.operand, undefined))));
       if (type.kind === 'ref') return type.target;
       if (type.kind === 'adt' && type.def.builtin === 'Box') return type.args[0];
       if (type.kind === 'var') compileError(expr.span, '型が決まらないので、* で参照をたどれません。');
       compileError(expr.span, `${typeToString(resolve(type))} は参照ではないので、* でたどれません。`);
     }
+    if (expr.op === '-' && expr.operand.kind === 'int') this.negatedLiterals.add(expr.operand);
     const operandType = this.expr(expr.operand, expected);
     const t = this.numericOperand(operandType);
     if (expr.op === '!') {
@@ -1777,16 +1833,8 @@ export class Checker {
     const rightType = this.expr(expr.right, l.kind === 'var' && !l.v.literal ? undefined : leftType);
     const r = normalize(shallow(rightType));
     const isEquality = expr.op === '==' || expr.op === '!=';
-    // String-like types compare with each other (`String == &str`), and sequences with each other (`Vec == [T; N]`).
-    if (
-      isStringLike(l) &&
-      isStringLike(r) &&
-      stringDepth(l) !== stringDepth(r) &&
-      Math.abs(stringDepth(l) - stringDepth(r)) <= 1
-    ) {
-      return BOOL;
-    }
-    if (isEquality && this.sequencesCompare(l, r)) return BOOL;
+    // Strings compare with each other (`String == &str`), and sequences with each other (`Vec == [T; N]`).
+    if (isEquality && (stringsCompare(l, r) || this.sequencesCompare(l, r))) return BOOL;
     if (!this.unifier.tryUnify(leftType, rightType)) {
       const lt = typeToString(resolve(leftType));
       const rt = typeToString(resolve(rightType));
@@ -1819,6 +1867,7 @@ export class Checker {
       (aIsVec && !bIsVec && b.depth === a.depth + 1) ||
       (bIsVec && !aIsVec && a.depth === b.depth + 1);
     if (!depthsMatch) return false;
+    if (stringsCompare(a.elem, b.elem)) return true;
     if (!this.unifier.tryUnify(a.elem, b.elem)) return false;
     this.requireTrait(a.elem, 'PartialEq', { row: 0, col: 1 });
     return true;
@@ -1886,7 +1935,7 @@ export class Checker {
   // code-gauge-allow functionCognitiveComplexity 16 -- Follows the type checking rules of rustc case by case.
   private cast(expr: Extract<Expr, { kind: 'cast' }>): Type {
     const target = this.lowerType(expr.type);
-    const sourceType = this.expr(expr.operand, undefined);
+    const sourceType = this.expr(expr.operand, castExpectation(expr.operand, target));
     const s = normalize(shallow(sourceType));
     const t = normalize(shallow(target));
     const ok = (): Type => target;
@@ -1927,7 +1976,7 @@ export class Checker {
 
   // code-gauge-allow functionCognitiveComplexity 17 -- Follows the type checking rules of rustc case by case.
   private field(expr: Extract<Expr, { kind: 'field' }>): Type {
-    const operandType = this.expr(expr.operand, undefined);
+    const operandType = this.settled(this.expr(expr.operand, undefined));
     for (const step of autoderefSteps(this.program, operandType)) {
       const t = normalize(shallow(step.type));
       if (t.kind === 'var')
@@ -1977,7 +2026,7 @@ export class Checker {
   }
 
   private index(expr: Extract<Expr, { kind: 'index' }>): Type {
-    const operandType = this.expr(expr.operand, undefined);
+    const operandType = this.settled(this.expr(expr.operand, undefined));
     let previous: Type | undefined;
     for (const step of autoderefSteps(this.program, operandType)) {
       const t = normalize(shallow(step.type));
@@ -2253,7 +2302,7 @@ export class Checker {
         const right = this.expr(macro.right, left);
         if (
           !this.unifier.tryUnify(left, right) &&
-          !(isStringLike(normalize(shallow(left))) && isStringLike(normalize(shallow(right)))) &&
+          !stringsCompare(left, right) &&
           !this.sequencesCompare(left, right)
         ) {
           this.mismatch(macro.right.span, left, right);
@@ -2657,27 +2706,33 @@ function stripAll(type: Type): Type {
   return t;
 }
 
-function isStringLike(type: Type): boolean {
-  let t = normalize(shallow(type));
-  while (t.kind === 'ref') t = normalize(shallow(t.target));
-  return t.kind === 'str' || (t.kind === 'adt' && t.def.builtin === 'String');
-}
-
 function isStrLike(type: Type): boolean {
   let t = normalize(shallow(type));
   while (t.kind === 'ref') t = normalize(shallow(t.target));
   return t.kind === 'str';
 }
 
-/** How many references a string-like type has, counting `str` as one (`&str` and `String` compare as peers). */
-function stringDepth(type: Type): number {
-  let t = normalize(shallow(type));
-  let depth = 0;
-  while (t.kind === 'ref') {
-    depth++;
-    t = normalize(shallow(t.target));
+/**
+ * Whether `left == right` holds by std's `PartialEq` impls between different string types: `String` with `str` and
+ * `&str` both ways, and the same under equal numbers of references (`impl PartialEq<&B> for &A`).
+ */
+function stringsCompare(left: Type, right: Type): boolean {
+  let l = normalize(shallow(left));
+  let r = normalize(shallow(right));
+  while (l.kind === 'ref' && r.kind === 'ref') {
+    l = normalize(shallow(l.target));
+    r = normalize(shallow(r.target));
   }
-  return t.kind === 'str' ? depth - 1 : depth;
+  const a = stringKind(l);
+  const b = stringKind(r);
+  return a !== undefined && b !== undefined && a !== b && (a === 'String' || b === 'String');
+}
+
+function stringKind(t: Type): 'String' | 'str' | '&str' | undefined {
+  if (t.kind === 'adt' && t.def.builtin === 'String') return 'String';
+  if (t.kind === 'str') return 'str';
+  if (t.kind === 'ref' && normalize(shallow(t.target)).kind === 'str') return '&str';
+  return undefined;
 }
 
 function isIntegral(type: Type): boolean {
@@ -2734,3 +2789,30 @@ function closureKindOf(
 }
 
 export { hasParams, deepNormalize, allSupertraits, derefOnce };
+
+/**
+ * The type an integer literal cast with `as` takes, as rustc types it: the target integer type, or `u8` for `char`
+ * (`300 as u8` overflows, and `-1 as u8` negates an unsigned integer).
+ */
+function castExpectation(operand: Expr, target: Type): Type | undefined {
+  const literal = operand.kind === 'unary' && operand.op === '-' ? operand.operand : operand;
+  if (literal.kind !== 'int') return undefined;
+  const t = normalize(shallow(target));
+  if (t.kind === 'int') return t;
+  if (t.kind === 'char') return intType('u8');
+  return undefined;
+}
+
+function checkFloatLiteral(literal: Extract<Expr, { kind: 'float' }>, name: FloatName): void {
+  const value = name === 'f32' ? Math.fround(literal.value) : literal.value;
+  if (!Number.isFinite(value)) compileError(literal.span, `小数のリテラルが ${name} の範囲を超えています。`);
+}
+
+function checkIntLiteral(literal: Extract<Expr, { kind: 'int' }>, name: IntName, negated: boolean): void {
+  const limit = negated && isSigned(name) ? -intMin(name) : intMax(name);
+  if (literal.value <= limit) return;
+  compileError(
+    literal.span,
+    `リテラル ${negated ? '-' : ''}${literal.value} は ${name} の範囲（${intMin(name)}〜${intMax(name)}）を超えています。`
+  );
+}

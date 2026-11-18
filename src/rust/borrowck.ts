@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 614 -- Follows the borrow checking rules case by case.
+// code-gauge-allow-file fileNcss 627 -- Follows the borrow checking rules case by case.
 import type { Annotations, FnContext, LocalVar } from './annotations';
 import type { Block, Condition, Expr, FnItem, FormatArgs, Pattern, Span, Stmt } from './ast';
 import { forEachDirect, patternBindings, walkBlock } from './astWalk';
@@ -216,7 +216,8 @@ export class BorrowChecker {
       case 'compoundAssign': {
         const value = this.expr(expr.value, state, 'move');
         const read = this.expr(expr.target, value, 'read');
-        return this.assign(expr.target, read, expr.span, undefined);
+        // A target that is no variable's place (`*map.entry(k).or_insert(0)`) is evaluated once, by the read.
+        return this.placeOf(expr.target) ? this.assign(expr.target, read, expr.span, undefined) : read;
       }
       case 'cast':
       case 'try': {
@@ -225,7 +226,7 @@ export class BorrowChecker {
       case 'call': {
         let current =
           expr.callee.kind === 'path' ? this.expr(expr.callee, state, 'read') : this.expr(expr.callee, state, 'read');
-        for (const arg of expr.args) current = this.expr(arg, current, 'move');
+        for (const arg of expr.args) current = this.expr(arg, current, argumentMode(arg));
         return current;
       }
       case 'methodCall': {
@@ -355,15 +356,16 @@ export class BorrowChecker {
     if (method) {
       const { receiver } = method;
       const throughRef = receiver.derefs.some((step) => step === 'ref' || step === 'mutRef');
-      if (receiver.autoref === 'mut') current = this.expr(expr.receiver, current, throughRef ? 'read' : 'mut');
-      else if (receiver.autoref === 'ref' || throughRef || receiver.rangeToIter)
+      if (receiver.autoref === 'mut' || (method.fn.selfMode === 'mutRef' && isMutReference(expr.receiver.ty))) {
+        current = this.expr(expr.receiver, current, 'mut');
+      } else if (receiver.autoref === 'ref' || throughRef || receiver.rangeToIter) {
         current = this.expr(expr.receiver, current, 'read');
-      else if (method.fn.selfMode === 'value') current = this.expr(expr.receiver, current, 'move');
+      } else if (method.fn.selfMode === 'value') current = this.expr(expr.receiver, current, 'move');
       else current = this.expr(expr.receiver, current, 'read');
     } else {
       current = this.expr(expr.receiver, current, 'read');
     }
-    for (const arg of expr.args) current = this.expr(arg, current, 'move');
+    for (const arg of expr.args) current = this.expr(arg, current, argumentMode(arg));
     return current;
   }
 
@@ -745,7 +747,9 @@ export class BorrowChecker {
       case 'ref': {
         const place = this.placeOf(expr.operand);
         if (!place) return this.borrowsOf(expr.operand);
-        if (place.root.mode !== 'move' || isReference(place.root.type)) return this.inheritedLoans(place.root);
+        if (place.root.mode !== 'move' || isReference(place.root.type)) {
+          return this.loansThroughReference(place, expr.mutable, expr.span);
+        }
         return [{ root: place.root, path: place.path, mutable: expr.mutable, span: expr.span }];
       }
       case 'methodCall': {
@@ -759,8 +763,9 @@ export class BorrowChecker {
         const place = this.placeOf(expr.receiver);
         if (!place) return this.borrowsOf(expr.receiver);
         const throughRef = method.receiver.derefs.some((step) => step === 'ref' || step === 'mutRef');
-        if (throughRef || place.root.mode !== 'move' || isReference(place.root.type))
-          return this.inheritedLoans(place.root);
+        if (throughRef || place.root.mode !== 'move' || isReference(place.root.type)) {
+          return this.loansThroughReference(place, method.fn.selfMode === 'mutRef', expr.span);
+        }
         return [{ root: place.root, path: place.path, mutable: method.receiver.autoref === 'mut', span: expr.span }];
       }
       case 'call': {
@@ -793,6 +798,16 @@ export class BorrowChecker {
         return [];
       }
     }
+  }
+
+  /**
+   * The loans of a borrow of a place that a variable reaches through a reference: those the variable holds, and, when
+   * it is a `&mut` reference, a loan of the place through it, which uses of the variable conflict with.
+   */
+  private loansThroughReference(place: PlacePath, mutable: boolean, span: Span): Omit<Loan, 'holder'>[] {
+    const inherited = this.inheritedLoans(place.root);
+    if (place.root.mode !== 'move' || !isMutReference(place.root.type)) return inherited;
+    return [...inherited, { root: place.root, path: place.path, mutable, span }];
   }
 
   private inheritedLoans(holder: LocalVar): Omit<Loan, 'holder'>[] {
@@ -855,6 +870,12 @@ function overlaps(a: string, b: string): boolean {
   return a === b || a.startsWith(`${b}.`) || b.startsWith(`${a}.`);
 }
 
+function isMutReference(type: Type | undefined): boolean {
+  if (!type) return false;
+  const t = normalize(shallow(type));
+  return t.kind === 'ref' && t.mutable;
+}
+
 function isReference(type: Type | undefined): boolean {
   if (!type) return false;
   return normalize(shallow(type)).kind === 'ref';
@@ -885,4 +906,10 @@ function containsReference(type: Type | undefined): boolean {
       return false;
     }
   }
+}
+
+/** A `&mut` argument is reborrowed (`&mut *r`) rather than moved, so the reference stays usable after the call. */
+function argumentMode(arg: Expr): 'move' | 'read' {
+  const type = arg.ty && normalize(shallow(arg.ty));
+  return type?.kind === 'ref' && type.mutable ? 'read' : 'move';
 }

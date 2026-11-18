@@ -297,11 +297,15 @@ export class Compiler {
         if (!local) return () => true;
         const sub = pattern.sub ? this.compileMatcher(pattern.sub) : undefined;
         const copies = local.mode === 'move' && needsCopy(resolve(local.type, true)) && this.isCopy(local.type);
+        const localType = normalize(shallow(local.type));
+        // Match ergonomics on a `&mut` value gives the parts of the value with `&mut` types, which are their places.
+        const bindsPlace = local.mode === 'refMut' || (localType.kind === 'ref' && localType.mutable);
         return (frame, value, place) => {
           if (sub && !sub(frame, value, place)) return false;
           let bound = value;
-          if (local.mode === 'refMut') bound = place ? place() : new CellPlace(value);
-          else if (local.mode === 'ref' && isPlace(value)) bound = value.get();
+          if (bindsPlace && !(local.mode === 'move' && isPlace(value))) {
+            bound = place ? place() : new CellPlace(value);
+          } else if (local.mode === 'ref' && isPlace(value)) bound = value.get();
           else if (copies) bound = copyValue(value);
           frame.locals[local.slot] = bound;
           return true;
@@ -824,7 +828,8 @@ export class Compiler {
       index: fields.findIndex((f) => f.name === field.name),
       value: this.value(field.value),
     }));
-    const base = expr.base ? this.value(expr.base) : undefined;
+    // The base gives up only the fields it moves, which the borrow checker keeps from being used again.
+    const base = expr.base ? this.read(expr.base) : undefined;
     return (frame) => {
       const result: Value[] = Array.from({ length: fields.length });
       for (const { index, value } of values) result[index] = value(frame);

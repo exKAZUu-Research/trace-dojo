@@ -1,9 +1,10 @@
-// code-gauge-allow-file fileNcss 534 -- One rule per trait or conversion of the standard library.
+// code-gauge-allow-file fileNcss 536 -- One rule per trait or conversion of the standard library.
 import { normalize, type Unifier } from './infer';
 import type { Module, Program } from './items';
 import {
   freshVar,
   type ImplDef,
+  isSigned,
   shallow,
   type Subst,
   substitute,
@@ -343,6 +344,9 @@ export class TraitSolver {
       }
       case 'Integer': {
         return t.kind === 'int' ? 'yes' : 'no';
+      }
+      case 'SignedInteger': {
+        return t.kind === 'int' && isSigned(t.name) ? 'yes' : 'no';
       }
       case 'Float': {
         return t.kind === 'float' ? 'yes' : 'no';

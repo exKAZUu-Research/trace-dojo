@@ -159,6 +159,9 @@ export class IterValue {
 
   /** Elements pushed back by `peekable`. */
   peeked: Next[] | undefined;
+
+  /** The elements left, for iterators over an array (`Chars::as_str` reads them without taking them). */
+  rest: (() => Value[]) | undefined;
 }
 
 /** A `HashMap` or `BTreeMap`: entries keyed by a text that equal keys share. */

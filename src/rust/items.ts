@@ -287,6 +287,7 @@ export class ItemCollector {
       params: item.generics.params.map((param) => newTypeParam(param.name)),
       variants: [],
       derives: new Set(item.attrs.derives.map((derive) => derive.name)),
+      span: item.span,
       module,
     };
     // `Error` is a builtin only as `fmt::Error`; `io::Error` is a plain declaration.
@@ -312,6 +313,7 @@ export class ItemCollector {
           name: field.name,
           type: lowerType(field.type, scope),
           isPublic: field.vis === 'pub',
+          span: field.span,
         })),
         discriminant: 0n,
       });
@@ -329,6 +331,7 @@ export class ItemCollector {
       params: item.generics.params.map((param) => newTypeParam(param.name)),
       variants: [],
       derives: new Set(item.attrs.derives.map((derive) => derive.name)),
+      span: item.span,
       module,
     };
     if (module.isStd && BUILTIN_ENUMS[item.name]) {
@@ -368,6 +371,7 @@ export class ItemCollector {
           name: field.name,
           type: lowerType(field.type, scope),
           isPublic: true,
+          span: field.span,
         }));
         checkDuplicateFields(variant.fields);
       }

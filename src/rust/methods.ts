@@ -3,9 +3,11 @@ import { normalize } from './infer';
 import type { Program } from './items';
 import type { TraitSolver } from './traits';
 import {
+  CHAR,
   type FnDef,
   freshVar,
   type ImplDef,
+  isBuiltin,
   ref,
   shallow,
   substitute,
@@ -74,7 +76,6 @@ const RANGE_ITERATORS = new Set(['Range', 'RangeInclusive', 'RangeFrom']);
  * Finds a method as rustc's method probe does: for each type the receiver derefs to, a method that takes it by value,
  * then by shared reference, then by mutable reference; inherent methods before trait methods.
  */
-// code-gauge-allow functionCognitiveComplexity 18 -- Follows rustc's method probe step by step.
 export function lookupMethod(
   program: Program,
   solver: TraitSolver,
@@ -97,20 +98,33 @@ export function lookupMethod(
     if (stepType.kind === 'var') return 'ambiguous';
   }
   // A range is an iterator: its methods are those of `Iter`.
-  const last = normalize(shallow(steps.at(-1)?.type ?? receiver));
-  const first = steps.find((step) => {
+  const range = steps.find((step) => {
     const t = shallow(step.type);
     return t.kind === 'adt' && RANGE_ITERATORS.has(t.def.builtin as string);
   });
-  if (first) {
-    const range = shallow(first.type) as Type & { kind: 'adt' };
-    const iter = program.builtinType('Iter', [range.args[0]]);
-    for (const autoref of ['none', 'ref', 'mut'] as const) {
-      const found = probe(program, solver, iter, autoref, name);
-      if (found) return { ...found, adjust: { derefs: first.derefs, autoref, rangeToIter: true } };
-    }
+  if (range) {
+    const elem = (shallow(range.type) as Type & { kind: 'adt' }).args[0];
+    return probeAsIter(program, solver, range, elem, name, true);
   }
-  void last;
+  // `char::to_uppercase`'s iterator is an `Iter<char>` that also displays as its text.
+  const caseIter = steps.find((step) => isBuiltin(shallow(step.type), 'CaseIter'));
+  return caseIter && probeAsIter(program, solver, caseIter, CHAR, name, false);
+}
+
+/** Finds a method of `Iter<elem>` for a receiver that is an iterator of another type. */
+function probeAsIter(
+  program: Program,
+  solver: TraitSolver,
+  step: DerefStep,
+  elem: Type,
+  name: string,
+  rangeToIter: boolean
+): MethodMatch | undefined {
+  const iter = program.builtinType('Iter', [elem]);
+  for (const autoref of ['none', 'ref', 'mut'] as const) {
+    const found = probe(program, solver, iter, autoref, name);
+    if (found) return { ...found, adjust: { derefs: step.derefs, autoref, rangeToIter } };
+  }
   return undefined;
 }
 
@@ -289,7 +303,9 @@ export function lookupAssociated(
     const args = trait.params.map(() => freshVar());
     const snapshot = solver.unifier.snapshot();
     const answer = solver.implements(t, { trait, args });
-    if (answer === 'yes' || (answer === 'unknown' && args.length > 0))
+    // A derive implements the trait for every type argument that meets it, which may not be known yet (`W::default()`).
+    const derived = t.kind === 'adt' && t.def.derives.has(trait.builtin);
+    if (answer === 'yes' || (answer === 'unknown' && (args.length > 0 || derived)))
       return { fn, typeArgs: [t, ...args, ...ownParams(fn)] };
     solver.unifier.rollback(snapshot);
   }

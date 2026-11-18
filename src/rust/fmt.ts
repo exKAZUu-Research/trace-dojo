@@ -210,7 +210,7 @@ export class Formatter {
     }
   }
 
-  // code-gauge-allow functionNcss 55 -- Follows std::fmt's formatting rules case by case.
+  // code-gauge-allow functionNcss 57 -- Follows std::fmt's formatting rules case by case.
   private debugAdt(v: Value, t: Type & { kind: 'adt' }, spec: Spec, indent: number | undefined): string {
     const user = this.hooks.userFmt('Debug', t, v, { ...spec, alternate: indent !== undefined });
     if (user !== undefined) return user;
@@ -270,7 +270,9 @@ export class Formatter {
         return errorDebug(def.builtin, v, indent);
       }
       case 'CaseIter': {
-        return `${def.name}(${caseIterText(v)})`;
+        const { name, text } = v as unknown as { name: string; text: string };
+        const chars = [...text].map((c) => `'${escapeDebug(c, true)}'`).join(', ');
+        return `${name}(CaseMappingIter(IntoIter([${chars}])))`;
       }
       case 'Turtle': {
         return 'Turtle';

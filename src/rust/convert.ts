@@ -1269,11 +1269,11 @@ export class Converter {
         return { kind: 'lit', expr: { ...literal, value: -literal.value as never }, span };
       }
       case 'tuple_pattern': {
-        return { kind: 'tuple', elems: this.subpatterns(node), span };
+        return { kind: 'tuple', elems: this.subpatterns(node).map((child) => this.pattern(child)), span };
       }
       case 'tuple_struct_pattern': {
         const type = this.field(node, 'type');
-        const elems = node.namedChildren.filter((child) => child.id !== type.id && !isComment(child));
+        const elems = this.subpatterns(node).filter((child) => child.id !== type.id);
         return { kind: 'tupleStruct', path: this.exprPath(type), elems: elems.map((c) => this.pattern(c)), span };
       }
       case 'struct_pattern': {
@@ -1359,8 +1359,9 @@ export class Converter {
     }
   }
 
-  private subpatterns(node: Node): Pattern[] {
-    return node.namedChildren.filter((child) => !isComment(child)).map((child) => this.pattern(child));
+  /** `_` is an anonymous token, so the element patterns are the named children and the `_` tokens. */
+  private subpatterns(node: Node): Node[] {
+    return node.children.filter((child) => (child.isNamed || child.type === '_') && !isComment(child));
   }
 
   // -------------------------------------------------------------------------------------------------------------------

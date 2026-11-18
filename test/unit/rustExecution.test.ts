@@ -103,6 +103,42 @@ test('main returning an Err reports it with Debug', () => {
   });
 });
 
+test('programs that learners commonly write run as rustc runs them', () => {
+  const program = `use std::collections::HashMap;
+#[derive(Debug)]
+struct User { name: String, email: String }
+fn add(out: &mut Vec<i32>, x: i32) { out.push(x); }
+fn twice(out: &mut Vec<i32>) { add(out, 1); add(out, 2); }
+fn main() {
+    let (_, b) = (1, 2);
+    if let Some(_) = Some(b) { println!("some"); }
+    let s = String::from("A");
+    println!("{} {}", s == "A", "B" != s);
+    let mut v = Vec::new();
+    twice(&mut v);
+    for (x, _) in v.iter_mut().zip(0..) { *x *= 10; }
+    let mut m = Some(3);
+    if let Some(x) = &mut m { *x += 1; }
+    let u1 = User { name: String::from("a"), email: String::from("e") };
+    let u2 = User { name: String::from("b"), ..u1 };
+    let mut freq: HashMap<String, i32> = HashMap::new();
+    for w in "x y x".split(' ') { *freq.entry(w.to_string()).or_insert(0) += 1; }
+    let mut pairs: Vec<_> = freq.iter().collect();
+    pairs.sort_by(|a, b| b.1.cmp(a.1));
+    let mut c = "rust".chars();
+    let first = c.next().unwrap().to_uppercase().collect::<String>() + c.as_str();
+    println!("{:?} {:?} {} {:?} {:?} {} {:?}", v, m, u1.name, u2, pairs, first, "ab".rfind(""));
+}`;
+  expect(executeProgram('rust', program)).toMatchObject({
+    kind: 'executed',
+    stdout: `some
+true true
+[10, 20] Some(4) a User { name: "b", email: "e" } [("x", 2), ("y", 1)] Rust Some(2)
+`,
+    uncaughtException: undefined,
+  });
+});
+
 test.each([
   ['a use after a move', '    let s1 = String::from("a");\n    let s2 = s1;\n    println!("{s1} {s2}");', 4],
   ['a move in an earlier iteration', '    let s = String::from("a");\n    for _ in 0..2 { let t = s; }', 3],
@@ -117,9 +153,18 @@ test.each([
   ['a move out of a Vec', '    let v = vec![String::new()];\n    let s = v[0];', 3],
   ['a non-exhaustive match', '    let n = 3;\n    match n { 1 => {} }', 3],
   ['arithmetic that always overflows', '    let x: u32 = 3;\n    let y = x - 5;', 3],
+  ['arithmetic on an associated constant that overflows', '    let x = i32::MAX + 1;', 2],
+  ['a literal out of its type', '    let x: u8 = 256;', 2],
+  [
+    'a borrow through a reference that a later push conflicts with',
+    '    let mut v = vec![1];\n    let r = &mut v;\n    let first = &r[0];\n    r.push(2);\n    println!("{first}");',
+    5,
+  ],
+  ['a method of signed integers on an unsigned one', '    let d = 3usize - 1;\n    println!("{}", d.abs());', 3],
+  ['a derive whose field lacks the trait', '', 4, 'struct Id;\n#[derive(Debug)]\nstruct P {\n    id: Id,\n}'],
   ['mismatched types', '    let x: i32 = "a";', 2],
-])('rustc rejects %s before running', (_name, body, row) => {
-  const execution = executeProgram('rust', rustMain(body));
+])('rustc rejects %s before running', (_name, body, row, items = '') => {
+  const execution = executeProgram('rust', rustMain(body, items));
   expect(execution.kind).toBe('compileError');
   expect(execution.kind === 'compileError' && execution.diagnostics[0].row + 1).toBe(row);
 });

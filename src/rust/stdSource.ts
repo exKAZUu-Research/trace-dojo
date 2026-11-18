@@ -1,10 +1,11 @@
 /**
  * The declarations of the standard library that this interpreter implements, in Rust's syntax. Functions without a
- * body run natively (`natives.ts`), keyed by the impl's self type or trait and the function's name. Builtin types
- * (`builtinTypes.ts`) are declared as structs whose values the runtime represents in its own way.
+ * body run natively (`natives.ts`), keyed by the impl's self type or trait and the function's name. Builtin types are
+ * declared as structs whose values the runtime represents in its own way.
  *
- * Pseudo-traits that rustc does not have stand for groups of types that the natives handle alike: `Integer`, `Float`,
- * `Pattern` (what `str::split` and its kin accept), `Borrow` (keys that look up a map), `FromStrTarget`, `SumTarget`.
+ * Pseudo-traits that rustc does not have stand for groups of types that the natives handle alike: `Integer`,
+ * `SignedInteger`, `Float`, `Pattern` (what `str::split` and its kin accept), `Borrow` (keys that look up a map),
+ * `FromStrTarget`, `StringPart`, `RangeBounds`, and `ExtendInto`.
  */
 export const STD_SOURCE = String.raw`
 pub mod marker {
@@ -357,8 +358,16 @@ pub mod num {
     pub struct ParseFloatError;
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     pub struct TryFromIntError;
-    impl<N: Integer> N {
+    impl<N: SignedInteger> N {
         pub fn abs(self) -> N;
+        pub fn checked_abs(self) -> Option<N>;
+        pub fn wrapping_abs(self) -> N;
+        pub fn signum(self) -> N;
+        pub fn is_positive(self) -> bool;
+        pub fn is_negative(self) -> bool;
+        pub fn unsigned_abs(self) -> Unsigned<N>;
+    }
+    impl<N: Integer> N {
         pub fn pow(self, exp: u32) -> N;
         pub fn checked_add(self, rhs: N) -> Option<N>;
         pub fn checked_sub(self, rhs: N) -> Option<N>;
@@ -367,7 +376,6 @@ pub mod num {
         pub fn checked_rem(self, rhs: N) -> Option<N>;
         pub fn checked_pow(self, exp: u32) -> Option<N>;
         pub fn checked_neg(self) -> Option<N>;
-        pub fn checked_abs(self) -> Option<N>;
         pub fn wrapping_add(self, rhs: N) -> N;
         pub fn wrapping_sub(self, rhs: N) -> N;
         pub fn wrapping_mul(self, rhs: N) -> N;
@@ -375,7 +383,6 @@ pub mod num {
         pub fn wrapping_rem(self, rhs: N) -> N;
         pub fn wrapping_neg(self) -> N;
         pub fn wrapping_pow(self, exp: u32) -> N;
-        pub fn wrapping_abs(self) -> N;
         pub fn saturating_add(self, rhs: N) -> N;
         pub fn saturating_sub(self, rhs: N) -> N;
         pub fn saturating_mul(self, rhs: N) -> N;
@@ -385,15 +392,11 @@ pub mod num {
         pub fn overflowing_mul(self, rhs: N) -> (N, bool);
         pub fn rem_euclid(self, rhs: N) -> N;
         pub fn div_euclid(self, rhs: N) -> N;
-        pub fn signum(self) -> N;
-        pub fn is_positive(self) -> bool;
-        pub fn is_negative(self) -> bool;
         pub fn count_ones(self) -> u32;
         pub fn count_zeros(self) -> u32;
         pub fn leading_zeros(self) -> u32;
         pub fn trailing_zeros(self) -> u32;
         pub fn abs_diff(self, other: N) -> Unsigned<N>;
-        pub fn unsigned_abs(self) -> Unsigned<N>;
         pub fn isqrt(self) -> N;
         pub fn ilog2(self) -> u32;
         pub fn ilog10(self) -> u32;
@@ -638,6 +641,9 @@ pub mod iter {
     impl<T> Iter<&mut T> {
         pub fn copied(self) -> Iter<T> where T: Copy;
         pub fn cloned(self) -> Iter<T> where T: Clone;
+    }
+    impl Iter<char> {
+        pub fn as_str(&self) -> &str;
     }
     impl<A, B> Iter<(A, B)> {
         pub fn unzip<FromA: FromIterator<A>, FromB: FromIterator<B>>(self) -> (FromA, FromB);
@@ -971,6 +977,7 @@ pub mod prelude {
 }
 pub mod pseudo {
     pub trait Integer {}
+    pub trait SignedInteger {}
     pub trait Float {}
     pub trait Pattern {}
     pub trait Borrow<Q> {}

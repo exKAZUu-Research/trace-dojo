@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 661 -- One native per method of the standard library.
+// code-gauge-allow-file fileNcss 666 -- One native per method of the standard library.
 import { normalize } from '../infer';
 import type { Interpreter } from '../interpreter';
 import {
@@ -39,12 +39,14 @@ export function arrayIter(
 ): IterValue {
   let front = start;
   let back = end;
-  return new IterValue(
+  const iter = new IterValue(
     () => (front < back ? map(front++) : DONE),
     () => (front < back ? map(--back) : DONE),
     () => back - front,
     [array]
   );
+  iter.rest = () => Array.from({ length: Math.max(back - front, 0) }, (_, offset) => map(front + offset));
+  return iter;
 }
 
 /** An iterator of a slice's elements; `places` yields places for `iter_mut`. */
@@ -639,6 +641,11 @@ define({
     return items.every(
       (item, index) => index === 0 || (compareValues(ctx.typeArgs[0], items[index - 1], item) ?? 1) <= 0
     );
+  },
+  'Iter<char>::as_str': ([self]) => {
+    const iter = iterOf(self);
+    const peeked = (iter.peeked ?? []).filter((next) => next !== DONE) as Value[];
+    return [...peeked, ...(iter.rest?.() ?? [])].join('');
   },
   'Iter<&_>::copied': ([self]) => derefIter(iterOf(self), true),
   'Iter<&_>::cloned': ([self], ctx) => cloneIter(iterOf(self), ctx.typeArgs[0]),
