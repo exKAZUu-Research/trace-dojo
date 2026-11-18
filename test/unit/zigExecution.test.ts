@@ -1559,6 +1559,45 @@ test.each([
   }
 );
 
+test.each([
+  ['void', 'var value:U=undefined;const u=&value;'],
+  ['struct{}', 'var value:U=undefined;const u=&value;'],
+  ['[0]u8', 'var value:U=undefined;const u=&value;'],
+  [
+    'void',
+    'var buf:[16]u8=undefined;var f=std.heap.FixedBufferAllocator.init(&buf);const u=try f.allocator().create(U);',
+  ],
+])('zero-sized union field and reinterpreted pointers share identity for %s (%s)', (child, storage) => {
+  const initial = child === 'void' ? '{}' : '.{}';
+  const source = `const std=@import("std");const Z=${child};const U=union(enum){a:Z,b:u16};const P=extern union{u:*U,z:*Z};pub fn main()!void{${storage}u.*=.{.a=${initial}};const p=&u.a;var map=std.AutoHashMap(*Z,u8).init(std.heap.page_allocator);defer map.deinit();try map.put(p,42);const alias=P{.u=u};std.debug.print("{} {any}|",.{p==alias.z,map.get(alias.z)});u.*=.{.b=9};std.debug.print("{} {any} {}",.{p==alias.z,map.get(alias.z),u.b});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: 'true 42|true 42 9',
+    uncaughtException: undefined,
+  });
+});
+
+test.each([
+  ['const copy=u;', 'copy'],
+  ['', 'identity(u)'],
+])('tagged union copies retain inactive bytes through %s%s', (preparation, sourceValue) => {
+  const source = `const std=@import("std");const U=union(enum){wide:u16,small:u8,unused:[1000]u8};fn identity(u:U)U{return u;}pub fn main()void{var u:U=.{.wide=0x1234};const p=&u.wide;u=.{.small=0x56};${preparation}var v:U=.{.wide=0};const q=&v.wide;v=${sourceValue};std.debug.print("{x} {x} {t}",.{p.*,q.*,v});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: '1256 1256 small',
+    uncaughtException: undefined,
+  });
+});
+
+test('tagged union copies preserve references in retained inactive fields', () => {
+  const source = `const std=@import("std");const U=union(enum){ptr:*u8,empty:void};fn identity(u:U)U{return u;}pub fn main()void{var first:u8=7;var second:u8=3;var a:U=.{.ptr=&first};const p=&a.ptr;a=.{.empty={}};var b:U=.{.ptr=&second};const q=&b.ptr;b=identity(a);q.*.*=9;std.debug.print("{} {} {} {t}",.{p.*==q.*,first,second,b});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: 'true 9 3 empty',
+    uncaughtException: undefined,
+  });
+});
+
 test('writer result types use the canonical usize and mutable byte slice', () => {
   const source = `const std=@import("std");fn less(n:usize,a:u8,b:u8)bool{return n>0 and a<b;}
 pub fn main()!void{var b:[2]u8=undefined;var w=std.Io.Writer.fixed(&b);const n=try w.write("x");var a=[_]u8{2,1};std.sort.heap(u8,&a,n,less);std.debug.print("{} {} {}",.{a[0],a[1],@TypeOf(w.buffered())==[]u8});}`;
@@ -7794,7 +7833,7 @@ test.each([
   [1_000_001, 'u8', 1, '8'],
   [1000, 'u64', 1000, '8000'],
 ])('addressed union variants budget only touched bytes for [%s]%s', (size, child, count, expected) => {
-  const source = `const std=@import("std");const U=union(enum){data:[${size}]${child},byte:u8};fn next(n:u8)u8{var u:U=.{.byte=n};const p=&u.byte;p.*+=1;return p.*;}pub fn main()void{var total:usize=0;for(0..${count})|_|total+=next(7);std.debug.print("{}",.{total});}`;
+  const source = `const std=@import("std");const U=union(enum){data:[${size}]${child},byte:u8};fn identity(u:U)U{return u;}fn next(n:u8)u8{var u:U=.{.byte=n};const p=&u.byte;p.*+=1;const copy=identity(u);return copy.byte;}pub fn main()void{var total:usize=0;for(0..${count})|_|total+=next(7);std.debug.print("{}",.{total});}`;
   expect(executeProgram('zig', source)).toMatchObject({
     kind: 'executed',
     stderr: expected,

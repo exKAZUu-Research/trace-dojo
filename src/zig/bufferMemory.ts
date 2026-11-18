@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 518 -- Keeps sparse and dense bytes with the typed views that share them.
+// code-gauge-allow-file fileNcss 525 -- Keeps the byte codecs, shared typed views, and reference-preserving copies together.
 import { transferCost } from './allocation';
 import { panic } from './arith';
 import { enumLookup } from './enumLookup';
@@ -9,6 +9,7 @@ import { memorySpace, reserveMemory, spendMemory } from './memoryAccounting';
 import { rememberPointerType, viewPointer } from './pointerViews';
 import { copyForStorage, undefinedValue } from './semaBase';
 import { singleValueOf } from './singleValue';
+import { copySparseBytes, propertyIndex, sparseBytes, sparseByteValues } from './sparseBytes';
 import { type Type, typeId } from './types';
 import {
   ErrorValue,
@@ -103,13 +104,7 @@ export function zeroPhysicalValue(type: Extract<Type, { kind: 'struct' | 'union'
 
 export function physicalUnion(type: Extract<Type, { kind: 'union' }>, value: ZUnion): ZUnion {
   if (value.fieldView) return value;
-  const length = sizeOf(type);
-  const lazy = type.layout === 'auto';
-  if (!lazy) {
-    reserveMemory(length);
-    spendMemory(length);
-  }
-  const bytes = lazy ? sparseBytes(length) : Array.from<Value>({ length }).fill(0xaan);
+  const bytes = unionBytes(type, 0xaan);
   const memory = new BufferMemory(bytes, spendMemory, memorySpace());
   memory.write(type, 0, value);
   const backing = memory.read(type, 0) as ZUnion;
@@ -180,7 +175,7 @@ export class BufferMemory {
       pull: (offset: number, bits: number) => void;
       push: (offset: number, bits: number) => void;
     },
-    private readonly pointerLocation?: (offset: number) => { storage: object; index: number }
+    private readonly pointerLocation?: (offset: number, type: Type | undefined) => { storage: object; index: number }
   ) {
     space.memories.set(bytes, this);
   }
@@ -219,11 +214,24 @@ export class BufferMemory {
         return true;
       },
     });
-    this.space.typedViews.set(slots, { memory: this, offset: (index) => fields[index]?.offset ?? 0 });
-    registerStorageLocation(slots, (index) => ({ storage: this.bytes, index: (fields[index]?.offset ?? 0) / 8 }));
-    if (this.pointerLocation)
-      registerPointerLocation(slots, (index) => this.pointerLocation!(fields[index]?.offset ?? 0));
+    this.registerBacking(
+      slots,
+      (index) => fields[index]?.offset ?? 0,
+      (index) => fields[index]?.type
+    );
     return slots;
+  }
+
+  private registerBacking(
+    slots: Value[],
+    offset: (index: number) => number,
+    type: (index: number) => Type | undefined,
+    virtual = false
+  ): void {
+    this.space.typedViews.set(slots, { memory: this, offset });
+    registerStorageLocation(slots, (index) => ({ storage: this.bytes, index: offset(index) / 8 }), virtual);
+    if (this.pointerLocation)
+      registerPointerLocation(slots, (index) => this.pointerLocation!(offset(index), type(index)));
   }
 
   // code-gauge-allow functionNcss 40 -- Decodes each scalar representation and transparent wrapper from shared bytes.
@@ -371,13 +379,26 @@ export class BufferMemory {
     union.fieldView = (index) => ({
       slots: this.slots([unionFieldLocation(type, index, offset + layout.payload * 8)]),
     });
-    if (type.layout === 'auto') union.writeBacking = (value) => this.write(type, offset, value);
-    else this.attachUnionBacking(union, type, offset);
+    this.attachUnionBacking(union, type, offset);
     return union;
   }
 
   private attachUnionBacking(union: ZUnion, type: Extract<Type, { kind: 'union' }>, offset: number): void {
     const bits = type.layout === 'packed' ? bitSizeOf(type) : sizeOf(type) * 8;
+    if (type.layout !== 'auto') this.attachRawUnionObservers(union, offset, bits);
+    union.copyBacking = () => {
+      const memory = new BufferMemory(unionBytes(type, 0n), spendMemory, this.space);
+      this.copyRegion(memory, offset, 0, bits);
+      const copy = memory.read(type, 0) as ZUnion;
+      copy.tag = union.tag;
+      return copy;
+    };
+    union.writeBacking = (value) =>
+      this.write(type, offset, type.layout === 'auto' ? value : physicalUnion(type, value));
+    union.copyBackingTo = (destination, start) => this.copyRegion(destination as BufferMemory, offset, start, bits);
+  }
+
+  private attachRawUnionObservers(union: ZUnion, offset: number, bits: number): void {
     union.backingKey = () => {
       spendMemory(Math.ceil(bits / 8));
       return this.access(false, offset, bits, () => this.regionBytes(offset, bits).join(','));
@@ -391,26 +412,18 @@ export class BufferMemory {
       }
       return values;
     };
-    union.copyBacking = () => {
-      const length = sizeOf(type);
-      reserveMemory(length);
-      spendMemory(length);
-      const memory = new BufferMemory(Array.from<Value>({ length }).fill(0n), spendMemory, this.space);
-      this.copyRegion(memory, offset, 0, bits);
-      const copy = memory.read(type, 0) as ZUnion;
-      copy.tag = union.tag;
-      return copy;
-    };
-    union.writeBacking = (value) => this.write(type, offset, physicalUnion(type, value));
-    union.copyBackingTo = (destination, start) => this.copyRegion(destination as BufferMemory, offset, start, bits);
   }
 
   arrayView(child: Type, length: bigint, offset: number, hasSentinel = false): ZArray {
     const singleton = singleValueOf(child, this.spend);
     if (singleton) {
       const array = zeroArray(length, hasSentinel, copyForStorage(singleton.value));
-      this.space.typedViews.set(array.slots, { memory: this, offset: () => offset });
-      registerStorageLocation(array.slots, () => ({ storage: this.bytes, index: offset / 8 }), true);
+      this.registerBacking(
+        array.slots,
+        () => offset,
+        () => child,
+        true
+      );
       return array;
     }
     const count = length + (hasSentinel ? 1n : 0n);
@@ -435,10 +448,12 @@ export class BufferMemory {
         return true;
       },
     });
-    this.space.typedViews.set(slots, { memory: this, offset: (index) => offset + index * stride * 8 });
-    registerStorageLocation(slots, (index) => ({ storage: this.bytes, index: offset / 8 + index * stride }), true);
-    if (this.pointerLocation)
-      registerPointerLocation(slots, (index) => this.pointerLocation!(offset + index * stride * 8));
+    this.registerBacking(
+      slots,
+      (index) => offset + index * stride * 8,
+      () => child,
+      true
+    );
     return new ZArray(slots, 0, length, hasSentinel);
   }
 
@@ -501,7 +516,6 @@ export class BufferMemory {
   }
 
   // code-gauge-allow functionCognitiveComplexity 23 -- Writes aggregate contents using their physical layout without replacing interior views.
-  // code-gauge-allow functionNcss 35 -- Encodes aggregate layouts without invalidating interior aliases.
   private writeAggregate(
     type: Extract<Type, { kind: 'array' | 'struct' | 'union' }>,
     offset: number,
@@ -539,28 +553,45 @@ export class BufferMemory {
         return;
       }
       case 'union': {
-        const union = value as ZUnion;
-        if (type.layout !== 'auto' && union.copyBackingTo) {
-          union.copyBackingTo(this, offset);
-          (this.readAggregate(type, offset) as ZUnion).tag = union.tag;
-          return;
-        }
-        const layout = unionOffsets(type);
-        (this.readAggregate(type, offset) as ZUnion).tag = union.tag;
-        const field = unionFieldLocation(type, union.tag, offset + layout.payload * 8);
-        this.write(field.type, field.offset, union.slots[0], field.packed);
+        this.writeUnion(type, offset, value as ZUnion);
         return;
       }
     }
   }
 
+  private writeUnion(type: Extract<Type, { kind: 'union' }>, offset: number, value: ZUnion): void {
+    const tag = value.tag;
+    const target = this.readAggregate(type, offset) as ZUnion;
+    if (value.copyBackingTo) {
+      value.copyBackingTo(this, offset);
+      target.tag = tag;
+      return;
+    }
+    target.tag = tag;
+    const field = unionFieldLocation(type, tag, offset + unionOffsets(type).payload * 8);
+    this.write(field.type, field.offset, value.slots[0], field.packed);
+  }
+
   private copyRegion(destination: BufferMemory, offset: number, start: number, bits: number): void {
+    if (bits === 0) return;
     this.access(false, offset, bits, () =>
       destination.access(true, start, bits, () => this.copyRegionRaw(destination, offset, start, bits))
     );
   }
 
   private copyRegionRaw(destination: BufferMemory, offset: number, start: number, bits: number): void {
+    const sourceBytes = sparseByteValues.get(this.bytes);
+    const destinationBytes = sparseByteValues.get(destination.bytes);
+    if (sourceBytes && destinationBytes && offset % 8 === 0 && start % 8 === 0 && bits % 8 === 0) {
+      const references = this.sparseReferences(offset, start, bits);
+      copySparseBytes(sourceBytes, destinationBytes, offset / 8, start / 8, bits / 8);
+      for (const at of destination.referenceOffsets.keys()) {
+        this.spend();
+        if (at >= start && at < start + bits) destination.referenceOffsets.delete(at);
+      }
+      destination.restoreReferences(references);
+      return;
+    }
     spendMemory(Math.ceil(bits / 8) * 20);
     const bytes = this.regionBytes(offset, bits);
     const references: (StoredReference & { offset: number })[] = [];
@@ -570,10 +601,25 @@ export class BufferMemory {
     }
     for (let bit = 0; bit < bits; bit++) destination.referenceOffsets.delete(start + bit);
     destination.writeRegionBytes(start, bits, bytes);
+    destination.restoreReferences(references);
+  }
+
+  private sparseReferences(offset: number, start: number, bits: number): (StoredReference & { offset: number })[] {
+    const references: (StoredReference & { offset: number })[] = [];
+    for (const at of this.referenceOffsets.keys()) {
+      this.spend();
+      if (at < offset || at >= offset + bits) continue;
+      const reference = this.currentReference(at);
+      if (reference) references.push({ ...reference, offset: start + at - offset });
+    }
+    return references;
+  }
+
+  private restoreReferences(references: readonly (StoredReference & { offset: number })[]): void {
     for (const reference of references) {
-      destination.referenceOffsets.set(reference.offset, reference);
-      destination.referenceHolds.set(reference.key, reference.value);
-      destination.space.references.set(reference.key, reference.value);
+      this.referenceOffsets.set(reference.offset, reference);
+      this.referenceHolds.set(reference.key, reference.value);
+      this.space.references.set(reference.key, reference.value);
     }
   }
 
@@ -698,33 +744,15 @@ function unionFieldLocation(type: Extract<Type, { kind: 'union' }>, index: numbe
   return { type: field, offset, packed: type.layout === 'packed' ? bitSizeOf(field) : undefined };
 }
 
-export function sparseBytes(length: number): Value[] {
-  const values = new Map<number, Value>();
-  return new Proxy<Value[]>([], {
-    get: (target, property, receiver) => {
-      if (property === 'length') return length;
-      const index = propertyIndex(property);
-      return index === undefined ? Reflect.get(target, property, receiver) : (values.get(index) ?? 0xaan);
-    },
-    has: (target, property) => {
-      const index = propertyIndex(property);
-      return index === undefined ? Reflect.has(target, property) : index < length;
-    },
-    set: (target, property, value: Value, receiver) => {
-      const index = propertyIndex(property);
-      if (index === undefined) return Reflect.set(target, property, value, receiver);
-      if (!values.has(index)) reserveMemory(1);
-      values.set(index, value);
-      return true;
-    },
-  });
+function unionBytes(type: Extract<Type, { kind: 'union' }>, fill: bigint): Value[] {
+  const length = sizeOf(type);
+  if (type.layout === 'auto') return sparseBytes(length);
+  reserveMemory(length);
+  spendMemory(length);
+  return Array.from<Value>({ length }).fill(fill);
 }
 
 function referenceKey(id: bigint, bits: number): string {
   const projection = bits === 16 ? 'error' : 'address';
   return `${id} ${projection}`;
-}
-
-function propertyIndex(property: string | symbol): number | undefined {
-  return typeof property === 'string' && /^(0|[1-9]\d*)$/.test(property) ? Number(property) : undefined;
 }

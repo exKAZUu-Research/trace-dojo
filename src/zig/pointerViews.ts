@@ -1,7 +1,8 @@
-import { BufferMemory, type BufferMemorySpace, physicalUnion, sparseBytes } from './bufferMemory';
+import { BufferMemory, type BufferMemorySpace, physicalUnion } from './bufferMemory';
 import { BigFloat } from './floats';
 import { bitSizeOf, errorUnionOffsets, fieldOffsets, optionalNicheBits, sizeOf, unionOffsets } from './layout';
 import { spendMemory } from './memoryAccounting';
+import { sparseBytes } from './sparseBytes';
 import { arrayOf, type StructType, type Type, typeId } from './types';
 import {
   Cell,
@@ -91,6 +92,7 @@ function firstField(source: Pointer, sourceType: Type, type: Type): { pointer: P
 }
 
 function logicalView(source: Pointer, sourceType: Type, type: Type, space: BufferMemorySpace): Pointer {
+  const originalSource = source;
   let offset = 0;
   if (source.target instanceof ZArray) {
     const array = source.target;
@@ -118,7 +120,10 @@ function logicalView(source: Pointer, sourceType: Type, type: Type, space: Buffe
         pull: (offset, bits) => synchronizeRegion(created, storage, offset, bits, false),
         push: (offset, bits) => synchronizeRegion(created, storage, offset, bits, true),
       },
-      (offset) => sourceLocation(source, sourceType, offset)
+      (position, viewType) =>
+        viewType && sizeOf(viewType) === 0
+          ? originalSource.fieldLocation((position - offset) / 8)
+          : sourceLocation(source, sourceType, position)
     );
     memory = created;
     memories.set(key, memory);
