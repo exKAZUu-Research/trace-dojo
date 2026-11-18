@@ -7,13 +7,13 @@ import type { ArgValue } from './calls';
 import { canAccessProp, declForKey, issetProp, lookupProp, objectToArray, readProp } from './classes';
 import * as conversionsModule from './conversions';
 import { compareBytes, compareNumbers, debugType, floatFitsInt, normalizeKeyString, valueName } from './conversions';
-import { deprecated, throwError, warn } from './errors';
+import { deprecated, throwError, warn, withCleanupExceptions } from './errors';
 import { cast } from './interp';
 import { naturalCompare } from './libString';
 import { defineAlias, defineConstant, defineFunction, markInlined } from './native';
 import { arithmetic, compare, looseEquals, strictEquals, toFloat, toInt, toKey, toStr } from './operators';
 import { arrayIsShared, ElementPlace, share, VarPlace } from './places';
-import { rt } from './runtime';
+import { PhpThrow, rt } from './runtime';
 import {
   copyValueSlot,
   deref,
@@ -1200,7 +1200,7 @@ export function userComparisonCaller(name: string): (callback: Value, a: Value, 
 
 /** The sign of a comparison callback's result, which PHP reads as an int: 0.5 counts as equal. */
 export function comparisonSign(result: Value): number {
-  const value = typeof result === 'number' ? Math.trunc(result) : Number(cast('int', result));
+  const value = Number(cast('int', result));
   return value < 0 ? -1 : value > 0 ? 1 : 0;
 }
 
@@ -1211,7 +1211,55 @@ function sortArray(
   renumber: boolean
 ): true {
   checkArrayRef(ctx, 0, name, 'array');
-  const array = writableArray(ctx, 0);
+  return sortStorage(writableArray(ctx, 0), name, compareEntries, renumber);
+}
+
+function sortUserArray(
+  ctx: NativeContext,
+  name: string,
+  compareEntries: (a: [Key, Value | Ref], b: [Key, Value | Ref]) => number,
+  renumber: boolean
+): true {
+  checkArrayRef(ctx, 0, name, 'array');
+  const reference = ctx.refs[0] as Ref;
+  const original = arr(reference.v);
+  if (original.size === 0) return true;
+  const snapshot = original.copy();
+  const runtime = rt();
+  runtime.held.push(snapshot);
+  try {
+    withCleanupExceptions(runtime, (capture) => {
+      let failed = false;
+      sortStorage(
+        snapshot,
+        name,
+        (a, b) => {
+          if (failed) return 0;
+          try {
+            return compareEntries(a, b);
+          } catch (error) {
+            if (!(error instanceof PhpThrow)) throw error;
+            failed = true;
+            capture(error);
+            return 0;
+          }
+        },
+        renumber
+      );
+      reference.v = snapshot;
+    });
+    return true;
+  } finally {
+    runtime.held.pop();
+  }
+}
+
+function sortStorage(
+  array: PhpArray,
+  name: string,
+  compareEntries: (a: [Key, Value | Ref], b: [Key, Value | Ref]) => number,
+  renumber: boolean
+): true {
   if ((name === 'ksort' || name === 'krsort') && array.size <= 1) return true;
   array.prepareSort();
   if (array.size <= 1 && !(renumber && array.size > 0)) return true;
@@ -1266,7 +1314,7 @@ for (const [name, byKey, renumber] of [
 ] as const) {
   defineFunction(`${name}(array &$array, callable $callback): true`, (ctx) => {
     const comparator = userComparator(name, ctx.args[1]);
-    return sortArray(
+    return sortUserArray(
       ctx,
       name,
       (a, b) => (byKey ? comparator(a[0], b[0]) : comparator(valueOf(a[1]), valueOf(b[1]))),

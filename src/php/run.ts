@@ -128,8 +128,7 @@ function printUncaught(runtime: Runtime, object: PhpObject): string | undefined 
       runtime.echo(`\n${message}\n`);
       return message;
     } catch (error) {
-      if (error instanceof FatalError || error instanceof ExitSignal) return report(runtime, error);
-      if (!(error instanceof PhpThrow)) throw error;
+      if (!(error instanceof PhpThrow)) return report(runtime, error);
       runtime.spend();
       object = error.object;
     }

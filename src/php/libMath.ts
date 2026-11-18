@@ -153,7 +153,7 @@ defineFunction('log(float $num, float $base = M_E): float', ({ args }) => {
   const [value, base] = args as [number, number?];
   if (base === undefined) return Math.log(value);
   if (base <= 0) throwError('ValueError', 'log(): Argument #2 ($base) must be greater than 0');
-  if (base === 1) throwError('ValueError', 'log(): Argument #2 ($base) must not be equal to 1');
+  if (base === 1) return Number.NaN;
   if (base === 2) return Math.log2(value);
   if (base === 10) return Math.log10(value);
   return Math.log(value) / Math.log(base);

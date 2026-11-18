@@ -1413,3 +1413,31 @@ test('leaves ordinary call results writable', () => {
   `;
   expect(run(program)).toMatchObject({ kind: 'executed', stdout: 'done' });
 });
+
+test.each(['static', '?static'])('rejects %s parameter types independently of return types', (type) => {
+  expect(run(`<?php class C { function f(${type} $value): static { return $this; } }`)).toMatchObject({
+    kind: 'compileError',
+    diagnostics: [{ row: 0, message: 'Cannot use the static modifier on a parameter' }],
+  });
+  expect(run('<?php class C { function f(): static { return $this; } } echo (new C())->f()::class;')).toMatchObject({
+    kind: 'executed',
+    stdout: 'C',
+  });
+});
+
+test.each([
+  ['fopen', 'fopen("file.txt", "r")'],
+  ['file_get_contents', 'file_get_contents("file.txt")'],
+])('reports unsupported %s from a replacement throwable stringifier', (name, expression) => {
+  const program = `<?php
+    class First extends Exception { function __toString(): string { throw new Second(); } }
+    class Second extends Exception { function __toString(): string { return ${expression}; } }
+    echo "before";
+    throw new First();
+  `;
+  expect(run(program)).toMatchObject({
+    kind: 'executed',
+    stdout: 'before',
+    uncaughtException: `ファイルの読み書き（${name}）は、この採点環境では使えません。`,
+  });
+});

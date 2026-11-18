@@ -140,7 +140,18 @@ export function ev(e: Expr, discardResult = false): Value {
 }
 
 /** The expressions that consume their operands, which PHP frees right after the expression. */
-const RELEASING_OPERANDS = new Set<Expr['k']>(['instanceof', 'unary', 'cast', 'cond', 'empty', 'isset', 'prop', 'idx']);
+const RELEASING_OPERANDS = new Set<Expr['k']>([
+  'instanceof',
+  'unary',
+  'cast',
+  'cond',
+  'empty',
+  'isset',
+  'prop',
+  'idx',
+  'clone',
+  'cconst',
+]);
 
 export function evBool(e: Expr): boolean {
   return consumeExpression(e, toBool);

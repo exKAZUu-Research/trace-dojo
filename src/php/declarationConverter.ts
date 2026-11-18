@@ -145,7 +145,7 @@ export abstract class DeclarationConverter extends ConverterBase {
       const type = typeNode ? this.typeDecl(typeNode) : undefined;
       if (type?.k === 'named' && ['void', 'never'].includes(type.name))
         this.error(child, 'void and never cannot be parameter types');
-      if (typeNode && type) this.checkTypeScope(typeNode, type);
+      if (typeNode && type) this.checkTypeScope(typeNode, type, true);
       const defaultNode = child.childForFieldName('default_value');
       const defaultExpr = defaultNode ? this.constantExpr(defaultNode, true) : undefined;
       const byRef = child.childForFieldName('reference_modifier') !== null;
@@ -440,11 +440,12 @@ export abstract class DeclarationConverter extends ConverterBase {
   }
 
   /** Checks the `self`, `static`, and `parent` a declared type names, as {@link checkClassScope} does. */
-  protected checkTypeScope(node: Node, type: TypeDecl): void {
+  protected checkTypeScope(node: Node, type: TypeDecl, parameter = false): void {
     if (type.k !== 'named') {
-      for (const part of type.types) this.checkTypeScope(node, part);
+      for (const part of type.types) this.checkTypeScope(node, part, parameter);
       return;
     }
+    if (parameter && type.name === 'static') this.error(node, 'Cannot use the static modifier on a parameter');
     if (type.name === 'self' || type.name === 'static' || type.name === 'parent') this.checkClassScope(node, type.name);
   }
 

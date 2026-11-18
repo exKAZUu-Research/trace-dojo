@@ -144,6 +144,7 @@ function checkBuiltinInterfaces(cls: PhpClass, row: number): void {
   if (cls.kind !== 'class') return;
   const implementsInterface = (name: string): boolean => cls.interfaces.some((iface) => lower(iface.name) === name);
   if (
+    !cls.isAbstract &&
     implementsInterface('traversable') &&
     !implementsInterface('iterator') &&
     !implementsInterface('iteratoraggregate')
