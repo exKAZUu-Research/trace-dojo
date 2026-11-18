@@ -201,7 +201,6 @@ export class Compiler {
    * returns nothing, where it is a statement.
    */
   compileBlock(block: Block, clearsLocals = true, isFnBody = false, returnsValue = false): Eval {
-    const firstLocal = this.fn.locals.length;
     const stmts = block.stmts.map((stmt) => this.compileStmt(stmt));
     let tail: Eval | undefined;
     if (block.tail) {
@@ -210,7 +209,7 @@ export class Compiler {
       const isStatementLike = !isBlockLike(expr) && !(isFnBody && returnsValue) && !isDiverging(expr);
       tail = isStatementLike ? this.withStep(expr.span, value, onlyCalls(expr, this.annotations)) : value;
     }
-    const declared = this.fn.locals.slice(firstLocal).map((local) => local.slot);
+    const declared = block.stmts.flatMap((stmt) => (stmt.kind === 'let' ? this.patternSlots(stmt.pattern) : []));
     const count = stmts.length;
     const run: Eval = (frame) => {
       for (let index = 0; index < count; index++) stmts[index](frame);
@@ -366,6 +365,43 @@ export class Compiler {
         return (frame, value, place) => alternatives.some((alt) => alt(frame, value, place));
       }
     }
+  }
+
+  /** The slots of the variables a pattern binds, which go out of scope with the pattern. */
+  private patternSlots(pattern: Pattern): number[] {
+    const slots: number[] = [];
+    const visit = (p: Pattern): void => {
+      const local = this.annotations.bindings.get(p);
+      if (local && !slots.includes(local.slot)) slots.push(local.slot);
+      switch (p.kind) {
+        case 'binding': {
+          if (p.sub) visit(p.sub);
+          break;
+        }
+        case 'tuple':
+        case 'tupleStruct': {
+          for (const elem of p.elems) visit(elem);
+          break;
+        }
+        case 'struct': {
+          for (const field of p.fields) visit(field.pattern);
+          break;
+        }
+        case 'ref': {
+          visit(p.pattern);
+          break;
+        }
+        case 'or': {
+          for (const alternative of p.alternatives) visit(alternative);
+          break;
+        }
+        default: {
+          break;
+        }
+      }
+    };
+    visit(pattern);
+    return slots;
   }
 
   private constMatcher(res: PathRes, type: Type): (frame: Frame, value: Value) => boolean {
@@ -1174,9 +1210,8 @@ export class Compiler {
   }
 
   private ifExpr(expr: Extract<Expr, { kind: 'if' }>): Eval {
-    const firstLocal = this.fn.locals.length;
     const cond = this.conditionEval(expr.cond);
-    const condLocals = this.fn.locals.slice(firstLocal).map((local) => local.slot);
+    const condLocals = expr.cond.kind === 'let' ? this.patternSlots(expr.cond.pattern) : [];
     const then = this.compileBlock(expr.consequent);
     const otherwise = expr.else ? this.value(expr.else) : undefined;
     return (frame) => {
@@ -1196,10 +1231,9 @@ export class Compiler {
     const scrutinee = this.read(expr.scrutinee);
     const placeEval = isPlaceExpr(expr.scrutinee, this.annotations) ? this.place(expr.scrutinee) : undefined;
     const arms = expr.arms.map((arm) => {
-      const firstLocal = this.fn.locals.length;
       const matcher = this.compileMatcher(arm.pattern);
       const body = this.value(arm.body);
-      const slots = this.fn.locals.slice(firstLocal).map((local) => local.slot);
+      const slots = this.patternSlots(arm.pattern);
       return { matcher, body, slots };
     });
     return (frame) => {
@@ -1243,9 +1277,8 @@ export class Compiler {
   }
 
   private whileExpr(expr: Extract<Expr, { kind: 'while' }>): Eval {
-    const firstLocal = this.fn.locals.length;
     const cond = this.conditionEval(expr.cond);
-    const condLocals = this.fn.locals.slice(firstLocal).map((local) => local.slot);
+    const condLocals = expr.cond.kind === 'let' ? this.patternSlots(expr.cond.pattern) : [];
     const body = this.compileBlock(expr.body);
     const label = expr.label;
     const isLet = expr.cond.kind === 'let';
@@ -1276,9 +1309,8 @@ export class Compiler {
     if (!loopInfo) throw new Error('Unchecked for');
     const iterable = this.value(expr.iterable);
     const fromType = runtimeType(loopInfo.from);
-    const firstLocal = this.fn.locals.length;
     const bind = this.compileBinder(expr.pattern);
-    const patternSlots = this.fn.locals.slice(firstLocal).map((local) => local.slot);
+    const patternSlots = this.patternSlots(expr.pattern);
     const body = this.compileBlock(expr.body);
     const label = expr.label;
     const row = this.stepRow(expr.span);

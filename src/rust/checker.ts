@@ -12,6 +12,7 @@ import type {
   Stmt,
   TypeAst,
 } from './ast';
+import { BorrowChecker } from './borrowck';
 import { isIrrefutable, lowerPattern, missingPattern } from './exhaustiveness';
 import { deepNormalize, normalize, Unifier } from './infer';
 import {
@@ -194,6 +195,7 @@ export class Checker {
       this.requireIrrefutable(param.pattern, def.paramTypes[index], 'fn');
     }
     const bodyType = this.checkBlock(item.body, this.body.retType);
+    if (item.body.tail) this.coerceReturned(item.body.tail, bodyType, this.body.retType);
     this.coerceTail(item.body, bodyType, this.body.retType, item);
     if (def.ret.kind === 'opaque') {
       def.ret.opaque.hidden = this.body.retType;
@@ -202,7 +204,18 @@ export class Checker {
       }
     }
     this.finishBody(item.span);
-    (this.body.fn as FnContext & { mainBlock?: Block }).mainBlock = item.body;
+    this.requireKnownTypes();
+    new BorrowChecker(this.annotations, this.solver).checkFn(item, this.body.fn);
+  }
+
+  /** Coerces the value a function's body ends with to its result type. */
+  private coerceReturned(tail: Expr, type: Type, retType: Type): void {
+    if (shallow(type).kind === 'never') return;
+    if (tail.kind === 'block' || tail.kind === 'if' || tail.kind === 'match') {
+      if (!this.unifier.tryUnify(type, retType)) this.coerce(tail, type, retType);
+      return;
+    }
+    this.coerce(tail, type, retType);
   }
 
   /** Checks a block's value against the function's result, reporting the mismatch at the block's last line. */
@@ -220,6 +233,22 @@ export class Checker {
         );
       }
       compileError(span, `関数 ${item.name} は ${typeToString(expected)} を返すはずですが、値を返していません。`);
+    }
+  }
+
+  /** Requires every variable's type to be known once inference is done, as rustc does (E0282). */
+  private requireKnownTypes(): void {
+    const contexts = [this.body.fn, ...[...this.annotations.closures.values()].map((info) => info.context)];
+    for (const context of contexts) {
+      for (const local of context.locals) {
+        const type = resolve(local.type, true);
+        if (hasVars(type)) {
+          compileError(
+            local.span,
+            `変数 ${local.name} の型が決まりません（${typeToString(type)} の型を書いてください）。`
+          );
+        }
+      }
     }
   }
 
@@ -1253,12 +1282,7 @@ export class Checker {
         `関数 ${fn.name} の引数の数が合いません（${params.length} 個ですが、${expr.args.length} 個あります）。`
       );
     }
-    if (expected && !hasVars(sig.ret)) {
-      // The result's type may decide the type arguments of the call (`let v: Vec<i32> = Vec::new()`).
-    } else if (expected) {
-      this.unifier.tryUnify(sig.ret, expected);
-    }
-    this.args(expr.args, params);
+    this.args(expr.args, params, this.expectations(sig.ret, params, expected));
     this.callee(expr).ty = { kind: 'fn', params, ret: sig.ret };
     return sig.ret.kind === 'opaque' ? sig.ret : sig.ret;
   }
@@ -1304,7 +1328,6 @@ export class Checker {
       compileError(expr.span, `${variant.name} は、${variant.name} { ... } の形で作ってください。`);
     }
     const self = adt(res.def, res.typeArgs);
-    if (expected) this.unifier.tryUnify(self, expected);
     const subst = new Map(res.def.params.map((param, index) => [param, res.typeArgs[index]]));
     const params = variant.fields.map((field) => substitute(field.type, subst));
     if (expr.args.length !== params.length) {
@@ -1313,20 +1336,34 @@ export class Checker {
         `${variant.name} の引数の数が合いません（${params.length} 個ですが、${expr.args.length} 個あります）。`
       );
     }
-    this.args(expr.args, params);
+    this.args(expr.args, params, this.expectations(self, params, expected));
     expr.callee.ty = { kind: 'fn', params, ret: self };
     return self;
   }
 
-  private args(args: Expr[], params: Type[]): void {
+  /**
+   * The types the arguments of a call are expected to have when its result is expected to have a type: a hint for
+   * checking them, as rustc derives it by unifying tentatively, which the arguments' own types may still override
+   * through coercions (`let b: Box<dyn T> = Box::new(s)`).
+   */
+  private expectations(ret: Type, params: Type[], expected: Type | undefined): (Type | undefined)[] {
+    if (!expected) return [];
+    const snapshot = this.unifier.snapshot();
+    const unified = this.unifier.unify(ret, expected);
+    const result = unified ? params.map((param) => resolve(param)) : [];
+    this.unifier.rollback(snapshot);
+    return result;
+  }
+
+  private args(args: Expr[], params: Type[], expectations: (Type | undefined)[] = []): void {
     // Closures are checked last, when the other arguments have told their parameters' types.
     const order = [...args.keys()].toSorted(
       (a, b) => Number(args[a].kind === 'closure') - Number(args[b].kind === 'closure')
     );
-    for (const index of order) this.argument(args[index], params[index]);
+    for (const index of order) this.argument(args[index], params[index], expectations[index]);
   }
 
-  private argument(arg: Expr, param: Type): void {
+  private argument(arg: Expr, param: Type, expectation: Type | undefined): void {
     if (arg.kind === 'closure') {
       const sig = this.closureSignature(param);
       if (sig) {
@@ -1334,6 +1371,11 @@ export class Checker {
         this.coerceClosure(arg, type, param);
         return;
       }
+    }
+    if (expectation && hasVars(param)) {
+      const type = this.expr(arg, expectation);
+      this.coerce(arg, type, param);
+      return;
     }
     this.coerceExpr(arg, param);
   }
@@ -1458,8 +1500,7 @@ export class Checker {
         `メソッド ${expr.method} の引数の数が合いません（${sig.params.length} 個ですが、${expr.args.length} 個あります）。`
       );
     }
-    if (expected) this.unifier.tryUnify(sig.ret, expected);
-    this.args(expr.args, sig.params);
+    this.args(expr.args, sig.params, this.expectations(sig.ret, sig.params, expected));
     this.annotations.methods.set(expr, { fn, typeArgs: found.typeArgs, receiver: found.adjust });
     if (fn.selfMode === 'value') this.checkMoveOutOfRef(expr, found.adjust, found.selfType);
     return sig.ret;

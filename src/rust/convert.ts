@@ -1138,24 +1138,33 @@ export class Converter {
     return { kind: 'struct', path, fields, base, span };
   }
 
+  /**
+   * An `if` with its `else if` and `else` clauses, which the grammar lists side by side as `alternative`s of the
+   * `if_expression`.
+   */
   private ifExpr(node: Node): Expr {
     const span = this.span(node);
-    const condition = node.childForFieldName('condition');
-    const consequence = node.childForFieldName('consequence');
-    const alternative = node.childForFieldName('alternative');
-    if (!condition || !consequence) {
-      // A bare `else { ... }`.
-      return this.block(this.field(node, 'consequence'));
-    }
+    const alternatives = node.childrenForFieldName('alternative');
     let elseExpr: Expr | undefined;
-    if (alternative) {
-      const altCondition = alternative.childForFieldName('condition');
-      elseExpr = altCondition ? this.ifExpr(alternative) : this.block(this.field(alternative, 'consequence'));
+    for (const alternative of alternatives.toReversed()) {
+      const condition = alternative.childForFieldName('condition');
+      const consequence = this.block(this.field(alternative, 'consequence'));
+      if (!condition) {
+        elseExpr = consequence;
+        continue;
+      }
+      elseExpr = {
+        kind: 'if',
+        cond: this.condition(condition),
+        consequent: consequence,
+        else: elseExpr,
+        span: this.span(alternative),
+      };
     }
     return {
       kind: 'if',
-      cond: this.condition(condition),
-      consequent: this.block(consequence),
+      cond: this.condition(this.field(node, 'condition')),
+      consequent: this.block(this.field(node, 'consequence')),
       else: elseExpr,
       span,
     };
