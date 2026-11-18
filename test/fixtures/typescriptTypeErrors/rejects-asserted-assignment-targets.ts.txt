@@ -1,0 +1,11 @@
+let s = "a"; (s as number) = 2;
+let n = 1; (n as unknown) = "x";
+(n as any)++; (s as string)++;
+let y: number; (y as number)++;
+(1 as number) = 2;
+for ((n as number) in {}) {}
+(n as number) = "q";
+let z: number; (z as number) = 1; console.log(z);
+const o: { a?: { b: number } } = { a: { b: 1 } };
+(o.a?.b as number) = 1;
+(<number>o.a?.b) += 1;

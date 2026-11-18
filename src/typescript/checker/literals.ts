@@ -967,7 +967,7 @@ function isSpreadableMember(type: Type): boolean {
 }
 
 /** Whether a spread's member is never truthy, which TypeScript accepts in a spread that adds nothing for it. */
-function isDefinitelyFalsy(type: Type): boolean {
+export function isDefinitelyFalsy(type: Type): boolean {
   return (
     isIntrinsic(type, 'undefined') ||
     isIntrinsic(type, 'null') ||
@@ -977,7 +977,7 @@ function isDefinitelyFalsy(type: Type): boolean {
 }
 
 /** Whether a spread copies a property: a class's methods, accessors, and private names stay out of the copy. */
-function isSpreadableProperty(property: Property): boolean {
+export function isSpreadableProperty(property: Property): boolean {
   const { declaration } = property;
   return (
     !property.isPrivateName &&

@@ -1,0 +1,10 @@
+(1,15): error TS2352: Conversion of type 'string' to type 'number' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.
+(3,15): error TS2356: An arithmetic operand must be of type 'any', 'number', 'bigint' or an enum type.
+(4,17): error TS2454: Variable 'y' is used before being assigned.
+(5,1): error TS2364: The left-hand side of an assignment expression must be a variable or a property access.
+(6,6): error TS2405: The left-hand side of a 'for...in' statement must be of type 'string' or 'any'.
+(7,1): error TS2322: Type 'string' is not assignable to type 'number'.
+(8,17): error TS2454: Variable 'z' is used before being assigned.
+(8,47): error TS2454: Variable 'z' is used before being assigned.
+(10,1): error TS2779: The left-hand side of an assignment expression may not be an optional property access.
+(11,1): error TS2779: The left-hand side of an assignment expression may not be an optional property access.

@@ -1,6 +1,7 @@
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import type { Checker } from './checker';
+import { isDefinitelyFalsy, isSpreadableProperty } from './literals';
 import { arrayPatternElements, named, propertyNameText } from './syntax';
 import {
   anonymousObject,
@@ -197,6 +198,7 @@ export class BindingPatterns {
     bind: (identifier: TreeNode, type: Type) => void,
     annotated: boolean
   ): void {
+    if (isEmptyPattern(pattern)) this.checkEmptyObjectSource(pattern, type);
     const used: string[] = [];
     for (const element of named(pattern)) {
       switch (element.type) {
@@ -222,7 +224,7 @@ export class BindingPatterns {
         }
         case 'rest_pattern': {
           const target = named(element)[0];
-          if (target) bind(target, this.restObject(type, used));
+          if (target) bind(target, this.declaredRestObject(target, type, used));
           break;
         }
         default: {
@@ -275,19 +277,62 @@ export class BindingPatterns {
     return { node, type, names };
   }
 
+  /**
+   * Reports a value that an object pattern without elements cannot take apart, which no property access checks: as
+   * TypeScript does, a value that may be `null`, `undefined`, or `void`, or one of type `unknown`.
+   */
+  private checkEmptyObjectSource(pattern: TreeNode, type: Type): void {
+    const rest = this.c.members.checkNonNullable(pattern, type);
+    if (isIntrinsic(rest, 'void')) this.c.error(pattern, "オブジェクトは 'undefined' の可能性があります。");
+  }
+
+  /** The type of a declaration's object rest element, which TypeScript makes only from a value that may be an object. */
+  private declaredRestObject(target: TreeNode, type: Type, omitted: string[]): Type {
+    if (!this.isObjectRestSource(type)) {
+      this.c.error(target, '残余要素の型は、オブジェクト型からしか作れません。');
+      return errorType;
+    }
+    return this.restObject(type, omitted);
+  }
+
+  /**
+   * As TypeScript's `isValidSpreadType`: whether a type is an object, or a type parameter that may be one, once its
+   * falsy members are left out.
+   */
+  private isObjectRestSource(type: Type): boolean {
+    const members = (type.kind === 'union' ? type.types : [type])
+      .flatMap((member) => {
+        // An unconstrained type parameter may be an object, unlike `unknown`, which its base constraint is.
+        const constraint =
+          member.kind === 'typeParameter' && !this.c.constraintOf(member) ? member : this.c.baseConstraint(member);
+        return constraint.kind === 'union' ? constraint.types : [constraint];
+      })
+      .filter((member) => !isDefinitelyFalsy(member));
+    if (members.length !== 1) return members.length > 0 && members.every((member) => this.isObjectRestSource(member));
+    const [member] = members;
+    if (member.kind === 'intersection') return member.types.every((part) => this.isObjectRestSource(part));
+    return (
+      isAnyLike(member) ||
+      isIntrinsic(member, 'object') ||
+      !['intrinsic', 'literal', 'templateLiteral', 'stringMapping', 'keyof'].includes(member.kind)
+    );
+  }
+
   restObject(type: Type, omitted: string[]): Type {
-    if (type.kind === 'union') return unionOf(type.types.map((member) => this.restObject(member, omitted)));
+    const object = this.c.relations.removeNullish(type);
+    if (object.kind === 'union') return unionOf(object.types.map((member) => this.restObject(member, omitted)));
     return anonymousObject(
       () => {
         const structure = emptyStructure();
-        const source = this.c.structureOf(type);
+        const source = this.c.structureOf(object);
         structure.stringIndex = source.stringIndex;
         structure.numberIndex = source.numberIndex;
         structure.symbolIndex = source.symbolIndex;
         structure.patternIndexes = source.patternIndexes;
-        // A rest copies each value into a plain, writable property, as a spread does.
+        // As a spread does, a rest copies each value into a plain, writable property, except a class's methods and
+        // accessors, which stay on its prototype, and its private and protected members.
         for (const [name, property] of source.properties) {
-          if (!omitted.includes(name) && !(property.isMethod && property.declaringClass))
+          if (!omitted.includes(name) && property.visibility === 'public' && isSpreadableProperty(property))
             structure.properties.set(name, { ...property, readonly: false, getterOnly: false, writeType: undefined });
         }
         return structure;
@@ -331,6 +376,7 @@ export class BindingPatterns {
     bind: (identifier: TreeNode, type: Type) => void,
     annotated: boolean
   ): void {
+    if (isEmptyPattern(pattern)) this.iteratedType(pattern, type);
     for (const { element, index } of arrayPatternElements(pattern)) {
       if (element.type === 'rest_pattern') {
         const target = named(element)[0];
@@ -443,4 +489,9 @@ export function defaultedTarget(element: TreeNode): TreeNode | undefined {
 
 function isTuple(type: Type): type is ObjectType {
   return type.kind === 'object' && type.objectKind === 'tuple';
+}
+
+/** Whether a binding or assignment pattern takes nothing apart, as `{}` or `[, ]`, so that no element checks its source. */
+export function isEmptyPattern(pattern: TreeNode): boolean {
+  return named(pattern).every((element) => element.type === 'comment');
 }

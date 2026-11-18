@@ -13,6 +13,7 @@ import {
   patternIdentifiers,
   skipParentheses,
   stringValue,
+  withoutAssertions,
 } from './syntax';
 import {
   anyType,
@@ -567,18 +568,6 @@ export class ConditionChecker {
     } finally {
       this.c.flow.current = outer;
     }
-  }
-}
-
-/** An expression without the type assertions and parentheses around it, which do not change its value. */
-function withoutAssertions(node: TreeNode): TreeNode {
-  let expression = node;
-  for (;;) {
-    expression = skipParentheses(expression);
-    if (['as_expression', 'satisfies_expression', 'non_null_expression'].includes(expression.type))
-      expression = named(expression)[0];
-    else if (expression.type === 'type_assertion') expression = named(expression).at(-1) as TreeNode;
-    else return expression;
   }
 }
 

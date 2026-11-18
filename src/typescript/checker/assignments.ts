@@ -2,11 +2,11 @@ import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import type { Checker } from './checker';
 import type { State } from './flow';
-import { defaultedTarget } from './patterns';
+import { defaultedTarget, isEmptyPattern } from './patterns';
 import { printedPropertyName } from './print';
 import type { Sym } from './scopes';
 import { nameSuggestionHint } from './spelling';
-import { arrayPatternElements, named, skipParentheses } from './syntax';
+import { arrayPatternElements, isOptionalChain, named, skipParentheses, withoutAssertions } from './syntax';
 import {
   anyType,
   bigintType,
@@ -161,18 +161,24 @@ export class AssignmentChecker {
         this.c.expressions.reportNotAssignable(target, valueType, declared);
       this.assignReference(skipParentheses(target), declared, valueType);
     };
-    if (pattern.type === 'array' || pattern.type === 'array_pattern') {
-      for (const { element, index } of arrayPatternElements(pattern)) {
-        if (element.type === 'spread_element' || element.type === 'rest_pattern') {
-          assign(named(element)[0], this.c.patterns.restOfIterable(pattern, type, index));
-          break;
-        }
-        const elementType = this.c.patterns.elementAt(element, type, index);
-        assign(element, elementType);
+    if (pattern.type === 'array' || pattern.type === 'array_pattern')
+      this.destructuringArrayAssignment(pattern, type, assign);
+    else this.destructuringObjectAssignment(pattern, type, assign);
+  }
+
+  private destructuringArrayAssignment(
+    pattern: TreeNode,
+    type: Type,
+    assign: (target: TreeNode, type: Type) => void
+  ): void {
+    if (isEmptyPattern(pattern)) this.c.patterns.iteratedType(pattern, type);
+    for (const { element, index } of arrayPatternElements(pattern)) {
+      if (element.type === 'spread_element' || element.type === 'rest_pattern') {
+        assign(named(element)[0], this.c.patterns.restOfIterable(pattern, type, index));
+        break;
       }
-      return;
+      assign(element, this.c.patterns.elementAt(element, type, index));
     }
-    this.destructuringObjectAssignment(pattern, type, assign);
   }
 
   private destructuringObjectAssignment(
@@ -180,6 +186,8 @@ export class AssignmentChecker {
     type: Type,
     assign: (target: TreeNode, type: Type) => void
   ): void {
+    // Unlike a declaration's pattern, an assignment's empty object pattern accepts `void`, as TypeScript does.
+    if (isEmptyPattern(pattern)) this.c.members.checkNonNullable(pattern, type);
     const used: string[] = [];
     for (const element of named(pattern)) {
       switch (element.type) {
@@ -311,11 +319,33 @@ export class AssignmentChecker {
       case 'non_null_expression': {
         return this.targetType(named(expression)[0], compound);
       }
+      case 'as_expression':
+      case 'type_assertion': {
+        return this.assertedTargetType(target, expression);
+      }
       default: {
         this.c.error(target, '代入の左辺には、変数かプロパティを書いてください。');
         return errorType;
       }
     }
+  }
+
+  /**
+   * The type of an asserted target, as `(x as number)` in `(x as number) = 2`. As in TypeScript, the target takes the
+   * asserted type and reads the reference it wraps, which therefore counts neither as assigned nor as written to, so
+   * that a constant or a read-only property there is accepted and the flow keeps what it knew of the reference.
+   */
+  private assertedTargetType(target: TreeNode, expression: TreeNode): Type {
+    const reference = withoutAssertions(expression);
+    if (!['identifier', 'member_expression', 'subscript_expression'].includes(reference.type)) {
+      this.c.error(target, '代入の左辺には、変数かプロパティを書いてください。');
+      return errorType;
+    }
+    if (isOptionalChain(reference)) {
+      this.c.error(target, 'オプショナルチェーン ?. を含む式には代入できません。');
+      return errorType;
+    }
+    return this.c.expressions.check(expression);
   }
 
   private variableTargetType(expression: TreeNode, compound: boolean): Type {
