@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 522 -- Keeps one PHP runtime concern and its shared helpers in one module.
+// code-gauge-allow-file fileNcss 545 -- Keeps one PHP runtime concern and its shared helpers in one module.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import { placeOf } from './assignment';
 import type { Arg, Expr } from './ast';
@@ -16,10 +16,10 @@ import {
 } from './calls';
 import { canCall, classScopeMessage, lookupMethod, requireClass } from './classes';
 import { debugType, valueName } from './conversions';
-import { deprecated, notice, probe, ProbeFailure, throwError, warn } from './errors';
+import { deprecated, notice, probe, ProbeFailure, throwError, warn, withPendingException } from './errors';
 import { type Chain, ev, evChain, iterate, resolveClassRef, SHORT } from './interp';
 import { ElementPlace, share, VarPlace, writableContainer } from './places';
-import { type Frame, rt } from './runtime';
+import { type Frame, PhpThrow, rt } from './runtime';
 import { UnsupportedFeatureError } from './unsupported';
 import {
   type Callable,
@@ -709,8 +709,34 @@ export function callCallback(callable: Value, args: Value[]): Value {
   );
 }
 
-export function callCallbackRefs(callable: Value, args: ArgValue[]): Value {
-  return callValue(callable, args, undefined);
+export function callCallbackRefs(callable: Value, args: ArgValue[], discardResult = false): Value {
+  const call = (): Value => callValue(callable, args, undefined, 'callback', discardResult);
+  return discardResult ? consumeInvokedResult(call, () => null) : call();
+}
+
+export function consumeCallbackResult<T>(callable: Value, args: Value[], consume: (value: Value) => T): T {
+  return consumeInvokedResult(() => callCallback(callable, args), consume);
+}
+
+function consumeInvokedResult<T>(call: () => Value, consume: (value: Value) => T): T {
+  const runtime = rt();
+  const nativeMark = runtime.nativeHeld.at(-1)?.length ?? 0;
+  const temporaryMark = runtime.frame.temporaries.length;
+  const value = call();
+  runtime.lastReturnRef = undefined;
+  if (!(value instanceof PhpObject || value instanceof PhpArray)) return consume(value);
+  let pending: PhpThrow | undefined;
+  let canRelease = true;
+  try {
+    return consume(value);
+  } catch (error) {
+    if (error instanceof PhpThrow) pending = error;
+    else canRelease = false;
+    throw error;
+  } finally {
+    if (canRelease)
+      withPendingException(runtime, pending, () => runtime.discardNativeResult(value, nativeMark, temporaryMark));
+  }
 }
 
 function warnCallbackReferenceArguments(target: CallTarget, args: ArgValue[]): void {

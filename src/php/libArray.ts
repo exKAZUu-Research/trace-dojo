@@ -2,7 +2,7 @@
 // oxlint-disable unicorn/prefer-code-point -- PHP strings hold bytes as code units 0–255, which charCodeAt and fromCharCode read and write as they are.
 import { type Comparisons, type Entry, SortedWalk } from './arraySetWalk';
 import { lower, upper } from './bytes';
-import { callCallback, callCallbackRefs, callMethod } from './callables';
+import { callCallback, callCallbackRefs, callMethod, consumeCallbackResult } from './callables';
 import type { ArgValue } from './calls';
 import { canAccessProp, declForKey, issetProp, lookupProp, objectToArray, readProp } from './classes';
 import * as conversionsModule from './conversions';
@@ -740,12 +740,15 @@ defineFunction('array_filter(array $array, ?callable $callback = null, int $mode
   rt().held.push(array);
   try {
     for (const [key, value] of arr(array).entries()) {
-      let keep: Value;
-      if (callback === null) keep = value;
-      else if (mode === 2n) keep = callCallback(callback, [key]);
-      else if (mode === 1n) keep = callCallback(callback, [value, key]);
-      else keep = callCallback(callback, [value]);
-      if (conversionsModule.toBool(keep)) result.setSlot(key, copyValueSlot(arr(args[0]).map.get(key) as Value | Ref));
+      const keep =
+        callback === null
+          ? conversionsModule.toBool(value)
+          : consumeCallbackResult(
+              callback,
+              mode === 2n ? [key] : mode === 1n ? [value, key] : [value],
+              conversionsModule.toBool
+            );
+      if (keep) result.setSlot(key, copyValueSlot(arr(args[0]).map.get(key) as Value | Ref));
     }
   } finally {
     rt().held.pop();
@@ -806,7 +809,7 @@ function walkValues(ref: Ref, ctx: NativeContext, recursive: boolean, active: Se
       const callbackKey = decl?.visibility === 'protected' ? `\0*\0${decl.name}` : key;
       const args: ArgValue[] = [{ v: elementRef.v, ref: elementRef }, { v: callbackKey }];
       if (ctx.args.length > 2) args.push({ v: ctx.args[2] });
-      callCallbackRefs(ctx.args[1], args);
+      callCallbackRefs(ctx.args[1], args, true);
     }
   } finally {
     active.delete(container);
@@ -1092,22 +1095,22 @@ defineFunction('array_intersect_assoc(array $array, array ...$arrays): array', (
 );
 defineFunction('array_find(array $array, callable $callback): mixed', ({ args }) => {
   for (const [key, value] of arr(args[0]).entries())
-    if (conversionsModule.toBool(callCallback(args[1], [value, key]))) return value;
+    if (consumeCallbackResult(args[1], [value, key], conversionsModule.toBool)) return value;
   return null;
 });
 defineFunction('array_find_key(array $array, callable $callback): mixed', ({ args }) => {
   for (const [key, value] of arr(args[0]).entries())
-    if (conversionsModule.toBool(callCallback(args[1], [value, key]))) return key;
+    if (consumeCallbackResult(args[1], [value, key], conversionsModule.toBool)) return key;
   return null;
 });
 defineFunction('array_any(array $array, callable $callback): bool', ({ args }) => {
   for (const [key, value] of arr(args[0]).entries())
-    if (conversionsModule.toBool(callCallback(args[1], [value, key]))) return true;
+    if (consumeCallbackResult(args[1], [value, key], conversionsModule.toBool)) return true;
   return false;
 });
 defineFunction('array_all(array $array, callable $callback): bool', ({ args }) => {
   for (const [key, value] of arr(args[0]).entries())
-    if (!conversionsModule.toBool(callCallback(args[1], [value, key]))) return false;
+    if (!consumeCallbackResult(args[1], [value, key], conversionsModule.toBool)) return false;
   return true;
 });
 defineFunction('array_rand(array $array, int $num = 1): int|string|array', ({ args }) => {
@@ -1184,7 +1187,9 @@ function userComparator(name: string, callback: Value): (a: Value, b: Value) => 
 export function userComparisonCaller(name: string): (callback: Value, a: Value, b: Value) => number {
   let warned = false;
   return (callback, a, b) => {
-    const result = callCallback(callback, [a, b]);
+    const result = consumeCallbackResult(callback, [a, b], (value) =>
+      typeof value === 'boolean' ? value : comparisonSign(value)
+    );
     if (typeof result === 'boolean') {
       if (!warned) {
         deprecated(
@@ -1192,9 +1197,10 @@ export function userComparisonCaller(name: string): (callback: Value, a: Value, 
         );
         warned = true;
       }
-      if (!result) return -comparisonSign(callCallback(callback, [b, a]));
+      if (!result) return -consumeCallbackResult(callback, [b, a], comparisonSign);
+      return 1;
     }
-    return comparisonSign(result);
+    return result;
   };
 }
 

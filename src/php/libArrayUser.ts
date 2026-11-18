@@ -1,5 +1,5 @@
 import { type Behavior, type Comparisons, type Entry, SortedWalk } from './arraySetWalk';
-import { callCallback } from './callables';
+import { consumeCallbackResult } from './callables';
 import { argumentCountMessage, callableProblem } from './calls';
 import { compareBytes } from './conversions';
 import { throwError } from './errors';
@@ -42,7 +42,9 @@ for (const [name, intersect] of [
   defineFunction(`${name}(...$arrays): array`, ({ args }) => {
     const [arrays, [callback]] = splitCallbacks(name, args, 1);
     checkSetArguments(name, arrays);
-    return lookupOperation(arrays as PhpArray[], intersect, (a, b) => comparisonSign(callCallback(callback, [a, b])));
+    return lookupOperation(arrays as PhpArray[], intersect, (a, b) =>
+      consumeCallbackResult(callback, [a, b], comparisonSign)
+    );
   });
 }
 

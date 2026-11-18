@@ -1,14 +1,14 @@
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import { dec, enc } from './bytes';
-import { callCallback } from './callables';
-import { throwError, warn } from './errors';
+import { consumeCallbackResult } from './callables';
+import { throwError, warn, withCleanupExceptions } from './errors';
 import { isCallable } from './libCore';
 import { defineConstant, defineFunction } from './native';
 import { toStr } from './operators';
 import { type Compiled, groupName, PatternError, translate } from './pcrePattern';
-import { rt } from './runtime';
+import { PhpThrow, rt } from './runtime';
 import { UnsupportedFeatureError } from './unsupported';
-import { copyValueSlot, PhpArray, type Ref, type Value } from './values';
+import { copyValueSlot, deref, PhpArray, PhpObject, type Ref, type Value } from './values';
 
 const PREG_CONSTANTS: [string, bigint][] = [
   ['PREG_PATTERN_ORDER', 1n],
@@ -300,78 +300,106 @@ function expandReplacement(replacement: string, match: Match): string {
   );
 }
 
+type MatchReplacement = (compiled: Compiled, match: Match) => string | undefined;
+
+interface ReplacementState {
+  value: number;
+  callbackFailed: boolean;
+  capture: (error: PhpThrow) => void;
+}
+
 function replaceOne(
   name: string,
   pattern: string,
   subject: string,
   limit: number,
   count: { value: number },
-  replace: (match: Match) => string
+  replace: MatchReplacement
 ): string | undefined {
   const compiled = compile(name, pattern);
-  return compiled && replaceCompiled(compiled, subject, limit, count, replace);
-}
-
-function replaceCompiled(
-  compiled: Compiled,
-  subject: string,
-  limit: number,
-  count: { value: number },
-  replace: (match: Match) => string
-): string | undefined {
+  if (!compiled) return undefined;
   if (limit === 0) return subject;
   const status = { error: 0 };
+  const matches = matchesOf(compiled, subject, 0, status);
   let result = '';
   let last = 0;
-  let done = 0;
-  for (const match of matchesOf(compiled, subject, 0, status)) {
-    if (limit >= 0 && done >= limit) break;
-    const replacement = replace(match);
+  for (let done = 0; limit < 0 || done < limit; done++) {
+    const next = matches.next();
+    if (next.done) break;
+    const match = next.value;
+    count.value++;
+    const replacement = replace(compiled, match);
+    if (replacement === undefined) return undefined;
     rt().ensureStringFits(result.length + match.starts[0] - last + replacement.length);
     result += subject.slice(last, match.starts[0]) + replacement;
     last = match.ends[0];
-    done++;
   }
   if (status.error !== 0) return undefined;
-  count.value += done;
   rt().ensureStringFits(result.length + subject.length - last);
   return result + subject.slice(last);
 }
 
+// code-gauge-allow functionNcss 32 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+// code-gauge-allow functionCognitiveComplexity 25 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 function pregReplace(
   name: string,
   args: Value[],
-  refs: (Ref | undefined)[],
-  replacer: (pattern: number) => (match: Match) => string,
+  countRef: Ref | undefined,
+  replacement: (index: number, state: ReplacementState) => MatchReplacement,
   filter = false
 ): Value {
-  rt().lastPregError = 0;
-  const [patternValue, , subjectValue, limitValue] = args;
+  const runtime = rt();
+  runtime.lastPregError = 0;
+  const [pattern, , subject, limitValue] = args;
   const limit = limitValue === undefined ? -1 : Number(limitValue);
-  const patterns =
-    patternValue instanceof PhpArray ? patternValue.values().map((item) => toStr(item)) : [toStr(patternValue)];
-  const count = { value: 0 };
-  // preg_filter drops a subject that no pattern matched.
-  const replaceSubject = (subject: string): string | undefined => {
-    const before = count.value;
-    let current: string | undefined = subject;
-    for (const [index, pattern] of patterns.entries()) {
-      current = replaceOne(name, pattern, current, limit, count, replacer(index));
-      if (current === undefined) return undefined;
+  const patterns = pattern instanceof PhpArray ? [...pattern.map.values()] : [pattern];
+  let result: Value = null;
+  withCleanupExceptions(runtime, (capture) => {
+    const state: ReplacementState = { value: 0, callbackFailed: false, capture };
+    const canConvert = (value: Value): boolean =>
+      !state.callbackFailed || !(value instanceof PhpObject) || value.isResource;
+    try {
+      result = mapSubjects(
+        subject,
+        (text) => {
+          const before = state.value;
+          let current = text;
+          for (const [index, entry] of patterns.entries()) {
+            const value = deref(entry);
+            if (!canConvert(value)) break;
+            const patternText = toStr(value);
+            const replaced = replaceOne(name, patternText, current, limit, state, replacement(index, state));
+            if (replaced === undefined) return;
+            current = replaced;
+          }
+          return filter && state.value === before ? undefined : current;
+        },
+        canConvert
+      );
+    } catch (error) {
+      if (!(error instanceof PhpThrow)) throw error;
+      capture(error);
     }
-    return filter && count.value === before ? undefined : current;
-  };
-  const result = mapSubjects(subjectValue, replaceSubject);
-  if (refs[4]) refs[4].v = BigInt(count.value);
+    if (countRef) {
+      const previous = countRef.v;
+      countRef.assign(BigInt(state.value));
+      runtime.release([previous]);
+    }
+  });
   return result;
 }
 
-/** Replaces in a subject, or in each subject of an array, leaving out those whose replacement fails. */
-function mapSubjects(subject: Value, replace: (subject: string) => string | undefined): Value {
+function mapSubjects(
+  subject: Value,
+  replace: (subject: string) => string | undefined,
+  canConvert: (value: Value) => boolean = () => true
+): Value {
   if (!(subject instanceof PhpArray)) return replace(toStr(subject)) ?? null;
   const array = new PhpArray();
-  for (const [key, item] of subject.entries()) {
-    const replaced = replace(toStr(item));
+  for (const [key, slot] of subject.map) {
+    const value = deref(slot);
+    if (!canConvert(value)) break;
+    const replaced = replace(toStr(value));
     if (replaced !== undefined) array.set(key, replaced);
   }
   return array;
@@ -391,33 +419,44 @@ for (const [name, filter] of [
           `${name}(): Argument #1 ($pattern) must be of type array when argument #2 ($replacement) is an array, string given`
         );
       }
-      const replacements =
-        replacement instanceof PhpArray ? replacement.values().map((item) => toStr(item)) : undefined;
+      const slots = replacement instanceof PhpArray ? [...replacement.map.values()] : undefined;
       return pregReplace(
         name,
         args,
-        refs,
-        (index) => (match) => expandReplacement(replacements ? (replacements[index] ?? '') : toStr(replacement), match),
+        refs[4],
+        (index) => {
+          const value = slots ? toStr(deref(slots[index] ?? '')) : toStr(replacement);
+          return (_compiled, match) => expandReplacement(value, match);
+        },
         filter
       );
     }
   );
 }
+
 defineFunction(
   'preg_replace_callback(string|array $pattern, callable $callback, string|array $subject, int $limit = -1, &$count = null, int $flags = 0): string|array|null',
   ({ args, refs }) => {
     const flags = (args[5] as bigint | undefined) ?? 0n;
-    return pregReplace('preg_replace_callback', args, refs, (index) => (match) => {
-      const compiled = compile(
-        'preg_replace_callback',
-        toStr(args[0] instanceof PhpArray ? (args[0].values()[index] as Value) : args[0])
-      ) as Compiled;
-      return toStr(
-        callCallback(args[1], [matchArray(compiled, match, (flags & 256n) !== 0n, (flags & 512n) !== 0n, true)])
-      );
+    return pregReplace('preg_replace_callback', args, refs[4], (_index, state) => (compiled, match) => {
+      if (state.callbackFailed) return;
+      try {
+        return callbackReplacement(args[1], compiled, match, flags);
+      } catch (error) {
+        if (!(error instanceof PhpThrow)) throw error;
+        state.callbackFailed = true;
+        state.capture(error);
+        return;
+      }
     });
   }
 );
+
+function callbackReplacement(callback: Value, compiled: Compiled, match: Match, flags: bigint): string {
+  const args = matchArray(compiled, match, (flags & 256n) !== 0n, (flags & 512n) !== 0n, true);
+  return consumeCallbackResult(callback, [args], toStr);
+}
+
 defineFunction(
   'preg_replace_callback_array(array $pattern, string|array $subject, int $limit = -1, &$count = null, int $flags = 0): string|array|null',
   ({ args, refs }) => {
@@ -441,12 +480,9 @@ defineFunction(
         );
       }
       subject = mapSubjects(subject, (text) =>
-        replaceOne('preg_replace_callback_array', pattern, text, limit, count, (match) => {
-          const compiled = compile('preg_replace_callback_array', pattern) as Compiled;
-          return toStr(
-            callCallback(callback, [matchArray(compiled, match, (flags & 256n) !== 0n, (flags & 512n) !== 0n, true)])
-          );
-        })
+        replaceOne('preg_replace_callback_array', pattern, text, limit, count, (compiled, match) =>
+          callbackReplacement(callback, compiled, match, flags)
+        )
       );
       if (subject === null) return null;
     }
@@ -457,7 +493,7 @@ defineFunction(
 defineFunction(
   'preg_split(string $pattern, string $subject, int $limit = -1, int $flags = 0): array|false',
   // code-gauge-allow functionCognitiveComplexity 29 -- Transcribes PHP's algorithm for this function step by step, whose branches mirror PHP's.
-  // code-gauge-allow functionNcss 36 -- Transcribes PHP's algorithm for this function step by step, whose branches mirror PHP's.
+  // code-gauge-allow functionNcss 39 -- Transcribes PHP's algorithm for this function step by step, whose branches mirror PHP's.
   ({ args }) => {
     const compiled = compile('preg_split', args[0] as string);
     if (!compiled) return false;
@@ -474,8 +510,11 @@ defineFunction(
       result.append(offsetCapture ? PhpArray.list([text, BigInt(offset)]) : text);
     };
     let last = 0;
-    for (const match of matchesOf(compiled, subject)) {
-      if (limit !== -1 && limit <= 1) break;
+    const matches = matchesOf(compiled, subject);
+    while (limit === -1 || limit > 1) {
+      const next = matches.next();
+      if (next.done) break;
+      const match = next.value;
       if (!noEmpty || match.starts[0] !== last) {
         add(subject.slice(last, match.starts[0]), last);
         if (limit !== -1) limit--;
