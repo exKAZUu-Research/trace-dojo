@@ -128,7 +128,7 @@ export function evalArgs(args: Arg[], fn: Callable | undefined, name: string | u
         const paramName = fn?.params[Math.min(paramIndex, (fn?.params.length ?? 1) - 1)]?.name ?? '';
         throwError('Error', `${label}(): Argument #${paramIndex + 1} ($${paramName}) could not be passed by reference`);
       }
-      const value = ev(arg.e);
+      const value = share(ev(arg.e));
       frame.temporaries.push(value);
       add({ v: value, name: arg.name });
     } finally {

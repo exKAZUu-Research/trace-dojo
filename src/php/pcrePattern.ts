@@ -1,5 +1,5 @@
 // oxlint-disable unicorn/prefer-code-point -- PHP pattern strings contain bytes; UTF-8 validation reads each byte separately.
-// code-gauge-allow-file fileNcss 760 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 766 -- Holds the cases of one concern of the interpreter, which share their helpers.
 import propertyAliases from 'unicode-property-value-aliases-ecmascript';
 
 import { dec, enc, utf8Length } from './bytes';
@@ -603,8 +603,9 @@ class PatternConverter {
       }
       case 'N': {
         const braced = this.readMatch(/^\{U\+([\dA-Fa-f]+)\}/);
-        if (!braced || !this.options.utf8) this.fail(UNSUPPORTED_CASE_ESCAPE, this.index);
-        return Number.parseInt(braced[1], 16);
+        if (!braced) this.fail(UNSUPPORTED_CASE_ESCAPE, this.index);
+        if (!this.options.utf8) this.fail(String.raw`\N{U+dddd} is supported only in Unicode (UTF) mode`, this.index);
+        return this.validateCodePoint(Number.parseInt(braced[1], 16), this.index - 1);
       }
     }
     return /[\dA-Za-z]/.test(letter) ? undefined : (letter.codePointAt(0) as number);
@@ -616,11 +617,16 @@ class PatternConverter {
     const digits = (this.readMatch(radix === 16 ? /^[\dA-Fa-f]*/ : /^[0-7]*/) as RegExpExecArray)[0];
     if (this.source[this.index] !== '}') this.fail(`${badDigit} (closing brace missing?)`, this.index + 1);
     if (digits === '') this.fail(DIGITS_MISSING, this.index);
-    const value = Number.parseInt(digits, radix);
-    if (value > (this.options.utf8 ? 0x10_ff_ff : 0xff)) {
-      this.fail(String.raw`character code point value in \x{} or \o{} is too large`, this.index);
-    }
+    const value = this.validateCodePoint(Number.parseInt(digits, radix), this.index);
     this.index++;
+    return value;
+  }
+
+  private validateCodePoint(value: number, index: number): number {
+    if (value > (this.options.utf8 ? 0x10_ff_ff : 0xff))
+      this.fail(String.raw`character code point value in \x{} or \o{} is too large`, index);
+    if (value >= 0xd8_00 && value <= 0xdf_ff)
+      this.fail('disallowed Unicode code point (>= 0xd800 && <= 0xdfff)', index);
     return value;
   }
 

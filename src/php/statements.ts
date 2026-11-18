@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 532 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 537 -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import { assignTo, bindRef, destructure, placeOf, unsetTarget } from './assignment';
 import type { Expr, FunctionDecl, Program, Stmt } from './ast';
@@ -659,10 +659,30 @@ setObjectConversions(
       .filter(([, slot]) => slot !== UNINIT)
       .map(([key, slot]) => [key, slot instanceof Ref ? slot.v : (slot as Value)])
 );
-setDefaultEvaluator((decl, index) => {
-  const param = decl.params[index];
-  return param.defaultExpr ? share(ev(param.defaultExpr)) : null;
-});
+function parameterDefault(decl: FunctionDecl, index: number, frame: Frame): Value {
+  const expression = decl.params[index].defaultExpr;
+  if (!expression) return null;
+  const runtime = rt();
+  const values = runtime.parameterDefaults.get(expression);
+  const stored = values?.get(frame.scope);
+  if (stored !== undefined) return share(stored);
+  const value = share(ev(expression));
+  if ((value === null || typeof value !== 'object') && !containsDefaultAllocation(expression)) {
+    const cache = values ?? new Map<PhpClass | undefined, Value>();
+    cache.set(frame.scope, value);
+    runtime.parameterDefaults.set(expression, cache);
+  }
+  return value;
+}
+
+function containsDefaultAllocation(node: unknown): boolean {
+  if (!node || typeof node !== 'object') return false;
+  if ('k' in node && (node.k === 'new' || node.k === 'newAnon' || node.k === 'closure' || node.k === 'arrow'))
+    return true;
+  return Object.values(node).some(containsDefaultAllocation);
+}
+
+setDefaultEvaluator(parameterDefault);
 setClassEvaluator((e, cls) => {
   const runtime = rt();
   const frame = new Frame(undefined, undefined, false, undefined, cls, cls);

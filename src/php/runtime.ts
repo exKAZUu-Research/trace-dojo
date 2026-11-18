@@ -132,6 +132,7 @@ export class Runtime {
   readonly userFunctions: UserFunction[] = [];
   readonly rootConstants = new Set<Value>();
   readonly literalArrays = new WeakMap<Expr, Map<PhpClass | undefined, PhpArray>>();
+  readonly parameterDefaults = new WeakMap<Expr, Map<PhpClass | undefined, Value>>();
   constantEvaluationEpoch = 0;
   readonly functions = new Map<string, Callable>();
   readonly classes = new Map<string, PhpClass>();
