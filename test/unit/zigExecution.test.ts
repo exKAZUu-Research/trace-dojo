@@ -9230,6 +9230,11 @@ test.each([0, 1])('gcd checks proven negative values in argument position %s', (
   expect(executeProgram('zig', valid)).toMatchObject({ kind: 'executed', stderr: 'g3', uncaughtException: undefined });
 });
 
+test.each(['u32', 'i32'])('weighted random %s selections meter weight reads', (type) => {
+  const source = `const std=@import("std");pub fn main()void{var p=std.Random.DefaultPrng.init(1);const a:[60000]${type}=@splat(1);for(0..3)|_|{_=p.random().weightedIndex(${type},&a);}}`;
+  expect(executeProgram('zig', source)).toMatchObject({ kind: 'limitExceeded', limit: 'operations' });
+});
+
 test.each(['u32760', 'i32760'])('weighted random %s selections meter wide accumulations and bounds', (type) => {
   const source = `const std=@import("std");pub fn main()void{var p=std.Random.DefaultPrng.init(1);var x:${type}=1<<32000;_=&x;const a:[400]${type}=@splat(x);for(0..20)|_|{_=p.random().weightedIndex(${type},&a);}}`;
   expect(executeProgram('zig', source)).toMatchObject({ kind: 'limitExceeded', limit: 'operations' });

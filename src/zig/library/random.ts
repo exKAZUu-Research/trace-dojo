@@ -161,7 +161,12 @@ function intRange(
 }
 
 /** `weightedIndex` with integer proportions: a point below their sum, found in the running totals. */
-function weightedIntIndex(state: RandomSource, type: IntType, proportions: Slice): bigint {
+function weightedIntIndex(
+  state: RandomSource,
+  type: IntType,
+  length: number,
+  readWeight: (index: number) => Value
+): bigint {
   state.spend(Math.ceil(type.bits / 64) * (type.signed ? 2 : 1));
   const minimum = minInt(type),
     maximum = maxInt(type);
@@ -174,11 +179,11 @@ function weightedIntIndex(state: RandomSource, type: IntType, proportions: Slice
     return result;
   };
   let sum = 0n;
-  for (let index = 0; index < proportions.length; index++) sum = accumulate(sum, proportions.get(index) as bigint);
+  for (let index = 0; index < length; index++) sum = accumulate(sum, readWeight(index) as bigint);
   const point = type.signed ? intRange(state, type, 0n, sum, false) : uintLessThan(state, type, sum);
   let accumulator = 0n;
-  for (let index = 0; index < proportions.length; index++) {
-    accumulator = accumulate(accumulator, proportions.get(index) as bigint);
+  for (let index = 0; index < length; index++) {
+    accumulator = accumulate(accumulator, readWeight(index) as bigint);
     spendIntegerOperation(point, accumulator, 'read', state.spend);
     if (point < accumulator) return BigInt(index);
   }
@@ -196,20 +201,21 @@ function rangeLessThan(state: RandomSource, left: bigint, right: bigint): boolea
 }
 
 /** `weightedIndex` with float proportions: `@min(r.float(T) * sum, sum - floatEps(T))`, as Zig computes in `T`. */
-function weightedFloatIndex(state: RandomSource, bits: 32 | 64, proportions: Slice): bigint {
+function weightedFloatIndex(
+  state: RandomSource,
+  bits: 32 | 64,
+  length: number,
+  readWeight: (index: number) => Value
+): bigint {
   const round = (value: number): number => (bits === 32 ? Math.fround(value) : value);
   let sum = 0;
-  for (let index = 0; index < proportions.length; index++) {
-    state.spend(1);
-    sum = round(sum + (proportions.get(index) as number));
-  }
+  for (let index = 0; index < length; index++) sum = round(sum + (readWeight(index) as number));
   const epsilon = bits === 32 ? 2 ** -23 : 2 ** -52;
   const point = Math.min(round(randomFloat(state, bits) * sum), round(sum - epsilon));
   if (!(point < sum)) panic(PANIC.unreachable);
   let accumulator = 0;
-  for (let index = 0; index < proportions.length; index++) {
-    state.spend(1);
-    accumulator = round(accumulator + (proportions.get(index) as number));
+  for (let index = 0; index < length; index++) {
+    accumulator = round(accumulator + (readWeight(index) as number));
     if (point < accumulator) return BigInt(index);
   }
   return panic(PANIC.unreachable);
@@ -461,9 +467,13 @@ addMembers(RANDOM, {
         const values = evaluate(frame) as Slice;
         if (values.lengthValue !== 0n && isUndefinedMemory(values)) throw new MemoryFault();
         frame.runtime.spend();
+        const readWeight = (index: number): Value => {
+          generator.spend(1);
+          return values.get(index);
+        };
         return type.kind === 'int'
-          ? weightedIntIndex(generator, type, values)
-          : weightedFloatIndex(generator, type.bits as 32 | 64, values);
+          ? weightedIntIndex(generator, type, values.length, readWeight)
+          : weightedFloatIndex(generator, type.bits as 32 | 64, values.length, readWeight);
       },
       call.span
     );
