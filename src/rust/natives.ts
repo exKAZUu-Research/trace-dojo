@@ -1,4 +1,5 @@
 import './natives/core';
+import './natives/debugBuilders';
 import './natives/iterators';
 import './natives/numbers';
 import './natives/strings';

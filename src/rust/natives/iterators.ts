@@ -1,17 +1,7 @@
-// code-gauge-allow-file fileNcss 666 -- One native per method of the standard library.
+// code-gauge-allow-file fileNcss 668 -- One native per method of the standard library.
 import { normalize } from '../infer';
 import type { Interpreter } from '../interpreter';
-import {
-  castValue,
-  cloneValue,
-  compareValues,
-  copyValue,
-  hashKey,
-  intArith,
-  needsCopy,
-  valuesEqual,
-  wrap,
-} from '../ops';
+import { castValue, cloneValue, compareValues, copyValue, hashKey, needsCopy, valuesEqual, wrap } from '../ops';
 import { RustPanic } from '../runtime';
 import { shallow, type Type } from '../types';
 import {
@@ -28,7 +18,7 @@ import {
   SliceView,
   type Value,
 } from '../values';
-import { call, define, deref, type NativeContext, none, option, panic, placeOf, some } from './support';
+import { call, define, deref, libraryPanic, type NativeContext, none, option, panic, placeOf, some } from './support';
 
 /** An iterator over an array's elements from `start` to `end`, from both ends. */
 export function arrayIter(
@@ -446,7 +436,7 @@ define({
   'Iter<_>::step_by': ([self, n], ctx) => {
     const iter = iterOf(self);
     const step = Number(n as bigint);
-    if (step === 0) panic(ctx, 'assertion failed: step != 0');
+    if (step === 0) libraryPanic(ctx, 'assertion failed: step != 0', 'core/src/iter/adapters/step_by.rs:36:9');
     let first = true;
     return adapter(iter, () => {
       if (first) {
@@ -792,28 +782,36 @@ function extremeByKey(ctx: NativeContext, iter: IterValue, f: Value, keyType: Ty
   return option(ctx, best === DONE ? undefined : best, best !== DONE);
 }
 
-// code-gauge-allow functionCognitiveComplexity 18 -- One native per method of the standard library.
 function sumOrProduct(ctx: NativeContext, iter: IterValue, type: Type, op: '+' | '*'): Value {
   const t = normalize(shallow(type));
-  if (t.kind === 'float') {
-    let total = op === '+' ? -0 : 1;
-    for (;;) {
-      ctx.runtime.spend();
-      const item = nextOf(iter);
-      if (item === DONE) return total;
-      const value = deref(item) as number;
-      total = op === '+' ? total + value : total * value;
-      if (t.name === 'f32') total = Math.fround(total);
-    }
-  }
-  const name = (t as { name: 'i32' }).name;
-  let total = op === '+' ? 0n : 1n;
+  let total: Value = op === '+' ? (t.kind === 'float' ? -0 : 0n) : t.kind === 'float' ? 1 : 1n;
   for (;;) {
     ctx.runtime.spend();
     const item = nextOf(iter);
     if (item === DONE) return total;
-    total = intArith(op, name, total, deref(item) as bigint, ctx.span);
+    total =
+      t.kind === 'float'
+        ? floatStep(t.name, op, total as number, deref(item) as number)
+        : intStep(ctx, t, op, total as bigint, deref(item) as bigint);
   }
+}
+
+function floatStep(name: 'f32' | 'f64', op: '+' | '*', total: number, value: number): number {
+  const result = op === '+' ? total + value : total * value;
+  return name === 'f32' ? Math.fround(result) : result;
+}
+
+/** One step of an integer sum or product, which panics inside the library's `Sum` and `Product` impls on overflow. */
+function intStep(ctx: NativeContext, type: Type, op: '+' | '*', total: bigint, value: bigint): bigint {
+  const result = op === '+' ? total + value : total * value;
+  if (result !== wrap((type as { name: 'i32' }).name, result)) {
+    libraryPanic(
+      ctx,
+      `attempt to ${op === '+' ? 'add' : 'multiply'} with overflow`,
+      'core/src/iter/traits/accum.rs:206:1'
+    );
+  }
+  return result;
 }
 
 /** Collects elements into a collection of the type `collect` was asked for. */

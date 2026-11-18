@@ -4,8 +4,8 @@
  * declared as structs whose values the runtime represents in its own way.
  *
  * Pseudo-traits that rustc does not have stand for groups of types that the natives handle alike: `Integer`,
- * `SignedInteger`, `Float`, `Pattern` (what `str::split` and its kin accept), `Borrow` (keys that look up a map),
- * `FromStrTarget`, `StringPart`, `RangeBounds`, and `ExtendInto`.
+ * `SignedInteger`, `UnsignedInteger`, `Float`, `Pattern` (what `str::split` and its kin accept), `Borrow` (keys that
+ * look up a map), `FromStrTarget`, `StringPart`, `RangeBounds`, and `ExtendInto`.
  */
 export const STD_SOURCE = String.raw`
 pub mod marker {
@@ -113,7 +113,38 @@ pub mod fmt {
         fn write_str(&mut self, s: &str) -> Result;
         fn write_char(&mut self, c: char) -> Result;
     }
+    pub struct DebugStruct;
+    pub struct DebugTuple;
+    pub struct DebugList;
+    pub struct DebugSet;
+    pub struct DebugMap;
+    impl DebugStruct {
+        pub fn field(&mut self, name: &str, value: &dyn Debug) -> &mut DebugStruct;
+        pub fn finish(&mut self) -> Result;
+        pub fn finish_non_exhaustive(&mut self) -> Result;
+    }
+    impl DebugTuple {
+        pub fn field(&mut self, value: &dyn Debug) -> &mut DebugTuple;
+        pub fn finish(&mut self) -> Result;
+    }
+    impl DebugList {
+        pub fn entry(&mut self, entry: &dyn Debug) -> &mut DebugList;
+        pub fn finish(&mut self) -> Result;
+    }
+    impl DebugSet {
+        pub fn entry(&mut self, entry: &dyn Debug) -> &mut DebugSet;
+        pub fn finish(&mut self) -> Result;
+    }
+    impl DebugMap {
+        pub fn entry(&mut self, key: &dyn Debug, value: &dyn Debug) -> &mut DebugMap;
+        pub fn finish(&mut self) -> Result;
+    }
     impl Formatter {
+        pub fn debug_struct(&mut self, name: &str) -> DebugStruct;
+        pub fn debug_tuple(&mut self, name: &str) -> DebugTuple;
+        pub fn debug_list(&mut self) -> DebugList;
+        pub fn debug_set(&mut self) -> DebugSet;
+        pub fn debug_map(&mut self) -> DebugMap;
         pub fn write_str(&mut self, data: &str) -> Result;
         pub fn pad(&mut self, s: &str) -> Result;
         pub fn alternate(&self) -> bool;
@@ -315,6 +346,24 @@ pub mod str {
     }
 }
 pub mod char {
+    impl u8 {
+        pub fn is_ascii(&self) -> bool;
+        pub fn is_ascii_digit(&self) -> bool;
+        pub fn is_ascii_hexdigit(&self) -> bool;
+        pub fn is_ascii_alphabetic(&self) -> bool;
+        pub fn is_ascii_alphanumeric(&self) -> bool;
+        pub fn is_ascii_uppercase(&self) -> bool;
+        pub fn is_ascii_lowercase(&self) -> bool;
+        pub fn is_ascii_punctuation(&self) -> bool;
+        pub fn is_ascii_whitespace(&self) -> bool;
+        pub fn is_ascii_graphic(&self) -> bool;
+        pub fn is_ascii_control(&self) -> bool;
+        pub fn to_ascii_uppercase(&self) -> u8;
+        pub fn to_ascii_lowercase(&self) -> u8;
+        pub fn make_ascii_uppercase(&mut self);
+        pub fn make_ascii_lowercase(&mut self);
+        pub fn eq_ignore_ascii_case(&self, other: &u8) -> bool;
+    }
     impl char {
         pub fn is_alphabetic(self) -> bool;
         pub fn is_numeric(self) -> bool;
@@ -366,6 +415,24 @@ pub mod num {
         pub fn is_positive(self) -> bool;
         pub fn is_negative(self) -> bool;
         pub fn unsigned_abs(self) -> Unsigned<N>;
+        pub fn saturating_neg(self) -> N;
+        pub fn saturating_abs(self) -> N;
+        pub fn overflowing_abs(self) -> (N, bool);
+        pub fn checked_isqrt(self) -> Option<N>;
+        pub fn cast_unsigned(self) -> Unsigned<N>;
+    }
+    impl<N: UnsignedInteger> N {
+        pub fn is_power_of_two(self) -> bool;
+        pub fn next_power_of_two(self) -> N;
+        pub fn checked_next_power_of_two(self) -> Option<N>;
+        pub fn div_ceil(self, rhs: N) -> N;
+        pub fn is_multiple_of(self, rhs: N) -> bool;
+        pub fn next_multiple_of(self, rhs: N) -> N;
+        pub fn checked_next_multiple_of(self, rhs: N) -> Option<N>;
+        pub fn checked_add_signed(self, rhs: Signed<N>) -> Option<N>;
+        pub fn wrapping_add_signed(self, rhs: Signed<N>) -> N;
+        pub fn saturating_add_signed(self, rhs: Signed<N>) -> N;
+        pub fn cast_signed(self) -> Signed<N>;
     }
     impl<N: Integer> N {
         pub fn pow(self, exp: u32) -> N;
@@ -390,6 +457,26 @@ pub mod num {
         pub fn overflowing_add(self, rhs: N) -> (N, bool);
         pub fn overflowing_sub(self, rhs: N) -> (N, bool);
         pub fn overflowing_mul(self, rhs: N) -> (N, bool);
+        pub fn overflowing_div(self, rhs: N) -> (N, bool);
+        pub fn overflowing_rem(self, rhs: N) -> (N, bool);
+        pub fn overflowing_neg(self) -> (N, bool);
+        pub fn overflowing_pow(self, exp: u32) -> (N, bool);
+        pub fn overflowing_shl(self, rhs: u32) -> (N, bool);
+        pub fn overflowing_shr(self, rhs: u32) -> (N, bool);
+        pub fn checked_shl(self, rhs: u32) -> Option<N>;
+        pub fn checked_shr(self, rhs: u32) -> Option<N>;
+        pub fn wrapping_shl(self, rhs: u32) -> N;
+        pub fn wrapping_shr(self, rhs: u32) -> N;
+        pub fn checked_div_euclid(self, rhs: N) -> Option<N>;
+        pub fn checked_rem_euclid(self, rhs: N) -> Option<N>;
+        pub fn wrapping_div_euclid(self, rhs: N) -> N;
+        pub fn wrapping_rem_euclid(self, rhs: N) -> N;
+        pub fn saturating_div(self, rhs: N) -> N;
+        pub fn checked_ilog2(self) -> Option<u32>;
+        pub fn checked_ilog10(self) -> Option<u32>;
+        pub fn checked_ilog(self, base: N) -> Option<u32>;
+        pub fn leading_ones(self) -> u32;
+        pub fn trailing_ones(self) -> u32;
         pub fn rem_euclid(self, rhs: N) -> N;
         pub fn div_euclid(self, rhs: N) -> N;
         pub fn count_ones(self) -> u32;
@@ -401,8 +488,6 @@ pub mod num {
         pub fn ilog2(self) -> u32;
         pub fn ilog10(self) -> u32;
         pub fn ilog(self, base: N) -> u32;
-        pub fn is_power_of_two(self) -> bool;
-        pub fn next_power_of_two(self) -> N;
         pub fn from_str_radix(src: &str, radix: u32) -> Result<N, ParseIntError>;
         pub fn max_value() -> N;
         pub fn min_value() -> N;
@@ -467,6 +552,16 @@ pub mod num {
 pub mod option {
     #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug, Hash)]
     pub enum Option<T> { None, Some(T) }
+    impl Option<String> {
+        pub fn as_deref(&self) -> Option<&str>;
+        pub fn as_deref_mut(&mut self) -> Option<&mut str>;
+    }
+    impl<T> Option<Vec<T>> {
+        pub fn as_deref(&self) -> Option<&[T]>;
+    }
+    impl<T> Option<Box<T>> {
+        pub fn as_deref(&self) -> Option<&T>;
+    }
     impl<T> Option<T> {
         pub fn is_some(&self) -> bool;
         pub fn is_none(&self) -> bool;
@@ -557,6 +652,8 @@ pub mod boxed {
     pub struct Box<T>;
     impl<T> Box<T> {
         pub fn new(x: T) -> Box<T>;
+        pub fn as_ref(&self) -> &T;
+        pub fn as_mut(&mut self) -> &mut T;
     }
 }
 pub mod convert {
@@ -898,6 +995,12 @@ pub mod f64 {
         pub const FRAC_PI_3: f64;
         pub const FRAC_PI_4: f64;
         pub const FRAC_PI_6: f64;
+        pub const FRAC_PI_8: f64;
+        pub const FRAC_1_PI: f64;
+        pub const FRAC_2_PI: f64;
+        pub const FRAC_2_SQRT_PI: f64;
+        pub const LOG2_10: f64;
+        pub const LOG10_2: f64;
         pub const FRAC_1_SQRT_2: f64;
         pub const LOG2_E: f64;
         pub const LOG10_E: f64;
@@ -922,6 +1025,12 @@ pub mod f32 {
         pub const FRAC_PI_3: f32;
         pub const FRAC_PI_4: f32;
         pub const FRAC_PI_6: f32;
+        pub const FRAC_PI_8: f32;
+        pub const FRAC_1_PI: f32;
+        pub const FRAC_2_PI: f32;
+        pub const FRAC_2_SQRT_PI: f32;
+        pub const LOG2_10: f32;
+        pub const LOG10_2: f32;
         pub const FRAC_1_SQRT_2: f32;
         pub const LOG2_E: f32;
         pub const LOG10_E: f32;
@@ -978,6 +1087,7 @@ pub mod prelude {
 pub mod pseudo {
     pub trait Integer {}
     pub trait SignedInteger {}
+    pub trait UnsignedInteger {}
     pub trait Float {}
     pub trait Pattern {}
     pub trait Borrow<Q> {}
@@ -987,6 +1097,7 @@ pub mod pseudo {
     pub trait ExtendInto<T> {}
     pub struct ParseError<F>;
     pub struct Unsigned<N>;
+    pub struct Signed<N>;
     pub struct Utf8Error;
 }
 `;

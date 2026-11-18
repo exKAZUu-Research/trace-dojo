@@ -18,7 +18,32 @@ export function shortestDigits(value: number, f32: boolean): { digits: string; e
   }
   const [mantissa, exp] = text.split('e');
   const digits = mantissa.replace('.', '').replace(/0+$/, '') || '0';
-  return { digits, exponent: Number(exp) + 1 };
+  const exponent = Number(exp) + 1;
+  // When the value lies exactly between two shortest candidates, JavaScript takes the even one and Rust the larger.
+  if (!f32 && isMidpoint(abs, BigInt(digits) * 2n + 1n, exponent - digits.length)) {
+    const larger = String(BigInt(digits) + 1n);
+    return { digits: larger.replace(/0+$/, ''), exponent: exponent + larger.length - digits.length };
+  }
+  return { digits, exponent };
+}
+
+/** Whether `value` equals `twiceDigits / 2 × 10^power` exactly. */
+function isMidpoint(value: number, twiceDigits: bigint, power: number): boolean {
+  const view = new DataView(new ArrayBuffer(8));
+  view.setFloat64(0, value);
+  const bits = view.getBigUint64(0);
+  const biased = Number((bits >> 52n) & 0x7_ffn);
+  const fraction = bits & 0xf_ff_ff_ff_ff_ff_ffn;
+  const mantissa = biased === 0 ? fraction : fraction | (1n << 52n);
+  // Compares twice each: 2 × value = mantissa × 2^binary, and 2 × midpoint = twiceDigits × 10^power.
+  const binary = (biased === 0 ? 1 : biased) - 1075 + 1;
+  let left = mantissa;
+  let right = twiceDigits;
+  if (binary >= 0) left <<= BigInt(binary);
+  else right <<= BigInt(-binary);
+  if (power >= 0) right *= 10n ** BigInt(power);
+  else left *= 10n ** BigInt(-power);
+  return left === right;
 }
 
 /** Places digits around the decimal point without an exponent: `digits` × 10^(exponent - digits.length). */

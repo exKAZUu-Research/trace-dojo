@@ -43,6 +43,8 @@ export interface ClosureType {
   ret: Type;
   /** The closure trait the closure implements: `FnOnce` when it moves a capture out, `FnMut` when it mutates one. */
   kind: 'Fn' | 'FnMut' | 'FnOnce';
+  /** Where an `FnOnce` closure first moves a capture out, which rustc reports when it needs `Fn` or `FnMut`. */
+  movedAt?: { name: string; span: Span };
 }
 
 /** A return type `impl Trait`, which callers see only through its bounds. */
@@ -92,6 +94,7 @@ export type BuiltinAdt =
   | 'CaseIter'
   | 'ParseError'
   | 'Unsigned'
+  | 'Signed'
   | 'Formatter'
   | 'FmtError'
   | 'ParseIntError'

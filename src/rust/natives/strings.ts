@@ -1,6 +1,7 @@
-// code-gauge-allow-file fileNcss 415 -- One native per method of the standard library.
+// code-gauge-allow-file fileNcss 430 -- One native per method of the standard library.
 import { normalize } from '../infer';
 import { strSliceBytes } from '../interpreter';
+import { RustPanic } from '../runtime';
 import { shallow, type Type } from '../types';
 import {
   DONE,
@@ -14,7 +15,20 @@ import {
 } from '../values';
 import { arrayIter } from './iterators';
 import { parseFloatText, parseInteger } from './numbers';
-import { call, define, deref, err, type NativeContext, none, ok, option, panic, placeOf, some } from './support';
+import {
+  call,
+  define,
+  deref,
+  err,
+  libraryPanic,
+  type NativeContext,
+  none,
+  ok,
+  option,
+  panic,
+  placeOf,
+  some,
+} from './support';
 
 const encoder = new TextEncoder();
 
@@ -321,7 +335,14 @@ const strNatives: Record<string, (args: Value[], ctx: NativeContext) => Value> =
   split_at: ([s, mid], ctx) => {
     const text = str(s);
     const offset = Number(mid as bigint);
-    const head = strSliceBytes(text, 0, offset, ctx.span);
+    // `str::split_at` reports its panics inside the library, unlike slicing with `&s[..mid]`.
+    let head: string;
+    try {
+      head = strSliceBytes(text, 0, offset, ctx.span);
+    } catch (error) {
+      if (error instanceof RustPanic) libraryPanic(ctx, error.message, 'core/src/str/mod.rs:862:21');
+      throw error;
+    }
     return [head, text.slice(head.length)];
   },
   contains: ([s, p], ctx) => patternMatcher(ctx, p)(str(s), 0) !== undefined,
@@ -598,7 +619,13 @@ const charNatives: Record<string, (args: Value[], ctx: NativeContext) => Value> 
 };
 
 function digitOf(ctx: NativeContext, c: string, radix: number): number | undefined {
-  if (radix > 36) panic(ctx, 'to_digit: invalid radix -- radix must be in the range 2 to 36 inclusive');
+  if (radix < 2 || radix > 36) {
+    libraryPanic(
+      ctx,
+      'to_digit: invalid radix -- radix must be in the range 2 to 36 inclusive',
+      'core/src/char/methods.rs:407:9'
+    );
+  }
   if (!/^[0-9a-zA-Z]$/.test(c)) return undefined;
   const digit = Number.parseInt(c, 36);
   return digit < radix ? digit : undefined;
@@ -612,7 +639,7 @@ function fromU32(ctx: NativeContext, value: Value): Value {
 
 function fromDigit(ctx: NativeContext, num: Value, radix: Value): Value {
   const base = Number(radix as bigint);
-  if (base > 36) panic(ctx, 'from_digit: radix is too high (maximum 36)');
+  if (base > 36) libraryPanic(ctx, 'from_digit: radix is too high (maximum 36)', 'core/src/char/convert.rs:332:9');
   const digit = Number(num as bigint);
   if (digit >= base) return none(ctx);
   return some(ctx, digit.toString(36));
@@ -629,6 +656,19 @@ const natives: Record<string, (args: Value[], ctx: NativeContext) => Value> = {}
 for (const [name, native] of Object.entries(strNatives)) natives[`str::${name}`] = native;
 for (const [name, native] of Object.entries(stringNatives)) natives[`String::${name}`] = native;
 for (const [name, native] of Object.entries(charNatives)) natives[`char::${name}`] = native;
+// `u8`'s ASCII methods behave as `char`'s on the byte's code point.
+const byteChar = (byte: Value): string => String.fromCodePoint(Number(deref(byte) as bigint));
+for (const name of Object.keys(charNatives).filter((key) => key.includes('ascii'))) {
+  natives[`u8::${name}`] = (args, ctx) => {
+    if (name.startsWith('make_')) {
+      const place = placeOf(args[0]);
+      place.set(BigInt(char(charNatives[name.replace('make_', 'to_')]([byteChar(place.get())], ctx)).codePointAt(0)!));
+      return UNIT_VALUE;
+    }
+    const result = charNatives[name](args.map(byteChar), ctx);
+    return typeof result === 'string' ? BigInt(result.codePointAt(0)!) : result;
+  };
+}
 natives['std::char::from_u32'] = ([i], ctx) => fromU32(ctx, i);
 natives['std::char::from_digit'] = ([num, radix], ctx) => fromDigit(ctx, num, radix);
 define(natives);

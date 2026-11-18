@@ -153,6 +153,11 @@ const resultNatives: Record<string, (args: Value[], ctx: NativeContext) => Value
 
 const natives: Record<string, (args: Value[], ctx: NativeContext) => Value> = {};
 for (const [name, native] of Object.entries(optionNatives)) natives[`Option<_>::${name}`] = native;
+// A `String`, a `Vec`, and a `Box` are the values they deref to, so `as_deref` borrows what the option holds.
+natives['Option<String>::as_deref'] = optionNatives.as_ref;
+natives['Option<String>::as_deref_mut'] = optionNatives.as_mut;
+natives['Option<Vec<_>>::as_deref'] = optionNatives.as_ref;
+natives['Option<Box<_>>::as_deref'] = optionNatives.as_ref;
 for (const [name, native] of Object.entries(resultNatives)) natives[`Result<_, _>::${name}`] = native;
 for (const prefix of ['Option<&_>', 'Option<&mut _>']) {
   natives[`${prefix}::copied`] = ([self], ctx) =>

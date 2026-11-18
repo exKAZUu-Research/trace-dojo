@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 627 -- Follows the borrow checking rules case by case.
+// code-gauge-allow-file fileNcss 657 -- Follows the borrow checking rules case by case.
 import type { Annotations, FnContext, LocalVar } from './annotations';
 import type { Block, Condition, Expr, FnItem, FormatArgs, Pattern, Span, Stmt } from './ast';
 import { forEachDirect, patternBindings, walkBlock } from './astWalk';
@@ -52,6 +52,8 @@ export class BorrowChecker {
   /** The bodies of loops, by their extent, for liveness across iterations. */
   private readonly loopRanges: { start: number; end: number }[] = [];
   private loopStack: { label: string | undefined; breaks: State[]; continues: State[] }[] = [];
+  /** The captures that the closure being checked moves out, which it owns. */
+  private ownedCaptures: readonly LocalVar[] = [];
 
   constructor(
     private readonly annotations: Annotations,
@@ -224,8 +226,10 @@ export class BorrowChecker {
         return this.expr(expr.operand, state, 'move');
       }
       case 'call': {
-        let current =
-          expr.callee.kind === 'path' ? this.expr(expr.callee, state, 'read') : this.expr(expr.callee, state, 'read');
+        // Calling an `FnOnce` closure consumes it.
+        const callee = expr.callee.ty && normalize(shallow(expr.callee.ty));
+        const consumes = callee?.kind === 'closure' && callee.closure.kind === 'FnOnce';
+        let current = this.expr(expr.callee, state, consumes ? 'move' : 'read');
         for (const arg of expr.args) current = this.expr(arg, current, argumentMode(arg));
         return current;
       }
@@ -436,8 +440,11 @@ export class BorrowChecker {
       const varState = current.get(local);
       if (!varState) continue;
       this.checkUsable(local, varState, expr.span, 'read');
-      if (info.context.isMove && !this.isCopy(local.type) && local.mode === 'move') {
-        current = setVar(current, local, { init: 'no', movedAt: expr.span, partial: new Set() });
+      const byValue = info.context.isMove || info.context.movedCaptures?.includes(local);
+      if (byValue && !this.isCopy(local.type) && local.mode === 'move') {
+        for (const path of this.capturedPaths(expr.body, local)) {
+          current = this.markMoved(current, { root: local, path, indirect: false }, expr.span, false);
+        }
       }
     }
     return current;
@@ -486,6 +493,7 @@ export class BorrowChecker {
   /** Checks a closure's body on its own, where its parameters and captured variables hold values. */
   private checkClosureBody(expr: Extract<Expr, { kind: 'closure' }>, context: FnContext): void {
     const checker = new BorrowChecker(this.annotations, this.solver);
+    checker.ownedCaptures = context.movedCaptures ?? [];
     const body: Block =
       expr.body.kind === 'block'
         ? expr.body
@@ -554,11 +562,40 @@ export class BorrowChecker {
     if (varState) this.checkUsable(place.root, varState, expr.span, mode, place.path);
     this.checkLoans(place, expr.span, mode);
     if (mode !== 'move' || this.isCopy(expr.ty)) return state;
-    if (place.indirect) {
+    if (place.indirect && !this.ownsCapture(expr)) {
       this.cannotMoveOut(expr, '');
     }
     if (place.root.mode !== 'move') return state;
     return this.markMoved(state, place, expr.span, false);
+  }
+
+  /**
+   * The places of a captured variable that a closure's body uses, which it captures each on its own as edition 2021
+   * does: `p.a` alone when the body uses only that field, or the whole variable (`''`).
+   */
+  private capturedPaths(body: Expr, local: LocalVar): string[] {
+    const paths = new Set<string>();
+    const visit = (expr: Expr): void => {
+      const place = this.placeOf(expr);
+      const fieldsOnly = expr.kind === 'path' || (expr.kind === 'field' && isFieldChain(expr));
+      if (fieldsOnly && place?.root === local) {
+        paths.add(place.path);
+        return;
+      }
+      forEachDirect(expr, visit);
+    };
+    visit(body);
+    if (paths.has('') || paths.size === 0) return [''];
+    // A field whose parent is captured too goes with the parent.
+    return [...paths].filter((path) => ![...paths].some((other) => path.startsWith(`${other}.`)));
+  }
+
+  /** Whether an expression is a capture, or a field of one, that the closure being checked owns. */
+  private ownsCapture(expr: Expr): boolean {
+    let current = expr;
+    while (current.kind === 'field') current = current.operand;
+    const res = current.kind === 'path' ? this.annotations.paths.get(current) : undefined;
+    return res?.kind === 'capture' && this.ownedCaptures.includes(res.local);
   }
 
   private markMoved(state: State, place: PlacePath, span: Span, partialOnly: boolean): State {
@@ -786,7 +823,9 @@ export class BorrowChecker {
         const mutable = info.context.closureKind !== 'Fn';
         return info.context.captures
           .filter((local) => local.mode === 'move' && !isReference(local.type))
-          .map((local) => ({ root: local, path: '', mutable, span: expr.span }));
+          .flatMap((local) =>
+            this.capturedPaths(expr.body, local).map((path) => ({ root: local, path, mutable, span: expr.span }))
+          );
       }
       case 'field':
       case 'index': {
@@ -912,4 +951,10 @@ function containsReference(type: Type | undefined): boolean {
 function argumentMode(arg: Expr): 'move' | 'read' {
   const type = arg.ty && normalize(shallow(arg.ty));
   return type?.kind === 'ref' && type.mutable ? 'read' : 'move';
+}
+
+function isFieldChain(expr: Expr): boolean {
+  let current = expr;
+  while (current.kind === 'field') current = current.operand;
+  return current.kind === 'path';
 }

@@ -31,6 +31,8 @@ export interface FnContext {
   isMove: boolean;
   /** For a closure, how it uses its captures, which decides the closure trait it implements. */
   closureKind: 'Fn' | 'FnMut' | 'FnOnce';
+  /** For a closure, the captured variables it moves out, which it captures by value even without `move`. */
+  movedCaptures?: LocalVar[];
 }
 
 export type PathRes =

@@ -1,10 +1,11 @@
-// code-gauge-allow-file fileNcss 720 -- Follows Rust's name resolution case by case.
+// code-gauge-allow-file fileNcss 742 -- Follows Rust's name resolution case by case.
 import { CompileError } from '../interpreter/diagnostics';
 import type {
   BoundAst,
   ConstItem,
   Crate,
   EnumItem,
+  Expr,
   FnItem,
   Generics,
   ImplItem,
@@ -30,6 +31,9 @@ import {
   freshVar,
   type ImplDef,
   INT_NAMES,
+  intMax,
+  intMin,
+  type IntName,
   intType,
   NEVER,
   newOpaque,
@@ -774,6 +778,7 @@ const BUILTIN_STRUCTS: Record<string, BuiltinAdt> = {
   CaseIter: 'CaseIter',
   ParseError: 'ParseError',
   Unsigned: 'Unsigned',
+  Signed: 'Signed',
   ParseBoolError: 'ParseBoolError',
   ParseCharError: 'ParseCharError',
 };
@@ -827,6 +832,62 @@ export function lookupValue(module: Module, name: string, span: Span): ValueBind
     if (found) return found as ValueBinding;
   }
   return undefined;
+}
+
+/**
+ * The value of an integer constant expression, as array lengths take them: literals, constants, integer types' `MIN`
+ * and `MAX`, and arithmetic on them. Undefined for other expressions.
+ */
+// code-gauge-allow functionCognitiveComplexity 22 -- One case per kind of constant expression.
+export function constInteger(expr: Expr, module: Module): bigint | undefined {
+  switch (expr.kind) {
+    case 'int': {
+      return expr.value;
+    }
+    case 'path': {
+      const { segments } = expr.path;
+      if (segments.length === 2 && (INT_NAMES as string[]).includes(segments[0].name)) {
+        const name = segments[0].name as IntName;
+        if (segments[1].name === 'MAX') return intMax(name);
+        if (segments[1].name === 'MIN') return intMin(name);
+      }
+      if (segments.length !== 1) return undefined;
+      const binding = lookupValue(module, segments[0].name, expr.span);
+      const constItem = binding?.kind === 'const' ? (binding.def.ast as ConstItem) : undefined;
+      return constItem?.value ? constInteger(constItem.value, module) : undefined;
+    }
+    case 'cast': {
+      return constInteger(expr.operand, module);
+    }
+    case 'unary': {
+      const operand = constInteger(expr.operand, module);
+      return expr.op === '-' && operand !== undefined ? -operand : undefined;
+    }
+    case 'binary': {
+      const left = constInteger(expr.left, module);
+      const right = constInteger(expr.right, module);
+      return left === undefined || right === undefined ? undefined : integerOperation(expr.op, left, right);
+    }
+    default: {
+      return undefined;
+    }
+  }
+}
+
+function integerOperation(op: string, left: bigint, right: bigint): bigint | undefined {
+  const operations: Record<string, () => bigint | undefined> = {
+    '+': () => left + right,
+    '-': () => left - right,
+    '*': () => left * right,
+    '/': () => (right === 0n ? undefined : left / right),
+    '%': () => (right === 0n ? undefined : left % right),
+    '<<': () => left << right,
+    '>>': () => left >> right,
+    '&': () => left & right,
+    '|': () => left | right,
+    '^': () => left ^ right,
+  };
+  return operations[op]?.();
 }
 
 /** Resolves every import of a module and the modules in it, reporting imports that name nothing, as rustc does. */
@@ -1098,7 +1159,6 @@ export function resolveTraitPath(path: PathAst, scope: TypeScope): TraitRef {
 // ---------------------------------------------------------------------------------------------------------------------
 // Lowering types
 
-// code-gauge-allow functionCognitiveComplexity 24 -- Follows Rust's name resolution case by case.
 // code-gauge-allow functionNcss 52 -- Follows Rust's name resolution case by case.
 export function lowerType(ast: TypeAst, scope: TypeScope): Type {
   switch (ast.kind) {
@@ -1112,16 +1172,11 @@ export function lowerType(ast: TypeAst, scope: TypeScope): Type {
       return { kind: 'tuple', elems: ast.elems.map((elem) => lowerType(elem, scope)) };
     }
     case 'array': {
-      const len = ast.len;
-      let length: number | undefined;
-      if (len.kind === 'int') length = Number(len.value);
-      else if (len.kind === 'path' && len.path.segments.length === 1) {
-        const binding = lookupValue(scope.module, len.path.segments[0].name, len.span);
-        const constItem = binding?.kind === 'const' ? (binding.def.ast as ConstItem) : undefined;
-        if (constItem?.value?.kind === 'int') length = Number(constItem.value.value);
+      const length = constInteger(ast.len, scope.module);
+      if (length === undefined || length < 0n) {
+        compileError(ast.span, '配列の長さには、整数のリテラルか定数の式を書いてください。');
       }
-      if (length === undefined) compileError(ast.span, '配列の長さには、整数のリテラルか定数を書いてください。');
-      return { kind: 'array', elem: lowerType(ast.elem, scope), len: length };
+      return { kind: 'array', elem: lowerType(ast.elem, scope), len: Number(length) };
     }
     case 'slice': {
       return { kind: 'slice', elem: lowerType(ast.elem, scope) };

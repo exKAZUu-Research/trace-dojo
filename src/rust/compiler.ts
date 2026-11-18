@@ -966,11 +966,12 @@ export class Compiler {
         return UNIT_VALUE;
       };
     }
+    // On primitive types, `a[i()] += f()` evaluates its right side first; `String`'s `+=` is a call, left side first.
     if (type.kind === 'bool') {
       return (frame) => {
+        const b = derefAll(value(frame)) as boolean;
         const target = place(frame);
         const a = target.get() as boolean;
-        const b = derefAll(value(frame)) as boolean;
         target.set(op === '&' ? a && b : op === '|' ? a || b : a !== b);
         return UNIT_VALUE;
       };
@@ -978,16 +979,16 @@ export class Compiler {
     if (type.kind === 'float') {
       const f32 = type.name === 'f32';
       return (frame) => {
-        const target = place(frame);
         const operand = derefAll(value(frame)) as number;
+        const target = place(frame);
         target.set(floatArith(op, target.get() as number, operand, f32));
         return UNIT_VALUE;
       };
     }
     const name = (type as { name: IntName }).name;
     return (frame) => {
-      const target = place(frame);
       const operand = derefAll(value(frame)) as bigint;
+      const target = place(frame);
       target.set(intArith(op, name, target.get() as bigint, operand, span));
       return UNIT_VALUE;
     };

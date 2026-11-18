@@ -128,20 +128,22 @@ export function setPseudoTypes(types: { parseError: (target: Type) => Type | und
   pseudoTypes = types;
 }
 
-/** Replaces `ParseError<F>` and `Unsigned<N>` with the types they stand for when their argument is known. */
+/**
+ * Replaces `ParseError<F>`, `Unsigned<N>`, and `Signed<N>` with the types they stand for when their argument is known.
+ */
 export function normalize(type: Type): Type {
   if (type.kind !== 'adt' || !isPseudo(type.def)) return type;
   const arg = shallow(type.args[0]);
   if (arg.kind === 'var') return type;
-  if (type.def.builtin === 'Unsigned') {
+  if (type.def.builtin === 'Unsigned' || type.def.builtin === 'Signed') {
     if (arg.kind !== 'int') return type;
-    return intType(arg.name.startsWith('i') ? (`u${arg.name.slice(1)}` as never) : arg.name);
+    return intType(`${type.def.builtin === 'Unsigned' ? 'u' : 'i'}${arg.name.slice(1)}` as never);
   }
   return pseudoTypes?.parseError(arg) ?? type;
 }
 
 function isPseudo(def: AdtDef): boolean {
-  return def.builtin === 'ParseError' || def.builtin === 'Unsigned';
+  return def.builtin === 'ParseError' || def.builtin === 'Unsigned' || def.builtin === 'Signed';
 }
 
 /** Resolves a type deeply, normalizing pseudo-types. */

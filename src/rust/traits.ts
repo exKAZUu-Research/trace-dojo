@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 536 -- One rule per trait or conversion of the standard library.
+// code-gauge-allow-file fileNcss 537 -- One rule per trait or conversion of the standard library.
 import { normalize, type Unifier } from './infer';
 import type { Module, Program } from './items';
 import {
@@ -34,7 +34,11 @@ export class TraitSolver {
       return 'unknown';
     }
     if (t.kind === 'param') return this.boundsImply(t.param.bounds, ref) ? 'yes' : 'no';
-    if (t.kind === 'adt' && (t.def.builtin === 'ParseError' || t.def.builtin === 'Unsigned')) return 'unknown';
+    if (
+      t.kind === 'adt' &&
+      (t.def.builtin === 'ParseError' || t.def.builtin === 'Unsigned' || t.def.builtin === 'Signed')
+    )
+      return 'unknown';
     if (t.kind === 'opaque') return this.boundsImply(t.opaque.bounds, ref) ? 'yes' : this.builtinOnly(t, ref);
     if (t.kind === 'dyn') {
       if (this.boundsImply([t.trait], ref)) return 'yes';
@@ -345,8 +349,9 @@ export class TraitSolver {
       case 'Integer': {
         return t.kind === 'int' ? 'yes' : 'no';
       }
-      case 'SignedInteger': {
-        return t.kind === 'int' && isSigned(t.name) ? 'yes' : 'no';
+      case 'SignedInteger':
+      case 'UnsignedInteger': {
+        return t.kind === 'int' && isSigned(t.name) === (name === 'SignedInteger') ? 'yes' : 'no';
       }
       case 'Float': {
         return t.kind === 'float' ? 'yes' : 'no';
@@ -522,7 +527,10 @@ export class TraitSolver {
     }
     const source = normalize(shallow(ref.args[0]));
     if (source.kind === 'var') return 'unknown';
-    if (source.kind === 'adt' && (source.def.builtin === 'ParseError' || source.def.builtin === 'Unsigned'))
+    if (
+      source.kind === 'adt' &&
+      (source.def.builtin === 'ParseError' || source.def.builtin === 'Unsigned' || source.def.builtin === 'Signed')
+    )
       return 'unknown';
     if (this.unifier.tryUnify(t, source)) return 'yes';
     return conversionExists(this.program, source, t, this) ? 'yes' : 'no';

@@ -1,9 +1,22 @@
+// code-gauge-allow-file fileNcss 411 -- One native per method of the standard library.
+import { debugFloat } from '../floatFormat';
 import { normalize } from '../infer';
 import { bitsOf, intArith, overflow, wrap } from '../ops';
-import { RustPanic } from '../runtime';
 import { intMax, intMin, type IntName, shallow, type Type } from '../types';
 import { StructValue, type Value } from '../values';
-import { define, deref, err, type NativeContext, none, ok, ordering, panic, some } from './support';
+import {
+  define,
+  deref,
+  err,
+  intImplLocation,
+  libraryPanic,
+  type NativeContext,
+  none,
+  ok,
+  ordering,
+  panic,
+  some,
+} from './support';
 
 function intName(ctx: NativeContext): IntName {
   const t = normalize(shallow(ctx.typeArgs[0]));
@@ -35,6 +48,31 @@ function isqrt(value: bigint): bigint {
   while (x * x > value) x--;
   while ((x + 1n) * (x + 1n) <= value) x++;
   return x;
+}
+
+/**
+ * `base ** exp` when it fits in the type, or undefined when it overflows, without computing huge powers: a base other
+ * than 0, 1, and -1 overflows every type once the exponent passes 128.
+ */
+function power(name: IntName, base: bigint, exp: bigint): bigint | undefined {
+  if (base === 0n) return exp === 0n ? 1n : 0n;
+  if (base === 1n) return 1n;
+  if (base === -1n) return exp % 2n === 0n ? 1n : -1n;
+  if (exp > 128n) return undefined;
+  const result = base ** exp;
+  return inRange(name, result) ? result : undefined;
+}
+
+/** `base ** exp` wrapped to the type, by squaring modulo its bit width. */
+function wrappingPower(name: IntName, base: bigint, exp: bigint): bigint {
+  const modulus = 1n << BigInt(bitsOf(name));
+  let result = 1n;
+  let square = BigInt.asUintN(bitsOf(name), base);
+  for (let rest = exp; rest > 0n; rest >>= 1n) {
+    if (rest & 1n) result = (result * square) % modulus;
+    square = (square * square) % modulus;
+  }
+  return wrap(name, result);
 }
 
 /** Truncated division and remainder, as Rust's integer `/` and `%` are. */
@@ -96,30 +134,150 @@ function round(ctx: NativeContext, value: number): number {
   return isF32(ctx) ? Math.fround(value) : value;
 }
 
+const isMinByMinusOne = (ctx: NativeContext, a: bigint, b: bigint): boolean =>
+  b === -1n && a === intMin(intName(ctx)) && a !== 0n;
+
+function shifted(ctx: NativeContext, a: bigint, rhs: bigint, left: boolean): bigint {
+  const name = intName(ctx);
+  const shift = rhs % BigInt(bitsOf(name));
+  return left ? wrap(name, a << shift) : a >> shift;
+}
+
+function ones(ctx: NativeContext, a: bigint, leading: boolean): bigint {
+  const bits = bitsOf(intName(ctx));
+  const text = BigInt.asUintN(bits, a).toString(2).padStart(bits, '0');
+  const run = leading ? /^1*/.exec(text)! : /1*$/.exec(text)!;
+  return BigInt(run[0].length);
+}
+
+function checkedLog(ctx: NativeContext, a: bigint, base: bigint): Value {
+  if (a <= 0n || base < 2n) return none(ctx);
+  let count = 0n;
+  for (let value = a; value >= base; value /= base) count++;
+  return some(ctx, count);
+}
+
+function nextMultiple(a: bigint, b: bigint): bigint {
+  const remainder = a % b;
+  return remainder === 0n ? a : a + (b - remainder);
+}
+
+/** Integer methods beyond the basic arithmetic: euclidean, shifting, logarithmic, and sign-crossing variants. */
+const integerExtras: Record<string, (args: Value[], ctx: NativeContext) => Value> = {
+  overflowing_div: ([a, b], ctx) => {
+    if ((b as bigint) === 0n) panic(ctx, 'attempt to divide by zero');
+    if (isMinByMinusOne(ctx, a as bigint, b as bigint)) return [a, true];
+    return [(a as bigint) / (b as bigint), false];
+  },
+  overflowing_rem: ([a, b], ctx) => {
+    if ((b as bigint) === 0n) panic(ctx, 'attempt to calculate the remainder with a divisor of zero');
+    if (isMinByMinusOne(ctx, a as bigint, b as bigint)) return [0n, true];
+    return [(a as bigint) % (b as bigint), false];
+  },
+  overflowing_neg: ([a], ctx) => [wrap(intName(ctx), -(a as bigint)), !inRange(intName(ctx), -(a as bigint))],
+  overflowing_pow: ([a, e], ctx) => {
+    const name = intName(ctx);
+    return [wrappingPower(name, a as bigint, e as bigint), power(name, a as bigint, e as bigint) === undefined];
+  },
+  overflowing_shl: ([a, n], ctx) => [
+    shifted(ctx, a as bigint, n as bigint, true),
+    (n as bigint) >= bitsOf(intName(ctx)),
+  ],
+  overflowing_shr: ([a, n], ctx) => [
+    shifted(ctx, a as bigint, n as bigint, false),
+    (n as bigint) >= bitsOf(intName(ctx)),
+  ],
+  checked_shl: ([a, n], ctx) =>
+    (n as bigint) >= bitsOf(intName(ctx)) ? none(ctx) : some(ctx, shifted(ctx, a as bigint, n as bigint, true)),
+  checked_shr: ([a, n], ctx) =>
+    (n as bigint) >= bitsOf(intName(ctx)) ? none(ctx) : some(ctx, shifted(ctx, a as bigint, n as bigint, false)),
+  wrapping_shl: ([a, n], ctx) => shifted(ctx, a as bigint, n as bigint, true),
+  wrapping_shr: ([a, n], ctx) => shifted(ctx, a as bigint, n as bigint, false),
+  checked_div_euclid: ([a, b], ctx) => {
+    if ((b as bigint) === 0n || isMinByMinusOne(ctx, a as bigint, b as bigint)) return none(ctx);
+    return some(ctx, divEuclid(a as bigint, b as bigint));
+  },
+  checked_rem_euclid: ([a, b], ctx) => {
+    if ((b as bigint) === 0n || isMinByMinusOne(ctx, a as bigint, b as bigint)) return none(ctx);
+    return some(ctx, remEuclid(a as bigint, b as bigint));
+  },
+  wrapping_div_euclid: ([a, b], ctx) => {
+    if ((b as bigint) === 0n) panic(ctx, 'attempt to divide by zero');
+    return wrap(intName(ctx), divEuclid(a as bigint, b as bigint));
+  },
+  wrapping_rem_euclid: ([a, b], ctx) => {
+    if ((b as bigint) === 0n) panic(ctx, 'attempt to calculate the remainder with a divisor of zero');
+    return isMinByMinusOne(ctx, a as bigint, b as bigint) ? 0n : remEuclid(a as bigint, b as bigint);
+  },
+  saturating_div: ([a, b], ctx) => {
+    if ((b as bigint) === 0n) panic(ctx, 'attempt to divide by zero');
+    return isMinByMinusOne(ctx, a as bigint, b as bigint) ? intMax(intName(ctx)) : (a as bigint) / (b as bigint);
+  },
+  checked_ilog2: ([a], ctx) => checkedLog(ctx, a as bigint, 2n),
+  checked_ilog10: ([a], ctx) => checkedLog(ctx, a as bigint, 10n),
+  checked_ilog: ([a, base], ctx) => checkedLog(ctx, a as bigint, base as bigint),
+  leading_ones: ([a], ctx) => ones(ctx, a as bigint, true),
+  trailing_ones: ([a], ctx) => ones(ctx, a as bigint, false),
+  saturating_neg: ([a], ctx) => saturate(intName(ctx), -(a as bigint)),
+  saturating_abs: ([a], ctx) => saturate(intName(ctx), (a as bigint) < 0n ? -(a as bigint) : (a as bigint)),
+  overflowing_abs: ([a], ctx) => {
+    const value = (a as bigint) < 0n ? -(a as bigint) : (a as bigint);
+    return [wrap(intName(ctx), value), !inRange(intName(ctx), value)];
+  },
+  checked_isqrt: ([a], ctx) => ((a as bigint) < 0n ? none(ctx) : some(ctx, isqrt(a as bigint))),
+  cast_unsigned: ([a], ctx) => BigInt.asUintN(bitsOf(intName(ctx)), a as bigint),
+  cast_signed: ([a], ctx) => BigInt.asIntN(bitsOf(intName(ctx)), a as bigint),
+  checked_next_power_of_two: ([a], ctx) => {
+    let power = 1n;
+    while (power < (a as bigint)) power <<= 1n;
+    return checked(ctx, power);
+  },
+  div_ceil: ([a, b], ctx) => {
+    if ((b as bigint) === 0n) panic(ctx, 'attempt to divide by zero');
+    const quotient = (a as bigint) / (b as bigint);
+    return (a as bigint) % (b as bigint) === 0n ? quotient : quotient + 1n;
+  },
+  is_multiple_of: ([a, b]) => ((b as bigint) === 0n ? a === 0n : (a as bigint) % (b as bigint) === 0n),
+  next_multiple_of: ([a, b], ctx) => {
+    const location = intImplLocation(intName(ctx));
+    if ((b as bigint) === 0n) {
+      libraryPanic(ctx, 'attempt to calculate the remainder with a divisor of zero', location);
+    }
+    const result = nextMultiple(a as bigint, b as bigint);
+    if (!inRange(intName(ctx), result)) libraryPanic(ctx, 'attempt to add with overflow', location);
+    return result;
+  },
+  checked_next_multiple_of: ([a, b], ctx) =>
+    (b as bigint) === 0n ? none(ctx) : checked(ctx, nextMultiple(a as bigint, b as bigint)),
+  checked_add_signed: ([a, b], ctx) => checked(ctx, (a as bigint) + (b as bigint)),
+  wrapping_add_signed: ([a, b], ctx) => wrap(intName(ctx), (a as bigint) + (b as bigint)),
+  saturating_add_signed: ([a, b], ctx) => saturate(intName(ctx), (a as bigint) + (b as bigint)),
+};
+
 const integer: Record<string, (args: Value[], ctx: NativeContext) => Value> = {
   abs: ([a], ctx) => {
     const value = a as bigint;
-    if (value === intMin(intName(ctx)) && intName(ctx).startsWith('i')) overflow('neg', ctx.span);
+    const name = intName(ctx);
+    if (value === intMin(name)) libraryPanic(ctx, 'attempt to negate with overflow', intImplLocation(name));
     return value < 0n ? -value : value;
   },
   pow: ([a, e], ctx) => {
     const name = intName(ctx);
-    let result = 1n;
-    const base = a as bigint;
-    for (let i = 0n; i < (e as bigint); i++) {
-      result *= base;
-      if (!inRange(name, result)) throw new RustPanic('attempt to multiply with overflow', ctx.span);
-    }
+    const result = power(name, a as bigint, e as bigint);
+    if (result === undefined) libraryPanic(ctx, 'attempt to exponentiate with overflow', intImplLocation(name));
     return result;
   },
   checked_add: ([a, b], ctx) => checked(ctx, (a as bigint) + (b as bigint)),
   checked_sub: ([a, b], ctx) => checked(ctx, (a as bigint) - (b as bigint)),
   checked_mul: ([a, b], ctx) => checked(ctx, (a as bigint) * (b as bigint)),
   checked_div: ([a, b], ctx) => ((b as bigint) === 0n ? none(ctx) : checked(ctx, (a as bigint) / (b as bigint))),
-  checked_rem: ([a, b], ctx) => ((b as bigint) === 0n ? none(ctx) : checked(ctx, (a as bigint) % (b as bigint))),
+  checked_rem: ([a, b], ctx) => {
+    if ((b as bigint) === 0n || (b === -1n && a === intMin(intName(ctx)) && a !== 0n)) return none(ctx);
+    return some(ctx, (a as bigint) % (b as bigint));
+  },
   checked_pow: ([a, e], ctx) => {
-    const result = (a as bigint) ** (e as bigint);
-    return checked(ctx, result);
+    const result = power(intName(ctx), a as bigint, e as bigint);
+    return result === undefined ? none(ctx) : some(ctx, result);
   },
   checked_neg: ([a], ctx) => checked(ctx, -(a as bigint)),
   checked_abs: ([a], ctx) => checked(ctx, (a as bigint) < 0n ? -(a as bigint) : (a as bigint)),
@@ -127,20 +285,25 @@ const integer: Record<string, (args: Value[], ctx: NativeContext) => Value> = {
   wrapping_sub: ([a, b], ctx) => wrap(intName(ctx), (a as bigint) - (b as bigint)),
   wrapping_mul: ([a, b], ctx) => wrap(intName(ctx), (a as bigint) * (b as bigint)),
   wrapping_div: ([a, b], ctx) => {
-    if ((b as bigint) === 0n) panic(ctx, 'attempt to divide by zero');
+    if ((b as bigint) === 0n) divisionByZero(ctx, 'attempt to divide by zero');
     return wrap(intName(ctx), (a as bigint) / (b as bigint));
   },
   wrapping_rem: ([a, b], ctx) => {
-    if ((b as bigint) === 0n) panic(ctx, 'attempt to calculate the remainder with a divisor of zero');
+    if ((b as bigint) === 0n) divisionByZero(ctx, 'attempt to calculate the remainder with a divisor of zero');
     return wrap(intName(ctx), (a as bigint) % (b as bigint));
   },
   wrapping_neg: ([a], ctx) => wrap(intName(ctx), -(a as bigint)),
-  wrapping_pow: ([a, e], ctx) => wrap(intName(ctx), (a as bigint) ** (e as bigint)),
+  wrapping_pow: ([a, e], ctx) => wrappingPower(intName(ctx), a as bigint, e as bigint),
   wrapping_abs: ([a], ctx) => wrap(intName(ctx), (a as bigint) < 0n ? -(a as bigint) : (a as bigint)),
   saturating_add: ([a, b], ctx) => saturate(intName(ctx), (a as bigint) + (b as bigint)),
   saturating_sub: ([a, b], ctx) => saturate(intName(ctx), (a as bigint) - (b as bigint)),
   saturating_mul: ([a, b], ctx) => saturate(intName(ctx), (a as bigint) * (b as bigint)),
-  saturating_pow: ([a, e], ctx) => saturate(intName(ctx), (a as bigint) ** (e as bigint)),
+  saturating_pow: ([a, e], ctx) => {
+    const name = intName(ctx);
+    const result = power(name, a as bigint, e as bigint);
+    if (result !== undefined) return result;
+    return (a as bigint) < 0n && (e as bigint) % 2n === 1n ? intMin(name) : intMax(name);
+  },
   overflowing_add: ([a, b], ctx) => {
     const result = (a as bigint) + (b as bigint);
     return [wrap(intName(ctx), result), !inRange(intName(ctx), result)];
@@ -155,6 +318,7 @@ const integer: Record<string, (args: Value[], ctx: NativeContext) => Value> = {
   },
   rem_euclid: ([a, b], ctx) => {
     if ((b as bigint) === 0n) panic(ctx, 'attempt to calculate the remainder with a divisor of zero');
+    if (b === -1n && a === intMin(intName(ctx)) && a !== 0n) overflow('%', ctx.span);
     return remEuclid(a as bigint, b as bigint);
   },
   div_euclid: ([a, b], ctx) => {
@@ -206,7 +370,8 @@ const integer: Record<string, (args: Value[], ctx: NativeContext) => Value> = {
     return BigInt((a as bigint).toString().length - 1);
   },
   ilog: ([a, base], ctx) => {
-    if ((a as bigint) <= 0n || (base as bigint) < 2n) panic(ctx, 'argument of integer logarithm must be positive');
+    if ((a as bigint) <= 0n) panic(ctx, 'argument of integer logarithm must be positive');
+    if ((base as bigint) < 2n) panic(ctx, 'base of integer logarithm must be at least 2');
     let count = 0n;
     let value = a as bigint;
     while (value >= (base as bigint)) {
@@ -219,12 +384,21 @@ const integer: Record<string, (args: Value[], ctx: NativeContext) => Value> = {
   next_power_of_two: ([a], ctx) => {
     let power = 1n;
     while (power < (a as bigint)) power <<= 1n;
-    if (!inRange(intName(ctx), power)) overflow('+', ctx.span);
+    if (!inRange(intName(ctx), power)) {
+      libraryPanic(ctx, 'attempt to add with overflow', intImplLocation(intName(ctx)));
+    }
     return power;
   },
   from_str_radix: ([text, radix], ctx) => {
     const base = Number(radix as bigint);
-    if (base < 2 || base > 36) panic(ctx, `from_str_radix_int: must lie in the range \`[2, 36]\` - found ${base}`);
+    if (base < 2 || base > 36) {
+      const row = intName(ctx).startsWith('i') ? 1866 : 1867;
+      libraryPanic(
+        ctx,
+        `from_ascii_bytes_radix: radix must lie in the range \`[2, 36]\` - found ${base}`,
+        `core/src/num/mod.rs:${row}:1`
+      );
+    }
     return parseInteger(ctx, deref(text) as string, intName(ctx), base);
   },
   max_value: (_args, ctx) => intMax(intName(ctx)),
@@ -258,16 +432,25 @@ const integer: Record<string, (args: Value[], ctx: NativeContext) => Value> = {
     const shift = (n as bigint) % bits;
     return wrap(intName(ctx), (value >> shift) | (value << (bits - shift)));
   },
-  midpoint: ([a, b]) => {
+  ...integerExtras,
+  midpoint: ([a, b], ctx) => {
     const sum = (a as bigint) + (b as bigint);
-    return sum >= 0n ? sum / 2n : -((-sum + 1n) / 2n);
+    // Signed integers round toward zero, and unsigned ones down.
+    return intName(ctx).startsWith('i') ? sum / 2n : sum >> 1n;
   },
 };
+
+/** Division by zero in `wrapping_div` and `wrapping_rem`, which signed integers report inside the library. */
+function divisionByZero(ctx: NativeContext, message: string): never {
+  const name = intName(ctx);
+  if (name.startsWith('i')) libraryPanic(ctx, message, intImplLocation(name));
+  panic(ctx, message);
+}
 
 const floating: Record<string, (args: Value[], ctx: NativeContext) => Value> = {
   sqrt: ([a], ctx) => round(ctx, Math.sqrt(float(a))),
   cbrt: ([a], ctx) => round(ctx, Math.cbrt(float(a))),
-  powi: ([a, n], ctx) => round(ctx, powi(float(a), Number(n as bigint))),
+  powi: ([a, n], ctx) => powi(float(a), Number(n as bigint), (value) => round(ctx, value)),
   powf: ([a, n], ctx) => round(ctx, Math.pow(float(a), float(n))),
   abs: ([a], ctx) => round(ctx, Math.abs(float(a))),
   floor: ([a], ctx) => round(ctx, Math.floor(float(a))),
@@ -300,15 +483,21 @@ const floating: Record<string, (args: Value[], ctx: NativeContext) => Value> = {
   ln: ([a], ctx) => round(ctx, Math.log(float(a))),
   log10: ([a], ctx) => round(ctx, Math.log10(float(a))),
   log2: ([a], ctx) => round(ctx, Math.log2(float(a))),
-  log: ([a, base], ctx) => round(ctx, Math.log(float(a)) / Math.log(float(base))),
+  log: ([a, base], ctx) => round(ctx, round(ctx, Math.log(float(a))) / round(ctx, Math.log(float(base)))),
   hypot: ([a, b], ctx) => round(ctx, Math.hypot(float(a), float(b))),
   min: ([a, b], ctx) =>
     round(ctx, Number.isNaN(float(a)) ? float(b) : Number.isNaN(float(b)) ? float(a) : Math.min(float(a), float(b))),
   max: ([a, b], ctx) =>
     round(ctx, Number.isNaN(float(a)) ? float(b) : Number.isNaN(float(b)) ? float(a) : Math.max(float(a), float(b))),
   clamp: ([a, min, max], ctx) => {
-    if (!(float(min) <= float(max)))
-      panic(ctx, `min > max, or either was NaN. min = ${float(min)}, max = ${float(max)}`);
+    if (!(float(min) <= float(max))) {
+      const f32 = isF32(ctx);
+      libraryPanic(
+        ctx,
+        `min > max, or either was NaN. min = ${debugFloat(float(min), f32)}, max = ${debugFloat(float(max), f32)}`,
+        f32 ? 'core/src/num/f32.rs:1605:9' : 'core/src/num/f64.rs:1585:9'
+      );
+    }
     return round(ctx, Math.min(Math.max(float(a), float(min)), float(max)));
   },
   is_nan: ([a]) => Number.isNaN(float(a)),
@@ -321,8 +510,9 @@ const floating: Record<string, (args: Value[], ctx: NativeContext) => Value> = {
   },
   is_sign_positive: ([a]) => float(a) > 0 || Object.is(float(a), 0),
   is_sign_negative: ([a]) => float(a) < 0 || Object.is(float(a), -0),
-  to_degrees: ([a], ctx) => round(ctx, float(a) * (180 / Math.PI)),
-  to_radians: ([a], ctx) => round(ctx, float(a) * (Math.PI / 180)),
+  // Rust multiplies by a constant of the type: `180 / PI` and `PI / 180` rounded to it.
+  to_degrees: ([a], ctx) => round(ctx, float(a) * round(ctx, 180 / Math.PI)),
+  to_radians: ([a], ctx) => round(ctx, float(a) * round(ctx, round(ctx, Math.PI) / 180)),
   mul_add: ([a, b, c], ctx) => round(ctx, fma(float(a), float(b), float(c))),
   recip: ([a], ctx) => round(ctx, 1 / float(a)),
   total_cmp: ([a, b], ctx) => {
@@ -358,17 +548,18 @@ function totalOrderKey(value: number): bigint {
 }
 
 /** `powi`, which multiplies repeatedly as LLVM's `powi` does, so that results match in the last bits. */
-function powi(base: number, exponent: number): number {
+/** `powi` as compiler-rt's `__powidf2` and `__powisf2` compute it, rounding each step to the type (`round`). */
+function powi(base: number, exponent: number, round: (value: number) => number): number {
   if (exponent === 0) return 1;
   let result = 1;
   let factor = base;
   let n = Math.abs(exponent);
   while (n > 0) {
-    if (n & 1) result *= factor;
-    factor *= factor;
+    if (n & 1) result = round(result * factor);
     n >>= 1;
+    if (n > 0) factor = round(factor * factor);
   }
-  return exponent < 0 ? 1 / result : result;
+  return exponent < 0 ? round(1 / result) : result;
 }
 
 /** A fused multiply-add, computed exactly with bigints and rounded once, as `f64::mul_add` does. */
@@ -429,7 +620,8 @@ function tryConvert(ctx: NativeContext, value: Value, to: Type): Value {
   const target = normalize(shallow(to)) as { name: IntName };
   const number = deref(value) as bigint;
   if (inRange(target.name, number)) return ok(ctx, number);
-  return err(ctx, new StructValue(ctx.interp.program.adtDef('TryFromIntError'), []));
+  const kind = number < 0n ? 'NegOverflow' : 'PosOverflow';
+  return err(ctx, new StructValue(ctx.interp.program.adtDef('TryFromIntError'), [kind]));
 }
 
 const natives: Record<string, (args: Value[], ctx: NativeContext) => Value> = {
@@ -437,27 +629,32 @@ const natives: Record<string, (args: Value[], ctx: NativeContext) => Value> = {
   'TryInto::try_into': ([value], ctx) => tryConvert(ctx, value, ctx.typeArgs[1]),
 };
 for (const [name, native] of Object.entries(integer)) {
-  natives[`Integer::${name}`] = native;
-  natives[`SignedInteger::${name}`] = native;
+  for (const group of ['Integer', 'SignedInteger', 'UnsignedInteger']) natives[`${group}::${name}`] = native;
 }
 for (const [name, native] of Object.entries(floating)) natives[`Float::${name}`] = native;
 define(natives);
 
-/** Constants of the primitive types and `std::f64::consts`. */
+/** `std::f64::consts`, rounded from the literals that std writes for them where `Math` does not round alike. */
 const F64_CONSTS: Record<string, number> = {
   PI: Math.PI,
-  E: Math.E,
   TAU: 2 * Math.PI,
+  E: Math.E,
   SQRT_2: Math.SQRT2,
   LN_2: Math.LN2,
   LN_10: Math.LN10,
   FRAC_PI_2: Math.PI / 2,
-  FRAC_PI_3: Math.PI / 3,
+  FRAC_PI_3: Number('1.04719755119659774615421446109316763'),
   FRAC_PI_4: Math.PI / 4,
-  FRAC_PI_6: Math.PI / 6,
-  FRAC_1_SQRT_2: Math.SQRT1_2,
-  LOG2_E: Math.LOG2E,
-  LOG10_E: Math.LOG10E,
+  FRAC_PI_6: Number('0.52359877559829887307710723054658381'),
+  FRAC_PI_8: Number('0.39269908169872415480783042290993786'),
+  FRAC_1_PI: Number('0.318309886183790671537767526745028724'),
+  FRAC_2_PI: Number('0.636619772367581343075535053490057448'),
+  FRAC_2_SQRT_PI: Number('1.12837916709551257389615890312154517'),
+  FRAC_1_SQRT_2: Number('0.707106781186547524400844362104849039'),
+  LOG2_E: Number('1.44269504088896340735992468100189214'),
+  LOG10_E: Number('0.434294481903251827651128918916605082'),
+  LOG2_10: Number('3.32192809488736234787031942948939018'),
+  LOG10_2: Number('0.301029995663981195213738894724493027'),
 };
 
 const FLOAT_LIMITS: Record<string, { f64: number; f32: number }> = {

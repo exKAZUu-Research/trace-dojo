@@ -1232,13 +1232,22 @@ export class Converter {
         }
         params.push({ pattern, type: this.type(this.field(child, 'type')), span: this.span(child) });
       } else {
-        params.push({ pattern: this.pattern(child), type: undefined, span: this.span(child) });
+        params.push({ pattern: this.closureParam(child), type: undefined, span: this.span(child) });
       }
     }
     const ret = node.childForFieldName('return_type');
     const body = this.field(node, 'body');
     if (ret && body.type !== 'block') syntaxError(span, '戻り値の型を書いたクロージャの本体は { } で囲んでください。');
     return { kind: 'closure', isMove, params, ret: ret ? this.type(ret) : undefined, body: this.expr(body), span };
+  }
+
+  /** An untyped closure parameter, which may be `mut x` as a function's parameter may. */
+  private closureParam(node: Node): Pattern {
+    const inner =
+      node.type === 'mut_pattern' ? node.namedChildren.find((child) => child.type === 'identifier') : undefined;
+    if (!inner) return this.pattern(node);
+    const pattern = this.pattern(inner);
+    return pattern.kind === 'binding' ? { ...pattern, mutable: true } : pattern;
   }
 
   // -------------------------------------------------------------------------------------------------------------------

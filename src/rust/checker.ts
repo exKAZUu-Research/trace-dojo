@@ -19,6 +19,7 @@ import { isIrrefutable, lowerPattern, missingPattern } from './exhaustiveness';
 import { deepNormalize, normalize, Unifier } from './infer';
 import {
   compileError,
+  constInteger,
   ItemCollector,
   lookupType,
   lookupValue,
@@ -38,6 +39,7 @@ import {
   type AdtDef,
   BOOL,
   CHAR,
+  type ClosureType,
   F32,
   F64,
   type FloatName,
@@ -337,6 +339,14 @@ export class Checker {
   }
 
   private unsatisfied(obligation: Obligation): never {
+    const closure = normalize(shallow(obligation.type));
+    if (closure.kind === 'closure' && closure.closure.movedAt) {
+      const { name, span } = closure.closure.movedAt;
+      compileError(
+        span,
+        `${obligation.ref.trait.name} のクロージャの中では、取り込んだ変数 ${name} をムーブできません（.clone() で複製してください）。`
+      );
+    }
     const type = typeToString(resolve(obligation.type));
     const trait = traitRefToString(obligation.ref);
     const name = obligation.ref.trait.name;
@@ -453,35 +463,13 @@ export class Checker {
     this.coerce(expr, actual, target);
   }
 
-  // code-gauge-allow functionCognitiveComplexity 30 -- Follows the type checking rules of rustc case by case.
-  // code-gauge-allow functionNcss 33 -- Follows the type checking rules of rustc case by case.
+  // code-gauge-allow functionCognitiveComplexity 22 -- Follows the type checking rules of rustc case by case.
   private coerce(expr: Expr, actual: Type, target: Type): void {
     const a = normalize(shallow(actual));
     const t = normalize(shallow(target));
     if (a.kind === 'never') return;
     if (this.unifier.tryUnify(a, t)) return;
-    // &T → &U through derefs, and &mut T → &T.
-    if (a.kind === 'ref' && t.kind === 'ref' && (!t.mutable || a.mutable)) {
-      const steps = autoderefSteps(this.program, a.target);
-      for (const step of steps) {
-        if (this.unifier.tryUnify(step.type, t.target)) {
-          if (step.derefs.length > 0 || (a.mutable && !t.mutable)) {
-            this.annotations.coercions.set(expr, {
-              kind: 'deref',
-              derefs: step.derefs,
-              fromMut: a.mutable && !t.mutable,
-            });
-          }
-          return;
-        }
-      }
-      const target = shallow(t.target);
-      if (target.kind === 'dyn') {
-        this.requireDyn(a.target, target.trait, expr.span);
-        this.annotations.coercions.set(expr, { kind: 'dyn', type: a.target, mutable: a.mutable });
-        return;
-      }
-    }
+    if (a.kind === 'ref' && t.kind === 'ref' && (!t.mutable || a.mutable) && this.coerceRef(expr, a, t)) return;
     if (a.kind === 'adt' && a.def.builtin === 'Box' && t.kind === 'adt' && t.def.builtin === 'Box') {
       const target = shallow(t.args[0]);
       if (target.kind === 'dyn') {
@@ -506,6 +494,24 @@ export class Checker {
       return;
     }
     this.mismatch(expr.span, target, actual);
+  }
+
+  /** `&T` → `&U` through derefs, `&mut T` → `&T`, and `&T` → `&dyn Trait`; false when none applies. */
+  private coerceRef(expr: Expr, a: Type & { kind: 'ref' }, t: Type & { kind: 'ref' }): boolean {
+    // rustc coerces to a trait object by unsizing alone, without deref (`&Box<dyn S>` is no `&dyn S`).
+    const target = shallow(t.target);
+    const steps = autoderefSteps(this.program, a.target).slice(0, target.kind === 'dyn' ? 1 : undefined);
+    for (const step of steps) {
+      if (!this.unifier.tryUnify(step.type, t.target)) continue;
+      if (step.derefs.length > 0 || (a.mutable && !t.mutable)) {
+        this.annotations.coercions.set(expr, { kind: 'deref', derefs: step.derefs, fromMut: a.mutable && !t.mutable });
+      }
+      return true;
+    }
+    if (target.kind !== 'dyn') return false;
+    this.requireDyn(a.target, target.trait, expr.span);
+    this.annotations.coercions.set(expr, { kind: 'dyn', type: a.target, mutable: a.mutable });
+    return true;
   }
 
   private requireDyn(type: Type, trait: TraitRef, span: Span): void {
@@ -857,13 +863,11 @@ export class Checker {
 
   private constUsize(expr: Expr): number {
     this.coerceExpr(expr, USIZE);
-    if (expr.kind === 'int') return Number(expr.value);
-    const res = expr.kind === 'path' ? this.annotations.paths.get(expr) : undefined;
-    if (res?.kind === 'const') {
-      const ast = res.def.ast as { value?: Expr };
-      if (ast.value?.kind === 'int') return Number(ast.value.value);
+    const count = constInteger(expr, this.body.module);
+    if (count === undefined) {
+      compileError(expr.span, '[値; 個数] の個数には、整数のリテラルか定数の式を書いてください。');
     }
-    return compileError(expr.span, '[値; 個数] の個数には、整数のリテラルか定数を書いてください。');
+    return Number(count);
   }
 
   private blockUnit(block: Block): void {
@@ -1508,7 +1512,7 @@ export class Checker {
       const callee = expr.callee;
       const closureType = shallow(callee.ty ?? UNIT);
       const actual = closureType.kind === 'closure' ? closureType.closure.kind : kind;
-      if (actual === 'Fn') return;
+      if (actual !== 'FnMut') return;
       if (callee.kind !== 'path') return;
       const res = this.annotations.paths.get(callee);
       if (res?.kind === 'local' && !res.local.mutable && shallow(res.local.type).kind === 'closure') {
@@ -1532,13 +1536,7 @@ export class Checker {
       );
     }
     const found = lookupMethod(this.program, this.solver, receiverType, expr.method);
-    // On a number whose type is not yet known, rustc finds trait methods (`1.cmp(&2)`) but no inherent ones.
-    if (stripped.kind === 'var' && found && found !== 'ambiguous' && (!found.fn.trait || found.fn.impl)) {
-      compileError(
-        expr.methodSpan,
-        `数の型が決まらないので、メソッド ${expr.method} を呼べません（5_i32 や 2.0_f64 のように、型を書いてください）。`
-      );
-    }
+    if (stripped.kind === 'var' && found && found !== 'ambiguous') this.numberReceiver(expr, stripped, found.fn);
     if (found === 'ambiguous') {
       compileError(
         expr.methodSpan,
@@ -1565,6 +1563,23 @@ export class Checker {
     this.annotations.methods.set(expr, { fn, typeArgs: found.typeArgs, receiver: found.adjust });
     if (fn.selfMode === 'value') this.checkMoveOutOfRef(expr, found.adjust, found.selfType);
     return sig.ret;
+  }
+
+  /**
+   * On a number whose type is not yet known, rustc finds trait methods (`1.cmp(&2)`) but no inherent ones; the
+   * program's own trait impl for a number type gives the number that type.
+   */
+  private numberReceiver(expr: Extract<Expr, { kind: 'methodCall' }>, number: Type, fn: FnDef): void {
+    const ownImpl = fn.impl?.trait && !(fn.module as Module).isStd ? fn.impl : undefined;
+    if (ownImpl) {
+      const implSelf = normalize(shallow(ownImpl.selfType));
+      if (implSelf.kind === 'int' || implSelf.kind === 'float') this.unifier.tryUnify(number, implSelf);
+    } else if (!fn.trait || fn.impl) {
+      compileError(
+        expr.methodSpan,
+        `数の型が決まらないので、メソッド ${expr.method} を呼べません（5_i32 や 2.0_f64 のように、型を書いてください）。`
+      );
+    }
   }
 
   private noMethod(expr: Extract<Expr, { kind: 'methodCall' }>, receiverType: Type): never {
@@ -1924,7 +1939,9 @@ export class Checker {
   private refExpr(expr: Extract<Expr, { kind: 'ref' }>, expected: Type | undefined): Type {
     const e = expected ? normalize(shallow(expected)) : undefined;
     let inner = e?.kind === 'ref' ? e.target : undefined;
-    if (inner && shallow(inner).kind === 'slice' && expr.operand.kind !== 'index') inner = undefined;
+    // An array literal takes its elements' type from the slice it is borrowed as (`&[&dyn Shape]`).
+    const slicing = expr.operand.kind === 'index' || expr.operand.kind === 'array';
+    if (inner && shallow(inner).kind === 'slice' && !slicing) inner = undefined;
     if (inner && shallow(inner).kind === 'str') inner = undefined;
     if (inner && shallow(inner).kind === 'dyn') inner = undefined;
     const type = this.expr(expr.operand, inner);
@@ -2211,9 +2228,9 @@ export class Checker {
     } finally {
       this.body = parentBody;
     }
-    const kind = closureKindOf(fn, expr.body, this.annotations, this.solver);
+    const { kind, movedAt } = closureKindOf(fn, expr.body, this.annotations, this.solver);
     fn.closureKind = kind;
-    (closureType as { closure: { kind: string } }).closure.kind = kind;
+    Object.assign((closureType as Type & { kind: 'closure' }).closure, { kind, movedAt });
     this.annotations.closures.set(expr, {
       context: fn,
       params: expr.params.flatMap((param) =>
@@ -2280,11 +2297,17 @@ export class Checker {
             `write! の書き込み先は、fmt::Formatter か String にしてください（${typeToString(resolve(target))} です）。`
           );
         }
-        if (isString)
+        if (isString) {
+          // `write!` calls `write_fmt`, which `String` has only from `std::fmt::Write` in scope.
+          const write = lookupType(this.body.module, 'Write', macro.target.span);
+          if (write?.kind !== 'trait' || !write.def.methods.has('write_str')) {
+            compileError(macro.target.span, 'String に write! で書き込むには、use std::fmt::Write; を書いてください。');
+          }
           this.requireMutablePlace(
             macro.target.kind === 'ref' ? macro.target.operand : macro.target,
             'write! で書き込む'
           );
+        }
         if (macro.format) this.formatArgs(macro.format);
         return this.program.builtinType('Result', [UNIT, this.program.builtinType('FmtError')]);
       }
@@ -2740,52 +2763,115 @@ function isIntegral(type: Type): boolean {
   return t.kind === 'int' || (t.kind === 'var' && t.v.literal === 'int');
 }
 
-/** The closure trait a closure implements, from how its body uses the variables it captures. */
-// code-gauge-allow functionCognitiveComplexity 29 -- Follows the type checking rules of rustc case by case.
+/**
+ * The closure trait a closure implements, from how its body uses the variables it captures: `FnOnce` when it moves
+ * one out (its value is used rather than borrowed), `FnMut` when it mutates one. Records the captures it moves.
+ */
+// code-gauge-allow functionCognitiveComplexity 21 -- Follows the type checking rules of rustc case by case.
+// code-gauge-allow functionNcss 32 -- Follows the type checking rules of rustc case by case.
 function closureKindOf(
   fn: FnContext,
   body: Expr,
   annotations: Annotations,
   solver: TraitSolver
-): 'Fn' | 'FnMut' | 'FnOnce' {
+): Pick<ClosureType, 'kind' | 'movedAt'> {
   let kind: 'Fn' | 'FnMut' | 'FnOnce' = 'Fn';
   const captured = new Set(fn.captures);
-  const isCaptured = (expr: Expr): boolean => {
+  const moved = new Set<LocalVar>();
+  let firstMove: { name: string; span: Span } | undefined;
+  const capturedLocal = (expr: Expr): LocalVar | undefined => {
     let current = expr;
     while (current.kind === 'field' || current.kind === 'index') current = current.operand;
-    if (current.kind !== 'path') return false;
+    if (current.kind !== 'path') return undefined;
     const res = annotations.paths.get(current);
-    return res?.kind === 'capture' && captured.has(res.local);
+    return res?.kind === 'capture' && captured.has(res.local) ? res.local : undefined;
   };
-  const visit = (expr: Expr | undefined): void => {
+  const visit = (expr: Expr | undefined, consumed: boolean): void => {
     if (!expr) return;
-    const mutates =
-      ((expr.kind === 'assign' || expr.kind === 'compoundAssign') && isCaptured(expr.target)) ||
-      (expr.kind === 'ref' && expr.mutable && isCaptured(expr.operand)) ||
-      (expr.kind === 'methodCall' &&
-        annotations.methods.get(expr)?.receiver.autoref === 'mut' &&
-        isCaptured(expr.receiver)) ||
-      (expr.kind === 'macro' &&
-        expr.macro.kind === 'write' &&
-        isCaptured(expr.macro.target.kind === 'ref' ? expr.macro.target.operand : expr.macro.target));
-    if (mutates && kind === 'Fn') kind = 'FnMut';
-    if (expr.kind === 'methodCall') {
-      const method = annotations.methods.get(expr);
-      if (
-        method?.fn.selfMode === 'value' &&
-        method.receiver.autoref === 'none' &&
-        expr.receiver.kind === 'path' &&
-        isCaptured(expr.receiver)
-      ) {
-        const type = resolve(expr.receiver.ty ?? UNIT, true);
-        if (!solver.isCopy(type)) kind = 'FnOnce';
+    if (closureMutates(expr, annotations, (e) => capturedLocal(e) !== undefined) && kind === 'Fn') kind = 'FnMut';
+    if (consumed && expr.kind !== 'index') {
+      const local = capturedLocal(expr);
+      // Defaulting number literals' types here would fix them too early; the solver knows they are `Copy` anyway.
+      const type = resolve(expr.ty ?? UNIT);
+      const unknown = type.kind === 'var' && !type.v.literal;
+      if (local && !unknown && !solver.isCopy(type)) {
+        kind = 'FnOnce';
+        moved.add(local);
+        firstMove ??= { name: local.name, span: expr.span };
       }
     }
-    forEachDirect(expr, visit);
+    const consumes = consumedChildren(expr, annotations);
+    forEachDirect(expr, (child) => visit(child, consumes(child, consumed)));
   };
-  visit(body);
+  visit(body, true);
+  fn.movedCaptures = [...moved];
   void closureKindAtLeast;
-  return kind;
+  return { kind, movedAt: firstMove };
+}
+
+function closureMutates(expr: Expr, annotations: Annotations, isCaptured: (expr: Expr) => boolean): boolean {
+  if ((expr.kind === 'assign' || expr.kind === 'compoundAssign') && isCaptured(expr.target)) return true;
+  if (expr.kind === 'ref' && expr.mutable && isCaptured(expr.operand)) return true;
+  if (expr.kind === 'methodCall' && annotations.methods.get(expr)?.receiver.autoref === 'mut') {
+    return isCaptured(expr.receiver);
+  }
+  if (expr.kind === 'macro' && expr.macro.kind === 'write') {
+    const { target } = expr.macro;
+    return isCaptured(target.kind === 'ref' ? target.operand : target);
+  }
+  return false;
+}
+
+/** Which children of an expression it uses by value (moves), given whether the expression's own value is moved. */
+// code-gauge-allow functionCognitiveComplexity 20 -- One case per kind of expression.
+// code-gauge-allow functionNcss 33 -- One case per kind of expression.
+function consumedChildren(expr: Expr, annotations: Annotations): (child: Expr, consumed: boolean) => boolean {
+  switch (expr.kind) {
+    case 'ref':
+    case 'field':
+    case 'index':
+    case 'closure': {
+      return () => false;
+    }
+    case 'macro': {
+      return () => expr.macro.kind === 'vec';
+    }
+    case 'match': {
+      return (child, consumed) => child !== expr.scrutinee && consumed;
+    }
+    case 'while': {
+      return (child) => child !== (expr.cond.kind === 'expr' ? expr.cond.expr : expr.cond.value);
+    }
+    case 'unary': {
+      return () => expr.op !== '*';
+    }
+    case 'binary': {
+      return () => !['==', '!=', '<', '<=', '>', '>='].includes(expr.op);
+    }
+    case 'methodCall': {
+      const method = annotations.methods.get(expr);
+      const byValue = method?.fn.selfMode === 'value' && method.receiver.autoref === 'none';
+      return (child) => child !== expr.receiver || byValue;
+    }
+    case 'call': {
+      return (child) => child !== expr.callee;
+    }
+    case 'assign':
+    case 'compoundAssign': {
+      return (child) => child === expr.value;
+    }
+    case 'if': {
+      const cond = expr.cond.kind === 'expr' ? expr.cond.expr : expr.cond.value;
+      return (child, consumed) =>
+        child === cond ? false : child === expr.consequent.tail || child === expr.else ? consumed : true;
+    }
+    case 'block': {
+      return (child, consumed) => (child === expr.tail ? consumed : true);
+    }
+    default: {
+      return () => true;
+    }
+  }
 }
 
 export { hasParams, deepNormalize, allSupertraits, derefOnce };

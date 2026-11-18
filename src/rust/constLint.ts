@@ -1,20 +1,28 @@
 import type { Annotations, LocalVar } from './annotations';
-import type { Block, Expr, Stmt } from './ast';
+import type { Block, Condition, Expr, MatchArm, Pattern, Stmt } from './ast';
 import { forEachDirect } from './astWalk';
 import { normalize } from './infer';
 import { compileError } from './items';
 import { castValue, wrap } from './ops';
-import { intMax, intMin, type IntName, resolve, shallow, type Type } from './types';
+import { INT_NAMES, intMax, intMin, type IntName, resolve, shallow, type Type } from './types';
 
-type Known = bigint | number | boolean;
+/** A constant: a number, a bool, or a tuple or struct of constants keyed by field (`0`, `x`). */
+type Known = bigint | number | boolean | Aggregate;
+
+interface Aggregate {
+  fields: Map<string, Known | undefined>;
+}
 
 /**
  * Rejects operations that rustc's deny-by-default lints find always panic, by propagating constants through
  * literals, `const` items, and variables declared without `mut`: arithmetic that overflows (`arithmetic_overflow`),
- * division by zero and indexes of arrays out of bounds (`unconditional_panic`).
+ * division by zero and indexes of arrays out of bounds (`unconditional_panic`). Like rustc, which lints the reachable
+ * code of the function after propagating constants, it skips what a known condition never reaches.
  */
 export class ConstLint {
   private readonly known = new Map<LocalVar, Known>();
+  /** Whether the code checked last never finishes normally (`return`, `break`), so what follows is unreachable. */
+  private diverged = false;
 
   constructor(private readonly annotations: Annotations) {}
 
@@ -22,22 +30,40 @@ export class ConstLint {
     this.block(block);
   }
 
-  private block(block: Block): void {
-    for (const stmt of block.stmts) this.stmt(stmt);
-    if (block.tail) this.expr(block.tail);
+  private block(block: Block): Known | undefined {
+    for (const stmt of block.stmts) {
+      if (this.diverged) return undefined;
+      this.stmt(stmt);
+    }
+    return block.tail && !this.diverged ? this.expr(block.tail) : undefined;
   }
 
   private stmt(stmt: Stmt): void {
     if (stmt.kind === 'let') {
-      if (stmt.init) {
-        const value = this.expr(stmt.init);
-        const local = stmt.pattern.kind === 'binding' ? this.annotations.bindings.get(stmt.pattern) : undefined;
-        if (local && !local.mutable && local.mode === 'move' && value !== undefined) this.known.set(local, value);
-      }
-      if (stmt.else) this.block(stmt.else);
+      if (stmt.init) this.bind(stmt.pattern, this.expr(stmt.init));
+      if (stmt.else) this.branch(() => this.block(stmt.else!));
     } else if (stmt.kind === 'expr') {
       this.expr(stmt.expr);
     }
+  }
+
+  /** Records the constants that a pattern binds to variables declared without `mut`. */
+  private bind(pattern: Pattern, value: Known | undefined): void {
+    if (value === undefined) return;
+    if (pattern.kind === 'binding') {
+      const local = this.annotations.bindings.get(pattern);
+      if (local && !local.mutable && local.mode === 'move') this.known.set(local, value);
+    } else if (pattern.kind === 'tuple' && typeof value === 'object') {
+      for (const [index, elem] of pattern.elems.entries()) this.bind(elem, value.fields.get(String(index)));
+    }
+  }
+
+  /** Checks code that may not run, which leaves what follows reachable. */
+  private branch(check: () => void): boolean {
+    check();
+    const diverged = this.diverged;
+    this.diverged = false;
+    return diverged;
   }
 
   /** Checks an expression's operations, returning its value when it is a constant. */
@@ -75,7 +101,7 @@ export class ConstLint {
       }
       case 'cast': {
         const operand = this.expr(expr.operand);
-        if (operand === undefined || !intTypeOf(expr.ty)) return undefined;
+        if (operand === undefined || typeof operand === 'object' || !intTypeOf(expr.ty)) return undefined;
         return castValue(operand, resolve(expr.operand.ty!, true), resolve(expr.ty!, true)) as Known;
       }
       case 'index': {
@@ -91,6 +117,47 @@ export class ConstLint {
         }
         return undefined;
       }
+      case 'tuple': {
+        return aggregate(expr.elems.map((elem, index) => [String(index), this.expr(elem)]));
+      }
+      case 'struct': {
+        const fields = expr.fields.map(({ name, value }) => [name, this.expr(value)] as const);
+        if (!expr.base) return aggregate(fields);
+        this.expr(expr.base);
+        return undefined;
+      }
+      case 'field': {
+        const operand = this.expr(expr.operand);
+        return typeof operand === 'object' ? operand.fields.get(expr.name) : undefined;
+      }
+      case 'assign': {
+        const value = this.expr(expr.value);
+        if (expr.target.kind !== 'path') this.expr(expr.target);
+        this.assign(expr.target, value);
+        return undefined;
+      }
+      case 'return':
+      case 'break':
+      case 'continue': {
+        if (expr.kind !== 'continue' && expr.value) this.expr(expr.value);
+        this.diverged = true;
+        return undefined;
+      }
+      case 'while': {
+        const cond = this.condition(expr.cond);
+        if (cond !== false) this.branch(() => this.block(expr.body));
+        return undefined;
+      }
+      case 'loop':
+      case 'for': {
+        if (expr.kind === 'for') this.expr(expr.iterable);
+        this.branch(() => this.block(expr.body));
+        return undefined;
+      }
+      case 'match': {
+        this.match(this.expr(expr.scrutinee), expr.arms);
+        return undefined;
+      }
       case 'closure': {
         const lint = new ConstLint(this.annotations);
         for (const [local, value] of this.known) lint.known.set(local, value);
@@ -99,20 +166,10 @@ export class ConstLint {
         return undefined;
       }
       case 'block': {
-        this.block(expr);
-        return undefined;
+        return this.block(expr);
       }
       case 'if': {
-        // A branch that a known condition never takes is unreachable, where rustc's lints do not look.
-        if (expr.cond.kind === 'let') {
-          this.expr(expr.cond.value);
-          this.block(expr.consequent);
-          if (expr.else) this.expr(expr.else);
-          return undefined;
-        }
-        const cond = this.expr(expr.cond.expr);
-        if (cond !== false) this.block(expr.consequent);
-        if (expr.else && cond !== true) this.expr(expr.else);
+        this.ifExpr(expr);
         return undefined;
       }
       default: {
@@ -124,18 +181,58 @@ export class ConstLint {
     }
   }
 
+  /** Checks the branches of an `if` that its condition may take; it diverges when every branch it takes does. */
+  private ifExpr(expr: Extract<Expr, { kind: 'if' }>): void {
+    const cond = this.condition(expr.cond);
+    const then = cond === false ? undefined : this.branch(() => this.block(expr.consequent));
+    const otherwise = cond === true || !expr.else ? undefined : this.branch(() => this.expr(expr.else!));
+    if (cond === true) this.diverged = then!;
+    else if (cond === false) this.diverged = otherwise ?? false;
+    else this.diverged = then! && (otherwise ?? false);
+  }
+
+  private condition(cond: Condition): Known | undefined {
+    if (cond.kind === 'expr') return this.expr(cond.expr);
+    this.expr(cond.value);
+    return undefined;
+  }
+
+  /** Checks the arms a known scrutinee may reach: those before and at the first arm whose pattern surely matches. */
+  private match(scrutinee: Known | undefined, arms: MatchArm[]): void {
+    let allDiverge = true;
+    for (const arm of arms) {
+      const matches = patternMatches(arm.pattern, scrutinee, this.annotations);
+      if (matches === false) continue;
+      allDiverge = this.branch(() => this.expr(arm.body)) && allDiverge;
+      if (matches === true) break;
+    }
+    this.diverged = allDiverge && arms.length > 0;
+  }
+
+  /** A variable declared without `mut` and without a value takes its one assignment as a constant. */
+  private assign(target: Expr, value: Known | undefined): void {
+    if (target.kind !== 'path' || value === undefined) return;
+    const res = this.annotations.paths.get(target);
+    if (res?.kind === 'local' && !res.local.mutable && res.local.mode === 'move') this.known.set(res.local, value);
+  }
+
   private constValue(expr: Expr): Known | undefined {
     return new ConstLint(this.annotations).expr(expr);
   }
 
-  // code-gauge-allow functionNcss 35 -- One case per kind of constant expression.
+  // code-gauge-allow functionCognitiveComplexity 16 -- One case per kind of constant expression.
+  // code-gauge-allow functionNcss 39 -- One case per kind of constant expression.
   private binary(expr: Extract<Expr, { kind: 'binary' }>): Known | undefined {
     const left = this.expr(expr.left);
+    if (expr.op === '&&' || expr.op === '||') return this.logical(expr, left);
     const right = this.expr(expr.right);
     const name = intTypeOf(expr.left.ty);
     if (!name || typeof right !== 'bigint') return undefined;
     if ((expr.op === '/' || expr.op === '%') && right === 0n) {
       compileError(expr.span, '0 で割る計算なので、実行すると必ず panic します。');
+    }
+    if ((expr.op === '/' || expr.op === '%') && right === -1n && left === intMin(name) && left !== 0n) {
+      compileError(expr.span, 'この計算は、実行すると必ずあふれます。');
     }
     if ((expr.op === '<<' || expr.op === '>>') && (right < 0n || right >= BigInt(bits(name)))) {
       compileError(expr.span, 'この計算は、実行すると必ずあふれます。');
@@ -176,6 +273,15 @@ export class ConstLint {
         return undefined;
       }
     }
+  }
+
+  /** `&&` and `||` evaluate their right operand only when the left one does not decide the result. */
+  private logical(expr: Extract<Expr, { kind: 'binary' }>, left: Known | undefined): Known | undefined {
+    const decided = expr.op === '||';
+    if (left === decided) return decided;
+    const right = this.expr(expr.right);
+    if (left === !decided) return typeof right === 'boolean' ? right : undefined;
+    return right === decided ? decided : undefined;
   }
 
   // code-gauge-allow duplicateLines 21 -- Each language compares its own constants, as its operators define.
@@ -226,23 +332,38 @@ function bits(name: IntName): number {
 /** The value of an integer type's associated constant (`i32::MAX`), which rustc's lints know. */
 function integerConst(name: string): bigint | undefined {
   const [type, constant] = name.split('::') as [IntName, string];
-  if (!INT_NAMES.has(type)) return undefined;
+  if (!INT_NAMES.includes(type)) return undefined;
   if (constant === 'MAX') return intMax(type);
   if (constant === 'MIN') return intMin(type);
   return undefined;
 }
 
-const INT_NAMES = new Set<string>([
-  'i8',
-  'i16',
-  'i32',
-  'i64',
-  'i128',
-  'isize',
-  'u8',
-  'u16',
-  'u32',
-  'u64',
-  'u128',
-  'usize',
-]);
+function aggregate(fields: Iterable<readonly [string, Known | undefined]>): Aggregate {
+  return { fields: new Map(fields) };
+}
+
+/** Whether a pattern matches a constant: surely, surely not, or unknown. */
+function patternMatches(pattern: Pattern, value: Known | undefined, annotations: Annotations): boolean | undefined {
+  switch (pattern.kind) {
+    case 'wild': {
+      return true;
+    }
+    case 'binding': {
+      // A name that resolves to a constant or a unit variant compares rather than binds.
+      return pattern.sub || annotations.paths.has(pattern) ? undefined : true;
+    }
+    case 'lit': {
+      const literal = pattern.expr;
+      if (value === undefined || (literal.kind !== 'int' && literal.kind !== 'bool')) return undefined;
+      return literal.value === value;
+    }
+    case 'or': {
+      const results = pattern.alternatives.map((alternative) => patternMatches(alternative, value, annotations));
+      if (results.includes(true)) return true;
+      return results.every((result) => result === false) ? false : undefined;
+    }
+    default: {
+      return undefined;
+    }
+  }
+}

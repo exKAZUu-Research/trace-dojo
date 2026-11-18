@@ -1,7 +1,7 @@
 import type { Span } from '../ast';
 import type { Interpreter } from '../interpreter';
 import { type Frame, type Runtime, RustPanic } from '../runtime';
-import type { Type } from '../types';
+import type { IntName, Type } from '../types';
 import { EnumValue, isPlace, type Place, type Value } from '../values';
 
 export interface NativeContext {
@@ -25,6 +25,31 @@ export function define(natives: Record<string, Native>): void {
 export function panic(ctx: NativeContext, message: string): never {
   throw new RustPanic(message, ctx.span);
 }
+
+/** A panic inside a function of the standard library without `#[track_caller]`, which Rust reports where it is. */
+export function libraryPanic(ctx: NativeContext, message: string, location: string): never {
+  throw new RustPanic(message, ctx.span, location);
+}
+
+/** Where `core/src/num/mod.rs` expands the methods of an integer type, which their panics report. */
+export function intImplLocation(name: IntName): string {
+  return `core/src/num/mod.rs:${INT_IMPL_ROWS[name]}:5`;
+}
+
+const INT_IMPL_ROWS: Record<IntName, number> = {
+  i8: 379,
+  i16: 404,
+  i32: 429,
+  i64: 454,
+  i128: 479,
+  isize: 559,
+  u8: 586,
+  u16: 1234,
+  u32: 1290,
+  u64: 1322,
+  u128: 1354,
+  usize: 1452,
+};
 
 export function deref(value: Value): Value {
   let current = value;

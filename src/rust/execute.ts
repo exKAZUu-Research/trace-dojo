@@ -27,10 +27,16 @@ export function executeRustProgram(source: string, input?: ProgramInput): Progra
   }
 }
 
+/** The commit of Rust 1.99.1, which the paths of its standard library's sources in panic messages name. */
+const RUSTC_COMMIT = '58cf8f9c35b355199727627d07ae34a4e2846d67';
+
 /** The text Rust prints when a panic ends the program. */
 export function describePanic(panic: RustPanic): string {
   const { row, col } = panic.span;
-  return `thread 'main' (1) panicked at src/main.rs:${row + 1}:${col}:\n${panic.message}\nnote: run with \`RUST_BACKTRACE=1\` environment variable to display a backtrace`;
+  const location = panic.libraryLocation
+    ? `/rustc/${RUSTC_COMMIT}/library/${panic.libraryLocation}`
+    : `src/main.rs:${row + 1}:${col}`;
+  return `thread 'main' (1) panicked at ${location}:\n${panic.message}\nnote: run with \`RUST_BACKTRACE=1\` environment variable to display a backtrace`;
 }
 
 /**

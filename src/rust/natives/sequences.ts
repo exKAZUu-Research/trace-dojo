@@ -21,6 +21,7 @@ import {
   define,
   deref,
   err,
+  libraryPanic,
   type NativeContext,
   none,
   ok,
@@ -263,9 +264,18 @@ const sliceNatives: Record<string, (args: Value[], ctx: NativeContext) => Value>
   },
   to_vec: ([self], ctx) => sliceItems(deref(self)).map((item) => cloneValue(elemType(ctx), item)),
   into_vec: ([self]) => sliceItems(deref(self)),
-  rotate_left: ([self, mid]) => rotate(deref(self), Number(mid as bigint)),
-  rotate_right: ([self, k]) => {
+  rotate_left: ([self, mid], ctx) => {
     const slice = deref(self);
+    if (Number(mid as bigint) > sliceLength(slice)) {
+      libraryPanic(ctx, 'assertion failed: mid <= self.len()', 'core/src/slice/mod.rs:3904:9');
+    }
+    return rotate(slice, Number(mid as bigint));
+  },
+  rotate_right: ([self, k], ctx) => {
+    const slice = deref(self);
+    if (Number(k as bigint) > sliceLength(slice)) {
+      libraryPanic(ctx, 'assertion failed: k <= self.len()', 'core/src/slice/mod.rs:3950:9');
+    }
     return rotate(slice, sliceLength(slice) - Number(k as bigint));
   },
   copy_from_slice: ([self, src], ctx) => copyFrom(ctx, deref(self), deref(src), (item) => copyValue(item)),
@@ -362,7 +372,13 @@ const vecNatives: Record<string, (args: Value[], ctx: NativeContext) => Value> =
   swap_remove: ([self, index], ctx) => {
     const items = vec(self);
     const position = Number(index as bigint);
-    checkIndex(ctx, position, items.length, 'swap_remove');
+    if (position >= items.length) {
+      libraryPanic(
+        ctx,
+        `swap_remove index (is ${position}) should be < len (is ${items.length})`,
+        'alloc/src/vec/mod.rs:2258:13'
+      );
+    }
     const removed = items[position];
     const last = items.pop() as Value;
     if (position < items.length) items[position] = last;
@@ -414,8 +430,16 @@ const vecNatives: Record<string, (args: Value[], ctx: NativeContext) => Value> =
     const r = deref(range) as RangeValue | undefined;
     const start = r?.start === undefined ? 0 : Number(r.start as bigint);
     const end = r?.end === undefined ? items.length : Number(r.end as bigint) + (r.inclusive ? 1 : 0);
-    if (start > end) panic(ctx, `slice index starts at ${start} but ends at ${end}`);
-    if (end > items.length) panic(ctx, `range end index ${end} out of range for slice of length ${items.length}`);
+    if (start > end) {
+      libraryPanic(ctx, `slice index starts at ${start} but ends at ${end}`, 'core/src/slice/index.rs:1020:55');
+    }
+    if (end > items.length) {
+      libraryPanic(
+        ctx,
+        `range end index ${end} out of range for slice of length ${items.length}`,
+        'core/src/slice/index.rs:1009:51'
+      );
+    }
     return arrayIter(items.splice(start, end - start));
   },
   retain: ([self, f], ctx) => {
@@ -514,7 +538,9 @@ const dequeNatives: Record<string, (args: Value[], ctx: NativeContext) => Value>
   insert: ([self, index, value], ctx) => {
     const items = vec(self);
     const position = Number(index as bigint);
-    if (position > items.length) panic(ctx, 'index out of bounds');
+    if (position > items.length) {
+      libraryPanic(ctx, 'index out of bounds', 'alloc/src/collections/vec_deque/mod.rs:2564:9');
+    }
     items.splice(position, 0, value);
     return UNIT_VALUE;
   },

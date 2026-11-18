@@ -65,7 +65,9 @@ export class Frame implements TracedFrame {
 export class RustPanic {
   constructor(
     readonly message: string,
-    readonly span: Span
+    readonly span: Span,
+    /** Where in the standard library the panic is, for functions without `#[track_caller]` (`core/src/...:L:C`). */
+    readonly libraryLocation?: string
   ) {}
 }
 

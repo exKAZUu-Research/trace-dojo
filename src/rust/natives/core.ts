@@ -225,7 +225,11 @@ define({
   'Ord::min': ([self, other], ctx) => ((compareValues(selfType(ctx), self, other) ?? 0) <= 0 ? self : other),
   'Ord::clamp': ([self, min, max], ctx) => {
     const type = selfType(ctx);
-    if ((compareValues(type, min, max) ?? 0) > 0) panic(ctx, 'assertion failed: min <= max');
+    if ((compareValues(type, min, max) ?? 0) > 0) {
+      // Integers report their bounds; other types assert.
+      const isInt = normalize(shallow(type)).kind === 'int';
+      panic(ctx, isInt ? `min > max. min = ${min as bigint}, max = ${max as bigint}` : 'assertion failed: min <= max');
+    }
     if ((compareValues(type, self, min) ?? 0) < 0) return min;
     if ((compareValues(type, self, max) ?? 0) > 0) return max;
     return self;
@@ -269,6 +273,8 @@ define({
     throw new ProcessExit(Number(code as bigint));
   },
   'Box<_>::new': ([x]) => x,
+  'Box<_>::as_ref': ([self]) => deref(self),
+  'Box<_>::as_mut': ([self]) => self,
   'Ordering::reverse': ([self], ctx) => ordering(ctx, -((self as EnumValue).variant - 1)),
   'Ordering::then': ([self, other]) => ((self as EnumValue).variant === 1 ? other : self),
   'Ordering::then_with': ([self, f], ctx) => ((self as EnumValue).variant === 1 ? call(ctx, f, []) : self),

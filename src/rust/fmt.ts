@@ -213,7 +213,8 @@ export class Formatter {
   // code-gauge-allow functionNcss 57 -- Follows std::fmt's formatting rules case by case.
   private debugAdt(v: Value, t: Type & { kind: 'adt' }, spec: Spec, indent: number | undefined): string {
     const user = this.hooks.userFmt('Debug', t, v, { ...spec, alternate: indent !== undefined });
-    if (user !== undefined) return user;
+    // What an impl writes on several lines nests as the containers around it do (std's `PadAdapter`).
+    if (user !== undefined) return indent ? user.replaceAll('\n', `\n${'    '.repeat(indent)}`) : user;
     const { def } = t;
     switch (def.builtin) {
       case 'String': {
@@ -520,7 +521,7 @@ export function errorDisplay(builtin: string, value: Value): string {
       return 'provided string was not `true` or `false`';
     }
     case 'TryFromIntError': {
-      return 'out of range integral type conversion attempted';
+      return `number too ${kind === 'NegOverflow' ? 'small' : 'large'} to fit in target type`;
     }
     case 'FmtError': {
       return 'an error occurred when formatting an argument';
@@ -548,9 +549,10 @@ function errorDebug(builtin: string, value: Value, indent: number | undefined): 
       return inner('ParseFloatError', 'kind', kind ?? 'Invalid');
     }
     case 'TryFromIntError': {
+      const text = kind ?? 'PosOverflow';
       return indent === undefined
-        ? 'TryFromIntError(())'
-        : `TryFromIntError(\n${'    '.repeat(indent + 1)}(),\n${'    '.repeat(indent)})`;
+        ? `TryFromIntError(${text})`
+        : `TryFromIntError(\n${'    '.repeat(indent + 1)}${text},\n${'    '.repeat(indent)})`;
     }
     case 'FmtError': {
       return 'Error';
