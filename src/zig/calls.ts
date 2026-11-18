@@ -78,7 +78,7 @@ export abstract class CallCompiler extends BuiltinCompiler {
     if (callee.kind === 'enumLiteral' && resultType) {
       // A decl literal such as `.init(42)` names a declaration of the result type, seen through `?` and `!`.
       const namespace = unwrapResult(resultType);
-      const member = this.typeMember(namespace, callee.name, callee);
+      const member = this.requireKnownDeclarationLiteral(this.typeMember(namespace, callee.name, callee), callee);
       return this.callValue(member, undefined, expression, resultType);
     }
     const target = this.compile(callee);

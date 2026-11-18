@@ -325,9 +325,14 @@ export abstract class ExpressionCompiler extends SemaBase {
     if (!resultType) return literal;
     const target = unwrapResult(resultType);
     const decl = this.findDecl(target, name);
-    if (decl) return this.resolveDecl(decl, span);
+    if (decl) return this.requireKnownDeclarationLiteral(this.resolveDecl(decl, span), span);
     if (target.kind === 'enum' || target.kind === 'union') return this.coerce(literal, target, span);
     return literal;
+  }
+
+  protected requireKnownDeclarationLiteral(value: TExpr, span: Span): TExpr {
+    if (!value.known) return this.error(span, '宣言リテラルはコンパイルのときに値が決まっていなければなりません。');
+    return value;
   }
 
   findDecl(type: Type, name: string): Decl | undefined {

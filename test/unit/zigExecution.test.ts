@@ -1367,6 +1367,23 @@ test('enum and union declaration literals prefer namespace aliases before tags',
   });
 });
 
+test.each([
+  'const T=enum{a,b,var zero:@This()=.a;};pub fn main()void{const x:T=.zero;_=x;}',
+  'const T=union(enum){a:u8,var zero:@This()=.{.a=0};};pub fn main()void{const x:T=.zero;_=x;}',
+  'const T=struct{x:u8,var zero:@This()=.{.x=0};};pub fn main()void{const x:??T=.zero;_=x;}',
+  'const T=struct{x:u8,var factory:*const fn()T=&make;fn make()T{return .{.x=0};}};pub fn main()void{const x:T=.factory();_=x;}',
+])('declaration literals reject runtime namespace members: %s', (source) => {
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'compileError',
+    diagnostics: [{ message: expect.stringContaining('宣言リテラル') }],
+  });
+});
+
+test('qualified access can select a runtime namespace variable', () => {
+  const source = `const std=@import("std");const T=enum{a,b,var current:@This()=.a;};pub fn main()void{T.current=.b;std.debug.print("{t}",.{T.current});}`;
+  expect(executeProgram('zig', source)).toMatchObject({ kind: 'executed', stderr: 'b', uncaughtException: undefined });
+});
+
 test('writer result types use the canonical usize and mutable byte slice', () => {
   const source = `const std=@import("std");fn less(n:usize,a:u8,b:u8)bool{return n>0 and a<b;}
 pub fn main()!void{var b:[2]u8=undefined;var w=std.Io.Writer.fixed(&b);const n=try w.write("x");var a=[_]u8{2,1};std.sort.heap(u8,&a,n,less);std.debug.print("{} {} {}",.{a[0],a[1],@TypeOf(w.buffered())==[]u8});}`;
