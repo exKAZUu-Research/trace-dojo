@@ -8,7 +8,7 @@ import { setErrorFactories, setThrowableFormatter, throwableKey } from './errors
 import { type ClassDefinition, defineClass, type NativeMethod } from './native';
 import { toStr } from './operators';
 import { rt, SCRIPT_PATH } from './runtime';
-import { PhpArray, type PhpClass, PhpObject, Ref, type Value } from './values';
+import { enumCaseName, PhpArray, type PhpClass, PhpObject, Ref, type Value } from './values';
 
 /** Sets the file, line, and trace of a new throwable, as PHP does when the object is created. */
 function initThrowable(object: PhpObject): undefined {
@@ -104,8 +104,9 @@ export function traceArg(value: Value): string {
     }
   }
   if (value instanceof PhpArray) return 'Array';
-  if (value instanceof PhpObject && value.isResource) return `Resource id #${value.id}`;
-  return `Object(${(value as PhpObject).cls.name})`;
+  const object = value as PhpObject;
+  if (object.isResource) return `Resource id #${object.id}`;
+  return object.cls.kind === 'enum' ? enumCaseName(object) : `Object(${object.cls.name})`;
 }
 
 const TRACE_ESCAPES: Record<string, string> = {

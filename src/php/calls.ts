@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 702 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 717 -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import { LIMITS } from '../interpreter/limits';
 import type { FunctionDecl } from './ast';
@@ -39,6 +39,7 @@ import {
 /** An argument as a call passes it: its value, and the reference a by-reference parameter receives. */
 export interface ArgValue {
   temporaryCount?: number;
+  heldReference?: boolean;
   nativeTransfer?: { values: unknown[]; count: number; value?: Value };
   v: Value;
   ref?: Ref;
@@ -614,7 +615,7 @@ function invokeUser(
   let failed = false;
   try {
     runtime.row = decl.row;
-    handOverArgs(caller, args);
+    handOverArgs(caller, args, frame);
     if (closure) bindClosureVars(frame, closure);
     bindParams(frame, fn, args, positional, { name, parameter: functionDisplayName(target, true) }, strict, row);
     recordBoundArgs(record, params, frame, args, positional.length);
@@ -805,8 +806,10 @@ function tracedNamedArgs(
  * Takes the arguments of a user function call off the caller's temporaries once the callee's parameters hold them, as
  * PHP moves a temporary argument into the callee's frame, which frees it with the callee's other variables.
  */
-export function handOverArgs(caller: Frame, args: ArgValue[]): void {
+// code-gauge-allow functionCognitiveComplexity 18 -- Transfers both value and reference arguments to their actual call owner.
+export function handOverArgs(caller: Frame, args: ArgValue[], callee?: Frame): void {
   for (const arg of args) {
+    if (arg.heldReference && arg.ref) transferArgumentReference(caller, arg.ref, callee);
     if (arg.nativeTransfer) {
       const { values, count, value = arg.v } = arg.nativeTransfer;
       for (let index = count - 1; index >= 0; index--) {
@@ -823,6 +826,14 @@ export function handOverArgs(caller: Frame, args: ArgValue[]): void {
       caller.temporaries.splice(index, 1);
     }
   }
+}
+
+function transferArgumentReference(caller: Frame, reference: Ref, callee: Frame | undefined): void {
+  const index = caller.temporaries.lastIndexOf(reference);
+  if (index === -1) return;
+  caller.temporaries.splice(index, 1);
+  if (callee) callee.temporaries.push(reference);
+  else reference.rc--;
 }
 
 /** Gives a closure's frame the variables the closure captured: shared references, or copies of values. */
@@ -892,7 +903,7 @@ export function setDefaultEvaluator(run: (decl: FunctionDecl, index: number, fra
   evaluateDefault = run;
 }
 
-// code-gauge-allow functionNcss 53 -- Binds arguments to parameters as PHP's call protocol does, in its order of checks.
+// code-gauge-allow functionNcss 55 -- Binds arguments to parameters as PHP's call protocol does, in its order of checks.
 // code-gauge-allow functionParameterCount 7 -- Binds arguments to parameters as PHP's call protocol does, in its order of checks.
 function bindParams(
   frame: Frame,
@@ -909,7 +920,7 @@ function bindParams(
     const ref = param.byRef ? bindRef(arg) : undefined;
     if (ref) assign(ref);
     const original = ref ? ref.v : share(arg.v);
-    const value = checkParam(original, param, index, labels.parameter, strict, frame, callRow);
+    const value = checkParam(original, param, index, labels.parameter, strict, frame, callRow, ref);
     if (ref) {
       if (value !== original) ref.v = value;
     } else assign(value);
@@ -956,7 +967,9 @@ function bindParams(
         );
       }
       const value = evaluateDefault(fn.decl, index, frame);
-      frame.vars.set(param.name, new Ref(value));
+      rt().row = fn.decl.row;
+      const checked = checkParam(value, param, index, labels.parameter, rt().strictTypes, frame, callRow);
+      frame.vars.set(param.name, new Ref(checked));
       continue;
     }
     bindSupplied(arg, param, index, (slot) => frame.vars.set(param.name, slot instanceof Ref ? slot : new Ref(slot)));
@@ -970,7 +983,7 @@ function bindRef(arg: ArgValue): Ref {
   return ref;
 }
 
-// code-gauge-allow functionParameterCount 7 -- Binds arguments to parameters as PHP's call protocol does, in its order of checks.
+// code-gauge-allow functionParameterCount 8 -- Binds arguments to parameters as PHP's call protocol does, in its order of checks.
 function checkParam(
   value: Value,
   param: Param,
@@ -978,11 +991,17 @@ function checkParam(
   name: string,
   strict: boolean,
   frame: Frame,
-  callRow: number | undefined
+  callRow: number | undefined,
+  reference?: Ref
 ): Value {
   const type = parameterType(param);
   if (!type) return value;
-  const coerced = coerce(value, type, { strict, internal: false, scope: frame.scope, staticClass: frame.staticClass });
+  const context = { scope: frame.scope, staticClass: frame.staticClass };
+  const coerced = reference?.typeOwners().length
+    ? matches(value, type, context)
+      ? value
+      : NO_MATCH
+    : coerce(value, type, { ...context, strict, internal: false });
   if (coerced !== NO_MATCH) return coerced;
   const where = callRow === undefined ? '' : `, called in ${SCRIPT_PATH} on line ${callRow + 1}`;
   const typeText = describeType(type, frame.scope);

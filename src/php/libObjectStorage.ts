@@ -13,11 +13,14 @@ import { dropped, type Key, type NativeFunction, NativeValueIndex, PhpArray, Php
 interface StorageEntry {
   object: PhpObject;
   info: Value;
+  slot: number;
 }
 
 class ObjectStorage {
   readonly nativeValues = new NativeValueIndex();
   slots: (StorageEntry | undefined)[] = [];
+  private bucketCapacity = 8;
+  private bucketMode: 'empty' | 'packed' | 'mixed' = 'empty';
   entries = new Map<string | PhpObject, StorageEntry>();
   /** The slot the iteration is at, which may be an empty one before the next element. */
   position = 0;
@@ -67,12 +70,41 @@ class ObjectStorage {
       dropped(old);
     } else {
       rt().allocate(1);
-      const entry = { object, info };
+      const slot = this.insertionBucket(hash);
+      const entry = { object, info, slot };
       this.entries.set(hash, entry);
-      this.slots.push(entry);
+      this.slots[slot] = entry;
       this.nativeValues.add(object);
       this.nativeValues.add(info);
     }
+  }
+
+  // code-gauge-allow functionCognitiveComplexity 19 -- PHP bucket insertion shares representation, compaction and capacity state.
+  private insertionBucket(hash: string | PhpObject): number {
+    const id = typeof hash === 'string' ? undefined : hash.id;
+    if (this.bucketMode === 'empty')
+      this.bucketMode = id !== undefined && id < this.bucketCapacity ? 'packed' : 'mixed';
+    if (this.bucketMode === 'packed' && id !== undefined && id >= this.slots.length) {
+      if (id < this.bucketCapacity) return id;
+      if (id < this.bucketCapacity * 2 && this.entries.size > this.bucketCapacity / 2) {
+        this.bucketCapacity *= 2;
+        return id;
+      }
+    }
+    if (this.bucketMode === 'packed') {
+      this.bucketMode = 'mixed';
+      if (this.slots.length >= this.bucketCapacity) this.bucketCapacity *= 2;
+      this.compactBuckets();
+    } else if (this.slots.length >= this.bucketCapacity) {
+      if (this.slots.length > this.entries.size + Math.floor(this.entries.size / 32)) this.compactBuckets();
+      else this.bucketCapacity *= 2;
+    }
+    return this.slots.length;
+  }
+
+  private compactBuckets(): void {
+    this.slots = this.slots.filter((entry) => entry !== undefined);
+    for (const [slot, entry] of this.slots.entries()) if (entry) entry.slot = slot;
   }
 
   detach(object: PhpObject, capture?: (error: PhpThrow) => void): boolean {
@@ -82,7 +114,9 @@ class ObjectStorage {
     this.entries.delete(hash);
     this.nativeValues.delete(entry.object);
     this.nativeValues.delete(entry.info);
-    this.slots[this.slots.indexOf(entry)] = undefined;
+    this.slots[entry.slot] = undefined;
+    if (entry.slot === this.slots.length - 1)
+      while (this.slots.length > 0 && this.slots.at(-1) === undefined) this.slots.pop();
     this.releaseRemoved([entry.object, entry.info], capture);
     return true;
   }
@@ -148,11 +182,15 @@ class ObjectStorage {
     });
   }
 
+  // code-gauge-allow functionCognitiveComplexity 16 -- Pins a key through its callback, detach and pending-exception cleanup.
   removeAllExcept(other: ObjectStorage): bigint {
     return this.bulkRemove(this.hashKeys || other.hashKeys, (capture) => {
-      for (const object of this.objects()) {
+      for (let slot = 0; slot < this.slots.length; slot++) {
         const runtime = rt();
         runtime.spend();
+        const entry = this.slots[slot];
+        if (!entry) continue;
+        const { object } = entry;
         const holder = runtime.held.length;
         runtime.held.push(object);
         let pending: PhpThrow | undefined;

@@ -11,3 +11,28 @@ string(5) "UTF-8"
 string(11) "ISO-2022-KR"
 bool(false)
 mb_detect_encoding(): Argument #2 ($encodings) contains invalid encoding "bogus"
+string(7) "UCS-2BE"
+string(7) "UCS-2LE"
+string(7) "UCS-4BE"
+string(7) "UCS-4LE"
+string(5) "UCS-2"
+string(19) "UTF-8-Mobile#DOCOMO"
+string(9) "UTF7-IMAP"
+string(5) "UTF-7"
+string(6) "EUC-TW"
+string(11) "ISO-2022-KR"
+string(2) "HZ"
+string(5) "CP850"
+string(9) "ArmSCII-8"
+bool(false)
+bool(false)
+bool(false)
+bool(false)
+string(4) "SJIS"
+string(4) "SJIS"
+bool(false)
+bool(false)
+string(5) "CP932"
+string(5) "CP932"
+string(5) "CP932"
+bool(false)

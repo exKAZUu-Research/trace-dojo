@@ -25,6 +25,7 @@ interface Level {
   object: PhpObject;
   iterator: InnerIterator;
   step: Step;
+  retiring?: boolean;
 }
 
 /** The state of a RecursiveIteratorIterator (spl_recursive_it_object). */
@@ -43,7 +44,7 @@ class RecursiveState {
 
   /** What the iterator holds, in the order PHP releases it (spl_RecursiveIteratorIterator_free_iterators). */
   held(): Value[] {
-    return this.levels.toReversed().flatMap((level) => [level.iterator.handle, level.object]);
+    return this.levels.toReversed().flatMap((level) => (level.retiring ? [] : [level.iterator.handle, level.object]));
   }
 
   releaseTraversal(object: PhpObject): boolean {
@@ -54,7 +55,7 @@ class RecursiveState {
       withCleanupExceptions(runtime, (capture) => {
         while (this.depth > 0) {
           try {
-            releaseLevel(object, this, true);
+            releaseLevel(object, this, 'teardown');
           } catch (error) {
             if (!(error instanceof PhpThrow)) throw error;
             capture(error);
@@ -119,7 +120,7 @@ function validAt(object: PhpObject, state: RecursiveState): boolean {
 function rewind(object: PhpObject, state: RecursiveState): void {
   state.checkConstructed();
   while (state.levels.length > 1) {
-    releaseLevel(object, state, true);
+    releaseLevel(object, state, 'rewind');
     callMethod(object, 'endChildren', []);
   }
   const root = state.levels[0];
@@ -139,18 +140,26 @@ function moveForward(object: PhpObject, state: RecursiveState): void {
       if (state.levels.length === 1) return;
       const exhausted = state.top;
       catching(state, () => hook(object, 'endChildren'));
-      if (state.levels.at(-1) === exhausted) releaseLevel(object, state, false);
+      if (state.levels.at(-1) === exhausted) releaseLevel(object, state, 'advance');
     }
   }
 }
 
-function releaseLevel(object: PhpObject, state: RecursiveState, rewinding: boolean): void {
-  const level = state.levels.pop() as Level;
+function releaseLevel(object: PhpObject, state: RecursiveState, mode: 'advance' | 'rewind' | 'teardown'): void {
+  const level = state.top;
+  if (level.retiring || mode === 'rewind') state.levels.pop();
+  if (level.retiring) return;
+  level.retiring = true;
   nativeOwnershipChanged(object);
   const runtime = rt();
   const values = [level.iterator.handle, level.object];
-  runtime.release(rewinding ? values : values.toReversed(), true);
-  runtime.flushReleases(true);
+  try {
+    runtime.release(mode === 'advance' ? values.toReversed() : values, true);
+    runtime.flushReleases(true);
+  } finally {
+    const index = state.levels.indexOf(level);
+    if (index !== -1) state.levels.splice(index, 1);
+  }
 }
 
 /** Takes one step of the deepest level: reports an element, moves on, or finds the level exhausted. */

@@ -171,7 +171,7 @@ function resolveConstant(constant: ClassConst, displayName: string, trackEvaluat
         if (coerced === NO_MATCH) {
           throwError(
             'TypeError',
-            `Cannot use ${debugType(value)} as value for class constant ${constant.cls.name}::${name} of type ${typeToString(constant.type)}`
+            `Cannot assign ${debugType(value)} to class constant ${constant.cls.name}::${name} of type ${typeToString(constant.type)}`
           );
         }
         value = coerced;

@@ -29,12 +29,12 @@ export function setDestructor(run: (object: PhpObject, row?: number) => void): v
 }
 
 /** Collects unreachable objects and, when `cycles` is set, cycles; returns PHP's count of objects and arrays. */
-export function collectGarbage(runtime: Runtime, cycles = false): number {
+export function collectGarbage(runtime: Runtime, cycles = false, stopOnException = false): number {
   if (runtime.collectingCycles) return 0;
   runtime.collectingCycles = cycles;
   if (cycles) for (const value of gcTemporaries(runtime)) runtime.gcRoots.delete(value);
   try {
-    return collectGarbageNow(runtime, cycles);
+    return collectGarbageNow(runtime, cycles, stopOnException);
   } finally {
     runtime.collectingCycles = false;
     runtime.collectingArrays.clear();
@@ -56,7 +56,7 @@ function gcTemporaries(runtime: Runtime): (PhpArray | PhpObject)[] {
 
 // code-gauge-allow functionCognitiveComplexity 26 -- The first pass collects the same live snapshots for both release paths.
 // code-gauge-allow functionNcss 44 -- Shares mark results, roots and release order across both release paths.
-function collectGarbageNow(runtime: Runtime, cycles: boolean): number {
+function collectGarbageNow(runtime: Runtime, cycles: boolean, stopOnException: boolean): number {
   // While a release runs destructors, it frees the rest of what it released itself, in PHP's order.
   if ((runtime.objects.size === 0 && runtime.arrayCycles.size === 0) || (releasing > 0 && !cycles)) {
     if (cycles) runtime.gcRoots.clear();
@@ -103,18 +103,28 @@ function collectGarbageNow(runtime: Runtime, cycles: boolean): number {
     retainTurtles(runtime, mark(runtime));
     return collected;
   }
-  return collectAfterDestruction(runtime, owners, handles, destructible, arrayCandidates, arrayStorage);
+  return collectAfterDestruction(
+    runtime,
+    owners,
+    handles,
+    destructible,
+    arrayCandidates,
+    arrayStorage,
+    stopOnException
+  );
 }
 
-// code-gauge-allow functionCognitiveComplexity 16 -- Captures destructor exceptions while releasing the rest of the batch.
+// code-gauge-allow functionCognitiveComplexity 17 -- Captures destructor exceptions while releasing the rest of the batch.
 // code-gauge-allow functionNcss 31 -- Destructor dispatch and cleanup use the same collection batch.
+// code-gauge-allow functionParameterCount 7 -- Uses the mark results, destructor order and shutdown policy for one collection batch.
 function collectAfterDestruction(
   runtime: Runtime,
   owners: PhpObject[],
   handles: PhpObject[],
   destructible: PhpObject[],
   arrayCandidates: PhpArray[],
-  arrayStorage: Set<PhpArray>
+  arrayStorage: Set<PhpArray>,
+  stopOnException: boolean
 ): number {
   let count = 0;
   const destructedInBuffer = new Set<PhpObject>();
@@ -132,7 +142,7 @@ function collectAfterDestruction(
           runtime.held.pop();
         }
       } catch (error) {
-        if (!(error instanceof PhpThrow)) throw error;
+        if (stopOnException || !(error instanceof PhpThrow)) throw error;
         capture(error);
       }
       retainCollectionReceiver(runtime, object);
@@ -198,11 +208,16 @@ function countAfterDestruction(
  * handle returns to the free list. Objects on a cycle stay, as reference counting cannot free them.
  */
 // code-gauge-allow functionNcss 48 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
-export function releaseDropped(runtime: Runtime, dropped: unknown[], fromNative: boolean): void {
+export function releaseDropped(
+  runtime: Runtime,
+  dropped: unknown[],
+  fromNative: boolean,
+  stopOnException = false
+): void {
   if (runtime.shuttingDown || runtime.exhausted) return;
   const collectible = releaseCollectionDescendants(runtime, dropped);
   try {
-    releaseDroppedNow(runtime, dropped, fromNative);
+    releaseDroppedNow(runtime, dropped, fromNative, stopOnException);
   } finally {
     for (const object of collectible)
       if (runtime.objects.get(object.id) === object) runtime.collectingObjects.add(object);
@@ -258,7 +273,7 @@ function releaseCollectionDescendants(runtime: Runtime, dropped: unknown[]): Php
 
 // code-gauge-allow functionNcss 53 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 // code-gauge-allow functionCognitiveComplexity 30 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
-function releaseDroppedNow(runtime: Runtime, dropped: unknown[], fromNative: boolean): void {
+function releaseDroppedNow(runtime: Runtime, dropped: unknown[], fromNative: boolean, stopOnException: boolean): void {
   if (runtime.shuttingDown || runtime.exhausted) return;
   dropped = dropped.filter(
     (value) =>
@@ -292,7 +307,7 @@ function releaseDroppedNow(runtime: Runtime, dropped: unknown[], fromNative: boo
     retireArrays(runtime, arrayStorage);
     return;
   }
-  const release = new Release(runtime, freed, roots, fromNative);
+  const release = new Release(runtime, freed, roots, fromNative, stopOnException);
   const active = release.active;
   releasing++;
   let failure: unknown;
@@ -338,7 +353,8 @@ class Release {
     private readonly runtime: Runtime,
     private readonly freed: Set<PhpObject>,
     private roots: Set<unknown>,
-    private readonly fromNative: boolean
+    private readonly fromNative: boolean,
+    private readonly stopOnException: boolean
   ) {
     for (const object of freed) this.track(object);
   }
@@ -457,7 +473,7 @@ class Release {
     }
   }
 
-  // code-gauge-allow functionCognitiveComplexity 20 -- Release eligibility and resurrection use the same ownership state.
+  // code-gauge-allow functionCognitiveComplexity 21 -- Release eligibility and resurrection use the same ownership state.
   // code-gauge-allow functionNcss 32 -- Runs one destructor and resolves its effects before releasing its children.
   private prepare(object: PhpObject, onFailure: (error: PhpThrow) => void): ReleaseFinish | undefined {
     if (this.visited.has(object) || this.runtime.objects.get(object.id) !== object) return undefined;
@@ -476,7 +492,7 @@ class Release {
       try {
         destruct(object, this.fromNative ? undefined : this.runtime.row);
       } catch (error) {
-        if (!(error instanceof PhpThrow)) throw error;
+        if (this.stopOnException || !(error instanceof PhpThrow)) throw error;
         onFailure(error);
       } finally {
         stopObserving();
@@ -1029,13 +1045,13 @@ export function holderCounts(runtime: Runtime): Map<PhpObject, number> {
 /** Releases a unique global, retaining the index when no other object's ownership can have changed. */
 export function releaseGlobalObject(runtime: Runtime, object: PhpObject): boolean {
   if (object.internal !== undefined || objectHasOwnedValues(runtime, object)) {
-    collectGarbage(runtime);
+    collectGarbage(runtime, false, true);
     return false;
   }
   if (!object.destructed && object.cls.findMethod('__destruct')) {
     const changed = runGlobalDestructor(runtime, object);
     if (changed) {
-      collectGarbage(runtime);
+      collectGarbage(runtime, false, true);
       return false;
     }
   }

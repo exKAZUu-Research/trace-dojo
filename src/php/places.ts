@@ -246,10 +246,11 @@ export class ValuePlace implements Place {
  */
 export function writableContainer(
   place: Place,
-  value: Value | undefined = undefined,
-  update = false
+  value?: Value,
+  update = false,
+  lookupRow?: number
 ): PhpArray | PhpObject | string {
-  if (value === undefined) value = place.get(update ? 'nestedUpdate' : 'nested');
+  if (value === undefined) value = readContainerForWrite(place, update, lookupRow);
   if (value instanceof PhpArray) {
     if (arrayIsShared(value)) {
       const copy = value.copy();
@@ -258,10 +259,7 @@ export function writableContainer(
     }
     return value;
   }
-  if (value === undefined || value === null) {
-    if (update && value === undefined) place.warnUndefined?.();
-    return initializeArray(place);
-  }
+  if (value === undefined || value === null) return initializeArray(place);
   if (value === false) {
     deprecated('Automatic conversion of false to array is deprecated');
     return initializeArray(place);
@@ -269,6 +267,19 @@ export function writableContainer(
   if (value instanceof PhpObject) return value;
   if (typeof value === 'string') return value;
   throwError('Error', 'Cannot use a scalar value as an array');
+}
+
+function readContainerForWrite(place: Place, update: boolean, lookupRow: number | undefined): Value | undefined {
+  const runtime = rt();
+  const operationRow = runtime.row;
+  if (lookupRow !== undefined) runtime.row = lookupRow;
+  try {
+    const value = place.get(update ? 'nestedUpdate' : 'nested');
+    if (update && value === undefined) place.warnUndefined?.();
+    return value;
+  } finally {
+    if (lookupRow !== undefined) runtime.row = operationRow;
+  }
 }
 
 function initializeArray(place: Place): PhpArray {

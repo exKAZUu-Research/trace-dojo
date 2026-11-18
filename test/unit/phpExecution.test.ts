@@ -599,10 +599,43 @@ test.each([
   });
 });
 
+test.each([
+  ['final final class K {}', 'Multiple final modifiers are not allowed'],
+  ['abstract abstract class K {}', 'Multiple abstract modifiers are not allowed'],
+  ['readonly final readonly class K {}', 'Multiple readonly modifiers are not allowed'],
+  ['$value = new readonly readonly class {};', 'Multiple readonly modifiers are not allowed'],
+  ['$value = new final abstract class {};', 'Cannot use the final modifier on an anonymous class'],
+  ['class K { const VALUE = "text"; public int $n = self::VALUE; }', 'Cannot use string as default value'],
+  ['class K { const VALUE = "text"; public static int $n = K::VALUE . "x"; }', 'Cannot use string as default value'],
+  ['class E { const TEXT = "a"; } class K { public int $n = E::TEXT; }', 'Cannot use string as default value'],
+  ['$array = [[] => 1];', 'Illegal offset type'],
+  ['const VALUE = [[] => 1];', 'Illegal offset type'],
+  ['class K { const VALUE = [[] => 1]; }', 'Illegal offset type'],
+  ['function f($value = [[] => 1]) {}', 'Illegal offset type'],
+  ['$value = new (1.5);', 'Illegal class name'],
+  ['$value = new (null);', 'Illegal class name'],
+  ['$value = new ([]);', 'Illegal class name'],
+  ['$value = (1)::X;', 'Illegal class name'],
+  ['$value = (1)::m();', 'Illegal class name'],
+  ['$value = new stdClass instanceof (1);', 'Illegal class name'],
+])('rejects invalid compiled operands and class defaults before execution: %s', (source, message) => {
+  expect(run(`<?php echo 'before'; ${source}`)).toMatchObject({
+    kind: 'compileError',
+    diagnostics: [{ message: expect.stringContaining(message) }],
+  });
+});
+
 test('rejects directly declared abstract methods on anonymous classes before execution', () => {
   expect(run("<?php echo 'before';\nnew class {\nabstract function rejected();\n};")).toMatchObject({
     kind: 'compileError',
     diagnostics: [{ row: 2, message: 'Anonymous class method rejected() must not be abstract' }],
+  });
+});
+
+test('reports Unicode caseless restriction as an unsupported regex feature', () => {
+  expect(run("<?php preg_match('/k/iur', 'K');")).toMatchObject({
+    kind: 'executed',
+    uncaughtException: expect.stringContaining('この採点環境では使えません'),
   });
 });
 

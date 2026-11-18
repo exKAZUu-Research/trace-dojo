@@ -28,6 +28,7 @@ export class PatternError extends Error {}
 
 type PatternOption =
   | 'caseless'
+  | 'caselessRestricted'
   | 'multiline'
   | 'dotAll'
   | 'extended'
@@ -44,6 +45,7 @@ type PatternOptions = Record<PatternOption, boolean>;
 
 const MODIFIERS = new Map<string, PatternOption | undefined>([
   ['i', 'caseless'],
+  ['r', 'caselessRestricted'],
   ['m', 'multiline'],
   ['s', 'dotAll'],
   ['x', 'extended'],
@@ -66,6 +68,7 @@ export function translate(pattern: string): Compiled {
   const { body, modifiers } = splitDelimiters(pattern);
   const options: PatternOptions = {
     caseless: false,
+    caselessRestricted: false,
     multiline: false,
     dotAll: false,
     extended: false,
@@ -320,6 +323,7 @@ class PatternConverter {
     this.options = { ...options };
     this.offsetBase = offsetBase;
     this.unicode = options.utf8;
+    this.checkCaselessRestriction(options);
     this.known = known;
     this.frames = [{ start: 0, outer: this.options, close: '', modifiers: [], lookaround: false }];
   }
@@ -1035,6 +1039,12 @@ class PatternConverter {
     const option = INLINE_OPTIONS.get(letter);
     if (option === undefined) this.fail('unrecognized character after (? or (?-', this.index);
     options[option] = !unsetting;
+    if (option === 'caseless') this.checkCaselessRestriction(options);
+  }
+
+  private checkCaselessRestriction(options: PatternOptions): void {
+    if (options.utf8 && options.caseless && options.caselessRestricted)
+      this.unavailable ??= 'Unicode 正規表現の大文字小文字の制限（r）';
   }
 
   private readGroupName(

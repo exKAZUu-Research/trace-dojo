@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 857 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 866 -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import type { Expr, ListItem } from './ast';
 import { foreachSubjectWritable, hasReferenceItem } from './astAnalysis';
@@ -123,7 +123,7 @@ function namedPlace(name: Expr | string, mode: PlaceMode, locate: (name: string)
   return mode === 'deferred' ? deferredPlace(resolve, () => readForIsset(resolve())) : resolve();
 }
 
-// code-gauge-allow functionCognitiveComplexity 18 -- Keeps the ordered PHP cases together because each branch shares the same dispatch state.
+// code-gauge-allow functionCognitiveComplexity 21 -- Keeps the ordered PHP cases together because each branch shares the same dispatch state.
 function dimensionPlace(e: Extract<Expr, { k: 'idx' }>, mode: PlaceMode): Place {
   const parent = placeOf(e.base, mode, true);
   const readKey = e.index === undefined ? undefined : prepareOperand(e.index);
@@ -133,7 +133,9 @@ function dimensionPlace(e: Extract<Expr, { k: 'idx' }>, mode: PlaceMode): Place 
     rt().row = row;
     const fetch = nestedPlace(parent, writeMode);
     rt().row = row;
-    const container = writableContainer(fetch, undefined, writeMode !== 'write');
+    const lookupRow =
+      e.base.k === 'idx' || e.base.k === 'prop' || e.base.k === 'sprop' ? compiledOperandRow(e.base) : undefined;
+    const container = writableContainer(fetch, undefined, writeMode !== 'write', lookupRow);
     if (container instanceof PhpObject) {
       if (beforeOffsetGet && !isArrayAccess(container)) {
         beforeOffsetGet();
@@ -971,31 +973,41 @@ export function compoundAssign(e: Extract<Expr, { k: 'assignOp' }>): Value {
   }
   const place = placeOf(e.target, 'deferred');
   const read = prepareOperand(e.value);
+  const row = compoundWriteRow(e.target, e.value);
   return withOperandWarnings((warning, warningPending) => {
     place.readCompoundName?.(warning);
-    let readAfterFetch = e.target.k === 'idx' && isCompiledVariable(e.value);
-    let value = readAfterFetch ? null : readUpdateValue(e, read, warning);
-    runtime.row = e.value.row;
+    let readAfterFetch =
+      e.target.k === 'idx' && isCompiledVariable(e.value) && !dimensionWritesOwnVariable(e.target, e.value);
+    let value = readAfterFetch ? null : share(readUpdateValue(e, read, warning, row));
+    runtime.row = row;
     const fetched = readCompound(place, warning, () => {
       if (readAfterFetch && missingCompiledOperand(e.value)) {
-        value = readOperandWithWarning(e.value, read, warning, e.value.row);
+        value = readOperandWithWarning(e.value, read, warning, row);
         readAfterFetch = false;
       }
       return warningPending();
     });
     if (fetched === SKIP_COMPOUND) return null;
-    if (readAfterFetch) value = readOperandWithWarning(e.value, read, warning, e.value.row);
+    if (readAfterFetch) value = readOperandWithWarning(e.value, read, warning, row);
+    runtime.row = row;
     return storeCompoundResult(e.op, place, fetched, value, warningPending());
   });
+}
+
+function compoundWriteRow(target: Expr, value: Expr): number {
+  if (target.k === 'idx') return dimensionWriteRow(target);
+  if (target.k === 'prop' || target.k === 'sprop') return compiledOperandRow(target);
+  return compiledOperandRow(value);
 }
 
 function readUpdateValue(
   e: Extract<Expr, { k: 'assignOp' }>,
   read: (row?: number) => Value,
-  warning: UpdateWarning
+  warning: UpdateWarning,
+  row: number
 ): Value {
-  if (e.target.k !== 'var' && e.target.k !== 'prop') return read();
-  return readOperandWithWarning(e.value, read, warning, e.value.row);
+  if (e.target.k !== 'var' && e.target.k !== 'prop') return read(row);
+  return readOperandWithWarning(e.value, read, warning, row);
 }
 
 function storeCompoundResult(
@@ -1078,7 +1090,7 @@ function incrementPlace(e: Extract<Expr, { k: 'incdec' }>, warning: UpdateWarnin
   const runtime = rt();
   const target = placeOf(e.target, 'incdec');
   const place = target.incrementTarget?.() ?? target;
-  runtime.row = e.row;
+  runtime.row = compiledOperandRow(e.target);
   let old = place.get('incdec');
   if (old === undefined) {
     if (place instanceof VarPlace && e.target.k !== 'idx') place.fetchCompound(warning);

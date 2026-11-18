@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 875 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 879 -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 // oxlint-disable unicorn/text-encoding-identifier-case -- mbstring names its encodings in this case.
 // oxlint-disable typescript/no-misused-spread -- PHP splits strings into bytes or code points, never into grapheme clusters.
@@ -8,6 +8,7 @@ import { inflateRawSync } from 'node:zlib';
 import { eastAsianWidth } from 'get-east-asian-width';
 
 import { codePointBytes, dec, enc, lower } from './bytes';
+import { extraEncodingReader } from './detectionReaders';
 import { deprecated, throwError, warn } from './errors';
 import { padUnits } from './libString';
 import { encodingNames } from './multibyteEncodingNames';
@@ -926,8 +927,10 @@ function encodingReader(name: string): EncodingReader {
   if (codec) return codec;
   let reader = detectionReaders.get(name);
   if (!reader) {
-    const decoder = legacyTextDecoder(name);
-    reader = { name, decode: decoder ? (text) => decodeLegacy(text, decoder) : CODECS.get('ascii')!.decode };
+    const special = extraEncodingReader(name, decodeUtf8, (bytes) => decodeUtf16(bytes, false));
+    const decoder = special ? undefined : legacyTextDecoder(name);
+    if (!special && !decoder) throw new UnsupportedFeatureError(`文字コード ${name} の判定（mb_detect_encoding）`);
+    reader = { name, decode: special ?? ((text) => decodeLegacy(text, decoder!)) };
     detectionReaders.set(name, reader);
   }
   return reader;

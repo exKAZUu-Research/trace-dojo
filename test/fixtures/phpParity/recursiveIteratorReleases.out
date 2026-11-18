@@ -6,3 +6,6 @@ return:destroy:child;1;0
 destroy:child;loop;0
 destroy:child;1;0
 destroy:root;finished;
+depth:2;depth:1;after:0
+depth:2;depth:1;caught:0
+value:1;depth:2;depth:1;done:0

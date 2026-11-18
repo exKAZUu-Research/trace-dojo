@@ -12,8 +12,12 @@ export function dimensionWriteRow(dimension: Extract<Expr, { k: 'idx' }>): numbe
   return compiledOperandRow(dimension.index ?? dimension.base);
 }
 
+// code-gauge-allow functionNcss 31 -- Keeps the compiler operand order in one dispatch over AST expressions.
 function lastCompiledOperand(expression: Expr): Expr | undefined {
   switch (expression.k) {
+    case 'array': {
+      return expression.items[0]?.value;
+    }
     case 'idx': {
       return expression.index ?? expression.base;
     }

@@ -8,13 +8,18 @@ import { throwError, warn } from './errors';
 import { collectGarbage } from './garbage';
 import { defineClass, installNatives, type NativeMethod } from './native';
 import { rt } from './runtime';
-import { type ClosureData, type PhpClass, PhpObject, type Value } from './values';
+import { type ClosureData, PhpArray, type PhpClass, PhpObject, type Value } from './values';
 
 /** Installs the builtin functions, constants, and classes into a new run. */
 export function bootstrap(): void {
   installNatives();
 }
 
+defineClass({
+  name: 'UnitEnum',
+  kind: 'interface',
+  methods: [{ signature: 'cases(): array', isStatic: true, impl: () => new PhpArray() }],
+});
 defineClass({ name: 'stdClass' });
 defineClass({ name: 'Traversable', kind: 'interface' });
 defineClass({

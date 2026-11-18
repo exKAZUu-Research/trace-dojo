@@ -17,7 +17,17 @@ import { deprecated, E_ERROR, reportUncaughtWarning, warn, withCleanupExceptions
 import { toStr } from './operators';
 import { FatalError, PhpThrow, rt } from './runtime';
 import { describePropertyType } from './types';
-import { type ClosureData, isClosure, PhpArray, PhpObject, Ref, type Slot, UNINIT, type Value } from './values';
+import {
+  type ClosureData,
+  enumCaseName,
+  isClosure,
+  PhpArray,
+  PhpObject,
+  Ref,
+  type Slot,
+  UNINIT,
+  type Value,
+} from './values';
 
 type DebugEntry = [string | bigint, Slot, string];
 
@@ -376,10 +386,6 @@ function dumpObject(
       write(`${indent}uninitialized(${decl?.type ? describePropertyType(decl) : 'mixed'})\n`);
     } else dumpValue(slotValue(slot), level + 2, state, write, slot);
   }
-}
-
-function enumCaseName(object: PhpObject): string {
-  return `${object.cls.name}::${object.props.get('name') as string}`;
 }
 
 function keyFor(name: string, label: string): string {

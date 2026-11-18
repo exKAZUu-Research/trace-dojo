@@ -55,3 +55,34 @@ Warning: Constant MANY already defined, this will be an error in PHP 9 in /main.
 110
 
 Warning: Undefined property: stdClass::$unset in /main.php on line 115
+
+Warning: Undefined property: stdClass::$first in /main.php on line 121
+
+Warning: Undefined array key "first" in /main.php on line 125
+
+Warning: Undefined array key "prefix" in /main.php on line 128
+
+Warning: Undefined array key "outer" in /main.php on line 130
+
+Warning: Undefined array key "inner" in /main.php on line 131
+
+Warning: Undefined array key "append" in /main.php on line 134
+
+Warning: Undefined variable $unknownArray in /main.php on line 134
+
+Warning: Undefined variable $unknownObject in /main.php on line 138
+
+Warning: Undefined property: stdClass::$second in /main.php on line 138
+
+Warning: Undefined variable $unknownStatic in /main.php on line 145
+150:Cannot assign string to property StaticDiagnostics::$typed of type int
+
+Warning: Undefined property: stdClass::$nested in /main.php on line 155
+
+Warning: Undefined array key "key" in /main.php on line 156
+
+Deprecated: Implicit conversion from float 1.5 to int loses precision in /main.php on line 161
+
+Deprecated: Implicit conversion from float 2.5 to int loses precision in /main.php on line 167
+
+Deprecated: Implicit conversion from float 1.5 to int loses precision in /main.php on line 167

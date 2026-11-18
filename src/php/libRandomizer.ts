@@ -1,10 +1,9 @@
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import { callMethod } from './callables';
-import { classConstant } from './classConstants';
 import { findClass } from './classes';
 import { valueName } from './conversions';
 import { deprecated, throwError } from './errors';
-import { defineClass, type NativeMethod } from './native';
+import { defineClass, defineUnitEnum, type NativeMethod } from './native';
 import { toStr } from './operators';
 import { MersenneTwister } from './random';
 import { rt } from './runtime';
@@ -679,31 +678,7 @@ defineClass({
   },
 });
 
-defineClass({
-  name: 'UnitEnum',
-  kind: 'interface',
-  methods: [{ signature: 'cases(): array', isStatic: true, impl: () => new PhpArray() }],
-});
-
-defineClass({
-  name: String.raw`Random\IntervalBoundary`,
-  kind: 'enum',
-  isFinal: true,
-  isCloneable: false,
-  interfaces: ['UnitEnum'],
-  props: [{ name: 'name', visibility: 'public', type: 'string', isReadonly: true }],
-  enumCases: INTERVAL_BOUNDARIES,
-  methods: [
-    {
-      signature: 'cases(): array',
-      isStatic: true,
-      impl: ({ calledClass }) => {
-        const cls = calledClass as PhpClass;
-        return PhpArray.list(INTERVAL_BOUNDARIES.map((name) => classConstant(cls, name, cls)));
-      },
-    },
-  ],
-});
+defineUnitEnum(String.raw`Random\IntervalBoundary`, INTERVAL_BOUNDARIES);
 
 defineClass({
   name: String.raw`Random\Randomizer`,

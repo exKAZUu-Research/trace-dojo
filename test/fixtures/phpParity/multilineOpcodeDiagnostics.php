@@ -115,3 +115,55 @@ $property
     ->unset
     .=
     'test';
+
+$object = new stdClass;
+$object
+    ->first
+    ++;
+$incremented = [];
+$incremented
+    ['first']
+    ++;
+++$incremented
+    ['prefix'];
+$incremented
+    ['outer']
+    ['inner']
+    ++;
+$incremented
+    ['append']
+    .=
+    $unknownArray;
+$object
+    ->second
+    .=
+    $unknownObject;
+class StaticDiagnostics {
+    public static $value = 0;
+    public static int $typed = 0;
+}
+StaticDiagnostics::$value
+    +=
+    $unknownStatic;
+try {
+    StaticDiagnostics
+        ::$typed
+        .=
+        'a';
+} catch (TypeError $error) { echo $error->getLine(), ':', $error->getMessage(), "\n"; }
+$object
+    ->nested
+    ['key']
+    .=
+    'a';
+$array = [
+    1.5 => [
+        1
+    ]
+];
+$array = [
+    1.5 =>
+        [
+            2.5 => 1
+        ]
+];

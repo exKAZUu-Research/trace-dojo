@@ -30,3 +30,20 @@ try {
 echo iterator_apply($iterator, fn () => false), ';', $iterator->getDepth(), "\n";
 unset($iterator);
 echo "finished;\n";
+
+class ReportsDepth extends RecursiveArrayIterator {
+    function __construct($items, private bool $root = false) { parent::__construct($items); }
+    function getChildren(): ?RecursiveArrayIterator { return new self($this->current()); }
+    function __destruct() {
+        global $observed;
+        if (!$this->root) echo 'depth:', $observed->getDepth(), ';';
+    }
+}
+$observed = new RecursiveIteratorIterator(new ReportsDepth([[[1]]], true));
+foreach ($observed as $value) break;
+echo 'after:', $observed->getDepth(), "\n";
+try {
+    foreach ($observed as $value) throw new Exception('stop');
+} catch (Exception $error) { echo 'caught:', $observed->getDepth(), "\n"; }
+foreach ($observed as $value) echo 'value:', $value, ';';
+echo 'done:', $observed->getDepth(), "\n";

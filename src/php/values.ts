@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 834 -- Keeps one PHP runtime concern and its shared helpers in one module.
+// code-gauge-allow-file fileNcss 836 -- Keeps one PHP runtime concern and its shared helpers in one module.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import type { TurtleState } from '../interpreter/turtleWorld';
 import { type ArrayCursor, ArrayOrder, type ArrayRebuild } from './arrayOrder';
@@ -748,6 +748,10 @@ export class PhpObject {
     public cls: PhpClass,
     public id: number
   ) {}
+}
+
+export function enumCaseName(object: PhpObject): string {
+  return `${object.cls.name}::${object.props.get('name') as string}`;
 }
 
 /** The internal state of a closure object. */

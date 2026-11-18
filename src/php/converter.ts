@@ -930,7 +930,7 @@ export class Converter extends DeclarationConverter {
       }
       case 'array_creation_expression': {
         const items = this.compileArrayItems(node);
-        this.checkArrayUnpacking(node, items);
+        this.checkConstantArrayOperands(node, items);
         return { k: 'array', items, row };
       }
       case 'list_literal': {
@@ -1250,7 +1250,7 @@ export class Converter extends DeclarationConverter {
     return { k: 'cconst', cls, name: typeof literal === 'string' ? literal : name, row: name.row };
   }
 
-  // code-gauge-allow functionCognitiveComplexity 17 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+  // code-gauge-allow functionCognitiveComplexity 20 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
   private functionCall(node: Node): Expr {
     const row = node.startPosition.row;
     const fnNode = node.childForFieldName('function') as Node;
@@ -1270,12 +1270,28 @@ export class Converter extends DeclarationConverter {
       const raw = this.nameText(fnNode);
       if (this.preserveSyntax) return { k: 'call', fn: { name: raw }, args, fcc, row };
       const name = this.resolveFunctionName(raw);
+      if (!name.fallback && ['call_user_func', 'call_user_func_array'].includes(lower(name.name)) && args[0]) {
+        args[0].e = this.foldCallableOperand(args[0].e);
+      }
       if (lower(name.fallback ?? name.name) === 'assert') {
         this.addAssertionDescription(argumentsNode, args, row);
       }
       return { k: 'call', fn: name, args, fcc, row };
     }
-    return { k: 'call', fn: this.expr(fnNode), args, fcc, initRow: row, row: argumentsNode.startPosition.row };
+    return {
+      k: 'call',
+      fn: this.foldCallableOperand(this.expr(fnNode)),
+      args,
+      fcc,
+      initRow: row,
+      row: argumentsNode.startPosition.row,
+    };
+  }
+
+  private foldCallableOperand(expression: Expr): Expr {
+    if (this.preserveSyntax || expression.k === 'lit') return expression;
+    const value = this.compiledValue(expression);
+    return typeof value === 'string' ? { k: 'lit', v: value, row: expression.row } : expression;
   }
 
   private quietCheck(node: Node, argumentsNode: Node, word: 'isset' | 'empty', row: number): Expr {
@@ -1435,9 +1451,7 @@ export class Converter extends DeclarationConverter {
 
   private instanceOf(l: Expr, right: Node, row: number): Expr {
     if (!this.preserveSyntax && this.compiledType(l) !== undefined) return { k: 'lit', v: false, row };
-    const cls = ['name', 'qualified_name', 'relative_name'].includes(right.type)
-      ? this.classRef(right)
-      : { k: 'expr' as const, e: this.expr(right) };
+    const cls = this.classRef(right);
     return { k: 'instanceof', e: l, cls, row };
   }
 
@@ -1568,17 +1582,21 @@ export class Converter extends DeclarationConverter {
     }
   }
 
-  private checkArrayUnpacking(node: Node, items: ArrayItem[]): void {
-    if (!items.some((item) => item.spread)) return;
-    let invalid: Constant | undefined;
+  // code-gauge-allow functionCognitiveComplexity 18 -- Checks folded keys and values in source order and keeps deferred failures at runtime.
+  private checkConstantArrayOperands(node: Node, items: ArrayItem[]): void {
+    if (this.preserveSyntax || !items.some((item) => item.spread || item.key)) return;
+    let invalid: string | undefined;
     for (const item of items) {
       if (item.byRef) return;
+      const key = item.key ? this.compiledValue(item.key) : null;
       const value = this.compiledValue(item.value);
-      if (value === undefined || (item.key && this.compiledValue(item.key) === undefined)) return;
-      if (item.spread && !(value instanceof Map) && invalid === undefined) invalid = value;
+      if (key === undefined || value === undefined) return;
+      if (invalid !== undefined) continue;
+      if (key instanceof Map) invalid = 'Illegal offset type';
+      else if (item.spread && !(value instanceof Map))
+        invalid = `Only arrays and Traversables can be unpacked, ${constantTypeName(value)} given`;
     }
-    if (invalid !== undefined)
-      this.error(node, `Only arrays and Traversables can be unpacked, ${constantTypeName(invalid)} given`);
+    if (invalid !== undefined) this.error(node, invalid);
   }
 
   private arrayItems(node: Node): ArrayItem[] {

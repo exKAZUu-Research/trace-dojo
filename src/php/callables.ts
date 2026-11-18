@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 657 -- Keeps one PHP runtime concern and its shared helpers in one module.
+// code-gauge-allow-file fileNcss 660 -- Keeps one PHP runtime concern and its shared helpers in one module.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import { placeOf } from './assignment';
 import type { Arg, Expr, ResolvedName } from './ast';
@@ -70,6 +70,10 @@ export function evalArgs(
     if (value.name === undefined) value.position = positional++;
     const index = named?.add(value);
     if (index !== undefined) positional = Math.max(positional, index + 1);
+    if (value.ref) {
+      runtime.holdTemporaryReference(value.ref);
+      value.heldReference = true;
+    }
     values.push(value);
   };
   const frame = runtime.frame;

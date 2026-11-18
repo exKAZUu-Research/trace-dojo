@@ -41,3 +41,7 @@ The given interval is empty, there are no floats between argument #1 ($min) and 
 The given interval is empty, there are no floats between argument #1 ($min) and argument #2 ($max)
 Random\Randomizer::getFloat(): Argument #3 ($boundary) must be of type Random\IntervalBoundary, string given
 889562942
+#0 /main.php(30): enumTrace(Random\IntervalBoundary::OpenOpen)
+#1 {main}
+#0 /main.php(32): Random\Randomizer->getFloat(-1, -1, Random\IntervalBoundary::ClosedOpen)
+#1 {main}

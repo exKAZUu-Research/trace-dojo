@@ -1,5 +1,6 @@
 import { enc, lower } from './bytes';
 import { parseSignature, parseTypeText } from './calls';
+import { classConstant } from './classConstants';
 import { rt } from './runtime';
 import {
   type ClassKind,
@@ -146,6 +147,28 @@ export function nativeClassDefinition(name: string): ClassDefinition | undefined
 
 export function defineClass(definition: ClassDefinition): void {
   classDefinitions.push(definition);
+}
+
+export function defineUnitEnum(name: string, cases: readonly string[]): void {
+  defineClass({
+    name,
+    kind: 'enum',
+    isFinal: true,
+    isCloneable: false,
+    interfaces: ['UnitEnum'],
+    props: [{ name: 'name', visibility: 'public', type: 'string', isReadonly: true }],
+    enumCases: cases,
+    methods: [
+      {
+        signature: 'cases(): array',
+        isStatic: true,
+        impl: ({ calledClass }) => {
+          const cls = calledClass as PhpClass;
+          return PhpArray.list(cases.map((caseName) => classConstant(cls, caseName, cls)));
+        },
+      },
+    ],
+  });
 }
 
 /** Installs the builtin functions, constants, and classes into a run. */

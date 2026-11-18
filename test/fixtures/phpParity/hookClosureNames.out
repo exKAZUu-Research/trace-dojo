@@ -1,0 +1,6 @@
+{closure:HookNames::$name::get():5}
+{closure:HookNames::$name::set():9}
+#0 /main.php(10): HookNames->{closure:HookNames::$name::set():9}()
+#1 /main.php(23): HookNames->$name::set('value')
+#2 {main}
+HookNames::{closure:HookNames::$type::get():15}(): Argument #1 ($input) must be of type string, array given, called in /main.php on line 16

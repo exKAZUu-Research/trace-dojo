@@ -57,3 +57,19 @@ func_get_args() cannot be called from the global scope
 func_get_arg() cannot be called from the global scope
 func_num_args() must be called from a function context
 func_get_args() cannot be called from the global scope
+int(1)
+int(2)
+array(1) {
+  ["value"]=>
+  int(5)
+}
+int(1)
+array(1) {
+  [0]=>
+  int(5)
+}
+extract(): Argument #2 ($flags) must be a valid extract type
+extract(): Argument #3 ($prefix) is required when using this extract type
+extract(): Argument #3 ($prefix) must be a valid identifier
+Cannot call extract() dynamically
+extract(): Argument #2 ($flags) must be a valid extract type

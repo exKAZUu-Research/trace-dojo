@@ -36,3 +36,20 @@ foreach (['func_get_args', 'func_get_arg', 'func_num_args', func_get_args(...)] 
         else $callback();
     } catch (Error $error) { echo $error->getMessage(), "\n"; }
 }
+
+class LiteralScope {
+    const COUNT = 'func_num_args';
+    static function countValues(...$values) { return (self::COUNT)(); }
+}
+function foldedScope($value) {
+    var_dump(('func_' . 'num_args')(), LiteralScope::countValues(1, 2), ('com' . 'pact')('value'));
+    var_dump(call_user_func('func_' . 'num_args'), call_user_func_array('func_' . 'get_args', []));
+}
+foldedScope(5);
+$dynamicExtract = 'extract';
+foreach ([[[], 99], [[], EXTR_PREFIX_ALL], [[], EXTR_PREFIX_ALL, '1 a'], [[]]] as $arguments) {
+    try { $dynamicExtract(...$arguments); }
+    catch (Error $error) { echo $error->getMessage(), "\n"; }
+}
+try { array_map('extract', [[]], [99]); }
+catch (Error $error) { echo $error->getMessage(), "\n"; }

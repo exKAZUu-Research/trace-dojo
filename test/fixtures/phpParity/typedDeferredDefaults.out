@@ -1,0 +1,6 @@
+int(5)
+string(1) "9"
+float(6)
+6:failsInt(): Argument #1 ($value) must be of type int, string given, called in /main.php on line 18
+Cannot assign string to class constant RuntimeTypedConstant::NUMBER of type int
+{closure:/main.php:22}(): Argument #1 ($value) must be of type int, string given, called in /main.php on line 23

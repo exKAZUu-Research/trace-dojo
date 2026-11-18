@@ -25,3 +25,9 @@ foreach (IntervalBoundary::cases() as $boundary) {
 try { $random->getFloat(1, 2, 'ClosedOpen'); }
 catch (TypeError $error) { echo $error->getMessage(), "\n"; }
 echo $random->nextInt(), "\n";
+
+function enumTrace($boundary) { throw new Exception('trace'); }
+try { enumTrace(IntervalBoundary::OpenOpen); }
+catch (Exception $error) { echo $error->getTraceAsString(), "\n"; }
+try { $random->getFloat(-1, -1, IntervalBoundary::ClosedOpen); }
+catch (ValueError $error) { echo $error->getTraceAsString(), "\n"; }

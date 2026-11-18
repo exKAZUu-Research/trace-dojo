@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 841 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 855 -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import type { Node } from '@willbooster/web-tree-sitter';
 
@@ -66,6 +66,19 @@ export abstract class DeclarationConverter extends ConverterBase {
 
   protected get constantInitializer(): boolean {
     return this.initializerContext?.kind === 'eager' || this.initializerContext?.kind === 'deferred';
+  }
+
+  protected override classRef(
+    node: Node,
+    deferScope = false,
+    use: 'name' | 'constant' | 'reference' = 'reference'
+  ): ClassRef {
+    const ref = super.classRef(node, deferScope, use);
+    if (!this.preserveSyntax && use !== 'name' && ref.k === 'expr') {
+      const value = this.compiledValue(ref.e);
+      if (value !== undefined && typeof value !== 'string') this.error(node, 'Illegal class name');
+    }
+    return ref;
   }
 
   protected compiledType(expression: Expr): string | undefined {
@@ -573,9 +586,14 @@ export abstract class DeclarationConverter extends ConverterBase {
     }
   }
 
-  // code-gauge-allow functionCognitiveComplexity 16 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+  // code-gauge-allow functionCognitiveComplexity 18 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
   private checkDefaultType(node: Node, name: string, type: TypeDecl, value: Expr, property?: ClassDecl): void {
-    const literalType = foldedDefaultType(value, { budget: this.compileBudget });
+    const literalType = foldedDefaultType(value, {
+      budget: this.compileBudget,
+      preserveNamedConstants: !property,
+      classConstant: property ? this.compileClasses.lookup(property) : undefined,
+      className: property ? (cls) => this.compileClasses.className(cls, property) : undefined,
+    });
     if (literalType === 'null' && !property) return;
     if (literalType === undefined || defaultFits(type, literalType)) return;
     const display = describeType(
@@ -758,9 +776,14 @@ export abstract class DeclarationConverter extends ConverterBase {
   }
 
   private validateClassModifiers(node: Node, decl: ClassDecl): void {
-    if (decl.isAnonymous && (decl.isAbstract || decl.isFinal)) {
-      const invalid = decl.isAbstract ? 'abstract' : 'final';
-      this.error(node, `Cannot use the ${invalid} modifier on an anonymous class`);
+    const seen = new Set<string>();
+    for (const child of node.children) {
+      if (!['abstract_modifier', 'final_modifier', 'readonly_modifier'].includes(child.type)) continue;
+      const modifier = child.type.replace('_modifier', '');
+      if (seen.has(modifier)) this.error(child, `Multiple ${modifier} modifiers are not allowed`);
+      seen.add(modifier);
+      if (decl.isAnonymous && modifier !== 'readonly')
+        this.error(child, `Cannot use the ${modifier} modifier on an anonymous class`);
     }
     if (decl.isAbstract && decl.isFinal) this.error(node, 'Cannot use the final modifier on an abstract class');
   }
@@ -1077,6 +1100,7 @@ export abstract class DeclarationConverter extends ConverterBase {
         gotos: [],
         className,
         name: `$${prop.name}::${kind}`,
+        displayName: `${className}::$${prop.name}::${kind}()`,
         propertyName: prop.name,
         isMethod: true,
         returnType: kind === 'set' ? { k: 'named', name: 'void' } : prop.type,

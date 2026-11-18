@@ -4,11 +4,11 @@ import { randomBytes } from 'node:crypto';
 import { floatFitsInt, valueName } from './conversions';
 import { deprecated, throwError } from './errors';
 import { cPow } from './floatPow';
-import { defineAlias, defineConstant, defineFunction } from './native';
+import { defineAlias, defineConstant, defineFunction, defineUnitEnum } from './native';
 import { arithmetic, compare } from './operators';
 import { rt } from './runtime';
 import { fixedDigits, phpRound, type RoundMode } from './strings';
-import { deref, PhpArray, type Ref, type Value } from './values';
+import { deref, PhpArray, PhpObject, type Ref, type Value } from './values';
 
 const MATH_CONSTANTS: [string, number][] = [
   ['M_PI', Math.PI],
@@ -54,23 +54,35 @@ defineFunction('abs(int|float $num): int|float', ({ args }) => {
 });
 defineFunction('ceil(int|float $num): float', ({ args }) => Math.ceil(Number(num(args[0]))));
 defineFunction('floor(int|float $num): float', ({ args }) => Math.floor(Number(num(args[0]))));
+const ROUNDING_MODES = new Map<string | bigint, RoundMode>();
+const ROUNDING_CASES: [string, bigint, RoundMode][] = [
+  ['HalfAwayFromZero', 1n, 'halfUp'],
+  ['HalfTowardsZero', 2n, 'halfDown'],
+  ['HalfEven', 3n, 'halfEven'],
+  ['HalfOdd', 4n, 'halfOdd'],
+  ['TowardsZero', 7n, 'towardsZero'],
+  ['AwayFromZero', 8n, 'awayFromZero'],
+  ['NegativeInfinity', 6n, 'floor'],
+  ['PositiveInfinity', 5n, 'ceiling'],
+];
+for (const [name, number, mode] of ROUNDING_CASES) {
+  ROUNDING_MODES.set(name, mode);
+  ROUNDING_MODES.set(number, mode);
+}
+defineUnitEnum(
+  'RoundingMode',
+  ROUNDING_CASES.map(([name]) => name)
+);
+
 defineFunction(
   'round(int|float $num, int $precision = 0, RoundingMode|int $mode = PHP_ROUND_HALF_UP): float',
   ({ args }) => {
     const value = num(args[0]);
     const places = Number(args[1] ?? 0n);
-    const modes: Record<string, RoundMode> = {
-      '1': 'halfUp',
-      '2': 'halfDown',
-      '3': 'halfEven',
-      '4': 'halfOdd',
-      '5': 'ceiling',
-      '6': 'floor',
-      '7': 'towardsZero',
-      '8': 'awayFromZero',
-    };
     const modeArg = args[2] ?? 1n;
-    const mode = typeof modeArg === 'bigint' ? modes[modeArg.toString()] : undefined;
+    const mode = ROUNDING_MODES.get(
+      modeArg instanceof PhpObject ? (modeArg.props.get('name') as string) : (modeArg as bigint)
+    );
     if (!mode) throwError('ValueError', 'round(): Argument #3 ($mode) must be a valid rounding mode (RoundingMode::*)');
     if (typeof value === 'bigint') {
       if (places >= 0) return Number(value);

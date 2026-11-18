@@ -658,12 +658,13 @@ defineFunction(
 );
 defineFunction(
   'extract(array &~$array, int $flags = EXTR_OVERWRITE, string $prefix = UNKNOWN): int',
-  // code-gauge-allow functionCognitiveComplexity 16 -- The extraction loop shares the source and bindings across modes.
-  ({ args, refs }) => {
+  // code-gauge-allow functionCognitiveComplexity 17 -- The extraction loop shares the source and bindings across modes.
+  ({ args, refs, dynamic }) => {
     const flags = (args[1] as bigint | undefined) ?? 0n;
     const mode = Number(flags & 0xffn);
     const prefix = args[2] as string | undefined;
     checkExtractArguments(mode, prefix);
+    if (dynamic) throwError('Error', 'Cannot call extract() dynamically');
     const byReference = (flags & 256n) !== 0n;
     let array = (refs[0]?.v ?? args[0]) as PhpArray;
     if (byReference && arrayIsShared(array)) {
@@ -691,7 +692,7 @@ defineFunction(
   true
 );
 
-markDirectOnly('compact', 'extract');
+markDirectOnly('compact');
 
 function checkExtractArguments(mode: number, prefix: string | undefined): void {
   if (mode > 6) throwError('ValueError', 'extract(): Argument #2 ($flags) must be a valid extract type');

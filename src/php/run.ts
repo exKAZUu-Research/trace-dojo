@@ -7,9 +7,9 @@ import { bootstrap } from './bootstrap';
 import { dec } from './bytes';
 import { callValue } from './callables';
 import { asInternal, type CallRecord, HostStackExhaustion, invoke, resetCallStack } from './calls';
-import { E_DEPRECATED, emitError, throwableLocation } from './errors';
+import { E_DEPRECATED, E_ERROR, emitError, throwableLocation } from './errors';
 import { throwableText, traceText } from './exceptions';
-import { holderCounts, releaseGlobalObject } from './garbage';
+import { holderCounts, releaseDropped, releaseGlobalObject } from './garbage';
 import { type ParsedProgram, parsePhp } from './parse';
 import { ExitSignal, FatalError, type Frame, PhpThrow, Runtime, SCRIPT_PATH, withRuntime } from './runtime';
 import { runStatements } from './statements';
@@ -126,7 +126,7 @@ function printUncaught(runtime: Runtime, object: PhpObject): string | undefined 
     try {
       const text = throwableText(object);
       const message = `Fatal error: Uncaught ${text}\n  thrown in ${throwableLocation(object)}`;
-      runtime.echo(`\n${message}\n`);
+      if ((runtime.errorReporting & E_ERROR) !== 0n) runtime.echo(`\n${message}\n`);
       return dec(message);
     } catch (error) {
       if (!(error instanceof PhpThrow)) return report(runtime, error);
@@ -168,7 +168,7 @@ function releaseMainStatics(runtime: Runtime): void {
   const statics = [...runtime.globalStatics.values()];
   runtime.globalStatics.clear();
   for (const ref of statics) ref.rc--;
-  runtime.release(statics);
+  releaseDropped(runtime, statics, true, true);
 }
 
 // code-gauge-allow functionCognitiveComplexity 20 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
