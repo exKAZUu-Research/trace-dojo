@@ -1572,6 +1572,14 @@ test.each([
   ['function f(&$arg) {} f((new stdClass())->p);', 'Cannot use temporary expression in write context'],
   ['{ function f(&$arg) {} } f((new stdClass())->p);', 'Cannot use temporary expression in write context'],
   ['{ function f(&$arg) {} f((new stdClass())->p); }', 'Cannot use temporary expression in write context'],
+  [
+    'new class { static function f(&$arg) {} static function g() { self::f((new stdClass())->p); } };',
+    'Cannot use temporary expression in write context',
+  ],
+  [
+    'new class { private function f(&$arg) {} function g() { $this->f((new stdClass())->p); } };',
+    'Cannot use temporary expression in write context',
+  ],
   ['class C extends A, B {}', 'unexpected token ","'],
 ])('validates write and declaration syntax: %s', (source, message) => {
   const result = run(`<?php echo 'never'; ${source}`);

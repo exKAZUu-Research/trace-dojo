@@ -1,10 +1,11 @@
-// code-gauge-allow-file fileNcss 631 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 638 -- Holds statement execution and its shared binding and cleanup helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import type { CompileError } from '../interpreter/diagnostics';
 import { assignTo, bindRef, destructure, foreachSubjectPlace, unsetTarget } from './assignment';
 import type { Expr, FunctionDecl, Program, Stmt } from './ast';
 import { foreachReferences, nestedBodies } from './astAnalysis';
 import { lower } from './bytes';
+import { consumeInvokedResult } from './callables';
 import { asInternal, invoke, setBodyRunner, setDefaultEvaluator } from './calls';
 import {
   bindPropertyReference,
@@ -18,11 +19,11 @@ import {
   visiblePropertyKeys,
   writeProp,
 } from './classes';
-import { toBool, valueName } from './conversions';
+import { valueName } from './conversions';
 import { E_DEPRECATED, E_WARNING, emitError, setPrevious, throwError, warn, withPendingException } from './errors';
 import { collectBeforeAllocation, setDestructor } from './garbage';
 import { consumeExpression, ev, evBool, evOpcodeOperand, evQuiet, evReturn, prepareOperand } from './interp';
-import { acquireIterator, callIteratorMethod } from './iteratorAcquisition';
+import { acquireIterator, InnerIterator } from './iteratorAcquisition';
 import { builtinLiteralKey } from './native';
 import { compiledOperandRow } from './opcodeRows';
 import { looseEquals, setObjectToString, toStr } from './operators';
@@ -611,6 +612,11 @@ function foreachIteration(
   key: Key | Value,
   value: Value
 ): 'next' | Completion {
+  bindForeachValue(statement, key, value);
+  return loopBody(statement.body);
+}
+
+function bindForeachValue(statement: Extract<Stmt, { k: 'foreach' }>, key: Key | Value, value: Value): void {
   const runtime = rt();
   runtime.row = statement.row;
   if (statement.value.k === 'list')
@@ -618,7 +624,6 @@ function foreachIteration(
   else assignTo(statement.value, share(value));
   if (statement.key) assignTo(statement.key, key as Value);
   runtime.steps.stepBinding(statement.row, statement.value.k === 'list' || storesAnswer(value));
-  return loopBody(statement.body);
 }
 
 /** Whether a foreach binding stores a value learners answer, as Java's primitives and strings are. */
@@ -633,8 +638,6 @@ function bindForeachRef(statement: Extract<Stmt, { k: 'foreach' }>, ref: Ref): v
   else bindRef(target, ref);
 }
 
-// code-gauge-allow functionCognitiveComplexity 27 -- Acquires and releases native iterators and preserves the live ordinary-property traversal.
-// code-gauge-allow functionNcss 42 -- Both iteration modes share the statement binding and completion path.
 function foreachObject(
   statement: Extract<Stmt, { k: 'foreach' }>,
   object: PhpObject,
@@ -653,26 +656,13 @@ function foreachObject(
         const result = foreachArrayByRef(statement, storage.writable(), storage);
         return result === FOREACH_REPLACED ? undefined : result;
       }
-      callIteratorMethod(iterator, 'rewind');
-      let valid = toBool(callIteratorMethod(iterator, 'valid'));
-      releaseSubject?.();
-      while (valid) {
-        runtime.spend();
-        const value = callIteratorMethod(iterator, 'current');
-        const key = statement.key ? callIteratorMethod(iterator, 'key') : null;
-        const completion = foreachIteration(statement, key, value);
-        if (completion !== 'next') return completion;
-        runtime.row = statement.subjectEndRow;
-        callIteratorMethod(iterator, 'next');
-        valid = toBool(callIteratorMethod(iterator, 'valid'));
-      }
+      return foreachIteratorByValue(statement, new InnerIterator(iterator, handle), releaseSubject);
     } catch (error) {
       if (error instanceof PhpThrow) failure = error;
       throw error;
     } finally {
       withPendingException(runtime, failure, () => runtime.discardNativeResult(handle, Infinity, 0));
     }
-    return undefined;
   }
   const scope = runtime.frame.scope;
   for (const key of visiblePropertyKeys(object, scope, true)) {
@@ -681,6 +671,32 @@ function foreachObject(
     if (completion !== 'next') return completion;
   }
   return undefined;
+}
+
+function foreachIteratorByValue(
+  statement: Extract<Stmt, { k: 'foreach' }>,
+  iterator: InnerIterator,
+  releaseSubject: (() => void) | undefined
+): Completion {
+  const runtime = rt();
+  iterator.rewind();
+  let valid = iterator.valid();
+  releaseSubject?.();
+  while (valid) {
+    runtime.spend();
+    const value = iterator.current();
+    if (statement.key) {
+      consumeInvokedResult(
+        () => iterator.key(),
+        (key) => bindForeachValue(statement, key, value)
+      );
+    } else bindForeachValue(statement, null, value);
+    const completion = loopBody(statement.body);
+    if (completion !== 'next') return completion;
+    runtime.row = statement.subjectEndRow;
+    iterator.next();
+    valid = iterator.valid();
+  }
 }
 
 function runBody(decl: FunctionDecl, frame: Frame): Value {

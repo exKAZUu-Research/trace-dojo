@@ -1,7 +1,8 @@
 import { callMethod, consumeInvokedResult } from './callables';
+import { toBool } from './conversions';
 import { throwError, withPendingException } from './errors';
 import { PhpThrow, rt } from './runtime';
-import { type PhpArray, type PhpClass, PhpObject, type Value } from './values';
+import { nativeOwnershipChanged, PhpArray, type PhpClass, PhpObject, type Value } from './values';
 
 interface AcquiredIterator {
   iterator: PhpObject;
@@ -121,4 +122,73 @@ export class EngineIteratorOwner {
     const state = this.object.internal as { releaseTraversal?: (object: PhpObject) => boolean } | undefined;
     return state?.releaseTraversal?.(this.object) ?? false;
   }
+}
+
+/**
+ * The iterator PHP's engine makes for an Iterator object: it calls the object's methods and, like zend_user_iterator,
+ * calls current() once until the iterator moves.
+ */
+export class InnerIterator extends EngineIteratorOwner {
+  /** The object handle PHP allocates for the iterator, which shifts the numbers var_dump shows for later objects. */
+  readonly handle: PhpObject;
+  private cached: { v: Value } | undefined;
+
+  constructor(object: PhpObject, handle = newEngineIterator(object)) {
+    super(object);
+    this.handle = handle;
+    if (handle !== object) handle.internal = this;
+  }
+
+  override held(): Value[] {
+    return this.cached ? [this.cached.v, this.object] : [this.object];
+  }
+
+  rewind(): void {
+    this.invalidate();
+    callIteratorMethod(this.object, 'rewind');
+  }
+
+  valid(): boolean {
+    return toBool(callIteratorMethod(this.object, 'valid'));
+  }
+
+  current(): Value {
+    if (this.cached) return this.cached.v;
+    return consumeInvokedResult(
+      () => callIteratorMethod(this.object, 'current'),
+      (value) => {
+        this.cached = { v: value };
+        nativeOwnershipChanged(this.handle);
+        return value;
+      }
+    );
+  }
+
+  key(): Value {
+    return callIteratorMethod(this.object, 'key');
+  }
+
+  next(): void {
+    this.invalidate();
+    callIteratorMethod(this.object, 'next');
+  }
+
+  invalidate(): void {
+    releaseIteratorValues([this.takeCurrent()]);
+  }
+
+  takeCurrent(): Value | undefined {
+    if (!this.cached) return;
+    const { v } = this.cached;
+    this.cached = undefined;
+    nativeOwnershipChanged(this.handle);
+    return v;
+  }
+}
+
+export function releaseIteratorValues(values: (Value | undefined)[]): void {
+  if (!values.some((value) => value instanceof PhpArray || value instanceof PhpObject)) return;
+  const runtime = rt();
+  runtime.release(values, true);
+  runtime.flushReleases();
 }

@@ -194,6 +194,11 @@ class ReadValidator {
         this.classMembers(node.decl as ClassDecl);
         return;
       }
+      case 'newAnon': {
+        this.classMembers(node.decl as ClassDecl);
+        this.arguments(node as unknown as Expr, node.args as Arg[]);
+        return;
+      }
       case 'closure':
       case 'arrow': {
         const previous = this.inClosure;
@@ -253,8 +258,7 @@ class ReadValidator {
       case 'call':
       case 'mcall':
       case 'scall':
-      case 'new':
-      case 'newAnon': {
+      case 'new': {
         for (const [key, child] of Object.entries(node)) {
           if (key === 'args') {
             this.arguments(node as unknown as Expr, child as Arg[]);
@@ -286,8 +290,10 @@ class ReadValidator {
 
   private classMembers(decl: ClassDecl): void {
     const previous = this.activeClass;
+    const inClosure = this.inClosure;
     const methods = new Map<string, MethodDeclAst>();
     this.activeClass = { decl, methods };
+    this.inClosure = false;
     try {
       this.visit(decl.consts, false);
       this.visit(decl.props, false);
@@ -297,6 +303,7 @@ class ReadValidator {
       }
     } finally {
       this.activeClass = previous;
+      this.inClosure = inClosure;
     }
   }
 
