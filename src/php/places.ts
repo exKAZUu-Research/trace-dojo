@@ -20,7 +20,7 @@ export interface Place {
    * The place a nested write (`$place[] = 1`) changes: the place itself, or another one for a property that `__get`
    * provides or an element that `offsetGet` provides. Throws where the place may not change that way.
    */
-  nested?(): Place;
+  nested?(mode?: 'write' | 'update' | 'unset'): Place;
   /** Warns that the place does not exist, as a read-modify-write (`++`, `.=`) of it does, creating what PHP creates. */
   warnUndefined?(): void;
   /** The value as `isset` and `??` read it, asking `__isset` or `offsetExists` first; undefined when unset. */

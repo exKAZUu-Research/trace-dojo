@@ -1,4 +1,3 @@
-// code-gauge-allow-file fileNcss 1000 -- Keeps one PHP runtime concern and its shared helpers in one module.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 // oxlint-disable unicorn/prefer-code-point -- PHP strings hold bytes as code units 0–255, which charCodeAt and fromCharCode read and write as they are.
 import { type Comparisons, type Entry, SortedWalk } from './arraySetWalk';
@@ -757,8 +756,16 @@ defineFunction('array_filter(array $array, ?callable $callback = null, int $mode
   return result;
 });
 defineFunction('array_reduce(array $array, callable $callback, mixed $initial = null): mixed', ({ args }) => {
+  const runtime = rt();
+  const start = runtime.nativeHeld.at(-1)?.length ?? 0;
   let carry = args[2] ?? null;
-  for (const value of arr(args[0]).values()) carry = callCallback(args[1], [carry, value]);
+  let owned = false;
+  for (const value of arr(args[0]).values()) {
+    const previous = carry;
+    carry = callCallback(args[1], [carry, value]);
+    if (owned) runtime.discardNativeResult(previous, start);
+    owned = true;
+  }
   return carry;
 });
 for (const name of ['array_walk', 'array_walk_recursive']) {
@@ -1193,6 +1200,7 @@ function sortArray(
 ): true {
   checkArrayRef(ctx, 0, name, 'array');
   const array = writableArray(ctx, 0);
+  if ((name === 'ksort' || name === 'krsort') && array.size <= 1) return true;
   array.prepareSort();
   if (array.size <= 1 && !(renumber && array.size > 0)) return true;
   const entries = [...array.map].map((entry, position) => ({ entry, position }));

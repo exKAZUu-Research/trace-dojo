@@ -1045,3 +1045,14 @@ test('keeps repeated short UTF-8 matches bounded on large subjects', () => {
     }
   );
 });
+
+test.each([
+  ['class C{public self $x=null;}', 'type C may not be null'],
+  ['class P{}class C extends P{public parent $x=null;}', 'type P may not be null'],
+  ['class C{public self $x="s";}', 'property C::$x of type C'],
+  ['trait T{public self $x=null;}', 'type self may not be null'],
+])('checks compile-time declaration diagnostics: %s', (source, message) => {
+  const result = run(`<?php ${source}`);
+  expect(result.kind).toBe('compileError');
+  expect(JSON.stringify(result)).toContain(message);
+});

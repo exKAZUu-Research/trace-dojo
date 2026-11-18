@@ -28,29 +28,30 @@ export function isSubtype(
   sub: TypeDecl,
   subScope: PhpClass | undefined,
   sup: TypeDecl,
-  supScope: PhpClass | undefined
+  supScope: PhpClass | undefined,
+  allowUnresolved = false
 ): boolean {
   if (sub.k === 'named' && lower(sub.name) === 'iterable')
-    return isSubtype(expandIterable(sub.nullable), subScope, sup, supScope);
+    return isSubtype(expandIterable(sub.nullable), subScope, sup, supScope, allowUnresolved);
   if (sup.k === 'named' && lower(sup.name) === 'iterable')
-    return isSubtype(sub, subScope, expandIterable(sup.nullable), supScope);
-  if (sub.k === 'union') return sub.types.every((part) => isSubtype(part, subScope, sup, supScope));
+    return isSubtype(sub, subScope, expandIterable(sup.nullable), supScope, allowUnresolved);
+  if (sub.k === 'union') return sub.types.every((part) => isSubtype(part, subScope, sup, supScope, allowUnresolved));
   if (sub.k === 'named' && sub.nullable) {
     return (
-      isSubtype({ k: 'named', name: 'null' }, subScope, sup, supScope) &&
-      isSubtype({ k: 'named', name: sub.name }, subScope, sup, supScope)
+      isSubtype({ k: 'named', name: 'null' }, subScope, sup, supScope, allowUnresolved) &&
+      isSubtype({ k: 'named', name: sub.name }, subScope, sup, supScope, allowUnresolved)
     );
   }
-  if (sup.k === 'union') return sup.types.some((part) => isSubtype(sub, subScope, part, supScope));
+  if (sup.k === 'union') return sup.types.some((part) => isSubtype(sub, subScope, part, supScope, allowUnresolved));
   if (sup.k === 'named' && sup.nullable) {
     return (
-      isSubtype(sub, subScope, { k: 'named', name: 'null' }, supScope) ||
-      isSubtype(sub, subScope, { k: 'named', name: sup.name }, supScope)
+      isSubtype(sub, subScope, { k: 'named', name: 'null' }, supScope, allowUnresolved) ||
+      isSubtype(sub, subScope, { k: 'named', name: sup.name }, supScope, allowUnresolved)
     );
   }
-  if (sup.k === 'inter') return sup.types.every((part) => isSubtype(sub, subScope, part, supScope));
-  if (sub.k === 'inter') return sub.types.some((part) => isSubtype(part, subScope, sup, supScope));
-  return namedSubtype(lower(sub.name), subScope, lower(sup.name), supScope);
+  if (sup.k === 'inter') return sup.types.every((part) => isSubtype(sub, subScope, part, supScope, allowUnresolved));
+  if (sub.k === 'inter') return sub.types.some((part) => isSubtype(part, subScope, sup, supScope, allowUnresolved));
+  return namedSubtype(lower(sub.name), subScope, lower(sup.name), supScope, allowUnresolved);
 }
 
 function expandIterable(nullable: boolean | undefined): TypeDecl {
@@ -67,11 +68,12 @@ function namedSubtype(
   sub: string,
   subScope: PhpClass | undefined,
   sup: string,
-  supScope: PhpClass | undefined
+  supScope: PhpClass | undefined,
+  allowUnresolved = false
 ): boolean {
   if (sup === 'mixed') return sub !== 'void';
   if (sub === 'never') return true;
-  if (sub === 'static') return sup === 'static' || namedSubtype('self', subScope, sup, supScope);
+  if (sub === 'static') return sup === 'static' || namedSubtype('self', subScope, sup, supScope, allowUnresolved);
   if (sup === 'static') return false;
   if ((sub === 'true' || sub === 'false') && (sup === 'bool' || sup === sub)) return true;
   if (BUILTIN.has(sub) || BUILTIN.has(sup)) {
@@ -80,19 +82,20 @@ function namedSubtype(
     if (sup === 'callable') return sub === 'closure';
     return false;
   }
-  return isClassSubtype(sub, subScope, sup, supScope);
+  return isClassSubtype(sub, subScope, sup, supScope, allowUnresolved);
 }
 
-/** Whether the class `sub` names is `sup` or extends or implements it; unknown classes compare by name. */
 function isClassSubtype(
   sub: string,
   subScope: PhpClass | undefined,
   sup: string,
-  supScope: PhpClass | undefined
+  supScope: PhpClass | undefined,
+  allowUnresolved = false
 ): boolean {
   const subClass = resolve(sub, subScope);
   const supClass = resolve(sup, supScope);
   if (subClass && supClass) return subClass.isSubclassOf(supClass);
+  if (allowUnresolved) return true;
   return (subClass ? lower(subClass.name) : sub) === (supClass ? lower(supClass.name) : sup);
 }
 

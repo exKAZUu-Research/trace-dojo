@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 785 -- Keeps one PHP runtime concern and its shared helpers in one module.
+// code-gauge-allow-file fileNcss 794 -- Keeps one PHP runtime concern and its shared helpers in one module.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import type { TurtleState } from '../interpreter/turtleWorld';
 import { ArrayTable } from './arrayTable';
@@ -720,7 +720,7 @@ class ArrayOrder {
   delete(key: Key): void {
     const entry = this.entries.get(key);
     if (!entry) return;
-    for (const cursor of this.liveCursors()) if (cursor.entry === entry) cursor.entry = entry.next;
+    for (const cursor of this.liveCursors()) cursor.deleteEntry(entry);
     if (entry.previous) entry.previous.next = entry.next;
     else this.first = entry.next;
     if (entry.next) entry.next.previous = entry.previous;
@@ -733,7 +733,7 @@ class ArrayOrder {
 
   replace(keys: Iterable<Key>, packed: boolean): void {
     const orderedKeys = [...keys];
-    const cursors = [...this.liveCursors()].map((cursor) => ({ cursor, index: cursor.entry?.index }));
+    const cursors = [...this.liveCursors()].map((cursor) => ({ cursor, index: cursor.index }));
     this.entries.clear();
     this.first = undefined;
     this.last = undefined;
@@ -755,15 +755,27 @@ class ArrayOrder {
 }
 
 export class ArrayCursor {
-  entry: ArrayEntry | undefined;
+  private current: ArrayEntry | undefined;
+  private position: number | undefined;
+  get entry(): ArrayEntry | undefined {
+    return this.current;
+  }
+  set entry(value: ArrayEntry | undefined) {
+    this.current = value;
+    this.position = value?.index;
+  }
+  deleteEntry(entry: ArrayEntry): void {
+    if (this.current === entry) this.current = entry.next;
+  }
   constructor(private readonly order: ArrayOrder) {
     this.rewind();
   }
   get key(): Key | undefined {
-    return this.entry?.key;
+    this.position = this.current?.index;
+    return this.current?.key;
   }
   get index(): number | undefined {
-    return this.entry?.index;
+    return this.position;
   }
   rewind(): void {
     this.entry = this.order.first;

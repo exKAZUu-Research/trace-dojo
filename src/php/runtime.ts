@@ -256,6 +256,14 @@ export class Runtime {
     releaseDropped(this, released);
   }
 
+  discardNativeResult(value: Value, start: number): void {
+    const held = this.nativeHeld.at(-1);
+    const index = held?.lastIndexOf(value) ?? -1;
+    if (held && index >= start) held[index] = undefined;
+    this.release([value], true);
+    this.flushReleases();
+  }
+
   holdTemporaryReference(ref: Ref): void {
     ref.rc++;
     this.frame.temporaries.push(ref);

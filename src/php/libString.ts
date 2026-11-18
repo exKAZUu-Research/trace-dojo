@@ -500,7 +500,7 @@ defineFunction('strrchr(string $haystack, string $needle, bool $before_needle = 
   if (index === -1) return false;
   return args[2] === true ? haystack.slice(0, index) : haystack.slice(index);
 });
-// code-gauge-allow functionCognitiveComplexity 24 -- Transcribes PHP's algorithm for this function step by step, whose branches mirror PHP's.
+// code-gauge-allow functionCognitiveComplexity 25 -- Transcribes PHP's algorithm for this function step by step, whose branches mirror PHP's.
 // code-gauge-allow functionNcss 36 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 defineFunction('strtr(string $string, string|array $from, ?string $to = null): string', ({ args }) => {
   const text = s(args[0]);

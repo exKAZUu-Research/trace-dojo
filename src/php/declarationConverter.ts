@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 635 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 636 -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import type { Node } from '@willbooster/web-tree-sitter';
 
@@ -18,7 +18,7 @@ import { parseTypeText } from './calls';
 import { numericPrefix, toBool } from './conversions';
 import { BUILTIN_TYPES, ConverterBase } from './converterBase';
 import { SCRIPT_PATH } from './runtime';
-import { typeToString } from './types';
+import { describeType, typeToString } from './types';
 import { INT_MAX, INT_MIN, type TypeDecl, type Visibility } from './values';
 import { isSubtype } from './variance';
 
@@ -391,7 +391,7 @@ export abstract class DeclarationConverter extends ConverterBase {
     }
   }
 
-  private checkDefaultType(node: Node, name: string, type: TypeDecl, value: Expr, property?: string): void {
+  private checkDefaultType(node: Node, name: string, type: TypeDecl, value: Expr, property?: ClassDecl): void {
     value = knownScalarDefault(value) ?? value;
     if (value.k !== 'lit' && value.k !== 'array') return;
     if (value.k === 'lit' && value.v === null && !property) return;
@@ -410,8 +410,17 @@ export abstract class DeclarationConverter extends ConverterBase {
                   ? 'string'
                   : undefined;
     if (literalType === undefined || defaultFits(type, literalType)) return;
+    const display = describeType(
+      type,
+      property && property.kind !== 'trait'
+        ? {
+            name: property.name,
+            parent: property.parent ? { name: property.parent } : undefined,
+          }
+        : undefined
+    );
     if (property && literalType === 'null' && type.k !== 'inter') {
-      const text = typeToString(type);
+      const text = display;
       this.error(
         node,
         `Default value for property of type ${text} may not be null. Use the nullable type ${type.k === 'named' && type.name !== 'iterable' ? '?' + text : text + '|null'} to allow null default value`
@@ -419,7 +428,7 @@ export abstract class DeclarationConverter extends ConverterBase {
     }
     this.error(
       node,
-      `型に合わない既定値です（Cannot use ${literalType} as default value for ${property ? `property ${property}::$${name}` : `parameter $${name}`} of type ${typeToString(type)}）。`
+      `型に合わない既定値です（Cannot use ${literalType} as default value for ${property ? `property ${property.name}::$${name}` : `parameter $${name}`} of type ${display}）。`
     );
   }
 
@@ -727,7 +736,7 @@ export abstract class DeclarationConverter extends ConverterBase {
         );
       }
       const defaultExpr = defaultNode ? this.constantExpr(defaultNode, false) : undefined;
-      if (type && defaultExpr) this.checkDefaultType(element, name, type, defaultExpr, decl.name);
+      if (type && defaultExpr) this.checkDefaultType(element, name, type, defaultExpr, decl);
       const prop: PropertyDeclAst = {
         name,
         visibility: modifiers.visibility ?? 'public',

@@ -126,10 +126,10 @@ export function declareClass(decl: ClassDecl, row: number): PhpClass {
     }
   }
   for (const constant of decl.consts) addConst(cls, constant);
-  linkInterfaceConstants(cls, row);
   for (const prop of decl.props) addProperty(cls, prop);
   for (const method of decl.methods) addMethod(cls, method);
   applyTraits(cls, decl);
+  linkInterfaceConstants(cls, row);
   checkInheritance(cls, row);
   if (!decl.isAnonymous) runtime.classes.set(key, cls);
   runtime.userClasses.push(cls);
@@ -189,8 +189,8 @@ function addProperty(cls: PhpClass, ast: PropertyDeclAst, declarationScope = cls
         `Cannot redeclare ${inherited.isReadonly ? 'readonly' : 'non-readonly'} property ${inherited.cls.name}::$${ast.name} as ${ast.isReadonly ? 'readonly' : 'non-readonly'} ${cls.name}::$${ast.name}`,
         ast.row
       );
-    const setter = ast.setVisibility ?? (ast.isReadonly && ast.visibility === 'public' ? 'protected' : ast.visibility);
-    const parentSetter = inherited.setVisibility ?? inherited.visibility;
+    const setter = effectiveSetVisibility(ast);
+    const parentSetter = effectiveSetVisibility(inherited);
     if (visibilityRank(setter) < visibilityRank(parentSetter)) {
       throw new FatalError(
         `Set access level of ${cls.name}::$${ast.name} must be ${parentSetter === 'public' ? 'omitted' : `${parentSetter}(set)`} (as in class ${inherited.cls.name})${parentSetter === 'protected' ? ' or weaker' : ''}`,
@@ -516,7 +516,6 @@ function checkInheritance(cls: PhpClass, row: number): void {
   }
 }
 
-// code-gauge-allow functionCognitiveComplexity 29 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 function missingPropertyHooks(cls: PhpClass, ancestors: PhpClass[], row: number): string[] {
   const missing = new Set<string>();
   const contracts = [...ancestors, ...cls.interfaces, cls].flatMap((parent) => [...parent.propByName.values()]);
@@ -536,6 +535,16 @@ function missingPropertyHooks(cls: PhpClass, ancestors: PhpClass[], row: number)
           `Access level to ${cls.name}::$${property.name} must be ${contract.visibility} (as in class ${contract.cls.name})`,
           row
         );
+      if (
+        contract.hooks.abstractSet &&
+        visibilityRank(effectiveSetVisibility(property)) < visibilityRank(effectiveSetVisibility(contract))
+      ) {
+        const setter = effectiveSetVisibility(contract);
+        throw new FatalError(
+          `Set access level of ${cls.name}::$${property.name} must be ${setter === 'public' ? 'omitted' : `${setter}(set)`} (as in class ${contract.cls.name})${setter === 'protected' ? ' or weaker' : ''}`,
+          row
+        );
+      }
       if (!propertyTypeCompatible(contract, property, property.cls))
         propertyTypeError(contract, cls, property.name, row);
     }
@@ -899,7 +908,7 @@ export function writeProp(object: PhpObject, name: string, value: Value, scope: 
       if (outsideScope && (scope === undefined || !scope.isSubclassOf(decl.cls))) {
         throwError(
           'Error',
-          `Cannot modify ${readonlySetVisibility(decl)}(set) readonly property ${decl.cls.name}::$${name} from ${scopeText(scope)}`
+          `Cannot modify ${effectiveSetVisibility(decl)}(set) readonly property ${decl.cls.name}::$${name} from ${scopeText(scope)}`
         );
       }
       if (object.cloning) {
@@ -993,13 +1002,23 @@ export function coerceProperty(decl: PropDecl, value: Value, object?: PhpObject,
  * Throws PHP's error for changing a property through a reference or a nested write (`$o->list[] = 1`), which readonly
  * and asymmetric visibility forbid where a plain write would be forbidden.
  */
-export function checkIndirectModification(object: PhpObject, name: string, scope: PhpClass | undefined): void {
+// code-gauge-allow functionCognitiveComplexity 18 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+export function checkIndirectModification(
+  object: PhpObject,
+  name: string,
+  scope: PhpClass | undefined,
+  mode: 'write' | 'update' | 'unset' = 'write'
+): void {
   if (object.isResource) throwError('Error', `Attempt to modify property "${name}" on resource`);
   const decl = lookupProp(object.cls, name, scope);
   if (!decl || decl.isStatic) return;
   if (decl.isReadonly) {
     const slot = object.props.get(decl.key);
     const value = slot instanceof Ref ? slot.v : slot;
+    if (value === UNINIT || value === undefined) {
+      if (mode === 'unset') return;
+      if (mode === 'update') readProp(object, name, scope);
+    }
     if (value instanceof PhpObject) return;
     throwError('Error', `Cannot indirectly modify readonly property ${decl.cls.name}::$${name}`);
   } else if (!canWriteProp(decl, scope)) {
@@ -1010,9 +1029,11 @@ export function checkIndirectModification(object: PhpObject, name: string, scope
   }
 }
 
-/** The visibility of writing a readonly property, which is protected unless declared narrower, as since PHP 8.4. */
-function readonlySetVisibility(decl: PropDecl): Visibility {
-  return decl.setVisibility ?? (decl.visibility === 'public' ? 'protected' : decl.visibility);
+function effectiveSetVisibility(property: Pick<PropDecl, 'visibility' | 'setVisibility' | 'isReadonly'>): Visibility {
+  return (
+    property.setVisibility ??
+    (property.isReadonly && property.visibility === 'public' ? 'protected' : property.visibility)
+  );
 }
 
 /** The reference a property holds, creating it, for `=&`, by-reference arguments, and nested writes. */

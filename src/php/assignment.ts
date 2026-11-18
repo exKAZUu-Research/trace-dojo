@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 560 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 576 -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import type { Expr, ListItem } from './ast';
 import { callMethod } from './callables';
@@ -37,9 +37,9 @@ import {
 // Assignment ---------------------------------------------------------------------------------------------------------
 
 /** The location a writable expression names, evaluating its keys and creating containers as PHP's writes do. */
-// code-gauge-allow functionNcss 50 -- Handles each kind of writable expression, whose write rules PHP defines separately.
+// code-gauge-allow functionNcss 52 -- Handles each kind of writable expression, whose write rules PHP defines separately.
 // code-gauge-allow functionCognitiveComplexity 30 -- Transcribes PHP's algorithm for this function step by step, whose branches mirror PHP's.
-export function placeOf(e: Expr): Place {
+export function placeOf(e: Expr, mode: 'write' | 'update' | 'deferred' = 'write'): Place {
   const runtime = rt();
   const frame = runtime.frame;
   switch (e.k) {
@@ -59,10 +59,11 @@ export function placeOf(e: Expr): Place {
       if (e.base.k === 'var' && e.base.name === 'GLOBALS') {
         return globalPlace(e.index);
       }
-      const parent = placeOf(e.base);
+      const parent = placeOf(e.base, mode);
       const key = e.index === undefined ? undefined : ev(e.index);
       runtime.row = e.row;
-      const container = writableContainer(parent.nested?.() ?? parent);
+      if (mode === 'deferred') return deferredElementPlace(parent, key);
+      const container = writableContainer(parent.nested?.(mode) ?? parent);
       if (container instanceof PhpArray) return new ElementPlace(container, key === undefined ? undefined : toKey(key));
       if (container instanceof PhpObject) return arrayAccessPlace(container, key);
       return stringOffsetPlace(parent, container, key);
@@ -95,6 +96,40 @@ export function placeOf(e: Expr): Place {
       return new ValuePlace(ev(e));
     }
   }
+}
+
+function deferredElementPlace(parent: Place, key: Value | undefined): Place {
+  let target: Place | undefined;
+  const writable = (): Place => {
+    if (target) return target;
+    const container = writableContainer(parent.nested?.('write') ?? parent);
+    target =
+      container instanceof PhpArray
+        ? new ElementPlace(container, key === undefined ? undefined : toKey(key))
+        : container instanceof PhpObject
+          ? arrayAccessPlace(container, key)
+          : stringOffsetPlace(parent, container, key);
+    return target;
+  };
+  const read = (): Value | undefined => {
+    const container = parent.getForIsset ? parent.getForIsset() : parent.get();
+    return container === undefined || container === null || key === undefined
+      ? undefined
+      : readIndex(container, key, true);
+  };
+  return {
+    get: read,
+    getForIsset: read,
+    nested: (mode) => {
+      const place = writable();
+      return place.nested?.(mode) ?? place;
+    },
+    declaration: () => writable().declaration?.(),
+    typeSources: () => writable().typeSources?.(),
+    set: (value) => writable().set(value),
+    ref: () => writable().ref(),
+    unset: () => writable().unset(),
+  };
 }
 
 function globalPlace(index?: Expr): VarPlace {
@@ -196,7 +231,7 @@ function propPlace(object: PhpObject, name: string): Place {
       }
       warn(`Undefined property: ${object.cls.name}::$${name}`);
     },
-    nested() {
+    nested(mode = 'write') {
       const decl = classesModule.lookupProp(object.cls, name, scope);
       if (
         ((decl && !classesModule.canAccessProp(decl, scope)) || !issetPropExists(object, name, scope)) &&
@@ -204,7 +239,7 @@ function propPlace(object: PhpObject, name: string): Place {
       )
         return new RefPlace(propRef(object, name, scope));
       if (decl?.hooks?.get && !object.guards?.has(`hook:${name}`)) {
-        classesModule.checkIndirectModification(object, name, scope);
+        classesModule.checkIndirectModification(object, name, scope, mode);
         const runtime = rt();
         runtime.lastReturnRef = undefined;
         const value = readProp(object, name, scope, true);
@@ -215,7 +250,7 @@ function propPlace(object: PhpObject, name: string): Place {
           throwError('Error', `Indirect modification of ${decl.cls.name}::$${name} is not allowed`);
         return new RefPlace(Ref.temporary(value));
       }
-      classesModule.checkIndirectModification(object, name, scope);
+      classesModule.checkIndirectModification(object, name, scope, mode);
       return this;
     },
   };
@@ -378,7 +413,7 @@ export function assignExpression(target: Expr, valueExpr: Expr): Value {
     ref.assign(value);
     return ref.v;
   }
-  const place = placeOf(target);
+  const place = placeOf(target, 'deferred');
   const value = ev(valueExpr);
   runtime.row = target.row;
   return place.set(share(value));
@@ -511,13 +546,13 @@ export function compoundAssign(e: Extract<Expr, { k: 'assignOp' }>): Value {
   const runtime = rt();
   if (e.op === '??') {
     // PHP evaluates the target's parts once, for both the read and the write.
-    const place = placeOf(e.target);
+    const place = placeOf(e.target, 'deferred');
     const current = place.getForIsset ? place.getForIsset() : place.get();
     if (current !== undefined && current !== null) return current;
     const value = ev(e.value);
     return place.set(share(value));
   }
-  const place = placeOf(e.target);
+  const place = placeOf(e.target, 'update');
   const value = ev(e.value);
   runtime.row = e.row;
   let current = place.get('assignOp');
@@ -557,7 +592,7 @@ export function applyOperator(op: string, left: Value, right: Value): Value {
 // code-gauge-allow functionNcss 37 -- Transcribes PHP's algorithm for this function step by step, whose branches mirror PHP's.
 export function incDec(e: Extract<Expr, { k: 'incdec' }>): Value {
   const runtime = rt();
-  const place = placeOf(e.target);
+  const place = placeOf(e.target, 'update');
   runtime.row = e.row;
   let old = place.get('incdec');
   if (old === undefined) {
@@ -709,7 +744,7 @@ function unsetPlace(e: Expr): Place | undefined {
     const name = memberName(e.name);
     if (!(object instanceof PhpObject)) return undefined;
     const place = propPlace(object, name);
-    return place.nested?.() ?? place;
+    return place.nested?.('unset') ?? place;
   }
   if (e.k === 'var' || e.k === 'varvar' || e.k === 'sprop') {
     return placeOf(e);

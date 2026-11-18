@@ -128,7 +128,7 @@ export class ArrayStorage {
 
   private moveCursor(array: PhpArray, mode: 'copy' | 'replace'): void {
     if (this.cursorArray === array) return;
-    const key = this.iteratorCursor?.key;
+    const key = mode === 'copy' ? this.iteratorCursor?.key : undefined;
     const index = this.iteratorCursor?.index;
     const initialized = this.iteratorCursor !== undefined;
     this.cursorArray = array;

@@ -1,0 +1,4 @@
+
+Fatal error: Class C inherits both P::X and I::X, which is ambiguous in /main.php on line 1
+Stack trace:
+#0 {main}

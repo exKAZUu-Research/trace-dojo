@@ -5,7 +5,7 @@ import { reportUncaughtWarning, throwError } from './errors';
 import { strictEquals } from './operators';
 import { share } from './places';
 import { FatalError, PhpThrow } from './runtime';
-import { coerce, NO_MATCH, typeToString } from './types';
+import { coerce, describeType, NO_MATCH, typeToString } from './types';
 import { type ClassConst, type PhpClass, type Value, visibilityRank } from './values';
 import { isSubtype } from './variance';
 
@@ -46,19 +46,21 @@ function checkConstantOverride(cls: PhpClass, constant: ClassConst, inherited: C
   }
   if (inherited.type && (!constant.type || !isSubtype(constant.type, constant.cls, inherited.type, inherited.cls))) {
     throw new FatalError(
-      `Type of ${cls.name}::${name} must be compatible with ${inherited.cls.name}::${name} of type ${typeToString(inherited.type)}`,
+      `Type of ${cls.name}::${name} must be compatible with ${inherited.cls.name}::${name} of type ${describeType(inherited.type, inherited.cls)}`,
       row
     );
   }
 }
 
+// code-gauge-allow functionCognitiveComplexity 16 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 export function linkInterfaceConstants(cls: PhpClass, row: number): void {
   for (const iface of cls.interfaces) {
     for (const [name, constant] of iface.consts) {
       const existing = cls.consts.get(name);
       if (!existing) cls.consts.set(name, constant);
       else if (existing !== constant) {
-        if (existing.cls.kind === 'interface' && !existing.cls.isSubclassOf(constant.cls)) {
+        if (constant.isFinal) checkConstantOverride(cls, existing, constant, row);
+        if (existing.cls !== constant.cls && existing.cls !== cls) {
           throw new FatalError(
             `Class ${cls.name} inherits both ${existing.cls.name}::${name} and ${constant.cls.name}::${name}, which is ambiguous`,
             row
@@ -107,8 +109,8 @@ function checkTraitConstant(cls: PhpClass, conflict: TraitConstantConflict, row:
     (!existing.type && !constant.type) ||
     (existing.type &&
       constant.type &&
-      isSubtype(existing.type, cls, constant.type, trait) &&
-      isSubtype(constant.type, trait, existing.type, cls));
+      isSubtype(existing.type, cls, constant.type, trait, true) &&
+      isSubtype(constant.type, trait, existing.type, cls, true));
   let sameValue = false;
   let evaluationFailed = false;
   if (existing.visibility === constant.visibility && existing.isFinal === constant.isFinal && sameType) {

@@ -1,3 +1,4 @@
+// code-gauge-allow-file fileNcss 408 -- Keeps one PHP runtime concern and its shared helpers in one module.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 // oxlint-disable unicorn/prefer-code-point -- PHP strings hold bytes as code units 0–255, which charCodeAt and fromCharCode read and write as they are.
 import { codePointBytes, enc, utf8Length } from './bytes';
@@ -374,6 +375,8 @@ const SIMPLE_ESCAPES: Record<string, string> = {
 
 class JsonParser {
   private index = 0;
+  private temporariesStart = 0;
+  private readonly containers: (PhpArray | PhpObject)[] = [];
 
   constructor(
     private readonly text: string,
@@ -383,10 +386,23 @@ class JsonParser {
   ) {}
 
   parseDocument(): Value {
-    const value = this.value(0);
-    this.skipSpace();
-    if (this.index < this.text.length) throw new JsonError(4);
-    return value;
+    const runtime = rt();
+    this.temporariesStart = runtime.frame.temporaries.length;
+    runtime.nativeHeld.push(this.containers);
+    try {
+      const value = this.value(0);
+      this.skipSpace();
+      if (this.index < this.text.length) throw new JsonError(4);
+      return value;
+    } finally {
+      runtime.nativeHeld.pop();
+    }
+  }
+
+  private releaseStoredTemporaries(): void {
+    const runtime = rt();
+    runtime.dropTemporaries(runtime.frame, this.temporariesStart);
+    runtime.flushReleases();
   }
 
   private skipSpace(): void {
@@ -416,55 +432,76 @@ class JsonParser {
     throw new JsonError(4);
   }
 
-  // code-gauge-allow functionNcss 31 -- Transcribes PHP's algorithm for this function step by step, whose branches mirror PHP's.
+  // code-gauge-allow functionNcss 40 -- Transcribes PHP's algorithm for this function step by step, whose branches mirror PHP's.
   private object(depth: number): Value {
     this.index++;
     const array = new PhpArray();
-    let object: PhpObject | undefined;
-    // PHP's parser creates an object once it has parsed the first member's value.
-    const createIfNeeded = (): void => {
-      if (!this.associative && !object) object = createObject(rt().classes.get('stdclass') as PhpClass);
-    };
-    this.skipSpace();
-    if (this.text[this.index] === '}') {
-      this.index++;
-      createIfNeeded();
+    this.containers.push(array);
+    try {
+      let object: PhpObject | undefined;
+      // PHP's parser creates an object once it has parsed the first member's value.
+      const createIfNeeded = (): void => {
+        if (!this.associative && !object) {
+          object = createObject(rt().classes.get('stdclass') as PhpClass);
+          this.containers[this.containers.length - 1] = object;
+        }
+      };
+      this.skipSpace();
+      if (this.text[this.index] === '}') {
+        this.index++;
+        createIfNeeded();
+        return object ?? array;
+      }
+      for (;;) {
+        this.skipSpace();
+        if (this.text[this.index] !== '"') throw new JsonError(4);
+        const key = this.string();
+        this.skipSpace();
+        if (this.text[this.index] !== ':') throw new JsonError(4);
+        this.index++;
+        const value = this.value(depth);
+        const runtime = rt();
+        runtime.held.push(value);
+        try {
+          createIfNeeded();
+          storeMember(object ?? array, key, value);
+        } finally {
+          runtime.held.pop();
+        }
+        this.releaseStoredTemporaries();
+        this.skipSpace();
+        const next = this.text[this.index++];
+        if (next === '}') break;
+        if (next !== ',') throw new JsonError(4);
+      }
       return object ?? array;
+    } finally {
+      rt().release([this.containers.pop()]);
     }
-    for (;;) {
-      this.skipSpace();
-      if (this.text[this.index] !== '"') throw new JsonError(4);
-      const key = this.string();
-      this.skipSpace();
-      if (this.text[this.index] !== ':') throw new JsonError(4);
-      this.index++;
-      const value = this.value(depth);
-      createIfNeeded();
-      storeMember(object ?? array, key, value);
-      this.skipSpace();
-      const next = this.text[this.index++];
-      if (next === '}') break;
-      if (next !== ',') throw new JsonError(4);
-    }
-    return object ?? array;
   }
 
   private array(depth: number): PhpArray {
     this.index++;
     const array = new PhpArray();
-    this.skipSpace();
-    if (this.text[this.index] === ']') {
-      this.index++;
-      return array;
-    }
-    for (;;) {
-      array.append(this.value(depth));
+    this.containers.push(array);
+    try {
       this.skipSpace();
-      const next = this.text[this.index++];
-      if (next === ']') break;
-      if (next !== ',') throw new JsonError(4);
+      if (this.text[this.index] === ']') {
+        this.index++;
+        return array;
+      }
+      for (;;) {
+        array.append(this.value(depth));
+        this.releaseStoredTemporaries();
+        this.skipSpace();
+        const next = this.text[this.index++];
+        if (next === ']') break;
+        if (next !== ',') throw new JsonError(4);
+      }
+      return array;
+    } finally {
+      rt().release([this.containers.pop()]);
     }
-    return array;
   }
 
   private string(): string {

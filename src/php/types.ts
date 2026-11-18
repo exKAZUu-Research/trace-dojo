@@ -258,13 +258,22 @@ export function isTraversable(object: PhpObject): boolean {
   return traversable !== undefined && object.cls.isSubclassOf(traversable);
 }
 
+interface TypeDisplayScope {
+  name: string;
+  parent?: { name: string };
+}
+
 /** Resolves `self` and `static` in a type for messages, as PHP prints the class names. */
-export function describeType(type: TypeDecl, scope?: PhpClass, staticClass?: PhpClass): string {
+export function describeType(type: TypeDecl, scope?: TypeDisplayScope, staticClass?: TypeDisplayScope): string {
   return typeToString(resolveSelf(type, scope, staticClass));
 }
 
 /** Writes `self`, `parent`, and `static` in a type as the class names they stand for, as PHP's messages do. */
-function resolveSelf(type: TypeDecl, scope: PhpClass | undefined, staticClass: PhpClass | undefined): TypeDecl {
+function resolveSelf(
+  type: TypeDecl,
+  scope: TypeDisplayScope | undefined,
+  staticClass: TypeDisplayScope | undefined
+): TypeDecl {
   if (type.k === 'named') {
     if (type.name === 'static' && staticClass) return { ...type, name: staticClass.name };
     if (!scope) return type;
