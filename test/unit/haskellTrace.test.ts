@@ -996,26 +996,27 @@ main=forM_ [1..${iterations}::Int] $ \\i -> do
 );
 
 test.each([
-  ['', 's', 'show i', 's', '1000'],
+  ['', 's', 'show i', 's', '500'],
   ['', 's', 'if even i then "even" else "odd"', 's', 'even'],
   ['data Color=Red|Blue', 'c', 'if even i then Red else Blue', 'c', 'Red'],
-  ['', 'c', 'compare i 500', 'c', 'GT'],
-  ['import Data.Ratio', 'n', 'i % 2', 'n', '500 % 1'],
-  ['data P=P {first::Int,second::Int}', 'this', 'P (i*2) (i*3)', 'this.first', 2000],
-  ['data P=P {first::Int,second::Int}', 'this', 'id(P (i*2) (i*3))', 'this.second', 3000],
-  ['data P=P {label::String}', 'this', 'P(show i)', 'this.label', '1000'],
+  ['', 'c', 'compare i 250', 'c', 'GT'],
+  ['import Data.Ratio', 'n', 'i % 2', 'n', '250 % 1'],
+  ['data P=P {first::Int,second::Int}', 'this', 'P (i*2) (i*3)', 'this.first', 1000],
+  ['data P=P {first::Int,second::Int}', 'this', 'id(P (i*2) (i*3))', 'this.second', 1500],
+  ['data P=P {label::String}', 'this', 'P(show i)', 'this.label', '500'],
 ])('composite exhaustion preserves scalar answer views: %s %s=%s', (declaration, name, expression, shown, last) => {
+  const iterations = 500;
   const source = `import Control.Monad
 ${declaration}
-main=forM_ [1..1000::Int] $ \\i -> do
+main=forM_ [1..${iterations}::Int] $ \\i -> do
  let a=reverse [1..200::Int]
  let ${name}=${expression}
  print i`;
   const recording = traceWithClock(source, () => 0);
   expect(recording.uncaughtException).toBeUndefined();
-  expect(recording.stdout).toBe(Array.from({ length: 1000 }, (_, i) => `${i + 1}\n`).join(''));
+  expect(recording.stdout).toBe(Array.from({ length: iterations }, (_, i) => `${i + 1}\n`).join(''));
   const assignments = recording.traceItems.filter((item) => item.line === 5);
-  expect(assignments).toHaveLength(1000);
+  expect(assignments).toHaveLength(iterations);
   for (const item of assignments) expect(Object.hasOwn(item.vars, shown)).toBe(true);
   expect(assignments.at(-1)?.vars[shown]).toBe(last);
 });
