@@ -3,18 +3,10 @@ import { execFileSync } from 'node:child_process';
 import { expect, test } from 'vitest';
 import { z } from 'zod';
 
+const bundles = new Map<string, string>();
+
 test('shared reference views serialize and render within a bounded heap', { timeout: 30_000 }, () => {
-  const bundle = execFileSync(
-    'bun',
-    ['build', 'test/helpers/haskellDisplayOutput.ts', '--target=node', '--packages=external'],
-    { encoding: 'utf8', timeout: 30_000, maxBuffer: 16 * 1024 * 1024 }
-  );
-  const output = execFileSync('node', ['--max-old-space-size=512', '--input-type=module'], {
-    input: bundle,
-    encoding: 'utf8',
-    timeout: 10_000,
-    maxBuffer: 1024 * 1024,
-  });
+  const output = runHelper('test/helpers/haskellDisplayOutput.ts', 512);
   const results = z
     .array(
       z.object({
@@ -29,7 +21,7 @@ test('shared reference views serialize and render within a bounded heap', { time
         cheap: z.unknown().optional(),
       })
     )
-    .parse(JSON.parse(output));
+    .parse(output);
   expect(results.map((item) => item.name)).toEqual([
     'small',
     'binary',
@@ -65,17 +57,7 @@ test(
   'shared scalar answer arrays keep complete recordings serializable within a bounded heap',
   { timeout: 30_000 },
   () => {
-    const bundle = execFileSync(
-      'bun',
-      ['build', 'test/helpers/haskellScalarOutput.ts', '--target=node', '--packages=external'],
-      { encoding: 'utf8', timeout: 30_000, maxBuffer: 16 * 1024 * 1024 }
-    );
-    const output = execFileSync('node', ['--max-old-space-size=256', '--input-type=module'], {
-      input: bundle,
-      encoding: 'utf8',
-      timeout: 10_000,
-      maxBuffer: 1024 * 1024,
-    });
+    const output = runHelper('test/helpers/haskellScalarOutput.ts', 256);
     const results = z
       .array(
         z.object({
@@ -92,7 +74,7 @@ test(
           inner: z.number(),
         })
       )
-      .parse(JSON.parse(output));
+      .parse(output);
     expect(results.map((item) => item.name)).toEqual([
       'small',
       'manySnapshots',
@@ -121,21 +103,47 @@ test(
 );
 
 test('reference recordings and mandatory world snapshots stay bounded', { timeout: 30_000 }, () => {
-  const bundle = execFileSync(
-    'bun',
-    ['build', 'test/helpers/haskellRecordingOutput.ts', '--target=node', '--packages=external'],
-    { encoding: 'utf8', timeout: 30_000, maxBuffer: 16 * 1024 * 1024 }
-  );
-  const output = execFileSync('node', ['--max-old-space-size=256', '--input-type=module'], {
-    input: bundle,
-    encoding: 'utf8',
-    timeout: 10_000,
-    maxBuffer: 1024 * 1024,
-  });
-  const result = z
-    .object({ bytes: z.number(), transportBytes: z.number(), stateLimited: z.boolean() })
-    .parse(JSON.parse(output));
+  const output = runHelper('test/helpers/haskellRecordingOutput.ts', 256);
+  const result = z.object({ bytes: z.number(), transportBytes: z.number(), stateLimited: z.boolean() }).parse(output);
   expect(result.bytes).toBeLessThan(64 * 1024 * 1024);
   expect(result.transportBytes).toBeLessThan(64 * 1024 * 1024);
   expect(result.stateLimited).toBe(true);
 });
+
+test.each([
+  'control',
+  'negativeZero',
+  'nan',
+  'infinity',
+  'negativeInfinity',
+  'deepBigints',
+  'finite',
+  'mixed',
+  'selfField',
+])('transport annotations round-trip within a bounded heap: %s', { timeout: 30_000 }, (name) => {
+  const result = z
+    .object({ bytes: z.number(), loops: z.number() })
+    .parse(runHelper('test/helpers/haskellTransportAnnotations.ts', 256, [name]));
+  expect(result.bytes).toBeLessThan(32 * 1024 * 1024);
+  expect(result.loops).toBe(name === 'control' ? 5 : 1200);
+});
+
+function runHelper(path: string, heap: number, args: string[] = []): unknown {
+  let bundle = bundles.get(path);
+  if (bundle === undefined) {
+    bundle = execFileSync('bun', ['build', path, '--target=node', '--packages=external'], {
+      encoding: 'utf8',
+      timeout: 30_000,
+      maxBuffer: 16 * 1024 * 1024,
+    });
+    bundles.set(path, bundle);
+  }
+  return JSON.parse(
+    execFileSync('node', [`--max-old-space-size=${heap}`, '--input-type=module', '-', ...args], {
+      input: bundle,
+      encoding: 'utf8',
+      timeout: 10_000,
+      maxBuffer: 1024 * 1024,
+    })
+  );
+}
