@@ -3,10 +3,11 @@ import { valueSlots } from './allocation';
 import { PANIC, panic } from './arith';
 import { isDiscardName } from './ast';
 import type { Capture, Expression, ExpressionOf, Label, Span, Statement, SwitchCase } from './ast';
+import { physicalUnion } from './bufferMemory';
 import { CallCompiler, type FunctionCompilation } from './calls';
 import { enumLookup } from './enumLookup';
 import type { FunctionInstance } from './functions';
-import { sizeOf } from './layout';
+import { hasValueDependentWrites, sizeOf } from './layout';
 import { type Frame, Jump, withHeldValues } from './runtime';
 import {
   copyForFrame,
@@ -784,17 +785,30 @@ export abstract class StatementCompiler extends CallCompiler {
     return (frame, holder, index) => {
       const union = holder.slots[index] as ZUnion;
       const changed = union.tag !== tag;
+      if (changed && retainBytes) this.retainUnionPayload(type, union, frame);
+      const initialize = changed && !union.fieldView;
       let payload: Value;
-      if (changed) {
-        if (retainBytes && !union.fieldView && sizeOf(fields[union.tag].type) !== 0) union.retainPayload();
+      if (initialize) {
         frame.runtime.reserveStorage(slots);
         frame.runtime.spend(slots);
         payload = undefinedValue(fieldType);
       }
       union.tag = tag;
-      if (changed) union.slots[0] = payload;
+      if (initialize) union.slots[0] = payload;
       store(frame, union, 0);
+      union.payloadInitialized = true;
     };
+  }
+
+  private retainUnionPayload(type: Extract<Type, { kind: 'union' }>, union: ZUnion, frame: Frame): void {
+    if (union.fieldView || !union.payloadInitialized) return;
+    const field = type.fields![union.tag].type;
+    if (sizeOf(field) === 0) return;
+    if (union.priorPayloads?.has(union.tag) && hasValueDependentWrites(field, () => frame.runtime.spend())) {
+      physicalUnion(type, union);
+    } else {
+      union.retainPayload();
+    }
   }
 
   /** The code that writes a field's or element's value: in place for a nested anonymous literal, else as a whole. */

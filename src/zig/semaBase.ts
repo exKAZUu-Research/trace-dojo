@@ -1729,7 +1729,7 @@ function buildUndefinedValue(type: Type): Value {
     }
     case 'union': {
       const fields = type.fields ?? [];
-      return new ZUnion(0, fields[0] ? buildUndefinedValue(fields[0].type) : undefined);
+      return new ZUnion(0, fields[0] ? buildUndefinedValue(fields[0].type) : undefined, false);
     }
     case 'fn': {
       let value = undefinedFunctions.get(type);

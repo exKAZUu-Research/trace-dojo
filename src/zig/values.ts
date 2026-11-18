@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 441 -- Keeps logical slots, pointer identity, and retained payload storage with their shared assignment rules.
+// code-gauge-allow-file fileNcss 442 -- Keeps logical slots, pointer identity, and retained payload storage with their shared assignment rules.
 import { ExecutionLimitError, LIMITS } from '../interpreter/limits';
 import type { TurtleState } from '../interpreter/turtleWorld';
 import { BigFloat, compareFloats } from './floats';
@@ -201,7 +201,8 @@ export class ZUnion implements Slots {
 
   constructor(
     public tag: number,
-    payload: Value
+    payload: Value,
+    public payloadInitialized = true
   ) {
     this.slots = [payload];
   }
@@ -217,7 +218,7 @@ export class ZUnion implements Slots {
   }
 
   withCopiedPayload(payload: Value): ZUnion {
-    const copy = new ZUnion(this.tag, payload);
+    const copy = new ZUnion(this.tag, payload, this.payloadInitialized);
     copy.priorPayloads = this.priorPayloads;
     return copy;
   }
@@ -542,7 +543,7 @@ export function storeInto(target: Slots, index: number, value: Value): void {
 }
 
 // code-gauge-allow functionCognitiveComplexity 21 -- Preserves existing aggregate locations when storing copied values.
-// code-gauge-allow functionNcss 31 -- Handles aggregate assignment and retained payloads at the storage boundary.
+// code-gauge-allow functionNcss 32 -- Handles aggregate assignment and retained payloads at the storage boundary.
 function storeSnapshotInto(target: Slots, index: number, value: Value): void {
   value = valueWithRetainedPayload(target, index, value);
   if (storageLocations.has(target.slots)) {
@@ -574,6 +575,7 @@ function storeSnapshotInto(target: Slots, index: number, value: Value): void {
   ) {
     storeSnapshotInto(current, 0, value.slots[0]);
     current.priorPayloads = value.priorPayloads;
+    current.payloadInitialized = value.payloadInitialized;
     return;
   }
   if (value instanceof Some && current instanceof Some) {

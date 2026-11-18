@@ -1605,6 +1605,22 @@ test.each([
   }
 );
 
+test.each([
+  ['I', '.{.wide=0x1234}', '.{.small=0x78}', 'u', ''],
+  ['I', '.{.wide=0x1234}', '.{.small=0x78}', 'identity(u)', ''],
+  ['I', '.{.wide=0x1234}', '.{.empty={}}', 'u', ''],
+  ['I', '.{.wide=0x1234}', '.{.empty={}}', 'identity(u)', ''],
+  ['struct{value:I}', '.{.value=.{.wide=0x1234}}', '.{.value=.{.empty={}}}', 'identity(u)', ''],
+  ['I', '.{.wide=0x1234}', '.{.small=0x78}', 'identity(u)', '_=&u.inner.wide;'],
+])('revisited union variants retain nested writes through %s %s %s %s', (shape, first, later, copied, address) => {
+  const source = `const std=@import("std");const I=union(enum){wide:u16,small:u8,empty:void};const U=union(enum){inner:${shape},small:u8,wide:u16};fn identity(u:U)U{return u;}pub fn main()void{var u:U=.{.inner=${first}};${address}u=.{.small=0x56};u=.{.inner=${later}};u=.{.small=0x9a};var v:U=.{.wide=0};const p=&v.wide;v=${copied};std.debug.print("{x} {t}",.{p.*,v});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: '129a small',
+    uncaughtException: undefined,
+  });
+});
+
 test('tagged union copies preserve references in retained inactive fields', () => {
   const source = `const std=@import("std");const U=union(enum){ptr:*u8,empty:void};fn identity(u:U)U{return u;}pub fn main()void{var first:u8=7;var second:u8=3;var a:U=.{.ptr=&first};const p=&a.ptr;a=.{.empty={}};var b:U=.{.ptr=&second};const q=&b.ptr;b=identity(a);q.*.*=9;std.debug.print("{} {} {} {t}",.{p.*==q.*,first,second,b});}`;
   expect(executeProgram('zig', source)).toMatchObject({

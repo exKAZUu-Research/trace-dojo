@@ -261,6 +261,38 @@ export function optionalNicheBits(child: Type): number | undefined {
   return child.kind === 'pointer' ? 64 : child.kind === 'error_set' ? 16 : undefined;
 }
 
+const valueDependentWrites = new WeakMap<Type, boolean>();
+
+export function hasValueDependentWrites(type: Type, spend: () => void): boolean {
+  spend();
+  const cached = valueDependentWrites.get(type);
+  if (cached !== undefined) return cached;
+  const result = valueDependentWriteLayout(type, spend);
+  valueDependentWrites.set(type, result);
+  return result;
+}
+
+function valueDependentWriteLayout(type: Type, spend: () => void): boolean {
+  switch (type.kind) {
+    case 'error_union':
+    case 'union': {
+      return true;
+    }
+    case 'optional': {
+      return optionalNicheBits(type.child) === undefined;
+    }
+    case 'array': {
+      return hasValueDependentWrites(type.child, spend);
+    }
+    case 'struct': {
+      return Boolean(type.fields?.some((field) => !field.comptimeValue && hasValueDependentWrites(field.type, spend)));
+    }
+    default: {
+      return false;
+    }
+  }
+}
+
 export function bitSizeOf(type: Type, spendWork?: () => void): number {
   return resolvedBits.get(type) ?? new LayoutQuery(spendWork).bits(type);
 }
