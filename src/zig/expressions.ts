@@ -854,9 +854,7 @@ export abstract class ExpressionCompiler extends SemaBase {
     const first = staticResultOf(start)?.value as bigint | undefined;
     const last = end ? (staticResultOf(end)?.value as bigint | undefined) : staticLen;
     const reachesSentinel = !end || (last !== undefined && staticLen !== undefined && last === staticLen);
-    const sentinelExpression = expression.sentinel
-      ? this.coerce(this.compile(expression.sentinel, child), child, expression.sentinel)
-      : undefined;
+    const sentinelExpression = expression.sentinel ? this.compileSentinel(expression.sentinel, child) : undefined;
     const sentinel = sentinelExpression
       ? new Sentinel(
           (staticResultOf(sentinelExpression) ?? { value: this.knownValue(sentinelExpression, '番兵') }).value
@@ -941,7 +939,38 @@ export abstract class ExpressionCompiler extends SemaBase {
   }
 
   private sentinelValue(expression: Expression, child: Type): Sentinel {
-    return new Sentinel(this.knownValue(this.coerce(this.compile(expression, child), child, expression), '番兵'));
+    return new Sentinel(this.knownValue(this.compileSentinel(expression, child), '番兵'));
+  }
+
+  private compileSentinel(expression: Expression, child: Type): TExpr {
+    let scalar = child;
+    while (scalar.kind === 'optional') {
+      this.spendCompilation();
+      scalar = scalar.child;
+    }
+    switch (scalar.kind) {
+      case 'int':
+      case 'float':
+      case 'comptime_int':
+      case 'comptime_float':
+      case 'void':
+      case 'bool':
+      case 'type':
+      case 'enum':
+      case 'enum_literal':
+      case 'error_set':
+      case 'fn': {
+        return this.coerce(this.compile(expression, child), child, expression);
+      }
+      case 'pointer': {
+        if (scalar.size !== 'slice') return this.coerce(this.compile(expression, child), child, expression);
+        break;
+      }
+      default: {
+        break;
+      }
+    }
+    return this.error(expression, `番兵の型はスカラー型にしてください（${typeName(child)} 型です）。`);
   }
 
   // Operators -------------------------------------------------------------------------------------------------------

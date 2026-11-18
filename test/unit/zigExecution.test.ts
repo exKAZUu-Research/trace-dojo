@@ -7228,6 +7228,29 @@ test('void sentinel types retain distinct array and slice metadata and their sen
   });
 });
 
+test.each([
+  'const T=[1:P{.x=0}]P;_=@typeName(T);',
+  'const T=[:P{.x=0}]const P;_=@typeName(T);',
+  'const T=[1:.{0}][1]u8;_=@typeName(T);',
+  'const T=[1:null]?P;_=@typeName(T);',
+  'var a:[2]P=.{.{.x=0},.{.x=0}};_=&a;var end:usize=1;_=&end;_=a[0..end:P{.x=0}];',
+])('non-scalar sentinel declarations and slices are rejected: %s', (body) => {
+  const source = `const P=struct{x:u8};pub fn main()void{${body}}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'compileError',
+    diagnostics: [{ message: expect.stringContaining('スカラー型') }],
+  });
+});
+
+test('optional scalar sentinels retain the null sentinel', () => {
+  const source = `const std=@import("std");pub fn main()void{const a=[1:null]?u8{7};std.debug.print("{any} {any}",.{a[0],a[1]});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: '7 null',
+    uncaughtException: undefined,
+  });
+});
+
 test('large virtual void sentinel arrays retain their extra logical element', () => {
   const source = `const std=@import("std");pub fn main()void{const a:[1000001:{}]void=@splat({});std.debug.print("{} {} {}",.{a.len,@TypeOf(a),a[1000001]});}`;
   expect(executeProgram('zig', source)).toMatchObject({
