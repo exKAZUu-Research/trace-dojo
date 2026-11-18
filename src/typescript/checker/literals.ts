@@ -92,16 +92,6 @@ export class LiteralChecker {
 
   constructor(private readonly c: Checker) {}
 
-  hasLiteralConstituent(type: Type, primitive: 'string' | 'number' | 'boolean'): boolean {
-    const members = type.kind === 'union' ? type.types : [type];
-    return members.some(
-      (member) =>
-        (member.kind === 'literal' && typeof member.value === primitive) ||
-        member.kind === 'templateLiteral' ||
-        (member.kind === 'typeParameter' && primitive === 'string')
-    );
-  }
-
   arrayLiteral(node: TreeNode, contextual?: Type): Type {
     const elements = arrayElements(node);
     const tupleContext = contextual ? this.tupleContext(contextual) : undefined;
@@ -197,7 +187,7 @@ export class LiteralChecker {
   }
 
   /** Whether an expression is in a `const` context, inside `as const`. */
-  private isConstContext(node: TreeNode): boolean {
+  isConstContext(node: TreeNode): boolean {
     let current: TreeNode | null = node.parent;
     let child: TreeNode = node;
     while (current) {
@@ -205,9 +195,16 @@ export class LiteralChecker {
         return current.children.some((part) => part?.type === 'const') && named(current)[0]?.id === child.id;
       if (current.type === 'type_assertion') return named(current)[0]?.text === 'const';
       if (
-        !['parenthesized_expression', 'array', 'object', 'pair', 'spread_element', 'ternary_expression'].includes(
-          current.type
-        )
+        ![
+          'parenthesized_expression',
+          'array',
+          'object',
+          'pair',
+          'spread_element',
+          'ternary_expression',
+          'template_substitution',
+          'template_string',
+        ].includes(current.type)
       )
         return false;
       child = current;

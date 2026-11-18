@@ -26,6 +26,11 @@ import {
   templateFragmentText,
 } from './syntax';
 import {
+  isTemplateLiteralContext,
+  isTemplateLiteralContextualType,
+  templatePlaceholderConstraint,
+} from './templateContexts';
+import {
   anyType,
   errorType,
   freshLiteralType,
@@ -153,20 +158,16 @@ export class ExpressionChecker {
     }
     // A template without substitutions is a string literal, as TypeScript's `NoSubstitutionTemplateLiteral` is.
     if (types.length === 0) return freshLiteralType(texts[0]);
-    // A template a literal or template literal type expects has the type its parts spell.
-    if (!contextual || !this.c.literals.hasLiteralConstituent(contextual, 'string')) return stringType;
-    const spellable = types.every((type) =>
-      (type.kind === 'union' ? type.types : [type]).every(
-        (member) =>
-          member.kind === 'literal' ||
-          member.kind === 'templateLiteral' ||
-          ['string', 'number', 'bigint', 'boolean', 'null', 'undefined'].some((name) =>
-            isIntrinsic(member, name as 'string')
-          )
-      )
+    const spellsType =
+      this.c.literals.isConstContext(node) ||
+      isTemplateLiteralContext(node) ||
+      (contextual !== undefined && isTemplateLiteralContextualType(this.c, contextual));
+    if (!spellsType) return stringType;
+    // A substitution that is not a template placeholder type, such as an object, spells some `string`.
+    const placeholders = types.map((type) =>
+      this.c.relations.isAssignable(type, templatePlaceholderConstraint) ? regularOf(type) : stringType
     );
-    if (!spellable) return stringType;
-    const spelled = this.c.typeOperators.templateLiteral(texts, types.map(regularOf));
+    const spelled = this.c.typeOperators.templateLiteral(texts, placeholders);
     return spelled.kind === 'literal' ? freshLiteralType(spelled.value as string) : spelled;
   }
 
