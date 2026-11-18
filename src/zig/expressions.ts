@@ -110,6 +110,7 @@ import {
   Slice,
   type Slots,
   Some,
+  storageLocation,
   type Value,
   ZArray,
   zeroArrayElement,
@@ -474,12 +475,10 @@ export abstract class ExpressionCompiler extends SemaBase {
       return this.error(span, `${typeName(type)} 型には、フィールド「${name}」がありません。`);
     }
     if (field.comptimeValue !== undefined) return this.fixedResult(base, field.type, field.comptimeValue.value, span);
+    const project = this.fieldPointer(base, field.type, (parent) => new Pointer(parent.load() as ZStruct, index));
     const parent = this.knownAddress(base);
-    if (parent) {
-      const pointer = new Pointer(parent.load() as ZStruct, index);
-      return knownAt(field.type, pointer, span);
-    }
-    const fieldPlace = this.projectedPlace(base, field.type, (parent) => new Pointer(parent.load() as ZStruct, index));
+    if (parent) return knownAt(field.type, project(parent), span);
+    const fieldPlace = this.projectedPlace(base, field.type, project);
     const facts = fieldFacts(valueFactsOf(base), index);
     const result = facts?.exact
       ? this.fixedResult(base, field.type, facts.exact.value, span)
@@ -494,14 +493,13 @@ export abstract class ExpressionCompiler extends SemaBase {
     const field = fields[index];
     if (type.layout !== 'auto') {
       const view = (value: Value): Slots => physicalUnion(type, value as ZUnion).fieldView!(index);
+      const project = this.fieldPointer(base, field.type, (parent) => new Pointer(view(parent.load()), 0));
       const parent = this.knownAddress(base);
-      if (parent) {
-        return knownAt(field.type, new Pointer(view(parent.load()), 0), span);
-      }
+      if (parent) return knownAt(field.type, project(parent), span);
       return {
         ...this.derived(base, field.type, (value) => view(value).slots[0]),
         span,
-        place: this.projectedPlace(base, field.type, (parent) => new Pointer(view(parent.load()), 0)),
+        place: this.projectedPlace(base, field.type, project),
       };
     }
     const check = (value: Value): ZUnion => {
@@ -511,6 +509,7 @@ export abstract class ExpressionCompiler extends SemaBase {
       }
       return union;
     };
+    const project = this.fieldPointer(base, field.type, (parent) => new Pointer(check(parent.load()), 0));
     if (base.known) {
       const union = base.value as ZUnion;
       if (union.tag !== index) {
@@ -520,15 +519,22 @@ export abstract class ExpressionCompiler extends SemaBase {
         );
       }
       const parent = this.knownAddress(base);
-      if (parent) return knownAt(field.type, new Pointer(parent.load() as ZUnion, 0), span);
+      if (parent) return knownAt(field.type, project(parent), span);
     }
-    const fieldPlace = this.projectedPlace(base, field.type, (parent) => new Pointer(check(parent.load()), 0));
+    const fieldPlace = this.projectedPlace(base, field.type, project);
     return {
       ...this.derived(base, field.type, (value) => check(value).slots[0]),
       valueFacts: fieldFacts(valueFactsOf(base), index),
       span,
       place: fieldPlace,
     };
+  }
+
+  private fieldPointer(base: TExpr, child: Type, project: (parent: Pointer) => Pointer): (parent: Pointer) => Pointer {
+    const comptime = this.requiresComptime(base.type, base.span);
+    if (comptime || sizeOf(child) !== 0) return project;
+    if (sizeOf(base.type) === 0) return (parent) => this.zeroPointerAt(parent.slotLocation(), child);
+    return (parent) => this.zeroPointerAt(project(parent).slotLocation(), child);
   }
 
   private projectedPlace(base: TExpr, child: Type, project: (parent: Pointer) => Pointer): Place | undefined {
@@ -601,12 +607,21 @@ export abstract class ExpressionCompiler extends SemaBase {
     return this.compile(expression, resultType);
   }
 
-  protected zeroPointer(pointer: Pointer, type: Type): Pointer {
+  protected zeroPointer(pointer: Pointer, type: Type, arrayAddress?: Value): Pointer {
+    const location = arrayAddress instanceof Pointer ? arrayAddress.slotLocation() : pointer.storageLocation();
+    return this.zeroPointerAt(location, type);
+  }
+
+  private zeroPointerAt(location: ReturnType<Pointer['storageLocation']>, type: Type): Pointer {
     let loaded: { value: Value } | undefined;
     const slots: Value[] = [];
     Object.defineProperty(slots, 0, {
       get: () => {
-        loaded ??= { value: undefinedValue(type) };
+        if (!loaded) {
+          const value = undefinedValue(type);
+          if (value instanceof ZArray) registerStorageLocation(value.slots, () => location, true);
+          loaded = { value };
+        }
         return loaded.value;
       },
       set: (value: Value) => {
@@ -614,7 +629,6 @@ export abstract class ExpressionCompiler extends SemaBase {
       },
     });
     const storage = { slots };
-    const location = pointer.storageLocation();
     registerStorageLocation(storage.slots, () => location, true);
     return new Pointer(storage, 0);
   }
@@ -731,37 +745,41 @@ export abstract class ExpressionCompiler extends SemaBase {
       this.error(expression.index, `添字 ${index.value as bigint} は、長さ ${length} の範囲の外です。`);
     }
     const isConst = isConstIndexable(type, object.place);
+    const elementPointer = ({ slots, position }: { slots: Slots; position: number }, source: Value): Pointer => {
+      const pointer = new Pointer(slots, position);
+      return zero ? this.zeroPointer(pointer, child, source) : pointer;
+    };
     const arrayAddress = index.known && type.kind === 'array' ? this.knownAddress(object) : undefined;
     if (index.known && (arrayAddress || (object.known && type.kind !== 'array' && isConstantData(object.value)))) {
       const source = arrayAddress ? arrayAddress.load() : object.value;
       const elements = elementSlots(source, type);
-      const pointer = new Pointer({ slots: elements.slots }, elements.start + Number(index.value));
+      const pointer = elementPointer(
+        { slots: { slots: elements.slots }, position: elements.start + Number(index.value) },
+        arrayAddress ?? source
+      );
       return knownAt(child, pointer, expression);
     }
     const base = this.deferredLoad(object);
     const evaluateObject = base.operand.eval;
     const access = this.elementAccess(type);
-    const locate = (frame: Frame): { slots: Slots; position: number } => {
+    const projectElement = (source: Value, position: bigint): Pointer => {
+      const value = type.kind === 'array' ? base.read(source) : source;
+      return elementPointer(access(value, position), source);
+    };
+    const locatePointer = (frame: Frame): Pointer => {
       const value = evaluateObject(frame);
       return withHeldValues(
         frame,
         [value],
         () => {
           const position = index.eval(frame) as bigint;
-          return access(base.read(value), position);
+          return projectElement(type.kind === 'array' ? value : base.read(value), position);
         },
         [base.operand.type]
       );
     };
     const staticSource =
-      type.kind === 'array' ? object.place?.compileTimePointer?.load() : object.known ? object.value : undefined;
-    const staticElement =
-      index.known && staticSource !== undefined ? access(staticSource, index.value as bigint) : undefined;
-    const elementPointer = (element: { slots: Slots; position: number }): Pointer => {
-      const pointer = new Pointer(element.slots, element.position);
-      return zero ? this.zeroPointer(pointer, child) : pointer;
-    };
-    const locatePointer = (frame: Frame): Pointer => elementPointer(locate(frame));
+      type.kind === 'array' ? object.place?.compileTimePointer : object.known ? object.value : undefined;
     const addressType = pointerTo(child, isConst);
     const place: Place = {
       isConst,
@@ -769,25 +787,17 @@ export abstract class ExpressionCompiler extends SemaBase {
         ...runtime(addressType, locatePointer, expression),
         staticResult: this.constantResult(
           [type.kind === 'array' ? base.operand : object, index],
-          ([value, position]) =>
-            elementPointer(access(type.kind === 'array' ? base.read(value) : value, position as bigint)),
+          ([value, position]) => projectElement(value, position as bigint),
           expression
         ),
       }),
       locate: locatePointer,
-      compileTimePointer: staticElement ? elementPointer(staticElement) : undefined,
+      compileTimePointer:
+        index.known && staticSource !== undefined ? projectElement(staticSource, index.value as bigint) : undefined,
     };
     const facts =
       !zero && index.known && type.kind === 'array' ? fieldFacts(valueFactsOf(object), Number(index.value)) : undefined;
-    const projected = runtime(
-      child,
-      (frame) => {
-        const { slots, position } = locate(frame);
-        return zero ? undefinedValue(child) : slots.slots[position];
-      },
-      expression,
-      place
-    );
+    const projected = runtime(child, (frame) => locatePointer(frame).load(), expression, place);
     const result = {
       ...(facts?.exact ? this.fixedResult(object, child, facts.exact.value, expression) : projected),
       place,
@@ -900,6 +910,7 @@ export abstract class ExpressionCompiler extends SemaBase {
       this.checkMemoryOperand(operand, expression);
     const arrayType =
       type.kind === 'pointer' && type.size === 'one' && type.child.kind === 'array' ? type.child : undefined;
+    const zero = !this.requiresComptime(child, expression) && sizeOf(child) === 0;
     const loaded = this.deferredLoad(base);
     const operands = [
       loaded.operand,
@@ -913,7 +924,10 @@ export abstract class ExpressionCompiler extends SemaBase {
       let offset: number;
       let length: bigint;
       if (arrayType) {
-        const array = arrayPointerView(value as Pointer, arrayType);
+        const pointer = value as Pointer;
+        const array = zero
+          ? (this.zeroPointerAt(pointer.slotLocation(), arrayType).load() as ZArray)
+          : arrayPointerView(pointer, arrayType);
         target = array;
         offset = array.offset;
         length = staticLen as bigint;
@@ -934,9 +948,13 @@ export abstract class ExpressionCompiler extends SemaBase {
         if (!scalarValuesEqual(actual, sentinel.value))
           panic(`sentinel mismatch: expected ${String(sentinel.value)}, found ${String(actual)}`);
       }
-      return resultLength === undefined
-        ? new Slice(target, from, toValue - fromValue)
-        : new Pointer(new Constant(new ZArray(target.slots, from, toValue - fromValue, sentinel !== undefined)), 0);
+      if (resultLength === undefined) return new Slice(target, from, toValue - fromValue);
+      const view = new Constant(new ZArray(target.slots, from, toValue - fromValue, sentinel !== undefined));
+      if (zero) {
+        const location = storageLocation(target.slots, from);
+        registerStorageLocation(view.slots, () => location);
+      }
+      return new Pointer(view, 0);
     };
     const evaluators = valueEvaluators(operands, false);
     return {

@@ -1403,6 +1403,15 @@ test('single-field unions use only payload storage even with explicit tag backin
   });
 });
 
+test.each([0, 1])('zero-sized union projections preserve the source address at index %s', (index) => {
+  const source = `const std=@import("std");const U=union(enum(u64)){only:void=7};const T=struct{a:U,b:U};const S=struct{prefix:u8,values:[2]T,suffix:u8};fn get(n:*usize,s:*S)*S{n.*+=1;return s;}pub fn main()void{var s:S=.{.prefix=5,.values=undefined,.suffix=6};var t:S=s;var n:usize=0;const p=&get(&n,&s).values[0].a.only;const q=&get(&n,&s).values[${index}].a.only;const r=&get(&n,&s).values[0].b.only;const w=&get(&n,&t).values[1].a.only;const fixed=&get(&n,&s).values[0..][1].a.only;const ptr=&(&get(&n,&s).values)[1].a.only;const upper=n-4;const dynamic=&get(&n,&s).values[0..upper][1].a.only;var same=true;for(&get(&n,&s).values)|*item|same=same and p==&item.a.only;std.debug.print("{} {} {} {} {} {} {} {} {}",.{n,p==q,p==r,p==w,p==fixed,p==ptr,p==dynamic,same,@intFromEnum(s.values[0].a)});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: '8 true true false true true true true 7',
+    uncaughtException: undefined,
+  });
+});
+
 test('writer result types use the canonical usize and mutable byte slice', () => {
   const source = `const std=@import("std");fn less(n:usize,a:u8,b:u8)bool{return n>0 and a<b;}
 pub fn main()!void{var b:[2]u8=undefined;var w=std.Io.Writer.fixed(&b);const n=try w.write("x");var a=[_]u8{2,1};std.sort.heap(u8,&a,n,less);std.debug.print("{} {} {}",.{a[0],a[1],@TypeOf(w.buffered())==[]u8});}`;

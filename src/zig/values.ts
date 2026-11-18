@@ -278,6 +278,10 @@ export class Pointer {
     );
   }
 
+  slotLocation(): { storage: object; index: number } {
+    return storageLocation(this.target.slots, this.index);
+  }
+
   equals(other: Pointer): boolean {
     const left = this.storageLocation(),
       right = other.storageLocation();

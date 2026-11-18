@@ -1809,7 +1809,7 @@ export abstract class StatementCompiler extends CallCompiler {
         ? (value, index) => {
             const view = viewOf(value);
             const pointer = new Pointer(view.slots, view.start + index);
-            return zero ? this.zeroPointer(pointer, child) : pointer;
+            return zero ? this.zeroPointer(pointer, child, value) : pointer;
           }
         : (value, index, frame) => {
             if (zero) return undefinedValue(child);
