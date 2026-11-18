@@ -67,3 +67,59 @@ test.each(rejected)('invalid kinds retain ordinary type diagnostics: %s', (_name
     expect(result.diagnostics[0]?.message).not.toContain('使えません');
   }
 });
+
+const constraintKinds = [
+  ['phantomClass', 'data P a=P\nx::P Show\nx=P\nmain=putStrLn "ok"'],
+  ['fieldClass', 'data P a=P\ndata R=R(P Eq)\nmain=putStrLn "ok"'],
+  [
+    'instanceClass',
+    'data P a=P\nclass C a where c::a->String\ninstance C(P Show) where c _="ok"\nmain=putStrLn(c(P::P Show))',
+  ],
+  ['variableConstraint', 'data P a=P\ng::c a=>P c->a->Int\ng _ _=1\nmain=print 1'],
+  ['aliasSuperclass', 'type C a=Show a\nclass C a=>D a\nmain=print 1'],
+  [
+    'qualifiedClassType',
+    'import qualified Prelude as P\nimport Prelude\ndata Q a=Q\nx::Q P.Show\nx=Q\nmain=putStrLn "ok"',
+  ],
+  ['userClassType', 'class C a where c::a->String\ndata P a=P\nx::P C\nx=P\nmain=putStrLn "ok"'],
+  ['nestedConstraintTuple', 'type C a=((Show a,Eq a),Ord a)\nf::C a=>a->String\nf=show\nmain=putStrLn(f 1)'],
+  ['constraintSynonymApply', 'type Id a=a\ntype C a=Id(Show a)\nf::C a=>a->String\nf=show\nmain=putStrLn(f 1)'],
+] as const;
+
+test.each(constraintKinds)('well-kinded constraint uses have an environment diagnostic: %s', (_name, source) => {
+  const result = executeProgram('haskell', source);
+  expect(result.kind).toBe('compileError');
+  if (result.kind === 'compileError') {
+    expect(result.diagnostics[0]?.message).toMatch(/PolyKinds|ConstraintKinds/);
+    expect(result.diagnostics[0]?.message).toContain('は、この採点環境では使えません。');
+  }
+});
+
+const kindMisuses = [
+  ['nameContext', 'type Name=String\ngreet::Name a=>a->String\ngreet _="hi"\nmain=putStrLn "ok"'],
+  ['pairContext', 'type Pair a=(a,a)\nf::Pair a=>a->Int\nf _=1\nmain=print 1'],
+  ['printerArrow', 'type Printer a=Show a->String\nmain=putStrLn "ok"'],
+  ['bareListClass', 'type Shows=[Show]\nmain=print 1'],
+  ['listClass', 'type Shows a=[Show a]\nmain=putStrLn "ok"'],
+  ['maybeClass', 'type M=Maybe Eq\nmain=putStrLn "ok"'],
+  ['invalidShowMaybe', 'type C=Show Maybe\nmain=print 1'],
+  ['invalidOverClass', 'type C a=Show a a\nmain=print 1'],
+  ['invalidClassValue', 'data D=D Show\nmain=print 1'],
+  ['constraintTupleEmpty', 'type C a=(Show a,())\nmain=print 1'],
+  ['aliasValueContext', 'type Name=String\nclass Name a=>C a\nmain=print 1'],
+  ['aliasValueInstance', 'type Point=(Int,Int)\ninstance Point Int\nmain=print 1'],
+  ['aliasValueDeriving', 'type Name=String\ndata D=D deriving Name\nmain=print 1'],
+  ['aliasClassInstance', 'type C a=Show a\ndata D=D\ninstance C D where show _="D"\nmain=print D'],
+  ['bareAliasInstance', 'type C=Show\ndata D=D\ninstance C D where show _="D"\nmain=print D'],
+  ['aliasDeriving', 'type C a=Show a\ndata D=D deriving C\nmain=print D'],
+  ['tupleBareClass', 'type T a=(Show,a)\nmain=print 1'],
+] as const;
+
+test.each(kindMisuses)('invalid type and class uses keep ordinary diagnostics: %s', (_name, source) => {
+  const result = executeProgram('haskell', source);
+  expect(result.kind).toBe('compileError');
+  if (result.kind === 'compileError') {
+    expect(result.diagnostics[0]?.message).toMatch(/カインド|クラスではありません/);
+    expect(result.diagnostics[0]?.message).not.toContain('使えません');
+  }
+});

@@ -4,13 +4,13 @@ import { CHAR_TYPE, FUNCTION_TYPE, LIST_TYPE, tupleCon } from './builtinTypes';
 import { type ClassEnv, entailByGivens, hasConstructorHead, isSubclassOf, predsEqual } from './classEnv';
 import { dependencyOrder } from './dependencies';
 import type { ClassEntity, ConInfo, DictParam, Evidence, EvidenceHole, TypeEntity, ValueEntity } from './entities';
-import { compileError, unsupportedError } from './errors';
-import { freshKind, instantiateKind } from './kindTemplates';
+import { compileError } from './errors';
 import { TypePrinter } from './prettyType';
 import type {
   Binder,
   RBindGroup,
   RBinding,
+  RConstraint,
   RExpr,
   RFieldBind,
   RPat,
@@ -22,6 +22,7 @@ import type {
 } from './rast';
 import { RecursionBudget } from './recursionBudget';
 import type { Span } from './syntax';
+import { TypeConversion } from './typeConversion';
 import { walkGraph } from './typeGraph';
 import {
   defaultKind,
@@ -33,12 +34,12 @@ import {
   kindArrow,
   kindOfType,
   occursIn,
+  parameterKinds,
   type Pred,
   prune,
   pruneKind,
   quantifyType,
   type Scheme,
-  showKind,
   splitApp,
   STAR,
   tap,
@@ -96,7 +97,7 @@ export class Checker {
 
   readonly globalMono = new Map<ValueEntity, Type>();
   private reductionsRemaining = LIMITS.maxOperations;
-  private kindInstances: { kind: Kind; expected: Kind; span: Span }[] = [];
+  private readonly typeConversion = new TypeConversion();
   private scopedTypes: ReadonlyMap<string, Type> = new Map();
 
   constructor(
@@ -316,10 +317,7 @@ export class Checker {
       varKinds.set(name, kinds[index]);
     }
     const type = this.convertType(sig.type, vars, varKinds, STAR);
-    const preds = sig.context.map((constraint) => ({
-      cls: constraint.cls,
-      type: this.convertType(constraint.type, vars, varKinds, this.classKind(constraint.cls, constraint.span)),
-    }));
+    const preds = sig.context.map((constraint) => this.convertConstraint(constraint, vars, varKinds));
     this.checkKinds();
     const scheme = { kinds: kinds.map(defaultKind), names, preds, type };
     checkSchemeAmbiguity(scheme, sig.span);
@@ -327,102 +325,15 @@ export class Checker {
   }
 
   convertType(type: RType, vars: ReadonlyMap<string, Type>, varKinds: ReadonlyMap<string, Kind>, expected: Kind): Type {
-    const { type: result, kind } = this.convertTypeKind(type, vars, varKinds);
-    if (!unifyKinds(kind, expected)) {
-      typeError(
-        type.span,
-        `型の種類（カインド）が合いません。種類 ${showKind(expected)} の型が期待されているところに、種類 ${showKind(kind)} の型があります。`
-      );
-    }
-    return result;
+    return this.typeConversion.convert(type, vars, varKinds, expected);
   }
 
-  private convertTypeKind(
-    type: RType,
+  convertConstraint(
+    constraint: RConstraint,
     vars: ReadonlyMap<string, Type>,
     varKinds: ReadonlyMap<string, Kind>
-  ): { type: Type; kind: Kind } {
-    switch (type.k) {
-      case 'var': {
-        const found = vars.get(type.name);
-        if (!found) typeError(type.span, `型変数 ${type.name} がスコープにありません。`);
-        return { type: found, kind: varKinds.get(type.name) as Kind };
-      }
-      case 'fun': {
-        const from = this.convertType(type.from, vars, varKinds, STAR);
-        const to = this.convertType(type.to, vars, varKinds, STAR);
-        return { type: fnType(from, to), kind: STAR };
-      }
-      case 'con':
-      case 'app': {
-        return this.convertAppliedType(type, vars, varKinds);
-      }
-    }
-  }
-
-  private convertAppliedType(
-    type: RType,
-    vars: ReadonlyMap<string, Type>,
-    varKinds: ReadonlyMap<string, Kind>
-  ): { type: Type; kind: Kind } {
-    const args: RType[] = [];
-    let head: RType = type;
-    while (head.k === 'app') {
-      args.unshift(head.arg);
-      head = head.fn;
-    }
-    if (head.k === 'con' && head.entity.sort === 'synonym') {
-      const entity = head.entity;
-      if (args.length < entity.arity) {
-        typeError(type.span, `型シノニム ${entity.name} には ${entity.arity} 個の型引数が要ります。`);
-      }
-      const synonymArgs = args.slice(0, entity.arity).map((arg) => this.convertTypeKind(arg, vars, varKinds));
-      const appliedKind = this.instantiateKind(entity, entity.kind, head.span);
-      const paramKinds = parameterKinds(appliedKind).slice(0, entity.arity);
-      for (const [index, arg] of synonymArgs.entries()) {
-        if (!unifyKinds(arg.kind, paramKinds[index])) {
-          typeError(args[index].span, `型の種類（カインド）が合いません（${entity.name} の型引数）。`);
-        }
-      }
-      const expanded = instantiateType(
-        entity.synonym as Type,
-        synonymArgs.map((arg) => arg.type)
-      );
-      let resultKind = appliedKind;
-      for (let index = 0; index < entity.arity; index++) {
-        resultKind = (pruneKind(resultKind) as { tag: 'arrow'; to: Kind }).to;
-      }
-      return this.applyTypeArgs({ type: expanded, kind: resultKind }, args.slice(entity.arity), vars, varKinds);
-    }
-    const converted =
-      head.k === 'con'
-        ? { type: tcon(head.entity) as Type, kind: this.instantiateKind(head.entity, head.entity.kind, head.span) }
-        : this.convertTypeKind(head, vars, varKinds);
-    return this.applyTypeArgs(converted, args, vars, varKinds);
-  }
-
-  private applyTypeArgs(
-    head: { type: Type; kind: Kind },
-    args: RType[],
-    vars: ReadonlyMap<string, Type>,
-    varKinds: ReadonlyMap<string, Kind>
-  ): { type: Type; kind: Kind } {
-    let { type: result, kind } = head;
-    for (const arg of args) {
-      const converted = this.convertTypeKind(arg, vars, varKinds);
-      const resultKind = freshKindVar();
-      if (!unifyKinds(kind, kindArrow(converted.kind, resultKind))) {
-        typeError(
-          arg.span,
-          pruneKind(kind).tag === 'star'
-            ? '型の種類（カインド）が合いません。型引数をとらない型に、型引数を書いています。'
-            : '型の種類（カインド）が合いません。'
-        );
-      }
-      result = tap(result, converted.type);
-      kind = resultKind;
-    }
-    return { type: result, kind };
+  ): Pred {
+    return this.typeConversion.predicate(constraint, vars, varKinds);
   }
 
   typeOfRef(ref: VarRef, span: Span, name: string, expr: Extract<RExpr, { k: 'var' }>): Type {
@@ -989,22 +900,11 @@ export class Checker {
   }
 
   classKind(entity: ClassEntity, span: Span): Kind {
-    return this.instantiateKind(entity, entity.tyvarKind, span);
+    return this.typeConversion.classKind(entity, span);
   }
 
   checkKinds(specialize = false): void {
-    for (const { kind, expected, span } of this.kindInstances) {
-      if (!unifyKinds(specialize ? expected : freshKind(expected).kind, kind)) {
-        throw unsupportedError(span, '多相カインド（PolyKinds）');
-      }
-    }
-    this.kindInstances = [];
-  }
-
-  private instantiateKind(owner: object, kind: Kind, span: Span): Kind {
-    const instance = instantiateKind(owner, kind);
-    if (instance.variables.length > 0) this.kindInstances.push({ kind: instance.kind, expected: kind, span });
-    return instance.kind;
+    this.typeConversion.checkKinds(specialize);
   }
 }
 
@@ -1040,16 +940,6 @@ export function typeParamKinds(type: TypeEntity): Kind[] {
   return parameterKinds(type.kind);
 }
 
-function parameterKinds(initial: Kind): Kind[] {
-  const kinds: Kind[] = [];
-  let kind = pruneKind(initial);
-  while (kind.tag === 'arrow') {
-    kinds.push(kind.from);
-    kind = pruneKind(kind.to);
-  }
-  return kinds;
-}
-
 export function isFailable(pat: RPat): boolean {
   switch (pat.k) {
     case 'var':
@@ -1076,6 +966,8 @@ export function typeVarNames(types: readonly RType[]): string[] {
     } else if (type.k === 'app') {
       collect(type.fn);
       collect(type.arg);
+    } else if (type.k === 'tuple') {
+      for (const elem of type.elems) collect(elem);
     } else if (type.k === 'fun') {
       collect(type.from);
       collect(type.to);

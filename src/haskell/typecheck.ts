@@ -1,3 +1,5 @@
+import assert from 'node:assert/strict';
+
 import { FUNCTION_TYPE } from './builtinTypes';
 import type { ClassEnv } from './classEnv';
 import { deriveInstance } from './deriving';
@@ -94,8 +96,12 @@ function defineConstructors(decl: RDataDecl): void {
 }
 
 function defineClassMethods(decl: RClassDecl): void {
-  decl.entity.supers = decl.supers.map((sup) => sup.cls);
-  for (const sup of decl.supers) {
+  const supers = decl.supers.map((sup) => {
+    assert.ok('cls' in sup);
+    return sup;
+  });
+  decl.entity.supers = supers.map((sup) => sup.cls);
+  for (const sup of supers) {
     if (reachesSuperclass(sup.cls, decl.entity)) {
       throw compileError(decl.span, `クラス ${decl.entity.name} のスーパークラスが循環しています。`);
     }
@@ -128,10 +134,7 @@ function declareInstance(checker: Checker, decl: RInstanceDecl, moduleName: stri
   const vars = new Map<string, Type>(names.map((name, index) => [name, { tag: 'tgen', index }]));
   const varKinds = new Map<string, Kind>(names.map((name, index) => [name, kinds[index]]));
   const head = checker.convertType(decl.type, vars, varKinds, checker.classKind(decl.cls, decl.span));
-  const context: Pred[] = decl.context.map((constraint) => ({
-    cls: constraint.cls,
-    type: checker.convertType(constraint.type, vars, varKinds, checker.classKind(constraint.cls, constraint.span)),
-  }));
+  const context = decl.context.map((constraint) => checker.convertConstraint(constraint, vars, varKinds));
   if (splitApp(head).head.tag !== 'tcon') {
     throw unsupportedError(decl.span, '型変数だけを型に書いたインスタンス');
   }

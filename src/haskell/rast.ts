@@ -1,7 +1,3 @@
-/**
- * The syntax after renaming: every name resolved, operators resolved by fixity, and patterns normalized to
- * constructor applications. The type checker annotates it with types and class evidence.
- */
 import type { ClassEntity, ConInfo, DictParam, Evidence, FieldInfo, Fixity, TypeEntity, ValueEntity } from './entities';
 import type { Literal, Pat, Span } from './syntax';
 import type { Scheme, Type } from './types';
@@ -79,14 +75,12 @@ export type RPat = (
 export type RType =
   | { k: 'var'; name: string; span: Span }
   | { k: 'con'; entity: TypeEntity; span: Span }
+  | { k: 'class'; entity: ClassEntity; span: Span }
+  | { k: 'tuple'; elems: RType[]; span: Span }
   | { k: 'app'; fn: RType; arg: RType; span: Span }
   | { k: 'fun'; from: RType; to: RType; span: Span };
 
-export interface RConstraint {
-  cls: ClassEntity;
-  type: RType;
-  span: Span;
-}
+export type RConstraint = ({ cls: ClassEntity } | { head: RType }) & { type: RType; span: Span };
 
 export interface RSigType {
   context: RConstraint[];
@@ -145,7 +139,6 @@ export type RBinding =
       dictParams?: DictParam[];
       /** The globals a top-level pattern binding defines, one per binder. */
       globals?: ValueEntity[];
-      /** The signatures of the pattern's variables. */
       patSigs?: Map<LocalVar, RSigType>;
     };
 

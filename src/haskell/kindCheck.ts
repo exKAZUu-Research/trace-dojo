@@ -1,10 +1,10 @@
 import { stronglyConnected } from './dependencies';
-import type { TypeEntity } from './entities';
+import type { ClassEntity, TypeEntity } from './entities';
 import { compileError } from './errors';
 import type { Checker } from './infer';
 import { checkSchemeAmbiguity, typeVarNames } from './infer';
 import { rememberKind } from './kindTemplates';
-import type { RType } from './rast';
+import type { RConstraint, RType } from './rast';
 import type { RClassDecl, RDataDecl, RModule, RSynonymDecl } from './rename';
 import {
   defaultKind,
@@ -63,18 +63,21 @@ function prepareDeclarations(module: RModule): KindDeclaration[] {
 function kindDependencies(entry: KindDeclaration): Set<object> {
   const found = new Set<object>();
   const work: RType[] = [];
+  const contexts: RConstraint[] = [];
   if (entry.kind === 'data') {
     for (const con of entry.decl.cons) work.push(...con.fields);
   } else if (entry.kind === 'synonym') work.push(entry.decl.rhs);
   else {
-    for (const sup of entry.decl.supers) found.add(sup.cls);
+    contexts.push(...entry.decl.supers);
     for (const method of entry.decl.methods) {
       work.push(method.sig.type);
-      for (const constraint of method.sig.context) {
-        found.add(constraint.cls);
-        work.push(constraint.type);
-      }
+      contexts.push(...method.sig.context);
     }
+  }
+  for (const constraint of contexts) {
+    if ('cls' in constraint) found.add(constraint.cls);
+    else work.push(constraint.head);
+    work.push(constraint.type);
   }
   for (const entity of typeEntities(work)) found.add(entity);
   return found;
@@ -120,6 +123,14 @@ function inferTypeDeclaration(checker: Checker, entry: Exclude<KindDeclaration, 
 
 function inferClass(checker: Checker, decl: RClassDecl): void {
   for (const sup of decl.supers) {
+    if (!('cls' in sup)) {
+      checker.convertConstraint(
+        sup,
+        new Map([[decl.param, { tag: 'tgen', index: 0 }]]),
+        new Map([[decl.param, decl.entity.tyvarKind]])
+      );
+      continue;
+    }
     if (!unifyKinds(decl.entity.tyvarKind, checker.classKind(sup.cls, sup.span))) {
       throw compileError(sup.span, `スーパークラス ${sup.cls.name} の型変数と、種類（カインド）が合いません。`);
     }
@@ -166,7 +177,7 @@ function orderSynonyms(decls: RSynonymDecl[]): RSynonymDecl[] {
 
 function* synonymDependencies(type: RType, byEntity: ReadonlyMap<TypeEntity, RSynonymDecl>): Generator<RSynonymDecl> {
   for (const entity of typeEntities([type])) {
-    const dependency = byEntity.get(entity);
+    const dependency = 'sort' in entity ? byEntity.get(entity) : undefined;
     if (dependency) yield dependency;
   }
 }
@@ -183,24 +194,20 @@ function methodScheme(checker: Checker, decl: RClassDecl, sig: RClassDecl['metho
   const varKinds = new Map<string, Kind>(names.map((name, index) => [name, kinds[index]]));
   const type = checker.convertType(sig.type, vars, varKinds, STAR);
   const preds: Pred[] = [{ cls: decl.entity, type: { tag: 'tgen', index: 0 } }];
-  for (const constraint of sig.context) {
-    preds.push({
-      cls: constraint.cls,
-      type: checker.convertType(constraint.type, vars, varKinds, checker.classKind(constraint.cls, constraint.span)),
-    });
-  }
+  for (const constraint of sig.context) preds.push(checker.convertConstraint(constraint, vars, varKinds));
   const scheme = { kinds, names, preds, type };
   checkSchemeAmbiguity(scheme, sig.span);
   return scheme;
 }
 
-function* typeEntities(types: readonly RType[]): Generator<TypeEntity> {
+function* typeEntities(types: readonly RType[]): Generator<TypeEntity | ClassEntity> {
   const work = [...types];
   while (work.length > 0) {
     chargeTypeWork();
     const type = work.pop()!;
-    if (type.k === 'con') yield type.entity;
+    if (type.k === 'con' || type.k === 'class') yield type.entity;
     else if (type.k === 'app') work.push(type.fn, type.arg);
     else if (type.k === 'fun') work.push(type.from, type.to);
+    else if (type.k === 'tuple') for (const elem of type.elems) work.push(elem);
   }
 }

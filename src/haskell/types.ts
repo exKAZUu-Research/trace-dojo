@@ -3,7 +3,7 @@ import type { ClassEntity, TypeEntity } from './entities';
 import { mapGraph, walkGraph, walkGraphPairs } from './typeGraph';
 import { chargeTypeWork } from './typeWorkBudget';
 
-export type Kind = { tag: 'star' } | { tag: 'arrow'; from: Kind; to: Kind } | KindVar;
+export type Kind = { tag: 'star' | 'constraint' } | { tag: 'arrow'; from: Kind; to: Kind } | KindVar;
 
 export interface KindVar {
   tag: 'kvar';
@@ -12,13 +12,13 @@ export interface KindVar {
 }
 
 export const STAR: Kind = { tag: 'star' };
+export const CONSTRAINT: Kind = { tag: 'constraint' };
 
 export function kindArrow(from: Kind, to: Kind): Kind {
   chargeTypeWork();
   return { tag: 'arrow', from, to };
 }
 
-/** The kind of a type constructor taking `arity` types of kind `*`. */
 export function simpleKind(arity: number): Kind {
   let kind: Kind = STAR;
   for (let index = 0; index < arity; index++) kind = kindArrow(STAR, kind);
@@ -30,6 +30,16 @@ let nextKindVar = 0;
 export function freshKindVar(): KindVar {
   chargeTypeWork();
   return { tag: 'kvar', id: nextKindVar++ };
+}
+
+export function parameterKinds(initial: Kind): Kind[] {
+  const kinds: Kind[] = [];
+  let kind = pruneKind(initial);
+  while (kind.tag === 'arrow') {
+    kinds.push(kind.from);
+    kind = pruneKind(kind.to);
+  }
+  return kinds;
 }
 
 export function pruneKind(kind: Kind): Kind {
@@ -90,6 +100,9 @@ function printKind(kind: Kind, depth: number): string {
     case 'star': {
       return '*';
     }
+    case 'constraint': {
+      return 'Constraint';
+    }
     case 'kvar': {
       return 'k';
     }
@@ -101,11 +114,8 @@ function printKind(kind: Kind, depth: number): string {
   }
 }
 
-// ---------------------------------------------------------------------------------------------------------------
-
 export type Type = TVar | TCon | TAp | TGen;
 
-/** A type variable: a unification variable, or a rigid one (a skolem) from a signature. */
 export interface TVar {
   tag: 'tvar';
   id: number;
@@ -129,7 +139,6 @@ export interface TAp {
   arg: Type;
 }
 
-/** A quantified variable of a type scheme, by its index. */
 export interface TGen {
   tag: 'tgen';
   index: number;
@@ -173,7 +182,6 @@ export function prune(type: Type): Type {
   return type;
 }
 
-/** The type with every bound variable replaced by what it stands for. */
 export function zonk(type: Type): Type {
   return mapType(type, (node) => node);
 }
@@ -186,7 +194,6 @@ export function mapType(type: Type, leaf: (node: Type) => Type): Type {
   });
 }
 
-/** Splits an application into its head and arguments: `Either a b` into `Either` and `[a, b]`. */
 export function splitApp(type: Type): { head: Type; args: Type[] } {
   const args: Type[] = [];
   let head = prune(type);
@@ -246,7 +253,6 @@ export function instantiateType(type: Type, args: readonly Type[]): Type {
   return mapType(type, (node) => (node.tag === 'tgen' ? args[node.index] : node));
 }
 
-/** Replaces the given variables by `TGen` indices, for building a scheme. */
 export function quantifyType(type: Type, vars: readonly TVar[]): Type {
   const indices = new Map(vars.map((variable, index) => [variable, index]));
   return mapType(type, (node) => {
@@ -274,7 +280,6 @@ function unifyTypeNode(x: Type, y: Type, bind: BindVariable): UnificationFailure
   return x.tag === 'tap' && y.tag === 'tap' ? undefined : 'mismatch';
 }
 
-/** Whether two types are the same after resolving bound variables. */
 export function typesEqual(a: Type, b: Type): boolean {
   for (const [x, y] of walkGraphPairs(a, b, prune, typeChildren)) {
     if (x === y) continue;
@@ -308,7 +313,6 @@ function matchTypeNode(pattern: Type, type: Type, bindings: (Type | undefined)[]
   return pattern === type;
 }
 
-/** Whether a pattern type could match the type once the type's variables are known. */
 export function couldMatch(pattern: Type, type: Type): boolean {
   for (const [p, t] of walkGraphPairs(pattern, type, prune, typeChildren)) {
     if (p.tag === 'tgen' || t.tag === 'tvar') continue;

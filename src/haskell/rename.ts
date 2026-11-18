@@ -52,7 +52,7 @@ import type {
   Stmt,
   TypeExpr,
 } from './syntax';
-import { checkTypeParams, typeConstructorNames } from './typeNames';
+import { checkTypeParams } from './typeNames';
 import { STAR } from './types';
 import { chargeTypeWork } from './typeWorkBudget';
 
@@ -585,7 +585,6 @@ class Renamer {
   }
 
   private renameSynonym(decl: Extract<Decl, { kind: 'typeSyn' }>): void {
-    for (const name of typeConstructorNames(decl.type)) this.lookupTypeEntity(name, true);
     const like = this.ownTypes.get(decl.name.name) as { kind: 'type'; entity: TypeEntity };
     const params = checkTypeParams(decl.params);
     this.synonyms.push({
@@ -1113,10 +1112,17 @@ class Renamer {
 
   private renameConstraint(constraint: Constraint, vars: Set<string>): RConstraint {
     return {
-      cls: this.lookupClass(constraint.cls),
+      ...this.renameConstraintHead(constraint.cls),
       type: this.renameType(constraint.types[0], vars),
       span: constraint.span,
     };
+  }
+
+  private renameConstraintHead(name: QName): { cls: ClassEntity } | { head: RType } {
+    const found = this.lookupType(name);
+    return found.kind === 'class'
+      ? { cls: found.entity }
+      : { head: { k: 'con', entity: found.entity, span: name.span } };
   }
 
   renameType(type: TypeExpr, vars: ReadonlySet<string>): RType {
@@ -1127,7 +1133,7 @@ class Renamer {
         return { k: 'var', name: type.name, span };
       }
       case 'tcon': {
-        return { k: 'con', entity: this.lookupTypeEntity(type.name), span };
+        return this.renameTypeName(type.name);
       }
       case 'tapp': {
         return { k: 'app', fn: this.renameType(type.fn, vars), arg: this.renameType(type.arg, vars), span };
@@ -1139,9 +1145,7 @@ class Renamer {
         return { k: 'app', fn: { k: 'con', entity: LIST_TYPE, span }, arg: this.renameType(type.elem, vars), span };
       }
       case 'ttuple': {
-        let result: RType = { k: 'con', entity: tupleType(type.elems.length), span };
-        for (const elem of type.elems) result = { k: 'app', fn: result, arg: this.renameType(elem, vars), span };
-        return result;
+        return { k: 'tuple', elems: type.elems.map((elem) => this.renameType(elem, vars)), span };
       }
     }
   }
@@ -1273,28 +1277,27 @@ class Renamer {
     return picked.candidate;
   }
 
-  private lookupTypeEntity(name: QName, constraintSynonym = false): TypeEntity {
+  private renameTypeName(name: QName): RType {
+    let builtin: TypeEntity | undefined;
     if (!name.qualifier) {
-      if (name.name === '()') return UNIT_TYPE;
-      if (name.name === '[]') return LIST_TYPE;
-      if (name.name === '->') return FUNCTION_TYPE;
-      const tuple = /^\((,+)\)$/.exec(name.name);
-      if (tuple) return tupleType(tuple[1].length + 1);
+      if (name.name === '()') builtin = UNIT_TYPE;
+      else if (name.name === '[]') builtin = LIST_TYPE;
+      else if (name.name === '->') builtin = FUNCTION_TYPE;
+      else {
+        const tuple = /^\((,+)\)$/.exec(name.name);
+        if (tuple) builtin = tupleType(tuple[1].length + 1);
+      }
     }
+    if (builtin) return { k: 'con', entity: builtin, span: name.span };
     const found = this.lookupType(name);
-    if (found.kind !== 'type')
-      throw constraintSynonym
-        ? unsupportedError(name.span, '制約を表す型シノニム（ConstraintKinds）')
-        : compileError(name.span, `${describeName(name)} はクラスで、型ではありません。`);
-    return found.entity;
+    return found.kind === 'type'
+      ? { k: 'con', entity: found.entity, span: name.span }
+      : { k: 'class', entity: found.entity, span: name.span };
   }
 
   private lookupClass(name: QName): ClassEntity {
     const found = this.lookupType(name);
-    if (found.kind !== 'class')
-      throw found.entity.sort === 'synonym'
-        ? unsupportedError(name.span, '制約を表す型シノニム（ConstraintKinds）')
-        : compileError(name.span, `${describeName(name)} は型で、クラスではありません。`);
+    if (found.kind !== 'class') throw compileError(name.span, `${describeName(name)} は型で、クラスではありません。`);
     return found.entity;
   }
 }
@@ -1456,8 +1459,12 @@ function rtypeMentions(type: RType, name: string): boolean {
     case 'var': {
       return type.name === name;
     }
-    case 'con': {
+    case 'con':
+    case 'class': {
       return false;
+    }
+    case 'tuple': {
+      return type.elems.some((elem) => rtypeMentions(elem, name));
     }
     case 'app': {
       return rtypeMentions(type.fn, name) || rtypeMentions(type.arg, name);
