@@ -1,13 +1,15 @@
-// code-gauge-allow-file fileNcss 408 -- One case per kind of type.
+// code-gauge-allow-file fileNcss 416 -- One case per kind of type.
 import type { Span } from './ast';
 import { bigintToF32 } from './floatFormat';
 import { normalize } from './infer';
 import { RustPanic } from './runtime';
 import { type AdtDef, intMax, intMin, type IntName, shallow, type Type } from './types';
 import {
+  DONE,
   DynValue,
   EnumValue,
   isPlace,
+  type IterValue,
   MapValue,
   RangeValue,
   SetValue,
@@ -474,7 +476,7 @@ export function hashKey(type: Type, value: Value): string {
 
 /** A deep copy of a value as `Clone::clone` makes it, calling the program's own `clone` for its types. */
 // code-gauge-allow functionCognitiveComplexity 23 -- One case per kind of type.
-// code-gauge-allow functionNcss 57 -- One case per kind of type.
+// code-gauge-allow functionNcss 59 -- One case per kind of value.
 export function cloneValue(type: Type, value: Value): Value {
   const t = normalize(shallow(type));
   if (t.kind === 'ref') return value;
@@ -524,6 +526,9 @@ export function cloneValue(type: Type, value: Value): Value {
           const range = value as RangeValue;
           return new RangeValue(range.start, range.end, range.inclusive, range.exhausted);
         }
+        case 'Iter': {
+          return cloneIterator(t.args[0], value as IterValue);
+        }
         default: {
           if (value instanceof StructValue) {
             const types = fieldTypes(def, t.args, 0);
@@ -550,6 +555,14 @@ export function cloneValue(type: Type, value: Value): Value {
       return value;
     }
   }
+}
+
+/** A clone of an iterator, which goes on from where the iterator is, on its own. */
+function cloneIterator(item: Type, iter: IterValue): IterValue {
+  const cloneItem = (value: Value): Value => cloneValue(item, value);
+  const copy = iter.fork?.(cloneItem) ?? iter;
+  if (iter.peeked) copy.peeked = iter.peeked.map((next) => (next === DONE ? DONE : cloneItem(next)));
+  return copy;
 }
 
 /** Whether copying a value of a `Copy` type must duplicate it, as aggregates the program can mutate in place must. */

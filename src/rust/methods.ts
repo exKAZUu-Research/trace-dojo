@@ -1,9 +1,9 @@
 import type { ReceiverAdjust } from './annotations';
 import { normalize } from './infer';
 import type { Program } from './items';
+import { intoIterItem, intoIterShape } from './iterTypes';
 import type { TraitSolver } from './traits';
 import {
-  CHAR,
   type FnDef,
   freshVar,
   type ImplDef,
@@ -102,25 +102,21 @@ export function lookupMethod(
     const t = shallow(step.type);
     return t.kind === 'adt' && RANGE_ITERATORS.has(t.def.builtin as string);
   });
-  if (range) {
-    const elem = (shallow(range.type) as Type & { kind: 'adt' }).args[0];
-    return probeAsIter(program, solver, range, elem, name, true);
-  }
-  // `char::to_uppercase`'s iterator is an `Iter<char>` that also displays as its text.
+  if (range) return probeAsIter(program, solver, range, name, true);
+  // `char::to_uppercase`'s iterator is an iterator of `char`s that also displays as its text.
   const caseIter = steps.find((step) => isBuiltin(shallow(step.type), 'CaseIter'));
-  return caseIter && probeAsIter(program, solver, caseIter, CHAR, name, false);
+  return caseIter && probeAsIter(program, solver, caseIter, name, false);
 }
 
-/** Finds a method of `Iter<elem>` for a receiver that is an iterator of another type. */
+/** Finds a method of iterators for a receiver that is an iterator of another type (a range). */
 function probeAsIter(
   program: Program,
   solver: TraitSolver,
   step: DerefStep,
-  elem: Type,
   name: string,
   rangeToIter: boolean
 ): MethodMatch | undefined {
-  const iter = program.builtinType('Iter', [elem]);
+  const iter = program.iterType(intoIterItem(step.type) as Type, intoIterShape(program, step.type) as Type);
   for (const autoref of ['none', 'ref', 'mut'] as const) {
     const found = probe(program, solver, iter, autoref, name);
     if (found) return { ...found, adjust: { derefs: step.derefs, autoref, rangeToIter } };

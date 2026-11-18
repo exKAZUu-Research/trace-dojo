@@ -7,6 +7,12 @@
  * `SignedInteger`, `UnsignedInteger`, `Float`, `Pattern` (what `str::split` and its kin accept), `Borrow` (keys that
  * look up a map), `FromStrTarget`, `StringPart`, `RangeBounds`, `ExtendInto`, and `SliceIndex` (what `<[T]>::get`
  * accepts: a `usize` or a range of them, giving `Indexed<I, T>`, an element or a slice).
+ *
+ * Every iterator is an `IterImpl<T, S>` of items `T`, whose shape `S` (`CharsShape`, `RevShape<S>`, `MapShape<S, F>`,
+ * ...) stands for the iterator type of std: it decides the traits the iterator implements (`DoubleEndedIterator`,
+ * `ExactSizeIterator`), and the aliases with std's names (`std::str::Chars`, `std::iter::Peekable<I>`) name it.
+ * `IterItem<I>`, `IterShape<I>`, `IterTarget<I>`, `IntoItem<T>`, and `IntoShape<T>` are the item, the shape, the
+ * referent of a reference item, and the item and the shape of the iterator `IntoIterator` makes.
  */
 export const STD_SOURCE = String.raw`
 pub mod marker {
@@ -54,7 +60,6 @@ pub mod ops {
     impl<Idx> Range<Idx> {
         pub fn contains(&self, item: &Idx) -> bool where Idx: PartialOrd;
         pub fn is_empty(&self) -> bool where Idx: PartialOrd;
-        pub fn len(&self) -> usize where Idx: Integer;
     }
     impl<Idx> RangeInclusive<Idx> {
         pub fn contains(&self, item: &Idx) -> bool where Idx: PartialOrd;
@@ -130,17 +135,17 @@ pub mod fmt {
     }
     impl DebugList {
         pub fn entry(&mut self, entry: &dyn Debug) -> &mut DebugList;
-        pub fn entries<T: Debug>(&mut self, entries: Iter<T>) -> &mut DebugList;
+        pub fn entries<T: Debug, S>(&mut self, entries: IterImpl<T, S>) -> &mut DebugList;
         pub fn finish(&mut self) -> Result;
     }
     impl DebugSet {
         pub fn entry(&mut self, entry: &dyn Debug) -> &mut DebugSet;
-        pub fn entries<T: Debug>(&mut self, entries: Iter<T>) -> &mut DebugSet;
+        pub fn entries<T: Debug, S>(&mut self, entries: IterImpl<T, S>) -> &mut DebugSet;
         pub fn finish(&mut self) -> Result;
     }
     impl DebugMap {
         pub fn entry(&mut self, key: &dyn Debug, value: &dyn Debug) -> &mut DebugMap;
-        pub fn entries<K: Debug, V: Debug>(&mut self, entries: Iter<(K, V)>) -> &mut DebugMap;
+        pub fn entries<K: Debug, V: Debug, S>(&mut self, entries: IterImpl<(K, V), S>) -> &mut DebugMap;
         pub fn finish(&mut self) -> Result;
     }
     impl Formatter {
@@ -168,7 +173,7 @@ pub mod string {
         pub fn with_capacity(capacity: usize) -> String;
         pub fn from_utf8(vec: Vec<u8>) -> Result<String, Utf8Error>;
         pub fn from_utf8_lossy(v: &[u8]) -> String;
-        pub fn from_iter<P: StringPart>(iter: Iter<P>) -> String;
+        pub fn from_iter<P: StringPart, S>(iter: IterImpl<P, S>) -> String;
         pub fn push_str(&mut self, string: &str);
         pub fn push(&mut self, ch: char);
         pub fn pop(&mut self) -> Option<char>;
@@ -183,16 +188,18 @@ pub mod string {
         pub fn as_mut_str(&mut self) -> &mut str;
         pub fn into_bytes(self) -> Vec<u8>;
         pub fn retain<F: FnMut(char) -> bool>(&mut self, f: F);
-        pub fn drain<R: RangeBounds<usize>>(&mut self, range: R) -> Iter<char>;
+        pub fn drain<R: RangeBounds<usize>>(&mut self, range: R) -> IterImpl<char, StringDrainShape>;
         pub fn split_off(&mut self, at: usize) -> String;
         pub fn replace_range<R: RangeBounds<usize>>(&mut self, range: R, replace_with: &str);
-        pub fn extend<I>(&mut self, iter: Iter<I>) where I: StringPart;
+        pub fn extend<I, S>(&mut self, iter: IterImpl<I, S>) where I: StringPart;
     }
 }
 pub mod vec {
+    pub type IntoIter<T> = IterImpl<T, VecIntoIterShape>;
+    pub type Drain<'a, T> = IterImpl<'a, T, VecDrainShape>;
     pub struct Vec<T>;
     impl<T> Vec<T> {
-        pub fn from_iter(iter: Iter<T>) -> Vec<T>;
+        pub fn from_iter<S>(iter: IterImpl<T, S>) -> Vec<T>;
         pub fn new() -> Vec<T>;
         pub fn with_capacity(capacity: usize) -> Vec<T>;
         pub fn push(&mut self, value: T);
@@ -205,10 +212,10 @@ pub mod vec {
         pub fn capacity(&self) -> usize;
         pub fn reserve(&mut self, additional: usize);
         pub fn shrink_to_fit(&mut self);
-        pub fn extend<A: ExtendInto<T>>(&mut self, iter: Iter<A>);
+        pub fn extend<A: ExtendInto<T>, S>(&mut self, iter: IterImpl<A, S>);
         pub fn extend_from_slice(&mut self, other: &[T]) where T: Clone;
         pub fn append(&mut self, other: &mut Vec<T>);
-        pub fn drain<R: RangeBounds<usize>>(&mut self, range: R) -> Iter<T>;
+        pub fn drain<R: RangeBounds<usize>>(&mut self, range: R) -> IterImpl<T, VecDrainShape>;
         pub fn retain<F: FnMut(&T) -> bool>(&mut self, f: F);
         pub fn retain_mut<F: FnMut(&mut T) -> bool>(&mut self, f: F);
         pub fn dedup(&mut self) where T: PartialEq;
@@ -223,16 +230,20 @@ pub mod vec {
         pub fn len(&self) -> usize;
     }
     impl<T> Vec<T> {
-        pub fn into_iter(self) -> Iter<T>;
+        pub fn into_iter(self) -> IterImpl<T, VecIntoIterShape>;
     }
     impl<T> &Vec<T> {
-        pub fn into_iter(self) -> Iter<&T>;
+        pub fn into_iter(self) -> IterImpl<&T, SliceIterShape>;
     }
     impl<T> &mut Vec<T> {
-        pub fn into_iter(self) -> Iter<&mut T>;
+        pub fn into_iter(self) -> IterImpl<&mut T, SliceIterMutShape>;
     }
 }
 pub mod slice {
+    pub type Iter<'a, T> = IterImpl<'a, &'a T, SliceIterShape>;
+    pub type IterMut<'a, T> = IterImpl<'a, &'a mut T, SliceIterMutShape>;
+    pub type Windows<'a, T> = IterImpl<'a, &'a [T], WindowsShape>;
+    pub type Chunks<'a, T> = IterImpl<'a, &'a [T], ChunksShape>;
     impl<T> [T] {
         pub fn len(&self) -> usize;
         pub fn is_empty(&self) -> bool;
@@ -242,8 +253,8 @@ pub mod slice {
         pub fn last_mut(&mut self) -> Option<&mut T>;
         pub fn get<I: SliceIndex>(&self, index: I) -> Option<&Indexed<I, T>>;
         pub fn get_mut<I: SliceIndex>(&mut self, index: I) -> Option<&mut Indexed<I, T>>;
-        pub fn iter(&self) -> Iter<&T>;
-        pub fn iter_mut(&mut self) -> Iter<&mut T>;
+        pub fn iter(&self) -> IterImpl<&T, SliceIterShape>;
+        pub fn iter_mut(&mut self) -> IterImpl<&mut T, SliceIterMutShape>;
         pub fn contains(&self, x: &T) -> bool where T: PartialEq;
         pub fn starts_with(&self, needle: &[T]) -> bool where T: PartialEq;
         pub fn ends_with(&self, needle: &[T]) -> bool where T: PartialEq;
@@ -264,10 +275,10 @@ pub mod slice {
         pub fn split_at_mut(&mut self, mid: usize) -> (&mut [T], &mut [T]);
         pub fn split_first(&self) -> Option<(&T, &[T])>;
         pub fn split_last(&self) -> Option<(&T, &[T])>;
-        pub fn windows(&self, size: usize) -> Iter<&[T]>;
-        pub fn chunks(&self, chunk_size: usize) -> Iter<&[T]>;
-        pub fn rchunks(&self, chunk_size: usize) -> Iter<&[T]>;
-        pub fn chunks_exact(&self, chunk_size: usize) -> Iter<&[T]>;
+        pub fn windows(&self, size: usize) -> IterImpl<&[T], WindowsShape>;
+        pub fn chunks(&self, chunk_size: usize) -> IterImpl<&[T], ChunksShape>;
+        pub fn rchunks(&self, chunk_size: usize) -> IterImpl<&[T], RChunksShape>;
+        pub fn chunks_exact(&self, chunk_size: usize) -> IterImpl<&[T], ChunksExactShape>;
         pub fn fill(&mut self, value: T) where T: Clone;
         pub fn to_vec(&self) -> Vec<T> where T: Clone;
         pub fn into_vec(self) -> Vec<T>;
@@ -278,13 +289,13 @@ pub mod slice {
         pub fn repeat(&self, n: usize) -> Vec<T> where T: Copy;
     }
     impl<T> [T] {
-        pub fn into_iter(self) -> Iter<T>;
+        pub fn into_iter(self) -> IterImpl<T, ArrayIntoIterShape>;
     }
     impl<T> &[T] {
-        pub fn into_iter(self) -> Iter<&T>;
+        pub fn into_iter(self) -> IterImpl<&T, SliceIterShape>;
     }
     impl<T> &mut [T] {
-        pub fn into_iter(self) -> Iter<&mut T>;
+        pub fn into_iter(self) -> IterImpl<&mut T, SliceIterMutShape>;
     }
     impl [String] {
         pub fn join(&self, sep: &str) -> String;
@@ -303,6 +314,12 @@ pub mod slice {
     }
 }
 pub mod str {
+    pub type Chars<'a> = IterImpl<'a, char, CharsShape>;
+    pub type CharIndices<'a> = IterImpl<'a, (usize, char), CharIndicesShape>;
+    pub type Bytes<'a> = IterImpl<'a, u8, BytesShape>;
+    pub type SplitWhitespace<'a> = IterImpl<'a, &'a str, SplitWhitespaceShape>;
+    pub type Lines<'a> = IterImpl<'a, &'a str, LinesShape>;
+    pub type Split<'a, P> = IterImpl<'a, &'a str, SplitShape<P>>;
     pub trait FromStr {}
     #[derive(Debug, Clone, PartialEq, Eq)]
     pub struct ParseBoolError;
@@ -311,9 +328,9 @@ pub mod str {
     impl str {
         pub fn len(&self) -> usize;
         pub fn is_empty(&self) -> bool;
-        pub fn chars(&self) -> Iter<char>;
-        pub fn bytes(&self) -> Iter<u8>;
-        pub fn char_indices(&self) -> Iter<(usize, char)>;
+        pub fn chars(&self) -> IterImpl<char, CharsShape>;
+        pub fn bytes(&self) -> IterImpl<u8, BytesShape>;
+        pub fn char_indices(&self) -> IterImpl<(usize, char), CharIndicesShape>;
         pub fn as_bytes(&self) -> &[u8];
         pub fn trim(&self) -> &str;
         pub fn trim_start(&self) -> &str;
@@ -323,15 +340,15 @@ pub mod str {
         pub fn trim_end_matches<P: Pattern>(&self, pat: P) -> &str;
         pub fn strip_prefix<P: Pattern>(&self, prefix: P) -> Option<&str>;
         pub fn strip_suffix<P: Pattern>(&self, suffix: P) -> Option<&str>;
-        pub fn split_whitespace(&self) -> Iter<&str>;
-        pub fn split_ascii_whitespace(&self) -> Iter<&str>;
-        pub fn lines(&self) -> Iter<&str>;
-        pub fn split<P: Pattern>(&self, pat: P) -> Iter<&str>;
-        pub fn rsplit<P: Pattern>(&self, pat: P) -> Iter<&str>;
-        pub fn split_terminator<P: Pattern>(&self, pat: P) -> Iter<&str>;
-        pub fn split_inclusive<P: Pattern>(&self, pat: P) -> Iter<&str>;
-        pub fn splitn<P: Pattern>(&self, n: usize, pat: P) -> Iter<&str>;
-        pub fn rsplitn<P: Pattern>(&self, n: usize, pat: P) -> Iter<&str>;
+        pub fn split_whitespace(&self) -> IterImpl<&str, SplitWhitespaceShape>;
+        pub fn split_ascii_whitespace(&self) -> IterImpl<&str, SplitWhitespaceShape>;
+        pub fn lines(&self) -> IterImpl<&str, LinesShape>;
+        pub fn split<P: Pattern>(&self, pat: P) -> IterImpl<&str, SplitShape<P>>;
+        pub fn rsplit<P: Pattern>(&self, pat: P) -> IterImpl<&str, SplitShape<P>>;
+        pub fn split_terminator<P: Pattern>(&self, pat: P) -> IterImpl<&str, SplitShape<P>>;
+        pub fn split_inclusive<P: Pattern>(&self, pat: P) -> IterImpl<&str, SplitShape<P>>;
+        pub fn splitn<P: Pattern>(&self, n: usize, pat: P) -> IterImpl<&str, SplitNShape<P>>;
+        pub fn rsplitn<P: Pattern>(&self, n: usize, pat: P) -> IterImpl<&str, SplitNShape<P>>;
         pub fn split_once<P: Pattern>(&self, delimiter: P) -> Option<(&str, &str)>;
         pub fn rsplit_once<P: Pattern>(&self, delimiter: P) -> Option<(&str, &str)>;
         pub fn split_at(&self, mid: usize) -> (&str, &str);
@@ -340,8 +357,8 @@ pub mod str {
         pub fn ends_with<P: Pattern>(&self, pat: P) -> bool;
         pub fn find<P: Pattern>(&self, pat: P) -> Option<usize>;
         pub fn rfind<P: Pattern>(&self, pat: P) -> Option<usize>;
-        pub fn matches<P: Pattern>(&self, pat: P) -> Iter<&str>;
-        pub fn match_indices<P: Pattern>(&self, pat: P) -> Iter<(usize, &str)>;
+        pub fn matches<P: Pattern>(&self, pat: P) -> IterImpl<&str, SplitShape<P>>;
+        pub fn match_indices<P: Pattern>(&self, pat: P) -> IterImpl<(usize, &str), SplitShape<P>>;
         pub fn replace<P: Pattern>(&self, from: P, to: &str) -> String;
         pub fn replacen<P: Pattern>(&self, pat: P, to: &str, count: usize) -> String;
         pub fn to_uppercase(&self) -> String;
@@ -720,9 +737,9 @@ pub mod option {
         pub fn get_or_insert_with<F: FnOnce() -> T>(&mut self, f: F) -> &mut T;
         pub fn as_ref(&self) -> Option<&T>;
         pub fn as_mut(&mut self) -> Option<&mut T>;
-        pub fn iter(&self) -> Iter<&T>;
+        pub fn iter(&self) -> IterImpl<&T, OptionIterShape>;
         pub fn zip<U>(self, other: Option<U>) -> Option<(T, U)>;
-        pub fn into_iter(self) -> Iter<T>;
+        pub fn into_iter(self) -> IterImpl<T, OptionIterShape>;
     }
     impl<T> Option<&T> {
         pub fn copied(self) -> Option<T> where T: Copy;
@@ -767,8 +784,8 @@ pub mod result {
         pub fn err(self) -> Option<E>;
         pub fn as_ref(&self) -> Result<&T, &E>;
         pub fn as_mut(&mut self) -> Result<&mut T, &mut E>;
-        pub fn iter(&self) -> Iter<&T>;
-        pub fn into_iter(self) -> Iter<T>;
+        pub fn iter(&self) -> IterImpl<&T, OptionIterShape>;
+        pub fn into_iter(self) -> IterImpl<T, OptionIterShape>;
     }
     impl<T, E> Result<&T, E> {
         pub fn copied(self) -> Result<T, E> where T: Copy;
@@ -800,7 +817,7 @@ pub mod error {
     pub trait Error: Debug + Display {}
 }
 pub mod iter {
-    pub struct Iter<'a, T>;
+    pub struct IterImpl<'a, T, S>;
     pub trait Iterator {}
     pub trait IntoIterator {}
     pub trait FromIterator<A> {}
@@ -809,39 +826,139 @@ pub mod iter {
     pub trait Product<A> {}
     pub trait DoubleEndedIterator {}
     pub trait ExactSizeIterator {}
-    impl<T> Iter<T> {
+    pub trait DoubleEndedSearcher {}
+    pub mod shape {
+        pub struct SliceIterShape;
+        pub struct SliceIterMutShape;
+        pub struct VecIntoIterShape;
+        pub struct ArrayIntoIterShape;
+        pub struct VecDrainShape;
+        pub struct StringDrainShape;
+        pub struct WindowsShape;
+        pub struct ChunksShape;
+        pub struct RChunksShape;
+        pub struct ChunksExactShape;
+        pub struct CharsShape;
+        pub struct BytesShape;
+        pub struct CharIndicesShape;
+        pub struct SplitWhitespaceShape;
+        pub struct LinesShape;
+        pub struct SplitShape<P>;
+        pub struct SplitNShape<P>;
+        pub struct OptionIterShape;
+        pub struct HashMapIterShape;
+        pub struct HashMapIterMutShape;
+        pub struct HashMapKeysShape;
+        pub struct HashMapValuesShape;
+        pub struct HashMapValuesMutShape;
+        pub struct HashMapIntoKeysShape;
+        pub struct HashMapIntoValuesShape;
+        pub struct HashMapDrainShape;
+        pub struct HashMapIntoIterShape;
+        pub struct HashSetIterShape;
+        pub struct HashSetDrainShape;
+        pub struct HashSetIntoIterShape;
+        pub struct BTreeMapIterShape;
+        pub struct BTreeMapIterMutShape;
+        pub struct BTreeMapKeysShape;
+        pub struct BTreeMapValuesShape;
+        pub struct BTreeMapValuesMutShape;
+        pub struct BTreeMapIntoKeysShape;
+        pub struct BTreeMapIntoValuesShape;
+        pub struct BTreeMapIntoIterShape;
+        pub struct BTreeMapRangeShape;
+        pub struct BTreeSetIterShape;
+        pub struct BTreeSetIntoIterShape;
+        pub struct BTreeSetRangeShape;
+        pub struct SetOpShape;
+        pub struct VecDequeIterShape;
+        pub struct VecDequeIterMutShape;
+        pub struct VecDequeIntoIterShape;
+        pub struct VecDequeDrainShape;
+        pub struct BinaryHeapIterShape;
+        pub struct BinaryHeapIntoIterShape;
+        pub struct RangeShape<Idx>;
+        pub struct RangeInclusiveShape<Idx>;
+        pub struct RangeFromShape<Idx>;
+        pub struct CaseMappingShape;
+        pub struct RepeatShape;
+        pub struct RepeatNShape;
+        pub struct OnceShape;
+        pub struct EmptyShape;
+        pub struct FromFnShape<F>;
+        pub struct SuccessorsShape<F>;
+        pub struct MapShape<S, F>;
+        pub struct FilterShape<S, P>;
+        pub struct FilterMapShape<S, F>;
+        pub struct FlatMapShape<S, U, F>;
+        pub struct FlattenShape<S, U>;
+        pub struct MapWhileShape<S, P>;
+        pub struct EnumerateShape<S>;
+        pub struct ZipShape<S, U>;
+        pub struct ChainShape<S, U>;
+        pub struct RevShape<S>;
+        pub struct TakeShape<S>;
+        pub struct SkipShape<S>;
+        pub struct TakeWhileShape<S, P>;
+        pub struct SkipWhileShape<S, P>;
+        pub struct StepByShape<S>;
+        pub struct PeekableShape<S>;
+        pub struct FuseShape<S>;
+        pub struct InspectShape<S, F>;
+        pub struct CycleShape<S>;
+        pub struct ScanShape<S, St, F>;
+        pub struct ByRefShape<S>;
+        pub struct CopiedShape<S>;
+        pub struct ClonedShape<S>;
+    }
+    pub type Rev<I> = IterImpl<IterItem<I>, RevShape<IterShape<I>>>;
+    pub type Take<I> = IterImpl<IterItem<I>, TakeShape<IterShape<I>>>;
+    pub type Skip<I> = IterImpl<IterItem<I>, SkipShape<IterShape<I>>>;
+    pub type StepBy<I> = IterImpl<IterItem<I>, StepByShape<IterShape<I>>>;
+    pub type Peekable<I> = IterImpl<IterItem<I>, PeekableShape<IterShape<I>>>;
+    pub type Fuse<I> = IterImpl<IterItem<I>, FuseShape<IterShape<I>>>;
+    pub type Cycle<I> = IterImpl<IterItem<I>, CycleShape<IterShape<I>>>;
+    pub type Enumerate<I> = IterImpl<(usize, IterItem<I>), EnumerateShape<IterShape<I>>>;
+    pub type Copied<I> = IterImpl<IterTarget<I>, CopiedShape<IterShape<I>>>;
+    pub type Cloned<I> = IterImpl<IterTarget<I>, ClonedShape<IterShape<I>>>;
+    pub type Zip<A, B> = IterImpl<(IterItem<A>, IterItem<B>), ZipShape<IterShape<A>, IterShape<B>>>;
+    pub type Chain<A, B> = IterImpl<IterItem<A>, ChainShape<IterShape<A>, IterShape<B>>>;
+    pub type Repeat<A> = IterImpl<A, RepeatShape>;
+    pub type RepeatN<A> = IterImpl<A, RepeatNShape>;
+    pub type Once<A> = IterImpl<A, OnceShape>;
+    pub type Empty<A> = IterImpl<A, EmptyShape>;
+    impl<T, S> IterImpl<T, S> {
         pub fn next(&mut self) -> Option<T>;
-        pub fn next_back(&mut self) -> Option<T>;
-        pub fn map<B, F: FnMut(T) -> B>(self, f: F) -> Iter<B>;
-        pub fn filter<P: FnMut(&T) -> bool>(self, predicate: P) -> Iter<T>;
-        pub fn filter_map<B, F: FnMut(T) -> Option<B>>(self, f: F) -> Iter<B>;
-        pub fn flat_map<U, F: FnMut(T) -> Iter<U>>(self, f: F) -> Iter<U>;
-        pub fn map_while<B, P: FnMut(T) -> Option<B>>(self, predicate: P) -> Iter<B>;
-        pub fn enumerate(self) -> Iter<(usize, T)>;
-        pub fn zip<U>(self, other: Iter<U>) -> Iter<(T, U)>;
-        pub fn chain(self, other: Iter<T>) -> Iter<T>;
-        pub fn rev(self) -> Iter<T>;
-        pub fn take(self, n: usize) -> Iter<T>;
-        pub fn skip(self, n: usize) -> Iter<T>;
-        pub fn take_while<P: FnMut(&T) -> bool>(self, predicate: P) -> Iter<T>;
-        pub fn skip_while<P: FnMut(&T) -> bool>(self, predicate: P) -> Iter<T>;
-        pub fn step_by(self, step: usize) -> Iter<T>;
-        pub fn peekable(self) -> Iter<T>;
-        pub fn peek(&mut self) -> Option<&T>;
-        pub fn next_if<F: FnOnce(&T) -> bool>(&mut self, func: F) -> Option<T>;
-        pub fn fuse(self) -> Iter<T>;
-        pub fn inspect<F: FnMut(&T)>(self, f: F) -> Iter<T>;
-        pub fn cycle(self) -> Iter<T> where T: Clone;
-        pub fn scan<St, B, F: FnMut(&mut St, T) -> Option<B>>(self, initial_state: St, f: F) -> Iter<B>;
-        pub fn by_ref(&mut self) -> Iter<T>;
+        pub fn next_back(&mut self) -> Option<T> where S: DoubleEndedIterator;
+        pub fn map<B, F: FnMut(T) -> B>(self, f: F) -> IterImpl<B, MapShape<S, F>>;
+        pub fn filter<P: FnMut(&T) -> bool>(self, predicate: P) -> IterImpl<T, FilterShape<S, P>>;
+        pub fn filter_map<B, F: FnMut(T) -> Option<B>>(self, f: F) -> IterImpl<B, FilterMapShape<S, F>>;
+        pub fn flat_map<U: IntoIterator, F: FnMut(T) -> U>(self, f: F) -> IterImpl<IntoItem<U>, FlatMapShape<S, IntoShape<U>, F>>;
+        pub fn flatten(self) -> IterImpl<IntoItem<T>, FlattenShape<S, IntoShape<T>>> where T: IntoIterator;
+        pub fn map_while<B, P: FnMut(T) -> Option<B>>(self, predicate: P) -> IterImpl<B, MapWhileShape<S, P>>;
+        pub fn enumerate(self) -> IterImpl<(usize, T), EnumerateShape<S>>;
+        pub fn zip<U, S2>(self, other: IterImpl<U, S2>) -> IterImpl<(T, U), ZipShape<S, S2>>;
+        pub fn chain<S2>(self, other: IterImpl<T, S2>) -> IterImpl<T, ChainShape<S, S2>>;
+        pub fn rev(self) -> IterImpl<T, RevShape<S>> where S: DoubleEndedIterator;
+        pub fn take(self, n: usize) -> IterImpl<T, TakeShape<S>>;
+        pub fn skip(self, n: usize) -> IterImpl<T, SkipShape<S>>;
+        pub fn take_while<P: FnMut(&T) -> bool>(self, predicate: P) -> IterImpl<T, TakeWhileShape<S, P>>;
+        pub fn skip_while<P: FnMut(&T) -> bool>(self, predicate: P) -> IterImpl<T, SkipWhileShape<S, P>>;
+        pub fn step_by(self, step: usize) -> IterImpl<T, StepByShape<S>>;
+        pub fn peekable(self) -> IterImpl<T, PeekableShape<S>>;
+        pub fn fuse(self) -> IterImpl<T, FuseShape<S>>;
+        pub fn inspect<F: FnMut(&T)>(self, f: F) -> IterImpl<T, InspectShape<S, F>>;
+        pub fn cycle(self) -> IterImpl<T, CycleShape<S>> where T: Clone;
+        pub fn scan<St, B, F: FnMut(&mut St, T) -> Option<B>>(self, initial_state: St, f: F) -> IterImpl<B, ScanShape<S, St, F>>;
+        pub fn by_ref(&mut self) -> IterImpl<T, ByRefShape<S>>;
         pub fn collect<B: FromIterator<T>>(self) -> B;
-        pub fn sum<S: Sum<T>>(self) -> S;
-        pub fn product<P: Product<T>>(self) -> P;
+        pub fn sum<Out: Sum<T>>(self) -> Out;
+        pub fn product<Out: Product<T>>(self) -> Out;
         pub fn count(self) -> usize;
-        pub fn len(&self) -> usize;
+        pub fn len(&self) -> usize where S: ExactSizeIterator;
         pub fn last(self) -> Option<T>;
         pub fn nth(&mut self, n: usize) -> Option<T>;
-        pub fn nth_back(&mut self, n: usize) -> Option<T>;
+        pub fn nth_back(&mut self, n: usize) -> Option<T> where S: DoubleEndedIterator;
         pub fn fold<B, F: FnMut(B, T) -> B>(self, init: B, f: F) -> B;
         pub fn reduce<F: FnMut(T, T) -> T>(self, f: F) -> Option<T>;
         pub fn for_each<F: FnMut(T)>(self, f: F);
@@ -850,7 +967,7 @@ pub mod iter {
         pub fn find<P: FnMut(&T) -> bool>(&mut self, predicate: P) -> Option<T>;
         pub fn find_map<B, F: FnMut(T) -> Option<B>>(&mut self, f: F) -> Option<B>;
         pub fn position<P: FnMut(T) -> bool>(&mut self, predicate: P) -> Option<usize>;
-        pub fn rposition<P: FnMut(T) -> bool>(&mut self, predicate: P) -> Option<usize>;
+        pub fn rposition<P: FnMut(T) -> bool>(&mut self, predicate: P) -> Option<usize> where S: DoubleEndedIterator + ExactSizeIterator;
         pub fn max(self) -> Option<T> where T: Ord;
         pub fn min(self) -> Option<T> where T: Ord;
         pub fn max_by_key<B: Ord, F: FnMut(&T) -> B>(self, f: F) -> Option<T>;
@@ -858,52 +975,35 @@ pub mod iter {
         pub fn max_by<F: FnMut(&T, &T) -> Ordering>(self, compare: F) -> Option<T>;
         pub fn min_by<F: FnMut(&T, &T) -> Ordering>(self, compare: F) -> Option<T>;
         pub fn partition<B: Extend<T>, F: FnMut(&T) -> bool>(self, f: F) -> (B, B);
-        pub fn eq(self, other: Iter<T>) -> bool where T: PartialEq;
+        pub fn eq<S2>(self, other: IterImpl<T, S2>) -> bool where T: PartialEq;
         pub fn is_sorted(self) -> bool where T: PartialOrd;
-        pub fn into_iter(self) -> Iter<T>;
+        pub fn into_iter(self) -> IterImpl<T, S>;
     }
-    impl<T> Iter<&T> {
-        pub fn copied(self) -> Iter<T> where T: Copy;
-        pub fn cloned(self) -> Iter<T> where T: Clone;
+    impl<T, S> IterImpl<T, PeekableShape<S>> {
+        pub fn peek(&mut self) -> Option<&T>;
+        pub fn next_if<F: FnOnce(&T) -> bool>(&mut self, func: F) -> Option<T>;
     }
-    impl<T> Iter<&mut T> {
-        pub fn copied(self) -> Iter<T> where T: Copy;
-        pub fn cloned(self) -> Iter<T> where T: Clone;
+    impl<T, S> IterImpl<&T, S> {
+        pub fn copied(self) -> IterImpl<T, CopiedShape<S>> where T: Copy;
+        pub fn cloned(self) -> IterImpl<T, ClonedShape<S>> where T: Clone;
     }
-    impl Iter<char> {
+    impl<T, S> IterImpl<&mut T, S> {
+        pub fn copied(self) -> IterImpl<T, CopiedShape<S>> where T: Copy;
+        pub fn cloned(self) -> IterImpl<T, ClonedShape<S>> where T: Clone;
+    }
+    impl IterImpl<char, CharsShape> {
         pub fn as_str(&self) -> &str;
     }
-    impl<A, B> Iter<(A, B)> {
+    impl<A, B, S> IterImpl<(A, B), S> {
         pub fn unzip<FromA: FromIterator<A>, FromB: FromIterator<B>>(self) -> (FromA, FromB);
     }
-    impl<T> Iter<Iter<T>> {
-        pub fn flatten(self) -> Iter<T>;
-    }
-    impl<T> Iter<Vec<T>> {
-        pub fn flatten(self) -> Iter<T>;
-    }
-    impl<T> Iter<&Vec<T>> {
-        pub fn flatten(self) -> Iter<&T>;
-    }
-    impl<T> Iter<&Option<T>> {
-        pub fn flatten(self) -> Iter<&T>;
-    }
-    impl<T, E> Iter<&Result<T, E>> {
-        pub fn flatten(self) -> Iter<&T>;
-    }
-    impl<T> Iter<Option<T>> {
-        pub fn flatten(self) -> Iter<T>;
-    }
-    impl<T, E> Iter<Result<T, E>> {
-        pub fn flatten(self) -> Iter<T>;
-    }
-    pub fn repeat<T: Clone>(elt: T) -> Iter<T>;
-    pub fn repeat_n<T: Clone>(element: T, count: usize) -> Iter<T>;
-    pub fn once<T>(value: T) -> Iter<T>;
-    pub fn empty<T>() -> Iter<T>;
-    pub fn from_fn<T, F: FnMut() -> Option<T>>(f: F) -> Iter<T>;
-    pub fn successors<T, F: FnMut(&T) -> Option<T>>(first: Option<T>, succ: F) -> Iter<T>;
-    pub fn zip<A, B>(a: Iter<A>, b: Iter<B>) -> Iter<(A, B)>;
+    pub fn repeat<T: Clone>(elt: T) -> IterImpl<T, RepeatShape>;
+    pub fn repeat_n<T: Clone>(element: T, count: usize) -> IterImpl<T, RepeatNShape>;
+    pub fn once<T>(value: T) -> IterImpl<T, OnceShape>;
+    pub fn empty<T>() -> IterImpl<T, EmptyShape>;
+    pub fn from_fn<T, F: FnMut() -> Option<T>>(f: F) -> IterImpl<T, FromFnShape<F>>;
+    pub fn successors<T, F: FnMut(&T) -> Option<T>>(first: Option<T>, succ: F) -> IterImpl<T, SuccessorsShape<F>>;
+    pub fn zip<A, B, SA, SB>(a: IterImpl<A, SA>, b: IterImpl<B, SB>) -> IterImpl<(A, B), ZipShape<SA, SB>>;
 }
 pub mod collections {
     pub struct HashMap<K, V>;
@@ -913,10 +1013,20 @@ pub mod collections {
     pub struct VecDeque<T>;
     pub struct BinaryHeap<T>;
     pub mod hash_map {
+        pub type Iter<'a, K, V> = IterImpl<'a, (&'a K, &'a V), HashMapIterShape>;
+        pub type IterMut<'a, K, V> = IterImpl<'a, (&'a K, &'a mut V), HashMapIterMutShape>;
+        pub type Keys<'a, K, V> = IterImpl<'a, &'a K, HashMapKeysShape>;
+        pub type Values<'a, K, V> = IterImpl<'a, &'a V, HashMapValuesShape>;
+        pub type IntoIter<K, V> = IterImpl<(K, V), HashMapIntoIterShape>;
         pub struct Entry<'a, K, V>;
         pub use super::HashMap;
     }
     pub mod btree_map {
+        pub type Iter<'a, K, V> = IterImpl<'a, (&'a K, &'a V), BTreeMapIterShape>;
+        pub type IterMut<'a, K, V> = IterImpl<'a, (&'a K, &'a mut V), BTreeMapIterMutShape>;
+        pub type Keys<'a, K, V> = IterImpl<'a, &'a K, BTreeMapKeysShape>;
+        pub type Values<'a, K, V> = IterImpl<'a, &'a V, BTreeMapValuesShape>;
+        pub type IntoIter<K, V> = IterImpl<(K, V), BTreeMapIntoIterShape>;
         pub use super::hash_map::Entry;
         pub use super::BTreeMap;
     }
@@ -934,27 +1044,27 @@ pub mod collections {
         pub fn len(&self) -> usize;
         pub fn is_empty(&self) -> bool;
         pub fn clear(&mut self);
-        pub fn iter(&self) -> Iter<(&K, &V)>;
-        pub fn iter_mut(&mut self) -> Iter<(&K, &mut V)>;
-        pub fn keys(&self) -> Iter<&K>;
-        pub fn values(&self) -> Iter<&V>;
-        pub fn values_mut(&mut self) -> Iter<&mut V>;
-        pub fn into_keys(self) -> Iter<K>;
-        pub fn into_values(self) -> Iter<V>;
-        pub fn drain(&mut self) -> Iter<(K, V)>;
+        pub fn iter(&self) -> IterImpl<(&K, &V), HashMapIterShape>;
+        pub fn iter_mut(&mut self) -> IterImpl<(&K, &mut V), HashMapIterMutShape>;
+        pub fn keys(&self) -> IterImpl<&K, HashMapKeysShape>;
+        pub fn values(&self) -> IterImpl<&V, HashMapValuesShape>;
+        pub fn values_mut(&mut self) -> IterImpl<&mut V, HashMapValuesMutShape>;
+        pub fn into_keys(self) -> IterImpl<K, HashMapIntoKeysShape>;
+        pub fn into_values(self) -> IterImpl<V, HashMapIntoValuesShape>;
+        pub fn drain(&mut self) -> IterImpl<(K, V), HashMapDrainShape>;
         pub fn retain<F: FnMut(&K, &mut V) -> bool>(&mut self, f: F);
-        pub fn extend(&mut self, iter: Iter<(K, V)>) where K: Eq + Hash;
+        pub fn extend<S>(&mut self, iter: IterImpl<(K, V), S>) where K: Eq + Hash;
         pub fn capacity(&self) -> usize;
-        pub fn into_iter(self) -> Iter<(K, V)>;
+        pub fn into_iter(self) -> IterImpl<(K, V), HashMapIntoIterShape>;
     }
     impl<K, V> &HashMap<K, V> {
-        pub fn into_iter(self) -> Iter<(&K, &V)>;
+        pub fn into_iter(self) -> IterImpl<(&K, &V), HashMapIterShape>;
     }
     impl<K, V> &mut HashMap<K, V> {
-        pub fn into_iter(self) -> Iter<(&K, &mut V)>;
+        pub fn into_iter(self) -> IterImpl<(&K, &mut V), HashMapIterMutShape>;
     }
     impl<K, V> BTreeMap<K, V> {
-        pub fn range<R: RangeBounds<K>>(&self, range: R) -> Iter<(&K, &V)>;
+        pub fn range<R: RangeBounds<K>>(&self, range: R) -> IterImpl<(&K, &V), BTreeMapRangeShape>;
         pub fn new() -> BTreeMap<K, V>;
         pub fn insert(&mut self, k: K, v: V) -> Option<V> where K: Ord;
         pub fn get<Q>(&self, k: &Q) -> Option<&V> where K: Borrow<Q>;
@@ -966,26 +1076,26 @@ pub mod collections {
         pub fn len(&self) -> usize;
         pub fn is_empty(&self) -> bool;
         pub fn clear(&mut self);
-        pub fn iter(&self) -> Iter<(&K, &V)>;
-        pub fn iter_mut(&mut self) -> Iter<(&K, &mut V)>;
-        pub fn keys(&self) -> Iter<&K>;
-        pub fn values(&self) -> Iter<&V>;
-        pub fn values_mut(&mut self) -> Iter<&mut V>;
-        pub fn into_keys(self) -> Iter<K>;
-        pub fn into_values(self) -> Iter<V>;
+        pub fn iter(&self) -> IterImpl<(&K, &V), BTreeMapIterShape>;
+        pub fn iter_mut(&mut self) -> IterImpl<(&K, &mut V), BTreeMapIterMutShape>;
+        pub fn keys(&self) -> IterImpl<&K, BTreeMapKeysShape>;
+        pub fn values(&self) -> IterImpl<&V, BTreeMapValuesShape>;
+        pub fn values_mut(&mut self) -> IterImpl<&mut V, BTreeMapValuesMutShape>;
+        pub fn into_keys(self) -> IterImpl<K, BTreeMapIntoKeysShape>;
+        pub fn into_values(self) -> IterImpl<V, BTreeMapIntoValuesShape>;
         pub fn first_key_value(&self) -> Option<(&K, &V)>;
         pub fn last_key_value(&self) -> Option<(&K, &V)>;
         pub fn pop_first(&mut self) -> Option<(K, V)>;
         pub fn pop_last(&mut self) -> Option<(K, V)>;
         pub fn retain<F: FnMut(&K, &mut V) -> bool>(&mut self, f: F);
-        pub fn extend(&mut self, iter: Iter<(K, V)>) where K: Ord;
-        pub fn into_iter(self) -> Iter<(K, V)>;
+        pub fn extend<S>(&mut self, iter: IterImpl<(K, V), S>) where K: Ord;
+        pub fn into_iter(self) -> IterImpl<(K, V), BTreeMapIntoIterShape>;
     }
     impl<K, V> &BTreeMap<K, V> {
-        pub fn into_iter(self) -> Iter<(&K, &V)>;
+        pub fn into_iter(self) -> IterImpl<(&K, &V), BTreeMapIterShape>;
     }
     impl<K, V> &mut BTreeMap<K, V> {
-        pub fn into_iter(self) -> Iter<(&K, &mut V)>;
+        pub fn into_iter(self) -> IterImpl<(&K, &mut V), BTreeMapIterMutShape>;
     }
     impl<K, V> Entry<K, V> {
         pub fn or_insert(self, default: V) -> &mut V;
@@ -1006,24 +1116,24 @@ pub mod collections {
         pub fn len(&self) -> usize;
         pub fn is_empty(&self) -> bool;
         pub fn clear(&mut self);
-        pub fn iter(&self) -> Iter<&T>;
-        pub fn union<'a>(&'a self, other: &'a HashSet<T>) -> Iter<&'a T>;
-        pub fn intersection<'a>(&'a self, other: &'a HashSet<T>) -> Iter<&'a T>;
-        pub fn difference<'a>(&'a self, other: &'a HashSet<T>) -> Iter<&'a T>;
-        pub fn symmetric_difference<'a>(&'a self, other: &'a HashSet<T>) -> Iter<&'a T>;
+        pub fn iter(&self) -> IterImpl<&T, HashSetIterShape>;
+        pub fn union<'a>(&'a self, other: &'a HashSet<T>) -> IterImpl<&'a T, SetOpShape>;
+        pub fn intersection<'a>(&'a self, other: &'a HashSet<T>) -> IterImpl<&'a T, SetOpShape>;
+        pub fn difference<'a>(&'a self, other: &'a HashSet<T>) -> IterImpl<&'a T, SetOpShape>;
+        pub fn symmetric_difference<'a>(&'a self, other: &'a HashSet<T>) -> IterImpl<&'a T, SetOpShape>;
         pub fn is_subset(&self, other: &HashSet<T>) -> bool;
         pub fn is_superset(&self, other: &HashSet<T>) -> bool;
         pub fn is_disjoint(&self, other: &HashSet<T>) -> bool;
         pub fn retain<F: FnMut(&T) -> bool>(&mut self, f: F);
-        pub fn extend<A: ExtendInto<T>>(&mut self, iter: Iter<A>) where T: Eq + Hash;
-        pub fn drain(&mut self) -> Iter<T>;
-        pub fn into_iter(self) -> Iter<T>;
+        pub fn extend<A: ExtendInto<T>, S>(&mut self, iter: IterImpl<A, S>) where T: Eq + Hash;
+        pub fn drain(&mut self) -> IterImpl<T, HashSetDrainShape>;
+        pub fn into_iter(self) -> IterImpl<T, HashSetIntoIterShape>;
     }
     impl<T> &HashSet<T> {
-        pub fn into_iter(self) -> Iter<&T>;
+        pub fn into_iter(self) -> IterImpl<&T, HashSetIterShape>;
     }
     impl<T> BTreeSet<T> {
-        pub fn range<R: RangeBounds<T>>(&self, range: R) -> Iter<&T>;
+        pub fn range<R: RangeBounds<T>>(&self, range: R) -> IterImpl<&T, BTreeSetRangeShape>;
         pub fn new() -> BTreeSet<T>;
         pub fn insert(&mut self, value: T) -> bool where T: Ord;
         pub fn contains<Q>(&self, value: &Q) -> bool where T: Borrow<Q>;
@@ -1031,23 +1141,23 @@ pub mod collections {
         pub fn len(&self) -> usize;
         pub fn is_empty(&self) -> bool;
         pub fn clear(&mut self);
-        pub fn iter(&self) -> Iter<&T>;
+        pub fn iter(&self) -> IterImpl<&T, BTreeSetIterShape>;
         pub fn first(&self) -> Option<&T>;
         pub fn last(&self) -> Option<&T>;
         pub fn pop_first(&mut self) -> Option<T>;
         pub fn pop_last(&mut self) -> Option<T>;
-        pub fn union<'a>(&'a self, other: &'a BTreeSet<T>) -> Iter<&'a T>;
-        pub fn intersection<'a>(&'a self, other: &'a BTreeSet<T>) -> Iter<&'a T>;
-        pub fn difference<'a>(&'a self, other: &'a BTreeSet<T>) -> Iter<&'a T>;
-        pub fn symmetric_difference<'a>(&'a self, other: &'a BTreeSet<T>) -> Iter<&'a T>;
+        pub fn union<'a>(&'a self, other: &'a BTreeSet<T>) -> IterImpl<&'a T, SetOpShape>;
+        pub fn intersection<'a>(&'a self, other: &'a BTreeSet<T>) -> IterImpl<&'a T, SetOpShape>;
+        pub fn difference<'a>(&'a self, other: &'a BTreeSet<T>) -> IterImpl<&'a T, SetOpShape>;
+        pub fn symmetric_difference<'a>(&'a self, other: &'a BTreeSet<T>) -> IterImpl<&'a T, SetOpShape>;
         pub fn is_subset(&self, other: &BTreeSet<T>) -> bool;
         pub fn is_superset(&self, other: &BTreeSet<T>) -> bool;
         pub fn retain<F: FnMut(&T) -> bool>(&mut self, f: F);
-        pub fn extend<A: ExtendInto<T>>(&mut self, iter: Iter<A>) where T: Ord;
-        pub fn into_iter(self) -> Iter<T>;
+        pub fn extend<A: ExtendInto<T>, S>(&mut self, iter: IterImpl<A, S>) where T: Ord;
+        pub fn into_iter(self) -> IterImpl<T, BTreeSetIntoIterShape>;
     }
     impl<T> &BTreeSet<T> {
-        pub fn into_iter(self) -> Iter<&T>;
+        pub fn into_iter(self) -> IterImpl<&T, BTreeSetIterShape>;
     }
     impl<T> VecDeque<T> {
         pub fn new() -> VecDeque<T>;
@@ -1066,25 +1176,25 @@ pub mod collections {
         pub fn is_empty(&self) -> bool;
         pub fn clear(&mut self);
         pub fn contains(&self, x: &T) -> bool where T: PartialEq;
-        pub fn iter(&self) -> Iter<&T>;
-        pub fn iter_mut(&mut self) -> Iter<&mut T>;
+        pub fn iter(&self) -> IterImpl<&T, VecDequeIterShape>;
+        pub fn iter_mut(&mut self) -> IterImpl<&mut T, VecDequeIterMutShape>;
         pub fn insert(&mut self, index: usize, value: T);
         pub fn remove(&mut self, index: usize) -> Option<T>;
-        pub fn extend<A: ExtendInto<T>>(&mut self, iter: Iter<A>);
+        pub fn extend<A: ExtendInto<T>, S>(&mut self, iter: IterImpl<A, S>);
         pub fn retain<F: FnMut(&T) -> bool>(&mut self, f: F);
         pub fn truncate(&mut self, len: usize);
         pub fn swap(&mut self, i: usize, j: usize);
         pub fn rotate_left(&mut self, n: usize);
         pub fn rotate_right(&mut self, n: usize);
         pub fn make_contiguous(&mut self) -> &mut [T];
-        pub fn drain<R: RangeBounds<usize>>(&mut self, range: R) -> Iter<T>;
-        pub fn into_iter(self) -> Iter<T>;
+        pub fn drain<R: RangeBounds<usize>>(&mut self, range: R) -> IterImpl<T, VecDequeDrainShape>;
+        pub fn into_iter(self) -> IterImpl<T, VecDequeIntoIterShape>;
     }
     impl<T> &VecDeque<T> {
-        pub fn into_iter(self) -> Iter<&T>;
+        pub fn into_iter(self) -> IterImpl<&T, VecDequeIterShape>;
     }
     impl<T> &mut VecDeque<T> {
-        pub fn into_iter(self) -> Iter<&mut T>;
+        pub fn into_iter(self) -> IterImpl<&mut T, VecDequeIterMutShape>;
     }
     impl<T> BinaryHeap<T> {
         pub fn new() -> BinaryHeap<T>;
@@ -1095,14 +1205,14 @@ pub mod collections {
         pub fn len(&self) -> usize;
         pub fn is_empty(&self) -> bool;
         pub fn clear(&mut self);
-        pub fn iter(&self) -> Iter<&T>;
+        pub fn iter(&self) -> IterImpl<&T, BinaryHeapIterShape>;
         pub fn into_vec(self) -> Vec<T>;
         pub fn into_sorted_vec(self) -> Vec<T> where T: Ord;
-        pub fn extend<A: ExtendInto<T>>(&mut self, iter: Iter<A>) where T: Ord;
-        pub fn into_iter(self) -> Iter<T>;
+        pub fn extend<A: ExtendInto<T>, S>(&mut self, iter: IterImpl<A, S>) where T: Ord;
+        pub fn into_iter(self) -> IterImpl<T, BinaryHeapIntoIterShape>;
     }
     impl<T> &BinaryHeap<T> {
-        pub fn into_iter(self) -> Iter<&T>;
+        pub fn into_iter(self) -> IterImpl<&T, BinaryHeapIterShape>;
     }
 }
 pub mod mem {
@@ -1288,6 +1398,11 @@ pub mod pseudo {
     pub struct Unsigned<N>;
     pub struct Signed<N>;
     pub struct Indexed<I, T>;
+    pub struct IterItem<I>;
+    pub struct IterShape<I>;
+    pub struct IterTarget<I>;
+    pub struct IntoItem<T>;
+    pub struct IntoShape<T>;
     pub struct Utf8Error;
 }
 `;

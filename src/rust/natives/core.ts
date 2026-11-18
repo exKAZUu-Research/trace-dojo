@@ -419,11 +419,6 @@ define({
     const range = deref(self) as RangeValue;
     return range.exhausted || !((compareValues(ctx.typeArgs[0], range.start, range.end) ?? 1) <= 0);
   },
-  'Range<_>::len': ([self]) => {
-    const range = deref(self) as RangeValue;
-    const length = (range.end as bigint) - (range.start as bigint);
-    return length > 0n ? length : 0n;
-  },
 });
 
 function rangeContains(ctx: NativeContext, range: RangeValue, item: Value): boolean {

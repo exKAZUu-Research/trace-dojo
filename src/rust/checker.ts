@@ -32,6 +32,7 @@ import {
   type TypeScope,
   type ValueBinding,
 } from './items';
+import { intoIterItem, intoIterShape } from './iterTypes';
 import { allSupertraits, autoderefSteps, boundsOf, derefOnce, lookupAssociated, lookupMethod } from './methods';
 import { closureKindAtLeast, RANGE_TYPES, TraitSolver } from './traits';
 import {
@@ -551,8 +552,13 @@ export class Checker {
       }
     }
     if (t.kind === 'adt' && t.def.builtin === 'Iter') {
-      const item = this.intoIterItem(a);
-      if (item && this.unifier.tryUnify(item, t.args[0])) {
+      const item = intoIterItem(a);
+      const shape = intoIterShape(this.program, a);
+      if (
+        item &&
+        shape &&
+        this.unifier.tryUnify({ kind: 'tuple', elems: [item, shape] }, { kind: 'tuple', elems: t.args })
+      ) {
         this.annotations.coercions.set(expr, { kind: 'intoIter', from: a });
         return;
       }
@@ -611,73 +617,6 @@ export class Checker {
     const t = shallow(type);
     if (t.kind === 'dyn' && t.trait.trait === trait.trait) return;
     this.require(type, trait, span);
-  }
-
-  /** The element type a `for` loop over a value of this type binds, as `IntoIterator` gives it. */
-  // code-gauge-allow functionCognitiveComplexity 19 -- Follows the type checking rules of rustc case by case.
-  // code-gauge-allow functionNcss 50 -- Follows the type checking rules of rustc case by case.
-  intoIterItem(type: Type): Type | undefined {
-    const t = normalize(shallow(type));
-    if (t.kind === 'array') return t.elem;
-    if (t.kind === 'ref') {
-      const target = normalize(shallow(t.target));
-      if (target.kind === 'array' || target.kind === 'slice') return ref(target.elem, t.mutable);
-      if (target.kind === 'adt') {
-        switch (target.def.builtin) {
-          case 'Vec':
-          case 'VecDeque':
-          case 'HashSet':
-          case 'BTreeSet':
-          case 'BinaryHeap': {
-            return ref(
-              target.args[0],
-              t.mutable && target.def.builtin !== 'HashSet' && target.def.builtin !== 'BTreeSet'
-            );
-          }
-          case 'HashMap':
-          case 'BTreeMap': {
-            return { kind: 'tuple', elems: [ref(target.args[0]), ref(target.args[1], t.mutable)] };
-          }
-          case 'Option': {
-            return ref(target.args[0], t.mutable);
-          }
-          case 'Iter': {
-            return t.mutable ? target.args[0] : undefined;
-          }
-          default: {
-            return undefined;
-          }
-        }
-      }
-      return undefined;
-    }
-    if (t.kind !== 'adt') return undefined;
-    switch (t.def.builtin) {
-      case 'Vec':
-      case 'VecDeque':
-      case 'HashSet':
-      case 'BTreeSet':
-      case 'BinaryHeap':
-      case 'Iter':
-      case 'Option':
-      case 'Range':
-      case 'RangeInclusive':
-      case 'RangeFrom':
-      case 'CaseIter': {
-        if (t.def.builtin === 'CaseIter') return CHAR;
-        return t.args[0];
-      }
-      case 'HashMap':
-      case 'BTreeMap': {
-        return { kind: 'tuple', elems: t.args };
-      }
-      case 'Result': {
-        return t.args[0];
-      }
-      default: {
-        return undefined;
-      }
-    }
   }
 
   // -------------------------------------------------------------------------------------------------------------------
@@ -1105,7 +1044,7 @@ export class Checker {
     const iterable = this.expr(expr.iterable, undefined);
     const resolved = normalize(shallow(iterable));
     if (resolved.kind === 'var') compileError(expr.iterable.span, '繰り返すものの型が決まりません。');
-    const item = this.intoIterItem(resolved);
+    const item = intoIterItem(resolved);
     if (!item) {
       const t = typeToString(resolve(iterable));
       if (resolved.kind === 'adt' && resolved.def.builtin === 'String') {

@@ -249,6 +249,16 @@ test.each([
     '    let r;\n    {\n        let x = 5;\n        r = &x;\n    }\n    println!("{r}");',
     5,
   ],
+  [
+    'the length of an iterator that does not know it',
+    '    let s = String::from("hello");\n    println!("{}", s.chars().len());',
+    3,
+  ],
+  [
+    'an iterator of another type assigned to a variable',
+    '    let v = vec![1, 2, 3];\n    let mut it = v.iter();\n    it = v.iter().skip(1);\n    println!("{:?}", it.next());',
+    4,
+  ],
   ['mismatched types', '    let x: i32 = "a";', 2],
 ])('rustc rejects %s before running', (_name, body, row, items = '') => {
   const execution = executeProgram('rust', rustMain(body, items));
@@ -287,6 +297,36 @@ fn main() {
   expect(executeProgram('rust', program)).toMatchObject({
     kind: 'executed',
     stdout: 'None\n[1, 2, 3, 4] ["a", "b"] [" a ", "b "] a b! n 3 [2] [1]\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('iterators go backwards, clone, print, and have the types std gives them, as rustc runs them', () => {
+  const program = `use std::iter::Peekable;
+use std::str::Chars;
+struct Lexer<'a> {
+    chars: Peekable<Chars<'a>>,
+}
+fn main() {
+    let v = vec![1, 2, 3, 4, 5];
+    let a: Vec<_> = v.iter().take(2).rev().collect();
+    let b: Vec<_> = (0..10).step_by(3).rev().collect();
+    let c: Vec<_> = v.iter().zip(["a", "b", "c"].iter()).rev().collect();
+    let mut it = v.iter();
+    it.next();
+    let copy = it.clone();
+    it.next();
+    let d: Vec<i32> = vec![[1, 2], [3, 4]].into_iter().flatten().collect();
+    let mut lexer = Lexer { chars: "xy".chars().peekable() };
+    let first = lexer.chars.peek().copied();
+    println!("{:?} {:?} {:?} {} {} {:?} {:?}", a, b, c, copy.len(), it.len(), d, first);
+    println!("{:?} {:?}", v.iter().skip(3), "hi".chars().rev());
+}`;
+  expect(executeProgram('rust', program)).toMatchObject({
+    kind: 'executed',
+    stdout: `[2, 1] [9, 6, 3, 0] [(3, "c"), (2, "b"), (1, "a")] 4 3 [1, 2, 3, 4] Some('x')
+Skip { iter: Iter([1, 2, 3, 4, 5]), n: 3 } Rev { iter: Chars(['h', 'i']) }
+`,
     uncaughtException: undefined,
   });
 });

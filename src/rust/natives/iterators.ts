@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 683 -- One native per method of the standard library.
+// code-gauge-allow-file fileNcss 760 -- One native per method of the standard library.
 import { normalize } from '../infer';
 import type { Interpreter } from '../interpreter';
 import { castValue, cloneValue, compareValues, copyValue, hashKey, needsCopy, valuesEqual, wrap } from '../ops';
@@ -11,7 +11,7 @@ import {
   IterValue,
   MapValue,
   type Next,
-  type RangeValue,
+  RangeValue,
   SetValue,
   sliceBase,
   sliceItems,
@@ -19,7 +19,7 @@ import {
   SliceView,
   type Value,
 } from '../values';
-import { call, define, deref, libraryPanic, type NativeContext, none, option, panic, placeOf, some } from './support';
+import { call, define, deref, libraryPanic, type NativeContext, none, option, placeOf, some } from './support';
 
 /** An iterator over an array's elements from `start` to `end`, from both ends. */
 export function arrayIter(
@@ -37,6 +37,7 @@ export function arrayIter(
     [array]
   );
   iter.rest = () => Array.from({ length: Math.max(back - front, 0) }, (_, offset) => map(front + offset));
+  iter.fork = () => arrayIter(array, front, back, map);
   return iter;
 }
 
@@ -53,6 +54,7 @@ export function ownedIter(items: Value[]): IterValue {
     [rest]
   );
   iter.rest = () => [...rest];
+  iter.fork = (cloneItem) => ownedIter(rest.map(cloneItem));
   return iter;
 }
 
@@ -221,7 +223,9 @@ export function rangeIterator(range: RangeValue, elem: Type): IterValue {
     const count = Number(toNumber(range.end) - toNumber(range.start)) + (range.inclusive ? 1 : 0);
     return Math.max(0, count);
   };
-  return new IterValue(next, nextBack, remaining, [range]);
+  const iter = new IterValue(next, nextBack, remaining, [range]);
+  iter.fork = () => rangeIterator(new RangeValue(range.start, range.end, range.inclusive, range.exhausted), elem);
+  return iter;
 }
 
 function iterOf(value: Value): IterValue {
@@ -232,6 +236,23 @@ function iterOf(value: Value): IterValue {
 export function nextOf(iter: IterValue): Next {
   if (iter.peeked && iter.peeked.length > 0) return iter.peeked.shift() as Next;
   return iter.next();
+}
+
+/** Takes the element `n` places from the back, dropping those after it, as `nth_back` does. */
+function nthBack(iter: IterValue, n: number): Next {
+  for (let index = 0; index < n; index++) if (iter.nextBack!() === DONE) return DONE;
+  return iter.nextBack!();
+}
+
+/** Takes the element `n` places from the front, dropping those before it, as `nth` does. */
+function nth(iter: IterValue, n: number): Next {
+  for (let index = 0; index < n; index++) if (nextOf(iter) === DONE) return DONE;
+  return nextOf(iter);
+}
+
+/** The number of elements left, counting those `peek` looked at. */
+function lengthOf(iter: IterValue): number {
+  return (iter.remaining?.() ?? 0) + (iter.peeked?.filter((item) => item !== DONE).length ?? 0);
 }
 
 /** Takes the elements left, up to and including one that `stop` picks. */
@@ -247,247 +268,308 @@ function collectAll(ctx: NativeContext, iter: IterValue, stop?: (item: Value) =>
   }
 }
 
-/** Flattens `Option`s or `Result`s, keeping the value of each one whose variant is `present` (`Some`, `Ok`). */
-function flattenPresent(ctx: NativeContext, self: Value, present: number): IterValue {
-  return flatten(ctx, iterOf(self), (item) => {
-    const value = deref(item) as EnumValue;
-    return arrayIter(value.variant === present ? [value.fields[0]] : []);
-  });
+/** The operations of an adapter over its source, which `fork` builds again over a copy of the source. */
+interface AdapterParts {
+  next: () => Next;
+  nextBack?: () => Next;
+  remaining?: () => number;
 }
 
-function adapter(source: IterValue, next: () => Next, nextBack?: () => Next, remaining?: () => number): IterValue {
-  return new IterValue(next, nextBack, remaining, [source]);
+/**
+ * An adapter of a source iterator whose own state (`state`, copied for clones) and the source decide its elements;
+ * `forkState` copies state that holds iterators.
+ */
+function adapter<S extends object>(
+  source: IterValue,
+  state: S,
+  parts: (source: IterValue, state: S) => AdapterParts,
+  forkState: (state: S, cloneItem: (value: Value) => Value) => S = (s) => ({ ...s })
+): IterValue {
+  const { next, nextBack, remaining } = parts(source, state);
+  const iter = new IterValue(next, nextBack, remaining, [source, state]);
+  iter.fork = (cloneItem) => adapter(forkIter(source, cloneItem), forkState(state, cloneItem), parts, forkState);
+  return iter;
+}
+
+/** An independent copy of an iterator, with the elements `peek` looked at. */
+function forkIter(iter: IterValue, cloneItem: (value: Value) => Value): IterValue {
+  if (!iter.fork) throw new Error('This iterator cannot be cloned');
+  const copy = iter.fork(cloneItem);
+  if (iter.peeked) copy.peeked = iter.peeked.map((item) => (item === DONE ? DONE : cloneItem(item)));
+  return copy;
+}
+
+/** An adapter that maps each element, from either end. */
+function mapped(source: IterValue, map: (item: Value) => Value): IterValue {
+  const take = (item: Next): Next => (item === DONE ? DONE : map(item));
+  return adapter(source, {}, (src) => ({
+    next: () => take(nextOf(src)),
+    nextBack: src.nextBack && (() => take(src.nextBack!())),
+    remaining: src.remaining,
+  }));
+}
+
+/** An adapter that finds the next element `pick` keeps (mapped), from either end. */
+function picked(ctx: NativeContext, source: IterValue, pick: (item: Value) => Next): IterValue {
+  const find = (take: () => Next): Next => {
+    for (;;) {
+      ctx.runtime.spend();
+      const item = take();
+      if (item === DONE) return DONE;
+      const result = pick(item);
+      if (result !== DONE) return result;
+    }
+  };
+  return adapter(source, {}, (src) => ({
+    next: () => find(() => nextOf(src)),
+    nextBack: src.nextBack && (() => find(src.nextBack!)),
+  }));
+}
+
+/** An adapter that yields the elements until `stop` (given each element) returns DONE for one, then nothing. */
+function until(source: IterValue, map: (item: Value) => Next): IterValue {
+  return adapter(source, { done: false }, (src, state) => ({
+    next: () => {
+      if (state.done) return DONE;
+      const item = nextOf(src);
+      const result = item === DONE ? DONE : map(item);
+      if (result === DONE) state.done = true;
+      return result;
+    },
+  }));
 }
 
 function truthy(value: Value): boolean {
   return deref(value) as boolean;
 }
 
+function optionValue(value: Value): Next {
+  const result = deref(value) as EnumValue;
+  return result.variant === 1 ? result.fields[0] : DONE;
+}
+
+/**
+ * Flattens an iterator of iterables as `flat_map` and `flatten` do: an inner iterator for the front and one for the
+ * back, which each end falls back on once the outer iterator runs out.
+ */
+// code-gauge-allow functionCognitiveComplexity 19 -- Walks the inner iterators from either end, as `FlattenCompat` does.
+function flattened(ctx: NativeContext, source: IterValue, inner: (item: Value) => IterValue): IterValue {
+  return adapter<FlattenState>(
+    source,
+    { front: undefined, back: undefined },
+    (src, state) => {
+      const take = (end: End): Next => {
+        for (;;) {
+          ctx.runtime.spend();
+          const item = takeInner(state, end);
+          if (item !== DONE) return item;
+          const next = fromEnd(src, end);
+          if (next === DONE) return takeInner(state, end === 'front' ? 'back' : 'front');
+          state[end] = inner(next);
+        }
+      };
+      return { next: () => take('front'), nextBack: src.nextBack && (() => take('back')) };
+    },
+    (state, cloneItem) => ({
+      front: state.front && forkIter(state.front, cloneItem),
+      back: state.back && forkIter(state.back, cloneItem),
+    })
+  );
+}
+
+type End = 'front' | 'back';
+
+/** The inner iterators of a flattening adapter, at its front and its back. */
+interface FlattenState {
+  front: IterValue | undefined;
+  back: IterValue | undefined;
+}
+
+function fromEnd(iter: IterValue, end: End): Next {
+  return end === 'front' ? nextOf(iter) : iter.nextBack!();
+}
+
+/** Takes an element of the inner iterator at an end, dropping the iterator once it runs out. */
+function takeInner(state: FlattenState, end: End): Next {
+  const current = state[end];
+  if (!current) return DONE;
+  const item = fromEnd(current, end);
+  if (item === DONE) state[end] = undefined;
+  return item;
+}
+
+/** The iterator an element of `flatten` (or a result of `flat_map`'s function) makes, as `IntoIterator` does. */
+function innerIter(ctx: NativeContext, value: Value, type: Type): IterValue {
+  return toIterator(ctx.interp, value, type) as IterValue;
+}
+
 define({
-  'Iter<_>::next': ([self]) => {
-    const iter = iterOf(self);
-    const item = nextOf(iter);
-    return item === DONE ? NONE_MARK : SOME_MARK(item);
-  },
-  'Iter<_>::next_back': ([self], ctx) => {
-    const iter = iterOf(self);
-    if (!iter.nextBack) panic(ctx, 'この反復子は後ろから取り出せません。');
-    const item = iter.nextBack();
+  'IterImpl<_, _>::next': ([self], ctx) => {
+    const item = nextOf(iterOf(self));
     return option(ctx, item === DONE ? undefined : item, item !== DONE);
   },
-  'Iter<_>::map': ([self, f], ctx) => {
-    const iter = iterOf(self);
-    const map = (item: Next): Next => (item === DONE ? DONE : call(ctx, f, [item]));
-    return adapter(iter, () => map(nextOf(iter)), iter.nextBack && (() => map(iter.nextBack!())), iter.remaining);
+  'IterImpl<_, _>::next_back': ([self], ctx) => {
+    const item = iterOf(self).nextBack!();
+    return option(ctx, item === DONE ? undefined : item, item !== DONE);
   },
-  'Iter<_>::filter': ([self, f], ctx) => {
-    const iter = iterOf(self);
-    const find = (take: () => Next): Next => {
-      for (;;) {
-        ctx.runtime.spend();
-        const item = take();
-        if (item === DONE || truthy(call(ctx, f, [item]))) return item;
-      }
-    };
-    return adapter(iter, () => find(() => nextOf(iter)), iter.nextBack && (() => find(iter.nextBack!)));
-  },
-  'Iter<_>::filter_map': ([self, f], ctx) => {
-    const iter = iterOf(self);
-    const find = (take: () => Next): Next => {
-      for (;;) {
-        ctx.runtime.spend();
-        const item = take();
-        if (item === DONE) return DONE;
-        const result = deref(call(ctx, f, [item])) as EnumValue;
-        if (result.variant === 1) return result.fields[0];
-      }
-    };
-    return adapter(iter, () => find(() => nextOf(iter)), iter.nextBack && (() => find(iter.nextBack!)));
-  },
-  'Iter<_>::map_while': ([self, f], ctx) => {
-    const iter = iterOf(self);
-    let done = false;
-    return adapter(iter, () => {
-      if (done) return DONE;
-      const item = nextOf(iter);
-      if (item === DONE) return DONE;
-      const result = deref(call(ctx, f, [item])) as EnumValue;
-      if (result.variant === 1) return result.fields[0];
-      done = true;
-      return DONE;
-    });
-  },
-  'Iter<_>::flat_map': ([self, f], ctx) => {
-    const iter = iterOf(self);
-    let current: IterValue | undefined;
-    return adapter(iter, () => {
-      for (;;) {
-        ctx.runtime.spend();
-        if (current) {
-          const item = nextOf(current);
-          if (item !== DONE) return item;
+  'IterImpl<_, _>::map': ([self, f], ctx) => mapped(iterOf(self), (item) => call(ctx, f, [item])),
+  'IterImpl<_, _>::filter': ([self, f], ctx) =>
+    picked(ctx, iterOf(self), (item) => (truthy(call(ctx, f, [item])) ? item : DONE)),
+  'IterImpl<_, _>::filter_map': ([self, f], ctx) =>
+    picked(ctx, iterOf(self), (item) => optionValue(call(ctx, f, [item]))),
+  'IterImpl<_, _>::map_while': ([self, f], ctx) => until(iterOf(self), (item) => optionValue(call(ctx, f, [item]))),
+  'IterImpl<_, _>::take_while': ([self, f], ctx) =>
+    until(iterOf(self), (item) => (truthy(call(ctx, f, [item])) ? item : DONE)),
+  'IterImpl<_, _>::flat_map': ([self, f], ctx) =>
+    flattened(ctx, iterOf(self), (item) => innerIter(ctx, call(ctx, f, [item]), ctx.typeArgs[2])),
+  'IterImpl<_, _>::flatten': ([self], ctx) =>
+    flattened(ctx, iterOf(self), (item) => innerIter(ctx, item, ctx.typeArgs[0])),
+  'IterImpl<_, _>::enumerate': ([self]) =>
+    adapter(iterOf(self), { index: 0 }, (src, state) => ({
+      next: () => {
+        const item = nextOf(src);
+        return item === DONE ? DONE : [BigInt(state.index++), item];
+      },
+      nextBack: () => {
+        const total = state.index + lengthOf(src);
+        const item = src.nextBack!();
+        return item === DONE ? DONE : [BigInt(total - 1), item];
+      },
+      remaining: () => lengthOf(src),
+    })),
+  'IterImpl<_, _>::zip': ([self, other], ctx) => zipped(iterOf(self), iterOf(other), ctx),
+  'std::iter::zip': ([a, b], ctx) => zipped(iterOf(a), iterOf(b), ctx),
+  'IterImpl<_, _>::chain': ([self, other]) =>
+    adapter(
+      iterOf(self),
+      { second: iterOf(other), firstDone: false },
+      (src, state) => ({
+        next: () => {
+          if (!state.firstDone) {
+            const item = nextOf(src);
+            if (item !== DONE) return item;
+            state.firstDone = true;
+          }
+          return nextOf(state.second);
+        },
+        nextBack: () => {
+          const item = state.second.nextBack!();
+          return item === DONE ? src.nextBack!() : item;
+        },
+      }),
+      (state, cloneItem) => ({ ...state, second: forkIter(state.second, cloneItem) })
+    ),
+  'IterImpl<_, _>::rev': ([self]) =>
+    adapter(iterOf(self), {}, (src) => ({
+      next: () => src.nextBack!(),
+      nextBack: () => nextOf(src),
+      remaining: src.remaining,
+    })),
+  'IterImpl<_, _>::take': ([self, n]) =>
+    adapter(iterOf(self), { left: Number(n as bigint) }, (src, state) => ({
+      next: () => {
+        if (state.left <= 0) return DONE;
+        state.left--;
+        return nextOf(src);
+      },
+      // `Take::next_back` drops the elements past its count from the back first.
+      nextBack: () => {
+        if (state.left <= 0) return DONE;
+        const left = state.left--;
+        return nthBack(src, Math.max(lengthOf(src) - left, 0));
+      },
+      remaining: () => Math.min(state.left, lengthOf(src)),
+    })),
+  'IterImpl<_, _>::skip': ([self, n]) =>
+    adapter(iterOf(self), { toSkip: Number(n as bigint) }, (src, state) => ({
+      next: () => {
+        if (state.toSkip > 0) {
+          const skip = state.toSkip;
+          state.toSkip = 0;
+          return nth(src, skip);
         }
-        const next = nextOf(iter);
-        if (next === DONE) return DONE;
-        current = iterOf(call(ctx, f, [next]));
-      }
-    });
-  },
-  'Iter<_>::enumerate': ([self]) => {
-    const iter = iterOf(self);
-    let index = 0;
-    const length = iter.remaining;
-    return adapter(
-      iter,
-      () => {
-        const item = nextOf(iter);
-        return item === DONE ? DONE : [BigInt(index++), item];
+        return nextOf(src);
       },
-      iter.nextBack && length
-        ? () => {
-            const total = index + length();
-            const item = iter.nextBack!();
-            return item === DONE ? DONE : [BigInt(total - 1), item];
-          }
-        : undefined,
-      length
-    );
-  },
-  'Iter<_>::zip': ([self, other]) => {
-    const iter = iterOf(self);
-    const second = iterOf(other);
-    return adapter(
-      iter,
-      () => {
-        const a = nextOf(iter);
-        if (a === DONE) return DONE;
-        const b = nextOf(second);
-        return b === DONE ? DONE : [a, b];
-      },
-      undefined,
-      iter.remaining && second.remaining ? () => Math.min(iter.remaining!(), second.remaining!()) : undefined
-    );
-  },
-  'Iter<_>::chain': ([self, other]) => {
-    const iter = iterOf(self);
-    const second = iterOf(other);
-    let firstDone = false;
-    return adapter(
-      iter,
-      () => {
-        if (!firstDone) {
-          const item = nextOf(iter);
-          if (item !== DONE) return item;
-          firstDone = true;
+      nextBack: () => (lengthOf(src) > state.toSkip ? src.nextBack!() : DONE),
+      remaining: () => Math.max(0, lengthOf(src) - state.toSkip),
+    })),
+  'IterImpl<_, _>::skip_while': ([self, f], ctx) =>
+    adapter(iterOf(self), { skipping: true }, (src, state) => ({
+      next: () => {
+        for (;;) {
+          ctx.runtime.spend();
+          const item = nextOf(src);
+          if (item === DONE) return DONE;
+          if (state.skipping && truthy(call(ctx, f, [item]))) continue;
+          state.skipping = false;
+          return item;
         }
-        return nextOf(second);
       },
-      iter.nextBack && second.nextBack
-        ? () => {
-            const item = second.nextBack!();
-            return item === DONE ? iter.nextBack!() : item;
-          }
-        : undefined,
-      iter.remaining && second.remaining ? () => iter.remaining!() + second.remaining!() : undefined
-    );
-  },
-  'Iter<_>::rev': ([self], ctx) => {
-    const iter = iterOf(self);
-    if (!iter.nextBack) panic(ctx, 'この反復子は rev で逆にできません。');
-    return adapter(iter, iter.nextBack, () => nextOf(iter), iter.remaining);
-  },
-  'Iter<_>::take': ([self, n]) => {
-    const iter = iterOf(self);
-    let left = Number(n as bigint);
-    return adapter(
-      iter,
-      () => {
-        if (left <= 0) return DONE;
-        left--;
-        return nextOf(iter);
-      },
-      undefined,
-      iter.remaining ? () => Math.min(left, iter.remaining!()) : undefined
-    );
-  },
-  'Iter<_>::skip': ([self, n]) => {
-    const iter = iterOf(self);
-    let toSkip = Number(n as bigint);
-    const skip = (): void => {
-      while (toSkip > 0) {
-        toSkip--;
-        if (nextOf(iter) === DONE) toSkip = 0;
-      }
-    };
-    return adapter(
-      iter,
-      () => {
-        skip();
-        return nextOf(iter);
-      },
-      iter.nextBack && iter.remaining
-        ? () => {
-            if (iter.remaining!() <= toSkip) return DONE;
-            return iter.nextBack!();
-          }
-        : undefined,
-      iter.remaining ? () => Math.max(0, iter.remaining!() - toSkip) : undefined
-    );
-  },
-  'Iter<_>::take_while': ([self, f], ctx) => {
-    const iter = iterOf(self);
-    let done = false;
-    return adapter(iter, () => {
-      if (done) return DONE;
-      const item = nextOf(iter);
-      if (item === DONE || !truthy(call(ctx, f, [item]))) {
-        done = true;
-        return DONE;
-      }
-      return item;
-    });
-  },
-  'Iter<_>::skip_while': ([self, f], ctx) => {
-    const iter = iterOf(self);
-    let skipping = true;
-    return adapter(iter, () => {
-      for (;;) {
-        const item = nextOf(iter);
-        if (item === DONE) return DONE;
-        if (skipping && truthy(call(ctx, f, [item]))) continue;
-        skipping = false;
-        return item;
-      }
-    });
-  },
-  'Iter<_>::step_by': ([self, n], ctx) => {
-    const iter = iterOf(self);
+    })),
+  // code-gauge-allow functionCognitiveComplexity 18 -- Follows `StepBy`'s arithmetic from either end.
+  'IterImpl<_, _>::step_by': ([self, n], ctx) => {
     const step = Number(n as bigint);
     if (step === 0) libraryPanic(ctx, 'assertion failed: step != 0', 'core/src/iter/adapters/step_by.rs:36:9');
-    let first = true;
-    return adapter(iter, () => {
-      if (first) {
-        first = false;
-        return nextOf(iter);
-      }
-      for (let index = 0; index < step - 1; index++) if (nextOf(iter) === DONE) return DONE;
-      return nextOf(iter);
-    });
+    return adapter(iterOf(self), { first: true, step }, (src, state) => ({
+      next: () => {
+        const skip = state.first ? 0 : step - 1;
+        state.first = false;
+        return nth(src, skip);
+      },
+      // `StepBy::next_back_index`: the elements after the last one the steps reach are dropped from the back.
+      nextBack: () => {
+        const rem = lengthOf(src) % step;
+        const index = state.first ? (rem === 0 ? step - 1 : rem - 1) : rem;
+        return nthBack(src, index);
+      },
+      remaining: () => {
+        const length = lengthOf(src);
+        if (state.first) return length === 0 ? 0 : 1 + Math.floor((length - 1) / step);
+        return Math.floor(length / step);
+      },
+    }));
   },
-  'Iter<_>::peekable': ([self]) => iterOf(self),
-  'Iter<_>::fuse': ([self]) => iterOf(self),
+  'IterImpl<_, _>::peekable': ([self]) =>
+    adapter(iterOf(self), {}, (src) => ({
+      next: () => nextOf(src),
+      nextBack: () => {
+        // `Peekable::next_back` takes from the back of what it has not peeked, then the peeked element.
+        const peeked = src.peeked;
+        if (peeked && peeked.length > 0 && peeked[0] === DONE) return DONE;
+        const item = src.nextBack!();
+        if (item !== DONE || !peeked || peeked.length === 0) return item;
+        return peeked.shift() as Next;
+      },
+      remaining: () => lengthOf(src),
+    })),
+  'IterImpl<_, _>::fuse': ([self]) =>
+    adapter(iterOf(self), { done: false }, (src, state) => ({
+      next: () => {
+        if (state.done) return DONE;
+        const item = nextOf(src);
+        if (item === DONE) state.done = true;
+        return item;
+      },
+      nextBack: () => {
+        if (state.done) return DONE;
+        const item = src.nextBack!();
+        if (item === DONE) state.done = true;
+        return item;
+      },
+      remaining: () => (state.done ? 0 : lengthOf(src)),
+    })),
   // `&mut I` iterates as `I` does, so the adapters after `by_ref` advance the same iterator.
-  'Iter<_>::by_ref': ([self]) => deref(self),
-  'Iter<_>::into_iter': ([self]) => iterOf(self),
-  'Iter<_>::peek': ([self], ctx) => {
-    const iter = iterOf(self);
+  'IterImpl<_, _>::by_ref': ([self]) => deref(self),
+  'IterImpl<_, _>::into_iter': ([self]) => iterOf(self),
+  'IterImpl<_, PeekableShape<_>>::peek': ([self], ctx) => {
+    const iter = peekSource(self);
     iter.peeked ??= [];
     if (iter.peeked.length === 0) iter.peeked.push(iter.next());
     const item = iter.peeked[0];
     return option(ctx, item === DONE ? undefined : item, item !== DONE);
   },
-  'Iter<_>::next_if': ([self, f], ctx) => {
-    const iter = iterOf(self);
+  'IterImpl<_, PeekableShape<_>>::next_if': ([self, f], ctx) => {
+    const iter = peekSource(self);
     const item = nextOf(iter);
     if (item === DONE) return none(ctx);
     if (truthy(call(ctx, f, [item]))) return some(ctx, item);
@@ -495,302 +577,253 @@ define({
     iter.peeked.unshift(item);
     return none(ctx);
   },
-  'Iter<_>::inspect': ([self, f], ctx) => {
-    const iter = iterOf(self);
-    return adapter(iter, () => {
-      const item = nextOf(iter);
-      if (item !== DONE) call(ctx, f, [item]);
+  'IterImpl<_, _>::inspect': ([self, f], ctx) =>
+    mapped(iterOf(self), (item) => {
+      call(ctx, f, [item]);
       return item;
-    });
+    }),
+  'IterImpl<_, _>::cycle': ([self], ctx) => {
+    // `Cycle` keeps a clone of the iterator as it was, which it clones again to go round once more.
+    const clone = (value: Value): Value => cloneValue(ctx.typeArgs[0], value);
+    const original = forkIter(iterOf(self), clone);
+    return adapter(
+      iterOf(self),
+      { current: undefined as IterValue | undefined },
+      (src, state) => ({
+        next: () => {
+          ctx.runtime.spend();
+          const item = nextOf(state.current ?? src);
+          if (item !== DONE) return item;
+          state.current = forkIter(original, clone);
+          return nextOf(state.current);
+        },
+      }),
+      (state, cloneItem) => ({ current: state.current && forkIter(state.current, cloneItem) })
+    );
   },
-  'Iter<_>::cycle': ([self], ctx) => {
-    const iter = iterOf(self);
-    const items = collectAll(ctx, iter);
-    const type = ctx.typeArgs[0];
-    let index = 0;
-    return adapter(iter, () => {
-      if (items.length === 0) return DONE;
-      ctx.runtime.spend();
-      return cloneValue(type, items[index++ % items.length]);
-    });
-  },
-  'Iter<_>::scan': ([self, initial, f], ctx) => {
-    const iter = iterOf(self);
-    const state = { value: initial };
+  'IterImpl<_, _>::scan': ([self, initial, f], ctx) => {
+    const state = { value: initial, done: false };
     const place = { isPlace: true as const, get: () => state.value, set: (v: Value) => void (state.value = v) };
-    let done = false;
-    return adapter(iter, () => {
-      if (done) return DONE;
-      const item = nextOf(iter);
-      if (item === DONE) return DONE;
-      const result = deref(call(ctx, f, [place, item])) as EnumValue;
-      if (result.variant === 1) return result.fields[0];
-      done = true;
-      return DONE;
-    });
+    return adapter(iterOf(self), state, (src, st) => ({
+      next: () => {
+        if (st.done) return DONE;
+        const item = nextOf(src);
+        if (item === DONE) return DONE;
+        const result = optionValue(call(ctx, f, [place, item]));
+        if (result === DONE) st.done = true;
+        return result;
+      },
+    }));
   },
-  'Iter<_>::collect': ([self], ctx) => {
+});
+
+/** The iterator a `Peekable` wraps, which keeps the elements `peek` looked at. */
+function peekSource(self: Value): IterValue {
+  return iterOf(self).roots[0] as IterValue;
+}
+
+/**
+ * Zips two iterators. From the back, it first drops the longer one's extra elements from its back, as `Zip`'s
+ * `next_back` does.
+ */
+// code-gauge-allow functionCognitiveComplexity 16 -- Follows `Zip`'s `next` and `next_back`.
+function zipped(first: IterValue, second: IterValue, ctx: NativeContext): IterValue {
+  void ctx;
+  return adapter(
+    first,
+    { second },
+    (src, state) => ({
+      next: () => {
+        const a = nextOf(src);
+        if (a === DONE) return DONE;
+        const b = nextOf(state.second);
+        return b === DONE ? DONE : [a, b];
+      },
+      nextBack: () => {
+        const lengthA = lengthOf(src);
+        const lengthB = lengthOf(state.second);
+        for (let index = lengthB; index < lengthA; index++) src.nextBack!();
+        for (let index = lengthA; index < lengthB; index++) state.second.nextBack!();
+        const a = src.nextBack!();
+        const b = state.second.nextBack!();
+        return a === DONE || b === DONE ? DONE : [a, b];
+      },
+      remaining: () => Math.min(lengthOf(src), lengthOf(state.second)),
+    }),
+    (state, cloneItem) => ({ second: forkIter(state.second, cloneItem) })
+  );
+}
+
+/** Calls `f` on the elements in order until it returns a value, which it returns; undefined at the end. */
+function each<T>(ctx: NativeContext, iter: IterValue, f: (item: Value, index: number) => T | undefined): T | undefined {
+  for (let index = 0; ; index++) {
+    ctx.runtime.spend();
+    const item = nextOf(iter);
+    if (item === DONE) return undefined;
+    const result = f(item, index);
+    if (result !== undefined) return result;
+  }
+}
+
+define({
+  'IterImpl<_, _>::collect': ([self], ctx) => {
     // Collecting into a `Result` or an `Option` stops at the first `Err` or `None`, taking nothing after it.
-    const target = normalize(shallow(ctx.typeArgs[1]));
+    const target = normalize(shallow(ctx.typeArgs[2]));
     const builtin = target.kind === 'adt' ? target.def.builtin : undefined;
     const stopVariant = builtin === 'Result' ? 1 : builtin === 'Option' ? 0 : undefined;
     const stop =
       stopVariant === undefined ? undefined : (item: Value) => (deref(item) as EnumValue).variant === stopVariant;
-    return collectInto(ctx, collectAll(ctx, iterOf(self), stop), ctx.typeArgs[1], ctx.typeArgs[0]);
+    return collectInto(ctx, collectAll(ctx, iterOf(self), stop), ctx.typeArgs[2], ctx.typeArgs[0]);
   },
-  'Iter<_>::sum': ([self], ctx) => sumOrProduct(ctx, iterOf(self), ctx.typeArgs[1], '+'),
-  'Iter<_>::product': ([self], ctx) => sumOrProduct(ctx, iterOf(self), ctx.typeArgs[1], '*'),
-  'Iter<_>::count': ([self], ctx) => BigInt(collectAll(ctx, iterOf(self)).length),
-  'Iter<_>::len': ([self], ctx) => {
-    const iter = iterOf(self);
-    if (!iter.remaining) panic(ctx, 'この反復子は len で長さを数えられません。');
-    return BigInt(iter.remaining() + (iter.peeked?.filter((item) => item !== DONE).length ?? 0));
-  },
-  'Iter<_>::last': ([self], ctx) => {
+  'IterImpl<_, _>::sum': ([self], ctx) => sumOrProduct(ctx, iterOf(self), ctx.typeArgs[2], '+'),
+  'IterImpl<_, _>::product': ([self], ctx) => sumOrProduct(ctx, iterOf(self), ctx.typeArgs[2], '*'),
+  'IterImpl<_, _>::count': ([self], ctx) => BigInt(collectAll(ctx, iterOf(self)).length),
+  'IterImpl<_, _>::len': ([self]) => BigInt(lengthOf(iterOf(self))),
+  'IterImpl<_, _>::last': ([self], ctx) => {
     const items = collectAll(ctx, iterOf(self));
     return option(ctx, items.at(-1), items.length > 0);
   },
-  'Iter<_>::nth': ([self, n], ctx) => {
-    const iter = iterOf(self);
-    for (let index = 0; index < Number(n as bigint); index++) if (nextOf(iter) === DONE) return none(ctx);
-    const item = nextOf(iter);
+  'IterImpl<_, _>::nth': ([self, n], ctx) => {
+    const item = nth(iterOf(self), Number(n as bigint));
     return option(ctx, item === DONE ? undefined : item, item !== DONE);
   },
-  'Iter<_>::nth_back': ([self, n], ctx) => {
-    const iter = iterOf(self);
-    if (!iter.nextBack) panic(ctx, 'この反復子は後ろから取り出せません。');
-    let item: Next = DONE;
-    for (let index = 0; index <= Number(n as bigint); index++) {
-      item = iter.nextBack();
-      if (item === DONE) break;
-    }
+  'IterImpl<_, _>::nth_back': ([self, n], ctx) => {
+    const item = nthBack(iterOf(self), Number(n as bigint));
     return option(ctx, item === DONE ? undefined : item, item !== DONE);
   },
-  'Iter<_>::fold': ([self, init, f], ctx) => {
-    const iter = iterOf(self);
+  'IterImpl<_, _>::fold': ([self, init, f], ctx) => {
     let acc = init;
-    for (;;) {
-      ctx.runtime.spend();
-      const item = nextOf(iter);
-      if (item === DONE) return acc;
-      acc = call(ctx, f, [acc, item]);
-    }
+    each(ctx, iterOf(self), (item) => void (acc = call(ctx, f, [acc, item])));
+    return acc;
   },
-  'Iter<_>::reduce': ([self, f], ctx) => {
+  'IterImpl<_, _>::reduce': ([self, f], ctx) => {
     const iter = iterOf(self);
     const first = nextOf(iter);
     if (first === DONE) return none(ctx);
     let acc = first;
-    for (;;) {
-      ctx.runtime.spend();
-      const item = nextOf(iter);
-      if (item === DONE) return some(ctx, acc);
-      acc = call(ctx, f, [acc, item]);
-    }
+    each(ctx, iter, (item) => void (acc = call(ctx, f, [acc, item])));
+    return some(ctx, acc);
   },
-  'Iter<_>::for_each': ([self, f], ctx) => {
-    const iter = iterOf(self);
-    for (;;) {
-      ctx.runtime.spend();
-      const item = nextOf(iter);
-      if (item === DONE) return [];
-      call(ctx, f, [item]);
-    }
+  'IterImpl<_, _>::for_each': ([self, f], ctx) => {
+    each(ctx, iterOf(self), (item) => void call(ctx, f, [item]));
+    return [];
   },
-  'Iter<_>::any': ([self, f], ctx) => {
-    const iter = iterOf(self);
-    for (;;) {
-      ctx.runtime.spend();
-      const item = nextOf(iter);
-      if (item === DONE) return false;
-      if (truthy(call(ctx, f, [item]))) return true;
-    }
-  },
-  'Iter<_>::all': ([self, f], ctx) => {
-    const iter = iterOf(self);
-    for (;;) {
-      ctx.runtime.spend();
-      const item = nextOf(iter);
-      if (item === DONE) return true;
-      if (!truthy(call(ctx, f, [item]))) return false;
-    }
-  },
-  'Iter<_>::find': ([self, f], ctx) => {
-    const iter = iterOf(self);
-    for (;;) {
-      ctx.runtime.spend();
-      const item = nextOf(iter);
-      if (item === DONE) return none(ctx);
-      if (truthy(call(ctx, f, [item]))) return some(ctx, item);
-    }
-  },
-  'Iter<_>::find_map': ([self, f], ctx) => {
-    const iter = iterOf(self);
-    for (;;) {
-      ctx.runtime.spend();
-      const item = nextOf(iter);
-      if (item === DONE) return none(ctx);
+  'IterImpl<_, _>::any': ([self, f], ctx) =>
+    each(ctx, iterOf(self), (item) => (truthy(call(ctx, f, [item])) ? true : undefined)) ?? false,
+  'IterImpl<_, _>::all': ([self, f], ctx) =>
+    each(ctx, iterOf(self), (item) => (truthy(call(ctx, f, [item])) ? undefined : false)) ?? true,
+  'IterImpl<_, _>::find': ([self, f], ctx) =>
+    each(ctx, iterOf(self), (item) => (truthy(call(ctx, f, [item])) ? some(ctx, item) : undefined)) ?? none(ctx),
+  'IterImpl<_, _>::find_map': ([self, f], ctx) =>
+    each(ctx, iterOf(self), (item) => {
       const result = deref(call(ctx, f, [item])) as EnumValue;
-      if (result.variant === 1) return result;
-    }
-  },
-  'Iter<_>::position': ([self, f], ctx) => {
+      return result.variant === 1 ? result : undefined;
+    }) ?? none(ctx),
+  'IterImpl<_, _>::position': ([self, f], ctx) =>
+    each(ctx, iterOf(self), (item, index) => (truthy(call(ctx, f, [item])) ? some(ctx, BigInt(index)) : undefined)) ??
+    none(ctx),
+  'IterImpl<_, _>::rposition': ([self, f], ctx) => {
+    // `rposition` counts down from the length, taking the elements from the back.
     const iter = iterOf(self);
-    for (let index = 0; ; index++) {
+    let index = lengthOf(iter);
+    for (;;) {
       ctx.runtime.spend();
-      const item = nextOf(iter);
+      const item = iter.nextBack!();
       if (item === DONE) return none(ctx);
+      index--;
       if (truthy(call(ctx, f, [item]))) return some(ctx, BigInt(index));
     }
   },
-  'Iter<_>::rposition': ([self, f], ctx) => {
-    const items = collectAll(ctx, iterOf(self));
-    for (let index = items.length - 1; index >= 0; index--) {
-      if (truthy(call(ctx, f, [items[index]]))) return some(ctx, BigInt(index));
-    }
-    return none(ctx);
-  },
-  'Iter<_>::max': ([self], ctx) => extreme(ctx, iterOf(self), (a, b) => compareValues(ctx.typeArgs[0], a, b) ?? 0, 1),
-  'Iter<_>::min': ([self], ctx) => extreme(ctx, iterOf(self), (a, b) => compareValues(ctx.typeArgs[0], a, b) ?? 0, -1),
-  'Iter<_>::max_by_key': ([self, f], ctx) => extremeByKey(ctx, iterOf(self), f, ctx.typeArgs[1], 1),
-  'Iter<_>::min_by_key': ([self, f], ctx) => extremeByKey(ctx, iterOf(self), f, ctx.typeArgs[1], -1),
-  'Iter<_>::max_by': ([self, f], ctx) =>
+  'IterImpl<_, _>::max': ([self], ctx) =>
+    extreme(ctx, iterOf(self), (a, b) => compareValues(ctx.typeArgs[0], a, b) ?? 0, 1),
+  'IterImpl<_, _>::min': ([self], ctx) =>
+    extreme(ctx, iterOf(self), (a, b) => compareValues(ctx.typeArgs[0], a, b) ?? 0, -1),
+  'IterImpl<_, _>::max_by_key': ([self, f], ctx) => extremeByKey(ctx, iterOf(self), f, ctx.typeArgs[2], 1),
+  'IterImpl<_, _>::min_by_key': ([self, f], ctx) => extremeByKey(ctx, iterOf(self), f, ctx.typeArgs[2], -1),
+  'IterImpl<_, _>::max_by': ([self, f], ctx) =>
     extreme(ctx, iterOf(self), (a, b) => (deref(call(ctx, f, [a, b])) as EnumValue).variant - 1, 1),
-  'Iter<_>::min_by': ([self, f], ctx) =>
+  'IterImpl<_, _>::min_by': ([self, f], ctx) =>
     extreme(ctx, iterOf(self), (a, b) => (deref(call(ctx, f, [a, b])) as EnumValue).variant - 1, -1),
-  'Iter<_>::partition': ([self, f], ctx) => {
-    const items = collectAll(ctx, iterOf(self));
+  'IterImpl<_, _>::partition': ([self, f], ctx) => {
     const yes: Value[] = [];
     const no: Value[] = [];
-    for (const item of items) (truthy(call(ctx, f, [item])) ? yes : no).push(item);
-    const type = ctx.typeArgs[1];
+    each(ctx, iterOf(self), (item) => void (truthy(call(ctx, f, [item])) ? yes : no).push(item));
+    const type = ctx.typeArgs[2];
     return [collectInto(ctx, yes, type, ctx.typeArgs[0]), collectInto(ctx, no, type, ctx.typeArgs[0])];
   },
-  'Iter<_>::eq': ([self, other], ctx) => {
-    const a = collectAll(ctx, iterOf(self));
-    const b = collectAll(ctx, iterOf(other));
-    return a.length === b.length && a.every((item, index) => valuesEqual(ctx.typeArgs[0], item, b[index]));
+  'IterImpl<_, _>::eq': ([self, other], ctx) => {
+    // `eq` stops at the first difference.
+    const a = iterOf(self);
+    const b = iterOf(other);
+    for (;;) {
+      ctx.runtime.spend();
+      const x = nextOf(a);
+      const y = nextOf(b);
+      if (x === DONE || y === DONE) return x === y;
+      if (!valuesEqual(ctx.typeArgs[0], x, y)) return false;
+    }
   },
-  'Iter<_>::is_sorted': ([self], ctx) => {
-    const items = collectAll(ctx, iterOf(self));
-    return items.every(
-      (item, index) => index === 0 || (compareValues(ctx.typeArgs[0], items[index - 1], item) ?? 1) <= 0
+  'IterImpl<_, _>::is_sorted': ([self], ctx) => {
+    // `is_sorted` stops at the first pair out of order.
+    const iter = iterOf(self);
+    let previous = nextOf(iter);
+    if (previous === DONE) return true;
+    return (
+      each(ctx, iter, (item) => {
+        const order = compareValues(ctx.typeArgs[0], previous as Value, item);
+        previous = item;
+        return order === undefined || order > 0 ? false : undefined;
+      }) ?? true
     );
   },
-  'Iter<char>::as_str': ([self]) => {
+  'IterImpl<char, CharsShape>::as_str': ([self]) => {
     const iter = iterOf(self);
     const peeked = (iter.peeked ?? []).filter((next) => next !== DONE) as Value[];
     return [...peeked, ...(iter.rest?.() ?? [])].join('');
   },
-  'Iter<&_>::copied': ([self]) => derefIter(iterOf(self), true),
-  'Iter<&_>::cloned': ([self], ctx) => cloneIter(iterOf(self), ctx.typeArgs[0]),
-  'Iter<&mut _>::copied': ([self]) => derefIter(iterOf(self), true),
-  'Iter<&mut _>::cloned': ([self], ctx) => cloneIter(iterOf(self), ctx.typeArgs[0]),
-  'Iter<(_, _)>::unzip': ([self], ctx) => {
+  'IterImpl<&_, _>::copied': ([self]) => mapped(iterOf(self), (item) => copyValue(deref(item))),
+  'IterImpl<&_, _>::cloned': ([self], ctx) => mapped(iterOf(self), (item) => cloneValue(ctx.typeArgs[0], deref(item))),
+  'IterImpl<&mut _, _>::copied': ([self]) => mapped(iterOf(self), (item) => copyValue(deref(item))),
+  'IterImpl<&mut _, _>::cloned': ([self], ctx) =>
+    mapped(iterOf(self), (item) => cloneValue(ctx.typeArgs[0], deref(item))),
+  'IterImpl<(_, _), _>::unzip': ([self], ctx) => {
     const items = collectAll(ctx, iterOf(self)) as Value[][];
-    const [typeA, typeB, fromA, fromB] = ctx.typeArgs;
-    return [
-      collectInto(
-        ctx,
-        items.map((item) => item[0]),
-        fromA,
-        typeA
-      ),
-      collectInto(
-        ctx,
-        items.map((item) => item[1]),
-        fromB,
-        typeB
-      ),
-    ];
+    const [typeA, typeB, , fromA, fromB] = ctx.typeArgs;
+    const firsts = items.map((item) => item[0]);
+    const seconds = items.map((item) => item[1]);
+    return [collectInto(ctx, firsts, fromA, typeA), collectInto(ctx, seconds, fromB, typeB)];
   },
-  'Iter<Iter<_>>::flatten': ([self], ctx) => flatten(ctx, iterOf(self), (item) => iterOf(item)),
-  'Iter<Vec<_>>::flatten': ([self], ctx) => flatten(ctx, iterOf(self), (item) => arrayIter(item as Value[])),
-  'Iter<&Vec<_>>::flatten': ([self], ctx) => flatten(ctx, iterOf(self), (item) => arrayIter(deref(item) as Value[])),
-  // A shared reference is the value it refers to, so `&Option` and `&Result` flatten as their values do.
-  'Iter<&Option<_>>::flatten': ([self], ctx) => flattenPresent(ctx, self, 1),
-  'Iter<&Result<_, _>>::flatten': ([self], ctx) => flattenPresent(ctx, self, 0),
-  'Iter<Option<_>>::flatten': ([self], ctx) => flattenPresent(ctx, self, 1),
-  'Iter<Result<_, _>>::flatten': ([self], ctx) => flattenPresent(ctx, self, 0),
-  'std::iter::repeat': ([value], ctx) => new IterValue(() => cloneValue(ctx.typeArgs[0], value)),
-  'std::iter::repeat_n': ([value, n], ctx) => {
-    let left = Number(n as bigint);
-    return new IterValue(
-      () => (left-- > 0 ? cloneValue(ctx.typeArgs[0], value) : DONE),
-      undefined,
-      () => Math.max(left, 0)
-    );
+  'std::iter::repeat': ([value], ctx) => repeated(ctx, value, Number.POSITIVE_INFINITY),
+  'std::iter::repeat_n': ([value, n], ctx) => repeated(ctx, value, Number(n as bigint)),
+  'std::iter::once': ([value]) => ownedIter([value]),
+  'std::iter::empty': () => ownedIter([]),
+  'std::iter::from_fn': ([f], ctx) => {
+    const iter = new IterValue(() => optionValue(call(ctx, f, [])));
+    iter.fork = () => iter;
+    return iter;
   },
-  'std::iter::once': ([value]) => arrayIter([value]),
-  'std::iter::empty': () => arrayIter([]),
-  'std::iter::from_fn': ([f], ctx) =>
-    new IterValue(() => {
-      const result = deref(call(ctx, f, [])) as EnumValue;
-      return result.variant === 1 ? result.fields[0] : DONE;
-    }),
-  'std::iter::successors': ([first, f], ctx) => {
-    let current = deref(first) as EnumValue;
-    return new IterValue(() => {
-      if (current.variant === 0) return DONE;
-      const value = current.fields[0];
-      current = deref(call(ctx, f, [value])) as EnumValue;
-      return value;
-    });
-  },
-  'std::iter::zip': ([a, b], ctx) => NATIVES_ZIP([a, b], ctx),
+  'std::iter::successors': ([first, f], ctx) => successors(ctx, deref(first) as EnumValue, f),
 });
 
-const NATIVES_ZIP = (args: Value[], ctx: NativeContext): Value => {
-  const [a, b] = args;
-  const first = iterOf(a);
-  const second = iterOf(b);
-  void ctx;
-  return new IterValue(() => {
-    const x = nextOf(first);
-    if (x === DONE) return DONE;
-    const y = nextOf(second);
-    return y === DONE ? DONE : [x, y];
-  });
-};
-
-/** Markers that `Iter::next`'s native returns, which the call site wraps in `Option`. */
-const NONE_MARK = undefined as unknown as Value;
-const SOME_MARK = (value: Value): Value => value;
-
-/** Replaces the plain native of `Iter::next` with one that knows `Option`. */
-define({
-  'Iter<_>::next': ([self], ctx) => {
-    const iter = iterOf(self);
-    const item = nextOf(iter);
-    return option(ctx, item === DONE ? undefined : item, item !== DONE);
-  },
-});
-
-function derefIter(iter: IterValue, copy: boolean): IterValue {
-  const take = (item: Next): Next => (item === DONE ? DONE : copy ? copyValue(deref(item)) : deref(item));
-  return adapter(iter, () => take(nextOf(iter)), iter.nextBack && (() => take(iter.nextBack!())), iter.remaining);
+/** `repeat` and `repeat_n`: clones of a value, `count` of them. */
+function repeated(ctx: NativeContext, value: Value, count: number): IterValue {
+  let left = count;
+  const take = (): Next => (left-- > 0 ? cloneValue(ctx.typeArgs[0], value) : DONE);
+  const iter = new IterValue(take, take, Number.isFinite(count) ? () => Math.max(left, 0) : undefined);
+  iter.fork = () => repeated(ctx, value, left);
+  return iter;
 }
 
-function cloneIter(iter: IterValue, type: Type): IterValue {
-  const take = (item: Next): Next => (item === DONE ? DONE : cloneValue(type, deref(item)));
-  return adapter(iter, () => take(nextOf(iter)), iter.nextBack && (() => take(iter.nextBack!())), iter.remaining);
-}
-
-// code-gauge-allow duplicateLines 15 -- Flattening and flat_map walk nested iterators alike, from different sources.
-function flatten(ctx: NativeContext, iter: IterValue, inner: (item: Value) => IterValue): IterValue {
-  let current: IterValue | undefined;
-  return adapter(iter, () => {
-    for (;;) {
-      ctx.runtime.spend();
-      if (current) {
-        const item = nextOf(current);
-        if (item !== DONE) return item;
-      }
-      const next = nextOf(iter);
-      if (next === DONE) return DONE;
-      current = inner(next);
-    }
+function successors(ctx: NativeContext, start: EnumValue, f: Value): IterValue {
+  let current = start;
+  const iter = new IterValue(() => {
+    if (current.variant === 0) return DONE;
+    const value = current.fields[0];
+    current = deref(call(ctx, f, [value])) as EnumValue;
+    return value;
   });
+  iter.fork = () => successors(ctx, current, f);
+  return iter;
 }
 
 function extreme(ctx: NativeContext, iter: IterValue, compare: (a: Value, b: Value) => number, sign: 1 | -1): Value {

@@ -162,6 +162,12 @@ export class IterValue {
 
   /** The elements left, for iterators over an array (`Chars::as_str` reads them without taking them). */
   rest: (() => Value[]) | undefined;
+
+  /**
+   * An independent copy of the iterator at its position, as `Clone` makes it; `cloneItem` clones the elements an
+   * iterator owns. Undefined for an iterator whose position cannot be copied.
+   */
+  fork: ((cloneItem: (value: Value) => Value) => IterValue) | undefined;
 }
 
 /** A `HashMap` or `BTreeMap`: entries keyed by a text that equal keys share. */

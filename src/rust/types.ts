@@ -98,6 +98,11 @@ export type BuiltinAdt =
   | 'Unsigned'
   | 'Signed'
   | 'Indexed'
+  | 'IterItem'
+  | 'IterShape'
+  | 'IterTarget'
+  | 'IntoItem'
+  | 'IntoShape'
   | 'Formatter'
   | 'FmtError'
   | 'ParseIntError'
@@ -466,8 +471,8 @@ export function sameType(a: Type, b: Type): boolean {
 // Printing
 
 /** A type as rustc writes it in messages, with `{integer}` and `_` for variables. */
-// code-gauge-allow functionCognitiveComplexity 16 -- One case per kind of type.
-// code-gauge-allow functionNcss 40 -- One case per kind of type.
+// code-gauge-allow functionCognitiveComplexity 21 -- One case per kind of type.
+// code-gauge-allow functionNcss 42 -- One case per kind of type.
 export function typeToString(type: Type): string {
   const t = shallow(type);
   switch (t.kind) {
@@ -497,9 +502,14 @@ export function typeToString(type: Type): string {
       return `&${t.mutable ? 'mut ' : ''}${typeToString(t.target)}`;
     }
     case 'adt': {
-      if (t.def.builtin === 'Iter') return `impl Iterator<Item = ${typeToString(t.args[0])}>`;
-      if (t.args.length === 0) return t.def.name;
-      return `${t.def.name}<${t.args.map(typeToString).join(', ')}>`;
+      if (t.def.builtin === 'Iter') {
+        // An iterator is the std type its shape stands for.
+        const shape = shallow(t.args[1]);
+        return shape.kind === 'adt' ? typeToString(shape) : `impl Iterator<Item = ${typeToString(t.args[0])}>`;
+      }
+      const name = isIteratorShape(t.def) ? shapeName(t.def.name) : t.def.name;
+      if (t.args.length === 0) return name;
+      return `${name}<${t.args.map(typeToString).join(', ')}>`;
     }
     case 'param': {
       return t.param.name;
@@ -564,4 +574,25 @@ export function stripRefs(type: Type): Type {
   let t = shallow(type);
   while (t.kind === 'ref') t = shallow(t.target);
   return t;
+}
+
+/** Whether a type is the shape of an iterator (`std::iter::shape`), which stands for an iterator type of std. */
+export function isIteratorShape(def: AdtDef): boolean {
+  return def.name.endsWith('Shape') && (def.module as { name?: string } | undefined)?.name === 'shape';
+}
+
+/** The name of the iterator type of std that a shape stands for. */
+function shapeName(name: string): string {
+  const renamed: Record<string, string> = {
+    SliceIterShape: 'Iter',
+    SliceIterMutShape: 'IterMut',
+    VecIntoIterShape: 'IntoIter',
+    ArrayIntoIterShape: 'IntoIter',
+    VecDrainShape: 'Drain',
+    StringDrainShape: 'Drain',
+    OptionIterShape: 'Iter',
+  };
+  if (renamed[name]) return renamed[name];
+  const collection = /^(?:HashMap|BTreeMap|HashSet|BTreeSet|VecDeque|BinaryHeap)(\w+)Shape$/.exec(name);
+  return collection ? collection[1] : name.replace(/Shape$/, '');
 }

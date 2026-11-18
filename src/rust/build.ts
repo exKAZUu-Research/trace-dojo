@@ -3,6 +3,7 @@ import { Checker } from './checker';
 import { Converter } from './convert';
 import { setPseudoTypes } from './infer';
 import { ItemCollector, Program, resolveImports } from './items';
+import { intoIterItem, intoIterShape } from './iterTypes';
 import { turtleImplSource } from './natives/core';
 import { parseRust, parseWith } from './parse';
 import { STD_SOURCE } from './stdSource';
@@ -33,6 +34,8 @@ export function buildProgram(source: string, atomicRows: ReadonlySet<number> = n
   setupPrelude(program);
   setPseudoTypes({
     parseError: (target) => parseErrorType(program, target),
+    intoItem: (type) => intoIterItem(type),
+    intoShape: (type) => intoIterShape(program, type),
   });
   const crate = parseRust(source);
   collector.collectCrate(crate, program.root);

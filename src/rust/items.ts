@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 745 -- Follows Rust's name resolution case by case.
+// code-gauge-allow-file fileNcss 755 -- Follows Rust's name resolution case by case.
 import { CompileError } from '../interpreter/diagnostics';
 import type {
   BoundAst,
@@ -132,6 +132,8 @@ export class Program {
   readonly prelude = new Map<string, string[]>();
   readonly builtinAdts = new Map<BuiltinAdt, AdtDef>();
   readonly builtinTraits = new Map<string, TraitDef>();
+  /** The shapes of iterators (`std::iter::shape`), which stand for std's iterator types, by name. */
+  readonly shapes = new Map<string, AdtDef>();
   /** The bodies to check after every item's signature is known. */
   readonly pendingFns: FnDef[] = [];
 
@@ -154,6 +156,17 @@ export class Program {
 
   builtinType(name: BuiltinAdt, args: Type[] = []): Type {
     return adt(this.adtDef(name), args);
+  }
+
+  shapeType(name: string, args: Type[] = []): Type {
+    const def = this.shapes.get(name);
+    if (!def) throw new Error(`Unknown iterator shape ${name}`);
+    return adt(def, args);
+  }
+
+  /** An iterator of `item`s of a shape. */
+  iterType(item: Type, shape: Type): Type {
+    return adt(this.adtDef('Iter'), [item, shape]);
   }
 }
 
@@ -302,6 +315,7 @@ export class ItemCollector {
       def.builtin = builtin;
       this.program.builtinAdts.set(builtin, def);
     }
+    if (module.isStd && module.name === 'shape') this.program.shapes.set(item.name, def);
     this.program.adts.push(def);
     this.declareType(module, item.name, { kind: 'adt', def }, item.vis, item.span);
     if (item.shape !== 'named') {
@@ -768,7 +782,7 @@ const BUILTIN_STRUCTS: Record<string, BuiltinAdt> = {
   Box: 'Box',
   Reverse: 'Reverse',
   Turtle: 'Turtle',
-  Iter: 'Iter',
+  IterImpl: 'Iter',
   Range: 'Range',
   RangeInclusive: 'RangeInclusive',
   RangeFrom: 'RangeFrom',
@@ -787,6 +801,11 @@ const BUILTIN_STRUCTS: Record<string, BuiltinAdt> = {
   Unsigned: 'Unsigned',
   Signed: 'Signed',
   Indexed: 'Indexed',
+  IterItem: 'IterItem',
+  IterShape: 'IterShape',
+  IterTarget: 'IterTarget',
+  IntoItem: 'IntoItem',
+  IntoShape: 'IntoShape',
   ParseBoolError: 'ParseBoolError',
   ParseCharError: 'ParseCharError',
 };

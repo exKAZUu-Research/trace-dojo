@@ -1,6 +1,8 @@
 import type { FormatPiece, FormatSpec } from './ast';
+import { list, structText, tupleText } from './debugText';
 import { debugFloat, displayFloat, expFloat, fixedFloat } from './floatFormat';
 import { normalize } from './infer';
+import { iteratorDebug } from './iterDebug';
 import { compareValues, wrap } from './ops';
 import { FmtFailure } from './runtime';
 import { ERROR_TYPES } from './traits';
@@ -9,6 +11,7 @@ import {
   type DynValue,
   EnumValue,
   isPlace,
+  type IterValue,
   type MapValue,
   type RangeValue,
   type SetValue,
@@ -284,17 +287,23 @@ export class Formatter {
         return errorDebug(def.builtin, v, indent);
       }
       case 'CaseIter': {
-        const { name, text } = v as unknown as { name: string; text: string };
-        const chars = [...text].map((c) => `'${escapeDebug(c, true)}'`).join(', ');
-        return `${name}(CaseMappingIter(IntoIter([${chars}])))`;
+        return caseIterDebug(v);
       }
       case 'Turtle': {
         return 'Turtle';
+      }
+      case 'Iter': {
+        return this.iteratorText(v as IterValue, t, spec, indent);
       }
       default: {
         return this.debugUserAdt(v, t, spec, indent);
       }
     }
+  }
+
+  private iteratorText(iter: IterValue, t: Type & { kind: 'adt' }, spec: Spec, indent: number | undefined): string {
+    const debug = (value: Value, type: Type, inner: number | undefined): string => this.debug(value, type, spec, inner);
+    return iteratorDebug(iter, t.args[0], t.args[1], debug, indent);
   }
 
   private debugUserAdt(v: Value, t: Type & { kind: 'adt' }, spec: Spec, indent: number | undefined): string {
@@ -305,24 +314,15 @@ export class Formatter {
     const types = this.hooks.fieldTypes(def, t.args, variantIndex);
     if (variant.shape === 'unit') return pad(variant.name, spec, '<');
     if (variant.shape === 'tuple' && types.length === 0) return pad(variant.name, spec, '<');
-    if (variant.shape === 'tuple') {
-      const items = types.map(
-        (type, index) => (inner: number | undefined) => this.debug(fields[index], type, spec, inner)
-      );
-      return variant.name + list('(', ')', items, indent);
-    }
-    const items = types.map(
-      (type, index) => (inner: number | undefined) =>
-        `${variant.fields[index].name}: ${this.debug(fields[index], type, spec, inner)}`
+    const parts = types.map(
+      (type, index) => (inner: number | undefined) => this.debug(fields[index], type, spec, inner)
     );
-    if (indent === undefined) {
-      return items.length === 0
-        ? `${variant.name}`
-        : `${variant.name} { ${items.map((item) => item(undefined)).join(', ')} }`;
-    }
-    if (items.length === 0) return variant.name;
-    const pad4 = '    '.repeat(indent + 1);
-    return `${variant.name} {\n${items.map((item) => `${pad4}${item(indent + 1)},\n`).join('')}${'    '.repeat(indent)}}`;
+    if (variant.shape === 'tuple') return tupleText(variant.name, parts, indent);
+    return structText(
+      variant.name,
+      parts.map((part, index) => [variant.fields[index].name, part]),
+      indent
+    );
   }
 
   /** A map's entries in iteration order: insertion order for `HashMap`, key order for `BTreeMap`. */
@@ -403,16 +403,10 @@ function caseIterText(value: Value): string {
 }
 
 /** Formats a list of items compactly (`[1, 2]`) or, at a depth of `{:#?}`, one per line with trailing commas. */
-function list(
-  open: string,
-  close: string,
-  items: ((indent: number | undefined) => string)[],
-  indent: number | undefined
-): string {
-  if (indent === undefined) return `${open}${items.map((item) => item(undefined)).join(', ')}${close}`;
-  if (items.length === 0) return `${open}${close}`;
-  const pad4 = '    '.repeat(indent + 1);
-  return `${open}\n${items.map((item) => `${pad4}${item(indent + 1)},\n`).join('')}${'    '.repeat(indent)}${close}`;
+function caseIterDebug(value: Value): string {
+  const { name, text } = value as unknown as { name: string; text: string };
+  const chars = [...text].map((c) => `'${escapeDebug(c, true)}'`).join(', ');
+  return `${name}(CaseMappingIter(IntoIter([${chars}])))`;
 }
 
 function charCount(text: string): number {

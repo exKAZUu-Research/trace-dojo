@@ -128,27 +128,60 @@ function occurs(v: TypeVar, type: Type): boolean {
   return childTypes(t).some((child) => occurs(v, child));
 }
 
-/** The types of the standard library's pseudo-types, once their arguments are known. */
-let pseudoTypes: { parseError: (target: Type) => Type | undefined } | undefined;
+interface PseudoTypes {
+  parseError: (target: Type) => Type | undefined;
+  /** The item and the shape of the iterator that `IntoIterator` makes of a value of a type. */
+  intoItem: (type: Type) => Type | undefined;
+  intoShape: (type: Type) => Type | undefined;
+}
 
-export function setPseudoTypes(types: { parseError: (target: Type) => Type | undefined }): void {
+/** The types of the standard library's pseudo-types, once their arguments are known. */
+let pseudoTypes: PseudoTypes | undefined;
+
+export function setPseudoTypes(types: PseudoTypes): void {
   pseudoTypes = types;
 }
 
 /**
- * Replaces `ParseError<F>`, `Unsigned<N>`, `Signed<N>`, and `Indexed<I, T>` with the types they stand for when their
- * first argument is known.
+ * Replaces `ParseError<F>`, `Unsigned<N>`, `Signed<N>`, `Indexed<I, T>`, and the pseudo-types of iterators with the
+ * types they stand for when their first argument is known.
  */
 export function normalize(type: Type): Type {
   if (type.kind !== 'adt' || !isPseudo(type.def)) return type;
-  const arg = shallow(type.args[0]);
+  const arg = normalize(shallow(type.args[0]));
   if (type.def.builtin === 'Indexed') return indexed(type, arg);
   if (arg.kind === 'var') return type;
+  const iterator = iteratorPart(type.def.builtin as string, arg);
+  if (iterator !== false) return iterator ? normalize(shallow(iterator)) : type;
   if (type.def.builtin === 'Unsigned' || type.def.builtin === 'Signed') {
     if (arg.kind !== 'int') return type;
     return intType(`${type.def.builtin === 'Unsigned' ? 'u' : 'i'}${arg.name.slice(1)}` as never);
   }
   return pseudoTypes?.parseError(arg) ?? type;
+}
+
+/** `IterItem<I>`, `IterShape<I>`, `IterTarget<I>`, `IntoItem<T>`, `IntoShape<T>`; false for other pseudo-types. */
+function iteratorPart(name: string, arg: Type): Type | undefined | false {
+  switch (name) {
+    case 'IterItem':
+    case 'IterShape':
+    case 'IterTarget': {
+      if (arg.kind !== 'adt' || arg.def.builtin !== 'Iter') return undefined;
+      if (name === 'IterShape') return arg.args[1];
+      const item = normalize(shallow(arg.args[0]));
+      if (name === 'IterItem') return item;
+      return item.kind === 'ref' ? item.target : undefined;
+    }
+    case 'IntoItem': {
+      return pseudoTypes?.intoItem(arg);
+    }
+    case 'IntoShape': {
+      return pseudoTypes?.intoShape(arg);
+    }
+    default: {
+      return false;
+    }
+  }
 }
 
 /** `Indexed<I, T>`: an element for an index, which an untyped number is as a `usize`, or a slice for a range. */
@@ -160,7 +193,17 @@ function indexed(type: Type & { kind: 'adt' }, index: Type): Type {
 }
 
 function isPseudo(def: AdtDef): boolean {
-  return ['ParseError', 'Unsigned', 'Signed', 'Indexed'].includes(def.builtin as string);
+  return [
+    'ParseError',
+    'Unsigned',
+    'Signed',
+    'Indexed',
+    'IterItem',
+    'IterShape',
+    'IterTarget',
+    'IntoItem',
+    'IntoShape',
+  ].includes(def.builtin as string);
 }
 
 /** Resolves a type deeply, normalizing pseudo-types. */
