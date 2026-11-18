@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 485 -- One native per method of the standard library.
+// code-gauge-allow-file fileNcss 486 -- One native per method of the standard library.
 import { normalize } from '../infer';
 import { strSliceBytes } from '../interpreter';
 import { RustPanic } from '../runtime';
@@ -583,6 +583,7 @@ const stringNatives: Record<string, (args: Value[], ctx: NativeContext) => Value
   as_str: ([self]) => str(self),
   as_mut_str: ([self]) => self,
   into_bytes: ([self]) => Array.from(encoder.encode(str(self)), BigInt),
+  into_boxed_str: ([self]) => str(self),
   retain: ([self, f], ctx) => {
     const place = placeOf(self);
     place.set([...(place.get() as string)].filter((char) => call(ctx, f, [char]) as boolean).join(''));
@@ -737,6 +738,7 @@ for (const name of Object.keys(charNatives).filter((key) => key.includes('ascii'
     return typeof result === 'string' ? BigInt(result.codePointAt(0)!) : result;
   };
 }
+natives['FromStr::from_str'] = ([s], ctx) => parse(ctx, str(s));
 natives['String::len'] = strNatives.len;
 natives['String::is_empty'] = strNatives.is_empty;
 natives['std::char::from_u32'] = ([i], ctx) => fromU32(ctx, i);

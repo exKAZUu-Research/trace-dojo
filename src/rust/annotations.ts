@@ -52,8 +52,8 @@ export interface ReceiverAdjust {
   /** The derefs from the receiver expression's type, each of a reference (`ref`/`mutRef`) or of an owner. */
   derefs: ('ref' | 'mutRef' | 'own')[];
   autoref: 'none' | 'ref' | 'mut';
-  /** A range used as an iterator. */
-  rangeToIter: boolean;
+  /** A receiver used as the iterator it makes: a range, or a type parameter bounded by `Iterator` or `IntoIterator`. */
+  asIter: boolean;
 }
 
 export interface MethodRes {

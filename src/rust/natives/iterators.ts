@@ -66,10 +66,10 @@ export function sliceIter(slice: Value, places: boolean): IterValue {
 }
 
 /** The iterator `for` uses for a value of a type, as `IntoIterator` makes it. */
-// code-gauge-allow duplicateLines 16 -- Borrowed and owned collections iterate alike, yielding references or values.
 export function toIterator(interp: Interpreter, value: Value, from: Type): Value {
   const t = normalize(shallow(from));
   if (value instanceof IterValue) return value;
+  if (t.kind === 'opaque' && t.opaque.hidden) return toIterator(interp, value, t.opaque.hidden);
   if (t.kind === 'array') return ownedIter(sliceItems(value));
   if (t.kind === 'ref') {
     const target = normalize(shallow(t.target));
@@ -90,9 +90,11 @@ export function toIterator(interp: Interpreter, value: Value, from: Type): Value
         case 'BTreeSet': {
           return setIter(v as SetValue, target.args[0]);
         }
-        case 'Option': {
+        case 'Option':
+        case 'Result': {
+          // `Some` and `Ok` hold the one element.
           const option = v as EnumValue;
-          if (option.variant === 0) return arrayIter([]);
+          if (option.variant !== (target.def.builtin === 'Option' ? 1 : 0)) return arrayIter([]);
           return arrayIter([t.mutable ? new ElementPlace(option.fields, 0) : option.fields[0]]);
         }
         case 'Iter': {
@@ -888,7 +890,7 @@ function intStep(ctx: NativeContext, type: Type, op: '+' | '*', total: bigint, v
 }
 
 /** Collects elements into a collection of the type `collect` was asked for. */
-// code-gauge-allow functionCognitiveComplexity 23 -- One native per method of the standard library.
+// code-gauge-allow functionCognitiveComplexity 25 -- One native per method of the standard library.
 // code-gauge-allow functionNcss 52 -- One native per method of the standard library.
 export function collectInto(ctx: NativeContext, items: Value[], target: Type, item: Type): Value {
   const t = normalize(shallow(target));
@@ -900,7 +902,8 @@ export function collectInto(ctx: NativeContext, items: Value[], target: Type, it
       return items;
     }
     case 'Box': {
-      return items;
+      // A `Box<str>` collects text, as `String` does; a `Box<[T]>` the elements.
+      return shallow(t.args[0]).kind === 'str' ? items.map((element) => deref(element) as string).join('') : items;
     }
     case 'BinaryHeap': {
       return heapify([...items], t.args[0]);

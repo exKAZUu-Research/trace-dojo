@@ -1,5 +1,6 @@
-// code-gauge-allow-file fileNcss 414 -- One native per method of the standard library.
+// code-gauge-allow-file fileNcss 416 -- One native per method of the standard library.
 import { sliceRange } from '../compiler';
+import { normalize } from '../infer';
 import { cloneValue, compareValues, copyValue, valuesEqual } from '../ops';
 import { RustPanic } from '../runtime';
 import { shallow, type Type } from '../types';
@@ -288,6 +289,7 @@ const sliceNatives: Record<string, (args: Value[], ctx: NativeContext) => Value>
     return UNIT_VALUE;
   },
   to_vec: ([self], ctx) => sliceItems(deref(self)).map((item) => cloneValue(elemType(ctx), item)),
+  to_owned: ([self], ctx) => sliceItems(deref(self)).map((item) => cloneValue(elemType(ctx), item)),
   into_vec: ([self]) => sliceItems(deref(self)),
   rotate_left: ([self, mid], ctx) => {
     const slice = deref(self);
@@ -664,15 +666,15 @@ natives['[String]::join'] = ([self, sep]) => joinStrings(self, sep);
 natives['[String]::concat'] = ([self]) => joinStrings(self, '');
 natives['[&str]::join'] = ([self, sep]) => joinStrings(self, sep);
 natives['[&str]::concat'] = ([self]) => joinStrings(self, '');
-natives['[Vec<_>]::concat'] = ([self], ctx) =>
-  sliceItems(deref(self)).flatMap((item) => (item as Value[]).map((e) => cloneValue(elemType(ctx), e)));
-natives['[&[_]]::concat'] = ([self], ctx) =>
+natives['[SliceOf]::concat'] = ([self], ctx) =>
   sliceItems(deref(self)).flatMap((item) => sliceItems(deref(item)).map((e) => cloneValue(elemType(ctx), e)));
-natives['[Vec<_>]::join'] = ([self, sep], ctx) => {
+natives['[SliceOf]::join'] = ([self, sep], ctx) => {
+  const separator = normalize(shallow((normalize(shallow(ctx.typeArgs[2])) as Type & { kind: 'ref' }).target));
+  const parts = separator.kind === 'slice' ? sliceItems(deref(sep)) : [deref(sep)];
   const result: Value[] = [];
   for (const [index, item] of sliceItems(deref(self)).entries()) {
-    if (index > 0) result.push(cloneValue(elemType(ctx), deref(sep)));
-    result.push(...(item as Value[]).map((e) => cloneValue(elemType(ctx), e)));
+    if (index > 0) result.push(...parts.map((e) => cloneValue(elemType(ctx), e)));
+    result.push(...sliceItems(deref(item)).map((e) => cloneValue(elemType(ctx), e)));
   }
   return result;
 };

@@ -1,5 +1,5 @@
 import type { FormatPiece, FormatSpec } from './ast';
-import { list, structText, tupleText } from './debugText';
+import { type DebugPart, list, structText, tupleText } from './debugText';
 import { debugFloat, displayFloat, expFloat, fixedFloat } from './floatFormat';
 import { normalize } from './infer';
 import { iteratorDebug } from './iterDebug';
@@ -9,6 +9,7 @@ import { ERROR_TYPES } from './traits';
 import { type AdtDef, type IntName, shallow, type Type } from './types';
 import {
   type DynValue,
+  type EntryValue,
   EnumValue,
   isPlace,
   type IterValue,
@@ -258,11 +259,7 @@ export class Formatter {
       }
       case 'HashSet':
       case 'BTreeSet': {
-        const set = v as SetValue;
-        const values = [...set.entries.values()];
-        if (set.sorted) values.sort((a, b) => compareValues(t.args[0], a, b) ?? 0);
-        const items = values.map((item) => (inner: number | undefined) => this.debug(item, t.args[0], spec, inner));
-        return list('{', '}', items, indent);
+        return this.setText(v as SetValue, t.args[0], spec, indent);
       }
       case 'Range':
       case 'RangeInclusive':
@@ -282,6 +279,8 @@ export class Formatter {
       case 'ParseFloatError':
       case 'ParseCharError':
       case 'TryFromIntError':
+      case 'CharTryFromError':
+      case 'TryFromCharError':
       case 'Utf8Error':
       case 'FmtError': {
         return errorDebug(def.builtin, v, indent);
@@ -295,10 +294,41 @@ export class Formatter {
       case 'Iter': {
         return this.iteratorText(v as IterValue, t, spec, indent);
       }
+      case 'Entry': {
+        return this.entryText(v as EntryValue, t, spec, indent);
+      }
       default: {
         return this.debugUserAdt(v, t, spec, indent);
       }
     }
+  }
+
+  private setText(set: SetValue, elem: Type, spec: Spec, indent: number | undefined): string {
+    const values = [...set.entries.values()];
+    if (set.sorted) values.sort((a, b) => compareValues(elem, a, b) ?? 0);
+    const items = values.map((item) => (inner: number | undefined) => this.debug(item, elem, spec, inner));
+    return list('{', '}', items, indent);
+  }
+
+  /** A map's entry, as `Entry`, `OccupiedEntry`, and `VacantEntry` debug: the key and any value it holds. */
+  private entryText(entry: EntryValue, t: Type & { kind: 'adt' }, spec: Spec, indent: number | undefined): string {
+    const held = entry.map.entries.get(entry.hash);
+    const key: DebugPart = (inner) => this.debug(held ? held[0] : entry.key, t.args[0], spec, inner);
+    const inner: DebugPart = held
+      ? (depth) => {
+          const value: DebugPart = (nested) => this.debug(held[1], t.args[1], spec, nested);
+          return structText(
+            'OccupiedEntry',
+            [
+              ['key', key],
+              ['value', value],
+            ],
+            depth,
+            true
+          );
+        }
+      : (depth) => tupleText('VacantEntry', [key], depth);
+    return tupleText('Entry', [inner], indent);
   }
 
   private iteratorText(iter: IterValue, t: Type & { kind: 'adt' }, spec: Spec, indent: number | undefined): string {
@@ -529,6 +559,12 @@ export function errorDisplay(builtin: string, value: Value): string {
     case 'TryFromIntError': {
       return `number too ${kind === 'NegOverflow' ? 'small' : 'large'} to fit in target type`;
     }
+    case 'CharTryFromError': {
+      return 'converted integer out of range for `char`';
+    }
+    case 'TryFromCharError': {
+      return 'unicode code point out of range';
+    }
     case 'FmtError': {
       return 'an error occurred when formatting an argument';
     }
@@ -568,6 +604,12 @@ function errorDebug(builtin: string, value: Value, indent: number | undefined): 
     }
     case 'FmtError': {
       return 'Error';
+    }
+    case 'CharTryFromError':
+    case 'TryFromCharError': {
+      return indent === undefined
+        ? `${builtin}(())`
+        : `${builtin}(\n${'    '.repeat(indent + 1)}(),\n${'    '.repeat(indent)})`;
     }
     case 'ParseCharError': {
       return inner('ParseCharError', 'kind', kind ?? 'TooManyChars');

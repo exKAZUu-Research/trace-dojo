@@ -663,12 +663,20 @@ export class Converter {
     if (node.type === 'generic_type' || node.type === 'generic_type_with_turbofish') {
       const base = this.typePath(this.field(node, 'type'));
       const typeArguments = this.field(node, 'type_arguments');
-      const args = this.typeArgs(typeArguments);
+      const args = this.typeArgs(typeArguments, true);
       const lifetimes = typeArguments.namedChildren
         .filter((child) => child.type === 'lifetime')
         .map((child) => child.text);
+      const bindings = typeArguments.namedChildren
+        .filter((child) => child.type === 'type_binding')
+        .map((child) => ({
+          name: this.field(child, 'name').text,
+          type: this.type(this.field(child, 'type')),
+          span: this.span(child),
+        }));
       const last = base.segments.at(-1) as PathSegment;
-      return { segments: [...base.segments.slice(0, -1), { ...last, args, lifetimes }], span };
+      const segment = { ...last, args, lifetimes, ...(bindings.length > 0 && { bindings }) };
+      return { segments: [...base.segments.slice(0, -1), segment], span };
     }
     if (node.type === 'scoped_type_identifier' || node.type === 'scoped_identifier') {
       const path = node.childForFieldName('path');
@@ -690,11 +698,15 @@ export class Converter {
     return unavailable(span, `型の書き方（${node.text}）`);
   }
 
-  private typeArgs(node: Node): TypeAst[] {
+  /** The type arguments, without the lifetimes and the associated types (`Item = i32`) that the caller takes. */
+  private typeArgs(node: Node, allowBindings = false): TypeAst[] {
     const args: TypeAst[] = [];
     for (const child of node.namedChildren) {
       if (isComment(child) || child.type === 'lifetime') continue;
-      if (child.type === 'type_binding') unavailable(this.span(child), `関連型の指定（${child.text}）`);
+      if (child.type === 'type_binding') {
+        if (allowBindings) continue;
+        unavailable(this.span(child), `関連型の指定（${child.text}）`);
+      }
       if (child.type === 'block' || child.type.endsWith('_literal')) {
         unavailable(this.span(child), '定数の型引数');
       }

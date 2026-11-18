@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 755 -- Follows Rust's name resolution case by case.
+// code-gauge-allow-file fileNcss 788 -- Follows Rust's name resolution case by case.
 import { CompileError } from '../interpreter/diagnostics';
 import type {
   BoundAst,
@@ -18,6 +18,7 @@ import type {
   UseItem,
   Visibility,
 } from './ast';
+import { intoIterItem, iterationBound } from './iterTypes';
 import {
   adt,
   type AdtDef,
@@ -190,6 +191,11 @@ export interface TypeScope {
   allowOpaque?: boolean;
   /** Inside a function body, `_` is a type to infer. */
   allowInfer?: boolean;
+  /**
+   * In a function's signature, `I::Item` of a parameter bounded by `Iterator` or `IntoIterator` without its `Item` adds
+   * a type parameter here that the bound sets as `Item`, as if written `I: Iterator<Item = J>`.
+   */
+  assocParams?: TypeParam[];
 }
 
 // ---------------------------------------------------------------------------------------------------------------------
@@ -520,7 +526,7 @@ export class ItemCollector {
           item.trait.span
         );
         if (binding.kind === 'trait') this.checkStdTraitImpl(item, impl, binding.def);
-        const trait = resolveTraitPath(item.trait, scope);
+        const trait = resolveTraitPath(item.trait, scope, impl.selfType);
         impl.trait = trait;
         this.checkTraitImpl(item, impl, trait.trait);
       } else if (!module.isStd) {
@@ -624,7 +630,8 @@ export class ItemCollector {
       const params = new Map(def.params.map((param) => [param.name, param]));
       if (trait) params.delete('Self');
       const selfType: Type | undefined = trait ? { kind: 'param', param: trait.self } : impl?.selfType;
-      const scope: TypeScope = { module, params, selfType };
+      const assocParams: TypeParam[] = [];
+      const scope: TypeScope = { module, params, selfType, assocParams };
       for (const [index, param] of item.generics.params.entries()) {
         // A method's type parameter may not shadow its impl's.
         if (params.get(param.name) !== own[index] && impl?.params.some((p) => p.name === param.name)) {
@@ -634,7 +641,7 @@ export class ItemCollector {
       }
       addWherePredicates(item.generics, scope, (param, bounds) => {
         // A method's bounds on its impl's parameters constrain only the method.
-        if (own.includes(param)) return false;
+        if (own.includes(param) || assocParams.includes(param)) return false;
         def.extraBounds ??= [];
         def.extraBounds.push(...bounds.map((bound) => ({ param, bound })));
         return true;
@@ -644,6 +651,8 @@ export class ItemCollector {
       def.paramTypes = item.params.map((param) => lowerType(param.type, paramScope));
       def.params.push(...implParams);
       def.ret = item.ret ? lowerType(item.ret, { ...scope, allowOpaque: true }) : UNIT;
+      for (const param of own) assocItem(param, scope);
+      def.params.push(...assocParams);
       if (item.name === 'main' && module === this.program.root && !impl && !trait) {
         if (item.generics.params.length > 0) compileError(item.span, 'main 関数には型引数を書けません。');
         if (item.params.length > 0) compileError(item.span, 'main 関数には引数を書けません。');
@@ -801,6 +810,9 @@ const BUILTIN_STRUCTS: Record<string, BuiltinAdt> = {
   Unsigned: 'Unsigned',
   Signed: 'Signed',
   Indexed: 'Indexed',
+  TryFromError: 'TryFromError',
+  CharTryFromError: 'CharTryFromError',
+  TryFromCharError: 'TryFromCharError',
   IterItem: 'IterItem',
   IterShape: 'IterShape',
   IterTarget: 'IterTarget',
@@ -1167,7 +1179,8 @@ export function checkUnavailableStd(segments: string[], span: Span): void {
 }
 
 /** Resolves a path to a trait, with the type arguments its last segment gives. */
-export function resolveTraitPath(path: PathAst, scope: TypeScope): TraitRef {
+/** A trait with its arguments, where `PartialEq` without one compares with `self`, its default `Rhs`. */
+export function resolveTraitPath(path: PathAst, scope: TypeScope, self?: Type): TraitRef {
   const binding = resolveTypePath(
     path.segments.map((segment) => segment.name),
     scope.module,
@@ -1176,12 +1189,23 @@ export function resolveTraitPath(path: PathAst, scope: TypeScope): TraitRef {
   if (binding.kind !== 'trait')
     compileError(path.span, `${path.segments.map((s) => s.name).join('::')} はトレイトではありません。`);
   const def = binding.def;
-  const args = (path.segments.at(-1)?.args ?? []).map((arg) => lowerType(arg, scope));
+  const last = path.segments.at(-1);
+  const args = (last?.args ?? []).map((arg) => lowerType(arg, scope));
   if (args.length !== def.params.length) {
-    if (def.params.length > 0 && args.length === 0 && def.builtin === 'PartialEq') return { trait: def, args: [] };
+    if (def.params.length > 0 && args.length === 0 && def.builtin === 'PartialEq') {
+      return { trait: def, args: self ? [self] : [] };
+    }
     compileError(path.span, `トレイト ${def.name} の型引数の数が合いません（${def.params.length} 個です）。`);
   }
-  return { trait: def, args };
+  let item: Type | undefined;
+  for (const assoc of last?.bindings ?? []) {
+    const isIterator = def.builtin === 'Iterator' || def.builtin === 'IntoIterator';
+    if (!isIterator || assoc.name !== 'Item' || item) {
+      compileError(assoc.span, `関連型の指定（${assoc.name} = ...）は、この採点環境では使えません。`);
+    }
+    item = lowerType(assoc.type, scope);
+  }
+  return item ? { trait: def, args, item } : { trait: def, args };
 }
 
 // ---------------------------------------------------------------------------------------------------------------------
@@ -1248,6 +1272,19 @@ export function lowerType(ast: TypeAst, scope: TypeScope): Type {
   }
 }
 
+/** `I::Item` of a type parameter bounded by `Iterator` or `IntoIterator`. */
+function assocItem(param: TypeParam, scope: TypeScope): Type | undefined {
+  const paramType: Type = { kind: 'param', param };
+  const bound = iterationBound(paramType);
+  if (!bound) return undefined;
+  if (!bound.item && scope.assocParams) {
+    const item = newTypeParam(`${param.name}::Item`);
+    scope.assocParams.push(item);
+    bound.item = { kind: 'param', param: item };
+  }
+  return bound.item ?? intoIterItem(paramType);
+}
+
 function describeBound(bound: BoundAst): string {
   if (bound.kind === 'fn') return bound.trait;
   return bound.path.segments.map((segment) => segment.name).join('::');
@@ -1256,6 +1293,16 @@ function describeBound(bound: BoundAst): string {
 function lowerPathType(path: PathAst, scope: TypeScope): Type {
   const names = path.segments.map((segment) => segment.name);
   const last = path.segments.at(-1)!;
+  const owner = names.length === 2 ? scope.params.get(names[0]) : undefined;
+  if (owner) {
+    if (last.name !== 'Item' || last.args)
+      compileError(path.span, `${names.join('::')} は、この採点環境では使えません。`);
+    const item = assocItem(owner, scope);
+    if (!item) compileError(path.span, `${owner.name} に関連型 Item がありません（Iterator の境界を書いてください）。`);
+    return item;
+  }
+  if (last.bindings)
+    compileError(last.bindings[0].span, '関連型の指定（Item = ...）は、トレイトの境界にだけ書けます。');
   if (names.length === 1) {
     const param = scope.params.get(last.name);
     if (param) {
@@ -1315,7 +1362,7 @@ function lowerPathType(path: PathAst, scope: TypeScope): Type {
 }
 
 /** Lowers a bound on `self`, which closure traits complete with their signature. */
-export function lowerBound(bound: BoundAst, scope: TypeScope, _self: Type | undefined): TraitRef {
+export function lowerBound(bound: BoundAst, scope: TypeScope, self: Type | undefined): TraitRef {
   if (bound.kind === 'fn') {
     const trait = scope.module.program.traitDef(bound.trait);
     return {
@@ -1327,7 +1374,7 @@ export function lowerBound(bound: BoundAst, scope: TypeScope, _self: Type | unde
       },
     };
   }
-  const ref = resolveTraitPath(bound.path, scope);
+  const ref = resolveTraitPath(bound.path, scope, self);
   if (['Fn', 'FnMut', 'FnOnce'].includes(ref.trait.name) && (ref.trait.module as Module | undefined)?.isStd) {
     compileError(
       bound.span,

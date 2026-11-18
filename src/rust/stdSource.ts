@@ -5,13 +5,13 @@
  *
  * Pseudo-traits that rustc does not have stand for groups of types that the natives handle alike: `Integer`,
  * `SignedInteger`, `UnsignedInteger`, `Float`, `Pattern` (what `str::split` and its kin accept), `Borrow` (keys that
- * look up a map), `FromStrTarget`, `StringPart`, `RangeBounds`, `ExtendInto`, and `SliceIndex` (what `<[T]>::get`
+ * look up a map), `FromStrTarget`, `StringPart`, `RangeBounds`, `ExtendInto`, `SliceOf` (what borrows as a slice), `JoinSeparator`, and `SliceIndex` (what `<[T]>::get`
  * accepts: a `usize` or a range of them, giving `Indexed<I, T>`, an element or a slice).
  *
  * Every iterator is an `IterImpl<T, S>` of items `T`, whose shape `S` (`CharsShape`, `RevShape<S>`, `MapShape<S, F>`,
  * ...) stands for the iterator type of std: it decides the traits the iterator implements (`DoubleEndedIterator`,
  * `ExactSizeIterator`), and the aliases with std's names (`std::str::Chars`, `std::iter::Peekable<I>`) name it.
- * `IterItem<I>`, `IterShape<I>`, `IterTarget<I>`, `IntoItem<T>`, and `IntoShape<T>` are the item, the shape, the
+ * `TryFromError<S, T>` is the error of `TryFrom<S>` for `T`. `IterItem<I>`, `IterShape<I>`, `IterTarget<I>`, `IntoItem<T>`, and `IntoShape<T>` are the item, the shape, the
  * referent of a reference item, and the item and the shape of the iterator `IntoIterator` makes.
  */
 export const STD_SOURCE = String.raw`
@@ -23,6 +23,9 @@ pub mod marker {
 }
 pub mod clone {
     pub trait Clone { fn clone(&self) -> Self; }
+}
+pub mod borrow {
+    pub trait ToOwned { fn to_owned(&self) -> Self; }
 }
 pub mod default {
     pub trait Default { fn default() -> Self; }
@@ -67,9 +70,9 @@ pub mod ops {
     }
 }
 pub mod cmp {
-    pub trait PartialEq {
-        fn eq(&self, other: &Self) -> bool;
-        fn ne(&self, other: &Self) -> bool;
+    pub trait PartialEq<Rhs> {
+        fn eq(&self, other: &Rhs) -> bool;
+        fn ne(&self, other: &Rhs) -> bool;
     }
     pub trait Eq: PartialEq {}
     pub trait PartialOrd: PartialEq {
@@ -187,6 +190,7 @@ pub mod string {
         pub fn as_str(&self) -> &str;
         pub fn as_mut_str(&mut self) -> &mut str;
         pub fn into_bytes(self) -> Vec<u8>;
+        pub fn into_boxed_str(self) -> Box<str>;
         pub fn retain<F: FnMut(char) -> bool>(&mut self, f: F);
         pub fn drain<R: RangeBounds<usize>>(&mut self, range: R) -> IterImpl<char, StringDrainShape>;
         pub fn split_off(&mut self, at: usize) -> String;
@@ -225,7 +229,7 @@ pub mod vec {
         pub fn split_off(&mut self, at: usize) -> Vec<T>;
         pub fn as_slice(&self) -> &[T];
         pub fn as_mut_slice(&mut self) -> &mut [T];
-        pub fn into_boxed_slice(self) -> Vec<T>;
+        pub fn into_boxed_slice(self) -> Box<[T]>;
         pub fn is_empty(&self) -> bool;
         pub fn len(&self) -> usize;
     }
@@ -281,6 +285,7 @@ pub mod slice {
         pub fn chunks_exact(&self, chunk_size: usize) -> IterImpl<&[T], ChunksExactShape>;
         pub fn fill(&mut self, value: T) where T: Clone;
         pub fn to_vec(&self) -> Vec<T> where T: Clone;
+        pub fn to_owned(&self) -> Vec<T> where T: Clone;
         pub fn into_vec(self) -> Vec<T>;
         pub fn rotate_left(&mut self, mid: usize);
         pub fn rotate_right(&mut self, mid: usize);
@@ -305,12 +310,9 @@ pub mod slice {
         pub fn join(&self, sep: &str) -> String;
         pub fn concat(&self) -> String;
     }
-    impl<T> [&[T]] {
+    impl<T, V: SliceOf<T>> [V] {
         pub fn concat(&self) -> Vec<T> where T: Clone;
-    }
-    impl<T> [Vec<T>] {
-        pub fn concat(&self) -> Vec<T> where T: Clone;
-        pub fn join(&self, sep: &T) -> Vec<T> where T: Clone;
+        pub fn join<P: JoinSeparator<T>>(&self, sep: P) -> Vec<T> where T: Clone;
     }
 }
 pub mod str {
@@ -320,7 +322,7 @@ pub mod str {
     pub type SplitWhitespace<'a> = IterImpl<'a, &'a str, SplitWhitespaceShape>;
     pub type Lines<'a> = IterImpl<'a, &'a str, LinesShape>;
     pub type Split<'a, P> = IterImpl<'a, &'a str, SplitShape<P>>;
-    pub trait FromStr {}
+    pub trait FromStr { fn from_str(s: &str) -> Result<Self, ParseError<Self>>; }
     #[derive(Debug, Clone, PartialEq, Eq)]
     pub struct ParseBoolError;
     #[derive(Debug, Clone, PartialEq, Eq)]
@@ -378,6 +380,10 @@ pub mod str {
     }
 }
 pub mod char {
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub struct CharTryFromError;
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub struct TryFromCharError;
     impl u8 {
         pub fn is_ascii(&self) -> bool;
         pub fn is_ascii_digit(&self) -> bool;
@@ -629,7 +635,6 @@ pub mod num {
         pub fn ilog10(self) -> u32;
         pub fn ilog(self, base: N) -> u32;
         pub fn from_str_radix(src: &str, radix: u32) -> Result<N, ParseIntError>;
-        pub fn from_str(src: &str) -> Result<N, ParseIntError>;
         pub fn max_value() -> N;
         pub fn min_value() -> N;
         pub fn swap_bytes(self) -> N;
@@ -802,14 +807,20 @@ pub mod boxed {
         pub fn as_ref(&self) -> &T;
         pub fn as_mut(&mut self) -> &mut T;
     }
+    impl<T> Box<[T]> {
+        pub fn into_vec(self) -> Vec<T>;
+    }
+    impl Box<str> {
+        pub fn into_string(self) -> String;
+    }
 }
 pub mod convert {
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     pub enum Infallible {}
     pub trait From<T> { fn from(value: T) -> Self; }
     pub trait Into<T> { fn into(self) -> T; }
-    pub trait TryFrom<T> { fn try_from(value: T) -> Result<Self, TryFromIntError>; }
-    pub trait TryInto<T> { fn try_into(self) -> Result<T, TryFromIntError>; }
+    pub trait TryFrom<T> { fn try_from(value: T) -> Result<Self, TryFromError<T, Self>>; }
+    pub trait TryInto<T> { fn try_into(self) -> Result<T, TryFromError<Self, T>>; }
     pub trait AsRef<T> { fn as_ref(&self) -> &T; }
     pub fn identity<T>(x: T) -> T;
 }
@@ -1356,6 +1367,7 @@ pub mod prelude {
     pub use super::string::ToString;
     pub use super::boxed::Box;
     pub use super::clone::Clone;
+    pub use super::borrow::ToOwned;
     pub use super::marker::Copy;
     pub use super::marker::Send;
     pub use super::marker::Sync;
@@ -1370,6 +1382,7 @@ pub mod prelude {
     pub use super::iter::DoubleEndedIterator;
     pub use super::iter::ExactSizeIterator;
     pub use super::iter::FromIterator;
+    pub use super::iter::Extend;
     pub use super::convert::From;
     pub use super::convert::Into;
     pub use super::convert::TryFrom;
@@ -1394,10 +1407,13 @@ pub mod pseudo {
     pub trait StringPart {}
     pub trait RangeBounds<T> {}
     pub trait ExtendInto<T> {}
+    pub trait SliceOf<T> {}
+    pub trait JoinSeparator<T> {}
     pub struct ParseError<F>;
     pub struct Unsigned<N>;
     pub struct Signed<N>;
     pub struct Indexed<I, T>;
+    pub struct TryFromError<S, T>;
     pub struct IterItem<I>;
     pub struct IterShape<I>;
     pub struct IterTarget<I>;

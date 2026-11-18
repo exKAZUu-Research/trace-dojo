@@ -133,6 +133,8 @@ interface PseudoTypes {
   /** The item and the shape of the iterator that `IntoIterator` makes of a value of a type. */
   intoItem: (type: Type) => Type | undefined;
   intoShape: (type: Type) => Type | undefined;
+  /** The error of `TryFrom<source>` for `target`. */
+  tryFromError: (source: Type, target: Type) => Type | undefined;
 }
 
 /** The types of the standard library's pseudo-types, once their arguments are known. */
@@ -151,7 +153,7 @@ export function normalize(type: Type): Type {
   const arg = normalize(shallow(type.args[0]));
   if (type.def.builtin === 'Indexed') return indexed(type, arg);
   if (arg.kind === 'var') return type;
-  const iterator = iteratorPart(type.def.builtin as string, arg);
+  const iterator = iteratorPart(type, arg);
   if (iterator !== false) return iterator ? normalize(shallow(iterator)) : type;
   if (type.def.builtin === 'Unsigned' || type.def.builtin === 'Signed') {
     if (arg.kind !== 'int') return type;
@@ -160,8 +162,12 @@ export function normalize(type: Type): Type {
   return pseudoTypes?.parseError(arg) ?? type;
 }
 
-/** `IterItem<I>`, `IterShape<I>`, `IterTarget<I>`, `IntoItem<T>`, `IntoShape<T>`; false for other pseudo-types. */
-function iteratorPart(name: string, arg: Type): Type | undefined | false {
+/**
+ * `IterItem<I>`, `IterShape<I>`, `IterTarget<I>`, `IntoItem<T>`, `IntoShape<T>`, `TryFromError<S, T>`; false for other
+ * pseudo-types.
+ */
+function iteratorPart(type: Type & { kind: 'adt' }, arg: Type): Type | undefined | false {
+  const name = type.def.builtin as string;
   switch (name) {
     case 'IterItem':
     case 'IterShape':
@@ -178,6 +184,10 @@ function iteratorPart(name: string, arg: Type): Type | undefined | false {
     case 'IntoShape': {
       return pseudoTypes?.intoShape(arg);
     }
+    case 'TryFromError': {
+      const target = normalize(shallow(type.args[1]));
+      return target.kind === 'var' ? undefined : pseudoTypes?.tryFromError(arg, target);
+    }
     default: {
       return false;
     }
@@ -192,7 +202,7 @@ function indexed(type: Type & { kind: 'adt' }, index: Type): Type {
   return type;
 }
 
-function isPseudo(def: AdtDef): boolean {
+export function isPseudo(def: AdtDef): boolean {
   return [
     'ParseError',
     'Unsigned',
@@ -203,6 +213,7 @@ function isPseudo(def: AdtDef): boolean {
     'IterTarget',
     'IntoItem',
     'IntoShape',
+    'TryFromError',
   ].includes(def.builtin as string);
 }
 

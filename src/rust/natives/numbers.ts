@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 446 -- One native per method of the standard library.
+// code-gauge-allow-file fileNcss 459 -- One native per method of the standard library.
 import { debugFloat, decimalToF32 } from '../floatFormat';
 import { normalize } from '../infer';
 import { bitsOf, intArith, overflow, wrap } from '../ops';
@@ -391,7 +391,6 @@ const integer: Record<string, (args: Value[], ctx: NativeContext) => Value> = {
     }
     return power;
   },
-  from_str: ([text], ctx) => parseInteger(ctx, deref(text) as string, intName(ctx), 10),
   from_str_radix: ([text, radix], ctx) => {
     const base = Number(radix as bigint);
     if (base < 2 || base > 36) {
@@ -637,8 +636,22 @@ function roundToDouble(mantissa: bigint, exponent: number): number {
 
 /** `T::try_from(value)` between integer types: the value when it fits, or `TryFromIntError`. */
 function tryConvert(ctx: NativeContext, value: Value, to: Type): Value {
-  const target = normalize(shallow(to)) as { name: IntName };
-  const number = deref(value) as bigint;
+  const t = normalize(shallow(to));
+  const v = deref(value);
+  if (t.kind === 'char') {
+    // A `char` from a `u32`: a code point outside the surrogates.
+    const code = Number(v as bigint);
+    const valid = code <= 0x10_ff_ff && (code < 0xd8_00 || code > 0xdf_ff);
+    if (valid) return ok(ctx, String.fromCodePoint(code));
+    return err(ctx, new StructValue(ctx.interp.program.adtDef('CharTryFromError'), []));
+  }
+  if (typeof v === 'string') {
+    const code = BigInt(v.codePointAt(0)!);
+    if (inRange((t as { name: IntName }).name, code)) return ok(ctx, code);
+    return err(ctx, new StructValue(ctx.interp.program.adtDef('TryFromCharError'), []));
+  }
+  const target = t as { name: IntName };
+  const number = v as bigint;
   if (inRange(target.name, number)) return ok(ctx, number);
   const kind = number < 0n ? 'NegOverflow' : 'PosOverflow';
   return err(ctx, new StructValue(ctx.interp.program.adtDef('TryFromIntError'), [kind]));

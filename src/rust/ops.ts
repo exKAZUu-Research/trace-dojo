@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 424 -- One case per kind of type.
+// code-gauge-allow-file fileNcss 426 -- One case per kind of type.
 import type { Span } from './ast';
 import { bigintToF32 } from './floatFormat';
 import { normalize } from './infer';
@@ -20,7 +20,7 @@ import {
 
 /** Hooks into the program's own impls, which the type-directed operations call for user types. */
 export interface UserImpls {
-  eq?(type: Type, a: Value, b: Value): boolean | undefined;
+  eq?(type: Type, a: Value, b: Value, rhs: Type): boolean | undefined;
   cmp?(type: Type, a: Value, b: Value): number | undefined;
   clone?(type: Type, value: Value): { value: Value } | undefined;
   /** Substitutes a generic type's parameters with its arguments in a field's type. */
@@ -195,12 +195,13 @@ function deref(value: Value): Value {
   return current;
 }
 
-export function valuesEqual(type: Type, a: Value, b: Value): boolean {
+/** Whether two values are equal, as `PartialEq<Rhs>` for the type of `a` says, where `Rhs` is `a`'s type by default. */
+export function valuesEqual(type: Type, a: Value, b: Value, rhs: Type = type): boolean {
   const t = derefType(type);
   const x = deref(a);
   const y = deref(b);
   if (t.kind === 'adt') {
-    const user = hooks?.eq?.(t, x, y);
+    const user = hooks?.eq?.(t, x, y, derefType(rhs));
     if (user !== undefined) return user;
   }
   switch (t.kind) {
@@ -232,8 +233,8 @@ export function valuesEqual(type: Type, a: Value, b: Value): boolean {
   }
 }
 
-// code-gauge-allow functionCognitiveComplexity 23 -- One case per kind of type.
-// code-gauge-allow functionNcss 51 -- One case per kind of type.
+// code-gauge-allow functionCognitiveComplexity 27 -- One case per kind of type.
+// code-gauge-allow functionNcss 56 -- One case per kind of type.
 function adtEqual(t: Type & { kind: 'adt' }, x: Value, y: Value): boolean {
   const { def } = t;
   switch (def.builtin) {
@@ -277,14 +278,16 @@ function adtEqual(t: Type & { kind: 'adt' }, x: Value, y: Value): boolean {
       return xs.entries.size === ys.entries.size && [...xs.entries.keys()].every((hash) => ys.entries.has(hash));
     }
     case 'Range':
-    case 'RangeInclusive': {
+    case 'RangeInclusive':
+    case 'RangeFrom':
+    case 'RangeTo':
+    case 'RangeToInclusive':
+    case 'RangeFull': {
       const xr = x as RangeValue;
       const yr = y as RangeValue;
-      return (
-        valuesEqual(t.args[0], xr.start, yr.start) &&
-        valuesEqual(t.args[0], xr.end, yr.end) &&
-        xr.exhausted === yr.exhausted
-      );
+      const bound = (a: Value | undefined, b: Value | undefined): boolean =>
+        a === undefined || b === undefined ? a === b : valuesEqual(t.args[0], a, b);
+      return bound(xr.start, yr.start) && bound(xr.end, yr.end) && xr.exhausted === yr.exhausted;
     }
     default: {
       if (x instanceof StructValue && y instanceof StructValue) {
@@ -454,7 +457,10 @@ export function hashKey(type: Type, value: Value): string {
       const { def } = t;
       if (def.builtin === 'String') return `s${x as string}`;
       if (def.builtin === 'Vec' || def.builtin === 'VecDeque') {
-        return `[${(x as Value[]).map((item) => hashKey(t.args[0], item)).join(',')}]`;
+        // A key looked up by a slice (`Borrow<[T]>`) hashes as the `Vec` it equals.
+        return `[${sliceItems(x)
+          .map((item) => hashKey(t.args[0], item))
+          .join(',')}]`;
       }
       if (def.builtin === 'Box') return hashKey(t.args[0], x);
       if (x instanceof StructValue) {
@@ -490,8 +496,9 @@ export function cloneValue(type: Type, value: Value): Value {
     case 'closure': {
       return cloneClosure(t.closure.captures ?? [], value as FnValue);
     }
-    case 'array': {
-      return (value as Value[]).map((item) => cloneValue(t.elem, item));
+    case 'array':
+    case 'slice': {
+      return sliceItems(value).map((item) => cloneValue(t.elem, item));
     }
     case 'adt': {
       const { def } = t;

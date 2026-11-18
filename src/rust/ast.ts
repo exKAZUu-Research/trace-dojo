@@ -199,6 +199,8 @@ export interface PathSegment {
   args: TypeAst[] | undefined;
   /** The lifetime arguments (`Parser<'a>`). */
   lifetimes?: string[];
+  /** The associated types a trait bound sets (`Iterator<Item = i32>`). */
+  bindings?: { name: string; type: TypeAst; span: Span }[];
   span: Span;
 }
 

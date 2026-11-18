@@ -9,16 +9,25 @@ export function list(open: string, close: string, items: DebugPart[], indent: nu
   return `${open}\n${items.map((item) => `${pad4}${item(indent + 1)},\n`).join('')}${'    '.repeat(indent)}${close}`;
 }
 
-/** A struct with named fields, as std's `debug_struct` writes it. */
-export function structText(name: string, fields: [string, DebugPart][], indent: number | undefined): string {
-  if (fields.length === 0) return name;
+/** A struct with named fields, as std's `debug_struct` writes it, ending in `..` for `finish_non_exhaustive`. */
+export function structText(
+  name: string,
+  fields: [string, DebugPart][],
+  indent: number | undefined,
+  nonExhaustive = false
+): string {
+  if (fields.length === 0) return nonExhaustive ? `${name} { .. }` : name;
   const items = fields.map(
     ([field, part]): DebugPart =>
       (inner) =>
         `${field}: ${part(inner)}`
   );
-  if (indent === undefined) return `${name} { ${items.map((item) => item(undefined)).join(', ')} }`;
-  return `${name} ${list('{', '}', items, indent)}`;
+  const rest = nonExhaustive ? ', ..' : '';
+  if (indent === undefined) return `${name} { ${items.map((item) => item(undefined)).join(', ')}${rest} }`;
+  const text = list('{', '}', items, indent);
+  if (!nonExhaustive) return `${name} ${text}`;
+  const close = `${'    '.repeat(indent)}}`;
+  return `${name} ${text.slice(0, -close.length)}${'    '.repeat(indent + 1)}..\n${close}`;
 }
 
 /** A tuple struct, as std's `debug_tuple` writes it. */

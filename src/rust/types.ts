@@ -102,6 +102,9 @@ export type BuiltinAdt =
   | 'Unsigned'
   | 'Signed'
   | 'Indexed'
+  | 'TryFromError'
+  | 'CharTryFromError'
+  | 'TryFromCharError'
   | 'IterItem'
   | 'IterShape'
   | 'IterTarget'
@@ -155,6 +158,8 @@ export interface TraitRef {
   args: Type[];
   /** The parameters and result of a closure trait (`Fn(i32) -> i32`). */
   fnSig?: { params: Type[]; ret: Type };
+  /** The `Item` an `Iterator` or `IntoIterator` bound sets (`Iterator<Item = i32>`). */
+  item?: Type;
 }
 
 export interface ImplDef {
@@ -314,6 +319,7 @@ function mapTraitRef(ref: TraitRef, f: (type: Type) => Type): TraitRef {
     trait: ref.trait,
     args: ref.args.map(f),
     fnSig: ref.fnSig && { params: ref.fnSig.params.map(f), ret: f(ref.fnSig.ret) },
+    item: ref.item && f(ref.item),
   };
 }
 

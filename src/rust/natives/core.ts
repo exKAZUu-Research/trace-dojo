@@ -12,6 +12,7 @@ import {
   MapValue,
   type RangeValue,
   SetValue,
+  sliceItems,
   StructValue,
   type TurtleValue,
   UNIT_VALUE,
@@ -205,7 +206,7 @@ export function defaultValue(ctx: NativeContext, type: Type): Value {
       return Array.from({ length: t.len }, () => defaultValue(ctx, t.elem));
     }
     case 'ref': {
-      return '';
+      return normalize(shallow(t.target)).kind === 'slice' ? [] : '';
     }
     case 'adt': {
       switch (t.def.builtin) {
@@ -267,6 +268,7 @@ export function defaultValue(ctx: NativeContext, type: Type): Value {
 
 define({
   'Clone::clone': ([self], ctx) => cloneValue(selfType(ctx), deref(self)),
+  'ToOwned::to_owned': ([self], ctx) => cloneValue(selfType(ctx), deref(self)),
   'ToString::to_string': ([self], ctx) => {
     try {
       return ctx.interp.formatter.display(self, selfType(ctx), DEFAULT_SPEC);
@@ -342,7 +344,15 @@ define({
     return order <= 0 ? a : b;
   },
   // A `String` is its `str`, and a `Vec` its slice, so the reference they lend is the value.
-  'AsRef::as_ref': ([self]) => deref(self),
+  // A `Box<[T]>` is its elements and a `Box<str>` its text, as a `Vec<T>` and a `String` are.
+  'Box<[_]>::into_vec': ([self]) => deref(self),
+  'Box<str>::into_string': ([self]) => deref(self),
+  'AsRef::as_ref': ([self], ctx) => {
+    const value = deref(self);
+    // A string as `[u8]` is its UTF-8 bytes.
+    const isBytes = normalize(shallow(ctx.typeArgs[1])).kind === 'slice' && typeof value === 'string';
+    return isBytes ? Array.from(new TextEncoder().encode(value), BigInt) : value;
+  },
   'std::mem::size_of': (_args, ctx) => BigInt(layoutOf(ctx, ctx.typeArgs[0]).size),
   'std::mem::swap': ([x, y]) => {
     const a = placeOf(x);
@@ -432,11 +442,10 @@ function rangeContains(ctx: NativeContext, range: RangeValue, item: Value): bool
 }
 
 /** `T::from(value)` for the conversions of the standard library. */
-// code-gauge-allow functionCognitiveComplexity 28 -- One native per method of the standard library.
-// code-gauge-allow functionNcss 36 -- One native per method of the standard library.
 export function convert(ctx: NativeContext, value: Value, from: Type, to: Type): Value {
   const source = normalize(shallow(from));
   const target = normalize(shallow(to));
+  if (target.kind === 'float' && source.kind === 'bool') return deref(value) ? 1 : 0;
   if (target.kind === 'int' || target.kind === 'float' || target.kind === 'char')
     return castValue(deref(value), source, target);
   if (target.kind === 'adt') {
@@ -445,32 +454,16 @@ export function convert(ctx: NativeContext, value: Value, from: Type, to: Type):
         return deref(value) as string;
       }
       case 'Vec': {
-        if (source.kind === 'adt' && source.def.builtin === 'String') {
-          return Array.from(new TextEncoder().encode(value as string), BigInt);
-        }
-        if (source.kind === 'ref' && shallow(source.target).kind === 'str') {
-          return Array.from(new TextEncoder().encode(deref(value) as string), BigInt);
-        }
-        const items = deref(value);
-        return Array.isArray(items)
-          ? [...items]
-          : (items as { base: Value[]; start: number; end: number }).base.slice(
-              (items as { start: number }).start,
-              (items as { end: number }).end
-            );
+        const isText = typeof deref(value) === 'string';
+        return isText
+          ? Array.from(new TextEncoder().encode(deref(value) as string), BigInt)
+          : [...sliceItems(deref(value))];
       }
       case 'Option': {
         return some(ctx, value);
       }
       case 'Box': {
-        const inner = normalize(shallow(target.args[0]));
-        if (inner.kind === 'dyn') {
-          if (source.kind === 'ref' || (source.kind === 'adt' && source.def.builtin === 'String')) {
-            return new DynValue(ctx.interp.program.builtinType('String'), deref(value) as string);
-          }
-          return new DynValue(source, value);
-        }
-        return value;
+        return boxValue(ctx, value, source, normalize(shallow(target.args[0])));
       }
       case 'HashMap':
       case 'BTreeMap':
@@ -488,6 +481,20 @@ export function convert(ctx: NativeContext, value: Value, from: Type, to: Type):
       }
     }
   }
+  return value;
+}
+
+/** `Box<T>::from(value)`: a trait object of the value, or the value itself, which a box holds as it is. */
+function boxValue(ctx: NativeContext, value: Value, source: Type, inner: Type): Value {
+  if (inner.kind === 'dyn') {
+    if (source.kind === 'ref' || (source.kind === 'adt' && source.def.builtin === 'String')) {
+      return new DynValue(ctx.interp.program.builtinType('String'), deref(value) as string);
+    }
+    return new DynValue(source, value);
+  }
+  // A `Box<[T]>` owns a copy of the elements; a `Box<str>` is its text.
+  if (inner.kind === 'slice') return [...sliceItems(deref(value))];
+  if (inner.kind === 'str') return deref(value) as string;
   return value;
 }
 

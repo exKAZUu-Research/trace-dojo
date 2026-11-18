@@ -1,7 +1,7 @@
 import type { ReceiverAdjust } from './annotations';
 import { normalize } from './infer';
 import type { Program } from './items';
-import { intoIterItem, intoIterShape } from './iterTypes';
+import { intoIterItem, intoIterShape, iterationBound } from './iterTypes';
 import type { TraitSolver } from './traits';
 import {
   type FnDef,
@@ -68,34 +68,48 @@ export interface MethodMatch {
   adjust: ReceiverAdjust;
   /** The type of `self` in the method's signature, after the impl's parameters are bound. */
   selfType: Type;
+  /** Another trait whose method of the name also applies, which makes the call ambiguous (E0034). */
+  ambiguousWith?: TraitDef;
 }
 
 const RANGE_ITERATORS = new Set(['Range', 'RangeInclusive', 'RangeFrom']);
 
 /**
  * Finds a method as rustc's method probe does: for each type the receiver derefs to, a method that takes it by value,
- * then by shared reference, then by mutable reference; inherent methods before trait methods.
+ * then by shared reference, then by mutable reference; inherent methods before trait methods, of the standard
+ * library's traits those that `inScope` accepts.
  */
+// code-gauge-allow functionCognitiveComplexity 18 -- Follows rustc's method probe step by step.
 export function lookupMethod(
   program: Program,
   solver: TraitSolver,
   receiver: Type,
-  name: string
+  name: string,
+  inScope: (trait: TraitDef) => boolean = () => true
 ): MethodMatch | 'ambiguous' | undefined {
   const steps = autoderefSteps(program, receiver);
   for (const step of steps) {
     const stepType = normalize(shallow(step.type));
     if (stepType.kind === 'var' && !stepType.v.literal) return 'ambiguous';
     for (const autoref of ['none', 'ref', 'mut'] as const) {
-      const found = probe(program, solver, stepType, autoref, name);
+      const found = probe(program, solver, stepType, autoref, name, inScope);
       if (found) {
         return {
           ...found,
-          adjust: { derefs: step.derefs, autoref, rangeToIter: false },
+          adjust: { derefs: step.derefs, autoref, asIter: false },
         };
       }
     }
     if (stepType.kind === 'var') return 'ambiguous';
+  }
+  // A type parameter or an opaque type bounded by `Iterator` has the methods of `Iter`, and by `IntoIterator`,
+  // `into_iter`.
+  const bounded = steps.find((step) => iterationBound(normalize(shallow(step.type))));
+  if (bounded) {
+    const bound = iterationBound(normalize(shallow(bounded.type))) as TraitRef;
+    if (bound.trait.builtin === 'Iterator' || name === 'into_iter') {
+      return probeAsIter(program, solver, bounded, name, true);
+    }
   }
   // A range is an iterator: its methods are those of `Iter`.
   const range = steps.find((step) => {
@@ -114,22 +128,27 @@ function probeAsIter(
   solver: TraitSolver,
   step: DerefStep,
   name: string,
-  rangeToIter: boolean
+  asIter: boolean
 ): MethodMatch | undefined {
-  const iter = program.iterType(intoIterItem(step.type) as Type, intoIterShape(program, step.type) as Type);
+  const item = intoIterItem(step.type);
+  const shape = intoIterShape(program, step.type);
+  if (!item || !shape) return undefined;
+  const iter = program.iterType(item, shape);
   for (const autoref of ['none', 'ref', 'mut'] as const) {
     const found = probe(program, solver, iter, autoref, name);
-    if (found) return { ...found, adjust: { derefs: step.derefs, autoref, rangeToIter } };
+    if (found) return { ...found, adjust: { derefs: step.derefs, autoref, asIter } };
   }
   return undefined;
 }
 
+// code-gauge-allow functionCognitiveComplexity 24 -- Follows rustc's method probe step by step.
 function probe(
   program: Program,
   solver: TraitSolver,
   stepType: Type,
   autoref: 'none' | 'ref' | 'mut',
-  name: string
+  name: string,
+  inScope: (trait: TraitDef) => boolean = () => true
 ): Omit<MethodMatch, 'adjust'> | undefined {
   const receiverType = autoref === 'none' ? stepType : ref(stepType, autoref === 'mut');
   // Inherent methods first.
@@ -152,32 +171,74 @@ function probe(
       if (found) return found;
     }
   }
-  // Trait impls of the program and the standard library.
+  const candidates = traitCandidates(program, solver, receiverType, name, inScope);
+  for (const [index, candidate] of candidates.entries()) {
+    const found = candidate.attempt();
+    if (!found) continue;
+    const other = candidates.slice(index + 1).find((c) => c.trait !== candidate.trait && applies(solver, c.attempt));
+    return other ? { ...found, ambiguousWith: other.trait } : found;
+  }
+  return undefined;
+}
+
+interface TraitCandidate {
+  trait: TraitDef;
+  /** Matches the method, binding what it learns, or gives undefined and binds nothing. */
+  attempt: () => Omit<MethodMatch, 'adjust'> | undefined;
+}
+
+/** The trait methods of a name that may take the receiver: of trait impls, then of the std traits builtin types have. */
+// code-gauge-allow functionCognitiveComplexity 23 -- Follows rustc's method probe step by step.
+function traitCandidates(
+  program: Program,
+  solver: TraitSolver,
+  receiverType: Type,
+  name: string,
+  inScope: (trait: TraitDef) => boolean
+): TraitCandidate[] {
+  const candidates: TraitCandidate[] = [];
   for (const impl of program.impls) {
     if (!impl.trait) continue;
-    const declared = impl.trait.trait.methods.get(name);
-    if (!declared?.selfMode) continue;
+    const { trait } = impl.trait;
+    const declared = trait.methods.get(name);
+    if (!declared?.selfMode || (trait.builtin && !inScope(trait))) continue;
     const fn = impl.methods.get(name) ?? declared;
-    const found =
-      fn === declared ? matchDefault(solver, impl, declared, receiverType) : matchSelf(solver, impl, fn, receiverType);
-    if (found) return found;
+    candidates.push({
+      trait,
+      attempt: () =>
+        fn === declared
+          ? matchDefault(solver, impl, declared, receiverType)
+          : matchSelf(solver, impl, fn, receiverType),
+    });
   }
-  // Traits that the standard library implements for builtin types, by its rules.
   for (const trait of program.traits) {
-    if (!trait.builtin) continue;
+    if (!trait.builtin || !inScope(trait)) continue;
     const fn = trait.methods.get(name);
     if (!fn?.selfMode) continue;
     const selfType = selfForMode(fn.selfMode, receiverType);
     if (!selfType) continue;
-    const snapshot = solver.unifier.snapshot();
-    const args = trait.params.map(() => freshVar());
-    const answer = solver.implements(selfType, { trait, args });
-    if (answer === 'yes' || (answer === 'unknown' && args.length > 0)) {
-      return { fn, typeArgs: [selfType, ...args, ...ownParams(fn)], selfType };
-    }
-    solver.unifier.rollback(snapshot);
+    candidates.push({
+      trait,
+      attempt: () => {
+        const snapshot = solver.unifier.snapshot();
+        const args = trait.params.map(() => freshVar());
+        const answer = solver.implements(selfType, { trait, args });
+        if (answer === 'yes' || (answer === 'unknown' && args.length > 0)) {
+          return { fn, typeArgs: [selfType, ...args, ...ownParams(fn)], selfType };
+        }
+        solver.unifier.rollback(snapshot);
+        return;
+      },
+    });
   }
-  return undefined;
+  return candidates;
+}
+
+function applies(solver: TraitSolver, attempt: TraitCandidate['attempt']): boolean {
+  const snapshot = solver.unifier.snapshot();
+  const found = attempt();
+  solver.unifier.rollback(snapshot);
+  return found !== undefined;
 }
 
 /** The type `Self` must be for a method with this receiver mode to take `receiverType`. */

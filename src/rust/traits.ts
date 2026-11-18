@@ -1,11 +1,15 @@
-// code-gauge-allow-file fileNcss 658 -- One rule per trait or conversion of the standard library.
-import { normalize, type Unifier } from './infer';
+// code-gauge-allow-file fileNcss 760 -- One rule per trait or conversion of the standard library.
+import { isPseudo, normalize, type Unifier } from './infer';
 import type { Module, Program } from './items';
 import { supportsDebug } from './iterDebug';
 import { intoIterItem } from './iterTypes';
 import {
+  F32,
+  F64,
   freshVar,
   type ImplDef,
+  INT_NAMES,
+  intType,
   isIteratorShape,
   isSigned,
   shallow,
@@ -36,8 +40,8 @@ export class TraitSolver {
     if (t.kind === 'var') return this.varImplements(t, ref);
     // Type parameters are `Sized` unless they opt out with `?Sized`.
     if (t.kind === 'param') return trait.builtin === 'Sized' || this.boundsImply(t.param.bounds, ref) ? 'yes' : 'no';
-    if (t.kind === 'adt' && ['ParseError', 'Unsigned', 'Signed', 'Indexed'].includes(t.def.builtin as string))
-      return 'unknown';
+    // A pseudo-type that stays is one whose arguments are not known yet.
+    if (t.kind === 'adt' && isPseudo(t.def)) return 'unknown';
     if (t.kind === 'opaque') return this.boundsImply(t.opaque.bounds, ref) ? 'yes' : this.builtinOnly(t, ref);
     if (t.kind === 'dyn') {
       if (this.boundsImply([t.trait], ref)) return 'yes';
@@ -58,8 +62,30 @@ export class TraitSolver {
     // An untyped number indexing a slice is a `usize`, the only integer type slices take.
     if (t.v.literal === 'int' && ref.trait.builtin === 'SliceIndex')
       return this.unifier.tryUnify(t, USIZE) ? 'yes' : 'no';
-    if (t.v.literal && ref.trait.builtin) return this.literalImplements(t.v.literal, ref);
+    if (!t.v.literal) return 'unknown';
+    // rustc takes a number's type from the one impl that fits it, among the impls for numbers of its kind.
+    const only = this.onlyNumericImpl(t.v.literal, ref);
+    if (only) return this.unifier.tryUnify(t, only) ? 'yes' : 'no';
+    if (ref.trait.builtin) return this.literalImplements(t.v.literal, ref);
     return 'unknown';
+  }
+
+  /** The one number type of a literal's kind that implements a trait, if exactly one does. */
+  private onlyNumericImpl(literal: 'int' | 'float', ref: TraitRef): Type | undefined {
+    const numbers: Type[] = literal === 'int' ? INT_NAMES.map((name) => intType(name)) : [F32, F64];
+    if (ref.trait.builtin === 'Into') {
+      const target = normalize(shallow(ref.args[0]));
+      if (target.kind !== 'int') return undefined;
+      const fitting = numbers.filter((number) => infallibleConversion(number, target));
+      return fitting.length === 1 ? fitting[0] : undefined;
+    }
+    if (ref.trait.builtin) return undefined;
+    const impls = this.program.impls.filter((impl) => impl.trait?.trait === ref.trait);
+    if (impls.some((impl) => normalize(shallow(impl.selfType)).kind === 'param')) return undefined;
+    const fitting = impls
+      .map((impl) => normalize(shallow(impl.selfType)))
+      .filter((self) => self.kind === (literal === 'int' ? 'int' : 'float'));
+    return fitting.length === 1 ? fitting[0] : undefined;
   }
 
   private literalImplements(literal: 'int' | 'float', ref: TraitRef): Answer {
@@ -76,6 +102,7 @@ export class TraitSolver {
         'PartialOrd',
         'Default',
         'ToString',
+        'ToOwned',
         'Send',
         'Sync',
         'Sized',
@@ -89,8 +116,12 @@ export class TraitSolver {
   }
 
   /** Whether bounds imply a trait, through supertraits. */
-  // code-gauge-allow functionCognitiveComplexity 18 -- One rule per trait or conversion of the standard library.
+  // code-gauge-allow functionCognitiveComplexity 21 -- One rule per trait or conversion of the standard library.
   boundsImply(bounds: TraitRef[], ref: TraitRef): boolean {
+    const blanket = BLANKET_IMPLS[ref.trait.builtin as string];
+    if (blanket && this.boundsImply(bounds, { trait: this.program.traitDef(blanket), args: [], item: ref.item })) {
+      return true;
+    }
     const seen = new Set<TraitDef>();
     const stack = [...bounds];
     while (stack.length > 0) {
@@ -106,8 +137,10 @@ export class TraitSolver {
             this.unifier.tryUnify(bound.fnSig.ret, ref.fnSig.ret)
           );
         }
-        if (bound.args.every((arg, i) => ref.args[i] === undefined || this.unifier.tryUnify(arg, ref.args[i])))
-          return true;
+        const argsMatch = bound.args.every(
+          (arg, i) => ref.args[i] === undefined || this.unifier.tryUnify(arg, ref.args[i])
+        );
+        if (argsMatch && this.itemsMatch(bound, ref)) return true;
       }
       if (ref.fnSig && bound.fnSig && closureKindAtLeast(bound.trait.name, ref.trait.name)) {
         return (
@@ -124,6 +157,12 @@ export class TraitSolver {
       stack.push(...bound.trait.supertraits);
     }
     return false;
+  }
+
+  /** Whether a bound gives the `Item` that a required `Iterator` or `IntoIterator` names, as its own or as `IntoItem`. */
+  private itemsMatch(bound: TraitRef, ref: TraitRef): boolean {
+    if (!ref.item) return true;
+    return bound.item !== undefined && this.unifier.tryUnify(bound.item, ref.item);
   }
 
   // code-gauge-allow functionCognitiveComplexity 20 -- One rule per trait or conversion of the standard library.
@@ -264,7 +303,8 @@ export class TraitSolver {
           if (t.def.builtin === 'Box') {
             const inner = shallow(t.args[0]);
             if (inner.kind === 'dyn') return 'no';
-            return all(t.args);
+            if (inner.kind === 'str') return 'yes';
+            return all([inner.kind === 'slice' ? inner.elem : inner]);
           }
           return 'no';
         }
@@ -309,6 +349,12 @@ export class TraitSolver {
       case 'PartialOrd':
       case 'Ord':
       case 'Hash': {
+        // The standard library's types compare with their own type, as the default `Rhs` makes them.
+        if (name === 'PartialEq' && ref.args[0]) {
+          return this.unifier.tryUnify(t, ref.args[0])
+            ? this.builtinImplements(t, { trait: ref.trait, args: [] })
+            : 'no';
+        }
         const exact = name !== 'PartialEq' && name !== 'PartialOrd';
         if (t.kind === 'float') return exact ? 'no' : 'yes';
         if (isPrimitive || t.kind === 'str' || t.kind === 'never') return 'yes';
@@ -326,7 +372,7 @@ export class TraitSolver {
           }
           if (['HashMap', 'HashSet'].includes(builtin))
             return name === 'PartialEq' || name === 'Eq' ? all(t.args) : 'no';
-          if (['Range', 'RangeInclusive'].includes(builtin))
+          if (RANGE_TYPES.has(builtin))
             return name === 'PartialEq' || name === 'Eq' || name === 'Hash' ? all(t.args) : 'no';
           return 'no';
         }
@@ -335,8 +381,9 @@ export class TraitSolver {
       case 'Default': {
         if (isPrimitive) return 'yes';
         if (t.kind === 'tuple') return all(t.elems);
-        if (t.kind === 'array') return all([t.elem]);
-        if (t.kind === 'ref') return shallow(t.target).kind === 'str' ? 'yes' : 'no';
+        // std implements `Default` for arrays of up to 32 elements, and for empty `&str` and slices.
+        if (t.kind === 'array') return t.len <= 32 ? all([t.elem]) : 'no';
+        if (t.kind === 'ref') return ['str', 'slice'].includes(shallow(t.target).kind) ? 'yes' : 'no';
         if (t.kind === 'adt') {
           const d = derived();
           if (d) return d;
@@ -374,7 +421,11 @@ export class TraitSolver {
         const target = normalize(shallow(ref.args[0]));
         if (t.kind === 'ref') return this.implements(t.target, ref);
         const isString = t.kind === 'str' || (t.kind === 'adt' && t.def.builtin === 'String');
-        if (isString) return this.unifier.tryUnify(target, { kind: 'str' }) ? 'yes' : 'no';
+        // Strings are also their UTF-8 bytes.
+        const bytes: Type = { kind: 'slice', elem: { kind: 'int', name: 'u8' } };
+        if (isString) {
+          return this.unifier.tryUnify(target, { kind: 'str' }) || this.unifier.tryUnify(target, bytes) ? 'yes' : 'no';
+        }
         const elem =
           t.kind === 'array' || t.kind === 'slice'
             ? t.elem
@@ -397,6 +448,7 @@ export class TraitSolver {
       case 'Float': {
         return t.kind === 'float' ? 'yes' : 'no';
       }
+      case 'FromStr':
       case 'FromStrTarget': {
         if (t.kind === 'int' || t.kind === 'float' || t.kind === 'bool' || t.kind === 'char') return 'yes';
         return t.kind === 'adt' && t.def.builtin === 'String' ? 'yes' : 'no';
@@ -431,17 +483,22 @@ export class TraitSolver {
         return 'no';
       }
       case 'StringPart': {
-        if (t.kind === 'char') return 'yes';
-        if (t.kind === 'adt' && t.def.builtin === 'String') return 'yes';
-        if (t.kind === 'ref') {
-          const target = shallow(t.target);
-          return target.kind === 'str' ||
-            target.kind === 'char' ||
-            (target.kind === 'adt' && target.def.builtin === 'String')
-            ? 'yes'
-            : 'no';
-        }
-        return 'no';
+        return isStringPart(t) ? 'yes' : 'no';
+      }
+      case 'SliceOf': {
+        // What implements `Borrow<[T]>`, as `Concat` and `Join` take it: arrays, vectors, and slices by reference.
+        const elem = borrowedSliceElem(t);
+        if (elem === 'unknown') return 'unknown';
+        return elem && this.unifier.tryUnify(elem, ref.args[0]) ? 'yes' : 'no';
+      }
+      case 'JoinSeparator': {
+        // `Join` separates by an element or by a slice of elements.
+        if (t.kind !== 'ref') return t.kind === 'var' ? 'unknown' : 'no';
+        const target = normalize(shallow(t.target));
+        return this.unifier.tryUnify(target.kind === 'slice' ? target.elem : target, ref.args[0]) ? 'yes' : 'no';
+      }
+      case 'ToOwned': {
+        return this.implements(t, { trait: this.program.traitDef('Clone'), args: [] });
       }
       case 'RangeBounds': {
         if (t.kind !== 'adt') return 'no';
@@ -451,9 +508,10 @@ export class TraitSolver {
       }
       case 'Borrow': {
         const [q] = ref.args;
-        if (this.unifier.tryUnify(t, q)) return 'yes';
+        // The type a key is looked up by comes from the argument (`set.contains(&[1][..])` by `[i32]`).
         const target = shallow(q);
-        if (target.kind === 'var') return 'unknown';
+        if (target.kind === 'var' && !target.v.literal) return 'unknown';
+        if (this.unifier.tryUnify(t, q)) return 'yes';
         if (t.kind === 'adt' && t.def.builtin === 'String' && target.kind === 'str') return 'yes';
         if (t.kind === 'adt' && t.def.builtin === 'Vec' && target.kind === 'slice') {
           return this.unifier.tryUnify(t.args[0], target.elem) ? 'yes' : 'no';
@@ -472,9 +530,13 @@ export class TraitSolver {
       case 'DoubleEndedSearcher': {
         return doubleEndedSearcher(t);
       }
+      case 'Iterator':
       case 'IntoIterator': {
         if (t.kind === 'var') return 'unknown';
-        return intoIterItem(t) ? 'yes' : 'no';
+        if (name === 'Iterator' && !isIterator(t)) return 'no';
+        const item = intoIterItem(t);
+        if (!item) return 'no';
+        return !ref.item || this.unifier.tryUnify(item, ref.item) ? 'yes' : 'no';
       }
       case 'ExtendInto': {
         // A collection of `T` extends from `T`s, and from `&T`s when `T` is `Copy`.
@@ -512,11 +574,18 @@ export class TraitSolver {
       }
       case 'TryFrom':
       case 'TryInto': {
-        // Integers convert to each other, failing out of range.
+        // Integers convert to each other, failing out of range; `char`s from `u32`s, and `u8`s from `char`s.
         const other = normalize(shallow(ref.args[0]));
-        if (t.kind !== 'int') return 'no';
-        if (other.kind === 'var') return other.v.literal === 'float' ? 'no' : 'unknown';
-        return other.kind === 'int' ? 'yes' : 'no';
+        const [source, target] = name === 'TryFrom' ? [other, t] : [t, other];
+        if (source.kind === 'var' || target.kind === 'var') {
+          const literal =
+            source.kind === 'var' ? source.v.literal : target.kind === 'var' ? target.v.literal : undefined;
+          return literal === 'float' ? 'no' : 'unknown';
+        }
+        if (source.kind === 'int' && target.kind === 'int') return 'yes';
+        if (target.kind === 'char' && source.kind === 'int' && source.name === 'u32') return 'yes';
+        if (source.kind === 'char' && target.kind === 'int' && target.name === 'u8') return 'yes';
+        return infallibleConversion(source, target) ? 'yes' : 'no';
       }
       default: {
         return 'no';
@@ -524,6 +593,8 @@ export class TraitSolver {
     }
   }
 
+  // code-gauge-allow functionCognitiveComplexity 30 -- Follows std's `FromIterator` impls case by case.
+  // code-gauge-allow functionNcss 39 -- Follows std's `FromIterator` impls case by case.
   private fromIterator(t: Type, item: Type): Answer {
     if (t.kind !== 'adt') return 'no';
     const element = shallow(item);
@@ -538,18 +609,13 @@ export class TraitSolver {
       case 'Box': {
         const inner = shallow(t.args[0]);
         if (inner.kind === 'slice') return this.unifier.tryUnify(inner.elem, item) ? 'yes' : 'no';
+        if (inner.kind === 'str') return element.kind === 'var' ? 'unknown' : isStringPart(element) ? 'yes' : 'no';
         return 'no';
       }
       case 'String': {
         if (element.kind === 'var') return 'unknown';
         if (element.kind === 'char') return 'yes';
-        if (element.kind === 'adt' && element.def.builtin === 'String') return 'yes';
-        if (element.kind === 'ref') {
-          const target = shallow(element.target);
-          if (target.kind === 'str' || target.kind === 'char') return 'yes';
-          if (target.kind === 'adt' && target.def.builtin === 'String') return 'yes';
-        }
-        return 'no';
+        return isStringPart(element) ? 'yes' : 'no';
       }
       case 'HashMap':
       case 'BTreeMap': {
@@ -585,6 +651,9 @@ export class TraitSolver {
     return conversionExists(this.program, source, t, this) ? 'yes' : 'no';
   }
 }
+
+/** The std traits with a blanket impl for every type of another trait: `impl<T: Display> ToString for T`. */
+const BLANKET_IMPLS: Record<string, string> = { ToString: 'Display', ToOwned: 'Clone', IntoIterator: 'Iterator' };
 
 const CLONE_CONTAINERS = new Set([
   'Vec',
@@ -630,6 +699,7 @@ const DEBUG_TYPES = new Set([
   'Utf8Error',
   'FmtError',
   'CaseIter',
+  'Entry',
 ]);
 
 export const ERROR_TYPES = new Set([
@@ -638,6 +708,8 @@ export const ERROR_TYPES = new Set([
   'ParseBoolError',
   'ParseCharError',
   'TryFromIntError',
+  'CharTryFromError',
+  'TryFromCharError',
   'Utf8Error',
   'FmtError',
   'Infallible',
@@ -693,7 +765,10 @@ function conversionExists(program: Program, source: Type, target: Type, solver: 
       case 'BTreeSet':
       case 'VecDeque':
       case 'BinaryHeap': {
-        if (source.kind !== 'array' && !(source.kind === 'adt' && source.def.builtin === 'Vec')) return false;
+        // Maps and sets convert from arrays; `VecDeque` and `BinaryHeap` also from `Vec`s.
+        const fromVec = t.def.builtin === 'VecDeque' || t.def.builtin === 'BinaryHeap';
+        const isVec = source.kind === 'adt' && source.def.builtin === 'Vec';
+        if (source.kind !== 'array' && !(fromVec && isVec)) return false;
         const elem = source.kind === 'array' ? source.elem : source.args[0];
         const want: Type = t.def.builtin.endsWith('Map') ? { kind: 'tuple', elems: t.args } : t.args[0];
         return solver.unifier.tryUnify(elem, want);
@@ -708,6 +783,7 @@ function conversionExists(program: Program, source: Type, target: Type, solver: 
           if (source.kind === 'ref' && shallow(source.target).kind === 'str') return true;
           return solver.implements(source, { trait: program.traitDef('Error'), args: [] }) === 'yes';
         }
+        if (inner.kind === 'str' || inner.kind === 'slice') return boxedUnsized(inner, source, solver);
         return solver.unifier.tryUnify(inner, source);
       }
       default: {
@@ -719,6 +795,7 @@ function conversionExists(program: Program, source: Type, target: Type, solver: 
   if (t.kind === 'int' && source.kind === 'bool') return true;
   if (t.kind === 'int' && source.kind === 'char') return t.name === 'u32' || t.name === 'u64' || t.name === 'u128';
   if (t.kind === 'float' && source.kind === 'float') return t.name === 'f64' || source.name === 'f32';
+  if (t.kind === 'float' && source.kind === 'bool') return true;
   if (t.kind === 'float' && source.kind === 'int') {
     const bits = Number(source.name.slice(1));
     return t.name === 'f64' ? bits <= 32 : bits <= 16;
@@ -898,4 +975,66 @@ function closureCaptures(t: Type & { kind: 'closure' }, all: (types: Type[]) => 
 function isShapeType(type: Type): boolean {
   const t = normalize(shallow(type));
   return t.kind === 'adt' && isIteratorShape(t.def);
+}
+
+/**
+ * What `String` (and `Box<str>`) collect from and extend with: `char`s, `&char`s, `&str`s, `String`s, and `Box<str>`s,
+ * but not `&String`s.
+ */
+function isStringPart(type: Type): boolean {
+  const t = normalize(shallow(type));
+  if (t.kind === 'char') return true;
+  if (t.kind === 'adt')
+    return t.def.builtin === 'String' || (t.def.builtin === 'Box' && shallow(t.args[0]).kind === 'str');
+  if (t.kind !== 'ref') return false;
+  const target = normalize(shallow(t.target));
+  return target.kind === 'str' || target.kind === 'char';
+}
+
+/** Whether `From` converts between two primitive types, which makes `TryFrom` infallible. */
+export function infallibleConversion(source: Type, target: Type): boolean {
+  const s = normalize(shallow(source));
+  const t = normalize(shallow(target));
+  if (s.kind === 'int' && t.kind === 'int') return losslessInt(s.name, t.name);
+  if (s.kind === 'char' && t.kind === 'int') return ['u32', 'u64', 'u128'].includes(t.name);
+  if (s.kind === 'int' && t.kind === 'char') return s.name === 'u8';
+  if (s.kind === 'bool' && t.kind === 'int') return true;
+  return s.kind === t.kind && (s.kind === 'char' || s.kind === 'bool');
+}
+
+/** `Box<str>` from `&str` and `String`; `Box<[T]>` from `&[T]`, `Vec<T>`, and `[T; N]`. */
+function boxedUnsized(inner: Type & { kind: 'str' | 'slice' }, source: Type, solver: TraitSolver): boolean {
+  const s = normalize(shallow(source));
+  const target = s.kind === 'ref' ? normalize(shallow(s.target)) : s;
+  if (inner.kind === 'str') return target.kind === 'str' || (target.kind === 'adt' && target.def.builtin === 'String');
+  const elem =
+    target.kind === 'slice' || (target.kind === 'array' && s.kind !== 'ref')
+      ? target.elem
+      : target.kind === 'adt' && target.def.builtin === 'Vec' && s.kind !== 'ref'
+        ? target.args[0]
+        : undefined;
+  return elem !== undefined && solver.unifier.tryUnify(elem, inner.elem);
+}
+
+function borrowedSliceElem(type: Type): Type | 'unknown' | undefined {
+  if (type.kind === 'var') return 'unknown';
+  if (type.kind === 'array') return type.elem;
+  if (type.kind === 'adt' && type.def.builtin === 'Vec') return type.args[0];
+  if (type.kind === 'adt' && type.def.builtin === 'Box') {
+    const inner = normalize(shallow(type.args[0]));
+    return inner.kind === 'slice' ? inner.elem : undefined;
+  }
+  if (type.kind !== 'ref') return undefined;
+  const target = normalize(shallow(type.target));
+  if (target.kind === 'var') return 'unknown';
+  return target.kind === 'slice' ? target.elem : undefined;
+}
+
+/** Whether a type is an iterator itself, not only a collection that makes one: `IterImpl`, a range, or `&mut` of one. */
+function isIterator(type: Type): boolean {
+  const t = type.kind === 'ref' && type.mutable ? normalize(shallow(type.target)) : type;
+  if (t.kind === 'param' || t.kind === 'opaque') return true;
+  return (
+    t.kind === 'adt' && ['Iter', 'Range', 'RangeInclusive', 'RangeFrom', 'CaseIter'].includes(t.def.builtin as string)
+  );
 }

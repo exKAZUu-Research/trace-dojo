@@ -24,7 +24,7 @@ import { forEachDirect, patternBindingParts } from './astWalk';
 import { BorrowChecker } from './borrowck';
 import { ConstLint } from './constLint';
 import { isIrrefutable, lowerPattern, missingPattern } from './exhaustiveness';
-import { deepNormalize, normalize, Unifier } from './infer';
+import { deepNormalize, isPseudo, normalize, Unifier } from './infer';
 import {
   compileError,
   constInteger,
@@ -108,6 +108,8 @@ interface BodyContext {
   module: Module;
   typeParams: Map<string, TypeParam>;
   selfType: Type | undefined;
+  /** The trait the body's impl implements or its trait declares, which is in scope in it as rustc puts it. */
+  currentTrait?: TraitDef;
 }
 
 let nextLocalId = 0;
@@ -118,6 +120,8 @@ export class Checker {
   readonly unifier = new Unifier();
   readonly solver: TraitSolver;
   private obligations: Obligation[] = [];
+  /** The errors `?` converts whose type waits on a parse's target (`ParseError<F>`), to settle once it is known. */
+  private pendingTryErrors: { from: Type; to: Type; span: Span }[] = [];
   /** Bodies of functions declared in blocks, checked after the function around them. */
   private readonly nestedFns: FnDef[] = [];
   /** The context of each checked function, which the compiler reads. */
@@ -252,6 +256,7 @@ export class Checker {
     isAtomic: boolean;
     typeParams?: Map<string, TypeParam>;
     selfType?: Type;
+    currentTrait?: TraitDef;
   }): BodyContext {
     const fn: FnContext = {
       name: options.name,
@@ -273,6 +278,7 @@ export class Checker {
       module: options.module,
       typeParams: options.typeParams ?? new Map(),
       selfType: options.selfType,
+      currentTrait: options.currentTrait,
     };
   }
 
@@ -294,6 +300,7 @@ export class Checker {
       isAtomic: this.isAtomic(item),
       typeParams,
       selfType,
+      currentTrait: def.trait ?? def.impl?.trait?.trait,
     });
     this.fnContexts.set(def, this.body.fn);
     if (item.selfParam && selfType) {
@@ -389,6 +396,7 @@ export class Checker {
 
   // code-gauge-allow functionCognitiveComplexity 17 -- Follows the type checking rules of rustc case by case.
   private solveObligations(final: boolean): void {
+    this.settleTryErrors(final);
     let progress = true;
     while (progress) {
       progress = false;
@@ -415,6 +423,22 @@ export class Checker {
         compileError(obligation.span, `型が決まりません（${typeToString(obligation.type)} の型を書いてください）。`);
       }
     }
+  }
+
+  private settleTryErrors(final: boolean): void {
+    const pending = this.pendingTryErrors;
+    this.pendingTryErrors = [];
+    for (const error of pending) {
+      const from = normalize(shallow(error.from));
+      if (!final && from.kind === 'adt' && isPseudo(from.def)) this.pendingTryErrors.push(error);
+      else this.convertTryError(error.from, error.to, error.span);
+    }
+  }
+
+  /** Requires `?` to convert an error to the function's, by `From` unless it is the same type. */
+  private convertTryError(from: Type, to: Type, span: Span): void {
+    if (!this.unifier.tryUnify(from, to))
+      this.require(to, { trait: this.program.traitDef('From'), args: [from] }, span);
   }
 
   private unsatisfied(obligation: Obligation): never {
@@ -644,6 +668,9 @@ export class Checker {
     if (a.kind === 'ref' && t.kind === 'ref' && (!t.mutable || a.mutable) && this.coerceRef(expr, a, t)) return;
     if (a.kind === 'adt' && a.def.builtin === 'Box' && t.kind === 'adt' && t.def.builtin === 'Box') {
       const target = shallow(t.args[0]);
+      // `Box<[T; N]>` unsizes to `Box<[T]>`, which holds the same elements.
+      const array = normalize(shallow(a.args[0]));
+      if (target.kind === 'slice' && array.kind === 'array' && this.unifier.tryUnify(array.elem, target.elem)) return;
       if (target.kind === 'dyn') {
         this.requireDyn(a.args[0], target.trait, expr.span);
         this.setCoercion(expr, { kind: 'dyn', type: a.args[0], mutable: false });
@@ -1315,6 +1342,7 @@ export class Checker {
       compileError(span, `${typeToString(t)} に関連関数 ${last.name} がありません。`);
     }
     this.checkMethodVisible(found.fn, span);
+    this.checkTraitInScope(found.fn, t, span, `関連関数 ${last.name}`);
     if (last.args) {
       const own = found.fn.params.slice(found.fn.parentParamCount);
       const written = this.typeArgsFor(own, last.args, span, last.name);
@@ -1332,6 +1360,13 @@ export class Checker {
     if (module === 'env')
       compileError(span, '環境変数とコマンドラインの引数（std::env）は、この採点環境では使えません。');
     return compileError(span, `${names.join('::')} は、この採点環境では使えません。`);
+  }
+
+  /** Whether a trait is in scope in the body: imported, in the prelude, or the trait of the body's impl. */
+  private traitInScope(trait: TraitDef): boolean {
+    if (trait === this.body.currentTrait) return true;
+    const binding = lookupType(this.body.module, trait.name, { row: 0, col: 1 });
+    return binding?.kind === 'trait' && binding.def === trait;
   }
 
   private checkMethodVisible(fn: FnDef, span: Span): void {
@@ -1678,7 +1713,7 @@ export class Checker {
     });
   }
 
-  // code-gauge-allow functionNcss 31 -- Follows rustc's method probe and its checks step by step.
+  // code-gauge-allow functionNcss 34 -- Follows rustc's method probe and its checks step by step.
   private methodCall(expr: Extract<Expr, { kind: 'methodCall' }>, expected: Type | undefined): Type {
     const receiverType = this.settled(this.expr(expr.receiver, undefined));
     const resolvedReceiver = normalize(shallow(receiverType));
@@ -1690,7 +1725,9 @@ export class Checker {
         `型が決まらないので、メソッド ${expr.method} を呼べません（変数の型を書いてください）。`
       );
     }
-    const found = lookupMethod(this.program, this.solver, receiverType, expr.method);
+    const found = lookupMethod(this.program, this.solver, receiverType, expr.method, (trait) =>
+      this.traitInScope(trait)
+    );
     if (stripped.kind === 'var' && found && found !== 'ambiguous') this.numberReceiver(expr, stripped, found.fn);
     if (found === 'ambiguous') {
       compileError(
@@ -1699,8 +1736,15 @@ export class Checker {
       );
     }
     if (!found) return this.noMethod(expr, receiverType);
+    if (found.ambiguousWith) {
+      const first = (found.fn.trait ?? found.fn.impl?.trait?.trait) as TraitDef;
+      compileError(
+        expr.methodSpan,
+        `メソッド ${expr.method} は、トレイト ${first.name} と ${found.ambiguousWith.name} の両方にあります（${first.name}::${expr.method}(...) の形で、どちらかを選んでください）。`
+      );
+    }
     this.checkMethodVisible(found.fn, expr.methodSpan);
-    this.checkTraitInScope(found.fn, expr);
+    this.checkTraitInScope(found.fn, stripped, expr.methodSpan, `メソッド ${expr.method}`);
     const { fn } = found;
     if (expr.turbofish) {
       const own = fn.params.slice(fn.parentParamCount);
@@ -1739,15 +1783,15 @@ export class Checker {
   }
 
   /** A method of the program's own trait impl is callable only where the trait is in scope, as rustc requires. */
-  private checkTraitInScope(fn: FnDef, expr: Extract<Expr, { kind: 'methodCall' }>): void {
-    const trait = fn.impl?.trait?.trait;
-    if (!trait || (trait.module as Module).isStd) return;
-    const binding = lookupType(this.body.module, trait.name, expr.methodSpan);
-    if (binding?.kind === 'trait' && binding.def === trait) return;
-    compileError(
-      expr.methodSpan,
-      `メソッド ${expr.method} はトレイト ${trait.name} のものなので、use でトレイトを取り込んでください。`
-    );
+  /**
+   * Rejects a function of a trait that is not in scope: the program's traits by their impls, and the standard library's
+   * outside the prelude. A bound of a type parameter, a trait object, or an opaque type brings its traits into scope.
+   */
+  private checkTraitInScope(fn: FnDef, selfType: Type, span: Span, what: string): void {
+    const isStd = (fn.trait?.module as Module | undefined)?.isStd;
+    const trait = isStd ? fn.trait : fn.impl?.trait?.trait;
+    if (!trait || (!isStd && (trait.module as Module).isStd) || boundsOf(selfType) || this.traitInScope(trait)) return;
+    compileError(span, `${what} はトレイト ${trait.name} のものなので、use でトレイトを取り込んでください。`);
   }
 
   private noMethod(expr: Extract<Expr, { kind: 'methodCall' }>, receiverType: Type): never {
@@ -1786,7 +1830,7 @@ export class Checker {
 
   /** Taking `self` by value through a reference moves out of it, which only `Copy` types allow. */
   private checkMoveOutOfRef(expr: Extract<Expr, { kind: 'methodCall' }>, adjust: ReceiverAdjust, selfType: Type): void {
-    if (adjust.autoref !== 'none' || adjust.rangeToIter) return;
+    if (adjust.autoref !== 'none' || adjust.asIter) return;
     const throughRef = adjust.derefs.some((step) => step === 'ref' || step === 'mutRef');
     if (!throughRef) return;
     this.deferredChecks.push(() => {
@@ -1931,7 +1975,6 @@ export class Checker {
     return compileError(expr.span, `${typeToString(resolve(operandType))} に - は使えません。`);
   }
 
-  /** The type arithmetic sees: numbers through one reference, as Rust's impls for `&i32` allow. */
   /**
    * The number an operand of an operator stands for: std implements the operators for numbers and for shared
    * references to them, one level deep (`&i32 + i32`), but not for `&&i32` or `&mut i32`, which stay as they are.
@@ -1940,8 +1983,8 @@ export class Checker {
     const t = normalize(shallow(type));
     if (t.kind === 'ref' && !t.mutable) {
       const target = normalize(shallow(t.target));
-      if (target.kind === 'int' || target.kind === 'float' || (target.kind === 'var' && target.v.literal))
-        return target;
+      const isNumber = target.kind === 'int' || target.kind === 'float' || target.kind === 'bool';
+      if (isNumber || (target.kind === 'var' && target.v.literal)) return target;
     }
     return t;
   }
@@ -1977,6 +2020,8 @@ export class Checker {
     }
     const rightType = this.expr(expr.right, left.kind === 'var' && !left.v.literal ? undefined : left);
     const right = this.numericOperand(rightType);
+    const set = this.setOperation(expr, leftType, rightType);
+    if (set) return set;
     if ((op === '&' || op === '|' || op === '^') && left.kind === 'bool') {
       this.unifyOrError(expr.right.span, BOOL, right);
       return BOOL;
@@ -2000,6 +2045,18 @@ export class Checker {
     return result;
   }
 
+  /** `&a | &b`, `&`, `-`, and `^` of two sets by reference: their union, intersection, and differences. */
+  private setOperation(expr: Extract<Expr, { kind: 'binary' }>, left: Type, right: Type): Type | undefined {
+    if (!['|', '&', '-', '^'].includes(expr.op)) return undefined;
+    const l = normalize(shallow(left));
+    if (l.kind !== 'ref') return undefined;
+    const set = normalize(shallow(l.target));
+    if (set.kind !== 'adt' || (set.def.builtin !== 'HashSet' && set.def.builtin !== 'BTreeSet')) return undefined;
+    this.unifyOrError(expr.right.span, l, right);
+    this.requireTrait(set.args[0], 'Clone', expr.span);
+    return set;
+  }
+
   private badOperands(expr: Extract<Expr, { kind: 'binary' }>, left: Type, right: Type): never {
     const l = resolve(left);
     const r = resolve(right);
@@ -2013,16 +2070,20 @@ export class Checker {
     compileError(expr.opSpan, `${typeToString(l)} と ${typeToString(r)} は、${expr.op} で計算できません。`);
   }
 
+  // code-gauge-allow functionCognitiveComplexity 18 -- Follows the `PartialEq` and `PartialOrd` impls of std case by case.
   private comparison(expr: Extract<Expr, { kind: 'binary' }>): Type {
     const leftType = this.expr(expr.left, undefined);
     const l = normalize(shallow(leftType));
     // A sequence compares with sequences of other element types (`Vec<String> == [&str; 1]`), so it guides nothing.
-    const guides = !(l.kind === 'var' && !l.v.literal) && !sequenceElem(l);
+    const guides = !(l.kind === 'var' && !l.v.literal) && !isSequence(l);
     const rightType = this.expr(expr.right, guides ? leftType : undefined);
     const r = normalize(shallow(rightType));
     const isEquality = expr.op === '==' || expr.op === '!=';
     // Strings compare with each other (`String == &str`), and sequences with each other (`Vec == [T; N]`).
     if (isEquality && (stringsCompare(l, r) || this.sequencesCompare(l, r))) return BOOL;
+    // A type of the program compares with another by its `impl PartialEq<Rhs>`.
+    const partialEq = { trait: this.program.traitDef('PartialEq'), args: [rightType] };
+    if (isEquality && l.kind === 'adt' && !l.def.builtin && this.solver.implements(l, partialEq) === 'yes') return BOOL;
     if (!this.unifier.tryUnify(leftType, rightType)) {
       const lt = typeToString(resolve(leftType));
       const rt = typeToString(resolve(rightType));
@@ -2036,25 +2097,27 @@ export class Checker {
       }
       compileError(expr.opSpan, `${lt} と ${rt} は ${expr.op} で比べられません（型をそろえてください）。`);
     }
-    this.requireTrait(leftType, isEquality ? 'PartialEq' : 'PartialOrd', expr.opSpan);
+    if (isEquality)
+      this.require(leftType, { trait: this.program.traitDef('PartialEq'), args: [rightType] }, expr.opSpan);
+    else this.requireTrait(leftType, 'PartialOrd', expr.opSpan);
     return BOOL;
   }
 
-  /** Whether two sequence types compare with `==` though they differ: a `Vec`, an array, or a slice, by reference alike. */
+  /**
+   * Whether two sequence types compare with `==` by std's `PartialEq` impls between `Vec`, `VecDeque`, arrays, and
+   * slices, each side under the same number of references or under the one reference an impl names (`Vec<T> == &[U]`).
+   */
   private sequencesCompare(left: Type, right: Type): boolean {
-    const a = sequenceElem(left);
-    const b = sequenceElem(right);
-    if (!a || !b) return false;
-    const aVec = normalize(shallow(stripAll(left)));
-    const bVec = normalize(shallow(stripAll(right)));
-    const aIsVec = aVec.kind === 'adt';
-    const bIsVec = bVec.kind === 'adt';
-    // `Vec<T> == &[U]` and `[T; N] == [U]` compare, as do equal depths of references.
-    const depthsMatch =
-      a.depth === b.depth ||
-      (aIsVec && !bIsVec && b.depth === a.depth + 1) ||
-      (bIsVec && !aIsVec && a.depth === b.depth + 1);
-    if (!depthsMatch) return false;
+    let l = normalize(shallow(left));
+    let r = normalize(shallow(right));
+    while (l.kind === 'ref' && r.kind === 'ref') {
+      l = normalize(shallow(l.target));
+      r = normalize(shallow(r.target));
+    }
+    const a = sequenceSide(l);
+    const b = sequenceSide(r);
+    if (!a || !b || !SEQUENCE_EQ.has(`${a.kind}=${b.kind}`)) return false;
+    if (a.len !== undefined && b.len !== undefined && a.len !== b.len) return false;
     if (stringsCompare(a.elem, b.elem)) return true;
     if (!this.unifier.tryUnify(a.elem, b.elem)) return false;
     this.requireTrait(a.elem, 'PartialEq', { row: 0, col: 1 });
@@ -2425,6 +2488,7 @@ export class Checker {
     return closureType;
   }
 
+  // code-gauge-allow functionCognitiveComplexity 16 -- Follows rustc's desugaring of `?` for `Option` and `Result`.
   private tryExpr(expr: Extract<Expr, { kind: 'try' }>): Type {
     const operand = normalize(shallow(this.expr(expr.operand, undefined)));
     const ret = normalize(shallow(this.body.retType));
@@ -2451,9 +2515,9 @@ export class Checker {
     }
     const from = operand.args[1];
     const to = r.args[1];
-    if (!this.unifier.tryUnify(from, to)) {
-      this.require(to, { trait: this.program.traitDef('From'), args: [from] }, expr.span);
-    }
+    const error = normalize(shallow(from));
+    if (error.kind === 'adt' && isPseudo(error.def)) this.pendingTryErrors.push({ from, to, span: expr.span });
+    else this.convertTryError(from, to, expr.span);
     this.annotations.tries.set(expr, { kind: 'result', errorFrom: from, errorTo: to });
     return operand.args[0];
   }
@@ -2896,16 +2960,48 @@ function isNumber(t: Type): boolean {
 }
 
 /** The elements of a sequence type (an array, a slice, or a `Vec`) and the references around it. */
-function sequenceElem(type: Type): { depth: number; elem: Type } | undefined {
-  let t = normalize(shallow(type));
-  let depth = 0;
-  while (t.kind === 'ref') {
-    depth++;
-    t = normalize(shallow(t.target));
-  }
-  if (t.kind === 'array' || t.kind === 'slice') return { depth, elem: t.elem };
-  if (t.kind === 'adt' && (t.def.builtin === 'Vec' || t.def.builtin === 'VecDeque')) return { depth, elem: t.args[0] };
+/** The pairs of sequence kinds std implements `PartialEq` between, with `&` for a shared or mutable reference. */
+const SEQUENCE_EQ = new Set([
+  'array=array',
+  'array=slice',
+  'array=&slice',
+  'slice=array',
+  '&slice=array',
+  'slice=slice',
+  'slice=Vec',
+  '&slice=Vec',
+  'Vec=Vec',
+  'Vec=&slice',
+  'Vec=slice',
+  'Vec=array',
+  'Vec=&array',
+  'VecDeque=VecDeque',
+  'VecDeque=Vec',
+  'VecDeque=&slice',
+  'VecDeque=array',
+  'VecDeque=&array',
+]);
+
+/** A side of a sequence comparison: its kind as `SEQUENCE_EQ` names it, its element type, and an array's length. */
+function sequenceSide(type: Type): { kind: string; elem: Type; len?: number } | undefined {
+  const isRef = type.kind === 'ref';
+  const t = isRef ? normalize(shallow(type.target)) : type;
+  const prefix = isRef ? '&' : '';
+  if (t.kind === 'array') return { kind: `${prefix}array`, elem: t.elem, len: isRef ? undefined : t.len };
+  if (t.kind === 'slice') return { kind: `${prefix}slice`, elem: t.elem };
+  if (isRef || t.kind !== 'adt') return undefined;
+  if (t.def.builtin === 'Vec' || t.def.builtin === 'VecDeque') return { kind: t.def.builtin, elem: t.args[0] };
   return undefined;
+}
+
+/** Whether the type is a sequence that compares with other sequence types, under any number of references. */
+function isSequence(type: Type): boolean {
+  const t = stripAll(type);
+  return (
+    t.kind === 'array' ||
+    t.kind === 'slice' ||
+    (t.kind === 'adt' && (t.def.builtin === 'Vec' || t.def.builtin === 'VecDeque'))
+  );
 }
 
 function stripAll(type: Type): Type {

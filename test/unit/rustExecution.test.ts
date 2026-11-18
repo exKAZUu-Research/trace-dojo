@@ -284,6 +284,24 @@ test.each([
     '    let mut x: i32 = 0;\n    x = i32::MAX;\n    let y = x + 1;',
     4,
   ],
+  ['an associated function of a trait that is not in scope', '    let n = i32::from_str("4");', 2],
+  [
+    'a method that two traits in scope both have',
+    '    Human.fly();',
+    7,
+    'trait Pilot { fn fly(&self); }\ntrait Wizard { fn fly(&self); }\nstruct Human;\nimpl Pilot for Human { fn fly(&self) {} }\nimpl Wizard for Human { fn fly(&self) {} }',
+  ],
+  [
+    'arrays of different lengths compared with ==',
+    '    let a = [1, 2];\n    let b = [1, 2, 3];\n    let c = a == b;',
+    4,
+  ],
+  [
+    "a parse error that ? cannot convert to the function's error type",
+    '    let _ = f("1");',
+    2,
+    'fn f(s: &str) -> Result<f64, std::num::ParseIntError> {\n    let x: f64 = s.parse()?;\n    Ok(x)\n}',
+  ],
   ['mismatched types', '    let x: i32 = "a";', 2],
 ])('rustc rejects %s before running', (_name, body, row, items = '') => {
   const execution = executeProgram('rust', rustMain(body, items));
@@ -405,6 +423,48 @@ fn main() {
   expect(executeProgram('rust', program)).toMatchObject({
     kind: 'executed',
     stdout: '20 20 2 2 1 2 1 0\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('std traits apply as std implements them: generic iterators, blanket impls, Rhs, and the impl a number fits', () => {
+  const program = `use std::collections::{HashMap, HashSet};
+use std::fmt::Display;
+use std::str::FromStr;
+trait Describe {
+    fn describe(&self) -> String;
+}
+impl Describe for u8 {
+    fn describe(&self) -> String { format!("u8 {}", self) }
+}
+struct Meters(i32);
+impl PartialEq<i32> for Meters {
+    fn eq(&self, other: &i32) -> bool { self.0 == *other }
+}
+fn largest<I>(it: I) -> Option<I::Item> where I: Iterator, I::Item: Ord { it.max() }
+fn total<I: IntoIterator<Item = u32>>(items: I) -> u32 { items.into_iter().sum() }
+fn evens(n: u32) -> impl Iterator<Item = u32> { (0..n).filter(|x| x % 2 == 0) }
+fn show<T: Display>(t: T) -> String { t.to_string() }
+fn describe<T: Describe>(t: T) -> String { t.describe() }
+fn main() {
+    println!("{:?} {} {:?}", largest("bca".chars()), total(evens(7)), evens(5).collect::<Vec<_>>());
+    println!("{} {} {}", show(4), describe(5), Meters(5) == 5);
+    println!("{:?} {:?}", f64::from_str("1.5"), vec![[1, 2], [3, 4]].concat());
+    let a: HashSet<i32> = [1, 2].into_iter().collect();
+    let b: HashSet<i32> = [2, 3].into_iter().collect();
+    let mut both: Vec<i32> = (&a & &b).into_iter().collect();
+    both.sort();
+    println!("{:?} {} {}", both, vec![1, 2] == [1, 2], &vec![1, 2][..] == [1, 2]);
+    let mut m: HashMap<&str, i32> = HashMap::new();
+    m.insert("k", 1);
+    println!("{:?}", m.entry("k"));
+    println!("{:?}", m.entry("z"));
+}`;
+  expect(executeProgram('rust', program)).toMatchObject({
+    kind: 'executed',
+    stdout:
+      "Some('c') 12 [0, 2, 4]\n4 u8 5 true\nOk(1.5) [1, 2, 3, 4]\n[2] true true\n" +
+      'Entry(OccupiedEntry { key: "k", value: 1, .. })\nEntry(VacantEntry("z"))\n',
     uncaughtException: undefined,
   });
 });

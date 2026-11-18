@@ -353,7 +353,7 @@ export class BorrowChecker {
       const throughRef = receiver.derefs.some((step) => step === 'ref' || step === 'mutRef');
       if (receiver.autoref === 'mut' || (method.fn.selfMode === 'mutRef' && isMutReference(expr.receiver.ty))) {
         current = this.expr(expr.receiver, current, 'mut');
-      } else if (receiver.autoref === 'ref' || throughRef || receiver.rangeToIter) {
+      } else if (receiver.autoref === 'ref' || throughRef || receiver.asIter) {
         current = this.expr(expr.receiver, current, 'read');
       } else if (method.fn.selfMode === 'value') current = this.expr(expr.receiver, current, 'move');
       else current = this.expr(expr.receiver, current, 'read');

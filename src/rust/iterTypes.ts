@@ -1,6 +1,6 @@
 import { normalize } from './infer';
-import type { Program } from './items';
-import { CHAR, ref, shallow, type Type } from './types';
+import type { Module, Program } from './items';
+import { adt, CHAR, ref, shallow, type TraitRef, type Type } from './types';
 
 /** The shapes of the iterators that `IntoIterator` makes of a collection: by shared reference, by `&mut`, by value. */
 const COLLECTION_SHAPES: Record<string, [string, string | undefined, string]> = {
@@ -22,9 +22,14 @@ const RANGE_SHAPES: Record<string, string> = {
 };
 
 /** The element type a `for` loop over a value of this type binds, as `IntoIterator` gives it. */
-// code-gauge-allow functionNcss 49 -- Follows std's `IntoIterator` impls case by case.
+// code-gauge-allow functionNcss 56 -- Follows std's `IntoIterator` impls case by case.
+// code-gauge-allow functionCognitiveComplexity 24 -- Follows std's `IntoIterator` impls case by case.
 export function intoIterItem(type: Type): Type | undefined {
   const t = normalize(shallow(type));
+  if (t.kind === 'param' || t.kind === 'opaque') {
+    const bound = iterationBound(t);
+    return bound && (bound.item ?? adt((bound.trait.module as Module).program.adtDef('IntoItem'), [t]));
+  }
   if (t.kind === 'array') return t.elem;
   if (t.kind === 'ref') {
     const target = normalize(shallow(t.target));
@@ -32,18 +37,21 @@ export function intoIterItem(type: Type): Type | undefined {
     if (target.kind !== 'adt') return undefined;
     switch (target.def.builtin) {
       case 'Vec':
-      case 'VecDeque':
+      case 'VecDeque': {
+        return ref(target.args[0], t.mutable);
+      }
       case 'HashSet':
       case 'BTreeSet':
       case 'BinaryHeap': {
-        const builtin = target.def.builtin;
-        return ref(target.args[0], t.mutable && builtin !== 'HashSet' && builtin !== 'BTreeSet');
+        // Sets and heaps do not let their elements change in place, so `&mut` of them is no iterable.
+        return t.mutable ? undefined : ref(target.args[0]);
       }
       case 'HashMap':
       case 'BTreeMap': {
         return { kind: 'tuple', elems: [ref(target.args[0]), ref(target.args[1], t.mutable)] };
       }
-      case 'Option': {
+      case 'Option':
+      case 'Result': {
         return ref(target.args[0], t.mutable);
       }
       case 'Iter': {
@@ -70,11 +78,16 @@ export function intoIterItem(type: Type): Type | undefined {
     case 'BinaryHeap':
     case 'Iter':
     case 'Option':
-    case 'Result':
+    case 'Result': {
+      return t.args[0];
+    }
     case 'Range':
     case 'RangeInclusive':
     case 'RangeFrom': {
-      return t.args[0];
+      // A range iterates by `Step`, which integers and `char`s have and floats do not.
+      const idx = normalize(shallow(t.args[0]));
+      const steps = idx.kind === 'int' || idx.kind === 'char' || (idx.kind === 'var' && idx.v.literal !== 'float');
+      return steps ? t.args[0] : undefined;
     }
     default: {
       return undefined;
@@ -83,9 +96,10 @@ export function intoIterItem(type: Type): Type | undefined {
 }
 
 /** The shape of the iterator that `IntoIterator` makes of a value of this type. */
-// code-gauge-allow functionCognitiveComplexity 25 -- Follows std's `IntoIterator` impls case by case.
+// code-gauge-allow functionCognitiveComplexity 28 -- Follows std's `IntoIterator` impls case by case.
 export function intoIterShape(program: Program, type: Type): Type | undefined {
   const t = normalize(shallow(type));
+  if (t.kind === 'param' || t.kind === 'opaque') return iterationBound(t) && adt(program.adtDef('IntoShape'), [t]);
   if (t.kind === 'array') return program.shapeType('ArrayIntoIterShape');
   if (t.kind === 'ref') {
     const target = normalize(shallow(t.target));
@@ -105,4 +119,10 @@ export function intoIterShape(program: Program, type: Type): Type | undefined {
   if (range) return program.shapeType(range, [t.args[0]]);
   const shapes = COLLECTION_SHAPES[t.def.builtin as string];
   return shapes ? program.shapeType(shapes[2]) : undefined;
+}
+
+/** The `Iterator` or `IntoIterator` bound of a type parameter or an opaque type, by which it iterates. */
+export function iterationBound(type: Type): TraitRef | undefined {
+  const bounds = type.kind === 'param' ? type.param.bounds : type.kind === 'opaque' ? type.opaque.bounds : undefined;
+  return bounds?.find((bound) => bound.trait.builtin === 'Iterator' || bound.trait.builtin === 'IntoIterator');
 }

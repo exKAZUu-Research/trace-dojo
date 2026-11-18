@@ -35,6 +35,7 @@ import {
   type MapValue,
   type Place,
   RangeValue,
+  SetValue,
   sliceBase,
   sliceGet,
   sliceLength,
@@ -60,7 +61,6 @@ export interface CallSupport {
   callValue(callee: Value, args: Value[], callRow: number | undefined): Value;
   makeClosure(compiled: CompiledFn, frame: Frame, captures: Place[], byValue: boolean[]): Value;
   toIter(value: Value, from: Type): Value;
-  rangeIter(range: RangeValue, elem: Type): Value;
   constValue(def: unknown, frame: Frame): Value;
   builtinConst(name: string): Value;
   formatter: Formatter;
@@ -980,8 +980,8 @@ export class Compiler {
     };
   }
 
-  // code-gauge-allow functionCognitiveComplexity 20 -- One case per kind of expression, statement, or pattern.
-  // code-gauge-allow functionNcss 37 -- One case per kind of expression, statement, or pattern.
+  // code-gauge-allow functionCognitiveComplexity 23 -- One case per kind of expression, statement, or pattern.
+  // code-gauge-allow functionNcss 41 -- One case per kind of expression, statement, or pattern.
   private binary(expr: Extract<Expr, { kind: 'binary' }>): Eval {
     const { op } = expr;
     if (op === '&&' || op === '||') {
@@ -1000,7 +1000,9 @@ export class Compiler {
       const compareType = runtimeType(stringish(staticType) ?? staticType);
       if (op === '==' || op === '!=') {
         const equal = op === '==';
-        return (frame) => valuesEqual(compareType(frame), leftCoerced(frame), rightCoerced(frame)) === equal;
+        const rhsType = runtimeType(resolve(expr.right.ty!, true));
+        return (frame) =>
+          valuesEqual(compareType(frame), leftCoerced(frame), rightCoerced(frame), rhsType(frame)) === equal;
       }
       const tests: Record<string, (order: number) => boolean> = {
         '<': (o) => o < 0,
@@ -1016,6 +1018,11 @@ export class Compiler {
     }
     const type = numericType(expr.ty!);
     const span = expr.span;
+    if (type.kind === 'adt' && (type.def.builtin === 'HashSet' || type.def.builtin === 'BTreeSet')) {
+      const elem = runtimeType(type.args[0]);
+      return (frame) =>
+        setOperation(op, derefAll(left(frame)) as SetValue, derefAll(right(frame)) as SetValue, elem(frame));
+    }
     if (type.kind === 'adt') {
       // String + &str
       return (frame) => (left(frame) as string) + (derefAll(rightCoerced(frame)) as string);
@@ -1184,21 +1191,15 @@ export class Compiler {
   /** The receiver a method takes, after the derefs and the reference its call adds. */
   private receiver(expr: Extract<Expr, { kind: 'methodCall' }>, method: MethodRes): Eval {
     const adjust: ReceiverAdjust = method.receiver;
-    const elem = adjust.rangeToIter ? rangeElem(expr.receiver.ty!) : undefined;
+    const iterFrom = adjust.asIter ? runtimeType(stripRefs(expr.receiver.ty!)) : undefined;
     if (adjust.autoref === 'mut') {
       const place = this.placeThrough(expr.receiver, adjust.derefs);
-      if (elem) {
-        const elemType = runtimeType(elem);
-        return (frame) => new CellPlace(this.support.rangeIter(place(frame).get() as RangeValue, elemType(frame)));
-      }
+      if (iterFrom) return (frame) => new CellPlace(this.support.toIter(place(frame).get(), iterFrom(frame)));
       return place;
     }
     const byValue = adjust.autoref === 'none' && method.fn.selfMode === 'value' && adjust.derefs.length === 0;
     const read = byValue ? this.value(expr.receiver) : this.valueThrough(expr.receiver, adjust.derefs);
-    if (elem) {
-      const elemType = runtimeType(elem);
-      return (frame) => this.support.rangeIter(read(frame) as RangeValue, elemType(frame));
-    }
+    if (iterFrom) return (frame) => this.support.toIter(read(frame), iterFrom(frame));
     const selfType = resolve(expr.receiver.ty!, true);
     if (
       method.fn.selfMode === 'value' &&
@@ -1716,10 +1717,10 @@ function stringish(type: Type): Type | undefined {
   return undefined;
 }
 
-function rangeElem(type: Type): Type {
+function stripRefs(type: Type): Type {
   let t = normalize(shallow(type));
   while (t.kind === 'ref') t = normalize(shallow(t.target));
-  return (t as { args: Type[] }).args[0];
+  return t;
 }
 
 function isRefType(type: Type): boolean {
@@ -1854,4 +1855,16 @@ function takeFromBase(source: StructValue, result: Value[], given: ReadonlySet<n
     result[index] = moved[index] ? source.fields[index] : copyValue(source.fields[index]);
     if (moved[index]) source.fields[index] = MOVED;
   }
+}
+
+/** The set that `|`, `&`, `-`, or `^` makes of two sets, of clones of their elements, in the order they iterate. */
+function setOperation(op: string, a: SetValue, b: SetValue, elem: Type): SetValue {
+  const result = new SetValue(a.sorted);
+  const add = (hash: string, value: Value): void => void result.entries.set(hash, cloneValue(elem, value));
+  for (const [hash, value] of a.entries) {
+    const inB = b.entries.has(hash);
+    if (op === '|' || (op === '&' && inB) || ((op === '-' || op === '^') && !inB)) add(hash, value);
+  }
+  if (op === '|' || op === '^') for (const [hash, value] of b.entries) if (!a.entries.has(hash)) add(hash, value);
+  return result;
 }

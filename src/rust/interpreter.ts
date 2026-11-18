@@ -5,7 +5,7 @@ import { Formatter, type Spec } from './fmt';
 import { normalize } from './infer';
 import type { Module, Program } from './items';
 import { type NativeContext, NATIVES } from './natives';
-import { rangeIterator, toIterator } from './natives/iterators';
+import { toIterator } from './natives/iterators';
 import { cloneValue, compareValues, setUserImpls, valuesEqual } from './ops';
 import { ControlSignal, FmtFailure, Frame, type FunctionInfo, type Runtime, RustPanic } from './runtime';
 import { concreteType, matchConcrete, typeKey } from './runtimeTypes';
@@ -29,7 +29,6 @@ import {
   FormatterValue,
   isPlace,
   type Place,
-  type RangeValue,
   StructValue,
   TurtleValue,
   UNIT_VALUE,
@@ -69,8 +68,8 @@ export class Interpreter implements CallSupport {
       },
     });
     setUserImpls({
-      eq: (type, a, b) => {
-        const found = this.userTraitMethod('PartialEq', type, 'eq');
+      eq: (type, a, b, rhs) => {
+        const found = this.userTraitMethod('PartialEq', type, 'eq', rhs);
         if (!found) return;
         return this.callDispatched(found, type, [a, b]) as boolean;
       },
@@ -131,14 +130,18 @@ export class Interpreter implements CallSupport {
   }
 
   /** The impl method that a trait method runs for a concrete type, or the trait's default method. */
-  private dispatch(trait: TraitDef, self: Type, name: string): Dispatch | undefined {
-    const key = `${trait.path}#${(trait as { id?: number }).id ?? ''}|${typeKey(self)}|${name}`;
+  private dispatch(trait: TraitDef, self: Type, name: string, traitArg?: Type): Dispatch | undefined {
+    const argKey = traitArg ? typeKey(traitArg) : '';
+    const key = `${trait.path}#${(trait as { id?: number }).id ?? ''}|${typeKey(self)}|${name}|${argKey}`;
     if (this.dispatchCache.has(key)) return this.dispatchCache.get(key);
     let result: Dispatch | undefined;
     for (const impl of this.program.impls) {
       if (impl.trait?.trait !== trait) continue;
       const subst = new Map<TypeParam, Type>();
-      if (!matchConcrete(impl.selfType, self, new Set(impl.params), subst)) continue;
+      const params = new Set(impl.params);
+      if (!matchConcrete(impl.selfType, self, params, subst)) continue;
+      const implArg = impl.trait.args[0];
+      if (traitArg && implArg && !matchConcrete(implArg, traitArg, params, subst)) continue;
       const fn = impl.methods.get(name);
       if (fn) result = { fn, implArgs: impl.params.map((param) => subst.get(param) as Type) };
       break;
@@ -148,12 +151,12 @@ export class Interpreter implements CallSupport {
   }
 
   /** A program's own impl method of a standard trait for a type, for the type-directed operations. */
-  private userTraitMethod(traitName: string, type: Type, method: string): Dispatch | undefined {
+  private userTraitMethod(traitName: string, type: Type, method: string, traitArg?: Type): Dispatch | undefined {
     const trait = this.program.builtinTraits.get(traitName);
     if (!trait) return undefined;
     const t = normalize(shallow(type));
     if (t.kind !== 'adt' || (t.def.module as Module | undefined)?.isStd) return undefined;
-    return this.dispatch(trait, t, method);
+    return this.dispatch(trait, t, method, traitArg);
   }
 
   private callDispatched(dispatch: Dispatch, self: Type, args: Value[]): Value {
@@ -232,10 +235,6 @@ export class Interpreter implements CallSupport {
 
   toIter(value: Value, from: Type): Value {
     return toIterator(this, value, from);
-  }
-
-  rangeIter(range: RangeValue, elem: Type): Value {
-    return rangeIterator(range, elem);
   }
 
   // -------------------------------------------------------------------------------------------------------------------

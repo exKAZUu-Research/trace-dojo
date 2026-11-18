@@ -3,10 +3,11 @@ import { Checker } from './checker';
 import { Converter } from './convert';
 import { setPseudoTypes } from './infer';
 import { ItemCollector, Program, resolveImports } from './items';
-import { intoIterItem, intoIterShape } from './iterTypes';
+import { intoIterItem, intoIterShape, iterationBound } from './iterTypes';
 import { turtleImplSource } from './natives/core';
 import { parseRust, parseWith } from './parse';
 import { STD_SOURCE } from './stdSource';
+import { infallibleConversion } from './traits';
 import { shallow, type Type } from './types';
 
 let stdItems: Item[] | undefined;
@@ -34,8 +35,10 @@ export function buildProgram(source: string, atomicRows: ReadonlySet<number> = n
   setupPrelude(program);
   setPseudoTypes({
     parseError: (target) => parseErrorType(program, target),
-    intoItem: (type) => intoIterItem(type),
-    intoShape: (type) => intoIterShape(program, type),
+    // A type parameter's or an opaque type's item stays `IntoItem<T>` unless its bound sets it.
+    intoItem: (type) => (isAbstract(type) ? iterationBound(type)?.item : intoIterItem(type)),
+    intoShape: (type) => (isAbstract(type) ? undefined : intoIterShape(program, type)),
+    tryFromError: (source, target) => tryFromErrorType(program, source, target),
   });
   const crate = parseRust(source);
   collector.collectCrate(crate, program.root);
@@ -74,4 +77,18 @@ function parseErrorType(program: Program, target: Type): Type | undefined {
       return undefined;
     }
   }
+}
+
+/** The error of `TryFrom<source>` for `target`: none for a conversion that `From` also makes, else by the types. */
+function tryFromErrorType(program: Program, source: Type, target: Type): Type {
+  const s = shallow(source);
+  const t = shallow(target);
+  if (infallibleConversion(s, t)) return program.builtinType('Infallible');
+  if (t.kind === 'char') return program.builtinType('CharTryFromError');
+  if (s.kind === 'char') return program.builtinType('TryFromCharError');
+  return program.builtinType('TryFromIntError');
+}
+
+function isAbstract(type: Type): boolean {
+  return type.kind === 'param' || type.kind === 'opaque';
 }
