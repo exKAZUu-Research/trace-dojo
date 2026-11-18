@@ -1,0 +1,13 @@
+function f<T = U, U = number>(x: T): T { return x; }
+type Box<T = T> = { v: T };
+interface Q<T = Array<{ x: U }>, U = number> { t: T }
+function h<T, U = 1, V = Array<V>, W = { w: W }>(): void {}
+type F = <T = (u: U) => void, U = 1>() => void;
+type C<T = U extends infer V ? V : never, U = 1> = T;
+type Sh<T = <T>(t: T) => T> = T;
+interface Nd<T = Nd> { v?: T }
+type A<T = B> = T;
+type B<U = A> = U;
+type Ok<T, U = T, V = Array<U>> = [T, U, V];
+const ok: Ok<number> = [1, 2, [3]];
+console.log(f(3), h, ok);

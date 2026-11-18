@@ -1,0 +1,6 @@
+(1,31): error TS2706: Required type parameters may not follow optional type parameters.
+(2,24): error TS2706: Required type parameters may not follow optional type parameters.
+(3,15): error TS2706: Required type parameters may not follow optional type parameters.
+(4,19): error TS2706: Required type parameters may not follow optional type parameters.
+(5,20): error TS2706: Required type parameters may not follow optional type parameters.
+(7,20): error TS2706: Required type parameters may not follow optional type parameters.

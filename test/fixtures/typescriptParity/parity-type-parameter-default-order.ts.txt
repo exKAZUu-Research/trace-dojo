@@ -1,0 +1,22 @@
+class K<T, U = T> {
+  constructor(public t: T, public u: U) {}
+}
+type Ok<T, U = T, V = Array<U>> = [T, U, V];
+function wrap<T, R = { value: T }>(value: T, make: (v: T) => R): R {
+  return make(value);
+}
+function f<T extends U, U = number>(x: T): T {
+  return x;
+}
+class Greeter {
+  constructor(public name: string) {}
+  greet(this: Greeter, suffix: string): string {
+    return `${this.name}${suffix}`;
+  }
+}
+const ok: Ok<number> = [1, 2, [3]];
+const greet = function (this: { v: number }, x: number): number {
+  return this.v + x;
+};
+console.log(new K(1, 'a'), ok, wrap(2, (v) => ({ value: v * 10 })), f(3));
+console.log(new Greeter('Ann').greet('!'), greet.call({ v: 1 }, 2));

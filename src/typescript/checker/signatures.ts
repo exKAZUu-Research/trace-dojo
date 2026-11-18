@@ -26,12 +26,16 @@ import {
 /** The declarations that may be a get or set accessor: in a class, an interface, or an object type. */
 const accessorDeclarationTypes = new Set(['method_definition', 'method_signature', 'abstract_method_signature']);
 const constructSignatureTypes = new Set(['construct_signature', 'constructor_type']);
+const typeNameDeclarationParents = new Set(['type_parameter', 'mapped_type_clause', 'infer_type']);
 
 /** Resolves the signatures and type parameters that function-like and generic declarations declare. */
 export class Signatures {
   private readonly signatureCache = new Map<number, Signature>();
   /** The constraint nodes being resolved, by node. */
   private readonly resolvingConstraints = new Set<number>();
+  /** The default nodes being resolved, and those found to refer to themselves while they resolve, by node. */
+  private readonly resolvingDefaults = new Set<number>();
+  private readonly circularDefaults = new Set<number>();
 
   constructor(private readonly c: Checker) {}
 
@@ -356,7 +360,7 @@ export class Signatures {
       id: newTypeId(),
       name: node.childForFieldName('name')?.text ?? 'T',
       constraint: constraintNode ? () => this.declaredConstraint(constraintNode) : undefined,
-      default: defaultNode ? () => this.c.typeNodes.typeFromNode(named(defaultNode)[0]) : undefined,
+      default: defaultNode ? () => this.declaredDefault(defaultNode) : undefined,
     };
   }
 
@@ -375,12 +379,20 @@ export class Signatures {
   }
 
   private checkTypeParameterDeclaration(declaration: TreeNode, parameter: TypeParameter): void {
+    this.checkTypeParameterOrder(declaration);
     const constraintNode = declaration.childForFieldName('constraint');
     if (constraintNode) this.c.typeNodes.typeFromNode(named(constraintNode)[0]);
     const defaultNode = declaration.childForFieldName('value');
     if (!defaultNode) return;
     const defaultTypeNode = named(defaultNode)[0];
-    const defaultType = this.c.typeNodes.typeFromNode(defaultTypeNode);
+    // The written type resolves first, as in tsc, so that of two defaults that refer to each other, the one this
+    // declaration's default refers to is the one found circular.
+    this.c.typeNodes.typeFromNode(defaultTypeNode);
+    const defaultType = this.declaredDefault(defaultNode);
+    if (this.circularDefaults.has(defaultNode.id)) {
+      this.c.error(defaultTypeNode, `型パラメーター '${parameter.name}' の既定値が循環しています。`);
+      return;
+    }
     const constraint = parameter.constraint?.();
     if (!constraint) return;
     // Only the parameter itself stands for its default; the constraint may still refer to the other parameters.
@@ -390,6 +402,44 @@ export class Signatures {
         defaultTypeNode,
         `型 '${this.c.print(this.c.widenLiteralForMessage(defaultType, instantiated))}' は制約 '${this.c.print(instantiated)}' を満たしていません。`
       );
+  }
+
+  /**
+   * Reports a type parameter without a default after one with a default, and a default that refers to its own or a later
+   * type parameter of its list, which callers could not have given yet.
+   */
+  private checkTypeParameterOrder(declaration: TreeNode): void {
+    const list = declaration.parent ? named(declaration.parent) : [declaration];
+    const index = list.findIndex((sibling) => sibling.id === declaration.id);
+    const defaultNode = declaration.childForFieldName('value');
+    if (!defaultNode) {
+      if (list.slice(0, index).some((sibling) => sibling.childForFieldName('value')))
+        this.c.error(declaration, '既定値のある型パラメーターの後に、既定値のない型パラメーターは書けません。');
+      return;
+    }
+    const undeclared = new Set(list.slice(index).map((sibling) => sibling.id));
+    for (const reference of typeReferencesIn(defaultNode)) {
+      const symbol = this.c.scopeOf(reference).lookupType(reference.text);
+      if (symbol?.typeDeclarations.some((typeDeclaration) => undeclared.has(typeDeclaration.id)))
+        this.c.error(reference, '型パラメーターの既定値では、それより前に宣言された型パラメーターしか参照できません。');
+    }
+  }
+
+  /**
+   * A type parameter's default, which reads as `unknown` where it is needed while it resolves, as in
+   * `type Tree<T = Tree> = T`, whose `Tree` takes the default of `T`; the declaration then reports it as circular.
+   */
+  private declaredDefault(defaultNode: TreeNode): Type {
+    if (this.resolvingDefaults.has(defaultNode.id)) {
+      this.circularDefaults.add(defaultNode.id);
+      return unknownType;
+    }
+    this.resolvingDefaults.add(defaultNode.id);
+    try {
+      return this.c.typeNodes.typeFromNode(named(defaultNode)[0]);
+    } finally {
+      this.resolvingDefaults.delete(defaultNode.id);
+    }
   }
 
   /**
@@ -453,6 +503,12 @@ function withRequiredPrefix(parameters: Parameter[], nodes: TreeNode[]): Paramet
       ? { ...parameter, optional: false, type: unionOf([parameter.type, undefinedType]) }
       : parameter
   );
+}
+
+/** The names that a type node refers to, without the names it declares, as `U` in `<U>(u: U) => U` or `infer U`. */
+function typeReferencesIn(node: TreeNode): TreeNode[] {
+  if (node.type === 'type_identifier') return typeNameDeclarationParents.has(node.parent?.type ?? '') ? [] : [node];
+  return named(node).flatMap((child) => typeReferencesIn(child));
 }
 
 /** The parameter declarations of a function-like node, a `this` parameter included. */
