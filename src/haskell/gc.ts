@@ -163,12 +163,12 @@ function pushRoots(runtime: Runtime, push: Push): void {
   for (const frame of runtime.machine.stack) pushStackFrame(frame, scannedEnvs, push);
 }
 
-// code-gauge-allow functionCognitiveComplexity 20 -- One branch per kind of evaluator frame that holds values, including pending IO results.
+// code-gauge-allow functionCognitiveComplexity 21 -- One branch per kind of live evaluator frame that holds values, including pending IO results.
 function pushStackFrame(frame: Frame, scannedEnvs: Set<Env>, push: Push): void {
   if (frame.k === 'update' && frame.code) pushRefs(freeVarsOf(frame.code), frame.env, push);
   else if (frame.k === 'apply' || frame.k === 'prim') for (const arg of frame.args) push(arg);
   else if (frame.k === 'ioBind' || frame.k === 'ioThen') push(frame.next);
-  else if (frame.k === 'do') {
+  else if (frame.k === 'do' && !frame.tailCalled) {
     if (!frame.discardResult) push(frame.result);
     pushPreparedActions(frame.prefix, push, frame.index);
   } else if (frame.k === 'deferredDo') {

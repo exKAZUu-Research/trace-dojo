@@ -138,3 +138,58 @@ main=do
     finalTurtles: result.finalTurtles,
   });
 });
+
+test.each([
+  { name: 'one consumed turtle', xs: '[0::Int]', tail: 'walk ts' },
+  { name: 'two consumed turtles', xs: '[1,0::Int]', tail: 'walk ts' },
+  { name: 'three consumed turtles', xs: '[2,1,0::Int]', tail: 'walk ts' },
+  { name: 'seven consumed turtles', xs: '[6,5..0::Int]', tail: 'walk ts' },
+  { name: 'nested tail block', xs: '[2,1,0::Int]', tail: 'do {walk ts}' },
+  { name: 'conditional tail block', xs: '[2,1,0::Int]', tail: 'if True then walk ts else pure ()' },
+])('retired tail-call scopes release $name before a turtle query', ({ xs, tail }) => {
+  const source = `main=make >>= walk
+make=mapM (\\x->newTurtleAt x 1) ${xs}
+walk []=do
+ r<-newTurtle
+ clear<-canMoveForward r
+ print clear
+walk (t:ts)=do
+ turnRight t
+ ${tail}`;
+  const result = traceProgram('haskell', source, source);
+  expect(result.stdout).toBe('True\n');
+  expect(result.uncaughtException).toBeUndefined();
+  expect(result.traceItems.find((item) => item.line === 5)?.turtles).toEqual([expect.objectContaining({ x: 0, y: 0 })]);
+  expect(executeProgram('haskell', source)).toMatchObject({
+    kind: 'executed',
+    stdout: 'True\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('a reusable IO action still retains its captured turtles across tail calls', () => {
+  const source = `main=do
+ action<-prepare
+ action
+ action
+prepare=do
+ ts<-mapM (\\x->newTurtleAt x 1) [1,0::Int]
+ pure(walk ts)
+walk []=do
+ r<-newTurtle
+ clear<-canMoveForward r
+ print clear
+walk (t:ts)=do
+ turnRight t
+ walk ts`;
+  const result = traceProgram('haskell', source, source);
+  expect(result.stdout).toBe('False\nFalse\n');
+  expect(result.uncaughtException).toBeUndefined();
+  expect(result.finalTurtles).toHaveLength(2);
+  expect(executeProgram('haskell', source)).toMatchObject({
+    kind: 'executed',
+    stdout: 'False\nFalse\n',
+    uncaughtException: undefined,
+    finalTurtles: result.finalTurtles,
+  });
+});
