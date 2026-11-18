@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 571 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 573 -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import { byteAt, lower, untilNul } from './bytes';
 import { callableClosureName, callValue, checkCallable, explainCallable } from './callables';
@@ -314,29 +314,29 @@ defineFunction('function_exists(string $function): bool', ({ args }) =>
 );
 defineFunction(
   'func_get_args(): array',
-  () => {
-    const frame = rt().frame;
-    if (!frame.fn) throwError('Error', 'func_get_args() cannot be called from the global scope');
+  ({ dynamic }) => {
+    checkArgumentFunction('func_get_args', dynamic);
     return PhpArray.list(currentArgs());
   },
   true
 );
 defineFunction(
   'func_num_args(): int',
-  () => {
-    const frame = rt().frame;
-    if (!frame.fn) throwError('Error', 'func_num_args() must be called from a function context');
+  ({ dynamic }) => {
+    checkArgumentFunction('func_num_args', dynamic);
     return BigInt(currentArgs().length);
   },
   true
 );
 defineFunction(
   'func_get_arg(int $position): mixed',
-  ({ args }) => {
-    if (!rt().frame.fn) throwError('Error', 'func_get_arg() cannot be called from the global scope');
-    const values = currentArgs();
+  ({ args, dynamic }) => {
     const position = Number(args[0]);
-    if (position < 0 || position >= values.length) {
+    if (position < 0)
+      throwError('ValueError', 'func_get_arg(): Argument #1 ($position) must be greater than or equal to 0');
+    checkArgumentFunction('func_get_arg', dynamic);
+    const values = currentArgs();
+    if (position >= values.length) {
       throwError(
         'ValueError',
         'func_get_arg(): Argument #1 ($position) must be less than the number of the arguments passed to the currently executed function'
@@ -745,6 +745,15 @@ defineFunction('fprintf(resource $stream, string $format, mixed ...$values): int
   const stream = args[0] as PhpObject;
   return BigInt(formatPrintf(args[1] as string, args.slice(2), (output) => writeStream(stream, output)).length);
 });
+function checkArgumentFunction(name: string, dynamic: boolean | undefined): void {
+  if (!rt().frame.fn) {
+    const message =
+      name === 'func_num_args' ? 'must be called from a function context' : 'cannot be called from the global scope';
+    throwError('Error', `${name}() ${message}`);
+  }
+  if (dynamic) throwError('Error', `Cannot call ${name}() dynamically`);
+}
+
 defineFunction(
   'get_defined_vars(): array',
   () => {
@@ -759,8 +768,7 @@ defineFunction(
   true
 );
 
-markDirectOnly('function', 'func_get_args', 'func_get_arg', 'func_num_args');
-markDirectOnly('always', 'get_defined_vars');
+markDirectOnly('get_defined_vars');
 
 function checkDelay(value: bigint, name: string, parameter: string): void {
   if (value < 0n) throwError('ValueError', `${name}(): Argument #1 ($${parameter}) must be greater than or equal to 0`);

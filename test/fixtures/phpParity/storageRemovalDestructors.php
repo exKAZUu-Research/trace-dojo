@@ -29,3 +29,37 @@ foreach ([new NativeIdentityStorage, new CallbackHashStorage] as $storage) {
     foreach ($storage as $entry) echo $storage->getInfo(), ';';
     echo "\n";
 }
+
+class RemovedKey {
+    function __construct(public $id) {}
+    function __destruct() { echo 'key:', $this->id, ';'; }
+}
+class RemovedInfo {
+    function __construct(private $name) {}
+    function __destruct() { echo "info:$this->name;"; throw new Exception($this->name); }
+}
+foreach ([false, true] as $sourceCustom) {
+    foreach ([false, true] as $keepCustom) {
+        foreach ([false, true] as $keepMiddle) {
+            $storage = $sourceCustom ? new CallbackHashStorage : new NativeIdentityStorage;
+            $keep = $keepCustom ? new CallbackHashStorage : new NativeIdentityStorage;
+            $storage[new RemovedKey(1)] = new RemovedInfo('first');
+            $storage[$middle = (object) ['id' => 2]] = 'middle';
+            $storage[$last = (object) ['id' => 3]] = 'last';
+            if ($keepMiddle) $keep[$middle] = true;
+            $storage->next();
+            try { $storage->removeAllExcept($keep); }
+            catch (Exception $error) { echo 'caught:', $error->getMessage(), ';'; }
+            echo count($storage), ':', $storage->key(), ';';
+            foreach ($storage as $key) echo $storage->getInfo(), ';';
+            echo "\n";
+        }
+    }
+}
+$storage = new SplObjectStorage;
+$storage[new stdClass] = new RemovedInfo('first');
+$storage[new stdClass] = new RemovedInfo('second');
+try { $storage->removeAllExcept(new SplObjectStorage); }
+catch (Exception $error) {
+    echo $error->getMessage(), '/', $error->getPrevious()->getMessage(), ':', count($storage), "\n";
+}

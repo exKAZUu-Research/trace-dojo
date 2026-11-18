@@ -40,3 +40,7 @@ int(97)
 {closure:/main.php:31}(): Argument #1 ($value) could not be passed by reference
 {closure:/main.php:34}(): Argument #1 ($value) could not be passed by reference
 ClosureOwner::{closure:ClosureOwner::method():37}(): Argument #1 ($value) could not be passed by reference
+variadicRef(): Argument #2 could not be passed by reference
+MethodRef::variadic(): Argument #1 could not be passed by reference
+{closure:/main.php:43}(): Argument #1 could not be passed by reference
+variadicRef(): Argument #2 could not be passed by reference

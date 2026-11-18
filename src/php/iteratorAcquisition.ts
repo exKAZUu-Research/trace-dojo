@@ -1,7 +1,7 @@
 import { callMethod, consumeInvokedResult } from './callables';
 import { throwError, withPendingException } from './errors';
 import { PhpThrow, rt } from './runtime';
-import { type PhpArray, type PhpClass, PhpObject } from './values';
+import { type PhpArray, type PhpClass, PhpObject, type Value } from './values';
 
 interface AcquiredIterator {
   iterator: PhpObject;
@@ -82,6 +82,19 @@ function throwInvalidIterator(object: PhpObject): never {
 export function newEngineIterator(owner: PhpObject): PhpObject {
   const runtime = rt();
   const handle = runtime.newObject(runtime.classes.get('internaliterator') as PhpClass);
-  handle.internal = { held: () => [owner] };
+  handle.internal = new EngineIteratorOwner(owner);
   return handle;
+}
+
+export class EngineIteratorOwner {
+  constructor(readonly object: PhpObject) {}
+
+  held(): Value[] {
+    return [this.object];
+  }
+
+  beforeRelease(): boolean {
+    const state = this.object.internal as { releaseTraversal?: (object: PhpObject) => boolean } | undefined;
+    return state?.releaseTraversal?.(this.object) ?? false;
+  }
 }

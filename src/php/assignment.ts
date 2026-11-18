@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 847 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 857 -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import type { Expr, ListItem } from './ast';
 import { foreachSubjectWritable, hasReferenceItem } from './astAnalysis';
@@ -29,6 +29,7 @@ import {
   resolveClassRef,
   stringOffset,
 } from './interp';
+import { compiledOperandRow, dimensionWriteRow } from './opcodeRows';
 import { arithmetic, bitwise, concat, toInt, toKey, toStr } from './operators';
 import {
   type BeforeOffsetGet,
@@ -128,7 +129,7 @@ function dimensionPlace(e: Extract<Expr, { k: 'idx' }>, mode: PlaceMode): Place 
   const readKey = e.index === undefined ? undefined : prepareOperand(e.index);
   const resolve = (writeMode: WriteMode, beforeOffsetGet?: BeforeOffsetGet, warning?: UpdateWarning): Place => {
     const { key, keyWarning } = readDimensionKey(readKey, warning);
-    const row = e.index?.row ?? e.row;
+    const row = dimensionWriteRow(e);
     rt().row = row;
     const fetch = nestedPlace(parent, writeMode);
     rt().row = row;
@@ -142,7 +143,7 @@ function dimensionPlace(e: Extract<Expr, { k: 'idx' }>, mode: PlaceMode): Place 
     }
     if (keyWarning) throw keyWarning;
     if (container instanceof PhpArray) return new ElementPlace(container, key === undefined ? undefined : toKey(key));
-    return stringOffsetPlace(fetch, container, key);
+    return stringOffsetPlace(fetch, container, key, row);
   };
   if (mode !== 'deferred') return resolve(mode);
   return deferredPlace(resolve, () => {
@@ -680,7 +681,7 @@ function nativeArrayNestedPlace(object: PhpObject, storage: NativeArrayStorage, 
 }
 
 // code-gauge-allow functionCognitiveComplexity 28 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
-function stringOffsetPlace(parent: Place, text: string, key: Value | undefined): Place {
+function stringOffsetPlace(parent: Place, text: string, key: Value | undefined, row: number): Place {
   const assign = (value: () => Value): Value => {
     if (key === undefined) throwError('Error', '[] operator not supported for strings');
     const position = stringOffset(text, key) as number;
@@ -707,6 +708,7 @@ function stringOffsetPlace(parent: Place, text: string, key: Value | undefined):
   };
   return {
     get: (operation) => {
+      rt().row = row;
       if (key === undefined) throwError('Error', '[] operator not supported for strings');
       stringOffset(text, key);
       const message =
@@ -878,10 +880,11 @@ export function assignReference(target: Expr, source: Expr): Value {
 
 export function destructureAssignment(target: Extract<Expr, { k: 'list' }>, expression: Expr): Value {
   const runtime = rt();
-  if (!hasReferenceItem(target)) return destructure(target, ev(expression));
+  const row = isCompiledVariable(expression) ? target.row : compiledOperandRow(expression);
+  if (!hasReferenceItem(target)) return destructure(target, ev(expression), undefined, row);
   if (foreachSubjectWritable(expression)) {
     const source = nestedPlace(placeOf(expression, 'write', true), 'write');
-    return destructure(target, source.get('nested') ?? null, source);
+    return destructure(target, source.get('nested') ?? null, source, row);
   }
   const call = expression.k === 'call' || expression.k === 'mcall' || expression.k === 'scall';
   runtime.lastReturnRef = undefined;
@@ -889,7 +892,7 @@ export function destructureAssignment(target: Extract<Expr, { k: 'list' }>, expr
   const returned = call ? runtime.lastReturnRef : undefined;
   runtime.lastReturnRef = undefined;
   if (call && !returned) notice('Attempting to set reference to non referenceable value');
-  return destructure(target, value, returned ? new RefPlace(returned) : undefined);
+  return destructure(target, value, returned ? new RefPlace(returned) : undefined, row);
 }
 
 export function destructure(
@@ -910,11 +913,20 @@ export function destructure(
       continue;
     }
     const key = item.key === undefined ? position++ : toKey(ev(item.key));
-    rt().row = item.key?.row ?? fetchRow;
+    rt().row = item.key ? compiledOperandRow(item.key) : fetchRow;
     destructureItem(item, value, key, source !== undefined);
-    fetchRow = item.target.row;
+    fetchRow = destructuringWriteRow(item.target);
   }
   return value;
+}
+
+function destructuringWriteRow(target: Expr): number {
+  while (target.k === 'list') {
+    const item = target.items.findLast((element) => element !== undefined);
+    if (!item) return target.row;
+    target = item.target;
+  }
+  return target.row;
 }
 
 function destructureItem(item: ListItem, value: Value, key: Key, writable: boolean): void {

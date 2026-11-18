@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 701 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 702 -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import { LIMITS } from '../interpreter/limits';
 import type { FunctionDecl } from './ast';
@@ -288,8 +288,7 @@ function invokeNative(
       Boolean(inline || target.directOverload),
       record
     );
-    if (target.dynamic && (fn.directOnly === 'always' || (fn.directOnly === 'function' && runtime.frame.fn)))
-      throwError('Error', `Cannot call ${fn.name}() dynamically`);
+    if (target.dynamic && fn.directOnly) throwError('Error', `Cannot call ${fn.name}() dynamically`);
     for (let index = 0; index < values.length; index++) {
       if (values[index] === undefined && fn.params[index]?.byRef)
         refs[index] = Ref.temporary(nativeDefault(fn.params[index].nativeDefault));
@@ -309,6 +308,7 @@ function invokeNative(
       named,
       directOverload: target.directOverload,
       compiledCallback: target.compiledCallback,
+      dynamic: target.dynamic,
       row: inline || target.frameless ? row : undefined,
       discardResult: Boolean(inline && discardResult),
     });
@@ -635,7 +635,7 @@ function invokeUser(
       }
       throw error;
     }
-    result = completeUserReturn(decl, frame, result, name);
+    result = completeUserReturn(decl, frame, result, target);
     if (discardResult) {
       const returning = frame.returning;
       frame.returning = undefined;
@@ -671,10 +671,17 @@ function invokeUser(
   return returned;
 }
 
-function completeUserReturn(decl: FunctionDecl, frame: Frame, value: Value, name: string): Value {
+function completeUserReturn(decl: FunctionDecl, frame: Frame, value: Value, target: CallTarget): Value {
   const runtime = rt();
   runtime.row = frame.returnRow ?? decl.endRow;
-  const result = decl.returnType ? checkReturn(value, decl.returnType, name, frame) : value;
+  if (decl.returnType?.k === 'named' && decl.returnType.name === 'never') {
+    const subject = frame.scope ? 'method' : 'function';
+    throwError(
+      'TypeError',
+      `${functionDisplayName(target, true)}(): never-returning ${subject} must not implicitly return`
+    );
+  }
+  const result = decl.returnType ? checkReturn(value, decl.returnType, functionDisplayName(target), frame) : value;
   if (!decl.byRefReturn) return decl.returnType ? result : share(result);
   if (frame.returning instanceof Ref) {
     if (decl.returnType) frame.returning.assign(result);
@@ -988,9 +995,6 @@ function checkParam(
 
 function checkReturn(value: Value, type: TypeDecl, name: string, frame: Frame): Value {
   if (type.k === 'named' && type.name === 'void') return null;
-  if (type.k === 'named' && type.name === 'never') {
-    throwError('TypeError', `${name}(): never-returning function must not implicitly return`);
-  }
   if (
     frame.returning instanceof Ref &&
     frame.returning.typeOwners().length > 0 &&

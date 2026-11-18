@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 833 -- Keeps one PHP runtime concern and its shared helpers in one module.
+// code-gauge-allow-file fileNcss 834 -- Keeps one PHP runtime concern and its shared helpers in one module.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import type { TurtleState } from '../interpreter/turtleWorld';
 import { type ArrayCursor, ArrayOrder, type ArrayRebuild } from './arrayOrder';
@@ -519,6 +519,7 @@ export interface NativeContext {
   /** Named arguments that a variadic parameter collected. */
   named?: Map<string, Value>;
   compiledCallback?: boolean;
+  dynamic?: boolean;
   /** The row of the call when code called the function directly, for a function whose call PHP compiles away. */
   row?: number;
 }
@@ -533,7 +534,7 @@ export interface NativeFunction {
   impl: (ctx: NativeContext) => Value;
   /** Whether the function reads its caller's variables (compact, extract, func_get_args). */
   needsCaller?: boolean;
-  directOnly?: 'always' | 'function';
+  directOnly?: boolean;
   /**
    * Whether PHP compiles eligible direct calls into an instruction of their own (strlen, count, call_user_func),
    * so that stack traces show no frame for it and what it calls shows the caller's line.

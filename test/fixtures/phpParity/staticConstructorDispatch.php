@@ -38,3 +38,20 @@ foreach ([
 }
 $protectedChild = new class extends ProtectedChild { function __construct() {} };
 $protectedChild->invoke();
+
+class OwnPrivateContext {
+    private function __construct() { echo "private body\n"; }
+    static function tryFromChild() { (new PrivateSubclass)->retry(); }
+    function retry() { self::__construct(); }
+}
+class PrivateSubclass extends OwnPrivateContext { function __construct() {} }
+try { OwnPrivateContext::tryFromChild(); }
+catch (Error $error) { echo $error->getMessage(), "\n"; }
+abstract class AbstractConstructor { abstract public function __construct(); }
+interface ConstructorContract { function __construct(); }
+class ConcreteConstructor extends AbstractConstructor implements ConstructorContract {
+    function __construct() { parent::__construct(); ConstructorContract::__construct(); }
+}
+new ConcreteConstructor;
+try { AbstractConstructor::__construct(); }
+catch (Error $error) { echo $error->getMessage(), "\n"; }

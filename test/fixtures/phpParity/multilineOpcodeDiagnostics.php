@@ -62,3 +62,56 @@ echo $exception->getLine(), "\n";
 try { throw new
     Exception('multiline');
 } catch (Exception $error) { echo $error->getLine(), ':', $error->getMessage(), "\n"; }
+
+$floatKey = 3.5;
+$a1 = [
+    1.5
+    =>
+    1];
+$a2 = [
+    $floatKey
+    =>
+    1];
+try {
+    $badKey = [];
+    $a3 = [
+        $badKey
+        =>1];
+} catch (TypeError $error) { echo $error->getLine(), ':', $error->getMessage(), "\n"; }
+try {
+    $a4 = [
+        new stdClass
+        =>1];
+} catch (TypeError $error) { echo $error->getLine(), ':', $error->getMessage(), "\n"; }
+try {
+    $nestedArray = [1];
+    $nestedArray
+        [0]
+        []
+        = 2;
+} catch (Error $error) { echo $error->getLine(), ':', $error->getMessage(), "\n"; }
+try {
+    $nestedString = "ab";
+    $nestedString
+        [0]
+        [0]
+        = 2;
+} catch (Error $error) { echo $error->getLine(), ':', $error->getMessage(), "\n"; }
+[[$first],
+ [$second]] = [[], []];
+const MANY = 1,
+      OTHER = 2,
+      MANY = 3;
+$exception = new
+    class extends Exception {};
+echo $exception->getLine(), "\n";
+$exception = new
+    (
+      'Exception'
+    );
+echo $exception->getLine(), "\n";
+$property = new stdClass;
+$property
+    ->unset
+    .=
+    'test';

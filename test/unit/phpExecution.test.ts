@@ -587,6 +587,18 @@ test.each([
   expect(run(`<?php echo 'before'; ${source}`)).toMatchObject({ kind: 'compileError', diagnostics: [{ message }] });
 });
 
+test.each([
+  ['new final class {};', 'final'],
+  ['new abstract class {};', 'abstract'],
+  ['new final readonly class {};', 'final'],
+  ['new abstract final class {};', 'abstract'],
+])('rejects forbidden anonymous class modifiers before execution: %s', (source, modifier) => {
+  expect(run(`<?php echo 'before';\n${source}`)).toMatchObject({
+    kind: 'compileError',
+    diagnostics: [{ row: 1, message: `Cannot use the ${modifier} modifier on an anonymous class` }],
+  });
+});
+
 test('rejects directly declared abstract methods on anonymous classes before execution', () => {
   expect(run("<?php echo 'before';\nnew class {\nabstract function rejected();\n};")).toMatchObject({
     kind: 'compileError',

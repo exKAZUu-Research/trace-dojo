@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 949 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 950 -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import {
   applyOperator,
@@ -48,6 +48,7 @@ import * as conversionsModule from './conversions';
 import { deprecated, throwError, type UpdateWarning, warn, withOperandWarnings, withPendingException } from './errors';
 import { acquireIterator } from './iteratorAcquisition';
 import { constantDeprecation } from './native';
+import { compiledOperandRow } from './opcodeRows';
 import {
   bitwiseNot,
   compare,
@@ -643,7 +644,7 @@ function insertArrayItem(array: PhpArray, item: Extract<Expr, { k: 'array' }>['i
     slot.isRef = true;
     slot.rc++;
   } else slot = share(ev(item.value));
-  const key = readKey === undefined ? undefined : readLiteralKey(item.key!, readKey);
+  const key = readKey === undefined ? undefined : readLiteralKey(item.key!, readKey, compiledOperandRow(item.value));
   const previous = key === undefined ? undefined : array.map.get(key);
   if (key !== undefined) array.setSlot(key, slot);
   else if (!array.append(slot))
@@ -652,11 +653,11 @@ function insertArrayItem(array: PhpArray, item: Extract<Expr, { k: 'array' }>['i
   if (!item.byRef) rt().spend();
 }
 
-function readLiteralKey(expression: Expr, read: () => Value): string | bigint {
+function readLiteralKey(expression: Expr, read: (row: number) => Value, row: number): string | bigint {
   const undefinedVariable =
     expression.k === 'var' && isCompiledVariable(expression) && !rt().frame.vars.has(expression.name);
-  const value = read();
-  rt().row = expression.row;
+  const value = read(row);
+  rt().row = row;
   return undefinedVariable ? '' : toKey(value);
 }
 

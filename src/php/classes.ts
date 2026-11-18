@@ -13,7 +13,7 @@ export { canAccessConstant, classConstant, setClassEvaluator } from './classCons
 import { lower } from './bytes';
 import { type ArgValue, asInternal, invoke } from './calls';
 import { foldedConstant, selectConstantBranch } from './constantDefaults';
-import { debugType, formatFloat, normalizeKeyString, toBool, valueName } from './conversions';
+import { formatFloat, normalizeKeyString, toBool, valueName } from './conversions';
 import { deprecated, notice, throwError, warn } from './errors';
 import { strictEquals } from './operators';
 import { share } from './places';
@@ -274,7 +274,7 @@ function addProperty(cls: PhpClass, ast: PropertyDeclAst, declarationScope = cls
     const expression = ast.defaultExpr;
     let cached: { value: Value } | undefined;
     decl.defaultValue = () => {
-      cached ??= { value: checkPropertyDefault(decl, evaluateInClass(expression, cls)) };
+      cached ??= { value: evaluatePropertyDefault(decl, expression, cls) };
       if (cached.value instanceof PhpArray) cached.value.persistentHolder = true;
       return share(cached.value);
     };
@@ -386,15 +386,18 @@ function propertyTypeError(parent: PropDecl, child: PhpClass, name: string, row:
   );
 }
 
-function checkPropertyDefault(decl: PropDecl, value: Value): Value {
+function evaluatePropertyDefault(decl: PropDecl, expression: Expr, scope: PhpClass): Value {
+  const runtime = rt();
+  const row = runtime.row;
+  const value = evaluateInClass(expression, scope);
+  runtime.row = row;
   if (!decl.type) return value;
   const coerced = coerce(value, decl.type, { strict: true, internal: false, scope: decl.cls });
-  if (coerced === NO_MATCH) {
-    throw new FatalError(
-      `Cannot use ${debugType(value)} as default value for property ${decl.cls.name}::$${decl.name} of type ${describePropertyType(decl)}`,
-      decl.cls.declaredRow
+  if (coerced === NO_MATCH)
+    throwError(
+      'TypeError',
+      `Cannot assign ${valueName(value)} to property ${decl.cls.name}::$${decl.name} of type ${describePropertyType(decl)}`
     );
-  }
   return coerced;
 }
 

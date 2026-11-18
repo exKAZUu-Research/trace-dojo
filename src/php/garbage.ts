@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 978 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 992 -- Holds the cases of one concern of the interpreter, which share their helpers.
 import type { TurtleState } from '../interpreter/turtleWorld';
 import { withCleanupExceptions, withPendingException } from './errors';
 import { type Frame, PhpThrow, type Runtime } from './runtime';
@@ -364,8 +364,8 @@ class Release {
     }
   }
 
-  // code-gauge-allow functionNcss 32 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
-  // code-gauge-allow functionCognitiveComplexity 19 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+  // code-gauge-allow functionNcss 34 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+  // code-gauge-allow functionCognitiveComplexity 21 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
   private releaseValue(item: unknown, pending: unknown[], onFailure: (error: PhpThrow) => void): void {
     if (item instanceof ReleaseFinish) {
       this.runtime.freeObject(item.object);
@@ -395,12 +395,26 @@ class Release {
       }
       const finish = this.prepare(item, onFailure);
       if (!finish) return;
+      if (item.internal !== undefined) this.releaseNative(item, onFailure);
       pending.push(finish);
       this.runtime.retiringObjects.add(item);
       const children: unknown[] = [];
       pushObject(item, children);
       this.enqueue(pending, children);
     }
+  }
+
+  private releaseNative(object: PhpObject, onFailure: (error: PhpThrow) => void): void {
+    const native = object.internal as { beforeRelease?: () => boolean } | undefined;
+    if (!native?.beforeRelease) return;
+    try {
+      if (!native.beforeRelease()) return;
+    } catch (error) {
+      if (!(error instanceof PhpThrow)) throw error;
+      onFailure(error);
+    }
+    this.roots = ownershipRoots(this.runtime);
+    this.unreachable.clear();
   }
 
   private enqueue(pending: unknown[], values: unknown[]): void {

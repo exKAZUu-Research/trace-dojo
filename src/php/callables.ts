@@ -1,7 +1,7 @@
-// code-gauge-allow-file fileNcss 643 -- Keeps one PHP runtime concern and its shared helpers in one module.
+// code-gauge-allow-file fileNcss 657 -- Keeps one PHP runtime concern and its shared helpers in one module.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import { placeOf } from './assignment';
-import type { Arg, Expr } from './ast';
+import type { Arg, Expr, ResolvedName } from './ast';
 import { hasNullsafeReceiver } from './astAnalysis';
 import { oneArgumentBuiltinOpcodes, simpleSprintfFormat } from './builtinCompiler';
 import builtinNames from './builtinNames.json';
@@ -73,7 +73,7 @@ export function evalArgs(
     values.push(value);
   };
   const frame = runtime.frame;
-  for (const [index, arg] of args.entries()) {
+  for (const arg of args) {
     const mark = frame.temporaries.length;
     const first = values.length;
     try {
@@ -150,7 +150,8 @@ export function evalArgs(
           add({ v: returned.v, ref: returned, name: arg.name });
           continue;
         }
-        const param = fn?.params[Math.min(position === -1 ? 0 : position, (fn?.params.length ?? 1) - 1)];
+        const paramIndex = referenceParameterIndex(fn?.params, position, arg.name);
+        const param = fn?.params[Math.min(paramIndex, fn.params.length - 1)];
         if (param?.preferRef) {
           add({ v: value, name: arg.name });
           continue;
@@ -161,10 +162,8 @@ export function evalArgs(
           continue;
         }
         const label = name ?? fn?.name ?? '';
-        const paramIndex =
-          arg.name === undefined ? index : (fn?.params.findIndex((param) => param.name === arg.name) ?? 0);
-        const paramName = fn?.params[Math.min(paramIndex, (fn?.params.length ?? 1) - 1)]?.name ?? '';
-        throwError('Error', `${label}(): Argument #${paramIndex + 1} ($${paramName}) could not be passed by reference`);
+        const paramLabel = param?.variadic ? '' : ` ($${param?.name ?? ''})`;
+        throwError('Error', `${label}(): Argument #${paramIndex + 1}${paramLabel} could not be passed by reference`);
       }
       const value = share(ev(arg.e));
       frame.temporaries.push(value);
@@ -174,6 +173,12 @@ export function evalArgs(
     }
   }
   return values;
+}
+
+function referenceParameterIndex(params: Callable['params'] | undefined, position: number, name?: string): number {
+  if (name === undefined || !params) return position;
+  const index = params.findIndex((param) => !param.variadic && param.name === name);
+  return index === -1 ? params.length - 1 : index;
 }
 
 function permitsTemporaryReference(e: Expr): boolean {
@@ -222,53 +227,16 @@ function claimArgumentTemporaries(frame: Frame, args: ArgValue[], first: number,
   }
 }
 
-// code-gauge-allow functionCognitiveComplexity 30 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
-// code-gauge-allow functionNcss 40 -- Keeps the ordered PHP cases together because each branch shares the same dispatch state.
 export function callExpression(e: Extract<Expr, { k: 'call' }>, discardResult = false): Value {
   const runtime = rt();
   runtime.row = e.row;
-  if (!('k' in e.fn)) {
-    const name = e.fn;
-    const fn =
-      runtime.functions.get(lower(name.name)) ??
-      (name.fallback ? runtime.functions.get(lower(name.fallback)) : undefined);
-    if (!fn) {
-      if (builtinNames.functions.includes(lower(name.fallback ?? name.name)))
-        throw new UnsupportedFeatureError(`PHP の組み込み関数（${name.fallback ?? name.name}）`);
-      throwError('Error', `Call to undefined function ${name.name}()`);
-    }
-    if (e.fcc) return closureFromCallable({ fn });
-    const format =
-      fn.kind === 'native' && !name.fallback && lower(fn.name) === 'sprintf' ? simpleSprintfFormat(e.args) : undefined;
-    if (format !== undefined) {
-      const reads = e.args.slice(1).map((arg) => prepareOperand(arg.e));
-      return renderSimpleSprintf(format, reads, e.row);
-    }
-    const specialized = specializedCall(fn, e.args);
-    const frameless = specialized === 'frameless';
-    const directOverload = frameless && fn.kind === 'native' && fn.shortParamsDirectOnly;
-    const inline = specialized === 'opcode' || (frameless && fn.name === 'strtr');
-    const row = inline && fn.name === 'strlen' ? e.args[0].e.row : e.row;
-    const args =
-      specialized && fn.name !== 'call_user_func' && fn.name !== 'call_user_func_array'
-        ? evalDeferredValueArgs(e.args, row)
-        : evalArgs(e.args, fn, fn.name);
-    runtime.row = row;
-    const callback = e.args[0]?.e;
-    const compiledCallback =
-      inline &&
-      ['call_user_func', 'call_user_func_array'].includes(fn.name) &&
-      callback?.k === 'lit' &&
-      typeof callback.v === 'string';
-    const result = invoke({ fn, inline, frameless, directOverload, compiledCallback }, args, row, discardResult);
-    runtime.frame.temporaries.push(result);
-    return result;
-  }
+  if (!('k' in e.fn)) return callNamedExpression(e, e.fn, discardResult);
   const callee = ev(e.fn);
   if (callee instanceof PhpObject || callee instanceof PhpArray) runtime.frame.temporaries.push(callee);
   runtime.row = e.initRow ?? e.row;
   const target = callTargetOf(callee, 'direct');
   if (e.fcc) return closureFromCallable(target);
+  if (e.fn.k === 'lit' && typeof callee === 'string') target.dynamic = false;
   const args = evalArgs(e.args, target.magic ? undefined : target.fn, functionDisplayName(target, true));
   runtime.row = e.row;
   const result = target.magic
@@ -276,6 +244,45 @@ export function callExpression(e: Extract<Expr, { k: 'call' }>, discardResult = 
     : invoke(target, args, e.row, discardResult);
   runtime.frame.temporaries.push(result);
   return result;
+}
+
+// code-gauge-allow functionCognitiveComplexity 17 -- Resolves the named call before selecting how PHP evaluates its arguments.
+function callNamedExpression(e: Extract<Expr, { k: 'call' }>, name: ResolvedName, discardResult: boolean): Value {
+  const runtime = rt();
+  const fn =
+    runtime.functions.get(lower(name.name)) ??
+    (name.fallback ? runtime.functions.get(lower(name.fallback)) : undefined);
+  if (!fn) {
+    if (builtinNames.functions.includes(lower(name.fallback ?? name.name)))
+      throw new UnsupportedFeatureError(`PHP の組み込み関数（${name.fallback ?? name.name}）`);
+    throwError('Error', `Call to undefined function ${name.name}()`);
+  }
+  if (e.fcc) return closureFromCallable({ fn });
+  const format =
+    fn.kind === 'native' && !name.fallback && lower(fn.name) === 'sprintf' ? simpleSprintfFormat(e.args) : undefined;
+  if (format !== undefined) {
+    const reads = e.args.slice(1).map((arg) => prepareOperand(arg.e));
+    return renderSimpleSprintf(format, reads, e.row);
+  }
+  const specialized = name.fallback ? undefined : specializedCall(fn, e.args);
+  const frameless = specialized === 'frameless';
+  const directOverload = frameless && fn.kind === 'native' && fn.shortParamsDirectOnly;
+  const inline = specialized === 'opcode' || (frameless && fn.name === 'strtr');
+  const row = inline && fn.name === 'strlen' ? e.args[0].e.row : e.row;
+  const args =
+    specialized && fn.name !== 'call_user_func' && fn.name !== 'call_user_func_array'
+      ? evalDeferredValueArgs(e.args, row)
+      : evalArgs(e.args, fn, fn.name);
+  runtime.row = row;
+  const compiledCallback = inline && compiledLiteralCallback(fn, e.args[0]?.e);
+  const result = invoke({ fn, inline, frameless, directOverload, compiledCallback }, args, row, discardResult);
+  runtime.frame.temporaries.push(result);
+  return result;
+}
+
+function compiledLiteralCallback(fn: Callable, callback: Expr | undefined): boolean {
+  if (fn.name !== 'call_user_func' && fn.name !== 'call_user_func_array') return false;
+  return callback?.k === 'lit' && typeof callback.v === 'string' && !callback.v.startsWith('\\');
 }
 
 function evalDeferredValueArgs(args: Arg[], row: number): ArgValue[] {
@@ -416,7 +423,9 @@ export function staticCallExpression(e: Extract<Expr, { k: 'scall' }>, discardRe
   const method = constructor ? staticConstructor(cls, frame) : lookupMethod(cls, lower(methodName), scope);
   const thisObj = frame.thisObj && frame.thisObj.cls.isSubclassOf(cls) ? frame.thisObj : undefined;
   if (method && (constructor || canCall(method, scope))) {
-    const target = staticInvocationTarget(e.cls.k, cls, method, thisObj, frame.staticClass);
+    const target = constructor
+      ? nonStaticMethodTarget(method, thisObj)
+      : staticInvocationTarget(e.cls.k, cls, method, thisObj, frame.staticClass);
     if (e.fcc) return closureFromCallable(target);
     const args = evalArgs(e.args, method.fn, classMethodLabel(method.scope, method.name));
     runtime.row = e.row;
@@ -461,7 +470,7 @@ export function staticCallExpression(e: Extract<Expr, { k: 'scall' }>, discardRe
 function staticConstructor(cls: PhpClass, frame: Frame): Method {
   const constructor = cls.findMethod('__construct');
   if (!constructor) throwError('Error', 'Cannot call constructor');
-  if (constructor.visibility === 'private' && frame.thisObj && !canCall(constructor, frame.scope))
+  if (constructor.visibility === 'private' && frame.thisObj && frame.thisObj.cls !== constructor.scope)
     throwError('Error', `Cannot call private ${constructor.scope.name}::__construct()`);
   return constructor;
 }
@@ -479,6 +488,10 @@ function staticInvocationTarget(
     const forwarding = kind === 'parent' || kind === 'self' || kind === 'static';
     return { fn: method.fn, scope: method.scope, staticClass: forwarding && calledClass ? calledClass : cls, method };
   }
+  return nonStaticMethodTarget(method, thisObj);
+}
+
+function nonStaticMethodTarget(method: Method, thisObj: PhpObject | undefined): CallTarget {
   if (thisObj) return { fn: method.fn, thisObj, scope: method.scope, staticClass: thisObj.cls, method };
   throwError('Error', `Non-static method ${method.scope.name}::${method.name}() cannot be called statically`);
 }

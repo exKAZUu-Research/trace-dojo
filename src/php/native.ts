@@ -58,8 +58,8 @@ export function markInlined(name: string): void {
   markedFunction(name).inlined = true;
 }
 
-export function markDirectOnly(mode: NonNullable<NativeFunction['directOnly']>, ...names: string[]): void {
-  for (const name of names) markedFunction(name).directOnly = mode;
+export function markDirectOnly(...names: string[]): void {
+  for (const name of names) markedFunction(name).directOnly = true;
 }
 
 function markedFunction(name: string): NativeFunction {

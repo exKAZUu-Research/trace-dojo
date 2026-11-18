@@ -1,0 +1,34 @@
+
+Warning: Constant lesson\UPPER already defined, this will be an error in PHP 9 in /main.php on line 5
+int(1)
+int(1)
+int(1)
+array(1) {
+  ["value"]=>
+  int(42)
+}
+array(1) {
+  ["value"]=>
+  int(42)
+}
+Cannot call compact() dynamically
+#0 [internal function]: compact('value')
+#1 /main.php(10): call_user_func('compact', 'value')
+#2 /main.php(14): {closure:Lesson\forwards():10}()
+#3 /main.php(23): Lesson\forwards(42)
+#4 {main}
+Cannot call func_get_args() dynamically
+#0 [internal function]: func_get_args()
+#1 /main.php(11): call_user_func_array('func_get_args', Array)
+#2 /main.php(14): {closure:Lesson\forwards():11}()
+#3 /main.php(23): Lesson\forwards(42)
+#4 {main}
+Cannot call compact() dynamically
+#0 /main.php(12): compact('value')
+#1 /main.php(14): {closure:Lesson\forwards():12}()
+#2 /main.php(23): Lesson\forwards(42)
+#3 {main}
+func_get_arg(): Argument #1 ($position) must be greater than or equal to 0
+Cannot call func_get_arg() dynamically
+Cannot call func_get_arg() dynamically
+func_get_arg(): Argument #1 ($position) must be greater than or equal to 0

@@ -7,3 +7,5 @@ Non-static method PrivateParent::__construct() cannot be called statically
 Non-static method ProtectedParent::__construct() cannot be called statically
 Non-static method PrivateParent::__construct() cannot be called statically
 constructed
+Cannot call private OwnPrivateContext::__construct()
+Non-static method AbstractConstructor::__construct() cannot be called statically

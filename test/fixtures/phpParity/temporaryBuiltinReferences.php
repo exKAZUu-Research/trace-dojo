@@ -37,3 +37,12 @@ catch (Error $error) { echo $error->getMessage(), "\n"; }
 class ClosureOwner { function method() { return function (&$value) {}; } }
 try { (new ClosureOwner)->method()(strlen('x')); }
 catch (Error $error) { echo $error->getMessage(), "\n"; }
+
+function variadicRef($first, &...$values) {}
+class MethodRef { function variadic(&...$values) {} }
+$closureRef = fn (&...$values) => 1;
+foreach ([fn () => variadicRef(1, 2), fn () => (new MethodRef)->variadic(strlen('x')),
+    fn () => $closureRef(1, 2), fn () => variadicRef(first: 1, extra: 2)] as $check) {
+    try { $check(); }
+    catch (Error $error) { echo $error->getMessage(), "\n"; }
+}

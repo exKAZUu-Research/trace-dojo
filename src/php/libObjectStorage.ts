@@ -2,7 +2,7 @@
 import { callMethod } from './callables';
 import { objectToArray } from './classes';
 import { valueName } from './conversions';
-import { deprecated, throwError, withCleanupExceptions } from './errors';
+import { deprecated, throwError, withCleanupExceptions, withPendingException } from './errors';
 import { magicSerializationMethods, serializationMethods } from './libArrayObject';
 import { defineClass, type NativeMethod } from './native';
 import { strictEquals, toKey } from './operators';
@@ -83,15 +83,19 @@ class ObjectStorage {
     this.nativeValues.delete(entry.object);
     this.nativeValues.delete(entry.info);
     this.slots[this.slots.indexOf(entry)] = undefined;
+    this.releaseRemoved([entry.object, entry.info], capture);
+    return true;
+  }
+
+  private releaseRemoved(values: Value[], capture?: (error: PhpThrow) => void): void {
     const runtime = rt();
-    runtime.release([entry.object, entry.info]);
     try {
+      runtime.release(values);
       runtime.flushReleases(true);
     } catch (error) {
       if (!capture || !(error instanceof PhpThrow)) throw error;
       capture(error);
     }
-    return true;
   }
 
   unsetOffset(value: Value): void {
@@ -134,15 +138,41 @@ class ObjectStorage {
   }
 
   removeAll(other: ObjectStorage): bigint {
-    return this.rewindAfter(() => {
-      withCleanupExceptions(rt(), (capture) => {
-        let position = 0;
-        while (position < other.slots.length) {
-          rt().spend();
-          const entry = other.slots[position];
-          if (!entry || !this.detach(entry.object, this.hashKeys ? undefined : capture)) position++;
+    return this.bulkRemove(this.hashKeys, (capture) => {
+      let position = 0;
+      while (position < other.slots.length) {
+        rt().spend();
+        const entry = other.slots[position];
+        if (!entry || !this.detach(entry.object, capture)) position++;
+      }
+    });
+  }
+
+  removeAllExcept(other: ObjectStorage): bigint {
+    return this.bulkRemove(this.hashKeys || other.hashKeys, (capture) => {
+      for (const object of this.objects()) {
+        const runtime = rt();
+        runtime.spend();
+        const holder = runtime.held.length;
+        runtime.held.push(object);
+        let pending: PhpThrow | undefined;
+        try {
+          if (!other.has(object)) this.detach(object, capture);
+        } catch (error) {
+          if (error instanceof PhpThrow) pending = error;
+          throw error;
+        } finally {
+          runtime.held.splice(holder, 1);
+          withPendingException(runtime, pending, () => this.releaseRemoved([object], capture));
         }
-      });
+      }
+    });
+  }
+
+  private bulkRemove(callsHash: boolean, remove: (capture?: (error: PhpThrow) => void) => void): bigint {
+    return this.rewindAfter(() => {
+      if (callsHash) remove();
+      else withCleanupExceptions(rt(), remove);
       return BigInt(this.entries.size);
     });
   }
@@ -265,14 +295,7 @@ defineClass({
     },
     {
       signature: 'removeAllExcept(SplObjectStorage $storage): int',
-      impl: ({ thisObj, args }) => {
-        const storage = storageOf(thisObj);
-        const other = storageOf(args[0] as PhpObject);
-        return storage.rewindAfter(() => {
-          for (const object of storage.objects()) if (!other.has(object)) storage.detach(object);
-          return BigInt(storage.entries.size);
-        });
-      },
+      impl: ({ thisObj, args }) => storageOf(thisObj).removeAllExcept(storageOf(args[0] as PhpObject)),
     },
     {
       signature: 'getInfo(): mixed',

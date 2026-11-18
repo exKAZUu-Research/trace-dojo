@@ -1,2 +1,11 @@
 drop:three;caught:three;at:0;two;
 drop:three;caught:three;at:0;one;two;reattached;
+info:first;key:1;caught:first;0:0;
+info:first;key:1;caught:first;1:0;middle;
+info:first;key:1;caught:first;2:0;middle;last;
+info:first;key:1;caught:first;2:0;middle;last;
+info:first;key:1;caught:first;2:0;middle;last;
+info:first;key:1;caught:first;2:0;middle;last;
+info:first;key:1;caught:first;2:0;middle;last;
+info:first;key:1;caught:first;2:0;middle;last;
+info:first;info:second;second/first:0

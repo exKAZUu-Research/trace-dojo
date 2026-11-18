@@ -27,6 +27,7 @@ import {
 import { DeclarationConverter } from './declarationConverter';
 import { exportExpr, UnexportableSyntax } from './export';
 import { decodeLiteral, decodeSingleQuoted, parseIntegerLiteral } from './literals';
+import { compiledOperandRow } from './opcodeRows';
 
 export type { CompileNotice } from './converterBase';
 
@@ -264,6 +265,7 @@ export class Converter extends DeclarationConverter {
       }
       case 'const_declaration': {
         if (!topLevel) this.error(node, 'syntax error, unexpected token "const"');
+        let declarationRow: number | undefined;
         const items = node.namedChildren
           .filter((child) => child.type === 'const_element')
           .map((child) => {
@@ -277,13 +279,10 @@ export class Converter extends DeclarationConverter {
             )
               this.error(nameNode, `syntax error, unexpected token "${name}", expecting identifier`);
             this.declareSymbol(nameNode, 'const', name);
-            return {
-              name: this.qualify(name),
-              value: this.constantExpr(valueNode, true),
-              row: nameNode.startPosition.row,
-            };
+            declarationRow ??= nameNode.startPosition.row;
+            return { name: this.qualify(name), value: this.constantExpr(valueNode, true) };
           });
-        return [{ k: 'const', items, row }];
+        return [{ k: 'const', items, row: declarationRow ?? row }];
       }
       case 'named_label_statement': {
         const name = this.nameText(semanticChildren(node)[0]);
@@ -1389,23 +1388,23 @@ export class Converter extends DeclarationConverter {
   }
 
   private objectCreation(node: Node): Expr {
-    const row = node.startPosition.row;
     const anonymous = node.namedChildren.find((child) => child.type === 'anonymous_class');
     if (anonymous) {
       const argumentsNode = anonymous.namedChildren.find((child) => child.type === 'arguments');
       const { args } = argumentsNode ? this.args(argumentsNode) : { args: [] };
-      return { k: 'newAnon', decl: this.classDecl(anonymous, true), args, row };
+      return { k: 'newAnon', decl: this.classDecl(anonymous, true), args, row: anonymous.startPosition.row };
     }
     const parts = node.namedChildren.filter((child) => child.type !== 'comment');
     const argumentsNode = parts.find((child) => child.type === 'arguments');
     const classNode = parts.find((child) => child.type !== 'arguments') as Node;
     const { args, fcc } = argumentsNode ? this.args(argumentsNode) : { args: [], fcc: false };
     if (fcc) this.error(node, 'new で第一級 callable は作れません（Cannot create Closure for new expression）。');
+    const cls = this.classRef(classNode, this.constantInitializer);
     return {
       k: 'new',
-      cls: this.classRef(classNode, this.constantInitializer),
+      cls,
       args,
-      row: classNode.startPosition.row,
+      row: cls.k === 'expr' ? compiledOperandRow(cls.e) : classNode.startPosition.row,
     };
   }
 

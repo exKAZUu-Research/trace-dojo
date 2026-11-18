@@ -37,3 +37,21 @@ Deprecated: Implicit conversion from float 1.5 to int loses precision in /main.p
 Deprecated: Implicit conversion from float 2.5 to int loses precision in /main.php on line 58
 60
 63:multiline
+
+Deprecated: Implicit conversion from float 1.5 to int loses precision in /main.php on line 70
+
+Deprecated: Implicit conversion from float 3.5 to int loses precision in /main.php on line 74
+79:Cannot access offset of type array on array
+84:Cannot access offset of type stdClass on array
+89:Cannot use a scalar value as an array
+96:Cannot use string offset as an array
+
+Warning: Undefined array key 0 in /main.php on line 101
+
+Warning: Undefined array key 0 in /main.php on line 100
+
+Warning: Constant MANY already defined, this will be an error in PHP 9 in /main.php on line 102
+106
+110
+
+Warning: Undefined property: stdClass::$unset in /main.php on line 115

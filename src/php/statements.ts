@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 606 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 611 -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import type { CompileError } from '../interpreter/diagnostics';
 import { assignTo, bindRef, destructure, foreachSubjectPlace, unsetTarget } from './assignment';
@@ -262,7 +262,7 @@ function execStmt(statement: Stmt, seek?: string): Completion {
       case 'const': {
         for (const item of statement.items) {
           const value = ev(item.value);
-          runtime.row = item.row;
+          runtime.row = statement.row;
           defineConstant(item.name, value);
         }
         return undefined;
@@ -306,7 +306,7 @@ export function defineConstant(name: string, value: Value): boolean {
   const runtime = rt();
   const key = constantKey(name);
   if (runtime.constants.has(key) || ['true', 'false', 'null'].includes(lower(name))) {
-    warn(`Constant ${name} already defined, this will be an error in PHP 9`);
+    warn(`Constant ${key} already defined, this will be an error in PHP 9`);
     return false;
   }
   runtime.constants.set(key, share(value));
@@ -490,8 +490,13 @@ function foreachStatement(statement: Extract<Stmt, { k: 'foreach' }>): Completio
   const runtime = rt();
   const frame = runtime.frame;
   if (foreachReferences(statement.value, statement.byRef)) return foreachReferenceSubject(statement);
+  const subjectMark = frame.temporaries.length;
+  const nativeMark = runtime.nativeHeld.at(-1)?.length ?? 0;
   const subject = ev(statement.subject);
-  if (subject instanceof PhpObject && !subject.isResource) return foreachObject(statement, subject);
+  if (subject instanceof PhpObject && !subject.isResource)
+    return foreachObject(statement, subject, false, () =>
+      runtime.discardNativeResult(subject, nativeMark, subjectMark)
+    );
   if (!(subject instanceof PhpArray)) return warnForeachSubject(statement, subject);
   subject.shared = true;
   frame.temporaries.push(subject);
@@ -624,7 +629,12 @@ function bindForeachRef(target: Expr, ref: Ref): void {
 
 // code-gauge-allow functionCognitiveComplexity 27 -- Acquires and releases native iterators and preserves the live ordinary-property traversal.
 // code-gauge-allow functionNcss 42 -- Both iteration modes share the statement binding and completion path.
-function foreachObject(statement: Extract<Stmt, { k: 'foreach' }>, object: PhpObject, byRef = false): Completion {
+function foreachObject(
+  statement: Extract<Stmt, { k: 'foreach' }>,
+  object: PhpObject,
+  byRef = false,
+  releaseSubject?: () => void
+): Completion {
   const runtime = rt();
   runtime.row = statement.subjectEndRow;
   const acquired = acquireIterator(object, byRef);
@@ -638,7 +648,9 @@ function foreachObject(statement: Extract<Stmt, { k: 'foreach' }>, object: PhpOb
         return result === FOREACH_REPLACED ? undefined : result;
       }
       callMethod(iterator, 'rewind', []);
-      while (toBool(callMethod(iterator, 'valid', []))) {
+      let valid = toBool(callMethod(iterator, 'valid', []));
+      releaseSubject?.();
+      while (valid) {
         runtime.spend();
         const value = callMethod(iterator, 'current', []);
         const key = statement.key ? callMethod(iterator, 'key', []) : null;
@@ -646,6 +658,7 @@ function foreachObject(statement: Extract<Stmt, { k: 'foreach' }>, object: PhpOb
         if (completion !== 'next') return completion;
         runtime.row = statement.subjectEndRow;
         callMethod(iterator, 'next', []);
+        valid = toBool(callMethod(iterator, 'valid', []));
       }
     } catch (error) {
       if (error instanceof PhpThrow) failure = error;

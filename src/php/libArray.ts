@@ -691,7 +691,7 @@ defineFunction(
   true
 );
 
-markDirectOnly('always', 'compact', 'extract');
+markDirectOnly('compact', 'extract');
 
 function checkExtractArguments(mode: number, prefix: string | undefined): void {
   if (mode > 6) throwError('ValueError', 'extract(): Argument #2 ($flags) must be a valid extract type');

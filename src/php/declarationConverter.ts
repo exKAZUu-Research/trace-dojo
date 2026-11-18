@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 835 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 841 -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import type { Node } from '@willbooster/web-tree-sitter';
 
@@ -701,8 +701,7 @@ export abstract class DeclarationConverter extends ConverterBase {
       endRow: node.endPosition.row,
       isAnonymous: anonymous,
     };
-    if (!this.preserveSyntax && decl.isAbstract && decl.isFinal)
-      this.error(node, 'Cannot use the final modifier on an abstract class');
+    if (!this.preserveSyntax) this.validateClassModifiers(node, decl);
     this.withClassContext(decl, () => {
       const body = node.childForFieldName('body') as Node;
       const memberNames = new Set<string>();
@@ -756,6 +755,14 @@ export abstract class DeclarationConverter extends ConverterBase {
         });
       }
     }
+  }
+
+  private validateClassModifiers(node: Node, decl: ClassDecl): void {
+    if (decl.isAnonymous && (decl.isAbstract || decl.isFinal)) {
+      const invalid = decl.isAbstract ? 'abstract' : 'final';
+      this.error(node, `Cannot use the ${invalid} modifier on an anonymous class`);
+    }
+    if (decl.isAbstract && decl.isFinal) this.error(node, 'Cannot use the final modifier on an abstract class');
   }
 
   // code-gauge-allow functionNcss 35 -- Keeps the ordered PHP cases together because each branch shares the same dispatch state.

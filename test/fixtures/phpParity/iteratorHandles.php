@@ -51,3 +51,26 @@ foreach ([new ArrayObject([1, 2]), new InheritedIterator([3])] as $collection) {
     packIterator(...$collection);
     printFreshHandle();
 }
+
+function freshArrayObject() { return new ArrayObject([7]); }
+function iterateTemporary($kind) {
+    if ($kind === 'object') foreach (new ArrayObject([1]) as $value) {}
+    if ($kind === 'function') foreach (freshArrayObject() as $value) {}
+    if ($kind === 'method') foreach ((new ArrayObject([2]))->getIterator() as $value) {}
+    if ($kind === 'iterator') foreach (new ArrayIterator([3]) as $value) {}
+    if ($kind === 'fixed') foreach (new SplFixedArray(1) as $value) {}
+    if ($kind === 'queue') foreach (new SplQueue as $value) {}
+    var_dump(spl_object_id($first = new stdClass), spl_object_id(new stdClass));
+}
+foreach (['object','function','method','iterator','fixed','queue'] as $kind) iterateTemporary($kind);
+class TemporaryAggregate implements IteratorAggregate {
+    function getIterator(): Traversable { echo 'get;'; return new VisibleRewind([1]); }
+    function __destruct() { echo 'aggregate;'; }
+}
+class VisibleRewind extends ArrayIterator {
+    function rewind(): void { echo 'rewind;'; parent::rewind(); }
+    function __destruct() { echo 'iterator;'; }
+}
+foreach (new TemporaryAggregate as $value) echo 'body;';
+echo "end;\n";
+printFreshHandle();

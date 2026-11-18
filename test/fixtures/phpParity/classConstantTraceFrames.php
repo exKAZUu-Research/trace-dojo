@@ -44,3 +44,29 @@ foreach ([
     try { $read(); }
     catch (Error $error) { echo $error->getLine(), "\n", $error->getTraceAsString(), "\n"; }
 }
+
+class WrongDefaults {
+    public int $ordinary = self::TEXT;
+    const TEXT = 'five';
+}
+class WrongStaticDefault {
+    public static ?int $nullable = self::FLOAT;
+    const FLOAT = 1.75;
+}
+class FloatDefault {
+    public float $converted = self::INTEGER;
+    const INTEGER = 2;
+}
+class ArrayDefault {
+    public int $number = OtherDefaults::ARRAY_VALUE;
+}
+class OtherDefaults { const ARRAY_VALUE = []; }
+foreach ([
+    fn () => new WrongDefaults,
+    fn () => WrongStaticDefault::$nullable,
+    fn () => new ArrayDefault,
+    fn () => (new FloatDefault)->converted,
+] as $read) {
+    try { var_dump($read()); }
+    catch (TypeError $error) { echo $error->getLine(), ':', $error->getMessage(), "\n"; }
+}

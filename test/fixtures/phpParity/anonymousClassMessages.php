@@ -27,5 +27,26 @@ foreach ([
     try { $call(); }
     catch (TypeError $error) { echo $error->getMessage(), "\n"; }
 }
+function neverFunction(): never {}
+class NeverMethod {
+    static function stop(): never {}
+    function __get($name): never {}
+    function callback() { return function (): never {}; }
+}
+$anonymous = new class {
+    function stop(): never {}
+    function callback() { return function (): never {}; }
+};
+foreach ([
+    fn () => neverFunction(),
+    fn () => NeverMethod::stop(),
+    fn () => (new NeverMethod)->value,
+    fn () => (new NeverMethod)->callback()(),
+    fn () => $anonymous->stop(),
+    fn () => $anonymous->callback()(),
+] as $call) {
+    try { $call(); }
+    catch (TypeError $error) { echo $error->getMessage(), "\n"; }
+}
 interface RequiresMethods { function one(); function two(); }
 new class implements RequiresMethods {};

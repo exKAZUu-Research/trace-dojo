@@ -1,7 +1,7 @@
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import { callMethod, consumeInvokedResult } from './callables';
 import { toBool } from './conversions';
-import { throwError } from './errors';
+import { throwError, withCleanupExceptions } from './errors';
 import { InnerIterator, innerIteratorOf } from './libIterators';
 import { defineClass, type NativeMethod } from './native';
 import { PhpThrow, rt } from './runtime';
@@ -44,6 +44,27 @@ class RecursiveState {
   /** What the iterator holds, in the order PHP releases it (spl_RecursiveIteratorIterator_free_iterators). */
   held(): Value[] {
     return this.levels.toReversed().flatMap((level) => [level.iterator.handle, level.object]);
+  }
+
+  releaseTraversal(object: PhpObject): boolean {
+    if (this.depth <= 0) return false;
+    const runtime = rt();
+    runtime.held.push(object);
+    try {
+      withCleanupExceptions(runtime, (capture) => {
+        while (this.depth > 0) {
+          try {
+            releaseLevel(object, this, true);
+          } catch (error) {
+            if (!(error instanceof PhpThrow)) throw error;
+            capture(error);
+          }
+        }
+      });
+    } finally {
+      runtime.held.pop();
+    }
+    return true;
   }
 
   get top(): Level {

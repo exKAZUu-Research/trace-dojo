@@ -24,3 +24,7 @@
 #0 /main.php(42): [constant expression]()
 #1 /main.php(44): {closure:/main.php:42}()
 #2 {main}
+65:Cannot assign string to property WrongDefaults::$ordinary of type int
+66:Cannot assign float to property WrongStaticDefault::$nullable of type ?int
+67:Cannot assign array to property ArrayDefault::$number of type int
+float(2)

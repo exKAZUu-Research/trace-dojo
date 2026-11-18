@@ -1,3 +1,8 @@
 value:1;hook:1;destroy:child;value:2;end;
 again;destroy:child;hook:0;returned;
 destroy:child;destroy:root;done;
+break:1;destroy:child;0
+return:destroy:child;1;0
+destroy:child;loop;0
+destroy:child;1;0
+destroy:root;finished;
