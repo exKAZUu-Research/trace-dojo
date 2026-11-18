@@ -266,7 +266,6 @@ export class TypeInference {
     if (naked.length === 1 && remaining.length > 0) recurse(unionOf(remaining, true), naked[0]);
   }
 
-  // code-gauge-allow functionCognitiveComplexity 21 -- Follows TypeScript's order of inference for each kind of object target.
   private inferToObject(run: InferenceRun, source: Type, target: ObjectType, recurse: Recurse): void {
     // An iterable or array-like target infers its element from what iterating the source gives, as a string's characters.
     if (
@@ -279,10 +278,7 @@ export class TypeInference {
       return;
     }
     if (source.kind !== 'object' && source.kind !== 'intersection') {
-      if (source.kind === 'literal' || source.kind === 'intrinsic') {
-        const apparent = this.c.apparentType(source);
-        if (apparent.kind === 'object' && target.objectKind !== 'reference') recurse(apparent, target);
-      }
+      this.inferFromNonObject(source, target, recurse);
       return;
     }
     if (target.objectKind === 'mapped' && target.mapped) {
@@ -293,6 +289,17 @@ export class TypeInference {
     }
     if (source.kind === 'object' && this.inferFromElements(run, source, target, recurse)) return;
     this.inferFromMembers(source, target, recurse);
+  }
+
+  /** Infers to an object from what a non-object source stands for, as TypeScript's `inferFromTypes` takes its apparent type. */
+  private inferFromNonObject(source: Type, target: ObjectType, recurse: Recurse): void {
+    if (['typeParameter', 'indexedAccess', 'keyof', 'conditional'].includes(source.kind)) {
+      const constraint = this.c.baseConstraint(source);
+      if (constraint !== source && !isIntrinsic(constraint, 'unknown')) recurse(constraint, target);
+    } else if (source.kind === 'literal' || source.kind === 'intrinsic') {
+      const apparent = this.c.apparentType(source);
+      if (apparent.kind === 'object' && target.objectKind !== 'reference') recurse(apparent, target);
+    }
   }
 
   /** Infers from the type arguments or elements of related references, arrays, and tuples; whether it applied. */
