@@ -1,6 +1,6 @@
 import { CompileError } from '../interpreter/diagnostics';
 import type { Expression, IterationSource, PropertyName } from './ast';
-import { printedOperation } from './operatorPrinter';
+import { printedOperation, stringLiteralValue } from './operatorPrinter';
 
 /**
  * The parts of a tree-sitter node that converting reads, which a view of another grammar's tree can also provide.
@@ -134,10 +134,8 @@ function printedCallee(node: Node): string | undefined {
       const index = unwrapParentheses(field(node, 'index'));
       if (object === undefined) return undefined;
       const dot = node.childForFieldName('optional_chain') ? '?.' : '';
-      const plain =
-        index.type === 'template_string' &&
-        namedChildren(index).every((child) => child.type !== 'template_substitution');
-      if (index.type === 'string' || plain) return `${object}${dot || '.'}${index.text.slice(1, -1)}`;
+      const key = stringLiteralValue(index);
+      if (key !== undefined) return `${object}${dot || '.'}${key}`;
       return `${object}${dot}[${printedCallee(index) ?? '(intermediate value)'}]`;
     }
     default: {

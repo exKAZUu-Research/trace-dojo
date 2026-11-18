@@ -1,4 +1,5 @@
 import { field, isOptionalChain, namedChildren, type Node } from './convertNodes';
+import { decodeStringLiteral, decodeTemplateFragment } from './literals';
 
 type Print = (node: Node) => string | undefined;
 
@@ -84,12 +85,10 @@ function fold(node: Node): Folded | undefined {
       if (node.text.endsWith('n')) return undefined;
       return { kind: 'number', value: Number(node.text.replaceAll('_', '')) };
     }
-    case 'string': {
-      return { kind: 'string', text: node.text.slice(1, -1) };
-    }
+    case 'string':
     case 'template_string': {
-      if (namedChildren(node).some((child) => child.type === 'template_substitution')) return undefined;
-      return { kind: 'string', text: node.text.slice(1, -1) };
+      const text = stringLiteralValue(node);
+      return text === undefined ? undefined : { kind: 'string', text };
     }
     case 'true':
     case 'false': {
@@ -163,4 +162,12 @@ function foldBinary(operator: string, left: Folded | undefined, right: Folded | 
 function printedLiteral(folded: Folded): string {
   if (folded.kind === 'string') return `"${folded.text}"`;
   return String(folded.value);
+}
+
+/** The value of a string literal or of a template literal without substitutions, its escapes decoded. */
+export function stringLiteralValue(node: Node): string | undefined {
+  if (node.type === 'string') return decodeStringLiteral(node.text);
+  if (node.type !== 'template_string' || namedChildren(node).some((child) => child.type === 'template_substitution'))
+    return undefined;
+  return decodeTemplateFragment(node.text.slice(1, -1));
 }

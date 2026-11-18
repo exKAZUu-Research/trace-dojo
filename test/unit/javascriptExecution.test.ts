@@ -1566,6 +1566,13 @@ function main() {
 main();`,
   ],
   [
+    'callees with escaped string keys in errors',
+    `const o = {};
+for (const f of [() => o["a"](), () => o["a\\nb"](), () => o[\`\\x62\`](), () => o.c(), () => o.d(), () => o["\\u{1F600}"](), () => o['q"r'](), () => ("a" + "b")()]) {
+  try { f(); } catch (e) { console.log(JSON.stringify(e.message)); }
+}`,
+  ],
+  [
     'console.dir sorted with a comparator',
     `console.dir({ b: 2, a: 1 }, { sorted: (a, b) => b.localeCompare(a) });
 console.dir(new Map([["a", 1], ["b", 2]]), { sorted: (a, b) => { console.log("cmp", a, b); return b.localeCompare(a); } });
