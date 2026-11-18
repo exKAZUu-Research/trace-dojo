@@ -288,7 +288,7 @@ export class BindingPatterns {
 
   /** The type of a declaration's object rest element, which TypeScript makes only from a value that may be an object. */
   private declaredRestObject(target: TreeNode, type: Type, omitted: string[]): Type {
-    if (!this.isObjectRestSource(type)) {
+    if (!this.isValidSpreadType(type)) {
       this.c.error(target, '残余要素の型は、オブジェクト型からしか作れません。');
       return errorType;
     }
@@ -299,7 +299,7 @@ export class BindingPatterns {
    * As TypeScript's `isValidSpreadType`: whether a type is an object, or a type parameter that may be one, once its
    * falsy members are left out.
    */
-  private isObjectRestSource(type: Type): boolean {
+  isValidSpreadType(type: Type): boolean {
     const members = (type.kind === 'union' ? type.types : [type])
       .flatMap((member) => {
         // An unconstrained type parameter may be an object, unlike `unknown`, which its base constraint is.
@@ -308,9 +308,9 @@ export class BindingPatterns {
         return constraint.kind === 'union' ? constraint.types : [constraint];
       })
       .filter((member) => !isDefinitelyFalsy(member));
-    if (members.length !== 1) return members.length > 0 && members.every((member) => this.isObjectRestSource(member));
+    if (members.length !== 1) return members.length > 0 && members.every((member) => this.isValidSpreadType(member));
     const [member] = members;
-    if (member.kind === 'intersection') return member.types.every((part) => this.isObjectRestSource(part));
+    if (member.kind === 'intersection') return member.types.every((part) => this.isValidSpreadType(part));
     return (
       isAnyLike(member) ||
       isIntrinsic(member, 'object') ||
@@ -329,10 +329,9 @@ export class BindingPatterns {
         structure.numberIndex = source.numberIndex;
         structure.symbolIndex = source.symbolIndex;
         structure.patternIndexes = source.patternIndexes;
-        // As a spread does, a rest copies each value into a plain, writable property, except a class's methods and
-        // accessors, which stay on its prototype, and its private and protected members.
+        // As a spread does, a rest copies each value into a plain, writable property.
         for (const [name, property] of source.properties) {
-          if (!omitted.includes(name) && property.visibility === 'public' && isSpreadableProperty(property))
+          if (!omitted.includes(name) && isSpreadableProperty(property))
             structure.properties.set(name, { ...property, readonly: false, getterOnly: false, writeType: undefined });
         }
         return structure;

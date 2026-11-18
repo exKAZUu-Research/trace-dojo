@@ -594,7 +594,7 @@ export class LiteralChecker {
     const spread = this.c.expressions.check(operand);
     const objectPart = filterType(spread, (type) => !isDefinitelyFalsy(type));
     const members = objectPart.kind === 'union' ? objectPart.types : [objectPart];
-    const isValid = members.every(isSpreadableMember);
+    const isValid = this.c.patterns.isValidSpreadType(spread);
     if (!isValid) this.c.error(member, 'スプレッド構文は、オブジェクト型にのみ使えます。');
     if (!isValid || isAnyLike(objectPart)) {
       literal.spreadsAny = true;
@@ -962,10 +962,6 @@ export class LiteralChecker {
   }
 }
 
-function isSpreadableMember(type: Type): boolean {
-  return isAnyLike(type) || type.kind === 'object' || type.kind === 'intersection' || type.kind === 'typeParameter';
-}
-
 /** Whether a spread's member is never truthy, which TypeScript accepts in a spread that adds nothing for it. */
 export function isDefinitelyFalsy(type: Type): boolean {
   return (
@@ -976,11 +972,15 @@ export function isDefinitelyFalsy(type: Type): boolean {
   );
 }
 
-/** Whether a spread copies a property: a class's methods, accessors, and private names stay out of the copy. */
+/**
+ * Whether a spread or rest copies a property: a class's methods and accessors stay on its prototype, and its private
+ * names and private or protected members stay out of the copy's type.
+ */
 export function isSpreadableProperty(property: Property): boolean {
   const { declaration } = property;
   return (
     !property.isPrivateName &&
+    property.visibility === 'public' &&
     !(
       declaration?.parent?.type === 'class_body' &&
       ['method_definition', 'method_signature', 'abstract_method_signature'].includes(declaration.type)

@@ -1,0 +1,7 @@
+(1,13): error TS2698: Spread types may only be created from object types.
+(2,13): error TS2698: Spread types may only be created from object types.
+(5,47): error TS2698: Spread types may only be created from object types.
+(7,38): error TS2698: Spread types may only be created from object types.
+(8,13): error TS2698: Spread types may only be created from object types.
+(9,13): error TS2698: Spread types may only be created from object types.
+(11,13): error TS2698: Spread types may only be created from object types.
