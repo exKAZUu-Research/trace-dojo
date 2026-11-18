@@ -199,7 +199,7 @@ export class Codegen {
           const fallback = info.cls.defaults[index];
           if (!fallback) {
             return new Thunk(undefined, undefined, () => {
-              throw new HaskellException(missing, 'Other');
+              throw new HaskellException(missing);
             });
           }
           const def = globalOf(fallback, fallback.name, fallback);
@@ -284,9 +284,7 @@ export class Codegen {
           k: 'case',
           scrut: { k: 'local', depth: 0, index: 0 },
           alts,
-          default: allHaveIt
-            ? undefined
-            : { k: 'error', message: `No match in record selector ${field.name}`, kind: 'error' },
+          default: allHaveIt ? undefined : { k: 'error', message: `No match in record selector ${field.name}` },
         },
       };
     }
@@ -367,7 +365,6 @@ export class Codegen {
     const fail: Core = {
       k: 'error',
       message: `${sourceSpanText(binding.span)}: Non-exhaustive patterns in function ${name}`,
-      kind: 'patternMatch',
     };
     return this.compileMatch(argSlots, binding.clauses, fail, ioResult);
   }
@@ -437,7 +434,6 @@ export class Codegen {
     return {
       k: 'error',
       message: `${sourceSpanText(span)}: Non-exhaustive patterns in pattern binding`,
-      kind: 'patternMatch',
     };
   }
 
@@ -451,7 +447,6 @@ export class Codegen {
       const fail: Core = {
         k: 'error',
         message: `${sourceSpanText(span)}: Non-exhaustive patterns in ${text}`,
-        kind: 'patternMatch',
       };
       return this.matchPlan(plan, patternResult(binding.binders.map((binder) => this.localRef(binder))), fail);
     } finally {
@@ -745,7 +740,6 @@ export class Codegen {
           return {
             k: 'error',
             message: `${sourceSpanText(expr.span)}: Missing field in record construction ${fieldName ?? ''}`.trimEnd(),
-            kind: 'error',
           } as Core;
         });
         for (const field of expr.fields)
@@ -832,7 +826,6 @@ export class Codegen {
       const fail: Core = {
         k: 'error',
         message: `${sourceSpanText(expr.span)}: Non-exhaustive patterns in lambda`,
-        kind: 'patternMatch',
       };
       const savedVisible = this.visible;
       const plans = expr.pats.map((pat, index) => this.planPattern(pat, slots[index], true));
@@ -862,7 +855,6 @@ export class Codegen {
     const fail: Core = {
       k: 'error',
       message: `${sourceSpanText(expr.span)}: Non-exhaustive patterns in case`,
-      kind: 'patternMatch',
     };
     const scrutinee = this.compileExpr(expr.scrutinee);
     if (expr.alts.length === 0) return { k: 'case', scrut: scrutinee, alts: new Map(), default: fail };
@@ -908,7 +900,6 @@ export class Codegen {
           ? {
               k: 'error',
               message: `${sourceSpanText(expr.span)}: Non-exhaustive patterns in record update`,
-              kind: 'patternMatch',
             }
           : undefined,
     };
@@ -1076,7 +1067,7 @@ export class Codegen {
                   { k: 'str', value: [...`Pattern match failure in 'do' block at ${sourceSpanText(stmt.pat.span)}`] },
                 ],
               }
-            : { k: 'error', message: 'Pattern match failure', kind: 'patternMatch' };
+            : { k: 'error', message: 'Pattern match failure' };
           return { k: 'lam', arity: 1, size: frame.size, body: this.matchPlan(plan, rest, fail) } as Core;
         });
         return { k: 'app', fn: bind, args: [action, lambda] };
@@ -1123,7 +1114,6 @@ export class Codegen {
             const fail: Core = {
               k: 'error',
               message: `user error (Pattern match failure in 'do' block at ${sourceSpanText(stmt.pat.span)})`,
-              kind: 'error',
             };
             matcher = this.matchPlan(plan, { k: 'con', con: UNIT_CON, args: [] }, fail);
           }

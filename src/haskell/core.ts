@@ -42,7 +42,7 @@ export type Core = (
   | { k: 'super'; dict: Core; index: number }
   | { k: 'deferredDo'; ordinary?: Core; io: IODoCore }
   | { k: 'dict'; instance: InstanceInfo; args: Core[] }
-  | { k: 'error'; message: string; kind: 'error' | 'patternMatch' }
+  | { k: 'error'; message: string }
   | IODoCore
 ) & { displayType?: Type };
 

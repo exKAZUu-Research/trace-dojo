@@ -545,7 +545,6 @@ function convertData(node: Node): Decl {
     params: typeParams(node),
     cons,
     deriving,
-    derivingSpan: derivingNodes[0] ? spanOf(derivingNodes[0]) : undefined,
     span: spanOf(node),
   };
 }

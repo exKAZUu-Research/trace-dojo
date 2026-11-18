@@ -66,7 +66,7 @@ export function typecheckModule(module: RModule, options: TypecheckOptions): Typ
   for (const declared of [...instanceDecls, ...derived]) {
     checkInstanceSupers(checker, declared.info, declared.span);
   }
-  checker.inferBindGroup(module.values, true);
+  checker.inferBindGroup(module.values);
   for (const declared of [...instanceDecls, ...derived])
     instances.push({ ...checkInstanceMethods(checker, declared), sourceDefined: instanceDecls.includes(declared) });
   const defaults = module.classes.flatMap((decl) => checkDefaults(checker, decl));

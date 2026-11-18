@@ -37,7 +37,7 @@ export function testIntegerBit(value: bigint, index: bigint, runtime: Runtime): 
 }
 
 function validateBitIndex(index: bigint): void {
-  if (index < 0n) throw new HaskellException('heap overflow', 'Other');
+  if (index < 0n) throw new HaskellException('heap overflow');
 }
 
 function allocateBit(index: bigint, runtime: Runtime): bigint {

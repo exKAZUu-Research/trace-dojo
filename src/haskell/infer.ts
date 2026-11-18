@@ -360,7 +360,7 @@ export class Checker {
         return this.inferLambda(expr);
       }
       case 'let': {
-        this.inferBindGroup(expr.binds, false);
+        this.inferBindGroup(expr.binds);
         return this.inferExpr(expr.body);
       }
       case 'if': {
@@ -404,7 +404,7 @@ export class Checker {
         return instantiated.type;
       }
       case 'recordCon': {
-        const { type, fieldTypes } = this.instantiateCon(expr.con, expr.span);
+        const { type, fieldTypes } = this.instantiateCon(expr.con);
         this.checkFields(expr.fields, expr.con, fieldTypes);
         return type;
       }
@@ -466,8 +466,8 @@ export class Checker {
       typeError(expr.span, 'これらのフィールドをすべて持つ構成子がありません。');
     }
     expr.cons = cons;
-    const input = this.instantiateCon(cons[0], expr.span);
-    const output = this.instantiateCon(cons[0], expr.span);
+    const input = this.instantiateCon(cons[0]);
+    const output = this.instantiateCon(cons[0]);
     this.unify(target, input.type, expr.expr.span, 'レコードの更新');
     const inputArgs = splitApp(input.type).args;
     const outputArgs = splitApp(output.type).args;
@@ -494,9 +494,8 @@ export class Checker {
     }
   }
 
-  instantiateCon(con: ConInfo, span: Span): { type: Type; fieldTypes: Type[] } {
+  instantiateCon(con: ConInfo): { type: Type; fieldTypes: Type[] } {
     const args = typeParamKinds(con.type).map((kind) => this.freshVar(kind));
-    void span;
     return {
       type: tap(tcon(con.type), ...args),
       fieldTypes: con.fieldTypes.map((fieldType) => instantiateType(fieldType, args)),
@@ -547,7 +546,7 @@ export class Checker {
           break;
         }
         case 'let': {
-          this.inferBindGroup(stmt.binds, false);
+          this.inferBindGroup(stmt.binds);
           break;
         }
         case 'exp': {
@@ -574,7 +573,7 @@ export class Checker {
         break;
       }
       case 'let': {
-        this.inferBindGroup(qual.binds, false);
+        this.inferBindGroup(qual.binds);
         break;
       }
       case 'exp': {
@@ -630,7 +629,7 @@ export class Checker {
           break;
         }
         case 'con': {
-          const { type: conType, fieldTypes } = this.instantiateCon(pat.con, pat.span);
+          const { type: conType, fieldTypes } = this.instantiateCon(pat.con);
           this.unify(conType, type, pat.span, `構成子 ${pat.con.name} のパターン`);
           for (let index = pat.args.length - 1; index >= 0; index--) {
             pending.push({ pat: pat.args[index], type: fieldTypes[index] });
@@ -642,7 +641,7 @@ export class Checker {
   }
 
   checkRhs(rhs: RRhs, expected: Type): void {
-    this.inferBindGroup(rhs.where, false);
+    this.inferBindGroup(rhs.where);
     if (rhs.body.k === 'plain') {
       this.checkExpr(rhs.body.expr, expected);
       return;
@@ -650,7 +649,7 @@ export class Checker {
     for (const branch of rhs.body.branches) {
       for (const guard of branch.guards) {
         if (guard.k === 'bool') this.checkExpr(guard.expr, tcon(this.builtins.bool), 'ガード');
-        else this.inferBindGroup(guard.binds, false);
+        else this.inferBindGroup(guard.binds);
       }
       this.checkExpr(branch.expr, expected);
     }
@@ -676,8 +675,7 @@ export class Checker {
     }
   }
 
-  inferBindGroup(group: RBindGroup, isTop: boolean): void {
-    void isTop;
+  inferBindGroup(group: RBindGroup): void {
     const explicit: { binding: Extract<RBinding, { k: 'fun' }>; scheme: Scheme }[] = [];
     const implicit: RBinding[] = [];
     for (const binding of group.bindings) {

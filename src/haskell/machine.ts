@@ -329,7 +329,7 @@ export class Machine {
         return;
       }
       case 'error': {
-        throw new HaskellException(code.message, code.kind === 'patternMatch' ? 'PatternMatchFail' : 'ErrorCall');
+        throw new HaskellException(code.message);
       }
     }
   }

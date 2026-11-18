@@ -90,7 +90,7 @@ export function forceString(slot: Slot, runtime: Runtime): string {
 }
 
 function haskellError(message: string): HaskellException {
-  return new HaskellException(message, 'ErrorCall');
+  return new HaskellException(message);
 }
 
 const INT_MIN = -(2n ** 63n);
@@ -100,7 +100,7 @@ function wrapInt(value: bigint): bigint {
 }
 
 function divideByZero(): HaskellException {
-  return new HaskellException('divide by zero', 'ArithException');
+  return new HaskellException('divide by zero');
 }
 
 /** Floor division and modulus, as Haskell's `div` and `mod` round toward negative infinity. */
@@ -135,7 +135,7 @@ function defineIntegral(prefix: 'int' | 'integer' | 'word', wrap: (value: bigint
       if ((b as bigint) === 0n) throw divideByZero();
       if (prefix === 'int' && (a as bigint) === INT_MIN && (b as bigint) === -1n) {
         // GHC reports the overflow of the one quotient that does not fit.
-        throw new HaskellException('arithmetic overflow', 'ArithException');
+        throw new HaskellException('arithmetic overflow');
       }
       return wrap(op(a as bigint, b as bigint));
     };
@@ -185,7 +185,7 @@ function rotate64(value: bigint, count: bigint): bigint {
 
 function shiftCount(value: Value): bigint {
   const count = value as bigint;
-  if (count < 0n) throw new HaskellException('arithmetic overflow', 'ArithException');
+  if (count < 0n) throw new HaskellException('arithmetic overflow');
   return count;
 }
 
@@ -815,8 +815,7 @@ define(
             const count = runtime.machine.force(size.fields[0]) as bigint;
             if (count <= 0n)
               throw new HaskellException(
-                `hSetBuffering: invalid argument (illegal buffer size ${showSignedInt(count)})`,
-                'IOException'
+                `hSetBuffering: invalid argument (illegal buffer size ${showSignedInt(count)})`
               );
           }
         }
@@ -837,7 +836,7 @@ define(
     new IOPrim(
       'fail',
       () => {
-        throw new HaskellException(`user error (${forceString(message, runtime)})`, 'IOException');
+        throw new HaskellException(`user error (${forceString(message, runtime)})`);
       },
       [message]
     )
@@ -850,7 +849,7 @@ define(
     new IOPrim(
       'ioError',
       () => {
-        throw new HaskellException(forceString(message, runtime), 'IOException');
+        throw new HaskellException(forceString(message, runtime));
       },
       [message]
     )
@@ -869,7 +868,7 @@ function turtleAction(name: string, args: Slot[], runtime: Runtime, act: (runtim
 
 function createTurtle(runtime: Runtime, x: number, y: number, color: string | undefined): Value {
   const created = runtime.world.create(x, y, color);
-  if ('error' in created) throw new HaskellException(created.error, 'ErrorCall');
+  if ('error' in created) throw new HaskellException(created.error);
   return new TurtleValue(created);
 }
 
@@ -901,7 +900,7 @@ function defineTurtleMethod(names: readonly string[], act: (runtime: Runtime, tu
 }
 
 function moved(error: string | undefined): Value {
-  if (error) throw new HaskellException(error, 'ErrorCall');
+  if (error) throw new HaskellException(error);
   return unit();
 }
 

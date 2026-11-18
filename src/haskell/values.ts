@@ -222,13 +222,10 @@ export function isFunction(value: Value): value is FunValue {
   return value instanceof Closure || value instanceof PrimFn || value instanceof Partial;
 }
 
-/** An exception a program raises, carrying the Haskell value that describes it. */
 export class HaskellException extends Error {
   constructor(
     /** The message `displayException` gives, which an uncaught exception reports. */
-    readonly display: string,
-    /** The kind of exception, for `Control.Exception`-style matching. */
-    readonly kind: 'ErrorCall' | 'ArithException' | 'PatternMatchFail' | 'IOException' | 'Other'
+    readonly display: string
   ) {
     super(display);
     this.name = 'HaskellException';
