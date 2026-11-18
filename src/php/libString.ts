@@ -8,13 +8,13 @@ import { byteAt, charAt, enc, lower, untilNul, upper } from './bytes';
 import { byteMembership, literalMatches, spendScan } from './byteSearch';
 import { callStack } from './calls';
 import { debugType, valueName } from './conversions';
-import { deprecated, throwError, warn, withCleanupExceptions } from './errors';
+import { deprecated, throwError, warn } from './errors';
 import { decodeHtml, escapeHtml, nextChar, translationTable } from './htmlEntities';
 import { writeStream } from './libCore';
 import { ctypeUpper, isCtypeAlpha, isUtf8Ctype } from './libLocale';
 import { defineAlias, defineConstant, defineFunction, defineOverloadedFunction, markInlined } from './native';
-import { toInt, toStr } from './operators';
-import { PhpThrow, rt } from './runtime';
+import { toInt, toStr, withStringConversionErrors } from './operators';
+import { rt } from './runtime';
 import { formatPrintf } from './sprintf';
 import { incrementString } from './strings';
 import { allowedTags, stripTags } from './stripTags';
@@ -302,7 +302,6 @@ function replaceAll(
   return checkLength(result + subject.slice(position));
 }
 
-// code-gauge-allow functionCognitiveComplexity 23 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 function strReplace(args: Value[], refs: (Ref | undefined)[], insensitive: boolean): Value {
   const [search, replace, subject] = args;
   if (!(search instanceof PhpArray) && replace instanceof PhpArray)
@@ -310,22 +309,9 @@ function strReplace(args: Value[], refs: (Ref | undefined)[], insensitive: boole
       'TypeError',
       `${insensitive ? 'str_ireplace' : 'str_replace'}(): Argument #2 ($replace) must be of type string when argument #1 ($search) is a string`
     );
-  const runtime = rt();
   const count = { value: 0 };
   let result: Value = '';
-  withCleanupExceptions(runtime, (capture) => {
-    let conversionFailed = false;
-    const convert = (value: Value): string => {
-      if (conversionFailed && value instanceof PhpObject && !value.isResource) return '';
-      try {
-        return toStr(value);
-      } catch (error) {
-        if (!(error instanceof PhpThrow)) throw error;
-        capture(error);
-        conversionFailed = true;
-        return '';
-      }
-    };
+  withStringConversionErrors((convert) => {
     const replaceOne = (text: string): string => replaceSubject(text, search, replace, convert, insensitive, count);
     if (subject instanceof PhpArray) {
       const array = new PhpArray();
@@ -610,12 +596,19 @@ function translatePairs(text: string, replacements: PhpArray): string {
 
 function translateSinglePair(text: string, replacements: PhpArray): string {
   const [key, slot] = replacements.map.entries().next().value!;
-  const replacement = toStr(slot instanceof Ref ? slot.v : slot);
+  const value = slot instanceof Ref ? slot.v : slot;
   if (key === '') {
-    warn('strtr(): Ignoring replacement of empty string');
+    withStringConversionErrors((convert) => {
+      convert(value);
+      const pending = rt().nativeStringConversionPending;
+      const caller = pending ? callStack.at(-2) : undefined;
+      const name = caller?.name ?? (pending ? 'main' : 'strtr');
+      const scope = caller?.className ? `${caller.className}::` : '';
+      warn(`${scope}${name}(): Ignoring replacement of empty string`);
+    });
     return text;
   }
-  return replaceAll(text, String(key), replacement, false, { value: 0 });
+  return replaceAll(text, String(key), toStr(value), false, { value: 0 });
 }
 
 function translationAt(

@@ -163,6 +163,7 @@ export class Runtime {
   /** How many `@` operators are active. */
   silence = 0;
   errorReporting = 30_719n;
+  nativeStringConversionPending = false;
   errorHandlers: { handler: Value; mask: bigint }[] = [];
   exceptionHandler: Value = null;
   /** The handlers `set_exception_handler` replaced, latest last, which `restore_exception_handler` brings back. */

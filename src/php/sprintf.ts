@@ -1,11 +1,11 @@
 // oxlint-disable unicorn/prefer-code-point -- PHP strings hold bytes as code units 0–255, which charCodeAt and fromCharCode read and write as they are.
 import { callStack } from './calls';
 import { floatFitsInt, formatFloatRepr, numericPrefix } from './conversions';
-import { fatal, notice, throwError, warn, withCleanupExceptions } from './errors';
-import { toFloat, toInt, toStr } from './operators';
-import { PhpThrow, rt } from './runtime';
+import { fatal, notice, throwError, warn } from './errors';
+import { toFloat, toInt, withStringConversionErrors } from './operators';
+import { rt } from './runtime';
 import { exponentialText, fixedDigits, generalText } from './strings';
-import { PhpArray, PhpObject, type Value } from './values';
+import type { Value } from './values';
 
 const MAX_FLOAT_PRECISION = 53;
 const INT_LIMIT = 2_147_483_647;
@@ -41,19 +41,7 @@ interface Spec {
  */
 export function formatPrintf(format: string, args: Value[], fromArray = false, write?: (text: string) => void): string {
   let result = '';
-  withCleanupExceptions(rt(), (capture) => {
-    let conversionFailed = false;
-    const stringArg = (value: Value): string => {
-      if (conversionFailed && value instanceof PhpObject && !value.isResource) return '';
-      try {
-        return toStr(value);
-      } catch (error) {
-        if (!(error instanceof PhpThrow)) throw error;
-        capture(error);
-        conversionFailed = true;
-        return value instanceof PhpArray ? 'Array' : '';
-      }
-    };
+  withStringConversionErrors((stringArg) => {
     result = formatValues(format, args, fromArray, stringArg);
     write?.(result);
   });

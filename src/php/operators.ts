@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 443 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 467 -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/prefer-code-point -- PHP strings hold bytes as code units 0–255, which charCodeAt and fromCharCode read and write as they are.
 import {
   boolValue,
@@ -15,9 +15,9 @@ import {
   numericValue,
   valueName,
 } from './conversions';
-import { deprecated, notice, throwError, warn } from './errors';
+import { deprecated, notice, throwError, warn, withCleanupExceptions } from './errors';
 import { cPow } from './floatPow';
-import { rt } from './runtime';
+import { PhpThrow, rt } from './runtime';
 import { copyValueSlot, INT_MAX, INT_MIN, type Key, PhpArray, PhpObject, type Value } from './values';
 
 /** Converts an object to a string through `__toString`, which the interpreter provides. */
@@ -35,6 +35,10 @@ export function setObjectConversions(
 
 /** Converts a value to a byte string, as PHP's string conversion does. */
 export function toStr(value: Value): string {
+  return stringify(value, warn);
+}
+
+function stringify(value: Value, reportWarning: (message: string) => void): string {
   if (typeof value === 'string') return value;
   if (value === null) return '';
   switch (typeof value) {
@@ -46,16 +50,48 @@ export function toStr(value: Value): string {
     }
     case 'number': {
       rt().constantEvaluationEpoch++;
-      if (Number.isNaN(value)) warn(NAN_STRING_WARNING);
+      if (Number.isNaN(value)) reportWarning(NAN_STRING_WARNING);
       return formatFloat(value);
     }
   }
   if (value instanceof PhpArray) {
-    warn('Array to string conversion');
+    reportWarning('Array to string conversion');
     return 'Array';
   }
   if (value.cls.name === '(stream)') return `Resource id #${value.id}`;
   return objectToString(value);
+}
+
+export function withStringConversionErrors(continuation: (convert: (value: Value) => string) => void): void {
+  const runtime = rt();
+  const pending = runtime.nativeStringConversionPending;
+  try {
+    withCleanupExceptions(runtime, (capture) => {
+      const hold = (error: unknown): void => {
+        if (!(error instanceof PhpThrow)) throw error;
+        capture(error);
+        runtime.nativeStringConversionPending = true;
+      };
+      const reportWarning = (message: string): void => {
+        try {
+          warn(message);
+        } catch (error) {
+          hold(error);
+        }
+      };
+      continuation((value) => {
+        if (runtime.nativeStringConversionPending && value instanceof PhpObject && !value.isResource) return '';
+        try {
+          return stringify(value, reportWarning);
+        } catch (error) {
+          hold(error);
+          return '';
+        }
+      });
+    });
+  } finally {
+    runtime.nativeStringConversionPending = pending;
+  }
 }
 
 /** Converts a value to an int as `(int)` and `intval` do. */

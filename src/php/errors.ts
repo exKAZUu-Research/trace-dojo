@@ -134,13 +134,15 @@ export function clearLastError(): void {
 export function emitError(level: bigint, message: string, row = rt().row): void {
   const runtime = rt();
   runtime.constantEvaluationEpoch++;
-  for (let index = runtime.errorHandlers.length - 1; index >= 0; index--) {
-    const { handler, mask } = runtime.errorHandlers[index];
-    if (handler === null || runtime.activeErrorHandlers.has(handler)) break;
-    if ((mask & level) === 0n) break;
-    if (callUserHandler(handler, level, message, row)) return;
-    break;
-  }
+  const current = runtime.errorHandlers.at(-1);
+  if (
+    current &&
+    current.handler !== null &&
+    !runtime.activeErrorHandlers.has(current.handler) &&
+    (current.mask & level) !== 0n &&
+    (runtime.nativeStringConversionPending || callUserHandler(current.handler, level, message, row))
+  )
+    return;
   lastErrors.set(runtime, { level, message, row });
   if (runtime.silence > 0 && level !== E_USER_ERROR) return;
   const reported = (runtime.errorReporting & level) !== 0n;

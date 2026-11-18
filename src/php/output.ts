@@ -247,11 +247,12 @@ export function varDump(value: Value): void {
   dumpValue(value, 1, new Set(), (text) => runtime.echo(text));
 }
 
-// code-gauge-allow functionNcss 31 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+// code-gauge-allow functionNcss 32 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 // code-gauge-allow functionCognitiveComplexity 17 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 function dumpValue(value: Value, level: number, active: Set<object>, write: (text: string) => void, slot?: Slot): void {
   const indent = level > 1 ? ' '.repeat(level - 1) : '';
-  const pad = slot instanceof Ref && slot.rc > 1 ? `${indent}&` : indent;
+  const reference = slot instanceof Ref && slot.rc > 1 ? '&' : '';
+  const pad = indent + reference;
   if (value === null) return write(`${pad}NULL\n`);
   switch (typeof value) {
     case 'boolean': {
@@ -278,8 +279,8 @@ function dumpValue(value: Value, level: number, active: Set<object>, write: (tex
         dumpValue(slotValue(item), level + 2, active, write, item);
       }
     } else {
-      if (pad) write(pad);
-      dumpObject(value, level, active, write);
+      if (indent) write(indent);
+      dumpObject(value, level, active, write, reference);
     }
     write(`${indent}}\n`);
   } finally {
@@ -287,10 +288,16 @@ function dumpValue(value: Value, level: number, active: Set<object>, write: (tex
   }
 }
 
-function dumpObject(object: PhpObject, level: number, active: Set<object>, write: (text: string) => void): void {
+function dumpObject(
+  object: PhpObject,
+  level: number,
+  active: Set<object>,
+  write: (text: string) => void,
+  reference: string
+): void {
   const entries = debugEntries(object);
   const count = entries.filter(([, slot]) => slot !== UNINIT).length;
-  write(`object(${object.cls.name})#${object.id} (${count}) {\n`);
+  write(`${reference}object(${object.cls.name})#${object.id} (${count}) {\n`);
   const indent = ' '.repeat(level + 1);
   for (const [key, slot, label] of entries) {
     write(`${indent}[${typeof key === 'bigint' ? key : label}]=>\n`);
