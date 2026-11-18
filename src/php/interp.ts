@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 817 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 825 -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import {
   applyOperator,
@@ -42,7 +42,7 @@ import {
   writeProp,
 } from './classes';
 import * as classesModule from './classes';
-import { debugType, numericPrefix, toBool, valueName } from './conversions';
+import { debugType, getType, numericPrefix, toBool, valueName } from './conversions';
 import * as conversionsModule from './conversions';
 import { deprecated, notice, throwError, warn } from './errors';
 import { constantDeprecation } from './native';
@@ -634,7 +634,7 @@ function compileTimeValue(e: Expr, context: ConstantContext = 'expression'): boo
       break;
     }
     case 'cconst': {
-      result = e.name === 'class' && e.cls.k !== 'expr' && e.cls.k !== 'static';
+      result = e.className === true && e.cls.k !== 'expr' && e.cls.k !== 'static';
       break;
     }
   }
@@ -821,24 +821,32 @@ export function resolveClassRef(ref: ClassRef): PhpClass {
 }
 
 function classConstantOf(e: Extract<Expr, { k: 'cconst' }>): Value {
+  if (e.className) return resolveClassName(e.cls);
   const runtime = rt();
-  if (lower(e.name) === 'class') {
-    if (e.cls.k === 'named') return e.cls.name;
-    if (e.cls.k === 'expr') {
-      const value = ev(e.cls.e);
-      if (!(value instanceof PhpObject)) throwError('TypeError', `Cannot use "::class" on ${valueName(value)}`);
-      return value.cls.fullName;
-    }
-    if (e.cls.k === 'self' || e.cls.k === 'static' || e.cls.k === 'parent')
-      requireClassScope(runtime.frame.scope, e.cls.k, 'className');
-    return resolveClassRef(e.cls).fullName;
-  }
-  const cls = resolveClassRef(e.cls);
+  const receiver = e.cls.k === 'expr' ? resolveClassRef(e.cls) : undefined;
+  const name = typeof e.name === 'string' ? e.name : ev(e.name);
+  const cls = receiver ?? resolveClassRef(e.cls);
   runtime.row = e.row;
   // The direct fetch opcode starts evaluation; lookups within an initializer track recursive constant references.
   const trackEvaluation = runtime.frame.constantExpression;
+  if (typeof name !== 'string') {
+    const type = name instanceof PhpObject ? getType(name) : debugType(name);
+    throwError('TypeError', `Cannot use value of type ${type} as class constant name`);
+  }
+  if (typeof e.name !== 'string' && !trackEvaluation && lower(name) === 'class') return cls.fullName;
   const displayName = trackEvaluation && e.cls.k !== 'expr' ? (e.cls.k === 'named' ? e.cls.name : e.cls.k) : cls.name;
-  return classConstant(cls, e.name, runtime.frame.scope, displayName, trackEvaluation);
+  return classConstant(cls, name, runtime.frame.scope, displayName, trackEvaluation);
+}
+
+function resolveClassName(ref: ClassRef): string {
+  if (ref.k === 'named') return ref.name;
+  if (ref.k === 'expr') {
+    const value = ev(ref.e);
+    if (!(value instanceof PhpObject)) throwError('TypeError', `Cannot use "::class" on ${valueName(value)}`);
+    return value.cls.fullName;
+  }
+  requireClassScope(rt().frame.scope, ref.k, 'className');
+  return resolveClassRef(ref).fullName;
 }
 
 /** Evaluates the arguments of `new`, which PHP does after it has created the object. */

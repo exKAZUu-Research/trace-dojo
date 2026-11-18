@@ -816,7 +816,8 @@ function defaultText(e: Expr, method: Method): string {
   if (typeof value === 'number') return formatFloat(value);
   if (value !== undefined) return String(value);
   if (e.k === 'const') return e.name.name;
-  if (e.k === 'cconst' && e.cls.k !== 'expr') return `${e.cls.k === 'named' ? e.cls.name : e.cls.k}::${e.name}`;
+  if (e.k === 'cconst' && e.cls.k !== 'expr' && typeof e.name === 'string')
+    return `${e.cls.k === 'named' ? e.cls.name : e.cls.k}::${e.name}`;
   return '<expression>';
 }
 

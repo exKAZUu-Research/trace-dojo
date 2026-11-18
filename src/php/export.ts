@@ -78,7 +78,7 @@ export function exportExpr(e: Expr, priority = 0): string {
       return e.name.fallback ?? e.name.name;
     }
     case 'cconst': {
-      return `${exportClass(e.cls)}::${e.name}`;
+      return `${exportClass(e.cls)}::${typeof e.name === 'string' ? e.name : `{${exportExpr(e.name)}}`}`;
     }
     case 'array': {
       const items = e.items.map((item) => {

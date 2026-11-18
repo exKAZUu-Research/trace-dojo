@@ -13,7 +13,7 @@ import {
 } from './astAnalysis';
 import { oneArgumentBuiltinOpcodes, usesSimpleSprintf } from './builtinCompiler';
 import { enc, lower } from './bytes';
-import { type Constant, constantTruth, constantTypeName } from './constantDefaults';
+import { type Constant, constantTruth, constantTypeName, foldedConstant } from './constantDefaults';
 import { formatFloat, isNumericString, NAN_BOOL_WARNING, NAN_STRING_WARNING } from './conversions';
 import { isReservedClassName, MAGIC_RUNTIME } from './converterBase';
 import { DeclarationConverter } from './declarationConverter';
@@ -948,23 +948,7 @@ export class Converter extends DeclarationConverter {
         return { k: 'scall', cls, name: this.memberName(nameNode), args, fcc, row: nameNode.startPosition.row };
       }
       case 'class_constant_access_expression': {
-        const [scope, nameNode] = node.namedChildren.filter((child) => child.type !== 'comment');
-        const name = this.nameText(nameNode);
-        const cls = this.classRef(scope, lower(name) !== 'class' && this.constantInitializer);
-        const literal = lower(name) === 'class' && cls.k === 'expr' ? parserScalar(cls.e) : undefined;
-        if (literal !== undefined && typeof literal !== 'string') this.error(scope, 'Illegal class name');
-        if (lower(name) === 'class' && cls.k === 'expr' && literal === undefined) {
-          const type = this.compiledType(cls.e);
-          if (type !== undefined) this.error(scope, `Cannot use "::class" on ${type}`);
-        }
-        if (literal === undefined) return { k: 'cconst', cls, name, row };
-        if (typeof literal !== 'string') return { k: 'cconst', cls, name, row };
-        const word = lower(literal);
-        if (word === 'self' || word === 'parent' || word === 'static') {
-          this.checkClassScope(scope, word);
-          return { k: 'cconst', cls: { k: word }, name, row };
-        }
-        return { k: 'lit', v: literal.startsWith('\\') ? literal.slice(1) : literal, row };
+        return this.classConstantExpression(node, row);
       }
       case 'function_call_expression': {
         return this.functionCall(node);
@@ -1164,6 +1148,40 @@ export class Converter extends DeclarationConverter {
     if (MAGIC_RUNTIME.has(raw)) return { k: 'magic', name: raw as Extract<Expr, { k: 'magic' }>['name'], row };
     if (raw === '__COMPILER_HALT_OFFSET__') this.unsupported(node, '__halt_compiler');
     return { k: 'const', name: this.resolveConstName(raw), row };
+  }
+
+  private classConstantExpression(node: Node, row: number): Expr {
+    const [scope, nameNode] = node.namedChildren.filter((child) => child.type !== 'comment');
+    const nameExpression = node.childForFieldName('name_expression');
+    if (nameExpression) return this.bracedClassConstant(scope, nameExpression);
+    const name = this.nameText(nameNode);
+    const className = lower(name) === 'class' ? true : undefined;
+    const cls = this.classRef(scope, !className && this.constantInitializer);
+    if (!className || cls.k !== 'expr') return { k: 'cconst', cls, name, className, row };
+    const literal = parserScalar(cls.e);
+    if (literal === undefined) {
+      const type = this.compiledType(cls.e);
+      if (type !== undefined) this.error(scope, `Cannot use "::class" on ${type}`);
+      return { k: 'cconst', cls, name, className, row };
+    }
+    if (typeof literal !== 'string') this.error(scope, 'Illegal class name');
+    const word = lower(literal);
+    if (word === 'self' || word === 'parent' || word === 'static') {
+      this.checkClassScope(scope, word);
+      return { k: 'cconst', cls: { k: word }, name, className, row };
+    }
+    return { k: 'lit', v: literal.startsWith('\\') ? literal.slice(1) : literal, row };
+  }
+
+  private bracedClassConstant(scope: Node, nameExpression: Node): Expr {
+    let cls = this.classRef(scope, this.constantInitializer);
+    if (cls.k === 'expr') {
+      const literal = parserScalar(cls.e);
+      if (typeof literal === 'string') cls = { k: 'named', name: literal };
+    }
+    const name = this.expr(nameExpression);
+    const literal = this.compiledValue(name) ?? foldedConstant(name, {});
+    return { k: 'cconst', cls, name: typeof literal === 'string' ? literal : name, row: name.row };
   }
 
   // code-gauge-allow functionNcss 36 -- One case per grammar node kind, each converted where PHP gives it its own meaning.
@@ -1411,9 +1429,6 @@ export class Converter extends DeclarationConverter {
     const row = node.startPosition.row;
     const subject = this.condition(node);
     const block = node.childForFieldName('body') as Node;
-    const comma = block.children.find((child) => child.type === ',');
-    if (comma && block.namedChildren.every((child) => child.type === 'comment'))
-      this.error(comma, 'syntax error, unexpected token ","');
     const arms: MatchArm[] = [];
     let defaults = 0;
     for (const arm of block.namedChildren) {

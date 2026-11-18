@@ -1,4 +1,6 @@
-import { CompileError } from '../interpreter/diagnostics';
+import type { Node } from '@willbooster/web-tree-sitter';
+
+import { CompileError, type SourceDiagnostic } from '../interpreter/diagnostics';
 import {
   misplacedAtomicMessage,
   type TraceAnnotation,
@@ -34,33 +36,65 @@ export function parsePhp(source: string, trace?: TraceOptions): ParsedProgram {
   const atomicRows = new Set(trace?.atomicAnnotations.keys());
   const ignoredPrefix = shebangEnd(source);
   const text = hideShebang(source, ignoredPrefix);
-  return parseSource(parser, text, MISSING_TOKEN_NAMES, (root) => {
-    const parseNotices = root.descendantsOfType('cast_expression').flatMap((node): CompileNotice[] => {
-      const { spelling, type } = castType(node);
-      return spelling === type
-        ? []
-        : [
-            {
-              level: 'Deprecated',
-              message: `Non-canonical cast (${spelling}) is deprecated, use the (${type}) cast instead`,
-              row: node.startPosition.row,
-            },
-          ];
-    });
-    const converter = new Converter(text, atomicRows, ignoredPrefix);
-    let program: Program;
-    try {
-      program = converter.convertProgram(root);
-    } catch (error) {
-      if (!(error instanceof CompileError)) throw error;
-      program = converter.compiledPrefix();
-      return { program, notices: converter.notices, parseNotices, conversionError: error };
-    }
-    for (const row of atomicRows) {
-      if (!converter.claimedAtomicRows.has(row)) throw new CompileError([{ row, message: misplacedAtomicMessage }]);
-    }
-    return { program, notices: converter.notices, parseNotices };
+  return parseSource(parser, text, MISSING_TOKEN_NAMES, (root) => convertPhp(root, text, atomicRows, ignoredPrefix), {
+    locateErrors: locateMatchErrors,
   });
+}
+
+function convertPhp(root: Node, text: string, atomicRows: Set<number>, ignoredPrefix: number): ParsedProgram {
+  const parseNotices = root.descendantsOfType('cast_expression').flatMap((node): CompileNotice[] => {
+    const { spelling, type } = castType(node);
+    return spelling === type
+      ? []
+      : [
+          {
+            level: 'Deprecated',
+            message: `Non-canonical cast (${spelling}) is deprecated, use the (${type}) cast instead`,
+            row: node.startPosition.row,
+          },
+        ];
+  });
+  const converter = new Converter(text, atomicRows, ignoredPrefix);
+  let program: Program;
+  try {
+    program = converter.convertProgram(root);
+  } catch (error) {
+    if (!(error instanceof CompileError)) throw error;
+    program = converter.compiledPrefix();
+    return { program, notices: converter.notices, parseNotices, conversionError: error };
+  }
+  for (const row of atomicRows) {
+    if (!converter.claimedAtomicRows.has(row)) throw new CompileError([{ row, message: misplacedAtomicMessage }]);
+  }
+  return { program, notices: converter.notices, parseNotices };
+}
+
+function locateMatchErrors(root: Node, diagnostics: SourceDiagnostic[]): SourceDiagnostic[] {
+  if (diagnostics.length === 0) return diagnostics;
+  for (const error of root.descendantsOfType('ERROR')) {
+    if (diagnostics[0].row !== error.startPosition.row) continue;
+    const next = error.nextNamedSibling;
+    if (
+      error.parent?.type === 'match_block' &&
+      next?.type === 'match_default_expression' &&
+      error.namedChildCount === 1 &&
+      error.firstNamedChild?.type === 'match_condition_list'
+    ) {
+      return [{ row: next.startPosition.row, message: 'syntax error, unexpected token "default", expecting "=>"' }];
+    }
+    const children = error.children;
+    const open = children.findIndex((node) => node.type === '{');
+    if (
+      open < 2 ||
+      children[open - 2].text.toLowerCase() !== 'match' ||
+      children[open - 1].type !== 'parenthesized_expression'
+    )
+      continue;
+    const token = children.slice(open + 1).find((node) => node.type !== 'comment');
+    if (token?.type === ',')
+      return [{ row: token.startPosition.row, message: 'syntax error, unexpected token ",", expecting "}"' }];
+  }
+  return diagnostics;
 }
 
 /** Matches the annotation a line comment ends with, which may follow an ordinary remark. */

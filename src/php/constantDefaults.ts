@@ -53,8 +53,10 @@ function fold(expression: Expr, context: FoldContext): Folded {
       return result;
     }
     case 'cconst': {
-      if (expression.name.toLowerCase() === 'class' && expression.cls.k === 'named') return expression.cls.name;
-      const value = context.classConstant?.(expression.cls, expression.name);
+      if (expression.className && expression.cls.k === 'named') return expression.cls.name;
+      const name = typeof expression.name === 'string' ? expression.name : fold(expression.name, context);
+      if (typeof name !== 'string') return UNKNOWN;
+      const value = context.classConstant?.(expression.cls, name);
       return value === undefined ? UNKNOWN : value;
     }
     case 'idx': {
