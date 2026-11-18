@@ -254,7 +254,7 @@ export type ArithOp = '+' | '-' | '*' | '/' | '%' | '&' | '|' | '^' | '<<' | '>>
 export type Expr = ExprBase &
   (
     | { kind: 'int'; value: bigint; suffix: string | undefined }
-    | { kind: 'float'; value: number; suffix: string | undefined }
+    | { kind: 'float'; value: number; f32: number; suffix: string | undefined }
     | { kind: 'bool'; value: boolean }
     | { kind: 'char'; value: string }
     | { kind: 'str'; value: string }
@@ -334,6 +334,8 @@ export interface FormatSpec {
   zero: boolean;
   width: { kind: 'literal'; value: number } | { kind: 'arg'; arg: number } | undefined;
   precision: { kind: 'literal'; value: number } | { kind: 'arg'; arg: number } | undefined;
+  /** `{:x?}` and `{:X?}`: `Debug` with integers in hexadecimal. */
+  debugHex?: 'x' | 'X';
 }
 
 export type MacroCall =
@@ -341,12 +343,14 @@ export type MacroCall =
   | { kind: 'format'; format: FormatArgs }
   | { kind: 'write'; target: Expr; newline: boolean; format: FormatArgs | undefined }
   | { kind: 'panic'; name: string; format: FormatArgs | undefined }
-  | { kind: 'assert'; cond: Expr; format: FormatArgs | undefined }
+  /** `assert!`, with its condition's source text as `stringify!` gives it, which its default message quotes. */
+  | { kind: 'assert'; cond: Expr; text: string; format: FormatArgs | undefined }
   | { kind: 'assertEq'; equal: boolean; left: Expr; right: Expr; format: FormatArgs | undefined }
   | { kind: 'vec'; elems: Expr[] }
   | { kind: 'vecRepeat'; value: Expr; count: Expr }
   | { kind: 'matches'; value: Expr; pattern: Pattern }
-  | { kind: 'dbg'; args: Expr[] };
+  /** `dbg!`'s arguments, with their source text as `stringify!` gives it (whitespace runs as single spaces). */
+  | { kind: 'dbg'; args: Expr[]; texts: string[] };
 
 // ---------------------------------------------------------------------------------------------------------------------
 // Patterns

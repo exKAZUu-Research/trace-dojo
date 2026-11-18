@@ -1,9 +1,9 @@
-// code-gauge-allow-file fileNcss 411 -- One native per method of the standard library.
-import { debugFloat } from '../floatFormat';
+// code-gauge-allow-file fileNcss 446 -- One native per method of the standard library.
+import { debugFloat, decimalToF32 } from '../floatFormat';
 import { normalize } from '../infer';
 import { bitsOf, intArith, overflow, wrap } from '../ops';
-import { intMax, intMin, type IntName, shallow, type Type } from '../types';
-import { StructValue, type Value } from '../values';
+import { INT_NAMES, intMax, intMin, type IntName, shallow, type Type } from '../types';
+import { EnumValue, StructValue, type Value } from '../values';
 import {
   define,
   deref,
@@ -88,6 +88,7 @@ function remEuclid(a: bigint, b: bigint): bigint {
 }
 
 /** Parses an integer as `str::parse` and `from_str_radix` do, with their errors. */
+// code-gauge-allow functionCognitiveComplexity 19 -- Follows std's integer parsing step by step.
 export function parseInteger(ctx: NativeContext, text: string, name: IntName, radix: number): Value {
   const errorKind = (kind: string): Value =>
     err(ctx, new StructValue(ctx.interp.program.adtDef('ParseIntError'), [kind]));
@@ -100,17 +101,17 @@ export function parseInteger(ctx: NativeContext, text: string, name: IntName, ra
     if (negative && name.startsWith('u')) return errorKind('InvalidDigit');
     body = body.slice(1);
   }
+  // Like std, reads the digits from the left and reports an overflow as soon as one happens, before later digits.
   let value = 0n;
   const base = BigInt(radix);
   for (const char of body) {
     const digit = Number.parseInt(char, 36);
     if (Number.isNaN(digit) || digit >= radix || !/[\da-z]/i.test(char)) return errorKind('InvalidDigit');
     value = value * base + BigInt(digit);
+    if (!negative && value > intMax(name)) return errorKind('PosOverflow');
+    if (negative && -value < intMin(name)) return errorKind('NegOverflow');
   }
-  const result = negative ? -value : value;
-  if (result > intMax(name)) return errorKind('PosOverflow');
-  if (result < intMin(name)) return errorKind('NegOverflow');
-  return ok(ctx, result);
+  return ok(ctx, negative ? -value : value);
 }
 
 /** Parses a float as `str::parse::<f64>` does: decimal, `inf`, `infinity`, and `nan` in any case, with a sign. */
@@ -122,6 +123,7 @@ export function parseFloatText(ctx: NativeContext, text: string, f32: boolean): 
   const sign = match[1] === '-' ? -1 : 1;
   let value: number;
   if (match[2]) value = match[2].toLowerCase() === 'nan' ? Number.NaN : sign * Number.POSITIVE_INFINITY;
+  else if (f32) return ok(ctx, sign * decimalToF32(match[3]));
   else value = sign * Number(match[3]);
   return ok(ctx, f32 ? Math.fround(value) : value);
 }
@@ -389,6 +391,7 @@ const integer: Record<string, (args: Value[], ctx: NativeContext) => Value> = {
     }
     return power;
   },
+  from_str: ([text], ctx) => parseInteger(ctx, deref(text) as string, intName(ctx), 10),
   from_str_radix: ([text, radix], ctx) => {
     const base = Number(radix as bigint);
     if (base < 2 || base > 36) {
@@ -451,12 +454,18 @@ const floating: Record<string, (args: Value[], ctx: NativeContext) => Value> = {
   sqrt: ([a], ctx) => round(ctx, Math.sqrt(float(a))),
   cbrt: ([a], ctx) => round(ctx, Math.cbrt(float(a))),
   powi: ([a, n], ctx) => powi(float(a), Number(n as bigint), (value) => round(ctx, value)),
-  powf: ([a, n], ctx) => round(ctx, Math.pow(float(a), float(n))),
+  powf: ([a, n], ctx) => {
+    // C's pow, which Rust calls, gives 1 for 1 to any power and for ±1 to an infinite one, where JavaScript gives NaN.
+    const base = float(a);
+    const unit = base === 1 || (Math.abs(base) === 1 && Math.abs(float(n)) === Number.POSITIVE_INFINITY);
+    return unit ? 1 : round(ctx, Math.pow(base, float(n)));
+  },
   abs: ([a], ctx) => round(ctx, Math.abs(float(a))),
   floor: ([a], ctx) => round(ctx, Math.floor(float(a))),
   ceil: ([a], ctx) => round(ctx, Math.ceil(float(a))),
   round: ([a], ctx) => {
     const value = float(a);
+    if (Number.isNaN(value)) return value;
     return round(ctx, Math.sign(value) * Math.round(Math.abs(value)) || (Object.is(value, -0) || value < 0 ? -0 : 0));
   },
   round_ties_even: ([a], ctx) => {
@@ -478,6 +487,15 @@ const floating: Record<string, (args: Value[], ctx: NativeContext) => Value> = {
   sinh: ([a], ctx) => round(ctx, Math.sinh(float(a))),
   cosh: ([a], ctx) => round(ctx, Math.cosh(float(a))),
   tanh: ([a], ctx) => round(ctx, Math.tanh(float(a))),
+  asinh: ([a], ctx) => round(ctx, Math.asinh(float(a))),
+  acosh: ([a], ctx) => round(ctx, Math.acosh(float(a))),
+  // std computes `atanh` from `ln_1p` as below, rounding each step to the type.
+  atanh: ([a], ctx) => {
+    const x = float(a);
+    return round(ctx, 0.5 * round(ctx, Math.log1p(round(ctx, round(ctx, 2 * x) / round(ctx, 1 - x)))));
+  },
+  exp_m1: ([a], ctx) => round(ctx, Math.expm1(float(a))),
+  ln_1p: ([a], ctx) => round(ctx, Math.log1p(float(a))),
   exp: ([a], ctx) => round(ctx, Math.exp(float(a))),
   exp2: ([a], ctx) => round(ctx, 2 ** float(a)),
   ln: ([a], ctx) => round(ctx, Math.log(float(a))),
@@ -498,7 +516,9 @@ const floating: Record<string, (args: Value[], ctx: NativeContext) => Value> = {
         f32 ? 'core/src/num/f32.rs:1605:9' : 'core/src/num/f64.rs:1585:9'
       );
     }
-    return round(ctx, Math.min(Math.max(float(a), float(min)), float(max)));
+    // Comparing keeps -0 and NaN as they are, where `Math.max(-0, 0)` gives 0.
+    const value = float(a);
+    return value < float(min) ? float(min) : value > float(max) ? float(max) : value;
   },
   is_nan: ([a]) => Number.isNaN(float(a)),
   is_infinite: ([a]) => !Number.isFinite(float(a)) && !Number.isNaN(float(a)),
@@ -624,7 +644,33 @@ function tryConvert(ctx: NativeContext, value: Value, to: Type): Value {
   return err(ctx, new StructValue(ctx.interp.program.adtDef('TryFromIntError'), [kind]));
 }
 
+/** An integer's bytes, most significant first, in two's complement. */
+function bigEndianBytes(name: IntName, value: bigint): bigint[] {
+  const bits = bitsOf(name);
+  let rest = BigInt.asUintN(bits, value);
+  const bytes: bigint[] = [];
+  for (let index = 0; index < bits / 8; index++) {
+    bytes.unshift(rest & 0xffn);
+    rest >>= 8n;
+  }
+  return bytes;
+}
+
+function fromBigEndian(name: IntName, bytes: Value[]): bigint {
+  const unsigned = bytes.reduce<bigint>((value, byte) => (value << 8n) | (byte as bigint), 0n);
+  return wrap(name, unsigned);
+}
+
 const natives: Record<string, (args: Value[], ctx: NativeContext) => Value> = {
+  'ParseIntError::kind': ([self], ctx) => {
+    const def = ctx.interp.program.adtDef('IntErrorKind');
+    const kind = (deref(self) as StructValue).fields[0] as string;
+    return new EnumValue(
+      def,
+      def.variants.findIndex((variant) => variant.name === kind),
+      []
+    );
+  },
   'TryFrom::try_from': ([value], ctx) => tryConvert(ctx, value, ctx.typeArgs[0]),
   'TryInto::try_into': ([value], ctx) => tryConvert(ctx, value, ctx.typeArgs[1]),
 };
@@ -632,6 +678,15 @@ for (const [name, native] of Object.entries(integer)) {
   for (const group of ['Integer', 'SignedInteger', 'UnsignedInteger']) natives[`${group}::${name}`] = native;
 }
 for (const [name, native] of Object.entries(floating)) natives[`Float::${name}`] = native;
+// This target is little-endian, as the machines rustc builds for here are.
+for (const name of INT_NAMES) {
+  natives[`${name}::to_be_bytes`] = ([a]) => bigEndianBytes(name, a as bigint);
+  natives[`${name}::to_le_bytes`] = ([a]) => bigEndianBytes(name, a as bigint).toReversed();
+  natives[`${name}::to_ne_bytes`] = natives[`${name}::to_le_bytes`];
+  natives[`${name}::from_be_bytes`] = ([bytes]) => fromBigEndian(name, deref(bytes) as Value[]);
+  natives[`${name}::from_le_bytes`] = ([bytes]) => fromBigEndian(name, (deref(bytes) as Value[]).toReversed());
+  natives[`${name}::from_ne_bytes`] = natives[`${name}::from_le_bytes`];
+}
 define(natives);
 
 /** `std::f64::consts`, rounded from the literals that std writes for them where `Math` does not round alike. */
@@ -672,7 +727,12 @@ for (const [name, value] of Object.entries(F64_CONSTS)) {
   consts[`const:${name}`] = (_args, ctx) => (isF32Type(ctx.typeArgs[0]) ? Math.fround(value) : value);
 }
 for (const [name, value] of Object.entries(FLOAT_LIMITS)) {
-  consts[`const:${name}`] = (_args, ctx) => (isF32Type(ctx.typeArgs[0]) ? value.f32 : value.f64);
+  // The modules `std::i32` and its kin, which predate the associated constants, keep `MAX` and `MIN` too.
+  consts[`const:${name}`] = (_args, ctx) => {
+    const type = normalize(shallow(ctx.typeArgs[0]));
+    if (type.kind === 'int') return name === 'MAX' ? intMax(type.name) : intMin(type.name);
+    return isF32Type(type) ? value.f32 : value.f64;
+  };
   consts[`const:f64::${name}`] = () => value.f64;
   consts[`const:f32::${name}`] = () => value.f32;
 }

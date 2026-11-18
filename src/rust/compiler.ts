@@ -1,8 +1,8 @@
 import type { Annotations, Coercion, FnContext, LocalVar, MethodRes, PathRes, ReceiverAdjust } from './annotations';
 import type { Block, Condition, Expr, FormatArgs, MacroCall, Pattern, Span, Stmt } from './ast';
-import { forEachDirect, patternBindings } from './astWalk';
+import { patternBindings } from './astWalk';
 import type { Checker } from './checker';
-import { escapeDebug, type Formatter, type Spec } from './fmt';
+import type { Formatter, Spec } from './fmt';
 import { normalize } from './infer';
 import type { Program } from './items';
 import {
@@ -14,9 +14,11 @@ import {
   hashKey,
   intArith,
   needsCopy,
+  overflow,
   valuesEqual,
+  wrap,
 } from './ops';
-import { ControlSignal, type Frame, type FunctionInfo, RustPanic, UNASSIGNED } from './runtime';
+import { ControlSignal, FmtFailure, type Frame, type FunctionInfo, RustPanic, UNASSIGNED } from './runtime';
 import { runtimeType } from './runtimeTypes';
 import { type AdtDef, type FnDef, type IntName, isUnit, resolve, shallow, type Type } from './types';
 import {
@@ -467,7 +469,7 @@ export class Compiler {
       }
       case 'float': {
         const type = resolve(expr.ty!, true);
-        const value = type.kind === 'float' && type.name === 'f32' ? Math.fround(expr.value) : expr.value;
+        const value = type.kind === 'float' && type.name === 'f32' ? expr.f32 : expr.value;
         return () => value;
       }
       case 'bool':
@@ -763,14 +765,15 @@ export class Compiler {
     if (!res) throw new Error('Unresolved index');
     const base = this.valueThrough(expr.operand, res.derefs);
     const index = this.value(expr.index);
-    const span = res.overloaded ? expr.bracketSpan : expr.span;
+    // A range goes through the `Index` impls, which report their panics at the `[`, as `Vec`'s indexes do.
+    const span = res.overloaded || res.range ? expr.bracketSpan : expr.span;
     if (res.container === 'map') {
       const keyType = runtimeType(expr.index.ty!);
       return (frame) => {
         const map = base(frame) as MapValue;
         const key = index(frame);
         const entry = map.entries.get(hashKey(keyType(frame), key));
-        if (!entry) throw new RustPanic('key not found', span);
+        if (!entry) throw new RustPanic('no entry found for key', span);
         return entry[1];
       };
     }
@@ -790,12 +793,10 @@ export class Compiler {
     }
     return (frame) => {
       const container = base(frame);
-      const position = Number(index(frame) as bigint);
+      const position = index(frame) as bigint;
       const length = sliceLength(container);
-      if (position >= length) {
-        throw new RustPanic(`index out of bounds: the len is ${length} but the index is ${position}`, span);
-      }
-      return sliceGet(container, position);
+      if (position >= length) throw new RustPanic(indexPanic(res.container, length, position), span);
+      return sliceGet(container, Number(position));
     };
   }
 
@@ -814,7 +815,7 @@ export class Compiler {
       const position = Number(index(frame) as bigint);
       const length = sliceLength(container);
       if (position >= length) {
-        throw new RustPanic(`index out of bounds: the len is ${length} but the index is ${position}`, span);
+        throw new RustPanic(indexPanic(undefined, length, BigInt(position)), span);
       }
       const { base: array, start } = sliceBase(container);
       return new ElementPlace(array, start + position);
@@ -869,7 +870,11 @@ export class Compiler {
     }
     if (type.kind === 'float') return (frame) => -(derefAll(operand(frame)) as number);
     const name = (type as { name: IntName }).name;
-    return (frame) => intArith('-', name, 0n, derefAll(operand(frame)) as bigint, span);
+    return (frame) => {
+      const negated = -(derefAll(operand(frame)) as bigint);
+      if (negated !== wrap(name, negated)) overflow('neg', span);
+      return negated;
+    };
   }
 
   // code-gauge-allow functionCognitiveComplexity 20 -- One case per kind of expression, statement, or pattern.
@@ -1341,13 +1346,14 @@ export class Compiler {
         const newline = macro.newline ? '\n' : '';
         const stream = macro.stream;
         return (frame) => {
-          const text = format(frame) + newline;
+          const text = formatOrPanic(format, frame, IO_WRITE_FAILURE) + newline;
           frame.runtime.write(stream, text);
           return UNIT_VALUE;
         };
       }
       case 'format': {
-        return this.format(macro.format);
+        const format = this.format(macro.format);
+        return (frame) => formatOrPanic(format, frame, FORMAT_FAILURE);
       }
       case 'write': {
         const target = this.read(macro.target);
@@ -1357,22 +1363,24 @@ export class Compiler {
         const inner = targetType.kind === 'ref' ? normalize(shallow(targetType.target)) : targetType;
         const isString = inner.kind === 'adt' && inner.def.builtin === 'String';
         const okValue = (): Value => new EnumValue(this.program.adtDef('Result'), 0, [UNIT_VALUE]);
+        const errValue = (): Value =>
+          new EnumValue(this.program.adtDef('Result'), 1, [new StructValue(this.program.adtDef('FmtError'), [])]);
         if (isString) {
           const place = this.place(macro.target.kind === 'ref' ? macro.target.operand : macro.target);
           const throughRef = targetType.kind === 'ref' && macro.target.kind !== 'ref';
           return (frame) => {
-            const text = format(frame) + newline;
             const p = throughRef ? (target(frame) as Place) : place(frame);
-            p.set((p.get() as string) + text);
-            return okValue();
+            const { text, failed } = formatPartly(format, frame);
+            p.set((p.get() as string) + text + (failed ? '' : newline));
+            return failed ? errValue() : okValue();
           };
         }
         return (frame) => {
-          const text = format(frame) + newline;
           let formatter = target(frame);
           while (isPlace(formatter)) formatter = formatter.get();
-          (formatter as FormatterValue).text += text;
-          return okValue();
+          const { text, failed } = formatPartly(format, frame);
+          (formatter as FormatterValue).text += text + (failed ? '' : newline);
+          return failed ? errValue() : okValue();
         };
       }
       case 'panic': {
@@ -1400,7 +1408,7 @@ export class Compiler {
       case 'assert': {
         const cond = this.value(macro.cond);
         const format = macro.format ? this.format(macro.format) : undefined;
-        const source = assertSource(macro.cond);
+        const source = macro.text;
         return (frame) => {
           if (!(cond(frame) as boolean)) {
             throw new RustPanic(format ? format(frame) : `assertion failed: ${source}`, span);
@@ -1467,10 +1475,10 @@ export class Compiler {
         return (frame) => matcher(frame, value(frame), undefined);
       }
       case 'dbg': {
-        const args = macro.args.map((arg) => ({
+        const args = macro.args.map((arg, index) => ({
           value: this.value(arg),
           type: runtimeType(arg.ty!),
-          text: sourceText(arg),
+          text: macro.texts[index],
         }));
         return (frame) => {
           const values = args.map(({ value, type, text }) => {
@@ -1579,17 +1587,27 @@ function rangeEnd(range: RangeValue | undefined): number | undefined {
   return Number(range.end as bigint) + (range.inclusive ? 1 : 0);
 }
 
+/** The message of an index past the end; `VecDeque`'s says less. */
+function indexPanic(container: string | undefined, length: number, index: bigint): string {
+  if (container === 'vecDeque') return 'out of bounds access';
+  return `index out of bounds: the len is ${length} but the index is ${index}`;
+}
+
 /** `&v[a..b]`: a window on a slice, panicking as Rust does when the range is out of order or bounds. */
 export function sliceRange(container: Value, range: RangeValue | undefined, span: Span): Value {
   const length = sliceLength(container);
   const start = rangeStart(range) ?? 0;
   const end = rangeEnd(range) ?? length;
-  if (range?.inclusive && range.end !== undefined && Number(range.end as bigint) === Number.MAX_SAFE_INTEGER) {
+  if (range?.inclusive && range.end !== undefined && (range.end as bigint) === 0xff_ff_ff_ff_ff_ff_ff_ffn) {
     throw new RustPanic('attempted to index slice up to maximum usize', span);
+  }
+  if (range?.end === undefined && start > length) {
+    throw new RustPanic(`range start index ${range!.start as bigint} out of range for slice of length ${length}`, span);
   }
   if (start > end) throw new RustPanic(`slice index starts at ${start} but ends at ${end}`, span);
   if (end > length) {
-    throw new RustPanic(`range end index ${end} out of range for slice of length ${length}`, span);
+    // An inclusive range reports its last index, and others their end, as the numbers the program wrote.
+    throw new RustPanic(`range end index ${range!.end as bigint} out of range for slice of length ${length}`, span);
   }
   const { base, start: offset } = sliceBase(container);
   return new SliceView(base, offset + start, offset + end);
@@ -1645,49 +1663,31 @@ export function isObjectCreation(expr: Expr, annotations: Annotations): boolean 
   return false;
 }
 
-function assertSource(expr: Expr): string {
-  return sourceText(expr);
-}
+/** Where std panics when an impl's error reaches `println!` (its `io::Write`) and `format!`. */
+const IO_WRITE_FAILURE = {
+  message: 'a formatting trait implementation returned an error when the underlying stream did not',
+  location: 'core/src/io/write.rs:411:17',
+};
+const FORMAT_FAILURE = {
+  message: 'a formatting trait implementation returned an error when the underlying stream did not: Error',
+  location: 'alloc/src/fmt.rs:657:14',
+};
 
-/** The source text of an expression, as `assert!` and `dbg!` quote it. */
-let sourceLines: string[] = [];
-export function setSourceForMessages(source: string): void {
-  sourceLines = source.split('\n');
-}
-
-// code-gauge-allow functionCognitiveComplexity 17 -- One case per kind of expression, statement, or pattern.
-// code-gauge-allow functionNcss 34 -- One case per kind of expression, statement, or pattern.
-function sourceText(expr: Expr): string {
-  const start = expr.span;
-  let end = start;
-  forEachDirect(expr, (child) => {
-    if (child.span.row > end.row || (child.span.row === end.row && child.span.col > end.col)) end = child.span;
-  });
-  const line = sourceLines[start.row] ?? '';
-  const chars = [...line];
-  // Take the expression's text up to the end of its line, trimming a trailing argument separator.
-  let text = chars.slice(start.col - 1).join('');
-  let depth = 0;
-  let cut = text.length;
-  for (let index = 0; index < text.length; index++) {
-    const char = text[index];
-    if ('([{'.includes(char)) depth++;
-    else if (')]}'.includes(char)) {
-      if (depth === 0) {
-        cut = index;
-        break;
-      }
-      depth--;
-    } else if (char === ',' && depth === 0) {
-      cut = index;
-      break;
-    } else if (char === '"') {
-      const close = text.indexOf('"', index + 1);
-      if (close > 0) index = close;
-    }
+function formatOrPanic(format: Eval, frame: Frame, failure: { message: string; location: string }): string {
+  try {
+    return format(frame) as string;
+  } catch (error) {
+    if (error instanceof FmtFailure) throw new RustPanic(failure.message, { row: 0, col: 0 }, failure.location);
+    throw error;
   }
-  text = text.slice(0, cut).trim();
-  void end;
-  void escapeDebug;
-  return text;
+}
+
+/** Formats for `write!`, which writes what the formatting wrote before an impl's error and returns the error. */
+function formatPartly(format: Eval, frame: Frame): { text: string; failed: boolean } {
+  try {
+    return { text: format(frame) as string, failed: false };
+  } catch (error) {
+    if (error instanceof FmtFailure) return { text: error.written, failed: true };
+    throw error;
+  }
 }

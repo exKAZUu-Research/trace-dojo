@@ -1,5 +1,6 @@
-// code-gauge-allow-file fileNcss 401 -- One case per kind of type.
+// code-gauge-allow-file fileNcss 408 -- One case per kind of type.
 import type { Span } from './ast';
+import { bigintToF32 } from './floatFormat';
 import { normalize } from './infer';
 import { RustPanic } from './runtime';
 import { type AdtDef, intMax, intMin, type IntName, shallow, type Type } from './types';
@@ -169,8 +170,8 @@ export function castValue(value: Value, from: Type, to: Type): Value {
     if (value instanceof EnumValue) return wrap(target.name, value.def.variants[value.variant].discriminant);
   }
   if (target.kind === 'float') {
-    const number = typeof value === 'bigint' ? Number(value) : (value as number);
-    return target.name === 'f32' ? Math.fround(number) : number;
+    if (typeof value === 'bigint') return target.name === 'f32' ? bigintToF32(value) : Number(value);
+    return target.name === 'f32' ? Math.fround(value as number) : (value as number);
   }
   if (target.kind === 'char') return String.fromCodePoint(Number(value as bigint));
   void source;
@@ -231,12 +232,19 @@ export function valuesEqual(type: Type, a: Value, b: Value): boolean {
 }
 
 // code-gauge-allow functionCognitiveComplexity 23 -- One case per kind of type.
-// code-gauge-allow functionNcss 46 -- One case per kind of type.
+// code-gauge-allow functionNcss 51 -- One case per kind of type.
 function adtEqual(t: Type & { kind: 'adt' }, x: Value, y: Value): boolean {
   const { def } = t;
   switch (def.builtin) {
     case 'String': {
       return x === y;
+    }
+    case 'ParseIntError':
+    case 'ParseFloatError':
+    case 'ParseCharError':
+    case 'TryFromIntError': {
+      // Errors keep their kind in a field that their declarations do not show.
+      return (x as StructValue).fields[0] === (y as StructValue).fields[0];
     }
     case 'Vec':
     case 'VecDeque': {

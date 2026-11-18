@@ -130,14 +130,17 @@ pub mod fmt {
     }
     impl DebugList {
         pub fn entry(&mut self, entry: &dyn Debug) -> &mut DebugList;
+        pub fn entries<T: Debug>(&mut self, entries: Iter<T>) -> &mut DebugList;
         pub fn finish(&mut self) -> Result;
     }
     impl DebugSet {
         pub fn entry(&mut self, entry: &dyn Debug) -> &mut DebugSet;
+        pub fn entries<T: Debug>(&mut self, entries: Iter<T>) -> &mut DebugSet;
         pub fn finish(&mut self) -> Result;
     }
     impl DebugMap {
         pub fn entry(&mut self, key: &dyn Debug, value: &dyn Debug) -> &mut DebugMap;
+        pub fn entries<K: Debug, V: Debug>(&mut self, entries: Iter<(K, V)>) -> &mut DebugMap;
         pub fn finish(&mut self) -> Result;
     }
     impl Formatter {
@@ -164,6 +167,8 @@ pub mod string {
         pub fn new() -> String;
         pub fn with_capacity(capacity: usize) -> String;
         pub fn from_utf8(vec: Vec<u8>) -> Result<String, Utf8Error>;
+        pub fn from_utf8_lossy(v: &[u8]) -> String;
+        pub fn from_iter<P: StringPart>(iter: Iter<P>) -> String;
         pub fn push_str(&mut self, string: &str);
         pub fn push(&mut self, ch: char);
         pub fn pop(&mut self) -> Option<char>;
@@ -187,6 +192,7 @@ pub mod string {
 pub mod vec {
     pub struct Vec<T>;
     impl<T> Vec<T> {
+        pub fn from_iter(iter: Iter<T>) -> Vec<T>;
         pub fn new() -> Vec<T>;
         pub fn with_capacity(capacity: usize) -> Vec<T>;
         pub fn push(&mut self, value: T);
@@ -207,6 +213,7 @@ pub mod vec {
         pub fn retain_mut<F: FnMut(&mut T) -> bool>(&mut self, f: F);
         pub fn dedup(&mut self) where T: PartialEq;
         pub fn dedup_by_key<K: PartialEq, F: FnMut(&mut T) -> K>(&mut self, key: F);
+        pub fn dedup_by<F: FnMut(&mut T, &mut T) -> bool>(&mut self, same_bucket: F);
         pub fn resize(&mut self, new_len: usize, value: T) where T: Clone;
         pub fn split_off(&mut self, at: usize) -> Vec<T>;
         pub fn as_slice(&self) -> &[T];
@@ -259,6 +266,7 @@ pub mod slice {
         pub fn split_last(&self) -> Option<(&T, &[T])>;
         pub fn windows(&self, size: usize) -> Iter<&[T]>;
         pub fn chunks(&self, chunk_size: usize) -> Iter<&[T]>;
+        pub fn rchunks(&self, chunk_size: usize) -> Iter<&[T]>;
         pub fn chunks_exact(&self, chunk_size: usize) -> Iter<&[T]>;
         pub fn fill(&mut self, value: T) where T: Clone;
         pub fn to_vec(&self) -> Vec<T> where T: Clone;
@@ -285,6 +293,9 @@ pub mod slice {
     impl [&str] {
         pub fn join(&self, sep: &str) -> String;
         pub fn concat(&self) -> String;
+    }
+    impl<T> [&[T]] {
+        pub fn concat(&self) -> Vec<T> where T: Clone;
     }
     impl<T> [Vec<T>] {
         pub fn concat(&self) -> Vec<T> where T: Clone;
@@ -318,6 +329,7 @@ pub mod str {
         pub fn split<P: Pattern>(&self, pat: P) -> Iter<&str>;
         pub fn rsplit<P: Pattern>(&self, pat: P) -> Iter<&str>;
         pub fn split_terminator<P: Pattern>(&self, pat: P) -> Iter<&str>;
+        pub fn split_inclusive<P: Pattern>(&self, pat: P) -> Iter<&str>;
         pub fn splitn<P: Pattern>(&self, n: usize, pat: P) -> Iter<&str>;
         pub fn rsplitn<P: Pattern>(&self, n: usize, pat: P) -> Iter<&str>;
         pub fn split_once<P: Pattern>(&self, delimiter: P) -> Option<(&str, &str)>;
@@ -396,6 +408,7 @@ pub mod char {
         pub fn to_lowercase(self) -> CaseIter;
         pub fn to_digit(self, radix: u32) -> Option<u32>;
         pub fn len_utf8(self) -> usize;
+        pub fn len_utf16(self) -> usize;
         pub fn from_u32(i: u32) -> Option<char>;
         pub fn from_digit(num: u32, radix: u32) -> Option<char>;
     }
@@ -406,10 +419,117 @@ pub mod char {
 pub mod num {
     #[derive(Debug, Clone, PartialEq, Eq)]
     pub struct ParseIntError;
+    impl ParseIntError {
+        pub fn kind(&self) -> &IntErrorKind;
+    }
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub enum IntErrorKind {
+        Empty,
+        InvalidDigit,
+        PosOverflow,
+        NegOverflow,
+        Zero,
+    }
     #[derive(Debug, Clone, PartialEq, Eq)]
     pub struct ParseFloatError;
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     pub struct TryFromIntError;
+    impl i8 {
+        pub fn to_be_bytes(self) -> [u8; 1];
+        pub fn to_le_bytes(self) -> [u8; 1];
+        pub fn to_ne_bytes(self) -> [u8; 1];
+        pub fn from_be_bytes(bytes: [u8; 1]) -> i8;
+        pub fn from_le_bytes(bytes: [u8; 1]) -> i8;
+        pub fn from_ne_bytes(bytes: [u8; 1]) -> i8;
+    }
+    impl i16 {
+        pub fn to_be_bytes(self) -> [u8; 2];
+        pub fn to_le_bytes(self) -> [u8; 2];
+        pub fn to_ne_bytes(self) -> [u8; 2];
+        pub fn from_be_bytes(bytes: [u8; 2]) -> i16;
+        pub fn from_le_bytes(bytes: [u8; 2]) -> i16;
+        pub fn from_ne_bytes(bytes: [u8; 2]) -> i16;
+    }
+    impl i32 {
+        pub fn to_be_bytes(self) -> [u8; 4];
+        pub fn to_le_bytes(self) -> [u8; 4];
+        pub fn to_ne_bytes(self) -> [u8; 4];
+        pub fn from_be_bytes(bytes: [u8; 4]) -> i32;
+        pub fn from_le_bytes(bytes: [u8; 4]) -> i32;
+        pub fn from_ne_bytes(bytes: [u8; 4]) -> i32;
+    }
+    impl i64 {
+        pub fn to_be_bytes(self) -> [u8; 8];
+        pub fn to_le_bytes(self) -> [u8; 8];
+        pub fn to_ne_bytes(self) -> [u8; 8];
+        pub fn from_be_bytes(bytes: [u8; 8]) -> i64;
+        pub fn from_le_bytes(bytes: [u8; 8]) -> i64;
+        pub fn from_ne_bytes(bytes: [u8; 8]) -> i64;
+    }
+    impl i128 {
+        pub fn to_be_bytes(self) -> [u8; 16];
+        pub fn to_le_bytes(self) -> [u8; 16];
+        pub fn to_ne_bytes(self) -> [u8; 16];
+        pub fn from_be_bytes(bytes: [u8; 16]) -> i128;
+        pub fn from_le_bytes(bytes: [u8; 16]) -> i128;
+        pub fn from_ne_bytes(bytes: [u8; 16]) -> i128;
+    }
+    impl isize {
+        pub fn to_be_bytes(self) -> [u8; 8];
+        pub fn to_le_bytes(self) -> [u8; 8];
+        pub fn to_ne_bytes(self) -> [u8; 8];
+        pub fn from_be_bytes(bytes: [u8; 8]) -> isize;
+        pub fn from_le_bytes(bytes: [u8; 8]) -> isize;
+        pub fn from_ne_bytes(bytes: [u8; 8]) -> isize;
+    }
+    impl u8 {
+        pub fn to_be_bytes(self) -> [u8; 1];
+        pub fn to_le_bytes(self) -> [u8; 1];
+        pub fn to_ne_bytes(self) -> [u8; 1];
+        pub fn from_be_bytes(bytes: [u8; 1]) -> u8;
+        pub fn from_le_bytes(bytes: [u8; 1]) -> u8;
+        pub fn from_ne_bytes(bytes: [u8; 1]) -> u8;
+    }
+    impl u16 {
+        pub fn to_be_bytes(self) -> [u8; 2];
+        pub fn to_le_bytes(self) -> [u8; 2];
+        pub fn to_ne_bytes(self) -> [u8; 2];
+        pub fn from_be_bytes(bytes: [u8; 2]) -> u16;
+        pub fn from_le_bytes(bytes: [u8; 2]) -> u16;
+        pub fn from_ne_bytes(bytes: [u8; 2]) -> u16;
+    }
+    impl u32 {
+        pub fn to_be_bytes(self) -> [u8; 4];
+        pub fn to_le_bytes(self) -> [u8; 4];
+        pub fn to_ne_bytes(self) -> [u8; 4];
+        pub fn from_be_bytes(bytes: [u8; 4]) -> u32;
+        pub fn from_le_bytes(bytes: [u8; 4]) -> u32;
+        pub fn from_ne_bytes(bytes: [u8; 4]) -> u32;
+    }
+    impl u64 {
+        pub fn to_be_bytes(self) -> [u8; 8];
+        pub fn to_le_bytes(self) -> [u8; 8];
+        pub fn to_ne_bytes(self) -> [u8; 8];
+        pub fn from_be_bytes(bytes: [u8; 8]) -> u64;
+        pub fn from_le_bytes(bytes: [u8; 8]) -> u64;
+        pub fn from_ne_bytes(bytes: [u8; 8]) -> u64;
+    }
+    impl u128 {
+        pub fn to_be_bytes(self) -> [u8; 16];
+        pub fn to_le_bytes(self) -> [u8; 16];
+        pub fn to_ne_bytes(self) -> [u8; 16];
+        pub fn from_be_bytes(bytes: [u8; 16]) -> u128;
+        pub fn from_le_bytes(bytes: [u8; 16]) -> u128;
+        pub fn from_ne_bytes(bytes: [u8; 16]) -> u128;
+    }
+    impl usize {
+        pub fn to_be_bytes(self) -> [u8; 8];
+        pub fn to_le_bytes(self) -> [u8; 8];
+        pub fn to_ne_bytes(self) -> [u8; 8];
+        pub fn from_be_bytes(bytes: [u8; 8]) -> usize;
+        pub fn from_le_bytes(bytes: [u8; 8]) -> usize;
+        pub fn from_ne_bytes(bytes: [u8; 8]) -> usize;
+    }
     impl<N: SignedInteger> N {
         pub fn abs(self) -> N;
         pub fn checked_abs(self) -> Option<N>;
@@ -492,6 +612,7 @@ pub mod num {
         pub fn ilog10(self) -> u32;
         pub fn ilog(self, base: N) -> u32;
         pub fn from_str_radix(src: &str, radix: u32) -> Result<N, ParseIntError>;
+        pub fn from_str(src: &str) -> Result<N, ParseIntError>;
         pub fn max_value() -> N;
         pub fn min_value() -> N;
         pub fn swap_bytes(self) -> N;
@@ -522,6 +643,11 @@ pub mod num {
         pub fn sinh(self) -> F;
         pub fn cosh(self) -> F;
         pub fn tanh(self) -> F;
+        pub fn asinh(self) -> F;
+        pub fn acosh(self) -> F;
+        pub fn atanh(self) -> F;
+        pub fn exp_m1(self) -> F;
+        pub fn ln_1p(self) -> F;
         pub fn exp(self) -> F;
         pub fn exp2(self) -> F;
         pub fn ln(self) -> F;
@@ -630,6 +756,7 @@ pub mod result {
         pub fn unwrap_or_default(self) -> T where T: Default;
         pub fn map<U, F: FnOnce(T) -> U>(self, op: F) -> Result<U, E>;
         pub fn map_or<U, F: FnOnce(T) -> U>(self, default: U, f: F) -> U;
+        pub fn map_or_else<U, D: FnOnce(E) -> U, F: FnOnce(T) -> U>(self, default: D, f: F) -> U;
         pub fn map_err<F2, O: FnOnce(E) -> F2>(self, op: O) -> Result<T, F2>;
         pub fn inspect<F: FnOnce(&T)>(self, f: F) -> Result<T, E>;
         pub fn and_then<U, F: FnOnce(T) -> Result<U, E>>(self, op: F) -> Result<U, E>;
@@ -666,7 +793,7 @@ pub mod convert {
     pub trait Into<T> { fn into(self) -> T; }
     pub trait TryFrom<T> { fn try_from(value: T) -> Result<Self, TryFromIntError>; }
     pub trait TryInto<T> { fn try_into(self) -> Result<T, TryFromIntError>; }
-    pub trait AsRef<T> {}
+    pub trait AsRef<T> { fn as_ref(&self) -> &T; }
     pub fn identity<T>(x: T) -> T;
 }
 pub mod error {
@@ -714,6 +841,7 @@ pub mod iter {
         pub fn len(&self) -> usize;
         pub fn last(self) -> Option<T>;
         pub fn nth(&mut self, n: usize) -> Option<T>;
+        pub fn nth_back(&mut self, n: usize) -> Option<T>;
         pub fn fold<B, F: FnMut(B, T) -> B>(self, init: B, f: F) -> B;
         pub fn reduce<F: FnMut(T, T) -> T>(self, f: F) -> Option<T>;
         pub fn for_each<F: FnMut(T)>(self, f: F);
@@ -978,6 +1106,7 @@ pub mod collections {
     }
 }
 pub mod mem {
+    pub fn size_of<T>() -> usize;
     pub fn swap<T>(x: &mut T, y: &mut T);
     pub fn replace<T>(dest: &mut T, src: T) -> T;
     pub fn take<T: Default>(dest: &mut T) -> T;
@@ -993,6 +1122,54 @@ pub mod io {
 }
 pub mod process {
     pub fn exit(code: i32) -> !;
+}
+pub mod i8 {
+    pub const MAX: i8;
+    pub const MIN: i8;
+}
+pub mod i16 {
+    pub const MAX: i16;
+    pub const MIN: i16;
+}
+pub mod i32 {
+    pub const MAX: i32;
+    pub const MIN: i32;
+}
+pub mod i64 {
+    pub const MAX: i64;
+    pub const MIN: i64;
+}
+pub mod i128 {
+    pub const MAX: i128;
+    pub const MIN: i128;
+}
+pub mod isize {
+    pub const MAX: isize;
+    pub const MIN: isize;
+}
+pub mod u8 {
+    pub const MAX: u8;
+    pub const MIN: u8;
+}
+pub mod u16 {
+    pub const MAX: u16;
+    pub const MIN: u16;
+}
+pub mod u32 {
+    pub const MAX: u32;
+    pub const MIN: u32;
+}
+pub mod u64 {
+    pub const MAX: u64;
+    pub const MIN: u64;
+}
+pub mod u128 {
+    pub const MAX: u128;
+    pub const MIN: u128;
+}
+pub mod usize {
+    pub const MAX: usize;
+    pub const MIN: usize;
 }
 pub mod f64 {
     pub mod consts {

@@ -7,12 +7,13 @@ import type { Module, Program } from './items';
 import { type NativeContext, NATIVES } from './natives';
 import { rangeIterator, toIterator } from './natives/iterators';
 import { cloneValue, compareValues, setUserImpls, valuesEqual } from './ops';
-import { ControlSignal, Frame, type FunctionInfo, type Runtime, RustPanic } from './runtime';
+import { ControlSignal, FmtFailure, Frame, type FunctionInfo, type Runtime, RustPanic } from './runtime';
 import { concreteType, matchConcrete, typeKey } from './runtimeTypes';
 import {
   type AdtDef,
   type FnDef,
   type ImplDef,
+  resolve,
   shallow,
   substitute,
   type TraitDef,
@@ -61,7 +62,10 @@ export class Interpreter implements CallSupport {
       fieldTypes: (def, args, variant) => fieldTypes(def, args, variant),
       concrete: (type) => {
         const frame = this.runtime.frames.at(-1);
-        return frame ? concreteType(type, frame.typeArgs) : type;
+        let t = shallow(frame ? concreteType(type, frame.typeArgs) : type);
+        // An `impl Trait` value formats as the type it hides.
+        while (t.kind === 'opaque' && t.opaque.hidden) t = shallow(resolve(t.opaque.hidden, true));
+        return t;
       },
     });
     setUserImpls({
@@ -361,9 +365,7 @@ export class Interpreter implements CallSupport {
       { row: 0, col: 0 },
       frame
     ) as EnumValue;
-    if (result.variant !== 0) {
-      throw new RustPanic('a Display implementation returned an error unexpectedly: Error', { row: 0, col: 0 });
-    }
+    if (result.variant !== 0) throw new FmtFailure(formatter.text);
     return formatter.text;
   }
 }

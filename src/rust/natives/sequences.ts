@@ -1,3 +1,4 @@
+// code-gauge-allow-file fileNcss 414 -- One native per method of the standard library.
 import { sliceRange } from '../compiler';
 import { cloneValue, compareValues, copyValue, valuesEqual } from '../ops';
 import { RustPanic } from '../runtime';
@@ -269,6 +270,17 @@ const sliceNatives: Record<string, (args: Value[], ctx: NativeContext) => Value>
     return arrayIter(base, 0, count, (index) => new SliceView(base, start + index, start + index + width));
   },
   chunks: ([self, size], ctx) => chunks(ctx, deref(self), Number(size as bigint), false),
+  rchunks: ([self, size], ctx) => {
+    const slice = deref(self);
+    const width = Number(size as bigint);
+    if (width === 0) panic(ctx, 'chunk size must be non-zero');
+    const { base, start } = sliceBase(slice);
+    const length = sliceLength(slice);
+    return arrayIter(base, 0, Math.ceil(length / width), (index) => {
+      const end = length - index * width;
+      return new SliceView(base, start + Math.max(0, end - width), start + end);
+    });
+  },
   chunks_exact: ([self, size], ctx) => chunks(ctx, deref(self), Number(size as bigint), true),
   fill: ([self, value], ctx) => {
     const slice = deref(self);
@@ -343,7 +355,7 @@ function copyFrom(ctx: NativeContext, target: Value, source: Value, copy: (item:
   if (items.length !== sliceLength(target)) {
     panic(
       ctx,
-      `source slice length (${items.length}) does not match destination slice length (${sliceLength(target)})`
+      `copy_from_slice: source slice length (${items.length}) does not match destination slice length (${sliceLength(target)})`
     );
   }
   for (const [index, item] of items.entries()) sliceSet(target, index, copy(item));
@@ -358,6 +370,15 @@ function joinStrings(self: Value, sep: Value): string {
 
 const vecNatives: Record<string, (args: Value[], ctx: NativeContext) => Value> = {
   new: () => [],
+  from_iter: ([iter], ctx) => {
+    const iterator = deref(iter) as IterValue;
+    const items: Value[] = [];
+    for (let item = iterator.next(); item !== DONE; item = iterator.next()) {
+      ctx.runtime.spend();
+      items.push(item);
+    }
+    return items;
+  },
   with_capacity: () => [],
   push: ([self, value], ctx) => {
     ctx.runtime.allocate(1);
@@ -474,6 +495,19 @@ const vecNatives: Record<string, (args: Value[], ctx: NativeContext) => Value> =
   dedup: ([self], ctx) => {
     const items = vec(self);
     const kept = items.filter((item, index) => index === 0 || !valuesEqual(elemType(ctx), items[index - 1], item));
+    items.length = 0;
+    items.push(...kept);
+    return UNIT_VALUE;
+  },
+  dedup_by: ([self, f], ctx) => {
+    // Keeps an element unless `same_bucket(it, the last element kept)` says it repeats that one.
+    const items = vec(self);
+    const kept: Value[] = [];
+    for (let index = 0; index < items.length; index++) {
+      const repeats =
+        kept.length > 0 && call(ctx, f, [new ElementPlace(items, index), new ElementPlace(kept, kept.length - 1)]);
+      if (!repeats) kept.push(items[index]);
+    }
     items.length = 0;
     items.push(...kept);
     return UNIT_VALUE;
@@ -632,6 +666,8 @@ natives['[&str]::join'] = ([self, sep]) => joinStrings(self, sep);
 natives['[&str]::concat'] = ([self]) => joinStrings(self, '');
 natives['[Vec<_>]::concat'] = ([self], ctx) =>
   sliceItems(deref(self)).flatMap((item) => (item as Value[]).map((e) => cloneValue(elemType(ctx), e)));
+natives['[&[_]]::concat'] = ([self], ctx) =>
+  sliceItems(deref(self)).flatMap((item) => sliceItems(deref(item)).map((e) => cloneValue(elemType(ctx), e)));
 natives['[Vec<_>]::join'] = ([self, sep], ctx) => {
   const result: Value[] = [];
   for (const [index, item] of sliceItems(deref(self)).entries()) {

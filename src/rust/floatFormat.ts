@@ -171,3 +171,45 @@ function exactDigitsSignificant(value: number, count: number): { digits: string;
   }
   return { digits, exponent };
 }
+
+/** A decimal number (`1.5`, `-2e-3`) rounded to the nearest `f32` once, where going through `f64` would round twice. */
+export function decimalToF32(text: string): number {
+  const match = /^([+-]?)(\d*)(?:\.(\d*))?(?:[eE]([+-]?\d+))?$/.exec(text);
+  if (!match) return Math.fround(Number(text));
+  const sign = match[1] === '-' ? -1 : 1;
+  const digits = `${match[2]}${match[3] ?? ''}`.replace(/^0+/, '');
+  const exponent = Number(match[4] ?? 0) - (match[3]?.length ?? 0);
+  // Beyond these, the value is surely infinite or zero as an `f32`.
+  if (digits === '' || digits.length + exponent < -50) return sign * 0;
+  if (digits.length + exponent > 40) return sign * Number.POSITIVE_INFINITY;
+  const scale = 10n ** BigInt(Math.abs(exponent));
+  const value = BigInt(digits);
+  return sign * rationalToF32(exponent >= 0 ? value * scale : value, exponent >= 0 ? 1n : scale);
+}
+
+/** An integer rounded to the nearest `f32` once. */
+export function bigintToF32(value: bigint): number {
+  return value < 0n ? -rationalToF32(-value, 1n) : rationalToF32(value, 1n);
+}
+
+/** `num / den` (positive) rounded to the nearest `f32`, ties to even, with subnormals and overflow to infinity. */
+function rationalToF32(num: bigint, den: bigint): number {
+  if (num === 0n) return 0;
+  // The binary exponent: 2^power <= num / den < 2^(power + 1).
+  let power = num.toString(2).length - den.toString(2).length;
+  const atLeast = power >= 0 ? num >= den << BigInt(power) : num << BigInt(-power) >= den;
+  if (!atLeast) power--;
+  // The mantissa has 24 bits, fewer for subnormals, whose exponent stays at -126.
+  let shift = Math.max(power, -126) - 23;
+  const scaledNum = shift >= 0 ? num : num << BigInt(-shift);
+  const scaledDen = shift >= 0 ? den << BigInt(shift) : den;
+  let mantissa = scaledNum / scaledDen;
+  const twiceRemainder = 2n * (scaledNum - mantissa * scaledDen);
+  if (twiceRemainder > scaledDen || (twiceRemainder === scaledDen && (mantissa & 1n) === 1n)) mantissa++;
+  if (mantissa === 1n << 24n) {
+    mantissa >>= 1n;
+    shift++;
+  }
+  if (shift + 23 > 127) return Number.POSITIVE_INFINITY;
+  return Number(mantissa) * 2 ** shift;
+}

@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 432 -- One native per method of the standard library.
+// code-gauge-allow-file fileNcss 485 -- One native per method of the standard library.
 import { normalize } from '../infer';
 import { strSliceBytes } from '../interpreter';
 import { RustPanic } from '../runtime';
@@ -9,6 +9,7 @@ import {
   isPlace,
   type IterValue,
   type RangeValue,
+  sliceItems,
   StructValue,
   UNIT_VALUE,
   type Value,
@@ -145,6 +146,43 @@ function headAtBoundary(ctx: NativeContext, text: string, offset: number, name: 
     panic(ctx, `assertion failed: self.is_char_boundary(${name})`);
   }
   return new TextDecoder().decode(bytes.slice(0, offset));
+}
+
+/**
+ * Where UTF-8 decoding fails, as `Utf8Error` reports it: the valid prefix's length, and the invalid sequence's length,
+ * or undefined when the bytes end in the middle of a sequence.
+ */
+function utf8Error(bytes: Uint8Array): { validUpTo: number; errorLen: number | undefined } {
+  let index = 0;
+  while (index < bytes.length) {
+    const width = sequenceWidth(bytes[index]);
+    if (width === 0) return { validUpTo: index, errorLen: 1 };
+    for (let offset = 1; offset < width; offset++) {
+      if (index + offset >= bytes.length) return { validUpTo: index, errorLen: undefined };
+      const [low, high] = offset === 1 ? secondByteRange(bytes[index]) : [0x80, 0xbf];
+      const byte = bytes[index + offset];
+      if (byte < low || byte > high) return { validUpTo: index, errorLen: offset };
+    }
+    index += width;
+  }
+  return { validUpTo: index, errorLen: undefined };
+}
+
+/** How many bytes a UTF-8 sequence that starts with `first` takes, or 0 when no sequence starts with it. */
+function sequenceWidth(first: number): number {
+  if (first < 0x80) return 1;
+  if (first >= 0xc2 && first <= 0xdf) return 2;
+  if (first >= 0xe0 && first <= 0xef) return 3;
+  return first >= 0xf0 && first <= 0xf4 ? 4 : 0;
+}
+
+/** The bytes that may follow a sequence's first byte, which exclude overlong forms and surrogates. */
+function secondByteRange(first: number): [number, number] {
+  if (first === 0xe0) return [0xa0, 0xbf];
+  if (first === 0xed) return [0x80, 0x9f];
+  if (first === 0xf0) return [0x90, 0xbf];
+  if (first === 0xf4) return [0x80, 0x8f];
+  return [0x80, 0xbf];
 }
 
 function strIter(items: string[]): IterValue {
@@ -292,13 +330,28 @@ const strNatives: Record<string, (args: Value[], ctx: NativeContext) => Value> =
     ),
   lines: ([s]) => {
     const text = str(s);
-    const lines = text.split('\n').map((line) => (line.endsWith('\r') ? line.slice(0, -1) : line));
+    // A line ends at `\n` or `\r\n`; a `\r` at the very end stays in the last line.
+    const lines = text
+      .split('\n')
+      .map((line, index, all) => (index < all.length - 1 && line.endsWith('\r') ? line.slice(0, -1) : line));
     if (text.endsWith('\n')) lines.pop();
     if (text.length === 0) return strIter([]);
     return strIter(lines);
   },
   split: ([s, p], ctx) => strIter(splitBy(ctx, str(s), p)),
   rsplit: ([s, p], ctx) => strIter(splitBy(ctx, str(s), p).toReversed()),
+  split_inclusive: ([s, p], ctx) => {
+    const text = str(s);
+    const match = patternMatcher(ctx, p);
+    const parts: string[] = [];
+    let start = 0;
+    for (let found = match(text, 0); found; found = match(text, found.index + Math.max(found.length, 1))) {
+      parts.push(text.slice(start, found.index + found.length));
+      start = found.index + found.length;
+    }
+    if (start < text.length) parts.push(text.slice(start));
+    return strIter(parts);
+  },
   split_terminator: ([s, p], ctx) => {
     const parts = splitBy(ctx, str(s), p);
     if (parts.at(-1) === '') parts.pop();
@@ -452,12 +505,24 @@ function replaceN(ctx: NativeContext, text: string, from: Value, to: string, cou
 const stringNatives: Record<string, (args: Value[], ctx: NativeContext) => Value> = {
   new: () => '',
   with_capacity: () => '',
+  from_iter: ([iter], ctx) => {
+    const iterator = deref(iter) as IterValue;
+    let text = '';
+    for (let item = iterator.next(); item !== DONE; item = iterator.next()) {
+      ctx.runtime.spend();
+      text += deref(item) as string;
+    }
+    return text;
+  },
+  from_utf8_lossy: ([bytes]) => new TextDecoder().decode(Uint8Array.from(sliceItems(deref(bytes)) as bigint[], Number)),
   from_utf8: ([bytes], ctx) => {
-    const array = Uint8Array.from((deref(bytes) as Value[]).map((byte) => Number(byte as bigint)));
+    const values = deref(bytes) as bigint[];
+    const array = Uint8Array.from(values, Number);
     try {
       return ok(ctx, new TextDecoder('utf-8', { fatal: true }).decode(array));
     } catch {
-      return err(ctx, new StructValue(ctx.interp.program.adtDef('Utf8Error'), []));
+      const { validUpTo, errorLen } = utf8Error(array);
+      return err(ctx, new StructValue(ctx.interp.program.adtDef('Utf8Error'), [[...values], validUpTo, errorLen]));
     }
   },
   push_str: ([self, s]) => {
@@ -527,6 +592,8 @@ const stringNatives: Record<string, (args: Value[], ctx: NativeContext) => Value
     const place = placeOf(self);
     const text = place.get() as string;
     const { start, end } = rangeBounds(range, byteLength(text));
+    headAtBoundary(ctx, text, start ?? 0, 'start');
+    headAtBoundary(ctx, text, end ?? byteLength(text), 'end');
     const removed = strSliceBytes(text, start, end, ctx.span);
     const head = strSliceBytes(text, 0, start, ctx.span);
     place.set(head + text.slice(head.length + removed.length));
@@ -614,6 +681,7 @@ const charNatives: Record<string, (args: Value[], ctx: NativeContext) => Value> 
     return option(ctx, digit === undefined ? undefined : BigInt(digit), digit !== undefined);
   },
   len_utf8: ([c]) => BigInt(byteLength(char(c))),
+  len_utf16: ([c]) => BigInt(char(c).length),
   from_u32: ([i], ctx) => fromU32(ctx, i),
   from_digit: ([num, radix], ctx) => fromDigit(ctx, num, radix),
 };

@@ -2,6 +2,7 @@ import type { FormatPiece, FormatSpec } from './ast';
 import { debugFloat, displayFloat, expFloat, fixedFloat } from './floatFormat';
 import { normalize } from './infer';
 import { compareValues, wrap } from './ops';
+import { FmtFailure } from './runtime';
 import { ERROR_TYPES } from './traits';
 import { type AdtDef, type IntName, shallow, type Type } from './types';
 import {
@@ -25,6 +26,7 @@ export interface Spec {
   zero: boolean;
   width: number | undefined;
   precision: number | undefined;
+  debugHex?: 'x' | 'X';
 }
 
 export const DEFAULT_SPEC: Spec = {
@@ -58,7 +60,12 @@ export class Formatter {
         continue;
       }
       const spec = this.resolveSpec(piece, values);
-      text += this.formatOne(piece.trait, values[piece.arg], types[piece.arg], spec);
+      try {
+        text += this.formatOne(piece.trait, values[piece.arg], types[piece.arg], spec);
+      } catch (error) {
+        if (error instanceof FmtFailure) throw new FmtFailure(text + error.written);
+        throw error;
+      }
     }
     return text;
   }
@@ -77,6 +84,7 @@ export class Formatter {
       zero: piece.zero,
       width: count(piece.width),
       precision: count(piece.precision),
+      debugHex: piece.debugHex,
     };
   }
 
@@ -109,7 +117,7 @@ export class Formatter {
         return padNumber(this.floatText(v as number, t.name === 'f32', spec), spec);
       }
       case 'bool': {
-        return pad(String(v), spec, '<');
+        return padString(String(v), spec);
       }
       case 'char':
       case 'str': {
@@ -133,11 +141,12 @@ export class Formatter {
             return this.display(v, t.args[0], spec);
           }
           case 'CaseIter': {
-            return padString(caseIterText(v), spec);
+            // `ToUppercase` writes its chars one by one, ignoring the width.
+            return caseIterText(v);
           }
           default: {
             if (ERROR_TYPES.has(t.def.builtin as string))
-              return pad(errorDisplay(t.def.builtin as string, v), spec, '<');
+              return padString(errorDisplay(t.def.builtin as string, v), spec);
             return '';
           }
         }
@@ -158,7 +167,8 @@ export class Formatter {
    * `{:?}` of a value; `indent` is the nesting depth of `{:#?}`, or undefined for the compact form. Containers pass the
    * placeholder's options on to the values in them, as Rust's builders do.
    */
-  // code-gauge-allow functionNcss 39 -- Follows std::fmt's formatting rules case by case.
+  // code-gauge-allow functionCognitiveComplexity 16 -- Follows std::fmt's formatting rules case by case.
+  // code-gauge-allow functionNcss 41 -- Follows std::fmt's formatting rules case by case.
   debug(value: Value, type: Type, spec: Spec, indent: number | undefined): string {
     const t = this.concrete(type);
     const v = deref(value);
@@ -167,19 +177,21 @@ export class Formatter {
         return this.debug(value, t.target, spec, indent);
       }
       case 'int': {
+        if (spec.debugHex) return this.radix(spec.debugHex === 'x' ? 'lowerHex' : 'upperHex', v, t, spec);
         return padNumber(String(v as bigint), spec);
       }
       case 'float': {
         if (spec.precision !== undefined) return padNumber(this.floatText(v as number, t.name === 'f32', spec), spec);
         let text = debugFloat(v as number, t.name === 'f32');
-        if (spec.sign === '+' && !text.startsWith('-')) text = `+${text}`;
+        if (spec.sign === '+' && !text.startsWith('-') && text !== 'NaN') text = `+${text}`;
         return padNumber(text, spec);
       }
       case 'bool': {
         return pad(String(v), spec, '<');
       }
       case 'char': {
-        return pad(`'${escapeDebug(v as string, true)}'`, spec, '<');
+        // `char`'s `Debug` writes its quoted escape directly, ignoring the width.
+        return `'${escapeDebug(v as string, true)}'`;
       }
       case 'str': {
         return `"${escapeDebug(v as string, false)}"`;
@@ -210,7 +222,7 @@ export class Formatter {
     }
   }
 
-  // code-gauge-allow functionNcss 57 -- Follows std::fmt's formatting rules case by case.
+  // code-gauge-allow functionNcss 58 -- Follows std::fmt's formatting rules case by case.
   private debugAdt(v: Value, t: Type & { kind: 'adt' }, spec: Spec, indent: number | undefined): string {
     const user = this.hooks.userFmt('Debug', t, v, { ...spec, alternate: indent !== undefined });
     // What an impl writes on several lines nests as the containers around it do (std's `PadAdapter`).
@@ -265,6 +277,7 @@ export class Formatter {
       }
       case 'ParseIntError':
       case 'ParseFloatError':
+      case 'ParseCharError':
       case 'TryFromIntError':
       case 'Utf8Error':
       case 'FmtError': {
@@ -291,6 +304,7 @@ export class Formatter {
     const fields = v instanceof EnumValue || v instanceof StructValue ? v.fields : [];
     const types = this.hooks.fieldTypes(def, t.args, variantIndex);
     if (variant.shape === 'unit') return pad(variant.name, spec, '<');
+    if (variant.shape === 'tuple' && types.length === 0) return pad(variant.name, spec, '<');
     if (variant.shape === 'tuple') {
       const items = types.map(
         (type, index) => (inner: number | undefined) => this.debug(fields[index], type, spec, inner)
@@ -450,6 +464,8 @@ export function padNumber(text: string, spec: Spec, prefixLength = 0): string {
 export function escapeDebug(text: string, isChar: boolean): string {
   let result = '';
   for (const char of text) {
+    // `Debug` escapes combining marks, which would otherwise join the char before them.
+    const combining = /\p{Grapheme_Extend}/u.test(char);
     const code = char.codePointAt(0)!;
     switch (char) {
       case '\t': {
@@ -481,23 +497,19 @@ export function escapeDebug(text: string, isChar: boolean): string {
         break;
       }
       default: {
-        result += isPrintable(code) ? char : `\\u{${code.toString(16)}}`;
+        result += isPrintable(char) && !combining ? char : `\\u{${code.toString(16)}}`;
       }
     }
   }
   return result;
 }
 
-function isPrintable(code: number): boolean {
-  if (code < 0x20 || (code >= 0x7f && code < 0xa0)) return false;
-  if (code === 0xad) return false;
-  if (code >= 0x20_0b && code <= 0x20_0f) return false;
-  if (code >= 0x20_28 && code <= 0x20_2e) return false;
-  if (code >= 0x20_60 && code <= 0x20_6f) return false;
-  if (code === 0xfe_ff) return false;
-  if (code >= 0xd8_00 && code <= 0xdf_ff) return false;
-  if (code >= 0xe0_00 && code <= 0xf8_ff) return false;
-  return true;
+/**
+ * Whether `{:?}` shows a char as it is, as std's `is_printable` decides from Unicode's categories: not control, format,
+ * separator (but the space), private-use, surrogate, or unassigned.
+ */
+function isPrintable(char: string): boolean {
+  return char === ' ' || !/[\p{Cc}\p{Cf}\p{Z}\p{Co}\p{Cs}\p{Cn}]/u.test(char);
 }
 
 export function errorDisplay(builtin: string, value: Value): string {
@@ -527,7 +539,13 @@ export function errorDisplay(builtin: string, value: Value): string {
       return 'an error occurred when formatting an argument';
     }
     case 'Utf8Error': {
-      return 'invalid utf-8 sequence';
+      const [, validUpTo, errorLen] = (value as StructValue).fields as [Value, number, number | undefined];
+      return errorLen === undefined
+        ? `incomplete utf-8 byte sequence from index ${validUpTo}`
+        : `invalid utf-8 sequence of ${errorLen} bytes from index ${validUpTo}`;
+    }
+    case 'ParseCharError': {
+      return kind === 'EmptyString' ? 'cannot parse char from empty string' : 'too many characters in string';
     }
     default: {
       return '';
@@ -556,6 +574,15 @@ function errorDebug(builtin: string, value: Value, indent: number | undefined): 
     }
     case 'FmtError': {
       return 'Error';
+    }
+    case 'ParseCharError': {
+      return inner('ParseCharError', 'kind', kind ?? 'TooManyChars');
+    }
+    case 'Utf8Error': {
+      // `String::from_utf8`'s error, which keeps the bytes it was given.
+      const [bytes, validUpTo, errorLen] = (value as StructValue).fields as [bigint[], number, number | undefined];
+      const error = `Utf8Error { valid_up_to: ${validUpTo}, error_len: ${errorLen === undefined ? 'None' : `Some(${errorLen})`} }`;
+      return `FromUtf8Error { bytes: [${bytes.join(', ')}], error: ${error} }`;
     }
     default: {
       return builtin;

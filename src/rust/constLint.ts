@@ -6,8 +6,8 @@ import { compileError } from './items';
 import { castValue, wrap } from './ops';
 import { INT_NAMES, intMax, intMin, type IntName, resolve, shallow, type Type } from './types';
 
-/** A constant: a number, a bool, or a tuple or struct of constants keyed by field (`0`, `x`). */
-type Known = bigint | number | boolean | Aggregate;
+/** A constant: a number, a bool, a char, or a tuple or struct of constants keyed by field (`0`, `x`). */
+type Known = bigint | number | boolean | string | Aggregate;
 
 interface Aggregate {
   fields: Map<string, Known | undefined>;
@@ -28,6 +28,10 @@ export class ConstLint {
 
   check(block: Block): void {
     this.block(block);
+  }
+
+  checkExpr(expr: Expr): void {
+    this.expr(expr);
   }
 
   private block(block: Block): Known | undefined {
@@ -73,7 +77,8 @@ export class ConstLint {
         const type = intTypeOf(expr.ty);
         return type ? expr.value : undefined;
       }
-      case 'bool': {
+      case 'bool':
+      case 'char': {
         return expr.value;
       }
       case 'path': {

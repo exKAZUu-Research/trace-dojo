@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 742 -- Follows Rust's name resolution case by case.
+// code-gauge-allow-file fileNcss 745 -- Follows Rust's name resolution case by case.
 import { CompileError } from '../interpreter/diagnostics';
 import type {
   BoundAst,
@@ -325,8 +325,8 @@ export class ItemCollector {
     });
   }
 
-  // code-gauge-allow functionCognitiveComplexity 21 -- Follows Rust's name resolution case by case.
-  // code-gauge-allow functionNcss 34 -- Follows Rust's name resolution case by case.
+  // code-gauge-allow functionCognitiveComplexity 23 -- Follows Rust's name resolution case by case.
+  // code-gauge-allow functionNcss 38 -- Follows Rust's name resolution case by case.
   private enumItem(item: EnumItem, module: Module): void {
     const def: AdtDef = {
       name: item.name,
@@ -352,6 +352,7 @@ export class ItemCollector {
     }
     // Discriminants are known before the bodies, since they are literals in learning programs.
     let next = 0n;
+    const discriminants = new Set<bigint>();
     for (const [index, variant] of item.variants.entries()) {
       let discriminant = next;
       if (variant.discriminant) {
@@ -365,6 +366,10 @@ export class ItemCollector {
           compileError(literal.span, 'フィールドを持つ列挙型の列挙子には、値を書けません。');
         }
       }
+      if (discriminants.has(discriminant)) {
+        compileError(item.span, `列挙型 ${item.name} の判別値 ${discriminant} が2回使われています。`);
+      }
+      discriminants.add(discriminant);
       def.variants.push({ name: variant.name, index, shape: variant.shape, fields: [], discriminant });
       next = discriminant + 1n;
     }
@@ -392,11 +397,12 @@ export class ItemCollector {
     };
     for (const derive of derives) {
       const required = requires[derive.name];
+      // rustc reports a missing supertrait at the type's name, which the derived impl is for.
       if (required && !names.has(required)) {
-        compileError(derive.span, `#[derive(${derive.name})] には、#[derive(${required})] も必要です。`);
+        compileError(span, `#[derive(${derive.name})] には、#[derive(${required})] も必要です。`);
       }
       if (derive.name === 'Ord' && !names.has('Eq')) {
-        compileError(derive.span, '#[derive(Ord)] には、#[derive(Eq)] も必要です。');
+        compileError(span, '#[derive(Ord)] には、#[derive(Eq)] も必要です。');
       }
       if (derive.name === 'Default' && def.kind === 'enum') {
         compileError(
@@ -405,7 +411,6 @@ export class ItemCollector {
         );
       }
     }
-    void span;
   }
 
   private adtScope(def: AdtDef, module: Module, generics: Generics): TypeScope {
@@ -789,6 +794,7 @@ const BUILTIN_ENUMS: Record<string, BuiltinAdt> = {
   Result: 'Result',
   Ordering: 'Ordering',
   Infallible: 'Infallible',
+  IntErrorKind: 'IntErrorKind',
 };
 
 // ---------------------------------------------------------------------------------------------------------------------

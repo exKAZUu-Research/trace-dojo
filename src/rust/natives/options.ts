@@ -131,6 +131,7 @@ const resultNatives: Record<string, (args: Value[], ctx: NativeContext) => Value
   unwrap_or_default: ([self], ctx) => (isOk(self) ? opt(self).fields[0] : defaultValue(ctx, ctx.typeArgs[0])),
   map: ([self, f], ctx) => (isOk(self) ? ok(ctx, call(ctx, f, [opt(self).fields[0]])) : self),
   map_or: ([self, fallback, f], ctx) => (isOk(self) ? call(ctx, f, [opt(self).fields[0]]) : fallback),
+  map_or_else: ([self, fallback, f], ctx) => call(ctx, isOk(self) ? f : fallback, [opt(self).fields[0]]),
   map_err: ([self, f], ctx) => (isOk(self) ? self : err(ctx, call(ctx, f, [opt(self).fields[0]]))),
   inspect: ([self, f], ctx) => {
     if (isOk(self)) call(ctx, f, [opt(self).fields[0]]);

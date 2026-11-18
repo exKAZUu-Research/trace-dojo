@@ -66,6 +66,7 @@ import {
   type Subst,
   substitute,
   substituteTraitRef,
+  type TraitDef,
   type TraitRef,
   traitRefToString,
   type Type,
@@ -130,6 +131,7 @@ export class Checker {
 
   checkProgram(): void {
     this.checkDerivedFields();
+    this.checkImplCoherence();
     for (const impl of this.program.impls) this.checkImplSignatures(impl);
     for (const fn of this.program.pendingFns.splice(0)) this.checkFn(fn);
     while (this.nestedFns.length > 0) this.checkFn(this.nestedFns.shift()!);
@@ -141,6 +143,33 @@ export class Checker {
     for (const def of this.program.adts) {
       if ((def.module as Module | undefined)?.isStd) continue;
       for (const name of def.derives) this.checkDerivedTrait(def, name);
+    }
+  }
+
+  /**
+   * Rejects a second impl of a trait for the same type (E0119), and an impl of a standard library's trait for a type
+   * the program does not declare (E0117, the orphan rule).
+   */
+  private checkImplCoherence(): void {
+    const seen = new Set<string>();
+    for (const impl of this.program.impls) {
+      const traitRef = impl.trait;
+      if (!traitRef || (impl.module as Module).isStd) continue;
+      const span = impl.span as Span;
+      const key = `${traitRef.trait.path}<${traitRef.args.map(typeToString).join(',')}> for ${typeToString(impl.selfType)}`;
+      if (impl.params.length === 0 && seen.has(key)) {
+        compileError(
+          span,
+          `トレイト ${traitRef.trait.name} は、型 ${typeToString(impl.selfType)} に2回実装されています。`
+        );
+      }
+      seen.add(key);
+      if ((traitRef.trait.module as Module).isStd && !isLocalType(impl.selfType)) {
+        compileError(
+          span,
+          `標準ライブラリのトレイト ${traitRef.trait.name} は、自分で宣言した型にだけ実装できます（${typeToString(impl.selfType)} には実装できません）。`
+        );
+      }
     }
   }
 
@@ -198,6 +227,8 @@ export class Checker {
       this.body = this.newBody({ name: def.name, module, retType: def.type, isAtomic: false });
       this.coerceExpr(ast.value, def.type);
       this.finishBody(ast.span);
+      // rustc evaluates constants before running, so one whose value overflows or divides by zero is an error.
+      new ConstLint(this.annotations).checkExpr(ast.value);
     }
     const main = this.program.root.values.get('main');
     if (main?.binding.kind !== 'fn') {
@@ -291,17 +322,18 @@ export class Checker {
     this.coerce(tail, type, retType);
   }
 
-  /** Checks a block's value against the function's result, reporting the mismatch at the block's last line. */
+  /** Checks a block's value against the function's result, reporting the mismatch at the result type. */
   private coerceTail(block: Block, actual: Type, expected: Type, item: FnItem): void {
     if (block.tail) return;
     const t = shallow(actual);
     if (t.kind === 'never') return;
     if (!this.unifier.tryUnify(actual, expected)) {
-      const span = { row: block.endRow, col: 1 };
+      // rustc reports the return type that the body does not give.
+      const span = item.ret?.span ?? item.span;
       const lastStmt = block.stmts.at(-1);
       if (lastStmt?.kind === 'expr' && lastStmt.semi && !isUnit(expected)) {
         compileError(
-          lastStmt.span,
+          span,
           `関数 ${item.name} は ${typeToString(expected)} を返すはずですが、最後の式の後に ; があるので値を返していません（; を消してください）。`
         );
       }
@@ -369,6 +401,8 @@ export class Checker {
       const answer = this.solver.implements(obligation.type, obligation.ref);
       if (answer === 'no') this.unsatisfied(obligation);
       if (answer === 'unknown') {
+        // rustc reports the variable whose type is not known, where one is.
+        this.requireKnownTypes();
         compileError(obligation.span, `型が決まりません（${typeToString(obligation.type)} の型を書いてください）。`);
       }
     }
@@ -476,7 +510,9 @@ export class Checker {
   }
 
   lowerType(ast: TypeAst): Type {
-    return lowerType(ast, this.typeScope());
+    const type = lowerType(ast, this.typeScope());
+    this.checkWrittenType(type, ast.span);
+    return type;
   }
 
   private mismatch(span: Span, expected: Type, actual: Type): never {
@@ -548,6 +584,27 @@ export class Checker {
     this.requireDyn(a.target, target.trait, expr.span);
     this.annotations.coercions.set(expr, { kind: 'dyn', type: a.target, mutable: a.mutable });
     return true;
+  }
+
+  /**
+   * Rejects what rustc rejects in a written type: a trait object of a trait that methods returning `Self` or taking
+   * type parameters make not dyn compatible (E0038), and an unsized type (`dyn T`, `str`) as a type argument (E0277).
+   */
+  private checkWrittenType(type: Type, span: Span): void {
+    const t = shallow(type);
+    if (t.kind === 'dyn') checkDynCompatible(t.trait.trait, span);
+    if (t.kind === 'adt' && t.def.builtin !== 'Box') {
+      for (const arg of t.args) {
+        const a = shallow(arg);
+        if (a.kind === 'dyn' || a.kind === 'str' || a.kind === 'slice') {
+          compileError(
+            span,
+            `${typeToString(a)} は大きさが決まらないので、${t.def.name} の型引数にできません（Box<…> に入れてください）。`
+          );
+        }
+      }
+    }
+    for (const child of childTypes(t)) if (child.kind !== 'closure') this.checkWrittenType(child, span);
   }
 
   private requireDyn(type: Type, trait: TraitRef, span: Span): void {
@@ -1560,6 +1617,7 @@ export class Checker {
     });
   }
 
+  // code-gauge-allow functionNcss 31 -- Follows rustc's method probe and its checks step by step.
   private methodCall(expr: Extract<Expr, { kind: 'methodCall' }>, expected: Type | undefined): Type {
     const receiverType = this.settled(this.expr(expr.receiver, undefined));
     const resolvedReceiver = normalize(shallow(receiverType));
@@ -1581,6 +1639,7 @@ export class Checker {
     }
     if (!found) return this.noMethod(expr, receiverType);
     this.checkMethodVisible(found.fn, expr.methodSpan);
+    this.checkTraitInScope(found.fn, expr);
     const { fn } = found;
     if (expr.turbofish) {
       const own = fn.params.slice(fn.parentParamCount);
@@ -1616,6 +1675,18 @@ export class Checker {
         `数の型が決まらないので、メソッド ${expr.method} を呼べません（5_i32 や 2.0_f64 のように、型を書いてください）。`
       );
     }
+  }
+
+  /** A method of the program's own trait impl is callable only where the trait is in scope, as rustc requires. */
+  private checkTraitInScope(fn: FnDef, expr: Extract<Expr, { kind: 'methodCall' }>): void {
+    const trait = fn.impl?.trait?.trait;
+    if (!trait || (trait.module as Module).isStd) return;
+    const binding = lookupType(this.body.module, trait.name, expr.methodSpan);
+    if (binding?.kind === 'trait' && binding.def === trait) return;
+    compileError(
+      expr.methodSpan,
+      `メソッド ${expr.method} はトレイト ${trait.name} のものなので、use でトレイトを取り込んでください。`
+    );
   }
 
   private noMethod(expr: Extract<Expr, { kind: 'methodCall' }>, receiverType: Type): never {
@@ -1881,7 +1952,9 @@ export class Checker {
   private comparison(expr: Extract<Expr, { kind: 'binary' }>): Type {
     const leftType = this.expr(expr.left, undefined);
     const l = normalize(shallow(leftType));
-    const rightType = this.expr(expr.right, l.kind === 'var' && !l.v.literal ? undefined : leftType);
+    // A sequence compares with sequences of other element types (`Vec<String> == [&str; 1]`), so it guides nothing.
+    const guides = !(l.kind === 'var' && !l.v.literal) && !sequenceElem(l);
+    const rightType = this.expr(expr.right, guides ? leftType : undefined);
     const r = normalize(shallow(rightType));
     const isEquality = expr.op === '==' || expr.op === '!=';
     // Strings compare with each other (`String == &str`), and sequences with each other (`Vec == [T; N]`).
@@ -1985,13 +2058,15 @@ export class Checker {
     return ref(type, expr.mutable);
   }
 
-  // code-gauge-allow functionCognitiveComplexity 16 -- Follows the type checking rules of rustc case by case.
+  // code-gauge-allow functionCognitiveComplexity 18 -- Follows the type checking rules of rustc case by case.
   private cast(expr: Extract<Expr, { kind: 'cast' }>): Type {
     const target = this.lowerType(expr.type);
     const sourceType = this.expr(expr.operand, castExpectation(expr.operand, target));
     const s = normalize(shallow(sourceType));
     const t = normalize(shallow(target));
     const ok = (): Type => target;
+    // `as _` takes its target from where the value goes, which the rest of the body settles.
+    if (t.kind === 'var' && !t.v.literal) return ok();
     if (s.kind === 'var' && s.v.literal === 'int' && t.kind === 'int') {
       return ok();
     }
@@ -2142,6 +2217,8 @@ export class Checker {
     return compileError(expr.span, `${typeToString(resolve(operandType))} は [ ] で要素を取り出せません。`);
   }
 
+  // code-gauge-allow functionCognitiveComplexity 17 -- Follows the type checking rules of rustc case by case.
+  // code-gauge-allow functionNcss 33 -- Follows the type checking rules of rustc case by case.
   private structExpr(expr: Extract<Expr, { kind: 'struct' }>, expected: Type | undefined): Type {
     const { def, variant, typeArgs } = this.resolveStructPath(expr.path, expr.span);
     const self = adt(def, typeArgs);
@@ -2161,6 +2238,10 @@ export class Checker {
       this.coerceExpr(field.value, substitute(variantDef.fields[index].type, subst));
     }
     this.annotations.paths.set(expr, { kind: 'ctor', def, variant, typeArgs });
+    // A struct's bounds on its type parameters hold for every value of it (`struct Labeled<T: Display>`).
+    for (const [index, param] of def.params.entries()) {
+      for (const bound of param.bounds) this.require(typeArgs[index], substituteTraitRef(bound, subst), expr.span);
+    }
     if (expr.base) {
       if (def.kind === 'enum') compileError(expr.base.span, '列挙子には .. を書けません。');
       this.coerceExpr(expr.base, self);
@@ -2928,7 +3009,7 @@ function castExpectation(operand: Expr, target: Type): Type | undefined {
 }
 
 function checkFloatLiteral(literal: Extract<Expr, { kind: 'float' }>, name: FloatName): void {
-  const value = name === 'f32' ? Math.fround(literal.value) : literal.value;
+  const value = name === 'f32' ? literal.f32 : literal.value;
   if (!Number.isFinite(value)) compileError(literal.span, `小数のリテラルが ${name} の範囲を超えています。`);
 }
 
@@ -2956,4 +3037,34 @@ function implSubst(impl: ImplDef, traitRef: TraitRef, decl: FnDef, fn: FnDef): M
     if (own[index]) subst.set(param, { kind: 'param', param: own[index] });
   }
   return subst;
+}
+
+/** Whether an impl's self type is one the program declares, which the orphan rule lets it implement std's traits for. */
+function isLocalType(type: Type): boolean {
+  const t = shallow(type);
+  if (t.kind === 'ref') return isLocalType(t.target);
+  if (t.kind === 'param') return true;
+  return t.kind === 'adt' && !(t.def.module as Module | undefined)?.isStd;
+}
+
+/** A trait of the program can be a trait object unless a method returns `Self` or takes type parameters. */
+function checkDynCompatible(trait: TraitDef, span: Span): void {
+  if ((trait.module as Module | undefined)?.isStd) return;
+  for (const fn of trait.methods.values()) {
+    if (fn.extraBounds?.some(({ param }) => param === trait.self)) continue;
+    const returnsSelf = mentionsParam(fn.ret, trait.self);
+    const generic = fn.params.length > fn.parentParamCount;
+    if (returnsSelf || generic || !fn.selfMode) {
+      compileError(
+        span,
+        `トレイト ${trait.name} はメソッド ${fn.name} が${returnsSelf ? ' Self を返す' : generic ? '型引数を取る' : ' self を取らない'}ので、dyn ${trait.name} にできません。`
+      );
+    }
+  }
+}
+
+function mentionsParam(type: Type, param: TypeParam): boolean {
+  const t = shallow(type);
+  if (t.kind === 'param') return t.param === param;
+  return childTypes(t).some((child) => mentionsParam(child, param));
 }

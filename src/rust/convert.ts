@@ -815,13 +815,15 @@ export class Converter {
       case 'integer_literal': {
         const literal = parseIntegerLiteral(node.text);
         if (!literal) syntaxError(span, `整数の書き方（${node.text}）に誤りがあります。`);
-        if (literal.kind === 'float') return { kind: 'float', value: literal.value, suffix: literal.suffix, span };
+        if (literal.kind === 'float') {
+          return { kind: 'float', value: literal.value, f32: literal.f32, suffix: literal.suffix, span };
+        }
         return { kind: 'int', value: literal.value, suffix: literal.suffix, span };
       }
       case 'float_literal': {
         const literal = parseFloatLiteral(node.text);
         if (!literal) syntaxError(span, `小数の書き方（${node.text}）に誤りがあります。`);
-        return { kind: 'float', value: literal.value, suffix: literal.suffix, span };
+        return { kind: 'float', value: literal.value, f32: literal.f32, suffix: literal.suffix, span };
       }
       case 'boolean_literal': {
         return { kind: 'bool', value: node.text === 'true', span };
@@ -1277,7 +1279,11 @@ export class Converter {
       case 'negative_literal': {
         const literal = this.expr(this.onlyChild(node));
         if (literal.kind !== 'int' && literal.kind !== 'float') syntaxError(span, 'パターンの書き方に誤りがあります。');
-        return { kind: 'lit', expr: { ...literal, value: -literal.value as never }, span };
+        const negated =
+          literal.kind === 'float'
+            ? { ...literal, value: -literal.value, f32: -literal.f32 }
+            : { ...literal, value: -literal.value };
+        return { kind: 'lit', expr: negated, span };
       }
       case 'tuple_pattern': {
         return { kind: 'tuple', elems: this.subpatterns(node).map((child) => this.pattern(child)), span };
@@ -1439,6 +1445,7 @@ export class Converter {
         return {
           kind: 'assert',
           cond: this.expr(cond),
+          text: cond.text.replaceAll(/\s+/g, ' '),
           format: rest.length > 0 ? this.formatArgs(rest, span, name) : undefined,
         };
       }
@@ -1464,7 +1471,12 @@ export class Converter {
         return this.matchesMacro(tree, span);
       }
       case 'dbg': {
-        return { kind: 'dbg', args: this.macroArgs(tree).map((arg) => this.expr(arg)) };
+        const args = this.macroArgs(tree);
+        return {
+          kind: 'dbg',
+          args: args.map((arg) => this.expr(arg)),
+          texts: args.map((arg) => arg.text.replaceAll(/\s+/g, ' ')),
+        };
       }
       default: {
         return unavailable(span, `マクロ ${name}!`);
@@ -1562,7 +1574,8 @@ export class Converter {
         exprs.push(positional.at(-1) as Expr);
       }
     }
-    return parseFormatString(text, exprs, positional.length, named, span, this.span(formatNode));
+    // Named arguments follow the positional ones, and `{}` may take them in turn too.
+    return parseFormatString(text, exprs, exprs.length, named, span, this.span(formatNode));
   }
 
   private field(node: Node, name: string): Node {

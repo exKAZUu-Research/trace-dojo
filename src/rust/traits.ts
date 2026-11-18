@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 547 -- One rule per trait or conversion of the standard library.
+// code-gauge-allow-file fileNcss 561 -- One rule per trait or conversion of the standard library.
 import { normalize, type Unifier } from './infer';
 import type { Module, Program } from './items';
 import {
@@ -31,7 +31,8 @@ export class TraitSolver {
     const { trait } = ref;
     if (t.kind === 'never') return 'yes';
     if (t.kind === 'var') return this.varImplements(t, ref);
-    if (t.kind === 'param') return this.boundsImply(t.param.bounds, ref) ? 'yes' : 'no';
+    // Type parameters are `Sized` unless they opt out with `?Sized`.
+    if (t.kind === 'param') return trait.builtin === 'Sized' || this.boundsImply(t.param.bounds, ref) ? 'yes' : 'no';
     if (t.kind === 'adt' && ['ParseError', 'Unsigned', 'Signed', 'Indexed'].includes(t.def.builtin as string))
       return 'unknown';
     if (t.kind === 'opaque') return this.boundsImply(t.opaque.bounds, ref) ? 'yes' : this.builtinOnly(t, ref);
@@ -214,6 +215,8 @@ export class TraitSolver {
       }
       return undefined;
     };
+    // std implements these for tuples of up to 12 elements.
+    if (t.kind === 'tuple' && t.elems.length > 12 && TUPLE_TRAITS.has(name)) return 'no';
     switch (name) {
       case 'Sized': {
         return t.kind === 'str' || t.kind === 'slice' || t.kind === 'dyn' ? 'no' : 'yes';
@@ -351,6 +354,21 @@ export class TraitSolver {
       }
       case 'Integer': {
         return t.kind === 'int' ? 'yes' : 'no';
+      }
+      case 'AsRef': {
+        // `String` and `str` as `str`, and `Vec`s, arrays, and slices as slices; through references too.
+        const target = normalize(shallow(ref.args[0]));
+        if (t.kind === 'ref') return this.implements(t.target, ref);
+        const isString = t.kind === 'str' || (t.kind === 'adt' && t.def.builtin === 'String');
+        if (isString) return this.unifier.tryUnify(target, { kind: 'str' }) ? 'yes' : 'no';
+        const elem =
+          t.kind === 'array' || t.kind === 'slice'
+            ? t.elem
+            : t.kind === 'adt' && t.def.builtin === 'Vec'
+              ? t.args[0]
+              : undefined;
+        if (!elem) return 'no';
+        return this.unifier.tryUnify(target, { kind: 'slice', elem }) ? 'yes' : 'no';
       }
       case 'SliceIndex': {
         // A `usize`, or a range of them.
@@ -600,6 +618,8 @@ export const ERROR_TYPES = new Set([
   'FmtError',
   'Infallible',
 ]);
+
+const TUPLE_TRAITS = new Set(['Debug', 'PartialEq', 'Eq', 'PartialOrd', 'Ord', 'Hash', 'Default']);
 
 export const RANGE_TYPES = new Set([
   'Range',

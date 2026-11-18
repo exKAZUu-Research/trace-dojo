@@ -1,6 +1,5 @@
 import type { Item } from './ast';
 import { Checker } from './checker';
-import { setSourceForMessages } from './compiler';
 import { Converter } from './convert';
 import { setPseudoTypes } from './infer';
 import { ItemCollector, Program, resolveImports } from './items';
@@ -36,7 +35,6 @@ export function buildProgram(source: string, atomicRows: ReadonlySet<number> = n
     parseError: (target) => parseErrorType(program, target),
   });
   const crate = parseRust(source);
-  setSourceForMessages(source);
   collector.collectCrate(crate, program.root);
   collector.finish();
   resolveImports(program.root);

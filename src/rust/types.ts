@@ -99,6 +99,7 @@ export type BuiltinAdt =
   | 'Formatter'
   | 'FmtError'
   | 'ParseIntError'
+  | 'IntErrorKind'
   | 'ParseFloatError'
   | 'ParseBoolError'
   | 'ParseCharError'

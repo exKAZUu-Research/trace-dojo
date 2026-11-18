@@ -1,5 +1,6 @@
 import { DEFAULT_SPEC } from '../fmt';
-import { type DynValue, type FormatterValue, UNIT_VALUE, type Value } from '../values';
+import type { Type } from '../types';
+import { DONE, type DynValue, type FormatterValue, type IterValue, UNIT_VALUE, type Value } from '../values';
 import { define, deref, type NativeContext, ok } from './support';
 
 /** What `Formatter::debug_struct` and its kin build: the entries written so far, each formatted when added. */
@@ -22,8 +23,25 @@ function start(kind: DebugBuilder['kind']): (args: Value[]) => Value {
 /** A `&dyn Debug` entry, nested one level deeper than the builder in `{:#?}`. */
 function entryText(ctx: NativeContext, b: DebugBuilder, value: Value): string {
   const dyn = deref(value) as DynValue;
+  return typedText(ctx, b, dyn.value, dyn.type);
+}
+
+function typedText(ctx: NativeContext, b: DebugBuilder, value: Value, type: Type): string {
   const { spec } = b.formatter;
-  return ctx.interp.formatter.debug(dyn.value, dyn.type, { ...DEFAULT_SPEC, ...spec }, spec.alternate ? 1 : undefined);
+  return ctx.interp.formatter.debug(value, type, { ...DEFAULT_SPEC, ...spec }, spec.alternate ? 1 : undefined);
+}
+
+/** `entries`: every element of an iterator, of the method's type parameters (`T`, or `K` and `V`). */
+function addEntries(ctx: NativeContext, self: Value, iter: Value, pairs: boolean): Value {
+  const b = builder(self);
+  const it = deref(iter) as IterValue;
+  for (let item = it.next(); item !== DONE; item = it.next()) {
+    if (pairs) {
+      const [key, value] = deref(item) as Value[];
+      b.entries.push(`${typedText(ctx, b, key, ctx.typeArgs[0])}: ${typedText(ctx, b, value, ctx.typeArgs[1])}`);
+    } else b.entries.push(typedText(ctx, b, item, ctx.typeArgs[0]));
+  }
+  return self;
 }
 
 function add(
@@ -80,7 +98,10 @@ define({
   'DebugTuple::field': add(([, value], ctx, b) => entryText(ctx, b, value)),
   'DebugTuple::finish': finish(false),
   'DebugList::entry': add(([, value], ctx, b) => entryText(ctx, b, value)),
+  'DebugList::entries': ([self, iter], ctx) => addEntries(ctx, self, iter, false),
   'DebugList::finish': finish(false),
+  'DebugSet::entries': ([self, iter], ctx) => addEntries(ctx, self, iter, false),
+  'DebugMap::entries': ([self, iter], ctx) => addEntries(ctx, self, iter, true),
   'DebugSet::entry': add(([, value], ctx, b) => entryText(ctx, b, value)),
   'DebugSet::finish': finish(false),
   'DebugMap::entry': add(([, key, value], ctx, b) => `${entryText(ctx, b, key)}: ${entryText(ctx, b, value)}`),

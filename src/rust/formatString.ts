@@ -106,7 +106,7 @@ export function parseFormatString(
     };
     if (chars[index] === ':') {
       index++;
-      if (chars[index + 1] !== undefined && '<>^'.includes(chars[index + 1]) && chars[index] !== '}') {
+      if (chars[index + 1] !== undefined && '<>^'.includes(chars[index + 1])) {
         spec.fill = chars[index];
         spec.align = chars[index + 1] as FormatSpec['align'];
         index += 2;
@@ -135,8 +135,8 @@ export function parseFormatString(
           used.add(nextPositional);
           nextPositional++;
         } else {
+          // An empty precision (`{:.}`) is no precision.
           spec.precision = readCount();
-          if (!spec.precision) formatError(stringSpan, '書式の精度（. の後）に誤りがあります。');
         }
       }
       while (chars[index] === ' ') index++;
@@ -153,10 +153,8 @@ export function parseFormatString(
         e: 'lowerExp',
         E: 'upperExp',
       };
-      if (type === 'x?' || type === 'X?') {
-        formatError(stringSpan, `書式の {:${type}} は、この採点環境では使えません。`);
-      }
-      const trait = traits[type];
+      if (type === 'x?' || type === 'X?') spec.debugHex = type[0] as 'x' | 'X';
+      const trait = traits[type.replace(/^[xX]\?$/, '?')];
       if (!trait) formatError(stringSpan, `書式の指定 ${type} は使えません（使えるのは ?, x, X, o, b, e, E です）。`);
       spec.trait = trait;
     }

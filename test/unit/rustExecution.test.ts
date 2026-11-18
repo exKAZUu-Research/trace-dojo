@@ -176,6 +176,23 @@ Err("invalid digit found in string") [
   });
 });
 
+test('numbers, escapes, and error values print as rustc prints them', () => {
+  const program = `use std::num::IntErrorKind;
+fn main() {
+    let e = "300".parse::<u8>().unwrap_err();
+    println!("{} {}", *e.kind() == IntErrorKind::PosOverflow, std::mem::size_of::<(u8, u32)>());
+    println!("{:x?} {:?} {} {}", [255, 16], '\\u{301}', 1.00000005960464477539062500001f32, (1u64 << 60) as f32);
+    println!("{:?} {:?}", "a\\rb\\r".lines().collect::<Vec<_>>(), String::from_utf8(vec![255]));
+}`;
+  expect(executeProgram('rust', program)).toMatchObject({
+    kind: 'executed',
+    stdout: String.raw`true 8
+[ff, 10] '\u{301}' 1.0000001 1152921500000000000
+["a\rb\r"] Err(FromUtf8Error { bytes: [255], error: Utf8Error { valid_up_to: 0, error_len: Some(1) } })
+`,
+  });
+});
+
 test.each([
   ['a use after a move', '    let s1 = String::from("a");\n    let s2 = s1;\n    println!("{s1} {s2}");', 4],
   ['a move in an earlier iteration', '    let s = String::from("a");\n    for _ in 0..2 { let t = s; }', 3],
@@ -199,6 +216,12 @@ test.each([
   ],
   ['a method of signed integers on an unsigned one', '    let d = 3usize - 1;\n    println!("{}", d.abs());', 3],
   ['a derive whose field lacks the trait', '', 4, 'struct Id;\n#[derive(Debug)]\nstruct P {\n    id: Id,\n}'],
+  [
+    'a method of a trait that is not in scope',
+    '    println!("{}", zoo::Dog.speak());',
+    7,
+    'mod zoo {\n    pub trait Speak { fn speak(&self) -> String; }\n    pub struct Dog;\n    impl Speak for Dog { fn speak(&self) -> String { "woof".into() } }\n}',
+  ],
   [
     'a second call of an FnOnce closure',
     '    let v = vec![String::new()];\n    let f = move || v;\n    f();\n    f();',

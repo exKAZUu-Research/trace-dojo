@@ -1,3 +1,5 @@
+import { decimalToF32 } from './floatFormat';
+
 const INT_SUFFIXES = ['i128', 'isize', 'i16', 'i32', 'i64', 'i8', 'u128', 'usize', 'u16', 'u32', 'u64', 'u8'];
 
 /** An integer literal's value and suffix; a decimal literal with a float suffix (`1f64`) is a float. */
@@ -5,7 +7,7 @@ export function parseIntegerLiteral(
   text: string
 ):
   | { kind: 'int'; value: bigint; suffix: string | undefined }
-  | { kind: 'float'; value: number; suffix: string }
+  | { kind: 'float'; value: number; f32: number; suffix: string }
   | undefined {
   let body = text;
   let suffix: string | undefined;
@@ -20,7 +22,8 @@ export function parseIntegerLiteral(
   body = body.replaceAll('_', '');
   if (suffix?.startsWith('f')) {
     if (!/^\d+$/.test(body)) return undefined;
-    return { kind: 'float', value: Number(body), suffix };
+    const f32 = decimalToF32(body);
+    return { kind: 'float', value: suffix === 'f32' ? f32 : Number(body), f32, suffix };
   }
   if (radix) {
     const digits = body.slice(2);
@@ -32,7 +35,10 @@ export function parseIntegerLiteral(
   return { kind: 'int', value: BigInt(body), suffix };
 }
 
-export function parseFloatLiteral(text: string): { value: number; suffix: string | undefined } | undefined {
+/** A float literal's value as an `f64`, and as an `f32` rounded from its digits. */
+export function parseFloatLiteral(
+  text: string
+): { value: number; f32: number; suffix: string | undefined } | undefined {
   let body = text;
   let suffix: string | undefined;
   for (const candidate of ['f32', 'f64']) {
@@ -44,8 +50,9 @@ export function parseFloatLiteral(text: string): { value: number; suffix: string
   }
   body = body.replaceAll('_', '');
   if (!/^\d+(\.\d*)?([eE][+-]?\d+)?$/.test(body)) return undefined;
-  const value = Number(body.endsWith('.') ? body.slice(0, -1) : body);
-  return { value: suffix === 'f32' ? Math.fround(value) : value, suffix };
+  const digits = body.endsWith('.') ? body.slice(0, -1) : body;
+  const f32 = decimalToF32(digits);
+  return { value: suffix === 'f32' ? f32 : Number(digits), f32, suffix };
 }
 
 /** The character a literal such as `'a'`, `'\n'`, or `'\u{3042}'` denotes. */

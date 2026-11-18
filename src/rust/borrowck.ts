@@ -214,10 +214,10 @@ export class BorrowChecker {
       }
       case 'unary': {
         if (expr.op === '*') {
-          const current = this.expr(expr.operand, state, 'read');
-          // Moving out of a Box is allowed; out of a reference it is not.
-          if (mode === 'move' && !this.isCopy(expr.ty) && isReference(expr.operand.ty)) this.cannotMoveOut(expr, '');
-          return current;
+          // Moving out of a Box moves the Box; out of a reference it is not allowed.
+          const movesOut = mode === 'move' && !this.isCopy(expr.ty);
+          if (movesOut && isReference(expr.operand.ty)) this.cannotMoveOut(expr, '');
+          return this.expr(expr.operand, state, movesOut ? 'move' : 'read');
         }
         return this.expr(expr.operand, state, 'move');
       }

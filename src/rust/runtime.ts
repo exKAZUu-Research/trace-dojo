@@ -71,6 +71,11 @@ export class RustPanic {
   ) {}
 }
 
+/** A `Display` or `Debug` impl returned `Err`, after the formatting wrote `written`; each caller reacts as std does. */
+export class FmtFailure {
+  constructor(readonly written: string) {}
+}
+
 /** `std::process::exit`, which ends the program at once. */
 export class ProcessExit {
   constructor(readonly code: number) {}

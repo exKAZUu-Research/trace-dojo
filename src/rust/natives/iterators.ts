@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 669 -- One native per method of the standard library.
+// code-gauge-allow-file fileNcss 678 -- One native per method of the standard library.
 import { normalize } from '../infer';
 import type { Interpreter } from '../interpreter';
 import { castValue, cloneValue, compareValues, copyValue, hashKey, needsCopy, valuesEqual, wrap } from '../ops';
@@ -537,6 +537,16 @@ define({
     const iter = iterOf(self);
     for (let index = 0; index < Number(n as bigint); index++) if (nextOf(iter) === DONE) return none(ctx);
     const item = nextOf(iter);
+    return option(ctx, item === DONE ? undefined : item, item !== DONE);
+  },
+  'Iter<_>::nth_back': ([self, n], ctx) => {
+    const iter = iterOf(self);
+    if (!iter.nextBack) panic(ctx, 'この反復子は後ろから取り出せません。');
+    let item: Next = DONE;
+    for (let index = 0; index <= Number(n as bigint); index++) {
+      item = iter.nextBack();
+      if (item === DONE) break;
+    }
     return option(ctx, item === DONE ? undefined : item, item !== DONE);
   },
   'Iter<_>::fold': ([self, init, f], ctx) => {

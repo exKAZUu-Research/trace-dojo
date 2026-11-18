@@ -1,8 +1,9 @@
 import { TURTLE_METHOD_NAMES, type TurtleState } from '../../interpreter/turtleWorld';
 import { DEFAULT_SPEC } from '../fmt';
 import { normalize } from '../infer';
+import { fieldTypes } from '../interpreter';
 import { castValue, cloneValue, compareValues, valuesEqual } from '../ops';
-import { ProcessExit, RustPanic } from '../runtime';
+import { FmtFailure, ProcessExit, RustPanic } from '../runtime';
 import { shallow, substitute as substituteType, type Type } from '../types';
 import {
   DynValue,
@@ -17,7 +18,20 @@ import {
   type Value,
 } from '../values';
 import { collectInto } from './iterators';
-import { call, define, deref, type NativeContext, none, ok, option, ordering, panic, placeOf, some } from './support';
+import {
+  call,
+  define,
+  deref,
+  libraryPanic,
+  type NativeContext,
+  none,
+  ok,
+  option,
+  ordering,
+  panic,
+  placeOf,
+  some,
+} from './support';
 
 // ---------------------------------------------------------------------------------------------------------------------
 // Turtle
@@ -93,6 +107,75 @@ export function turtleImplSource(): string {
 
 // ---------------------------------------------------------------------------------------------------------------------
 // Traits implemented by the standard library for every type that has them
+
+/**
+ * A type's size and alignment as rustc lays it out on a 64-bit target: primitives, pointers (references, `Box`), `String`
+ * and `Vec` (three words), arrays, and tuples and structs, whose fields rustc reorders so that only the end pads.
+ * `Option` of a reference or a `Box` uses the null pointer, and other enums are a tag before their largest variant.
+ */
+function layoutOf(ctx: NativeContext, type: Type): { size: number; align: number } {
+  const t = normalize(shallow(type));
+  switch (t.kind) {
+    case 'int': {
+      return scalar(t.name === 'isize' || t.name === 'usize' ? 8 : Number(t.name.slice(1)) / 8);
+    }
+    case 'float': {
+      return scalar(t.name === 'f32' ? 4 : 8);
+    }
+    case 'bool': {
+      return scalar(1);
+    }
+    case 'char': {
+      return scalar(4);
+    }
+    case 'ref': {
+      const target = normalize(shallow(t.target));
+      return { size: target.kind === 'str' || target.kind === 'slice' || target.kind === 'dyn' ? 16 : 8, align: 8 };
+    }
+    case 'array': {
+      const elem = layoutOf(ctx, t.elem);
+      return { size: elem.size * t.len, align: elem.align };
+    }
+    case 'tuple': {
+      return aggregateLayout(t.elems.map((elem) => layoutOf(ctx, elem)));
+    }
+    case 'adt': {
+      return adtLayout(ctx, t);
+    }
+    default: {
+      return scalar(0);
+    }
+  }
+}
+
+function scalar(size: number): { size: number; align: number } {
+  return { size, align: size || 1 };
+}
+
+function adtLayout(ctx: NativeContext, t: Type & { kind: 'adt' }): { size: number; align: number } {
+  const builtin = t.def.builtin as string | undefined;
+  if (builtin === 'String' || builtin === 'Vec') return { size: 24, align: 8 };
+  if (builtin === 'Box') return layoutOf(ctx, { kind: 'ref', mutable: false, target: t.args[0] });
+  const variants = t.def.variants.map((variant, index) =>
+    aggregateLayout(fieldTypes(t.def, t.args, index).map((field) => layoutOf(ctx, field)))
+  );
+  if (t.def.kind === 'struct') return variants[0] ?? { size: 0, align: 1 };
+  if (builtin === 'Option') {
+    const inner = normalize(shallow(t.args[0]));
+    const pointer = inner.kind === 'ref' || (inner.kind === 'adt' && inner.def.builtin === 'Box');
+    if (pointer) return layoutOf(ctx, inner);
+  }
+  if (variants.every((variant) => variant.size === 0)) return { size: variants.length > 1 ? 1 : 0, align: 1 };
+  const align = Math.max(1, ...variants.map((variant) => variant.align));
+  const largest = Math.max(...variants.map((variant) => variant.size));
+  return { size: Math.ceil((align + largest) / align) * align, align };
+}
+
+function aggregateLayout(fields: { size: number; align: number }[]): { size: number; align: number } {
+  const align = Math.max(1, ...fields.map((field) => field.align));
+  const size = fields.reduce((sum, field) => sum + field.size, 0);
+  return { size: Math.ceil(size / align) * align, align };
+}
 
 function selfType(ctx: NativeContext): Type {
   return ctx.typeArgs[0];
@@ -184,7 +267,18 @@ export function defaultValue(ctx: NativeContext, type: Type): Value {
 
 define({
   'Clone::clone': ([self], ctx) => cloneValue(selfType(ctx), deref(self)),
-  'ToString::to_string': ([self], ctx) => ctx.interp.formatter.display(self, selfType(ctx), DEFAULT_SPEC),
+  'ToString::to_string': ([self], ctx) => {
+    try {
+      return ctx.interp.formatter.display(self, selfType(ctx), DEFAULT_SPEC);
+    } catch (error) {
+      if (!(error instanceof FmtFailure)) throw error;
+      return libraryPanic(
+        ctx,
+        'a Display implementation returned an error unexpectedly: Error',
+        'alloc/src/string.rs:2953:14'
+      );
+    }
+  },
   'Display::fmt': ([self, f], ctx) => {
     const formatter = deref(f) as FormatterValue;
     formatter.text += ctx.interp.formatter.display(self, selfType(ctx), { ...DEFAULT_SPEC, ...formatter.spec });
@@ -247,6 +341,9 @@ define({
     const order = compareValues(ctx.typeArgs[2], call(ctx, f, [a]), call(ctx, f, [b])) ?? 0;
     return order <= 0 ? a : b;
   },
+  // A `String` is its `str`, and a `Vec` its slice, so the reference they lend is the value.
+  'AsRef::as_ref': ([self]) => deref(self),
+  'std::mem::size_of': (_args, ctx) => BigInt(layoutOf(ctx, ctx.typeArgs[0]).size),
   'std::mem::swap': ([x, y]) => {
     const a = placeOf(x);
     const b = placeOf(y);
