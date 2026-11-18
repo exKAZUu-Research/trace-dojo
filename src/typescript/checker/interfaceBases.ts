@@ -143,7 +143,7 @@ export class InterfaceBases {
    * mapped type, `object`, `any`, an intersection of such types, or a type parameter whose non-circular constraint is
    * one.
    */
-  private isValidBaseType(type: Type): boolean {
+  isValidBaseType(type: Type): boolean {
     this.c.budget.spend();
     switch (type.kind) {
       case 'intrinsic': {

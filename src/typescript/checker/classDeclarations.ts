@@ -222,9 +222,8 @@ export class ClassDeclarationChecker {
     const clause = heritage?.namedChildren.find((child) => child?.type === 'implements_clause');
     if (!clause) return;
     for (const typeNode of named(clause)) {
-      const target = this.c.typeNodes.typeFromNode(typeNode);
-      if (target === errorType || isAnyLike(target) || this.c.relations.isAssignable(info.instanceType, target))
-        continue;
+      const target = this.validImplementedType(typeNode);
+      if (!target || isAnyLike(target) || this.c.relations.isAssignable(info.instanceType, target)) continue;
       if (!this.reportIncompatibleMembers(info, target)) {
         const missing =
           target.kind === 'object'
@@ -242,6 +241,20 @@ export class ClassDeclarationChecker {
         );
       }
     }
+  }
+
+  /** The type an `implements` clause names, unless it is an error or a type a class cannot implement, which is reported. */
+  private validImplementedType(typeNode: TreeNode): Type | undefined {
+    // tsc resolves the name of a heritage clause as an entity name, where a type keyword such as `any` names nothing.
+    if (typeNode.type === 'predefined_type') {
+      this.c.error(typeNode, `クラスはプリミティブ型 '${typeNode.text}' を実装できません。`);
+      return undefined;
+    }
+    const target = this.c.typeNodes.typeFromNode(typeNode);
+    if (target === errorType) return undefined;
+    if (this.c.typeNodes.interfaceBases.isValidBaseType(target)) return target;
+    this.c.error(typeNode, 'クラスが実装できるのは、メンバーが静的に決まるオブジェクト型か、その交差型だけです。');
+    return undefined;
   }
 
   /**
