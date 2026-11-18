@@ -15,6 +15,7 @@ import { EventLoop } from './promises';
 import { createRealm, type ErrorName, type Realm } from './realm';
 import { dateValueOf } from './realmDate';
 import { WELL_KNOWN_SYMBOLS } from './realmIterators';
+import { rejectUnavailableMember, type UnavailableMemberCheck } from './unavailableMembers';
 import {
   type AccessorProperty,
   appendAll,
@@ -84,6 +85,8 @@ export class Runtime {
   /** Set from the program: whether turning a function into text ends it as unavailable. */
   rejectsFunctionText = false;
   allowsOnlyStringRawTag = false;
+  /** Set from the program: names a library member the realm leaves out, which a read then ends the program for. */
+  unavailableMember: UnavailableMemberCheck | undefined;
   readonly steps = new StepTracker();
   readonly evaluator: Evaluator;
   private allocatedSlots = 0;
@@ -200,6 +203,8 @@ export class Runtime {
       if (!isAccessor(property)) return property.value;
       return property.get ? this.call(property.get, receiver, [], this.currentRow) : undefined;
     }
+    const unavailable = this.unavailableMember?.(value, key);
+    if (unavailable) rejectUnavailableMember(unavailable, this.currentRow);
     return undefined;
   }
 

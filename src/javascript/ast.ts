@@ -15,6 +15,8 @@ export interface Program {
   rejectsFunctionText?: boolean;
   /** Whether a tagged template may only call the builtin `String.raw`, as for TypeScript, whose other tags come later. */
   allowsOnlyStringRawTag?: boolean;
+  /** Whether reading a library member the realm leaves out ends the program, as for TypeScript, which rejects it. */
+  rejectsUnavailableMembers?: boolean;
 }
 
 /** The names a function body or block declares, which its scope creates before running its statements. */

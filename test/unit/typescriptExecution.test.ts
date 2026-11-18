@@ -121,6 +121,26 @@ test.each([
   ['a Date', 'new Date();', 'Date（日付と時刻）は、この採点環境では使えません。'],
   ['Math.random', 'Math.random();', 'Math.random は、この採点環境では使えません。'],
   [
+    'Math.random through any',
+    'const m: any = Math;\nconsole.log(m.random());',
+    'Math.random は、この採点環境では使えません。',
+  ],
+  [
+    'the stack of an Error through any',
+    'const e: any = new Error("oops");\nconsole.log(e.stack);',
+    'Error の stack は、この採点環境では使えません。',
+  ],
+  [
+    'console.time through any',
+    'const c: any = console;\nc.time("x");',
+    'console.time は、この採点環境では使えません。',
+  ],
+  [
+    'RegExp compile through any',
+    'const r: any = /a/;\nr.compile("b");',
+    'RegExp の compile は、この採点環境では使えません。',
+  ],
+  [
     'Math.random through an intersection whose first member declares it too',
     'const m: { random(): number } & Math = Math;\nm.random();',
     'Math.random は、この採点環境では使えません。',

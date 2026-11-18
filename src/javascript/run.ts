@@ -6,6 +6,7 @@ import type { Program } from './ast';
 import { errorHeadline, inspect } from './inspect';
 import { parseJavaScript } from './parse';
 import { Runtime } from './runtime';
+import { unavailableMemberCheck } from './unavailableMembers';
 import { JsObject, JsThrow, Scope } from './values';
 
 export function executeJavaScriptProgram(source: string, input?: ProgramInput): ProgramExecution {
@@ -42,6 +43,7 @@ export function executeParsedProgram(parse: () => Program, input?: ProgramInput)
 export function runProgram(runtime: Runtime, program: Program, onEnd?: (scope: Scope) => void): ProgramRun {
   runtime.rejectsFunctionText = program.rejectsFunctionText ?? false;
   runtime.allowsOnlyStringRawTag = program.allowsOnlyStringRawTag ?? false;
+  if (program.rejectsUnavailableMembers) runtime.unavailableMember = unavailableMemberCheck(runtime.realm);
   const scope = new Scope(runtime.realm.globals, {
     // A CommonJS script's `this` is its empty `module.exports`.
     thisValue: program.isStrict ? undefined : runtime.newObject(),
