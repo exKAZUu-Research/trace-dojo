@@ -259,6 +259,16 @@ test.each([
     '    let v = vec![1, 2, 3];\n    let mut it = v.iter();\n    it = v.iter().skip(1);\n    println!("{:?}", it.next());',
     4,
   ],
+  [
+    'a closure called twice that a match in it moves a capture out of',
+    '    let name = Some(String::from("a"));\n    let take = || match name {\n        Some(n) => n,\n        None => String::new(),\n    };\n    take();\n    take();',
+    8,
+  ],
+  [
+    'a closure that modifies through a captured &mut but is not declared mut',
+    '    let mut v = vec![1];\n    let r = &mut v;\n    let c = || r.push(2);\n    c();',
+    5,
+  ],
   ['mismatched types', '    let x: i32 = "a";', 2],
 ])('rustc rejects %s before running', (_name, body, row, items = '') => {
   const execution = executeProgram('rust', rustMain(body, items));
@@ -355,6 +365,31 @@ fn main() {
   expect(executeProgram('rust', program)).toMatchObject({
     kind: 'executed',
     stdout: 'o o ["o", "x"] Some("o") Ok("o") 2.5 3 1 two\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('closures are Copy or Clone as what they capture is, and copies keep their own state', () => {
+  const program = `fn twice<F: Fn() -> i32>(f: F) -> i32 {
+    f() + f()
+}
+fn main() {
+    let k = 5;
+    let f = || k * 2;
+    let s = String::from("ab");
+    let g = move || s.len();
+    let h = g.clone();
+    let mut n = 0;
+    let mut c = move || {
+        n += 1;
+        n
+    };
+    let mut d = c;
+    println!("{} {} {} {} {} {} {} {}", twice(f), twice(f), g(), h(), c(), c(), d(), n);
+}`;
+  expect(executeProgram('rust', program)).toMatchObject({
+    kind: 'executed',
+    stdout: '20 20 2 2 1 2 1 0\n',
     uncaughtException: undefined,
   });
 });

@@ -58,7 +58,7 @@ export interface CompiledFn {
 export interface CallSupport {
   callFn(def: FnDef, typeArgs: Type[], args: Value[], callRow: number | undefined, span: Span, frame: Frame): Value;
   callValue(callee: Value, args: Value[], callRow: number | undefined): Value;
-  makeClosure(compiled: CompiledFn, frame: Frame, captures: Place[], name: string): Value;
+  makeClosure(compiled: CompiledFn, frame: Frame, captures: Place[], byValue: boolean[]): Value;
   toIter(value: Value, from: Type): Value;
   rangeIter(range: RangeValue, elem: Type): Value;
   constValue(def: unknown, frame: Frame): Value;
@@ -1202,10 +1202,10 @@ export class Compiler {
           : { kind: 'capture', local, index: outer.captures.indexOf(local) };
       return { res, local, fields: this.capturedFields(expr.body, local) };
     });
-    const name = '{closure}';
+    const byValue = context.captures.map((local) => context.isMove || context.movedCaptures?.includes(local) === true);
     return (frame) => {
       const places = captures.map((capture) => this.capturePlace(frame, capture, context));
-      return this.support.makeClosure(compiled, frame, places, name);
+      return this.support.makeClosure(compiled, frame, places, byValue);
     };
   }
 

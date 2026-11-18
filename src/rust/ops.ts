@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 416 -- One case per kind of type.
+// code-gauge-allow-file fileNcss 424 -- One case per kind of type.
 import type { Span } from './ast';
 import { bigintToF32 } from './floatFormat';
 import { normalize } from './infer';
@@ -6,15 +6,14 @@ import { RustPanic } from './runtime';
 import { type AdtDef, intMax, intMin, type IntName, shallow, type Type } from './types';
 import {
   DONE,
-  DynValue,
   EnumValue,
+  FnValue,
   isPlace,
   type IterValue,
   MapValue,
   RangeValue,
   SetValue,
   sliceItems,
-  SliceView,
   StructValue,
   type Value,
 } from './values';
@@ -488,6 +487,9 @@ export function cloneValue(type: Type, value: Value): Value {
     case 'tuple': {
       return t.elems.map((elem, index) => cloneValue(elem, (value as Value[])[index]));
     }
+    case 'closure': {
+      return cloneClosure(t.closure.captures ?? [], value as FnValue);
+    }
     case 'array': {
       return (value as Value[]).map((item) => cloneValue(t.elem, item));
     }
@@ -550,11 +552,14 @@ export function cloneValue(type: Type, value: Value): Value {
       }
     }
     default: {
-      if (value instanceof SliceView) return value;
-      if (value instanceof DynValue) return value;
       return value;
     }
   }
+}
+
+/** A clone of a closure, which clones what it captures by value. */
+function cloneClosure(captures: { type: Type }[], fn: FnValue): FnValue {
+  return fn.duplicate?.((item, index) => cloneValue(captures[index].type, item)) ?? fn;
 }
 
 /** A clone of an iterator, which goes on from where the iterator is, on its own. */
@@ -570,6 +575,8 @@ export function needsCopy(type: Type): boolean {
   const t = normalize(shallow(type));
   if (t.kind === 'tuple') return t.elems.length > 0;
   if (t.kind === 'array') return true;
+  // A closure that captures by value copies what it captures.
+  if (t.kind === 'closure') return t.closure.captures?.some((capture) => capture.mode === 'value') ?? false;
   if (t.kind === 'adt')
     return !t.def.builtin || t.def.builtin === 'Option' || t.def.builtin === 'Result' || t.def.builtin === 'Reverse';
   return false;
@@ -578,6 +585,7 @@ export function needsCopy(type: Type): boolean {
 /** A copy of a value of a `Copy` type, which shares nothing mutable with the original. */
 export function copyValue(value: Value): Value {
   if (Array.isArray(value)) return value.length === 0 ? value : value.map(copyValue);
+  if (value instanceof FnValue) return value.duplicate?.(copyValue) ?? value;
   if (value instanceof StructValue) return new StructValue(value.def, value.fields.map(copyValue));
   if (value instanceof EnumValue) {
     return value.fields.length === 0 ? value : new EnumValue(value.def, value.variant, value.fields.map(copyValue));

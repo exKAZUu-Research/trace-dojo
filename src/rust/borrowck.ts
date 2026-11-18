@@ -2,7 +2,7 @@
 import { CompileError } from '../interpreter/diagnostics';
 import type { Annotations, FnContext, LocalVar } from './annotations';
 import type { Block, Condition, Expr, FnItem, FormatArgs, Pattern, Span, Stmt } from './ast';
-import { forEachDirect, patternBindings } from './astWalk';
+import { forEachDirect, patternBindingParts, patternBindings } from './astWalk';
 import { normalize } from './infer';
 import { compileError } from './items';
 import { LoanBuilder } from './loanBuilder';
@@ -338,48 +338,11 @@ export class BorrowChecker {
     return current;
   }
 
-  /**
-   * The parts of the matched value (`''` for all of it, `.0`, `.name.1`) that a pattern's bindings take by value
-   * and that are not `Copy`; bindings through references (match ergonomics, `&x`) take nothing.
-   */
-  // code-gauge-allow functionCognitiveComplexity 20 -- Follows rustc's binding modes case by case.
-  // code-gauge-allow functionNcss 33 -- Follows rustc's binding modes case by case.
+  /** The parts of the matched value that a pattern's bindings take by value and that are not `Copy`. */
   private movedParts(pattern: Pattern): string[] {
-    const parts: string[] = [];
-    const visit = (p: Pattern, path: string, throughRef: boolean): void => {
-      const derefs = p.kind !== 'binding' && p.kind !== 'wild' && p.ty && normalize(shallow(p.ty)).kind === 'ref';
-      const under = throughRef || Boolean(derefs);
-      switch (p.kind) {
-        case 'binding': {
-          const local = this.annotations.bindings.get(p);
-          if (local && !throughRef && !this.isCopy(local.type)) parts.push(path);
-          if (p.sub) visit(p.sub, path, throughRef);
-          return;
-        }
-        case 'tuple':
-        case 'tupleStruct': {
-          for (const [index, elem] of p.elems.entries()) visit(elem, `${path}.${index}`, under);
-          return;
-        }
-        case 'struct': {
-          for (const field of p.fields) visit(field.pattern, `${path}.${field.name}`, under);
-          return;
-        }
-        case 'ref': {
-          visit(p.pattern, path, true);
-          return;
-        }
-        case 'or': {
-          for (const alternative of p.alternatives) visit(alternative, path, throughRef);
-          return;
-        }
-        default: {
-          return;
-        }
-      }
-    };
-    visit(pattern, '', false);
-    return parts;
+    return patternBindingParts(pattern, this.annotations)
+      .filter((part) => !part.throughRef && !this.isCopy(part.local.type))
+      .map((part) => part.path);
   }
 
   private methodCall(expr: Extract<Expr, { kind: 'methodCall' }>, state: State): State {

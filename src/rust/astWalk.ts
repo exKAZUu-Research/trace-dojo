@@ -1,5 +1,7 @@
 import type { Annotations, LocalVar } from './annotations';
 import type { Block, Expr, FormatArgs, Pattern } from './ast';
+import { normalize } from './infer';
+import { shallow } from './types';
 
 export function walkBlock(block: Block, visit: (expr: Expr) => void): void {
   for (const stmt of block.stmts) {
@@ -161,40 +163,58 @@ export function forEachDirect(expr: Expr, visit: (expr: Expr) => void): void {
 }
 
 /** The variables a pattern binds, in order, each once (or-patterns bind the same variables in each alternative). */
-// code-gauge-allow functionCognitiveComplexity 17 -- One case per kind of expression.
-// code-gauge-allow functionNcss 31 -- One case per kind of expression.
 export function patternBindings(pattern: Pattern, annotations: Annotations): LocalVar[] {
-  const locals: LocalVar[] = [];
-  const visit = (p: Pattern): void => {
-    const local = annotations.bindings.get(p);
-    if (local && !locals.includes(local)) locals.push(local);
+  return [...new Set(patternBindingParts(pattern, annotations).map((part) => part.local))];
+}
+
+/**
+ * A variable a pattern binds, with the part of the matched value it binds (`''` for all of it, `.0`, `.name.1`), and
+ * whether it binds it through a reference (match ergonomics, `&x`), which takes nothing out of the value.
+ */
+export interface PatternBindingPart {
+  local: LocalVar;
+  path: string;
+  throughRef: boolean;
+}
+
+/** The variables a pattern binds, in order, each with the part it binds. */
+// code-gauge-allow functionCognitiveComplexity 20 -- Follows rustc's binding modes case by case.
+// code-gauge-allow functionNcss 33 -- Follows rustc's binding modes case by case.
+export function patternBindingParts(pattern: Pattern, annotations: Annotations): PatternBindingPart[] {
+  const parts: PatternBindingPart[] = [];
+  const visit = (p: Pattern, path: string, throughRef: boolean): void => {
+    // A pattern other than a binding matched against a reference looks through it.
+    const derefs = p.kind !== 'binding' && p.kind !== 'wild' && p.ty && normalize(shallow(p.ty)).kind === 'ref';
+    const under = throughRef || Boolean(derefs);
     switch (p.kind) {
       case 'binding': {
-        if (p.sub) visit(p.sub);
-        break;
+        const local = annotations.bindings.get(p);
+        if (local) parts.push({ local, path, throughRef });
+        if (p.sub) visit(p.sub, path, throughRef);
+        return;
       }
       case 'tuple':
       case 'tupleStruct': {
-        for (const elem of p.elems) visit(elem);
-        break;
+        for (const [index, elem] of p.elems.entries()) visit(elem, `${path}.${index}`, under);
+        return;
       }
       case 'struct': {
-        for (const field of p.fields) visit(field.pattern);
-        break;
+        for (const field of p.fields) visit(field.pattern, `${path}.${field.name}`, under);
+        return;
       }
       case 'ref': {
-        visit(p.pattern);
-        break;
+        visit(p.pattern, path, true);
+        return;
       }
       case 'or': {
-        for (const alternative of p.alternatives) visit(alternative);
-        break;
+        for (const alternative of p.alternatives) visit(alternative, path, throughRef);
+        return;
       }
       default: {
-        break;
+        return;
       }
     }
   };
-  visit(pattern);
-  return locals;
+  visit(pattern, '', false);
+  return parts;
 }

@@ -141,6 +141,12 @@ export class FnValue {
     /** What the function keeps alive, such as a closure's captured values, for garbage collection. */
     readonly roots: unknown[] = []
   ) {}
+
+  /**
+   * For a closure, a copy (or a clone) of it: what it captures by value goes through `copy` (with the capture's
+   * index), and what it captures by reference stays shared.
+   */
+  duplicate: ((copy: (value: Value, index: number) => Value) => FnValue) | undefined;
 }
 
 export const DONE: unique symbol = Symbol('done');

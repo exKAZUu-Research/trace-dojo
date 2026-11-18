@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 644 -- One rule per trait or conversion of the standard library.
+// code-gauge-allow-file fileNcss 658 -- One rule per trait or conversion of the standard library.
 import { normalize, type Unifier } from './infer';
 import type { Module, Program } from './items';
 import { supportsDebug } from './iterDebug';
@@ -6,6 +6,7 @@ import { intoIterItem } from './iterTypes';
 import {
   freshVar,
   type ImplDef,
+  isIteratorShape,
   isSigned,
   shallow,
   type Subst,
@@ -125,7 +126,7 @@ export class TraitSolver {
     return false;
   }
 
-  // code-gauge-allow functionCognitiveComplexity 17 -- One rule per trait or conversion of the standard library.
+  // code-gauge-allow functionCognitiveComplexity 20 -- One rule per trait or conversion of the standard library.
   private closureImplements(t: Type, ref: TraitRef): Answer {
     const sig = ref.fnSig!;
     if (t.kind === 'closure') {
@@ -144,7 +145,13 @@ export class TraitSolver {
         this.unifier.tryUnify(t.ret, sig.ret);
       return ok ? 'yes' : 'no';
     }
-    if (t.kind === 'ref') return this.closureImplements(normalize(shallow(t.target)), ref);
+    // `&F` calls `F` through a shared reference, which needs `F: Fn`; `&mut F` calls it as `F` does.
+    if (t.kind === 'ref') {
+      if (!t.mutable && ref.trait.name !== 'Fn') {
+        return this.closureImplements(normalize(shallow(t.target)), { ...ref, trait: this.program.traitDef('Fn') });
+      }
+      return this.closureImplements(normalize(shallow(t.target)), ref);
+    }
     if (t.kind === 'adt' && t.def.builtin === 'Box') return this.closureImplements(normalize(shallow(t.args[0])), ref);
     return 'no';
   }
@@ -232,6 +239,7 @@ export class TraitSolver {
         if (t.kind === 'ref') return t.mutable ? 'no' : 'yes';
         if (t.kind === 'tuple') return all(t.elems);
         if (t.kind === 'array') return all([t.elem]);
+        if (t.kind === 'closure') return closureCaptures(t, all);
         if (t.kind === 'adt') {
           if (t.def.builtin === 'RangeFull') return 'yes';
           return derived() ?? 'no';
@@ -243,12 +251,14 @@ export class TraitSolver {
         if (t.kind === 'ref') return t.mutable ? 'no' : 'yes';
         if (t.kind === 'tuple') return all(t.elems);
         if (t.kind === 'array') return all([t.elem]);
-        if (t.kind === 'closure') return 'no';
+        if (t.kind === 'closure') return closureCaptures(t, all);
         if (t.kind === 'adt') {
           const d = derived();
           if (d) return d;
-          // Iterators clone as their state does, which this interpreter copies whatever they hold.
-          if (t.def.builtin === 'Iter') return 'yes';
+          // An iterator clones as what it holds does: the closures of its adapters.
+          if (t.def.builtin === 'Iter') return all([t.args[1]]);
+          if (isIteratorShape(t.def))
+            return all(t.args.filter((arg) => normalize(shallow(arg)).kind === 'closure' || isShapeType(arg)));
           if (CLONE_CONTAINERS.has(t.def.builtin as string)) return all(t.args);
           if (t.def.builtin === 'String' || ERROR_TYPES.has(t.def.builtin as string)) return 'yes';
           if (t.def.builtin === 'Box') {
@@ -873,4 +883,19 @@ function doubleEndedSearcher(type: Type): Answer {
   if (t.kind === 'char' || t.kind === 'closure' || t.kind === 'fn') return 'yes';
   if (isChars(t)) return 'yes';
   return t.kind === 'ref' && isChars(t.target) ? 'yes' : 'no';
+}
+
+/**
+ * Whether a closure is `Copy` (or `Clone`), which it is when what it captures is: a shared reference always, a
+ * `&mut` never, a value when its type is.
+ */
+function closureCaptures(t: Type & { kind: 'closure' }, all: (types: Type[]) => Answer): Answer {
+  const captures = t.closure.captures ?? [];
+  if (captures.some((capture) => capture.mode === 'mut')) return 'no';
+  return all(captures.filter((capture) => capture.mode === 'value').map((capture) => capture.type));
+}
+
+function isShapeType(type: Type): boolean {
+  const t = normalize(shallow(type));
+  return t.kind === 'adt' && isIteratorShape(t.def);
 }

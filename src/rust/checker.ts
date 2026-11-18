@@ -20,7 +20,7 @@ import type {
   Stmt,
   TypeAst,
 } from './ast';
-import { forEachDirect } from './astWalk';
+import { forEachDirect, patternBindingParts } from './astWalk';
 import { BorrowChecker } from './borrowck';
 import { ConstLint } from './constLint';
 import { isIrrefutable, lowerPattern, missingPattern } from './exhaustiveness';
@@ -42,7 +42,7 @@ import {
 } from './items';
 import { intoIterItem, intoIterShape } from './iterTypes';
 import { allSupertraits, autoderefSteps, boundsOf, derefOnce, lookupAssociated, lookupMethod } from './methods';
-import { closureKindAtLeast, RANGE_TYPES, TraitSolver } from './traits';
+import { RANGE_TYPES, TraitSolver } from './traits';
 import {
   adt,
   type AdtDef,
@@ -418,7 +418,17 @@ export class Checker {
   }
 
   private unsatisfied(obligation: Obligation): never {
-    const closure = normalize(shallow(obligation.type));
+    let closure = normalize(shallow(obligation.type));
+    const throughRef = closure.kind === 'ref' && !closure.mutable;
+    if (closure.kind === 'ref') closure = normalize(shallow(closure.target));
+    // rustc reports a closure that implements too weak a closure trait where the closure is written.
+    const needsFn = obligation.ref.trait.name === 'Fn' || (throughRef && obligation.ref.fnSig !== undefined);
+    if (closure.kind === 'closure' && closure.closure.kind === 'FnMut' && needsFn && closure.closure.span) {
+      compileError(
+        closure.closure.span,
+        'Fn のクロージャが要りますが、このクロージャは取り込んだ変数を書き換えるので FnMut です（参照ではなく、そのまま渡してください）。'
+      );
+    }
     if (closure.kind === 'closure' && closure.closure.movedAt) {
       const { name, span } = closure.closure.movedAt;
       compileError(
@@ -2403,9 +2413,9 @@ export class Checker {
     } finally {
       this.body = parentBody;
     }
-    const { kind, movedAt } = closureKindOf(fn, expr.body, this.annotations, this.solver);
+    const { kind, movedAt, captures } = closureKindOf(fn, expr.body, this.annotations, this.solver);
     fn.closureKind = kind;
-    Object.assign((closureType as Type & { kind: 'closure' }).closure, { kind, movedAt });
+    Object.assign((closureType as Type & { kind: 'closure' }).closure, { kind, movedAt, captures, span: expr.span });
     this.annotations.closures.set(expr, {
       context: fn,
       params: expr.params.flatMap((param) =>
@@ -2940,67 +2950,140 @@ function isIntegral(type: Type): boolean {
 
 /**
  * The closure trait a closure implements, from how its body uses the variables it captures: `FnOnce` when it moves
- * one out (its value is used rather than borrowed), `FnMut` when it mutates one. Records the captures it moves.
+ * one out (its value is used rather than borrowed), `FnMut` when it mutates one. Records the captures it moves, and
+ * how it captures each (by reference, by `&mut`, by value), which decides whether it is `Copy` and `Clone`.
  */
-// code-gauge-allow functionCognitiveComplexity 21 -- Follows the type checking rules of rustc case by case.
-// code-gauge-allow functionNcss 32 -- Follows the type checking rules of rustc case by case.
 function closureKindOf(
   fn: FnContext,
   body: Expr,
   annotations: Annotations,
   solver: TraitSolver
-): Pick<ClosureType, 'kind' | 'movedAt'> {
-  let kind: 'Fn' | 'FnMut' | 'FnOnce' = 'Fn';
-  const captured = new Set(fn.captures);
-  const moved = new Set<LocalVar>();
-  let firstMove: { name: string; span: Span } | undefined;
-  const capturedLocal = (expr: Expr): LocalVar | undefined => {
-    let current = expr;
-    while (current.kind === 'field' || current.kind === 'index') current = current.operand;
-    if (current.kind !== 'path') return undefined;
-    const res = annotations.paths.get(current);
-    return res?.kind === 'capture' && captured.has(res.local) ? res.local : undefined;
-  };
-  const visit = (expr: Expr | undefined, consumed: boolean): void => {
-    if (!expr) return;
-    if (closureMutates(expr, annotations, (e) => capturedLocal(e) !== undefined) && kind === 'Fn') kind = 'FnMut';
-    if (consumed && expr.kind !== 'index') {
-      const local = capturedLocal(expr);
-      // Defaulting number literals' types here would fix them too early; the solver knows they are `Copy` anyway.
-      const type = resolve(expr.ty ?? UNIT);
-      const unknown = type.kind === 'var' && !type.v.literal;
-      if (local && !unknown && !solver.isCopy(type)) {
-        kind = 'FnOnce';
-        moved.add(local);
-        firstMove ??= { name: local.name, span: expr.span };
-      }
-    }
-    const consumes = consumedChildren(expr, annotations);
-    forEachDirect(expr, (child) => visit(child, consumes(child, consumed)));
-  };
-  visit(body, true);
-  fn.movedCaptures = [...moved];
-  void closureKindAtLeast;
-  return { kind, movedAt: firstMove };
+): Pick<ClosureType, 'kind' | 'movedAt' | 'captures'> {
+  const uses = new CaptureUses(new Set(fn.captures), annotations, solver);
+  uses.visit(body, true);
+  fn.movedCaptures = [...uses.moved];
+  const captures = fn.captures.map((local) => ({
+    type: local.type,
+    mode:
+      fn.isMove || uses.moved.has(local)
+        ? ('value' as const)
+        : uses.mutated.has(local)
+          ? ('mut' as const)
+          : ('ref' as const),
+  }));
+  const kind = uses.moved.size > 0 ? 'FnOnce' : uses.mutated.size > 0 ? 'FnMut' : 'Fn';
+  return { kind, movedAt: uses.firstMove, captures };
 }
 
-function closureMutates(expr: Expr, annotations: Annotations, isCaptured: (expr: Expr) => boolean): boolean {
-  if ((expr.kind === 'assign' || expr.kind === 'compoundAssign') && isCaptured(expr.target)) return true;
-  if (expr.kind === 'ref' && expr.mutable && isCaptured(expr.operand)) return true;
-  if (expr.kind === 'methodCall' && annotations.methods.get(expr)?.receiver.autoref === 'mut') {
-    return isCaptured(expr.receiver);
+/** How a closure's body uses the variables it captures: those it moves out and those it modifies. */
+class CaptureUses {
+  readonly moved = new Set<LocalVar>();
+  readonly mutated = new Set<LocalVar>();
+  firstMove: { name: string; span: Span } | undefined;
+
+  constructor(
+    private readonly captured: ReadonlySet<LocalVar>,
+    private readonly annotations: Annotations,
+    private readonly solver: TraitSolver
+  ) {}
+
+  /** Visits an expression, whose value the closure moves when `consumed`. */
+  visit(expr: Expr | undefined, consumed: boolean): void {
+    if (!expr) return;
+    const mutation = mutatedCapture(expr, this.annotations, this.capturedLocal);
+    if (mutation) this.mutated.add(mutation);
+    // Calling a captured `FnOnce` closure moves it.
+    if (expr.kind === 'call' && closureKindOfType(expr.callee.ty) === 'FnOnce') this.move(expr.callee, expr.span);
+    if (consumed && expr.kind !== 'index' && !this.isCopy(expr.ty ?? UNIT)) this.move(expr, expr.span);
+    const consumes = consumedChildren(expr, this.annotations, (pattern) =>
+      bindsByValue(pattern, this.annotations, this.isCopy)
+    );
+    forEachDirect(expr, (child) => this.visit(child, consumes(child, consumed)));
   }
-  if (expr.kind === 'macro' && expr.macro.kind === 'write') {
-    const { target } = expr.macro;
-    return isCaptured(target.kind === 'ref' ? target.operand : target);
+
+  private move(expr: Expr, span: Span): void {
+    const local = this.capturedLocal(expr);
+    if (!local) return;
+    this.moved.add(local);
+    this.firstMove ??= { name: local.name, span };
   }
-  return false;
+
+  /** The captured variable a place expression (`v`, `p.a`, `*r`, `v[0]`) is rooted in. */
+  private readonly capturedLocal = (expr: Expr): LocalVar | undefined => {
+    let current = expr;
+    while (current.kind === 'field' || current.kind === 'index' || (current.kind === 'unary' && current.op === '*')) {
+      current = current.operand;
+    }
+    if (current.kind !== 'path') return undefined;
+    const res = this.annotations.paths.get(current);
+    return res?.kind === 'capture' && this.captured.has(res.local) ? res.local : undefined;
+  };
+
+  private readonly isCopy = (type: Type): boolean => {
+    // Defaulting number literals' types here would fix them too early; the solver knows they are `Copy` anyway.
+    const t = resolve(type);
+    return (t.kind === 'var' && !t.v.literal) || this.solver.isCopy(t);
+  };
+}
+
+/** The closure trait that calling a value of a type uses: its own for a closure, `Fn` through a shared reference. */
+function closureKindOfType(type: Type | undefined): 'Fn' | 'FnMut' | 'FnOnce' | undefined {
+  const t = type && normalize(shallow(type));
+  if (t?.kind === 'closure') return t.closure.kind;
+  if (t?.kind === 'ref') return t.mutable ? closureKindOfType(t.target) : 'Fn';
+  return undefined;
+}
+
+/** Whether a pattern takes a part of what it matches by value that is not `Copy`, which moves it. */
+function bindsByValue(pattern: Pattern, annotations: Annotations, isCopy: (type: Type) => boolean): boolean {
+  return patternBindingParts(pattern, annotations).some((part) => !part.throughRef && !isCopy(part.local.type));
+}
+
+/**
+ * The captured variable an expression modifies, which the closure must borrow uniquely: an assignment to it or
+ * through it, `&mut` of it, a method taking `&mut self` on it or through a `&mut` it holds, `write!` to it, or a call
+ * of an `FnMut` closure it holds.
+ */
+function mutatedCapture(
+  expr: Expr,
+  annotations: Annotations,
+  capturedLocal: (expr: Expr) => LocalVar | undefined
+): LocalVar | undefined {
+  switch (expr.kind) {
+    case 'assign':
+    case 'compoundAssign': {
+      return capturedLocal(expr.target);
+    }
+    case 'ref': {
+      return expr.mutable ? capturedLocal(expr.operand) : undefined;
+    }
+    case 'methodCall': {
+      const method = annotations.methods.get(expr);
+      const throughMut = method?.fn.selfMode === 'mutRef' && method.receiver.autoref === 'none';
+      return method?.receiver.autoref === 'mut' || throughMut ? capturedLocal(expr.receiver) : undefined;
+    }
+    case 'call': {
+      return closureKindOfType(expr.callee.ty) === 'FnMut' ? capturedLocal(expr.callee) : undefined;
+    }
+    case 'macro': {
+      if (expr.macro.kind !== 'write') return undefined;
+      const { target } = expr.macro;
+      return capturedLocal(target.kind === 'ref' ? target.operand : target);
+    }
+    default: {
+      return undefined;
+    }
+  }
 }
 
 /** Which children of an expression it uses by value (moves), given whether the expression's own value is moved. */
-// code-gauge-allow functionCognitiveComplexity 20 -- One case per kind of expression.
-// code-gauge-allow functionNcss 33 -- One case per kind of expression.
-function consumedChildren(expr: Expr, annotations: Annotations): (child: Expr, consumed: boolean) => boolean {
+// code-gauge-allow functionCognitiveComplexity 28 -- One case per kind of expression.
+// code-gauge-allow functionNcss 36 -- One case per kind of expression.
+function consumedChildren(
+  expr: Expr,
+  annotations: Annotations,
+  movesByPattern: (pattern: Pattern) => boolean
+): (child: Expr, consumed: boolean) => boolean {
   switch (expr.kind) {
     case 'ref':
     case 'field':
@@ -3012,10 +3095,13 @@ function consumedChildren(expr: Expr, annotations: Annotations): (child: Expr, c
       return () => expr.macro.kind === 'vec';
     }
     case 'match': {
-      return (child, consumed) => child !== expr.scrutinee && consumed;
+      // A scrutinee moves when a pattern takes a part of it by value.
+      const moves = expr.arms.some((arm) => movesByPattern(arm.pattern));
+      return (child, consumed) => (child === expr.scrutinee ? moves : consumed);
     }
     case 'while': {
-      return (child) => child !== (expr.cond.kind === 'expr' ? expr.cond.expr : expr.cond.value);
+      const moves = expr.cond.kind === 'let' && movesByPattern(expr.cond.pattern);
+      return (child) => (child === (expr.cond.kind === 'expr' ? expr.cond.expr : expr.cond.value) ? moves : true);
     }
     case 'unary': {
       return () => expr.op !== '*';
@@ -3037,8 +3123,9 @@ function consumedChildren(expr: Expr, annotations: Annotations): (child: Expr, c
     }
     case 'if': {
       const cond = expr.cond.kind === 'expr' ? expr.cond.expr : expr.cond.value;
+      const moves = expr.cond.kind === 'let' && movesByPattern(expr.cond.pattern);
       return (child, consumed) =>
-        child === cond ? false : child === expr.consequent.tail || child === expr.else ? consumed : true;
+        child === cond ? moves : child === expr.consequent.tail || child === expr.else ? consumed : true;
     }
     case 'block': {
       return (child, consumed) => (child === expr.tail ? consumed : true);

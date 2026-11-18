@@ -948,7 +948,7 @@ pub mod iter {
         pub fn peekable(self) -> IterImpl<T, PeekableShape<S>>;
         pub fn fuse(self) -> IterImpl<T, FuseShape<S>>;
         pub fn inspect<F: FnMut(&T)>(self, f: F) -> IterImpl<T, InspectShape<S, F>>;
-        pub fn cycle(self) -> IterImpl<T, CycleShape<S>> where T: Clone;
+        pub fn cycle(self) -> IterImpl<T, CycleShape<S>> where T: Clone, S: Clone;
         pub fn scan<St, B, F: FnMut(&mut St, T) -> Option<B>>(self, initial_state: St, f: F) -> IterImpl<B, ScanShape<S, St, F>>;
         pub fn by_ref(&mut self) -> IterImpl<T, ByRefShape<S>>;
         pub fn collect<B: FromIterator<T>>(self) -> B;

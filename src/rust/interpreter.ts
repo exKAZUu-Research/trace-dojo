@@ -216,9 +216,18 @@ export class Interpreter implements CallSupport {
     return (fn as FnValue).call(args, callRow);
   }
 
-  makeClosure(compiled: CompiledFn, frame: Frame, captures: Place[], name: string): Value {
+  makeClosure(compiled: CompiledFn, frame: Frame, captures: Place[], byValue: boolean[]): Value {
     const { typeArgs } = frame;
-    return new FnValue((args, callRow) => this.invoke(compiled, typeArgs, args, callRow, captures), name, captures);
+    const fn = new FnValue(
+      (args, callRow) => this.invoke(compiled, typeArgs, args, callRow, captures),
+      '{closure}',
+      captures
+    );
+    fn.duplicate = (copy) => {
+      const places = captures.map((place, index) => (byValue[index] ? new CellPlace(copy(place.get(), index)) : place));
+      return this.makeClosure(compiled, frame, places, byValue) as FnValue;
+    };
+    return fn;
   }
 
   toIter(value: Value, from: Type): Value {

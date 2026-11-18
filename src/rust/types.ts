@@ -47,6 +47,10 @@ export interface ClosureType {
   kind: 'Fn' | 'FnMut' | 'FnOnce';
   /** Where an `FnOnce` closure first moves a capture out, which rustc reports when it needs `Fn` or `FnMut`. */
   movedAt?: { name: string; span: Span };
+  /** Where the closure is written, which rustc reports when it implements too weak a closure trait. */
+  span?: Span;
+  /** How the closure captures each variable, which decides whether it is `Copy` and `Clone`. */
+  captures?: { type: Type; mode: 'ref' | 'mut' | 'value' }[];
 }
 
 /** A return type `impl Trait`, which callers see only through its bounds. */
