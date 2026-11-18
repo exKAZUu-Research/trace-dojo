@@ -418,6 +418,8 @@ export class AssignmentChecker {
       return errorType;
     }
     const readType = this.c.members.indexedType(expression, objectNode, indexNode, objectType, indexType);
+    if (readType !== errorType && this.c.members.isReadonlyMappedWrite(objectType, indexType))
+      return this.reportReadonlyIndex(expression, objectType);
     if (indexType.kind === 'literal')
       return unionOf(
         (objectType.kind === 'union' ? objectType.types : [objectType]).map((member) =>

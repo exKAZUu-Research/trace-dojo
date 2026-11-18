@@ -409,6 +409,16 @@ export class MemberChecker {
   }
 
   /**
+   * Whether a generic key writes a mapped type declared `readonly`, which TypeScript's `checkIndexedAccessIndexType`
+   * rejects from the mapped type's own modifier, not from the modifiers a homomorphic one keeps.
+   */
+  isReadonlyMappedWrite(objectType: Type, indexType: Type): boolean {
+    return (
+      objectType.kind === 'object' && objectType.mapped?.readonlyModifier === '+' && isGenericKey(regularOf(indexType))
+    );
+  }
+
+  /**
    * Whether writing a key of a type parameter goes through an index signature of its constraint other than the number
    * index, which TypeScript forbids, as the parameter may stand for a type with a narrower property under that key.
    */
@@ -430,7 +440,7 @@ export class MemberChecker {
   private indexedTypeAt(access: IndexAccess, objectType: Type, indexType: Type): Type {
     if (isAnyLike(objectType)) return anyType;
     const index = regularOf(indexType);
-    if (['typeParameter', 'keyof', 'conditional', 'indexedAccess'].includes(index.kind))
+    if (isGenericKey(index))
       return this.checkedGenericIndex(access, objectType, this.c.typeOperators.indexedAccess(objectType, index));
     // A key that is not generic reads the object a type parameter stands for through its constraint.
     if (objectType.kind === 'typeParameter')
@@ -519,6 +529,10 @@ export class MemberChecker {
   private indexedTypeOfMembers(access: IndexAccess, objectType: UnionType, indexType: Type): Type {
     return unionOf(objectType.types.map((member) => this.indexedTypeAt(access, member, indexType)));
   }
+}
+
+function isGenericKey(index: Type): boolean {
+  return ['typeParameter', 'keyof', 'conditional', 'indexedAccess'].includes(index.kind);
 }
 
 /**
