@@ -9,6 +9,7 @@ import {
   isSamePattern,
   keyedIndexes,
 } from './indexInfos';
+import { printedPropertyName } from './print';
 import { isWithin, named } from './syntax';
 import {
   isSymbolName,
@@ -44,7 +45,7 @@ export function checkIndexConformance(c: Checker, structure: Structure, owner?: 
 function checkPropertyConformance(c: Checker, property: Property, indexes: KeyedIndexInfo[], owner?: IndexOwner): void {
   const { declaration } = property;
   const nameNode = declaration?.childForFieldName('name');
-  if (!nameNode || !declaration || c.isLibrary(declaration) || isSymbolName(property.name)) return;
+  if (!nameNode || !declaration || c.isLibrary(declaration)) return;
   const type = property.optional ? unionOf([property.type(), undefinedType]) : property.type();
   const local = !owner || owner.bodies.some((body) => isWithin(declaration, body));
   for (const index of indexes) {
@@ -61,9 +62,14 @@ function checkPropertyConformance(c: Checker, property: Property, indexes: Keyed
     if (!node) continue;
     c.error(
       node,
-      `型 '${c.print(type)}' のプロパティ '${property.name}' は、'${c.print(index.keyType)}' のインデックスの型 '${c.print(index.type)}' に代入できません。`
+      `型 '${c.print(type)}' のプロパティ '${messagePropertyName(property.name)}' は、'${c.print(index.keyType)}' のインデックスの型 '${c.print(index.type)}' に代入できません。`
     );
   }
+}
+
+/** A property name as TypeScript writes it in this message, a symbol in brackets as `[key]`. */
+function messagePropertyName(name: string): string {
+  return isSymbolName(name) ? printedPropertyName(name) : name;
 }
 
 /** Reports an index signature whose value type does not fit another applying to its keys. */
