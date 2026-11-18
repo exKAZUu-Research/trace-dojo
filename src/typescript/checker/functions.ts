@@ -1,5 +1,6 @@
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
+import { minimumArguments } from './callArity';
 import type { Checker } from './checker';
 import { contextualSignatureOf } from './contextualSignatures';
 import { FlowState, type State } from './flow';
@@ -485,9 +486,11 @@ export class FunctionChecker {
     const overloads = symbol.valueDeclarations.filter((declaration) => declaration.type === 'function_signature');
     for (const overload of overloads) {
       const overloadSignature = this.c.signatures.signatureOf(this.c.nativeOverload(overload));
+      // As in TypeScript's `compareSignaturesRelated`, an implementation fits an overload that passes as many arguments
+      // as it needs at least, or any number of them through a rest parameter.
       const compatible =
-        overloadSignature.parameters.length >=
-          signature.parameters.filter((parameter) => !parameter.optional && !parameter.rest).length &&
+        (overloadSignature.parameters.some((parameter) => parameter.rest) ||
+          overloadSignature.parameters.length >= minimumArguments(signature)) &&
         overloadSignature.parameters.every((parameter, index) =>
           this.overloadParameterCompatible(parameter, signature, index)
         ) &&
