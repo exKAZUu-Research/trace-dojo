@@ -1,0 +1,25 @@
+NULL
+array(1) {
+  ["created"]=>
+  &NULL
+}
+
+Warning: Cannot use int as array in /main.php on line 6
+NULL
+Cannot use a scalar value as an array
+array(2) {
+  [0]=>
+  int(1)
+  [1]=>
+  &NULL
+}
+NULL
+Cannot create references to/from string offsets
+array(1) {
+  [1]=>
+  &NULL
+}
+NULL
+Cannot access uninitialized non-nullable property ListSource::$uninitialized by reference
+Cannot auto-initialize an array inside a reference held by property ListSource::$nullable of type ?int
+Cannot auto-initialize an array inside a reference held by property ListSource::$shared of type ?int

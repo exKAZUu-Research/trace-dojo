@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 894 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 896 -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import type { Expr, ListItem } from './ast';
 import { foreachSubjectWritable, hasReferenceItem } from './astAnalysis';
@@ -896,8 +896,8 @@ export function destructureAssignment(target: Extract<Expr, { k: 'list' }>, expr
   const row = !byRef && isCompiledVariable(expression) ? listOperandRow(target) : compiledOperandRow(expression);
   if (!byRef) return destructure(target, prepareOperand(expression)(row), undefined, row);
   if (foreachSubjectWritable(expression)) {
-    const source = nestedPlace(placeOf(expression, 'write', true), 'write');
-    return destructure(target, source.get('nested') ?? null, source, row);
+    const source = new RefPlace(placeOf(expression, 'write', true).ref());
+    return destructure(target, source.get(), source, row);
   }
   const call = expression.k === 'call' || expression.k === 'mcall' || expression.k === 'scall';
   runtime.lastReturnRef = undefined;
@@ -908,53 +908,54 @@ export function destructureAssignment(target: Extract<Expr, { k: 'list' }>, expr
   return destructure(target, value, returned ? new RefPlace(returned) : undefined, row);
 }
 
-// code-gauge-allow functionCognitiveComplexity 22 -- Keeps the list's fetch line and lazy writable source in assignment order.
+// code-gauge-allow functionCognitiveComplexity 27 -- Keeps the list's fetch line and lazy writable source in assignment order.
+// code-gauge-allow functionNcss 31 -- Keeps reference ownership and ordered target writes together.
 export function destructure(
   target: Extract<Expr, { k: 'list' }>,
   value: Value,
-  source?: Place,
+  source?: RefPlace,
   fetchRow = target.row
 ): Value {
   const runtime = rt();
   const writableSource =
     source ??
     (value instanceof PhpArray && hasReferenceItem(target) ? new RefPlace(Ref.temporary(share(value))) : undefined);
-  let prepared = false;
-  runtime.frame.temporaries.push(value);
+  if (writableSource) {
+    writableSource.target.isRef = true;
+    runtime.holdTemporaryReference(writableSource.target);
+  } else runtime.frame.temporaries.push(value);
   let position = 0n;
   for (const item of target.items) {
     if (item === undefined) {
       position++;
       continue;
     }
-    const key = item.key === undefined ? position++ : toKey(ev(item.key));
+    const key = item.key === undefined ? position++ : ev(item.key);
     runtime.row = item.key ? compiledOperandRow(item.key) : fetchRow;
     const itemRow = runtime.row;
     const byRef = item.byRef || (item.target.k === 'list' && hasReferenceItem(item.target));
-    if (byRef && writableSource && !prepared && (value instanceof PhpArray || value === null || value === false)) {
+    if (writableSource) value = writableSource.get();
+    if (byRef && writableSource && (value instanceof PhpArray || value === null || value === false))
       value = writableContainer(writableSource, value === false ? null : value);
-      runtime.frame.temporaries.push(value);
-      prepared = true;
-    }
     destructureItem(item, value, key, source !== undefined, byRef);
     if (item.target.k === 'list') fetchRow = runtime.row;
     else if (item.byRef) fetchRow = itemRow;
     else fetchRow = item.target.row;
     runtime.row = fetchRow;
   }
-  return value;
+  return writableSource ? writableSource.get() : value;
 }
 
 function listOperandRow(target: Expr): number {
   while (target.k === 'list') {
-    const item = target.items.find((element) => element !== undefined);
+    const item = target.items[0];
     if (!item) return target.row;
     target = item.target;
   }
   return target.row;
 }
 
-function destructureItem(item: ListItem, value: Value, key: Key, writable: boolean, byRef: boolean): void {
+function destructureItem(item: ListItem, value: Value, key: Value, writable: boolean, byRef: boolean): void {
   if (item.byRef) {
     bindRef(item.target, destructuredReference(value, key, writable));
     return;
@@ -966,21 +967,19 @@ function destructureItem(item: ListItem, value: Value, key: Key, writable: boole
   }
   let element: Value;
   if (value instanceof PhpArray) {
-    element = readElement(value, key, false);
+    element = readElement(value, toKey(key), false);
   } else if (value instanceof PhpObject) {
     element = readIndex(value, key);
   } else {
     if (value !== null) warn(`Cannot use ${debugType(value)} as array`);
     element = null;
   }
-  if (item.target.k === 'list') {
-    const source = value instanceof PhpArray ? new ElementPlace(value, key) : undefined;
-    destructure(item.target, element, source, rt().row);
-  } else placeOf(item.target).set(share(element));
+  if (item.target.k === 'list') destructure(item.target, element, undefined, rt().row);
+  else placeOf(item.target).set(share(element));
 }
 
-function destructuredReference(value: Value, key: Key, writable: boolean): Ref {
-  if (value instanceof PhpArray) return new ElementPlace(value, key).ref();
+function destructuredReference(value: Value, key: Value, writable: boolean): Ref {
+  if (value instanceof PhpArray) return new ElementPlace(value, toKey(key)).ref();
   if (value instanceof PhpObject) return arrayAccessPlace(value, key).ref();
   if (typeof value === 'string') throwError('Error', 'Cannot create references to/from string offsets');
   if (writable && value !== null) throwError('Error', 'Cannot use a scalar value as an array');

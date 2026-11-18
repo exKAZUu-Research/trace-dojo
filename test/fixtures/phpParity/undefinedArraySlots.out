@@ -343,6 +343,9 @@ array(3) {
   [2]=>
   string(3) "new"
 }
+int(1)
+array(0) {
+}
 array(2) {
   [0]=>
   int(1)

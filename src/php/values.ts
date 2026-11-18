@@ -285,15 +285,7 @@ export class PhpArray {
     const last = this.lastKey();
     if (last === undefined) return null;
     const value = this.get(last) as Value;
-    const trim = this.map.mayHaveUndefinedSlots && this.ordered().isPacked && this.ordered().last?.key === last;
     this.delete(last);
-    if (trim) {
-      let entry = this.ordered().last;
-      while (entry && this.map.get(entry.key) === UNDEFINED_RESULT) {
-        this.removeUndefinedSlot(entry.key);
-        entry = this.ordered().last;
-      }
-    }
     if (last === this.nextFree - 1n) this.nextFree = last;
     this.pointer = null;
     return value;
@@ -449,6 +441,7 @@ export class PhpArray {
   delete(key: Key): void {
     if (!this.has(key)) return;
     const order = this.ordered();
+    const trim = this.map.mayHaveUndefinedSlots && order.isPacked && order.last?.key === key;
     const old = this.map.get(key);
     if (old instanceof Ref) old.rc--;
     // PHP moves a pointer at the deleted element on to the next one.
@@ -456,6 +449,9 @@ export class PhpArray {
     this.invalidate();
     this.map.delete(key);
     order.delete(key);
+    if (trim) {
+      while (order.last && this.map.get(order.last.key) === UNDEFINED_RESULT) this.removeUndefinedSlot(order.last.key);
+    }
     dropped(old);
   }
 

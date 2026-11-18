@@ -241,3 +241,19 @@ Warning: Undefined variable $undefinedBase in /main.php on line 418
 Warning: Trying to access array offset on null in /main.php on line 418
 
 Deprecated: Implicit conversion from float 1.5 to int loses precision in /main.php on line 418
+
+Warning: Undefined variable $unsetList in /main.php on line 422
+
+Warning: Undefined array key 0 in /main.php on line 427
+Class "Missing" not found at 429
+
+Deprecated: Implicit conversion from float 1.5 to int loses precision in /main.php on line 435
+
+Deprecated: Implicit conversion from float 1.5 to int loses precision in /main.php on line 443
+Bit shift by negative number at 452
+
+Warning: Undefined variable $undefinedObject in /main.php on line 459
+
+Warning: Attempt to read property "property" on null in /main.php on line 459
+
+Deprecated: Implicit conversion from float 1.5 to int loses precision in /main.php on line 459

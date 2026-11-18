@@ -28,7 +28,7 @@ import { DeclarationConverter } from './declarationConverter';
 import { exportExpr, UnexportableSyntax } from './export';
 import { decodeLiteral, decodeSingleQuoted, parseIntegerLiteral } from './literals';
 import { builtinLiteralKey } from './native';
-import { compiledOperandRow, constantAstRow } from './opcodeRows';
+import { compiledOperandRow } from './opcodeRows';
 
 export type { CompileNotice } from './converterBase';
 
@@ -933,7 +933,13 @@ export class Converter extends DeclarationConverter {
       case 'array_creation_expression': {
         const items = this.compileArrayItems(node);
         this.checkConstantArrayOperands(node, items);
-        return { k: 'array', items, row, initializerRow: this.constantInitializer ? arrayFoldRow(node) : undefined };
+        const arrayRow = items.length === 0 ? node.endPosition.row : row;
+        return {
+          k: 'array',
+          items,
+          row: arrayRow,
+          initializerRow: this.constantInitializer ? arrayFoldRow(node) : undefined,
+        };
       }
       case 'list_literal': {
         return this.listLiteral(node);
@@ -1465,8 +1471,7 @@ export class Converter extends DeclarationConverter {
       return { k: 'pipe', l, r, row };
     }
     const expression: Extract<Expr, { k: 'bin' }> = { k: 'bin', op: op === '<>' ? '!=' : op, l, r, row };
-    if (this.initializerContext?.kind === 'array' && r.k === 'array' && this.compiledValue(r, true) instanceof Map)
-      expression.opcodeRow = this.initializerContext.row;
+    if (this.initializerContext?.kind === 'array') expression.opcodeRow = this.resultOpcodeRow(r, rightNode);
     return this.preserveSyntax || this.initializerContext?.kind === 'deferred'
       ? expression
       : this.compileBinary(expression);
@@ -1656,7 +1661,8 @@ export class Converter extends DeclarationConverter {
     return { key, keyOpcodeRow, value, byRef, spread: false };
   }
 
-  // code-gauge-allow functionCognitiveComplexity 17 -- Selects the emitting operand across the expression forms PHP can fold.
+  // code-gauge-allow functionCognitiveComplexity 22 -- Selects the emitting operand across the expression forms PHP can fold.
+  // code-gauge-allow functionNcss 33 -- Carries the shared folding row through the operands selected by each expression.
   private resultOpcodeRow(value: Expr, node: Node): number {
     if (node.type === 'heredoc' || node.type === 'nowdoc') return node.startPosition.row + 1;
     switch (value.k) {
@@ -1673,6 +1679,9 @@ export class Converter extends DeclarationConverter {
         if (node.type === 'binary_expression' && !directiveLiteral(node, value)) return this.arrayValueFoldRow(node);
         break;
       }
+      case 'array':
+      case 'const':
+      case 'unary':
       case 'idx': {
         if (this.compiledValue(value, true) !== undefined) return this.arrayValueFoldRow(node);
         break;
@@ -1681,10 +1690,13 @@ export class Converter extends DeclarationConverter {
         const test = this.compiledValue(value.test);
         if (test !== undefined) {
           const selected = constantTruth(test) ? (value.consequent ?? value.test) : value.alternate;
-          if (selected.k === 'array' && this.compiledValue(selected, true) instanceof Map)
-            return this.arrayValueFoldRow(node);
-          return compiledOperandRow(selected);
+          const branch = selected === value.alternate ? 'alternative' : selected === value.test ? 'condition' : 'body';
+          return this.resultOpcodeRow(selected, node.childForFieldName(branch) ?? node);
         }
+        break;
+      }
+      case 'assign': {
+        if (value.target.k === 'idx') return compiledOperandRow(value.value);
         break;
       }
     }
@@ -1694,11 +1706,12 @@ export class Converter extends DeclarationConverter {
   private binaryOpcodeRow(value: Extract<Expr, { k: 'bin' }>, node: Node): number {
     if (value.op === '??') {
       const left = this.compiledValue(value.l);
-      return compiledOperandRow(left === undefined || left === null ? value.r : value.l);
+      const branch = left === undefined || left === null ? 'right' : 'left';
+      const selected = branch === 'right' ? value.r : value.l;
+      return this.resultOpcodeRow(selected, node.childForFieldName(branch) ?? node);
     }
-    if (value.op === '+' && value.l.k === 'array' && value.r.k === 'array') return compiledOperandRow(value.l);
-    if (this.compiledValue(value, true) === undefined) return compiledOperandRow(value);
-    if (value.op !== '.') return constantAstRow(value);
+    if (this.compiledValue(value, true) === undefined) return value.opcodeRow ?? compiledOperandRow(value);
+    if (value.op !== '.') return this.arrayValueFoldRow(node);
     if (directiveLiteral(node, value)) return node.parent?.nextSibling?.startPosition.row ?? node.endPosition.row;
     return this.arrayValueFoldRow(node);
   }
@@ -1716,7 +1729,7 @@ export class Converter extends DeclarationConverter {
   }
 
   // code-gauge-allow functionCognitiveComplexity 29 -- One case per grammar node kind, each converted where PHP gives it its own meaning.
-  // code-gauge-allow functionNcss 39 -- One case per grammar node kind, each converted where PHP gives it its own meaning.
+  // code-gauge-allow functionNcss 40 -- One case per grammar node kind, each converted where PHP gives it its own meaning.
   private listLiteral(node: Node): Expr {
     const row = node.startPosition.row;
     const items: (ListItem | undefined)[] = [];
@@ -1764,7 +1777,8 @@ export class Converter extends DeclarationConverter {
           'キーのある要素とない要素を混ぜられません（Cannot mix keyed and unkeyed array entries in assignments）。'
         );
     }
-    return { k: 'list', items, keyed, row };
+    const listRow = items[0] ? row : (children.find((child) => child.type === ',')?.startPosition.row ?? row);
+    return { k: 'list', items, keyed, row: listRow };
   }
 
   // Strings -----------------------------------------------------------------------------------------------------------

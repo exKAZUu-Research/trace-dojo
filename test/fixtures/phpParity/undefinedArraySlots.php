@@ -26,6 +26,11 @@ class UndefinedArrayChild extends RecursiveArrayIterator {
             $copy['new'] = 9;
             var_dump(count($copy), array_keys($copy));
         }
+        $afterRemoval = [$read(), 2, 3];
+        array_pop($afterRemoval);
+        unset($afterRemoval[1]);
+        var_dump(count($afterRemoval), array_keys($afterRemoval));
+
         $packed = [1, $read(), 3];
         var_dump(array_slice($packed, 0, 2, true), array_slice($packed, 1, 2, true));
         unset($packed[1]);

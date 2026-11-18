@@ -326,8 +326,12 @@ export class Runtime {
       this.durableReleaseVersion++;
       for (const value of dropped) this.pendingGcRoots.add(value instanceof Ref ? value.v : value);
     }
+    if (fromNative) {
+      releaseDropped(this, dropped, true);
+      return;
+    }
     for (const value of dropped) this.pendingReleases.push(value);
-    if (this.nativeCalls === 0) this.flushReleases(fromNative);
+    if (this.nativeCalls === 0) this.flushReleases();
   }
 
   durableReleaseVersion = 0;

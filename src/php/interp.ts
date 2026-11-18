@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 982 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 983 -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import {
   applyOperator,
@@ -50,6 +50,7 @@ import { acquireIterator } from './iteratorAcquisition';
 import { constantDeprecation } from './native';
 import { compiledOperandRow, constantAstRow } from './opcodeRows';
 import {
+  arithmetic,
   bitwiseNot,
   compare,
   looseEquals,
@@ -276,15 +277,17 @@ export function evChain(e: Expr, discardResult = false): Chain {
       }
       const value = ev(e.e);
       runtime.row = e.row;
+      const lowerConstantUnary =
+        runtime.frame.constantExpression && typeof value !== 'bigint' && typeof value !== 'number';
       switch (e.op) {
         case '!': {
           return !toBool(value);
         }
         case '-': {
-          return negate(value);
+          return lowerConstantUnary ? arithmetic('*', -1n, value) : negate(value);
         }
         case '+': {
-          return unaryPlus(value);
+          return lowerConstantUnary ? arithmetic('+', 0n, value) : unaryPlus(value);
         }
         default: {
           return bitwiseNot(value);
@@ -491,9 +494,12 @@ function globalOffsetRead(key: Value, row: number, mode: ReadMode): Value {
   return null;
 }
 
-// code-gauge-allow functionCognitiveComplexity 23 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+// code-gauge-allow functionCognitiveComplexity 26 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 function preparePropertyRead(e: Extract<Expr, { k: 'prop' }>, mode: ReadMode): ReadPlan {
-  let receiver = prepareRead(e.obj, mode === 'read' ? 'read' : 'coalesce');
+  let receiver =
+    mode === 'read' && !e.nullsafe && isCompiledVariable(e.obj)
+      ? prepareOperand(e.obj)
+      : prepareRead(e.obj, mode === 'read' ? 'read' : 'coalesce');
   if (receiver === SHORT) return SHORT;
   if (e.nullsafe) {
     const object = receiver();
@@ -505,7 +511,7 @@ function preparePropertyRead(e: Extract<Expr, { k: 'prop' }>, mode: ReadMode): R
   }
   const name = readMemberOperand(e.name);
   return () => {
-    const object = receiver();
+    const object = receiver(e.row);
     if (object === SHORT) return SHORT;
     const key = name();
     const runtime = rt();

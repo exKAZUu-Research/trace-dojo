@@ -417,3 +417,44 @@ $array = [
     $undefinedBase
     [0]
 ];
+
+[
+    ,
+    $secondMissing
+] =
+    $unsetList;
+[$missing] = [
+];
+try { echo (1 ?
+    $classPrefix :
+    'Other')
+    ::CONSTANT; }
+catch (Throwable $error) { echo $error->getMessage(), ' at ', $error->getLine(), "\n"; }
+$array = [
+    1.5 =>
+    null ??
+    [
+        2
+    ]
+];
+$array = [
+    1.5 =>
+    [
+        1
+    ] ===
+    [
+        1
+    ]
+];
+try {
+    $array = [
+        1.5 =>
+        1 <<
+        -1
+    ];
+} catch (ArithmeticError $error) { echo $error->getMessage(), ' at ', $error->getLine(), "\n"; }
+$array = [
+    1.5 =>
+    $undefinedObject
+    ->property
+];

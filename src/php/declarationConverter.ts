@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 904 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 905 -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import type { Node } from '@willbooster/web-tree-sitter';
 
@@ -17,7 +17,14 @@ import { hasNullsafeReceiver } from './astAnalysis';
 import { enc, lower } from './bytes';
 import { parseTypeText } from './calls';
 import { CompileClassConstants } from './compileClassConstants';
-import { type Constant, constantTruth, constantTypeName, foldedConstant, foldedDefaultType } from './constantDefaults';
+import {
+  type Constant,
+  constantTruth,
+  constantTypeName,
+  foldedConstant,
+  foldedDefaultType,
+  selectConstantBranch,
+} from './constantDefaults';
 import {
   BUILTIN_TYPES,
   ConverterBase,
@@ -79,8 +86,10 @@ export abstract class DeclarationConverter extends ConverterBase {
       const value = this.compiledValue(ref.e, use === 'constant');
       if (value !== undefined && typeof value !== 'string') this.error(node, 'Illegal class name');
       if (node.type === 'parenthesized_expression') {
-        if (value === undefined) ref.fetchRow = compiledOperandRow(ref.e);
-        else if (node.parent?.type !== 'object_creation_expression')
+        if (value === undefined) {
+          const expression = use === 'constant' ? selectConstantBranch(ref.e, { budget: this.compileBudget }) : ref.e;
+          ref.fetchRow = compiledOperandRow(expression);
+        } else if (node.parent?.type !== 'object_creation_expression')
           ref.fetchRow = semanticChildren(node.parent ?? node).at(-1)?.startPosition.row;
       }
     }
