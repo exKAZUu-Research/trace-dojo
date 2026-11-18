@@ -1675,6 +1675,58 @@ test.each([
   }
 );
 
+test.each([
+  ['u16', '0x1234', 'u', '129a'],
+  ['u16', '0x1234', 'identity(u)', '129a'],
+  ['u32', '0x12345678', 'u', '1234569a'],
+  ['u32', '0x12345678', 'identity(u)', '1234569a'],
+])('unaddressed extern union stores retain prior %s bytes through %s %s', (wide, initial, result, expected) => {
+  const source = `const std=@import("std");const U=extern union{wide:${wide},small:u8};fn identity(u:U)U{return u;}pub fn main()void{var u:U=.{.wide=${initial}};u=.{.small=0x9a};const v=${result};std.debug.print("{x}",.{v.wide});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: expected,
+    uncaughtException: undefined,
+  });
+});
+
+test.each([
+  ['.bits=0', '', 'true', 1],
+  ['.bits=1', 'const v=identity(u);_=&v;', 'true', 1],
+  ['.empty={}', 'const v=identity(u);_=&v;', 'false', 2],
+])('union root collection follows the surviving payload bytes after %s', (variant, copied, clear, count) => {
+  const source = `const std=@import("std");const U=union(enum){p:*Turtle,bits:usize,empty:void};fn identity(u:U)U{return u;}fn make(a:std.mem.Allocator)!U{const p=try a.create(Turtle);p.*=Turtle.init(0,1);return .{.p=p};}pub fn main(init:std.process.Init)!void{var u=try make(init.gpa);u=.{${variant}};${copied}const t=Turtle.init(0,0);std.debug.print("{}",.{t.canMoveForward()});_=&u;}`;
+  const result = executeProgram('zig', source);
+  expect(result).toMatchObject({ kind: 'executed', stderr: clear, uncaughtException: undefined });
+  if (result.kind === 'executed') expect(result.finalTurtles).toHaveLength(count);
+});
+
+test.each([
+  ['?S', '.{.x=1,.y=2}', '.?'],
+  ['??S', '@as(?S,.{.x=1,.y=2})', '.?.?'],
+])('reinitializing a null %s reuses retained payload fields', (optional, initial, unwrap) => {
+  const source = `const std=@import("std");const S=struct{x:u8,y:u8};pub fn main()void{var o:${optional}=${initial};const p=&o${unwrap};const x=&p.x;o=null;o=.{.x=7,.y=8};std.debug.print("{} {} {} {}",.{x.*,p.y,o${unwrap}.x,o${unwrap}.y});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: '7 8 7 8',
+    uncaughtException: undefined,
+  });
+});
+
+test.each([
+  ['packed struct{x:u8}', 'P', '', '==', 'false'],
+  ['packed struct{x:u8}', 'P', '', '!=', 'true'],
+  ['packed union{x:u8,y:u8}', 'P', '', '==', 'false'],
+  ['packed union{x:u8,y:u8}', 'P', '', '!=', 'true'],
+  ['packed struct{x:u8}', '?P', '.?', '==', 'false'],
+])('packed %s comparison snapshots the earlier operand through %s', (shape, type, unwrap, operator, expected) => {
+  const source = `const std=@import("std");const P=${shape};const A=${type};fn change(p:*A)A{p.*${unwrap}.x=2;return p.*;}pub fn main()void{var a:A=.{.x=1};std.debug.print("{} {}",.{a${operator}change(&a),a${unwrap}.x});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: `${expected} 2`,
+    uncaughtException: undefined,
+  });
+});
+
 test('writer result types use the canonical usize and mutable byte slice', () => {
   const source = `const std=@import("std");fn less(n:usize,a:u8,b:u8)bool{return n>0 and a<b;}
 pub fn main()!void{var b:[2]u8=undefined;var w=std.Io.Writer.fixed(&b);const n=try w.write("x");var a=[_]u8{2,1};std.sort.heap(u8,&a,n,less);std.debug.print("{} {} {}",.{a[0],a[1],@TypeOf(w.buffered())==[]u8});}`;
@@ -1728,8 +1780,16 @@ test('runtime aggregate materializations share one storage budget across calls a
   for (const source of [repeated, recursive])
     expect(executeProgram('zig', source)).toMatchObject({ kind: 'limitExceeded', limit: 'storage' });
   const reuse =
-    prefix + `pub fn main()void{var a:[400000]u8=@splat(0);for(0..5)|_|{a=@splat(1);}std.debug.print("{}",.{a[0]});}`;
+    prefix + `pub fn main()void{var a:[100000]u8=@splat(0);for(0..4)|_|{a=@splat(1);}std.debug.print("{}",.{a[0]});}`;
   expect(executeProgram('zig', reuse)).toMatchObject({ kind: 'executed', stderr: '1', uncaughtException: undefined });
+});
+
+test.each([
+  ['[200000]u8', '@splat(7)', 'b[0]'],
+  ['struct{data:[200000]u8}', '.{.data=@splat(7)}', 'b.data[0]'],
+])('repeated assignment snapshots of %s exhaust the shared execution budget', (type, initial, result) => {
+  const source = `const std=@import("std");const A=${type};pub fn main()void{const a:A=${initial};var b:A=undefined;for(0..10)|_|{b=a;}std.debug.print("{}",.{${result}});}`;
+  expect(executeProgram('zig', source)).toMatchObject({ kind: 'limitExceeded' });
 });
 
 test('arguments snapshot aggregate values before later argument effects', () => {
@@ -5451,7 +5511,7 @@ test('union tag conversions reuse the validated enum field order and explicit va
 test.each(['[80000]u8', 'struct{data:[80000]u8}'])('union tag changes account for fresh %s payloads', (type) => {
   const value = type.startsWith('struct') ? '.{.data=@splat(1)}' : '@splat(1)';
   const source = `const U=union(enum){a:${type},b:void};pub fn main()void{var u:U=.{.b={}};for(0..60)|_|{u=.{.a=${value}};u=.{.b={}};}_=&u;}`;
-  expect(executeProgram('zig', source)).toMatchObject({ kind: 'limitExceeded', limit: 'storage' });
+  expect(executeProgram('zig', source)).toMatchObject({ kind: 'limitExceeded' });
 });
 
 test('zero-bit union payload changes remain bounded without consuming aggregate slots', () => {

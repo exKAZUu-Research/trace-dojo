@@ -751,7 +751,7 @@ export abstract class StatementCompiler extends CallCompiler {
         const slots = nested ? 0 : valueSlots(type.child);
         frame.runtime.reserveStorage(slots);
         frame.runtime.spend(slots);
-        holder.slots[index] = optionalSome(nested ? NULL : undefinedValue(type.child), type.child);
+        storeInto(holder, index, optionalSome(nested ? NULL : undefinedValue(type.child), type.child));
       }
       const payload = this.optionalPayloadPointer(new Pointer(holder, index), type.child);
       inner(frame, payload.target, payload.index);
@@ -781,7 +781,7 @@ export abstract class StatementCompiler extends CallCompiler {
     const fieldType = fields[tag].type;
     const store = this.slotStore(init.value, fieldType);
     const slots = sizeOf(fieldType) === 0 ? 0 : valueSlots(fieldType);
-    const retainBytes = type.layout === 'auto' && !this.requiresComptime(type, value);
+    const retainBytes = !this.requiresComptime(type, value);
     return (frame, holder, index) => {
       const union = holder.slots[index] as ZUnion;
       const changed = union.tag !== tag;
@@ -804,10 +804,10 @@ export abstract class StatementCompiler extends CallCompiler {
     if (union.fieldView || !union.payloadInitialized) return;
     const field = type.fields![union.tag].type;
     if (sizeOf(field) === 0) return;
-    if (union.priorPayloads?.has(union.tag) && hasValueDependentWrites(field, () => frame.runtime.spend())) {
+    if (union.retainedPayloads?.values.has(union.tag) && hasValueDependentWrites(field, () => frame.runtime.spend())) {
       physicalUnion(type, union);
     } else {
-      union.retainPayload();
+      union.retainPayload(type);
     }
   }
 

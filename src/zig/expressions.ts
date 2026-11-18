@@ -36,6 +36,7 @@ import { asFloat, comparisonTest, isArithmeticType, isIntegerType, isZero, sign 
 import { type Frame, Jump, withHeldValues } from './runtime';
 import {
   addDecls,
+  copyForFrame,
   copyForStorage,
   evaluateHeld,
   FnRef,
@@ -1311,7 +1312,15 @@ export abstract class ExpressionCompiler extends SemaBase {
     }
     const compare = this.valueComparator(type, ordered, expression);
     const test = comparisonTest(operator);
-    return this.combine([left, right], BOOL, ([a, b]) => test(compare(a, b)), expression);
+    return this.combine([this.comparisonSnapshot(left), right], BOOL, ([a, b]) => test(compare(a, b)), expression);
+  }
+
+  private comparisonSnapshot(operand: TExpr): TExpr {
+    const payload = unwrapResult(operand.type);
+    if (operand.known || !((payload.kind === 'struct' || payload.kind === 'union') && payload.layout === 'packed'))
+      return operand;
+    const evaluate = operand.eval;
+    return { ...operand, eval: (frame) => copyForFrame(frame, evaluate(frame), operand.type) };
   }
 
   /** A function comparing two values of a type: negative, zero, or positive, or NaN when unordered. */

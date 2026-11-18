@@ -1,3 +1,4 @@
+import { physicalUnion } from './bufferMemory';
 import type { FunctionInstance } from './functions';
 import type { Frame } from './runtime';
 import type { Type } from './types';
@@ -166,16 +167,14 @@ export class TurtleReachability {
   }
 
   private unionChildren(union: ZUnion, push: Push, type?: Extract<Type, { kind: 'union' }>): void {
+    const retainedType = union.retainedPayloads?.type;
+    if (retainedType && this.mayContainTurtles(retainedType)) physicalUnion(retainedType, union);
     if (union.backingReferences) {
       for (const reference of union.backingReferences()) push(reference);
       return;
     }
     const active = type?.fields?.[union.tag];
     if (!type || active) push(union.slots[0], active?.type);
-    for (const [tag, payload] of union.priorPayloads ?? []) {
-      this.spend();
-      push(payload, type?.fields?.[tag]?.type);
-    }
   }
 
   private structChildren(

@@ -108,7 +108,7 @@ export function physicalUnion(type: Extract<Type, { kind: 'union' }>, value: ZUn
   const memory = new BufferMemory(bytes, spendMemory, memorySpace());
   memory.write(type, 0, value);
   const backing = memory.read(type, 0) as ZUnion;
-  value.priorPayloads = undefined;
+  value.retainedPayloads = undefined;
   Object.defineProperty(value, 'tag', {
     get: () => backing.tag,
     set: (tag: number) => {
@@ -560,7 +560,7 @@ export class BufferMemory {
     }
     target.tag = tag;
     const payloadOffset = offset + unionOffsets(type).payload * 8;
-    for (const [index, payload] of value.priorPayloads ?? []) {
+    for (const [index, payload] of value.retainedPayloads?.values ?? []) {
       this.spend();
       this.writeUnionPayload(type, index, payloadOffset, payload);
     }

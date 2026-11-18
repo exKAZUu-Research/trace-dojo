@@ -1,11 +1,11 @@
-// code-gauge-allow-file fileNcss 442 -- Keeps logical slots, pointer identity, and retained payload storage with their shared assignment rules.
+// code-gauge-allow-file fileNcss 452 -- Keeps logical slots, pointer identity, and retained payload storage with their shared assignment rules.
 import { ExecutionLimitError, LIMITS } from '../interpreter/limits';
 import type { TurtleState } from '../interpreter/turtleWorld';
 import { BigFloat, compareFloats } from './floats';
 import type { FunctionInstance } from './functions';
 import { reserveMemory, spendMemory } from './memoryAccounting';
 import { MemoryFault, UNDEFINED_MEMORY } from './memoryFault';
-import type { Type } from './types';
+import type { Type, UnionType } from './types';
 import { WeakValueMap } from './weakValueMap';
 
 export interface FunctionReference {
@@ -191,7 +191,7 @@ export class ZStruct implements Slots {
 
 export class ZUnion implements Slots {
   slots: Value[];
-  priorPayloads?: ReadonlyMap<number, Value>;
+  retainedPayloads?: { type: UnionType; values: ReadonlyMap<number, Value> };
   writeBacking?: (value: ZUnion) => void;
   backingKey?: () => string;
   backingReferences?: () => Value[];
@@ -207,19 +207,20 @@ export class ZUnion implements Slots {
     this.slots = [payload];
   }
 
-  retainPayload(): void {
-    const count = this.priorPayloads?.size ?? 0;
+  retainPayload(type: UnionType): void {
+    const prior = this.retainedPayloads?.values;
+    const count = prior?.size ?? 0;
     reserveMemory(count + 1);
     spendMemory(count + 1);
-    const payloads = new Map(this.priorPayloads);
+    const payloads = new Map(prior);
     payloads.delete(this.tag);
     payloads.set(this.tag, this.slots[0]);
-    this.priorPayloads = payloads;
+    this.retainedPayloads = { type, values: payloads };
   }
 
   withCopiedPayload(payload: Value): ZUnion {
     const copy = new ZUnion(this.tag, payload, this.payloadInitialized);
-    copy.priorPayloads = this.priorPayloads;
+    copy.retainedPayloads = this.retainedPayloads;
     return copy;
   }
 }
@@ -521,17 +522,37 @@ export function copyZeroArray(value: ZArray): ZArray | undefined {
 }
 
 /** A copy of a value whose aggregates are fresh, since Zig copies arrays, structs, and unions by value. */
-export function copyValue(value: Value): Value {
+function copyValue(value: Value): Value {
   if (value instanceof ZArray) {
     const virtual = copyZeroArray(value);
     if (virtual) return virtual;
-    const copied = value.values(value.hasSentinel).map((slot) => copyValue(slot));
-    return new ZArray(copied, 0, value.lengthValue, value.hasSentinel);
+    const length = value.length + (value.hasSentinel ? 1 : 0);
+    chargeSnapshot(length);
+    return new ZArray(
+      Array.from({ length }, (_, index) => copyValue(value.get(index))),
+      0,
+      value.lengthValue,
+      value.hasSentinel
+    );
   }
-  if (value instanceof ZStruct) return new ZStruct(value.slots.map((slot) => copyValue(slot)));
-  if (value instanceof ZUnion) return value.copyBacking?.() ?? value.withCopiedPayload(copyValue(value.slots[0]));
-  if (value instanceof Some) return new Some(copyValue(value.value));
+  if (value instanceof ZStruct) {
+    chargeSnapshot(value.slots.length);
+    return new ZStruct(value.slots.map(copyValue));
+  }
+  if (value instanceof ZUnion) {
+    chargeSnapshot(1);
+    return value.copyBacking?.() ?? value.withCopiedPayload(copyValue(value.slots[0]));
+  }
+  if (value instanceof Some) {
+    chargeSnapshot(1);
+    return new Some(copyValue(value.value));
+  }
   return value;
+}
+
+function chargeSnapshot(slots: number): void {
+  reserveMemory(slots);
+  spendMemory(slots);
 }
 
 /**
@@ -543,7 +564,7 @@ export function storeInto(target: Slots, index: number, value: Value): void {
 }
 
 // code-gauge-allow functionCognitiveComplexity 21 -- Preserves existing aggregate locations when storing copied values.
-// code-gauge-allow functionNcss 32 -- Handles aggregate assignment and retained payloads at the storage boundary.
+// code-gauge-allow functionNcss 34 -- Handles aggregate assignment and retained payloads at the storage boundary.
 function storeSnapshotInto(target: Slots, index: number, value: Value): void {
   value = valueWithRetainedPayload(target, index, value);
   if (storageLocations.has(target.slots)) {
@@ -553,12 +574,14 @@ function storeSnapshotInto(target: Slots, index: number, value: Value): void {
   const current = target.slots[index];
   if (value instanceof ZArray && current instanceof ZArray && current.length === value.length) {
     if (zeroArrayValues.has(value.slots) && zeroArrayValues.has(current.slots)) return;
-    const source = value.values(current.hasSentinel && value.hasSentinel);
-    for (const [at, slot] of source.entries()) storeSnapshotInto(current, current.offset + at, slot);
+    const length = value.length + (current.hasSentinel && value.hasSentinel ? 1 : 0);
+    spendMemory(length);
+    for (let at = 0; at < length; at++) storeSnapshotInto(current, current.offset + at, value.get(at));
     return;
   }
   if (value instanceof ZStruct && current instanceof ZStruct && current.slots.length === value.slots.length) {
     const source = value.slots;
+    spendMemory(source.length);
     for (const [at, slot] of source.entries()) storeSnapshotInto(current, at, slot);
     return;
   }
@@ -574,7 +597,7 @@ function storeSnapshotInto(target: Slots, index: number, value: Value): void {
     current.tag === value.tag
   ) {
     storeSnapshotInto(current, 0, value.slots[0]);
-    current.priorPayloads = value.priorPayloads;
+    current.retainedPayloads = value.retainedPayloads;
     current.payloadInitialized = value.payloadInitialized;
     return;
   }
