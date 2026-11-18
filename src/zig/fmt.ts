@@ -1,5 +1,5 @@
 import { checkOutputSize } from './allocation';
-// code-gauge-allow-file fileNcss 825 -- Keeps format parsing and rendering with their shared specifiers.
+// code-gauge-allow-file fileNcss 827 -- Keeps format parsing and rendering with their shared specifiers.
 /**
  * Zig's formatted printing (`std.Io.Writer.print` and `printValue`), transcribed so that output matches byte for byte.
  * Formatting works on bytes, as Zig's strings are bytes.
@@ -837,6 +837,7 @@ function byteView(length: number, get: (index: number) => number, source?: Slice
 }
 
 export function utf8(text: string): number[] {
+  spendMemory(text.length);
   return encodeIdentifierText(text);
 }
 

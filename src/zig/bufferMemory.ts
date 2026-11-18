@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 528 -- Keeps the byte codecs, shared typed views, and reference-preserving copies together.
+// code-gauge-allow-file fileNcss 576 -- Keeps the byte codecs, shared typed views, and reference-preserving copies together.
 import { transferCost } from './allocation';
 import { panic } from './arith';
 import { enumLookup } from './enumLookup';
@@ -58,6 +58,7 @@ export class BufferMemorySpace {
   readonly memories = new WeakMap<Value[], BufferMemory>();
   readonly typedViews = new WeakMap<Value[], { memory: BufferMemory; offset: (index: number) => number }>();
   readonly logicalMemories = new WeakMap<object, Map<string, BufferMemory>>();
+  readonly byteReferences = new WeakMap<object, Map<number, StoredReference>>();
   readonly referenceIds = new WeakMap<object, bigint>();
   readonly references = new WeakValueMap<string, object>();
   nextReferenceId = 1n;
@@ -184,6 +185,52 @@ export function bindBufferMemory(
 }
 
 export class BufferMemory {
+  static byteCopyReferences(destination: Pointer, source: Pointer, length: number): (() => void) | undefined {
+    const space = memorySpace();
+    const from = space.typedViews.get(source.target.slots);
+    const to = space.typedViews.get(destination.target.slots);
+    const sourceLocation = source.slotLocation();
+    const destinationLocation = destination.slotLocation();
+    const targetOffset = to ? to.offset(destination.index) : destinationLocation.index * 8;
+    const bits = length * 8;
+    const references = from
+      ? from.memory.sparseReferences(from.offset(source.index), targetOffset, bits)
+      : BufferMemory.logicalByteReferences(space, sourceLocation, targetOffset, bits);
+    if (references.length === 0) return undefined;
+    return () => {
+      if (to) {
+        to.memory.restoreReferences(references);
+        return;
+      }
+      let target = space.byteReferences.get(destinationLocation.storage);
+      if (!target) {
+        target = new Map();
+        space.byteReferences.set(destinationLocation.storage, target);
+      }
+      for (const reference of references) {
+        if (!target.has(reference.offset)) reserveMemory(1);
+        target.set(reference.offset, reference);
+      }
+    };
+  }
+
+  private static logicalByteReferences(
+    space: BufferMemorySpace,
+    source: ReturnType<Pointer['slotLocation']>,
+    target: number,
+    bits: number
+  ): (StoredReference & { offset: number })[] {
+    const stored = space.byteReferences.get(source.storage);
+    if (!stored) return [];
+    const start = source.index * 8;
+    const references: (StoredReference & { offset: number })[] = [];
+    for (const [offset, reference] of sparseEntriesInRange(stored, start, bits)) {
+      if (matchesLogicalBytes(source.storage as Value[], offset, reference))
+        references.push({ ...reference, offset: target + offset - start });
+    }
+    return references;
+  }
+
   private accessDepth = 0;
   private readonly views = new Map<string, Value>();
   private readonly referenceHolds = new Map<string, object>();
@@ -772,4 +819,19 @@ function unionFieldLocation(type: Extract<Type, { kind: 'union' }>, index: numbe
 function referenceKey(id: bigint, bits: number): string {
   const projection = bits === 16 ? 'error' : 'address';
   return `${id} ${projection}`;
+}
+
+function matchesLogicalBytes(bytes: readonly Value[], offset: number, reference: StoredReference): boolean {
+  for (let bit = 0; bit < reference.bits; bit += 8) {
+    spendMemory();
+    const position = offset + bit;
+    const index = Math.floor(position / 8);
+    const shift = position % 8;
+    const low = bytes[index];
+    const high = shift === 0 ? 0n : bytes[index + 1];
+    if (typeof low !== 'bigint' || typeof high !== 'bigint') return false;
+    const mask = (1n << BigInt(Math.min(8, reference.bits - bit))) - 1n;
+    if ((((low | (high << 8n)) >> BigInt(shift)) & mask) !== ((reference.id >> BigInt(bit)) & mask)) return false;
+  }
+  return true;
 }

@@ -1,6 +1,7 @@
 import { PANIC, panic } from '../arith';
 import { BigFloat, parseFloatLiteral, toNumber } from '../floats';
 import { spendIntegerOperation, spendIntegerWidth } from '../integerWork';
+import { MemoryFault } from '../memoryFault';
 import { runtime } from '../semaBase';
 import {
   CONST_U8_SLICE,
@@ -18,19 +19,10 @@ import {
   U8,
   USIZE,
 } from '../types';
-import { decodeUtf8 } from '../utf8';
-import { ErrorValue, Slice, type Value } from '../values';
+import { createUtf8Decoder } from '../utf8';
+import { ErrorValue, isUndefinedMemory, Slice, type Value } from '../values';
 import { allocatingWriter, freeWriter, ownWriterSlice } from './allocatingWriter';
-import {
-  allocating,
-  allocatorArg,
-  computed,
-  constSlice,
-  elements,
-  generic,
-  mutableSlice,
-  nativeBudget,
-} from './common';
+import { allocating, allocatorArg, computed, constSlice, generic, mutableSlice, nativeBudget } from './common';
 import { allocatorState, ERROR_OUT_OF_MEMORY, nativeEnum } from './heap';
 import { compileArgs, expectArgs, fnMember, type Member, nativeCall, nativeStruct, typeMember } from './native';
 import { compilePrint } from './print';
@@ -113,32 +105,40 @@ function parseInt(bytes: Slice, base: number, type: IntType, spend: (cost?: numb
 }
 
 /** `std.fmt.parseFloat`: decimal or hexadecimal digits with `_`, `inf`, or `nan`, rounded to the type. */
-function parseFloat(bytes: number[], type: Extract<Type, { kind: 'float' }>): Value {
-  const text = decodeUtf8(bytes);
-  const match = /^([+-]?)(.*)$/s.exec(text) as RegExpExecArray;
-  const negative = match[1] === '-';
-  const body = match[2];
+function parseFloat(bytes: Slice, type: Extract<Type, { kind: 'float' }>, spend: (cost?: number) => void): Value {
+  if (bytes.lengthValue !== 0n && isUndefinedMemory(bytes)) throw new MemoryFault();
+  spend(bytes.length);
+  const input = Uint8Array.from({ length: bytes.length }, (_, index) => Number(bytes.get(index)));
+  spend(input.length);
+  const text = createUtf8Decoder().decode(input);
+  const negative = text[0] === '-';
+  const body = negative || text[0] === '+' ? text.slice(1) : text;
+  const special = body.length <= 8 ? body.toLowerCase() : undefined;
   let value: BigFloat;
-  if (/^inf(inity)?$/i.test(body)) value = new BigFloat(negative, 'inf', 0n, 0);
-  else if (/^nan$/i.test(body)) value = new BigFloat(false, 'nan', 0n, 0);
-  else if (isFloatNumber(body)) {
-    const parsed = parseFloatLiteral(body, type.bits);
+  if (special === 'inf' || special === 'infinity') value = new BigFloat(negative, 'inf', 0n, 0);
+  else if (special === 'nan') value = new BigFloat(false, 'nan', 0n, 0);
+  else if (isFloatNumber(body, spend)) {
+    const parsed = parseFloatLiteral(body, type.bits, spend);
     value = negative ? new BigFloat(true, parsed.kind, parsed.mantissa, parsed.exponent) : parsed;
   } else return INVALID_CHARACTER;
   return type.bits <= 64 ? toNumber(value, type.bits as 16 | 32 | 64) : value;
 }
 
 // code-gauge-allow functionCognitiveComplexity 18 -- Scans both numeric radices with the same digit, separator, and exponent rules.
-function isFloatNumber(text: string): boolean {
+function isFloatNumber(text: string, spend: (cost?: number) => void): boolean {
   const hexadecimal = text.slice(0, 2).toLowerCase() === '0x';
   const base = hexadecimal ? 16 : 10;
   let position = hexadecimal ? 2 : 0;
   const scanDigits = (radix: number): number => {
     let count = 0;
     while (isDigit(text[position], radix)) {
+      spend();
       count++;
       position++;
-      if (text[position] === '_' && isDigit(text[position + 1], radix)) position++;
+      if (text[position] === '_' && isDigit(text[position + 1], radix)) {
+        spend();
+        position++;
+      }
     }
     return count;
   };
@@ -160,10 +160,6 @@ function isDigit(character: string | undefined, base: number): boolean {
   if (character === undefined) return false;
   const code = character.codePointAt(0) ?? 0;
   return (code >= 48 && code <= 57) || (base === 16 && (code | 32) >= 97 && (code | 32) <= 102);
-}
-
-function bytesOf(value: Value): number[] {
-  return elements(value).map((byte) => Number(byte as bigint));
 }
 
 const MEMBERS: Record<string, () => Member> = {
@@ -192,11 +188,9 @@ const MEMBERS: Record<string, () => Member> = {
         `std.fmt.parseFloat には浮動小数点数の型を渡してください（${typeName(type)} です）。`
       );
     const buffer = constSlice(sema, bufferArg, U8);
-    return computed(errorUnionOf(errorSetOf(['InvalidCharacter']), type), [buffer], call.span, ([text], frame) => {
-      nativeBudget(sema, frame)((text as Slice).length);
-      const bytes = bytesOf(text);
-      return parseFloat(bytes, type);
-    });
+    return computed(errorUnionOf(errorSetOf(['InvalidCharacter']), type), [buffer], call.span, ([text], frame) =>
+      parseFloat(text as Slice, type, nativeBudget(sema, frame))
+    );
   }),
   charToDigit: fnMember(
     'std.fmt.charToDigit',

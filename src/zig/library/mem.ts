@@ -2,7 +2,7 @@
 import { transferCost } from '../allocation';
 import { indexOutOfBounds, PANIC, panic } from '../arith';
 import type { Expression, Span } from '../ast';
-import { zeroPhysicalValue } from '../bufferMemory';
+import { BufferMemory, zeroPhysicalValue } from '../bufferMemory';
 import { enumLookup } from '../enumLookup';
 import { type AnyFloat, BigFloat, compareFloats, floatFromBigInt, minMaxFloat } from '../floats';
 import { sizeOf } from '../layout';
@@ -29,7 +29,7 @@ import {
 import {
   isUndefinedMemory,
   NULL,
-  type Pointer,
+  Pointer,
   Slice,
   storageLocation,
   storageOverlaps,
@@ -839,7 +839,6 @@ const MEMBERS: Record<string, () => Member> = {
   tokenizeAny: iteratorFactory('std.mem.tokenizeAny', 'token', 'any'),
 };
 
-// code-gauge-allow functionCognitiveComplexity 16 -- Keeps generic prefix and suffix validation with the resulting shared-storage view.
 function cutMember(name: string, suffix: boolean): () => Member {
   return generic(name, 3, (sema, call, type, [sourceArg, needleArg]) => {
     const source = constSlice(sema, sourceArg, type);
@@ -850,9 +849,8 @@ function cutMember(name: string, suffix: boolean): () => Member {
       const target = pattern as Slice;
       if (target.lengthValue > input.lengthValue) return NULL;
       const offset = suffix ? input.lengthValue - target.lengthValue : 0n;
-      const equal = equality(frame);
-      for (let index = 0n; index < target.lengthValue; index++)
-        if (!equal(input.get(Number(offset + index)), target.get(Number(index)))) return NULL;
+      const spend = nativeBudget(sema, frame);
+      if (!startsWith(sequence(input, spend), sequence(target, spend), equality(frame), offset)) return NULL;
       return new Slice(
         input.target,
         input.start + (suffix ? 0 : Number(target.lengthValue)),
@@ -934,7 +932,7 @@ function extremeIndex(name: string, direction: number): () => Member {
   });
 }
 
-// code-gauge-allow functionCognitiveComplexity 17 -- Keeps directional transfer and exact bounds checks together.
+// code-gauge-allow functionCognitiveComplexity 20 -- Keeps exact bounds, copy direction and reference transfer in evaluation order.
 function copier(name: string): () => Member {
   return generic(name, 3, (sema, call, type, [destinationArg, sourceArg]) => {
     const destination = mutableSlice(sema, destinationArg, type);
@@ -951,11 +949,20 @@ function copier(name: string): () => Member {
       }
       if (cost === 0) return;
       const spend = nativeBudget(sema, frame);
+      const restoreReferences =
+        type === U8
+          ? BufferMemory.byteCopyReferences(
+              new Pointer(target.target, target.start),
+              new Pointer(values.target, values.start),
+              Number(values.lengthValue)
+            )
+          : undefined;
       for (let position = 0n; position < values.lengthValue; position++) {
         spend(cost * 2);
         const index = backwards ? values.lengthValue - position - 1n : position;
         storeSliceValue(target, Number(index), values.get(Number(index)));
       }
+      restoreReferences?.();
       return;
     });
   });

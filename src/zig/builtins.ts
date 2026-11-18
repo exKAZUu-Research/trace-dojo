@@ -16,7 +16,8 @@ import {
   rem,
 } from './arith';
 import type { Expression, ExpressionOf, Span } from './ast';
-// code-gauge-allow-file fileNcss 713 -- The file holds one layer of the compiler, whose parts share its private state.
+import { BufferMemory } from './bufferMemory';
+// code-gauge-allow-file fileNcss 714 -- The file holds one layer of the compiler, whose parts share its private state.
 import { enumLookup } from './enumLookup';
 import { ExpressionCompiler, log2IntType } from './expressions';
 import {
@@ -973,8 +974,8 @@ export abstract class BuiltinCompiler extends ExpressionCompiler {
     return slice;
   }
 
-  // code-gauge-allow functionNcss 39 -- Keeps typed length/alias checks with the matching copy evaluation.
-  // code-gauge-allow functionCognitiveComplexity 19 -- Keeps typed length/alias checks with the matching copy evaluation.
+  // code-gauge-allow functionNcss 40 -- Keeps bounds, alias checks and reference transfer in copy evaluation order.
+  // code-gauge-allow functionCognitiveComplexity 21 -- Keeps bounds, alias checks and reference transfer in copy evaluation order.
   private memoryCopy(name: string, expression: ExpressionOf<'builtinCall'>): TExpr {
     const destination = this.compile(expression.args[0]);
     const source = this.compile(expression.args[1]);
@@ -1008,11 +1009,20 @@ export abstract class BuiltinCompiler extends ExpressionCompiler {
           panic(PANIC.memcpyAlias);
         if (isUndefinedMemory(valuesOf[0]) || isUndefinedMemory(valuesOf[1])) throw new MemoryFault();
         frame.runtime.spend(Number(input.length) * cost);
+        const restoreReferences =
+          target.child === U8
+            ? BufferMemory.byteCopyReferences(
+                new Pointer(out.slots, out.start),
+                new Pointer(input.slots, input.start),
+                Number(input.length)
+              )
+            : undefined;
         const values = input.slots.slots.slice(input.start, input.start + Number(input.length)).map(copyForStorage);
         for (const [index, value] of values.entries()) {
           frame.runtime.spend(cost * 2);
           storeInto(out.slots, out.start + index, value);
         }
+        restoreReferences?.();
         return;
       },
       expression

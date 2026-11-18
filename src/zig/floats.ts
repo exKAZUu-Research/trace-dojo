@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 402 -- Keeps IEEE arithmetic, conversions, and rounding with their shared representation.
+// code-gauge-allow-file fileNcss 407 -- Keeps IEEE arithmetic, conversions, and rounding with their shared representation.
 import { spendIntegerOperation, spendIntegerShift, spendIntegerWidth } from './integerWork';
 import { spendMemory } from './memoryAccounting';
 
@@ -409,16 +409,19 @@ export function integerSqrt(value: bigint, spend: (cost: number) => void = spend
 // Literals ------------------------------------------------------------------------------------------------------------
 
 /** Parses a Zig float literal (decimal or hexadecimal, with `_` separators) to the nearest float of a format. */
-// code-gauge-allow functionNcss 43 -- Keeps decimal and hexadecimal literal conversion and allocation planning together.
+// code-gauge-allow functionNcss 48 -- Keeps decimal and hexadecimal literal conversion and accounting together.
 // code-gauge-allow functionCognitiveComplexity 19 -- Checks both literal radices before allocating their exact values.
 export function parseFloatLiteral(text: string, bits: FloatBits, spend = spendMemory): BigFloat {
+  spend(text.length);
   const clean = text.replaceAll('_', '');
   const format = FORMATS[bits];
+  spend(clean.length);
   if (/^0x/i.test(clean)) {
     const match = /^0x([\da-f]*)(?:\.([\da-f]*))?(?:p([+-]?\d+))?$/i.exec(clean);
     if (!match) return new BigFloat(false, 'nan', 0n, 0);
     const whole = match[1] ?? '';
     const fraction = match[2] ?? '';
+    spend(whole.length + fraction.length + (match[3]?.length ?? 0));
     const significant = `${whole}${fraction}`.replace(/^0+/, '');
     const binaryExponent = Number(match[3] ?? '0') - 4 * fraction.length;
     if (!significant) return BigFloat.zero();
@@ -436,8 +439,10 @@ export function parseFloatLiteral(text: string, bits: FloatBits, spend = spendMe
   if (!match) return new BigFloat(false, 'nan', 0n, 0);
   const whole = match[1] ?? '';
   const fraction = match[2] ?? '';
+  spend(whole.length + fraction.length);
   const significand = `${whole}${fraction}`.replace(/^0+/, '');
   if (!significand) return BigFloat.zero();
+  spend(significand.length + (match[3]?.length ?? 0));
   const significant = significand.replace(/0+$/, '');
   const decimalExponent = Number(match[3] ?? '0') - fraction.length + significand.length - significant.length;
   const magnitude = significant.length + decimalExponent;

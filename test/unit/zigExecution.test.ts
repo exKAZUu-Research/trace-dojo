@@ -1791,6 +1791,20 @@ test.each([
 });
 
 test.each([
+  ['@memcpy(&b.bytes,&a.bytes);', '', 'false', 2],
+  ['@memmove(&b.bytes,&a.bytes);', '', 'false', 2],
+  ['std.mem.copyForwards(u8,&b.bytes,&a.bytes);', '', 'false', 2],
+  ['std.mem.copyBackwards(u8,&b.bytes,&a.bytes);', '', 'false', 2],
+  ['var bytes:[8]u8=undefined;@memcpy(&bytes,&a.bytes);a.bits=0;@memcpy(&b.bytes,&bytes);', '', 'false', 2],
+  ['@memcpy(&b.bytes,&a.bytes);', 'b.bits=0;', 'true', 1],
+])('raw byte transfers keep surviving turtle pointers through %s', (copy, overwrite, clear, count) => {
+  const source = `const std=@import("std");const U=extern union{p:*Turtle,bits:usize,bytes:[8]u8};fn make(a:std.mem.Allocator)!U{const p=try a.create(Turtle);p.*=Turtle.init(0,1);return .{.p=p};}pub fn main(init:std.process.Init)!void{var a=try make(init.gpa);var b:U=.{.bits=0};${copy}a.bits=0;${overwrite}const t=Turtle.init(0,0);std.debug.print("{}",.{t.canMoveForward()});_=&b;}`;
+  const result = executeProgram('zig', source);
+  expect(result).toMatchObject({ kind: 'executed', stderr: clear, uncaughtException: undefined });
+  if (result.kind === 'executed') expect(result.finalTurtles).toHaveLength(count);
+});
+
+test.each([
   ['1000001', '.a=1', '_=init;'],
   ['2000001', '.a=1', '_=init;'],
   ['2000001', '.t=p', 'const p=try init.gpa.create(Turtle);p.*=Turtle.init(0,1);'],
@@ -3971,6 +3985,22 @@ test('union switch captures use declared tag values rather than field positions'
   });
 });
 
+test.each([
+  'switch(u){.a=>|v|std.debug.print("{}",.{v}),.b=>|v|{_=v;const x:u8=300;_=x;},.c=>unreachable}',
+  'switch(u){.a=>|v|std.debug.print("{}",.{v}),.b=>|v|std.debug.print("{s}",.{v}),.c=>unreachable}',
+  'switch(u){inline .a,.b=>|v,tag|{_=tag;const b:[v]u8=@splat(0);std.debug.print("{}",.{b.len});},.c=>unreachable}',
+  'switch(u){.b=>unreachable,inline else=>|v,tag|{_=tag;const b:[v]u8=@splat(0);std.debug.print("{}",.{b.len});}}',
+  'const x:u8=switch(u){.a=>|v|v,.b=>|v|@as(u8,300)+v,.c=>unreachable};std.debug.print("{}",.{x});',
+])('a known tagged-union switch analyzes the reachable specialization for %s', (body) => {
+  const source = `const std=@import("std");const Tag=enum(u16){a=19,b=401,c=4};const U=union(Tag){a:u8,b:u8,c:f64};pub fn main()void{const u=U{.a=7};${body}}`;
+  expect(executeProgram('zig', source)).toMatchObject({ kind: 'executed', stderr: '7', uncaughtException: undefined });
+});
+
+test('a labeled switch analyzes prongs reachable through continuation', () => {
+  const source = `const U=union(enum){a:u8,b:u8};pub fn main()void{const u=U{.a=7};retry:switch(u){.a=>continue :retry .{.b=1},.b=>|v|{_=v;const bad:u8=300;_=bad;}}}`;
+  expect(executeProgram('zig', source)).toMatchObject({ kind: 'compileError' });
+});
+
 test.each(['eql', 'replaceScalar'])('native %s scans charge every visited element', (method) => {
   const setup = method === 'eql' ? 'var b:[300000]u8=@splat(7);_=&b;' : '';
   const operation = method === 'eql' ? '_=std.mem.eql(u8,&a,&b);' : 'std.mem.replaceScalar(u8,&a,7,8);';
@@ -4877,6 +4907,16 @@ test.each(['cutPrefix', 'cutSuffix'])('memory cuts retain exact zero-sized view 
     stderr: '18446744073709551615 18446744073709551612',
     uncaughtException: undefined,
   });
+});
+
+test.each(['cutPrefix', 'cutSuffix'])('memory %s meters reads from both slices', (method) => {
+  const source = `const std=@import("std");const a:[256]u8=@splat(97);const b:[256]u8=@splat(97);pub fn main()void{std.debug.print("{}",.{std.mem.${method}(u8,&a,&b).?.len});}`;
+  expect(executeProgram('zig', source)).toMatchObject({ kind: 'executed', stderr: '0', uncaughtException: undefined });
+  const budget = new ExecutionBudget();
+  budget.spend(LIMITS.maxOperations - 600);
+  expect(() => runProgram(new Runtime(undefined, budget), compileSource(source))).toThrow(
+    expect.objectContaining({ limit: 'operations' })
+  );
 });
 
 test.each(['findMin', 'findMax', 'indexOfMin', 'indexOfMax', 'min', 'max', 'minMax'])(
@@ -8940,13 +8980,13 @@ test.each(['hexadecimal', 'decimal'])(
     const text = radix === 'hexadecimal' ? `0x1${'1'.repeat(300_000)}p-1200000` : `${'1'.repeat(330_000)}e-329999`;
     for (const expression of [`std.fmt.parseFloat(f128,"${text}") catch 0`, `@as(f128,${text})`]) {
       const source = `const std=@import("std");pub fn main()void{const x=${expression};std.debug.print("{d}",.{x});}`;
-      expect(executeProgram('zig', source)).toMatchObject({ kind: 'limitExceeded', limit: 'storage' });
+      expect(executeProgram('zig', source)).toMatchObject({ kind: 'limitExceeded' });
     }
   }
 );
 
 test('bounded compensated hexadecimal parsing retains exact f128 rounding', () => {
-  const text = `0x1${'1'.repeat(240_000)}p-960000`;
+  const text = `0x1${'1'.repeat(120_000)}p-480000`;
   const source = `const std=@import("std");pub fn main()void{const x=std.fmt.parseFloat(f128,"${text}") catch 0;std.debug.print("{}",.{x==@as(f128,0x1.1111111111111111111111111111p0)});}`;
   expect(executeProgram('zig', source)).toMatchObject({
     kind: 'executed',
@@ -9059,6 +9099,55 @@ test.each([
   });
   const budget = new ExecutionBudget();
   budget.spend(LIMITS.maxOperations - Math.floor(digits * 1.5));
+  expect(() => runProgram(new Runtime(undefined, budget), compileSource(source))).toThrow(
+    expect.objectContaining({ limit: 'operations' })
+  );
+});
+
+test.each([
+  ['const a:[512]u8=@splat(97);', 800],
+  [`const a="${'a'.repeat(512)}";`, 800],
+  [`const a:[]const u8="${'a'.repeat(512)}";`, 800],
+  ['const a:[512]u16=@splat(97);', 2500],
+])('format count meters type names containing a constant sequence for %s', (constant, remaining) => {
+  const source = `const std=@import("std");pub fn main()void{${constant}const t=.{a};std.debug.print("{}",.{std.fmt.count("{}",.{@TypeOf(t)})});}`;
+  expect(executeProgram('zig', source)).toMatchObject({ kind: 'executed', uncaughtException: undefined });
+  const budget = new ExecutionBudget();
+  budget.spend(LIMITS.maxOperations - remaining);
+  expect(() => runProgram(new Runtime(undefined, budget), compileSource(source))).toThrow(
+    expect.objectContaining({ limit: 'operations' })
+  );
+});
+
+test.each([
+  ['enum', 'const E=enum{@"NAME"};var x:E=.@"NAME";_=&x;'],
+  ['error', 'const E=error{@"NAME"};var x:E=error.@"NAME";_=&x;'],
+  ['union', 'const U=union(enum){@"NAME":void};var x=U{.@"NAME"={}};_=&x;'],
+  ['enum literal', 'const x=.@"NAME";'],
+])('format count meters the encoding of a quoted %s tag', (_shape, declaration) => {
+  const name = 'あ'.repeat(300);
+  const source = `const std=@import("std");pub fn main()void{${declaration.replaceAll('NAME', name)}std.debug.print("{}",.{std.fmt.count("{t}",.{x})});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: '900',
+    uncaughtException: undefined,
+  });
+  const budget = new ExecutionBudget();
+  budget.spend(LIMITS.maxOperations - 1100);
+  expect(() => runProgram(new Runtime(undefined, budget), compileSource(source))).toThrow(
+    expect.objectContaining({ limit: 'operations' })
+  );
+});
+
+test.each(['f64', 'f128'])('parseFloat meters buffering, decoding and numeric scans for %s', (type) => {
+  const source = `const std=@import("std");const input:[512]u8=@splat('0');pub fn main()!void{const n=try std.fmt.parseFloat(${type},&input);std.debug.print("{}",.{n==0});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: 'true',
+    uncaughtException: undefined,
+  });
+  const budget = new ExecutionBudget();
+  budget.spend(LIMITS.maxOperations - 2200);
   expect(() => runProgram(new Runtime(undefined, budget), compileSource(source))).toThrow(
     expect.objectContaining({ limit: 'operations' })
   );

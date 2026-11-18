@@ -82,6 +82,12 @@ interface FnContext {
   targets: JumpTarget[];
 }
 
+interface SwitchMatch {
+  values: unknown[];
+  ranges: [bigint, bigint][];
+  isUnnamed: boolean;
+}
+
 /** A block, loop, or switch that `break` and `continue` may leave. */
 interface JumpTarget {
   readonly id: object;
@@ -2057,10 +2063,9 @@ export abstract class StatementCompiler extends CallCompiler {
     const prongs: Prong[] = [];
     let elseProng: Prong | undefined;
     // A labeled switch may `continue` into any prong, so only an unlabeled one skips the prongs it never reaches.
-    const reached =
-      operandResult && !union && !expression.label
-        ? this.reachedCase(expression, keyOf(operandResult.value), tagType)
-        : undefined;
+    const selection =
+      operandResult && !expression.label ? { ...operandResult, key: keyOf(operandResult.value) } : undefined;
+    const reached = selection && this.reachedCase(matches, selection.key, tagType);
     fn.targets.push(target);
     try {
       for (const { each, match } of matches) {
@@ -2068,6 +2073,7 @@ export abstract class StatementCompiler extends CallCompiler {
           each,
           {
             skipped: reached !== undefined && each !== reached,
+            knownOperand: each === reached ? selection : undefined,
             operand,
             operandType,
             tagType,
@@ -2274,7 +2280,7 @@ export abstract class StatementCompiler extends CallCompiler {
     union: boolean,
     keyOf: (value: Value) => unknown,
     seen: Map<unknown, Span>
-  ): { values: unknown[]; ranges: [bigint, bigint][]; isUnnamed: boolean } {
+  ): SwitchMatch {
     this.compilationBudget.spend();
     const values: unknown[] = [];
     const ranges: [bigint, bigint][] = [];
@@ -2318,12 +2324,27 @@ export abstract class StatementCompiler extends CallCompiler {
       asStatement: boolean;
       seen: Map<unknown, Span>;
       skipped: boolean;
+      knownOperand?: { value: Value; key: unknown };
     },
-    match: { values: unknown[]; ranges: [bigint, bigint][]; isUnnamed: boolean }
+    match: SwitchMatch
   ): unknown {
     this.compilationBudget.spend();
     const { operand, operandType, tagType, union, unionFields, fieldForTag, resultType, asStatement, seen } = context;
     const { values, ranges, isUnnamed } = match;
+    if (each.tagCapture && !isDiscardName(each.tagCapture) && !each.isInline)
+      this.error(each.tagCapture, 'タグを受け取れるのは inline の枝だけです。');
+    if (context.skipped) {
+      const never: Stmt = { exec: () => panic(PANIC.unreachable), noreturn: true };
+      return {
+        values,
+        ranges,
+        isElse: each.isElse,
+        isUnnamed,
+        body: asStatement ? never : undefined,
+        value: asStatement ? undefined : known(NORETURN, undefined, each.body),
+      };
+    }
+    const knownOperand = context.knownOperand;
     const capturePayload = Boolean(union && (!each.isElse || each.isInline));
     const captureFor = (keys: unknown[]): Type => {
       if (!union || !unionFields) return operandType;
@@ -2358,7 +2379,13 @@ export abstract class StatementCompiler extends CallCompiler {
             frame.slots[binding.slot] = payloadPointer ? payloadPointer(source, value) : source;
           };
         } else {
-          const binding = this.newLocal(capture.name, captureType, true);
+          const value = knownOperand?.value;
+          const knownValue = capturePayload && knownOperand ? (value as ZUnion).slots[0] : value;
+          const binding = {
+            ...this.newLocal(capture.name, captureType, true),
+            known: knownOperand !== undefined,
+            value: knownValue,
+          };
           locals.set(capture.name, binding);
           bind = (frame, value) => {
             frame.slots[binding.slot] = copyForFrame(
@@ -2370,7 +2397,6 @@ export abstract class StatementCompiler extends CallCompiler {
         }
       }
       if (each.tagCapture && !isDiscardName(each.tagCapture)) {
-        if (!each.isInline) this.error(each.tagCapture, 'タグを受け取れるのは inline の枝だけです。');
         const binding = {
           ...this.newLocal(each.tagCapture.name, tagType, true),
           known: Boolean(tagValue?.known),
@@ -2383,13 +2409,6 @@ export abstract class StatementCompiler extends CallCompiler {
           frame.slots[binding.slot] = tagValue?.value;
         };
       }
-      // Zig does not analyze a prong that a known operand never reaches.
-      if (context.skipped) {
-        const never: Stmt = { exec: () => panic(PANIC.unreachable), noreturn: true };
-        return asStatement
-          ? { body: never, value: undefined, bind }
-          : { body: undefined, value: known(NORETURN, undefined, each.body), bind };
-      }
       return this.withScope({ locals, parent: this.scope }, () => {
         const slots = [...locals.values()].map((binding) => binding.slot);
         if (asStatement) {
@@ -2401,8 +2420,12 @@ export abstract class StatementCompiler extends CallCompiler {
       });
     };
     if (each.isInline) {
-      const keys = each.isElse ? this.remainingKeys(tagType, seen, each) : [...values];
-      if (!each.isElse)
+      const keys = knownOperand
+        ? [knownOperand.key]
+        : each.isElse
+          ? this.remainingKeys(tagType, seen, each)
+          : [...values];
+      if (!knownOperand && !each.isElse)
         for (const [first, last] of ranges) {
           this.compilationBudget.spend(Number(last - first + 1n));
           for (let key = first; key <= last; key++) keys.push(key);
@@ -2437,29 +2460,22 @@ export abstract class StatementCompiler extends CallCompiler {
   }
 
   /** The prong a known operand takes: the one listing its value, else the `else` or `_` prong. */
-  // code-gauge-allow functionCognitiveComplexity 19 -- Keeps the analysis and the generated code of one construct together, as Zig's Sema does.
-  private reachedCase(expression: ExpressionOf<'switch'>, key: unknown, tagType: Type): SwitchCase | undefined {
-    const valueOf = (item: Expression): Value =>
-      this.knownValue(this.coerce(this.compile(item, tagType), tagType, item), 'switch の枝の値');
-    for (const each of expression.cases) {
-      for (const item of each.items) {
-        if (item.value.kind === 'identifier' && isDiscardName(item.value)) continue;
-        const first = prongKey(valueOf(item.value));
-        if (!item.last && first === key) return each;
-        if (item.last && typeof key === 'bigint' && key >= (first as bigint) && key <= (valueOf(item.last) as bigint))
-          return each;
-      }
+  private reachedCase(
+    matches: readonly { each: SwitchCase; match: SwitchMatch }[],
+    key: unknown,
+    tagType: Type
+  ): SwitchCase | undefined {
+    for (const { each, match } of matches) {
+      this.compilationBudget.spend(1 + match.values.length + match.ranges.length);
+      if (match.values.includes(key)) return each;
+      if (typeof key === 'bigint' && match.ranges.some(([first, last]) => key >= first && key <= last)) return each;
     }
     const unnamed =
       tagType.kind === 'enum' &&
       !tagType.exhaustive &&
       !enumLookup(this.enumFields(tagType), () => this.spendCompilation()).byValue.has(key as bigint);
-    const fallback = unnamed
-      ? expression.cases.find((each) =>
-          each.items.some((item) => item.value.kind === 'identifier' && isDiscardName(item.value))
-        )
-      : undefined;
-    return fallback ?? expression.cases.find((each) => each.isElse);
+    const fallback = unnamed ? matches.find(({ match }) => match.isUnnamed)?.each : undefined;
+    return fallback ?? matches.find(({ each }) => each.isElse)?.each;
   }
 
   /** The values of an enum, union, bool, or error set that no prong lists, which `else` matches. */
@@ -2844,11 +2860,6 @@ function copyJumpValue(value: TExpr): (frame: Frame) => Value {
 
 /** Writes a value into `holder.slots[index]`. */
 type ResultStore = (frame: Frame, holder: Slots, index: number) => void;
-
-/** The key a prong's value has in a switch: an error's name, or the value itself. */
-function prongKey(value: Value): unknown {
-  return value instanceof ErrorValue ? value.name : value;
-}
 
 function clearingLocals<T>(slots: readonly number[], run: (frame: Frame) => T): (frame: Frame) => T {
   if (slots.length === 0) return run;
