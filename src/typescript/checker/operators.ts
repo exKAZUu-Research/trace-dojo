@@ -96,11 +96,7 @@ export class OperatorChecker {
    * the operator still gives its usual type.
    */
   private checkNonNullOperand(argument: TreeNode, type: Type): boolean {
-    if (isIntrinsic(type, 'null') || isIntrinsic(type, 'undefined')) {
-      this.c.error(argument, `値 '${this.c.print(type)}' はここでは使えません。`);
-      return false;
-    }
-    if (isIntrinsic(type, 'unknown')) {
+    if (isIntrinsic(type, 'null') || isIntrinsic(type, 'undefined') || isIntrinsic(type, 'unknown')) {
       this.c.members.checkNonNullable(argument, type);
       return false;
     }
@@ -227,8 +223,8 @@ export class OperatorChecker {
       case '>':
       case '<=':
       case '>=': {
-        const l = this.baseOfLiterals(this.nonNullOperand(left, leftType));
-        const r = this.baseOfLiterals(this.nonNullOperand(right, rightType));
+        const l = this.baseOfLiterals(this.c.members.checkNonNullable(left, leftType));
+        const r = this.baseOfLiterals(this.c.members.checkNonNullable(right, rightType));
         // Both operands are numbers, or neither is and they are comparable, as `string | number >= 1` is not.
         const leftNumeric = this.isNumberLike(l) || this.isBigintLike(l);
         const rightNumeric = this.isNumberLike(r) || this.isBigintLike(r);
@@ -258,8 +254,8 @@ export class OperatorChecker {
     if (this.reportsSymbolOperand(left, right, leftType, rightType)) return errorType;
     const concatenates = this.isStringLike(leftType) || this.isStringLike(rightType);
     if (!concatenates && (isAnyLike(leftType) || isAnyLike(rightType))) return anyType;
-    const l = concatenates ? leftType : this.nonNullOperand(left, leftType);
-    const r = concatenates ? rightType : this.nonNullOperand(right, rightType);
+    const l = concatenates ? leftType : this.c.members.checkNonNullable(left, leftType);
+    const r = concatenates ? rightType : this.c.members.checkNonNullable(right, rightType);
     if (this.isStringLike(l) || this.isStringLike(r)) {
       this.c.expressions.checkFunctionText(left, l);
       this.c.expressions.checkFunctionText(right, r);
@@ -288,10 +284,10 @@ export class OperatorChecker {
     leftType: Type,
     rightType: Type
   ): Type {
-    const l = this.nonNullOperand(left, leftType);
-    const r = this.nonNullOperand(right, rightType);
-    const leftOk = this.isNumberLike(l) || this.isBigintLike(l);
-    const rightOk = this.isNumberLike(r) || this.isBigintLike(r);
+    const l = this.c.members.checkNonNullable(left, leftType);
+    const r = this.c.members.checkNonNullable(right, rightType);
+    const leftOk = this.isNumericOperand(l);
+    const rightOk = this.isNumericOperand(r);
     if (!leftOk)
       this.c.error(left, '算術演算の左辺は、any 型、number 型、bigint 型、列挙型のいずれかでなければいけません。');
     if (!rightOk)
@@ -312,15 +308,21 @@ export class OperatorChecker {
   }
 
   /**
-   * An operand's type without `null` and `undefined`, reporting an operand that is or may be either, as TypeScript's
-   * `checkNonNullType` does. A `void` operand stays, so the operator's own check rejects it.
+   * Whether both operands of an arithmetic compound assignment are numeric once `null` and `undefined` are left out,
+   * as TypeScript requires before it checks the assignment of the result.
    */
-  private nonNullOperand(operand: TreeNode, type: Type): Type {
-    if (isIntrinsic(type, 'null') || isIntrinsic(type, 'undefined')) {
-      this.c.error(operand, `値 '${this.c.print(type)}' はここでは使えません。`);
-      return errorType;
-    }
-    return this.c.members.checkNonNullable(operand, type);
+  hasNumericOperands(left: TreeNode, right: TreeNode, leftType: Type, rightType: Type): boolean {
+    return this.c.silently(() =>
+      [
+        [left, leftType],
+        [right, rightType],
+      ].every(([node, type]) => this.isNumericOperand(this.c.members.checkNonNullable(node as TreeNode, type as Type)))
+    );
+  }
+
+  /** Whether an operand, without its `null` and `undefined`, may be an arithmetic operand; `void` may not. */
+  isNumericOperand(type: Type): boolean {
+    return this.isNumberLike(type) || this.isBigintLike(type);
   }
 
   private reportOperator(node: TreeNode, operator: string, leftType: Type, rightType: Type): void {

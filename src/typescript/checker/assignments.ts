@@ -13,7 +13,6 @@ import {
   errorType,
   intersectionOf,
   isAnyLike,
-  isIntrinsic,
   isPropertyKeyLiteral,
   type LiteralType,
   literalType,
@@ -254,7 +253,11 @@ export class AssignmentChecker {
       valueType
     );
     const declared = this.declaredTargetType(left);
-    if (targetType !== errorType && resultType !== errorType)
+    if (
+      targetType !== errorType &&
+      resultType !== errorType &&
+      (operator === '+=' || this.c.operators.hasNumericOperands(left, right, targetType, valueType))
+    )
       this.c.expressions.checkAssignable(skipParentheses(left), resultType, declared);
     this.assignReference(skipParentheses(left), declared, resultType);
     return resultType;
@@ -286,17 +289,14 @@ export class AssignmentChecker {
     const argument = node.childForFieldName('argument') as TreeNode;
     const type = this.targetType(argument, true);
     if (type === errorType) return numberType;
-    if (
-      !this.c.operators.isNumberLike(type) &&
-      !isIntrinsic(regularOf(type), 'bigint') &&
-      !(type.kind === 'literal' && typeof type.value === 'bigint')
-    ) {
-      const nonNull = this.c.relations.removeNullish(type);
-      if (this.c.operators.isNumberLike(nonNull) && nonNull !== type) this.c.members.checkNonNullable(argument, type);
-      else this.c.error(argument, '++ や -- を使える値は、number 型、bigint 型、any 型のものだけです。');
+    // As TypeScript's `checkNonNullType`, then its arithmetic operand check, which rejects `void`.
+    const operand = this.c.members.checkNonNullable(argument, type);
+    if (operand === errorType) return numberType;
+    if (!this.c.operators.isNumericOperand(operand)) {
+      this.c.error(argument, '++ や -- を使える値は、number 型、bigint 型、any 型のものだけです。');
       return numberType;
     }
-    const result = this.c.operators.isBigintLike(type) ? bigintType : numberType;
+    const result = this.c.operators.isBigintLike(operand) ? bigintType : numberType;
     this.assignReference(skipParentheses(argument), this.declaredTargetType(argument), result);
     return result;
   }
