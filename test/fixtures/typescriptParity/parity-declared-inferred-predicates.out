@@ -1,0 +1,17 @@
+[ 'A', 'B' ]
+A
+2.0
+B
+[ '2.0' ]
+[ 'A', 'B' ]
+[ 'A', 'B' ]
+[ 'C' ]
+[ 'A', 'B' ]
+[ 'A', 'B' ]
+OUTER
+3.00
+[ 'C' ]
+[ '1.0', '2.0' ]
+composed A
+composed B
+present

@@ -59,7 +59,7 @@ export function unwrapParentheses(node: Node): Node {
 
 /**
  * How V8's CallPrinter names a callee in an error message: names, `this`, and property accesses as written without
- * spaces or type syntax, a string key as `.key`, and anything else as `(intermediate value)`.
+ * spaces or type syntax, a string key as `.key`, and an unnamed receiver as `(intermediate value)`.
  */
 export function calleeText(node: Node): string {
   return printedCallee(node) ?? '(intermediate value)';
@@ -126,15 +126,18 @@ function printedCallee(node: Node): string | undefined {
     case 'call_expression': {
       return `${calleeText(field(node, 'function'))}(...)`;
     }
+    case 'regex': {
+      const flags = node.childForFieldName('flags')?.text ?? '';
+      return `/${field(node, 'pattern').text}/${flags.split('').toSorted().join('')}`;
+    }
     case 'member_expression': {
-      const object = printedCallee(field(node, 'object'));
+      const object = calleeText(field(node, 'object'));
       const dot = node.childForFieldName('optional_chain') ? '?.' : '.';
-      return object === undefined ? undefined : `${object}${dot}${nameOf(field(node, 'property'))}`;
+      return `${object}${dot}${nameOf(field(node, 'property'))}`;
     }
     case 'subscript_expression': {
-      const object = printedCallee(field(node, 'object'));
+      const object = calleeText(field(node, 'object'));
       const index = unwrapParentheses(field(node, 'index'));
-      if (object === undefined) return undefined;
       const dot = node.childForFieldName('optional_chain') ? '?.' : '';
       const key = stringLiteralValue(index);
       if (key !== undefined) return `${object}${dot || '.'}${key}`;

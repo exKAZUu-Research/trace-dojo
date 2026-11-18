@@ -236,8 +236,12 @@ export class BindingPatterns {
     }
   }
 
-  destructuredKey(key: TreeNode, objectType: Type): { type: Type; keyType: Type; names?: string[] } {
-    const selection = this.patternKey(key);
+  destructuredKey(
+    key: TreeNode,
+    objectType: Type,
+    computedType?: Type
+  ): { type: Type; keyType: Type; names?: string[] } {
+    const selection = this.patternKey(key, computedType);
     this.selectedKeys.set(key.id, selection.names);
     const namedTypes = selection.names?.map((name) => this.destructuredProperty(key, objectType, name));
     const type =
@@ -260,7 +264,7 @@ export class BindingPatterns {
     return names;
   }
 
-  private patternKey(key: TreeNode): { node: TreeNode; type: Type; names?: string[] } {
+  private patternKey(key: TreeNode, computedType?: Type): { node: TreeNode; type: Type; names?: string[] } {
     if (key.type !== 'computed_property_name') {
       const name = propertyNameText(key);
       return {
@@ -270,7 +274,7 @@ export class BindingPatterns {
       };
     }
     const node = named(key)[0];
-    const type = this.c.expressions.check(node);
+    const type = computedType ?? this.c.expressions.check(node);
     const constraint = this.c.baseConstraint(type);
     const members = constraint.kind === 'union' ? constraint.types : [constraint];
     const names: string[] = [];

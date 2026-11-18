@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 466 -- Resolves every kind of type syntax a program writes, each needing its own rule.
+// code-gauge-allow-file fileNcss 468 -- Resolves every kind of type syntax a program writes, each needing its own rule.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import { ExecutionLimitError, LIMITS } from '../../interpreter/limits';
@@ -20,6 +20,7 @@ import {
   anyType,
   bigintType,
   booleanType,
+  emptyObjectType,
   emptyStructure,
   errorType,
   falseType,
@@ -504,6 +505,7 @@ export class TypeNodes {
 
   private objectTypeLiteral(node: TreeNode): Type {
     const members = named(node);
+    if (members.length === 0) return emptyObjectType;
     if (members[0] && isMappedMember(members[0])) {
       if (members[1]) this.c.errorWhileResolving(members[1], mappedTypeMembersMessage);
       return this.c.typeOperators.mappedTypeFromNode(members[0]);

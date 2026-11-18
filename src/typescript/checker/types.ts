@@ -478,12 +478,22 @@ export function intersectionOf(types: Type[], budget: ExecutionBudget): Type {
   }
   const literal = units.find((type) => type.kind === 'literal');
   if (literal && units.length === members.length) return literal;
-  // TypeScript drops `void` beside its subtype `undefined`.
-  const reduced = members.filter(
-    (type) => !isIntrinsic(type, 'void') || !units.some((unit) => isIntrinsic(unit, 'undefined'))
-  );
+  const reduced = reducedIntersectionMembers(members, units);
   if (reduced.length === 1) return reduced[0];
   return { kind: 'intersection', id: newTypeId(), types: reduced };
+}
+
+function reducedIntersectionMembers(members: Type[], units: Type[]): Type[] {
+  if (
+    members.includes(emptyObjectType) &&
+    units.some((unit) => isIntrinsic(unit, 'null') || isIntrinsic(unit, 'undefined'))
+  )
+    return [neverType];
+  return members.filter(
+    (type) =>
+      (!isIntrinsic(type, 'void') || !units.some((unit) => isIntrinsic(unit, 'undefined'))) &&
+      (type !== emptyObjectType || !units.some((unit) => !isIntrinsic(unit, 'void')))
+  );
 }
 
 function flattenedMembers(
@@ -561,7 +571,7 @@ export function anonymousObject(resolve: () => Structure, extra: Partial<ObjectT
 }
 
 /** `{}`, which every value but `null` and `undefined` is assignable to. */
-export const emptyObjectType = anonymousObject(() => emptyStructure());
+export const emptyObjectType = anonymousObject(() => emptyStructure(), { nonGeneric: true });
 
 export function simpleProperty(name: string, type: Type, options: Partial<Property> = {}): Property {
   return {

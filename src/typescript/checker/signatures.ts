@@ -49,9 +49,9 @@ export class Signatures {
 
   constructor(private readonly c: Checker) {}
 
-  /** The signature a function-like node declares, from its annotations alone. */
-  signatureOf(node: TreeNode, contextual?: Signature): Signature {
-    if (!contextual) {
+  // code-gauge-allow functionCognitiveComplexity 16 -- Builds lazy annotation or body signatures and caches only context-free complete signatures.
+  signatureOf(node: TreeNode, contextual?: Signature, inferPredicate = true): Signature {
+    if (!contextual && inferPredicate) {
       const cached = this.signatureCache.get(node.id);
       if (cached) return cached;
     }
@@ -75,7 +75,9 @@ export class Signatures {
         return returnType;
       },
     };
-    if (!contextual && this.c.silent === 0) this.signatureCache.set(node.id, signature);
+    if (inferPredicate && !returnNode && node.childForFieldName('body') && !isClassConstructor(node))
+      this.c.functions.addInferredPredicate(node, signature);
+    if (!contextual && inferPredicate && this.c.silent === 0) this.signatureCache.set(node.id, signature);
     return signature;
   }
 

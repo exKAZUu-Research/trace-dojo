@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 603 -- Holds the types of classes with `this`, `super`, and accessibility, which all read the class information.
+// code-gauge-allow-file fileNcss 607 -- Holds the types of classes with `this`, `super`, and accessibility, which all read the class information.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import { typesAtConstructorExit } from './assignmentFlow';
@@ -426,7 +426,7 @@ export class ClassChecker {
     }
     const entry = members.methods.get(name) ?? { signatures: [], abstract: false, first: member };
     if (member.type === 'method_definition' && member.childForFieldName('body')) entry.implementation = member;
-    else entry.signatures.push({ ...this.c.signatures.signatureOf(member), isMethod: true });
+    else entry.signatures.push(this.methodSignature(member));
     if (member.type === 'abstract_method_signature' || hasToken(member, 'abstract')) entry.abstract = true;
     members.methods.set(name, entry);
   }
@@ -436,7 +436,7 @@ export class ClassChecker {
       entry.signatures.length > 0 && entry.implementation
         ? entry.signatures
         : entry.implementation
-          ? [{ ...this.c.signatures.signatureOf(entry.implementation), isMethod: true }]
+          ? [this.methodSignature(entry.implementation)]
           : entry.signatures;
     const declaration = entry.first;
     return {
@@ -451,6 +451,12 @@ export class ClassChecker {
       declaration,
       isAbstract: entry.abstract,
     };
+  }
+
+  private methodSignature(node: TreeNode): Signature {
+    const signature = this.c.signatures.signatureOf(node);
+    signature.isMethod = true;
+    return signature;
   }
 
   private accessorProperty(name: string, { getter, setter }: AccessorEntry, info: ClassInfo): Property {
@@ -558,19 +564,27 @@ export class ClassChecker {
     // Names compare as property keys, as `["x"]` and `x`, or `1` and `this[1]`, name the same field.
     const name = propertyNameText(nameNode);
     return body && name !== undefined
-      ? typesAtConstructorExit(
-          body,
-          name,
-          (right) => this.c.widen(this.c.silently(() => this.c.expressions.check(right))),
-          (index) => {
+      ? typesAtConstructorExit(body, name, {
+          assignedType: (right) => this.c.widen(this.c.silently(() => this.c.assignments.assignmentValueType(right))),
+          keyName: (index) => {
             const key = this.c.silently(() => this.c.expressions.check(index));
             return key.kind === 'literal' && (typeof key.value === 'string' || typeof key.value === 'number')
               ? String(key.value)
               : undefined;
           },
-          (operator, type) => skippedType(this.c, operator, type),
-          () => this.c.budget.spend()
-        )
+          skippedBy: (operator, type) => skippedType(this.c, operator, type),
+          spend: () => this.c.budget.spend(),
+          destructure: (pattern, right, assign, evaluate) =>
+            this.c.silently(() =>
+              this.c.assignments.assignmentTargets(
+                pattern,
+                this.c.assignments.assignmentValueType(right),
+                (target, type) => assign(target, this.c.widen(type)),
+                evaluate,
+                true
+              )
+            ),
+        })
       : [];
   }
 

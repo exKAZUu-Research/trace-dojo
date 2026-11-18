@@ -1572,6 +1572,35 @@ function main() {
 main();`,
   ],
   [
+    'callee member errors preserve temporary receivers and canonical regular expression flags',
+    `class Point {}
+const key = 'missing';
+const cases = [
+  () => new Point().missing(),
+  () => ((x) => x).missing(),
+  () => (function () {}).missing(),
+  () => (class {}).missing(),
+  () => (/a/gi).missing(),
+  () => (/a/ig).missing(),
+  () => (/a\\/b/gi).missing(),
+  () => (123n).missing(),
+  () => new Point()['missing'](),
+  () => ((x) => x)[key](),
+  () => (function () {})[0](),
+  () => (class {})[123n](),
+  () => (/a/gi)[key](),
+  () => (123n)[key](),
+  () => new Point()?.missing(),
+  () => ((x) => x)?.missing(),
+  () => (class {})?.['missing'](),
+  () => (/a/ig)?.[key](),
+  () => (123n)?.missing(),
+  () => new Point().missing?.(),
+];
+for (const run of cases) { try { run(); } catch (e) { console.log(e.message); } }
+`,
+  ],
+  [
     'callees with escaped names in errors',
     `const o = {};
 for (const f of [() => o.a(), () => o.b(), () => o.\\u{63}(), () => o?.d(), () => o.e.f()]) {

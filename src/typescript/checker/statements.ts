@@ -1,4 +1,6 @@
-// code-gauge-allow-file fileNcss 599 -- Follows the flow of control through each kind of statement.
+// code-gauge-allow-file fileNcss 615 -- Follows the flow of control through each kind of statement.
+import assert from 'node:assert/strict';
+
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import type { Checker } from './checker';
@@ -9,6 +11,7 @@ import {
   checkTypeMemberDuplicates,
 } from './declarations';
 import { FlowState, type State } from './flow';
+import type { FunctionContext } from './functions';
 import { baseIndexMismatch, checkDuplicateIndexSignatures, checkIndexConformance } from './indexConformance';
 import type { Scope, Sym } from './scopes';
 import { arrayLiteralLength, hasToken, named, skipParentheses } from './syntax';
@@ -867,28 +870,44 @@ export class StatementChecker {
       return;
     }
     if (expression) {
-      const declared = context.declaredReturn;
+      const declared = context.isConstructor ? this.constructorInstanceType(context.node) : context.declaredReturn;
       context.inReturn = true;
       const type = this.c.expressions.check(expression, declared ?? context.contextualReturn);
       context.inReturn = false;
-      if (declared && !context.isConstructor) this.c.expressions.checkReturnValue(expression, type, declared);
+      if (declared) {
+        if (context.isConstructor) this.checkConstructorReturn(expression, type, declared);
+        else this.c.expressions.checkReturnValue(expression, type, declared);
+      }
       context.returnTypes.push(type);
       context.hasReturnWithValue = true;
-    } else {
-      context.hasReturnWithoutValue = true;
-      const declared = context.declaredReturn;
-      if (
-        declared &&
-        !context.isConstructor &&
-        !isAnyLike(declared) &&
-        !isIntrinsic(declared, 'void') &&
-        !this.c.relations.isAssignable(undefinedType, declared)
-      ) {
-        this.c.expressions.reportNotAssignable(node, undefinedType, declared);
-      }
-    }
+    } else this.returnWithoutValue(node, context);
     context.returnStates.push(this.c.flow.current?.clone());
     this.c.flow.current = undefined;
+  }
+
+  private returnWithoutValue(node: TreeNode, context: FunctionContext): void {
+    context.hasReturnWithoutValue = true;
+    const declared = context.declaredReturn;
+    if (
+      declared &&
+      !context.isConstructor &&
+      !isAnyLike(declared) &&
+      !isIntrinsic(declared, 'void') &&
+      !this.c.relations.isAssignable(undefinedType, declared)
+    )
+      this.c.expressions.reportNotAssignable(node, undefinedType, declared);
+  }
+
+  private constructorInstanceType(node: TreeNode): Type {
+    const classNode = node.parent?.parent;
+    assert.ok(classNode);
+    return this.c.classes.classInfoOfNode(classNode).instanceType;
+  }
+
+  private checkConstructorReturn(node: TreeNode, type: Type, expected: Type): void {
+    if (this.c.relations.isAssignable(type, expected)) return;
+    this.c.expressions.reportNotAssignable(node, type, expected);
+    this.c.error(node, 'コンストラクタの戻り値の型は、このクラスのインスタンス型に代入できる必要があります。');
   }
 }
 

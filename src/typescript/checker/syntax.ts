@@ -195,8 +195,17 @@ export function stringValue(node: TreeNode): string {
 
 /** The text a part of a template spells: an escape sequence decoded, and a line break as `\n`. */
 export function templateFragmentText(node: TreeNode): string {
-  if (node.type === 'escape_sequence') return decodeEscape(node.text);
+  if (node.type === 'escape_sequence') {
+    if (node.parent?.type === 'template_literal_type' && hasInvalidUnicodeEscape(node)) return node.text;
+    return decodeEscape(node.text);
+  }
   return node.text.replaceAll(/\r\n?/g, '\n');
+}
+
+export function hasInvalidUnicodeEscape(node: TreeNode): boolean {
+  if (node.type !== 'escape_sequence' || !node.text.startsWith(String.raw`\u{`)) return false;
+  const digits = node.text.slice(3, -1);
+  return !/^[\da-f]+$/i.test(digits) || Number.parseInt(digits, 16) > 0x10_ff_ff;
 }
 
 const simpleEscapes: Record<string, string> = { n: '\n', t: '\t', r: '\r', b: '\b', f: '\f', v: '\v', '0': '\0' };

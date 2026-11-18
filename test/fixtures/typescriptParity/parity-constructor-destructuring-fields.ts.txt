@@ -1,0 +1,53 @@
+class Point {
+  x;
+  y;
+  constructor(input: {x: number; y: number}) {
+    ({x: this.x, y: this.y} = input);
+  }
+}
+class Nested {
+  value;
+  tail;
+  rest;
+  constructor(input: {nested: {value?: number}; extra: string}, values: [number, ...string[]]) {
+    ({nested: {value: this.value = 9}, ...this.rest} = input);
+    [, ...this.tail] = values;
+  }
+}
+class Ordered {
+  value;
+  constructor(values: [string, string]) {
+    [this.value, this.value] = values;
+  }
+}
+class Branch {
+  value;
+  constructor(flag: boolean, input: {x: number}, values: [number]) {
+    if (flag) ({x: this.value} = input);
+    else [this.value] = values;
+  }
+}
+const point = new Point({x: 3, y: 4});
+const nested = new Nested({nested: {}, extra: 'kept'}, [1, 'a', 'b']);
+const numberValue: number = point.x;
+const defaultValue: number = nested.value;
+const tailValue: (string | number)[] = nested.tail;
+const restValue: {extra: string} = nested.rest;
+const ordered: number | string = new Ordered(['first', 'last']).value;
+console.log(numberValue, point.y, defaultValue, tailValue, restValue, ordered, new Branch(false, {x: 2}, [3]).value);
+nested.rest = true;
+console.log(nested.rest);
+class Computed {
+  key;
+  value;
+  constructor(input: {x: number}) { ({[(this.key = 'x')]: this.value} = input); }
+}
+class Defaults {
+  other;
+  value;
+  constructor(input: {value?: number}) { ({value: this.value = (this.other = 9)} = input); }
+}
+const key: string = new Computed({x: 2}).key;
+const value: number = new Computed({x: 2}).value;
+const other: number | undefined = new Defaults({value: 2}).other;
+console.log(key, value, new Defaults({}).other, other);

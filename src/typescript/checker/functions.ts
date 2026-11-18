@@ -75,7 +75,7 @@ export class FunctionChecker {
     const contextualSignature = isAnyLike(contextual ?? unknownType)
       ? this.anySignature()
       : contextualSignatureOf(this.c, contextual, node);
-    const signature = this.c.signatures.signatureOf(node, contextualSignature);
+    const signature = this.c.signatures.signatureOf(node, contextualSignature, false);
     if (node.type !== 'arrow_function' && isContextSensitiveFunction(node))
       this.c.classes.registerContextualThis(node, contextualSignature?.thisType);
     // Parameters take their types from the signature, which the body sees.
@@ -83,7 +83,6 @@ export class FunctionChecker {
     const contextualReturn = contextualSignature ? contextualSignature.returnType() : undefined;
     const declaredReturn = this.declaredReturnType(node);
     let returnType: Type | undefined;
-    let predicate: { inferred: Signature['predicate'] } | undefined;
     const typed: Signature = {
       ...signature,
       returnType: () => {
@@ -91,21 +90,31 @@ export class FunctionChecker {
         return returnType;
       },
     };
-    if (!declaredReturn && !signature.predicate) {
-      Object.defineProperty(typed, 'predicate', {
-        get: (): Signature['predicate'] => {
-          predicate ??= { inferred: this.inferredPredicate(node, typed) };
-          return predicate.inferred;
-        },
-        enumerable: true,
-      });
-    }
+    if (!declaredReturn && !signature.predicate) this.addInferredPredicate(node, typed);
     const type = functionType(typed);
     const ownName = node.childForFieldName('name');
     const self = ownName ? this.c.ownScope(node)?.lookupValue(ownName.text) : undefined;
     if (self?.valueDeclaration?.id === node.id) self.valueType = type;
     if (!this.c.silent) this.c.functions.deferFunctionBody(node, signature, contextualReturn);
     return type;
+  }
+
+  addInferredPredicate(node: TreeNode, signature: Signature): void {
+    let predicate: { inferred: Signature['predicate'] } | undefined;
+    let resolving = false;
+    Object.defineProperty(signature, 'predicate', {
+      get: (): Signature['predicate'] => {
+        if (resolving) return undefined;
+        resolving = true;
+        try {
+          predicate ??= { inferred: this.inferredPredicate(node, signature) };
+          return predicate.inferred;
+        } finally {
+          resolving = false;
+        }
+      },
+      enumerable: true,
+    });
   }
 
   /**

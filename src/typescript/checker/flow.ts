@@ -4,7 +4,7 @@ import type { Checker } from './checker';
 import { isUnchangedVariable } from './constantReferences';
 import { isGenericObjectOrIndexType } from './genericTypes';
 import { applicableIndex } from './indexInfos';
-import { nonNullableType, withoutNullishUnit } from './nullishConstraints';
+import { nonNullableType, nullishConstraint, withoutNullishUnit } from './nullishConstraints';
 import { named, propertyNameText, skipParentheses } from './syntax';
 import {
   anonymousObject,
@@ -464,7 +464,7 @@ export class Flow {
       if (!this.c.relations.isGeneric(member)) return neverType;
       // An unconstrained one stays whole, and a constrained one keeps its identity with the nullish part of its
       // constraint, so it still fits where the type parameter does.
-      const constraint = this.c.baseConstraint(member);
+      const constraint = nullishConstraint(this.c, member);
       if (constraint === member || isIntrinsic(constraint, 'unknown')) return member;
       const nullish = this.nullishPart(constraint);
       return isIntrinsic(nullish, 'never') ? neverType : intersectionOf([member, nullish], this.c.budget);
@@ -476,13 +476,15 @@ export class Flow {
     return assumeTrue ? this.narrowToEqual(type, other, loose) : this.narrowToUnequal(type, other, loose);
   }
 
-  // code-gauge-allow functionCognitiveComplexity 17 -- Follows TypeScript's narrowing of each kind of type by equality.
+  // code-gauge-allow functionCognitiveComplexity 18 -- Preserves generic identity while comparing unit types and resolving nullish bounds during equality narrowing.
   private narrowToEqual(type: Type, other: Type, loose: boolean): Type {
     const nullish = isIntrinsic(other, 'null') || isIntrinsic(other, 'undefined');
     if (loose && nullish) return this.nullishPart(type);
     if (isAnyLike(type)) return type;
     if (isIntrinsic(type, 'unknown')) return isUnit(other) ? other : type;
-    const filtered = filterType(type, (member) => this.c.relations.isComparable(member, other));
+    const filtered = filterType(type, (member) =>
+      this.c.relations.isComparable(nullish ? nullishConstraint(this.c, member) : member, other)
+    );
     if (isUnit(other)) {
       // A union's members that equal the unit become it, as `string` does for `"a"`.
       return mapType(filtered, (member) =>

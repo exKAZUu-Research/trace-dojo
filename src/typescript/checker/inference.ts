@@ -430,15 +430,19 @@ export class TypeInference {
     ];
   }
 
+  // code-gauge-allow functionCognitiveComplexity 17 -- Infers callback this, parameters, rests, returns, and predicates, fitting generic guards to their target.
   private inferFromSignatures(generic: Signature, target: Signature, recurse: Recurse): void {
-    // A generic source infers with its own type parameters as their constraints, or `unknown`.
     const source =
-      generic.typeParameters.length > 0
-        ? this.c.instantiateSignature(
-            { ...generic, typeParameters: [] },
-            new Map(generic.typeParameters.map((parameter) => [parameter.id, parameter.constraint?.() ?? unknownType]))
-          )
-        : generic;
+      generic.typeParameters.length === 0
+        ? generic
+        : generic.predicate
+          ? this.instantiateToFit(generic, target)
+          : this.c.instantiateSignature(
+              { ...generic, typeParameters: [] },
+              new Map(
+                generic.typeParameters.map((parameter) => [parameter.id, parameter.constraint?.() ?? unknownType])
+              )
+            );
     if (source.thisType && target.thisType) recurse(source.thisType, target.thisType, false);
     const restIndex = target.parameters.findIndex((parameter) => parameter.rest);
     const count = Math.min(source.parameters.length, restIndex === -1 ? target.parameters.length : restIndex);

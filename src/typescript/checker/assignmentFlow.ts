@@ -8,6 +8,21 @@ type Value = object;
 /** The values at a point, or undefined where no path reaches it. */
 type Values = Value[] | undefined;
 
+type Destructure = (
+  pattern: TreeNode,
+  right: TreeNode,
+  assign: (target: TreeNode, value: Type) => void,
+  evaluate: (expression: TreeNode, conditional: boolean) => void
+) => void;
+
+interface ConstructorAssignments {
+  assignedType: (value: TreeNode) => Type;
+  keyName: (index: TreeNode) => string | undefined;
+  skippedBy: (operator: string, type: Type) => Type | undefined;
+  spend: () => void;
+  destructure: Destructure;
+}
+
 interface LoopEntry {
   kind: 'loopEntry';
 }
@@ -33,19 +48,14 @@ const nestedFunctionTypes = new Set([
  * The types `this.<name>` may hold when a constructor finishes, from which a field without a type annotation or an
  * initializer takes its type: TypeScript follows the constructor's control flow from `undefined` to each of its exits.
  */
-export function typesAtConstructorExit(
-  body: TreeNode,
-  name: string,
-  assignedType: (value: TreeNode) => Type,
-  keyName: (index: TreeNode) => string | undefined,
-  skippedBy: (operator: string, type: Type) => Type | undefined,
-  spend: () => void
-): Type[] {
+export function typesAtConstructorExit(body: TreeNode, name: string, assignments: ConstructorAssignments): Type[] {
   const flow = new AssignmentFlow(
-    (left) => isThisField(left, name, keyName),
-    assignedType,
-    (operator, value) => skippedBy(operator, value as Type),
-    spend
+    (left) => isThisField(left, name, assignments.keyName),
+    assignments.assignedType,
+    (operator, value) => assignments.skippedBy(operator, value as Type),
+    assignments.spend,
+    undefined,
+    assignments.destructure
   );
   const end = flow.statement(body, [undefinedType]);
   return (merge([end, ...flow.returns]) ?? []).filter((value) => !isLoopEntry(value)) as Type[];
@@ -89,7 +99,8 @@ class AssignmentFlow {
     private readonly skippedBy: (operator: string, value: Value) => Value | undefined,
     /** Charges the checker's budget for each statement followed, which bounds the paths through nested blocks. */
     private readonly spend: () => void,
-    private readonly read?: TreeNode
+    private readonly read?: TreeNode,
+    private readonly destructure?: Destructure
   ) {}
 
   statement(node: TreeNode, values: Values): Values {
@@ -311,10 +322,34 @@ class AssignmentFlow {
 
   private assignment(node: TreeNode, values: Value[]): Values {
     const right = node.childForFieldName('right');
-    const after = right ? this.expression(right, values) : values;
     const left = node.childForFieldName('left');
-    if (!right || !after || !left || !this.isTarget(left)) return after;
-    const value = this.assignedValue(right);
+    if (!right || !left) return values;
+    const pattern = skipParentheses(left);
+    const destructuring = ['object_pattern', 'array_pattern', 'object', 'array'].includes(pattern.type);
+    const before = destructuring ? values : this.expression(left, values);
+    const after = this.expression(right, before);
+    if (!after) return after;
+    if (this.destructure && destructuring) return this.assignPattern(pattern, right, after, this.destructure);
+    return this.isTarget(left) ? this.trackValue(this.assignedValue(right)) : after;
+  }
+
+  private assignPattern(pattern: TreeNode, right: TreeNode, values: Value[], destructure: Destructure): Values {
+    let current: Values = values;
+    destructure(
+      pattern,
+      right,
+      (target, value) => {
+        if (current && this.isTarget(target)) current = this.trackValue(value);
+      },
+      (expression, conditional) => {
+        const evaluated = this.expression(expression, current);
+        current = conditional ? merge([current, evaluated]) : evaluated;
+      }
+    );
+    return current;
+  }
+
+  private trackValue(value: Value): Values {
     for (const assigned of this.tryAssignments) assigned.push(value);
     return [value];
   }

@@ -1,0 +1,8 @@
+console.log("\u{0}".length,"\u{10FFFF}".length,"\uD800".length,`\u{1F600}`.length);
+type Maximum="\u{10FFFF}";
+const maximum:Maximum="\u{10FFFF}";
+console.log(maximum.length,maximum.charCodeAt(0),maximum.charCodeAt(1));
+console.log(String.raw`\u{110000}`);
+console.log(String.raw`\u{FFFFFFFFFFFFFFFFFFFFFFFF}`);
+const sub=2;console.log(String.raw`x\u{110000}${sub}y`);
+console.log("\\u{110000}");

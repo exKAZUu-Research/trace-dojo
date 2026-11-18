@@ -143,26 +143,47 @@ export class AssignmentChecker {
   }
 
   destructuringAssignment(pattern: TreeNode, type: Type): void {
-    const assign = (target: TreeNode, valueType: Type): void => {
-      const left = defaultedTarget(target);
-      if (left) {
-        const right = target.childForFieldName('right') as TreeNode;
-        const defaultType = this.c.expressions.check(right);
-        assign(left, unionOf([this.c.relations.removeUndefined(valueType), regularOf(defaultType)]));
-        return;
-      }
-      if (['array', 'object', 'array_pattern', 'object_pattern'].includes(target.type)) {
-        this.destructuringAssignment(target, valueType);
-        return;
-      }
+    this.assignmentTargets(pattern, type, (target, valueType) => {
       const declared = this.targetType(target, false);
       if (declared !== errorType && !this.c.relations.isAssignable(valueType, declared))
         this.c.expressions.reportNotAssignable(target, valueType, declared);
       this.assignReference(skipParentheses(target), declared, valueType);
+    });
+  }
+
+  assignmentTargets(
+    pattern: TreeNode,
+    type: Type,
+    assignLeaf: (target: TreeNode, type: Type) => void,
+    evaluate?: (expression: TreeNode, conditional: boolean) => void,
+    inferField = false
+  ): void {
+    const assign = (target: TreeNode, valueType: Type): void => {
+      const left = defaultedTarget(target);
+      if (left) {
+        const right = target.childForFieldName('right') as TreeNode;
+        evaluate?.(right, true);
+        const defaultType = inferField ? this.assignmentValueType(right) : this.c.expressions.check(right);
+        assign(left, unionOf([this.c.relations.removeUndefined(valueType), regularOf(defaultType)]));
+        return;
+      }
+      const unwrapped = skipParentheses(target);
+      if (['array', 'object', 'array_pattern', 'object_pattern'].includes(unwrapped.type)) {
+        if (unwrapped.type === 'array' || unwrapped.type === 'array_pattern')
+          this.destructuringArrayAssignment(unwrapped, valueType, assign);
+        else this.destructuringObjectAssignment(unwrapped, valueType, assign, evaluate, inferField);
+        return;
+      }
+      evaluate?.(target, false);
+      assignLeaf(target, valueType);
     };
-    if (pattern.type === 'array' || pattern.type === 'array_pattern')
-      this.destructuringArrayAssignment(pattern, type, assign);
-    else this.destructuringObjectAssignment(pattern, type, assign);
+    assign(pattern, type);
+  }
+
+  assignmentValueType(expression: TreeNode): Type {
+    const value = skipParentheses(expression);
+    const right = value.type === 'assignment_expression' ? value.childForFieldName('right') : undefined;
+    return right ? this.assignmentValueType(right) : this.c.expressions.check(expression);
   }
 
   private destructuringArrayAssignment(
@@ -180,11 +201,13 @@ export class AssignmentChecker {
     }
   }
 
-  // code-gauge-allow functionNcss 31 -- Keeps object assignment targets with key transport and rest flow typing.
+  // code-gauge-allow functionNcss 34 -- Keeps object assignment targets with computed key evaluation, key transport, and rest flow typing.
   private destructuringObjectAssignment(
     pattern: TreeNode,
     type: Type,
-    assign: (target: TreeNode, type: Type) => void
+    assign: (target: TreeNode, type: Type) => void,
+    evaluate?: (expression: TreeNode, conditional: boolean) => void,
+    inferField = false
   ): void {
     // Unlike a declaration's pattern, an assignment's empty object pattern accepts `void`, as TypeScript does.
     if (isEmptyPattern(pattern)) this.c.members.checkNonNullable(pattern, type);
@@ -207,7 +230,10 @@ export class AssignmentChecker {
         case 'pair_pattern': {
           const key = element.childForFieldName('key') as TreeNode;
           const value = element.childForFieldName('value') as TreeNode;
-          const selected = this.c.patterns.destructuredKey(key, type);
+          if (key.type === 'computed_property_name') evaluate?.(key, false);
+          const computedType =
+            inferField && key.type === 'computed_property_name' ? this.assignmentValueType(named(key)[0]) : undefined;
+          const selected = this.c.patterns.destructuredKey(key, type, computedType);
           used.push(selected.keyType);
           assign(value, selected.type);
           break;
@@ -215,7 +241,7 @@ export class AssignmentChecker {
         case 'spread_element':
         case 'rest_pattern': {
           const target = named(element)[0];
-          assign(target, this.objectRestAssignmentType(target, type, used));
+          assign(target, inferField ? anyType : this.objectRestAssignmentType(target, type, used));
           break;
         }
         default: {

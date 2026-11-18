@@ -401,3 +401,59 @@ test.each([
     uncaughtException: undefined,
   });
 });
+
+test('apply budgets an oversized array-like list before reading its indices or calling its target', () => {
+  for (const length of ['1000001', 'Number.MAX_SAFE_INTEGER', 'Infinity']) {
+    const source = `function target() { console.log('called'); return 7; }
+const list: any = {
+  get length() { console.log('length'); return ${length}; },
+  get 0() { console.log('index'); throw new Error('index read'); },
+};
+target.apply(undefined, list);`;
+    expect(executeProgram('typescript', source)).toMatchObject({
+      kind: 'executed',
+      stdout: 'length\n',
+      uncaughtException: 'RangeError: Out of memory',
+    });
+  }
+});
+
+test('apply argument lists share the allocation budget and a later program starts with a fresh budget', () => {
+  const source = `const reserved = new Array(800000);
+console.log(reserved.length);
+function target() { console.log('called'); return 7; }
+const list: any = {
+  get length() { console.log('length'); return 300000; },
+  get 0() { console.log('index'); throw new Error('index read'); },
+};
+Function.prototype.apply.call(target, undefined, list);`;
+  expect(executeProgram('typescript', source)).toMatchObject({
+    kind: 'executed',
+    stdout: '800000\nlength\n',
+    uncaughtException: 'RangeError: Out of memory',
+  });
+  expect(
+    executeProgram('typescript', 'function target() { return 7; } console.log(target.apply(undefined, []));')
+  ).toMatchObject({ kind: 'executed', stdout: '7\n', uncaughtException: undefined });
+});
+
+test('apply reads length once before ordered own and inherited indices and keeps empty lists empty', () => {
+  const source = `function target() { console.log('call', arguments.length, arguments[0], arguments[1]); }
+const list: any = {
+  get length() { console.log('length'); return { valueOf() { console.log('valueOf'); return 2.9; } }; },
+  get 0() { console.log('own'); return 'first'; },
+};
+Object.setPrototypeOf(list, { get 1() { console.log('inherited'); return 'second'; } });
+target.apply(undefined, list);
+const empty: any = { get length() { console.log('empty length'); return 0; }, get 0() { throw new Error('index read'); } };
+target.apply(undefined, empty);
+target.apply(undefined, null as any);
+target.apply(undefined, undefined as any);
+target.apply(undefined, Object('ab') as any);`;
+  expect(executeProgram('typescript', source)).toMatchObject({
+    kind: 'executed',
+    stdout:
+      'length\nvalueOf\nown\ninherited\ncall 2 first second\nempty length\ncall 0 undefined undefined\ncall 0 undefined undefined\ncall 0 undefined undefined\ncall 2 a b\n',
+    uncaughtException: undefined,
+  });
+});

@@ -6,6 +6,7 @@ import { commentTokens, loadParser, parseSource } from '../interpreter/treeSitte
 import type { Program } from '../javascript/ast';
 import { nameOf } from '../javascript/convertNodes';
 import { checkTypeScript } from './checker/checker';
+import { hasInvalidUnicodeEscape } from './checker/syntax';
 import { javaScriptViewOf } from './jsView';
 import { TypeScriptProgramConverter } from './programConverter';
 import { rejectUnsupportedSyntax } from './unsupported';
@@ -103,7 +104,7 @@ function decodedName(node: Node): string {
 /** The syntax errors tsc's parser reports where the tree-sitter grammar accepts the program. */
 function typeScriptSyntaxErrors(root: Node, source: string, errors: SourceDiagnostic[]): SourceDiagnostic[] {
   const visit = (node: Node): void => {
-    const message = numericEscapeError(node, source) ?? optionalAccessorError(node);
+    const message = numericEscapeError(node, source) ?? unicodeEscapeError(node) ?? optionalAccessorError(node);
     if (message) errors.push({ row: node.startPosition.row, message });
     const located = exponentiationBaseError(node) ?? operandAssignmentError(node) ?? optionalIndexSignatureError(node);
     if (located) errors.push(located);
@@ -115,10 +116,18 @@ function typeScriptSyntaxErrors(root: Node, source: string, errors: SourceDiagno
 
 function numericEscapeError(node: Node, source: string): string | undefined {
   if (node.type !== 'escape_sequence' || !/^\\[0-9]/.test(node.text)) return undefined;
-  const template = node.parent;
-  const tagged = template?.type === 'template_string' && template.parent?.type === 'call_expression';
   const nullEscape = node.text === String.raw`\0` && !/[0-9]/.test(source[node.endIndex] ?? '');
-  return tagged || nullEscape ? undefined : '8進数や10進数のエスケープシーケンスは使えません。';
+  return isTaggedTemplateEscape(node) || nullEscape ? undefined : '8進数や10進数のエスケープシーケンスは使えません。';
+}
+
+function unicodeEscapeError(node: Node): string | undefined {
+  if (node.parent?.type === 'template_literal_type' || isTaggedTemplateEscape(node)) return undefined;
+  return hasInvalidUnicodeEscape(node) ? 'Unicode エスケープの値は 0x10FFFF 以下にしてください。' : undefined;
+}
+
+function isTaggedTemplateEscape(node: Node): boolean {
+  const template = node.parent;
+  return template?.type === 'template_string' && template.parent?.type === 'call_expression';
 }
 
 /** An unparenthesized unary, `await`, or type assertion expression as the base of `**`, which tsc's parser rejects. */

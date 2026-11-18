@@ -84,6 +84,6 @@ export function listFromArrayLike(runtime: Runtime, value: Value): Value[] {
   if (!isObject(value)) return runtime.throwError('TypeError', 'CreateListFromArrayLike called on non-object');
   const ops = new ArrayOps(runtime, value);
   const { length } = ops;
-  runtime.scan(length);
+  runtime.allocate(length);
   return Array.from({ length }, (_, index) => ops.get(index));
 }
