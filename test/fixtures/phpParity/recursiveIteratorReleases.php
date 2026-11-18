@@ -36,7 +36,9 @@ class ReportsDepth extends RecursiveArrayIterator {
     function getChildren(): ?RecursiveArrayIterator { return new self($this->current()); }
     function __destruct() {
         global $observed;
-        if (!$this->root) echo 'depth:', $observed->getDepth(), ';';
+        if ($this->root) return;
+        echo 'depth:', $observed->getDepth(), ';';
+        var_dump($observed->getSubIterator() === $this, $observed->getInnerIterator() === $this);
     }
 }
 $observed = new RecursiveIteratorIterator(new ReportsDepth([[[1]]], true));

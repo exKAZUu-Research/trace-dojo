@@ -21,11 +21,13 @@ const enum Step {
   Start,
 }
 
+type RetirementMode = 'advance' | 'rewind' | 'teardown';
+
 interface Level {
   object: PhpObject;
   iterator: InnerIterator;
   step: Step;
-  retiring?: boolean;
+  retiring?: RetirementMode;
 }
 
 /** The state of a RecursiveIteratorIterator (spl_recursive_it_object). */
@@ -145,11 +147,11 @@ function moveForward(object: PhpObject, state: RecursiveState): void {
   }
 }
 
-function releaseLevel(object: PhpObject, state: RecursiveState, mode: 'advance' | 'rewind' | 'teardown'): void {
+function releaseLevel(object: PhpObject, state: RecursiveState, mode: RetirementMode): void {
   const level = state.top;
   if (level.retiring || mode === 'rewind') state.levels.pop();
   if (level.retiring) return;
-  level.retiring = true;
+  level.retiring = mode;
   nativeOwnershipChanged(object);
   const runtime = rt();
   const values = [level.iterator.handle, level.object];
@@ -258,6 +260,10 @@ function appendChild(object: PhpObject, state: RecursiveState, child: Value): Le
   return level;
 }
 
+function visibleIterator(level: Level): PhpObject | null {
+  return level.retiring === 'advance' ? null : level.object;
+}
+
 const recursiveMethods: NativeMethod[] = [
   {
     signature: '__construct(Traversable $iterator, int $mode = RecursiveIteratorIterator::LEAVES_ONLY, int $flags = 0)',
@@ -300,10 +306,10 @@ const recursiveMethods: NativeMethod[] = [
       const level = args[0] === undefined || args[0] === null ? state.depth : Number(args[0]);
       if (level < 0 || level > state.depth) return null;
       state.checkConstructed();
-      return state.levels[level].object;
+      return visibleIterator(state.levels[level]);
     },
   },
-  { signature: 'getInnerIterator(): RecursiveIterator', impl: ({ thisObj }) => stateOf(thisObj).top.object },
+  { signature: 'getInnerIterator(): RecursiveIterator', impl: ({ thisObj }) => visibleIterator(stateOf(thisObj).top) },
   { signature: 'beginIteration(): void', impl: () => null },
   { signature: 'endIteration(): void', impl: () => null },
   {
