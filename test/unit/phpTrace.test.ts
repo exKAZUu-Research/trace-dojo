@@ -232,3 +232,20 @@ $walk = new WalkOnQuit();`;
   const releasing = moving.replace('$t->forward(); $t->turnRight();', '$t = null;');
   expect(executeProgram('php', releasing)).toMatchObject({ kind: 'executed', finalTurtles: [] });
 });
+
+test('clones a turtle before running the subclass hook and tracks the copy independently', () => {
+  const program = `<?php
+class WalkingTurtle extends Turtle { function __clone() { $this->forward(); } }
+$source = new WalkingTurtle(1, 1);
+$source->turnRight();
+$copy = clone $source;
+echo "cloned";
+unset($source);
+$copy->forward();`;
+  const source = { x: 1, y: 1, color: '#', dir: 'E' };
+  const copy = { ...source, x: 2 };
+  const moved = { ...copy, x: 3 };
+  expect(phpTrace(program).find(({ line }) => line === 6)?.turtles).toEqual([source, copy]);
+  expect(phpTrace(program).at(-1)?.turtles).toEqual([moved]);
+  expect(executeProgram('php', program)).toMatchObject({ kind: 'executed', stdout: 'cloned', finalTurtles: [moved] });
+});

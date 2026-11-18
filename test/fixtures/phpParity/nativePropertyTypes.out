@@ -8,3 +8,7 @@ Cannot assign string to property LevelException::$severity of type int
 int(1)
 string(3) "123"
 Cannot assign array to property RegexIterator::$replacement of type ?string
+Cannot assign array to property Exception::$line of type int
+Cannot assign array to reference held by property Exception::$file of type string
+Cannot assign array to reference held by property Error::$line of type int
+Cannot assign array to property ErrorException::$severity of type int

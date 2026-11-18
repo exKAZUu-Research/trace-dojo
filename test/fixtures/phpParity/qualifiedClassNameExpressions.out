@@ -22,3 +22,18 @@ bool(true)
 bool(true)
 int(9)
 Cannot use "parent" when current class scope has no parent
+array(6) {
+  [0]=>
+  string(5) "child"
+  [1]=>
+  string(4) "base"
+  [2]=>
+  string(5) "child"
+  [3]=>
+  string(5) "child"
+  [4]=>
+  string(5) "child"
+  [5]=>
+  string(5) "child"
+}
+Cannot access "self" when no class scope is active

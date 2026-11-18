@@ -218,8 +218,7 @@ function defineTurtleMethods(): NativeMethod[] {
         if (color === null && args.length >= 3) throwError('RuntimeException', 'Invalid color: null');
         const created = rt().world.create(Number(x), Number(y), color ?? undefined);
         if ('error' in created) throwError('RuntimeException', created.error);
-        thisObj.turtle = created;
-        rt().turtleObjects.add(thisObj);
+        rt().attachTurtle(thisObj, created);
         return null;
       },
     },

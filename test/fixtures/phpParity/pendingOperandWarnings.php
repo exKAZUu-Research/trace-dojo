@@ -148,3 +148,65 @@ $x=42;
 echo ${"GLOBALS"}["x"],"\n";
 ${"GLOBALS"}["globalAdded"]=8;
 echo $globalAdded,"\n";
+
+set_error_handler(function($level,$message) { echo $message,"\n"; throw new ErrorException($message); });
+class ForwardingOffsets extends ArrayObject {
+    function offsetGet($key): mixed { return parent::offsetGet($key); }
+}
+class ReportingOffsets extends ArrayObject {
+    function offsetSet($key, $value): void { echo "unexpected offsetSet\n"; parent::offsetSet($key, $value); }
+}
+$forward = new ForwardingOffsets;
+$reporting = new ReportingOffsets(['k'=>2]);
+$native = new ArrayObject(['k'=>2]);
+reportOperation(fn()=>$target['k']=$unread);
+reportOperation(fn()=>$reporting['k']=$unread);
+reportOperation(fn()=>$queue[0]=$unread);
+reportOperation(fn()=>$queue[]=$unread);
+reportOperation(fn()=>$failure[$key]=$unread);
+reportOperation(fn()=>$fixed[0]=$unread);
+reportOperation(fn()=>$native['read']=$unread);
+var_dump($reporting['k'],$queue[0],count($queue),$failure[$key],$fixed[0],$native['read']);
+
+$plain = ['k'=>2];
+reportOperation(function()use(&$plain){$plain['k'] .= $unread;});
+reportOperation(function()use(&$plain){$plain['k'] /= $unread;});
+var_dump($plain);
+reportOperation(fn()=>$native['k'] .= $unread);
+reportOperation(fn()=>$native['k'] /= $unread);
+reportOperation(fn()=>$native['k'] *= $unread);
+reportOperation(fn()=>$native[] += 1);
+reportOperation(fn()=>$native[4.5] += 2);
+reportOperation(fn()=>$native[null] += 3);
+var_dump($native->getArrayCopy());
+reportOperation(fn()=>$forward['k'] += 1);
+reportOperation(fn()=>$forward['k'] .= 'foo');
+reportOperation(fn()=>$forward['k'] /= 0);
+reportOperation(fn()=>$forward['k']++);
+var_dump($forward->getArrayCopy());
+restore_error_handler();
+
+class ThrowingOffsets extends ArrayObject {
+    function offsetGet($key): mixed { throw new RuntimeException('read'); }
+}
+class ThrowingQueue extends SplQueue {
+    function offsetGet($index): mixed { throw new RuntimeException('queue read'); }
+}
+$throwing = new ThrowingOffsets;
+$throwingQueue = new ThrowingQueue;
+reportOperation(fn()=>$throwing['a'] += 1);
+reportOperation(fn()=>$throwing['a'] /= 0);
+reportOperation(fn()=>$throwingQueue[0] += 1);
+reportOperation(fn()=>$throwingQueue[0]++);
+reportOperation(fn()=>$native[[]] += 1);
+reportOperation(fn()=>$fixed[[]] += 1);
+reportOperation(fn()=>$queue['a'] += 1);
+reportOperation(fn()=>$failure[1] += 1);
+
+$o = new stdClass;
+$o->p[0] += 1;
+$o->q[0]++;
+$o->r[0][1] += 1;
+$o->s[0] = 1;
+$o->t[0] ??= 1;
+reportOperation(fn()=>$o->a->b += 1);

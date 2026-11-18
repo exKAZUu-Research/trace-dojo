@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 525 -- PHP operators share coercion and comparison helpers.
+// code-gauge-allow-file fileNcss 528 -- PHP operators share coercion and comparison helpers.
 // oxlint-disable unicorn/prefer-code-point -- PHP strings hold bytes as code units 0–255, which charCodeAt and fromCharCode read and write as they are.
 import {
   boolValue,
@@ -15,7 +15,7 @@ import {
   numericValue,
   valueName,
 } from './conversions';
-import { deprecated, notice, throwError, warn, withCleanupExceptions } from './errors';
+import { deprecated, notice, throwError, type UpdateWarning, warn, withCleanupExceptions } from './errors';
 import { cPow } from './floatPow';
 import { PhpThrow, rt } from './runtime';
 import {
@@ -137,12 +137,13 @@ export function toInt(value: Value): bigint {
  * Converts a float to an int as PHP 8.5 does: a value out of range wraps around 64 bits, and NaN and the infinities
  * become 0, both with a warning.
  */
-export function floatToIntCast(value: number, pending?: PhpThrow): bigint {
+export function floatToIntCast(value: number, pending?: PhpThrow, warning?: UpdateWarning): bigint {
   if (floatFitsInt(value)) return BigInt(Math.trunc(value));
   operatorDiagnostic(
     pending,
     warn,
-    `The float ${formatFloatForMessage(value)} is not representable as an int, cast occurred`
+    `The float ${formatFloatForMessage(value)} is not representable as an int, cast occurred`,
+    warning
   );
   return Number.isFinite(value) ? BigInt.asIntN(64, BigInt(value)) : 0n;
 }
@@ -208,9 +209,15 @@ function unsupportedOperands(op: string, left: Value, right: Value, pending?: Ph
   throwError('TypeError', `Unsupported operand types: ${debugType(left)} ${op} ${debugType(right)}`);
 }
 
-function operatorDiagnostic(pending: PhpThrow | undefined, report: (message: string) => void, message: string): void {
+function operatorDiagnostic(
+  pending: PhpThrow | undefined,
+  report: (message: string) => void,
+  message: string,
+  warning?: UpdateWarning
+): void {
   if (pending) throw pending;
-  report(message);
+  if (warning) warning(() => report(message));
+  else report(message);
 }
 
 // code-gauge-allow functionCognitiveComplexity 27 -- Transcribes PHP's algorithm for this function step by step, whose branches mirror PHP's.
@@ -278,19 +285,20 @@ function power(a: bigint | number, b: bigint | number, pending?: PhpThrow): bigi
  * Converts a float used where PHP needs an int (an operand of `%` or a bitwise operator, an array key), warning as
  * PHP does about a value out of range and deprecating one with a fraction.
  */
-export function toIntForOperator(value: bigint | number, pending?: PhpThrow): bigint {
+export function toIntForOperator(value: bigint | number, pending?: PhpThrow, warning?: UpdateWarning): bigint {
   if (typeof value === 'bigint') return value;
   if (!floatFitsInt(value)) {
-    const result = floatToIntCast(value, pending);
+    const result = floatToIntCast(value, pending, warning);
     if (Number.isNaN(value))
-      operatorDiagnostic(pending, deprecated, 'Implicit conversion from float NAN to int loses precision');
+      operatorDiagnostic(pending, deprecated, 'Implicit conversion from float NAN to int loses precision', warning);
     return result;
   }
   if (!Number.isInteger(value)) {
     operatorDiagnostic(
       pending,
       deprecated,
-      `Implicit conversion from float ${formatFloatForMessage(value)} to int loses precision`
+      `Implicit conversion from float ${formatFloatForMessage(value)} to int loses precision`,
+      warning
     );
   }
   return BigInt(Math.trunc(value));
@@ -660,15 +668,20 @@ function isIntegerText(text: string): boolean {
 export type KeyUse = 'access' | 'isset' | 'unset';
 
 /** Converts a value to an array key, as `$a[$key]` does, throwing for keys PHP rejects. */
-export function toKey(value: Value, use: KeyUse = 'access', container = 'array'): Key {
+export function toKey(value: Value, use: KeyUse = 'access', container = 'array', warning?: UpdateWarning): Key {
   if (typeof value === 'bigint') return value;
   if (typeof value === 'string') return normalizeKeyString(value);
   if (value === null) {
-    deprecated('Using null as an array offset is deprecated, use an empty string instead');
+    operatorDiagnostic(
+      undefined,
+      deprecated,
+      'Using null as an array offset is deprecated, use an empty string instead',
+      warning
+    );
     return '';
   }
   if (typeof value === 'boolean') return value ? 1n : 0n;
-  if (typeof value === 'number') return toIntForOperator(value);
+  if (typeof value === 'number') return toIntForOperator(value, undefined, warning);
   const type = debugType(value);
   if (use === 'isset') throwError('TypeError', `Cannot access offset of type ${type} in isset or empty`);
   throwError('TypeError', `Cannot ${use === 'unset' ? 'unset' : 'access'} offset of type ${type} on ${container}`);

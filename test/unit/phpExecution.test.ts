@@ -526,6 +526,8 @@ test.each([
   '<?php $a=new stdClass;$b=new stdClass;for($i=0;$i<25;$i++){$a=(object)["l"=>$a,"r"=>$a];$b=(object)["l"=>$b,"r"=>$b];}var_dump($a==$b);',
   '<?php echo strtr(str_repeat("a",2000),array_fill_keys(range(0,999),"x"));',
   '<?php $a=["x"];for($i=0;$i<25;$i++)$a=[$a,$a];var_dump(mb_check_encoding($a));',
+  '<?php $s=str_repeat("b",500000); $d=str_repeat("a",500000); echo strlen(strtok($s,$d));',
+  '<?php $s=str_repeat("z",500000); $f="%[^" . str_repeat("a-b",100000) . "]"; echo strlen(sscanf($s,$f)[0]);',
 ])('charges recursive or multiplicative native work against the budget: %s', (source) => {
   expect(run(source)).toEqual({ kind: 'limitExceeded', limit: 'operations' });
 });
@@ -1922,11 +1924,15 @@ test.each(['get', 'set'])('rejects overriding a final property %s hook through a
   const program = `<?php
 class ParentHook { public int $value { final ${body} } }
 class MiddleHook extends ParentHook {}
-class ChildHook extends MiddleHook { public int $value { ${body} } }
+class ChildHook extends MiddleHook {
+  public int $value { ${body} }
+}
 echo 'unreachable';`;
   expect(run(program)).toMatchObject({
     kind: 'executed',
-    stdout: expect.stringContaining(`Cannot override final property hook ParentHook::$value::${hook}()`),
+    stdout: expect.stringContaining(
+      `Cannot override final property hook ParentHook::$value::${hook}() in /main.php on line 4`
+    ),
   });
 });
 

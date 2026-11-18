@@ -44,3 +44,7 @@ foreach (['(?R(a)', '(?R(', '(?R(1)', '(?R(1))', '(?&n(a)', '(?P>n(a)', '(?<n>x)
     var_dump(preg_match('~' . $source . '~', 'ab'));
 }
 echo "continued\n";
+
+foreach (['(?R(<n>))', "(?R('n'))", '(?&n(1))', '(?P>n(1))', '(?<n>x)(?&n(<m>))'] as $source) {
+    preg_match('/'.$source.'/', 'x');
+}

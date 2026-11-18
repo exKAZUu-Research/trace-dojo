@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 779 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 806 -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import type { Expr, ListItem } from './ast';
 import { foreachSubjectWritable, hasReferenceItem } from './astAnalysis';
@@ -438,7 +438,7 @@ function nestedPropertyPlace(
   const indirect = classesModule.checkIndirectModification(object, name, scope, mode);
   if (indirect) return new RefPlace(Ref.temporary(indirect));
   const key = decl?.key ?? name;
-  if (!decl && !object.props.has(key)) classesModule.createDynamicProp(object, name);
+  if (mode !== 'update' && !decl && !object.props.has(key)) classesModule.createDynamicProp(object, name);
   else if (mode === 'unset' && decl && !decl.type && (!object.props.has(key) || object.unsetProperties?.has(key)))
     object.props.set(key, null);
   return undefined;
@@ -481,6 +481,8 @@ function issetPropExists(object: PhpObject, name: string, scope: PhpClass | unde
 interface NativeArrayStorage {
   writable(): PhpArray;
   readonly array: PhpArray;
+  offsetValue(key: Value, className: string, warning?: UpdateWarning): Value;
+  setOffset(key: Value, value: Value, className: string, warning?: UpdateWarning): void;
   cursor(): { readonly key: Key | undefined };
 }
 let nativeArrayStorage: (value: unknown) => value is NativeArrayStorage = (_value): _value is NativeArrayStorage =>
@@ -506,7 +508,6 @@ function arrayAccessPlace(object: PhpObject, key: Value | undefined, readAssignm
     const error = (): never => invalidObjectDimension(object);
     return readAssignmentValue ? invalidWriteTarget(error) : error();
   }
-  const read = (): Value => callMethod(object, 'offsetGet', [key ?? null], rt().row);
   return {
     getForIsset: () =>
       toBool(callMethod(object, 'offsetExists', [key ?? null], rt().row))
@@ -514,12 +515,11 @@ function arrayAccessPlace(object: PhpObject, key: Value | undefined, readAssignm
         : undefined,
     nested: (mode) => arrayAccessNestedPlace(object, key, mode === 'unset'),
     incrementTarget: () => arrayAccessNestedPlace(object, key),
-    get: read,
-    fetchCompound: (warning, beforeOffsetGet) => ({
-      value: fetchObjectDimension(object, read, warning, beforeOffsetGet),
-    }),
+    get: () => callMethod(object, 'offsetGet', [key ?? null], rt().row),
+    fetchCompound: (warning, beforeOffsetGet) => fetchCompoundDimension(object, key, warning, beforeOffsetGet?.()),
     set: (value) => {
-      callMethod(object, 'offsetSet', [key ?? null, value], rt().row);
+      if (!rt().pendingAssignmentWarning || writesOffsetWithException(object, key))
+        callMethod(object, 'offsetSet', [key ?? null, value], rt().row);
       return value;
     },
     ref: () => arrayAccessNestedPlace(object, key).ref(),
@@ -532,31 +532,72 @@ function arrayAccessPlace(object: PhpObject, key: Value | undefined, readAssignm
   };
 }
 
-function fetchObjectDimension(
+function writesOffsetWithException(object: PhpObject, key: Value | undefined): boolean {
+  const setter = object.cls.findMethod('offsetset');
+  if (setter?.fn.kind !== 'native') return false;
+  return (
+    nativeArrayStorage(object.internal) ||
+    setter.scope.lname === 'splfixedarray' ||
+    (setter.scope.lname === 'splobjectstorage' && key instanceof PhpObject && !key.isResource)
+  );
+}
+
+function fetchCompoundDimension(
   object: PhpObject,
-  read: () => Value,
+  key: Value | undefined,
   warning: UpdateWarning,
-  beforeOffsetGet?: BeforeOffsetGet
-): Value {
-  const pending = beforeOffsetGet?.();
+  pending: PhpThrow | undefined
+): CompoundRead {
+  const storage = object.internal;
+  if (!nativeArrayStorage(storage)) return { value: fetchObjectDimension(object, key, pending) };
+  const value = fetchArrayObjectDimension(object, storage, key, warning);
+  return {
+    value,
+    write: (result) => {
+      if (writesOffsetWithException(object, key)) storage.setOffset(key ?? null, result, object.cls.name, warning);
+      else warning(() => callMethod(object, 'offsetSet', [key ?? null, result], rt().row));
+      return result;
+    },
+  };
+}
+
+function fetchObjectDimension(object: PhpObject, key: Value | undefined, pending: PhpThrow | undefined): Value {
   const native = object.cls.findMethod('offsetget')?.fn.kind === 'native';
-  if (!native) {
-    if (pending) invalidObjectDimension(object);
-    return read();
+  if (pending) {
+    if (!native) invalidObjectDimension(object);
+    throw pending;
   }
-  if (pending && !nativeArrayStorage(object.internal)) throw pending;
-  const runtime = rt();
-  const previous = runtime.readWriteDimension;
-  const fetch = { object, warning, pending, missing: false };
-  runtime.readWriteDimension = fetch;
   try {
-    return read();
+    return callMethod(object, 'offsetGet', [key ?? null], rt().row, true);
   } catch (error) {
-    if (fetch.missing && error instanceof PhpThrow) invalidObjectDimension(object, error);
+    if (error instanceof PhpThrow) invalidObjectDimension(object, error);
     throw error;
-  } finally {
-    runtime.readWriteDimension = previous;
   }
+}
+
+function fetchArrayObjectDimension(
+  object: PhpObject,
+  storage: NativeArrayStorage,
+  key: Value | undefined,
+  warning: UpdateWarning
+): Value {
+  let value: Value = null;
+  if (object.cls.findMethod('offsetget')?.fn.kind !== 'native') {
+    warning(() => {
+      value = callMethod(object, 'offsetGet', key === undefined ? [] : [key], rt().row);
+    });
+    return value;
+  }
+  if (key === undefined) return null;
+  try {
+    return storage.offsetValue(key, object.cls.name, warning);
+  } catch (error) {
+    if (!(error instanceof PhpThrow)) throw error;
+    warning(() => {
+      throw error;
+    });
+  }
+  return null;
 }
 
 function arrayAccessNestedPlace(object: PhpObject, key: Value | undefined, unsetting = false): Place {
@@ -872,7 +913,8 @@ export function compoundAssign(e: Extract<Expr, { k: 'assignOp' }>): Value {
       return warningPending();
     });
     if (fetched === SKIP_COMPOUND) return null;
-    return storeCompoundResult(e.op, place, fetched, readAfterFetch ? read(e.row) : value, warningPending());
+    if (readAfterFetch) value = readOperandWithWarning(e.value, read, warning, e.row);
+    return storeCompoundResult(e.op, place, fetched, value, warningPending());
   });
 }
 
@@ -903,7 +945,8 @@ function storeCompoundResult(
     }
     throw error;
   }
-  return place.set(share(result), 'assignOp');
+  const stored = share(result);
+  return fetched.write ? fetched.write(stored) : place.set(stored, 'assignOp');
 }
 
 // code-gauge-allow functionCognitiveComplexity 17 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.

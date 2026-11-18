@@ -58,3 +58,16 @@ $inner = $context->getter;
 var_dump($inner->argument, $inner->staticLocal, $inner::OUTER, $inner->inside, $inner->sameLine, $inner->names());
 $context->setter=3;
 var_dump($context->backing->nested);
+
+class OuterBinding {
+    function make() { return fn()=>[fn()=>__class__, function(){return __class__;}]; }
+}
+$outer = (new OuterBinding)->make();
+foreach ([\Closure::bind($outer,null,Beta::class),$outer->bindTo(null,Beta::class)] as $rebound) {
+    foreach ($rebound() as $innerClosure) var_dump($innerClosure());
+}
+
+function globalLexicalName() { return __CLASS__; }
+foreach ([globalLexicalName(...), \Closure::fromCallable(__NAMESPACE__ . '\\globalLexicalName')] as $named) {
+    var_dump($named->bindTo(new Beta)());
+}

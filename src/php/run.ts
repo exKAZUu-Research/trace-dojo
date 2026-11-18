@@ -144,8 +144,7 @@ function shutdown(runtime: Runtime): string | undefined {
     } finally {
       runtime.releasingGlobalsAtShutdown = false;
     }
-    const remaining = [...runtime.objects.values()].toSorted((a, b) => a.id - b.id);
-    for (const object of remaining) {
+    for (const object of runtime.objectsInShutdownOrder()) {
       if (object.destructed) continue;
       const destructor = object.cls.findMethod('__destruct');
       object.destructed = true;

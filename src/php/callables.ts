@@ -445,7 +445,7 @@ function reportStaticTraitCall(cls: PhpClass, name: string): void {
 }
 
 /** Calls a method of an object by name, as native code calls `offsetGet` or `__toString`. */
-export function callMethod(object: PhpObject, name: string, args: Value[], row?: number): Value {
+export function callMethod(object: PhpObject, name: string, args: Value[], row?: number, dimensionRead = false): Value {
   const method = object.cls.findMethod(lower(name));
   if (!method) {
     const magic = object.cls.findMethod('__call');
@@ -468,7 +468,7 @@ export function callMethod(object: PhpObject, name: string, args: Value[], row?:
       inline:
         row !== undefined &&
         method.fn.kind === 'native' &&
-        ['splfixedarray', 'arrayobject', 'arrayiterator'].includes(lower(method.scope.name)),
+        (dimensionRead || ['splfixedarray', 'arrayobject', 'arrayiterator'].includes(method.scope.lname)),
     },
     args.map((v) => ({ v })),
     row
@@ -921,7 +921,8 @@ function newClosure(fn: UserFunction, bound: Map<string, Ref>, isStatic: boolean
     bound,
     thisObj: isStatic ? undefined : frame.thisObj,
     scope: frame.scope,
-    lexicalScope: frame.scope,
+    lexicalScope:
+      frame.decl?.isClosure && frame.closure ? (frame.closure.internal as ClosureData).lexicalScope : frame.scope,
     calledClass: frame.staticClass,
     isStatic,
   } satisfies ClosureData;

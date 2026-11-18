@@ -286,12 +286,12 @@ function linkPropertyHooks(decl: PropDecl, ast: PropertyDeclAst, parent: PropDec
   if (own?.get && inherited?.finalGet)
     throw new FatalError(
       `Cannot override final property hook ${(inherited.getScope ?? parent?.cls)?.name}::$${ast.name}::get()`,
-      ast.row
+      decl.cls.declaredRow
     );
   if (own?.set && inherited?.finalSet)
     throw new FatalError(
       `Cannot override final property hook ${(inherited.setScope ?? parent?.cls)?.name}::$${ast.name}::set()`,
-      ast.row
+      decl.cls.declaredRow
     );
   const cls = decl.cls;
   const parameter = own?.set?.params[0];
@@ -1260,7 +1260,7 @@ export function coerceProperty(decl: PropDecl, value: Value, object?: PhpObject,
     if (pending) throw pending;
     throwError(
       'TypeError',
-      `Cannot assign ${valueName(value)} to ${holder} ${(object?.cls ?? decl.cls).name}::$${decl.name} of type ${describePropertyType(decl)}`
+      `Cannot assign ${valueName(value)} to ${holder} ${decl.cls.name}::$${decl.name} of type ${describePropertyType(decl)}`
     );
   }
   return coerced;

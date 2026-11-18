@@ -29,3 +29,9 @@ array(2) {
 }
 setter
 string(6) "nested"
+string(22) "MagicDemo\OuterBinding"
+string(22) "MagicDemo\OuterBinding"
+string(22) "MagicDemo\OuterBinding"
+string(22) "MagicDemo\OuterBinding"
+string(0) ""
+string(0) ""

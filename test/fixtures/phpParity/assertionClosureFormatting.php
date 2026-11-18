@@ -26,3 +26,9 @@ show(function(){
     show(fn()=>assert(false && ${'hello world'}));
     show(fn()=>assert(false && ${'猫'}));
 });
+show(fn()=>assert(__LiNe__ < 1));
+show(fn()=>assert(__class__ === 'different'));
+show(fn()=>assert(__namespace__ === 'different'));
+show(fn()=>assert(__property__ === 'different'));
+const ExampleConstant = false;
+show(fn()=>assert(ExampleConstant));

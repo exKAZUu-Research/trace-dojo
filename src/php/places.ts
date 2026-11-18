@@ -13,6 +13,7 @@ export const SKIP_COMPOUND = Symbol('compound target changed during fetch');
 
 export interface CompoundRead {
   value: Value;
+  write?(value: Value): Value;
   declaration?: PropDecl;
   sources?: Ref['typedBy'];
 }

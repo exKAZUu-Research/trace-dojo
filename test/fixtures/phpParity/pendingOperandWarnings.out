@@ -194,3 +194,88 @@ Error: Cannot use object of type SplQueue as array (SplDoublyLinkedList::offsetG
 OutOfRangeException: SplDoublyLinkedList::offsetGet(): Argument #1 ($index) is out of range ()
 42
 8
+Undefined variable $unread
+ErrorException: Undefined variable $unread ()
+Undefined variable $unread
+ErrorException: Undefined variable $unread ()
+Undefined variable $unread
+ErrorException: Undefined variable $unread ()
+Undefined variable $unread
+ErrorException: Undefined variable $unread ()
+Undefined variable $unread
+ErrorException: Undefined variable $unread ()
+Undefined variable $unread
+ErrorException: Undefined variable $unread ()
+Undefined variable $unread
+ErrorException: Undefined variable $unread ()
+int(2)
+int(1)
+int(1)
+NULL
+NULL
+NULL
+Undefined variable $unread
+ErrorException: Undefined variable $unread ()
+Undefined variable $unread
+DivisionByZeroError: Division by zero (Undefined variable $unread)
+array(1) {
+  ["k"]=>
+  string(1) "2"
+}
+Undefined variable $unread
+ErrorException: Undefined variable $unread ()
+Undefined variable $unread
+DivisionByZeroError: Division by zero (Undefined variable $unread)
+Undefined variable $unread
+ErrorException: Undefined variable $unread ()
+Implicit conversion from float 4.5 to int loses precision
+ErrorException: Implicit conversion from float 4.5 to int loses precision ()
+Using null as an array offset is deprecated, use an empty string instead
+ErrorException: Using null as an array offset is deprecated, use an empty string instead ()
+array(5) {
+  ["k"]=>
+  int(0)
+  ["read"]=>
+  NULL
+  [0]=>
+  int(1)
+  [4]=>
+  int(2)
+  [5]=>
+  int(3)
+}
+Undefined array key "k"
+ErrorException: Undefined array key "k" ()
+A non-numeric value encountered
+ErrorException: A non-numeric value encountered ()
+Indirect modification of overloaded element of ForwardingOffsets has no effect
+ErrorException: Indirect modification of overloaded element of ForwardingOffsets has no effect ()
+array(1) {
+  ["k"]=>
+  string(4) "1foo"
+}
+RuntimeException: read ()
+DivisionByZeroError: Division by zero (read)
+Error: Cannot use object of type ThrowingQueue as array (queue read)
+RuntimeException: queue read ()
+TypeError: Cannot access offset of type array on ArrayObject (Cannot access offset of type array on ArrayObject)
+Error: Cannot use object of type SplFixedArray as array (Cannot access offset of type array on SplFixedArray)
+Error: Cannot use object of type SplQueue as array (SplDoublyLinkedList::offsetGet(): Argument #1 ($index) must be of type int, string given)
+Error: Cannot use object of type SplObjectStorage as array (SplObjectStorage::offsetGet(): Argument #1 ($object) must be of type object, int given)
+
+Warning: Undefined property: stdClass::$p in /main.php on line 207
+
+Warning: Undefined array key 0 in /main.php on line 207
+
+Warning: Undefined property: stdClass::$q in /main.php on line 208
+
+Warning: Undefined array key 0 in /main.php on line 208
+
+Warning: Undefined property: stdClass::$r in /main.php on line 209
+
+Warning: Undefined array key 0 in /main.php on line 209
+
+Warning: Undefined array key 1 in /main.php on line 209
+
+Warning: Undefined property: stdClass::$a in /main.php on line 212
+Error: Attempt to assign property "b" on null ()

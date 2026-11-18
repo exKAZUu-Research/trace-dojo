@@ -16,7 +16,13 @@ import { oneArgumentBuiltinOpcodes, simpleSprintfFormat } from './builtinCompile
 import { enc, lower } from './bytes';
 import { type Constant, constantTruth, constantTypeName, foldedConstant } from './constantDefaults';
 import { formatFloat, isNumericString, NAN_BOOL_WARNING, NAN_STRING_WARNING } from './conversions';
-import { type CompileNotice, isReservedClassName, MAGIC_RUNTIME, relativeClassName } from './converterBase';
+import {
+  type CompileNotice,
+  isReservedClassName,
+  MAGIC_RUNTIME,
+  relativeClassName,
+  reservedIdentifierToken,
+} from './converterBase';
 import { DeclarationConverter } from './declarationConverter';
 import { exportExpr, UnexportableSyntax } from './export';
 import { decodeLiteral, decodeSingleQuoted, parseIntegerLiteral } from './literals';
@@ -1171,6 +1177,7 @@ export class Converter extends DeclarationConverter {
     return this.expr(node);
   }
 
+  // code-gauge-allow functionCognitiveComplexity 16 -- Keeps the ordered PHP cases together because each branch shares the same dispatch state.
   private constant(node: Node): Expr {
     const row = node.startPosition.row;
     const raw = this.nameText(node);
@@ -1178,8 +1185,11 @@ export class Converter extends DeclarationConverter {
     if (node.type === 'name' && word === 'default') this.error(node, 'syntax error, unexpected token "default"');
     if (word === 'true' || word === 'false') return { k: 'lit', v: word === 'true', row };
     if (word === 'null') return { k: 'lit', v: null, row };
-    if (this.preserveSyntax) return { k: 'const', name: { name: raw }, row };
     const magic = raw.toUpperCase();
+    if (this.preserveSyntax) {
+      const name = magic.startsWith('__') && reservedIdentifierToken(raw) === magic ? magic : raw;
+      return { k: 'const', name: { name }, row };
+    }
     if (magic === '__LINE__') return { k: 'lit', v: BigInt(row + 1), row };
     if (magic === '__FILE__') return { k: 'lit', v: '/main.php', row };
     if (magic === '__DIR__') return { k: 'lit', v: '/', row };
@@ -1222,13 +1232,21 @@ export class Converter extends DeclarationConverter {
   }
 
   private bracedClassConstant(scope: Node, nameExpression: Node): Expr {
-    let cls = this.classRef(scope, this.constantInitializer, 'constant');
+    const name = this.expr(nameExpression);
+    const literal = foldedConstant(name, {
+      compiler: true,
+      preserveNamedConstants: true,
+      budget: this.compileBudget,
+    });
+    let cls = this.classRef(
+      scope,
+      this.constantInitializer || typeof literal !== 'string',
+      typeof literal === 'string' ? 'constant' : 'reference'
+    );
     if (cls.k === 'expr') {
       const literal = parserScalar(cls.e);
       if (typeof literal === 'string') cls = { k: 'named', name: literal };
     }
-    const name = this.expr(nameExpression);
-    const literal = this.compiledValue(name) ?? foldedConstant(name, { budget: this.compileBudget });
     return { k: 'cconst', cls, name: typeof literal === 'string' ? literal : name, row: name.row };
   }
 

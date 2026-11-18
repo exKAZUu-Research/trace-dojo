@@ -25,3 +25,17 @@ try { echo \self::class; } catch (\Throwable $error) { echo $error->getMessage()
 $c->relatives($c, new Base);
 try { \Closure::bind(fn()=>\parent::class, null, Base::class)(); }
 catch (\Throwable $error) { echo $error->getMessage(), "\n"; }
+
+const CONSTANT_NAME = 'SAMPLE';
+function makeConstantName() { return 'SAMPLE'; }
+class DynamicBase { const SAMPLE = 'base'; }
+class DynamicClass extends DynamicBase {
+    const SAMPLE = 'child';
+    function fetch($name) {
+        return [namespace\self::{$name}, namespace\parent::{$name}, namespace\static::{$name},
+            namespace\self::{CONSTANT_NAME}, namespace\self::{makeConstantName()}, namespace\self::{"$name"}];
+    }
+}
+var_dump((new DynamicClass)->fetch('SAMPLE'));
+try { $name = 'SAMPLE'; namespace\self::{$name}; }
+catch (\Throwable $e) { echo $e->getMessage(),"\n"; }

@@ -3,11 +3,10 @@
 import { ExecutionBudget, LIMITS } from '../interpreter/limits';
 import { type ProgramInput, ProgramIO } from '../interpreter/programIo';
 import { StepTracker } from '../interpreter/stepTracker';
-import { TurtleWorld } from '../interpreter/turtleWorld';
+import { type TurtleState, TurtleWorld } from '../interpreter/turtleWorld';
 import type { Expr, FunctionDecl, Program } from './ast';
 import { dec } from './bytes';
 import type { CompileNotice } from './converter';
-import type { UpdateWarning } from './errors';
 import { arrayIsShared, collectGarbage, GC_THRESHOLD_DEFAULT, releaseDropped } from './garbage';
 import { GcRoots } from './gcRoots';
 import { ObjectHeap } from './objectHeap';
@@ -157,6 +156,7 @@ export class Runtime {
   readonly retiringObjects = new Set<PhpObject>();
   private readonly freeHandles: number[] = [];
   private nextHandle = 1;
+  private reuseObjectHandles = true;
   /** Whether an object with a destructor exists, which makes releasing values check for garbage. */
   destructibles = 0;
   strictTypes = false;
@@ -183,7 +183,6 @@ export class Runtime {
   shuttingDown = false;
   releasingGlobalsAtShutdown = false;
   assignmentWarning?: { frame: Frame; exception: PhpThrow };
-  readWriteDimension?: { object: PhpObject; warning: UpdateWarning; pending?: PhpThrow; missing: boolean };
   exhausted = false;
   private pendingOutput = '';
   /** The classes a program declared, in declaration order, whose static properties the trace shows. */
@@ -196,13 +195,6 @@ export class Runtime {
     this.io = new ProgramIO(this.budget, input);
     this.globalFrame = new Frame(undefined, undefined, false);
     this.frames.push(this.globalFrame);
-  }
-
-  takeReadWriteDimension(object: PhpObject): Runtime['readWriteDimension'] {
-    const fetch = this.readWriteDimension;
-    if (fetch?.object !== object) return undefined;
-    this.readWriteDimension = undefined;
-    return fetch;
   }
 
   get pendingAssignmentWarning(): PhpThrow | undefined {
@@ -244,10 +236,25 @@ export class Runtime {
     return new FatalError(memoryExhaustedMessage(bytes), this.row, true);
   }
 
+  attachTurtle(object: PhpObject, state: TurtleState): void {
+    if (object.turtle) this.world.remove(object.turtle);
+    object.turtle = state;
+    this.turtleObjects.add(object);
+  }
+
+  *objectsInShutdownOrder(): Generator<PhpObject> {
+    this.reuseObjectHandles = false;
+    for (let id = 1; id < this.nextHandle; id++) {
+      this.spend();
+      const object = this.objects.get(id);
+      if (object) yield object;
+    }
+  }
+
   /** Allocates the handle of a new object, reusing the most recently freed one as PHP does. */
   newObject(cls: PhpClass): PhpObject {
     this.flushReleases();
-    const id = this.freeHandles.pop() ?? this.nextHandle++;
+    const id = (this.reuseObjectHandles ? this.freeHandles.pop() : undefined) ?? this.nextHandle++;
     const object = new PhpObject(cls, id);
     this.objects.set(id, object);
     if (cls.findMethod('__destruct')) this.destructibles++;

@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 436 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 453 -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/prefer-code-point -- PHP strings hold bytes as code units 0–255, which charCodeAt and fromCharCode read and write as they are.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import { byteAt, charAt, untilNul, utf8Length } from './bytes';
@@ -30,14 +30,19 @@ defineFunction('strtok(string $string, ?string $token = null): string|false', ({
   let index = state.position;
   // Past the end, PHP keeps the string, so later calls with one argument return false without a warning.
   if (index >= text.length) return false;
-  while (token.includes(text[index])) {
+  const runtime = rt();
+  runtime.spend(token.length);
+  const delimiters = new Uint8Array(256);
+  for (let at = 0; at < token.length; at++) delimiters[token.charCodeAt(at)] = 1;
+  while (delimiters[text.charCodeAt(index)]) {
+    runtime.spend();
     if (++index >= text.length) {
       state.text = undefined;
       return false;
     }
   }
   const start = index;
-  while (++index < text.length && !token.includes(text[index]));
+  while (++index < text.length && !delimiters[text.charCodeAt(index)]) runtime.spend();
   state.position = index + 1;
   return text.slice(start, index);
 });
@@ -294,7 +299,9 @@ function noteScanTarget(targets: ScanTargets, spec: ScanSpec, varCount: number):
 /** Skips a `[` set to its closing `]`, returning the index after it. */
 function skipScanSet(format: string, index: number): number {
   let at = index;
+  const runtime = rt();
   const next = (): string => {
+    runtime.spend();
     if (at >= format.length) throwError('ValueError', 'Unmatched [ in format string');
     return format[at++];
   };
@@ -389,7 +396,11 @@ function scanField(text: string, start: number, format: string, spec: ScanSpec):
     const close = skipScanSet(format, next);
     const inSet = scanSet(format.slice(next, close - 1));
     let end = start;
-    while (end < text.length && end - start < (width || Infinity) && inSet(text[end])) end++;
+    const runtime = rt();
+    while (end < text.length && end - start < (width || Infinity) && inSet(text[end])) {
+      runtime.spend();
+      end++;
+    }
     return { end, value: end === start ? undefined : text.slice(start, end), formatIndex: close };
   }
   const read = 'feEg'.includes(char) ? scanFloat(text, start, width) : scanInteger(text, start, width, char);
@@ -517,22 +528,29 @@ function acceptsFloatChar(scan: FloatScan, char: string): boolean {
 function scanSet(body: string): (char: string) => boolean {
   const exclude = body.startsWith('^');
   const list = exclude ? body.slice(1) : body;
-  const chars = new Set<string>();
-  const ranges: [number, number][] = [];
-  let index = 0;
-  if (list[0] === ']' || list[0] === '-') chars.add(list[index++]);
-  for (; index < list.length; index++) {
-    if (list[index + 1] === '-' && index + 2 < list.length) {
-      const [from, to] = [signed(list[index]), signed(list[index + 2])];
-      ranges.push(from < to ? [from, to] : [to, from]);
-      index += 2;
-    } else chars.add(list[index]);
-  }
-  return (char) => {
-    const code = signed(char);
-    const match = chars.has(char) || ranges.some(([from, to]) => from <= code && code <= to);
-    return match !== exclude;
+  rt().spend(list.length);
+  const boundaries = new Int32Array(257);
+  const addRange = (from: number, to = from): void => {
+    boundaries[from + 128]++;
+    boundaries[to + 129]--;
   };
+  let index = 0;
+  if (list[0] === ']' || list[0] === '-') addRange(signed(list[index++]));
+  for (; index < list.length; index++) {
+    const from = signed(list[index]);
+    if (list[index + 1] === '-' && index + 2 < list.length) {
+      const to = signed(list[index + 2]);
+      addRange(Math.min(from, to), Math.max(from, to));
+      index += 2;
+    } else addRange(from);
+  }
+  let count = 0;
+  const matches = new Uint8Array(256);
+  for (let code = 0; code < matches.length; code++) {
+    count += boundaries[code];
+    matches[code] = Number(count > 0 !== exclude);
+  }
+  return (char) => Boolean(matches[signed(char) + 128]);
 }
 
 /** A byte as C's signed char holds it. */

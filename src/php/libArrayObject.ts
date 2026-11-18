@@ -3,7 +3,7 @@ import { setNativeArrayStorage } from './assignment';
 import { callMethod } from './callables';
 import { invoke } from './calls';
 import { createObject, findClass, objectToArray } from './classes';
-import { deprecated, throwError, warn, withCleanupExceptions } from './errors';
+import { deprecated, throwError, type UpdateWarning, warn, withCleanupExceptions } from './errors';
 import { defineClass, type NativeMethod } from './native';
 import { toKey } from './operators';
 import { arrayIsShared, share } from './places';
@@ -96,6 +96,26 @@ export class ArrayStorage {
     copy.flags = this.flags;
     copy.iteratorClass = this.iteratorClass;
     return copy;
+  }
+
+  offsetValue(key: Value, className: string, warning?: UpdateWarning): Value {
+    const offset = toKey(key, 'access', className, warning);
+    const value = this.array.get(offset);
+    if (value !== undefined) return value;
+    const message = `Undefined array key ${typeof offset === 'bigint' ? offset : `"${offset}"`}`;
+    if (warning)
+      warning(
+        () => warn(message),
+        () => warn(message, true)
+      );
+    else warn(message);
+    return null;
+  }
+
+  setOffset(key: Value, value: Value, className: string, warning?: UpdateWarning): void {
+    const array = this.writable();
+    if (key === null) array.append(share(value));
+    else array.set(toKey(key, 'access', className, warning), share(value));
   }
 
   writable(): PhpArray {
@@ -260,8 +280,6 @@ function checkFlags(flags: number): number {
   return flags;
 }
 
-// code-gauge-allow functionNcss 33 -- Keeps the ordered PHP cases together because each branch shares the same dispatch state.
-// code-gauge-allow functionCognitiveComplexity 20 -- Keeps the ordered PHP cases together because each branch shares the same dispatch state.
 function arrayMethods(name: string): NativeMethod[] {
   return [
     {
@@ -283,26 +301,12 @@ function arrayMethods(name: string): NativeMethod[] {
     },
     {
       signature: 'offsetGet(mixed $key): mixed',
-      impl: ({ thisObj, args }) => {
-        const fetch = rt().takeReadWriteDimension(thisObj);
-        const key = toKey(args[0], 'access', thisObj.cls.name);
-        const value = storageOf(thisObj).array.get(key);
-        if (value === undefined) {
-          const report = (): void => warn(`Undefined array key ${typeof key === 'bigint' ? key : `"${key}"`}`);
-          if (fetch) fetch.warning(report);
-          else report();
-          return null;
-        }
-        if (fetch?.pending) throw fetch.pending;
-        return value;
-      },
+      impl: ({ thisObj, args }) => storageOf(thisObj).offsetValue(args[0], thisObj.cls.name),
     },
     {
       signature: 'offsetSet(mixed $key, mixed $value): void',
       impl: ({ thisObj, args }) => {
-        const array = storageOf(thisObj).writable();
-        if (args[0] === null) array.append(share(args[1]));
-        else array.set(toKey(args[0], 'access', thisObj.cls.name), share(args[1]));
+        storageOf(thisObj).setOffset(args[0], args[1], thisObj.cls.name);
         return null;
       },
     },

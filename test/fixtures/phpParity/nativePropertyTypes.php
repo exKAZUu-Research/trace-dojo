@@ -29,3 +29,18 @@ $iterator=new RegexIterator(new ArrayIterator([]),'~.~');
 $iterator->replacement=123;
 var_dump($iterator->replacement);
 reportTypeError(fn()=>$iterator->replacement=[]);
+
+class InheritedException extends Exception {
+    function setBadLine() { $this->line=[]; }
+    function setBadFileReference() { $reference =& $this->file; $reference=[]; }
+}
+class InheritedError extends Error {
+    function setBadLineReference() { $reference =& $this->line; $reference=[]; }
+}
+class InheritedSeverity extends ErrorException {
+    function setBadSeverity() { $this->severity=[]; }
+}
+reportTypeError(fn()=>(new InheritedException)->setBadLine());
+reportTypeError(fn()=>(new InheritedException)->setBadFileReference());
+reportTypeError(fn()=>(new InheritedError)->setBadLineReference());
+reportTypeError(fn()=>(new InheritedSeverity)->setBadSeverity());

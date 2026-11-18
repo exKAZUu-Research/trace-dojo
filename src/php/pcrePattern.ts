@@ -834,14 +834,12 @@ class PatternConverter {
     return group;
   }
 
-  // code-gauge-allow functionNcss 31 -- Keeps the ordered PHP cases together because each branch shares the same dispatch state.
   // code-gauge-allow functionCognitiveComplexity 17 -- Keeps the ordered PHP cases together because each branch shares the same dispatch state.
   private parenthesizedSubroutine(rest: string): void {
     this.index += 2;
     if (rest.startsWith('&') || rest.startsWith('P>')) {
       this.index += rest.startsWith('&') ? 1 : 2;
-      const { name, start } = this.readGroupName(')', true);
-      this.subroutine(name, start);
+      this.readGroupName(')', (name, start) => this.subroutine(name, start));
       return;
     }
     if (rest.startsWith('R')) {
@@ -883,8 +881,8 @@ class PatternConverter {
         this.references.push({ target: group, at: start });
       } else if (opener === '<' || opener === "'") {
         this.index++;
-        const { name } = this.readGroupName(opener === '<' ? '>' : "'");
-        this.references.push({ target: name, at: start });
+        const { name, start: nameStart } = this.readGroupName(opener === '<' ? '>' : "'");
+        this.references.push({ target: name, at: nameStart });
       } else this.fail('expected capture group number or name', start);
     } while (this.source[this.index] === ',');
     if (this.source[this.index] !== ')') this.fail('missing closing parenthesis for condition', this.index);
@@ -1040,7 +1038,10 @@ class PatternConverter {
     options[option] = !unsetting;
   }
 
-  private readGroupName(terminator: string, parenthesized = false): { name: string; start: number } {
+  private readGroupName(
+    terminator: string,
+    subroutine?: (name: string, start: number) => void
+  ): { name: string; start: number } {
     if (terminator === '}') this.readMatch(/^[ \t]*/);
     const start = this.index;
     const digit = this.readMatch(this.options.utf8 ? /^\p{Nd}/u : /^\d/);
@@ -1050,9 +1051,12 @@ class PatternConverter {
     if ((this.options.utf8 ? enc(name).length : name.length) > 128)
       this.fail('subpattern name is too long (maximum 128 code units)', this.index);
     if (terminator === '}') this.readMatch(/^[ \t]*/);
-    if (parenthesized && this.source[this.index] === '(') this.readSubroutineCaptures();
+    if (subroutine) {
+      subroutine(name, start);
+      if (this.source[this.index] === '(') this.readSubroutineCaptures();
+    }
     if (this.source[this.index] !== terminator) {
-      if (parenthesized) this.fail('missing closing parenthesis', this.index);
+      if (subroutine) this.fail('missing closing parenthesis', this.index);
       this.fail('syntax error in subpattern name (missing terminator?)', this.index);
     }
     this.index++;

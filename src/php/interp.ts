@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 909 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 913 -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import {
   applyOperator,
@@ -834,16 +834,18 @@ export function deprecatedConstant(name: string, value: Value): Value {
   return value;
 }
 
-// code-gauge-allow functionCognitiveComplexity 26 -- One case per expression kind, as PHP evaluates each kind differently.
+// code-gauge-allow functionCognitiveComplexity 27 -- One case per expression kind, as PHP evaluates each kind differently.
 function magicConstant(name: Extract<Expr, { k: 'magic' }>['name']): Value {
   const frame = rt().frame;
   const decl = frame.decl;
   switch (name) {
     case '__CLASS__': {
-      if (!decl?.isClosure || !frame.closure) return frame.scope?.fullName ?? '';
-      if (decl.className === undefined) return '';
-      if (findClass(decl.className)?.kind === 'trait') return frame.scope?.fullName ?? '';
-      return (frame.closure.internal as ClosureData).lexicalScope?.fullName ?? decl.className;
+      const scopeName = frame.scope?.fullName ?? '';
+      if (!decl) return scopeName;
+      const className = decl.className;
+      if (className === undefined) return '';
+      if (!decl.isClosure || !frame.closure || findClass(className)?.kind === 'trait') return scopeName;
+      return (frame.closure.internal as ClosureData).lexicalScope?.fullName ?? className;
     }
     case '__FUNCTION__': {
       return decl?.name ?? '';
@@ -970,7 +972,7 @@ function cloneExpression(e: Extract<Expr, { k: 'clone' }>): Value {
   return cloneObject(value);
 }
 
-// code-gauge-allow functionNcss 41 -- One case per expression kind, as PHP evaluates each kind differently.
+// code-gauge-allow functionCognitiveComplexity 16 -- Keeps the ordered PHP cases together because each branch shares the same dispatch state.
 export function cloneObject(original: PhpObject, withValue?: Value): PhpObject {
   if (original.isResource)
     throwError('TypeError', 'clone(): Argument #1 ($object) must be of type object, resource given');
@@ -987,18 +989,9 @@ export function cloneObject(original: PhpObject, withValue?: Value): PhpObject {
   }
   const copy = runtime.newObject(original.cls);
   runtime.frame.temporaries.push(copy);
-  for (const [key, slot] of original.props) {
-    if (slot instanceof Ref) {
-      if (slot.rc > 1) {
-        slot.rc++;
-        copy.props.set(key, slot);
-        const decl = classesModule.declForKey(copy.cls, key);
-        if (decl?.type) classesModule.attachPropertyReference(slot, decl, copy);
-      } else copy.props.set(key, share(slot.v));
-    } else copy.props.set(key, typeof slot === 'symbol' ? slot : share(slot));
-  }
-  if (original.unsetProperties) copy.unsetProperties = new Set(original.unsetProperties);
+  copyCloneProperties(original, copy);
   copy.internal = cloneInternal(original, copy);
+  if (original.turtle) runtime.attachTurtle(copy, runtime.world.clone(original.turtle));
   copy.cloning = true;
   try {
     if (cloneMethod) {
@@ -1025,6 +1018,21 @@ export function cloneObject(original: PhpObject, withValue?: Value): PhpObject {
     copy.readonlyInit = undefined;
   }
   return copy;
+}
+
+function copyCloneProperties(original: PhpObject, copy: PhpObject): void {
+  for (const [key, slot] of original.props) {
+    if (!(slot instanceof Ref) || slot.rc <= 1) {
+      const value = slot instanceof Ref ? slot.v : slot;
+      copy.props.set(key, typeof value === 'symbol' ? value : share(value));
+      continue;
+    }
+    slot.rc++;
+    copy.props.set(key, slot);
+    const decl = classesModule.declForKey(copy.cls, key);
+    if (decl?.type) classesModule.attachPropertyReference(slot, decl, copy);
+  }
+  if (original.unsetProperties) copy.unsetProperties = new Set(original.unsetProperties);
 }
 
 function cloneInternal(original: PhpObject, copy: PhpObject): unknown {

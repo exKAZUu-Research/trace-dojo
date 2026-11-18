@@ -49,8 +49,18 @@ export class TurtleWorld {
     const error = outOfBounds(turtle);
     if (error) return { error };
     this.board[y][x] = colorText;
-    this.turtles.push(turtle);
-    this.finalTurtles?.add(turtle);
+    return this.register(turtle);
+  }
+
+  clone(turtle: TurtleState): TurtleState {
+    return this.register({ ...turtle });
+  }
+
+  private register(turtle: TurtleState): TurtleState {
+    if (turtle.isAlive) {
+      this.turtles.push(turtle);
+      this.finalTurtles?.add(turtle);
+    }
     return turtle;
   }
 
