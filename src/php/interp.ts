@@ -548,35 +548,34 @@ type ConstantContext = 'constant' | 'expression';
 const compileTimeValues = { constant: new WeakMap<Expr, boolean>(), expression: new WeakMap<Expr, boolean>() };
 const scopedCompileTimeValues = { constant: new WeakMap<Expr, boolean>(), expression: new WeakMap<Expr, boolean>() };
 
-// code-gauge-allow functionCognitiveComplexity 21 -- One case per expression kind, as PHP evaluates each kind differently.
 function arrayLiteral(e: Extract<Expr, { k: 'array' }>): PhpArray {
   const runtime = rt();
+  const frame = runtime.frame;
   const array = new PhpArray(undefined, e.items.length);
+  frame.temporaries.push(array);
   for (const item of e.items) {
-    if (item.spread) {
-      const value = ev(item.value);
-      spreadInto(array, value);
-      continue;
-    }
-    const key = item.key === undefined ? undefined : toKey(ev(item.key));
-    if (item.byRef) {
-      const ref = placeOf(item.value).ref();
-      ref.isRef = true;
-      ref.rc++;
-      if (key === undefined) {
-        if (!array.append(ref))
-          throwError('Error', 'Cannot add element to the array as the next element is already occupied');
-      } else array.setSlot(key, ref);
-      continue;
-    }
-    const value = share(ev(item.value));
-    if (key === undefined) {
-      if (!array.append(value))
-        throwError('Error', 'Cannot add element to the array as the next element is already occupied');
-    } else array.setSlot(key, value);
-    runtime.spend();
+    const mark = frame.temporaries.length;
+    if (item.spread) spreadInto(array, ev(item.value));
+    else insertArrayItem(array, item);
+    runtime.dropTemporaries(frame, mark);
   }
   return array;
+}
+
+function insertArrayItem(array: PhpArray, item: Extract<Expr, { k: 'array' }>['items'][number]): void {
+  const key = item.key === undefined ? undefined : toKey(ev(item.key));
+  let slot: Value | Ref;
+  if (item.byRef) {
+    slot = placeOf(item.value).ref();
+    slot.isRef = true;
+    slot.rc++;
+  } else slot = share(ev(item.value));
+  const previous = key === undefined ? undefined : array.map.get(key);
+  if (key !== undefined) array.setSlot(key, slot);
+  else if (!array.append(slot))
+    throwError('Error', 'Cannot add element to the array as the next element is already occupied');
+  if (previous !== undefined) rt().release([previous]);
+  if (!item.byRef) rt().spend();
 }
 
 // code-gauge-allow functionNcss 46 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.

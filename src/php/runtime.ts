@@ -151,6 +151,8 @@ export class Runtime {
   collectingCycles = false;
   readonly internalObjects = new Set<PhpObject>();
   private readonly pendingReleases: unknown[] = [];
+  readonly releasingValues = new Map<object, number>();
+  readonly retiringObjects = new Set<PhpObject>();
   private readonly freeHandles: number[] = [];
   private nextHandle = 1;
   /** Whether an object with a destructor exists, which makes releasing values check for garbage. */

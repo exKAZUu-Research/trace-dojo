@@ -38,7 +38,7 @@ import {
 /** An argument as a call passes it: its value, and the reference a by-reference parameter receives. */
 export interface ArgValue {
   temporaryCount?: number;
-  nativeTransfer?: { values: unknown[]; count: number };
+  nativeTransfer?: { values: unknown[]; count: number; value?: Value };
   v: Value;
   ref?: Ref;
   name?: string;
@@ -735,12 +735,12 @@ function tracedNamedArgs(
  * Takes the arguments of a user function call off the caller's temporaries once the callee's parameters hold them, as
  * PHP moves a temporary argument into the callee's frame, which frees it with the callee's other variables.
  */
-function handOverArgs(caller: Frame, args: ArgValue[]): void {
+export function handOverArgs(caller: Frame, args: ArgValue[]): void {
   for (const arg of args) {
     if (arg.nativeTransfer) {
-      const { values, count } = arg.nativeTransfer;
+      const { values, count, value = arg.v } = arg.nativeTransfer;
       for (let index = count - 1; index >= 0; index--) {
-        if (values[index] === arg.v) {
+        if (values[index] === value) {
           values[index] = undefined;
           break;
         }

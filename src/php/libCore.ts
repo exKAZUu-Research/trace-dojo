@@ -345,7 +345,11 @@ defineFunction('call_user_func(callable $callback, mixed ...$args): mixed', ({ a
   return callValue(callback, argValues, row, 'callback', discardResult);
 });
 defineFunction('call_user_func_array(callable $callback, array $args): mixed', ({ args, row, discardResult }) => {
-  return callValue(args[0], callbackArrayArguments(args[1] as PhpArray), row, 'callback', discardResult);
+  const array = args[1] as PhpArray;
+  const forwarded = callbackArrayArguments(array);
+  const last = forwarded.at(-1);
+  if (last) last.nativeTransfer = { values: rt().nativeHeld.at(-1)!, count: args.length, value: array };
+  return callValue(args[0], forwarded, row, 'callback', discardResult);
 });
 markInlined('call_user_func');
 markInlined('call_user_func_array');

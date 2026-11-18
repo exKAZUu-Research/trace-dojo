@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 867 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 881 -- Holds the cases of one concern of the interpreter, which share their helpers.
 import type { TurtleState } from '../interpreter/turtleWorld';
 import { withCleanupExceptions, withPendingException } from './errors';
 import { type Frame, PhpThrow, type Runtime } from './runtime';
@@ -262,47 +262,83 @@ class Release {
     private roots: Set<unknown>
   ) {}
 
-  // code-gauge-allow functionNcss 48 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
   values(values: unknown[]): void {
-    const pending: unknown[] = values.toReversed();
+    const pending: unknown[] = [];
+    this.enqueue(pending, values);
     let work = 0;
-    withCleanupExceptions(this.runtime, (onFailure) => {
-      while (pending.length > 0) {
-        if ((++work & 255) === 0) this.runtime.budget.checkClock();
-        const item = pending.pop();
-        if (item instanceof ReleaseFinish) {
-          this.runtime.freeObject(item.object);
-          pendingReleaseObjects.delete(item.object);
-        } else if (item instanceof Ref) pending.push(item.v);
-        else if (item instanceof PhpArray) {
-          if (
-            !item.composite ||
-            this.visitedArrays.has(item) ||
-            ownedReachable(item, this.roots, this.runtime, this.unreachable, this.retainedBefore)
-          )
-            continue;
-          this.visitedArrays.add(item);
-          appendReversed(pending, item.map.values());
-        } else if (item instanceof PhpObject) {
-          const owner = activeReleaseObjects.get(item);
-          if (owner && owner !== this) {
-            try {
-              owner.resume(item);
-            } catch (error) {
-              if (!(error instanceof PhpThrow)) throw error;
-              onFailure(error);
-            }
-            continue;
-          }
-          const finish = this.prepare(item, onFailure);
-          if (!finish) continue;
-          pending.push(finish);
-          const children: unknown[] = [];
-          pushObject(item, children);
-          appendReversed(pending, children);
+    try {
+      withCleanupExceptions(this.runtime, (onFailure) => {
+        while (pending.length > 0) {
+          if ((++work & 255) === 0) this.runtime.budget.checkClock();
+          const item = pending.pop();
+          this.unhold(item);
+          this.releaseValue(item, pending, onFailure);
         }
+      });
+    } finally {
+      for (const item of pending) {
+        this.unhold(item);
+        if (item instanceof ReleaseFinish) this.runtime.retiringObjects.delete(item.object);
       }
-    });
+    }
+  }
+
+  // code-gauge-allow functionNcss 32 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+  // code-gauge-allow functionCognitiveComplexity 19 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+  private releaseValue(item: unknown, pending: unknown[], onFailure: (error: PhpThrow) => void): void {
+    if (item instanceof ReleaseFinish) {
+      this.runtime.freeObject(item.object);
+      pendingReleaseObjects.delete(item.object);
+      this.runtime.retiringObjects.delete(item.object);
+    } else if (item instanceof Ref) {
+      this.enqueue(pending, [item.v]);
+    } else if (item instanceof PhpArray) {
+      if (
+        !item.composite ||
+        this.visitedArrays.has(item) ||
+        ownedReachable(item, this.roots, this.runtime, this.unreachable, this.retainedBefore)
+      )
+        return;
+      this.visitedArrays.add(item);
+      this.enqueue(pending, [...item.map.values()]);
+    } else if (item instanceof PhpObject) {
+      const owner = activeReleaseObjects.get(item);
+      if (owner && owner !== this) {
+        try {
+          owner.resume(item);
+        } catch (error) {
+          if (!(error instanceof PhpThrow)) throw error;
+          onFailure(error);
+        }
+        return;
+      }
+      const finish = this.prepare(item, onFailure);
+      if (!finish) return;
+      pending.push(finish);
+      this.runtime.retiringObjects.add(item);
+      const children: unknown[] = [];
+      pushObject(item, children);
+      this.enqueue(pending, children);
+    }
+  }
+
+  private enqueue(pending: unknown[], values: unknown[]): void {
+    const held = this.runtime.releasingValues;
+    for (let index = values.length - 1; index >= 0; index--) {
+      const value = values[index];
+      pending.push(value);
+      if (!(value instanceof Ref || value instanceof PhpArray || value instanceof PhpObject)) continue;
+      held.set(value, (held.get(value) ?? 0) + 1);
+      if (this.unreachable.has(value)) this.unreachable.clear();
+    }
+  }
+
+  private unhold(value: unknown): void {
+    if (!(value instanceof Ref || value instanceof PhpArray || value instanceof PhpObject)) return;
+    const held = this.runtime.releasingValues;
+    const count = held.get(value) ?? 0;
+    if (count > 1) held.set(value, count - 1);
+    else held.delete(value);
   }
 
   hasVisited(object: PhpObject): boolean {
@@ -583,6 +619,7 @@ export function mark(runtime: Runtime, includeBuffered = true, visitedArrays = n
   const roots: unknown[] = [];
   for (const object of activeReleaseObjects.keys()) if (runtime.objects.get(object.id) === object) roots.push(object);
   appendValues(roots, ownershipRoots(runtime));
+  appendValues(roots, runtime.releasingValues.keys());
   if (includeBuffered)
     appendValues(roots, [...runtime.arrayCycles, ...runtime.collectingArrays, ...runtime.objectCycles]);
   // A stack visits the first of the items pushed together first when they are pushed in reverse.
@@ -969,6 +1006,7 @@ function ownershipRootCheck(
   return (value) => {
     if (
       roots.has(value) ||
+      runtime.releasingValues.has(value) ||
       (value instanceof PhpObject && (runtime.objectCycles.has(value) || runtime.collectingObjects.has(value))) ||
       (value instanceof PhpArray && (runtime.arrayCycles.has(value) || runtime.collectingArrays.has(value)))
     )
@@ -985,9 +1023,11 @@ function ownershipRootCheck(
 }
 
 function* reverseOwners(value: object, runtime: Runtime, visited: Set<object>): Generator<object> {
-  yield* valueOwners(value);
+  for (const owner of valueOwners(value)) {
+    if (!(owner instanceof PhpObject && runtime.retiringObjects.has(owner))) yield owner;
+  }
   for (const object of runtime.internalObjects) {
-    if (visited.has(object) || object.nativeValues) continue;
+    if (visited.has(object) || object.nativeValues || runtime.retiringObjects.has(object)) continue;
     const held: unknown[] = [];
     pushObject(object, held);
     if (held.includes(value)) yield object;

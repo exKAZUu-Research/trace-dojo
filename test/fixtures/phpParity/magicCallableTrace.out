@@ -1,0 +1,6 @@
+#0 [internal function]: FallingBack->__call('first', Array)
+#1 /main.php(6): FallingBack->first(21)
+#2 {main}
+#0 [internal function]: FallingBack::__callStatic('second', Array)
+#1 /main.php(7): FallingBack::second(34)
+#2 {main}

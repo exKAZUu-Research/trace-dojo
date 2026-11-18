@@ -1,11 +1,19 @@
-// code-gauge-allow-file fileNcss 501 -- Keeps one PHP runtime concern and its shared helpers in one module.
+// code-gauge-allow-file fileNcss 522 -- Keeps one PHP runtime concern and its shared helpers in one module.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import { placeOf } from './assignment';
 import type { Arg, Expr } from './ast';
 import { usesSimpleSprintf } from './builtinCompiler';
 import builtinNames from './builtinNames.json';
 import { lower } from './bytes';
-import { type ArgValue, type CallTarget, closureFunction, functionDisplayName, invoke, paramIsByRef } from './calls';
+import {
+  type ArgValue,
+  type CallTarget,
+  closureFunction,
+  functionDisplayName,
+  handOverArgs,
+  invoke,
+  paramIsByRef,
+} from './calls';
 import { canCall, classScopeMessage, lookupMethod, requireClass } from './classes';
 import { debugType, valueName } from './conversions';
 import { deprecated, notice, probe, ProbeFailure, throwError, warn } from './errors';
@@ -93,6 +101,7 @@ export function evalArgs(args: Arg[], fn: Callable | undefined, name: string | u
           }
         } else
           throwError('TypeError', `Only arrays and Traversables can be unpacked, ${valueName(value ?? null)} given`);
+        keepUnpackedArguments(frame, values.slice(first), mark);
         continue;
       }
       const position = arg.name === undefined ? positional : -1;
@@ -136,6 +145,17 @@ export function evalArgs(args: Arg[], fn: Callable | undefined, name: string | u
     }
   }
   return values;
+}
+
+function keepUnpackedArguments(frame: Frame, args: ArgValue[], mark: number): void {
+  const end = frame.temporaries.length;
+  for (const { v, ref } of args) {
+    if (ref) rt().holdTemporaryReference(ref);
+    else if (v instanceof PhpObject || v instanceof PhpArray) frame.temporaries.push(v);
+  }
+  const source = frame.temporaries.splice(mark, end - mark);
+  for (const value of source) if (value instanceof Ref) value.rc--;
+  rt().release(source);
 }
 
 function claimArgumentTemporaries(frame: Frame, args: ArgValue[], first: number, mark: number): void {
@@ -225,10 +245,10 @@ export function methodCallExpression(e: Extract<Expr, { k: 'mcall' }>, discardRe
   const magic = object.cls.findMethod('__call');
   if (magic) {
     const args = evalArgs(e.args, undefined, undefined);
-    if (e.fcc) return magicClosure(object, magic, methodName);
+    if (e.fcc) return magicClosure(object, object.cls, magic, methodName);
     return invoke(
       { fn: magic.fn, thisObj: object, scope: magic.scope, staticClass: object.cls, method: magic },
-      [{ v: methodName }, { v: argsArray(args) }],
+      [{ v: methodName }, packMagicArguments(args)],
       e.row,
       discardResult
     );
@@ -248,36 +268,48 @@ function dynamicMethodName(value: Value): string {
   return value;
 }
 
-function argsArray(args: ArgValue[]): PhpArray {
+function packMagicArguments(args: ArgValue[]): ArgValue {
   const array = new PhpArray();
   for (const arg of args) {
     if (arg.name !== undefined) array.set(arg.name, arg.v);
     else array.append(arg.v);
   }
-  return array;
+  const frame = rt().frame;
+  frame.temporaries.push(array);
+  handOverArgs(
+    frame,
+    args.filter((arg) => arg.name === undefined)
+  );
+  return { v: array, temporaryCount: 1 };
 }
 
-function magicClosure(object: PhpObject, magic: Method, methodName: string): PhpObject {
-  return closureFromCallable({
-    fn: magicForwarder(magic, methodName, object, object.cls),
-    thisObj: object,
-    scope: object.cls,
-  });
+function magicClosure(object: PhpObject | undefined, cls: PhpClass, magic: Method, name: string): PhpObject {
+  const fn = magicForwarder(magic, name, object, cls, true);
+  const method: Method = { ...magic, fn, name, lname: lower(name), cls, scope: cls, isStatic: !object };
+  return closureFromCallable({ fn, method, thisObj: object, scope: cls, staticClass: cls });
 }
 
-/** A function that passes its arguments to `__call` or `__callStatic` with the name of the method a program called. */
-function magicForwarder(magic: Method, name: string, object: PhpObject | undefined, cls: PhpClass): Callable {
+function magicForwarder(
+  magic: Method,
+  name: string,
+  object: PhpObject | undefined,
+  cls: PhpClass,
+  keepsArguments = false
+): Callable {
   return {
     kind: 'native',
     name,
     acceptsNamed: true,
     params: [{ name: 'args', byRef: false, variadic: true, optional: true }],
     impl: ({ args, named }) => {
-      const forwarded = PhpArray.list(args);
-      for (const [key, value] of named ?? []) forwarded.set(key, value);
+      const values = rt().nativeHeld.at(-1)!;
+      const count = args.length + (named?.size ?? 0);
+      const nativeTransfer = keepsArguments ? undefined : { values, count };
+      const argumentsToPack: ArgValue[] = args.map((v) => ({ v, nativeTransfer }));
+      for (const [key, v] of named ?? []) argumentsToPack.push({ v, name: key });
       return invoke(
         { fn: magic.fn, thisObj: object, scope: magic.scope, staticClass: cls, method: magic },
-        [{ v: name }, { v: forwarded }],
+        [{ v: name }, packMagicArguments(argumentsToPack)],
         undefined
       );
     },
@@ -318,11 +350,11 @@ export function staticCallExpression(e: Extract<Expr, { k: 'scall' }>, discardRe
   if (thisObj) {
     const magic = thisObj.cls.findMethod('__call');
     if (magic) {
-      if (e.fcc) return magicClosure(thisObj, magic, methodName);
+      if (e.fcc) return magicClosure(thisObj, thisObj.cls, magic, methodName);
       const args = evalArgs(e.args, undefined, undefined);
       return invoke(
         { fn: magic.fn, thisObj, scope: magic.scope, staticClass: thisObj.cls, method: magic },
-        [{ v: methodName }, { v: argsArray(args) }],
+        [{ v: methodName }, packMagicArguments(args)],
         e.row,
         discardResult
       );
@@ -330,12 +362,11 @@ export function staticCallExpression(e: Extract<Expr, { k: 'scall' }>, discardRe
   }
   const magicStatic = cls.findMethod('__callstatic');
   if (magicStatic) {
-    if (e.fcc)
-      return closureFromCallable({ fn: magicForwarder(magicStatic, methodName, undefined, cls), staticClass: cls });
+    if (e.fcc) return magicClosure(undefined, cls, magicStatic, methodName);
     const args = evalArgs(e.args, undefined, undefined);
     return invoke(
       { fn: magicStatic.fn, scope: magicStatic.scope, staticClass: cls, method: magicStatic },
-      [{ v: methodName }, { v: argsArray(args) }],
+      [{ v: methodName }, packMagicArguments(args)],
       e.row,
       discardResult
     );
