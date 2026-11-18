@@ -48,6 +48,7 @@ import { payloadFacts, valueFactsOf } from './valueFacts';
 import {
   arrayPointerView,
   Cell,
+  compileTimeReadable,
   ErrorValue,
   NULL,
   optionalPayload,
@@ -86,6 +87,18 @@ interface SwitchMatch {
   values: unknown[];
   ranges: [bigint, bigint][];
   isUnnamed: boolean;
+}
+
+interface ForOperand {
+  rootType?: Type;
+  lengthOf?: (frame: Frame, value: Value) => bigint;
+  element: (value: Value, index: number, frame: Frame) => Value;
+  evaluate: TExpr['eval'];
+  type: Type;
+  staticLength?: bigint;
+  elementFact?: { value: Value };
+  constantElement?: (index: number) => { value: Value } | undefined;
+  loadType?: Type;
 }
 
 /** A block, loop, or switch that `break` and `continue` may leave. */
@@ -1675,17 +1688,7 @@ export abstract class StatementCompiler extends CallCompiler {
       breaks: [],
       broken: false,
     };
-    interface Operand {
-      rootType?: Type;
-      lengthOf?: (frame: Frame, value: Value) => bigint;
-      element: (value: Value, index: number, frame: Frame) => Value;
-      evaluate: (frame: Frame) => Value;
-      type: Type;
-      staticLength?: bigint;
-      elementFact?: { value: Value };
-      loadType?: Type;
-    }
-    const operands: Operand[] = expression.operands.map((operand, index) => {
+    const operands: ForOperand[] = expression.operands.map((operand, index) => {
       const capture = expression.captures[index];
       if (operand.isRange) {
         const start = this.coerce(this.compile(operand.value, USIZE), USIZE, operand.value);
@@ -1820,20 +1823,7 @@ export abstract class StatementCompiler extends CallCompiler {
     };
   }
 
-  private forOperand(
-    compiled: TExpr,
-    capture: Capture | undefined,
-    span: Span
-  ): {
-    rootType: Type;
-    lengthOf?: (frame: Frame, value: Value) => bigint;
-    element: (value: Value, index: number, frame: Frame) => Value;
-    evaluate: (frame: Frame) => Value;
-    type: Type;
-    staticLength?: bigint;
-    elementFact?: { value: Value };
-    loadType?: Type;
-  } {
+  private forOperand(compiled: TExpr, capture: Capture | undefined, span: Span): ForOperand {
     const byPointer = capture?.byPointer ?? false;
     const readsElement = capture !== undefined && !isDiscardName(capture) && !byPointer;
     const type = compiled.type;
@@ -1876,7 +1866,7 @@ export abstract class StatementCompiler extends CallCompiler {
       return this.error(span, `${typeName(type)} 型は、for で回せません。`);
     }
     this.resolveStorage(child, span);
-    const zero = sizeOf(child) === 0;
+    const zero = sizeOf(child) === 0 && !this.requiresComptime(child, span);
     if (type.kind === 'pointer' && type.size === 'slice') this.checkMemoryHeader(compiled, span);
     if (type.kind === 'pointer' && readsElement && !zero && staticLength !== 0n)
       this.checkMemoryOperand(compiled, span);
@@ -1891,29 +1881,40 @@ export abstract class StatementCompiler extends CallCompiler {
             value: zero ? this.zeroPointer(undefinedValue(elementType) as Pointer, child) : undefinedValue(elementType),
           }
         : undefined;
+    const readElement = byPointer
+      ? (value: Value, index: number) => {
+          const view = viewOf(value);
+          const pointer = new Pointer(view.slots, view.start + index);
+          return zero ? this.zeroPointer(pointer, child, value) : pointer;
+        }
+      : (value: Value, index: number) => {
+          if (zero) return undefinedValue(child);
+          const view = viewOf(value);
+          return view.slots.slots[view.start + index];
+        };
+    const fact = staticResultOf(compiled);
+    const knownElements = fact && (byPointer || type.kind === 'array' || compileTimeReadable(fact.value));
     return {
       rootType: type,
       type: elementType,
       elementFact,
+      constantElement: knownElements
+        ? (index) => elementFact ?? this.constantResult([compiled], ([value]) => readElement(value, index), span)
+        : undefined,
       loadType: readsElement || (byPointer && type.kind === 'pointer' && type.size === 'one') ? child : undefined,
       evaluate,
       staticLength,
       lengthOf: (_frame, value) => staticLength ?? viewOf(value).length,
-      element: byPointer
-        ? (value, index) => {
-            const view = viewOf(value);
-            const pointer = new Pointer(view.slots, view.start + index);
-            return zero ? this.zeroPointer(pointer, child, value) : pointer;
-          }
-        : (value, index, frame) => {
-            if (zero) return undefinedValue(child);
-            const view = viewOf(value);
-            return copyForFrame(frame, view.slots.slots[view.start + index], child);
-          },
+      element:
+        byPointer || zero
+          ? readElement
+          : (value, index, frame) => copyForFrame(frame, readElement(value, index), child),
     };
   }
 
   /** `inline for`, which the compiler unrolls, binding each capture to a value it may know. */
+  // code-gauge-allow functionCognitiveComplexity 30 -- Keeps lexical captures and early exits with the unrolled loop.
+  // code-gauge-allow functionNcss 47 -- Keeps lexical captures and early exits with the unrolled loop.
   private inlineFor(expression: ExpressionOf<'for'>, asStatement: boolean): { stmt: Stmt; value: TExpr } {
     if (!asStatement) this.error(expression, 'inline for の値は、この採点環境では使えません。');
     if (expression.operands.length !== 1 || expression.otherwise) {
@@ -1922,47 +1923,8 @@ export abstract class StatementCompiler extends CallCompiler {
     const [operand] = expression.operands;
     const [capture] = expression.captures;
     const fn = this.currentFn(expression);
-    const elements: TExpr[] = [];
     const operandSlot = this.localSlot();
-    let evaluateOperand: TExpr['eval'] | undefined;
-    if (operand.isRange) {
-      const start = this.knownValue(
-        this.coerce(this.compile(operand.value, USIZE), USIZE, operand.value),
-        '範囲'
-      ) as bigint;
-      if (!operand.rangeEnd) return this.error(expression, '終わりのない範囲は、inline for では回せません。');
-      const end = this.knownValue(
-        this.coerce(this.compile(operand.rangeEnd, USIZE), USIZE, operand.rangeEnd),
-        '範囲'
-      ) as bigint;
-      if (end < start) this.error(operand, '範囲の始まりが終わりより大きくなっています。');
-      this.compilationBudget.spend(Number(end - start));
-      for (let value = start; value < end; value++) elements.push(known(USIZE, value, operand));
-    } else {
-      const source = this.compile(operand.value);
-      const type = source.type;
-      if (!source.known) evaluateOperand = (frame) => copyForFrame(frame, source.eval(frame), type);
-      const compiled = source.known ? source : runtime(type, (frame) => frame.slots[operandSlot], operand);
-      this.compilationBudget.spend(
-        type.kind === 'array' ? Number(type.length) : type.kind === 'struct' ? (type.fields?.length ?? 0) : 0
-      );
-      if (type.kind === 'struct' && type.isTuple) {
-        for (const [index, field] of (type.fields ?? []).entries())
-          elements.push(this.tupleElement(compiled, index, field, operand));
-      } else if (type.kind === 'array') {
-        for (let index = 0; index < type.length; index++) {
-          const position = index;
-          const evaluate = compiled.eval;
-          elements.push(
-            compiled.known
-              ? known(type.child, (compiled.value as ZArray).get(index), operand)
-              : runtime(type.child, (frame) => (evaluate(frame) as ZArray).get(position), operand)
-          );
-        }
-      } else {
-        return this.error(operand, 'inline for は、配列・タプル・範囲にだけ使えます。');
-      }
-    }
+    const { elements, evaluateOperand } = this.inlineElements(operand, capture, operandSlot);
     const target: JumpTarget = {
       id: {},
       label: expression.label?.name,
@@ -1984,8 +1946,8 @@ export abstract class StatementCompiler extends CallCompiler {
       const locals = new Map<string, LocalBinding>();
       let binding: LocalBinding | undefined;
       if (capture && !isDiscardName(capture)) {
-        binding = this.newLocal(capture.name, element.type, true);
-        binding = { ...binding, known: element.known, value: element.value };
+        const fact = staticResultOf(element);
+        binding = { ...this.newLocal(capture.name, element.type, true), known: fact !== undefined, value: fact?.value };
         locals.set(capture.name, binding);
       }
       fn.targets.push(target);
@@ -2025,6 +1987,74 @@ export abstract class StatementCompiler extends CallCompiler {
         noreturn,
       },
       value: known(VOID, undefined, expression),
+    };
+  }
+
+  private inlineElements(
+    operand: ExpressionOf<'for'>['operands'][number],
+    capture: Capture | undefined,
+    slot: number
+  ): { elements: TExpr[]; evaluateOperand?: TExpr['eval'] } {
+    if (operand.isRange) return { elements: this.inlineRange(operand) };
+    const source = this.compile(operand.value);
+    const type = source.type;
+    const pointee = type.kind === 'pointer' && type.size === 'one' ? type.child : type;
+    if (pointee.kind === 'struct' && pointee.isTuple) {
+      return this.inlineTuple(source, pointee, capture, slot, operand);
+    }
+    const plan = this.forOperand(source, capture, operand);
+    const fact = staticResultOf(source);
+    const count =
+      type.kind === 'pointer' && type.size === 'slice' && !(fact?.value instanceof Slice)
+        ? undefined
+        : plan.staticLength;
+    if (count === undefined) this.error(operand, 'inline for の対象の長さがコンパイルのときに決まりません。');
+    this.compilationBudget.spend(Number(count));
+    const evaluate = source.known ? source.eval : (frame: Frame) => frame.slots[slot];
+    const hasCapture = capture && !isDiscardName(capture);
+    const elements = Array.from({ length: Number(count) }, (_, index) => {
+      const value = hasCapture ? plan.constantElement?.(index) : undefined;
+      return value
+        ? known(plan.type, value.value, operand)
+        : runtime(plan.type, (frame) => plan.element(evaluate(frame), index, frame), operand);
+    });
+    return { elements, evaluateOperand: source.known ? undefined : plan.evaluate };
+  }
+
+  private inlineRange(operand: ExpressionOf<'for'>['operands'][number]): TExpr[] {
+    const start = this.knownValue(this.coerce(this.compile(operand.value, USIZE), USIZE), '範囲') as bigint;
+    if (!operand.rangeEnd) return this.error(operand, '終わりのない範囲は、inline for では回せません。');
+    const end = this.knownValue(this.coerce(this.compile(operand.rangeEnd, USIZE), USIZE), '範囲') as bigint;
+    if (end < start) this.error(operand, '範囲の始まりが終わりより大きくなっています。');
+    const count = Number(end - start);
+    this.compilationBudget.spend(count);
+    return Array.from({ length: count }, (_, index) => known(USIZE, start + BigInt(index), operand));
+  }
+
+  private inlineTuple(
+    source: TExpr,
+    type: Extract<Type, { kind: 'struct' }>,
+    capture: Capture | undefined,
+    slot: number,
+    span: Span
+  ): { elements: TExpr[]; evaluateOperand?: TExpr['eval'] } {
+    const pointer = source.type.kind === 'pointer';
+    if (capture?.byPointer && !pointer)
+      this.error(span, 'タプルを |*x| で受け取るには、inline for (&tuple) |*x| と書いてください。');
+    const compiled = source.known
+      ? source
+      : { ...runtime(source.type, (frame) => frame.slots[slot], span), staticResult: staticResultOf(source) };
+    const value = pointer ? this.dereferenced(compiled, span) : compiled;
+    const fields = this.structFields(type, span);
+    this.compilationBudget.spend(fields.length);
+    const elements = fields.map((field, index) => {
+      if (!pointer) return this.tupleElement(value, index, field, span);
+      const member = this.structField(value, type, field.name, span);
+      return capture?.byPointer ? this.addressOf(member) : member;
+    });
+    return {
+      elements,
+      evaluateOperand: source.known ? undefined : (frame) => copyForFrame(frame, source.eval(frame), source.type),
     };
   }
 

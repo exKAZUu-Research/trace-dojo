@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 684 -- Groups the related standard library operations that share this module.
+// code-gauge-allow-file fileNcss 690 -- Groups the related standard library operations that share this module.
 import { transferCost } from '../allocation';
 import { indexOutOfBounds, PANIC, panic } from '../arith';
 import type { Expression, Span } from '../ast';
@@ -11,6 +11,7 @@ import type { Frame } from '../runtime';
 import { copyForStorage, known, newArray, runtime, type SemaApi, type TExpr, undefinedValue } from '../semaBase';
 import { singleValueOf } from '../singleValue';
 import {
+  arrayOf,
   BOOL,
   CONST_U8_SLICE,
   fnType,
@@ -36,6 +37,7 @@ import {
   storageOverlaps,
   storeInto,
   type Value,
+  type ZArray,
   ZStruct,
 } from '../values';
 import { WeakValueMap } from '../weakValueMap';
@@ -784,8 +786,9 @@ const MEMBERS: Record<string, () => Member> = {
       sliceOf(sliceOf(type, true), true),
       slicesArg
     );
+    const empty = emptySliceLiteral(sema, type, call.span);
     return allocatingCall(sliceOf(type, false), [allocator, slices], call.span, ([value], frame) =>
-      joiningPlan(value as Slice, undefined, () => frame.runtime.spend(), sizeOf(type) === 0)
+      joiningPlan(value as Slice, undefined, empty, () => frame.runtime.spend(), sizeOf(type) === 0)
     );
   }),
   join: fnMember('std.mem.join', (sema, call) => {
@@ -797,8 +800,9 @@ const MEMBERS: Record<string, () => Member> = {
       sliceOf(CONST_U8_SLICE, true),
       slicesArg
     );
+    const empty = emptySliceLiteral(sema, U8, call.span);
     return allocatingCall(sliceOf(U8, false), [allocator, separator, slices], call.span, ([sep, value], frame) =>
-      joiningPlan(value as Slice, sep as Slice, () => frame.runtime.spend())
+      joiningPlan(value as Slice, sep as Slice, empty, () => frame.runtime.spend())
     );
   }),
   sort: sorter('std.mem.sort', 'block'),
@@ -999,14 +1003,21 @@ function replacementPlan(
   };
 }
 
+function emptySliceLiteral(sema: SemaApi, type: Type, span: Span): Slice {
+  const literal = known(arrayOf(0, type), newArray([], undefined), span);
+  const array = (sema.addressOf(literal).value as Pointer).load() as ZArray;
+  return new Slice(array, array.offset, 0);
+}
+
 // code-gauge-allow functionCognitiveComplexity 19 -- Plans exact lengths before traversing only stored data.
 function joiningPlan(
   parts: Slice,
   separator: Slice | undefined,
+  empty: Slice,
   spend: () => void,
   zero = false
 ): AllocationPlan | Slice {
-  if (parts.lengthValue === 0n) return newSlice([]);
+  if (parts.lengthValue === 0n) return empty;
   const slices: Slice[] = [];
   let length = BigInt(separator?.length ?? 0) * BigInt(Math.max(0, parts.length - 1));
   for (let index = 0; index < parts.length; index++) {

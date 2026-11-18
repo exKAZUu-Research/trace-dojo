@@ -985,6 +985,32 @@ test('copies destructured arrays, inline loop values, and optional return payloa
   ).toMatchObject({ kind: 'executed', stderr: '1', uncaughtException: undefined });
 });
 
+test.each([
+  ['var a=[_]u8{1,2};inline for(&a)|*x|x.*+=1;std.debug.print("{any}",.{a});', '{ 2, 3 }'],
+  ['var a=[_]u8{1,2};inline for(&a)|x|{std.debug.print("{}",.{x});a[1]=9;}', '19'],
+  [
+    'var a=[_]u8{1,2};inline for(blk:{std.debug.print("x",.{});break :blk &a;})|*x|x.*+=1;std.debug.print("{any}",.{a});',
+    'x{ 2, 3 }',
+  ],
+  [
+    'var n:u8=1;_=&n;var m:u16=2;_=&m;var a=.{n,m};inline for(&a)|*x|x.*+=1;std.debug.print("{} {}",.{a[0],a[1]});',
+    '2 3',
+  ],
+  ['const a=[_]type{u8,u16};inline for(&a)|*p|std.debug.print("{} ",.{p.*});', 'u8 u16 '],
+])('inline loop captures preserve the operand semantics for %s', (body, stderr) => {
+  const source = `const std=@import("std");pub fn main()void{${body}}`;
+  expect(executeProgram('zig', source)).toMatchObject({ kind: 'executed', stderr, uncaughtException: undefined });
+});
+
+test.each([
+  'const a=[_]u8{1,2};inline for(a)|*x|{_=x;}',
+  'const a=.{@as(u8,1),@as(u16,2)};inline for(a)|*x|{_=x;}',
+  'const a=[_]u8{1,2};inline for(&a)|*x|x.*+=1;',
+  'var a=[_]u8{1,2};const s:[]u8=&a;inline for(s)|*x|x.*+=1;',
+])('inline loops reject invalid pointer captures for %s', (body) => {
+  expect(executeProgram('zig', `pub fn main()void{${body}}`)).toMatchObject({ kind: 'compileError' });
+});
+
 test('preserves pointer identity through array views and specializes inline switch ranges', () => {
   expect(
     executeProgram(
@@ -3371,6 +3397,11 @@ test('empty allocations share their aligned location across allocator operations
     stderr: 'true true true false false',
     uncaughtException: undefined,
   });
+});
+
+test('join and concat without inputs share the typed empty literal', () => {
+  const source = `const std=@import("std");pub fn main(init:std.process.Init)!void{const a=try std.mem.concat(init.gpa,u8,&.{});const b=try std.mem.concat(init.gpa,u8,&.{});const c=try std.mem.join(init.gpa,"",&.{});const d=try std.mem.join(init.gpa,"",&.{});const e=try init.gpa.alloc(u8,0);const literal=&[0]u8{};std.debug.print("{} {} {} {} {}",.{a[0..0]==b[0..0],c[0..0]==d[0..0],a[0..0]==c[0..0],a[0..0]==literal,a[0..0]==e[0..0]});}`;
+  expect(executeProgram('zig', source)).toMatchObject({ kind: 'executed', stderr: 'true true true true false' });
 });
 
 test('configured debug allocators preserve the byte limit across failed growth, successful resizing, and free', () => {
