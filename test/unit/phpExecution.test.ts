@@ -1566,6 +1566,11 @@ test('bounds combined allowed tags before strip_tags builds the list', () => {
   });
 });
 
+test.each(['PHP_INT_MAX', '1e40'])('counts every thousands separator in the formatted length for %s', (value) => {
+  const result = run(`<?php number_format(${value}, 0, '.', str_repeat('x', 200000)); echo 'unreachable';`);
+  expect(result.kind === 'executed' && result.stdout).toMatch(/^\nFatal error: Allowed memory size/);
+});
+
 test('counts matches without spending slots on omitted preg_match_all output', () => {
   vi.restoreAllMocks();
   const result = run(`<?php echo preg_match_all('/(a)()()()()()/', str_repeat('a', 200000));`);

@@ -287,8 +287,12 @@ function formatIntNumber(value: bigint, { decimals, point, separator }: NumberFo
     const power = decimals < -19n ? 0n : 10n ** -decimals;
     magnitude = power === 0n ? 0n : ((magnitude + power / 2n) / power) * power;
   }
-  const fraction = decimals > 0n ? `${point}${'0'.repeat(Number(decimals))}` : '';
-  return `${value < 0n && magnitude !== 0n ? '-' : ''}${groupThousands(magnitude.toString(), separator)}${fraction}`;
+  const integer = magnitude.toString();
+  const places = decimals > 0n ? Number(decimals) : 0;
+  const sign = value < 0n && magnitude !== 0n ? '-' : '';
+  checkFormattedLength(integer, places, point, separator, sign);
+  const fraction = places > 0 ? `${point}${'0'.repeat(places)}` : '';
+  return `${sign}${groupThousands(integer, separator)}${fraction}`;
 }
 
 function formatFloatNumber(value: number, { decimals, point, separator }: NumberFormat): string {
@@ -298,7 +302,16 @@ function formatFloatNumber(value: number, { decimals, point, separator }: Number
   if (!Number.isFinite(rounded)) return 'inf';
   const [integer, fraction] = fixedDigits(rounded, Math.max(places, 0)).split('.');
   const sign = value < 0 && rounded !== 0 ? '-' : '';
+  checkFormattedLength(integer, fraction?.length ?? 0, point, separator, sign);
   return `${sign}${groupThousands(integer, separator)}${fraction === undefined ? '' : `${point}${fraction}`}`;
+}
+
+function checkFormattedLength(integer: string, places: number, point: string, separator: string, sign: string): void {
+  const groups = Math.floor((integer.length - 1) / 3);
+  const fraction = places > 0 ? point.length + places : 0;
+  const bytes = sign.length + integer.length + groups * separator.length + fraction;
+  rt().ensureStringFits(bytes);
+  rt().spend(Math.ceil(bytes / 64));
 }
 
 function groupThousands(digits: string, separator: string): string {

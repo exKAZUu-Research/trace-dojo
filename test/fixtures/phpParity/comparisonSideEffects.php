@@ -21,3 +21,12 @@ $left->later = 1;
 set_error_handler(function () use ($left) { $left->later = 2; });
 var_dump($left == $right);
 restore_error_handler();
+class DynamicCompared extends Compared {}
+$left = new DynamicCompared;
+$right = new DynamicCompared;
+@$left->d = 1;
+@$right->d = 1;
+$left->first = new ChangesComparison;
+$right->first = 'ok';
+$right->later = 2;
+var_dump($left == $right, isset($left->later));

@@ -15,7 +15,7 @@ function wrapAllowedTags(values: PhpArray): string {
   const runtime = rt();
   const tags: string[] = [];
   let bytes = 0;
-  for (const item of values.values()) {
+  for (const item of values.iterValues()) {
     const tag = toStr(item);
     bytes += tag.length + 2;
     runtime.ensureStringFits(bytes);

@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 670 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 673 -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import { LIMITS } from '../interpreter/limits';
 import type { FunctionDecl } from './ast';
@@ -72,6 +72,7 @@ export interface CallRecord {
   args: Value[];
   argumentRefs?: (Ref | undefined)[];
   boundFrame?: Frame;
+  thisObj?: PhpObject;
   /** The arguments a variadic parameter collected by name, which traces show as `name: value`. */
   named?: [string, Value][];
   /** The row of the call in its caller, or undefined when native code made the call. */
@@ -106,6 +107,7 @@ setCallCapture(() =>
     named: callNamedArguments(record),
     argumentRefs: undefined,
     boundFrame: undefined,
+    thisObj: undefined,
   }))
 );
 
@@ -168,6 +170,7 @@ function recordFor(target: CallTarget, args: Value[], row: number | undefined): 
       name: method.name,
       className: method.scope.name,
       type: thisObj && !method.isStatic ? '->' : '::',
+      thisObj,
       args,
       row,
     };
@@ -177,6 +180,7 @@ function recordFor(target: CallTarget, args: Value[], row: number | undefined): 
       name: fn.name,
       className: target.scope?.name ?? fn.decl.className,
       type: thisObj ? '->' : '::',
+      thisObj,
       args,
       row,
     };
@@ -186,6 +190,7 @@ function recordFor(target: CallTarget, args: Value[], row: number | undefined): 
       name: fn.decl.name,
       className: scope?.name,
       type: scope ? (thisObj ? '->' : '::') : undefined,
+      thisObj,
       args,
       row,
     };
@@ -382,6 +387,7 @@ function bindNative(
     if (record && index < record.args.length && typeof value === 'string') record.args[index] = value;
   };
   const named = checkNamedArgs(params, args);
+  if (record && named) record.named = [...named];
   const variadic = params.at(-1)?.variadic ? params.at(-1) : undefined;
   const fixed = variadic ? params.length - 1 : params.length;
   let lastGiven = positional.length - 1;
@@ -414,7 +420,7 @@ function bindNative(
         const arg = positional[rest];
         append(
           param.byRef ? (arg.ref?.v ?? arg.v) : coerceArg(param, rest, arg.v, strict, name),
-          param.byRef ? (arg.ref ?? Ref.temporary(arg.v)) : arg.ref
+          param.byRef ? (arg.ref ?? Ref.temporary(arg.v)) : undefined
         );
       }
       break;

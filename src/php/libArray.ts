@@ -258,6 +258,8 @@ defineFunction('array_search(mixed $needle, array $haystack, bool $strict = fals
 // Building arrays ----------------------------------------------------------------------------------------------------
 
 defineFunction('array_merge(array ...$arrays): array', ({ args }) => {
+  const reused = mergeReuse(args);
+  if (reused) return share(reused);
   const result = new PhpArray();
   for (const [index, value] of args.entries()) {
     if (!(value instanceof PhpArray))
@@ -271,11 +273,21 @@ defineFunction('array_merge(array ...$arrays): array', ({ args }) => {
   return result;
 });
 defineFunction('array_merge_recursive(array ...$arrays): array', ({ args }) => {
+  const reused = mergeReuse(args);
+  if (reused) return share(reused);
   const result = new PhpArray();
   const combination = new ArrayCombination('merge');
   for (const value of args) combination.run(result, arr(value));
   return result;
 });
+
+function mergeReuse(args: Value[]): PhpArray | undefined {
+  if (args.length !== 2) return;
+  const [left, right] = args;
+  if (!(left instanceof PhpArray && right instanceof PhpArray)) return;
+  const candidate = left.size === 0 ? right : right.size === 0 ? left : undefined;
+  if (candidate?.keepsKeysWhenMerged()) return candidate;
+}
 
 interface CombinationFrame {
   target: PhpArray;

@@ -497,17 +497,14 @@ function* objectComparisonPairs(
 
 function* propertyComparisonPairs(a: PhpObject, b: PhpObject): Generator<ComparisonPair, number> {
   const dynamic = hasDynamicProps(a) || hasDynamicProps(b);
-  if (dynamic) {
-    const leftCount = presentPropertyCount(a);
-    const rightCount = presentPropertyCount(b);
-    if (leftCount !== rightCount) return Math.sign(leftCount - rightCount);
-  }
-  const names = dynamic ? [...a.props.keys()] : new Set([...a.props.keys(), ...b.props.keys()]);
+  if (dynamic && a.props.size !== b.props.size) return Math.sign(a.props.size - b.props.size);
+  const names = dynamic ? a.props.keys() : new Set([...a.props.keys(), ...b.props.keys()]);
   for (const name of names) {
+    if (dynamic && !b.props.has(name)) return 1;
     const left = comparisonProperty(a, name);
     const right = comparisonProperty(b, name);
     if (left === undefined) {
-      if (!dynamic && right !== undefined) return 1;
+      if (right !== undefined) return 1;
       continue;
     }
     if (right === undefined) return 1;
@@ -519,12 +516,6 @@ function* propertyComparisonPairs(a: PhpObject, b: PhpObject): Generator<Compari
 function comparisonProperty(object: PhpObject, name: string): Value | undefined {
   const slot = object.props.get(name);
   return slot === undefined || slot === UNINIT ? undefined : deref(slot);
-}
-
-function presentPropertyCount(object: PhpObject): number {
-  let count = 0;
-  for (const slot of object.props.values()) if (slot !== UNINIT) count++;
-  return count;
 }
 
 function hasDynamicProps(object: PhpObject): boolean {

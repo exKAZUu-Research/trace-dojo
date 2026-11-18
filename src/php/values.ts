@@ -465,6 +465,12 @@ export class PhpArray {
     }
     return true;
   }
+
+  keepsKeysWhenMerged(): boolean {
+    if (this.order?.hasDensePackedStorage() ?? (this.orderPacked !== false && this.isList())) return true;
+    for (const key of this.map.keys()) if (typeof key !== 'string') return false;
+    return true;
+  }
 }
 
 export type Visibility = 'public' | 'protected' | 'private';
@@ -715,6 +721,10 @@ class ArrayOrder {
 
   get(key: Key): ArrayEntry | undefined {
     return this.entries.get(typeof key === 'bigint' ? key + this.keyOffset : key);
+  }
+
+  hasDensePackedStorage(): boolean {
+    return Boolean(this.packed && this.nextIndex === this.entries.size);
   }
 
   cursor(): ArrayCursor {

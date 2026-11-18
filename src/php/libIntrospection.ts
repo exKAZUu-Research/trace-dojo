@@ -1,11 +1,11 @@
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import { callCallback } from './callables';
-import { backtraceLimit, callArguments, callNamedArguments, type CallRecord, callStack, frameArguments } from './calls';
+import { backtraceLimit, callArguments, callNamedArguments, type CallRecord, callStack } from './calls';
 import * as conversionsModule from './conversions';
 import { clearLastError, deprecated, lastError, throwError, warn } from './errors';
 import { defineConstant, defineFunction } from './native';
 import { toStr } from './operators';
-import { type Frame, PhpThrow, rt, SCRIPT_PATH } from './runtime';
+import { PhpThrow, rt, SCRIPT_PATH } from './runtime';
 import { UnsupportedFeatureError } from './unsupported';
 import { PhpArray, PhpObject, type Value } from './values';
 
@@ -36,36 +36,15 @@ defineFunction('debug_backtrace(int $options = DEBUG_BACKTRACE_PROVIDE_OBJECT, i
   const limit = backtraceLimit(args[1] as bigint | undefined);
   // The last record is debug_backtrace's own call.
   const records = callStack.slice(0, -1);
-  const frames = framesOf(records);
   const trace = new PhpArray();
   for (let index = records.length - 1; index >= 0; index--) {
     if (trace.size >= limit) break;
-    trace.append(backtraceFrame(records[index], frames[index], options));
+    trace.append(backtraceFrame(records[index], options));
   }
   return trace;
 });
 
-/**
- * The frames of user code that the records called, matched up in order: native functions run without one. A record
- * without a frame shows no object and the arguments it was called with.
- */
-function framesOf(records: CallRecord[]): (Frame | undefined)[] {
-  const frames = rt().frames.slice(1);
-  let next = 0;
-  return records.map((record) => {
-    const frame = frames.at(next);
-    const matches = frame !== undefined && frameName(frame) === record.name;
-    if (matches) next++;
-    return matches ? frame : undefined;
-  });
-}
-
-function frameName(frame: Frame): string | undefined {
-  if (frame.method) return frame.method.name;
-  return frame.fn?.kind === 'user' ? frame.fn.decl.name : frame.fn?.name;
-}
-
-function backtraceFrame(record: CallRecord, frame: Frame | undefined, options: bigint): PhpArray {
+function backtraceFrame(record: CallRecord, options: bigint): PhpArray {
   const entry = new PhpArray();
   if (record.row !== undefined) {
     entry.set('file', SCRIPT_PATH);
@@ -74,11 +53,11 @@ function backtraceFrame(record: CallRecord, frame: Frame | undefined, options: b
   entry.set('function', record.name);
   if (record.className !== undefined) {
     entry.set('class', record.className);
-    if ((options & 1n) !== 0n && record.type === '->' && frame?.thisObj) entry.set('object', frame.thisObj);
+    if ((options & 1n) !== 0n && record.type === '->' && record.thisObj) entry.set('object', record.thisObj);
     entry.set('type', record.type ?? '::');
   }
   if ((options & 2n) === 0n) {
-    const args = PhpArray.list(frame ? frameArguments(frame) : callArguments(record));
+    const args = PhpArray.list(callArguments(record));
     for (const [name, value] of callNamedArguments(record)) args.set(name, value);
     entry.set('args', args);
   }
