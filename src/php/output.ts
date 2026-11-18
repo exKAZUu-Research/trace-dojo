@@ -39,6 +39,7 @@ function debugEntries(object: PhpObject): [string | bigint, Slot, string][] {
   for (const [key, slot] of object.props) {
     const name = propNameOf(key);
     const decl = declForKey(object.cls, key);
+    if (slot === UNINIT && !decl?.type) continue;
     let label = `"${name}"`;
     if (decl?.visibility === 'protected') label = `"${name}":protected`;
     else if (decl?.visibility === 'private') label = `"${name}":"${decl.cls.name}":private`;

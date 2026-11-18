@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 576 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 577 -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import type { Expr, ListItem } from './ast';
 import { callMethod } from './callables';
@@ -221,7 +221,7 @@ function propPlace(object: PhpObject, name: string): Place {
       const ref = object.props.get(decl?.key ?? name);
       return ref instanceof Ref ? ref.typeOwners() : undefined;
     },
-    getForIsset: () => (issetProp(object, name, scope) ? readProp(object, name, scope, true) : undefined),
+    getForIsset: () => readProp(object, name, scope, 'coalesce'),
     warnUndefined: () => {
       if (object.cls.findMethod('__get')) return;
       // PHP creates the property (deprecating a dynamic one) before it warns about reading it.
@@ -242,7 +242,7 @@ function propPlace(object: PhpObject, name: string): Place {
         classesModule.checkIndirectModification(object, name, scope, mode);
         const runtime = rt();
         runtime.lastReturnRef = undefined;
-        const value = readProp(object, name, scope, true);
+        const value = readProp(object, name, scope, 'quiet');
         const returned = runtime.lastReturnRef;
         runtime.lastReturnRef = undefined;
         if (returned) return new RefPlace(returned);
@@ -269,14 +269,15 @@ function readPropertyPlace(
     );
   if (!issetPropExists(object, name, scope)) {
     const magic = object.cls.findMethod('__get');
-    if (!magic) return;
+    const decl = classesModule.lookupProp(object.cls, name, scope);
+    if (!magic && (!decl?.type || decl.isStatic)) return;
   }
-  return readProp(object, name, scope, true);
+  return readProp(object, name, scope, operation === 'assignOp' || operation === 'incdec' ? 'update' : 'quiet');
 }
 
 function issetPropExists(object: PhpObject, name: string, scope: PhpClass | undefined): boolean {
   const decl = classesModule.lookupProp(object.cls, name, scope);
-  if (decl && !decl.isStatic) return object.props.has(decl.key);
+  if (decl && !decl.isStatic) return object.props.has(decl.key) && !object.unsetProperties?.has(decl.key);
   return object.props.has(name);
 }
 

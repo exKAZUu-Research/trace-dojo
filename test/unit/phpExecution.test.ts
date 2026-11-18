@@ -1091,3 +1091,27 @@ test('completes packed splice and keyed queues with time to spare', () => {
     '<?php $people=range(1,4000);$i=0;while(count($people)>1){$i=($i+2)%count($people);array_splice($people,$i,1);}echo $people[0],"|";$tasks=[];for($i=0;$i<5000;$i++)$tasks["task$i"]=$i%7;$sum=0;while($tasks)$sum+=array_shift($tasks);echo $sum;';
   expect(run(source)).toMatchObject({ kind: 'executed', stdout: '3910|14995' });
 });
+
+test.each([
+  ['new class{public self $x=null;}', 'type self may not be null'],
+  ['new class{public self $x="s";}', 'property class@anonymous::$x of type self'],
+  ['class P{} new class extends P{public parent $x=null;}', 'type parent may not be null'],
+  ['class P{} new class extends P{public parent $x="s";}', 'property P@anonymous::$x of type parent'],
+  ...['private', 'protected'].flatMap((visibility) =>
+    ['get;', 'set;', 'get;set;'].map((hooks) => [
+      `interface I{${visibility} int $x{${hooks}}}`,
+      'Property in interface cannot be protected or private',
+    ])
+  ),
+  ...['public(set)', 'protected(set)', 'private(set)'].flatMap((visibility) => [
+    [`class A{public ${visibility} $x=1;}`, 'Property with asymmetric visibility A::$x must have type'],
+    [
+      `class A{function __construct(public ${visibility} $x=1){}}`,
+      'Property with asymmetric visibility A::$x must have type',
+    ],
+  ]),
+])('checks scoped property declaration contracts: %s', (source, message) => {
+  const result = run(`<?php ${source};`);
+  expect(result.kind).toBe('compileError');
+  expect(JSON.stringify(result)).toContain(message);
+});

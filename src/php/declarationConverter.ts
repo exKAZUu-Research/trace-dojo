@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 648 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 653 -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import type { Node } from '@willbooster/web-tree-sitter';
 
@@ -412,7 +412,7 @@ export abstract class DeclarationConverter extends ConverterBase {
     if (literalType === undefined || defaultFits(type, literalType)) return;
     const display = describeType(
       type,
-      property && property.kind !== 'trait'
+      property && property.kind !== 'trait' && !property.isAnonymous
         ? {
             name: property.name,
             parent: property.parent ? { name: property.parent } : undefined,
@@ -579,7 +579,13 @@ export abstract class DeclarationConverter extends ConverterBase {
             param.row,
             '可変長引数はプロパティに昇格できません（Cannot declare variadic promoted property）。'
           );
-        this.checkPropertyType(param.row, decl.name, param.type, param.promote.isReadonly || decl.isReadonly, false);
+        this.checkPropertyType(param.row, decl.name, {
+          ...param.promote,
+          name: param.name,
+          type: param.type,
+          isReadonly: param.promote.isReadonly || decl.isReadonly,
+          isStatic: false,
+        });
         decl.props.push({
           name: param.name,
           visibility: param.promote.visibility,
@@ -682,10 +688,9 @@ export abstract class DeclarationConverter extends ConverterBase {
   private checkPropertyType(
     node: Node | number,
     className: string,
-    type: TypeDecl | undefined,
-    isReadonly: boolean,
-    isStatic: boolean
+    property: Pick<PropertyDeclAst, 'name' | 'type' | 'isReadonly' | 'isStatic' | 'setVisibility'>
   ): void {
+    const { name, type, isReadonly, isStatic, setVisibility } = property;
     if (
       type &&
       (type.k === 'named'
@@ -696,14 +701,15 @@ export abstract class DeclarationConverter extends ConverterBase {
     if (isReadonly && !type && !isStatic)
       this.error(
         node,
-        `readonly のプロパティには型が必要です（Readonly property ${className}::$... must have type）。`
+        `readonly のプロパティには型が必要です（Readonly property ${className}::$${name} must have type）。`
       );
+    if (setVisibility && !type)
+      this.error(node, `Property with asymmetric visibility ${className}::$${name} must have type`);
     if (isReadonly && isStatic)
       this.error(node, 'static のプロパティは readonly にできません（Static property cannot be readonly）。');
   }
 
   // code-gauge-allow functionNcss 39 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
-  // code-gauge-allow functionCognitiveComplexity 29 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
   protected properties(member: Node, decl: ClassDecl, kind: ClassDecl['kind']): void {
     const attributes = member.childForFieldName('attributes');
     if (attributes) this.unsupported(attributes, '属性（#[...]）');
@@ -714,11 +720,12 @@ export abstract class DeclarationConverter extends ConverterBase {
       );
     }
     const modifiers = this.memberModifiers(member);
+    if (kind === 'interface' && modifiers.visibility !== undefined && modifiers.visibility !== 'public')
+      this.error(member, 'Property in interface cannot be protected or private');
     const typeNode = member.childForFieldName('type');
     const type = typeNode ? this.typeDecl(typeNode) : undefined;
     if (typeNode && type) this.checkTypeScope(typeNode, type);
     const isReadonly = modifiers.isReadonly || decl.isReadonly;
-    this.checkPropertyType(member, decl.name, type, isReadonly, modifiers.isStatic);
     const hookList = member.namedChildren.find((child) => child.type === 'property_hook_list');
     for (const element of member.namedChildren.filter((child) => child.type === 'property_element')) {
       const name = this.variableName(element.childForFieldName('name') as Node);
@@ -728,6 +735,7 @@ export abstract class DeclarationConverter extends ConverterBase {
           `プロパティ ${decl.name}::$${name} は、すでに宣言されています（Cannot redeclare ${decl.name}::$${name}）。`
         );
       }
+      this.checkPropertyType(element, decl.name, { ...modifiers, name, type, isReadonly });
       const defaultNode = element.childForFieldName('default_value');
       if (defaultNode && isReadonly) {
         this.error(

@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 780 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 785 -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import {
   applyOperator,
@@ -406,7 +406,8 @@ function isThrowableObject(object: PhpObject): boolean {
 
 /** Evaluates an expression without the warnings an undefined variable or key would raise, as `??` and `empty` do. */
 // code-gauge-allow functionNcss 37 -- One case per expression kind, as PHP evaluates each kind differently.
-export function evQuiet(e: Expr): Value {
+// code-gauge-allow functionCognitiveComplexity 19 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+export function evQuiet(e: Expr, mode: 'isset' | 'coalesce' = 'isset'): Value {
   const runtime = rt();
   switch (e.k) {
     case 'var': {
@@ -419,18 +420,21 @@ export function evQuiet(e: Expr): Value {
     }
     case 'idx': {
       if (e.index === undefined) throwError('Error', 'Cannot use [] for reading');
-      const base = evQuiet(e.base);
+      const base = evQuiet(e.base, mode);
       const index = ev(e.index);
       if (base === null) return null;
       return readIndex(base, index, true);
     }
     case 'prop': {
-      const object = evQuiet(e.obj);
+      const object = evQuiet(e.obj, mode);
       if (!(object instanceof PhpObject)) return null;
       const name = memberName(e.name);
       const scope = runtime.frame.scope;
-      if (!issetProp(object, name, scope)) return null;
-      return readProp(object, name, scope, true);
+      if (mode === 'coalesce') return readProp(object, name, scope, 'coalesce');
+      const decl = classesModule.lookupProp(object.cls, name, scope);
+      if (!(decl?.hooks?.get && classesModule.canAccessProp(decl, scope)) && !issetProp(object, name, scope))
+        return null;
+      return readProp(object, name, scope, 'quiet');
     }
     case 'sprop': {
       const cls = resolveClassRef(e.cls);
@@ -858,8 +862,8 @@ function cloneExpression(e: Extract<Expr, { k: 'clone' }>): Value {
   return cloneObject(value);
 }
 
-// code-gauge-allow functionCognitiveComplexity 28 -- One case per expression kind, as PHP evaluates each kind differently.
-// code-gauge-allow functionNcss 35 -- One case per expression kind, as PHP evaluates each kind differently.
+// code-gauge-allow functionCognitiveComplexity 29 -- One case per expression kind, as PHP evaluates each kind differently.
+// code-gauge-allow functionNcss 37 -- One case per expression kind, as PHP evaluates each kind differently.
 export function cloneObject(original: PhpObject, withValue?: Value): PhpObject {
   const runtime = rt();
   const scope = runtime.frame.scope;
@@ -882,6 +886,7 @@ export function cloneObject(original: PhpObject, withValue?: Value): PhpObject {
       } else copy.props.set(key, share(slot.v));
     } else copy.props.set(key, typeof slot === 'symbol' ? slot : share(slot));
   }
+  if (original.unsetProperties) copy.unsetProperties = new Set(original.unsetProperties);
   copy.internal = cloneInternal(original, copy);
   copy.cloning = true;
   try {
@@ -935,7 +940,7 @@ function binary(e: Extract<Expr, { k: 'bin' }>): Value {
       return toBool(ev(e.l)) !== toBool(ev(e.r));
     }
     case '??': {
-      return evQuiet(e.l) ?? ev(e.r);
+      return evQuiet(e.l, 'coalesce') ?? ev(e.r);
     }
   }
   const mark = runtime.frame.temporaries.length;

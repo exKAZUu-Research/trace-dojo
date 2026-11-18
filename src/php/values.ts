@@ -841,6 +841,7 @@ export class PhpObject {
 
   readonly arrayHolders: { array: WeakRef<PhpArray>; key: Key }[] = [];
   props = new PropertyMap(this);
+  unsetProperties?: Set<string>;
   private internalValue?: unknown;
   get internal(): unknown {
     return this.internalValue;
@@ -1072,12 +1073,14 @@ class PropertyMap extends Map<string, Slot> {
   override set(key: string, value: Slot): this {
     const old = this.get(key);
     super.set(key, value);
+    if (value !== UNINIT) this.owner.unsetProperties?.delete(key);
     trackOwner(value, this.owner, key);
     dropped(old);
     return this;
   }
   override clear(): void {
     invalidateOwner(this.owner);
+    this.owner.unsetProperties?.clear();
     super.clear();
   }
   override delete(key: string): boolean {

@@ -574,7 +574,7 @@ function foreachObject(statement: Extract<Stmt, { k: 'foreach' }>, object: PhpOb
       if (result !== 'next') return result;
       continue;
     }
-    const completion = foreachIteration(statement, name, readProp(object, name, scope, true));
+    const completion = foreachIteration(statement, name, readProp(object, name, scope, 'quiet'));
     if (completion !== 'next') return completion;
   }
   return undefined;
