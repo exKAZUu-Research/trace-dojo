@@ -35,7 +35,7 @@ function checkValueDuplicates(c: Checker, symbol: Sym): void {
     for (const entry of entries) c.error(entry.name, message);
     return;
   }
-  if (entries.some((entry) => entry.kind === 'function') && entries.some((entry) => entry.kind === 'var')) {
+  if (entries.some((entry) => entry.kind === 'function') && entries.some(isFunctionScopedVariable)) {
     for (const entry of entries) c.error(entry.name, `${name} はすでに宣言されています。`);
     return;
   }
@@ -50,7 +50,13 @@ function checkValueDuplicates(c: Checker, symbol: Sym): void {
     }
     return;
   }
-  if (entries.every((entry) => entry.kind === 'var')) checkVarRedeclarations(c, symbol);
+  if (entries.some((entry) => entry.kind === 'var') && entries.every(isFunctionScopedVariable))
+    checkVarRedeclarations(c, symbol);
+}
+
+/** A `var` or a parameter, which a `var` of the same function redeclares. */
+function isFunctionScopedVariable(entry: Sym['valueEntries'][number]): boolean {
+  return entry.kind === 'var' || entry.kind === 'parameter';
 }
 
 /**
@@ -66,15 +72,22 @@ function isLexical(entry: Sym['valueEntries'][number]): boolean {
   return entry.kind === 'let' || entry.kind === 'const';
 }
 
-/** A `var` declared again must have the same type each time. */
+/**
+ * A `var` declared again, or redeclaring a parameter, must have the same type each time; a parameter without an
+ * annotation, which a contextual signature may type, is not compared.
+ */
 function checkVarRedeclarations(c: Checker, symbol: Sym): void {
   const types = symbol.valueDeclarations.map((declaration) =>
-    c.silently(() => c.statements.declaredVariableType(symbol, declaration))
+    symbol.valueKind === 'parameter' && declaration === symbol.valueDeclaration
+      ? c.typeNodes.annotationType(declaration.childForFieldName('type'))
+      : c.silently(() => c.statements.declaredVariableType(symbol, declaration))
   );
   const [first] = types;
+  if (!first) return;
   for (const [index, type] of types.entries()) {
     if (index === 0) continue;
     const native = nativeGlobalRedeclaration(c, symbol, symbol.valueDeclarations[index]);
+    if (!type) continue;
     const identical =
       isIntrinsic(type, 'any') !== isIntrinsic(first, 'any') ? false : c.relations.identical(type, first);
     if (native ?? identical) continue;

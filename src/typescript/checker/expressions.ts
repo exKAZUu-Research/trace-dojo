@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 481 -- Resolves expressions, lexical references, closure captures, and contextual assignment diagnostics; memoization is separate.
+// code-gauge-allow-file fileNcss 496 -- Resolves expressions, lexical references, closure captures, and contextual assignment diagnostics; memoization is separate.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import { unsupportedMessage } from '../unsupported';
@@ -463,6 +463,10 @@ export class ExpressionChecker {
 
   // code-gauge-allow functionCognitiveComplexity 22 -- Follows TypeScript's rules for uses before a declaration, which depend on when the use runs.
   checkUsedBeforeDeclaration(node: TreeNode, symbol: Sym): void {
+    if (symbol.valueKind === 'function') {
+      this.checkParameterUseOfBodyFunction(node, symbol);
+      return;
+    }
     if (
       symbol.valueKind !== 'let' &&
       symbol.valueKind !== 'const' &&
@@ -487,6 +491,23 @@ export class ExpressionChecker {
     }
     const kind = symbol.valueKind === 'class' ? 'クラス' : '変数';
     this.c.error(node, `${kind} ${symbol.name} は宣言より前で使われています。`);
+  }
+
+  /**
+   * Reports a parameter's initializer using, other than in a function it declares, a function its function's body
+   * declares, which tsc rejects as declared after the parameter.
+   */
+  private checkParameterUseOfBodyFunction(node: TreeNode, symbol: Sym): void {
+    const declaration = symbol.valueDeclaration;
+    let current: TreeNode | null = node;
+    while (current && current.parent?.type !== 'formal_parameters') {
+      if (laterRunningTypes.has(current.type)) return;
+      current = current.parent;
+    }
+    const body = current?.parent?.parent?.childForFieldName('body');
+    if (!current || !body || declaration?.parent?.id !== body.id) return;
+    const parameter = current.childForFieldName('pattern')?.text ?? current.text;
+    this.c.error(node, `引数 ${parameter} は、後で宣言される ${symbol.name} を参照できません。`);
   }
 
   private beforeBindingInitialized(node: TreeNode, symbol: Sym, declaration: TreeNode): boolean {

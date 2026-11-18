@@ -1,6 +1,6 @@
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
-import { Scope, type Sym } from './scopes';
+import { Scope, type Sym, type ValueKind } from './scopes';
 import { named, patternIdentifiers } from './syntax';
 
 const functionLikeTypes = new Set([
@@ -191,6 +191,7 @@ export class Binder {
   // code-gauge-allow functionCognitiveComplexity 17 -- Declares each form of parameter a function-like node has.
   private bindFunction(node: TreeNode, scope: Scope): void {
     const functionScope = this.newScope(node, 'function', scope);
+    const signatureScope = new SignatureScope(functionScope);
     this.declareTypeParameters(node, functionScope);
     // A named function expression sees its own name.
     if (node.type === 'function_expression') {
@@ -209,8 +210,12 @@ export class Binder {
     const single = node.childForFieldName('parameter');
     if (single) functionScope.declareValue(single.text, 'parameter', single, single);
     for (const child of named(node)) {
-      if (child.type === 'statement_block') this.bindChildren(child, functionScope);
-      else this.bind(child, functionScope);
+      if (child.type === 'statement_block') {
+        this.bindChildren(child, functionScope);
+      } else {
+        this.scopes.set(child.id, signatureScope);
+        this.bind(child, signatureScope);
+      }
     }
   }
 
@@ -273,6 +278,32 @@ export class Binder {
       const name = parameter.childForFieldName('name');
       if (name) scope.declareType(name.text, 'typeParameter', parameter, name);
     }
+  }
+}
+
+/** The declarations of a function's body that its parameters, type parameters, and return type cannot see. */
+const bodyOnlyValueKinds = new Set<ValueKind>(['var', 'let', 'const', 'class']);
+
+/**
+ * What a function's parameters, type parameters, and return type see of the names the function declares, as tsc
+ * resolves them: its parameters, type parameters, and own name, and the functions its body declares, but not the
+ * variables, classes, and types the body declares, for which they see the enclosing scope's names instead.
+ */
+class SignatureScope extends Scope {
+  constructor(private readonly declaring: Scope) {
+    super('function', declaring.parent, declaring.node);
+  }
+
+  override lookupValue(name: string): Sym | undefined {
+    const symbol = this.declaring.values.get(name);
+    if (symbol && !bodyOnlyValueKinds.has(symbol.valueKind as ValueKind)) return symbol;
+    return this.parent?.lookupValue(name);
+  }
+
+  override lookupType(name: string): Sym | undefined {
+    const symbol = this.declaring.types.get(name);
+    if (symbol?.typeKind === 'typeParameter') return symbol;
+    return this.parent?.lookupType(name);
   }
 }
 
