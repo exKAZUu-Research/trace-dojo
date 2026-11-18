@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 503 -- Keeps typed byte views and their overlapping storage operations together.
+// code-gauge-allow-file fileNcss 518 -- Keeps sparse and dense bytes with the typed views that share them.
 import { transferCost } from './allocation';
 import { panic } from './arith';
 import { enumLookup } from './enumLookup';
@@ -104,9 +104,12 @@ export function zeroPhysicalValue(type: Extract<Type, { kind: 'struct' | 'union'
 export function physicalUnion(type: Extract<Type, { kind: 'union' }>, value: ZUnion): ZUnion {
   if (value.fieldView) return value;
   const length = sizeOf(type);
-  reserveMemory(length);
-  spendMemory(length);
-  const bytes = Array.from<Value>({ length }).fill(0xaan);
+  const lazy = type.layout === 'auto';
+  if (!lazy) {
+    reserveMemory(length);
+    spendMemory(length);
+  }
+  const bytes = lazy ? sparseBytes(length) : Array.from<Value>({ length }).fill(0xaan);
   const memory = new BufferMemory(bytes, spendMemory, memorySpace());
   memory.write(type, 0, value);
   const backing = memory.read(type, 0) as ZUnion;
@@ -599,8 +602,8 @@ export class BufferMemory {
     for (let index = 0; index < bits; index += 8) {
       this.spend();
       const position = offset + index;
-      const byte = position >> 3;
-      const shift = position & 7;
+      const byte = Math.floor(position / 8);
+      const shift = position % 8;
       let value = Number(this.bytes[byte] as bigint) >> shift;
       if (shift !== 0 && index + 8 < bits + shift)
         value |= Number((this.bytes[byte + 1] ?? 0n) as bigint) << (8 - shift);
@@ -618,8 +621,8 @@ export class BufferMemory {
     for (let index = 0; index < bits;) {
       this.spend();
       const position = offset + index;
-      const byte = position >> 3;
-      const shift = position & 7;
+      const byte = Math.floor(position / 8);
+      const shift = position % 8;
       const count = Math.min(8 - shift, bits - index);
       const mask = ((1 << count) - 1) << shift;
       const previous = Number(this.bytes[byte] as bigint);
@@ -693,6 +696,28 @@ export class BufferMemory {
 function unionFieldLocation(type: Extract<Type, { kind: 'union' }>, index: number, offset: number): FieldLocation {
   const field = type.fields![index].type;
   return { type: field, offset, packed: type.layout === 'packed' ? bitSizeOf(field) : undefined };
+}
+
+export function sparseBytes(length: number): Value[] {
+  const values = new Map<number, Value>();
+  return new Proxy<Value[]>([], {
+    get: (target, property, receiver) => {
+      if (property === 'length') return length;
+      const index = propertyIndex(property);
+      return index === undefined ? Reflect.get(target, property, receiver) : (values.get(index) ?? 0xaan);
+    },
+    has: (target, property) => {
+      const index = propertyIndex(property);
+      return index === undefined ? Reflect.has(target, property) : index < length;
+    },
+    set: (target, property, value: Value, receiver) => {
+      const index = propertyIndex(property);
+      if (index === undefined) return Reflect.set(target, property, value, receiver);
+      if (!values.has(index)) reserveMemory(1);
+      values.set(index, value);
+      return true;
+    },
+  });
 }
 
 function referenceKey(id: bigint, bits: number): string {

@@ -1,7 +1,7 @@
-import { BufferMemory, type BufferMemorySpace, physicalUnion } from './bufferMemory';
+import { BufferMemory, type BufferMemorySpace, physicalUnion, sparseBytes } from './bufferMemory';
 import { BigFloat } from './floats';
-import { bitSizeOf, errorUnionOffsets, fieldOffsets, optionalNicheBits, sizeOf } from './layout';
-import { reserveMemory, spendMemory } from './memoryAccounting';
+import { bitSizeOf, errorUnionOffsets, fieldOffsets, optionalNicheBits, sizeOf, unionOffsets } from './layout';
+import { spendMemory } from './memoryAccounting';
 import { arrayOf, type StructType, type Type, typeId } from './types';
 import {
   Cell,
@@ -110,7 +110,7 @@ function logicalView(source: Pointer, sourceType: Type, type: Type, space: Buffe
   if (!memory) {
     const storage: PointerStorage = { source, type: sourceType, cache: new Map() };
     const created = new BufferMemory(
-      lazyBytes(length),
+      sparseBytes(length),
       spendMemory,
       space,
       undefined,
@@ -286,34 +286,6 @@ function structRegions(type: StructType): StructRegion[] {
   return regions;
 }
 
-function lazyBytes(length: number): Value[] {
-  const values = new Map<number, Value>();
-  return new Proxy<Value[]>([], {
-    get: (target, property, receiver) => {
-      if (property === 'length') return length;
-      const index = byteIndex(property);
-      return index === undefined ? Reflect.get(target, property, receiver) : (values.get(index) ?? 0xaan);
-    },
-    has: (target, property) => {
-      const index = byteIndex(property);
-      return index === undefined ? Reflect.has(target, property) : index < length;
-    },
-    set: (target, property, value: Value, receiver) => {
-      const index = byteIndex(property);
-      if (index === undefined) return Reflect.set(target, property, value, receiver);
-      if (!values.has(index)) reserveMemory(1);
-      values.set(index, value);
-      return true;
-    },
-  });
-}
-
-function byteIndex(property: string | symbol): number | undefined {
-  if (typeof property !== 'string') return undefined;
-  const index = Number(property);
-  return Number.isInteger(index) && index >= 0 && String(index) === property ? index : undefined;
-}
-
 function sourceLocation(pointer: Pointer, type: Type, offset: number): { storage: object; index: number } {
   spendMemory();
   if (type.kind === 'array' && sizeOf(type.child) !== 0) {
@@ -332,6 +304,11 @@ function sourceLocation(pointer: Pointer, type: Type, offset: number): { storage
     }
   }
   if (type.kind === 'error_union') return errorSourceLocation(pointer, type, offset);
+  if (type.kind === 'union') {
+    const union = physicalUnion(type, pointer.load() as ZUnion);
+    const payload = new Pointer(union.fieldView!(0), 0).storageLocation();
+    return { storage: payload.storage, index: payload.index + offset / 8 - unionOffsets(type).payload };
+  }
   const location = pointer.storageLocation();
   return { storage: location.storage, index: location.index + offset / (8 * Math.max(1, sizeOf(type))) };
 }

@@ -1543,6 +1543,22 @@ test('retained tagged union aggregate fields update their portion of a new paylo
   });
 });
 
+test.each([
+  ['union(enum){a:u16,b:u16}', 'var u:U=.{.a=7};', 'U', '&u', '2', 'u'],
+  ['union(enum){a:u16,b:u16}', 'const S=struct{u:U,tail:u16};var s:S=.{.u=.{.a=7},.tail=3};', 'S', '&s', '3', 's.u'],
+  ['union(enum(u16)){a:u16}', 'var u:U=.{.a=7};', 'U', '&u', '1', 'u'],
+])(
+  'tagged union field and byte-view pointers share map keys for %s',
+  (definition, storage, owner, root, length, union) => {
+    const source = `const std=@import("std");const U=${definition};pub fn main()!void{${storage}const P=extern union{u:*${owner},words:*[${length}]u16};const p=&${union}.a;var map=std.AutoHashMap(*u16,u8).init(std.heap.page_allocator);defer map.deinit();try map.put(p,42);const alias=P{.u=${root}};const q=&alias.words[0];std.debug.print("{} {} {}|{any}|",.{p==q,p.*,q.*,map.get(q)});q.*=9;std.debug.print("{} {}",.{p.*,${union}.a});}`;
+    expect(executeProgram('zig', source)).toMatchObject({
+      kind: 'executed',
+      stderr: 'true 7 7|42|9 9',
+      uncaughtException: undefined,
+    });
+  }
+);
+
 test('writer result types use the canonical usize and mutable byte slice', () => {
   const source = `const std=@import("std");fn less(n:usize,a:u8,b:u8)bool{return n>0 and a<b;}
 pub fn main()!void{var b:[2]u8=undefined;var w=std.Io.Writer.fixed(&b);const n=try w.write("x");var a=[_]u8{2,1};std.sort.heap(u8,&a,n,less);std.debug.print("{} {} {}",.{a[0],a[1],@TypeOf(w.buffered())==[]u8});}`;
@@ -7772,6 +7788,19 @@ test.each(['a:u3,b:u4', 'a:u8,b:u16', 'a:u64,b:*u8'])(
     expect(executeProgram('zig', source)).toMatchObject({ kind: 'compileError' });
   }
 );
+
+test.each([
+  [1000, 'u8', 1000, '8000'],
+  [1_000_001, 'u8', 1, '8'],
+  [1000, 'u64', 1000, '8000'],
+])('addressed union variants budget only touched bytes for [%s]%s', (size, child, count, expected) => {
+  const source = `const std=@import("std");const U=union(enum){data:[${size}]${child},byte:u8};fn next(n:u8)u8{var u:U=.{.byte=n};const p=&u.byte;p.*+=1;return p.*;}pub fn main()void{var total:usize=0;for(0..${count})|_|total+=next(7);std.debug.print("{}",.{total});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: expected,
+    uncaughtException: undefined,
+  });
+});
 
 test('union construction budgets only its active logical payload', () => {
   const source = `const std=@import("std");const U=union(enum){large:[1000001]u8,empty:void};pub fn main()void{const a=@unionInit(U,"empty",{});const b:U=.empty;const c=U{.empty={}};std.debug.print("{} {} {}",.{a==.empty,b==.empty,c==.empty});}`;

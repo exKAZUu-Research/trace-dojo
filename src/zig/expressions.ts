@@ -549,7 +549,7 @@ export abstract class ExpressionCompiler extends SemaBase {
     span: Span,
     check?: (value: Value) => ZUnion
   ): (parent: Pointer, value?: Value) => Pointer {
-    const fixed = !this.requiresComptime(type, span) && sizeOf(child) !== 0 && (type.fields?.length ?? 0) > 1;
+    const fixed = !this.requiresComptime(type, span) && sizeOf(child) !== 0;
     return this.fieldPointer(
       type,
       child,
