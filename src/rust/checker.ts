@@ -24,6 +24,7 @@ import {
   lowerType,
   Module,
   type Program,
+  resolveImports,
   resolveTypePath,
   type TypeBinding,
   type TypeScope,
@@ -548,6 +549,7 @@ export class Checker {
     const pendingBefore = this.program.pendingFns.length;
     collector.collectItems(block.items, module);
     collector.finish();
+    resolveImports(module);
     this.nestedFns.push(...this.program.pendingFns.splice(pendingBefore));
     this.body.module = module;
   }
@@ -1121,7 +1123,7 @@ export class Checker {
   }
 
   private unavailableStd(names: string[], span: Span): never {
-    const [, module] = names;
+    const module = names.find((name) => !['std', 'core', 'alloc'].includes(name));
     if (module === 'io' || module === 'fs') {
       compileError(span, '標準入力・ファイルの入出力は、この採点環境では使えません。');
     }

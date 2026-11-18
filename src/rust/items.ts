@@ -34,6 +34,7 @@ import {
   newOpaque,
   newTypeParam,
   STR,
+  substitute,
   type TraitDef,
   type TraitRef,
   type Type,
@@ -50,7 +51,7 @@ export type TypeBinding =
   | { kind: 'adt'; def: AdtDef }
   | { kind: 'trait'; def: TraitDef }
   | { kind: 'mod'; module: Module }
-  | { kind: 'alias'; resolve: () => Type }
+  | { kind: 'alias'; params: TypeParam[]; resolve: () => Type }
   | { kind: 'prim'; type: Type };
 
 export type ValueBinding =
@@ -246,11 +247,16 @@ export class ItemCollector {
         }
         case 'typeAlias': {
           let resolved: Type | undefined;
-          const scope: TypeScope = { module, params: new Map(), selfType: undefined };
+          const params = item.generics.params.map((param) => newTypeParam(param.name));
+          const scope: TypeScope = {
+            module,
+            params: new Map(params.map((param) => [param.name, param])),
+            selfType: undefined,
+          };
           this.declareType(
             module,
             item.name,
-            { kind: 'alias', resolve: () => (resolved ??= lowerType(item.type, scope)) },
+            { kind: 'alias', params, resolve: () => (resolved ??= lowerType(item.type, scope)) },
             item.vis,
             item.span
           );
@@ -282,7 +288,9 @@ export class ItemCollector {
       derives: new Set(item.attrs.derives.map((derive) => derive.name)),
       module,
     };
-    const builtin = module.isStd ? BUILTIN_STRUCTS[item.name] : undefined;
+    // `Error` is a builtin only as `fmt::Error`; `io::Error` is a plain declaration.
+    const builtin =
+      module.isStd && (item.name !== 'Error' || module.name === 'fmt') ? BUILTIN_STRUCTS[item.name] : undefined;
     if (builtin) {
       def.builtin = builtin;
       this.program.builtinAdts.set(builtin, def);
@@ -488,6 +496,28 @@ export class ItemCollector {
   }
 
   private checkTraitImpl(item: ImplItem, impl: ImplDef, trait: TraitDef): void {
+    const traitModule = trait.module as Module;
+    if (traitModule.isStd && !(impl.module as Module).isStd && !STD_TRAITS_LEARNERS_IMPLEMENT.has(trait.name)) {
+      const operators = [
+        'Add',
+        'Sub',
+        'Mul',
+        'Div',
+        'Rem',
+        'Neg',
+        'Not',
+        'AddAssign',
+        'SubAssign',
+        'MulAssign',
+        'DivAssign',
+        'Index',
+        'IndexMut',
+      ];
+      const what = operators.includes(trait.name)
+        ? `演算子の多重定義（impl ${trait.name}）`
+        : `標準ライブラリのトレイト ${trait.name} の実装`;
+      compileError(item.span, `${what}は、この採点環境では使えません。`);
+    }
     for (const method of item.methods) {
       if (!trait.methods.has(method.name)) {
         compileError(method.span, `メソッド ${method.name} は、トレイト ${trait.name} にありません。`);
@@ -777,6 +807,16 @@ export function lookupValue(module: Module, name: string, span: Span): ValueBind
   return undefined;
 }
 
+/** Resolves every import of a module and the modules in it, reporting imports that name nothing, as rustc does. */
+export function resolveImports(module: Module): void {
+  for (const entry of module.imports.values()) resolveImport(module, entry);
+  for (const glob of module.globs) {
+    const target = resolveTypePath(glob.path, module, glob.span);
+    if (target.kind === 'mod' && target.module.isStd) checkUnavailableStd(['std', ...glob.path.slice(1)], glob.span);
+  }
+  for (const child of module.children) if (!child.lexicalParent) resolveImports(child);
+}
+
 const stdIndexes = new WeakMap<Program, { type: Map<string, unknown>; value: Map<string, unknown> }>();
 
 /** The standard library's declarations see each other's items by name, wherever they are declared. */
@@ -910,6 +950,8 @@ function resolveImport(module: Module, entry: Import): void {
       } else if (parent.kind === 'mod') {
         const typeEntry = ownType(parent.module, last, span, new Set());
         const valueEntry = ownValue(parent.module, last, span, new Set());
+        if (!typeEntry && !valueEntry && parent.module.isStd)
+          checkUnavailableStd(path[0] === 'std' || path[0] === 'core' ? path : ['std', ...path], span);
         checkVisible<TypeBinding | ValueBinding>(typeEntry ?? valueEntry, parent.module, module, last, span);
         types = typeEntry?.binding;
         values = valueEntry?.binding;
@@ -1146,7 +1188,11 @@ function lowerPathType(path: PathAst, scope: TypeScope): Type {
       return adt(def, args);
     }
     case 'alias': {
-      return binding.resolve();
+      if (binding.params.length === 0) return binding.resolve();
+      if (args.length !== binding.params.length) {
+        compileError(path.span, `${last.name} には型引数を ${binding.params.length} 個書いてください。`);
+      }
+      return substitute(binding.resolve(), new Map(binding.params.map((param, index) => [param, args[index]])));
     }
     case 'trait': {
       return compileError(

@@ -120,6 +120,7 @@ export class Converter {
           name: this.field(node, 'name').text,
           span,
           vis: this.visibility(node),
+          generics: this.generics(node),
           type: this.type(this.field(node, 'type')),
         };
       }

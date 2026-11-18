@@ -29,6 +29,7 @@ export interface TypeAliasItem {
   name: string;
   span: Span;
   vis: Visibility;
+  generics: Generics;
   type: TypeAst;
 }
 

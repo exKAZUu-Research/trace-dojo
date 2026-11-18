@@ -3,7 +3,7 @@ import { Checker } from './checker';
 import { setSourceForMessages } from './compiler';
 import { Converter } from './convert';
 import { setPseudoTypes } from './infer';
-import { ItemCollector, Program } from './items';
+import { ItemCollector, Program, resolveImports } from './items';
 import { turtleImplSource } from './natives/core';
 import { parseRust, parseWith } from './parse';
 import { STD_SOURCE } from './stdSource';
@@ -39,6 +39,7 @@ export function buildProgram(source: string, atomicRows: ReadonlySet<number> = n
   setSourceForMessages(source);
   collector.collectCrate(crate, program.root);
   collector.finish();
+  resolveImports(program.root);
   const checker = new Checker(program, atomicRows);
   checker.checkProgram();
   return { program, checker };

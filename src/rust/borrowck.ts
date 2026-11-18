@@ -705,8 +705,10 @@ export class BorrowChecker {
         return [{ root: place.root, path: place.path, mutable: expr.mutable, span: expr.span }];
       }
       case 'methodCall': {
-        if (!containsReference(expr.ty)) return [];
         const method = this.annotations.methods.get(expr);
+        // A result borrows from the receiver only when the signature's result has a reference of its own, not one
+        // that a type argument brings (`Vec<&str>::pop` returns no borrow of the vector).
+        if (!containsReference(expr.ty) || (method && !containsReference(method.fn.ret))) return [];
         if (!method || method.fn.selfMode === 'value') {
           return method?.fn.selfMode === 'value' ? this.borrowsOf(expr.receiver) : [];
         }
@@ -719,6 +721,9 @@ export class BorrowChecker {
       }
       case 'call': {
         if (!containsReference(expr.ty)) return [];
+        const res = expr.callee.kind === 'path' ? this.annotations.paths.get(expr.callee) : undefined;
+        if (res?.kind === 'fn' && !containsReference(res.fn.ret)) return [];
+        if (res?.kind === 'ctor') return expr.args.flatMap((arg) => this.borrowsOf(arg));
         return expr.args.flatMap((arg) => this.borrowsOf(arg));
       }
       case 'path': {

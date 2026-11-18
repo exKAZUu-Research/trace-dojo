@@ -20,6 +20,22 @@ pub mod default {
     pub trait Default { fn default() -> Self; }
 }
 pub mod ops {
+    pub trait Add<Rhs> {}
+    pub trait Sub<Rhs> {}
+    pub trait Mul<Rhs> {}
+    pub trait Div<Rhs> {}
+    pub trait Rem<Rhs> {}
+    pub trait Neg {}
+    pub trait Not {}
+    pub trait AddAssign<Rhs> {}
+    pub trait SubAssign<Rhs> {}
+    pub trait MulAssign<Rhs> {}
+    pub trait DivAssign<Rhs> {}
+    pub trait Index<Idx> {}
+    pub trait IndexMut<Idx> {}
+    pub trait Deref {}
+    pub trait DerefMut {}
+    pub trait Drop {}
     pub trait Fn {}
     pub trait FnMut {}
     pub trait FnOnce {}
@@ -844,6 +860,14 @@ pub mod mem {
     pub fn take<T: Default>(dest: &mut T) -> T;
     pub fn drop<T>(x: T);
 }
+pub mod io {
+    #[derive(Debug)]
+    pub struct Error;
+    pub type Result<T> = core::result::Result<T, Error>;
+    pub trait Write {}
+    pub trait Read {}
+    pub trait BufRead {}
+}
 pub mod process {
     pub fn exit(code: i32) -> !;
 }
@@ -933,6 +957,7 @@ pub mod prelude {
     pub use super::ops::FnMut;
     pub use super::ops::FnOnce;
     pub use super::mem::drop;
+    pub use super::ops::Drop;
     pub use super::dojo::Turtle;
 }
 pub mod pseudo {
