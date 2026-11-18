@@ -1,0 +1,24 @@
+import { execFileSync } from 'node:child_process';
+
+import { expect, test } from 'vitest';
+import { z } from 'zod';
+
+test('deep superclass and instance evidence remains bounded under Node', { timeout: 30_000 }, () => {
+  const bundle = execFileSync(
+    'bun',
+    ['build', 'test/helpers/haskellEvidenceMemory.ts', '--target=node', '--packages=external'],
+    { encoding: 'utf8', timeout: 30_000, maxBuffer: 16 * 1024 * 1024 }
+  );
+  const output = execFileSync('node', ['--max-old-space-size=512', '--input-type=module'], {
+    input: bundle,
+    encoding: 'utf8',
+    timeout: 30_000,
+  });
+  const result = z.discriminatedUnion('kind', [
+    z.object({ kind: z.literal('executed'), stdout: z.string(), uncaughtException: z.undefined().optional() }),
+    z.object({ kind: z.literal('limitExceeded'), limit: z.literal('operations') }),
+  ]);
+  const results = z.tuple([result, result]).parse(JSON.parse(output));
+  if (results[0].kind === 'executed') expect(results[0].stdout).toBe('1\n');
+  expect(results[1]).toMatchObject({ kind: 'executed', stdout: '7\n' });
+});
