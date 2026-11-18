@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 512 -- PHP operators share coercion and comparison helpers.
+// code-gauge-allow-file fileNcss 514 -- PHP operators share coercion and comparison helpers.
 // oxlint-disable unicorn/prefer-code-point -- PHP strings hold bytes as code units 0–255, which charCodeAt and fromCharCode read and write as they are.
 import {
   boolValue,
@@ -177,38 +177,39 @@ export function toFloat(value: Value, reportWarning = warn): number {
 }
 
 /** Converts a value to a number for arithmetic, or throws PHP's TypeError for operands it cannot use. */
-function arithmeticOperand(value: Value, op: string, left: Value, right: Value): bigint | number {
+function arithmeticOperand(value: Value, op: string, left: Value, right: Value, pending?: PhpThrow): bigint | number {
   if (typeof value === 'bigint' || typeof value === 'number') return value;
   if (value === null) return 0n;
   if (typeof value === 'boolean') return value ? 1n : 0n;
   if (typeof value === 'string') {
     const prefix = numericPrefix(value);
-    if (!prefix) unsupportedOperands(op, left, right);
+    if (!prefix) unsupportedOperands(op, left, right, pending);
     if (!prefix.whole) warn('A non-numeric value encountered');
     return prefix.value;
   }
-  return unsupportedOperands(op, left, right);
+  return unsupportedOperands(op, left, right, pending);
 }
 
 /** `%`, which reads its operands as ints, as the bitwise operators do. */
-function modulo(left: Value, right: Value): bigint {
-  const x = intOperand(left, '%', left, right);
-  const y = intOperand(right, '%', left, right);
+function modulo(left: Value, right: Value, pending?: PhpThrow): bigint {
+  const x = intOperand(left, '%', left, right, pending);
+  const y = intOperand(right, '%', left, right, pending);
   if (y === 0n) throwError('DivisionByZeroError', 'Modulo by zero');
   if (y === -1n) return 0n;
   return x % y;
 }
 
-export function unsupportedOperands(op: string, left: Value, right: Value): never {
+function unsupportedOperands(op: string, left: Value, right: Value, pending?: PhpThrow): never {
+  if (pending) throw pending;
   throwError('TypeError', `Unsupported operand types: ${debugType(left)} ${op} ${debugType(right)}`);
 }
 
 // code-gauge-allow functionCognitiveComplexity 27 -- Transcribes PHP's algorithm for this function step by step, whose branches mirror PHP's.
-export function arithmetic(op: string, left: Value, right: Value): Value {
+export function arithmetic(op: string, left: Value, right: Value, pending?: PhpThrow): Value {
   if (op === '+' && left instanceof PhpArray && right instanceof PhpArray) return arrayUnion(left, right);
-  if (op === '%') return modulo(left, right);
-  const a = arithmeticOperand(left, op, left, right);
-  const b = arithmeticOperand(right, op, left, right);
+  if (op === '%') return modulo(left, right, pending);
+  const a = arithmeticOperand(left, op, left, right, pending);
+  const b = arithmeticOperand(right, op, left, right, pending);
   switch (op) {
     case '+': {
       return typeof a === 'bigint' && typeof b === 'bigint' ? intOrFloat(a + b) : Number(a) + Number(b);
@@ -308,26 +309,26 @@ export function concat(left: Value, right: Value): string {
 }
 
 /** Converts an operand of `%` or a bitwise operator to an int, as PHP's zendi_try_get_long does. */
-function intOperand(value: Value, op: string, left: Value, right: Value): bigint {
+function intOperand(value: Value, op: string, left: Value, right: Value, pending?: PhpThrow): bigint {
   if (typeof value === 'bigint') return value;
   if (typeof value === 'number') return toIntForOperator(value);
   if (value === null) return 0n;
   if (typeof value === 'boolean') return value ? 1n : 0n;
   if (typeof value === 'string') {
     const prefix = numericPrefix(value);
-    if (!prefix) unsupportedOperands(op, left, right);
+    if (!prefix) unsupportedOperands(op, left, right, pending);
     if (!prefix.whole) warn('A non-numeric value encountered');
     return typeof prefix.value === 'bigint' ? prefix.value : floatStringToInt(value, prefix.value);
   }
-  return unsupportedOperands(op, left, right);
+  return unsupportedOperands(op, left, right, pending);
 }
 
-export function bitwise(op: string, left: Value, right: Value): Value {
+export function bitwise(op: string, left: Value, right: Value, pending?: PhpThrow): Value {
   if ((op === '&' || op === '|' || op === '^') && typeof left === 'string' && typeof right === 'string') {
     return bytewise(op, left, right);
   }
-  const a = intOperand(left, op, left, right);
-  const b = intOperand(right, op, left, right);
+  const a = intOperand(left, op, left, right, pending);
+  const b = intOperand(right, op, left, right, pending);
   switch (op) {
     case '&': {
       return a & b;

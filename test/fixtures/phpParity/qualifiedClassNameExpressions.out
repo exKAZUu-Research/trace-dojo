@@ -1,0 +1,8 @@
+string(10) "Scope\Base"
+string(10) "Scope\Base"
+string(10) "Scope\Base"
+string(10) "Scope\Base"
+string(11) "Scope\Child"
+string(10) "Scope\Base"
+string(10) "Scope\Base"
+Cannot use "self" in the global scope

@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 806 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 813 -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import type { Node } from '@willbooster/web-tree-sitter';
 
@@ -380,7 +380,7 @@ export abstract class DeclarationConverter extends ConverterBase {
     switch (node.type) {
       case 'primitive_type':
       case 'bottom_type': {
-        return { k: 'named', name: lower(node.text) };
+        return this.builtinType(node.text);
       }
       case 'named_type': {
         const inner = node.namedChildren[0];
@@ -564,6 +564,7 @@ export abstract class DeclarationConverter extends ConverterBase {
 
   /** Checks the `self`, `static`, and `parent` a declared type names, as {@link checkClassScope} does. */
   protected checkTypeScope(node: Node, type: TypeDecl): void {
+    if (this.preserveSyntax) return;
     if (type.k !== 'named') {
       for (const part of type.types) this.checkTypeScope(node, part);
       return;
@@ -574,8 +575,11 @@ export abstract class DeclarationConverter extends ConverterBase {
   protected typeName(node: Node, parameter: boolean): TypeDecl {
     const raw = this.nameText(node);
     const word = lower(raw);
-    if (BUILTIN_TYPES.has(word)) return { k: 'named', name: word };
-    if (word === 'self' || word === 'static' || word === 'parent') return { k: 'named', name: word };
+    if (BUILTIN_TYPES.has(word) || word === 'self' || word === 'static' || word === 'parent')
+      return this.builtinType(raw);
+    const last = word.slice(word.lastIndexOf('\\') + 1);
+    if (last === 'array' || last === 'callable')
+      this.error(node, `Cannot use "${this.resolveClassName(raw)}" as a type name as it is reserved`);
     const explicit = explicitlyQualifiedName(word);
     if (explicit && (BUILTIN_TYPES.has(explicit) || explicit === 'static'))
       this.error(node, `Type declaration '${explicit}' must be unqualified`);
@@ -584,6 +588,12 @@ export abstract class DeclarationConverter extends ConverterBase {
     const root = parent?.type === 'property_declaration' || parent?.type.endsWith('_parameter');
     const expected = root && (parameter || parent?.type === 'property_declaration') ? 'variable' : '';
     return { k: 'named', name: this.namedClass(node, expected) };
+  }
+
+  private builtinType(raw: string): TypeDecl {
+    const name = lower(raw);
+    const keyword = name === 'array' || name === 'callable' || name === 'static';
+    return { k: 'named', name, syntaxName: this.preserveSyntax && !keyword ? raw : undefined };
   }
 
   // Classes -----------------------------------------------------------------------------------------------------------

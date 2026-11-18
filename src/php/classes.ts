@@ -1195,11 +1195,11 @@ export function writeProp(
   return value;
 }
 
-export function createDynamicProp(object: PhpObject, name: string): void {
+export function createDynamicProp(object: PhpObject, name: string, deprecate = deprecated): void {
   if (object.cls.isReadonly || object.cls.name === 'Closure')
     throwError('Error', `Cannot create dynamic property ${object.cls.name}::$${name}`);
   if (object.cls.name !== 'stdClass' && !allowsDynamicProps(object.cls)) {
-    deprecated(`Creation of dynamic property ${object.cls.name}::$${name} is deprecated`);
+    deprecate(`Creation of dynamic property ${object.cls.name}::$${name} is deprecated`);
   }
 }
 
@@ -1229,24 +1229,24 @@ export function coerceProperty(decl: PropDecl, value: Value, object?: PhpObject,
   return coerced;
 }
 
-/**
- * Throws PHP's error for changing a property through a reference or a nested write (`$o->list[] = 1`), which readonly
- * and asymmetric visibility forbid where a plain write would be forbidden.
- */
-// code-gauge-allow functionCognitiveComplexity 21 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+/** Checks indirect writes and returns the object to mutate when a set-only hook exposes only its value. */
+// code-gauge-allow functionCognitiveComplexity 24 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 export function checkIndirectModification(
   object: PhpObject,
   name: string,
   scope: PhpClass | undefined,
   mode: 'write' | 'update' | 'unset' = 'write'
-): void {
+): PhpObject | undefined {
   if (object.isResource) throwError('Error', `Attempt to modify property "${name}" on resource`);
   const decl = lookupProp(object.cls, name, scope);
   if (!decl || decl.isStatic) return;
   if (!canAccessProp(decl, scope))
     throwError('Error', `Cannot access ${decl.visibility} property ${object.cls.name}::$${name}`);
-  if (mode === 'unset' && decl.hooks && !decl.hooks.get)
+  if (decl.hooks && !decl.hooks.get && !isBackingAccess(object, decl, 'write')) {
+    const value = readProp(object, name, scope, 'update');
+    if (value instanceof PhpObject && !value.isResource) return value;
     throwError('Error', `Indirect modification of ${decl.cls.name}::$${name} is not allowed`);
+  }
   if (decl.isReadonly) {
     const slot = object.props.get(decl.key);
     const value = slot instanceof Ref ? slot.v : slot;
@@ -1262,6 +1262,7 @@ export function checkIndirectModification(
       `Cannot indirectly modify ${decl.setVisibility ?? decl.visibility}(set) property ${decl.cls.name}::$${name} from ${scopeText(scope)}`
     );
   }
+  return undefined;
 }
 
 function effectiveSetVisibility(property: Pick<PropDecl, 'visibility' | 'setVisibility' | 'isReadonly'>): Visibility {
@@ -1293,7 +1294,7 @@ export function checkStaticInstanceAccess(
 }
 
 /** The reference a property holds, creating it, for `=&`, by-reference arguments, and nested writes. */
-// code-gauge-allow functionNcss 45 -- Follows PHP's class linking and property access rules in their order of checks.
+// code-gauge-allow functionNcss 47 -- Follows PHP's class linking and property access rules in their order of checks.
 export function propRef(
   object: PhpObject,
   name: string,
@@ -1322,7 +1323,8 @@ export function propRef(
   if (mode === 'foreach' && decl?.isReadonly)
     throwError('Error', `Cannot acquire reference to readonly property ${decl.cls.name}::$${name}`);
   if (decl?.isReadonly && value instanceof PhpObject) return Ref.temporary(value);
-  checkIndirectModification(object, name, scope);
+  const indirect = checkIndirectModification(object, name, scope);
+  if (indirect) return Ref.temporary(indirect);
   if (slot instanceof Ref) return slot;
   if (object.unsetProperties?.has(key)) {
     const overloaded = overloadedPropertyReference(object, name);
@@ -1397,7 +1399,7 @@ function overloadedPropertyReference(object: PhpObject, name: string): Ref | und
 }
 
 // code-gauge-allow functionCognitiveComplexity 26 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
-// code-gauge-allow functionNcss 36 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+// code-gauge-allow functionNcss 37 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 export function bindPropertyReference(object: PhpObject, name: string, ref: Ref, scope: PhpClass | undefined): void {
   if (object.isResource) throwError('Error', `Attempt to modify property "${name}" on resource`);
   const property = lookupProp(object.cls, name, scope);
@@ -1424,7 +1426,8 @@ export function bindPropertyReference(object: PhpObject, name: string, ref: Ref,
           : `Cannot indirectly modify readonly property ${decl.cls.name}::$${name}`
       );
     }
-    checkIndirectModification(object, name, scope);
+    if (checkIndirectModification(object, name, scope))
+      throwError('Error', 'Cannot assign by reference to overloaded object');
     if (decl.type) attachPropertyReference(ref, decl, object);
   } else if (!object.props.has(name)) createDynamicProp(object, name);
   const key = decl?.key ?? name;

@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 735 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 751 -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import type { Expr, ListItem } from './ast';
 import { foreachSubjectWritable, hasReferenceItem } from './astAnalysis';
@@ -73,13 +73,13 @@ export function placeOf(e: Expr, mode: PlaceMode = 'write', through = false): Pl
     case 'varvar': {
       return namedPlace(e.name, mode, (name) => {
         if (name === 'this') throwError('Error', 'Cannot re-assign $this');
-        return new VarPlace(frame, name);
+        return new VarPlace(frame, name, 'dynamic');
       });
     }
     case 'idx': {
       if (e.base.k === 'var' && e.base.name === 'GLOBALS') {
         if (e.index === undefined) throwError('Error', 'Cannot append to $GLOBALS');
-        return namedPlace(e.index, mode, (name) => new VarPlace(runtime.globalFrame, name, true));
+        return namedPlace(e.index, mode, (name) => new VarPlace(runtime.globalFrame, name, 'global'));
       }
       return dimensionPlace(e, mode);
     }
@@ -138,7 +138,7 @@ function dimensionPlace(e: Extract<Expr, { k: 'idx' }>, mode: PlaceMode): Place 
 function instancePropertyPlace(e: Extract<Expr, { k: 'prop' }>, mode: PlaceMode, through: boolean): Place {
   const parent = placeOf(e.obj, mode, true);
   const property = e.name;
-  const readName = typeof property === 'string' ? () => property : prepareOperand(property);
+  let readName = typeof property === 'string' ? () => property : prepareOperand(property);
   const locate = (name: string, object: Value, writeMode: WriteMode): Place => {
     rt().row = e.row;
     if (!(object instanceof PhpObject)) {
@@ -159,6 +159,10 @@ function instancePropertyPlace(e: Extract<Expr, { k: 'prop' }>, mode: PlaceMode,
     return object instanceof PhpObject ? readProp(object, name, rt().frame.scope, 'coalesce') : undefined;
   });
   if (typeof property !== 'string' && !through) {
+    place.readCompoundName = (warning) => {
+      const name = readUpdateOperand(property, readName, warning, e.row);
+      readName = () => name;
+    };
     place.assign = (readValue) => {
       const object = propertyReceiver(e.obj, parent, 'write');
       const value = readValue();
@@ -225,7 +229,7 @@ function deferredPlace(resolve: (mode: WriteMode) => Place, read: () => Value | 
       const place = writable(mode === 'update' ? 'update' : 'write');
       return place.nested?.(mode) ?? place;
     },
-    warnUndefined: () => target?.warnUndefined?.(),
+    warnUndefined: (warning) => target?.warnUndefined?.(warning),
     declaration: () => target?.declaration?.(),
     typeSources: () => target?.typeSources?.(),
     set: (value, operation) => writable().set(value, operation),
@@ -237,7 +241,7 @@ function deferredPlace(resolve: (mode: WriteMode) => Place, read: () => Value | 
 
 function globalPlace(index?: Expr): VarPlace {
   if (index === undefined) throwError('Error', 'Cannot append to $GLOBALS');
-  return new VarPlace(rt().globalFrame, toStr(ev(index)), true);
+  return new VarPlace(rt().globalFrame, toStr(ev(index)), 'global');
 }
 
 class StaticPlace implements Place {
@@ -347,13 +351,17 @@ function propPlace(object: PhpObject, name: string): Place {
       return ref instanceof Ref && ref.isRef ? ref.typeOwners() : undefined;
     },
     getForIsset: () => readProp(object, name, scope, 'coalesce'),
-    warnUndefined: () => {
+    warnUndefined: (
+      warning = (emit) => {
+        emit();
+        return true;
+      }
+    ) => {
       if (object.cls.findMethod('__get')) return;
-      // PHP creates the property (deprecating a dynamic one) before it warns about reading it.
       const decl = lookup(false);
-      if (!decl) classesModule.createDynamicProp(object, name);
+      if (!decl) classesModule.createDynamicProp(object, name, (message) => warning(() => deprecated(message)));
       object.props.set(decl?.key ?? name, null);
-      warn(`Undefined property: ${object.cls.name}::$${name}`);
+      warning(() => warn(`Undefined property: ${object.cls.name}::$${name}`));
     },
     nested(mode = 'write') {
       return nestedPropertyPlace(object, name, scope, mode, lookup(true), reportedStaticAccess) ?? this;
@@ -377,7 +385,7 @@ function fetchCompoundProperty(
     classesModule.canWriteProp(decl, scope) &&
     !object.unsetProperties?.has(decl.key);
   const value = readPropertyPlace(object, name, scope, 'assignOp');
-  if (value === undefined) warning(() => place.warnUndefined?.());
+  if (value === undefined) place.warnUndefined?.(warning);
   return {
     value: value ?? null,
     declaration: ordinary ? decl : undefined,
@@ -399,7 +407,8 @@ function nestedPropertyPlace(
     return new RefPlace(propRef(object, name, scope, 'alias', reportedStaticAccess));
   if (decl?.hooks?.get && !object.guards?.has(`hook:${name}`))
     return new RefPlace(classesModule.hookedPropertyReference(object, decl, scope, mode, true));
-  classesModule.checkIndirectModification(object, name, scope, mode);
+  const indirect = classesModule.checkIndirectModification(object, name, scope, mode);
+  if (indirect) return new RefPlace(Ref.temporary(indirect));
   const key = decl?.key ?? name;
   if (mode === 'unset' && !decl?.type && (!object.props.has(key) || object.unsetProperties?.has(key))) {
     if (!decl) classesModule.createDynamicProp(object, name);
@@ -766,13 +775,14 @@ export function compoundAssign(e: Extract<Expr, { k: 'assignOp' }>): Value {
   }
   const place = placeOf(e.target, 'deferred');
   const read = prepareOperand(e.value);
-  return withUpdateWarnings((warning) => {
+  return withUpdateWarnings((warning, warningPending) => {
+    place.readCompoundName?.(warning);
     const afterFetch = e.target.k === 'idx' && isCompiledVariable(e.value);
     const value = afterFetch ? null : readUpdateValue(e, read, warning);
     runtime.row = e.row;
     const fetched = readCompound(place, warning);
     if (fetched === SKIP_COMPOUND) return null;
-    return storeCompoundResult(e.op, place, fetched, afterFetch ? read(e.row) : value);
+    return storeCompoundResult(e.op, place, fetched, afterFetch ? read(e.row) : value, warningPending());
   });
 }
 
@@ -781,20 +791,33 @@ function readUpdateValue(
   read: (row?: number) => Value,
   warning: UpdateWarning
 ): Value {
-  if (!isCompiledVariable(e.value) || (e.target.k !== 'var' && e.target.k !== 'prop')) return read();
+  if (e.target.k !== 'var' && e.target.k !== 'prop') return read();
+  return readUpdateOperand(e.value, read, warning, e.row);
+}
+
+function readUpdateOperand(e: Expr, read: (row?: number) => Value, warning: UpdateWarning, row: number): Value {
+  if (e.k !== 'var' || !isCompiledVariable(e)) return read();
+  if (rt().frame.vars.has(e.name)) return read(row);
   let value: Value = null;
   warning(() => {
-    value = read(e.row);
+    value = read(row);
   });
   return value;
 }
 
-function storeCompoundResult(op: string, place: Place, fetched: CompoundRead, value: Value): Value {
+function storeCompoundResult(
+  op: string,
+  place: Place,
+  fetched: CompoundRead,
+  value: Value,
+  pending: PhpThrow | undefined
+): Value {
   const current = fetched.value;
   let result: Value;
   try {
-    result = applyOperator(op, current, value);
+    result = applyOperator(op, current, value, pending);
   } catch (error) {
+    if (pending && error === pending) return current;
     if (error instanceof PhpThrow && !(op === '.' && typeof current === 'string')) {
       finishFailedCompound(place, fetched, error);
     }
@@ -803,22 +826,27 @@ function storeCompoundResult(op: string, place: Place, fetched: CompoundRead, va
   return place.set(share(result), 'assignOp');
 }
 
-function withUpdateWarnings(update: (warning: UpdateWarning) => Value): Value {
+function withUpdateWarnings(
+  update: (warning: UpdateWarning, warningPending: () => PhpThrow | undefined) => Value
+): Value {
   let result: Value = null;
   withCleanupExceptions(rt(), (capture) => {
-    let pending = false;
-    result = update((emit) => {
-      if (pending) return false;
-      try {
-        emit();
-        return true;
-      } catch (error) {
-        if (!(error instanceof PhpThrow)) throw error;
-        capture(error);
-        pending = true;
-        return false;
-      }
-    });
+    let pending: PhpThrow | undefined;
+    result = update(
+      (emit) => {
+        if (pending) return false;
+        try {
+          emit();
+          return true;
+        } catch (error) {
+          if (!(error instanceof PhpThrow)) throw error;
+          capture(error);
+          pending = error;
+          return false;
+        }
+      },
+      () => pending
+    );
   });
   return result;
 }
@@ -849,7 +877,7 @@ function finishFailedCompound(place: Place, fetched: CompoundRead, pending: PhpT
   });
 }
 
-export function applyOperator(op: string, left: Value, right: Value): Value {
+export function applyOperator(op: string, left: Value, right: Value, pending?: PhpThrow): Value {
   switch (op) {
     case '+':
     case '-':
@@ -857,7 +885,7 @@ export function applyOperator(op: string, left: Value, right: Value): Value {
     case '/':
     case '%':
     case '**': {
-      return arithmetic(op, left, right);
+      return arithmetic(op, left, right, pending);
     }
     case '.': {
       return concat(left, right);
@@ -867,7 +895,7 @@ export function applyOperator(op: string, left: Value, right: Value): Value {
     case '^':
     case '<<':
     case '>>': {
-      return bitwise(op, left, right);
+      return bitwise(op, left, right, pending);
     }
   }
   throw new Error(`Unknown operator ${op}`);
@@ -885,7 +913,7 @@ function incrementPlace(e: Extract<Expr, { k: 'incdec' }>, warning: UpdateWarnin
   let old = place.get('incdec');
   if (old === undefined) {
     if (place instanceof VarPlace && e.target.k !== 'idx') place.fetchCompound(warning);
-    else if (e.target.k === 'prop') warning(() => place.warnUndefined?.());
+    else if (e.target.k === 'prop') place.warnUndefined?.(warning);
     else place.warnUndefined?.();
     old = null;
   }
@@ -982,7 +1010,7 @@ function prepareUnset(e: Expr, nested?: UnsetBase): () => Place | undefined {
     }
     case 'varvar': {
       const name = prepareOperand(e.name);
-      return () => new VarPlace(rt().frame, toStr(name()));
+      return () => new VarPlace(rt().frame, toStr(name()), 'dynamic');
     }
     case 'sprop': {
       const cls = resolveClassRef(e.cls);
@@ -1002,7 +1030,7 @@ function prepareUnsetOffset(e: Extract<Expr, { k: 'idx' }>, nested?: UnsetBase):
   if (e.index === undefined) throwError('Error', 'Cannot use [] for unsetting');
   if (e.base.k === 'var' && e.base.name === 'GLOBALS') {
     const readKey = prepareOperand(e.index);
-    return () => new VarPlace(rt().globalFrame, toStr(readKey()), true);
+    return () => new VarPlace(rt().globalFrame, toStr(readKey()), 'global');
   }
   const readParent = prepareUnset(e.base, 'array');
   const readKey = prepareOperand(e.index);

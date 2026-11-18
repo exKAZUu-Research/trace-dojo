@@ -21,6 +21,7 @@ export interface CompoundRead {
 export interface Place {
   /** The value, or undefined when the location does not exist. */
   get(update?: PlaceOperation): Value | undefined;
+  readCompoundName?(warning: UpdateWarning): void;
   fetchCompound?(warning: UpdateWarning): CompoundRead | typeof SKIP_COMPOUND;
   set(value: Value, operation?: 'assignOp'): Value;
   assign?(value: () => Value): Value;
@@ -37,7 +38,7 @@ export interface Place {
   nested?(mode?: NestMode): Place;
   incrementTarget?(): Place;
   /** Warns that the place does not exist, as a read-modify-write (`++`, `.=`) of it does, creating what PHP creates. */
-  warnUndefined?(): void;
+  warnUndefined?(warning?: UpdateWarning): void;
   /** The value as `isset` and `??` read it, asking `__isset` or `offsetExists` first; undefined when unset. */
   getForIsset?(): Value | undefined;
 }
@@ -59,7 +60,7 @@ export class VarPlace implements Place {
   constructor(
     private readonly frame: Frame,
     readonly name: string,
-    private readonly global = false
+    private readonly kind: 'compiled' | 'dynamic' | 'global' = 'compiled'
   ) {}
 
   get(): Value | undefined {
@@ -67,13 +68,13 @@ export class VarPlace implements Place {
   }
 
   warnUndefined(): void {
-    warn(`Undefined ${this.global ? 'global ' : ''}variable $${this.name}`);
+    warn(`Undefined ${this.kind === 'global' ? 'global ' : ''}variable $${this.name}`);
   }
 
   fetchCompound(warning: UpdateWarning): CompoundRead {
     const current = this.get();
     if (current !== undefined) return { value: current, sources: this.typeSources() };
-    if (this.global) this.warnUndefined();
+    if (this.kind !== 'compiled') this.warnUndefined();
     else warning(() => this.warnUndefined());
     this.set(null);
     return { value: null };

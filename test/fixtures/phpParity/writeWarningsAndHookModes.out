@@ -78,3 +78,70 @@ Warning: Array to string conversion in /main.php on line 45
 
 Warning: Undefined variable $value in /main.php on line 46
 Error:Object of class stdClass could not be converted to string / 
+warning:Undefined variable $u
+bool(true)
+NULL
+ErrorException:Undefined variable $u / 
+warning:Undefined property: stdClass::$p
+object(stdClass)#6 (1) {
+  ["p"]=>
+  NULL
+}
+ErrorException:Undefined property: stdClass::$p / 
+warning:Undefined variable $v
+bool(false)
+ErrorException:Undefined variable $v / 
+warning:Undefined variable $v
+bool(false)
+ErrorException:Undefined variable $v / 
+warning:Undefined variable $v
+bool(false)
+ErrorException:Undefined variable $v / 
+warning:Creation of dynamic property DynamicSlots::$p is deprecated
+object(DynamicSlots)#5 (1) {
+  ["p"]=>
+  int(1)
+}
+ErrorException:Creation of dynamic property DynamicSlots::$p is deprecated / 
+warning:Creation of dynamic property DynamicSlots::$p is deprecated
+object(DynamicSlots)#4 (1) {
+  ["p"]=>
+  int(1)
+}
+ErrorException:Creation of dynamic property DynamicSlots::$p is deprecated / 
+warning:Undefined variable $name
+object(stdClass)#6 (1) {
+  [""]=>
+  int(0)
+}
+ErrorException:Undefined variable $name / 
+warning:Undefined variable $name
+object(stdClass)#5 (1) {
+  [""]=>
+  int(7)
+}
+ErrorException:Undefined variable $name / 
+
+Warning: Undefined variable $name in /main.php on line 61
+
+Warning: Undefined variable $rhs in /main.php on line 61
+
+Warning: Undefined property: stdClass::$ in /main.php on line 61
+object(stdClass)#6 (1) {
+  [""]=>
+  string(0) ""
+}
+Error:Indirect modification of SetterSlots::$items is not allowed / 
+Error:Indirect modification of SetterSlots::$items is not allowed / 
+Error:Indirect modification of SetterSlots::$items is not allowed / 
+Error:Typed property SetterSlots::$uninitialized must not be accessed before initialization / 
+Error:Property SetterSlots::$virtual is write-only / 
+Error:Cannot assign by reference to overloaded object / 
+array(1) {
+  ["x"]=>
+  int(5)
+}
+object(stdClass)#4 (1) {
+  ["next"]=>
+  int(2)
+}

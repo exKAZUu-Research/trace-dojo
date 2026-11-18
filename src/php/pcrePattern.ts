@@ -1,5 +1,5 @@
 // oxlint-disable unicorn/prefer-code-point -- PHP pattern strings contain bytes; UTF-8 validation reads each byte separately.
-// code-gauge-allow-file fileNcss 982 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 984 -- Holds the cases of one concern of the interpreter, which share their helpers.
 import propertyAliases from 'unicode-property-value-aliases-ecmascript';
 
 import { dec, enc, utf8Length } from './bytes';
@@ -264,11 +264,15 @@ const SIMPLE_ESCAPES = new Map([
 const DIGITS_MISSING = String.raw`digits missing after \x or in \x{} or \o{} or \N{U+}`;
 const UNSUPPORTED_CASE_ESCAPE = String.raw`PCRE2 does not support \F, \L, \l, \N{name}, \U, or \u`;
 
-function bracedQuantifier(text: string): { length: number; min: number; max: number | undefined } | undefined {
+function bracedQuantifier(
+  text: string
+): { length: number; endOfMin: number; endOfDigits: number; min: number; max: number | undefined } | undefined {
   const match = /^\{[ \t]*(\d*)[ \t]*(?:(,)[ \t]*(\d*)[ \t]*)?\}/.exec(text);
   if (!match || (match[1] === '' && !match[3])) return undefined;
   return {
     length: match[0].length,
+    endOfMin: match[0].indexOf(match[1]) + match[1].length,
+    endOfDigits: match[0].slice(0, -1).trimEnd().length,
     min: Number(match[1]),
     max: match[2] && match[3] === '' ? undefined : Number(match[3] ?? match[1]),
   };
@@ -531,13 +535,14 @@ class PatternConverter {
     }
     const { min, max } = match;
     const close = this.index + match.length - 1;
-    this.checkQuantifierRange(min, max, close);
+    this.checkQuantifierRange(min, max, this.index + match.endOfMin, this.index + match.endOfDigits);
     this.quantifier(max === min ? `{${min}}` : `{${min},${max ?? ''}}`, close + 1, max === undefined || max > 1);
   }
 
-  private checkQuantifierRange(min: number, max: number | undefined, at: number): void {
-    if (min > 0xff_ff || (max ?? 0) > 0xff_ff) this.fail('number too big in {} quantifier', at);
-    if (max !== undefined && max < min) this.fail('numbers out of order in {} quantifier', at);
+  private checkQuantifierRange(min: number, max: number | undefined, minAt: number, maxAt = minAt): void {
+    if (min > 0xff_ff) this.fail('number too big in {} quantifier', minAt);
+    if ((max ?? 0) > 0xff_ff) this.fail('number too big in {} quantifier', maxAt);
+    if (max !== undefined && max < min) this.fail('numbers out of order in {} quantifier', maxAt);
   }
 
   private escape(): void {
@@ -863,9 +868,9 @@ class PatternConverter {
     const relative = /^[+-]/.test(digits);
     if (Math.abs(number) > 65_535) this.fail('subpattern number is too big', this.index);
     if (relative && number === 0) this.fail('a relative value of zero is not allowed', this.index);
-    if (this.source[this.index] !== ')') this.fail('missing closing parenthesis', this.index);
     const group = relative ? this.names.length - Number(number > 0) + number : number;
     if (relative && group <= 0) this.fail('reference to non-existent subpattern', this.index);
+    if (this.source[this.index] !== ')') this.fail('missing closing parenthesis', this.index);
     this.index++;
     this.subroutine(group, this.index - 1);
   }

@@ -32,4 +32,7 @@ foreach (['\N{name}', '(?P>)', '(?P>a', '(?P>a)', '\g<a', "\\g'a", '\g<1', '\g<a
 foreach (['\N{2,1}', '\N{70000}', '(?+)', '(?+a)', '(?+', '(?P>a b)', '(?&a b)'] as $source) {
     var_dump(preg_match('~' . $source . '~', 'ab'));
 }
+foreach (['(?-1', '(?-1a)', '(a)(?-1a)', '(?+1a)', 'a{ 2,1 }', 'a{ 70000 }', 'a{ 2,99999 }'] as $source) {
+    var_dump(preg_match('~' . $source . '~', 'ab'));
+}
 echo "continued\n";

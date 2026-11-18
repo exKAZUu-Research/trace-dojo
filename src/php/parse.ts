@@ -123,15 +123,45 @@ function creationClassDiagnostic(expression: Node): SourceDiagnostic | undefined
   const parent = expression.parent;
   const binary =
     parent?.type === 'binary_expression' && parent.childForFieldName('left')?.id === expression.id ? parent : undefined;
+  const operator =
+    binary?.childForFieldName('operator') ??
+    (parent?.type === 'ERROR' ? nextSignificantSibling(expression) : undefined);
   if (name.text.toLowerCase() === 'enum') {
-    const operator = binary?.childForFieldName('operator');
     const hasArgs = expression.namedChildren.some((child) => child.type === 'arguments');
-    if (!operator || !newClassKeywordOperators.has(operator.type) || hasArgs) return undefined;
+    if (!operator || !newClassKeywordOperators.has(operator.text.toLowerCase()) || hasArgs) return undefined;
   }
-  const argument = binary ? binary.parent : parent;
-  return unexpectedNewName(name, argument?.type === 'argument' && argument.startIndex === expression.startIndex);
+  return unexpectedNewName(name, startsNewArgument(binary ?? expression));
 }
 
+function startsNewArgument(expression: Node): boolean {
+  const parent = expression.parent;
+  if (parent?.type === 'argument') return parent.startIndex === expression.startIndex;
+  if (parent?.type !== 'ERROR' && parent?.type !== 'arguments') return false;
+  const parts = parent.children.filter((child) => child.type !== 'comment');
+  const index = parts.findIndex((part) => part.id === expression.id);
+  return followsArgumentSeparator(parts, index, parent.type === 'arguments');
+}
+
+function followsArgumentSeparator(parts: Node[], index: number, knownArguments: boolean): boolean {
+  const previous = parts[index - 1];
+  if (previous?.type === ',') return true;
+  if (previous?.type !== '(') return false;
+  if (knownArguments) return true;
+  const callee = parts[index - 2];
+  return (
+    callee !== undefined &&
+    (callee.type !== 'name' || reservedIdentifierToken(callee.text) === undefined) &&
+    ['name', 'variable_name', 'qualified_name', 'relative_name', ')', ']'].includes(callee.type)
+  );
+}
+
+function nextSignificantSibling(node: Node): Node | undefined {
+  let next = node.nextSibling;
+  while (next?.type === 'comment') next = next.nextSibling;
+  return next ?? undefined;
+}
+
+// code-gauge-allow functionCognitiveComplexity 23 -- Keeps the ordered PHP cases together because each branch shares the same dispatch state.
 function recoveredNewName(error: Node): SourceDiagnostic | undefined {
   const parts = error.children.filter((child) => child.type !== 'comment');
   if (
@@ -145,17 +175,23 @@ function recoveredNewName(error: Node): SourceDiagnostic | undefined {
     };
   for (const [index, child] of parts.entries()) {
     if (child.text.toLowerCase() !== 'new') continue;
-    const name = parts[index + 1];
+    const name = parts[index + 1] ?? nextSignificantSibling(error);
+    if (!name) continue;
     const operatorNode = parts[index + 2];
     const operator = operatorNode?.text.toLowerCase();
-    if (!name || !operator || !newClassKeywordOperators.has(operator)) continue;
     if (name.text.toLowerCase() === 'readonly' && operator === 'instanceof')
       return {
         row: operatorNode.startPosition.row,
         message: 'syntax error, unexpected token "instanceof", expecting "class"',
       };
-    const previous = parts[index - 1]?.type;
-    const diagnostic = unexpectedNewName(name, previous === '(' || previous === ',');
+    const loneKeyword = index === 0 && parts.length === 1;
+    const startsArgument = loneKeyword ? startsNewArgument(error) : followsArgumentSeparator(parts, index, false);
+    if (name.type === ')') {
+      const expected = startsArgument ? ':' : 'class';
+      return { row: name.startPosition.row, message: `syntax error, unexpected token ")", expecting "${expected}"` };
+    }
+    if (!operator || !newClassKeywordOperators.has(operator)) continue;
+    const diagnostic = unexpectedNewName(name, startsArgument);
     if (diagnostic) return diagnostic;
   }
   return undefined;

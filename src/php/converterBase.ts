@@ -151,11 +151,11 @@ export abstract class ConverterBase {
     return this.resolveClassName(raw);
   }
 
-  protected classRef(node: Node, deferScope = false): ClassRef {
+  protected classRef(node: Node, deferScope = false, className = false): ClassRef {
     const isName = node.type === 'name' || node.type === 'qualified_name' || node.type === 'relative_name';
     if (node.type !== 'relative_scope' && !isName) return { k: 'expr', e: this.expr(node) };
     const raw = this.nameText(node);
-    const word = lower(raw);
+    const word = lower(className ? (explicitlyQualifiedName(raw) ?? raw) : raw);
     if (word === 'self' || word === 'parent' || word === 'static') {
       if (!deferScope) this.checkClassScope(node, word);
       return { k: word };

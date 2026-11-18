@@ -180,4 +180,25 @@ bool(false)
 
 Warning: preg_match(): Compilation failed: missing closing parenthesis at offset 4 in /main.php on line 33
 bool(false)
+
+Warning: preg_match(): Compilation failed: reference to non-existent subpattern at offset 4 in /main.php on line 36
+bool(false)
+
+Warning: preg_match(): Compilation failed: reference to non-existent subpattern at offset 4 in /main.php on line 36
+bool(false)
+
+Warning: preg_match(): Compilation failed: missing closing parenthesis at offset 7 in /main.php on line 36
+bool(false)
+
+Warning: preg_match(): Compilation failed: missing closing parenthesis at offset 4 in /main.php on line 36
+bool(false)
+
+Warning: preg_match(): Compilation failed: numbers out of order in {} quantifier at offset 6 in /main.php on line 36
+bool(false)
+
+Warning: preg_match(): Compilation failed: number too big in {} quantifier at offset 8 in /main.php on line 36
+bool(false)
+
+Warning: preg_match(): Compilation failed: number too big in {} quantifier at offset 10 in /main.php on line 36
+bool(false)
 continued

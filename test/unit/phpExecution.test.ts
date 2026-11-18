@@ -25,6 +25,11 @@ test.each([
   [String.raw`$object instanceof namespace\self;`, String.raw`'namespace\self' is an invalid class name`],
   [String.raw`function f(\Int $value) {}`, "Type declaration 'int' must be unqualified"],
   [String.raw`namespace A; function f(namespace\int $value) {}`, "Type declaration 'int' must be unqualified"],
+  [String.raw`function f(\ArRaY $value) {}`, 'Cannot use "ArRaY" as a type name as it is reserved'],
+  [
+    String.raw`namespace A; function f(namespace\CALLABLE $value) {}`,
+    String.raw`Cannot use "A\CALLABLE" as a type name as it is reserved`,
+  ],
 ])('rejects qualified relative class and builtin type names in %s', (statement, message) => {
   expect(run(`<?php\n${statement}`)).toMatchObject({ kind: 'compileError', diagnostics: [{ row: 1, message }] });
 });
@@ -32,6 +37,12 @@ test.each([
 test.each([
   ['var_dump(new enum instanceof stdClass);', 'enum', ':'],
   ['var_dump(new match instanceof stdClass);', 'match', ':'],
+  ['var_dump(new enum instanceof A::class);', 'enum', ':'],
+  ['var_dump(new match instanceof A::class);', 'match', ':'],
+  ['var_dump(5 + new match instanceof A::class);', 'match', 'class'],
+  ['var_dump(new and 1);', 'and', ':'],
+  ['var_dump(new );', ')', ':'],
+  ['return (new and 1);', 'and', 'class'],
   ['var_dump(new clone instanceof stdClass);', 'clone', ':'],
   ['var_dump(new list instanceof stdClass);', 'list', ':'],
   ['var_dump(new unset instanceof stdClass);', 'unset', ':'],

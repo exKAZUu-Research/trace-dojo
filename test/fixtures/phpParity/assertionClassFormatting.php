@@ -65,3 +65,15 @@ show(fn()=>assert(false && function(){
     }
     return fn(iterable $items): ?iterable => $items;
 }));
+show(fn()=>assert(false && function(){
+    class WrittenTypes {
+        public ITERABLE $items;
+        public ?ItErAbLe $nullable;
+        public NULL|INT $count;
+        function f(ArRaY $items, CaLlAbLe $cb, SELF $self, PARENT $parent, INT $count): MIXED {
+            return [\self::Class, namespace\self::class, SeLf::CLASS, \WrittenTypes::class];
+        }
+        function make(): StAtIc {}
+    }
+    return fn(MIXED $x): ?ITERABLE => $x;
+}));

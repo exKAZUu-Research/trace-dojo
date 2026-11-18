@@ -186,3 +186,19 @@ assert(false && function () {
 
     return fn(iterable $items): ?iterable => $items;
 })
+assert(false && function () {
+    class WrittenTypes {
+        public ITERABLE $items;
+        public ?ItErAbLe $nullable;
+        public NULL|INT $count;
+        public function f(array $items, callable $cb, SELF $self, PARENT $parent, INT $count): MIXED {
+            return [\self::class, namespace\self::class, SeLf::class, \WrittenTypes::class];
+        }
+
+        public function make(): static {
+        }
+
+    }
+
+    return fn(MIXED $x): ?ITERABLE => $x;
+})

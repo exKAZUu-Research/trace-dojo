@@ -2,7 +2,7 @@
 import type { Node } from '@willbooster/web-tree-sitter';
 
 import { CompileError } from '../interpreter/diagnostics';
-import type { Arg, ArrayItem, CatchClause, Expr, ListItem, MatchArm, Program, Stmt, SwitchCase } from './ast';
+import type { Arg, ArrayItem, CatchClause, ClassRef, Expr, ListItem, MatchArm, Program, Stmt, SwitchCase } from './ast';
 import {
   collectMainVars,
   collectVariables,
@@ -1180,17 +1180,23 @@ export class Converter extends DeclarationConverter {
     return { k: 'const', name: this.resolveConstName(raw), row };
   }
 
+  // code-gauge-allow functionCognitiveComplexity 21 -- Keeps the ordered PHP cases together because each branch shares the same dispatch state.
   private classConstantExpression(node: Node, row: number): Expr {
     const [scope, nameNode] = node.namedChildren.filter((child) => child.type !== 'comment');
     const nameExpression = node.childForFieldName('name_expression');
     if (this.preserveSyntax) {
       const name = nameExpression ? this.expr(nameExpression) : this.nameText(nameNode);
-      return { k: 'cconst', cls: this.classRef(scope), name, row };
+      const className = typeof name === 'string' && lower(name) === 'class';
+      const cls: ClassRef =
+        className && ['name', 'qualified_name', 'relative_name', 'relative_scope'].includes(scope.type)
+          ? { k: 'named', name: this.nameText(scope) }
+          : this.classRef(scope);
+      return { k: 'cconst', cls, name: className ? 'class' : name, row };
     }
     if (nameExpression) return this.bracedClassConstant(scope, nameExpression);
     const name = this.nameText(nameNode);
     const className = lower(name) === 'class' ? true : undefined;
-    const cls = this.classRef(scope, !className && this.constantInitializer);
+    const cls = this.classRef(scope, !className && this.constantInitializer, className);
     if (!className || cls.k !== 'expr') return { k: 'cconst', cls, name, className, row: nameNode.startPosition.row };
     const literal = parserScalar(cls.e);
     if (literal === undefined) {

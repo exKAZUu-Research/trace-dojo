@@ -491,7 +491,7 @@ export interface Param {
 }
 
 export type TypeDecl =
-  | { k: 'named'; name: string; nullable?: boolean }
+  | { k: 'named'; name: string; nullable?: boolean; syntaxName?: string }
   | { k: 'union'; types: TypeDecl[] }
   | { k: 'inter'; types: TypeDecl[] };
 

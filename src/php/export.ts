@@ -281,7 +281,10 @@ function exportReturnType(fn: FunctionDecl): string {
 }
 
 function exportType(type: TypeDecl): string {
-  if (type.k === 'named') return type.nullable ? `?${type.name}` : type.name;
+  if (type.k === 'named') {
+    const name = type.syntaxName ?? type.name;
+    return type.nullable ? `?${name}` : name;
+  }
   return type.types.map(exportType).join(type.k === 'union' ? '|' : '&');
 }
 
