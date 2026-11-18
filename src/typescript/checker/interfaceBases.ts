@@ -46,7 +46,7 @@ export class InterfaceBases {
     this.resolutions.set(symbol.id, resolution);
     this.stack.push(resolution);
     const types = this.basesOf(symbol.typeDeclarations).filter((base) => {
-      if (!this.hasBaseType(base, symbol)) return true;
+      if (!this.hasBaseType(base, symbol, new Set())) return true;
       resolution.circular = true;
       return false;
     });
@@ -102,13 +102,18 @@ export class InterfaceBases {
     }
   }
 
-  /** Whether a base type is the interface or extends it, through the interfaces it extends. */
-  private hasBaseType(type: Type, symbol: Sym): boolean {
-    if (type.kind === 'intersection') return type.types.some((member) => this.hasBaseType(member, symbol));
+  /**
+   * Whether a base type is the interface or extends it, through the interfaces it extends, skipping the interfaces
+   * already searched, as interfaces sharing bases would otherwise be searched once per path.
+   */
+  private hasBaseType(type: Type, symbol: Sym, searched: Set<Sym>): boolean {
+    this.c.budget.spend();
+    if (type.kind === 'intersection') return type.types.some((member) => this.hasBaseType(member, symbol, searched));
     if (type.kind !== 'object') return false;
     const target = this.symbols.get(type.target ?? type.origin ?? type);
-    if (!target) return false;
-    return target === symbol || this.baseTypesOf(target).some((base) => this.hasBaseType(base, symbol));
+    if (!target || searched.has(target)) return false;
+    searched.add(target);
+    return target === symbol || this.baseTypesOf(target).some((base) => this.hasBaseType(base, symbol, searched));
   }
 
   /** A DOM interface the library extends lends its members, though it stands for `any` where a program names it. */
