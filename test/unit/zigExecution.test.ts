@@ -1358,6 +1358,15 @@ test('nested function-pointer field calls analyze and evaluate each receiver onc
   });
 });
 
+test('enum and union declaration literals prefer namespace aliases before tags', () => {
+  const source = `const std=@import("std");const E=enum{a,b,const zero:@This()=.a;};const U=union(enum){a:u8,b:u8,const zero:@This()=.{.a=0};};fn make()!U{return .zero;}pub fn main()!void{const e:??E=.zero;const q=try make();std.debug.print("{t} {}",.{e.?.?,q.a});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: 'a 0',
+    uncaughtException: undefined,
+  });
+});
+
 test('writer result types use the canonical usize and mutable byte slice', () => {
   const source = `const std=@import("std");fn less(n:usize,a:u8,b:u8)bool{return n>0 and a<b;}
 pub fn main()!void{var b:[2]u8=undefined;var w=std.Io.Writer.fixed(&b);const n=try w.write("x");var a=[_]u8{2,1};std.sort.heap(u8,&a,n,less);std.debug.print("{} {} {}",.{a[0],a[1],@TypeOf(w.buffered())==[]u8});}`;
@@ -6680,6 +6689,24 @@ test('byte-backed pointer union views preserve signed reads and mutations', () =
   });
 });
 
+test.each([
+  ['v.u.a=2;', '2'],
+  ['v.u.b=3;', '3'],
+  ['const w=try f.allocator().create(P);w.*=.{.left=0,.u=.{.b=5},.right=0};v.u=w.u;', '5'],
+])('byte-backed packed unions preserve adjacent fields: %s', (body, value) => {
+  const source = `const std=@import("std");const U=packed union{a:u4,b:u4};const P=packed struct{left:u2,u:U,right:u2};fn read(u:U)u4{return u.a;}pub fn main()!void{var buf:[16]u8=undefined;var f=std.heap.FixedBufferAllocator.init(&buf);const v=try f.allocator().create(P);v.*=.{.left=2,.u=.{.a=1},.right=3};const snapshot=v.u;const before=read(v.u);${body}std.debug.print("{} {} {} {} {} {}",.{snapshot.a,before,v.left,v.u.a,v.u.b,v.right});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: `1 1 2 ${value} ${value} 3`,
+    uncaughtException: undefined,
+  });
+});
+
+test.each(['allocUpperString', 'allocLowerString'])('%s charges snapshots into fixed-backed storage', (method) => {
+  const source = `const std=@import("std");pub fn main()!void{var buf:[60000]u8=undefined;var f=std.heap.FixedBufferAllocator.init(&buf);const a:[60000]u8=@splat(97);for(0..3)|_|{_=try std.ascii.${method}(f.allocator(),&a);f.reset();}}`;
+  expect(executeProgram('zig', source)).toMatchObject({ kind: 'limitExceeded', limit: 'operations' });
+});
+
 test('zero-bit packed union fields retain native layout', () => {
   expect(
     executeProgram(
@@ -7312,6 +7339,32 @@ test('optional scalar sentinels retain the null sentinel', () => {
     uncaughtException: undefined,
   });
 });
+
+test.each([
+  ['u8', '&o.?'],
+  ['S', '&o.?.x'],
+  ['[1]u8', '&o.?[0]'],
+  ['S', 'o.?.x'],
+  ['[1]u8', 'o.?[0]'],
+])('known-null optional projections reject %s through %s at compile time', (type, value) => {
+  const source = `const S=struct{x:u8};pub fn main()void{var flag=false;_=&flag;if(flag){const o:?${type}=null;const x=${value};_=x;}}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'compileError',
+    diagnostics: [{ message: expect.stringContaining('null の optional') }],
+  });
+});
+
+test.each(['const o:?u8=null;_=o.?;', 'var o:?u8=null;_=&o;const p=&o.?;_=p;'])(
+  'by-value and unknown optional unwraps preserve runtime checks: %s',
+  (body) => {
+    const source = `const std=@import("std");pub fn main()void{var flag=false;_=&flag;if(flag){${body}}std.debug.print("ok",.{});}`;
+    expect(executeProgram('zig', source)).toMatchObject({
+      kind: 'executed',
+      stderr: 'ok',
+      uncaughtException: undefined,
+    });
+  }
+);
 
 test('large virtual void sentinel arrays retain their extra logical element', () => {
   const source = `const std=@import("std");pub fn main()void{const a:[1000001:{}]void=@splat({});std.debug.print("{} {} {}",.{a.len,@TypeOf(a),a[1000001]});}`;

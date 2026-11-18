@@ -1,4 +1,5 @@
 // code-gauge-allow-file fileNcss 503 -- Keeps typed byte views and their overlapping storage operations together.
+import { transferCost } from './allocation';
 import { panic } from './arith';
 import { enumLookup } from './enumLookup';
 import { decodeFloat, encodeFloat } from './floatEncoding';
@@ -133,7 +134,11 @@ export function bindBufferMemory(
   const space = execution.bufferMemory;
   if (!('slots' in memory) || !Array.isArray(memory.slots)) return;
   const destination = memory as Slots;
-  const initial = singleValueOf(type, spend) ? [] : destination.slots.slice(0, initialized).map(copyForStorage);
+  const initial: Value[] = [];
+  if (initialized > 0 && !singleValueOf(type, spend)) {
+    execution.spend(initialized * transferCost(type));
+    for (let index = 0; index < initialized; index++) initial.push(copyForStorage(destination.slots[index]));
+  }
   const location = storageLocation(buffer.target.slots, buffer.start);
   const bytes = location.storage as Value[];
   let backing = space.memories.get(bytes);
@@ -329,6 +334,7 @@ export class BufferMemory {
     let active = 0;
     const tag = (): number => (tagOffset === undefined ? active : this.unionTag(type, offset + tagOffset * 8));
     const union = new ZUnion(0, undefined);
+    const payload = (): FieldLocation => unionFieldLocation(type, tag(), offset + layout.payload * 8);
     Object.defineProperty(union, 'tag', {
       get: tag,
       set: (index: number) => {
@@ -340,13 +346,15 @@ export class BufferMemory {
       },
     });
     union.slots = new Proxy([undefined] as Value[], {
-      get: (target, property, receiver) =>
-        property === '0'
-          ? this.read(type.fields![tag()].type, offset + layout.payload * 8)
-          : Reflect.get(target, property, receiver),
+      get: (target, property, receiver) => {
+        if (property !== '0') return Reflect.get(target, property, receiver);
+        const field = payload();
+        return this.read(field.type, field.offset, field.packed);
+      },
       set: (target, property, value: Value, receiver) => {
         if (property !== '0') return Reflect.set(target, property, value, receiver);
-        this.write(type.fields![tag()].type, offset + layout.payload * 8, value);
+        const field = payload();
+        this.write(field.type, field.offset, value, field.packed);
         return true;
       },
     });
@@ -356,35 +364,33 @@ export class BufferMemory {
   }
 
   private attachUnionBacking(union: ZUnion, type: Extract<Type, { kind: 'union' }>, offset: number): void {
+    const bits = type.layout === 'packed' ? bitSizeOf(type) : sizeOf(type) * 8;
     union.backingKey = () => {
-      spendMemory(sizeOf(type));
-      return this.access(false, offset, sizeOf(type) * 8, () =>
-        this.bytes.slice(offset / 8, offset / 8 + sizeOf(type)).join(',')
-      );
+      spendMemory(Math.ceil(bits / 8));
+      return this.access(false, offset, bits, () => this.regionBytes(offset, bits).join(','));
     };
     union.backingReferences = () => {
-      spendMemory(sizeOf(type) * 8);
+      spendMemory(bits);
       const values: Value[] = [];
-      for (let bit = 0; bit < sizeOf(type) * 8; bit++) {
+      for (let bit = 0; bit < bits; bit++) {
         const reference = this.currentReference(offset + bit);
         if (reference) values.push(reference.value as Value);
       }
       return values;
     };
-    union.fieldView = (index) => ({ slots: this.slots([{ type: type.fields![index].type, offset }]) });
+    union.fieldView = (index) => ({ slots: this.slots([unionFieldLocation(type, index, offset)]) });
     union.copyBacking = () => {
       const length = sizeOf(type);
       reserveMemory(length);
       spendMemory(length);
       const memory = new BufferMemory(Array.from<Value>({ length }).fill(0n), spendMemory, this.space);
-      this.copyRegion(memory, offset, 0, length);
+      this.copyRegion(memory, offset, 0, bits);
       const copy = memory.read(type, 0) as ZUnion;
       copy.tag = union.tag;
       return copy;
     };
     union.writeBacking = (value) => this.write(type, offset, physicalUnion(type, value));
-    union.copyBackingTo = (destination, start) =>
-      this.copyRegion(destination as BufferMemory, offset, start, sizeOf(type));
+    union.copyBackingTo = (destination, start) => this.copyRegion(destination as BufferMemory, offset, start, bits);
   }
 
   arrayView(child: Type, length: bigint, offset: number, hasSentinel = false): ZArray {
@@ -483,7 +489,7 @@ export class BufferMemory {
   }
 
   // code-gauge-allow functionCognitiveComplexity 23 -- Writes aggregate contents using their physical layout without replacing interior views.
-  // code-gauge-allow functionNcss 34 -- Encodes aggregate layouts without invalidating interior aliases.
+  // code-gauge-allow functionNcss 35 -- Encodes aggregate layouts without invalidating interior aliases.
   private writeAggregate(
     type: Extract<Type, { kind: 'array' | 'struct' | 'union' }>,
     offset: number,
@@ -529,32 +535,48 @@ export class BufferMemory {
         }
         const layout = unionOffsets(type);
         (this.readAggregate(type, offset) as ZUnion).tag = union.tag;
-        this.write(type.fields![union.tag].type, offset + layout.payload * 8, union.slots[0]);
+        const field = unionFieldLocation(type, union.tag, offset + layout.payload * 8);
+        this.write(field.type, field.offset, union.slots[0], field.packed);
         return;
       }
     }
   }
 
-  private copyRegion(destination: BufferMemory, offset: number, start: number, length: number): void {
-    this.access(false, offset, length * 8, () =>
-      destination.access(true, start, length * 8, () => this.copyRegionRaw(destination, offset, start, length))
+  private copyRegion(destination: BufferMemory, offset: number, start: number, bits: number): void {
+    this.access(false, offset, bits, () =>
+      destination.access(true, start, bits, () => this.copyRegionRaw(destination, offset, start, bits))
     );
   }
 
-  private copyRegionRaw(destination: BufferMemory, offset: number, start: number, length: number): void {
-    spendMemory(length * 20);
-    const bytes = this.bytes.slice(offset / 8, offset / 8 + length);
+  private copyRegionRaw(destination: BufferMemory, offset: number, start: number, bits: number): void {
+    spendMemory(Math.ceil(bits / 8) * 20);
+    const bytes = this.regionBytes(offset, bits);
     const references: (StoredReference & { offset: number })[] = [];
-    for (let bit = 0; bit < length * 8; bit++) {
+    for (let bit = 0; bit < bits; bit++) {
       const reference = this.currentReference(offset + bit);
       if (reference) references.push({ ...reference, offset: start + bit });
     }
-    for (let bit = 0; bit < length * 8; bit++) destination.referenceOffsets.delete(start + bit);
-    for (let index = 0; index < bytes.length; index++) destination.bytes[start / 8 + index] = bytes[index];
+    for (let bit = 0; bit < bits; bit++) destination.referenceOffsets.delete(start + bit);
+    destination.writeRegionBytes(start, bits, bytes);
     for (const reference of references) {
       destination.referenceOffsets.set(reference.offset, reference);
       destination.referenceHolds.set(reference.key, reference.value);
       destination.space.references.set(reference.key, reference.value);
+    }
+  }
+
+  private regionBytes(offset: number, bits: number): Value[] {
+    if (offset % 8 === 0 && bits % 8 === 0) return this.bytes.slice(offset / 8, (offset + bits) / 8);
+    const bytes: Value[] = [];
+    for (let bit = 0; bit < bits; bit += 8) bytes.push(this.readRawBits(offset + bit, Math.min(8, bits - bit)));
+    return bytes;
+  }
+
+  private writeRegionBytes(offset: number, bits: number, bytes: readonly Value[]): void {
+    for (const [index, value] of bytes.entries()) {
+      const at = offset + index * 8;
+      if (offset % 8 === 0 && at + 8 <= offset + bits) this.bytes[at / 8] = value;
+      else this.writeRawBits(at, Math.min(8, offset + bits - at), value as bigint);
     }
   }
 
@@ -657,6 +679,11 @@ export class BufferMemory {
     const value = this.read(type.tagType, offset);
     return enumLookup(type.tagType.fields!, this.spend).indexByValue.get(value as bigint) ?? -1;
   }
+}
+
+function unionFieldLocation(type: Extract<Type, { kind: 'union' }>, index: number, offset: number): FieldLocation {
+  const field = type.fields![index].type;
+  return { type: field, offset, packed: type.layout === 'packed' ? bitSizeOf(field) : undefined };
 }
 
 function referenceKey(id: bigint, bits: number): string {

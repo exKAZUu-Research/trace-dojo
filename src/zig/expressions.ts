@@ -324,12 +324,9 @@ export abstract class ExpressionCompiler extends SemaBase {
     const literal = known(ENUM_LITERAL, EnumLiteral.of(name), span);
     if (!resultType) return literal;
     const target = unwrapResult(resultType);
+    const decl = this.findDecl(target, name);
+    if (decl) return this.resolveDecl(decl, span);
     if (target.kind === 'enum' || target.kind === 'union') return this.coerce(literal, target, span);
-    // A declaration literal, such as `.empty` or `.init`, names a declaration of the result type.
-    if (target.kind === 'struct') {
-      const decl = this.findDecl(target, name);
-      if (decl) return this.resolveDecl(decl, span);
-    }
     return literal;
   }
 
@@ -589,6 +586,10 @@ export abstract class ExpressionCompiler extends SemaBase {
       this.compilationBudget.spend();
       return this.dereferenced(this.compile(expression.operand), expression, false);
     }
+    if (expression.kind === 'unwrap') {
+      this.spendCompilation();
+      return this.unwrapOptional(expression, true);
+    }
     return this.compile(expression, resultType);
   }
 
@@ -658,14 +659,15 @@ export abstract class ExpressionCompiler extends SemaBase {
     return new FnValue(this.instantiate(ref, [], span));
   }
 
-  private unwrapOptional(expression: ExpressionOf<'unwrap'>): TExpr {
+  private unwrapOptional(expression: ExpressionOf<'unwrap'>, location = false): TExpr {
     const operand = this.compile(expression.operand);
     const type = operand.type;
     if (type.kind !== 'optional')
       return this.error(expression, `${typeName(type)} 型は optional ではないので、.? は使えません。`);
     const child = type.child;
     this.checkMemoryHeader(operand, expression);
-    // A known null still panics only when the program runs, as in Zig.
+    if (location && operand.known && operand.value === NULL)
+      return this.error(expression, 'null の optional は参照できません。');
     if (operand.known && operand.value !== NULL)
       return knownAt(child, this.optionalPayloadPointer(this.addressOf(operand).value as Pointer, child), expression);
     const evaluate = operand.eval;
@@ -697,7 +699,7 @@ export abstract class ExpressionCompiler extends SemaBase {
   // Indexing and slicing ----------------------------------------------------------------------------------------------
 
   protected index(expression: ExpressionOf<'index'>, load = true): TExpr {
-    const object = this.compile(expression.object);
+    const object = this.compileLocation(expression.object);
     const index = this.coerce(this.compile(expression.index, USIZE), USIZE, expression.index);
     const type = object.type;
     if (type.kind === 'struct' && type.isTuple) {
