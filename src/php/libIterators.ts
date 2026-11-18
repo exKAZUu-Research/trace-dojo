@@ -3,14 +3,12 @@ import { callCallback, callMethod, consumeInvokedResult } from './callables';
 import { createObject, findClass } from './classes';
 import { toBool } from './conversions';
 import { throwError, warn } from './errors';
+import { acquireIterator, newEngineIterator } from './iteratorAcquisition';
 import { arrayIteratorOver } from './libArrayObject';
 import { defineClass, type NativeMethod } from './native';
 import { toKey, toStr } from './operators';
 import { rt } from './runtime';
-import { iteratorOf } from './statements';
-import { nativeOwnershipChanged, PhpArray, PhpClass, PhpObject, type Value } from './values';
-
-const ITERATOR_CLASS = new PhpClass('InternalIterator');
+import { nativeOwnershipChanged, PhpArray, type PhpClass, PhpObject, type Value } from './values';
 
 /**
  * The iterator PHP's engine makes for an Iterator object: it calls the object's methods and, like zend_user_iterator,
@@ -18,11 +16,15 @@ const ITERATOR_CLASS = new PhpClass('InternalIterator');
  */
 export class InnerIterator {
   /** The object handle PHP allocates for the iterator, which shifts the numbers var_dump shows for later objects. */
-  readonly handle = rt().newObject(ITERATOR_CLASS);
+  readonly handle: PhpObject;
   private cached: { v: Value } | undefined;
 
-  constructor(readonly object: PhpObject) {
-    this.handle.internal = this;
+  constructor(
+    readonly object: PhpObject,
+    handle = newEngineIterator(object)
+  ) {
+    this.handle = handle;
+    if (handle !== object) handle.internal = this;
   }
 
   held(): Value[] {
@@ -81,27 +83,33 @@ function releaseIteratorValues(values: (Value | undefined)[]): void {
 
 /** The engine's iterator for a Traversable object, which asks an IteratorAggregate for its iterator. */
 export function innerIteratorOf(object: PhpObject): InnerIterator {
-  return new InnerIterator(iteratorOf(object) ?? object);
+  const acquired = acquireIterator(object);
+  return acquired ? new InnerIterator(acquired.iterator, acquired.handle) : new InnerIterator(object);
 }
 
 class LiveIteratorState {
   position = 0;
   constructor(
     readonly owner: PhpObject,
-    readonly values: () => Value[]
+    readonly values: () => Value[],
+    private readonly engine?: PhpObject
   ) {}
   held(): Value[] {
-    return [this.owner];
+    return [this.engine ?? this.owner];
   }
   clone(): never {
     throwError('Error', 'Trying to clone an uncloneable object of class InternalIterator');
   }
 }
 
-export function liveArrayIterator(owner: PhpObject, values: () => Value[]): PhpObject {
-  const object = createObject(rt().classes.get('internaliterator') as PhpClass);
-  object.internal = new LiveIteratorState(owner, values);
-  return object;
+export function liveArrayIterator(owner: PhpObject, values: () => Value[], exposed = false): PhpObject {
+  const cls = rt().classes.get('internaliterator') as PhpClass;
+  const engine = createObject(cls);
+  engine.internal = new LiveIteratorState(owner, values);
+  if (!exposed) return engine;
+  const wrapper = createObject(cls);
+  wrapper.internal = new LiveIteratorState(owner, values, engine);
+  return wrapper;
 }
 
 const liveState = (object: PhpObject): LiveIteratorState => object.internal as LiveIteratorState;

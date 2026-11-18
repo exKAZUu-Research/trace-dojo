@@ -122,6 +122,14 @@ class ObjectStorage {
     return hash;
   }
 
+  rewindAfter<T>(operate: () => T): T {
+    try {
+      return operate();
+    } finally {
+      this.rewind();
+    }
+  }
+
   rewind(): void {
     this.position = 0;
     this.index = 0;
@@ -186,8 +194,7 @@ function storageKey(value: Value, method: string): PhpObject {
 /** Detaches an object as the detach methods do, which also rewind the storage. */
 function detachAndRewind(object: PhpObject, target: PhpObject): void {
   const storage = storageOf(object);
-  storage.detach(target);
-  storage.rewind();
+  storage.rewindAfter(() => storage.detach(target));
 }
 
 defineClass({
@@ -232,14 +239,15 @@ defineClass({
       impl: ({ thisObj, args }) => {
         const storage = storageOf(thisObj);
         const other = storageOf(args[0] as PhpObject);
-        let position = 0;
-        while (position < other.slots.length) {
-          rt().spend();
-          const entry = other.slots[position];
-          if (!entry || !storage.detach(entry.object)) position++;
-        }
-        storage.rewind();
-        return BigInt(storage.entries.size);
+        return storage.rewindAfter(() => {
+          let position = 0;
+          while (position < other.slots.length) {
+            rt().spend();
+            const entry = other.slots[position];
+            if (!entry || !storage.detach(entry.object)) position++;
+          }
+          return BigInt(storage.entries.size);
+        });
       },
     },
     {
@@ -247,9 +255,10 @@ defineClass({
       impl: ({ thisObj, args }) => {
         const storage = storageOf(thisObj);
         const other = storageOf(args[0] as PhpObject);
-        for (const object of storage.objects()) if (!other.has(object)) storage.detach(object);
-        storage.rewind();
-        return BigInt(storage.entries.size);
+        return storage.rewindAfter(() => {
+          for (const object of storage.objects()) if (!other.has(object)) storage.detach(object);
+          return BigInt(storage.entries.size);
+        });
       },
     },
     {

@@ -581,7 +581,9 @@ class FixedStorage {
     this.nativeValues.delete(old);
     dropped(old);
   }
-  position = 0;
+  fixedIterator(owner: PhpObject): PhpObject {
+    return liveArrayIterator(owner, () => this.items);
+  }
 
   held(): Value[] {
     return this.items;
@@ -700,7 +702,7 @@ defineClass({
       },
       {
         signature: 'getIterator(): Iterator',
-        impl: ({ thisObj }) => liveArrayIterator(thisObj, () => fixedOf(thisObj).items),
+        impl: ({ thisObj }) => liveArrayIterator(thisObj, () => fixedOf(thisObj).items, true),
       },
       {
         signature: 'fromArray(array $array, bool $preserveKeys = true): SplFixedArray',

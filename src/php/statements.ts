@@ -19,13 +19,23 @@ import {
   writeProp,
 } from './classes';
 import { toBool, valueName } from './conversions';
-import { E_DEPRECATED, E_WARNING, emitError, setPrevious, throwError, warn } from './errors';
+import { E_DEPRECATED, E_WARNING, emitError, setPrevious, throwError, warn, withPendingException } from './errors';
 import { collectBeforeAllocation, setDestructor } from './garbage';
 import { consumeExpression, ev, evBool, evQuiet, evReturn, prepareOperand } from './interp';
+import { acquireIterator } from './iteratorAcquisition';
 import { looseEquals, setObjectToString, toStr } from './operators';
 import { ElementPlace, RefPlace, share, ValuePlace, VarPlace, writableContainer } from './places';
 import { FatalError, Frame, PhpThrow, rt, type Runtime } from './runtime';
-import { type Callable, type Key, PhpArray, PhpClass, PhpObject, Ref, type UserFunction, type Value } from './values';
+import {
+  type Callable,
+  type Key,
+  PhpArray,
+  type PhpClass,
+  PhpObject,
+  Ref,
+  type UserFunction,
+  type Value,
+} from './values';
 
 type Completion =
   | undefined
@@ -571,34 +581,33 @@ function bindForeachRef(target: Expr, ref: Ref): void {
   else bindRef(target, ref);
 }
 
-/** The class of the iterator objects PHP's engine makes for foreach, which programs never see. */
-const FOREACH_ITERATOR = new PhpClass('InternalIterator');
-
-// code-gauge-allow functionCognitiveComplexity 27 -- One case per statement kind, as PHP runs each kind differently.
-// code-gauge-allow functionNcss 44 -- One case per statement kind, as PHP runs each kind differently.
+// code-gauge-allow functionCognitiveComplexity 27 -- Acquires and releases native iterators and preserves the live ordinary-property traversal.
+// code-gauge-allow functionNcss 42 -- Both iteration modes share the statement binding and completion path.
 function foreachObject(statement: Extract<Stmt, { k: 'foreach' }>, object: PhpObject, byRef = false): Completion {
   const runtime = rt();
-  const iterator = iteratorOf(object);
-  // PHP's own array iterators let foreach change their elements by reference.
-  const storage = iterator?.internal as NativeForeachStorage | undefined;
-  if (iterator && byRef && typeof storage?.writable === 'function') {
-    return foreachArrayByRef(statement, storage.writable(), storage);
-  }
-  if (iterator) {
-    if (byRef) throwError('Error', 'An iterator cannot be used with foreach by reference');
-    // PHP's engine wraps the iterator in an iterator object of its own, which takes an object handle while the loop
-    // runs and releases the iterator before itself.
-    const handle = runtime.newObject(FOREACH_ITERATOR);
-    handle.internal = { held: () => [iterator] };
-    runtime.frame.temporaries.push(handle);
-    callMethod(iterator, 'rewind', []);
-    while (toBool(callMethod(iterator, 'valid', []))) {
-      runtime.spend();
-      const value = callMethod(iterator, 'current', []);
-      const key = statement.key ? callMethod(iterator, 'key', []) : null;
-      const completion = foreachIteration(statement, key, value);
-      if (completion !== 'next') return completion;
-      callMethod(iterator, 'next', []);
+  const acquired = acquireIterator(object, byRef);
+  if (acquired) {
+    const { iterator, handle } = acquired;
+    let failure: PhpThrow | undefined;
+    try {
+      if (byRef) {
+        const storage = iterator.internal as NativeForeachStorage;
+        return foreachArrayByRef(statement, storage.writable(), storage);
+      }
+      callMethod(iterator, 'rewind', []);
+      while (toBool(callMethod(iterator, 'valid', []))) {
+        runtime.spend();
+        const value = callMethod(iterator, 'current', []);
+        const key = statement.key ? callMethod(iterator, 'key', []) : null;
+        const completion = foreachIteration(statement, key, value);
+        if (completion !== 'next') return completion;
+        callMethod(iterator, 'next', []);
+      }
+    } catch (error) {
+      if (error instanceof PhpThrow) failure = error;
+      throw error;
+    } finally {
+      withPendingException(runtime, failure, () => runtime.discardNativeResult(handle, Infinity, 0));
     }
     return undefined;
   }
@@ -618,31 +627,6 @@ function foreachObject(statement: Extract<Stmt, { k: 'foreach' }>, object: PhpOb
     if (completion !== 'next') return completion;
   }
   return undefined;
-}
-
-/** The Iterator an object iterates with: itself, or what `getIterator` returns; undefined for plain objects. */
-export function iteratorOf(object: PhpObject): PhpObject | undefined {
-  const runtime = rt();
-  const iteratorClass = runtime.classes.get('iterator') as PhpClass;
-  const aggregate = runtime.classes.get('iteratoraggregate') as PhpClass;
-  let current = object;
-  for (;;) {
-    runtime.spend();
-    if (current.cls.isSubclassOf(iteratorClass)) return current;
-    if (!current.cls.isSubclassOf(aggregate)) return undefined;
-    const next = callMethod(current, 'getIterator', []);
-    if (
-      !(next instanceof PhpObject) ||
-      next === current ||
-      !next.cls.isSubclassOf(runtime.classes.get('traversable') as PhpClass)
-    ) {
-      throwError(
-        'Exception',
-        `Objects returned by ${current.cls.name}::getIterator() must be traversable or implement interface Iterator`
-      );
-    }
-    current = next;
-  }
 }
 
 function runBody(decl: FunctionDecl, frame: Frame): Value {

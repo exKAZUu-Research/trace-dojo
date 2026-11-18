@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 925 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 935 -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import {
   applyOperator,
@@ -45,7 +45,8 @@ import {
 import * as classesModule from './classes';
 import { debugType, getType, numericPrefix, toBool, valueName } from './conversions';
 import * as conversionsModule from './conversions';
-import { deprecated, throwError, type UpdateWarning, warn, withOperandWarnings } from './errors';
+import { deprecated, throwError, type UpdateWarning, warn, withOperandWarnings, withPendingException } from './errors';
+import { acquireIterator } from './iteratorAcquisition';
 import { constantDeprecation } from './native';
 import {
   bitwiseNot,
@@ -62,7 +63,7 @@ import {
 } from './operators';
 import { readElement, share } from './places';
 import { PhpThrow, rt } from './runtime';
-import { constantKey, iteratorOf } from './statements';
+import { constantKey } from './statements';
 import { UnsupportedFeatureError } from './unsupported';
 import {
   type ClosureData,
@@ -751,7 +752,6 @@ function appendSpreadValue(array: PhpArray, value: Value | Ref): void {
 /** Iterates over an array or a Traversable object, as `foreach` would. */
 export function iterate(value: Value, fetch?: 'both' | 'value' | 'none', slots?: false): Generator<[Value, Value]>;
 export function iterate(value: Value, fetch: 'both' | 'value' | 'none', slots: true): Generator<[Value, Value | Ref]>;
-// code-gauge-allow functionNcss 33 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 export function* iterate(
   value: Value,
   fetch: 'both' | 'value' | 'none' = 'both',
@@ -762,30 +762,48 @@ export function* iterate(
     return;
   }
   if (!(value instanceof PhpObject)) return;
-  const iterator = iteratorOf(value);
-  if (!iterator) {
+  const acquired = acquireIterator(value);
+  if (!acquired) {
     for (const entry of visibleProps(value, rt().frame.scope)) yield entry;
     return;
   }
-  callMethod(iterator, 'rewind', []);
-  while (toBool(callMethod(iterator, 'valid', []))) {
-    const runtime = rt();
-    runtime.spend();
-    const frame = runtime.frame;
-    const mark = frame.temporaries.length;
-    try {
-      if (slots) runtime.lastReturnRef = undefined;
-      const current = fetch === 'none' ? null : callMethod(iterator, 'current', []);
-      const reference = slots && fetch !== 'none' ? runtime.lastReturnRef : undefined;
-      if (slots) runtime.lastReturnRef = undefined;
-      const slot = slots ? (reference ?? nativeIteratorSlot(iterator) ?? current) : current;
-      if (slots && slot instanceof Ref) runtime.holdTemporaryReference(slot);
-      const key = fetch === 'both' ? callMethod(iterator, 'key', []) : null;
-      yield [key, slot];
-    } finally {
-      if (slots) runtime.dropTemporaries(frame, mark);
+  yield* iterateObject(acquired.iterator, acquired.handle, fetch, slots);
+}
+
+// code-gauge-allow functionCognitiveComplexity 22 -- Retains fetched references while the callback runs and releases the engine iterator on every exit.
+function* iterateObject(
+  iterator: PhpObject,
+  handle: PhpObject,
+  fetch: 'both' | 'value' | 'none',
+  slots: boolean
+): Generator<[Value, Value | Ref]> {
+  const runtime = rt();
+  let failure: PhpThrow | undefined;
+  try {
+    callMethod(iterator, 'rewind', []);
+    while (toBool(callMethod(iterator, 'valid', []))) {
+      runtime.spend();
+      const frame = runtime.frame;
+      const mark = frame.temporaries.length;
+      try {
+        if (slots) runtime.lastReturnRef = undefined;
+        const current = fetch === 'none' ? null : callMethod(iterator, 'current', []);
+        const reference = slots && fetch !== 'none' ? runtime.lastReturnRef : undefined;
+        if (slots) runtime.lastReturnRef = undefined;
+        const slot = slots ? (reference ?? nativeIteratorSlot(iterator) ?? current) : current;
+        if (slots && slot instanceof Ref) runtime.holdTemporaryReference(slot);
+        const key = fetch === 'both' ? callMethod(iterator, 'key', []) : null;
+        yield [key, slot];
+      } finally {
+        if (slots) runtime.dropTemporaries(frame, mark);
+      }
+      callMethod(iterator, 'next', []);
     }
-    callMethod(iterator, 'next', []);
+  } catch (error) {
+    if (error instanceof PhpThrow) failure = error;
+    throw error;
+  } finally {
+    withPendingException(runtime, failure, () => runtime.discardNativeResult(handle, Infinity, 0));
   }
 }
 

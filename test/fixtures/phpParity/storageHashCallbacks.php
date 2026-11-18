@@ -8,7 +8,7 @@ class HashCallbacks extends SplObjectStorage {
     public function getHash(object $object) {
         echo $this->label, ':', count($this), ':', ++$this->calls, "\n";
         if ($this->calls === $this->failAt) throw new RuntimeException('getHash');
-        return $this->hash;
+        return isset($object->id) ? "entry:$object->id" : $this->hash;
     }
     public function __clone() { echo 'clone:', $this->label, ':', $this->calls, "\n"; }
 }
@@ -33,4 +33,21 @@ foreach ([23, null, false] as $hash) {
         catch (TypeError $error) { echo $error->getMessage(), "\n"; }
     }
     var_dump(count($storage));
+}
+
+foreach ([false, true] as $same) {
+    for ($callback = 1; $callback <= ($same ? 3 : 4); $callback++) {
+        $target = new HashCallbacks();
+        $other = $same ? $target : new SplObjectStorage();
+        foreach ([1, 2, 3] as $value) {
+            $entry = (object)['id' => $value];
+            $target[$entry] = $value;
+            if (!$same) $other[$entry] = $value;
+        }
+        $target->next();
+        $target->failAt = $target->calls + $callback;
+        try { $target->removeAll($other); }
+        catch (RuntimeException) { echo "caught\n"; }
+        var_dump(count($target), $target->key(), $target->getInfo());
+    }
 }
