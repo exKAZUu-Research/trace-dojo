@@ -17,7 +17,12 @@ export function unavailableMemberCheck(realm: Realm): UnavailableMemberCheck {
   return (value, key) => {
     if (value === math && key === 'random') return 'Math.random';
     if (value === console && consoleTimers.has(key)) return `console.${String(key)}`;
-    if (key === 'stack' && inherits(value, realm.errorPrototypes.Error)) return 'Error の stack';
+    // Node.js gives every error its own stack, whatever its prototype becomes.
+    if (
+      key === 'stack' &&
+      ((value instanceof JsObject && value.isError) || inherits(value, realm.errorPrototypes.Error))
+    )
+      return 'Error の stack';
     if (key === 'compile' && inherits(value, realm.regExpPrototype)) return 'RegExp の compile';
     return;
   };

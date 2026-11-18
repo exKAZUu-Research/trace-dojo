@@ -131,6 +131,11 @@ test.each([
     'Error の stack は、この採点環境では使えません。',
   ],
   [
+    'the stack of an Error whose prototype is removed',
+    'const e: any = new Error("oops");\nObject.setPrototypeOf(e, null);\nconsole.log(e.stack);',
+    'Error の stack は、この採点環境では使えません。',
+  ],
+  [
     'console.time through any',
     'const c: any = console;\nc.time("x");',
     'console.time は、この採点環境では使えません。',
