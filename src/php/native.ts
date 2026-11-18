@@ -55,9 +55,17 @@ export function defineOverloadedFunction(
 
 /** Marks a native function whose direct calls PHP compiles away, as {@link NativeFunction.inlined} says. */
 export function markInlined(name: string): void {
+  markedFunction(name).inlined = true;
+}
+
+export function markDirectOnly(...names: string[]): void {
+  for (const name of names) markedFunction(name).directOnly = true;
+}
+
+function markedFunction(name: string): NativeFunction {
   const fn = functions.find((candidate) => candidate.name === name);
   if (!fn) throw new Error(`Unknown function ${name}`);
-  fn.inlined = true;
+  return fn;
 }
 
 export function defineAlias(alias: string, target: string): void {

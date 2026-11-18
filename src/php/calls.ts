@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 687 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 698 -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import { LIMITS } from '../interpreter/limits';
 import type { FunctionDecl } from './ast';
@@ -8,6 +8,7 @@ import { notice, throwError, withPendingException } from './errors';
 import { decodeLiteral } from './literals';
 import { share } from './places';
 import {
+  ExitSignal,
   FatalError,
   Frame,
   memoryExhaustedMessage,
@@ -55,6 +56,7 @@ export interface CallTarget {
   method?: Method;
   closure?: PhpObject;
   magic?: MagicCall;
+  dynamic?: boolean;
   directOverload?: boolean;
   inline?: boolean;
   frameless?: boolean;
@@ -170,7 +172,10 @@ export function classMethodLabel(scope: PhpClass, method: string): string {
   return untilNul(`${scope.fullName}::${method}`);
 }
 
-// code-gauge-allow functionCognitiveComplexity 17 -- Emits PHP stack frames by callable kind.
+export function closureFunctionName(decl: FunctionDecl, scope: PhpClass | undefined): string {
+  return scope?.isAnonymous ? decl.name.replace(scope.name, scope.fullName) : decl.name;
+}
+
 function recordFor(target: CallTarget, args: Value[], row: number | undefined): CallRecord {
   const { fn, method, thisObj } = target;
   if (method) {
@@ -195,7 +200,7 @@ function recordFor(target: CallTarget, args: Value[], row: number | undefined): 
   if (fn.kind === 'user' && fn.decl.isClosure) {
     const scope = target.scope;
     return {
-      name: scope?.isAnonymous ? fn.decl.name.replace(scope.name, scope.fullName) : fn.decl.name,
+      name: closureFunctionName(fn.decl, scope),
       className: scope?.fullName,
       type: scope ? (thisObj ? '->' : '::') : undefined,
       thisObj,
@@ -277,6 +282,7 @@ function invokeNative(
       Boolean(inline || target.directOverload),
       record
     );
+    if (target.dynamic && fn.directOnly) throwError('Error', `Cannot call ${fn.name}() dynamically`);
     for (let index = 0; index < values.length; index++) {
       if (values[index] === undefined && fn.params[index]?.byRef)
         refs[index] = Ref.temporary(nativeDefault(fn.params[index].nativeDefault));
@@ -311,7 +317,7 @@ function invokeNative(
     runtime.nativeHeld.pop();
     if (target.thisObj) runtime.pendingGcRoots.add(target.thisObj);
     runtime.row = savedRow;
-    if (!failed || failure instanceof PhpThrow) {
+    if (!failed || failure instanceof PhpThrow || failure instanceof ExitSignal) {
       if (result instanceof PhpObject || result instanceof PhpArray) caller.temporaries.push(result);
       releaseNativeValues(runtime, held, failure instanceof PhpThrow ? failure : undefined);
     } else {
@@ -358,7 +364,7 @@ function releaseNativeValues(runtime: Runtime, held: NativeHolders, pending?: Ph
   } finally {
     runtime.nativeHeld.pop();
     for (const ref of held.references) ref.releaseWithoutGc();
-    if (!failed || failure instanceof PhpThrow)
+    if (!failed || failure instanceof PhpThrow || failure instanceof ExitSignal)
       releaseCallValues(runtime, args, failure instanceof PhpThrow ? failure : undefined);
   }
 }
@@ -643,7 +649,7 @@ function invokeUser(
     for (const value of frame.temporaries) if (value instanceof Ref) value.rc--;
     runtime.row = savedRow;
     if (decl.isAtomic) runtime.steps.completeAtomicCall();
-    if (!failed || failure instanceof PhpThrow)
+    if (!failed || failure instanceof PhpThrow || failure instanceof ExitSignal)
       releaseFrame(
         runtime,
         caller,
@@ -826,33 +832,42 @@ function positionalArguments(args: ArgValue[]): ArgValue[] {
   return result;
 }
 
-// code-gauge-allow functionCognitiveComplexity 17 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 function checkNamedArgs(params: Param[], args: ArgValue[]): Map<string, Value> | undefined {
-  const variadic = params.at(-1)?.variadic;
-  const names = new Set<string>();
-  const positions = new Set<number>();
-  let nextPosition = 0;
-  let named: Map<string, Value> | undefined;
-  for (const arg of args) {
+  if (!args.some((arg) => arg.name !== undefined)) return undefined;
+  const binding = new NamedArgumentBindings(params);
+  for (const arg of args) binding.add(arg);
+  return binding.extra;
+}
+
+export class NamedArgumentBindings {
+  private readonly names = new Set<string>();
+  private readonly positions = new Set<number>();
+  private nextPosition = 0;
+  extra?: Map<string, Value>;
+
+  constructor(
+    private readonly params: Param[],
+    private readonly allowUnknown = false
+  ) {}
+
+  add(arg: ArgValue): number | undefined {
     if (arg.name === undefined) {
-      if (arg.position === undefined && names.size > 0)
+      if (arg.position === undefined && this.names.size > 0)
         throwError('Error', 'Cannot use positional argument after named argument');
-      const position = arg.position ?? nextPosition;
-      positions.add(position);
-      nextPosition = position + 1;
-      continue;
+      const position = arg.position ?? this.nextPosition;
+      this.positions.add(position);
+      this.nextPosition = position + 1;
+      return undefined;
     }
-    const index = params.findIndex((param) => param.name === arg.name && !param.variadic);
-    if (names.has(arg.name) || (index !== -1 && positions.has(index)))
+    const index = this.params.findIndex((param) => param.name === arg.name && !param.variadic);
+    if (this.names.has(arg.name) || (index !== -1 && this.positions.has(index)))
       throwError('Error', `Named parameter $${arg.name} overwrites previous argument`);
-    names.add(arg.name);
-    if (index === -1) {
-      if (!variadic) throwError('Error', `Unknown named parameter $${arg.name}`);
-      named ??= new Map();
-      named.set(arg.name, arg.v);
-    }
+    this.names.add(arg.name);
+    if (index !== -1) return index;
+    if (!this.allowUnknown && !this.params.at(-1)?.variadic)
+      throwError('Error', `Unknown named parameter $${arg.name}`);
+    (this.extra ??= new Map()).set(arg.name, arg.v);
   }
-  return named;
 }
 
 /** Evaluates a parameter's default value, which the interpreter provides. */

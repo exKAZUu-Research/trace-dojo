@@ -65,7 +65,7 @@ export function analyzeRegex(
         throw new UnsupportedFeatureError('可変長後読みのキャプチャ');
     },
     onQuantifierLeave(node) {
-      validateCaptureRepeat(node, lengths);
+      validateNullableRepeat(node, lengths);
     },
     onCapturingGroupEnter() {
       captureCount++;
@@ -114,11 +114,32 @@ function specializeForEmptySubject(tree: AST.Pattern, markers: ReadonlyMap<strin
   return output + tree.raw.slice(cursor);
 }
 
-function validateCaptureRepeat(node: AST.Quantifier, lengths: Map<AST.Element, Length>): void {
+function validateNullableRepeat(node: AST.Quantifier, lengths: Map<AST.Element, Length>): void {
   const group = node.element;
-  if (group.type !== 'CapturingGroup' || !/^\$\d+$/.test(group.name ?? '') || node.max === node.min) return;
+  if (node.max === node.min || (group.type !== 'CapturingGroup' && group.type !== 'Group')) return;
   const [min, max] = elementLength(group, lengths, new Set());
-  if (min === 0 && (node.min === 0 || max > 0)) throw new UnsupportedFeatureError('空に一致できるキャプチャの繰り返し');
+  if (min !== 0) return;
+  if (group.type === 'CapturingGroup' && /^\$\d+$/.test(group.name ?? '') && (node.min === 0 || max > 0))
+    throw new UnsupportedFeatureError('空に一致できるキャプチャの繰り返し');
+  if (max > 0 && prefersEmpty(group, lengths))
+    throw new UnsupportedFeatureError('空の一致を優先する正規表現の繰り返し');
+}
+
+function prefersEmpty(node: AST.Element, lengths: Map<AST.Element, Length>): boolean {
+  const [min, max] = elementLength(node, lengths, new Set());
+  if (min > 0 || max === 0) return false;
+  if (node.type === 'Quantifier') return !node.greedy || prefersEmpty(node.element, lengths);
+  if (node.type !== 'Group' && node.type !== 'CapturingGroup') return false;
+  let nullable = false;
+  for (const alternative of node.alternatives) {
+    const [alternativeMin, alternativeMax] = alternativeLength(alternative, lengths, new Set());
+    if (nullable && alternativeMax > 0) return true;
+    if (alternativeMin === 0) {
+      if (alternative.elements.some((element) => prefersEmpty(element, lengths))) return true;
+      nullable = true;
+    }
+  }
+  return false;
 }
 
 function validateLookbehind(

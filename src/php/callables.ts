@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 613 -- Keeps one PHP runtime concern and its shared helpers in one module.
+// code-gauge-allow-file fileNcss 620 -- Keeps one PHP runtime concern and its shared helpers in one module.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import { placeOf } from './assignment';
 import type { Arg, Expr } from './ast';
@@ -11,10 +11,12 @@ import {
   type CallTarget,
   classMethodLabel,
   closureFunction,
+  closureFunctionName,
   functionDisplayName,
   handOverArgs,
   invoke,
   type MagicCall,
+  NamedArgumentBindings,
   paramIsByRef,
 } from './calls';
 import { canCall, classScopeMessage, lookupMethod, requireClass } from './classes';
@@ -50,17 +52,23 @@ import {
 // Calls --------------------------------------------------------------------------------------------------------------
 
 /** Evaluates call arguments, binding by-reference parameters to locations. */
-export function evalArgs(args: Arg[], fn: Callable | undefined, name: string | undefined): ArgValue[] {
+export function evalArgs(
+  args: Arg[],
+  fn: Callable | undefined,
+  name: string | undefined,
+  allowUnresolvedNames = true
+): ArgValue[] {
   const runtime = rt();
   const values: ArgValue[] = [];
+  const named = args.some((arg) => arg.name !== undefined || arg.spread)
+    ? new NamedArgumentBindings(fn?.params ?? [], fn === undefined && allowUnresolvedNames)
+    : undefined;
   let positional = 0;
   const add = (value: ArgValue): void => {
-    values.push(value);
     if (value.name === undefined) value.position = positional++;
-    else {
-      const index = fn?.params.findIndex((param) => param.name === value.name && !param.variadic) ?? -1;
-      if (index >= 0) positional = Math.max(positional, index + 1);
-    }
+    const index = named?.add(value);
+    if (index !== undefined) positional = Math.max(positional, index + 1);
+    values.push(value);
   };
   const frame = runtime.frame;
   for (const [index, arg] of args.entries()) {
@@ -198,7 +206,7 @@ function claimArgumentTemporaries(frame: Frame, args: ArgValue[], first: number,
   }
 }
 
-// code-gauge-allow functionCognitiveComplexity 28 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+// code-gauge-allow functionCognitiveComplexity 29 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 // code-gauge-allow functionNcss 38 -- Keeps the ordered PHP cases together because each branch shares the same dispatch state.
 export function callExpression(e: Extract<Expr, { k: 'call' }>, discardResult = false): Value {
   const runtime = rt();
@@ -239,7 +247,7 @@ export function callExpression(e: Extract<Expr, { k: 'call' }>, discardResult = 
   runtime.row = e.initRow ?? e.row;
   const target = callTargetOf(callee, 'direct');
   if (e.fcc) return closureFromCallable(target);
-  const args = evalArgs(e.args, target.fn, functionNameFor(target));
+  const args = evalArgs(e.args, target.magic ? undefined : target.fn, functionNameFor(target));
   runtime.row = e.row;
   const result = target.magic
     ? invokeMagic(target.magic, args, e.row, discardResult)
@@ -525,12 +533,20 @@ export function closureTarget(closure: PhpObject): CallTarget {
   const data = closure.internal as ClosureData;
   return {
     fn: data.fn,
+    dynamic: true,
     thisObj: data.thisObj,
     scope: data.scope,
     staticClass: data.calledClass ?? data.thisObj?.cls ?? data.scope,
     method: data.method,
     closure: data.fn.kind === 'user' && data.fn.decl.isClosure ? closure : undefined,
   };
+}
+
+export function callableClosureName(closure: PhpObject): string {
+  const { fn, method, scope } = closureTarget(closure);
+  if (method) return `${method.scope.fullName}::${method.name}`;
+  if (fn.kind === 'user' && fn.decl.isClosure) return closureFunctionName(fn.decl, scope);
+  return fn.name;
 }
 
 class CallableFailure {
@@ -546,7 +562,7 @@ class CallableFailure {
  */
 export function callTargetOf(value: Value, mode: 'direct' | 'callback'): CallTarget {
   try {
-    return resolveCallable(value, mode);
+    return { ...resolveCallable(value, mode), dynamic: true };
   } catch (error) {
     if (error instanceof CallableFailure) throwError('Error', error.message);
     throw error;

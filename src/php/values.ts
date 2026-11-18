@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 825 -- Keeps one PHP runtime concern and its shared helpers in one module.
+// code-gauge-allow-file fileNcss 832 -- Keeps one PHP runtime concern and its shared helpers in one module.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import type { TurtleState } from '../interpreter/turtleWorld';
 import { type ArrayCursor, ArrayOrder, type ArrayRebuild } from './arrayOrder';
@@ -532,6 +532,7 @@ export interface NativeFunction {
   impl: (ctx: NativeContext) => Value;
   /** Whether the function reads its caller's variables (compact, extract, func_get_args). */
   needsCaller?: boolean;
+  directOnly?: boolean;
   /**
    * Whether PHP compiles eligible direct calls into an instruction of their own (strlen, count, call_user_func),
    * so that stack traces show no frame for it and what it calls shows the caller's line.
@@ -714,12 +715,18 @@ export class PhpObject {
     return this.internalValue;
   }
   set internal(value: unknown) {
-    this.nativeValues?.detach();
-    clearNativeOwnership(this);
+    if (this.internalValue === value) return;
+    this.releaseInternal();
     this.internalValue = value;
     this.nativeValues?.attach(this);
     internalHandler(this);
     nativeOwnershipChanged(this);
+  }
+  releaseInternal(): void {
+    const storage = this.internalValue as { close?: () => void } | undefined;
+    storage?.close?.();
+    this.nativeValues?.detach();
+    clearNativeOwnership(this);
   }
   get nativeValues(): NativeValueIndex | undefined {
     const index = (this.internalValue as { nativeValues?: unknown } | undefined)?.nativeValues;

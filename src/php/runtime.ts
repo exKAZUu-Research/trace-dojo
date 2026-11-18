@@ -15,7 +15,6 @@ import { setArraySharingCheck } from './places';
 import { MersenneTwister } from './random';
 import {
   type Callable,
-  clearNativeOwnership,
   type ClosureData,
   isClosure,
   type Method,
@@ -369,8 +368,7 @@ export class Runtime {
     this.collectingObjects.delete(object);
     this.turtleObjects.delete(object);
     this.internalObjects.delete(object);
-    object.nativeValues?.detach();
-    clearNativeOwnership(object);
+    object.releaseInternal();
     for (const slot of object.props.values())
       if (slot instanceof Ref) {
         slot.rc--;

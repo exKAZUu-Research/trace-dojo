@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 952 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 961 -- Holds the cases of one concern of the interpreter, which share their helpers.
 import type { TurtleState } from '../interpreter/turtleWorld';
 import { withCleanupExceptions, withPendingException } from './errors';
 import { type Frame, PhpThrow, type Runtime } from './runtime';
@@ -200,15 +200,7 @@ function countAfterDestruction(
 // code-gauge-allow functionNcss 48 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 export function releaseDropped(runtime: Runtime, dropped: unknown[], fromNative: boolean): void {
   if (runtime.shuttingDown || runtime.exhausted) return;
-  const collectible =
-    runtime.collectingObjects.size > 0
-      ? dropped.filter(
-          (value): value is PhpObject =>
-            value instanceof PhpObject &&
-            !runtime.destructedCollectionRoots.has(value) &&
-            runtime.collectingObjects.delete(value)
-        )
-      : [];
+  const collectible = releaseCollectionDescendants(runtime, dropped);
   try {
     releaseDroppedNow(runtime, dropped, fromNative);
   } finally {
@@ -249,6 +241,19 @@ export function releaseDropped(runtime: Runtime, dropped: unknown[], fromNative:
     }
     runtime.gcRoots.add(value);
   }
+}
+
+function releaseCollectionDescendants(runtime: Runtime, dropped: unknown[]): PhpObject[] {
+  if (runtime.collectingObjects.size === 0) return [];
+  const collectible = objectsWithin(dropped, (value) => {
+    runtime.spend();
+    return (
+      !(value instanceof PhpObject) ||
+      (runtime.collectingObjects.has(value) && !runtime.destructedCollectionRoots.has(value))
+    );
+  });
+  for (const object of collectible) runtime.collectingObjects.delete(object);
+  return collectible;
 }
 
 // code-gauge-allow functionNcss 53 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.

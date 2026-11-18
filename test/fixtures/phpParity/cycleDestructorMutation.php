@@ -60,3 +60,22 @@ foreach ([false, true] as $wrap) {
     unset($a, $b, $c);
     echo 'gc:', gc_collect_cycles(), ';after;', gc_collect_cycles(), "\n";
 }
+
+class ThreeLinkMutation {
+    public $next;
+    function __construct(public $id, public $replace = false) {}
+    function __destruct() {
+        echo $this->id, ';';
+        if ($this->id === 'one') $this->next = $this->replace ? new self('new') : null;
+    }
+}
+foreach ([false, true] as $replace) {
+    $one = new ThreeLinkMutation('one', $replace);
+    $two = new ThreeLinkMutation('two');
+    $three = new ThreeLinkMutation('three');
+    $one->next = $two;
+    $two->next = $three;
+    $three->next = $one;
+    unset($one, $two, $three);
+    echo 'gc:', gc_collect_cycles(), ';after;', gc_collect_cycles(), "\n";
+}

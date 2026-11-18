@@ -1,7 +1,7 @@
 // code-gauge-allow-file fileNcss 570 -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import { byteAt, lower, untilNul } from './bytes';
-import { callValue, checkCallable, explainCallable } from './callables';
+import { callableClosureName, callValue, checkCallable, explainCallable } from './callables';
 import { type ArgValue, backtraceLimit, callStack, frameArguments, setCallableExplainer } from './calls';
 import * as classesModule from './classes';
 import { classConstant, findClass, requireClassScope } from './classes';
@@ -32,7 +32,14 @@ import { traceLine } from './exceptions';
 import { collectGarbage } from './garbage';
 import { cast, cloneObject, deprecatedConstant, iterate } from './interp';
 import { isCtypeSpace } from './libLocale';
-import { defineAlias, defineConstant, defineFunction, defineRuntimeConstant, markInlined } from './native';
+import {
+  defineAlias,
+  defineConstant,
+  defineFunction,
+  defineRuntimeConstant,
+  markDirectOnly,
+  markInlined,
+} from './native';
 import { toFloat, toInt, toKey, toStr } from './operators';
 import { printR, varDump, varExport } from './output';
 import { share } from './places';
@@ -41,7 +48,7 @@ import { formatPrintf } from './sprintf';
 import { constantKey, defineConstant as defineUserConstant } from './statements';
 import { setCallableCheck } from './types';
 import { UnsupportedFeatureError } from './unsupported';
-import { copyValueSlot, PhpArray, PhpClass, PhpObject, Ref, UNINIT, type Value } from './values';
+import { copyValueSlot, isClosure, PhpArray, PhpClass, PhpObject, Ref, UNINIT, type Value } from './values';
 
 // Constants ------------------------------------------------------------------------------------------------------------
 
@@ -154,6 +161,7 @@ defineFunction('is_countable(mixed $value): bool', ({ args }) => {
 });
 defineFunction(
   'is_callable(mixed $value, bool $syntax_only = false, &$callable_name = null): bool',
+  // code-gauge-allow functionCognitiveComplexity 17 -- Reports each callable syntax form with its native name.
   ({ args, refs }) => {
     const value = args[0];
     let name = 'Array';
@@ -162,7 +170,7 @@ defineFunction(
       name = value;
       syntax = true;
     } else if (value instanceof PhpObject && value.cls.name !== '(stream)') {
-      name = value.cls.name + '::__invoke';
+      name = isClosure(value) ? callableClosureName(value) : value.cls.fullName + '::__invoke';
       syntax = isCallable(value);
     } else if (value instanceof PhpArray && value.size === 2) {
       const owner = value.get(0n);
@@ -735,6 +743,8 @@ defineFunction(
   },
   true
 );
+
+markDirectOnly('func_get_args', 'func_get_arg', 'func_num_args', 'get_defined_vars');
 
 function checkDelay(value: bigint, name: string, parameter: string): void {
   if (value < 0n) throwError('ValueError', `${name}(): Argument #1 ($${parameter}) must be greater than or equal to 0`);

@@ -1,7 +1,7 @@
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import { callMethod } from './callables';
 import { createObject } from './classes';
-import { debugType } from './conversions';
+import { debugType, normalizeKeyString } from './conversions';
 import { throwError } from './errors';
 import { magicSerializationMethods, serializationMethods } from './libArrayObject';
 import './libObjectStorage';
@@ -617,12 +617,10 @@ function fixedIndex(object: PhpObject, index: Value): number {
 }
 
 function fixedOffset(index: Value): number {
-  let position: number;
-  if (typeof index === 'bigint' || typeof index === 'boolean') position = Number(index);
-  else if (typeof index === 'number') position = Number(toKey(index));
-  else if (typeof index === 'string' && /^(?:0|-?[1-9]\d*)$/.test(index)) position = Number(index);
-  else throwError('TypeError', `Cannot access offset of type ${debugType(index)} on SplFixedArray`);
-  return position;
+  const offset = typeof index === 'string' ? normalizeKeyString(index) : index;
+  if (typeof offset === 'bigint' || typeof offset === 'boolean') return Number(offset);
+  if (typeof offset === 'number') return Number(toKey(offset));
+  throwError('TypeError', `Cannot access offset of type ${debugType(index)} on SplFixedArray`);
 }
 
 defineClass({

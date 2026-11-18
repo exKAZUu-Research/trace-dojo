@@ -74,3 +74,19 @@ foreach ([Exception::class, Error::class] as $kind) {
     catch (Throwable $error) { echo 'caught:', get_class($error), "\n"; }
     unset($source);
 }
+
+foreach ([new SplObjectStorage, new HashCallbacks] as $dimension) {
+    foreach ([false, true] as $fail) {
+        $one = (object)['id' => 1];
+        $two = (object)['id' => 2];
+        $dimension[$one] = 1;
+        $dimension[$two] = 2;
+        $dimension->rewind();
+        $dimension->next();
+        if ($fail && $dimension instanceof HashCallbacks) $dimension->failAt = $dimension->calls + 1;
+        try { unset($dimension[$one]); }
+        catch (Throwable $error) { echo "caught\n"; }
+        var_dump(count($dimension), $dimension->key(), $dimension->getInfo());
+        unset($dimension[$one], $dimension[$two]);
+    }
+}

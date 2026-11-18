@@ -11,7 +11,7 @@ import { compareBytes, compareNumbers, debugType, floatFitsInt, normalizeKeyStri
 import { deprecated, throwError, warn, withCleanupExceptions } from './errors';
 import { cast } from './interp';
 import { naturalCompare } from './libString';
-import { defineAlias, defineConstant, defineFunction, markInlined } from './native';
+import { defineAlias, defineConstant, defineFunction, markDirectOnly, markInlined } from './native';
 import {
   arithmetic,
   compare,
@@ -690,6 +690,8 @@ defineFunction(
   },
   true
 );
+
+markDirectOnly('compact', 'extract');
 
 function checkExtractArguments(mode: number, prefix: string | undefined): void {
   if (mode > 6) throwError('ValueError', 'extract(): Argument #2 ($flags) must be a valid extract type');

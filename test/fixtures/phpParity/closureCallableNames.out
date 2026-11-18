@@ -1,0 +1,16 @@
+bool(true)
+strlen
+bool(true)
+strlen
+bool(true)
+CallableCreator::method
+bool(true)
+CallableCreator::method
+bool(true)
+{closure:CallableCreator::literal():4}
+bool(true)
+{closure:CallableCreator::literal():4}
+bool(true)
+{closure:/main.php:7}
+bool(true)
+{closure:/main.php:7}

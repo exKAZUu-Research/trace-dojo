@@ -230,7 +230,11 @@ export abstract class DeclarationConverter extends ConverterBase {
         this.error(child, 'void and never cannot be parameter types');
       if (typeNode && type) this.checkTypeScope(typeNode, type);
       const defaultNode = child.childForFieldName('default_value');
-      const defaultExpr = defaultNode ? this.constantExpr(defaultNode, true, 'deferred') : undefined;
+      const expression = defaultNode ? this.constantExpr(defaultNode, true, 'deferred') : undefined;
+      const defaultExpr: Expr | undefined =
+        expression?.k === 'const' && lower(expression.name.name) === 'null'
+          ? { k: 'lit', v: null, row: expression.row }
+          : expression;
       const byRef = child.childForFieldName('reference_modifier') !== null;
       const variadic = child.type === 'variadic_parameter';
       if (params.at(-1)?.variadic) {
@@ -246,38 +250,37 @@ export abstract class DeclarationConverter extends ConverterBase {
         defaultExpr,
         row: child.startPosition.row,
       };
-      if (defaultExpr?.k === 'lit' && defaultExpr.v === null && type && !typeAllowsNull(type)) {
+      if (defaultExpr?.k === 'lit' && defaultExpr.v === null && type && !typeAllowsNull(type))
         param.implicitNullable = true;
-        const displayName = className === undefined ? functionName : `${className}::${functionName}`;
-        this.notices.push({
-          level: 'Deprecated',
-          message: `${displayName}(): Implicitly marking parameter $${name} as nullable is deprecated, the explicit nullable type must be used instead`,
-          row: child.startPosition.row,
-        });
-      }
       if (child.type === 'property_promotion_parameter')
         param.promote = this.parameterPromotion(child, functionName, className);
       params.push(param);
     }
-    // A required parameter after optional ones makes them required.
-    let lastRequired = -1;
-    for (const [index, param] of params.entries()) if (!param.optional) lastRequired = index;
-    for (const [index, param] of params.entries()) {
-      if (index < lastRequired && param.optional && !param.variadic) {
-        const isNullDefault = param.defaultExpr?.k === 'lit' && param.defaultExpr.v === null;
-        if (!(isNullDefault && param.type)) {
-          const required = params.slice(index + 1).find((later) => !later.optional) as ParamDecl;
-          this.notices.push({
-            level: 'Deprecated',
-            message: `${className === undefined ? functionName : `${className}::${functionName}`}(): Optional parameter $${param.name} declared before required parameter $${required.name} is implicitly treated as a required parameter`,
-            row: param.row,
-          });
-        }
-        param.optional = false;
-        param.defaultExpr = undefined;
-      }
-    }
+    this.parameterDeprecations(params, className === undefined ? functionName : `${className}::${functionName}`);
     return params;
+  }
+
+  private parameterDeprecations(params: ParamDecl[], displayName: string): void {
+    const lastRequired = params.findLastIndex((param) => !param.optional);
+    for (const [index, param] of params.entries()) {
+      if (param.implicitNullable) {
+        this.notices.push({
+          level: 'Deprecated',
+          message: `${displayName}(): Implicitly marking parameter $${param.name} as nullable is deprecated, the explicit nullable type must be used instead`,
+          row: param.row,
+        });
+      }
+      if (index >= lastRequired || !param.optional || param.variadic) continue;
+      if (!param.implicitNullable) {
+        this.notices.push({
+          level: 'Deprecated',
+          message: `${displayName}(): Optional parameter $${param.name} declared before required parameter $${params[lastRequired].name} is implicitly treated as a required parameter`,
+          row: param.row,
+        });
+      }
+      param.optional = false;
+      param.defaultExpr = undefined;
+    }
   }
 
   private parameterPromotion(node: Node, functionName: string, className?: string): NonNullable<ParamDecl['promote']> {

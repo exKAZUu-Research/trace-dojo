@@ -1,0 +1,35 @@
+Cannot call compact() dynamically
+#0 /main.php(9): compact('value')
+#1 /main.php(20): checkScopeCalls(42)
+#2 {main}
+Cannot call extract() dynamically
+#0 /main.php(10): extract(Array)
+#1 /main.php(20): checkScopeCalls(42)
+#2 {main}
+Cannot call get_defined_vars() dynamically
+#0 /main.php(12): get_defined_vars()
+#1 /main.php(20): checkScopeCalls(42)
+#2 {main}
+Cannot call func_get_args() dynamically
+#0 /main.php(12): func_get_args()
+#1 /main.php(20): checkScopeCalls(42)
+#2 {main}
+Cannot call func_get_arg() dynamically
+#0 /main.php(11): func_get_arg(0)
+#1 /main.php(20): checkScopeCalls(42)
+#2 {main}
+Cannot call func_num_args() dynamically
+#0 /main.php(12): func_num_args()
+#1 /main.php(20): checkScopeCalls(42)
+#2 {main}
+extract() expects at least 1 argument, 0 given
+array(1) {
+  ["value"]=>
+  int(7)
+}
+int(1)
+int(8)
+array(1) {
+  [0]=>
+  int(42)
+}

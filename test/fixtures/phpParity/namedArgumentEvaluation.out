@@ -1,0 +1,9 @@
+AUnknown named parameter $unknown
+CDNamed parameter $first overwrites previous argument
+FUnknown named parameter $missing
+#0 {main}
+#0 {main}
+array(1) {
+  ["named"]=>
+  int(42)
+}

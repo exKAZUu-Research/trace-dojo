@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 598 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 606 -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import type { CompileError } from '../interpreter/diagnostics';
 import { assignTo, bindRef, destructure, foreachSubjectPlace, unsetTarget } from './assignment';
@@ -419,13 +419,15 @@ function tryStatement(statement: Extract<Stmt, { k: 'try' }>, seek?: string): Co
   return runFinally(statement.fin, inFinally ? seek : undefined, completion, pending);
 }
 
+// code-gauge-allow functionCognitiveComplexity 19 -- The pending exception and return slot share the same unwind scope.
+// code-gauge-allow functionNcss 34 -- Carries pending control flow across the finally body.
 function runFinally(body: Stmt[], seek: string | undefined, completion: Completion, pending?: PhpThrow): Completion {
   const runtime = rt();
   const frame = runtime.frame;
   const returning = completion?.t === 'return' ? completion.slot : undefined;
   if (returning instanceof Ref) runtime.holdTemporaryReference(returning);
   else if (returning !== undefined) frame.temporaries.push(returning);
-  if (pending) frame.temporaries.push(pending.object);
+  if (pending) runtime.held.push(pending.object);
   let result: Completion;
   try {
     result = execList(body, seek);
@@ -433,9 +435,18 @@ function runFinally(body: Stmt[], seek: string | undefined, completion: Completi
     if (completion?.t === 'return') frame.returning = undefined;
     if (error instanceof PhpThrow && pending) setPrevious(error.object, pending.object);
     throw error;
+  } finally {
+    if (pending) runtime.held.pop();
   }
-  if (result) return result;
-  if (pending) throw pending;
+  if (result) {
+    if (pending && runtime.thrown === pending.object) runtime.thrown = undefined;
+    if (pending) runtime.release([pending.object]);
+    return result;
+  }
+  if (pending) {
+    runtime.thrown = pending.object;
+    throw pending;
+  }
   if (completion?.t === 'return') frame.returning = completion.slot;
   return completion;
 }

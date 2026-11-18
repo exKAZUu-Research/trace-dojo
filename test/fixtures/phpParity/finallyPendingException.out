@@ -1,0 +1,10 @@
+inner
+Exception:original
+inner
+LogicException:from catch
+inner
+
+Fatal error: Uncaught Exception: uncaught in /main.php:18
+Stack trace:
+#0 {main}
+  thrown in /main.php on line 18

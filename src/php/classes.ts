@@ -970,20 +970,28 @@ export function instantiate(
   checkInstantiable(cls);
   const object = createObject(cls);
   rt().frame.temporaries.push(object);
-  const constructor = cls.findMethod('__construct');
-  if (constructor && !canCall(constructor, scope)) {
-    throwError(
-      'Error',
-      `Call to ${constructor.visibility} ${constructor.scope.name}::__construct() from ${scope ? `scope ${scope.name}` : 'global scope'}`
-    );
-  }
-  const values = args();
-  if (constructor) {
-    invoke(
-      { fn: constructor.fn, thisObj: object, scope: constructor.scope, staticClass: cls, method: constructor },
-      values,
-      callRow
-    );
+  try {
+    const constructor = cls.findMethod('__construct');
+    if (constructor && !canCall(constructor, scope)) {
+      throwError(
+        'Error',
+        `Call to ${constructor.visibility} ${constructor.scope.name}::__construct() from ${scope ? `scope ${scope.name}` : 'global scope'}`
+      );
+    }
+    const values = args();
+    if (constructor) {
+      invoke(
+        { fn: constructor.fn, thisObj: object, scope: constructor.scope, staticClass: cls, method: constructor },
+        values,
+        callRow
+      );
+    }
+  } catch (error) {
+    if (!object.destructed) {
+      if (cls.findMethod('__destruct')) rt().destructibles--;
+      object.destructed = true;
+    }
+    throw error;
   }
   return object;
 }

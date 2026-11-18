@@ -661,6 +661,10 @@ test.each([
   '<?php preg_match("/(a*)+/","aaa");',
   '<?php preg_match("/(a?){0,3}/","a");',
   '<?php preg_match("/()*/","");',
+  '<?php preg_replace("/(?:b?|a)*/","X","aa");',
+  '<?php preg_match("/(?:|a){0,3}/","aa");',
+  '<?php preg_match("/(?:a*?)*/","aa");',
+  '<?php preg_match("/(?:x*|a)+/","aa");',
 ])('rejects regex semantics the host cannot preserve: %s', (source) => {
   expect(run(source)).toMatchObject({
     kind: 'executed',
@@ -1259,6 +1263,14 @@ test.each([
 ])('keeps packed queues within the execution budget: %s', (source, stdout) => {
   vi.restoreAllMocks();
   expect(run(`<?php ${source}`)).toMatchObject({ kind: 'executed', stdout });
+});
+
+test.each(['rewind', 'current'])('releasing ArrayIterator %s watchers keeps storage exchanges bounded', (method) => {
+  expect(
+    run(
+      `<?php $array=new ArrayObject([1]);for($i=0;$i<10000;$i++){$it=$array->getIterator();$it->${method}();unset($it);$array->exchangeArray([$i]);}echo $array[0];`
+    )
+  ).toMatchObject({ kind: 'executed', stdout: '9999' });
 });
 
 test.each(['array_walk', 'array_walk_recursive'])('repeated %s releases cursors before array mutations', (walk) => {

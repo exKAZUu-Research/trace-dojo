@@ -27,7 +27,8 @@ export class ArrayStorage {
   private cursorArray: PhpArray | undefined;
   private iteratorCursor: ArrayCursor | undefined;
   private readonly watchers = new Set<WeakRef<ArrayStorage>>();
-  private readonly knownWatchers = new WeakSet<ArrayStorage>();
+  private readonly registration = new WeakRef(this);
+  private watched = new Set<ArrayStorage>();
   flags = 0;
   /** The class ArrayObject::getIterator instantiates. */
   iteratorClass = 'ArrayIterator';
@@ -49,7 +50,7 @@ export class ArrayStorage {
   cursor(): ArrayCursor {
     const array = this.array;
     if (this.cursorArray !== array) this.moveCursor(array, 'replace');
-    this.watchChain(this);
+    this.watchChain();
     return this.iteratorCursor as ArrayCursor;
   }
 
@@ -136,6 +137,12 @@ export class ArrayStorage {
     }
   }
 
+  close(): void {
+    this.iteratorCursor?.close();
+    for (const storage of this.watched) storage.watchers.delete(this.registration);
+    this.watched.clear();
+  }
+
   private syncCursors(mode: 'copy' | 'replace'): void {
     for (const reference of this.watchers) {
       const watcher = reference.deref();
@@ -143,18 +150,16 @@ export class ArrayStorage {
         this.watchers.delete(reference);
         continue;
       }
-      if (!watcher.chain().includes(this)) continue;
-      watcher.watchChain(watcher);
+      watcher.watchChain();
       watcher.moveCursor(watcher.array, mode);
     }
   }
 
-  private watchChain(watcher: ArrayStorage): void {
-    for (const storage of this.chain())
-      if (!storage.knownWatchers.has(watcher)) {
-        storage.knownWatchers.add(watcher);
-        storage.watchers.add(new WeakRef(watcher));
-      }
+  private watchChain(): void {
+    const chain = new Set(this.chain());
+    for (const storage of this.watched) if (!chain.has(storage)) storage.watchers.delete(this.registration);
+    for (const storage of chain) storage.watchers.add(this.registration);
+    this.watched = chain;
   }
 
   private moveCursor(array: PhpArray, mode: 'copy' | 'replace'): void {

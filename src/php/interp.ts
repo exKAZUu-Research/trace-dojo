@@ -969,7 +969,8 @@ function constructorArgs(cls: PhpClass, args: Arg[], row: number): ArgValue[] {
   const values = evalArgs(
     args,
     constructor?.fn,
-    constructor ? classMethodLabel(constructor.scope, '__construct') : undefined
+    constructor ? classMethodLabel(constructor.scope, '__construct') : undefined,
+    false
   );
   rt().row = row;
   return values;

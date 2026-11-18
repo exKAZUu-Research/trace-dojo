@@ -1,0 +1,27 @@
+0
+bool(true)
+string(4) "zero"
+9223372036854775807
+bool(false)
+OutOfBoundsException
+OutOfBoundsException
+-9223372036854775808
+bool(false)
+OutOfBoundsException
+OutOfBoundsException
+9223372036854775808
+TypeError
+TypeError
+TypeError
+-9223372036854775809
+TypeError
+TypeError
+TypeError
+01
+TypeError
+TypeError
+TypeError
+-0
+TypeError
+TypeError
+TypeError

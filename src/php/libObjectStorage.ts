@@ -88,7 +88,11 @@ class ObjectStorage {
   }
 
   unsetOffset(value: Value): void {
-    this.detach(storageKey(value, 'offsetUnset'));
+    if (this.hashKeys || !(value instanceof PhpObject) || value.isResource) {
+      callMethod(this.holder, 'offsetUnset', [value], rt().row);
+      return;
+    }
+    this.detach(value);
   }
 
   has(object: PhpObject): boolean {
@@ -329,7 +333,8 @@ defineClass({
     },
     ...magicSerializationMethods,
   ],
-  createInternal: (object) => new ObjectStorage(object, true),
+  createInternal: (object) =>
+    new ObjectStorage(object, object.cls.findMethod('gethash')?.scope.lname !== 'splobjectstorage'),
 });
 
 function* compareObjectStorage(a: PhpObject, b: PhpObject): Generator<[Value, Value, 'order'], number> {
