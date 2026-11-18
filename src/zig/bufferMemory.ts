@@ -9,7 +9,7 @@ import { memorySpace, reserveMemory, spendMemory } from './memoryAccounting';
 import { rememberPointerType, viewPointer } from './pointerViews';
 import { copyForStorage, undefinedValue } from './semaBase';
 import { singleValueOf } from './singleValue';
-import { copySparseBytes, propertyIndex, sparseBytes, sparseByteValues } from './sparseBytes';
+import { copySparseBytes, propertyIndex, sparseBytes, sparseByteValues, sparseEntriesInRange } from './sparseBytes';
 import { type Type, typeId } from './types';
 import {
   ErrorValue,
@@ -585,10 +585,8 @@ export class BufferMemory {
     if (sourceBytes && destinationBytes && offset % 8 === 0 && start % 8 === 0 && bits % 8 === 0) {
       const references = this.sparseReferences(offset, start, bits);
       copySparseBytes(sourceBytes, destinationBytes, offset / 8, start / 8, bits / 8);
-      for (const at of destination.referenceOffsets.keys()) {
-        this.spend();
-        if (at >= start && at < start + bits) destination.referenceOffsets.delete(at);
-      }
+      for (const [at] of sparseEntriesInRange(destination.referenceOffsets, start, bits))
+        destination.referenceOffsets.delete(at);
       destination.restoreReferences(references);
       return;
     }
@@ -606,9 +604,7 @@ export class BufferMemory {
 
   private sparseReferences(offset: number, start: number, bits: number): (StoredReference & { offset: number })[] {
     const references: (StoredReference & { offset: number })[] = [];
-    for (const at of this.referenceOffsets.keys()) {
-      this.spend();
-      if (at < offset || at >= offset + bits) continue;
+    for (const [at] of sparseEntriesInRange(this.referenceOffsets, offset, bits)) {
       const reference = this.currentReference(at);
       if (reference) references.push({ ...reference, offset: start + at - offset });
     }

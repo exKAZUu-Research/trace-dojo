@@ -1610,6 +1610,22 @@ test.each([
   });
 });
 
+test.each([
+  ['u8', '0', 'const copy=outer.value.u;sum+=copy.wide;', 'sum,p.*,outer.value.data[999]', '7000 7 0'],
+  ['u8', '0', 'outer.value.u=v;', 'p.*,q.*,outer.value.data[999]', '7 7 0'],
+  ['*u8', '&marker', 'outer.value.u=v;', 'p.*,q.*,outer.value.data[999].*', '7 7 5'],
+])('sparse union copies visit only their region beside a [%s] buffer', (child, item, operation, printed, expected) => {
+  const marker = child === '*u8' ? 'var marker:u8=5;' : '';
+  const reads = printed.startsWith('sum,');
+  const locals = reads ? 'var sum:usize=0;' : 'var v:U=.{.wide=7};const q=&v.wide;';
+  const source = `const std=@import("std");const U=union(enum){wide:u16,small:u8};const S=struct{data:[1000]${child},u:U};const Outer=union(enum){value:S,empty:void};pub fn main()void{${marker}var outer:Outer=.{.value=.{.data=@splat(${item}),.u=.{.wide=${reads ? 7 : 3}}}};const p=&outer.value.u.wide;${locals}for(0..1000)|_|{${operation}}std.debug.print("{} {} {}",.{${printed}});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: expected,
+    uncaughtException: undefined,
+  });
+});
+
 test('writer result types use the canonical usize and mutable byte slice', () => {
   const source = `const std=@import("std");fn less(n:usize,a:u8,b:u8)bool{return n>0 and a<b;}
 pub fn main()!void{var b:[2]u8=undefined;var w=std.Io.Writer.fixed(&b);const n=try w.write("x");var a=[_]u8{2,1};std.sort.heap(u8,&a,n,less);std.debug.print("{} {} {}",.{a[0],a[1],@TypeOf(w.buffered())==[]u8});}`;

@@ -34,17 +34,33 @@ export function copySparseBytes(
   length: number
 ): void {
   const snapshot = new Map<number, Value>();
-  for (const [index, value] of source) {
-    spendMemory();
-    if (index >= offset && index < offset + length) snapshot.set(start + index - offset, value);
-  }
-  for (const index of target.keys()) {
-    spendMemory();
-    if (index >= start && index < start + length) target.set(index, snapshot.get(index) ?? 0xaan);
+  for (const [index, value] of sparseEntriesInRange(source, offset, length))
+    snapshot.set(start + index - offset, value);
+  for (const [index] of sparseEntriesInRange(target, start, length)) {
+    if (!snapshot.has(index)) target.set(index, 0xaan);
   }
   for (const [index, value] of snapshot) {
     spendMemory();
     writeSparseByte(target, index, value);
+  }
+}
+
+export function* sparseEntriesInRange<T>(
+  entries: ReadonlyMap<number, T>,
+  start: number,
+  length: number
+): IterableIterator<[number, T]> {
+  const end = start + length;
+  if (length < entries.size) {
+    for (let at = start; at < end; at++) {
+      spendMemory();
+      if (entries.has(at)) yield [at, entries.get(at)!];
+    }
+    return;
+  }
+  for (const entry of entries) {
+    spendMemory();
+    if (entry[0] >= start && entry[0] < end) yield entry;
   }
 }
 
