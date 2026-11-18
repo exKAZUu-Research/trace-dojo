@@ -1369,6 +1369,7 @@ test('enum and union declaration literals prefer namespace aliases before tags',
 
 test.each([
   'const T=enum{a,b,var zero:@This()=.a;};pub fn main()void{const x:T=.zero;_=x;}',
+  'const T=enum(u8){only=7,var zero:@This()=.only;};pub fn main()void{const x:T=.zero;_=x;}',
   'const T=union(enum){a:u8,var zero:@This()=.{.a=0};};pub fn main()void{const x:T=.zero;_=x;}',
   'const T=struct{x:u8,var zero:@This()=.{.x=0};};pub fn main()void{const x:??T=.zero;_=x;}',
   'const T=struct{x:u8,var factory:*const fn()T=&make;fn make()T{return .{.x=0};}};pub fn main()void{const x:T=.factory();_=x;}',
@@ -1387,9 +1388,19 @@ test('qualified access can select a runtime namespace variable', () => {
 test.each([
   ['enum{a,var zero:@This()=.a;}', '{t}', 'a'],
   ['struct{var zero:@This()=.{};}', '{any}', '.{ }'],
+  ['union(enum(u8)){only:void,var zero:@This()=.{.only={}};}', '{t}', 'only'],
 ])('declaration literals use the only value of %s', (type, format, stderr) => {
   const source = `const std=@import("std");const T=${type};pub fn main()void{const x:T=.zero;std.debug.print("${format}",.{x});}`;
   expect(executeProgram('zig', source)).toMatchObject({ kind: 'executed', stderr, uncaughtException: undefined });
+});
+
+test('single-field unions use only payload storage even with explicit tag backing', () => {
+  const source = `const std=@import("std");const U=union(enum(u8)){only:void};const V=union(enum(u8)){only:u16};const S=struct{values:[2]U,var zero:@This()=.{.values=.{.{.only={}},.{.only={}}}};};pub fn main()!void{var b:[8]u8=undefined;var f=std.heap.FixedBufferAllocator.init(&b);const z=try f.allocator().create(S);z.*=.zero;const v=try f.allocator().create(V);v.*=.{.only=42};std.debug.print("{t} {t} {} {}",.{z.values[0],z.values[1],v.only,f.end_index});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: 'only only 42 2',
+    uncaughtException: undefined,
+  });
 });
 
 test('writer result types use the canonical usize and mutable byte slice', () => {
@@ -6710,6 +6721,26 @@ test('byte-backed pointer union views preserve signed reads and mutations', () =
   expect(executeProgram('zig', source)).toMatchObject({
     kind: 'executed',
     stderr: '-1|254',
+    uncaughtException: undefined,
+  });
+});
+
+test.each([
+  ['f32', '整数型'],
+  ['u16', '8 ビット'],
+])('packed struct backing must be an integer of the exact field width: %s', (backing, diagnostic) => {
+  const source = `const std=@import("std");const P=packed struct(${backing}){x:u8};pub fn main()void{const p=P{.x=2};std.debug.print("{}",.{p.x});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'compileError',
+    diagnostics: [{ message: expect.stringContaining(diagnostic) }],
+  });
+});
+
+test('signed packed struct backing uses the combined width of nested fields', () => {
+  const source = `const std=@import("std");const P=packed struct(i8){inner:packed struct(u2){a:u2},x:u6};pub fn main()!void{var b:[4]u8=undefined;var f=std.heap.FixedBufferAllocator.init(&b);const p=try f.allocator().create(P);p.*=.{.inner=.{.a=2},.x=16};std.debug.print("{} {}",.{b[0],f.end_index});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: '66 1',
     uncaughtException: undefined,
   });
 });

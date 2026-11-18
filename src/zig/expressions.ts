@@ -474,8 +474,8 @@ export abstract class ExpressionCompiler extends SemaBase {
       return this.error(span, `${typeName(type)} 型には、フィールド「${name}」がありません。`);
     }
     if (field.comptimeValue !== undefined) return this.fixedResult(base, field.type, field.comptimeValue.value, span);
-    if (base.known) {
-      const parent = this.addressOf(base).value as Pointer;
+    const parent = this.knownAddress(base);
+    if (parent) {
       const pointer = new Pointer(parent.load() as ZStruct, index);
       return knownAt(field.type, pointer, span);
     }
@@ -494,8 +494,8 @@ export abstract class ExpressionCompiler extends SemaBase {
     const field = fields[index];
     if (type.layout !== 'auto') {
       const view = (value: Value): Slots => physicalUnion(type, value as ZUnion).fieldView!(index);
-      if (base.known) {
-        const parent = this.addressOf(base).value as Pointer;
+      const parent = this.knownAddress(base);
+      if (parent) {
         return knownAt(field.type, new Pointer(view(parent.load()), 0), span);
       }
       return {
@@ -519,8 +519,8 @@ export abstract class ExpressionCompiler extends SemaBase {
           `union のフィールド「${name}」を読もうとしましたが、有効なのは「${fields[union.tag].name}」です。`
         );
       }
-      const parent = this.addressOf(base).value as Pointer;
-      return knownAt(field.type, new Pointer(parent.load() as ZUnion, 0), span);
+      const parent = this.knownAddress(base);
+      if (parent) return knownAt(field.type, new Pointer(parent.load() as ZUnion, 0), span);
     }
     const fieldPlace = this.projectedPlace(base, field.type, (parent) => new Pointer(check(parent.load()), 0));
     return {
@@ -653,6 +653,12 @@ export abstract class ExpressionCompiler extends SemaBase {
     return runtime(pointerTo(expression.type, true), (frame) => new Pointer(new Constant(evaluate(frame)), 0), span);
   }
 
+  private knownAddress(expression: TExpr): Pointer | undefined {
+    if (!expression.known) return undefined;
+    const address = this.addressOf(expression);
+    return address.known && address.value instanceof Pointer ? address.value : undefined;
+  }
+
   private functionType(expression: TExpr, span: Span): Type {
     const fn = this.functionOf(expression, span);
     return fnType(fn.params, fn.returnType);
@@ -676,8 +682,8 @@ export abstract class ExpressionCompiler extends SemaBase {
     this.checkMemoryHeader(operand, expression);
     if (location && operand.known && operand.value === NULL)
       return this.error(expression, 'null の optional は参照できません。');
-    if (operand.known && operand.value !== NULL)
-      return knownAt(child, this.optionalPayloadPointer(this.addressOf(operand).value as Pointer, child), expression);
+    const parent = operand.value === NULL ? undefined : this.knownAddress(operand);
+    if (parent) return knownAt(child, this.optionalPayloadPointer(parent, child), expression);
     const evaluate = operand.eval;
     const place = operand.place;
     const unwrapPlace: Place | undefined = place && {
@@ -725,8 +731,9 @@ export abstract class ExpressionCompiler extends SemaBase {
       this.error(expression.index, `添字 ${index.value as bigint} は、長さ ${length} の範囲の外です。`);
     }
     const isConst = isConstIndexable(type, object.place);
-    if (object.known && index.known && (type.kind === 'array' || isConstantData(object.value))) {
-      const source = type.kind === 'array' ? (this.addressOf(object).value as Pointer).load() : object.value;
+    const arrayAddress = index.known && type.kind === 'array' ? this.knownAddress(object) : undefined;
+    if (index.known && (arrayAddress || (object.known && type.kind !== 'array' && isConstantData(object.value)))) {
+      const source = arrayAddress ? arrayAddress.load() : object.value;
       const elements = elementSlots(source, type);
       const pointer = new Pointer({ slots: elements.slots }, elements.start + Number(index.value));
       return knownAt(child, pointer, expression);
@@ -746,11 +753,8 @@ export abstract class ExpressionCompiler extends SemaBase {
         [base.operand.type]
       );
     };
-    const staticSource = object.known
-      ? object.value
-      : type.kind === 'array'
-        ? object.place?.compileTimePointer?.load()
-        : undefined;
+    const staticSource =
+      type.kind === 'array' ? object.place?.compileTimePointer?.load() : object.known ? object.value : undefined;
     const staticElement =
       index.known && staticSource !== undefined ? access(staticSource, index.value as bigint) : undefined;
     const elementPointer = (element: { slots: Slots; position: number }): Pointer => {

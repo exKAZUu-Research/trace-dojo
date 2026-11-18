@@ -45,7 +45,7 @@ export function unionOffsets(type: UnionType): { payload: number; tag: number | 
 }
 
 function calculateUnionOffsets(type: UnionType, query: LayoutQuery): { payload: number; tag: number | undefined } {
-  if (type.layout !== 'auto') return { payload: 0, tag: undefined };
+  if (type.layout !== 'auto' || type.fields?.length === 1) return { payload: 0, tag: undefined };
   const { size: payloadSize, align: payloadAlign } = unionPayload(type, query);
   const tag = query.layout(type.tagType ?? intType(false, 8));
   return tag.align >= payloadAlign
@@ -246,7 +246,8 @@ function computeLayout(type: Type, query: LayoutQuery): Layout {
 
 function unionLayout(type: UnionType, query: LayoutQuery): Layout {
   const payload = unionPayload(type, query);
-  if (type.layout !== 'auto') return { size: alignTo(payload.size, payload.align), align: payload.align };
+  if (type.layout !== 'auto' || type.fields?.length === 1)
+    return { size: alignTo(payload.size, payload.align), align: payload.align };
   let { size, align } = payload;
   const tag = type.tagType ? intLayout(type.tagType.tagType?.bits ?? 0) : intLayout(8);
   if (tag.size > 0) {
@@ -260,8 +261,8 @@ export function optionalNicheBits(child: Type): number | undefined {
   return child.kind === 'pointer' ? 64 : child.kind === 'error_set' ? 16 : undefined;
 }
 
-export function bitSizeOf(type: Type): number {
-  return resolvedBits.get(type) ?? new LayoutQuery().bits(type);
+export function bitSizeOf(type: Type, spendWork?: () => void): number {
+  return resolvedBits.get(type) ?? new LayoutQuery(spendWork).bits(type);
 }
 
 function unionPayload(type: UnionType, query: LayoutQuery): Layout {

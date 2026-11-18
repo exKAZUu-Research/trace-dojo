@@ -605,6 +605,7 @@ export abstract class SemaBase implements SemaApi {
         this.spendCompilation();
         this.resolveLayout(field.type, span, seen);
       }
+      this.checkPackedStructBacking(type);
     } else if (type.kind === 'union') {
       const fields = this.unionFields(type);
       for (const field of fields) {
@@ -617,6 +618,19 @@ export abstract class SemaBase implements SemaApi {
       resolveTypeLayout(type, () => this.spendCompilation());
       resolveTypeSlots(type, () => this.spendCompilation());
     }
+  }
+
+  private checkPackedStructBacking(type: StructType): void {
+    const syntax = type.namespace.syntax;
+    if (type.layout !== 'packed' || !syntax?.argument) return;
+    const argument = syntax.argument;
+    this.inContainerScope(type.namespace, () => {
+      const backing = this.compileType(argument);
+      if (backing.kind !== 'int') this.error(argument, 'packed struct の基底型には整数型を指定してください。');
+      const bits = bitSizeOf(type, () => this.spendCompilation());
+      if (backing.bits !== bits)
+        this.error(argument, `packed struct の基底型は、フィールドの合計と同じ ${bits} ビットにしてください。`);
+    });
   }
 
   private checkPackedUnion(fields: readonly { type: Type }[], span: Span): void {

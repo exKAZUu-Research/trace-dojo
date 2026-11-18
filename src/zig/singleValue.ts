@@ -56,7 +56,7 @@ function buildValue(type: Type, spend: () => void, seen: Set<Type>): Fact | unde
       return type.tagType?.bits === 0 && type.fields?.length === 1 ? { value: type.fields[0].value } : undefined;
     }
     case 'union': {
-      if (type.fields?.length !== 1 || (type.tagType && !valueOf(type.tagType, spend, seen))) return undefined;
+      if (type.fields?.length !== 1) return undefined;
       const child = valueOf(type.fields[0].type, spend, seen);
       return child ? { value: new ZUnion(0, child.value) } : undefined;
     }
