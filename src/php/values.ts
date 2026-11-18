@@ -959,6 +959,7 @@ export interface ClosureData {
   isStatic: boolean;
   /** The method a first-class callable or `Closure::fromCallable` names, for its trace name. */
   method?: Method;
+  omitParameters?: boolean;
 }
 
 export function isClosure(value: Value): boolean {

@@ -72,7 +72,6 @@ export abstract class ConverterBase {
   protected currentClass?: string;
   protected currentClassKind?: 'class' | 'interface' | 'trait';
   protected currentClassHasParent = false;
-  /** Whether the statement to convert follows `<?=`, which echoes it. */
 
   constructor(
     protected readonly source: string,

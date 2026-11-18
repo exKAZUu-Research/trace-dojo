@@ -1,6 +1,10 @@
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
+import type { ClassRef, Expr, FunctionDecl, Stmt } from './ast';
+import { nestedBodies } from './astAnalysis';
 import { callMethod } from './callables';
-import { declForKey, propNameOf } from './classes';
+import { canAccessConstant } from './classConstants';
+import { declForKey, findClass, objectPropertyKeys, propNameOf, readProp } from './classes';
+import { type Constant, foldedConstant } from './constantDefaults';
 import { formatFloat, formatFloatRepr } from './conversions';
 import { deprecated, E_ERROR, reportUncaughtWarning, warn } from './errors';
 import { toStr } from './operators';
@@ -66,7 +70,7 @@ function debugLabel(key: string | bigint): string {
   return owner === '*' ? `"${name}":protected` : `"${name}":"${owner}":private`;
 }
 
-// code-gauge-allow functionCognitiveComplexity 23 -- Transcribes PHP's algorithm for this function step by step, whose branches mirror PHP's.
+// code-gauge-allow functionCognitiveComplexity 25 -- Transcribes PHP's algorithm for this function step by step, whose branches mirror PHP's.
 function closureDebug(object: PhpObject): [string, Value, string][] {
   const data = object.internal as ClosureData;
   const entries: [string, Value, string][] = [];
@@ -89,17 +93,83 @@ function closureDebug(object: PhpObject): [string, Value, string][] {
     ]);
   }
   const statics = new PhpArray();
-  for (const [name, ref] of data.bound) statics.set(name, ref.v);
-  if (fn.kind === 'user') for (const [name, ref] of fn.statics) statics.set(name, ref.v);
+  for (const [name, slot] of closureStatics(data)) {
+    statics.setSlot(name, slot instanceof Ref && (!slot.isRef || slot.rc <= 1) ? slot.v : slot);
+  }
   if (statics.size > 0) entries.push(['static', statics, '"static"']);
   if (data.thisObj) entries.push(['this', data.thisObj, '"this"']);
-  if (fn.params.length > 0) {
+  if (!data.omitParameters && fn.params.length > 0) {
     const params = new PhpArray();
     for (const param of fn.params)
       params.set(`${param.byRef ? '&' : ''}$${param.name}`, param.optional ? '<optional>' : '<required>');
     entries.push(['parameter', params, '"parameter"']);
   }
   return entries;
+}
+
+const staticDeclarations = new WeakMap<FunctionDecl, [string, Expr | undefined][]>();
+
+function closureStatics(data: ClosureData): Map<string, Value | Ref> {
+  const slots = new Map<string, Value | Ref>(data.bound);
+  if (data.fn.kind === 'user') {
+    for (const [name, init] of declaredStatics(data.fn.decl)) {
+      const live = data.fn.statics.get(name);
+      slots.set(name, live ?? previewStatic(init, data));
+    }
+    for (const [name, ref] of data.fn.statics) slots.set(name, ref);
+  }
+  return slots;
+}
+
+function declaredStatics(decl: FunctionDecl): [string, Expr | undefined][] {
+  const cached = staticDeclarations.get(decl);
+  if (cached) return cached;
+  const entries: [string, Expr | undefined][] = [];
+  const pending: Stmt[] = decl.body.toReversed();
+  while (pending.length > 0) {
+    const statement = pending.pop()!;
+    if (statement.k === 'static') {
+      for (const { name, init } of statement.vars) entries.push([name, init]);
+    }
+    for (const [body] of nestedBodies(statement).toReversed()) {
+      for (let index = body.length - 1; index >= 0; index--) pending.push(body[index]);
+    }
+  }
+  staticDeclarations.set(decl, entries);
+  return entries;
+}
+
+function previewStatic(init: Expr | undefined, data: ClosureData): Value {
+  if (!init) return null;
+  if (init.k === 'magic') {
+    if (init.name === '__CLASS__') return data.scope?.fullName ?? '';
+    if (init.name === '__TRAIT__') return data.scope?.kind === 'trait' ? data.scope.name : '';
+    return data.fn.kind === 'user' ? data.fn.decl.name : data.fn.name;
+  }
+  return materializeConstant(foldedConstant(init, { classConstant: (cls, name) => previewConstant(cls, name, data) }));
+}
+
+function previewConstant(ref: ClassRef, name: string, data: ClosureData): Constant | undefined {
+  const cls =
+    ref.k === 'named'
+      ? findClass(ref.name)
+      : ref.k === 'self'
+        ? data.scope
+        : ref.k === 'parent'
+          ? data.scope?.parent
+          : undefined;
+  const entry = cls?.findConst(name);
+  if (!entry || !canAccessConstant(entry, data.scope)) return undefined;
+  const value = entry.value;
+  if (value !== undefined && !(value instanceof PhpObject || value instanceof PhpArray)) return value;
+  return entry.initializer ? foldedConstant(entry.initializer, {}) : undefined;
+}
+
+function materializeConstant(value: Constant | undefined): Value {
+  if (!(value instanceof Map)) return value ?? null;
+  const array = new PhpArray();
+  for (const [key, slot] of value) array.set(key, materializeConstant(slot));
+  return array;
 }
 
 function slotValue(slot: Slot): Value {
@@ -172,64 +242,62 @@ function printHash(entries: [string, Value][], indent: number, active: Set<objec
 
 // var_dump -----------------------------------------------------------------------------------------------------------
 
-export function varDump(value: Value): string {
-  return dumpValue(value, 1, new Set());
+export function varDump(value: Value): void {
+  const runtime = rt();
+  dumpValue(value, 1, new Set(), (text) => runtime.echo(text));
 }
 
-// code-gauge-allow functionCognitiveComplexity 28 -- Transcribes PHP's algorithm for this function step by step, whose branches mirror PHP's.
-// code-gauge-allow functionNcss 43 -- Transcribes PHP's algorithm for this function step by step, whose branches mirror PHP's.
-function dumpValue(value: Value, level: number, active: Set<object>, slot?: Slot): string {
+// code-gauge-allow functionNcss 31 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+// code-gauge-allow functionCognitiveComplexity 17 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+function dumpValue(value: Value, level: number, active: Set<object>, write: (text: string) => void, slot?: Slot): void {
   const indent = level > 1 ? ' '.repeat(level - 1) : '';
-  // PHP marks a value that a reference shares with another holder.
   const pad = slot instanceof Ref && slot.rc > 1 ? `${indent}&` : indent;
-  if (value === null) return `${pad}NULL\n`;
+  if (value === null) return write(`${pad}NULL\n`);
   switch (typeof value) {
     case 'boolean': {
-      return `${pad}bool(${value})\n`;
+      return write(`${pad}bool(${value})\n`);
     }
     case 'bigint': {
-      return `${pad}int(${value})\n`;
+      return write(`${pad}int(${value})\n`);
     }
     case 'number': {
-      return `${pad}float(${formatFloatRepr(value)})\n`;
+      return write(`${pad}float(${formatFloatRepr(value)})\n`);
     }
     case 'string': {
-      return `${pad}string(${value.length}) "${value}"\n`;
+      return write(`${pad}string(${value.length}) "${value}"\n`);
     }
   }
-  if (value instanceof PhpArray) {
-    if (active.has(value)) return `${indent}*RECURSION*\n`;
-    active.add(value);
-    try {
-      let text = `${pad}array(${value.size}) {\n`;
-      for (const [key, item] of value.map) {
-        text = grown(
-          `${text}${' '.repeat(level + 1)}[${typeof key === 'bigint' ? key : `"${key}"`}]=>\n${dumpValue(slotValue(item), level + 2, active, item)}`
-        );
-      }
-      return `${text}${indent}}\n`;
-    } finally {
-      active.delete(value);
-    }
-  }
-  const object = value as PhpObject;
-  if (object.cls.name === '(stream)') return `${pad}resource(${object.id}) of type (stream)\n`;
-  if (active.has(object)) return `${indent}*RECURSION*\n`;
-  active.add(object);
+  if (value instanceof PhpObject && value.isResource) return write(`${pad}resource(${value.id}) of type (stream)\n`);
+  if (active.has(value)) return write(`${indent}*RECURSION*\n`);
+  active.add(value);
   try {
-    const entries = debugEntries(object);
-    const count = entries.filter(([, slot]) => slot !== UNINIT).length;
-    let text = `${pad}object(${object.cls.name})#${object.id} (${count}) {\n`;
-    for (const [key, slot, label] of entries) {
-      text += `${' '.repeat(level + 1)}[${typeof key === 'bigint' ? key : label}]=>\n`;
-      if (slot === UNINIT) {
-        const decl = declForKey(object.cls, typeof key === 'string' ? keyFor(key, label) : String(key));
-        text += `${' '.repeat(level + 1)}uninitialized(${decl?.type ? describePropertyType(decl) : 'mixed'})\n`;
-      } else text = grown(text + dumpValue(slotValue(slot), level + 2, active, slot));
+    if (value instanceof PhpArray) {
+      write(`${pad}array(${value.size}) {\n`);
+      for (const [key, item] of value.map) {
+        write(`${' '.repeat(level + 1)}[${typeof key === 'bigint' ? key : `"${key}"`}]=>\n`);
+        dumpValue(slotValue(item), level + 2, active, write, item);
+      }
+    } else {
+      if (pad) write(pad);
+      dumpObject(value, level, active, write);
     }
-    return `${text}${indent}}\n`;
+    write(`${indent}}\n`);
   } finally {
-    active.delete(object);
+    active.delete(value);
+  }
+}
+
+function dumpObject(object: PhpObject, level: number, active: Set<object>, write: (text: string) => void): void {
+  const entries = debugEntries(object);
+  const count = entries.filter(([, slot]) => slot !== UNINIT).length;
+  write(`object(${object.cls.name})#${object.id} (${count}) {\n`);
+  const indent = ' '.repeat(level + 1);
+  for (const [key, slot, label] of entries) {
+    write(`${indent}[${typeof key === 'bigint' ? key : label}]=>\n`);
+    if (slot === UNINIT) {
+      const decl = declForKey(object.cls, typeof key === 'string' ? keyFor(key, label) : String(key));
+      write(`${indent}uninitialized(${decl?.type ? describePropertyType(decl) : 'mixed'})\n`);
+    } else dumpValue(slotValue(slot), level + 2, active, write, slot);
   }
 }
 
@@ -302,10 +370,24 @@ function exportValue(value: Value, level: number, active: Set<object>): string {
   }
 }
 
-/** The properties `var_export` writes: an ArrayObject's or ArrayIterator's are the array it holds. */
 function exportedProps(object: PhpObject): Iterable<[string | bigint, Slot]> {
-  const storage = (object.internal as { properties?: () => PhpArray } | undefined)?.properties;
-  return typeof storage === 'function' ? storage.call(object.internal).map : object.props;
+  const storage = object.internal as
+    | {
+        properties?: () => PhpArray;
+        exportEntries?: () => [bigint, Value][];
+      }
+    | undefined;
+  if (storage?.properties) return storage.properties().map;
+  const entries: [string | bigint, Slot][] = storage?.exportEntries?.() ?? [];
+  for (const key of objectPropertyKeys(object)) {
+    const decl = declForKey(object.cls, key);
+    if (decl?.hooks?.get) entries.push([key, readProp(object, decl.name, decl.cls, 'quiet')]);
+    else {
+      const slot = object.props.get(key);
+      if (slot !== undefined && slot !== UNINIT) entries.push([key, slot]);
+    }
+  }
+  return entries;
 }
 
 function circularExport(): string {

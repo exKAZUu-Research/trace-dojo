@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 545 -- Keeps one PHP runtime concern and its shared helpers in one module.
+// code-gauge-allow-file fileNcss 549 -- Keeps one PHP runtime concern and its shared helpers in one module.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import { placeOf } from './assignment';
 import type { Arg, Expr } from './ast';
@@ -12,6 +12,7 @@ import {
   functionDisplayName,
   handOverArgs,
   invoke,
+  type MagicCall,
   paramIsByRef,
 } from './calls';
 import { canCall, classScopeMessage, lookupMethod, requireClass } from './classes';
@@ -283,10 +284,14 @@ function packMagicArguments(args: ArgValue[]): ArgValue {
   return { v: array, temporaryCount: 1 };
 }
 
-function magicClosure(object: PhpObject | undefined, cls: PhpClass, magic: Method, name: string): PhpObject {
-  const fn = magicForwarder(magic, name, object, cls, true);
-  const method: Method = { ...magic, fn, name, lname: lower(name), cls, scope: cls, isStatic: !object };
-  return closureFromCallable({ fn, method, thisObj: object, scope: cls, staticClass: cls });
+function magicClosure(receiver: PhpObject | undefined, calledClass: PhpClass, method: Method, name: string): PhpObject {
+  return makeCallableClosure(magicClosureTarget({ method, name, receiver, calledClass }));
+}
+
+function magicClosureTarget({ method: magic, name, receiver, calledClass }: MagicCall): CallTarget {
+  const fn = magicForwarder(magic, name, receiver, calledClass, true);
+  const method: Method = { ...magic, fn, name, lname: lower(name), isStatic: !receiver };
+  return { fn, method, thisObj: receiver, scope: method.scope, staticClass: calledClass };
 }
 
 function magicForwarder(
@@ -300,7 +305,7 @@ function magicForwarder(
     kind: 'native',
     name,
     acceptsNamed: true,
-    params: [{ name: 'args', byRef: false, variadic: true, optional: true }],
+    params: [{ name: 'arguments', byRef: false, variadic: true, optional: true }],
     impl: ({ args, named }) => {
       const values = rt().nativeHeld.at(-1)!;
       const count = args.length + (named?.size ?? 0);
@@ -569,16 +574,16 @@ function arrayMagicTarget(
   inaccessible: Method | undefined
 ): CallTarget | undefined {
   const magic = lookupClass.findMethod('__call');
-  if (lookupClass === receiver.cls) return magic && magicTarget(receiver, magic, name);
+  if (lookupClass === receiver.cls) return magic && magicTarget(receiver, receiver.cls, magic, name);
   if (inaccessible && !magic) return;
   const caller = rt().frame.thisObj;
   if (magic && caller?.cls.isSubclassOf(lookupClass)) {
     const callerMagic = caller.cls.findMethod('__call') ?? magic;
-    return magicTarget(receiver, callerMagic, name);
+    return magicTarget(receiver, receiver.cls, callerMagic, name);
   }
   const staticMagic = lookupClass.findMethod('__callstatic');
   if (staticMagic) {
-    return { fn: magicForwarder(staticMagic, name, undefined, receiver.cls), staticClass: receiver.cls };
+    return magicTarget(undefined, receiver.cls, staticMagic, name);
   }
 }
 
@@ -613,8 +618,13 @@ function qualifiedObjectMethod(
   return { cls, name: method.slice(separator + 2) };
 }
 
-function magicTarget(object: PhpObject, magic: Method, name: string): CallTarget {
-  return { fn: magicForwarder(magic, name, object, object.cls), thisObj: object };
+function magicTarget(receiver: PhpObject | undefined, calledClass: PhpClass, method: Method, name: string): CallTarget {
+  return {
+    fn: magicForwarder(method, name, receiver, calledClass),
+    thisObj: receiver,
+    staticClass: calledClass,
+    magic: { method, name, receiver, calledClass },
+  };
 }
 
 // code-gauge-allow functionCognitiveComplexity 30 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
@@ -646,7 +656,7 @@ function staticCallable(
   const method = lookupMethod(cls, lower(methodName), scope);
   if (!method || !canCall(method, scope)) {
     const magic = cls.findMethod('__callstatic');
-    if (magic) return { fn: magicForwarder(magic, methodName, undefined, cls), staticClass: cls };
+    if (magic) return magicTarget(undefined, cls, magic, methodName);
     if (!method)
       throw new CallableFailure(
         `Call to undefined method ${cls.name}::${methodName}()`,
@@ -754,6 +764,10 @@ function warnCallbackReferenceArguments(target: CallTarget, args: ArgValue[]): v
 }
 
 export function closureFromCallable(target: CallTarget): PhpObject {
+  return target.magic ? makeCallableClosure(magicClosureTarget(target.magic), true) : makeCallableClosure(target);
+}
+
+function makeCallableClosure(target: CallTarget, omitParameters = false): PhpObject {
   const runtime = rt();
   const closureClass = runtime.classes.get('closure') as PhpClass;
   const object = runtime.newObject(closureClass);
@@ -765,6 +779,7 @@ export function closureFromCallable(target: CallTarget): PhpObject {
     calledClass: target.staticClass,
     isStatic: target.method?.isStatic ?? target.fn.kind === 'native',
     method: target.method,
+    omitParameters,
   };
   object.internal = data;
   runtime.frame.temporaries.push(object);

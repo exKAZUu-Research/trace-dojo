@@ -96,7 +96,7 @@ defineFunction('print_r(mixed $value, bool $return = false): string|bool', ({ ar
   return true;
 });
 defineFunction('var_dump(mixed $value, mixed ...$values): void', ({ args }) => {
-  for (const value of args) rt().echo(varDump(value));
+  for (const value of args) varDump(value);
   return null;
 });
 defineFunction('var_export(mixed $value, bool $return = false): ?string', ({ args }) => {
@@ -374,13 +374,13 @@ defineFunction('get_class(object $object = UNKNOWN): string', ({ args }) => {
   return object.cls.fullName;
 });
 markInlined('get_class');
-defineFunction('get_parent_class(object|string $object_or_class = UNKNOWN): string|false', ({ args }) => {
+defineFunction('get_parent_class(mixed $object_or_class = UNKNOWN): string|false', ({ args }) => {
   if (args.length === 0) deprecated('Calling get_parent_class() without arguments is deprecated');
-  const cls = args.length === 0 ? rt().frame.scope : classOf(args[0]);
-  if (typeof args[0] === 'string' && !cls)
+  const cls = args.length === 0 ? rt().frame.scope : isStream(args[0]) ? undefined : classOf(args[0]);
+  if (args.length > 0 && !cls)
     throwError(
       'TypeError',
-      'get_parent_class(): Argument #1 ($object_or_class) must be an object or a valid class name, string given'
+      `get_parent_class(): Argument #1 ($object_or_class) must be an object or a valid class name, ${valueName(args[0])} given`
     );
   return cls?.parent?.name ?? false;
 });

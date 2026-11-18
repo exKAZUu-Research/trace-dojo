@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 989 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 999 -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 // oxlint-disable typescript/no-misused-spread -- PHP splits strings into bytes or code points, never into grapheme clusters.
 // oxlint-disable unicorn/prefer-code-point -- PHP strings hold bytes as code units 0–255, which charCodeAt and fromCharCode read and write as they are.
@@ -19,7 +19,7 @@ import { formatPrintf } from './sprintf';
 import { incrementString } from './strings';
 import { allowedTags, stripTags } from './stripTags';
 import { UnsupportedFeatureError } from './unsupported';
-import { PhpArray, PhpObject, Ref, type Value } from './values';
+import { type NativeContext, PhpArray, PhpObject, Ref, type Value } from './values';
 
 defineConstant('STR_PAD_RIGHT', 1n);
 defineConstant('STR_PAD_LEFT', 0n);
@@ -160,7 +160,13 @@ defineFunction('explode(string $separator, string $string, int $limit = PHP_INT_
   return PhpArray.list([parts.length > 1 ? parts.join(separator) : text]);
 });
 // `mixed` lets the body report the legacy argument order as PHP does, before the type of `$array` is checked.
-defineFunction('implode(array|string $separator, mixed $array = null): string', ({ args, row }) => {
+defineOverloadedFunction(
+  'implode(mixed $separator): string',
+  'implode(array|string $separator, mixed $array = null): string',
+  implode
+);
+
+function implode({ args, row }: NativeContext): string {
   let [separator, array] = args;
   const inlinePair = row !== undefined && args.length === 2;
   if (inlinePair && separator instanceof PhpArray)
@@ -188,7 +194,7 @@ defineFunction('implode(array|string $separator, mixed $array = null): string', 
     rt().ensureStringFits(result.length);
   }
   return result;
-});
+}
 defineAlias('join', 'implode');
 
 defineFunction('substr(string $string, int $offset, ?int $length = null): string', ({ args }) =>
@@ -576,7 +582,8 @@ function translate(args: Value[]): string {
 }
 
 function translatePairs(text: string, replacements: PhpArray): string {
-  if (text === '') return text;
+  if (text === '' || replacements.size === 0) return text;
+  if (replacements.size === 1) return translateSinglePair(text, replacements);
   if (replacements.map.has('')) warn('strtr(): Ignoring replacement of empty string');
   const pairs: (readonly [string, Value | Ref])[] = [];
   for (const [key, value] of replacements.map) {
@@ -599,6 +606,16 @@ function translatePairs(text: string, replacements: PhpArray): string {
     index += key.length;
   }
   return result;
+}
+
+function translateSinglePair(text: string, replacements: PhpArray): string {
+  const [key, slot] = replacements.map.entries().next().value!;
+  const replacement = toStr(slot instanceof Ref ? slot.v : slot);
+  if (key === '') {
+    warn('strtr(): Ignoring replacement of empty string');
+    return text;
+  }
+  return replaceAll(text, String(key), replacement, false, { value: 0 });
 }
 
 function translationAt(

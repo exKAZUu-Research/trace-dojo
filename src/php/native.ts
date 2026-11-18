@@ -21,8 +21,14 @@ const constantDeprecations = new Map<string, string>();
 const classDefinitions: ClassDefinition[] = [];
 
 /** Defines a builtin function from its signature as PHP's stubs write it. */
-export function defineFunction(signature: string, impl: (ctx: NativeContext) => Value, needsCaller = false): void {
+export function defineFunction(
+  signature: string,
+  impl: (ctx: NativeContext) => Value,
+  needsCaller = false,
+  nullTypes?: Record<number, string>
+): void {
   const { name, params, returnType } = parseSignature(signature);
+  if (nullTypes) for (const [index, param] of params.entries()) param.nativeNullType = nullTypes[index];
   functions.push({ kind: 'native', name, params, returnType, impl, needsCaller });
 }
 
@@ -30,10 +36,10 @@ export function defineOverloadedFunction(
   shortSignature: string,
   signature: string,
   impl: (ctx: NativeContext) => Value,
-  nullTypes: Record<number, string>
+  nullTypes?: Record<number, string>
 ): void {
   const { name, params, returnType } = parseSignature(signature);
-  for (const [index, param] of params.entries()) param.nativeNullType = nullTypes[index];
+  if (nullTypes) for (const [index, param] of params.entries()) param.nativeNullType = nullTypes[index];
   const shortParams = parseSignature(shortSignature).params;
   functions.push({ kind: 'native', name, params, shortParams, returnType, impl });
 }

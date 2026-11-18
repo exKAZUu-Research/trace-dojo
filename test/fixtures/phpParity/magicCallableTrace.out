@@ -4,3 +4,34 @@
 #0 [internal function]: FallingBack::__callStatic('second', Array)
 #1 /main.php(7): FallingBack::second(34)
 #2 {main}
+#0 [internal function]: FallingBack->__call('third', Array)
+#1 /main.php(10): FallingBack->third()
+#2 {main}
+#0 [internal function]: FallingBack::__callStatic('fourth', Array)
+#1 /main.php(11): FallingBack::fourth()
+#2 {main}
+#0 [internal function]: FallingBack->__call('fifth', Array)
+#1 /main.php(12): FallingBack->fifth(23)
+#2 {main}
+#0 [internal function]: FallingBack::__callStatic('sixth', Array)
+#1 /main.php(13): FallingBack::sixth(45)
+#2 {main}
+object(Closure)#1 (3) {
+  ["function"]=>
+  string(18) "FallingBack::trace"
+  ["this"]=>
+  object(ExtendingFallback)#2 (0) {
+  }
+  ["parameter"]=>
+  array(1) {
+    ["$arguments"]=>
+    string(10) "<optional>"
+  }
+}
+object(Closure)#3 (2) {
+  ["function"]=>
+  string(22) "FallingBack::fromTrace"
+  ["this"]=>
+  object(ExtendingFallback)#2 (0) {
+  }
+}

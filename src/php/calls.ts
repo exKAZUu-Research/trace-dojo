@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 664 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 670 -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import { LIMITS } from '../interpreter/limits';
 import type { FunctionDecl } from './ast';
@@ -53,7 +53,15 @@ export interface CallTarget {
   staticClass?: PhpClass;
   method?: Method;
   closure?: PhpObject;
+  magic?: MagicCall;
   inline?: boolean;
+}
+
+export interface MagicCall {
+  method: Method;
+  name: string;
+  receiver?: PhpObject;
+  calledClass: PhpClass;
 }
 
 /** One call on the stack, as stack traces report it. */

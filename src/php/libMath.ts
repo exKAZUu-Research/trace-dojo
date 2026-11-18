@@ -240,7 +240,9 @@ defineFunction(
     if (typeof value === 'bigint' || (Math.abs(value) >= 2 ** 52 && floatFitsInt(value)))
       return formatIntNumber(BigInt(value), format);
     return formatFloatNumber(value, format);
-  }
+  },
+  false,
+  { 0: 'float' }
 );
 
 interface NumberFormat {

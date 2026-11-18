@@ -1048,7 +1048,8 @@ const sameAssoc: SetCompare = (a, b) => a[0] === b[0] && toStr(a[1]) === toStr(b
 defineFunction('array_diff(array $array, array ...$arrays): array', ({ args }) => {
   const [first, ...others] = args;
   checkSetArguments('array_diff', [first]);
-  return others.length === 0 ? share(first) : diffByString(first as PhpArray, others);
+  const array = first as PhpArray;
+  return others.length === 0 && array.size !== 1 ? share(array) : diffByString(array, others);
 });
 
 /** Transcribes PHP's array_diff, which converts each value to a string once, so each conversion warns once. */
