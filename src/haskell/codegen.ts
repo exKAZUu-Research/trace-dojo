@@ -1,6 +1,6 @@
 import { OrderedMap } from 'immutable';
 
-// code-gauge-allow-file fileNcss 961 -- The Core generator covers every construct of the language in one pass over shared state.
+// code-gauge-allow-file fileNcss 967 -- The Core generator covers every construct of the language in one pass over shared state.
 import { ExecutionLimitError, LIMITS } from '../interpreter/limits';
 import {
   CONS_CON,
@@ -107,6 +107,7 @@ export class Codegen {
   private readonly rootFrame = new FrameScope(undefined);
   private frame: FrameScope = this.rootFrame;
   private visible = OrderedMap<string, VisibleBinding>();
+  private sourceDefined = true;
   private readonly recursion = new RecursionBudget();
   private readonly untracedDoTypes = new Set<object>();
   /** The dictionary parameters of the bindings whose bodies are being generated, for their recursive uses. */
@@ -171,10 +172,8 @@ export class Codegen {
       const fun = binding as Extract<RBinding, { k: 'fun' }>;
       const entity = (fun.binder as { kind: 'global'; entity: ValueEntity }).entity;
       this.ownDictParams.set(entity, fun.dictParams ?? []);
-      globalOf(entity, entity.name, entity).code = this.compileFunction(
-        fun,
-        entity.name,
-        this.options.isProgram && sourceDefined
+      globalOf(entity, entity.name, entity).code = this.withSourceDefined(sourceDefined, () =>
+        this.compileFunction(fun, entity.name, this.options.isProgram && sourceDefined)
       );
     }
     const superCodes = info.supers.map((evidence) => {
@@ -309,12 +308,22 @@ export class Codegen {
     }
   }
 
+  private withSourceDefined<T>(sourceDefined: boolean, build: () => T): T {
+    const saved = this.sourceDefined;
+    this.sourceDefined &&= sourceDefined;
+    try {
+      return build();
+    } finally {
+      this.sourceDefined = saved;
+    }
+  }
+
   private infoFor(name: string, span: Span, sigSpan: Span | undefined): FunctionInfo {
     const rows = new Set<number>([span.row]);
     if (sigSpan) for (let row = sigSpan.row; row <= sigSpan.endRow; row++) rows.add(row);
     let isAtomic = false;
     for (const row of rows) {
-      if (this.options.atomicRows?.has(row)) {
+      if (this.sourceDefined && this.options.atomicRows?.has(row)) {
         isAtomic = true;
         this.claimedAtomicRows.add(row);
       }

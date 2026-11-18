@@ -256,3 +256,36 @@ test('a local atomic IO value groups each execution without changing its origina
     [9, []],
   ]);
 });
+
+test.each([
+  'data T=T -- atomic',
+  'data T=T deriving Show -- atomic',
+  'data T=T -- atomic\n deriving Show',
+  'data T=T\n deriving Show -- atomic',
+  'data R=R {a::Int} deriving(Eq,Show) -- atomic',
+  'data T=A|B deriving(Eq,Ord,Show,Read,Enum,Bounded) -- atomic',
+])('generated deriving methods cannot claim a data annotation: %s', (declaration) => {
+  const source = `${declaration}\nmain=print(1::Int)`;
+  expect(executeProgram('haskell', source)).toMatchObject({
+    kind: 'executed',
+    stdout: '1\n',
+    uncaughtException: undefined,
+  });
+  expect(() => traceProgram('haskell', source, source)).toThrow('-- atomic');
+});
+
+test.each([
+  'data T=T deriving(Eq,Show)\nclass C a where\n act::a->IO()\n act _=do -- atomic\n  print(1::Int)\n  print(2::Int)\ninstance C T',
+  'data T=T deriving(Eq,Show)\nclass C a where act::a->IO()\ninstance C T where\n act _=do -- atomic\n  print(1::Int)\n  print(2::Int)',
+])('source-defined class methods keep atomic eligibility after deriving: %s', (declarations) => {
+  const source = `${declarations}\nmain=do\n act T\n print(0::Int)`;
+  const result = traceProgram('haskell', source, source);
+  expect(result.stdout).toBe('1\n2\n0\n');
+  expect(result.uncaughtException).toBeUndefined();
+  const lines = source.split('\n');
+  expect(result.traceItems.map((item) => [item.line, item.callLines])).toEqual([
+    [0, []],
+    [lines.indexOf(' act T') + 1, []],
+    [lines.indexOf(' print(0::Int)') + 1, []],
+  ]);
+});
