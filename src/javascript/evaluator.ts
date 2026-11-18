@@ -786,7 +786,7 @@ export class Evaluator extends SuspendableStatementEvaluator {
       const { ctor } = behavior;
       if (ctor) {
         this.bindParameters(fn, ctor, args);
-        this.instantiate(scope, ctor.scope);
+        this.instantiate(this.enterBodyScope(ctor), ctor.scope);
         const completion = ctor.scope.disposes
           ? this.disposing(() => this.statements(ctor.body as Statement[]))
           : this.statements(ctor.body as Statement[]);
