@@ -248,7 +248,7 @@ const MEMBERS: Record<string, () => Member> = {
       USIZE,
       (frame) => {
         try {
-          const writer = discardingWriter();
+          const writer = discardingWriter(frame);
           print(frame, writer);
           return discardedBytes(writer);
         } catch (error) {

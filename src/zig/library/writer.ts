@@ -115,12 +115,15 @@ export class WriterFormatOutput implements FormatOutput {
   }
 }
 
-export function discardingWriter(): WriterState {
+export function temporaryWriter(frame: Frame, fd: number | undefined, capacity: number, fill: bigint): WriterState {
+  frame.runtime.spend(capacity);
+  const slots = Array.from({ length: capacity }, () => fill);
+  return { fd, buffer: new Slice(new ZArray(slots), 0, capacity), end: 0, capacity };
+}
+
+export function discardingWriter(frame: Frame): WriterState {
   return {
-    fd: undefined,
-    buffer: new Slice(new ZArray(Array.from({ length: 64 }, () => 0xaan)), 0, 64),
-    end: 0,
-    capacity: 64,
+    ...temporaryWriter(frame, undefined, 64, 0xaan),
     growth: new NativeHandle('discardingWriter', {
       count: 0n,
       drain: (frame: Frame, state: WriterState, bytes: readonly number[]) => {

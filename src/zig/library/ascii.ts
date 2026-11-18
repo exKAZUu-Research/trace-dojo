@@ -1,7 +1,7 @@
 import { PANIC, panic } from '../arith';
 import { Constant } from '../expressions';
 import { arrayOf, BOOL, CONST_U8_SLICE, pointerTo, sliceOf, type StructType, type Type, U8 } from '../types';
-import { markConstantStorage, Pointer, Slice, type Value, ZArray } from '../values';
+import { isUndefinedMemory, markConstantStorage, Pointer, Slice, storageLocation, type Value, ZArray } from '../values';
 import { allocating, OPTIONAL_USIZE, optionalIndex, ORDER, orderValue } from './common';
 import { ALLOCATOR, allocatorState, ERROR_OUT_OF_MEMORY, reserveNativeAllocation } from './heap';
 import { concreteFnMember, type Member, nativeStruct } from './native';
@@ -26,14 +26,9 @@ function mapper(name: string, map: (c: number) => number): () => Member {
   return concreteFnMember(name, [U8], U8, ([value]) => BigInt(map(Number(value as bigint))));
 }
 
-function caseFold(
-  a: SearchSequence<number>,
-  b: SearchSequence<number>,
-  spend: () => void,
-  start = 0n,
-  end = a.length
-): number {
+function caseFold(a: FoldedBytes, b: FoldedBytes, spend: () => void, start = 0n, end = a.length): number {
   const available = end - start;
+  if (a.sameWindow(b, start, available)) return 0;
   const length = available < b.length ? available : b.length;
   for (let index = 0n; index < length; index++) {
     spend();
@@ -80,12 +75,12 @@ function allocMapper(name: string, map: (c: number) => number): () => Member {
 
 function comparer(
   name: string,
-  compute: (a: SearchSequence<number>, b: SearchSequence<number>, spend: () => void) => Value,
+  compute: (a: FoldedBytes, b: FoldedBytes, spend: () => void) => Value,
   resultType: Type = BOOL
 ): () => Member {
   return concreteFnMember(name, [CONST_U8_SLICE, CONST_U8_SLICE], resultType, ([x, y], frame) => {
     const spend = (): void => frame.runtime.spend();
-    return compute(foldedSequence(x as Slice, spend), foldedSequence(y as Slice, spend), spend);
+    return compute(new FoldedBytes(x as Slice, spend), new FoldedBytes(y as Slice, spend), spend);
   });
 }
 
@@ -97,14 +92,40 @@ function findIgnoreCase(text: SearchSequence<number>, pattern: SearchSequence<nu
   return found === undefined ? -1 : Number(found);
 }
 
-function foldedSequence(values: Slice, spend: () => void): SearchSequence<number> {
-  return {
-    length: values.lengthValue,
-    get: (index) => {
-      spend();
-      return toLower(Number(values.get(Number(index))));
-    },
-  };
+class FoldedBytes implements SearchSequence<number> {
+  readonly length: bigint;
+
+  constructor(
+    private readonly slice: Slice,
+    private readonly spend: () => void
+  ) {
+    this.length = slice.lengthValue;
+  }
+
+  get(index: bigint): number {
+    this.spend();
+    return toLower(Number(this.slice.get(Number(index))));
+  }
+
+  sameRange(other: SearchSequence<number>): boolean {
+    return other instanceof FoldedBytes && this.sameWindow(other, 0n, this.length);
+  }
+
+  sameWindow(other: FoldedBytes, start: bigint, length: bigint): boolean {
+    if (length !== other.length) return false;
+    if (length === 0n) return true;
+    const left = this.location(start, length);
+    const right = other.location(0n, length);
+    return left !== undefined && left.storage === right?.storage && left.index === right.index;
+  }
+
+  private location(start: bigint, length: bigint): ReturnType<typeof storageLocation> | undefined {
+    const index = this.slice.start + Number(start);
+    const slots = this.slice.target.slots;
+    if (this.slice.undefinedHeader || index < 0 || index + Number(length) > slots.length) return undefined;
+    if (isUndefinedMemory(this.slice)) return undefined;
+    return storageLocation(slots, index);
+  }
 }
 
 const MEMBERS: Record<string, () => Member> = {

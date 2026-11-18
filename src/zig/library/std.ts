@@ -21,7 +21,7 @@ import {
   VOID,
 } from '../types';
 import { decodeUtf8 } from '../utf8';
-import { ErrorValue, NativeHandle, Pointer, Slice, type Value, ZArray, ZStruct } from '../values';
+import { ErrorValue, NativeHandle, Pointer, type Slice, type Value, ZArray, ZStruct } from '../values';
 import { ALLOCATOR, allocatorMembers, ARENA_ALLOCATOR, arenaValue, heapNamespace } from './heap';
 import {
   addMembers,
@@ -43,6 +43,7 @@ import {
   bufferedBytes,
   bufferedSlice,
   flushWriter,
+  temporaryWriter,
   writeByteTo,
   WRITER,
   writerBytes,
@@ -146,13 +147,8 @@ const DEBUG = nativeStruct('std.debug', {
       VOID,
       (frame) => {
         frame.runtime.spend();
-        const state: WriterState = {
-          fd: 2,
-          flushAfterFormat: true,
-          buffer: new Slice(new ZArray(Array.from({ length: 64 }, () => 0n)), 0, 64),
-          end: 0,
-          capacity: 64,
-        };
+        const state = temporaryWriter(frame, 2, 64, 0n);
+        state.flushAfterFormat = true;
         try {
           print(frame, state);
         } catch (error) {
@@ -175,13 +171,7 @@ const DEBUG = nativeStruct('std.debug', {
     return runtime(
       { kind: 'noreturn' },
       (frame) => {
-        const buffer = new ZArray(Array.from({ length: 0x10_00 }, () => 0xaan));
-        const state: WriterState = {
-          fd: undefined,
-          buffer: new Slice(buffer, 0, buffer.length),
-          end: 0,
-          capacity: buffer.length,
-        };
+        const state = temporaryWriter(frame, undefined, 0x10_00, 0xaan);
         try {
           print(frame, state);
         } catch (error) {

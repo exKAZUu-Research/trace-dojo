@@ -9367,6 +9367,19 @@ test.each([
   expect(executeProgram('zig', source)).toMatchObject({ kind: 'limitExceeded', limit: 'operations' });
 });
 
+test('ASCII case comparisons and searches recognize identical byte views', () => {
+  const source = `const std=@import("std");pub fn main()void{var a:[400000]u8=@splat(97);_=&a;const s:[]const u8=&a;std.debug.print("{any} {} {} {} {} {t}",.{std.ascii.findIgnoreCase(&a,s),std.ascii.eqlIgnoreCase(&a,s),std.ascii.startsWithIgnoreCase(s,s[0..399999]),std.ascii.endsWithIgnoreCase(s,s[1..]),std.ascii.lessThanIgnoreCase(&a,s),std.ascii.orderIgnoreCase(&a,s)});}`;
+  expect(executeProgram('zig', source)).toMatchObject({ kind: 'executed', stderr: '0 true true true false eq' });
+});
+
+test.each(['std.debug.print("x",.{});', '_=std.fmt.count("x",.{});'])(
+  'temporary formatter buffers share the operation limit for %s',
+  (body) => {
+    const source = `const std=@import("std");pub fn main()void{for(0..20000)|_|{${body}}}`;
+    expect(executeProgram('zig', source)).toMatchObject({ kind: 'limitExceeded', limit: 'operations' });
+  }
+);
+
 test.each(['parseInt', 'parseUnsigned'])('wide %s arithmetic shares the digit work budget', (method) => {
   const text = '9'.repeat(10_000);
   const source = `const std=@import("std");pub fn main()void{for(0..10)|_|{_=std.fmt.${method}(u65535,"${text}",10) catch 0;}}`;
