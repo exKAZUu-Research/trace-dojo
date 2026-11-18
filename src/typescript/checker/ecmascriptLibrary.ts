@@ -1160,6 +1160,9 @@ interface MapConstructor {
         keySelector: (item: T, index: number) => K,
     ): Map<K, T[]>;
 }
+interface RegExp {
+    readonly unicodeSets: boolean;
+}
 interface String {
     isWellFormed(): boolean;
     toWellFormed(): string;
