@@ -576,7 +576,7 @@ export abstract class ExpressionCompiler extends SemaBase {
     return expression;
   }
 
-  private compileLocation(expression: Expression, resultType?: Type): TExpr {
+  protected compileLocation(expression: Expression, resultType?: Type): TExpr {
     if (expression.kind === 'paren') return this.compileLocation(expression.operand, resultType);
     if (expression.kind === 'field' || expression.kind === 'index') {
       this.compilationBudget.spend();
@@ -660,7 +660,7 @@ export abstract class ExpressionCompiler extends SemaBase {
   }
 
   private unwrapOptional(expression: ExpressionOf<'unwrap'>, location = false): TExpr {
-    const operand = this.compile(expression.operand);
+    const operand = location ? this.compileLocation(expression.operand) : this.compile(expression.operand);
     const type = operand.type;
     if (type.kind !== 'optional')
       return this.error(expression, `${typeName(type)} 型は optional ではないので、.? は使えません。`);
@@ -827,7 +827,7 @@ export abstract class ExpressionCompiler extends SemaBase {
   }
 
   private slice(expression: ExpressionOf<'slice'>): TExpr {
-    const operand = this.compile(expression.object);
+    const operand = this.compileLocation(expression.object);
     let type = operand.type;
     const start = this.coerce(this.compile(expression.start, USIZE), USIZE, expression.start);
     const end = expression.end ? this.coerce(this.compile(expression.end, USIZE), USIZE, expression.end) : undefined;

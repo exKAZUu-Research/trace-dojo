@@ -7346,12 +7346,31 @@ test.each([
   ['[1]u8', '&o.?[0]'],
   ['S', 'o.?.x'],
   ['[1]u8', 'o.?[0]'],
+  ['??u8', '&o.?.?'],
+  ['???u8', '&o.?.?.?'],
+  ['?[1]u8', '&o.?.?[0]'],
+  ['[1]u8', 'o.?[0..]'],
+  ['[1]u8', '&o.?[0..].*'],
+  ['[]u8', 'o.?[0..]'],
 ])('known-null optional projections reject %s through %s at compile time', (type, value) => {
   const source = `const S=struct{x:u8};pub fn main()void{var flag=false;_=&flag;if(flag){const o:?${type}=null;const x=${value};_=x;}}`;
   expect(executeProgram('zig', source)).toMatchObject({
     kind: 'compileError',
     diagnostics: [{ message: expect.stringContaining('null の optional') }],
   });
+});
+
+test.each(['f', 'method'])('calling %s through a known-null optional is a compile error', (member) => {
+  const source = `const S=struct{f:*const fn()void,fn method(self:S)void{_=self;}};pub fn main()void{var flag=false;_=&flag;if(flag){const o:?S=null;o.?.${member}();}}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'compileError',
+    diagnostics: [{ message: expect.stringContaining('null の optional') }],
+  });
+});
+
+test('a present nested optional retains its payload address', () => {
+  const source = `const std=@import("std");pub fn main()void{const o:??u8=@as(?u8,7);const p=&o.?.?;std.debug.print("{}",.{p.*});}`;
+  expect(executeProgram('zig', source)).toMatchObject({ kind: 'executed', stderr: '7', uncaughtException: undefined });
 });
 
 test.each(['const o:?u8=null;_=o.?;', 'var o:?u8=null;_=&o;const p=&o.?;_=p;'])(

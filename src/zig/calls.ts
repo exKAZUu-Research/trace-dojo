@@ -65,7 +65,7 @@ export abstract class CallCompiler extends BuiltinCompiler {
   protected compileCall(expression: ExpressionOf<'call'>, resultType: Type | undefined): TExpr {
     const { callee } = expression;
     if (callee.kind === 'field') {
-      const object = this.compile(callee.object);
+      const object = this.compileLocation(callee.object);
       if (object.type.kind === 'type') {
         const member = this.typeMember(this.knownValue(object, '型') as Type, callee.name, callee);
         return this.callValue(member, undefined, expression, resultType);
