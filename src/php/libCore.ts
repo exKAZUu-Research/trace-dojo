@@ -1,10 +1,10 @@
-// code-gauge-allow-file fileNcss 554 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 559 -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import { lower, untilNul } from './bytes';
 import { callValue, checkCallable, explainCallable } from './callables';
 import { type ArgValue, backtraceLimit, callStack, frameArguments, setCallableExplainer } from './calls';
 import * as classesModule from './classes';
-import { findClass } from './classes';
+import { classConstant, findClass, requireClassScope } from './classes';
 import { debugType, getType, isNumericString, normalizeKeyString, toBool, valueName } from './conversions';
 import {
   deprecated,
@@ -264,26 +264,44 @@ defineFunction('define(string $constant_name, mixed $value, bool $case_insensiti
 });
 defineFunction('defined(string $constant_name): bool', ({ args }) => {
   const name = (args[0] as string).replace(/^\\/, '');
-  if (name.includes('::')) {
-    const [className, constName] = name.split('::');
-    const constant = findClass(className)?.findConst(constName);
-    return constant !== undefined && classesModule.canAccessConstant(constant, rt().frame.scope);
+  const separator = name.lastIndexOf('::');
+  if (separator !== -1) {
+    const cls = constantClass(name.slice(0, separator));
+    const constName = name.slice(separator + 2);
+    const scope = rt().frame.scope;
+    const constant = cls?.findConst(constName);
+    if (!cls || cls.kind === 'trait' || !constant || !classesModule.canAccessConstant(constant, scope)) return false;
+    classConstant(cls, constName, scope);
+    return true;
   }
   return rt().constants.has(constantKey(name));
 });
 defineFunction('constant(string $name): mixed', ({ args }) => {
   const name = (args[0] as string).replace(/^\\/, '');
-  if (name.includes('::')) {
-    const [className, constName] = name.split('::');
-    const cls = findClass(className);
+  const separator = name.lastIndexOf('::');
+  if (separator !== -1) {
+    const className = name.slice(0, separator);
+    const cls = constantClass(className);
     if (!cls) throwError('Error', `Class "${className}" not found`);
-    const { classConstant } = classesModule;
-    return classConstant(cls, constName, rt().frame.scope);
+    return classConstant(cls, name.slice(separator + 2), rt().frame.scope, className);
   }
   const value = rt().constants.get(constantKey(name));
   if (value === undefined) throwError('Error', `Undefined constant "${name}"`);
   return deprecatedConstant(name, value);
 });
+
+function constantClass(name: string): PhpClass | undefined {
+  const { scope, staticClass } = rt().frame;
+  const word = lower(name);
+  if (word === 'self') return requireClassScope(scope, word);
+  if (word === 'static') return requireClassScope(staticClass, word);
+  if (word === 'parent') {
+    const parent = requireClassScope(scope, word).parent;
+    if (!parent) throwError('Error', 'Cannot access "parent" when current class scope has no parent');
+    return parent;
+  }
+  return findClass(name);
+}
 
 defineFunction('function_exists(string $function): bool', ({ args }) =>
   rt().functions.has(lower((args[0] as string).replace(/^\\/, '')))

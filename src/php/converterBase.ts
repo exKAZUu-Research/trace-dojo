@@ -34,6 +34,11 @@ export const BUILTIN_TYPES = new Set([
 ]);
 export const MAGIC_RUNTIME = new Set(['__CLASS__', '__FUNCTION__', '__METHOD__', '__TRAIT__']);
 
+export function isReservedClassName(name: string): boolean {
+  const word = lower(name);
+  return BUILTIN_TYPES.has(word) || word === 'self' || word === 'parent' || word === 'static';
+}
+
 export interface LoopContext {
   /** The number of loops and switches enclosing the current statement in its function. */
   depth: number;
@@ -124,13 +129,13 @@ export abstract class ConverterBase {
     return enc(node.text.replaceAll(/\s+/g, ''));
   }
 
-  protected classRef(node: Node): ClassRef {
+  protected classRef(node: Node, deferScope = false): ClassRef {
     const isName = node.type === 'name' || node.type === 'qualified_name' || node.type === 'relative_name';
     if (node.type !== 'relative_scope' && !isName) return { k: 'expr', e: this.expr(node) };
     const raw = this.nameText(node);
     const word = lower(raw);
     if (word === 'self' || word === 'parent' || word === 'static') {
-      this.checkClassScope(node, word);
+      if (!deferScope) this.checkClassScope(node, word);
       return { k: word };
     }
     return { k: 'named', name: this.resolveClassName(raw) };

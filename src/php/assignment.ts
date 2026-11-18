@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 638 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 641 -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import type { Expr, ListItem } from './ast';
 import { callMethod } from './callables';
@@ -207,6 +207,8 @@ function globalPlace(index?: Expr): VarPlace {
 }
 
 class StaticPlace implements Place {
+  private reportedTraitAccess = false;
+
   constructor(
     private readonly cls: PhpClass,
     private readonly name: string,
@@ -218,7 +220,9 @@ class StaticPlace implements Place {
   }
 
   private get target(): Ref {
-    return staticPropRef(this.cls, this.name, this.scope);
+    const target = staticPropRef(this.cls, this.name, this.scope, !this.reportedTraitAccess);
+    this.reportedTraitAccess = true;
+    return target;
   }
 
   typeSources(): Ref['typedBy'] {

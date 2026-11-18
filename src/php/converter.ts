@@ -7,7 +7,7 @@ import { oneArgumentBuiltinOpcodes, usesSimpleSprintf } from './builtinCompiler'
 import { enc, lower } from './bytes';
 import { type Constant, constantTruth } from './constantDefaults';
 import { formatFloat, isNumericString, NAN_BOOL_WARNING, NAN_STRING_WARNING } from './conversions';
-import { MAGIC_RUNTIME } from './converterBase';
+import { isReservedClassName, MAGIC_RUNTIME } from './converterBase';
 import { DeclarationConverter } from './declarationConverter';
 import { exportExpr } from './export';
 import { decodeLiteral, parseIntegerLiteral } from './literals';
@@ -60,17 +60,17 @@ export class Converter extends DeclarationConverter {
 
   // Errors ------------------------------------------------------------------------------------------------------------
 
-  protected block(node: Node | null | undefined): Stmt[] {
+  protected block(node: Node | null | undefined, topLevel = false): Stmt[] {
     if (!node) return [];
     if (node.type === 'compound_statement' || node.type === 'colon_block') {
       const statements: Stmt[] = [];
       for (const child of node.namedChildren) {
         if (child.type === 'comment') continue;
-        statements.push(...this.statement(child, false));
+        statements.push(...this.statement(child, topLevel));
       }
       return statements;
     }
-    return this.statement(node, false);
+    return this.statement(node, topLevel);
   }
 
   private blockOf(nodes: Node[]): Stmt[] {
@@ -159,9 +159,11 @@ export class Converter extends DeclarationConverter {
           .filter((child) => child.type === 'static_variable_declaration')
           .map((child) => {
             const nameNode = child.childForFieldName('name') as Node;
+            const name = this.variableName(nameNode);
+            if (name === 'this') this.error(nameNode, 'Cannot use $this as static variable');
             const value = child.childForFieldName('value');
             return {
-              name: this.variableName(nameNode),
+              name,
               init: value ? this.initializerExpr(value, 'static') : undefined,
             };
           });
@@ -186,7 +188,10 @@ export class Converter extends DeclarationConverter {
         return [{ k: 'unset', targets, row }];
       }
       case 'function_definition': {
-        this.declareSymbol(node, 'function', this.nameText(node.childForFieldName('name') as Node));
+        const name = this.nameText(node.childForFieldName('name') as Node);
+        if (this.namespace === '' && lower(name) === '__autoload')
+          this.error(node, '__autoload() is no longer supported, use spl_autoload_register() instead');
+        this.declareSymbol(node, 'function', name);
         const decl = this.functionDecl(node, false);
         const key = lower(decl.name);
         if (topLevel) {
@@ -207,16 +212,26 @@ export class Converter extends DeclarationConverter {
         return [{ k: 'class', decl: this.classDecl(node, false, topLevel), row }];
       }
       case 'enum_declaration': {
+        if (this.currentClass !== undefined) this.error(node, 'Class declarations may not be nested');
         this.unsupported(node, '列挙型（enum）');
         break;
       }
       case 'const_declaration': {
+        if (!topLevel) this.error(node, 'syntax error, unexpected token "const"');
         const items = node.namedChildren
           .filter((child) => child.type === 'const_element')
           .map((child) => {
             const [nameNode, valueNode] = child.namedChildren.filter((part) => part.type !== 'comment');
-            this.declareSymbol(nameNode, 'const', this.nameText(nameNode));
-            return { name: this.qualify(this.nameText(nameNode)), value: this.constantExpr(valueNode, true) };
+            const name = this.nameText(nameNode);
+            const word = lower(name);
+            if (['null', 'true', 'false'].includes(word)) this.error(nameNode, `Cannot redeclare constant '${name}'`);
+            if (
+              MAGIC_RUNTIME.has(word.toUpperCase()) ||
+              ['__line__', '__file__', '__dir__', '__namespace__', '__property__'].includes(word)
+            )
+              this.error(nameNode, `syntax error, unexpected token "${name}", expecting identifier`);
+            this.declareSymbol(nameNode, 'const', name);
+            return { name: this.qualify(name), value: this.constantExpr(valueNode, true) };
           });
         return [{ k: 'const', items, row }];
       }
@@ -239,6 +254,7 @@ export class Converter extends DeclarationConverter {
         return this.namespaceDefinition(node);
       }
       case 'namespace_use_declaration': {
+        if (!topLevel) this.error(node, 'syntax error, unexpected token "use"');
         this.useDeclaration(node);
         return [];
       }
@@ -444,6 +460,7 @@ export class Converter extends DeclarationConverter {
     return { k: 'return', e: argument ? this.expr(argument) : undefined, row };
   }
 
+  // code-gauge-allow functionCognitiveComplexity 18 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
   private tryStatement(node: Node): Stmt {
     const row = node.startPosition.row;
     const body = this.block(node.childForFieldName('body'));
@@ -454,13 +471,18 @@ export class Converter extends DeclarationConverter {
         const typeList = child.childForFieldName('type') as Node;
         const types = typeList.namedChildren
           .filter((type) => type.type !== 'comment')
-          .map((type) =>
-            this.resolveClassName(this.nameText(type.type === 'named_type' ? type.namedChildren[0] : type))
-          );
+          .map((type) => {
+            const raw = this.nameText(type.type === 'named_type' ? type.namedChildren[0] : type);
+            if (['self', 'static', 'parent'].includes(lower(raw)))
+              this.error(type, 'Bad class name in the catch statement');
+            return this.resolveClassName(raw);
+          });
         const nameNode = child.childForFieldName('name');
+        const varName = nameNode ? this.variableName(nameNode) : undefined;
+        if (varName === 'this') this.error(nameNode as Node, 'Cannot re-assign $this');
         catches.push({
           types,
-          varName: nameNode ? this.variableName(nameNode) : undefined,
+          varName,
           body: this.block(child.childForFieldName('body')),
           row: child.startPosition.row,
         });
@@ -471,11 +493,18 @@ export class Converter extends DeclarationConverter {
     return { k: 'try', body, catches, fin, row };
   }
 
-  // code-gauge-allow functionCognitiveComplexity 24 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+  // code-gauge-allow functionCognitiveComplexity 27 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
   private declareStatement(node: Node, topLevel: boolean): Stmt[] {
     for (const directive of node.namedChildren.filter((child) => child.type === 'declare_directive')) {
-      const key = lower((directive.childForFieldName('name') as Node).text);
+      const name = (directive.childForFieldName('name') as Node).text;
+      const key = lower(name);
       const valueNode = directive.childForFieldName('value') as Node;
+      const value = this.expr(valueNode);
+      if (!directiveLiteral(valueNode, value))
+        this.error(
+          valueNode,
+          key === 'encoding' ? 'Encoding must be a literal' : `declare(${name}) value must be a literal`
+        );
       if (key === 'strict_types') {
         if (
           !topLevel ||
@@ -490,15 +519,14 @@ export class Converter extends DeclarationConverter {
             'strict_types は、ファイルの最初の文として、ブロックなしで書いてください（strict_types declaration must be the very first statement in the script）。'
           );
         }
-        if (valueNode.text !== '0' && valueNode.text !== '1') {
+        if (value.k !== 'lit' || (value.v !== 0n && value.v !== 1n)) {
           this.error(
             node,
             'strict_types の値は 0 か 1 です（strict_types declaration must have 0 or 1 as its value）。'
           );
         }
-        this.strictTypes = valueNode.text === '1';
+        this.strictTypes = value.v === 1n;
       } else if (key === 'encoding') {
-        if (!encodingLiteral(valueNode, this.expr(valueNode))) this.error(valueNode, 'Encoding must be a literal');
         if (
           !topLevel ||
           node.parent?.namedChildren.some(
@@ -513,7 +541,11 @@ export class Converter extends DeclarationConverter {
           row: node.startPosition.row,
         });
       } else if (key !== 'ticks') {
-        this.error(node, `declare の指定「${directive.text}」は使えません。`);
+        this.notices.push({
+          level: 'Warning',
+          message: `Unsupported declare '${name}'`,
+          row: directive.startPosition.row,
+        });
       }
     }
     const body = node.namedChildren.filter((child) => child.type !== 'declare_directive' && child.type !== 'comment');
@@ -547,6 +579,8 @@ export class Converter extends DeclarationConverter {
     const nameNode = node.childForFieldName('name');
     const body = node.childForFieldName('body');
     const name = nameNode ? this.nameText(nameNode) : '';
+    if (name.startsWith('\\'))
+      this.error(nameNode as Node, `syntax error, unexpected fully qualified name "${name}", expecting "{"`);
     if (lower(name) === 'namespace' || lower(name).startsWith('namespace\\')) {
       this.error(node, `名前空間の名前に「${name}」は使えません。`);
     }
@@ -556,7 +590,7 @@ export class Converter extends DeclarationConverter {
     this.constImports = new Map();
     this.declaredSymbols = new Map();
     if (!body) return [];
-    const statements = this.blockOf([body]).map((statement) => statement);
+    const statements = this.block(body, true);
     this.namespace = '';
     this.classImports = new Map();
     this.functionImports = new Map();
@@ -565,7 +599,7 @@ export class Converter extends DeclarationConverter {
     return statements;
   }
 
-  // code-gauge-allow functionCognitiveComplexity 25 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+  // code-gauge-allow functionCognitiveComplexity 28 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
   private useDeclaration(node: Node): void {
     const kindNode = node.childForFieldName('type');
     const kind = kindNode ? lower(kindNode.text) : 'class';
@@ -591,6 +625,8 @@ export class Converter extends DeclarationConverter {
         });
       }
       const alias = aliasNode ? this.nameText(aliasNode) : (full.split('\\').at(-1) as string);
+      if (effective === 'class' && isReservedClassName(alias))
+        this.error(clause, `Cannot use ${full} as ${alias} because '${alias}' is a special class name`);
       const imports = this.importsFor(effective);
       const key = effective === 'const' ? alias : lower(alias);
       const declared = this.declaredSymbols.get(effective)?.get(key);
@@ -728,7 +764,8 @@ export class Converter extends DeclarationConverter {
   }
 
   expr(node: Node): Expr {
-    if (this.initializerContext?.kind === 'static' && CALL_EXPRESSIONS.has(node.type))
+    const initializer = this.initializerContext?.kind;
+    if ((initializer === 'static' || initializer === 'array') && CALL_EXPRESSIONS.has(node.type))
       return this.compileRuntimeCall(node);
     const row = node.startPosition.row;
     switch (node.type) {
@@ -800,7 +837,7 @@ export class Converter extends DeclarationConverter {
         return this.constant(node);
       }
       case 'array_creation_expression': {
-        return { k: 'array', items: this.arrayItems(node), row };
+        return { k: 'array', items: this.compileArrayItems(node), row };
       }
       case 'list_literal': {
         return this.listLiteral(node);
@@ -856,8 +893,8 @@ export class Converter extends DeclarationConverter {
       }
       case 'class_constant_access_expression': {
         const [scope, nameNode] = node.namedChildren.filter((child) => child.type !== 'comment');
-        const cls = this.classRef(scope);
         const name = this.nameText(nameNode);
+        const cls = this.classRef(scope, lower(name) !== 'class' && this.constantInitializer);
         const literal = lower(name) === 'class' && cls.k === 'expr' ? parserScalar(cls.e) : undefined;
         if (literal !== undefined && typeof literal !== 'string') this.error(scope, 'Illegal class name');
         if (lower(name) === 'class' && cls.k === 'expr' && literal === undefined) {
@@ -1202,7 +1239,7 @@ export class Converter extends DeclarationConverter {
     const classNode = parts.find((child) => child.type !== 'arguments') as Node;
     const { args, fcc } = argumentsNode ? this.args(argumentsNode) : { args: [], fcc: false };
     if (fcc) this.error(node, 'new で第一級 callable は作れません（Cannot create Closure for new expression）。');
-    return { k: 'new', cls: this.classRef(classNode), args, row };
+    return { k: 'new', cls: this.classRef(classNode, this.constantInitializer), args, row };
   }
 
   private binary(node: Node): Expr {
@@ -1349,7 +1386,18 @@ export class Converter extends DeclarationConverter {
     return { k: 'match', subject, arms, row };
   }
 
-  // code-gauge-allow functionCognitiveComplexity 18 -- One case per grammar node kind, each converted where PHP gives it its own meaning.
+  private compileArrayItems(node: Node): ArrayItem[] {
+    if (this.initializerContext) return this.arrayItems(node);
+    const first = node.namedChildren.find((child) => child.type === 'array_element_initializer');
+    this.initializerContext = { kind: 'array', row: (first ?? node).startPosition.row };
+    try {
+      return this.arrayItems(node);
+    } finally {
+      this.initializerContext = undefined;
+    }
+  }
+
+  // code-gauge-allow functionCognitiveComplexity 18 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
   private arrayItems(node: Node): ArrayItem[] {
     const items: ArrayItem[] = [];
     for (const child of node.namedChildren) {
@@ -1619,7 +1667,7 @@ function chainedComparison(operator: Node, left: Node, right: Node): Node | unde
   if (rightOperator && group.has(rightOperator.type)) return rightOperator;
 }
 
-function encodingLiteral(node: Node, value: Expr): boolean {
+function directiveLiteral(node: Node, value: Expr): boolean {
   while (node.type === 'parenthesized_expression')
     node = node.namedChildren.find((child) => child.type !== 'comment') as Node;
   if (value.k === 'lit')
@@ -1631,8 +1679,8 @@ function encodingLiteral(node: Node, value: Expr): boolean {
     node.type === 'binary_expression' &&
     value.k === 'bin' &&
     value.op === '.' &&
-    encodingLiteral(node.childForFieldName('left') as Node, value.l) &&
-    encodingLiteral(node.childForFieldName('right') as Node, value.r)
+    directiveLiteral(node.childForFieldName('left') as Node, value.l) &&
+    directiveLiteral(node.childForFieldName('right') as Node, value.r)
   );
 }
 

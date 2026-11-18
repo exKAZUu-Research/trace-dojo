@@ -1,5 +1,5 @@
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
-import type { ClassDecl, Expr, FunctionDecl, MethodDeclAst, PropertyDeclAst } from './ast';
+import type { ClassDecl, Expr, FunctionDecl, MethodDeclAst, PropertyDeclAst, TraitRule } from './ast';
 import builtinNames from './builtinNames.json';
 import { addConst, applyTraitConstants, evaluateInClass, linkInterfaceConstants } from './classConstants';
 export { canAccessConstant, classConstant, setClassEvaluator } from './classConstants';
@@ -124,8 +124,10 @@ export function declareClass(decl: ClassDecl, row: number): PhpClass {
     for (const name of use.names) {
       const trait = findClass(name);
       if (!trait) throwError('Error', `Trait "${name}" not found`);
-      if (trait.kind !== 'trait')
-        throw new FatalError(`${decl.name} cannot use ${trait.name} - it is not a trait`, use.row);
+      if (trait.kind !== 'trait') {
+        runtime.row = use.row;
+        throwError('Error', `${decl.name} cannot use ${trait.name} - it is not a trait`);
+      }
       cls.traits.push(trait);
     }
   }
@@ -369,21 +371,21 @@ function addMethod(cls: PhpClass, ast: MethodDeclAst, scope = cls): void {
 }
 
 // code-gauge-allow functionNcss 56 -- Follows PHP's class linking and property access rules in their order of checks.
+// code-gauge-allow functionCognitiveComplexity 25 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 function applyTraits(cls: PhpClass, decl: ClassDecl): void {
   if (cls.traits.length === 0) return;
   const rules = decl.traits.flatMap((use) => use.rules);
-  const excluded = new Set<string>();
-  for (const rule of rules) {
-    if (rule.k !== 'insteadof') continue;
-    for (const other of rule.instead) excluded.add(`${lower(other)}::${lower(rule.method)}`);
-  }
+  const excluded = traitPrecedence(cls, rules, decl.row);
+  const aliases = rules
+    .filter((rule) => rule.k === 'as')
+    .map((rule) => ({ rule, source: traitAliasSource(cls, rule, decl.row) }));
   const ownMethods = new Set(decl.methods.map((method) => lower(method.fn.name)));
   const added = new Map<string, PhpClass>();
   const contracts: Method[] = [];
   const propertyOrigins = new Map<string, string>();
   const constantOrigins = new Map<string, string>();
   for (const trait of cls.traits) {
-    for (const [lname, method] of allTraitMethods(trait)) {
+    for (const [lname, method] of trait.methods) {
       if (method.isAbstract) {
         contracts.push({ ...method, cls, scope: trait });
         if (!cls.findMethod(lname)) cls.methods.set(lname, { ...method, cls, scope: cls, fn: copyFunction(method.fn) });
@@ -404,38 +406,100 @@ function applyTraits(cls: PhpClass, decl: ClassDecl): void {
     applyTraitProperties(cls, trait, propertyOrigins, decl.row);
     applyTraitConstants(cls, trait, constantOrigins, decl.row);
   }
-  for (const rule of rules) {
-    if (rule.k !== 'as') continue;
-    const traits = rule.trait ? [findClass(rule.trait) as PhpClass] : cls.traits;
-    const source = traits.find((trait) => trait && allTraitMethods(trait).has(lower(rule.method)));
-    if (!source) {
-      throw new FatalError(
-        `An alias was defined for ${rule.trait ? `${rule.trait}::` : ''}${rule.method} but this method does not exist`,
-        decl.row
-      );
-    }
-    const method = allTraitMethods(source).get(lower(rule.method)) as Method;
-    if (rule.alias) {
-      if (!ownMethods.has(lower(rule.alias))) {
-        cls.methods.set(lower(rule.alias), {
-          ...method,
-          name: rule.alias,
-          lname: lower(rule.alias),
-          cls,
-          scope: cls,
-          visibility: rule.visibility ?? method.visibility,
-          fn: copyFunction(method.fn),
-        });
-      }
-    } else if (rule.visibility) {
-      const own = cls.methods.get(lower(rule.method));
-      if (own) cls.methods.set(own.lname, { ...own, visibility: rule.visibility });
-    }
-  }
+  for (const { rule, source } of aliases) applyTraitAlias(cls, rule, source, ownMethods, added);
   for (const contract of contracts) {
     const implementation = cls.findMethod(contract.lname);
     if (implementation) checkOverride(cls, implementation, contract);
   }
+}
+
+function applyTraitAlias(
+  cls: PhpClass,
+  rule: Extract<TraitRule, { k: 'as' }>,
+  source: PhpClass,
+  ownMethods: Set<string>,
+  added: Map<string, PhpClass>
+): void {
+  const name = lower(rule.method);
+  const method = source.methods.get(name) as Method;
+  if (rule.alias) {
+    const lname = lower(rule.alias);
+    if (ownMethods.has(lname)) return;
+    cls.methods.set(lname, {
+      ...method,
+      name: rule.alias,
+      lname,
+      cls,
+      scope: cls,
+      visibility: rule.visibility ?? method.visibility,
+      fn: copyFunction(method.fn),
+    });
+  } else if (rule.visibility && added.get(name) === source) {
+    const own = cls.methods.get(name);
+    if (own) cls.methods.set(name, { ...own, visibility: rule.visibility });
+  }
+}
+
+function traitPrecedence(cls: PhpClass, rules: TraitRule[], row: number): Set<string> {
+  const excluded = new Set<string>();
+  for (const rule of rules) {
+    if (rule.k !== 'insteadof') continue;
+    const trait = usedTrait(cls, rule.trait, row);
+    const method = lower(rule.method);
+    if (!trait.methods.has(method))
+      throw new FatalError(
+        `A precedence rule was defined for ${trait.name}::${rule.method} but this method does not exist`,
+        row
+      );
+    for (const name of rule.instead) {
+      const other = usedTrait(cls, name, row);
+      const key = `${lower(other.name)}::${method}`;
+      if (excluded.has(key))
+        throw new FatalError(
+          `Failed to evaluate a trait precedence (${rule.method}). Method of trait ${other.name} was defined to be excluded multiple times`,
+          row
+        );
+      if (other === trait)
+        throw new FatalError(
+          `Inconsistent insteadof definition. The method ${rule.method} is to be used from ${trait.name}, but ${trait.name} is also on the exclude list`,
+          row
+        );
+      excluded.add(key);
+    }
+  }
+  return excluded;
+}
+
+function traitAliasSource(cls: PhpClass, rule: Extract<TraitRule, { k: 'as' }>, row: number): PhpClass {
+  const name = lower(rule.method);
+  if (rule.trait) {
+    const trait = usedTrait(cls, rule.trait, row);
+    if (!trait.methods.has(name))
+      throw new FatalError(
+        `An alias was defined for ${trait.name}::${rule.method} but this method does not exist`,
+        row
+      );
+    return trait;
+  }
+  const [first, second] = [...new Set(cls.traits)].filter((trait) => trait.methods.has(name));
+  if (second)
+    throw new FatalError(
+      `An alias was defined for method ${rule.method}(), which exists in both ${first.name} and ${second.name}. Use ${first.name}::${rule.method} or ${second.name}::${rule.method} to resolve the ambiguity`,
+      row
+    );
+  if (first) return first;
+  const message = rule.alias
+    ? `An alias (${rule.alias}) was defined for method ${rule.method}(), but this method does not exist`
+    : `The modifiers of the trait method ${rule.method}() are changed, but this method does not exist. Error`;
+  throw new FatalError(message, row);
+}
+
+function usedTrait(cls: PhpClass, name: string, row: number): PhpClass {
+  const trait = findClass(name);
+  if (!trait) throw new FatalError(`Could not find trait ${name}`, row);
+  if (!cls.traits.includes(trait))
+    throw new FatalError(`Required Trait ${trait.name} wasn't added to ${cls.name}`, row);
+  return trait;
 }
 
 function applyTraitProperties(cls: PhpClass, trait: PhpClass, origins: Map<string, string>, row: number): void {
@@ -488,10 +552,6 @@ function traitPropertyCompatible(
   const left = existing.defaultValue ? existing.defaultValue() : existing.type ? UNINIT : null;
   const right = property.defaultExpr ? evaluateInClass(property.defaultExpr, cls) : property.type ? UNINIT : null;
   return left === UNINIT || right === UNINIT ? left === right : strictEquals(left, right);
-}
-
-function allTraitMethods(trait: PhpClass): Map<string, Method> {
-  return trait.methods;
 }
 
 function copyFunction(fn: Callable): Callable {
@@ -1451,12 +1511,16 @@ export function resolveStatic(ref: LazyRef): Ref {
   return ref;
 }
 
-export function staticPropRef(cls: PhpClass, name: string, scope: PhpClass | undefined): Ref {
+export function staticPropRef(cls: PhpClass, name: string, scope: PhpClass | undefined, reportTraitAccess = true): Ref {
   const found = cls.findStatic(name);
   if (!found) throwError('Error', `Access to undeclared static property ${cls.name}::$${name}`);
   if (!canAccessProp(found.decl, scope)) {
     throwError('Error', `Cannot access ${found.decl.visibility} property ${cls.name}::$${name}`);
   }
+  if (reportTraitAccess && cls.kind === 'trait')
+    deprecated(
+      `Accessing static trait property ${cls.name}::$${name} is deprecated, it should only be accessed on a class using the trait`
+    );
   const ref = resolveStatic(found.ref);
   if (found.decl.type) ref.addTypeOwner(found.decl);
   return ref;

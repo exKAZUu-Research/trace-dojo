@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 685 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 727 -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import type { Node } from '@willbooster/web-tree-sitter';
 
@@ -17,7 +17,7 @@ import { lower } from './bytes';
 import { parseTypeText } from './calls';
 import { CompileClassConstants } from './compileClassConstants';
 import { type Constant, constantTypeName, foldedConstant, foldedDefaultType } from './constantDefaults';
-import { BUILTIN_TYPES, ConverterBase } from './converterBase';
+import { BUILTIN_TYPES, ConverterBase, isReservedClassName } from './converterBase';
 import { SCRIPT_PATH } from './runtime';
 import { describeType, typeToString } from './types';
 import { type TypeDecl, type Visibility, visibilityRank } from './values';
@@ -48,7 +48,11 @@ const MAGIC_METHODS: Record<
 export abstract class DeclarationConverter extends ConverterBase {
   private readonly compileClasses = new CompileClassConstants();
   private activeClass?: ClassDecl;
-  protected initializerContext?: { kind: 'eager' | 'deferred' | 'static'; row: number };
+  protected initializerContext?: { kind: 'eager' | 'deferred' | 'static' | 'array'; row: number };
+
+  protected get constantInitializer(): boolean {
+    return this.initializerContext?.kind === 'eager' || this.initializerContext?.kind === 'deferred';
+  }
 
   protected compiledType(expression: Expr): string | undefined {
     const value = this.compiledValue(expression);
@@ -62,7 +66,8 @@ export abstract class DeclarationConverter extends ConverterBase {
     });
   }
 
-  // code-gauge-allow functionNcss 36 -- Converts every part of a function declaration and checks it as PHP does at compile time.
+  // code-gauge-allow functionNcss 40 -- Converts every part of a function declaration and checks it as PHP does at compile time.
+  // code-gauge-allow functionCognitiveComplexity 19 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
   protected functionDecl(node: Node, isClosure: boolean, className?: string): FunctionDecl {
     const attributes = node.childForFieldName('attributes');
     if (attributes) this.unsupported(attributes, '属性（#[...]）');
@@ -97,7 +102,15 @@ export abstract class DeclarationConverter extends ConverterBase {
       const returnType = returnTypeNode ? this.typeDecl(returnTypeNode) : undefined;
       this.fn.returnType = returnType;
       if (returnTypeNode && returnType) this.checkTypeScope(returnTypeNode, returnType);
+      if (byRefReturn && returnType?.k === 'named' && returnType.name === 'void')
+        this.notices.push({
+          level: 'Deprecated',
+          message: `${this.fn.displayName}: Returning by reference from a void function is deprecated`,
+          row: node.startPosition.row,
+        });
       const params = this.params(node.childForFieldName('parameters') as Node, name, className);
+      if (!body && className !== undefined && lower(name) === '__construct' && params.some((param) => param.promote))
+        this.error(node, 'Cannot declare promoted property in an abstract constructor');
       const isAtomic = this.claimAtomic(node, body);
       let statements: Stmt[] = [];
       let arrowBody: Expr | undefined;
@@ -146,6 +159,8 @@ export abstract class DeclarationConverter extends ConverterBase {
         this.error(child, `引数の名前 $${name} が重なっています（Redefinition of parameter $${name}）。`);
       seen.add(name);
       const typeNode = child.childForFieldName('type');
+      if (typeNode && lower(typeNode.text) === 'abstract')
+        this.error(typeNode, 'Cannot use the abstract modifier on a parameter');
       const type = typeNode ? this.typeDecl(typeNode, true) : undefined;
       if (type?.k === 'named' && ['void', 'never'].includes(type.name))
         this.error(child, 'void and never cannot be parameter types');
@@ -176,22 +191,8 @@ export abstract class DeclarationConverter extends ConverterBase {
           row: child.startPosition.row,
         });
       }
-      if (child.type === 'property_promotion_parameter') {
-        if (lower(functionName) !== '__construct' || className === undefined) {
-          this.error(
-            child,
-            'プロパティの昇格は、コンストラクタの引数にしか書けません（Cannot declare promoted property outside a constructor）。'
-          );
-        }
-        const modifiers = this.memberModifiers(child);
-        const visibility = modifiers.visibility ?? 'public';
-        const setVisibility = modifiers.setVisibility;
-        param.promote = {
-          visibility,
-          isReadonly: modifiers.isReadonly,
-          setVisibility,
-        };
-      }
+      if (child.type === 'property_promotion_parameter')
+        param.promote = this.parameterPromotion(child, functionName, className);
       params.push(param);
     }
     // A required parameter after optional ones makes them required.
@@ -215,6 +216,22 @@ export abstract class DeclarationConverter extends ConverterBase {
     return params;
   }
 
+  private parameterPromotion(node: Node, functionName: string, className?: string): NonNullable<ParamDecl['promote']> {
+    if (lower(functionName) !== '__construct' || className === undefined)
+      this.error(
+        node,
+        'プロパティの昇格は、コンストラクタの引数にしか書けません（Cannot declare promoted property outside a constructor）。'
+      );
+    const modifiers = this.memberModifiers(node);
+    if (modifiers.isStatic || modifiers.isAbstract)
+      this.error(node, `Cannot use the ${modifiers.isStatic ? 'static' : 'abstract'} modifier on a parameter`);
+    return {
+      visibility: modifiers.visibility ?? 'public',
+      isReadonly: modifiers.isReadonly,
+      setVisibility: modifiers.setVisibility,
+    };
+  }
+
   protected setVisibilityOf(node: Node): Visibility | undefined {
     const operation = node.namedChildren.find((child) => child.type === 'operation');
     if (!operation) return undefined;
@@ -235,6 +252,8 @@ export abstract class DeclarationConverter extends ConverterBase {
   private checkIntersection(node: Node, members: TypeDecl[]): void {
     const seen = new Set<string>();
     for (const member of members) {
+      if (member.k === 'named' && member.nullable)
+        this.error(node, 'syntax error, unexpected token "&", expecting variable');
       const name = this.typeMemberName(member, node);
       const key = lower(name);
       if (member.k !== 'named' || BUILTIN_TYPES.has(lower(member.name)) || ['self', 'parent', 'static'].includes(key))
@@ -244,7 +263,6 @@ export abstract class DeclarationConverter extends ConverterBase {
     }
   }
 
-  // code-gauge-allow functionCognitiveComplexity 26 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
   // code-gauge-allow functionCognitiveComplexity 26 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
   private checkUnion(node: Node, type: Extract<TypeDecl, { k: 'union' }>): void {
     const seen = new Set<string>();
@@ -270,6 +288,26 @@ export abstract class DeclarationConverter extends ConverterBase {
         node,
         `Type ${typeToString(this.resolveRelativeTypes(type, node))} contains both object and a class type, which is redundant`
       );
+    this.checkRedundantIntersections(node, type.types);
+  }
+
+  // code-gauge-allow functionCognitiveComplexity 16 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+  private checkRedundantIntersections(node: Node, members: TypeDecl[]): void {
+    if (!members.some((member) => member.k === 'inter')) return;
+    const types = members.map((member) => {
+      const name = this.typeMemberName(member, node);
+      const parts = lower(name).split('&');
+      return { name, parts };
+    });
+    for (const [index, type] of types.entries()) {
+      if (type.parts.length === 1) continue;
+      for (const [otherIndex, other] of types.entries()) {
+        if (index === otherIndex || !other.parts.every((part) => type.parts.includes(part))) continue;
+        if (type.parts.length > other.parts.length)
+          this.error(node, `Type ${type.name} is redundant as it is more restrictive than type ${other.name}`);
+        if (index > otherIndex) this.error(node, `Type ${type.name} is redundant with type ${other.name}`);
+      }
+    }
   }
 
   private unionTypeComponents(member: TypeDecl, name: string, node: Node): string[] {
@@ -511,6 +549,7 @@ export abstract class DeclarationConverter extends ConverterBase {
   // Classes -----------------------------------------------------------------------------------------------------------
 
   classDecl(node: Node, anonymous = false, topLevel = true): ClassDecl {
+    if (!anonymous && this.currentClass !== undefined) this.error(node, 'Class declarations may not be nested');
     const attributes = node.childForFieldName('attributes');
     if (attributes) this.unsupported(attributes, '属性（#[...]）');
     const kind: ClassDecl['kind'] =
@@ -520,8 +559,7 @@ export abstract class DeclarationConverter extends ConverterBase {
     const runtimeIndex = anonymous || !topLevel ? this.runtimeClasses++ : 0;
     if (!anonymous) {
       const raw = this.nameText(nameNode as Node);
-      const word = lower(raw);
-      if (BUILTIN_TYPES.has(word) || ['self', 'parent', 'static'].includes(word)) {
+      if (isReservedClassName(raw)) {
         this.error(
           node,
           `「${raw}」はクラスの名前に使えません（Cannot use '${raw}' as class name as it is reserved）。`
@@ -666,6 +704,7 @@ export abstract class DeclarationConverter extends ConverterBase {
     return decl;
   }
 
+  // code-gauge-allow functionCognitiveComplexity 16 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
   protected memberModifiers(member: Node): {
     visibility?: Visibility;
     setVisibility?: Visibility;
@@ -676,15 +715,19 @@ export abstract class DeclarationConverter extends ConverterBase {
     isVar: boolean;
   } {
     const children = member.children;
-    const modifierKinds = children
-      .filter((child) => child.type.endsWith('_modifier'))
-      .map((child) =>
-        child.type === 'visibility_modifier'
-          ? this.setVisibilityOf(child)
-            ? 'set_visibility'
-            : 'visibility'
-          : child.type
-      );
+    const modifiers = children.filter((child) => child.type.endsWith('_modifier'));
+    const varModifier = modifiers.find((child) => child.type === 'var_modifier');
+    if (varModifier && modifiers.length > 1) {
+      const unexpected = modifiers[0] === varModifier ? modifiers[1] : varModifier;
+      this.error(unexpected, `syntax error, unexpected token "${lower(unexpected.text)}", expecting variable`);
+    }
+    const modifierKinds = modifiers.map((child) =>
+      child.type === 'visibility_modifier'
+        ? this.setVisibilityOf(child)
+          ? 'set_visibility'
+          : 'visibility'
+        : child.type
+    );
     if (new Set(modifierKinds).size !== modifierKinds.length)
       this.error(member, 'Multiple access or duplicate modifiers are not allowed');
     if (modifierKinds.includes('abstract_modifier') && modifierKinds.includes('final_modifier'))
@@ -871,6 +914,7 @@ export abstract class DeclarationConverter extends ConverterBase {
       const body = hook.childForFieldName('body');
       const paramsNode = hook.childForFieldName('parameters');
       const outerFn = this.fn;
+      const outerLoop = this.loop;
       const byRefReturn = hook.childForFieldName('reference_modifier') !== null;
       if (kind === 'set' && byRefReturn)
         this.notices.push({
@@ -886,6 +930,7 @@ export abstract class DeclarationConverter extends ConverterBase {
         isMethod: true,
         returnType: kind === 'set' ? { k: 'named', name: 'void' } : prop.type,
       };
+      this.loop = { depth: 0, switches: [] };
       try {
         let params: ParamDecl[] = [];
         if (paramsNode) params = this.params(paramsNode, `$${prop.name}::${kind}`, className);
@@ -958,6 +1003,7 @@ export abstract class DeclarationConverter extends ConverterBase {
           }
         }
         if (body && referencesProperty(body, prop.name)) referencesBacking = true;
+        this.checkGotos(this.fn, statements);
         const fn: FunctionDecl = {
           name: `$${prop.name}::${kind}`,
           isPropertyHook: true,
@@ -970,7 +1016,7 @@ export abstract class DeclarationConverter extends ConverterBase {
           endRow: hook.endPosition.row,
           isAtomic: false,
           usesThis: true,
-          hasGoto: false,
+          hasGoto: this.fn.gotos.length > 0,
           namespace: this.namespace,
           className,
           isClosure: false,
@@ -989,6 +1035,7 @@ export abstract class DeclarationConverter extends ConverterBase {
           );
       } finally {
         this.fn = outerFn;
+        this.loop = outerLoop;
       }
     }
     prop.hooks = hooks;
@@ -997,9 +1044,10 @@ export abstract class DeclarationConverter extends ConverterBase {
       this.error(list, `Cannot specify default value for virtual hooked property ${className}::$${prop.name}`);
   }
 
-  // code-gauge-allow functionCognitiveComplexity 21 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+  // code-gauge-allow functionCognitiveComplexity 22 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
   protected methodDecl(member: Node, decl: ClassDecl): MethodDeclAst {
     const modifiers = this.memberModifiers(member);
+    if (modifiers.isReadonly) this.error(member, 'Cannot use the readonly modifier on a method');
     const fn = this.functionDecl(member, false, decl.name);
     const body = member.childForFieldName('body');
     if (decl.kind === 'interface' && (modifiers.isFinal || modifiers.isAbstract))

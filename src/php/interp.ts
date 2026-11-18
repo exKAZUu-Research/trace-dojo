@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 815 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 816 -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import {
   applyOperator,
@@ -834,9 +834,10 @@ function classConstantOf(e: Extract<Expr, { k: 'cconst' }>): Value {
   }
   const cls = resolveClassRef(e.cls);
   runtime.row = e.row;
-  const displayName =
-    runtime.frame.constantExpression && (e.cls.k === 'self' || e.cls.k === 'parent') ? e.cls.k : cls.name;
-  return classConstant(cls, e.name, runtime.frame.scope, displayName);
+  // The direct fetch opcode starts evaluation; lookups within an initializer track recursive constant references.
+  const trackEvaluation = runtime.frame.constantExpression;
+  const displayName = trackEvaluation && e.cls.k !== 'expr' ? (e.cls.k === 'named' ? e.cls.name : e.cls.k) : cls.name;
+  return classConstant(cls, e.name, runtime.frame.scope, displayName, trackEvaluation);
 }
 
 /** Evaluates the arguments of `new`, which PHP does after it has created the object. */

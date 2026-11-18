@@ -138,15 +138,22 @@ function checkTraitConstant(cls: PhpClass, conflict: TraitConstantConflict, row:
   }
 }
 
-export function classConstant(cls: PhpClass, name: string, scope: PhpClass | undefined, displayName = cls.name): Value {
+// code-gauge-allow functionCognitiveComplexity 17 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+export function classConstant(
+  cls: PhpClass,
+  name: string,
+  scope: PhpClass | undefined,
+  displayName = cls.name,
+  trackEvaluation = true
+): Value {
   const constant = cls.findConst(name);
   if (!constant) throwError('Error', `Undefined constant ${displayName}::${name}`);
   if (!canAccessConstant(constant, scope))
-    throwError('Error', `Cannot access ${constant.visibility} constant ${cls.name}::${name}`);
+    throwError('Error', `Cannot access ${constant.visibility} constant ${displayName}::${name}`);
+  if (cls.kind === 'trait') throwError('Error', `Cannot access trait constant ${displayName}::${name} directly`);
   if (constant.value === undefined) {
-    if (constant.evaluating)
-      throwError('Error', `Cannot declare self-referencing constant ${constant.cls.name}::${name}`);
-    constant.evaluating = true;
+    if (constant.evaluating) throwError('Error', `Cannot declare self-referencing constant ${displayName}::${name}`);
+    if (trackEvaluation) constant.evaluating = true;
     try {
       let value = (constant.evaluate as () => Value)();
       if (constant.type) {
@@ -162,7 +169,7 @@ export function classConstant(cls: PhpClass, name: string, scope: PhpClass | und
       constant.value = value;
       if (value instanceof PhpArray) value.persistentHolder = true;
     } finally {
-      constant.evaluating = false;
+      if (trackEvaluation) constant.evaluating = false;
     }
   }
   return share(constant.value as Value);

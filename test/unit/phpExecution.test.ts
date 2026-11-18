@@ -1085,6 +1085,57 @@ test.each(['![...[]]', '![...[...[]]]', '![...[1]]'])('validates resolved spread
   expect(JSON.stringify(result)).toContain('Cannot use bool as default value');
 });
 
+test.each([
+  ['while(false){class C{public int $x{get{break;}}}}', "not in the 'loop' or 'switch' context"],
+  ['while(false){class C{public int $x{get{continue;}}}}', "not in the 'loop' or 'switch' context"],
+  ['class C{public int $x{get{goto absent;}}}', "'goto' to undefined label"],
+  ['function f(){static $this;}', 'Cannot use $this as static variable'],
+  ['try{}catch(E $this){}', 'Cannot re-assign $this'],
+  [
+    'abstract class A{abstract function __construct(public $x);}',
+    'Cannot declare promoted property in an abstract constructor',
+  ],
+  ['class A{readonly function f(){}}', 'Cannot use the readonly modifier on a method'],
+  ['class A{function __construct(static $x){}}', 'Cannot use the static modifier on a parameter'],
+  ['class A{function __construct(abstract $x){}}', 'Cannot use the abstract modifier on a parameter'],
+  ['class A{var static $x;}', 'expecting variable'],
+  [String.raw`use Project\Item as self;`, "because 'self' is a special class name"],
+  ['function __autoload($name){}', '__autoload() is no longer supported'],
+  ['declare(ticks=$x);', 'declare(ticks) value must be a literal'],
+  ['try{}catch(parent $e){}', 'Bad class name in the catch statement'],
+  ['const NULL=1;', "Cannot redeclare constant 'NULL'"],
+  ['function f((A&B)|A $x){}', 'Type A&B is redundant as it is more restrictive than type A'],
+  ['function f(?A&B $x){}', 'unexpected token "&"'],
+  ['function f(){const A=1;}', 'unexpected token "const"'],
+  ['if(true){use stdClass as S;}', 'unexpected token "use"'],
+  ['class A{function f(){class B{}}}', 'Class declarations may not be nested'],
+])('checks declaration and function boundaries before execution: %s', (source, message) => {
+  const result = run(`<?php echo 'never'; ${source}`);
+  expect(result.kind).toBe('compileError');
+  if (result.kind === 'compileError') expect(result.diagnostics[0]?.message).toContain(message);
+});
+
+test.each([
+  ['T::f insteadof U;', "Required Trait U wasn't added to Combined"],
+  ['T::f insteadof Missing;', 'Could not find trait Missing'],
+  ['Missing::f insteadof T;', 'Could not find trait Missing'],
+  ['T::missing insteadof T;', 'A precedence rule was defined for T::missing but this method does not exist'],
+  ['T::f insteadof T;', 'Inconsistent insteadof definition'],
+  ['U::f as alias;', "Required Trait U wasn't added to Combined"],
+  ['Missing::f as alias;', 'Could not find trait Missing'],
+  ['T::missing as alias;', 'An alias was defined for T::missing but this method does not exist'],
+  ['missing as alias;', 'An alias (alias) was defined for method missing(), but this method does not exist'],
+])('rejects invalid trait adaptations: %s', (adaptation, message) => {
+  const result = run(
+    `<?php trait T{function f(){}} trait U{function f(){}} class Combined{use T{${adaptation}}}echo 'never';`
+  );
+  expect(result.kind).toBe('executed');
+  if (result.kind === 'executed') {
+    expect(result.stdout).toContain(message);
+    expect(result.stdout).not.toContain('never');
+  }
+});
+
 test('mutates arrays held by many objects within the operation limit', () => {
   const source =
     '<?php class Student{public array $scores=[];}$students=[];for($i=0;$i<2000;$i++)$students[]=new Student;foreach($students as $s){$s->scores[]=1;$s->scores[]=2;}$sum=0;foreach($students as $s)$sum+=array_sum($s->scores);echo $sum;';

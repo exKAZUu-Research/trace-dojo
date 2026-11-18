@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 551 -- Keeps one PHP runtime concern and its shared helpers in one module.
+// code-gauge-allow-file fileNcss 556 -- Keeps one PHP runtime concern and its shared helpers in one module.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import { placeOf } from './assignment';
 import type { Arg, Expr } from './ast';
@@ -325,7 +325,7 @@ function magicForwarder(
 }
 
 // code-gauge-allow functionCognitiveComplexity 30 -- Resolves each form of call and callable by PHP's lookup rules, in PHP's order of checks.
-// code-gauge-allow functionNcss 46 -- Resolves each form of call and callable by PHP's lookup rules, in PHP's order of checks.
+// code-gauge-allow functionNcss 48 -- Resolves each form of call and callable by PHP's lookup rules, in PHP's order of checks.
 export function staticCallExpression(e: Extract<Expr, { k: 'scall' }>, discardResult = false): Value {
   const runtime = rt();
   const frame = runtime.frame;
@@ -341,6 +341,7 @@ export function staticCallExpression(e: Extract<Expr, { k: 'scall' }>, discardRe
     if (method.isAbstract) throwError('Error', `Cannot call abstract method ${method.scope.name}::${method.name}()`);
     let target: CallTarget;
     if (method.isStatic) {
+      reportStaticTraitCall(cls, method.name);
       const staticClass = forwarding && frame.staticClass ? frame.staticClass : cls;
       target = { fn: method.fn, scope: method.scope, staticClass, method };
     } else if (thisObj) {
@@ -370,6 +371,7 @@ export function staticCallExpression(e: Extract<Expr, { k: 'scall' }>, discardRe
   }
   const magicStatic = cls.findMethod('__callstatic');
   if (magicStatic) {
+    reportStaticTraitCall(cls, methodName);
     if (e.fcc) return magicClosure(undefined, cls, magicStatic, methodName);
     const args = evalArgs(e.args, undefined, undefined);
     return invoke(
@@ -386,6 +388,13 @@ export function staticCallExpression(e: Extract<Expr, { k: 'scall' }>, discardRe
     );
   }
   throwError('Error', `Call to undefined method ${cls.name}::${methodName}()`);
+}
+
+function reportStaticTraitCall(cls: PhpClass, name: string): void {
+  if (cls.kind === 'trait')
+    deprecated(
+      `Calling static trait method ${cls.name}::${name} is deprecated, it should only be called on a class using the trait`
+    );
 }
 
 /** Calls a method of an object by name, as native code calls `offsetGet` or `__toString`. */
