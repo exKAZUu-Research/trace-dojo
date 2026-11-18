@@ -1,6 +1,7 @@
-// code-gauge-allow-file fileNcss 453 -- Resolves every kind of type syntax a program writes, each needing its own rule.
+// code-gauge-allow-file fileNcss 458 -- Resolves every kind of type syntax a program writes, each needing its own rule.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
+import { ExecutionLimitError, LIMITS } from '../../interpreter/limits';
 import { unsupportedMessage } from '../unsupported';
 import type { Checker, Mapper, UnionAlias } from './checker';
 import { BROWSER_INTERFACES } from './domGlobals';
@@ -119,10 +120,14 @@ export class TypeNodes {
 
   /** How many array, tuple, and type argument nodes enclose the type node being resolved. */
   private deferredDepth = 0;
+  private resolutionDepth = 0;
 
   typeFromNode(node: TreeNode): Type {
     const cached = this.typeNodeCache.get(node.id);
     if (cached) return cached;
+    this.c.budget.spend();
+    if (this.resolutionDepth >= LIMITS.maxCallDepth) throw new ExecutionLimitError('operations');
+    this.resolutionDepth++;
     const defers = deferringTypeNodes.has(node.type);
     if (defers) this.deferredDepth++;
     try {
@@ -134,6 +139,7 @@ export class TypeNodes {
       return type;
     } finally {
       if (defers) this.deferredDepth--;
+      this.resolutionDepth--;
     }
   }
 

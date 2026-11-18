@@ -690,8 +690,6 @@ export class ClassChecker {
       return isStatic ? info.staticType : this.selfType(info);
     }
     if (owner.type === 'function_declaration' || owner.type === 'function_expression') {
-      const fromStack = this.thisStack.at(-1);
-      if (fromStack) return fromStack;
       this.c.error(node, "'this' の型が暗黙に any になります。型の注釈がないためです。");
       return anyType;
     }
@@ -835,11 +833,12 @@ export class ClassChecker {
     if (!property.declaringClass || (objectNode.type === 'super' && this.reportSuperAccess(propertyNode, property)))
       return;
     if (property.visibility === 'public') return;
-    const enclosing = this.enclosingClass(node);
-    const enclosingInfo = enclosing ? this.classInfoOfNode(enclosing) : undefined;
+    const enclosingClasses: ClassInfo[] = [];
+    for (let enclosing = this.enclosingClass(node); enclosing; enclosing = this.enclosingClass(enclosing))
+      enclosingClasses.push(this.classInfoOfNode(enclosing));
     const declaring = property.declaringClass;
     if (property.visibility === 'private') {
-      if (enclosingInfo?.declaration.id !== declaring.declaration.id) {
+      if (!enclosingClasses.some((enclosing) => enclosing.declaration.id === declaring.declaration.id)) {
         this.c.error(
           propertyNode,
           `プロパティ '${property.name}' は private なので、クラス '${declaring.name}' の中でしか使えません。`
@@ -847,8 +846,8 @@ export class ClassChecker {
       }
       return;
     }
-    // Protected: inside the declaring class or a class derived from it.
-    if (!enclosingInfo || !this.derivesFrom(enclosingInfo, declaring)) {
+    const enclosingInfo = enclosingClasses.find((enclosing) => this.derivesFrom(enclosing, declaring));
+    if (!enclosingInfo) {
       this.c.error(
         propertyNode,
         `プロパティ '${property.name}' は protected なので、クラス '${declaring.name}' とその派生クラスの中でしか使えません。`

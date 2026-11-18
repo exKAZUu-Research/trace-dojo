@@ -1,0 +1,11 @@
+const array = [1];
+Object.setPrototypeOf(array, Object.create(Array.prototype, {0: {value: 99, enumerable: true}, length: {value: 8}}));
+console.dir(array, {showHidden: true});
+const text = new String("a");
+Object.setPrototypeOf(text, Object.create(String.prototype, {0: {value: "z", enumerable: true}, length: {value: 8}}));
+console.dir(text, {showHidden: true});
+const protoArray = [9];
+const child = Object.create(protoArray);
+console.dir(child, {showHidden: true});
+const intermediate = Object.create(protoArray, {0: {value: 3}, length: {value: 2}});
+console.dir(Object.create(intermediate), {showHidden: true});

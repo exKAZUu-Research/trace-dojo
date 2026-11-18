@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 734 -- One runtime of the JavaScript interpreter, whose state its builtins and evaluator share.
+// code-gauge-allow-file fileNcss 748 -- One runtime of the JavaScript interpreter, whose state its builtins and evaluator share.
 import { CompileError } from '../interpreter/diagnostics';
 import { ExecutionBudget, LIMITS } from '../interpreter/limits';
 import { type ProgramInput, ProgramIO } from '../interpreter/programIo';
@@ -161,7 +161,7 @@ export class Runtime {
     return error;
   }
 
-  // code-gauge-allow functionCognitiveComplexity 21 -- One case per kind of exotic object whose own properties are not stored as properties.
+  // code-gauge-allow functionCognitiveComplexity 22 -- One case per kind of exotic object whose own properties are not stored as properties.
   getOwnProperty(object: JsObject, key: Key): Property | undefined {
     if (typeof object.primitive === 'string') {
       const element = ownElement(object.primitive, key);
@@ -191,7 +191,9 @@ export class Runtime {
         };
       }
     }
-    return object.properties.get(key);
+    const property = object.properties.get(key);
+    if (!property) this.checkUnavailableMember(object, key);
+    return property;
   }
 
   get(value: Value, key: Key, receiver: Value = value): Value {
@@ -203,9 +205,13 @@ export class Runtime {
       if (!isAccessor(property)) return property.value;
       return property.get ? this.call(property.get, receiver, [], this.currentRow) : undefined;
     }
+    this.checkUnavailableMember(value, key);
+    return undefined;
+  }
+
+  private checkUnavailableMember(value: Value, key?: Key): void {
     const unavailable = this.unavailableMember?.(value, key);
     if (unavailable) rejectUnavailableMember(unavailable, this.currentRow);
-    return undefined;
   }
 
   /** The object whose properties `value` has: itself, or the prototype of its primitive type. */
@@ -576,6 +582,7 @@ export class Runtime {
 
   /** Own string keys with the `length` an array or a String object holds, as `Object.getOwnPropertyNames` lists them. */
   ownPropertyNames(object: JsObject): string[] {
+    this.checkUnavailableMember(object);
     const keys = this.ownKeys(object);
     if (!(object instanceof JsArray) && typeof object.primitive !== 'string') return keys;
     const indexCount = keys.findIndex((key) => arrayIndexOf(key) === undefined);

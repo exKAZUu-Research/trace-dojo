@@ -1,6 +1,7 @@
 // code-gauge-allow-file fileNcss 515 -- Evaluates every kind of function call, class, and statement of the language in one evaluator.
+import assert from 'node:assert/strict';
+
 import { createArgumentsObject, mapArguments } from './argumentsObject';
-// code-gauge-allow-file fileNcss 501 -- Executes statements, functions, fields, and constructor initialization with their shared lexical scopes.
 import type {
   Block,
   ClassMember,
@@ -54,6 +55,7 @@ type UserBehavior = Extract<FunctionBehavior, { kind: 'user' }>;
 type ClassBehavior = Extract<FunctionBehavior, { kind: 'class' }>;
 
 export class Evaluator extends SuspendableStatementEvaluator {
+  private readonly constructorScopes = new WeakMap<FunctionFrame, Scope>();
   /** What `this` is for a plain call of a function that is not strict mode code, created when first needed. */
   implicitReceiver: JsObject | undefined;
 
@@ -760,6 +762,7 @@ export class Evaluator extends SuspendableStatementEvaluator {
     });
   }
 
+  // code-gauge-allow functionNcss 33 -- Parameter binding, field initialization, and constructor returns share the constructing frame and its cleanup.
   constructClass(
     fn: JsFunction,
     behavior: ClassBehavior,
@@ -777,6 +780,7 @@ export class Evaluator extends SuspendableStatementEvaluator {
       isStrict: true,
     };
     const scope = new Scope(behavior.scope, functionFrame);
+    this.constructorScopes.set(functionFrame, scope);
     runtime.pushFrame(scope, callRow, behavior.ctor?.isAtomic ?? false);
     try {
       if (thisValue !== UNINITIALIZED) {
@@ -786,7 +790,9 @@ export class Evaluator extends SuspendableStatementEvaluator {
       const { ctor } = behavior;
       if (ctor) {
         this.bindParameters(fn, ctor, args);
-        this.instantiate(this.enterBodyScope(ctor), ctor.scope);
+        const bodyScope = this.enterBodyScope(ctor);
+        this.constructorScopes.set(functionFrame, bodyScope);
+        this.instantiate(bodyScope, ctor.scope);
         const completion = ctor.scope.disposes
           ? this.disposing(() => this.statements(ctor.body as Statement[]))
           : this.statements(ctor.body as Statement[]);
@@ -848,15 +854,9 @@ export class Evaluator extends SuspendableStatementEvaluator {
 
   private initializeAfterSuper(statements: Statement[] | undefined, frame: FunctionFrame): void {
     if (!statements) return;
-    const outer = this.runtime.frame.scope;
-    let scope = outer;
-    while (scope.functionFrame !== frame && scope.parent) scope = scope.parent;
-    this.runtime.frame.scope = scope;
-    try {
-      this.statements(statements);
-    } finally {
-      this.runtime.frame.scope = outer;
-    }
+    const scope = this.constructorScopes.get(frame);
+    assert.ok(scope);
+    this.inScope(scope, () => this.statements(statements));
   }
 }
 

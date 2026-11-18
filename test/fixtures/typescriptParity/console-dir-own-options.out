@@ -1,0 +1,12 @@
+{ a: { b: 1 } }
+{ a: { b: 1 } }
+depth
+sorted
+ignored
+{ a: [Object] }
+depth
+compact
+{
+  a: [Object]
+}
+{ a: { b: 1 } }

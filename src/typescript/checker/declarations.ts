@@ -50,8 +50,25 @@ function checkValueDuplicates(c: Checker, symbol: Sym): void {
     }
     return;
   }
-  if (entries.some((entry) => entry.kind === 'var') && entries.every(isFunctionScopedVariable))
+  if (
+    symbol.valueKind !== 'parameter' &&
+    entries.some((entry) => entry.kind === 'var') &&
+    entries.every(isFunctionScopedVariable)
+  )
     checkVarRedeclarations(c, symbol);
+}
+
+export function checkParameterRedeclarations(c: Checker, scopes: Scope[]): void {
+  for (const scope of scopes) {
+    for (const symbol of scope.values.values()) {
+      if (
+        symbol.valueKind === 'parameter' &&
+        symbol.valueEntries.some((entry) => entry.kind === 'var') &&
+        symbol.valueEntries.every(isFunctionScopedVariable)
+      )
+        checkVarRedeclarations(c, symbol);
+    }
+  }
 }
 
 /** A `var` or a parameter, which a `var` of the same function redeclares. */
@@ -72,23 +89,16 @@ function isLexical(entry: Sym['valueEntries'][number]): boolean {
   return entry.kind === 'let' || entry.kind === 'const';
 }
 
-/**
- * A `var` declared again, or redeclaring a parameter, must have the same type each time; a parameter without an
- * annotation, which a contextual signature may type, or one a pattern binds, whose annotation types the whole pattern,
- * is not compared.
- */
 function checkVarRedeclarations(c: Checker, symbol: Sym): void {
   const types = symbol.valueDeclarations.map((declaration) =>
     symbol.valueKind === 'parameter' && declaration === symbol.valueDeclaration
-      ? declaredParameterType(c, declaration)
+      ? c.silently(() => c.expressions.valueTypeOf(symbol))
       : c.silently(() => c.statements.declaredVariableType(symbol, declaration))
   );
   const [first] = types;
-  if (!first) return;
-  for (const [index, type] of types.entries()) {
-    if (index === 0) continue;
+  for (let index = 1; index < types.length; index++) {
+    const type = types[index];
     const native = nativeGlobalRedeclaration(c, symbol, symbol.valueDeclarations[index]);
-    if (!type) continue;
     const identical =
       isIntrinsic(type, 'any') !== isIntrinsic(first, 'any') ? false : c.relations.identical(type, first);
     if (native ?? identical) continue;
@@ -97,11 +107,6 @@ function checkVarRedeclarations(c: Checker, symbol: Sym): void {
       `後の変数の宣言は、同じ型でなければいけません。変数 ${symbol.name} の型は '${c.print(first)}' ですが、ここでは '${c.print(type)}' です。`
     );
   }
-}
-
-function declaredParameterType(c: Checker, parameter: TreeNode): Type | undefined {
-  if (parameter.childForFieldName('pattern')?.type !== 'identifier') return undefined;
-  return c.typeNodes.annotationType(parameter.childForFieldName('type'));
 }
 
 const reservedTypeNames = new Set([

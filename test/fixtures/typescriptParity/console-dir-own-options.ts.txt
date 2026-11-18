@@ -1,0 +1,7 @@
+const value = {a: {b: 1}};
+console.dir(value, Object.create({depth: 0}));
+console.dir(value, Object.defineProperty({}, "depth", {value: 0}));
+const options = {get depth() {console.log("depth"); return 0;}, get sorted() {console.log("sorted"); return true;}, get ignored() {console.log("ignored"); return 1;}};
+console.dir(value, options);
+console.dir(value, {get compact() {options.depth; console.log("compact"); return false;}, depth: 0});
+console.dir(value, null as any);

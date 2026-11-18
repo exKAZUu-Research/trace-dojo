@@ -569,38 +569,47 @@ function defineConsole(builder: RealmBuilder): void {
 }
 
 /** `console.dir`, which prints its value with the `util.inspect` options it is given. */
-// code-gauge-allow functionCognitiveComplexity 18 -- Reads each util.inspect option console.dir takes.
+// code-gauge-allow functionCognitiveComplexity 20 -- Copies console.dir options once and reads each util.inspect option with its own conversion.
 function defineConsoleDir(
   builder: RealmBuilder,
   console: JsObject,
   write: (runtime: Runtime, stream: 'stdout' | 'stderr', text: string) => void
 ): void {
   builder.method(console, 'dir', 0, ({ runtime, args }) => {
-    const [value, options] = args;
-    // null means no limit for depth and maxArrayLength, as util.inspect takes them.
-    const limit = (name: string): number | undefined => {
-      const option = isObject(options) ? runtime.get(options, name) : undefined;
-      if (option === undefined) return undefined;
-      return option === null ? Number.POSITIVE_INFINITY : runtime.toNumber(option);
-    };
-    const option = (name: string): Value => (isObject(options) ? runtime.get(options, name) : undefined);
-    const compact = option('compact');
-    const getters = option('getters');
-    write(
-      runtime,
-      'stdout',
-      inspectValue(runtime, value, undefined, limit('depth'), {
-        breakLength: limit('breakLength'),
-        compact: typeof compact === 'boolean' || typeof compact === 'number' ? compact : undefined,
-        maxArrayLength: limit('maxArrayLength'),
-        maxStringLength: limit('maxStringLength'),
-        showHidden: toBoolean(option('showHidden')),
-        sorted: sortedOption(option('sorted')),
-        getters: getters === 'get' || getters === 'set' ? getters : toBoolean(getters),
-        numericSeparator: toBoolean(option('numericSeparator')),
-      })
-    );
-    return;
+    const [value, givenOptions] = args;
+    const options = runtime.newObject();
+    return runtime.hold<undefined>(options, () => {
+      if (givenOptions !== undefined && givenOptions !== null) {
+        const source = runtime.toObject(givenOptions);
+        runtime.forEachOwnEnumerable(source, (key) =>
+          runtime.createDataProperty(options, key, runtime.get(source, key))
+        );
+      }
+      // null means no limit for depth and maxArrayLength, as util.inspect takes them.
+      const limit = (name: string): number | undefined => {
+        const option = runtime.get(options, name);
+        if (option === undefined) return undefined;
+        return option === null ? Number.POSITIVE_INFINITY : runtime.toNumber(option);
+      };
+      const option = (name: string): Value => runtime.get(options, name);
+      const compact = option('compact');
+      const getters = option('getters');
+      write(
+        runtime,
+        'stdout',
+        inspectValue(runtime, value, undefined, limit('depth'), {
+          breakLength: limit('breakLength'),
+          compact: typeof compact === 'boolean' || typeof compact === 'number' ? compact : undefined,
+          maxArrayLength: limit('maxArrayLength'),
+          maxStringLength: limit('maxStringLength'),
+          showHidden: toBoolean(option('showHidden')),
+          sorted: sortedOption(option('sorted')),
+          getters: getters === 'get' || getters === 'set' ? getters : toBoolean(getters),
+          numericSeparator: toBoolean(option('numericSeparator')),
+        })
+      );
+      return;
+    });
   });
 }
 

@@ -1,0 +1,15 @@
+true true true
+random 0 true false true
+true true true
+compile 2 true false true
+true true true
+time 0 true true true
+true true true
+timeEnd 0 true true true
+true true true
+timeLog 0 true true true
+true true true
+timeStamp 0 true true true
+0 0
+[ 'time', 'timeEnd', 'timeLog', 'timeStamp' ]
+random abs

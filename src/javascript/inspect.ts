@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 569 -- One port of Node.js's util.inspect, whose formatters share its context.
+// code-gauge-allow-file fileNcss 573 -- One port of Node.js's util.inspect, whose formatters share its context.
 import { eastAsianWidthType } from 'get-east-asian-width';
 
 import { ExecutionLimitError, LIMITS } from '../interpreter/limits';
@@ -234,7 +234,7 @@ function formatRaw(ctx: Context, value: JsObject, recurseTimes: number): string 
   if (value.isError && constructor !== 'Object') noteErrorStack(ctx, value);
   const keys = enumerableKeys(runtime, value, ctx.showHidden, ctx.errorStacks.get(value));
   const showsLength = ctx.showHidden && value instanceof JsArray;
-  const inherited = ctx.showHidden ? inheritedKeys(value) : [];
+  const inherited = ctx.showHidden ? inheritedKeys(ctx.runtime, value) : [];
   const frame = frameOf(
     ctx,
     value,
@@ -319,14 +319,14 @@ function sortOutput(ctx: Context, entries: string[]): void {
  * holding each, which Node.js's `showHidden` lists after its own: up to three prototypes, stopping at a builtin one,
  * without methods, `constructor`, or keys a nearer object has.
  */
-function inheritedKeys(value: JsObject): [JsObject, Key][] {
-  const seen = new Set<Key>(value.properties.keys());
+function inheritedKeys(runtime: Runtime, value: JsObject): [JsObject, Key][] {
+  const seen = new Set<Key>(inspectionKeys(runtime, value));
   const found: [JsObject, Key][] = [];
   let current: JsObject | undefined = firstOwnPrototype(value);
   for (let depth = 0; depth < 3 && current && !isBuiltinPrototype(current); depth++) {
-    const keys = [...current.properties.keys()];
+    const keys = inspectionKeys(runtime, current);
     for (const key of keys) {
-      const property = current.properties.get(key) as Property;
+      const property = runtime.getOwnProperty(current, key) as Property;
       if (key === 'constructor' || seen.has(key)) continue;
       if (!isAccessor(property) && property.value instanceof JsFunction) continue;
       found.push([current, key]);
@@ -335,6 +335,14 @@ function inheritedKeys(value: JsObject): [JsObject, Key][] {
     current = current.proto ?? undefined;
   }
   return found;
+}
+
+function inspectionKeys(runtime: Runtime, object: JsObject): Key[] {
+  const strings =
+    object instanceof JsArray || typeof object.primitive === 'string'
+      ? runtime.ownPropertyNames(object)
+      : runtime.ownKeys(object);
+  return [...strings, ...runtime.ownSymbols(object)];
 }
 
 /** The prototype Node.js starts listing inherited properties from: the object's own one, unless that is a builtin's. */
@@ -458,12 +466,15 @@ function prefixOf(constructor: string | undefined, fallback: string, size = ''):
 /** The keys an object shows: its enumerable ones, or with `showHidden` all of its own, as `%o` shows them. */
 const ERROR_KEYS = new Set<Key>(['name', 'message', 'stack']);
 
+// code-gauge-allow functionCognitiveComplexity 17 -- Lists the own keys exposed by each inspected value, including hidden string lengths and error causes.
 function enumerableKeys(runtime: Runtime, object: JsObject, showHidden: boolean, stack?: ErrorStack): Key[] {
   // An array keeps its elements apart from its other properties.
   const own =
     object instanceof JsArray
       ? [...object.properties.keys()].filter((key) => typeof key === 'string')
-      : runtime.ownKeys(object);
+      : showHidden && typeof object.primitive === 'string'
+        ? runtime.ownPropertyNames(object)
+        : runtime.ownKeys(object);
   // A String object's indices, which come first, show as its text instead.
   const strings = typeof object.primitive === 'string' ? own.slice(object.primitive.length) : own;
   const keys: Key[] = [...strings, ...runtime.ownSymbols(object)];
@@ -742,7 +753,7 @@ function promiseEntry(ctx: Context, state: PromiseState, recurseTimes: number): 
 
 // code-gauge-allow functionCognitiveComplexity 20 -- Ports Node.js's util.inspect, so the two stay comparable.
 function formatProperty(ctx: Context, object: JsObject, recurseTimes: number, key: Key, receiver = object): string {
-  const property = object.properties.get(key);
+  const property = ctx.runtime.getOwnProperty(object, key);
   let text = 'undefined';
   let separator = ' ';
   if (property && !isAccessor(property)) {
@@ -755,7 +766,10 @@ function formatProperty(ctx: Context, object: JsObject, recurseTimes: number, ke
   }
   // A symbol key shows its description with control characters escaped, unlike a symbol value.
   const symbolKey = typeof key === 'symbol' ? escapeControls(key.toString()) : undefined;
-  if (property && !property.enumerable) return `[${symbolKey ?? String(key)}]:${separator}${text}`;
+  if (property && !property.enumerable) {
+    const name = symbolKey ?? (typeof key === 'string' && !KEY_PATTERN.test(key) ? quote(key) : String(key));
+    return `[${name}]:${separator}${text}`;
+  }
   if (typeof key === 'symbol') return `${symbolKey}:${separator}${text}`;
   if (KEY_PATTERN.test(key)) return `${key === '__proto__' ? "['__proto__']" : key}:${separator}${text}`;
   return `${quote(key)}:${separator}${text}`;

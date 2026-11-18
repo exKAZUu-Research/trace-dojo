@@ -366,3 +366,18 @@ test('RegExp match state starts fresh for each execution', () => {
     stdout: 'true true\n',
   });
 });
+
+test('reflected unavailable methods still reject invocation and error stacks reject reflection', () => {
+  for (const source of [
+    'Object.getOwnPropertyDescriptor(Math, "random")!.value();',
+    'Object.getOwnPropertyDescriptors(RegExp.prototype).compile.value!.call(/a/, "b");',
+    'Object.getOwnPropertyDescriptor(console, "time")!.value("start");',
+    'Object.getOwnPropertyNames(new Error("bad"));',
+    'Object.getOwnPropertyDescriptor(new Error("bad"), "stack");',
+  ]) {
+    expect(executeProgram('typescript', source)).toMatchObject({
+      kind: 'compileError',
+      diagnostics: [{ message: expect.stringContaining('この採点環境では使えません。') }],
+    });
+  }
+});

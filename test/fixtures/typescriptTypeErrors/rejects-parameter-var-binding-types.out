@@ -1,0 +1,9 @@
+(1,38): error TS2403: Subsequent variable declarations must have the same type.  Variable 'x' must be of type 'number', but here has type 'string'.
+(2,47): error TS2403: Subsequent variable declarations must have the same type.  Variable 'x' must be of type 'number', but here has type 'string'.
+(3,44): error TS2403: Subsequent variable declarations must have the same type.  Variable 'x' must be of type 'number', but here has type 'string'.
+(4,44): error TS2403: Subsequent variable declarations must have the same type.  Variable 'x' must be of type 'number', but here has type 'string'.
+(5,52): error TS2403: Subsequent variable declarations must have the same type.  Variable 'x' must be of type 'number', but here has type 'string'.
+(6,65): error TS2403: Subsequent variable declarations must have the same type.  Variable 'x' must be of type 'number', but here has type 'string'.
+(7,43): error TS2403: Subsequent variable declarations must have the same type.  Variable 'x' must be of type 'number[]', but here has type 'string[]'.
+(8,31): error TS2403: Subsequent variable declarations must have the same type.  Variable 'x' must be of type 'number', but here has type 'any'.
+(9,44): error TS2403: Subsequent variable declarations must have the same type.  Variable 'x' must be of type 'number | undefined', but here has type 'number'.

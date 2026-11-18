@@ -1,3 +1,4 @@
+import { boundedHostWork } from './boundedHostWork';
 import { DONE } from './iteration';
 import type { RealmBuilder } from './realm';
 import { defineHostIteratorPrototype, newHostIterator } from './realmIterators';
@@ -167,7 +168,7 @@ function withHostRegExp<T>(runtime: Runtime, object: RegExpObject, run: (regexp:
   const regexp = new RegExp(object.regexp.source, object.regexp.flags);
   const lastIndex = runtime.toNumber(runtime.get(object, 'lastIndex'));
   regexp.lastIndex = Number.isNaN(lastIndex) ? 0 : Math.max(0, Math.trunc(lastIndex));
-  const result = run(regexp);
+  const result = boundedHostWork(runtime.budget, () => run(regexp));
   if (regexp.global || regexp.sticky) runtime.set(object, 'lastIndex', regexp.lastIndex);
   return result;
 }
@@ -248,7 +249,9 @@ function defineStringMethods(builder: RealmBuilder): void {
   });
   method('search', ({ runtime, args }, text) => {
     const object = regExpArgument(runtime, args[0], '');
-    const index = text.search(new RegExp(object.regexp.source, object.regexp.flags));
+    const index = boundedHostWork(runtime.budget, () =>
+      text.search(new RegExp(object.regexp.source, object.regexp.flags))
+    );
     if (index >= 0) recordHostMatch(runtime);
     return index;
   });
@@ -269,7 +272,7 @@ function matchAllIterator(runtime: Runtime, object: RegExpObject, text: string, 
   const matches = text.matchAll(regexp);
   return newHostIterator(runtime, prototype, {
     next: () => {
-      const next = matches.next();
+      const next = boundedHostWork(runtime.budget, () => matches.next());
       if (!next.done) recordHostMatch(runtime);
       return next.done ? DONE : matchArray(runtime, next.value);
     },
@@ -409,13 +412,17 @@ function dollarExpansion(
   return undefined;
 }
 
-// code-gauge-allow functionCognitiveComplexity 22 -- Transcribes the specification's algorithm step by step, whose branches mirror its steps.
-// code-gauge-allow functionNcss 37 -- Transcribes the specification's algorithm step by step, whose branches mirror its steps.
 /**
  * The spec's RegExp.prototype[Symbol.split], which matches at each position with a sticky copy of the expression and
  * charges each part before it is kept.
  */
 export function splitWithRegExp(runtime: Runtime, text: string, object: RegExpObject, limit: number): JsArray {
+  return boundedHostWork(runtime.budget, () => splitRegExp(runtime, text, object, limit));
+}
+
+// code-gauge-allow functionCognitiveComplexity 22 -- Transcribes the specification's algorithm step by step, whose branches mirror its steps.
+// code-gauge-allow functionNcss 37 -- Transcribes the specification's algorithm step by step, whose branches mirror its steps.
+function splitRegExp(runtime: Runtime, text: string, object: RegExpObject, limit: number): JsArray {
   const { flags } = object.regexp;
   const splitter = new RegExp(object.regexp.source, flags.includes('y') ? flags : `${flags}y`);
   const array = runtime.newArray([]);

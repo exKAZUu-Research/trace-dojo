@@ -1,0 +1,4 @@
+[ 1, [length]: 1 ]
+[String: 'a'] { [length]: 1 }
+Array { '0': 9, [length]: 1 }
+Array { ['0']: 3, [length]: 2 }

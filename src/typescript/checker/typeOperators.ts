@@ -308,7 +308,8 @@ export class TypeOperators {
       type: () => {
         if (type) return type;
         let mappedType = this.c.instantiate(info.template, new Map([[info.typeParameter.id, key]]));
-        if (info.optionalModifier === '-') mappedType = this.c.relations.removeUndefined(mappedType);
+        if (info.optionalModifier === '-' && sourceProperty?.optional)
+          mappedType = this.c.relations.removeUndefined(mappedType);
         type = mappedType;
         return type;
       },
