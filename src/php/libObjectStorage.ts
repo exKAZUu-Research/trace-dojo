@@ -2,12 +2,12 @@
 import { callMethod } from './callables';
 import { objectToArray } from './classes';
 import { valueName } from './conversions';
-import { deprecated, throwError, withCleanupExceptions, withPendingException } from './errors';
+import { type CleanupException, deprecated, throwError, withCleanupExceptions, withPendingException } from './errors';
 import { magicSerializationMethods, serializationMethods } from './libArrayObject';
 import { defineClass, type NativeMethod } from './native';
 import { strictEquals, toKey } from './operators';
 import { share } from './places';
-import { PhpThrow, rt } from './runtime';
+import { ExitSignal, PhpThrow, rt } from './runtime';
 import { dropped, type Key, type NativeFunction, NativeValueIndex, PhpArray, PhpObject, type Value } from './values';
 
 interface StorageEntry {
@@ -107,7 +107,7 @@ class ObjectStorage {
     for (const [slot, entry] of this.slots.entries()) if (entry) entry.slot = slot;
   }
 
-  detach(object: PhpObject, capture?: (error: PhpThrow) => void): boolean {
+  detach(object: PhpObject, capture?: (error: CleanupException) => void): boolean {
     const hash = this.hash(object);
     const entry = this.entries.get(hash);
     if (!entry) return false;
@@ -121,13 +121,13 @@ class ObjectStorage {
     return true;
   }
 
-  private releaseRemoved(values: Value[], capture?: (error: PhpThrow) => void): void {
+  private releaseRemoved(values: Value[], capture?: (error: CleanupException) => void): void {
     const runtime = rt();
     try {
       runtime.release(values);
       runtime.flushReleases(true);
     } catch (error) {
-      if (!capture || !(error instanceof PhpThrow)) throw error;
+      if (!capture || !(error instanceof PhpThrow || error instanceof ExitSignal)) throw error;
       capture(error);
     }
   }
@@ -207,7 +207,7 @@ class ObjectStorage {
     });
   }
 
-  private bulkRemove(callsHash: boolean, remove: (capture?: (error: PhpThrow) => void) => void): bigint {
+  private bulkRemove(callsHash: boolean, remove: (capture?: (error: CleanupException) => void) => void): bigint {
     return this.rewindAfter(() => {
       if (callsHash) remove();
       else withCleanupExceptions(rt(), remove);

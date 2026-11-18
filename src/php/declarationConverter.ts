@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 856 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 896 -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import type { Node } from '@willbooster/web-tree-sitter';
 
@@ -17,7 +17,7 @@ import { hasNullsafeReceiver } from './astAnalysis';
 import { enc, lower } from './bytes';
 import { parseTypeText } from './calls';
 import { CompileClassConstants } from './compileClassConstants';
-import { type Constant, constantTypeName, foldedConstant, foldedDefaultType } from './constantDefaults';
+import { type Constant, constantTruth, constantTypeName, foldedConstant, foldedDefaultType } from './constantDefaults';
 import {
   BUILTIN_TYPES,
   ConverterBase,
@@ -96,11 +96,11 @@ export abstract class DeclarationConverter extends ConverterBase {
     });
   }
 
-  private compiledMagic(token: Extract<Expr, { k: 'magic' }>['name']): string | undefined {
+  protected compiledMagic(token: Extract<Expr, { k: 'magic' }>['name']): string | undefined {
     switch (token) {
       case '__CLASS__': {
-        if (this.activeClass?.isAnonymous || this.currentClassKind === 'trait') return undefined;
-        return this.fn.className ?? this.currentClass ?? '';
+        if (this.currentClassKind === 'trait') return undefined;
+        return this.activeClass?.fullName ?? this.currentClass ?? '';
       }
       case '__TRAIT__': {
         return this.currentClassKind === 'trait' ? this.currentClass : '';
@@ -109,9 +109,9 @@ export abstract class DeclarationConverter extends ConverterBase {
         return this.fn.name ?? '';
       }
       case '__METHOD__': {
-        if (!this.fn.name || !this.fn.isMethod) return this.fn.name ?? '';
-        if (this.activeClass?.isAnonymous) return undefined;
-        return `${this.fn.className}::${this.fn.name}`;
+        if (this.fn.isMethod) return this.fn.displayName?.slice(0, -2);
+        if (this.activeClass && !this.fn.isClosure) return '';
+        return this.fn.name ?? '';
       }
     }
   }
@@ -262,7 +262,7 @@ export abstract class DeclarationConverter extends ConverterBase {
         variadic,
         optional: defaultExpr !== undefined || variadic,
         defaultExpr,
-        defaultReportRow: defaultNode?.endPosition.row,
+        defaultReportRow: defaultExpr ? this.constantCompileRow(defaultExpr, child.startPosition.row, true) : undefined,
         row: child.startPosition.row,
       };
       if (defaultExpr?.k === 'lit' && defaultExpr.v === null && type && !typeAllowsNull(type))
@@ -479,6 +479,55 @@ export abstract class DeclarationConverter extends ConverterBase {
     const expression = this.initializerExpr(node, context, propertyName);
     this.checkConstantExpr(expression, allowNew);
     return expression;
+  }
+
+  // code-gauge-allow functionCognitiveComplexity 29 -- Follows the constant-expression AST order with a shared row.
+  // code-gauge-allow functionNcss 40 -- Follows the constant-expression AST order with a shared row.
+  protected constantCompileRow(expression: Expr, row: number, preserveNames = false): number {
+    const fold = (value: Expr): Constant | undefined =>
+      foldedConstant(value, { compiler: true, preserveNamedConstants: preserveNames, budget: this.compileBudget });
+    const visit = (value: unknown): void => {
+      if (!value || typeof value !== 'object') return;
+      if (Array.isArray(value)) {
+        for (const item of value) visit(item);
+        return;
+      }
+      const node = value as Expr;
+      switch (node.k) {
+        case 'const': {
+          if (preserveNames || fold(node) === undefined) row = node.row;
+          return;
+        }
+        case 'arrow':
+        case 'closure': {
+          return;
+        }
+        case 'array': {
+          for (const item of node.items) {
+            visit(item.value);
+            visit(item.key);
+          }
+          return;
+        }
+        case 'cond': {
+          const test = fold(node.test);
+          if (test === undefined) break;
+          visit(constantTruth(test) ? (node.consequent ?? node.test) : node.alternate);
+          return;
+        }
+        case 'bin': {
+          if (['??', '&&', 'and', '||', 'or'].includes(node.op) && fold(node) !== undefined) return;
+          break;
+        }
+        case 'newAnon': {
+          visit(node.args);
+          return;
+        }
+      }
+      for (const child of Object.values(value)) visit(child);
+    };
+    visit(expression);
+    return row;
   }
 
   protected initializerExpr(node: Node, kind: 'eager' | 'deferred' | 'static', propertyName?: string): Expr {

@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 867 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 869 -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import type { Expr, ListItem } from './ast';
 import { foreachSubjectWritable, hasReferenceItem } from './astAnalysis';
@@ -58,6 +58,7 @@ import {
   type PropDecl,
   Ref,
   type TypeDecl,
+  UNDEFINED_RESULT,
   UNINIT,
   type Value,
 } from './values';
@@ -65,7 +66,7 @@ import {
 // Assignment ---------------------------------------------------------------------------------------------------------
 
 type WriteMode = 'write' | 'update' | 'incdec';
-type PlaceMode = WriteMode | 'deferred';
+type PlaceMode = WriteMode | 'deferred' | 'coalesce';
 
 /** The location a writable expression names, evaluating its keys and creating containers as PHP's writes do. */
 // code-gauge-allow functionNcss 52 -- Handles each kind of writable expression, whose write rules PHP defines separately.
@@ -121,18 +122,19 @@ export function placeOf(e: Expr, mode: PlaceMode = 'write', through = false): Pl
 function namedPlace(name: Expr | string, mode: PlaceMode, locate: (name: string) => Place): Place {
   const readName = typeof name === 'string' ? () => name : prepareOperand(name);
   const resolve = (): Place => locate(toStr(readName()));
-  return mode === 'deferred' ? deferredPlace(resolve, () => readForIsset(resolve())) : resolve();
+  return mode === 'deferred' || mode === 'coalesce' ? deferredPlace(resolve, () => readForIsset(resolve())) : resolve();
 }
 
-// code-gauge-allow functionCognitiveComplexity 21 -- Keeps the ordered PHP cases together because each branch shares the same dispatch state.
+// code-gauge-allow functionCognitiveComplexity 24 -- Shares operand evaluation and parent writes across assignment modes.
 function dimensionPlace(e: Extract<Expr, { k: 'idx' }>, mode: PlaceMode): Place {
   const parent = placeOf(e.base, mode, true);
   const readKey = e.index === undefined ? undefined : prepareOperand(e.index);
   const resolve = (writeMode: WriteMode, beforeOffsetGet?: BeforeOffsetGet, warning?: UpdateWarning): Place => {
+    const parentWrite = mode === 'coalesce' ? nestedPlace(parent, writeMode) : undefined;
     const { key, keyWarning } = readDimensionKey(readKey, warning);
     const row = dimensionWriteRow(e);
     rt().row = row;
-    const fetch = nestedPlace(parent, writeMode);
+    const fetch = parentWrite ?? nestedPlace(parent, writeMode);
     rt().row = row;
     const lookupRow =
       e.base.k === 'idx' || e.base.k === 'prop' || e.base.k === 'sprop' ? compiledOperandRow(e.base) : undefined;
@@ -148,7 +150,7 @@ function dimensionPlace(e: Extract<Expr, { k: 'idx' }>, mode: PlaceMode): Place 
     if (container instanceof PhpArray) return new ElementPlace(container, key === undefined ? undefined : toKey(key));
     return stringOffsetPlace(fetch, container, key, row);
   };
-  if (mode !== 'deferred') return resolve(mode);
+  if (mode !== 'deferred' && mode !== 'coalesce') return resolve(mode);
   return deferredPlace(resolve, () => {
     const container = readForIsset(parent);
     const key = readKey?.();
@@ -174,7 +176,7 @@ function readDimensionKey(
   }
 }
 
-// code-gauge-allow functionCognitiveComplexity 19 -- Keeps the ordered PHP cases together because each branch shares the same dispatch state.
+// code-gauge-allow functionCognitiveComplexity 20 -- Shares receiver resolution across the read and write phases.
 function instancePropertyPlace(e: Extract<Expr, { k: 'prop' }>, mode: PlaceMode, through: boolean): Place {
   const parent = placeOf(e.obj, mode, true);
   const property = e.name;
@@ -191,14 +193,14 @@ function instancePropertyPlace(e: Extract<Expr, { k: 'prop' }>, mode: PlaceMode,
   };
   const resolve = (writeMode: WriteMode): Place =>
     locate(toStr(readName()), propertyReceiver(e.obj, parent, writeMode), writeMode);
-  if (mode !== 'deferred') return resolve(mode);
+  if (mode !== 'deferred' && mode !== 'coalesce') return resolve(mode);
   const place = deferredPlace(resolve, () => {
     const object = readForIsset(parent);
     const name = toStr(readName());
     rt().row = e.row;
     return object instanceof PhpObject ? readProp(object, name, rt().frame.scope, 'coalesce') : undefined;
   });
-  if (typeof property !== 'string' && !through) {
+  if (mode === 'deferred' && typeof property !== 'string' && !through) {
     place.readCompoundName = (warning) => {
       const name = readOperandWithWarning(property, readName, warning, e.row);
       readName = () => name;
@@ -965,14 +967,12 @@ function destructuredReference(value: Value, key: Key, writable: boolean): Ref {
 export function compoundAssign(e: Extract<Expr, { k: 'assignOp' }>): Value {
   const runtime = rt();
   if (e.op === '??') {
-    // PHP evaluates the target's parts once, for both the read and the write.
-    const place = placeOf(e.target, 'deferred');
+    const place = placeOf(e.target, 'coalesce');
     const current = place.getForIsset ? place.getForIsset() : place.get();
-    if (current !== undefined && current !== null) return current;
-    const value = isCompiledVariable(e.value)
-      ? prepareOperand(e.value)(compoundWriteRow(e.target, e.value))
-      : ev(e.value);
-    return place.set(share(value));
+    if (current !== undefined && current !== null && current !== UNDEFINED_RESULT) return current;
+    const read = prepareOperand(e.value);
+    const row = e.target.k === 'var' ? e.target.row : compoundWriteRow(e.target, e.value);
+    return assignPlace(place, () => share(read(row)));
   }
   const place = placeOf(e.target, 'deferred');
   const read = prepareOperand(e.value);

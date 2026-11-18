@@ -27,6 +27,7 @@ import {
 import { DeclarationConverter } from './declarationConverter';
 import { exportExpr, UnexportableSyntax } from './export';
 import { decodeLiteral, decodeSingleQuoted, parseIntegerLiteral } from './literals';
+import { builtinLiteralKey } from './native';
 import { compiledOperandRow } from './opcodeRows';
 
 export type { CompileNotice } from './converterBase';
@@ -266,6 +267,7 @@ export class Converter extends DeclarationConverter {
       case 'const_declaration': {
         if (!topLevel) this.error(node, 'syntax error, unexpected token "const"');
         let declarationRow: number | undefined;
+        let opcodeRow: number | undefined;
         const items = node.namedChildren
           .filter((child) => child.type === 'const_element')
           .map((child) => {
@@ -280,7 +282,9 @@ export class Converter extends DeclarationConverter {
               this.error(nameNode, `syntax error, unexpected token "${name}", expecting identifier`);
             this.declareSymbol(nameNode, 'const', name);
             declarationRow ??= nameNode.startPosition.row;
-            return { name: this.qualify(name), value: this.constantExpr(valueNode, true) };
+            const value = this.constantExpr(valueNode, true);
+            opcodeRow = this.constantCompileRow(value, opcodeRow ?? declarationRow);
+            return { name: this.qualify(name), value, opcodeRow };
           });
         return [{ k: 'const', items, row: declarationRow ?? row }];
       }
@@ -931,7 +935,7 @@ export class Converter extends DeclarationConverter {
       case 'array_creation_expression': {
         const items = this.compileArrayItems(node);
         this.checkConstantArrayOperands(node, items);
-        return { k: 'array', items, row };
+        return { k: 'array', items, row, initializerRow: this.constantInitializer ? arrayFoldRow(node) : undefined };
       }
       case 'list_literal': {
         return this.listLiteral(node);
@@ -1181,14 +1185,14 @@ export class Converter extends DeclarationConverter {
     return this.expr(node);
   }
 
-  // code-gauge-allow functionCognitiveComplexity 17 -- Keeps the ordered PHP cases together because each branch shares the same dispatch state.
+  // code-gauge-allow functionCognitiveComplexity 19 -- Classifies literal, named and magic constants in order.
   private constant(node: Node): Expr {
     const row = node.startPosition.row;
     const raw = this.nameText(node);
-    const word = lower(raw.startsWith('\\') ? raw.slice(1) : raw);
-    if (node.type === 'name' && word === 'default') this.error(node, 'syntax error, unexpected token "default"');
-    if (word === 'true' || word === 'false') return { k: 'lit', v: word === 'true', row };
-    if (word === 'null') return { k: 'lit', v: null, row };
+    if (node.type === 'name' && lower(raw) === 'default') this.error(node, 'syntax error, unexpected token "default"');
+    const name = this.preserveSyntax ? { name: raw.replace(/^\\/, '') } : this.resolveConstName(raw);
+    const literal = builtinLiteralKey(name.fallback ?? name.name);
+    if (literal) return { k: 'lit', v: literal === 'NULL' ? null : literal === 'TRUE', row };
     const magic = raw.toUpperCase();
     if (this.preserveSyntax) {
       const name = magic.startsWith('__') && reservedIdentifierToken(raw) === magic ? magic : raw;
@@ -1200,9 +1204,13 @@ export class Converter extends DeclarationConverter {
     if (magic === '__PROPERTY__')
       return { k: 'lit', v: this.initializerContext?.propertyName ?? this.fn.propertyName ?? '', row };
     if (magic === '__NAMESPACE__') return { k: 'lit', v: this.namespace, row };
-    if (MAGIC_RUNTIME.has(magic)) return { k: 'magic', name: magic as Extract<Expr, { k: 'magic' }>['name'], row };
+    if (MAGIC_RUNTIME.has(magic)) {
+      const token = magic as Extract<Expr, { k: 'magic' }>['name'];
+      const value = this.compiledMagic(token);
+      return value === undefined ? { k: 'magic', name: token, row } : { k: 'lit', v: value, row };
+    }
     if (magic === '__COMPILER_HALT_OFFSET__') this.unsupported(node, '__halt_compiler');
-    return { k: 'const', name: this.resolveConstName(raw), row };
+    return { k: 'const', name, row };
   }
 
   // code-gauge-allow functionCognitiveComplexity 23 -- Keeps the ordered PHP cases together because each branch shares the same dispatch state.
@@ -1636,19 +1644,18 @@ export class Converter extends DeclarationConverter {
     const byRef = valueNode.type === 'by_ref';
     const value = byRef ? this.writable(semanticChildren(valueNode)[0]) : this.expr(valueNode);
     if (keyNotices > start) this.orderArrayFoldNotices(start, keyNotices);
-    const keyOpcodeRow = key ? this.arrayKeyOpcodeRow(value, valueNode) : undefined;
+    const keyOpcodeRow = key && !this.constantInitializer ? this.resultOpcodeRow(value, valueNode) : undefined;
     return { key, keyOpcodeRow, value, byRef, spread: false };
-  }
-
-  private arrayKeyOpcodeRow(value: Expr, node: Node): number {
-    if (this.constantInitializer) return this.initializerContext!.row;
-    return this.resultOpcodeRow(value, node);
   }
 
   private resultOpcodeRow(value: Expr, node: Node): number {
     if (value.k === 'bin' && this.compiledValue(value) !== undefined) {
-      return value.op === '.' ? (node.parent?.nextSibling?.startPosition.row ?? node.endPosition.row) : value.row;
+      if (value.op !== '.') return value.row;
+      return parserScalar(value.l) !== undefined && parserScalar(value.r) !== undefined
+        ? (node.parent?.nextSibling?.startPosition.row ?? node.endPosition.row)
+        : value.row;
     }
+    if (value.k === 'idx' && value.index?.k === 'lit') return value.base.row;
     if (value.k === 'cond') {
       const test = this.compiledValue(value.test);
       if (test !== undefined)

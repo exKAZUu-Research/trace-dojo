@@ -42,3 +42,39 @@ $refDefault = function (
 ) {};
 try { $refDefault(); }
 catch (TypeError $error) { echo $error->getLine(), ':', $error->getMessage(), "\n"; }
+
+class DeferredLines {
+    const TEXT = NON_NUMERIC;
+    function member(
+        int $first =
+            self::TEXT
+    ) {}
+}
+function deferredConcat(
+    int $value = NON_NUMERIC .
+        'more'
+) {}
+function deferredArray(
+    string $value = [
+        NON_NUMERIC,
+        NON_NUMERIC
+    ]
+) {}
+function skippedDefaults(int $first = NON_NUMERIC, $second = 2, $third = 3) {}
+function coercedPrefix(int|float $first, int|float $second) {}
+function coercedRest(string $first, int ...$rest) {}
+foreach ([
+    fn () => (new DeferredLines)->member(),
+    fn () => deferredConcat(),
+    fn () => deferredArray(),
+    fn () => skippedDefaults(third: 3),
+    fn () => coercedPrefix('1', 'text'),
+    fn () => coercedPrefix(second: 'text', first: '1'),
+    fn () => coercedRest('1', '2', 'text'),
+    fn () => coercedRest('1', extra: '2', invalid: 'text'),
+] as $call) {
+    try { $call(); }
+    catch (TypeError $error) {
+        echo $error->getLine(), ':', $error->getTraceAsString(), "\n";
+    }
+}

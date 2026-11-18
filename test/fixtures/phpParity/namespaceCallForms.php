@@ -48,3 +48,9 @@ class StaticForwarding {
     }
 }
 StaticForwarding::run(42);
+
+foreach (['True', 'fAlSe', 'NULL', '\true', '\FALSE', '\null', 'Lesson\TRUE'] as $spelling) {
+    var_dump(defined($spelling));
+    if (defined($spelling)) var_dump(constant($spelling));
+}
+var_dump(define('\true', 5), constant(str_repeat(chr(92), 2) . 'true'), constant('\true'));

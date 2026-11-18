@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 952 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 956 -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import {
   applyOperator,
@@ -627,17 +627,22 @@ function arrayLiteral(e: Extract<Expr, { k: 'array' }>): PhpArray {
   const runtime = rt();
   const frame = runtime.frame;
   const array = new PhpArray(undefined, e.items.length);
+  const initializerRow = frame.scope ? e.initializerRow : (frame.initializerOpcodeRow ?? e.initializerRow);
   frame.temporaries.push(array);
   for (const item of e.items) {
     const mark = frame.temporaries.length;
     if (item.spread) spreadInto(array, ev(item.value));
-    else insertArrayItem(array, item);
+    else insertArrayItem(array, item, initializerRow);
     runtime.dropTemporaries(frame, mark);
   }
   return array;
 }
 
-function insertArrayItem(array: PhpArray, item: Extract<Expr, { k: 'array' }>['items'][number]): void {
+function insertArrayItem(
+  array: PhpArray,
+  item: Extract<Expr, { k: 'array' }>['items'][number],
+  initializerRow: number | undefined
+): void {
   const readKey = item.key === undefined ? undefined : prepareOperand(item.key);
   let slot: Value | Ref;
   if (item.byRef) {
@@ -648,7 +653,7 @@ function insertArrayItem(array: PhpArray, item: Extract<Expr, { k: 'array' }>['i
   const key =
     readKey === undefined
       ? undefined
-      : readLiteralKey(item.key!, readKey, item.keyOpcodeRow ?? compiledOperandRow(item.value));
+      : readLiteralKey(item.key!, readKey, initializerRow ?? item.keyOpcodeRow ?? compiledOperandRow(item.value));
   const previous = key === undefined ? undefined : array.map.get(key);
   if (key !== undefined) array.setSlot(key, slot);
   else if (!array.append(slot))
@@ -851,7 +856,7 @@ function readConstant(name: string, fallback: string | undefined): Value {
   const value = runtime.constants.get(constantKey(name));
   if (value !== undefined) return deprecatedConstant(name, value);
   if (fallback !== undefined) {
-    const global = runtime.constants.get(fallback);
+    const global = runtime.constants.get(constantKey(fallback));
     if (global !== undefined) return deprecatedConstant(fallback, global);
   }
   if (builtinNames.constants.includes(global)) {
@@ -921,7 +926,7 @@ export function resolveClassRef(ref: ClassRef): PhpClass {
       return requireClassScope(frame.staticClass, 'static');
     }
     case 'expr': {
-      return classOfValue(ev(ref.e));
+      return classOfOperand(ev(ref.e), ref.e);
     }
   }
 }
@@ -932,7 +937,12 @@ export function resolveStaticClass(
 ): PhpClass | typeof SHORT {
   if (ref.k !== 'expr') return resolveClassRef(ref);
   const value = evaluate(ref.e);
-  return value === SHORT ? SHORT : classOfValue(value);
+  return value === SHORT ? SHORT : classOfOperand(value, ref.e);
+}
+
+function classOfOperand(value: Value, expression: Expr): PhpClass {
+  rt().row = expression.row;
+  return classOfValue(value);
 }
 
 function classOfValue(value: Value): PhpClass {

@@ -61,3 +61,14 @@ var_dump($obj == $obj2, (array)$obj, (object)['x' => 1]);
 $arr = ['k' => 'v']; $o = (object)$arr; echo $o->k, "\n";
 printf("%s %s %s\n", get_class($r), gettype($r), get_debug_type($r));
 echo $r::UNITS, " ", $r::class, "\n";
+
+trait TraitMagicDefaults {
+    const TRAIT_NAME = __TRAIT__;
+    public string $traitName = __TRAIT__ . ' instance';
+    public static string $staticTrait = __TRAIT__ . ' static';
+    public string $owner = __CLASS__;
+}
+class MagicUsingClass { use TraitMagicDefaults; }
+echo MagicUsingClass::TRAIT_NAME, ';', MagicUsingClass::$staticTrait, ';';
+$instance = new MagicUsingClass;
+echo $instance->traitName, ';', $instance->owner, "\n";

@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 611 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 618 -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import type { CompileError } from '../interpreter/diagnostics';
 import { assignTo, bindRef, destructure, foreachSubjectPlace, unsetTarget } from './assignment';
@@ -23,6 +23,7 @@ import { E_DEPRECATED, E_WARNING, emitError, setPrevious, throwError, warn, with
 import { collectBeforeAllocation, setDestructor } from './garbage';
 import { consumeExpression, ev, evBool, evOpcodeOperand, evQuiet, evReturn, prepareOperand } from './interp';
 import { acquireIterator } from './iteratorAcquisition';
+import { builtinLiteralKey } from './native';
 import { looseEquals, setObjectToString, toStr } from './operators';
 import { ElementPlace, RefPlace, share, ValuePlace, VarPlace, writableContainer } from './places';
 import { FatalError, Frame, PhpThrow, rt, type Runtime } from './runtime';
@@ -261,8 +262,8 @@ function execStmt(statement: Stmt, seek?: string): Completion {
       }
       case 'const': {
         for (const item of statement.items) {
-          const value = ev(item.value);
-          runtime.row = statement.row;
+          const value = evaluateInitializer(item.value, frame, item.opcodeRow);
+          runtime.row = item.opcodeRow;
           defineConstant(item.name, value);
         }
         return undefined;
@@ -305,8 +306,8 @@ function seekInto(statement: Stmt, label: string): Completion {
 export function defineConstant(name: string, value: Value): boolean {
   const runtime = rt();
   const key = constantKey(name);
-  if (runtime.constants.has(key) || ['true', 'false', 'null'].includes(lower(name))) {
-    warn(`Constant ${key} already defined, this will be an error in PHP 9`);
+  if (runtime.constants.has(key)) {
+    warn(`Constant ${name.includes('\\') ? key : name} already defined, this will be an error in PHP 9`);
     return false;
   }
   runtime.constants.set(key, share(value));
@@ -318,7 +319,7 @@ export function defineConstant(name: string, value: Value): boolean {
 /** The key of a constant: its namespace is case-insensitive, its own name is not. */
 export function constantKey(name: string): string {
   const slash = name.lastIndexOf('\\');
-  if (slash === -1) return name;
+  if (slash === -1) return builtinLiteralKey(name) ?? name;
   return lower(name.slice(0, slash)) + name.slice(slash);
 }
 
@@ -734,7 +735,7 @@ function parameterDefault(decl: FunctionDecl, index: number, frame: Frame): Valu
   const stored = values?.get(frame.scope);
   if (stored !== undefined) return share(stored);
   runtime.row = expression.row;
-  const value = share(ev(expression));
+  const value = share(evaluateInitializer(expression, frame, decl.params[index].defaultReportRow));
   if ((value === null || typeof value !== 'object') && !containsDefaultAllocation(expression)) {
     const cache = values ?? new Map<PhpClass | undefined, Value>();
     cache.set(frame.scope, value);
@@ -748,6 +749,16 @@ function containsDefaultAllocation(node: unknown): boolean {
   if ('k' in node && (node.k === 'new' || node.k === 'newAnon' || node.k === 'closure' || node.k === 'arrow'))
     return true;
   return Object.values(node).some(containsDefaultAllocation);
+}
+
+function evaluateInitializer(expression: Expr, frame: Frame, row: number | undefined): Value {
+  const outer = frame.initializerOpcodeRow;
+  frame.initializerOpcodeRow = row;
+  try {
+    return ev(expression);
+  } finally {
+    frame.initializerOpcodeRow = outer;
+  }
 }
 
 setDefaultEvaluator(parameterDefault);

@@ -61,3 +61,19 @@ Cannot call func_num_args() dynamically
 #1 /main.php(45): Lesson\StaticForwarding::{closure:Lesson\StaticForwarding::run():43}()
 #2 /main.php(50): Lesson\StaticForwarding::run(42)
 #3 {main}
+bool(true)
+bool(true)
+bool(true)
+bool(false)
+bool(true)
+NULL
+bool(true)
+bool(true)
+bool(true)
+bool(false)
+bool(true)
+NULL
+bool(false)
+bool(true)
+int(5)
+bool(true)

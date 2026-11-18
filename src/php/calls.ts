@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 729 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 730 -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import { LIMITS } from '../interpreter/limits';
 import type { FunctionDecl } from './ast';
@@ -586,10 +586,10 @@ function invokeUser(
   );
   const closure = target.closure?.internal as ClosureData | undefined;
   const strict = runtime.strictTypes && nativeDepth === 0;
-  const positional = positionalArguments(args);
   const params = fn.params;
   checkNamedArgs(params, args);
-  const record = recordForUserCall(target, params, positional, args, row);
+  const received = userArgumentSlots(params, args);
+  const record = recordForUserCall(target, received, row);
   frame.args = args.map((arg) => arg.ref?.v ?? arg.v);
   frame.argumentHolders = [...frame.args];
   const savedRow = runtime.row;
@@ -607,8 +607,7 @@ function invokeUser(
     runtime.row = decl.row;
     handOverArgs(caller, args, frame);
     if (closure) bindClosureVars(frame, closure);
-    bindParams(frame, fn, args, positional, { name, parameter: functionDisplayName(target, true) }, strict, row);
-    recordBoundArgs(record, params, frame, args, positional.length);
+    bindParams(frame, fn, args, received, { name, parameter: functionDisplayName(target, true) }, strict, row);
     bindArgumentHolders(frame, params, record, args);
     runtime.dropTemporaries(frame, 0);
     record.boundFrame = frame;
@@ -662,28 +661,31 @@ function invokeUser(
   return returned;
 }
 
-function recordForUserCall(
-  target: CallTarget,
-  params: Param[],
-  positional: ArgValue[],
-  args: ArgValue[],
-  row: number | undefined
-): CallRecord {
-  const fixed = positional.map((arg) => arg.ref?.v ?? arg.v);
-  const named: [string, Value][] = [];
+interface UserArgumentSlots {
+  fixed: (ArgValue | undefined)[];
+  extraNamed: { name: string; argument: ArgValue }[];
+}
+
+function userArgumentSlots(params: Param[], args: ArgValue[]): UserArgumentSlots {
+  const fixed = positionalArguments(args);
+  const extraNamed: UserArgumentSlots['extraNamed'] = [];
   for (const arg of args) {
     if (arg.name === undefined) continue;
     const index = params.findIndex((param) => !param.variadic && param.name === arg.name);
-    const value = arg.ref?.v ?? arg.v;
-    if (index !== -1) fixed[index] = value;
-    else named.push([arg.name, value]);
+    if (index !== -1) fixed[index] = arg;
+    else extraNamed.push({ name: arg.name, argument: arg });
   }
+  return { fixed, extraNamed };
+}
+
+function recordForUserCall(target: CallTarget, received: UserArgumentSlots, row: number | undefined): CallRecord {
   const record = recordFor(
     target,
-    Array.from({ length: fixed.length }, (_, index) => fixed[index] ?? null),
+    Array.from(received.fixed, (arg) => arg?.ref?.v ?? arg?.v ?? null),
     row ?? implicitCallRow()
   );
-  if (named.length > 0) record.named = named;
+  if (received.extraNamed.length > 0)
+    record.named = received.extraNamed.map(({ name, argument }) => [name, argument.ref?.v ?? argument.v]);
   return record;
 }
 
@@ -771,50 +773,6 @@ function releaseFrame(
 
 function releaseCallValues(runtime: Runtime, values: unknown[], pending?: PhpThrow): void {
   withPendingException(runtime, pending, () => runtime.release(values));
-}
-
-/**
- * Records a call's arguments as PHP's traces show them once bound: converted to the parameters' types, and with the
- * parameters that named arguments reach.
- */
-function recordBoundArgs(
-  record: CallRecord,
-  params: Param[],
-  frame: Frame,
-  args: ArgValue[],
-  positional: number
-): void {
-  if (args.some((arg) => arg.name !== undefined)) tracedNamedArgs(record, params, frame, args, positional);
-  for (const [index, param] of params.entries()) {
-    if (param.variadic || index >= record.args.length) break;
-    record.args[index] = frame.vars.get(param.name)?.v ?? null;
-  }
-}
-
-/**
- * Records the arguments of a call with named arguments as PHP's traces show them: the parameters up to the last one
- * passed, defaults included, then what a variadic parameter collected by name.
- */
-function tracedNamedArgs(
-  record: CallRecord,
-  params: Param[],
-  frame: Frame,
-  args: ArgValue[],
-  positional: number
-): void {
-  let count = positional;
-  const named: [string, Value][] = [];
-  for (const arg of args) {
-    if (arg.name === undefined) continue;
-    const index = params.findIndex((param) => param.name === arg.name && !param.variadic);
-    if (index === -1) named.push([arg.name, arg.v]);
-    else count = Math.max(count, index + 1);
-  }
-  record.args = [
-    ...record.args.slice(0, positional),
-    ...params.slice(positional, count).map((param) => frame.vars.get(param.name)?.v ?? null),
-  ];
-  record.named = named;
 }
 
 /**
@@ -918,25 +876,34 @@ export function setDefaultEvaluator(run: (decl: FunctionDecl, index: number, fra
   evaluateDefault = run;
 }
 
-// code-gauge-allow functionNcss 59 -- Binds arguments to parameters as PHP's call protocol does, in its order of checks.
+// code-gauge-allow functionNcss 60 -- Binds arguments to parameters as PHP's call protocol does, in its order of checks.
 // code-gauge-allow functionParameterCount 7 -- Binds arguments to parameters as PHP's call protocol does, in its order of checks.
 function bindParams(
   frame: Frame,
   fn: UserFunction,
   args: ArgValue[],
-  positional: ArgValue[],
+  received: UserArgumentSlots,
   labels: { name: string; parameter: string },
   strict: boolean,
   callRow: number | undefined
 ): void {
   const params = fn.params;
-  const record = callStack.at(-1);
+  const record = callStack.at(-1)!;
+  const gaps = fillUserArgumentGaps(frame, fn, received.fixed, record, labels.name);
   let holderIndices: Map<ArgValue, number> | undefined;
-  const bindSupplied = (arg: ArgValue, param: Param, index: number, assign: (slot: Value | Ref) => void): void => {
+  const bindSupplied = (
+    arg: ArgValue,
+    param: Param,
+    index: number,
+    assign: (slot: Value | Ref) => void,
+    namedSlot?: [string, Value]
+  ): void => {
     const ref = param.byRef ? bindRef(arg) : undefined;
     if (ref) assign(ref);
     const original = ref ? ref.v : share(arg.v);
     const value = checkParam(original, param, index, labels.parameter, strict, frame, callRow, ref);
+    if (namedSlot) namedSlot[1] = value;
+    else record.args[index] = value;
     if (ref) {
       if (value !== original) ref.v = value;
     } else assign(value);
@@ -954,26 +921,20 @@ function bindParams(
     if (param.variadic) {
       const rest = new PhpArray();
       frame.vars.set(param.name, new Ref(rest));
-      for (let at = index; at < positional.length; at++) {
-        const arg = positional[at];
-        if (arg.omitted) throwError('ArgumentCountError', `${labels.name}(): Argument #${at + 1} not passed`);
+      for (let at = index; at < received.fixed.length; at++) {
+        const arg = received.fixed[at];
+        if (!arg || arg.omitted) throwError('ArgumentCountError', `${labels.name}(): Argument #${at + 1} not passed`);
         bindSupplied(arg, param, at, (slot) => rest.append(slot));
       }
-      for (const arg of args) {
-        const argName = arg.name;
-        if (argName !== undefined && !params.some((other) => other.name === argName && !other.variadic))
-          bindSupplied(arg, param, index, (slot) => rest.setSlot(argName, slot));
+      for (const [at, { name, argument }] of received.extraNamed.entries()) {
+        bindSupplied(argument, param, index, (slot) => rest.setSlot(name, slot), record.named![at]);
       }
       break;
     }
-    const arg = positional[index] ?? args.find((candidate) => candidate.name === param.name);
+    const arg = received.fixed[index];
     if (arg === undefined || arg.omitted) {
       if (!param.optional) {
-        const anyNamed = args.some((candidate) => candidate.name !== undefined);
-        const passed = callStack.at(-1)?.args.length ?? positional.length;
-        if (arg?.omitted || (anyNamed && passed >= required)) {
-          throwError('ArgumentCountError', `${labels.name}(): Argument #${index + 1} ($${param.name}) not passed`);
-        }
+        const passed = record.args.length;
         const hasOptional = params.some((other) => other.optional && !other.variadic);
         const where = callRow === undefined ? '' : ` in ${SCRIPT_PATH} on line ${callRow + 1}`;
         const expectation = hasOptional ? 'at least' : 'exactly';
@@ -982,16 +943,41 @@ function bindParams(
           `Too few arguments to function ${labels.name}(), ${passed} passed${where} and ${expectation} ${required} expected`
         );
       }
-      const value = evaluateDefault(fn.decl, index, frame);
       const declared = fn.decl.params[index];
+      const gap = gaps?.get(index);
+      const value = gap === undefined ? evaluateDefault(fn.decl, index, frame) : gap;
       rt().row = declared.defaultReportRow ?? declared.row;
-      if (record && index < record.args.length) record.args[index] = value;
       const checked = checkParam(value, param, index, labels.parameter, rt().strictTypes, frame, callRow);
+      if (gap !== undefined) record.args[index] = checked;
       frame.vars.set(param.name, new Ref(checked));
       continue;
     }
     bindSupplied(arg, param, index, (slot) => frame.vars.set(param.name, slot instanceof Ref ? slot : new Ref(slot)));
   }
+}
+
+function fillUserArgumentGaps(
+  frame: Frame,
+  fn: UserFunction,
+  fixed: UserArgumentSlots['fixed'],
+  record: CallRecord,
+  name: string
+): Map<number, Value> | undefined {
+  let defaults: Map<number, Value> | undefined;
+  for (let index = 0; index < Math.min(fixed.length, fn.params.length); index++) {
+    const param = fn.params[index];
+    if (param.variadic) break;
+    const arg = fixed[index];
+    if (arg && !arg.omitted) continue;
+    const declared = fn.decl.params[index];
+    rt().row = declared.defaultReportRow ?? declared.row;
+    if (!param.optional)
+      throwError('ArgumentCountError', `${name}(): Argument #${index + 1} ($${param.name}) not passed`);
+    const value = evaluateDefault(fn.decl, index, frame);
+    (defaults ??= new Map<number, Value>()).set(index, value);
+    record.args[index] = value;
+  }
+  return defaults;
 }
 
 function bindRef(arg: ArgValue): Ref {

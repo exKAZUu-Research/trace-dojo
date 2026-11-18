@@ -45,3 +45,4 @@ object(stdClass)#12 (1) {
 v
 Rect object Rect
 cm Rect
+TraitMagicDefaults;TraitMagicDefaults static;TraitMagicDefaults instance;MagicUsingClass

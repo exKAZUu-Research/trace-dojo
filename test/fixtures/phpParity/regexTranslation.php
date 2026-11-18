@@ -36,3 +36,13 @@ foreach (['/^*a/', '/\b+a/', '/a$?/', '/(?=a)*a/', '/a\i/', '/a\y/', '/a\T/', '/
 
 foreach (['/\xz/', '/a\x/', '/\x{zz}/', '/\x{}/', '/[\xz]/', '/[\x{41}]/', '/\o{}/', '/\o/', '/\pZ/u', '/\p{/u', '/\p{L/u', '/[\E]]/', '/[\Q\E]]/', '/\ca/', '/\c/', '/[\c]]/', '/\x{100}/u', '/\o{777}/', '/[\x{100}]/'] as $p) { echo $p, ' => '; var_dump(preg_match($p, "a]\x01z")); }
 
+
+foreach ([
+    '/[\p{L\w}]/u',
+    '/[\p{L&&\p{Lo}}]/u',
+    '/[\p{L\x{41}}]/u',
+    '/\p1/u',
+    '/\p{}/u',
+    '/\p{ ^ L }/u',
+    '/\p{sc:Latin}/u',
+] as $pattern) var_dump(preg_match($pattern, 'a'));

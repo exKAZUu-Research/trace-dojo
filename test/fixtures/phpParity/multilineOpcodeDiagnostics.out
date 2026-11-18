@@ -105,3 +105,51 @@ Deprecated: Implicit conversion from float 1.5 to int loses precision in /main.p
 
 Deprecated: Implicit conversion from float 1.5 to int loses precision in /main.php on line 218
 finished diagnostics
+227:Class "MissingClass" not found
+232:Class "MissingClass" not found
+236:Class "MissingClass" not found
+
+Warning: Undefined variable $missing in /main.php on line 240
+
+Warning: Undefined variable $unknownKey in /main.php on line 244
+
+Deprecated: Using null as an array offset is deprecated, use an empty string instead in /main.php on line 244
+
+Warning: Undefined variable $unknownNestedKey in /main.php on line 244
+
+Warning: Undefined variable $unknownKey in /main.php on line 244
+
+Deprecated: Using null as an array offset is deprecated, use an empty string instead in /main.php on line 244
+
+Warning: Undefined variable $unknownNestedKey in /main.php on line 244
+
+Deprecated: Using null as an array offset is deprecated, use an empty string instead in /main.php on line 244
+
+Warning: Undefined variable $unknownValue in /main.php on line 244
+
+Warning: Undefined variable $unknownKey in /main.php on line 246
+
+Deprecated: Using null as an array offset is deprecated, use an empty string instead in /main.php on line 246
+
+Warning: Undefined variable $unknownKey in /main.php on line 246
+
+Warning: Undefined variable $unknownObjectValue in /main.php on line 246
+array(1) {
+  [1]=>
+  int(1)
+}
+
+Deprecated: Implicit conversion from float 1.5 to int loses precision in /main.php on line 252
+
+Deprecated: Implicit conversion from float 2.5 to int loses precision in /main.php on line 252
+
+Deprecated: Implicit conversion from float 3.5 to int loses precision in /main.php on line 261
+
+Deprecated: Implicit conversion from float 1.5 to int loses precision in /main.php on line 267
+1;
+Deprecated: Implicit conversion from float 2.5 to int loses precision in /main.php on line 272
+
+
+Deprecated: Implicit conversion from float 1.5 to int loses precision in /main.php on line 280
+
+Deprecated: Implicit conversion from float 1.5 to int loses precision in /main.php on line 285

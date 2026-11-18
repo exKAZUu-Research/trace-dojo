@@ -17,7 +17,7 @@ import {
 } from './conversions';
 import { deprecated, notice, throwError, type UpdateWarning, warn, withCleanupExceptions } from './errors';
 import { cPow } from './floatPow';
-import { PhpThrow, rt } from './runtime';
+import { ExitSignal, PhpThrow, rt } from './runtime';
 import {
   copyValueSlot,
   deref,
@@ -81,7 +81,7 @@ export function withStringConversionErrors(
   try {
     withCleanupExceptions(runtime, (capture) => {
       const hold = (error: unknown): void => {
-        if (!(error instanceof PhpThrow)) throw error;
+        if (!(error instanceof PhpThrow || error instanceof ExitSignal)) throw error;
         capture(error);
         runtime.nativeStringConversionPending = true;
       };

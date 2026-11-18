@@ -10,3 +10,27 @@ Cannot assign string to class constant RuntimeTypedConstant::NUMBER of type int
 #0 /main.php(37): unpackedDefaults(extra: 1)
 #1 {main}
 41:{closure:/main.php:39}(): Argument #1 ($number) must be of type int, string given, called in /main.php on line 43
+49:#0 /main.php(67): DeferredLines->member()
+#1 /main.php(76): {closure:/main.php:67}()
+#2 {main}
+54:#0 /main.php(68): deferredConcat()
+#1 /main.php(76): {closure:/main.php:68}()
+#2 {main}
+60:#0 /main.php(69): deferredArray()
+#1 /main.php(76): {closure:/main.php:69}()
+#2 {main}
+63:#0 /main.php(70): skippedDefaults('text', 2, 3)
+#1 /main.php(76): {closure:/main.php:70}()
+#2 {main}
+64:#0 /main.php(71): coercedPrefix(1, 'text')
+#1 /main.php(76): {closure:/main.php:71}()
+#2 {main}
+64:#0 /main.php(72): coercedPrefix(1, 'text')
+#1 /main.php(76): {closure:/main.php:72}()
+#2 {main}
+65:#0 /main.php(73): coercedRest('1', 2, 'text')
+#1 /main.php(76): {closure:/main.php:73}()
+#2 {main}
+65:#0 /main.php(74): coercedRest('1', extra: 2, invalid: 'text')
+#1 /main.php(76): {closure:/main.php:74}()
+#2 {main}

@@ -270,3 +270,20 @@ bool(false)
 /[\x{100}]/ => 
 Warning: preg_match(): Compilation failed: character code point value in \x{} or \o{} is too large at offset 7 in /main.php on line 37
 bool(false)
+
+Warning: preg_match(): Compilation failed: unknown property after \P or \p at offset 8 in /main.php on line 48
+bool(false)
+
+Warning: preg_match(): Compilation failed: malformed \P or \p sequence at offset 10 in /main.php on line 48
+bool(false)
+
+Warning: preg_match(): Compilation failed: malformed \P or \p sequence at offset 8 in /main.php on line 48
+bool(false)
+
+Warning: preg_match(): Compilation failed: malformed \P or \p sequence at offset 3 in /main.php on line 48
+bool(false)
+
+Warning: preg_match(): Compilation failed: unknown property after \P or \p at offset 4 in /main.php on line 48
+bool(false)
+int(0)
+int(1)

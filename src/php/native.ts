@@ -102,7 +102,12 @@ export function defineConstant(name: string, value: Value, deprecation?: string)
 }
 
 export function compileConstant(name: string): Value | undefined {
-  return compileConstants.get(name);
+  return compileConstants.get(builtinLiteralKey(name) ?? name);
+}
+
+export function builtinLiteralKey(name: string): 'TRUE' | 'FALSE' | 'NULL' | undefined {
+  const key = name.toUpperCase();
+  if (key === 'TRUE' || key === 'FALSE' || key === 'NULL') return key;
 }
 
 export function defineRuntimeConstant(name: string, create: () => Value): void {

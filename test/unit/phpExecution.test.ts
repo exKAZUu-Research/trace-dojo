@@ -12,6 +12,13 @@ afterEach(() => {
 
 const run = (program: string): ReturnType<typeof executeProgram> => executeProgram('php', program);
 
+test('resolves namespace-relative literal constants in the global namespace', () => {
+  expect(run(String.raw`<?php var_dump(namespace\TrUe, namespace\false, namespace\NULL);`)).toMatchObject({
+    kind: 'executed',
+    stdout: 'bool(true)\nbool(false)\nNULL\n',
+  });
+});
+
 test.each([
   [String.raw`try {} catch (\self $error) {}`, String.raw`'\self' is an invalid class name`],
   [String.raw`try {} catch (A|\static $error) {}`, String.raw`'\static' is an invalid class name`],
@@ -635,6 +642,9 @@ test.each([
   ['class D { const int NAME = __CLASS__; }', 'Cannot use string as value for class constant'],
   ['function f(int $n = __FUNCTION__) {}', 'Cannot use string as default value'],
   ['class D { function f(int $n = __METHOD__) {} }', 'Cannot use string as default value'],
+  ['if (false) { $object = new class { public int $n = __CLASS__; }; }', 'Cannot use string as default value'],
+  ['$object = new class { const int NAME = __CLASS__; };', 'Cannot use string as value for class constant'],
+  ['$object = new class { function f(int $n = __METHOD__) {} };', 'Cannot use string as default value'],
   ['$closure = function (int $n = __FUNCTION__) {};', 'Cannot use string as default value'],
   [String.raw`function f(int $n = \TRUE) {}`, 'Cannot use bool as default value'],
   ['$array = [[] => 1];', 'Illegal offset type'],

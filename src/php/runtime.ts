@@ -84,6 +84,7 @@ export interface TraceEntry {
 
 export class Frame {
   constantExpression = false;
+  initializerOpcodeRow?: number;
   vars = new Map<string, Ref>();
   /** Values that an expression being evaluated holds, which garbage collection must keep. */
   temporaries: (Value | Ref)[] = [];

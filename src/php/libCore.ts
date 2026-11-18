@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 573 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 576 -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import { byteAt, lower, untilNul } from './bytes';
 import { callableClosureName, callValue, checkCallable, explainCallable } from './callables';
@@ -95,6 +95,9 @@ defineConstant('PHP_MAXPATHLEN', 1024n);
 defineConstant('PHP_DEBUG', 0n);
 defineConstant('PHP_SAPI', 'cli');
 defineConstant('PHP_ZTS', 0n);
+defineConstant('TRUE', true);
+defineConstant('FALSE', false);
+defineConstant('NULL', null);
 
 // Output -------------------------------------------------------------------------------------------------------------
 
@@ -266,7 +269,7 @@ defineFunction('define(string $constant_name, mixed $value, bool $case_insensiti
   const name = args[0] as string;
   if (name.includes('::'))
     throwError('ValueError', 'define(): Argument #1 ($constant_name) cannot be a class constant');
-  return defineUserConstant(name.replace(/^\\/, ''), args[1]);
+  return defineUserConstant(name, args[1]);
 });
 defineFunction('defined(string $constant_name): bool', ({ args }) => {
   const name = (args[0] as string).replace(/^\\/, '');

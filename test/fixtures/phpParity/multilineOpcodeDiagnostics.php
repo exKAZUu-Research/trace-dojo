@@ -221,3 +221,67 @@ function constantArrayDefault($value = [
 ]) {}
 constantArrayDefault();
 echo "finished diagnostics\n";
+
+$className = 'MissingClass';
+try {
+    $className
+        ::$value
+        = 1;
+} catch (Error $error) { echo $error->getLine(), ':', $error->getMessage(), "\n"; }
+try {
+    $className
+        ::f();
+} catch (Error $error) { echo $error->getLine(), ':', $error->getMessage(), "\n"; }
+try {
+    echo $className
+        ::CONSTANT;
+} catch (Error $error) { echo $error->getLine(), ':', $error->getMessage(), "\n"; }
+
+$uninitialized
+    ??=
+    $missing;
+$target = [];
+$target[$unknownKey][$unknownNestedKey] ??= $unknownValue;
+$target = new ArrayObject;
+$target[$unknownKey] ??= $unknownObjectValue;
+$index = 0;
+$target = [];
+$target[$index] ??= ($index = 1);
+var_dump($target);
+
+const FIRST = 1,
+    SECOND = [
+        1.5 => 2
+    ],
+    THIRD = [
+        2.5 => 3
+    ];
+const FOURTH = [
+    3.5 =>
+        FIRST
+];
+class DeferredDiagnosticArray {
+    const VALUE = [
+        1.5 =>
+            [
+                1
+            ]
+    ];
+    public $value = [
+        2.5 =>
+            2
+    ];
+}
+echo count(DeferredDiagnosticArray::VALUE), ';';
+new DeferredDiagnosticArray;
+echo "\n";
+$array = [
+    1.5 =>
+        [1]
+        [0]
+];
+$array = [
+    1.5 =>
+        PHP_EOL .
+        "a"
+];

@@ -47,7 +47,7 @@ export type Expr = { row: number } & (
   | { k: 'interp'; parts: (string | Expr)[] }
   | { k: 'var'; name: string }
   | { k: 'varvar'; name: Expr }
-  | { k: 'array'; items: ArrayItem[] }
+  | { k: 'array'; items: ArrayItem[]; initializerRow?: number }
   | { k: 'list'; items: (ListItem | undefined)[]; keyed: boolean }
   | { k: 'idx'; base: Expr; index?: Expr }
   | { k: 'prop'; obj: Expr; name: string | Expr; nullsafe: boolean }
@@ -125,7 +125,7 @@ export type Stmt = { row: number } & (
   | { k: 'unset'; targets: Expr[] }
   | { k: 'func'; decl: FunctionDecl }
   | { k: 'class'; decl: ClassDecl }
-  | { k: 'const'; items: { name: string; value: Expr }[] }
+  | { k: 'const'; items: { name: string; value: Expr; opcodeRow: number }[] }
   | { k: 'goto'; label: string; offset: number }
   | { k: 'label'; name: string }
   | { k: 'nop' }

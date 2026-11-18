@@ -1,4 +1,4 @@
-import { FatalError, PhpThrow, rt, type Runtime, SCRIPT_PATH } from './runtime';
+import { ExitSignal, FatalError, PhpThrow, rt, type Runtime, SCRIPT_PATH } from './runtime';
 import { PhpObject, Ref, type Value } from './values';
 
 let formatThrowable: (object: PhpObject) => string;
@@ -211,13 +211,21 @@ export function withPendingException(runtime: Runtime, pending: PhpThrow | undef
   }
 }
 
-export function withCleanupExceptions(runtime: Runtime, cleanup: (capture: (error: PhpThrow) => void) => void): void {
+export type CleanupException = PhpThrow | ExitSignal;
+
+export function withCleanupExceptions(
+  runtime: Runtime,
+  cleanup: (capture: (error: CleanupException) => void) => void
+): void {
   const heldMark = runtime.held.length;
-  let failure: PhpThrow | undefined;
-  const capture = (error: PhpThrow): void => {
-    if (failure) setPrevious(error.object, failure.object);
+  let failure: CleanupException | undefined;
+  const capture = (error: CleanupException): void => {
+    if (failure instanceof ExitSignal) return;
+    if (error instanceof PhpThrow) {
+      if (failure) setPrevious(error.object, failure.object);
+      runtime.held.push(error.object);
+    }
     failure = error;
-    runtime.held.push(error.object);
   };
   try {
     try {
@@ -226,10 +234,8 @@ export function withCleanupExceptions(runtime: Runtime, cleanup: (capture: (erro
       if (!(error instanceof PhpThrow)) throw error;
       capture(error);
     }
-    if (failure) {
-      runtime.thrown = failure.object;
-      throw failure;
-    }
+    if (failure instanceof PhpThrow) runtime.thrown = failure.object;
+    if (failure) throw failure;
   } finally {
     runtime.held.length = heldMark;
   }

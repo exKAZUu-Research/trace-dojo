@@ -591,16 +591,37 @@ class PatternConverter {
   }
 
   private property(letter: string): CharacterSet {
-    const match = /^(?:\{(\^?)([\w&= \t-\r-]+)\}|(\w))/.exec(this.source.slice(this.index));
-    if (!match) {
-      const end = this.source[this.index] === '{' ? this.source.length : this.index + 1;
-      this.fail(String.raw`malformed \P or \p sequence`, Math.min(end, this.source.length));
-    }
-    this.index += match[0].length;
+    const { name, negated } = this.propertyName();
     this.unicode = true;
-    const set = unicodeProperty(match[2] ?? match[3], (letter === 'P') !== (match[1] === '^'));
+    const set = unicodeProperty(name, (letter === 'P') !== negated);
     if (!set) this.fail(String.raw`unknown property after \P or \p`, this.index);
     return set;
+  }
+
+  // code-gauge-allow functionCognitiveComplexity 16 -- Uses one cursor for the property name and its diagnostics.
+  private propertyName(): { name: string; negated: boolean } {
+    const first = this.propertyCharacter();
+    let name = '';
+    let negated = false;
+    if (first === '{') {
+      while (name.length < 49 && this.index < this.source.length) {
+        const char = this.propertyCharacter();
+        if (/[-_ \t-\r]/.test(char)) continue;
+        if (char === '^' && name === '' && !negated) negated = true;
+        else if (char === '}') return { name, negated };
+        else if (char >= '&' && char <= 'z') name += char;
+        else break;
+      }
+    } else if (/[A-Za-z]/.test(first)) return { name: first, negated };
+    this.fail(String.raw`malformed \P or \p sequence`, this.index);
+  }
+
+  private propertyCharacter(): string {
+    const code = this.source.codePointAt(this.index);
+    if (code === undefined) return '';
+    const char = String.fromCodePoint(code);
+    this.index += char.length;
+    return char;
   }
 
   private assertionEscape(letter: string): string | undefined {
@@ -1302,7 +1323,7 @@ function unicodeProperty(name: string, negated: boolean): CharacterSet | undefin
     ['xps', UCP_SETS.get('s') as string],
   ]).get(name);
   if (special !== undefined) return { content: special, negated };
-  const explicit = /^(sc|script|scx|scriptextensions)=(.+)$/.exec(name);
+  const explicit = /^(sc|script|scx|scriptextensions)[:=](.+)$/.exec(name);
   const script = explicit?.[1];
   const value = explicit?.[2] ?? name;
   const category = !explicit ? CATEGORY_ALIASES.get(value) : undefined;
