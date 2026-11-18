@@ -1,3 +1,4 @@
+// code-gauge-allow-file fileNcss 503 -- Evaluates every kind of function call, class, and statement of the language in one evaluator.
 import { createArgumentsObject, mapArguments } from './argumentsObject';
 // code-gauge-allow-file fileNcss 501 -- Executes statements, functions, fields, and constructor initialization with their shared lexical scopes.
 import type {
