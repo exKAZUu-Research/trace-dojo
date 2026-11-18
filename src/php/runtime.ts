@@ -321,13 +321,13 @@ export class Runtime {
   nativeHeld: unknown[][] = [];
 
   /** Frees what letting go of some values frees, as {@link releaseDropped} describes, when that is safe now. */
-  release(dropped: unknown[], durable = false): void {
+  release(dropped: unknown[], durable = false, fromNative = false): void {
     if (durable) {
       this.durableReleaseVersion++;
       for (const value of dropped) this.pendingGcRoots.add(value instanceof Ref ? value.v : value);
     }
     for (const value of dropped) this.pendingReleases.push(value);
-    if (this.nativeCalls === 0) this.flushReleases();
+    if (this.nativeCalls === 0) this.flushReleases(fromNative);
   }
 
   durableReleaseVersion = 0;

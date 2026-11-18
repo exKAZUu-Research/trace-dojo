@@ -20,11 +20,27 @@ class UndefinedArrayChild extends RecursiveArrayIterator {
             var_dump(array_shift($copy), $copy, array_keys($copy));
             $copy = $array;
             var_dump(array_pop($copy), $copy, array_keys($copy));
+            $copy[] = 9;
+            var_dump(array_keys($copy), array_is_list($copy));
             $copy = $array;
             $copy['new'] = 9;
             var_dump(count($copy), array_keys($copy));
         }
+        $packed = [1, $read(), 3];
+        var_dump(array_slice($packed, 0, 2, true), array_slice($packed, 1, 2, true));
+        unset($packed[1]);
+        var_dump(count($packed), array_keys($packed));
+        $packed[1] = 2;
+        var_dump(count($packed), array_keys($packed), json_encode($packed));
+        $sparse = [2 => 'a', 5 => $read(), 8 => 'b'];
+        var_dump(array_slice($sparse, -1, null, true));
+        $mixed = [1, $read(), 2, 'name' => 4];
+        var_dump(array_shift($mixed), $mixed);
+
         $array = ['x' => $read(), 'y' => 5];
+        var_dump(array_combine(['u', 'v'], $array));
+        try { array_combine(['u'], $array); }
+        catch (ValueError $error) { echo $error->getMessage(), "\n"; }
         var_dump([...$array], array_merge($array, ['z' => 6]), array_slice($array, 0), array_slice($array, -1));
         var_dump(array_reverse($array), array_change_key_case($array, CASE_UPPER));
         $report = function ($value, $key) { echo $key, '=', $value, "\n"; return true; };
@@ -32,6 +48,14 @@ class UndefinedArrayChild extends RecursiveArrayIterator {
         array_walk($array, $report);
         $nested = ['nested' => $array];
         array_walk_recursive($nested, $report);
+        foreach ([new ArrayIterator($array), (new ArrayObject($array))->getIterator()] as $iteratorView) {
+            foreach ($iteratorView as $key => $value) echo $key, '=', $value, "\n";
+            var_dump(iterator_count($iteratorView), iterator_to_array($iteratorView));
+            $iteratorView->seek(0);
+            var_dump($iteratorView->key(), $iteratorView->current());
+            $iteratorView->next();
+            var_dump($iteratorView->valid());
+        }
     }
 }
 $iterator = new RecursiveIteratorIterator(new UndefinedArrayChild([[1], 2]));

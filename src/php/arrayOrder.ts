@@ -103,8 +103,8 @@ export class ArrayOrder {
     return this.nextIndex;
   }
 
-  cursor(key = this.first?.key, family?: CursorFamily): ArrayCursor {
-    const cursor = new ArrayCursor(this, key === undefined ? undefined : this.get(key), family);
+  cursor(key = this.first?.key, family?: CursorFamily, includes?: (key: Key) => boolean): ArrayCursor {
+    const cursor = new ArrayCursor(this, key === undefined ? undefined : this.get(key), family, includes);
     this.cursors.add(cursor.registration);
     return cursor;
   }
@@ -187,7 +187,7 @@ export class ArrayOrder {
     this.compact();
   }
 
-  private compact(): void {
+  compact(): void {
     let index = 0;
     for (const entry of this.orderedEntries()) entry.index = index++;
     this.nextIndex = index;
@@ -360,10 +360,12 @@ export class ArrayCursor {
   constructor(
     private readonly order: ArrayOrder,
     entry: ArrayEntry | undefined,
-    readonly family?: CursorFamily
+    readonly family?: CursorFamily,
+    private readonly includes?: (key: Key) => boolean
   ) {
     this.generation = family?.generation;
     this.entry = entry;
+    this.skipExcluded();
   }
 
   get active(): boolean {
@@ -396,6 +398,7 @@ export class ArrayCursor {
     if (this.family && index !== undefined && index > end) this.setPosition(this.current, end);
   }
   get key(): Key | undefined {
+    this.skipExcluded();
     return this.current?.key;
   }
   get index(): number | undefined {
@@ -403,9 +406,18 @@ export class ArrayCursor {
   }
   rewind(): void {
     this.setPosition(this.order.first, this.family ? 0 : undefined);
+    this.skipExcluded();
   }
   next(): void {
     const entry = this.current;
     if (entry) this.setPosition(entry.next, entry.index + 1);
+    this.skipExcluded();
+  }
+
+  private skipExcluded(): void {
+    if (!this.includes) return;
+    let entry = this.current;
+    while (entry && !this.includes(entry.key)) entry = entry.next;
+    if (entry !== this.current) this.setPosition(entry);
   }
 }

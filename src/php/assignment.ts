@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 876 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 894 -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import type { Expr, ListItem } from './ast';
 import { foreachSubjectWritable, hasReferenceItem } from './astAnalysis';
@@ -892,8 +892,9 @@ export function assignReference(target: Expr, source: Expr): Value {
 
 export function destructureAssignment(target: Extract<Expr, { k: 'list' }>, expression: Expr): Value {
   const runtime = rt();
-  const row = isCompiledVariable(expression) ? target.row : compiledOperandRow(expression);
-  if (!hasReferenceItem(target)) return destructure(target, prepareOperand(expression)(row), undefined, row);
+  const byRef = hasReferenceItem(target);
+  const row = !byRef && isCompiledVariable(expression) ? listOperandRow(target) : compiledOperandRow(expression);
+  if (!byRef) return destructure(target, prepareOperand(expression)(row), undefined, row);
   if (foreachSubjectWritable(expression)) {
     const source = nestedPlace(placeOf(expression, 'write', true), 'write');
     return destructure(target, source.get('nested') ?? null, source, row);
@@ -907,17 +908,19 @@ export function destructureAssignment(target: Extract<Expr, { k: 'list' }>, expr
   return destructure(target, value, returned ? new RefPlace(returned) : undefined, row);
 }
 
+// code-gauge-allow functionCognitiveComplexity 22 -- Keeps the list's fetch line and lazy writable source in assignment order.
 export function destructure(
   target: Extract<Expr, { k: 'list' }>,
   value: Value,
   source?: Place,
   fetchRow = target.row
 ): Value {
-  if (hasReferenceItem(target) && (value instanceof PhpArray || (source && (value === null || value === false)))) {
-    const place = source ?? new RefPlace(Ref.temporary(share(value)));
-    value = writableContainer(place, value === false ? null : value);
-  }
-  rt().frame.temporaries.push(value);
+  const runtime = rt();
+  const writableSource =
+    source ??
+    (value instanceof PhpArray && hasReferenceItem(target) ? new RefPlace(Ref.temporary(share(value))) : undefined);
+  let prepared = false;
+  runtime.frame.temporaries.push(value);
   let position = 0n;
   for (const item of target.items) {
     if (item === undefined) {
@@ -925,25 +928,40 @@ export function destructure(
       continue;
     }
     const key = item.key === undefined ? position++ : toKey(ev(item.key));
-    rt().row = item.key ? compiledOperandRow(item.key) : fetchRow;
-    destructureItem(item, value, key, source !== undefined);
-    fetchRow = destructuringWriteRow(item.target);
+    runtime.row = item.key ? compiledOperandRow(item.key) : fetchRow;
+    const itemRow = runtime.row;
+    const byRef = item.byRef || (item.target.k === 'list' && hasReferenceItem(item.target));
+    if (byRef && writableSource && !prepared && (value instanceof PhpArray || value === null || value === false)) {
+      value = writableContainer(writableSource, value === false ? null : value);
+      runtime.frame.temporaries.push(value);
+      prepared = true;
+    }
+    destructureItem(item, value, key, source !== undefined, byRef);
+    if (item.target.k === 'list') fetchRow = runtime.row;
+    else if (item.byRef) fetchRow = itemRow;
+    else fetchRow = item.target.row;
+    runtime.row = fetchRow;
   }
   return value;
 }
 
-function destructuringWriteRow(target: Expr): number {
+function listOperandRow(target: Expr): number {
   while (target.k === 'list') {
-    const item = target.items.findLast((element) => element !== undefined);
+    const item = target.items.find((element) => element !== undefined);
     if (!item) return target.row;
     target = item.target;
   }
   return target.row;
 }
 
-function destructureItem(item: ListItem, value: Value, key: Key, writable: boolean): void {
+function destructureItem(item: ListItem, value: Value, key: Key, writable: boolean, byRef: boolean): void {
   if (item.byRef) {
     bindRef(item.target, destructuredReference(value, key, writable));
+    return;
+  }
+  if (byRef && item.target.k === 'list') {
+    const slot = destructuredReference(value, key, writable);
+    destructure(item.target, slot.v, new RefPlace(slot), rt().row);
     return;
   }
   let element: Value;

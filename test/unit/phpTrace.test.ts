@@ -121,6 +121,46 @@ class Walker {
   expect(asJava(phpTrace(php))).toEqual(asJava(traceProgram('java', java, java).traceItems));
 });
 
+test('promoted properties record constructor writes like explicit Java assignments', () => {
+  const java = `public class Main {
+    public static void main(String[] args) {
+        new Counter(21, 42);
+    }
+}
+class Counter {
+    int value;
+    Integer limit;
+    Counter(int value, int limit) {
+        this.value = value;
+        this.limit = limit;
+    }
+}`;
+  const php = `<?php
+class Counter {
+    function __construct(
+        public int $value,
+        private int $limit,
+    ) {}
+}
+new Counter(21, 42);`;
+  const items = phpTrace(php);
+  expect(asJava(items)).toEqual(asJava(traceProgram('java', java, java).traceItems));
+  expect(items.filter(({ callLines }) => callLines.length > 0).map(({ line }) => line)).toEqual([4, 5]);
+});
+
+test('declared property defaults are visible from the first constructor statement', () => {
+  const source = `<?php
+class Counter {
+    public int $value = 42;
+    function __construct() {
+        $first = $this->value;
+    }
+}
+new Counter();`;
+  const constructorSteps = phpTrace(source).filter(({ callLines }) => callLines.length > 0);
+  expect(constructorSteps).toMatchObject([{ line: 5, vars: { $first: 42, '$this->value': 42 } }]);
+});
+
 test('a function marked atomic counts as one step of its caller', () => {
   const program = `<?php
 $t = new Turtle();

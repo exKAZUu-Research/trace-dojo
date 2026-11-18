@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 899 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 904 -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import type { Node } from '@willbooster/web-tree-sitter';
 
@@ -76,16 +76,13 @@ export abstract class DeclarationConverter extends ConverterBase {
   ): ClassRef {
     const ref = super.classRef(node, deferScope, use);
     if (!this.preserveSyntax && use !== 'name' && ref.k === 'expr') {
-      const value = this.compiledValue(ref.e);
+      const value = this.compiledValue(ref.e, use === 'constant');
       if (value !== undefined && typeof value !== 'string') this.error(node, 'Illegal class name');
-      if (
-        node.type === 'parenthesized_expression' &&
-        (value === undefined || node.parent?.type !== 'object_creation_expression')
-      )
-        ref.fetchRow =
-          value === undefined
-            ? compiledOperandRow(ref.e)
-            : (node.nextSibling?.startPosition.row ?? node.endPosition.row);
+      if (node.type === 'parenthesized_expression') {
+        if (value === undefined) ref.fetchRow = compiledOperandRow(ref.e);
+        else if (node.parent?.type !== 'object_creation_expression')
+          ref.fetchRow = semanticChildren(node.parent ?? node).at(-1)?.startPosition.row;
+      }
     }
     return ref;
   }
@@ -239,7 +236,8 @@ export abstract class DeclarationConverter extends ConverterBase {
       const attributes = child.childForFieldName('attributes');
       if (attributes) this.unsupported(attributes, '属性（#[...]）');
       const nameNode = child.childForFieldName('name') as Node;
-      const name = this.variableName(nameNode);
+      const promotedReference = nameNode.type === 'by_ref';
+      const name = this.variableName(promotedReference ? semanticChildren(nameNode)[0] : nameNode);
       if (name === 'this') this.error(child, '$this は引数の名前に使えません（Cannot use $this as parameter）。');
       if (name === 'GLOBALS') this.error(child, 'Cannot re-assign auto-global variable GLOBALS');
       if (seen.has(name))
@@ -258,7 +256,7 @@ export abstract class DeclarationConverter extends ConverterBase {
         expression?.k === 'const' && lower(expression.name.name) === 'null'
           ? { k: 'lit', v: null, row: expression.row }
           : expression;
-      const byRef = child.childForFieldName('reference_modifier') !== null;
+      const byRef = promotedReference || child.childForFieldName('reference_modifier') !== null;
       const variadic = child.type === 'variadic_parameter';
       if (params.at(-1)?.variadic) {
         this.error(child, '可変長の引数は最後にしか書けません（Only the last parameter can be variadic）。');

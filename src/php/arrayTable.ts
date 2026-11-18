@@ -26,6 +26,10 @@ export class ArrayTable extends Map<Key, Slot> {
     return this.packed ? this.packed.length > 0 : this.integerKeys > 0;
   }
 
+  get countsUndefinedSlots(): boolean {
+    return this.mayHaveUndefinedSlots || this.removedUndefinedSlots > 0;
+  }
+
   spliceList(start: number, count: number, replacement: Slot[]): Slot[] | undefined {
     if (!this.pack()) return;
     const values = this.packed as Slot[];
@@ -53,7 +57,7 @@ export class ArrayTable extends Map<Key, Slot> {
   }
 
   private pack(): boolean {
-    if (this.mayHaveUndefinedSlots || this.removedUndefinedSlots) return false;
+    if (this.countsUndefinedSlots) return false;
     if (this.packed) return true;
     let index = 0n;
     for (const key of super.keys()) if (key !== index++) return false;

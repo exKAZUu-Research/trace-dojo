@@ -767,12 +767,13 @@ function releaseFrame(
       frame.thisObj,
       frame.closure,
     ],
-    pending
+    pending,
+    fromNative
   );
 }
 
-function releaseCallValues(runtime: Runtime, values: unknown[], pending?: PhpThrow): void {
-  withPendingException(runtime, pending, () => runtime.release(values));
+function releaseCallValues(runtime: Runtime, values: unknown[], pending?: PhpThrow, fromNative = false): void {
+  withPendingException(runtime, pending, () => runtime.release(values, false, fromNative));
 }
 
 /**

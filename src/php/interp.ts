@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 981 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 982 -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import {
   applyOperator,
@@ -456,17 +456,21 @@ function variableRead(e: Extract<Expr, { k: 'var' }>, mode: ReadMode): Value {
   return definedOrNull(ref?.v);
 }
 
+// code-gauge-allow functionCognitiveComplexity 17 -- Keeps operand evaluation and mode-dependent offset fetches in opcode order.
 function prepareOffsetRead(e: Extract<Expr, { k: 'idx' }>, mode: ReadMode): ReadPlan {
   if (e.index === undefined) throwError('Error', 'Cannot use [] for reading');
   if (e.base.k === 'var' && e.base.name === 'GLOBALS') {
     const key = prepareOperand(e.index);
     return () => globalOffsetRead(key(), e.row, mode);
   }
-  const base = prepareRead(e.base, mode === 'read' ? 'read' : 'coalesce');
+  const base =
+    mode === 'read' && isCompiledVariable(e.base)
+      ? prepareOperand(e.base)
+      : prepareRead(e.base, mode === 'read' ? 'read' : 'coalesce');
   if (base === SHORT) return SHORT;
   const index = prepareOperand(e.index);
   return () => {
-    const value = base();
+    const value = base(e.row);
     if (value === SHORT) return SHORT;
     const key = index();
     rt().row = e.row;
@@ -1154,15 +1158,16 @@ function binary(e: Extract<Expr, { k: 'bin' }>): Value {
   const mark = runtime.frame.temporaries.length;
   const readLeft = prepareOperand(e.l);
   const readRight = prepareOperand(e.r);
+  const row = e.opcodeRow ?? e.r.row;
   const run = (left: Value, right: Value, pending?: PhpThrow): Value => {
-    runtime.row = e.r.row;
+    runtime.row = row;
     const result = e.swapOperands ? operate(e.op, right, left, pending) : operate(e.op, left, right, pending);
     return keepResult(mark, result) as Value;
   };
-  if (!missingCompiledOperand(e.l) && !missingCompiledOperand(e.r)) return run(readLeft(e.r.row), readRight(e.r.row));
+  if (!missingCompiledOperand(e.l) && !missingCompiledOperand(e.r)) return run(readLeft(row), readRight(row));
   return withOperandWarnings((warning, pending) => {
-    const left = readOperandWithWarning(e.l, readLeft, warning, e.r.row);
-    const right = readOperandWithWarning(e.r, readRight, warning, e.r.row);
+    const left = readOperandWithWarning(e.l, readLeft, warning, row);
+    const right = readOperandWithWarning(e.r, readRight, warning, row);
     return run(left, right, pending());
   });
 }

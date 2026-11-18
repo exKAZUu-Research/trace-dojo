@@ -235,8 +235,8 @@ defineFunction('array_last(array $array): mixed', ({ args }) => arr(args[0]).las
 defineFunction('array_keys(array $array, mixed $filter_value = UNKNOWN, bool $strict = false): array', ({ args }) => {
   const array = arr(args[0]);
   const keys = new PhpArray();
-  if (args.length < 2 && array.map.mayHaveUndefinedSlots && array.hasDensePackedStorage()) {
-    for (const key of array.map.physicalKeys()) keys.append(key);
+  if (args.length < 2 && array.map.countsUndefinedSlots && array.hasDensePackedStorage()) {
+    for (let key = 0n; key < BigInt(array.size); key++) keys.append(key);
     return keys;
   }
   for (const [key, value] of array.entries()) {
@@ -391,16 +391,20 @@ defineFunction('array_replace_recursive(array $array, array ...$replacements): a
 });
 defineFunction('array_combine(array $keys, array $values): array', ({ args }) => {
   const keys = arr(args[0]);
-  const values = [...arr(args[1]).map.values()];
-  if (keys.size !== values.length) {
+  const values = arr(args[1]);
+  if (keys.size !== values.size) {
     throwError(
       'ValueError',
       'array_combine(): Argument #1 ($keys) and argument #2 ($values) must have the same number of elements'
     );
   }
   const result = new PhpArray();
-  let index = 0;
-  for (const key of keys.iterValues()) result.setSlot(toKey(toStrKey(key)), copyValueSlot(values[index++]));
+  const slots = values.map.values();
+  for (const key of keys.iterValues()) {
+    const slot = slots.next();
+    if (slot.done) break;
+    result.setSlot(toKey(toStrKey(key)), copyValueSlot(slot.value));
+  }
   return result;
 });
 
@@ -864,7 +868,7 @@ function* walkKeys(container: PhpArray | PhpObject): Generator<Key, undefined> {
       while (cursor.key !== undefined) {
         const key = cursor.key;
         cursor.next();
-        if (container.map.get(key) !== UNDEFINED_RESULT) yield key;
+        yield key;
       }
     } finally {
       cursor.close();
@@ -920,14 +924,16 @@ defineFunction(
       Number(args[1]),
       args[2] === undefined || args[2] === null ? undefined : Number(args[2])
     );
-    const sliced =
-      array.map.mayHaveUndefinedSlots && array.hasDenseSlots()
+    const densePacked = array.map.countsUndefinedSlots && array.hasDensePackedStorage();
+    const sliced = densePacked
+      ? [...array.map].filter(([key]) => Number(key) >= start).slice(0, end - start)
+      : array.map.mayHaveUndefinedSlots && array.hasDenseSlots()
         ? [...array.map.physicalEntries()]
             .slice(start)
             .filter(([, slot]) => slot !== UNDEFINED_RESULT)
             .slice(0, end - start)
         : [...array.map].slice(start, end);
-    return rebuild(sliced, args[3] !== true);
+    return rebuild(sliced, args[3] !== true || (start === 0 && densePacked));
   }
 );
 

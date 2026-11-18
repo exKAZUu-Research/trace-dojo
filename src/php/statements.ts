@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 620 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 631 -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import type { CompileError } from '../interpreter/diagnostics';
 import { assignTo, bindRef, destructure, foreachSubjectPlace, unsetTarget } from './assignment';
@@ -8,6 +8,7 @@ import { lower } from './bytes';
 import { callMethod } from './callables';
 import { asInternal, invoke, setBodyRunner, setDefaultEvaluator } from './calls';
 import {
+  bindPropertyReference,
   canDeclareEarly,
   declareClass,
   findClass,
@@ -24,6 +25,7 @@ import { collectBeforeAllocation, setDestructor } from './garbage';
 import { consumeExpression, ev, evBool, evOpcodeOperand, evQuiet, evReturn, prepareOperand } from './interp';
 import { acquireIterator } from './iteratorAcquisition';
 import { builtinLiteralKey } from './native';
+import { compiledOperandRow } from './opcodeRows';
 import { looseEquals, setObjectToString, toStr } from './operators';
 import { ElementPlace, RefPlace, share, ValuePlace, VarPlace, writableContainer } from './places';
 import { FatalError, Frame, PhpThrow, rt, type Runtime } from './runtime';
@@ -567,7 +569,7 @@ function foreachArrayByRef(
       cursor.next();
       if (array.map.get(key) === UNDEFINED_RESULT) continue;
       const ref = new ElementPlace(array, key).ref();
-      bindForeachRef(statement.value, ref);
+      bindForeachRef(statement, ref);
       if (statement.key) assignTo(statement.key, key);
       runtime.steps.stepBinding(statement.row, true);
       const result = loopBody(statement.body);
@@ -589,7 +591,7 @@ function foreachPropertyByRef(
   for (const key of keys) {
     const name = propNameOf(key);
     const ref = propRef(object, name, scope, 'foreach');
-    bindForeachRef(statement.value, ref);
+    bindForeachRef(statement, ref);
     if (statement.key) assignTo(statement.key, name);
     runtime.steps.stepBinding(statement.row, true);
     const result = loopBody(statement.body);
@@ -612,7 +614,8 @@ function foreachIteration(
 ): 'next' | Completion {
   const runtime = rt();
   runtime.row = statement.row;
-  if (statement.value.k === 'list') destructure(statement.value, value);
+  if (statement.value.k === 'list')
+    destructure(statement.value, value, undefined, compiledOperandRow(statement.subject));
   else assignTo(statement.value, share(value));
   if (statement.key) assignTo(statement.key, key as Value);
   runtime.steps.stepBinding(statement.row, statement.value.k === 'list' || storesAnswer(value));
@@ -624,8 +627,9 @@ function storesAnswer(value: Value): boolean {
   return value !== null && !(value instanceof PhpObject) && !(value instanceof PhpArray);
 }
 
-function bindForeachRef(target: Expr, ref: Ref): void {
-  if (target.k === 'list') destructure(target, ref.v, new RefPlace(ref));
+function bindForeachRef(statement: Extract<Stmt, { k: 'foreach' }>, ref: Ref): void {
+  const target = statement.value;
+  if (target.k === 'list') destructure(target, ref.v, new RefPlace(ref), compiledOperandRow(statement.subject));
   else if (target.k === 'var') new VarPlace(rt().frame, target.name).bind(ref);
   else bindRef(target, ref);
 }
@@ -681,11 +685,7 @@ function foreachObject(
 }
 
 function runBody(decl: FunctionDecl, frame: Frame): Value {
-  if (frame.thisObj) {
-    for (const param of decl.params) {
-      if (param.promote) writeProp(frame.thisObj, param.name, frame.vars.get(param.name)?.v ?? null, frame.scope);
-    }
-  }
+  if (frame.thisObj) promoteParameters(decl, frame, frame.thisObj);
   if (decl.arrowBody) {
     frame.returning = evReturn(decl.arrowBody);
     frame.returnRow = decl.arrowBody.row;
@@ -697,6 +697,18 @@ function runBody(decl: FunctionDecl, frame: Frame): Value {
   }
   const result = frame.returning;
   return result instanceof Ref ? result.v : (result ?? null);
+}
+
+function promoteParameters(decl: FunctionDecl, frame: Frame, object: PhpObject): void {
+  const runtime = rt();
+  for (const param of decl.params) {
+    if (!param.promote) continue;
+    runtime.row = param.row;
+    const ref = frame.vars.get(param.name);
+    if (param.byRef && ref) bindPropertyReference(object, param.name, ref, frame.scope);
+    else writeProp(object, param.name, ref?.v ?? null, frame.scope);
+    runtime.steps.step(param.row);
+  }
 }
 
 setBodyRunner(runBody);

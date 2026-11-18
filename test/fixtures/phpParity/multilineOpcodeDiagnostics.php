@@ -365,3 +365,55 @@ $floatKeys = [
     value
     TEXT,
 ];
+
+[
+    $missingElement
+] =
+    $notAssigned;
+$nested = [[]];
+[[
+    $nestedMissing
+]] =
+    $nested;
+$some = [1];
+[&$alias,
+    $missingAfterReference] =
+    $some;
+foreach ([[]] as
+    [$missingDuringIteration]) {}
+
+$nullSource = null;
+[$beforeReference, &$reference] = $nullSource;
+var_dump($nullSource);
+$emptySource = [];
+[[&$nestedReference], $missingSibling] = $emptySource;
+var_dump($emptySource);
+
+try { echo ('Missing')
+    ::
+    $property; }
+catch (Throwable $error) { echo $error->getMessage(), ' at ', $error->getLine(), "\n"; }
+try { echo (true ?
+    'Missing' : 'Other')
+    ::CONSTANT; }
+catch (Throwable $error) { echo $error->getMessage(), ' at ', $error->getLine(), "\n"; }
+$array = [
+    1.5 =>
+    true ?
+    [
+        1
+    ] :
+    2
+];
+$array = [
+    1.5 =>
+    [
+        1
+    ]
+    [0]
+];
+$array = [
+    1.5 =>
+    $undefinedBase
+    [0]
+];

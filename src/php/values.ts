@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 900 -- Keeps one PHP runtime concern and its shared helpers in one module.
+// code-gauge-allow-file fileNcss 930 -- Keeps one PHP runtime concern and its shared helpers in one module.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import type { TurtleState } from '../interpreter/turtleWorld';
 import { type ArrayCursor, ArrayOrder, type ArrayRebuild } from './arrayOrder';
@@ -179,7 +179,7 @@ export class PhpArray {
   }
 
   cursor(): ArrayCursor {
-    return this.ordered().cursor();
+    return this.ordered().cursor(undefined, undefined, (key) => this.map.get(key) !== UNDEFINED_RESULT);
   }
 
   foreachCursor(previous?: ArrayCursor, retainPosition = false): ArrayCursor {
@@ -247,6 +247,13 @@ export class PhpArray {
    * there.
    */
   private insert(key: Key, slot: Value | Ref): void {
+    const order = slot === UNDEFINED_RESULT || this.map.countsUndefinedSlots ? this.ordered() : this.order;
+    const wasPacked = order?.isPacked;
+    const wasDense = order?.endPosition === this.size;
+    if (wasPacked && this.map.get(key) === UNDEFINED_RESULT) {
+      this.removeUndefinedSlot(key);
+      order.unpack();
+    }
     if (!this.map.has(key)) {
       allocationHandler(1, this.map.size + 1);
       if (this.pointer === undefined) this.pointer = key;
@@ -255,7 +262,19 @@ export class PhpArray {
     this.trackSlot(key, slot);
     this.map.set(key, slot);
     this.advanceAppendKey(key);
-    this.order?.insert(key);
+    order?.insert(key);
+    if (wasPacked && !wasDense && !order.isPacked && this.map.mayHaveUndefinedSlots) {
+      for (const [oldKey, oldSlot] of this.map.physicalEntries())
+        if (oldSlot === UNDEFINED_RESULT) this.removeUndefinedSlot(oldKey);
+      order.compact();
+    }
+  }
+
+  private removeUndefinedSlot(key: Key): void {
+    if (this.pointer === key) this.pointer = this.keyAfter(key);
+    this.map.removedUndefinedSlots++;
+    this.map.delete(key);
+    this.order?.delete(key);
   }
 
   private advanceAppendKey(key: Key): void {
@@ -271,8 +290,7 @@ export class PhpArray {
     if (trim) {
       let entry = this.ordered().last;
       while (entry && this.map.get(entry.key) === UNDEFINED_RESULT) {
-        this.map.removedUndefinedSlots++;
-        this.delete(entry.key);
+        this.removeUndefinedSlot(entry.key);
         entry = this.ordered().last;
       }
     }
@@ -340,7 +358,7 @@ export class PhpArray {
   }
 
   shiftList(): { value: Value } | undefined {
-    if (this.map.mayHaveUndefinedSlots || this.map.removedUndefinedSlots) return this.shiftPackedWithHoles();
+    if (this.map.countsUndefinedSlots) return this.shiftWithUndefinedSlots();
     const result = this.map.shiftList();
     if (!result) return;
     const { slot } = result;
@@ -355,17 +373,29 @@ export class PhpArray {
     return { value };
   }
 
-  private shiftPackedWithHoles(): { value: Value } | undefined {
-    if (!this.ordered().isPacked) return;
+  private shiftWithUndefinedSlots(): { value: Value } | undefined {
+    const packed = this.ordered().isPacked;
+    if (!packed && !this.map.hasIntegerKeys()) return;
     const first = this.map.keys().next().value;
     if (first === undefined) return;
     const value = this.get(first) as Value;
     this.delete(first);
     const count = this.size;
-    const entries = Array.from(this.map.values(), (slot, index) => [BigInt(index), slot] as const);
-    this.replaceTable(entries, true, 'shift');
-    this.map.removedUndefinedSlots = count - entries.length;
-    this.nextFree = BigInt(entries.length);
+    let nextFree = 0n;
+    let rehash = packed;
+    const entries: [Key, Value | Ref][] = [];
+    for (const [key, slot] of this.map.physicalEntries()) {
+      if (typeof key === 'bigint' && slot !== UNDEFINED_RESULT) {
+        if (key !== nextFree) rehash = true;
+        entries.push([nextFree++, slot]);
+      } else entries.push([key, slot]);
+    }
+    if (rehash) {
+      const rebuilt = entries.filter(([, slot]) => slot !== UNDEFINED_RESULT);
+      this.replaceTable(rebuilt, packed, 'shift');
+      this.map.removedUndefinedSlots = count - rebuilt.length;
+    }
+    this.nextFree = nextFree;
     this.pointer = null;
     return { value };
   }
@@ -417,7 +447,7 @@ export class PhpArray {
   }
 
   delete(key: Key): void {
-    if (!this.map.has(key)) return;
+    if (!this.has(key)) return;
     const order = this.ordered();
     const old = this.map.get(key);
     if (old instanceof Ref) old.rc--;
@@ -524,7 +554,7 @@ export class PhpArray {
   }
 
   isList(): boolean {
-    if (this.map.mayHaveUndefinedSlots && this.hasDensePackedStorage()) return true;
+    if (this.map.countsUndefinedSlots && this.hasDensePackedStorage()) return true;
     let expected = 0n;
     for (const key of this.map.keys()) {
       if (key !== expected) return false;
@@ -542,11 +572,12 @@ export class PhpArray {
   }
 
   keepsValuesTable(): boolean {
-    if (!this.map.mayHaveUndefinedSlots && !this.map.removedUndefinedSlots) return this.isList();
+    if (!this.map.countsUndefinedSlots) return this.isList();
     return this.hasDensePackedStorage() && this.nextFree === BigInt(this.size);
   }
 
   keepsKeysWhenMerged(): boolean {
+    if (this.map.countsUndefinedSlots && this.ordered().isPacked) return this.hasDensePackedStorage();
     if (this.order?.hasDensePackedStorage() ?? (this.orderPacked !== false && this.isList())) return true;
     for (const key of this.map.keys()) if (typeof key !== 'string') return false;
     return true;

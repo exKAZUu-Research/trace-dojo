@@ -1056,7 +1056,8 @@ export class Converter extends DeclarationConverter {
       case 'unary_op_expression': {
         const operator = (node.childForFieldName('operator') ?? node.child(0)) as Node;
         const argument = (node.childForFieldName('argument') ?? node.namedChildren.at(-1)) as Node;
-        return { k: 'unary', op: operator.type, e: this.expr(argument), row };
+        const e = this.expr(argument);
+        return { k: 'unary', op: operator.type, e, row: compiledOperandRow(e) };
       }
       case 'update_expression': {
         const operator = node.childForFieldName('operator') as Node;
@@ -1463,7 +1464,9 @@ export class Converter extends DeclarationConverter {
         this.error(rightNode, 'Arrow functions on the right hand side of |> must be parenthesized');
       return { k: 'pipe', l, r, row };
     }
-    const expression = { k: 'bin' as const, op: op === '<>' ? '!=' : op, l, r, row };
+    const expression: Extract<Expr, { k: 'bin' }> = { k: 'bin', op: op === '<>' ? '!=' : op, l, r, row };
+    if (this.initializerContext?.kind === 'array' && r.k === 'array' && this.compiledValue(r, true) instanceof Map)
+      expression.opcodeRow = this.initializerContext.row;
     return this.preserveSyntax || this.initializerContext?.kind === 'deferred'
       ? expression
       : this.compileBinary(expression);
@@ -1653,6 +1656,7 @@ export class Converter extends DeclarationConverter {
     return { key, keyOpcodeRow, value, byRef, spread: false };
   }
 
+  // code-gauge-allow functionCognitiveComplexity 17 -- Selects the emitting operand across the expression forms PHP can fold.
   private resultOpcodeRow(value: Expr, node: Node): number {
     if (node.type === 'heredoc' || node.type === 'nowdoc') return node.startPosition.row + 1;
     switch (value.k) {
@@ -1665,14 +1669,22 @@ export class Converter extends DeclarationConverter {
       case 'bin': {
         return this.binaryOpcodeRow(value, node);
       }
+      case 'lit': {
+        if (node.type === 'binary_expression' && !directiveLiteral(node, value)) return this.arrayValueFoldRow(node);
+        break;
+      }
       case 'idx': {
-        if (value.index?.k === 'lit') return constantAstRow(value);
+        if (this.compiledValue(value, true) !== undefined) return this.arrayValueFoldRow(node);
         break;
       }
       case 'cond': {
         const test = this.compiledValue(value.test);
-        if (test !== undefined)
-          return compiledOperandRow(constantTruth(test) ? (value.consequent ?? value.test) : value.alternate);
+        if (test !== undefined) {
+          const selected = constantTruth(test) ? (value.consequent ?? value.test) : value.alternate;
+          if (selected.k === 'array' && this.compiledValue(selected, true) instanceof Map)
+            return this.arrayValueFoldRow(node);
+          return compiledOperandRow(selected);
+        }
         break;
       }
     }
@@ -1688,8 +1700,11 @@ export class Converter extends DeclarationConverter {
     if (this.compiledValue(value, true) === undefined) return compiledOperandRow(value);
     if (value.op !== '.') return constantAstRow(value);
     if (directiveLiteral(node, value)) return node.parent?.nextSibling?.startPosition.row ?? node.endPosition.row;
-    const arrayNode = node.parent?.parent;
-    return arrayNode ? arrayFoldRow(arrayNode) : constantAstRow(value);
+    return this.arrayValueFoldRow(node);
+  }
+
+  private arrayValueFoldRow(node: Node): number {
+    return this.initializerContext?.row ?? node.startPosition.row;
   }
 
   private orderArrayFoldNotices(start: number, keyEnd: number): void {
@@ -1964,7 +1979,17 @@ function arrayFoldRow(node: Node): number {
       const inner = first?.namedChildren.findLast((child) => child.type !== 'comment');
       if (!inner) return value.endPosition.row;
       value = inner;
-    } else if (['variadic_unpacking', 'parenthesized_expression', 'by_ref'].includes(value.type)) {
+    } else if (
+      [
+        'variadic_unpacking',
+        'parenthesized_expression',
+        'by_ref',
+        'binary_expression',
+        'conditional_expression',
+        'subscript_expression',
+        'unary_op_expression',
+      ].includes(value.type)
+    ) {
       const inner = value.namedChildren.find((child) => child.type !== 'comment');
       if (!inner) return value.startPosition.row;
       value = inner;

@@ -208,3 +208,36 @@ Deprecated: Implicit conversion from float 2.5 to int loses precision in /main.p
 Deprecated: Implicit conversion from float 3.5 to int loses precision in /main.php on line 362
 
 Deprecated: Implicit conversion from float 4.5 to int loses precision in /main.php on line 365
+
+Warning: Undefined variable $notAssigned in /main.php on line 370
+
+Warning: Undefined array key 0 in /main.php on line 375
+
+Warning: Undefined array key 1 in /main.php on line 381
+
+Warning: Undefined array key 0 in /main.php on line 382
+array(1) {
+  [1]=>
+  &NULL
+}
+
+Warning: Undefined array key 1 in /main.php on line 389
+array(1) {
+  [0]=>
+  array(1) {
+    [0]=>
+    &NULL
+  }
+}
+Class "Missing" not found at 394
+Class "Missing" not found at 398
+
+Deprecated: Implicit conversion from float 1.5 to int loses precision in /main.php on line 402
+
+Deprecated: Implicit conversion from float 1.5 to int loses precision in /main.php on line 411
+
+Warning: Undefined variable $undefinedBase in /main.php on line 418
+
+Warning: Trying to access array offset on null in /main.php on line 418
+
+Deprecated: Implicit conversion from float 1.5 to int loses precision in /main.php on line 418
